@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# legion-pin : épingle la fenêtre active (flottante, à sa place, visible sur tous les bureaux) ou la libère.
+w=$(hyprctl activewindow -j) || exit 1
+[ "$(jq -r '.address // empty' <<<"$w")" ] || exit 0
+if [ "$(jq -r .pinned <<<"$w")" = true ]; then
+  hyprctl dispatch pin >/dev/null
+else
+  [ "$(jq -r .floating <<<"$w")" = true ] || hyprctl dispatch togglefloating >/dev/null
+  hyprctl dispatch pin >/dev/null
+fi
