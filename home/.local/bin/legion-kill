@@ -5,7 +5,7 @@ w=$(hyprctl activewindow -j); pid=$(jq -r '.pid // empty' <<<"$w")
 n=$(hyprctl clients -j | jq --argjson p "$pid" '[.[]|select(.pid==$p)]|length')
 hyprctl dispatch killactive >/dev/null 2>&1
 if [ "$n" -le 1 ]; then
-  sleep 0.6
+  sleep 5
   kill -0 "$pid" 2>/dev/null && { kill -TERM "$pid"; sleep 0.6; kill -0 "$pid" 2>/dev/null && kill -KILL "$pid"; }
 fi
 true
