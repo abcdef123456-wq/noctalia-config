@@ -32,6 +32,7 @@ HOME_FILES=(
   .local/bin/legion-shell
   .local/bin/legion-shell-msg
   .local/bin/legion-brightness
+  .local/bin/unimatrix
   .local/bin/legion-pin
   .local/bin/legion-launch
   .local/bin/nvidia-run
