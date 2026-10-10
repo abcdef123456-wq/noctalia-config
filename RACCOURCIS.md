@@ -72,10 +72,10 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 
 ## Recherche (Super + R)
 
-- Barre vide : tes applications fréquentes.
+- Barre vide : tes applications fréquentes, en une rangée d'icônes.
 - Texte : applications, puis fichiers et dossiers (à partir de 3 lettres).
 - Calcul : `12*8`, ou `=` suivi de n'importe quelle expression (`=20 % de 80`, `=5 km en miles`). **Entrée** copie le résultat.
-- **↑ ↓** ou **Tab** pour choisir, **Entrée** pour lancer, **Échap** pour fermer.
+- **← →** (ou **Tab**) pour choisir une icône, **Entrée** pour lancer, **Échap** pour fermer.
 
 ## Fonds d'écran (Super + W)
 

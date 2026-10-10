@@ -1,16 +1,16 @@
 -- Legion Launcher (Noctalia v5) : barre de recherche compacte au centre de l'écran.
 -- Rien sous la barre tant qu'on n'a pas tapé, sauf les applications courantes (souvent ET récemment utilisées).
--- Entrée lance, Haut/Bas ou Tab pour choisir, Échap ferme. Lancement : legion-apps (uwsm-app + GPU du profil).
+-- Une rangée de grosses icônes : ← → (ou Tab) pour choisir, Entrée lance, Échap ferme. Lancement : legion-apps (uwsm-app + GPU du profil).
 -- Ouverture : noctalia msg panel-toggle legion/launcher:main
 
 local APPS_CMD = { noctalia.expandPath("~/.local/bin/legion-apps") }
 local PINNED = { "@BROWSER@", "kitty", "org.kde.dolphin" }
-local MAX_ROWS = 6
-local MAX_FAV = 7
-local CARD_W = 600
-local ROW_H = 46
+local MAX_TILES = 6
+local MAX_FAV = 6
+local CARD_W = 700
 local HEAD_H = 60
-local FAV_H = 100
+local TILE_H = 116
+local CALC_H = 56
 local FADE_MS = 150
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 
@@ -21,8 +21,7 @@ local appResults = {}
 local calcValue = nil
 local files = {}
 local favorites = {}
-local selected = 1
-local favSelected = 0
+local selected = 0      -- 0 = rien de choisi (barre vide)
 local query = ""
 local inputKey = 0
 local iconCache = {}
@@ -107,11 +106,14 @@ local function buildItems()
   if calcValue then
     table.insert(results, { key = "calc", name = calcValue, glyph = "calculator", hint = "copier", run = function() copyCalc(calcValue) end })
   end
-  for _, app in ipairs(appResults) do
+  local nFiles = math.min(#files, 2)
+  local nApps = math.min(#appResults, MAX_TILES - nFiles - (calcValue and 1 or 0))
+  for i = 1, nApps do
+    local app = appResults[i]
     table.insert(results, { key = "app-" .. app.id, app = app, name = app.name, run = function() launch(app) end })
   end
-  for _, f in ipairs(files) do
-    if #results >= MAX_ROWS + 2 then break end
+  for i = 1, nFiles do
+    local f = files[i]
     table.insert(results, { key = "file-" .. f.path, name = f.name, glyph = f.dir and "folder" or "file", hint = f.parent,
       run = function() openFile(f.path) end })
   end
@@ -121,9 +123,14 @@ end
 local function searchApps(q)
   appResults = {}
   local ranked = {}
+  local ql = q:lower()
   for _, app in ipairs(apps) do
     local best = nil
-    for field, w in pairs(WEIGHTS) do
+    if #ql <= 2 then
+      local nl = app.name:lower()
+      if nl:sub(1, #ql) == ql then best = 3 elseif nl:find(" " .. ql, 1, true) then best = 2 end
+    end
+    for field, w in pairs(#ql <= 2 and {} or WEIGHTS) do
       local text = app[field]
       if text and text ~= "" then
         local s = noctalia.fuzzyScore(q, text)
@@ -143,14 +150,14 @@ local function searchApps(q)
   -- Seuil : on écarte les correspondances vagues (score de 0,8 à ~4 ; nom presque exact ≈ 3,9)
   local cut = ranked[1] and math.max(1.5, 0.5 * ranked[1].rank) or 0
   for _, r in ipairs(ranked) do
-    if #appResults >= MAX_ROWS or r.rank < cut then break end
+    if #appResults >= MAX_TILES or r.rank < cut then break end
     table.insert(appResults, r.app)
   end
 end
 
 local function search()
-  selected = 1
   local q = noctalia.string.trim(query)
+  selected = (q == "") and 0 or 1
   calcValue = nil
   files = {}
   appResults = {}
@@ -217,77 +224,86 @@ local function screenTop()
   return 210
 end
 
-local function favTiles()
-  local tileW = math.floor((CARD_W - 24) / MAX_FAV)
-  local tiles = {}
-  for i, app in ipairs(favorites) do
-    local sel = i == favSelected
-    table.insert(tiles, ui.column({
-      key = "fav-" .. app.id,
-      width = tileW - 4,
-      height = 80,
-      align = "center",
-      justify = "center",
-      gap = 7,
-      radius = 14,
-      fill = sel and "primary/0.15" or nil,
-      onClick = function() launch(app) end,
-      onHover = function(state) if state == "true" then favSelected = i; render() end end,
-    }, {
-      ui.image({ path = iconFor(app), width = 36, height = 36, fit = "contain" }),
-      ui.label({ text = app.name, fontSize = 11, maxWidth = tileW - 14, maxLines = 1, textAlign = "center",
-        color = sel and "on_surface" or "on_surface_variant" }),
-    }))
+-- Éléments affichés : applis courantes quand la barre est vide, sinon les résultats
+local function currentItems()
+  if noctalia.string.trim(query) ~= "" then return results end
+  local out = {}
+  for _, app in ipairs(favorites) do
+    table.insert(out, { key = "fav-" .. app.id, app = app, name = app.name, run = function() launch(app) end })
   end
-  return ui.row({ justify = "center", gap = 4, height = FAV_H, align = "start", paddingH = 12 }, tiles)
+  return out
 end
 
-local function resultRows()
-  if #results == 0 then
-    return ui.column({ height = 48, align = "center", justify = "start" }, {
-      ui.label({ text = "Aucun résultat", fontSize = 13, color = "on_surface_variant" }),
-    })
+local function tile(item, i, w)
+  local sel = i == selected
+  local top
+  if item.app then
+    top = ui.image({ path = iconFor(item.app), width = 52, height = 52, fit = "contain" })
+  else
+    top = ui.row({ width = 52, height = 52, align = "center", justify = "center" }, {
+      ui.glyph({ name = item.glyph, size = 38, color = sel and "primary" or "on_surface_variant" }) })
   end
-  local rows = {}
-  for i, item in ipairs(results) do
-    local sel = i == selected
-    local icon = item.app and ui.image({ path = iconFor(item.app), width = 28, height = 28, fit = "contain" })
-      or ui.row({ width = 28, height = 28, align = "center", justify = "center" }, {
-        ui.glyph({ name = item.glyph, size = 22, color = sel and "primary" or "on_surface_variant" }) })
-    local kids = {
-      icon,
-      ui.label({ text = item.name, flexGrow = 1, fontSize = item.key == "calc" and 18 or 15,
-        fontWeight = (sel or item.key == "calc") and "semibold" or "medium",
-        color = sel and "on_surface" or "on_surface_variant", maxLines = 1, maxWidth = CARD_W - 220 }),
-    }
-    if item.hint then
-      table.insert(kids, ui.label({ text = item.hint, fontSize = 12, color = "on_surface_variant", opacity = 0.7, maxLines = 1, maxWidth = 200 }))
-    end
-    table.insert(rows, ui.row({
-      key = "res-" .. item.key,
-      height = ROW_H,
-      paddingH = 14,
-      gap = 14,
-      align = "center",
-      radius = 12,
-      fill = sel and "primary/0.15" or nil,
-      onClick = function() activate(item) end,
-      onHover = function(state) if state == "true" and selected ~= i then selected = i; render() end end,
-    }, kids))
+  local kids = {
+    top,
+    ui.label({ text = item.name, fontSize = 12, fontWeight = sel and "semibold" or "medium", maxWidth = w - 12, maxLines = 2,
+      textAlign = "center", color = sel and "on_surface" or "on_surface_variant" }),
+  }
+  if item.hint then
+    table.insert(kids, ui.label({ text = item.hint, fontSize = 10, maxWidth = w - 12, maxLines = 1, textAlign = "center",
+      color = "on_surface_variant", opacity = 0.65 }))
   end
-  return ui.column({ paddingH = 10, paddingV = 0, gap = 0, align = "stretch", height = 10 + #rows * ROW_H }, rows)
+  return ui.column({
+    key = "t-" .. item.key,
+    width = w - 6,
+    height = TILE_H - 12,
+    align = "center",
+    justify = "center",
+    gap = 8,
+    radius = 18,
+    fill = sel and "primary/0.18" or "primary/0",
+    onClick = function() activate(item) end,
+    onHover = function(state) if state == "true" and selected ~= i then selected = i; render() end end,
+  }, kids)
+end
+
+-- Corps sous la barre : résultat de calcul en bandeau (s'il y en a), puis la rangée de tuiles
+local function body(items)
+  local q = noctalia.string.trim(query)
+  if #items == 0 then
+    if q == "" then return nil, 0 end
+    return ui.column({ height = 56, align = "center", justify = "start" }, {
+      ui.label({ text = "Aucun résultat", fontSize = 13, color = "on_surface_variant" }) }), 56
+  end
+  local kids, h, first = {}, 0, 1
+  if items[1].key == "calc" then
+    local sel = selected == 1
+    table.insert(kids, ui.row({
+      key = "calc", height = CALC_H, paddingH = 20, gap = 14, align = "center", radius = 16,
+      fill = sel and "primary/0.18" or "primary/0",
+      onClick = function() activate(items[1]) end,
+      onHover = function(state) if state == "true" and selected ~= 1 then selected = 1; render() end end,
+    }, {
+      ui.glyph({ name = "calculator", size = 26, color = "primary" }),
+      ui.label({ text = items[1].name, flexGrow = 1, fontSize = 22, fontWeight = "semibold", color = "on_surface", maxLines = 1, maxWidth = CARD_W - 200 }),
+      ui.label({ text = "copier", fontSize = 12, color = "on_surface_variant", opacity = 0.7 }),
+    }))
+    h = h + CALC_H + 4
+    first = 2
+  end
+  if #items >= first then
+    local n = #items - first + 1
+    local w = math.floor((CARD_W - 40) / MAX_TILES)
+    local row = {}
+    for i = first, #items do table.insert(row, tile(items[i], i, w)) end
+    table.insert(kids, ui.row({ justify = "center", align = "start", gap = 0, height = TILE_H }, row))
+    h = h + TILE_H
+  end
+  return ui.column({ paddingH = 20, paddingBottom = 4, align = "stretch", height = h + 4 }, kids), h + 4
 end
 
 function render()
-  local q = noctalia.string.trim(query)
-  local body, bodyH = nil, 0
-  if q ~= "" then
-    body = resultRows()
-    bodyH = #results > 0 and (10 + #results * ROW_H) or 48
-  elseif #favorites > 0 then
-    body = favTiles()
-    bodyH = FAV_H
-  end
+  local items = currentItems()
+  local content, bodyH = body(items)
   -- Voile sur tout le panneau, par-dessus le flou du mode verre. La carte a une hauteur fixe
   -- calculée (sinon la mise en page la comprime) ; à l'ouverture elle apparaît en fondu en glissant de 12 px.
   local ease = 1 - (1 - appear) * (1 - appear)
@@ -299,14 +315,14 @@ function render()
       height = HEAD_H + bodyH,
       minHeight = HEAD_H + bodyH,
       fill = "surface/0.9",
-      radius = 24,
+      radius = 26,
       border = "outline/0.25",
       borderWidth = 1,
       align = "stretch",
       opacity = ease,
       onClick = function() end,   -- un clic dans la carte ne ferme pas
     }, {
-      ui.row({ height = HEAD_H, paddingH = 22, gap = 14, align = "center" }, {
+      ui.row({ height = HEAD_H, paddingH = 24, gap = 14, align = "center" }, {
         ui.glyph({ name = "search", size = 20, color = "primary" }),
         ui.input({
           key = "q" .. inputKey,
@@ -317,10 +333,10 @@ function render()
           focus = true,
           flexGrow = 1,
           onChange = function(v) query = v; search(); render() end,
-          onSubmit = function() activate(results[selected]) end,
+          onSubmit = function() activate(currentItems()[selected]) end,
         }),
       }),
-      body,
+      content,
     }),
   }))
 end
@@ -334,22 +350,16 @@ end
 -- ── Clavier ─────────────────────────────────────────────────────────────────
 function onKey(chord, pressed)
   if not pressed then return end
-  local nextKey = chord == "Down" or chord == "Tab" or chord == "ctrl+j" or chord == "ctrl+n"
-  local prevKey = chord == "Up" or chord == "shift+Tab" or chord == "ISO_Left_Tab" or chord == "ctrl+k" or chord == "ctrl+p"
+  local nextKey = chord == "Right" or chord == "Down" or chord == "Tab" or chord == "ctrl+j" or chord == "ctrl+n"
+  local prevKey = chord == "Left" or chord == "Up" or chord == "shift+Tab" or chord == "ISO_Left_Tab" or chord == "ctrl+k" or chord == "ctrl+p"
   local enter = chord == "Return" or chord == "KP_Enter"
-  if noctalia.string.trim(query) == "" then
-    local f = #favorites
-    if f == 0 then return end
-    if nextKey then favSelected = favSelected % f + 1
-    elseif prevKey then favSelected = favSelected <= 1 and f or favSelected - 1
-    elseif enter then if favSelected > 0 then launch(favorites[favSelected]) end return end
-    render()
-    return
-  end
-  local n = #results
-  if enter then activate(results[selected]) return end
+  local items = currentItems()
+  if enter then activate(items[selected]) return end
+  local n = #items
   if n == 0 then return end
-  if nextKey then selected = selected % n + 1 elseif prevKey then selected = selected <= 1 and n or selected - 1 end
+  if nextKey then selected = selected % n + 1
+  elseif prevKey then selected = selected <= 1 and n or selected - 1
+  else return end
   render()
 end
 
@@ -372,8 +382,7 @@ end
 function onOpen(context)
   query = context or ""   -- texte de départ facultatif : panel-toggle legion/launcher:main "fir"
   results = {}
-  selected = 1
-  favSelected = 0
+  selected = 0
   inputKey = inputKey + 1
   computeFavorites()
   search()
