@@ -14,6 +14,7 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 | `Super` + `E` | Fichiers (Dolphin) |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `P` | Capture d'une zone de l'écran |
+| `Super` + `Ctrl` + `P` | Épingler la fenêtre : elle devient flottante et reste au même endroit sur tous les bureaux (même touche pour la libérer) |
 | `Super` + `C` | Centre de contrôle |
 | `Super` + `,` | Réglages de la barre |
 | `Super` + `/` | Afficher cette fiche |
