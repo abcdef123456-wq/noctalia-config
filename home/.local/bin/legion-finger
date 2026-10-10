@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # legion-finger : le bouton d'arrêt fait apparaître de gros doigts (image vectorielle nette) sur le fond flouté, sans éteindre. Une touche quitte.
 hyprctl clients -j | grep -q '"class": "fingerpop"' && exit 0
-exec kitty --class fingerpop -o background_opacity=0.35 -o font_size=14 -o confirm_os_window_close=0 -o hide_window_decorations=yes \
+exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/legion-finger.lock" kitty --class fingerpop -o background_opacity=0.35 -o font_size=14 -o confirm_os_window_close=0 -o hide_window_decorations=yes \
   -o window_padding_width=0 python3 -c '
 import termios,tty,sys
 fd=sys.stdin.fileno(); termios.tcgetattr(fd); tty.setcbreak(fd)
