@@ -26,7 +26,7 @@ dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[].scale] | max // empty'); [ -
 
 mkdir -p "$OUT"
 # Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
-sig="v3-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
+sig="v4-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
 if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
   rm -f "$OUT"/*.jpg "$OUT"/*.webp
   echo "$sig" > "$OUT/.size"
@@ -52,13 +52,15 @@ shopt -s nullglob nocaseglob
 made=0
 for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
   n="$(basename "$f")"
-  tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"
-  [ "$tw" -nt "$f" ] && [ "$tn" -nt "$f" ] && continue
+  tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"; tb="$OUT/$n.B.webp"
+  [ "$tw" -nt "$f" ] && [ "$tn" -nt "$f" ] && [ "$tb" -nt "$f" ] && continue
+  # fond flouté (petit, agrandi à l'affichage : le flou masque l'agrandissement) : remplace le flou en direct, trop coûteux
+  magick "$f[0]" -resize 800x500^ -gravity center -extent 800x500 -blur 0x12 -modulate 75,110 -quality 88 "$tb.tmp.webp" && mv "$tb.tmp.webp" "$tb"
   bake "$f" "$tw" "$CW" "$CH" 1 && bake "$f" "$tn" "$NW" "$NH" 0 && made=$((made + 1))
 done
 for t in "$OUT"/*.W.webp; do
   base="$(basename "$t" .W.webp)"
-  [ -e "$src/$base" ] || rm -f "$t" "$OUT/$base.N.webp"
+  [ -e "$src/$base" ] || rm -f "$t" "$OUT/$base.N.webp" "$OUT/$base.B.webp"
 done
 [ "$made" -gt 0 ] && echo "legion-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)"
 exit 0
