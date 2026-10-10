@@ -137,12 +137,13 @@ local function strip()
   local cards, centers, x = {}, {}, 0
   for idx = c - reach, c + reach + 1 do
     local delta = math.abs(idx - pos)
-    local w, h = dims(delta)
-    local a = 1 - 0.3 * math.min(delta, 1)
-    if delta > REACH - 0.5 then a = a * math.max(0, REACH + 0.5 - delta) end
+    local d = math.abs(idx - c)
+    local w, h = dims(d)
+    local a = 1 - 0.3 * math.min(d, 1)
+    if d >= REACH then a = a * 0.5 end
     local wp = shown[wrap(idx)]
     local bw = w + SK * h                                  -- largeur de l'image découpée (parallélogramme + débord)
-    local kindW = delta < 0.5
+    local kindW = d == 0
     centers[idx] = x + w / 2
     table.insert(cards, ui.row({ key = "c" .. idx, width = w, height = ROW_H, align = "center", justify = "center" }, {
       ui.image({
