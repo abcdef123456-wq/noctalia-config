@@ -9,8 +9,8 @@ description = "Carrousel plein écran pour choisir le fond d'écran (miniatures 
 [[panel]]
 id = "main"
 entry = "panel.luau"
-width = 1500
-height = 620
+width = 1540
+height = 640
 placement = "floating"
 position = "center"
 layer = "overlay"

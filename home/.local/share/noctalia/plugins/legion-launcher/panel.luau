@@ -226,22 +226,33 @@ local function currentItems()
   return out
 end
 
+local STYLE = "A"
+
 local function tile(item, i, w)
   local sel = i == selected
-  local top
+  local icon
   if item.app then
-    top = ui.image({ path = iconFor(item.app), width = 52, height = 52, fit = "contain" })
+    icon = ui.image({ path = iconFor(item.app), width = STYLE == "A" and 40 or 56, height = STYLE == "A" and 40 or 56, fit = "contain" })
   else
-    top = ui.row({ width = 52, height = 52, align = "center", justify = "center" }, {
-      ui.glyph({ name = item.glyph, size = 38, color = sel and "primary" or "on_surface_variant" }) })
+    icon = ui.glyph({ name = item.glyph, size = STYLE == "A" and 32 or 44, color = sel and "primary" or "on_surface_variant" })
+  end
+  local top
+  if STYLE == "A" then
+    -- icône sur une pastille arrondie ; la pastille choisie prend la couleur d'accent, avec un contour
+    top = ui.row({ width = 64, height = 64, radius = 20, align = "center", justify = "center",
+      fill = sel and "primary/0.30" or "on_surface/0.07", border = sel and "primary" or "on_surface/0.0", borderWidth = 2 }, { icon })
+  else
+    -- grosse icône seule ; l'icône choisie est entourée d'un halo
+    top = ui.row({ width = 72, height = 72, radius = 36, align = "center", justify = "center",
+      fill = sel and "primary/0.22" or "on_surface/0.0" }, { icon })
   end
   local kids = {
     top,
-    ui.label({ text = item.name, fontSize = 12, fontWeight = sel and "semibold" or "medium", maxWidth = w - 12, maxLines = 2,
+    ui.label({ text = item.name, fontSize = 13, fontWeight = sel and "semibold" or "medium", maxWidth = w + 16, maxLines = 2,
       textAlign = "center", color = sel and "on_surface" or "on_surface_variant" }),
   }
   if item.hint then
-    table.insert(kids, ui.label({ text = item.hint, fontSize = 10, maxWidth = w - 12, maxLines = 1, textAlign = "center",
+    table.insert(kids, ui.label({ text = item.hint, fontSize = 10, maxWidth = w - 10, maxLines = 1, textAlign = "center",
       color = "on_surface_variant", opacity = 0.65 }))
   end
   return ui.column({
@@ -249,10 +260,9 @@ local function tile(item, i, w)
     width = w - 6,
     height = TILE_H - 12,
     align = "center",
-    justify = "center",
+    justify = "start",
     gap = 8,
-    radius = 18,
-    fill = sel and "primary/0.18" or "primary/0",
+    paddingV = 6,
     onClick = function() activate(item) end,
     onHover = function(state) if state == "true" and selected ~= i then selected = i; render() end end,
   }, kids)
