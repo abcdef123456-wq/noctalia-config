@@ -162,6 +162,14 @@ monitor = $mon"
   set_gpu_default "$profile"
   noctalia_eco "$profile"
 
+  # Applications lancées ensuite : AMD seule en Économie (la RTX peut s'endormir), sinon choix normal.
+  local egl=/usr/share/glvnd/egl_vendor.d
+  if [ "$profile" = power-saver ]; then
+    hyprctl keyword env "__EGL_VENDOR_LIBRARY_FILENAMES,$egl/50_mesa.json" >/dev/null
+  else
+    hyprctl keyword env "__EGL_VENDOR_LIBRARY_FILENAMES,$egl/10_nvidia.json:$egl/50_mesa.json" >/dev/null
+  fi
+
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
   # seulement si c'est ce script qui l'avait coupé.
   local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
