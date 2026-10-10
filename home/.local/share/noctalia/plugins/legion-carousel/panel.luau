@@ -15,10 +15,10 @@ local SK = 0.30              -- inclinaison
 local SPACE = 4              -- écart entre tranches
 local REACH = 3              -- tranches de chaque côté
 local ROW_H = CH + 30
-local SMOOTH_MS = 70         -- plus petit = plus rapide
+local SMOOTH_MS = 55         -- plus petit = plus rapide
 local REPEAT_DELAY = 280     -- flèche maintenue : délai puis cadence
 local REPEAT_EVERY = 115
-local FADE_MS = 420
+local FADE_MS = 260
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 local eco = false
 
@@ -144,14 +144,14 @@ local function strip()
     local bw = w + SK * h                                  -- largeur de l'image découpée (parallélogramme + débord)
     local kindW = delta < 0.5
     centers[idx] = x + w / 2
-    table.insert(cards, ui.row({ key = "c" .. idx, width = math.floor(w), height = ROW_H, align = "center", justify = "center" }, {
+    table.insert(cards, ui.row({ key = "c" .. idx, width = w, height = ROW_H, align = "center", justify = "center" }, {
       ui.image({
         key = "i" .. idx,
         path = kindW and wp.thumbW or wp.thumbN,
-        width = math.floor(bw),
-        height = math.floor(h),
+        width = bw,
+        height = h,
         fit = "cover",
-        opacity = a * (1 - (1 - appear) ^ 2),
+        opacity = a,
         onClick = function()
           if idx == target then apply(wp) else target = idx; setTicking(true) end
         end,
@@ -163,13 +163,13 @@ local function strip()
   local contentW = x - SPACE
   local p = lerp(centers[fl] or contentW / 2, centers[fl + 1] or contentW / 2, pos - fl)
   local e = 1 - (1 - appear) ^ 3
-  local s = contentW / 2 - p - (1 - e) * 520
+  local s = contentW / 2 - p
   if s > 0 then
-    table.insert(cards, 1, ui.box({ width = math.max(1, math.floor(2 * s - SPACE)), height = 1, opacity = 0 }))
+    table.insert(cards, 1, ui.box({ width = math.max(1, 2 * s - SPACE), height = 1, opacity = 0 }))
   elseif s < 0 then
-    table.insert(cards, ui.box({ width = math.max(1, math.floor(-2 * s - SPACE)), height = 1, opacity = 0 }))
+    table.insert(cards, ui.box({ width = math.max(1, -2 * s - SPACE), height = 1, opacity = 0 }))
   end
-  return ui.row({ height = ROW_H, width = math.floor(contentW + 2 * math.abs(s) + 60), align = "center", justify = "center", gap = SPACE }, cards)
+  return ui.row({ height = ROW_H, width = contentW + 2 * math.abs(s) + 60, align = "center", justify = "center", gap = SPACE }, cards)
 end
 
 function render()
@@ -182,7 +182,8 @@ function render()
     middle = strip()
   end
 
-  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center" }, { middle }))
+  local ease = 1 - (1 - appear) * (1 - appear)
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", opacity = ease }, { middle, ui.box({ width = 1, height = (1 - ease) * 60, opacity = 0 }) }))
 end
 
 function onFrameTick(deltaMs)
