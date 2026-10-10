@@ -8,7 +8,16 @@ case "${1:-}" in
   power-cycle)     exec noctalia msg power-cycle ;;
   control-center)  exec noctalia msg panel-toggle control-center ;;
   settings)        exec noctalia msg settings-toggle ;;
-  wallpapers)      exec noctalia msg panel-toggle legion/carousel:main ;;
+  wallpapers)
+    # Le flou plein écran coûte ~6 ms par image : coupé tant que le carrousel est ouvert, remis à la fermeture.
+    lock="${XDG_RUNTIME_DIR:-/tmp}/legion-carousel-blur"
+    if [ ! -e "$lock" ]; then
+      : > "$lock"; hyprctl keyword decoration:blur:enabled 0 >/dev/null
+      ( sleep 1; while hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 0.3; done
+        hyprctl keyword decoration:blur:enabled 1 >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
+      disown
+    fi
+    exec noctalia msg panel-toggle legion/carousel:main ;;
   window-switcher) exec noctalia msg window-switcher hold ;;
   keys)            exec noctalia msg panel-toggle legion/keys:main ;;
 esac
