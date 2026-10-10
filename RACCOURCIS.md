@@ -26,7 +26,7 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 
 | Touches | Action |
 |---|---|
-| `Super` + `Maj` + `Q` | Fermer la fenêtre |
+| `Super` + `Maj` + `Q` | Tuer le processus de la fenêtre (Discord, etc. ne restent plus en arrière-plan) |
 | `Super` + `V` | Fenêtre libre ↔ rangée |
 | `Super` + `Maj` + `P` | Garder sa taille (pseudo) |
 | `Super` + `J` | Changer le sens de la division |
