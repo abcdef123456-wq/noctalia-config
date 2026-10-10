@@ -16,7 +16,7 @@ BACKLIGHT=$(for d in /sys/class/backlight/*; do n=${d##*/}; case $n in nvidia*|\
 
 HZ_PERFORMANCE=max
 HZ_BALANCED_AC=max
-HZ_BALANCED_BAT=low
+HZ_BALANCED_BAT=max
 HZ_ECO=low
 ECO_BRIGHTNESS_MAX=40
 
