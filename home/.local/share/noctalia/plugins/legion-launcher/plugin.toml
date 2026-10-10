@@ -7,12 +7,12 @@ license     = "MIT"
 description = "Barre de recherche d'applications compacte au centre de l'écran (style Spotlight)."
 dependencies = ["python3"]
 
-# Panneau plein écran transparent : voile léger + carte centrée qui grandit avec les résultats.
+# Panneau de la taille de la carte, centré : cadre et flou de Noctalia, rien d'autre à l'écran.
 [[panel]]
 id = "main"
 entry = "panel.luau"
-width = "fill"
-height = "fill"
+width = 700
+height = 200
 placement = "floating"
 position = "center"
 layer = "overlay"

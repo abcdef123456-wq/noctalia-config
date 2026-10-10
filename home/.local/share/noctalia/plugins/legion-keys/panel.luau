@@ -73,20 +73,7 @@ function render()
   else
     body = ui.row({ gap = 36, align = "start", height = maxH }, cols)
   end
-  panel.render(ui.column({ fill = "surface/0.55", flexGrow = 1, align = "center", justify = "center", onClick = function() panel.close() end }, {
-    ui.column({
-      key = "card",
-      height = maxH + 56 + math.floor(10 * (1 - ease)),
-      paddingH = 32,
-      paddingV = 28,
-      fill = "surface/0.9",
-      radius = 24,
-      border = "outline/0.25",
-      borderWidth = 1,
-      align = "center",
-      opacity = ease,
-    }, { body }),
-  }))
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", paddingH = 32, paddingV = 28, opacity = ease }, { body }))
 end
 
 function onFrameTick(deltaMs)

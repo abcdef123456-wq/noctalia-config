@@ -173,7 +173,7 @@ function render()
     middle = ui.row({ height = ROW_H, align = "center", justify = "center", gap = 0, opacity = appear }, cards())
   end
 
-  panel.render(ui.column({ fill = "surface/0.55", flexGrow = 1, align = "stretch", justify = "space_between", paddingV = 24, paddingH = 24, onClick = function() panel.close() end }, {
+  panel.render(ui.column({ flexGrow = 1, align = "stretch", justify = "space_between", paddingV = 24, paddingH = 24 }, {
     ui.row({ height = 42, align = "center", justify = "space_between" }, {
       ui.box({ width = 42, height = 42, opacity = 0 }),
       ui.row({ width = 380, height = 42, paddingH = 16, gap = 10, align = "center", radius = 12, opacity = appear,
