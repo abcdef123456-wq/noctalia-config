@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# legion-kill : tue le processus de la fenêtre active (utile pour Discord & co qui restent en arrière-plan).
+pid=$(hyprctl activewindow -j | jq -r '.pid // empty')
+[ -n "$pid" ] || exit 0
+kill -TERM "$pid" 2>/dev/null; sleep 0.6
+kill -0 "$pid" 2>/dev/null && kill -KILL "$pid"
+hyprctl dispatch killactive >/dev/null 2>&1; true
