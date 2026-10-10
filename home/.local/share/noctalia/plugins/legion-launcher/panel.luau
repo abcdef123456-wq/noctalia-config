@@ -216,14 +216,6 @@ local function activate(item)
 end
 
 -- ── Affichage ───────────────────────────────────────────────────────────────
--- Haut de la carte à 27 % de l'écran (le panneau commence ~56 px sous le bord, sous la barre)
-local function screenTop()
-  for _, o in ipairs(noctalia.outputs()) do
-    if o.focused then return math.max(0, math.floor(o.height * 0.27) - 56) end
-  end
-  return 210
-end
-
 -- Éléments affichés : applis courantes quand la barre est vide, sinon les résultats
 local function currentItems()
   if noctalia.string.trim(query) ~= "" then return results end
@@ -303,41 +295,25 @@ end
 
 function render()
   local items = currentItems()
-  local content, bodyH = body(items)
-  -- Voile sur tout le panneau, par-dessus le flou du mode verre. La carte a une hauteur fixe
-  -- calculée (sinon la mise en page la comprime) ; à l'ouverture elle apparaît en fondu en glissant de 12 px.
+  local content = body(items)
+  -- Le panneau a la taille de la carte : le cadre, le flou et l'ombre sont ceux de Noctalia, rien d'autre sur l'écran.
   local ease = 1 - (1 - appear) * (1 - appear)
-  panel.render(ui.column({ fill = "surface/0.55", flexGrow = 1, align = "center", justify = "start", onClick = function() panel.close() end }, {
-    ui.box({ height = screenTop() + math.floor(12 * (1 - ease)), width = 1, opacity = 0 }),   -- sans largeur, la boîte est ignorée
-    ui.column({
-      key = "card",
-      width = CARD_W,
-      height = HEAD_H + bodyH,
-      minHeight = HEAD_H + bodyH,
-      fill = "surface/0.9",
-      radius = 26,
-      border = "outline/0.25",
-      borderWidth = 1,
-      align = "stretch",
-      opacity = ease,
-      onClick = function() end,   -- un clic dans la carte ne ferme pas
-    }, {
-      ui.row({ height = HEAD_H, paddingH = 24, gap = 14, align = "center" }, {
-        ui.glyph({ name = "search", size = 20, color = "primary" }),
-        ui.input({
-          key = "q" .. inputKey,
-          value = query,
-          placeholder = "Rechercher",
-          fontSize = 20,
-          frameVisible = false,
-          focus = true,
-          flexGrow = 1,
-          onChange = function(v) query = v; search(); render() end,
-          onSubmit = function() activate(currentItems()[selected]) end,
-        }),
+  panel.render(ui.column({ flexGrow = 1, align = "stretch", opacity = ease }, {
+    ui.row({ height = HEAD_H, paddingH = 24, gap = 14, align = "center" }, {
+      ui.glyph({ name = "search", size = 20, color = "primary" }),
+      ui.input({
+        key = "q" .. inputKey,
+        value = query,
+        placeholder = "Rechercher",
+        fontSize = 20,
+        frameVisible = false,
+        focus = true,
+        flexGrow = 1,
+        onChange = function(v) query = v; search(); render() end,
+        onSubmit = function() activate(currentItems()[selected]) end,
       }),
-      content,
     }),
+    content,
   }))
 end
 

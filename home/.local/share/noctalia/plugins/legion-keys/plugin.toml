@@ -9,8 +9,8 @@ description = "Fiche de tes raccourcis Hyprland, lus en direct par legion-keys (
 [[panel]]
 id = "main"
 entry = "panel.luau"
-width = "fill"
-height = "fill"
+width = 1500
+height = 540
 placement = "floating"
 position = "center"
 layer = "overlay"
