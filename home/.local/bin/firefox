@@ -1,3 +1,0 @@
-#!/bin/sh
-# Raccourci : « firefox » ouvre Firefox Developer Edition (seule version installée).
-exec /usr/bin/firefox-developer-edition "$@"
