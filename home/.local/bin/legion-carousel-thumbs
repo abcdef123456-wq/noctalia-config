@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# legion-carousel-thumbs : miniatures haute qualité (filtre Lanczos) pour le carrousel de fonds d'écran.
-# Chaque fond reçoit une copie réduite à la taille exacte de la carte sélectionnée à l'écran : le carrousel
-# l'affiche pixel pour pixel (plus net), et l'image d'origine reste celle appliquée comme fond.
+# legion-carousel-thumbs : miniatures « tranches inclinées » pour le carrousel de fonds d'écran (plugin legion/carousel).
+# Style Serpentinum : chaque fond reçoit deux découpes en parallélogramme (l'image n'est pas déformée, seul le contour est incliné) :
+#   <fond>.W.webp  grande tranche du milieu (avec un fin liseré clair)
+#   <fond>.N.webp  tranche étroite des voisines
+# Chaque découpe est faite à la taille exacte d'affichage (taille logique x échelle de l'écran, filtre Lanczos) :
+# le carrousel l'affiche pixel pour pixel, l'image d'origine reste celle appliquée comme fond.
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
 # Lancé automatiquement (legion-carousel-thumbs.path) à chaque changement du dossier de fonds.
 set -uo pipefail
@@ -15,26 +18,47 @@ src=$(awk '/^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{sub(/^[^=]*= *"/,
 src="${src/#\~/$HOME}"
 [ -d "$src" ] || exit 0
 
-# Taille de la carte centrale du carrousel (plugin legion/carousel : 340 x 470 px logiques) x échelle de l'écran
+# Tailles logiques : MÊMES valeurs que dans le plugin (panel.luau) ; inclinaison SK (0,30 = 17°)
+CW=600; CH=450      # grande tranche du milieu
+NW=192; NH=420      # tranche étroite des voisines
+SK=0.30
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[].scale] | max // empty'); [ -n "$dpr" ] || dpr=1.6
-read -r W H < <(awk -v d="$dpr" 'BEGIN{ printf "%d %d\n", int(340*d+0.5), int(470*d+0.5) }')
 
 mkdir -p "$OUT"
-# Si la taille cible a changé (réglages du carrousel, échelle de l'écran), tout est régénéré.
-if [ "$(cat "$OUT/.size" 2>/dev/null)" != "${W}x${H}" ]; then
-  rm -f "$OUT"/*.jpg
-  echo "${W}x${H}" > "$OUT/.size"
+# Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
+sig="v3-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
+if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
+  rm -f "$OUT"/*.jpg "$OUT"/*.webp
+  echo "$sig" > "$OUT/.size"
 fi
+
+# bake IMAGE SORTIE LARGEUR HAUTEUR LISERE(0|1) : parallélogramme de largeur LARGEUR (sur la ligne centrale), hauteur HAUTEUR
+bake() {
+  local img="$1" out="$2" w h ov b edge="$5"
+  w=$(awk -v v="$3" -v d="$dpr" 'BEGIN{printf "%d", v*d+0.5}')
+  h=$(awk -v v="$4" -v d="$dpr" 'BEGIN{printf "%d", v*d+0.5}')
+  ov=$(awk -v h="$h" -v k="$SK" 'BEGIN{printf "%d", h*k+0.5}')
+  b=$((w + ov))
+  local poly="$ov,0 $((b - 1)),0 $w,$((h - 1)) 0,$((h - 1))"
+  local stroke=() sw
+  sw=$(awk -v d="$dpr" 'BEGIN{printf "%d", 2.5*d+0.5}')
+  [ "$edge" = 1 ] && stroke=(-fill none -stroke "rgba(255,255,255,0.88)" -strokewidth "$sw" -draw "polygon $poly")
+  magick "$img[0]" -filter Lanczos -resize "${b}x${h}^" -gravity center -extent "${b}x${h}" -unsharp 0x0.6+0.7+0.02 \
+    \( -size "${b}x${h}" xc:black -fill white -draw "polygon $poly" \) -alpha off -compose copy_opacity -composite \
+    "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.webp" && mv "$out.tmp.webp" "$out"
+}
 
 shopt -s nullglob nocaseglob
 made=0
 for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
-  t="$OUT/$(basename "$f").jpg"
-  [ "$t" -nt "$f" ] && continue
-  magick "$f[0]" -filter Lanczos -resize "${W}x${H}^" -unsharp 0x0.6+0.7+0.02 -quality 95 -sampling-factor 4:4:4 "$t.tmp.jpg" && mv "$t.tmp.jpg" "$t" && made=$((made + 1))
+  n="$(basename "$f")"
+  tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"
+  [ "$tw" -nt "$f" ] && [ "$tn" -nt "$f" ] && continue
+  bake "$f" "$tw" "$CW" "$CH" 1 && bake "$f" "$tn" "$NW" "$NH" 0 && made=$((made + 1))
 done
-for t in "$OUT"/*.jpg; do
-  [ -e "$src/$(basename "$t" .jpg)" ] || rm -f "$t"
+for t in "$OUT"/*.W.webp; do
+  base="$(basename "$t" .W.webp)"
+  [ -e "$src/$base" ] || rm -f "$t" "$OUT/$base.N.webp"
 done
-[ "$made" -gt 0 ] && echo "legion-carousel-thumbs : $made miniature(s) ${W}x${H} générée(s)"
+[ "$made" -gt 0 ] && echo "legion-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)"
 exit 0

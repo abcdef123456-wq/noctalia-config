@@ -1,30 +1,28 @@
--- Legion Carousel (Noctalia v5) : choisir le fond d'écran dans un carrousel plein écran (comme la v4).
--- Gauche/Droite (maintenir pour défiler), Entrée ou clic sur l'image centrale pour appliquer, clic sur une
--- autre image pour la centrer, taper pour chercher, Échap / clic sur le fond pour fermer.
+-- Legion Carousel (Noctalia v5) : choisir le fond d'écran dans une bande de tranches inclinées (style Serpentinum).
+-- Gauche/Droite (maintenir pour défiler), Entrée ou clic sur la tranche du milieu pour appliquer, clic sur une
+-- autre tranche pour la centrer, taper pour chercher, Échap pour fermer.
+-- Les tranches sont des images déjà découpées en parallélogramme (l'image n'est pas déformée) par
+-- ~/.local/bin/legion-carousel-thumbs : <fond>.W.webp (grande, au milieu) et <fond>.N.webp (étroite, voisines),
+-- à la taille exacte d'affichage. Les tailles ci-dessous doivent rester celles du script.
 -- Défilement animé : la position suit la cible avec un amorti exponentiel (onFrameTick).
--- Miniatures : ~/.cache/legion/carousel/<fichier>.jpg (créées par legion-carousel-thumbs).
 -- Ouverture : noctalia msg panel-toggle legion/carousel:main
 
 local THUMBS = noctalia.expandPath("~/.cache/legion/carousel/")
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
--- Taille et opacité selon la distance à l'image centrale (interpolées entre les paliers)
-local STEPS = {
-  { w = 340, h = 470, a = 1.0 },
-  { w = 220, h = 390, a = 0.75 },
-  { w = 180, h = 330, a = 0.45 },
-  { w = 120, h = 270, a = 0.2 },
-  { w = 0, h = 220, a = 0.0 },
-}
-local ROW_H = 470
-local GAP = 18
-local SMOOTH_MS = 70          -- plus petit = plus rapide
-local REPEAT_DELAY = 280      -- flèche maintenue : délai puis cadence
+local CW, CH = 600, 450      -- tranche du milieu
+local NW, NH = 192, 420      -- tranche étroite (voisine immédiate)
+local SK = 0.30              -- inclinaison
+local SPACE = 4              -- écart entre tranches
+local REACH = 3              -- tranches de chaque côté
+local ROW_H = CH + 30
+local SMOOTH_MS = 70         -- plus petit = plus rapide
+local REPEAT_DELAY = 280     -- flèche maintenue : délai puis cadence
 local REPEAT_EVERY = 115
 local FADE_MS = 160
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 local eco = false
 
-local all = {}        -- { path, file, title, thumb }
+local all = {}        -- { path, file, title, thumbW, thumbN }
 local shown = {}      -- liste filtrée par la recherche
 local target = 1      -- index cible, non replié (peut dépasser n : carrousel infini)
 local pos = 1         -- position affichée (réelle), tend vers target
@@ -56,8 +54,12 @@ local function loadList()
       local path = dir .. f
       local info = noctalia.fileInfo(path)
       if info and not info.isDir then
-        local thumb = THUMBS .. f .. ".jpg"
-        table.insert(all, { path = path, file = f, title = prettify(f), thumb = noctalia.fileExists(thumb) and thumb or path })
+        local tw, tn = THUMBS .. f .. ".W.webp", THUMBS .. f .. ".N.webp"
+        table.insert(all, {
+          path = path, file = f, title = prettify(f),
+          thumbW = noctalia.fileExists(tw) and tw or path,
+          thumbN = noctalia.fileExists(tn) and tn or path,
+        })
       end
     end
   end
@@ -120,47 +122,53 @@ end
 
 local function lerp(a, b, t) return a + (b - a) * t end
 
-local function sizeAt(dist)
-  local d = math.min(math.abs(dist), #STEPS - 1)
-  local i = math.floor(d)
-  local t = d - i
-  local s0, s1 = STEPS[i + 1], STEPS[math.min(i + 2, #STEPS)]
-  return lerp(s0.w, s1.w, t), lerp(s0.h, s1.h, t), lerp(s0.a, s1.a, t)
+-- Taille de la tranche à la distance (continue) delta du centre : grande au milieu, étroite à côté, de plus en plus petite
+local function dims(delta)
+  local t = math.min(delta, 1)
+  local sc = delta <= 1 and 1 or math.max(0.58, 0.88 ^ (delta - 1))
+  return lerp(CW, NW * sc, t), lerp(CH, NH * sc, t)
 end
 
-local function cards()
+local function strip()
   local n = #shown
-  local reach = math.min(4, math.floor(n / 2))
-  local center = math.floor(pos + 0.5)
-  local out = {}
-  for k = -reach, reach do
-    local idx = center + k
-    local dist = idx - pos
-    local w, h, a = sizeAt(dist)
-    if w >= 1 then
-      local wp = shown[wrap(idx)]
-      local margin = GAP / 2 * math.max(0, math.min(1, 4 - math.abs(dist)))
-      local focus = math.max(0, 1 - math.abs(dist) * 2)        -- 1 au centre, 0 à mi-chemin
-      local isCur = wp.path == current
-      table.insert(out, ui.row({ key = "c" .. idx, width = math.floor(w + 2 * margin), height = ROW_H, align = "center", justify = "center" }, {
-        ui.image({
-          key = "i" .. idx,
-          path = wp.thumb,
-          width = math.floor(w),
-          height = math.floor(h),
-          fit = "cover",
-          radius = 16,
-          opacity = a * appear,
-          border = focus > 0 and "primary" or (isCur and "secondary/0.8" or nil),
-          borderWidth = focus > 0 and math.max(1, math.floor(3 * focus + 0.5)) or (isCur and 2 or 0),
-          onClick = function()
-            if idx == target then apply(wp) else target = idx; setTicking(true) end
-          end,
-        }),
-      }))
-    end
+  local reach = math.min(REACH, math.max(1, math.floor(n / 2)))
+  local c = math.floor(pos + 0.5)
+  local fl = math.floor(pos)
+  local cards, centers, x = {}, {}, 0
+  for idx = c - reach, c + reach + 1 do
+    local delta = math.abs(idx - pos)
+    local w, h = dims(delta)
+    local a = 1 - 0.3 * math.min(delta, 1)
+    if delta > REACH - 0.5 then a = a * math.max(0, REACH + 0.5 - delta) end
+    local wp = shown[wrap(idx)]
+    local bw = w + SK * h                                  -- largeur de l'image découpée (parallélogramme + débord)
+    local kindW = delta < 0.5
+    centers[idx] = x + w / 2
+    table.insert(cards, ui.row({ key = "c" .. idx, width = math.floor(w), height = ROW_H, align = "center", justify = "center" }, {
+      ui.image({
+        key = "i" .. idx,
+        path = kindW and wp.thumbW or wp.thumbN,
+        width = math.floor(bw),
+        height = math.floor(h),
+        fit = "cover",
+        opacity = a * appear,
+        onClick = function()
+          if idx == target then apply(wp) else target = idx; setTicking(true) end
+        end,
+      }),
+    }))
+    x = x + w + SPACE
   end
-  return out
+  -- Amène le point « pos » au centre de l'écran (la bande est centrée : on la décale avec une boîte vide d'un côté)
+  local contentW = x - SPACE
+  local p = lerp(centers[fl] or contentW / 2, centers[fl + 1] or contentW / 2, pos - fl)
+  local s = contentW / 2 - p
+  if s > 0 then
+    table.insert(cards, 1, ui.box({ width = math.max(1, math.floor(2 * s - SPACE)), height = 1, opacity = 0 }))
+  elseif s < 0 then
+    table.insert(cards, ui.box({ width = math.max(1, math.floor(-2 * s - SPACE)), height = 1, opacity = 0 }))
+  end
+  return ui.row({ height = ROW_H, width = math.floor(contentW + 2 * math.abs(s) + 60), align = "center", justify = "center", gap = SPACE }, cards)
 end
 
 function render()
@@ -170,29 +178,25 @@ function render()
       ui.label({ text = #all == 0 and "Aucune image dans le dossier des fonds d'écran" or "Aucun fond d'écran trouvé", fontSize = 22, fontWeight = "bold", color = "on_surface" }),
     })
   else
-    middle = ui.row({ height = ROW_H, align = "center", justify = "center", gap = 0, opacity = appear }, cards())
+    middle = strip()
   end
 
-  panel.render(ui.column({ flexGrow = 1, align = "stretch", justify = "space_between", paddingV = 24, paddingH = 24 }, {
-    ui.row({ height = 42, align = "center", justify = "space_between" }, {
-      ui.box({ width = 42, height = 42, opacity = 0 }),
-      ui.row({ width = 380, height = 42, paddingH = 16, gap = 10, align = "center", radius = 12, opacity = appear,
-        fill = "surface/0.85", border = "outline/0.5", borderWidth = 1, onClick = function() end }, {
-        ui.glyph({ name = "search", size = 18, color = "primary" }),
-        ui.input({
-          key = "q" .. inputKey,
-          placeholder = "Rechercher un fond d'écran",
-          fontSize = 15,
-          frameVisible = false,
-          focus = true,
-          flexGrow = 1,
-          onChange = function(v) query = v; filter(); render() end,
-        }),
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", paddingV = 28, paddingH = 24 }, {
+    ui.row({ width = 380, height = 44, paddingH = 16, gap = 10, align = "center", radius = 14, opacity = appear,
+      fill = "surface/0.85", border = "outline/0.5", borderWidth = 1 }, {
+      ui.glyph({ name = "search", size = 18, color = "primary" }),
+      ui.input({
+        key = "q" .. inputKey,
+        placeholder = "Rechercher un fond d'écran",
+        fontSize = 15,
+        frameVisible = false,
+        focus = true,
+        flexGrow = 1,
+        onChange = function(v) query = v; filter(); render() end,
       }),
-      ui.box({ width = 42, height = 42, opacity = 0 }),
     }),
+    ui.box({ height = 52, width = 1, opacity = 0 }),   -- de l'air entre la recherche et les images
     middle,
-    ui.box({ height = 42, width = 1, opacity = 0 }),   -- garde le carrousel centré (même hauteur que la recherche)
   }))
 end
 
