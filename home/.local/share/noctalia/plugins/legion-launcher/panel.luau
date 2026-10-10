@@ -7,11 +7,11 @@ local APPS_CMD = { noctalia.expandPath("~/.local/bin/legion-apps") }
 local PINNED = { "@BROWSER@", "kitty", "org.kde.dolphin" }
 local MAX_TILES = 6
 local MAX_FAV = 6
-local CARD_W = 700
+local CARD_W = 1200
 local HEAD_H = 60
-local TILE_H = 116
+local TILE_H = 190
 local CALC_H = 56
-local FADE_MS = 150
+local FADE_MS = 260
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 
 local apps = {}
@@ -232,14 +232,14 @@ local function tile(item, i, w)
   local sel = i == selected
   local icon
   if item.app then
-    icon = ui.image({ path = iconFor(item.app), width = STYLE == "A" and 40 or 56, height = STYLE == "A" and 40 or 56, fit = "contain" })
+    icon = ui.image({ path = iconFor(item.app), width = 72, height = 72, fit = "contain" })
   else
-    icon = ui.glyph({ name = item.glyph, size = STYLE == "A" and 32 or 44, color = sel and "primary" or "on_surface_variant" })
+    icon = ui.glyph({ name = item.glyph, size = 52, color = sel and "primary" or "on_surface_variant" })
   end
   local top
   if STYLE == "A" then
     -- icône sur une pastille arrondie ; la pastille choisie prend la couleur d'accent, avec un contour
-    top = ui.row({ width = 64, height = 64, radius = 20, align = "center", justify = "center",
+    top = ui.row({ width = 112, height = 112, radius = 34, align = "center", justify = "center",
       fill = sel and "primary/0.30" or "on_surface/0.07", border = sel and "primary" or "on_surface/0.0", borderWidth = 2 }, { icon })
   else
     -- grosse icône seule ; l'icône choisie est entourée d'un halo
@@ -248,7 +248,7 @@ local function tile(item, i, w)
   end
   local kids = {
     top,
-    ui.label({ text = item.name, fontSize = 13, fontWeight = sel and "semibold" or "medium", maxWidth = w + 16, maxLines = 2,
+    ui.label({ text = item.name, fontSize = 16, fontWeight = sel and "semibold" or "medium", maxWidth = w - 8, maxLines = 2,
       textAlign = "center", color = sel and "on_surface" or "on_surface_variant" }),
   }
   if item.hint then
@@ -261,7 +261,7 @@ local function tile(item, i, w)
     height = TILE_H - 12,
     align = "center",
     justify = "start",
-    gap = 8,
+    gap = 12,
     paddingV = 6,
     onClick = function() activate(item) end,
     onHover = function(state) if state == "true" and selected ~= i then selected = i; render() end end,
@@ -300,7 +300,7 @@ local function body(items)
     table.insert(kids, ui.row({ justify = "center", align = "start", gap = 0, height = TILE_H }, row))
     h = h + TILE_H
   end
-  return ui.column({ paddingH = 20, paddingBottom = 4, align = "stretch", height = h + 4 }, kids), h + 4
+  return ui.column({ width = CARD_W, paddingH = 20, paddingBottom = 4, align = "stretch", height = h + 4 }, kids), h + 4
 end
 
 function render()
@@ -308,14 +308,17 @@ function render()
   local content = body(items)
   -- Le panneau a la taille de la carte : le cadre, le flou et l'ombre sont ceux de Noctalia, rien d'autre sur l'écran.
   local ease = 1 - (1 - appear) * (1 - appear)
-  panel.render(ui.column({ flexGrow = 1, align = "stretch", opacity = ease }, {
-    ui.row({ height = HEAD_H, paddingH = 24, gap = 14, align = "center" }, {
-      ui.glyph({ name = "search", size = 20, color = "primary" }),
+  local slide = (1 - ease) * 60
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", gap = 40, opacity = ease }, {
+    ui.box({ width = 1, height = math.floor(slide), opacity = 0 }),
+    ui.row({ width = 640, height = 76, paddingH = 28, gap = 16, align = "center", radius = 38,
+      fill = "on_surface/0.10", border = "primary/0.6", borderWidth = 2 }, {
+      ui.glyph({ name = "search", size = 28, color = "primary" }),
       ui.input({
         key = "q" .. inputKey,
         value = query,
-        placeholder = "Rechercher",
-        fontSize = 20,
+        placeholder = "Rechercher une application…",
+        fontSize = 28,
         frameVisible = false,
         focus = true,
         flexGrow = 1,
@@ -323,6 +326,7 @@ function render()
         onSubmit = function() activate(currentItems()[selected]) end,
       }),
     }),
+    ui.box({ width = CARD_W, height = (content and 1 or 0), opacity = 0 }),
     content,
   }))
 end
