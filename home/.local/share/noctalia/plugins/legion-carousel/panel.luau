@@ -18,7 +18,7 @@ local ROW_H = CH + 30
 local SMOOTH_MS = 70         -- plus petit = plus rapide
 local REPEAT_DELAY = 280     -- flèche maintenue : délai puis cadence
 local REPEAT_EVERY = 115
-local FADE_MS = 160
+local FADE_MS = 420
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 local eco = false
 
@@ -151,7 +151,7 @@ local function strip()
         width = math.floor(bw),
         height = math.floor(h),
         fit = "cover",
-        opacity = a * appear,
+        opacity = a * (1 - (1 - appear) ^ 2),
         onClick = function()
           if idx == target then apply(wp) else target = idx; setTicking(true) end
         end,
@@ -162,7 +162,8 @@ local function strip()
   -- Amène le point « pos » au centre de l'écran (la bande est centrée : on la décale avec une boîte vide d'un côté)
   local contentW = x - SPACE
   local p = lerp(centers[fl] or contentW / 2, centers[fl + 1] or contentW / 2, pos - fl)
-  local s = contentW / 2 - p
+  local e = 1 - (1 - appear) ^ 3
+  local s = contentW / 2 - p - (1 - e) * 520
   if s > 0 then
     table.insert(cards, 1, ui.box({ width = math.max(1, math.floor(2 * s - SPACE)), height = 1, opacity = 0 }))
   elseif s < 0 then
@@ -181,23 +182,7 @@ function render()
     middle = strip()
   end
 
-  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", paddingV = 28, paddingH = 24 }, {
-    ui.row({ width = 380, height = 44, paddingH = 16, gap = 10, align = "center", radius = 14, opacity = appear,
-      fill = "surface/0.85", border = "outline/0.5", borderWidth = 1 }, {
-      ui.glyph({ name = "search", size = 18, color = "primary" }),
-      ui.input({
-        key = "q" .. inputKey,
-        placeholder = "Rechercher un fond d'écran",
-        fontSize = 15,
-        frameVisible = false,
-        focus = true,
-        flexGrow = 1,
-        onChange = function(v) query = v; filter(); render() end,
-      }),
-    }),
-    ui.box({ height = 52, width = 1, opacity = 0 }),   -- de l'air entre la recherche et les images
-    middle,
-  }))
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center" }, { middle }))
 end
 
 function onFrameTick(deltaMs)

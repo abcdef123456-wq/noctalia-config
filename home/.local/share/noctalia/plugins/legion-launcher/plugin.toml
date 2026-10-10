@@ -11,8 +11,8 @@ dependencies = ["python3"]
 [[panel]]
 id = "main"
 entry = "panel.luau"
-width = 700
-height = 200
+width = "fill"
+height = "fill"
 placement = "floating"
 position = "center"
 layer = "overlay"
