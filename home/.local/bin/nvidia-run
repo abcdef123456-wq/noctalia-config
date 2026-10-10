@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# nvidia-run : lance une commande sur la RTX 5060 (PRIME render offload).
+# La session limite EGL/Vulkan à Mesa pour laisser la RTX en veille (~/.config/uwsm/env-hyprland) ;
+# ce lanceur rétablit les pilotes NVIDIA pour cette seule commande.
+# Exemples : nvidia-run blender   ·   Steam, options de lancement : nvidia-run %command%
+set -euo pipefail
+[ $# -ge 1 ] || { echo "Usage : nvidia-run <commande> [arguments]" >&2; exit 1; }
+
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/50_mesa.json
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json:/usr/share/vulkan/icd.d/radeon_icd.json
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __VK_LAYER_NV_optimus=NVIDIA_only
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+exec "$@"

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# legion-carousel-thumbs : miniatures haute qualité (filtre Lanczos) pour le carrousel de fonds d'écran.
+# Chaque fond reçoit une copie réduite à la taille exacte de la carte sélectionnée à l'écran : le carrousel
+# l'affiche pixel pour pixel (plus net), et l'image d'origine reste celle appliquée comme fond.
+# Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
+# Lancé automatiquement (legion-carousel-thumbs.path) à chaque changement du dossier de fonds.
+set -uo pipefail
+
+NOCT="$HOME/.config/noctalia/settings.json"
+PSET="$HOME/.config/noctalia/plugins/wallpaperCarousel/settings.json"
+OUT="$HOME/.cache/legion/carousel"
+
+src=$(jq -r '.wallpaper.directory // empty' "$NOCT" 2>/dev/null)
+[ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
+src="${src/#\~/$HOME}"
+[ -d "$src" ] || exit 0
+
+# Même calcul que le carrousel : taille logique × échelle de l'écran × agrandissement de la carte sélectionnée
+w=$(jq -r '.itemWidth // 300' "$PSET" 2>/dev/null); h=$(jq -r '.itemHeight // 420' "$PSET" 2>/dev/null)
+sel=$(jq -r '.selectedScale // 108' "$PSET" 2>/dev/null); b=$(jq -r '.borderWidth // 3' "$PSET" 2>/dev/null)
+exp=$(jq -r 'if (.expandSelected|tostring) == "true" then (.expandMultiplier // 120) else 100 end' "$PSET" 2>/dev/null)
+dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[].scale] | max // empty'); [ -n "$dpr" ] || dpr=1.6
+# Taille d'affichage exacte de l'image dans la carte sélectionnée (en pixels écran) :
+#   hauteur = (hauteur de carte − 2 × bordure) × agrandissement × échelle de l'écran
+#   largeur = largeur de carte agrandie − 2 × bordure + débord de l'inclinaison (0,35 × hauteur) + 50, même facteur
+read -r W H < <(awk -v w="$w" -v h="$h" -v s="$sel" -v d="$dpr" -v b="$b" -v e="$exp" 'BEGIN{ if (s>10) s/=100; e/=100; t=d*s; ih=h-2*b; iw=w*e-2*b+ih*0.35+50; printf "%d %d\n", int(iw*t+0.5), int(ih*t+0.5) }')
+
+mkdir -p "$OUT"
+# Si la taille cible a changé (réglages du carrousel, échelle de l'écran), tout est régénéré.
+if [ "$(cat "$OUT/.size" 2>/dev/null)" != "${W}x${H}" ]; then
+  rm -f "$OUT"/*.jpg
+  echo "${W}x${H}" > "$OUT/.size"
+fi
+
+shopt -s nullglob nocaseglob
+made=0
+for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
+  t="$OUT/$(basename "$f").jpg"
+  [ "$t" -nt "$f" ] && continue
+  magick "$f[0]" -filter Lanczos -resize "${W}x${H}^" -unsharp 0x0.6+0.7+0.02 -quality 95 -sampling-factor 4:4:4 "$t.tmp.jpg" && mv "$t.tmp.jpg" "$t" && made=$((made + 1))
+done
+for t in "$OUT"/*.jpg; do
+  [ -e "$src/$(basename "$t" .jpg)" ] || rm -f "$t"
+done
+[ "$made" -gt 0 ] && echo "legion-carousel-thumbs : $made miniature(s) ${W}x${H} générée(s)"
+exit 0

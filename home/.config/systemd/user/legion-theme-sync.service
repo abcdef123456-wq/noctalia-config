@@ -1,0 +1,8 @@
+[Unit]
+Description=Thème kitty assorti aux couleurs Noctalia
+
+[Service]
+Type=oneshot
+# Laisse Noctalia finir d'écrire tous ses fichiers de thème.
+ExecStartPre=/usr/bin/sleep 0.5
+ExecStart=%h/.local/bin/legion-theme-sync

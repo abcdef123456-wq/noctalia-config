@@ -1,0 +1,10 @@
+[Unit]
+Description=Surveille le dossier des fonds d'écran (miniatures du carrousel)
+
+[Path]
+PathChanged=%h/Pictures/Wallpapers
+PathChanged=%h/.config/noctalia/plugins/wallpaperCarousel/settings.json
+Unit=legion-carousel-thumbs.service
+
+[Install]
+WantedBy=graphical-session.target
