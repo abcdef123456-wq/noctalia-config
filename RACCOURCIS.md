@@ -15,6 +15,7 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `Ctrl` + `P` | Épingler la fenêtre : elle devient flottante et reste au même endroit sur tous les bureaux (même touche pour la libérer) |
+| `Super` + `Ctrl` + `S` | Taille de la fenêtre : passe en flottante centrée à 50 %, puis 70 %, puis 90 % de l'écran |
 | `Super` + `C` | Centre de contrôle |
 | `Super` + `,` | Réglages de la barre |
 | `Super` + `/` | Afficher cette fiche |

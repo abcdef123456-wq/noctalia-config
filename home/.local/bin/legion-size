@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# legion-size : passe la fenêtre active (flottante, centrée) à la taille suivante : 50 %, 70 %, 90 % de l'écran.
+w=$(hyprctl activewindow -j); m=$(hyprctl monitors -j | jq '.[]|select(.focused)')
+[ "$(jq -r '.floating' <<<"$w")" = true ] || hyprctl dispatch togglefloating >/dev/null
+pct=$(jq -n --argjson w "$w" --argjson m "$m" '($w.size[0]*100/($m.width/$m.scale))|round')
+if [ "$pct" -lt 60 ]; then n=70; elif [ "$pct" -lt 80 ]; then n=90; else n=50; fi
+hyprctl dispatch resizeactive exact "$n%" "$n%" >/dev/null; hyprctl dispatch centerwindow >/dev/null
