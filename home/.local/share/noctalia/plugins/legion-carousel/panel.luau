@@ -28,6 +28,8 @@ local target = 1      -- index cible, non replié (peut dépasser n : carrousel 
 local pos = 1         -- position affichée (réelle), tend vers target
 local query = ""
 local current = nil
+local bg = nil
+local BGW, BGH = 1560, 940
 local inputKey = 0
 local holdDir = 0
 local holdT = 0
@@ -184,7 +186,10 @@ function render()
   end
 
   local ease = 1 - (1 - appear) * (1 - appear)
-  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", opacity = ease }, { middle, ui.box({ width = 1, height = (1 - ease) * 60, opacity = 0 }) }))
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2, opacity = ease }, {
+    bg and ui.image({ path = bg, width = BGW, height = BGH, fit = "cover", radius = 18 }) or ui.box({ width = 1, height = 1, opacity = 0 }),
+    ui.column({ height = ROW_H, width = BGW, align = "center", justify = "center" }, { middle }),
+  }))
 end
 
 function onFrameTick(deltaMs)
@@ -231,6 +236,11 @@ function onOpen(context)
   holdDir = 0
   inputKey = inputKey + 1
   current = noctalia.wallpaperPath(outputName())
+  bg = nil
+  if current then
+    local b = THUMBS .. (current:match("([^/]+)$") or "") .. ".B.webp"
+    if noctalia.fileExists(b) then bg = b end
+  end
   loadList()
   filter()
   eco = noctalia.fileExists(ECO)
