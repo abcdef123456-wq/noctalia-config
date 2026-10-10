@@ -1,0 +1,3 @@
+# Sourcé par uwsm pour toute la session graphique (agent-linux).
+# Applications Qt/KDE (Dolphin…) : palette Noctalia et icônes via qt6ct.
+export QT_QPA_PLATFORMTHEME=qt6ct

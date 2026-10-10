@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# legion-profile : profils énergétiques de la Legion Pro 5 (TLP via tlp-pd, API D-Bus net.hadess.PowerProfiles).
+# Aucune commande privilégiée : le changement de profil passe par D-Bus, sous contrôle de polkit.
+set -euo pipefail
+
+PPD_DEST=net.hadess.PowerProfiles
+PPD_PATH=/net/hadess/PowerProfiles
+DGPU=/sys/bus/pci/devices/0000:01:00.0
+GPU_MODE_FILE="$HOME/.config/uwsm/gpu-mode"
+
+usage() {
+  cat <<'EOF'
+Usage : legion-profile <commande>
+
+  performance | perf      Profil Performance (jeux, compilation)
+  balanced    | bal       Profil Équilibré (usage quotidien)
+  eco         | saver     Profil Économie extrême (batterie)
+  cycle                   Profil suivant
+  status                  État détaillé (profil, CPU, écran, GPU, batterie)
+  gpu [auto|igpu|both]    GPU utilisé par Hyprland à la prochaine session (sans argument : mode actuel)
+EOF
+}
+
+die() { echo "legion-profile : $*" >&2; exit 1; }
+
+get_profile() {
+  gdbus call --system --dest "$PPD_DEST" --object-path "$PPD_PATH" \
+    --method org.freedesktop.DBus.Properties.Get "$PPD_DEST" ActiveProfile 2>/dev/null \
+    | sed -nE "s/^\(<'([a-z-]+)'>,\)$/\1/p" || true
+}
+
+set_profile() {
+  local p=$1
+  gdbus call --system --dest "$PPD_DEST" --object-path "$PPD_PATH" \
+    --method org.freedesktop.DBus.Properties.Set "$PPD_DEST" ActiveProfile "<'$p'>" >/dev/null 2>&1 \
+    || die "impossible d'appliquer « $p ». tlp-pd est-il installé et actif ? (systemctl status tlp-pd)"
+  # tlp-pd applique le profil de façon asynchrone : on attend la confirmation (5 s au plus).
+  local now i
+  for i in $(seq 25); do
+    now=$(get_profile)
+    [ "$now" = "$p" ] && break
+    sleep 0.2
+  done
+  [ "$now" = "$p" ] || die "profil demandé : $p, profil actif : ${now:-inconnu}"
+  echo "Profil actif : $p"
+}
+
+read_sys() { [ -r "$1" ] && cat "$1" 2>/dev/null || echo "?"; }
+
+status() {
+  local p cpu=/sys/devices/system/cpu/cpu0/cpufreq bat=/sys/class/power_supply/BAT0
+  p=$(get_profile)
+  echo "Profil énergétique   : ${p:-indisponible (tlp-pd inactif)}"
+  echo "Profil TLP           : $(tlp-stat -s 2>/dev/null | sed -nE 's/^TLP profile += (.*)/\1/p')"
+  echo "Profil plateforme    : $(read_sys /sys/firmware/acpi/platform_profile)"
+  echo "CPU EPP / boost      : $(read_sys $cpu/energy_performance_preference) / $(read_sys /sys/devices/system/cpu/cpufreq/boost)"
+  echo "CPU fréquence max    : $(( $(read_sys $cpu/scaling_max_freq) / 1000 )) MHz"
+  if command -v hyprctl >/dev/null && hyprctl monitors -j >/dev/null 2>&1; then
+    echo "Écrans               : $(hyprctl monitors -j | jq -r 'map("\(.name) \(.width)x\(.height)@\(.refreshRate|floor)Hz") | join(", ")')"
+    echo "Flou / ombres        : $(hyprctl getoption decoration:blur:enabled -j | jq -r .int) / $(hyprctl getoption decoration:shadow:enabled -j | jq -r .int)"
+  fi
+  echo "RTX (runtime PM)     : $(read_sys $DGPU/power/runtime_status) (control=$(read_sys $DGPU/power/control))"
+  echo "Mode GPU Hyprland    : ${AQ_DRM_DEVICES:-non défini} (fichier gpu-mode : $(head -n1 "$GPU_MODE_FILE" 2>/dev/null || echo auto))"
+  if [ -d "$bat" ]; then
+    local pw
+    pw=$(read_sys $bat/power_now)
+    [ "$pw" != "?" ] && pw="$(awk -v p="$pw" 'BEGIN{printf "%.1f W", p/1e6}')"
+    echo "Batterie             : $(read_sys $bat/capacity) % ($(read_sys $bat/status)), consommation $pw"
+  fi
+  local t
+  for h in /sys/class/hwmon/hwmon*; do
+    [ "$(cat $h/name 2>/dev/null)" = k10temp ] && t=$(( $(cat $h/temp1_input) / 1000 ))
+  done
+  echo "Température CPU      : ${t:-?} °C"
+}
+
+gpu_mode() {
+  if [ $# -eq 0 ]; then
+    echo "Mode GPU (prochaine session) : $(head -n1 "$GPU_MODE_FILE" 2>/dev/null || echo auto)"
+    echo "Session actuelle : AQ_DRM_DEVICES=${AQ_DRM_DEVICES:-non défini}"
+    return
+  fi
+  case "$1" in
+    auto|igpu|both) mkdir -p "$(dirname "$GPU_MODE_FILE")"; echo "$1" > "$GPU_MODE_FILE"
+                    echo "Mode GPU « $1 » enregistré. Ferme puis rouvre la session pour l'appliquer." ;;
+    *) die "mode GPU invalide : $1 (auto, igpu ou both)" ;;
+  esac
+}
+
+[ $# -ge 1 ] || { usage; exit 1; }
+case "$1" in
+  performance|perf)  set_profile performance ;;
+  balanced|bal)      set_profile balanced ;;
+  eco|saver|power-saver) set_profile power-saver ;;
+  cycle)
+    case "$(get_profile)" in
+      performance) set_profile power-saver ;;
+      power-saver) set_profile balanced ;;
+      balanced)    set_profile performance ;;
+      *) die "profil actuel inconnu (tlp-pd inactif ?)" ;;
+    esac ;;
+  status)  status ;;
+  gpu)     shift; gpu_mode "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

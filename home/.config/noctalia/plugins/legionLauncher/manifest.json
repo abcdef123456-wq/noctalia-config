@@ -1,0 +1,24 @@
+{
+  "id": "legion-launcher",
+  "name": "Legion Launcher",
+  "version": "1.0.0",
+  "minNoctaliaVersion": "4.4.0",
+  "author": "agent-linux",
+  "license": "MIT",
+  "description": "Barre de recherche d'applications compacte au centre de l'écran (style Spotlight), aux couleurs du thème",
+  "repository": "",
+  "tags": [
+    "Launcher"
+  ],
+  "entryPoints": {
+    "main": "Main.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "defaultSettings": {
+      "lastUsed": {}
+    }
+  }
+}
