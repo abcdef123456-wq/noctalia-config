@@ -1,0 +1,258 @@
+# Noctalia v5 — configuration « Legion » (dépôt legion-dotfiles).
+# Les réglages faits dans l'interface vont dans ~/.local/state/noctalia/settings.toml et priment sur ce fichier.
+# Clés vérifiées avec « noctalia config export full » (v5.2.1) et docs.noctalia.dev.
+
+[shell]
+font_family = "Adwaita Sans"
+avatar_path = "@HOME@/.face"
+corner_radius_scale = 1.0
+setup_wizard_enabled = false
+telemetry_enabled = false
+polkit_agent = false                      # plasma-polkit-agent s'en charge déjà
+# Applis lancées dans leur propre unité systemd (elles survivent au changement v4/v5)
+# et sur le GPU du profil énergétique (legion-launch).
+launch_apps_custom_command = "uwsm-app -- @HOME@/.local/bin/legion-launch $CMD"
+
+[shell.animation]
+speed = 1.15
+
+[shell.shadow]
+direction = "down"
+alpha = 0.5
+
+[shell.panel]
+transparency_mode = "glass"               # panneaux en verre dépoli (flou Hyprland derrière)
+borders = true
+list_item_background = true
+launcher_placement = "floating"
+launcher_position = "center"
+control_center_placement = "attached"
+wallpaper_placement = "floating"
+wallpaper_position = "center"
+session_placement = "floating"
+session_position = "center"
+
+[shell.launcher]
+categories = false
+compact = false
+sort_by_usage = true
+pinned = ["@BROWSER@", "kitty", "org.kde.dolphin"]
+
+# Coins de l'écran arrondis (masque noir dans les 4 coins)
+[shell.screen_corners]
+enabled = true
+size = 20
+
+[shell.window_switcher]
+style = "carousel"
+mru = true
+
+# Clé de chiffrement de l'historique du presse-papier : fichier privé (0600) au lieu du trousseau de clés,
+# qui affichait une demande de mot de passe au démarrage.
+[storage]
+key_source = "file"
+key_file = "@HOME@/.local/state/noctalia/storage.key"
+
+# ---------------------------------------------------------------- Barre
+[bar.default]
+position = "top"
+thickness = 36
+margin_edge = 6                           # barre flottante, détachée du bord
+margin_ends = 10
+concave_edge_corners = false
+background_opacity = 0.0                  # barre transparente : seules les pastilles sont visibles
+compositor_blur = false                   # le flou vient de la règle Hyprland (pastilles seulement)
+shadow = false
+capsule = true
+capsule_fill = "surface"
+capsule_opacity = 0.82
+capsule_thickness = 0.86
+capsule_padding = 8
+widget_spacing = 6
+font_weight = 600
+start = ["arch", "workspaces", "active_window"]
+center = ["clock", "media"]
+end = ["group:sys", "tray", "power_profile", "group:status", "notifications"]
+
+[[bar.default.capsule_group]]
+id = "sys"
+members = ["cpu", "temp", "ram"]
+
+[[bar.default.capsule_group]]
+id = "status"
+members = ["network", "bluetooth", "volume", "battery"]
+
+[widget.arch]
+type = "control-center"
+custom_image = "@HOME@/.config/noctalia/arch-logo.png"
+custom_image_colorize = true
+color = "primary"
+
+[widget.workspaces]
+style = "regular"
+show_labels = true
+labels_only_when_occupied = true
+focused_color = "primary"
+occupied_color = "secondary"
+empty_color = "secondary"
+
+[widget.active_window]
+max_length = 240.0
+title_scroll = "on_hover"
+
+[widget.clock]
+format = "{:%a %d %b   %H:%M}"
+
+[widget.media]
+hide_when_no_media = true
+max_length = 200.0
+
+[widget.cpu]
+type = "sysmon"
+stat = "cpu_usage"
+visualization = "none"
+
+[widget.temp]
+type = "sysmon"
+stat = "cpu_temp"
+visualization = "none"
+
+[widget.ram]
+type = "sysmon"
+stat = "ram_used"
+visualization = "none"
+
+[widget.network]
+show_label = false
+
+[widget.volume]
+show_label = false
+
+[widget.battery]
+display_mode = "graphic"
+show_label = true
+
+[widget.notifications]
+hide_when_no_unread = false
+
+# ---------------------------------------------------------------- Dock
+[dock]
+enabled = true
+auto_hide = true
+reserve_space = false
+background_opacity = 0.8
+icon_size = 44
+magnification = true
+show_dots = true
+pinned = ["@BROWSER@", "kitty", "org.kde.dolphin"]
+
+# ---------------------------------------------------------------- Notifications, OSD
+[notification]
+position = "top_right"
+
+[osd]
+position = "bottom_center"
+
+# ---------------------------------------------------------------- Thème : couleurs du fond d'écran
+# Couleurs vives ou sobres selon le fond (et image de démarrage) : voir legion-wallpaper-colors
+[hooks]
+wallpaper_changed = "$HOME/.local/bin/legion-wallpaper-colors"
+
+[theme]
+mode = "dark"
+source = "wallpaper"
+wallpaper_scheme = "vibrant"
+
+[theme.templates]
+enable_builtin_templates = true
+builtin_ids = ["gtk3", "gtk4", "qt", "kcolorscheme"]
+enable_community_templates = false
+
+# Palette au format v4 : legion-theme-sync (kitty, bordures Hyprland, applis KDE, logo du terminal) la surveille
+[theme.templates.user.legion_colors]
+input_path = "templates/colors.json"
+output_path = "@HOME@/.config/noctalia/colors.json"
+
+# ---------------------------------------------------------------- Fonds d'écran : rotation 10 min, transition « disque » 2 s
+[wallpaper]
+directory = "@HOME@/Pictures/Wallpapers"
+fill_mode = "crop"
+transition = ["disc"]
+transition_duration = 2000.0
+
+[wallpaper.automation]
+enabled = true
+interval_seconds = 600
+order = "random"
+
+[lockscreen]
+transition = ["disc"]
+
+# Écran de verrouillage épuré : heure, date, musique (seulement si quelque chose joue), mot de passe
+[lockscreen_widgets]
+enabled = true
+widget_order = ["legion-time", "legion-date", "legion-media"]
+
+[lockscreen_widgets.widget.legion-time]
+type = "clock"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY1@
+box_width = 560.0
+box_height = 170.0
+
+[lockscreen_widgets.widget.legion-time.settings]
+format = "{:%H:%M}"
+center_text = true
+color = "on_surface"
+background = false
+shadow = true
+
+[lockscreen_widgets.widget.legion-date]
+type = "clock"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY2@
+box_width = 420.0
+box_height = 36.0
+
+[lockscreen_widgets.widget.legion-date.settings]
+format = "{:%A %d %B}"
+center_text = true
+color = "on_surface_variant"
+background = false
+shadow = true
+
+[lockscreen_widgets.widget.legion-media]
+type = "media_player"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY4@
+
+[lockscreen_widgets.widget.legion-media.settings]
+layout = "horizontal"
+hide_when_no_media = true
+color = "on_surface"
+background_opacity = 0.55
+background_radius = 16.0
+
+[lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@"]
+type = "login_box"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY3@
+
+[lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@".settings]
+layout = "compact"
+background_opacity = 0.55
+background_radius = 18.0
+input_radius = 12.0
+input_opacity = 0.8
+center_password_text = true
+show_login_button = false
+show_keyboard_layout = false
+
+# ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
+[plugins]
+enabled = ["legion/launcher", "legion/carousel", "legion/keys"]
+auto_update = "none"

@@ -6,24 +6,18 @@
 # Lancé automatiquement (legion-carousel-thumbs.path) à chaque changement du dossier de fonds.
 set -uo pipefail
 
-NOCT="$HOME/.config/noctalia/settings.json"
-PSET="$HOME/.config/noctalia/plugins/wallpaperCarousel/settings.json"
+CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
 OUT="$HOME/.cache/legion/carousel"
 
-src=$(jq -r '.wallpaper.directory // empty' "$NOCT" 2>/dev/null)
+# Dossier des fonds : clé « directory » de la section [wallpaper] de la config Noctalia v5
+src=$(awk '/^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{sub(/^[^=]*= *"/,""); sub(/".*$/,""); print; exit}' "$CONF" 2>/dev/null)
 [ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
 src="${src/#\~/$HOME}"
 [ -d "$src" ] || exit 0
 
-# Même calcul que le carrousel : taille logique × échelle de l'écran × agrandissement de la carte sélectionnée
-w=$(jq -r '.itemWidth // 300' "$PSET" 2>/dev/null); h=$(jq -r '.itemHeight // 420' "$PSET" 2>/dev/null)
-sel=$(jq -r '.selectedScale // 108' "$PSET" 2>/dev/null); b=$(jq -r '.borderWidth // 3' "$PSET" 2>/dev/null)
-exp=$(jq -r 'if (.expandSelected|tostring) == "true" then (.expandMultiplier // 120) else 100 end' "$PSET" 2>/dev/null)
+# Taille de la carte centrale du carrousel (plugin legion/carousel : 340 x 470 px logiques) x échelle de l'écran
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[].scale] | max // empty'); [ -n "$dpr" ] || dpr=1.6
-# Taille d'affichage exacte de l'image dans la carte sélectionnée (en pixels écran) :
-#   hauteur = (hauteur de carte − 2 × bordure) × agrandissement × échelle de l'écran
-#   largeur = largeur de carte agrandie − 2 × bordure + débord de l'inclinaison (0,35 × hauteur) + 50, même facteur
-read -r W H < <(awk -v w="$w" -v h="$h" -v s="$sel" -v d="$dpr" -v b="$b" -v e="$exp" 'BEGIN{ if (s>10) s/=100; e/=100; t=d*s; ih=h-2*b; iw=w*e-2*b+ih*0.35+50; printf "%d %d\n", int(iw*t+0.5), int(ih*t+0.5) }')
+read -r W H < <(awk -v d="$dpr" 'BEGIN{ printf "%d %d\n", int(340*d+0.5), int(470*d+0.5) }')
 
 mkdir -p "$OUT"
 # Si la taille cible a changé (réglages du carrousel, échelle de l'écran), tout est régénéré.

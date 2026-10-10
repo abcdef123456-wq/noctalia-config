@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """legion-wallpaper-colors : choisit la méthode de couleurs Noctalia la plus adaptée au fond d'écran.
 
-Appelé par le hook Noctalia « wallpaperChange » avec le chemin de l'image.
+Appelé par le hook Noctalia v5 « wallpaper_changed » (chemin dans NOCTALIA_WALLPAPER_PATH) ou avec l'image en argument.
   - image colorée       -> « vibrant » : reprend la couleur marquante (orange du tigre, rouge d'une voiture…)
   - image quasi neutre  -> « muted »   : palette sobre, sans couleur inventée (photo noir et blanc…)
 Mesure : 98e centile de la chroma OKLCH (capte aussi une petite zone vive, ex. un feu arrière) sur une miniature 64x64, en ignorant les pixels très sombres et très clairs.
-Usage : legion-wallpaper-colors IMAGE [--dry-run]
+Usage : legion-wallpaper-colors [IMAGE] [--dry-run]
 """
 import math
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,9 +41,11 @@ def colorfulness(path):
 
 
 def main():
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    src = args[0] if args else os.environ.get("NOCTALIA_WALLPAPER_PATH", "")
+    if not src:
         sys.exit(__doc__)
-    img = Path(sys.argv[1]).expanduser()
+    img = Path(src).expanduser()
     if not img.is_file():
         sys.exit(f"legion-wallpaper-colors : image introuvable : {img}")
     # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (legion-boot-wallpaper).
@@ -56,7 +59,10 @@ def main():
     print(f"{img.name}: chroma={c:.3f} -> {method}")
     if "--dry-run" in sys.argv:
         return
-    subprocess.run(["qs", "-c", "noctalia-shell", "ipc", "call", "colorScheme", "setGenerationMethod", method], check=False)
+    cur = subprocess.run(["noctalia", "msg", "color-scheme-get"], capture_output=True, text=True).stdout.split()
+    if cur != ["wallpaper", method]:
+        subprocess.run(["noctalia", "msg", "color-scheme-set", "wallpaper", method], check=False,
+                       stdout=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

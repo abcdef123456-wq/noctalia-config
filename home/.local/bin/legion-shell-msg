@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# legion-shell-msg : actions des raccourcis Hyprland, envoyées à Noctalia v5.
+#   menu  session  lock  power-cycle  control-center  settings  wallpapers  window-switcher  keys
+case "${1:-}" in
+  menu)            exec noctalia msg panel-toggle legion/launcher:main ;;
+  session)         exec noctalia msg session lock-and-suspend ;;
+  lock)            exec noctalia msg session lock ;;
+  power-cycle)     exec noctalia msg power-cycle ;;
+  control-center)  exec noctalia msg panel-toggle control-center ;;
+  settings)        exec noctalia msg settings-toggle ;;
+  wallpapers)      exec noctalia msg panel-toggle legion/carousel:main ;;
+  window-switcher) exec noctalia msg window-switcher hold ;;
+  keys)            exec noctalia msg panel-toggle legion/keys:main ;;
+esac
+echo "Action inconnue : ${1:-}" >&2
+exit 1

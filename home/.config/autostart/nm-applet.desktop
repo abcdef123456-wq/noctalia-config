@@ -1,6 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Network
-Exec=nm-applet
-Hidden=true
-# Masqué par agent-linux : le panneau réseau de Noctalia le remplace. Supprimer ce fichier pour le réactiver.
