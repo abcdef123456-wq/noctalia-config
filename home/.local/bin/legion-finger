@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# legion-finger : le bouton d'arrêt affiche un gros doigt sur le fond flouté (n'éteint plus). Une touche ferme.
+hyprctl clients -j | grep -q '"class": "fingerpop"' && exit 0
+exec kitty --class fingerpop -o background_opacity=0.35 -o font_size=170 -o confirm_os_window_close=0 -o hide_window_decorations=yes \
+  -o cursor_blink_interval=0 -o window_padding_width=0 sh -c 'printf "\033[?25l\033[2J\033[H\n\n\n   🖕"; read -rsn1 _'
