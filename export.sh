@@ -32,6 +32,7 @@ HOME_FILES=(
   .local/bin/legion-shell
   .local/bin/legion-shell-msg
   .local/bin/legion-brightness
+  .local/share/legion/finger.png
   .local/bin/legion-size
   .local/bin/legion-finger
   .local/bin/unimatrix
