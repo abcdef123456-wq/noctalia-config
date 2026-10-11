@@ -15,7 +15,8 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `Ctrl` + `P` | Épingler la fenêtre : elle devient flottante et reste au même endroit sur tous les bureaux (même touche pour la libérer) |
-| `Super` + `Maj` + `²` / `Super` + `Alt` + `²` | Envoyer la fenêtre vers le terminal caché / le bureau caché « magic » (même touche dans ce bureau pour la ramener) |
+| `Super` + `Maj` + `Tab` | Envoyer la fenêtre vers le bureau caché « magic » (même touche dans ce bureau pour la ramener) |
+| `Super` + `Maj` + `²` | Pareil avec le terminal caché |
 | `Super` + `Ctrl` + `S` | Taille de la fenêtre : passe en flottante centrée à 50 %, puis 70 %, puis 90 % de l'écran |
 | `Super` + `C` | Centre de contrôle |
 | `Super` + `,` | Réglages de la barre |
@@ -36,7 +37,7 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 | `Super` + `Alt` + `Tab` | Passer d'une fenêtre à l'autre |
 | `Super` + `G` | Grouper les fenêtres en onglets |
 | `Alt` + `Tab` | Onglet suivant |
-| `Alt` + `Maj` + `Tab` | Onglet précédent |
+| `Super` + `Ctrl` + `Tab` / `Super` + `Ctrl` + `Maj` + `Tab` | Onglet suivant / précédent du groupe |
 | `Super` + `Maj` + `G` | Sortir la fenêtre du groupe |
 | `Super` + `Ctrl` + `flèches` | Agrandir / rétrécir la fenêtre |
 | `Super` + `Maj` + `flèches` | Déplacer la fenêtre |
