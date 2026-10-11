@@ -16,6 +16,7 @@ dans `~/.config/hypr/conf.d/50-binds.conf` y apparaît tout seul (la commande `l
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `Ctrl` + `P` | Épingler la fenêtre : elle devient flottante et reste au même endroit sur tous les bureaux (même touche pour la libérer) |
 | `Super` + `Maj` + `Tab` | Envoyer la fenêtre vers le bureau caché « magic » (même touche dans ce bureau pour la ramener) |
+| `Super` + `Ctrl` + `C` | Recentrer la fenêtre flottante |
 | `Super` + `Maj` + `²` | Pareil avec le terminal caché |
 | `Super` + `Ctrl` + `S` | Taille de la fenêtre : passe en flottante centrée à 50 %, puis 70 %, puis 90 % de l'écran |
 | `Super` + `C` | Centre de contrôle |
