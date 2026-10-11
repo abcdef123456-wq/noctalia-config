@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# legion-tosp NOM : envoie la fenêtre active vers le bureau caché NOM (magic ou term) ; si elle y est déjà, la ramène sur le bureau visible.
+n=${1:-magic}
+cur=$(hyprctl activewindow -j | jq -r '.workspace.name // empty')
+if [ "$cur" = "special:$n" ]; then
+  ws=$(hyprctl monitors -j | jq -r '.[]|select(.focused)|.activeWorkspace.id')
+  hyprctl dispatch movetoworkspace "$ws" >/dev/null
+else
+  hyprctl dispatch movetoworkspacesilent "special:$n" >/dev/null
+fi
