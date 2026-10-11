@@ -67,6 +67,13 @@ def describe(d, arg, mouse, mods=()):
             return ("Redémarrer", 4)
         if "slurp" in a:
             return ("Capture d'une zone de l'écran", 0)
+        for k, v in (("legion-kill", ("Fermer la fenêtre (tue le programme)", 1)),
+                     ("legion-pin", ("Épingler la fenêtre sur tous les bureaux", 1)),
+                     ("legion-size", ("Taille de la fenêtre : 50 %, 70 %, 90 %", 1)),
+                     ("legion-tosp magic", ("Fenêtre ↔ bureau caché", 2)),
+                     ("legion-tosp term", ("Fenêtre ↔ terminal caché", 2))):
+            if k in a:
+                return v
         if any(x in a for x in ("wpctl", "brightnessctl", "playerctl")):
             return None   # touches multimédia, résumées à part
         return (a, 4)
@@ -78,6 +85,7 @@ def describe(d, arg, mouse, mods=()):
         "togglegroup": ("Grouper les fenêtres en onglets", 1),
         "moveoutofgroup": ("Sortir la fenêtre du groupe", 1),
         "setfloating": None,
+        "centerwindow": ("Recentrer la fenêtre", 1),
     }
     if d in table:
         return table[d]
