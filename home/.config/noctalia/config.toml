@@ -1,4 +1,4 @@
-# Noctalia v5 — configuration « Legion » (dépôt legion-dotfiles).
+# Noctalia v5 — configuration « Legion » (dépôt noctalia-config).
 # Les réglages faits dans l'interface vont dans ~/.local/state/noctalia/settings.toml et priment sur ce fichier.
 # Clés vérifiées avec « noctalia config export full » (v5.2.1) et docs.noctalia.dev.
 

@@ -1,4 +1,4 @@
-# legion-dotfiles
+# noctalia-config
 
 Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n'importe quel PC compatible avec Noctalia.
 Il a été fait sur un Lenovo Legion Pro 5, avec des réglages en plus si tu as un **Legion**.
@@ -14,8 +14,8 @@ Il a été fait sur un Lenovo Legion Pro 5, avec des réglages en plus si tu as 
 ## Installation
 
 ```bash
-git clone git@github.com:abcdef123456-wq/legion-dotfiles.git ~/legion-dotfiles
-cd ~/legion-dotfiles
+git clone git@github.com:abcdef123456-wq/noctalia-config.git ~/noctalia-config
+cd ~/noctalia-config
 ./install.sh
 ```
 
@@ -89,7 +89,7 @@ Pour lancer une appli sur la carte NVIDIA : `nvidia-run <commande>` (Steam : `nv
 ## Mettre à jour le dépôt depuis ta machine
 
 ```bash
-cd ~/legion-dotfiles
+cd ~/noctalia-config
 ./export.sh        # recopie la config actuelle ; ce qui est propre au PC devient un repère (@HOME@, @MONITOR@…)
 git add -A && git commit -m "Mise à jour" && git push
 ```
