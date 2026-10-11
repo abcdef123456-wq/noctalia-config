@@ -3,8 +3,8 @@
 -- Ouverture : noctalia msg panel-toggle legion/keys:main
 
 local KEYS_CMD = noctalia.expandPath("~/.local/bin/legion-keys")
-local COL_W = 470
-local KEY_W = 180
+local COL_W = 490
+local KEY_W = 220
 local ROW_H = 30
 local TITLE_H = 34
 local SEC_GAP = 22
@@ -13,8 +13,8 @@ local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- pré
 -- Sections par colonne (titres produits par legion-keys)
 local COLUMNS = {
   { "Applis et barre", "Bureaux" },
-  { "Fenêtres" },
-  { "Souris", "Système" },
+  { "Fenêtres", "Souris" },
+  { "Système" },
 }
 
 local sections = {}
@@ -71,7 +71,7 @@ function render()
     body = ui.label({ text = "Lecture des raccourcis…", fontSize = 14, color = "on_surface_variant" })
     maxH = 40
   else
-    body = ui.row({ gap = 36, align = "start", height = maxH }, cols)
+    body = ui.row({ gap = 24, align = "start", height = maxH }, cols)
   end
   panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", paddingH = 32, paddingV = 28, opacity = ease }, { body }))
 end
