@@ -4,7 +4,7 @@
 -- Ouverture : noctalia msg panel-toggle nc/launcher:main
 
 local APPS_CMD = { noctalia.expandPath("~/.local/bin/nc-apps") }
-local PINNED = { "@BROWSER@", "kitty", "org.kde.dolphin" }
+local PINNED = { "@BROWSER@", "kitty", "org.gnome.Nautilus" }
 local MAX_TILES = 6
 local MAX_FAV = 6
 local FADE_MS = 260

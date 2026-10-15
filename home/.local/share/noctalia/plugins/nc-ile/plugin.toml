@@ -20,6 +20,6 @@ entry = "pilule.luau"
 id = "centre"
 entry = "centre.luau"
 width = 470
-height = 612
+height = 640
 placement = "attached"
 position = "top_center"

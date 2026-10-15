@@ -36,7 +36,7 @@ session_position = "center"
 categories = false
 compact = false
 sort_by_usage = true
-pinned = ["@BROWSER@", "kitty", "org.kde.dolphin"]
+pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 
 # Coins de l'écran arrondis (masque noir dans les 4 coins)
 [shell.screen_corners]
@@ -89,14 +89,19 @@ custom_image_colorize = true
 color = "primary"
 
 [widget.workspaces]
-# Épuré : pas de chiffres ; bureau actif = pilule allongée aux couleurs du fond, occupés = points clairs, vides = discrets
+# Épuré : chiffres des bureaux occupés en couleur secondaire du fond, bureau actif = pilule allongée aux couleurs du fond, vides = discrets
 style = "regular"
-show_labels = false
+show_labels = true
+labels_only_when_occupied = true
 focused_color = "primary"
-occupied_color = "on_surface_variant"
+occupied_color = "secondary"
 empty_color = "outline"
 active_pill_size = 2.6
 inactive_pill_size = 0.6
+
+# Île dynamique : sa propre pilule noire, sans la pastille de la barre
+[widget."nc/ile:pilule"]
+capsule = false
 
 [widget.active_window]
 max_length = 240.0
@@ -146,7 +151,7 @@ background_opacity = 0.8
 icon_size = 44
 magnification = true
 show_dots = true
-pinned = ["@BROWSER@", "kitty", "org.kde.dolphin"]
+pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 
 # ---------------------------------------------------------------- Notifications, OSD
 [notification]

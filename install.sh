@@ -386,7 +386,7 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 }
 
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
-GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland kitty dolphin qt6ct papirus-icon-theme cava swaybg imagemagick
+GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze)
 if [ "$MODE" != files ]; then
@@ -513,6 +513,18 @@ if [ -f "$HC/hyprland.conf" ]; then
   ok "Ancienne config Hyprland (hyprland.conf) remplacée par hyprland.lua ; elle est dans la sauvegarde."
   [ -d "$HC/conf.d" ] && info "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin."
 fi
+
+# Fichiers (Nautilus, style Apple) : appli par défaut pour les dossiers ; applis GTK en sombre avec les icônes
+# Papirus ; couleurs GTK générées par Noctalia (fond d'écran) ; grandes vignettes, dossiers en premier
+if have gsettings; then
+  gsettings set org.gnome.desktop.interface color-scheme prefer-dark 2>/dev/null || true
+  gsettings set org.gnome.desktop.interface icon-theme Papirus-Dark 2>/dev/null || true
+  gsettings set org.gnome.nautilus.preferences default-folder-viewer icon-view 2>/dev/null || true
+  gsettings set org.gnome.nautilus.icon-view default-zoom-level large 2>/dev/null || true
+  gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true 2>/dev/null || true
+fi
+have xdg-mime && [ -n "$(find /usr/share/applications -name org.gnome.Nautilus.desktop -print -quit 2>/dev/null || true)" ] &&
+  xdg-mime default org.gnome.Nautilus.desktop inode/directory 2>/dev/null
 
 # Icônes sobres du terminal et des fichiers, aux couleurs du thème (remplacent le chat de kitty et le dauphin de Dolphin)
 "$HOME/.local/bin/nc-icones" >/dev/null 2>&1 || true
@@ -703,7 +715,7 @@ fi
 
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "4. Services de ta session"
-UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service)
+UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
 if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable "${UNITS[@]}" >/dev/null 2>&1 || true
@@ -714,7 +726,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
       # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
-      systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service hypridle.service 2>/dev/null || true
+      systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service hypridle.service 2>/dev/null || true
     else
       systemctl --user start noctalia.service nc-pouls.service 2>/dev/null || true   # rien n'a changé : simplement relancés
     fi

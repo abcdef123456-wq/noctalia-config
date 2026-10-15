@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# nc-ecran-externe : prévient quand un écran est branché sur une prise que la session ne peut pas utiliser.
+# PC hybride dont la session tourne sur la carte intégrée seule (voir ~/.config/uwsm/env-hyprland) : les prises
+# reliées à la carte NVIDIA (souvent le HDMI) ne marchent qu'avec une session ouverte en la comptant. Hyprland ne
+# peut pas ajouter une carte en cours de route : la notification propose de rouvrir la session, ou de toujours
+# garder la NVIDIA (mode « both », la NVIDIA reste alors éveillée).
+# Écoute les événements du noyau (udev) : rien n'est lu en boucle, la NVIDIA n'est pas réveillée pour rien.
+set -u
+case "${AQ_DRM_DEVICES:-}" in ""|*:*) exit 0 ;; esac   # session sur toutes les cartes : rien à surveiller
+utilisee="$(basename "$AQ_DRM_DEVICES")"
+dernier=0
+
+prevenir() {
+  local choix
+  choix="$(notify-send -a "Écrans" -i video-display -t 0 \
+    --action=session="Rouvrir la session" --action=toujours="Toujours garder la NVIDIA" \
+    "Écran branché sur la carte NVIDIA" \
+    "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." 2>/dev/null)"
+  case "$choix" in
+    session) uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()' ;;
+    toujours)
+      mkdir -p "$HOME/.config/uwsm" && echo both > "$HOME/.config/uwsm/gpu-mode"
+      notify-send -a "Écrans" "Carte NVIDIA toujours utilisée" "À partir de la prochaine session, les écrans se branchent à tout moment. Retour : supprimer ~/.config/uwsm/gpu-mode." ;;
+  esac
+}
+
+udevadm monitor --udev --subsystem-match=drm 2>/dev/null | while read -r _ _ action chemin _; do
+  [ "$action" = change ] || continue
+  carte="$(basename "$chemin")"
+  case "$carte" in card[0-9]*) ;; *) continue ;; esac
+  [ "$carte" = "$utilisee" ] && continue
+  branche=0
+  for s in /sys/class/drm/"$carte"-*/status; do
+    case "$s" in *eDP*) continue ;; esac
+    [ "$(cat "$s" 2>/dev/null)" = connected ] && branche=1
+  done
+  maintenant="$(date +%s)"
+  if [ "$branche" = 1 ] && [ $((maintenant - dernier)) -gt 20 ]; then
+    dernier="$maintenant"
+    prevenir &
+  fi
+done

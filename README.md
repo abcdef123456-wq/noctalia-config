@@ -12,8 +12,8 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
-- look épuré : bureaux en pilules sobres, icônes « Terminal » et « Fichiers » dessinées aux couleurs du fond,
-  explorateur de fichiers au style Breeze (moderne, aux couleurs du thème) ;
+- look épuré : île dynamique noir pur façon Apple, icônes « Terminal » et « Fichiers » dessinées aux couleurs du fond
+  (partout : barre, recherche, notifications), explorateur de fichiers Nautilus aux couleurs du fond ;
 - Neovim avec LazyVim et ses extras (C/C++, JavaScript, formatage, Git), plugins aux versions de `lazy-lock.json` ;
 - 3 profils d'énergie (Performance, Équilibré, Économie), mêmes réglages sur tous les portables ; en Économie, animations,
   flou et changement de fond coupés ; **mode jeu** (Super + Alt + G) ;
@@ -152,6 +152,8 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 - Le bureau tourne sur la carte intégrée, qui porte l'écran interne : la NVIDIA peut s'endormir (batterie, chaleur, bruit).
   Si un écran est branché sur une prise reliée à la NVIDIA à l'ouverture de session, les deux cartes sont utilisées.
+  Écran ou projecteur branché après coup sur une de ces prises (souvent le HDMI) : une notification propose de rouvrir
+  la session (Hyprland ne peut pas ajouter une carte en cours de route) ou de toujours garder la NVIDIA.
   Réglage dans `~/.config/uwsm/gpu-mode` : `auto` (défaut), `igpu`, `both` ou `off` (détails dans `~/.config/uwsm/env-hyprland`).
 - Lancer une appli sur la NVIDIA : `nvidia-run <commande>` (Steam : `nvidia-run %command%`) ; en Performance, les applis
   lancées depuis la barre y vont d'elles-mêmes.

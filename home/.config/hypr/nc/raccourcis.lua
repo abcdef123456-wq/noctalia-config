@@ -5,7 +5,7 @@
 
 local SUPER    = "SUPER"
 local terminal = "kitty"
-local fichiers = "dolphin"
+local fichiers = "nautilus --new-window"
 local barre    = "~/.local/bin/nc-shell-msg "   -- actions envoyées à Noctalia v5
 
 local function touche(touches, action, description, options)
