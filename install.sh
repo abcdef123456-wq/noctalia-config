@@ -486,7 +486,7 @@ ILE=noctalia
 # seulement les modules utiles à l'île, installé dans /usr/local. Testé sur Debian 13 (protocoles Wayland des backports).
 compiler_quickshell() {
   local wd prefixe="/usr/local"
-  info "Quickshell (l'île dynamique au plus près de l'iPhone) n'est pas dans les dépôts de ta distribution."
+  info "Quickshell (l'île dynamique : centre de contrôle, notifications, Spotlight) n'est pas dans les dépôts de ta distribution."
   info "Il peut être compilé depuis ses sources officielles (https://quickshell.org) : environ 5 minutes, ~400 Mo d'outils."
   ask "Le compiler et l'installer (dans $prefixe) ?" o || return 1
   pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
@@ -500,7 +500,7 @@ compiler_quickshell() {
        git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
      cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
        -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF -DSCREENCOPY=OFF \
-       -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF -DSERVICE_NOTIFICATIONS=OFF \
+       -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF \
        -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
        -DHYPRLAND_SURFACE_EXTENSIONS=OFF >"$wd/cmake.log" 2>&1 &&
      cmake --build "$wd/build" >"$wd/build.log" 2>&1 &&
@@ -512,7 +512,8 @@ compiler_quickshell() {
   warn "Compilation de Quickshell impossible (journal : $wd) : l'île du plugin Noctalia est utilisée."
   return 1
 }
-if ! have qs && [ "$FAMILY" = debian ] && [ "$MODE" = full ]; then compiler_quickshell || true; hash -r; fi
+# L'île Quickshell pour tout le monde : paquet sur Arch et Fedora, compilée sur Debian / Ubuntu
+if ! have qs && [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then compiler_quickshell || true; hash -r; fi
 if have qs; then
   ILE=quickshell
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"

@@ -227,11 +227,11 @@ order = "random"
 [lockscreen]
 transition = ["disc"]
 
-# Écran de verrouillage épuré : heure, date, mot de passe. Pas de lecteur de musique : celui de Noctalia affiche
-# des titres d'onglet bruts et ses boutons ne répondent pas ; les touches de musique du clavier marchent verrouillé.
+# Écran de verrouillage épuré : heure, date, mot de passe, et la musique en longue capsule façon île (plugin nc/verrou,
+# à la place du lecteur de Noctalia : titres d'onglet bruts, boutons qui ne répondaient pas)
 [lockscreen_widgets]
 enabled = true
-widget_order = ["nc-time", "nc-date"]
+widget_order = ["nc-time", "nc-date", "nc-musique"]
 
 [lockscreen_widgets.widget.nc-time]
 type = "clock"
@@ -263,6 +263,12 @@ color = "on_surface_variant"
 background = false
 shadow = true
 
+[lockscreen_widgets.widget.nc-musique]
+type = "nc/verrou:musique"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY4@
+
 [lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@"]
 type = "login_box"
 output = "@MONITOR@"
@@ -281,5 +287,5 @@ show_keyboard_layout = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/keys"@PLUGIN_ILE@]
+enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/verrou"@PLUGIN_ILE@]
 auto_update = "none"
