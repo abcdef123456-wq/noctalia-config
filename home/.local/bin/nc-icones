@@ -7,6 +7,8 @@ Remplace le chat de kitty et le dauphin de Dolphin partout (recherche, barre, s�
   - raccourcis d'applis copiés dans ~/.local/share/applications avec la nouvelle icône (marqués X-NC-Icone) ;
   - mêmes icônes sous les noms d'origine (kitty, org.kde.dolphin…) dans ~/.local/share/icons/<thème actif>, pour les
     notifications et tout ce qui demande l'icône par son nom (aucun fichier du système n'est touché).
+Avec un thème d'icônes façon macOS (WhiteSur) : icône Terminal de macOS et Finder à la place des dessins.
+Les fichiers d'un thème remplacés sont gardés (.nc-orig) et remis par « nc-icones retirer ».
 Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icônes d'origine : nc-icones retirer
 """
 import json
@@ -62,6 +64,23 @@ def ecrire(chemin, texte):
     os.replace(tmp, chemin)
 
 
+def icone_du_theme(theme, nom):
+    """Chemin réel d'une icône d'appli fournie par un thème (dossier perso ou système), sinon None."""
+    # La grande version (scalable) d'abord : les petites tailles sont parfois un dessin simplifié
+    dossiers = sorted(dossiers_apps(theme), key=lambda d: 0 if "scalable" in d else 1)
+    for base in [BASE_ICONES, Path("/usr/share/icons"), Path("/usr/local/share/icons")]:
+        for dossier in dossiers:
+            p = base / theme / dossier / f"{nom}.svg"
+            if p.exists():
+                return p.resolve()
+    return None
+
+
+def theme_macos():
+    """Thème d'icônes façon macOS actif (WhiteSur) : ses propres icônes Terminal et Finder sont gardées."""
+    return next((t for t in themes_actifs() if t.lower().startswith("whitesur")), None)
+
+
 def raccourci(nom, icone):
     """Copie le raccourci système de l'appli avec l'icône remplacée (sauf si tu as déjà le tien)."""
     perso = APPLIS / nom
@@ -83,6 +102,8 @@ def raccourci(nom, icone):
         lignes.append(ligne)
         if ligne.strip() == "[Desktop Entry]":
             lignes.append(MARQUE)
+    if nom == "org.kde.dolphin.desktop" and any((d / "org.gnome.Nautilus.desktop").exists() for d in SYSTEME):
+        lignes.insert(lignes.index(MARQUE) + 1, "NoDisplay=true")   # Nautilus sert de « Fichiers » : pas de doublon
     ecrire(perso, "\n".join(lignes) + "\n")
 
 
@@ -118,15 +139,24 @@ def dossiers_apps(theme):
     return ["scalable/apps"] if theme == "hicolor" else []
 
 
-def surcharger(svgs):
+def surcharger(svgs, surcharges):
+    anciens = set(INVENTAIRE.read_text().split()) if INVENTAIRE.exists() else set()
     ecrits = []
     for theme in themes_actifs():
         for dossier in dossiers_apps(theme):
-            for icone, noms in SURCHARGES.items():
+            for icone, noms in surcharges.items():
                 for nom in noms:
-                    chemin = BASE_ICONES / theme / dossier / f"{nom}.svg"
-                    if chemin.is_symlink():
-                        chemin.unlink()                 # lien du thème (WhiteSur…) : remplacé par notre fichier
+                    lien = BASE_ICONES / theme / dossier / f"{nom}.svg"
+                    lien.parent.mkdir(parents=True, exist_ok=True)
+                    chemin = lien.parent.resolve() / lien.name      # dossier lié (WhiteSur-dark -> WhiteSur) : vrai chemin
+                    if str(chemin) in ecrits:
+                        continue
+                    # Fichier du thème : gardé de côté une fois (remis par « nc-icones retirer »), jamais détruit
+                    orig = chemin.with_name(chemin.name + ".nc-orig")
+                    if (chemin.exists() or chemin.is_symlink()) and str(chemin) not in anciens and not orig.exists():
+                        os.replace(chemin, orig)
+                    elif chemin.is_symlink():
+                        chemin.unlink()
                     ecrire(chemin, svgs[icone])
                     ecrits.append(str(chemin))
         # Thème avec index (icon-theme.cache) : à régénérer, sinon GTK ne voit pas les nouvelles icônes
@@ -143,7 +173,11 @@ def retirer():
         (ICONES / f"{icone}.svg").unlink(missing_ok=True)
     if INVENTAIRE.exists():
         for chemin in INVENTAIRE.read_text().split():
-            Path(chemin).unlink(missing_ok=True)
+            p = Path(chemin)
+            p.unlink(missing_ok=True)
+            orig = p.with_name(p.name + ".nc-orig")
+            if orig.exists() or orig.is_symlink():
+                os.replace(orig, p)
         INVENTAIRE.unlink()
     print("Icônes d'origine rétablies.")
 
@@ -156,8 +190,20 @@ def main():
     for icone, dessin in DESSINS.items():
         svgs[icone] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  '
                        + CADRE.format(**c) + "\n  " + dessin.format(**c) + "\n</svg>\n")
+    surcharges = SURCHARGES
+    macos = theme_macos()
+    if macos:
+        # Thème façon macOS : icône Terminal de macOS pour kitty (au lieu du chat), Finder déjà fourni pour les fichiers
+        terminal = icone_du_theme(macos, "utilities-terminal")
+        finder = icone_du_theme(macos, "system-file-manager")
+        if terminal:
+            svgs["nc-terminal"] = terminal.read_text()
+        if finder:
+            svgs["nc-fichiers"] = finder.read_text()
+        surcharges = {"nc-terminal": ["kitty"]}
+    for icone in svgs:
         ecrire(ICONES / f"{icone}.svg", svgs[icone])
-    surcharger(svgs)
+    surcharger(svgs, surcharges)
     for nom, icone in APPS.items():
         raccourci(nom, icone)
 
