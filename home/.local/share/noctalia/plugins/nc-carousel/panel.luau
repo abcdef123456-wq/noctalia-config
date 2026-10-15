@@ -4,8 +4,8 @@
 -- Les tranches sont des images déjà découpées en parallélogramme (l'image n'est pas déformée) par
 -- ~/.local/bin/nc-carousel-thumbs : <fond>.W.webp (grande, au milieu) et <fond>.N.webp (étroite, voisines),
 -- à la taille exacte d'affichage. Les tailles ci-dessous (et le calcul de Z) doivent rester celles du script.
--- Taille : dessinée pour un écran de 1600 x 1000 points, réduite sur un écran plus petit (jamais agrandie) ;
--- le nombre de tranches visibles est réduit si la bande ne tient pas dans la largeur de l'écran.
+-- Taille : dessinée pour un écran de 1600 x 1000 points, réduite sur un écran plus petit, agrandie sur un plus grand ;
+-- fond calé sur le cadre du panneau.
 -- Défilement animé : la position suit la cible avec un amorti exponentiel (onFrameTick).
 -- Ouverture : noctalia msg panel-toggle nc/carousel:main
 
@@ -162,50 +162,30 @@ local function dims(delta)
   return lerp(CW, NW * sc, t), lerp(CH, NH * sc, t)
 end
 
--- Bande de tranches, de largeur fixe (celle du fond flouté, sans dépasser l'écran) et centrée sur « pos ».
--- Deux contraintes de Noctalia : un contenu plus large que son parent n'est pas centré, et une image plus large que
--- sa case déborde à droite (elle commence au bord gauche de la case). Chaque case commence donc exactement là où
--- son image (parallélogramme + débord) doit commencer ; les tranches qui ne tiennent pas sont omises, celles proches
--- des bords s'estompent.
+-- Bande de tranches comme avant (version du 12/10) : toutes les tranches voisines sont dessinées et filent jusqu'aux
+-- bords de l'écran ; les plus éloignées à moitié transparentes.
 local function strip()
   local n = #shown
-  local reach = math.min(REACH + 1, math.max(1, math.floor(n / 2) + 1))
-  local half = (math.min(BGW, SCREEN_W) - 24) / 2
+  local reach = math.min(REACH, math.max(1, math.floor(n / 2)))
   local c = math.floor(pos + 0.5)
   local fl = math.floor(pos)
-  -- Centre voulu de chaque tranche le long de la bande, puis centre de la bande interpolé entre deux tranches
-  local items, x = {}, 0
+  local cards, centers, x = {}, {}, 0
   for idx = c - reach, c + reach + 1 do
+    local delta = math.abs(idx - pos)
     local d = math.abs(idx - c)
     local w, h = dims(d)
-    local bw = w + SK * h                                  -- image découpée : parallélogramme + débord
-    table.insert(items, { idx = idx, d = d, w = w, h = h, bw = bw, cx = x + w / 2 })
-    x = x + w + SPACE
-  end
-  local centers = {}
-  for _, it in ipairs(items) do centers[it.idx] = it.cx end
-  local p = lerp(centers[fl] or x / 2, centers[fl + 1] or x / 2, pos - fl)
-  -- Tranches dont l'image tient entièrement dans [-half, half] autour du centre
-  local kept = {}
-  for _, it in ipairs(items) do
-    it.l = it.cx - it.bw / 2 - p
-    it.r = it.l + it.bw
-    if it.l >= -half and it.r <= half then table.insert(kept, it) end
-  end
-  if #kept == 0 then return ui.box({ width = 1, height = ROW_H, opacity = 0 }) end
-  local cards = { ui.box({ width = math.max(0, kept[1].l + half), height = 1, opacity = 0 }) }
-  for i, it in ipairs(kept) do
-    local nxt = kept[i + 1]
-    local edge = half - math.max(math.abs(it.l), math.abs(it.r))
-    local a = (1 - 0.3 * math.min(it.d, 1)) * math.max(0.35, math.min(1, edge / NW + 0.35))
-    local wp = shown[wrap(it.idx)]
-    local idx = it.idx
-    table.insert(cards, ui.row({ key = "c" .. idx, width = nxt and (nxt.l - it.l) or it.bw, height = ROW_H, align = "center", justify = "start" }, {
+    local a = 1 - 0.3 * math.min(d, 1)
+    if d >= REACH then a = a * 0.5 end
+    local wp = shown[wrap(idx)]
+    local bw = w + SK * h                                  -- largeur de l'image découpée (parallélogramme + débord)
+    local kindW = d == 0
+    centers[idx] = x + w / 2
+    table.insert(cards, ui.row({ key = "c" .. idx, width = w, height = ROW_H, align = "center", justify = "center" }, {
       ui.image({
         key = "i" .. idx,
-        path = it.d == 0 and wp.thumbW or wp.thumbN,
-        width = it.bw,
-        height = it.h,
+        path = kindW and wp.thumbW or wp.thumbN,
+        width = bw,
+        height = h,
         fit = "cover",
         opacity = a,
         onClick = function()
@@ -213,9 +193,19 @@ local function strip()
         end,
       }),
     }))
+    x = x + w + SPACE
   end
-  table.insert(cards, ui.box({ width = math.max(0, half - kept[#kept].r), height = 1, opacity = 0 }))
-  return ui.row({ height = ROW_H, width = 2 * half, align = "center", justify = "start", gap = 0 }, cards)
+  -- Amène le point « pos » au centre de l'écran (la bande est centrée : on la décale avec une boîte vide d'un côté)
+  local contentW = x - SPACE
+  local p = lerp(centers[fl] or contentW / 2, centers[fl + 1] or contentW / 2, pos - fl)
+  local e = 1 - (1 - appear) ^ 3
+  local s = contentW / 2 - p
+  if s > 0 then
+    table.insert(cards, 1, ui.box({ width = math.max(1, 2 * s - SPACE), height = 1, opacity = 0 }))
+  elseif s < 0 then
+    table.insert(cards, ui.box({ width = math.max(1, -2 * s - SPACE), height = 1, opacity = 0 }))
+  end
+  return ui.row({ height = ROW_H, width = contentW + 2 * math.abs(s) + 60, align = "center", justify = "center", gap = SPACE }, cards)
 end
 
 function render()
