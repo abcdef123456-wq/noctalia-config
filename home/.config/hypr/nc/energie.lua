@@ -24,7 +24,7 @@ else
 end
 
 -- Mode jeu (Super + Alt + G) : effets coupés et image envoyée sans attendre l'écran (jeux marqués dans nc/regles.lua),
--- notifications en pause. L'état tient dans un fichier de la session : il survit aux rechargements, pas à la déconnexion.
+-- notifications en pause (Concentration de l'île, sinon « ne pas déranger » de Noctalia). L'état tient dans un fichier de la session : il survit aux rechargements, pas à la déconnexion.
 local fichier_jeu = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
 local f = io.open(fichier_jeu)
 nc.jeu = f ~= nil
@@ -51,9 +51,9 @@ function nc.mode_jeu()
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
     if actif then
         hl.exec_cmd("hyprctl reload; notify-send -a 'Mode jeu' -t 2500 'Mode jeu activé' 'Effets coupés, notifications en pause.';"
-            .. " sleep 2.6; noctalia msg notification-dnd-set on")
+            .. " sleep 2.6; qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
     else
-        hl.exec_cmd("noctalia msg notification-dnd-set off; hyprctl reload;"
+        hl.exec_cmd("{ qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; }; hyprctl reload;"
             .. " notify-send -a 'Mode jeu' -t 2500 'Mode jeu désactivé' 'Effets et notifications rétablis.'")
     end
 end
