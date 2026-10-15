@@ -19,7 +19,7 @@ BACKLIGHT=$(for d in /sys/class/backlight/*; do n=${d##*/}; case $n in nvidia*|\
 
 HZ_PERFORMANCE=max
 HZ_BALANCED_AC=max
-HZ_BALANCED_BAT=max
+HZ_BALANCED_BAT=low      # sur batterie en Équilibré : 60 Hz (1 à 2 W de moins), 165 Hz dès qu'on branche
 HZ_ECO=low
 ECO_BRIGHTNESS_MAX=40
 
