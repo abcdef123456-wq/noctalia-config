@@ -1,6 +1,7 @@
 // Page « Système et batterie » : processeur, mémoire, température, disque ; batterie (autonomie, santé) ;
 // modes d'énergie ; écrans. Mesures lues par nc-ile-etat systeme toutes les 2 s tant que la page est affichée.
 import QtQuick
+import Quickshell
 import Quickshell.Services.UPower
 
 Item {
@@ -115,6 +116,49 @@ Item {
                         }
                     }
                     Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: Etat.profil === modelData.p }
+                }
+            }
+            // Outils (anciens raccourcis du centre de contrôle)
+            Texte { text: "Outils"; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+            Ligne {
+                width: sy.width; icone: "coffee"; titre: "Rester éveillé"; actif: Etat.cafe
+                sous: Etat.cafe ? "L'écran ne se met pas en veille" : "Désactivé"
+                onClic: Etat.basculerCafe()
+            }
+            Ligne {
+                width: sy.width; icone: "graphic_eq"; titre: "Halo sonore"; actif: Etat.sys.halo === "1"
+                sous: Etat.sys.halo === "1" ? "Le bord de l'écran suit la musique" : "Désactivé"
+                onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
+            }
+            Repeater {
+                model: [
+                    { icone: "contrast", titre: "Thème clair ou sombre", cmd: ["noctalia", "msg", "theme-mode-toggle"], ferme: false },
+                    { icone: "screenshot_region", titre: "Capture d'une zone", cmd: ["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"], ferme: true },
+                    { icone: "content_paste", titre: "Presse-papiers", cmd: ["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"], ferme: true },
+                    { icone: "wallpaper", titre: "Fonds d'écran", cmd: [Etat.bin + "nc-shell-msg", "wallpapers"], ferme: true }
+                ]
+                Ligne {
+                    required property var modelData
+                    width: sy.width; icone: modelData.icone; titre: modelData.titre
+                    droite: modelData.ferme ? "chevron_right" : ""
+                    onClic: { if (modelData.ferme) { Etat.fermer(); Quickshell.execDetached(modelData.cmd) } else Etat.faire(modelData.cmd) }
+                }
+            }
+            // Session (anciens boutons du bas du centre de contrôle)
+            Texte { text: "Session"; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+            Repeater {
+                model: [
+                    { icone: "notifications", titre: "Notifications", cmd: ["noctalia", "msg", "panel-toggle", "control-center"], ferme: true },
+                    { icone: "keyboard", titre: "Changer la disposition du clavier", cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
+                    { icone: "settings", titre: "Réglages de la barre", cmd: ["noctalia", "msg", "settings-open"], ferme: true },
+                    { icone: "lock", titre: "Verrouiller", cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
+                    { icone: "power_settings_new", titre: "Éteindre, redémarrer…", cmd: ["noctalia", "msg", "panel-toggle", "session-panel"], ferme: true }
+                ]
+                Ligne {
+                    required property var modelData
+                    width: sy.width; icone: modelData.icone; titre: modelData.titre
+                    droite: modelData.ferme ? "chevron_right" : ""
+                    onClic: { if (modelData.ferme) Etat.fermer(); Etat.faire(modelData.cmd) }
                 }
             }
             // Écrans et allumage

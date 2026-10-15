@@ -40,25 +40,49 @@ Item {
         // Connexions | Musique
         Row {
             width: parent.width; height: 168; spacing: 12
+            // Connexions façon macOS : rond (activer / couper) + nom et état (clic : liste des réseaux / appareils)
             Module {
                 width: 168; height: 168
-                Grid {
-                    anchors.centerIn: parent; columns: 2; spacing: 14
-                    Rond {
-                        icone: centre.s.wifi === "on" ? "wifi" : "wifi_off"; actif: centre.s.wifi === "on"; couleur: centre.bleu
-                        onClic: Etat.faire(["noctalia", "msg", "wifi-toggle"]); onAppuiLong: Etat.aller("reseau")
-                    }
-                    Rond {
-                        icone: "bluetooth"; actif: centre.s.bluetooth === "on"; couleur: centre.bleu
-                        onClic: Etat.faire(["noctalia", "msg", "bluetooth-toggle"]); onAppuiLong: Etat.aller("bluetooth")
-                    }
-                    Rond {
-                        icone: "dark_mode"; actif: centre.s.dnd === "on"; couleur: centre.indigo
-                        onClic: Etat.faire(["noctalia", "msg", "notification-dnd-toggle"])
-                    }
-                    Rond {
-                        icone: "sports_esports"; actif: Etat.jeu; couleur: centre.orange
-                        onClic: Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"])
+                Column {
+                    anchors.fill: parent; anchors.margins: 12; spacing: 8
+                    Repeater {
+                        model: [
+                            { cle: "wifi", icone: "wifi", nom: "Wi-Fi", page: "reseau" },
+                            { cle: "bluetooth", icone: "bluetooth", nom: "Bluetooth", page: "bluetooth" },
+                            { cle: "dnd", icone: "dark_mode", nom: "Concentration", page: "" }
+                        ]
+                        Item {
+                            id: lc
+                            required property var modelData
+                            readonly property bool actif: centre.s[modelData.cle] === "on"
+                            readonly property string etat: modelData.cle === "wifi" ? (actif ? (centre.s.reseau || "Activé") : "Désactivé")
+                                                        : modelData.cle === "dnd" ? (actif ? "Ne pas déranger" : "Désactivée")
+                                                        : (actif ? "Activé" : "Désactivé")
+                            width: parent.width; height: 41
+                            Rectangle {
+                                anchors.fill: parent; anchors.leftMargin: -6; anchors.rightMargin: -6; radius: 12
+                                color: zl.containsMouse && lc.modelData.page !== "" ? "#2c2c2e" : "transparent"
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                            }
+                            Rond {
+                                id: rl
+                                anchors.verticalCenter: parent.verticalCenter
+                                taille: 36; icone: lc.modelData.icone; actif: lc.actif
+                                couleur: lc.modelData.cle === "dnd" ? centre.indigo : centre.bleu
+                                onClic: Etat.faire(["noctalia", "msg", lc.modelData.cle === "dnd" ? "notification-dnd-toggle" : lc.modelData.cle + "-toggle"])
+                            }
+                            Column {
+                                anchors.left: rl.right; anchors.leftMargin: 9; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                Texte { text: lc.modelData.nom; font.weight: Font.DemiBold; font.pixelSize: 13; width: parent.width }
+                                Texte { text: lc.etat; secondaire: true; font.pixelSize: 11; width: parent.width }
+                            }
+                            MouseArea {
+                                id: zl
+                                anchors.fill: parent; anchors.leftMargin: 40
+                                hoverEnabled: true
+                                onClicked: lc.modelData.page !== "" ? Etat.aller(lc.modelData.page) : rl.clic()
+                            }
+                        }
                     }
                 }
             }
@@ -107,7 +131,7 @@ Item {
             }
         }
 
-        // Nuit, Halo | Luminosité | Volume
+        // Nuit, Mode jeu | Luminosité | Volume
         Row {
             width: parent.width; height: 168; spacing: 12
             Column {
@@ -139,8 +163,8 @@ Item {
                     onClic: { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) }
                 }
                 Pastille {
-                    icone: "graphic_eq"; titre: "Halo"; sous: centre.s.halo === "1" ? "Musique" : "Coupé"; actif: centre.s.halo === "1"; couleur: centre.rose
-                    onClic: Etat.faire(["systemctl", "--user", centre.s.halo === "1" ? "stop" : "start", "nc-pouls"])
+                    icone: "sports_esports"; titre: "Mode jeu"; sous: Etat.jeu ? "Effets coupés" : "Désactivé"; actif: Etat.jeu; couleur: centre.orange
+                    onClic: Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"])
                 }
             }
             Glissiere {
@@ -189,47 +213,5 @@ Item {
                 MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: Etat.aller("systeme") }
             }
         }
-
-        // Raccourcis (ceux de l'ancien centre de contrôle) : café anti-veille, thème, clavier, presse-papiers, fond, minuteur
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: (parent.width - 6 * 48) / 5
-            Rond { taille: 48; icone: "coffee"; actif: Etat.cafe; couleur: "#ac8e68"; onClic: Etat.basculerCafe() }
-            Rond { taille: 48; icone: "contrast"; onClic: Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) }
-            Rond { taille: 48; icone: "keyboard"; onClic: Etat.faire(["noctalia", "msg", "keyboard-layout-cycle"]) }
-            Rond { taille: 48; icone: "content_paste"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) } }
-            Rond { taille: 48; icone: "wallpaper"; onClic: { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-shell-msg", "wallpapers"]) } }
-            Rond { taille: 48; icone: "timer"; actif: Etat.minuteurFin > 0; couleur: "#ff9f0a"; onClic: Etat.aller("minuteur") }
-        }
-
-        // Ligne discrète d'actions (façon macOS) : les icônes ne s'éclairent qu'au survol
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            height: 40; spacing: 30
-            Repeater {
-                model: [
-                    { icone: "photo_camera", cmd: ["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"] },
-                    { icone: "notifications", cmd: ["noctalia", "msg", "panel-toggle", "control-center"] },
-                    { icone: "settings", cmd: ["noctalia", "msg", "settings-open"] },
-                    { icone: "lock", cmd: ["noctalia", "msg", "session", "lock"] },
-                    { icone: "power_settings_new", cmd: ["noctalia", "msg", "panel-toggle", "session-panel"] }
-                ]
-                Rectangle {
-                    required property var modelData
-                    width: 40; height: 40; radius: 20
-                    color: zone.containsMouse ? "#2c2c2e" : "transparent"
-                    Behavior on color { ColorAnimation { duration: 140 } }
-                    scale: zone.pressed ? 0.88 : 1
-                    Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
-                    Ico { anchors.centerIn: parent; nom: modelData.icone; taille: 22; color: zone.containsMouse ? "white" : "#c7c7cc" }
-                    MouseArea {
-                        id: zone
-                        anchors.fill: parent; hoverEnabled: true
-                        onClicked: { Etat.fermer(); Quickshell.execDetached(modelData.cmd) }
-                    }
-                }
-            }
-        }
     }
-
 }
