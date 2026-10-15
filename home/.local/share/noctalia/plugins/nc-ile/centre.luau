@@ -97,7 +97,7 @@ local SYMBOLES = { wifi = "wifi", ["wifi-off"] = "wifi-off", bluetooth = "blueto
   ["player-skip-forward-filled"] = "suivant", lock = "cadenas", power = "marche", settings = "reglages",
   screenshot = "capture", bolt = "eclair", leaf = "feuille", scale = "equilibre", microphone = "micro",
   ["microphone-off"] = "micro-coupe", ["chevron-left"] = "chevron-gauche", ["chevron-right"] = "chevron-droite",
-  check = "coche", headphones = "casque", ["device-speaker"] = "enceinte" }
+  check = "coche", headphones = "casque", ["device-speaker"] = "enceinte", ["bell-ringing"] = "cloche" }
 
 local function ico(nom, couleur, taille)
   local s = SYMBOLES[nom]
@@ -120,7 +120,7 @@ local function ligne(icone, nom, sous, actif, action, droite)
   return ui.row({ height = 56, flexGrow = 1, gap = 12, paddingH = 14, align = "center", radius = 16,
     fill = MODULE, onClick = action }, {
     ui.column({ width = 32, height = 32, radius = 16, fill = actif and BLEU or ETEINT, align = "center", justify = "center" }, {
-      ico(icone, BLANC, 16),
+      ico(icone, BLANC, 19),
     }),
     ui.column({ flexGrow = 1, gap = 1 }, {
       ui.label({ text = nom, fontSize = 14, fontWeight = "semibold", color = BLANC, maxLines = 1, maxWidth = 280 }),
@@ -131,11 +131,11 @@ local function ligne(icone, nom, sous, actif, action, droite)
 end
 
 -- Bouton rond façon Centre de contrôle iOS : gris éteint, couleur de la fonction quand il est actif
-local function rond(icone, actif, couleur, info, action, taille)
+local function rond(icone, actif, couleur, info, action, taille)   -- info : description (non affichée)
   taille = taille or 54
   return ui.column({ width = taille, height = taille, radius = taille / 2, fill = actif and couleur or ETEINT,
-    align = "center", justify = "center", tooltip = info, onClick = action }, {
-    ico(icone, BLANC, math.floor(taille * 0.4)),
+    align = "center", justify = "center", onClick = action }, {
+    ico(icone, BLANC, math.floor(taille * 0.5)),
   })
 end
 
@@ -143,7 +143,7 @@ end
 local function pastille(icone, titre, sous, actif, couleur, action)
   return ui.row({ flexGrow = 1, height = 71, gap = 10, paddingH = 12, align = "center", radius = 22, fill = MODULE, onClick = action }, {
     ui.column({ width = 38, height = 38, radius = 19, fill = actif and couleur or ETEINT, align = "center", justify = "center" }, {
-      ico(icone, BLANC, 17),
+      ico(icone, BLANC, 21),
     }),
     ui.column({ flexGrow = 1, gap = 1 }, {
       ui.label({ text = titre, fontSize = 13, fontWeight = "semibold", color = BLANC, maxLines = 1 }),
@@ -156,7 +156,7 @@ local function curseur(icone, valeur, bouton, change, fin, detail)
   valeur = math.floor((valeur or 0) + 0.5)
   local enfants = {
     ui.column({ width = 36, height = 36, radius = 18, align = "center", justify = "center", onClick = bouton }, {
-      ico(icone, BLANC, 19),
+      ico(icone, BLANC, 22),
     }),
     ui.slider({ flexGrow = 1, min = 0, max = 100, step = 1, value = valeur, onChange = change, onDragEnd = fin }),
     ui.label({ text = valeur .. " %", width = 44, fontSize = 13, fontWeight = "semibold", color = GRIS, textAlign = "end" }),
@@ -229,9 +229,9 @@ local function carteMedia()
         ui.label({ text = rien and "Lance une musique" or (e.media_artiste or ""), fontSize = 13, color = GRIS, maxLines = 1, maxWidth = 230 }),
       }),
       ui.row({ gap = 0, align = "center" }, {
-        commande("player-skip-back-filled", 18, function() faire({ "playerctl", "previous" }) end),
-        commande(joue and "player-pause-filled" or "player-play-filled", 26, function() faire({ "playerctl", "play-pause" }) end),
-        commande("player-skip-forward-filled", 18, function() faire({ "playerctl", "next" }) end),
+        commande("player-skip-back-filled", 22, function() faire({ "playerctl", "previous" }) end),
+        commande(joue and "player-pause-filled" or "player-play-filled", 30, function() faire({ "playerctl", "play-pause" }) end),
+        commande("player-skip-forward-filled", 22, function() faire({ "playerctl", "next" }) end),
       }),
     }),
     ui.row({ gap = 8, align = "center", height = 16 }, {
@@ -295,7 +295,7 @@ local function profils()
     local actif = actuel == id
     return ui.row({ flexGrow = 1, height = 34, radius = 12, gap = 6, align = "center", justify = "center",
       fill = actif and "#636366" or NOIR .. "00", onClick = function() msg("power-set", id) end }, {
-      ico(icone, actif and couleur or GRIS, 14),
+      ico(icone, actif and couleur or GRIS, 16),
       ui.label({ text = nom, fontSize = 13, fontWeight = "semibold", color = actif and BLANC or GRIS }),
     })
   end
