@@ -27,6 +27,7 @@ Item {
     }
 
     Column {
+        z: 2      // au-dessus de la zone de clic de la bannière (les textes laissent passer le clic, pas les boutons)
         anchors.left: image.right; anchors.leftMargin: 12
         anchors.right: parent.right; anchors.rightMargin: 18
         anchors.verticalCenter: parent.verticalCenter
@@ -47,6 +48,21 @@ Item {
             visible: text !== ""
             font.pixelSize: 13; color: "#d1d1d6"
             wrapMode: Text.Wrap; maximumLineCount: 2
+        }
+        // Boutons d'action (Supprimer, Ouvrir le dossier…)
+        Row {
+            visible: Notifs.boutons(b.vue).length > 0
+            topPadding: 8; spacing: 8
+            Repeater {
+                model: Notifs.boutons(b.vue)
+                Rectangle {
+                    required property var modelData
+                    width: lb.implicitWidth + 24; height: 28; radius: 14
+                    color: zb.pressed ? "#48484a" : "#2c2c2e"
+                    Texte { id: lb; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+                    MouseArea { id: zb; anchors.fill: parent; onClicked: Notifs.agir(b.vue, parent.modelData) }
+                }
+            }
         }
     }
 
