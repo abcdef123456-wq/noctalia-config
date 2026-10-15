@@ -15,7 +15,7 @@ Item {
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
-                                      minuteur: minuteur, "minuteur-fini": fini, micro: micro })[mode] || repos
+                                      minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -158,6 +158,23 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: Etat.cameraActive ? Etat.nomJoli(Etat.appliCamera) + " utilise la caméra" : Etat.nomJoli(Etat.appliMicro) + " utilise le micro"
             font.weight: Font.DemiBold
+        }
+    }
+
+    // ── Casque Bluetooth connecté : nom et batterie ──
+    Fondu {
+        id: casque
+        montre: c.mode === "casque"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "headphones"; taille: 18; color: "#0a84ff" }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueNom; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 220) }
+        Row {
+            anchors.verticalCenter: parent.verticalCenter; spacing: 3
+            visible: Etat.casqueBatterie !== ""
+            Ico {
+                anchors.verticalCenter: parent.verticalCenter; taille: 16; color: "#30d158"
+                nom: parseInt(Etat.casqueBatterie) > 60 ? "battery_full" : (parseInt(Etat.casqueBatterie) > 25 ? "battery_4_bar" : "battery_1_bar")
+            }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueBatterie + " %"; secondaire: true }
         }
     }
 
