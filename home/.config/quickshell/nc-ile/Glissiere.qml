@@ -39,6 +39,10 @@ ClippingRectangle {
         onPositionChanged: e => { if (pressed && (e.buttons & Qt.LeftButton)) regler(e.y) }
         onClicked: e => { if (e.button === Qt.RightButton) g.appuiLong() }
         onPressAndHold: g.appuiLong()
-        onWheel: w => g.change(Math.max(0, Math.min(1, g.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
+        // Deux doigts sur le pavé tactile : laissés à l'île (changer de page) ; molette de souris : réglage
+        onWheel: w => {
+            if (w.pixelDelta.x !== 0 || w.pixelDelta.y !== 0) { w.accepted = false; return }
+            g.change(Math.max(0, Math.min(1, g.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
+        }
     }
 }

@@ -4,7 +4,8 @@
 Dessine dans ~/.local/share/icons/NC :
   - les dossiers (dossier simple et dossiers personnels : Documents, Téléchargements, Musique, Images, Vidéos,
     Bureau, Modèles, Public, dossier personnel, réseau) et la corbeille ;
-  - le Terminal (à la place du chat de kitty) et les Fichiers (à la place du dauphin de Dolphin et de Nautilus).
+  - le Terminal (à la place du chat de kitty) et les Fichiers (à la place du dauphin de Dolphin et de Nautilus) ;
+    XTerm et UXTerm (vieille icône de X11) sont cachés du lanceur quand kitty est installé.
 Tout le reste vient de Papirus (thème parent). Les raccourcis d'applis sont copiés dans ~/.local/share/applications
 avec la nouvelle icône et un nom simple (« Terminal », « Fichiers »), marqués X-NC-Icone ; aucun fichier du système
 ni d'un autre thème n'est touché.
@@ -31,6 +32,8 @@ INVENTAIRE = BASE_ICONES / ".nc-icones"                   # anciennes versions :
 # Raccourci d'appli -> icône, et nom affiché (simple, comme sur un téléphone)
 APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers", "org.gnome.Nautilus.desktop": "nc-fichiers"}
 NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers", "org.gnome.Nautilus.desktop": "Fichiers"}
+# Vieux terminaux installés avec le système (icône de X11) : cachés du lanceur quand kitty est là, pas désinstallés
+CACHES = ["xterm.desktop", "uxterm.desktop", "debian-xterm.desktop", "debian-uxterm.desktop"]
 # Noms d'icônes demandés directement (notifications, sélecteur de fenêtres…) : servis par le thème NC
 ALIAS = {"nc-terminal": ["kitty", "utilities-terminal", "terminal", "org.gnome.Terminal", "org.gnome.Console"],
          "nc-fichiers": ["org.kde.dolphin", "org.gnome.Nautilus", "system-file-manager", "file-manager"]}
@@ -301,6 +304,24 @@ def raccourci(nom, icone):
     ecrire(perso, "\n".join(lignes) + "\n")
 
 
+def cacher(nom):
+    """Copie le raccourci système avec NoDisplay=true (sauf si tu as déjà le tien)."""
+    perso = APPLIS / nom
+    if perso.exists() and MARQUE not in perso.read_text():
+        return
+    source = next((d / nom for d in SYSTEME if (d / nom).exists()), None)
+    if not source:
+        return
+    lignes = []
+    for ligne in source.read_text().splitlines():
+        if ligne.startswith("NoDisplay="):
+            continue
+        lignes.append(ligne)
+        if ligne.strip() == "[Desktop Entry]":
+            lignes += [MARQUE, "NoDisplay=true"]
+    ecrire(perso, "\n".join(lignes) + "\n")
+
+
 def remettre_autres_themes():
     """Anciennes versions : icônes posées dans d'autres thèmes (WhiteSur, Papirus…) ; leurs fichiers sont remis."""
     if not INVENTAIRE.exists():
@@ -319,10 +340,11 @@ def remettre_autres_themes():
 
 def retirer():
     remettre_autres_themes()
-    for nom, icone in APPS.items():
+    for nom in list(APPS) + CACHES:
         p = APPLIS / nom
         if p.exists() and MARQUE in p.read_text():
             p.unlink()
+    for icone in set(APPS.values()):
         (ICONES / f"{icone}.svg").unlink(missing_ok=True)
     shutil.rmtree(THEME, ignore_errors=True)
     print("Icônes d'origine rétablies (pense à choisir un autre thème d'icônes, par exemple Papirus-Dark).")
@@ -345,6 +367,9 @@ def main():
     os.utime(THEME)
     for nom, icone in APPS.items():
         raccourci(nom, icone)
+    if any((d / "kitty.desktop").exists() for d in SYSTEME):
+        for nom in CACHES:
+            cacher(nom)
 
 
 if __name__ == "__main__":

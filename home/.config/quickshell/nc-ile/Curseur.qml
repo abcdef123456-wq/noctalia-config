@@ -27,6 +27,10 @@ ClippingRectangle {
         function regler(x) { c.change(Math.max(0, Math.min(1, x / width))) }
         onPressed: e => regler(e.x)
         onPositionChanged: e => { if (pressed) regler(e.x) }
-        onWheel: w => c.change(Math.max(0, Math.min(1, c.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
+        // Deux doigts sur le pavé tactile : laissés à l'île (changer de page) ; molette de souris : réglage
+        onWheel: w => {
+            if (w.pixelDelta.x !== 0 || w.pixelDelta.y !== 0) { w.accepted = false; return }
+            c.change(Math.max(0, Math.min(1, c.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
+        }
     }
 }
