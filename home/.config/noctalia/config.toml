@@ -71,7 +71,7 @@ capsule_padding = 8
 widget_spacing = 6
 font_weight = 600
 start = ["logo", "workspaces", "active_window"]
-center = ["clock", "media"]
+center = ["nc/ile:pilule"]                # île dynamique : heure, musique ; clic = centre de contrôle
 end = ["group:sys", "tray", "power_profile", "group:status", "notifications"]
 
 [[bar.default.capsule_group]]
@@ -151,6 +151,7 @@ pinned = ["@BROWSER@", "kitty", "org.kde.dolphin"]
 position = "top_right"
 
 [osd]
+enabled = false                           # bulles de volume / luminosité : l'île dynamique (nc/ile) les remplace
 position = "bottom_center"
 
 # ---------------------------------------------------------------- Thème : couleurs du fond d'écran
@@ -254,5 +255,5 @@ show_keyboard_layout = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/keys"]
+enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/ile"]
 auto_update = "none"

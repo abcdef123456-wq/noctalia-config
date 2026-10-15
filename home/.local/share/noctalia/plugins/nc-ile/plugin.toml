@@ -1,0 +1,25 @@
+id          = "nc/ile"
+name        = "Île dynamique"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Pilule au centre de la barre (heure, musique qui danse) qui s'ouvre en centre de contrôle : son, luminosité, réseau, profils, mode jeu."
+dependencies = ["wpctl", "playerctl", "brightnessctl"]
+
+# La pilule, au centre de la barre : clic = centre de contrôle, molette = volume, clic droit = lecture / pause
+[[widget]]
+id = "pilule"
+entry = "pilule.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# Le centre de contrôle, attaché sous la pilule : l'île s'agrandit vers le bas
+[[panel]]
+id = "centre"
+entry = "centre.luau"
+width = 470
+height = 612
+placement = "attached"
+position = "top_center"
