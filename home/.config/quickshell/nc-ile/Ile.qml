@@ -35,15 +35,19 @@ PanelWindow {
     readonly property var tailles: ({
         musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 268), charge: Qt.size(400, 140),
         jeu: Qt.size(400, 140), centre: Qt.size(432, 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410)
+        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410)
     })
     readonly property size taille: tailles[Etat.vueActive] || tailles.centre
     readonly property bool points: Etat.vues.length > 1
+    // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
+    readonly property bool banniere: !ouverte && Notifs.banniere !== null
+        && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
+    readonly property int hauteurBanniere: Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74
 
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
     Rectangle {
         id: bulle
-        readonly property bool montre: !fen.ouverte && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
+        readonly property bool montre: !fen.ouverte && !fen.banniere && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
         color: "#000000"
@@ -68,9 +72,9 @@ PanelWindow {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
-        width: fen.ouverte ? fen.taille.width : compact.largeur
-        height: fen.ouverte ? fen.taille.height : 30
-        radius: fen.ouverte ? 42 : 15
+        width: fen.ouverte ? fen.taille.width : (fen.banniere ? 440 : compact.largeur)
+        height: fen.ouverte ? fen.taille.height : (fen.banniere ? fen.hauteurBanniere : 30)
+        radius: fen.ouverte ? 42 : (fen.banniere ? 32 : 15)
         color: "#000000"
         clip: true
 
@@ -83,13 +87,20 @@ PanelWindow {
             id: compact
             anchors.centerIn: parent
             width: parent.width
-            opacity: fen.ouverte ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 90 : 220; easing.type: Easing.OutCubic } }
+            opacity: fen.ouverte || fen.banniere ? 0 : 1
+            Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere ? 90 : 220; easing.type: Easing.OutCubic } }
+        }
+
+        Banniere {
+            anchors.fill: parent
+            opacity: fen.banniere && ile.height > fen.hauteurBanniere * 0.7 ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: fen.banniere ? 180 : 90; easing.type: Easing.OutCubic } }
         }
 
         MouseArea {
             anchors.fill: parent
-            enabled: !fen.ouverte
+            enabled: !fen.ouverte && !fen.banniere
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause() : Etat.basculer(fen.modelData.name, false)
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
@@ -141,7 +152,7 @@ PanelWindow {
                     anchors.fill: parent
                     active: pageIle.visible || pageIle.active
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
-                                        son: pSon, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
+                                        son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         calendrier: pCalendrier })[pageIle.modelData] || pCentre
                 }
             }
@@ -152,6 +163,7 @@ PanelWindow {
         Component { id: pJeu; Jeu {} }
         Component { id: pCentre; Centre {} }
         Component { id: pSon; Son {} }
+        Component { id: pNotifs; PageNotifs {} }
         Component { id: pReseau; PageListe { mode: "wifi" } }
         Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
         Component { id: pSysteme; Systeme {} }

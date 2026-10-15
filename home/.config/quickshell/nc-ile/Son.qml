@@ -1,8 +1,11 @@
-// Page « Son », façon macOS : volume général, sortie et micro (lignes sobres, coche bleue), puis chaque application
-// qui joue du son avec son icône et son propre curseur.
+// Page « Son », comme les réglages d'iOS : grand curseur de volume, puis des cartes groupées.
+//   Sortie : un appareil par ligne, coche bleue sur celui qui sert ;
+//   Micro : interrupteur (coupé / actif), volume d'entrée, choix du micro s'il y en a plusieurs ;
+//   Applications : icône, nom et fin curseur pour chaque appli qui joue du son.
 import QtQuick
 import Quickshell
 import Quickshell.Services.Pipewire
+import Quickshell.Widgets
 
 Item {
     id: son
@@ -11,6 +14,7 @@ Item {
     readonly property var sorties: noeuds.filter(n => n.isSink && !n.isStream && n.audio)
     readonly property var entrees: noeuds.filter(n => !n.isSink && !n.isStream && n.audio && (n.properties["media.class"] || "").indexOf("Source") >= 0)
     readonly property var applis: noeuds.filter(n => n.isStream && n.audio && !n.isSink)
+    readonly property var micro: Pipewire.defaultAudioSource
     PwObjectTracker { objects: son.sorties.concat(son.entrees, son.applis) }
 
     function nom(n) { return n.properties["application.name"] || n.description || n.nickname || n.name || "?" }
@@ -23,85 +27,206 @@ Item {
         if (b.indexOf("alsa") >= 0 && (b.indexOf("analog") >= 0 || b.indexOf("pci") >= 0)) return entree ? "Micro intégré" : "Haut-parleurs"
         return d
     }
+    function iconeSortie(n) {
+        var t = nomAppareil(n, false)
+        if (t.indexOf("HDMI") >= 0) return "tv"
+        if ((n.name || "").indexOf("bluez") >= 0 || t.toLowerCase().indexOf("head") >= 0 || t.toLowerCase().indexOf("casque") >= 0) return "headphones"
+        return "speaker"
+    }
     function iconeAppli(n) {
         var p = n.properties
         return Quickshell.iconPath(p["application.icon-name"] || (p["application.process.binary"] || "").toLowerCase() || "audio-x-generic", "audio-x-generic")
     }
 
-    component Titre: Texte { font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+    // ── Éléments ──
+    component Titre: Texte { font.pixelSize: 13; font.weight: Font.DemiBold; secondaire: true; height: 30; verticalAlignment: Text.AlignBottom; leftPadding: 14; bottomPadding: 6 }
+    // Carte groupée (fond gris foncé, coins arrondis)
+    component Carte: ClippingRectangle {
+        default property alias contenu: col.data
+        width: parent ? parent.width : 300
+        height: col.implicitHeight
+        radius: 16; color: "#1c1c1e"
+        Column { id: col; width: parent.width }
+    }
+    // Ligne d'une carte : icône simple, nom, coche ; trait de séparation sauf pour la dernière
+    component Option: Item {
+        id: o
+        property string icone: ""
+        property string titre: ""
+        property bool coche: false
+        property bool dernier: false
+        signal clic()
+        width: parent ? parent.width : 300; height: 46
+        Rectangle { anchors.fill: parent; color: zo.pressed ? "#2c2c2e" : (zo.containsMouse ? "#242426" : "transparent") }
+        Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: o.icone; taille: 20; color: o.coche ? "#0a84ff" : "#d1d1d6"; plein: o.coche }
+        Texte {
+            x: 46; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 46 - 44
+            text: o.titre; font.pixelSize: 14; font.weight: o.coche ? Font.DemiBold : Font.Normal
+        }
+        Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: o.coche; graisse: 600 }
+        Rectangle { visible: !o.dernier; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: "#2c2c2e" }
+        MouseArea { id: zo; anchors.fill: parent; hoverEnabled: true; onClicked: o.clic() }
+    }
+    // Fin curseur façon macOS : piste fine, partie remplie blanche, bouton rond
+    component Piste: Item {
+        id: f
+        property real valeur: 0
+        signal change(real v)
+        height: 18
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: "#3a3a3c" }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: 2; color: "white" }
+        Rectangle {
+            id: bouton
+            width: 16; height: 16; radius: 8; color: "white"
+            anchors.verticalCenter: parent.verticalCenter
+            x: (f.width - width) * Math.max(0, Math.min(1, f.valeur))
+        }
+        MouseArea {
+            anchors.fill: parent; anchors.margins: -6
+            preventStealing: true
+            function regler(x) { f.change(Math.max(0, Math.min(1, (x - 6) / f.width))) }
+            onPressed: e => regler(e.x)
+            onPositionChanged: e => { if (pressed) regler(e.x) }
+            onWheel: w => f.change(Math.max(0, Math.min(1, f.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
+        }
+    }
+    // Interrupteur façon iOS
+    component Inter: Rectangle {
+        id: it
+        property bool allume: false
+        signal bascule()
+        width: 46; height: 28; radius: 14; color: allume ? "#30d158" : "#3a3a3c"
+        Behavior on color { ColorAnimation { duration: 180 } }
+        Rectangle {
+            width: 24; height: 24; radius: 12; color: "white"; y: 2; x: it.allume ? 20 : 2
+            Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
+        }
+        MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: it.bascule() }
+    }
 
     Defilement {
         id: defil
         anchors.fill: parent
         contentHeight: colonne.implicitHeight
+
         Column {
             id: colonne
-            width: son.width; spacing: 4
-            onImplicitHeightChanged: Etat.annoncerHauteur("son", implicitHeight + 6)
-            Component.onCompleted: Etat.annoncerHauteur("son", implicitHeight + 6)
+            width: son.width; spacing: 0
+            onImplicitHeightChanged: Etat.annoncerHauteur("son", implicitHeight + 4)
+            Component.onCompleted: Etat.annoncerHauteur("son", implicitHeight + 4)
 
-            Texte { text: "Son"; font.pixelSize: 20; font.weight: Font.Bold; height: 32; leftPadding: 4 }
+            // En-tête et grand curseur
+            Item {
+                width: parent.width; height: 34
+                Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Son"; font.pixelSize: 20; font.weight: Font.Bold }
+                Texte {
+                    anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                    text: Etat.muet ? "Coupé" : Math.round(Etat.volume * 100) + " %"
+                    secondaire: true; font.pixelSize: 14; font.features: { "tnum": 1 }
+                }
+            }
+            Item { width: 1; height: 8 }
             Curseur {
-                width: son.width
-                icone: Etat.muet ? "volume_off" : "volume_up"
+                width: son.width; height: 44; radius: 22
+                icone: Etat.muet ? "volume_off" : (Etat.volume < 0.34 ? "volume_mute" : (Etat.volume < 0.67 ? "volume_down" : "volume_up"))
                 valeur: Etat.muet ? 0 : Etat.volume
                 onChange: v => Etat.reglerVolume(v)
             }
 
             Titre { text: "Sortie" }
-            Repeater {
-                model: son.sorties
-                Ligne {
-                    required property var modelData
-                    readonly property string n: son.nomAppareil(modelData, false)
-                    titre: n
-                    icone: n.indexOf("HDMI") >= 0 ? "tv" : ((modelData.name || "").indexOf("bluez") >= 0 || n.toLowerCase().indexOf("head") >= 0 ? "headphones" : "laptop_mac")
-                    actif: modelData === Pipewire.defaultAudioSink
-                    droite: actif ? "check" : ""; couleurDroite: "#0a84ff"
-                    onClic: Pipewire.preferredDefaultAudioSink = modelData
+            Carte {
+                Repeater {
+                    model: son.sorties
+                    Option {
+                        required property var modelData
+                        required property int index
+                        icone: son.iconeSortie(modelData)
+                        titre: son.nomAppareil(modelData, false)
+                        coche: modelData === Pipewire.defaultAudioSink
+                        dernier: index === son.sorties.length - 1
+                        onClic: Pipewire.preferredDefaultAudioSink = modelData
+                    }
                 }
             }
 
-            Titre { text: "Micro" }
-            Repeater {
-                model: son.entrees
-                Ligne {
-                    required property var modelData
-                    titre: son.nomAppareil(modelData, true)
-                    sous: modelData.audio && modelData.audio.muted ? "Coupé · clic droit pour le remettre" : ""
-                    icone: modelData.audio && modelData.audio.muted ? "mic_off" : "mic"
-                    actif: modelData === Pipewire.defaultAudioSource
-                    droite: actif ? "check" : ""; couleurDroite: "#0a84ff"
-                    onClic: Pipewire.preferredDefaultAudioSource = modelData
-                    onClicDroit: if (modelData.audio) modelData.audio.muted = !modelData.audio.muted
+            Titre { text: "Micro"; visible: son.micro !== null }
+            Carte {
+                visible: son.micro !== null
+                Item {
+                    id: mic
+                    width: parent.width; height: 92
+                    readonly property bool coupe: son.micro && son.micro.audio ? son.micro.audio.muted : true
+                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? "#ff453a" : "#d1d1d6" }
+                    Column {
+                        x: 46; y: 9; width: parent.width - 46 - 70
+                        Texte { text: son.micro ? son.nomAppareil(son.micro, true) : ""; font.pixelSize: 14; width: parent.width }
+                        Texte { text: mic.coupe ? "Coupé" : "Actif"; secondaire: true; font.pixelSize: 12 }
+                    }
+                    Inter {
+                        anchors.right: parent.right; anchors.rightMargin: 14; y: 11
+                        allume: !mic.coupe
+                        onBascule: if (son.micro && son.micro.audio) son.micro.audio.muted = !son.micro.audio.muted
+                    }
+                    Piste {
+                        x: 46; y: 60; width: parent.width - 46 - 20
+                        opacity: mic.coupe ? 0.4 : 1
+                        valeur: son.micro && son.micro.audio ? son.micro.audio.volume : 0
+                        onChange: v => { if (son.micro && son.micro.audio) son.micro.audio.volume = v }
+                    }
+                    Rectangle { visible: son.entrees.length > 1; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: "#2c2c2e" }
+                }
+                // Choix du micro (s'il y en a plusieurs)
+                Repeater {
+                    model: son.entrees.length > 1 ? son.entrees : []
+                    Option {
+                        required property var modelData
+                        required property int index
+                        icone: "mic"
+                        titre: son.nomAppareil(modelData, true)
+                        coche: modelData === Pipewire.defaultAudioSource
+                        dernier: index === son.entrees.length - 1
+                        onClic: Pipewire.preferredDefaultAudioSource = modelData
+                    }
                 }
             }
 
             Titre { text: "Applications" }
-            Texte { text: "Aucune application ne joue de son."; secondaire: true; visible: son.applis.length === 0; height: 30; leftPadding: 8 }
-            Repeater {
-                model: son.applis
-                Item {
-                    required property var modelData
-                    width: son.width; height: 44
-                    Image {
-                        id: ic
-                        anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                        width: 26; height: 26; sourceSize: Qt.size(52, 52)
-                        source: son.iconeAppli(modelData)
-                    }
-                    Column {
-                        anchors.left: ic.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 8
-                        anchors.verticalCenter: parent.verticalCenter; spacing: 4
-                        Texte { text: son.nom(modelData); font.pixelSize: 12; secondaire: true; width: parent.width }
-                        Curseur {
-                            width: parent.width; height: 18; radius: 9; icone: ""
-                            valeur: modelData.audio ? modelData.audio.volume : 0
-                            onChange: v => { if (modelData.audio) modelData.audio.volume = v }
+            Carte {
+                Texte { text: "Aucune application ne joue de son."; secondaire: true; visible: son.applis.length === 0; height: 46; leftPadding: 14 }
+                Repeater {
+                    model: son.applis
+                    Item {
+                        id: ap
+                        required property var modelData
+                        required property int index
+                        width: parent.width; height: 58
+                        Image {
+                            x: 12; anchors.verticalCenter: parent.verticalCenter
+                            width: 28; height: 28; sourceSize: Qt.size(56, 56)
+                            source: son.iconeAppli(ap.modelData)
                         }
+                        Column {
+                            x: 52; width: parent.width - 52 - 18
+                            anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                            Item {
+                                width: parent.width; height: 16
+                                Texte { text: son.nom(ap.modelData); font.pixelSize: 13; width: parent.width - 50 }
+                                Texte {
+                                    anchors.right: parent.right; secondaire: true; font.pixelSize: 12; font.features: { "tnum": 1 }
+                                    text: ap.modelData.audio ? Math.round(ap.modelData.audio.volume * 100) + " %" : ""
+                                }
+                            }
+                            Piste {
+                                width: parent.width
+                                valeur: ap.modelData.audio ? ap.modelData.audio.volume : 0
+                                onChange: v => { if (ap.modelData.audio) ap.modelData.audio.volume = v }
+                            }
+                        }
+                        Rectangle { visible: ap.index < son.applis.length - 1; x: 52; anchors.bottom: parent.bottom; width: parent.width - 52; height: 1; color: "#2c2c2e" }
                     }
                 }
             }
+            Item { width: 1; height: 4 }
         }
     }
 }
