@@ -20,9 +20,20 @@ Singleton {
     property string ecranOuvert: ""
     property string page: "accueil"
 
-    function basculer(ecran) {
+    // Pages de l'île ouverte, comme sur iPhone : d'abord ce qui se passe (la musique), puis le centre de contrôle
+    readonly property var vues: lecteur && titre !== "" ? ["musique", "centre"] : ["centre"]
+    property int vue: 0
+    readonly property string vueActive: vues[Math.min(vue, vues.length - 1)]
+    function changerVue(d) {
+        var v = Math.max(0, Math.min(vues.length - 1, vue + d))
+        if (v !== vue) { vue = v; page = "accueil" }
+    }
+
+    // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
+    function basculer(ecran, versCentre) {
         if (ecranOuvert === ecran) { fermer(); return }
         page = "accueil"
+        vue = versCentre ? vues.length - 1 : 0
         ecranOuvert = ecran
         activiteType = ""
         lire()

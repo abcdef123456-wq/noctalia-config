@@ -55,7 +55,7 @@ faites) : seul ce qui manque ou a changé est fait.
 | Distribution | Hyprland et Noctalia v5 |
 |---|---|
 | Arch et dérivées (CachyOS, EndeavourOS, Manjaro…) | installés depuis les dépôts officiels |
-| Fedora | installés depuis les dépôts officiels |
+| Fedora (44 ou plus) | Noctalia et Quickshell depuis les dépôts officiels ; Hyprland depuis le dépôt communautaire COPR `sdegler/hyprland` (le script te le montre et demande avant) |
 | Debian 13, Debian Sid, Ubuntu 26.04 | Noctalia via le dépôt officiel de Noctalia (le script te montre les adresses et demande avant). Debian 13 : Hyprland 0.55, Noctalia et TLP viennent de « trixie-backports », la source officielle de Debian pour les versions récentes, que le script propose d'activer ; Neovim récent (0.11+) proposé depuis neovim.io |
 | openSUSE Tumbleweed et Slowroll | Noctalia via le dépôt indiqué par la documentation (idem) |
 | Autres (NixOS, Gentoo…) | installe-les toi-même ([guide](https://docs.noctalia.dev/noctalia/getting-started/installation/)), puis relance le script |
