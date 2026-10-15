@@ -16,7 +16,7 @@ local CW, CH = BASE.CW, BASE.CH   -- tranche du milieu
 local NW, NH = BASE.NW, BASE.NH   -- tranche étroite (voisine immédiate)
 local SK = 0.30              -- inclinaison
 local SPACE = 4              -- écart entre tranches
-local REACH = 3              -- tranches de chaque côté (au plus)
+local REACH = 3              -- tranches de chaque côté (au moins ; plus sur un écran large : portee)
 local ROW_H = CH + 30
 local SCREEN_W = 1600
 local SMOOTH_MS = 55         -- plus petit = plus rapide
@@ -164,9 +164,20 @@ end
 
 -- Bande de tranches comme avant (version du 12/10) : toutes les tranches voisines sont dessinées et filent jusqu'aux
 -- bords de l'écran ; les plus éloignées à moitié transparentes.
+-- Nombre de tranches de chaque côté pour que la bande atteigne les bords du cadre (écran large : plus de tranches),
+-- jamais moins de REACH (écran de 1600 points : 3, comme avant)
+local function portee()
+  local r, x = 0, CW / 2
+  while x < BGW / 2 and r < 12 do
+    r = r + 1
+    x = x + dims(r) + SPACE
+  end
+  return math.max(REACH, r)
+end
+
 local function strip()
   local n = #shown
-  local reach = math.min(REACH, math.max(1, math.floor(n / 2)))
+  local reach = math.min(portee(), math.max(1, math.floor(n / 2)))
   local c = math.floor(pos + 0.5)
   local fl = math.floor(pos)
   local cards, centers, x = {}, {}, 0
