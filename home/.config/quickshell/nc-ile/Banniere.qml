@@ -33,7 +33,7 @@ Item {
         spacing: 1
         Item {
             width: parent.width; height: 16
-            Texte { text: b.vue ? (b.vue.appName || "") : ""; secondaire: true; font.pixelSize: 12; width: parent.width - 90 }
+            Texte { text: b.vue ? Notifs.nomAppli(b.vue) : ""; secondaire: true; font.pixelSize: 12; width: parent.width - 90 }
             Texte {
                 anchors.right: parent.right
                 text: b.vue ? Notifs.quand(b.vue, Etat.maintenant.getTime()) : ""

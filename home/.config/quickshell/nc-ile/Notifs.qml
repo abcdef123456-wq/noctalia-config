@@ -60,11 +60,27 @@ Singleton {
     function fermer(notif) { if (banniere === notif) banniere = null; if (notif) notif.dismiss() }
     function toutEffacer() { banniere = null; var l = liste; for (var i = 0; i < l.length; i++) l[i].dismiss() }
 
+    // Image de la notification : d'abord une vraie image de contenu (photo d'un contact, pochette), puis l'icône de
+    // l'appli dans le thème (Terminal, Fichiers… dessinés par nc-icones), et seulement en dernier le fichier fourni par
+    // l'appli (kitty envoie son propre logo, /usr/lib/kitty/logo/kitty.png, qui passait avant le thème)
     function icone(notif) {
         if (!notif) return ""
-        if (notif.image !== "") return notif.image
+        var img = notif.image
+        // Icône d'appli passée comme chemin (Quickshell la range en « image://icon//usr/… ») : pas une image de contenu
+        var contenu = img !== "" && img !== notif.appIcon && !img.startsWith("image://icon/")
+                      && !img.startsWith("/usr/") && !img.startsWith("file:///usr/")
+        if (contenu) return img
+        var nom = (notif.desktopEntry || notif.appName || "").toLowerCase()
+        var duTheme = nom !== "" ? Quickshell.iconPath(nom, true) : ""
+        if (duTheme) return duTheme
         if (notif.appIcon !== "") return notif.appIcon.indexOf("/") >= 0 ? notif.appIcon : Quickshell.iconPath(notif.appIcon, true)
-        return Quickshell.iconPath((notif.desktopEntry || notif.appName || "").toLowerCase(), true)
+        return img
+    }
+    // Nom affiché : les mêmes noms simples que dans le lanceur (nc-icones)
+    function nomAppli(notif) {
+        if (!notif) return ""
+        var n = (notif.appName || "").toLowerCase()
+        return ({ kitty: "Terminal", "org.gnome.nautilus": "Fichiers", nautilus: "Fichiers", dolphin: "Fichiers" })[n] || notif.appName
     }
     // « maintenant », « il y a 5 min », sinon l'heure
     function quand(notif, maintenant) {

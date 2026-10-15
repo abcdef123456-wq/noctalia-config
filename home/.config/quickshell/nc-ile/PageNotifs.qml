@@ -82,7 +82,7 @@ Item {
                         y: 12; spacing: 1
                         Item {
                             width: parent.width; height: 16
-                            Texte { text: carte.modelData.appName; secondaire: true; font.pixelSize: 12; width: parent.width - 100 }
+                            Texte { text: Notifs.nomAppli(carte.modelData); secondaire: true; font.pixelSize: 12; width: parent.width - 100 }
                             Texte {
                                 anchors.right: parent.right
                                 visible: !zc.containsMouse
