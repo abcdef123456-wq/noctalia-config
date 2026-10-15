@@ -183,7 +183,9 @@ hypr_bin() { command -v Hyprland 2>/dev/null || command -v hyprland 2>/dev/null 
 hypr_version() {
   local b v=""
   b="$(hypr_bin)"
-  [ -n "$b" ] && v="$("$b" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  # Numéro qui suit « Hyprland » (ou « Tag: v… ») : la suite de --version liste aussi les bibliothèques (0.5.1…)
+  [ -n "$b" ] && v="$("$b" --version 2>/dev/null | grep -oE '^Hyprland v?[0-9]+\.[0-9]+\.[0-9]+|^Tag: v[0-9]+\.[0-9]+\.[0-9]+' |
+    head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
   if [ -z "$v" ]; then   # repli : version du paquet (la commande peut échouer sans écran)
     case "$FAMILY" in
       arch) v="$(pacman -Q hyprland 2>/dev/null | awk '{print $2}')" ;;
@@ -225,7 +227,19 @@ if [ "$MODE" != files ]; then
   fi
   hv="$(hypr_version)"
   [ -n "$hv" ] || die "version de Hyprland introuvable."
-  ver_ge "$hv" "$HYPR_MIN" || die "Hyprland $hv est trop ancien : cette config utilise le format Lua de Hyprland 0.55 ou plus. Mets-le à jour (sur Debian 13 : dépôt « trixie-backports »), puis relance."
+  if ! ver_ge "$hv" "$HYPR_MIN"; then
+    # Diagnostic : d'où vient ce Hyprland, et que faire selon la distribution
+    warn "Hyprland $hv ($(hypr_bin)) est trop ancien : cette config utilise le format Lua de Hyprland 0.55 ou plus."
+    case "$FAMILY:$OSID:$OSCODE" in
+      debian:debian:trixie)
+        info "Versions disponibles :"; apt-cache policy hyprland 2>/dev/null | sed -n '1,12p' | sed 's/^/     /'
+        info "Mise à jour à la main : sudo apt install -t trixie-backports hyprland hypridle xdg-desktop-portal-hyprland uwsm" ;;
+      debian:debian:*) info "Debian $OSCODE n'a pas Hyprland 0.55 : il faut Debian 13 (trixie) ou plus récent." ;;
+      debian:*) info "$OSNAME n'a pas encore Hyprland 0.55 dans ses dépôts : installe-le autrement (https://wiki.hypr.land/Getting-Started/Installation/)." ;;
+    esac
+    case "$(hypr_bin)" in /usr/local/*|"$HOME"/*) info "Ce Hyprland a été installé à la main ($(hypr_bin)) et passe avant celui de ta distribution : supprime-le ou mets-le à jour." ;; esac
+    die "Hyprland 0.55 ou plus est nécessaire."
+  fi
 
   # Noctalia v5
   if ! have noctalia; then
