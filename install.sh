@@ -79,6 +79,7 @@ bpo_on() {
     sudo apt-get update -q || return 1
   fi
 }
+bpo_actif() { [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] && apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; }
 bpo_install() { local r=0; BPO="-t trixie-backports"; pkg_install "$@" || r=$?; BPO=""; return $r; }
 
 pkg_installed() {
@@ -90,7 +91,9 @@ pkg_install() {
   case "$FAMILY" in
     arch) sudo pacman -S --needed "$@" ;;
     fedora) sudo dnf install -y "$@" ;;
-    debian) sudo apt-get install -y $BPO "$@" ;;
+    # Debian 13 avec backports (Hyprland) : leurs bibliothèques (libxkbcommon…) sont plus récentes que celles de
+    # trixie ; si un paquet ne s'installe pas pour cette raison, nouvel essai en acceptant les backports
+    debian) sudo apt-get install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get install -y -t trixie-backports "$@"; } ;;
     suse) sudo zypper --non-interactive install "$@" ;;
     *) return 1 ;;
   esac
