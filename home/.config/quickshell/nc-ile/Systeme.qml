@@ -6,6 +6,7 @@ import Quickshell.Services.UPower
 
 Item {
     id: sy
+    function defiler(dy) { return defil.defiler(dy) }
     function val(k) {
         var l = Etat.liste
         for (var i = 0; i < l.length; i++) if (l[i].genre === k) return l[i].champs[0]
@@ -39,11 +40,10 @@ Item {
         }
     }
 
-    Flickable {
+    Defilement {
+        id: defil
         anchors.fill: parent
         contentHeight: col.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
         Column {
             id: col
             width: sy.width; spacing: 10

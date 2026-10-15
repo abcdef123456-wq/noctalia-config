@@ -102,7 +102,11 @@ PanelWindow {
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             onWheel: w => {
-                cumul += w.pixelDelta.y !== 0 ? w.pixelDelta.y : w.angleDelta.y / 2
+                var dy = w.pixelDelta.y !== 0 ? w.pixelDelta.y : w.angleDelta.y / 2
+                // La liste de la page défile d'abord ; au bout, la molette change de page
+                var page = pages.itemAt(Etat.vue), contenu = page ? page.contenu : null
+                if (!verrou.running && contenu && contenu.defiler && contenu.defiler(dy)) { cumul = 0; return }
+                cumul += dy
                 if (Math.abs(cumul) >= 60 && !verrou.running) {
                     Etat.changerVue(cumul > 0 ? -1 : 1)
                     cumul = 0
@@ -114,9 +118,11 @@ PanelWindow {
 
         // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
         Repeater {
+            id: pages
             model: Etat.vues
             Item {
                 id: pageIle
+                readonly property var contenu: chargeur.item
                 required property string modelData
                 required property int index
                 readonly property size t: fen.tailles[modelData] || fen.tailles.centre
@@ -131,6 +137,7 @@ PanelWindow {
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {
+                    id: chargeur
                     anchors.fill: parent
                     active: pageIle.visible || pageIle.active
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,

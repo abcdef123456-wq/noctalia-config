@@ -40,7 +40,7 @@ Name=NC
 Comment=Icônes de noctalia-config, aux couleurs du fond d'écran (le reste vient de Papirus)
 Inherits={parents}
 Example=folder
-Directories=scalable/places,scalable/apps
+Directories=scalable/places,scalable/apps,scalable/mimetypes
 
 [scalable/places]
 Context=Places
@@ -51,6 +51,13 @@ Type=Scalable
 
 [scalable/apps]
 Context=Applications
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[scalable/mimetypes]
+Context=MimeTypes
 Size=64
 MinSize=16
 MaxSize=512
@@ -143,6 +150,70 @@ APPS_DESSINS = {
 }
 
 
+# Fichiers : feuille claire aux coins arrondis, coin replié, symbole du type dans sa couleur ; étiquette (PDF, ZIP…)
+# en bas pour les formats qu'on reconnaît à leur nom. Les applis demandent d'abord l'icône précise du type puis son
+# icône générique : le thème NC passant avant Papirus, les icônes génériques ci-dessous servent pour tous les fichiers.
+FICHIER = """<defs>
+    <linearGradient id="feuille" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{papier}"/><stop offset="1" stop-color="{papier2}"/>
+    </linearGradient>
+  </defs>
+  <path d="M68 24 H156 L208 76 V212 Q208 232 188 232 H68 Q48 232 48 212 V44 Q48 24 68 24 Z" fill="url(#feuille)"/>
+  <path d="M156 24 V60 Q156 76 172 76 H208 Z" fill="{pli}"/>
+  <g fill="none" stroke="{couleur}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">{symbole}</g>
+  {etiquette}"""
+ETIQUETTE = """<rect x="62" y="176" width="{l}" height="38" rx="11" fill="{couleur}"/>
+  <text x="{cx}" y="203" text-anchor="middle" font-family="Adwaita Sans, Inter, sans-serif" font-weight="700" font-size="24" fill="#ffffff">{texte}</text>"""
+# Symboles centrés vers (128, 124)
+TYPES = {
+    # nom : (couleur, symbole, étiquette, autres noms)
+    "text-x-generic": ("accent", '<path d="M86 104 H170 M86 128 H170 M86 152 H140"/>', "",
+                       ["text-plain", "text-x-log", "application-x-generic", "unknown", "application-octet-stream", "text-x-readme"]),
+    "x-office-document": ("bleu", '<path d="M86 96 H150 M86 120 H170 M86 144 H170"/>', "DOC",
+                          ["application-vnd.oasis.opendocument.text", "application-msword", "application-rtf",
+                           "application-vnd.openxmlformats-officedocument.wordprocessingml.document"]),
+    "x-office-spreadsheet": ("vert", '<rect x="84" y="92" width="88" height="66" rx="8"/><path d="M84 114 H172 M84 136 H172 M114 92 V158"/>', "",
+                             ["application-vnd.oasis.opendocument.spreadsheet", "text-csv", "application-vnd.ms-excel",
+                              "application-vnd.openxmlformats-officedocument.spreadsheetml.sheet"]),
+    "x-office-presentation": ("orange", '<rect x="80" y="92" width="96" height="62" rx="9"/><path d="M104 140 V124 M128 140 V108 M152 140 V118"/>', "",
+                              ["application-vnd.oasis.opendocument.presentation", "application-vnd.ms-powerpoint",
+                               "application-vnd.openxmlformats-officedocument.presentationml.presentation"]),
+    "application-pdf": ("rouge", '<path d="M86 100 H170 M86 124 H170 M86 148 H140"/>', "PDF", []),
+    "image-x-generic": ("accent2", '<rect x="80" y="90" width="96" height="76" rx="12"/><path d="M84 158 L110 130 L130 148 L144 136 L172 160"/><circle cx="150" cy="112" r="6"/>', "",
+                        ["image-svg+xml", "image-png", "image-jpeg"]),
+    "audio-x-generic": ("rose", '<path d="M118 154 V96 L160 88 V144"/><circle cx="106" cy="154" r="12"/><circle cx="148" cy="144" r="12"/>', "",
+                        ["audio-mpeg", "audio-flac", "audio-x-wav"]),
+    "video-x-generic": ("accent2", '<rect x="78" y="94" width="100" height="72" rx="14"/><path d="M118 114 L142 130 L118 146 Z"/>', "",
+                        ["video-mp4", "video-x-matroska", "video-webm"]),
+    "text-x-script": ("accent", '<path d="M104 104 L82 128 L104 152 M152 104 L174 128 L152 152 M136 96 L120 160"/>', "",
+                      ["application-x-shellscript", "text-x-python", "text-x-csrc", "text-x-c++src", "text-x-chdr",
+                       "text-javascript", "application-javascript", "text-x-java", "text-x-rust", "text-x-go",
+                       "text-x-lua", "text-x-makefile", "text-x-cmake", "application-x-php", "text-css", "text-x-typescript",
+                       "text-x-python3", "text-x-c", "text-x-c++", "text-x-c++hdr", "text-x-csharp", "text-rust",
+                       "text-x-kotlin", "text-x-ruby", "application-x-ruby", "application-x-perl", "text-x-perl",
+                       "application-sql", "text-x-sql", "text-x-patch", "text-x-diff", "text-x-scss", "text-x-sass",
+                       "application-x-typescript", "text-vnd.trolltech.linguist", "text-x-dockerfile", "text-x-nim",
+                       "text-x-zig", "text-x-haskell", "text-x-asm", "application-x-desktop", "text-x-systemd-unit"]),
+    "application-json": ("orange", '<path d="M110 92 Q96 92 96 106 V118 Q96 128 86 128 Q96 128 96 138 V150 Q96 164 110 164 M146 92 Q160 92 160 106 V118 Q160 128 170 128 Q160 128 160 138 V150 Q160 164 146 164"/>', "",
+                         ["application-xml", "text-xml", "application-toml", "application-x-yaml", "text-x-yaml"]),
+    "text-markdown": ("accent", '<path d="M86 100 H170 M86 124 H170 M86 148 H140"/>', "MD", ["text-x-markdown"]),
+    "text-html": ("bleu", '<circle cx="128" cy="126" r="36"/><path d="M92 126 H164 M128 90 Q106 126 128 162 Q150 126 128 90"/>', "", ["application-xhtml+xml"]),
+    "package-x-generic": ("ambre", '<path d="M120 86 H128 M128 100 H136 M120 114 H128 M128 128 H136 M120 142 H128"/><rect x="114" y="150" width="28" height="18" rx="6"/>', "ZIP",
+                          ["application-zip", "application-x-tar", "application-x-compressed-tar", "application-x-bzip-compressed-tar",
+                           "application-x-xz-compressed-tar", "application-x-zstd-compressed-tar", "application-x-7z-compressed",
+                           "application-x-rar", "application-vnd.rar", "application-gzip", "application-x-gzip", "application-x-archive",
+                           "application-x-java-archive", "application-vnd.debian.binary-package", "application-x-rpm"]),
+    "application-x-executable": ("gris", '<circle cx="128" cy="126" r="14"/><path d="M128 92 V102 M128 150 V160 M94 126 H104 M152 126 H162 M104 102 L111 109 M145 143 L152 150 M104 150 L111 143 M145 109 L152 102"/>', "",
+                                 ["application-x-sharedlib", "application-x-object", "application-x-appimage", "application-vnd.appimage"]),
+    "font-x-generic": ("accent", '<path d="M88 160 L110 96 L132 160 M96 140 H124"/><path d="M164 132 Q164 120 152 120 Q140 120 140 140 Q140 160 152 160 Q164 160 164 148 V120 M164 148 V160"/>', "",
+                       ["font-ttf", "font-otf", "font-woff", "font-woff2"]),
+    "application-x-cd-image": ("gris", '<circle cx="128" cy="126" r="36"/><circle cx="128" cy="126" r="9"/>', "ISO",
+                               ["application-x-iso9660-image", "application-x-raw-disk-image"]),
+}
+TEINTES = {"bleu": "#3d8bfd", "vert": "#2fb55d", "orange": "#f08c2b", "rouge": "#e5484d", "rose": "#e3488f",
+           "ambre": "#c9902c", "gris": "#7c7c8a"}
+
+
 def svg(corps):
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  ' + corps + "\n</svg>\n"
 
@@ -167,6 +238,20 @@ def dessins(c):
     dossier = DOSSIER.format(symbole="", **teintes)
     for nom, d in APPS_DESSINS.items():
         out[nom] = svg(CADRE.format(**c) + "\n  " + d.format(dossier=dossier, **c))
+    # Fichiers : couleurs fixes adoucies vers l'accent, pour rester dans l'ambiance du fond d'écran
+    papier = {"papier": melange("#ffffff", c["accent"], 0.04), "papier2": melange("#eceaf3", c["accent"], 0.10),
+              "pli": melange("#cfcde0", c["accent"], 0.22)}
+    for nom, (cle, symbole, texte, autres) in TYPES.items():
+        couleur = c.get(cle) or melange(TEINTES[cle], c["accent"], 0.18)
+        if texte:
+            l = 34 + 17 * len(texte)
+            symbole = symbole.replace("H170", "H160") if "H170" in symbole and nom != "x-office-document" else symbole
+            etiquette = ETIQUETTE.format(l=l, cx=62 + l / 2, couleur=couleur, texte=texte)
+        else:
+            etiquette = ""
+        out[nom] = svg(FICHIER.format(couleur=couleur, symbole=symbole, etiquette=etiquette, **papier))
+        for autre in autres:
+            out[autre] = out[nom]
     return out
 
 
@@ -250,7 +335,7 @@ def main():
     tout = dessins(couleurs())
     ecrire(THEME / "index.theme", INDEX.format(parents=parents()))
     for nom, texte in tout.items():
-        dossier = "apps" if nom.startswith("nc-") else "places"
+        dossier = "apps" if nom.startswith("nc-") else ("places" if nom.startswith(("folder", "user-", "inode", "network")) else "mimetypes")
         ecrire(THEME / "scalable" / dossier / f"{nom}.svg", texte)
     for icone, noms in ALIAS.items():
         ecrire(ICONES / f"{icone}.svg", tout[icone])
