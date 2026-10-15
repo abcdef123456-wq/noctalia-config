@@ -960,8 +960,33 @@ UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-po
 if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable "${UNITS[@]}" >/dev/null 2>&1 || true
   [ "$ILE" = quickshell ] || systemctl --user disable --now nc-ile.service >/dev/null 2>&1 || true
-  # Démons de notifications lancés à la demande (dunst, mako) : ils prendraient la place de l'île ou de Noctalia
-  for d in dunst mako; do
+  # Anciennes barres / shells (config d'avant : Waybar, HyprPanel, AGS, eww…) qui démarreraient avec la session par
+  # un service ou un lancement automatique : désactivés après une question (rien n'est désinstallé)
+  barres=(); demarrages=()
+  for b in waybar hyprpanel ags eww polybar; do
+    systemctl --user is-enabled "$b.service" >/dev/null 2>&1 && barres+=("$b")
+  done
+  for f in "$HOME"/.config/autostart/*.desktop /etc/xdg/autostart/*.desktop; do
+    [ -f "$f" ] || continue
+    grep -qiE '^Hidden=true' "$f" && continue
+    grep -qE '^Exec=.*\b(waybar|hyprpanel|ags|eww|polybar|swaync|dunst|mako)\b' "$f" && demarrages+=("$f")
+  done
+  if [ ${#barres[@]} -gt 0 ] || [ ${#demarrages[@]} -gt 0 ]; then
+    info "Ton ancienne config démarre encore : ${barres[*]} ${demarrages[*]##*/}"
+    if ask "Les désactiver (la barre de Noctalia et l'île les remplacent ; rien n'est désinstallé) ?" o; then
+      for b in "${barres[@]}"; do systemctl --user disable --now "$b.service" >/dev/null 2>&1 || true; done
+      mkdir -p "$HOME/.config/autostart"
+      for f in "${demarrages[@]}"; do
+        n="$HOME/.config/autostart/$(basename "$f")"
+        if [ "$f" = "$n" ]; then backup ".config/autostart/$(basename "$f")"; else cp "$f" "$n"; echo ".config/autostart/$(basename "$f")" >> "$BK/.created"; fi
+        printf '\nHidden=true\n' >> "$n"
+      done
+      for b in waybar hyprpanel eww polybar; do pkill -x "$b" 2>/dev/null || true; done
+      ok "Ancienne barre désactivée."
+    fi
+  fi
+  # Démons de notifications lancés à la demande (dunst, mako, swaync) : ils prendraient la place de l'île ou de Noctalia
+  for d in dunst mako swaync; do
     if [ -n "$(systemctl --user list-unit-files "$d.service" --no-legend 2>/dev/null)" ] && ! systemctl --user is-enabled "$d.service" 2>/dev/null | grep -x masked >/dev/null; then
       systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")."
     fi
