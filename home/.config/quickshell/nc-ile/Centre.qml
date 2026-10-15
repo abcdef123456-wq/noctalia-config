@@ -95,7 +95,8 @@ Item {
                         ClippingRectangle {
                             width: 54; height: 54; radius: 12; color: "#2c2c2e"
                             Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
-                            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: "#98989d"; visible: Etat.pochette === "" }
+                            Image { anchors.centerIn: parent; width: 34; height: 34; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(68, 68); visible: Etat.pochette === "" }
+                            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: "#98989d"; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                         }
                         Column {
                             width: parent.width - 64; spacing: 2

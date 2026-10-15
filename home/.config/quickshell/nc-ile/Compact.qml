@@ -39,10 +39,11 @@ Item {
         id: musique
         montre: c.mode === "musique"
         ClippingRectangle {
-            width: 20; height: 20; radius: 6; color: "#2c2c2e"
+            width: 20; height: 20; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : "#2c2c2e"
             anchors.verticalCenter: parent.verticalCenter
             Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
-            Ico { anchors.verticalCenter: parent.verticalCenter; anchors.centerIn: parent; nom: "music_note"; taille: 14; visible: Etat.pochette === "" }
+            Image { anchors.fill: parent; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(40, 40); visible: Etat.pochette === "" }
+            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 14; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.titre; secondaire: true; visible: !Etat.joue; width: Math.min(implicitWidth, 150) }
@@ -55,9 +56,9 @@ Item {
                 Rectangle {
                     required property int index
                     width: 3; radius: 1.5
-                    height: 3 + Etat.bandes[index] * 13
+                    height: 6 + Etat.bandes[index] * 10
                     anchors.verticalCenter: parent.verticalCenter
-                    color: Qt.hsla(0.55 + index * 0.04, 0.85, 0.7, 1)
+                    color: "white"
                     Behavior on height { NumberAnimation { duration: 70 } }
                 }
             }
@@ -106,9 +107,9 @@ Item {
         id: piste
         montre: c.mode === "piste"
         ClippingRectangle {
-            width: 22; height: 22; radius: 6; color: "#2c2c2e"
+            width: 22; height: 22; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : "#2c2c2e"
             anchors.verticalCenter: parent.verticalCenter
-            Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
+            Image { anchors.fill: parent; source: Etat.pochette !== "" ? Etat.pochette : Etat.iconeLecteur; sourceSize: Qt.size(44, 44); fillMode: Image.PreserveAspectCrop; asynchronous: true }
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.titre; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 200) }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.artiste; secondaire: true; width: Math.min(implicitWidth, 140); visible: Etat.artiste !== "" }

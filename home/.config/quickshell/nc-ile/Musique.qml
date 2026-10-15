@@ -22,7 +22,8 @@ Item {
             ClippingRectangle {
                 width: 72; height: 72; radius: 16; color: "#2c2c2e"
                 Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
-                Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: "#98989d"; visible: Etat.pochette === "" }
+                Image { anchors.centerIn: parent; width: 44; height: 44; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(88, 88); visible: Etat.pochette === "" }
+                Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: "#98989d"; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: if (Etat.lecteur && Etat.lecteur.canRaise) { Etat.lecteur.raise(); Etat.fermer() }
@@ -43,9 +44,9 @@ Item {
                     Rectangle {
                         required property int index
                         width: 4; radius: 2
-                        height: Etat.joue ? 6 + Etat.bandes[index] * 22 : 6
+                        height: Etat.joue ? 8 + Etat.bandes[index] * 20 : 8
                         anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.hsla(0.55 + index * 0.04, 0.85, 0.7, 1)
+                        color: "white"; opacity: Etat.joue ? 1 : 0.4
                         Behavior on height { NumberAnimation { duration: 70 } }
                     }
                 }

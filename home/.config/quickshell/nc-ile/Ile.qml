@@ -170,7 +170,7 @@ PanelWindow {
                     required property int index
                     readonly property bool active: modelData === Etat.vueActive
                     width: 6; height: active ? 14 : 6; radius: 3
-                    color: active ? "white" : (Etat.activites.indexOf(modelData) >= 0 ? "#ff9f0a" : "#5a5a5e")
+                    color: active ? "white" : "#5a5a5e"
                     Behavior on height { SpringAnimation { spring: 5; damping: 0.5 } }
                     MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller(parent.modelData) }
                 }

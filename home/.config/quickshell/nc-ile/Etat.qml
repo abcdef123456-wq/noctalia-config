@@ -20,7 +20,10 @@ Singleton {
     // Comme sur iPhone : d'abord les activités en cours (musique, minuteur, recharge, mode jeu), puis le centre de
     // contrôle et ses pages de détails ; on descend de l'une à l'autre (points sur le bord droit).
     property string ecranOuvert: ""
+    // Musique au premier plan pendant la lecture, et encore 15 min après une pause (comme l'iPhone)
     readonly property bool aMusique: lecteur !== null && titre !== ""
+                                     && (joue || (lecteur === dernierLecteur && finLecture > 0
+                                                  && maintenant.getTime() - finLecture < 15 * 60000))
     readonly property var activites: {
         var a = []
         if (aMusique) a.push("musique")
@@ -97,17 +100,39 @@ Singleton {
     readonly property var moisCourts: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
     readonly property string dateCourte: jours[maintenant.getDay()].slice(0, 3) + ". " + maintenant.getDate() + " " + moisCourts[maintenant.getMonth()]
 
-    // ── Musique : le lecteur qui joue, sinon le premier ──
-    readonly property var lecteurs: Mpris.players.values
+    // ── Musique : le lecteur qui joue, sinon le dernier qui a joué, sinon le premier qui a un titre ──
+    readonly property var lecteurs: Mpris.players.values.filter(p => (p.trackTitle || "") !== "")
+    property var dernierLecteur: null
+    property real finLecture: 0          // heure de la dernière pause (ms)
     readonly property var lecteur: {
         var l = lecteurs
         for (var i = 0; i < l.length; i++) if (l[i].isPlaying) return l[i]
+        if (dernierLecteur && l.indexOf(dernierLecteur) >= 0) return dernierLecteur
         return l.length > 0 ? l[0] : null
     }
     readonly property bool joue: lecteur !== null && lecteur.isPlaying
-    readonly property string titre: lecteur ? (lecteur.trackTitle || "") : ""
-    readonly property string artiste: lecteur ? (lecteur.trackArtist || "") : ""
+    // Pause notée seulement pour le lecteur qui jouait (pas quand il disparaît et qu'un autre, en pause depuis
+    // longtemps, prend sa place)
+    onJoueChanged: { if (joue) dernierLecteur = lecteur; else if (lecteur !== null && lecteur === dernierLecteur) finLecture = Date.now() }
+    Component.onCompleted: if (joue) dernierLecteur = lecteur
+
+    // Navigateurs : sans métadonnées du site, MPRIS donne le titre de l'onglet (« Épisode 3 – Série – Crunchyroll ») ;
+    // on le découpe : le site devient la source, le reste le titre. Préfixe « (3) » des notifications retiré.
+    readonly property bool navigateur: lecteur !== null
+        && /firefox|chrom|brave|vivaldi|opera|edge|zen|librewolf|floorp/i.test((lecteur.identity || "") + " " + (lecteur.desktopEntry || ""))
+    readonly property var morceauxOnglet: {
+        if (!navigateur || (lecteur.trackArtist || "") !== "") return []
+        var p = (lecteur.trackTitle || "").replace(/^\(\d+\)\s*/, "").split(/\s+[–—|·-]\s+/)
+        return p.length > 1 ? p : []
+    }
+    readonly property string titre: !lecteur ? ""
+        : (morceauxOnglet.length > 1 ? morceauxOnglet.slice(0, -1).join(" – ") : (lecteur.trackTitle || "").replace(/^\(\d+\)\s*/, ""))
+    readonly property string artiste: !lecteur ? ""
+        : ((lecteur.trackArtist || "") !== "" ? lecteur.trackArtist : (morceauxOnglet.length > 1 ? morceauxOnglet[morceauxOnglet.length - 1] : ""))
     readonly property string pochette: lecteur ? (lecteur.trackArtUrl || "") : ""
+    // Sans pochette : icône de l'appli qui joue (Firefox, Spotify…)
+    readonly property string iconeLecteur: !lecteur ? ""
+        : (Quickshell.iconPath(lecteur.desktopEntry || "", true) || Quickshell.iconPath((lecteur.identity || "").toLowerCase(), true) || "")
     function lecturePause() { if (lecteur && lecteur.canTogglePlaying) lecteur.togglePlaying() }
     // Position : relue chaque seconde pendant la lecture (MPRIS ne l'envoie pas en continu)
     Timer { interval: 1000; repeat: true; running: etat.joue && etat.ecranOuvert !== ""; onTriggered: if (etat.lecteur) etat.lecteur.positionChanged() }
@@ -250,17 +275,33 @@ Singleton {
         finActivite.restart()
     }
 
-    // ── Égaliseur de la pilule : basses lues par cava pendant la lecture ──
+    // ── Onde sonore (pilule, page Musique) : basses lues par cava pendant la lecture ; si cava n'entend rien (son
+    //    coupé, cava absent), une onde douce tourne quand même, pour ne pas laisser des barres à plat ──
     property var bandes: [0, 0, 0, 0, 0]
+    property real dernierSon: 0
+    Timer {
+        interval: 110; repeat: true
+        running: etat.joue && etat.maintenant.getTime() - etat.dernierSon > 1500
+        property real t: 0
+        onTriggered: {
+            t += 0.55
+            var b = []
+            for (var i = 0; i < 5; i++) b.push(0.25 + 0.22 * Math.sin(t + i * 1.3) + 0.12 * Math.sin(t * 1.7 + i))
+            etat.bandes = b
+        }
+    }
     Process {
-        running: etat.joue && etat.ecranOuvert === ""
+        running: etat.joue
         command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-cava.conf\"; printf '[general]\\nbars = 10\\nframerate = 30\\n[input]\\nmethod = pipewire\\nsource = auto\\n[output]\\nmethod = raw\\nraw_target = /dev/stdout\\ndata_format = ascii\\nascii_max_range = 100\\nbar_delimiter = 59\\nframe_delimiter = 10\\n' > \"$f\"; exec cava -p \"$f\""]
         stdout: SplitParser {
             onRead: data => {
                 var v = data.split(";")
                 if (v.length < 6) return
                 var b = []
-                for (var i = 0; i < 5; i++) b.push(Math.min(1, (parseInt(v[i]) || 0) / 100))
+                var somme = 0
+                for (var i = 0; i < 5; i++) { b.push(Math.min(1, (parseInt(v[i]) || 0) / 100)); somme += b[i] }
+                if (somme < 0.04) return
+                etat.dernierSon = Date.now()
                 etat.bandes = b
             }
         }
