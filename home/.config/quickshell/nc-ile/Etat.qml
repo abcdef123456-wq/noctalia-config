@@ -191,11 +191,16 @@ Singleton {
         && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile/i.test((n.properties["application.name"] || "") + " " + (n.properties["media.name"] || "")))
     PwObjectTracker { objects: Pipewire.nodes.values.filter(n => n.isStream && !n.isSink) }
     readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].properties["application.name"] || "Une appli") : ""
-    // Caméra : programme qui a un /dev/video* ouvert (sauf PipeWire et les portails, qui la gardent pour les autres)
+    // Caméra : allumée si la webcam est sortie de veille (simple fichier à lire) ; le nom de l'appli n'est cherché
+    // qu'à ce moment-là (parcourir les fichiers ouverts de tous les programmes coûte cher : pas toutes les 3 s)
     property string appliCamera: ""
     Process {
         id: lireCamera
-        command: ["sh", "-c", "for f in /proc/[0-9]*/fd/*; do case \"$(readlink \"$f\" 2>/dev/null)\" in /dev/video*) p=${f#/proc/}; cat /proc/${p%%/*}/comm;; esac; done 2>/dev/null | grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1"]
+        command: ["sh", "-c", "for v in /sys/class/video4linux/video*; do d=$(readlink -f \"$v/device\"); "
+            + "s=$(cat \"$d/power/runtime_status\" 2>/dev/null || cat \"$d/../power/runtime_status\" 2>/dev/null); "
+            + "[ \"$s\" = active ] || continue; "
+            + "for f in /proc/[0-9]*/fd/*; do case \"$(readlink \"$f\" 2>/dev/null)\" in /dev/video*) p=${f#/proc/}; cat /proc/${p%%/*}/comm;; esac; done 2>/dev/null "
+            + "| grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1 | grep . || echo 'Une appli'; exit; done"]
         stdout: StdioCollector { onStreamFinished: etat.appliCamera = text.trim() }
     }
     Timer { interval: 3000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
