@@ -181,8 +181,8 @@ info "Portable : $([ $LAPTOP = 1 ] && echo oui || echo non) · Carte NVIDIA : $(
 
 hypr_bin() { command -v Hyprland 2>/dev/null || command -v hyprland 2>/dev/null || true; }
 hypr_version() {
-  local b v=""
-  b="$(hypr_bin)"
+  local b="${1:-}" v=""
+  [ -n "$b" ] || b="$(hypr_bin)"
   # Numéro qui suit « Hyprland » (ou « Tag: v… ») : la suite de --version liste aussi les bibliothèques (0.5.1…)
   [ -n "$b" ] && v="$("$b" --version 2>/dev/null | grep -oE '^Hyprland v?[0-9]+\.[0-9]+\.[0-9]+|^Tag: v[0-9]+\.[0-9]+\.[0-9]+' |
     head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
@@ -225,6 +225,25 @@ if [ "$MODE" != files ]; then
     bpo_need=(); for p in hypridle xdg-desktop-portal-hyprland uwsm; do pkg_installed "$p" || bpo_need+=("$p"); done
     [ ${#bpo_need[@]} -eq 0 ] || { bpo_on && bpo_install "${bpo_need[@]}"; } || warn "Non installés depuis trixie-backports : ${bpo_need[*]}"
   fi
+  # Vieux Hyprland compilé à la main (ex. /usr/local/bin) qui passe devant celui de la distribution : mis de côté
+  # (déplacé dans /usr/local/nc-ancien-hyprland, pas supprimé), sinon c'est toujours lui qui démarre
+  hb="$(hypr_bin)"
+  for sys_b in /usr/bin/Hyprland /usr/bin/hyprland; do
+    [ -x "$sys_b" ] && [ "$hb" != "$sys_b" ] || continue
+    sv="$(hypr_version "$sys_b")"; hv="$(hypr_version)"
+    { [ -n "$sv" ] && ver_ge "$sv" "$HYPR_MIN" && ! ver_ge "${hv:-0}" "$HYPR_MIN"; } || break
+    info "Un Hyprland $hv installé à la main ($hb) passe devant celui de ta distribution ($sv, $sys_b)."
+    if ask "Le mettre de côté (déplacé dans /usr/local/nc-ancien-hyprland, rien n'est supprimé) ?" o; then
+      cote=/usr/local/nc-ancien-hyprland; d="$(dirname "$hb")"
+      for f in "$d"/Hyprland "$d"/hyprland "$d"/hyprctl "$d"/hyprpm /usr/local/share/wayland-sessions/hyprland*.desktop; do
+        [ -e "$f" ] || continue
+        sudo mkdir -p "$cote$(dirname "$f")" && sudo mv "$f" "$cote$f" && info "  $f → $cote$f"
+      done
+      hash -r
+      ok "Ancien Hyprland mis de côté : celui de ta distribution ($sv) sera utilisé. Pour le remettre : sudo cp -a $cote/. / "
+    fi
+    break
+  done
   hv="$(hypr_version)"
   [ -n "$hv" ] || die "version de Hyprland introuvable."
   if ! ver_ge "$hv" "$HYPR_MIN"; then
