@@ -118,21 +118,33 @@ PanelWindow {
         }
 
         // Spotlight : longue capsule de recherche
-        Recherche {
+        // Chargés seulement quand ils servent (mémoire), gardés le temps de l'animation de fermeture
+        Loader {
             id: spot
+            readonly property int hauteurVoulue: item ? item.hauteurVoulue : 56
             anchors.fill: parent
-            actif: fen.recherche
-            opacity: fen.recherche && ile.width > 560 ? 1 : 0
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: fen.recherche ? 160 : 70; easing.type: Easing.OutCubic } }
+            active: fen.recherche || garderSpot.running || (item !== null && item.occupe)
+            sourceComponent: Recherche {
+                actif: fen.recherche
+                opacity: fen.recherche && ile.width > 560 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: fen.recherche ? 160 : 70; easing.type: Easing.OutCubic } }
+            }
         }
+        Timer { id: garderSpot; interval: 400 }
+        Connections { target: fen; function onRechercheChanged() { if (!fen.recherche) garderSpot.restart() } }
 
-        Banniere {
+        Loader {
             anchors.fill: parent
-            opacity: fen.banniere && ile.height > fen.hauteurBanniere * 0.7 ? 1 : 0
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: fen.banniere ? 180 : 90; easing.type: Easing.OutCubic } }
+            active: fen.banniere || garderBanniere.running
+            sourceComponent: Banniere {
+                opacity: fen.banniere && ile.height > fen.hauteurBanniere * 0.7 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: fen.banniere ? 180 : 90; easing.type: Easing.OutCubic } }
+            }
         }
+        Timer { id: garderBanniere; interval: 400 }
+        Connections { target: fen; function onBanniereChanged() { if (!fen.banniere) garderBanniere.restart() } }
 
         MouseArea {
             anchors.fill: parent

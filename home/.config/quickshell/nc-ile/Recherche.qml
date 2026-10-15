@@ -26,8 +26,12 @@ Item {
     property int sel: 0
     readonly property string q: champ.text.trim()
 
-    onActifChanged: {
-        if (!actif) return
+    // Chargée à la demande : déjà active à sa création (une seule initialisation, une fois tout créé) ; rouverte avant
+    // d'être déchargée : réinitialisée au changement de « actif »
+    property bool cree: false
+    onActifChanged: if (actif && cree) demarrer()
+    Component.onCompleted: { cree = true; if (actif) demarrer() }
+    function demarrer() {
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
@@ -324,6 +328,8 @@ Item {
         }
     }
     property bool entreeEnAttente: false
+    // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
+    readonly property bool occupe: suivi.running || entreeEnAttente
     function valider(i, nouveau) {
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         if (lireApplis.running || applis.length === 0) { entreeEnAttente = true; return }
