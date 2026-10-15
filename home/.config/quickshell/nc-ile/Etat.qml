@@ -126,7 +126,11 @@ Singleton {
     readonly property bool joue: lecteur !== null && lecteur.isPlaying
     // Pause notée seulement pour le lecteur qui jouait (pas quand il disparaît et qu'un autre, en pause depuis
     // longtemps, prend sa place)
-    onJoueChanged: { if (joue) dernierLecteur = lecteur; else if (lecteur !== null && lecteur === dernierLecteur) finLecture = Date.now() }
+    onJoueChanged: {
+        if (joue) dernierLecteur = lecteur; else if (lecteur !== null && lecteur === dernierLecteur) finLecture = Date.now()
+        // Heure du dernier départ / arrêt de lecture : l'écran de verrouillage (nc-verrou-media) montre une pause récente
+        Quickshell.execDetached(["sh", "-c", "d=\"${XDG_CACHE_HOME:-$HOME/.cache}/nc\"; mkdir -p \"$d\" && date +%s > \"$d/derniere-lecture\""])
+    }
     Component.onCompleted: if (joue) dernierLecteur = lecteur
 
     // Navigateurs : sans métadonnées du site, MPRIS donne le titre de l'onglet (« Épisode 3 – Série – Crunchyroll ») ;
