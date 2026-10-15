@@ -27,6 +27,17 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 
 ## Installation
 
+Une seule ligne (Arch, Fedora, Debian 13, Ubuntu) : installe git s'il manque, télécharge le dépôt dans
+`~/noctalia-config` (ou le met à jour), puis lance `./install.sh` :
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/abcdef123456-wq/noctalia-config/main/get.sh)
+```
+
+Sans `curl` (Debian minimal) : `bash <(wget -qO- https://raw.githubusercontent.com/abcdef123456-wq/noctalia-config/main/get.sh)`
+
+Ou à la main :
+
 ```bash
 git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config
 cd ~/noctalia-config
