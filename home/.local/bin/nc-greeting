@@ -16,9 +16,27 @@ lines=${2:-$(tput lines 2>/dev/null || echo 24)}
 # Couleurs du fond d'écran (Noctalia) : accent pour les icônes, le titre et les barres ; contour pour le fond des barres
 P=$(jq -r '.mPrimary // empty' "$HOME/.config/noctalia/colors.json" 2>/dev/null)
 O=$(jq -r '.mOutline // empty' "$HOME/.config/noctalia/colors.json" 2>/dev/null)
+# Couleurs passées en code de terminal « 38;2;R;G;B » : les fastfetch anciens (Debian 13 : 2.40) refusent « #rrggbb »
+# (« invalid color code »). Options des barres : seulement si cette version de fastfetch les connaît (vérifié une
+# fois par version, gardé dans ~/.cache/nc)
+ansi() { [[ "$1" =~ ^#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2}) ]] && printf '38;2;%d;%d;%d' "0x${BASH_REMATCH[1]}" "0x${BASH_REMATCH[2]}" "0x${BASH_REMATCH[3]}"; }
+barres_ok() {
+  local v f
+  v="$(fastfetch --version-raw 2>/dev/null || fastfetch --version 2>/dev/null | head -1)"
+  f="$HOME/.cache/nc/fastfetch-barres"
+  if [ "$(head -1 "$f" 2>/dev/null)" != "$v" ]; then
+    mkdir -p "$(dirname "$f")"
+    { echo "$v"; fastfetch --help 2>/dev/null | grep -q -- 'bar-color-elapsed' && echo oui || echo non; } > "$f"
+  fi
+  [ "$(sed -n 2p "$f")" = oui ]
+}
 COL=()
-[[ "$P" =~ ^#[0-9a-fA-F]{6}$ ]] && COL+=(--color-keys "$P" --color-title "$P" --bar-color-elapsed "$P")
-[[ "$O" =~ ^#[0-9a-fA-F]{6}$ ]] && COL+=(--bar-color-total "$O")
+PA="$(ansi "$P")"; OA="$(ansi "$O")"
+if [ -n "$PA" ]; then
+  COL+=(--color-keys "$PA" --color-title "$PA")
+  barres_ok && COL+=(--bar-color-elapsed "$PA")
+fi
+[ -n "$OA" ] && barres_ok && COL+=(--bar-color-total "$OA")
 
 # Coupe chaque ligne à la largeur donnée sans compter les codes couleur (aucun retour à la ligne disgracieux)
 cut_to() {
