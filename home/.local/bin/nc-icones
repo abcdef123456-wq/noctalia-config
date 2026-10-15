@@ -4,7 +4,9 @@
 Remplace le chat de kitty et le dauphin de Dolphin partout (recherche, barre, sélecteur de fenêtres), et les nomme
 « Terminal » et « Fichiers » :
   - icônes dessinées ici : ~/.local/share/icons/hicolor/scalable/apps/nc-terminal.svg, nc-fichiers.svg ;
-  - raccourcis d'applis copiés dans ~/.local/share/applications avec la nouvelle icône (marqués X-NC-Icone).
+  - raccourcis d'applis copiés dans ~/.local/share/applications avec la nouvelle icône (marqués X-NC-Icone) ;
+  - mêmes icônes sous les noms d'origine (kitty, org.kde.dolphin…) dans ~/.local/share/icons/<thème actif>, pour les
+    notifications et tout ce qui demande l'icône par son nom (aucun fichier du système n'est touché).
 Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icônes d'origine : nc-icones retirer
 """
 import json
@@ -20,8 +22,13 @@ SYSTEME = [Path(d) / "applications" for d in os.environ.get("XDG_DATA_DIRS", "/u
 MARQUE = "X-NC-Icone=true"
 
 # Raccourci d'appli -> icône, et nom affiché (simple, comme sur un téléphone)
-APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers"}
-NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers"}
+APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers", "org.gnome.Nautilus.desktop": "nc-fichiers"}
+NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers", "org.gnome.Nautilus.desktop": "Fichiers"}
+# Noms d'icônes d'origine remplacés aussi dans le thème d'icônes (notifications, sélecteur de fenêtres… demandent
+# l'icône par son nom, sans passer par le raccourci d'appli)
+SURCHARGES = {"nc-terminal": ["kitty"], "nc-fichiers": ["org.kde.dolphin", "org.gnome.Nautilus", "system-file-manager"]}
+BASE_ICONES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "icons"
+INVENTAIRE = BASE_ICONES / ".nc-icones"      # liste des fichiers écrits, pour « nc-icones retirer »
 
 CADRE = """<rect x="16" y="16" width="224" height="224" rx="58" fill="{fond}"/>
   <rect x="17.5" y="17.5" width="221" height="221" rx="56.5" fill="none" stroke="{accent}" stroke-opacity=".35" stroke-width="3"/>"""
@@ -78,12 +85,52 @@ def raccourci(nom, icone):
     ecrire(perso, "\n".join(lignes) + "\n")
 
 
+def themes_actifs():
+    """Thème d'icônes des applis Qt (qt6ct) et GTK, plus hicolor (thème de secours commun)."""
+    noms = {"hicolor"}
+    for fichier, cle in ((HOME / ".config/qt6ct/qt6ct.conf", "icon_theme="), (HOME / ".config/gtk-3.0/settings.ini", "gtk-icon-theme-name=")):
+        try:
+            for ligne in fichier.read_text().splitlines():
+                if ligne.replace(" ", "").startswith(cle):
+                    noms.add(ligne.split("=", 1)[1].strip())
+        except OSError:
+            pass
+    return noms
+
+
+def dossiers_apps(theme):
+    """Dossiers « apps » déclarés par le thème (index.theme du système), ex. 48x48/apps ou scalable/apps."""
+    for base in ["/usr/share/icons", "/usr/local/share/icons"]:
+        index = Path(base) / theme / "index.theme"
+        if index.exists():
+            for ligne in index.read_text(errors="ignore").splitlines():
+                if ligne.startswith("Directories="):
+                    return [d for d in ligne.split("=", 1)[1].split(",") if d.endswith("/apps")]
+    return ["scalable/apps"] if theme == "hicolor" else []
+
+
+def surcharger(svgs):
+    ecrits = []
+    for theme in themes_actifs():
+        for dossier in dossiers_apps(theme):
+            for icone, noms in SURCHARGES.items():
+                for nom in noms:
+                    chemin = BASE_ICONES / theme / dossier / f"{nom}.svg"
+                    ecrire(chemin, svgs[icone])
+                    ecrits.append(str(chemin))
+    ecrire(INVENTAIRE, "\n".join(sorted(ecrits)) + "\n")
+
+
 def retirer():
     for nom, icone in APPS.items():
         p = APPLIS / nom
         if p.exists() and MARQUE in p.read_text():
             p.unlink()
         (ICONES / f"{icone}.svg").unlink(missing_ok=True)
+    if INVENTAIRE.exists():
+        for chemin in INVENTAIRE.read_text().split():
+            Path(chemin).unlink(missing_ok=True)
+        INVENTAIRE.unlink()
     print("Icônes d'origine rétablies.")
 
 
@@ -91,10 +138,12 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer"):
         return retirer()
     c = couleurs()
+    svgs = {}
     for icone, dessin in DESSINS.items():
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  '
-               + CADRE.format(**c) + "\n  " + dessin.format(**c) + "\n</svg>\n")
-        ecrire(ICONES / f"{icone}.svg", svg)
+        svgs[icone] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  '
+                       + CADRE.format(**c) + "\n  " + dessin.format(**c) + "\n</svg>\n")
+        ecrire(ICONES / f"{icone}.svg", svgs[icone])
+    surcharger(svgs)
     for nom, icone in APPS.items():
         raccourci(nom, icone)
 

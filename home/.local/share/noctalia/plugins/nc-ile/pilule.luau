@@ -14,7 +14,8 @@ local JEU = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
 local JOURS = { "dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam." }
 local MOIS = { "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc." }
 local NOMS_PROFIL = { ["power-saver"] = { "leaf", "Économie" }, balanced = { "scale", "Équilibré" }, performance = { "bolt", "Performance" } }
-local VERT = "#34c759"
+-- Couleurs façon Apple (mode sombre) : île noir pur, texte blanc, gris secondaire, vert système
+local NOIR, BLANC, GRIS, PISTE, VERT = "#000000", "#ffffff", "#98989d", "#3a3a3c", "#30d158"
 local BARRES = 5
 local CAR = 7.4            -- largeur moyenne d'un caractère dans la barre (px), pour estimer la taille du contenu
 
@@ -40,55 +41,54 @@ end
 
 -- ── Contenu de la pilule : renvoie (enfants, largeur estimée, signature) ─────
 
+local function egaliseur()
+  local barres = {}
+  for i = 1, BARRES do
+    table.insert(barres, ui.box({ width = 3, height = math.max(3, math.floor(3 + (spectre[i] or 0) * 13)), radius = 2, fill = "primary" }))
+  end
+  return ui.row({ gap = 2, align = "center", height = 16 }, barres)
+end
+
 local function repos()
   local t = os.date("*t")
   local heure = string.format("%02d:%02d", t.hour, t.min)
   if media then
-    local enfants, l = {}, 0
-    local p = media.pochette
-    if p ~= "" and noctalia.fileExists(p) then
-      table.insert(enfants, ui.image({ key = "pochette", path = p, width = 20, height = 20, radius = 10, fit = "cover" }))
-    else
-      table.insert(enfants, ui.glyph({ name = "music", size = 15, color = "primary" }))
-    end
+    -- Comme l'iPhone : pochette à gauche, onde sonore à droite ; l'heure au milieu (et le titre en pause)
     local joue = media.etat == "Playing"
-    table.insert(enfants, ui.label({ text = media.titre, maxWidth = 170, maxLines = 1, fontWeight = "semibold",
-      color = joue and "on_surface" or "on_surface_variant" }))
-    l = 20 + texte(media.titre, 170)
-    if media.etat == "Playing" then
-      local barres = {}
-      for i = 1, BARRES do
-        table.insert(barres, ui.box({ width = 3, height = math.max(3, math.floor(3 + (spectre[i] or 0) * 13)), radius = 2, fill = "primary" }))
-      end
-      table.insert(enfants, ui.row({ gap = 2, align = "center", height = 16 }, barres))
-      l += BARRES * 5
-    else
-      -- En pause : symbole « lecture » (ce que fera un clic droit), titre grisé
-      table.insert(enfants, ui.glyph({ name = "player-play-filled", size = 12, color = "on_surface_variant" }))
-      l += 12
+    local p = media.pochette
+    local gauche = (p ~= "" and noctalia.fileExists(p))
+      and ui.image({ key = "pochette", path = p, width = 20, height = 20, radius = 6, fit = "cover" })
+      or ui.glyph({ name = "music", size = 15, color = "primary" })
+    local milieu = { ui.label({ text = heure, fontWeight = "semibold", color = BLANC }) }
+    local l = 20 + texte(heure) + 9
+    if not joue then
+      table.insert(milieu, ui.label({ text = media.titre, maxWidth = 150, maxLines = 1, color = GRIS }))
+      l += texte(media.titre, 150) + 8
     end
-    table.insert(enfants, ui.label({ text = heure, fontWeight = "bold" }))
-    return enfants, l + texte(heure) + 3 * 9, "media:" .. media.titre .. media.etat
+    local droite = joue and egaliseur() or ui.glyph({ name = "player-play-filled", size = 12, color = GRIS })
+    l += joue and (BARRES * 5) or 12
+    return { gauche, ui.row({ gap = 8, align = "center", flexGrow = 1, justify = "center" }, milieu), droite },
+      l + 40, "media:" .. media.titre .. media.etat
   end
   local date = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month]
   return {
-    ui.label({ text = heure, fontWeight = "bold" }),
-    ui.label({ text = date, color = "on_surface_variant" }),
+    ui.label({ text = heure, fontWeight = "semibold", color = BLANC }),
+    ui.label({ text = date, color = GRIS }),
   }, texte(heure) + texte(date) + 9, "repos"
 end
 
 local function jauge(icone, valeur, couleur)
   return {
-    ui.glyph({ name = icone, size = 16, color = couleur or "primary" }),
-    ui.progress({ width = 120, height = 6, radius = 3, progress = math.max(0, math.min(1, valeur / 100)), fill = couleur or "primary", track = "on_surface/0.15" }),
-    ui.label({ text = valeur .. " %", fontWeight = "semibold", width = 42, textAlign = "end" }),
-  }, 16 + 120 + 42 + 2 * 9
+    ui.glyph({ name = icone, size = 16, color = couleur or BLANC }),
+    ui.progress({ width = 130, height = 6, radius = 3, progress = math.max(0, math.min(1, valeur / 100)), fill = couleur or BLANC, track = PISTE }),
+    ui.label({ text = valeur .. " %", fontWeight = "semibold", width = 42, textAlign = "end", color = BLANC }),
+  }, 16 + 130 + 42 + 2 * 9
 end
 
 local function reaction()
   local a = activite
   if a.genre == "volume" then
-    local e, l = jauge(a.muet and "volume-off" or "volume", a.valeur, a.muet and "on_surface_variant" or nil)
+    local e, l = jauge(a.muet and "volume-off" or "volume", a.valeur, a.muet and GRIS or nil)
     return e, l, "volume"
   elseif a.genre == "luminosite" then
     local e, l = jauge("brightness-half", a.valeur)
@@ -96,34 +96,34 @@ local function reaction()
   elseif a.genre == "piste" then
     local enfants = {}
     if a.pochette ~= "" and noctalia.fileExists(a.pochette) then
-      table.insert(enfants, ui.image({ key = "pochette-r", path = a.pochette, width = 24, height = 24, radius = 7, fit = "cover" }))
+      table.insert(enfants, ui.image({ key = "pochette-r", path = a.pochette, width = 22, height = 22, radius = 6, fit = "cover" }))
     else
       table.insert(enfants, ui.glyph({ name = "music", size = 16, color = "primary" }))
     end
-    table.insert(enfants, ui.label({ text = a.titre, maxWidth = 190, maxLines = 1, fontWeight = "bold" }))
+    table.insert(enfants, ui.label({ text = a.titre, maxWidth = 190, maxLines = 1, fontWeight = "semibold", color = BLANC }))
     local l = 24 + texte(a.titre, 190) + 9
     if a.artiste ~= "" then
-      table.insert(enfants, ui.label({ text = a.artiste, maxWidth = 130, maxLines = 1, color = "on_surface_variant" }))
+      table.insert(enfants, ui.label({ text = a.artiste, maxWidth = 130, maxLines = 1, color = GRIS }))
       l += texte(a.artiste, 130) + 9
     end
     return enfants, l, "piste:" .. a.titre
   elseif a.genre == "charge" then
     local t = (a.branche and "En charge · " or "Sur batterie · ") .. (batterie or "?") .. " %"
     return {
-      ui.glyph({ name = a.branche and "battery-charging" or "battery-2", size = 17, color = a.branche and VERT or "on_surface" }),
-      ui.label({ text = t, fontWeight = "semibold", color = a.branche and VERT or "on_surface" }),
+      ui.glyph({ name = a.branche and "battery-charging" or "battery-2", size = 17, color = a.branche and VERT or BLANC }),
+      ui.label({ text = t, fontWeight = "semibold", color = a.branche and VERT or BLANC }),
     }, 17 + texte(t) + 9, "charge" .. tostring(a.branche)
   elseif a.genre == "profil" then
     local n = NOMS_PROFIL[a.profil] or { "scale", a.profil }
     return {
-      ui.glyph({ name = n[1], size = 16, color = "primary" }),
-      ui.label({ text = n[2], fontWeight = "semibold" }),
+      ui.glyph({ name = n[1], size = 16, color = a.profil == "power-saver" and VERT or (a.profil == "performance" and "#ff9f0a" or BLANC) }),
+      ui.label({ text = n[2], fontWeight = "semibold", color = BLANC }),
     }, 16 + texte(n[2]) + 9, "profil" .. a.profil
   elseif a.genre == "jeu" then
     local t = a.actif and "Mode jeu" or "Mode jeu désactivé"
     return {
-      ui.glyph({ name = "device-gamepad-2", size = 17, color = a.actif and "primary" or "on_surface_variant" }),
-      ui.label({ text = t, fontWeight = "semibold" }),
+      ui.glyph({ name = "device-gamepad-2", size = 17, color = a.actif and "#ff9f0a" or GRIS }),
+      ui.label({ text = t, fontWeight = "semibold", color = BLANC }),
     }, 17 + texte(t) + 9, "jeu" .. tostring(a.actif)
   end
   return repos()
@@ -152,7 +152,10 @@ function rendre()
   if math.abs(ecart) < 0.5 and math.abs(vitesse) < 0.5 then largeur, vitesse = cible, 0 end
   if opacite < 1 then opacite = math.min(1, opacite + 0.09) end
   animer(largeur ~= cible or opacite < 1 or activite ~= nil or (media ~= nil and media.etat == "Playing"))
-  barWidget.render(ui.row({ width = math.floor(largeur), gap = 9, align = "center", justify = "center", opacity = opacite }, enfants))
+  -- La pilule : noir pur, entièrement arrondie, sans contour (la pastille de la barre est désactivée pour elle)
+  barWidget.render(ui.row({ width = math.floor(largeur), height = 30, radius = 15, fill = NOIR, paddingH = 14, align = "center" }, {
+    ui.row({ flexGrow = 1, gap = 9, align = "center", justify = "center", opacity = opacite }, enfants),
+  }))
 end
 
 local function reagir(a, duree)

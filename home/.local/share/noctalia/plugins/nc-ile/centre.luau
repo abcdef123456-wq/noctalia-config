@@ -7,10 +7,9 @@
 
 local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
 local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
-local L, H = 470, 612                       -- taille du panneau (plugin.toml)
+local L, H = 470, 640                       -- taille du panneau (plugin.toml)
 local JOURS = { "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi" }
 local MOIS = { "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre" }
-local CARTE = "surface_variant/0.55"
 
 local e = {}                                -- état (clé -> texte)
 local listes = { net = {}, bt = {}, sortie = {}, entree = {} }
@@ -82,52 +81,73 @@ local function aller(p)
   dessiner()
 end
 
--- ── Briques ─────────────────────────────────────────────────────────────────
+-- ── Briques (langage visuel d'Apple, mode sombre) ───────────────────────────
+-- Île noir pur ; modules gris foncé ; boutons ronds qui s'allument dans la couleur système de leur fonction.
+
+local NOIR, MODULE, MODULE2, GRIS, BLANC = "#000000", "#1c1c1e", "#2c2c2e", "#98989d", "#ffffff"
+local BLEU, VERT, ORANGE, INDIGO, JAUNE, ROSE = "#0a84ff", "#30d158", "#ff9f0a", "#5e5ce6", "#ffd60a", "#ff375f"
+local ETEINT = "#3a3a3c"
 
 local function titrePage(nom, droite)
-  return ui.row({ height = 44, gap = 8, align = "center" }, {
-    ui.button({ glyph = "chevron-left", variant = "ghost", controlSize = "sm", onClick = function() aller("accueil") end }),
-    ui.label({ text = nom, fontSize = 19, fontWeight = "bold", color = "on_surface", flexGrow = 1 }),
+  return ui.row({ height = 44, gap = 6, align = "center" }, {
+    ui.column({ width = 36, height = 36, radius = 18, fill = MODULE2, align = "center", justify = "center",
+      onClick = function() aller("accueil") end }, { ui.glyph({ name = "chevron-left", size = 18, color = BLANC }) }),
+    ui.label({ text = nom, fontSize = 20, fontWeight = "bold", color = BLANC, flexGrow = 1 }),
     droite or ui.spacer({ width = 1 }),
   })
 end
 
 local function ligne(icone, nom, sous, actif, action, droite)
-  return ui.row({ height = 54, flexGrow = 1, gap = 12, paddingH = 14, align = "center", radius = 18,
-    fill = actif and "primary/0.18" or CARTE, onClick = action }, {
-    ui.glyph({ name = icone, size = 19, color = actif and "primary" or "on_surface" }),
+  return ui.row({ height = 56, flexGrow = 1, gap = 12, paddingH = 14, align = "center", radius = 16,
+    fill = MODULE, onClick = action }, {
+    ui.column({ width = 32, height = 32, radius = 16, fill = actif and BLEU or ETEINT, align = "center", justify = "center" }, {
+      ui.glyph({ name = icone, size = 16, color = BLANC }),
+    }),
     ui.column({ flexGrow = 1, gap = 1 }, {
-      ui.label({ text = nom, fontSize = 13, fontWeight = "semibold", color = "on_surface", maxLines = 1, maxWidth = 290 }),
-      ui.label({ text = sous, fontSize = 11, color = actif and "primary" or "on_surface_variant", maxLines = 1 }),
+      ui.label({ text = nom, fontSize = 14, fontWeight = "semibold", color = BLANC, maxLines = 1, maxWidth = 280 }),
+      ui.label({ text = sous, fontSize = 12, color = actif and BLEU or GRIS, maxLines = 1 }),
     }),
     droite or ui.spacer({ width = 1 }),
   })
 end
 
-local function tuile(icone, titre, sous, actif, action, detail)
-  local haut = { ui.glyph({ name = icone, size = 20, color = actif and "on_primary" or "on_surface" }), ui.spacer({ flexGrow = 1 }) }
-  if detail then
-    table.insert(haut, ui.button({ glyph = "chevron-right", variant = "ghost", controlSize = "sm", height = 26, width = 26, onClick = detail }))
-  end
-  return ui.column({ flexGrow = 1, height = 78, radius = 20, paddingH = 12, paddingV = 10, gap = 3, justify = "center",
-    fill = actif and "primary" or CARTE, onClick = action }, {
-    ui.row({ height = 24, align = "center" }, haut),
-    ui.label({ text = titre, fontSize = 12, fontWeight = "semibold", color = actif and "on_primary" or "on_surface", maxLines = 1 }),
-    ui.label({ text = sous, fontSize = 10, color = actif and "on_primary/0.75" or "on_surface_variant", maxLines = 1, maxWidth = 120 }),
+-- Bouton rond façon Centre de contrôle iOS : gris éteint, couleur de la fonction quand il est actif
+local function rond(icone, actif, couleur, info, action, taille)
+  taille = taille or 54
+  return ui.column({ width = taille, height = taille, radius = taille / 2, fill = actif and couleur or ETEINT,
+    align = "center", justify = "center", tooltip = info, onClick = action }, {
+    ui.glyph({ name = icone, size = math.floor(taille * 0.4), color = BLANC }),
+  })
+end
+
+-- Grande pastille avec bouton rond et libellé (style « Concentration » d'iOS)
+local function pastille(icone, titre, sous, actif, couleur, action)
+  return ui.row({ flexGrow = 1, height = 71, gap = 10, paddingH = 12, align = "center", radius = 22, fill = MODULE, onClick = action }, {
+    ui.column({ width = 38, height = 38, radius = 19, fill = actif and couleur or ETEINT, align = "center", justify = "center" }, {
+      ui.glyph({ name = icone, size = 17, color = BLANC }),
+    }),
+    ui.column({ flexGrow = 1, gap = 1 }, {
+      ui.label({ text = titre, fontSize = 13, fontWeight = "semibold", color = BLANC, maxLines = 1 }),
+      ui.label({ text = sous, fontSize = 11, color = GRIS, maxLines = 1, maxWidth = 130 }),
+    }),
   })
 end
 
 local function curseur(icone, valeur, bouton, change, fin, detail)
   valeur = math.floor((valeur or 0) + 0.5)
   local enfants = {
-    ui.button({ glyph = icone, variant = "ghost", controlSize = "sm", onClick = bouton }),
+    ui.column({ width = 36, height = 36, radius = 18, align = "center", justify = "center", onClick = bouton }, {
+      ui.glyph({ name = icone, size = 19, color = BLANC }),
+    }),
     ui.slider({ flexGrow = 1, min = 0, max = 100, step = 1, value = valeur, onChange = change, onDragEnd = fin }),
-    ui.label({ text = valeur .. " %", width = 42, fontSize = 12, fontWeight = "semibold", color = "on_surface_variant", textAlign = "end" }),
+    ui.label({ text = valeur .. " %", width = 44, fontSize = 13, fontWeight = "semibold", color = GRIS, textAlign = "end" }),
   }
   if detail then
-    table.insert(enfants, ui.button({ glyph = "chevron-right", variant = "ghost", controlSize = "sm", onClick = detail }))
+    table.insert(enfants, ui.column({ width = 30, height = 36, align = "center", justify = "center", onClick = detail }, {
+      ui.glyph({ name = "chevron-right", size = 16, color = GRIS }),
+    }))
   end
-  return ui.row({ gap = 6, align = "center", height = 40, paddingH = 6, radius = 20, fill = CARTE }, enfants)
+  return ui.row({ gap = 6, align = "center", height = 54, paddingH = 10, radius = 22, fill = MODULE }, enfants)
 end
 
 local function curseurVolume(detail)
@@ -149,82 +169,89 @@ local function entete()
   local droite = {}
   if bat then
     local charge = e.batterie_etat ~= "Discharging"
-    table.insert(droite, ui.row({ gap = 6, align = "center", paddingH = 12, height = 32, radius = 16, fill = CARTE }, {
-      ui.glyph({ name = charge and "battery-charging" or "battery-2", size = 16, color = (bat <= 20 and not charge) and "error" or "primary" }),
-      ui.label({ text = bat .. " %", fontSize = 13, fontWeight = "semibold", color = "on_surface" }),
-    }))
+    table.insert(droite, ui.label({ text = bat .. " %", fontSize = 13, fontWeight = "semibold", color = BLANC }))
+    table.insert(droite, ui.glyph({ name = charge and "battery-charging" or "battery-2", size = 18,
+      color = charge and VERT or ((bat <= 20) and "#ff453a" or BLANC) }))
   end
-  return ui.row({ align = "center", gap = 10, height = 64 }, {
-    ui.column({ gap = 0, flexGrow = 1 }, {
-      ui.label({ text = string.format("%02d:%02d", t.hour, t.min), fontSize = 38, fontWeight = "bold", color = "on_surface" }),
-      ui.label({ text = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], fontSize = 13, color = "on_surface_variant" }),
-    }),
+  return ui.row({ align = "center", gap = 8, height = 26, paddingH = 6 }, {
+    ui.label({ text = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], fontSize = 13, fontWeight = "semibold", color = GRIS, flexGrow = 1 }),
     ui.row({ gap = 6, align = "center" }, droite),
   })
 end
 
 local function carteMedia()
-  if e.media ~= "1" or e.media_etat == "Stopped" then
-    return ui.row({ gap = 12, align = "center", height = 106, paddingH = 12, radius = 22, fill = CARTE }, {
-      ui.column({ width = 58, height = 58, radius = 14, fill = "primary/0.18", align = "center", justify = "center" }, {
-        ui.glyph({ name = "music", size = 24, color = "primary" }),
-      }),
-      ui.column({ flexGrow = 1, gap = 2 }, {
-        ui.label({ text = "Rien en lecture", fontSize = 15, fontWeight = "bold", color = "on_surface" }),
-        ui.label({ text = "Lance une musique : elle s'affichera ici et dans la pilule.", fontSize = 12, color = "on_surface_variant", maxLines = 1, maxWidth = 330 }),
-      }),
-    })
-  end
+  local rien = e.media ~= "1" or e.media_etat == "Stopped"
   local duree = (tonumber(e.media_duree) or 0) / 1000000
   local pos = tonumber(e.media_position) or 0
   local p = e.media_pochette or ""
   local pochette
-  if p ~= "" and noctalia.fileExists(p) then
-    pochette = ui.image({ key = "pochette-" .. p, path = p, width = 58, height = 58, radius = 14, fit = "cover" })
+  if not rien and p ~= "" and noctalia.fileExists(p) then
+    pochette = ui.image({ key = "pochette-" .. p, path = p, width = 62, height = 62, radius = 12, fit = "cover" })
   else
-    pochette = ui.column({ width = 58, height = 58, radius = 14, fill = "primary/0.18", align = "center", justify = "center" }, {
-      ui.glyph({ name = "music", size = 24, color = "primary" }),
+    pochette = ui.column({ width = 62, height = 62, radius = 12, fill = MODULE2, align = "center", justify = "center" }, {
+      ui.glyph({ name = "music", size = 26, color = GRIS }),
     })
   end
   local joue = e.media_etat == "Playing"
-  return ui.column({ gap = 10, paddingH = 12, paddingV = 12, height = 106, radius = 22, fill = CARTE }, {
-    ui.row({ gap = 12, align = "center" }, {
+  local function commande(icone, taille, action)
+    return ui.column({ width = 40, height = 40, radius = 20, align = "center", justify = "center", onClick = action }, {
+      ui.glyph({ name = icone, size = taille, color = rien and ETEINT or BLANC }),
+    })
+  end
+  local function temps(s)
+    s = math.max(0, math.floor(s or 0))
+    return string.format("%d:%02d", math.floor(s / 60), s % 60)
+  end
+  return ui.column({ gap = 10, padding = 14, height = 140, radius = 26, fill = MODULE }, {
+    ui.row({ gap = 12, align = "center", height = 62 }, {
       pochette,
       ui.column({ flexGrow = 1, gap = 2 }, {
-        ui.label({ text = e.media_titre or "", fontSize = 15, fontWeight = "bold", color = "on_surface", maxLines = 1, maxWidth = 210 }),
-        ui.label({ text = (e.media_artiste or "") .. (joue and "" or "  ·  en pause"), fontSize = 12, color = "on_surface_variant", maxLines = 1, maxWidth = 210 }),
+        ui.label({ text = rien and "Rien en lecture" or (e.media_titre or ""), fontSize = 15, fontWeight = "semibold", color = BLANC, maxLines = 1, maxWidth = 230 }),
+        ui.label({ text = rien and "Lance une musique" or (e.media_artiste or ""), fontSize = 13, color = GRIS, maxLines = 1, maxWidth = 230 }),
       }),
-      ui.row({ gap = 2, align = "center" }, {
-        ui.button({ glyph = "player-skip-back-filled", variant = "ghost", controlSize = "sm", onClick = function() faire({ "playerctl", "previous" }) end }),
-        ui.button({ glyph = joue and "player-pause-filled" or "player-play-filled", variant = "primary", controlSize = "md",
-          onClick = function() faire({ "playerctl", "play-pause" }) end }),
-        ui.button({ glyph = "player-skip-forward-filled", variant = "ghost", controlSize = "sm", onClick = function() faire({ "playerctl", "next" }) end }),
+      ui.row({ gap = 0, align = "center" }, {
+        commande("player-skip-back-filled", 18, function() faire({ "playerctl", "previous" }) end),
+        commande(joue and "player-pause-filled" or "player-play-filled", 26, function() faire({ "playerctl", "play-pause" }) end),
+        commande("player-skip-forward-filled", 18, function() faire({ "playerctl", "next" }) end),
       }),
     }),
-    ui.progress({ height = 4, radius = 2, progress = duree > 0 and math.min(1, pos / duree) or 0, fill = "primary", track = "on_surface/0.12" }),
+    ui.row({ gap = 8, align = "center", height = 16 }, {
+      ui.label({ text = temps(pos), width = 38, fontSize = 11, color = GRIS }),
+      ui.progress({ flexGrow = 1, height = 4, radius = 2, progress = duree > 0 and math.min(1, pos / duree) or 0, fill = BLANC, track = ETEINT }),
+      ui.label({ text = "-" .. temps(math.max(0, duree - pos)), width = 42, fontSize = 11, color = GRIS, textAlign = "end" }),
+    }),
   })
 end
 
-local function tuiles()
+local function reglages()
   local wifi, bt, dnd = e.wifi == "on", e.bluetooth == "on", e.dnd == "on"
   local nuit = noctalia.state.get("nuit") == true
   local jeu, halo = e.jeu == "1", e.halo == "1"
-  return ui.column({ gap = 8, height = 164 }, {
-    ui.row({ gap = 8, height = 78 }, {
-      tuile(wifi and "wifi" or "wifi-off", "Wi-Fi", wifi and ((e.reseau ~= "" and e.reseau) or "Activé") or "Coupé", wifi,
-        function() msg("wifi-toggle") end, function() aller("wifi") end),
-      tuile(bt and "bluetooth" or "bluetooth-off", "Bluetooth", bt and "Activé" or "Coupé", bt,
-        function() msg("bluetooth-toggle") end, function() aller("bluetooth") end),
-      tuile(dnd and "bell-off" or "bell", "Ne pas déranger", dnd and "Notifications en pause" or "Désactivé", dnd,
-        function() msg("notification-dnd-toggle") end),
+  -- Module de connexions : quatre boutons ronds (clic : activer ; clic droit impossible ici, d'où les pastilles › )
+  local connexions = ui.column({ width = 150, height = 150, padding = 14, gap = 14, radius = 26, fill = MODULE, justify = "center", align = "center" }, {
+    ui.row({ gap = 14, height = 54 }, {
+      rond(wifi and "wifi" or "wifi-off", wifi, BLEU, wifi and ("Wi-Fi : " .. ((e.reseau ~= "" and e.reseau) or "activé")) or "Wi-Fi coupé",
+        function() msg("wifi-toggle") end),
+      rond(bt and "bluetooth" or "bluetooth-off", bt, BLEU, bt and "Bluetooth activé" or "Bluetooth coupé", function() msg("bluetooth-toggle") end),
     }),
-    ui.row({ gap = 8, height = 78 }, {
-      tuile(nuit and "moon-stars" or "moon", "Lumière de nuit", nuit and "Tons chauds" or "Désactivée", nuit,
-        function() noctalia.state.set("nuit", not nuit); msg("nightlight-force-toggle") end),
-      tuile("device-gamepad-2", "Mode jeu", jeu and "Effets coupés" or "Désactivé", jeu,
-        function() faire({ "hyprctl", "eval", "nc.mode_jeu()" }) end),
-      tuile("wave-sine", "Halo musical", halo and "Suit les basses" or "Coupé", halo,
-        function() faire({ "systemctl", "--user", halo and "stop" or "start", "nc-pouls" }) end),
+    ui.row({ gap = 14, height = 54 }, {
+      rond(dnd and "moon" or "bell", dnd, INDIGO, dnd and "Ne pas déranger : activé" or "Ne pas déranger", function() msg("notification-dnd-toggle") end),
+      rond("device-gamepad-2", jeu, ORANGE, jeu and "Mode jeu : activé" or "Mode jeu", function() faire({ "hyprctl", "eval", "nc.mode_jeu()" }) end),
+    }),
+  })
+  local reseau = (wifi and ((e.reseau ~= "" and e.reseau) or "Activé")) or "Coupé"
+  return ui.row({ gap = 12, height = 150 }, {
+    connexions,
+    ui.column({ flexGrow = 1, gap = 8 }, {
+      ui.row({ gap = 8, height = 71 }, {
+        pastille("wifi", "Wi-Fi", reseau, wifi, BLEU, function() aller("wifi") end),
+      }),
+      ui.row({ gap = 8, height = 71 }, {
+        pastille(nuit and "moon-stars" or "sun", "Nuit", nuit and "Tons chauds" or "Désactivée", nuit, ORANGE,
+          function() noctalia.state.set("nuit", not nuit); msg("nightlight-force-toggle") end),
+        pastille("wave-sine", "Halo", halo and "Musique" or "Coupé", halo, ROSE,
+          function() faire({ "systemctl", "--user", halo and "stop" or "start", "nc-pouls" }) end),
+      }),
     }),
   })
 end
@@ -232,36 +259,41 @@ end
 local function curseurs()
   local enfants = { curseurVolume(function() aller("son") end) }
   if luminosite then
-    table.insert(enfants, curseur("brightness-half", luminosite, nil, function(v)
+    table.insert(enfants, curseur("sun", luminosite, nil, function(v)
       luminosite = tonumber(v) or luminosite
       noctalia.runAsync({ LUM, "set", tostring(math.max(1, math.floor(luminosite))) })
       dessiner()
     end, function() lire() end))
   end
-  return ui.column({ gap = 8, height = #enfants * 40 + (#enfants - 1) * 8 }, enfants)
+  return ui.column({ gap = 10, height = #enfants * 54 + (#enfants - 1) * 10 }, enfants)
 end
 
+-- Sélecteur segmenté façon iOS
 local function profils()
   local actuel = e.profil or ""
   if actuel == "" then return nil end
-  local function choix(id, icone, nom)
-    return ui.button({ text = nom, glyph = icone, flexGrow = 1, controlSize = "sm",
-      variant = actuel == id and "primary" or "ghost", onClick = function() msg("power-set", id) end })
+  local function choix(id, icone, nom, couleur)
+    local actif = actuel == id
+    return ui.row({ flexGrow = 1, height = 34, radius = 12, gap = 6, align = "center", justify = "center",
+      fill = actif and "#636366" or NOIR .. "00", onClick = function() msg("power-set", id) end }, {
+      ui.glyph({ name = icone, size = 14, color = actif and couleur or GRIS }),
+      ui.label({ text = nom, fontSize = 13, fontWeight = "semibold", color = actif and BLANC or GRIS }),
+    })
   end
-  return ui.row({ gap = 4, padding = 4, height = 44, align = "center", radius = 22, fill = CARTE }, {
-    choix("power-saver", "leaf", "Économie"),
-    choix("balanced", "scale", "Équilibré"),
-    choix("performance", "bolt", "Performance"),
+  return ui.row({ gap = 2, padding = 3, height = 40, align = "center", radius = 14, fill = MODULE }, {
+    choix("power-saver", "leaf", "Économie", VERT),
+    choix("balanced", "scale", "Équilibré", BLANC),
+    choix("performance", "bolt", "Performance", ORANGE),
   })
 end
 
 local function pied()
   local function action(icone, info, argv)
-    return ui.button({ glyph = icone, variant = "ghost", controlSize = "md", tooltip = info, flexGrow = 1,
-      onClick = function() panel.close(); noctalia.runAsync(argv) end })
+    return rond(icone, false, ETEINT, info, function() panel.close(); noctalia.runAsync(argv) end, 46)
   end
-  return ui.row({ gap = 4, height = 44, align = "center" }, {
+  return ui.row({ gap = 0, height = 46, align = "center", justify = "space_between", paddingH = 6 }, {
     action("screenshot", "Capture à annoter", { "noctalia", "msg", "screenshot-annotate" }),
+    action("bluetooth", "Appareils Bluetooth", { "noctalia", "msg", "plugin", "nc/ile:centre", "all", "page", "bluetooth" }),
     action("bell-ringing", "Notifications et agenda", { "noctalia", "msg", "panel-toggle", "control-center" }),
     action("settings", "Réglages de la barre", { "noctalia", "msg", "settings-open" }),
     action("lock", "Verrouiller", { "noctalia", "msg", "session", "lock" }),
@@ -270,7 +302,7 @@ local function pied()
 end
 
 local function accueil()
-  local blocs = { entete(), carteMedia(), tuiles(), curseurs() }
+  local blocs = { entete(), carteMedia(), reglages(), curseurs() }
   local p = profils()
   if p then table.insert(blocs, p) end
   table.insert(blocs, pied())
@@ -296,17 +328,17 @@ local function pageWifi()
   local wifi = e.wifi == "on"
   local lignes = {}
   if not wifi then
-    table.insert(lignes, ui.label({ text = "Le Wi-Fi est coupé.", fontSize = 13, color = "on_surface_variant" }))
+    table.insert(lignes, ui.label({ text = "Le Wi-Fi est coupé.", fontSize = 13, color = GRIS }))
   elseif #listes.net == 0 then
-    table.insert(lignes, ui.label({ text = "Recherche des réseaux…", fontSize = 13, color = "on_surface_variant" }))
+    table.insert(lignes, ui.label({ text = "Recherche des réseaux…", fontSize = 13, color = GRIS }))
   end
   for _, n in ipairs(wifi and listes.net or {}) do
     local nom, actif, sig, secu, connu = n[2], n[1] == "1", tonumber(n[3]) or 0, n[4] == "1", n[5] == "1"
     local icone = sig >= 67 and "wifi" or (sig >= 34 and "wifi-2" or "wifi-1")
     local sous = actif and "Connecté" or (enCours[nom] and "Connexion…" or (connu and "Enregistré" or (secu and "Sécurisé" or "Ouvert")))
     local droite = nil
-    if actif then droite = ui.glyph({ name = "check", size = 18, color = "primary" })
-    elseif secu then droite = ui.glyph({ name = "lock", size = 15, color = "on_surface_variant" }) end
+    if actif then droite = ui.glyph({ name = "check", size = 18, color = BLEU })
+    elseif secu then droite = ui.glyph({ name = "lock", size = 15, color = GRIS }) end
     table.insert(lignes, ui.row({ key = "net-" .. nom, height = 54 }, { ligne(icone, nom, sous, actif, function() connecter(n) end, droite) }))
     if saisie == nom then
       table.insert(lignes, ui.row({ key = "mdp-ligne-" .. nom, gap = 8, height = 44, align = "center" }, {
@@ -344,9 +376,9 @@ local function pageBluetooth()
   local bt = e.bluetooth == "on"
   local lignes = {}
   if not bt then
-    table.insert(lignes, ui.label({ text = "Le Bluetooth est coupé.", fontSize = 13, color = "on_surface_variant" }))
+    table.insert(lignes, ui.label({ text = "Le Bluetooth est coupé.", fontSize = 13, color = GRIS }))
   elseif #listes.bt == 0 then
-    table.insert(lignes, ui.label({ text = "Aucun appareil associé.", fontSize = 13, color = "on_surface_variant" }))
+    table.insert(lignes, ui.label({ text = "Aucun appareil associé.", fontSize = 13, color = GRIS }))
   end
   for _, d in ipairs(bt and listes.bt or {}) do
     local mac, nom, connecte = d[1], d[2], d[3] == "1"
@@ -359,7 +391,7 @@ local function pageBluetooth()
           if r.exitCode ~= 0 then noctalia.notifyError("Bluetooth", "« " .. nom .. " » ne répond pas.") end
         end)
         dessiner()
-      end, connecte and ui.glyph({ name = "check", size = 18, color = "primary" }) or nil),
+      end, connecte and ui.glyph({ name = "check", size = 18, color = BLEU }) or nil),
     }))
   end
   return {
@@ -375,25 +407,24 @@ end
 -- ── Page Son ────────────────────────────────────────────────────────────────
 
 local function pageSon()
-  local lignes = { ui.label({ text = "SORTIE", fontSize = 11, fontWeight = "bold", color = "on_surface_variant", height = 18 }) }
+  local lignes = { ui.label({ text = "SORTIE", fontSize = 11, fontWeight = "bold", color = GRIS, height = 18 }) }
   for _, s in ipairs(listes.sortie) do
     local id, nom, defaut = s[1], s[2], s[3] == "1"
     local bas = string.lower(nom)
     local icone = (string.find(bas, "casque") or string.find(bas, "head") or string.find(bas, "airpods")) and "headphones" or "device-speaker"
     table.insert(lignes, ui.row({ key = "so-" .. id, height = 54 }, {
       ligne(icone, nom, defaut and "Utilisée" or "Choisir", defaut, function() faire({ "wpctl", "set-default", id }) end,
-        defaut and ui.glyph({ name = "check", size = 18, color = "primary" }) or nil),
+        defaut and ui.glyph({ name = "check", size = 18, color = BLEU }) or nil),
     }))
   end
-  table.insert(lignes, ui.label({ text = "MICROPHONE", fontSize = 11, fontWeight = "bold", color = "on_surface_variant", height = 26 }))
+  table.insert(lignes, ui.label({ text = "MICROPHONE", fontSize = 11, fontWeight = "bold", color = GRIS, height = 26 }))
   for _, s in ipairs(listes.entree) do
     local id, nom, defaut = s[1], s[2], s[3] == "1"
     local muet = e.micro_muet == "1"
     local droite = nil
     if defaut then
-      droite = ui.button({ glyph = muet and "microphone-off" or "microphone", variant = muet and "ghost" or "primary", controlSize = "sm",
-        tooltip = muet and "Remettre le micro" or "Couper le micro",
-        onClick = function() faire({ "wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle" }) end })
+      droite = rond(muet and "microphone-off" or "microphone", muet, "#ff453a", muet and "Remettre le micro" or "Couper le micro",
+        function() faire({ "wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle" }) end, 34)
     end
     table.insert(lignes, ui.row({ key = "en-" .. id, height = 54 }, {
       ligne("microphone", nom, defaut and (muet and "Utilisé · coupé" or "Utilisé") or "Choisir", defaut,
@@ -417,12 +448,12 @@ function dessiner()
   else blocs = accueil() end
   local contenu = {}
   if anim.a > 0.02 then
-    contenu = { ui.column({ width = L - 36, height = H - 36, gap = 12, align = "stretch", opacity = anim.a }, blocs) }
+    contenu = { ui.column({ width = L - 36, height = H - 36, gap = 14, align = "stretch", opacity = anim.a }, blocs) }
   end
   -- L'île : fond propre (la barre est transparente), bord fin, coins de pilule pendant le déploiement
   panel.render(ui.column({ width = L, height = H, align = "center", justify = "start" }, {
     ui.column({ width = math.floor(anim.w), height = math.floor(anim.h), padding = 18, align = "center", justify = "start",
-      fill = "surface/0.94", radius = math.min(30, anim.h / 2), border = "primary/0.22", borderWidth = 1 }, contenu),
+      fill = NOIR, radius = math.min(42, anim.h / 2) }, contenu),
   }))
 end
 
