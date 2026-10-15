@@ -785,6 +785,14 @@ if [ ! -e "$PERSO" ]; then
 PERSO_EOF
   echo ".config/hypr/perso.lua" >> "$BK/.created"
 fi
+# Commandes nc-* (nc-maj…) trouvées aussi dans bash, sans attendre une reconnexion ni passer à zsh
+if [ -f "$HOME/.bashrc" ] || [ "$(basename "${SHELL:-}")" = bash ]; then
+  if ! grep -qF 'noctalia-config : commandes nc-' "$HOME/.bashrc" 2>/dev/null; then
+    [ -f "$HOME/.bashrc" ] && backup .bashrc
+    printf '\n# noctalia-config : commandes nc-* (nc-maj…) dans ~/.local/bin\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' >> "$HOME/.bashrc"
+  fi
+fi
+
 # Emplacement de ce dépôt, pour nc-maj (mise à jour en une commande)
 if [ -d "$REPO/.git" ]; then mkdir -p "$HOME/.config/nc"; printf '%s\n' "$REPO" > "$HOME/.config/nc/depot"; fi
 
