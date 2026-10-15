@@ -10,6 +10,7 @@ Item {
     property var vue: null
     readonly property var notif: Notifs.banniere
     onNotifChanged: if (notif) vue = notif
+    Component.onCompleted: vue = notif                  // chargée à la demande : la notification est déjà là
 
     ClippingRectangle {
         id: image
