@@ -13,6 +13,7 @@ Calculs dans l'espace perceptuel OKLCH. Aucune dépendance externe.
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -190,7 +191,16 @@ def main():
 
     # --- Hyprland : halo coloré de la fenêtre active, bordure en dégradé, onglets de groupes ---
     def hx(key, fallback):
-        return c.get(key, fallback).lstrip("#")
+        """Couleur en 6 chiffres hexadécimaux, quel que soit le format de colors.json (#rrggbb, #rrggbbaa,
+        rgb(r, g, b)…) ; illisible : couleur de secours (une couleur invalide bloquerait la config Hyprland)."""
+        v = str(c.get(key) or "").strip()
+        m = re.fullmatch(r"#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", v)
+        if m:
+            return m.group(1).lower()
+        m = re.fullmatch(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+).*\)", v)
+        if m:
+            return "".join(f"{min(255, int(x)):02x}" for x in m.groups())
+        return fallback
 
     p, s2, t3 = hx("mPrimary", "8fb3ff"), hx("mSecondary", "b9abff"), hx("mTertiary", "7fdbca")
     sv, osv = hx("mSurfaceVariant", "161a23"), hx("mOnSurfaceVariant", "a3a9b8")
