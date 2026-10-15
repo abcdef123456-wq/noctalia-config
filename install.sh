@@ -1058,7 +1058,7 @@ if [ "$MODE" = full ]; then
     BATLIM=$'# /etc/tlp.d/20-battery-limit.conf : limite de charge (noctalia-config). Recharge sous 75 %, arrêt à 80 %.\n# Charge complète ponctuelle : sudo tlp fullcharge   ·   Pour l\'enlever : sudo rm /etc/tlp.d/20-battery-limit.conf\nSTART_CHARGE_THRESH_BAT0=75\nSTOP_CHARGE_THRESH_BAT0=80'
   fi
   # Réglages TLP faits par toi (autres fichiers de /etc/tlp.d que ceux du dépôt) : gardés tels quels, rien n'est ajouté
-  TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|20-battery-limit)\.conf$' || true)"
+  TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|11-nc-frequence|20-battery-limit)\.conf$' || true)"
   tlp_regle() {   # réglages du dépôt dans /etc/tlp.d (et la limite de charge si choisie) ; vrai si quelque chose a changé
     local ch=1
     if [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ] && [ ! -f /etc/tlp.d/10-legion.conf ]; then
@@ -1066,6 +1066,13 @@ if [ "$MODE" = full ]; then
     fi
     [ -f /etc/tlp.d/10-legion.conf ] && { sbackup /etc/tlp.d/10-legion.conf; sudo rm -f /etc/tlp.d/10-legion.conf; ch=0; }
     cmp -s "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf || { sudo install -Dm0644 "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf; ch=0; }
+    # Fréquence maximale rendue en Équilibré et Performance : sans ça, le plafond de 2 GHz du profil Économie restait
+    # jusqu'au redémarrage (TLP ne touche pas à un réglage absent). Valeur de ce processeur, d'où un fichier à part.
+    fmax="$(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null)"
+    if [ -n "$fmax" ]; then
+      freq="$(printf '# /etc/tlp.d/11-nc-frequence.conf : fréquence maximale du processeur en Performance et Équilibré\n# (noctalia-config ; le profil Économie la plafonne à 2 GHz, voir 10-nc.conf).\nCPU_SCALING_MAX_FREQ_ON_AC=%s\nCPU_SCALING_MAX_FREQ_ON_BAT=%s\n' "$fmax" "$fmax")"
+      [ "$(cat /etc/tlp.d/11-nc-frequence.conf 2>/dev/null)" = "$freq" ] || { printf '%s\n' "$freq" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/11-nc-frequence.conf; ch=0; }
+    fi
     if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
       info "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché."
       if ask "Activer cette limite de charge ?" o; then
