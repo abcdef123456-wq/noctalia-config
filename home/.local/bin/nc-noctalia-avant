@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""nc-noctalia-avant : lancé juste avant Noctalia (ExecStartPre de noctalia.service).
+
+Noctalia réécrit la disposition de l'écran de verrouillage dans ~/.local/state/noctalia/settings.toml à chaque
+déverrouillage, et ce fichier passe avant ~/.config/noctalia/config.toml : une ancienne disposition y restait collée
+(heure, case du mot de passe par défaut…). Elle est retirée à chaque démarrage, pour que Noctalia parte toujours de
+la config. Le reste de settings.toml (thème, fond d'écran…) n'est pas touché.
+"""
+import os
+import re
+
+p = os.path.expanduser("~/.local/state/noctalia/settings.toml")
+try:
+    lignes = open(p).read().splitlines()
+except OSError:
+    raise SystemExit(0)
+garde, saute = [], False
+for l in lignes:
+    if re.match(r"^\s*\[", l):
+        saute = bool(re.match(r"^\s*\[+\s*lockscreen_widgets", l))
+    if not saute:
+        garde.append(l)
+if len(garde) != len(lignes):
+    tmp = p + ".tmp"
+    open(tmp, "w").write("\n".join(garde) + "\n")
+    os.replace(tmp, p)

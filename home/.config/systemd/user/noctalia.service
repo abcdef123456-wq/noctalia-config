@@ -5,6 +5,8 @@ BindsTo=graphical-session.target
 After=graphical-session.target
 
 [Service]
+# Disposition de l'écran de verrouillage enregistrée par Noctalia retirée : il part toujours de config.toml
+ExecStartPre=-%h/.local/bin/nc-noctalia-avant
 ExecStart=/usr/bin/noctalia
 Restart=on-failure
 RestartSec=1
