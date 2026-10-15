@@ -1,84 +1,193 @@
 #!/usr/bin/env python3
-"""nc-icones : icônes sobres, aux couleurs du fond d'écran, pour le terminal (kitty) et les fichiers (Dolphin).
+"""nc-icones : thème d'icônes « NC », dessiné ici, aux couleurs du fond d'écran.
 
-Remplace le chat de kitty et le dauphin de Dolphin partout (recherche, barre, sélecteur de fenêtres), et les nomme
-« Terminal » et « Fichiers » :
-  - icônes dessinées ici : ~/.local/share/icons/hicolor/scalable/apps/nc-terminal.svg, nc-fichiers.svg ;
-  - raccourcis d'applis copiés dans ~/.local/share/applications avec la nouvelle icône (marqués X-NC-Icone) ;
-  - mêmes icônes sous les noms d'origine (kitty, org.kde.dolphin…) dans ~/.local/share/icons/<thème actif>, pour les
-    notifications et tout ce qui demande l'icône par son nom (aucun fichier du système n'est touché).
-Avec un thème d'icônes façon macOS (WhiteSur) : icône Terminal de macOS et Finder à la place des dessins.
-Les fichiers d'un thème remplacés sont gardés (.nc-orig) et remis par « nc-icones retirer ».
+Dessine dans ~/.local/share/icons/NC :
+  - les dossiers (dossier simple et dossiers personnels : Documents, Téléchargements, Musique, Images, Vidéos,
+    Bureau, Modèles, Public, dossier personnel, réseau) et la corbeille ;
+  - le Terminal (à la place du chat de kitty) et les Fichiers (à la place du dauphin de Dolphin et de Nautilus).
+Tout le reste vient de Papirus (thème parent). Les raccourcis d'applis sont copiés dans ~/.local/share/applications
+avec la nouvelle icône et un nom simple (« Terminal », « Fichiers »), marqués X-NC-Icone ; aucun fichier du système
+ni d'un autre thème n'est touché.
 Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icônes d'origine : nc-icones retirer
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 HOME = Path.home()
+DONNEES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
 COULEURS = HOME / ".config/noctalia/colors.json"
-ICONES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "icons/hicolor/scalable/apps"
-APPLIS = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "applications"
+BASE_ICONES = DONNEES / "icons"
+THEME = BASE_ICONES / "NC"
+ICONES = DONNEES / "icons/hicolor/scalable/apps"          # nc-terminal, nc-fichiers : visibles avec tout thème
+APPLIS = DONNEES / "applications"
 SYSTEME = [Path(d) / "applications" for d in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if d]
 MARQUE = "X-NC-Icone=true"
+INVENTAIRE = BASE_ICONES / ".nc-icones"                   # anciennes versions : icônes posées dans d'autres thèmes
 
 # Raccourci d'appli -> icône, et nom affiché (simple, comme sur un téléphone)
 APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers", "org.gnome.Nautilus.desktop": "nc-fichiers"}
 NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers", "org.gnome.Nautilus.desktop": "Fichiers"}
-# Noms d'icônes d'origine remplacés aussi dans le thème d'icônes (notifications, sélecteur de fenêtres… demandent
-# l'icône par son nom, sans passer par le raccourci d'appli)
-SURCHARGES = {"nc-terminal": ["kitty"], "nc-fichiers": ["org.kde.dolphin", "org.gnome.Nautilus", "system-file-manager"]}
-BASE_ICONES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "icons"
-INVENTAIRE = BASE_ICONES / ".nc-icones"      # liste des fichiers écrits, pour « nc-icones retirer »
+# Noms d'icônes demandés directement (notifications, sélecteur de fenêtres…) : servis par le thème NC
+ALIAS = {"nc-terminal": ["kitty", "utilities-terminal", "terminal", "org.gnome.Terminal", "org.gnome.Console"],
+         "nc-fichiers": ["org.kde.dolphin", "org.gnome.Nautilus", "system-file-manager", "file-manager"]}
 
-CADRE = """<rect x="16" y="16" width="224" height="224" rx="58" fill="{fond}"/>
-  <rect x="17.5" y="17.5" width="221" height="221" rx="56.5" fill="none" stroke="{accent}" stroke-opacity=".35" stroke-width="3"/>"""
+INDEX = """[Icon Theme]
+Name=NC
+Comment=Icônes de noctalia-config, aux couleurs du fond d'écran (le reste vient de Papirus)
+Inherits={parents}
+Example=folder
+Directories=scalable/places,scalable/apps
 
-DESSINS = {
-    # Invite de commande : chevron et curseur
-    "nc-terminal": """<path d="M82 96 L122 128 L82 160" fill="none" stroke="{accent}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M138 164 H180" stroke="{texte}" stroke-width="16" stroke-linecap="round"/>""",
-    # Dossier, contour et onglet
-    "nc-fichiers": """<path d="M66 96 Q66 80 82 80 H112 Q119 80 124 85 L134 95 H174 Q190 95 190 111 V164 Q190 180 174 180 H82 Q66 180 66 164 Z"
-        fill="{accent}" fill-opacity=".16" stroke="{accent}" stroke-width="12" stroke-linejoin="round"/>
-  <path d="M66 120 H190" stroke="{accent}" stroke-width="12" stroke-linecap="round"/>""",
-}
+[scalable/places]
+Context=Places
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[scalable/apps]
+Context=Applications
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+"""
 
 
+# ── Couleurs ──
 def couleurs():
     try:
         c = json.loads(COULEURS.read_text())
     except (OSError, ValueError):
         c = {}
-    return {"fond": c.get("mSurface", "#1b1b22"), "accent": c.get("mPrimary", "#8fa8ff"), "texte": c.get("mOnSurface", "#e6e6ef")}
+    return {"fond": c.get("mSurface", "#1b1b22"), "accent": c.get("mPrimary", "#8fa8ff"),
+            "accent2": c.get("mSecondary", c.get("mPrimary", "#8fa8ff")), "texte": c.get("mOnSurface", "#e6e6ef"),
+            "erreur": c.get("mError", "#ff5c6c")}
 
 
+def rvb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def melange(a, b, t):
+    """Couleur entre a (t = 0) et b (t = 1)."""
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(rvb(a), rvb(b)))
+
+
+def clarte(h):
+    r, g, b = (x / 255 for x in rvb(h))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+# ── Dessins ──
+# Dossier : dos sombre avec onglet arrondi, face en dégradé (accent principal vers secondaire), fin liseré clair en
+# haut de la face ; symbole du dossier gravé au centre de la face, dans une teinte sombre de la même couleur.
+DOSSIER = """<defs>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="{haut}"/><stop offset="1" stop-color="{bas}"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 70 Q24 50 44 50 H98 Q108 50 115 57 L125 67 H212 Q232 67 232 87 V196 Q232 216 212 216 H44 Q24 216 24 196 Z" fill="{dos}"/>
+  <rect x="24" y="90" width="208" height="126" rx="20" fill="url(#face)"/>
+  <path d="M44 91 H212" stroke="#ffffff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round"/>
+  <g fill="none" stroke="{trait}" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity=".78">{symbole}</g>"""
+
+# Symboles centrés sur (128, 153), dans un carré d'environ 60 px
+SYMBOLES = {
+    "folder": "",
+    "folder-documents": '<path d="M108 124 H138 L152 138 V180 Q152 184 148 184 H108 Q104 184 104 180 V128 Q104 124 108 124 Z"/><path d="M116 152 H140 M116 166 H134"/>',
+    "folder-download": '<path d="M128 122 V168 M108 150 L128 170 L148 150"/><path d="M104 184 H152"/>',
+    "folder-music": '<path d="M120 176 V128 L152 120 V166"/><circle cx="112" cy="176" r="9"/><circle cx="144" cy="166" r="9"/>',
+    "folder-pictures": '<rect x="100" y="126" width="56" height="54" rx="10"/><path d="M104 172 L120 154 L134 166 L142 158 L154 172"/><circle cx="141" cy="140" r="4"/>',
+    "folder-videos": '<rect x="98" y="128" width="60" height="50" rx="11"/><path d="M121 142 L139 153 L121 164 Z"/>',
+    "user-desktop": '<rect x="98" y="124" width="60" height="42" rx="7"/><path d="M128 166 V180 M112 182 H144"/>',
+    "folder-templates": '<rect x="102" y="126" width="52" height="54" rx="9" stroke-dasharray="9 9"/>',
+    "folder-publicshare": '<circle cx="128" cy="138" r="11"/><path d="M106 180 Q106 158 128 158 Q150 158 150 180"/>',
+    "user-home": '<path d="M102 150 L128 126 L154 150"/><path d="M110 144 V180 H146 V144"/><path d="M122 180 V164 H134 V180"/>',
+    "folder-remote": '<circle cx="128" cy="153" r="27"/><path d="M101 153 H155 M128 126 Q114 153 128 180 Q142 153 128 126"/>',
+}
+# Autres noms qui reprennent un dessin (variantes que demandent certaines applis)
+AUTRES_NOMS = {
+    "folder": ["inode-directory", "folder-open", "folder-drag-accept", "folder-visiting", "folder-new"],
+    "folder-download": ["folder-downloads"],
+    "folder-pictures": ["folder-images"],
+    "folder-videos": ["folder-video"],
+    "user-desktop": ["folder-desktop"],
+    "user-home": ["folder-home"],
+    "folder-publicshare": ["folder-public"],
+    "folder-remote": ["folder-network", "network-workgroup"],
+}
+
+# Corbeille : seau aux bords arrondis, couvercle à poignée ; pleine : papiers froissés qui dépassent
+CORBEILLE = """<path d="M64 84 H192" stroke="{dos}" stroke-width="16" stroke-linecap="round"/>
+  <path d="M108 84 V72 Q108 62 118 62 H138 Q148 62 148 72 V84" fill="none" stroke="{dos}" stroke-width="12" stroke-linejoin="round"/>
+  {papiers}
+  <path d="M76 100 H180 L170 204 Q168 220 152 220 H104 Q88 220 86 204 Z" fill="url(#face)"/>
+  <path d="M110 124 L113 196 M128 124 V196 M146 124 L143 196" stroke="{trait}" stroke-width="9" stroke-linecap="round" opacity=".6"/>"""
+PAPIERS = '<path d="M92 98 Q96 70 122 74 Q132 56 152 72 Q174 70 168 98 Z" fill="{texte}" opacity=".9"/>'
+
+# Applis : tuile sombre bordée de l'accent
+CADRE = """<rect x="16" y="16" width="224" height="224" rx="58" fill="{fond}"/>
+  <rect x="17.5" y="17.5" width="221" height="221" rx="56.5" fill="none" stroke="{accent}" stroke-opacity=".35" stroke-width="3"/>"""
+APPS_DESSINS = {
+    # Invite de commande : chevron et curseur
+    "nc-terminal": """<path d="M82 96 L122 128 L82 160" fill="none" stroke="{accent}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M138 164 H180" stroke="{texte}" stroke-width="16" stroke-linecap="round"/>""",
+    # Petit dossier du thème, posé sur la tuile
+    "nc-fichiers": """<g transform="translate(52 56) scale(.594)">{dossier}</g>""",
+}
+
+
+def svg(corps):
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  ' + corps + "\n</svg>\n"
+
+
+def dessins(c):
+    """Tous les SVG du thème : {nom d'icône: texte}."""
+    sombre = melange(c["accent"], "#000000", 0.62)
+    teintes = {"haut": melange(c["accent"], "#ffffff", 0.08), "bas": melange(c["accent"], c["accent2"], 0.55),
+               "dos": melange(c["accent"], c["fond"], 0.45),
+               # symbole : sombre sur une couleur claire, clair sur une couleur foncée
+               "trait": sombre if clarte(c["accent"]) > 0.42 else melange(c["accent"], "#ffffff", 0.85)}
+    defs = DOSSIER.split("</defs>")[0] + "</defs>"
+    out = {}
+    for nom, symbole in SYMBOLES.items():
+        out[nom] = svg(DOSSIER.format(symbole=symbole, **teintes))
+        for autre in AUTRES_NOMS.get(nom, []):
+            out[autre] = out[nom]
+    vide = CORBEILLE.format(papiers="", **teintes)
+    pleine = CORBEILLE.format(papiers=PAPIERS.format(**c), **teintes)
+    out["user-trash"] = svg(defs.format(**teintes) + "\n  " + vide)
+    out["user-trash-full"] = svg(defs.format(**teintes) + "\n  " + pleine)
+    dossier = DOSSIER.format(symbole="", **teintes)
+    for nom, d in APPS_DESSINS.items():
+        out[nom] = svg(CADRE.format(**c) + "\n  " + d.format(dossier=dossier, **c))
+    return out
+
+
+# ── Écriture ──
 def ecrire(chemin, texte):
     chemin.parent.mkdir(parents=True, exist_ok=True)
-    if chemin.exists() and chemin.read_text() == texte:
+    if chemin.exists() and not chemin.is_symlink() and chemin.read_text() == texte:
         return
+    if chemin.is_symlink():
+        chemin.unlink()
     tmp = chemin.with_suffix(chemin.suffix + ".tmp")
     tmp.write_text(texte)
     os.replace(tmp, chemin)
 
 
-def icone_du_theme(theme, nom):
-    """Chemin réel d'une icône d'appli fournie par un thème (dossier perso ou système), sinon None."""
-    # La grande version (scalable) d'abord : les petites tailles sont parfois un dessin simplifié
-    dossiers = sorted(dossiers_apps(theme), key=lambda d: 0 if "scalable" in d else 1)
+def parents():
+    """Thème parent : Papirus (sombre) s'il est là, sinon Adwaita ; hicolor toujours en dernier."""
     for base in [BASE_ICONES, Path("/usr/share/icons"), Path("/usr/local/share/icons")]:
-        for dossier in dossiers:
-            p = base / theme / dossier / f"{nom}.svg"
-            if p.exists():
-                return p.resolve()
-    return None
-
-
-def theme_macos():
-    """Thème d'icônes façon macOS actif (WhiteSur) : ses propres icônes Terminal et Finder sont gardées."""
-    return next((t for t in themes_actifs() if t.lower().startswith("whitesur")), None)
+        if (base / "Papirus-Dark/index.theme").exists():
+            return "Papirus-Dark,Adwaita,hicolor"
+    return "Adwaita,hicolor"
 
 
 def raccourci(nom, icone):
@@ -107,103 +216,48 @@ def raccourci(nom, icone):
     ecrire(perso, "\n".join(lignes) + "\n")
 
 
-def themes_actifs():
-    """Thème d'icônes des applis Qt (qt6ct) et GTK, plus hicolor (thème de secours commun)."""
-    noms = {"hicolor"}
-    try:
-        g = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"], capture_output=True, text=True).stdout
-        if g.strip():
-            noms.add(g.strip().strip("'"))
-    except OSError:
-        pass
-    for fichier, cle in ((HOME / ".config/qt6ct/qt6ct.conf", "icon_theme="), (HOME / ".config/gtk-3.0/settings.ini", "gtk-icon-theme-name=")):
-        try:
-            for ligne in fichier.read_text().splitlines():
-                if ligne.replace(" ", "").startswith(cle):
-                    noms.add(ligne.split("=", 1)[1].strip())
-        except OSError:
-            pass
-    return noms
-
-
-def dossiers_apps(theme):
-    """Dossiers « apps » déclarés par le thème (index.theme), ex. 48x48/apps, scalable/apps ou apps/scalable."""
-    for base in [str(BASE_ICONES), "/usr/share/icons", "/usr/local/share/icons"]:
-        index = Path(base) / theme / "index.theme"
-        if index.exists():
-            for ligne in index.read_text(errors="ignore").splitlines():
-                if ligne.startswith("Directories="):
-                    # « 48x48/apps » (Papirus, hicolor) ou « apps/scalable » (WhiteSur) ; pas les icônes symboliques
-                    return [d for d in ligne.split("=", 1)[1].split(",")
-                            if "apps" in d.split("/") and "symbolic" not in d]
-    return ["scalable/apps"] if theme == "hicolor" else []
-
-
-def surcharger(svgs, surcharges):
-    anciens = set(INVENTAIRE.read_text().split()) if INVENTAIRE.exists() else set()
-    ecrits = []
-    for theme in themes_actifs():
-        for dossier in dossiers_apps(theme):
-            for icone, noms in surcharges.items():
-                for nom in noms:
-                    lien = BASE_ICONES / theme / dossier / f"{nom}.svg"
-                    lien.parent.mkdir(parents=True, exist_ok=True)
-                    chemin = lien.parent.resolve() / lien.name      # dossier lié (WhiteSur-dark -> WhiteSur) : vrai chemin
-                    if str(chemin) in ecrits:
-                        continue
-                    # Fichier du thème : gardé de côté une fois (remis par « nc-icones retirer »), jamais détruit
-                    orig = chemin.with_name(chemin.name + ".nc-orig")
-                    if (chemin.exists() or chemin.is_symlink()) and str(chemin) not in anciens and not orig.exists():
-                        os.replace(chemin, orig)
-                    elif chemin.is_symlink():
-                        chemin.unlink()
-                    ecrire(chemin, svgs[icone])
-                    ecrits.append(str(chemin))
-        # Thème avec index (icon-theme.cache) : à régénérer, sinon GTK ne voit pas les nouvelles icônes
-        if (BASE_ICONES / theme / "icon-theme.cache").exists():
-            subprocess.run(["gtk-update-icon-cache", "-qf", str(BASE_ICONES / theme)], capture_output=True)
-    ecrire(INVENTAIRE, "\n".join(sorted(ecrits)) + "\n")
+def remettre_autres_themes():
+    """Anciennes versions : icônes posées dans d'autres thèmes (WhiteSur, Papirus…) ; leurs fichiers sont remis."""
+    if not INVENTAIRE.exists():
+        return
+    for chemin in INVENTAIRE.read_text().split():
+        p = Path(chemin)
+        p.unlink(missing_ok=True)
+        orig = p.with_name(p.name + ".nc-orig")
+        if orig.exists() or orig.is_symlink():
+            os.replace(orig, p)
+        cache = next((d for d in p.parents if (d / "icon-theme.cache").exists()), None)
+        if cache:
+            subprocess.run(["gtk-update-icon-cache", "-qf", str(cache)], capture_output=True)
+    INVENTAIRE.unlink()
 
 
 def retirer():
+    remettre_autres_themes()
     for nom, icone in APPS.items():
         p = APPLIS / nom
         if p.exists() and MARQUE in p.read_text():
             p.unlink()
         (ICONES / f"{icone}.svg").unlink(missing_ok=True)
-    if INVENTAIRE.exists():
-        for chemin in INVENTAIRE.read_text().split():
-            p = Path(chemin)
-            p.unlink(missing_ok=True)
-            orig = p.with_name(p.name + ".nc-orig")
-            if orig.exists() or orig.is_symlink():
-                os.replace(orig, p)
-        INVENTAIRE.unlink()
-    print("Icônes d'origine rétablies.")
+    shutil.rmtree(THEME, ignore_errors=True)
+    print("Icônes d'origine rétablies (pense à choisir un autre thème d'icônes, par exemple Papirus-Dark).")
 
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer"):
         return retirer()
-    c = couleurs()
-    svgs = {}
-    for icone, dessin in DESSINS.items():
-        svgs[icone] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  '
-                       + CADRE.format(**c) + "\n  " + dessin.format(**c) + "\n</svg>\n")
-    surcharges = SURCHARGES
-    macos = theme_macos()
-    if macos:
-        # Thème façon macOS : icône Terminal de macOS pour kitty (au lieu du chat), Finder déjà fourni pour les fichiers
-        terminal = icone_du_theme(macos, "utilities-terminal")
-        finder = icone_du_theme(macos, "system-file-manager")
-        if terminal:
-            svgs["nc-terminal"] = terminal.read_text()
-        if finder:
-            svgs["nc-fichiers"] = finder.read_text()
-        surcharges = {"nc-terminal": ["kitty"]}
-    for icone in svgs:
-        ecrire(ICONES / f"{icone}.svg", svgs[icone])
-    surcharger(svgs, surcharges)
+    remettre_autres_themes()
+    tout = dessins(couleurs())
+    ecrire(THEME / "index.theme", INDEX.format(parents=parents()))
+    for nom, texte in tout.items():
+        dossier = "apps" if nom.startswith("nc-") else "places"
+        ecrire(THEME / "scalable" / dossier / f"{nom}.svg", texte)
+    for icone, noms in ALIAS.items():
+        ecrire(ICONES / f"{icone}.svg", tout[icone])
+        for nom in noms:
+            ecrire(THEME / "scalable/apps" / f"{nom}.svg", tout[icone])
+    # Pas d'index (icon-theme.cache) : GTK relit le dossier ; on touche le dossier pour qu'il voie les changements
+    os.utime(THEME)
     for nom, icone in APPS.items():
         raccourci(nom, icone)
 

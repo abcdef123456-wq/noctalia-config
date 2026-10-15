@@ -471,23 +471,9 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
 fi
 [ "$migrated" = 1 ] && ok "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde."
 
-# Icônes façon macOS : thème WhiteSur (github.com/vinceliuice/WhiteSur-icon-theme), installé pour toi seul dans
-# ~/.local/share/icons s'il manque (une question) ; sinon Papirus
-ICON_THEME=Papirus-Dark
-WS="$HOME/.local/share/icons/WhiteSur-dark"
-if [ ! -d "$WS" ] && [ "$MODE" != files ] && have git; then
-  info "Icônes façon macOS (dossiers, applis) : thème libre WhiteSur, https://github.com/vinceliuice/WhiteSur-icon-theme"
-  if ask "Le télécharger (environ 80 Mo) et l'installer pour toi ?" o; then
-    wd="$(mktemp -d)"
-    if git clone -q --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git "$wd/ws" && bash "$wd/ws/install.sh" -d "$HOME/.local/share/icons" -t default >/dev/null 2>&1; then
-      ok "Icônes WhiteSur installées."
-    else
-      warn "Téléchargement des icônes WhiteSur impossible : Papirus est gardé."
-    fi
-    rm -rf "$wd"
-  fi
-fi
-[ -d "$WS" ] && ICON_THEME=WhiteSur-dark
+# Icônes : thème « NC » dessiné par nc-icones aux couleurs du fond d'écran (dossiers, corbeille, Terminal,
+# Fichiers), le reste vient de Papirus
+ICON_THEME=NC
 
 # Île dynamique : version Quickshell (dessinée par-dessus la barre, au plus près de l'iPhone) si Quickshell est là,
 # sinon celle du plugin Noctalia. La version Quickshell utilise la police d'icônes Material Symbols Rounded (Google,
@@ -617,6 +603,39 @@ have xdg-mime && [ -n "$(find /usr/share/applications -name org.gnome.Nautilus.d
 
 # Barre latérale de Nautilus, comme les Favoris du Finder : Téléchargements, Documents, Images, Musique, Vidéos
 # (dossiers de ta langue, ajoutés seulement s'ils existent et n'y sont pas déjà)
+# Dossiers utilisateur : si xdg-user-dirs a créé des dossiers vides en français alors que les tiens existent en
+# anglais (Downloads, Pictures…), on garde les tiens ; Bureau, Modèles et Public vides (inutiles sous Hyprland) sont
+# désactivés. Seuls des dossiers vides sont supprimés.
+python3 -I - <<'PYEOF' 2>/dev/null || true
+import os, re
+maison = os.path.expanduser("~")
+fichier = os.path.join(maison, ".config/user-dirs.dirs")
+if os.path.exists(fichier):
+    anglais = {"DOWNLOAD": "Downloads", "DOCUMENTS": "Documents", "PICTURES": "Pictures", "MUSIC": "Music",
+               "VIDEOS": "Videos", "PROJECTS": "Projects"}
+    inutiles = {"DESKTOP", "TEMPLATES", "PUBLICSHARE"}
+    vide = lambda d: os.path.isdir(d) and not os.listdir(d)
+    lignes, change = [], False
+    for ligne in open(fichier).read().splitlines():
+        m = re.match(r'XDG_(\w+)_DIR="\$HOME/(.*)"$', ligne)
+        if m and m.group(2):
+            cle, d = m.group(1), os.path.join(maison, m.group(2))
+            remplace = None
+            if cle in inutiles and (vide(d) or not os.path.exists(d)):
+                remplace = ""
+            elif cle in anglais and anglais[cle] != m.group(2) and vide(d) and os.path.isdir(os.path.join(maison, anglais[cle])):
+                remplace = anglais[cle]
+            if remplace is not None:
+                ligne = 'XDG_%s_DIR="$HOME/%s"' % (cle, remplace)
+                change = True
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    pass
+        lignes.append(ligne)
+    if change:
+        open(fichier, "w").write("\n".join(lignes) + "\n")
+PYEOF
 python3 -I - "$HOME/.config/gtk-3.0/bookmarks" <<'PYEOF' 2>/dev/null || true
 import os, subprocess, sys, urllib.parse
 fichier = sys.argv[1]

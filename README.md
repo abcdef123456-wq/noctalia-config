@@ -13,8 +13,8 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
 - look façon Apple : île dynamique noir pur qui se déploie depuis la pilule et s'y rétracte (ressort physique),
-  symboles dessinés dans l'esprit des SF Symbols, icônes macOS (thème WhiteSur, proposé à l'installation),
-  icônes « Terminal » et « Fichiers » aux couleurs du fond, explorateur Nautilus façon Finder ;
+  symboles dessinés dans l'esprit des SF Symbols dans l'île ; ailleurs, thème d'icônes maison « NC » (dossiers,
+  corbeille, « Terminal », « Fichiers ») aux couleurs du fond d'écran, explorateur Nautilus façon Finder ;
 - Neovim avec LazyVim et ses extras (C/C++, JavaScript, formatage, Git), plugins aux versions de `lazy-lock.json` ;
 - 3 profils d'énergie (Performance, Équilibré, Économie), mêmes réglages sur tous les portables ; en Économie, animations,
   flou et changement de fond coupés ; **mode jeu** (Super + Alt + G) ;
