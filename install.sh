@@ -129,6 +129,8 @@ pname() {
     noto-fonts:debian) echo fonts-noto-core ;;
     noto-fonts:fedora) echo google-noto-sans-fonts ;;
     noto-fonts:suse) echo noto-sans-fonts ;;
+    quickshell:arch) echo quickshell ;;
+    quickshell:*) ;;   # pas dans les dépôts officiels : l'île du plugin Noctalia est utilisée
     breeze:fedora) echo plasma-breeze ;;
     breeze:suse) echo breeze6-style ;;
     *) echo "$1" ;;
@@ -388,7 +390,7 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell)
 if [ "$MODE" != files ]; then
   say "1. Paquets"
   missing=(); manual=()
@@ -415,7 +417,7 @@ if [ "$MODE" != files ]; then
     for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "installé : $p" || failed+=("$p"); done
     [ ${#failed[@]} -eq 0 ] && ok "Paquets installés." || warn "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}"
   fi
-  if [ ${#manual[@]} -gt 0 ]; then info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3."; fi
+  case " ${manual[*]} " in *" nerdfont "*) info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." ;; esac
 fi
 
 # ── 2. Fichiers ──────────────────────────────────────────────────────────────
@@ -473,6 +475,30 @@ if [ ! -d "$WS" ] && [ "$MODE" != files ] && have git; then
 fi
 [ -d "$WS" ] && ICON_THEME=WhiteSur-dark
 
+# Île dynamique : version Quickshell (dessinée par-dessus la barre, au plus près de l'iPhone) si Quickshell est là,
+# sinon celle du plugin Noctalia. La version Quickshell utilise la police d'icônes Material Symbols Rounded (Google,
+# licence Apache 2.0), téléchargée une fois dans ~/.local/share/fonts.
+ILE=noctalia
+if have qs; then
+  ILE=quickshell
+  POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
+  if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
+    info "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons"
+    if ask "La télécharger (15 Mo) ?" o; then
+      mkdir -p "$(dirname "$POLICE_ICONES")"
+      if curl -fsSL -o "$POLICE_ICONES.tmp" 'https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL,GRAD,opsz,wght%5D.ttf'; then
+        mv "$POLICE_ICONES.tmp" "$POLICE_ICONES"; fc-cache -f "$(dirname "$POLICE_ICONES")" >/dev/null 2>&1 || true; ok "Police d'icônes installée."
+      else
+        rm -f "$POLICE_ICONES.tmp"; warn "Téléchargement impossible : l'île du plugin Noctalia est utilisée."; ILE=noctalia
+      fi
+    else
+      ILE=noctalia
+    fi
+  fi
+  [ -s "$POLICE_ICONES" ] || ILE=noctalia
+fi
+if [ "$ILE" = quickshell ]; then ILE_CENTRE=""; else ILE_CENTRE='"nc/ile:pilule"'; fi
+
 # Style des applis Qt / KDE (Dolphin…) : Breeze, le style moderne de KDE, s'il est installé ; sinon Fusion
 QT_STYLE=Fusion
 [ -n "$(find /usr/lib /usr/lib64 -path '*qt6/plugins/styles/breeze*.so' -print -quit 2>/dev/null || true)" ] && QT_STYLE=Breeze
@@ -486,7 +512,7 @@ while IFS= read -r -d '' src; do
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" "$src" > "$tmp"
+        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
@@ -758,9 +784,11 @@ fi
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "4. Services de ta session"
 UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service)
+[ "$ILE" = quickshell ] && UNITS+=(nc-ile.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
 if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable "${UNITS[@]}" >/dev/null 2>&1 || true
+  [ "$ILE" = quickshell ] || systemctl --user disable --now nc-ile.service >/dev/null 2>&1 || true
   systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path hypridle.service >/dev/null 2>&1 ||
     warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
@@ -769,8 +797,10 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
       # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
       systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service hypridle.service 2>/dev/null || true
+      [ "$ILE" = quickshell ] && { systemctl --user restart nc-ile.service 2>/dev/null || true; }
     else
       systemctl --user start noctalia.service nc-pouls.service 2>/dev/null || true   # rien n'a changé : simplement relancés
+      [ "$ILE" = quickshell ] && { systemctl --user start nc-ile.service 2>/dev/null || true; }
     fi
     [ "$KDE_POLKIT" = 1 ] && { systemctl --user start plasma-polkit-agent.service 2>/dev/null || true; }
   fi

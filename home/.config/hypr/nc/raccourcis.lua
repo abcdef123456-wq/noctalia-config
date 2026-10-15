@@ -198,7 +198,9 @@ touche(SUPER .. " + code:71", cmd("systemctl reboot"),              "Système|Re
 -- Touches multimédia (actives aussi sur l'écran de verrouillage)
 local media = "Système|Son, luminosité, musique"
 -- L'île dynamique (plugin nc/ile) montre le nouveau niveau, à la place des bulles de Noctalia
-local function ile(evenement) return "; noctalia msg plugin nc/ile:pilule all " .. evenement .. " >/dev/null 2>&1" end
+local function ile(evenement)
+    return "; { qs -c nc-ile ipc call ile " .. evenement .. " || noctalia msg plugin nc/ile:pilule all " .. evenement .. "; } >/dev/null 2>&1"
+end
 touche("XF86AudioRaiseVolume",  cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+" .. ile("volume")), media, { locked = true, repeating = true })
 touche("XF86AudioLowerVolume",  cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" .. ile("volume")),      media, { locked = true, repeating = true })
 touche("XF86AudioMute",         cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" .. ile("volume")),     media, { locked = true })

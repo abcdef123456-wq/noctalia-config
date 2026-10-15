@@ -1,0 +1,12 @@
+[Unit]
+Description=Île dynamique (Quickshell) par-dessus la barre de Noctalia (noctalia-config)
+PartOf=graphical-session.target
+After=graphical-session.target noctalia.service
+
+[Service]
+ExecStart=/usr/bin/qs -c nc-ile
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

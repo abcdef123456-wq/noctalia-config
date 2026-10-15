@@ -71,7 +71,7 @@ capsule_padding = 8
 widget_spacing = 6
 font_weight = 600
 start = ["logo", "workspaces", "active_window"]
-center = ["nc/ile:pilule"]                # île dynamique : heure, musique ; clic = centre de contrôle
+center = [@ILE_CENTRE@]                    # île dynamique : île Quickshell par-dessus la barre (vide ici) ou plugin nc/ile
 end = ["group:sys", "tray", "power_profile", "group:status", "notifications"]
 
 [[bar.default.capsule_group]]
