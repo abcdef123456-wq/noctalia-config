@@ -226,48 +226,30 @@ order = "random"
 
 [lockscreen]
 transition = ["disc"]
+blur_intensity = 0.15                     # fond presque net, comme sur iPhone (flou léger)
 
-# Écran de verrouillage épuré : heure, date, mot de passe, et la musique en longue capsule façon île (plugin nc/verrou,
-# à la place du lecteur de Noctalia : titres d'onglet bruts, boutons qui ne répondaient pas)
+# Écran de verrouillage façon iPhone (plugin nc/verrou) : cadenas, date et très grande heure en haut ; musique en
+# longue capsule façon île ; mot de passe dans une simple pilule ; batterie quand le PC est branché
 [lockscreen_widgets]
 enabled = true
-widget_order = ["nc-time", "nc-date", "lockscreen-login-box@@MONITOR@", "nc-musique"]
+widget_order = ["nc-heure", "nc-musique", "lockscreen-login-box@@MONITOR@", "nc-batterie"]
 
-[lockscreen_widgets.widget.nc-time]
-type = "clock"
+[lockscreen_widgets.widget.nc-heure]
+type = "nc/verrou:heure"
 output = "@MONITOR@"
 cx = @LCX@
 cy = @LCY1@
-box_width = 560.0
-box_height = 170.0
+box_width = 640.0
+box_height = 280.0
 
-[lockscreen_widgets.widget.nc-time.settings]
-format = "{:%H:%M}"
-center_text = true
-color = "on_surface"
+[lockscreen_widgets.widget.nc-heure.settings]
 background = false
-shadow = true
-
-[lockscreen_widgets.widget.nc-date]
-type = "clock"
-output = "@MONITOR@"
-cx = @LCX@
-cy = @LCY2@
-box_width = 420.0
-box_height = 36.0
-
-[lockscreen_widgets.widget.nc-date.settings]
-format = "{:%A %d %B}"
-center_text = true
-color = "on_surface_variant"
-background = false
-shadow = true
 
 [lockscreen_widgets.widget.nc-musique]
 type = "nc/verrou:musique"
 output = "@MONITOR@"
 cx = @LCX@
-cy = @LCY4@
+cy = @LCY3@
 box_width = 680.0                         # longue capsule (sans taille : boîte carrée)
 box_height = 104.0
 
@@ -278,18 +260,34 @@ background = false                        # pas de cadre autour : la capsule des
 type = "login_box"
 output = "@MONITOR@"
 cx = @LCX@
-cy = @LCY3@
+cy = @LCY4@
+box_width = 360.0
+box_height = 56.0
 
 [lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@".settings]
 layout = "compact"
-background_opacity = 0.55
-background_radius = 18.0
-input_radius = 12.0
-input_opacity = 0.8
+background_opacity = 0.0                  # pas de cadre : seulement la pilule du mot de passe
+background_radius = 28.0
+input_radius = 28.0
+input_opacity = 0.35
 center_password_text = true
 show_login_button = false
 show_keyboard_layout = false
 show_media = false                        # la musique est dans sa propre capsule (nc-musique)
+show_session_buttons = false
+show_unlock_hint = false                  # pas de bandeau « Saisissez votre mot de passe… »
+show_caps_lock = true
+
+[lockscreen_widgets.widget.nc-batterie]
+type = "nc/verrou:batterie"
+output = "@MONITOR@"
+cx = @LCX@
+cy = @LCY5@
+box_width = 200.0
+box_height = 40.0
+
+[lockscreen_widgets.widget.nc-batterie.settings]
+background = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]

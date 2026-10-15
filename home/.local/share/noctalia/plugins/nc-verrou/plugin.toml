@@ -1,13 +1,21 @@
 id          = "nc/verrou"
-name        = "Musique de l'écran de verrouillage"
+name        = "Écran de verrouillage"
 version     = "1.0.0"
 plugin_api  = 32
 author      = "noctalia-config"
 license     = "MIT"
-description = "Longue capsule noire façon île dynamique : pochette, titre, source, progression et commandes du dernier lecteur actif."
+description = "Écran de verrouillage façon iPhone : heure et date, capsule de musique façon île, batterie quand le PC est branché."
 dependencies = ["playerctl"]
 
 # Widget de bureau, placé sur l'écran de verrouillage (lockscreen_widgets dans config.toml)
 [[desktop_widget]]
 id = "musique"
 entry = "musique.luau"
+
+[[desktop_widget]]
+id = "heure"
+entry = "heure.luau"
+
+[[desktop_widget]]
+id = "batterie"
+entry = "batterie.luau"
