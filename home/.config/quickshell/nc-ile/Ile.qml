@@ -53,7 +53,8 @@ PanelWindow {
     // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
     readonly property bool banniere: !ouverte && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
-    readonly property int hauteurBanniere: Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74
+    readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
+                                           + (Notifs.boutons(Notifs.banniere).length > 0 ? 36 : 0)
 
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
     Rectangle {

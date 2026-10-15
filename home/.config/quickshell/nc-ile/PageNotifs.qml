@@ -98,6 +98,20 @@ Item {
                             font.pixelSize: 13; color: "#d1d1d6"
                             wrapMode: Text.Wrap; maximumLineCount: 3
                         }
+                        Row {
+                            visible: Notifs.boutons(carte.modelData).length > 0
+                            topPadding: 8; spacing: 8
+                            Repeater {
+                                model: Notifs.boutons(carte.modelData)
+                                Rectangle {
+                                    required property var modelData
+                                    width: lbc.implicitWidth + 24; height: 28; radius: 14
+                                    color: zbc.pressed ? "#48484a" : "#3a3a3c"
+                                    Texte { id: lbc; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+                                    MouseArea { id: zbc; anchors.fill: parent; onClicked: Notifs.agir(carte.modelData, parent.modelData) }
+                                }
+                            }
+                        }
                     }
                     // Croix pour retirer la carte (au survol)
                     Rectangle {

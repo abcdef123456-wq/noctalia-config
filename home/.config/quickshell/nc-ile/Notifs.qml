@@ -57,6 +57,14 @@ Singleton {
         if (banniere === notif) banniere = null
         if (!notif.resident) notif.dismiss()
     }
+    // Boutons de la notification (Supprimer, Répondre…) : toutes les actions sauf celle du clic (« default »)
+    function boutons(notif) { return notif ? notif.actions.filter(a => a.identifier !== "default") : [] }
+    function agir(notif, action) {
+        if (!notif || !action) return
+        action.invoke()
+        if (banniere === notif) banniere = null
+        if (!notif.resident) notif.dismiss()
+    }
     function fermer(notif) { if (banniere === notif) banniere = null; if (notif) notif.dismiss() }
     function toutEffacer() { banniere = null; var l = liste; for (var i = 0; i < l.length; i++) l[i].dismiss() }
 

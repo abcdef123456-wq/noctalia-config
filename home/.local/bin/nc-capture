@@ -5,7 +5,8 @@
 #   nc-capture retouche   zone, ouverte tout de suite dans Swappy        Super + Maj + S
 # Fichier : ~/Images/Captures (dossier « Images » de ta langue), « Capture du 2026-10-15 à 23.25.10.png ».
 # L'image est aussi copiée : Ctrl + V la colle directement. Une notification la montre ; un clic l'ouvre dans Swappy
-# pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie).
+# pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
+# corbeille. Dans Swappy, l'icône de corbeille efface seulement les annotations ; Échap ferme Swappy.
 set -uo pipefail
 
 mode="${1:-zone}"
@@ -43,10 +44,11 @@ fi
 
 # Notification avec la capture ; clic : l'annoter dans Swappy (attente en arrière-plan, le raccourci rend la main)
 (
-  action="$(timeout 600 notify-send -a "Capture d'écran" -i "$fichier" -A "default=Annoter" -A "dossier=Ouvrir le dossier" \
-    "Capture enregistrée" "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." 2>/dev/null)"
+  action="$(timeout 600 notify-send -a "Capture d'écran" -i "$fichier" -A "default=Annoter" -A "supprimer=Supprimer" \
+    -A "dossier=Ouvrir le dossier" "Capture enregistrée" "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
+    supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)
     dossier) xdg-open "$dossier" ;;
   esac
 ) >/dev/null 2>&1 &
