@@ -56,6 +56,20 @@ PanelWindow {
     readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
                                            + (Notifs.boutons(Notifs.banniere).length > 0 ? 36 : 0)
 
+    // Point d'activité du micro (orange) ou de la caméra (vert), à droite de la pilule, comme sur iPhone
+    Rectangle {
+        id: pointPrive
+        readonly property bool montre: !fen.ouverte && !fen.banniere && (Etat.microActif || Etat.cameraActive)
+        x: ile.x + ile.width + (bulle.montre ? 44 : 9)
+        y: 9 + 15 - height / 2
+        width: 8; height: 8; radius: 4
+        color: Etat.cameraActive ? "#30d158" : "#ff9f0a"
+        opacity: montre ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: 250 } }
+        Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
+    }
+
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
     Rectangle {
         id: bulle

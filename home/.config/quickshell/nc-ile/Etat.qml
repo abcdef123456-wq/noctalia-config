@@ -182,7 +182,43 @@ Singleton {
     readonly property bool branche: !UPower.onBattery
     // Vraie recharge (pas seulement branché : la limite de charge peut la bloquer vers 80 %)
     readonly property bool enCharge: aBatterie && batterie.state === UPowerDeviceState.Charging
-    onBrancheChanged: if (aBatterie) activite("charge")
+    onBrancheChanged: { if (aBatterie) activite("charge"); if (branche) seuilAlerte = 100 }
+
+    // ── Micro et caméra utilisés (point orange / vert à côté de la pilule, comme sur iPhone) ──
+    // Micro : flux PipeWire qui capture une vraie source (pas le son des haut-parleurs : cava, halo, indicateurs de volume)
+    readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.isStream && !n.isSink && n.audio
+        && (n.properties["media.class"] || "") === "Stream/Input/Audio" && n.properties["stream.capture.sink"] !== "true"
+        && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile/i.test((n.properties["application.name"] || "") + " " + (n.properties["media.name"] || "")))
+    PwObjectTracker { objects: Pipewire.nodes.values.filter(n => n.isStream && !n.isSink) }
+    readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].properties["application.name"] || "Une appli") : ""
+    // Caméra : programme qui a un /dev/video* ouvert (sauf PipeWire et les portails, qui la gardent pour les autres)
+    property string appliCamera: ""
+    Process {
+        id: lireCamera
+        command: ["sh", "-c", "for f in /proc/[0-9]*/fd/*; do case \"$(readlink \"$f\" 2>/dev/null)\" in /dev/video*) p=${f#/proc/}; cat /proc/${p%%/*}/comm;; esac; done 2>/dev/null | grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1"]
+        stdout: StdioCollector { onStreamFinished: etat.appliCamera = text.trim() }
+    }
+    Timer { interval: 3000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
+    readonly property bool microActif: appliMicro !== ""
+    readonly property bool cameraActive: appliCamera !== ""
+    onMicroActifChanged: if (microActif) activite("micro", 3200)
+    onCameraActiveChanged: if (cameraActive) activite("micro", 3200)
+    function nomJoli(n) { return n === "WEBRTC VoiceEngine" ? "Discord" : (n.charAt(0).toUpperCase() + n.slice(1)) }
+
+    // ── Batterie faible : alerte à 20 % puis à 10 % (sur batterie), avec un bouton « Mode Économie » ──
+    property int seuilAlerte: 100       // dernier seuil annoncé (remis à 100 quand on branche)
+    onPourcentChanged: {
+        if (!aBatterie || branche || pourcent <= 0) return
+        var seuil = pourcent <= 10 ? 10 : (pourcent <= 20 ? 20 : 100)
+        if (seuil < seuilAlerte) { seuilAlerte = seuil; alerteBatterie.running = true }
+    }
+    Process {
+        id: alerteBatterie
+        command: ["notify-send", "-a", "Batterie", "-u", etat.seuilAlerte <= 10 ? "critical" : "normal", "-i", "battery-caution",
+                  "-A", "eco=Mode Économie", "Batterie faible : " + etat.pourcent + " %",
+                  etat.seuilAlerte <= 10 ? "Branche ton PC maintenant." : "Pense à brancher ton PC, ou passe en mode Économie."]
+        stdout: StdioCollector { onStreamFinished: if (text.trim() === "eco") etat.choisirProfil(PowerProfile.PowerSaver) }
+    }
     readonly property int profil: PowerProfiles.profile
     onProfilChanged: if (!jeuEnCours) activite("profil")
     function choisirProfil(p) { PowerProfiles.profile = p }

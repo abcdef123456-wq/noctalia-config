@@ -15,7 +15,7 @@ Item {
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
-                                      minuteur: minuteur, "minuteur-fini": fini })[mode] || repos
+                                      minuteur: minuteur, "minuteur-fini": fini, micro: micro })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -141,6 +141,22 @@ Item {
         Texte {
             anchors.verticalCenter: parent.verticalCenter
             text: Etat.profil === PowerProfile.PowerSaver ? "Économie" : (Etat.profil === PowerProfile.Performance ? "Performance" : "Équilibré")
+            font.weight: Font.DemiBold
+        }
+    }
+
+    // ── Micro / caméra : « Discord utilise le micro » ──
+    Fondu {
+        id: micro
+        montre: c.mode === "micro"
+        Ico {
+            anchors.verticalCenter: parent.verticalCenter
+            nom: Etat.cameraActive ? "videocam" : "mic"; taille: 18
+            color: Etat.cameraActive ? "#30d158" : "#ff9f0a"
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            text: Etat.cameraActive ? Etat.nomJoli(Etat.appliCamera) + " utilise la caméra" : Etat.nomJoli(Etat.appliMicro) + " utilise le micro"
             font.weight: Font.DemiBold
         }
     }
