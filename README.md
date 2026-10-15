@@ -10,7 +10,11 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
 - Neovim avec LazyVim et ses extras (C/C++, JavaScript, formatage, Git), plugins aux versions de `lazy-lock.json` ;
-- 3 profils d'énergie (Performance, Équilibré, Économie) ; en Économie, animations, flou et changement de fond coupés ;
+- 3 profils d'énergie (Performance, Équilibré, Économie), mêmes réglages sur tous les portables ; en Économie, animations,
+  flou et changement de fond coupés ; **mode jeu** (Super + Alt + G) ;
+- PC hybride (Intel/AMD + NVIDIA) : bureau sur la carte intégrée, la NVIDIA dort tant qu'un jeu ne la réveille pas ;
+- captures d'écran à annoter, presse-papiers, émojis, lumière de nuit, loupe, en un raccourci chacun ;
+- tes propres raccourcis en une commande (`nc-raccourci`), mise à jour en une commande (`nc-maj`) ;
 - écran de démarrage (logo animé, thème GRUB) et écran de connexion assortis, proposés à l'installation.
 
 ## Installation
@@ -35,13 +39,16 @@ Le script fait tout seul :
 | Terminal | propose zsh, oh-my-zsh, powerlevel10k et la police du terminal, et zsh comme shell par défaut |
 | Neovim | propose la config LazyVim, les outils qu'elle utilise (ripgrep, fd, Node.js, gitui…) et ses plugins (Neovim 0.11.2 ou plus) |
 | Services | active la barre, la synchronisation des couleurs, les miniatures du carrousel, les profils d'énergie, la mise en veille |
-| Étapes système | propose, **une par une** : profils d'énergie, Wi-Fi (Arch), écran de démarrage, écran de connexion |
+| Étapes système | propose, **une par une** : profils d'énergie, Wi-Fi (Arch), écran de démarrage, écran de connexion, pilote NVIDIA |
+
+Relancé, il **saute tout ce qui est déjà en place** (paquets, fichiers identiques, terminal, Neovim, étapes système déjà
+faites) : seul ce qui manque ou a changé est fait.
 
 | Distribution | Hyprland et Noctalia v5 |
 |---|---|
 | Arch et dérivées (CachyOS, EndeavourOS, Manjaro…) | installés depuis les dépôts officiels |
 | Fedora | installés depuis les dépôts officiels |
-| Debian 13, Debian Sid, Ubuntu 26.04 | Noctalia via le dépôt officiel de Noctalia (le script te montre les adresses et demande avant) ; sur Debian 13, Hyprland 0.55 vient de « trixie-backports » |
+| Debian 13, Debian Sid, Ubuntu 26.04 | Noctalia via le dépôt officiel de Noctalia (le script te montre les adresses et demande avant). Debian 13 : Hyprland 0.55, Noctalia et TLP viennent de « trixie-backports », la source officielle de Debian pour les versions récentes, que le script propose d'activer ; Neovim récent (0.11+) proposé depuis neovim.io |
 | openSUSE Tumbleweed et Slowroll | Noctalia via le dépôt indiqué par la documentation (idem) |
 | Autres (NixOS, Gentoo…) | installe-les toi-même ([guide](https://docs.noctalia.dev/noctalia/getting-started/installation/)), puis relance le script |
 
@@ -60,7 +67,9 @@ Le script :
 - ne lance **jamais** de mise à jour système. S'il manque un paquet dans ta base, il te demande de la faire toi-même ;
 - **sauvegarde** chaque fichier remplacé dans `~/.local/state/noctalia-config/backup-<date>/` ;
 - ne touche au démarrage (Plymouth, GRUB, initramfs) que si tu réponds **oui** (non par défaut) ;
-- n'écrase jamais tes images ni les fichiers que le bureau régénère (couleurs, profil d'énergie) ;
+- n'écrase jamais tes images (fonds d'écran, photo de profil) ni les fichiers que le bureau régénère (couleurs, profil d'énergie) ;
+- remplace chaque fichier d'un coup : Hyprland, qui recharge sa config à chaque changement, ne la voit jamais incomplète ;
+- retire l'ancienne config Hyprland au format `.conf` (sauvegardée) : seul `hypridle.conf` reste, hypridle ne lisant que ce format ;
 - peut être relancé sans risque : ce qui est déjà à jour n'est pas recopié ;
 - met à jour une installation faite avec l'ancienne version de ce dépôt (fichiers « legion ») : les anciens fichiers sont
   retirés après sauvegarde, et une session ouverte passe directement au format Lua.
@@ -72,6 +81,27 @@ Le script :
 
 Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Super + /** fiche des raccourcis · **Super + Entrée** terminal ·
 **Super + L** verrouiller · **Super + C** centre de contrôle. La liste complète est dans [RACCOURCIS.md](RACCOURCIS.md).
+
+| Nouveau | Raccourci |
+|---|---|
+| Capture de l'écran · d'une zone · à annoter | **Impr. écran** · **Super + P** · **Super + Maj + S** |
+| Historique du presse-papiers · émojis | **Super + Maj + V** · **Super + .** |
+| Lumière de nuit · ne pas déranger | **Super + N** · **Super + Maj + N** |
+| Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
+| Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
+| Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
+
+### Ajouter tes raccourcis
+
+```bash
+nc-raccourci ajoute "Super+B" "firefox" "Navigateur"     # Super + B lance Firefox
+nc-raccourci                                             # liste tes raccourcis
+nc-raccourci retire "Super+B"
+```
+
+Ils apparaissent tout de suite dans la fiche **Super + /** (section « Mes raccourcis »). Une combinaison déjà prise est
+refusée, en tenant compte de la disposition du clavier (AZERTY, QWERTZ…). Ils sont rangés dans `~/.config/hypr/perso.lua`,
+que tu peux aussi éditer (exemples dedans) et qu'aucune mise à jour ne remplace.
 
 ## Écrans
 
@@ -97,8 +127,20 @@ Les profils viennent du service de ta distribution : TLP sur un portable sous Ar
 de charge à environ 80 % proposée si la batterie la gère), `tuned-ppd` sur Fedora, `power-profiles-daemon` ailleurs. Un service
 déjà en place est gardé. Fréquences par profil : `~/.config/nc-profile.conf` (voir `nc-profile-sync`).
 
-PC hybride (carte intégrée + NVIDIA) : lancer une appli sur la carte NVIDIA avec `nvidia-run <commande>`
-(Steam : `nvidia-run %command%`) ; en Performance, les applis lancées depuis la barre y vont d'elles-mêmes.
+Sur un **portable**, les profils viennent de TLP et tlp-pd avec les réglages du dépôt (`system/tlp.d/10-nc.conf` : processeur,
+turbo, carte PCIe, mode de la plateforme) : les mêmes sur Arch, Fedora 44+, Debian 13 et openSUSE Tumbleweed. Ailleurs, et
+sur un PC fixe, le service de la distribution est utilisé. La limite de charge à 80 % est proposée si la batterie la gère
+(Lenovo, ASUS, Dell, ThinkPad… ; pas encore les Acer sous Linux).
+
+### PC hybride (carte intégrée + NVIDIA)
+
+- Le bureau tourne sur la carte intégrée, qui porte l'écran interne : la NVIDIA peut s'endormir (batterie, chaleur, bruit).
+  Si un écran est branché sur une prise reliée à la NVIDIA à l'ouverture de session, les deux cartes sont utilisées.
+  Réglage dans `~/.config/uwsm/gpu-mode` : `auto` (défaut), `igpu`, `both` ou `off` (détails dans `~/.config/uwsm/env-hyprland`).
+- Lancer une appli sur la NVIDIA : `nvidia-run <commande>` (Steam : `nvidia-run %command%`) ; en Performance, les applis
+  lancées depuis la barre y vont d'elles-mêmes.
+- Pilote : sur Arch, le script installe le pilote officiel s'il manque (`nvidia-open`, nécessaire aux RTX 50). Sur Debian 13,
+  les RTX 50 demandent le pilote de NVIDIA (celui de Debian, 550, est trop ancien) : le script donne la marche à suivre.
 
 ## Personnaliser sans perdre tes réglages
 
@@ -106,9 +148,18 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 | Fichier | Pour |
 |---|---|
-| `~/.config/hypr/perso.lua` | tes raccourcis, règles de fenêtres, écrans (format Lua de Hyprland) |
+| `~/.config/hypr/perso.lua` | tes raccourcis (`nc-raccourci` les y range), règles de fenêtres, écrans (format Lua de Hyprland) |
 | `~/.zshrc.perso` | tes alias et variables du terminal |
 | `~/.config/kitty/perso.conf` | tes réglages de kitty |
+
+## Mettre à jour ton bureau
+
+```bash
+nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
+```
+
+Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
+ne sont jamais remplacés.
 
 ## Mettre à jour le dépôt depuis ta machine
 

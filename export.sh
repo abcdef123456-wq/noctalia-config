@@ -15,6 +15,7 @@ HOME_FILES=(
   .config/hypr/nc
   .config/hypr/hypridle.conf
   .config/uwsm/env
+  .config/uwsm/env-hyprland
   .config/kitty/kitty.conf
   .config/kitty/themes/noctalia-dynamic.conf
   .config/qt6ct/qt6ct.conf
@@ -35,7 +36,9 @@ HOME_FILES=(
   .local/bin/nc-greeting
   .local/bin/nc-keys
   .local/bin/nc-launch
+  .local/bin/nc-maj
   .local/bin/nc-profile-sync
+  .local/bin/nc-raccourci
   .local/bin/nc-shell
   .local/bin/nc-shell-msg
   .local/bin/nc-sysinfo

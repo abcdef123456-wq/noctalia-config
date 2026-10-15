@@ -62,7 +62,7 @@ for d in /sys/bus/pci/devices/*; do
 done
 [ "$nv" = 1 ] && [ "$other" = 1 ] && [ -r "$EGL_DIR/10_nvidia.json" ] && [ -r "$EGL_DIR/50_mesa.json" ] && HYBRID=1
 # Pilotes Vulkan de la carte intégrée (tous sauf NVIDIA)
-IGPU_VK=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -v nvidia | paste -sd:)
+IGPU_VK=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -vE 'nvidia|nouveau' | paste -sd:)
 GPU_STATE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
 
 # Carte des applis lancées (PC hybride) : NVIDIA en Performance, carte intégrée sinon.

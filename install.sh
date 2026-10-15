@@ -64,6 +64,23 @@ case " $OSID $OSLIKE " in
   *suse*) FAMILY=suse ;;
 esac
 
+# Debian 13 (trixie) : Hyprland 0.55+ n'existe que dans les « backports » officiels de Debian (paquets plus récents
+# publiés par Debian elle-même, https://backports.debian.org). bpo_on : vrai si la source est (ou vient d'être) activée ;
+# bpo_install : installe des paquets précis depuis les backports (les autres paquets viennent toujours de trixie).
+BPO=""
+bpo_on() {
+  [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] || return 1
+  if ! apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; then
+    info "Hyprland 0.55 ou plus, TLP 1.9 ou plus : seulement dans « trixie-backports », la source officielle de Debian pour les"
+    info "versions récentes (https://backports.debian.org). Seuls les paquets demandés en viennent, le reste du système ne change pas."
+    ask "Activer trixie-backports ?" o || return 1
+    printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie-backports\nComponents: main\nEnabled: yes\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' |
+      sudo tee /etc/apt/sources.list.d/debian-backports.sources >/dev/null
+    sudo apt-get update -q || return 1
+  fi
+}
+bpo_install() { local r=0; BPO="-t trixie-backports"; pkg_install "$@" || r=$?; BPO=""; return $r; }
+
 pkg_installed() {
   case "$FAMILY" in
     arch) pacman -Q "$1" ;; fedora|suse) rpm -q "$1" ;; debian) dpkg -s "$1" ;; *) false ;;
@@ -73,7 +90,7 @@ pkg_install() {
   case "$FAMILY" in
     arch) sudo pacman -S --needed "$@" ;;
     fedora) sudo dnf install -y "$@" ;;
-    debian) sudo apt-get install -y "$@" ;;
+    debian) sudo apt-get install -y $BPO "$@" ;;
     suse) sudo zypper --non-interactive install "$@" ;;
     *) return 1 ;;
   esac
@@ -97,16 +114,19 @@ pname() {
     gdbus:suse) echo glib2-tools ;;
     gdbus:*) echo glib2 ;;
     nerdfont:arch) echo ttf-cascadia-code-nerd ;;
-    adwaita-fonts:arch) echo adwaita-fonts ;;
-    noto-fonts:arch) echo noto-fonts ;;
-    nerdfont:*|adwaita-fonts:*|noto-fonts:*) ;;
+    nerdfont:*) ;;   # proposée en téléchargement à l'étape 3
+    adwaita-fonts:debian) ;;   # pas de paquet dans Debian 13 : la barre utilise une police de remplacement
+    adwaita-fonts:fedora) echo adwaita-sans-fonts ;;
+    noto-fonts:debian) echo fonts-noto-core ;;
+    noto-fonts:fedora) echo google-noto-sans-fonts ;;
+    noto-fonts:suse) echo noto-sans-fonts ;;
     *) echo "$1" ;;
   esac
 }
 
 # ── Retour arrière ───────────────────────────────────────────────────────────
 if [ "$MODE" = restore ]; then
-  last="$(ls -1d "$STATE"/backup-* "$OLD_STATE"/backup-* 2>/dev/null | awk -F/ '{ print $NF "\t" $0 }' | sort | tail -1 | cut -f2-)"
+  last="$(ls -1d "$STATE"/backup-* "$OLD_STATE"/backup-* 2>/dev/null | awk -F/ '{ print $NF "\t" $0 }' | sort | tail -1 | cut -f2- || true)"
   [ -n "$last" ] || die "aucune sauvegarde trouvée dans $STATE"
   say "Restauration de $last"
   ask "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" n || exit 0
@@ -160,11 +180,21 @@ ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }   
 if [ "$MODE" != files ]; then
   [ "$FAMILY" != other ] || have Hyprland || die "distribution non gérée par l'installateur. Installe Hyprland (0.55 ou plus) et Noctalia v5 ($NOCT_DOCS), puis relance."
 
-  # Hyprland
-  if [ -z "$(hypr_bin)" ]; then
-    info "Hyprland n'est pas installé."
-    ask "L'installer maintenant ?" o || die "Hyprland est nécessaire."
-    pkg_install hyprland || die "installation de Hyprland impossible : installe-le toi-même puis relance."
+  # Hyprland (Debian 13 : depuis trixie-backports, avec sa veille, son portail et uwsm)
+  hv="$(hypr_version)"
+  if [ -z "$(hypr_bin)" ] || { [ -n "$hv" ] && ! ver_ge "$hv" "$HYPR_MIN"; }; then
+    if [ -z "$(hypr_bin)" ]; then info "Hyprland n'est pas installé."; else info "Hyprland $hv est trop ancien (0.55 ou plus)."; fi
+    ask "L'installer maintenant ?" o || die "Hyprland 0.55 ou plus est nécessaire."
+    if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
+      bpo_on || die "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même."
+      bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis trixie-backports."
+    else
+      pkg_install hyprland || die "installation de Hyprland impossible : installe-le toi-même puis relance."
+    fi
+  fi
+  if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
+    bpo_need=(); for p in hypridle xdg-desktop-portal-hyprland uwsm; do pkg_installed "$p" || bpo_need+=("$p"); done
+    [ ${#bpo_need[@]} -eq 0 ] || { bpo_on && bpo_install "${bpo_need[@]}"; } || warn "Non installés depuis trixie-backports : ${bpo_need[*]}"
   fi
   hv="$(hypr_version)"
   [ -n "$hv" ] || die "version de Hyprland introuvable."
@@ -186,7 +216,7 @@ if [ "$MODE" != files ]; then
         url="https://download.opensuse.org/repositories/home:neifua:Noctalia/$rp/home:neifua:Noctalia.repo"
         info "Noctalia n'est pas dans les dépôts d'openSUSE : dépôt tiers indiqué par la documentation officielle :"
         info "$url"
-        ask "Ajouter ce dépôt et installer Noctalia ?" n || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
+        ask "Ajouter ce dépôt et installer Noctalia ?" o || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
         sudo zypper addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --gpg-auto-import-keys refresh && sudo zypper install noctalia ;;
       debian)
         case "$OSCODE" in
@@ -199,11 +229,13 @@ if [ "$MODE" != files ]; then
         info "Noctalia n'est pas dans les dépôts de ta distribution : dépôt officiel indiqué par la documentation :"
         info "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb"
         info "  dépôt : https://pkg.noctalia.dev/deb/$src"
-        ask "Ajouter ce dépôt et installer Noctalia ?" n || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
+        ask "Ajouter ce dépôt et installer Noctalia ?" o || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
         have wget || sudo apt-get install -y wget
         kd="$(mktemp -d)"; wget -q -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
         sudo wget -q -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
-        sudo apt-get update && sudo apt-get install -y noctalia ;;
+        sudo apt-get update -q || true
+        # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
+        if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
     esac
     have noctalia || die "Noctalia v5 n'a pas pu être installé : $NOCT_DOCS"
   fi
@@ -296,11 +328,12 @@ fi
 
 echo
 info "Ce script va :"
+info "  Tout ce qui est déjà en place est sauté : seul ce qui manque ou a changé est fait."
 info "  1. installer les paquets manquants (sans mise à jour système) ;"
 info "  2. sauvegarder puis remplacer ta config Hyprland, Noctalia, kitty, Qt/KDE ;"
 info "  3. te proposer la config du terminal (zsh, oh-my-zsh, powerlevel10k) et de Neovim (LazyVim) ;"
 info "  4. activer les services de ta session (barre, couleurs, miniatures, profils d'énergie, veille) ;"
-[ "$MODE" = full ] && info "  5. te proposer, une par une, les étapes système (énergie, Wi-Fi, démarrage, écran de connexion)."
+[ "$MODE" = full ] && info "  5. te proposer, une par une, les étapes système pas encore faites (énergie, Wi-Fi, démarrage, écran de connexion, pilote NVIDIA)."
 ask "On y va ?" o || exit 0
 
 mkdir -p "$BK"
@@ -345,10 +378,7 @@ if [ "$MODE" != files ]; then
     for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "installé : $p" || failed+=("$p"); done
     [ ${#failed[@]} -eq 0 ] && ok "Paquets installés." || warn "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}"
   fi
-  if [ ${#manual[@]} -gt 0 ]; then
-    info "Polices sans paquet sur ta distribution : « Adwaita Sans » et Noto (barre), à installer à la main si tu les veux ;"
-    info "la police du terminal (CaskaydiaCove Nerd Font) t'est proposée à l'étape 3."
-  fi
+  if [ ${#manual[@]} -gt 0 ]; then info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3."; fi
 fi
 
 # ── 2. Fichiers ──────────────────────────────────────────────────────────────
@@ -388,7 +418,7 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
 fi
 [ "$migrated" = 1 ] && ok "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde."
 
-copied=0; same=0
+copied=0; same=0; hypr_changed=0
 root="$REPO/home"
 while IFS= read -r -d '' src; do
   rel="${src#"$root/"}"
@@ -403,43 +433,65 @@ while IFS= read -r -d '' src; do
   fi
   if [ -f "$dst" ] && cmp -s "$tmp" "$dst"; then same=$((same + 1)); continue; fi
   case "$rel" in
-    # Jamais écrasés : tes images et les fichiers régénérés automatiquement sur ce PC
-    Pictures/Wallpapers/* | .config/hypr/nc/couleurs.lua | .config/hypr/nc/profil.lua \
+    # Jamais écrasés : tes images (fonds d'écran, photo de profil) et les fichiers régénérés automatiquement sur ce PC
+    Pictures/Wallpapers/* | .face | .config/hypr/nc/couleurs.lua | .config/hypr/nc/profil.lua | .config/kdeglobals \
     | .config/noctalia/colors.json | .config/kitty/themes/noctalia-dynamic.conf)
       [ -e "$dst" ] && { same=$((same + 1)); continue; } ;;
   esac
   if [ -e "$dst" ] || [ -L "$dst" ]; then
     backup "$rel"
-    rm -f "$dst"
   else
     echo "$rel" >> "$BK/.created"
   fi
+  # Remplacement d'un seul coup (renommage) : le fichier n'est jamais absent ni à moitié écrit, même pour
+  # Hyprland qui recharge sa config dès qu'un fichier change
   mkdir -p "$(dirname "$dst")"
-  cp "$tmp" "$dst"
-  chmod --reference="$src" "$dst"
+  cp "$tmp" "$dst.nc-new"
+  chmod --reference="$src" "$dst.nc-new"
+  mv -f "$dst.nc-new" "$dst"
   copied=$((copied + 1))
+  case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
 done < <(find "$root" -type f -print0)
-ok "$copied fichier(s) installé(s), $same déjà à jour. Sauvegarde : $BK"
+ok "$copied fichier(s) installé(s), $same déjà à jour.$([ "$copied" -gt 0 ] && echo " Sauvegarde : $BK")"
 
 # Session Hyprland ouverte avec l'ancien format : bascule à chaud vers hyprland.lua, avant de retirer l'ancienne config
 # (Hyprland recharge sa config dès qu'un fichier change : la retirer avant la bascule laisserait la session sans réglages).
-if have hyprctl && hyprctl systeminfo 2>/dev/null | grep -q 'configProvider: hyprlang'; then
+if have hyprctl && hyprctl systeminfo 2>/dev/null | grep 'configProvider: hyprlang' >/dev/null; then
   hyprctl reload full-reset >/dev/null 2>&1 && ok "Session Hyprland passée au format Lua."
 fi
-# Ancienne config Hyprland (format hyprlang) : retirée si elle vient de ce dépôt, sinon gardée de côté
+# Config Hyprland changée : un seul rechargement, une fois tous les fichiers en place
+[ "$hypr_changed" = 1 ] && have hyprctl && hyprctl systeminfo 2>/dev/null | grep 'configProvider: lua' >/dev/null && hyprctl reload >/dev/null 2>&1
+# Ancienne config Hyprland (format hyprlang) : remplacée par hyprland.lua, donc retirée après sauvegarde.
+# hypridle.conf reste : hypridle ne lit que ce format.
 HC="$HOME/.config/hypr"
 if [ -f "$HC/hyprland.conf" ]; then
-  if grep -qF 'conf.d/00-monitors.conf' "$HC/hyprland.conf"; then
-    for rel in hyprland.conf conf.d/{00-monitors,10-env,20-autostart,30-look,35-colors,40-input,50-binds,60-rules,90-profile}.conf noctalia/noctalia-colors.conf; do
-      [ -e "$HC/$rel" ] && { backup ".config/hypr/$rel"; rm -f "$HC/$rel"; }
-    done
-    rmdir "$HC/conf.d" "$HC/noctalia" 2>/dev/null || true
-    ok "Ancienne config Hyprland (hyprland.conf) retirée ; elle est dans la sauvegarde."
-  else
-    backup .config/hypr/hyprland.conf
-    info "Ta config ~/.config/hypr/hyprland.conf est gardée (sauvegardée aussi) : Hyprland lit désormais hyprland.lua à la place."
-  fi
+  for rel in hyprland.conf conf.d/{00-monitors,10-env,20-autostart,30-look,35-colors,40-input,50-binds,60-rules,90-profile}.conf noctalia/noctalia-colors.conf; do
+    [ -e "$HC/$rel" ] && { backup ".config/hypr/$rel"; rm -f "$HC/$rel"; }
+  done
+  rmdir "$HC/conf.d" "$HC/noctalia" 2>/dev/null || true
+  ok "Ancienne config Hyprland (hyprland.conf) remplacée par hyprland.lua ; elle est dans la sauvegarde."
+  [ -d "$HC/conf.d" ] && info "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin."
 fi
+
+# Tes réglages Hyprland personnels : fichier créé une seule fois avec des exemples, jamais remplacé ensuite
+PERSO="$HOME/.config/hypr/perso.lua"
+if [ ! -e "$PERSO" ]; then
+  cat > "$PERSO" <<'PERSO_EOF'
+-- Tes réglages Hyprland personnels : chargés en dernier, jamais remplacés par install.sh ni nc-maj.
+-- Format Lua de Hyprland 0.55+ (https://wiki.hypr.land). Enlève « -- » devant une ligne pour l'activer.
+--
+-- Ajouter un raccourci sans éditer ce fichier :   nc-raccourci ajoute "Super+B" "firefox" "Navigateur"
+-- (liste : nc-raccourci ; retirer : nc-raccourci retire "Super+B")
+--
+-- hl.bind("SUPER + B", hl.dsp.exec_cmd("firefox"), { description = "Mes raccourcis|Navigateur" })
+-- hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
+-- hl.config({ general = { gaps_out = 6 }, decoration = { rounding = 10 } })
+-- hl.on("hyprland.start", function() hl.exec_cmd("discord --start-minimized") end)
+PERSO_EOF
+  echo ".config/hypr/perso.lua" >> "$BK/.created"
+fi
+# Emplacement de ce dépôt, pour nc-maj (mise à jour en une commande)
+if [ -d "$REPO/.git" ]; then mkdir -p "$HOME/.config/nc"; printf '%s\n' "$REPO" > "$HOME/.config/nc/depot"; fi
 
 # Clé de chiffrement de l'historique du presse-papiers : Noctalia ne la crée pas elle-même (64 caractères hexadécimaux
 # aléatoires, lisible par toi seul). Générée une fois sur ce PC, jamais versionnée ni écrasée.
@@ -457,23 +509,30 @@ fi
 
 # ── 3. Terminal : zsh + oh-my-zsh + powerlevel10k ─────────────────────────────
 say "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)"
-if ask "Installer la config du terminal ?" o; then
+ZSH_DIR="$HOME/.oh-my-zsh"; ZC="$ZSH_DIR/custom"
+declare -A REPOS=(
+  ["$ZSH_DIR"]=https://github.com/ohmyzsh/ohmyzsh.git
+  ["$ZC/themes/powerlevel10k"]=https://github.com/romkatv/powerlevel10k.git
+  ["$ZC/plugins/zsh-autosuggestions"]=https://github.com/zsh-users/zsh-autosuggestions.git
+  ["$ZC/plugins/zsh-syntax-highlighting"]=https://github.com/zsh-users/zsh-syntax-highlighting.git
+)
+need=()
+for d in "$ZSH_DIR" "$ZC/themes/powerlevel10k" "$ZC/plugins/zsh-autosuggestions" "$ZC/plugins/zsh-syntax-highlighting"; do
+  [ -e "$d" ] || need+=("$d")
+done
+has_font() { fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font" >/dev/null; }
+term_done=1
+have zsh && have git && [ ${#need[@]} -eq 0 ] && has_font || term_done=0
+for f in .zshrc .p10k.zsh; do cmp -s "$REPO/home/$f" "$HOME/$f" || term_done=0; done
+[ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" = zsh ] || term_done=0
+if [ "$term_done" = 1 ]; then
+  ok "Déjà en place (zsh par défaut, oh-my-zsh, powerlevel10k, police)."
+elif ask "Installer la config du terminal (seulement ce qui manque) ?" o; then
   have zsh || pkg_try zsh
   have git || pkg_try git
   if ! have zsh || ! have git; then
     warn "zsh ou git manquant : étape ignorée (installe-les puis relance)."
   else
-    ZSH_DIR="$HOME/.oh-my-zsh"; ZC="$ZSH_DIR/custom"
-    declare -A REPOS=(
-      ["$ZSH_DIR"]=https://github.com/ohmyzsh/ohmyzsh.git
-      ["$ZC/themes/powerlevel10k"]=https://github.com/romkatv/powerlevel10k.git
-      ["$ZC/plugins/zsh-autosuggestions"]=https://github.com/zsh-users/zsh-autosuggestions.git
-      ["$ZC/plugins/zsh-syntax-highlighting"]=https://github.com/zsh-users/zsh-syntax-highlighting.git
-    )
-    need=()
-    for d in "$ZSH_DIR" "$ZC/themes/powerlevel10k" "$ZC/plugins/zsh-autosuggestions" "$ZC/plugins/zsh-syntax-highlighting"; do
-      [ -e "$d" ] || need+=("$d")
-    done
     if [ ${#need[@]} -gt 0 ]; then
       info "Téléchargements depuis GitHub (dépôts officiels) :"
       for d in "${need[@]}"; do info "  ${REPOS[$d]}"; done
@@ -499,7 +558,7 @@ if ask "Installer la config du terminal ?" o; then
     fi
   fi
   # Police du terminal (icônes de l'invite) : paquet sur Arch, sinon téléchargement depuis la page officielle de Nerd Fonts
-  if [ -z "$(fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font")" ]; then
+  if ! has_font; then
     url=https://github.com/ryanoasis/nerd-fonts/releases/latest/download/CascadiaCode.zip
     info "Police du terminal (CaskaydiaCove Nerd Font) absente : $url"
     if have curl && have unzip && ask "La télécharger dans ~/.local/share/fonts ?" o; then
@@ -516,33 +575,74 @@ fi
 
 # ── 3b. Neovim (LazyVim) ──────────────────────────────────────────────────────
 say "3b. Neovim : LazyVim avec ses extras (C/C++, JavaScript, formatage, Git…)"
-if ask "Installer la config Neovim ?" o; then
-  # Outils dont LazyVim et ses extras ont besoin (noms selon la distribution, absents ignorés)
+NV="$HOME/.config/nvim"
+# Déjà fait : même config que le dépôt, plugins téléchargés, Neovim assez récent et outils essentiels présents
+# (gitui et tree-sitter sont facultatifs : absents de certaines distributions, ils ne bloquent rien)
+nv_bin() { if [ -x "$HOME/.local/bin/nvim" ]; then echo "$HOME/.local/bin/nvim"; else command -v nvim || true; fi; }   # celui du terminal
+nv_ver() { local b; b="$(nv_bin)"; [ -n "$b" ] && "$b" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true; }
+nv_tools=()
+for c in git rg gcc make node npm; do have "$c" || nv_tools+=("$c"); done
+have fd || have fdfind || nv_tools+=(fd)
+nv="$(nv_ver)"; { [ -n "$nv" ] && ver_ge "$nv" 0.11.2; } || nv_tools+=("neovim 0.11.2+")
+# « À jour » : identique au dépôt, ou déjà installée depuis cette version du dépôt (LazyVim retouche ensuite ses
+# fichiers, et tes propres modifications sont gardées tant que la config du dépôt ne change pas)
+NV_STAMP="$STATE/nvim-installe"
+NV_SUM="$(cd "$REPO/home/.config/nvim" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+nv_same=0
+if [ -d "$NV" ] && { diff -rq "$REPO/home/.config/nvim" "$NV" >/dev/null 2>&1 || [ "$(cat "$NV_STAMP" 2>/dev/null)" = "$NV_SUM" ]; }; then
+  nv_same=1; mkdir -p "$STATE"; echo "$NV_SUM" > "$NV_STAMP"
+fi
+nv_plugins=0; [ -d "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy/LazyVim" ] && nv_plugins=1
+if [ "$nv_same" = 1 ] && [ "$nv_plugins" = 1 ]; then
+  nv_q="Config déjà à jour ; installer les outils manquants (${nv_tools[*]}) ?"
+else
+  nv_q="Installer la config Neovim (seulement ce qui manque) ?"
+fi
+if [ "$nv_same" = 1 ] && [ "$nv_plugins" = 1 ] && [ ${#nv_tools[@]} -eq 0 ]; then
+  ok "Déjà en place (config, plugins et outils)."
+elif ask "$nv_q" o; then
+  # Outils dont LazyVim et ses extras ont besoin (noms selon la distribution ; déjà installés ou absents : ignorés)
   case "$FAMILY" in
     arch)   pkg_try neovim git ripgrep fd gcc make nodejs npm tree-sitter-cli gitui ;;
     fedora) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui ;;
     debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui ;;
     suse)   pkg_try neovim git ripgrep fd gcc make nodejs-default npm-default tree-sitter gitui ;;
   esac
-  nv="$(nvim --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-  if [ -z "$nv" ]; then
-    warn "Neovim n'est pas installé : config copiée quand même, elle servira dès que tu l'installeras."
-  elif ! ver_ge "$nv" 0.11.2; then
-    warn "Neovim $nv est trop ancien pour LazyVim (0.11.2 ou plus) : mets-le à jour, la config est copiée quand même."
+  nv="$(nv_ver)"
+  # Neovim trop ancien dans la distribution (Debian 13 : 0.10) : version officielle de neovim.io dans ~/.local
+  if [ -z "$nv" ] || ! ver_ge "$nv" 0.11.2; then
+    case "$(uname -m)" in x86_64) na=nvim-linux-x86_64 ;; aarch64) na=nvim-linux-arm64 ;; *) na="" ;; esac
+    url="https://github.com/neovim/neovim/releases/latest/download/$na.tar.gz"
+    info "Neovim ${nv:-absent}$([ -n "$nv" ] && echo " (trop ancien)") : LazyVim demande la 0.11.2 ou plus."
+    if [ -n "$na" ] && have curl && ask "Installer la version officielle de Neovim dans ~/.local (depuis $url) ?" o; then
+      zd="$(mktemp -d)"
+      if curl -fsSL -o "$zd/nvim.tar.gz" "$url" && mkdir -p "$HOME/.local/opt" "$HOME/.local/bin" &&
+         rm -rf "$HOME/.local/opt/$na" && tar -xzf "$zd/nvim.tar.gz" -C "$HOME/.local/opt"; then
+        ln -sfn "$HOME/.local/opt/$na/bin/nvim" "$HOME/.local/bin/nvim"
+        nv="$(nv_ver)"; ok "Neovim $nv installé (~/.local/bin/nvim)."
+      else
+        warn "Téléchargement de Neovim impossible."
+      fi
+      rm -rf "$zd"
+    fi
+    if [ -z "$nv" ] || ! ver_ge "$nv" 0.11.2; then
+      warn "Neovim 0.11.2 ou plus manquant : config copiée quand même, elle servira dès qu'il sera installé."
+    fi
   fi
-  NV="$HOME/.config/nvim"
-  if [ -d "$NV" ] && diff -rq "$REPO/home/.config/nvim" "$NV" >/dev/null 2>&1; then
+  if [ "$nv_same" = 1 ]; then
     ok "Config Neovim déjà à jour."
   elif [ ! -e "$NV" ] || ask "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" o; then
     if [ -e "$NV" ]; then backup .config/nvim; rm -rf "$NV"; else echo ".config/nvim" >> "$BK/.created"; fi
     mkdir -p "$HOME/.config" && cp -a "$REPO/home/.config/nvim" "$NV"
+    mkdir -p "$STATE"; echo "$NV_SUM" > "$NV_STAMP"
     ok "Config Neovim installée."
-    # Plugins aux versions exactes de lazy-lock.json (sinon ils s'installent au premier lancement)
-    if [ -n "$nv" ] && ver_ge "$nv" 0.11.2; then
-      info "Téléchargement des plugins (une à deux minutes)…"
-      timeout 600 nvim --headless "+Lazy! restore" +qa >/dev/null 2>&1 && ok "Plugins Neovim installés." ||
-        warn "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim."
-    fi
+    nv_plugins=0
+  fi
+  # Plugins aux versions exactes de lazy-lock.json (sinon ils s'installent au premier lancement)
+  if [ "$nv_plugins" = 0 ] && [ -n "$nv" ] && ver_ge "$nv" 0.11.2 && diff -rq "$REPO/home/.config/nvim" "$NV" >/dev/null 2>&1; then
+    info "Téléchargement des plugins (une à deux minutes)…"
+    timeout 600 "$(nv_bin)" --headless "+Lazy! restore" +qa >/dev/null 2>&1 && ok "Plugins Neovim installés." ||
+      warn "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim."
   fi
 fi
 
@@ -557,8 +657,12 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   systemctl --user start nc-carousel-thumbs.service >/dev/null 2>&1 || true
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
-    # Session ouverte : services relancés avec leur nouvelle config (hypridle appelle nc-shell-msg, plus legion-*)
-    systemctl --user restart noctalia.service nc-profile-sync.service hypridle.service 2>/dev/null || true
+    if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
+      # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
+      systemctl --user restart noctalia.service nc-profile-sync.service hypridle.service 2>/dev/null || true
+    else
+      systemctl --user start noctalia.service 2>/dev/null || true   # rien n'a changé : simplement relancée
+    fi
     [ "$KDE_POLKIT" = 1 ] && { systemctl --user start plasma-polkit-agent.service 2>/dev/null || true; }
   fi
   ok "Services activés."
@@ -575,39 +679,84 @@ if [ "$MODE" = full ]; then
   SBK="$BK/system"
   sbackup() { sudo mkdir -p "$SBK"; local f; for f in "$@"; do [ -e "$f" ] && sudo cp -a --parents "$f" "$SBK/"; done; sudo chown -R "$(id -u):$(id -g)" "$SBK"; }
 
-  # 5a. Énergie : 3 profils pour tous les PC, via un service compatible power-profiles-daemon (barre, Super + Alt + P)
+  # 5a. Énergie : 3 profils pour tous les PC, via un service compatible power-profiles-daemon (barre, Super + Alt + P).
+  # Portable : TLP + tlp-pd avec les réglages du dépôt (mêmes profils partout) quand la distribution les propose
+  # (Arch, Fedora 44+, Debian 13 via trixie-backports, openSUSE Tumbleweed) ; sinon le service de la distribution.
   say "5a. Énergie : 3 profils (Performance / Équilibré / Économie)"
   ppd=""
-  for u in power-profiles-daemon tlp-pd tuned-ppd; do systemctl is-active --quiet "$u.service" 2>/dev/null && { ppd=$u; break; }; done
-  if [ -n "$ppd" ]; then
-    ok "Profils déjà en place (service $ppd)."
-    if [ -f /etc/tlp.d/10-legion.conf ]; then   # réglages TLP d'une ancienne version de ce dépôt : nouveau nom
-      sbackup /etc/tlp.d/10-legion.conf
-      sudo install -Dm0644 "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf && sudo rm -f /etc/tlp.d/10-legion.conf &&
-        sudo tlp start >/dev/null && ok "Réglages TLP mis à jour (/etc/tlp.d/10-nc.conf)."
+  for u in tlp-pd power-profiles-daemon tuned-ppd; do systemctl is-active --quiet "$u.service" 2>/dev/null && { ppd=$u; break; }; done
+  tlp_dispo() {
+    case "$FAMILY" in
+      arch) pacman -Si tlp-pd >/dev/null 2>&1 ;;
+      fedora) dnf -q list --available tlp-pd >/dev/null 2>&1 || rpm -q tlp-pd >/dev/null 2>&1 ;;
+      debian) { [ "$OSCODE" != trixie ] || apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports' || bpo_on; } &&
+              [ -n "$(apt-cache madison tlp-pd 2>/dev/null)" ] ;;
+      suse) zypper -q info tlp-pd 2>/dev/null | grep -q '^Name' ;;
+      *) false ;;
+    esac
+  }
+  # Limite de charge (préserve la batterie si le PC reste souvent branché) : selon ce que le portable sait faire
+  BATLIM=""
+  if grep -q '\[Long_Life\]' /sys/class/power_supply/BAT*/charge_types 2>/dev/null ||
+     [ "$(cat /sys/class/power_supply/BAT*/charge_control_end_threshold 2>/dev/null | head -1)" -lt 100 ] 2>/dev/null; then
+    :   # limite déjà active (réglée ailleurs) : rien à proposer
+  elif grep -q Long_Life /sys/class/power_supply/BAT*/charge_types 2>/dev/null; then
+    BATLIM="$(cat "$REPO/system/tlp.d/20-battery-limit.conf")"   # mode « Long_Life » (Lenovo et autres)
+  elif ls /sys/class/power_supply/BAT*/charge_control_end_threshold >/dev/null 2>&1; then
+    BATLIM=$'# /etc/tlp.d/20-battery-limit.conf : limite de charge (noctalia-config). Recharge sous 75 %, arrêt à 80 %.\n# Charge complète ponctuelle : sudo tlp fullcharge   ·   Pour l\'enlever : sudo rm /etc/tlp.d/20-battery-limit.conf\nSTART_CHARGE_THRESH_BAT0=75\nSTOP_CHARGE_THRESH_BAT0=80'
+  fi
+  # Réglages TLP faits par toi (autres fichiers de /etc/tlp.d que ceux du dépôt) : gardés tels quels, rien n'est ajouté
+  TLP_PERSO="$(ls /etc/tlp.d/*.conf 2>/dev/null | grep -vE '/(00-template|10-nc|10-legion|20-battery-limit)\.conf$' || true)"
+  tlp_regle() {   # réglages du dépôt dans /etc/tlp.d (et la limite de charge si choisie) ; vrai si quelque chose a changé
+    local ch=1
+    if [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ] && [ ! -f /etc/tlp.d/10-legion.conf ]; then
+      return 1
     fi
-  elif [ "$FAMILY" = arch ] && [ "$LAPTOP" = 1 ]; then
-    info "Portable : TLP et tlp-pd (remplace power-profiles-daemon), avec des réglages valables pour tout portable."
-    if ask "Installer les profils énergétiques ?" o; then
-      sbackup /etc/tlp.conf /etc/tlp.d
-      if systemctl is-enabled --quiet auto-cpufreq.service 2>/dev/null; then
-        info "auto-cpufreq entre en conflit avec TLP : il est désactivé (le paquet reste installé)."
-        sudo systemctl disable --now auto-cpufreq.service
+    [ -f /etc/tlp.d/10-legion.conf ] && { sbackup /etc/tlp.d/10-legion.conf; sudo rm -f /etc/tlp.d/10-legion.conf; ch=0; }
+    cmp -s "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf || { sudo install -Dm0644 "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf; ch=0; }
+    if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
+      info "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché."
+      if ask "Activer cette limite de charge ?" o; then
+        printf '%s\n' "$BATLIM" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/20-battery-limit.conf; ch=0
       fi
-      if pacman -Si tlp-pd >/dev/null 2>&1; then
-        sudo pacman -S --needed tlp tlp-pd
-        sudo rm -f /etc/tlp.d/10-legion.conf
-        sudo install -Dm0644 "$REPO/system/tlp.d/10-nc.conf" /etc/tlp.d/10-nc.conf
-        if grep -q Long_Life /sys/class/power_supply/BAT*/charge_types 2>/dev/null; then
-          info "Ta batterie propose une charge limitée à environ 80 % (« Long_Life »), qui la préserve si le PC reste souvent branché."
-          ask "Activer cette limite de charge ?" o && sudo install -Dm0644 "$REPO/system/tlp.d/20-battery-limit.conf" /etc/tlp.d/20-battery-limit.conf
+    fi
+    return $ch
+  }
+  if [ "$ppd" = tlp-pd ]; then
+    if tlp_regle; then sudo tlp start >/dev/null && ok "Réglages TLP mis à jour (/etc/tlp.d/10-nc.conf)."
+    elif [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ]; then ok "Déjà en place (TLP avec tes propres réglages : $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), gardés)."
+    else ok "Déjà en place (TLP et tlp-pd)."; fi
+  elif [ "$LAPTOP" = 1 ] && tlp_dispo; then
+    info "Portable : TLP et tlp-pd, avec des réglages valables pour tout portable (processeur, turbo, carte PCIe, plateforme)."
+    [ -n "$ppd" ] && info "Ils remplacent $ppd (même fonctionnement depuis la barre)."
+    if ask "Installer ces profils énergétiques ?" o; then
+      sbackup /etc/tlp.conf /etc/tlp.d
+      for u in auto-cpufreq tuned power-profiles-daemon; do
+        if systemctl is-enabled --quiet "$u.service" 2>/dev/null; then
+          info "$u entre en conflit avec TLP : il est désactivé (le paquet reste installé, sauf conflit de paquets)."
+          sudo systemctl disable --now "$u.service" >/dev/null 2>&1 || true
         fi
-        sudo systemctl enable --now tlp.service tlp-pd.service
+      done
+      inst=1
+      case "$FAMILY" in
+        arch)
+          pkg_installed power-profiles-daemon && info "pacman va proposer de remplacer power-profiles-daemon : réponds oui."
+          sudo pacman -S --needed tlp tlp-pd || inst=0 ;;
+        fedora) sudo dnf install -y --allowerasing tlp tlp-pd || inst=0 ;;
+        debian) if [ "$OSCODE" = trixie ]; then bpo_install tlp tlp-pd || inst=0; else pkg_install tlp tlp-pd || inst=0; fi ;;
+        suse) sudo zypper --non-interactive install --force-resolution tlp tlp-pd || inst=0 ;;
+      esac
+      if [ "$inst" = 1 ]; then
+        tlp_regle || true
+        sudo systemctl enable --now tlp.service tlp-pd.service >/dev/null
         sudo tlp start >/dev/null && ok "TLP actif (profil Équilibré par défaut)."
       else
-        warn "tlp-pd introuvable dans ta base de paquets : étape ignorée (lance « sudo pacman -Syu » puis relance)."
+        warn "Installation de TLP impossible : $([ -n "$ppd" ] && echo "$ppd reste en place" || echo "profils non disponibles")."
+        [ -n "$ppd" ] && sudo systemctl enable --now "$ppd.service" >/dev/null 2>&1
       fi
     fi
+  elif [ -n "$ppd" ]; then
+    ok "Déjà en place (service $ppd)."
   else
     svc=power-profiles-daemon
     [ "$FAMILY" = fedora ] && svc=tuned-ppd   # service de profils par défaut de Fedora
@@ -624,6 +773,11 @@ if [ "$MODE" = full ]; then
 
   if [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
     say "5b. Wi-Fi : pays de réglementation"
+    cc="$(sed -nE 's/^WIRELESS_REGDOM="?([A-Z]{2})"?.*/\1/p' /etc/conf.d/wireless-regdom | tail -1)"
+  fi
+  if [ "$FAMILY" = arch ] && [ -n "${cc:-}" ]; then
+    ok "Déjà réglé (pays : $cc)."
+  elif [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
     info "Sans pays, le Wi-Fi reste bridé (canaux et puissance au minimum mondial)."
     if ask "Régler le pays du Wi-Fi ?" o; then
       dflt="$(echo "${LANG:-fr_FR}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p')"; dflt="${dflt:-FR}"
@@ -655,7 +809,53 @@ if [ "$MODE" = full ]; then
     GRUBMK="$(command -v grub-mkconfig || command -v grub2-mkconfig || true)"
     [ -n "$GRUBDIR" ] && [ -n "$GRUBMK" ] || GRUBDIR=""
   fi
-  if [ -n "$INITRD" ]; then
+  grub_nc() {   # option « splash » du noyau et thème GRUB « nc » (nom du PC dans le titre)
+    if ! grep -qE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\b(splash|rhgb)\b' /etc/default/grub; then
+      if grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+        sudo sed -i -E 's/^(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*)"/\1 splash"/' /etc/default/grub
+      else
+        echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' | sudo tee -a /etc/default/grub >/dev/null
+      fi
+    fi
+    # Thème GRUB : nom du PC dans le titre ; l'ancien thème « legion » de ce dépôt est retiré
+    sudo rm -rf "$GRUBDIR/themes/legion" "$GRUBDIR/themes/nc"
+    sudo mkdir -p "$GRUBDIR/themes"
+    sudo cp -r "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc"
+    sudo sed -i "s|@BOOT_TITLE@|$BOOT_TITLE|" "$GRUBDIR/themes/nc/theme.txt"
+    if grep -qE '^#?GRUB_THEME=' /etc/default/grub; then
+      sudo sed -i -E "s|^#?GRUB_THEME=.*|GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"|" /etc/default/grub
+    else
+      echo "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" | sudo tee -a /etc/default/grub >/dev/null
+    fi
+    sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "Thème GRUB installé (visible au prochain redémarrage)."
+    grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub &&
+      info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap) au démarrage pour le voir."
+    return 0
+  }
+  # Déjà fait : Plymouth dans l'initramfs ; avec GRUB, option splash et thème « nc » identique à celui du dépôt
+  plym_done=0; grub_done=1
+  if [ -n "$INITRD" ] && [ -f /etc/plymouth/plymouthd.conf ] && { have plymouth || [ -x /usr/sbin/plymouthd ]; }; then
+    plym_done=1
+    [ "$INITRD" = mkinitcpio ] && ! grep -qE '^HOOKS=.*\bplymouth\b' /etc/mkinitcpio.conf && plym_done=0
+  fi
+  if [ -n "$GRUBDIR" ]; then
+    sed "s|@BOOT_TITLE@|$BOOT_TITLE|" "$REPO/system/grub-theme/nc/theme.txt" > "$tmp"
+    grep -qE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\b(splash|rhgb)\b' /etc/default/grub &&
+      grep -qF "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" /etc/default/grub &&
+      cmp -s "$tmp" "$GRUBDIR/themes/nc/theme.txt" &&
+      diff -rq --exclude=theme.txt "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc" >/dev/null 2>&1 || grub_done=0
+  fi
+  if [ "$plym_done" = 1 ] && [ "$grub_done" = 1 ]; then
+    say "5c. Démarrage"
+    ok "Déjà en place (logo animé$([ -n "$GRUBDIR" ] && echo ", thème GRUB « nc »"))."
+  elif [ "$plym_done" = 1 ]; then
+    say "5c. Démarrage : thème GRUB « nc » (« $BOOT_TITLE »)"
+    info "Le logo animé est déjà en place ; seul le thème GRUB est à installer ou à mettre à jour."
+    if ask "Mettre à jour le thème GRUB ?" o; then
+      sbackup /etc/default/grub
+      grub_nc
+    fi
+  elif [ -n "$INITRD" ]; then
     say "5c. Démarrage : logo animé (Plymouth)$([ -n "$GRUBDIR" ] && echo " + thème GRUB « nc » (« $BOOT_TITLE »)")"
     warn "Cette étape modifie le démarrage (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Tout est sauvegardé avant."
     info "Secours si l'écran reste noir au démarrage : dans GRUB, touche « e », retirer « splash », Ctrl+X."
@@ -685,26 +885,7 @@ if [ "$MODE" = full ]; then
           ok "Plymouth installé (thème $theme)."
           # Option « splash » du noyau (Fedora utilise « rhgb », déjà présente)
           if [ -n "$GRUBDIR" ]; then
-            if ! grep -qE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\b(splash|rhgb)\b' /etc/default/grub; then
-              if grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
-                sudo sed -i -E 's/^(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*)"/\1 splash"/' /etc/default/grub
-              else
-                echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' | sudo tee -a /etc/default/grub >/dev/null
-              fi
-            fi
-            # Thème GRUB : nom du PC dans le titre ; l'ancien thème « legion » de ce dépôt est retiré
-            sudo rm -rf "$GRUBDIR/themes/legion" "$GRUBDIR/themes/nc"
-            sudo mkdir -p "$GRUBDIR/themes"
-            sudo cp -r "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc"
-            sudo sed -i "s|@BOOT_TITLE@|$BOOT_TITLE|" "$GRUBDIR/themes/nc/theme.txt"
-            if grep -qE '^#?GRUB_THEME=' /etc/default/grub; then
-              sudo sed -i -E "s|^#?GRUB_THEME=.*|GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"|" /etc/default/grub
-            else
-              echo "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" | sudo tee -a /etc/default/grub >/dev/null
-            fi
-            sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "Thème GRUB installé (visible au prochain redémarrage)."
-            grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub &&
-              info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap) au démarrage pour le voir."
+            grub_nc
           elif [ -f /etc/kernel/cmdline ]; then
             grep -qwE 'splash|rhgb' /etc/kernel/cmdline || sudo sed -i '1 s/$/ splash/' /etc/kernel/cmdline
             info "Option « splash » ajoutée à /etc/kernel/cmdline : elle s'appliquera à la prochaine mise à jour du noyau."
@@ -722,7 +903,15 @@ if [ "$MODE" = full ]; then
   if have sddm; then
     say "5d. Écran de connexion SDDM « nc »"
     T=/usr/share/sddm/themes/sddm-astronaut-theme
-    if [ ! -d "$T" ]; then
+    sed -e "s|@SCREEN_W@|$PXW|g" -e "s|@SCREEN_H@|$PXH|g" -e "s|@LOCALE@|$LOCALE|g" "$REPO/system/sddm/nc.conf" > "$tmp"
+    sddm_done() {
+      [ -d "$T" ] && cmp -s "$tmp" "$T/Themes/nc.conf" && cmp -s "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg" &&
+        grep -q '^ConfigFile=Themes/nc.conf' "$T/metadata.desktop" 2>/dev/null &&
+        grep -q '^Current=sddm-astronaut-theme' /etc/sddm.conf.d/theme.conf 2>/dev/null
+    }
+    if sddm_done; then
+      ok "Déjà en place."
+    elif [ ! -d "$T" ]; then
       info "Il s'appuie sur le thème libre sddm-astronaut-theme, absent : https://github.com/Keyitdev/sddm-astronaut-theme"
       if ask "Le télécharger (et ses modules Qt) ?" o; then
         case "$FAMILY" in
@@ -734,9 +923,8 @@ if [ "$MODE" = full ]; then
         sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "Téléchargement impossible."
       fi
     fi
-    if [ -d "$T" ] && ask "Installer l'écran de connexion ?" o; then
+    if [ -d "$T" ] && ! sddm_done && ask "Installer l'écran de connexion ?" o; then
       sbackup "$T/metadata.desktop" /etc/sddm.conf.d/theme.conf
-      sed -e "s|@SCREEN_W@|$PXW|g" -e "s|@SCREEN_H@|$PXH|g" -e "s|@LOCALE@|$LOCALE|g" "$REPO/system/sddm/nc.conf" > "$tmp"
       sudo install -Dm0644 "$tmp" "$T/Themes/nc.conf"
       sudo install -Dm0644 "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg"
       sudo rm -f "$T/Themes/legion.conf" "$T/Backgrounds/legion.jpg"
@@ -748,9 +936,45 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
+  # 5e. Pilote NVIDIA : sans lui, la carte tourne avec « nouveau » (pas d'accélération correcte, pas de mise en veille fine).
+  # Cartes récentes (RTX 50, « Blackwell ») : pilote 570.169 ou plus, en version « open » (modules ouverts de NVIDIA).
+  if [ "$NVIDIA" = 1 ]; then
+    say "5e. Carte NVIDIA"
+    nvdev="$(for d in /sys/bus/pci/devices/*; do [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] && [[ $(cat "$d/class" 2>/dev/null) == 0x03* ]] && cat "$d/device"; done | head -1 || true)"
+    BLACKWELL=0; [ -n "$nvdev" ] && [ $((nvdev)) -ge $((0x2b00)) ] && BLACKWELL=1
+    drv="$(modinfo -F version nvidia 2>/dev/null || true)"
+    if [ -n "$drv" ] && { [ "$BLACKWELL" = 0 ] || ver_ge "$drv" 570.169; }; then
+      ok "Pilote NVIDIA $drv installé."
+    elif [ "$FAMILY" = arch ]; then
+      if [ -n "$drv" ]; then info "Pilote NVIDIA $drv trop ancien pour cette carte (570.169 ou plus)."; else info "Pilote NVIDIA absent : la carte tourne sans accélération correcte."; fi
+      mapfile -t kernels < <(cat /usr/lib/modules/*/pkgbase 2>/dev/null | sort -u)
+      pk=(nvidia-utils)
+      if [ "${kernels[*]}" = linux ]; then pk+=(nvidia-open); else pk+=(nvidia-open-dkms); for k in "${kernels[@]}"; do pk+=("$k-headers"); done; fi
+      pacman -Sl multilib >/dev/null 2>&1 && pk+=(lib32-nvidia-utils)   # jeux 32 bits (Steam)
+      if ask "Installer le pilote officiel de NVIDIA (${pk[*]}) ?" o; then
+        if sudo pacman -S --needed "${pk[@]}"; then ok "Pilote NVIDIA installé : redémarre le PC pour l'utiliser."; else warn "Installation du pilote NVIDIA impossible."; fi
+      fi
+    elif [ "$FAMILY" = debian ] && [ "$BLACKWELL" = 1 ]; then
+      warn "Ta carte NVIDIA (série RTX 50) demande le pilote 570.169 ou plus ; Debian ne fournit que le 550, qui ne la gère pas."
+      info "Pilote de NVIDIA pour Debian (dépôt officiel de NVIDIA, paquet nvidia-open) :"
+      info "  https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/debian.html"
+      info "En attendant, l'écran interne fonctionne avec la carte intégrée."
+    else
+      info "Pilote NVIDIA ${drv:+$drv }à installer avec la méthode de ta distribution :"
+      case "$FAMILY" in
+        fedora) info "  RPM Fusion : https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)" ;;
+        debian) info "  https://wiki.debian.org/NvidiaGraphicsDrivers" ;;
+        suse) info "  https://en.opensuse.org/SDB:NVIDIA_drivers" ;;
+        *) info "  documentation de ta distribution (pilote « nvidia-open » pour les cartes récentes)" ;;
+      esac
+    fi
+  fi
+
   if [ "$FAMILY" = arch ]; then
-    say "5e. Entretien : nettoyage automatique du cache des paquets"
-    if ask "Garder seulement les 2 dernières versions de chaque paquet en cache (chaque semaine) ?" o; then
+    say "5f. Entretien : nettoyage automatique du cache des paquets"
+    if systemctl is-enabled --quiet paccache.timer 2>/dev/null; then
+      ok "Déjà en place (paccache.timer)."
+    elif ask "Garder seulement les 2 dernières versions de chaque paquet en cache (chaque semaine) ?" o; then
       pkg_installed pacman-contrib || sudo pacman -S --needed pacman-contrib
       sudo systemctl enable --now paccache.timer >/dev/null && ok "paccache.timer actif."
     fi
@@ -761,4 +985,5 @@ say "Terminé"
 info "Ferme puis rouvre ta session pour que tout s'applique (choisis « Hyprland (uwsm-managed) » sur l'écran de connexion)."
 info "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fonds d'écran · Super+Entrée terminal (liste complète : RACCOURCIS.md)."
 [ "$HYBRID" = 1 ] && info "PC hybride : lancer une appli sur la carte NVIDIA avec « nvidia-run <commande> » (Steam : nvidia-run %command%)."
-info "Retour arrière : ./install.sh --restore   (sauvegarde : $BK)"
+[ -n "$(ls -A "$BK" 2>/dev/null)" ] && info "Retour arrière : ./install.sh --restore   (sauvegarde : $BK)"
+info "Mise à jour plus tard, en une commande : nc-maj"

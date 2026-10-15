@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# nc-maj : met ce bureau à jour depuis GitHub, en une commande.
+# Récupère la dernière version du dépôt noctalia-config (git pull), puis relance install.sh, qui ne refait que ce qui
+# a changé ou manque (tes fichiers personnels et tes couleurs ne sont pas touchés).
+#   nc-maj                 mise à jour complète (une question avant chaque étape système pas encore faite)
+#   nc-maj --no-system     seulement ta session
+set -euo pipefail
+depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
+if [ ! -d "$depot/.git" ]; then
+  echo "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." >&2
+  echo "Clone-le puis lance l'installation une fois : git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2
+  exit 1
+fi
+cd "$depot"
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "Le dépôt $depot contient des modifications locales : mise à jour annulée pour ne pas les écraser." >&2
+  echo "(git status pour les voir ; git stash pour les mettre de côté)" >&2
+  exit 1
+fi
+avant="$(git rev-parse HEAD)"
+git pull --ff-only --quiet
+if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "Déjà à jour ($(git log -1 --format=%cd --date=short))."; else
+  echo "Nouveautés :"; git log --format='  • %s' "$avant..HEAD"
+fi
+exec ./install.sh "$@"

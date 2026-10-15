@@ -38,6 +38,14 @@ touche(SUPER .. " + code:59", cmd(barre .. "settings"),            "Applis et ba
 touche(SUPER .. " + code:61", cmd(barre .. "keys"),                "Applis et barre|Afficher cette fiche")
 touche(SUPER .. " + code:33", cmd('grim -g "$(slurp)" - | swappy -f -'), "Applis et barre|Capture d'une zone de l'écran")
 touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), "Applis et barre|Terminal déroulant (sous Échap)")
+touche(SUPER .. " + SHIFT + code:55", cmd("noctalia msg panel-toggle launcher /clipboard"), "Applis et barre|Historique du presse-papiers")
+touche(SUPER .. " + code:60", cmd("noctalia msg panel-toggle launcher /emo"),  "Applis et barre|Émojis")
+
+-- Captures d'écran (Noctalia) : écran entier, zone, ou zone à annoter avant de copier / enregistrer
+-- (Super + P plus haut : zone retouchée dans Swappy)
+touche("Print",                 cmd("noctalia msg screenshot-fullscreen"),      "Applis et barre|Capture de l'écran")
+touche("SHIFT + Print",         cmd("noctalia msg screenshot-region"))   -- comme Super + P (pas répété dans la fiche)
+touche(SUPER .. " + SHIFT + code:39", cmd("noctalia msg screenshot-annotate"), "Applis et barre|Capture à annoter")
 
 -- ── Fenêtres ─────────────────────────────────────────────────────────────────
 -- Fermer : si c'était la seule fenêtre de son programme (Discord & co), le programme est arrêté 5 s plus tard
@@ -161,6 +169,23 @@ touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), "Souris|Redimens
 touche(SUPER .. " + code:46", cmd(barre .. "lock"),                 "Système|Verrouiller l'écran")
 touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       "Système|Verrouiller et mettre en veille")
 touche(SUPER .. " + ALT + code:33", cmd(barre .. "power-cycle"),    "Système|Changer de profil d'énergie")
+touche(SUPER .. " + ALT + code:42", function() nc.mode_jeu() end,   "Système|Mode jeu (effets coupés, pas de notifications)")
+touche(SUPER .. " + code:57", cmd("noctalia msg nightlight-force-toggle"), "Système|Lumière de nuit")
+touche(SUPER .. " + SHIFT + code:57", cmd("noctalia msg notification-dnd-toggle"), "Système|Ne pas déranger")
+
+-- Loupe : zoom autour du curseur (Super + Ctrl + molette, ou Super + = / Super + -)
+local function loupe(facteur)
+    return function()
+        local z = tonumber(hl.get_config("cursor.zoom_factor")) or 1
+        z = math.max(1, math.min(8, z * facteur))
+        if z < 1.05 then z = 1 end
+        hl.config({ cursor = { zoom_factor = z } })
+    end
+end
+touche(SUPER .. " + CTRL + mouse_up",   loupe(1.25), "Système|Loupe : zoomer / dézoomer")
+touche(SUPER .. " + CTRL + mouse_down", loupe(0.8),  "Système|Loupe : zoomer / dézoomer")
+touche(SUPER .. " + code:21", loupe(1.25), "Système|Loupe : zoomer / dézoomer", { repeating = true })
+touche(SUPER .. " + code:20", loupe(0.8),  "Système|Loupe : zoomer / dézoomer", { repeating = true })
 touche(SUPER .. " + SHIFT + code:58",
     cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Système|Quitter la session")
 touche(SUPER .. " + code:70", cmd("systemctl poweroff"),            "Système|Éteindre")
