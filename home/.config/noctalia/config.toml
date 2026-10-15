@@ -88,6 +88,9 @@ custom_image = "@DISTRO_LOGO@"   # logo de ta distribution (install.sh) ; vide =
 custom_image_colorize = true
 color = "primary"
 
+
+[widget.logo.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile centre"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.workspaces]
 # Épuré : chiffres des bureaux occupés en couleur secondaire du fond, bureau actif = pilule allongée aux couleurs du fond, vides = discrets
 style = "regular"
@@ -119,29 +122,56 @@ type = "sysmon"
 stat = "cpu_usage"
 visualization = "none"
 
+
+[widget.cpu.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile systeme"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.temp]
 type = "sysmon"
 stat = "cpu_temp"
 visualization = "none"
 
+
+[widget.temp.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile systeme"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.ram]
 type = "sysmon"
 stat = "ram_used"
 visualization = "none"
 
+
+[widget.ram.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile systeme"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.network]
 show_label = false
 
+
+[widget.network.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile reseau"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.volume]
 show_label = false
 
+
+[widget.volume.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile son"   # l'île (sinon le centre de contrôle de Noctalia)
 [widget.battery]
 display_mode = "graphic"
 show_label = true
 
+
+[widget.battery.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile systeme"   # l'île (sinon le centre de contrôle de Noctalia)
+[widget.bluetooth]
+
+[widget.bluetooth.actions]
+left = "exec @HOME@/.local/bin/nc-shell-msg ile bluetooth"   # l'île (sinon le centre de contrôle de Noctalia)
+
 [widget.notifications]
 hide_when_no_unread = false
 
+
+# Clic droit sur une zone vide de la barre : centre de contrôle de l'île (sinon celui de Noctalia)
+[bar.default.dead_zone.actions]
+right = "exec /home/thxo/.local/bin/nc-shell-msg ile centre"
 # ---------------------------------------------------------------- Dock
 [dock]
 enabled = true
@@ -251,5 +281,5 @@ show_keyboard_layout = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/ile"]
+enabled = ["nc/launcher", "nc/carousel", "nc/keys"@PLUGIN_ILE@]
 auto_update = "none"

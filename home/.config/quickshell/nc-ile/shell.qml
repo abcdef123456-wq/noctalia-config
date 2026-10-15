@@ -35,7 +35,9 @@ ShellRoot {
         function notifications(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true); Etat.aller("notifications") }
         function effacerNotifications(): void { Notifs.toutEffacer() }
         function concentration(): void { Notifs.basculerConcentration() }
+        // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
         function page(nom: string): void {
+            if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
         }
