@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nc-apps : applications installées, pour la recherche Super+R (plugin Noctalia v5 nc/launcher).
 
-  nc-apps list        JSON : [{id, name, generic, comment, keywords, exe, icon}, ...]
+  nc-apps list        JSON : [{id, name, generic, comment, keywords, exe, icon, wmclass}, ...]
   nc-apps launch ID   lance l'application ID (nom du fichier .desktop sans l'extension),
                           dans sa propre unité systemd (uwsm-app) et sur le GPU du profil (nc-launch).
   nc-apps files TEXTE fichiers et dossiers du dossier personnel dont le nom contient TEXTE
@@ -149,6 +149,7 @@ def cmd_list():
             "keywords": loc(e, "Keywords").replace(";", " ").strip(),
             "exe": exe,
             "icon": e.get("Icon", ""),
+            "wmclass": e.get("StartupWMClass", ""),     # classe de ses fenêtres (Spotlight : aller sur la fenêtre ouverte)
         })
     json.dump(apps, sys.stdout, ensure_ascii=False)
 
