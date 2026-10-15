@@ -33,6 +33,19 @@ Item {
         lireFenetres.running = true
         fichierUsage.reload()
         champ.forceActiveFocus()
+        prendreClavier.essais = 0
+        prendreClavier.restart()
+    }
+    // Curseur directement dans la barre : l'île ne reçoit le clavier de Hyprland qu'un instant après s'être ouverte,
+    // la demande est donc répétée jusqu'à ce que la barre l'ait vraiment (1 s au plus)
+    Timer {
+        id: prendreClavier
+        property int essais: 0
+        interval: 60; repeat: true
+        onTriggered: {
+            if (!r.actif || champ.activeFocus || ++essais > 16) { stop(); return }
+            champ.forceActiveFocus()
+        }
     }
 
     Connections { target: Etat; function onValiderRecherche() { if (r.actif) r.valider(r.sel, false) } }
@@ -324,6 +337,7 @@ Item {
             color: "white"; selectionColor: "#0a84ff"; selectedTextColor: "white"
             font.family: "Adwaita Sans"; font.pixelSize: 19
             clip: true
+            cursorVisible: activeFocus
             Keys.onEscapePressed: Etat.fermer()
             Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
             Keys.onUpPressed: r.sel = Math.max(0, r.sel - 1)
