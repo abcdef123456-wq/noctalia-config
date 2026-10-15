@@ -225,25 +225,51 @@ if [ "$MODE" != files ]; then
     bpo_need=(); for p in hypridle xdg-desktop-portal-hyprland uwsm; do pkg_installed "$p" || bpo_need+=("$p"); done
     [ ${#bpo_need[@]} -eq 0 ] || { bpo_on && bpo_install "${bpo_need[@]}"; } || warn "Non installés depuis trixie-backports : ${bpo_need[*]}"
   fi
-  # Vieux Hyprland compilé à la main (ex. /usr/local/bin) qui passe devant celui de la distribution : mis de côté
-  # (déplacé dans /usr/local/nc-ancien-hyprland, pas supprimé), sinon c'est toujours lui qui démarre
-  hb="$(hypr_bin)"
-  for sys_b in /usr/bin/Hyprland /usr/bin/hyprland; do
-    [ -x "$sys_b" ] && [ "$hb" != "$sys_b" ] || continue
-    sv="$(hypr_version "$sys_b")"; hv="$(hypr_version)"
-    { [ -n "$sv" ] && ver_ge "$sv" "$HYPR_MIN" && ! ver_ge "${hv:-0}" "$HYPR_MIN"; } || break
-    info "Un Hyprland $hv installé à la main ($hb) passe devant celui de ta distribution ($sv, $sys_b)."
-    if ask "Le mettre de côté (déplacé dans /usr/local/nc-ancien-hyprland, rien n'est supprimé) ?" o; then
-      cote=/usr/local/nc-ancien-hyprland; d="$(dirname "$hb")"
-      for f in "$d"/Hyprland "$d"/hyprland "$d"/hyprctl "$d"/hyprpm /usr/local/share/wayland-sessions/hyprland*.desktop; do
-        [ -e "$f" ] || continue
-        sudo mkdir -p "$cote$(dirname "$f")" && sudo mv "$f" "$cote$f" && info "  $f → $cote$f"
-      done
-      hash -r
-      ok "Ancien Hyprland mis de côté : celui de ta distribution ($sv) sera utilisé. Pour le remettre : sudo cp -a $cote/. / "
+  # Plusieurs Hyprland installés (paquet, compilation à la main, mise à jour faite à la main…) : c'est le premier du
+  # PATH qui démarre. S'il est trop ancien alors qu'un autre est assez récent, les anciens qui passent devant sont mis
+  # de côté (déplacés dans /usr/local/nc-ancien-hyprland, rien n'est supprimé ; jamais un fichier d'un paquet)
+  hypr_tous() {
+    { type -aP Hyprland hyprland 2>/dev/null; for d in /usr/local/bin /usr/bin "$HOME/.local/bin" /opt/hyprland/bin; do
+        for n in Hyprland hyprland; do [ -x "$d/$n" ] && echo "$d/$n"; done; done; } | awk '!vu[$0]++'
+  }
+  du_paquet() {
+    case "$FAMILY" in
+      debian) dpkg -S "$(readlink -f "$1")" >/dev/null 2>&1 || dpkg -S "$1" >/dev/null 2>&1 ;;
+      arch) pacman -Qo "$1" >/dev/null 2>&1 ;; fedora|suse) rpm -qf "$1" >/dev/null 2>&1 ;; *) false ;;
+    esac
+  }
+  hb="$(hypr_bin)"; hv="$(hypr_version)"
+  if [ -n "$hb" ] && ! ver_ge "${hv:-0}" "$HYPR_MIN"; then
+    meilleur=""; mv_=""
+    while read -r b; do
+      v="$(hypr_version "$b")"
+      [ -n "$v" ] && ver_ge "$v" "$HYPR_MIN" && { [ -z "$mv_" ] || ! ver_ge "$mv_" "$v"; } && { meilleur="$b"; mv_="$v"; }
+    done < <(hypr_tous)
+    if [ -n "$meilleur" ]; then
+      info "Plusieurs Hyprland sont installés : $hb ($hv) démarre, alors que $meilleur ($mv_) est assez récent."
+      gener=(); while read -r b; do
+        [ "$b" = "$meilleur" ] && break
+        if du_paquet "$b"; then warn "$b vient d'un paquet de ta distribution : désinstalle ce paquet ou mets-le à jour."
+        else gener+=("$b"); fi
+      done < <(type -aP Hyprland hyprland 2>/dev/null | awk '!vu[$0]++')
+      if [ ${#gener[@]} -gt 0 ] && ask "Mettre de côté les anciens (${gener[*]}) dans /usr/local/nc-ancien-hyprland (rien n'est supprimé) ?" o; then
+        cote=/usr/local/nc-ancien-hyprland
+        for b in "${gener[@]}"; do
+          d="$(dirname "$b")"
+          for f in "$d"/Hyprland "$d"/hyprland "$d"/hyprctl "$d"/hyprpm; do
+            [ -e "$f" ] || continue
+            sudo mkdir -p "$cote$d" && sudo mv "$f" "$cote$f" && info "  $f → $cote$f"
+          done
+          case "$d" in
+            /usr/local/*) for f in /usr/local/share/wayland-sessions/hyprland*.desktop; do
+                [ -e "$f" ] && sudo mkdir -p "$cote$(dirname "$f")" && sudo mv "$f" "$cote$f" && info "  $f → $cote$f"; done ;;
+          esac
+        done
+        hash -r
+        ok "Anciens Hyprland mis de côté : $meilleur ($mv_) sera utilisé. Pour les remettre : sudo cp -a $cote/. / "
+      fi
     fi
-    break
-  done
+  fi
   hv="$(hypr_version)"
   [ -n "$hv" ] || die "version de Hyprland introuvable."
   if ! ver_ge "$hv" "$HYPR_MIN"; then
