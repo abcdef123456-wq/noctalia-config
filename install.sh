@@ -1122,6 +1122,29 @@ if [ "$MODE" = full ]; then
   fi
   systemctl --user restart nc-profile-sync.service >/dev/null 2>&1 || true
 
+  # Interrupteur « Protéger la batterie » de l'île : petit utilitaire root qui ne fait que limiter la charge, lancé
+  # sans mot de passe grâce à une règle sudo limitée à lui seul (vérifiée par visudo avant d'être mise en place)
+  if [ "$LAPTOP" = 1 ] && [ "$("$REPO/system/nc-limite-charge" etat 2>/dev/null)" != absent ]; then
+    regle=/etc/sudoers.d/nc-limite-charge
+    ligne="$(id -un) ALL=(root) NOPASSWD: /usr/local/bin/nc-limite-charge"
+    if cmp -s "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge && sudo grep -qxF "$ligne" "$regle" 2>/dev/null; then
+      ok "Interrupteur de protection de la batterie (île) : déjà en place."
+    else
+      info "Interrupteur « Protéger la batterie » dans la page Système de l'île (charge arrêtée vers 80 %) : un petit"
+      info "utilitaire qui ne fait que ça (/usr/local/bin/nc-limite-charge), lancé depuis l'île sans mot de passe."
+      if ask "L'installer ?" o; then
+        t="$(mktemp)"; printf '# noctalia-config : interrupteur « Protéger la batterie » de l'"'"'île\n%s\n' "$ligne" > "$t"
+        if sudo install -Dm0755 -o root -g root "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge &&
+           sudo visudo -cf "$t" >/dev/null && sudo install -m0440 -o root -g root "$t" "$regle"; then
+          ok "Interrupteur de protection de la batterie installé."
+        else
+          warn "Installation de l'interrupteur de batterie impossible (règle sudo refusée par visudo)."
+        fi
+        rm -f "$t"
+      fi
+    fi
+  fi
+
   if [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
     say "5b. Wi-Fi : pays de réglementation"
     cc="$(sed -nE 's/^WIRELESS_REGDOM="?([A-Z]{2})"?.*/\1/p' /etc/conf.d/wireless-regdom | tail -1)"

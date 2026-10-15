@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# nc-limite-charge : protège la batterie en limitant sa charge (vers 80 %), pour un PC souvent branché.
+# Installé par install.sh dans /usr/local/bin (appartient à root), avec une règle sudo qui permet à l'utilisateur de le
+# lancer sans mot de passe (interrupteur « Protéger la batterie » de l'île). Il ne fait que ça.
+#   nc-limite-charge etat    1 (limite active), 0 (charge complète) ou « absent » (portable sans limite possible)
+#   nc-limite-charge on      limite active          nc-limite-charge off     charge complète (100 %)
+# Méthodes, selon le portable : mode « Long_Life » (charge_types), seuil de fin de charge (80 %), ou mode
+# conservation des Lenovo (ideapad_laptop). TLP : son fichier /etc/tlp.d/20-battery-limit.conf (celui de
+# noctalia-config) suit le même réglage, sinon TLP remettrait l'ancien au démarrage.
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+bat=""; for b in /sys/class/power_supply/BAT*; do [ -d "$b" ] && { bat="$b"; break; }; done
+cons="$(ls /sys/bus/platform/drivers/ideapad_acpi/*/conservation_mode 2>/dev/null | head -1)"
+tlp=/etc/tlp.d/20-battery-limit.conf
+
+etat() {
+  if [ -n "$bat" ] && grep -q 'Long_Life' "$bat/charge_types" 2>/dev/null; then
+    grep -q '\[Long_Life\]' "$bat/charge_types" && echo 1 || echo 0
+  elif [ -n "$bat" ] && [ -r "$bat/charge_control_end_threshold" ]; then
+    [ "$(cat "$bat/charge_control_end_threshold")" -lt 100 ] && echo 1 || echo 0
+  elif [ -n "$cons" ]; then
+    cat "$cons"
+  else
+    echo absent
+  fi
+}
+
+regler() {   # $1 : 1 (limite) ou 0 (charge complète)
+  [ "$(id -u)" = 0 ] || { echo "nc-limite-charge : à lancer avec sudo." >&2; exit 1; }
+  local n="${bat##*/}"
+  if [ -n "$bat" ] && grep -q 'Long_Life' "$bat/charge_types" 2>/dev/null; then
+    if [ "$1" = 1 ]; then echo Long_Life; else echo Standard; fi > "$bat/charge_types"
+    contenu="STOP_CHARGE_THRESH_$n=1"
+  elif [ -n "$bat" ] && [ -e "$bat/charge_control_end_threshold" ]; then
+    if [ "$1" = 1 ]; then
+      echo 75 > "$bat/charge_control_start_threshold" 2>/dev/null; echo 80 > "$bat/charge_control_end_threshold"
+    else
+      echo 100 > "$bat/charge_control_end_threshold"; echo 0 > "$bat/charge_control_start_threshold" 2>/dev/null
+    fi
+    contenu="START_CHARGE_THRESH_$n=75
+STOP_CHARGE_THRESH_$n=80"
+  elif [ -n "$cons" ]; then
+    echo "$1" > "$cons"
+    contenu=""
+  else
+    echo "nc-limite-charge : ce portable ne permet pas de limiter la charge." >&2; exit 1
+  fi
+  # TLP : même réglage au prochain démarrage (seulement le fichier de noctalia-config)
+  if [ -d /etc/tlp.d ] && [ -n "$contenu" ]; then
+    if [ "$1" = 1 ]; then
+      printf '# %s : limite de charge (noctalia-config, interrupteur de l'"'"'île).\n%s\n' "$tlp" "$contenu" > "$tlp"
+    elif [ -f "$tlp" ] && grep -q 'noctalia-config' "$tlp"; then
+      rm -f "$tlp"
+    fi
+  fi
+}
+
+case "${1:-etat}" in
+  etat) etat ;;
+  on|1) regler 1; etat ;;
+  off|0) regler 0; etat ;;
+  *) echo "Usage : nc-limite-charge etat | on | off" >&2; exit 2 ;;
+esac
