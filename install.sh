@@ -326,6 +326,12 @@ if [ -z "$BOOT_TITLE" ] || [ ${#BOOT_TITLE} -gt 24 ] || echo "$BOOT_TITLE" | gre
   BOOT_TITLE="$(echo "$OSNAME" | tr -cd 'A-Za-z0-9 ._-')"
 fi
 
+# Écran verrouillé : Noctalia (qui dessine l'écran de verrouillage) ne doit pas être relancée, sinon Hyprland affiche
+# « l'écran de verrouillage a planté ». L'installation attend que tu sois là.
+if [ "$MODE" != files ] && have noctalia && noctalia msg status 2>/dev/null | grep -qE '"locked": *true'; then
+  die "l'écran est verrouillé : relance l'installation une fois la session déverrouillée."
+fi
+
 echo
 info "Ce script va :"
 info "  Tout ce qui est déjà en place est sauté : seul ce qui manque ou a changé est fait."
