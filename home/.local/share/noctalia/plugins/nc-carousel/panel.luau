@@ -85,15 +85,13 @@ local function outputName()
   return o and o.name or ""
 end
 
--- Tailles pour l'écran courant (même calcul que nc-carousel-thumbs) : dessinées pour 1600 x 1000 points, réduites
--- sur un écran plus petit, agrandies sur un plus grand (jusqu'à x2) ; le fond flou prend tout l'écran, quel que soit
--- son format (16:9, 16:10, ultra-large…)
+-- Tailles pour l'écran courant (même calcul que nc-carousel-thumbs)
 local function setZoom()
   local o = currentOutput()
-  local z = o and math.max(0.6, math.min(2, o.width / 1600, o.height / 1000)) or 1
+  local z = o and math.max(0.6, math.min(1, o.width / 1600, o.height / 1000)) or 1
   local function px(v) return math.floor(v * z + 0.5) end
   CW, CH, NW, NH = px(BASE.CW), px(BASE.CH), px(BASE.NW), px(BASE.NH)
-  if o then BGW, BGH = o.width - px(40), o.height - px(60) else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
+  BGW, BGH = px(BASE.BGW), px(BASE.BGH)
   ROW_H = CH + px(30)
   SCREEN_W = o and o.width or 1600
 end

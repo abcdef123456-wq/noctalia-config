@@ -23,11 +23,11 @@ src="${src/#\~/$HOME}"
 CW=600; CH=450      # grande tranche du milieu
 NW=192; NH=420      # tranche étroite des voisines
 SK=0.30
-# Facteur de pixels : échelle de l'écran x zoom du plugin (Z = min(largeur/1600, hauteur/1000), entre 0,6 et 2 :
-# réduit sur les petits écrans, agrandi sur les grands). Le plus grand de tous les écrans branchés.
+# Facteur de pixels : échelle de l'écran x réduction du plugin sur les écrans de moins de 1600 x 1000 points
+# (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6). Le plus grand de tous les écrans branchés.
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
-   ([2, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) * .scale] | max // empty')
+   ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) * .scale] | max // empty')
 [ -n "$dpr" ] || dpr=1
 dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
 
