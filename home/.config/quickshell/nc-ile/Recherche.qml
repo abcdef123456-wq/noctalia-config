@@ -1,0 +1,330 @@
+// Spotlight de l'île (Super + R) : la pilule s'étire en une longue capsule de recherche ; en tapant, quelques
+// résultats compacts s'ajoutent dessous. ↑ ↓ pour choisir, Entrée pour lancer, Échap pour refermer.
+// On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
+// de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
+// Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal.
+// Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import Quickshell.Widgets
+import Quickshell.Services.UPower
+
+Item {
+    id: r
+    property bool actif: false
+    readonly property int hauteurLigne: 46
+    readonly property int hauteurVoulue: 56 + (resultats.length > 0 ? 6 + resultats.length * hauteurLigne + 8 : 0)
+
+    property var applis: []
+    property var fenetres: []
+    property var usage: ({})
+    property var fichiers: []
+    property string calcul: ""
+    property var resultats: []
+    property int sel: 0
+    readonly property string q: champ.text.trim()
+
+    onActifChanged: {
+        if (!actif) return
+        champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""
+        lireApplis.running = true
+        lireFenetres.running = true
+        fichierUsage.reload()
+        champ.forceActiveFocus()
+    }
+
+    // ── Sources ──
+    Process {
+        id: lireApplis
+        command: [Etat.bin + "nc-apps", "list"]
+        stdout: StdioCollector { onStreamFinished: { try { r.applis = JSON.parse(text) } catch (e) {} r.chercher() } }
+    }
+    Process {
+        id: lireFenetres
+        command: ["hyprctl", "clients", "-j"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { r.fenetres = JSON.parse(text).filter(c => c.mapped && c.title !== "" && c.workspace && c.workspace.id > 0) } catch (e) {}
+                r.chercher()
+            }
+        }
+    }
+    FileView {
+        id: fichierUsage
+        path: Quickshell.env("HOME") + "/.local/state/noctalia/plugins/data/nc/launcher/usage.json"
+        printErrors: false
+        onLoaded: { try { r.usage = JSON.parse(text()) } catch (e) { r.usage = ({}) } }
+    }
+    Process {
+        id: lireFichiers
+        property string pour: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (lireFichiers.pour !== r.q) return
+                try { r.fichiers = JSON.parse(text).slice(0, 3) } catch (e) { r.fichiers = [] }
+                r.chercher()
+            }
+        }
+    }
+    Process {
+        id: calculer
+        property string pour: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (calculer.pour !== r.q) return
+                var t = text.trim().split("\n").pop()
+                // Rien d'utile (texte non compris, même chose que la saisie) : pas de ligne de calcul
+                r.calcul = t === "" || t === calculer.pour || /[A-Za-z]·|rem\(|^\(/.test(t) ? "" : t
+                r.chercher()
+            }
+        }
+    }
+    // Fichiers et calcul : lancés un instant après la dernière touche
+    Timer {
+        id: attente
+        interval: 120
+        onTriggered: {
+            var q = r.q
+            if (q.length >= 3 && !/^(>|g |yt |w )/.test(q)) {
+                lireFichiers.pour = q
+                lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
+                lireFichiers.running = true
+            }
+            if (/\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q)) {
+                calculer.pour = q
+                calculer.command = ["qalc", "-t", "-set", "mix 0", q.replace(/\s+en\s+/g, " to ")]
+                calculer.running = true
+            }
+        }
+    }
+
+    // ── Actions et pages ──
+    readonly property var actions: [
+        { t: "Verrouiller", k: "verrouiller lock écran", g: "lock", f: () => Etat.faire(["noctalia", "msg", "session", "lock"]) },
+        { t: "Mettre en veille", k: "veille suspend dormir", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
+        { t: "Éteindre, redémarrer…", k: "éteindre redémarrer arrêt shutdown reboot quitter session", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session-panel"]) },
+        { t: "Mode jeu", k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
+        { t: "Économie d'énergie", k: "économie batterie eco énergie", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
+        { t: "Équilibré", k: "équilibré énergie normal", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },
+        { t: "Performance", k: "performance énergie puissance nvidia", g: "bolt", f: () => Etat.choisirProfil(PowerProfile.Performance) },
+        { t: "Activer ou couper le Wi-Fi", k: "wifi wi-fi réseau internet", g: "wifi", f: () => Etat.faire(["noctalia", "msg", "wifi-toggle"]) },
+        { t: "Activer ou couper le Bluetooth", k: "bluetooth", g: "bluetooth", f: () => Etat.faire(["noctalia", "msg", "bluetooth-toggle"]) },
+        { t: "Concentration", k: "concentration ne pas déranger dnd notifications", g: "dark_mode", f: () => Notifs.basculerConcentration() },
+        { t: "Nuit (tons chauds)", k: "nuit night lumière bleue", g: "wb_twilight", f: () => { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) } },
+        { t: "Thème clair ou sombre", k: "thème clair sombre dark light", g: "contrast", f: () => Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) },
+        { t: "Rester éveillé", k: "rester éveillé café caféine veille", g: "coffee", f: () => Etat.basculerCafe() },
+        { t: "Capture d'une zone", k: "capture écran screenshot", g: "screenshot_region", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"]) },
+        { t: "Presse-papiers", k: "presse-papiers clipboard copier coller", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
+        { t: "Fond d'écran suivant", k: "fond écran wallpaper suivant", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
+        { t: "Raccourcis clavier", k: "raccourcis clavier touches aide", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }
+    ]
+    readonly property var pagesIle: [
+        { t: "Son", k: "son volume audio sortie micro haut-parleurs casque", g: "volume_up", p: "son" },
+        { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux", g: "wifi", p: "reseau" },
+        { t: "Bluetooth", k: "bluetooth appareils casque souris", g: "bluetooth", p: "bluetooth" },
+        { t: "Notifications", k: "notifications messages", g: "notifications", p: "notifications" },
+        { t: "Système", k: "système processeur mémoire batterie température disque énergie", g: "memory", p: "systeme" },
+        { t: "Calendrier", k: "calendrier date agenda", g: "calendar_month", p: "calendrier" },
+        { t: "Minuteur", k: "minuteur timer chrono", g: "timer", p: "minuteur" },
+        { t: "Centre de contrôle", k: "centre contrôle réglages luminosité", g: "toggle_on", p: "centre" }
+    ]
+
+    // ── Recherche ──
+    function sansAccents(s) { return (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") }
+    // Score d'un nom : début 100, début d'un mot 80, dedans 55 (seulement si large), sinon 0.
+    // Mots : séparés par espace, tiret, point, tiret bas (« org.gnome.Nautilus », « Wi-Fi »).
+    function score(q, texte, large) {
+        var t = sansAccents(texte)
+        if (t === "" || q === "") return 0
+        if (t.startsWith(q)) return 100
+        var mots = t.split(/[\s._\-/]+/)
+        for (var i = 0; i < mots.length; i++) if (mots[i].startsWith(q)) return 80
+        return large && t.indexOf(q) >= 0 ? 55 : 0
+    }
+    // Icône d'un fichier selon son extension (icônes du thème NC)
+    function iconeFichier(nom, dossier) {
+        if (dossier) return "folder"
+        var e = (nom.split(".").pop() || "").toLowerCase()
+        var t = { mp4: "video-x-generic", mkv: "video-x-generic", webm: "video-x-generic", mov: "video-x-generic", avi: "video-x-generic",
+                  mp3: "audio-x-generic", flac: "audio-x-generic", ogg: "audio-x-generic", wav: "audio-x-generic", m4a: "audio-x-generic",
+                  png: "image-x-generic", jpg: "image-x-generic", jpeg: "image-x-generic", webp: "image-x-generic", gif: "image-x-generic", svg: "image-x-generic",
+                  pdf: "application-pdf", zip: "package-x-generic", tar: "package-x-generic", gz: "package-x-generic", xz: "package-x-generic", "7z": "package-x-generic", rar: "package-x-generic",
+                  py: "text-x-script", js: "text-x-script", ts: "text-x-script", sh: "text-x-script", c: "text-x-script", cpp: "text-x-script", h: "text-x-script",
+                  rs: "text-x-script", go: "text-x-script", lua: "text-x-script", qml: "text-x-script", java: "text-x-script", css: "text-x-script",
+                  json: "application-json", jsonl: "application-json", toml: "application-json", yaml: "application-json", yml: "application-json", xml: "application-json",
+                  md: "text-markdown", html: "text-html", htm: "text-html", odt: "x-office-document", docx: "x-office-document", doc: "x-office-document",
+                  ods: "x-office-spreadsheet", xlsx: "x-office-spreadsheet", csv: "x-office-spreadsheet", odp: "x-office-presentation", pptx: "x-office-presentation",
+                  ttf: "font-x-generic", otf: "font-x-generic", iso: "application-x-cd-image" }[e]
+        return t || "text-x-generic"
+    }
+    function poidsUsage(id) {
+        var u = usage[id]
+        if (!u) return 1
+        var h = (Date.now() / 1000 - (u.t || 0)) / 3600
+        return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
+    }
+
+    onQChanged: { sel = 0; fichiers = []; calcul = ""; attente.restart(); chercher() }
+
+    function chercher() {
+        var q = r.q, qa = sansAccents(q), out = []
+        if (q === "") { resultats = []; return }
+
+        // Préfixes : web et commande
+        var web = [["g ", "Google", "https://www.google.com/search?q="], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
+                   ["w ", "Wikipédia", "https://fr.wikipedia.org/w/index.php?search="]]
+        for (var w = 0; w < web.length; w++) {
+            if (q.startsWith(web[w][0]) && q.length > web[w][0].length) {
+                var terme = q.slice(web[w][0].length)
+                var url = web[w][2] + encodeURIComponent(terme)
+                resultats = [{ titre: terme, sous: "Rechercher sur " + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
+                return
+            }
+        }
+        if (q.startsWith(">")) {
+            var c = q.slice(1).trim()
+            resultats = c === "" ? [] : [{ titre: c, sous: "Commande dans le terminal", glyphe: "terminal",
+                                          f: () => Quickshell.execDetached(["kitty", "--hold", "sh", "-c", c]) }]
+            return
+        }
+
+        // Calcul en tête
+        if (calcul !== "") {
+            var res = calcul
+            out.push({ titre: "= " + res, sous: "Calcul · Entrée pour copier", glyphe: "calculate", s: 1000,
+                       f: () => Quickshell.execDetached(["wl-copy", res.replace(/^≈?\s*/, "")]) })
+        }
+        // Fenêtres ouvertes
+        for (var i = 0; i < fenetres.length; i++) {
+            var fe = fenetres[i]
+            var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
+            if (sf > 0) {
+                var adr = fe.address
+                out.push({ titre: fe.title, sous: "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
+                           glyphe: "select_window", s: sf + 30,
+                           f: () => Etat.faire(["hyprctl", "eval", "hl.dispatch(hl.dsp.focus({ window = 'address:" + adr + "' }))"]) })
+            }
+        }
+        // Applications
+        for (var a = 0; a < applis.length; a++) {
+            var ap = applis[a]
+            var sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
+            if (sa > 0) {
+                var id = ap.id
+                out.push({ titre: ap.name, sous: ap.generic || "Application", icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps",
+                           s: sa * poidsUsage(id), f: () => r.lancer(id) })
+            }
+        }
+        // Pages de l'île et actions
+        for (var p = 0; p < pagesIle.length; p++) {
+            var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
+            if (sp > 0) { var nom = pg.p; out.push({ titre: pg.t, sous: "Dans l'île", glyphe: pg.g, s: sp - 5, page: nom }) }
+        }
+        for (var k = 0; k < actions.length; k++) {
+            var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
+            if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f })
+        }
+        // Fichiers
+        for (var n = 0; n < fichiers.length; n++) {
+            var fi = fichiers[n], chemin = fi.path
+            out.push({ titre: fi.name, sous: (fi.dir ? "Dossier · " : "Fichier · ") + fi.parent,
+                       icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
+                       s: Math.max(15, score(qa, fi.name, true) * 0.75),
+                       f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
+        }
+        out.sort((x, y) => y.s - x.s)
+        resultats = out.slice(0, 6)
+        if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+    }
+
+    function lancer(id) {
+        var u = Object.assign({}, usage)
+        var e = u[id] || { n: 0 }
+        u[id] = { n: (e.n || 0) + 1, t: Math.floor(Date.now() / 1000) }
+        usage = u
+        fichierUsage.setText(JSON.stringify(u))
+        Quickshell.execDetached([Etat.bin + "nc-apps", "launch", id])
+    }
+    function valider(i) {
+        var x = resultats[i]
+        if (!x) return
+        if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
+        Etat.fermer()
+        x.f()
+    }
+
+    // ── Dessin ──
+    // Barre de recherche
+    Item {
+        id: barre
+        width: parent.width; height: 56
+        Ico { id: loupe; x: 22; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 22; color: "#98989d" }
+        TextInput {
+            id: champ
+            anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
+            anchors.verticalCenter: parent.verticalCenter
+            color: "white"; selectionColor: "#0a84ff"; selectedTextColor: "white"
+            font.family: "Adwaita Sans"; font.pixelSize: 19
+            clip: true
+            Keys.onEscapePressed: Etat.fermer()
+            Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
+            Keys.onUpPressed: r.sel = Math.max(0, r.sel - 1)
+            Keys.onTabPressed: r.sel = r.resultats.length > 0 ? (r.sel + 1) % r.resultats.length : 0
+            onAccepted: r.valider(r.sel)
+            Texte {
+                visible: champ.text === ""
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Rechercher"; secondaire: true; font.pixelSize: 19
+            }
+        }
+    }
+
+    // Résultats
+    Column {
+        id: liste
+        anchors.top: barre.bottom; anchors.topMargin: 6
+        x: 8; width: parent.width - 16
+        Repeater {
+            model: r.resultats
+            Rectangle {
+                id: ligne
+                required property var modelData
+                required property int index
+                readonly property bool choisi: index === r.sel
+                width: liste.width; height: r.hauteurLigne; radius: 14
+                color: choisi ? "#2c2c2e" : "transparent"
+                Item {
+                    id: ic
+                    x: 12; anchors.verticalCenter: parent.verticalCenter
+                    width: 28; height: 28
+                    Image {
+                        id: img
+                        anchors.fill: parent
+                        source: ligne.modelData.icone || ""
+                        sourceSize: Qt.size(56, 56)
+                        visible: status === Image.Ready
+                    }
+                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: "#d1d1d6"; visible: img.status !== Image.Ready }
+                }
+                Texte {
+                    anchors.left: ic.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 12 - 28 - 12 - sous.width - 40
+                    text: ligne.modelData.titre; font.pixelSize: 15; font.weight: ligne.choisi ? Font.DemiBold : Font.Normal
+                }
+                Texte {
+                    id: sous
+                    anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, 260)
+                    text: ligne.modelData.sous + (ligne.choisi ? "  ↵" : ""); secondaire: true; font.pixelSize: 13
+                    horizontalAlignment: Text.AlignRight
+                }
+                MouseArea {
+                    anchors.fill: parent; hoverEnabled: true
+                    onEntered: r.sel = ligne.index
+                    onClicked: r.valider(ligne.index)
+                }
+            }
+        }
+    }
+}

@@ -47,6 +47,7 @@ Singleton {
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
     function aller(nom) {
         if (vues.indexOf(nom) < 0) return
+        recherche = false
         vueNom = nom
         lirePage()
     }
@@ -54,6 +55,7 @@ Singleton {
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
     function basculer(ecran, versCentre) {
         if (ecranOuvert === ecran) { fermer(); return }
+        recherche = false
         vueNom = versCentre || activites.length === 0 ? "centre" : activites[0]
         ecranOuvert = ecran
         activiteType = ""
@@ -61,7 +63,17 @@ Singleton {
         lireLuminosite(false)
         lirePage()
     }
-    function fermer() { ecranOuvert = "" }
+    function fermer() { ecranOuvert = ""; recherche = false }
+
+    // Spotlight (Super + R) : l'île s'ouvre en longue capsule de recherche
+    property bool recherche: false
+    property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
+    function chercher(ecran) {
+        if (ecranOuvert === ecran && recherche) { fermer(); return }
+        recherche = true
+        ecranOuvert = ecran
+        activiteType = ""
+    }
 
     // ── Minuteur (activité en direct, décompte dans la pilule) ──
     property real minuteurFin: 0
