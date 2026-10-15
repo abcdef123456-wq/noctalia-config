@@ -12,6 +12,8 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
 - écran de verrouillage épuré (heure, date, musique en cours), coins d'écran arrondis ;
 - terminal kitty assorti, zsh avec oh-my-zsh et powerlevel10k, accueil (logo, processeur, mémoire, batterie) ;
+- look épuré : bureaux en pilules sobres, icônes « Terminal » et « Fichiers » dessinées aux couleurs du fond,
+  explorateur de fichiers au style Breeze (moderne, aux couleurs du thème) ;
 - Neovim avec LazyVim et ses extras (C/C++, JavaScript, formatage, Git), plugins aux versions de `lazy-lock.json` ;
 - 3 profils d'énergie (Performance, Équilibré, Économie), mêmes réglages sur tous les portables ; en Économie, animations,
   flou et changement de fond coupés ; **mode jeu** (Super + Alt + G) ;

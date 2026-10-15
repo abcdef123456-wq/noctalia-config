@@ -36,6 +36,7 @@ HOME_FILES=(
   .local/bin/nc-finger
   .local/bin/nc-greeting
   .local/bin/nc-keys
+  .local/bin/nc-icones
   .local/bin/nc-ile-etat
   .local/bin/nc-launch
   .local/bin/nc-maj
@@ -102,6 +103,9 @@ sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s
 # Navigateur : le navigateur de ce PC devient celui de la machine cible ; applis personnelles retirées des favoris
 sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
   home/.config/noctalia/config.toml home/.local/share/noctalia/plugins/nc-launcher/panel.luau
+
+# Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
+sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/' home/.config/qt6ct/qt6ct.conf
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml

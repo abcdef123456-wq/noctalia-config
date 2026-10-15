@@ -129,6 +129,8 @@ pname() {
     noto-fonts:debian) echo fonts-noto-core ;;
     noto-fonts:fedora) echo google-noto-sans-fonts ;;
     noto-fonts:suse) echo noto-sans-fonts ;;
+    breeze:fedora) echo plasma-breeze ;;
+    breeze:suse) echo breeze6-style ;;
     *) echo "$1" ;;
   esac
 }
@@ -386,7 +388,7 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland kitty dolphin qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze)
 if [ "$MODE" != files ]; then
   say "1. Paquets"
   missing=(); manual=()
@@ -453,6 +455,10 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
 fi
 [ "$migrated" = 1 ] && ok "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde."
 
+# Style des applis Qt / KDE (Dolphin…) : Breeze, le style moderne de KDE, s'il est installé ; sinon Fusion
+QT_STYLE=Fusion
+[ -n "$(find /usr/lib /usr/lib64 -path '*qt6/plugins/styles/breeze*.so' -print -quit 2>/dev/null || true)" ] && QT_STYLE=Breeze
+
 copied=0; same=0; hypr_changed=0
 root="$REPO/home"
 while IFS= read -r -d '' src; do
@@ -462,7 +468,7 @@ while IFS= read -r -d '' src; do
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" "$src" > "$tmp"
+        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
@@ -507,6 +513,9 @@ if [ -f "$HC/hyprland.conf" ]; then
   ok "Ancienne config Hyprland (hyprland.conf) remplacée par hyprland.lua ; elle est dans la sauvegarde."
   [ -d "$HC/conf.d" ] && info "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin."
 fi
+
+# Icônes sobres du terminal et des fichiers, aux couleurs du thème (remplacent le chat de kitty et le dauphin de Dolphin)
+"$HOME/.local/bin/nc-icones" >/dev/null 2>&1 || true
 
 # Tes réglages Hyprland personnels : fichier créé une seule fois avec des exemples, jamais remplacé ensuite
 PERSO="$HOME/.config/hypr/perso.lua"

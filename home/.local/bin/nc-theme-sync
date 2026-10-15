@@ -2,7 +2,8 @@
 """nc-theme-sync : thème kitty assorti aux couleurs Noctalia (fond d'écran ou palette fixe).
 
 Lit ~/.config/noctalia/colors.json, écrit ~/.config/kitty/themes/noctalia-dynamic.conf (puis recharge kitty)
-et ~/.config/hypr/nc/couleurs.lua : halo coloré, bordure en dégradé, groupes (puis recharge Hyprland).
+et ~/.config/hypr/nc/couleurs.lua : halo coloré, bordure en dégradé, groupes (puis recharge Hyprland) ;
+met aussi à jour les couleurs KDE (Dolphin) et les icônes du terminal et des fichiers (nc-icones).
 Rouge, vert et jaune gardent leur sens (erreur, succès, avertissement) et sont rapprochés de la couleur
 principale de 20° au plus. Bleu, magenta et cyan prennent l'accent du thème le plus proche (à 60° près),
 sinon ils sont tirés de 30° vers la couleur principale. La luminosité est ensuite ajustée pour garantir
@@ -233,6 +234,8 @@ hl.config({{
         print("nc-theme-sync : couleurs Hyprland mises à jour")
 
     sync_kdeglobals()
+    # Icônes du terminal et des fichiers, aux nouvelles couleurs
+    subprocess.run([str(Path.home() / ".local/bin/nc-icones")], capture_output=True)
 
 
 def sync_kdeglobals():
