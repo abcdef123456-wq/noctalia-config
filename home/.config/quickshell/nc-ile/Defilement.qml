@@ -7,18 +7,17 @@ Flickable {
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     interactive: false
-    // Position visée : chaque petit pas du pavé tactile s'y ajoute (partir de la position en cours d'animation
-    // ralentissait tout et la liste n'arrivait jamais au bout)
+    // Un geste (pavé tactile ou cran de molette) fait défiler d'un grand coup : presque une hauteur de liste
     property real cible: 0
     onContentHeightChanged: cible = Math.min(cible, Math.max(0, contentHeight - height))
-    // Rend vrai si la liste a bougé (sinon, l'île passe à la page voisine)
+    // Rend vrai si la liste a bougé (sinon, l'île passe à la page voisine) ; dy > 0 : vers le haut
     function defiler(dy) {
         var max = Math.max(0, contentHeight - height)
-        var n = Math.max(0, Math.min(max, cible - dy))
+        var n = Math.max(0, Math.min(max, cible + (dy > 0 ? -1 : 1) * height * 0.85))
         if (Math.abs(n - cible) < 0.5) return false
         cible = n
         contentY = n
         return true
     }
-    Behavior on contentY { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+    Behavior on contentY { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
 }
