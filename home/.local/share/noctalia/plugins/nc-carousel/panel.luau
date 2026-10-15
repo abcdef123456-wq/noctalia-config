@@ -34,7 +34,6 @@ local query = ""
 local current = nil
 local bg = nil
 local BGW, BGH = BASE.BGW, BASE.BGH
-local DECALAGE = 0                  -- remontée de la rangée pour la centrer sur l'écran (setZoom)
 local inputKey = 0
 local holdDir = 0
 local holdT = 0
@@ -99,10 +98,6 @@ local function setZoom()
   if grand then BGW, BGH = o.width - px(40), o.height - px(60) else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
   SCREEN_W = o and o.width or 1600
-  -- Le panneau commence sous la barre (64 points du haut de l'écran, mesuré) : le fond garde la même marge en bas
-  -- qu'en haut, pour que fond et rangée d'images soient tous deux au milieu de l'écran
-  if o then BGH = math.min(BGH, o.height - 2 * 64) end
-  DECALAGE = o and (o.height / 2 - 64 - BGH / 2) or 0
 end
 
 local function wrap(i)
@@ -229,7 +224,7 @@ function render()
   end
 
   local ease = 1 - (1 - appear) * (1 - appear)
-  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2 + DECALAGE, opacity = ease }, {
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2, opacity = ease }, {
     bg and ui.image({ path = bg, width = BGW, height = BGH, fit = "cover", radius = 18 }) or ui.box({ width = 1, height = 1, opacity = 0 }),
     ui.column({ height = ROW_H, width = BGW, align = "center", justify = "center" }, { middle }),
   }))
