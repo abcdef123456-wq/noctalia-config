@@ -646,9 +646,20 @@ elif ask "$nv_q" o; then
   fi
   # Plugins aux versions exactes de lazy-lock.json (sinon ils s'installent au premier lancement)
   if [ "$nv_plugins" = 0 ] && [ -n "$nv" ] && ver_ge "$nv" 0.11.2 && diff -rq "$REPO/home/.config/nvim" "$NV" >/dev/null 2>&1; then
-    info "Téléchargement des plugins (une à deux minutes)…"
-    timeout 600 "$(nv_bin)" --headless "+Lazy! restore" +qa >/dev/null 2>&1 && ok "Plugins Neovim installés." ||
-      warn "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim."
+    # Téléchargement en arrière-plan, avec l'avancement affiché (plugins présents / plugins du lock) ;
+    # abandon au bout de 10 minutes (connexion lente) : ils s'installeront alors au premier lancement de nvim.
+    nv_total="$(grep -c '"branch"' "$NV/lazy-lock.json" 2>/dev/null || echo '?')"
+    nv_lazy="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy"
+    info "Téléchargement des plugins Neovim ($nv_total, une à cinq minutes selon la connexion)…"
+    timeout 600 "$(nv_bin)" --headless "+Lazy! restore" +qa >/dev/null 2>&1 &
+    nv_pid=$!
+    while kill -0 "$nv_pid" 2>/dev/null; do
+      printf '\r   %s / %s plugins' "$(find "$nv_lazy" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)" "$nv_total"
+      sleep 2
+    done
+    printf '\r%60s\r' ''
+    if wait "$nv_pid"; then ok "Plugins Neovim installés."
+    else warn "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim."; fi
   fi
 fi
 
