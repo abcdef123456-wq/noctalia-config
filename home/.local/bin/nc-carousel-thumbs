@@ -24,10 +24,12 @@ CW=600; CH=450      # grande tranche du milieu
 NW=192; NH=420      # tranche étroite des voisines
 SK=0.30
 # Facteur de pixels : échelle de l'écran x réduction du plugin sur les écrans de moins de 1600 x 1000 points
-# (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6). Le plus grand de tous les écrans branchés.
+# (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6) ; écran plus grand que 1600 x 1000 : agrandi jusqu'à x2.
+# Le plus grand de tous les écrans branchés.
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
-   ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) * .scale] | max // empty')
+   (if $w > 1600 or $h > 1000 then ([2, $w / 1600, $h / 1000] | min | if . < 1 then 1 else . end)
+    else ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) end) * .scale] | max // empty')
 [ -n "$dpr" ] || dpr=1
 dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
 

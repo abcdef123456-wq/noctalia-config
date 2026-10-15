@@ -89,9 +89,13 @@ end
 local function setZoom()
   local o = currentOutput()
   local z = o and math.max(0.6, math.min(1, o.width / 1600, o.height / 1000)) or 1
+  -- Écran plus grand que 1600 x 1000 points (1920 x 1080…) : le carrousel grandit avec lui (jusqu'à x2) et son fond
+  -- couvre tout l'écran ; jusqu'à 1600 x 1000, rien ne change
+  local grand = o and (o.width > 1600 or o.height > 1000)
+  if grand then z = math.max(1, math.min(2, o.width / 1600, o.height / 1000)) end
   local function px(v) return math.floor(v * z + 0.5) end
   CW, CH, NW, NH = px(BASE.CW), px(BASE.CH), px(BASE.NW), px(BASE.NH)
-  BGW, BGH = px(BASE.BGW), px(BASE.BGH)
+  if grand then BGW, BGH = o.width - px(40), o.height - px(60) else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
   SCREEN_W = o and o.width or 1600
 end
