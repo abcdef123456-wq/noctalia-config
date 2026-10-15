@@ -300,8 +300,28 @@ LCY1="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.30}')"; LCY2="$(awk -v h="$LH" 
 LCY3="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.64}')";  LCY4="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.86}')"
 ok "Écran principal : $MON, ${PXW}x${PXH} pixels, échelle $SCALE (${LW}x${LH} points)"
 
-# Clavier : disposition du système ; bascule Super+Espace seulement s'il y en a plusieurs
-KBL="$(localectl status 2>/dev/null | sed -n 's/.*X11 Layout: *//p' | head -1 || true)"
+# Clavier : disposition du système ; bascule Super+Espace seulement s'il y en a plusieurs.
+# Sources, dans l'ordre : localectl (X11), /etc/default/keyboard (Debian), clavier de la console (« fr-latin1 » -> fr),
+# pays de la langue (fr_FR -> fr). Chaque nom est vérifié dans la liste officielle des dispositions (xkb) :
+# « n/a » ou un nom inconnu donnerait « invalid keyboard layout » dans Hyprland.
+XKB_LST=/usr/share/X11/xkb/rules/evdev.lst
+kb_valide() { # kb_valide "fr,us" : vrai si chaque disposition existe
+  local l
+  [ -n "$1" ] || return 1
+  [ -r "$XKB_LST" ] || { [[ "$1" =~ ^[a-z]{2,3}(,[a-z]{2,3})*$ ]]; return; }
+  for l in ${1//,/ }; do
+    awk -v l="$l" '/^! layout/{f=1;next} /^!/{f=0} f && $1==l {t=1} END{exit !t}' "$XKB_LST" || return 1
+  done
+}
+KBL=""
+for kb in \
+  "$(localectl status 2>/dev/null | sed -n 's/.*X11 Layout: *//p' | head -1 || true)" \
+  "$(sed -n 's/^XKBLAYOUT="\{0,1\}\([^"]*\)"\{0,1\}/\1/p' /etc/default/keyboard 2>/dev/null | head -1 || true)" \
+  "$(localectl status 2>/dev/null | sed -n 's/.*VC Keymap: *//p' | head -1 | sed -E 's/[-_].*//' || true)" \
+  "$(echo "${LANG:-}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p' | tr '[:upper:]' '[:lower:]')"; do
+  kb="$(echo "$kb" | tr -d ' ')"
+  if kb_valide "$kb"; then KBL="$kb"; break; fi
+done
 KBL="${KBL:-us}"
 KBO=""; case "$KBL" in *,*) KBO="grp:win_space_toggle" ;; esac
 ok "Clavier : $KBL"
