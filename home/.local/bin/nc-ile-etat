@@ -88,6 +88,8 @@ systeme() {
     [ -r "$b/energy_full_design" ] && echo "sante=$(( $(cat "$b/energy_full") * 100 / $(cat "$b/energy_full_design") ))" && break
     [ -r "$b/charge_full_design" ] && echo "sante=$(( $(cat "$b/charge_full") * 100 / $(cat "$b/charge_full_design") ))" && break
   done
+  # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé
+  [ -x /usr/local/bin/nc-limite-charge ] && echo "protection=$(/usr/local/bin/nc-limite-charge etat 2>/dev/null)"
   hyprctl monitors -j 2>/dev/null | jq -r '.[] | "ecran=\(.name)\t\(.width)x\(.height)\t\(.refreshRate | floor) Hz\t\(.scale)"' 2>/dev/null
 }
 

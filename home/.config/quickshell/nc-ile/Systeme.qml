@@ -104,6 +104,42 @@ Item {
                     }
                 }
             }
+            // Protection de la batterie (charge arrêtée vers 80 %) : seulement si l'utilitaire est installé
+            Module {
+                id: protection
+                readonly property string v: sy.val("protection")
+                property bool attente: false
+                visible: v === "0" || v === "1"
+                width: sy.width; height: 56; radius: 18
+                onVChanged: attente = false
+                onAttenteChanged: if (attente) finAttenteProtection.restart()
+                Timer { id: finAttenteProtection; interval: 3000; onTriggered: protection.attente = false }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 16
+                    anchors.right: inter.left; anchors.rightMargin: 10
+                    Texte { text: "Protéger la batterie"; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                    Texte { text: "Charge arrêtée vers 80 %, conseillé si le PC reste souvent branché"; secondaire: true; font.pixelSize: 11; width: parent.width }
+                }
+                Rectangle {
+                    id: inter
+                    readonly property bool allume: protection.v === "1"
+                    anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                    width: 46; height: 28; radius: 14; color: allume ? "#30d158" : "#3a3a3c"
+                    opacity: protection.attente ? 0.5 : 1
+                    Behavior on color { ColorAnimation { duration: 180 } }
+                    Rectangle {
+                        width: 24; height: 24; radius: 12; color: "white"; y: 2; x: inter.allume ? 20 : 2
+                        Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
+                    }
+                    MouseArea {
+                        anchors.fill: parent; anchors.margins: -6
+                        onClicked: {
+                            protection.attente = true
+                            Etat.faire(["sudo", "-n", "/usr/local/bin/nc-limite-charge", inter.allume ? "off" : "on"])
+                        }
+                    }
+                }
+            }
             // Modes d'énergie
             Repeater {
                 model: [
