@@ -7,13 +7,14 @@
 -- Volume et luminosité arrivent des raccourcis Hyprland (noctalia msg plugin nc/ile:pilule all volume|luminosite) ;
 -- le reste est surveillé ici : fichiers du système chaque seconde, lecteur de musique toutes les 2 s.
 
+local sym = require("./symboles.luau")
 local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
 local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
 local PROFIL = noctalia.expandPath("~/.config/hypr/nc/profil.lua")
 local JEU = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
 local JOURS = { "dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam." }
 local MOIS = { "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc." }
-local NOMS_PROFIL = { ["power-saver"] = { "leaf", "Économie" }, balanced = { "scale", "Équilibré" }, performance = { "bolt", "Performance" } }
+local NOMS_PROFIL = { ["power-saver"] = { "feuille", "Économie" }, balanced = { "equilibre", "Équilibré" }, performance = { "eclair", "Performance" } }
 -- Couleurs façon Apple (mode sombre) : île noir pur, texte blanc, gris secondaire, vert système
 local NOIR, BLANC, GRIS, PISTE, VERT = "#000000", "#ffffff", "#98989d", "#3a3a3c", "#30d158"
 local BARRES = 5
@@ -27,6 +28,10 @@ local dernierMedia, derniereSeconde = 0, 0
 
 -- Animation : largeur en ressort (avec rebond), contenu qui s'efface puis réapparaît à chaque changement
 local largeur, vitesse, opacite = nil, 0, 1
+-- Liaison avec le centre de contrôle (l'île ouverte) : la pilule s'efface pendant qu'il est ouvert, réapparaît
+-- quand il se rétracte ; sa largeur est publiée pour que l'île naisse exactement à sa taille
+local ileOuverte = false
+local presence, publiee = 1, 0
 local signature = ""
 
 local function maintenant() return noctalia.nowMs() end
@@ -58,14 +63,14 @@ local function repos()
     local p = media.pochette
     local gauche = (p ~= "" and noctalia.fileExists(p))
       and ui.image({ key = "pochette", path = p, width = 20, height = 20, radius = 6, fit = "cover" })
-      or ui.glyph({ name = "music", size = 15, color = "primary" })
+      or sym.image("note", BLANC, 15)
     local milieu = { ui.label({ text = heure, fontWeight = "semibold", color = BLANC }) }
     local l = 20 + texte(heure) + 9
     if not joue then
       table.insert(milieu, ui.label({ text = media.titre, maxWidth = 150, maxLines = 1, color = GRIS }))
       l += texte(media.titre, 150) + 8
     end
-    local droite = joue and egaliseur() or ui.glyph({ name = "player-play-filled", size = 12, color = GRIS })
+    local droite = joue and egaliseur() or sym.image("lecture", GRIS, 13)
     l += joue and (BARRES * 5) or 12
     return { gauche, ui.row({ gap = 8, align = "center", flexGrow = 1, justify = "center" }, milieu), droite },
       l + 40, "media:" .. media.titre .. media.etat
@@ -79,7 +84,7 @@ end
 
 local function jauge(icone, valeur, couleur)
   return {
-    ui.glyph({ name = icone, size = 16, color = couleur or BLANC }),
+    sym.image(icone, couleur or BLANC, 17),
     ui.progress({ width = 130, height = 6, radius = 3, progress = math.max(0, math.min(1, valeur / 100)), fill = couleur or BLANC, track = PISTE }),
     ui.label({ text = valeur .. " %", fontWeight = "semibold", width = 42, textAlign = "end", color = BLANC }),
   }, 16 + 130 + 42 + 2 * 9
@@ -88,17 +93,17 @@ end
 local function reaction()
   local a = activite
   if a.genre == "volume" then
-    local e, l = jauge(a.muet and "volume-off" or "volume", a.valeur, a.muet and GRIS or nil)
+    local e, l = jauge(a.muet and "muet" or "haut-parleur", a.valeur, a.muet and GRIS or nil)
     return e, l, "volume"
   elseif a.genre == "luminosite" then
-    local e, l = jauge("brightness-half", a.valeur)
+    local e, l = jauge("soleil", a.valeur)
     return e, l, "luminosite"
   elseif a.genre == "piste" then
     local enfants = {}
     if a.pochette ~= "" and noctalia.fileExists(a.pochette) then
       table.insert(enfants, ui.image({ key = "pochette-r", path = a.pochette, width = 22, height = 22, radius = 6, fit = "cover" }))
     else
-      table.insert(enfants, ui.glyph({ name = "music", size = 16, color = "primary" }))
+      table.insert(enfants, sym.image("note", BLANC, 16))
     end
     table.insert(enfants, ui.label({ text = a.titre, maxWidth = 190, maxLines = 1, fontWeight = "semibold", color = BLANC }))
     local l = 24 + texte(a.titre, 190) + 9
@@ -114,15 +119,15 @@ local function reaction()
       ui.label({ text = t, fontWeight = "semibold", color = a.branche and VERT or BLANC }),
     }, 17 + texte(t) + 9, "charge" .. tostring(a.branche)
   elseif a.genre == "profil" then
-    local n = NOMS_PROFIL[a.profil] or { "scale", a.profil }
+    local n = NOMS_PROFIL[a.profil] or { "equilibre", a.profil }
     return {
-      ui.glyph({ name = n[1], size = 16, color = a.profil == "power-saver" and VERT or (a.profil == "performance" and "#ff9f0a" or BLANC) }),
+      sym.image(n[1], a.profil == "power-saver" and VERT or (a.profil == "performance" and "#ff9f0a" or BLANC), 17),
       ui.label({ text = n[2], fontWeight = "semibold", color = BLANC }),
     }, 16 + texte(n[2]) + 9, "profil" .. a.profil
   elseif a.genre == "jeu" then
     local t = a.actif and "Mode jeu" or "Mode jeu désactivé"
     return {
-      ui.glyph({ name = "device-gamepad-2", size = 17, color = a.actif and "#ff9f0a" or GRIS }),
+      sym.image("manette", a.actif and "#ff9f0a" or GRIS, 18),
       ui.label({ text = t, fontWeight = "semibold", color = BLANC }),
     }, 17 + texte(t) + 9, "jeu" .. tostring(a.actif)
   end
@@ -151,9 +156,17 @@ function rendre()
   largeur += vitesse
   if math.abs(ecart) < 0.5 and math.abs(vitesse) < 0.5 then largeur, vitesse = cible, 0 end
   if opacite < 1 then opacite = math.min(1, opacite + 0.09) end
-  animer(largeur ~= cible or opacite < 1 or activite ~= nil or (media ~= nil and media.etat == "Playing"))
+  -- Présence de la pilule : effacée très vite quand l'île s'ouvre, revient en douceur quand elle se referme
+  if ileOuverte and presence > 0 then presence = math.max(0, presence - 0.34)
+  elseif not ileOuverte and presence < 1 then presence = math.min(1, presence + 0.12) end
+  if not ileOuverte and math.abs(largeur - publiee) > 0.5 and largeur == cible then
+    publiee = largeur
+    noctalia.state.set("ile-largeur", math.floor(largeur))
+  end
+  animer(largeur ~= cible or opacite < 1 or (presence > 0 and presence < 1) or activite ~= nil or (media ~= nil and media.etat == "Playing"))
   -- La pilule : noir pur, entièrement arrondie, sans contour (la pastille de la barre est désactivée pour elle)
-  barWidget.render(ui.row({ width = math.floor(largeur), height = 30, radius = 15, fill = NOIR, paddingH = 14, align = "center" }, {
+  barWidget.render(ui.row({ width = math.floor(largeur), height = 30, radius = 15, fill = NOIR, paddingH = 14, align = "center",
+    opacity = presence }, {
     ui.row({ flexGrow = 1, gap = 9, align = "center", justify = "center", opacity = opacite }, enfants),
   }))
 end
@@ -254,8 +267,17 @@ function update()
 end
 
 function onClick()
-  noctalia.togglePanel("nc/ile:centre")
+  if ileOuverte then
+    noctalia.state.set("ile-commande", { action = "fermer", n = maintenant() })   -- fermeture animée
+  else
+    noctalia.togglePanel("nc/ile:centre")
+  end
 end
+
+noctalia.state.watch("ile-ouverte", function(etat)
+  ileOuverte = etat == "ouverte"
+  rendre()
+end)
 
 function onRightClick()
   noctalia.runAsync({ "playerctl", "play-pause" }, function() lireMedia() end, 3000)

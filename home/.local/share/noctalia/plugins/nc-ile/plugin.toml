@@ -23,3 +23,4 @@ width = 470
 height = 640
 placement = "attached"
 position = "top_center"
+capture_keys = ["Escape"]                 # Échap : fermeture animée (l'île se rétracte dans la pilule)

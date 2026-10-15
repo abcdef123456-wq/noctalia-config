@@ -455,6 +455,24 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
 fi
 [ "$migrated" = 1 ] && ok "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde."
 
+# Icônes façon macOS : thème WhiteSur (github.com/vinceliuice/WhiteSur-icon-theme), installé pour toi seul dans
+# ~/.local/share/icons s'il manque (une question) ; sinon Papirus
+ICON_THEME=Papirus-Dark
+WS="$HOME/.local/share/icons/WhiteSur-dark"
+if [ ! -d "$WS" ] && [ "$MODE" != files ] && have git; then
+  info "Icônes façon macOS (dossiers, applis) : thème libre WhiteSur, https://github.com/vinceliuice/WhiteSur-icon-theme"
+  if ask "Le télécharger (environ 80 Mo) et l'installer pour toi ?" o; then
+    wd="$(mktemp -d)"
+    if git clone -q --depth 1 https://github.com/vinceliuice/WhiteSur-icon-theme.git "$wd/ws" && bash "$wd/ws/install.sh" -d "$HOME/.local/share/icons" -t default >/dev/null 2>&1; then
+      ok "Icônes WhiteSur installées."
+    else
+      warn "Téléchargement des icônes WhiteSur impossible : Papirus est gardé."
+    fi
+    rm -rf "$wd"
+  fi
+fi
+[ -d "$WS" ] && ICON_THEME=WhiteSur-dark
+
 # Style des applis Qt / KDE (Dolphin…) : Breeze, le style moderne de KDE, s'il est installé ; sinon Fusion
 QT_STYLE=Fusion
 [ -n "$(find /usr/lib /usr/lib64 -path '*qt6/plugins/styles/breeze*.so' -print -quit 2>/dev/null || true)" ] && QT_STYLE=Breeze
@@ -468,7 +486,7 @@ while IFS= read -r -d '' src; do
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" "$src" > "$tmp"
+        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
@@ -514,17 +532,41 @@ if [ -f "$HC/hyprland.conf" ]; then
   [ -d "$HC/conf.d" ] && info "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin."
 fi
 
-# Fichiers (Nautilus, style Apple) : appli par défaut pour les dossiers ; applis GTK en sombre avec les icônes
-# Papirus ; couleurs GTK générées par Noctalia (fond d'écran) ; grandes vignettes, dossiers en premier
+# Fichiers (Nautilus, style Apple) : appli par défaut pour les dossiers ; applis GTK en sombre avec les mêmes icônes
+# que le reste ; couleurs GTK générées par Noctalia (fond d'écran) ; vignettes moyennes, dossiers en premier
 if have gsettings; then
   gsettings set org.gnome.desktop.interface color-scheme prefer-dark 2>/dev/null || true
-  gsettings set org.gnome.desktop.interface icon-theme Papirus-Dark 2>/dev/null || true
+  gsettings set org.gnome.desktop.interface icon-theme "$ICON_THEME" 2>/dev/null || true
   gsettings set org.gnome.nautilus.preferences default-folder-viewer icon-view 2>/dev/null || true
-  gsettings set org.gnome.nautilus.icon-view default-zoom-level large 2>/dev/null || true
+  gsettings set org.gnome.nautilus.icon-view default-zoom-level medium 2>/dev/null || true
   gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true 2>/dev/null || true
 fi
 have xdg-mime && [ -n "$(find /usr/share/applications -name org.gnome.Nautilus.desktop -print -quit 2>/dev/null || true)" ] &&
   xdg-mime default org.gnome.Nautilus.desktop inode/directory 2>/dev/null
+
+# Barre latérale de Nautilus, comme les Favoris du Finder : Téléchargements, Documents, Images, Musique, Vidéos
+# (dossiers de ta langue, ajoutés seulement s'ils existent et n'y sont pas déjà)
+python3 -I - "$HOME/.config/gtk-3.0/bookmarks" <<'PYEOF' 2>/dev/null || true
+import os, subprocess, sys, urllib.parse
+fichier = sys.argv[1]
+os.makedirs(os.path.dirname(fichier), exist_ok=True)
+lignes = open(fichier).read().splitlines() if os.path.exists(fichier) else []
+deja = {l.split(" ")[0] for l in lignes}
+maison = os.path.expanduser("~")
+noms = {"DOWNLOAD": ("Downloads", "Téléchargements"), "DOCUMENTS": ("Documents",), "PICTURES": ("Pictures", "Images"),
+        "MUSIC": ("Music", "Musique"), "VIDEOS": ("Videos", "Vidéos")}
+for nom, secours in noms.items():
+    try:
+        d = subprocess.run(["xdg-user-dir", nom], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        d = ""
+    if not d or d == maison:            # dossiers utilisateur non configurés : noms courants
+        d = next((os.path.join(maison, n) for n in secours if os.path.isdir(os.path.join(maison, n))), "")
+    uri = "file://" + urllib.parse.quote(d)
+    if d and os.path.isdir(d) and d != os.path.expanduser("~") and uri not in deja:
+        lignes.append(uri)
+open(fichier, "w").write("\n".join(lignes) + ("\n" if lignes else ""))
+PYEOF
 
 # Icônes sobres du terminal et des fichiers, aux couleurs du thème (remplacent le chat de kitty et le dauphin de Dolphin)
 "$HOME/.local/bin/nc-icones" >/dev/null 2>&1 || true
