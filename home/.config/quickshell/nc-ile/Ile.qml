@@ -30,7 +30,7 @@ PanelWindow {
     Rectangle {
         id: ile
         readonly property real largeurOuverte: 432
-        readonly property real hauteurOuverte: 546
+        readonly property real hauteurOuverte: 552
         anchors.horizontalCenter: parent.horizontalCenter
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
         width: fen.ouverte ? largeurOuverte : compact.largeur

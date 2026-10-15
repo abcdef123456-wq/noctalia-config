@@ -1,12 +1,13 @@
 // Pages de détails de l'île : réseaux Wi-Fi (mot de passe tapé ici), appareils Bluetooth, sorties et micro.
 // Listes lues par ~/.local/bin/nc-ile-etat wifi | bt | son.
 import QtQuick
+import Quickshell.Services.UPower
 
 Item {
     id: p
     property string saisie: ""          // réseau dont on tape le mot de passe
 
-    readonly property string titre: ({ wifi: "Wi-Fi", bluetooth: "Bluetooth", son: "Son" })[Etat.page] || ""
+    readonly property string titre: ({ wifi: "Wi-Fi", bluetooth: "Bluetooth", son: "Son", energie: "Énergie" })[Etat.page] || ""
     readonly property bool interrupteur: Etat.page === "wifi" || Etat.page === "bluetooth"
     readonly property bool allume: Etat.page === "wifi" ? Etat.sys.wifi === "on" : Etat.sys.bluetooth === "on"
     onVisibleChanged: saisie = ""
@@ -36,6 +37,40 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 onClicked: Etat.faire(["noctalia", "msg", Etat.page === "wifi" ? "wifi-toggle" : "bluetooth-toggle"])
+            }
+        }
+    }
+
+    // Page Énergie : les trois modes, façon Réglages d'Apple
+    Column {
+        anchors.top: tete.bottom; anchors.topMargin: 14
+        width: parent.width; spacing: 6
+        visible: Etat.page === "energie"
+        Repeater {
+            model: [
+                { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: 0 },
+                { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: 1 },
+                { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: 2 }
+            ]
+            Module {
+                required property var modelData
+                readonly property var profils: [PowerProfile.PowerSaver, PowerProfile.Balanced, PowerProfile.Performance]
+                readonly property bool actif: Etat.profil === profils[modelData.p]
+                width: parent.width; height: 64; radius: 16; cliquable: true
+                onClic: Etat.choisirProfil(profils[modelData.p])
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
+                    Rectangle {
+                        width: 36; height: 36; radius: 18; color: modelData.couleur
+                        Ico { anchors.centerIn: parent; nom: modelData.icone; taille: 20; color: modelData.texte; rotation: modelData.icone === "bolt" ? 0 : 90 }
+                    }
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        Texte { text: modelData.nom; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                        Texte { text: modelData.detail; secondaire: true; font.pixelSize: 12 }
+                    }
+                }
+                Ico { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 22; color: "#0a84ff"; visible: parent.actif }
             }
         }
     }
