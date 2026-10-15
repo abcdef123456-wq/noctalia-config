@@ -36,6 +36,21 @@ ask() { # ask "question" [o|n]  -> vrai si oui
   [[ "$r" =~ ^[oOyY] ]]
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+# Longue étape sans sudo (compilation, téléchargement) : tourne en arrière-plan pendant qu'une ligne s'actualise
+# (roue, temps écoulé ; pour une compilation, avancement en %). avec_progres "Message" journal commande… -> son code
+avec_progres() {
+  local msg="$1" log="$2" pid t0=$SECONDS i=0 roue='|/-\' pc=""
+  shift 2
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    pc="$(grep -ao '\[[0-9]*/[0-9]*\]' "$log" 2>/dev/null | tail -1 | awk -F'[][/]' '$3 > 0 { printf " · %d %%", 100 * $2 / $3 }' || true)"
+    [ -t 1 ] && printf '\r   %s %s (%d min %02d s)%s   ' "${roue:$((i++ % 4)):1}" "$msg" $(((SECONDS - t0) / 60)) $(((SECONDS - t0) % 60)) "$pc"
+    sleep 1
+  done
+  [ -t 1 ] && printf '\r\033[K'
+  wait "$pid"
+}
 
 for a in "$@"; do
   case "$a" in
@@ -166,6 +181,14 @@ fi
 
 # ── Vérifications ────────────────────────────────────────────────────────────
 say "Vérifications"
+# Outils de base du script : installés s'ils manquent (Debian neuf : jq et diffutils absents)
+manque=(); for t in jq sed find cmp awk; do have "$t" || manque+=("$t"); done
+if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ]; then
+  info "Outils nécessaires au script : ${manque[*]}"
+  paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; *) paquets+=("$t") ;; esac; done
+  [ "$FAMILY" = debian ] && sudo apt-get $APT_OPT update -q >/dev/null 2>&1
+  pkg_install "${paquets[@]}" >/dev/null 2>&1 || true
+fi
 for t in jq sed find cmp awk; do have "$t" || die "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)"; done
 info "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)"
 
@@ -570,15 +593,15 @@ compiler_quickshell() {
   # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
   wd="$(mktemp -d)"
-  info "Compilation de Quickshell…"
-  if { git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" 2>/dev/null ||
-       git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
-     cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
+  info "Compilation de Quickshell (5 à 15 minutes selon le processeur) :"
+  if { avec_progres "Téléchargement des sources" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" ||
+       avec_progres "Téléchargement des sources" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
+     avec_progres "Préparation" "$wd/cmake.log" cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
        -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF -DSCREENCOPY=OFF \
        -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF \
        -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
-       -DHYPRLAND_SURFACE_EXTENSIONS=OFF >"$wd/cmake.log" 2>&1 &&
-     cmake --build "$wd/build" >"$wd/build.log" 2>&1 &&
+       -DHYPRLAND_SURFACE_EXTENSIONS=OFF &&
+     avec_progres "Compilation" "$wd/build.log" cmake --build "$wd/build" &&
      sudo cmake --install "$wd/build" >/dev/null 2>&1; then
     ok "Quickshell installé ($(qs --version 2>/dev/null | head -1))."
     rm -rf "$wd"
@@ -810,7 +833,7 @@ elif ask "Installer la config du terminal (seulement ce qui manque) ?" o; then
       for d in "${need[@]}"; do info "  ${REPOS[$d]}"; done
       if ask "Les télécharger ?" o; then
         for d in "${need[@]}"; do
-          git clone -q --depth 1 "${REPOS[$d]}" "$d" && echo "${d#"$HOME/"}" >> "$BK/.created" || warn "téléchargement impossible : ${REPOS[$d]}"
+          avec_progres "Téléchargement de $(basename "$d")" /dev/null git clone -q --depth 1 "${REPOS[$d]}" "$d" && echo "${d#"$HOME/"}" >> "$BK/.created" || warn "téléchargement impossible : ${REPOS[$d]}"
         done
       fi
     fi
