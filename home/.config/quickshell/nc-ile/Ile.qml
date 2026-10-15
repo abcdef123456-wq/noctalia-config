@@ -112,19 +112,28 @@ PanelWindow {
             enabled: fen.ouverte && fen.points
             acceptedButtons: Qt.NoButton
             property real cumul: 0
+            property real dernier: 0         // heure du dernier événement : un trou de 200 ms = nouveau geste
+            property bool geste: false       // le geste en cours a déjà servi (liste défilée ou page changée)
             onWheel: w => {
+                var t = Date.now()
+                if (t - dernier > 200) { geste = false; cumul = 0 }
+                dernier = t
                 var dy = w.pixelDelta.y !== 0 ? w.pixelDelta.y : w.angleDelta.y / 2
-                // La liste de la page défile d'abord ; au bout, la molette change de page
+                // La liste de la page défile d'abord ; au bout, il faut un nouveau geste pour changer de page
+                // (comme sur iPhone : l'élan du pavé tactile ne saute pas de page)
                 var page = pages.itemAt(Etat.vue), contenu = page ? page.contenu : null
-                if (!verrou.running && contenu && contenu.defiler && contenu.defiler(dy)) { cumul = 0; return }
+                if (verrou.running) return
+                if (contenu && contenu.defiler && contenu.defiler(dy)) { cumul = 0; geste = true; return }
+                if (geste) return
                 cumul += dy
-                if (Math.abs(cumul) >= 60 && !verrou.running) {
+                if (Math.abs(cumul) >= 60) {
                     Etat.changerVue(cumul > 0 ? -1 : 1)
                     cumul = 0
+                    geste = true
                     verrou.restart()
                 }
             }
-            Timer { id: verrou; interval: 450 }
+            Timer { id: verrou; interval: 300 }
         }
 
         // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
