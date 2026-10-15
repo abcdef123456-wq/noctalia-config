@@ -425,7 +425,10 @@ if [ "$MODE" != files ]; then
     for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "installé : $p" || failed+=("$p"); done
     [ ${#failed[@]} -eq 0 ] && ok "Paquets installés." || warn "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}"
   fi
-  case " ${manual[*]} " in *" nerdfont "*) info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." ;; esac
+  case " ${manual[*]} " in
+    *" nerdfont "*) fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font" >/dev/null ||
+                      info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." ;;
+  esac
 fi
 
 # ── 2. Fichiers ──────────────────────────────────────────────────────────────
@@ -487,6 +490,37 @@ fi
 # sinon celle du plugin Noctalia. La version Quickshell utilise la police d'icônes Material Symbols Rounded (Google,
 # licence Apache 2.0), téléchargée une fois dans ~/.local/share/fonts.
 ILE=noctalia
+# Debian / Ubuntu : Quickshell n'est pas dans les dépôts : compilé depuis ses sources officielles (version 0.3.2),
+# seulement les modules utiles à l'île, installé dans /usr/local. Testé sur Debian 13 (protocoles Wayland des backports).
+compiler_quickshell() {
+  local wd prefixe="/usr/local"
+  info "Quickshell (l'île dynamique au plus près de l'iPhone) n'est pas dans les dépôts de ta distribution."
+  info "Il peut être compilé depuis ses sources officielles (https://quickshell.org) : environ 5 minutes, ~400 Mo d'outils."
+  ask "Le compiler et l'installer (dans $prefixe) ?" o || return 1
+  pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
+    qt6-declarative-dev qt6-declarative-private-dev qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev qt6-svg-dev \
+    libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols
+  # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
+  if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
+  wd="$(mktemp -d)"
+  info "Compilation de Quickshell…"
+  if { git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" 2>/dev/null ||
+       git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
+     cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
+       -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF -DSCREENCOPY=OFF \
+       -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF -DSERVICE_NOTIFICATIONS=OFF \
+       -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
+       -DHYPRLAND_SURFACE_EXTENSIONS=OFF >"$wd/cmake.log" 2>&1 &&
+     cmake --build "$wd/build" >"$wd/build.log" 2>&1 &&
+     sudo cmake --install "$wd/build" >/dev/null 2>&1; then
+    ok "Quickshell installé ($(qs --version 2>/dev/null | head -1))."
+    rm -rf "$wd"
+    return 0
+  fi
+  warn "Compilation de Quickshell impossible (journal : $wd) : l'île du plugin Noctalia est utilisée."
+  return 1
+}
+if ! have qs && [ "$FAMILY" = debian ] && [ "$MODE" = full ]; then compiler_quickshell || true; hash -r; fi
 if have qs; then
   ILE=quickshell
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
@@ -818,7 +852,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   fi
 else
   warn "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés."
-  info "Dans ta session Hyprland, lance : systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service hypridle.service"
+  info "Dans ta session Hyprland, lance : systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
 fi
 
 # ── 5. Étapes système (une question par étape) ───────────────────────────────
