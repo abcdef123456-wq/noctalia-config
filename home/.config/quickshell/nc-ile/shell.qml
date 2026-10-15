@@ -1,4 +1,5 @@
 //@ pragma UseQApplication
+//@ pragma IconTheme NC
 // nc-ile : l'île dynamique de noctalia-config, en Quickshell, par-dessus la barre de Noctalia.
 //   qs -c nc-ile                         lancer (service : nc-ile.service)
 //   qs -c nc-ile ipc call ile basculer   ouvrir / fermer sur l'écran actif, sur le centre de contrôle (Super + C)
