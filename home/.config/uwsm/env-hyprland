@@ -6,7 +6,8 @@
 # mode carte dédiée, PC fixe).
 #
 # Mode lu dans ~/.config/uwsm/gpu-mode (première ligne) : auto (défaut) | igpu | both | off
-#   auto : carte intégrée seule, plus la NVIDIA si un écran est branché sur une de ses prises à l'ouverture de session ;
+#   auto : carte intégrée seule, plus la NVIDIA si le profil d'énergie est Performance ou si un écran est branché sur
+#          une de ses prises à l'ouverture de session ;
 #   igpu : carte intégrée seule (les prises reliées à la NVIDIA ne marchent pas) ;
 #   both : les deux cartes (écrans externes branchables à tout moment, la NVIDIA reste éveillée) ;
 #   off  : Hyprland choisit seul.
@@ -35,6 +36,11 @@ if [ -n "$_nc_igpu" ] && [ -n "$_nc_dgpu" ] && [ -c "$_nc_igpu" ]; then
     both) export AQ_DRM_DEVICES="$_nc_igpu:$_nc_dgpu" ;;
     *)
       _nc_ext=0
+      # Profil Performance : la NVIDIA est démarrée avec la session (jeux, prises HDMI / USB-C actives d'emblée)
+      case "$(gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \
+        --method org.freedesktop.DBus.Properties.Get net.hadess.PowerProfiles ActiveProfile 2>/dev/null)" in
+        *performance*) _nc_ext=1 ;;
+      esac
       for _nc_c in "$_nc_dsys"/card*-*/status; do
         [ -r "$_nc_c" ] && [ "$(cat "$_nc_c")" = connected ] && _nc_ext=1
       done

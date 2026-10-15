@@ -90,6 +90,22 @@ set_gpu_default() {
   log "GPU par défaut des nouvelles applis : $want"
 }
 
+# Passage en Performance alors que la session tourne sur la carte intégrée seule : la NVIDIA n'entre dans la
+# session (prises HDMI / USB-C, rendu du bureau) qu'en la rouvrant ; la notification le propose, une fois par session.
+proposer_nvidia() {
+  local deja="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-nvidia-propose"
+  [ "$HYBRID" = 1 ] && [ "$1" = performance ] && [ -n "$last_profile" ] && [ "$last_profile" != performance ] || return 0
+  case "${AQ_DRM_DEVICES:-}" in ""|*:*) return 0 ;; esac
+  [ -e "$deja" ] && return 0
+  : > "$deja"
+  (
+    choix="$(notify-send -a "Énergie" -t 15000 --action=session="Rouvrir la session" \
+      "Performance : carte NVIDIA" \
+      "Les applis que tu lances l'utilisent déjà. Pour les prises HDMI / USB-C et tout le bureau, rouvre la session : elle démarrera avec la NVIDIA." 2>/dev/null)"
+    [ "$choix" = session ] && { uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()'; }
+  ) &
+}
+
 # Noctalia v5 en Économie : animations coupées, panneaux opaques (le flou de Hyprland est coupé),
 # rotation des fonds en pause, verrouillage sans transition. Fichier retiré en sortant d'Économie.
 noctalia_eco() {
@@ -144,6 +160,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   fi
 
   set_gpu_default "$profile"
+  proposer_nvidia "$profile"
   noctalia_eco "$profile"
 
   # PC hybride : applications lancées ensuite sur la carte intégrée seule en Économie (la NVIDIA peut s'endormir)
