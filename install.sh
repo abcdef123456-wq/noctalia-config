@@ -132,6 +132,7 @@ pname() {
   case "$1:$FAMILY" in
     imagemagick:fedora|imagemagick:suse) echo ImageMagick ;;
     libnotify:debian) echo libnotify-bin ;;
+    sushi:debian) echo gnome-sushi ;;   # aperçu rapide dans Fichiers (Espace sur un fichier), comme Quick Look
     libnotify:suse) echo libnotify-tools ;;
     python:arch) echo python ;;
     python:*) echo python3 ;;
@@ -487,7 +488,7 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi)
 if [ "$MODE" != files ]; then
   say "1. Paquets"
   missing=(); manual=()
