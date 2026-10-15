@@ -106,7 +106,7 @@ PanelWindow {
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
-        // Glisser entre les pages : molette ou deux doigts (les curseurs et listes gardent la molette pour eux)
+        // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)
         MouseArea {
             anchors.fill: parent
             enabled: fen.ouverte && fen.points
@@ -119,13 +119,13 @@ PanelWindow {
                 if (t - dernier > 200) { geste = false; cumul = 0 }
                 dernier = t
                 var dy = w.pixelDelta.y !== 0 ? w.pixelDelta.y : w.angleDelta.y / 2
-                // La liste de la page défile d'abord ; au bout, il faut un nouveau geste pour changer de page
-                // (comme sur iPhone : l'élan du pavé tactile ne saute pas de page)
-                var page = pages.itemAt(Etat.vue), contenu = page ? page.contenu : null
-                if (verrou.running) return
-                if (contenu && contenu.defiler && contenu.defiler(dy)) { cumul = 0; geste = true; return }
-                if (geste) return
+                // Un geste ne sert qu'une fois : il fait défiler la liste de la page d'un grand coup, ou, si la liste
+                // est déjà au bout (ou qu'il n'y en a pas), change de page. L'élan du pavé tactile ne compte pas.
+                if (verrou.running || geste) return
                 cumul += dy
+                if (Math.abs(cumul) < 30) return
+                var page = pages.itemAt(Etat.vue), contenu = page ? page.contenu : null
+                if (contenu && contenu.defiler && contenu.defiler(cumul)) { cumul = 0; geste = true; return }
                 if (Math.abs(cumul) >= 60) {
                     Etat.changerVue(cumul > 0 ? -1 : 1)
                     cumul = 0

@@ -1,5 +1,5 @@
 // Curseur horizontal façon macOS : capsule qui se remplit de blanc, icône à gauche dedans.
-// Glisser, cliquer ou molette.
+// Glisser ou cliquer (la molette et le pavé tactile servent à changer de page).
 import QtQuick
 import Quickshell.Widgets
 
@@ -27,10 +27,5 @@ ClippingRectangle {
         function regler(x) { c.change(Math.max(0, Math.min(1, x / width))) }
         onPressed: e => regler(e.x)
         onPositionChanged: e => { if (pressed) regler(e.x) }
-        // Deux doigts sur le pavé tactile : laissés à l'île (changer de page) ; molette de souris : réglage
-        onWheel: w => {
-            if (w.pixelDelta.x !== 0 || w.pixelDelta.y !== 0) { w.accepted = false; return }
-            c.change(Math.max(0, Math.min(1, c.valeur + (w.angleDelta.y > 0 ? 0.05 : -0.05))))
-        }
     }
 }
