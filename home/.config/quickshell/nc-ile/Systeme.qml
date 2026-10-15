@@ -1,0 +1,132 @@
+// Page « Système et batterie » : processeur, mémoire, température, disque ; batterie (autonomie, santé) ;
+// modes d'énergie ; écrans. Mesures lues par nc-ile-etat systeme toutes les 2 s tant que la page est affichée.
+import QtQuick
+import Quickshell.Services.UPower
+
+Item {
+    id: sy
+    function val(k) {
+        var l = Etat.liste
+        for (var i = 0; i < l.length; i++) if (l[i].genre === k) return l[i].champs[0]
+        return ""
+    }
+    readonly property var ecrans: Etat.liste.filter(e => e.genre === "ecran")
+    function heures(s) { return s > 0 ? Math.floor(s / 3600) + " h " + String(Math.floor((s % 3600) / 60)).padStart(2, "0") : "" }
+
+    component Mesure: Module {
+        id: me
+        property string icone
+        property string titre
+        property string valeur
+        property string detail
+        property real taux: 0
+        property color couleur: "white"
+        width: (sy.width - 10) / 2; height: 86; radius: 18
+        Column {
+            anchors.fill: parent; anchors.margins: 12; spacing: 4
+            Row {
+                spacing: 6
+                Ico { nom: me.icone; taille: 16; color: "#98989d" }
+                Texte { text: me.titre; secondaire: true; font.pixelSize: 12 }
+            }
+            Texte { text: me.valeur; font.pixelSize: 20; font.weight: Font.DemiBold; color: me.couleur }
+            Rectangle {
+                width: parent.width; height: 5; radius: 2.5; color: "#3a3a3c"
+                Rectangle { height: parent.height; radius: 2.5; color: me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
+            }
+            Texte { text: me.detail; secondaire: true; font.pixelSize: 11; visible: me.detail !== "" }
+        }
+    }
+
+    Flickable {
+        anchors.fill: parent
+        contentHeight: col.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        Column {
+            id: col
+            width: sy.width; spacing: 10
+            Row {
+                spacing: 10; height: 34
+                Ico { nom: "memory"; taille: 24; anchors.verticalCenter: parent.verticalCenter }
+                Texte { text: "Système"; font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+                Texte { text: sy.val("cpu_nom"); secondaire: true; anchors.verticalCenter: parent.verticalCenter; width: sy.width - 170 }
+            }
+            Grid {
+                columns: 2; spacing: 10
+                Mesure { icone: "speed"; titre: "Processeur"; valeur: (sy.val("cpu") || "0") + " %"; taux: (parseInt(sy.val("cpu")) || 0) / 100 }
+                Mesure {
+                    icone: "memory_alt"; titre: "Mémoire"; valeur: (sy.val("ram") || "0") + " %"; taux: (parseInt(sy.val("ram")) || 0) / 100
+                    detail: sy.val("ram_utilisee").replace(".", ",") + " / " + sy.val("ram_totale").replace(".", ",") + " Go"
+                }
+                Mesure {
+                    readonly property int t: parseInt(sy.val("temperature")) || 0
+                    icone: "device_thermostat"; titre: "Température"; valeur: t + " °C"; taux: t / 100
+                    couleur: t >= 85 ? "#ff453a" : (t >= 70 ? "#ff9f0a" : "#30d158")
+                }
+                Mesure {
+                    icone: "hard_drive"; titre: "Disque"; valeur: (sy.val("disque") || "0") + " %"; taux: (parseInt(sy.val("disque")) || 0) / 100
+                    detail: sy.val("disque_libre") + " Go libres"
+                }
+            }
+            // Batterie
+            Module {
+                visible: Etat.aBatterie
+                width: sy.width; height: 64; radius: 18
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
+                    Rectangle {
+                        width: 40; height: 40; radius: 20; color: Etat.branche ? "#0d3318" : "#3a3a3c"
+                        Ico { anchors.centerIn: parent; nom: Etat.branche ? "bolt" : "battery_full"; taille: 22; color: Etat.branche ? "#30d158" : "white"; rotation: Etat.branche ? 0 : 90 }
+                    }
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        Texte { text: "Batterie · " + Etat.pourcent + " %"; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                        Texte {
+                            secondaire: true
+                            text: (Etat.branche ? (Etat.batterie && Etat.batterie.timeToFull > 0 ? "Pleine dans " + sy.heures(Etat.batterie.timeToFull) : "Sur secteur")
+                                                : (Etat.batterie && Etat.batterie.timeToEmpty > 0 ? "Encore " + sy.heures(Etat.batterie.timeToEmpty) : "Sur batterie"))
+                                  + (sy.val("sante") !== "" ? "  ·  santé " + sy.val("sante") + " %" : "")
+                        }
+                    }
+                }
+            }
+            // Modes d'énergie
+            Repeater {
+                model: [
+                    { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
+                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: PowerProfile.Balanced },
+                    { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
+                ]
+                Module {
+                    required property var modelData
+                    width: sy.width; height: 56; radius: 16; cliquable: true
+                    onClic: Etat.choisirProfil(modelData.p)
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
+                        Rectangle {
+                            width: 32; height: 32; radius: 16; color: modelData.couleur
+                            Ico { anchors.centerIn: parent; nom: modelData.icone; taille: 18; color: modelData.texte; rotation: modelData.icone === "bolt" ? 0 : 90 }
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            Texte { text: modelData.nom; font.weight: Font.DemiBold }
+                            Texte { text: modelData.detail; secondaire: true; font.pixelSize: 11 }
+                        }
+                    }
+                    Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: Etat.profil === modelData.p }
+                }
+            }
+            // Écrans et allumage
+            Repeater {
+                model: sy.ecrans
+                Texte {
+                    required property var modelData
+                    width: sy.width; secondaire: true; font.pixelSize: 12
+                    text: "Écran " + modelData.champs[0] + " : " + modelData.champs[1] + " · " + modelData.champs[2] + " · échelle " + modelData.champs[3]
+                }
+            }
+            Texte { text: "Allumé depuis " + sy.val("allume"); secondaire: true; font.pixelSize: 12; visible: sy.val("allume") !== "" }
+        }
+    }
+}

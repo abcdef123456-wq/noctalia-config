@@ -4,7 +4,8 @@ PartOf=graphical-session.target
 After=graphical-session.target noctalia.service
 
 [Service]
-ExecStart=/usr/bin/qs -c nc-ile
+# qs : /usr/bin (paquet) ou /usr/local/bin (compilé par install.sh sur Debian)
+ExecStart=/usr/bin/env qs -c nc-ile
 Restart=on-failure
 RestartSec=3
 

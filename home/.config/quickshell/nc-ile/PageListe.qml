@@ -1,15 +1,15 @@
-// Pages de détails de l'île : réseaux Wi-Fi (mot de passe tapé ici), appareils Bluetooth, sorties et micro.
+// Pages de l'île : réseaux Wi-Fi (mot de passe tapé ici) ou appareils Bluetooth (mode : "wifi" ou "bluetooth").
 // Listes lues par ~/.local/bin/nc-ile-etat wifi | bt | son.
 import QtQuick
-import Quickshell.Services.UPower
 
 Item {
     id: p
+    property string mode: "wifi"
     property string saisie: ""          // réseau dont on tape le mot de passe
 
-    readonly property string titre: ({ wifi: "Wi-Fi", bluetooth: "Bluetooth", son: "Son", energie: "Énergie" })[Etat.page] || ""
-    readonly property bool interrupteur: Etat.page === "wifi" || Etat.page === "bluetooth"
-    readonly property bool allume: Etat.page === "wifi" ? Etat.sys.wifi === "on" : Etat.sys.bluetooth === "on"
+    readonly property string titre: p.mode === "wifi" ? "Wi-Fi" : "Bluetooth"
+    readonly property bool interrupteur: true
+    readonly property bool allume: p.mode === "wifi" ? Etat.sys.wifi === "on" : Etat.sys.bluetooth === "on"
     onVisibleChanged: saisie = ""
 
     // En-tête : retour, titre, interrupteur
@@ -20,7 +20,7 @@ Item {
             width: 34; height: 34; radius: 17; color: "#2c2c2e"
             anchors.verticalCenter: parent.verticalCenter
             Ico { anchors.centerIn: parent; nom: "chevron_left"; taille: 24 }
-            MouseArea { anchors.fill: parent; onClicked: Etat.page = "accueil" }
+            MouseArea { anchors.fill: parent; onClicked: Etat.aller("centre") }
         }
         Texte { x: 46; anchors.verticalCenter: parent.verticalCenter; text: p.titre; font.pixelSize: 20; font.weight: Font.Bold }
         // Interrupteur façon iOS
@@ -36,41 +36,7 @@ Item {
             }
             MouseArea {
                 anchors.fill: parent
-                onClicked: Etat.faire(["noctalia", "msg", Etat.page === "wifi" ? "wifi-toggle" : "bluetooth-toggle"])
-            }
-        }
-    }
-
-    // Page Énergie : les trois modes, façon Réglages d'Apple
-    Column {
-        anchors.top: tete.bottom; anchors.topMargin: 14
-        width: parent.width; spacing: 6
-        visible: Etat.page === "energie"
-        Repeater {
-            model: [
-                { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: 0 },
-                { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: 1 },
-                { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: 2 }
-            ]
-            Module {
-                required property var modelData
-                readonly property var profils: [PowerProfile.PowerSaver, PowerProfile.Balanced, PowerProfile.Performance]
-                readonly property bool actif: Etat.profil === profils[modelData.p]
-                width: parent.width; height: 64; radius: 16; cliquable: true
-                onClic: Etat.choisirProfil(profils[modelData.p])
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
-                    Rectangle {
-                        width: 36; height: 36; radius: 18; color: modelData.couleur
-                        Ico { anchors.centerIn: parent; nom: modelData.icone; taille: 20; color: modelData.texte; rotation: modelData.icone === "bolt" ? 0 : 90 }
-                    }
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        Texte { text: modelData.nom; font.weight: Font.DemiBold; font.pixelSize: 14 }
-                        Texte { text: modelData.detail; secondaire: true; font.pixelSize: 12 }
-                    }
-                }
-                Ico { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 22; color: "#0a84ff"; visible: parent.actif }
+                onClicked: Etat.faire(["noctalia", "msg", p.mode === "wifi" ? "wifi-toggle" : "bluetooth-toggle"])
             }
         }
     }
@@ -82,8 +48,7 @@ Item {
         width: parent.width
         clip: true
         spacing: 6
-        model: Etat.liste.filter(e => (Etat.page === "wifi" && e.genre === "net") || (Etat.page === "bluetooth" && e.genre === "bt")
-                                      || (Etat.page === "son" && (e.genre === "sortie" || e.genre === "entree")))
+        model: Etat.liste.filter(e => (p.mode === "wifi" && e.genre === "net") || (p.mode === "bluetooth" && e.genre === "bt"))
         section.property: "genre"
         delegate: Column {
             id: d

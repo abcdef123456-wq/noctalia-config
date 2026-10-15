@@ -1,8 +1,9 @@
 // Une île par écran : pilule noire posée sur la barre de Noctalia (couche au-dessus), qui se déploie avec un ressort,
-// comme l'île dynamique de l'iPhone. Une fois ouverte, ses pages se suivent verticalement : d'abord ce qui se passe
-// (la musique), puis le centre de contrôle ; points sur le bord droit, molette ou glisser à deux doigts pour passer
-// de l'une à l'autre ; l'île prend la taille de chaque page. Seule la forme de l'île capte la souris ; un clic
-// ailleurs, Échap, Super + C ou un clic sur la pilule la referment.
+// comme l'île dynamique de l'iPhone. Ouverte, ses pages se suivent verticalement : d'abord les activités en cours
+// (musique, minuteur, recharge, mode jeu), puis le centre de contrôle, Son, Wi-Fi, Bluetooth, Système, Calendrier.
+// Points sur le bord droit, molette ou deux doigts pour descendre ; l'île prend la taille de chaque page.
+// Deux activités en même temps (musique + minuteur) : la seconde dans une petite bulle à côté de la pilule.
+// Seule la forme de l'île capte la souris ; un clic ailleurs, Échap, Super + C ou un clic sur la pilule la referment.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -15,13 +16,13 @@ PanelWindow {
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
 
     anchors { top: true; left: true; right: true }
-    implicitHeight: 640
+    implicitHeight: 700
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "nc-ile"
     WlrLayershell.keyboardFocus: ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
-    mask: Region { item: ile }
+    mask: Region { item: ile; Region { item: bulle } }
 
     HyprlandFocusGrab {
         windows: [fen]
@@ -30,9 +31,37 @@ PanelWindow {
     }
 
     // Taille de chaque page
-    readonly property var tailles: ({ musique: Qt.size(430, 214), centre: Qt.size(432, 552) })
-    readonly property bool points: Etat.vues.length > 1          // marge à droite pour les points de page
+    readonly property var tailles: ({
+        musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 268), charge: Qt.size(400, 140),
+        jeu: Qt.size(400, 140), centre: Qt.size(432, 612), son: Qt.size(432, 520), reseau: Qt.size(432, 520),
+        bluetooth: Qt.size(432, 440), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410)
+    })
     readonly property size taille: tailles[Etat.vueActive] || tailles.centre
+    readonly property bool points: Etat.vues.length > 1
+
+    // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
+    Rectangle {
+        id: bulle
+        readonly property bool montre: !fen.ouverte && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
+        x: ile.x + ile.width + (montre ? 7 : -30)
+        y: 9; width: 30; height: 30; radius: 15
+        color: "#000000"
+        opacity: montre ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Canvas {
+            anchors.fill: parent
+            property real f: Etat.minuteurDuree > 0 ? Etat.minuteurReste * 1000 / Etat.minuteurDuree : 0
+            onFChanged: requestPaint()
+            onPaint: {
+                var c = getContext("2d"); c.reset(); c.lineWidth = 2.5; c.lineCap = "round"
+                c.strokeStyle = "#ff9f0a"; c.beginPath(); c.arc(15, 15, 11, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
+            }
+        }
+        Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: "#ff9f0a" }
+        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller("minuteur") } }
+    }
 
     Rectangle {
         id: ile
@@ -65,11 +94,10 @@ PanelWindow {
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
-        // Glisser entre les pages : molette ou deux doigts (les curseurs gardent la molette pour eux)
+        // Glisser entre les pages : molette ou deux doigts (les curseurs et listes gardent la molette pour eux)
         MouseArea {
-            id: glisse
             anchors.fill: parent
-            enabled: fen.ouverte && Etat.vues.length > 1
+            enabled: fen.ouverte && fen.points
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             onWheel: w => {
@@ -83,56 +111,67 @@ PanelWindow {
             Timer { id: verrou; interval: 450 }
         }
 
-        // Pages, empilées verticalement : celle de la vue active est à sa place, les autres glissent hors de l'île
+        // Pages empilées : celle de la vue active est à sa place, les autres glissent hors de l'île
         Repeater {
             model: Etat.vues
             Item {
                 id: pageIle
                 required property string modelData
                 required property int index
-                readonly property size t: fen.tailles[modelData]
+                readonly property size t: fen.tailles[modelData] || fen.tailles.centre
+                readonly property bool active: modelData === Etat.vueActive
                 x: (ile.width - t.width) / 2 + 16
-                width: t.width - 32 - (fen.points && modelData === "musique" ? 16 : 0)
+                width: t.width - 32 - (fen.points ? 14 : 0)
                 height: t.height - 32
                 y: 16 + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
-                readonly property bool active: index === Etat.vue
-                // Le contenu apparaît quand l'île a presque sa taille, s'efface dès qu'elle se referme ou change de page
+                // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
                 opacity: fen.ouverte && active && ile.height > t.height * 0.72 ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {
                     anchors.fill: parent
-                    sourceComponent: pageIle.modelData === "musique" ? pageMusique : pageCentre
+                    active: pageIle.visible || pageIle.active
+                    sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
+                                        son: pSon, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
+                                        calendrier: pCalendrier })[pageIle.modelData] || pCentre
                 }
             }
         }
-        Component { id: pageMusique; Musique {} }
-        Component { id: pageCentre; Centre { focus: fen.ouverte; Keys.onEscapePressed: Etat.fermer() } }
+        Component { id: pMusique; Musique {} }
+        Component { id: pMinuteur; Minuteur {} }
+        Component { id: pCharge; Charge {} }
+        Component { id: pJeu; Jeu {} }
+        Component { id: pCentre; Centre {} }
+        Component { id: pSon; Son {} }
+        Component { id: pReseau; PageListe { mode: "wifi" } }
+        Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
+        Component { id: pSysteme; Systeme {} }
+        Component { id: pCalendrier; Calendrier {} }
 
-        // Points de page, sur le bord droit (comme le Centre de contrôle de l'iPhone)
+        // Points de page sur le bord droit (comme le Centre de contrôle de l'iPhone)
         Column {
             anchors.right: parent.right; anchors.rightMargin: 9
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
-            visible: fen.ouverte && Etat.vues.length > 1
-            opacity: visible ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 200 } }
+            visible: fen.ouverte && fen.points
             Repeater {
-                model: Etat.vues.length
+                model: Etat.vues
                 Rectangle {
+                    required property string modelData
                     required property int index
-                    width: 6; height: index === Etat.vue ? 14 : 6; radius: 3
-                    color: index === Etat.vue ? "white" : "#5a5a5e"
+                    readonly property bool active: modelData === Etat.vueActive
+                    width: 6; height: active ? 14 : 6; radius: 3
+                    color: active ? "white" : (Etat.activites.indexOf(modelData) >= 0 ? "#ff9f0a" : "#5a5a5e")
                     Behavior on height { SpringAnimation { spring: 5; damping: 0.5 } }
-                    MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: { Etat.vue = index; Etat.page = "accueil" } }
+                    MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller(parent.modelData) }
                 }
             }
         }
 
+        focus: fen.ouverte
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)
         Keys.onDownPressed: Etat.changerVue(1)
-        focus: fen.ouverte
     }
 }

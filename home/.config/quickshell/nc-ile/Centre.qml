@@ -20,9 +20,6 @@ Item {
         id: accueil
         anchors.fill: parent
         spacing: 12
-        opacity: Etat.page === "accueil" ? 1 : 0
-        visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: 180 } }
 
         // En-tête : date, batterie
         Item {
@@ -49,7 +46,7 @@ Item {
                     anchors.centerIn: parent; columns: 2; spacing: 14
                     Rond {
                         icone: centre.s.wifi === "on" ? "wifi" : "wifi_off"; actif: centre.s.wifi === "on"; couleur: centre.bleu
-                        onClic: Etat.faire(["noctalia", "msg", "wifi-toggle"]); onAppuiLong: Etat.aller("wifi")
+                        onClic: Etat.faire(["noctalia", "msg", "wifi-toggle"]); onAppuiLong: Etat.aller("reseau")
                     }
                     Rond {
                         icone: "bluetooth"; actif: centre.s.bluetooth === "on"; couleur: centre.bleu
@@ -172,7 +169,7 @@ Item {
             readonly property var mode: modes[index]
             width: parent.width; height: 64; cliquable: true
             onClic: Etat.choisirProfil(modes[(index + 1) % 3].p)
-            onAppuiLong: Etat.aller("energie")
+            onAppuiLong: Etat.aller("systeme")
             Row {
                 anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
                 Rectangle {
@@ -189,8 +186,20 @@ Item {
             Ico {
                 anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
                 nom: "chevron_right"; taille: 24; color: "#98989d"
-                MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: Etat.aller("energie") }
+                MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: Etat.aller("systeme") }
             }
+        }
+
+        // Raccourcis (ceux de l'ancien centre de contrôle) : café anti-veille, thème, clavier, presse-papiers, fond, minuteur
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: (parent.width - 6 * 48) / 5
+            Rond { taille: 48; icone: "coffee"; actif: Etat.cafe; couleur: "#ac8e68"; onClic: Etat.basculerCafe() }
+            Rond { taille: 48; icone: "contrast"; onClic: Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) }
+            Rond { taille: 48; icone: "keyboard"; onClic: Etat.faire(["noctalia", "msg", "keyboard-layout-cycle"]) }
+            Rond { taille: 48; icone: "content_paste"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) } }
+            Rond { taille: 48; icone: "wallpaper"; onClic: { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-shell-msg", "wallpapers"]) } }
+            Rond { taille: 48; icone: "timer"; actif: Etat.minuteurFin > 0; couleur: "#ff9f0a"; onClic: Etat.aller("minuteur") }
         }
 
         // Ligne discrète d'actions (façon macOS) : les icônes ne s'éclairent qu'au survol
@@ -223,11 +232,4 @@ Item {
         }
     }
 
-    // ── Pages : Wi-Fi, Bluetooth, Son ──
-    PageListe {
-        anchors.fill: parent
-        opacity: Etat.page !== "accueil" ? 1 : 0
-        visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: 180 } }
-    }
 }

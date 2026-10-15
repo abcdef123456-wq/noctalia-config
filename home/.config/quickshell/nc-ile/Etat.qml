@@ -16,31 +16,70 @@ Singleton {
 
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
 
-    // ── Île ouverte (nom de l'écran, "" = fermée) et page du centre de contrôle ──
+    // ── Île ouverte (nom de l'écran, "" = fermée) et pages ──
+    // Comme sur iPhone : d'abord les activités en cours (musique, minuteur, recharge, mode jeu), puis le centre de
+    // contrôle et ses pages de détails ; on descend de l'une à l'autre (points sur le bord droit).
     property string ecranOuvert: ""
-    property string page: "accueil"
-
-    // Pages de l'île ouverte, comme sur iPhone : d'abord ce qui se passe (la musique), puis le centre de contrôle
-    readonly property var vues: lecteur && titre !== "" ? ["musique", "centre"] : ["centre"]
-    property int vue: 0
-    readonly property string vueActive: vues[Math.min(vue, vues.length - 1)]
-    function changerVue(d) {
-        var v = Math.max(0, Math.min(vues.length - 1, vue + d))
-        if (v !== vue) { vue = v; page = "accueil" }
+    readonly property bool aMusique: lecteur !== null && titre !== ""
+    readonly property var activites: {
+        var a = []
+        if (aMusique) a.push("musique")
+        if (minuteurFin > 0) a.push("minuteur")
+        if (enCharge) a.push("charge")
+        if (jeu) a.push("jeu")
+        return a
+    }
+    readonly property var vues: activites.concat(["centre", "son", "reseau", "bluetooth", "systeme", "calendrier"],
+                                                 minuteurFin > 0 ? [] : ["minuteur"])
+    property string vueNom: "centre"
+    readonly property int vue: Math.max(0, vues.indexOf(vueNom))
+    readonly property string vueActive: vues[vue]
+    function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
+    function aller(nom) {
+        if (vues.indexOf(nom) < 0) return
+        vueNom = nom
+        lirePage()
     }
 
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
     function basculer(ecran, versCentre) {
         if (ecranOuvert === ecran) { fermer(); return }
-        page = "accueil"
-        vue = versCentre ? vues.length - 1 : 0
+        vueNom = versCentre || activites.length === 0 ? "centre" : activites[0]
         ecranOuvert = ecran
         activiteType = ""
         lire()
         lireLuminosite(false)
+        lirePage()
     }
     function fermer() { ecranOuvert = "" }
-    function aller(p) { page = p; lirePage() }
+
+    // ── Minuteur (activité en direct, décompte dans la pilule) ──
+    property real minuteurFin: 0
+    property real minuteurDuree: 0
+    readonly property int minuteurReste: minuteurFin > 0 ? Math.max(0, Math.ceil((minuteurFin - maintenant.getTime()) / 1000)) : 0
+    function lancerMinuteur(minutes) {
+        minuteurDuree = minutes * 60000
+        minuteurFin = Date.now() + minuteurDuree
+        vueNom = "minuteur"
+    }
+    function ajouterMinute() { if (minuteurFin > 0) { minuteurFin += 60000; minuteurDuree += 60000 } }
+    function arreterMinuteur() { minuteurFin = 0; if (vueNom === "minuteur") vueNom = "centre" }
+    onMinuteurResteChanged: {
+        if (minuteurFin > 0 && minuteurReste === 0) {
+            minuteurFin = 0
+            Quickshell.execDetached(["sh", "-c", "notify-send -a Minuteur -u critical 'Minuteur terminé' 'Le temps est écoulé.'; "
+                + "command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i alarm-clock-elapsed || true"])
+            activite("minuteur-fini", 5000)
+        }
+    }
+    function duree(s) {
+        var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60
+        return (h > 0 ? h + ":" + String(m).padStart(2, "0") : String(m)) + ":" + String(x).padStart(2, "0")
+    }
+
+    // ── Café : empêche la mise en veille (Noctalia) ──
+    property bool cafe: false
+    function basculerCafe() { cafe = !cafe; Quickshell.execDetached(["noctalia", "msg", cafe ? "caffeine-enable" : "caffeine-disable"]) }
 
     // ── Heure ──
     property date maintenant: new Date()
@@ -92,6 +131,8 @@ Singleton {
     readonly property bool aBatterie: batterie && batterie.isLaptopBattery
     readonly property int pourcent: batterie ? Math.round(batterie.percentage * (batterie.percentage <= 1 ? 100 : 1)) : 0
     readonly property bool branche: !UPower.onBattery
+    // Vraie recharge (pas seulement branché : la limite de charge peut la bloquer vers 80 %)
+    readonly property bool enCharge: aBatterie && batterie.state === UPowerDeviceState.Charging
     onBrancheChanged: if (aBatterie) activite("charge")
     readonly property int profil: PowerProfiles.profile
     onProfilChanged: if (!jeuEnCours) activite("profil")
@@ -159,9 +200,9 @@ Singleton {
         }
     }
     function lire() { if (!lecteurEtat.running) lecteurEtat.running = true }
-    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== ""; onTriggered: { etat.lire(); if (etat.page !== "accueil") etat.lirePage() } }
+    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== ""; onTriggered: { etat.lire(); etat.lirePage() } }
 
-    // Listes des pages Wi-Fi, Bluetooth, Son
+    // Listes des pages Wi-Fi, Bluetooth, et mesures de la page Système
     property var liste: []
     Process {
         id: lecteurPage
@@ -178,7 +219,7 @@ Singleton {
         }
     }
     function lirePage() {
-        var quoi = ({ wifi: "wifi", bluetooth: "bt", son: "son" })[page]
+        var quoi = ({ reseau: "wifi", bluetooth: "bt", systeme: "systeme" })[vueActive]
         if (!quoi || lecteurPage.running) return
         lecteurPage.command = [bin + "nc-ile-etat", quoi]
         lecteurPage.running = true

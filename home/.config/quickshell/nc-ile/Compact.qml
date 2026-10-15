@@ -8,12 +8,14 @@ import Quickshell.Services.UPower
 
 Item {
     id: c
-    readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType : (Etat.lecteur && Etat.titre !== "" ? "musique" : "repos")
+    readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
+                                   : (Etat.aMusique ? "musique" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
     implicitHeight: 30
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
-                                      piste: piste, charge: charge, profil: profil, jeu: jeu })[mode] || repos
+                                      piste: piste, charge: charge, profil: profil, jeu: jeu,
+                                      minuteur: minuteur, "minuteur-fini": fini })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -61,6 +63,20 @@ Item {
             }
         }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "play_arrow"; taille: 16; color: "#98989d"; visible: !Etat.joue }
+    }
+
+    // ── Minuteur en cours : décompte orange ──
+    Fondu {
+        id: minuteur
+        montre: c.mode === "minuteur"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "timer"; taille: 17; color: "#ff9f0a" }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: "#ff9f0a"; font.features: { "tnum": 1 } }
+    }
+    Fondu {
+        id: fini
+        montre: c.mode === "minuteur-fini"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "alarm"; taille: 18; color: "#ff9f0a" }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Minuteur terminé"; font.weight: Font.DemiBold }
     }
 
     // ── Volume / luminosité : jauge blanche ──
