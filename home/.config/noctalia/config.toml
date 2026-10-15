@@ -197,10 +197,11 @@ order = "random"
 [lockscreen]
 transition = ["disc"]
 
-# Écran de verrouillage épuré : heure, date, musique (seulement si quelque chose joue), mot de passe
+# Écran de verrouillage épuré : heure, date, mot de passe. Pas de lecteur de musique : celui de Noctalia affiche
+# des titres d'onglet bruts et ses boutons ne répondent pas ; les touches de musique du clavier marchent verrouillé.
 [lockscreen_widgets]
 enabled = true
-widget_order = ["nc-time", "nc-date", "nc-media"]
+widget_order = ["nc-time", "nc-date"]
 
 [lockscreen_widgets.widget.nc-time]
 type = "clock"
@@ -231,19 +232,6 @@ center_text = true
 color = "on_surface_variant"
 background = false
 shadow = true
-
-[lockscreen_widgets.widget.nc-media]
-type = "media_player"
-output = "@MONITOR@"
-cx = @LCX@
-cy = @LCY4@
-
-[lockscreen_widgets.widget.nc-media.settings]
-layout = "horizontal"
-hide_when_no_media = true
-color = "on_surface"
-background_opacity = 0.55
-background_radius = 16.0
 
 [lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@"]
 type = "login_box"
