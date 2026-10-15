@@ -205,6 +205,32 @@ Singleton {
     onCameraActiveChanged: if (cameraActive) activite("micro", 3200)
     function nomJoli(n) { return n === "WEBRTC VoiceEngine" ? "Discord" : (n.charAt(0).toUpperCase() + n.slice(1)) }
 
+    // ── Casque / écouteurs Bluetooth qui se connectent (AirPods…) : la pilule montre leur nom et leur batterie ──
+    // Repérés par leur adresse (pas par le nœud PipeWire : passer en mode appel recrée le nœud sans reconnexion)
+    readonly property var adressesBt: Pipewire.nodes.values.filter(n => n.isSink && !n.isStream && (n.name || "").indexOf("bluez_output.") === 0)
+        .map(n => ({ mac: n.name.split(".")[1].replace(/_/g, ":"), nom: n.description || n.nickname || "Casque" }))
+    property var btConnus: []
+    property string casqueNom: ""
+    property string casqueBatterie: ""
+    onAdressesBtChanged: {
+        var avant = btConnus, macs = []
+        for (var i = 0; i < adressesBt.length; i++) {
+            var a = adressesBt[i]
+            macs.push(a.mac)
+            if (avant.indexOf(a.mac) < 0 && macs.indexOf(a.mac) === macs.length - 1 && pret) {
+                casqueNom = a.nom; casqueBatterie = ""
+                lireBatterieBt.command = ["sh", "-c", "sleep 1.5; bluetoothctl info " + a.mac + " | sed -n 's/.*Battery Percentage:.*(\\([0-9]*\\)).*/\\1/p' | head -1"]
+                lireBatterieBt.running = true
+                activite("casque", 4500)
+            }
+        }
+        btConnus = macs
+    }
+    Process {
+        id: lireBatterieBt
+        stdout: StdioCollector { onStreamFinished: etat.casqueBatterie = text.trim() }
+    }
+
     // ── Batterie faible : alerte à 20 % puis à 10 % (sur batterie), avec un bouton « Mode Économie » ──
     property int seuilAlerte: 100       // dernier seuil annoncé (remis à 100 quand on branche)
     onPourcentChanged: {
