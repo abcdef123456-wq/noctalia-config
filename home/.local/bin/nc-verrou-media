@@ -2,6 +2,7 @@
 # nc-verrou-media : le lecteur de musique actif, pour la capsule de l'écran de verrouillage (plugin nc/verrou).
 # Une ligne, champs séparés par des tabulations :
 #   état  titre  artiste  pochette (fichier local)  durée (µs)  position (µs)  lecteur  icône de l'appli (fichier)
+#   secondes depuis le dernier départ / arrêt de lecture (noté par l'île dans ~/.cache/nc/derniere-lecture ; vide sinon)
 # Lecteur : le dernier actif selon playerctld (comme les touches de musique du clavier).
 # Pochette venue d'internet (YouTube, Spotify…) : téléchargée une fois dans ~/.cache/nc/pochettes.
 # Icône de l'appli : nc-apps icon, gardée en cache pour ne pas la chercher à chaque seconde.
@@ -45,4 +46,6 @@ if [ -z "$icone" ] || [ ! -f "$icone" ]; then
   fi
 fi
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$etat" "$titre" "${artiste:-}" "$pochette" "${duree:-0}" "${position:-0}" "$nom" "$icone"
+age=""
+if [ -s "$cache/derniere-lecture" ]; then age=$(( $(date +%s) - $(cat "$cache/derniere-lecture") )); fi
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$etat" "$titre" "${artiste:-}" "$pochette" "${duree:-0}" "${position:-0}" "$nom" "$icone" "$age"

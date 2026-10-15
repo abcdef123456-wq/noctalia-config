@@ -3,7 +3,8 @@
 --   Pochette (sinon l'icône de l'appli sur une tuile sombre, comme sur iPhone), titre, artiste ou source,
 --   progression avec temps écoulé / restant, précédent / lecture / suivant.
 --   Infos : ~/.local/bin/nc-verrou-media (dernier lecteur actif selon playerctld, pochette d'internet mise en cache,
---   fichier d'icône de l'appli). Rien ne s'affiche quand rien ne joue, ni pour un lecteur en pause depuis plus de 15 min.
+--   fichier d'icône de l'appli, temps depuis la dernière pause noté par l'île). Rien ne s'affiche quand rien ne joue, ni
+--   pour un lecteur en pause depuis plus de 15 min.
 --   Navigateurs sans métadonnées : « Épisode 3 – Série – Crunchyroll » devient « Épisode 3 – Série », source « Crunchyroll ».
 -- Taille : box_width / box_height du widget dans config.toml (680 × 104).
 
@@ -12,9 +13,7 @@ local L, H = 680, 104
 local MEDIA = noctalia.expandPath("~/.local/bin/nc-verrou-media")
 local NAVIGATEURS = { "firefox", "chrom", "brave", "vivaldi", "opera", "edge", "zen", "librewolf", "floorp" }
 
-local media = nil          -- { etat, titre, source, pochette, icone, duree, position }
-local finLecture = nil     -- heure de la dernière pause (ms)
-local aJoue = false
+local media = nil          -- { etat, titre, source, pochette, icone, duree, position, age }
 local derniereLecture = 0
 
 local function maintenant() return noctalia.nowMs() end
@@ -56,7 +55,7 @@ local function lire()
     local l = string.gsub(r.stdout or "", "\n$", "")
     local c = {}
     for v in string.gmatch(l .. "\t", "([^\t]*)\t") do table.insert(c, v) end
-    if #c < 8 or c[1] == "" or c[1] == "Stopped" or c[2] == "" then
+    if #c < 9 or c[1] == "" or c[1] == "Stopped" or c[2] == "" then
       media = nil
     else
       local titre, source = c[2], c[3]
@@ -68,11 +67,9 @@ local function lire()
           titre = p[1]
         end
       end
-      -- Pause : comptée depuis maintenant seulement si on l'a vu jouer (un lecteur déjà en pause reste caché)
-      if c[1] == "Playing" then finLecture = nil; aJoue = true
-      elseif not finLecture then finLecture = aJoue and maintenant() or 0 end
+      -- age : secondes depuis le dernier départ / arrêt de lecture (noté par l'île), nil si inconnu
       media = { etat = c[1], titre = titre, source = source ~= "" and source or c[7], pochette = c[4], icone = c[8],
-        duree = (tonumber(c[5]) or 0) / 1e6, position = (tonumber(c[6]) or 0) / 1e6 }
+        duree = (tonumber(c[5]) or 0) / 1e6, position = (tonumber(c[6]) or 0) / 1e6, age = tonumber(c[9]) }
     end
     rendre()
   end, 4000)
@@ -89,7 +86,8 @@ local function bouton(nom, taille, action)
 end
 
 function rendre()
-  local visible = media ~= nil and (media.etat == "Playing" or (finLecture and finLecture > 0 and maintenant() - finLecture < 15 * 60000))
+  -- Lecture en cours, ou pause de moins de 15 min (un onglet oublié en pause depuis des heures reste caché)
+  local visible = media ~= nil and (media.etat == "Playing" or (media.age ~= nil and media.age < 15 * 60))
   if not visible then
     desktopWidget.render(ui.box({ width = L, height = H, opacity = 0 }))
     return

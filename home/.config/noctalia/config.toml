@@ -231,7 +231,7 @@ transition = ["disc"]
 # à la place du lecteur de Noctalia : titres d'onglet bruts, boutons qui ne répondaient pas)
 [lockscreen_widgets]
 enabled = true
-widget_order = ["nc-time", "nc-date", "nc-musique"]
+widget_order = ["nc-time", "nc-date", "lockscreen-login-box@@MONITOR@", "nc-musique"]
 
 [lockscreen_widgets.widget.nc-time]
 type = "clock"
@@ -289,6 +289,7 @@ input_opacity = 0.8
 center_password_text = true
 show_login_button = false
 show_keyboard_layout = false
+show_media = false                        # la musique est dans sa propre capsule (nc-musique)
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
