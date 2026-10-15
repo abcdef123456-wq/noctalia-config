@@ -34,6 +34,9 @@ local query = ""
 local current = nil
 local bg = nil
 local BGW, BGH = BASE.BGW, BASE.BGH
+-- Cadre des fenêtres : place prise par la barre en haut (épaisseur 36 + marge 6) et écart avec les bords de l'écran
+-- (gaps_out de Hyprland) ; le contenu du panneau commence 65 points sous le haut de l'écran (mesuré)
+local HAUT_BARRE, BORD, HAUT_PANNEAU = 42, 10, 65
 local inputKey = 0
 local holdDir = 0
 local holdT = 0
@@ -95,7 +98,8 @@ local function setZoom()
   if grand then z = math.max(1, math.min(2, o.width / 1600, o.height / 1000)) end
   local function px(v) return math.floor(v * z + 0.5) end
   CW, CH, NW, NH = px(BASE.CW), px(BASE.CH), px(BASE.NW), px(BASE.NH)
-  if grand then BGW, BGH = o.width - px(40), o.height - px(60) else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
+  -- Fond : exactement le cadre des fenêtres (barre en haut, écart de 10 points avec les bords : nc/apparence.lua)
+  if o then BGW, BGH = o.width - 2 * BORD, o.height - HAUT_BARRE - 2 * BORD else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
   SCREEN_W = o and o.width or 1600
 end
@@ -224,9 +228,13 @@ function render()
   end
 
   local ease = 1 - (1 - appear) * (1 - appear)
-  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2, opacity = ease }, {
-    bg and ui.image({ path = bg, width = BGW, height = BGH, fit = "cover", radius = 18 }) or ui.box({ width = 1, height = 1, opacity = 0 }),
-    ui.column({ height = ROW_H, width = BGW, align = "center", justify = "center" }, { middle }),
+  -- Remonté pour que le fond commence au même endroit que les fenêtres (le panneau commence plus bas)
+  panel.render(ui.column({ flexGrow = 1, align = "center", justify = "start", gap = (HAUT_BARRE + BORD) - HAUT_PANNEAU - 1, opacity = ease }, {
+    ui.box({ width = 1, height = 1, opacity = 0 }),
+    ui.column({ minWidth = BGW, align = "center", justify = "start", gap = -(BGH + ROW_H) / 2 }, {   -- minWidth : sinon rétréci aux marges du panneau
+      bg and ui.image({ path = bg, width = BGW, height = BGH, fit = "cover", radius = 18 }) or ui.box({ width = BGW, height = BGH, opacity = 0 }),
+      ui.column({ height = ROW_H, width = BGW, align = "center", justify = "center" }, { middle }),
+    }),
   }))
 end
 
