@@ -501,6 +501,22 @@ if [ -f "$NSET" ] && grep -qE 'legion-(time|date|media)' "$NSET"; then
   backup .local/state/noctalia/settings.toml
   sed -i -E 's/legion-(time|date|media)/nc-\1/g' "$NSET"; migrated=1
 fi
+# Écran de verrouillage : Noctalia garde sa propre disposition (settings.toml), qui passe avant config.toml ; celle
+# des anciennes versions (lecteur nc-media de Noctalia) est retirée pour que la capsule de musique s'applique
+if [ -f "$NSET" ] && grep -qF 'lockscreen_widgets.widget.nc-media]' "$NSET"; then
+  backup .local/state/noctalia/settings.toml
+  python3 -I - "$NSET" <<'PYEOF'
+import re, sys
+p = sys.argv[1]; out, saute = [], False
+for l in open(p).read().splitlines():
+    if re.match(r'^\s*\[', l):
+        saute = bool(re.match(r'^\s*\[lockscreen_widgets', l))
+    if not saute:
+        out.append(l)
+open(p, "w").write("\n".join(out) + "\n")
+PYEOF
+  migrated=1
+fi
 if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc"; then
   backup .zshrc
   sed -i 's#\.config/legion/greeting\.zsh#.config/nc/greeting.zsh#g' "$HOME/.zshrc"; migrated=1
