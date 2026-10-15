@@ -1,0 +1,18 @@
+id          = "nc/carousel"
+name        = "Carrousel de fonds d'écran"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Carrousel plein écran pour choisir le fond d'écran (miniatures ~/.cache/nc/carousel)."
+
+[[panel]]
+id = "main"
+entry = "panel.luau"
+width = "fill"
+height = "fill"
+placement = "floating"
+position = "center"
+layer = "overlay"
+keyboard_focus = "exclusive"
+capture_keys = ["Left", "Right", "Up", "Down", "Tab", "shift+Tab", "ISO_Left_Tab", "Return", "KP_Enter", "Home", "End"]

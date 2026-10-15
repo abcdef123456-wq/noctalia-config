@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# nc-shell-msg : actions des raccourcis Hyprland, envoyées à Noctalia v5.
+#   menu  session  lock  power-cycle  control-center  settings  wallpapers  window-switcher  keys
+case "${1:-}" in
+  menu)            exec noctalia msg panel-toggle nc/launcher:main ;;
+  session)         exec noctalia msg session lock-and-suspend ;;
+  lock)            exec noctalia msg session lock ;;
+  power-cycle)     exec noctalia msg power-cycle ;;
+  control-center)  exec noctalia msg panel-toggle control-center ;;
+  settings)        exec noctalia msg settings-toggle ;;
+  wallpapers)
+    # Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant que le carrousel est ouvert,
+    # remis à la fermeture (sauf en profil Économie, où il reste coupé : voir nc.flou dans ~/.config/hypr/nc/energie.lua).
+    lock="${XDG_RUNTIME_DIR:-/tmp}/nc-carousel-blur"
+    if [ ! -e "$lock" ]; then
+      : > "$lock"; hyprctl eval 'nc.flou(false)' >/dev/null
+      ( sleep 1; while hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 0.3; done
+        hyprctl eval 'nc.flou(true)' >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
+      disown
+    fi
+    exec noctalia msg panel-toggle nc/carousel:main ;;
+  window-switcher) exec noctalia msg window-switcher hold ;;
+  keys)            exec noctalia msg panel-toggle nc/keys:main ;;
+esac
+echo "Action inconnue : ${1:-}" >&2
+exit 1

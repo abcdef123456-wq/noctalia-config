@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""nc-theme-sync : thème kitty assorti aux couleurs Noctalia (fond d'écran ou palette fixe).
+
+Lit ~/.config/noctalia/colors.json, écrit ~/.config/kitty/themes/noctalia-dynamic.conf (puis recharge kitty)
+et ~/.config/hypr/nc/couleurs.lua : halo coloré, bordure en dégradé, groupes (puis recharge Hyprland).
+Rouge, vert et jaune gardent leur sens (erreur, succès, avertissement) et sont rapprochés de la couleur
+principale de 20° au plus. Bleu, magenta et cyan prennent l'accent du thème le plus proche (à 60° près),
+sinon ils sont tirés de 30° vers la couleur principale. La luminosité est ensuite ajustée pour garantir
+un contraste lisible sur le fond (WCAG : 4,5 pour les couleurs normales).
+Calculs dans l'espace perceptuel OKLCH. Aucune dépendance externe.
+"""
+import json
+import math
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+COLORS = Path.home() / ".config/noctalia/colors.json"
+OUT = Path.home() / ".config/kitty/themes/noctalia-dynamic.conf"
+HYPR_OUT = Path.home() / ".config/hypr/nc/couleurs.lua"
+KCS = Path.home() / ".local/share/color-schemes/noctalia.colors"
+KDEGLOBALS = Path.home() / ".config/kdeglobals"
+
+
+# --- Conversions sRGB <-> OKLab/OKLCH ---------------------------------------------------------
+def hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def rgb_to_hex(rgb):
+    return "#" + "".join(f"{round(max(0, min(1, c)) * 255):02x}" for c in rgb)
+
+
+def _lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _gam(c):
+    return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
+def rgb_to_oklch(rgb):
+    r, g, b = (_lin(c) for c in rgb)
+    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
+    m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
+    s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
+    L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    return L, math.hypot(A, B), math.degrees(math.atan2(B, A)) % 360
+
+
+def oklch_to_rgb_raw(L, C, H):
+    A, B = C * math.cos(math.radians(H)), C * math.sin(math.radians(H))
+    l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3
+    m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3
+    s = (L - 0.0894841775 * A - 1.2914855480 * B) ** 3
+    r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+    g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+    b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    return r, g, b
+
+
+def oklch_to_rgb(L, C, H):
+    """Réduit la chroma jusqu'à rentrer dans le gamut sRGB (teinte et luminosité conservées)."""
+    for _ in range(40):
+        rgb = oklch_to_rgb_raw(L, C, H)
+        if all(-1e-4 <= c <= 1 + 1e-4 for c in rgb):
+            return tuple(_gam(max(0, min(1, c))) for c in rgb)
+        C *= 0.92
+    return tuple(_gam(max(0, min(1, c))) for c in oklch_to_rgb_raw(L, 0, H))
+
+
+def luminance(rgb):
+    r, g, b = (_lin(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+# --- Génération -------------------------------------------------------------------------------
+def harmonize(hue, toward, max_shift=15.0):
+    d = (toward - hue + 180) % 360 - 180
+    return (hue + max(-max_shift, min(max_shift, d * 0.5))) % 360
+
+
+def tone(L, C, H, bg_rgb, min_ratio, dark_bg):
+    """Couleur OKLCH ajustée en luminosité jusqu'au contraste demandé."""
+    step = 0.01 if dark_bg else -0.01
+    for _ in range(100):
+        rgb = oklch_to_rgb(L, C, H)
+        if contrast(rgb, bg_rgb) >= min_ratio or not 0.05 < L < 0.98:
+            return rgb
+        L += step
+    return rgb
+
+
+def main():
+    try:
+        c = json.loads(COLORS.read_text())
+        bg_hex, fg_hex = c["mSurface"], c["mOnSurface"]
+        primary = c["mPrimary"]
+    except (OSError, KeyError, ValueError) as e:
+        sys.exit(f"nc-theme-sync : colors.json illisible ({e})")
+
+    bg, fg = hex_to_rgb(bg_hex), hex_to_rgb(fg_hex)
+    dark = luminance(bg) < 0.18
+    _, pc, ph = rgb_to_oklch(hex_to_rgb(primary))
+
+    # Teintes OKLCH de référence des couleurs ANSI
+    hues = {"red": 25, "green": 145, "yellow": 90, "blue": 255, "magenta": 330, "cyan": 200}
+    if dark:
+        L_n, L_b, C_n, C_b = 0.74, 0.84, 0.13, 0.10
+    else:
+        L_n, L_b, C_n, C_b = 0.52, 0.44, 0.14, 0.15
+
+    # Teintes d'accent du thème (couleurs non grises seulement)
+    accents = []
+    for key in ("mPrimary", "mSecondary", "mTertiary"):
+        if key in c:
+            _, ac, ah = rgb_to_oklch(hex_to_rgb(c[key]))
+            if ac > 0.03:
+                accents.append(ah)
+
+    def hue_dist(a, b):
+        return abs((a - b + 180) % 360 - 180)
+
+    def slot_hue(name, base):
+        # Rouge / vert / jaune : sens conservé, teinte rapprochée du thème (20° max).
+        if name in ("red", "green", "yellow"):
+            return harmonize(base, ph, 20.0)
+        # Bleu / magenta / cyan : prennent l'accent du thème le plus proche s'il est à moins de 60°…
+        if accents:
+            best = min(accents, key=lambda a: hue_dist(a, base))
+            if hue_dist(best, base) <= 60:
+                return best
+        # … sinon, sont tirés de 30° vers la couleur principale.
+        return harmonize(base, ph, 30.0)
+
+    normal, bright = {}, {}
+    for name, h in hues.items():
+        hh = slot_hue(name, h)
+        # Le jaune paraît terne à luminosité égale : on le remonte sur fond sombre.
+        boost = 0.08 if (dark and name == "yellow") else 0.0
+        normal[name] = tone(L_n + boost, C_n, hh, bg, 4.5, dark)
+        bright[name] = tone(min(L_b + boost, 0.93), C_b, hh, bg, 6.0, dark)
+
+    fL, fC, fH = rgb_to_oklch(fg)
+    bL, bC, bH = rgb_to_oklch(bg)
+    sel_bg = oklch_to_rgb(bL + (0.18 if dark else -0.14), max(bC, 0.04), ph)
+    normal["black"] = oklch_to_rgb(bL + (0.06 if dark else -0.08), bC, bH)
+    bright["black"] = tone(bL + (0.30 if dark else -0.30), min(pc, 0.03), ph, bg, 3.0, dark)  # commentaires, suggestions
+    normal["white"] = oklch_to_rgb(fL - (0.10 if dark else -0.10), fC, fH)
+    bright["white"] = fg
+
+    order = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]
+    accent = tone(*rgb_to_oklch(hex_to_rgb(primary)), bg, 4.5, dark)
+    lines = [
+        "# Généré par nc-theme-sync depuis ~/.config/noctalia/colors.json. Ne pas éditer.",
+        f"foreground {fg_hex}", f"background {bg_hex}",
+        f"selection_foreground {fg_hex}", f"selection_background {rgb_to_hex(sel_bg)}",
+        f"cursor {rgb_to_hex(accent)}", f"cursor_text_color {bg_hex}",
+        f"url_color {rgb_to_hex(accent)}",
+        f"active_border_color {primary}", f"inactive_border_color {c.get('mOutline', bg_hex)}",
+        f"active_tab_foreground {c.get('mOnPrimary', bg_hex)}", f"active_tab_background {primary}",
+        f"inactive_tab_foreground {c.get('mOnSurfaceVariant', fg_hex)}",
+        f"inactive_tab_background {c.get('mSurfaceVariant', bg_hex)}",
+        f"tab_bar_background {bg_hex}",
+    ]
+    lines += [f"color{i} {rgb_to_hex(normal[n])}" for i, n in enumerate(order)]
+    lines += [f"color{i + 8} {rgb_to_hex(bright[n])}" for i, n in enumerate(order)]
+    content = "\n".join(lines) + "\n"
+
+    if write_if_changed(OUT, content):
+        # kitty recharge sa configuration sur SIGUSR1
+        pids = subprocess.run(["pgrep", "-x", "kitty"], capture_output=True, text=True).stdout.split()
+        for pid in pids:
+            try:
+                os.kill(int(pid), signal.SIGUSR1)
+            except (ProcessLookupError, PermissionError):
+                pass
+        print(f"nc-theme-sync : thème kitty mis à jour (primaire {primary}, {len(pids)} kitty rechargé(s))")
+
+    # --- Hyprland : halo coloré de la fenêtre active, bordure en dégradé, onglets de groupes ---
+    def hx(key, fallback):
+        return c.get(key, fallback).lstrip("#")
+
+    p, s2, t3 = hx("mPrimary", "8fb3ff"), hx("mSecondary", "b9abff"), hx("mTertiary", "7fdbca")
+    sv, osv = hx("mSurfaceVariant", "161a23"), hx("mOnSurfaceVariant", "a3a9b8")
+    err, onp = hx("mError", "ffb4ab"), hx("mOnPrimary", "0b0d12")
+    hypr = f"""-- Généré par nc-theme-sync depuis les couleurs Noctalia. Ne pas éditer.
+hl.config({{
+    general = {{
+        col = {{
+            active_border   = {{ colors = {{ "rgba({p}ff)", "rgba({s2}ff)", "rgba({t3}ff)" }}, angle = 45 }},
+            inactive_border = "rgba({sv}aa)",
+        }},
+    }},
+    decoration = {{
+        shadow = {{
+            color          = "rgba({p}55)",
+            color_inactive = "rgba(00000050)",
+        }},
+    }},
+    group = {{
+        col = {{
+            border_active          = {{ colors = {{ "rgba({p}ff)", "rgba({t3}ff)" }}, angle = 45 }},
+            border_inactive        = "rgba({sv}aa)",
+            border_locked_active   = "rgba({err}ff)",
+            border_locked_inactive = "rgba({sv}aa)",
+        }},
+        groupbar = {{
+            col = {{
+                active          = "rgba({p}dd)",
+                inactive        = "rgba({sv}cc)",
+                locked_active   = "rgba({err}dd)",
+                locked_inactive = "rgba({sv}cc)",
+            }},
+            text_color          = "rgba({onp}ff)",
+            text_color_inactive = "rgba({osv}ff)",
+        }},
+    }},
+}})
+"""
+    if write_if_changed(HYPR_OUT, hypr):
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+        print("nc-theme-sync : couleurs Hyprland mises à jour")
+
+    sync_kdeglobals()
+
+
+def sync_kdeglobals():
+    """Applis KDE (Dolphin…) : copie le schéma généré par le template Noctalia « kcolorscheme » dans kdeglobals.
+    Seules les sections de couleurs sont remplacées ; les autres réglages KDE éventuels sont conservés."""
+    import configparser
+
+    if not KCS.exists():
+        return
+
+    def load(path):
+        cp = configparser.ConfigParser(interpolation=None, strict=False)
+        cp.optionxform = str
+        if path.exists():
+            cp.read(path, encoding="utf-8")
+        return cp
+
+    src, dst = load(KCS), load(KDEGLOBALS)
+    for sec in list(dst.sections()):
+        if sec.startswith(("Colors:", "ColorEffects:")) or sec == "WM":
+            dst.remove_section(sec)
+    for sec in src.sections():
+        if not dst.has_section(sec):
+            dst.add_section(sec)
+        for k, v in src.items(sec):
+            dst.set(sec, k, v)
+    if not dst.has_section("Icons"):
+        dst.add_section("Icons")
+    dst.set("Icons", "Theme", "Papirus-Dark")
+    # Hors Plasma, les applis KDE appliquent le schéma désigné par [UiSettings] ColorScheme (nom du fichier .colors).
+    # Indispensable sous Qt 6.12 : qt6ct 0.11 ne parvient plus à appliquer sa propre palette.
+    for sec in ("General", "UiSettings"):
+        if not dst.has_section(sec):
+            dst.add_section(sec)
+        dst.set(sec, "ColorScheme", KCS.stem)
+
+    import io
+    buf = io.StringIO()
+    dst.write(buf, space_around_delimiters=False)
+    if write_if_changed(KDEGLOBALS, buf.getvalue()):
+        print("nc-theme-sync : couleurs KDE (kdeglobals) mises à jour")
+
+
+def write_if_changed(path, content):
+    if path.exists() and path.read_text() == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(content)
+    os.replace(tmp, path)
+    return True
+
+
+if __name__ == "__main__":
+    main()
+    # Logo de l'accueil du terminal aux nouvelles couleurs (rien n'est refait si elles n'ont pas changé)
+    logo = Path.home() / ".local/bin/nc-term-logo"
+    if logo.exists():
+        keyf = Path.home() / ".cache/nc/term-logo.png.key"
+        before = keyf.read_text() if keyf.exists() else ""
+        subprocess.run([str(logo)], capture_output=True)
+        after = keyf.read_text() if keyf.exists() else ""
+        if after != before:
+            # Les terminaux dont seul l'accueil est affiché le redessinent (même réaction qu'un redimensionnement)
+            for pid in subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "zsh"], capture_output=True, text=True).stdout.split():
+                try:
+                    os.kill(int(pid), signal.SIGWINCH)
+                except (ProcessLookupError, PermissionError):
+                    pass

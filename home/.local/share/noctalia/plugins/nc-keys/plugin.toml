@@ -1,0 +1,17 @@
+id          = "nc/keys"
+name        = "Fiche des raccourcis"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Fiche de tes raccourcis Hyprland, lus en direct par nc-keys (Super + /)."
+
+[[panel]]
+id = "main"
+entry = "panel.luau"
+width = "fill"
+height = "fill"
+placement = "floating"
+position = "center"
+layer = "overlay"
+keyboard_focus = "exclusive"

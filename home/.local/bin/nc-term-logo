@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# nc-term-logo : logo du terminal (accueil fastfetch) aux couleurs du thème.
+# Logo officiel de la distribution (SVG) rempli d'un dégradé couleur principale -> secondaire, avec un léger halo.
+# Écrit ~/.cache/nc/term-logo.png ; ne refait rien si les couleurs n'ont pas changé.
+# Appelé par nc-theme-sync à chaque changement de couleurs.
+set -uo pipefail
+
+COLORS="$HOME/.config/noctalia/colors.json"
+OUT="$HOME/.cache/nc/term-logo.png"
+
+svg=""
+. /etc/os-release 2>/dev/null
+for n in ${LOGO:+"$LOGO"} "${ID:-linux}-logo" "${ID:-linux}linux-logo" "${ID:-linux}-logo-icon" "distributor-logo-${ID:-linux}"; do
+  for f in "/usr/share/pixmaps/$n.svg" "/usr/share/icons/hicolor/scalable/apps/$n.svg"; do
+    [ -r "$f" ] && { svg="$f"; break 2; }
+  done
+done
+[ -n "$svg" ] || exit 0   # pas de logo vectoriel : l'accueil utilisera le logo texte de fastfetch
+command -v magick >/dev/null || exit 0
+
+p=$(jq -r '.mPrimary // "#8aadf4"' "$COLORS" 2>/dev/null); [ -n "$p" ] || p="#8aadf4"
+s=$(jq -r '.mSecondary // .mTertiary // "#c6a0f6"' "$COLORS" 2>/dev/null); [ -n "$s" ] || s="#c6a0f6"
+key="$p $s $svg v2"
+[ -r "$OUT" ] && [ "$(cat "$OUT.key" 2>/dev/null)" = "$key" ] && exit 0
+
+mkdir -p "$(dirname "$OUT")"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+# Logo Arch : on retire le petit « ™ » (les deux tracés en bas à droite du SVG officiel) ; autres logos tels quels
+if [ "${ID:-}" = arch ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
+# Silhouette (canal alpha) du logo, 440 px de haut, centrée dans un carré de 560 px (marge pour le halo)
+magick -background none -density 400 "$tmp/logo.svg" -trim +repage -resize x440 \
+  -gravity center -extent 560x560 -alpha extract "$tmp/mask.png" || exit 0
+# Dégradé diagonal principal -> secondaire, découpé par la silhouette
+magick -size 560x560 -define gradient:angle=135 "gradient:$p-$s" "$tmp/mask.png" \
+  -alpha off -compose CopyOpacity -composite "$tmp/logo.png"
+# Halo : silhouette floutée, couleur principale, 45 % d'opacité
+magick -size 560x560 "xc:$p" \( "$tmp/mask.png" -blur 0x18 -evaluate multiply 0.45 \) \
+  -alpha off -compose CopyOpacity -composite "$tmp/glow.png"
+magick "$tmp/glow.png" "$tmp/logo.png" -background none -compose Over -composite -strip "PNG32:$tmp/out.png" &&
+  mv "$tmp/out.png" "$OUT" && echo "$key" > "$OUT.key"

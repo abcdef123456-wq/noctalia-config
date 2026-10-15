@@ -1,4 +1,4 @@
-# Noctalia v5 — configuration « Legion » (dépôt noctalia-config).
+# Noctalia v5 — configuration du dépôt noctalia-config.
 # Les réglages faits dans l'interface vont dans ~/.local/state/noctalia/settings.toml et priment sur ce fichier.
 # Clés vérifiées avec « noctalia config export full » (v5.2.1) et docs.noctalia.dev.
 
@@ -8,10 +8,10 @@ avatar_path = "@HOME@/.face"
 corner_radius_scale = 1.0
 setup_wizard_enabled = false
 telemetry_enabled = false
-polkit_agent = false                      # plasma-polkit-agent s'en charge déjà
+polkit_agent = @POLKIT@   # demandes de mot de passe : agent de Noctalia, sauf si celui de KDE est installé (install.sh)
 # Applis lancées dans leur propre unité systemd (elles survivent au changement v4/v5)
-# et sur le GPU du profil énergétique (legion-launch).
-launch_apps_custom_command = "uwsm-app -- @HOME@/.local/bin/legion-launch $CMD"
+# et sur le GPU du profil énergétique (nc-launch).
+launch_apps_custom_command = "uwsm-app -- @HOME@/.local/bin/nc-launch $CMD"
 
 [shell.animation]
 speed = 1.15
@@ -70,7 +70,7 @@ capsule_thickness = 0.86
 capsule_padding = 8
 widget_spacing = 6
 font_weight = 600
-start = ["arch", "workspaces", "active_window"]
+start = ["logo", "workspaces", "active_window"]
 center = ["clock", "media"]
 end = ["group:sys", "tray", "power_profile", "group:status", "notifications"]
 
@@ -82,9 +82,9 @@ members = ["cpu", "temp", "ram"]
 id = "status"
 members = ["network", "bluetooth", "volume", "battery"]
 
-[widget.arch]
+[widget.logo]
 type = "control-center"
-custom_image = "@HOME@/.config/noctalia/arch-logo.png"
+custom_image = "@DISTRO_LOGO@"   # logo de ta distribution (install.sh) ; vide = icône de Noctalia
 custom_image_colorize = true
 color = "primary"
 
@@ -154,9 +154,9 @@ position = "top_right"
 position = "bottom_center"
 
 # ---------------------------------------------------------------- Thème : couleurs du fond d'écran
-# Couleurs vives ou sobres selon le fond (et image de démarrage) : voir legion-wallpaper-colors
+# Couleurs vives ou sobres selon le fond (et image de démarrage) : voir nc-wallpaper-colors
 [hooks]
-wallpaper_changed = "$HOME/.local/bin/legion-wallpaper-colors"
+wallpaper_changed = "$HOME/.local/bin/nc-wallpaper-colors"
 
 [theme]
 mode = "dark"
@@ -168,8 +168,8 @@ enable_builtin_templates = true
 builtin_ids = ["gtk3", "gtk4", "qt", "kcolorscheme"]
 enable_community_templates = false
 
-# Palette au format v4 : legion-theme-sync (kitty, bordures Hyprland, applis KDE, logo du terminal) la surveille
-[theme.templates.user.legion_colors]
+# Palette au format v4 : nc-theme-sync (kitty, bordures Hyprland, applis KDE, logo du terminal) la surveille
+[theme.templates.user.nc_colors]
 input_path = "templates/colors.json"
 output_path = "@HOME@/.config/noctalia/colors.json"
 
@@ -191,9 +191,9 @@ transition = ["disc"]
 # Écran de verrouillage épuré : heure, date, musique (seulement si quelque chose joue), mot de passe
 [lockscreen_widgets]
 enabled = true
-widget_order = ["legion-time", "legion-date", "legion-media"]
+widget_order = ["nc-time", "nc-date", "nc-media"]
 
-[lockscreen_widgets.widget.legion-time]
+[lockscreen_widgets.widget.nc-time]
 type = "clock"
 output = "@MONITOR@"
 cx = @LCX@
@@ -201,14 +201,14 @@ cy = @LCY1@
 box_width = 560.0
 box_height = 170.0
 
-[lockscreen_widgets.widget.legion-time.settings]
+[lockscreen_widgets.widget.nc-time.settings]
 format = "{:%H:%M}"
 center_text = true
 color = "on_surface"
 background = false
 shadow = true
 
-[lockscreen_widgets.widget.legion-date]
+[lockscreen_widgets.widget.nc-date]
 type = "clock"
 output = "@MONITOR@"
 cx = @LCX@
@@ -216,20 +216,20 @@ cy = @LCY2@
 box_width = 420.0
 box_height = 36.0
 
-[lockscreen_widgets.widget.legion-date.settings]
+[lockscreen_widgets.widget.nc-date.settings]
 format = "{:%A %d %B}"
 center_text = true
 color = "on_surface_variant"
 background = false
 shadow = true
 
-[lockscreen_widgets.widget.legion-media]
+[lockscreen_widgets.widget.nc-media]
 type = "media_player"
 output = "@MONITOR@"
 cx = @LCX@
 cy = @LCY4@
 
-[lockscreen_widgets.widget.legion-media.settings]
+[lockscreen_widgets.widget.nc-media.settings]
 layout = "horizontal"
 hide_when_no_media = true
 color = "on_surface"
@@ -254,5 +254,5 @@ show_keyboard_layout = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["legion/launcher", "legion/carousel", "legion/keys"]
+enabled = ["nc/launcher", "nc/carousel", "nc/keys"]
 auto_update = "none"

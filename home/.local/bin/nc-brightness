@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# nc-brightness : luminosité de l'écran interne (détecte le bon rétroéclairage, sans nom écrit en dur).
+#   nc-brightness up|down   +/- 5 %
+#   nc-brightness dim       assombrit à 20 % (seulement si plus lumineux), niveau précédent mémorisé
+#   nc-brightness restore   remet le niveau mémorisé
+# Le rétroéclairage de la carte NVIDIA (nvidia_0) est ignoré : il ne pilote pas l'écran interne.
+dev=""
+for d in /sys/class/backlight/*; do
+  n=${d##*/}
+  case "$n" in nvidia*|'*') ;; *) dev=$n; break ;; esac
+done
+[ -n "$dev" ] || exit 0
+case "${1:-}" in
+  up)      exec brightnessctl -d "$dev" -e4 -n2 set 5%+ ;;
+  down)    exec brightnessctl -d "$dev" -e4 -n2 set 5%- ;;
+  dim)     brightnessctl -s -q -d "$dev"
+           b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
+           [ "$b" -gt 20 ] && brightnessctl -q -d "$dev" set 20% ; exit 0 ;;
+  restore) exec brightnessctl -r -q -d "$dev" ;;
+  *) sed -n '2,6p' "$0"; exit 1 ;;
+esac

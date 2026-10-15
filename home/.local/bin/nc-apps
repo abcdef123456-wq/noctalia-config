@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""nc-apps : applications installées, pour la recherche Super+R (plugin Noctalia v5 nc/launcher).
+
+  nc-apps list        JSON : [{id, name, generic, comment, keywords, exe, icon}, ...]
+  nc-apps launch ID   lance l'application ID (nom du fichier .desktop sans l'extension),
+                          dans sa propre unité systemd (uwsm-app) et sur le GPU du profil (nc-launch).
+  nc-apps files TEXTE fichiers et dossiers du dossier personnel dont le nom contient TEXTE
+                          (JSON, 4 au plus, dossiers cachés exclus)
+  nc-apps open CHEMIN ouvre un fichier ou un dossier avec l'appli par défaut
+"""
+import json
+import os
+import subprocess
+import shlex
+import shutil
+import sys
+
+LAUNCH = os.path.expanduser("~/.local/bin/nc-launch")
+TERMINAL = ["kitty", "-e"]
+# Outils système installés comme dépendances : masqués de la recherche (pas désinstallés)
+HIDDEN = {
+    "avahi-discover", "bssh", "bvnc", "jconsole-java-openjdk", "jshell-java-openjdk", "lstopo",
+    "qv4l2", "qvidcap", "uuctl", "uxterm", "xterm", "qt6ct", "nvidia-settings", "auto-cpufreq-gtk",
+    "nm-connection-editor", "org.torproject.torbrowser-launcher.settings",
+}
+
+
+def app_dirs():
+    home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    dirs = [home] + (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    seen = []
+    for d in dirs:
+        p = os.path.join(d, "applications")
+        if d and p not in seen and os.path.isdir(p):
+            seen.append(p)
+    return seen
+
+
+def locales():
+    lang = (os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or "").split(".")[0]
+    out = []
+    if lang and lang not in ("C", "POSIX"):
+        out.append(lang)
+        if "_" in lang:
+            out.append(lang.split("_")[0])
+    return out
+
+
+LOCS = locales()
+
+
+def parse(path):
+    entry, section = {}, None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("["):
+                    section = line
+                    continue
+                if section != "[Desktop Entry]" or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                entry.setdefault(k.strip(), v.strip())
+    except OSError:
+        return None
+    return entry
+
+
+def loc(e, key):
+    for l in LOCS:
+        v = e.get(f"{key}[{l}]")
+        if v:
+            return v
+    return e.get(key, "")
+
+
+def entries():
+    """id -> (chemin, entrée), le premier dossier trouvé l'emporte (règle XDG)."""
+    found = {}
+    for d in app_dirs():
+        for root, _, files in os.walk(d):
+            for fn in files:
+                if not fn.endswith(".desktop"):
+                    continue
+                path = os.path.join(root, fn)
+                app_id = os.path.relpath(path, d)[: -len(".desktop")].replace("/", "-")
+                if app_id not in found:
+                    found[app_id] = path
+    return found
+
+
+def visible(e):
+    if e.get("Type") != "Application" or e.get("NoDisplay") == "true" or e.get("Hidden") == "true":
+        return False
+    desk = set((os.environ.get("XDG_CURRENT_DESKTOP") or "").split(":"))
+    only = [x for x in e.get("OnlyShowIn", "").split(";") if x]
+    if only and not desk.intersection(only):
+        return False
+    if desk.intersection(x for x in e.get("NotShowIn", "").split(";") if x):
+        return False
+    tryexec = e.get("TryExec")
+    if tryexec and not (shutil.which(tryexec) or os.access(tryexec, os.X_OK)):
+        return False
+    return bool(e.get("Exec"))
+
+
+def exec_argv(e):
+    try:
+        args = shlex.split(e.get("Exec", ""))
+    except ValueError:
+        return []
+    out = []
+    for a in args:
+        if a in ("%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%k", "%v", "%m"):
+            continue
+        if a == "%i":
+            if e.get("Icon"):
+                out += ["--icon", e["Icon"]]
+            continue
+        if a == "%c":
+            out.append(loc(e, "Name"))
+            continue
+        out.append(a.replace("%%", "%"))
+    return out
+
+
+def cmd_list():
+    apps, dedupe = [], set()
+    for app_id, path in sorted(entries().items()):
+        if app_id in HIDDEN:
+            continue
+        e = parse(path)
+        if not e or not visible(e):
+            continue
+        argv = exec_argv(e)
+        exe = os.path.basename(argv[0]) if argv else ""
+        name = loc(e, "Name")
+        if not name or (name, exe) in dedupe:
+            continue
+        dedupe.add((name, exe))
+        apps.append({
+            "id": app_id,
+            "name": name,
+            "generic": loc(e, "GenericName"),
+            "comment": loc(e, "Comment"),
+            "keywords": loc(e, "Keywords").replace(";", " ").strip(),
+            "exe": exe,
+            "icon": e.get("Icon", ""),
+        })
+    json.dump(apps, sys.stdout, ensure_ascii=False)
+
+
+def cmd_launch(app_id):
+    path = entries().get(app_id)
+    e = parse(path) if path else None
+    if not e:
+        sys.exit(f"Application inconnue : {app_id}")
+    argv = exec_argv(e)
+    if not argv:
+        sys.exit(f"Commande vide : {app_id}")
+    if e.get("Terminal") == "true":
+        argv = TERMINAL + argv
+    if e.get("Path"):
+        try:
+            os.chdir(os.path.expanduser(e["Path"]))
+        except OSError:
+            pass
+    else:
+        os.chdir(os.path.expanduser("~"))
+    pre = [LAUNCH] if os.access(LAUNCH, os.X_OK) else []
+    if shutil.which("uwsm-app"):
+        os.execvp("uwsm-app", ["uwsm-app", "--"] + pre + argv)
+    os.execvp((pre + argv)[0], pre + argv)
+
+
+def cmd_files(text):
+    q = text.strip().lower()
+    home = os.path.expanduser("~")
+    if len(q) < 3:
+        print("[]")
+        return
+    found = []
+    for root, dirs, files in os.walk(home):
+        depth = root[len(home):].count(os.sep)
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__")]
+        if depth >= 5:
+            dirs[:] = []
+        for name, is_dir in [(d, True) for d in dirs] + [(f, False) for f in files if not f.startswith(".")]:
+            low = name.lower()
+            pos = low.find(q)
+            if pos < 0:
+                continue
+            path = os.path.join(root, name)
+            # nom qui commence par le texte > mot qui commence par le texte > ailleurs ; puis moins profond, plus court
+            word = pos == 0 or not low[pos - 1].isalnum()
+            found.append(((0 if pos == 0 else 1 if word else 2), depth, len(name), path, name, is_dir))
+    found.sort()
+    def where(p):
+        parts = os.path.relpath(os.path.dirname(p), home).split(os.sep)
+        if parts == ["."]:
+            return "~"
+        return "/".join(parts) if len(parts) <= 2 else parts[0] + "/…/" + parts[-1]
+    out = [{"path": p, "name": n, "dir": d, "parent": where(p)} for _, _, _, p, n, d in found[:4]]
+    json.dump(out, sys.stdout, ensure_ascii=False)
+
+
+def cmd_open(path):
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        sys.exit(f"Introuvable : {path}")
+    argv = ["xdg-open", path]
+    if shutil.which("uwsm-app"):
+        argv = ["uwsm-app", "--"] + argv
+    subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "list":
+        cmd_list()
+    elif len(sys.argv) == 3 and sys.argv[1] == "launch":
+        cmd_launch(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] == "files":
+        cmd_files(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] == "open":
+        cmd_open(sys.argv[2])
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(1)

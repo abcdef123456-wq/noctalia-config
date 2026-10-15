@@ -1,0 +1,13 @@
+[Unit]
+Description=Adapte Hyprland au profil énergétique (nc-profile-sync)
+PartOf=graphical-session.target
+After=graphical-session.target noctalia.service
+
+[Service]
+ExecStart=%h/.local/bin/nc-profile-sync
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target
