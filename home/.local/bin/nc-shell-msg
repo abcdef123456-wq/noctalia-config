@@ -6,7 +6,7 @@ case "${1:-}" in
   session)         exec noctalia msg session lock-and-suspend ;;
   lock)            exec noctalia msg session lock ;;
   power-cycle)     exec noctalia msg power-cycle ;;
-  control-center)  exec noctalia msg panel-toggle control-center ;;
+  control-center)  exec noctalia msg panel-toggle nc/ile:centre ;;   # centre de contrôle de l'île dynamique
   settings)        exec noctalia msg settings-toggle ;;
   wallpapers)
     # Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant que le carrousel est ouvert,

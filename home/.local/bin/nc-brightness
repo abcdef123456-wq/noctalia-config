@@ -3,6 +3,8 @@
 #   nc-brightness up|down   +/- 5 %
 #   nc-brightness dim       assombrit à 20 % (seulement si plus lumineux), niveau précédent mémorisé
 #   nc-brightness restore   remet le niveau mémorisé
+#   nc-brightness get       niveau actuel (0 à 100, même échelle que up/down)
+#   nc-brightness set N     règle le niveau à N (0 à 100)
 # Le rétroéclairage de la carte NVIDIA (nvidia_0) est ignoré : il ne pilote pas l'écran interne.
 dev=""
 for d in /sys/class/backlight/*; do
@@ -17,5 +19,7 @@ case "${1:-}" in
            b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
            [ "$b" -gt 20 ] && brightnessctl -q -d "$dev" set 20% ; exit 0 ;;
   restore) exec brightnessctl -r -q -d "$dev" ;;
-  *) sed -n '2,6p' "$0"; exit 1 ;;
+  get)     brightnessctl -d "$dev" -e4 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
+  set)     exec brightnessctl -q -d "$dev" -e4 -n2 set "${2:-50}%" ;;
+  *) sed -n '2,8p' "$0"; exit 1 ;;
 esac

@@ -27,6 +27,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-launcher
   .local/share/noctalia/plugins/nc-carousel
   .local/share/noctalia/plugins/nc-keys
+  .local/share/noctalia/plugins/nc-ile
   .local/share/nc/finger.png
   .local/bin/nc-apps
   .local/bin/nc-boot-wallpaper
@@ -35,6 +36,7 @@ HOME_FILES=(
   .local/bin/nc-finger
   .local/bin/nc-greeting
   .local/bin/nc-keys
+  .local/bin/nc-ile-etat
   .local/bin/nc-launch
   .local/bin/nc-maj
   .local/bin/nc-profile-sync

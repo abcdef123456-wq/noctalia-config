@@ -1,0 +1,268 @@
+--!nonstrict
+-- nc/ile : la pilule (île dynamique) au centre de la barre.
+--   Repos : l'heure et la date ; musique en cours : pochette, titre et égaliseur qui danse sur le son.
+--   Réactions, comme sur iPhone : la pilule s'étire avec un petit rebond, montre l'événement 2 à 3 s, puis revient :
+--   volume, luminosité, nouveau morceau, chargeur branché / débranché, profil d'énergie, mode jeu.
+--   Clic : centre de contrôle.  Molette : volume.  Clic droit : lecture / pause.
+-- Volume et luminosité arrivent des raccourcis Hyprland (noctalia msg plugin nc/ile:pilule all volume|luminosite) ;
+-- le reste est surveillé ici : fichiers du système chaque seconde, lecteur de musique toutes les 2 s.
+
+local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
+local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
+local PROFIL = noctalia.expandPath("~/.config/hypr/nc/profil.lua")
+local JEU = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
+local JOURS = { "dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam." }
+local MOIS = { "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc." }
+local NOMS_PROFIL = { ["power-saver"] = { "leaf", "Économie" }, balanced = { "scale", "Équilibré" }, performance = { "bolt", "Performance" } }
+local VERT = "#34c759"
+local BARRES = 5
+local CAR = 7.4            -- largeur moyenne d'un caractère dans la barre (px), pour estimer la taille du contenu
+
+local media = nil          -- musique en cours, ou nil
+local spectre = {}         -- hauteurs 0..1 de l'égaliseur
+local activite = nil       -- réaction en cours : { genre, …, fin = ms }
+local batterie, etatBatterie, profil, jeu = nil, nil, nil, nil
+local dernierMedia, derniereSeconde = 0, 0
+
+-- Animation : largeur en ressort (avec rebond), contenu qui s'efface puis réapparaît à chaque changement
+local largeur, vitesse, opacite = nil, 0, 1
+local signature = ""
+
+local function maintenant() return noctalia.nowMs() end
+
+local function longueur(s)
+  return (utf8 and utf8.len(s or "")) or #(s or "")
+end
+
+local function texte(s, max)
+  return math.min(longueur(s) * CAR, max or 1000)
+end
+
+-- ── Contenu de la pilule : renvoie (enfants, largeur estimée, signature) ─────
+
+local function repos()
+  local t = os.date("*t")
+  local heure = string.format("%02d:%02d", t.hour, t.min)
+  if media then
+    local enfants, l = {}, 0
+    local p = media.pochette
+    if p ~= "" and noctalia.fileExists(p) then
+      table.insert(enfants, ui.image({ key = "pochette", path = p, width = 20, height = 20, radius = 10, fit = "cover" }))
+    else
+      table.insert(enfants, ui.glyph({ name = "music", size = 15, color = "primary" }))
+    end
+    local joue = media.etat == "Playing"
+    table.insert(enfants, ui.label({ text = media.titre, maxWidth = 170, maxLines = 1, fontWeight = "semibold",
+      color = joue and "on_surface" or "on_surface_variant" }))
+    l = 20 + texte(media.titre, 170)
+    if media.etat == "Playing" then
+      local barres = {}
+      for i = 1, BARRES do
+        table.insert(barres, ui.box({ width = 3, height = math.max(3, math.floor(3 + (spectre[i] or 0) * 13)), radius = 2, fill = "primary" }))
+      end
+      table.insert(enfants, ui.row({ gap = 2, align = "center", height = 16 }, barres))
+      l += BARRES * 5
+    else
+      -- En pause : symbole « lecture » (ce que fera un clic droit), titre grisé
+      table.insert(enfants, ui.glyph({ name = "player-play-filled", size = 12, color = "on_surface_variant" }))
+      l += 12
+    end
+    table.insert(enfants, ui.label({ text = heure, fontWeight = "bold" }))
+    return enfants, l + texte(heure) + 3 * 9, "media:" .. media.titre .. media.etat
+  end
+  local date = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month]
+  return {
+    ui.label({ text = heure, fontWeight = "bold" }),
+    ui.label({ text = date, color = "on_surface_variant" }),
+  }, texte(heure) + texte(date) + 9, "repos"
+end
+
+local function jauge(icone, valeur, couleur)
+  return {
+    ui.glyph({ name = icone, size = 16, color = couleur or "primary" }),
+    ui.progress({ width = 120, height = 6, radius = 3, progress = math.max(0, math.min(1, valeur / 100)), fill = couleur or "primary", track = "on_surface/0.15" }),
+    ui.label({ text = valeur .. " %", fontWeight = "semibold", width = 42, textAlign = "end" }),
+  }, 16 + 120 + 42 + 2 * 9
+end
+
+local function reaction()
+  local a = activite
+  if a.genre == "volume" then
+    local e, l = jauge(a.muet and "volume-off" or "volume", a.valeur, a.muet and "on_surface_variant" or nil)
+    return e, l, "volume"
+  elseif a.genre == "luminosite" then
+    local e, l = jauge("brightness-half", a.valeur)
+    return e, l, "luminosite"
+  elseif a.genre == "piste" then
+    local enfants = {}
+    if a.pochette ~= "" and noctalia.fileExists(a.pochette) then
+      table.insert(enfants, ui.image({ key = "pochette-r", path = a.pochette, width = 24, height = 24, radius = 7, fit = "cover" }))
+    else
+      table.insert(enfants, ui.glyph({ name = "music", size = 16, color = "primary" }))
+    end
+    table.insert(enfants, ui.label({ text = a.titre, maxWidth = 190, maxLines = 1, fontWeight = "bold" }))
+    local l = 24 + texte(a.titre, 190) + 9
+    if a.artiste ~= "" then
+      table.insert(enfants, ui.label({ text = a.artiste, maxWidth = 130, maxLines = 1, color = "on_surface_variant" }))
+      l += texte(a.artiste, 130) + 9
+    end
+    return enfants, l, "piste:" .. a.titre
+  elseif a.genre == "charge" then
+    local t = (a.branche and "En charge · " or "Sur batterie · ") .. (batterie or "?") .. " %"
+    return {
+      ui.glyph({ name = a.branche and "battery-charging" or "battery-2", size = 17, color = a.branche and VERT or "on_surface" }),
+      ui.label({ text = t, fontWeight = "semibold", color = a.branche and VERT or "on_surface" }),
+    }, 17 + texte(t) + 9, "charge" .. tostring(a.branche)
+  elseif a.genre == "profil" then
+    local n = NOMS_PROFIL[a.profil] or { "scale", a.profil }
+    return {
+      ui.glyph({ name = n[1], size = 16, color = "primary" }),
+      ui.label({ text = n[2], fontWeight = "semibold" }),
+    }, 16 + texte(n[2]) + 9, "profil" .. a.profil
+  elseif a.genre == "jeu" then
+    local t = a.actif and "Mode jeu" or "Mode jeu désactivé"
+    return {
+      ui.glyph({ name = "device-gamepad-2", size = 17, color = a.actif and "primary" or "on_surface_variant" }),
+      ui.label({ text = t, fontWeight = "semibold" }),
+    }, 17 + texte(t) + 9, "jeu" .. tostring(a.actif)
+  end
+  return repos()
+end
+
+-- ── Rendu et animation ──────────────────────────────────────────────────────
+
+local function animer(actif)
+  noctalia.setUpdateInterval(actif and 16 or 1000)
+end
+
+function rendre()
+  if activite and maintenant() > activite.fin then activite = nil end
+  local enfants, cible, sig
+  if activite then enfants, cible, sig = reaction() else enfants, cible, sig = repos() end
+  cible = math.floor(cible + 28)                       -- marges intérieures
+  if sig ~= signature then                             -- nouveau contenu : il s'efface puis réapparaît
+    signature = sig
+    if largeur then opacite = 0 end
+  end
+  largeur = largeur or cible
+  -- Ressort amorti : rapide, avec un léger dépassement (rebond) avant de se poser
+  local ecart = cible - largeur
+  vitesse = vitesse * 0.62 + ecart * 0.26
+  largeur += vitesse
+  if math.abs(ecart) < 0.5 and math.abs(vitesse) < 0.5 then largeur, vitesse = cible, 0 end
+  if opacite < 1 then opacite = math.min(1, opacite + 0.09) end
+  animer(largeur ~= cible or opacite < 1 or activite ~= nil or (media ~= nil and media.etat == "Playing"))
+  barWidget.render(ui.row({ width = math.floor(largeur), gap = 9, align = "center", justify = "center", opacity = opacite }, enfants))
+end
+
+local function reagir(a, duree)
+  a.fin = maintenant() + (duree or 2200)
+  activite = a
+  rendre()
+end
+
+-- ── Sources d'événements ────────────────────────────────────────────────────
+
+local function lireMedia()
+  dernierMedia = maintenant()
+  noctalia.runAsync({ ETAT, "media" }, function(r)
+    local t = {}
+    for k, v in string.gmatch(r.stdout or "", "([%w_]+)=([^\n]*)") do t[k] = v end
+    local avant = media
+    if t.media == "1" and t.media_etat ~= "Stopped" then
+      media = { etat = t.media_etat, titre = t.media_titre or "", artiste = t.media_artiste or "",
+        pochette = t.media_pochette or "", duree = tonumber(t.media_duree) or 0, position = tonumber(t.media_position) or 0 }
+    else
+      media = nil
+    end
+    noctalia.state.set("media", media)
+    -- Nouveau morceau qui joue : la pilule le présente
+    if media and media.etat == "Playing" and media.titre ~= "" and (not avant or avant.titre ~= media.titre) then
+      reagir({ genre = "piste", titre = media.titre, artiste = media.artiste, pochette = media.pochette }, 3200)
+    end
+    rendre()
+  end, 3000)
+end
+
+local function surveiller()
+  -- Chargeur
+  local dir = noctalia.listDir("/sys/class/power_supply") or {}
+  for _, n in ipairs(dir) do
+    if string.sub(n, 1, 3) == "BAT" then
+      local st = noctalia.readFile("/sys/class/power_supply/" .. n .. "/status")
+      local cap = noctalia.readFile("/sys/class/power_supply/" .. n .. "/capacity")
+      batterie = tonumber(noctalia.string.trim(cap or "")) or batterie
+      st = noctalia.string.trim(st or "")
+      local branche = st ~= "Discharging"
+      if etatBatterie ~= nil and branche ~= etatBatterie then reagir({ genre = "charge", branche = branche }) end
+      etatBatterie = branche
+      break
+    end
+  end
+  -- Profil d'énergie (écrit par nc-profile-sync) et mode jeu
+  local p = string.match(noctalia.readFile(PROFIL) or "", 'profil%s*=%s*"([%a-]+)"')
+  if p and profil and p ~= profil and not (activite and activite.genre == "jeu") then reagir({ genre = "profil", profil = p }) end
+  profil = p or profil
+  local j = noctalia.fileExists(JEU)
+  if jeu ~= nil and j ~= jeu then reagir({ genre = "jeu", actif = j }) end
+  jeu = j
+end
+
+local function lireVolume()
+  noctalia.runAsync({ "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@" }, function(r)
+    local v = tonumber(string.match(r.stdout or "", "([%d.]+)"))
+    if v then reagir({ genre = "volume", valeur = math.floor(v * 100 + 0.5), muet = string.find(r.stdout, "MUTED") ~= nil }) end
+  end, 2000)
+end
+
+local function lireLuminosite()
+  noctalia.runAsync({ LUM, "get" }, function(r)
+    local v = tonumber(noctalia.string.trim(r.stdout or ""))
+    if v then reagir({ genre = "luminosite", valeur = v }) end
+  end, 2000)
+end
+
+-- ── Entrées de Noctalia ─────────────────────────────────────────────────────
+
+function onIpc(evenement)
+  if evenement == "volume" then lireVolume()
+  elseif evenement == "luminosite" then lireLuminosite()
+  elseif evenement == "media" then lireMedia() end
+end
+
+function onAudioSpectrum(valeursCsv)
+  if not media or media.etat ~= "Playing" then return end
+  local v = {}
+  for x in string.gmatch(valeursCsv or "", "[^,]+") do table.insert(v, tonumber(x) or 0) end
+  if #v == 0 then return end
+  local pas = math.max(1, math.floor(#v * 0.6 / BARRES))
+  for i = 1, BARRES do
+    local s = 0
+    for j = 0, pas - 1 do s = math.max(s, v[(i - 1) * pas + j + 1] or 0) end
+    spectre[i] = (spectre[i] or 0) * 0.35 + math.min(1, s) * 0.65
+  end
+end
+
+function update()
+  local t = maintenant()
+  if t - derniereSeconde >= 1000 then derniereSeconde = t; surveiller() end
+  if t - dernierMedia >= 2000 then lireMedia() end
+  rendre()
+end
+
+function onClick()
+  noctalia.togglePanel("nc/ile:centre")
+end
+
+function onRightClick()
+  noctalia.runAsync({ "playerctl", "play-pause" }, function() lireMedia() end, 3000)
+end
+
+function onScroll(axe, pas)
+  if axe ~= "vertical" then return end
+  noctalia.runAsync({ "wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", pas < 0 and "5%+" or "5%-" }, function() lireVolume() end, 2000)
+end
+
+surveiller()
+lireMedia()
+rendre()

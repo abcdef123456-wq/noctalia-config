@@ -4,6 +4,9 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 (portable ou fixe, Intel, AMD ou NVIDIA). La config Hyprland est au **format Lua** (Hyprland 0.55 ou plus).
 
 - Couleurs tirées du fond d'écran : barre, terminal, Dolphin, bordures des fenêtres (vives ou sobres selon l'image) ;
+- **île dynamique** au centre de la barre : l'heure, ta musique (pochette, égaliseur qui danse sur le son) ; elle
+  s'étire comme sur iPhone pour le volume, la luminosité, un nouveau morceau, le chargeur, le profil d'énergie ; un clic
+  (ou **Super + C**) et le centre de contrôle en sort : Wi-Fi, Bluetooth, son, luminosité, profils, mode jeu… ;
 - **Super + R** : recherche compacte au centre de l'écran (applis, fichiers, calculs) ;
 - **Super + W** : carrousel de fonds d'écran ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
