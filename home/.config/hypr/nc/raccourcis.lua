@@ -36,16 +36,15 @@ touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          "Applis et ba
 touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      "Applis et barre|Centre de contrôle (île)")
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            "Applis et barre|Réglages de la barre")
 touche(SUPER .. " + code:61", cmd(barre .. "keys"),                "Applis et barre|Afficher cette fiche")
-touche(SUPER .. " + code:33", cmd('grim -g "$(slurp)" - | swappy -f -'), "Applis et barre|Capture d'une zone de l'écran")
+touche(SUPER .. " + code:33", cmd("~/.local/bin/nc-capture zone"), "Applis et barre|Capture d'une zone de l'écran")
 touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), "Applis et barre|Terminal déroulant (sous Échap)")
 touche(SUPER .. " + SHIFT + code:55", cmd("noctalia msg panel-toggle launcher /clipboard"), "Applis et barre|Historique du presse-papiers")
 touche(SUPER .. " + code:60", cmd("noctalia msg panel-toggle launcher /emo"),  "Applis et barre|Émojis")
 
--- Captures d'écran (Noctalia) : écran entier, zone, ou zone à annoter avant de copier / enregistrer
--- (Super + P plus haut : zone retouchée dans Swappy)
-touche("Print",                 cmd("noctalia msg screenshot-fullscreen"),      "Applis et barre|Capture de l'écran")
-touche("SHIFT + Print",         cmd("noctalia msg screenshot-region"))   -- comme Super + P (pas répété dans la fiche)
-touche(SUPER .. " + SHIFT + code:39", cmd("noctalia msg screenshot-annotate"), "Applis et barre|Capture à annoter")
+-- Captures d'écran (nc-capture) : enregistrées dans Images/Captures ET copiées, notification de l'île (clic : annoter)
+touche("Print",                 cmd("~/.local/bin/nc-capture ecran"),    "Applis et barre|Capture de l'écran")
+touche("SHIFT + Print",         cmd("~/.local/bin/nc-capture zone"))     -- comme Super + P (pas répété dans la fiche)
+touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), "Applis et barre|Capture d'une zone à annoter")
 
 -- ── Fenêtres ─────────────────────────────────────────────────────────────────
 -- Fermer : si c'était la seule fenêtre de son programme (Discord & co), le programme est arrêté 5 s plus tard

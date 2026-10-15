@@ -133,7 +133,7 @@ Item {
             Repeater {
                 model: [
                     { icone: "contrast", titre: "Thème clair ou sombre", cmd: ["noctalia", "msg", "theme-mode-toggle"], ferme: false },
-                    { icone: "screenshot_region", titre: "Capture d'une zone", cmd: ["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"], ferme: true },
+                    { icone: "screenshot_region", titre: "Capture d'une zone", cmd: ["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"], ferme: true },
                     { icone: "content_paste", titre: "Presse-papiers", cmd: ["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"], ferme: true },
                     { icone: "wallpaper", titre: "Fonds d'écran", cmd: [Etat.bin + "nc-shell-msg", "wallpapers"], ferme: true }
                 ]

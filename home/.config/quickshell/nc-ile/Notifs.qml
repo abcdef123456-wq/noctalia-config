@@ -67,8 +67,10 @@ Singleton {
         if (!notif) return ""
         var img = notif.image
         // Icône d'appli passée comme chemin (Quickshell la range en « image://icon//usr/… ») : pas une image de contenu
-        var contenu = img !== "" && img !== notif.appIcon && !img.startsWith("image://icon/")
-                      && !img.startsWith("/usr/") && !img.startsWith("file:///usr/")
+        // … sauf un fichier de ton dossier (capture d'écran…), affiché tel quel
+        var fichierPerso = img.startsWith("image://icon//home/") || img.startsWith("image://icon//tmp/")
+        var contenu = img !== "" && img !== notif.appIcon && (fichierPerso || (!img.startsWith("image://icon/")
+                      && !img.startsWith("/usr/") && !img.startsWith("file:///usr/")))
         if (contenu) return img
         var nom = (notif.desktopEntry || notif.appName || "").toLowerCase()
         var duTheme = nom !== "" ? Quickshell.iconPath(nom, true) : ""

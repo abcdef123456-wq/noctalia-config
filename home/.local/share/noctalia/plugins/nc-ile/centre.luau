@@ -311,7 +311,7 @@ local function pied()
     return rond(icone, false, ETEINT, info, function() panel.close(); noctalia.runAsync(argv) end, 46)
   end
   return ui.row({ gap = 0, height = 46, align = "center", justify = "space_between", paddingH = 6 }, {
-    action("screenshot", "Capture à annoter", { "noctalia", "msg", "screenshot-annotate" }),
+    action("screenshot", "Capture à annoter", { noctalia.expandPath("~/.local/bin/nc-capture"), "retouche" }),
     action("bluetooth", "Appareils Bluetooth", { "noctalia", "msg", "plugin", "nc/ile:centre", "all", "page", "bluetooth" }),
     action("bell-ringing", "Notifications et agenda", { "noctalia", "msg", "panel-toggle", "control-center" }),
     action("settings", "Réglages de la barre", { "noctalia", "msg", "settings-open" }),
