@@ -982,7 +982,8 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   if [ ${#barres[@]} -gt 0 ] || [ ${#demarrages[@]} -gt 0 ]; then
     info "Ton ancienne config démarre encore : ${barres[*]} ${demarrages[*]##*/}"
     if ask "Les désactiver (la barre de Noctalia et l'île les remplacent ; rien n'est désinstallé) ?" o; then
-      for b in "${barres[@]}"; do systemctl --user disable --now "$b.service" >/dev/null 2>&1 || true; done
+      # mask, pas disable : sur Debian, waybar.service est activé pour tous les utilisateurs et reviendrait
+      for b in "${barres[@]}"; do systemctl --user stop "$b.service" >/dev/null 2>&1; systemctl --user mask "$b.service" >/dev/null 2>&1 || true; done
       mkdir -p "$HOME/.config/autostart"
       for f in "${demarrages[@]}"; do
         n="$HOME/.config/autostart/$(basename "$f")"

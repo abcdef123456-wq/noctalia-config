@@ -2,7 +2,8 @@
 # nc-session-propre : au démarrage de la session (nc/session.lua), arrête les barres et shells d'une ancienne config qui
 # démarreraient encore à côté de Noctalia et de l'île : Waybar, HyprPanel, AGS, eww, Polybar, nwg-panel, Ironbar,
 # Yambar, et les autres configs Quickshell (ancienne Noctalia v4, autres shells). Peu importe comment ils sont lancés :
-#   service systemd       -> désactivé pour de bon (systemctl --user disable --now)
+#   service systemd       -> bloqué pour de bon (systemctl --user mask : même activé pour tous les utilisateurs,
+#                            comme waybar.service sur Debian, où disable ne suffit pas)
 #   démarrage automatique -> désactivé (copie dans ~/.config/autostart avec Hidden=true, l'original n'est pas touché)
 #   autre (ancienne config de session…) -> arrêté
 # Rien n'est désinstallé. Une notification dit ce qui a été arrêté.   Usage : nc-session-propre [attente en secondes]
@@ -47,7 +48,7 @@ for pid in $(pgrep -u "$(id -u)" .); do
       done
       kill "$pid" 2>/dev/null ;;
     *.service)
-      case "$unite" in app-*) kill "$pid" 2>/dev/null ;; *) systemctl --user disable --now "$unite" >/dev/null 2>&1 || kill "$pid" 2>/dev/null ;; esac ;;
+      case "$unite" in app-*) kill "$pid" 2>/dev/null ;; *) systemctl --user stop "$unite" >/dev/null 2>&1; systemctl --user mask "$unite" >/dev/null 2>&1 || kill "$pid" 2>/dev/null ;; esac ;;
     *) kill "$pid" 2>/dev/null ;;
   esac
   arretes+=("$nom")
