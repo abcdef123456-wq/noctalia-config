@@ -132,7 +132,7 @@ lw, lh = (float(size[0]), float(size[1])) if len(size) == 2 else (1600.0, 1000.0
 head, sep, tail = s.partition("[lockscreen_widgets]")
 assert sep, "section [lockscreen_widgets] introuvable"
 sec, sep2, rest = tail.partition("\n[plugins]")
-marks = {0.30: "@LCY1@", 0.405: "@LCY2@", 0.64: "@LCY3@", 0.86: "@LCY4@"}
+marks = {0.30: "@LCY1@", 0.405: "@LCY2@", 0.64: "@LCY3@", 0.86: "@LCY4@", 0.93: "@LCY5@"}
 def y(m):
     v = float(m.group(1)) / lh
     best = min(marks, key=lambda k: abs(k - v))
