@@ -22,7 +22,7 @@ local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- pré
 local COLUMNS = {
   { "Applis et barre", "Bureaux" },
   { "Fenêtres", "Souris" },
-  { "Système", "Autres" },
+  { "Système", "Mes raccourcis" },
 }
 
 local sections = {}

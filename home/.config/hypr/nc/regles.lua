@@ -42,6 +42,35 @@ hl.window_rule({
     center = true,
 })
 
+-- Fenêtres « Ouvrir » / « Enregistrer » des applis : flottantes, centrées, à une taille confortable
+hl.window_rule({
+    name   = "dialogues-fichiers",
+    match  = { class = "^(xdg-desktop-portal-gtk|org.freedesktop.impl.portal.desktop.kde|org.gnome.FileChooser)$" },
+    float  = true,
+    center = true,
+    size   = { "monitor_w*0.5", "monitor_h*0.62" },
+})
+hl.window_rule({
+    name   = "dialogues-titres",
+    match  = { title = "^(Open File|Open Files|Save File|Save As|Open Folder|Select Folder|Ouvrir|Ouvrir un fichier|Ouvrir des fichiers|Enregistrer|Enregistrer sous|Enregistrer le fichier|Choisir un dossier|Sélectionner un dossier)$" },
+    float  = true,
+    center = true,
+})
+-- Fenêtres secondaires de Steam (amis, réglages) : flottantes
+hl.window_rule({
+    name  = "steam-secondaires",
+    match = { class = "^(steam)$", title = "^(Friends List|Liste d'amis|Steam Settings|Paramètres de Steam|Paramètres Steam)$" },
+    float = true,
+})
+-- Jeux (Steam, Proton, gamescope) : marqués « jeu » (fréquence variable, affichage direct) ; en mode jeu
+-- (Super + Alt + G), image envoyée sans attendre l'écran (latence minimale)
+hl.window_rule({
+    name      = "jeux",
+    match     = { class = "^(steam_app_.*|gamescope|.*\\.exe)$" },
+    content   = "game",
+    immediate = true,
+})
+
 -- Pas de mise en veille pendant une vidéo en plein écran
 hl.window_rule({ name = "video-plein-ecran", match = { class = ".*" }, idle_inhibit = "fullscreen" })
 

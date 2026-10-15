@@ -1,0 +1,58 @@
+# Sourcé par uwsm (sh POSIX) avant le démarrage de Hyprland (noctalia-config).
+# PC hybride (carte intégrée Intel/AMD + NVIDIA) : la session tourne sur la carte intégrée, qui porte l'écran interne,
+# et la NVIDIA peut s'endormir (batterie, chaleur, bruit). Pour une appli sur la NVIDIA : nvidia-run <commande>
+# (Steam : nvidia-run %command%) ; en profil Performance, les applis lancées depuis la barre y vont d'elles-mêmes.
+# Ne fait rien sur un PC sans NVIDIA, ni si l'écran interne est branché sur la NVIDIA (interrupteur « MUX » en
+# mode carte dédiée, PC fixe).
+#
+# Mode lu dans ~/.config/uwsm/gpu-mode (première ligne) : auto (défaut) | igpu | both | off
+#   auto : carte intégrée seule, plus la NVIDIA si un écran est branché sur une de ses prises à l'ouverture de session ;
+#   igpu : carte intégrée seule (les prises reliées à la NVIDIA ne marchent pas) ;
+#   both : les deux cartes (écrans externes branchables à tout moment, la NVIDIA reste éveillée) ;
+#   off  : Hyprland choisit seul.
+# Changer de mode demande de fermer puis rouvrir la session.
+
+_nc_mode=auto
+[ -r "$HOME/.config/uwsm/gpu-mode" ] && read -r _nc_mode < "$HOME/.config/uwsm/gpu-mode"
+_nc_igpu=""; _nc_dgpu=""; _nc_dsys=""
+
+if [ "$_nc_mode" != off ]; then
+  for _nc_d in /sys/class/drm/card*; do
+    case "${_nc_d##*/}" in *-*) continue ;; esac   # connecteurs (card1-eDP-1…) : ignorés ici
+    if [ "$(cat "$_nc_d/device/vendor" 2>/dev/null)" = 0x10de ]; then
+      _nc_dgpu="/dev/dri/${_nc_d##*/}"; _nc_dsys="$_nc_d"
+    else
+      for _nc_c in "$_nc_d"/card*-eDP-*/status; do
+        [ -r "$_nc_c" ] && [ "$(cat "$_nc_c")" = connected ] && _nc_igpu="/dev/dri/${_nc_d##*/}"
+      done
+    fi
+  done
+fi
+
+if [ -n "$_nc_igpu" ] && [ -n "$_nc_dgpu" ] && [ -c "$_nc_igpu" ]; then
+  case "$_nc_mode" in
+    igpu) export AQ_DRM_DEVICES="$_nc_igpu" ;;
+    both) export AQ_DRM_DEVICES="$_nc_igpu:$_nc_dgpu" ;;
+    *)
+      _nc_ext=0
+      for _nc_c in "$_nc_dsys"/card*-*/status; do
+        [ -r "$_nc_c" ] && [ "$(cat "$_nc_c")" = connected ] && _nc_ext=1
+      done
+      if [ "$_nc_ext" = 1 ]; then export AQ_DRM_DEVICES="$_nc_igpu:$_nc_dgpu"; else export AQ_DRM_DEVICES="$_nc_igpu"; fi
+      ;;
+  esac
+fi
+
+# Session sur la carte intégrée seule : Hyprland et les applis n'utilisent que les pilotes Mesa.
+# Sinon, le simple chargement des bibliothèques EGL/Vulkan NVIDIA (Hyprland, Discord…) garde la NVIDIA éveillée.
+# Le pilote Vulkan « nouveau » est écarté aussi : il vise la carte NVIDIA et la réveillerait.
+if [ -n "${AQ_DRM_DEVICES:-}" ] && [ "${AQ_DRM_DEVICES#*:}" = "$AQ_DRM_DEVICES" ] \
+   && [ -r /usr/share/glvnd/egl_vendor.d/50_mesa.json ]; then
+  _nc_vk=""
+  for _nc_f in /usr/share/vulkan/icd.d/*.json; do
+    case "$_nc_f" in *nvidia*|*nouveau*|"/usr/share/vulkan/icd.d/*.json") ;; *) _nc_vk="${_nc_vk:+$_nc_vk:}$_nc_f" ;; esac
+  done
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+  [ -n "$_nc_vk" ] && export VK_DRIVER_FILES="$_nc_vk"
+fi
+unset _nc_mode _nc_igpu _nc_dgpu _nc_dsys _nc_d _nc_c _nc_ext _nc_vk _nc_f

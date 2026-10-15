@@ -6,7 +6,8 @@ touche Windows.
 
 La fiche s'affiche aussi à l'écran avec **Super + /**. Elle est lue en direct dans ta config : un raccourci que tu ajoutes
 avec une description (`{ description = "Section|Texte" }`, voir `~/.config/hypr/nc/raccourcis.lua`) y apparaît tout seul.
-La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccourcis vont dans `~/.config/hypr/perso.lua`.
+La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccourcis : `nc-raccourci ajoute "Super+B" "firefox" "Navigateur"` (rangés dans `~/.config/hypr/perso.lua`,
+section « Mes raccourcis » de la fiche).
 
 ## Applis et barre
 
@@ -21,6 +22,10 @@ La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccour
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `` ` `` | Terminal déroulant (sous Échap) |
+| `Super` + `Maj` + `V` | Historique du presse-papiers |
+| `Super` + `.` | Émojis |
+| `Impr. écran` | Capture de l'écran |
+| `Super` + `Maj` + `S` | Capture à annoter |
 
 ## Fenêtres
 
@@ -71,6 +76,11 @@ La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccour
 | `Super` + `L` | Verrouiller l'écran |
 | `Super` + `Maj` + `Échap` | Verrouiller et mettre en veille |
 | `Super` + `Alt` + `P` | Changer de profil d'énergie |
+| `Super` + `Alt` + `G` | Mode jeu (effets coupés, pas de notifications) |
+| `Super` + `N` | Lumière de nuit |
+| `Super` + `Maj` + `N` | Ne pas déranger |
+| `Super` + `Ctrl` + `molette` | Loupe : zoomer / dézoomer |
+| `Super` + `= / -` | Loupe : zoomer / dézoomer |
 | `Super` + `Maj` + `M` | Quitter la session |
 | `Super` + `F4` | Éteindre |
 | `Super` + `F5` | Redémarrer |

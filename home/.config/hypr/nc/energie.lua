@@ -23,6 +23,41 @@ else
     hl.animation({ leaf = "borderangle", enabled = true, speed = 8, bezier = "standard" })
 end
 
+-- Mode jeu (Super + Alt + G) : effets coupés et image envoyée sans attendre l'écran (jeux marqués dans nc/regles.lua),
+-- notifications en pause. L'état tient dans un fichier de la session : il survit aux rechargements, pas à la déconnexion.
+local fichier_jeu = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
+local f = io.open(fichier_jeu)
+nc.jeu = f ~= nil
+if f then f:close() end
+
+if nc.jeu then
+    nc.flou_actif = false
+    hl.config({
+        general    = { allow_tearing = true },
+        animations = { enabled = false },
+        decoration = { dim_inactive = false, blur = { enabled = false }, shadow = { enabled = false } },
+    })
+    hl.animation({ leaf = "borderangle", enabled = false })
+end
+
+function nc.mode_jeu()
+    local actif = not nc.jeu
+    if actif then
+        local w = io.open(fichier_jeu, "w")
+        if w then w:close() end
+    else
+        os.remove(fichier_jeu)
+    end
+    -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
+    if actif then
+        hl.exec_cmd("hyprctl reload; notify-send -a 'Mode jeu' -t 2500 'Mode jeu activé' 'Effets coupés, notifications en pause.';"
+            .. " sleep 2.6; noctalia msg notification-dnd-set on")
+    else
+        hl.exec_cmd("noctalia msg notification-dnd-set off; hyprctl reload;"
+            .. " notify-send -a 'Mode jeu' -t 2500 'Mode jeu désactivé' 'Effets et notifications rétablis.'")
+    end
+end
+
 -- Flou coupé le temps d'un panneau plein écran (carrousel des fonds) : appelé par nc-shell-msg via « hyprctl eval »
 function nc.flou(actif)
     hl.config({ decoration = { blur = { enabled = actif and nc.flou_actif } } })

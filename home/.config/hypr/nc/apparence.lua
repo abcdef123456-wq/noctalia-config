@@ -95,6 +95,19 @@ hl.config({
         focus_on_activate        = true,
         key_press_enables_dpms   = true,
         mouse_move_enables_dpms  = true,
+        -- Fréquence variable (FreeSync / G-Sync) seulement pour un jeu ou une vidéo en plein écran : plus fluide,
+        -- sans scintillement sur le bureau
+        vrr                      = 3,
+    },
+
+    -- Jeu ou vidéo en plein écran affiché directement, sans passer par le compositeur : moins de latence
+    render = {
+        direct_scanout = 2,
+    },
+
+    -- Super + chiffre du bureau où l'on est déjà : retour au bureau précédent
+    binds = {
+        workspace_back_and_forth = true,
     },
 
     ecosystem = {

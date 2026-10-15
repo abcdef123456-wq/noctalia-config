@@ -4,7 +4,7 @@
   nc-keys          liste lisible dans le terminal
   nc-keys json     JSON pour la fiche Super + / (plugin Noctalia v5 nc/keys)
 Seuls les raccourcis qui ont une description apparaissent. Dans ~/.config/hypr/, une description s'écrit
-« Section|Texte », par exemple : hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Applis et barre|Navigateur" })
+« Section|Texte » ; sans section, le raccourci va dans « Mes raccourcis » (voir aussi nc-raccourci). Exemple : hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Applis et barre|Navigateur" })
 Les touches sont nommées comme sur la disposition US (les raccourcis suivent la position des touches).
 """
 import json
@@ -28,7 +28,7 @@ KEYCODES[95], KEYCODES[96] = "F11", "F12"
 
 MODS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Maj"))
 MOUSE = {"mouse:272": "glisser", "mouse:273": "clic droit", "mouse_down": "molette", "mouse_up": "molette"}
-SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "Autres"]
+SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "Mes raccourcis"]
 
 
 def parse_binds(text):
@@ -54,6 +54,8 @@ def key_label(raw):
         return "Touches média"
     if last in MOUSE:
         return MOUSE[last]
+    if last == "Print":
+        return "Impr. écran"
     return KEYCODES.get(last, last.capitalize() if len(last) > 1 else last.upper())
 
 
@@ -66,10 +68,10 @@ def collect():
             continue
         sec, sep, text = desc.partition("|")
         if not sep:
-            sec, text = "Autres", desc
+            sec, text = "Mes raccourcis", desc
         sec, text = sec.strip(), text.strip()
         if sec not in SECTIONS:
-            sec = "Autres"
+            sec = "Mes raccourcis"
         try:
             mask = int(b.get("modmask", "0"))
         except ValueError:
