@@ -39,6 +39,7 @@ HOME_FILES=(
   .local/bin/nc-greeting
   .local/bin/nc-capture
   .local/bin/nc-session-propre
+  .local/bin/nc-noctalia-avant
   .local/bin/nc-keys
   .local/bin/nc-icones
   .local/bin/nc-ile-etat
