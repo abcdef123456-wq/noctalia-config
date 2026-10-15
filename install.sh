@@ -532,6 +532,9 @@ if have qs; then
   [ -s "$POLICE_ICONES" ] || ILE=noctalia
 fi
 if [ "$ILE" = quickshell ]; then ILE_CENTRE=""; else ILE_CENTRE='"nc/ile:pilule"'; fi
+# Notifications : affichées par l'île Quickshell (bannière qui sort de la pilule, historique dans l'île) ; sinon par
+# Noctalia, avec son icône dans la barre
+if [ "$ILE" = quickshell ]; then NOTIF_NOCTALIA=false; NOTIF_WIDGET=""; else NOTIF_NOCTALIA=true; NOTIF_WIDGET=', "notifications"'; fi
 
 # Style des applis Qt / KDE (Dolphin…) : Breeze, le style moderne de KDE, s'il est installé ; sinon Fusion
 QT_STYLE=Fusion
@@ -546,7 +549,7 @@ while IFS= read -r -d '' src; do
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" "$src" > "$tmp"
+        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" -e "s|@NOTIF_NOCTALIA@|$NOTIF_NOCTALIA|g" -e "s|@NOTIF_WIDGET@|$NOTIF_WIDGET|g" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
@@ -856,6 +859,12 @@ UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-po
 if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable "${UNITS[@]}" >/dev/null 2>&1 || true
   [ "$ILE" = quickshell ] || systemctl --user disable --now nc-ile.service >/dev/null 2>&1 || true
+  # Démons de notifications lancés à la demande (dunst, mako) : ils prendraient la place de l'île ou de Noctalia
+  for d in dunst mako; do
+    if [ -n "$(systemctl --user list-unit-files "$d.service" --no-legend 2>/dev/null)" ] && ! systemctl --user is-enabled "$d.service" 2>/dev/null | grep -x masked >/dev/null; then
+      systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")."
+    fi
+  done
   systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path hypridle.service >/dev/null 2>&1 ||
     warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true

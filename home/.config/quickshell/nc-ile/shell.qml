@@ -4,7 +4,8 @@
 //   qs -c nc-ile ipc call ile basculer   ouvrir / fermer sur l'écran actif, sur le centre de contrôle (Super + C)
 //   qs -c nc-ile ipc call ile ouvrir     ouvrir sur ce qui se passe (musique…) ; … suivante / precedente : changer de page
 //   qs -c nc-ile ipc call ile luminosite montrer la luminosité (touches de luminosité)
-//   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son
+//   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son, notifications
+//   qs -c nc-ile ipc call ile effacerNotifications | concentration
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -26,6 +27,9 @@ ShellRoot {
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}
+        function notifications(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true); Etat.aller("notifications") }
+        function effacerNotifications(): void { Notifs.toutEffacer() }
+        function concentration(): void { Notifs.basculerConcentration() }
         function page(nom: string): void {
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)

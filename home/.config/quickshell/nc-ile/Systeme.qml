@@ -148,8 +148,7 @@ Item {
             Texte { text: "Session"; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
             Repeater {
                 model: [
-                    { icone: "notifications", titre: "Notifications", cmd: ["noctalia", "msg", "panel-toggle", "control-center"], ferme: true },
-                    { icone: "keyboard", titre: "Changer la disposition du clavier", cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
+                                        { icone: "keyboard", titre: "Changer la disposition du clavier", cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
                     { icone: "settings", titre: "Réglages de la barre", cmd: ["noctalia", "msg", "settings-open"], ferme: true },
                     { icone: "lock", titre: "Verrouiller", cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
                     { icone: "power_settings_new", titre: "Éteindre, redémarrer…", cmd: ["noctalia", "msg", "panel-toggle", "session-panel"], ferme: true }

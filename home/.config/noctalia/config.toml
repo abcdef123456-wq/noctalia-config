@@ -72,7 +72,7 @@ widget_spacing = 6
 font_weight = 600
 start = ["logo", "workspaces", "active_window"]
 center = [@ILE_CENTRE@]                    # île dynamique : île Quickshell par-dessus la barre (vide ici) ou plugin nc/ile
-end = ["group:sys", "tray", "power_profile", "group:status", "notifications"]
+end = ["group:sys", "tray", "power_profile", "group:status"@NOTIF_WIDGET@]
 
 [[bar.default.capsule_group]]
 id = "sys"
@@ -156,6 +156,7 @@ pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 # ---------------------------------------------------------------- Notifications, OSD
 [notification]
 position = "top_right"
+enable_daemon = @NOTIF_NOCTALIA@                     # false : notifications affichées par l'île dynamique (nc-ile)
 
 [osd]
 enabled = false                           # bulles de volume / luminosité : l'île dynamique (nc/ile) les remplace

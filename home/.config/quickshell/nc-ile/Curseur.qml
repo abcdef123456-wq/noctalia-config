@@ -17,8 +17,8 @@ ClippingRectangle {
         Behavior on width { enabled: !zone.pressed; SpringAnimation { spring: 5; damping: 0.5 } }
     }
     Ico {
-        anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
-        nom: c.icone; taille: 16; color: "#3a3a3c"
+        anchors.left: parent.left; anchors.leftMargin: Math.round(c.height * 0.27); anchors.verticalCenter: parent.verticalCenter
+        nom: c.icone; taille: Math.round(c.height * 0.55); color: "#3a3a3c"
     }
     MouseArea {
         id: zone

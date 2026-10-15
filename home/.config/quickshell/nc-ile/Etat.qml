@@ -32,7 +32,8 @@ Singleton {
         if (jeu) a.push("jeu")
         return a
     }
-    readonly property var vues: activites.concat(["centre", "son", "reseau", "bluetooth", "systeme", "calendrier"],
+    readonly property var vues: activites.concat(["centre", "notifications"],
+                                                 ["son", "reseau", "bluetooth", "systeme", "calendrier"],
                                                  minuteurFin > 0 ? [] : ["minuteur"])
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
