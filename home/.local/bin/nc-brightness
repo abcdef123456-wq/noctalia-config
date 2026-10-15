@@ -4,6 +4,8 @@
 #   nc-brightness dim       assombrit à 20 % (seulement si plus lumineux), niveau précédent mémorisé
 #   nc-brightness restore   remet le niveau mémorisé
 #   nc-brightness get       niveau actuel (0 à 100, même échelle que up/down)
+# Échelle perceptive douce (courbe au carré, -e2) : le milieu du curseur donne un écran à moitié lumineux à l'œil
+# (une puissance 4 rendait tout le bas de l'échelle presque noir).
 #   nc-brightness set N     règle le niveau à N (0 à 100)
 # Le rétroéclairage de la carte NVIDIA (nvidia_0) est ignoré : il ne pilote pas l'écran interne.
 dev=""
@@ -13,13 +15,13 @@ for d in /sys/class/backlight/*; do
 done
 [ -n "$dev" ] || exit 0
 case "${1:-}" in
-  up)      exec brightnessctl -d "$dev" -e4 -n2 set 5%+ ;;
-  down)    exec brightnessctl -d "$dev" -e4 -n2 set 5%- ;;
+  up)      exec brightnessctl -d "$dev" -e2 -n2 set 5%+ ;;
+  down)    exec brightnessctl -d "$dev" -e2 -n2 set 5%- ;;
   dim)     brightnessctl -s -q -d "$dev"
            b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
            [ "$b" -gt 20 ] && brightnessctl -q -d "$dev" set 20% ; exit 0 ;;
   restore) exec brightnessctl -r -q -d "$dev" ;;
-  get)     brightnessctl -d "$dev" -e4 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
-  set)     exec brightnessctl -q -d "$dev" -e4 -n2 set "${2:-50}%" ;;
+  get)     brightnessctl -d "$dev" -e2 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
+  set)     exec brightnessctl -q -d "$dev" -e2 -n2 set "${2:-50}%" ;;
   *) sed -n '2,8p' "$0"; exit 1 ;;
 esac
