@@ -47,6 +47,8 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Ctrl` + `Tab` | Onglet suivant du groupe |
 | `Super` + `Ctrl` + `Maj` + `Tab` | Onglet précédent du groupe |
 | `Alt` + `Tab` | Passer d'une fenêtre à l'autre |
+| `Super` + `Ctrl` + `1…4` | Marque-pages : attacher, puis rappeler la fenêtre (1…4) |
+| `Super` + `Ctrl` + `Maj` + `1…4` | Marque-pages : rattacher la fenêtre active (1…4) |
 
 ## Bureaux
 
@@ -78,6 +80,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `P` | Changer de profil d'énergie |
 | `Super` + `Alt` + `G` | Mode jeu (effets coupés, pas de notifications) |
 | `Super` + `N` | Lumière de nuit |
+| `Super` + `Alt` + `M` | Halo musical (pulse sur les basses) |
 | `Super` + `Maj` + `N` | Ne pas déranger |
 | `Super` + `Ctrl` + `molette` | Loupe : zoomer / dézoomer |
 | `Super` + `= / -` | Loupe : zoomer / dézoomer |

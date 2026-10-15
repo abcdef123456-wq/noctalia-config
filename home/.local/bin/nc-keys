@@ -87,8 +87,8 @@ def collect():
         keys = v["keys"]
         if set(keys) >= {"←", "→", "↑", "↓"}:
             key = "flèches"
-        elif len(keys) >= 9 and all(x.isdigit() for x in keys):
-            key = "1…0"
+        elif len(keys) >= 3 and all(x.isdigit() for x in keys):
+            key = f"{keys[0]}…{keys[-1]}"
         else:
             key = " / ".join(keys)
         by_sec[sec].append({"keys": list(mods) + [key], "text": text})

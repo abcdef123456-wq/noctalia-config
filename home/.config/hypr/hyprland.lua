@@ -25,6 +25,7 @@ require("nc.clavier")
 require("nc.raccourcis")
 require("nc.regles")
 require("nc.energie")
+require("nc.automatismes")
 
 -- Tes réglages personnels, s'il y en a
 local perso = os.getenv("HOME") .. "/.config/hypr/perso.lua"

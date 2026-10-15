@@ -171,6 +171,10 @@ touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       "Système|Ve
 touche(SUPER .. " + ALT + code:33", cmd(barre .. "power-cycle"),    "Système|Changer de profil d'énergie")
 touche(SUPER .. " + ALT + code:42", function() nc.mode_jeu() end,   "Système|Mode jeu (effets coupés, pas de notifications)")
 touche(SUPER .. " + code:57", cmd("noctalia msg nightlight-force-toggle"), "Système|Lumière de nuit")
+touche(SUPER .. " + ALT + code:58", cmd("systemctl --user is-active --quiet nc-pouls"
+    .. " && { systemctl --user stop nc-pouls; notify-send -a 'Halo musical' -t 2000 'Halo musical coupé'; }"
+    .. " || { systemctl --user start nc-pouls; notify-send -a 'Halo musical' -t 2500 'Halo musical activé' 'Le halo suit les basses quand de la musique joue.'; }"),
+    "Système|Halo musical (pulse sur les basses)")
 touche(SUPER .. " + SHIFT + code:57", cmd("noctalia msg notification-dnd-toggle"), "Système|Ne pas déranger")
 
 -- Loupe : zoom autour du curseur (Super + Ctrl + molette, ou Super + = / Super + -)
