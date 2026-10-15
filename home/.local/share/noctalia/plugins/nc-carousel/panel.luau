@@ -99,8 +99,9 @@ local function setZoom()
   if grand then BGW, BGH = o.width - px(40), o.height - px(60) else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
   SCREEN_W = o and o.width or 1600
-  -- Le panneau commence sous la barre (64 points du haut de l'écran, mesuré) : la rangée d'images est remontée
-  -- pour tomber au milieu de l'écran, pas au milieu du panneau
+  -- Le panneau commence sous la barre (64 points du haut de l'écran, mesuré) : le fond garde la même marge en bas
+  -- qu'en haut, pour que fond et rangée d'images soient tous deux au milieu de l'écran
+  if o then BGH = math.min(BGH, o.height - 2 * 64) end
   DECALAGE = o and (o.height / 2 - 64 - BGH / 2) or 0
 end
 
