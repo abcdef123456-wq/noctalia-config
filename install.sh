@@ -67,6 +67,9 @@ esac
 # Debian 13 (trixie) : Hyprland 0.55+ n'existe que dans les « backports » officiels de Debian (paquets plus récents
 # publiés par Debian elle-même, https://backports.debian.org). bpo_on : vrai si la source est (ou vient d'être) activée ;
 # bpo_install : installe des paquets précis depuis les backports (les autres paquets viennent toujours de trixie).
+# apt 3 (Debian 13) : un téléchargement raté est « mis en attente » pour un nouvel essai, et apt peut alors boucler sans
+# fin (« Tried to start delayed item … but failed »). Nouveaux essais immédiats à la place.
+APT_OPT="-o Acquire::Retries=3 -o Acquire::Retries::Delay=false"
 BPO=""
 bpo_on() {
   [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] || return 1
@@ -76,7 +79,7 @@ bpo_on() {
     ask "Activer trixie-backports ?" o || return 1
     printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie-backports\nComponents: main\nEnabled: yes\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' |
       sudo tee /etc/apt/sources.list.d/debian-backports.sources >/dev/null
-    sudo apt-get update -q || return 1
+    sudo apt-get $APT_OPT update -q || return 1
   fi
 }
 bpo_actif() { [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] && apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; }
@@ -93,7 +96,7 @@ pkg_install() {
     fedora) sudo dnf install -y "$@" ;;
     # Debian 13 avec backports (Hyprland) : leurs bibliothèques (libxkbcommon…) sont plus récentes que celles de
     # trixie ; si un paquet ne s'installe pas pour cette raison, nouvel essai en acceptant les backports
-    debian) sudo apt-get install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get install -y -t trixie-backports "$@"; } ;;
+    debian) sudo apt-get $APT_OPT install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get $APT_OPT install -y -t trixie-backports "$@"; } ;;
     suse) sudo zypper --non-interactive install "$@" ;;
     *) return 1 ;;
   esac
@@ -254,10 +257,10 @@ if [ "$MODE" != files ]; then
         info "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb"
         info "  dépôt : https://pkg.noctalia.dev/deb/$src"
         ask "Ajouter ce dépôt et installer Noctalia ?" o || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
-        have wget || sudo apt-get install -y wget
+        have wget || sudo apt-get $APT_OPT install -y wget
         kd="$(mktemp -d)"; wget -q -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
         sudo wget -q -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
-        sudo apt-get update -q || true
+        sudo apt-get $APT_OPT update -q || true
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
     esac
