@@ -535,6 +535,8 @@ if [ "$ILE" = quickshell ]; then ILE_CENTRE=""; else ILE_CENTRE='"nc/ile:pilule"
 # Notifications : affichées par l'île Quickshell (bannière qui sort de la pilule, historique dans l'île) ; sinon par
 # Noctalia, avec son icône dans la barre
 if [ "$ILE" = quickshell ]; then NOTIF_NOCTALIA=false; NOTIF_WIDGET=""; else NOTIF_NOCTALIA=true; NOTIF_WIDGET=', "notifications"'; fi
+# Ancienne île (plugin Noctalia nc/ile) : seulement sans l'île Quickshell
+if [ "$ILE" = quickshell ]; then PLUGIN_ILE=""; else PLUGIN_ILE=', "nc/ile"'; fi
 
 # Style des applis Qt / KDE (Dolphin…) : Breeze, le style moderne de KDE, s'il est installé ; sinon Fusion
 QT_STYLE=Fusion
@@ -549,7 +551,7 @@ while IFS= read -r -d '' src; do
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" -e "s|@NOTIF_NOCTALIA@|$NOTIF_NOCTALIA|g" -e "s|@NOTIF_WIDGET@|$NOTIF_WIDGET|g" "$src" > "$tmp"
+        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" -e "s|@NOTIF_NOCTALIA@|$NOTIF_NOCTALIA|g" -e "s|@NOTIF_WIDGET@|$NOTIF_WIDGET|g" -e "s|@PLUGIN_ILE@|$PLUGIN_ILE|g" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
