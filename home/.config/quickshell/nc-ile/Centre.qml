@@ -14,13 +14,6 @@ Item {
     readonly property color vert: "#30d158"
     readonly property var s: Etat.sys
 
-    // Petit module carré d'action (façon iOS)
-    component Tuile: Module {
-        id: ac
-        property string icone
-        radius: 18; cliquable: true
-        Ico { anchors.centerIn: parent; nom: ac.icone; taille: 26 }
-    }
 
     // ── Accueil ──
     Column {
@@ -167,51 +160,66 @@ Item {
             }
         }
 
-        // Profil d'énergie : sélecteur segmenté façon iOS (l'indicateur glisse)
-        Rectangle {
-            id: segments
-            width: parent.width; height: 40; radius: 13; color: "#1c1c1e"
+        // Énergie : module façon macOS. Clic : mode suivant ; flèche, appui long ou clic droit : liste des modes
+        Module {
+            id: energie
+            readonly property var modes: [
+                { nom: "Économie", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
+                { nom: "Équilibré", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: PowerProfile.Balanced },
+                { nom: "Performance", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
+            ]
             readonly property int index: Etat.profil === PowerProfile.PowerSaver ? 0 : (Etat.profil === PowerProfile.Performance ? 2 : 1)
-            Rectangle {
-                width: (parent.width - 6) / 3; height: parent.height - 6; y: 3; radius: 10; color: "#636366"
-                x: 3 + segments.index * (parent.width - 6) / 3
-                Behavior on x { SpringAnimation { spring: 4; damping: 0.45 } }
-            }
+            readonly property var mode: modes[index]
+            width: parent.width; height: 64; cliquable: true
+            onClic: Etat.choisirProfil(modes[(index + 1) % 3].p)
+            onAppuiLong: Etat.aller("energie")
             Row {
-                anchors.fill: parent; anchors.margins: 3
-                Repeater {
-                    model: [
-                        { nom: "Économie", icone: "eco", couleur: "#30d158", p: PowerProfile.PowerSaver },
-                        { nom: "Équilibré", icone: "balance", couleur: "white", p: PowerProfile.Balanced },
-                        { nom: "Performance", icone: "bolt", couleur: "#ff9f0a", p: PowerProfile.Performance }
-                    ]
-                    Item {
-                        required property var modelData
-                        required property int index
-                        width: (segments.width - 6) / 3; height: segments.height - 6
-                        Texte {
-                            anchors.centerIn: parent
-                            text: modelData.nom
-                            font.pixelSize: 13
-                            font.weight: segments.index === index ? Font.DemiBold : Font.Medium
-                            secondaire: segments.index !== index
-                        }
-                        MouseArea { anchors.fill: parent; onClicked: Etat.choisirProfil(modelData.p) }
-                    }
+                anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
+                Rectangle {
+                    width: 40; height: 40; radius: 20; color: energie.mode.couleur
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                    Ico { anchors.centerIn: parent; nom: energie.mode.icone; taille: 22; color: energie.mode.texte; rotation: energie.mode.icone === "bolt" ? 0 : 90 }
                 }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    Texte { text: "Énergie"; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                    Texte { text: energie.mode.nom; secondaire: true }
+                }
+            }
+            Ico {
+                anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
+                nom: "chevron_right"; taille: 24; color: "#98989d"
+                MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: Etat.aller("energie") }
             }
         }
 
-        // Actions : petits modules carrés façon iOS (lampe, minuteur, appareil photo…)
+        // Ligne discrète d'actions (façon macOS) : les icônes ne s'éclairent qu'au survol
         Row {
-            id: actions
-            width: parent.width; height: 58; spacing: 10
-            readonly property real largeurTuile: (width - 4 * spacing) / 5
-            Tuile { width: actions.largeurTuile; height: actions.height; icone: "photo_camera"; onClic: { Etat.fermer(); Quickshell.execDetached(["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"]) } }
-            Tuile { width: actions.largeurTuile; height: actions.height; icone: "notifications"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "control-center"]) } }
-            Tuile { width: actions.largeurTuile; height: actions.height; icone: "settings"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "settings-open"]) } }
-            Tuile { width: actions.largeurTuile; height: actions.height; icone: "lock"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "session", "lock"]) } }
-            Tuile { width: actions.largeurTuile; height: actions.height; icone: "power_settings_new"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "session-panel"]) } }
+            anchors.horizontalCenter: parent.horizontalCenter
+            height: 40; spacing: 30
+            Repeater {
+                model: [
+                    { icone: "photo_camera", cmd: ["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"] },
+                    { icone: "notifications", cmd: ["noctalia", "msg", "panel-toggle", "control-center"] },
+                    { icone: "settings", cmd: ["noctalia", "msg", "settings-open"] },
+                    { icone: "lock", cmd: ["noctalia", "msg", "session", "lock"] },
+                    { icone: "power_settings_new", cmd: ["noctalia", "msg", "panel-toggle", "session-panel"] }
+                ]
+                Rectangle {
+                    required property var modelData
+                    width: 40; height: 40; radius: 20
+                    color: zone.containsMouse ? "#2c2c2e" : "transparent"
+                    Behavior on color { ColorAnimation { duration: 140 } }
+                    scale: zone.pressed ? 0.88 : 1
+                    Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
+                    Ico { anchors.centerIn: parent; nom: modelData.icone; taille: 22; color: zone.containsMouse ? "white" : "#c7c7cc" }
+                    MouseArea {
+                        id: zone
+                        anchors.fill: parent; hoverEnabled: true
+                        onClicked: { Etat.fermer(); Quickshell.execDetached(modelData.cmd) }
+                    }
+                }
+            }
         }
     }
 
