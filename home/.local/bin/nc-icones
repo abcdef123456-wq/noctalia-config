@@ -11,6 +11,7 @@ Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icône
 """
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -88,6 +89,12 @@ def raccourci(nom, icone):
 def themes_actifs():
     """Thème d'icônes des applis Qt (qt6ct) et GTK, plus hicolor (thème de secours commun)."""
     noms = {"hicolor"}
+    try:
+        g = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"], capture_output=True, text=True).stdout
+        if g.strip():
+            noms.add(g.strip().strip("'"))
+    except OSError:
+        pass
     for fichier, cle in ((HOME / ".config/qt6ct/qt6ct.conf", "icon_theme="), (HOME / ".config/gtk-3.0/settings.ini", "gtk-icon-theme-name=")):
         try:
             for ligne in fichier.read_text().splitlines():
@@ -99,13 +106,15 @@ def themes_actifs():
 
 
 def dossiers_apps(theme):
-    """Dossiers « apps » déclarés par le thème (index.theme du système), ex. 48x48/apps ou scalable/apps."""
-    for base in ["/usr/share/icons", "/usr/local/share/icons"]:
+    """Dossiers « apps » déclarés par le thème (index.theme), ex. 48x48/apps, scalable/apps ou apps/scalable."""
+    for base in [str(BASE_ICONES), "/usr/share/icons", "/usr/local/share/icons"]:
         index = Path(base) / theme / "index.theme"
         if index.exists():
             for ligne in index.read_text(errors="ignore").splitlines():
                 if ligne.startswith("Directories="):
-                    return [d for d in ligne.split("=", 1)[1].split(",") if d.endswith("/apps")]
+                    # « 48x48/apps » (Papirus, hicolor) ou « apps/scalable » (WhiteSur) ; pas les icônes symboliques
+                    return [d for d in ligne.split("=", 1)[1].split(",")
+                            if "apps" in d.split("/") and "symbolic" not in d]
     return ["scalable/apps"] if theme == "hicolor" else []
 
 
@@ -116,8 +125,13 @@ def surcharger(svgs):
             for icone, noms in SURCHARGES.items():
                 for nom in noms:
                     chemin = BASE_ICONES / theme / dossier / f"{nom}.svg"
+                    if chemin.is_symlink():
+                        chemin.unlink()                 # lien du thème (WhiteSur…) : remplacé par notre fichier
                     ecrire(chemin, svgs[icone])
                     ecrits.append(str(chemin))
+        # Thème avec index (icon-theme.cache) : à régénérer, sinon GTK ne voit pas les nouvelles icônes
+        if (BASE_ICONES / theme / "icon-theme.cache").exists():
+            subprocess.run(["gtk-update-icon-cache", "-qf", str(BASE_ICONES / theme)], capture_output=True)
     ecrire(INVENTAIRE, "\n".join(sorted(ecrits)) + "\n")
 
 

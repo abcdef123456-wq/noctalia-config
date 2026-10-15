@@ -107,7 +107,7 @@ sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
   home/.config/noctalia/config.toml home/.local/share/noctalia/plugins/nc-launcher/panel.luau
 
 # Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
-sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/' home/.config/qt6ct/qt6ct.conf
+sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_theme=@ICON_THEME@/' home/.config/qt6ct/qt6ct.conf
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml
