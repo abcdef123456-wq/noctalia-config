@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# nc-session-propre : au démarrage de la session (nc/session.lua), arrête les barres et shells d'une ancienne config qui
+# démarreraient encore à côté de Noctalia et de l'île : Waybar, HyprPanel, AGS, eww, Polybar, nwg-panel, Ironbar,
+# Yambar, et les autres configs Quickshell (ancienne Noctalia v4, autres shells). Peu importe comment ils sont lancés :
+#   service systemd       -> désactivé pour de bon (systemctl --user disable --now)
+#   démarrage automatique -> désactivé (copie dans ~/.config/autostart avec Hidden=true, l'original n'est pas touché)
+#   autre (ancienne config de session…) -> arrêté
+# Rien n'est désinstallé. Une notification dit ce qui a été arrêté.   Usage : nc-session-propre [attente en secondes]
+set -uo pipefail
+sleep "${1:-6}"
+
+barres=" waybar hyprpanel ags eww polybar nwg-panel ironbar yambar sfwbar "
+arretes=()
+for pid in $(pgrep -u "$(id -u)" .); do
+  # Nom du programme lui-même (pas ses arguments : un éditeur ouvert sur « waybar/config » n'est pas une barre) ;
+  # programmes lancés par un interpréteur (gjs, python, node) : le nom du script
+  mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || continue
+  [ ${#argv[@]} -gt 0 ] || continue
+  prog="${argv[0]##*/}"
+  case "$prog" in gjs|python3|python|node) [ ${#argv[@]} -gt 1 ] && prog="${argv[1]##*/}" ;; esac
+  nom=""
+  if [[ "$barres" == *" $prog "* ]]; then
+    nom="$prog"
+  elif [ "$prog" = qs ] || [ "$prog" = quickshell ]; then
+    conf=""
+    for ((k = 1; k < ${#argv[@]} - 1; k++)); do
+      case "${argv[k]}" in -c|--config|-p|--path) conf="${argv[k+1]}" ;; esac
+    done
+    [ -n "$conf" ] || continue
+    [[ "$conf" == *nc-ile* ]] && continue                 # l'île de noctalia-config
+    [[ " ${argv[*]} " == *" ipc "* ]] && continue         # simple commande envoyée à un shell, pas un shell
+    nom="quickshell ($conf)"
+  else
+    continue
+  fi
+  unite="$(sed -n 's|.*/||p' "/proc/$pid/cgroup" 2>/dev/null | tail -1)"
+  case "$unite" in
+    app-*@autostart.service|app-*-autostart@*.service)
+      # Démarrage automatique : le fichier .desktop d'origine porte le nom de l'unité
+      d="${unite#app-}"; d="${d%%@*}"; d="$(printf %b "$d")"      # \x2d -> -
+      for f in "$HOME/.config/autostart/$d.desktop" "/etc/xdg/autostart/$d.desktop"; do
+        [ -f "$f" ] || continue
+        mkdir -p "$HOME/.config/autostart"
+        n="$HOME/.config/autostart/$d.desktop"
+        [ "$f" = "$n" ] || cp "$f" "$n"
+        grep -q '^Hidden=true' "$n" || printf '\nHidden=true\n' >> "$n"
+      done
+      kill "$pid" 2>/dev/null ;;
+    *.service)
+      case "$unite" in app-*) kill "$pid" 2>/dev/null ;; *) systemctl --user disable --now "$unite" >/dev/null 2>&1 || kill "$pid" 2>/dev/null ;; esac ;;
+    *) kill "$pid" 2>/dev/null ;;
+  esac
+  arretes+=("$nom")
+done
+
+if [ ${#arretes[@]} -gt 0 ]; then
+  liste="$(printf '%s\n' "${arretes[@]}" | sort -u | paste -sd ', ')"
+  notify-send -a "noctalia-config" "Ancienne barre arrêtée" "$liste : elle démarrait encore avec ta session (rien n'est désinstallé)." 2>/dev/null || true
+fi
+exit 0

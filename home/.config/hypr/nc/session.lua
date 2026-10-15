@@ -10,4 +10,6 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("~/.local/bin/nc-boot-wallpaper")
     -- Suit le dernier lecteur de musique actif : les touches de musique le visent (pas un onglet en pause depuis des heures)
     hl.exec_cmd("playerctld daemon")
+    -- Ancienne barre (Waybar, HyprPanel, ancienne Noctalia…) qui démarrerait encore : arrêtée et désactivée
+    hl.exec_cmd("~/.local/bin/nc-session-propre")
 end)
