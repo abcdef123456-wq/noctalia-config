@@ -27,6 +27,7 @@ ShellRoot {
             Etat.saisie = texte
             if (!Etat.recherche) recherche()
         }
+        function valider(): void { Etat.validerRecherche() }
         function recherche(): void { Etat.chercher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name) }
         function suivante(): void { Etat.changerVue(1) }
         function precedente(): void { Etat.changerVue(-1) }

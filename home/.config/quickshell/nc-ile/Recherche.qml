@@ -35,6 +35,8 @@ Item {
         champ.forceActiveFocus()
     }
 
+    Connections { target: Etat; function onValiderRecherche() { if (r.actif) r.valider(r.sel, false) } }
+
     // ── Sources ──
     Process {
         id: lireApplis
@@ -263,12 +265,43 @@ Item {
     }
 
     function lancer(id) {
-        var u = Object.assign({}, usage)
-        var e = u[id] || { n: 0 }
-        u[id] = { n: (e.n || 0) + 1, t: Math.floor(Date.now() / 1000) }
-        usage = u
-        fichierUsage.setText(JSON.stringify(u))
         Quickshell.execDetached([Etat.bin + "nc-apps", "launch", id])
+        // Suivre l'appli : sa fenêtre peut s'ouvrir sur un autre bureau (Discord réduit dans la zone de notification
+        // ressort là où il était) ; dès qu'elle apparaît, on y va
+        var ap = applis.find(x => x.id === id)
+        if (ap) {
+            suivi.noms = [ap.wmclass, ap.id, ap.exe === "env" ? "" : ap.exe].filter(x => x).map(x => x.toLowerCase())
+            suivi.avant = fenetres.map(f => f.address)
+            suivi.fin = Date.now() + 10000
+            suivi.restart()
+        }
+        try {
+            var u = Object.assign({}, usage)
+            var e = u[id] || { n: 0 }
+            u[id] = { n: (e.n || 0) + 1, t: Math.floor(Date.now() / 1000) }
+            usage = u
+            fichierUsage.setText(JSON.stringify(u))
+        } catch (err) {}
+    }
+    Timer {
+        id: suivi
+        property var noms: []
+        property var avant: []
+        property real fin: 0
+        interval: 400; repeat: true
+        onTriggered: { if (Date.now() > fin) stop(); else if (!chercheFenetre.running) chercheFenetre.running = true }
+    }
+    Process {
+        id: chercheFenetre
+        command: ["hyprctl", "clients", "-j"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var l = []
+                try { l = JSON.parse(text) } catch (e) { return }
+                var f = l.find(c => c.mapped && suivi.noms.indexOf((c.class || "").toLowerCase()) >= 0 && suivi.avant.indexOf(c.address) < 0)
+                if (f) { suivi.stop(); r.allerA(f.address) }
+            }
+        }
     }
     function valider(i, nouveau) {
         var x = resultats[i]
