@@ -146,5 +146,6 @@ hl.animation({ leaf = "layersOut",        enabled = true, speed = 2,   bezier = 
 hl.animation({ leaf = "fadeLayersIn",     enabled = true, speed = 2.5, bezier = "standard" })
 hl.animation({ leaf = "fadeLayersOut",    enabled = true, speed = 2,   bezier = "standard" })
 hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5, bezier = "emphasized",      style = "slidefadevert 15%" })
-hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5, bezier = "emphasized",      style = "slidefadevert 15%" })
+-- Bureaux cachés (terminal déroulant, bloc-notes) : descendent du haut de l'écran et y remontent
+hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5, bezier = "emphasized",      style = "slidevert -100%" })
 hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5,   bezier = "standard" })

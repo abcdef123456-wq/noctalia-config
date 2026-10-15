@@ -173,12 +173,12 @@ enable_community_templates = false
 input_path = "templates/colors.json"
 output_path = "@HOME@/.config/noctalia/colors.json"
 
-# ---------------------------------------------------------------- Fonds d'écran : rotation 10 min, transition « disque » 2 s
+# ---------------------------------------------------------------- Fonds d'écran : rotation 10 min, fondu enchaîné 1,2 s
 [wallpaper]
 directory = "@HOME@/Pictures/Wallpapers"
 fill_mode = "crop"
-transition = ["disc"]
-transition_duration = 2000.0
+transition = ["fade"]
+transition_duration = 1200.0
 
 [wallpaper.automation]
 enabled = true
