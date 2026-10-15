@@ -25,12 +25,38 @@ local function ecrire(chemin, texte)
 end
 
 -- ── Halo musical ────────────────────────────────────────────────────────────
--- n de 0 (silence) à 1 (basse forte) ; sans effet en Économie et en mode jeu (ombres coupées)
-nc.halo_base = tonumber(hl.get_config("decoration.shadow.range")) or 22
+-- n de 0 (silence) à 1 (basse forte) : le halo de la fenêtre active s'intensifie et s'élargit, sa bordure s'éclaircit.
+-- Couleurs de départ lues au chargement (celles du fond d'écran, nc/couleurs.lua) ; n = 0 les remet telles quelles.
+-- Sans effet en Économie et en mode jeu (ombres coupées).
+local function argb(c)   -- « 0xAARRGGBB » -> a, r, g, b
+    local a, r, g, b = tostring(c):match("0x(%x%x)(%x%x)(%x%x)(%x%x)")
+    if not a then return nil end
+    return tonumber(a, 16), tonumber(r, 16), tonumber(g, 16), tonumber(b, 16)
+end
+local function rgba(r, g, b, a)
+    return string.format("rgba(%02x%02x%02x%02x)", math.floor(r + 0.5), math.floor(g + 0.5), math.floor(b + 0.5), math.floor(a + 0.5))
+end
+local base_portee = tonumber(hl.get_config("decoration.shadow.range")) or 22
+local base_ombre  = hl.get_config("decoration.shadow.color")
+local base_bord   = hl.get_config("general.col.active_border")
+
 function nc.halo(n)
     if not nc.flou_actif then return end
     n = math.max(0, math.min(1, tonumber(n) or 0))
-    hl.config({ decoration = { shadow = { range = math.floor(nc.halo_base + n * 34 + 0.5) } } })
+    local reglage = { decoration = { shadow = { range = math.floor(base_portee + n * 18 + 0.5) } } }
+    local a, r, g, b = argb(base_ombre and base_ombre.colors and base_ombre.colors[1])
+    if a then reglage.decoration.shadow.color = rgba(r, g, b, a + (0xF0 - a) * n) end
+    if base_bord and base_bord.colors then
+        local couleurs = {}
+        for _, c in ipairs(base_bord.colors) do
+            local ca, cr, cg, cb = argb(c)
+            if not ca then couleurs = nil break end
+            local k = 0.55 * n   -- vers le blanc
+            couleurs[#couleurs + 1] = rgba(cr + (255 - cr) * k, cg + (255 - cg) * k, cb + (255 - cb) * k, ca)
+        end
+        if couleurs then reglage.general = { col = { active_border = { colors = couleurs, angle = base_bord.angle or 45 } } } end
+    end
+    hl.config(reglage)
 end
 
 -- ── Mode jeu automatique ────────────────────────────────────────────────────
