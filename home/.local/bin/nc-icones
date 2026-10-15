@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""nc-icones : icônes sobres, aux couleurs du fond d'écran, pour le terminal (kitty) et les fichiers (Dolphin).
+
+Remplace le chat de kitty et le dauphin de Dolphin partout (recherche, barre, sélecteur de fenêtres), et les nomme
+« Terminal » et « Fichiers » :
+  - icônes dessinées ici : ~/.local/share/icons/hicolor/scalable/apps/nc-terminal.svg, nc-fichiers.svg ;
+  - raccourcis d'applis copiés dans ~/.local/share/applications avec la nouvelle icône (marqués X-NC-Icone).
+Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icônes d'origine : nc-icones retirer
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+COULEURS = HOME / ".config/noctalia/colors.json"
+ICONES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "icons/hicolor/scalable/apps"
+APPLIS = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "applications"
+SYSTEME = [Path(d) / "applications" for d in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") if d]
+MARQUE = "X-NC-Icone=true"
+
+# Raccourci d'appli -> icône, et nom affiché (simple, comme sur un téléphone)
+APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers"}
+NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers"}
+
+CADRE = """<rect x="16" y="16" width="224" height="224" rx="58" fill="{fond}"/>
+  <rect x="17.5" y="17.5" width="221" height="221" rx="56.5" fill="none" stroke="{accent}" stroke-opacity=".35" stroke-width="3"/>"""
+
+DESSINS = {
+    # Invite de commande : chevron et curseur
+    "nc-terminal": """<path d="M82 96 L122 128 L82 160" fill="none" stroke="{accent}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M138 164 H180" stroke="{texte}" stroke-width="16" stroke-linecap="round"/>""",
+    # Dossier, contour et onglet
+    "nc-fichiers": """<path d="M66 96 Q66 80 82 80 H112 Q119 80 124 85 L134 95 H174 Q190 95 190 111 V164 Q190 180 174 180 H82 Q66 180 66 164 Z"
+        fill="{accent}" fill-opacity=".16" stroke="{accent}" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M66 120 H190" stroke="{accent}" stroke-width="12" stroke-linecap="round"/>""",
+}
+
+
+def couleurs():
+    try:
+        c = json.loads(COULEURS.read_text())
+    except (OSError, ValueError):
+        c = {}
+    return {"fond": c.get("mSurface", "#1b1b22"), "accent": c.get("mPrimary", "#8fa8ff"), "texte": c.get("mOnSurface", "#e6e6ef")}
+
+
+def ecrire(chemin, texte):
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    if chemin.exists() and chemin.read_text() == texte:
+        return
+    tmp = chemin.with_suffix(chemin.suffix + ".tmp")
+    tmp.write_text(texte)
+    os.replace(tmp, chemin)
+
+
+def raccourci(nom, icone):
+    """Copie le raccourci système de l'appli avec l'icône remplacée (sauf si tu as déjà le tien)."""
+    perso = APPLIS / nom
+    if perso.exists() and MARQUE not in perso.read_text():
+        return
+    source = next((d / nom for d in SYSTEME if (d / nom).exists()), None)
+    if not source:
+        return
+    lignes, section = [], ""
+    for ligne in source.read_text().splitlines():
+        if ligne.startswith("["):
+            section = ligne.strip()
+        if ligne.startswith("Icon="):
+            ligne = f"Icon={icone}"
+        elif section == "[Desktop Entry]" and nom in NOMS and (ligne.startswith("Name=") or ligne.startswith("Name[")):
+            if ligne.startswith("Name["):
+                continue                      # noms traduits retirés : le nom simple sert partout
+            ligne = f"Name={NOMS[nom]}"
+        lignes.append(ligne)
+        if ligne.strip() == "[Desktop Entry]":
+            lignes.append(MARQUE)
+    ecrire(perso, "\n".join(lignes) + "\n")
+
+
+def retirer():
+    for nom, icone in APPS.items():
+        p = APPLIS / nom
+        if p.exists() and MARQUE in p.read_text():
+            p.unlink()
+        (ICONES / f"{icone}.svg").unlink(missing_ok=True)
+    print("Icônes d'origine rétablies.")
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer"):
+        return retirer()
+    c = couleurs()
+    for icone, dessin in DESSINS.items():
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n  '
+               + CADRE.format(**c) + "\n  " + dessin.format(**c) + "\n</svg>\n")
+        ecrire(ICONES / f"{icone}.svg", svg)
+    for nom, icone in APPS.items():
+        raccourci(nom, icone)
+
+
+if __name__ == "__main__":
+    main()

@@ -89,12 +89,14 @@ custom_image_colorize = true
 color = "primary"
 
 [widget.workspaces]
+# Épuré : pas de chiffres ; bureau actif = pilule allongée aux couleurs du fond, occupés = points clairs, vides = discrets
 style = "regular"
-show_labels = true
-labels_only_when_occupied = true
+show_labels = false
 focused_color = "primary"
-occupied_color = "secondary"
-empty_color = "secondary"
+occupied_color = "on_surface_variant"
+empty_color = "outline"
+active_pill_size = 2.6
+inactive_pill_size = 0.6
 
 [widget.active_window]
 max_length = 240.0
