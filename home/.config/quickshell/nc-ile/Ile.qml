@@ -21,14 +21,25 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "nc-ile"
-    WlrLayershell.keyboardFocus: ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    // Recherche : le clavier va tout de suite à l'île ; sinon seulement quand on clique dedans
+    WlrLayershell.keyboardFocus: recherche ? WlrKeyboardFocus.Exclusive : (ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
+    readonly property bool recherche: ouverte && Etat.recherche
     mask: Region { item: ile; Region { item: bulle } }
 
+    // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
+    // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
     HyprlandFocusGrab {
         windows: [fen]
-        active: fen.ouverte
+        active: fen.ouverte && prise.prete
         onCleared: Etat.fermer()
     }
+    Timer {
+        id: prise
+        property bool prete: false
+        interval: 120
+        onTriggered: prete = true
+    }
+    onOuverteChanged: { prise.prete = false; if (ouverte) prise.restart() }
 
     // Taille de chaque page
     function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32))) }
@@ -37,8 +48,8 @@ PanelWindow {
         jeu: Qt.size(400, 140), centre: Qt.size(432, 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410)
     })
-    readonly property size taille: tailles[Etat.vueActive] || tailles.centre
-    readonly property bool points: Etat.vues.length > 1
+    readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
+    readonly property bool points: Etat.vues.length > 1 && !recherche
     // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
     readonly property bool banniere: !ouverte && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
@@ -74,7 +85,7 @@ PanelWindow {
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
         width: fen.ouverte ? fen.taille.width : (fen.banniere ? 440 : compact.largeur)
         height: fen.ouverte ? fen.taille.height : (fen.banniere ? fen.hauteurBanniere : 30)
-        radius: fen.ouverte ? 42 : (fen.banniere ? 32 : 15)
+        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere ? 32 : 15)
         color: "#000000"
         clip: true
 
@@ -89,6 +100,16 @@ PanelWindow {
             width: parent.width
             opacity: fen.ouverte || fen.banniere ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere ? 90 : 220; easing.type: Easing.OutCubic } }
+        }
+
+        // Spotlight : longue capsule de recherche
+        Recherche {
+            id: spot
+            anchors.fill: parent
+            actif: fen.recherche
+            opacity: fen.recherche && ile.width > 560 ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: fen.recherche ? 160 : 70; easing.type: Easing.OutCubic } }
         }
 
         Banniere {
@@ -109,7 +130,7 @@ PanelWindow {
         // Glisser entre les pages : molette ou deux doigts, partout dans l'île (les curseurs ne prennent pas la molette)
         MouseArea {
             anchors.fill: parent
-            enabled: fen.ouverte && fen.points
+            enabled: fen.ouverte && fen.points && !fen.recherche
             acceptedButtons: Qt.NoButton
             property real cumul: 0
             property real dernier: 0         // heure du dernier événement : un trou de 200 ms = nouveau geste
@@ -153,7 +174,7 @@ PanelWindow {
                 y: 16 + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
-                opacity: fen.ouverte && active && ile.height > t.height * 0.72 ? 1 : 0
+                opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {

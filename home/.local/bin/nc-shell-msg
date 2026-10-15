@@ -2,7 +2,9 @@
 # nc-shell-msg : actions des raccourcis Hyprland, envoyées à Noctalia v5.
 #   menu  session  lock  power-cycle  control-center  settings  wallpapers  window-switcher  keys
 case "${1:-}" in
-  menu)            exec noctalia msg panel-toggle nc/launcher:main ;;
+  menu)                                       # recherche : Spotlight de l'île Quickshell, sinon lanceur Noctalia
+    if systemctl --user is-active --quiet nc-ile.service; then exec qs -c nc-ile ipc call ile recherche; fi
+    exec noctalia msg panel-toggle nc/launcher:main ;;
   session)         exec noctalia msg session lock-and-suspend ;;
   lock)            exec noctalia msg session lock ;;
   power-cycle)     exec noctalia msg power-cycle ;;
