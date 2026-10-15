@@ -13,6 +13,7 @@ Item {
     property string saisie: ""          // réseau dont on tape le mot de passe
     property var attente: ({})          // connexions en cours (nom ou adresse -> vrai)
     property bool recherche: false
+    function defiler(dy) { return defil.defiler(dy) }
 
     readonly property bool wifi: mode === "wifi"
     readonly property bool allume: wifi ? Etat.sys.wifi === "on" : Etat.sys.bluetooth === "on"
@@ -75,12 +76,11 @@ Item {
         }
     }
 
-    Flickable {
+    Defilement {
+        id: defil
         anchors.top: tete.bottom; anchors.topMargin: 8; anchors.bottom: pied.top; anchors.bottomMargin: 6
         width: parent.width
         contentHeight: liste.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
         Column {
             id: liste
             width: p.width; spacing: 2

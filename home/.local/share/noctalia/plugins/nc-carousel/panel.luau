@@ -135,11 +135,13 @@ local function step(d)
   setTicking(true)
 end
 
+-- Le panneau se ferme d'abord, le fond change une fois la fermeture finie : changer le fond fait recharger les plugins
+-- par Noctalia, et un panneau rechargé en pleine fermeture restait figé à l'écran.
 local function apply(w)
   if not w then return end
-  noctalia.setWallpaper(w.path)
   current = w.path
   panel.close()
+  noctalia.runAsync({ "sh", "-c", 'sleep 0.4; exec noctalia msg wallpaper-set "$1"', "sh", w.path })
 end
 
 local function lerp(a, b, t) return a + (b - a) * t end

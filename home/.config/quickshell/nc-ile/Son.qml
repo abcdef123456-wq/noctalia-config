@@ -6,6 +6,7 @@ import Quickshell.Services.Pipewire
 
 Item {
     id: son
+    function defiler(dy) { return defil.defiler(dy) }
     readonly property var noeuds: Pipewire.nodes.values
     readonly property var sorties: noeuds.filter(n => n.isSink && !n.isStream && n.audio)
     readonly property var entrees: noeuds.filter(n => !n.isSink && !n.isStream && n.audio && (n.properties["media.class"] || "").indexOf("Source") >= 0)
@@ -29,11 +30,10 @@ Item {
 
     component Titre: Texte { font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
 
-    Flickable {
+    Defilement {
+        id: defil
         anchors.fill: parent
         contentHeight: colonne.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
         Column {
             id: colonne
             width: son.width; spacing: 4
