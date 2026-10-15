@@ -14,6 +14,14 @@ Item {
     readonly property color vert: "#30d158"
     readonly property var s: Etat.sys
 
+    // Petit module carré d'action (façon iOS)
+    component Tuile: Module {
+        id: ac
+        property string icone
+        radius: 18; cliquable: true
+        Ico { anchors.centerIn: parent; nom: ac.icone; taille: 26 }
+    }
+
     // ── Accueil ──
     Column {
         id: accueil
@@ -137,7 +145,7 @@ Item {
                     }
                 }
                 Pastille {
-                    icone: "bedtime"; titre: "Nuit"; sous: Etat.nuit ? "Tons chauds" : "Désactivée"; actif: Etat.nuit; couleur: centre.orange
+                    icone: "wb_twilight"; titre: "Nuit"; sous: Etat.nuit ? "Tons chauds" : "Désactivée"; actif: Etat.nuit; couleur: centre.orange
                     onClic: { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) }
                 }
                 Pastille {
@@ -181,10 +189,12 @@ Item {
                         required property var modelData
                         required property int index
                         width: (segments.width - 6) / 3; height: segments.height - 6
-                        Row {
-                            anchors.centerIn: parent; spacing: 5
-                            Ico { nom: modelData.icone; taille: 16; color: segments.index === index ? modelData.couleur : "#98989d" }
-                            Texte { text: modelData.nom; font.weight: Font.DemiBold; secondaire: segments.index !== index }
+                        Texte {
+                            anchors.centerIn: parent
+                            text: modelData.nom
+                            font.pixelSize: 13
+                            font.weight: segments.index === index ? Font.DemiBold : Font.Medium
+                            secondaire: segments.index !== index
                         }
                         MouseArea { anchors.fill: parent; onClicked: Etat.choisirProfil(modelData.p) }
                     }
@@ -192,15 +202,16 @@ Item {
             }
         }
 
-        // Actions
+        // Actions : petits modules carrés façon iOS (lampe, minuteur, appareil photo…)
         Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: (parent.width - 5 * 46) / 4
-            Rond { taille: 46; icone: "screenshot_region"; onClic: { Etat.fermer(); Quickshell.execDetached(["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"]) } }
-            Rond { taille: 46; icone: "notifications"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "control-center"]) } }
-            Rond { taille: 46; icone: "settings"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "settings-open"]) } }
-            Rond { taille: 46; icone: "lock"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "session", "lock"]) } }
-            Rond { taille: 46; icone: "power_settings_new"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "session-panel"]) } }
+            id: actions
+            width: parent.width; height: 58; spacing: 10
+            readonly property real largeurTuile: (width - 4 * spacing) / 5
+            Tuile { width: actions.largeurTuile; height: actions.height; icone: "photo_camera"; onClic: { Etat.fermer(); Quickshell.execDetached(["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"]) } }
+            Tuile { width: actions.largeurTuile; height: actions.height; icone: "notifications"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "control-center"]) } }
+            Tuile { width: actions.largeurTuile; height: actions.height; icone: "settings"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "settings-open"]) } }
+            Tuile { width: actions.largeurTuile; height: actions.height; icone: "lock"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "session", "lock"]) } }
+            Tuile { width: actions.largeurTuile; height: actions.height; icone: "power_settings_new"; onClic: { Etat.fermer(); Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "session-panel"]) } }
         }
     }
 
