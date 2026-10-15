@@ -1,5 +1,6 @@
 // Spotlight de l'île (Super + R) : la pilule s'étire en une longue capsule de recherche ; en tapant, quelques
 // résultats compacts s'ajoutent dessous. ↑ ↓ pour choisir, Entrée pour lancer, Échap pour refermer.
+// Appli déjà ouverte : Entrée amène sur sa fenêtre, Ctrl + Entrée en ouvre une nouvelle.
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal.
@@ -158,6 +159,17 @@ Item {
                   ttf: "font-x-generic", otf: "font-x-generic", iso: "application-x-cd-image" }[e]
         return t || "text-x-generic"
     }
+    // Fenêtre déjà ouverte d'une appli (la plus récemment utilisée), sinon null
+    function fenetreDe(ap) {
+        var noms = [ap.wmclass, ap.id, ap.exe === "env" ? "" : ap.exe].filter(x => x).map(x => x.toLowerCase())
+        var meilleure = null
+        for (var i = 0; i < fenetres.length; i++) {
+            var c = (fenetres[i].class || "").toLowerCase()
+            if (noms.indexOf(c) >= 0 && (!meilleure || fenetres[i].focusHistoryID < meilleure.focusHistoryID)) meilleure = fenetres[i]
+        }
+        return meilleure
+    }
+    function allerA(adresse) { Etat.faire(["hyprctl", "eval", "hl.dispatch(hl.dsp.focus({ window = 'address:" + adresse + "' }))"]) }
     function poidsUsage(id) {
         var u = usage[id]
         if (!u) return 1
@@ -195,25 +207,37 @@ Item {
             out.push({ titre: "= " + res, sous: "Calcul · Entrée pour copier", glyphe: "calculate", s: 1000,
                        f: () => Quickshell.execDetached(["wl-copy", res.replace(/^≈?\s*/, "")]) })
         }
-        // Fenêtres ouvertes
-        for (var i = 0; i < fenetres.length; i++) {
-            var fe = fenetres[i]
-            var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
-            if (sf > 0) {
-                var adr = fe.address
-                out.push({ titre: fe.title, sous: "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
-                           glyphe: "select_window", s: sf + 30,
-                           f: () => Etat.faire(["hyprctl", "eval", "hl.dispatch(hl.dsp.focus({ window = 'address:" + adr + "' }))"]) })
-            }
-        }
-        // Applications
+        // Applications : déjà ouverte → Entrée y va (Ctrl + Entrée : nouvelle fenêtre), sinon Entrée la lance
+        var prises = {}
         for (var a = 0; a < applis.length; a++) {
             var ap = applis[a]
             var sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
             if (sa > 0) {
-                var id = ap.id
-                out.push({ titre: ap.name, sous: ap.generic || "Application", icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps",
-                           s: sa * poidsUsage(id), f: () => r.lancer(id) })
+                var id = ap.id, fen = fenetreDe(ap)
+                var item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0) }
+                if (fen) {
+                    var adresse = fen.address
+                    prises[adresse] = true
+                    item.sous = "Ouverte · bureau " + fen.workspace.name
+                    item.aide = "↵ y aller · Ctrl ↵ nouvelle"
+                    item.f = () => r.allerA(adresse)
+                    item.nouveau = () => r.lancer(id)
+                } else {
+                    item.sous = ap.generic || "Application"
+                    item.f = () => r.lancer(id)
+                }
+                out.push(item)
+            }
+        }
+        // Fenêtres ouvertes (celles qui ne sont pas déjà proposées par leur appli)
+        for (var i = 0; i < fenetres.length; i++) {
+            var fe = fenetres[i]
+            if (prises[fe.address]) continue
+            var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
+            if (sf > 0) {
+                var adr = fe.address
+                out.push({ titre: fe.title, sous: "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
+                           glyphe: "select_window", s: sf + 30, f: () => r.allerA(adr) })
             }
         }
         // Pages de l'île et actions
@@ -246,12 +270,12 @@ Item {
         fichierUsage.setText(JSON.stringify(u))
         Quickshell.execDetached([Etat.bin + "nc-apps", "launch", id])
     }
-    function valider(i) {
+    function valider(i, nouveau) {
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
         Etat.fermer()
-        x.f()
+        if (nouveau && x.nouveau) x.nouveau(); else x.f()
     }
 
     // ── Dessin ──
@@ -271,7 +295,8 @@ Item {
             Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
             Keys.onUpPressed: r.sel = Math.max(0, r.sel - 1)
             Keys.onTabPressed: r.sel = r.resultats.length > 0 ? (r.sel + 1) % r.resultats.length : 0
-            onAccepted: r.valider(r.sel)
+            Keys.onReturnPressed: e => r.valider(r.sel, (e.modifiers & Qt.ControlModifier) !== 0)
+            Keys.onEnterPressed: e => r.valider(r.sel, (e.modifiers & Qt.ControlModifier) !== 0)
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
@@ -315,14 +340,14 @@ Item {
                 Texte {
                     id: sous
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, 260)
-                    text: ligne.modelData.sous + (ligne.choisi ? "  ↵" : ""); secondaire: true; font.pixelSize: 13
+                    width: Math.min(implicitWidth, 320)
+                    text: ligne.modelData.sous + (ligne.choisi ? "  ·  " + (ligne.modelData.aide || "↵") : ""); secondaire: true; font.pixelSize: 13
                     horizontalAlignment: Text.AlignRight
                 }
                 MouseArea {
                     anchors.fill: parent; hoverEnabled: true
                     onEntered: r.sel = ligne.index
-                    onClicked: r.valider(ligne.index)
+                    onClicked: e => r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
                 }
             }
         }
