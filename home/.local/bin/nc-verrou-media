@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# nc-verrou-media : le lecteur de musique actif, pour la capsule de l'écran de verrouillage (plugin nc/verrou).
+# Une ligne, champs séparés par des tabulations :
+#   état  titre  artiste  pochette (fichier local)  durée (µs)  position (µs)  lecteur  icône de l'appli (fichier)
+# Lecteur : le dernier actif selon playerctld (comme les touches de musique du clavier).
+# Pochette venue d'internet (YouTube, Spotify…) : téléchargée une fois dans ~/.cache/nc/pochettes.
+# Icône de l'appli : nc-apps icon, gardée en cache pour ne pas la chercher à chaque seconde.
+set -u
+
+n=$(busctl --user get-property org.mpris.MediaPlayer2.playerctld /org/mpris/MediaPlayer2 \
+      com.github.altdesktop.playerctld PlayerNames 2>/dev/null | grep -o '"[^"]*"' | head -1 | tr -d '"' |
+    sed 's/^org\.mpris\.MediaPlayer2\.//')
+[ -n "$n" ] || exit 0
+
+# Séparateur \x1f (pas une tabulation : read fusionnerait les champs vides)
+IFS=$'\x1f' read -r etat titre artiste art duree position joueur < <(playerctl -p "$n" metadata --format \
+  $'{{status}}\x1f{{title}}\x1f{{artist}}\x1f{{mpris:artUrl}}\x1f{{mpris:length}}\x1f{{position}}\x1f{{playerName}}' 2>/dev/null)
+[ -n "${etat:-}" ] || exit 0
+
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
+pochette=""
+case "${art:-}" in
+  file://*) pochette="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "${art#file://}")" ;;
+  http://*|https://*)
+    mkdir -p "$cache/pochettes"
+    f="$cache/pochettes/$(printf '%s' "$art" | md5sum | cut -c1-16)"
+    if [ ! -s "$f" ]; then
+      curl -fsSL -m 4 -o "$f.tmp" "$art" 2>/dev/null && mv "$f.tmp" "$f" || rm -f "$f.tmp"
+      # Garde les 50 dernières pochettes
+      ls -1t "$cache/pochettes" 2>/dev/null | tail -n +51 | sed "s|^|$cache/pochettes/|" | xargs -r rm -f
+    fi
+    [ -s "$f" ] && pochette="$f" ;;
+esac
+[ -n "$pochette" ] && [ ! -f "$pochette" ] && pochette=""
+
+# Icône de l'appli (cache : nom du lecteur → fichier)
+nom="${joueur%%.*}"; nom="${nom:-${n%%.*}}"
+icones="$cache/icones-lecteurs"
+icone="$(grep -m1 "^$nom	" "$icones" 2>/dev/null | cut -f2)"
+if [ -z "$icone" ] || [ ! -f "$icone" ]; then
+  icone="$("$HOME/.local/bin/nc-apps" icon "$nom" 2>/dev/null)"
+  if [ -n "$icone" ]; then
+    mkdir -p "$cache"
+    { grep -v "^$nom	" "$icones" 2>/dev/null; printf '%s\t%s\n' "$nom" "$icone"; } > "$icones.tmp" && mv "$icones.tmp" "$icones"
+  fi
+fi
+
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$etat" "$titre" "${artiste:-}" "$pochette" "${duree:-0}" "${position:-0}" "$nom" "$icone"

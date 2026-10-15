@@ -268,8 +268,11 @@ type = "nc/verrou:musique"
 output = "@MONITOR@"
 cx = @LCX@
 cy = @LCY4@
-box_width = 640.0                         # longue capsule (sans taille : boîte carrée)
-box_height = 96.0
+box_width = 680.0                         # longue capsule (sans taille : boîte carrée)
+box_height = 104.0
+
+[lockscreen_widgets.widget.nc-musique.settings]
+background = false                        # pas de cadre autour : la capsule dessine son propre fond
 
 [lockscreen_widgets.widget."lockscreen-login-box@@MONITOR@"]
 type = "login_box"

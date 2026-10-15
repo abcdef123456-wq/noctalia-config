@@ -7,6 +7,8 @@
   nc-apps files TEXTE fichiers et dossiers du dossier personnel dont le nom contient TEXTE
                           (JSON, 4 au plus, dossiers cachés exclus)
   nc-apps open CHEMIN ouvre un fichier ou un dossier avec l'appli par défaut
+  nc-apps icon NOM    chemin du fichier d'icône d'une appli (nom du lecteur, de la fenêtre ou du .desktop),
+                          cherché dans le thème d'icônes actif puis Papirus et hicolor (vide si rien)
 """
 import json
 import os
@@ -219,6 +221,81 @@ def cmd_open(path):
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def themes_icones():
+    """Thème actif (GTK), ses parents, puis Papirus-Dark, Adwaita et hicolor."""
+    noms = []
+    try:
+        g = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"],
+                           capture_output=True, text=True, timeout=2).stdout.strip().strip("'")
+        if g:
+            noms.append(g)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    bases = [os.path.expanduser("~/.local/share/icons"), "/usr/share/icons", "/usr/local/share/icons"]
+    i = 0
+    while i < len(noms):            # parents déclarés par chaque thème (Inherits=)
+        for b in bases:
+            idx = os.path.join(b, noms[i], "index.theme")
+            if os.path.exists(idx):
+                for ligne in open(idx, errors="ignore"):
+                    if ligne.startswith("Inherits="):
+                        noms += [t.strip() for t in ligne.split("=", 1)[1].split(",") if t.strip() and t.strip() not in noms]
+                break
+        i += 1
+    for t in ("Papirus-Dark", "Papirus", "Adwaita", "hicolor"):
+        if t not in noms:
+            noms.append(t)
+    return bases, noms
+
+
+def chercher_icone(icone):
+    if not icone:
+        return ""
+    if os.path.isabs(icone):
+        return icone if os.path.exists(icone) else ""
+    bases, themes = themes_icones()
+    tailles = ["scalable", "128x128", "96x96", "64x64", "48x48", "256x256", "512x512", "32x32"]
+    for t in themes:
+        for b in bases:
+            racine = os.path.join(b, t)
+            if not os.path.isdir(racine):
+                continue
+            for taille in tailles:
+                for ordre in ((taille, "apps"), ("apps", taille)):          # 64x64/apps (Papirus) ou apps/64 (WhiteSur)
+                    for ext in (".svg", ".png"):
+                        f = os.path.join(racine, *ordre, icone + ext)
+                        if os.path.exists(f):
+                            return f
+    for ext in (".svg", ".png", ".xpm"):
+        f = os.path.join("/usr/share/pixmaps", icone + ext)
+        if os.path.exists(f):
+            return f
+    return ""
+
+
+def cmd_icon(nom):
+    """Icône d'une appli à partir du nom de son lecteur ou de sa fenêtre (firefox, spotify, discord…)."""
+    n = nom.lower().split(".")[0]
+    candidats = []
+    for app_id, path in entries().items():
+        e = parse(path)
+        if not e:
+            continue
+        argv = exec_argv(e)
+        exe = os.path.basename(argv[0]).lower() if argv else ""
+        ids = {app_id.lower(), app_id.lower().split(".")[-1], e.get("StartupWMClass", "").lower(), exe}
+        if n in ids:
+            candidats.insert(0, e)
+        elif app_id.lower().startswith(n):
+            candidats.append(e)
+    for e in candidats:
+        f = chercher_icone(e.get("Icon", ""))
+        if f:
+            print(f)
+            return
+    print(chercher_icone(n))
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "list":
         cmd_list()
@@ -228,6 +305,8 @@ if __name__ == "__main__":
         cmd_files(sys.argv[2])
     elif len(sys.argv) == 3 and sys.argv[1] == "open":
         cmd_open(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] == "icon":
+        cmd_icon(sys.argv[2])
     else:
         print(__doc__.strip(), file=sys.stderr)
         sys.exit(1)
