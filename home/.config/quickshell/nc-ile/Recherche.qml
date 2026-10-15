@@ -323,7 +323,7 @@ Item {
                 var l = []
                 try { l = JSON.parse(text) } catch (e) { return }
                 var f = l.find(c => c.mapped && suivi.noms.indexOf((c.class || "").toLowerCase()) >= 0 && suivi.avant.indexOf(c.address) < 0)
-                if (f) { suivi.stop(); r.allerA(f.address) }
+                if (f) { r.allerA(f.address); suivi.stop() }    // arrêter le suivi peut décharger le Spotlight : après
             }
         }
     }
@@ -336,8 +336,9 @@ Item {
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
-        Etat.fermer()
+        // Action d'abord : fermer l'île décharge le Spotlight tout de suite (ses fonctions n'existeraient plus)
         if (nouveau && x.nouveau) x.nouveau(); else x.f()
+        Etat.fermer()
     }
 
     // ── Dessin ──
