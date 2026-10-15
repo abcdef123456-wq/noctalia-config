@@ -95,8 +95,17 @@ pkg_install() {
     *) return 1 ;;
   esac
 }
-# Un paquet à la fois, sans arrêter le script s'il n'existe pas sur cette distribution
-pkg_try() { local p; for p in "$@"; do pkg_installed "$p" || pkg_install "$p" >/dev/null 2>&1 || true; done; }
+# Un paquet à la fois, sans arrêter le script s'il n'existe pas sur cette distribution. Sortie masquée : aucune
+# question ne doit attendre de réponse invisible (pacman demanderait de confirmer ou de choisir un fournisseur).
+pkg_try() {
+  local p
+  for p in "$@"; do
+    pkg_installed "$p" && continue
+    info "installation : $p"
+    if [ "$FAMILY" = arch ]; then sudo pacman -S --needed --noconfirm "$p" >/dev/null 2>&1 || true
+    else pkg_install "$p" >/dev/null 2>&1 || true; fi
+  done
+}
 # Nom générique -> nom du paquet sur cette distribution (vide = pas de paquet, à installer à la main)
 pname() {
   case "$1:$FAMILY" in
