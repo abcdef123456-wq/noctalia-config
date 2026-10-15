@@ -28,7 +28,7 @@ Item {
 
     onActifChanged: {
         if (!actif) return
-        champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""
+        champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
         fichierUsage.reload()
@@ -54,7 +54,14 @@ Item {
     Process {
         id: lireApplis
         command: [Etat.bin + "nc-apps", "list"]
-        stdout: StdioCollector { onStreamFinished: { try { r.applis = JSON.parse(text) } catch (e) {} r.chercher() } }
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { r.applis = JSON.parse(text) } catch (e) {}
+                r.chercher()
+                // Entrée tapée avant que les applis soient chargées : validée maintenant, sur la liste complète
+                if (r.entreeEnAttente) { r.entreeEnAttente = false; r.valider(r.sel, false) }
+            }
+        }
     }
     Process {
         id: lireFenetres
@@ -269,7 +276,7 @@ Item {
             var fi = fichiers[n], chemin = fi.path
             out.push({ titre: fi.name, sous: (fi.dir ? "Dossier · " : "Fichier · ") + fi.parent,
                        icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
-                       s: Math.max(15, score(qa, fi.name, true) * 0.75),
+                       s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)),   // jamais devant une appli qui commence par la saisie
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
         }
         out.sort((x, y) => y.s - x.s)
@@ -316,7 +323,10 @@ Item {
             }
         }
     }
+    property bool entreeEnAttente: false
     function valider(i, nouveau) {
+        // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
+        if (lireApplis.running || applis.length === 0) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
