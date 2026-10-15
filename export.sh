@@ -37,6 +37,7 @@ HOME_FILES=(
   .local/bin/nc-carousel-thumbs
   .local/bin/nc-finger
   .local/bin/nc-greeting
+  .local/bin/nc-capture
   .local/bin/nc-keys
   .local/bin/nc-icones
   .local/bin/nc-ile-etat

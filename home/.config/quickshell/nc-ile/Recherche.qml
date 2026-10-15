@@ -130,7 +130,7 @@ Item {
         { t: "Nuit (tons chauds)", k: "nuit night lumière bleue", g: "wb_twilight", f: () => { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) } },
         { t: "Thème clair ou sombre", k: "thème clair sombre dark light", g: "contrast", f: () => Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) },
         { t: "Rester éveillé", k: "rester éveillé café caféine veille", g: "coffee", f: () => Etat.basculerCafe() },
-        { t: "Capture d'une zone", k: "capture écran screenshot", g: "screenshot_region", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; noctalia msg screenshot-annotate"]) },
+        { t: "Capture d'une zone", k: "capture écran screenshot", g: "screenshot_region", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"]) },
         { t: "Presse-papiers", k: "presse-papiers clipboard copier coller", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
         { t: "Fond d'écran suivant", k: "fond écran wallpaper suivant", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
         { t: "Raccourcis clavier", k: "raccourcis clavier touches aide", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }

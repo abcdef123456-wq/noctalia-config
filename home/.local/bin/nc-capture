@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# nc-capture : captures d'écran façon Mac, enregistrées ET copiées.
+#   nc-capture ecran      écran entier (celui de la souris)              Impr. écran
+#   nc-capture zone       zone choisie à la souris                       Super + P, Maj + Impr. écran
+#   nc-capture retouche   zone, ouverte tout de suite dans Swappy        Super + Maj + S
+# Fichier : ~/Images/Captures (dossier « Images » de ta langue), « Capture du 2026-10-15 à 23.25.10.png ».
+# L'image est aussi copiée : Ctrl + V la colle directement. Une notification la montre ; un clic l'ouvre dans Swappy
+# pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie).
+set -uo pipefail
+
+mode="${1:-zone}"
+images="$(xdg-user-dir PICTURES 2>/dev/null)"
+[ -n "$images" ] && [ "$images" != "$HOME" ] && [ "$images" != "$HOME/" ] || images="$HOME/Pictures"
+dossier="$images/Captures"
+mkdir -p "$dossier"
+fichier="$dossier/Capture du $(date '+%Y-%m-%d à %H.%M.%S').png"
+
+case "$mode" in
+  ecran)
+    # Écran sous la souris (Hyprland), sinon tous les écrans
+    sortie="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null)"
+    if [ -n "$sortie" ]; then grim -o "$sortie" "$fichier"; else grim "$fichier"; fi || exit 1 ;;
+  zone|retouche)
+    zone="$(slurp -d 2>/dev/null)" || exit 0            # Échap : rien n'est fait
+    [ -n "$zone" ] || exit 0
+    grim -g "$zone" "$fichier" || exit 1 ;;
+  *) echo "Usage : nc-capture ecran | zone | retouche" >&2; exit 2 ;;
+esac
+
+wl-copy --type image/png < "$fichier" 2>/dev/null
+
+# Swappy : enregistre la version annotée dans le même dossier
+mkdir -p "$HOME/.config/swappy"
+conf="$HOME/.config/swappy/config"
+if ! grep -qF "save_dir=$dossier" "$conf" 2>/dev/null; then
+  printf '[Default]\nsave_dir=%s\nsave_filename_format=Capture annotée du %%Y-%%m-%%d à %%H.%%M.%%S.png\nshow_panel=true\nearly_exit=true\n' \
+    "$dossier" > "$conf"
+fi
+
+if [ "$mode" = retouche ]; then
+  exec swappy -f "$fichier"
+fi
+
+# Notification avec la capture ; clic : l'annoter dans Swappy (attente en arrière-plan, le raccourci rend la main)
+(
+  action="$(timeout 600 notify-send -a "Capture d'écran" -i "$fichier" -A "default=Annoter" -A "dossier=Ouvrir le dossier" \
+    "Capture enregistrée" "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." 2>/dev/null)"
+  case "$action" in
+    default) swappy -f "$fichier" ;;
+    dossier) xdg-open "$dossier" ;;
+  esac
+) >/dev/null 2>&1 &
+disown 2>/dev/null || true
+exit 0
