@@ -24,19 +24,31 @@ Item {
         property real taux: 0
         property color couleur: "white"
         width: (sy.width - 10) / 2; height: 86; radius: 18
+        // Même structure pour les quatre blocs (titre, chiffre, barre), centrée verticalement ; le détail éventuel
+        // (« 7,4 / 30,6 Go », « 284 Go libres ») est sur la ligne du chiffre, à droite
         Column {
-            anchors.fill: parent; anchors.margins: 12; spacing: 4
+            anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
             Row {
                 spacing: 6
-                Ico { nom: me.icone; taille: 16; color: "#98989d" }
-                Texte { text: me.titre; secondaire: true; font.pixelSize: 12 }
+                Ico { nom: me.icone; taille: 16; color: "#98989d"; anchors.verticalCenter: parent.verticalCenter }
+                Texte { text: me.titre; secondaire: true; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
             }
-            Texte { text: me.valeur; font.pixelSize: 20; font.weight: Font.DemiBold; color: me.couleur }
+            Item {
+                width: parent.width; height: chiffre.implicitHeight
+                Texte { id: chiffre; text: me.valeur; font.pixelSize: 20; font.weight: Font.DemiBold; color: me.couleur; font.features: { "tnum": 1 } }
+                Texte {
+                    anchors.right: parent.right; anchors.baseline: chiffre.baseline
+                    width: Math.min(implicitWidth, parent.width - chiffre.implicitWidth - 8)
+                    horizontalAlignment: Text.AlignRight
+                    text: me.detail; secondaire: true; font.pixelSize: 11; visible: me.detail !== ""
+                }
+            }
             Rectangle {
                 width: parent.width; height: 5; radius: 2.5; color: "#3a3a3c"
                 Rectangle { height: parent.height; radius: 2.5; color: me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
             }
-            Texte { text: me.detail; secondaire: true; font.pixelSize: 11; visible: me.detail !== "" }
         }
     }
 
