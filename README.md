@@ -99,6 +99,20 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 
+## Île dynamique
+
+Au centre de la barre, une pilule noire comme l'île de l'iPhone : l'heure, ta musique (pochette, onde sonore). Elle
+s'étire quelques secondes pour le volume, la luminosité, un nouveau morceau, le chargeur, le profil d'énergie, le mode
+jeu. Un clic (ou **Super + C**) et elle se déploie en centre de contrôle façon iOS : Wi-Fi, Bluetooth, ne pas déranger,
+mode jeu, musique, curseurs verticaux de luminosité et de volume, lumière de nuit, halo musical, profil d'énergie,
+capture, notifications, réglages, verrouillage, extinction. **Appui long (ou clic droit)** sur Wi-Fi, Bluetooth ou le
+volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
+se referme dans la pilule.
+
+Sur Arch, l'île est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
+service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même île est fournie par le plugin Noctalia
+`nc/ile` (un peu moins libre : elle s'ouvre juste sous la barre).
+
 ## Automatismes
 
 | | |

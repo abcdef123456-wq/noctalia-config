@@ -28,6 +28,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-carousel
   .local/share/noctalia/plugins/nc-keys
   .local/share/noctalia/plugins/nc-ile
+  .config/quickshell/nc-ile
   .local/share/nc/finger.png
   .local/bin/nc-apps
   .local/bin/nc-boot-wallpaper
@@ -62,6 +63,7 @@ HOME_FILES=(
   .config/systemd/user/nc-carousel-thumbs.service
   .config/systemd/user/nc-profile-sync.service
   .config/systemd/user/nc-pouls.service
+  .config/systemd/user/nc-ile.service
   .config/systemd/user/nc-ecran-externe.service
   .zshrc
   .p10k.zsh
@@ -108,6 +110,9 @@ sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
 
 # Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
 sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_theme=@ICON_THEME@/' home/.config/qt6ct/qt6ct.conf
+
+# Centre de la barre : île Quickshell (vide) ou plugin nc/ile, choisi par install.sh
+sed -i -E 's/^center = \[("nc\/ile:pilule")?\]/center = [@ILE_CENTRE@]/' home/.config/noctalia/config.toml
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml

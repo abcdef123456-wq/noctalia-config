@@ -7,6 +7,8 @@ case "${1:-}" in
   lock)            exec noctalia msg session lock ;;
   power-cycle)     exec noctalia msg power-cycle ;;
   control-center)                             # centre de contrôle de l'île dynamique : ouverture, ou fermeture animée
+    # Île Quickshell (au-dessus de la barre), sinon île du plugin Noctalia
+    if systemctl --user is-active --quiet nc-ile.service; then exec qs -c nc-ile ipc call ile basculer; fi
     if noctalia msg status 2>/dev/null | grep -q '"activePanelId": *"nc/ile:centre"'; then
       exec noctalia msg plugin nc/ile:centre all fermer
     fi
