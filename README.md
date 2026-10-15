@@ -15,6 +15,8 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - PC hybride (Intel/AMD + NVIDIA) : bureau sur la carte intégrée, la NVIDIA dort tant qu'un jeu ne la réveille pas ;
 - captures d'écran à annoter, presse-papiers, émojis, lumière de nuit, loupe, en un raccourci chacun ;
 - tes propres raccourcis en une commande (`nc-raccourci`), mise à jour en une commande (`nc-maj`) ;
+- **un bureau qui réagit tout seul** : halo qui pulse sur les basses de ta musique, mode jeu automatique au lancement
+  d'un jeu, marque-pages de fenêtres, fenêtres flottantes qui se rouvrent là où tu les as laissées ;
 - écran de démarrage (logo animé, thème GRUB) et écran de connexion assortis, proposés à l'installation.
 
 ## Installation
@@ -90,6 +92,15 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
+
+## Automatismes
+
+| | |
+|---|---|
+| **Halo musical** | Quand de la musique joue, le halo coloré de la fenêtre active pulse sur les basses (cava écoute la sortie son). Coupé en Économie, en mode jeu et sur batterie (sauf en Performance). **Super + Alt + M** pour le couper ou le remettre ; `nc-pouls demo` pour le voir sans musique. |
+| **Mode jeu automatique** | Un jeu s'ouvre (Steam, Proton, gamescope, `.exe`) : profil Performance et mode jeu. Le dernier jeu fermé : retour au profil d'avant, effets et notifications rétablis. |
+| **Marque-pages de fenêtres** | **Super + Ctrl + 1…4** : le premier appui attache la fenêtre active à la touche ; ensuite, la touche t'amène à elle depuis n'importe quel bureau, et depuis elle te ramène à la fenêtre d'avant. **Super + Ctrl + Maj + 1…4** pour en attacher une autre. |
+| **Fenêtres flottantes** | Chaque appli flottante (calculatrice, réglages, lecteur…) se rouvre à la taille et à la place où tu l'as fermée, en proportion de l'écran. |
 
 ### Ajouter tes raccourcis
 

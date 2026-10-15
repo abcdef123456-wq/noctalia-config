@@ -38,6 +38,7 @@ HOME_FILES=(
   .local/bin/nc-launch
   .local/bin/nc-maj
   .local/bin/nc-profile-sync
+  .local/bin/nc-pouls
   .local/bin/nc-raccourci
   .local/bin/nc-shell
   .local/bin/nc-shell-msg
@@ -56,6 +57,7 @@ HOME_FILES=(
   .config/systemd/user/nc-carousel-thumbs.path
   .config/systemd/user/nc-carousel-thumbs.service
   .config/systemd/user/nc-profile-sync.service
+  .config/systemd/user/nc-pouls.service
   .zshrc
   .p10k.zsh
   .config/nvim

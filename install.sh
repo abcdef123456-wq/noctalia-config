@@ -654,7 +654,7 @@ fi
 
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "4. Services de ta session"
-UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service)
+UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
 if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable "${UNITS[@]}" >/dev/null 2>&1 || true
@@ -665,9 +665,9 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
       # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
-      systemctl --user restart noctalia.service nc-profile-sync.service hypridle.service 2>/dev/null || true
+      systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service hypridle.service 2>/dev/null || true
     else
-      systemctl --user start noctalia.service 2>/dev/null || true   # rien n'a changé : simplement relancée
+      systemctl --user start noctalia.service nc-pouls.service 2>/dev/null || true   # rien n'a changé : simplement relancés
     fi
     [ "$KDE_POLKIT" = 1 ] && { systemctl --user start plasma-polkit-agent.service 2>/dev/null || true; }
   fi
@@ -677,7 +677,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   fi
 else
   warn "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés."
-  info "Dans ta session Hyprland, lance : systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service hypridle.service"
+  info "Dans ta session Hyprland, lance : systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service hypridle.service"
 fi
 
 # ── 5. Étapes système (une question par étape) ───────────────────────────────

@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""nc-pouls : le halo de la fenêtre active pulse sur les basses de la musique.
+
+Tourne en service (nc-pouls.service) : dès qu'un lecteur joue (Spotify, navigateur, mpv… vus par playerctl), il
+écoute la sortie son avec cava et transmet le niveau des basses à Hyprland (nc.halo, dans nc/automatismes.lua).
+Rien ne se passe en profil Économie ni en mode jeu, ni sur batterie hors profil Performance ; sans musique, cava est
+arrêté (aucun coût).
+
+  nc-pouls          service (lancé par systemd)
+  nc-pouls demo     8 secondes de pulsation de démonstration, sans musique
+Couper / remettre : Super + Alt + M, ou systemctl --user disable --now nc-pouls
+"""
+import glob
+import math
+import os
+import re
+import select
+import socket
+import subprocess
+import sys
+import time
+
+RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+PROFIL = os.path.expanduser("~/.config/hypr/nc/profil.lua")
+CAVA_CONF = """[general]
+bars = 8
+framerate = 40
+[input]
+method = pipewire
+source = auto
+[output]
+method = raw
+raw_target = /dev/stdout
+data_format = ascii
+ascii_max_range = 100
+bar_delimiter = 59
+frame_delimiter = 10
+[smoothing]
+noise_reduction = 55
+"""
+
+
+def socket_path():
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if sig and os.path.exists(f"{RUN}/hypr/{sig}/.socket.sock"):
+        return f"{RUN}/hypr/{sig}/.socket.sock"
+    socks = sorted(glob.glob(f"{RUN}/hypr/*/.socket.sock"), key=os.path.getmtime)
+    return socks[-1] if socks else None
+
+
+def hypr(cmd):
+    p = socket_path()
+    if not p:
+        return
+    try:
+        with socket.socket(socket.AF_UNIX) as s:
+            s.settimeout(0.5)
+            s.connect(p)
+            s.sendall(cmd.encode())
+            s.recv(256)
+    except OSError:
+        pass
+
+
+def halo(n):
+    hypr(f"eval nc.halo({n:.2f})")
+
+
+def autorise():
+    """Pas en Économie, pas en mode jeu, pas sur batterie hors Performance."""
+    if os.path.exists(f"{RUN}/nc-mode-jeu"):
+        return False
+    try:
+        t = open(PROFIL).read()
+    except OSError:
+        return True
+    profil = (re.search(r'profil\s*=\s*"([a-z-]+)"', t) or [None, "balanced"])[1]
+    batterie = re.search(r"batterie\s*=\s*true", t) is not None
+    return profil != "power-saver" and (not batterie or profil == "performance")
+
+
+def musique():
+    try:
+        out = subprocess.run(["playerctl", "-a", "status"], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "Playing" in out
+
+
+def demo():
+    t0 = time.time()
+    while time.time() - t0 < 8:
+        t = time.time() - t0
+        beat = (t * 2.1) % 1          # environ 126 battements par minute
+        halo(max(0.0, math.exp(-beat * 6)) * (0.7 + 0.3 * math.sin(t)))
+        time.sleep(1 / 40)
+    halo(0)
+
+
+def service():
+    conf = f"{RUN}/nc-pouls-cava.conf"
+    with open(conf, "w") as f:
+        f.write(CAVA_CONF)
+    cava, niveau, envoye, prochain_test = None, 0.0, -1.0, 0.0
+    while True:
+        now = time.time()
+        if now >= prochain_test:
+            prochain_test = now + 2
+            actif = musique() and autorise()
+            if actif and cava is None:
+                cava = subprocess.Popen(["cava", "-p", conf], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            elif not actif and cava is not None:
+                cava.terminate()
+                cava = None
+                niveau, envoye = 0.0, -1.0
+                halo(0)
+        if cava is None:
+            time.sleep(1)
+            continue
+        r, _, _ = select.select([cava.stdout], [], [], 0.25)
+        if not r:
+            continue
+        ligne = cava.stdout.readline()
+        if not ligne:                              # cava arrêté (son coupé, PipeWire relancé…)
+            cava = None
+            halo(0)
+            continue
+        barres = [int(x) for x in ligne.strip().strip(";").split(";") if x.isdigit()]
+        if len(barres) < 2:
+            continue
+        basse = max(barres[0], barres[1]) / 100
+        # Montée immédiate, retombée douce : la pulsation suit le rythme sans clignoter
+        niveau = basse if basse > niveau else niveau * 0.86 + basse * 0.14
+        if abs(niveau - envoye) >= 0.04:
+            halo(niveau)
+            envoye = niveau
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "demo":
+        demo()
+    elif len(sys.argv) > 1:
+        print(__doc__.strip())
+    else:
+        try:
+            service()
+        finally:
+            halo(0)
