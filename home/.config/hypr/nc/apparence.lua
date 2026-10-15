@@ -98,6 +98,9 @@ hl.config({
         -- Fréquence variable (FreeSync / G-Sync) seulement pour un jeu ou une vidéo en plein écran : plus fluide,
         -- sans scintillement sur le bureau
         vrr                      = 3,
+        -- Si Noctalia redémarre pendant que l'écran est verrouillé, elle reprend le verrouillage
+        -- (au lieu de l'écran rouge « lockscreen app died »)
+        allow_session_lock_restore = true,
     },
 
     -- Jeu ou vidéo en plein écran affiché directement, sans passer par le compositeur : moins de latence
