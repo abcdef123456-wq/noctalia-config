@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# nc-launch : lance une appli sur la carte graphique du profil énergétique courant (PC hybride).
+# Utilisé comme préfixe de lancement par Noctalia (lanceur, dock, barre des tâches).
+#   Profil Performance (session sur la carte intégrée) -> NVIDIA, via nvidia-run
+#   Autres profils, ou PC non hybride                 -> environnement de la session
+# Le choix est écrit par nc-profile-sync dans $XDG_RUNTIME_DIR/nc-gpu-default.
+[ $# -ge 1 ] || { echo "Usage : nc-launch <commande> [arguments]" >&2; exit 1; }
+state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
+if [ "$(cat "$state" 2>/dev/null)" = nvidia ]; then
+  exec "$HOME/.local/bin/nvidia-run" "$@"
+fi
+exec "$@"

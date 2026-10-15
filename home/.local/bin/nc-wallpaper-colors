@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""nc-wallpaper-colors : choisit la méthode de couleurs Noctalia la plus adaptée au fond d'écran.
+
+Appelé par le hook Noctalia v5 « wallpaper_changed » (chemin dans NOCTALIA_WALLPAPER_PATH) ou avec l'image en argument.
+  - image colorée       -> « vibrant » : reprend la couleur marquante (orange du tigre, rouge d'une voiture…)
+  - image quasi neutre  -> « muted »   : palette sobre, sans couleur inventée (photo noir et blanc…)
+Mesure : 98e centile de la chroma OKLCH (capte aussi une petite zone vive, ex. un feu arrière) sur une miniature 64x64, en ignorant les pixels très sombres et très clairs.
+Usage : nc-wallpaper-colors [IMAGE] [--dry-run]
+"""
+import json
+import math
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+THRESHOLD = 0.045  # chroma OKLCH ; au-dessous : image considérée comme neutre
+
+
+def _lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def oklch(r, g, b):
+    r, g, b = _lin(r / 255), _lin(g / 255), _lin(b / 255)
+    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
+    m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
+    s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
+    L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    return L, math.hypot(A, B)
+
+
+def colorfulness(path):
+    raw = subprocess.run(["magick", str(path) + "[0]", "-resize", "64x64!", "-colorspace", "sRGB", "-depth", "8", "rgb:-"],
+                         capture_output=True, check=True).stdout
+    chromas = sorted(c for L, c in (oklch(*raw[i:i + 3]) for i in range(0, len(raw) - 2, 3)) if 0.08 < L < 0.95)
+    if not chromas:
+        return 0.0
+    return chromas[min(len(chromas) - 1, int(len(chromas) * 0.98))]
+
+
+def boot_size():
+    """Définition du plus grand écran branché (2560x1600 si Hyprland ne répond pas)."""
+    try:
+        mons = json.loads(subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=3).stdout)
+        w, h = max(((m["width"], m["height"]) for m in mons), key=lambda wh: wh[0] * wh[1])
+        return f"{w}x{h}"
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return "2560x1600"
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    src = args[0] if args else os.environ.get("NOCTALIA_WALLPAPER_PATH", "")
+    if not src:
+        sys.exit(__doc__)
+    img = Path(src).expanduser()
+    if not img.is_file():
+        sys.exit(f"nc-wallpaper-colors : image introuvable : {img}")
+    # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (nc-boot-wallpaper).
+    if "--dry-run" not in sys.argv:
+        cache = Path.home() / ".cache/nc/wallpaper-boot.jpg"
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        size = boot_size()
+        subprocess.Popen(["magick", str(img) + "[0]", "-resize", size + "^", "-gravity", "center",
+                          "-extent", size, "-quality", "90", str(cache)])
+    c = colorfulness(img)
+    method = "vibrant" if c >= THRESHOLD else "muted"
+    print(f"{img.name}: chroma={c:.3f} -> {method}")
+    if "--dry-run" in sys.argv:
+        return
+    cur = subprocess.run(["noctalia", "msg", "color-scheme-get"], capture_output=True, text=True).stdout.split()
+    if cur != ["wallpaper", method]:
+        subprocess.run(["noctalia", "msg", "color-scheme-set", "wallpaper", method], check=False,
+                       stdout=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    main()

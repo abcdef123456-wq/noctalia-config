@@ -1,0 +1,71 @@
+# Thème GRUB « nc » (noctalia-config) : panneau givré centré, assorti au bureau.
+# Titre (@BOOT_TITLE@) : nom du PC, ou à défaut de la distribution, écrit par install.sh.
+# Polices Noto Sans (GRUB affiche sans anticrénelage : la graisse Medium reste nette). PNG en RVB/RVBA 8 bits uniquement.
+title-text: ""
+desktop-image: "background.png"
+desktop-color: "#0b0d12"
+terminal-font: "Noto Sans Regular 22"
+terminal-left: "10%"
+terminal-top: "10%"
+terminal-width: "80%"
+terminal-height: "80%"
+
++ label {
+    left = 30%
+    top = 33%
+    width = 40%
+    align = "center"
+    text = "@BOOT_TITLE@"
+    font = "Noto Sans Bold 58"
+    color = "#e6e8ef"
+}
+
++ label {
+    left = 30%
+    top = 39%
+    width = 40%
+    align = "center"
+    text = "Choisis un système"
+    font = "Noto Sans Regular 22"
+    color = "#8fb3ff"
+}
+
++ boot_menu {
+    left = 34%
+    top = 45%
+    width = 32%
+    height = 24%
+    item_font = "Noto Sans Regular 30"
+    item_color = "#dfe3ec"
+    selected_item_font = "Noto Sans Regular 30"
+    selected_item_color = "#0a1226"
+    selected_item_pixmap_style = "select_*.png"
+    icon_width = 0
+    icon_height = 0
+    item_icon_space = 0
+    item_height = 64
+    item_padding = 24
+    item_spacing = 14
+    scrollbar = false
+}
+
++ label {
+    id = "__timeout__"
+    left = 30%
+    top = 71%
+    width = 40%
+    align = "center"
+    text = "Démarrage automatique dans %d s"
+    font = "Noto Sans Regular 22"
+    color = "#a3a9b8"
+}
+
++ label {
+    left = 0
+    top = 92%
+    width = 100%
+    align = "center"
+    text = "Flèches : choisir   ·   Entrée : démarrer   ·   e : modifier   ·   c : console"
+    font = "Noto Sans Regular 22"
+    color = "#6b7385"
+}

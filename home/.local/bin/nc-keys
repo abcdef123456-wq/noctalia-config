@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""nc-keys : tes raccourcis Hyprland, lus en direct (hyprctl binds), avec leur description.
+
+  nc-keys          liste lisible dans le terminal
+  nc-keys json     JSON pour la fiche Super + / (plugin Noctalia v5 nc/keys)
+Seuls les raccourcis qui ont une description apparaissent. Dans ~/.config/hypr/, une description s'écrit
+« Section|Texte », par exemple : hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Applis et barre|Navigateur" })
+Les touches sont nommées comme sur la disposition US (les raccourcis suivent la position des touches).
+"""
+import json
+import re
+import subprocess
+import sys
+
+KEYCODES = {
+    9: "Échap", 22: "Retour arrière", 23: "Tab", 36: "Entrée", 49: "`", 65: "Espace", 61: "/",
+    59: ",", 60: ".", 20: "-", 21: "=", 34: "[", 35: "]", 47: ";", 48: "'", 51: "\\",
+    111: "↑", 113: "←", 114: "→", 116: "↓",
+}
+for i, k in enumerate("1234567890"):
+    KEYCODES[10 + i] = k
+for row, start in (("QWERTYUIOP", 24), ("ASDFGHJKL", 38), ("ZXCVBNM", 52)):
+    for i, k in enumerate(row):
+        KEYCODES[start + i] = k
+for i in range(10):
+    KEYCODES[67 + i] = f"F{i + 1}"
+KEYCODES[95], KEYCODES[96] = "F11", "F12"
+
+MODS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Maj"))
+MOUSE = {"mouse:272": "glisser", "mouse:273": "clic droit", "mouse_down": "molette", "mouse_up": "molette"}
+SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "Autres"]
+
+
+def parse_binds(text):
+    """Blocs de « hyprctl binds » -> liste de dictionnaires (la sortie JSON ne donne pas les touches par position)."""
+    binds, cur = [], None
+    for line in text.splitlines():
+        if line and not line[0].isspace():
+            cur = {"flags": line.strip()}
+            binds.append(cur)
+        elif cur is not None and ":" in line:
+            k, _, v = line.strip().partition(":")
+            cur[k.strip()] = v[1:] if v.startswith(" ") else v
+    return binds
+
+
+def key_label(raw):
+    raw = raw.strip()
+    last = raw.split("+")[-1].strip()
+    m = re.fullmatch(r"code:(\d+)", last)
+    if m:
+        return KEYCODES.get(int(m.group(1)), f"touche {m.group(1)}")
+    if last.startswith("XF86"):
+        return "Touches média"
+    if last in MOUSE:
+        return MOUSE[last]
+    return KEYCODES.get(last, last.capitalize() if len(last) > 1 else last.upper())
+
+
+def collect():
+    out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True, check=True).stdout
+    rows = {}   # (section, texte, mods) -> {keys, order}
+    for n, b in enumerate(parse_binds(out)):
+        desc = b.get("description", "").strip()
+        if not desc or b.get("submap", "").strip():
+            continue
+        sec, sep, text = desc.partition("|")
+        if not sep:
+            sec, text = "Autres", desc
+        sec, text = sec.strip(), text.strip()
+        if sec not in SECTIONS:
+            sec = "Autres"
+        try:
+            mask = int(b.get("modmask", "0"))
+        except ValueError:
+            mask = 0
+        mods = tuple(name for bit, name in MODS if mask & bit)
+        k = (sec, text, mods)
+        rows.setdefault(k, {"keys": [], "order": n})
+        lab = key_label(b.get("key", ""))
+        if lab not in rows[k]["keys"]:
+            rows[k]["keys"].append(lab)
+    by_sec = {s: [] for s in SECTIONS}
+    for (sec, text, mods), v in sorted(rows.items(), key=lambda kv: kv[1]["order"]):
+        keys = v["keys"]
+        if set(keys) >= {"←", "→", "↑", "↓"}:
+            key = "flèches"
+        elif len(keys) >= 9 and all(x.isdigit() for x in keys):
+            key = "1…0"
+        else:
+            key = " / ".join(keys)
+        by_sec[sec].append({"keys": list(mods) + [key], "text": text})
+    # Bascule de disposition du clavier (option XKB, pas un raccourci « bind »)
+    opts = subprocess.run(["hyprctl", "getoption", "input:kb_options"], capture_output=True, text=True).stdout
+    if "grp:win_space_toggle" in opts:
+        by_sec["Système"].append({"keys": ["Super", "Espace"], "text": "Changer la disposition du clavier"})
+    return [{"title": s, "rows": by_sec[s]} for s in SECTIONS if by_sec[s]]
+
+
+if __name__ == "__main__":
+    data = collect()
+    if len(sys.argv) > 1 and sys.argv[1] == "json":
+        json.dump(data, sys.stdout, ensure_ascii=False)
+    else:
+        for sec in data:
+            print(f"\n{sec['title']}")
+            for r in sec["rows"]:
+                print(f"  {' + '.join(r['keys']):<28} {r['text']}")

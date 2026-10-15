@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# nc-finger : le bouton d'arrêt fait apparaître de gros doigts (image vectorielle nette) sur le fond flouté, sans éteindre. Une touche quitte.
+hyprctl clients -j | grep -q '"class": "fingerpop"' && exit 0
+exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/nc-finger.lock" kitty --class fingerpop -o background_opacity=0.35 -o font_size=14 -o confirm_os_window_close=0 -o hide_window_decorations=yes \
+  -o window_padding_width=0 python3 -c '
+import termios,tty,sys
+fd=sys.stdin.fileno(); termios.tcgetattr(fd); tty.setcbreak(fd)
+import os,random,select,subprocess
+img=os.path.expanduser("~/.local/share/nc/finger.png")
+c,r=os.get_terminal_size()
+sys.stdout.write("\033[?25l\033[2J"); sys.stdout.flush()
+n=0
+while not select.select([sys.stdin],[],[],0.5)[0]:
+    w=random.randint(38,72); h=int(w*0.5)
+    x=random.randint(0,max(0,c-w)); y=random.randint(0,max(0,r-h))
+    subprocess.run(["kitten","icat","--transfer-mode=memory","--stdin=no","--place","%dx%d@%dx%d"%(w,h,x,y),img])
+'

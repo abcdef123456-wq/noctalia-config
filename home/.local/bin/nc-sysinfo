@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# nc-sysinfo : lignes courtes, en français, pour l'accueil du terminal (nc-greeting).
+#   nc-sysinfo gpu     cartes graphiques ; la carte dédiée indique si elle est en veille
+#   nc-sysinfo power   batterie, secteur, profil énergétique
+#   nc-sysinfo uptime  durée depuis l'allumage
+# Ne lit que des fichiers de /sys mis en cache par le noyau : n'allume jamais une carte graphique en veille
+# (contrairement à lspci ou au module GPU de fastfetch).
+set -uo pipefail
+
+gpu_name() { # $1 = dossier PCI
+  local d=$1 ven dev rev name=""
+  ven=$(<"$d/vendor"); dev=$(<"$d/device"); rev=$(<"$d/revision")
+  ven=${ven#0x}; dev=${dev#0x}; rev=${rev#0x}
+  if [ "$ven" = 1002 ] && [ -r /usr/share/libdrm/amdgpu.ids ]; then
+    name=$(awk -F',[ \t]*' -v d="${dev^^}" -v r="${rev^^}" '$1 == d && $2 == r { print $3; exit }' /usr/share/libdrm/amdgpu.ids)
+  fi
+  if [ -z "$name" ] && [ -r /usr/share/hwdata/pci.ids ]; then
+    name=$(awk -v v="$ven" -v d="$dev" '
+      /^[0-9a-f]{4} / { inv = ($1 == v); next }
+      inv && /^\t[0-9a-f]{4} / { if ($1 == d) { sub(/^\t[0-9a-f]{4}  /, ""); print; exit } }' /usr/share/hwdata/pci.ids)
+    [[ "$name" =~ \[(.*)\] ]] && name=${BASH_REMATCH[1]}
+  fi
+  name=${name#AMD }; name=${name#NVIDIA }; name=${name#GeForce }; name=${name#Intel }
+  name=${name% / Mobile}; name=${name% Max-Q}; name=${name% Laptop GPU}
+  echo "${name:-carte $ven:$dev}"
+}
+
+case "${1:-}" in
+  gpu)
+    out=()
+    for d in /sys/bus/pci/devices/*; do
+      [[ $(<"$d/class") == 0x03* ]] || continue
+      n=$(gpu_name "$d")
+      if [ "$(cat "$d/boot_vga" 2>/dev/null)" != 1 ] && [ "$(cat "$d/power/runtime_status" 2>/dev/null)" = suspended ]; then
+        n="$n (en veille)"
+      fi
+      # Carte principale (celle de l'écran) en premier
+      if [ "$(cat "$d/boot_vga" 2>/dev/null)" = 1 ]; then out=("$n" "${out[@]}"); else out+=("$n"); fi
+    done
+    (IFS='|'; echo "${out[*]}") | sed 's/|/ · /g'
+    ;;
+  power)
+    parts=()
+    # Pourcentage gardé en mémoire par UPower (3 ms) ; lire /sys/…/BAT*/capacity interroge le matériel (~70 ms)
+    pct=$(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower/devices/DisplayDevice \
+          org.freedesktop.UPower.Device Percentage 2>/dev/null | awk '{printf "%d", $2 + 0.5}')
+    if [ -z "$pct" ] || [ "$pct" = 0 ]; then
+      for b in /sys/class/power_supply/BAT*; do [ -r "$b/capacity" ] && { pct=$(<"$b/capacity"); break; }; done
+    fi
+    [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && parts+=("$pct %")
+    ac=""
+    for a in /sys/class/power_supply/*; do
+      [ "$(cat "$a/type" 2>/dev/null)" = Mains ] && ac=$(cat "$a/online" 2>/dev/null) && break
+    done
+    if [ ${#parts[@]} -gt 0 ]; then
+      [ "$ac" = 1 ] && parts+=("sur secteur") || parts+=("sur batterie")
+    fi
+    # Profil de la plateforme (instantané, suit TLP / power-profiles-daemon), sinon D-Bus
+    prof=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null)
+    case "$prof" in low-power|quiet|cool) prof=power-saver ;; esac
+    [ -n "$prof" ] || prof=$(busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile 2>/dev/null | awk -F'"' '{print $2}')
+    case "$prof" in
+      performance) parts+=("Performance") ;;
+      balanced) parts+=("Équilibré") ;;
+      power-saver) parts+=("Économie") ;;
+    esac
+    [ ${#parts[@]} -gt 0 ] && (IFS='|'; echo "${parts[*]}") | sed 's/|/ · /g'
+    ;;
+  uptime)
+    read -r up _ < /proc/uptime; up=${up%.*}
+    d=$((up / 86400)); h=$((up % 86400 / 3600)); m=$((up % 3600 / 60))
+    if [ $d -gt 0 ]; then echo "allumé depuis $d j $h h"
+    elif [ $h -gt 0 ]; then printf 'allumé depuis %d h %02d\n' $h $m
+    else echo "allumé depuis $m min"; fi
+    ;;
+  *) sed -n '2,6p' "$0"; exit 1 ;;
+esac
