@@ -129,7 +129,7 @@ pname() {
     noto-fonts:debian) echo fonts-noto-core ;;
     noto-fonts:fedora) echo google-noto-sans-fonts ;;
     noto-fonts:suse) echo noto-sans-fonts ;;
-    quickshell:arch) echo quickshell ;;
+    quickshell:arch|quickshell:fedora) echo quickshell ;;
     quickshell:*) ;;   # pas dans les dépôts officiels : l'île du plugin Noctalia est utilisée
     breeze:fedora) echo plasma-breeze ;;
     breeze:suse) echo breeze6-style ;;
@@ -201,6 +201,14 @@ if [ "$MODE" != files ]; then
     if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
       bpo_on || die "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même."
       bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis trixie-backports."
+    elif [ "$FAMILY" = fedora ] && ! dnf -q info --available hyprland >/dev/null 2>&1; then
+      # Fedora : Hyprland n'est pas dans les dépôts officiels ; dépôt communautaire (COPR) le plus suivi, à jour
+      info "Hyprland n'est pas dans les dépôts officiels de Fedora : dépôt communautaire COPR sdegler/hyprland"
+      info "  https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/"
+      ask "Activer ce dépôt et installer Hyprland ?" o || die "Hyprland 0.55 ou plus est nécessaire."
+      pkg_try dnf5-plugins dnf-plugins-core          # commande « dnf copr »
+      sudo dnf -y copr enable sdegler/hyprland || die "activation du dépôt sdegler/hyprland impossible (paquet dnf-plugins-core ?)."
+      pkg_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis sdegler/hyprland."
     else
       pkg_install hyprland || die "installation de Hyprland impossible : installe-le toi-même puis relance."
     fi
