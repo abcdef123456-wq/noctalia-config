@@ -34,6 +34,12 @@ Singleton {
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
     readonly property string vueActive: vues[vue]
+    // Hauteur du contenu annoncée par les pages à liste (Son, Wi-Fi, Bluetooth) : l'île s'y ajuste
+    property var hauteurs: ({})
+    function annoncerHauteur(nom, h) {
+        if (hauteurs[nom] === Math.round(h)) return
+        var t = Object.assign({}, hauteurs); t[nom] = Math.round(h); hauteurs = t
+    }
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
     function aller(nom) {
         if (vues.indexOf(nom) < 0) return

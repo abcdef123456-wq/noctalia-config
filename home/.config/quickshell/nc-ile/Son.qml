@@ -1,5 +1,7 @@
-// Page « Son » : sortie et micro par défaut, et volume de chaque application (comme l'onglet Audio de Noctalia)
+// Page « Son », façon macOS : volume général, sortie et micro (lignes sobres, coche bleue), puis chaque application
+// qui joue du son avec son icône et son propre curseur.
 import QtQuick
+import Quickshell
 import Quickshell.Services.Pipewire
 
 Item {
@@ -10,29 +12,22 @@ Item {
     readonly property var applis: noeuds.filter(n => n.isStream && n.audio && !n.isSink)
     PwObjectTracker { objects: son.sorties.concat(son.entrees, son.applis) }
 
-    function nom(n) {
-        return n.properties["application.name"] || n.description || n.nickname || n.name || "?"
+    function nom(n) { return n.properties["application.name"] || n.description || n.nickname || n.name || "?" }
+    // Noms lisibles pour les périphériques (« Ryzen HD Audio Controller Stéréo analogique » → « Haut-parleurs »)
+    function nomAppareil(n, entree) {
+        var d = n.description || n.nickname || n.name || "?", b = (n.name || "").toLowerCase(), l = d.toLowerCase()
+        if (b.indexOf("hdmi") >= 0 || l.indexOf("hdmi") >= 0 || b.indexOf("displayport") >= 0) return "Écran (HDMI)"
+        if (b.indexOf("bluez") >= 0 || l.indexOf("headphone") >= 0 || l.indexOf("casque") >= 0) return d
+        if (b.indexOf("usb") >= 0) return d.replace(/ (Stéréo|Stereo|Mono|Analog|analogique).*$/i, "")
+        if (b.indexOf("alsa") >= 0 && (b.indexOf("analog") >= 0 || b.indexOf("pci") >= 0)) return entree ? "Micro intégré" : "Haut-parleurs"
+        return d
+    }
+    function iconeAppli(n) {
+        var p = n.properties
+        return Quickshell.iconPath(p["application.icon-name"] || (p["application.process.binary"] || "").toLowerCase() || "audio-x-generic", "audio-x-generic")
     }
 
-    component Titre: Texte { font.pixelSize: 12; font.weight: Font.Bold; secondaire: true; height: 22 }
-
-    // Ligne d'appareil : rond bleu si c'est celui utilisé
-    component Appareil: Module {
-        id: ap
-        property var noeud
-        property bool defaut
-        property string icone
-        width: son.width; height: 50; radius: 16; cliquable: true
-        Row {
-            anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 10; spacing: 10
-            Rectangle {
-                width: 32; height: 32; radius: 16; color: ap.defaut ? "#0a84ff" : "#3a3a3c"
-                Ico { anchors.centerIn: parent; nom: ap.icone; taille: 18 }
-            }
-            Texte { text: son.nom(ap.noeud); font.weight: Font.DemiBold; width: son.width - 110; anchors.verticalCenter: parent.verticalCenter }
-        }
-        Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: ap.defaut }
-    }
+    component Titre: Texte { font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
 
     Flickable {
         anchors.fill: parent
@@ -41,57 +36,68 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         Column {
             id: colonne
-            width: son.width; spacing: 6
-            Row {
-                spacing: 10; height: 34
-                Ico { nom: "volume_up"; taille: 24; anchors.verticalCenter: parent.verticalCenter }
-                Texte { text: "Son"; font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+            width: son.width; spacing: 4
+            onImplicitHeightChanged: Etat.annoncerHauteur("son", implicitHeight + 6)
+            Component.onCompleted: Etat.annoncerHauteur("son", implicitHeight + 6)
+
+            Texte { text: "Son"; font.pixelSize: 20; font.weight: Font.Bold; height: 32; leftPadding: 4 }
+            Curseur {
+                width: son.width
+                icone: Etat.muet ? "volume_off" : "volume_up"
+                valeur: Etat.muet ? 0 : Etat.volume
+                onChange: v => Etat.reglerVolume(v)
             }
-            Titre { text: "SORTIE" }
+
+            Titre { text: "Sortie" }
             Repeater {
                 model: son.sorties
-                Appareil {
+                Ligne {
                     required property var modelData
-                    noeud: modelData; defaut: modelData === Pipewire.defaultAudioSink
-                    icone: (son.nom(modelData).toLowerCase().indexOf("hdmi") >= 0 || son.nom(modelData).indexOf("GB2") >= 0) ? "tv" : "speaker"
+                    readonly property string n: son.nomAppareil(modelData, false)
+                    titre: n
+                    icone: n.indexOf("HDMI") >= 0 ? "tv" : ((modelData.name || "").indexOf("bluez") >= 0 || n.toLowerCase().indexOf("head") >= 0 ? "headphones" : "laptop_mac")
+                    actif: modelData === Pipewire.defaultAudioSink
+                    droite: actif ? "check" : ""; couleurDroite: "#0a84ff"
                     onClic: Pipewire.preferredDefaultAudioSink = modelData
                 }
             }
-            Titre { text: "MICRO" }
+
+            Titre { text: "Micro" }
             Repeater {
                 model: son.entrees
-                Appareil {
+                Ligne {
                     required property var modelData
-                    noeud: modelData; defaut: modelData === Pipewire.defaultAudioSource
+                    titre: son.nomAppareil(modelData, true)
+                    sous: modelData.audio && modelData.audio.muted ? "Coupé · clic droit pour le remettre" : ""
                     icone: modelData.audio && modelData.audio.muted ? "mic_off" : "mic"
+                    actif: modelData === Pipewire.defaultAudioSource
+                    droite: actif ? "check" : ""; couleurDroite: "#0a84ff"
                     onClic: Pipewire.preferredDefaultAudioSource = modelData
-                    onAppuiLong: if (modelData.audio) modelData.audio.muted = !modelData.audio.muted
+                    onClicDroit: if (modelData.audio) modelData.audio.muted = !modelData.audio.muted
                 }
             }
-            Titre { text: "APPLICATIONS" }
-            Texte { text: "Aucune application ne joue de son."; secondaire: true; visible: son.applis.length === 0; height: 26 }
+
+            Titre { text: "Applications" }
+            Texte { text: "Aucune application ne joue de son."; secondaire: true; visible: son.applis.length === 0; height: 30; leftPadding: 8 }
             Repeater {
                 model: son.applis
-                Module {
+                Item {
                     required property var modelData
-                    width: son.width; height: 58; radius: 16
+                    width: son.width; height: 44
+                    Image {
+                        id: ic
+                        anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                        width: 26; height: 26; sourceSize: Qt.size(52, 52)
+                        source: son.iconeAppli(modelData)
+                    }
                     Column {
-                        anchors.fill: parent; anchors.margins: 10; spacing: 6
-                        Row {
-                            width: parent.width; spacing: 8
-                            Texte { text: son.nom(modelData); font.weight: Font.DemiBold; width: parent.width - 50 }
-                            Texte { text: Math.round((modelData.audio ? modelData.audio.volume : 0) * 100) + " %"; secondaire: true }
-                        }
-                        // Volume de l'application : barre qu'on clique ou fait glisser
-                        Rectangle {
-                            width: parent.width; height: 8; radius: 4; color: "#3a3a3c"
-                            Rectangle { height: parent.height; radius: 4; color: "white"; width: parent.width * Math.min(1, modelData.audio ? modelData.audio.volume : 0) }
-                            MouseArea {
-                                anchors.fill: parent; anchors.margins: -8; preventStealing: true
-                                function regler(x) { if (modelData.audio) modelData.audio.volume = Math.max(0, Math.min(1, x / width)) }
-                                onPressed: e => regler(e.x)
-                                onPositionChanged: e => { if (pressed) regler(e.x) }
-                            }
+                        anchors.left: ic.right; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 4
+                        Texte { text: son.nom(modelData); font.pixelSize: 12; secondaire: true; width: parent.width }
+                        Curseur {
+                            width: parent.width; height: 18; radius: 9; icone: ""
+                            valeur: modelData.audio ? modelData.audio.volume : 0
+                            onChange: v => { if (modelData.audio) modelData.audio.volume = v }
                         }
                     }
                 }

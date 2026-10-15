@@ -3,7 +3,7 @@
 #   nc-ile-etat          tout (centre de contrôle)
 #   nc-ile-etat media    seulement la musique (pilule)
 #   nc-ile-etat wifi     réseaux Wi-Fi :      net=actif<TAB>nom<TAB>signal<TAB>sécurité<TAB>connu
-#   nc-ile-etat bt       appareils Bluetooth : bt=adresse<TAB>nom<TAB>connecté<TAB>icône
+#   nc-ile-etat bt       appareils Bluetooth : bt=adresse<TAB>nom<TAB>connecté<TAB>icône<TAB>associé
 #   nc-ile-etat son      sorties / entrées :  sortie=id<TAB>nom<TAB>défaut   entree=id<TAB>nom<TAB>défaut
 #   nc-ile-etat systeme  processeur, mémoire, température, disque, allumage, santé de la batterie, écrans
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
@@ -34,18 +34,27 @@ media() {
 wifi() {
   local connus
   connus="$(nmcli -t -f NAME,TYPE con show 2>/dev/null | sed -n 's/:802-11-wireless$//p' | sed 's/\\:/:/g')"
+  # Un même nom peut venir de plusieurs bornes (2,4 et 5 GHz) : une seule ligne par nom, active si l'une l'est,
+  # avec le meilleur signal.
   nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | sed 's/\\:/\x1f/g' |
     awk -F: -v connus="$connus" 'BEGIN { n = split(connus, c, "\n"); for (i = 1; i <= n; i++) k[c[i]] = 1 }
-      { gsub("\x1f", ":", $2); if ($2 == "" || vu[$2]++) next
-        printf "net=%s\t%s\t%s\t%s\t%s\n", ($1 == "*" ? 1 : 0), $2, $3, ($4 == "" ? "" : "1"), (($2 in k) ? 1 : 0) }'
+      { gsub("\x1f", ":", $2); if ($2 == "") next
+        if (!($2 in sig)) ordre[++m] = $2
+        if ($1 == "*") act[$2] = 1
+        if ($3 + 0 > sig[$2] + 0) sig[$2] = $3
+        if ($4 != "") sec[$2] = 1 }
+      END { for (i = 1; i <= m; i++) { s = ordre[i]
+        printf "net=%s\t%s\t%s\t%s\t%s\n", (s in act ? 1 : 0), s, sig[s], (s in sec ? "1" : ""), ((s in k) ? 1 : 0) } }'
 }
 
 bt() {
+  # Tous les appareils connus (associés ou vus pendant une recherche) : bt=adresse, nom, connecté, icône, associé
   local mac nom info
-  bluetoothctl devices Paired 2>/dev/null | while read -r _ mac nom; do
+  bluetoothctl devices 2>/dev/null | while read -r _ mac nom; do
     info="$(bluetoothctl info "$mac" 2>/dev/null)"
-    printf 'bt=%s\t%s\t%s\t%s\n' "$mac" "$nom" \
-      "$(grep -q 'Connected: yes' <<<"$info" && echo 1 || echo 0)" "$(sed -n 's/^\s*Icon: //p' <<<"$info" | head -1)"
+    printf 'bt=%s\t%s\t%s\t%s\t%s\n' "$mac" "$nom" \
+      "$(grep -q 'Connected: yes' <<<"$info" && echo 1 || echo 0)" "$(sed -n 's/^\s*Icon: //p' <<<"$info" | head -1)" \
+      "$(grep -q 'Paired: yes' <<<"$info" && echo 1 || echo 0)"
   done
 }
 
