@@ -16,6 +16,8 @@ A_TAPER = [
                                    "terminal, raccourcis… Gardés à chaque mise à jour."),
     ("nc-raccourci", "nc-raccourci", "Tes raccourcis clavier : changer les touches, en désactiver, en ajouter."),
     ("nc-maj", "nc-maj", "Met la config à jour depuis GitHub (ne refait que ce qui a changé)."),
+    ("nc-diag", "nc-diag rapport", "Vérifie toute l'installation et dit quoi faire si quelque chose cloche ; "
+                                   "« rapport » copie le bilan, prêt à envoyer pour avoir de l'aide."),
     ("nc-aide", "nc-aide nc-anim", "Cette aide ; avec un nom, le détail d'une commande."),
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),

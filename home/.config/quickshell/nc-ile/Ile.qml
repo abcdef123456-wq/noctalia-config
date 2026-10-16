@@ -142,14 +142,22 @@ PanelWindow {
         Loader {
             id: spot
             readonly property int hauteurVoulue: item ? item.hauteurVoulue : 56
+            // Travail en cours après la fermeture (appli lancée suivie…) : reste chargé. Recopié par un signal, pas lu
+            // directement sur item (active dépendrait de item, qui dépend de active : boucle de liaisons)
+            property bool occupe: false
             anchors.fill: parent
-            active: fen.recherche || garderSpot.running || (item !== null && item.occupe)
+            active: fen.recherche || garderSpot.running || occupe
             sourceComponent: Recherche {
                 actif: fen.recherche
                 opacity: fen.recherche && ile.width > 560 ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.recherche ? 160 : 70; easing.type: Easing.OutCubic } }
             }
+        }
+        Connections {
+            target: spot.item
+            ignoreUnknownSignals: true
+            function onOccupeChanged() { spot.occupe = spot.item ? spot.item.occupe : false }
         }
         Timer { id: garderSpot; interval: 400 }
         Connections { target: fen; function onRechercheChanged() { if (!fen.recherche) garderSpot.restart() } }

@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""nc-diag : vérifie toute l'installation de noctalia-config et dit quoi faire quand quelque chose cloche.
+  nc-diag            le bilan, en couleurs : ✓ ce qui va, ! ce qui manque (sans gravité), ✗ ce qui ne marche pas
+  nc-diag rapport    le même bilan en texte simple, copié dans le presse-papiers : à envoyer pour avoir de l'aide
+Ne change rien sur le PC.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HOME = os.path.expanduser("~")
+BIN = os.path.join(HOME, ".local/bin")
+
+
+def sortie(cmd, delai=5):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=delai)
+        return (r.stdout + r.stderr).strip(), r.returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return "", 127
+
+
+def a(cmd):
+    return shutil.which(cmd) is not None
+
+
+class Bilan:
+    def __init__(self, couleurs):
+        self.lignes, self.ko, self.attention = [], 0, 0
+        self.c = couleurs
+
+    def titre(self, t):
+        self.lignes.append(("titre", t, ""))
+
+    def ok(self, t):
+        self.lignes.append(("ok", t, ""))
+
+    def avert(self, t, quoi=""):
+        self.attention += 1
+        self.lignes.append(("avert", t, quoi))
+
+    def faux(self, t, quoi=""):
+        self.ko += 1
+        self.lignes.append(("faux", t, quoi))
+
+    def texte(self):
+        if self.c:
+            V, J, R, G, D, F = "\033[32m", "\033[33m", "\033[31m", "\033[1m", "\033[2m", "\033[0m"
+        else:
+            V = J = R = G = D = F = ""
+        out = []
+        for genre, t, quoi in self.lignes:
+            if genre == "titre":
+                out.append(f"\n{G}{t}{F}")
+                continue
+            signe = {"ok": f"{V}✓{F}", "avert": f"{J}!{F}", "faux": f"{R}✗{F}"}[genre]
+            out.append(f"  {signe} {t}")
+            if quoi:
+                out.append(f"      {D}→ {quoi}{F}")
+        return "\n".join(out)
+
+
+def verifier(b):
+    # ── Système ──
+    b.titre("Système")
+    osr = {}
+    try:
+        for l in open("/etc/os-release"):
+            k, _, v = l.strip().partition("=")
+            osr[k] = v.strip('"')
+    except OSError:
+        pass
+    b.ok(f"{osr.get('PRETTY_NAME', 'Linux')} · noyau {os.uname().release}")
+    depot = ""
+    try:
+        depot = open(os.path.join(HOME, ".config/nc/depot")).read().strip()
+    except OSError:
+        pass
+    if depot and os.path.isdir(os.path.join(depot, ".git")):
+        rev, _ = sortie(["git", "-C", depot, "log", "-1", "--format=%h du %cd", "--date=format:%d/%m/%Y"])
+        b.ok(f"noctalia-config : version {rev}")
+    else:
+        b.avert("dépôt noctalia-config introuvable", "relance install.sh depuis le dépôt cloné (nc-maj en a besoin)")
+
+    # ── Hyprland ──
+    b.titre("Hyprland")
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        b.faux("pas dans une session Hyprland", "lance nc-diag depuis un terminal de ta session Hyprland")
+    else:
+        v, _ = sortie(["hyprctl", "version", "-j"])
+        try:
+            ver = json.loads(v).get("tag", "?").lstrip("v").split("-")[0]
+        except ValueError:
+            ver = "?"
+        b.ok(f"Hyprland {ver}")
+        err, _ = sortie(["hyprctl", "configerrors"])
+        err = "\n".join(l for l in err.splitlines() if l.strip())
+        if err:
+            premiere = err.splitlines()[0][:160]
+            b.faux(f"erreur dans la config Hyprland : {premiere}",
+                   "nc-maj ; si ça reste, envoie « nc-diag rapport »")
+        else:
+            b.ok("config Hyprland sans erreur")
+    # Marqueurs @…@ jamais remplis (fichier copié à la main depuis le dépôt) : casse la config
+    restes = []
+    for d in (".config/hypr", ".config/noctalia", ".config/kitty", ".config/quickshell"):
+        for racine, _, fichiers in os.walk(os.path.join(HOME, d)):
+            for f in fichiers:
+                if not f.endswith((".lua", ".toml", ".conf", ".qml", ".json")):
+                    continue
+                p = os.path.join(racine, f)
+                try:
+                    t = open(p, encoding="utf-8", errors="ignore").read()
+                except OSError:
+                    continue
+                for m in re.findall(r"@[A-Z][A-Z_]+[0-9]?@", t):
+                    if m not in ("@DEFAULT_AUDIO_SINK@", "@DEFAULT_AUDIO_SOURCE@", "@DEFAULT_SINK@", "@DEFAULT_SOURCE@"):
+                        restes.append(f"{p.replace(HOME, '~')} ({m})")
+                        break
+    if restes:
+        b.faux("fichiers jamais complétés par l'installation : " + ", ".join(restes[:3]),
+               "relance install.sh (ne copie pas les fichiers du dépôt à la main)")
+
+    # ── Noctalia et l'île ──
+    b.titre("Barre et île")
+    if a("noctalia"):
+        v, _ = sortie(["noctalia", "--version"])
+        b.ok(v.splitlines()[0] if v else "Noctalia installée")
+        _, code = sortie(["noctalia", "msg", "status"])
+        if code != 0:
+            b.faux("Noctalia ne tourne pas", "systemctl --user restart noctalia.service")
+        val, _ = sortie(["noctalia", "config", "validate"], 15)
+        if "invalid" in val.lower() or "error" in val.lower():
+            ligne = next((l for l in val.splitlines() if "ERR" in l or "error" in l.lower()), val.splitlines()[-1] if val else "")
+            b.faux(f"config de Noctalia : {ligne[:160]}", "nc-maj")
+    else:
+        b.faux("Noctalia n'est pas installée", "relance install.sh")
+    if a("qs"):
+        v, _ = sortie(["qs", "--version"])
+        qv = (re.findall(r"\d+\.\d+(?:\.\d+)?", v) or ["?"])[0]
+        if qv != "?" and tuple(int(x) for x in qv.split(".")[:2]) < (0, 3):
+            b.avert(f"Quickshell {qv} : l'île demande la 0.3", "mets Quickshell à jour (Fedora : COPR errornointernet/quickshell)")
+        else:
+            b.ok(f"Quickshell {qv} (île dynamique)")
+        _, code = sortie(["systemctl", "--user", "is-active", "nc-ile.service"])
+        if code != 0:
+            b.faux("l'île dynamique ne tourne pas", "systemctl --user restart nc-ile.service ; journal : qs -c nc-ile log")
+        if not os.path.exists(os.path.join(HOME, ".local/share/fonts/MaterialSymbolsRounded.ttf")):
+            b.avert("police des icônes de l'île absente (carrés à la place des icônes)", "relance install.sh, qui la télécharge")
+    else:
+        b.avert("Quickshell absent : île simplifiée du plugin Noctalia", "relance install.sh (il propose de l'installer)")
+
+    # ── Services ──
+    b.titre("Services de la session")
+    services = {
+        "noctalia.service": "barre de Noctalia", "nc-profile-sync.service": "profils d'énergie",
+        "nc-pouls.service": "halo musical", "nc-ecran-externe.service": "écrans externes",
+        "hypridle.service": "veille automatique", "nc-theme-sync.path": "couleurs du fond d'écran",
+    }
+    if os.path.exists(os.path.join(HOME, ".config/systemd/user/nc-couvercle.service")):
+        services["nc-couvercle.service"] = "couvercle"
+    for s, nom in services.items():
+        etat, _ = sortie(["systemctl", "--user", "is-active", s])
+        if etat == "active":
+            b.ok(f"{nom} ({s})")
+        elif s == "nc-couvercle.service" and etat == "inactive":
+            b.ok(f"{nom} : mise en veille normale")
+        elif etat == "failed":
+            journal, _ = sortie(["journalctl", "--user", "-u", s, "-n", "3", "--no-pager", "-o", "cat"])
+            b.faux(f"{nom} ({s}) en échec : {journal.splitlines()[-1][:140] if journal else ''}",
+                   f"systemctl --user restart {s}")
+        else:
+            b.avert(f"{nom} ({s}) : {etat or 'inconnu'}", f"systemctl --user enable --now {s}")
+
+    # ── Énergie ──
+    b.titre("Énergie")
+    prof, code = sortie(["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
+                         "/net/hadess/PowerProfiles", "--method", "org.freedesktop.DBus.Properties.Get",
+                         "net.hadess.PowerProfiles", "ActiveProfile"])
+    if code == 0:
+        p = re.findall(r"'([a-z-]+)'", prof)
+        b.ok(f"profils d'énergie disponibles (actif : {p[0] if p else '?'})")
+    else:
+        b.avert("pas de service de profils d'énergie (Performance / Équilibré / Économie)",
+                "relance install.sh (TLP + tlp-pd, ou power-profiles-daemon / tuned-ppd)")
+    bats = [d for d in os.listdir("/sys/class/power_supply") if d.startswith("BAT")] if os.path.isdir("/sys/class/power_supply") else []
+    if bats:
+        v, _ = sortie([os.path.join(BIN, "nc-sysinfo"), "sante"])
+        if v:
+            sante, _, cycles = v.partition("\t")
+            b.ok(f"batterie : santé {sante} %" + (f", {cycles} cycles" if cycles else ""))
+        rb = [d for d in os.listdir("/sys/class/backlight")] if os.path.isdir("/sys/class/backlight") else []
+        if not rb:
+            b.avert("aucun rétroéclairage : les touches de luminosité ne feront rien",
+                    "écran externe seul, ou pilote graphique pas encore chargé")
+
+    # ── Outils ──
+    b.titre("Outils utilisés par la config")
+    outils = {
+        "kitty": "terminal", "jq": "scripts", "brightnessctl": "luminosité", "playerctl": "musique",
+        "wpctl": "volume", "grim": "captures", "slurp": "captures de zone", "wl-copy": "presse-papiers",
+        "notify-send": "notifications", "cava": "halo musical", "qalc": "calculs du Spotlight",
+        "swappy": "annoter les captures", "fastfetch": "accueil du terminal", "magick": "fonds d'écran",
+    }
+    manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c)]
+    if manquants:
+        b.avert("absents : " + ", ".join(manquants), "relance install.sh, ou installe-les avec ton gestionnaire de paquets")
+    else:
+        b.ok("tous présents")
+    polices, _ = sortie(["fc-list", ":", "family"])
+    if "Nerd Font" not in polices:
+        b.avert("aucune police « Nerd Font » : icônes du terminal en carrés", "relance install.sh (étape du terminal)")
+
+    # ── Tes réglages ──
+    b.titre("Tes réglages")
+    conf = os.path.join(HOME, ".config/nc/reglages.conf")
+    n = 0
+    if os.path.exists(conf):
+        n = sum(1 for l in open(conf) if re.match(r"\s*[A-Z0-9_]+=", l))
+    style = ""
+    try:
+        style = next((l.split("=", 1)[1].strip() for l in open(os.path.join(HOME, ".config/nc/style.conf")) if l.startswith("STYLE=")), "")
+    except OSError:
+        pass
+    b.ok(f"{n} réglage(s) changé(s) dans nc-reglages" + (f" · style {style}" if style and style != "noctalia" else ""))
+    rac = os.path.join(HOME, ".config/nc/raccourcis.conf")
+    if os.path.exists(rac):
+        k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
+        b.ok(f"{k} raccourci(s) personnalisé(s)")
+
+
+def main():
+    rapport = len(sys.argv) > 1 and sys.argv[1] in ("rapport", "--rapport", "report")
+    if len(sys.argv) > 1 and not rapport:
+        print(__doc__.strip())
+        return
+    b = Bilan(couleurs=sys.stdout.isatty() and not rapport and not os.environ.get("NO_COLOR"))
+    verifier(b)
+    texte = b.texte()
+    if b.ko:
+        fin = f"{b.ko} problème(s) à corriger"
+    elif b.attention:
+        fin = f"Tout marche ; {b.attention} point(s) à améliorer"
+    else:
+        fin = "Tout est en ordre"
+    texte = "Bilan de noctalia-config (nc-diag)" + texte + f"\n\n{fin}."
+    print(texte)
+    if rapport:
+        if a("wl-copy"):
+            subprocess.run(["wl-copy"], input=texte, text=True)
+            print("\n(Copié : colle-le dans ton message.)")
+    elif b.ko or b.attention:
+        print("Pour demander de l'aide : nc-diag rapport (le bilan est copié, prêt à envoyer).")
+
+
+if __name__ == "__main__":
+    main()

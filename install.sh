@@ -1430,3 +1430,4 @@ info "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fond
 [ -n "$(ls -A "$BK" 2>/dev/null)" ] && info "Retour arrière : ./install.sh --restore   (sauvegarde : $BK)"
 info "Mise à jour plus tard, en une commande : nc-maj"
 info "Tes réglages (écran, fenêtres, île, veille, clavier, terminal…) : nc-reglages (gardés à chaque mise à jour)"
+info "Un souci ? nc-diag vérifie tout et dit quoi faire (nc-diag rapport : le bilan, prêt à envoyer). Les commandes : nc-aide"
