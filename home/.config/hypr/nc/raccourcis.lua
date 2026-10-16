@@ -253,6 +253,29 @@ touche("XF86AudioPrev",         cmd("~/.local/bin/nc-media previous" .. ile("med
 touche("XF86AudioStop",         cmd("~/.local/bin/nc-media stop" .. ile("media")),         media, { locked = true })
 touche("XF86AudioForward",      cmd("~/.local/bin/nc-media avance"),                       media, { locked = true, repeating = true })
 touche("XF86AudioRewind",       cmd("~/.local/bin/nc-media recule"),                       media, { locked = true, repeating = true })
+-- Autres touches spéciales des portables (selon le modèle, avec Fn) : rétroéclairage du clavier, pavé tactile,
+-- calculatrice, recherche, fichiers, navigateur, courrier, veille, verrouillage, réglages ; touche Copilot des
+-- PC récents (Super + Maj + F23) : la recherche. Une touche absente du clavier ne gêne pas.
+local portable = "Système|Touches spéciales du portable"
+local tp = "~/.local/bin/nc-touches "
+touche("XF86KbdBrightnessUp",   cmd(tp .. "clavier up"),      portable, { locked = true, repeating = true })
+touche("XF86KbdBrightnessDown", cmd(tp .. "clavier down"),    portable, { locked = true, repeating = true })
+touche("XF86KbdLightOnOff",     cmd(tp .. "clavier bascule"), portable, { locked = true })
+touche("XF86TouchpadToggle",    cmd(tp .. "pave bascule"),    portable, { locked = true })
+touche("XF86TouchpadOn",        cmd(tp .. "pave on"),         portable, { locked = true })
+touche("XF86TouchpadOff",       cmd(tp .. "pave off"),        portable, { locked = true })
+touche("XF86Calculator",        cmd(tp .. "calculatrice"),    portable)
+touche("XF86Search",            cmd(barre .. "menu"),         portable)
+touche("SUPER + SHIFT + F23",   cmd(barre .. "menu"),         portable)
+touche("XF86Explorer",          cmd(fichiers),                portable)
+touche("XF86MyComputer",        cmd(fichiers),                portable)
+touche("XF86HomePage",          cmd("xdg-open https://"),     portable)
+touche("XF86WWW",               cmd("xdg-open https://"),     portable)
+touche("XF86Mail",              cmd("xdg-open mailto:"),      portable)
+touche("XF86Tools",             cmd("kitty --class nc-reglages -e ~/.local/bin/nc-reglages"), portable)
+touche("XF86ScreenSaver",       cmd(barre .. "lock"),         portable, { locked = true })
+touche("XF86Sleep",             cmd("systemctl suspend"),     portable, { locked = true })
+
 -- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint)
 touche("XF86PowerOff",          cmd("~/.local/bin/nc-finger"), nil, { locked = true })
 

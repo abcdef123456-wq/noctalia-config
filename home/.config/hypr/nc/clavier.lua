@@ -35,6 +35,17 @@ hl.config({
     },
 })
 
+-- Pavé tactile coupé avec sa touche (nc-touches pave) : le reste après un rechargement de Hyprland
+do
+    local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-pave-coupe", "r")
+    if f then
+        for nom in f:lines() do
+            if nom ~= "" then pcall(hl.device, { name = nom, enabled = false }) end
+        end
+        f:close()
+    end
+end
+
 -- Gestes du pavé tactile
 --   3 doigts gauche/droite : changer de bureau
 --   4 doigts en glissant   : déplacer la fenêtre sous le curseur
