@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
-"""nc-raccourci : ajoute tes propres raccourcis clavier sans éditer de fichier.
+"""nc-raccourci : tes raccourcis clavier, sans éditer de fichier.
 
-  nc-raccourci                                         liste tes raccourcis
-  nc-raccourci ajoute "Super+B" "firefox" "Navigateur"  lance une commande avec Super + B
-  nc-raccourci retire "Super+B"                         retire ce raccourci
+  nc-raccourci                                    menu
+  nc-raccourci liste                              tous les raccourcis, et tes changements
+  nc-raccourci ajoute TOUCHES CIBLE [NOM]         nouveau raccourci. CIBLE :
+        une appli (firefox, discord…)             va à sa fenêtre si elle est ouverte, sinon la lance
+        bureau N                                  va au bureau N
+        ile PAGE                                  ouvre une page de l'île (son, reseau, bluetooth, systeme…)
+        toute autre commande                      lancée telle quelle
+  nc-raccourci change ANCIENNES NOUVELLES         un raccourci de la config sur d'autres touches
+  nc-raccourci desactive TOUCHES                  désactive un raccourci de la config
+  nc-raccourci retablit TOUCHES | tout            annule un changement (ou tous)
+  nc-raccourci retire TOUCHES                     retire un de tes raccourcis
+Exemples : nc-raccourci ajoute "Super+B" firefox · nc-raccourci change "Super+Entrée" "Super+T"
 
 Touches : Super, Ctrl, Alt, Maj, puis une lettre, un chiffre, F1…F12, Entrée, Espace, Tab, Échap, Impr, Suppr,
 gauche/droite/haut/bas. Les lettres suivent la disposition active du clavier ; les chiffres, la rangée du haut.
-Les raccourcis vont dans ~/.config/hypr/perso.lua (jamais remplacé par install.sh), dans la section
-« Mes raccourcis » de la fiche Super + /. Une combinaison déjà prise est refusée.
+Tout est gardé dans ~/.config/nc/raccourcis.conf, que les mises à jour ne touchent jamais ; tes raccourcis
+apparaissent dans la fiche Super + / (section « Mes raccourcis »). Une combinaison déjà prise est refusée.
 """
+import importlib.machinery
+import importlib.util
+import json
 import os
 import re
 import subprocess
 import sys
+import unicodedata
 
-PERSO = os.path.expanduser("~/.config/hypr/perso.lua")
+CONF = os.path.expanduser("~/.config/nc/raccourcis.conf")
+PERSO = os.path.expanduser("~/.config/hypr/perso.lua")          # ancienne version : raccourcis dans perso.lua
 TAG = "-- nc-raccourci"
+BIN = os.path.expanduser("~/.local/bin")
+PAGES = ["centre", "notifications", "son", "reseau", "bluetooth", "systeme", "calendrier", "minuteur"]
 MODS = {"super": ("SUPER", 64), "win": ("SUPER", 64), "meta": ("SUPER", 64),
         "ctrl": ("CTRL", 4), "control": ("CTRL", 4), "alt": ("ALT", 8),
         "maj": ("SHIFT", 1), "shift": ("SHIFT", 1)}
@@ -25,85 +41,60 @@ NAMES = {"entrée": "Return", "entree": "Return", "enter": "Return", "return": "
          "impr": "Print", "print": "Print", "suppr": "Delete", "delete": "Delete", "début": "Home", "home": "Home",
          "fin": "End", "end": "End", "gauche": "left", "left": "left", "droite": "right", "right": "right",
          "haut": "up", "up": "up", "bas": "down", "down": "down"}
-ARROW_CODES = {"left": 113, "right": 114, "up": 111, "down": 116}
+# Touches désignées par leur position (comme dans la config) : mêmes touches en US, AZERTY…
+CODES = {"Return": 36, "space": 65, "Tab": 23, "Escape": 9, "Delete": 119, "left": 113, "right": 114, "up": 111, "down": 116}
+
+TTY = sys.stdout.isatty()
+B, D, N = ("\033[1m", "\033[2m", "\033[0m") if TTY else ("", "", "")
+ACC, MOD, OK, ERR = ("\033[34m", "\033[33m", "\033[32m", "\033[31m") if TTY else ("", "", "", "")
+
+# Noms des touches et sections de la fiche Super + / : ceux de nc-keys
+_chargeur = importlib.machinery.SourceFileLoader("nckeys", os.path.join(BIN, "nc-keys"))
+nckeys = importlib.util.module_from_spec(importlib.util.spec_from_loader("nckeys", _chargeur))
+_chargeur.exec_module(nckeys)
 
 
-def die(msg):
-    print(f"nc-raccourci : {msg}", file=sys.stderr)
-    sys.exit(1)
+class Refus(Exception):
+    pass
 
 
+# ── Touches ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def parse_keys(text):
-    """« Super+Maj+B » -> (texte Hyprland, masque, touche, code ou None)."""
+    """« Super+Maj+B » -> (texte Hyprland, masque, touche, codes possibles)."""
     parts = [p.strip() for p in text.replace(" ", "").split("+") if p.strip()]
     if not parts:
-        die("combinaison vide")
+        raise Refus("combinaison vide")
     mods, mask = [], 0
     for p in parts[:-1]:
         m = MODS.get(p.lower())
         if not m:
-            die(f"modificateur inconnu : {p} (Super, Ctrl, Alt, Maj)")
+            raise Refus(f"modificateur inconnu : {p} (Super, Ctrl, Alt, Maj)")
         if m[0] not in mods:
             mods.append(m[0])
             mask |= m[1]
     k = parts[-1]
-    code = None
+    codes = set()
     if re.fullmatch(r"[0-9]", k):
-        code = 19 if k == "0" else 9 + int(k)   # rangée du haut : mêmes touches en US et en AZERTY
-        key = f"code:{code}"
+        codes = {19 if k == "0" else 9 + int(k)}   # rangée du haut : mêmes touches en US et en AZERTY
+        key = f"code:{min(codes)}"
     elif re.fullmatch(r"[A-Za-z]", k):
         key = k.upper()
+        codes = letter_codes(key)
     elif re.fullmatch(r"[Ff]([1-9]|1[0-2])", k):
         key = k.upper()
     elif k.lower() in NAMES:
         key = NAMES[k.lower()]
-        if key in ARROW_CODES:
-            code = ARROW_CODES[key]
-            key = f"code:{code}"
+        if key in CODES:
+            codes = {CODES[key]}
+            key = f"code:{CODES[key]}"
     else:
-        die(f"touche inconnue : {k}")
+        raise Refus(f"touche inconnue : {k}")
     if not mods and not key.startswith("F") and key != "Print":
-        die("ajoute au moins un modificateur (Super, Ctrl, Alt) : sinon la touche ne marcherait plus pour taper")
-    return " + ".join(mods + [key]), mask, key, code
+        raise Refus("ajoute au moins un modificateur (Super, Ctrl, Alt) : sinon la touche ne marcherait plus pour taper")
+    return " + ".join(mods + [key]), mask, key, codes
 
 
-def lua_str(s):
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
-
-
-def read_perso():
-    try:
-        with open(PERSO, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return ""
-
-
-def write_perso(content):
-    os.makedirs(os.path.dirname(PERSO), exist_ok=True)
-    tmp = PERSO + ".nc-new"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(content)
-    os.replace(tmp, PERSO)
-
-
-def reload_ok():
-    subprocess.run(["hyprctl", "reload"], capture_output=True)
-    err = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True).stdout.strip()
-    return err if err and err != "ok" else ""
-
-
-def my_lines(content):
-    return [l for l in content.splitlines() if l.rstrip().endswith(TAG)]
-
-
-def bind_of(line):
-    m = re.match(r'\s*hl\.bind\("([^"]+)"', line)
-    return m.group(1) if m else ""
-
-
-# Position (code) des lettres sur un clavier QWERTY, et différences des dispositions AZERTY / QWERTZ :
-# une lettre peut correspondre à une autre touche selon la disposition active (raccourcis existants donnés par position)
+# Position (code) des lettres sur un clavier QWERTY, et différences des dispositions AZERTY / QWERTZ
 QWERTY = {c: start + i for row, start in (("QWERTYUIOP", 24), ("ASDFGHJKL", 38), ("ZXCVBNM", 52)) for i, c in enumerate(row)}
 AZERTY = {"A": 24, "Z": 25, "Q": 38, "M": 47, "W": 52}
 QWERTZ = {"Z": 29, "Y": 52}
@@ -115,87 +106,409 @@ def letter_codes(letter):
     for l in re.findall(r"[a-z]+", layouts.split("str:")[-1]):
         if l in ("fr", "be"):
             codes.add(AZERTY.get(letter, QWERTY.get(letter)))
-        elif l in ("de", "ch", "at", "cz", "sk", "hu", "si", "hr", "rs", "pl_qwertz"):
+        elif l in ("de", "ch", "at", "cz", "sk", "hu", "si", "hr", "rs"):
             codes.add(QWERTZ.get(letter, QWERTY.get(letter)))
     return {c for c in codes if c}
 
 
-def taken(mask, key, code):
-    """Description du raccourci qui utilise déjà cette combinaison, sinon None (lit « hyprctl binds »)."""
+def id_of(bind):
+    """Identifiant d'une combinaison au format Hyprland, comme la config le calcule (nc/raccourcis.lua)."""
+    mask, key = 0, ""
+    for m in bind.split("+"):
+        m = m.strip()
+        b = {"SUPER": 64, "CTRL": 4, "CONTROL": 4, "ALT": 8, "SHIFT": 1}.get(m.upper())
+        if b:
+            mask |= b
+        else:
+            key = m.lower()
+    return f"{mask}:{key}"
+
+
+def matches(ident, mask, key, codes):
+    """L'identifiant « masque:touche » correspond-il à la combinaison tapée ?"""
+    m, _, k = ident.partition(":")
+    if m != str(mask):
+        return False
+    c = re.fullmatch(r"code:(\d+)", k)
+    return (c and int(c.group(1)) in codes) or (not c and k == key.lower())
+
+
+def human(ident_or_bind):
+    """« 64:code:36 » ou « SUPER + code:36 » -> « Super + Entrée »."""
+    if re.fullmatch(r"\d+:.*", ident_or_bind):
+        m, _, k = ident_or_bind.partition(":")
+        mask, last = int(m), k
+    else:
+        mask = int(id_of(ident_or_bind).split(":")[0])
+        last = ident_or_bind.split("+")[-1].strip()
+    mods = [name for bit, name in nckeys.MODS if mask & bit]
+    return " + ".join(mods + [nckeys.key_label(last)])
+
+
+# ── Raccourcis actifs (hyprctl binds) ──────────────────────────────────────────────────────────────────────────
+def live_binds():
     out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True).stdout
-    codes = {code} if code is not None else (letter_codes(key) if re.fullmatch(r"[A-Z]", key) else set())
-    blocks, cur = [], None
-    for line in out.splitlines():
-        if line and not line[0].isspace():
-            cur = {}
-            blocks.append(cur)
-        elif cur is not None and ":" in line:
-            k, _, v = line.strip().partition(":")
-            cur[k.strip()] = v.strip()
-    for b in blocks:
-        if b.get("submap") or b.get("modmask") != str(mask):
+    res = []
+    for b in nckeys.parse_binds(out):
+        if b.get("submap", "").strip():
             continue
+        try:
+            mask = int(b.get("modmask", "0"))
+        except ValueError:
+            mask = 0
         last = b.get("key", "").split("+")[-1].strip()
-        m = re.fullmatch(r"code:(\d+)", last)
-        if (m and int(m.group(1)) in codes) or (not m and last.lower() == key.lower()):
-            return b.get("description") or b.get("arg") or "un autre raccourci"
+        res.append({"id": f"{mask}:{last.lower()}", "desc": b.get("description", "").strip(), "arg": b.get("arg", "")})
+    return res
+
+
+def find_live(mask, key, codes, ignore=None):
+    for b in live_binds():
+        if b["id"] != ignore and matches(b["id"], mask, key, codes):
+            return b
     return None
 
 
+def desc_text(desc):
+    sec, sep, text = desc.partition("|")
+    return (text if sep else desc).strip() or "un raccourci sans nom"
+
+
+# ── Fichier des changements ─────────────────────────────────────────────────────────────────────────────────────
+def read_conf():
+    try:
+        with open(CONF, encoding="utf-8") as f:
+            return [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith("#")]
+    except FileNotFoundError:
+        return []
+
+
+def write_conf(entries):
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    tmp = CONF + ".nc-new"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("# Tes raccourcis (commande nc-raccourci). Gardé tel quel par les mises à jour.\n"
+                "# change MASQUE:TOUCHE NOUVELLES_TOUCHES (nom) · aucun MASQUE:TOUCHE (nom) · ajout TOUCHES TYPE VALEUR NOM\n")
+        for e in entries:
+            f.write("\t".join(x.replace("\t", " ") for x in e) + "\n")
+    os.replace(tmp, CONF)
+
+
+def reload_or_rollback(old_entries):
+    subprocess.run(["hyprctl", "reload"], capture_output=True)
+    err = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True).stdout.strip()
+    if err and err != "ok":
+        write_conf(old_entries)
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+        raise Refus("Hyprland a refusé ce changement, rien n'a été modifié :\n" + err)
+
+
+def original_id(live_id, entries):
+    """Raccourci déplacé : identifiant d'origine (celui de la config), sinon le même."""
+    for e in entries:
+        if e[0] == "change" and len(e) > 2 and id_of(e[2]) == live_id:
+            return e[1]
+    return live_id
+
+
+def legacy_lines():
+    try:
+        with open(PERSO, encoding="utf-8") as f:
+            return [l for l in f.read().splitlines() if l.rstrip().endswith(TAG)]
+    except FileNotFoundError:
+        return []
+
+
+# ── Applis ──────────────────────────────────────────────────────────────────────────────────────────────────────
+def plain(t):
+    return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
+
+
+def apps():
+    try:
+        return json.loads(subprocess.run([os.path.join(BIN, "nc-apps"), "list"], capture_output=True, text=True).stdout)
+    except (ValueError, OSError):
+        return []
+
+
+def find_app(name):
+    n = plain(name)
+    for a in apps():
+        if n in (plain(a["id"]), plain(a["name"]), plain(a.get("exe") or "") if a.get("exe") != "env" else ""):
+            return a
+    return None
+
+
+def cmd_ouvrir(app_id):
+    """Va à la fenêtre de l'appli si elle est ouverte (la suivante si on y est déjà), sinon la lance."""
+    a = next((x for x in apps() if x["id"] == app_id), None)
+    names = {x.lower() for x in ([a["wmclass"], a["id"], "" if a["exe"] == "env" else a["exe"]] if a else [app_id]) if x}
+    try:
+        clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True).stdout)
+    except ValueError:
+        clients = []
+    wins = sorted((c for c in clients if (c.get("class") or "").lower() in names), key=lambda c: c.get("focusHistoryID", 99))
+    if wins:
+        target = wins[1] if wins[0].get("focusHistoryID") == 0 and len(wins) > 1 else wins[0]
+        subprocess.run(["hyprctl", "eval", f"hl.dispatch(hl.dsp.focus({{ window = 'address:{target['address']}' }}))"],
+                       capture_output=True)
+    else:
+        subprocess.Popen([os.path.join(BIN, "nc-apps"), "launch", app_id], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────
+def describe(e):
+    """Ligne lisible d'un changement : (touches, texte)."""
+    if e[0] == "change":
+        nom = e[3] if len(e) > 3 else ""
+        return human(e[2]), f"{nom or 'raccourci de la config'}  {D}(au lieu de {human(e[1])}){N}"
+    if e[0] == "aucun":
+        nom = e[2] if len(e) > 2 else ""
+        return human(e[1]), f"{nom or 'raccourci de la config'}  {D}(désactivé){N}"
+    t = {"appli": "appli", "bureau": "bureau", "ile": "île", "commande": "commande"}.get(e[2], e[2])
+    val = f"  {D}({t} : {e[3]}){N}" if e[2] != "appli" else f"  {D}(appli){N}"
+    return human(e[1]), f"{e[4] or e[3]}{val}"
+
+
+def changes():
+    return read_conf()
+
+
 def cmd_list():
-    lines = my_lines(read_perso())
-    if not lines:
-        print("Aucun raccourci personnel. Exemple : nc-raccourci ajoute \"Super+B\" \"firefox\" \"Navigateur\"")
-        return
-    for l in lines:
-        d = re.search(r'description = "Mes raccourcis\|((?:[^"\\]|\\.)*)"', l)
-        c = re.search(r"exec_cmd\(\[==\[(.*?)\]==\]\)", l)
-        print(f"  {bind_of(l):<24} {d.group(1).replace(chr(92) + chr(34), chr(34)) if d else ''}  ({c.group(1) if c else ''})")
+    for sec in nckeys.collect():
+        print(f"\n  {B}{ACC}{sec['title']}{N}")
+        for r in sec["rows"]:
+            print(f"    {' + '.join(r['keys']):<30} {r['text']}")
+    ent = changes()
+    if ent or legacy_lines():
+        print(f"\n  {B}{ACC}Tes changements{N}  {D}(nc-raccourci){N}")
+        for e in ent:
+            k, t = describe(e)
+            print(f"    {MOD}●{N} {k:<28} {t}")
+        for l in legacy_lines():
+            m = re.match(r'\s*hl\.bind\("([^"]+)"', l)
+            print(f"    {MOD}●{N} {human(m.group(1)) if m else '?':<28} {D}(dans perso.lua){N}")
+    print()
 
 
-def cmd_add(keys, command, desc):
-    bind, mask, key, code = parse_keys(keys)
-    if "]==]" in command:
-        die("la commande ne peut pas contenir « ]==] »")
-    old = read_perso()
-    if any(bind_of(l) == bind for l in my_lines(old)):
-        die(f"{keys} est déjà un de tes raccourcis : retire-le d'abord (nc-raccourci retire \"{keys}\")")
-    who = taken(mask, key, code)
+def target_of(cible, nom):
+    """CIBLE -> (type, valeur, nom)."""
+    m = re.fullmatch(r"(?i)bureau\s+(\d+)", cible.strip())
+    if m:
+        return "bureau", m.group(1), nom or f"Bureau {m.group(1)}"
+    m = re.fullmatch(r"(?i)[iî]le\s+(\S+)", cible.strip())
+    if m:
+        page = plain(m.group(1))
+        page = {"wifi": "reseau", "wi-fi": "reseau", "bt": "bluetooth", "audio": "son", "agenda": "calendrier",
+                "notifs": "notifications", "controle": "centre"}.get(page, page)
+        if page not in PAGES:
+            raise Refus(f"page de l'île inconnue : {m.group(1)} ({', '.join(PAGES)})")
+        return "ile", page, nom or f"Île : {page}"
+    a = find_app(cible)
+    if a:
+        return "appli", a["id"], nom or a["name"]
+    return "commande", cible, nom or cible
+
+
+def cmd_add(keys, cible, nom=""):
+    bind, mask, key, codes = parse_keys(keys)
+    typ, val, nom = target_of(cible, nom)
+    who = find_live(mask, key, codes)
     if who:
-        die(f"{keys} est déjà pris : {who}")
-    line = (f'hl.bind({lua_str(bind)}, hl.dsp.exec_cmd([==[{command}]==]), '
-            f'{{ description = {lua_str("Mes raccourcis|" + (desc or command))} }})  {TAG}')
-    new = old if old.endswith("\n") or not old else old + "\n"
-    if not my_lines(old):
-        new += "\n-- Raccourcis ajoutés par nc-raccourci (modifiables ici, ou retirés avec « nc-raccourci retire »)\n"
-    write_perso(new + line + "\n")
-    err = reload_ok()
-    if err:
-        write_perso(old)
-        reload_ok()
-        die("Hyprland a refusé ce raccourci, rien n'a été changé :\n" + err)
-    print(f"Ajouté : {keys} -> {command}   (visible dans la fiche Super + /)")
+        raise Refus(f"{keys} est déjà pris : {desc_text(who['desc'])} "
+                    f"(change-le ou désactive-le d'abord : nc-raccourci change / desactive)")
+    old = read_conf()
+    reload_or_rollback_after(old, old + [["ajout", bind, typ, val, nom]])
+    return f"Ajouté : {human(bind)} → {nom}" + (" (va à sa fenêtre, sinon la lance)" if typ == "appli" else "")
+
+
+def reload_or_rollback_after(old, new):
+    write_conf(new)
+    reload_or_rollback(old)
+
+
+def find_config_bind(keys):
+    """Raccourci actif désigné par ses touches -> (bind, entrée « ajout » si c'est un des tiens, sinon None)."""
+    bind, mask, key, codes = parse_keys(keys)
+    b = find_live(mask, key, codes)
+    if not b:
+        raise Refus(f"aucun raccourci sur {keys} (liste : nc-raccourci liste)")
+    for e in read_conf():
+        if e[0] == "ajout" and id_of(e[1]) == b["id"]:
+            return b, e
+    return b, None
+
+
+def cmd_change(old_keys, new_keys):
+    b, mine = find_config_bind(old_keys)
+    nbind, mask, key, codes = parse_keys(new_keys)
+    who = find_live(mask, key, codes, ignore=b["id"])
+    if who:
+        raise Refus(f"{new_keys} est déjà pris : {desc_text(who['desc'])}")
+    old = read_conf()
+    if mine:
+        new = [(["ajout", nbind] + e[2:]) if e == mine else e for e in old]
+    else:
+        orig = original_id(b["id"], old)
+        new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] == orig)]
+        if id_of(nbind) != orig:
+            new.append(["change", orig, nbind, desc_text(b["desc"])])
+    reload_or_rollback_after(old, new)
+    return f"{desc_text(b['desc'])} : {human(nbind)}"
+
+
+def cmd_disable(keys):
+    b, mine = find_config_bind(keys)
+    if mine:
+        raise Refus(f"{keys} est un de tes raccourcis : pour l'enlever, nc-raccourci retire \"{keys}\"")
+    old = read_conf()
+    orig = original_id(b["id"], old)
+    new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] == orig)] + [["aucun", orig, desc_text(b["desc"])]]
+    reload_or_rollback_after(old, new)
+    return f"Désactivé : {desc_text(b['desc'])} ({human(orig)})"
+
+
+def cmd_restore(keys):
+    old = read_conf()
+    if keys in ("tout", "tous", "all"):
+        new = [e for e in old if e[0] == "ajout"]
+        reload_or_rollback_after(old, new)
+        return "Raccourcis de la config remis comme à l'origine (tes raccourcis ajoutés sont gardés)."
+    bind, mask, key, codes = parse_keys(keys)
+    # Par les touches actuelles (raccourci déplacé) ou d'origine (déplacé ou désactivé)
+    hit = [e for e in old if e[0] in ("change", "aucun")
+           and (matches(e[1], mask, key, codes) or (e[0] == "change" and matches(id_of(e[2]), mask, key, codes)))]
+    if not hit:
+        raise Refus(f"aucun changement sur {keys}")
+    reload_or_rollback_after(old, [e for e in old if e not in hit])
+    return "Rétabli : " + ", ".join(f"{(e[3] if e[0] == 'change' else e[2]) if len(e) > 2 else ''} ({human(e[1])})" for e in hit)
 
 
 def cmd_remove(keys):
-    bind = parse_keys(keys)[0]
-    old = read_perso()
-    kept = [l for l in old.splitlines() if not (l.rstrip().endswith(TAG) and bind_of(l) == bind)]
-    if len(kept) == len(old.splitlines()):
-        die(f"{keys} n'est pas un de tes raccourcis (liste : nc-raccourci)")
-    write_perso("\n".join(kept) + "\n")
-    reload_ok()
-    print(f"Retiré : {keys}")
+    bind, mask, key, codes = parse_keys(keys)
+    old = read_conf()
+    new = [e for e in old if not (e[0] == "ajout" and matches(id_of(e[1]), mask, key, codes))]
+    if len(new) != len(old):
+        reload_or_rollback_after(old, new)
+        return f"Retiré : {keys}"
+    # Ancienne version : raccourci écrit dans perso.lua
+    try:
+        with open(PERSO, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        lines = []
+    kept = [l for l in lines if not (l.rstrip().endswith(TAG) and
+                                     (m := re.match(r'\s*hl\.bind\("([^"]+)"', l)) and matches(id_of(m.group(1)), mask, key, codes))]
+    if len(kept) == len(lines):
+        raise Refus(f"{keys} n'est pas un de tes raccourcis (liste : nc-raccourci liste)")
+    with open(PERSO, "w", encoding="utf-8") as f:
+        f.write("\n".join(kept) + "\n")
+    subprocess.run(["hyprctl", "reload"], capture_output=True)
+    return f"Retiré : {keys}"
+
+
+# ── Menu ────────────────────────────────────────────────────────────────────────────────────────────────────────
+def ask(prompt):
+    try:
+        return input(f"  {prompt} › ").strip()
+    except EOFError:
+        return ""
+
+
+def wait():
+    ask(f"{D}Entrée pour revenir{N}")
+
+
+def run(fn, *a):
+    try:
+        print(f"\n  {OK}✓{N} {fn(*a)}")
+    except Refus as e:
+        print(f"\n  {ERR}{e}{N}")
+    wait()
+
+
+def menu():
+    while True:
+        os.system("clear")
+        print(f"\n  {B}Raccourcis clavier{N}   {D}{CONF.replace(os.path.expanduser('~'), '~')}{N}\n")
+        ent = changes()
+        if ent:
+            print(f"  {B}{ACC}Tes changements{N}")
+            for i, e in enumerate(ent, 1):
+                k, t = describe(e)
+                print(f"   {D}{i:2}{N} {k:<28} {t}")
+        else:
+            print(f"  {D}Aucun changement : tous les raccourcis sont ceux de la config.{N}")
+        print(f"\n  {D}a : ajouter   c : changer les touches   d : désactiver   numéro : annuler ce changement\n"
+              f"  l : voir tous les raccourcis   q : quitter{N}\n")
+        r = ask("")
+        if r in ("q", "Q", ""):
+            break
+        if r == "l":
+            os.system("clear")
+            cmd_list()
+            wait()
+        elif r == "a":
+            print(f"\n  {D}Touches : ex. Super+B, Super+Maj+F, Ctrl+Alt+T{N}")
+            k = ask("Touches")
+            if not k:
+                continue
+            print(f"\n  {D}Une appli (firefox, discord…), « bureau 3 », « ile son », ou une commande{N}")
+            c = ask("Action")
+            if c:
+                run(cmd_add, k, c, ask(f"Nom dans la fiche Super + / {D}(Entrée : automatique){N}"))
+        elif r == "c":
+            k = ask("Touches actuelles du raccourci (ex. Super+Entrée)")
+            if not k:
+                continue
+            try:
+                b, _ = find_config_bind(k)
+            except Refus as e:
+                print(f"\n  {ERR}{e}{N}")
+                wait()
+                continue
+            print(f"\n  {B}{desc_text(b['desc'])}{N}")
+            n = ask("Nouvelles touches")
+            if n:
+                run(cmd_change, k, n)
+        elif r == "d":
+            k = ask("Touches du raccourci à désactiver")
+            if k:
+                run(cmd_disable, k)
+        elif r.isdigit() and 1 <= int(r) <= len(ent):
+            e = ent[int(r) - 1]
+            old = read_conf()
+            try:
+                reload_or_rollback_after(old, [x for x in old if x != e])
+                print(f"\n  {OK}✓{N} Annulé : {describe(e)[0]}")
+            except Refus as err:
+                print(f"\n  {ERR}{err}{N}")
+            wait()
+    os.system("clear")
 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] in ("liste", "list"):
-        cmd_list()
-    elif a[0] in ("ajoute", "add") and len(a) in (3, 4):
-        cmd_add(a[1], a[2], a[3] if len(a) == 4 else "")
-    elif a[0] in ("retire", "remove") and len(a) == 2:
-        cmd_remove(a[1])
-    else:
-        print(__doc__.strip())
-        sys.exit(0 if a and a[0] in ("-h", "--help", "aide") else 1)
+    try:
+        if not a:
+            menu() if sys.stdin.isatty() else cmd_list()
+        elif a[0] in ("liste", "list"):
+            cmd_list()
+        elif a[0] in ("ajoute", "add") and len(a) in (3, 4):
+            print(cmd_add(a[1], a[2], a[3] if len(a) == 4 else ""))
+        elif a[0] in ("change", "remap") and len(a) == 3:
+            print(cmd_change(a[1], a[2]))
+        elif a[0] in ("desactive", "désactive", "disable") and len(a) == 2:
+            print(cmd_disable(a[1]))
+        elif a[0] in ("retablit", "rétablit", "restore") and len(a) == 2:
+            print(cmd_restore(a[1]))
+        elif a[0] in ("retire", "remove") and len(a) == 2:
+            print(cmd_remove(a[1]))
+        elif a[0] == "ouvrir" and len(a) == 2:
+            cmd_ouvrir(a[1])
+        else:
+            print(__doc__.strip())
+            sys.exit(0 if a and a[0] in ("-h", "--help", "aide") else 2)
+    except Refus as e:
+        print(f"nc-raccourci : {e}", file=sys.stderr)
+        sys.exit(1)

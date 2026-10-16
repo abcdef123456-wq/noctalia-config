@@ -133,13 +133,19 @@ service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même
 | **Marque-pages de fenêtres** | **Super + Ctrl + 1…4** : le premier appui attache la fenêtre active à la touche ; ensuite, la touche t'amène à elle depuis n'importe quel bureau, et depuis elle te ramène à la fenêtre d'avant. **Super + Ctrl + Maj + 1…4** pour en attacher une autre. |
 | **Fenêtres flottantes** | Chaque appli flottante (calculatrice, réglages, lecteur…) se rouvre à la taille et à la place où tu l'as fermée, en proportion de l'écran. |
 
-### Ajouter tes raccourcis
+### Tes raccourcis
 
 ```bash
-nc-raccourci ajoute "Super+B" "firefox" "Navigateur"     # Super + B lance Firefox
-nc-raccourci                                             # liste tes raccourcis
-nc-raccourci retire "Super+B"
+nc-raccourci                                       # menu : ajouter, changer, désactiver, annuler
+nc-raccourci ajoute "Super+B" firefox              # Super + B : va à Firefox s'il est ouvert, sinon le lance
+nc-raccourci ajoute "Super+Alt+S" "ile son"        # ouvre la page Son de l'île (aussi : bureau 3, ou une commande)
+nc-raccourci change "Super+Entrée" "Super+T"       # un raccourci de la config sur d'autres touches
+nc-raccourci desactive "Super+N"                   # désactive un raccourci de la config
+nc-raccourci retablit tout                         # annule tes changements de raccourcis de la config
+nc-raccourci liste                                 # tous les raccourcis, et tes changements
 ```
+
+Tout est gardé dans `~/.config/nc/raccourcis.conf`, jamais touché par les mises à jour ; une combinaison déjà prise est refusée.
 
 Ils apparaissent tout de suite dans la fiche **Super + /** (section « Mes raccourcis »). Une combinaison déjà prise est
 refusée, en tenant compte de la disposition du clavier (AZERTY, QWERTZ…). Ils sont rangés dans `~/.config/hypr/perso.lua`,
@@ -192,7 +198,8 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 | Fichier | Pour |
 |---|---|
-| `~/.config/hypr/perso.lua` | tes raccourcis (`nc-raccourci` les y range), règles de fenêtres, écrans (format Lua de Hyprland) |
+| `~/.config/nc/reglages.conf`, `~/.config/nc/raccourcis.conf` | tes réglages (`nc-reglages`) et tes raccourcis (`nc-raccourci`) |
+| `~/.config/hypr/perso.lua` | règles de fenêtres, écrans, tout réglage Hyprland en plus (format Lua de Hyprland) |
 | `~/.zshrc.perso` | tes alias et variables du terminal |
 | `~/.config/kitty/perso.conf` | tes réglages de kitty |
 
