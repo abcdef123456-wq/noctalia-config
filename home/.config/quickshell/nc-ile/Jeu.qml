@@ -16,7 +16,7 @@ Item {
     }
     Rond {
         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-        taille: 46; icone: "close"; actif: true; couleur: "#3a3a3c"
+        taille: 46; icone: "close"; actif: true; couleur: Couleurs.gris3
         onClic: Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"])
     }
 }

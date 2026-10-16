@@ -7,7 +7,7 @@ import Quickshell.Services.UPower
 
 Item {
     id: centre
-    readonly property color bleu: "#0a84ff"
+    readonly property color bleu: Couleurs.accent
     readonly property color orange: "#ff9f0a"
     readonly property color indigo: "#5e5ce6"
     readonly property color rose: "#ff375f"
@@ -61,7 +61,7 @@ Item {
                             width: parent.width; height: 41
                             Rectangle {
                                 anchors.fill: parent; anchors.leftMargin: -6; anchors.rightMargin: -6; radius: 12
-                                color: zl.containsMouse && lc.modelData.page !== "" ? "#2c2c2e" : "transparent"
+                                color: zl.containsMouse && lc.modelData.page !== "" ? Couleurs.gris2 : "transparent"
                                 Behavior on color { ColorAnimation { duration: 120 } }
                             }
                             Rond {
@@ -93,10 +93,10 @@ Item {
                     Row {
                         spacing: 10; width: parent.width
                         ClippingRectangle {
-                            width: 54; height: 54; radius: 12; color: "#2c2c2e"
+                            width: 54; height: 54; radius: 12; color: Couleurs.gris2
                             Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
                             Image { anchors.centerIn: parent; width: 34; height: 34; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(68, 68); visible: Etat.pochette === "" }
-                            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: "#98989d"; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
+                            Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                         }
                         Column {
                             width: parent.width - 64; spacing: 2
@@ -107,7 +107,7 @@ Item {
                     }
                     // Progression
                     Rectangle {
-                        width: parent.width; height: 4; radius: 2; color: "#3a3a3c"
+                        width: parent.width; height: 4; radius: 2; color: Couleurs.gris3
                         Rectangle {
                             height: parent.height; radius: 2; color: "white"
                             width: Etat.lecteur && Etat.lecteur.length > 0 ? parent.width * Math.min(1, Etat.lecteur.position / Etat.lecteur.length) : 0
@@ -119,7 +119,7 @@ Item {
                         component Commande: Ico {
                             id: cmd
                             signal clic()
-                            color: Etat.lecteur ? "white" : "#48484a"
+                            color: Etat.lecteur ? "white" : Couleurs.gris4
                             scale: z.pressed ? 0.85 : 1
                             Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
                             MouseArea { id: z; anchors.fill: parent; anchors.margins: -8; onClicked: cmd.clic() }
@@ -148,7 +148,7 @@ Item {
                     Row {
                         anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 10
                         Rectangle {
-                            width: 40; height: 40; radius: 20; color: pa.actif ? pa.couleur : "#3a3a3c"
+                            width: 40; height: 40; radius: 20; color: pa.actif ? pa.couleur : Couleurs.gris3
                             Behavior on color { ColorAnimation { duration: 160 } }
                             Ico { anchors.centerIn: parent; nom: pa.icone; taille: 21 }
                         }
@@ -187,7 +187,7 @@ Item {
             id: energie
             readonly property var modes: [
                 { nom: "Économie", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
-                { nom: "Équilibré", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: PowerProfile.Balanced },
+                { nom: "Équilibré", icone: "battery_full", couleur: Couleurs.gris3, texte: "white", p: PowerProfile.Balanced },
                 { nom: "Performance", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
             ]
             readonly property int index: Etat.profil === PowerProfile.PowerSaver ? 0 : (Etat.profil === PowerProfile.Performance ? 2 : 1)
@@ -210,7 +210,7 @@ Item {
             }
             Ico {
                 anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-                nom: "chevron_right"; taille: 24; color: "#98989d"
+                nom: "chevron_right"; taille: 24; color: Couleurs.texteSec
                 MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: Etat.aller("systeme") }
             }
         }

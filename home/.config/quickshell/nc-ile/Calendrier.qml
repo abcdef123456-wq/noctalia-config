@@ -46,7 +46,7 @@ Item {
                         anchors.centerIn: parent; visible: parent.jour > 0
                         text: parent.jour; font.pixelSize: 15
                         font.weight: parent.aujourdhui ? Font.Bold : Font.Normal
-                        color: parent.aujourdhui ? "white" : ((index % 7) >= 5 ? "#98989d" : "white")
+                        color: parent.aujourdhui ? "white" : ((index % 7) >= 5 ? Couleurs.texteSec : "white")
                     }
                 }
             }

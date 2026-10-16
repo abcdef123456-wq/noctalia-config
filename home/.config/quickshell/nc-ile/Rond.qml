@@ -6,12 +6,12 @@ Rectangle {
     id: r
     property string icone: ""
     property bool actif: false
-    property color couleur: "#0a84ff"
+    property color couleur: Couleurs.accent
     property real taille: 52
     signal clic()
     signal appuiLong()
     width: taille; height: taille; radius: taille / 2
-    color: actif ? couleur : (zone.containsMouse ? "#48484a" : "#3a3a3c")
+    color: actif ? couleur : (zone.containsMouse ? Couleurs.gris4 : Couleurs.gris3)
     Behavior on color { ColorAnimation { duration: 160 } }
     scale: zone.pressed ? 0.9 : 1
     Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }

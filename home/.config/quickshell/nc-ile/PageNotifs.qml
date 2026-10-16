@@ -14,7 +14,7 @@ Item {
         Texte {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
             visible: Notifs.liste.length > 0
-            text: "Tout effacer"; color: ze.containsMouse ? "#409cff" : "#0a84ff"
+            text: "Tout effacer"; color: ze.containsMouse ? Couleurs.accentClair : Couleurs.accent
             MouseArea { id: ze; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: Notifs.toutEffacer() }
         }
     }
@@ -37,7 +37,7 @@ Item {
                 width: parent.width; height: 110
                 Column {
                     anchors.centerIn: parent; spacing: 6
-                    Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: Notifs.concentration ? "dark_mode" : "notifications"; taille: 30; color: "#48484a" }
+                    Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: Notifs.concentration ? "dark_mode" : "notifications"; taille: 30; color: Couleurs.gris4 }
                     Texte {
                         anchors.horizontalCenter: parent.horizontalCenter; secondaire: true
                         text: Notifs.concentration ? "Concentration activée" : "Aucune notification"
@@ -53,7 +53,7 @@ Item {
                     width: liste.width
                     height: contenu.implicitHeight + 24
                     radius: 18
-                    color: zc.containsMouse ? "#2c2c2e" : "#1c1c1e"
+                    color: zc.containsMouse ? Couleurs.gris2 : Couleurs.carte
                     Behavior on color { ColorAnimation { duration: 120 } }
                     scale: zc.pressed ? 0.98 : 1
                     Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }
@@ -72,7 +72,7 @@ Item {
                     ClippingRectangle {
                         id: ic
                         x: 12; y: 12; width: 34; height: 34; radius: 9
-                        color: im.status === Image.Ready ? "transparent" : "#2c2c2e"
+                        color: im.status === Image.Ready ? "transparent" : Couleurs.gris2
                         Image { id: im; anchors.fill: parent; source: Notifs.icone(carte.modelData); sourceSize: Qt.size(68, 68); fillMode: Image.PreserveAspectCrop }
                         Ico { anchors.centerIn: parent; nom: "notifications"; taille: 18; visible: im.status !== Image.Ready }
                     }
@@ -95,7 +95,7 @@ Item {
                             width: parent.width
                             text: carte.modelData.body.replace(/<[^>]*>/g, "")
                             visible: text !== ""
-                            font.pixelSize: 13; color: "#d1d1d6"
+                            font.pixelSize: 13; color: Couleurs.texteDoux
                             wrapMode: Text.Wrap; maximumLineCount: 3
                         }
                         Row {
@@ -106,7 +106,7 @@ Item {
                                 Rectangle {
                                     required property var modelData
                                     width: lbc.implicitWidth + 24; height: 28; radius: 14
-                                    color: zbc.pressed ? "#48484a" : "#3a3a3c"
+                                    color: zbc.pressed ? Couleurs.gris4 : Couleurs.gris3
                                     Texte { id: lbc; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
                                     MouseArea { id: zbc; anchors.fill: parent; onClicked: Notifs.agir(carte.modelData, parent.modelData) }
                                 }
@@ -117,9 +117,9 @@ Item {
                     Rectangle {
                         anchors.right: parent.right; anchors.rightMargin: 10; y: 9
                         width: 22; height: 22; radius: 11
-                        color: zx.containsMouse ? "#48484a" : "#3a3a3c"
+                        color: zx.containsMouse ? Couleurs.gris4 : Couleurs.gris3
                         visible: zc.containsMouse || zx.containsMouse
-                        Ico { anchors.centerIn: parent; nom: "close"; taille: 14; color: "#d1d1d6" }
+                        Ico { anchors.centerIn: parent; nom: "close"; taille: 14; color: Couleurs.texteDoux }
                         MouseArea { id: zx; anchors.fill: parent; hoverEnabled: true; onClicked: Notifs.fermer(carte.modelData) }
                     }
                 }

@@ -9,7 +9,7 @@ ClippingRectangle {
     property string icone: ""
     signal change(real v)
     height: 28; radius: 14
-    color: "#3a3a3c"
+    color: Couleurs.gris3
     Rectangle {
         height: parent.height; color: "white"
         width: Math.max(parent.height, parent.width * Math.max(0, Math.min(1, c.valeur)))
@@ -18,7 +18,7 @@ ClippingRectangle {
     }
     Ico {
         anchors.left: parent.left; anchors.leftMargin: Math.round(c.height * 0.27); anchors.verticalCenter: parent.verticalCenter
-        nom: c.icone; taille: Math.round(c.height * 0.55); color: "#3a3a3c"
+        nom: c.icone; taille: Math.round(c.height * 0.55); color: Couleurs.gris3
     }
     MouseArea {
         id: zone

@@ -76,7 +76,7 @@ PanelWindow {
         readonly property bool montre: !fen.ouverte && !fen.banniere && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
-        color: "#000000"
+        color: Couleurs.fondCompact
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
         Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
@@ -101,7 +101,11 @@ PanelWindow {
         width: fen.ouverte ? fen.taille.width : (fen.banniere ? 440 : compact.largeur)
         height: fen.ouverte ? fen.taille.height : (fen.banniere ? fen.hauteurBanniere : 30)
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere ? 32 : 15)
-        color: "#000000"
+        // Presque noire en pilule ; ouverte, teintée par le fond d'écran avec un fin liseré (voir Couleurs.qml)
+        color: fen.ouverte || fen.banniere ? Couleurs.fond : Couleurs.fondCompact
+        border.width: fen.ouverte || fen.banniere ? 1 : 0
+        border.color: Couleurs.lisere
+        Behavior on color { ColorAnimation { duration: 260 } }
         clip: true
 
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup
@@ -239,7 +243,7 @@ PanelWindow {
                     required property int index
                     readonly property bool active: modelData === Etat.vueActive
                     width: 6; height: active ? 14 : 6; radius: 3
-                    color: active ? "white" : "#5a5a5e"
+                    color: active ? "white" : Couleurs.gris5
                     Behavior on height { SpringAnimation { spring: 5; damping: 0.5 } }
                     MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller(parent.modelData) }
                 }

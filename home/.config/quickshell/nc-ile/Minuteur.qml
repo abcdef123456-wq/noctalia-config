@@ -35,7 +35,7 @@ Item {
     Row {
         visible: m.enCours
         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 10
-        Rond { taille: 46; icone: "add"; couleur: "#3a3a3c"; onClic: Etat.ajouterMinute() }
+        Rond { taille: 46; icone: "add"; couleur: Couleurs.gris3; onClic: Etat.ajouterMinute() }
         Rond { taille: 46; icone: "close"; actif: true; couleur: "#ff453a"; onClic: Etat.arreterMinuteur() }
     }
 

@@ -45,7 +45,7 @@ Item {
         default property alias contenu: col.data
         width: parent ? parent.width : 300
         height: col.implicitHeight
-        radius: 16; color: "#1c1c1e"
+        radius: 16; color: Couleurs.carte
         Column { id: col; width: parent.width }
     }
     // Ligne d'une carte : icône simple, nom, coche ; trait de séparation sauf pour la dernière
@@ -57,14 +57,14 @@ Item {
         property bool dernier: false
         signal clic()
         width: parent ? parent.width : 300; height: 46
-        Rectangle { anchors.fill: parent; color: zo.pressed ? "#2c2c2e" : (zo.containsMouse ? "#242426" : "transparent") }
-        Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: o.icone; taille: 20; color: o.coche ? "#0a84ff" : "#d1d1d6"; plein: o.coche }
+        Rectangle { anchors.fill: parent; color: zo.pressed ? Couleurs.gris2 : (zo.containsMouse ? Couleurs.carteSurvol : "transparent") }
+        Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: o.icone; taille: 20; color: o.coche ? Couleurs.accent : Couleurs.texteDoux; plein: o.coche }
         Texte {
             x: 46; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 46 - 44
             text: o.titre; font.pixelSize: 14; font.weight: o.coche ? Font.DemiBold : Font.Normal
         }
-        Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: o.coche; graisse: 600 }
-        Rectangle { visible: !o.dernier; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: "#2c2c2e" }
+        Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: Couleurs.accent; visible: o.coche; graisse: 600 }
+        Rectangle { visible: !o.dernier; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: Couleurs.gris2 }
         MouseArea { id: zo; anchors.fill: parent; hoverEnabled: true; onClicked: o.clic() }
     }
     // Fin curseur façon macOS : piste fine, partie remplie blanche, bouton rond
@@ -73,7 +73,7 @@ Item {
         property real valeur: 0
         signal change(real v)
         height: 18
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: "#3a3a3c" }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Couleurs.gris3 }
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: 2; color: "white" }
         Rectangle {
             id: bouton
@@ -94,7 +94,7 @@ Item {
         id: it
         property bool allume: false
         signal bascule()
-        width: 46; height: 28; radius: 14; color: allume ? "#30d158" : "#3a3a3c"
+        width: 46; height: 28; radius: 14; color: allume ? "#30d158" : Couleurs.gris3
         Behavior on color { ColorAnimation { duration: 180 } }
         Rectangle {
             width: 24; height: 24; radius: 12; color: "white"; y: 2; x: it.allume ? 20 : 2
@@ -155,7 +155,7 @@ Item {
                     id: mic
                     width: parent.width; height: 92
                     readonly property bool coupe: son.micro && son.micro.audio ? son.micro.audio.muted : true
-                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? "#ff453a" : "#d1d1d6" }
+                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? "#ff453a" : Couleurs.texteDoux }
                     Column {
                         x: 46; y: 9; width: parent.width - 46 - 70
                         Texte { text: son.micro ? son.nomAppareil(son.micro, true) : ""; font.pixelSize: 14; width: parent.width }
@@ -172,7 +172,7 @@ Item {
                         valeur: son.micro && son.micro.audio ? son.micro.audio.volume : 0
                         onChange: v => { if (son.micro && son.micro.audio) son.micro.audio.volume = v }
                     }
-                    Rectangle { visible: son.entrees.length > 1; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: "#2c2c2e" }
+                    Rectangle { visible: son.entrees.length > 1; x: 46; anchors.bottom: parent.bottom; width: parent.width - 46; height: 1; color: Couleurs.gris2 }
                 }
                 // Choix du micro (s'il y en a plusieurs)
                 Repeater {
@@ -221,7 +221,7 @@ Item {
                                 onChange: v => { if (ap.modelData.audio) ap.modelData.audio.volume = v }
                             }
                         }
-                        Rectangle { visible: ap.index < son.applis.length - 1; x: 52; anchors.bottom: parent.bottom; width: parent.width - 52; height: 1; color: "#2c2c2e" }
+                        Rectangle { visible: ap.index < son.applis.length - 1; x: 52; anchors.bottom: parent.bottom; width: parent.width - 52; height: 1; color: Couleurs.gris2 }
                     }
                 }
             }

@@ -32,7 +32,7 @@ Item {
             spacing: 6
             Row {
                 spacing: 6
-                Ico { nom: me.icone; taille: 16; color: "#98989d"; anchors.verticalCenter: parent.verticalCenter }
+                Ico { nom: me.icone; taille: 16; color: Couleurs.texteSec; anchors.verticalCenter: parent.verticalCenter }
                 Texte { text: me.titre; secondaire: true; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
             }
             Item {
@@ -46,7 +46,7 @@ Item {
                 }
             }
             Rectangle {
-                width: parent.width; height: 5; radius: 2.5; color: "#3a3a3c"
+                width: parent.width; height: 5; radius: 2.5; color: Couleurs.gris3
                 Rectangle { height: parent.height; radius: 2.5; color: me.couleur; width: parent.width * Math.max(0, Math.min(1, me.taux)) }
             }
         }
@@ -89,7 +89,7 @@ Item {
                 Row {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
                     Rectangle {
-                        width: 40; height: 40; radius: 20; color: Etat.branche ? "#0d3318" : "#3a3a3c"
+                        width: 40; height: 40; radius: 20; color: Etat.branche ? "#0d3318" : Couleurs.gris3
                         Ico { anchors.centerIn: parent; nom: Etat.branche ? "bolt" : "battery_full"; taille: 22; color: Etat.branche ? "#30d158" : "white"; rotation: Etat.branche ? 0 : 90 }
                     }
                     Column {
@@ -124,7 +124,7 @@ Item {
                     id: inter
                     readonly property bool allume: protection.v === "1"
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                    width: 46; height: 28; radius: 14; color: allume ? "#30d158" : "#3a3a3c"
+                    width: 46; height: 28; radius: 14; color: allume ? "#30d158" : Couleurs.gris3
                     opacity: protection.attente ? 0.5 : 1
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Rectangle {
@@ -144,7 +144,7 @@ Item {
             Repeater {
                 model: [
                     { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
-                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: "#3a3a3c", texte: "white", p: PowerProfile.Balanced },
+                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: Couleurs.gris3, texte: "white", p: PowerProfile.Balanced },
                     { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
                 ]
                 Module {
@@ -163,7 +163,7 @@ Item {
                             Texte { text: modelData.detail; secondaire: true; font.pixelSize: 11 }
                         }
                     }
-                    Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: "#0a84ff"; visible: Etat.profil === modelData.p }
+                    Ico { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; nom: "check"; taille: 20; color: Couleurs.accent; visible: Etat.profil === modelData.p }
                 }
             }
             // Outils (anciens raccourcis du centre de contrôle)
