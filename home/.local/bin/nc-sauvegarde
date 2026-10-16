@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""nc-sauvegarde : tes réglages de noctalia-config dans un seul fichier, pour réinstaller ton PC ou les donner à un ami.
+  nc-sauvegarde                     crée ~/nc-sauvegarde-DATE.tar.gz (réglages, raccourcis, style, animations, ajouts
+                                    perso, photo de profil, palettes) ; --fonds : avec tes fonds d'écran
+  nc-sauvegarde restaurer FICHIER   remet une sauvegarde (ce qui est là avant est gardé dans ~/.cache/nc/avant-restauration)
+  nc-sauvegarde voir FICHIER        ce que contient une sauvegarde
+Les fichiers générés (couleurs, thème du terminal…) ne sont pas sauvegardés : ils se refont tout seuls.
+"""
+import datetime
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+
+HOME = os.path.expanduser("~")
+# Chemins relatifs au dossier personnel : tout ce qui vient de toi, rien de ce qui se régénère
+A_GARDER = [
+    ".config/nc/reglages.conf", ".config/nc/raccourcis.conf", ".config/nc/style.conf", ".config/nc/style-avant",
+    ".config/nc/animations", ".config/hypr/perso.lua", ".config/kitty/perso.conf", ".zshrc.perso", ".face",
+    ".config/noctalia/palettes", ".local/state/noctalia/settings.toml",
+]
+
+
+def dossier_fonds():
+    """Dossier des fonds d'écran : celui choisi dans nc-reglages, sinon celui de la config."""
+    try:
+        for l in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8"):
+            if l.startswith("FONDS_DOSSIER="):
+                return os.path.expanduser(l.split("=", 1)[1].strip().strip('"'))
+    except OSError:
+        pass
+    return os.path.join(HOME, "Pictures/Wallpapers")
+
+
+def taille(o):
+    return f"{o / 1048576:.1f} Mo" if o >= 1048576 else f"{max(1, o // 1024)} Ko"
+
+
+def creer(avec_fonds):
+    nom = os.path.join(HOME, f"nc-sauvegarde-{datetime.date.today().isoformat()}.tar.gz")
+    chemins = [p for p in A_GARDER if os.path.exists(os.path.join(HOME, p))]
+    fonds = dossier_fonds()
+    if avec_fonds and os.path.isdir(fonds):
+        chemins.append(os.path.relpath(fonds, HOME))
+    if not chemins:
+        sys.exit("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).")
+    with tarfile.open(nom, "w:gz") as t:
+        for p in chemins:
+            t.add(os.path.join(HOME, p), arcname=p)
+    print(f"Sauvegarde créée : {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})")
+    for p in chemins:
+        print(f"  • ~/{p}")
+    if not avec_fonds:
+        print("Tes fonds d'écran n'y sont pas (nc-sauvegarde --fonds pour les ajouter).")
+    print("Pour la remettre : nc-sauvegarde restaurer " + nom.replace(HOME, "~"))
+
+
+def membres_surs(t):
+    """Seulement des chemins sous le dossier personnel (pas de ../, pas de chemin absolu, pas de lien)."""
+    ok = []
+    for m in t.getmembers():
+        chemin = os.path.normpath(m.name)
+        if chemin.startswith(("/", "..")) or m.issym() or m.islnk() or m.isdev():
+            continue
+        ok.append(m)
+    return ok
+
+
+def voir(fichier):
+    with tarfile.open(fichier, "r:gz") as t:
+        fichiers = [m for m in membres_surs(t) if m.isfile()]
+    print(f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} fichiers) :")
+    groupes = {}
+    for m in fichiers:                       # beaucoup de fichiers (fonds d'écran) : regroupés par dossier
+        cle = os.path.dirname(m.name) if len(fichiers) > 20 else m.name
+        groupes[cle] = groupes.get(cle, 0) + 1
+    for g, n in sorted(groupes.items()):
+        print(f"  • ~/{g}" + (f"  ({n} fichiers)" if n > 1 else ""))
+
+
+def restaurer(fichier):
+    if not os.path.isfile(fichier):
+        sys.exit(f"nc-sauvegarde : fichier introuvable : {fichier}")
+    avant = os.path.join(HOME, ".cache/nc/avant-restauration", datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S"))
+    with tarfile.open(fichier, "r:gz") as t:
+        membres = membres_surs(t)
+        # Ce qui sera remplacé est mis de côté d'abord
+        for m in membres:
+            cible = os.path.join(HOME, m.name)
+            if m.isfile() and os.path.isfile(cible):
+                os.makedirs(os.path.dirname(os.path.join(avant, m.name)), exist_ok=True)
+                shutil.copy2(cible, os.path.join(avant, m.name))
+        try:
+            t.extractall(HOME, members=membres, filter="data")
+        except TypeError:                                     # Python < 3.12 : sans filtre (chemins déjà vérifiés)
+            t.extractall(HOME, members=membres)
+    print(f"Sauvegarde remise ({len(membres)} fichiers). Avant : {avant.replace(HOME, '~')}")
+    # Tout ce qui découle des réglages est refait, et appliqué tout de suite
+    bin_ = os.path.join(HOME, ".local/bin")
+    subprocess.run([os.path.join(bin_, "nc-reglages"), "appliquer"], capture_output=True)
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+    subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+    print("Réglages appliqués.")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("--fonds", "creer", "créer"):
+        creer("--fonds" in a)
+    elif a[0] in ("restaurer", "remettre") and len(a) > 1:
+        restaurer(os.path.expanduser(a[1]))
+    elif a[0] == "voir" and len(a) > 1:
+        voir(os.path.expanduser(a[1]))
+    else:
+        print(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()

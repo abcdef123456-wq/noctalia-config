@@ -19,6 +19,8 @@ A_TAPER = [
     ("nc-diag", "nc-diag rapport", "Vérifie toute l'installation et dit quoi faire si quelque chose cloche ; "
                                    "« rapport » copie le bilan, prêt à envoyer pour avoir de l'aide."),
     ("nc-aide", "nc-aide nc-anim", "Cette aide ; avec un nom, le détail d'une commande."),
+    ("nc-sauvegarde", "nc-sauvegarde --fonds", "Tous tes réglages dans un seul fichier (pour réinstaller, ou les donner à "
+                                               "un ami) ; nc-sauvegarde restaurer FICHIER pour les remettre."),
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
