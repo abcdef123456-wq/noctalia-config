@@ -119,6 +119,10 @@ touche(SUPER .. " + SHIFT + code:24", function()
 end, "Fenêtres|Fermer (et le programme si dernière)")
 
 touche(SUPER .. " + code:55", hl.dsp.window.float({ action = "toggle" }), "Fenêtres|Fenêtre libre ↔ rangée")
+-- Réduire (comme le « _ » de Windows) : la fenêtre part dans un bureau caché ; elle revient par la vue des fenêtres,
+-- Spotlight, le dock, Alt + Tab ou Super + Ctrl + M (nc-fenetre)
+touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), "Fenêtres|Réduire la fenêtre")
+touche(SUPER .. " + CTRL + code:58", cmd("~/.local/bin/nc-fenetre restaurer"), "Fenêtres|Ramener la dernière fenêtre réduite")
 touche(SUPER .. " + code:38", cmd("qs -c nc-ile ipc call ile vue"),  "Fenêtres|Vue de toutes les fenêtres (glisser sur un bureau : l'y envoyer)")
 touche(SUPER .. " + code:41", hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }), "Fenêtres|Plein écran")
 touche(SUPER .. " + SHIFT + code:33", hl.dsp.window.pseudo(),      "Fenêtres|Garder sa taille (pseudo)")

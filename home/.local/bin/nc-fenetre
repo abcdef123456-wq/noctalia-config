@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# nc-fenetre : réduire une fenêtre (comme le « _ » de Windows) et la ramener. Hyprland n'a pas de fenêtres réduites :
+# elles vont dans un bureau caché, « special:reduites », et reviennent sur le bureau affiché.
+#   nc-fenetre reduire [ADRESSE]     réduit la fenêtre active (ou celle-là)                  Super + M
+#   nc-fenetre restaurer [ADRESSE]   ramène la dernière fenêtre réduite (ou celle-là)        Super + Ctrl + M
+#   nc-fenetre aller ADRESSE         va sur une fenêtre ; réduite, elle est d'abord ramenée (Spotlight, vue des fenêtres)
+# Une fenêtre réduite qu'on active autrement (dock, Alt + Tab) revient aussi d'elle-même (nc/automatismes.lua).
+set -uo pipefail
+pile="${XDG_RUNTIME_DIR:-/tmp}/nc-reduites"
+CACHE="special:reduites"
+
+clients() { hyprctl clients -j 2>/dev/null; }
+bureau_de() { clients | jq -r --arg a "$1" '.[] | select(.address == $a) | .workspace.name' | head -1; }
+eval_lua() { hyprctl dispatch "$1" >/dev/null 2>&1; }
+
+case "${1:-}" in
+  reduire)
+    a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
+    [ -n "$a" ] && [ "$a" != null ] || exit 0
+    [ "$(bureau_de "$a")" = "$CACHE" ] && exit 0
+    eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })"
+    { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp"; mv "$pile.tmp" "$pile" ;;
+  restaurer|aller)
+    a="${2:-}"
+    if [ -z "$a" ]; then                                  # la dernière réduite encore là
+      reduites="$(clients | jq -r --arg c "$CACHE" '.[] | select(.workspace.name == $c) | .address')"
+      a="$(tac "$pile" 2>/dev/null | grep -xF -f <(printf '%s\n' "$reduites") | head -1)"
+      [ -n "$a" ] || a="$(printf '%s\n' "$reduites" | head -1)"
+      [ -n "$a" ] || exit 0
+    fi
+    if [ "$(bureau_de "$a")" = "$CACHE" ]; then
+      # Bureau affiché sur l'écran actif (pas le bureau caché, s'il est ouvert)
+      ws="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)"
+      ouvert="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .specialWorkspace.name' | head -1)"
+      [ "$ouvert" = "$CACHE" ] && eval_lua "hl.dsp.workspace.toggle_special('reduites')"
+      eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })"
+      grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
+    fi
+    eval_lua "hl.dsp.focus({ window = 'address:$a' })" ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

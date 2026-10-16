@@ -71,6 +71,8 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `glisser` | Détacher et placer librement |
 | `Super` + `Alt` + `clic droit` | Détacher et redimensionner librement |
 | `Super` + `Maj` + `glisser` | Redimensionner (pavé tactile) |
+| `Super` + `M` | Réduire la fenêtre (elle revient par la vue des fenêtres, Spotlight, le dock ou Alt + Tab) |
+| `Super` + `Ctrl` + `M` | Ramener la dernière fenêtre réduite |
 | `Super` + `A` (ou trois doigts vers le haut) | Vue de toutes les fenêtres : clic pour y aller, glisser sur un bureau pour l'y envoyer, clic molette pour fermer |
 | Coins actifs | Pousser la souris dans un coin (au choix dans `nc-reglages` → Clavier et souris) |
 

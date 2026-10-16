@@ -235,3 +235,11 @@ local function rapport_quickshell(w)
 end
 hl.on("window.open", rapport_quickshell)
 hl.on("window.class", rapport_quickshell)
+
+-- Fenêtre réduite (nc-fenetre : bureau caché « special:reduites ») activée par le dock, Alt + Tab ou une notification :
+-- elle revient sur le bureau affiché au lieu d'ouvrir le bureau caché par-dessus
+hl.on("window.active", function(w)
+    if w and w.workspace and w.workspace.name == "special:reduites" then
+        hl.exec_cmd("~/.local/bin/nc-fenetre aller " .. w.address)
+    end
+end)
