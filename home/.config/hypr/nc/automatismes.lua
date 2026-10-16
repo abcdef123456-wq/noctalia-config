@@ -1,4 +1,5 @@
 -- Automatismes : le bureau réagit tout seul.
+--   Barre             : réaffichée quand une fenêtre sort du plein écran
 --   Halo musical      : le halo de la fenêtre active pulse sur les basses de la musique (nc-pouls appelle nc.halo)
 --   Mode jeu auto     : un jeu s'ouvre -> mode jeu + profil Performance ; le dernier jeu fermé -> tout revient
 --   Marque-pages      : Super + Ctrl + 1…4 attache la fenêtre active à la touche, puis la ramène d'où que tu sois
@@ -23,6 +24,15 @@ local function ecrire(chemin, texte)
     f:close()
     os.rename(chemin .. ".tmp", chemin)
 end
+
+-- ── Barre après le plein écran ──────────────────────────────────────────────
+-- Une fenêtre sort du plein écran (Super + F, vidéo, jeu) : la barre de Noctalia est réaffichée. Avec certaines
+-- versions de Noctalia et de Hyprland (Debian), elle restait cachée alors que l'île revenait.
+hl.on("window.fullscreen", function(w)
+    if w and (tonumber(w.fullscreen) or 0) == 0 then
+        hl.exec_cmd("sleep 0.3; noctalia msg bar-show >/dev/null 2>&1")
+    end
+end)
 
 -- ── Halo musical ────────────────────────────────────────────────────────────
 -- n de 0 (silence) à 1 (basse forte) : le halo de la fenêtre active s'intensifie et s'élargit, sa bordure s'éclaircit.

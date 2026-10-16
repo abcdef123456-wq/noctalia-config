@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""nc-memoire : qui utilise la mémoire, la config d'un côté, tes applis de l'autre.
+
+  nc-memoire        mémoire réelle (PSS : la mémoire partagée est répartie entre les programmes qui la partagent,
+                    rien n'est compté deux fois), par programme regroupé, et le total de la config
+Le « cache » du système n'est pas de la mémoire perdue : Linux garde en mémoire les fichiers lus récemment et la
+rend dès qu'une appli en a besoin. Seule la ligne « vraiment utilisée » compte.
+"""
+import os
+import re
+
+# Programmes de la config (noctalia-config) : nom du programme -> nom affiché
+CONFIG = {
+    "Hyprland": "Hyprland (gestionnaire de fenêtres)", "Xwayland": "Xwayland (vieilles applis X11)",
+    "noctalia": "Noctalia (barre, menus, fond d'écran)", "qs": "Île dynamique (Quickshell)",
+    "quickshell": "Île dynamique (Quickshell)", "hypridle": "Veille (hypridle)", "cava": "Halo musical (cava)",
+    "nc-pouls": "Halo musical", "nc-profile-sync": "Profils d'énergie", "nc-ecran-externe": "Écrans externes",
+    "playerctld": "Touches de musique (playerctld)", "xdg-desktop-portal": "Portails (partage d'écran…)",
+    "xdg-desktop-portal-hyprland": "Portails (partage d'écran…)", "xdg-desktop-portal-gtk": "Portails (partage d'écran…)",
+    "uwsm": "Session (uwsm)", "tlp-pd": "Profils d'énergie", "wireplumber": "Son (PipeWire)",
+    "pipewire": "Son (PipeWire)", "pipewire-pulse": "Son (PipeWire)",
+}
+# Applis regroupées sous un seul nom (navigateurs, Electron…)
+GROUPES = [
+    (r"^(firefox|firefox-bin|Isolated Web Co|Web Content|WebExtensions|Privileged Cont|RDD Process|Socket Process|Utility Process|GeckoMain|forkserver)$", "Firefox"),
+    (r"^(chrome|chromium|brave|vivaldi|opera|thorium)", "Navigateur Chromium"),
+    (r"^(Discord|discord|Vesktop|vesktop|WebCord)", "Discord"),
+    (r"^(code|Code|electron|codium)", "VS Code / Electron"),
+    (r"^(spotify|Spotify)", "Spotify"), (r"^(steam|steamwebhelper)", "Steam"), (r"^kitty$", "Terminal (kitty)"),
+    (r"^(claude|node)$", "Claude Code / Node"), (r"^(java|javaw)$", "Java"),
+]
+
+
+def pss(pid):
+    try:
+        with open(f"/proc/{pid}/smaps_rollup") as f:
+            for l in f:
+                if l.startswith("Pss:"):
+                    return int(l.split()[1]) * 1024
+    except OSError:
+        pass
+    return 0
+
+
+def nom(pid):
+    try:
+        cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+        comm = open(f"/proc/{pid}/comm").read().strip()
+    except OSError:
+        return None
+    prog = os.path.basename(cmd[0].decode(errors="replace")) if cmd and cmd[0] else comm
+    if prog in ("python3", "python", "bash", "sh") and len(cmd) > 1 and cmd[1]:
+        prog = os.path.basename(cmd[1].decode(errors="replace"))
+    return prog or comm, comm
+
+
+def mo(o):
+    return f"{o / 1048576:7.0f} Mo" if o < 10 * 1073741824 else f"{o / 1073741824:7.1f} Go"
+
+
+def main():
+    uid = os.getuid()
+    config, applis = {}, {}
+    for p in os.listdir("/proc"):
+        if not p.isdigit():
+            continue
+        try:
+            if os.stat(f"/proc/{p}").st_uid != uid:
+                continue
+        except OSError:
+            continue
+        n = nom(p)
+        if not n:
+            continue
+        prog, comm = n
+        taille = pss(p)
+        if not taille:
+            continue
+        cle = CONFIG.get(prog) or CONFIG.get(comm)
+        if cle:
+            config[cle] = config.get(cle, 0) + taille
+            continue
+        for motif, groupe in GROUPES:
+            if re.search(motif, comm) or re.search(motif, prog):
+                applis[groupe] = applis.get(groupe, 0) + taille
+                break
+        else:
+            applis[prog] = applis.get(prog, 0) + taille
+
+    mem = {}
+    for l in open("/proc/meminfo"):
+        k, v = l.split(":")
+        mem[k] = int(v.split()[0]) * 1024
+    total, dispo = mem["MemTotal"], mem["MemAvailable"]
+    utilisee = total - dispo
+    cache = mem.get("Cached", 0) + mem.get("Buffers", 0) + mem.get("SReclaimable", 0)
+
+    print(f"\n  Mémoire : {mo(utilisee).strip()} vraiment utilisés sur {mo(total).strip()} "
+          f"({utilisee * 100 // total} %)   ·   cache rendu à la demande : {mo(cache).strip()}")
+    zram = sum(int(open(f"/sys/block/{d}/mm_stat").read().split()[1]) for d in os.listdir("/sys/block")
+               if d.startswith("zram") and os.path.exists(f"/sys/block/{d}/mm_stat"))
+    if zram:
+        print(f"  Mémoire compressée (zram) : {mo(zram).strip()}")
+
+    t = sum(config.values())
+    print(f"\n  La config (noctalia-config)                    {mo(t)}   ({t * 100 // total} % de la mémoire)")
+    for k, v in sorted(config.items(), key=lambda x: -x[1]):
+        print(f"    {k:<44} {mo(v)}")
+    print("\n  Tes applis (les 12 plus gourmandes)")
+    for k, v in sorted(applis.items(), key=lambda x: -x[1])[:12]:
+        print(f"    {k[:44]:<44} {mo(v)}")
+    print("\n  PSS : mémoire réelle de chaque programme (la mémoire partagée est répartie, rien n'est compté deux fois).\n")
+
+
+if __name__ == "__main__":
+    main()
