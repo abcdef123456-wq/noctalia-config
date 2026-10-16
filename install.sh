@@ -152,6 +152,14 @@ pname() {
     qalc:suse) echo qalculate ;;
     bluez-utils:arch) echo bluez-utils ;;
     bluez-utils:*) echo bluez ;;
+    tesseract:debian|tesseract:suse) echo tesseract-ocr ;;        # lire le texte d'une capture (nc-capture texte)
+    tesseract-fra:arch) echo tesseract-data-fra ;;
+    tesseract-fra:fedora) echo tesseract-langpack-fra ;;
+    tesseract-fra:debian) echo tesseract-ocr-fra ;;
+    tesseract-fra:suse) echo tesseract-ocr-traineddata-french ;;
+    tesseract-eng:arch) echo tesseract-data-eng ;;
+    tesseract-eng:debian|tesseract-eng:suse) echo tesseract-ocr ;;   # l'anglais vient avec
+    tesseract-eng:*) echo tesseract ;;
     gdbus:debian) echo libglib2.0-bin ;;
     gdbus:suse) echo glib2-tools ;;
     gdbus:*) echo glib2 ;;
@@ -528,7 +536,7 @@ if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)
 fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng)
 if [ "$MODE" != files ]; then
   say "1. Paquets"
   missing=(); manual=()
