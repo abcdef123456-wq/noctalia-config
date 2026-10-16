@@ -73,7 +73,7 @@ def voir(fichier):
     print(f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} fichiers) :")
     groupes = {}
     for m in fichiers:                       # beaucoup de fichiers (fonds d'écran) : regroupés par dossier
-        cle = os.path.dirname(m.name) if len(fichiers) > 20 else m.name
+        cle = (os.path.dirname(m.name) or m.name) if len(fichiers) > 20 else m.name
         groupes[cle] = groupes.get(cle, 0) + 1
     for g, n in sorted(groupes.items()):
         print(f"  • ~/{g}" + (f"  ({n} fichiers)" if n > 1 else ""))
