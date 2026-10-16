@@ -1,0 +1,11 @@
+[Desktop Entry]
+# Terminal déroulant (Super + ², la touche sous Échap) : l'ouvre ou le range, et donne son icône à sa fenêtre dans le dock
+Type=Application
+Name=Terminal déroulant
+GenericName=Terminal qui descend du haut de l'écran
+Comment=Le terminal caché, ouvert ou rangé (Super + la touche sous Échap)
+Exec=hyprctl dispatch "hl.dsp.workspace.toggle_special('term')"
+Icon=kitty
+StartupWMClass=dropterm
+Categories=System;TerminalEmulator;
+Keywords=terminal;console;dropdown;
