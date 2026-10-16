@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# nc-touches : les touches spéciales des portables (rangée F1…F12 avec Fn), quel que soit le modèle.
+#   nc-touches clavier up|down|bascule   rétroéclairage du clavier (détecté : …kbd_backlight)
+#   nc-touches pave [bascule|on|off]     pavé tactile activé / coupé (tous les pavés tactiles)
+#   nc-touches calculatrice              calculatrice installée (Qalculate, GNOME…), sinon qalc dans le terminal
+# Un petit message dans l'île (notification passagère) dit le nouvel état.
+set -uo pipefail
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+
+dire() {   # dire TITRE [TEXTE] : notification passagère, remplacée par la suivante
+  notify-send -a "Clavier" -t 1500 -h string:x-canonical-private-synchronous:nc-touches -h int:transient:1 "$@" 2>/dev/null || true
+}
+
+case "${1:-}" in
+  clavier)
+    dev=""
+    for d in /sys/class/leds/*kbd_backlight*; do [ -e "$d" ] && { dev="${d##*/}"; break; }; done
+    [ -n "$dev" ] || { dire "Pas de rétroéclairage du clavier réglable"; exit 0; }
+    max=$(cat "/sys/class/leds/$dev/max_brightness" 2>/dev/null || echo 1)
+    cur=$(brightnessctl -d "$dev" get 2>/dev/null || cat "/sys/class/leds/$dev/brightness")
+    case "${2:-bascule}" in
+      up)   new=$(( cur < max ? cur + 1 : max )) ;;
+      down) new=$(( cur > 0 ? cur - 1 : 0 )) ;;
+      *)    new=$(( cur < max ? cur + 1 : 0 )) ;;           # un appui : niveau suivant, puis éteint
+    esac
+    brightnessctl -q -d "$dev" set "$new" 2>/dev/null || exit 1
+    if [ "$new" -eq 0 ]; then dire "Clavier éteint"; else dire "Clavier allumé" "Niveau $new sur $max"; fi ;;
+  pave)
+    etat="$RUN/nc-pave-coupe"
+    case "${2:-bascule}" in
+      on) coupe=0 ;; off) coupe=1 ;;
+      *) if [ -e "$etat" ]; then coupe=0; else coupe=1; fi ;;
+    esac
+    paves="$(hyprctl devices -j 2>/dev/null | jq -r '.mice[] | select(.name | test("touchpad|trackpad"; "i")) | .name')"
+    # L'état tient dans un fichier de la session (noms des pavés coupés) : nc/clavier.lua le relit à chaque
+    # rechargement de Hyprland
+    if [ "$coupe" = 1 ]; then printf '%s\n' "$paves" > "$etat"; else rm -f "$etat"; fi
+    n=0
+    while IFS= read -r nom; do
+      [ -n "$nom" ] || continue
+      hyprctl eval "hl.device({ name = '$nom', enabled = $([ "$coupe" = 1 ] && echo false || echo true) })" >/dev/null
+      n=$((n + 1))
+    done <<< "$paves"
+    [ "$n" -gt 0 ] || { dire "Pas de pavé tactile"; exit 0; }
+    if [ "$coupe" = 1 ]; then dire "Pavé tactile coupé" "La souris reste active"; else dire "Pavé tactile activé"; fi ;;
+  calculatrice)
+    for c in qalculate-gtk qalculate-qt gnome-calculator kcalc galculator; do
+      command -v "$c" >/dev/null && exec "$c"
+    done
+    exec kitty --class nc-calculatrice -e qalc ;;
+  *) sed -n '2,6p' "$0"; exit 1 ;;
+esac

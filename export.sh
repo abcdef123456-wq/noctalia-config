@@ -45,6 +45,7 @@ HOME_FILES=(
   .local/bin/nc-ile-etat
   .local/bin/nc-verrou-media
   .local/bin/nc-media
+  .local/bin/nc-touches
   .local/bin/nc-reglages
   .local/bin/nc-launch
   .local/bin/nc-maj

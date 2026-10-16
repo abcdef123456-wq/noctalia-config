@@ -7,11 +7,16 @@
 # Échelle perceptive douce (courbe au carré, -e2) : le milieu du curseur donne un écran à moitié lumineux à l'œil
 # (une puissance 4 rendait tout le bas de l'échelle presque noir).
 #   nc-brightness set N     règle le niveau à N (0 à 100)
-# Le rétroéclairage de la carte NVIDIA (nvidia_0) est ignoré : il ne pilote pas l'écran interne.
+# Rétroéclairage choisi comme le recommande le noyau : d'abord celui du micrologiciel (dont nvidia_wmi_ec_backlight,
+# qui pilote l'écran de portables gaming à NVIDIA Advanced Optimus), puis celui de la plateforme, puis le direct
+# (amdgpu_bl…, intel_backlight). Celui du pilote NVIDIA lui-même (nvidia_0) est ignoré : il ne pilote pas l'écran.
 dev=""
-for d in /sys/class/backlight/*; do
-  n=${d##*/}
-  case "$n" in nvidia*|'*') ;; *) dev=$n; break ;; esac
+for type in firmware platform raw; do
+  for d in /sys/class/backlight/*; do
+    n=${d##*/}
+    case "$n" in nvidia_[0-9]*|'*') continue ;; esac
+    [ "$(cat "$d/type" 2>/dev/null)" = "$type" ] && { dev=$n; break 2; }
+  done
 done
 [ -n "$dev" ] || exit 0
 case "${1:-}" in
