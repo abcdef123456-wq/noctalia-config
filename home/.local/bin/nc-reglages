@@ -399,6 +399,39 @@ for _r in VISIBLES:
     if _r.section not in SECTIONS:
         SECTIONS.append(_r.section)
 SECTIONS.append("Raccourcis")
+SECTIONS.append("Nouveautés")
+
+
+# ── Nouveautés : les 10 dernières mises à jour du dépôt (une mise à jour = un commit) ─────────────────────────────
+def nouveautes(n=10):
+    """[{date, titre, points, id}] des n dernières mises à jour, la plus récente d'abord ; points : ce qu'elle apporte."""
+    try:
+        depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
+    except OSError:
+        return []
+    brut = sortie(["git", "-C", depot, "log", f"-{n}", "--date=format:%d/%m/%Y", "--format=%h%x1f%cd%x1f%s%x1e"])
+    res = []
+    for bloc in brut.split("\x1e"):
+        p = bloc.strip().split("\x1f")
+        if len(p) < 3:
+            continue
+        # « A ; B ; C » ou « A, B et C » : un point par partie, la première sert de titre
+        points = [x.strip() for x in re.split(r"\s;\s", p[2]) if x.strip()]
+        points = [x if x.startswith(("nc-", "nvidia-")) else x[0].upper() + x[1:] for x in points]
+        titre = re.split(r"\s:\s|\s\(", points[0])[0] if points else p[2]
+        res.append({"genre": "nouveaute", "id": p[0], "date": p[1], "titre": titre, "points": points})
+    return res
+
+
+def maj_disponible():
+    """Une version plus récente a été annoncée (nc-maj verifier) et n'est pas encore installée."""
+    try:
+        annonce = open(os.path.join(HOME, ".cache/nc/maj-annoncee"), encoding="utf-8").read().strip()
+        depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
+    except OSError:
+        return False
+    return subprocess.run(["git", "-C", depot, "merge-base", "--is-ancestor", annonce, "HEAD"],
+                          capture_output=True).returncode != 0
 
 
 # ── Fichier ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -962,6 +995,13 @@ class Ecran:
             if self.lignes_r is None:
                 self.lignes_r = raccourcis()
             return self.lignes_r
+        if SECTIONS[self.sec] == "Nouveautés":
+            if getattr(self, "lignes_n", None) is None:
+                self.lignes_n = ([{"genre": "titre", "nom": "Une nouvelle version est disponible : nc-maj pour l'installer"}]
+                                 if maj_disponible() else []) + nouveautes()
+                if not self.lignes_n:
+                    self.lignes_n = [{"genre": "titre", "nom": "Historique introuvable (dépôt de la config absent)"}]
+            return self.lignes_n
         return [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
 
     @staticmethod
@@ -1041,6 +1081,8 @@ class Ecran:
                 e.addstr(y, x0, couper(it["nom"], iw), curses.A_BOLD | self.ACC)
             elif it["genre"] == "ajouter":
                 self.ligne(y, x0, iw, col, "+ " + it["nom"], "", sel, False)
+            elif it["genre"] == "nouveaute":
+                self.ligne(y, x0, iw, max(col, iw - 14), it["titre"], it["date"], sel, False)
             else:
                 t = "désactivé" if it["desactive"] else touches_de(it)
                 self.ligne(y, x0, iw, col, it["nom"], t, sel, it["change"] or bool(it["mien"]), gris=it["desactive"])
@@ -1060,6 +1102,9 @@ class Ecran:
                     aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
                 elif du_style:
                     aide = (aide + "  " if aide else "") + "Valeur donnée par le style Apple."
+            elif cur["genre"] == "nouveaute":
+                aide = " · ".join(cur["points"][1:4]) or cur["points"][0]
+                aide = (aide[:240] + "…") if len(aide) > 240 else aide
             elif cur["genre"] == "ajouter":
                 aide = "Une appli (va à sa fenêtre si elle est ouverte, sinon la lance), un bureau, une page de l'île ou une commande."
             elif cur["genre"] == "raccourci":
@@ -1081,6 +1126,8 @@ class Ecran:
             bas = "↑↓ section    → ou Entrée : ouvrir    q : quitter"
         elif SECTIONS[self.sec] == "Raccourcis":
             bas = "↑↓ choisir    Entrée : modifier    Échap : sections    q : quitter"
+        elif SECTIONS[self.sec] == "Nouveautés":
+            bas = "↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter"
         else:
             bas = "↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter"
             cur_r = self.courant()[0]
@@ -1113,6 +1160,32 @@ class Ecran:
         win.box()
         win.addstr(0, 2, f" {couper(titre, larg - 6)} ", curses.A_BOLD | self.ACC)
         return win, larg
+
+    def afficher(self, titre, points):
+        """Texte à lire (une mise à jour en détail) : un point par ligne, ↑↓ si c'est long ; une touche ferme."""
+        h, w = self.e.getmaxyx()
+        larg = min(w - 4, 100)
+        lignes = []
+        for p in points:
+            for k, l in enumerate(textwrap.wrap(p, larg - 10) or [""]):
+                lignes.append(("• " if k == 0 else "  ") + l)
+        vue = max(3, min(len(lignes), h - 8))
+        haut = 0
+        while True:
+            self.dessiner()
+            win, larg = self.boite(titre, vue + 1, larg)
+            for k, l in enumerate(lignes[haut:haut + vue]):
+                win.addstr(2 + k, 3, couper(l, larg - 6))
+            pied = "↑↓ défiler · une touche : fermer" if len(lignes) > vue else "Une touche : fermer"
+            win.addstr(2 + vue, 3, couper(pied, larg - 6), curses.A_DIM)
+            win.refresh()
+            c = win.getch()
+            if c in (curses.KEY_DOWN, ord("j")) and haut + vue < len(lignes):
+                haut += 1
+            elif c in (curses.KEY_UP, ord("k")) and haut > 0:
+                haut -= 1
+            elif c not in (curses.KEY_DOWN, curses.KEY_UP, ord("j"), ord("k"), -1):
+                return
 
     def choisir(self, titre, options, aide=""):
         """Liste d'options (↑↓ Entrée, Échap) ; renvoie l'indice ou None."""
@@ -1466,6 +1539,11 @@ class Ecran:
                     self.statut(f"{cur.nom} : valeur {'du style' if du else 'de la config'}")
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
+            elif cur["genre"] == "nouveaute":
+                if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
+                    self.afficher(f"{cur['date']} · {cur['titre']}", cur["points"])
+                elif c == curses.KEY_LEFT:
+                    self.focus = "sections"
             else:
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
                     self.action_raccourci(cur)
@@ -1491,6 +1569,16 @@ def tui(section=0):
 # ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
 def cli(a):
     vals = lire()
+    if a[0] in ("nouveautes", "nouveautés", "news"):
+        if maj_disponible():
+            print("Une nouvelle version est disponible : nc-maj pour l'installer.\n")
+        for x in nouveautes():
+            print(f"{x['date']}  {x['titre']}")
+            for p in x["points"]:
+                for k, l in enumerate(textwrap.wrap(p, 100)):
+                    print(("    • " if k == 0 else "      ") + l)
+            print()
+        return
     if a[0] in ("liste", "list", "ls"):
         sec = None
         for r in VISIBLES:
