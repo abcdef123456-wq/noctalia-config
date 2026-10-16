@@ -150,6 +150,17 @@ Singleton {
         Quickshell.execDetached(["sh", "-c", "rm -rf \"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\""])
     }
 
+    // ── Enregistrement d'écran (nc-video) : point rouge et durée dans la pilule ; un clic dessus l'arrête ──
+    property real debutVideo: 0
+    readonly property bool enregistre: debutVideo > 0
+    Process {
+        id: lireVideo
+        command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-video\"; [ -s \"$f\" ] && kill -0 \"$(head -1 \"$f\")\" 2>/dev/null && sed -n 2p \"$f\" || echo 0"]
+        stdout: StdioCollector { onStreamFinished: etat.debutVideo = parseInt(text) || 0 }
+    }
+    Timer { interval: 1000; repeat: true; running: true; onTriggered: if (!lireVideo.running) lireVideo.running = true }
+    function arreterVideo() { Quickshell.execDetached([bin + "nc-video", "arreter"]); debutVideo = 0 }
+
     // ── Café : empêche la mise en veille (Noctalia) ──
     property bool cafe: false
     function basculerCafe() { cafe = !cafe; Quickshell.execDetached(["noctalia", "msg", cafe ? "caffeine-enable" : "caffeine-disable"]) }

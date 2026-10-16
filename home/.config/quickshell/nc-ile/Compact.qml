@@ -10,6 +10,7 @@ import Quickshell.Services.UPower
 Item {
     id: c
     readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
+                                   : Etat.enregistre ? "video"
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
@@ -18,7 +19,7 @@ Item {
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
-                                      claude: claude, "claude-fini": claudeFini })[mode] || repos
+                                      claude: claude, "claude-fini": claudeFini, video: video })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -220,6 +221,22 @@ Item {
         Texte { anchors.verticalCenter: parent.verticalCenter; text: "Claude a terminé"; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.dernierFini; secondaire: true; width: Math.min(implicitWidth, 160) }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "check_circle"; taille: 17; color: Couleurs.vert }
+    }
+
+    // ── Enregistrement d'écran : point rouge qui palpite et durée (un clic sur la pilule l'arrête) ──
+    Fondu {
+        id: video
+        montre: c.mode === "video"
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.rouge
+            SequentialAnimation on opacity { running: video.montre; loops: Animation.Infinite
+                NumberAnimation { to: 0.35; duration: 700 } NumberAnimation { to: 1; duration: 700 } }
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold; font.features: { "tnum": 1 }
+            text: Etat.duree(Math.max(0, Math.floor(Etat.maintenant.getTime() / 1000 - Etat.debutVideo)))
+        }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "stop_circle"; taille: 17; color: Couleurs.texteSec }
     }
 
     // ── Mode jeu ──

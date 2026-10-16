@@ -346,6 +346,8 @@ REGLAGES = [
       "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
     # Captures
     R("CAPTURES_DOSSIER", "Captures", "Dossier des captures d'écran", "dossier", "auto", "Automatique : Captures, dans ton dossier Images."),
+    R("VIDEO_SON", "Captures", "Son des vidéos (Super + Maj + R)", "choix", "non", "",
+      [("non", "Sans son"), ("systeme", "Le son du PC"), ("micro", "Le micro")]),
     R("CAPTURES_COPIER", "Captures", "Copier aussi la capture", "ouinon", "oui", "Ctrl + V la colle directement."),
     R("CAPTURES_NOTIF", "Captures", "Notification après une capture", "ouinon", "oui", "Avec les boutons Annoter, Supprimer et Ouvrir le dossier."),
 ]

@@ -42,6 +42,7 @@ HOME_FILES=(
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
   .local/bin/nc-meteo
+  .local/bin/nc-video
   .local/bin/nc-fermer
   .local/bin/nc-greeting
   .local/bin/nc-capture

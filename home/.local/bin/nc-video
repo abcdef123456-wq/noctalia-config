@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# nc-video : enregistre l'écran en vidéo (wf-recorder). Un point rouge et la durée s'affichent dans l'île ; un clic sur
+# la pilule (ou le même raccourci) arrête.
+#   nc-video            démarre : zone choisie à la souris, ou clic sur un écran pour l'écran entier ; arrête si en cours
+#                       (Super + Maj + R)
+#   nc-video arreter    arrête l'enregistrement en cours
+# Fichier : ~/Vidéos/Enregistrements (dossier « Vidéos » de ta langue), « Enregistrement du 2026-10-16 à 19.20.05.mp4 ».
+# Son : nc-reglages → Captures → « Son des vidéos » (VIDEO_SON : non, systeme, micro).
+set -uo pipefail
+etat="${XDG_RUNTIME_DIR:-/tmp}/nc-video"
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+dire() { notify-send -a "Enregistrement d'écran" -i media-record "$@" 2>/dev/null || true; }
+
+arreter() {
+  [ -s "$etat" ] || return 1
+  local pid debut fichier duree
+  { read -r pid; read -r debut; read -r fichier; } < "$etat"
+  kill -INT "$pid" 2>/dev/null
+  for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done   # la vidéo est finalisée
+  rm -f "$etat"
+  [ -s "$fichier" ] || { dire "Enregistrement vide" "Rien n'a été enregistré."; return 0; }
+  duree=$(( $(date +%s) - debut ))
+  (
+    choix="$(timeout 600 notify-send -a "Enregistrement d'écran" -i video-x-generic -A ouvrir="Ouvrir" -A dossier="Ouvrir le dossier" \
+      -A supprimer="Supprimer" "Vidéo enregistrée" "$(printf '%d:%02d' $((duree / 60)) $((duree % 60))) · ${fichier##*/}" 2>/dev/null)"
+    case "$choix" in
+      ouvrir) xdg-open "$fichier" ;;
+      dossier) xdg-open "${fichier%/*}" ;;
+      supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;
+    esac
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+
+[ "${1:-}" = arreter ] && { arreter; exit 0; }
+# Déjà en cours : le même raccourci arrête
+if [ -s "$etat" ] && kill -0 "$(head -1 "$etat")" 2>/dev/null; then arreter; exit 0; fi
+rm -f "$etat"
+command -v wf-recorder >/dev/null || { dire "wf-recorder n'est pas installé" "nc-maj l'installe (ou ton gestionnaire de paquets : wf-recorder)."; exit 1; }
+
+zone="$(slurp -o -d 2>/dev/null)" || exit 0          # Échap : rien n'est fait
+[ -n "$zone" ] || exit 0
+videos="$(xdg-user-dir VIDEOS 2>/dev/null)"
+[ -n "$videos" ] && [ "$videos" != "$HOME" ] && [ "$videos" != "$HOME/" ] || videos="$HOME/Videos"
+dossier="$videos/Enregistrements"
+mkdir -p "$dossier"
+fichier="$dossier/Enregistrement du $(date '+%Y-%m-%d à %H.%M.%S').mp4"
+
+son=()
+case "$(reglage VIDEO_SON)" in
+  systeme) s="$(pactl get-default-sink 2>/dev/null)"; [ -n "$s" ] && son=(--audio="$s.monitor") ;;
+  micro) son=(--audio) ;;
+esac
+setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" -c libx264 -p preset=veryfast -p crf=23 >/dev/null 2>"$etat.log" < /dev/null &
+pid=$!
+sleep 0.5
+if ! kill -0 "$pid" 2>/dev/null; then
+  dire "L'enregistrement n'a pas démarré" "$(tail -1 "$etat.log" 2>/dev/null)"
+  exit 1
+fi
+printf '%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" > "$etat"
