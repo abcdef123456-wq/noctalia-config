@@ -46,6 +46,7 @@ HOME_FILES=(
   .local/bin/nc-verrou-media
   .local/bin/nc-media
   .local/bin/nc-touches
+  .local/bin/nc-memoire
   .local/bin/nc-reglages
   .local/bin/nc-launch
   .local/bin/nc-maj
