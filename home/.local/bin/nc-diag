@@ -230,6 +230,16 @@ def verifier(b):
         b.faux(f"le portail répond en {int(attente) / 1000:.0f} s : les applis Electron (Discord…) démarrent lentement",
                "nc-maj, puis déconnecte-toi et reconnecte-toi")
 
+    # ── Wi-Fi : veille entre deux paquets (messages en retard, voix des autres coupée en appel) ──
+    b.titre("Wi-Fi")
+    for carte in [x for x in (os.listdir("/sys/class/net") if os.path.isdir("/sys/class/net") else []) if x.startswith("wl")]:
+        ps_, _ = sortie(["iw", "dev", carte, "get", "power_save"])
+        if "Power save: on" in ps_:
+            b.avert(f"Wi-Fi ({carte}) en veille entre deux paquets : messages en retard, voix des autres coupée en appel",
+                    "nc-maj (désactive cette veille), ou tout de suite : sudo iw dev " + carte + " set power_save off")
+        elif "Power save: off" in ps_:
+            b.ok(f"Wi-Fi ({carte}) réactif (pas de veille entre deux paquets)")
+
     # ── Outils ──
     b.titre("Outils utilisés par la config")
     outils = {
