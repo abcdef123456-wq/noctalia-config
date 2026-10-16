@@ -9,6 +9,7 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
                         la même chose pour l'agent de Google Antigravity (appli, éditeur ou agy en terminal) : ce
                         qu'il fait et quand il a fini (~/.gemini/config/hooks.json) ; ses demandes restent dans Antigravity
   nc-claude agy EVENEMENT   appelé par Antigravity (PreInvocation, PostToolUse, Stop)
+  nc-claude ecrire SESSION TEXTE   écrit à l'agent de cette session (tapé dans son terminal kitty, puis Entrée)
   nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
 question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
@@ -167,21 +168,39 @@ def fenetres():
         return []
 
 
-def terminal_pid():
-    """Le programme à fenêtre (kitty…) dont descend ce Claude : on remonte les parents jusqu'à une fenêtre."""
+def terminal_et_shell():
+    """Le programme à fenêtre (kitty…) dont descend cet agent, et le processus juste en dessous (le shell de l'onglet,
+    pour écrire à l'agent depuis l'île) : on remonte les parents jusqu'à une fenêtre."""
     pids = {w.get("pid") for w in fenetres()}
-    p = os.getppid()
+    p, avant = os.getppid(), 0
     for _ in range(30):
         if p in pids:
-            return p
+            return p, avant
         try:
             with open(f"/proc/{p}/stat") as f:
-                p = int(f.read().rsplit(")", 1)[1].split()[1])
+                p, avant = int(f.read().rsplit(")", 1)[1].split()[1]), p
         except (OSError, ValueError, IndexError):
-            return 0
+            return 0, 0
         if p <= 1:
-            return 0
-    return 0
+            return 0, 0
+    return 0, 0
+
+
+def terminal_pid():
+    return terminal_et_shell()[0]
+
+
+def socket_kitty(pid):
+    """Socket de contrôle du kitty de cette fenêtre (listen_on dans kitty.conf), s'il existe."""
+    f = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), f"kitty-{pid}")
+    return f if pid and os.path.exists(f) else ""
+
+
+def reperer_terminal(s):
+    """Fenêtre, shell et « peut-on lui écrire depuis l'île » d'une session (une fois pour toutes)."""
+    if not s.get("terminal") or not s.get("shell"):
+        s["terminal"], s["shell"] = terminal_et_shell()
+    s["ecrire"] = bool(s.get("shell") and socket_kitty(s.get("terminal")))
 
 
 def terminal_actif(pid):
@@ -207,8 +226,7 @@ def session(d, ev):
     s["cwd"] = cwd.replace(HOME, "~")
     s["projet"] = ev.get("session_title") or os.path.basename(cwd.rstrip("/")) or "Claude"
     s["maj"] = time.time()
-    if not s.get("terminal"):
-        s["terminal"] = terminal_pid()
+    reperer_terminal(s)
     return s
 
 
@@ -441,8 +459,7 @@ def hook_agy(nom):
             s["cwd"] = ws.replace(HOME, "~")
         s["projet"] = os.path.basename(ws.rstrip("/")) or s.get("projet") or "Antigravity"
         s["maj"] = time.time()
-        if not s.get("terminal"):
-            s["terminal"] = terminal_pid()
+        reperer_terminal(s)
         if nom == "PreInvocation":
             if s.get("etat") != "travail":             # nouvelle demande : on repart de zéro
                 s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
@@ -613,6 +630,29 @@ def montrer():
         print(f"  demande : {x.get('titre')} {x.get('detail', '')}")
 
 
+def ecrire(sid, texte):
+    """Écrit un message à l'agent d'une session depuis l'île : tapé dans son terminal (kitty), puis Entrée."""
+    texte = re.sub(r"\s+", " ", texte).strip()
+    try:
+        s = json.load(open(ETAT, encoding="utf-8"))["sessions"][sid]
+    except (OSError, ValueError, KeyError):
+        sys.exit("nc-claude : session inconnue.")
+    sock = socket_kitty(s.get("terminal"))
+    if not texte or not sock or not s.get("shell"):
+        sys.exit("nc-claude : on ne peut écrire qu'à un agent lancé dans kitty.")
+    base = ["kitty", "@", "--to", "unix:" + sock, "send-text", "--match", f"pid:{s['shell']}"]
+    r = subprocess.run(base + ["--bracketed-paste", "auto", "--stdin"], input=texte, text=True, capture_output=True, timeout=5)
+    if r.returncode:
+        sys.exit("nc-claude : " + (r.stderr.strip() or "kitty n'a pas accepté le texte"))
+    time.sleep(0.2)                            # Entrée à part : sinon prise pour un retour à la ligne du texte collé
+    subprocess.run(base + ["--stdin"], input="\r", text=True, capture_output=True, timeout=5)
+    with Etat() as d:
+        x = d["sessions"].get(sid)
+        if x:
+            x.update(etat="travail", maj=time.time())
+            ajouter_etape(x, "chat", "Toi : " + court(texte, 50))
+
+
 def diag():
     """Ce qui est en place, en clair : à envoyer si l'île ne montre rien."""
     def ligne(ok, texte):
@@ -677,6 +717,8 @@ def main():
         montrer()
     elif a[0] == "diag":
         diag()
+    elif a[0] == "ecrire" and len(a) >= 3:
+        ecrire(a[1], " ".join(a[2:]))
     else:
         print(__doc__.strip())
 

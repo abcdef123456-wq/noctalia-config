@@ -64,6 +64,10 @@ Singleton {
     function repondre(id, choix) {
         Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf %s \"$2\" > \"$1/$3\"", "sh", dossier + "/reponses", choix, id])
     }
+    // Écrire à l'agent depuis l'île : tapé dans son terminal kitty, puis Entrée (nc-claude ecrire)
+    function ecrire(id, texte) {
+        if (texte.trim() !== "") Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-claude", "ecrire", id, texte])
+    }
     function allerTerminal(pid) {
         if (pid > 0) Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = 'pid:" + pid + "' })"])
     }
