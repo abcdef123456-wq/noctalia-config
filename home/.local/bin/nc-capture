@@ -3,6 +3,7 @@
 #   nc-capture ecran      écran entier (celui de la souris)              Impr. écran
 #   nc-capture zone       zone choisie à la souris                       Super + P, Maj + Impr. écran
 #   nc-capture retouche   zone, ouverte tout de suite dans Swappy        Super + Maj + S
+#   nc-capture texte      le TEXTE d'une zone (image, vidéo, PDF scanné…) copié, prêt à coller   Super + Maj + T
 # Fichier : ~/Images/Captures (dossier « Images » de ta langue), « Capture du 2026-10-15 à 23.25.10.png ».
 # L'image est aussi copiée : Ctrl + V la colle directement. Une notification la montre ; un clic l'ouvre dans Swappy
 # pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
@@ -10,6 +11,22 @@
 set -uo pipefail
 
 mode="${1:-zone}"
+
+# Texte d'une zone : lu par tesseract (français et anglais), copié ; rien n'est enregistré
+if [ "$mode" = texte ]; then
+  dire() { notify-send -a "Texte de l'écran" -i edit-copy "$@" 2>/dev/null || true; }
+  command -v tesseract >/dev/null || { dire "tesseract n'est pas installé" "nc-maj l'installe (lecture du texte des images)."; exit 1; }
+  zone="$(slurp -d 2>/dev/null)" || exit 0
+  [ -n "$zone" ] || exit 0
+  langues="$(tesseract --list-langs 2>/dev/null | grep -xE 'fra|eng' | paste -sd+)"
+  # Agrandie deux fois : tesseract lit bien mieux les petits caractères d'écran
+  texte="$(grim -g "$zone" -s 2 - | tesseract stdin stdout ${langues:+-l "$langues"} 2>/dev/null | sed -e 's/[[:space:]]*$//' | cat -s)"
+  texte="$(printf '%s' "$texte" | sed -e '/./,$!d')"          # sans lignes vides au début
+  if [ -z "${texte//[[:space:]]/}" ]; then dire "Aucun texte trouvé" "Essaie une zone plus grande ou plus nette."; exit 0; fi
+  printf '%s' "$texte" | wl-copy
+  dire "Texte copié" "$(printf '%s' "$texte" | head -c 180)"
+  exit 0
+fi
 images="$(xdg-user-dir PICTURES 2>/dev/null)"
 [ -n "$images" ] && [ "$images" != "$HOME" ] && [ "$images" != "$HOME/" ] || images="$HOME/Pictures"
 dossier="$images/Captures"
@@ -29,7 +46,7 @@ case "$mode" in
     zone="$(slurp -d 2>/dev/null)" || exit 0            # Échap : rien n'est fait
     [ -n "$zone" ] || exit 0
     grim -g "$zone" "$fichier" || exit 1 ;;
-  *) echo "Usage : nc-capture ecran | zone | retouche" >&2; exit 2 ;;
+  *) echo "Usage : nc-capture ecran | zone | retouche | texte" >&2; exit 2 ;;
 esac
 
 # Copiée aussi, sauf si coupé dans nc-reglages (CAPTURES_COPIER)

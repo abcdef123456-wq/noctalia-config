@@ -26,6 +26,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `.` | Émojis |
 | `Impr. écran` | Capture de l'écran |
 | `Super` + `Maj` + `S` | Capture à annoter |
+| `Super` + `Maj` + `T` | Copier le texte d'une zone de l'écran (image, vidéo, PDF scanné) |
 
 ## Fenêtres
 
