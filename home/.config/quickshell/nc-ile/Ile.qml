@@ -15,7 +15,9 @@ PanelWindow {
     screen: modelData
     readonly property bool ouverte: Etat.ecranOuvert === modelData.name
 
-    anchors { top: true; left: true; right: true }
+    // Recherche : la fenêtre couvre tout l'écran (invisible) pour qu'un clic à côté la referme. L'île prend alors le
+    // clavier en exclusif, et Hyprland ne laisse aucun clic arriver ailleurs : une couche séparée ne les recevait pas
+    anchors { top: true; left: true; right: true; bottom: fen.recherche }
     implicitHeight: 700
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
@@ -24,7 +26,7 @@ PanelWindow {
     // Recherche : le clavier va tout de suite à l'île ; sinon seulement quand on clique dedans
     WlrLayershell.keyboardFocus: recherche ? WlrKeyboardFocus.Exclusive : (ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
     readonly property bool recherche: ouverte && Etat.recherche
-    mask: Region { item: ile; Region { item: bulle } }
+    mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
@@ -63,6 +65,19 @@ PanelWindow {
                                            + (Notifs.boutons(Notifs.banniere).length > 0 ? 36 : 0)
 
     // Point d'activité du micro (orange) ou de la caméra (vert), à droite de la pilule, comme sur iPhone
+    // Spotlight : clic n'importe où à côté = fermer (sous l'île, qui garde ses propres clics)
+    Item {
+        id: fondClic
+        anchors.fill: parent
+        MouseArea {
+            anchors.fill: parent
+            enabled: fen.recherche
+            acceptedButtons: Qt.AllButtons
+            // Fermée au relâchement : le clic entier reste ici. Fermée à l'appui, le relâchement tombait sur ce qu'il y a
+            // dessous (un bouton de la barre, une fenêtre…) et le déclenchait
+            onReleased: Etat.fermer()
+        }
+    }
     Rectangle {
         id: pointPrive
         readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.demandeClaude && (Etat.microActif || Etat.cameraActive)
