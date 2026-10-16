@@ -13,6 +13,9 @@ mode="${1:-zone}"
 images="$(xdg-user-dir PICTURES 2>/dev/null)"
 [ -n "$images" ] && [ "$images" != "$HOME" ] && [ "$images" != "$HOME/" ] || images="$HOME/Pictures"
 dossier="$images/Captures"
+# Dossier choisi avec nc-reglages (CAPTURES_DOSSIER)
+perso="$(sed -n 's/^CAPTURES_DOSSIER=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"')"
+[ -n "$perso" ] && dossier="${perso/#\~/$HOME}"
 mkdir -p "$dossier"
 fichier="$dossier/Capture du $(date '+%Y-%m-%d à %H.%M.%S').png"
 

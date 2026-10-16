@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+# nc-reglages : tes réglages de noctalia-config, à part des fichiers de la config.
+# Ils sont gardés dans ~/.config/nc/reglages.conf (lignes CLE=valeur), que les mises à jour (nc-maj, install.sh) ne
+# touchent jamais : seules les valeurs que tu changes y sont écrites, le reste suit la config. Chaque partie de la
+# config lit ce fichier (Hyprland, l'île, les profils d'énergie, la veille, le terminal, les captures) ; la commande
+# applique tout de suite ce que tu changes.
+#
+#   nc-reglages                     menu (choisir un réglage par son numéro)
+#   nc-reglages liste               tous les réglages et leur valeur
+#   nc-reglages get CLE             valeur d'un réglage
+#   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
+#   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
+#   nc-reglages fichier             ouvrir le fichier dans ton éditeur
+#   nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
+set -uo pipefail
+
+FICHIER="$HOME/.config/nc/reglages.conf"
+VEILLE_SRC="$HOME/.config/hypr/hypridle.conf"
+VEILLE_OUT="$HOME/.config/nc/hypridle.conf"
+VEILLE_UNITE="$HOME/.config/systemd/user/hypridle.service.d/nc-reglages.conf"
+KITTY_OUT="$HOME/.config/kitty/nc-reglages.conf"
+
+# ── Les réglages ─────────────────────────────────────────────────────────────────────────────────────────────────
+# CLE | section | nom | type | paramètres | valeur de la config | explication
+#   choix : valeur=Nom;…      entier : min:max:unité      ouinon      hz (fréquence de l'écran)      dossier
+REGISTRE="$(cat <<'R'
+ILE_STYLE|Île|Couleurs de l'île|choix|terminal=Couleurs du terminal;noir=Noire, couleurs d'Apple|terminal|Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.
+ILE_CONTOUR|Île|Contour de l'île ouverte|choix|degrade=Dégradé des fenêtres;discret=Filet discret;aucun=Aucun|degrade|Le dégradé reprend la bordure de la fenêtre active.
+BATTERIE_ALERTE|Île|Alerte de batterie faible|entier|0:50:%|20|Notification à ce niveau, puis à la moitié. 0 : jamais.
+HZ_PERFORMANCE|Énergie|Écran en Performance|hz||max|Fréquence de l'écran du portable dans ce profil.
+HZ_BALANCED_AC|Énergie|Écran en Équilibré, sur secteur|hz||max|Fréquence de l'écran du portable dans ce profil.
+HZ_BALANCED_BAT|Énergie|Écran en Équilibré, sur batterie|hz||max|Fréquence de l'écran du portable dans ce profil.
+HZ_ECO|Énergie|Écran en Économie|hz||low|Fréquence de l'écran du portable dans ce profil.
+ECO_BRIGHTNESS_MAX|Énergie|Luminosité maximale en Économie|entier|0:100:%|40|0 : ne pas limiter.
+FENETRES_ESPACE|Fenêtres|Espace entre les fenêtres|entier|0:40:px|4|
+FENETRES_MARGE|Fenêtres|Marge au bord de l'écran|entier|0:60:px|10|
+FENETRES_BORDURE|Fenêtres|Épaisseur de la bordure|entier|0:8:px|2|
+FENETRES_ARRONDI|Fenêtres|Arrondi des coins|entier|0:30:px|14|
+FENETRES_ASSOMBRIR|Fenêtres|Assombrir les fenêtres inactives|ouinon||oui|La fenêtre active ressort.
+CLAVIER_DISPOSITION|Clavier et souris|Disposition du clavier|texte||systeme|Code de disposition : us, fr, us,fr (Super + Espace passe de l'une à l'autre)… « systeme » : celle du système.
+DEFILEMENT_NATUREL|Clavier et souris|Défilement naturel (pavé tactile)|ouinon||oui|Le contenu suit les doigts, comme sur un téléphone.
+TAPOTER_CLIC|Clavier et souris|Toucher le pavé pour cliquer|ouinon||oui|
+SOURIS_VITESSE|Clavier et souris|Vitesse du pointeur|entier|-10:10:|0|De -10 (lent) à 10 (rapide).
+VEILLE_VERROU|Veille|Verrouillage automatique après|entier|0:120:min|5|L'écran s'assombrit un peu avant et s'éteint 30 s après. 0 : jamais.
+VEILLE_SUSPENSION|Veille|Mise en veille sur batterie après|entier|0:240:min|15|Sur secteur, le PC ne se met jamais en veille tout seul. 0 : jamais.
+TERMINAL_OPACITE|Terminal|Opacité du fond du terminal|entier|50:100:%|88|
+TERMINAL_TAILLE|Terminal|Taille du texte du terminal|entier|8:24:pt|11|
+CAPTURES_DOSSIER|Captures|Dossier des captures d'écran|dossier||auto|Par défaut : Captures, dans ton dossier Images.
+R
+)"
+
+# Couleurs du terminal (les mêmes que la config) ; aucune si la sortie n'est pas un terminal
+if [ -t 1 ]; then
+  B=$'\e[1m'; D=$'\e[2m'; N=$'\e[0m'; ACC=$'\e[34m'; MOD=$'\e[33m'; OK=$'\e[32m'; ERR=$'\e[31m'
+else
+  B=""; D=""; N=""; ACC=""; MOD=""; OK=""; ERR=""
+fi
+
+champ() { # champ CLE NUMÉRO (1 : clé … 7 : explication)
+  printf '%s\n' "$REGISTRE" | awk -F'|' -v k="$1" -v n="$2" '$1 == k { print $n; exit }'
+}
+cles() { printf '%s\n' "$REGISTRE" | cut -d'|' -f1; }
+connue() { cles | grep -qxF "$1"; }
+
+# Valeur écrite dans le fichier (vide : celle de la config)
+lue() { sed -n "s/^$1=//p" "$FICHIER" 2>/dev/null | tail -1 | sed 's/^"\(.*\)"$/\1/'; }
+valeur() { local v; v="$(lue "$1")"; [ -n "$v" ] && echo "$v" || champ "$1" 6; }
+
+# Fréquences de l'écran du portable (dans sa définition native), de la plus basse à la plus haute
+frequences() {
+  hyprctl monitors all -j 2>/dev/null | jq -r '
+    [.[] | select(.name | test("^eDP"))][0] // empty | .availableModes
+    | map(capture("^(?<w>[0-9]+)x(?<h>[0-9]+)@(?<hz>[0-9.]+)") | {px: ((.w | tonumber) * (.h | tonumber)), hz: (.hz | tonumber | round)})
+    | (map(.px) | max) as $m | map(select(.px == $m) | .hz) | unique | .[]' 2>/dev/null
+}
+
+# Valeur lisible
+montrer() { # montrer CLE VALEUR
+  local type v="$2" p u
+  type="$(champ "$1" 4)"; p="$(champ "$1" 5)"
+  case "$type" in
+    choix)  printf '%s\n' "$p" | tr ';' '\n' | awk -F= -v v="$v" '$1 == v { print $2; f = 1 } END { if (!f) print v }' ;;
+    ouinon) [ "$v" = oui ] && echo "Oui" || echo "Non" ;;
+    entier) u="${p##*:}"; [ "$v" = 0 ] && [[ "$(champ "$1" 7)" == *"0 : "* ]] && { echo "$(champ "$1" 7 | sed -n 's/.*0 : \([^.]*\).*/\1/p' | sed 's/^./\U&/')"; return; }
+            echo "$v${u:+ $u}" ;;
+    hz)     local l; l="$(frequences)"
+            case "$v" in
+              max) echo "La plus haute${l:+ ($(echo "$l" | tail -1) Hz)}" ;;
+              low) echo "60 Hz (sinon la plus basse)" ;;
+              *)   echo "$v Hz" ;;
+            esac ;;
+    dossier) [ "$v" = auto ] && echo "Images/Captures" || echo "$v" ;;
+    texte)  [ "$v" = systeme ] && echo "Celle du système ($(hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null))" || echo "$v" ;;
+    *) echo "$v" ;;
+  esac
+}
+
+# Vérifie une valeur ; l'affiche normalisée (oui/non…) ou échoue avec un message
+valider() { # valider CLE VALEUR
+  local type p v="$2" min max
+  type="$(champ "$1" 4)"; p="$(champ "$1" 5)"
+  case "$type" in
+    choix)  printf '%s\n' "$p" | tr ';' '\n' | cut -d= -f1 | grep -qxF "$v" && { echo "$v"; return 0; }
+            echo "valeurs possibles : $(printf '%s\n' "$p" | tr ';' '\n' | cut -d= -f1 | paste -sd' ')" >&2; return 1 ;;
+    ouinon) case "${v,,}" in oui|o|yes|y|true|1) echo oui ;; non|n|no|false|0) echo non ;; *) echo "oui ou non" >&2; return 1 ;; esac ;;
+    entier) min="${p%%:*}"; max="${p#*:}"; max="${max%%:*}"
+            if [[ "$v" =~ ^-?[0-9]{1,4}$ ]]; then
+              if [[ "$v" == -* ]]; then v="-$((10#${v#-}))"; else v="$((10#$v))"; fi   # 08 -> 8
+              [ "$v" = -0 ] && v=0
+              [ "$v" -ge "$min" ] && [ "$v" -le "$max" ] && { echo "$v"; return 0; }
+            fi
+            echo "un nombre entier de $min à $max" >&2; return 1 ;;
+    hz)     case "$v" in max|low) echo "$v"; return 0 ;; esac
+            [[ "$v" =~ ^[0-9]{2,3}$ ]] && [ "$v" -ge 20 ] && { echo "$v"; return 0; }
+            echo "max, low ou une fréquence en Hz (ex. 60)" >&2; return 1 ;;
+    texte)  [ "$v" = systeme ] && { echo systeme; return 0; }
+            # Disposition(s) du clavier : chaque code doit exister dans XKB
+            local x ok=1
+            [[ "$v" =~ ^[a-z]{2,3}(,[a-z]{2,3})*$ ]] || ok=0
+            for x in ${v//,/ }; do [ -e "/usr/share/X11/xkb/symbols/$x" ] || ok=0; done
+            [ "$ok" = 1 ] && { echo "$v"; return 0; }
+            echo "codes de disposition XKB séparés par des virgules (ex. us, fr, us,fr)" >&2; return 1 ;;
+    dossier) [ "$v" = auto ] && { echo auto; return 0; }
+            v="${v/#\~/$HOME}"; [[ "$v" = /* ]] || { echo "un chemin complet (ex. ~/Images/Captures) ou auto" >&2; return 1; }
+            echo "$v" ;;
+  esac
+}
+
+# Réécrit le fichier : réglages dans l'ordre du menu, par section, et les clés inconnues (autres versions) à la fin
+ecrire() { # ecrire CLE VALEUR (VALEUR vide : retirer)
+  local cle="$1" v="$2" tmp k s sec="" val
+  mkdir -p "$(dirname "$FICHIER")"
+  tmp="$(mktemp "$FICHIER.XXXXXX")"
+  {
+    echo "# Tes réglages de noctalia-config : seulement ce que tu as changé, le reste suit la config."
+    echo "# Gardé tel quel par les mises à jour. Le plus simple pour le changer : la commande nc-reglages."
+    while IFS= read -r k; do
+      if [ "$k" = "$cle" ]; then val="$v"; else val="$(lue "$k")"; fi
+      [ -n "$val" ] || continue
+      s="$(champ "$k" 2)"
+      [ "$s" != "$sec" ] && { printf '\n# %s\n' "$s"; sec="$s"; }
+      printf '%s=%s\n' "$k" "$val"
+    done < <(cles)
+    grep -E '^[A-Z0-9_]+=' "$FICHIER" 2>/dev/null | while IFS= read -r l; do connue "${l%%=*}" || echo "$l"; done
+  } > "$tmp"
+  mv "$tmp" "$FICHIER"
+}
+
+# ── Application ──────────────────────────────────────────────────────────────────────────────────────────────────
+appliquer_veille() {
+  local verrou susp hi
+  verrou="$(lue VEILLE_VERROU)"; susp="$(lue VEILLE_SUSPENSION)"
+  if [ -z "$verrou$susp" ]; then
+    # Rien de changé : la veille de la config
+    if [ -e "$VEILLE_UNITE" ]; then
+      rm -f "$VEILLE_UNITE" "$VEILLE_OUT"
+      systemctl --user daemon-reload; systemctl --user restart hypridle.service 2>/dev/null
+    fi
+    return 0
+  fi
+  [ -r "$VEILLE_SRC" ] || return 0
+  verrou="${verrou:-$(champ VEILLE_VERROU 6)}"; susp="${susp:-$(champ VEILLE_SUSPENSION 6)}"
+  # Copie de la veille de la config, délais remplacés (assombrir 2 min 30 avant le verrouillage, écran éteint 30 s
+  # après) ; un délai à 0 retire l'étape. Refaite à chaque mise à jour (nc-reglages appliquer).
+  {
+    echo "# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : $verrou min, veille : $susp min)."
+    echo "# Ne pas éditer : nc-reglages set VEILLE_VERROU / VEILLE_SUSPENSION, ou nc-reglages reset pour revenir à la config."
+    awk -v verrou="$verrou" -v susp="$susp" '
+      function sortie(b,   t) {
+        if (b ~ /nc-brightness dim/)   t = (verrou > 0) ? ((verrou * 60 - 150 > 30) ? verrou * 60 - 150 : 30) : 0
+        else if (b ~ /dpms/)           t = (verrou > 0) ? verrou * 60 + 30 : 0
+        else if (b ~ /lock-session/)   t = verrou * 60
+        else if (b ~ /suspend/)        t = susp * 60
+        else { printf "%s", b; return }
+        if (t <= 0) return
+        sub(/timeout *= *[0-9]+/, "timeout = " t, b); printf "%s", b
+      }
+      /^listener *\{/ { bloc = $0 "\n"; dans = 1; next }
+      dans { bloc = bloc $0 "\n"; if ($0 ~ /^\}/) { dans = 0; sortie(bloc) }; next }
+      { print }' "$VEILLE_SRC"
+  } > "$VEILLE_OUT.tmp" && mv "$VEILLE_OUT.tmp" "$VEILLE_OUT"
+  hi="$(command -v hypridle || echo /usr/bin/hypridle)"
+  mkdir -p "$(dirname "$VEILLE_UNITE")"
+  printf '# nc-reglages : la veille avec tes délais (%s)\n[Service]\nExecStart=\nExecStart=%s -c %s\n' \
+    "$VEILLE_OUT" "$hi" "%h/.config/nc/hypridle.conf" > "$VEILLE_UNITE"
+  systemctl --user daemon-reload; systemctl --user restart hypridle.service 2>/dev/null
+}
+
+appliquer_terminal() {
+  local op taille c=""
+  op="$(lue TERMINAL_OPACITE)"; taille="$(lue TERMINAL_TAILLE)"
+  [ -n "$op" ] && c+="background_opacity $(awk -v o="$op" 'BEGIN { printf "%.2f", o / 100 }')"$'\n'
+  [ -n "$taille" ] && c+="font_size $taille"$'\n'
+  if [ -z "$c" ]; then
+    [ -e "$KITTY_OUT" ] || return 0
+    rm -f "$KITTY_OUT"
+  else
+    [ "$(cat "$KITTY_OUT" 2>/dev/null)" = "# Écrit par nc-reglages. Ne pas éditer."$'\n'"${c%$'\n'}" ] && return 0
+    printf '# Écrit par nc-reglages. Ne pas éditer.\n%s' "$c" > "$KITTY_OUT"
+  fi
+  pkill -USR1 -x kitty 2>/dev/null || true          # kitty relit sa config
+}
+
+appliquer() { # appliquer CLE (vide : tout ce qui est généré)
+  case "${1:-}" in
+    HZ_*|ECO_*)  systemctl --user restart nc-profile-sync.service 2>/dev/null || true ;;
+    FENETRES_*|DEFILEMENT_*|TAPOTER_*|SOURIS_*|CLAVIER_*) hyprctl reload >/dev/null 2>&1 || true ;;
+    VEILLE_*)    appliquer_veille ;;
+    TERMINAL_*)  appliquer_terminal ;;
+    "")          appliquer_veille; appliquer_terminal ;;
+    *) ;;                                        # île, captures : relu tout seul
+  esac
+}
+
+regler() { # regler CLE VALEUR
+  local v
+  v="$(valider "$1" "$2")" || return 1
+  if [ "$v" = "$(champ "$1" 6)" ]; then ecrire "$1" ""; else ecrire "$1" "$v"; fi
+  appliquer "$1"
+}
+
+# Texte complété par des espaces jusqu'à une largeur (en caractères : printf compte les octets des accents)
+pad() { local t="$1" w="$2"; printf '%s%*s' "$t" $((w > ${#t} ? w - ${#t} : 1)) ''; }
+
+# ── Menu ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+liste() { # liste [numéros]
+  local i=0 sec="" k s nom v marque
+  while IFS= read -r k; do
+    i=$((i + 1))
+    s="$(champ "$k" 2)"; nom="$(champ "$k" 3)"; v="$(valeur "$k")"
+    [ "$s" != "$sec" ] && { printf '\n  %s%s%s\n' "$B$ACC" "$s" "$N"; sec="$s"; }
+    if [ -n "$(lue "$k")" ]; then marque="$MOD●$N"; else marque=" "; fi
+    if [ "${1:-}" = numeros ]; then
+      printf '   %s%2d%s %s %s%s\n' "$D" "$i" "$N" "$marque" "$(pad "$nom" 37)" "$(montrer "$k" "$v")"
+    else
+      printf '   %s %s%s%s%s%s\n' "$marque" "$(pad "$nom" 37)" "$(pad "$(montrer "$k" "$v")" 30)" "$D" "$k" "$N"
+    fi
+  done < <(cles)
+}
+
+choisir() { # choisir CLE : demande la nouvelle valeur
+  local k="$1" type p v def rep i=0 opts=() l
+  type="$(champ "$k" 4)"; p="$(champ "$k" 5)"; v="$(valeur "$k")"; def="$(champ "$k" 6)"
+  clear
+  printf '\n  %s%s%s\n' "$B" "$(champ "$k" 3)" "$N"
+  [ -n "$(champ "$k" 7)" ] && printf '  %s%s%s\n' "$D" "$(champ "$k" 7)" "$N"
+  printf '\n  Actuel : %s%s%s     config : %s\n\n' "$B" "$(montrer "$k" "$v")" "$N" "$(montrer "$k" "$def")"
+  case "$type" in
+    choix)  while IFS= read -r l; do opts+=("${l%%=*}"); done < <(printf '%s\n' "$p" | tr ';' '\n') ;;
+    ouinon) opts=(oui non) ;;
+    hz)     opts=(max low); while IFS= read -r l; do opts+=("$l"); done < <(frequences)
+            [ "${#opts[@]}" -gt 2 ] || printf '  %sPas d’écran de portable détecté : le réglage servira sur un portable.%s\n\n' "$D" "$N" ;;
+  esac
+  if [ "${#opts[@]}" -gt 0 ]; then
+    for l in "${opts[@]}"; do
+      i=$((i + 1))
+      printf '   %s%d%s  %s%s\n' "$D" "$i" "$N" "$(montrer "$k" "$l")" "$([ "$l" = "$v" ] && printf '  %s✓%s' "$OK" "$N")"
+    done
+    [ "$type" = hz ] && printf '   %s   ou une autre fréquence en Hz (la plus proche que ton écran propose sera prise)%s\n' "$D" "$N"
+    printf '\n'
+    read -rp "  Choix (Entrée : ne rien changer) › " rep || return 0
+    [ -n "$rep" ] || return 0
+    if [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "${#opts[@]}" ] && ! { [ "$type" = hz ] && [ "$rep" -ge 20 ]; }; then
+      rep="${opts[$((rep - 1))]}"
+    fi
+  else
+    case "$type" in
+      entier)  printf '  De %s à %s %s\n\n' "${p%%:*}" "$(echo "$p" | cut -d: -f2)" "${p##*:}" ;;
+      dossier) printf '  Un chemin (ex. ~/Images/Captures), ou auto\n\n' ;;
+      texte)   printf '  Ex. us, fr, us,fr — ou systeme\n\n' ;;
+    esac
+    read -rp "  Nouvelle valeur (Entrée : ne rien changer) › " rep || return 0
+    [ -n "$rep" ] || return 0
+  fi
+  if regler "$k" "$rep" 2> >(sed "s/^/  ${ERR}Valeur refusée : /; s/\$/$N/" >&2); then
+    printf '\n  %s✓%s %s : %s\n' "$OK" "$N" "$(champ "$k" 3)" "$(montrer "$k" "$(valeur "$k")")"
+  fi
+  sleep 1
+}
+
+menu() {
+  local rep k n
+  n="$(cles | wc -l)"
+  while true; do
+    clear
+    printf '\n  %sRéglages de noctalia-config%s   %s%s%s\n' "$B" "$N" "$D" "${FICHIER/#$HOME/\~}" "$N"
+    liste numeros
+    printf '\n  %s● changé par toi   numéro : changer   r numéro : remettre la valeur de la config   q : quitter%s\n\n' "$D" "$N"
+    read -rp "  › " rep || break
+    case "$rep" in
+      q|Q|"") break ;;
+      r\ *|r[0-9]*)
+        rep="${rep#r}"; rep="${rep// /}"
+        [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "$n" ] || continue
+        k="$(cles | sed -n "${rep}p")"; ecrire "$k" ""; appliquer "$k" ;;
+      *)
+        [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "$n" ] || continue
+        choisir "$(cles | sed -n "${rep}p")" ;;
+    esac
+  done
+  clear
+}
+
+case "${1:-}" in
+  "")        [ -t 0 ] && menu || liste ;;
+  liste|list|ls) liste; echo ;;
+  get)       [ -n "${2:-}" ] && connue "$2" || { echo "Réglage inconnu : ${2:-} (voir nc-reglages liste)" >&2; exit 2; }
+             valeur "$2" ;;
+  set)       [ -n "${2:-}" ] && connue "$2" || { echo "Réglage inconnu : ${2:-} (voir nc-reglages liste)" >&2; exit 2; }
+             [ $# -ge 3 ] || { echo "Usage : nc-reglages set CLE VALEUR" >&2; exit 2; }
+             regler "$2" "$3" || { echo "($2)" >&2; exit 1; }
+             echo "$(champ "$2" 3) : $(montrer "$2" "$(valeur "$2")")" ;;
+  reset)     if [ -n "${2:-}" ]; then
+               connue "$2" || { echo "Réglage inconnu : $2" >&2; exit 2; }
+               ecrire "$2" ""; appliquer "$2"
+             else
+               ks="$(grep -oE '^[A-Z0-9_]+' "$FICHIER" 2>/dev/null)"; rm -f "$FICHIER"
+               for k in $ks; do appliquer "$k"; done
+             fi
+             echo "Valeur de la config remise." ;;
+  fichier|edit) [ -e "$FICHIER" ] || ecrire _ ""; "${EDITOR:-nano}" "$FICHIER"; appliquer ;;
+  appliquer|apply) appliquer ;;
+  -h|--help|aide|help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)         echo "Commande inconnue : $1 (nc-reglages aide)" >&2; exit 2 ;;
+esac

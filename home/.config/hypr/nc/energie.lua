@@ -10,7 +10,7 @@ nc.flou_actif = not eco
 hl.config({
     animations = { enabled = not eco },
     decoration = {
-        dim_inactive = not eco,
+        dim_inactive = not eco and nc.reglage("FENETRES_ASSOMBRIR", true),
         blur   = { enabled = not eco },
         shadow = { enabled = not eco },
     },

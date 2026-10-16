@@ -15,8 +15,9 @@ Singleton {
     id: c
 
     property var p: ({})                 // palette du terminal (vide : couleurs d'Apple)
-    property string style: "terminal"
-    property string contour: "degrade"
+    readonly property string style: Reglages.val("ILE_STYLE", "terminal") === "noir" ? "noir" : "terminal"
+    readonly property string contour: ["degrade", "discret", "aucun"].indexOf(Reglages.val("ILE_CONTOUR", "")) >= 0
+                                      ? Reglages.val("ILE_CONTOUR", "") : "degrade"
 
     FileView {
         path: Quickshell.env("HOME") + "/.config/nc/palette-ile.json"
@@ -24,18 +25,6 @@ Singleton {
         onFileChanged: reload()
         onLoaded: { try { c.p = JSON.parse(text()) } catch (e) { c.p = {} } }
         onLoadFailed: c.p = {}
-    }
-    FileView {
-        path: Quickshell.env("HOME") + "/.config/nc/reglages.conf"
-        watchChanges: true
-        onFileChanged: reload()
-        onLoaded: {
-            var r = {}
-            text().split("\n").forEach(l => { var m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*"?([^"#]*?)"?\s*(#.*)?$/); if (m) r[m[1]] = m[2] })
-            c.style = r.ILE_STYLE === "noir" ? "noir" : "terminal"
-            c.contour = ["degrade", "discret", "aucun"].indexOf(r.ILE_CONTOUR) >= 0 ? r.ILE_CONTOUR : "degrade"
-        }
-        onLoadFailed: { c.style = "terminal"; c.contour = "degrade" }
     }
 
     readonly property bool terminal: style === "terminal" && p.fond !== undefined
