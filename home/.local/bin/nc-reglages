@@ -174,8 +174,8 @@ REGLAGES = [
     # Île
     R("ILE_STYLE", "Île", "Couleurs", "choix", "terminal", "Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
       [("terminal", "Couleurs du terminal"), ("noir", "Noire, façon iPhone")]),
-    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "Le dégradé reprend la bordure de la fenêtre active.",
-      [("degrade", "Dégradé des fenêtres"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
+    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "Une seule teinte, celle de l'accent, adoucie : sobre même sur un fond d'écran très coloré.",
+      [("degrade", "Accent en dégradé"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
     R("ILE_HEURE", "Île", "Format de l'heure", "choix", "24", "", [("24", "24 h  (14:05)"), ("12", "12 h  (2:05 PM)")]),
     R("ILE_DATE", "Île", "Date à côté de l'heure", "ouinon", "oui"),
     R("ILE_BANNIERES", "Île", "Notifications en bannière", "ouinon", "oui",
