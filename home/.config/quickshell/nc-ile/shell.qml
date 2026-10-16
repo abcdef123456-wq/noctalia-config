@@ -17,11 +17,6 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
-    // Spotlight : clic à côté = fermer (couche créée seulement pendant la recherche)
-    Variants {
-        model: Etat.recherche && Etat.ecranOuvert !== "" ? Quickshell.screens : []
-        Dehors {}
-    }
     // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : créée seulement quand on l'ouvre
     Variants {
         model: Etat.vueFenetres ? Quickshell.screens : []
