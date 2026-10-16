@@ -223,7 +223,7 @@ touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), "Souris|Redimens
 -- moitié (comme Windows). Super + clic molette : libre ↔ rangée.
 local saisie = nc.reglage("SAISIE", "clavier")
 if saisie == "souris" or saisie == "les-deux" then
-    hl.config({ binds = { drag_threshold = 8 } })
+    pcall(hl.config, { binds = { drag_threshold = 8 } })
     local function aimanter()
         local w, p = hl.get_active_window(), hl.get_cursor_pos()
         local m = w and w.monitor
@@ -242,12 +242,20 @@ if saisie == "souris" or saisie == "les-deux" then
             hl.dispatch(hl.dsp.window.move({ window = w, x = math.floor(px <= m.x + 4 and ax or ax + demi + g), y = math.floor(ay) }))
         end
     end
+    -- Raccourci « au clic » ou « après un glisser » : gardé seulement si ce Hyprland connaît l'option (sinon il partirait
+    -- dès l'appui, en même temps que le déplacement)
+    local function si_compris(drapeau, touches, action)
+        local ok, b = pcall(touche, touches, action, nil, { mouse = drapeau == "click", [drapeau] = true })
+        if ok and b and b[drapeau] ~= true and b.remove then pcall(b.remove, b) end
+    end
     touche("mouse:275", hl.dsp.window.drag(), "Souris|Bouton latéral arrière maintenu : déplacer", { mouse = true })
-    touche("mouse:275", hl.dsp.send_shortcut({ mods = "ALT", key = "Left" }), nil, { mouse = true, click = true })
-    touche("mouse:275", aimanter, nil, { drag = true })
     touche("mouse:276", hl.dsp.window.resize(), "Souris|Bouton latéral avant maintenu : redimensionner", { mouse = true })
-    touche("mouse:276", hl.dsp.send_shortcut({ mods = "ALT", key = "Right" }), nil, { mouse = true, click = true })
-    touche(SUPER .. " + mouse:272", aimanter, nil, { drag = true })
+    if hl.dsp.send_shortcut then
+        si_compris("click", "mouse:275", hl.dsp.send_shortcut({ mods = "ALT", key = "Left" }))
+        si_compris("click", "mouse:276", hl.dsp.send_shortcut({ mods = "ALT", key = "Right" }))
+    end
+    si_compris("drag", "mouse:275", aimanter)
+    si_compris("drag", SUPER .. " + mouse:272", aimanter)
     touche(SUPER .. " + mouse:274", hl.dsp.window.float({ action = "toggle" }), "Souris|Fenêtre libre ↔ rangée")
 end
 

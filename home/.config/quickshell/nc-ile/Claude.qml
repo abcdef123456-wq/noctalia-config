@@ -107,6 +107,30 @@ Item {
                             Texte { text: "−" + (carte.s.retraits || 0); color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold }
                             Texte { text: "lignes"; secondaire: true; font.pixelSize: 12 }
                         }
+                        // Lui écrire (agent lancé dans kitty) : Entrée envoie, comme dans son terminal
+                        Rectangle {
+                            visible: carte.s.ecrire === true
+                            width: parent.width; height: 36; radius: 18; color: Couleurs.gris2
+                            border.width: msg.activeFocus ? 1.5 : 0; border.color: Agents.couleurDe(carte.s)
+                            TextInput {
+                                id: msg
+                                anchors.left: parent.left; anchors.leftMargin: 14; anchors.right: envoi.left; anchors.rightMargin: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Couleurs.texte; selectionColor: Agents.couleurDe(carte.s); font.pixelSize: 13; clip: true
+                                onAccepted: { Agents.ecrire(carte.s.id, text); text = "" }
+                                Keys.onEscapePressed: { text = ""; focus = false }
+                                Texte { visible: msg.text === ""; anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 13
+                                        text: (carte.enCours ? "Ajouter une consigne pour " : "Répondre à ") + Agents.nom(carte.s) + "…" }
+                            }
+                            Rectangle {
+                                id: envoi
+                                anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                                width: 28; height: 28; radius: 14
+                                color: msg.text !== "" ? Agents.couleurDe(carte.s) : Couleurs.gris4
+                                Ico { anchors.centerIn: parent; nom: "arrow_upward"; taille: 16; color: "#ffffff" }
+                                MouseArea { anchors.fill: parent; onClicked: { Agents.ecrire(carte.s.id, msg.text); msg.text = "" } }
+                            }
+                        }
                     }
                 }
             }
