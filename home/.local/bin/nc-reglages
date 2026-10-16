@@ -217,9 +217,11 @@ REGLAGES = [
     R("NPD_FIN", "Notifications", "Jusqu'à", "choix", "07:00", "", ['05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30']),
     # Apparence
     R("STYLE", "Apparence", "Style du bureau", "choix", "noctalia",
-      "Apple : couleurs de macOS, île noire, barre de menus, fenêtres, dock et animations façon Mac. Tes autres "
-      "réglages passent toujours devant ceux du style.",
-      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)")], groupe="style"),
+      "Couleurs de tout le bureau (barre, applis, terminal, île) et quelques retouches assorties. noctalia-config : "
+      "couleurs du fond d'écran. Tes autres réglages passent toujours devant ceux du style.",
+      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)"), ("oled", "Noir pur (écran OLED)"),
+       ("nord", "Nord"), ("catppuccin", "Catppuccin"), ("dracula", "Dracula"), ("gruvbox", "Gruvbox"),
+       ("kanagawa", "Kanagawa")], groupe="style"),
     R("THEME_MODE", "Apparence", "Thème", "choix", "dark", "Les couleurs suivent toujours le fond d'écran.",
       [("dark", "Sombre"), ("light", "Clair")], groupe="noctalia"),
     R("POLICE", "Apparence", "Police de l'interface", "choix", "Adwaita Sans", "Barre, panneaux et menus de Noctalia.",
@@ -431,7 +433,17 @@ STYLES = {
         "ANIM_VERROU": "fade", "ANIM_FOND": "fade", "DOCK_TAILLE": "52", "DOCK_LOUPE": "oui", "BARRE_SYSTEME": "non",
         "VERROU_FLOU": "35",
     },
+    # Noir pur : fonds noirs (pixels éteints sur un écran OLED), île noire, pas d'assombrissement
+    "oled": {"ILE_STYLE": "noir", "ILE_CONTOUR": "aucun", "FENETRES_ASSOMBRIR": "non"},
+    "nord": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "10"},
+    "catppuccin": {"FENETRES_ARRONDI": "16", "ANIM_BUREAUX": "slidefade"},
+    "dracula": {"FENETRES_ARRONDI": "12"},
+    "gruvbox": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "8"},
+    "kanagawa": {"ILE_CONTOUR": "discret", "FENETRES_ARRONDI": "12"},
 }
+# Palette de Noctalia de chaque style (sans palette : celle du fond d'écran)
+PALETTES = {"apple": ["custom", "Apple"], "nord": ["builtin", "Nord"], "catppuccin": ["builtin", "Catppuccin"],
+            "dracula": ["builtin", "Dracula"], "gruvbox": ["builtin", "Gruvbox"], "kanagawa": ["builtin", "Kanagawa"]}
 
 
 def police_apple():
@@ -611,6 +623,8 @@ def appliquer_noctalia(vals):
             mettre("location", "custom_schedule", True)
             mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
             mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
+    if style_vals().get("STYLE") == "oled":
+        mettre("theme", "pure_black_dark", True)       # fonds noirs purs
     if style_vals().get("STYLE") == "apple":
         # Barre de menus façon Mac : une bande translucide sur toute la largeur (l'île y fait l'encoche), sans
         # pastilles (le dock est déjà en verre dépoli)
@@ -689,22 +703,25 @@ def appliquer_style(vals):
         os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)
         with open(STYLE_FICHIER, "w", encoding="utf-8") as f:
             f.write(texte)
-    # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…)
+    # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…) ; celle d'avant le premier
+    # style est gardée pour la remettre
     actuelle = sortie(["noctalia", "msg", "color-scheme-get"]).strip()
+    cible = PALETTES.get(style)
+    des_styles = {" ".join(p) for p in PALETTES.values()}
     if not actuelle:
         pass                                       # Noctalia ne tourne pas : palette changée au prochain passage
-    elif style == "apple":
-        if actuelle and actuelle != "custom Apple":
+    elif cible:
+        if actuelle not in des_styles:
             with open(STYLE_AVANT, "w", encoding="utf-8") as f:
                 f.write(actuelle + "\n")
-        if actuelle != "custom Apple":
-            subprocess.run(["noctalia", "msg", "color-scheme-set", "custom", "Apple"], capture_output=True)
-    elif actuelle == "custom Apple":
+        if actuelle != " ".join(cible):
+            subprocess.run(["noctalia", "msg", "color-scheme-set"] + cible, capture_output=True)
+    elif actuelle in des_styles:
         try:
             avant = open(STYLE_AVANT, encoding="utf-8").read().split()
         except OSError:
             avant = []
-        if len(avant) < 2 or avant == ["custom", "Apple"]:
+        if len(avant) < 2 or " ".join(avant) in des_styles:
             avant = ["wallpaper", "vibrant"]
         subprocess.run(["noctalia", "msg", "color-scheme-set"] + avant, capture_output=True)
     # Bordures, ombres et terminal (nc-theme-sync lit style.conf), puis tout ce que le style touche
