@@ -84,10 +84,8 @@ systeme() {
   [ -n "$temp" ] && echo "temperature=$((temp / 1000))"
   df -P / 2>/dev/null | awk 'NR==2 { gsub("%","",$5); printf "disque=%s\ndisque_libre=%.0f\n", $5, $4/1048576 }'
   awk '{ s=int($1); h=int(s/3600); m=int((s%3600)/60); if (h>0) printf "allume=%d h %02d\n", h, m; else printf "allume=%d min\n", m }' /proc/uptime
-  for b in /sys/class/power_supply/BAT*; do
-    [ -r "$b/energy_full_design" ] && echo "sante=$(( $(cat "$b/energy_full") * 100 / $(cat "$b/energy_full_design") ))" && break
-    [ -r "$b/charge_full_design" ] && echo "sante=$(( $(cat "$b/charge_full") * 100 / $(cat "$b/charge_full_design") ))" && break
-  done
+  # Santé de la batterie lissée et cycles (même calcul que l'accueil du terminal : nc-sysinfo sante)
+  "$HOME/.local/bin/nc-sysinfo" sante | awk -F'\t' 'NF { print "sante=" $1; if ($2 != "") print "cycles=" $2 }'
   # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé
   [ -x /usr/local/bin/nc-limite-charge ] && echo "protection=$(/usr/local/bin/nc-limite-charge etat 2>/dev/null)"
   hyprctl monitors -j 2>/dev/null | jq -r '.[] | "ecran=\(.name)\t\(.width)x\(.height)\t\(.refreshRate | floor) Hz\t\(.scale)"' 2>/dev/null

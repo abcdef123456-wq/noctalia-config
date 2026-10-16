@@ -100,6 +100,7 @@ Item {
                             text: (Etat.branche ? (Etat.batterie && Etat.batterie.timeToFull > 0 ? "Pleine dans " + sy.heures(Etat.batterie.timeToFull) : "Sur secteur")
                                                 : (Etat.batterie && Etat.batterie.timeToEmpty > 0 ? "Encore " + sy.heures(Etat.batterie.timeToEmpty) : "Sur batterie"))
                                   + (sy.val("sante") !== "" ? "  ·  santé " + sy.val("sante") + " %" : "")
+                                  + (sy.val("cycles") !== "" ? " (" + sy.val("cycles") + " cycles)" : "")
                         }
                     }
                 }
