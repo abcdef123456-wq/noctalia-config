@@ -201,6 +201,8 @@ REGLAGES = [
     R("ILE_BANNIERE_DUREE", "Notifications", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
     R("ILE_METEO", "Île", "Météo à côté de l'heure", "ouinon", "oui", "Et une page Météo dans l'île (Open-Meteo, sans compte)."),
     R("METEO_VILLE", "Île", "Ville de la météo", "texte", "auto", "Automatique : d'après ta connexion internet. Sinon, le nom d'une ville."),
+    R("ILE_PRESSE", "Île", "Presse-papiers dans l'île", "ouinon", "oui",
+      "Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire."),
     R("SPOTLIGHT_ENTREE", "Île", "Entrée sur une appli déjà ouverte", "choix", "nouvelle",
       "Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.",
       [("nouvelle", "Ouvre une nouvelle fenêtre"), ("aller", "Va sur la fenêtre ouverte")]),

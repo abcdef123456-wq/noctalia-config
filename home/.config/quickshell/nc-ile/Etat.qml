@@ -35,7 +35,7 @@ Singleton {
     }
     readonly property var vues: activites.concat(["centre", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
-                                                 meteo.temp !== undefined ? ["meteo"] : [],
+                                                 meteo.temp !== undefined ? ["meteo"] : [], ["presse"],
                                                  minuteurFin > 0 ? [] : ["minuteur"])
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
@@ -113,6 +113,42 @@ Singleton {
     Timer { interval: 10 * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"; triggeredOnStart: true
             onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
     Connections { target: Reglages; function onValeursChanged() { if (!lireMeteo.running) lireMeteo.running = true } }
+
+    // ── Presse-papiers : les 12 derniers textes ou images copiés (en mémoire seulement ; jamais ce qu'un gestionnaire
+    //    de mots de passe marque comme secret) ; un clic les recopie ──
+    property var presse: []
+    Process {
+        running: Reglages.val("ILE_PRESSE", "oui") !== "non"
+        command: ["wl-paste", "--watch", "sh", "-c",
+            "t=$(wl-paste --list-types 2>/dev/null); case \"$t\" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0;; esac; "
+            + "if printf '%s' \"$t\" | grep -q '^image/png'; then d=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\"; mkdir -p \"$d\"; "
+            + "f=\"$d/$(date +%s%N).png\"; wl-paste -t image/png > \"$f\" && printf 'I:%s\\n' \"$f\"; "
+            + "elif printf '%s' \"$t\" | grep -qE '^(text/plain|UTF8_STRING|STRING|TEXT)'; then "
+            + "printf 'T:'; wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | tr '\\n\\r' '\\037\\037'; printf '\\n'; fi"]
+        stdout: SplitParser {
+            onRead: ligne => {
+                var e = null
+                if (ligne.indexOf("T:") === 0) {
+                    var t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
+                    if (t.trim() === "") return
+                    e = { genre: "texte", texte: t }
+                } else if (ligne.indexOf("I:") === 0) e = { genre: "image", chemin: ligne.slice(2) }
+                if (!e) return
+                e.t = Date.now()
+                var l = etat.presse.filter(x => !(x.genre === "texte" && e.genre === "texte" && x.texte === e.texte))
+                l.unshift(e)
+                etat.presse = l.slice(0, 12)
+            }
+        }
+    }
+    function recopier(e) {
+        if (e.genre === "texte") Quickshell.execDetached(["wl-copy", "--", e.texte])
+        else Quickshell.execDetached(["sh", "-c", "wl-copy -t image/png < \"$1\"", "sh", e.chemin])
+    }
+    function oublierPresse() {
+        presse = []
+        Quickshell.execDetached(["sh", "-c", "rm -rf \"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\""])
+    }
 
     // ── Café : empêche la mise en veille (Noctalia) ──
     property bool cafe: false
