@@ -777,8 +777,8 @@ if [ ! -e "$PERSO" ]; then
 -- Tes réglages Hyprland personnels : chargés en dernier, jamais remplacés par install.sh ni nc-maj.
 -- Format Lua de Hyprland 0.55+ (https://wiki.hypr.land). Enlève « -- » devant une ligne pour l'activer.
 --
--- Ajouter un raccourci sans éditer ce fichier :   nc-raccourci ajoute "Super+B" "firefox" "Navigateur"
--- (liste : nc-raccourci ; retirer : nc-raccourci retire "Super+B")
+-- Raccourcis sans éditer de fichier : nc-raccourci (ajouter, changer ou désactiver ceux de la config).
+-- Réglages courants (espaces, bordures, pavé tactile, écran…) : nc-reglages.
 --
 -- hl.bind("SUPER + B", hl.dsp.exec_cmd("firefox"), { description = "Mes raccourcis|Navigateur" })
 -- hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })

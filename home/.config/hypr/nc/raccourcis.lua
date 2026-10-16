@@ -8,10 +8,49 @@ local terminal = "kitty"
 local fichiers = "nautilus --new-window"
 local barre    = "~/.local/bin/nc-shell-msg "   -- actions envoyées à Noctalia v5
 
+-- Tes changements (commande nc-raccourci) : ~/.config/nc/raccourcis.conf, jamais remplacé par les mises à jour.
+-- Une ligne par changement, champs séparés par des tabulations :
+--   change  MASQUE:TOUCHE  NOUVELLES TOUCHES      un raccourci de la config déplacé sur d'autres touches
+--   aucun   MASQUE:TOUCHE                         un raccourci de la config désactivé
+--   ajout   TOUCHES  TYPE  VALEUR  NOM            un raccourci à toi (TYPE : commande, appli, bureau, ile)
+-- MASQUE:TOUCHE désigne le raccourci d'origine comme « hyprctl binds » : 64:code:36 pour Super + Entrée.
+local perso = { change = {}, ajouts = {} }
+do
+    local f = io.open((os.getenv("HOME") or "") .. "/.config/nc/raccourcis.conf", "r")
+    if f then
+        for ligne in f:lines() do
+            local c = {}
+            for champ in (ligne .. "\t"):gmatch("([^\t]*)\t") do c[#c + 1] = champ end
+            if c[1] == "change" and (c[3] or "") ~= "" then perso.change[c[2]] = c[3]
+            elseif c[1] == "aucun" and c[2] then perso.change[c[2]] = false
+            elseif c[1] == "ajout" and c[5] then table.insert(perso.ajouts, c) end
+        end
+        f:close()
+    end
+end
+
+-- Identifiant d'une combinaison : masque des modificateurs et dernière touche, en minuscules
+local MASQUES = { SUPER = 64, CTRL = 4, CONTROL = 4, ALT = 8, SHIFT = 1 }
+local function id_touches(touches)
+    local vus, masque, cle = {}, 0, ""
+    for morceau in touches:gmatch("[^+]+") do
+        local m = morceau:match("^%s*(.-)%s*$")
+        local b = MASQUES[m:upper()]
+        if b then
+            if not vus[b] then vus[b] = true; masque = masque + b end
+        else
+            cle = m:lower()
+        end
+    end
+    return masque .. ":" .. cle
+end
+
 local function touche(touches, action, description, options)
+    local remplace = perso.change[id_touches(touches)]
+    if remplace == false then return end          -- désactivé avec nc-raccourci
     options = options or {}
     options.description = description
-    return hl.bind(touches, action, options)
+    return hl.bind(remplace or touches, action, options)
 end
 
 local function cmd(c) return hl.dsp.exec_cmd(c) end
@@ -216,3 +255,20 @@ touche("XF86AudioForward",      cmd("~/.local/bin/nc-media avance"),            
 touche("XF86AudioRewind",       cmd("~/.local/bin/nc-media recule"),                       media, { locked = true, repeating = true })
 -- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint)
 touche("XF86PowerOff",          cmd("~/.local/bin/nc-finger"), nil, { locked = true })
+
+-- ── Tes raccourcis (nc-raccourci) ───────────────────────────────────────────
+-- Un raccourci refusé par Hyprland est ignoré sans bloquer les autres
+local function guillemets(t) return "'" .. tostring(t):gsub("'", "'\\''") .. "'" end
+for _, a in ipairs(perso.ajouts) do
+    local touches, type_, valeur, nom = a[2], a[3], a[4], a[5]
+    local action
+    if type_ == "commande" then action = cmd(valeur)
+    elseif type_ == "appli" then action = cmd("~/.local/bin/nc-raccourci ouvrir " .. guillemets(valeur))
+    elseif type_ == "bureau" then action = hl.dsp.focus({ workspace = tonumber(valeur) or valeur })
+    elseif type_ == "ile" then action = cmd(barre .. "ile " .. guillemets(valeur))
+    end
+    if action then
+        local ok, err = pcall(hl.bind, touches, action, { description = "Mes raccourcis|" .. (nom ~= "" and nom or valeur) })
+        if not ok then print("noctalia-config : raccourci " .. touches .. " ignoré (" .. tostring(err) .. ")") end
+    end
+end
