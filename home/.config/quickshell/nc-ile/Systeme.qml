@@ -200,7 +200,7 @@ Item {
                                         { icone: "keyboard", titre: "Changer la disposition du clavier", cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
                     { icone: "settings", titre: "Réglages de la barre", cmd: ["noctalia", "msg", "settings-open"], ferme: true },
                     { icone: "lock", titre: "Verrouiller", cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
-                    { icone: "power_settings_new", titre: "Éteindre, redémarrer…", cmd: ["noctalia", "msg", "panel-toggle", "session-panel"], ferme: true }
+                    { icone: "power_settings_new", titre: "Éteindre, redémarrer…", cmd: ["noctalia", "msg", "panel-toggle", "session"], ferme: true }
                 ]
                 Ligne {
                     required property var modelData

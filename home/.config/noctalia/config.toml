@@ -171,7 +171,7 @@ hide_when_no_unread = false
 
 # Clic droit sur une zone vide de la barre : centre de contrôle de l'île (sinon celui de Noctalia)
 [bar.default.dead_zone.actions]
-right = "exec ~/.local/bin/nc-shell-msg ile centre"
+right = "exec @HOME@/.local/bin/nc-shell-msg ile centre"
 # ---------------------------------------------------------------- Dock
 [dock]
 enabled = true

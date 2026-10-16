@@ -8,7 +8,7 @@ set -euo pipefail
 [ -r /usr/share/glvnd/egl_vendor.d/10_nvidia.json ] || { echo "nvidia-run : pilote NVIDIA introuvable, lancement normal." >&2; exec "$@"; }
 
 # Pilote Vulkan NVIDIA : nvidia_icd.json, ou nvidia_icd.x86_64.json (Fedora, RPM Fusion)
-vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd:)
+vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd: || true)
 vk=${vk:-/usr/share/vulkan/icd.d/nvidia_icd.json}
 others=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -vE 'nvidia|nouveau' | paste -sd: || true)
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/50_mesa.json

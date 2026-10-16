@@ -354,6 +354,10 @@ NOMS = {"doigts": "Des doigts partout", "confettis": "Confettis", "neige": "Neig
         "bulles": "Bulles", "coeurs": "Cœur qui bat", "compte": "Faux compte à rebours"}
 
 
+# Choix du bouton qui ne sont pas des animations : une animation perso ne peut pas porter ces noms
+RESERVES = {"aleatoire", "menu", "verrouiller", "veille", "eteindre", "rien", "bouton", "liste", "nouvelle"}
+
+
 def perso():
     """Tes animations : {nom: chemin}"""
     res = {}
@@ -361,7 +365,7 @@ def perso():
         for f in sorted(os.listdir(PERSO)):
             chemin = os.path.join(PERSO, f)
             nom = os.path.splitext(f)[0]
-            if os.path.isfile(chemin) and not f.startswith(".") and nom not in NOMS:
+            if os.path.isfile(chemin) and not f.startswith(".") and nom not in NOMS and nom not in RESERVES:
                 res[nom] = chemin
     except OSError:
         pass
@@ -424,10 +428,13 @@ MODELE = '''#!/usr/bin/env python3
 #   nc.melange(a, b, t)          couleur entre a (t = 0) et b (t = 1)
 # L'écran est effacé avant chaque image : à chaque tour, on dessine tout puis « yield » (30 images par seconde).
 import importlib.machinery
+import importlib.util
 import math
 import os
 
-nc = importlib.machinery.SourceFileLoader("nc_anim", os.path.expanduser("~/.local/bin/nc-anim")).load_module()
+_chargeur = importlib.machinery.SourceFileLoader("nc_anim", os.path.expanduser("~/.local/bin/nc-anim"))
+nc = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_anim", _chargeur))
+_chargeur.exec_module(nc)
 
 
 def animation(e):
@@ -471,8 +478,8 @@ def main():
     if a[0] == "nouvelle":
         if len(a) < 2 or not all(ch.isalnum() or ch in "-_" for ch in a[1]):
             sys.exit("Usage : nc-anim nouvelle NOM   (lettres, chiffres, - et _)")
-        if a[1] in NOMS or a[1] == "aleatoire":
-            sys.exit(f"nc-anim : « {a[1]} » est déjà une animation de la config : choisis un autre nom")
+        if a[1] in NOMS or a[1] in RESERVES:
+            sys.exit(f"nc-anim : le nom « {a[1]} » est déjà pris par la config : choisis-en un autre")
         os.makedirs(PERSO, exist_ok=True)
         chemin = os.path.join(PERSO, a[1] + ".py")
         if os.path.exists(chemin):

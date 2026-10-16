@@ -643,7 +643,7 @@ compiler_quickshell() {
 }
 # L'île Quickshell pour tout le monde : paquet sur Arch et Fedora, compilée sur Debian / Ubuntu
 if ! have qs && [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then compiler_quickshell || true; hash -r; fi
-if have qs; then
+if have qs && ver_ge "$(qs_ver || true)" 0.3; then      # l'île demande Quickshell 0.3
   ILE=quickshell
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
   if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
@@ -1146,7 +1146,7 @@ if [ "$MODE" = full ]; then
         sudo tlp start >/dev/null && ok "TLP actif (profil Équilibré par défaut)."
       else
         warn "Installation de TLP impossible : $([ -n "$ppd" ] && echo "$ppd reste en place" || echo "profils non disponibles")."
-        [ "$ppd" = tuned-ppd ] && sudo systemctl enable --now tuned.service >/dev/null 2>&1   # tuned-ppd s'appuie sur tuned
+        if [ "$ppd" = tuned-ppd ]; then sudo systemctl enable --now tuned.service >/dev/null 2>&1 || true; fi   # tuned-ppd s'appuie sur tuned
         [ -n "$ppd" ] && sudo systemctl enable --now "$ppd.service" >/dev/null 2>&1
       fi
     fi
@@ -1264,10 +1264,11 @@ if [ "$MODE" = full ]; then
       echo "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" | sudo tee -a /etc/default/grub >/dev/null
     fi
     # Fedora : sortie texte par défaut (GRUB_TERMINAL_OUTPUT="console"), qui ignore le thème : sortie graphique
-    grep -qE '^GRUB_TERMINAL_OUTPUT="?console' /etc/default/grub &&
+    if grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub; then
       sudo sed -i -E 's/^GRUB_TERMINAL_OUTPUT=.*/GRUB_TERMINAL_OUTPUT="gfxterm"/' /etc/default/grub
+    fi
     sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "Thème GRUB installé (visible au prochain redémarrage)."
-    have restorecon && sudo restorecon -RF "$GRUBDIR/themes/nc" >/dev/null 2>&1   # SELinux (Fedora) : étiquettes du dossier
+    if have restorecon; then sudo restorecon -RF "$GRUBDIR/themes/nc" >/dev/null 2>&1 || true; fi   # SELinux (Fedora)
     if grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub ||
        { have grub2-editenv && sudo grub2-editenv - list 2>/dev/null | grep -q '^menu_auto_hide=1'; }; then
       info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap, F8) au démarrage pour le voir."
@@ -1285,7 +1286,8 @@ if [ "$MODE" = full ]; then
     grep -qE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\b(splash|rhgb)\b' /etc/default/grub &&
       grep -qF "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" /etc/default/grub &&
       cmp -s "$tmp" "$GRUBDIR/themes/nc/theme.txt" &&
-      diff -rq --exclude=theme.txt "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc" >/dev/null 2>&1 || grub_done=0
+      diff -rq --exclude=theme.txt "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc" >/dev/null 2>&1 &&
+      ! grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub || grub_done=0
   fi
   if [ "$plym_done" = 1 ] && [ "$grub_done" = 1 ]; then
     say "5c. Démarrage"

@@ -135,8 +135,8 @@ def verifier(b):
         _, code = sortie(["noctalia", "msg", "status"])
         if code != 0:
             b.faux("Noctalia ne tourne pas", "systemctl --user restart noctalia.service")
-        val, _ = sortie(["noctalia", "config", "validate"], 15)
-        if "invalid" in val.lower() or "error" in val.lower():
+        val, code = sortie(["noctalia", "config", "validate"], 15)
+        if code != 0:
             ligne = next((l for l in val.splitlines() if "ERR" in l or "error" in l.lower()), val.splitlines()[-1] if val else "")
             b.faux(f"config de Noctalia : {ligne[:160]}", "nc-maj")
     else:
@@ -148,10 +148,12 @@ def verifier(b):
             b.avert(f"Quickshell {qv} : l'île demande la 0.3", "mets Quickshell à jour (Fedora : COPR errornointernet/quickshell)")
         else:
             b.ok(f"Quickshell {qv} (île dynamique)")
-        _, code = sortie(["systemctl", "--user", "is-active", "nc-ile.service"])
-        if code != 0:
+        _, active = sortie(["systemctl", "--user", "is-enabled", "nc-ile.service"])
+        if active != 0:
+            b.avert("île simplifiée du plugin Noctalia (l'île Quickshell n'est pas activée)", "relance install.sh")
+        elif sortie(["systemctl", "--user", "is-active", "nc-ile.service"])[1] != 0:
             b.faux("l'île dynamique ne tourne pas", "systemctl --user restart nc-ile.service ; journal : qs -c nc-ile log")
-        if not os.path.exists(os.path.join(HOME, ".local/share/fonts/MaterialSymbolsRounded.ttf")):
+        elif not os.path.exists(os.path.join(HOME, ".local/share/fonts/MaterialSymbolsRounded.ttf")):
             b.avert("police des icônes de l'île absente (carrés à la place des icônes)", "relance install.sh, qui la télécharge")
     else:
         b.avert("Quickshell absent : île simplifiée du plugin Noctalia", "relance install.sh (il propose de l'installer)")

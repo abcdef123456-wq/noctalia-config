@@ -43,8 +43,9 @@ VEILLE_OUT = os.path.join(HOME, ".config/nc/hypridle.conf")
 VEILLE_UNITE = os.path.join(HOME, ".config/systemd/user/hypridle.service.d/nc-reglages.conf")
 KITTY_OUT = os.path.join(HOME, ".config/kitty/nc-reglages.conf")
 NOCTALIA_DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME", os.path.join(HOME, ".config")), "noctalia")
-# Noctalia lit tous les .toml de son dossier par ordre alphabétique, le dernier l'emporte : après settings.toml
-# (réglages faits dans Noctalia), avant zz-economie.toml (profil Économie, qui doit gagner)
+# Noctalia lit tous les .toml de son dossier par ordre alphabétique, le dernier l'emporte : ce fichier passe avant
+# zz-economie.toml (profil Économie, qui doit gagner). Les réglages faits dans l'interface de Noctalia
+# (~/.local/state/noctalia/settings.toml) passent devant tout : la palette se change donc avec color-scheme-set.
 NOCTALIA_OUT = os.path.join(NOCTALIA_DIR, "zy-reglages.toml")
 
 
@@ -248,7 +249,7 @@ REGLAGES = [
     R("BARRE_SYSTEME", "Barre et dock", "Processeur, température et mémoire", "ouinon", "oui", "La pastille d'infos système à droite de la barre.", groupe="noctalia"),
     R("DOCK", "Barre et dock", "Dock", "ouinon", "oui", groupe="noctalia"),
     R("DOCK_AUTO", "Barre et dock", "Masquer le dock automatiquement", "ouinon", "oui", "Il apparaît quand le pointeur touche le bas de l'écran.", groupe="noctalia"),
-    R("DOCK_TAILLE", "Barre et dock", "Taille des icônes du dock", "entier", "44", mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
+    R("DOCK_TAILLE", "Barre et dock", "Taille des icônes du dock", "entier", "48", mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
     R("DOCK_LOUPE", "Barre et dock", "Effet loupe du dock", "ouinon", "oui", groupe="noctalia"),
     R("DOCK_POSITION", "Barre et dock", "Position du dock", "choix", "bottom", "",
       [("bottom", "En bas"), ("left", "À gauche"), ("right", "À droite")], groupe="noctalia"),
@@ -560,12 +561,9 @@ def appliquer_noctalia(vals):
             mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
     if style_vals().get("STYLE") == "apple":
         # Barre de menus façon Mac : une bande translucide sur toute la largeur (l'île y fait l'encoche), sans
-        # pastilles ; dock en verre dépoli, loupe plus marquée
+        # pastilles (le dock est déjà en verre dépoli)
         mettre("bar.default", "capsule", False)
         mettre("bar.default", "background_opacity", 0.55)
-        mettre("dock", "background_opacity", 0.55)
-        mettre("dock", "radius", 20)
-        mettre("dock", "magnification_scale", 1.6)
     TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
     for cle, table in (("ANIM_VERROU", "lockscreen"), ("ANIM_FOND", "wallpaper")):
         if cle in vals:
@@ -641,7 +639,9 @@ def appliquer_style(vals):
             f.write(texte)
     # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…)
     actuelle = sortie(["noctalia", "msg", "color-scheme-get"]).strip()
-    if style == "apple":
+    if not actuelle:
+        pass                                       # Noctalia ne tourne pas : palette changée au prochain passage
+    elif style == "apple":
         if actuelle and actuelle != "custom Apple":
             with open(STYLE_AVANT, "w", encoding="utf-8") as f:
                 f.write(actuelle + "\n")
@@ -912,6 +912,7 @@ class Ecran:
         # Liste des sections : défile si la fenêtre est trop basse pour toutes les montrer
         place = h - 6
         debut = 0 if len(SECTIONS) <= place else min(max(0, self.sec - place + 2), len(SECTIONS) - place)
+        self.debut_sec = debut                     # pour le clic (liste défilée)
         for i, s in enumerate(SECTIONS):
             y = 2 + i - debut
             if y < 2:
@@ -1304,8 +1305,10 @@ class Ecran:
         if not etat & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
             return
         lg_x = 22
-        if x < lg_x and 2 <= y < 2 + len(SECTIONS):
-            self.sec, self.focus, self.haut = y - 2, "items", 0
+        h = self.e.getmaxyx()[0]
+        sec = y - 2 + getattr(self, "debut_sec", 0)
+        if x < lg_x and 2 <= y < h - 4 and sec < len(SECTIONS):
+            self.sec, self.focus, self.haut = sec, "items", 0
             self.deplacer(0)
             return
         if x > lg_x and y >= 2:
@@ -1373,7 +1376,8 @@ class Ecran:
                 elif c in ("r", "R") and cur.cle in self.vals:
                     st = style_vals()
                     self.poser(cur, st[cur.cle] if cur.cle in st and cur.cle != "STYLE" else cur.defaut)
-                    self.statut(f"{cur.nom} : valeur {'du style' if cur.cle in st else 'de la config'}")
+                    du = cur.cle in st and cur.cle != "STYLE"
+                    self.statut(f"{cur.nom} : valeur {'du style' if du else 'de la config'}")
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
             else:

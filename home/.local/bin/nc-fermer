@@ -7,6 +7,10 @@ pid="${1:-}"; adr="${2:-}"
 [ -n "$pid" ] && [ -n "$adr" ] || { echo "Usage : nc-fermer PID ADRESSE" >&2; exit 2; }
 
 fermer() { hyprctl dispatch "hl.dsp.window.close({ window = 'address:$adr' })" >/dev/null; }
+# Plusieurs fenêtres dans ce même kitty (Ctrl + Maj + N) : impossible de savoir laquelle fait tourner quoi, kitty
+# pose sa propre question
+n="$(hyprctl clients -j | jq --argjson p "$pid" '[.[] | select(.pid == $p)] | length')"
+[ "$n" = 1 ] || { fermer; exit 0; }
 
 # Programmes lancés depuis les shells du terminal (les « kitten » sont des aides de kitty, gitstatusd celui du prompt)
 progs=""
@@ -20,6 +24,4 @@ choix="$(printf 'Annuler\nFermer quand même\n' | noctalia dmenu -p "« $progs �
 st=$?
 if [ "$st" -ne 0 ] && ! command -v noctalia >/dev/null; then fermer; exit 0; fi   # pas de lanceur : la question de kitty
 [ "$choix" = "Fermer quand même" ] || exit 0
-# Seule fenêtre de ce kitty : arrêté proprement (sans redemander) ; sinon fenêtre fermée (kitty peut redemander)
-n="$(hyprctl clients -j | jq --argjson p "$pid" '[.[] | select(.pid == $p)] | length')"
-if [ "$n" = 1 ]; then kill -TERM "$pid"; else fermer; fi
+kill -TERM "$pid"                              # seule fenêtre de ce kitty : arrêté proprement, sans redemander
