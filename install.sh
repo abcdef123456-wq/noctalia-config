@@ -65,11 +65,12 @@ done
 [ "$(id -u)" != 0 ] || die "lance ce script sans sudo : il demandera ton mot de passe quand il en aura besoin."
 
 # ── Distribution ─────────────────────────────────────────────────────────────
-OSID=""; OSLIKE=""; OSCODE=""; OSNAME=""; OSLOGO=""
+OSID=""; OSLIKE=""; OSCODE=""; OSNAME=""; OSLOGO=""; OSVER=0
 if [ -r /etc/os-release ]; then
   OSID="$(. /etc/os-release; echo "${ID:-}")"; OSLIKE="$(. /etc/os-release; echo "${ID_LIKE:-}")"
   OSCODE="$(. /etc/os-release; echo "${VERSION_CODENAME:-}")"; OSNAME="$(. /etc/os-release; echo "${NAME:-Linux}")"
   OSLOGO="$(. /etc/os-release; echo "${LOGO:-}")"
+  OSVER="$(. /etc/os-release; echo "${VERSION_ID:-0}")"
 fi
 FAMILY=other
 case " $OSID $OSLIKE " in
@@ -136,7 +137,8 @@ pname() {
     libnotify:suse) echo libnotify-tools ;;
     python:arch) echo python ;;
     python:*) echo python3 ;;
-    qalc:arch|qalc:fedora) echo libqalculate ;;
+    qalc:arch) echo libqalculate ;;
+    qalc:fedora) echo qalculate ;;       # /usr/bin/qalc (libqalculate n'a que la bibliothèque)
     qalc:debian) echo qalc ;;
     qalc:suse) echo qalculate ;;
     bluez-utils:arch) echo bluez-utils ;;
@@ -153,7 +155,7 @@ pname() {
     noto-fonts:suse) echo noto-sans-fonts ;;
     quickshell:arch|quickshell:fedora) echo quickshell ;;
     quickshell:*) ;;   # pas dans les dépôts officiels : l'île du plugin Noctalia est utilisée
-    breeze:fedora) echo plasma-breeze ;;
+    breeze:fedora) echo plasma-breeze-qt6 ;;   # le style Qt 6 seul, sans les modules de réglage de KDE
     breeze:suse) echo breeze6-style ;;
     *) echo "$1" ;;
   esac
@@ -223,6 +225,14 @@ hypr_version() {
 ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }   # ver_ge A B : A >= B
 
 if [ "$MODE" != files ]; then
+  # Fedora : Noctalia v5 n'est dans les dépôts qu'à partir de Fedora 44 ; vérifié avant de toucher à quoi que ce soit
+  if [ "$FAMILY" = fedora ] && ! have noctalia; then
+    if [ "$OSID" != fedora ] && [ "$OSID" != nobara ]; then
+      die "$OSNAME n'a pas Noctalia v5 dans ses dépôts : installe-le toi-même ($NOCT_DOCS) puis relance."
+    elif [ "${OSVER%%.*}" -lt 44 ] 2>/dev/null; then
+      die "Fedora $OSVER n'a pas Noctalia v5 : il faut Fedora 44 ou plus (sudo dnf system-upgrade download --releasever=44)."
+    fi
+  fi
   [ "$FAMILY" != other ] || have Hyprland || die "distribution non gérée par l'installateur. Installe Hyprland (0.55 ou plus) et Noctalia v5 ($NOCT_DOCS), puis relance."
 
   # Hyprland (Debian 13 : depuis trixie-backports, avec sa veille, son portail et uwsm)
@@ -233,14 +243,18 @@ if [ "$MODE" != files ]; then
     if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
       bpo_on || die "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même."
       bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis trixie-backports."
-    elif [ "$FAMILY" = fedora ] && ! dnf -q info --available hyprland >/dev/null 2>&1; then
-      # Fedora : Hyprland n'est pas dans les dépôts officiels ; dépôt communautaire (COPR) le plus suivi, à jour
-      info "Hyprland n'est pas dans les dépôts officiels de Fedora : dépôt communautaire COPR sdegler/hyprland"
+    elif [ "$FAMILY" = fedora ] && { dv="$(dnf -q repoquery --latest-limit=1 --qf '%{version}\n' hyprland 2>/dev/null | tail -1)"
+                                     [ -z "$dv" ] || ! ver_ge "$dv" "$HYPR_MIN"; }; then
+      # Fedora : pas de Hyprland récent dans les dépôts officiels (ni dans l'ancien COPR solopasha, abandonné) ;
+      # dépôt communautaire (COPR) le plus suivi, à jour
+      info "Pas de Hyprland 0.55 ou plus dans les dépôts de Fedora : dépôt communautaire COPR sdegler/hyprland"
       info "  https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/"
       ask "Activer ce dépôt et installer Hyprland ?" o || die "Hyprland 0.55 ou plus est nécessaire."
-      pkg_try dnf5-plugins dnf-plugins-core          # commande « dnf copr »
-      sudo dnf -y copr enable sdegler/hyprland || die "activation du dépôt sdegler/hyprland impossible (paquet dnf-plugins-core ?)."
-      pkg_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis sdegler/hyprland."
+      if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi   # commande « dnf copr »
+      sudo dnf -y copr disable solopasha/hyprland >/dev/null 2>&1 || true
+      sudo dnf -y copr enable sdegler/hyprland || die "activation du dépôt sdegler/hyprland impossible (paquet dnf5-plugins ?)."
+      sudo dnf install -y --refresh hyprland hypridle xdg-desktop-portal-hyprland uwsm ||
+        die "installation de Hyprland impossible depuis sdegler/hyprland."
     else
       pkg_install hyprland || die "installation de Hyprland impossible : installe-le toi-même puis relance."
     fi
@@ -305,6 +319,7 @@ if [ "$MODE" != files ]; then
         info "Mise à jour à la main : sudo apt install -t trixie-backports hyprland hypridle xdg-desktop-portal-hyprland uwsm" ;;
       debian:debian:*) info "Debian $OSCODE n'a pas Hyprland 0.55 : il faut Debian 13 (trixie) ou plus récent." ;;
       debian:*) info "$OSNAME n'a pas encore Hyprland 0.55 dans ses dépôts : installe-le autrement (https://wiki.hypr.land/Getting-Started/Installation/)." ;;
+      fedora:*) info "Mise à jour à la main : sudo dnf copr enable sdegler/hyprland && sudo dnf upgrade --refresh hyprland" ;;
     esac
     case "$(hypr_bin)" in /usr/local/*|"$HOME"/*) info "Ce Hyprland a été installé à la main ($(hypr_bin)) et passe avant celui de ta distribution : supprime-le ou mets-le à jour." ;; esac
     die "Hyprland 0.55 ou plus est nécessaire."
@@ -486,6 +501,20 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 }
 
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
+# Fedora : l'île dynamique demande Quickshell 0.3 ; Fedora 44 n'a qu'un instantané plus ancien (0.2), Fedora 43 rien.
+# Dépôt communautaire (COPR) errornointernet/quickshell, tenu à jour (0.3.x)
+qs_ver() { qs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
+if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)" 0.3; then
+  info "L'île dynamique utilise Quickshell 0.3, absent des dépôts de Fedora : dépôt communautaire COPR errornointernet/quickshell"
+  if ask "Activer ce dépôt pour l'île dynamique ?" o; then
+    if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi
+    sudo dnf -y copr enable errornointernet/quickshell >/dev/null 2>&1 &&
+      { if have qs; then sudo dnf upgrade -y --refresh quickshell; else sudo dnf install -y --refresh quickshell; fi; } >/dev/null 2>&1 &&
+      hash -r && ver_ge "$(qs_ver)" 0.3 && ok "Quickshell $(qs_ver) installé." ||
+      warn "Quickshell non installé depuis le COPR : l'île du plugin Noctalia sera utilisée."
+    hash -r
+  fi
+fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi)
@@ -909,7 +938,9 @@ elif ask "$nv_q" o; then
   # Outils dont LazyVim et ses extras ont besoin (noms selon la distribution ; déjà installés ou absents : ignorés)
   case "$FAMILY" in
     arch)   pkg_try neovim git ripgrep fd gcc make nodejs npm tree-sitter-cli gitui ;;
-    fedora) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui ;;
+    fedora) pkg_try neovim git ripgrep fd-find gcc make tree-sitter-cli gitui
+            # Fedora 44 : nodejs24 / nodejs24-npm (plus de paquet « nodejs ») ; demandés par la commande fournie
+            have node || sudo dnf install -y /usr/bin/node /usr/bin/npm >/dev/null 2>&1 || true ;;
     debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui ;;
     suse)   pkg_try neovim git ripgrep fd gcc make nodejs-default npm-default tree-sitter gitui ;;
   esac
@@ -1094,7 +1125,7 @@ if [ "$MODE" = full ]; then
     [ -n "$ppd" ] && info "Ils remplacent $ppd (même fonctionnement depuis la barre)."
     if ask "Installer ces profils énergétiques ?" o; then
       sbackup /etc/tlp.conf /etc/tlp.d
-      for u in auto-cpufreq tuned power-profiles-daemon; do
+      for u in auto-cpufreq tuned tuned-ppd power-profiles-daemon; do
         if systemctl is-enabled --quiet "$u.service" 2>/dev/null; then
           info "$u entre en conflit avec TLP : il est désactivé (le paquet reste installé, sauf conflit de paquets)."
           sudo systemctl disable --now "$u.service" >/dev/null 2>&1 || true
@@ -1115,6 +1146,7 @@ if [ "$MODE" = full ]; then
         sudo tlp start >/dev/null && ok "TLP actif (profil Équilibré par défaut)."
       else
         warn "Installation de TLP impossible : $([ -n "$ppd" ] && echo "$ppd reste en place" || echo "profils non disponibles")."
+        [ "$ppd" = tuned-ppd ] && sudo systemctl enable --now tuned.service >/dev/null 2>&1   # tuned-ppd s'appuie sur tuned
         [ -n "$ppd" ] && sudo systemctl enable --now "$ppd.service" >/dev/null 2>&1
       fi
     fi
@@ -1231,9 +1263,15 @@ if [ "$MODE" = full ]; then
     else
       echo "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" | sudo tee -a /etc/default/grub >/dev/null
     fi
+    # Fedora : sortie texte par défaut (GRUB_TERMINAL_OUTPUT="console"), qui ignore le thème : sortie graphique
+    grep -qE '^GRUB_TERMINAL_OUTPUT="?console' /etc/default/grub &&
+      sudo sed -i -E 's/^GRUB_TERMINAL_OUTPUT=.*/GRUB_TERMINAL_OUTPUT="gfxterm"/' /etc/default/grub
     sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "Thème GRUB installé (visible au prochain redémarrage)."
-    grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub &&
-      info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap) au démarrage pour le voir."
+    have restorecon && sudo restorecon -RF "$GRUBDIR/themes/nc" >/dev/null 2>&1   # SELinux (Fedora) : étiquettes du dossier
+    if grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub ||
+       { have grub2-editenv && sudo grub2-editenv - list 2>/dev/null | grep -q '^menu_auto_hide=1'; }; then
+      info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap, F8) au démarrage pour le voir."
+    fi
     return 0
   }
   # Déjà fait : Plymouth dans l'initramfs ; avec GRUB, option splash et thème « nc » identique à celui du dépôt

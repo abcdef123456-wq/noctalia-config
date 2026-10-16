@@ -80,7 +80,9 @@ set_gpu_default() {
   local egl vk off layer glx
   if [ "$want" = nvidia ]; then
     egl=$EGL_DIR/10_nvidia.json:$EGL_DIR/50_mesa.json
-    vk=/usr/share/vulkan/icd.d/nvidia_icd.json${IGPU_VK:+:$IGPU_VK}
+    # nvidia_icd.json, ou nvidia_icd.x86_64.json (Fedora, RPM Fusion)
+    vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd:)
+    vk=${vk:-/usr/share/vulkan/icd.d/nvidia_icd.json}${IGPU_VK:+:$IGPU_VK}
     off=1; layer=NVIDIA_only; glx=nvidia
   else
     egl=$EGL_DIR/50_mesa.json
