@@ -326,12 +326,13 @@ Singleton {
     onBrancheChanged: { if (aBatterie) activite("charge"); if (branche) seuilAlerte = 100 }
 
     // ── Micro et caméra utilisés (point orange / vert à côté de la pilule, comme sur iPhone) ──
-    // Micro : flux PipeWire qui capture une vraie source (pas le son des haut-parleurs : cava, halo, indicateurs de volume)
-    readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.isStream && !n.isSink && n.audio
-        && (n.properties["media.class"] || "") === "Stream/Input/Audio" && n.properties["stream.capture.sink"] !== "true"
-        && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile/i.test((n.properties["application.name"] || "") + " " + (n.properties["media.name"] || "")))
-    PwObjectTracker { objects: Pipewire.nodes.values.filter(n => n.isStream && !n.isSink) }
-    readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].properties["application.name"] || "Une appli") : ""
+    // Micro : flux PipeWire qui enregistre (pas les captures du son des haut-parleurs : cava, halo, indicateurs).
+    // Seulement le type, le nom et la description des flux, lisibles sans s'y attacher : s'attacher (PwObjectTracker) à
+    // tous les flux des applis faisait planter Quickshell quand plusieurs disparaissaient d'un coup (quitter Discord en
+    // déconnectant le casque).
+    readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.type === PwNodeType.AudioInStream
+        && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile|monitor/i.test((n.name || "") + " " + (n.description || "")))
+    readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].description || fluxMicro[0].name || "Une appli") : ""
     // Caméra : allumée si la webcam est sortie de veille (simple fichier à lire) ; le nom de l'appli n'est cherché
     // qu'à ce moment-là (parcourir les fichiers ouverts de tous les programmes coûte cher : pas toutes les 3 s)
     property string appliCamera: ""

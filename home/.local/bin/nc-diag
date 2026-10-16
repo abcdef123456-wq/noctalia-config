@@ -303,6 +303,20 @@ def details():
         branches = [x.strip()[2:] for x in ias.splitlines() if x.strip().startswith(("✓", "✗")) and "île" not in x]
         if branches:
             l.append("  IA : " + " ; ".join(branches))
+    # Plantages de l'île ou de la barre (même si elle ne tourne plus) : ce que systemd et coredumpctl en ont gardé
+    plant, _ = sortie(["sh", "-c", "journalctl --user -u nc-ile.service -u noctalia.service -n 400 -o cat --no-pager 2>/dev/null "
+                       "| grep -iE 'segmentation|core dumped|abort|fatal|crash|failed with result|qt\\.qml.*error' | tail -6"])
+    for x in plant.splitlines():
+        l.append("  plantage : " + x.strip()[:200])
+    cores, _ = sortie(["sh", "-c", "coredumpctl list --no-pager --no-legend 2>/dev/null | grep -E '/(qs|quickshell|noctalia)( |$)' | tail -3"])
+    for x in cores.splitlines():
+        l.append("  plantage enregistré : " + " ".join(x.split()[:2] + x.split()[-3:]))
+    # Restes de GNOME (ou KDE) qui tournent encore dans la session Hyprland : ils peuvent ralentir ou gêner
+    ps, _ = sortie(["ps", "-u", str(os.getuid()), "-o", "comm="])
+    restes = sorted({c for c in ps.split() if re.match(r"^(gnome-shell|gsd-|gnome-software|evolution-|tracker-miner|localsearch|"
+                                                       r"xdg-desktop-por.*gnome|xdg-desktop-por.*kde|ibus-daemon|kded|plasmashell|baloo)", c)})
+    if restes:
+        l.append("  bureau d'avant qui tourne encore : " + ", ".join(restes))
     # Dernières erreurs : île, barre, Hyprland
     err, _ = sortie(["sh", "-c", "qs -c nc-ile log 2>/dev/null | grep -E 'ERROR|qml:.*(Error|error)' | tail -4"])
     err2, _ = sortie(["journalctl", "--user", "-u", "noctalia.service", "-p", "err", "-n", "4", "--no-pager", "-o", "cat"])

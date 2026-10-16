@@ -11,9 +11,11 @@ Item {
     id: son
     function defiler(dy) { return defil.defiler(dy) }
     readonly property var noeuds: Pipewire.nodes.values
-    readonly property var sorties: noeuds.filter(n => n.isSink && !n.isStream && n.audio)
-    readonly property var entrees: noeuds.filter(n => !n.isSink && !n.isStream && n.audio && (n.properties["media.class"] || "").indexOf("Source") >= 0)
-    readonly property var applis: noeuds.filter(n => n.isStream && n.audio && !n.isSink)
+    // Par leur type (lisible sans s'attacher au nœud) : pour un flux, isSink est vrai quand il JOUE du son (il entre dans
+    // le graphe) ; le filtre « !isSink » écartait donc toutes les applis qui jouent, et la liste restait vide
+    readonly property var sorties: noeuds.filter(n => n.type === PwNodeType.AudioSink)
+    readonly property var entrees: noeuds.filter(n => n.type === PwNodeType.AudioSource)
+    readonly property var applis: noeuds.filter(n => n.type === PwNodeType.AudioOutStream)
     readonly property var micro: Pipewire.defaultAudioSource
     PwObjectTracker { objects: son.sorties.concat(son.entrees, son.applis) }
 
