@@ -40,6 +40,7 @@ HOME_FILES=(
   .local/bin/nc-aide
   .local/bin/nc-diag
   .local/bin/nc-sauvegarde
+  .local/bin/nc-claude
   .local/bin/nc-fermer
   .local/bin/nc-greeting
   .local/bin/nc-capture

@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""nc-claude : Claude Code dans l'île dynamique (comme l'appli coucou) : ce qu'il fait, étape par étape, quand il a
+fini, et ses demandes (autoriser une commande, répondre à une question) depuis l'île.
+  nc-claude installer   ajoute les hooks à ~/.claude/settings.json (copie de l'ancien fichier gardée à côté)
+  nc-claude retirer     les enlève
+  nc-claude etat        les sessions suivies, en clair
+  nc-claude hook        appelé par Claude Code à chaque événement (lit le JSON de l'événement sur l'entrée standard)
+Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
+question repasse dans le terminal. Sans l'île (ou nc-reglages → Claude Code), rien ne change : Claude n'attend jamais.
+État : $XDG_RUNTIME_DIR/nc-claude/etat.json (lu par l'île) ; réponses de l'île : …/nc-claude/reponses/ID.
+"""
+import fcntl
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+
+HOME = os.path.expanduser("~")
+RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/nc-{os.getuid()}", "nc-claude")
+ETAT = os.path.join(RUN, "etat.json")
+VERROU = os.path.join(RUN, "etat.lock")
+REPONSES = os.path.join(RUN, "reponses")
+SETTINGS = os.path.join(HOME, ".claude/settings.json")
+COMMANDE = "$HOME/.local/bin/nc-claude hook"
+GARDER = 6 * 3600                  # une session sans nouvelles depuis 6 h disparaît de l'île
+
+
+def reglage(cle, defaut):
+    try:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
+            for l in f:
+                if l.startswith(cle + "="):
+                    defaut = l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+# ── État partagé (verrou : plusieurs hooks peuvent tourner en même temps) ─────────────────────────────────────────
+class Etat:
+    def __enter__(self):
+        os.makedirs(RUN, mode=0o700, exist_ok=True)
+        self.v = open(VERROU, "w")
+        fcntl.flock(self.v, fcntl.LOCK_EX)
+        try:
+            with open(ETAT, encoding="utf-8") as f:
+                self.d = json.load(f)
+        except (OSError, ValueError):
+            self.d = {}
+        self.d.setdefault("sessions", {})
+        self.d.setdefault("demandes", {})
+        return self.d
+
+    def __exit__(self, *_):
+        maintenant = time.time()
+        for sid in [s for s, v in self.d["sessions"].items() if maintenant - v.get("maj", 0) > GARDER]:
+            del self.d["sessions"][sid]
+        tmp = ETAT + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.d, f, ensure_ascii=False)
+        os.replace(tmp, ETAT)
+        fcntl.flock(self.v, fcntl.LOCK_UN)
+        self.v.close()
+
+
+# ── Ce que fait Claude, en français ────────────────────────────────────────────────────────────────────────────────
+def court(t, n=70):
+    t = re.sub(r"\s+", " ", str(t or "")).strip()
+    return t if len(t) <= n else t[:n - 1] + "…"
+
+
+def nom_fichier(p):
+    return os.path.basename(str(p or "")) or "un fichier"
+
+
+def etape(outil, e):
+    """(icône Material Symbols, texte) pour un outil."""
+    e = e or {}
+    if outil == "Bash":
+        return "terminal", "Lance : " + court(e.get("description") or e.get("command"), 60)
+    if outil in ("Edit", "MultiEdit"):
+        return "edit", "Modifie " + nom_fichier(e.get("file_path"))
+    if outil == "Write":
+        return "edit_document", "Écrit " + nom_fichier(e.get("file_path"))
+    if outil == "Read":
+        return "description", "Lit " + nom_fichier(e.get("file_path"))
+    if outil == "NotebookEdit":
+        return "edit", "Modifie " + nom_fichier(e.get("notebook_path"))
+    if outil == "Grep":
+        return "search", "Cherche « " + court(e.get("pattern"), 30) + " »"
+    if outil == "Glob":
+        return "search", "Cherche des fichiers"
+    if outil == "WebFetch":
+        return "public", "Lit une page web"
+    if outil == "WebSearch":
+        return "travel_explore", "Cherche sur le web : " + court(e.get("query"), 40)
+    if outil in ("Task", "Agent"):
+        return "smart_toy", "Lance un agent : " + court(e.get("description"), 40)
+    if outil == "TodoWrite":
+        return "checklist", "Met à jour sa liste"
+    if outil == "AskUserQuestion":
+        return "help", "Te pose une question"
+    if outil.startswith("mcp__"):
+        return "extension", "Utilise " + outil.split("__")[1].replace("_", " ")
+    return "build", court(outil, 40)
+
+
+def lignes(t):
+    return len(str(t or "").splitlines()) if t else 0
+
+
+def diff(outil, e):
+    """(+ajouts, −retraits) d'une modification."""
+    e = e or {}
+    if outil == "Edit":
+        return lignes(e.get("new_string")), lignes(e.get("old_string"))
+    if outil == "MultiEdit":
+        m = e.get("edits") or []
+        return sum(lignes(x.get("new_string")) for x in m), sum(lignes(x.get("old_string")) for x in m)
+    if outil == "Write":
+        return lignes(e.get("content")), 0
+    return 0, 0
+
+
+def demande_texte(outil, e):
+    e = e or {}
+    if outil == "Bash":
+        return "Veut lancer une commande", court(e.get("command"), 160)
+    if outil in ("Edit", "MultiEdit", "NotebookEdit"):
+        return "Veut modifier un fichier", str(e.get("file_path") or e.get("notebook_path") or "").replace(HOME, "~")
+    if outil == "Write":
+        return "Veut écrire un fichier", str(e.get("file_path") or "").replace(HOME, "~")
+    if outil == "WebFetch":
+        return "Veut lire une page web", court(e.get("url"), 160)
+    if outil.startswith("mcp__"):
+        return "Veut utiliser " + outil.split("__")[1].replace("_", " "), court(json.dumps(e, ensure_ascii=False), 160)
+    return "Veut utiliser " + outil, court(json.dumps(e, ensure_ascii=False), 160)
+
+
+# ── Le terminal de la session ────────────────────────────────────────────────────────────────────────────────────
+def fenetres():
+    try:
+        r = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=2)
+        return json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+
+
+def terminal_pid():
+    """Le programme à fenêtre (kitty…) dont descend ce Claude : on remonte les parents jusqu'à une fenêtre."""
+    pids = {w.get("pid") for w in fenetres()}
+    p = os.getppid()
+    for _ in range(30):
+        if p in pids:
+            return p
+        try:
+            with open(f"/proc/{p}/stat") as f:
+                p = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return 0
+        if p <= 1:
+            return 0
+    return 0
+
+
+def terminal_actif(pid):
+    if not pid:
+        return False
+    try:
+        r = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2)
+        return json.loads(r.stdout or "{}").get("pid") == pid
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+
+
+def ile_active():
+    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "nc-ile.service"]).returncode == 0
+
+
+# ── Les événements ───────────────────────────────────────────────────────────────────────────────────────────────
+def session(d, ev):
+    sid = ev.get("session_id") or "?"
+    s = d["sessions"].setdefault(sid, {"id": sid, "etat": "pret", "etapes": [], "ajouts": 0, "retraits": 0,
+                                       "debut": time.time()})
+    cwd = ev.get("cwd") or s.get("cwd") or ""
+    s["cwd"] = cwd.replace(HOME, "~")
+    s["projet"] = ev.get("session_title") or os.path.basename(cwd.rstrip("/")) or "Claude"
+    s["maj"] = time.time()
+    if not s.get("terminal"):
+        s["terminal"] = terminal_pid()
+    return s
+
+
+def ajouter_etape(s, icone, texte):
+    s["icone"], s["etape"] = icone, texte
+    l = s.setdefault("etapes", [])
+    l.append({"icone": icone, "texte": texte, "t": time.time()})
+    del l[:-6]
+
+
+def repondre(sortie):
+    print(json.dumps(sortie, ensure_ascii=False))
+
+
+def attendre(ident, pid, delai=590):
+    """Réponse de l'île (oui, toujours, non, terminal, ou le choix d'une question), ou None si tu retournes sur le
+    terminal de Claude (la question y repasse) ou si personne ne répond."""
+    os.makedirs(REPONSES, mode=0o700, exist_ok=True)
+    f = os.path.join(REPONSES, ident)
+    fin = time.time() + delai
+    n = 0
+    while time.time() < fin:
+        if os.path.exists(f):
+            try:
+                with open(f, encoding="utf-8") as x:
+                    return x.read().strip()
+            finally:
+                os.remove(f)
+        n += 1
+        if n % 3 == 0 and terminal_actif(pid):
+            return None
+        time.sleep(0.25)
+    return None
+
+
+def demande(ev, genre):
+    """Demande d'autorisation (PermissionRequest) ou question (AskUserQuestion) : dans l'île si tu n'es pas sur le
+    terminal de Claude. Rien sur la sortie standard = la question s'affiche dans le terminal, comme d'habitude."""
+    if reglage("CLAUDE_DEMANDES", "ile") != "ile" or not ile_active():
+        return
+    outil, e = ev.get("tool_name") or "", ev.get("tool_input") or {}
+    if genre == "question":
+        qs = e.get("questions") or []
+        # L'île sait répondre à une seule question à choix unique ; sinon, le terminal
+        if len(qs) != 1 or qs[0].get("multiSelect") or not qs[0].get("options"):
+            return
+    ident = uuid.uuid4().hex[:12]
+    with Etat() as d:
+        s = session(d, ev)
+        pid = s.get("terminal") or 0
+        if terminal_actif(pid):
+            return
+        s["etat"] = "demande"
+        if genre == "question":
+            q = e["questions"][0]
+            d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
+                                    "genre": "question", "titre": court(q.get("question"), 140),
+                                    "options": [court(o.get("label"), 40) for o in q.get("options", [])][:4],
+                                    "t": time.time()}
+        else:
+            titre, detail = demande_texte(outil, e)
+            d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
+                                    "genre": "permission", "titre": titre, "detail": detail,
+                                    "toujours": bool(ev.get("permission_suggestions")), "t": time.time()}
+    try:
+        r = attendre(ident, pid)
+    finally:
+        with Etat() as d:
+            d["demandes"].pop(ident, None)
+            s = d["sessions"].get(ev.get("session_id") or "?")
+            if s and s.get("etat") == "demande" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
+                s["etat"] = "travail"
+    if not r or r == "terminal":
+        return
+    if genre == "question":
+        q = e["questions"][0]
+        if r.startswith("choix:"):
+            repondre({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                             "updatedInput": {"questions": e["questions"],
+                                                              "answers": {q.get("question"): r[6:]}}}})
+        return
+    if r in ("oui", "toujours"):
+        decision = {"behavior": "allow"}
+        if r == "toujours" and ev.get("permission_suggestions"):
+            decision["updatedPermissions"] = ev["permission_suggestions"]
+        repondre({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+    elif r == "non":
+        repondre({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+                                         "decision": {"behavior": "deny", "message": "Refusé depuis l'île dynamique"}}})
+
+
+def hook():
+    if reglage("CLAUDE_ILE", "oui") == "non":
+        return
+    try:
+        ev = json.load(sys.stdin)
+    except ValueError:
+        return
+    nom = ev.get("hook_event_name") or ""
+    if ev.get("agent_id") and nom not in ("PermissionRequest", "PreToolUse"):
+        return                                         # sous-agents : seule la session principale est suivie
+    if nom == "PermissionRequest":
+        return demande(ev, "permission")
+    if nom == "PreToolUse" and ev.get("tool_name") == "AskUserQuestion" and os.environ.get("NC_CLAUDE_SYNC"):
+        return demande(ev, "question")
+    with Etat() as d:
+        if nom == "SessionEnd":
+            d["sessions"].pop(ev.get("session_id") or "?", None)
+            return
+        s = session(d, ev)
+        if nom == "SessionStart":
+            s["etat"] = "pret"
+        elif nom == "UserPromptSubmit":
+            s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
+            ajouter_etape(s, "neurology", "Réfléchit…")
+        elif nom == "PreToolUse" and not ev.get("agent_id"):
+            if s.get("etat") not in ("demande",):
+                s["etat"] = "travail"
+            ajouter_etape(s, *etape(ev.get("tool_name") or "", ev.get("tool_input")))
+        elif nom == "PostToolUse":
+            a, r = diff(ev.get("tool_name") or "", ev.get("tool_input"))
+            if a or r:
+                s["ajouts"] = s.get("ajouts", 0) + a
+                s["retraits"] = s.get("retraits", 0) + r
+                if s.get("etapes"):
+                    s["etapes"][-1]["diff"] = f"+{a} −{r}"
+            if s.get("etat") == "demande" and not d["demandes"]:
+                s["etat"] = "travail"
+        elif nom == "Notification":
+            t = ev.get("notification_type") or ""
+            if t == "idle_prompt":
+                s["etat"] = "attente"
+            elif t == "permission_prompt" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
+                s["etat"] = "terminal"         # Claude attend une réponse dans le terminal
+        elif nom == "Stop":
+            s["etat"] = "fini"
+            s["fin"] = time.time()
+            s["message"] = court(ev.get("last_assistant_message"), 160)
+
+
+# ── Installation des hooks ───────────────────────────────────────────────────────────────────────────────────────
+def a_nous(h):
+    return "nc-claude hook" in str(h.get("command", ""))
+
+
+def retirer_de(cfg):
+    hooks = cfg.get("hooks") or {}
+    for ev in list(hooks):
+        groupes = []
+        for g in hooks[ev]:
+            g = dict(g)
+            g["hooks"] = [h for h in g.get("hooks", []) if not a_nous(h)]
+            if g["hooks"]:
+                groupes.append(g)
+        if groupes:
+            hooks[ev] = groupes
+        else:
+            del hooks[ev]
+    if hooks:
+        cfg["hooks"] = hooks
+    else:
+        cfg.pop("hooks", None)
+    return cfg
+
+
+def lire_settings():
+    try:
+        with open(SETTINGS, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except ValueError:
+        sys.exit(f"nc-claude : {SETTINGS} n'est pas un JSON valide : rien n'a été changé.")
+
+
+def ecrire_settings(cfg):
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    if os.path.exists(SETTINGS):
+        copie = SETTINGS + ".avant-nc-claude"
+        if not os.path.exists(copie):
+            shutil.copy2(SETTINGS, copie)
+    tmp = SETTINGS + ".nc-tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, SETTINGS)
+
+
+def installer():
+    cfg = retirer_de(lire_settings())
+    hooks = cfg.setdefault("hooks", {})
+    vite = {"type": "command", "command": COMMANDE, "async": True, "timeout": 10}
+    for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"):
+        hooks.setdefault(ev, []).append({"hooks": [dict(vite)]})
+    # Demandes : le hook attend ta réponse dans l'île (ou ton retour sur le terminal), 10 min au plus
+    hooks.setdefault("PermissionRequest", []).append(
+        {"hooks": [{"type": "command", "command": COMMANDE, "timeout": 600}]})
+    hooks.setdefault("PreToolUse", []).append(
+        {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "NC_CLAUDE_SYNC=1 " + COMMANDE, "timeout": 600}]})
+    ecrire_settings(cfg)
+    print(f"Claude Code s'affiche maintenant dans l'île (hooks ajoutés à {SETTINGS.replace(HOME, '~')}).")
+    print("Les sessions de Claude déjà ouvertes le prennent en compte d'elles-mêmes (sinon : relance claude).")
+    print("Pour l'enlever : nc-claude retirer")
+
+
+def retirer():
+    if not os.path.exists(SETTINGS):
+        print("Rien à retirer.")
+        return
+    ecrire_settings(retirer_de(lire_settings()))
+    print("Hooks de l'île retirés de " + SETTINGS.replace(HOME, "~") + ".")
+
+
+def montrer():
+    try:
+        d = json.load(open(ETAT, encoding="utf-8"))
+    except (OSError, ValueError):
+        print("Aucune session de Claude Code suivie.")
+        return
+    for s in d.get("sessions", {}).values():
+        print(f"{s.get('projet')}  [{s.get('etat')}]  {s.get('etape', '')}  +{s.get('ajouts', 0)} −{s.get('retraits', 0)}")
+    for x in d.get("demandes", {}).values():
+        print(f"  demande : {x.get('titre')} {x.get('detail', '')}")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__.strip())
+    elif a[0] == "hook":
+        try:
+            hook()
+        except Exception:                      # un hook ne doit jamais gêner Claude
+            pass
+    elif a[0] == "installer":
+        installer()
+    elif a[0] == "retirer":
+        retirer()
+    elif a[0] == "etat":
+        montrer()
+    else:
+        print(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()
