@@ -2,6 +2,8 @@
 // Logo : ~/.cache/nc/term-logo.png, régénéré aux couleurs du fond d'écran (nc-term-logo).
 // Couleurs : nc-greeting passe la couleur principale du fond d'écran (--color-keys…) ; valeurs ci-dessous = secours.
 // Le module GPU de fastfetch n'est pas utilisé : il réveillerait la carte NVIDIA ; nc-sysinfo lit /sys à la place.
+// Composants propres à chaque PC (modèle, écrans, disques, batterie) : lignes de nc-sysinfo, masquées quand elles
+// sont vides (PC fixe sans batterie, modèle inconnu…).
 {
   "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
   "logo": {
@@ -53,6 +55,11 @@
       "outputColor": "90"
     },
     {
+      "type": "command",
+      "key": "\uf108",
+      "text": "nc-sysinfo modele"
+    },
+    {
       "type": "os",
       "key": "\uf17c",
       "format": "{name} · noyau {kernel-release}"
@@ -73,6 +80,11 @@
       "text": "nc-sysinfo gpu"
     },
     {
+      "type": "command",
+      "key": "󰍹",
+      "text": "nc-sysinfo ecrans"
+    },
+    {
       "type": "memory",
       "key": "󰑭",
       "format": "{used} / {total}  {percentage-bar}"
@@ -82,6 +94,11 @@
       "key": "󰋊",
       "folders": "/",
       "format": "{size-used} / {size-total}  {size-percentage-bar}"
+    },
+    {
+      "type": "command",
+      "key": "\uf0a0",
+      "text": "nc-sysinfo disques"
     },
     {
       "type": "command",
