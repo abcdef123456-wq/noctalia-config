@@ -38,6 +38,7 @@ ShellRoot {
         function effacerNotifications(): void { Notifs.toutEffacer() }
         function concentration(): void { Notifs.basculerConcentration() }
         function concentrationRegler(actif: bool): void { Notifs.concentration = actif }   // mode jeu
+        function concentrationEtat(): string { return Notifs.concentration ? "oui" : "non" }
         // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
         function page(nom: string): void {
             if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }

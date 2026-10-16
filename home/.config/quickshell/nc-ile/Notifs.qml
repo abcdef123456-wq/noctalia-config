@@ -23,6 +23,19 @@ Singleton {
     property alias concentration: garde.concentration
     function basculerConcentration() { garde.concentration = !garde.concentration }
 
+    // Ne pas déranger programmé (nc-reglages : NPD_NUIT, NPD_DEBUT, NPD_FIN) : la concentration s'active au début de la
+    // plage et se coupe à la fin ; entre les deux, le bouton du centre de contrôle reste libre
+    property bool dansPlage: false
+    function minutes(h) { var p = String(h).split(":"); return (parseInt(p[0]) || 0) * 60 + (parseInt(p[1]) || 0) }
+    function verifierPlage() {
+        var d = new Date(), m = d.getHours() * 60 + d.getMinutes()
+        var a = minutes(Reglages.val("NPD_DEBUT", "22:00")), b = minutes(Reglages.val("NPD_FIN", "07:00"))
+        var dedans = Reglages.val("NPD_NUIT", "non") === "oui" && (a <= b ? (m >= a && m < b) : (m >= a || m < b))
+        if (dedans !== dansPlage) { dansPlage = dedans; garde.concentration = dedans }
+    }
+    Timer { interval: 30000; repeat: true; running: true; triggeredOnStart: true; onTriggered: n.verifierPlage() }
+    Connections { target: Reglages; function onValeursChanged() { n.verifierPlage() } }
+
     NotificationServer {
         id: serveur
         keepOnReload: true

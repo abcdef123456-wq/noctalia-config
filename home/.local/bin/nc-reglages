@@ -194,9 +194,9 @@ REGLAGES = [
       [("degrade", "Accent en dégradé"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
     R("ILE_HEURE", "Île", "Format de l'heure", "choix", "24", "", [("24", "24 h  (14:05)"), ("12", "12 h  (2:05 PM)")]),
     R("ILE_DATE", "Île", "Date à côté de l'heure", "ouinon", "oui"),
-    R("ILE_BANNIERES", "Île", "Notifications en bannière", "ouinon", "oui",
+    R("ILE_BANNIERES", "Notifications", "Notifications en bannière", "ouinon", "oui",
       "Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours."),
-    R("ILE_BANNIERE_DUREE", "Île", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
+    R("ILE_BANNIERE_DUREE", "Notifications", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
     R("SPOTLIGHT_ENTREE", "Île", "Entrée sur une appli déjà ouverte", "choix", "nouvelle",
       "Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.",
       [("nouvelle", "Ouvre une nouvelle fenêtre"), ("aller", "Va sur la fenêtre ouverte")]),
@@ -204,6 +204,11 @@ REGLAGES = [
       "Les fichiers du dossier personnel apparaissent dans les résultats (à partir de 3 lettres)."),
     R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
       mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
+    # Notifications
+    R("NPD_NUIT", "Notifications", "Ne pas déranger la nuit", "ouinon", "non",
+      "Les notifications arrivent sans bannière ni son (les urgentes passent). Le bouton du centre de contrôle reste libre.",),
+    R("NPD_DEBUT", "Notifications", "À partir de", "choix", "22:00", "", ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '00:00', '00:30', '01:00', '01:30']),
+    R("NPD_FIN", "Notifications", "Jusqu'à", "choix", "07:00", "", ['05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30']),
     # Apparence
     R("STYLE", "Apparence", "Style du bureau", "choix", "noctalia",
       "Apple : couleurs de macOS, île noire, barre de menus, fenêtres, dock et animations façon Mac. Tes autres "
