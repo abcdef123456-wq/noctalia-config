@@ -89,9 +89,47 @@ Singleton {
         vueNom = "minuteur"
     }
     function ajouterMinute() { if (minuteurFin > 0) { minuteurFin += 60000; minuteurDuree += 60000 } }
-    function arreterMinuteur() { minuteurFin = 0; if (vueNom === "minuteur") vueNom = "centre" }
+    function arreterMinuteur() {
+        minuteurFin = 0; if (vueNom === "minuteur") vueNom = "centre"
+        if (pomodoro) { pomodoro = false; concentrationPomodoro(false) }
+    }
+    // Pomodoro : 25 min de travail (Ne pas déranger), 5 min de pause, 15 toutes les 4 séances ; enchaîne tout seul
+    property bool pomodoro: false
+    property bool pomoPause: false
+    property int pomoSeance: 1
+    property bool dndAvantPomo: false
+    function concentrationPomodoro(actif) {
+        if (Reglages.val("POMODORO_CONCENTRATION", "oui") === "non") return
+        if (actif) { dndAvantPomo = Notifs.concentration; Notifs.concentration = true }
+        else Notifs.concentration = dndAvantPomo
+    }
+    function lancerPomodoro() {
+        pomodoro = true; pomoPause = false; pomoSeance = 1
+        concentrationPomodoro(true)
+        lancerMinuteur(25)
+    }
+    function etapePomodoro() {
+        var msg
+        if (!pomoPause) {
+            pomoPause = true
+            concentrationPomodoro(false)
+            var longue = pomoSeance % 4 === 0
+            msg = ["Pause !", longue ? "15 minutes : lève-toi, bouge un peu." : "5 minutes pour souffler."]
+            lancerMinuteur(longue ? 15 : 5)
+        } else {
+            pomoPause = false; pomoSeance++
+            concentrationPomodoro(true)
+            msg = ["Au travail", "Séance " + pomoSeance + " : 25 minutes de concentration."]
+            lancerMinuteur(25)
+        }
+        Quickshell.execDetached(["sh", "-c", "notify-send -a Pomodoro \"$1\" \"$2\"; command -v canberra-gtk-play >/dev/null && "
+                                 + "canberra-gtk-play -i complete || true", "sh", msg[0], msg[1]])
+    }
     onMinuteurResteChanged: {
-        if (minuteurFin > 0 && minuteurReste === 0) {
+        if (minuteurFin > 0 && minuteurReste === 0 && pomodoro) {
+            minuteurFin = 0
+            etapePomodoro()
+        } else if (minuteurFin > 0 && minuteurReste === 0) {
             minuteurFin = 0
             Quickshell.execDetached(["sh", "-c", "notify-send -a Minuteur -u critical 'Minuteur terminé' 'Le temps est écoulé.'; "
                 + "command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i alarm-clock-elapsed || true"])

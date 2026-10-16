@@ -82,8 +82,9 @@ Item {
     Fondu {
         id: minuteur
         montre: c.mode === "minuteur"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "timer"; taille: 17; color: Couleurs.orange }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: Couleurs.orange; font.features: { "tnum": 1 } }
+        readonly property color teinte: Etat.pomodoro ? (Etat.pomoPause ? Couleurs.vert : "#ff6347") : Couleurs.orange
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.pomodoro ? (Etat.pomoPause ? "coffee" : "psychology") : "timer"; taille: 17; color: minuteur.teinte }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: minuteur.teinte; font.features: { "tnum": 1 } }
     }
     Fondu {
         id: fini

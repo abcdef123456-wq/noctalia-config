@@ -43,6 +43,7 @@ ShellRoot {
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
         function fermer(): void { Etat.fermer() }
+        function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
         function rechercher(texte: string): void {
             Etat.saisie = texte
