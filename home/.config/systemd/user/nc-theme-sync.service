@@ -1,5 +1,8 @@
 [Unit]
 Description=Thème kitty assorti aux couleurs Noctalia
+# Plusieurs changements de couleurs d'affilée (essai de styles, fonds qui défilent) : jamais bloqué par la limite de
+# relances de systemd (5 en 10 s par défaut), qui arrêtait aussi la surveillance
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
