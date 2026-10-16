@@ -7,6 +7,8 @@
 # Le .zshrc le relance quand la fenêtre change de taille, tant qu'aucune commande n'a été tapée.
 set -uo pipefail
 command -v fastfetch >/dev/null || exit 0
+# Accueil coupé dans nc-reglages (TERMINAL_ACCUEIL=non)
+grep -qx 'TERMINAL_ACCUEIL=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
 
 CFG="$HOME/.config/fastfetch/nc.jsonc"
 LOGO="$HOME/.cache/nc/term-logo.png"

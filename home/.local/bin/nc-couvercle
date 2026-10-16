@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# nc-couvercle : ce que fait le portable quand on ferme le couvercle (nc-reglages, Veille → « Couvercle fermé »).
+#   COUVERCLE=veille (par défaut)  le système met le PC en veille, comme d'habitude
+#   COUVERCLE=ecran                l'écran s'éteint (et se verrouille, sauf COUVERCLE_VERROU=non) ; le PC continue de
+#                                  tourner : téléchargements, musique, partage… Il ne se met pas non plus en veille
+#                                  pour inactivité tant que le couvercle reste fermé.
+#   nc-couvercle garde          (service nc-couvercle) en mode « ecran », empêche le système de mettre en veille au
+#                               couvercle (verrou de logind, sans sudo)
+#   nc-couvercle ferme | ouvre  appelé par Hyprland (interrupteur du couvercle)
+# Écran externe branché : le système ne met déjà pas en veille ; seul l'écran du portable s'éteint.
+set -uo pipefail
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+PID="$RUN/nc-couvercle-inactivite.pid"
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+mode="$(reglage COUVERCLE)"; [ "$mode" = ecran ] || mode=veille
+
+ecrans() {   # ecrans on|off : écran du portable seul si un écran externe est branché, sinon tous
+  local tous internes m
+  tous="$(hyprctl monitors -j 2>/dev/null | jq -r '.[].name' 2>/dev/null)"
+  internes="$(grep -E '^(eDP|LVDS|DSI)' <<< "$tous")"
+  if [ -n "$internes" ] && [ "$internes" != "$tous" ]; then
+    while IFS= read -r m; do hyprctl dispatch "hl.dsp.dpms({ action = \"$1\", monitor = \"$m\" })" >/dev/null; done <<< "$internes"
+  else
+    hyprctl dispatch "hl.dsp.dpms({ action = \"$1\" })" >/dev/null
+  fi
+}
+
+arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep »)
+  local p
+  p="$(cat "$PID" 2>/dev/null)"
+  [ -n "$p" ] && { pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; }
+  rm -f "$PID"
+}
+
+case "${1:-}" in
+  garde)
+    [ "$mode" = ecran ] || exit 0
+    exec systemd-inhibit --what=handle-lid-switch --who=noctalia-config --mode=block \
+      --why="Couvercle fermé : l'écran s'éteint, le PC continue de tourner (nc-reglages)" sleep infinity ;;
+  ferme)
+    [ "$mode" = ecran ] || exit 0
+    [ "$(reglage COUVERCLE_VERROU)" = non ] || loginctl lock-session
+    # Pas de veille pour inactivité tant que le couvercle est fermé (hypridle respecte ce verrou)
+    arreter
+    setsid systemd-inhibit --what=idle --who=noctalia-config --why="Couvercle fermé, le PC continue de tourner" \
+      sleep infinity >/dev/null 2>&1 &
+    echo $! > "$PID"
+    sleep 1                                   # le verrouillage s'affiche avant que l'écran s'éteigne
+    ecrans off ;;
+  ouvre)
+    arreter
+    ecrans on ;;
+  *) sed -n '2,11p' "$0"; exit 1 ;;
+esac

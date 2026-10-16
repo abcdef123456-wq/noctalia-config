@@ -184,6 +184,8 @@ REGLAGES = [
     R("SPOTLIGHT_ENTREE", "Île", "Entrée sur une appli déjà ouverte", "choix", "nouvelle",
       "Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.",
       [("nouvelle", "Ouvre une nouvelle fenêtre"), ("aller", "Va sur la fenêtre ouverte")]),
+    R("SPOTLIGHT_FICHIERS", "Île", "Fichiers dans le Spotlight", "ouinon", "oui",
+      "Les fichiers du dossier personnel apparaissent dans les résultats (à partir de 3 lettres)."),
     R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
       mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
     # Apparence
@@ -193,11 +195,18 @@ REGLAGES = [
       lambda: polices(r"^(Inter|Noto Sans|Roboto|Ubuntu|Cantarell|Fira Sans|Open Sans|Lato|IBM Plex Sans|SF Pro)",
                       ["Adwaita Sans", "Inter", "Noto Sans", "Cantarell", "Roboto", "Ubuntu", "Fira Sans", "IBM Plex Sans"]),
       groupe="noctalia"),
-    R("ANIMATIONS_VITESSE", "Apparence", "Vitesse des animations", "choix", "1.15", "Panneaux et menus de Noctalia.",
+    R("ANIMATIONS_VITESSE", "Apparence", "Vitesse des animations des menus", "choix", "1.15", "Panneaux et menus de Noctalia.",
       [("0.8", "Douce"), ("1.15", "Normale"), ("1.6", "Rapide")], groupe="noctalia"),
     R("COINS_ECRAN", "Apparence", "Coins de l'écran arrondis", "ouinon", "oui", groupe="noctalia"),
     R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
       mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    # Lumière nocturne
+    R("NUIT", "Lumière nocturne", "Lumière nocturne", "choix", "non", "Réchauffe les couleurs de l'écran pour moins fatiguer les yeux le soir.",
+      [("non", "Désactivée"), ("soir", "Le soir, aux heures ci-dessous"), ("toujours", "Toujours")], groupe="noctalia"),
+    R("NUIT_TEMPERATURE", "Lumière nocturne", "Chaleur des couleurs", "entier", "4000", "Plus c'est bas, plus c'est orangé (6500 K : normal).",
+      mini=2500, maxi=6000, pas=250, unite="K", groupe="noctalia"),
+    R("NUIT_DEBUT", "Lumière nocturne", "Commence à", "choix", "21:00", "", ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'], groupe="noctalia"),
+    R("NUIT_FIN", "Lumière nocturne", "S'arrête à", "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
     # Barre et dock
     R("BARRE_OPACITE", "Barre et dock", "Opacité des pastilles de la barre", "entier", "82", mini=30, maxi=100, pas=2, unite="%", groupe="noctalia"),
     R("BARRE_SYSTEME", "Barre et dock", "Processeur, température et mémoire", "ouinon", "oui", "La pastille d'infos système à droite de la barre.", groupe="noctalia"),
@@ -205,6 +214,8 @@ REGLAGES = [
     R("DOCK_AUTO", "Barre et dock", "Masquer le dock automatiquement", "ouinon", "oui", "Il apparaît quand le pointeur touche le bas de l'écran.", groupe="noctalia"),
     R("DOCK_TAILLE", "Barre et dock", "Taille des icônes du dock", "entier", "44", mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
     R("DOCK_LOUPE", "Barre et dock", "Effet loupe du dock", "ouinon", "oui", groupe="noctalia"),
+    R("DOCK_POSITION", "Barre et dock", "Position du dock", "choix", "bottom", "",
+      [("bottom", "En bas"), ("left", "À gauche"), ("right", "À droite")], groupe="noctalia"),
     # Fenêtres
     R("FENETRES_ESPACE", "Fenêtres", "Espace entre les fenêtres", "entier", "4", mini=0, maxi=40, unite="px", groupe="hypr"),
     R("FENETRES_MARGE", "Fenêtres", "Marge au bord de l'écran", "entier", "10", mini=0, maxi=60, unite="px", groupe="hypr"),
@@ -213,6 +224,13 @@ REGLAGES = [
     R("FENETRES_HALO", "Fenêtres", "Halo coloré de la fenêtre active", "ouinon", "oui", "Ombre aux couleurs du fond d'écran (et halo musical).", groupe="hypr"),
     R("FENETRES_FLOU", "Fenêtres", "Flou derrière les fenêtres transparentes", "ouinon", "oui", groupe="hypr"),
     R("FENETRES_ANIMATIONS", "Fenêtres", "Animations des fenêtres", "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_ANIMATIONS_VITESSE", "Fenêtres", "Vitesse des animations", "choix", "normale", "",
+      [("lente", "Lente"), ("normale", "Normale"), ("rapide", "Rapide")], groupe="hypr"),
+    R("FENETRES_OUVERTURE", "Fenêtres", "Ouverture des fenêtres", "choix", "popin", "",
+      [("popin", "Zoom léger"), ("slide", "Glissement"), ("gnomed", "Dépliée, façon GNOME")], groupe="hypr"),
+    R("FENETRES_DISPOSITION", "Fenêtres", "Disposition des fenêtres", "choix", "dwindle",
+      "Spirale : chaque nouvelle fenêtre partage la place de l'active. Principale : une grande à gauche, les autres en pile à droite.",
+      [("dwindle", "Spirale"), ("master", "Une principale + une pile")], groupe="hypr"),
     R("FENETRES_ASSOMBRIR", "Fenêtres", "Assombrir les fenêtres inactives", "ouinon", "oui", "La fenêtre active ressort.", groupe="hypr"),
     R("FENETRES_OPACITE_INACTIVE", "Fenêtres", "Opacité des fenêtres inactives", "entier", "100", mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
     # Fonds d'écran
@@ -227,6 +245,11 @@ REGLAGES = [
     R("ECO_BRIGHTNESS_MAX", "Énergie", "Luminosité maximale en Économie", "entier", "40", mini=0, maxi=100, pas=5, unite="%", zero="Sans limite", groupe="energie"),
     R("HALO_BATTERIE", "Énergie", "Halo musical sur batterie", "ouinon", "non",
       "Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus)."),
+    # Son et luminosité
+    R("VOLUME_PAS", "Son et luminosité", "Pas du volume", "entier", "5", "Touches de volume (et F2, F3).", mini=1, maxi=20, unite="%", groupe="hypr"),
+    R("VOLUME_MAX", "Son et luminosité", "Volume maximal", "choix", "100", "150 % : pour des haut-parleurs faibles (le son peut saturer).",
+      [("100", "100 %"), ("150", "150 %")], groupe="hypr"),
+    R("LUMINOSITE_PAS", "Son et luminosité", "Pas de la luminosité", "entier", "5", "Touches de luminosité (et F5, F6).", mini=1, maxi=25, unite="%"),
     # Clavier et souris
     R("CLAVIER_DISPOSITION", "Clavier et souris", "Disposition du clavier", "texte", "systeme",
       "Codes XKB : us, fr, us,fr… Avec plusieurs, Super + Espace passe de l'une à l'autre.", groupe="hypr"),
@@ -240,19 +263,37 @@ REGLAGES = [
     R("DEFILEMENT_NATUREL", "Clavier et souris", "Défilement naturel (pavé tactile)", "ouinon", "oui", "Le contenu suit les doigts, comme sur un téléphone.", groupe="hypr"),
     R("TAPOTER_CLIC", "Clavier et souris", "Toucher le pavé pour cliquer", "ouinon", "oui", groupe="hypr"),
     R("FOCUS_SOURIS", "Clavier et souris", "La fenêtre sous le pointeur devient active", "ouinon", "oui", "Non : il faut cliquer dans une fenêtre pour l'activer.", groupe="hypr"),
+    R("GESTES", "Clavier et souris", "Gestes du pavé tactile", "ouinon", "oui",
+      "3 doigts de côté : changer de bureau. 4 doigts : déplacer une fenêtre (Alt : la redimensionner), pincer : la détacher.", groupe="hypr"),
+    R("CURSEUR_TAILLE", "Clavier et souris", "Taille du pointeur", "choix", "24", "Certaines applis ne le prennent qu'à leur prochaine ouverture.",
+      [("24", "Normale (24)"), ("32", "Grande (32)"), ("40", "Très grande (40)"), ("48", "Énorme (48)")], groupe="curseur"),
     # Veille
     R("VEILLE_VERROU", "Veille", "Verrouillage automatique après", "entier", "5",
       "L'écran s'assombrit un peu avant et s'éteint 30 s après.", mini=0, maxi=120, unite="min", zero="Jamais", groupe="veille"),
     R("VEILLE_SUSPENSION", "Veille", "Mise en veille sur batterie après", "entier", "15",
-      "Sur secteur, le PC ne se met jamais en veille tout seul.", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
+      "", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
+    R("VEILLE_SECTEUR", "Veille", "Mise en veille sur secteur après", "entier", "0",
+      "PC branché (ou PC de bureau).", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
+    R("COUVERCLE", "Veille", "Couvercle fermé", "choix", "veille",
+      "Écran éteint : le PC continue de tourner (téléchargements, musique…), sans veille tant que le couvercle est fermé. "
+      "Attention à la chaleur dans un sac.",
+      [("veille", "Mise en veille"), ("ecran", "Écran éteint, le PC continue")], groupe="couvercle"),
+    R("COUVERCLE_VERROU", "Veille", "Verrouiller en fermant le couvercle", "ouinon", "oui", "Quand le PC continue de tourner, couvercle fermé."),
     # Terminal
     R("TERMINAL_OPACITE", "Terminal", "Opacité du fond", "entier", "88", mini=50, maxi=100, pas=2, unite="%", groupe="terminal"),
     R("TERMINAL_TAILLE", "Terminal", "Taille du texte", "entier", "11", mini=8, maxi=24, unite="pt", groupe="terminal"),
     R("TERMINAL_POLICE", "Terminal", "Police", "choix", "CaskaydiaCove Nerd Font Mono", "Polices « Nerd Font Mono » installées.",
       lambda: polices(r"Nerd Font Mono$", ["CaskaydiaCove Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "FiraCode Nerd Font Mono"]),
       groupe="terminal"),
+    R("TERMINAL_CURSEUR", "Terminal", "Forme du curseur", "choix", "beam", "",
+      [("beam", "Barre fine"), ("block", "Bloc"), ("underline", "Souligné")], groupe="terminal"),
+    R("TERMINAL_TRAINEE", "Terminal", "Traînée du curseur", "ouinon", "oui", "Le curseur laisse une courte traînée quand il saute.", groupe="terminal"),
+    R("TERMINAL_MARGE", "Terminal", "Marge autour du texte", "entier", "10", mini=0, maxi=40, unite="px", groupe="terminal"),
+    R("TERMINAL_ACCUEIL", "Terminal", "Accueil à l'ouverture", "ouinon", "oui", "Logo et infos du PC à chaque nouveau terminal."),
     # Captures
     R("CAPTURES_DOSSIER", "Captures", "Dossier des captures d'écran", "dossier", "auto", "Automatique : Captures, dans ton dossier Images."),
+    R("CAPTURES_COPIER", "Captures", "Copier aussi la capture", "ouinon", "oui", "Ctrl + V la colle directement."),
+    R("CAPTURES_NOTIF", "Captures", "Notification après une capture", "ouinon", "oui", "Avec les boutons Annoter, Supprimer et Ouvrir le dossier."),
 ]
 PAR_CLE = {r.cle: r for r in REGLAGES}
 SECTIONS = []
@@ -314,8 +355,8 @@ def regler(vals, cle, v):
 
 # ── Application ─────────────────────────────────────────────────────────────────────────────────────────────────
 def appliquer_veille(vals):
-    verrou, susp = vals.get("VEILLE_VERROU"), vals.get("VEILLE_SUSPENSION")
-    if verrou is None and susp is None:
+    verrou, susp, secteur = vals.get("VEILLE_VERROU"), vals.get("VEILLE_SUSPENSION"), vals.get("VEILLE_SECTEUR")
+    if verrou is None and susp is None and secteur is None:
         if os.path.exists(VEILLE_UNITE):
             for f in (VEILLE_UNITE, VEILLE_OUT):
                 try:
@@ -331,6 +372,7 @@ def appliquer_veille(vals):
         return
     verrou = int(verrou or PAR_CLE["VEILLE_VERROU"].defaut)
     susp = int(susp or PAR_CLE["VEILLE_SUSPENSION"].defaut)
+    secteur = int(secteur or 0)
 
     def bloc(m):
         b = m.group(0)
@@ -347,10 +389,16 @@ def appliquer_veille(vals):
         return re.sub(r"timeout\s*=\s*\d+", f"timeout = {t}", b) if t > 0 else ""
 
     texte = re.sub(r"(?ms)^listener\s*\{.*?^\}\n?", bloc, src)
+    if secteur:
+        # PC branché, ou sans batterie (PC de bureau) : veille après ce délai
+        texte += ("\n# nc-reglages : veille sur secteur\nlistener {\n    timeout = %d\n    on-timeout = sh -c 'ls -d "
+                  "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; for s in /sys/class/power_supply/*; "
+                  "do [ \"$(cat $s/type)\" = Mains ] && [ \"$(cat $s/online)\" = 1 ] && exec systemctl suspend; done; exit 0'\n}\n"
+                  % (secteur * 60))
     os.makedirs(os.path.dirname(VEILLE_OUT), exist_ok=True)
     with open(VEILLE_OUT, "w", encoding="utf-8") as f:
         f.write(f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
-                f"veille : {susp} min). Ne pas éditer.\n" + texte)
+                f"veille : {susp} min, sur secteur : {secteur or 'jamais'}). Ne pas éditer.\n" + texte)
     hi = sortie(["sh", "-c", "command -v hypridle"]).strip() or "/usr/bin/hypridle"
     os.makedirs(os.path.dirname(VEILLE_UNITE), exist_ok=True)
     with open(VEILLE_UNITE, "w", encoding="utf-8") as f:
@@ -367,6 +415,12 @@ def appliquer_terminal(vals):
         c.append(f"font_size {vals['TERMINAL_TAILLE']}")
     if "TERMINAL_POLICE" in vals:
         c.append(f"font_family {vals['TERMINAL_POLICE']}")
+    if "TERMINAL_CURSEUR" in vals:
+        c.append(f"cursor_shape {vals['TERMINAL_CURSEUR']}")
+    if vals.get("TERMINAL_TRAINEE") == "non":
+        c.append("cursor_trail 0")
+    if "TERMINAL_MARGE" in vals:
+        c.append(f"window_padding_width {vals['TERMINAL_MARGE']}")
     texte = "# Écrit par nc-reglages. Ne pas éditer.\n" + "\n".join(c) + "\n" if c else ""
     ancien = open(KITTY_OUT, encoding="utf-8").read() if os.path.exists(KITTY_OUT) else ""
     if texte == ancien:
@@ -406,6 +460,17 @@ def appliquer_noctalia(vals):
         mettre("shell.screen_corners", "enabled", oui("COINS_ECRAN"))
     if "VERROU_FLOU" in vals:
         mettre("lockscreen", "blur_intensity", int(vals["VERROU_FLOU"]) / 100)
+    if "DOCK_POSITION" in vals:
+        mettre("dock", "position", vals["DOCK_POSITION"])
+    if any(k in vals for k in ("NUIT", "NUIT_TEMPERATURE", "NUIT_DEBUT", "NUIT_FIN")):
+        nuit = valeur(vals, "NUIT")
+        mettre("nightlight", "enabled", nuit != "non")
+        mettre("nightlight", "force", nuit == "toujours")
+        mettre("nightlight", "temperature_night", int(valeur(vals, "NUIT_TEMPERATURE")))
+        if nuit == "soir":
+            mettre("location", "custom_schedule", True)
+            mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
+            mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", int(vals["BARRE_OPACITE"]) / 100)
     if "BARRE_SYSTEME" in vals and tomllib:
@@ -447,6 +512,14 @@ def appliquer_noctalia(vals):
     subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
 
 
+def appliquer_curseur(vals):
+    taille = valeur(vals, "CURSEUR_TAILLE")
+    theme = os.environ.get("XCURSOR_THEME") or sortie(["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"]).strip().strip("'") or "Adwaita"
+    subprocess.run(["hyprctl", "setcursor", theme, taille], capture_output=True)
+    subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "cursor-size", taille], capture_output=True)
+    subprocess.run(["hyprctl", "reload"], capture_output=True)      # variables XCURSOR_SIZE des applis lancées ensuite
+
+
 def appliquer(groupes, vals=None):
     vals = lire() if vals is None else vals
     for g in groupes:
@@ -460,6 +533,11 @@ def appliquer(groupes, vals=None):
             appliquer_terminal(vals)
         elif g == "noctalia":
             appliquer_noctalia(vals)
+        elif g == "couvercle":
+            subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
+            subprocess.run(["systemctl", "--user", "restart", "nc-couvercle.service"], capture_output=True)
+        elif g == "curseur":
+            appliquer_curseur(vals)
         # île, captures, halo : relu tout seul
 
 
@@ -686,8 +764,13 @@ class Ecran:
         e.addstr(0, max(32, w - len(chemin) - 2), chemin, curses.A_DIM)
         # Sections
         lg = 22
+        # Liste des sections : défile si la fenêtre est trop basse pour toutes les montrer
+        place = h - 6
+        debut = 0 if len(SECTIONS) <= place else min(max(0, self.sec - place + 2), len(SECTIONS) - place)
         for i, s in enumerate(SECTIONS):
-            y = 2 + i
+            y = 2 + i - debut
+            if y < 2:
+                continue
             if y >= h - 4:
                 break
             n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in REGLAGES if r.section == s and r.cle in self.vals)
@@ -1174,7 +1257,7 @@ def cli(a):
         appliquer([g for g in groupes if g], vals)
         print("Valeur de la config remise.")
     elif a[0] in ("appliquer", "apply"):
-        appliquer(["veille", "terminal", "noctalia"], vals)
+        appliquer(["veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
     elif a[0] in ("-h", "--help", "aide", "help"):
         print(__doc__.strip())
     else:

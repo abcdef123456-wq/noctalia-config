@@ -215,3 +215,8 @@ hl.on("window.open", function(w)
     hl.dispatch(hl.dsp.window.resize({ x = l, y = h, window = w }))
     hl.dispatch(hl.dsp.window.move({ x = math.floor(mx + v[1] * lw + 0.5), y = math.floor(my + v[2] * lh + 0.5), window = w }))
 end)
+
+-- Couvercle du portable : en mode « l'écran s'éteint, le PC continue » (nc-reglages, COUVERCLE=ecran), nc-couvercle
+-- éteint l'écran et verrouille en fermant, rallume en ouvrant (sinon il ne fait rien : le système met en veille)
+pcall(hl.bind, "switch:on:Lid Switch",  hl.dsp.exec_cmd("~/.local/bin/nc-couvercle ferme"), { locked = true })
+pcall(hl.bind, "switch:off:Lid Switch", hl.dsp.exec_cmd("~/.local/bin/nc-couvercle ouvre"), { locked = true })

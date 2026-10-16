@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nc-brightness : luminosité de l'écran interne (détecte le bon rétroéclairage, sans nom écrit en dur).
-#   nc-brightness up|down   +/- 5 %
+#   nc-brightness up|down   +/- 5 % (pas réglable : nc-reglages, LUMINOSITE_PAS)
 #   nc-brightness dim       assombrit à 20 % (seulement si plus lumineux), niveau précédent mémorisé
 #   nc-brightness restore   remet le niveau mémorisé
 #   nc-brightness get       niveau actuel (0 à 100, même échelle que up/down)
@@ -19,9 +19,11 @@ for type in firmware platform raw; do
   done
 done
 [ -n "$dev" ] || exit 0
+pas="$(sed -n 's/^LUMINOSITE_PAS=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -dc 0-9)"
+[ -n "$pas" ] && [ "$pas" -ge 1 ] && [ "$pas" -le 25 ] || pas=5
 case "${1:-}" in
-  up)      exec brightnessctl -d "$dev" -e2 -n2 set 5%+ ;;
-  down)    exec brightnessctl -d "$dev" -e2 -n2 set 5%- ;;
+  up)      exec brightnessctl -d "$dev" -e2 -n2 set "$pas%+" ;;
+  down)    exec brightnessctl -d "$dev" -e2 -n2 set "$pas%-" ;;
   dim)     brightnessctl -s -q -d "$dev"
            b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
            [ "$b" -gt 20 ] && brightnessctl -q -d "$dev" set 20% ; exit 0 ;;

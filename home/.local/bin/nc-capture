@@ -14,7 +14,8 @@ images="$(xdg-user-dir PICTURES 2>/dev/null)"
 [ -n "$images" ] && [ "$images" != "$HOME" ] && [ "$images" != "$HOME/" ] || images="$HOME/Pictures"
 dossier="$images/Captures"
 # Dossier choisi avec nc-reglages (CAPTURES_DOSSIER)
-perso="$(sed -n 's/^CAPTURES_DOSSIER=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"')"
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+perso="$(reglage CAPTURES_DOSSIER)"
 [ -n "$perso" ] && dossier="${perso/#\~/$HOME}"
 mkdir -p "$dossier"
 fichier="$dossier/Capture du $(date '+%Y-%m-%d à %H.%M.%S').png"
@@ -31,7 +32,9 @@ case "$mode" in
   *) echo "Usage : nc-capture ecran | zone | retouche" >&2; exit 2 ;;
 esac
 
-wl-copy --type image/png < "$fichier" 2>/dev/null
+# Copiée aussi, sauf si coupé dans nc-reglages (CAPTURES_COPIER)
+copiee=1
+if [ "$(reglage CAPTURES_COPIER)" = non ]; then copiee=0; else wl-copy --type image/png < "$fichier" 2>/dev/null; fi
 
 # Swappy : enregistre la version annotée dans le même dossier
 mkdir -p "$HOME/.config/swappy"
@@ -45,10 +48,13 @@ if [ "$mode" = retouche ]; then
   exec swappy -f "$fichier"
 fi
 
-# Notification avec la capture ; clic : l'annoter dans Swappy (attente en arrière-plan, le raccourci rend la main)
+# Notification avec la capture (sauf si coupée : CAPTURES_NOTIF) ; clic : l'annoter dans Swappy (attente en arrière-plan,
+# le raccourci rend la main)
+[ "$(reglage CAPTURES_NOTIF)" = non ] && exit 0
+if [ "$copiee" = 1 ]; then texte="Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter."; else texte="Clic pour l'annoter."; fi
 (
   action="$(timeout 600 notify-send -a "Capture d'écran" -i "$fichier" -A "default=Annoter" -A "supprimer=Supprimer" \
-    -A "dossier=Ouvrir le dossier" "Capture enregistrée" "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." 2>/dev/null)"
+    -A "dossier=Ouvrir le dossier" "Capture enregistrée" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)

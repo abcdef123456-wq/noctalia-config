@@ -239,8 +239,13 @@ local media = "Système|Son, luminosité, musique"
 local function ile(evenement)
     return "; { qs -c nc-ile ipc call ile " .. evenement .. " || noctalia msg plugin nc/ile:pilule all " .. evenement .. "; } >/dev/null 2>&1"
 end
-touche("XF86AudioRaiseVolume",  cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+" .. ile("volume")), media, { locked = true, repeating = true })
-touche("XF86AudioLowerVolume",  cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" .. ile("volume")),      media, { locked = true, repeating = true })
+-- Pas du volume et volume maximal (100 %, ou 150 % pour des haut-parleurs faibles) : nc-reglages
+local vol_pas = math.max(1, math.min(20, math.floor(nc.reglage("VOLUME_PAS", 5))))
+local vol_max = nc.reglage("VOLUME_MAX", "100") == "150" and "1.5" or "1"
+local monter = "wpctl set-volume -l " .. vol_max .. " @DEFAULT_AUDIO_SINK@ " .. vol_pas .. "%+"
+local baisser = "wpctl set-volume @DEFAULT_AUDIO_SINK@ " .. vol_pas .. "%-"
+touche("XF86AudioRaiseVolume",  cmd(monter .. ile("volume")),  media, { locked = true, repeating = true })
+touche("XF86AudioLowerVolume",  cmd(baisser .. ile("volume")), media, { locked = true, repeating = true })
 touche("XF86AudioMute",         cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" .. ile("volume")),     media, { locked = true })
 touche("XF86AudioMicMute",      cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),   media, { locked = true })
 touche("XF86MonBrightnessUp",   cmd("~/.local/bin/nc-brightness up" .. ile("luminosite")),                  media, { locked = true, repeating = true })
@@ -264,8 +269,8 @@ do
         local rangee = "Système|F1 à F12 : son, micro, luminosité, musique, clavier, pavé, calculatrice"
         local nm = "~/.local/bin/nc-media "
         touche("F1",  cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" .. ile("volume")), rangee, { locked = true })
-        touche("F2",  cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" .. ile("volume")), rangee, { locked = true, repeating = true })
-        touche("F3",  cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+" .. ile("volume")), rangee, { locked = true, repeating = true })
+        touche("F2",  cmd(baisser .. ile("volume")), rangee, { locked = true, repeating = true })
+        touche("F3",  cmd(monter .. ile("volume")), rangee, { locked = true, repeating = true })
         touche("F4",  cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"), rangee, { locked = true })
         touche("F5",  cmd("~/.local/bin/nc-brightness down" .. ile("luminosite")), rangee, { locked = true, repeating = true })
         touche("F6",  cmd("~/.local/bin/nc-brightness up" .. ile("luminosite")), rangee, { locked = true, repeating = true })
