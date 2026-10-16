@@ -9,9 +9,10 @@ nc = {}
 
 -- Tes réglages (commande nc-reglages) : ~/.config/nc/reglages.conf, lignes CLE=valeur, jamais remplacé par les
 -- mises à jour. nc.reglage(CLE, défaut) : la valeur choisie, du type du défaut (nombre, oui/non, texte), sinon le défaut.
+-- Le style du bureau (style Apple…) donne ses propres valeurs dans ~/.config/nc/style.conf ; tes réglages passent devant.
 nc.reglages = {}
-do
-    local f = io.open((os.getenv("HOME") or "") .. "/.config/nc/reglages.conf", "r")
+for _, nom in ipairs({ "style.conf", "reglages.conf" }) do
+    local f = io.open((os.getenv("HOME") or "") .. "/.config/nc/" .. nom, "r")
     if f then
         for ligne in f:lines() do
             local k, v = ligne:match("^%s*([%u%d_]+)%s*=%s*(.-)%s*$")

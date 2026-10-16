@@ -26,6 +26,15 @@ HYPR_OUT = Path.home() / ".config/hypr/nc/couleurs.lua"
 ILE_OUT = Path.home() / ".config/nc/palette-ile.json"
 KCS = Path.home() / ".local/share/color-schemes/noctalia.colors"
 KDEGLOBALS = Path.home() / ".config/kdeglobals"
+STYLE = Path.home() / ".config/nc/style.conf"                 # style du bureau choisi dans nc-reglages
+PALETTE_APPLE = Path.home() / ".config/noctalia/palettes/Apple.json"
+
+
+def style_apple():
+    try:
+        return "STYLE=apple" in STYLE.read_text().split()
+    except OSError:
+        return False
 
 
 # --- Conversions sRGB <-> OKLab/OKLCH ---------------------------------------------------------
@@ -163,6 +172,17 @@ def main():
     normal["white"] = oklch_to_rgb(fL - (0.10 if dark else -0.10), fC, fH)
     bright["white"] = fg
 
+    # Style Apple : les couleurs exactes du Terminal de macOS (palette Apple de Noctalia), sans recalcul
+    apple = style_apple()
+    if apple:
+        try:
+            t = json.loads(PALETTE_APPLE.read_text())["dark" if dark else "light"]["terminal"]
+            for n in t["normal"]:
+                normal[n], bright[n] = hex_to_rgb(t["normal"][n]), hex_to_rgb(t["bright"][n])
+            sel_bg = hex_to_rgb(t["selectionBg"])
+        except (OSError, KeyError, ValueError):
+            pass
+
     order = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]
     accent = tone(*rgb_to_oklch(hex_to_rgb(primary)), bg, 4.5, dark)
     lines = [
@@ -207,17 +227,25 @@ def main():
     p, s2, t3 = hx("mPrimary", "8fb3ff"), hx("mSecondary", "b9abff"), hx("mTertiary", "7fdbca")
     sv, osv = hx("mSurfaceVariant", "161a23"), hx("mOnSurfaceVariant", "a3a9b8")
     err, onp = hx("mError", "ffb4ab"), hx("mOnPrimary", "0b0d12")
+    # Style Apple : filet gris discret autour des fenêtres et ombre noire douce (pas de couleurs)
+    if apple:
+        fil = "ffffff" if dark else "000000"
+        bord_actif, bord_inactif = f'"rgba({fil}38)"', f'"rgba({fil}1a)"'
+        ombre = "rgba(00000099)" if dark else "rgba(00000055)"
+    else:
+        bord_actif = f'{{ colors = {{ "rgba({p}ff)", "rgba({s2}ff)", "rgba({t3}ff)" }}, angle = 45 }}'
+        bord_inactif, ombre = f'"rgba({sv}aa)"', f"rgba({p}55)"
     hypr = f"""-- Généré par nc-theme-sync depuis les couleurs Noctalia. Ne pas éditer.
 hl.config({{
     general = {{
         col = {{
-            active_border   = {{ colors = {{ "rgba({p}ff)", "rgba({s2}ff)", "rgba({t3}ff)" }}, angle = 45 }},
-            inactive_border = "rgba({sv}aa)",
+            active_border   = {bord_actif},
+            inactive_border = {bord_inactif},
         }},
     }},
     decoration = {{
         shadow = {{
-            color          = "rgba({p}55)",
+            color          = "{ombre}",
             color_inactive = "rgba(00000050)",
         }},
     }},

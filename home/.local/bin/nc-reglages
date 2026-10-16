@@ -36,6 +36,8 @@ except ImportError:          # Python < 3.11
 HOME = os.path.expanduser("~")
 BIN = os.path.join(HOME, ".local/bin")
 FICHIER = os.path.join(HOME, ".config/nc/reglages.conf")
+STYLE_FICHIER = os.path.join(HOME, ".config/nc/style.conf")       # valeurs du style du bureau (écrit ici)
+STYLE_AVANT = os.path.join(HOME, ".config/nc/style-avant")         # palette Noctalia d'avant le style Apple
 VEILLE_SRC = os.path.join(HOME, ".config/hypr/hypridle.conf")
 VEILLE_OUT = os.path.join(HOME, ".config/nc/hypridle.conf")
 VEILLE_UNITE = os.path.join(HOME, ".config/systemd/user/hypridle.service.d/nc-reglages.conf")
@@ -201,6 +203,10 @@ REGLAGES = [
     R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
       mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
     # Apparence
+    R("STYLE", "Apparence", "Style du bureau", "choix", "noctalia",
+      "Apple : couleurs de macOS, île noire, barre de menus, fenêtres, dock et animations façon Mac. Tes autres "
+      "réglages passent toujours devant ceux du style.",
+      [("noctalia", "noctalia-config (couleurs du fond d'écran)"), ("apple", "Apple (façon macOS et iPhone)")], groupe="style"),
     R("THEME_MODE", "Apparence", "Thème", "choix", "dark", "Les couleurs suivent toujours le fond d'écran.",
       [("dark", "Sombre"), ("light", "Clair")], groupe="noctalia"),
     R("POLICE", "Apparence", "Police de l'interface", "choix", "Adwaita Sans", "Barre, panneaux et menus de Noctalia.",
@@ -362,8 +368,58 @@ def ecrire(vals):
     os.replace(tmp, FICHIER)
 
 
+# Ce que change chaque style (en plus de sa palette, de la barre et du dock, voir appliquer_style et
+# appliquer_noctalia) ; tes propres réglages passent devant
+STYLES = {
+    "apple": {
+        "ILE_STYLE": "noir", "ILE_CONTOUR": "aucun",
+        "FENETRES_ARRONDI": "12", "FENETRES_BORDURE": "1", "FENETRES_ESPACE": "6", "FENETRES_MARGE": "12",
+        "FENETRES_ASSOMBRIR": "non", "FENETRES_OUVERTURE": "gnomed", "ANIM_BUREAUX": "slide",
+        "ANIM_VERROU": "fade", "ANIM_FOND": "fade", "DOCK_TAILLE": "52", "DOCK_LOUPE": "oui", "BARRE_SYSTEME": "non",
+        "VERROU_FLOU": "35",
+    },
+}
+
+
+def police_apple():
+    """SF Pro si elle est installée, sinon Inter (très proche), sinon rien."""
+    familles = set(sortie(["fc-list", ":", "family"]).replace(",", "\n").splitlines())
+    for p in ("SF Pro Display", "SF Pro Text", "SF Pro", "Inter", "Inter Variable"):
+        if p in familles:
+            return p
+    return ""
+
+
+_style_cache = [None, {}]
+
+
+def style_vals():
+    """Valeurs données par le style du bureau (~/.config/nc/style.conf)."""
+    try:
+        t = os.path.getmtime(STYLE_FICHIER)
+    except OSError:
+        return {}
+    if _style_cache[0] != t:
+        v = {}
+        with open(STYLE_FICHIER, encoding="utf-8") as f:
+            for l in f:
+                m = re.match(r"\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$", l)
+                if m:
+                    v[m[1]] = m[2]
+        _style_cache[:] = [t, v]
+    return _style_cache[1]
+
+
+def effectifs(vals):
+    """Valeurs en vigueur : celles du style, puis les tiennes."""
+    return {**{k: v for k, v in style_vals().items() if k != "STYLE"}, **vals}
+
+
 def valeur(vals, cle):
-    return vals.get(cle, PAR_CLE[cle].defaut)
+    if cle in vals:
+        return vals[cle]
+    st = style_vals()
+    return st[cle] if cle in st and cle != "STYLE" else PAR_CLE[cle].defaut
 
 
 def regler(vals, cle, v):
@@ -375,7 +431,8 @@ def regler(vals, cle, v):
     frais = lire()
     vals.clear()
     vals.update(frais)
-    if v == r.defaut:
+    base = style_vals().get(cle, r.defaut) if cle != "STYLE" else r.defaut
+    if v == base:
         vals.pop(cle, None)
     else:
         vals[cle] = v
@@ -501,6 +558,14 @@ def appliquer_noctalia(vals):
             mettre("location", "custom_schedule", True)
             mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
             mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
+    if style_vals().get("STYLE") == "apple":
+        # Barre de menus façon Mac : une bande translucide sur toute la largeur (l'île y fait l'encoche), sans
+        # pastilles ; dock en verre dépoli, loupe plus marquée
+        mettre("bar.default", "capsule", False)
+        mettre("bar.default", "background_opacity", 0.55)
+        mettre("dock", "background_opacity", 0.55)
+        mettre("dock", "radius", 20)
+        mettre("dock", "magnification_scale", 1.6)
     TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
     for cle, table in (("ANIM_VERROU", "lockscreen"), ("ANIM_FOND", "wallpaper")):
         if cle in vals:
@@ -557,8 +622,51 @@ def appliquer_curseur(vals):
     subprocess.run(["hyprctl", "reload"], capture_output=True)      # variables XCURSOR_SIZE des applis lancées ensuite
 
 
+def appliquer_style(vals):
+    """Écrit les valeurs du style choisi dans style.conf (lues par Hyprland, l'île et nc-reglages) et change la palette
+    de Noctalia (Apple), en gardant celle d'avant pour la remettre."""
+    style = vals.get("STYLE", "noctalia")
+    texte = "# Écrit par nc-reglages : valeurs du style du bureau. Ne pas éditer (nc-reglages → Apparence).\n"
+    texte += f"STYLE={style}\n"
+    prereglage = dict(STYLES.get(style, {}))
+    if style == "apple":
+        p = police_apple()
+        if p:
+            prereglage["POLICE"] = p
+    texte += "".join(f"{k}={v}\n" for k, v in prereglage.items())
+    ancien = open(STYLE_FICHIER, encoding="utf-8").read() if os.path.exists(STYLE_FICHIER) else ""
+    if texte != ancien:
+        os.makedirs(os.path.dirname(STYLE_FICHIER), exist_ok=True)
+        with open(STYLE_FICHIER, "w", encoding="utf-8") as f:
+            f.write(texte)
+    # Palette de Noctalia (couleurs de tout le bureau : barre, applis GTK et Qt, terminal…)
+    actuelle = sortie(["noctalia", "msg", "color-scheme-get"]).strip()
+    if style == "apple":
+        if actuelle and actuelle != "custom Apple":
+            with open(STYLE_AVANT, "w", encoding="utf-8") as f:
+                f.write(actuelle + "\n")
+        if actuelle != "custom Apple":
+            subprocess.run(["noctalia", "msg", "color-scheme-set", "custom", "Apple"], capture_output=True)
+    elif actuelle == "custom Apple":
+        try:
+            avant = open(STYLE_AVANT, encoding="utf-8").read().split()
+        except OSError:
+            avant = []
+        if len(avant) < 2 or avant == ["custom", "Apple"]:
+            avant = ["wallpaper", "vibrant"]
+        subprocess.run(["noctalia", "msg", "color-scheme-set"] + avant, capture_output=True)
+    # Bordures, ombres et terminal (nc-theme-sync lit style.conf), puis tout ce que le style touche
+    subprocess.run([os.path.join(HOME, ".local/bin/nc-theme-sync")], capture_output=True)
+    return ["hypr", "noctalia", "terminal"]
+
+
 def appliquer(groupes, vals=None):
     vals = lire() if vals is None else vals
+    groupes = list(groupes)
+    if "style" in groupes:
+        groupes.remove("style")
+        groupes += [g for g in appliquer_style(vals) if g not in groupes]
+    vals = effectifs(vals)
     for g in groupes:
         if g == "hypr":
             subprocess.run(["hyprctl", "reload"], capture_output=True)
@@ -857,8 +965,14 @@ class Ecran:
         if self.focus == "items" and cur is not None:
             if isinstance(cur, R):
                 aide = cur.aide
+                st = style_vals()
+                du_style = cur.cle in st and cur.cle != "STYLE"
                 if cur.cle in self.vals:
-                    aide = (aide + "  " if aide else "") + f"Valeur de la config : {cur.montrer(cur.defaut)} (r pour la remettre)."
+                    base = st[cur.cle] if du_style else cur.defaut
+                    origine = "du style Apple" if du_style else "de la config"
+                    aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
+                elif du_style:
+                    aide = (aide + "  " if aide else "") + "Valeur donnée par le style Apple."
             elif cur["genre"] == "ajouter":
                 aide = "Une appli (va à sa fenêtre si elle est ouverte, sinon la lance), un bureau, une page de l'île ou une commande."
             elif cur["genre"] == "raccourci":
@@ -1257,8 +1371,9 @@ class Ecran:
                 elif c in ("\n", "\r", " ", curses.KEY_ENTER):
                     self.entree(cur)
                 elif c in ("r", "R") and cur.cle in self.vals:
-                    self.poser(cur, cur.defaut)
-                    self.statut(f"{cur.nom} : valeur de la config")
+                    st = style_vals()
+                    self.poser(cur, st[cur.cle] if cur.cle in st and cur.cle != "STYLE" else cur.defaut)
+                    self.statut(f"{cur.nom} : valeur {'du style' if cur.cle in st else 'de la config'}")
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
             else:
@@ -1318,7 +1433,7 @@ def cli(a):
         appliquer([g for g in groupes if g], vals)
         print("Valeur de la config remise.")
     elif a[0] in ("appliquer", "apply"):
-        appliquer(["veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
+        appliquer(["style", "veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
     elif a[0] in ("-h", "--help", "aide", "help"):
         print(__doc__.strip())
     else:
