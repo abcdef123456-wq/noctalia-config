@@ -1080,6 +1080,8 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   # est refait d'après la nouvelle version de la config
   "$HOME/.local/bin/nc-reglages" appliquer >/dev/null 2>&1 || true
   "$HOME/.local/bin/nc-verrou-place" >/dev/null 2>&1 || true     # écran de verrouillage centré sur l'écran réel
+  # Portails choisis pour Hyprland (~/.config/xdg-desktop-portal) : pris en compte tout de suite
+  systemctl --user try-restart xdg-desktop-portal.service >/dev/null 2>&1 || true
   # Claude Code dans l'île (comme l'appli coucou) : ses étapes, sa fin, ses demandes ; hooks dans ~/.claude/settings.json
   if [ "$ILE" = quickshell ] && { have claude || [ -d "$HOME/.claude" ]; } &&
      ! grep -q "nc-claude hook" "$HOME/.claude/settings.json" 2>/dev/null &&

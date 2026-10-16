@@ -202,6 +202,34 @@ def verifier(b):
             b.avert("aucun rétroéclairage : les touches de luminosité ne feront rien",
                     "écran externe seul, ou pilote graphique pas encore chargé")
 
+    # ── Partage d'écran et applis Electron (Discord, VS Code…) : portails ──
+    b.titre("Partage d'écran (Discord, navigateur…)")
+    actif, _ = sortie(["systemctl", "--user", "is-active", "xdg-desktop-portal-hyprland"])
+    if actif.strip() == "active":
+        b.ok("portail de Hyprland actif (capture de l'écran)")
+    else:
+        b.faux("portail de Hyprland arrêté : le partage d'écran sera noir",
+               "installe xdg-desktop-portal-hyprland (nc-maj), puis déconnecte-toi et reconnecte-toi")
+    conf = os.path.join(HOME, ".config/xdg-desktop-portal/hyprland-portals.conf")
+    autres = [n for n, f in (("GNOME", "gnome-portals.conf"), ("KDE", "kde-portals.conf"))
+              if os.path.exists("/usr/share/xdg-desktop-portal/" + f)]
+    if os.path.exists(conf) and "ScreenCast=hyprland" in open(conf, encoding="utf-8").read():
+        b.ok("portails choisis pour Hyprland" + (f" (celui de {', '.join(autres)} écarté)" if autres else ""))
+    elif autres:
+        b.faux(f"le portail de {', '.join(autres)} peut être pris : applis Electron lentes à démarrer, partage d'écran noir",
+               "nc-maj (installe ~/.config/xdg-desktop-portal/hyprland-portals.conf), puis déconnecte-toi")
+    else:
+        b.avert("portails non choisis explicitement", "nc-maj")
+    if not a("hyprland-share-picker"):
+        b.avert("hyprland-share-picker absent : pas de choix de l'écran ou de la fenêtre à partager",
+                "il vient avec xdg-desktop-portal-hyprland (ou hyprland-qtutils selon la distribution)")
+    attente, _ = sortie(["sh", "-c", "s=$(date +%s%N); busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop "
+                        "org.freedesktop.portal.Settings ReadOne ss org.freedesktop.appearance color-scheme >/dev/null 2>&1; "
+                        "echo $(( ($(date +%s%N) - s) / 1000000 ))"], 30)
+    if attente.strip().isdigit() and int(attente) > 2000:
+        b.faux(f"le portail répond en {int(attente) / 1000:.0f} s : les applis Electron (Discord…) démarrent lentement",
+               "nc-maj, puis déconnecte-toi et reconnecte-toi")
+
     # ── Outils ──
     b.titre("Outils utilisés par la config")
     outils = {
