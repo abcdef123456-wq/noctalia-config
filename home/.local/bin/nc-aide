@@ -34,6 +34,7 @@ A_TAPER = [
 ]
 RACCOURCIS = [
     ("nc-capture", "nc-capture zone", "Captures d'écran (Impr. écran, Super + P…), enregistrées et copiées."),
+    ("nc-video", "nc-video", "Vidéo de l'écran (Super + Maj + R) : zone ou écran entier ; même raccourci pour arrêter."),
     ("nc-brightness", "nc-brightness set 50", "Luminosité de l'écran (touches de luminosité, F5 / F6)."),
     ("nc-media", "nc-media play-pause", "Touches de musique : visent le lecteur qu'on entend."),
     ("nc-touches", "nc-touches pave bascule", "Touches spéciales des portables : clavier lumineux, pavé tactile, calculatrice."),

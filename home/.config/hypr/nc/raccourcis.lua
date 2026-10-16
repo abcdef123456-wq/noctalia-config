@@ -86,6 +86,8 @@ touche(SUPER .. " + code:60", cmd("noctalia msg panel-toggle launcher /emo"),  "
 touche("Print",                 cmd("~/.local/bin/nc-capture ecran"),    "Applis et barre|Capture de l'écran")
 touche("SHIFT + Print",         cmd("~/.local/bin/nc-capture zone"))     -- comme Super + P (pas répété dans la fiche)
 touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), "Applis et barre|Capture d'une zone à annoter")
+-- Vidéo de l'écran (nc-video) : zone ou écran entier ; le même raccourci (ou un clic sur l'île) arrête
+touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), "Applis et barre|Enregistrer l'écran en vidéo (démarrer / arrêter)")
 
 -- ── Fenêtres ─────────────────────────────────────────────────────────────────
 -- Fermer : si c'était la seule fenêtre de son programme (Discord & co), le programme est arrêté 5 s plus tard

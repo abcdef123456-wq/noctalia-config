@@ -200,7 +200,8 @@ PanelWindow {
             anchors.fill: parent
             enabled: !fen.ouverte && !fen.banniere && !fen.demandeClaude
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause() : Etat.basculer(fen.modelData.name, false)
+            onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
+                            : (Etat.enregistre ? Etat.arreterVideo() : Etat.basculer(fen.modelData.name, false))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 

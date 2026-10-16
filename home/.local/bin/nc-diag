@@ -208,7 +208,7 @@ def verifier(b):
         "kitty": "terminal", "jq": "scripts", "brightnessctl": "luminosité", "playerctl": "musique",
         "wpctl": "volume", "grim": "captures", "slurp": "captures de zone", "wl-copy": "presse-papiers",
         "notify-send": "notifications", "cava": "halo musical", "qalc": "calculs du Spotlight",
-        "swappy": "annoter les captures", "fastfetch": "accueil du terminal", "magick": "fonds d'écran",
+        "swappy": "annoter les captures", "wf-recorder": "vidéos de l'écran", "fastfetch": "accueil du terminal", "magick": "fonds d'écran",
     }
     manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c)]
     if manquants:
