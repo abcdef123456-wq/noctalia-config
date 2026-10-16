@@ -5,21 +5,23 @@
 -- La fréquence de l'écran interne est réglée dans nc/ecrans.lua.
 
 local eco = nc.profil.profil == "power-saver"
-nc.flou_actif = not eco
+-- « Aucun effet » (nc-reglages → Animations → Effets visuels) : comme l'Économie, dans tous les profils
+local coupe = eco or nc.reglage("EFFETS", "tous") == "aucun"
+nc.flou_actif = not coupe
 
 -- Tes choix (nc-reglages) s'ajoutent : un effet coupé par toi le reste dans tous les profils
 nc.flou_actif = nc.flou_actif and nc.reglage("FENETRES_HALO", true)
 hl.config({
-    animations = { enabled = not eco and nc.reglage("FENETRES_ANIMATIONS", true) },
+    animations = { enabled = not coupe and nc.reglage("FENETRES_ANIMATIONS", true) },
     decoration = {
-        dim_inactive = not eco and nc.reglage("FENETRES_ASSOMBRIR", true),
-        blur   = { enabled = not eco and nc.reglage("FENETRES_FLOU", true) },
-        shadow = { enabled = not eco and nc.reglage("FENETRES_HALO", true) },
+        dim_inactive = not coupe and nc.reglage("FENETRES_ASSOMBRIR", true),
+        blur   = { enabled = not coupe and nc.reglage("FENETRES_FLOU", true) },
+        shadow = { enabled = not coupe and nc.reglage("FENETRES_HALO", true) },
     },
 })
 
 -- Bordure en rotation continue : seulement en Performance sur secteur (elle force un rendu permanent de l'écran)
-if nc.profil.profil == "performance" and not nc.profil.batterie then
+if nc.profil.profil == "performance" and not nc.profil.batterie and not coupe then
     hl.animation({ leaf = "borderangle", enabled = true, speed = 100, bezier = "linear", style = "loop" })
 else
     hl.animation({ leaf = "borderangle", enabled = true, speed = 8, bezier = "standard" })
