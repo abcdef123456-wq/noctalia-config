@@ -237,6 +237,53 @@ def verifier(b):
         b.ok(f"{k} raccourci(s) personnalisé(s)")
 
 
+def details():
+    """En plus dans « nc-diag rapport » : ce qui aide à comprendre un souci à distance. Rien de personnel (ni mot de
+    passe, ni nom de réseau, ni fichier)."""
+    l = ["", "Détails (pour aider)"]
+
+    def lire(f):
+        try:
+            return open(f, encoding="utf-8", errors="ignore").read().strip()
+        except OSError:
+            return ""
+    dmi = "/sys/class/dmi/id/"
+    l.append("  PC : " + " ".join(x for x in (lire(dmi + "sys_vendor"), lire(dmi + "product_version"), lire(dmi + "product_name")) if x))
+    gpu, _ = sortie(["sh", "-c", "lspci 2>/dev/null | grep -iE 'vga|3d|display' | sed 's/^[^ ]* //'"])
+    for g in gpu.splitlines():
+        l.append("  carte graphique : " + g)
+    try:
+        for m in json.loads(sortie(["hyprctl", "monitors", "all", "-j"])[0] or "[]"):
+            l.append(f"  écran {m['name']} : {m['width']}x{m['height']} à {round(m.get('refreshRate', 0))} Hz, échelle {m.get('scale')}"
+                     + (" (éteint)" if m.get("disabled") else ""))
+    except ValueError:
+        pass
+    leds = [x for x in os.listdir("/sys/class/leds") if "kbd" in x] if os.path.isdir("/sys/class/leds") else []
+    l.append("  éclairage du clavier : " + (", ".join(leds) if leds else "aucun réglable par Linux"))
+    noms = re.findall(r'N: Name="([^"]+)"', lire("/proc/bus/input/devices"))
+    pointeurs = [n for n in noms if re.search(r"mouse|souris|touchpad|trackpad|pointer", n, re.I)]
+    l.append("  souris / pavé : " + (", ".join(dict.fromkeys(pointeurs)) or "rien de reconnu"))
+    wifi, _ = sortie(["nmcli", "-t", "-f", "TYPE,STATE", "device"])
+    etats = [x.split(":", 1)[1] for x in wifi.splitlines() if x.startswith("wifi:")]
+    l.append("  Wi-Fi : " + (", ".join(etats) if etats else "pas de carte Wi-Fi vue par NetworkManager"))
+    conf = os.path.join(HOME, ".config/nc/reglages.conf")
+    changes = [x.strip() for x in lire(conf).splitlines() if "=" in x and not x.startswith("#") and not x.startswith("METEO_VILLE")]
+    if changes:
+        l.append("  réglages changés : " + ", ".join(changes))
+    if a("nc-claude"):
+        ias, _ = sortie([os.path.join(BIN, "nc-claude"), "diag"], 10)
+        branches = [x.strip()[2:] for x in ias.splitlines() if x.strip().startswith(("✓", "✗")) and "île" not in x]
+        if branches:
+            l.append("  IA : " + " ; ".join(branches))
+    # Dernières erreurs : île, barre, Hyprland
+    err, _ = sortie(["sh", "-c", "qs -c nc-ile log 2>/dev/null | grep -E 'ERROR|qml:.*(Error|error)' | tail -4"])
+    err2, _ = sortie(["journalctl", "--user", "-u", "noctalia.service", "-p", "err", "-n", "4", "--no-pager", "-o", "cat"])
+    for t, quoi in ((err, "île"), (err2 if "No entries" not in err2 else "", "barre")):
+        for x in t.splitlines()[-4:]:
+            l.append(f"  erreur ({quoi}) : " + re.sub(r"\x1b\[[0-9;]*m", "", x)[:200])
+    return "\n".join(l)
+
+
 def main():
     rapport = len(sys.argv) > 1 and sys.argv[1] in ("rapport", "--rapport", "report")
     court = len(sys.argv) > 1 and sys.argv[1] == "court"
@@ -260,10 +307,13 @@ def main():
     else:
         fin = "Tout est en ordre"
     texte = "Bilan de noctalia-config (nc-diag)" + texte + f"\n\n{fin}."
+    if rapport:
+        texte += "\n" + details()
     print(texte)
     if rapport:
         if a("wl-copy"):
-            subprocess.run(["wl-copy"], input=texte, text=True)
+            # wl-copy reste en fond pour garder le texte : sans ses sorties, sinon « nc-diag rapport | … » ne finit jamais
+            subprocess.run(["wl-copy"], input=texte, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("\n(Copié : colle-le dans ton message.)")
     elif b.ko or b.attention:
         print("Pour demander de l'aide : nc-diag rapport (le bilan est copié, prêt à envoyer).")
