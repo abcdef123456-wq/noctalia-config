@@ -230,6 +230,10 @@ REGLAGES = [
     R("CLAVIER_REPETITION", "Clavier et souris", "Vitesse de répétition des touches", "entier", "35", mini=10, maxi=80, unite="/s", groupe="hypr"),
     R("CLAVIER_DELAI", "Clavier et souris", "Délai avant répétition", "entier", "300", mini=150, maxi=1000, pas=25, unite="ms", groupe="hypr"),
     R("SOURIS_VITESSE", "Clavier et souris", "Vitesse du pointeur", "entier", "0", "De -10 (lent) à 10 (rapide).", mini=-10, maxi=10, groupe="hypr"),
+    R("TOUCHES_F", "Clavier et souris", "Touches F1 à F12", "choix", "media",
+      "Son (F1-F3), micro (F4), luminosité (F5-F6), musique (F7-F9), clavier (F10), pavé (F11), calculatrice (F12). "
+      "En mode jeu, elles redeviennent classiques.",
+      [("media", "Son, luminosité, musique…"), ("fonctions", "F1…F12 classiques (F5 actualise…)")], groupe="hypr"),
     R("DEFILEMENT_NATUREL", "Clavier et souris", "Défilement naturel (pavé tactile)", "ouinon", "oui", "Le contenu suit les doigts, comme sur un téléphone.", groupe="hypr"),
     R("TAPOTER_CLIC", "Clavier et souris", "Toucher le pavé pour cliquer", "ouinon", "oui", groupe="hypr"),
     R("FOCUS_SOURIS", "Clavier et souris", "La fenêtre sous le pointeur devient active", "ouinon", "oui", "Non : il faut cliquer dans une fenêtre pour l'activer.", groupe="hypr"),

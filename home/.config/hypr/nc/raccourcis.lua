@@ -253,6 +253,31 @@ touche("XF86AudioPrev",         cmd("~/.local/bin/nc-media previous" .. ile("med
 touche("XF86AudioStop",         cmd("~/.local/bin/nc-media stop" .. ile("media")),         media, { locked = true })
 touche("XF86AudioForward",      cmd("~/.local/bin/nc-media avance"),                       media, { locked = true, repeating = true })
 touche("XF86AudioRewind",       cmd("~/.local/bin/nc-media recule"),                       media, { locked = true, repeating = true })
+-- Rangée F1…F12 en touches de son, luminosité et musique, comme les icônes d'un clavier de portable : tout le monde
+-- les a, même sur un clavier de bureau. F1…F12 classiques (F5 actualiser, F11 plein écran…) : nc-reglages,
+-- « Touches F1 à F12 » ; en mode jeu, elles redeviennent classiques d'elles-mêmes.
+do
+    local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu", "r")
+    local en_jeu = f ~= nil
+    if f then f:close() end
+    if nc.reglage("TOUCHES_F", "media") == "media" and not en_jeu then
+        local rangee = "Système|F1 à F12 : son, micro, luminosité, musique, clavier, pavé, calculatrice"
+        local nm = "~/.local/bin/nc-media "
+        touche("F1",  cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" .. ile("volume")), rangee, { locked = true })
+        touche("F2",  cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-" .. ile("volume")), rangee, { locked = true, repeating = true })
+        touche("F3",  cmd("wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+" .. ile("volume")), rangee, { locked = true, repeating = true })
+        touche("F4",  cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"), rangee, { locked = true })
+        touche("F5",  cmd("~/.local/bin/nc-brightness down" .. ile("luminosite")), rangee, { locked = true, repeating = true })
+        touche("F6",  cmd("~/.local/bin/nc-brightness up" .. ile("luminosite")), rangee, { locked = true, repeating = true })
+        touche("F7",  cmd(nm .. "previous" .. ile("media")), rangee, { locked = true })
+        touche("F8",  cmd(nm .. "play-pause" .. ile("media")), rangee, { locked = true })
+        touche("F9",  cmd(nm .. "next" .. ile("media")), rangee, { locked = true })
+        touche("F10", cmd("~/.local/bin/nc-touches clavier bascule"), rangee, { locked = true })
+        touche("F11", cmd("~/.local/bin/nc-touches pave bascule"), rangee, { locked = true })
+        touche("F12", cmd("~/.local/bin/nc-touches calculatrice"), rangee)
+    end
+end
+
 -- Autres touches spéciales des portables (selon le modèle, avec Fn) : rétroéclairage du clavier, pavé tactile,
 -- calculatrice, recherche, fichiers, navigateur, courrier, veille, verrouillage, réglages ; touche Copilot des
 -- PC récents (Super + Maj + F23) : la recherche. Une touche absente du clavier ne gêne pas.

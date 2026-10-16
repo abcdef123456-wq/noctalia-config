@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # nc-sysinfo : lignes courtes, en français, pour l'accueil du terminal (nc-greeting).
-#   nc-sysinfo gpu     cartes graphiques ; la carte dédiée indique si elle est en veille
-#   nc-sysinfo power   batterie, secteur, profil énergétique
-#   nc-sysinfo uptime  durée depuis l'allumage
+#   nc-sysinfo modele   marque et modèle du PC (portable) ou de la carte mère (PC monté), rien s'ils sont inconnus
+#   nc-sysinfo gpu      cartes graphiques ; la carte dédiée indique si elle est en veille
+#   nc-sysinfo ecrans   écrans branchés : définition et fréquence (interne d'abord)
+#   nc-sysinfo disques  disques physiques : SSD NVMe, SSD, disque dur, et leur taille
+#   nc-sysinfo power    batterie (et sa santé), secteur, profil énergétique ; profil seul sur un PC fixe
+#   nc-sysinfo uptime   durée depuis l'allumage
+# Une ligne vide est masquée par fastfetch : chaque PC n'affiche que ses propres composants.
 # Ne lit que des fichiers de /sys mis en cache par le noyau : n'allume jamais une carte graphique en veille
 # (contrairement à lspci ou au module GPU de fastfetch).
 set -uo pipefail
@@ -25,7 +29,55 @@ gpu_name() { # $1 = dossier PCI
   echo "${name:-carte $ven:$dev}"
 }
 
+# Taille lisible en français (Go, To ; puissances de 10, comme sur l'étiquette du disque)
+taille() { awk -v b="$1" 'BEGIN { if (b >= 1e12) printf "%.1f To", b / 1e12; else printf "%.0f Go", b / 1e9 }' | sed 's/\.0 To/ To/; s/\./,/'; }
+
+# Nom de marque lisible
+marque() {
+  case "${1,,}" in
+    lenovo*) echo Lenovo ;; asustek*|asus*) echo ASUS ;; acer*) echo Acer ;; hp|hewlett*) echo HP ;; dell*) echo Dell ;;
+    micro-star*|msi*) echo MSI ;; gigabyte*) echo Gigabyte ;; samsung*) echo Samsung ;; huawei*) echo Huawei ;;
+    framework*) echo Framework ;; apple*) echo Apple ;; razer*) echo Razer ;; tuxedo*) echo TUXEDO ;;
+    *) echo "$1" ;;
+  esac
+}
+inconnu() { [[ -z "$1" || "${1,,}" =~ (to be filled|system product|default string|not applicable|^none$|^o\.e\.m|type1|system version|^x\.x) ]]; }
+
 case "${1:-}" in
+  modele)
+    dmi=/sys/class/dmi/id
+    v=$(cat $dmi/sys_vendor 2>/dev/null); n=$(cat $dmi/product_name 2>/dev/null); ver=$(cat $dmi/product_version 2>/dev/null)
+    # Lenovo range le nom commercial dans product_version (« Legion Pro 5 16ADR10 »), product_name n'est qu'un code
+    if [ "${v,,}" = lenovo ] && ! inconnu "$ver"; then n=$ver; fi
+    if inconnu "$n"; then
+      # PC monté : la carte mère
+      v=$(cat $dmi/board_vendor 2>/dev/null); n=$(cat $dmi/board_name 2>/dev/null)
+      inconnu "$n" && exit 0
+    fi
+    v=$(marque "$v")
+    case "$n" in "$v"*) echo "$n" ;; *) echo "${v:+$v }$n" ;; esac
+    ;;
+  ecrans)
+    command -v hyprctl >/dev/null || exit 0
+    hyprctl monitors -j 2>/dev/null | jq -r '
+      sort_by(.name | test("^eDP") | not) | map(
+        "\(.width) × \(.height) · \(.refreshRate | round) Hz"
+        + (if (.physicalWidth // 0) > 0 then
+             " · \(((.physicalWidth * .physicalWidth + .physicalHeight * .physicalHeight) | sqrt / 25.4 + 0.5) | floor)\""
+           else "" end)
+      ) | join("  ·  ")' 2>/dev/null
+    ;;
+  disques)
+    out=()
+    while read -r nom octets rota tran; do
+      case "$nom" in zram*|loop*|sr*|fd*) continue ;; esac
+      [ "$octets" -gt 0 ] 2>/dev/null || continue
+      if [ "$tran" = nvme ]; then t="SSD NVMe"; elif [ "$rota" = 0 ]; then t="SSD"; else t="disque dur"; fi
+      [ "$tran" = usb ] && t="$t USB"
+      out+=("$t $(taille "$octets")")
+    done < <(lsblk -dbno NAME,SIZE,ROTA,TRAN 2>/dev/null)
+    [ ${#out[@]} -gt 0 ] && (IFS='|'; echo "${out[*]}") | sed 's/|/ · /g'
+    ;;
   gpu)
     out=()
     for d in /sys/bus/pci/devices/*; do
@@ -47,7 +99,16 @@ case "${1:-}" in
     if [ -z "$pct" ] || [ "$pct" = 0 ]; then
       for b in /sys/class/power_supply/BAT*; do [ -r "$b/capacity" ] && { pct=$(<"$b/capacity"); break; }; done
     fi
-    [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && parts+=("$pct %")
+    if [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1; then
+      # Santé : capacité actuelle / capacité d'origine
+      sante=""
+      for b in /sys/class/power_supply/BAT*; do
+        pl=$(cat "$b/energy_full" 2>/dev/null || cat "$b/charge_full" 2>/dev/null)
+        or=$(cat "$b/energy_full_design" 2>/dev/null || cat "$b/charge_full_design" 2>/dev/null)
+        [ -n "$pl" ] && [ "${or:-0}" -gt 0 ] && sante=$(( (pl * 100 + or / 2) / or )) && break
+      done
+      [ -n "$sante" ] && [ "$sante" -le 100 ] && parts+=("$pct % (santé $sante %)") || parts+=("$pct %")
+    fi
     ac=""
     for a in /sys/class/power_supply/*; do
       [ "$(cat "$a/type" 2>/dev/null)" = Mains ] && ac=$(cat "$a/online" 2>/dev/null) && break

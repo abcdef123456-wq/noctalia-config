@@ -87,6 +87,8 @@ def collect():
         keys = v["keys"]
         if set(keys) >= {"←", "→", "↑", "↓"}:
             key = "flèches"
+        elif len(keys) >= 3 and all(re.fullmatch(r"F\d+", x) for x in keys):
+            key = f"{keys[0]}…{keys[-1]}"
         elif len(keys) >= 3 and all(x.isdigit() for x in keys):
             key = f"{keys[0]}…{keys[-1]}"
         else:
