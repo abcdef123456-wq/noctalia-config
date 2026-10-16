@@ -174,13 +174,16 @@ REGLAGES = [
     # Île
     R("ILE_STYLE", "Île", "Couleurs", "choix", "terminal", "Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
       [("terminal", "Couleurs du terminal"), ("noir", "Noire, façon iPhone")]),
-    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "Une seule teinte, celle de l'accent, adoucie : sobre même sur un fond d'écran très coloré.",
+    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "La teinte de l'accent, adoucie et légèrement nuancée : sobre même sur un fond d'écran très coloré.",
       [("degrade", "Accent en dégradé"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
     R("ILE_HEURE", "Île", "Format de l'heure", "choix", "24", "", [("24", "24 h  (14:05)"), ("12", "12 h  (2:05 PM)")]),
     R("ILE_DATE", "Île", "Date à côté de l'heure", "ouinon", "oui"),
     R("ILE_BANNIERES", "Île", "Notifications en bannière", "ouinon", "oui",
       "Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours."),
     R("ILE_BANNIERE_DUREE", "Île", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
+    R("SPOTLIGHT_ENTREE", "Île", "Entrée sur une appli déjà ouverte", "choix", "nouvelle",
+      "Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.",
+      [("nouvelle", "Ouvre une nouvelle fenêtre"), ("aller", "Va sur la fenêtre ouverte")]),
     R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
       mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
     # Apparence

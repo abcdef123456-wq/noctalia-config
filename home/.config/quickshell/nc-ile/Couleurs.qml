@@ -3,7 +3,7 @@ pragma Singleton
 // nc-theme-sync les tire du fond d'écran (comme le thème de kitty) dans ~/.config/nc/palette-ile.json, relu dès
 // qu'il change : fond et textes du terminal, gris en paliers au-dessus du fond, accent du terminal (curseur,
 // onglet actif) et couleurs ANSI pour les états (vert : recharge, orange : minuteur, rouge : alerte…), contour
-// d'une seule teinte (l'accent, adouci). Sur une couleur vive, icônes et textes prennent la couleur du fond (comme l'onglet actif).
+// dans la teinte de l'accent (adoucie, nuancée d'un bord à l'autre). Sur une couleur vive, icônes et textes prennent la couleur du fond (comme l'onglet actif).
 // Réglages (nc-reglages, ~/.config/nc/reglages.conf) :
 //   ILE_STYLE=terminal (par défaut) | noir (île noire d'iPhone, couleurs d'Apple)
 //   ILE_CONTOUR=degrade (par défaut, l'accent fondu au milieu) | discret (filet de l'accent) | aucun
