@@ -198,8 +198,9 @@ def socket_kitty(pid):
 
 def reperer_terminal(s):
     """Fenêtre, shell et « peut-on lui écrire depuis l'île » d'une session (une fois pour toutes)."""
-    if not s.get("terminal") or not s.get("shell"):
+    if not s.get("terminal") or not s.get("shell") or "classe" not in s:
         s["terminal"], s["shell"] = terminal_et_shell()
+        s["classe"] = next((w.get("class", "") for w in fenetres() if w.get("pid") == s["terminal"]), "")
     s["ecrire"] = bool(s.get("shell") and socket_kitty(s.get("terminal")))
 
 
@@ -367,15 +368,24 @@ def hook():
             s["message"] = court(ev.get("last_assistant_message"), 160)
 
 
-# ── Antigravity : ses sessions dans l'île, à côté de celles de Claude ───────────────────────────────────────────────
-# Ses hooks (https://antigravity.google/docs/hooks) ne donnent ni le nom de l'événement (passé en argument), ni de
-# demande d'autorisation : l'île montre ce qu'il fait et quand il a fini. Seulement des événements qui ne décident de
-# rien (PostToolUse plutôt que PreToolUse : un PreToolUse qui échoue bloquerait l'outil).
-AGY_HOOKS = os.path.join(HOME, ".gemini/config/hooks.json")
-AGY_GROUPE = "nc-ile"
-AGY_EVENEMENTS = ("PreInvocation", "PostToolUse", "Stop")     # les 5 événements du CLI 1.1 : pas de SessionStart
-AGY_JOURNAL = os.path.join(RUN, "agy.log")
-AGY_MODIFS = ("write_to_file", "replace_file_content", "multi_replace_file_content")
+# ── Les autres IA (Antigravity, opencode…) : même suivi, quelle que soit l'IA ────────────────────────────────────────
+# Chaque IA appelle « nc-claude <ia> ÉVÉNEMENT » à sa façon (hooks, plugin) ; suivre() met sa session à jour comme
+# celles de Claude, avec agent: "<ia>" pour son logo et sa couleur dans l'île. Leurs demandes d'autorisation restent
+# dans leur terminal (l'île montre « t'attend » quand l'IA le signale).
+JOURNAL = os.path.join(RUN, "agents.log")
+NOMS = {"claude": "Claude", "antigravity": "Antigravity"}
+CMD = ("bash", "run_command", "run_shell_command", "shell", "exec_command", "local_shell", "terminal", "run_terminal_cmd")
+MODIF = ("edit", "multiedit", "replace", "replace_file_content", "multi_replace_file_content", "apply_patch", "patch",
+         "str_replace", "str_replace_editor", "edit_file", "search_replace")
+ECRIT = ("write", "write_file", "write_to_file", "create_file")
+LIT = ("read", "read_file", "read_many_files", "view", "view_file", "view_file_outline", "view_code_item", "cat")
+GREP = ("grep", "grep_search", "search_file_content", "rg", "codebase_search")
+TROUVE = ("glob", "find_by_name", "find", "file_search")
+LISTE = ("list", "ls", "list_dir", "list_directory")
+PAGE = ("webfetch", "web_fetch", "read_url_content", "fetch")
+WEB = ("websearch", "web_search", "google_web_search", "search_web")
+AGENT = ("task", "agent", "invoke_subagent", "subagent")
+TODO = ("todowrite", "todo_write", "write_todos", "update_plan", "todoread")
 
 
 def arg(e, *cles):
@@ -387,47 +397,61 @@ def arg(e, *cles):
     return ""
 
 
-def etape_agy(outil, e):
-    """(icône, texte) pour un outil d'Antigravity."""
-    f = nom_fichier(arg(e, "TargetFile", "AbsolutePath", "FilePath", "File", "Path"))
-    if outil == "run_command":
-        cmd = re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", str(arg(e, "CommandLine", "Command")))
-        return "terminal", "Lance : " + court(cmd, 60)
-    if outil in ("replace_file_content", "multi_replace_file_content"):
-        return "edit", "Modifie " + f
-    if outil == "write_to_file":
+def etape_generique(outil, e):
+    """(icône, texte) pour un outil de n'importe quelle IA (noms de Claude, Antigravity, opencode, Codex, Gemini…)."""
+    o = str(outil or "").lower()
+    f = nom_fichier(arg(e, "file_path", "filePath", "TargetFile", "AbsolutePath", "absolute_path", "path", "file"))
+    if o in CMD:
+        c = arg(e, "command", "CommandLine", "cmd")
+        c = " ".join(map(str, c)) if isinstance(c, list) else str(c)
+        c = re.sub(r"^(bash|sh|zsh) -l?c ", "", c)
+        return "terminal", "Lance : " + court(re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", c), 60)
+    if o in MODIF:
+        return "edit", "Modifie " + f if f != "un fichier" else "Modifie des fichiers"
+    if o in ECRIT:
         return "edit_document", "Écrit " + f
-    if outil.startswith("view_"):
+    if o in LIT:
         return "description", "Lit " + f
-    if outil == "grep_search":
-        return "search", "Cherche « " + court(arg(e, "Query", "Pattern"), 30) + " »"
-    if outil in ("find_by_name", "codebase_search"):
+    if o in GREP:
+        return "search", "Cherche « " + court(arg(e, "pattern", "query", "Query", "Pattern"), 30) + " »"
+    if o in TROUVE:
         return "search", "Cherche des fichiers"
-    if outil == "list_dir":
-        return "folder_open", "Parcourt " + nom_fichier(arg(e, "DirectoryPath", "Path"))
-    if outil == "search_web":
-        return "travel_explore", "Cherche sur le web : " + court(arg(e, "query", "Query"), 40)
-    if outil == "read_url_content":
+    if o in LISTE:
+        return "folder_open", "Parcourt " + nom_fichier(arg(e, "DirectoryPath", "dir_path", "path"))
+    if o in PAGE:
         return "public", "Lit une page web"
-    if outil.startswith("browser_"):
+    if o in WEB:
+        return "travel_explore", "Cherche sur le web : " + court(arg(e, "query", "Query"), 40)
+    if o in AGENT:
+        return "smart_toy", "Lance un agent" + (" : " + court(arg(e, "description"), 40) if arg(e, "description") else "")
+    if o in TODO:
+        return "checklist", "Met à jour sa liste"
+    if o.startswith("browser_"):
         return "public", "Utilise le navigateur"
-    if outil == "invoke_subagent":
-        return "smart_toy", "Lance un agent"
-    return "build", court(outil.replace("_", " "), 40)
+    if o.startswith("mcp__") or "__" in o:
+        return "extension", "Utilise " + o.split("__")[1 if o.startswith("mcp__") else 0].replace("_", " ")
+    return "build", court(str(outil).replace("_", " "), 40)
 
 
-def diff_agy(e):
-    """(+ajouts, −retraits) d'une modification d'Antigravity (contenu remplacé ou écrit, où qu'il soit dans les args)."""
+def diff_generique(e):
+    """(+ajouts, −retraits) d'une modification, où que soit le texte dans les arguments (ou un patch unifié)."""
     t = {"plus": 0, "moins": 0}
 
     def visite(x):
         if isinstance(x, dict):
             for k, v in x.items():
                 if isinstance(v, str):
-                    if k.lower() in ("replacementcontent", "codecontent", "content"):
+                    k = k.lower()
+                    if k in ("new_string", "newstring", "replacementcontent", "codecontent", "content", "new_str"):
                         t["plus"] += lignes(v)
-                    elif k.lower() == "targetcontent":
+                    elif k in ("old_string", "oldstring", "targetcontent", "old_str"):
                         t["moins"] += lignes(v)
+                    elif k in ("patch", "input", "patchtext") and ("\n+" in v or "\n-" in v):
+                        for l in v.splitlines():
+                            if l.startswith("+") and not l.startswith("+++"):
+                                t["plus"] += 1
+                            elif l.startswith("-") and not l.startswith("---"):
+                                t["moins"] += 1
                 else:
                     visite(v)
         elif isinstance(x, list):
@@ -437,63 +461,94 @@ def diff_agy(e):
     return t["plus"], t["moins"]
 
 
-def hook_agy(nom):
-    print("{}")                                        # ne décide de rien
-    sys.stdout.flush()
+def journal(agent, nom, detail=""):
+    """Les 60 derniers événements reçus des IA (pour nc-claude diag)."""
+    os.makedirs(RUN, mode=0o700, exist_ok=True)
     try:
-        ev = json.load(sys.stdin)
-    except ValueError:
-        ev = None
-    journal(nom, ev)
-    if reglage("ANTIGRAVITY_ILE", "oui") == "non" or nom not in AGY_EVENEMENTS or not isinstance(ev, dict):
-        return
-    sid = "agy-" + str(ev.get("conversationId") or "?")
-    ws = str((ev.get("workspacePaths") or [""])[0] or "")
-    if ws.startswith("file://"):
-        ws = urllib.parse.unquote(ws[7:])
+        with open(JOURNAL, encoding="utf-8") as f:
+            l = f.read().splitlines()[-59:]
+    except OSError:
+        l = []
+    l.append(f"{time.strftime('%H:%M:%S')} {agent} {nom} {detail}".strip())
+    with open(JOURNAL, "w", encoding="utf-8") as f:
+        f.write("\n".join(l) + "\n")
+
+
+def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message=""):
+    """Met à jour la session d'une IA. quoi : debut (nouvelle demande), etape (un outil), attente (t'attend dans son
+    terminal), fini (a fini sa réponse), fin (session fermée)."""
+    sid = f"{agent}-{sid or '?'}"
+    cwd = str(cwd or "")
+    if cwd.startswith("file://"):
+        cwd = urllib.parse.unquote(cwd[7:])
     with Etat() as d:
+        if quoi == "fin":
+            d["sessions"].pop(sid, None)
+            return
         s = d["sessions"].setdefault(sid, {"id": sid, "etat": "pret", "etapes": [], "ajouts": 0, "retraits": 0,
                                            "debut": time.time()})
-        s["agent"] = "antigravity"
-        if ws:
-            s["cwd"] = ws.replace(HOME, "~")
-        s["projet"] = os.path.basename(ws.rstrip("/")) or s.get("projet") or "Antigravity"
+        s["agent"] = agent
+        if cwd:
+            s["cwd"] = cwd.replace(HOME, "~")
+        s["projet"] = os.path.basename(cwd.rstrip("/")) or s.get("projet") or NOMS.get(agent, agent)
         s["maj"] = time.time()
         reperer_terminal(s)
-        if nom == "PreInvocation":
-            if s.get("etat") != "travail":             # nouvelle demande : on repart de zéro
-                s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
-                ajouter_etape(s, "neurology", "Réfléchit…")
-        elif nom == "PostToolUse":
-            tc = ev.get("toolCall") or {}
-            if not tc.get("name"):
-                return
+        if quoi == "debut" or (quoi == "etape" and s.get("etat") in ("pret", "fini", "attente")):
+            s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
+            ajouter_etape(s, "neurology", "Réfléchit…")
+        if quoi == "etape" and outil:
             s["etat"] = "travail"
-            ajouter_etape(s, *etape_agy(tc["name"], tc.get("args")))
-            if tc["name"] in AGY_MODIFS and not ev.get("error"):
-                a, r = diff_agy(tc.get("args"))
+            ajouter_etape(s, *etape_generique(outil, args))
+            if not erreur and str(outil).lower() in MODIF + ECRIT:
+                a, r = diff_generique(args)
                 if a or r:
                     s["ajouts"] = s.get("ajouts", 0) + a
                     s["retraits"] = s.get("retraits", 0) + r
                     s["etapes"][-1]["diff"] = f"+{a} −{r}"
-        elif nom == "Stop" and ev.get("fullyIdle", True) and s.get("etat") == "travail":
+        elif quoi == "attente":
+            s["etat"] = "terminal"
+        elif quoi == "fini" and s.get("etat") in ("travail", "terminal"):
             s["etat"] = "fini"
             s["fin"] = time.time()
+            if message:
+                s["message"] = court(message, 160)
 
 
-def journal(nom, ev):
-    """Les 40 derniers événements reçus d'Antigravity (pour nc-claude diag)."""
-    os.makedirs(RUN, mode=0o700, exist_ok=True)
+def lire_entree():
     try:
-        with open(AGY_JOURNAL, encoding="utf-8") as f:
-            l = f.read().splitlines()[-39:]
-    except OSError:
-        l = []
-    outil = ((ev or {}).get("toolCall") or {}).get("name", "") if isinstance(ev, dict) else ""
-    cid = str((ev or {}).get("conversationId", ""))[:8] if isinstance(ev, dict) else "JSON illisible"
-    l.append(f"{time.strftime('%H:%M:%S')} {nom} {outil} {cid}".strip())
-    with open(AGY_JOURNAL, "w", encoding="utf-8") as f:
-        f.write("\n".join(l) + "\n")
+        ev = json.load(sys.stdin)
+        return ev if isinstance(ev, dict) else {}
+    except ValueError:
+        return {}
+
+
+# ── Antigravity (Google : appli, éditeur, agy) ─────────────────────────────────────────────────────────────────────
+# Ses hooks (https://antigravity.google/docs/hooks) ne donnent ni le nom de l'événement (passé en argument), ni de
+# demande d'autorisation. Seulement des événements qui ne décident de rien (PostToolUse plutôt que PreToolUse : un
+# PreToolUse qui échoue bloquerait l'outil). Coupés par agy en mode sans autorisations (--dangerously-skip-permissions).
+AGY_HOOKS = os.path.join(HOME, ".gemini/config/hooks.json")
+AGY_GROUPE = "nc-ile"
+AGY_EVENEMENTS = ("PreInvocation", "PostToolUse", "Stop")     # les 5 événements du CLI 1.1 : pas de SessionStart
+
+
+def hook_agy(nom):
+    print("{}")                                        # ne décide de rien
+    sys.stdout.flush()
+    ev = lire_entree()
+    tc = ev.get("toolCall") or {}
+    journal("antigravity", nom, (tc.get("name") or "") + " " + str(ev.get("conversationId", ""))[:8])
+    if reglage("ANTIGRAVITY_ILE", "oui") == "non" or nom not in AGY_EVENEMENTS or not ev:
+        return
+    sid, ws = ev.get("conversationId"), (ev.get("workspacePaths") or [""])[0]
+    if nom == "PreInvocation":
+        with Etat() as d:
+            en_cours = d["sessions"].get(f"antigravity-{sid}", {}).get("etat") == "travail"
+        if not en_cours:
+            suivre("antigravity", sid, ws, "debut")
+    elif nom == "PostToolUse" and tc.get("name"):
+        suivre("antigravity", sid, ws, "etape", tc["name"], tc.get("args"), bool(ev.get("error")))
+    elif nom == "Stop" and ev.get("fullyIdle", True):
+        suivre("antigravity", sid, ws, "fini")
 
 
 def lire_json(chemin):
@@ -541,7 +596,7 @@ def retirer_agy():
         ecrire_json(AGY_HOOKS, cfg)
     print("Hooks de l'île retirés de " + AGY_HOOKS.replace(HOME, "~") + ".")
     with Etat() as d:
-        for sid in [x for x in d["sessions"] if x.startswith("agy-")]:
+        for sid in [x for x in d["sessions"] if x.startswith("antigravity-")]:
             del d["sessions"][sid]
 
 
@@ -685,7 +740,7 @@ def diag():
         ligne(False, AGY_HOOKS.replace(HOME, "~") + f" n'est pas un JSON valide ({e}) : Antigravity l'ignore")
     ligne(reglage("ANTIGRAVITY_ILE", "oui") != "non", "réglage ANTIGRAVITY_ILE = " + reglage("ANTIGRAVITY_ILE", "oui"))
     try:
-        l = open(AGY_JOURNAL, encoding="utf-8").read().splitlines()
+        l = open(JOURNAL, encoding="utf-8").read().splitlines()
         print(f"    derniers événements reçus ({len(l)}) :")
         for x in l[-8:]:
             print("      " + x)
