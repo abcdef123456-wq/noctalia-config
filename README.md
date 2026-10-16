@@ -209,6 +209,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 ## Mettre à jour ton bureau
 
 ```bash
+nc-aide       # à quoi sert chaque commande (nc-aide NOM : le détail)
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
 nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres,
               # fonds d'écran, énergie, son et luminosité, clavier et souris, veille et couvercle, terminal,

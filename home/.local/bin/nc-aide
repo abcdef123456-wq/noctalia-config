@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""nc-aide : à quoi sert chaque commande de noctalia-config.
+  nc-aide          toutes les commandes, rangées : celles à taper, celles des raccourcis, celles qui tournent seules
+  nc-aide NOM      le détail d'une commande (ce qu'elle fait, ses options)
+"""
+import os
+import re
+import shutil
+import sys
+
+BIN = os.path.expanduser("~/.local/bin")
+
+# (commande, exemple, explication) — rangées par usage
+A_TAPER = [
+    ("nc-reglages", "nc-reglages", "Tous les réglages, aux flèches : île, apparence, animations, énergie, clavier, veille, "
+                                   "terminal, raccourcis… Gardés à chaque mise à jour."),
+    ("nc-raccourci", "nc-raccourci", "Tes raccourcis clavier : changer les touches, en désactiver, en ajouter."),
+    ("nc-maj", "nc-maj", "Met la config à jour depuis GitHub (ne refait que ce qui a changé)."),
+    ("nc-aide", "nc-aide nc-anim", "Cette aide ; avec un nom, le détail d'une commande."),
+    ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
+                                 "nc-anim nouvelle NOM pour créer la tienne."),
+    ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
+    ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),
+    ("nc-sysinfo", "nc-sysinfo sante", "Infos du PC : modele, ecrans, disques, sante (usure de la batterie)…"),
+    ("nvidia-run", "nvidia-run steam", "Lance un programme sur la carte NVIDIA d'un PC hybride."),
+    ("cmatrix", "cmatrix", "Pluie façon Matrix dans le terminal, aux couleurs du thème."),
+]
+RACCOURCIS = [
+    ("nc-capture", "nc-capture zone", "Captures d'écran (Impr. écran, Super + P…), enregistrées et copiées."),
+    ("nc-brightness", "nc-brightness set 50", "Luminosité de l'écran (touches de luminosité, F5 / F6)."),
+    ("nc-media", "nc-media play-pause", "Touches de musique : visent le lecteur qu'on entend."),
+    ("nc-touches", "nc-touches pave bascule", "Touches spéciales des portables : clavier lumineux, pavé tactile, calculatrice."),
+    ("nc-keys", "nc-keys", "La fiche des raccourcis (Super + /), dans le terminal."),
+    ("nc-fermer", "", "Fermer un terminal où un programme tourne : question aux flèches (Super + Maj + Q)."),
+    ("nc-finger", "nc-finger", "Les doigts du bouton d'arrêt."),
+    ("nc-shell-msg", "", "Fait le lien entre les raccourcis et Noctalia ou l'île (menus, recherche, verrouillage)."),
+    ("nc-launch", "", "Lance une appli sur la bonne carte graphique selon le profil d'énergie."),
+    ("nc-apps", "", "La liste des applis et des fichiers pour la recherche (Super + R)."),
+]
+AUTOMATIQUES = [
+    ("nc-profile-sync", "Adapte tout au profil d'énergie et au secteur : fréquence de l'écran, effets, luminosité."),
+    ("nc-theme-sync", "Couleurs du terminal, des bordures et de l'île, tirées du fond d'écran."),
+    ("nc-wallpaper-colors", "Choisit la façon de tirer les couleurs du fond d'écran."),
+    ("nc-icones", "Dessine les icônes du terminal et des fichiers aux couleurs du thème."),
+    ("nc-couvercle", "Couvercle fermé : veille, ou écran éteint et PC qui continue (réglable)."),
+    ("nc-ecran-externe", "Prévient quand un écran est branché sur une prise inutilisable."),
+    ("nc-verrou-place", "Centre l'écran de verrouillage sur l'écran réel."),
+    ("nc-verrou-media", "La musique sur l'écran de verrouillage."),
+    ("nc-ile-etat", "Batterie, réseau, système… pour l'île dynamique."),
+    ("nc-greeting", "L'accueil du terminal (logo et infos du PC)."),
+    ("nc-term-logo", "Le logo de cet accueil, aux couleurs du thème."),
+    ("nc-carousel-thumbs", "Les miniatures du carrousel de fonds d'écran."),
+    ("nc-boot-wallpaper", "Le fond d'écran dès l'ouverture de session (pas d'écran noir)."),
+    ("nc-session-propre", "Arrête les barres d'une ancienne config au démarrage."),
+    ("nc-noctalia-avant", "Prépare Noctalia juste avant son démarrage."),
+    ("nc-shell", "État de la barre Noctalia."),
+]
+
+POURQUOI = ("Pourquoi autant de petites commandes ? Chacune fait une seule chose, et tout le monde peut l'appeler : "
+            "les raccourcis clavier, l'île, la barre, les services et toi dans le terminal. Elles marchent pareil sur "
+            "Arch, Debian et Fedora, se testent une par une, et les mises à jour les remplacent sans jamais toucher à "
+            "tes réglages (~/.config/nc).")
+
+
+def couleurs():
+    """Accent du thème (île) pour les titres, si le terminal sait afficher les couleurs."""
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        return "", "", "", ""
+    acc = "\033[1m"
+    try:
+        import json
+        with open(os.path.expanduser("~/.config/nc/palette-ile.json"), encoding="utf-8") as f:
+            h = json.load(f)["accent"].lstrip("#")
+        acc = "\033[1;38;2;%d;%d;%dm" % tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except (OSError, ValueError, KeyError):
+        pass
+    return acc, "\033[1m", "\033[2m", "\033[0m"
+
+
+def couper(texte, largeur, retrait):
+    import textwrap
+    return textwrap.fill(texte, max(30, largeur), initial_indent="", subsequent_indent=" " * retrait)
+
+
+def tout():
+    acc, gras, doux, fin = couleurs()
+    largeur = min(110, shutil.get_terminal_size((100, 30)).columns)
+    col = 16
+    print(f"\n{acc}Les commandes de noctalia-config{fin}   {doux}nc-aide NOM : le détail d'une commande{fin}\n")
+
+    def bloc(titre, sous_titre, lignes):
+        print(f"{acc}{titre}{fin}  {doux}{sous_titre}{fin}")
+        for nom, ex, txt in lignes:
+            if not os.path.exists(os.path.join(BIN, nom)) and nom not in ("nc-aide",):
+                continue
+            t = couper(txt, largeur - col - 4, col + 4)
+            print(f"  {gras}{nom:<{col}}{fin}  {t}")
+            if ex and ex != nom:
+                print(f"  {'':<{col}}  {doux}ex. : {ex}{fin}")
+        print()
+
+    bloc("À taper toi-même", "", A_TAPER)
+    bloc("Derrière les raccourcis", "(tu peux aussi les taper)", RACCOURCIS)
+    bloc("Automatiques", "(rien à faire : services et démarrage)", [(n, "", t) for n, t in AUTOMATIQUES])
+    print(f"{doux}{couper(POURQUOI, largeur - 2, 0)}{fin}\n")
+
+
+def detail(nom):
+    if not nom.startswith(("nc-", "nvidia-", "cmatrix")):
+        nom = "nc-" + nom
+    chemin = os.path.join(BIN, nom)
+    if not os.path.isfile(chemin):
+        sys.exit(f"nc-aide : pas de commande « {nom} » (nc-aide pour la liste)")
+    acc, gras, doux, fin = couleurs()
+    connu = {n: t for n, _, t in A_TAPER + RACCOURCIS} | dict(AUTOMATIQUES)
+    print(f"\n{acc}{nom}{fin}")
+    if nom in connu:
+        print(f"  {connu[nom]}\n")
+    # L'en-tête du script : commentaires (#) ou docstring Python, jusqu'au code
+    lignes = []
+    with open(chemin, encoding="utf-8", errors="replace") as f:
+        texte = f.read().splitlines()[1:]
+    if texte and texte[0].startswith('"""'):
+        for l in texte:
+            lignes.append(l.replace('"""', ""))
+            if l.rstrip().endswith('"""') and len(lignes) > 1 or l.strip() == '"""' and len(lignes) > 1:
+                break
+    else:
+        for l in texte:
+            if not l.startswith("#"):
+                break
+            lignes.append(re.sub(r"^# ?", "", l))
+    for l in lignes:
+        if l.strip():
+            print(f"  {doux if not l.startswith(' ') else ''}{l}{fin}")
+    print()
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        tout()
+    elif a[0] in ("-h", "--help"):
+        print(__doc__.strip())
+    else:
+        detail(a[0])
+
+
+if __name__ == "__main__":
+    main()
