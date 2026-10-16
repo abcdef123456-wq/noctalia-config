@@ -107,6 +107,16 @@ Item {
                             Texte { text: "−" + (carte.s.retraits || 0); color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold }
                             Texte { text: "lignes"; secondaire: true; font.pixelSize: 12 }
                         }
+                        // Pas possible pour ce terminal (kitty ouvert avant la mise à jour, ou autre terminal) : on dit pourquoi
+                        Row {
+                            visible: carte.s.ecrire !== true && (carte.s.terminal || 0) > 0
+                                     && /kitty|term|foot|alacritty|ghostty|konsole|wezterm|tilix|ptyxis/i.test(carte.s.classe || "")
+                            spacing: 6
+                            Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit_off"; taille: 14; color: Couleurs.texteSec }
+                            Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
+                                    width: Math.min(implicitWidth, col.width - 24); elide: Text.ElideRight
+                                    text: "Pour lui écrire d'ici : lance-le dans un nouveau terminal" }
+                        }
                         // Lui écrire (agent lancé dans kitty) : Entrée envoie, comme dans son terminal
                         Rectangle {
                             visible: carte.s.ecrire === true
