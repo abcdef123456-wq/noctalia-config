@@ -36,6 +36,15 @@ ask() { # ask "question" [o|n]  -> vrai si oui
   [[ "$r" =~ ^[oOyY] ]]
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans $CHOIX (1 par défaut)
+  local q="$1" i=1 r=""
+  shift
+  info "$q"
+  for o in "$@"; do info "  $i) $o"; i=$((i + 1)); done
+  if { true </dev/tty; } 2>/dev/null; then read -r -p "   Ton choix [1] : " r </dev/tty || r=""; else info "-> réponse par défaut (1)"; fi
+  [[ "$r" =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le $# ] || r=1
+  CHOIX=$r
+}
 # Longue étape sans sudo (compilation, téléchargement) : tourne en arrière-plan pendant qu'une ligne s'actualise
 # (roue, temps écoulé ; pour une compilation, avancement en %). avec_progres "Message" journal commande… -> son code
 avec_progres() {
@@ -196,6 +205,8 @@ for t in jq sed find cmp awk; do have "$t" || die "commande manquante : $t (inst
 info "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)"
 
 LAPTOP=0; ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && LAPTOP=1
+# Première installation sur ce PC : quelques choix au début (assistant, étape 4)
+PREMIERE=0; [ -e "$HOME/.config/nc/depot" ] || [ -e "$HOME/.config/nc/reglages.conf" ] || PREMIERE=1
 NVIDIA=0; OTHER_GPU=0
 for d in /sys/bus/pci/devices/*; do
   [[ $(cat "$d/class" 2>/dev/null) == 0x03* ]] || continue
@@ -1036,6 +1047,25 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer hypridle.service >/dev/null 2>&1 ||
     warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
+  # Première installation : quelques choix, tout de suite (tout se change ensuite avec nc-reglages)
+  if [ "$PREMIERE" = 1 ]; then
+    R="$HOME/.local/bin/nc-reglages"
+    say "Quelques choix pour commencer (modifiables ensuite : nc-reglages)"
+    choisir "Style du bureau :" "noctalia-config : les couleurs de ton fond d'écran" "Apple : façon macOS et iPhone" \
+      "Noir pur (écran OLED)" "Nord" "Catppuccin"
+    case "$CHOIX" in 2) "$R" set STYLE apple ;; 3) "$R" set STYLE oled ;; 4) "$R" set STYLE nord ;; 5) "$R" set STYLE catppuccin ;; esac >/dev/null 2>&1
+    ask "Thème sombre ?" o || "$R" set THEME_MODE light >/dev/null 2>&1
+    ask "Changer de fond d'écran tout seul toutes les 10 minutes ?" o || "$R" set FONDS_ROTATION non >/dev/null 2>&1
+    ask "Couper les notifications la nuit (22 h à 7 h) ?" n && "$R" set NPD_NUIT oui >/dev/null 2>&1
+    if [ "$LAPTOP" = 1 ]; then
+      choisir "Couvercle fermé :" "Mise en veille" "L'écran s'éteint, le PC continue (téléchargements, musique…)"
+      [ "$CHOIX" = 2 ] && "$R" set COUVERCLE ecran >/dev/null 2>&1
+    fi
+    choisir "Un appui sur le bouton d'arrêt :" "Une petite surprise (des doigts partout)" "Des confettis" \
+      "Le menu Éteindre / Redémarrer / Veille" "Éteindre, comme d'habitude"
+    case "$CHOIX" in 2) "$R" set BOUTON_ARRET confettis ;; 3) "$R" set BOUTON_ARRET menu ;; 4) "$R" set BOUTON_ARRET eteindre ;; esac >/dev/null 2>&1
+    ok "C'est noté."
+  fi
   # Tes réglages (nc-reglages) : ~/.config/nc/reglages.conf n'est jamais touché ; ce qui en est tiré (veille, terminal)
   # est refait d'après la nouvelle version de la config
   "$HOME/.local/bin/nc-reglages" appliquer >/dev/null 2>&1 || true
