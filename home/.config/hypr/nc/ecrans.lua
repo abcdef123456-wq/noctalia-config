@@ -3,7 +3,9 @@
 -- Échelle : mêmes seuils que Hyprland (densité de pixels), mais sans jamais descendre sous 1600 x 900 points
 -- utiles. Sans cette limite, un portable 15" en 1920 x 1080 passe à 1,5 : tout paraît zoomé et les panneaux
 -- (recherche, fonds d'écran) débordent de l'écran.
--- Écran interne d'un portable : fréquence choisie selon le profil énergétique (voir nc-profile-sync).
+-- Fréquence : écran interne d'un portable selon le profil énergétique (voir nc-profile-sync) ; écran externe
+-- (bureau, écran 144 Hz branché au portable) : sa fréquence la plus haute dans sa définition native. Le mode
+-- « preferred » de l'écran le laisse souvent à 60 Hz.
 --
 -- Forcer une échelle ou un mode : dans ~/.config/hypr/perso.lua, par exemple
 --   hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
@@ -64,9 +66,8 @@ function nc.echelle(m)
     return 1
 end
 
--- Mode de l'écran interne selon le profil : « max » (fréquence la plus haute), « low » (60 Hz) ou un nombre
-local function mode_interne(m)
-    local voulu = nc.profil.hz
+-- Mode dans la définition native : « max » (fréquence la plus haute), « low » (60 Hz) ou un nombre
+local function mode_hz(m, voulu)
     local liste = modes(m)
     if not voulu or #liste == 0 then return "preferred" end
     local w, h = native(m, liste)
@@ -92,7 +93,7 @@ local function regle(m)
     local interne = m.name:match("^eDP") ~= nil
     hl.monitor({
         output   = m.name,
-        mode     = interne and mode_interne(m) or "preferred",
+        mode     = mode_hz(m, interne and nc.profil.hz or "max"),
         position = "auto",
         scale    = nc.echelle(m),
     })
