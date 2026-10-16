@@ -133,6 +133,8 @@ class R:
             return "celle du système"
         if self.genre == "texte" and v == "auto":
             return "automatique"
+        if self.genre == "texte" and v == "aucun":
+            return "aucun"
         return v
 
     def valider(self, v):
@@ -229,6 +231,11 @@ REGLAGES = [
                       ["Adwaita Sans", "Inter", "Noto Sans", "Cantarell", "Roboto", "Ubuntu", "Fira Sans", "IBM Plex Sans"]),
       groupe="noctalia"),
     R("COINS_ECRAN", "Apparence", "Coins de l'écran arrondis", "ouinon", "oui", groupe="noctalia"),
+    R("VERROU_HORLOGE", "Apparence", "Horloge du verrouillage", "choix", "grande", "",
+      [("grande", "Grande et grasse"), ("fine", "Grande et fine"), ("petite", "Plus petite")]),
+    R("VERROU_PHOTO", "Apparence", "Ta photo sur le verrouillage", "ouinon", "non", "Ta photo de profil (~/.face) à la place du cadenas."),
+    R("VERROU_MESSAGE", "Apparence", "Message sur le verrouillage", "texte", "aucun",
+      "Sous l'heure, par exemple « Si trouvé : 06 12 34 56 78 ». « aucun » : pas de message."),
     R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
       mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
     # Animations
