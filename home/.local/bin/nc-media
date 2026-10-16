@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# nc-media : touches de musique du clavier (raccourcis de nc/raccourcis.lua, actifs aussi sur l'écran de verrouillage).
+#   nc-media play-pause | next | previous | stop | avance | recule      (avance / recule : 10 secondes)
+# Lecteur visé : celui qu'on entend (en lecture) ; sinon le dernier actif selon playerctld ; sinon le premier trouvé.
+# playerctld seul se trompait : un onglet en pause ou Discord qui change ses infos devient « le dernier actif » et
+# recevait la touche à la place de la musique en cours.
+set -u
+action="${1:-play-pause}"
+
+cible=""
+while read -r p; do
+  [ -n "$p" ] || continue
+  [ "$(playerctl -p "$p" status 2>/dev/null)" = Playing ] && { cible="$p"; break; }
+done < <(playerctl -l 2>/dev/null)
+[ -z "$cible" ] && playerctl -p playerctld status >/dev/null 2>&1 && cible=playerctld
+
+opt=(); [ -n "$cible" ] && opt=(-p "$cible")
+case "$action" in
+  avance) playerctl "${opt[@]}" position 10+ ;;
+  recule) playerctl "${opt[@]}" position 10- ;;
+  play-pause|next|previous|stop|play|pause) playerctl "${opt[@]}" "$action" ;;
+  *) echo "Usage : nc-media play-pause | next | previous | stop | avance | recule" >&2; exit 2 ;;
+esac

@@ -44,6 +44,7 @@ HOME_FILES=(
   .local/bin/nc-icones
   .local/bin/nc-ile-etat
   .local/bin/nc-verrou-media
+  .local/bin/nc-media
   .local/bin/nc-launch
   .local/bin/nc-maj
   .local/bin/nc-profile-sync
