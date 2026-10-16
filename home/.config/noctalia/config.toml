@@ -180,7 +180,18 @@ reserve_space = false
 background_opacity = 0.8
 icon_size = 44
 magnification = true
-show_dots = true
+show_dots = true                          # un point sous les applis ouvertes…
+show_instance_count = false               # … sans pastille « 2 » en plus (deux indicateurs pour la même chose)
+inactive_opacity = 1.0                    # toutes les icônes nettes et de la même taille
+inactive_scale = 1.0
+margin_edge = 8                           # flotte un peu au-dessus du bord, coins tous arrondis, fin contour
+concave_edge_corners = false
+radius = 18
+border = "outline"
+border_width = 1.0
+item_spacing = 8
+main_axis_padding = 12
+cross_axis_padding = 8
 pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 
 # ---------------------------------------------------------------- Notifications, OSD
