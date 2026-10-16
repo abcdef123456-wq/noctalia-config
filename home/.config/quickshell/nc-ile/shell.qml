@@ -22,6 +22,16 @@ ShellRoot {
         model: Etat.recherche && Etat.ecranOuvert !== "" ? Quickshell.screens : []
         Dehors {}
     }
+    // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : créée seulement quand on l'ouvre
+    Variants {
+        model: Etat.vueFenetres ? Quickshell.screens : []
+        Vue {}
+    }
+    // Coins actifs (nc-reglages → Clavier et souris)
+    Variants {
+        model: Quickshell.screens
+        Coins {}
+    }
     // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
     Variants {
         model: Reglages.val("FOND_ANIME", "non") === "aurore" && Reglages.val("EFFETS", "tous") !== "aucun" ? Quickshell.screens : []
@@ -33,6 +43,7 @@ ShellRoot {
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
         function fermer(): void { Etat.fermer() }
+        function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
         function rechercher(texte: string): void {
             Etat.saisie = texte
             if (!Etat.recherche) recherche()

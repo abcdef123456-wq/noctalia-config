@@ -69,6 +69,7 @@ Singleton {
 
     // Spotlight (Super + R) : l'île s'ouvre en longue capsule de recherche
     property bool recherche: false
+    property bool vueFenetres: false       // vue de toutes les fenêtres (Vue.qml)
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
     function chercher(ecran) {

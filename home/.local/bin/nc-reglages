@@ -326,6 +326,15 @@ REGLAGES = [
       "moitié ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
       [("clavier", "Clavier (fenêtres rangées, raccourcis)"), ("souris", "Souris (fenêtres libres, comme Windows)"),
        ("les-deux", "Les deux (rangées, plus les gestes souris)")], groupe="hypr"),
+] + [
+    R(f"COIN_{_c}", "Clavier et souris", f"Coin actif {_n}", "choix", "auto",
+      "Pousser la souris dans ce coin lance l'action (pas en jeu ni en plein écran). Automatique : en mode Souris ou Les "
+      "deux, le coin en haut à gauche ouvre la vue de toutes les fenêtres ; sinon rien.",
+      [("auto", "Automatique"), ("rien", "Rien"), ("vue", "Vue de toutes les fenêtres"), ("recherche", "Recherche (Spotlight)"),
+       ("centre", "Centre de contrôle"), ("notifications", "Notifications"), ("lanceur", "Lanceur d'applis"),
+       ("verrouiller", "Verrouiller"), ("ecran", "Éteindre l'écran")])
+    for _c, _n in (("HG", "en haut à gauche"), ("HD", "en haut à droite"), ("BG", "en bas à gauche"), ("BD", "en bas à droite"))
+] + [
     R("SUPER_SEUL", "Clavier et souris", "Touche Super seule", "choix", "rien",
       "Un appui sur Super, sans autre touche, comme la touche Windows. Coupé en mode jeu.",
       [("rien", "Rien"), ("recherche", "Ouvre la recherche (Spotlight)"), ("lanceur", "Ouvre le lanceur d'applis"),
