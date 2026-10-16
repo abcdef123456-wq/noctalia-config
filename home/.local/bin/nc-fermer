@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# nc-fermer PID ADRESSE : ferme un terminal kitty (Super + Maj + Q). Si un programme y tourne encore, la question
+# « Fermer quand même ? » s'affiche dans le lanceur de Noctalia : flèches et Entrée (Annuler en premier), Échap
+# annule. Remplace la question de kitty, qui ne répond qu'aux lettres (O/N) et pas aux flèches.
+set -uo pipefail
+pid="${1:-}"; adr="${2:-}"
+[ -n "$pid" ] && [ -n "$adr" ] || { echo "Usage : nc-fermer PID ADRESSE" >&2; exit 2; }
+
+fermer() { hyprctl dispatch "hl.dsp.window.close({ window = 'address:$adr' })" >/dev/null; }
+
+# Programmes lancés depuis les shells du terminal (les « kitten » sont des aides de kitty, gitstatusd celui du prompt)
+progs=""
+for s in $(ps -o pid=,comm= --ppid "$pid" 2>/dev/null | awk '$2 ~ /^(zsh|bash|fish|sh|dash|nu|xonsh|tmux)$/ { print $1 }'); do
+  progs+="$(ps -o comm= --ppid "$s" 2>/dev/null | grep -v -E '^(gitstatus|kitten)')"$'\n'
+done
+progs="$(printf '%s' "$progs" | sed '/^$/d' | sort -u | paste -sd ',' | sed 's/,/, /g')"
+[ -n "$progs" ] || { fermer; exit 0; }
+
+choix="$(printf 'Annuler\nFermer quand même\n' | noctalia dmenu -p "« $progs » tourne encore dans ce terminal" 2>/dev/null)"
+st=$?
+if [ "$st" -ne 0 ] && ! command -v noctalia >/dev/null; then fermer; exit 0; fi   # pas de lanceur : la question de kitty
+[ "$choix" = "Fermer quand même" ] || exit 0
+# Seule fenêtre de ce kitty : arrêté proprement (sans redemander) ; sinon fenêtre fermée (kitty peut redemander)
+n="$(hyprctl clients -j | jq --argjson p "$pid" '[.[] | select(.pid == $p)] | length')"
+if [ "$n" = 1 ]; then kill -TERM "$pid"; else fermer; fi

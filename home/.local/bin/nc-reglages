@@ -97,10 +97,10 @@ class R:
     """Un réglage : clé du fichier, section, nom, genre (ouinon, choix, entier, hz, texte, dossier), valeur de la config."""
 
     def __init__(self, cle, section, nom, genre, defaut, aide="", choix=None, mini=0, maxi=100, pas=1, unite="",
-                 groupe="", zero=""):
+                 groupe="", zero="", essai=""):
         self.cle, self.section, self.nom, self.genre, self.defaut, self.aide = cle, section, nom, genre, defaut, aide
         self._choix, self.mini, self.maxi, self.pas, self.unite = choix, mini, maxi, pas, unite
-        self.groupe, self.zero = groupe, zero
+        self.groupe, self.zero, self.essai = groupe, zero, essai
 
     def choix(self):
         """[(valeur, nom affiché)] pour ouinon, choix et hz."""
@@ -170,6 +170,18 @@ class R:
         return v
 
 
+def animations_bouton():
+    """Ce que peut faire le bouton d'arrêt : actions, animations de nc-anim (dont les tiennes)."""
+    res = [("doigts", "Des doigts partout")]
+    for l in sortie([os.path.join(HOME, ".local/bin/nc-anim"), "liste", "--brut"]).splitlines():
+        n, _, d = l.partition("\t")
+        if n and n != "doigts":
+            res.append((n, d))
+    return res + [("aleatoire", "Une animation au hasard"), ("menu", "Menu Éteindre / Redémarrer / Veille"),
+                  ("verrouiller", "Verrouiller l'écran"), ("veille", "Mettre en veille"),
+                  ("eteindre", "Éteindre (comme d'habitude)"), ("rien", "Rien")]
+
+
 REGLAGES = [
     # Île
     R("ILE_STYLE", "Île", "Couleurs", "choix", "terminal", "Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
@@ -195,11 +207,29 @@ REGLAGES = [
       lambda: polices(r"^(Inter|Noto Sans|Roboto|Ubuntu|Cantarell|Fira Sans|Open Sans|Lato|IBM Plex Sans|SF Pro)",
                       ["Adwaita Sans", "Inter", "Noto Sans", "Cantarell", "Roboto", "Ubuntu", "Fira Sans", "IBM Plex Sans"]),
       groupe="noctalia"),
-    R("ANIMATIONS_VITESSE", "Apparence", "Vitesse des animations des menus", "choix", "1.15", "Panneaux et menus de Noctalia.",
-      [("0.8", "Douce"), ("1.15", "Normale"), ("1.6", "Rapide")], groupe="noctalia"),
     R("COINS_ECRAN", "Apparence", "Coins de l'écran arrondis", "ouinon", "oui", groupe="noctalia"),
     R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
       mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    # Animations
+    R("BOUTON_ARRET", "Animations", "Bouton d'arrêt", "choix", "doigts",
+      "Un appui court. Le garder appuyé éteint toujours. e : essayer. Crée la tienne : nc-anim nouvelle NOM (dans un terminal).",
+      animations_bouton, essai="bouton"),
+    R("ANIM_VERROU", "Animations", "Apparition de l'écran de verrouillage", "choix", "disc", "e : essayer (verrouille l'écran).",
+      [("disc", "Disque"), ("fade", "Fondu"), ("wipe", "Balayage"), ("stripes", "Bandes"), ("honeycomb", "Nid d'abeilles"), ("zoom", "Zoom"), ("aleatoire", "Au hasard"), ("aucune", "Aucune")], groupe="noctalia", essai="verrou"),
+    R("ANIM_VERROU_DUREE", "Animations", "Durée de l'apparition", "entier", "1500", "", mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="verrou"),
+    R("ANIM_FOND", "Animations", "Changement de fond d'écran", "choix", "fade", "e : essayer (fond d'écran suivant).",
+      [("disc", "Disque"), ("fade", "Fondu"), ("wipe", "Balayage"), ("stripes", "Bandes"), ("honeycomb", "Nid d'abeilles"), ("zoom", "Zoom"), ("aleatoire", "Au hasard"), ("aucune", "Aucune")], groupe="noctalia", essai="fond"),
+    R("ANIM_FOND_DUREE", "Animations", "Durée du changement de fond", "entier", "1200", "", mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="fond"),
+    R("FENETRES_ANIMATIONS", "Animations", "Animations des fenêtres et des bureaux", "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_ANIMATIONS_VITESSE", "Animations", "Vitesse des fenêtres et des bureaux", "choix", "normale", "",
+      [("lente", "Lente"), ("normale", "Normale"), ("rapide", "Rapide")], groupe="hypr"),
+    R("FENETRES_OUVERTURE", "Animations", "Ouverture des fenêtres", "choix", "popin", "",
+      [("popin", "Zoom léger"), ("slide", "Glissement"), ("gnomed", "Dépliée, façon GNOME")], groupe="hypr"),
+    R("ANIM_BUREAUX", "Animations", "Passage d'un bureau à l'autre", "choix", "slidefadevert", "",
+      [("slidefadevert", "Glisse vers le haut, en fondu"), ("slidefade", "Glisse sur le côté, en fondu"),
+       ("slidevert", "Glisse vers le haut"), ("slide", "Glisse sur le côté"), ("fade", "Fondu")], groupe="hypr"),
+    R("ANIMATIONS_VITESSE", "Animations", "Vitesse des menus et panneaux", "choix", "1.15", "Panneaux et menus de Noctalia.",
+      [("0.8", "Douce"), ("1.15", "Normale"), ("1.6", "Rapide")], groupe="noctalia"),
     # Lumière nocturne
     R("NUIT", "Lumière nocturne", "Lumière nocturne", "choix", "non", "Réchauffe les couleurs de l'écran pour moins fatiguer les yeux le soir.",
       [("non", "Désactivée"), ("soir", "Le soir, aux heures ci-dessous"), ("toujours", "Toujours")], groupe="noctalia"),
@@ -223,11 +253,6 @@ REGLAGES = [
     R("FENETRES_ARRONDI", "Fenêtres", "Arrondi des coins", "entier", "14", mini=0, maxi=30, unite="px", groupe="hypr"),
     R("FENETRES_HALO", "Fenêtres", "Halo coloré de la fenêtre active", "ouinon", "oui", "Ombre aux couleurs du fond d'écran (et halo musical).", groupe="hypr"),
     R("FENETRES_FLOU", "Fenêtres", "Flou derrière les fenêtres transparentes", "ouinon", "oui", groupe="hypr"),
-    R("FENETRES_ANIMATIONS", "Fenêtres", "Animations des fenêtres", "ouinon", "oui", groupe="hypr"),
-    R("FENETRES_ANIMATIONS_VITESSE", "Fenêtres", "Vitesse des animations", "choix", "normale", "",
-      [("lente", "Lente"), ("normale", "Normale"), ("rapide", "Rapide")], groupe="hypr"),
-    R("FENETRES_OUVERTURE", "Fenêtres", "Ouverture des fenêtres", "choix", "popin", "",
-      [("popin", "Zoom léger"), ("slide", "Glissement"), ("gnomed", "Dépliée, façon GNOME")], groupe="hypr"),
     R("FENETRES_DISPOSITION", "Fenêtres", "Disposition des fenêtres", "choix", "dwindle",
       "Spirale : chaque nouvelle fenêtre partage la place de l'active. Principale : une grande à gauche, les autres en pile à droite.",
       [("dwindle", "Spirale"), ("master", "Une principale + une pile")], groupe="hypr"),
@@ -476,6 +501,13 @@ def appliquer_noctalia(vals):
             mettre("location", "custom_schedule", True)
             mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
             mettre("location", "sunrise", valeur(vals, "NUIT_FIN"))
+    TOUTES = ["disc", "fade", "wipe", "stripes", "honeycomb", "zoom"]
+    for cle, table in (("ANIM_VERROU", "lockscreen"), ("ANIM_FOND", "wallpaper")):
+        if cle in vals:
+            v = vals[cle]
+            mettre(table, "transition", TOUTES if v == "aleatoire" else [] if v == "aucune" else [v])
+        if cle + "_DUREE" in vals:
+            mettre(table, "transition_duration", float(vals[cle + "_DUREE"]))
     if "BARRE_OPACITE" in vals:
         mettre("bar.default", "capsule_opacity", int(vals["BARRE_OPACITE"]) / 100)
     if "BARRE_SYSTEME" in vals and tomllib:
@@ -850,6 +882,9 @@ class Ecran:
             bas = "↑↓ choisir    Entrée : modifier    Échap : sections    q : quitter"
         else:
             bas = "↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter"
+            cur_r = self.courant()[0]
+            if isinstance(cur_r, R) and cur_r.essai:
+                bas = "↑↓ choisir    ← → changer    Entrée : liste    e : essayer    r : valeur de la config    Échap : sections    q : quitter"
         e.addstr(h - 1, 2, couper(bas, w - 4), curses.A_DIM)
         e.refresh()
 
@@ -998,6 +1033,25 @@ class Ecran:
         else:
             return self.entree(r)
         self.poser(r, nv)
+
+    def essayer(self, r):
+        """Touche e : montre l'animation choisie (réglages appliqués d'abord)."""
+        if self.attente:
+            appliquer(self.attente, self.vals)
+            self.attente.clear()
+        if r.essai == "bouton":
+            v = valeur(self.vals, r.cle)
+            if v in ("menu", "verrouiller", "veille", "eteindre", "rien"):
+                self.statut("Rien à essayer : ce n'est pas une animation")
+                return
+            subprocess.Popen([os.path.join(HOME, ".local/bin/nc-anim"), v], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.statut("Animation lancée : une touche la ferme")
+        elif r.essai == "verrou":
+            time.sleep(0.4)                          # le temps que Noctalia relise sa config
+            subprocess.Popen(["loginctl", "lock-session"])
+        elif r.essai == "fond":
+            time.sleep(0.4)
+            subprocess.Popen(["noctalia", "msg", "wallpaper-next"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def poser(self, r, v):
         try:
@@ -1205,6 +1259,8 @@ class Ecran:
                 elif c in ("r", "R") and cur.cle in self.vals:
                     self.poser(cur, cur.defaut)
                     self.statut(f"{cur.nom} : valeur de la config")
+                elif c in ("e", "E") and cur.essai:
+                    self.essayer(cur)
             else:
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
                     self.action_raccourci(cur)

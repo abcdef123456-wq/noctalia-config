@@ -1157,7 +1157,7 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
-  # Bouton d'arrêt : un appui fait la petite surprise des doigts (nc-finger, raccourci XF86PowerOff) au lieu
+  # Bouton d'arrêt : un appui fait une petite animation (nc-anim bouton, raccourci XF86PowerOff ; laquelle : nc-reglages) au lieu
   # d'éteindre ; logind doit donc laisser la touche à Hyprland. Le garder appuyé éteint toujours proprement, et
   # Super + F4 éteint aussi. 50-legion-powerkey.conf : ancien nom de ce réglage, remplacé.
   bouton=/etc/systemd/logind.conf.d/50-nc-bouton.conf

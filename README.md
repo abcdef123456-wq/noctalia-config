@@ -210,9 +210,11 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 ```bash
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
-nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, lumière nocturne, barre et dock, fenêtres,
+nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres,
               # fonds d'écran, énergie, son et luminosité, clavier et souris, veille et couvercle, terminal,
               # captures, raccourcis — gardés à chaque mise à jour
+nc-anim liste # les animations du bouton d'arrêt (nc-anim NOM pour en voir une) ;
+              # nc-anim nouvelle NOM crée la tienne dans ~/.config/nc/animations
 ```
 
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
