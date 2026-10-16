@@ -347,6 +347,8 @@ local tp = "~/.local/bin/nc-touches "
 touche("XF86KbdBrightnessUp",   cmd(tp .. "clavier up"),      portable, { locked = true, repeating = true })
 touche("XF86KbdBrightnessDown", cmd(tp .. "clavier down"),    portable, { locked = true, repeating = true })
 touche("XF86KbdLightOnOff",     cmd(tp .. "clavier bascule"), portable, { locked = true })
+-- Même chose sans touche Fn dédiée (Fn + Espace n'arrive pas toujours jusqu'au système)
+touche(SUPER .. " + CTRL + code:65", cmd(tp .. "clavier bascule"), "Système|Éclairage du clavier (palier suivant)", { locked = true })
 touche("XF86TouchpadToggle",    cmd(tp .. "pave bascule"),    portable, { locked = true })
 touche("XF86TouchpadOn",        cmd(tp .. "pave on"),         portable, { locked = true })
 touche("XF86TouchpadOff",       cmd(tp .. "pave off"),        portable, { locked = true })
