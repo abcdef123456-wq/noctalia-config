@@ -141,15 +141,29 @@ CORBEILLE = """<path d="M64 84 H192" stroke="{dos}" stroke-width="16" stroke-lin
   <path d="M110 124 L113 196 M128 124 V196 M146 124 L143 196" stroke="{trait}" stroke-width="9" stroke-linecap="round" opacity=".6"/>"""
 PAPIERS = '<path d="M92 98 Q96 70 122 74 Q132 56 152 72 Q174 70 168 98 Z" fill="{texte}" opacity=".9"/>'
 
-# Applis : tuile sombre bordée de l'accent
-CADRE = """<rect x="16" y="16" width="224" height="224" rx="58" fill="{fond}"/>
-  <rect x="17.5" y="17.5" width="221" height="221" rx="56.5" fill="none" stroke="{accent}" stroke-opacity=".35" stroke-width="3"/>"""
+# Applis : vraies tuiles d'appli, comme sur un téléphone, qui ressortent dans le dock (une tuile sombre s'y fondait)
+#   Terminal : graphite brillant (dégradé de haut en bas, liseré clair), chevron de l'accent et curseur clair
+#   Fichiers : dégradé de l'accent, dossier blanc (sombre si l'accent est très clair)
+LISERE = """<rect x="17.5" y="17.5" width="221" height="221" rx="52.5" fill="none" stroke="#ffffff" stroke-opacity=".16" stroke-width="3"/>"""
 APPS_DESSINS = {
-    # Invite de commande : chevron et curseur
-    "nc-terminal": """<path d="M82 96 L122 128 L82 160" fill="none" stroke="{accent}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M138 164 H180" stroke="{texte}" stroke-width="16" stroke-linecap="round"/>""",
-    # Petit dossier du thème, posé sur la tuile
-    "nc-fichiers": """<g transform="translate(52 56) scale(.594)">{dossier}</g>""",
+    "nc-terminal": """<defs>
+    <linearGradient id="tuile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d3d44"/><stop offset="1" stop-color="#141417"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#tuile)"/>
+  {lisere}
+  <path d="M78 94 L120 128 L78 162" fill="none" stroke="{vif}" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M136 166 H180" stroke="#f2f2f5" stroke-width="17" stroke-linecap="round"/>""",
+    "nc-fichiers": """<defs>
+    <linearGradient id="tuile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{tuile_haut}"/><stop offset="1" stop-color="{tuile_bas}"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#tuile)"/>
+  {lisere}
+  <path d="M62 92 Q62 78 76 78 H108 Q115 78 120 83 L128 91 H180 Q194 91 194 105 V170 Q194 184 180 184 H76 Q62 184 62 170 Z" fill="{glyphe}" fill-opacity=".55"/>
+  <rect x="62" y="106" width="132" height="78" rx="14" fill="{glyphe}" fill-opacity=".97"/>""",
 }
 
 
@@ -239,8 +253,16 @@ def dessins(c):
     out["user-trash"] = svg(defs.format(**teintes) + "\n  " + vide)
     out["user-trash-full"] = svg(defs.format(**teintes) + "\n  " + pleine)
     dossier = DOSSIER.format(symbole="", **teintes)
+    # Accent presque gris (fond d'écran en noir et blanc) : tuile Fichiers d'un bleu de dossier, sinon elle serait terne
+    r, g, b = rvb(c["accent"])
+    gris = (max(r, g, b) - min(r, g, b)) / 255 < 0.15
+    a1, a2 = ("#4aa3ff", "#1f6fe0") if gris else (c["accent"], c["accent2"])
+    haut = melange(a1, "#ffffff", 0.22)
+    tuile = {"vif": melange(c["accent"], "#ffffff", 0.18), "lisere": LISERE,
+             "tuile_haut": haut, "tuile_bas": melange(melange(a1, a2, 0.35), "#000000", 0.18),
+             "glyphe": "#ffffff" if clarte(haut) < 0.75 else melange(c["accent"], "#000000", 0.7)}
     for nom, d in APPS_DESSINS.items():
-        out[nom] = svg(CADRE.format(**c) + "\n  " + d.format(dossier=dossier, **c))
+        out[nom] = svg(d.format(**tuile))
     # Fichiers : couleurs fixes adoucies vers l'accent, pour rester dans l'ambiance du fond d'écran
     papier = {"papier": melange("#ffffff", c["accent"], 0.04), "papier2": melange("#eceaf3", c["accent"], 0.10),
               "pli": melange("#cfcde0", c["accent"], 0.22)}

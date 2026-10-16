@@ -87,3 +87,5 @@ hl.layer_rule({
     blur         = true,
     blur_popups  = true,
 })
+-- Dock en verre dépoli : flouté même là où il est très transparent
+hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-dock$" }, ignore_alpha = 0.2 })

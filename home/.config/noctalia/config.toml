@@ -177,21 +177,23 @@ right = "exec ~/.local/bin/nc-shell-msg ile centre"
 enabled = true
 auto_hide = true
 reserve_space = false
-background_opacity = 0.8
-icon_size = 44
+# Verre dépoli : fond translucide flouté par Hyprland (nc/regles.lua), forme de pilule, sans contour, ombre douce
+background_opacity = 0.45
+radius = 26
+border_width = 0.0
+shadow = true
+margin_edge = 10                          # flotte au-dessus du bord de l'écran
+concave_edge_corners = false
+icon_size = 48
+item_spacing = 10
+main_axis_padding = 10
+cross_axis_padding = 8
 magnification = true
-show_dots = true                          # un point sous les applis ouvertes…
-show_instance_count = false               # … sans pastille « 2 » en plus (deux indicateurs pour la même chose)
+magnification_scale = 1.35                # loupe légère
 inactive_opacity = 1.0                    # toutes les icônes nettes et de la même taille
 inactive_scale = 1.0
-margin_edge = 8                           # flotte un peu au-dessus du bord, coins tous arrondis, fin contour
-concave_edge_corners = false
-radius = 18
-border = "outline"
-border_width = 1.0
-item_spacing = 8
-main_axis_padding = 12
-cross_axis_padding = 8
+show_dots = true                          # un point sous les applis ouvertes, sans pastille de nombre
+show_instance_count = false
 pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 
 # ---------------------------------------------------------------- Notifications, OSD
