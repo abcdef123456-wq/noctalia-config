@@ -1153,6 +1153,24 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
+  # Bouton d'arrêt : un appui fait la petite surprise des doigts (nc-finger, raccourci XF86PowerOff) au lieu
+  # d'éteindre ; logind doit donc laisser la touche à Hyprland. Le garder appuyé éteint toujours proprement, et
+  # Super + F4 éteint aussi. 50-legion-powerkey.conf : ancien nom de ce réglage, remplacé.
+  bouton=/etc/systemd/logind.conf.d/50-nc-bouton.conf
+  contenu=$'# noctalia-config : un appui sur le bouton d\'arrêt fait apparaître les doigts (nc-finger) au lieu d\'éteindre.\n# Le garder appuyé éteint ; Super + F4 aussi. Pour revenir à l\'arrêt normal : sudo rm '"$bouton"$'\n[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=poweroff'
+  if [ "$(cat "$bouton" 2>/dev/null)" = "$contenu" ] && [ ! -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf ]; then
+    ok "Bouton d'arrêt (les doigts) : déjà en place."
+  elif ask "Bouton d'arrêt : un appui fait apparaître des doigts au lieu d'éteindre (le garder appuyé éteint) ?" o; then
+    if printf '%s\n' "$contenu" | sudo install -Dm0644 /dev/stdin "$bouton"; then
+      sudo rm -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf
+      # Relecture de la config par logind sans le redémarrer (un redémarrage fermerait la session)
+      sudo systemctl kill -s HUP systemd-logind >/dev/null 2>&1 || true
+      ok "Bouton d'arrêt : les doigts à chaque appui."
+    else
+      warn "Réglage du bouton d'arrêt impossible."
+    fi
+  fi
+
   if [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
     say "5b. Wi-Fi : pays de réglementation"
     cc="$(sed -nE 's/^WIRELESS_REGDOM="?([A-Z]{2})"?.*/\1/p' /etc/conf.d/wireless-regdom | tail -1)"
