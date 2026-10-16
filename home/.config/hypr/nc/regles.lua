@@ -4,7 +4,13 @@
 hl.window_rule({ name = "pas-de-maximisation", match = { class = ".*" }, suppress_event = "maximize" })
 -- Fenêtres sans nom ni classe (glisser-déposer XWayland, menus fantômes) : ne prennent pas le focus en apparaissant
 hl.window_rule({ name = "sans-nom", match = { class = "^$", title = "^$" }, no_initial_focus = true })
-hl.window_rule({ name = "hyprland-run", match = { class = "hyprland-run" }, float = true, move = "20 monitor_h-120" })
+-- Mode souris (nc-reglages → Clavier et souris, SAISIE=souris) : fenêtres libres et centrées, comme sur Windows
+-- (automatismes.lua les rouvre ensuite à la place et à la taille où tu les as laissées)
+if nc.reglage("SAISIE", "clavier") == "souris" then
+    hl.window_rule({ name = "souris-libres", match = { class = ".*" }, float = true, center = true })
+    hl.window_rule({ name = "souris-terminal", match = { class = "^(kitty)$" }, size = { "monitor_w*0.5", "monitor_h*0.55" } })
+end
+hl.window_rule({ name = "hyprland-run",match = { class = "hyprland-run" }, float = true, move = "20 monitor_h-120" })
 
 -- Fenêtres utilitaires en flottant
 hl.window_rule({

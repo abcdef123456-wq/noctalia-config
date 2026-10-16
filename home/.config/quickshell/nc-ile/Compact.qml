@@ -1,7 +1,7 @@
 // Contenu de la pilule (île fermée) :
 //   repos   : heure et date ;  musique : pochette, heure, onde sonore (en pause : symbole lecture et titre)
 //   réactions (2 à 3 s) : volume, luminosité, nouveau morceau, chargeur, profil d'énergie, mode jeu
-//   Claude Code (nc-claude) : ce qu'il fait (étincelle qui tourne), « t'attend dans le terminal », « a terminé »
+//   Claude Code et Antigravity (nc-claude) : ce qu'il fait (son logo qui bouge), « t'attend dans le terminal », « a terminé »
 // largeur : largeur voulue de la pilule ; l'île s'y ajuste avec un ressort.
 import QtQuick
 import Quickshell.Widgets
@@ -196,7 +196,8 @@ Item {
         readonly property var s: Agents.principale
         readonly property bool terminal: Agents.attendTerminal
         montre: c.mode === "claude"
-        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; tourne: !claude.terminal; visible: claude.montre || opacity > 0 }
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; tourne: !claude.terminal; visible: claude.montre || opacity > 0
+                    agent: claude.terminal ? "claude" : Agents.agent(claude.s) }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
             text: claude.terminal ? "Claude t'attend dans le terminal" : (claude.s ? (claude.s.etape || "Travaille…") : "")
@@ -217,8 +218,9 @@ Item {
     Fondu {
         id: claudeFini
         montre: c.mode === "claude-fini"
-        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16 }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Claude a terminé"; font.weight: Font.DemiBold }
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; agent: Agents.dernierFiniAgent }
+        Texte { anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
+                text: (Agents.dernierFiniAgent === "antigravity" ? "Antigravity" : "Claude") + " a terminé" }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.dernierFini; secondaire: true; width: Math.min(implicitWidth, 160) }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "check_circle"; taille: 17; color: Couleurs.vert }
     }

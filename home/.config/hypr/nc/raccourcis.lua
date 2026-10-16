@@ -217,6 +217,40 @@ touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.resize(), "Souris|Détacher 
 touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.float({ action = "set" }))
 touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), "Souris|Redimensionner (pavé tactile)", { mouse = true })
 
+-- Souris sans clavier (nc-reglages → Clavier et souris, SAISIE = souris ou les-deux) : boutons latéraux maintenus pour
+-- déplacer (arrière) ou redimensionner (avant) ; un simple clic garde Précédent / Suivant (Alt + ←/→, navigateurs et
+-- fichiers). Lâchée en haut de l'écran, une fenêtre libre s'agrandit ; sur le bord gauche ou droit, elle en prend la
+-- moitié (comme Windows). Super + clic molette : libre ↔ rangée.
+local saisie = nc.reglage("SAISIE", "clavier")
+if saisie == "souris" or saisie == "les-deux" then
+    hl.config({ binds = { drag_threshold = 8 } })
+    local function aimanter()
+        local w, p = hl.get_active_window(), hl.get_cursor_pos()
+        local m = w and w.monitor
+        if not (w and p and m) or not w.floating then return end
+        local px, py = xy(p)
+        local lw, lh = taille_ecran(m)
+        local r = type(m.reserved) == "table" and m.reserved or {}
+        local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
+        local g = 10
+        local ax, ay, aw, ah = m.x + rg + g, m.y + rh + g, lw - rg - rd - 2 * g, lh - rh - rb - 2 * g
+        if py <= m.y + rh + 4 then
+            hl.dispatch(hl.dsp.window.fullscreen({ window = w, mode = "maximized", action = "set" }))
+        elseif px <= m.x + 4 or px >= m.x + lw - 4 then
+            local demi = math.floor((aw - g) / 2)
+            hl.dispatch(hl.dsp.window.resize({ window = w, x = demi, y = math.floor(ah) }))
+            hl.dispatch(hl.dsp.window.move({ window = w, x = math.floor(px <= m.x + 4 and ax or ax + demi + g), y = math.floor(ay) }))
+        end
+    end
+    touche("mouse:275", hl.dsp.window.drag(), "Souris|Bouton latéral arrière maintenu : déplacer", { mouse = true })
+    touche("mouse:275", hl.dsp.send_shortcut({ mods = "ALT", key = "Left" }), nil, { mouse = true, click = true })
+    touche("mouse:275", aimanter, nil, { drag = true })
+    touche("mouse:276", hl.dsp.window.resize(), "Souris|Bouton latéral avant maintenu : redimensionner", { mouse = true })
+    touche("mouse:276", hl.dsp.send_shortcut({ mods = "ALT", key = "Right" }), nil, { mouse = true, click = true })
+    touche(SUPER .. " + mouse:272", aimanter, nil, { drag = true })
+    touche(SUPER .. " + mouse:274", hl.dsp.window.float({ action = "toggle" }), "Souris|Fenêtre libre ↔ rangée")
+end
+
 -- ── Système ──────────────────────────────────────────────────────────────────
 touche(SUPER .. " + code:46", cmd(barre .. "lock"),                 "Système|Verrouiller l'écran")
 touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       "Système|Verrouiller et mettre en veille")

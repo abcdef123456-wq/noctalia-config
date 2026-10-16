@@ -1,8 +1,8 @@
 pragma Singleton
-// Claude Code dans l'île (comme l'appli coucou) : sessions suivies par ~/.local/bin/nc-claude, que les hooks de Claude
-// Code appellent à chaque étape ; relues dès qu'elles changent. Les réponses aux demandes (autoriser, refuser, choix
+// Claude Code et Antigravity dans l'île (comme l'appli coucou) : sessions suivies par ~/.local/bin/nc-claude, que leurs
+// hooks appellent à chaque étape (agent: "antigravity" pour celles d'Antigravity) ; relues dès qu'elles changent. Les réponses aux demandes (autoriser, refuser, choix
 // d'une question) sont écrites dans …/nc-claude/reponses/ID, où le hook les attend.
-// Réglages (nc-reglages, Claude Code) : CLAUDE_ILE (oui/non), CLAUDE_DEMANDES (ile/terminal)
+// Réglages (nc-reglages, Agents IA) : CLAUDE_ILE et ANTIGRAVITY_ILE (oui/non), CLAUDE_DEMANDES (ile/terminal)
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -11,12 +11,16 @@ Singleton {
     id: a
     readonly property string dossier: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-claude"
     readonly property color couleur: "#d97757"           // l'orange de Claude
+    readonly property color couleurAgy: "#4c8df6"        // le bleu d'Antigravity
     readonly property bool active: Reglages.val("CLAUDE_ILE", "oui") !== "non"
+    readonly property bool activeAgy: Reglages.val("ANTIGRAVITY_ILE", "oui") !== "non"
+    function agent(s) { return s && s.agent === "antigravity" ? "antigravity" : "claude" }
+    function nom(s) { return agent(s) === "antigravity" ? "Antigravity" : "Claude" }
+    function couleurDe(s) { return agent(s) === "antigravity" ? couleurAgy : couleur }
     property var donnees: ({ sessions: {}, demandes: {} })
 
     readonly property var sessions: {
-        if (!active) return []
-        var l = Object.values(donnees.sessions || {})
+        var l = Object.values(donnees.sessions || {}).filter(s => agent(s) === "antigravity" ? activeAgy : active)
         l.sort((x, y) => (y.maj || 0) - (x.maj || 0))
         return l
     }
@@ -43,12 +47,16 @@ Singleton {
     // Fin d'une session (« Claude a terminé ») et demande dans le terminal : réaction de la pilule
     property var avant: ({})
     property string dernierFini: ""
+    property string dernierFiniAgent: "claude"
+    // Titre de la page : selon les agents suivis
+    readonly property string titre: sessions.length && sessions.every(s => agent(s) === "antigravity") ? "Antigravity"
+                                    : (sessions.some(s => agent(s) === "antigravity") ? "Agents IA" : "Claude Code")
     onSessionsChanged: {
         var n = {}
         for (var i = 0; i < sessions.length; i++) {
             var s = sessions[i], e = avant[s.id]
             n[s.id] = s.etat
-            if (e && e !== s.etat && s.etat === "fini") { dernierFini = s.projet; Etat.activite("claude-fini", 4500) }
+            if (e && e !== s.etat && s.etat === "fini") { dernierFini = s.projet; dernierFiniAgent = agent(s); Etat.activite("claude-fini", 4500) }
         }
         avant = n
     }

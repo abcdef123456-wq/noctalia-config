@@ -5,21 +5,35 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude retirer     les enlève
   nc-claude etat        les sessions suivies, en clair
   nc-claude hook        appelé par Claude Code à chaque événement (lit le JSON de l'événement sur l'entrée standard)
+  nc-claude installer antigravity | retirer antigravity
+                        la même chose pour l'agent de Google Antigravity (appli, éditeur ou agy en terminal) : ce
+                        qu'il fait et quand il a fini (~/.gemini/config/hooks.json) ; ses demandes restent dans Antigravity
+  nc-claude agy EVENEMENT   appelé par Antigravity (SessionStart, PreInvocation, PostToolUse, Stop)
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
-question repasse dans le terminal. Sans l'île (ou nc-reglages → Claude Code), rien ne change : Claude n'attend jamais.
+question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
 État : $XDG_RUNTIME_DIR/nc-claude/etat.json (lu par l'île) ; réponses de l'île : …/nc-claude/reponses/ID.
 """
 import fcntl
+import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import uuid
 
 HOME = os.path.expanduser("~")
+# Antigravity lance ses hooks avec un environnement réduit : dossier d'exécution et Hyprland retrouvés à la main
+if not os.environ.get("XDG_RUNTIME_DIR") and os.path.isdir(f"/run/user/{os.getuid()}"):
+    os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and os.environ.get("XDG_RUNTIME_DIR"):
+    _hypr = sorted(glob.glob(os.environ["XDG_RUNTIME_DIR"] + "/hypr/*/.socket.sock"), key=os.path.getmtime)
+    if _hypr:
+        os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = os.path.basename(os.path.dirname(_hypr[-1]))
 RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/nc-{os.getuid()}", "nc-claude")
 ETAT = os.path.join(RUN, "etat.json")
 VERROU = os.path.join(RUN, "etat.lock")
@@ -334,6 +348,167 @@ def hook():
             s["message"] = court(ev.get("last_assistant_message"), 160)
 
 
+# ── Antigravity : ses sessions dans l'île, à côté de celles de Claude ───────────────────────────────────────────────
+# Ses hooks (https://antigravity.google/docs/hooks) ne donnent ni le nom de l'événement (passé en argument), ni de
+# demande d'autorisation : l'île montre ce qu'il fait et quand il a fini. Seulement des événements qui ne décident de
+# rien (PostToolUse plutôt que PreToolUse : un PreToolUse qui échoue bloquerait l'outil).
+AGY_HOOKS = os.path.join(HOME, ".gemini/config/hooks.json")
+AGY_GROUPE = "nc-ile"
+AGY_EVENEMENTS = ("SessionStart", "PreInvocation", "PostToolUse", "Stop")
+AGY_MODIFS = ("write_to_file", "replace_file_content", "multi_replace_file_content")
+
+
+def arg(e, *cles):
+    e = e if isinstance(e, dict) else {}
+    bas = {k.lower(): v for k, v in e.items()}
+    for c in cles:
+        if bas.get(c.lower()):
+            return bas[c.lower()]
+    return ""
+
+
+def etape_agy(outil, e):
+    """(icône, texte) pour un outil d'Antigravity."""
+    f = nom_fichier(arg(e, "TargetFile", "AbsolutePath", "FilePath", "File", "Path"))
+    if outil == "run_command":
+        cmd = re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", str(arg(e, "CommandLine", "Command")))
+        return "terminal", "Lance : " + court(cmd, 60)
+    if outil in ("replace_file_content", "multi_replace_file_content"):
+        return "edit", "Modifie " + f
+    if outil == "write_to_file":
+        return "edit_document", "Écrit " + f
+    if outil.startswith("view_"):
+        return "description", "Lit " + f
+    if outil == "grep_search":
+        return "search", "Cherche « " + court(arg(e, "Query", "Pattern"), 30) + " »"
+    if outil in ("find_by_name", "codebase_search"):
+        return "search", "Cherche des fichiers"
+    if outil == "list_dir":
+        return "folder_open", "Parcourt " + nom_fichier(arg(e, "DirectoryPath", "Path"))
+    if outil == "search_web":
+        return "travel_explore", "Cherche sur le web : " + court(arg(e, "query", "Query"), 40)
+    if outil == "read_url_content":
+        return "public", "Lit une page web"
+    if outil.startswith("browser_"):
+        return "public", "Utilise le navigateur"
+    if outil == "invoke_subagent":
+        return "smart_toy", "Lance un agent"
+    return "build", court(outil.replace("_", " "), 40)
+
+
+def diff_agy(e):
+    """(+ajouts, −retraits) d'une modification d'Antigravity (contenu remplacé ou écrit, où qu'il soit dans les args)."""
+    t = {"plus": 0, "moins": 0}
+
+    def visite(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if isinstance(v, str):
+                    if k.lower() in ("replacementcontent", "codecontent", "content"):
+                        t["plus"] += lignes(v)
+                    elif k.lower() == "targetcontent":
+                        t["moins"] += lignes(v)
+                else:
+                    visite(v)
+        elif isinstance(x, list):
+            for v in x:
+                visite(v)
+    visite(e)
+    return t["plus"], t["moins"]
+
+
+def hook_agy(nom):
+    print("{}")                                        # ne décide de rien
+    sys.stdout.flush()
+    if reglage("ANTIGRAVITY_ILE", "oui") == "non" or nom not in AGY_EVENEMENTS:
+        return
+    try:
+        ev = json.load(sys.stdin)
+    except ValueError:
+        return
+    sid = "agy-" + str(ev.get("conversationId") or "?")
+    ws = str((ev.get("workspacePaths") or [""])[0] or "")
+    if ws.startswith("file://"):
+        ws = urllib.parse.unquote(ws[7:])
+    with Etat() as d:
+        s = d["sessions"].setdefault(sid, {"id": sid, "etat": "pret", "etapes": [], "ajouts": 0, "retraits": 0,
+                                           "debut": time.time()})
+        s["agent"] = "antigravity"
+        if ws:
+            s["cwd"] = ws.replace(HOME, "~")
+        s["projet"] = os.path.basename(ws.rstrip("/")) or s.get("projet") or "Antigravity"
+        s["maj"] = time.time()
+        if not s.get("terminal"):
+            s["terminal"] = terminal_pid()
+        if nom == "PreInvocation":
+            if s.get("etat") != "travail":             # nouvelle demande : on repart de zéro
+                s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
+                ajouter_etape(s, "neurology", "Réfléchit…")
+        elif nom == "PostToolUse":
+            tc = ev.get("toolCall") or {}
+            if not tc.get("name"):
+                return
+            s["etat"] = "travail"
+            ajouter_etape(s, *etape_agy(tc["name"], tc.get("args")))
+            if tc["name"] in AGY_MODIFS and not ev.get("error"):
+                a, r = diff_agy(tc.get("args"))
+                if a or r:
+                    s["ajouts"] = s.get("ajouts", 0) + a
+                    s["retraits"] = s.get("retraits", 0) + r
+                    s["etapes"][-1]["diff"] = f"+{a} −{r}"
+        elif nom == "Stop" and ev.get("fullyIdle", True) and s.get("etat") == "travail":
+            s["etat"] = "fini"
+            s["fin"] = time.time()
+
+
+def lire_json(chemin):
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except ValueError:
+        sys.exit(f"nc-claude : {chemin} n'est pas un JSON valide : rien n'a été changé.")
+
+
+def ecrire_json(chemin, cfg):
+    os.makedirs(os.path.dirname(chemin), exist_ok=True)
+    if os.path.exists(chemin):
+        copie = chemin + ".avant-nc-claude"
+        if not os.path.exists(copie):
+            shutil.copy2(chemin, copie)
+    tmp = chemin + ".nc-tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, chemin)
+
+
+def installer_agy():
+    cfg = lire_json(AGY_HOOKS)
+    # Chemins complets : l'environnement des hooks d'Antigravity n'a pas forcément PATH ni HOME
+    base = shlex.quote(sys.executable) + " " + shlex.quote(os.path.realpath(__file__)) + " agy "
+    h = lambda ev: {"type": "command", "command": base + ev, "timeout": 10}
+    cfg[AGY_GROUPE] = {"enabled": True, "SessionStart": [h("SessionStart")], "PreInvocation": [h("PreInvocation")],
+                       "PostToolUse": [{"matcher": "*", "hooks": [h("PostToolUse")]}], "Stop": [h("Stop")]}
+    ecrire_json(AGY_HOOKS, cfg)
+    print(f"Antigravity s'affiche maintenant dans l'île (hooks ajoutés à {AGY_HOOKS.replace(HOME, '~')}).")
+    print("Relance Antigravity s'il est ouvert. Pour l'enlever : nc-claude retirer antigravity")
+
+
+def retirer_agy():
+    if not os.path.exists(AGY_HOOKS):
+        print("Rien à retirer.")
+        return
+    cfg = lire_json(AGY_HOOKS)
+    if cfg.pop(AGY_GROUPE, None) is not None:
+        ecrire_json(AGY_HOOKS, cfg)
+    print("Hooks de l'île retirés de " + AGY_HOOKS.replace(HOME, "~") + ".")
+    with Etat() as d:
+        for sid in [x for x in d["sessions"] if x.startswith("agy-")]:
+            del d["sessions"][sid]
+
+
 # ── Installation des hooks ───────────────────────────────────────────────────────────────────────────────────────
 def a_nous(h):
     return "nc-claude hook" in str(h.get("command", ""))
@@ -428,10 +603,15 @@ def main():
             hook()
         except Exception:                      # un hook ne doit jamais gêner Claude
             pass
+    elif a[0] == "agy":
+        try:
+            hook_agy(a[1] if len(a) > 1 else "")
+        except Exception:                      # un hook ne doit jamais gêner Antigravity
+            pass
     elif a[0] == "installer":
-        installer()
+        installer_agy() if a[1:2] == ["antigravity"] else installer()
     elif a[0] == "retirer":
-        retirer()
+        retirer_agy() if a[1:2] == ["antigravity"] else retirer()
     elif a[0] == "etat":
         montrer()
     else:

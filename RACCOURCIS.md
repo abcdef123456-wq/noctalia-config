@@ -71,6 +71,19 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `clic droit` | Détacher et redimensionner librement |
 | `Super` + `Maj` + `glisser` | Redimensionner (pavé tactile) |
 
+Mode **Souris** ou **Les deux** (`nc-reglages` → Clavier et souris), sans toucher au clavier :
+
+| Souris | Action |
+|---|---|
+| Bouton latéral arrière maintenu + glisser | Déplacer la fenêtre (un simple clic : Précédent) |
+| Bouton latéral avant maintenu + glisser | Redimensionner la fenêtre (un simple clic : Suivant) |
+| Fenêtre libre lâchée en haut de l'écran | Agrandie |
+| Fenêtre libre lâchée sur le bord gauche ou droit | La moitié de l'écran |
+| Attraper le bord d'une fenêtre | La redimensionner |
+| `Super` + clic molette | Fenêtre libre ↔ rangée |
+
+En mode **Souris**, les fenêtres s'ouvrent libres et centrées, comme sur Windows, puis là où tu les as laissées.
+
 ## Système
 
 | Touches | Action |

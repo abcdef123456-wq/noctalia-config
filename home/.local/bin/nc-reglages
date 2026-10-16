@@ -320,6 +320,12 @@ REGLAGES = [
     R("CLAVIER_REPETITION", "Clavier et souris", "Vitesse de répétition des touches", "entier", "35", mini=10, maxi=80, unite="/s", groupe="hypr"),
     R("CLAVIER_DELAI", "Clavier et souris", "Délai avant répétition", "entier", "300", mini=150, maxi=1000, pas=25, unite="ms", groupe="hypr"),
     R("SOURIS_VITESSE", "Clavier et souris", "Vitesse du pointeur", "entier", "0", "De -10 (lent) à 10 (rapide).", mini=-10, maxi=10, groupe="hypr"),
+    R("SAISIE", "Clavier et souris", "Clavier, souris ou les deux", "choix", "clavier",
+      "Souris et Les deux : bouton latéral arrière maintenu = déplacer la fenêtre, avant maintenu = la redimensionner "
+      "(un simple clic garde Précédent / Suivant) ; lâchée en haut de l'écran elle s'agrandit, sur un bord elle prend la "
+      "moitié ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
+      [("clavier", "Clavier (fenêtres rangées, raccourcis)"), ("souris", "Souris (fenêtres libres, comme Windows)"),
+       ("les-deux", "Les deux (rangées, plus les gestes souris)")], groupe="hypr"),
     R("SUPER_SEUL", "Clavier et souris", "Touche Super seule", "choix", "rien",
       "Un appui sur Super, sans autre touche, comme la touche Windows. Coupé en mode jeu.",
       [("rien", "Rien"), ("recherche", "Ouvre la recherche (Spotlight)"), ("lanceur", "Ouvre le lanceur d'applis"),
@@ -363,11 +369,14 @@ REGLAGES = [
        ("arch", "Arch"), ("Debian", "Debian"), ("Fedora", "Fedora"), ("ubuntu", "Ubuntu"), ("CachyOS", "CachyOS"),
        ("NixOS", "NixOS"), ("Gentoo", "Gentoo"), ("android", "Android"), ("photo", "Ta photo de profil"), ("aucun", "Aucun")]),
     R("TERMINAL_ACCUEIL", "Terminal", "Accueil à l'ouverture", "ouinon", "oui", "Logo et infos du PC à chaque nouveau terminal."),
-    # Claude Code dans l'île (nc-claude)
-    R("CLAUDE_ILE", "Claude Code", "Claude Code dans l'île (coucou)", "ouinon", "oui",
+    # Claude Code et Antigravity dans l'île (nc-claude)
+    R("CLAUDE_ILE", "Agents IA (coucou)", "Claude Code dans l'île (coucou)", "ouinon", "oui",
       "Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
       groupe="claude"),
-    R("CLAUDE_DEMANDES", "Claude Code", "Ses demandes (autoriser, questions)", "choix", "ile",
+    R("ANTIGRAVITY_ILE", "Agents IA (coucou)", "Antigravity dans l'île aussi", "ouinon", "oui",
+      "L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
+      "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.", groupe="antigravity"),
+    R("CLAUDE_DEMANDES", "Agents IA (coucou)", "Demandes de Claude (autoriser, questions)", "choix", "ile",
       "Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
       [("ile", "Dans l'île quand tu es ailleurs"), ("terminal", "Toujours dans le terminal")]),
     # Mises à jour
@@ -823,6 +832,11 @@ def appliquer(groupes, vals=None):
             if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):
                 quoi = "retirer" if vals.get("CLAUDE_ILE") == "non" else "installer"
                 subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi], capture_output=True)
+        elif g == "antigravity":
+            # Hooks d'Antigravity (~/.gemini/config/hooks.json), seulement s'il est là
+            if os.path.isdir(os.path.join(HOME, ".gemini")) or shutil.which("antigravity") or shutil.which("agy"):
+                quoi = "retirer" if vals.get("ANTIGRAVITY_ILE") == "non" else "installer"
+                subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, "antigravity"], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
         # île, captures, halo : relu tout seul

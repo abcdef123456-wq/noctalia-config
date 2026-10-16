@@ -1,5 +1,5 @@
-// Page « Claude Code » de l'île (activité, comme la musique) : la demande en cours, puis chaque session suivie
-// (projet, état, ce qu'il fait, ses dernières étapes, lignes ajoutées / retirées) ; « Terminal » : y aller.
+// Page « Claude Code » de l'île (activité, comme la musique) : la demande en cours, puis chaque session suivie, de Claude
+// ou d'Antigravity (projet, état, ce qu'il fait, ses dernières étapes, lignes ajoutées / retirées) ; bouton : y aller.
 import QtQuick
 
 Item {
@@ -11,8 +11,9 @@ Item {
         width: parent.width; height: 34
         Row {
             anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; spacing: 9
-            Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 20; tourne: Agents.travaille }
-            Texte { anchors.verticalCenter: parent.verticalCenter; text: "Claude Code"; font.pixelSize: 20; font.weight: Font.Bold }
+            Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 20; tourne: Agents.travaille
+                        agent: Agents.titre === "Antigravity" ? "antigravity" : "claude" }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.titre; font.pixelSize: 20; font.weight: Font.Bold }
         }
         Texte {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -61,17 +62,19 @@ Item {
                                 Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4
                                     color: carte.s.etat === "fini" ? Couleurs.vert : (carte.s.etat === "demande" || carte.s.etat === "terminal"
-                                           ? Couleurs.orange : (carte.enCours ? Agents.couleur : Couleurs.gris5))
+                                           ? Couleurs.orange : (carte.enCours ? Agents.couleurDe(carte.s) : Couleurs.gris5))
                                 }
-                                Texte { anchors.verticalCenter: parent.verticalCenter; text: carte.s.projet || "Claude"; font.pixelSize: 15; font.weight: Font.DemiBold
-                                        width: Math.min(implicitWidth, col.width - 210) }
+                                Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 14; agent: Agents.agent(carte.s)
+                                            tourne: carte.s.etat === "travail" }
+                                Texte { anchors.verticalCenter: parent.verticalCenter; text: carte.s.projet || Agents.nom(carte.s); font.pixelSize: 15; font.weight: Font.DemiBold
+                                        width: Math.min(implicitWidth, col.width - 232) }
                                 Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.libelle(carte.s); secondaire: true; font.pixelSize: 12 }
                             }
                             Rectangle {
                                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                 visible: (carte.s.terminal || 0) > 0
                                 width: 30; height: 24; radius: 12; color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
-                                Ico { anchors.centerIn: parent; nom: "terminal"; taille: 15 }
+                                Ico { anchors.centerIn: parent; nom: Agents.agent(carte.s) === "antigravity" ? "code" : "terminal"; taille: 15 }
                                 MouseArea { id: zt; anchors.fill: parent; hoverEnabled: true; onClicked: { Agents.allerTerminal(carte.s.terminal); Etat.fermer() } }
                             }
                         }
@@ -84,7 +87,7 @@ Item {
                                 readonly property bool derniere: index === Math.min(carte.enCours ? 4 : 2, (carte.s.etapes || []).length) - 1
                                 spacing: 8; opacity: derniere ? 1 : 0.55
                                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: parent.modelData.icone || "build"; taille: 15
-                                      color: parent.derniere && carte.enCours ? Agents.couleur : Couleurs.texteSec }
+                                      color: parent.derniere && carte.enCours ? Agents.couleurDe(carte.s) : Couleurs.texteSec }
                                 Texte { anchors.verticalCenter: parent.verticalCenter; text: parent.modelData.texte; font.pixelSize: 13
                                         width: Math.min(implicitWidth, col.width - 90) }
                                 Texte { anchors.verticalCenter: parent.verticalCenter; visible: (parent.modelData.diff || "") !== ""

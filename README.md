@@ -211,7 +211,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 ```bash
 nc-aide       # à quoi sert chaque commande (nc-aide NOM : le détail)
 nc-sauvegarde # tes réglages dans un fichier (restaurer FICHIER pour les remettre ; --fonds : avec tes fonds)
-nc-claude     # Claude Code dans l'île (ses étapes, sa fin, ses demandes) : installer / retirer
+nc-claude     # Claude Code dans l'île (ses étapes, sa fin, ses demandes) : installer / retirer ; Antigravity aussi : installer antigravity
 nc-diag       # vérifie toute l'installation ; nc-diag rapport : le bilan copié, à envoyer pour avoir de l'aide
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
 nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres,
