@@ -13,14 +13,32 @@ import Quickshell.Io
 import Quickshell.Hyprland
 
 ShellRoot {
+    id: racine
     Variants {
         model: Quickshell.screens
         Ile {}
     }
-    // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : créée seulement quand on l'ouvre
-    Variants {
-        model: Etat.vueFenetres ? Quickshell.screens : []
-        Vue {}
+    // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : chargée seulement à l'ouverture.
+    // Elle utilise la capture d'écran de Quickshell, absente de certains paquets : sans elle, seule la vue manque
+    // (un message le dit) ; déclarée ici directement, c'est toute l'île qui ne se chargeait plus.
+    property Component composantVue: null
+    property var vues: []
+    Connections {
+        target: Etat
+        function onVueFenetresChanged() {
+            racine.vues.forEach(v => v.destroy())
+            racine.vues = []
+            if (!Etat.vueFenetres) return
+            if (!racine.composantVue) racine.composantVue = Qt.createComponent("Vue.qml")
+            if (racine.composantVue.status !== Component.Ready) {
+                console.warn("Vue des fenêtres indisponible : " + racine.composantVue.errorString())
+                Etat.vueFenetres = false
+                Quickshell.execDetached(["notify-send", "-a", "Vue des fenêtres", "Vue des fenêtres indisponible",
+                                         "Ta version de Quickshell n'a pas la capture des fenêtres."])
+                return
+            }
+            racine.vues = Quickshell.screens.map(s => racine.composantVue.createObject(racine, { modelData: s }))
+        }
     }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
