@@ -7,12 +7,14 @@
 local eco = nc.profil.profil == "power-saver"
 nc.flou_actif = not eco
 
+-- Tes choix (nc-reglages) s'ajoutent : un effet coupé par toi le reste dans tous les profils
+nc.flou_actif = nc.flou_actif and nc.reglage("FENETRES_HALO", true)
 hl.config({
-    animations = { enabled = not eco },
+    animations = { enabled = not eco and nc.reglage("FENETRES_ANIMATIONS", true) },
     decoration = {
         dim_inactive = not eco and nc.reglage("FENETRES_ASSOMBRIR", true),
-        blur   = { enabled = not eco },
-        shadow = { enabled = not eco },
+        blur   = { enabled = not eco and nc.reglage("FENETRES_FLOU", true) },
+        shadow = { enabled = not eco and nc.reglage("FENETRES_HALO", true) },
     },
 })
 

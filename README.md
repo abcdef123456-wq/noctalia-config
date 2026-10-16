@@ -135,8 +135,11 @@ service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même
 
 ### Tes raccourcis
 
+Le plus simple : `nc-raccourci` (ou `nc-reglages`, section Raccourcis). Tous les raccourcis y sont listés ; Entrée sur
+l'un d'eux pour changer ses touches (tu appuies sur la nouvelle combinaison) ou le désactiver, « Ajouter un raccourci »
+pour en créer un. En ligne de commande :
+
 ```bash
-nc-raccourci                                       # menu : ajouter, changer, désactiver, annuler
 nc-raccourci ajoute "Super+B" firefox              # Super + B : va à Firefox s'il est ouvert, sinon le lance
 nc-raccourci ajoute "Super+Alt+S" "ile son"        # ouvre la page Son de l'île (aussi : bureau 3, ou une commande)
 nc-raccourci change "Super+Entrée" "Super+T"       # un raccourci de la config sur d'autres touches
@@ -207,8 +210,8 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 ```bash
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
-nc-reglages   # tes réglages (fréquence de l'écran par profil, fenêtres, île, veille, clavier, terminal, captures),
-              # gardés dans ~/.config/nc/reglages.conf : jamais touché par les mises à jour
+nc-reglages   # tes réglages, aux flèches : île, apparence, barre et dock, fenêtres, fonds d'écran, énergie,
+              # clavier et souris, veille, terminal, captures, raccourcis — gardés à chaque mise à jour
 ```
 
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
