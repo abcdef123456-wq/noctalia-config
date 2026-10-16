@@ -339,8 +339,34 @@ REGLAGES = [
     R("CAPTURES_NOTIF", "Captures", "Notification après une capture", "ouinon", "oui", "Avec les boutons Annoter, Supprimer et Ouvrir le dossier."),
 ]
 PAR_CLE = {r.cle: r for r in REGLAGES}
+
+# Réglages qui n'ont de sens qu'avec un certain matériel : cachés sur un PC qui ne l'a pas (PC de bureau : ni batterie,
+# ni couvercle, ni pavé tactile, ni écran intégré). Ils restent utilisables en ligne de commande.
+MATERIEL = {
+    "BATTERIE_ALERTE": "batterie", "HZ_BALANCED_BAT": "batterie", "HALO_BATTERIE": "batterie", "VEILLE_SUSPENSION": "batterie",
+    "COUVERCLE": "couvercle", "COUVERCLE_VERROU": "couvercle",
+    "DEFILEMENT_NATUREL": "pave", "TAPOTER_CLIC": "pave", "GESTES": "pave",
+    "LUMINOSITE_PAS": "ecran", "ECO_BRIGHTNESS_MAX": "ecran",
+    "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
+}
+
+
+def materiel():
+    def existe(motif):
+        import glob
+        return bool(glob.glob(motif))
+    try:
+        entrees = open("/proc/bus/input/devices", encoding="utf-8", errors="ignore").read().lower()
+    except OSError:
+        entrees = ""
+    return {"batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
+            "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*")}
+
+
+_DISPO = materiel()
+VISIBLES = [r for r in REGLAGES if _DISPO.get(MATERIEL.get(r.cle, ""), True)]
 SECTIONS = []
-for _r in REGLAGES:
+for _r in VISIBLES:
     if _r.section not in SECTIONS:
         SECTIONS.append(_r.section)
 SECTIONS.append("Raccourcis")
@@ -892,7 +918,7 @@ class Ecran:
             if self.lignes_r is None:
                 self.lignes_r = raccourcis()
             return self.lignes_r
-        return [r for r in REGLAGES if r.section == SECTIONS[self.sec]]
+        return [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
 
     @staticmethod
     def selectionnable(it):
@@ -935,7 +961,7 @@ class Ecran:
                 continue
             if y >= h - 4:
                 break
-            n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in REGLAGES if r.section == s and r.cle in self.vals)
+            n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in VISIBLES if r.section == s and r.cle in self.vals)
             if i == self.sec:
                 attr = (curses.A_REVERSE | self.ACC | curses.A_BOLD) if self.focus == "sections" else (curses.A_BOLD | self.ACC)
                 e.addstr(y, 1, couper(f" {s}", lg - 3).ljust(lg - 3), attr)
@@ -1423,7 +1449,7 @@ def cli(a):
     vals = lire()
     if a[0] in ("liste", "list", "ls"):
         sec = None
-        for r in REGLAGES:
+        for r in VISIBLES:
             if r.section != sec:
                 print(f"\n  {r.section}")
                 sec = r.section
