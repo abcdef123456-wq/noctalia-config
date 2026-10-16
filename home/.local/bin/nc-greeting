@@ -53,7 +53,25 @@ cut_to() {
   }'
 }
 
-if [ "$cols" -ge 66 ] && [ "$lines" -ge 16 ]; then
+# Logo choisi dans nc-reglages (Terminal → Logo de l'accueil) : celui de ta distribution (image aux couleurs du thème),
+# un logo de fastfetch (Apple, Windows, Tux…, en couleurs du thème), ta photo de profil, ou aucun
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/style.conf" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+choix="$(reglage TERMINAL_LOGO)"; choix="${choix:-distribution}"
+S2=$(jq -r '.mSecondary // .mTertiary // empty' "$HOME/.config/noctalia/colors.json" 2>/dev/null)
+SA="$(ansi "$S2")"; SA="${SA:-$PA}"
+LOGO_OPT=()
+case "$choix" in
+  distribution) ;;
+  aucun) LOGO_OPT=(--logo none) ;;
+  photo) if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$HOME/.face" ]; then
+           LOGO_OPT=(--logo "$HOME/.face" --logo-type kitty-direct --logo-width 20 --logo-height 10)
+         fi ;;
+  *) LOGO_OPT=(--logo "$choix" --logo-type builtin ${PA:+--logo-color-1 "$PA" --logo-color-2 "$SA"} --logo-padding-top 1 --logo-padding-left 2 --logo-padding-right 3) ;;
+esac
+
+if [ "$cols" -ge 66 ] && [ "$lines" -ge 16 ] && [ ${#LOGO_OPT[@]} -gt 0 ]; then
+  exec fastfetch -c "$CFG" "${COL[@]}" "${LOGO_OPT[@]}"
+elif [ "$cols" -ge 66 ] && [ "$lines" -ge 16 ]; then
   if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$LOGO" ]; then
     exec fastfetch -c "$CFG" "${COL[@]}"
   else

@@ -320,6 +320,23 @@ touche("XF86Tools",             cmd("kitty --class nc-reglages -e ~/.local/bin/n
 touche("XF86ScreenSaver",       cmd(barre .. "lock"),         portable, { locked = true })
 touche("XF86Sleep",             cmd("systemctl suspend"),     portable, { locked = true })
 
+-- Super seul (appuyée puis relâchée sans autre touche) : nc-reglages → Clavier et souris → « Touche Super seule »
+-- (rien par défaut). Coupé en mode jeu.
+do
+    local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu", "r")
+    local en_jeu = f ~= nil
+    if f then f:close() end
+    local actions = {
+        recherche = { "~/.local/bin/nc-shell-msg menu", "la recherche (Spotlight)" },
+        lanceur   = { "noctalia msg panel-toggle launcher", "le lanceur d'applis" },
+        centre    = { "qs -c nc-ile ipc call ile basculer 2>/dev/null || noctalia msg panel-toggle control-center", "le centre de contrôle" },
+    }
+    local a = actions[nc.reglage("SUPER_SEUL", "rien")]
+    if a and not en_jeu then
+        touche(SUPER .. " + Super_L", cmd(a[1]), "Système|Super seule : " .. a[2], { release = true })
+    end
+end
+
 -- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint) ; laquelle : nc-reglages, Animations
 touche("XF86PowerOff",          cmd("~/.local/bin/nc-anim bouton"), nil, { locked = true })
 
