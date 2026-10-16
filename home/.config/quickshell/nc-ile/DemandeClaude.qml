@@ -10,14 +10,16 @@ Item {
     onDemChanged: if (dem) vue = dem
     Component.onCompleted: vue = dem
     readonly property bool question: vue !== null && vue.genre === "question"
+    readonly property color teinte: (Agents.ias[vue && vue.agent ? vue.agent : "claude"] || Agents.ias.claude).couleur
     implicitHeight: question ? 78 + 40 * Math.ceil((vue.options || []).length / 2) : 146
 
     component Bouton: Rectangle {
         property string texte: ""
+        property color teinte: Agents.couleur
         property bool principal: false
         signal clic()
         width: Math.max(86, lb.implicitWidth + 28); height: 32; radius: 16
-        color: principal ? (zb.containsMouse ? Qt.lighter(Agents.couleur, 1.12) : Agents.couleur)
+        color: principal ? (zb.containsMouse ? Qt.lighter(teinte, 1.12) : teinte)
                          : (zb.containsMouse ? Couleurs.gris4 : Couleurs.gris2)
         scale: zb.pressed ? 0.94 : 1
         Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
@@ -31,8 +33,9 @@ Item {
     Row {
         id: tete
         x: 18; y: 14; spacing: 8
-        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16 }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Claude Code · " + (d.vue ? d.vue.projet : ""); secondaire: true; font.pixelSize: 12
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; agent: d.vue && d.vue.agent ? d.vue.agent : "claude" }
+        Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
+                text: (Agents.ias[d.vue && d.vue.agent ? d.vue.agent : "claude"] || Agents.ias.claude).titre + " · " + (d.vue ? d.vue.projet : "")
                 width: Math.min(implicitWidth, d.width - 170) }
     }
     Rectangle {
@@ -70,7 +73,7 @@ Item {
             anchors.right: parent.right; spacing: 8
             Bouton { texte: "Refuser"; onClic: d.choisir("non") }
             Bouton { texte: "Toujours"; visible: d.vue !== null && d.vue.toujours === true; onClic: d.choisir("toujours") }
-            Bouton { texte: "Autoriser"; principal: true; onClic: d.choisir("oui") }
+            Bouton { texte: "Autoriser"; principal: true; teinte: d.teinte; onClic: d.choisir("oui") }
         }
         // Question : un bouton par réponse
         Flow {

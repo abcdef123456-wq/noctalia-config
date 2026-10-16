@@ -382,7 +382,7 @@ REGLAGES = [
     R("CLAUDE_ILE", "Agents IA (coucou)", "Claude Code dans l'île (coucou)", "ouinon", "oui",
       "Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
       groupe="claude"),
-    R("CLAUDE_DEMANDES", "Agents IA (coucou)", "Demandes de Claude (autoriser, questions)", "choix", "ile",
+    R("CLAUDE_DEMANDES", "Agents IA (coucou)", "Demandes des IA (autoriser, questions)", "choix", "ile",
       "Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
       [("ile", "Dans l'île quand tu es ailleurs"), ("terminal", "Toujours dans le terminal")]),
     R("ANTIGRAVITY_ILE", "Agents IA (coucou)", "Antigravity dans l'île aussi", "ouinon", "oui",
