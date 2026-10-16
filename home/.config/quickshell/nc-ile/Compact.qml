@@ -1,6 +1,7 @@
 // Contenu de la pilule (île fermée) :
 //   repos   : heure et date ;  musique : pochette, heure, onde sonore (en pause : symbole lecture et titre)
 //   réactions (2 à 3 s) : volume, luminosité, nouveau morceau, chargeur, profil d'énergie, mode jeu
+//   Claude Code (nc-claude) : ce qu'il fait (étincelle qui tourne), « t'attend dans le terminal », « a terminé »
 // largeur : largeur voulue de la pilule ; l'île s'y ajuste avec un ressort.
 import QtQuick
 import Quickshell.Widgets
@@ -9,13 +10,15 @@ import Quickshell.Services.UPower
 Item {
     id: c
     readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
-                                   : (Etat.aMusique ? "musique" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))
+                                   : (Agents.attendTerminal ? "claude"
+                                   : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
     implicitHeight: 30
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
-                                      minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque })[mode] || repos
+                                      minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
+                                      claude: claude, "claude-fini": claudeFini })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -177,6 +180,39 @@ Item {
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueBatterie + " %"; secondaire: true }
         }
+    }
+
+    // ── Claude Code : étincelle qui tourne, l'étape en cours, lignes ajoutées / retirées ──
+    Fondu {
+        id: claude
+        readonly property var s: Agents.principale
+        readonly property bool terminal: Agents.attendTerminal
+        montre: c.mode === "claude"
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; tourne: !claude.terminal; visible: claude.montre || opacity > 0 }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            text: claude.terminal ? "Claude t'attend dans le terminal" : (claude.s ? (claude.s.etape || "Travaille…") : "")
+            font.weight: Font.DemiBold; color: claude.terminal ? Couleurs.orange : Couleurs.texte
+            width: Math.min(implicitWidth, 250)
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !claude.terminal && claude.s !== null && (claude.s.ajouts || 0) + (claude.s.retraits || 0) > 0
+            text: claude.s ? "+" + (claude.s.ajouts || 0) : ""; color: Couleurs.vert; font.pixelSize: 12
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !claude.terminal && claude.s !== null && (claude.s.retraits || 0) > 0
+            text: claude.s ? "−" + (claude.s.retraits || 0) : ""; color: Couleurs.rouge; font.pixelSize: 12
+        }
+    }
+    Fondu {
+        id: claudeFini
+        montre: c.mode === "claude-fini"
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16 }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Claude a terminé"; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.dernierFini; secondaire: true; width: Math.min(implicitWidth, 160) }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "check_circle"; taille: 17; color: Couleurs.vert }
     }
 
     // ── Mode jeu ──

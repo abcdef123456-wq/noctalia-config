@@ -46,12 +46,18 @@ PanelWindow {
     readonly property var tailles: ({
         musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 268), charge: Qt.size(400, 140),
         jeu: Qt.size(400, 140), centre: Qt.size(432, 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410)
+        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410),
+        claude: adaptee("claude", 180)
     })
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
     readonly property bool points: Etat.vues.length > 1 && !recherche
     // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
-    readonly property bool banniere: !ouverte && Notifs.banniere !== null
+    // Demande de Claude Code (autoriser, question) : l'île s'étire en bannière, avant les notifications
+    readonly property bool demandeClaude: !ouverte && Agents.demande !== null
+        && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
+    readonly property int hauteurDemande: Agents.demande && Agents.demande.genre === "question"
+                                          ? 78 + 40 * Math.ceil((Agents.demande.options || []).length / 2) : 146
+    readonly property bool banniere: !ouverte && !demandeClaude && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
                                            + (Notifs.boutons(Notifs.banniere).length > 0 ? 36 : 0)
@@ -59,7 +65,7 @@ PanelWindow {
     // Point d'activité du micro (orange) ou de la caméra (vert), à droite de la pilule, comme sur iPhone
     Rectangle {
         id: pointPrive
-        readonly property bool montre: !fen.ouverte && !fen.banniere && (Etat.microActif || Etat.cameraActive)
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.demandeClaude && (Etat.microActif || Etat.cameraActive)
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
         y: 9 + 15 - height / 2
         width: 8; height: 8; radius: 4
@@ -73,7 +79,10 @@ PanelWindow {
     // Bulle de la seconde activité (minuteur pendant la musique), comme l'île scindée de l'iPhone
     Rectangle {
         id: bulle
-        readonly property bool montre: !fen.ouverte && !fen.banniere && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
+        // Minuteur, sinon Claude Code qui travaille (étincelle), pendant la musique
+        readonly property bool minuteur: Etat.minuteurFin > 0
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.demandeClaude && Etat.aMusique
+                                       && (minuteur || Agents.travaille) && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
         color: Couleurs.fond
@@ -83,6 +92,7 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 200 } }
         Canvas {
             anchors.fill: parent
+            visible: bulle.minuteur
             property real f: Etat.minuteurDuree > 0 ? Etat.minuteurReste * 1000 / Etat.minuteurDuree : 0
             onFChanged: requestPaint()
             onPaint: {
@@ -90,15 +100,16 @@ PanelWindow {
                 c.strokeStyle = String(Couleurs.orange); c.beginPath(); c.arc(15, 15, 11, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
             }
         }
-        Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: Couleurs.orange }
-        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller("minuteur") } }
+        Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: Couleurs.orange; visible: bulle.minuteur }
+        Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && !bulle.minuteur; visible: !bulle.minuteur }
+        MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller(bulle.minuteur ? "minuteur" : "claude") } }
     }
 
     // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
     // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
     Rectangle {
         id: cadre
-        readonly property real e: (fen.ouverte || fen.banniere) && Couleurs.aContour ? 2 : 0
+        readonly property real e: (fen.ouverte || fen.banniere || fen.demandeClaude) && Couleurs.aContour ? 2 : 0
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
@@ -117,9 +128,9 @@ PanelWindow {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
-        width: fen.ouverte ? fen.taille.width : (fen.banniere ? 440 : compact.largeur)
-        height: fen.ouverte ? fen.taille.height : (fen.banniere ? fen.hauteurBanniere : 30)
-        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere ? 32 : 15)
+        width: fen.ouverte ? fen.taille.width : (fen.demandeClaude ? 460 : (fen.banniere ? 440 : compact.largeur))
+        height: fen.ouverte ? fen.taille.height : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))
+        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.demandeClaude ? 32 : 15)
         color: Couleurs.fond                        // fond du terminal (Couleurs.qml)
         Behavior on color { ColorAnimation { duration: 260 } }
         clip: true
@@ -133,8 +144,8 @@ PanelWindow {
             id: compact
             anchors.centerIn: parent
             width: parent.width
-            opacity: fen.ouverte || fen.banniere ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere ? 90 : 220; easing.type: Easing.OutCubic } }
+            opacity: fen.ouverte || fen.banniere || fen.demandeClaude ? 0 : 1
+            Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere || fen.demandeClaude ? 90 : 220; easing.type: Easing.OutCubic } }
         }
 
         // Spotlight : longue capsule de recherche
@@ -172,11 +183,22 @@ PanelWindow {
             }
         }
         Timer { id: garderBanniere; interval: 400 }
+        Loader {
+            anchors.fill: parent
+            active: fen.demandeClaude || garderDemande.running
+            sourceComponent: DemandeClaude {
+                opacity: fen.demandeClaude && ile.height > fen.hauteurDemande * 0.7 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: fen.demandeClaude ? 180 : 90; easing.type: Easing.OutCubic } }
+            }
+        }
+        Timer { id: garderDemande; interval: 400 }
+        Connections { target: fen; function onDemandeClaudeChanged() { if (!fen.demandeClaude) garderDemande.restart() } }
         Connections { target: fen; function onBanniereChanged() { if (!fen.banniere) garderBanniere.restart() } }
 
         MouseArea {
             anchors.fill: parent
-            enabled: !fen.ouverte && !fen.banniere
+            enabled: !fen.ouverte && !fen.banniere && !fen.demandeClaude
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause() : Etat.basculer(fen.modelData.name, false)
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
@@ -238,7 +260,7 @@ PanelWindow {
                     active: pageIle.visible || pageIle.active
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
-                                        calendrier: pCalendrier })[pageIle.modelData] || pCentre
+                                        calendrier: pCalendrier, claude: pClaude })[pageIle.modelData] || pCentre
                 }
             }
         }
@@ -253,6 +275,7 @@ PanelWindow {
         Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
         Component { id: pSysteme; Systeme {} }
         Component { id: pCalendrier; Calendrier {} }
+        Component { id: pClaude; Claude {} }
 
         // Points de page sur le bord droit (comme le Centre de contrôle de l'iPhone)
         Column {

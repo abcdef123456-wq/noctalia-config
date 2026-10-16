@@ -27,6 +27,7 @@ Singleton {
     readonly property var activites: {
         var a = []
         if (aMusique) a.push("musique")
+        if (Agents.aPage || Agents.demande !== null) a.push("claude")      // Claude Code (nc-claude)
         if (minuteurFin > 0) a.push("minuteur")
         if (enCharge) a.push("charge")
         if (jeu) a.push("jeu")

@@ -22,6 +22,7 @@ import json
 import locale
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -322,6 +323,13 @@ REGLAGES = [
     R("TERMINAL_TRAINEE", "Terminal", "Traînée du curseur", "ouinon", "oui", "Le curseur laisse une courte traînée quand il saute.", groupe="terminal"),
     R("TERMINAL_MARGE", "Terminal", "Marge autour du texte", "entier", "10", mini=0, maxi=40, unite="px", groupe="terminal"),
     R("TERMINAL_ACCUEIL", "Terminal", "Accueil à l'ouverture", "ouinon", "oui", "Logo et infos du PC à chaque nouveau terminal."),
+    # Claude Code dans l'île (nc-claude)
+    R("CLAUDE_ILE", "Claude Code", "Claude Code dans l'île", "ouinon", "oui",
+      "Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
+      groupe="claude"),
+    R("CLAUDE_DEMANDES", "Claude Code", "Ses demandes (autoriser, questions)", "choix", "ile",
+      "Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
+      [("ile", "Dans l'île quand tu es ailleurs"), ("terminal", "Toujours dans le terminal")]),
     # Mises à jour
     R("MAJ_VERIFIER", "Mises à jour", "Prévenir des nouvelles versions de la config", "ouinon", "oui",
       "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
@@ -684,6 +692,11 @@ def appliquer(groupes, vals=None):
         elif g == "couvercle":
             subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
             subprocess.run(["systemctl", "--user", "restart", "nc-couvercle.service"], capture_output=True)
+        elif g == "claude":
+            # Hooks de Claude Code ajoutés ou retirés (seulement si Claude Code est là)
+            if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):
+                quoi = "retirer" if vals.get("CLAUDE_ILE") == "non" else "installer"
+                subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
         # île, captures, halo : relu tout seul

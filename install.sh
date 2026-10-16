@@ -1040,6 +1040,14 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   # est refait d'après la nouvelle version de la config
   "$HOME/.local/bin/nc-reglages" appliquer >/dev/null 2>&1 || true
   "$HOME/.local/bin/nc-verrou-place" >/dev/null 2>&1 || true     # écran de verrouillage centré sur l'écran réel
+  # Claude Code dans l'île (comme l'appli coucou) : ses étapes, sa fin, ses demandes ; hooks dans ~/.claude/settings.json
+  if [ "$ILE" = quickshell ] && { have claude || [ -d "$HOME/.claude" ]; } &&
+     ! grep -q "nc-claude hook" "$HOME/.claude/settings.json" 2>/dev/null &&
+     ! grep -qx 'CLAUDE_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
+    info "Claude Code est installé : l'île peut montrer ce qu'il fait et répondre à ses demandes (comme l'appli coucou)."
+    if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer | head -1
+    else printf 'CLAUDE_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
+  fi
   systemctl --user start nc-carousel-thumbs.service >/dev/null 2>&1 || true
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then

@@ -23,6 +23,8 @@ A_TAPER = [
                                                "un ami) ; nc-sauvegarde restaurer FICHIER pour les remettre."),
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
+    ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
+                                    "demandes ; nc-claude installer / retirer."),
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
     ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),
     ("nc-sysinfo", "nc-sysinfo sante", "Infos du PC : modele, ecrans, disques, sante (usure de la batterie)…"),
