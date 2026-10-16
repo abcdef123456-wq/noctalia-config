@@ -210,6 +210,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 ```bash
 nc-aide       # à quoi sert chaque commande (nc-aide NOM : le détail)
+nc-diag       # vérifie toute l'installation ; nc-diag rapport : le bilan copié, à envoyer pour avoir de l'aide
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
 nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres,
               # fonds d'écran, énergie, son et luminosité, clavier et souris, veille et couvercle, terminal,
