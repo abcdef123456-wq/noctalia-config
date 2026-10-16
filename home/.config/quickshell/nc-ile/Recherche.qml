@@ -4,7 +4,9 @@
 // SPOTLIGHT_ENTREE=aller dans nc-reglages).
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
-// Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal.
+// Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal, « ? » question à une IA
+// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander). Une saisie qui commence par
+// un programme (htop, ping…) propose aussi de la lancer dans le terminal.
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -16,7 +18,25 @@ Item {
     id: r
     property bool actif: false
     readonly property int hauteurLigne: 46
-    readonly property int hauteurVoulue: 56 + (resultats.length > 0 ? 6 + resultats.length * hauteurLigne + 8 : 0)
+    readonly property int hauteurVoulue: 56 + (zoneReponse.visible ? zoneReponse.height + 10 : 0)
+                                         + (resultats.length > 0 ? 6 + resultats.length * hauteurLigne + 8 : 0)
+
+    // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
+    property var execs: ({})                 // programmes du PATH (saisie qui commence par une commande)
+    property string nomIA: ""
+    property string questionPosee: ""
+    property string reponse: ""
+    property string commandeIA: ""
+    readonly property bool reflechit: demandeur.running
+    function demander(question) {
+        if (question === "" || demandeur.running) return
+        questionPosee = question; reponse = ""; commandeIA = ""
+        demandeur.command = [Etat.bin + "nc-demander", question]
+        demandeur.running = true
+        chercher()
+    }
+    // Dans le terminal, avec le PATH de l'utilisateur (l'île n'a que celui du système)
+    function lancerCommande(c) { Quickshell.execDetached(["kitty", "--hold", "sh", "-c", "PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; " + c]) }
 
     property var applis: []
     property var fenetres: []
@@ -36,6 +56,8 @@ Item {
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
+        if (Object.keys(execs).length === 0) lireExecs.running = true
+        if (nomIA === "") lireIA.running = true
         fichierUsage.reload()
         champ.forceActiveFocus()
         prendreClavier.essais = 0
@@ -56,6 +78,29 @@ Item {
     Connections { target: Etat; function onValiderRecherche() { if (r.actif) r.valider(r.sel, false) } }
 
     // ── Sources ──
+    Process {
+        id: lireExecs
+        command: ["sh", "-c", "IFS=:; for d in $HOME/.local/bin:$HOME/bin:$PATH; do ls -1 \"$d\" 2>/dev/null; done | sort -u"]
+        stdout: StdioCollector { onStreamFinished: { var e = {}; text.split("\n").forEach(x => { if (x) e[x] = true }); r.execs = e } }
+    }
+    Process {
+        id: lireIA
+        command: [Etat.bin + "nc-demander", "--ia"]
+        stdout: StdioCollector { onStreamFinished: r.nomIA = text.trim() || "-" }
+    }
+    Process {
+        id: demandeur
+        onRunningChanged: r.chercher()
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var l = text.trim().split("\n")
+                var c = l.length && l[l.length - 1].startsWith("$ ") ? l.pop().slice(2).trim() : ""
+                r.reponse = l.join("\n").trim() || "Pas de réponse."
+                r.commandeIA = c
+                r.chercher()
+            }
+        }
+    }
     Process {
         id: lireApplis
         command: [Etat.bin + "nc-apps", "list"]
@@ -221,10 +266,23 @@ Item {
                 return
             }
         }
+        if (q.startsWith("?")) {
+            var question = q.slice(1).trim()
+            if (r.reponse !== "" && question === r.questionPosee) {
+                let cmdIA = r.commandeIA
+                resultats = cmdIA === "" ? [] : [{ titre: cmdIA, sous: "Lancer dans le terminal", glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]
+            } else {
+                resultats = r.reflechit ? []
+                          : nomIA === "-" ? [{ titre: "Aucune IA installée pour répondre", sous: "Claude, opencode, Gemini ou Qwen", glyphe: "block", garder: true, f: () => {} }]
+                          : [{ titre: question || "Pose ta question", sous: r.reflechit ? (nomIA + " réfléchit…") : "Demander à " + (nomIA || "l'IA"),
+                               glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
+            }
+            return
+        }
         if (q.startsWith(">")) {
             var c = q.slice(1).trim()
             resultats = c === "" ? [] : [{ titre: c, sous: "Commande dans le terminal", glyphe: "terminal",
-                                          f: () => Quickshell.execDetached(["kitty", "--hold", "sh", "-c", c]) }]
+                                          f: () => r.lancerCommande(c) }]
             return
         }
 
@@ -291,7 +349,17 @@ Item {
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
         }
         out.sort((x, y) => y.s - x.s)
-        resultats = out.slice(0, 6)
+        out = out.slice(0, 6)
+        // Saisie qui commence par un programme (« htop », « ping google.fr ») : la lancer dans le terminal
+        var prog = q.split(/\s+/)[0]
+        if (execs[prog] && !q.startsWith("/")) {
+            let commande = q
+            out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? 5 : 4)
+            var lancerItem = { titre: commande, sous: "Lancer dans le terminal", glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
+            // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
+            if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
+        }
+        resultats = out
         if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
     }
 
@@ -343,6 +411,7 @@ Item {
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
+        if (x.garder) { x.f(); return }        // question à l'IA : le Spotlight reste ouvert pour la réponse
         // Action d'abord : fermer l'île décharge le Spotlight tout de suite (ses fonctions n'existeraient plus)
         if (nouveau && x.nouveau) x.nouveau(); else x.f()
         Etat.fermer()
@@ -371,15 +440,44 @@ Item {
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Rechercher"; secondaire: true; font.pixelSize: 19
+                text: "Rechercher  ·  > commande  ·  ? question à l'IA"; secondaire: true; font.pixelSize: 19
             }
+        }
+    }
+
+    // Réponse de l'IA (« ? … »)
+    Rectangle {
+        id: zoneReponse
+        visible: r.q.startsWith("?") && (r.reflechit || r.reponse !== "")
+        anchors.top: barre.bottom; anchors.topMargin: 4
+        x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
+        height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0) + 14, 320)
+        clip: true
+        Row {
+            id: enTete
+            x: 14; y: 12; spacing: 8
+            Etincelle {
+                anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: r.reflechit
+                agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen" })[r.nomIA] || "claude"
+            }
+            Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
+                    text: r.reflechit ? r.nomIA + " réfléchit…" : r.nomIA }
+        }
+        Text {
+            id: texteReponse
+            anchors.top: enTete.bottom; anchors.topMargin: 6
+            x: 14; width: parent.width - 28
+            text: r.reflechit ? "" : r.reponse
+            visible: !r.reflechit
+            color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
+            textFormat: Text.PlainText
         }
     }
 
     // Résultats
     Column {
         id: liste
-        anchors.top: barre.bottom; anchors.topMargin: 6
+        anchors.top: zoneReponse.visible ? zoneReponse.bottom : barre.bottom; anchors.topMargin: 6
         x: 8; width: parent.width - 16
         Repeater {
             model: r.resultats
