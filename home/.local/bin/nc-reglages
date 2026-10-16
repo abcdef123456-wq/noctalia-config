@@ -345,6 +345,11 @@ def regler(vals, cle, v):
     """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
     r = PAR_CLE[cle]
     v = r.valider(v)
+    # Fichier relu juste avant d'écrire : un réglage changé ailleurs entre-temps (autre fenêtre de nc-reglages,
+    # ligne de commande) n'est pas écrasé ; vals est mis à jour sur place avec l'état du fichier
+    frais = lire()
+    vals.clear()
+    vals.update(frais)
     if v == r.defaut:
         vals.pop(cle, None)
     else:
