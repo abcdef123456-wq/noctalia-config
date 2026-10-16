@@ -35,6 +35,7 @@ Singleton {
     }
     readonly property var vues: activites.concat(["centre", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
+                                                 meteo.temp !== undefined ? ["meteo"] : [],
                                                  minuteurFin > 0 ? [] : ["minuteur"])
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
@@ -100,6 +101,18 @@ Singleton {
         var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60
         return (h > 0 ? h + ":" + String(m).padStart(2, "0") : String(m)) + ":" + String(x).padStart(2, "0")
     }
+
+    // ── Météo (nc-meteo : Open-Meteo, gardée 20 min en cache) : pilule au repos et page Météo ──
+    property var meteo: ({})
+    readonly property bool meteoPilule: Reglages.val("ILE_METEO", "oui") !== "non" && meteo.temp !== undefined
+    Process {
+        id: lireMeteo
+        command: [etat.bin + "nc-meteo"]
+        stdout: StdioCollector { onStreamFinished: { try { var m = JSON.parse(text); if (m.temp !== undefined) etat.meteo = m } catch (e) {} } }
+    }
+    Timer { interval: 10 * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"; triggeredOnStart: true
+            onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
+    Connections { target: Reglages; function onValeursChanged() { if (!lireMeteo.running) lireMeteo.running = true } }
 
     // ── Café : empêche la mise en veille (Noctalia) ──
     property bool cafe: false
