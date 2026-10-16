@@ -1079,8 +1079,11 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     else printf 'CLAUDE_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
   fi
   # Antigravity (Google) aussi : ce que fait son agent et quand il a fini ; hooks dans ~/.gemini/config/hooks.json
-  if [ "$ILE" = quickshell ] && { have antigravity || have agy || [ -d "$HOME/.gemini" ]; } &&
-     ! grep -q "nc-claude.* agy " "$HOME/.gemini/config/hooks.json" 2>/dev/null &&
+  # (déjà là : remis au format du jour sans rien demander)
+  if [ "$ILE" = quickshell ] && grep -q "nc-claude.* agy " "$HOME/.gemini/config/hooks.json" 2>/dev/null &&
+     ! grep -qx 'ANTIGRAVITY_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
+    "$HOME/.local/bin/nc-claude" installer antigravity >/dev/null 2>&1 || true
+  elif [ "$ILE" = quickshell ] && { have antigravity || have agy || [ -x "$HOME/.local/bin/agy" ] || [ -d "$HOME/.gemini" ] || [ -d "$HOME/.antigravity" ]; } &&
      ! grep -qx 'ANTIGRAVITY_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
     info "Antigravity est installé : l'île peut montrer ce que fait son agent et quand il a fini."
     if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer antigravity | head -1
