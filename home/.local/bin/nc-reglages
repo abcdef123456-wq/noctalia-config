@@ -289,6 +289,11 @@ REGLAGES = [
     # Fonds d'écran
     R("FONDS_ROTATION", "Fonds d'écran", "Changer de fond automatiquement", "ouinon", "oui", groupe="noctalia"),
     R("FONDS_INTERVALLE", "Fonds d'écran", "Toutes les", "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
+    R("FOND_ANIME", "Fonds d'écran", "Fond animé", "choix", "non",
+      "Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. En pause dès qu'une "
+      "fenêtre est ouverte, en mode Économie et en mode jeu.",
+      [("non", "Non"), ("aurore", "Aurore")]),
+    R("FOND_ANIME_BATTERIE", "Fonds d'écran", "Fond animé aussi sur batterie", "ouinon", "non", "Consomme un peu plus."),
     R("FONDS_DOSSIER", "Fonds d'écran", "Dossier des fonds d'écran", "dossier", "~/Pictures/Wallpapers", groupe="noctalia"),
     # Énergie
     R("HZ_PERFORMANCE", "Énergie", "Écran en Performance", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),

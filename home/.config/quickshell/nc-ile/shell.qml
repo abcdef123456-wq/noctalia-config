@@ -17,6 +17,11 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
+    // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
+    Variants {
+        model: Reglages.val("FOND_ANIME", "non") === "aurore" ? Quickshell.screens : []
+        Fond {}
+    }
 
     IpcHandler {
         target: "ile"

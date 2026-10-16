@@ -6,6 +6,7 @@ import Quickshell.Io
 Item {
     id: j
     property var m: ({})
+
     Process {
         id: mesure
         command: [Etat.bin + "nc-ile-etat", "jeu"]
@@ -38,28 +39,19 @@ Item {
         onClic: Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"])
     }
 
-    // Mesures : une tuile par valeur ; la température vire à l'orange puis au rouge
-    component Tuile: Rectangle {
-        property string titre: ""
-        property string valeur: "–"
-        property string icone: ""
-        property color teinte: Couleurs.texte
-        width: (j.width - 10) / 2; height: 62; radius: 16; color: Couleurs.carte
-        Ico { x: 12; y: 10; nom: parent.icone; taille: 16; color: Couleurs.texteSec }
-        Texte { x: 34; y: 9; text: parent.titre; secondaire: true; font.pixelSize: 12 }
-        Texte { x: 12; y: 30; text: parent.valeur; font.pixelSize: 20; font.weight: Font.DemiBold; color: parent.teinte }
-    }
     function chaleur(t) { return t >= 85 ? Couleurs.rouge : (t >= 72 ? Couleurs.orange : Couleurs.texte) }
     readonly property bool gpuVeille: m.gpu === "veille"
     Grid {
+        id: grille
         anchors.top: tete.bottom; anchors.topMargin: 16
         columns: 2; spacing: 10
-        Tuile { icone: "memory"; titre: "Processeur"; valeur: j.m.cpu !== undefined ? j.m.cpu + " %" : "–" }
-        Tuile { icone: "device_thermostat"; titre: "Processeur"; valeur: j.m.cpu_temp !== undefined ? j.m.cpu_temp + " °C" : "–"
+        readonly property real l: (j.width - 10) / 2
+        TuileJeu { width: grille.l; icone: "memory"; titre: "Processeur"; valeur: j.m.cpu !== undefined ? j.m.cpu + " %" : "–" }
+        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: "Processeur"; valeur: j.m.cpu_temp !== undefined ? j.m.cpu_temp + " °C" : "–"
                 teinte: j.chaleur(parseInt(j.m.cpu_temp) || 0) }
-        Tuile { icone: "developer_board"; titre: j.m.gpu_nom || "Carte graphique"
+        TuileJeu { width: grille.l; icone: "developer_board"; titre: j.m.gpu_nom || "Carte graphique"
                 valeur: j.gpuVeille ? "en veille" : (j.m.gpu !== undefined ? j.m.gpu + " %" + (j.m.gpu_watts ? " · " + j.m.gpu_watts + " W" : "") : "–") }
-        Tuile { icone: "device_thermostat"; titre: "Carte graphique"; valeur: j.m.gpu_temp !== undefined ? j.m.gpu_temp + " °C" : "–"
+        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: "Carte graphique"; valeur: j.m.gpu_temp !== undefined ? j.m.gpu_temp + " °C" : "–"
                 teinte: j.chaleur(parseInt(j.m.gpu_temp) || 0) }
     }
 }
