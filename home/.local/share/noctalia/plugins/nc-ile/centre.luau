@@ -316,7 +316,7 @@ local function pied()
     action("bell-ringing", "Notifications et agenda", { "noctalia", "msg", "panel-toggle", "control-center" }),
     action("settings", "Réglages de la barre", { "noctalia", "msg", "settings-open" }),
     action("lock", "Verrouiller", { "noctalia", "msg", "session", "lock" }),
-    action("power", "Éteindre, redémarrer…", { "noctalia", "msg", "panel-toggle", "session-panel" }),
+    action("power", "Éteindre, redémarrer…", { "noctalia", "msg", "panel-toggle", "session" }),
   })
 end
 

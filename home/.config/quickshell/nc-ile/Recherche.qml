@@ -131,7 +131,7 @@ Item {
     readonly property var actions: [
         { t: "Verrouiller", k: "verrouiller lock écran", g: "lock", f: () => Etat.faire(["noctalia", "msg", "session", "lock"]) },
         { t: "Mettre en veille", k: "veille suspend dormir", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
-        { t: "Éteindre, redémarrer…", k: "éteindre redémarrer arrêt shutdown reboot quitter session", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session-panel"]) },
+        { t: "Éteindre, redémarrer…", k: "éteindre redémarrer arrêt shutdown reboot quitter session", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session"]) },
         { t: "Mode jeu", k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
         { t: "Économie d'énergie", k: "économie batterie eco énergie", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
         { t: "Équilibré", k: "équilibré énergie normal", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },

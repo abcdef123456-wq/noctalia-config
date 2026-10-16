@@ -14,16 +14,10 @@ PID="$RUN/nc-couvercle-inactivite.pid"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 mode="$(reglage COUVERCLE)"; [ "$mode" = ecran ] || mode=veille
 
-ecrans() {   # ecrans on|off : écran du portable seul si un écran externe est branché, sinon tous
-  local tous internes m
-  tous="$(hyprctl monitors -j 2>/dev/null | jq -r '.[].name' 2>/dev/null)"
-  internes="$(grep -E '^(eDP|LVDS|DSI)' <<< "$tous")"
-  if [ -n "$internes" ] && [ "$internes" != "$tous" ]; then
-    while IFS= read -r m; do hyprctl dispatch "hl.dsp.dpms({ action = \"$1\", monitor = \"$m\" })" >/dev/null; done <<< "$internes"
-  else
-    hyprctl dispatch "hl.dsp.dpms({ action = \"$1\" })" >/dev/null
-  fi
-}
+tous="$(hyprctl monitors all -j 2>/dev/null | jq -r '.[].name' 2>/dev/null)"
+internes="$(grep -E '^(eDP|LVDS|DSI)' <<< "$tous")"
+externe=0; [ -n "$internes" ] && [ "$internes" != "$tous" ] && externe=1
+couvercle_ferme() { grep -qs closed /proc/acpi/button/lid/*/state; }
 
 arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep »)
   local p
@@ -39,6 +33,12 @@ case "${1:-}" in
       --why="Couvercle fermé : l'écran s'éteint, le PC continue de tourner (nc-reglages)" sleep infinity ;;
   ferme)
     [ "$mode" = ecran ] || exit 0
+    if [ "$externe" = 1 ]; then
+      # Écran externe : on continue de travailler dessus ; l'écran du portable est retiré (ni pointeur ni fenêtres
+      # dessous, ne se rallume pas à la première touche), sans verrouiller
+      while IFS= read -r m; do hyprctl eval "hl.monitor({ output = '$m', disabled = true })" >/dev/null; done <<< "$internes"
+      exit 0
+    fi
     [ "$(reglage COUVERCLE_VERROU)" = non ] || loginctl lock-session
     # Pas de veille pour inactivité tant que le couvercle est fermé (hypridle respecte ce verrou)
     arreter
@@ -46,9 +46,15 @@ case "${1:-}" in
       sleep infinity >/dev/null 2>&1 &
     echo $! > "$PID"
     sleep 1                                   # le verrouillage s'affiche avant que l'écran s'éteigne
-    ecrans off ;;
+    couvercle_ferme || { arreter; exit 0; }   # rouvert entre-temps
+    hyprctl dispatch 'hl.dsp.dpms({ action = "off" })' >/dev/null ;;
   ouvre)
     arreter
-    ecrans on ;;
+    # Écran du portable retiré (écran externe) : la config des écrans (nc/ecrans.lua) le remet ; sinon il est rallumé
+    if hyprctl monitors all -j 2>/dev/null | jq -e '.[] | select((.name | test("^(eDP|LVDS|DSI)")) and .disabled)' >/dev/null 2>&1; then
+      hyprctl reload >/dev/null
+    else
+      hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
+    fi ;;
   *) sed -n '2,11p' "$0"; exit 1 ;;
 esac

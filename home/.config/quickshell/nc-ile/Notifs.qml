@@ -39,7 +39,7 @@ Singleton {
             if (Reglages.val("ILE_BANNIERES", "oui") === "non" && notif.urgency !== NotificationUrgency.Critical) return
             n.banniere = notif
             fin.interval = notif.urgency === NotificationUrgency.Critical ? 12000
-                         : Math.max(2, Math.min(30, parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "5.5")) || 5.5)) * 1000
+                         : Math.max(2, Math.min(30, parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "5")) || 5)) * 1000
             fin.restart()
         }
     }
