@@ -32,6 +32,7 @@ HZ_BALANCED_AC|Énergie|Écran en Équilibré, sur secteur|hz||max|Fréquence de
 HZ_BALANCED_BAT|Énergie|Écran en Équilibré, sur batterie|hz||max|Fréquence de l'écran du portable dans ce profil.
 HZ_ECO|Énergie|Écran en Économie|hz||low|Fréquence de l'écran du portable dans ce profil.
 ECO_BRIGHTNESS_MAX|Énergie|Luminosité maximale en Économie|entier|0:100:%|40|0 : ne pas limiter.
+HALO_BATTERIE|Énergie|Halo musical sur batterie|ouinon||non|Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus). En Économie, jamais.
 FENETRES_ESPACE|Fenêtres|Espace entre les fenêtres|entier|0:40:px|4|
 FENETRES_MARGE|Fenêtres|Marge au bord de l'écran|entier|0:60:px|10|
 FENETRES_BORDURE|Fenêtres|Épaisseur de la bordure|entier|0:8:px|2|

@@ -3,8 +3,8 @@
 
 Tourne en service (nc-pouls.service) : dès qu'un lecteur joue (Spotify, navigateur, mpv… vus par playerctl), il
 écoute la sortie son avec cava et transmet le niveau des basses à Hyprland (nc.halo, dans nc/automatismes.lua).
-Rien ne se passe en profil Économie ni en mode jeu, ni sur batterie hors profil Performance ; sans musique, cava est
-arrêté (aucun coût).
+Rien ne se passe en profil Économie ni en mode jeu, ni sur batterie hors profil Performance (sauf avec le réglage
+HALO_BATTERIE=oui de nc-reglages) ; sans musique, cava est arrêté (aucun coût).
 
   nc-pouls          service (lancé par systemd)
   nc-pouls demo     8 secondes de pulsation de démonstration, sans musique
@@ -22,6 +22,7 @@ import time
 
 RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 PROFIL = os.path.expanduser("~/.config/hypr/nc/profil.lua")
+REGLAGES = os.path.expanduser("~/.config/nc/reglages.conf")
 CAVA_CONF = """[general]
 bars = 8
 framerate = 40
@@ -66,8 +67,16 @@ def halo(n):
     hypr(f"eval nc.halo({n:.2f})")
 
 
+def halo_sur_batterie():
+    """Réglage HALO_BATTERIE (nc-reglages) : halo aussi sur batterie, en Équilibré."""
+    try:
+        return re.search(r"^HALO_BATTERIE=\"?oui", open(REGLAGES).read(), re.M) is not None
+    except OSError:
+        return False
+
+
 def autorise():
-    """Pas en Économie, pas en mode jeu, pas sur batterie hors Performance."""
+    """Pas en Économie, pas en mode jeu, pas sur batterie hors Performance (sauf réglage HALO_BATTERIE)."""
     if os.path.exists(f"{RUN}/nc-mode-jeu"):
         return False
     try:
@@ -76,7 +85,7 @@ def autorise():
         return True
     profil = (re.search(r'profil\s*=\s*"([a-z-]+)"', t) or [None, "balanced"])[1]
     batterie = re.search(r"batterie\s*=\s*true", t) is not None
-    return profil != "power-saver" and (not batterie or profil == "performance")
+    return profil != "power-saver" and (not batterie or profil == "performance" or halo_sur_batterie())
 
 
 def musique():
