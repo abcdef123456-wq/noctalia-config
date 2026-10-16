@@ -43,6 +43,16 @@ Item {
         attendre(f[1])
         Etat.faire(f[4] === "1" ? ["nmcli", "con", "up", "id", f[1]] : ["nmcli", "dev", "wifi", "connect", f[1]])
     }
+    // Connexion avec mot de passe. Refusée (mauvais mot de passe, réseau trop loin) : on le dit, et le profil à moitié
+    // créé par nmcli est effacé (sinon le réseau passait pour « Enregistré » et ne redemandait plus le mot de passe)
+    function connecterAvec(mdp) {
+        if (saisie === "" || mdp === "") return
+        attendre(saisie)
+        Etat.faire(["sh", "-c", "nmcli dev wifi connect \"$1\" password \"$2\" >/dev/null 2>&1 || { nmcli con delete id \"$1\" >/dev/null 2>&1; "
+                    + "notify-send -a Wi-Fi -i network-wireless-offline \"Connexion impossible à $1\" \"Mot de passe incorrect, ou réseau trop loin.\"; }",
+                    "sh", saisie, mdp])
+        saisie = ""
+    }
     function basculerBt(f) {
         attendre(f[0])
         if (f[2] === "1") Etat.faire(["bluetoothctl", "disconnect", f[0]])
@@ -104,42 +114,52 @@ Item {
                     onClicDroit: Etat.faire(["nmcli", "con", "down", "id", modelData.champs[1]])
                 }
             }
+            // Mot de passe du réseau choisi : hors de la liste, relue toutes les 2 s (dedans, le champ était recréé à
+            // chaque relecture et ce qu'on avait tapé s'effaçait)
+            Column {
+                visible: p.wifi && p.allume && p.saisie !== ""
+                width: p.width; spacing: 6
+                Titre { text: "Mot de passe de « " + p.saisie + " »" }
+                Rectangle {
+                    width: parent.width; height: 40; radius: 12; color: Couleurs.gris2
+                    border.color: Couleurs.accent; border.width: 1.5
+                    TextInput {
+                        id: mdp
+                        anchors.left: parent.left; anchors.leftMargin: 14; anchors.right: voir.left; anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Couleurs.texte; font.pixelSize: 14; clip: true
+                        echoMode: voir.montre ? TextInput.Normal : TextInput.Password
+                        onAccepted: p.connecterAvec(text)
+                        Keys.onEscapePressed: p.saisie = ""
+                        Texte { visible: mdp.text === ""; text: "Mot de passe, puis Entrée"; secondaire: true; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    // Afficher / masquer ce qu'on tape
+                    Ico {
+                        id: voir
+                        property bool montre: false
+                        anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                        nom: montre ? "visibility_off" : "visibility"; taille: 17; color: Couleurs.texteSec
+                        MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: voir.montre = !voir.montre }
+                    }
+                }
+            }
+            Connections {
+                target: p
+                function onSaisieChanged() { mdp.text = ""; voir.montre = false; if (p.saisie !== "") mdp.forceActiveFocus() }
+            }
             Titre { text: "Autres réseaux"; visible: p.wifi && p.allume }
             Texte { visible: p.wifi && p.allume && p.elements.length === 0; text: "Recherche des réseaux…"; secondaire: true; height: 34; leftPadding: 8 }
             Repeater {
                 model: p.wifi && p.allume ? p.autres : []
-                Column {
+                Ligne {
                     required property var modelData
-                    width: p.width; spacing: 2
-                    Ligne {
-                        titre: modelData.champs[1]
-                        sous: modelData.champs[4] === "1" ? "Enregistré" : ""
-                        icone: p.iconeWifi(modelData.champs)
-                        droite: modelData.champs[3] === "1" ? "lock" : ""
-                        attente: p.attente[modelData.champs[1]] === true
-                        onClic: p.connecterWifi(modelData.champs)
-                        onClicDroit: if (modelData.champs[4] === "1") Etat.faire(["nmcli", "con", "delete", "id", modelData.champs[1]])
-                    }
-                    // Mot de passe du réseau choisi
-                    Rectangle {
-                        visible: p.saisie === modelData.champs[1]
-                        width: parent.width; height: 40; radius: 12; color: Couleurs.gris2
-                        border.color: Couleurs.accent; border.width: 1.5
-                        TextInput {
-                            id: mdp
-                            anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: Couleurs.texte; font.pixelSize: 14; echoMode: TextInput.Password
-                            onVisibleChanged: if (visible) { text = ""; forceActiveFocus() }
-                            onAccepted: {
-                                p.attendre(modelData.champs[1])
-                                Etat.faire(["nmcli", "dev", "wifi", "connect", modelData.champs[1], "password", text])
-                                p.saisie = ""
-                            }
-                            Keys.onEscapePressed: p.saisie = ""
-                            Texte { visible: mdp.text === ""; text: "Mot de passe, puis Entrée"; secondaire: true; anchors.verticalCenter: parent.verticalCenter }
-                        }
-                    }
+                    titre: modelData.champs[1]
+                    sous: p.saisie === modelData.champs[1] ? "Mot de passe demandé" : (modelData.champs[4] === "1" ? "Enregistré" : "")
+                    icone: p.iconeWifi(modelData.champs)
+                    droite: modelData.champs[3] === "1" ? "lock" : ""
+                    attente: p.attente[modelData.champs[1]] === true
+                    onClic: p.connecterWifi(modelData.champs)
+                    onClicDroit: if (modelData.champs[4] === "1") Etat.faire(["nmcli", "con", "delete", "id", modelData.champs[1]])
                 }
             }
 
