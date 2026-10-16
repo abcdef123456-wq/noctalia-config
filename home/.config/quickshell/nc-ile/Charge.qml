@@ -8,13 +8,13 @@ Item {
     Row {
         anchors.verticalCenter: parent.verticalCenter; spacing: 18
         Rectangle {
-            width: 76; height: 76; radius: 38; color: "#0d3318"
-            Ico { anchors.centerIn: parent; nom: "bolt"; taille: 40; color: "#30d158" }
+            width: 76; height: 76; radius: 38; color: Couleurs.fondVert
+            Ico { anchors.centerIn: parent; nom: "bolt"; taille: 40; color: Couleurs.vert }
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3
             Texte { text: "En charge"; secondaire: true; font.pixelSize: 14 }
-            Texte { text: Etat.pourcent + " %"; font.pixelSize: 38; font.weight: Font.DemiBold; color: "#30d158" }
+            Texte { text: Etat.pourcent + " %"; font.pixelSize: 38; font.weight: Font.DemiBold; color: Couleurs.vert }
             Texte {
                 secondaire: true
                 text: charge.restant > 60

@@ -63,7 +63,7 @@ PanelWindow {
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
         y: 9 + 15 - height / 2
         width: 8; height: 8; radius: 4
-        color: Etat.cameraActive ? "#30d158" : "#ff9f0a"
+        color: Etat.cameraActive ? Couleurs.vert : Couleurs.orange
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
         Behavior on opacity { NumberAnimation { duration: 250 } }
@@ -76,7 +76,7 @@ PanelWindow {
         readonly property bool montre: !fen.ouverte && !fen.banniere && Etat.aMusique && Etat.minuteurFin > 0 && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
-        color: Couleurs.fondCompact
+        color: Couleurs.fond
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
         Behavior on x { SpringAnimation { spring: 3.4; damping: 0.36 } }
@@ -87,11 +87,30 @@ PanelWindow {
             onFChanged: requestPaint()
             onPaint: {
                 var c = getContext("2d"); c.reset(); c.lineWidth = 2.5; c.lineCap = "round"
-                c.strokeStyle = "#ff9f0a"; c.beginPath(); c.arc(15, 15, 11, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
+                c.strokeStyle = String(Couleurs.orange); c.beginPath(); c.arc(15, 15, 11, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
             }
         }
-        Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: "#ff9f0a" }
+        Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: Couleurs.orange }
         MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller("minuteur") } }
+    }
+
+    // Contour de l'île ouverte : le dégradé de la bordure des fenêtres (comme une fenêtre active), dessiné derrière
+    // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
+    Rectangle {
+        id: cadre
+        readonly property real e: (fen.ouverte || fen.banniere) && Couleurs.aContour ? 2 : 0
+        x: ile.x - e; y: ile.y - e
+        width: ile.width + 2 * e; height: ile.height + 2 * e
+        radius: ile.radius + e
+        visible: e > 0
+        opacity: e > 0 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
+            GradientStop { position: 0.5; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1] }
+            GradientStop { position: 1; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2] }
+        }
     }
 
     Rectangle {
@@ -101,10 +120,7 @@ PanelWindow {
         width: fen.ouverte ? fen.taille.width : (fen.banniere ? 440 : compact.largeur)
         height: fen.ouverte ? fen.taille.height : (fen.banniere ? fen.hauteurBanniere : 30)
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere ? 32 : 15)
-        // Presque noire en pilule ; ouverte, teintée par le fond d'écran avec un fin liseré (voir Couleurs.qml)
-        color: fen.ouverte || fen.banniere ? Couleurs.fond : Couleurs.fondCompact
-        border.width: fen.ouverte || fen.banniere ? 1 : 0
-        border.color: Couleurs.lisere
+        color: Couleurs.fond                        // fond du terminal (Couleurs.qml)
         Behavior on color { ColorAnimation { duration: 260 } }
         clip: true
 
@@ -243,7 +259,7 @@ PanelWindow {
                     required property int index
                     readonly property bool active: modelData === Etat.vueActive
                     width: 6; height: active ? 14 : 6; radius: 3
-                    color: active ? "white" : Couleurs.gris5
+                    color: active ? Couleurs.texte : Couleurs.gris5
                     Behavior on height { SpringAnimation { spring: 5; damping: 0.5 } }
                     MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller(parent.modelData) }
                 }

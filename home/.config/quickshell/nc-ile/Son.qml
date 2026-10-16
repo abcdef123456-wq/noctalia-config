@@ -74,10 +74,10 @@ Item {
         signal change(real v)
         height: 18
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Couleurs.gris3 }
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: 2; color: "white" }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: bouton.x + bouton.width / 2; height: 4; radius: 2; color: Couleurs.texte }
         Rectangle {
             id: bouton
-            width: 16; height: 16; radius: 8; color: "white"
+            width: 16; height: 16; radius: 8; color: Couleurs.texte
             anchors.verticalCenter: parent.verticalCenter
             x: (f.width - width) * Math.max(0, Math.min(1, f.valeur))
         }
@@ -94,10 +94,10 @@ Item {
         id: it
         property bool allume: false
         signal bascule()
-        width: 46; height: 28; radius: 14; color: allume ? "#30d158" : Couleurs.gris3
+        width: 46; height: 28; radius: 14; color: allume ? Couleurs.vert : Couleurs.gris3
         Behavior on color { ColorAnimation { duration: 180 } }
         Rectangle {
-            width: 24; height: 24; radius: 12; color: "white"; y: 2; x: it.allume ? 20 : 2
+            width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2; x: it.allume ? 20 : 2
             Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
         }
         MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: it.bascule() }
@@ -155,7 +155,7 @@ Item {
                     id: mic
                     width: parent.width; height: 92
                     readonly property bool coupe: son.micro && son.micro.audio ? son.micro.audio.muted : true
-                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? "#ff453a" : Couleurs.texteDoux }
+                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? Couleurs.rouge : Couleurs.texteDoux }
                     Column {
                         x: 46; y: 9; width: parent.width - 46 - 70
                         Texte { text: son.micro ? son.nomAppareil(son.micro, true) : ""; font.pixelSize: 14; width: parent.width }

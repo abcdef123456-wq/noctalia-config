@@ -40,13 +40,13 @@ Item {
                     width: ca.width / 7; height: 40
                     Rectangle {
                         anchors.centerIn: parent; width: 34; height: 34; radius: 17
-                        color: parent.aujourdhui ? "#ff453a" : "transparent"
+                        color: parent.aujourdhui ? Couleurs.rouge : "transparent"
                     }
                     Texte {
                         anchors.centerIn: parent; visible: parent.jour > 0
                         text: parent.jour; font.pixelSize: 15
                         font.weight: parent.aujourdhui ? Font.Bold : Font.Normal
-                        color: parent.aujourdhui ? "white" : ((index % 7) >= 5 ? Couleurs.texteSec : "white")
+                        color: parent.aujourdhui ? Couleurs.surCouleur : ((index % 7) >= 5 ? Couleurs.texteSec : Couleurs.texte)
                     }
                 }
             }

@@ -58,7 +58,7 @@ Item {
                     width: 3; radius: 1.5
                     height: 6 + Etat.bandes[index] * 10
                     anchors.verticalCenter: parent.verticalCenter
-                    color: "white"
+                    color: Couleurs.texte
                     Behavior on height { NumberAnimation { duration: 70 } }
                 }
             }
@@ -70,13 +70,13 @@ Item {
     Fondu {
         id: minuteur
         montre: c.mode === "minuteur"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "timer"; taille: 17; color: "#ff9f0a" }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: "#ff9f0a"; font.features: { "tnum": 1 } }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "timer"; taille: 17; color: Couleurs.orange }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: Couleurs.orange; font.features: { "tnum": 1 } }
     }
     Fondu {
         id: fini
         montre: c.mode === "minuteur-fini"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "alarm"; taille: 18; color: "#ff9f0a" }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "alarm"; taille: 18; color: Couleurs.orange }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: "Minuteur terminé"; font.weight: Font.DemiBold }
     }
 
@@ -89,13 +89,13 @@ Item {
         Ico {
             anchors.verticalCenter: parent.verticalCenter
             nom: jauge.vol ? (Etat.muet ? "volume_off" : (Etat.volume < 0.34 ? "volume_mute" : (Etat.volume < 0.67 ? "volume_down" : "volume_up"))) : "light_mode"
-            taille: 18; color: jauge.vol && Etat.muet ? Couleurs.texteSec : "white"
+            taille: 18; color: jauge.vol && Etat.muet ? Couleurs.texteSec : Couleurs.texte
         }
         Rectangle {
             width: 130; height: 6; radius: 3; color: Couleurs.gris3
             anchors.verticalCenter: parent.verticalCenter
             Rectangle {
-                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: "white"
+                width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: Couleurs.texte
                 Behavior on width { SpringAnimation { spring: 5; damping: 0.5 } }
             }
         }
@@ -120,11 +120,11 @@ Item {
     Fondu {
         id: charge
         montre: c.mode === "charge"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.branche ? "bolt" : "battery_full"; taille: 18; color: Etat.branche ? "#30d158" : "white" }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.branche ? "bolt" : "battery_full"; taille: 18; color: Etat.branche ? Couleurs.vert : Couleurs.texte }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
             text: (Etat.branche ? "En charge · " : "Sur batterie · ") + Etat.pourcent + " %"
-            font.weight: Font.DemiBold; color: Etat.branche ? "#30d158" : "white"
+            font.weight: Font.DemiBold; color: Etat.branche ? Couleurs.vert : Couleurs.texte
         }
     }
 
@@ -136,7 +136,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             nom: Etat.profil === PowerProfile.PowerSaver ? "eco" : (Etat.profil === PowerProfile.Performance ? "bolt" : "balance")
             taille: 18
-            color: Etat.profil === PowerProfile.PowerSaver ? "#30d158" : (Etat.profil === PowerProfile.Performance ? "#ff9f0a" : "white")
+            color: Etat.profil === PowerProfile.PowerSaver ? Couleurs.vert : (Etat.profil === PowerProfile.Performance ? Couleurs.orange : Couleurs.texte)
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
@@ -152,7 +152,7 @@ Item {
         Ico {
             anchors.verticalCenter: parent.verticalCenter
             nom: Etat.cameraActive ? "videocam" : "mic"; taille: 18
-            color: Etat.cameraActive ? "#30d158" : "#ff9f0a"
+            color: Etat.cameraActive ? Couleurs.vert : Couleurs.orange
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
@@ -171,7 +171,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3
             visible: Etat.casqueBatterie !== ""
             Ico {
-                anchors.verticalCenter: parent.verticalCenter; taille: 16; color: "#30d158"
+                anchors.verticalCenter: parent.verticalCenter; taille: 16; color: Couleurs.vert
                 nom: parseInt(Etat.casqueBatterie) > 60 ? "battery_full" : (parseInt(Etat.casqueBatterie) > 25 ? "battery_4_bar" : "battery_1_bar")
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueBatterie + " %"; secondaire: true }
@@ -182,7 +182,7 @@ Item {
     Fondu {
         id: jeu
         montre: c.mode === "jeu"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "sports_esports"; taille: 19; color: Etat.jeu ? "#ff9f0a" : Couleurs.texteSec }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "sports_esports"; taille: 19; color: Etat.jeu ? Couleurs.orange : Couleurs.texteSec }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.jeu ? "Mode jeu" : "Mode jeu désactivé"; font.weight: Font.DemiBold }
     }
 }
