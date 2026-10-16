@@ -36,6 +36,13 @@ Item {
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
                 visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages
+        // Météo (nc-reglages, ILE_METEO)
+        Row {
+            anchors.verticalCenter: parent.verticalCenter; spacing: 3
+            visible: Etat.meteoPilule
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.meteo.icone || "cloud"; taille: 15; color: Couleurs.texteSec }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: (Etat.meteo.temp !== undefined ? Etat.meteo.temp : "") + "°"; secondaire: true }
+        }
     }
 
     // ── Musique : pochette | heure (et titre en pause) | onde ──

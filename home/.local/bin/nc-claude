@@ -81,7 +81,9 @@ def etape(outil, e):
     """(icône Material Symbols, texte) pour un outil."""
     e = e or {}
     if outil == "Bash":
-        return "terminal", "Lance : " + court(e.get("description") or e.get("command"), 60)
+        # Sans description : la commande, sans le « cd dossier && » du début (peu parlant)
+        cmd = re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", str(e.get("command") or ""))
+        return "terminal", "Lance : " + court(e.get("description") or cmd, 60)
     if outil in ("Edit", "MultiEdit"):
         return "edit", "Modifie " + nom_fichier(e.get("file_path"))
     if outil == "Write":

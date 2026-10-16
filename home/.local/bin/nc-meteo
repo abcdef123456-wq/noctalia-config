@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""nc-meteo : la météo pour l'île (Open-Meteo : gratuit, sans clé ni compte), en JSON.
+  nc-meteo           la météo actuelle, les prochaines heures et les prochains jours (gardée 20 min en cache)
+  nc-meteo texte     la même chose en clair
+Ville : nc-reglages → Île → « Ville de la météo » (METEO_VILLE) ; vide : estimée d'après ta connexion internet.
+"""
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+HOME = os.path.expanduser("~")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "nc", "meteo.json")
+DUREE = 20 * 60
+
+# Codes météo de l'OMM -> (icône Material Symbols le jour, la nuit, texte)
+CODES = {
+    0: ("sunny", "clear_night", "Ciel dégagé"), 1: ("partly_cloudy_day", "partly_cloudy_night", "Plutôt dégagé"),
+    2: ("partly_cloudy_day", "partly_cloudy_night", "Partiellement nuageux"), 3: ("cloud", "cloud", "Couvert"),
+    45: ("foggy", "foggy", "Brouillard"), 48: ("foggy", "foggy", "Brouillard givrant"),
+    51: ("rainy_light", "rainy_light", "Bruine légère"), 53: ("rainy_light", "rainy_light", "Bruine"),
+    55: ("rainy", "rainy", "Bruine forte"), 56: ("rainy_light", "rainy_light", "Bruine verglaçante"),
+    57: ("rainy", "rainy", "Bruine verglaçante"), 61: ("rainy_light", "rainy_light", "Pluie faible"),
+    63: ("rainy", "rainy", "Pluie"), 65: ("rainy_heavy", "rainy_heavy", "Forte pluie"),
+    66: ("rainy", "rainy", "Pluie verglaçante"), 67: ("rainy_heavy", "rainy_heavy", "Pluie verglaçante"),
+    71: ("weather_snowy", "weather_snowy", "Neige faible"), 73: ("weather_snowy", "weather_snowy", "Neige"),
+    75: ("ac_unit", "ac_unit", "Forte neige"), 77: ("weather_snowy", "weather_snowy", "Grains de neige"),
+    80: ("rainy_light", "rainy_light", "Averses"), 81: ("rainy", "rainy", "Averses"), 82: ("rainy_heavy", "rainy_heavy", "Fortes averses"),
+    85: ("weather_snowy", "weather_snowy", "Averses de neige"), 86: ("ac_unit", "ac_unit", "Averses de neige"),
+    95: ("thunderstorm", "thunderstorm", "Orage"), 96: ("thunderstorm", "thunderstorm", "Orage et grêle"),
+    99: ("thunderstorm", "thunderstorm", "Orage et grêle"),
+}
+JOURS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+
+
+def reglage(cle, defaut=""):
+    try:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
+            for l in f:
+                if l.startswith(cle + "="):
+                    defaut = l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+def lire(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "noctalia-config (nc-meteo)"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read().decode())
+
+
+def lieu(ville):
+    """(latitude, longitude, nom) de la ville choisie, sinon d'après la connexion."""
+    if ville:
+        r = lire("https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name=" + urllib.parse.quote(ville))
+        if r.get("results"):
+            x = r["results"][0]
+            return x["latitude"], x["longitude"], x.get("name", ville)
+    r = lire("https://ipwho.is/?fields=latitude,longitude,city,success")
+    if r.get("success") is False:
+        raise OSError("position introuvable")
+    return r["latitude"], r["longitude"], r.get("city", "")
+
+
+def icone(code, jour=True):
+    c = CODES.get(code, ("cloud", "cloud", "—"))
+    return c[0] if jour else c[1]
+
+
+def meteo():
+    ville = reglage("METEO_VILLE", "auto")
+    ville = "" if ville == "auto" else ville
+    try:
+        with open(CACHE, encoding="utf-8") as f:
+            c = json.load(f)
+        if time.time() - c.get("t", 0) < DUREE and c.get("demande") == ville:
+            return c
+    except (OSError, ValueError):
+        c = None
+    try:
+        lat, lon, nom = lieu(ville)
+        q = urllib.parse.urlencode({
+            "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 5,
+            "current": "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m",
+            "hourly": "temperature_2m,weather_code,is_day", "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+        })
+        r = lire("https://api.open-meteo.com/v1/forecast?" + q)
+    except (OSError, ValueError, KeyError):
+        return c or {"erreur": "hors ligne"}                 # pas de réseau : la dernière météo connue
+    cur = r["current"]
+    jour = bool(cur.get("is_day", 1))
+    h = r["hourly"]
+    maintenant = cur["time"][:13]
+    debut = next((i for i, t in enumerate(h["time"]) if t[:13] >= maintenant), 0)
+    heures = [{"h": h["time"][i][11:13] + " h", "t": round(h["temperature_2m"][i]),
+               "icone": icone(h["weather_code"][i], bool(h["is_day"][i]))} for i in range(debut + 1, min(debut + 7, len(h["time"])))]
+    d = r["daily"]
+    jours = []
+    for i, t in enumerate(d["time"]):
+        a, m, j = (int(x) for x in t.split("-"))
+        nom_jour = "Aujourd'hui" if i == 0 else JOURS[__import__("datetime").date(a, m, j).weekday()]
+        jours.append({"jour": nom_jour, "min": round(d["temperature_2m_min"][i]), "max": round(d["temperature_2m_max"][i]),
+                      "icone": icone(d["weather_code"][i])})
+    res = {
+        "t": time.time(), "demande": ville, "ville": nom, "temp": round(cur["temperature_2m"]),
+        "ressenti": round(cur["apparent_temperature"]), "vent": round(cur["wind_speed_10m"]),
+        "humidite": round(cur.get("relative_humidity_2m", 0)), "code": cur["weather_code"],
+        "icone": icone(cur["weather_code"], jour), "texte": CODES.get(cur["weather_code"], ("", "", "—"))[2],
+        "min": jours[0]["min"] if jours else None, "max": jours[0]["max"] if jours else None,
+        "heures": heures, "jours": jours,
+    }
+    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+    with open(CACHE + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(res, f, ensure_ascii=False)
+    os.replace(CACHE + ".tmp", CACHE)
+    return res
+
+
+def main():
+    m = meteo()
+    if len(sys.argv) > 1 and sys.argv[1] == "texte":
+        if "temp" not in m:
+            print("Météo indisponible (hors ligne ?)")
+            return
+        print(f"{m['ville']} : {m['temp']} °C, {m['texte'].lower()} (ressenti {m['ressenti']} °C, min {m['min']}, max {m['max']})")
+        print("  " + "   ".join(f"{x['h']} {x['t']}°" for x in m["heures"]))
+        print("  " + "   ".join(f"{x['jour']} {x['min']}/{x['max']}°" for x in m["jours"]))
+        return
+    print(json.dumps(m, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
