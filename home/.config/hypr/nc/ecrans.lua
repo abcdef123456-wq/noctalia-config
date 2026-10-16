@@ -80,8 +80,9 @@ local function mode_hz(m, voulu)
             elseif voulu == "low" then
                 if hz == 60 then choix = md; break end
                 if not choix or md.hz < choix.hz then choix = md end
-            elseif hz == tonumber(voulu) then
-                choix = md; break
+            elseif tonumber(voulu) then
+                -- Un nombre : cette fréquence, sinon la plus proche que l'écran propose
+                if not choix or math.abs(md.hz - tonumber(voulu)) < math.abs(choix.hz - tonumber(voulu)) then choix = md end
             end
         end
     end

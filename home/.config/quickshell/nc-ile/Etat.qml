@@ -237,17 +237,20 @@ Singleton {
     }
 
     // ── Batterie faible : alerte à 20 % puis à 10 % (sur batterie), avec un bouton « Mode Économie » ──
+    // Premier seuil réglable (nc-reglages, BATTERIE_ALERTE ; 0 : jamais), le second à la moitié
+    readonly property int alerte1: Math.max(0, Math.min(50, parseInt(Reglages.val("BATTERIE_ALERTE", "20")) || 0))
+    readonly property int alerte2: Math.round(alerte1 / 2)
     property int seuilAlerte: 100       // dernier seuil annoncé (remis à 100 quand on branche)
     onPourcentChanged: {
-        if (!aBatterie || branche || pourcent <= 0) return
-        var seuil = pourcent <= 10 ? 10 : (pourcent <= 20 ? 20 : 100)
+        if (!aBatterie || branche || pourcent <= 0 || alerte1 === 0) return
+        var seuil = pourcent <= alerte2 ? alerte2 : (pourcent <= alerte1 ? alerte1 : 100)
         if (seuil < seuilAlerte) { seuilAlerte = seuil; alerteBatterie.running = true }
     }
     Process {
         id: alerteBatterie
-        command: ["notify-send", "-a", "Batterie", "-u", etat.seuilAlerte <= 10 ? "critical" : "normal", "-i", "battery-caution",
+        command: ["notify-send", "-a", "Batterie", "-u", etat.seuilAlerte <= etat.alerte2 ? "critical" : "normal", "-i", "battery-caution",
                   "-A", "eco=Mode Économie", "Batterie faible : " + etat.pourcent + " %",
-                  etat.seuilAlerte <= 10 ? "Branche ton PC maintenant." : "Pense à brancher ton PC, ou passe en mode Économie."]
+                  etat.seuilAlerte <= etat.alerte2 ? "Branche ton PC maintenant." : "Pense à brancher ton PC, ou passe en mode Économie."]
         stdout: StdioCollector { onStreamFinished: if (text.trim() === "eco") etat.choisirProfil(PowerProfile.PowerSaver) }
     }
     readonly property int profil: PowerProfiles.profile

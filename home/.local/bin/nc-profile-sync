@@ -4,7 +4,8 @@
 # la config Hyprland (nc/ecrans.lua, nc/energie.lua) en tire la fréquence, le flou, les ombres et les animations.
 # Fonctionne avec tout service de profils compatible (power-profiles-daemon, tlp-pd, tuned-ppd).
 # PC hybride (carte intégrée + NVIDIA) : choisit aussi la carte des applis lancées selon le profil.
-# Réglages facultatifs dans ~/.config/nc-profile.conf (format CLE=valeur, entiers uniquement) :
+# Réglages facultatifs (commande nc-reglages, ~/.config/nc/reglages.conf ; ancien fichier ~/.config/nc-profile.conf
+# encore lu) :
 #   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=low  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
 # Fréquences : « max » = la plus haute de l'écran interne, « low » = 60 Hz (sinon la plus basse), ou un nombre (ex. 120).
 # Écran, rétroéclairage de l'écran et du clavier : détectés automatiquement.
@@ -23,16 +24,17 @@ HZ_BALANCED_BAT=max
 HZ_ECO=low
 ECO_BRIGHTNESS_MAX=40
 
-if [ -r "$CFG" ]; then
+for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
+  [ -r "$f" ] || continue
   while IFS='=' read -r k v; do
+    v="${v//\"/}"; v="${v%%[[:space:]]}"
     case "$k" in
       HZ_PERFORMANCE|HZ_BALANCED_AC|HZ_BALANCED_BAT|HZ_ECO|ECO_BRIGHTNESS_MAX)
         [[ "$v" =~ ^([0-9]{1,3}|max|low)$ ]] && printf -v "$k" '%s' "$v" || echo "valeur ignorée : $k=$v" >&2 ;;
-      ''|\#*) ;;
-      *) echo "clé inconnue ignorée : $k" >&2 ;;
+      *) ;;                                      # autres réglages : pour d'autres parties de la config
     esac
-  done < "$CFG"
-fi
+  done < "$f"
+done
 
 log() { echo "nc-profile-sync: $*"; }
 

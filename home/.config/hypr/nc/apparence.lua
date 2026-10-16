@@ -3,9 +3,10 @@
 
 hl.config({
     general = {
-        gaps_in                 = 4,
-        gaps_out                = 10,
-        border_size             = 2,
+        -- Espaces et bordure : réglables avec nc-reglages
+        gaps_in                 = nc.reglage("FENETRES_ESPACE", 4),
+        gaps_out                = nc.reglage("FENETRES_MARGE", 10),
+        border_size             = nc.reglage("FENETRES_BORDURE", 2),
         resize_on_border        = true,
         extend_border_grab_area = 20,
         allow_tearing           = false,
@@ -21,7 +22,7 @@ hl.config({
     },
 
     decoration = {
-        rounding       = 14,
+        rounding       = nc.reglage("FENETRES_ARRONDI", 14),
         rounding_power = 2.5,
 
         active_opacity   = 1.0,

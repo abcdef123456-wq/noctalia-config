@@ -200,6 +200,8 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 ```bash
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
+nc-reglages   # tes réglages (fréquence de l'écran par profil, fenêtres, île, veille, clavier, terminal, captures),
+              # gardés dans ~/.config/nc/reglages.conf : jamais touché par les mises à jour
 ```
 
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs

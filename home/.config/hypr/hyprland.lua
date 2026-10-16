@@ -1,10 +1,36 @@
 -- noctalia-config : configuration Hyprland (format Lua, Hyprland 0.55 ou plus).
 -- Chaque fichier de nc/ couvre un domaine. Une erreur dans l'un n'empêche pas les autres de se charger.
+-- Réglages courants (espaces, bordures, pavé tactile, écran…) : commande nc-reglages.
 -- Tes ajouts personnels vont dans ~/.config/hypr/perso.lua (chargé en dernier, jamais remplacé par install.sh).
 -- Fichiers générés automatiquement, à ne pas éditer : nc/couleurs.lua (nc-theme-sync), nc/profil.lua (nc-profile-sync).
 
 -- État partagé entre les modules
 nc = {}
+
+-- Tes réglages (commande nc-reglages) : ~/.config/nc/reglages.conf, lignes CLE=valeur, jamais remplacé par les
+-- mises à jour. nc.reglage(CLE, défaut) : la valeur choisie, du type du défaut (nombre, oui/non, texte), sinon le défaut.
+nc.reglages = {}
+do
+    local f = io.open((os.getenv("HOME") or "") .. "/.config/nc/reglages.conf", "r")
+    if f then
+        for ligne in f:lines() do
+            local k, v = ligne:match("^%s*([%u%d_]+)%s*=%s*(.-)%s*$")
+            if k then nc.reglages[k] = v:gsub('^"(.*)"$', "%1") end
+        end
+        f:close()
+    end
+end
+function nc.reglage(cle, defaut)
+    local v = nc.reglages[cle]
+    if v == nil or v == "" then return defaut end
+    if type(defaut) == "number" then return tonumber(v) or defaut end
+    if type(defaut) == "boolean" then
+        if v == "oui" or v == "true" or v == "1" then return true end
+        if v == "non" or v == "false" or v == "0" then return false end
+        return defaut
+    end
+    return v
+end
 
 -- Charge un module sans arrêter la config s'il manque ou contient une erreur (renvoie sa valeur, ou nil)
 function nc.charger(nom)
