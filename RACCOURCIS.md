@@ -89,6 +89,7 @@ En mode **Souris**, les fenêtres s'ouvrent libres et centrées, comme sur Windo
 | Touches | Action |
 |---|---|
 | `Super` + `L` | Verrouiller l'écran |
+| `Super` + `Ctrl` + `Espace` | Éclairage du clavier (palier suivant, puis éteint) |
 | `Super` + `Maj` + `Échap` | Verrouiller et mettre en veille |
 | `Super` + `Alt` + `P` | Changer de profil d'énergie |
 | `Super` + `Alt` + `G` | Mode jeu (effets coupés, pas de notifications) |

@@ -179,6 +179,15 @@ Item {
                 sous: Etat.sys.halo === "1" ? "Le bord de l'écran suit la musique" : "Désactivé"
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
             }
+            // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
+            Ligne {
+                readonly property var niv: (Etat.sys.clavier || "").split("/").map(x => parseInt(x) || 0)
+                visible: (Etat.sys.clavier || "") !== ""
+                width: sy.width; icone: "keyboard"; titre: "Éclairage du clavier"; actif: niv[0] > 0
+                sous: niv[0] === 0 ? "Éteint · Super + Ctrl + Espace" : (niv[1] <= 4 ? "Niveau " + niv[0] + " sur " + niv[1]
+                      : Math.round(niv[0] * 100 / niv[1]) + " %")
+                onClic: Etat.faire([Etat.bin + "nc-touches", "clavier", "bascule"])
+            }
             Repeater {
                 model: [
                     { icone: "contrast", titre: "Thème clair ou sombre", cmd: ["noctalia", "msg", "theme-mode-toggle"], ferme: false },

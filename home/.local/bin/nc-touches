@@ -15,7 +15,7 @@ case "${1:-}" in
   clavier)
     dev=""
     for d in /sys/class/leds/*kbd_backlight*; do [ -e "$d" ] && { dev="${d##*/}"; break; }; done
-    [ -n "$dev" ] || { dire "Pas de rétroéclairage du clavier réglable"; exit 0; }
+    [ -n "$dev" ] || { dire "Pas d'éclairage du clavier réglable" "Ton clavier ne le donne pas à Linux (souvent : Fn + Espace le règle tout seul)."; exit 0; }
     max=$(cat "/sys/class/leds/$dev/max_brightness" 2>/dev/null || echo 1)
     cur=$(brightnessctl -d "$dev" get 2>/dev/null || cat "/sys/class/leds/$dev/brightness")
     # Paliers : 0…max quand le clavier en a peu (souvent 3), sinon éteint, 33 %, 66 %, 100 % (certains claviers
@@ -29,7 +29,12 @@ case "${1:-}" in
       down) new=$precedent ;;
       *)    if [ "$cur" -ge "$max" ]; then new=0; else new=$suivant; fi ;;   # un appui : palier suivant, puis éteint
     esac
-    brightnessctl -q -d "$dev" set "$new" 2>/dev/null || exit 1
+    # brightnessctl, sinon directement par logind (marche sans droits particuliers pour la session ouverte, là où
+    # brightnessctl n'a pas accès aux lumières : groupe manquant sur certaines Fedora)
+    brightnessctl -q -d "$dev" set "$new" 2>/dev/null ||
+      busctl call org.freedesktop.login1 /org/freedesktop/login1/session/auto org.freedesktop.login1.Session \
+        SetBrightness ssu leds "$dev" "$new" 2>/dev/null ||
+      { dire "Éclairage du clavier inaccessible" "Le système refuse de le changer (nc-diag pour en savoir plus)."; exit 1; }
     if [ "$new" -eq 0 ]; then dire "Clavier éteint"
     elif [ "$max" -le 4 ]; then dire "Clavier allumé" "Niveau $new sur $max"
     else dire "Clavier allumé" "$(( new * 100 / max )) %"; fi ;;

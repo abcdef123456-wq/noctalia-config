@@ -143,6 +143,10 @@ echo "profil=$(gdbus call --system --dest net.hadess.PowerProfiles --object-path
   --method org.freedesktop.DBus.Properties.Get net.hadess.PowerProfiles ActiveProfile 2>/dev/null | sed -nE "s/^\(<'([a-z-]+)'>,\)$/\1/p")"
 [ -e "${XDG_RUNTIME_DIR:-/tmp}/nc-mode-jeu" ] && echo "jeu=1" || echo "jeu=0"
 systemctl --user is-active --quiet nc-pouls && echo "halo=1" || echo "halo=0"
+# Éclairage du clavier : niveau/maximum (absent s'il n'y en a pas)
+for d in /sys/class/leds/*kbd_backlight*; do
+  [ -r "$d/brightness" ] && { echo "clavier=$(cat "$d/brightness")/$(cat "$d/max_brightness")"; break; }
+done
 for b in /sys/class/power_supply/BAT*; do
   [ -r "$b/capacity" ] || continue
   echo "batterie=$(cat "$b/capacity")"; echo "batterie_etat=$(cat "$b/status")"; break
