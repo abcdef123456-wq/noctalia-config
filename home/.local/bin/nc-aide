@@ -24,7 +24,8 @@ A_TAPER = [
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
     ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
-                                    "demandes ; nc-claude installer / retirer. Antigravity aussi : nc-claude installer antigravity."),
+                                    "demandes, et lui écrire depuis l'île. Aussi opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, "
+                                    "Antigravity : nc-claude installer IA (ou tout) ; nc-claude diag si rien ne s'affiche."),
     ("nc-meteo", "nc-meteo texte", "La météo (Open-Meteo, sans compte), comme dans l'île ; ville : nc-reglages → Île."),
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
     ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),

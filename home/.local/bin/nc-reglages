@@ -373,12 +373,22 @@ REGLAGES = [
     R("CLAUDE_ILE", "Agents IA (coucou)", "Claude Code dans l'île (coucou)", "ouinon", "oui",
       "Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
       groupe="claude"),
-    R("ANTIGRAVITY_ILE", "Agents IA (coucou)", "Antigravity dans l'île aussi", "ouinon", "oui",
-      "L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
-      "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.", groupe="antigravity"),
     R("CLAUDE_DEMANDES", "Agents IA (coucou)", "Demandes de Claude (autoriser, questions)", "choix", "ile",
       "Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
       [("ile", "Dans l'île quand tu es ailleurs"), ("terminal", "Toujours dans le terminal")]),
+    R("ANTIGRAVITY_ILE", "Agents IA (coucou)", "Antigravity dans l'île aussi", "ouinon", "oui",
+      "L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
+      "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.", groupe="ia:antigravity"),
+] + [
+    # Les autres IA (nc-claude) : affichées seulement si elles sont installées
+    R(f"{_cle.upper()}_ILE", "Agents IA (coucou)", f"{_nom} dans l'île aussi", "ouinon", "oui",
+      f"Ce que fait {_nom}, quand il a fini et quand il t'attend, comme Claude ; tu peux lui écrire depuis l'île s'il "
+      f"tourne dans kitty.{_plus} Non : retiré.", groupe=f"ia:{_cle}")
+    for _cle, _nom, _plus in (
+        ("opencode", "OpenCode", ""), ("codex", "Codex", " Codex demande d'approuver ses hooks une fois : /hooks."),
+        ("gemini", "Gemini CLI", ""), ("cursor", "Cursor", " Dans l'éditeur et en terminal (cursor-agent)."),
+        ("copilot", "Copilot CLI", ""), ("qwen", "Qwen Code", ""), ("kiro", "Kiro", ""), ("amp", "Amp", ""))
+] + [
     # Mises à jour
     R("MAJ_VERIFIER", "Mises à jour", "Prévenir des nouvelles versions de la config", "ouinon", "oui",
       "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
@@ -397,7 +407,8 @@ MATERIEL = {
     "BATTERIE_ALERTE": "batterie", "HZ_BALANCED_BAT": "batterie", "HALO_BATTERIE": "batterie", "VEILLE_SUSPENSION": "batterie",
     "COUVERCLE": "couvercle", "COUVERCLE_VERROU": "couvercle",
     "DEFILEMENT_NATUREL": "pave", "TAPOTER_CLIC": "pave", "GESTES": "pave",
-    "LUMINOSITE_PAS": "ecran", "ECO_BRIGHTNESS_MAX": "ecran",
+    "LUMINOSITE_PAS": "ecran",
+    **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
 }
 
@@ -410,7 +421,15 @@ def materiel():
         entrees = open("/proc/bus/input/devices", encoding="utf-8", errors="ignore").read().lower()
     except OSError:
         entrees = ""
-    return {"batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
+    # IA installées (même détection que nc-claude) : leur réglage n'apparaît que si elles sont là
+    ias = {"antigravity": (("agy", "antigravity"), ("~/.gemini/antigravity-cli", "~/.gemini/config")),
+           "opencode": (("opencode",), ("~/.config/opencode",)), "codex": (("codex",), ("~/.codex",)),
+           "gemini": (("gemini",), ()), "cursor": (("cursor-agent", "cursor"), ("~/.cursor",)),
+           "copilot": (("copilot",), ("~/.copilot",)), "qwen": (("qwen",), ("~/.qwen",)),
+           "kiro": (("kiro-cli", "kiro"), ("~/.kiro",)), "amp": (("amp",), ("~/.config/amp",))}
+    dispo = {"ia:" + k: any(shutil.which(p) for p in v[0]) or any(os.path.isdir(os.path.expanduser(d)) for d in v[1])
+             for k, v in ias.items()}
+    return {**dispo, "batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
             "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*")}
 
 
@@ -832,11 +851,11 @@ def appliquer(groupes, vals=None):
             if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):
                 quoi = "retirer" if vals.get("CLAUDE_ILE") == "non" else "installer"
                 subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi], capture_output=True)
-        elif g == "antigravity":
-            # Hooks d'Antigravity (~/.gemini/config/hooks.json), seulement s'il est là
-            if os.path.isdir(os.path.join(HOME, ".gemini")) or shutil.which("antigravity") or shutil.which("agy"):
-                quoi = "retirer" if vals.get("ANTIGRAVITY_ILE") == "non" else "installer"
-                subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, "antigravity"], capture_output=True)
+        elif g.startswith("ia:"):
+            # Autres IA (Antigravity, opencode, Codex…) : branchées ou retirées par nc-claude
+            ia = g[3:]
+            quoi = "retirer" if vals.get(ia.upper() + "_ILE") == "non" else "installer"
+            subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
         # île, captures, halo : relu tout seul

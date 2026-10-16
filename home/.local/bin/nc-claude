@@ -5,10 +5,12 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude retirer     les enlève
   nc-claude etat        les sessions suivies, en clair
   nc-claude hook        appelé par Claude Code à chaque événement (lit le JSON de l'événement sur l'entrée standard)
-  nc-claude installer antigravity | retirer antigravity
-                        la même chose pour l'agent de Google Antigravity (appli, éditeur ou agy en terminal) : ce
-                        qu'il fait et quand il a fini (~/.gemini/config/hooks.json) ; ses demandes restent dans Antigravity
-  nc-claude agy EVENEMENT   appelé par Antigravity (PreInvocation, PostToolUse, Stop)
+  nc-claude installer IA | retirer IA
+                        la même chose pour les autres IA : antigravity, opencode, codex, gemini, cursor, copilot, qwen,
+                        kiro, amp (ou « tout » : celles qui sont installées) ; ce qu'elles font, quand elles ont fini,
+                        quand elles t'attendent ; leurs demandes restent dans leur terminal
+  nc-claude ia IA EVENEMENT   appelé par leurs hooks ou leur extension ; nc-claude agy EVENEMENT : par Antigravity
+  nc-claude detecter | actualiser   IA présentes pas encore branchées / remettre celles branchées au format du jour
   nc-claude ecrire SESSION TEXTE   écrit à l'agent de cette session (tapé dans son terminal kitty, puis Entrée)
   nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
@@ -201,7 +203,7 @@ def reperer_terminal(s):
     if not s.get("terminal") or not s.get("shell") or "classe" not in s:
         s["terminal"], s["shell"] = terminal_et_shell()
         s["classe"] = next((w.get("class", "") for w in fenetres() if w.get("pid") == s["terminal"]), "")
-    s["ecrire"] = bool(s.get("shell") and socket_kitty(s.get("terminal")))
+    s["ecrire"] = bool(s.get("shell") and socket_kitty(s.get("terminal"))) or (s.get("agent") == "opencode" and bool(shutil.which("opencode")))
 
 
 def terminal_actif(pid):
@@ -326,6 +328,8 @@ def hook():
         ev = json.load(sys.stdin)
     except ValueError:
         return
+    if ev.get("cursor_version") or os.environ.get("CURSOR_VERSION"):
+        return                                         # Cursor relit les hooks de Claude : il a les siens (nc-claude ia cursor)
     nom = ev.get("hook_event_name") or ""
     if ev.get("agent_id") and nom not in ("PermissionRequest", "PreToolUse"):
         return                                         # sous-agents : seule la session principale est suivie
@@ -377,7 +381,7 @@ NOMS = {"claude": "Claude", "antigravity": "Antigravity"}
 CMD = ("bash", "run_command", "run_shell_command", "shell", "exec_command", "local_shell", "terminal", "run_terminal_cmd")
 MODIF = ("edit", "multiedit", "replace", "replace_file_content", "multi_replace_file_content", "apply_patch", "patch",
          "str_replace", "str_replace_editor", "edit_file", "search_replace")
-ECRIT = ("write", "write_file", "write_to_file", "create_file")
+ECRIT = ("write", "write_file", "write_to_file", "create_file", "create")
 LIT = ("read", "read_file", "read_many_files", "view", "view_file", "view_file_outline", "view_code_item", "cat")
 GREP = ("grep", "grep_search", "search_file_content", "rg", "codebase_search")
 TROUVE = ("glob", "find_by_name", "find", "file_search")
@@ -407,7 +411,11 @@ def etape_generique(outil, e):
         c = re.sub(r"^(bash|sh|zsh) -l?c ", "", c)
         return "terminal", "Lance : " + court(re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", c), 60)
     if o in MODIF:
+        m = re.search(r"\*\*\* (?:Update|Add) File: (\S+)", str(arg(e, "command", "patch", "input")))   # apply_patch (Codex)
+        f = nom_fichier(m.group(1)) if m and f == "un fichier" else f
         return "edit", "Modifie " + f if f != "un fichier" else "Modifie des fichiers"
+    if o == "delete":
+        return "delete", "Supprime " + f
     if o in ECRIT:
         return "edit_document", "Écrit " + f
     if o in LIT:
@@ -446,7 +454,7 @@ def diff_generique(e):
                         t["plus"] += lignes(v)
                     elif k in ("old_string", "oldstring", "targetcontent", "old_str"):
                         t["moins"] += lignes(v)
-                    elif k in ("patch", "input", "patchtext") and ("\n+" in v or "\n-" in v):
+                    elif k in ("patch", "input", "patchtext", "command") and ("\n+" in v or "\n-" in v):
                         for l in v.splitlines():
                             if l.startswith("+") and not l.startswith("+++"):
                                 t["plus"] += 1
@@ -574,30 +582,267 @@ def ecrire_json(chemin, cfg):
     os.replace(tmp, chemin)
 
 
-def installer_agy():
-    cfg = lire_json(AGY_HOOKS)
-    # Chemins complets : l'environnement des hooks d'Antigravity n'a pas forcément PATH ni HOME
-    base = shlex.quote(sys.executable) + " " + shlex.quote(os.path.realpath(__file__)) + " agy "
-    h = lambda ev: {"type": "command", "command": base + ev, "timeout": 10}
-    cfg[AGY_GROUPE] = {"enabled": True, "PreInvocation": [h("PreInvocation")],
-                       "PostToolUse": [{"matcher": "*", "hooks": [h("PostToolUse")]}], "Stop": [h("Stop")]}
-    ecrire_json(AGY_HOOKS, cfg)
-    print(f"Antigravity s'affiche maintenant dans l'île (hooks ajoutés à {AGY_HOOKS.replace(HOME, '~')}).")
-    print("Relance Antigravity (ou agy) s'il est ouvert : il ne lit ses hooks qu'au démarrage.")
-    print("Pour vérifier : nc-claude diag ; pour l'enlever : nc-claude retirer antigravity")
+# ── Toutes les IA : où chacune se branche, comment l'installer et la retirer ─────────────────────────────────────────
+# Chaque IA appelle « nc-claude ia <ia> <événement> » (JSON de l'événement sur l'entrée standard) : par ses hooks
+# (Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Kiro) ou par une petite extension (opencode, Amp). Antigravity a
+# son propre format (hook_agy). Réglages : <IA>_ILE=oui/non (nc-reglages → Agents IA).
+PY = shlex.quote(sys.executable)
+NC = shlex.quote(os.path.realpath(__file__))
+IAS = {
+    # clé : nom affiché, programmes, dossiers qui trahissent sa présence
+    "antigravity": ("Antigravity", ("agy", "antigravity"), ("~/.gemini/antigravity-cli", "~/.gemini/config")),
+    "opencode": ("OpenCode", ("opencode",), ("~/.config/opencode",)),
+    "codex": ("Codex", ("codex",), ("~/.codex",)),
+    "gemini": ("Gemini CLI", ("gemini",), ()),
+    "cursor": ("Cursor", ("cursor-agent", "cursor"), ("~/.cursor",)),
+    "copilot": ("Copilot", ("copilot",), ("~/.copilot",)),
+    "qwen": ("Qwen Code", ("qwen",), ("~/.qwen",)),
+    "kiro": ("Kiro", ("kiro-cli", "kiro"), ("~/.kiro",)),
+    "amp": ("Amp", ("amp",), ("~/.config/amp",)),
+}
+NOMS.update({k: v[0] for k, v in IAS.items()})
+FICHIERS = {
+    "antigravity": "~/.gemini/config/hooks.json", "opencode": "~/.config/opencode/plugins/nc-ile.js",
+    "codex": "~/.codex/hooks.json", "gemini": "~/.gemini/settings.json", "cursor": "~/.cursor/hooks.json",
+    "copilot": "~/.copilot/hooks/nc-ile.json", "qwen": "~/.qwen/settings.json", "kiro": "~/.kiro/hooks/nc-ile.json",
+    "amp": "~/.config/amp/plugins/nc-ile.js",
+}
+# Événements écoutés, par IA (rien qui décide : seulement observer ; PostToolUse là où un hook avant l'outil pourrait
+# le bloquer en cas d'erreur)
+EVENEMENTS = {
+    "codex": ("UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"),
+    "gemini": ("BeforeAgent", "AfterTool", "AfterAgent", "Notification", "SessionEnd"),
+    "qwen": ("UserPromptSubmit", "PostToolUse", "Notification", "Stop"),
+    "cursor": ("beforeSubmitPrompt", "postToolUse", "stop", "sessionEnd"),
+    "copilot": ("userPromptSubmitted", "postToolUse", "agentStop", "notification", "sessionEnd"),
+    "kiro": ("UserPromptSubmit", "PostToolUse", "Stop"),
+}
+DEBUT = ("userpromptsubmit", "beforeagent", "userpromptsubmitted", "beforesubmitprompt", "prompt")
+ETAPE = ("pretooluse", "posttooluse", "aftertool", "tool")
+ATTENTE = ("permissionrequest", "permission")
+FINI = ("stop", "afteragent", "agentstop")
 
 
-def retirer_agy():
-    if not os.path.exists(AGY_HOOKS):
-        print("Rien à retirer.")
-        return
-    cfg = lire_json(AGY_HOOKS)
-    if cfg.pop(AGY_GROUPE, None) is not None:
-        ecrire_json(AGY_HOOKS, cfg)
-    print("Hooks de l'île retirés de " + AGY_HOOKS.replace(HOME, "~") + ".")
+def chemin(ia):
+    return os.path.expanduser(FICHIERS[ia])
+
+
+def commande(ia, ev):
+    return f"{PY} {NC} ia {ia} {ev}"
+
+
+def present(ia):
+    nom, progs, dossiers = IAS[ia]
+    return any(shutil.which(p) for p in progs) or any(os.path.isdir(os.path.expanduser(d)) for d in dossiers)
+
+
+def installe(ia):
+    try:
+        with open(chemin(ia), encoding="utf-8") as f:
+            t = f.read()
+    except OSError:
+        return False
+    return "nc-claude" in t and (ia == "antigravity" or f" ia {ia} " in t or "nc-ile" in t)
+
+
+def nettoyer(cfg, marque):
+    """Retire de cfg["hooks"] nos hooks (ceux dont la commande contient marque), et les groupes ou événements vidés."""
+    hooks = cfg.get("hooks")
+    if isinstance(hooks, dict):
+        for ev in list(hooks):
+            if not isinstance(hooks[ev], list):
+                continue
+            l = []
+            for g in hooks[ev]:
+                if isinstance(g, dict) and isinstance(g.get("hooks"), list):
+                    g = dict(g, hooks=[h for h in g["hooks"] if marque not in json.dumps(h)])
+                    if g["hooks"]:
+                        l.append(g)
+                elif marque not in json.dumps(g):
+                    l.append(g)
+            if l:
+                hooks[ev] = l
+            else:
+                del hooks[ev]
+    return cfg
+
+
+PLUGIN_OPENCODE = r'''// nc-ile : OpenCode dans l'île dynamique de noctalia-config (écrit par « nc-claude installer opencode » ;
+// « nc-claude retirer opencode » l'enlève). OpenCode 1 appelle server(), OpenCode 2 appelle setup().
+import { spawn } from "node:child_process"
+const envoyer = (ev, o) => {
+  try {
+    const p = spawn(@PY@, [@NC@, "ia", "opencode", ev], { stdio: ["pipe", "ignore", "ignore"], detached: true })
+    p.on("error", () => {})
+    p.stdin.on("error", () => {})
+    p.stdin.end(JSON.stringify(o))
+    p.unref()
+  } catch {}
+}
+// Événements : OpenCode 1 (properties, session.idle…) et 2 (data, session.execution.succeeded…)
+const FIN = ["session.idle", "session.execution.succeeded", "session.execution.interrupted", "session.execution.failed"]
+const ATTENTE = ["permission.asked", "question.asked", "form.created"]
+const REPRISE = ["permission.replied", "permission.rejected", "question.replied", "form.replied", "form.cancelled"]
+const evenement = (e, dir) => {
+  if (!e) return
+  const p = e.properties || e.data || {}
+  const sid = p.sessionID || (p.info && p.info.id) || (p.form && p.form.sessionID)
+  if (!sid) return
+  if (FIN.includes(e.type) || (e.type === "session.status" && p.status && p.status.type === "idle")) envoyer("stop", { session_id: sid, cwd: dir })
+  else if (ATTENTE.includes(e.type)) envoyer("permission", { session_id: sid, cwd: dir })
+  else if (REPRISE.includes(e.type)) envoyer("reprise", { session_id: sid, cwd: dir })
+  else if (e.type === "session.deleted") envoyer("fin", { session_id: sid, cwd: dir })
+}
+export default {
+  id: "nc-ile",
+  async setup(ctx) {
+    const dir = (ctx.location && ctx.location.directory) || process.cwd()
+    const c = new AbortController()
+    try { await ctx.session.hook("prompt", (e) => envoyer("prompt", { session_id: e && e.sessionID, cwd: dir })) } catch {}
+    try { await ctx.tool.hook("execute.after", (e) => envoyer("tool", { session_id: e.sessionID, cwd: dir, tool: e.tool, args: e.input })) } catch {}
+    ;(async () => {
+      try { for await (const e of ctx.event.subscribe({ signal: c.signal })) evenement(e, dir) } catch {}
+    })()
+    return () => c.abort()
+  },
+  async server(input) {
+    const dir = (input && input.directory) || process.cwd()
+    return {
+      "chat.message": async (i) => envoyer("prompt", { session_id: i.sessionID, cwd: dir }),
+      "tool.execute.after": async (i) => envoyer("tool", { session_id: i.sessionID, cwd: dir, tool: i.tool, args: i.args }),
+      event: async ({ event }) => evenement(event, dir),
+    }
+  },
+}
+'''
+PLUGIN_AMP = r'''// nc-ile : Amp dans l'île dynamique de noctalia-config (écrit par « nc-claude installer amp » ;
+// « nc-claude retirer amp » l'enlève). Ne décide de rien : il regarde seulement.
+import { spawn } from "node:child_process"
+const envoyer = (ev, o) => {
+  try {
+    const p = spawn(@PY@, [@NC@, "ia", "amp", ev], { stdio: ["pipe", "ignore", "ignore"], detached: true })
+    p.on("error", () => {})
+    p.stdin.on("error", () => {})
+    p.stdin.end(JSON.stringify(o))
+    p.unref()
+  } catch {}
+}
+const sid = (e) => (e && e.thread && e.thread.id) || (e && e.threadID) || "amp"
+export default function (amp) {
+  amp.on("agent.start", async (e) => { envoyer("prompt", { session_id: sid(e), cwd: process.cwd() }) })
+  amp.on("tool.result", async (e) => { envoyer("tool", { session_id: sid(e), cwd: process.cwd(), tool: e && e.tool, args: e && e.input, erreur: e && e.status === "error" }) })
+  amp.on("agent.end", async (e) => { envoyer("stop", { session_id: sid(e), cwd: process.cwd() }) })
+}
+'''
+
+
+def installer_ia(ia, bavard=True):
+    f = chemin(ia)
+    if ia == "antigravity":
+        cfg = lire_json(f)
+        base = f"{PY} {NC} agy "
+        h = lambda ev: {"type": "command", "command": base + ev, "timeout": 10}
+        cfg[AGY_GROUPE] = {"enabled": True, "PreInvocation": [h("PreInvocation")],
+                           "PostToolUse": [{"matcher": "*", "hooks": [h("PostToolUse")]}], "Stop": [h("Stop")]}
+        ecrire_json(f, cfg)
+    elif ia in ("opencode", "amp"):
+        os.makedirs(os.path.dirname(f), exist_ok=True)
+        js = (PLUGIN_OPENCODE if ia == "opencode" else PLUGIN_AMP).replace("@PY@", json.dumps(sys.executable))
+        with open(f, "w", encoding="utf-8") as x:
+            x.write(js.replace("@NC@", json.dumps(os.path.realpath(__file__))))
+    elif ia in ("copilot", "kiro"):
+        if ia == "copilot":
+            cfg = {"version": 1, "hooks": {ev: [{"type": "command", "bash": commande(ia, ev), "timeoutSec": 5}]
+                                           for ev in EVENEMENTS[ia]}}
+        else:
+            cfg = {"version": "v1", "hooks": [dict({"name": f"nc-ile-{ev}", "trigger": ev, "timeout": 10,
+                                                    "action": {"type": "command", "command": commande(ia, ev)}},
+                                                   **({"matcher": "*"} if "Tool" in ev else {}))
+                                              for ev in EVENEMENTS[ia]]}
+        ecrire_json(f, cfg)
+    else:
+        cfg = nettoyer(lire_json(f), f" ia {ia} ")
+        hooks = cfg.setdefault("hooks", {})
+        if ia == "cursor":
+            cfg.setdefault("version", 1)
+        for ev in EVENEMENTS[ia]:
+            c = commande(ia, ev)
+            if ia == "cursor":
+                hooks.setdefault(ev, []).append({"command": c, "timeout": 5})
+                continue
+            if ia == "gemini":
+                h = {"name": f"nc-ile-{ev}", "type": "command", "command": c, "timeout": 5000}
+            else:
+                h = {"type": "command", "command": c, "timeout": 10}
+                if ia == "codex":
+                    h["async"] = True
+            g = {"hooks": [h]}
+            if "Tool" in ev or ev == "PermissionRequest":
+                g = {"matcher": ".*" if ia in ("gemini", "qwen") else "*", "hooks": [h]}
+            hooks.setdefault(ev, []).append(g)
+        ecrire_json(f, cfg)
+    if bavard:
+        print(f"{NOMS[ia]} s'affiche maintenant dans l'île ({f.replace(HOME, '~')}).")
+        if ia == "codex":
+            print("Codex demande d'approuver ses nouveaux hooks : ouvre-le et tape /hooks une fois.")
+        print(f"Relance {NOMS[ia]} s'il est ouvert. Pour vérifier : nc-claude diag ; pour l'enlever : nc-claude retirer {ia}")
+
+
+def retirer_ia(ia):
+    f = chemin(ia)
+    if os.path.exists(f):
+        if ia == "antigravity":
+            cfg = lire_json(f)
+            if cfg.pop(AGY_GROUPE, None) is not None:
+                ecrire_json(f, cfg)
+        elif ia in ("opencode", "amp", "copilot", "kiro"):
+            os.remove(f)                       # fichier à nous
+        else:
+            ecrire_json(f, nettoyer(lire_json(f), f" ia {ia} "))
+    print(f"{NOMS[ia]} retiré de l'île.")
     with Etat() as d:
-        for sid in [x for x in d["sessions"] if x.startswith("antigravity-")]:
+        for sid in [x for x in d["sessions"] if x.startswith(ia + "-")]:
             del d["sessions"][sid]
+
+
+def hook_ia(ia, nom):
+    """Un événement d'une IA (JSON sur l'entrée standard), ramené à : début, étape, attente, fini, fin."""
+    ev = lire_entree()
+    n = (nom or ev.get("hook_event_name") or "").lower()
+    # Réponses attendues : Gemini lit du JSON, Cursor veut « continue » avant d'envoyer la demande ; les autres rien
+    if ia == "gemini":
+        print("{}")
+    elif ia == "cursor" and n == "beforesubmitprompt":
+        print('{"continue": true}')
+    sys.stdout.flush()
+    outil = ev.get("tool_name") or ev.get("toolName") or ev.get("tool") or ""
+    journal(ia, nom, outil)
+    if reglage(ia.upper() + "_ILE", "oui") == "non" or not ev:
+        return
+    sid = ev.get("session_id") or ev.get("sessionId") or ev.get("conversation_id") or ev.get("conversationId")
+    cwd = ev.get("cwd") or (ev.get("workspace_roots") or [""])[0] or ev.get("directory") or ""
+    if n in DEBUT:
+        suivre(ia, sid, cwd, "debut")
+    elif n in ETAPE and outil:
+        args = ev.get("tool_input") or ev.get("toolArgs") or ev.get("args") or ev.get("input") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {"command": args}
+        suivre(ia, sid, cwd, "etape", outil, args, bool(ev.get("erreur") or ev.get("error")))
+    elif n in ATTENTE or (n == "notification" and str(ev.get("notification_type") or "").lower()
+                          in ("permission_prompt", "toolpermission", "elicitation_dialog")):
+        suivre(ia, sid, cwd, "attente")
+    elif n == "reprise":
+        with Etat() as d:
+            s = d["sessions"].get(f"{ia}-{sid}")
+            if s and s.get("etat") == "terminal":
+                s["etat"] = "travail"
+    elif n in FINI:
+        suivre(ia, sid, cwd, "fini", message=ev.get("last_assistant_message") or ev.get("prompt_response") or "")
+    elif n in ("sessionend", "fin"):
+        suivre(ia, sid, cwd, "fin")
 
 
 # ── Installation des hooks ───────────────────────────────────────────────────────────────────────────────────────
@@ -693,14 +938,14 @@ def ecrire(sid, texte):
     except (OSError, ValueError, KeyError):
         sys.exit("nc-claude : session inconnue.")
     sock = socket_kitty(s.get("terminal"))
-    if not texte or not sock or not s.get("shell"):
+    if texte and s.get("agent") == "opencode" and not (sock and s.get("shell")) and shutil.which("opencode"):
+        # OpenCode 2 tourne en service de fond : le message part dans la session par sa propre commande
+        subprocess.Popen(["opencode", "run", "--session", sid.split("-", 1)[1], texte], cwd=os.path.expanduser(s.get("cwd") or "~"),
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    elif not texte or not sock or not s.get("shell"):
         sys.exit("nc-claude : on ne peut écrire qu'à un agent lancé dans kitty.")
-    base = ["kitty", "@", "--to", "unix:" + sock, "send-text", "--match", f"pid:{s['shell']}"]
-    r = subprocess.run(base + ["--bracketed-paste", "auto", "--stdin"], input=texte, text=True, capture_output=True, timeout=5)
-    if r.returncode:
-        sys.exit("nc-claude : " + (r.stderr.strip() or "kitty n'a pas accepté le texte"))
-    time.sleep(0.2)                            # Entrée à part : sinon prise pour un retour à la ligne du texte collé
-    subprocess.run(base + ["--stdin"], input="\r", text=True, capture_output=True, timeout=5)
+    else:
+        envoyer_kitty(sock, s["shell"], texte)
     with Etat() as d:
         x = d["sessions"].get(sid)
         if x:
@@ -708,45 +953,47 @@ def ecrire(sid, texte):
             ajouter_etape(x, "chat", "Toi : " + court(texte, 50))
 
 
+def envoyer_kitty(sock, shell, texte):
+    base = ["kitty", "@", "--to", "unix:" + sock, "send-text", "--match", f"pid:{shell}"]
+    r = subprocess.run(base + ["--bracketed-paste", "auto", "--stdin"], input=texte, text=True, capture_output=True, timeout=5)
+    if r.returncode:
+        sys.exit("nc-claude : " + (r.stderr.strip() or "kitty n'a pas accepté le texte"))
+    time.sleep(0.2)                            # Entrée à part : sinon prise pour un retour à la ligne du texte collé
+    subprocess.run(base + ["--stdin"], input="\r", text=True, capture_output=True, timeout=5)
+
+
 def diag():
     """Ce qui est en place, en clair : à envoyer si l'île ne montre rien."""
     def ligne(ok, texte):
         print(("  ✓ " if ok else "  ✗ ") + texte)
-    print("Île")
-    ligne(ile_active(), "nc-ile.service " + ("actif" if ile_active() else "arrêté : systemctl --user start nc-ile"))
-    print("Claude Code")
+    ligne(ile_active(), "île (nc-ile.service) " + ("active" if ile_active() else "arrêtée : systemctl --user start nc-ile"))
     try:
         cc = "nc-claude hook" in open(SETTINGS, encoding="utf-8").read()
     except OSError:
         cc = False
-    ligne(cc, "hooks dans ~/.claude/settings.json" if cc else "pas de hooks : nc-claude installer")
-    ligne(reglage("CLAUDE_ILE", "oui") != "non", "réglage CLAUDE_ILE = " + reglage("CLAUDE_ILE", "oui"))
-    print("Antigravity")
-    prog = [x for x in ("agy", "antigravity") if shutil.which(x)]
-    ligne(bool(prog), "trouvé : " + ", ".join(shutil.which(x) for x in prog) if prog else "ni agy ni antigravity dans le PATH")
-    try:
-        cfg = json.load(open(AGY_HOOKS, encoding="utf-8"))
-        g = cfg.get(AGY_GROUPE)
-        ligne(bool(g), ("hooks dans " if g else "pas de hooks de l'île dans ") + AGY_HOOKS.replace(HOME, "~")
-              + (" : " + ", ".join(k for k in g if k != "enabled") if g else " : nc-claude installer antigravity"))
-        if g and "SessionStart" in g:
-            ligne(False, "ancien format (SessionStart) : nc-claude installer antigravity, puis relance agy")
-        autres = [k for k in cfg if k != AGY_GROUPE]
-        if autres:
-            print("    autres hooks dans le fichier : " + ", ".join(autres))
-    except FileNotFoundError:
-        ligne(False, AGY_HOOKS.replace(HOME, "~") + " absent : nc-claude installer antigravity")
-    except ValueError as e:
-        ligne(False, AGY_HOOKS.replace(HOME, "~") + f" n'est pas un JSON valide ({e}) : Antigravity l'ignore")
-    ligne(reglage("ANTIGRAVITY_ILE", "oui") != "non", "réglage ANTIGRAVITY_ILE = " + reglage("ANTIGRAVITY_ILE", "oui"))
+    if cc or os.path.isdir(os.path.join(HOME, ".claude")):
+        ligne(cc and reglage("CLAUDE_ILE", "oui") != "non",
+              "Claude Code : " + ("branché" if cc else "pas branché (nc-claude installer)")
+              + (" — coupé dans nc-reglages" if reglage("CLAUDE_ILE", "oui") == "non" else ""))
+    for ia in IAS:
+        if not present(ia) and not installe(ia):
+            continue
+        ok = installe(ia)
+        ligne(ok and reglage(ia.upper() + "_ILE", "oui") != "non",
+              f"{NOMS[ia]} : " + (f"branché ({FICHIERS[ia]})" if ok else f"pas branché (nc-claude installer {ia})")
+              + (" — coupé dans nc-reglages" if reglage(ia.upper() + "_ILE", "oui") == "non" else ""))
+        if ia == "antigravity" and ok:
+            print("      agy lancé avec --dangerously-skip-permissions : selon sa version, ses hooks ne tournent pas")
+        if ia == "codex" and ok:
+            print("      Codex : ses hooks doivent être approuvés une fois (/hooks dans Codex)")
     try:
         l = open(JOURNAL, encoding="utf-8").read().splitlines()
-        print(f"    derniers événements reçus ({len(l)}) :")
-        for x in l[-8:]:
-            print("      " + x)
+        print(f"Derniers événements reçus des IA ({len(l)}) :")
+        for x in l[-10:]:
+            print("  " + x)
     except OSError:
-        ligne(False, "aucun événement reçu d'Antigravity : relance agy après l'installation des hooks, puis donne-lui une demande")
-    print("Sessions suivies")
+        print("Aucun événement reçu d'une IA (hors Claude) : relance-la après l'installation, puis donne-lui une demande.")
+    print("Sessions suivies :")
     montrer()
 
 
@@ -764,10 +1011,30 @@ def main():
             hook_agy(a[1] if len(a) > 1 else "")
         except Exception:                      # un hook ne doit jamais gêner Antigravity
             pass
-    elif a[0] == "installer":
-        installer_agy() if a[1:2] == ["antigravity"] else installer()
-    elif a[0] == "retirer":
-        retirer_agy() if a[1:2] == ["antigravity"] else retirer()
+    elif a[0] == "ia" and len(a) >= 3:
+        try:
+            hook_ia(a[1], a[2])
+        except Exception:                      # un hook ne doit jamais gêner l'IA
+            pass
+    elif a[0] in ("installer", "retirer"):
+        quoi = a[1] if len(a) > 1 else "claude"
+        if quoi == "tout":
+            for ia in [x for x in IAS if present(x)]:
+                (installer_ia if a[0] == "installer" else retirer_ia)(ia)
+        elif quoi in IAS:
+            (installer_ia if a[0] == "installer" else retirer_ia)(quoi)
+        elif quoi == "claude":
+            installer() if a[0] == "installer" else retirer()
+        else:
+            sys.exit("nc-claude : IA inconnue. Au choix : claude, " + ", ".join(IAS) + ", tout")
+    elif a[0] == "detecter":
+        # IA présentes, pas encore branchées, pas refusées (pour install.sh)
+        print(" ".join(ia for ia in IAS if present(ia) and not installe(ia) and reglage(ia.upper() + "_ILE", "oui") != "non"))
+    elif a[0] == "actualiser":
+        # IA déjà branchées : remises au format du jour (nc-maj), sans rien demander
+        for ia in IAS:
+            if installe(ia) and reglage(ia.upper() + "_ILE", "oui") != "non":
+                installer_ia(ia, bavard=False)
     elif a[0] == "etat":
         montrer()
     elif a[0] == "diag":
