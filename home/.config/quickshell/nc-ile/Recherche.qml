@@ -1,6 +1,7 @@
 // Spotlight de l'île (Super + R) : la pilule s'étire en une longue capsule de recherche ; en tapant, quelques
 // résultats compacts s'ajoutent dessous. ↑ ↓ pour choisir, Entrée pour lancer, Échap pour refermer.
-// Appli déjà ouverte : Entrée amène sur sa fenêtre, Ctrl + Entrée en ouvre une nouvelle.
+// Appli déjà ouverte : Entrée en ouvre une nouvelle fenêtre, Ctrl + Entrée amène sur celle qui est ouverte (inversé avec
+// SPOTLIGHT_ENTREE=aller dans nc-reglages).
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal.
@@ -233,21 +234,27 @@ Item {
             out.push({ titre: "= " + res, sous: "Calcul · Entrée pour copier", glyphe: "calculate", s: 1000,
                        f: () => Quickshell.execDetached(["wl-copy", res.replace(/^≈?\s*/, "")]) })
         }
-        // Applications : déjà ouverte → Entrée y va (Ctrl + Entrée : nouvelle fenêtre), sinon Entrée la lance
+        // Applications : déjà ouverte → Entrée en ouvre une nouvelle (Ctrl + Entrée : y aller), sinon Entrée la lance
         var prises = {}
         for (var a = 0; a < applis.length; a++) {
             var ap = applis[a]
             var sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
             if (sa > 0) {
-                var id = ap.id, fen = fenetreDe(ap)
+                let id = ap.id, fen = fenetreDe(ap)
                 var item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0) }
                 if (fen) {
-                    var adresse = fen.address
+                    let adresse = fen.address
                     prises[adresse] = true
                     item.sous = "Ouverte · bureau " + fen.workspace.name
-                    item.aide = "↵ y aller · Ctrl ↵ nouvelle"
-                    item.f = () => r.allerA(adresse)
-                    item.nouveau = () => r.lancer(id)
+                    if (Reglages.val("SPOTLIGHT_ENTREE", "nouvelle") === "aller") {
+                        item.aide = "↵ y aller · Ctrl ↵ nouvelle"
+                        item.f = () => r.allerA(adresse)
+                        item.nouveau = () => r.lancer(id)
+                    } else {
+                        item.aide = "↵ nouvelle · Ctrl ↵ y aller"
+                        item.f = () => r.lancer(id)
+                        item.nouveau = () => r.allerA(adresse)
+                    }
                 } else {
                     item.sous = ap.generic || "Application"
                     item.f = () => r.lancer(id)
@@ -261,7 +268,7 @@ Item {
             if (prises[fe.address]) continue
             var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
             if (sf > 0) {
-                var adr = fe.address
+                let adr = fe.address
                 out.push({ titre: fe.title, sous: "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
                            glyphe: "select_window", s: sf + 30, f: () => r.allerA(adr) })
             }
@@ -269,7 +276,7 @@ Item {
         // Pages de l'île et actions
         for (var p = 0; p < pagesIle.length; p++) {
             var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
-            if (sp > 0) { var nom = pg.p; out.push({ titre: pg.t, sous: "Dans l'île", glyphe: pg.g, s: sp - 5, page: nom }) }
+            if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: "Dans l'île", glyphe: pg.g, s: sp - 5, page: nom }) }
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
@@ -277,7 +284,7 @@ Item {
         }
         // Fichiers
         for (var n = 0; n < fichiers.length; n++) {
-            var fi = fichiers[n], chemin = fi.path
+            let fi = fichiers[n], chemin = fi.path
             out.push({ titre: fi.name, sous: (fi.dir ? "Dossier · " : "Fichier · ") + fi.parent,
                        icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
                        s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)),   // jamais devant une appli qui commence par la saisie
