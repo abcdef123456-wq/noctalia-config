@@ -1033,7 +1033,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
       systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")."
     fi
   done
-  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path hypridle.service >/dev/null 2>&1 ||
+  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer hypridle.service >/dev/null 2>&1 ||
     warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   # Tes réglages (nc-reglages) : ~/.config/nc/reglages.conf n'est jamais touché ; ce qui en est tiré (veille, terminal)

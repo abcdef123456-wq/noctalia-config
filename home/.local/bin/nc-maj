@@ -4,8 +4,30 @@
 # a changé ou manque (tes fichiers personnels et tes couleurs ne sont pas touchés).
 #   nc-maj                 mise à jour complète (une question avant chaque étape système pas encore faite)
 #   nc-maj --no-system     seulement ta session
+#   nc-maj verifier        y a-t-il une nouvelle version ? Une notification avec « Mettre à jour » (une fois par
+#                          version ; lancé toutes les 6 h par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non)
 set -euo pipefail
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
+
+if [ "${1:-}" = verifier ]; then
+  grep -qx 'MAJ_VERIFIER=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
+  [ -d "$depot/.git" ] || exit 0
+  cd "$depot"
+  # Adresse publique (https), sans clé ni mot de passe : jamais de question en arrière-plan
+  url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#')"
+  branche="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$branche" 2>/dev/null | cut -f1)"
+  [ -n "$distant" ] || exit 0                                  # hors ligne
+  # À jour : la version publiée est déjà ici (ou plus ancienne que la tienne)
+  git merge-base --is-ancestor "$distant" HEAD 2>/dev/null && exit 0
+  annonce="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
+  [ "$(cat "$annonce" 2>/dev/null)" = "$distant" ] && exit 0  # déjà annoncée
+  mkdir -p "$(dirname "$annonce")"; echo "$distant" > "$annonce"
+  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="Mettre à jour" -A tard="Plus tard" \
+    "Nouvelle version de la config" "Des améliorations sont disponibles. Tes réglages sont gardés." 2>/dev/null || true)"
+  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf 'Entrée pour fermer'; read r"
+  exit 0
+fi
 if [ ! -d "$depot/.git" ]; then
   echo "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." >&2
   echo "Clone-le puis lance l'installation une fois : git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2

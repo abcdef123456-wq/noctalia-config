@@ -82,6 +82,8 @@ HOME_FILES=(
   .config/systemd/user/nc-ile.service
   .config/systemd/user/nc-ecran-externe.service
   .config/systemd/user/nc-couvercle.service
+  .config/systemd/user/nc-maj-verif.service
+  .config/systemd/user/nc-maj-verif.timer
   .zshrc
   .p10k.zsh
   .config/nvim

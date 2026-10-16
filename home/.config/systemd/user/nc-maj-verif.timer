@@ -1,0 +1,10 @@
+[Unit]
+Description=Cherche une nouvelle version de noctalia-config toutes les 6 heures
+
+[Timer]
+OnStartupSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
