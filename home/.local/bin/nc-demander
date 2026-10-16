@@ -93,12 +93,13 @@ def main():
         dire("Aucune IA installée pour répondre (Claude Code, opencode, Gemini CLI ou Qwen Code).")
         return
     texte = CONSIGNE.format(distrib=distrib()) + question
-    # Claude démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide
-    vide = ["--strict-mcp-config", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]
+    # Claude démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort le
+    # plus bas et pas de réflexion étendue (ton réglage de Claude Code, souvent « high », ne compte pas ici)
+    vide = ["--effort", "low", "--strict-mcp-config", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]
     cmd = {"claude": ["claude", "-p", "--model", "haiku"] + vide + [texte], "opencode": ["opencode", "run", texte],
            "gemini": ["gemini", "-p", texte], "qwen": ["qwen", "-p", texte]}[qui]
     # NC_ILE_SANS : ses hooks ne l'affichent pas dans l'île comme une session de travail ; dossier neutre
-    env = dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1")
+    env = dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1", MAX_THINKING_TOKENS="0")
     if flux and qui == "claude":
         flux_claude(cmd, env)
         return
