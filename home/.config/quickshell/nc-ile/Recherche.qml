@@ -31,7 +31,7 @@ Item {
     function demander(question) {
         if (question === "" || demandeur.running) return
         questionPosee = question; reponse = ""; commandeIA = ""
-        demandeur.command = [Etat.bin + "nc-demander", question]
+        demandeur.command = [Etat.bin + "nc-demander", "--flux", question]
         demandeur.running = true
         chercher()
     }
@@ -88,16 +88,24 @@ Item {
         command: [Etat.bin + "nc-demander", "--ia"]
         stdout: StdioCollector { onStreamFinished: r.nomIA = text.trim() || "-" }
     }
+    // Réponse affichée pendant qu'elle s'écrit ; à la fin, la ligne « $ … » devient la commande à lancer
+    property string brut: ""
     Process {
         id: demandeur
-        onRunningChanged: r.chercher()
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var l = text.trim().split("\n")
-                var c = l.length && l[l.length - 1].startsWith("$ ") ? l.pop().slice(2).trim() : ""
+        onRunningChanged: {
+            if (running) { r.brut = "" }
+            else {
+                var l = r.brut.trim().split("\n")
+                var c = l.length && l[l.length - 1].trim().startsWith("$ ") ? l.pop().trim().slice(2).trim() : ""
                 r.reponse = l.join("\n").trim() || "Pas de réponse."
                 r.commandeIA = c
-                r.chercher()
+            }
+            r.chercher()
+        }
+        stdout: SplitParser {
+            onRead: ligne => {
+                try { r.brut += JSON.parse(ligne).t || "" } catch (e) { return }
+                r.reponse = r.brut
             }
         }
     }
@@ -451,6 +459,7 @@ Item {
     Rectangle {
         id: zoneReponse
         visible: r.q.startsWith("?") && (r.reflechit || r.reponse !== "")
+        readonly property bool attend: r.reflechit && r.reponse === ""
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
         height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0) + 14, 320)
@@ -463,14 +472,14 @@ Item {
                 agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen" })[r.nomIA] || "claude"
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
-                    text: r.reflechit ? r.nomIA + " réfléchit…" : r.nomIA }
+                    text: zoneReponse.attend ? r.nomIA + " réfléchit…" : r.nomIA }
         }
         Text {
             id: texteReponse
             anchors.top: enTete.bottom; anchors.topMargin: 6
             x: 14; width: parent.width - 28
-            text: r.reflechit ? "" : r.reponse
-            visible: !r.reflechit
+            text: r.reponse
+            visible: !zoneReponse.attend
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
             textFormat: Text.PlainText
         }

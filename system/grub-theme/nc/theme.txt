@@ -2,7 +2,7 @@
 # Titre (@BOOT_TITLE@) : nom du PC, ou à défaut de la distribution, écrit par install.sh.
 # Polices Noto Sans (GRUB affiche sans anticrénelage : la graisse Medium reste nette). PNG en RVB/RVBA 8 bits uniquement.
 title-text: ""
-desktop-image: "background.png"
+desktop-image: "background.jpg"
 desktop-color: "#0b0d12"
 terminal-font: "Noto Sans Regular 22"
 terminal-left: "10%"

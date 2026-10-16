@@ -1326,6 +1326,13 @@ if [ "$MODE" = full ]; then
     else
       echo "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" | sudo tee -a /etc/default/grub >/dev/null
     fi
+    # Attente du menu : 5 s ou plus par défaut, raccourcie (3 s avec un autre système à côté pour avoir le temps de
+    # choisir, 1 s sinon) ; une attente que tu as déjà réglée plus courte n'est pas touchée
+    if grep -qE '^GRUB_TIMEOUT=([5-9]|[1-9][0-9]+)\s*$' /etc/default/grub; then
+      if grep -qiE "menuentry '[^']*(windows|\((on|sur) /dev)" "$GRUBDIR/grub.cfg" 2>/dev/null ||
+         { have os-prober && sudo os-prober 2>/dev/null | grep -q .; }; then t=3; else t=1; fi
+      sudo sed -i -E "s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=$t/" /etc/default/grub
+    fi
     # Fedora : sortie texte par défaut (GRUB_TERMINAL_OUTPUT="console"), qui ignore le thème : sortie graphique
     if grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub; then
       sudo sed -i -E 's/^GRUB_TERMINAL_OUTPUT=.*/GRUB_TERMINAL_OUTPUT="gfxterm"/' /etc/default/grub
@@ -1350,7 +1357,8 @@ if [ "$MODE" = full ]; then
       grep -qF "GRUB_THEME=\"$GRUBDIR/themes/nc/theme.txt\"" /etc/default/grub &&
       cmp -s "$tmp" "$GRUBDIR/themes/nc/theme.txt" &&
       diff -rq --exclude=theme.txt "$REPO/system/grub-theme/nc" "$GRUBDIR/themes/nc" >/dev/null 2>&1 &&
-      ! grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub || grub_done=0
+      ! grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub &&
+      ! grep -qE '^GRUB_TIMEOUT=([5-9]|[1-9][0-9]+)\s*$' /etc/default/grub || grub_done=0
   fi
   if [ "$plym_done" = 1 ] && [ "$grub_done" = 1 ]; then
     say "5c. Démarrage"
