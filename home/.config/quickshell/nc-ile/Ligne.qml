@@ -27,7 +27,7 @@ Rectangle {
             width: 28; height: 28; radius: 14
             color: l.actif ? Couleurs.accent : Couleurs.gris3
             Behavior on color { ColorAnimation { duration: 160 } }
-            Ico { anchors.centerIn: parent; nom: l.icone; taille: 16 }
+            Ico { anchors.centerIn: parent; nom: l.icone; taille: 16; color: l.actif ? Couleurs.surAccent : Couleurs.texte }
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter

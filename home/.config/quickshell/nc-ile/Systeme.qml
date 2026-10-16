@@ -22,7 +22,7 @@ Item {
         property string valeur
         property string detail
         property real taux: 0
-        property color couleur: "white"
+        property color couleur: Couleurs.texte
         width: (sy.width - 10) / 2; height: 86; radius: 18
         // Même structure pour les quatre blocs (titre, chiffre, barre), centrée verticalement ; le détail éventuel
         // (« 7,4 / 30,6 Go », « 284 Go libres ») est sur la ligne du chiffre, à droite
@@ -75,7 +75,7 @@ Item {
                 Mesure {
                     readonly property int t: parseInt(sy.val("temperature")) || 0
                     icone: "device_thermostat"; titre: "Température"; valeur: t + " °C"; taux: t / 100
-                    couleur: t >= 85 ? "#ff453a" : (t >= 70 ? "#ff9f0a" : "#30d158")
+                    couleur: t >= 85 ? Couleurs.rouge : (t >= 70 ? Couleurs.orange : Couleurs.vert)
                 }
                 Mesure {
                     icone: "hard_drive"; titre: "Disque"; valeur: (sy.val("disque") || "0") + " %"; taux: (parseInt(sy.val("disque")) || 0) / 100
@@ -89,8 +89,8 @@ Item {
                 Row {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 12; spacing: 12
                     Rectangle {
-                        width: 40; height: 40; radius: 20; color: Etat.branche ? "#0d3318" : Couleurs.gris3
-                        Ico { anchors.centerIn: parent; nom: Etat.branche ? "bolt" : "battery_full"; taille: 22; color: Etat.branche ? "#30d158" : "white"; rotation: Etat.branche ? 0 : 90 }
+                        width: 40; height: 40; radius: 20; color: Etat.branche ? Couleurs.fondVert : Couleurs.gris3
+                        Ico { anchors.centerIn: parent; nom: Etat.branche ? "bolt" : "battery_full"; taille: 22; color: Etat.branche ? Couleurs.vert : Couleurs.texte; rotation: Etat.branche ? 0 : 90 }
                     }
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
@@ -124,11 +124,11 @@ Item {
                     id: inter
                     readonly property bool allume: protection.v === "1"
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                    width: 46; height: 28; radius: 14; color: allume ? "#30d158" : Couleurs.gris3
+                    width: 46; height: 28; radius: 14; color: allume ? Couleurs.vert : Couleurs.gris3
                     opacity: protection.attente ? 0.5 : 1
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Rectangle {
-                        width: 24; height: 24; radius: 12; color: "white"; y: 2; x: inter.allume ? 20 : 2
+                        width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2; x: inter.allume ? 20 : 2
                         Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
                     }
                     MouseArea {
@@ -143,9 +143,9 @@ Item {
             // Modes d'énergie
             Repeater {
                 model: [
-                    { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
-                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: Couleurs.gris3, texte: "white", p: PowerProfile.Balanced },
-                    { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
+                    { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
+                    { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
                 ]
                 Module {
                     required property var modelData

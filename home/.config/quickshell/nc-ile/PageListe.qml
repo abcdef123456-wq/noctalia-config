@@ -65,10 +65,10 @@ Item {
         Texte { x: 44; anchors.verticalCenter: parent.verticalCenter; text: p.wifi ? "Wi-Fi" : "Bluetooth"; font.pixelSize: 20; font.weight: Font.Bold }
         Rectangle {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            width: 46; height: 28; radius: 14; color: p.allume ? "#30d158" : Couleurs.gris3
+            width: 46; height: 28; radius: 14; color: p.allume ? Couleurs.vert : Couleurs.gris3
             Behavior on color { ColorAnimation { duration: 180 } }
             Rectangle {
-                width: 24; height: 24; radius: 12; color: "white"; y: 2
+                width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2
                 x: p.allume ? 20 : 2
                 Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
             }
@@ -129,7 +129,7 @@ Item {
                             id: mdp
                             anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
                             verticalAlignment: TextInput.AlignVCenter
-                            color: "white"; font.pixelSize: 14; echoMode: TextInput.Password
+                            color: Couleurs.texte; font.pixelSize: 14; echoMode: TextInput.Password
                             onVisibleChanged: if (visible) { text = ""; forceActiveFocus() }
                             onAccepted: {
                                 p.attendre(modelData.champs[1])

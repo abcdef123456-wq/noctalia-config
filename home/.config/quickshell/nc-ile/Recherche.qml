@@ -351,7 +351,7 @@ Item {
             id: champ
             anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
             anchors.verticalCenter: parent.verticalCenter
-            color: "white"; selectionColor: Couleurs.accent; selectedTextColor: "white"
+            color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
             font.family: "Adwaita Sans"; font.pixelSize: 19
             clip: true
             cursorVisible: activeFocus

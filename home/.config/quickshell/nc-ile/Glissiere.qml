@@ -18,7 +18,7 @@ ClippingRectangle {
         anchors.bottom: parent.bottom
         width: parent.width
         height: parent.height * Math.max(0, Math.min(1, g.valeur))
-        color: "white"
+        color: Couleurs.texte
         Behavior on height { enabled: !zone.pressed; SpringAnimation { spring: 5; damping: 0.5 } }
     }
     Ico {
@@ -27,7 +27,7 @@ ClippingRectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         nom: g.icone
         taille: 26
-        color: g.valeur > 0.16 ? Couleurs.gris3 : "white"
+        color: g.valeur > 0.16 ? Couleurs.gris3 : Couleurs.texte
     }
     MouseArea {
         id: zone

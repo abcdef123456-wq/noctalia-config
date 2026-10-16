@@ -11,7 +11,7 @@ ClippingRectangle {
     height: 28; radius: 14
     color: Couleurs.gris3
     Rectangle {
-        height: parent.height; color: "white"
+        height: parent.height; color: Couleurs.texte
         width: Math.max(parent.height, parent.width * Math.max(0, Math.min(1, c.valeur)))
         radius: parent.height / 2
         Behavior on width { enabled: !zone.pressed; SpringAnimation { spring: 5; damping: 0.5 } }

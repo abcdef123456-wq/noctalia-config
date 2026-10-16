@@ -8,10 +8,10 @@ import Quickshell.Services.UPower
 Item {
     id: centre
     readonly property color bleu: Couleurs.accent
-    readonly property color orange: "#ff9f0a"
-    readonly property color indigo: "#5e5ce6"
-    readonly property color rose: "#ff375f"
-    readonly property color vert: "#30d158"
+    readonly property color orange: Couleurs.orange
+    readonly property color indigo: Couleurs.violet
+    readonly property color rose: Couleurs.rose
+    readonly property color vert: Couleurs.vert
     readonly property var s: Etat.sys
 
 
@@ -31,7 +31,7 @@ Item {
                 Texte { text: Etat.pourcent + " %"; font.weight: Font.DemiBold }
                 Ico {
                     nom: Etat.branche ? "battery_charging_full" : (Etat.pourcent > 80 ? "battery_full" : (Etat.pourcent > 30 ? "battery_5_bar" : "battery_2_bar"))
-                    taille: 18; color: Etat.branche ? centre.vert : (Etat.pourcent <= 20 ? "#ff453a" : "white")
+                    taille: 18; color: Etat.branche ? centre.vert : (Etat.pourcent <= 20 ? Couleurs.rouge : Couleurs.texte)
                     rotation: 90
                 }
             }
@@ -109,7 +109,7 @@ Item {
                     Rectangle {
                         width: parent.width; height: 4; radius: 2; color: Couleurs.gris3
                         Rectangle {
-                            height: parent.height; radius: 2; color: "white"
+                            height: parent.height; radius: 2; color: Couleurs.texte
                             width: Etat.lecteur && Etat.lecteur.length > 0 ? parent.width * Math.min(1, Etat.lecteur.position / Etat.lecteur.length) : 0
                         }
                     }
@@ -119,7 +119,7 @@ Item {
                         component Commande: Ico {
                             id: cmd
                             signal clic()
-                            color: Etat.lecteur ? "white" : Couleurs.gris4
+                            color: Etat.lecteur ? Couleurs.texte : Couleurs.gris4
                             scale: z.pressed ? 0.85 : 1
                             Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
                             MouseArea { id: z; anchors.fill: parent; anchors.margins: -8; onClicked: cmd.clic() }
@@ -150,7 +150,7 @@ Item {
                         Rectangle {
                             width: 40; height: 40; radius: 20; color: pa.actif ? pa.couleur : Couleurs.gris3
                             Behavior on color { ColorAnimation { duration: 160 } }
-                            Ico { anchors.centerIn: parent; nom: pa.icone; taille: 21 }
+                            Ico { anchors.centerIn: parent; nom: pa.icone; taille: 21; color: pa.actif ? Couleurs.surCouleur : Couleurs.texte }
                         }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
@@ -186,9 +186,9 @@ Item {
         Module {
             id: energie
             readonly property var modes: [
-                { nom: "Économie", icone: "battery_saver", couleur: "#ffd60a", texte: "#1c1c1e", p: PowerProfile.PowerSaver },
-                { nom: "Équilibré", icone: "battery_full", couleur: Couleurs.gris3, texte: "white", p: PowerProfile.Balanced },
-                { nom: "Performance", icone: "bolt", couleur: "#ff9f0a", texte: "white", p: PowerProfile.Performance }
+                { nom: "Économie", icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                { nom: "Équilibré", icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
+                { nom: "Performance", icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
             ]
             readonly property int index: Etat.profil === PowerProfile.PowerSaver ? 0 : (Etat.profil === PowerProfile.Performance ? 2 : 1)
             readonly property var mode: modes[index]

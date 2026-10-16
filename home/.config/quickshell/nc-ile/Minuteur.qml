@@ -21,22 +21,22 @@ Item {
             onPaint: {
                 var c = getContext("2d"); c.reset()
                 c.lineWidth = 8; c.lineCap = "round"
-                c.strokeStyle = "#3a2a10"; c.beginPath(); c.arc(46, 46, 40, 0, 2 * Math.PI); c.stroke()
-                c.strokeStyle = "#ff9f0a"; c.beginPath(); c.arc(46, 46, 40, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
+                c.strokeStyle = String(Couleurs.fondOrange); c.beginPath(); c.arc(46, 46, 40, 0, 2 * Math.PI); c.stroke()
+                c.strokeStyle = String(Couleurs.orange); c.beginPath(); c.arc(46, 46, 40, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * f); c.stroke()
             }
-            Ico { anchors.centerIn: parent; nom: "timer"; taille: 30; color: "#ff9f0a" }
+            Ico { anchors.centerIn: parent; nom: "timer"; taille: 30; color: Couleurs.orange }
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 2
             Texte { text: "Minuteur"; secondaire: true; font.pixelSize: 14 }
-            Texte { text: Etat.duree(Etat.minuteurReste); font.pixelSize: 40; font.weight: Font.DemiBold; color: "#ff9f0a" }
+            Texte { text: Etat.duree(Etat.minuteurReste); font.pixelSize: 40; font.weight: Font.DemiBold; color: Couleurs.orange }
         }
     }
     Row {
         visible: m.enCours
         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 10
         Rond { taille: 46; icone: "add"; couleur: Couleurs.gris3; onClic: Etat.ajouterMinute() }
-        Rond { taille: 46; icone: "close"; actif: true; couleur: "#ff453a"; onClic: Etat.arreterMinuteur() }
+        Rond { taille: 46; icone: "close"; actif: true; couleur: Couleurs.rouge; onClic: Etat.arreterMinuteur() }
     }
 
     // ── À lancer : durées ──
@@ -45,7 +45,7 @@ Item {
         anchors.fill: parent; spacing: 14
         Row {
             spacing: 10
-            Ico { nom: "timer"; taille: 26; color: "#ff9f0a" }
+            Ico { nom: "timer"; taille: 26; color: Couleurs.orange }
             Texte { text: "Minuteur"; font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
         }
         Grid {

@@ -8,7 +8,7 @@ Text {
     property bool plein: true
     property int graisse: 500
     text: nom
-    color: "white"
+    color: Couleurs.texte
     font.family: "Material Symbols Rounded"
     font.pixelSize: taille
     font.variableAxes: ({ "FILL": plein ? 1 : 0, "wght": graisse, "opsz": Math.min(48, Math.max(20, taille)), "GRAD": 0 })

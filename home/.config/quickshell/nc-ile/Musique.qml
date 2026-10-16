@@ -46,7 +46,7 @@ Item {
                         width: 4; radius: 2
                         height: Etat.joue ? 8 + Etat.bandes[index] * 20 : 8
                         anchors.verticalCenter: parent.verticalCenter
-                        color: "white"; opacity: Etat.joue ? 1 : 0.4
+                        color: Couleurs.texte; opacity: Etat.joue ? 1 : 0.4
                         Behavior on height { NumberAnimation { duration: 70 } }
                     }
                 }
@@ -59,7 +59,7 @@ Item {
             Rectangle {
                 width: parent.width; height: 6; radius: 3; color: Couleurs.gris3
                 Rectangle {
-                    height: parent.height; radius: 3; color: "white"
+                    height: parent.height; radius: 3; color: Couleurs.texte
                     width: m.duree > 0 ? parent.width * Math.min(1, m.position / m.duree) : 0
                 }
                 MouseArea {
@@ -82,7 +82,7 @@ Item {
             component Commande: Ico {
                 id: cmd
                 signal clic()
-                color: Etat.lecteur ? "white" : Couleurs.gris4
+                color: Etat.lecteur ? Couleurs.texte : Couleurs.gris4
                 scale: z.pressed ? 0.85 : 1
                 Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
                 MouseArea { id: z; anchors.fill: parent; anchors.margins: -10; onClicked: cmd.clic() }

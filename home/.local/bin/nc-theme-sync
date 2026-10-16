@@ -3,7 +3,8 @@
 
 Lit ~/.config/noctalia/colors.json, écrit ~/.config/kitty/themes/noctalia-dynamic.conf (puis recharge kitty)
 et ~/.config/hypr/nc/couleurs.lua : halo coloré, bordure en dégradé, groupes (puis recharge Hyprland) ;
-met aussi à jour les couleurs KDE (Dolphin) et les icônes du terminal et des fichiers (nc-icones).
+met aussi à jour les couleurs KDE (Dolphin), celles de l'île (~/.config/nc/palette-ile.json : les mêmes que le
+terminal) et les icônes du terminal et des fichiers (nc-icones).
 Rouge, vert et jaune gardent leur sens (erreur, succès, avertissement) et sont rapprochés de la couleur
 principale de 20° au plus. Bleu, magenta et cyan prennent l'accent du thème le plus proche (à 60° près),
 sinon ils sont tirés de 30° vers la couleur principale. La luminosité est ensuite ajustée pour garantir
@@ -22,6 +23,7 @@ from pathlib import Path
 COLORS = Path.home() / ".config/noctalia/colors.json"
 OUT = Path.home() / ".config/kitty/themes/noctalia-dynamic.conf"
 HYPR_OUT = Path.home() / ".config/hypr/nc/couleurs.lua"
+ILE_OUT = Path.home() / ".config/nc/palette-ile.json"
 KCS = Path.home() / ".local/share/color-schemes/noctalia.colors"
 KDEGLOBALS = Path.home() / ".config/kdeglobals"
 
@@ -242,6 +244,35 @@ hl.config({{
     if write_if_changed(HYPR_OUT, hypr):
         subprocess.run(["hyprctl", "reload"], capture_output=True)
         print("nc-theme-sync : couleurs Hyprland mises à jour")
+
+    # --- Île dynamique (Quickshell) : les couleurs du terminal ---
+    # Fond et textes du terminal, gris en paliers au-dessus du fond (même teinte), accent et couleurs ANSI
+    # (rouge, vert, jaune…) du terminal, bordure en dégradé des fenêtres. Relu par l'île dès qu'il change.
+    sens = 1 if dark else -1
+
+    def palier(d):
+        return rgb_to_hex(oklch_to_rgb(bL + sens * d, max(bC, 0.012), bH))
+
+    def teinte_fond(rgb, t):
+        return rgb_to_hex(tuple(b + (x - b) * t for x, b in zip(rgb, bg)))
+
+    orange = tone(L_n + (0.03 if dark else 0.0), C_n + 0.02, harmonize(60, ph, 15.0), bg, 4.5, dark)
+    ile = {
+        "sombre": dark,
+        "fond": bg_hex, "texte": fg_hex,
+        "texteSec": c.get("mOnSurfaceVariant", fg_hex), "texteDoux": rgb_to_hex(normal["white"]),
+        "carte": palier(0.035), "carteSurvol": palier(0.05), "gris2": palier(0.065), "gris3": palier(0.11),
+        "gris4": palier(0.15), "gris5": palier(0.22),
+        "accent": primary, "surAccent": c.get("mOnPrimary", bg_hex),
+        "surCouleur": bg_hex if dark else "#ffffff",
+        "rouge": rgb_to_hex(normal["red"]), "vert": rgb_to_hex(normal["green"]), "jaune": rgb_to_hex(normal["yellow"]),
+        "orange": rgb_to_hex(orange), "bleu": rgb_to_hex(normal["blue"]), "violet": rgb_to_hex(normal["magenta"]),
+        "cyan": rgb_to_hex(normal["cyan"]),
+        "fondVert": teinte_fond(normal["green"], 0.22), "fondOrange": teinte_fond(orange, 0.22),
+        "bordure": [f"#{p}", f"#{s2}", f"#{t3}"],
+    }
+    if write_if_changed(ILE_OUT, json.dumps(ile, indent=1) + "\n"):
+        print("nc-theme-sync : couleurs de l'île mises à jour")
 
     sync_kdeglobals()
     # Icônes du terminal et des fichiers, aux nouvelles couleurs
