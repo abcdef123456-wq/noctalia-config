@@ -26,7 +26,7 @@ hl.config({
         rounding_power = 2.5,
 
         active_opacity   = 1.0,
-        inactive_opacity = 1.0,
+        inactive_opacity = math.max(0.3, math.min(1, nc.reglage("FENETRES_OPACITE_INACTIVE", 100) / 100)),   -- nc-reglages
         dim_special      = 0.35,
 
         -- Fenêtres inactives légèrement assombries : la fenêtre active ressort

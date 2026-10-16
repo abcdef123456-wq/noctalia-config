@@ -18,10 +18,11 @@ hl.config({
         kb_options = options,
         kb_rules   = "",
 
-        repeat_rate  = 35,
-        repeat_delay = 300,
+        -- Répétition des touches et focus : réglables avec nc-reglages
+        repeat_rate  = nc.reglage("CLAVIER_REPETITION", 35),
+        repeat_delay = nc.reglage("CLAVIER_DELAI", 300),
 
-        follow_mouse = 1,
+        follow_mouse = nc.reglage("FOCUS_SOURIS", true) and 1 or 0,
         sensitivity  = math.max(-1, math.min(1, nc.reglage("SOURIS_VITESSE", 0) / 10)),   -- nc-reglages : -10 à 10
 
         touchpad = {

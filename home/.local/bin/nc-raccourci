@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """nc-raccourci : tes raccourcis clavier, sans éditer de fichier.
 
-  nc-raccourci                                    menu
+  nc-raccourci                                    écran des raccourcis (dans nc-reglages)
   nc-raccourci liste                              tous les raccourcis, et tes changements
   nc-raccourci ajoute TOUCHES CIBLE [NOM]         nouveau raccourci. CIBLE :
         une appli (firefox, discord…)             va à sa fenêtre si elle est ouverte, sinon la lance
@@ -80,6 +80,9 @@ def parse_keys(text):
     elif re.fullmatch(r"[A-Za-z]", k):
         key = k.upper()
         codes = letter_codes(key)
+    elif re.fullmatch(r"code:\d+", k):              # touche désignée par sa position (comme dans la config)
+        key = k
+        codes = {int(k[5:])}
     elif re.fullmatch(r"[Ff]([1-9]|1[0-2])", k):
         key = k.upper()
     elif k.lower() in NAMES:
@@ -142,6 +145,8 @@ def human(ident_or_bind):
         mask = int(id_of(ident_or_bind).split(":")[0])
         last = ident_or_bind.split("+")[-1].strip()
     mods = [name for bit, name in nckeys.MODS if mask & bit]
+    if last.lower().startswith("xf86"):
+        return "Touches média"
     return " + ".join(mods + [nckeys.key_label(last)])
 
 
@@ -311,8 +316,13 @@ def target_of(cible, nom):
 
 
 def cmd_add(keys, cible, nom=""):
-    bind, mask, key, codes = parse_keys(keys)
     typ, val, nom = target_of(cible, nom)
+    return ajouter(keys, typ, val, nom)
+
+
+def ajouter(keys, typ, val, nom):
+    """Nouveau raccourci : TYPE commande, appli (id du .desktop), bureau (numéro) ou ile (page)."""
+    bind, mask, key, codes = parse_keys(keys)
     who = find_live(mask, key, codes)
     if who:
         raise Refus(f"{keys} est déjà pris : {desc_text(who['desc'])} "
@@ -368,6 +378,48 @@ def cmd_disable(keys):
     return f"Désactivé : {desc_text(b['desc'])} ({human(orig)})"
 
 
+def texte_de_id(ident):
+    """« 64:code:36 » -> « Super+code:36 » (lisible par parse_keys)."""
+    m, _, k = ident.partition(":")
+    mods = [name for bit, name in ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Maj")) if int(m) & bit]
+    return "+".join(mods + [k.upper() if len(k) == 1 else k])
+
+
+def modifiable(ident):
+    """Un raccourci peut changer de touches si sa touche est une lettre, un chiffre, une touche nommée ou une position."""
+    try:
+        parse_keys(texte_de_id(ident))
+        return True
+    except Refus:
+        return False
+
+
+def changer_id(live_id, new_keys):
+    return cmd_change(texte_de_id(live_id), new_keys)
+
+
+def desactiver_ids(live_ids, nom):
+    old = read_conf()
+    origs = [original_id(i, old) for i in live_ids]
+    new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] in origs)] + [["aucun", o, nom] for o in origs]
+    reload_or_rollback_after(old, new)
+    return f"Désactivé : {nom}"
+
+
+def retablir_ids(orig_ids):
+    old = read_conf()
+    new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] in orig_ids)]
+    reload_or_rollback_after(old, new)
+    return "Rétabli comme dans la config"
+
+
+def retirer_ajout(bind):
+    old = read_conf()
+    new = [e for e in old if not (e[0] == "ajout" and e[1] == bind)]
+    reload_or_rollback_after(old, new)
+    return "Retiré"
+
+
 def cmd_restore(keys):
     old = read_conf()
     if keys in ("tout", "tous", "all"):
@@ -407,91 +459,14 @@ def cmd_remove(keys):
     return f"Retiré : {keys}"
 
 
-# ── Menu ────────────────────────────────────────────────────────────────────────────────────────────────────────
-def ask(prompt):
-    try:
-        return input(f"  {prompt} › ").strip()
-    except EOFError:
-        return ""
-
-
-def wait():
-    ask(f"{D}Entrée pour revenir{N}")
-
-
-def run(fn, *a):
-    try:
-        print(f"\n  {OK}✓{N} {fn(*a)}")
-    except Refus as e:
-        print(f"\n  {ERR}{e}{N}")
-    wait()
-
-
-def menu():
-    while True:
-        os.system("clear")
-        print(f"\n  {B}Raccourcis clavier{N}   {D}{CONF.replace(os.path.expanduser('~'), '~')}{N}\n")
-        ent = changes()
-        if ent:
-            print(f"  {B}{ACC}Tes changements{N}")
-            for i, e in enumerate(ent, 1):
-                k, t = describe(e)
-                print(f"   {D}{i:2}{N} {k:<28} {t}")
-        else:
-            print(f"  {D}Aucun changement : tous les raccourcis sont ceux de la config.{N}")
-        print(f"\n  {D}a : ajouter   c : changer les touches   d : désactiver   numéro : annuler ce changement\n"
-              f"  l : voir tous les raccourcis   q : quitter{N}\n")
-        r = ask("")
-        if r in ("q", "Q", ""):
-            break
-        if r == "l":
-            os.system("clear")
-            cmd_list()
-            wait()
-        elif r == "a":
-            print(f"\n  {D}Touches : ex. Super+B, Super+Maj+F, Ctrl+Alt+T{N}")
-            k = ask("Touches")
-            if not k:
-                continue
-            print(f"\n  {D}Une appli (firefox, discord…), « bureau 3 », « ile son », ou une commande{N}")
-            c = ask("Action")
-            if c:
-                run(cmd_add, k, c, ask(f"Nom dans la fiche Super + / {D}(Entrée : automatique){N}"))
-        elif r == "c":
-            k = ask("Touches actuelles du raccourci (ex. Super+Entrée)")
-            if not k:
-                continue
-            try:
-                b, _ = find_config_bind(k)
-            except Refus as e:
-                print(f"\n  {ERR}{e}{N}")
-                wait()
-                continue
-            print(f"\n  {B}{desc_text(b['desc'])}{N}")
-            n = ask("Nouvelles touches")
-            if n:
-                run(cmd_change, k, n)
-        elif r == "d":
-            k = ask("Touches du raccourci à désactiver")
-            if k:
-                run(cmd_disable, k)
-        elif r.isdigit() and 1 <= int(r) <= len(ent):
-            e = ent[int(r) - 1]
-            old = read_conf()
-            try:
-                reload_or_rollback_after(old, [x for x in old if x != e])
-                print(f"\n  {OK}✓{N} Annulé : {describe(e)[0]}")
-            except Refus as err:
-                print(f"\n  {ERR}{err}{N}")
-            wait()
-    os.system("clear")
-
-
 if __name__ == "__main__":
     a = sys.argv[1:]
     try:
         if not a:
-            menu() if sys.stdin.isatty() else cmd_list()
+            # Le menu des raccourcis est dans l'écran de réglages (section Raccourcis)
+            if sys.stdin.isatty():
+                os.execv(os.path.join(BIN, "nc-reglages"), ["nc-reglages", "raccourcis"])
+            cmd_list()
         elif a[0] in ("liste", "list"):
             cmd_list()
         elif a[0] in ("ajoute", "add") and len(a) in (3, 4):

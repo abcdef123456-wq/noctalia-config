@@ -109,7 +109,9 @@ Singleton {
     Timer { interval: 1000; running: true; repeat: true; onTriggered: etat.maintenant = new Date() }
     readonly property var jours: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
     readonly property var mois: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
-    readonly property string heure: Qt.formatTime(maintenant, "hh:mm")
+    // Format réglable (nc-reglages, ILE_HEURE : 24 ou 12)
+    readonly property string heure: Reglages.val("ILE_HEURE", "24") === "12" ? Qt.formatTime(maintenant, "h:mm AP")
+                                                                            : Qt.formatTime(maintenant, "hh:mm")
     readonly property string dateLongue: jours[maintenant.getDay()] + " " + maintenant.getDate() + " " + mois[maintenant.getMonth()]
     readonly property var moisCourts: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
     readonly property string dateCourte: jours[maintenant.getDay()].slice(0, 3) + ". " + maintenant.getDate() + " " + moisCourts[maintenant.getMonth()]

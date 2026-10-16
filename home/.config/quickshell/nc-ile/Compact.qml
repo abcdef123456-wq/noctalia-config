@@ -31,7 +31,8 @@ Item {
         id: repos
         montre: c.mode === "repos"
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.dateCourte; secondaire: true
+                visible: Reglages.val("ILE_DATE", "oui") !== "non" }       // nc-reglages
     }
 
     // ── Musique : pochette | heure (et titre en pause) | onde ──

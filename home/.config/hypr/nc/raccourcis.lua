@@ -256,6 +256,12 @@ touche("XF86AudioRewind",       cmd("~/.local/bin/nc-media recule"),            
 -- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint)
 touche("XF86PowerOff",          cmd("~/.local/bin/nc-finger"), nil, { locked = true })
 
+-- Mode « capture » de nc-reglages : le temps d'appuyer sur une nouvelle combinaison, aucun raccourci ne réagit
+-- (retour automatique au bout de 20 s, ou avec Super + Ctrl + Alt + F12)
+hl.define_submap("nc-capture", function()
+    hl.bind("SUPER + CTRL + ALT + F12", hl.dsp.submap("reset"))
+end)
+
 -- ── Tes raccourcis (nc-raccourci) ───────────────────────────────────────────
 -- Un raccourci refusé par Hyprland est ignoré sans bloquer les autres
 local function guillemets(t) return "'" .. tostring(t):gsub("'", "'\\''") .. "'" end

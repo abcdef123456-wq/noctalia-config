@@ -1,326 +1,1186 @@
-#!/usr/bin/env bash
-# nc-reglages : tes réglages de noctalia-config, à part des fichiers de la config.
-# Ils sont gardés dans ~/.config/nc/reglages.conf (lignes CLE=valeur), que les mises à jour (nc-maj, install.sh) ne
-# touchent jamais : seules les valeurs que tu changes y sont écrites, le reste suit la config. Chaque partie de la
-# config lit ce fichier (Hyprland, l'île, les profils d'énergie, la veille, le terminal, les captures) ; la commande
-# applique tout de suite ce que tu changes.
-#
-#   nc-reglages                     menu (choisir un réglage par son numéro)
-#   nc-reglages liste               tous les réglages et leur valeur
-#   nc-reglages get CLE             valeur d'un réglage
-#   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
-#   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
-#   nc-reglages fichier             ouvrir le fichier dans ton éditeur
-#   nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
-set -uo pipefail
+#!/usr/bin/env python3
+"""nc-reglages : les réglages de noctalia-config, dans le terminal, aux flèches.
 
-FICHIER="$HOME/.config/nc/reglages.conf"
-VEILLE_SRC="$HOME/.config/hypr/hypridle.conf"
-VEILLE_OUT="$HOME/.config/nc/hypridle.conf"
-VEILLE_UNITE="$HOME/.config/systemd/user/hypridle.service.d/nc-reglages.conf"
-KITTY_OUT="$HOME/.config/kitty/nc-reglages.conf"
+  nc-reglages                     écran des réglages
+  nc-reglages raccourcis          directement les raccourcis clavier
+  nc-reglages liste               tous les réglages et leur valeur
+  nc-reglages get CLE             valeur d'un réglage
+  nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
+  nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
+  nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
 
-# ── Les réglages ─────────────────────────────────────────────────────────────────────────────────────────────────
-# CLE | section | nom | type | paramètres | valeur de la config | explication
-#   choix : valeur=Nom;…      entier : min:max:unité      ouinon      hz (fréquence de l'écran)      dossier
-REGISTRE="$(cat <<'R'
-ILE_STYLE|Île|Couleurs de l'île|choix|terminal=Couleurs du terminal;noir=Noire, couleurs d'Apple|terminal|Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.
-ILE_CONTOUR|Île|Contour de l'île ouverte|choix|degrade=Dégradé des fenêtres;discret=Filet discret;aucun=Aucun|degrade|Le dégradé reprend la bordure de la fenêtre active.
-BATTERIE_ALERTE|Île|Alerte de batterie faible|entier|0:50:%|20|Notification à ce niveau, puis à la moitié. 0 : jamais.
-HZ_PERFORMANCE|Énergie|Écran en Performance|hz||max|Fréquence de l'écran du portable dans ce profil.
-HZ_BALANCED_AC|Énergie|Écran en Équilibré, sur secteur|hz||max|Fréquence de l'écran du portable dans ce profil.
-HZ_BALANCED_BAT|Énergie|Écran en Équilibré, sur batterie|hz||max|Fréquence de l'écran du portable dans ce profil.
-HZ_ECO|Énergie|Écran en Économie|hz||low|Fréquence de l'écran du portable dans ce profil.
-ECO_BRIGHTNESS_MAX|Énergie|Luminosité maximale en Économie|entier|0:100:%|40|0 : ne pas limiter.
-HALO_BATTERIE|Énergie|Halo musical sur batterie|ouinon||non|Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus). En Économie, jamais.
-FENETRES_ESPACE|Fenêtres|Espace entre les fenêtres|entier|0:40:px|4|
-FENETRES_MARGE|Fenêtres|Marge au bord de l'écran|entier|0:60:px|10|
-FENETRES_BORDURE|Fenêtres|Épaisseur de la bordure|entier|0:8:px|2|
-FENETRES_ARRONDI|Fenêtres|Arrondi des coins|entier|0:30:px|14|
-FENETRES_ASSOMBRIR|Fenêtres|Assombrir les fenêtres inactives|ouinon||oui|La fenêtre active ressort.
-CLAVIER_DISPOSITION|Clavier et souris|Disposition du clavier|texte||systeme|Code de disposition : us, fr, us,fr (Super + Espace passe de l'une à l'autre)… « systeme » : celle du système.
-DEFILEMENT_NATUREL|Clavier et souris|Défilement naturel (pavé tactile)|ouinon||oui|Le contenu suit les doigts, comme sur un téléphone.
-TAPOTER_CLIC|Clavier et souris|Toucher le pavé pour cliquer|ouinon||oui|
-SOURIS_VITESSE|Clavier et souris|Vitesse du pointeur|entier|-10:10:|0|De -10 (lent) à 10 (rapide).
-VEILLE_VERROU|Veille|Verrouillage automatique après|entier|0:120:min|5|L'écran s'assombrit un peu avant et s'éteint 30 s après. 0 : jamais.
-VEILLE_SUSPENSION|Veille|Mise en veille sur batterie après|entier|0:240:min|15|Sur secteur, le PC ne se met jamais en veille tout seul. 0 : jamais.
-TERMINAL_OPACITE|Terminal|Opacité du fond du terminal|entier|50:100:%|88|
-TERMINAL_TAILLE|Terminal|Taille du texte du terminal|entier|8:24:pt|11|
-CAPTURES_DOSSIER|Captures|Dossier des captures d'écran|dossier||auto|Par défaut : Captures, dans ton dossier Images.
-R
-)"
+Dans l'écran : ↑ ↓ pour choisir, ← → pour changer la valeur (appliquée tout de suite), Entrée pour saisir ou
+ouvrir, r pour remettre la valeur de la config, Tab pour passer des sections aux réglages, q pour quitter.
+Tes réglages sont gardés dans ~/.config/nc/reglages.conf (seulement ce que tu changes), tes raccourcis dans
+~/.config/nc/raccourcis.conf : les mises à jour (nc-maj) ne les touchent jamais. Chaque partie de la config lit
+ces fichiers : Hyprland, l'île, Noctalia (barre, dock, fonds d'écran…), les profils d'énergie, la veille, le terminal.
+"""
+import curses
+import importlib.machinery
+import importlib.util
+import json
+import locale
+import os
+import re
+import signal
+import subprocess
+import sys
+import textwrap
+import time
 
-# Couleurs du terminal (les mêmes que la config) ; aucune si la sortie n'est pas un terminal
-if [ -t 1 ]; then
-  B=$'\e[1m'; D=$'\e[2m'; N=$'\e[0m'; ACC=$'\e[34m'; MOD=$'\e[33m'; OK=$'\e[32m'; ERR=$'\e[31m'
-else
-  B=""; D=""; N=""; ACC=""; MOD=""; OK=""; ERR=""
-fi
+try:
+    import tomllib
+except ImportError:          # Python < 3.11
+    tomllib = None
 
-champ() { # champ CLE NUMÉRO (1 : clé … 7 : explication)
-  printf '%s\n' "$REGISTRE" | awk -F'|' -v k="$1" -v n="$2" '$1 == k { print $n; exit }'
-}
-cles() { printf '%s\n' "$REGISTRE" | cut -d'|' -f1; }
-connue() { cles | grep -qxF "$1"; }
+HOME = os.path.expanduser("~")
+BIN = os.path.join(HOME, ".local/bin")
+FICHIER = os.path.join(HOME, ".config/nc/reglages.conf")
+VEILLE_SRC = os.path.join(HOME, ".config/hypr/hypridle.conf")
+VEILLE_OUT = os.path.join(HOME, ".config/nc/hypridle.conf")
+VEILLE_UNITE = os.path.join(HOME, ".config/systemd/user/hypridle.service.d/nc-reglages.conf")
+KITTY_OUT = os.path.join(HOME, ".config/kitty/nc-reglages.conf")
+NOCTALIA_DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME", os.path.join(HOME, ".config")), "noctalia")
+# Noctalia lit tous les .toml de son dossier par ordre alphabétique, le dernier l'emporte : après settings.toml
+# (réglages faits dans Noctalia), avant zz-economie.toml (profil Économie, qui doit gagner)
+NOCTALIA_OUT = os.path.join(NOCTALIA_DIR, "zy-reglages.toml")
 
-# Valeur écrite dans le fichier (vide : celle de la config)
-lue() { sed -n "s/^$1=//p" "$FICHIER" 2>/dev/null | tail -1 | sed 's/^"\(.*\)"$/\1/'; }
-valeur() { local v; v="$(lue "$1")"; [ -n "$v" ] && echo "$v" || champ "$1" 6; }
 
-# Fréquences de l'écran du portable (dans sa définition native), de la plus basse à la plus haute
-frequences() {
-  hyprctl monitors all -j 2>/dev/null | jq -r '
-    [.[] | select(.name | test("^eDP"))][0] // empty | .availableModes
-    | map(capture("^(?<w>[0-9]+)x(?<h>[0-9]+)@(?<hz>[0-9.]+)") | {px: ((.w | tonumber) * (.h | tonumber)), hz: (.hz | tonumber | round)})
-    | (map(.px) | max) as $m | map(select(.px == $m) | .hz) | unique | .[]' 2>/dev/null
-}
+def charger(nom, fichier):
+    chargeur = importlib.machinery.SourceFileLoader(nom, os.path.join(BIN, fichier))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(nom, chargeur))
+    chargeur.exec_module(mod)
+    return mod
 
-# Valeur lisible
-montrer() { # montrer CLE VALEUR
-  local type v="$2" p u
-  type="$(champ "$1" 4)"; p="$(champ "$1" 5)"
-  case "$type" in
-    choix)  printf '%s\n' "$p" | tr ';' '\n' | awk -F= -v v="$v" '$1 == v { print $2; f = 1 } END { if (!f) print v }' ;;
-    ouinon) [ "$v" = oui ] && echo "Oui" || echo "Non" ;;
-    entier) u="${p##*:}"; [ "$v" = 0 ] && [[ "$(champ "$1" 7)" == *"0 : "* ]] && { echo "$(champ "$1" 7 | sed -n 's/.*0 : \([^.]*\).*/\1/p' | sed 's/^./\U&/')"; return; }
-            echo "$v${u:+ $u}" ;;
-    hz)     local l; l="$(frequences)"
-            case "$v" in
-              max) echo "La plus haute${l:+ ($(echo "$l" | tail -1) Hz)}" ;;
-              low) echo "60 Hz (sinon la plus basse)" ;;
-              *)   echo "$v Hz" ;;
-            esac ;;
-    dossier) [ "$v" = auto ] && echo "Images/Captures" || echo "$v" ;;
-    texte)  [ "$v" = systeme ] && echo "Celle du système ($(hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null))" || echo "$v" ;;
-    *) echo "$v" ;;
-  esac
-}
 
-# Vérifie une valeur ; l'affiche normalisée (oui/non…) ou échoue avec un message
-valider() { # valider CLE VALEUR
-  local type p v="$2" min max
-  type="$(champ "$1" 4)"; p="$(champ "$1" 5)"
-  case "$type" in
-    choix)  printf '%s\n' "$p" | tr ';' '\n' | cut -d= -f1 | grep -qxF "$v" && { echo "$v"; return 0; }
-            echo "valeurs possibles : $(printf '%s\n' "$p" | tr ';' '\n' | cut -d= -f1 | paste -sd' ')" >&2; return 1 ;;
-    ouinon) case "${v,,}" in oui|o|yes|y|true|1) echo oui ;; non|n|no|false|0) echo non ;; *) echo "oui ou non" >&2; return 1 ;; esac ;;
-    entier) min="${p%%:*}"; max="${p#*:}"; max="${max%%:*}"
-            if [[ "$v" =~ ^-?[0-9]{1,4}$ ]]; then
-              if [[ "$v" == -* ]]; then v="-$((10#${v#-}))"; else v="$((10#$v))"; fi   # 08 -> 8
-              [ "$v" = -0 ] && v=0
-              [ "$v" -ge "$min" ] && [ "$v" -le "$max" ] && { echo "$v"; return 0; }
-            fi
-            echo "un nombre entier de $min à $max" >&2; return 1 ;;
-    hz)     case "$v" in max|low) echo "$v"; return 0 ;; esac
-            [[ "$v" =~ ^[0-9]{2,3}$ ]] && [ "$v" -ge 20 ] && { echo "$v"; return 0; }
-            echo "max, low ou une fréquence en Hz (ex. 60)" >&2; return 1 ;;
-    texte)  [ "$v" = systeme ] && { echo systeme; return 0; }
-            # Disposition(s) du clavier : chaque code doit exister dans XKB
-            local x ok=1
-            [[ "$v" =~ ^[a-z]{2,3}(,[a-z]{2,3})*$ ]] || ok=0
-            for x in ${v//,/ }; do [ -e "/usr/share/X11/xkb/symbols/$x" ] || ok=0; done
-            [ "$ok" = 1 ] && { echo "$v"; return 0; }
-            echo "codes de disposition XKB séparés par des virgules (ex. us, fr, us,fr)" >&2; return 1 ;;
-    dossier) [ "$v" = auto ] && { echo auto; return 0; }
-            v="${v/#\~/$HOME}"; [[ "$v" = /* ]] || { echo "un chemin complet (ex. ~/Images/Captures) ou auto" >&2; return 1; }
-            echo "$v" ;;
-  esac
-}
+def sortie(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
-# Réécrit le fichier : réglages dans l'ordre du menu, par section, et les clés inconnues (autres versions) à la fin
-ecrire() { # ecrire CLE VALEUR (VALEUR vide : retirer)
-  local cle="$1" v="$2" tmp k s sec="" val
-  mkdir -p "$(dirname "$FICHIER")"
-  tmp="$(mktemp "$FICHIER.XXXXXX")"
-  {
-    echo "# Tes réglages de noctalia-config : seulement ce que tu as changé, le reste suit la config."
-    echo "# Gardé tel quel par les mises à jour. Le plus simple pour le changer : la commande nc-reglages."
-    while IFS= read -r k; do
-      if [ "$k" = "$cle" ]; then val="$v"; else val="$(lue "$k")"; fi
-      [ -n "$val" ] || continue
-      s="$(champ "$k" 2)"
-      [ "$s" != "$sec" ] && { printf '\n# %s\n' "$s"; sec="$s"; }
-      printf '%s=%s\n' "$k" "$val"
-    done < <(cles)
-    grep -E '^[A-Z0-9_]+=' "$FICHIER" 2>/dev/null | while IFS= read -r l; do connue "${l%%=*}" || echo "$l"; done
-  } > "$tmp"
-  mv "$tmp" "$FICHIER"
-}
 
-# ── Application ──────────────────────────────────────────────────────────────────────────────────────────────────
-appliquer_veille() {
-  local verrou susp hi
-  verrou="$(lue VEILLE_VERROU)"; susp="$(lue VEILLE_SUSPENSION)"
-  if [ -z "$verrou$susp" ]; then
-    # Rien de changé : la veille de la config
-    if [ -e "$VEILLE_UNITE" ]; then
-      rm -f "$VEILLE_UNITE" "$VEILLE_OUT"
-      systemctl --user daemon-reload; systemctl --user restart hypridle.service 2>/dev/null
-    fi
-    return 0
-  fi
-  [ -r "$VEILLE_SRC" ] || return 0
-  verrou="${verrou:-$(champ VEILLE_VERROU 6)}"; susp="${susp:-$(champ VEILLE_SUSPENSION 6)}"
-  # Copie de la veille de la config, délais remplacés (assombrir 2 min 30 avant le verrouillage, écran éteint 30 s
-  # après) ; un délai à 0 retire l'étape. Refaite à chaque mise à jour (nc-reglages appliquer).
-  {
-    echo "# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : $verrou min, veille : $susp min)."
-    echo "# Ne pas éditer : nc-reglages set VEILLE_VERROU / VEILLE_SUSPENSION, ou nc-reglages reset pour revenir à la config."
-    awk -v verrou="$verrou" -v susp="$susp" '
-      function sortie(b,   t) {
-        if (b ~ /nc-brightness dim/)   t = (verrou > 0) ? ((verrou * 60 - 150 > 30) ? verrou * 60 - 150 : 30) : 0
-        else if (b ~ /dpms/)           t = (verrou > 0) ? verrou * 60 + 30 : 0
-        else if (b ~ /lock-session/)   t = verrou * 60
-        else if (b ~ /suspend/)        t = susp * 60
-        else { printf "%s", b; return }
-        if (t <= 0) return
-        sub(/timeout *= *[0-9]+/, "timeout = " t, b); printf "%s", b
-      }
-      /^listener *\{/ { bloc = $0 "\n"; dans = 1; next }
-      dans { bloc = bloc $0 "\n"; if ($0 ~ /^\}/) { dans = 0; sortie(bloc) }; next }
-      { print }' "$VEILLE_SRC"
-  } > "$VEILLE_OUT.tmp" && mv "$VEILLE_OUT.tmp" "$VEILLE_OUT"
-  hi="$(command -v hypridle || echo /usr/bin/hypridle)"
-  mkdir -p "$(dirname "$VEILLE_UNITE")"
-  printf '# nc-reglages : la veille avec tes délais (%s)\n[Service]\nExecStart=\nExecStart=%s -c %s\n' \
-    "$VEILLE_OUT" "$hi" "%h/.config/nc/hypridle.conf" > "$VEILLE_UNITE"
-  systemctl --user daemon-reload; systemctl --user restart hypridle.service 2>/dev/null
-}
+# ── Choix calculés sur ce PC ────────────────────────────────────────────────────────────────────────────────────
+def frequences():
+    """Fréquences de l'écran du portable dans sa définition native (de la plus basse à la plus haute)."""
+    try:
+        mons = json.loads(sortie(["hyprctl", "monitors", "all", "-j"]) or "[]")
+    except ValueError:
+        return []
+    m = next((x for x in mons if x.get("name", "").startswith("eDP")), None)
+    if not m:
+        return []
+    modes = []
+    for s in m.get("availableModes", []):
+        r = re.match(r"(\d+)x(\d+)@([\d.]+)", s)
+        if r:
+            modes.append((int(r[1]) * int(r[2]), round(float(r[3]))))
+    if not modes:
+        return []
+    px = max(p for p, _ in modes)
+    return sorted({hz for p, hz in modes if p == px})
 
-appliquer_terminal() {
-  local op taille c=""
-  op="$(lue TERMINAL_OPACITE)"; taille="$(lue TERMINAL_TAILLE)"
-  [ -n "$op" ] && c+="background_opacity $(awk -v o="$op" 'BEGIN { printf "%.2f", o / 100 }')"$'\n'
-  [ -n "$taille" ] && c+="font_size $taille"$'\n'
-  if [ -z "$c" ]; then
-    [ -e "$KITTY_OUT" ] || return 0
-    rm -f "$KITTY_OUT"
-  else
-    [ "$(cat "$KITTY_OUT" 2>/dev/null)" = "# Écrit par nc-reglages. Ne pas éditer."$'\n'"${c%$'\n'}" ] && return 0
-    printf '# Écrit par nc-reglages. Ne pas éditer.\n%s' "$c" > "$KITTY_OUT"
-  fi
-  pkill -USR1 -x kitty 2>/dev/null || true          # kitty relit sa config
-}
 
-appliquer() { # appliquer CLE (vide : tout ce qui est généré)
-  case "${1:-}" in
-    HZ_*|ECO_*)  systemctl --user restart nc-profile-sync.service 2>/dev/null || true ;;
-    FENETRES_*|DEFILEMENT_*|TAPOTER_*|SOURIS_*|CLAVIER_*) hyprctl reload >/dev/null 2>&1 || true ;;
-    VEILLE_*)    appliquer_veille ;;
-    TERMINAL_*)  appliquer_terminal ;;
-    "")          appliquer_veille; appliquer_terminal ;;
-    *) ;;                                        # île, captures : relu tout seul
-  esac
-}
+def polices(motif, preferees):
+    """Polices installées : d'abord celles de la liste (si présentes), puis les autres qui suivent le motif."""
+    familles = set()
+    for l in sortie(["fc-list", ":", "family"]).splitlines():
+        for f in l.split(","):
+            familles.add(f.strip())
+    res = [p for p in preferees if p in familles]
+    res += sorted(f for f in familles if re.search(motif, f) and f not in res)
+    return res[:14]
 
-regler() { # regler CLE VALEUR
-  local v
-  v="$(valider "$1" "$2")" || return 1
-  if [ "$v" = "$(champ "$1" 6)" ]; then ecrire "$1" ""; else ecrire "$1" "$v"; fi
-  appliquer "$1"
-}
 
-# Texte complété par des espaces jusqu'à une largeur (en caractères : printf compte les octets des accents)
-pad() { local t="$1" w="$2"; printf '%s%*s' "$t" $((w > ${#t} ? w - ${#t} : 1)) ''; }
+# ── Les réglages ────────────────────────────────────────────────────────────────────────────────────────────────
+class R:
+    """Un réglage : clé du fichier, section, nom, genre (ouinon, choix, entier, hz, texte, dossier), valeur de la config."""
 
-# ── Menu ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-liste() { # liste [numéros]
-  local i=0 sec="" k s nom v marque
-  while IFS= read -r k; do
-    i=$((i + 1))
-    s="$(champ "$k" 2)"; nom="$(champ "$k" 3)"; v="$(valeur "$k")"
-    [ "$s" != "$sec" ] && { printf '\n  %s%s%s\n' "$B$ACC" "$s" "$N"; sec="$s"; }
-    if [ -n "$(lue "$k")" ]; then marque="$MOD●$N"; else marque=" "; fi
-    if [ "${1:-}" = numeros ]; then
-      printf '   %s%2d%s %s %s%s\n' "$D" "$i" "$N" "$marque" "$(pad "$nom" 37)" "$(montrer "$k" "$v")"
-    else
-      printf '   %s %s%s%s%s%s\n' "$marque" "$(pad "$nom" 37)" "$(pad "$(montrer "$k" "$v")" 30)" "$D" "$k" "$N"
-    fi
-  done < <(cles)
-}
+    def __init__(self, cle, section, nom, genre, defaut, aide="", choix=None, mini=0, maxi=100, pas=1, unite="",
+                 groupe="", zero=""):
+        self.cle, self.section, self.nom, self.genre, self.defaut, self.aide = cle, section, nom, genre, defaut, aide
+        self._choix, self.mini, self.maxi, self.pas, self.unite = choix, mini, maxi, pas, unite
+        self.groupe, self.zero = groupe, zero
 
-choisir() { # choisir CLE : demande la nouvelle valeur
-  local k="$1" type p v def rep i=0 opts=() l
-  type="$(champ "$k" 4)"; p="$(champ "$k" 5)"; v="$(valeur "$k")"; def="$(champ "$k" 6)"
-  clear
-  printf '\n  %s%s%s\n' "$B" "$(champ "$k" 3)" "$N"
-  [ -n "$(champ "$k" 7)" ] && printf '  %s%s%s\n' "$D" "$(champ "$k" 7)" "$N"
-  printf '\n  Actuel : %s%s%s     config : %s\n\n' "$B" "$(montrer "$k" "$v")" "$N" "$(montrer "$k" "$def")"
-  case "$type" in
-    choix)  while IFS= read -r l; do opts+=("${l%%=*}"); done < <(printf '%s\n' "$p" | tr ';' '\n') ;;
-    ouinon) opts=(oui non) ;;
-    hz)     opts=(max low); while IFS= read -r l; do opts+=("$l"); done < <(frequences)
-            [ "${#opts[@]}" -gt 2 ] || printf '  %sPas d’écran de portable détecté : le réglage servira sur un portable.%s\n\n' "$D" "$N" ;;
-  esac
-  if [ "${#opts[@]}" -gt 0 ]; then
-    for l in "${opts[@]}"; do
-      i=$((i + 1))
-      printf '   %s%d%s  %s%s\n' "$D" "$i" "$N" "$(montrer "$k" "$l")" "$([ "$l" = "$v" ] && printf '  %s✓%s' "$OK" "$N")"
-    done
-    [ "$type" = hz ] && printf '   %s   ou une autre fréquence en Hz (la plus proche que ton écran propose sera prise)%s\n' "$D" "$N"
-    printf '\n'
-    read -rp "  Choix (Entrée : ne rien changer) › " rep || return 0
-    [ -n "$rep" ] || return 0
-    if [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "${#opts[@]}" ] && ! { [ "$type" = hz ] && [ "$rep" -ge 20 ]; }; then
-      rep="${opts[$((rep - 1))]}"
-    fi
-  else
-    case "$type" in
-      entier)  printf '  De %s à %s %s\n\n' "${p%%:*}" "$(echo "$p" | cut -d: -f2)" "${p##*:}" ;;
-      dossier) printf '  Un chemin (ex. ~/Images/Captures), ou auto\n\n' ;;
-      texte)   printf '  Ex. us, fr, us,fr — ou systeme\n\n' ;;
-    esac
-    read -rp "  Nouvelle valeur (Entrée : ne rien changer) › " rep || return 0
-    [ -n "$rep" ] || return 0
-  fi
-  if regler "$k" "$rep" 2> >(sed "s/^/  ${ERR}Valeur refusée : /; s/\$/$N/" >&2); then
-    printf '\n  %s✓%s %s : %s\n' "$OK" "$N" "$(champ "$k" 3)" "$(montrer "$k" "$(valeur "$k")")"
-  fi
-  sleep 1
-}
+    def choix(self):
+        """[(valeur, nom affiché)] pour ouinon, choix et hz."""
+        if self.genre == "ouinon":
+            return [("oui", "Oui"), ("non", "Non")]
+        if self.genre == "hz":
+            l = frequences()
+            res = [("max", f"La plus haute{f' ({l[-1]} Hz)' if l else ''}"), ("low", "60 Hz, sinon la plus basse")]
+            return res + [(str(h), f"{h} Hz") for h in l]
+        c = self._choix() if callable(self._choix) else (self._choix or [])
+        return [(x, x) if isinstance(x, str) else x for x in c]
 
-menu() {
-  local rep k n
-  n="$(cles | wc -l)"
-  while true; do
-    clear
-    printf '\n  %sRéglages de noctalia-config%s   %s%s%s\n' "$B" "$N" "$D" "${FICHIER/#$HOME/\~}" "$N"
-    liste numeros
-    printf '\n  %s● changé par toi   numéro : changer   r numéro : remettre la valeur de la config   q : quitter%s\n\n' "$D" "$N"
-    read -rp "  › " rep || break
-    case "$rep" in
-      q|Q|"") break ;;
-      r\ *|r[0-9]*)
-        rep="${rep#r}"; rep="${rep// /}"
-        [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "$n" ] || continue
-        k="$(cles | sed -n "${rep}p")"; ecrire "$k" ""; appliquer "$k" ;;
-      *)
-        [[ "$rep" =~ ^[0-9]+$ ]] && [ "$rep" -ge 1 ] && [ "$rep" -le "$n" ] || continue
-        choisir "$(cles | sed -n "${rep}p")" ;;
-    esac
-  done
-  clear
-}
+    def montrer(self, v):
+        if self.genre in ("ouinon", "choix", "hz"):
+            for val, nom in self.choix():
+                if val == v:
+                    return nom
+            return f"{v} Hz" if self.genre == "hz" and v.isdigit() else v
+        if self.genre == "entier":
+            if v == "0" and self.zero:
+                return self.zero
+            return f"{v}{' ' + self.unite if self.unite else ''}"
+        if self.genre == "dossier" and v == "auto":
+            return "automatique"
+        if self.genre == "texte" and v == "systeme":
+            return "celle du système"
+        return v
 
-case "${1:-}" in
-  "")        [ -t 0 ] && menu || liste ;;
-  liste|list|ls) liste; echo ;;
-  get)       [ -n "${2:-}" ] && connue "$2" || { echo "Réglage inconnu : ${2:-} (voir nc-reglages liste)" >&2; exit 2; }
-             valeur "$2" ;;
-  set)       [ -n "${2:-}" ] && connue "$2" || { echo "Réglage inconnu : ${2:-} (voir nc-reglages liste)" >&2; exit 2; }
-             [ $# -ge 3 ] || { echo "Usage : nc-reglages set CLE VALEUR" >&2; exit 2; }
-             regler "$2" "$3" || { echo "($2)" >&2; exit 1; }
-             echo "$(champ "$2" 3) : $(montrer "$2" "$(valeur "$2")")" ;;
-  reset)     if [ -n "${2:-}" ]; then
-               connue "$2" || { echo "Réglage inconnu : $2" >&2; exit 2; }
-               ecrire "$2" ""; appliquer "$2"
-             else
-               ks="$(grep -oE '^[A-Z0-9_]+' "$FICHIER" 2>/dev/null)"; rm -f "$FICHIER"
-               for k in $ks; do appliquer "$k"; done
-             fi
-             echo "Valeur de la config remise." ;;
-  fichier|edit) [ -e "$FICHIER" ] || ecrire _ ""; "${EDITOR:-nano}" "$FICHIER"; appliquer ;;
-  appliquer|apply) appliquer ;;
-  -h|--help|aide|help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *)         echo "Commande inconnue : $1 (nc-reglages aide)" >&2; exit 2 ;;
-esac
+    def valider(self, v):
+        """Valeur normalisée, ou ValueError avec un message."""
+        v = v.strip()
+        if self.genre == "ouinon":
+            l = v.lower()
+            if l in ("oui", "o", "yes", "y", "true", "1"):
+                return "oui"
+            if l in ("non", "n", "no", "false", "0"):
+                return "non"
+            raise ValueError("oui ou non")
+        if self.genre == "choix":
+            vals = [c for c, _ in self.choix()]
+            if v in vals:
+                return v
+            raise ValueError("valeurs possibles : " + ", ".join(vals))
+        if self.genre == "entier":
+            if not re.fullmatch(r"-?\d{1,5}", v) or not self.mini <= int(v) <= self.maxi:
+                raise ValueError(f"un nombre de {self.mini} à {self.maxi}")
+            return str(int(v))
+        if self.genre == "hz":
+            if v in ("max", "low") or (v.isdigit() and 20 <= int(v) <= 500):
+                return v
+            raise ValueError("max, low ou une fréquence en Hz (ex. 60)")
+        if self.genre == "dossier":
+            if v == "auto":
+                return v
+            v = os.path.expanduser(v)
+            if not v.startswith("/"):
+                raise ValueError("un chemin complet (ex. ~/Images/Captures), ou auto")
+            return v.replace(HOME, "~", 1)
+        if self.genre == "texte":
+            if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
+                if not re.fullmatch(r"[a-z]{2,3}(,[a-z]{2,3})*", v) or \
+                        any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
+                    raise ValueError("codes de disposition séparés par des virgules (ex. us, fr, us,fr), ou systeme")
+            if not v:
+                raise ValueError("une valeur")
+            return v
+        return v
+
+
+REGLAGES = [
+    # Île
+    R("ILE_STYLE", "Île", "Couleurs", "choix", "terminal", "Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
+      [("terminal", "Couleurs du terminal"), ("noir", "Noire, façon iPhone")]),
+    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "Le dégradé reprend la bordure de la fenêtre active.",
+      [("degrade", "Dégradé des fenêtres"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
+    R("ILE_HEURE", "Île", "Format de l'heure", "choix", "24", "", [("24", "24 h  (14:05)"), ("12", "12 h  (2:05 PM)")]),
+    R("ILE_DATE", "Île", "Date à côté de l'heure", "ouinon", "oui"),
+    R("ILE_BANNIERES", "Île", "Notifications en bannière", "ouinon", "oui",
+      "Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours."),
+    R("ILE_BANNIERE_DUREE", "Île", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
+    R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
+      mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
+    # Apparence
+    R("THEME_MODE", "Apparence", "Thème", "choix", "dark", "Les couleurs suivent toujours le fond d'écran.",
+      [("dark", "Sombre"), ("light", "Clair")], groupe="noctalia"),
+    R("POLICE", "Apparence", "Police de l'interface", "choix", "Adwaita Sans", "Barre, panneaux et menus de Noctalia.",
+      lambda: polices(r"^(Inter|Noto Sans|Roboto|Ubuntu|Cantarell|Fira Sans|Open Sans|Lato|IBM Plex Sans|SF Pro)",
+                      ["Adwaita Sans", "Inter", "Noto Sans", "Cantarell", "Roboto", "Ubuntu", "Fira Sans", "IBM Plex Sans"]),
+      groupe="noctalia"),
+    R("ANIMATIONS_VITESSE", "Apparence", "Vitesse des animations", "choix", "1.15", "Panneaux et menus de Noctalia.",
+      [("0.8", "Douce"), ("1.15", "Normale"), ("1.6", "Rapide")], groupe="noctalia"),
+    R("COINS_ECRAN", "Apparence", "Coins de l'écran arrondis", "ouinon", "oui", groupe="noctalia"),
+    R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
+      mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    # Barre et dock
+    R("BARRE_OPACITE", "Barre et dock", "Opacité des pastilles de la barre", "entier", "82", mini=30, maxi=100, pas=2, unite="%", groupe="noctalia"),
+    R("BARRE_SYSTEME", "Barre et dock", "Processeur, température et mémoire", "ouinon", "oui", "La pastille d'infos système à droite de la barre.", groupe="noctalia"),
+    R("DOCK", "Barre et dock", "Dock", "ouinon", "oui", groupe="noctalia"),
+    R("DOCK_AUTO", "Barre et dock", "Masquer le dock automatiquement", "ouinon", "oui", "Il apparaît quand le pointeur touche le bas de l'écran.", groupe="noctalia"),
+    R("DOCK_TAILLE", "Barre et dock", "Taille des icônes du dock", "entier", "44", mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
+    R("DOCK_LOUPE", "Barre et dock", "Effet loupe du dock", "ouinon", "oui", groupe="noctalia"),
+    # Fenêtres
+    R("FENETRES_ESPACE", "Fenêtres", "Espace entre les fenêtres", "entier", "4", mini=0, maxi=40, unite="px", groupe="hypr"),
+    R("FENETRES_MARGE", "Fenêtres", "Marge au bord de l'écran", "entier", "10", mini=0, maxi=60, unite="px", groupe="hypr"),
+    R("FENETRES_BORDURE", "Fenêtres", "Épaisseur de la bordure", "entier", "2", mini=0, maxi=8, unite="px", groupe="hypr"),
+    R("FENETRES_ARRONDI", "Fenêtres", "Arrondi des coins", "entier", "14", mini=0, maxi=30, unite="px", groupe="hypr"),
+    R("FENETRES_HALO", "Fenêtres", "Halo coloré de la fenêtre active", "ouinon", "oui", "Ombre aux couleurs du fond d'écran (et halo musical).", groupe="hypr"),
+    R("FENETRES_FLOU", "Fenêtres", "Flou derrière les fenêtres transparentes", "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_ANIMATIONS", "Fenêtres", "Animations des fenêtres", "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_ASSOMBRIR", "Fenêtres", "Assombrir les fenêtres inactives", "ouinon", "oui", "La fenêtre active ressort.", groupe="hypr"),
+    R("FENETRES_OPACITE_INACTIVE", "Fenêtres", "Opacité des fenêtres inactives", "entier", "100", mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
+    # Fonds d'écran
+    R("FONDS_ROTATION", "Fonds d'écran", "Changer de fond automatiquement", "ouinon", "oui", groupe="noctalia"),
+    R("FONDS_INTERVALLE", "Fonds d'écran", "Toutes les", "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
+    R("FONDS_DOSSIER", "Fonds d'écran", "Dossier des fonds d'écran", "dossier", "~/Pictures/Wallpapers", groupe="noctalia"),
+    # Énergie
+    R("HZ_PERFORMANCE", "Énergie", "Écran en Performance", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
+    R("HZ_BALANCED_AC", "Énergie", "Écran en Équilibré, sur secteur", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
+    R("HZ_BALANCED_BAT", "Énergie", "Écran en Équilibré, sur batterie", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
+    R("HZ_ECO", "Énergie", "Écran en Économie", "hz", "low", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
+    R("ECO_BRIGHTNESS_MAX", "Énergie", "Luminosité maximale en Économie", "entier", "40", mini=0, maxi=100, pas=5, unite="%", zero="Sans limite", groupe="energie"),
+    R("HALO_BATTERIE", "Énergie", "Halo musical sur batterie", "ouinon", "non",
+      "Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus)."),
+    # Clavier et souris
+    R("CLAVIER_DISPOSITION", "Clavier et souris", "Disposition du clavier", "texte", "systeme",
+      "Codes XKB : us, fr, us,fr… Avec plusieurs, Super + Espace passe de l'une à l'autre.", groupe="hypr"),
+    R("CLAVIER_REPETITION", "Clavier et souris", "Vitesse de répétition des touches", "entier", "35", mini=10, maxi=80, unite="/s", groupe="hypr"),
+    R("CLAVIER_DELAI", "Clavier et souris", "Délai avant répétition", "entier", "300", mini=150, maxi=1000, pas=25, unite="ms", groupe="hypr"),
+    R("SOURIS_VITESSE", "Clavier et souris", "Vitesse du pointeur", "entier", "0", "De -10 (lent) à 10 (rapide).", mini=-10, maxi=10, groupe="hypr"),
+    R("DEFILEMENT_NATUREL", "Clavier et souris", "Défilement naturel (pavé tactile)", "ouinon", "oui", "Le contenu suit les doigts, comme sur un téléphone.", groupe="hypr"),
+    R("TAPOTER_CLIC", "Clavier et souris", "Toucher le pavé pour cliquer", "ouinon", "oui", groupe="hypr"),
+    R("FOCUS_SOURIS", "Clavier et souris", "La fenêtre sous le pointeur devient active", "ouinon", "oui", "Non : il faut cliquer dans une fenêtre pour l'activer.", groupe="hypr"),
+    # Veille
+    R("VEILLE_VERROU", "Veille", "Verrouillage automatique après", "entier", "5",
+      "L'écran s'assombrit un peu avant et s'éteint 30 s après.", mini=0, maxi=120, unite="min", zero="Jamais", groupe="veille"),
+    R("VEILLE_SUSPENSION", "Veille", "Mise en veille sur batterie après", "entier", "15",
+      "Sur secteur, le PC ne se met jamais en veille tout seul.", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
+    # Terminal
+    R("TERMINAL_OPACITE", "Terminal", "Opacité du fond", "entier", "88", mini=50, maxi=100, pas=2, unite="%", groupe="terminal"),
+    R("TERMINAL_TAILLE", "Terminal", "Taille du texte", "entier", "11", mini=8, maxi=24, unite="pt", groupe="terminal"),
+    R("TERMINAL_POLICE", "Terminal", "Police", "choix", "CaskaydiaCove Nerd Font Mono", "Polices « Nerd Font Mono » installées.",
+      lambda: polices(r"Nerd Font Mono$", ["CaskaydiaCove Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "FiraCode Nerd Font Mono"]),
+      groupe="terminal"),
+    # Captures
+    R("CAPTURES_DOSSIER", "Captures", "Dossier des captures d'écran", "dossier", "auto", "Automatique : Captures, dans ton dossier Images."),
+]
+PAR_CLE = {r.cle: r for r in REGLAGES}
+SECTIONS = []
+for _r in REGLAGES:
+    if _r.section not in SECTIONS:
+        SECTIONS.append(_r.section)
+SECTIONS.append("Raccourcis")
+
+
+# ── Fichier ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def lire():
+    vals = {}
+    try:
+        with open(FICHIER, encoding="utf-8") as f:
+            for l in f:
+                m = re.match(r"\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$", l)
+                if m:
+                    vals[m[1]] = re.sub(r'^"(.*)"$', r"\1", m[2])
+    except FileNotFoundError:
+        pass
+    return vals
+
+
+def ecrire(vals):
+    os.makedirs(os.path.dirname(FICHIER), exist_ok=True)
+    lignes = ["# Tes réglages de noctalia-config : seulement ce que tu as changé, le reste suit la config.",
+              "# Gardé tel quel par les mises à jour. Le plus simple pour le changer : la commande nc-reglages."]
+    sec = None
+    for r in REGLAGES:
+        if r.cle in vals:
+            if r.section != sec:
+                lignes += ["", f"# {r.section}"]
+                sec = r.section
+            lignes.append(f"{r.cle}={vals[r.cle]}")
+    autres = [k for k in vals if k not in PAR_CLE]
+    if autres:
+        lignes += ["", "# Autres"] + [f"{k}={vals[k]}" for k in autres]
+    tmp = FICHIER + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lignes) + "\n")
+    os.replace(tmp, FICHIER)
+
+
+def valeur(vals, cle):
+    return vals.get(cle, PAR_CLE[cle].defaut)
+
+
+def regler(vals, cle, v):
+    """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
+    r = PAR_CLE[cle]
+    v = r.valider(v)
+    if v == r.defaut:
+        vals.pop(cle, None)
+    else:
+        vals[cle] = v
+    ecrire(vals)
+    return r.groupe
+
+
+# ── Application ─────────────────────────────────────────────────────────────────────────────────────────────────
+def appliquer_veille(vals):
+    verrou, susp = vals.get("VEILLE_VERROU"), vals.get("VEILLE_SUSPENSION")
+    if verrou is None and susp is None:
+        if os.path.exists(VEILLE_UNITE):
+            for f in (VEILLE_UNITE, VEILLE_OUT):
+                try:
+                    os.remove(f)
+                except FileNotFoundError:
+                    pass
+            subprocess.run(["systemctl", "--user", "daemon-reload"])
+            subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
+        return
+    try:
+        src = open(VEILLE_SRC, encoding="utf-8").read()
+    except OSError:
+        return
+    verrou = int(verrou or PAR_CLE["VEILLE_VERROU"].defaut)
+    susp = int(susp or PAR_CLE["VEILLE_SUSPENSION"].defaut)
+
+    def bloc(m):
+        b = m.group(0)
+        if "nc-brightness dim" in b:
+            t = max(30, verrou * 60 - 150) if verrou else 0
+        elif "dpms" in b:
+            t = verrou * 60 + 30 if verrou else 0
+        elif "lock-session" in b:
+            t = verrou * 60
+        elif "suspend" in b:
+            t = susp * 60
+        else:
+            return b
+        return re.sub(r"timeout\s*=\s*\d+", f"timeout = {t}", b) if t > 0 else ""
+
+    texte = re.sub(r"(?ms)^listener\s*\{.*?^\}\n?", bloc, src)
+    os.makedirs(os.path.dirname(VEILLE_OUT), exist_ok=True)
+    with open(VEILLE_OUT, "w", encoding="utf-8") as f:
+        f.write(f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
+                f"veille : {susp} min). Ne pas éditer.\n" + texte)
+    hi = sortie(["sh", "-c", "command -v hypridle"]).strip() or "/usr/bin/hypridle"
+    os.makedirs(os.path.dirname(VEILLE_UNITE), exist_ok=True)
+    with open(VEILLE_UNITE, "w", encoding="utf-8") as f:
+        f.write(f"# nc-reglages : la veille avec tes délais\n[Service]\nExecStart=\nExecStart={hi} -c %h/.config/nc/hypridle.conf\n")
+    subprocess.run(["systemctl", "--user", "daemon-reload"])
+    subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
+
+
+def appliquer_terminal(vals):
+    c = []
+    if "TERMINAL_OPACITE" in vals:
+        c.append(f"background_opacity {int(vals['TERMINAL_OPACITE']) / 100:.2f}")
+    if "TERMINAL_TAILLE" in vals:
+        c.append(f"font_size {vals['TERMINAL_TAILLE']}")
+    if "TERMINAL_POLICE" in vals:
+        c.append(f"font_family {vals['TERMINAL_POLICE']}")
+    texte = "# Écrit par nc-reglages. Ne pas éditer.\n" + "\n".join(c) + "\n" if c else ""
+    ancien = open(KITTY_OUT, encoding="utf-8").read() if os.path.exists(KITTY_OUT) else ""
+    if texte == ancien:
+        return
+    if texte:
+        with open(KITTY_OUT, "w", encoding="utf-8") as f:
+            f.write(texte)
+    elif os.path.exists(KITTY_OUT):
+        os.remove(KITTY_OUT)
+    subprocess.run(["pkill", "-USR1", "-x", "kitty"], capture_output=True)      # kitty relit sa config
+
+
+def toml_val(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    return json.dumps(v, ensure_ascii=False)
+
+
+def appliquer_noctalia(vals):
+    tables = {}
+
+    def mettre(table, cle, v):
+        tables.setdefault(table, {})[cle] = v
+
+    def oui(k):
+        return vals[k] == "oui"
+
+    if "THEME_MODE" in vals:
+        mettre("theme", "mode", vals["THEME_MODE"])
+    if "POLICE" in vals:
+        mettre("shell", "font_family", vals["POLICE"])
+    if "ANIMATIONS_VITESSE" in vals:
+        mettre("shell.animation", "speed", float(vals["ANIMATIONS_VITESSE"]))
+    if "COINS_ECRAN" in vals:
+        mettre("shell.screen_corners", "enabled", oui("COINS_ECRAN"))
+    if "VERROU_FLOU" in vals:
+        mettre("lockscreen", "blur_intensity", int(vals["VERROU_FLOU"]) / 100)
+    if "BARRE_OPACITE" in vals:
+        mettre("bar.default", "capsule_opacity", int(vals["BARRE_OPACITE"]) / 100)
+    if "BARRE_SYSTEME" in vals and tomllib:
+        # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système
+        try:
+            with open(os.path.join(NOCTALIA_DIR, "config.toml"), "rb") as f:
+                fin = tomllib.load(f)["bar"]["default"]["end"]
+            if not oui("BARRE_SYSTEME"):
+                fin = [w for w in fin if w != "group:sys"]
+            mettre("bar.default", "end", fin)
+        except (OSError, KeyError, ValueError):
+            pass
+    for cle, nom in (("DOCK", "enabled"), ("DOCK_AUTO", "auto_hide"), ("DOCK_LOUPE", "magnification")):
+        if cle in vals:
+            mettre("dock", nom, oui(cle))
+    if "DOCK_TAILLE" in vals:
+        mettre("dock", "icon_size", int(vals["DOCK_TAILLE"]))
+    if "FONDS_ROTATION" in vals:
+        mettre("wallpaper.automation", "enabled", oui("FONDS_ROTATION"))
+    if "FONDS_INTERVALLE" in vals:
+        mettre("wallpaper.automation", "interval_seconds", int(vals["FONDS_INTERVALLE"]) * 60)
+    if "FONDS_DOSSIER" in vals:
+        mettre("wallpaper", "directory", os.path.expanduser(vals["FONDS_DOSSIER"]))
+
+    texte = ""
+    if tables:
+        texte = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n"
+        for t, kv in tables.items():
+            texte += f"\n[{t}]\n" + "".join(f"{k} = {toml_val(v)}\n" for k, v in kv.items())
+    ancien = open(NOCTALIA_OUT, encoding="utf-8").read() if os.path.exists(NOCTALIA_OUT) else ""
+    if texte == ancien:
+        return
+    if texte:
+        os.makedirs(NOCTALIA_DIR, exist_ok=True)
+        with open(NOCTALIA_OUT, "w", encoding="utf-8") as f:
+            f.write(texte)
+    elif os.path.exists(NOCTALIA_OUT):
+        os.remove(NOCTALIA_OUT)
+    subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+
+
+def appliquer(groupes, vals=None):
+    vals = lire() if vals is None else vals
+    for g in groupes:
+        if g == "hypr":
+            subprocess.run(["hyprctl", "reload"], capture_output=True)
+        elif g == "energie":
+            subprocess.run(["systemctl", "--user", "restart", "nc-profile-sync.service"], capture_output=True)
+        elif g == "veille":
+            appliquer_veille(vals)
+        elif g == "terminal":
+            appliquer_terminal(vals)
+        elif g == "noctalia":
+            appliquer_noctalia(vals)
+        # île, captures, halo : relu tout seul
+
+
+# ── Raccourcis (moteur : nc-raccourci) ─────────────────────────────────────────────────────────────────────────
+rc = None
+
+
+def raccourcis():
+    """Lignes de la section Raccourcis : titres, raccourcis actifs (de la config et les tiens), désactivés."""
+    global rc
+    if rc is None:
+        rc = charger("ncraccourci", "nc-raccourci")
+    conf = rc.read_conf()
+    groupes, ordre = {}, []
+    for b in rc.live_binds():
+        if not b["desc"]:
+            continue
+        if b["desc"] not in groupes:
+            groupes[b["desc"]] = []
+            ordre.append(b["desc"])
+        if b["id"] not in groupes[b["desc"]]:
+            groupes[b["desc"]].append(b["id"])
+    lignes = {s: [] for s in rc.nckeys.SECTIONS}
+    for d in ordre:
+        sec, sep, texte = d.partition("|")
+        sec = sec.strip() if sep and sec.strip() in lignes else "Mes raccourcis"
+        ids = groupes[d]
+        mien = next((e for e in conf if e[0] == "ajout" and rc.id_of(e[1]) in ids), None)
+        origs = [rc.original_id(i, conf) for i in ids]
+        lignes[sec].append({"genre": "raccourci", "nom": rc.desc_text(d), "ids": ids, "origs": origs, "mien": mien,
+                            "change": any(o != i for o, i in zip(origs, ids)), "desactive": False})
+    off = {}
+    for e in conf:
+        if e[0] == "aucun":
+            nom = e[2] if len(e) > 2 and e[2] else "Raccourci de la config"
+            off.setdefault(nom, []).append(e[1])
+    for nom, ids in off.items():
+        lignes["Mes raccourcis"].append({"genre": "raccourci", "nom": nom, "ids": ids, "origs": ids, "mien": None,
+                                         "change": True, "desactive": True})
+    res = [{"genre": "ajouter", "nom": "Ajouter un raccourci…"}]
+    for s in rc.nckeys.SECTIONS:
+        if lignes[s]:
+            res.append({"genre": "titre", "nom": s})
+            res += lignes[s]
+    return res
+
+
+def touches_de(ligne):
+    noms = list(dict.fromkeys(rc.human(i) for i in ligne["ids"]))      # sans doublons (molette haut / bas)
+    fins = [n.split(" + ")[-1] for n in noms]
+    mods = " + ".join(noms[0].split(" + ")[:-1])
+    if len(noms) > 1 and set(fins) <= {"←", "→", "↑", "↓"}:
+        return f"{mods} + flèches" if mods else "flèches"
+    if len(noms) > 3:
+        return f"{noms[0]} … {noms[-1].split(' + ')[-1]}"
+    return "  /  ".join(noms)
+
+
+# ── Capture d'une combinaison (kitty) ──────────────────────────────────────────────────────────────────────────
+US_POSITION = {"`": 49, "-": 20, "=": 21, "[": 34, "]": 35, ";": 47, "'": 48, "\\": 51, ",": 59, ".": 60, "/": 61}
+FONCTIONS = {"P": "F1", "Q": "F2", "R": "F3", "S": "F4", "A": "haut", "B": "bas", "C": "droite", "D": "gauche",
+             "H": "Début", "F": "Fin"}
+TILDE = {"3": "Suppr", "15": "F5", "17": "F6", "18": "F7", "19": "F8", "20": "F9", "21": "F10", "23": "F11", "24": "F12"}
+
+
+def lire_sequence(ecran, limite):
+    """Une touche du terminal (octets bruts) ; None si rien avant la limite."""
+    ecran.nodelay(True)
+    octets = []
+    try:
+        while time.time() < limite:
+            c = ecran.getch()
+            if c == -1:
+                if octets:
+                    break
+                time.sleep(0.01)
+                continue
+            octets.append(c)
+            if octets[0] != 27:
+                break
+            if len(octets) > 2 and (chr(c).isalpha() or chr(c) == "~"):       # fin d'une séquence CSI
+                break
+    finally:
+        ecran.nodelay(False)
+    return bytes(o for o in octets if o < 256).decode("utf-8", "replace") if octets else None
+
+
+def touches_de_sequence(s):
+    """Séquence du protocole clavier de kitty -> texte pour nc-raccourci (« Super+Maj+T »), « annuler », ou None."""
+    m = re.fullmatch(r"\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?u", s)
+    if m:
+        code, base, mods = int(m[1]), int(m[3]) if m[3] else None, int(m[4] or 1) - 1
+        if code == 27 and not mods:
+            return "annuler"
+        noms = {13: "Entrée", 9: "Tab", 32: "Espace", 27: "Échap"}
+        if code in noms:
+            touche = noms[code]
+        else:
+            ch = chr(code)
+            b = chr(base) if base else ch
+            touche = None
+            if len(ch) == 1 and ch.isascii() and ch.isalpha():
+                touche = ch.upper()
+            elif b.isdigit():
+                touche = b
+            elif ch.isdigit():
+                touche = ch
+            elif b in US_POSITION:
+                touche = f"code:{US_POSITION[b]}"
+        if not touche:
+            return None
+    else:
+        m = re.fullmatch(r"\x1b\[(\d+)?(?:;(\d+))?([A-Z~])", s) or re.fullmatch(r"\x1bO()()([PQRS])", s)
+        if not m:
+            return "annuler" if s == "\x1b" else None
+        mods = int(m[2] or 1) - 1
+        touche = TILDE.get(m[1] or "") if m[3] == "~" else FONCTIONS.get(m[3])
+        if not touche:
+            return None
+    noms_mods = [n for bit, n in ((8, "Super"), (4, "Ctrl"), (2, "Alt"), (1, "Maj")) if mods & bit]
+    return "+".join(noms_mods + [touche])
+
+
+def capturer(ecran, ui):
+    """Attend une combinaison de touches ; renvoie son texte, ou None (annulé). Hyprland passe en mode « capture »
+    (aucun de ses raccourcis ne réagit) le temps de l'appui, avec un retour automatique au bout de 20 s."""
+    if os.environ.get("TERM") != "xterm-kitty" and not os.environ.get("KITTY_WINDOW_ID"):
+        return ui.saisir("Nouvelles touches", "", "Ex. Super+T, Super+Maj+B, Ctrl+Alt+F")
+    subprocess.run(["hyprctl", "eval",
+                    "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if hl.get_current_submap() == 'nc-capture' "
+                    "then hl.dispatch(hl.dsp.submap('reset')) end end, { timeout = 20000, type = 'oneshot' })"],
+                   capture_output=True)
+    sys.stdout.write("\x1b[>5u")              # protocole clavier de kitty : modificateurs et touche d'origine
+    sys.stdout.flush()
+    ecran.keypad(False)
+    try:
+        limite = time.time() + 20
+        while time.time() < limite:
+            s = lire_sequence(ecran, limite)
+            if s is None:
+                return None
+            t = touches_de_sequence(s)
+            if t == "annuler":
+                return None
+            if t and ("+" in t or re.fullmatch(r"F\d+", t)):
+                return t
+            if t:
+                ui.statut("Ajoute au moins Super, Ctrl ou Alt (Échap pour annuler)", erreur=True)
+                ui.dessiner_popup_capture()
+        return None
+    finally:
+        sys.stdout.write("\x1b[<u")
+        sys.stdout.flush()
+        ecran.keypad(True)
+        subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.submap('reset'))"], capture_output=True)
+
+
+# ── Écran ───────────────────────────────────────────────────────────────────────────────────────────────────────
+def couper(t, w):
+    return t if len(t) <= w else t[:max(0, w - 1)] + "…"
+
+
+class Ecran:
+    def __init__(self, ecran, section_depart=0):
+        self.e = ecran
+        self.vals = lire()
+        self.sec = section_depart
+        self.pos = {}                       # position dans chaque section
+        self.focus = "items" if section_depart else "sections"
+        self.haut = 0
+        self.attente, self.derniere = set(), 0.0
+        self.msg, self.msg_err, self.msg_fin = "", False, 0.0
+        self.lignes_r = None
+        self.titre_capture = ""
+        try:                                # terminaux très simples : pas de curseur invisible ni de couleurs
+            curses.curs_set(0)
+            curses.use_default_colors()
+        except curses.error:
+            pass
+        for i, c in enumerate((curses.COLOR_BLUE, curses.COLOR_YELLOW, curses.COLOR_GREEN, curses.COLOR_RED), 1):
+            curses.init_pair(i, c, -1)
+        self.ACC, self.MOD, self.OK, self.ERR = (curses.color_pair(i) for i in (1, 2, 3, 4))
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
+        curses.mouseinterval(0)
+        if section_depart:
+            self.deplacer(0)
+
+    # Lignes de la section courante
+    def items(self):
+        if SECTIONS[self.sec] == "Raccourcis":
+            if self.lignes_r is None:
+                self.lignes_r = raccourcis()
+            return self.lignes_r
+        return [r for r in REGLAGES if r.section == SECTIONS[self.sec]]
+
+    @staticmethod
+    def selectionnable(it):
+        return not (isinstance(it, dict) and it["genre"] == "titre")
+
+    def courant(self):
+        its = self.items()
+        if not its:
+            return None, 0
+        i = max(0, min(self.pos.get(self.sec, 0), len(its) - 1))
+        while i < len(its) - 1 and not self.selectionnable(its[i]):
+            i += 1
+        return its[i], i
+
+    def statut(self, texte, erreur=False):
+        self.msg, self.msg_err, self.msg_fin = texte, erreur, time.time() + 3
+
+    # ── Dessin ──
+    def dessiner(self):
+        e = self.e
+        e.erase()
+        h, w = e.getmaxyx()
+        if h < 14 or w < 70:
+            e.addstr(0, 0, couper("Agrandis le terminal pour voir les réglages (70 × 14 au moins).", w - 1))
+            e.refresh()
+            return
+        e.addstr(0, 2, "Réglages", curses.A_BOLD | self.ACC)
+        e.addstr(0, 10, "  de noctalia-config", curses.A_DIM)
+        chemin = "~/.config/nc/" + ("raccourcis.conf" if SECTIONS[self.sec] == "Raccourcis" else "reglages.conf")
+        e.addstr(0, max(32, w - len(chemin) - 2), chemin, curses.A_DIM)
+        # Sections
+        lg = 22
+        for i, s in enumerate(SECTIONS):
+            y = 2 + i
+            if y >= h - 4:
+                break
+            n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in REGLAGES if r.section == s and r.cle in self.vals)
+            if i == self.sec:
+                attr = (curses.A_REVERSE | self.ACC | curses.A_BOLD) if self.focus == "sections" else (curses.A_BOLD | self.ACC)
+                e.addstr(y, 1, couper(f" {s}", lg - 3).ljust(lg - 3), attr)
+            else:
+                e.addstr(y, 1, couper(f" {s}", lg - 3))
+            if n:
+                e.addstr(y, lg - 2, "●", self.MOD)
+        for y in range(2, h - 4):
+            e.addstr(y, lg, "│", curses.A_DIM)
+        # Réglages de la section
+        x0, iw = lg + 4, w - lg - 6
+        its = self.items()
+        cur, ci = self.courant()
+        zone = h - 7
+        if ci < self.haut:
+            self.haut = ci
+        elif ci >= self.haut + zone:
+            self.haut = ci - zone + 1
+        if ci <= 1:
+            self.haut = 0
+        col = min(42, iw // 2 + 4)
+        for k, it in enumerate(its[self.haut:self.haut + zone]):
+            i, y = self.haut + k, 2 + k
+            sel = (i == ci and self.focus == "items")
+            if isinstance(it, R):
+                v = it.montrer(valeur(self.vals, it.cle))
+                if sel and it.genre in ("ouinon", "choix", "hz", "entier"):
+                    v = f"‹ {v} ›"
+                elif sel:
+                    v = f"{v}   ↵"
+                self.ligne(y, x0, iw, col, it.nom, v, sel, it.cle in self.vals)
+            elif it["genre"] == "titre":
+                e.addstr(y, x0, couper(it["nom"], iw), curses.A_BOLD | self.ACC)
+            elif it["genre"] == "ajouter":
+                self.ligne(y, x0, iw, col, "+ " + it["nom"], "", sel, False)
+            else:
+                t = "désactivé" if it["desactive"] else touches_de(it)
+                self.ligne(y, x0, iw, col, it["nom"], t, sel, it["change"] or bool(it["mien"]), gris=it["desactive"])
+        if len(its) > zone:
+            e.addstr(2, w - 2, "▲" if self.haut > 0 else " ", curses.A_DIM)
+            e.addstr(h - 6, w - 2, "▼" if self.haut + zone < len(its) else " ", curses.A_DIM)
+        # Explication du réglage choisi
+        aide = ""
+        if self.focus == "items" and cur is not None:
+            if isinstance(cur, R):
+                aide = cur.aide
+                if cur.cle in self.vals:
+                    aide = (aide + "  " if aide else "") + f"Valeur de la config : {cur.montrer(cur.defaut)} (r pour la remettre)."
+            elif cur["genre"] == "ajouter":
+                aide = "Une appli (va à sa fenêtre si elle est ouverte, sinon la lance), un bureau, une page de l'île ou une commande."
+            elif cur["genre"] == "raccourci":
+                if cur["mien"]:
+                    aide = "Un de tes raccourcis. Entrée : changer les touches ou le retirer."
+                elif cur["desactive"]:
+                    aide = "Raccourci de la config désactivé. Entrée : le réactiver."
+                else:
+                    aide = "Entrée : changer les touches ou désactiver."
+                    if cur["change"]:
+                        aide += f"  À l'origine : {' / '.join(rc.human(o) for o in cur['origs'][:3])}."
+        elif self.focus == "sections":
+            aide = "Choisis une section. Un point marque ce que tu as changé."
+        for k, l in enumerate(textwrap.wrap(aide, w - 4)[:2]):
+            e.addstr(h - 4 + k, 2, l, curses.A_DIM)
+        if self.msg and time.time() < self.msg_fin:
+            e.addstr(h - 2, 2, couper(("✗ " if self.msg_err else "✓ ") + self.msg, w - 4), self.ERR if self.msg_err else self.OK)
+        if self.focus == "sections":
+            bas = "↑↓ section    → ou Entrée : ouvrir    q : quitter"
+        elif SECTIONS[self.sec] == "Raccourcis":
+            bas = "↑↓ choisir    Entrée : modifier    Échap : sections    q : quitter"
+        else:
+            bas = "↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter"
+        e.addstr(h - 1, 2, couper(bas, w - 4), curses.A_DIM)
+        e.refresh()
+
+    def ligne(self, y, x0, iw, col, nom, v, sel, change, gris=False):
+        e = self.e
+        if change:
+            e.addstr(y, x0 - 2, "●", self.MOD)
+        if sel:
+            attr = curses.A_REVERSE | self.ACC | curses.A_BOLD
+            e.addstr(y, x0 - 1, " " * (iw + 1), attr)
+            e.addstr(y, x0, couper(nom, col - 2), attr)
+            e.addstr(y, x0 + col, couper(v, iw - col), attr)
+        else:
+            e.addstr(y, x0, couper(nom, col - 2), curses.A_DIM if gris else curses.A_NORMAL)
+            e.addstr(y, x0 + col, couper(v, iw - col), curses.A_DIM if gris else self.ACC)
+
+    # ── Fenêtres par-dessus ──
+    def boite(self, titre, n, larg):
+        h, w = self.e.getmaxyx()
+        larg = min(w - 4, larg)
+        haut = n + 4
+        win = curses.newwin(haut, larg, max(1, (h - haut) // 2), (w - larg) // 2)
+        win.keypad(True)
+        win.erase()
+        win.box()
+        win.addstr(0, 2, f" {couper(titre, larg - 6)} ", curses.A_BOLD | self.ACC)
+        return win, larg
+
+    def choisir(self, titre, options, aide=""):
+        """Liste d'options (↑↓ Entrée, Échap) ; renvoie l'indice ou None."""
+        i = 0
+        larg = max(44, len(titre) + 8, *(len(o) + 8 for o in options))
+        while True:
+            self.dessiner()
+            win, larg = self.boite(titre, len(options) + (2 if aide else 0), larg)
+            for k, o in enumerate(options):
+                win.addstr(2 + k, 3, couper(o, larg - 6).ljust(larg - 6), (curses.A_REVERSE | self.ACC) if k == i else 0)
+            if aide:
+                win.addstr(3 + len(options), 3, couper(aide, larg - 6), curses.A_DIM)
+            win.refresh()
+            c = win.getch()
+            if c in (curses.KEY_UP, ord("k")):
+                i = (i - 1) % len(options)
+            elif c in (curses.KEY_DOWN, ord("j")):
+                i = (i + 1) % len(options)
+            elif c in (10, 13, curses.KEY_ENTER, ord(" ")):
+                return i
+            elif c in (27, ord("q")):
+                return None
+
+    def saisir(self, titre, initial="", aide=""):
+        """Ligne de texte modifiable ; renvoie le texte ou None (Échap)."""
+        texte = list(initial)
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
+        try:
+            while True:
+                self.dessiner()
+                win, larg = self.boite(titre, 2 if aide else 1, 70)
+                champ = larg - 6
+                vu = "".join(texte)[-(champ - 1):]
+                if aide:
+                    win.addstr(3, 3, couper(aide, champ), curses.A_DIM)
+                win.addstr(2, 3, vu.ljust(champ), curses.A_UNDERLINE)
+                win.move(2, 3 + len(vu))
+                win.refresh()
+                c = win.get_wch()
+                if c in ("\n", "\r", curses.KEY_ENTER):
+                    return "".join(texte).strip()
+                if c == "\x1b":
+                    return None
+                if c in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                    texte = texte[:-1]
+                elif c == "\x15":           # Ctrl + U : tout effacer
+                    texte = []
+                elif isinstance(c, str) and c.isprintable():
+                    texte.append(c)
+        finally:
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+
+    def filtrer(self, titre, elements):
+        """Longue liste avec recherche en tapant : elements = [(texte, valeur)] ; renvoie la valeur ou None."""
+        q, i = "", 0
+        while True:
+            vus = [x for x in elements if q.lower() in x[0].lower()] if q else elements
+            i = max(0, min(i, len(vus) - 1))
+            h, _ = self.e.getmaxyx()
+            n = max(3, min(len(vus), h - 12))
+            debut = max(0, i - n + 1)
+            self.dessiner()
+            win, larg = self.boite(titre, n + 2, 64)
+            win.addstr(2, 3, ("Rechercher : " + q).ljust(larg - 6), curses.A_UNDERLINE)
+            for k, (t, _) in enumerate(vus[debut:debut + n]):
+                win.addstr(4 + k, 3, couper(t, larg - 6).ljust(larg - 6), (curses.A_REVERSE | self.ACC) if debut + k == i else 0)
+            if not vus:
+                win.addstr(4, 3, "Aucun résultat", curses.A_DIM)
+            win.refresh()
+            c = win.get_wch()
+            if c in ("\n", "\r", curses.KEY_ENTER):
+                return vus[i][1] if vus else None
+            if c == "\x1b":
+                return None
+            if c == curses.KEY_UP:
+                i -= 1
+            elif c == curses.KEY_DOWN:
+                i += 1
+            elif c in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                q, i = q[:-1], 0
+            elif isinstance(c, str) and c.isprintable():
+                q, i = q + c, 0
+
+    def dessiner_popup_capture(self):
+        self.dessiner()
+        win, larg = self.boite(self.titre_capture, 5, 60)
+        if self.msg and time.time() < self.msg_fin and self.msg_err:
+            win.addstr(2, 3, couper(self.msg, larg - 6), self.ERR)
+        win.addstr(3, 3, "Appuie sur la nouvelle combinaison…", curses.A_BOLD)
+        win.addstr(4, 3, couper("ex. Super + T, Super + Maj + B, Ctrl + Alt + F", larg - 6), curses.A_DIM)
+        win.addstr(6, 3, "Échap : annuler", curses.A_DIM)
+        win.refresh()
+
+    def nouvelles_touches(self, titre):
+        self.titre_capture = titre
+        self.msg = ""
+        self.dessiner_popup_capture()
+        return capturer(self.e, self)
+
+    # ── Actions ──
+    def changer(self, r, sens):
+        """← → : valeur suivante ou précédente (ou ± pas)."""
+        v = valeur(self.vals, r.cle)
+        if r.genre in ("ouinon", "choix", "hz"):
+            vals = [c for c, _ in r.choix()]
+            if not vals:
+                return
+            i = vals.index(v) if v in vals else 0
+            nv = vals[(i + sens) % len(vals)]
+        elif r.genre == "entier":
+            n = int(v) if re.fullmatch(r"-?\d+", v) else int(r.defaut)
+            nv = str(max(r.mini, min(r.maxi, n + sens * r.pas)))
+        else:
+            return self.entree(r)
+        self.poser(r, nv)
+
+    def poser(self, r, v):
+        try:
+            g = regler(self.vals, r.cle, v)
+        except ValueError as err:
+            self.statut(f"Valeur refusée : {err}", erreur=True)
+            return
+        if g:
+            self.attente.add(g)
+        self.derniere = time.time()
+        self.statut(f"{r.nom} : {r.montrer(valeur(self.vals, r.cle))}")
+
+    def entree(self, r):
+        if r.genre == "ouinon":
+            return self.changer(r, 1)
+        if r.genre in ("choix", "hz"):
+            ch = r.choix()
+            v = valeur(self.vals, r.cle)
+            opts = [("✓ " if c == v else "  ") + n for c, n in ch]
+            extra = r.genre == "hz"
+            i = self.choisir(r.nom, opts + (["  Autre fréquence…"] if extra else []))
+            if i is None:
+                return
+            if extra and i == len(ch):
+                t = self.saisir(r.nom, "", "Fréquence en Hz : la plus proche que ton écran propose sera prise")
+                if t:
+                    self.poser(r, t)
+                return
+            return self.poser(r, ch[i][0])
+        aide = {"entier": f"De {r.mini} à {r.maxi}{' ' + r.unite if r.unite else ''}",
+                "dossier": "Un chemin (ex. ~/Images/Captures), ou auto",
+                "texte": "Ex. us, fr, us,fr — ou systeme"}.get(r.genre, "")
+        t = self.saisir(r.nom, valeur(self.vals, r.cle), aide)
+        if t:
+            self.poser(r, t)
+
+    def action_raccourci(self, it):
+        def faire(fn, *a):
+            try:
+                self.statut(fn(*a))
+            except rc.Refus as err:
+                self.statut(str(err), erreur=True)
+            self.lignes_r = None
+
+        if it["genre"] == "ajouter":
+            return self.ajouter_raccourci()
+        if it["desactive"]:
+            if self.choisir(it["nom"], ["Réactiver", "Annuler"]) == 0:
+                faire(rc.retablir_ids, it["ids"])
+            return
+        opts, fns = [], []
+        if len(it["ids"]) == 1 and rc.modifiable(it["ids"][0]):
+            opts.append("Changer les touches")
+            fns.append("touches")
+        if it["mien"]:
+            opts.append("Retirer ce raccourci")
+            fns.append("retirer")
+        else:
+            opts.append("Désactiver")
+            fns.append("desactiver")
+            if it["change"]:
+                opts.append("Remettre les touches d'origine")
+                fns.append("origine")
+        i = self.choisir(f"{it['nom']}  ({touches_de(it)})", opts)
+        if i is None:
+            return
+        f = fns[i]
+        if f == "touches":
+            t = self.nouvelles_touches(f"Nouvelles touches : {it['nom']}")
+            if t:
+                faire(rc.changer_id, it["ids"][0], t)
+        elif f == "retirer":
+            faire(rc.retirer_ajout, it["mien"][1])
+        elif f == "desactiver":
+            faire(rc.desactiver_ids, it["ids"], it["nom"])
+        elif f == "origine":
+            faire(rc.retablir_ids, it["origs"])
+
+    def ajouter_raccourci(self):
+        i = self.choisir("Ajouter un raccourci", ["Ouvrir une appli", "Aller à un bureau", "Ouvrir une page de l'île",
+                                                   "Lancer une commande"])
+        if i is None:
+            return
+        if i == 0:
+            apps = sorted(rc.apps(), key=lambda a: a["name"].lower())
+            choix = self.filtrer("Quelle appli ?", [(a["name"], a) for a in apps])
+            if not choix:
+                return
+            typ, val, nom = "appli", choix["id"], choix["name"]
+        elif i == 1:
+            k = self.choisir("Quel bureau ?", [f"Bureau {n}" for n in range(1, 11)])
+            if k is None:
+                return
+            typ, val, nom = "bureau", str(k + 1), f"Bureau {k + 1}"
+        elif i == 2:
+            pages = [("centre", "Centre de contrôle"), ("notifications", "Notifications"), ("son", "Son"),
+                     ("reseau", "Wi-Fi"), ("bluetooth", "Bluetooth"), ("systeme", "Système"),
+                     ("calendrier", "Calendrier"), ("minuteur", "Minuteur")]
+            k = self.choisir("Quelle page de l'île ?", [n for _, n in pages])
+            if k is None:
+                return
+            typ, val, nom = "ile", pages[k][0], f"Île : {pages[k][1]}"
+        else:
+            c = self.saisir("Commande à lancer", "", "Ex. kitty -e htop, ou notify-send Bonjour")
+            if not c:
+                return
+            n = self.saisir("Nom dans la fiche Super + /", c)
+            typ, val, nom = "commande", c, n or c
+        t = self.nouvelles_touches(f"Touches pour : {nom}")
+        if not t:
+            return
+        try:
+            self.statut(rc.ajouter(t, typ, val, nom))
+        except rc.Refus as err:
+            self.statut(str(err), erreur=True)
+        self.lignes_r = None
+
+    def deplacer(self, d):
+        its = self.items()
+        _, i = self.courant()
+        j = i + d
+        while 0 <= j < len(its) and not self.selectionnable(its[j]):
+            j += d if d else 1
+        if 0 <= j < len(its):
+            self.pos[self.sec] = j
+
+    def clic(self):
+        try:
+            _, x, y, _, etat = curses.getmouse()
+        except curses.error:
+            return
+        if etat & curses.BUTTON4_PRESSED:
+            return self.deplacer(-1)
+        if etat & getattr(curses, "BUTTON5_PRESSED", 0x200000):
+            return self.deplacer(1)
+        if not etat & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
+            return
+        lg_x = 22
+        if x < lg_x and 2 <= y < 2 + len(SECTIONS):
+            self.sec, self.focus, self.haut = y - 2, "items", 0
+            self.deplacer(0)
+            return
+        if x > lg_x and y >= 2:
+            i = self.haut + y - 2
+            its = self.items()
+            if i < len(its) and self.selectionnable(its[i]):
+                deja = self.pos.get(self.sec, 0) == i and self.focus == "items"
+                self.pos[self.sec], self.focus = i, "items"
+                if deja:
+                    it = its[i]
+                    if isinstance(it, R):
+                        self.changer(it, 1) if it.genre in ("ouinon",) else self.entree(it)
+                    else:
+                        self.action_raccourci(it)
+
+    def boucle(self):
+        self.e.timeout(150)
+        while True:
+            if self.attente and time.time() - self.derniere > 0.4:
+                appliquer(self.attente, self.vals)
+                self.attente = set()
+            self.dessiner()
+            try:
+                c = self.e.get_wch()
+            except curses.error:
+                continue
+            if c == curses.KEY_RESIZE:
+                continue
+            if c == curses.KEY_MOUSE:
+                self.clic()
+                continue
+            if c in ("q", "Q") or (c == "\x1b" and self.focus == "sections"):
+                break
+            if self.focus == "sections":
+                if c in (curses.KEY_UP, "k"):
+                    self.sec, self.haut = (self.sec - 1) % len(SECTIONS), 0
+                elif c in (curses.KEY_DOWN, "j"):
+                    self.sec, self.haut = (self.sec + 1) % len(SECTIONS), 0
+                elif c in (curses.KEY_RIGHT, "\n", "\r", "\t", curses.KEY_ENTER, "l"):
+                    self.focus = "items"
+                    self.deplacer(0)
+                continue
+            cur, _ = self.courant()
+            if c in ("\t", "\x1b", curses.KEY_BTAB):
+                self.focus = "sections"
+            elif c in (curses.KEY_UP, "k"):
+                self.deplacer(-1)
+            elif c in (curses.KEY_DOWN, "j"):
+                self.deplacer(1)
+            elif c == curses.KEY_PPAGE:
+                for _ in range(8):
+                    self.deplacer(-1)
+            elif c == curses.KEY_NPAGE:
+                for _ in range(8):
+                    self.deplacer(1)
+            elif cur is None:
+                continue
+            elif isinstance(cur, R):
+                if c in (curses.KEY_LEFT, "h", "-"):
+                    self.changer(cur, -1)
+                elif c in (curses.KEY_RIGHT, "l", "+"):
+                    self.changer(cur, 1)
+                elif c in ("\n", "\r", " ", curses.KEY_ENTER):
+                    self.entree(cur)
+                elif c in ("r", "R") and cur.cle in self.vals:
+                    self.poser(cur, cur.defaut)
+                    self.statut(f"{cur.nom} : valeur de la config")
+            else:
+                if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
+                    self.action_raccourci(cur)
+                elif c == curses.KEY_LEFT:
+                    self.focus = "sections"
+        if self.attente:
+            appliquer(self.attente, self.vals)
+
+
+def tui(section=0):
+    os.environ.setdefault("ESCDELAY", "25")
+    # Fenêtre fermée ou programme arrêté : sortie propre (le mode « capture » de Hyprland est quitté plus bas)
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, lambda *_: sys.exit(1))
+    try:
+        curses.wrapper(lambda e: Ecran(e, section).boucle())
+    finally:
+        # Jamais bloqué dans le mode « capture » de Hyprland, même après une erreur
+        if sortie(["hyprctl", "submap"]).strip() == "nc-capture":
+            subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.submap('reset'))"], capture_output=True)
+
+
+# ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
+def cli(a):
+    vals = lire()
+    if a[0] in ("liste", "list", "ls"):
+        sec = None
+        for r in REGLAGES:
+            if r.section != sec:
+                print(f"\n  {r.section}")
+                sec = r.section
+            m = "●" if r.cle in vals else " "
+            print(f"   {m} {r.nom:<44} {r.montrer(valeur(vals, r.cle)):<30} {r.cle}")
+        print()
+    elif a[0] == "get" and len(a) == 2 and a[1] in PAR_CLE:
+        print(valeur(vals, a[1]))
+    elif a[0] == "set" and len(a) == 3 and a[1] in PAR_CLE:
+        try:
+            g = regler(vals, a[1], a[2])
+        except ValueError as e:
+            sys.exit(f"nc-reglages : valeur refusée pour {a[1]} : {e}")
+        appliquer([g] if g else [], vals)
+        r = PAR_CLE[a[1]]
+        print(f"{r.nom} : {r.montrer(valeur(vals, a[1]))}")
+    elif a[0] == "reset":
+        if len(a) == 2:
+            if a[1] not in PAR_CLE:
+                sys.exit(f"nc-reglages : réglage inconnu : {a[1]}")
+            vals.pop(a[1], None)
+            groupes = {PAR_CLE[a[1]].groupe}
+        else:
+            groupes = {PAR_CLE[k].groupe for k in vals if k in PAR_CLE}
+            vals = {}
+        ecrire(vals)
+        appliquer([g for g in groupes if g], vals)
+        print("Valeur de la config remise.")
+    elif a[0] in ("appliquer", "apply"):
+        appliquer(["veille", "terminal", "noctalia"], vals)
+    elif a[0] in ("-h", "--help", "aide", "help"):
+        print(__doc__.strip())
+    else:
+        sys.exit("nc-reglages : commande ou réglage inconnu (nc-reglages aide, nc-reglages liste)")
+
+
+if __name__ == "__main__":
+    locale.setlocale(locale.LC_ALL, "")
+    args = sys.argv[1:]
+    if not args or args[0] in ("raccourcis", "shortcuts"):
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            cli(["liste"])
+        else:
+            tui(SECTIONS.index("Raccourcis") if args else 0)
+    else:
+        cli(args)
