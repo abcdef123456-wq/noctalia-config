@@ -11,6 +11,7 @@ Item {
     id: c
     readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
                                    : Etat.enregistre ? "video"
+                                   : Etat.telecharge && !Etat.aMusique && !Agents.travaille ? "telechargement"
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
@@ -19,7 +20,8 @@ Item {
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
-                                      claude: claude, "claude-fini": claudeFini, video: video })[mode] || repos
+                                      claude: claude, "claude-fini": claudeFini, video: video,
+                                      telechargement: telechargement, "telechargement-fini": telechargementFini })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -227,6 +229,34 @@ Item {
     }
 
     // ── Enregistrement d'écran : point rouge qui palpite et durée (un clic sur la pilule l'arrête) ──
+    // ── Téléchargement en cours : flèche qui descend, nom, taille reçue et vitesse ──
+    Fondu {
+        id: telechargement
+        readonly property var t: Etat.telechargements.length ? Etat.telechargements[0] : null
+        montre: c.mode === "telechargement"
+        Ico {
+            anchors.verticalCenter: parent.verticalCenter; nom: "arrow_downward"; taille: 17; color: Couleurs.accent
+            SequentialAnimation on anchors.verticalCenterOffset { running: telechargement.montre; loops: Animation.Infinite
+                NumberAnimation { from: -3; to: 3; duration: 600; easing.type: Easing.InOutSine }
+                NumberAnimation { from: 3; to: -3; duration: 600; easing.type: Easing.InOutSine } }
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 190)
+            text: telechargement.t ? telechargement.t.nom : ""
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.features: { "tnum": 1 }
+            text: telechargement.t ? Etat.octets(telechargement.t.taille) + (telechargement.t.vitesse > 0 ? " · " + Etat.octets(telechargement.t.vitesse) + "/s" : "")
+                  + (Etat.telechargements.length > 1 ? "  +" + (Etat.telechargements.length - 1) : "") : ""
+        }
+    }
+    Fondu {
+        id: telechargementFini
+        montre: c.mode === "telechargement-fini"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "download_done"; taille: 17; color: Couleurs.vert }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Téléchargé"; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.telechargeFini; secondaire: true; width: Math.min(implicitWidth, 200) }
+    }
     Fondu {
         id: video
         montre: c.mode === "video"
