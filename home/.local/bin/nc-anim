@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""nc-anim : petites animations plein écran aux couleurs du fond d'écran (bouton d'arrêt…). Une touche ou un clic les
+ferme.
+  nc-anim NOM            joue une animation (essaie-les : nc-anim liste)
+  nc-anim liste          les animations, dont les tiennes
+  nc-anim bouton         ce que fait le bouton d'arrêt (nc-reglages → Animations → « Bouton d'arrêt »)
+  nc-anim nouvelle NOM   crée ta propre animation (~/.config/nc/animations/NOM.py, à modifier), puis choisis-la dans
+                         nc-reglages comme les autres
+Tes animations : ~/.config/nc/animations/, un script par animation (Python ou autre), lancé dans un terminal plein
+écran transparent ; jamais touchées par les mises à jour.
+"""
+import json
+import math
+import os
+import random
+import select
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+PERSO = os.path.join(HOME, ".config/nc/animations")
+REGLAGES = os.path.join(HOME, ".config/nc/reglages.conf")
+MOI = os.path.abspath(__file__)
+
+
+# ── Couleurs du thème (celles de l'île et du terminal) ────────────────────────────────────────────────────────────
+def _palette():
+    try:
+        with open(os.path.join(HOME, ".config/nc/palette-ile.json"), encoding="utf-8") as f:
+            p = json.load(f)
+    except (OSError, ValueError):
+        p = {}
+
+    def rgb(cle, defaut):
+        h = str(p.get(cle) or defaut).lstrip("#")
+        try:
+            return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return tuple(int(defaut.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+
+    return p, rgb
+
+
+_p, _rgb = _palette()
+ACCENT = _rgb("accent", "#8fb3ff")
+FOND = _rgb("fond", "#101216")
+TEXTE = _rgb("texte", "#f2f2f2")
+ROUGE, VERT, JAUNE = _rgb("rouge", "#f07178"), _rgb("vert", "#a6d189"), _rgb("jaune", "#e5c890")
+BLEU, VIOLET, CYAN, ORANGE = _rgb("bleu", "#8caaee"), _rgb("violet", "#ca9ee6"), _rgb("cyan", "#81c8be"), _rgb("orange", "#ef9f76")
+COUL = [ACCENT, ROUGE, VERT, JAUNE, BLEU, VIOLET, CYAN, ORANGE]
+
+
+def melange(a, b, t):
+    """Couleur entre a (t = 0) et b (t = 1)."""
+    t = max(0.0, min(1.0, t))
+    return tuple(int(x + (y - x) * t) for x, y in zip(a, b))
+
+
+# ── L'écran : une grille de caractères colorés, redessinée 30 fois par seconde ──────────────────────────────────
+class Ecran:
+    def __init__(self):
+        self.c, self.r = os.get_terminal_size()
+        self.efface()
+
+    def efface(self):
+        self.ch = [[" "] * self.c for _ in range(self.r)]
+        self.co = [[None] * self.c for _ in range(self.r)]
+
+    def pose(self, x, y, ch, co=TEXTE):
+        x, y = int(x), int(y)
+        if 0 <= y < self.r and 0 <= x < self.c:
+            self.ch[y][x], self.co[y][x] = ch, co
+
+    def texte(self, y, t, co=TEXTE, x=None):
+        """Texte centré (ou à partir de x)."""
+        x = (self.c - len(t)) // 2 if x is None else x
+        for i, ch in enumerate(t):
+            self.pose(x + i, y, ch, co)
+
+    def dessine(self):
+        out = []
+        for y in range(self.r):
+            out.append(f"\033[{y + 1};1H")
+            cur = 0
+            for x in range(self.c):
+                co = self.co[y][x]
+                if co != cur:
+                    out.append("\033[39m" if co is None else "\033[38;2;%d;%d;%dm" % co)
+                    cur = co
+                out.append(self.ch[y][x])
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
+
+
+def jouer(anim, duree_max=30, ips=30):
+    """Joue une animation : un générateur qui dessine une image dans l'écran à chaque tour (yield). Elle s'arrête quand
+    il se termine, après duree_max secondes, ou à la première touche (ou clic)."""
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    try:
+        ancien = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+    except termios.error:
+        ancien = None
+    sys.stdout.write("\033[?25l\033[?1000h\033[2J")      # curseur caché, clics reçus comme des touches
+    e = Ecran()
+    gen = anim(e)
+    debut = time.time()
+    try:
+        while time.time() - debut < duree_max:
+            t = time.time()
+            e.efface()
+            try:
+                next(gen)
+            except StopIteration:
+                break
+            e.dessine()
+            if select.select([sys.stdin], [], [], max(0.0, 1 / ips - (time.time() - t)))[0]:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write("\033[?1000l\033[0m\033[2J\033[?25h")
+        sys.stdout.flush()
+        if ancien:
+            termios.tcsetattr(fd, termios.TCSADRAIN, ancien)
+
+
+# ── Les animations ─────────────────────────────────────────────────────────────────────────────────────────────────
+def confettis(e):
+    """Confettis de toutes les couleurs du thème"""
+    parts = []
+    while True:
+        for _ in range(max(1, e.c // 34)):
+            parts.append([random.uniform(0, e.c), random.uniform(-4, 0), random.uniform(-0.25, 0.25),
+                          random.uniform(0.2, 0.55), random.choice(COUL), random.choice("▪▬■◆●▴▾"), random.uniform(0, 6.3)])
+        for p in parts:
+            p[6] += 0.18
+            p[0] += p[2] + math.sin(p[6]) * 0.35
+            p[1] += p[3]
+            e.pose(p[0], p[1], p[5], p[4])
+        parts = [p for p in parts if p[1] < e.r]
+        yield
+
+
+def neige(e):
+    """Neige qui tombe et s'entasse en bas de l'écran"""
+    flocons, sol = [], [0.0] * e.c
+    for _ in range(e.c * e.r // 60):              # déjà de la neige à l'ouverture
+        flocons.append([random.uniform(0, e.c), random.uniform(0, e.r - 2), random.uniform(0.1, 0.4), random.choice("❄*·•∗"), random.uniform(0, 6.3)])
+    blanc = melange(TEXTE, ACCENT, 0.15)
+    blocs = " ▁▂▃▄▅▆▇█"
+    while True:
+        for _ in range(max(1, e.c // 35)):
+            flocons.append([random.uniform(0, e.c), -1.0, random.uniform(0.1, 0.4), random.choice("❄*·•∗"), random.uniform(0, 6.3)])
+        reste = []
+        for f in flocons:
+            f[4] += 0.05
+            f[0] += math.sin(f[4]) * 0.15
+            f[1] += f[2]
+            x = int(f[0]) % e.c
+            if f[1] >= e.r - 1 - sol[x]:
+                for dx, part in ((0, 0.22), (-1, 0.06), (1, 0.06)):     # la neige s'étale un peu
+                    xx = (x + dx) % e.c
+                    sol[xx] = min(e.r / 3, sol[xx] + part)
+            else:
+                reste.append(f)
+                e.pose(x, f[1], f[3], blanc if f[2] > 0.2 else melange(blanc, FOND, 0.45))
+        flocons = reste
+        for x, h in enumerate(sol):
+            plein = int(h)
+            for k in range(plein):
+                e.pose(x, e.r - 1 - k, "█", blanc)
+            reste_h = int((h - plein) * 8)
+            if reste_h:
+                e.pose(x, e.r - 1 - plein, blocs[reste_h], blanc)
+        yield
+
+
+def matrix(e):
+    """Pluie de caractères façon Matrix"""
+    car = [chr(c) for c in range(0xFF66, 0xFF9E)] + list("0123456789:=+*<>")
+    vert = VERT
+    tete = melange(vert, (255, 255, 255), 0.75)
+    gouttes = [None] * e.c
+    grille = [[random.choice(car) for _ in range(e.r)] for _ in range(e.c)]
+    while True:
+        for x in range(e.c):
+            g = gouttes[x]
+            if g is None:
+                if random.random() < 0.012:
+                    gouttes[x] = [0.0, random.uniform(0.35, 1.0), random.randint(5, max(7, e.r // 2))]
+                continue
+            g[0] += g[1]
+            y0 = int(g[0])
+            for k in range(g[2]):
+                y = y0 - k
+                if 0 <= y < e.r:
+                    if random.random() < 0.03:
+                        grille[x][y] = random.choice(car)
+                    co = tete if k == 0 else melange(vert, FOND, k / g[2])
+                    e.pose(x, y, grille[x][y], co)
+            if y0 - g[2] > e.r:
+                gouttes[x] = None
+        yield
+
+
+def feu(e):
+    """Feu d'artifice"""
+    fusees, etincelles = [], []
+    t = 0
+    while True:
+        t += 1
+        if random.random() < 0.06 or not fusees and not etincelles:
+            fusees.append([random.uniform(e.c * 0.15, e.c * 0.85), e.r - 1.0, random.uniform(0.55, 0.9),
+                           random.choice(COUL), random.uniform(e.r * 0.15, e.r * 0.45)])
+        for f in fusees[:]:
+            f[1] -= f[2]
+            e.pose(f[0], f[1], "|", melange(f[3], TEXTE, 0.5))
+            e.pose(f[0], f[1] + 1, "·", melange(f[3], FOND, 0.4))
+            if f[1] <= f[4]:
+                fusees.remove(f)
+                n = random.randint(28, 50)
+                autre = random.choice(COUL)
+                for i in range(n):
+                    a = 2 * math.pi * i / n + random.uniform(-0.1, 0.1)
+                    v = random.uniform(0.45, 0.85)
+                    etincelles.append([f[0], f[1], math.cos(a) * v * 2, math.sin(a) * v, 1.0,
+                                       f[3] if i % 3 else autre])
+        for s in etincelles:
+            s[0] += s[2]
+            s[1] += s[3]
+            s[2] *= 0.94
+            s[3] = s[3] * 0.94 + 0.025
+            s[4] -= 0.022
+            ch = "✦" if s[4] > 0.7 else "*" if s[4] > 0.4 else "·"
+            e.pose(s[0], s[1], ch, melange(s[5], FOND, 1 - s[4]))
+        etincelles = [s for s in etincelles if s[4] > 0]
+        yield
+
+
+def etoiles(e):
+    """Saut dans l'hyperespace"""
+    stars = [[random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(0.1, 1)] for _ in range(260)]
+    cx, cy = e.c / 2, e.r / 2
+    teinte = melange(TEXTE, ACCENT, 0.35)
+    v = 0.004
+    while True:
+        v = min(0.045, v * 1.04)
+        for s in stars:
+            z0 = s[2]
+            s[2] -= v
+            if s[2] <= 0.02:
+                s[0], s[1], s[2] = random.uniform(-1, 1), random.uniform(-1, 1), 1.0
+                continue
+            x, y = cx + s[0] / s[2] * cx, cy + s[1] / s[2] * cy
+            px, py = cx + s[0] / z0 * cx, cy + s[1] / z0 * cy
+            co = melange(FOND, teinte, 1.15 - s[2])
+            pas = max(1, int(max(abs(x - px), abs(y - py))))
+            for k in range(min(pas, 12)):                       # traînée de l'étoile
+                e.pose(px + (x - px) * k / pas, py + (y - py) * k / pas, "·", melange(co, FOND, 0.5))
+            e.pose(x, y, "●" if s[2] < 0.25 else "•" if s[2] < 0.6 else "·", co)
+        yield
+
+
+def bulles(e):
+    """Bulles qui montent et éclatent"""
+    bs = []
+    couleurs = [CYAN, BLEU, ACCENT, melange(CYAN, TEXTE, 0.4)]
+    while True:
+        if random.random() < 0.5:
+            bs.append([random.uniform(0, e.c), e.r + 0.0, random.uniform(0.12, 0.35), random.uniform(0, 6.3),
+                       random.uniform(0.1, 0.6) * e.r, random.choice(couleurs), 0])
+        for b in bs:
+            if b[6]:
+                b[6] += 1
+                for dx, dy, ch in ((-1, 0, "-"), (1, 0, "-"), (0, -1, "'"), (0, 1, "."), (-1, -1, "`"), (1, -1, "'")):
+                    e.pose(b[0] + dx * b[6] * 0.8, b[1] + dy * b[6] * 0.5, ch, melange(b[5], FOND, b[6] / 5))
+                continue
+            b[3] += 0.12
+            b[0] += math.sin(b[3]) * 0.3
+            b[1] -= b[2]
+            haut = (e.r - b[1]) / e.r
+            e.pose(b[0], b[1], "°" if haut < 0.15 else "o" if haut < 0.4 else "O", b[5])
+            if b[1] < b[4] and random.random() < 0.04:
+                b[6] = 1
+        bs = [b for b in bs if b[1] > -1 and b[6] < 5]
+        yield
+
+
+def coeurs(e):
+    """Un grand cœur qui bat, et des petits qui s'envolent"""
+    petits = []
+    rose = melange(ROUGE, VIOLET, 0.35)
+    t = 0
+    while True:
+        t += 1
+        battement = 1 + 0.12 * max(0, math.sin(t / 3.2)) ** 6 + 0.06 * max(0, math.sin(t / 3.2 + 0.9)) ** 6
+        taille = min(e.r * 0.33, e.c * 0.16) * battement
+        cx, cy = e.c / 2, e.r / 2
+        if random.random() < 0.35:
+            petits.append([random.uniform(0, e.c), e.r + 0.0, random.uniform(0.15, 0.4), random.uniform(0, 6.3), random.choice([ROUGE, rose, VIOLET])])
+        for p in petits:
+            p[3] += 0.1
+            p[0] += math.sin(p[3]) * 0.4
+            p[1] -= p[2]
+            e.pose(p[0], p[1], "♥", p[4])
+        petits = [p for p in petits if p[1] > -1]
+        for y in range(e.r):
+            for x in range(e.c):
+                u, v = (x - cx) / (taille * 2), -(y - cy) / taille        # caractères deux fois plus hauts que larges
+                if (u * u + v * v - 1) ** 3 - u * u * v ** 3 <= 0:
+                    e.pose(x, y, "█", melange(ROUGE, rose, (v + 1.3) / 2.6))
+        yield
+
+
+CHIFFRES = {
+    "3": ["████", "   █", " ███", "   █", "████"],
+    "2": ["████", "   █", "████", "█   ", "████"],
+    "1": [" ██ ", "███ ", " ██ ", " ██ ", "████"],
+}
+
+
+def compte(e):
+    """Compte à rebours avant l'extinction… ou pas"""
+    for n in "321":
+        for i in range(30):
+            k = 1 + 0.25 * (1 - i / 30) ** 3                      # le chiffre arrive en grossissant un peu
+            lx, ly = int(4 * k) * 2, int(2 * k)
+            g = CHIFFRES[n]
+            x0, y0 = (e.c - 4 * lx) // 2, (e.r - 5 * ly) // 2
+            co = melange(ACCENT, TEXTE, i / 60)
+            for y, ligne in enumerate(g):
+                for x, ch in enumerate(ligne):
+                    if ch != " ":
+                        for dy in range(ly):
+                            for dx in range(lx):
+                                e.pose(x0 + x * lx + dx, y0 + y * ly + dy, "█", co)
+            e.texte(y0 - 3, "Extinction dans…", melange(TEXTE, FOND, 0.3))
+            yield
+    for i in range(110):
+        e.texte(e.r // 2 - 1, "Raté, je reste allumé !", ACCENT)
+        if i > 20:
+            e.texte(e.r // 2 + 1, "Pour éteindre pour de vrai : Super + F4", melange(TEXTE, FOND, 0.35))
+        yield
+
+
+ANIMATIONS = {"confettis": confettis, "neige": neige, "matrix": matrix, "feu": feu, "etoiles": etoiles,
+              "bulles": bulles, "coeurs": coeurs, "compte": compte}
+NOMS = {"doigts": "Des doigts partout", "confettis": "Confettis", "neige": "Neige",
+        "matrix": "Pluie façon Matrix", "feu": "Feu d'artifice", "etoiles": "Saut dans l'hyperespace",
+        "bulles": "Bulles", "coeurs": "Cœur qui bat", "compte": "Faux compte à rebours"}
+
+
+def perso():
+    """Tes animations : {nom: chemin}"""
+    res = {}
+    try:
+        for f in sorted(os.listdir(PERSO)):
+            chemin = os.path.join(PERSO, f)
+            nom = os.path.splitext(f)[0]
+            if os.path.isfile(chemin) and not f.startswith(".") and nom not in NOMS:
+                res[nom] = chemin
+    except OSError:
+        pass
+    return res
+
+
+def reglage(cle, defaut):
+    try:
+        with open(REGLAGES, encoding="utf-8") as f:
+            for l in f:
+                if l.startswith(cle + "="):
+                    defaut = l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+def plein_ecran(commande):
+    """Lance la commande dans un terminal plein écran transparent (règle « fingerpop » de Hyprland), une seule fois."""
+    clients = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True).stdout
+    if '"class": "fingerpop"' in clients:
+        return
+    os.execvp("flock", ["flock", "-n", os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "nc-anim.lock"),
+                        "kitty", "--class", "fingerpop", "-o", "background_opacity=0.35", "-o", "confirm_os_window_close=0",
+                        "-o", "hide_window_decorations=yes", "-o", "window_padding_width=0", "-o", "cursor_trail=0",
+                        "env", "NC_ANIM_DEDANS=1"] + commande)
+
+
+def lancer(nom):
+    if nom == "aleatoire":
+        nom = random.choice(list(NOMS) + list(perso()))
+    if nom == "doigts":
+        os.execv(os.path.join(HOME, ".local/bin/nc-finger"), ["nc-finger"])
+    if nom in ANIMATIONS:
+        if os.environ.get("NC_ANIM_DEDANS") or not os.environ.get("WAYLAND_DISPLAY"):
+            jouer(ANIMATIONS[nom])                 # déjà dans le terminal plein écran (ou essai dans ce terminal)
+        else:
+            plein_ecran([sys.executable, MOI, nom])
+        return
+    p = perso().get(nom)
+    if not p:
+        sys.exit(f"nc-anim : animation inconnue : {nom} (nc-anim liste)")
+    commande = [sys.executable, p] if p.endswith(".py") else [p]
+    if os.environ.get("NC_ANIM_DEDANS"):
+        os.execvp(commande[0], commande)
+    plein_ecran(commande)
+
+
+MODELE = '''#!/usr/bin/env python3
+# Ton animation pour noctalia-config. Pour l'essayer : nc-anim {nom}
+# Pour le bouton d'arrêt : nc-reglages → Animations → « Bouton d'arrêt » → {nom}
+# Elle tourne dans un terminal plein écran transparent ; une touche ou un clic la ferme.
+#
+# Ce qu'il y a sous la main (nc) :
+#   e.c, e.r                     largeur (colonnes) et hauteur (lignes) de l'écran
+#   e.pose(x, y, "●", couleur)   un caractère, à la colonne x et à la ligne y (0, 0 : en haut à gauche)
+#   e.texte(y, "Bonjour", couleur)   texte centré sur la ligne y
+#   nc.ACCENT, nc.TEXTE, nc.FOND, nc.ROUGE, nc.VERT, nc.JAUNE, nc.BLEU, nc.VIOLET, nc.CYAN, nc.ORANGE
+#                                couleurs du thème (celles du fond d'écran) ; nc.COUL : toutes, dans une liste
+#   nc.melange(a, b, t)          couleur entre a (t = 0) et b (t = 1)
+# L'écran est effacé avant chaque image : à chaque tour, on dessine tout puis « yield » (30 images par seconde).
+import importlib.machinery
+import math
+import os
+
+nc = importlib.machinery.SourceFileLoader("nc_anim", os.path.expanduser("~/.local/bin/nc-anim")).load_module()
+
+
+def animation(e):
+    t = 0
+    while True:
+        t += 1
+        # Une vague de points de toutes les couleurs
+        for x in range(e.c):
+            y = e.r / 2 + math.sin((x + t) / 7) * e.r / 4
+            e.pose(x, y, "●", nc.COUL[(x // 6) % len(nc.COUL)])
+        e.texte(e.r - 3, "Mon animation", nc.melange(nc.TEXTE, nc.FOND, 0.3))
+        yield
+
+
+nc.jouer(animation, duree_max=20)
+'''
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "aide"):
+        print(__doc__.strip())
+        return
+    if a[0] == "liste":
+        if "--brut" in a:
+            for n, d in NOMS.items():
+                print(f"{n}\t{d}")
+            for n in perso():
+                print(f"{n}\tLa tienne : {n}")
+            return
+        print("Animations (nc-anim NOM pour en essayer une) :")
+        for n, d in NOMS.items():
+            print(f"  {n:<12} {d}")
+        p = perso()
+        if p:
+            print("Les tiennes (~/.config/nc/animations) :")
+            for n in p:
+                print(f"  {n}")
+        print("\nNouvelle animation à toi : nc-anim nouvelle NOM")
+        return
+    if a[0] == "nouvelle":
+        if len(a) < 2 or not all(ch.isalnum() or ch in "-_" for ch in a[1]):
+            sys.exit("Usage : nc-anim nouvelle NOM   (lettres, chiffres, - et _)")
+        if a[1] in NOMS or a[1] == "aleatoire":
+            sys.exit(f"nc-anim : « {a[1]} » est déjà une animation de la config : choisis un autre nom")
+        os.makedirs(PERSO, exist_ok=True)
+        chemin = os.path.join(PERSO, a[1] + ".py")
+        if os.path.exists(chemin):
+            sys.exit(f"nc-anim : elle existe déjà : {chemin}")
+        with open(chemin, "w", encoding="utf-8") as f:
+            f.write(MODELE.format(nom=a[1]))
+        os.chmod(chemin, 0o755)
+        print(f"Créée : {chemin}\nModifie-la, essaie-la avec : nc-anim {a[1]}\n"
+              f"Puis choisis-la : nc-reglages → Animations → Bouton d'arrêt.")
+        return
+    if a[0] == "bouton":
+        choix = reglage("BOUTON_ARRET", "doigts")
+        actions = {"rien": None, "menu": ["noctalia", "msg", "panel-toggle", "session"],
+                   "verrouiller": ["loginctl", "lock-session"], "veille": ["systemctl", "suspend"],
+                   "eteindre": ["systemctl", "poweroff"]}
+        if choix in actions:
+            if actions[choix]:
+                os.execvp(actions[choix][0], actions[choix])
+            return
+        lancer(choix)
+        return
+    lancer(a[0])
+
+
+if __name__ == "__main__":
+    main()

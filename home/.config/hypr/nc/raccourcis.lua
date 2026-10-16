@@ -90,6 +90,16 @@ touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), "
 touche(SUPER .. " + SHIFT + code:24", function()
     local w = hl.get_active_window()
     if not w then return end
+    -- Terminal kitty : nc-fermer demande, aux flèches, s'il faut fermer alors qu'un programme y tourne encore
+    local comm = w.pid and io.open("/proc/" .. w.pid .. "/comm", "r")
+    if comm then
+        local nom = comm:read("l")
+        comm:close()
+        if nom == "kitty" then
+            hl.exec_cmd(string.format("~/.local/bin/nc-fermer %d %s", w.pid, w.address))
+            return
+        end
+    end
     local n = 0
     for _, autre in ipairs(hl.get_windows()) do
         if autre.pid == w.pid then n = n + 1 end
@@ -306,8 +316,8 @@ touche("XF86Tools",             cmd("kitty --class nc-reglages -e ~/.local/bin/n
 touche("XF86ScreenSaver",       cmd(barre .. "lock"),         portable, { locked = true })
 touche("XF86Sleep",             cmd("systemctl suspend"),     portable, { locked = true })
 
--- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint)
-touche("XF86PowerOff",          cmd("~/.local/bin/nc-finger"), nil, { locked = true })
+-- Bouton d'arrêt : une petite surprise au lieu d'éteindre (Super + F4 éteint) ; laquelle : nc-reglages, Animations
+touche("XF86PowerOff",          cmd("~/.local/bin/nc-anim bouton"), nil, { locked = true })
 
 -- Mode « capture » de nc-reglages : le temps d'appuyer sur une nouvelle combinaison, aucun raccourci ne réagit
 -- (retour automatique au bout de 20 s, ou avec Super + Ctrl + Alt + F12)

@@ -133,6 +133,8 @@ hl.config({
 -- Courbes et animations
 -- Vitesse (nc-reglages, FENETRES_ANIMATIONS_VITESSE) : durées multipliées ; style d'ouverture (FENETRES_OUVERTURE)
 local duree = ({ lente = 1.5, normale = 1, rapide = 0.65 })[nc.reglage("FENETRES_ANIMATIONS_VITESSE", "normale")] or 1
+local bureaux = ({ slidefadevert = "slidefadevert 15%", slidefade = "slidefade 15%", slidevert = "slidevert", slide = "slide",
+                   fade = "fade" })[nc.reglage("ANIM_BUREAUX", "slidefadevert")] or "slidefadevert 15%"
 local ouverture = ({ popin = "popin 90%", slide = "slide", gnomed = "gnomed" })[nc.reglage("FENETRES_OUVERTURE", "popin")] or "popin 90%"
 hl.curve("emphasized",      { type = "bezier", points = { { 0.05, 0.7 }, { 0.1, 1 } } })
 hl.curve("emphasizedAccel", { type = "bezier", points = { { 0.3, 0 },    { 0.8, 0.15 } } })
@@ -150,7 +152,7 @@ hl.animation({ leaf = "layersIn",         enabled = true, speed = 3 * duree,   b
 hl.animation({ leaf = "layersOut",        enabled = true, speed = 2 * duree,   bezier = "emphasizedAccel", style = "fade" })
 hl.animation({ leaf = "fadeLayersIn",     enabled = true, speed = 2.5 * duree, bezier = "standard" })
 hl.animation({ leaf = "fadeLayersOut",    enabled = true, speed = 2 * duree,   bezier = "standard" })
-hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidefadevert 15%" })
+hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = bureaux })
 -- Bureaux cachés (terminal déroulant, bloc-notes) : descendent du haut de l'écran et y remontent
 hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidevert -100%" })
 hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5 * duree,   bezier = "standard" })
