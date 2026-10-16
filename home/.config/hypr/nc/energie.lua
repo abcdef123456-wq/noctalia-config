@@ -50,9 +50,21 @@ function nc.mode_jeu()
     else
         os.remove(fichier_jeu)
     end
+    -- Profil Performance le temps du jeu (nc-reglages, JEU_PERFORMANCE) ; celui d'avant est remis en sortant
+    local profil = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu-profil"
+    if nc.reglage("JEU_PERFORMANCE", true) then
+        if actif then
+            hl.exec_cmd("p=$(gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles"
+                .. " --method org.freedesktop.DBus.Properties.Get net.hadess.PowerProfiles ActiveProfile 2>/dev/null"
+                .. " | grep -oE \"'[a-z-]+'\" | tr -d \"'\"); [ -n \"$p\" ] && echo \"$p\" > " .. profil
+                .. " && noctalia msg power-set performance >/dev/null 2>&1")
+        else
+            hl.exec_cmd("[ -s " .. profil .. " ] && noctalia msg power-set \"$(cat " .. profil .. ")\" >/dev/null 2>&1; rm -f " .. profil)
+        end
+    end
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
     if actif then
-        hl.exec_cmd("hyprctl reload; notify-send -a 'Mode jeu' -t 2500 'Mode jeu activé' 'Effets coupés, notifications en pause.';"
+        hl.exec_cmd("hyprctl reload; notify-send -a 'Mode jeu' -t 2500 'Mode jeu activé' 'Effets coupés, notifications en pause, profil Performance.';"
             .. " sleep 2.6; qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
     else
         hl.exec_cmd("{ qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; }; hyprctl reload;"

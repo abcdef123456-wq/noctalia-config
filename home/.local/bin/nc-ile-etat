@@ -6,6 +6,8 @@
 #   nc-ile-etat bt       appareils Bluetooth : bt=adresse<TAB>nom<TAB>connecté<TAB>icône<TAB>associé
 #   nc-ile-etat son      sorties / entrées :  sortie=id<TAB>nom<TAB>défaut   entree=id<TAB>nom<TAB>défaut
 #   nc-ile-etat systeme  processeur, mémoire, température, disque, allumage, santé de la batterie, écrans
+#   nc-ile-etat jeu      page Mode jeu : processeur (charge, température), carte graphique (nom, charge, température,
+#                        watts) ; une carte NVIDIA en veille n'est pas réveillée pour ça (gpu=veille)
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
 media() {
   local m art cache
@@ -91,8 +93,37 @@ systeme() {
   hyprctl monitors -j 2>/dev/null | jq -r '.[] | "ecran=\(.name)\t\(.width)x\(.height)\t\(.refreshRate | floor) Hz\t\(.scale)"' 2>/dev/null
 }
 
+jeu() {
+  local u n s i w x y z t1 i1 t2 i2 temp="" d v
+  read -r _ u n s i w x y z _ < /proc/stat; t1=$((u + n + s + i + w + x + y + z)); i1=$((i + w))
+  sleep 0.4
+  read -r _ u n s i w x y z _ < /proc/stat; t2=$((u + n + s + i + w + x + y + z)); i2=$((i + w))
+  [ "$t2" -gt "$t1" ] && echo "cpu=$(( (100 * ((t2 - t1) - (i2 - i1))) / (t2 - t1) ))"
+  for h in /sys/class/hwmon/hwmon*; do
+    case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|zenpower|cpu_thermal) temp="$(cat "$h/temp1_input" 2>/dev/null)"; break ;; esac
+  done
+  [ -n "$temp" ] && echo "cpu_temp=$((temp / 1000))"
+  # NVIDIA : seulement si la carte est déjà réveillée (nvidia-smi la sortirait de veille)
+  for d in /sys/bus/pci/drivers/nvidia/0000:*; do
+    [ -e "$d" ] || continue
+    if [ "$(cat "$d/power/runtime_status" 2>/dev/null)" = suspended ]; then echo "gpu=veille"; return; fi
+    v="$(nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1)"
+    [ -n "$v" ] && echo "$v" | awk -F', ' '{ sub(/^NVIDIA (GeForce )?/, "", $1); printf "gpu_nom=%s\ngpu=%d\ngpu_temp=%d\ngpu_watts=%d\n", $1, $2, $3, $4 }'
+    return
+  done
+  # AMD (carte dédiée ou intégrée) : charge et température lues directement
+  for d in /sys/class/drm/card*/device; do
+    [ -r "$d/gpu_busy_percent" ] || continue
+    echo "gpu=$(cat "$d/gpu_busy_percent")"
+    for h in "$d"/hwmon/hwmon*; do [ -r "$h/temp1_input" ] && echo "gpu_temp=$(( $(cat "$h/temp1_input") / 1000 ))" && break; done
+    echo "gpu_nom=Radeon"
+    return
+  done
+}
+
 case "${1:-}" in
   media) media; exit 0 ;;
+  jeu) jeu; exit 0 ;;
   systeme) systeme; exit 0 ;;
   wifi) wifi; exit 0 ;;
   bt) bt; exit 0 ;;
