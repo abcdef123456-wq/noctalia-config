@@ -221,13 +221,20 @@ def ile_active():
 
 
 # ── Les événements ───────────────────────────────────────────────────────────────────────────────────────────────
-def session(d, ev):
+def cle_session(ev, ia="claude"):
     sid = ev.get("session_id") or "?"
+    return sid if ia == "claude" else f"{ia}-{sid}"
+
+
+def session(d, ev, ia="claude"):
+    sid = cle_session(ev, ia)
     s = d["sessions"].setdefault(sid, {"id": sid, "etat": "pret", "etapes": [], "ajouts": 0, "retraits": 0,
                                        "debut": time.time()})
+    if ia != "claude":
+        s["agent"] = ia
     cwd = ev.get("cwd") or s.get("cwd") or ""
     s["cwd"] = cwd.replace(HOME, "~")
-    s["projet"] = ev.get("session_title") or os.path.basename(cwd.rstrip("/")) or "Claude"
+    s["projet"] = ev.get("session_title") or os.path.basename(cwd.rstrip("/")) or NOMS.get(ia, "Claude")
     s["maj"] = time.time()
     reperer_terminal(s)
     return s
@@ -265,10 +272,13 @@ def attendre(ident, pid, delai=590):
     return None
 
 
-def demande(ev, genre):
+def demande(ev, genre, ia="claude"):
     """Demande d'autorisation (PermissionRequest) ou question (AskUserQuestion) : dans l'île si tu n'es pas sur le
-    terminal de Claude. Rien sur la sortie standard = la question s'affiche dans le terminal, comme d'habitude."""
+    terminal de l'IA. Rien sur la sortie standard = la question s'affiche dans le terminal, comme d'habitude.
+    Claude, et les IA qui répondent de la même façon (Codex, Qwen Code)."""
     if reglage("CLAUDE_DEMANDES", "ile") != "ile" or not ile_active():
+        if ia != "claude":
+            suivre(ia, ev.get("session_id"), ev.get("cwd"), "attente")
         return
     outil, e = ev.get("tool_name") or "", ev.get("tool_input") or {}
     if genre == "question":
@@ -278,9 +288,11 @@ def demande(ev, genre):
             return
     ident = uuid.uuid4().hex[:12]
     with Etat() as d:
-        s = session(d, ev)
+        s = session(d, ev, ia)
         pid = s.get("terminal") or 0
         if terminal_actif(pid):
+            if ia != "claude":
+                s["etat"] = "terminal"
             return
         s["etat"] = "demande"
         if genre == "question":
@@ -292,16 +304,17 @@ def demande(ev, genre):
         else:
             titre, detail = demande_texte(outil, e)
             d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
-                                    "genre": "permission", "titre": titre, "detail": detail,
-                                    "toujours": bool(ev.get("permission_suggestions")), "t": time.time()}
+                                    "genre": "permission", "titre": titre, "detail": detail, "agent": ia,
+                                    "toujours": ia == "claude" and bool(ev.get("permission_suggestions")), "t": time.time()}
     try:
         r = attendre(ident, pid)
     finally:
         with Etat() as d:
             d["demandes"].pop(ident, None)
-            s = d["sessions"].get(ev.get("session_id") or "?")
+            s = d["sessions"].get(cle_session(ev, ia))
             if s and s.get("etat") == "demande" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
-                s["etat"] = "travail"
+                # Pas de réponse dans l'île : la question passe dans le terminal (les autres IA ne le signalent pas)
+                s["etat"] = "terminal" if ia != "claude" and (not r or r == "terminal") else "travail"
     if not r or r == "terminal":
         return
     if genre == "question":
@@ -313,7 +326,7 @@ def demande(ev, genre):
         return
     if r in ("oui", "toujours"):
         decision = {"behavior": "allow"}
-        if r == "toujours" and ev.get("permission_suggestions"):
+        if r == "toujours" and ia == "claude" and ev.get("permission_suggestions"):
             decision["updatedPermissions"] = ev["permission_suggestions"]
         repondre({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
     elif r == "non":
@@ -612,11 +625,12 @@ FICHIERS = {
 EVENEMENTS = {
     "codex": ("UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"),
     "gemini": ("BeforeAgent", "AfterTool", "AfterAgent", "Notification", "SessionEnd"),
-    "qwen": ("UserPromptSubmit", "PostToolUse", "Notification", "Stop"),
+    "qwen": ("UserPromptSubmit", "PostToolUse", "PermissionRequest", "Notification", "Stop"),
     "cursor": ("beforeSubmitPrompt", "postToolUse", "stop", "sessionEnd"),
     "copilot": ("userPromptSubmitted", "postToolUse", "agentStop", "notification", "sessionEnd"),
     "kiro": ("UserPromptSubmit", "PostToolUse", "Stop"),
 }
+DEMANDES_ILE = ("codex", "qwen")     # IA qui acceptent « autoriser / refuser » par leur hook, comme Claude
 DEBUT = ("userpromptsubmit", "beforeagent", "userpromptsubmitted", "beforesubmitprompt", "prompt")
 ETAPE = ("pretooluse", "posttooluse", "aftertool", "tool")
 ATTENTE = ("permissionrequest", "permission")
@@ -772,6 +786,8 @@ def installer_ia(ia, bavard=True):
                 continue
             if ia == "gemini":
                 h = {"name": f"nc-ile-{ev}", "type": "command", "command": c, "timeout": 5000}
+            elif ev == "PermissionRequest":
+                h = {"type": "command", "command": c, "timeout": 600}   # attend ta réponse dans l'île
             else:
                 h = {"type": "command", "command": c, "timeout": 10}
                 if ia == "codex":
@@ -821,7 +837,10 @@ def hook_ia(ia, nom):
         return
     sid = ev.get("session_id") or ev.get("sessionId") or ev.get("conversation_id") or ev.get("conversationId")
     cwd = ev.get("cwd") or (ev.get("workspace_roots") or [""])[0] or ev.get("directory") or ""
-    if n in DEBUT:
+    if n == "permissionrequest" and ia in DEMANDES_ILE:
+        ev.setdefault("session_id", sid)
+        demande(ev, "permission", ia)          # attend ta réponse dans l'île (ou ton retour sur son terminal)
+    elif n in DEBUT:
         suivre(ia, sid, cwd, "debut")
     elif n in ETAPE and outil:
         args = ev.get("tool_input") or ev.get("toolArgs") or ev.get("args") or ev.get("input") or {}
