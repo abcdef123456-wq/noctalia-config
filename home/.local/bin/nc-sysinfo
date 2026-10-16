@@ -5,6 +5,7 @@
 #   nc-sysinfo ecrans   écrans branchés : définition et fréquence (interne d'abord)
 #   nc-sysinfo disques  disques physiques : SSD NVMe, SSD, disque dur, et leur taille
 #   nc-sysinfo power    batterie (et sa santé), secteur, profil énergétique ; profil seul sur un PC fixe
+#   nc-sysinfo sante    santé de la batterie en % (lissée) et nombre de cycles, séparés par une tabulation
 #   nc-sysinfo uptime   durée depuis l'allumage
 # Une ligne vide est masquée par fastfetch : chaque PC n'affiche que ses propres composants.
 # Ne lit que des fichiers de /sys mis en cache par le noyau : n'allume jamais une carte graphique en veille
@@ -43,7 +44,35 @@ marque() {
 }
 inconnu() { [[ -z "$1" || "${1,,}" =~ (to be filled|system product|default string|not applicable|^none$|^o\.e\.m|type1|system version|^x\.x) ]]; }
 
+# Santé de la batterie : capacité annoncée par la batterie / capacité d'origine. Cette estimation du contrôleur de la
+# batterie bouge de ±1 à 2 % d'un jour à l'autre (température, charge partielle, limite à 80 % qui empêche de se
+# recalibrer) : un relevé par jour est gardé (~/.local/state/nc/batterie-sante, 60 jours), et la santé affichée est la
+# médiane des 30 derniers. Sortie : « santé<TAB>cycles » (cycles vide si inconnu), rien sans batterie.
+sante() {
+  local b pl or cy f jour
+  for b in /sys/class/power_supply/BAT*; do
+    pl=$(cat "$b/energy_full" 2>/dev/null || cat "$b/charge_full" 2>/dev/null)
+    or=$(cat "$b/energy_full_design" 2>/dev/null || cat "$b/charge_full_design" 2>/dev/null)
+    cy=$(cat "$b/cycle_count" 2>/dev/null)
+    [ -n "$pl" ] && [ "${or:-0}" -gt 0 ] && break
+    pl=""
+  done
+  [ -n "$pl" ] || return 0
+  f="${XDG_STATE_HOME:-$HOME/.local/state}/nc/batterie-sante"
+  jour=$(date +%F)
+  if ! grep -q "^$jour " "$f" 2>/dev/null; then
+    mkdir -p "$(dirname "$f")"
+    { tail -n 59 "$f" 2>/dev/null; echo "$jour $pl $or"; } > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+  # Médiane (sort puis awk : marche avec tous les awk, mawk de Debian compris)
+  tail -n 30 "$f" | awk '{ printf "%.4f\n", $2 * 100 / $3 }' | sort -n | awk -v cy="${cy:-}" '{ v[NR] = $1 } END {
+      m = (NR % 2) ? v[(NR + 1) / 2] : (v[NR / 2] + v[NR / 2 + 1]) / 2
+      if (m > 100) m = 100
+      printf "%d\t%s\n", m + 0.5, (cy > 0 ? cy : "") }'
+}
+
 case "${1:-}" in
+  sante) sante ;;
   modele)
     dmi=/sys/class/dmi/id
     v=$(cat $dmi/sys_vendor 2>/dev/null); n=$(cat $dmi/product_name 2>/dev/null); ver=$(cat $dmi/product_version 2>/dev/null)
@@ -100,14 +129,8 @@ case "${1:-}" in
       for b in /sys/class/power_supply/BAT*; do [ -r "$b/capacity" ] && { pct=$(<"$b/capacity"); break; }; done
     fi
     if [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1; then
-      # Santé : capacité actuelle / capacité d'origine
-      sante=""
-      for b in /sys/class/power_supply/BAT*; do
-        pl=$(cat "$b/energy_full" 2>/dev/null || cat "$b/charge_full" 2>/dev/null)
-        or=$(cat "$b/energy_full_design" 2>/dev/null || cat "$b/charge_full_design" 2>/dev/null)
-        [ -n "$pl" ] && [ "${or:-0}" -gt 0 ] && sante=$(( (pl * 100 + or / 2) / or )) && break
-      done
-      [ -n "$sante" ] && [ "$sante" -le 100 ] && parts+=("$pct % (santé $sante %)") || parts+=("$pct %")
+      sante=$(sante | cut -f1)
+      [ -n "$sante" ] && parts+=("$pct % (santé $sante %)") || parts+=("$pct %")
     fi
     ac=""
     for a in /sys/class/power_supply/*; do
