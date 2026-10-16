@@ -308,6 +308,15 @@ def details():
                        "| grep -iE 'segmentation|core dumped|abort|fatal|crash|failed with result|qt\\.qml.*error' | tail -6"])
     for x in plant.splitlines():
         l.append("  plantage : " + x.strip()[:200])
+    # Message de PipeWire juste avant le plantage (Quickshell réinitialise sa connexion au son sur toute erreur)
+    pw, _ = sortie(["sh", "-c", "d=$(ls -td \"$HOME\"/.cache/quickshell/crashes/*/ 2>/dev/null | head -1); [ -n \"$d\" ] && "
+                    "grep -ahiE 'pipewire error|error on object|fatal' \"$d\"log.qslog.log 2>/dev/null | tail -3"])
+    for x in pw.splitlines():
+        l.append("  juste avant : " + re.sub(r"\x1b\[[0-9;]*m", "", x).strip()[:200])
+    pwj, _ = sortie(["sh", "-c", "journalctl --user -u pipewire -u wireplumber -u pipewire-pulse -p warning -n 300 -o cat --no-pager "
+                     "2>/dev/null | grep -viE 'rtkit|realtime' | tail -4"])
+    for x in pwj.splitlines():
+        l.append("  son (PipeWire) : " + x.strip()[:200])
     cores, _ = sortie(["sh", "-c", "coredumpctl list --no-pager --no-legend 2>/dev/null | grep -E '/(qs|quickshell|noctalia)( |$)' | tail -3"])
     for x in cores.splitlines():
         l.append("  plantage enregistré : " + " ".join(x.split()[:2] + x.split()[-3:]))

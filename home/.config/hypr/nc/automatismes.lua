@@ -220,3 +220,18 @@ end)
 -- éteint l'écran et verrouille en fermant, rallume en ouvrant (sinon il ne fait rien : le système met en veille)
 pcall(hl.bind, "switch:on:Lid Switch",  hl.dsp.exec_cmd("~/.local/bin/nc-couvercle ferme"), { locked = true })
 pcall(hl.bind, "switch:off:Lid Switch", hl.dsp.exec_cmd("~/.local/bin/nc-couvercle ouvre"), { locked = true })
+
+-- Plantage de Quickshell (l'île) : il se relance tout seul, mais ouvrait en plus une fenêtre de rapport en anglais
+-- (« Quickshell has crashed »). Elle est fermée et remplacée par une notification ; le détail reste dans
+-- ~/.cache/quickshell/crashes et dans « nc-diag rapport ». Cas connu : une erreur de PipeWire (casque qui se
+-- déconnecte, appli audio qui se ferme) fait réinitialiser sa connexion au son, et il plante pendant ce temps-là.
+local rapports_vus = {}
+local function rapport_quickshell(w)
+    if not w or w.class ~= "org.quickshell" or rapports_vus[w.address] then return end
+    rapports_vus[w.address] = true
+    -- Fermée un instant après son ouverture (tout de suite, la demande arrivait trop tôt et était ignorée)
+    hl.exec_cmd("sleep 0.4; hyprctl dispatch \"hl.dsp.window.close({ window = 'address:" .. w.address .. "' })\"; notify-send -a 'Île dynamique' -i dialog-warning 'L’île a redémarré' "
+        .. "'Quickshell a planté (souvent un souci de son) et s’est relancé tout seul. Détails : nc-diag rapport'")
+end
+hl.on("window.open", rapport_quickshell)
+hl.on("window.class", rapport_quickshell)
