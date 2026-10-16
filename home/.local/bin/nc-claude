@@ -1018,6 +1018,8 @@ def diag():
 
 def main():
     a = sys.argv[1:]
+    if os.environ.get("NC_ILE_SANS") and a and a[0] in ("hook", "agy", "ia"):
+        return                                 # question rapide du Spotlight (nc-demander) : pas une session à suivre
     if not a:
         print(__doc__.strip())
     elif a[0] == "hook":

@@ -23,6 +23,8 @@ A_TAPER = [
                                                "un ami) ; nc-sauvegarde restaurer FICHIER pour les remettre."),
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
+    ("nc-demander", "nc-demander \"comment voir la place libre\"", "Question rapide à une IA installée (Claude, opencode, Gemini, Qwen) ; "
+                                    "dans le Spotlight : « ? ta question »."),
     ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
                                     "demandes, et lui écrire depuis l'île. Aussi opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, "
                                     "Antigravity : nc-claude installer IA (ou tout) ; nc-claude diag si rien ne s'affiche."),
