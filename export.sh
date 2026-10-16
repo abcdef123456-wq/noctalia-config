@@ -41,6 +41,8 @@ HOME_FILES=(
   .local/bin/nc-diag
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
+  .local/bin/nc-demander
+  .local/bin/nc-paquets
   .local/bin/nc-meteo
   .local/bin/nc-video
   .local/bin/nc-fermer
@@ -87,6 +89,8 @@ HOME_FILES=(
   .config/systemd/user/nc-couvercle.service
   .config/systemd/user/nc-maj-verif.service
   .config/systemd/user/nc-maj-verif.timer
+  .config/systemd/user/nc-paquets.service
+  .config/systemd/user/nc-paquets.timer
   .zshrc
   .p10k.zsh
   .config/nvim

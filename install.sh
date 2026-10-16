@@ -152,6 +152,8 @@ pname() {
     qalc:suse) echo qalculate ;;
     bluez-utils:arch) echo bluez-utils ;;
     bluez-utils:*) echo bluez ;;
+    checkupdates:arch) echo pacman-contrib ;;                      # compter les mises à jour (nc-paquets)
+    checkupdates:*) ;;
     tesseract:debian|tesseract:suse) echo tesseract-ocr ;;        # lire le texte d'une capture (nc-capture texte)
     tesseract-fra:arch) echo tesseract-data-fra ;;
     tesseract-fra:fedora) echo tesseract-langpack-fra ;;
@@ -536,7 +538,7 @@ if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)
 fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng checkupdates)
 if [ "$MODE" != files ]; then
   say "1. Paquets"
   missing=(); manual=()
@@ -1052,7 +1054,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
       systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")."
     fi
   done
-  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer hypridle.service >/dev/null 2>&1 ||
+  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer hypridle.service >/dev/null 2>&1 ||
     warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   # Première installation : quelques choix, tout de suite (tout se change ensuite avec nc-reglages)

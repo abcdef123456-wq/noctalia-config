@@ -403,6 +403,9 @@ REGLAGES = [
         ("copilot", "Copilot CLI", ""), ("qwen", "Qwen Code", ""), ("kiro", "Kiro", ""), ("amp", "Amp", ""))
 ] + [
     # Mises à jour
+    R("MAJ_SYSTEME", "Mises à jour", "Mises à jour du système", "choix", "ile",
+      "Comptées toutes les 3 h (pacman, dnf ou apt, et Flatpak) ; dans l'île, page Système, un clic met tout à jour.",
+      [("ile", "Dans l'île (page Système)"), ("notif", "Dans l'île et une notification"), ("non", "Ne pas vérifier")]),
     R("MAJ_VERIFIER", "Mises à jour", "Prévenir des nouvelles versions de la config", "ouinon", "oui",
       "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
     # Captures

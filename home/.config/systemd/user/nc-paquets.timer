@@ -1,0 +1,10 @@
+[Unit]
+Description=Compte les mises à jour du système toutes les 3 heures
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=3h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
