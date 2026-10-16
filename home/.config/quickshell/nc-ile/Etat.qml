@@ -192,6 +192,45 @@ Singleton {
     // ── Enregistrement d'écran (nc-video) : point rouge et durée dans la pilule ; un clic dessus l'arrête ──
     property real debutVideo: 0
     readonly property bool enregistre: debutVideo > 0
+
+    // ── Téléchargements du navigateur (fichiers .part de Firefox, .crdownload des Chrome) : taille, vitesse, fin ──
+    property var telechargements: []          // { nom, taille, vitesse } (octets, octets/s)
+    property string telechargeFini: ""
+    property var tailles: ({})
+    readonly property bool telecharge: telechargements.length > 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"
+    Process {
+        id: lecteurTel
+        command: ["sh", "-c", "d=$(xdg-user-dir DOWNLOAD 2>/dev/null); [ -d \"$d\" ] || d=$HOME/Downloads; "
+                  + "find \"$d\" -maxdepth 1 -type f \\( -name '*.part' -o -name '*.crdownload' \\) -printf '%s\\t%f\\n' 2>/dev/null; echo \"#$d\""]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var l = [], vu = {}, dossier = ""
+                text.split("\n").forEach(x => {
+                    if (x.startsWith("#")) { dossier = x.slice(1); return }
+                    var p = x.split("\t")
+                    if (p.length < 2) return
+                    var nom = p[1].replace(/\.(part|crdownload)$/, "").replace(/^Unconfirmed \d+$/, "Téléchargement")
+                    var taille = parseInt(p[0]) || 0, avant = etat.tailles[p[1]]
+                    vu[p[1]] = { taille: taille, nom: nom }
+                    l.push({ nom: nom, taille: taille, vitesse: avant !== undefined ? Math.max(0, (taille - avant.taille) / 2) : 0 })
+                })
+                // Un fichier temporaire disparu : téléchargement fini (si le vrai fichier est là, pas annulé)
+                for (var k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== "Téléchargement") verifFin.verifier(dossier, etat.tailles[k].nom)
+                etat.tailles = vu
+                etat.telechargements = l
+            }
+        }
+    }
+    Process {
+        id: verifFin
+        property string nom: ""
+        function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
+        onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
+    }
+    Timer { interval: 2000; repeat: true; running: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    function octets(n) {
+        return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")
+    }
     Process {
         id: lireVideo
         command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-video\"; [ -s \"$f\" ] && kill -0 \"$(head -1 \"$f\")\" 2>/dev/null && sed -n 2p \"$f\" || echo 0"]

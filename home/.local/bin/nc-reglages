@@ -205,6 +205,8 @@ REGLAGES = [
     R("METEO_VILLE", "Île", "Ville de la météo", "texte", "auto", "Automatique : d'après ta connexion internet. Sinon, le nom d'une ville."),
     R("ILE_PRESSE", "Île", "Presse-papiers dans l'île", "ouinon", "oui",
       "Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire."),
+    R("ILE_TELECHARGEMENTS", "Île", "Téléchargements du navigateur dans l'île", "ouinon", "oui",
+      "Firefox, Chrome, Brave, Edge, Vivaldi… : le fichier, la taille reçue et la vitesse, puis « Téléchargé »."),
     R("POMODORO_CONCENTRATION", "Île", "Pomodoro : Ne pas déranger pendant le travail", "ouinon", "oui",
       "Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4."),
     R("SPOTLIGHT_IA", "Île", "IA du Spotlight (« ? ta question »)", "choix", "auto",
