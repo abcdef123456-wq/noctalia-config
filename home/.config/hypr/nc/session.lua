@@ -2,8 +2,10 @@
 -- Les variables de toute la session graphique (Qt, etc.) sont dans ~/.config/uwsm/env.
 -- Noctalia v5 démarre via noctalia.service (systemd --user), comme les autres services de la session.
 
-hl.env("XCURSOR_SIZE", "24")
-hl.env("HYPRCURSOR_SIZE", "24")
+-- Taille du curseur : nc-reglages (CURSEUR_TAILLE)
+local curseur = tostring(math.floor(nc.reglage("CURSEUR_TAILLE", 24)))
+hl.env("XCURSOR_SIZE", curseur)
+hl.env("HYPRCURSOR_SIZE", curseur)
 
 hl.on("hyprland.start", function()
     -- Fond d'écran affiché tout de suite, en attendant Noctalia (évite l'écran noir)

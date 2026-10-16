@@ -51,7 +51,9 @@ end
 --   4 doigts en glissant   : déplacer la fenêtre sous le curseur
 --   Alt + 4 doigts         : redimensionner la fenêtre
 --   4 doigts en pincement  : détacher / remettre la fenêtre dans le pavage
-hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
-hl.gesture({ fingers = 4, direction = "swipe", action = "move" })
-hl.gesture({ fingers = 4, direction = "swipe", mods = "ALT", action = "resize" })
-hl.gesture({ fingers = 4, direction = "pinch", action = "float" })
+if nc.reglage("GESTES", true) then   -- nc-reglages : gestes du pavé tactile
+    hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
+    hl.gesture({ fingers = 4, direction = "swipe", action = "move" })
+    hl.gesture({ fingers = 4, direction = "swipe", mods = "ALT", action = "resize" })
+    hl.gesture({ fingers = 4, direction = "pinch", action = "float" })
+end

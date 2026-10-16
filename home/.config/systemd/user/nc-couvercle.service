@@ -1,0 +1,13 @@
+[Unit]
+Description=Couvercle fermé : l'écran s'éteint, le PC continue de tourner, si choisi dans nc-reglages (noctalia-config)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/nc-couvercle garde
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

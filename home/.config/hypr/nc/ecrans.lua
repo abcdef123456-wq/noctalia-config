@@ -103,4 +103,9 @@ end
 -- Règle par défaut (avant que l'écran ne soit connu), puis une règle précise par écran
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
 for _, m in ipairs(hl.get_monitors()) do regle(m) end
-hl.on("monitor.added", regle)
+hl.on("monitor.added", function(m)
+    regle(m)
+    -- Écran de verrouillage recentré sur l'écran (sa taille réelle, échelle comprise)
+    hl.exec_cmd("sleep 2; ~/.local/bin/nc-verrou-place")
+end)
+hl.on("hyprland.start", function() hl.exec_cmd("sleep 3; ~/.local/bin/nc-verrou-place") end)

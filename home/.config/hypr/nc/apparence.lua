@@ -10,7 +10,8 @@ hl.config({
         resize_on_border        = true,
         extend_border_grab_area = 20,
         allow_tearing           = false,
-        layout                  = "dwindle",
+        -- Disposition des fenêtres (nc-reglages) : dwindle (spirale) ou master (une grande + une pile)
+        layout                  = (nc.reglage("FENETRES_DISPOSITION", "dwindle") == "master") and "master" or "dwindle",
 
         -- Aimantation des fenêtres flottantes aux bords de l'écran et aux autres fenêtres
         snap = {
@@ -130,23 +131,26 @@ hl.config({
 })
 
 -- Courbes et animations
+-- Vitesse (nc-reglages, FENETRES_ANIMATIONS_VITESSE) : durées multipliées ; style d'ouverture (FENETRES_OUVERTURE)
+local duree = ({ lente = 1.5, normale = 1, rapide = 0.65 })[nc.reglage("FENETRES_ANIMATIONS_VITESSE", "normale")] or 1
+local ouverture = ({ popin = "popin 90%", slide = "slide", gnomed = "gnomed" })[nc.reglage("FENETRES_OUVERTURE", "popin")] or "popin 90%"
 hl.curve("emphasized",      { type = "bezier", points = { { 0.05, 0.7 }, { 0.1, 1 } } })
 hl.curve("emphasizedAccel", { type = "bezier", points = { { 0.3, 0 },    { 0.8, 0.15 } } })
 hl.curve("standard",        { type = "bezier", points = { { 0.2, 0 },    { 0, 1 } } })
 hl.curve("linear",          { type = "bezier", points = { { 0, 0 },      { 1, 1 } } })
 
-hl.animation({ leaf = "global",           enabled = true, speed = 5,   bezier = "standard" })
-hl.animation({ leaf = "border",           enabled = true, speed = 5,   bezier = "standard" })
-hl.animation({ leaf = "windowsIn",        enabled = true, speed = 4,   bezier = "emphasized",      style = "popin 90%" })
-hl.animation({ leaf = "windowsOut",       enabled = true, speed = 2.5, bezier = "emphasizedAccel", style = "popin 90%" })
-hl.animation({ leaf = "windowsMove",      enabled = true, speed = 4,   bezier = "emphasized",      style = "slide" })
-hl.animation({ leaf = "fadeIn",           enabled = true, speed = 3,   bezier = "standard" })
-hl.animation({ leaf = "fadeOut",          enabled = true, speed = 2,   bezier = "emphasizedAccel" })
-hl.animation({ leaf = "layersIn",         enabled = true, speed = 3,   bezier = "emphasized",      style = "fade" })
-hl.animation({ leaf = "layersOut",        enabled = true, speed = 2,   bezier = "emphasizedAccel", style = "fade" })
-hl.animation({ leaf = "fadeLayersIn",     enabled = true, speed = 2.5, bezier = "standard" })
-hl.animation({ leaf = "fadeLayersOut",    enabled = true, speed = 2,   bezier = "standard" })
-hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5, bezier = "emphasized",      style = "slidefadevert 15%" })
+hl.animation({ leaf = "global",           enabled = true, speed = 5 * duree,   bezier = "standard" })
+hl.animation({ leaf = "border",           enabled = true, speed = 5 * duree,   bezier = "standard" })
+hl.animation({ leaf = "windowsIn",        enabled = true, speed = 4 * duree,   bezier = "emphasized",      style = ouverture })
+hl.animation({ leaf = "windowsOut",       enabled = true, speed = 2.5 * duree, bezier = "emphasizedAccel", style = ouverture })
+hl.animation({ leaf = "windowsMove",      enabled = true, speed = 4 * duree,   bezier = "emphasized",      style = "slide" })
+hl.animation({ leaf = "fadeIn",           enabled = true, speed = 3 * duree,   bezier = "standard" })
+hl.animation({ leaf = "fadeOut",          enabled = true, speed = 2 * duree,   bezier = "emphasizedAccel" })
+hl.animation({ leaf = "layersIn",         enabled = true, speed = 3 * duree,   bezier = "emphasized",      style = "fade" })
+hl.animation({ leaf = "layersOut",        enabled = true, speed = 2 * duree,   bezier = "emphasizedAccel", style = "fade" })
+hl.animation({ leaf = "fadeLayersIn",     enabled = true, speed = 2.5 * duree, bezier = "standard" })
+hl.animation({ leaf = "fadeLayersOut",    enabled = true, speed = 2 * duree,   bezier = "standard" })
+hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidefadevert 15%" })
 -- Bureaux cachés (terminal déroulant, bloc-notes) : descendent du haut de l'écran et y remontent
-hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5, bezier = "emphasized",      style = "slidevert -100%" })
-hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5,   bezier = "standard" })
+hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidevert -100%" })
+hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5 * duree,   bezier = "standard" })

@@ -53,6 +53,8 @@ HOME_FILES=(
   .local/bin/nc-profile-sync
   .local/bin/nc-pouls
   .local/bin/nc-ecran-externe
+  .local/bin/nc-couvercle
+  .local/bin/nc-verrou-place
   .local/bin/nc-raccourci
   .local/bin/nc-shell
   .local/bin/nc-shell-msg
@@ -74,6 +76,7 @@ HOME_FILES=(
   .config/systemd/user/nc-pouls.service
   .config/systemd/user/nc-ile.service
   .config/systemd/user/nc-ecran-externe.service
+  .config/systemd/user/nc-couvercle.service
   .zshrc
   .p10k.zsh
   .config/nvim

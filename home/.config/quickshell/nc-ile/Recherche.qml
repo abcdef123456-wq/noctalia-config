@@ -114,7 +114,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|g |yt |w )/.test(q)) {
+            if (q.length >= 3 && !/^(>|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""nc-verrou-place : place l'écran de verrouillage (heure, musique, mot de passe, batterie) au centre de l'écran réel.
+
+install.sh calcule ces positions d'après l'écran vu pendant l'installation ; si l'échelle choisie ensuite diffère, si
+un autre écran était branché ou si l'écran change, tout se retrouvait décalé. Relancé à chaque ouverture de session et
+à chaque écran branché (nc/ecrans.lua) : ~/.config/noctalia/zx-verrou.toml (centre et hauteurs en proportion de
+l'écran du portable, sinon du premier écran), rechargé par Noctalia seulement s'il change.
+"""
+import json
+import os
+import subprocess
+import sys
+
+try:
+    import tomllib
+except ImportError:           # Python < 3.11 : rien à faire sans lecteur TOML (les positions de l'installation restent)
+    sys.exit(0)
+
+DIR = os.path.expanduser("~/.config/noctalia")
+OUT = os.path.join(DIR, "zx-verrou.toml")
+# Hauteur de chaque élément, en proportion de l'écran (mêmes valeurs que install.sh)
+HAUTEUR = {"nc/verrou:heure": 0.30, "nc/verrou:musique": 0.64, "login_box": 0.86, "nc/verrou:batterie": 0.93}
+
+
+def main():
+    try:
+        ecrans = json.loads(subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True).stdout)
+        with open(os.path.join(DIR, "config.toml"), "rb") as f:
+            widgets = tomllib.load(f).get("lockscreen_widgets", {}).get("widget", {})
+    except (OSError, ValueError):
+        return
+    ecrans = [e for e in ecrans if not e.get("disabled")]
+    if not ecrans or not widgets:
+        return
+    e = next((e for e in ecrans if e["name"].startswith(("eDP", "LVDS", "DSI"))), ecrans[0])
+    l, h = e["width"] / e["scale"], e["height"] / e["scale"]
+    if e.get("transform", 0) % 2:
+        l, h = h, l
+    texte = "# Écrit par nc-verrou-place : écran de verrouillage centré sur l'écran réel. Ne pas éditer.\n"
+    for nom, w in widgets.items():
+        part = HAUTEUR.get(w.get("type"))
+        if part is None:
+            continue
+        cle = nom if nom.replace("-", "").replace("_", "").isalnum() else json.dumps(nom)
+        texte += (f"\n[lockscreen_widgets.widget.{cle}]\ntype = {json.dumps(w['type'])}\noutput = {json.dumps(e['name'])}\n"
+                  f"cx = {l / 2:.1f}\ncy = {h * part:.1f}\n")
+    try:
+        if open(OUT, encoding="utf-8").read() == texte:
+            return
+    except OSError:
+        pass
+    with open(OUT + ".tmp", "w", encoding="utf-8") as f:
+        f.write(texte)
+    os.replace(OUT + ".tmp", OUT)
+    subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+
+
+if __name__ == "__main__":
+    main()
