@@ -239,6 +239,10 @@ REGLAGES = [
     R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
       mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
     # Animations
+    R("EFFETS", "Animations", "Effets visuels", "choix", "tous",
+      "Aucun : ni animations, ni flou, ni ombres, ni transitions, ni loupe du dock, ni fond animé : plus sobre et plus "
+      "léger. Les réglages ci-dessous sont gardés pour quand tu les remets.",
+      [("tous", "Tous les effets"), ("aucun", "Aucun effet")], groupe="effets"),
     R("BOUTON_ARRET", "Animations", "Bouton d'arrêt", "choix", "doigts",
       "Un appui court. Le garder appuyé éteint toujours. e : essayer. Crée la tienne : nc-anim nouvelle NOM (dans un terminal).",
       animations_bouton, essai="bouton"),
@@ -706,6 +710,13 @@ def appliquer_noctalia(vals):
     if "FONDS_DOSSIER" in vals:
         mettre("wallpaper", "directory", os.path.expanduser(vals["FONDS_DOSSIER"]))
 
+    if vals.get("EFFETS") == "aucun":
+        # Plus aucun effet : en dernier, passe devant les choix d'animations et de transitions (qui restent gardés)
+        mettre("shell.animation", "enabled", False)
+        mettre("wallpaper", "transition", [])
+        mettre("lockscreen", "transition", [])
+        mettre("dock", "magnification", False)
+
     texte = ""
     if tables:
         texte = "# Écrit par nc-reglages (tes réglages de Noctalia). Ne pas éditer : nc-reglages.\n"
@@ -791,6 +802,9 @@ def appliquer(groupes, vals=None):
         elif g == "terminal":
             appliquer_terminal(vals)
         elif g == "noctalia":
+            appliquer_noctalia(vals)
+        elif g == "effets":
+            subprocess.run(["hyprctl", "reload"], capture_output=True)
             appliquer_noctalia(vals)
         elif g == "couvercle":
             subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
