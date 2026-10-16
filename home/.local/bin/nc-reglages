@@ -206,7 +206,7 @@ REGLAGES = [
     R("STYLE", "Apparence", "Style du bureau", "choix", "noctalia",
       "Apple : couleurs de macOS, île noire, barre de menus, fenêtres, dock et animations façon Mac. Tes autres "
       "réglages passent toujours devant ceux du style.",
-      [("noctalia", "noctalia-config (couleurs du fond d'écran)"), ("apple", "Apple (façon macOS et iPhone)")], groupe="style"),
+      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)")], groupe="style"),
     R("THEME_MODE", "Apparence", "Thème", "choix", "dark", "Les couleurs suivent toujours le fond d'écran.",
       [("dark", "Sombre"), ("light", "Clair")], groupe="noctalia"),
     R("POLICE", "Apparence", "Police de l'interface", "choix", "Adwaita Sans", "Barre, panneaux et menus de Noctalia.",
