@@ -197,10 +197,10 @@ Item {
         readonly property bool terminal: Agents.attendTerminal
         montre: c.mode === "claude"
         Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; tourne: !claude.terminal; visible: claude.montre || opacity > 0
-                    agent: claude.terminal ? "claude" : Agents.agent(claude.s) }
+                    agent: Agents.agent(claude.terminal ? Agents.attend : claude.s) }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: claude.terminal ? "Claude t'attend dans le terminal" : (claude.s ? (claude.s.etape || "Travaille…") : "")
+            text: claude.terminal ? Agents.nom(Agents.attend) + " t'attend dans le terminal" : (claude.s ? (claude.s.etape || "Travaille…") : "")
             font.weight: Font.DemiBold; color: claude.terminal ? Couleurs.orange : Couleurs.texte
             width: Math.min(implicitWidth, 250)
         }
@@ -220,7 +220,7 @@ Item {
         montre: c.mode === "claude-fini"
         Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; agent: Agents.dernierFiniAgent }
         Texte { anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
-                text: (Agents.dernierFiniAgent === "antigravity" ? "Antigravity" : "Claude") + " a terminé" }
+                text: Agents.ias[Agents.dernierFiniAgent].nom + " a terminé" }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.dernierFini; secondaire: true; width: Math.min(implicitWidth, 160) }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "check_circle"; taille: 17; color: Couleurs.vert }
     }

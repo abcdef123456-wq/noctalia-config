@@ -1078,16 +1078,20 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer | head -1
     else printf 'CLAUDE_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
   fi
-  # Antigravity (Google) aussi : ce que fait son agent et quand il a fini ; hooks dans ~/.gemini/config/hooks.json
-  # (déjà là : remis au format du jour sans rien demander)
-  if [ "$ILE" = quickshell ] && grep -q "nc-claude.* agy " "$HOME/.gemini/config/hooks.json" 2>/dev/null &&
-     ! grep -qx 'ANTIGRAVITY_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
-    "$HOME/.local/bin/nc-claude" installer antigravity >/dev/null 2>&1 || true
-  elif [ "$ILE" = quickshell ] && { have antigravity || have agy || [ -x "$HOME/.local/bin/agy" ] || [ -d "$HOME/.gemini" ] || [ -d "$HOME/.antigravity" ]; } &&
-     ! grep -qx 'ANTIGRAVITY_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
-    info "Antigravity est installé : l'île peut montrer ce que fait son agent et quand il a fini."
-    if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer antigravity | head -1
-    else printf 'ANTIGRAVITY_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
+  # Les autres IA (Antigravity, opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp) : déjà branchées, remises
+  # au format du jour sans rien demander ; nouvelles (installées, pas refusées), une seule question pour toutes
+  if [ "$ILE" = quickshell ]; then
+    "$HOME/.local/bin/nc-claude" actualiser >/dev/null 2>&1 || true
+    ias="$("$HOME/.local/bin/nc-claude" detecter 2>/dev/null || true)"
+    if [ -n "$ias" ]; then
+      info "IA installées : $ias. L'île peut montrer ce qu'elles font, quand elles ont fini, et te laisser leur écrire."
+      if ask "Les afficher dans l'île ?" o; then
+        for ia in $ias; do "$HOME/.local/bin/nc-claude" installer "$ia" | head -1; done
+        case " $ias " in *" codex "*) info "Codex : ouvre-le et tape /hooks une fois pour approuver ses nouveaux hooks." ;; esac
+      else
+        for ia in $ias; do printf '%s_ILE=non\n' "$(printf %s "$ia" | tr a-z A-Z)" >> "$HOME/.config/nc/reglages.conf"; done
+      fi
+    fi
   fi
   systemctl --user start nc-carousel-thumbs.service >/dev/null 2>&1 || true
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then

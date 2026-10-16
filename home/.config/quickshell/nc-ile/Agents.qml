@@ -12,15 +12,28 @@ Singleton {
     readonly property string dossier: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-claude"
     readonly property color couleur: "#d97757"           // l'orange de Claude
     readonly property color couleurAgy: "#4c8df6"        // le bleu d'Antigravity
+    // Toutes les IA suivies : nom affiché, couleur (celle de leur logo), réglage qui les coupe
+    readonly property var ias: ({
+        claude: { nom: "Claude", titre: "Claude Code", couleur: "#d97757", reglage: "CLAUDE_ILE" },
+        antigravity: { nom: "Antigravity", titre: "Antigravity", couleur: "#4c8df6", reglage: "ANTIGRAVITY_ILE" },
+        opencode: { nom: "OpenCode", titre: "OpenCode", couleur: "#c9cdd4", reglage: "OPENCODE_ILE" },
+        codex: { nom: "Codex", titre: "Codex", couleur: "#7c8cff", reglage: "CODEX_ILE" },
+        gemini: { nom: "Gemini", titre: "Gemini CLI", couleur: "#6f8ff0", reglage: "GEMINI_ILE" },
+        cursor: { nom: "Cursor", titre: "Cursor", couleur: "#dfe3ea", reglage: "CURSOR_ILE" },
+        copilot: { nom: "Copilot", titre: "Copilot", couleur: "#a371f7", reglage: "COPILOT_ILE" },
+        qwen: { nom: "Qwen", titre: "Qwen Code", couleur: "#7a6cf2", reglage: "QWEN_ILE" },
+        kiro: { nom: "Kiro", titre: "Kiro", couleur: "#9b5cff", reglage: "KIRO_ILE" },
+        amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" }
+    })
     readonly property bool active: Reglages.val("CLAUDE_ILE", "oui") !== "non"
-    readonly property bool activeAgy: Reglages.val("ANTIGRAVITY_ILE", "oui") !== "non"
-    function agent(s) { return s && s.agent === "antigravity" ? "antigravity" : "claude" }
-    function nom(s) { return agent(s) === "antigravity" ? "Antigravity" : "Claude" }
-    function couleurDe(s) { return agent(s) === "antigravity" ? couleurAgy : couleur }
+    function agent(s) { return s && ias[s.agent] ? s.agent : "claude" }
+    function nom(s) { return ias[agent(s)].nom }
+    function couleurDe(s) { return ias[agent(s)].couleur }
+    function suivie(s) { return Reglages.val(ias[agent(s)].reglage, "oui") !== "non" }
     property var donnees: ({ sessions: {}, demandes: {} })
 
     readonly property var sessions: {
-        var l = Object.values(donnees.sessions || {}).filter(s => agent(s) === "antigravity" ? activeAgy : active)
+        var l = Object.values(donnees.sessions || {}).filter(s => suivie(s))
         l.sort((x, y) => (y.maj || 0) - (x.maj || 0))
         return l
     }
@@ -49,8 +62,9 @@ Singleton {
     property string dernierFini: ""
     property string dernierFiniAgent: "claude"
     // Titre de la page : selon les agents suivis
-    readonly property string titre: sessions.length && sessions.every(s => agent(s) === "antigravity") ? "Antigravity"
-                                    : (sessions.some(s => agent(s) === "antigravity") ? "Agents IA" : "Claude Code")
+    readonly property string titreAgent: sessions.length && sessions.every(s => agent(s) === agent(sessions[0])) ? agent(sessions[0]) : ""
+    readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : (sessions.length ? "Agents IA" : "Claude Code")
+    readonly property var attend: sessions.find(s => s.etat === "terminal") || null
     onSessionsChanged: {
         var n = {}
         for (var i = 0; i < sessions.length; i++) {
