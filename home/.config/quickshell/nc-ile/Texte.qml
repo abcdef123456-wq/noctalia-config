@@ -3,7 +3,7 @@ import QtQuick
 
 Text {
     property bool secondaire: false
-    color: secondaire ? "#98989d" : "white"
+    color: secondaire ? Couleurs.texteSec : "white"
     font.family: "Adwaita Sans"
     font.pixelSize: 13
     elide: Text.ElideRight

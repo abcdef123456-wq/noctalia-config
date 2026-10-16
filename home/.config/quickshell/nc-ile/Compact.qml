@@ -39,7 +39,7 @@ Item {
         id: musique
         montre: c.mode === "musique"
         ClippingRectangle {
-            width: 20; height: 20; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : "#2c2c2e"
+            width: 20; height: 20; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
             anchors.verticalCenter: parent.verticalCenter
             Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
             Image { anchors.fill: parent; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(40, 40); visible: Etat.pochette === "" }
@@ -63,7 +63,7 @@ Item {
                 }
             }
         }
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "play_arrow"; taille: 16; color: "#98989d"; visible: !Etat.joue }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "play_arrow"; taille: 16; color: Couleurs.texteSec; visible: !Etat.joue }
     }
 
     // ── Minuteur en cours : décompte orange ──
@@ -89,10 +89,10 @@ Item {
         Ico {
             anchors.verticalCenter: parent.verticalCenter
             nom: jauge.vol ? (Etat.muet ? "volume_off" : (Etat.volume < 0.34 ? "volume_mute" : (Etat.volume < 0.67 ? "volume_down" : "volume_up"))) : "light_mode"
-            taille: 18; color: jauge.vol && Etat.muet ? "#98989d" : "white"
+            taille: 18; color: jauge.vol && Etat.muet ? Couleurs.texteSec : "white"
         }
         Rectangle {
-            width: 130; height: 6; radius: 3; color: "#3a3a3c"
+            width: 130; height: 6; radius: 3; color: Couleurs.gris3
             anchors.verticalCenter: parent.verticalCenter
             Rectangle {
                 width: parent.width * Math.max(0, Math.min(1, jauge.valeur)); height: parent.height; radius: 3; color: "white"
@@ -107,7 +107,7 @@ Item {
         id: piste
         montre: c.mode === "piste"
         ClippingRectangle {
-            width: 22; height: 22; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : "#2c2c2e"
+            width: 22; height: 22; radius: 6; color: Etat.pochette === "" && Etat.iconeLecteur !== "" ? "transparent" : Couleurs.gris2
             anchors.verticalCenter: parent.verticalCenter
             Image { anchors.fill: parent; source: Etat.pochette !== "" ? Etat.pochette : Etat.iconeLecteur; sourceSize: Qt.size(44, 44); fillMode: Image.PreserveAspectCrop
                     asynchronous: Etat.pochette !== "" }   // icônes du thème : jamais hors du fil principal (plantage de Qt)
@@ -165,7 +165,7 @@ Item {
     Fondu {
         id: casque
         montre: c.mode === "casque"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "headphones"; taille: 18; color: "#0a84ff" }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "headphones"; taille: 18; color: Couleurs.accent }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueNom; font.weight: Font.DemiBold; width: Math.min(implicitWidth, 220) }
         Row {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3
@@ -182,7 +182,7 @@ Item {
     Fondu {
         id: jeu
         montre: c.mode === "jeu"
-        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "sports_esports"; taille: 19; color: Etat.jeu ? "#ff9f0a" : "#98989d" }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "sports_esports"; taille: 19; color: Etat.jeu ? "#ff9f0a" : Couleurs.texteSec }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.jeu ? "Mode jeu" : "Mode jeu désactivé"; font.weight: Font.DemiBold }
     }
 }

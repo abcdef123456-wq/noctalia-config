@@ -6,7 +6,7 @@ Rectangle {
     property bool cliquable: false
     signal clic()
     signal appuiLong()
-    color: "#1c1c1e"
+    color: Couleurs.carte
     radius: 24
     scale: zone.pressed && cliquable ? 0.97 : 1
     Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }

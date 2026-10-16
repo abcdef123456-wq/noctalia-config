@@ -57,7 +57,7 @@ Item {
         id: tete
         width: parent.width; height: 40
         Rectangle {
-            width: 32; height: 32; radius: 16; color: zr.containsMouse ? "#3a3a3c" : "#2c2c2e"
+            width: 32; height: 32; radius: 16; color: zr.containsMouse ? Couleurs.gris3 : Couleurs.gris2
             anchors.verticalCenter: parent.verticalCenter
             Ico { anchors.centerIn: parent; nom: "chevron_left"; taille: 22 }
             MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; onClicked: Etat.aller("centre") }
@@ -65,7 +65,7 @@ Item {
         Texte { x: 44; anchors.verticalCenter: parent.verticalCenter; text: p.wifi ? "Wi-Fi" : "Bluetooth"; font.pixelSize: 20; font.weight: Font.Bold }
         Rectangle {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            width: 46; height: 28; radius: 14; color: p.allume ? "#30d158" : "#3a3a3c"
+            width: 46; height: 28; radius: 14; color: p.allume ? "#30d158" : Couleurs.gris3
             Behavior on color { ColorAnimation { duration: 180 } }
             Rectangle {
                 width: 24; height: 24; radius: 12; color: "white"; y: 2
@@ -123,8 +123,8 @@ Item {
                     // Mot de passe du réseau choisi
                     Rectangle {
                         visible: p.saisie === modelData.champs[1]
-                        width: parent.width; height: 40; radius: 12; color: "#2c2c2e"
-                        border.color: "#0a84ff"; border.width: 1.5
+                        width: parent.width; height: 40; radius: 12; color: Couleurs.gris2
+                        border.color: Couleurs.accent; border.width: 1.5
                         TextInput {
                             id: mdp
                             anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
@@ -192,7 +192,7 @@ Item {
         id: pied
         anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.leftMargin: 8
         height: 26
-        color: zp.containsMouse ? "#409cff" : "#0a84ff"
+        color: zp.containsMouse ? Couleurs.accentClair : Couleurs.accent
         text: p.wifi ? "Réglages réseau…" : (p.recherche ? "Recherche en cours…" : "Rechercher des appareils")
         MouseArea {
             id: zp

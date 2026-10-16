@@ -9,7 +9,7 @@ ClippingRectangle {
     property string icone: ""
     signal change(real v)
     signal appuiLong()
-    color: "#2c2c2e"
+    color: Couleurs.gris2
     radius: 26
     scale: zone.pressed ? 1.03 : 1
     Behavior on scale { SpringAnimation { spring: 5; damping: 0.4 } }
@@ -27,7 +27,7 @@ ClippingRectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         nom: g.icone
         taille: 26
-        color: g.valeur > 0.16 ? "#3a3a3c" : "white"
+        color: g.valeur > 0.16 ? Couleurs.gris3 : "white"
     }
     MouseArea {
         id: zone

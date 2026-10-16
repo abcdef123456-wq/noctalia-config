@@ -16,7 +16,7 @@ Item {
         id: image
         anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter
         width: 42; height: 42; radius: 11
-        color: img.status === Image.Ready ? "transparent" : "#2c2c2e"
+        color: img.status === Image.Ready ? "transparent" : Couleurs.gris2
         Image {
             id: img
             anchors.fill: parent
@@ -47,7 +47,7 @@ Item {
             width: parent.width
             text: b.vue ? b.vue.body.replace(/<[^>]*>/g, "") : ""
             visible: text !== ""
-            font.pixelSize: 13; color: "#d1d1d6"
+            font.pixelSize: 13; color: Couleurs.texteDoux
             wrapMode: Text.Wrap; maximumLineCount: 2
         }
         // Boutons d'action (Supprimer, Ouvrir le dossier…)
@@ -59,7 +59,7 @@ Item {
                 Rectangle {
                     required property var modelData
                     width: lb.implicitWidth + 24; height: 28; radius: 14
-                    color: zb.pressed ? "#48484a" : "#2c2c2e"
+                    color: zb.pressed ? Couleurs.gris4 : Couleurs.gris2
                     Texte { id: lb; anchors.centerIn: parent; text: parent.modelData.text; font.pixelSize: 13; font.weight: Font.DemiBold }
                     MouseArea { id: zb; anchors.fill: parent; onClicked: Notifs.agir(b.vue, parent.modelData) }
                 }

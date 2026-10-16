@@ -20,10 +20,10 @@ Item {
         Row {
             width: parent.width; height: 72; spacing: 14
             ClippingRectangle {
-                width: 72; height: 72; radius: 16; color: "#2c2c2e"
+                width: 72; height: 72; radius: 16; color: Couleurs.gris2
                 Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
                 Image { anchors.centerIn: parent; width: 44; height: 44; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(88, 88); visible: Etat.pochette === "" }
-                Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: "#98989d"; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
+                Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: if (Etat.lecteur && Etat.lecteur.canRaise) { Etat.lecteur.raise(); Etat.fermer() }
@@ -57,7 +57,7 @@ Item {
         Column {
             width: parent.width; spacing: 6
             Rectangle {
-                width: parent.width; height: 6; radius: 3; color: "#3a3a3c"
+                width: parent.width; height: 6; radius: 3; color: Couleurs.gris3
                 Rectangle {
                     height: parent.height; radius: 3; color: "white"
                     width: m.duree > 0 ? parent.width * Math.min(1, m.position / m.duree) : 0
@@ -82,7 +82,7 @@ Item {
             component Commande: Ico {
                 id: cmd
                 signal clic()
-                color: Etat.lecteur ? "white" : "#48484a"
+                color: Etat.lecteur ? "white" : Couleurs.gris4
                 scale: z.pressed ? 0.85 : 1
                 Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
                 MouseArea { id: z; anchors.fill: parent; anchors.margins: -10; onClicked: cmd.clic() }

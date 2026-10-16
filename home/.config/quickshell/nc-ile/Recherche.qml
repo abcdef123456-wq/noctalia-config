@@ -346,12 +346,12 @@ Item {
     Item {
         id: barre
         width: parent.width; height: 56
-        Ico { id: loupe; x: 22; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 22; color: "#98989d" }
+        Ico { id: loupe; x: 22; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 22; color: Couleurs.texteSec }
         TextInput {
             id: champ
             anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
             anchors.verticalCenter: parent.verticalCenter
-            color: "white"; selectionColor: "#0a84ff"; selectedTextColor: "white"
+            color: "white"; selectionColor: Couleurs.accent; selectedTextColor: "white"
             font.family: "Adwaita Sans"; font.pixelSize: 19
             clip: true
             cursorVisible: activeFocus
@@ -382,7 +382,7 @@ Item {
                 required property int index
                 readonly property bool choisi: index === r.sel
                 width: liste.width; height: r.hauteurLigne; radius: 14
-                color: choisi ? "#2c2c2e" : "transparent"
+                color: choisi ? Couleurs.gris2 : "transparent"
                 Item {
                     id: ic
                     x: 12; anchors.verticalCenter: parent.verticalCenter
@@ -394,7 +394,7 @@ Item {
                         sourceSize: Qt.size(56, 56)
                         visible: status === Image.Ready
                     }
-                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: "#d1d1d6"; visible: img.status !== Image.Ready }
+                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: Couleurs.texteDoux; visible: img.status !== Image.Ready }
                 }
                 Texte {
                     anchors.left: ic.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
