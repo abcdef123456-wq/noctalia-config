@@ -8,7 +8,8 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude installer antigravity | retirer antigravity
                         la même chose pour l'agent de Google Antigravity (appli, éditeur ou agy en terminal) : ce
                         qu'il fait et quand il a fini (~/.gemini/config/hooks.json) ; ses demandes restent dans Antigravity
-  nc-claude agy EVENEMENT   appelé par Antigravity (SessionStart, PreInvocation, PostToolUse, Stop)
+  nc-claude agy EVENEMENT   appelé par Antigravity (PreInvocation, PostToolUse, Stop)
+  nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
 question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
 État : $XDG_RUNTIME_DIR/nc-claude/etat.json (lu par l'île) ; réponses de l'île : …/nc-claude/reponses/ID.
@@ -354,7 +355,8 @@ def hook():
 # rien (PostToolUse plutôt que PreToolUse : un PreToolUse qui échoue bloquerait l'outil).
 AGY_HOOKS = os.path.join(HOME, ".gemini/config/hooks.json")
 AGY_GROUPE = "nc-ile"
-AGY_EVENEMENTS = ("SessionStart", "PreInvocation", "PostToolUse", "Stop")
+AGY_EVENEMENTS = ("PreInvocation", "PostToolUse", "Stop")     # les 5 événements du CLI 1.1 : pas de SessionStart
+AGY_JOURNAL = os.path.join(RUN, "agy.log")
 AGY_MODIFS = ("write_to_file", "replace_file_content", "multi_replace_file_content")
 
 
@@ -420,11 +422,12 @@ def diff_agy(e):
 def hook_agy(nom):
     print("{}")                                        # ne décide de rien
     sys.stdout.flush()
-    if reglage("ANTIGRAVITY_ILE", "oui") == "non" or nom not in AGY_EVENEMENTS:
-        return
     try:
         ev = json.load(sys.stdin)
     except ValueError:
+        ev = None
+    journal(nom, ev)
+    if reglage("ANTIGRAVITY_ILE", "oui") == "non" or nom not in AGY_EVENEMENTS or not isinstance(ev, dict):
         return
     sid = "agy-" + str(ev.get("conversationId") or "?")
     ws = str((ev.get("workspacePaths") or [""])[0] or "")
@@ -461,6 +464,21 @@ def hook_agy(nom):
             s["fin"] = time.time()
 
 
+def journal(nom, ev):
+    """Les 40 derniers événements reçus d'Antigravity (pour nc-claude diag)."""
+    os.makedirs(RUN, mode=0o700, exist_ok=True)
+    try:
+        with open(AGY_JOURNAL, encoding="utf-8") as f:
+            l = f.read().splitlines()[-39:]
+    except OSError:
+        l = []
+    outil = ((ev or {}).get("toolCall") or {}).get("name", "") if isinstance(ev, dict) else ""
+    cid = str((ev or {}).get("conversationId", ""))[:8] if isinstance(ev, dict) else "JSON illisible"
+    l.append(f"{time.strftime('%H:%M:%S')} {nom} {outil} {cid}".strip())
+    with open(AGY_JOURNAL, "w", encoding="utf-8") as f:
+        f.write("\n".join(l) + "\n")
+
+
 def lire_json(chemin):
     try:
         with open(chemin, encoding="utf-8") as f:
@@ -489,11 +507,12 @@ def installer_agy():
     # Chemins complets : l'environnement des hooks d'Antigravity n'a pas forcément PATH ni HOME
     base = shlex.quote(sys.executable) + " " + shlex.quote(os.path.realpath(__file__)) + " agy "
     h = lambda ev: {"type": "command", "command": base + ev, "timeout": 10}
-    cfg[AGY_GROUPE] = {"enabled": True, "SessionStart": [h("SessionStart")], "PreInvocation": [h("PreInvocation")],
+    cfg[AGY_GROUPE] = {"enabled": True, "PreInvocation": [h("PreInvocation")],
                        "PostToolUse": [{"matcher": "*", "hooks": [h("PostToolUse")]}], "Stop": [h("Stop")]}
     ecrire_json(AGY_HOOKS, cfg)
     print(f"Antigravity s'affiche maintenant dans l'île (hooks ajoutés à {AGY_HOOKS.replace(HOME, '~')}).")
-    print("Relance Antigravity s'il est ouvert. Pour l'enlever : nc-claude retirer antigravity")
+    print("Relance Antigravity (ou agy) s'il est ouvert : il ne lit ses hooks qu'au démarrage.")
+    print("Pour vérifier : nc-claude diag ; pour l'enlever : nc-claude retirer antigravity")
 
 
 def retirer_agy():
@@ -594,6 +613,48 @@ def montrer():
         print(f"  demande : {x.get('titre')} {x.get('detail', '')}")
 
 
+def diag():
+    """Ce qui est en place, en clair : à envoyer si l'île ne montre rien."""
+    def ligne(ok, texte):
+        print(("  ✓ " if ok else "  ✗ ") + texte)
+    print("Île")
+    ligne(ile_active(), "nc-ile.service " + ("actif" if ile_active() else "arrêté : systemctl --user start nc-ile"))
+    print("Claude Code")
+    try:
+        cc = "nc-claude hook" in open(SETTINGS, encoding="utf-8").read()
+    except OSError:
+        cc = False
+    ligne(cc, "hooks dans ~/.claude/settings.json" if cc else "pas de hooks : nc-claude installer")
+    ligne(reglage("CLAUDE_ILE", "oui") != "non", "réglage CLAUDE_ILE = " + reglage("CLAUDE_ILE", "oui"))
+    print("Antigravity")
+    prog = [x for x in ("agy", "antigravity") if shutil.which(x)]
+    ligne(bool(prog), "trouvé : " + ", ".join(shutil.which(x) for x in prog) if prog else "ni agy ni antigravity dans le PATH")
+    try:
+        cfg = json.load(open(AGY_HOOKS, encoding="utf-8"))
+        g = cfg.get(AGY_GROUPE)
+        ligne(bool(g), ("hooks dans " if g else "pas de hooks de l'île dans ") + AGY_HOOKS.replace(HOME, "~")
+              + (" : " + ", ".join(k for k in g if k != "enabled") if g else " : nc-claude installer antigravity"))
+        if g and "SessionStart" in g:
+            ligne(False, "ancien format (SessionStart) : nc-claude installer antigravity, puis relance agy")
+        autres = [k for k in cfg if k != AGY_GROUPE]
+        if autres:
+            print("    autres hooks dans le fichier : " + ", ".join(autres))
+    except FileNotFoundError:
+        ligne(False, AGY_HOOKS.replace(HOME, "~") + " absent : nc-claude installer antigravity")
+    except ValueError as e:
+        ligne(False, AGY_HOOKS.replace(HOME, "~") + f" n'est pas un JSON valide ({e}) : Antigravity l'ignore")
+    ligne(reglage("ANTIGRAVITY_ILE", "oui") != "non", "réglage ANTIGRAVITY_ILE = " + reglage("ANTIGRAVITY_ILE", "oui"))
+    try:
+        l = open(AGY_JOURNAL, encoding="utf-8").read().splitlines()
+        print(f"    derniers événements reçus ({len(l)}) :")
+        for x in l[-8:]:
+            print("      " + x)
+    except OSError:
+        ligne(False, "aucun événement reçu d'Antigravity : relance agy après l'installation des hooks, puis donne-lui une demande")
+    print("Sessions suivies")
+    montrer()
+
+
 def main():
     a = sys.argv[1:]
     if not a:
@@ -614,6 +675,8 @@ def main():
         retirer_agy() if a[1:2] == ["antigravity"] else retirer()
     elif a[0] == "etat":
         montrer()
+    elif a[0] == "diag":
+        diag()
     else:
         print(__doc__.strip())
 
