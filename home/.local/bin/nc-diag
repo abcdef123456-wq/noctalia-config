@@ -2,6 +2,7 @@
 """nc-diag : vérifie toute l'installation de noctalia-config et dit quoi faire quand quelque chose cloche.
   nc-diag            le bilan, en couleurs : ✓ ce qui va, ! ce qui manque (sans gravité), ✗ ce qui ne marche pas
   nc-diag rapport    le même bilan en texte simple, copié dans le presse-papiers : à envoyer pour avoir de l'aide
+  nc-diag court      seulement ce qui cloche (lancé par nc-maj après chaque mise à jour)
 Ne change rien sur le PC.
 """
 import json
@@ -46,13 +47,15 @@ class Bilan:
         self.ko += 1
         self.lignes.append(("faux", t, quoi))
 
-    def texte(self):
+    def texte(self, court=False):
         if self.c:
             V, J, R, G, D, F = "\033[32m", "\033[33m", "\033[31m", "\033[1m", "\033[2m", "\033[0m"
         else:
             V = J = R = G = D = F = ""
         out = []
         for genre, t, quoi in self.lignes:
+            if court and genre in ("titre", "ok"):
+                continue
             if genre == "titre":
                 out.append(f"\n{G}{t}{F}")
                 continue
@@ -234,11 +237,19 @@ def verifier(b):
 
 def main():
     rapport = len(sys.argv) > 1 and sys.argv[1] in ("rapport", "--rapport", "report")
-    if len(sys.argv) > 1 and not rapport:
+    court = len(sys.argv) > 1 and sys.argv[1] == "court"
+    if len(sys.argv) > 1 and not (rapport or court):
         print(__doc__.strip())
         return
     b = Bilan(couleurs=sys.stdout.isatty() and not rapport and not os.environ.get("NO_COLOR"))
     verifier(b)
+    if court:
+        if b.ko or b.attention:
+            print("Vérification (nc-diag) :\n" + b.texte(court=True))
+            print("Détail : nc-diag · pour demander de l'aide : nc-diag rapport")
+        else:
+            print("✓ Vérification : tout est en ordre.")
+        return
     texte = b.texte()
     if b.ko:
         fin = f"{b.ko} problème(s) à corriger"

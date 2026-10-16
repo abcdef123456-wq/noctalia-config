@@ -22,4 +22,10 @@ git pull --ff-only --quiet
 if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "Déjà à jour ($(git log -1 --format=%cd --date=short))."; else
   echo "Nouveautés :"; git log --format='  • %s' "$avant..HEAD"
 fi
-exec ./install.sh "$@"
+./install.sh "$@"
+code=$?
+# Bilan après la mise à jour : seulement ce qui cloche (rien de plus si tout va bien)
+if [ "$code" = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -x "$HOME/.local/bin/nc-diag" ]; then
+  echo; "$HOME/.local/bin/nc-diag" court
+fi
+exit "$code"
