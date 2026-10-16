@@ -1,0 +1,8 @@
+[Unit]
+Description=Compte les mises à jour du système (pour l'île : page Système)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nc-paquets compter
+Slice=background.slice
+Nice=10

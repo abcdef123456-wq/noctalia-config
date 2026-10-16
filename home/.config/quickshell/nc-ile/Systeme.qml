@@ -2,6 +2,7 @@
 // modes d'énergie ; écrans. Mesures lues par nc-ile-etat systeme toutes les 2 s tant que la page est affichée.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.UPower
 
 Item {
@@ -178,6 +179,21 @@ Item {
                 width: sy.width; icone: "graphic_eq"; titre: "Halo sonore"; actif: Etat.sys.halo === "1"
                 sous: Etat.sys.halo === "1" ? "Le bord de l'écran suit la musique" : "Désactivé"
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
+            }
+            // Mises à jour du système (nc-paquets, comptées toutes les 3 h) : un clic, tout mettre à jour dans un terminal
+            Ligne {
+                readonly property int n: parseInt((paquets.text().split("\n")[0]) || "0") || 0
+                visible: Reglages.val("MAJ_SYSTEME", "ile") !== "non" && paquets.loaded
+                width: sy.width; icone: "system_update"; actif: n > 0
+                titre: n > 0 ? n + (n > 1 ? " mises à jour du système" : " mise à jour du système") : "Système à jour"
+                sous: n > 0 ? "Clic : tout mettre à jour (ton mot de passe sera demandé)" : "Vérifié toutes les 3 heures"
+                onClic: if (n > 0) { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-paquets", "mettre-a-jour"]) }
+                FileView {
+                    id: paquets
+                    path: Quickshell.env("HOME") + "/.cache/nc/paquets"
+                    watchChanges: true; printErrors: false
+                    onFileChanged: reload()
+                }
             }
             // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
             Ligne {

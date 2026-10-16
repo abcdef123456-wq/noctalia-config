@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# nc-paquets : les mises à jour du système (pas de la config : ça, c'est nc-maj).
+#   nc-paquets compter        compte les paquets à mettre à jour (pacman, dnf ou apt, et Flatpak) ; toutes les 3 h
+#                             (nc-paquets.timer) ; résultat dans ~/.cache/nc/paquets, lu par l'île (page Système)
+#   nc-paquets mettre-a-jour  ouvre un terminal qui met tout à jour (demande ton mot de passe), puis recompte
+#   nc-paquets                le nombre et la liste
+# Réglage : nc-reglages → Mises à jour → « Mises à jour du système » (MAJ_SYSTEME : ile, notif, non)
+set -uo pipefail
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
+fichier="$cache/paquets"
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+
+liste() {   # un paquet par ligne
+  if command -v pacman >/dev/null; then
+    if command -v checkupdates >/dev/null; then checkupdates 2>/dev/null | awk '{print $1}'; fi
+  elif command -v dnf >/dev/null; then
+    dnf -q check-update --refresh 2>/dev/null | awk 'NF == 3 && $1 ~ /\./ {print $1}'
+  elif command -v apt >/dev/null; then
+    apt list --upgradable 2>/dev/null | awk -F/ '/upgradable/ {print $1}'
+  fi
+  if command -v flatpak >/dev/null; then
+    flatpak remote-ls --updates --columns=application 2>/dev/null | sed 's/^/flatpak:/'
+  fi
+}
+
+case "${1:-}" in
+  compter)
+    [ "$(reglage MAJ_SYSTEME)" = non ] && { rm -f "$fichier"; exit 0; }
+    mkdir -p "$cache"
+    l="$(liste | sort -u)"
+    n=$(printf '%s' "$l" | grep -c . || true)
+    avant=$(head -1 "$fichier" 2>/dev/null || echo 0)
+    { echo "$n"; printf '%s\n' "$l"; } > "$fichier.tmp" && mv "$fichier.tmp" "$fichier"
+    # Notification (si choisie) seulement quand le nombre augmente
+    if [ "$(reglage MAJ_SYSTEME)" = notif ] && [ "$n" -gt 0 ] && [ "$n" -gt "${avant:-0}" ]; then
+      (
+        r="$(timeout 3600 notify-send -a "Mises à jour" -i system-software-update -A maj="Mettre à jour" \
+          "$n mise(s) à jour du système" "Programmes et sécurité de ta distribution." 2>/dev/null)"
+        [ "$r" = maj ] && exec "$0" mettre-a-jour
+      ) >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi ;;
+  mettre-a-jour)
+    if command -v pacman >/dev/null; then c="sudo pacman -Syu"
+    elif command -v dnf >/dev/null; then c="sudo dnf upgrade --refresh"
+    elif command -v apt >/dev/null; then c="sudo apt update && sudo apt full-upgrade"
+    else c="echo 'Gestionnaire de paquets non reconnu.'"; fi
+    command -v flatpak >/dev/null && c="$c; flatpak update"
+    exec kitty --class nc-paquets --title "Mises à jour du système" sh -c "$c; \"$0\" compter; echo; printf 'Terminé. Entrée pour fermer.'; read r" ;;
+  *)
+    if [ -s "$fichier" ]; then echo "$(head -1 "$fichier") mise(s) à jour :"; tail -n +2 "$fichier"
+    else echo "Pas encore compté : nc-paquets compter"; fi ;;
+esac
