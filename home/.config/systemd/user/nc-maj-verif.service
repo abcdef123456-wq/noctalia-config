@@ -1,0 +1,7 @@
+[Unit]
+Description=Nouvelle version de noctalia-config ? (notification avec « Mettre à jour »)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nc-maj verifier
+Slice=background.slice

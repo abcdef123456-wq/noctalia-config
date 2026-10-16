@@ -322,6 +322,9 @@ REGLAGES = [
     R("TERMINAL_TRAINEE", "Terminal", "Traînée du curseur", "ouinon", "oui", "Le curseur laisse une courte traînée quand il saute.", groupe="terminal"),
     R("TERMINAL_MARGE", "Terminal", "Marge autour du texte", "entier", "10", mini=0, maxi=40, unite="px", groupe="terminal"),
     R("TERMINAL_ACCUEIL", "Terminal", "Accueil à l'ouverture", "ouinon", "oui", "Logo et infos du PC à chaque nouveau terminal."),
+    # Mises à jour
+    R("MAJ_VERIFIER", "Mises à jour", "Prévenir des nouvelles versions de la config", "ouinon", "oui",
+      "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
     # Captures
     R("CAPTURES_DOSSIER", "Captures", "Dossier des captures d'écran", "dossier", "auto", "Automatique : Captures, dans ton dossier Images."),
     R("CAPTURES_COPIER", "Captures", "Copier aussi la capture", "ouinon", "oui", "Ctrl + V la colle directement."),
