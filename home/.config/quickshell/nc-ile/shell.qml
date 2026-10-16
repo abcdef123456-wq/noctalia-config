@@ -17,6 +17,11 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
+    // Spotlight : clic à côté = fermer (couche créée seulement pendant la recherche)
+    Variants {
+        model: Etat.recherche && Etat.ecranOuvert !== "" ? Quickshell.screens : []
+        Dehors {}
+    }
     // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
     Variants {
         model: Reglages.val("FOND_ANIME", "non") === "aurore" && Reglages.val("EFFETS", "tous") !== "aucun" ? Quickshell.screens : []

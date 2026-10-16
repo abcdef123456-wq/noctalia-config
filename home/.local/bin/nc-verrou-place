@@ -5,9 +5,13 @@ install.sh calcule ces positions d'après l'écran vu pendant l'installation ; s
 un autre écran était branché ou si l'écran change, tout se retrouvait décalé. Relancé à chaque ouverture de session et
 à chaque écran branché (nc/ecrans.lua) : ~/.config/noctalia/zx-verrou.toml (centre et hauteurs en proportion de
 l'écran du portable, sinon du premier écran), rechargé par Noctalia seulement s'il change.
+Noctalia recopie aussi ces positions dans son état (~/.local/state/noctalia/settings.toml, après une modification
+depuis ses réglages ou une mise à jour), qui passe avant la config : elles y sont recentrées de la même façon (sinon,
+chez certains, l'heure restait en bas à droite pour toujours).
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -19,7 +23,43 @@ except ImportError:           # Python < 3.11 : rien à faire sans lecteur TOML 
 DIR = os.path.expanduser("~/.config/noctalia")
 OUT = os.path.join(DIR, "zx-verrou.toml")
 # Hauteur de chaque élément, en proportion de l'écran (mêmes valeurs que install.sh)
+ETAT = os.path.expanduser("~/.local/state/noctalia/settings.toml")
 HAUTEUR = {"nc/verrou:heure": 0.30, "nc/verrou:musique": 0.64, "login_box": 0.86, "nc/verrou:batterie": 0.93}
+
+
+def recentrer_etat(nom_ecran, l, h):
+    """Mêmes positions dans l'état de Noctalia (édité ligne à ligne : le reste du fichier ne bouge pas). Vrai si changé."""
+    try:
+        with open(ETAT, encoding="utf-8") as f:
+            lignes = f.read().split("\n")
+    except OSError:
+        return False
+    # Sections [lockscreen_widgets.widget.NOM] (pas leurs .settings) : début, fin, type
+    sections, debut = [], None
+    for i, x in enumerate(lignes + ["["]):
+        if re.match(r"\s*\[", x):
+            if debut is not None:
+                sections.append((debut, i))
+            debut = i if re.match(r"\s*\[lockscreen_widgets\.widget\.(\"[^\"]*\"|[^.\]]+)\]\s*$", x) else None
+    avant = list(lignes)
+    for d, f in sections:
+        corps = "\n".join(lignes[d:f])
+        t = re.search(r'^\s*type\s*=\s*"([^"]*)"', corps, re.M)
+        part = HAUTEUR.get(t.group(1)) if t else None
+        if part is None:
+            continue
+        valeurs = {"cx": f"{l / 2:.1f}", "cy": f"{h * part:.1f}", "output": json.dumps(nom_ecran),
+                   "placement_width": f"{l:.1f}", "placement_height": f"{h:.1f}"}
+        for i in range(d + 1, f):
+            m = re.match(r"(\s*)(cx|cy|output|placement_width|placement_height)\s*=", lignes[i])
+            if m:
+                lignes[i] = f"{m.group(1)}{m.group(2)} = {valeurs[m.group(2)]}"
+    if lignes == avant:
+        return False
+    with open(ETAT + ".nc-tmp", "w", encoding="utf-8") as f:
+        f.write("\n".join(lignes))
+    os.replace(ETAT + ".nc-tmp", ETAT)
+    return True
 
 
 def main():
@@ -44,8 +84,9 @@ def main():
         cle = nom if nom.replace("-", "").replace("_", "").isalnum() else json.dumps(nom)
         texte += (f"\n[lockscreen_widgets.widget.{cle}]\ntype = {json.dumps(w['type'])}\noutput = {json.dumps(e['name'])}\n"
                   f"cx = {l / 2:.1f}\ncy = {h * part:.1f}\n")
+    change = recentrer_etat(e["name"], l, h)
     try:
-        if open(OUT, encoding="utf-8").read() == texte:
+        if open(OUT, encoding="utf-8").read() == texte and not change:
             return
     except OSError:
         pass

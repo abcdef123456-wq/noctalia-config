@@ -101,7 +101,8 @@ PanelWindow {
             }
         }
         Ico { anchors.centerIn: parent; nom: "timer"; taille: 13; color: Couleurs.orange; visible: bulle.minuteur }
-        Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && !bulle.minuteur; visible: !bulle.minuteur }
+        Etincelle { anchors.centerIn: parent; taille: 15; tourne: bulle.montre && !bulle.minuteur; visible: !bulle.minuteur
+                    agent: Agents.agent(Agents.principale) }
         MouseArea { anchors.fill: parent; onClicked: { Etat.basculer(fen.modelData.name, false); Etat.aller(bulle.minuteur ? "minuteur" : "claude") } }
     }
 

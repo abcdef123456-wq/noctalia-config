@@ -1078,6 +1078,14 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer | head -1
     else printf 'CLAUDE_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
   fi
+  # Antigravity (Google) aussi : ce que fait son agent et quand il a fini ; hooks dans ~/.gemini/config/hooks.json
+  if [ "$ILE" = quickshell ] && { have antigravity || have agy || [ -d "$HOME/.gemini" ]; } &&
+     ! grep -q "nc-claude.* agy " "$HOME/.gemini/config/hooks.json" 2>/dev/null &&
+     ! grep -qx 'ANTIGRAVITY_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
+    info "Antigravity est installé : l'île peut montrer ce que fait son agent et quand il a fini."
+    if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer antigravity | head -1
+    else printf 'ANTIGRAVITY_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
+  fi
   systemctl --user start nc-carousel-thumbs.service >/dev/null 2>&1 || true
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
@@ -1388,7 +1396,7 @@ if [ "$MODE" = full ]; then
     sed -e "s|@SCREEN_W@|$PXW|g" -e "s|@SCREEN_H@|$PXH|g" -e "s|@LOCALE@|$LOCALE|g" "$REPO/system/sddm/nc.conf" > "$tmp"
     sddm_done() {
       [ -d "$T" ] && cmp -s "$tmp" "$T/Themes/nc.conf" && cmp -s "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg" &&
-        grep -q '^ConfigFile=Themes/nc.conf' "$T/metadata.desktop" 2>/dev/null &&
+        grep -q '^ConfigFile=Themes/nc.conf' "$T/metadata.desktop" 2>/dev/null && ! grep -q 'Screen\.ScreenWidth' "$T/Main.qml" &&
         grep -q '^Current=sddm-astronaut-theme' /etc/sddm.conf.d/theme.conf 2>/dev/null
     }
     if sddm_done; then
@@ -1411,6 +1419,8 @@ if [ "$MODE" = full ]; then
       sudo install -Dm0644 "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg"
       sudo rm -f "$T/Themes/legion.conf" "$T/Backgrounds/legion.jpg"
       sudo sed -i 's#^ConfigFile=.*#ConfigFile=Themes/nc.conf#' "$T/metadata.desktop"
+      # Erreur du thème : sans taille dans la config, la largeur de l'écran n'était pas lue (Screen.ScreenWidth)
+      sudo sed -i 's/Screen\.ScreenWidth/Screen.width/' "$T/Main.qml"
       printf '[Theme]\nCurrent=sddm-astronaut-theme\n' | sudo install -Dm0644 /dev/stdin /etc/sddm.conf.d/theme.conf
       ok "Écran de connexion installé."
       systemctl is-enabled --quiet sddm.service 2>/dev/null ||
