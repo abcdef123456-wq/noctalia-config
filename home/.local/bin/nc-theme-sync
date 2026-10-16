@@ -247,7 +247,7 @@ hl.config({{
 
     # --- Île dynamique (Quickshell) : les couleurs du terminal ---
     # Fond et textes du terminal, gris en paliers au-dessus du fond (même teinte), accent et couleurs ANSI
-    # (rouge, vert, jaune…) du terminal, bordure en dégradé des fenêtres. Relu par l'île dès qu'il change.
+    # (rouge, vert, jaune…) du terminal, contour d'une seule teinte. Relu par l'île dès qu'il change.
     sens = 1 if dark else -1
 
     def palier(d):
@@ -257,6 +257,11 @@ hl.config({{
         return rgb_to_hex(tuple(b + (x - b) * t for x, b in zip(rgb, bg)))
 
     orange = tone(L_n + (0.03 if dark else 0.0), C_n + 0.02, harmonize(60, ph, 15.0), bg, 4.5, dark)
+    # Contour de l'île : une seule teinte (celle de l'accent), saturation plafonnée pour rester sobre même sur un
+    # fond d'écran très coloré ; plus vif aux bords, fondu vers le fond au milieu
+    aL, aC, aH = rgb_to_oklch(hex_to_rgb(primary))
+    aC = min(aC, 0.08)
+    bord = rgb_to_hex(oklch_to_rgb(aL, aC, aH))
     ile = {
         "sombre": dark,
         "fond": bg_hex, "texte": fg_hex,
@@ -269,7 +274,7 @@ hl.config({{
         "orange": rgb_to_hex(orange), "bleu": rgb_to_hex(normal["blue"]), "violet": rgb_to_hex(normal["magenta"]),
         "cyan": rgb_to_hex(normal["cyan"]),
         "fondVert": teinte_fond(normal["green"], 0.22), "fondOrange": teinte_fond(orange, 0.22),
-        "bordure": [f"#{p}", f"#{s2}", f"#{t3}"],
+        "bordure": [bord, teinte_fond(hex_to_rgb(bord), 0.45), bord],
     }
     if write_if_changed(ILE_OUT, json.dumps(ile, indent=1) + "\n"):
         print("nc-theme-sync : couleurs de l'île mises à jour")
