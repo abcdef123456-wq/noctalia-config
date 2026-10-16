@@ -2,9 +2,12 @@
 """nc-demander : pose une question rapide à une IA installée et affiche sa réponse (courte, en français).
   nc-demander "comment décompresser un .tar.xz"     la réponse ; une commande utile sur une ligne « $ … » à la fin
   nc-demander --ia                                  l'IA utilisée (pour le Spotlight)
+  nc-demander --flux "question"                     la réponse morceau par morceau, une ligne JSON {"t": …} chacun
+                                                    (le Spotlight l'affiche pendant qu'elle s'écrit)
 Dans le Spotlight de l'île : « ? ta question » puis Entrée. IA : nc-reglages → Île → « IA du Spotlight »
 (SPOTLIGHT_IA : auto, claude, opencode, gemini, qwen, non) ; auto = la première installée dans cet ordre.
 """
+import json
 import os
 import re
 import shutil
@@ -51,32 +54,63 @@ def distrib():
     return "Linux"
 
 
+def flux_claude(cmd, env):
+    """Réponse de Claude morceau par morceau, dès qu'ils arrivent (premiers mots en 1 à 2 s)."""
+    p = subprocess.Popen(cmd[:-1] + ["--output-format", "stream-json", "--include-partial-messages", "--verbose", cmd[-1]],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True, env=env, cwd=HOME)
+    rien = True
+    try:
+        for l in p.stdout:
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            d = (e.get("event") or {}).get("delta") or {}
+            if e.get("type") == "stream_event" and d.get("type") == "text_delta":
+                print(json.dumps({"t": d.get("text", "")}, ensure_ascii=False), flush=True)
+                rien = False
+            elif e.get("type") == "result" and rien:
+                print(json.dumps({"t": e.get("result") or "Claude n'a rien répondu."}, ensure_ascii=False), flush=True)
+        p.wait()
+    except BrokenPipeError:                      # le Spotlight a été fermé : on arrête Claude
+        p.kill()
+
+
 def main():
     a = sys.argv[1:]
     qui = ia()
     if a and a[0] == "--ia":
         print(NOMS.get(qui, ""))
         return
+    flux = bool(a) and a[0] == "--flux"
+    if flux:
+        a = a[1:]
     question = " ".join(a).strip()
     if not question:
         sys.exit(__doc__.strip())
+    dire = lambda m: print(json.dumps({"t": m}, ensure_ascii=False) if flux else m, flush=True)
     if not qui:
-        print("Aucune IA installée pour répondre (Claude Code, opencode, Gemini CLI ou Qwen Code).")
+        dire("Aucune IA installée pour répondre (Claude Code, opencode, Gemini CLI ou Qwen Code).")
         return
     texte = CONSIGNE.format(distrib=distrib()) + question
-    cmd = {"claude": ["claude", "-p", "--model", "haiku", texte], "opencode": ["opencode", "run", texte],
+    # Claude démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide
+    vide = ["--strict-mcp-config", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]
+    cmd = {"claude": ["claude", "-p", "--model", "haiku"] + vide + [texte], "opencode": ["opencode", "run", texte],
            "gemini": ["gemini", "-p", texte], "qwen": ["qwen", "-p", texte]}[qui]
     # NC_ILE_SANS : ses hooks ne l'affichent pas dans l'île comme une session de travail ; dossier neutre
     env = dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1")
+    if flux and qui == "claude":
+        flux_claude(cmd, env)
+        return
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env, cwd=HOME, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        print(f"{NOMS[qui]} n'a pas répondu à temps.")
+        dire(f"{NOMS[qui]} n'a pas répondu à temps.")
         return
     sortie = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", r.stdout).strip()
     if qui == "opencode":                      # lignes d'état d'opencode (« > build · modèle », outils…)
         sortie = "\n".join(l for l in sortie.splitlines() if not re.match(r"^\s*(>|→|\$ ?cat|⚙)", l) or l.startswith("$ ")).strip()
-    print(sortie or (r.stderr.strip().splitlines() or [f"{NOMS[qui]} n'a rien répondu."])[-1])
+    dire(sortie or (r.stderr.strip().splitlines() or [f"{NOMS[qui]} n'a rien répondu."])[-1])
 
 
 if __name__ == "__main__":
