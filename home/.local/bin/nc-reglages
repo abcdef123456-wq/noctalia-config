@@ -476,8 +476,15 @@ def nouveautes(n=10):
         p = bloc.strip().split("\x1f")
         if len(p) < 3:
             continue
-        # « A ; B ; C » ou « A, B et C » : un point par partie, la première sert de titre
-        points = [x.strip() for x in re.split(r"\s;\s", p[2]) if x.strip()]
+        # « A ; B ; C » : un point par partie, la première sert de titre (un « ; » entre parenthèses ne coupe pas)
+        points, prof, cur = [], 0, ""
+        for i, ch in enumerate(p[2]):
+            prof += (ch == "(") - (ch == ")")
+            if ch == ";" and prof <= 0 and p[2][i - 1:i] == " ":
+                points.append(cur.strip()); cur = ""
+            else:
+                cur += ch
+        points = [x for x in points + [cur.strip()] if x]
         points = [x if x.startswith(("nc-", "nvidia-")) else x[0].upper() + x[1:] for x in points]
         titre = re.split(r"\s:\s|\s\(", points[0])[0] if points else p[2]
         res.append({"genre": "nouveaute", "id": p[0], "date": p[1], "titre": titre, "points": points})

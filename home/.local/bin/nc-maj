@@ -23,9 +23,28 @@ if [ "${1:-}" = verifier ]; then
   annonce="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
   [ "$(cat "$annonce" 2>/dev/null)" = "$distant" ] && exit 0  # déjà annoncée
   mkdir -p "$(dirname "$annonce")"; echo "$distant" > "$annonce"
-  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="Mettre à jour" -A tard="Plus tard" \
-    "Nouvelle version de la config" "Des améliorations sont disponibles. Tes réglages sont gardés." 2>/dev/null || true)"
+  # Les grosses nouveautés : la nouvelle version est téléchargée (pas installée) pour lire ses messages de mise à jour ;
+  # chacun ramené à son idée principale (avant « ; », sans les parenthèses), les 4 plus récents
+  nouveau=""
+  if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$branche" 2>/dev/null; then
+    nouveau="$(git log --format=%s HEAD..FETCH_HEAD 2>/dev/null | python3 -c '
+import re, sys
+l = [x.strip() for x in sys.stdin if x.strip()]
+def idee(s):
+    while re.search(r" \([^()]*\)", s):      # parenthèses retirées avant : un « ; » dedans ne coupe pas
+        s = re.sub(r" \([^()]*\)", "", s)
+    s = s.split(" ; ")[0].split(" : ")[0]                # le titre seul : la bannière de l île a deux lignes
+    s = re.sub(r"\s+", " ", s).strip(" ,;")
+    return s if len(s) <= 48 else s[:47].rsplit(" ", 1)[0] + "…"
+texte = " · ".join(idee(s) for s in l[:4])
+print(texte + (f" (+ {len(l) - 4} autres)" if len(l) > 4 else ""))
+' 2>/dev/null || true)"
+  fi
+  [ -n "$nouveau" ] || nouveau="Des améliorations sont disponibles."
+  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="Mettre à jour" -A tout="Tout voir" \
+    -A tard="Plus tard" "Nouvelle version de la config" "$nouveau" 2>/dev/null || true)"
   [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf 'Entrée pour fermer'; read r"
+  [ "$choix" = tout ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-reglages nouveautes | less -R"
   exit 0
 fi
 if [ ! -d "$depot/.git" ]; then
