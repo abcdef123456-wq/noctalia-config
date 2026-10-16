@@ -1,6 +1,7 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
 //   Les fenêtres du bureau affiché en miniatures vivantes ; les bureaux de l'écran en haut.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
+//   Au survol : boutons Réduire et Fermer · en bas, les fenêtres réduites (nc-fenetre) : un clic les ramène
 //   Clic sur un bureau : y aller · Échap ou clic dans le vide : fermer
 import QtQuick
 import Quickshell
@@ -23,6 +24,8 @@ PanelWindow {
     // Bureaux de cet écran (les bureaux cachés « special: » à part), dans l'ordre
     readonly property var bureaux: Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === moniteur).sort((a, b) => a.id - b.id)
     readonly property var fenetres: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.id === bureau && t.wayland)
+    readonly property var reduites: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.name === "special:reduites")
+    function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
     function fermer() { Etat.vueFenetres = false }
@@ -96,7 +99,7 @@ PanelWindow {
     // ── Fenêtres du bureau, en grille ──
     Item {
         id: zone
-        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
+        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: v.reduites.length ? 130 : 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
         readonly property int n: v.fenetres.length
         // Colonnes : la grille la plus proche de la forme de l'écran (fenêtres en 16:10 environ)
         readonly property int colonnes: Math.max(1, Math.min(n, Math.round(Math.sqrt(n * width / Math.max(1, height) / 1.6))))
@@ -155,6 +158,30 @@ PanelWindow {
                         layer.enabled: true
                         layer.smooth: true
                     }
+                    // Boutons au survol : réduire, fermer (au-dessus de la zone de clic de la miniature)
+                    HoverHandler { id: survol }
+                    Row {
+                        z: 2
+                        anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 8
+                        spacing: 6
+                        opacity: survol.hovered ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                        Repeater {
+                            model: [{ ico: "remove", action: "reduire" }, { ico: "close", action: "fermer" }]
+                            Rectangle {
+                                required property var modelData
+                                width: 30; height: 30; radius: 15
+                                color: zb.containsMouse ? (modelData.action === "fermer" ? Couleurs.rouge : Couleurs.gris4) : Qt.rgba(0, 0, 0, 0.6)
+                                Ico { anchors.centerIn: parent; nom: parent.modelData.ico; taille: 17; color: "#ffffff" }
+                                MouseArea {
+                                    id: zb; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: parent.modelData.action === "fermer"
+                                               ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
+                                               : v.fenetre("reduire", case_.modelData)
+                                }
+                            }
+                        }
+                    }
                     MouseArea {
                         id: zf
                         anchors.fill: parent
@@ -187,6 +214,43 @@ PanelWindow {
                         text: case_.modelData.title || case_.ipc.class || ""; font.pixelSize: 13
                         color: "#ffffff"
                     }
+                }
+            }
+        }
+    }
+
+    // ── Fenêtres réduites : un clic les ramène sur le bureau affiché ──
+    Column {
+        visible: v.reduites.length > 0
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 34
+        spacing: 10
+        opacity: v.entree
+        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: "Réduites"; color: "#ffffff"; opacity: 0.7; font.pixelSize: 13 }
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 10
+            Repeater {
+                model: v.reduites
+                Rectangle {
+                    id: red
+                    required property var modelData
+                    readonly property var ipc: modelData.lastIpcObject || ({})
+                    width: Math.min(240, contenu.implicitWidth + 28); height: 44; radius: 22
+                    color: zr.containsMouse ? Couleurs.gris4 : Couleurs.gris2
+                    Row {
+                        id: contenu
+                        anchors.verticalCenter: parent.verticalCenter; x: 14; spacing: 8
+                        Image {
+                            width: 22; height: 22; sourceSize: Qt.size(44, 44); anchors.verticalCenter: parent.verticalCenter
+                            source: Quickshell.iconPath(String(red.ipc.class || "").toLowerCase(), true)
+                            visible: source != ""
+                        }
+                        Texte {
+                            anchors.verticalCenter: parent.verticalCenter; width: Math.min(implicitWidth, 170)
+                            text: red.modelData.title || red.ipc.class || "Fenêtre"; font.pixelSize: 13
+                        }
+                    }
+                    MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; onClicked: v.fenetre("aller", red.modelData) }
                 }
             }
         }

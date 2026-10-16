@@ -43,6 +43,7 @@ HOME_FILES=(
   .local/bin/nc-claude
   .local/bin/nc-demander
   .local/bin/nc-paquets
+  .local/bin/nc-fenetre
   .local/bin/nc-meteo
   .local/bin/nc-video
   .local/bin/nc-fermer

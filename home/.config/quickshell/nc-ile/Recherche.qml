@@ -251,7 +251,9 @@ Item {
         }
         return meilleure
     }
-    function allerA(adresse) { Etat.faire(["hyprctl", "eval", "hl.dispatch(hl.dsp.focus({ window = 'address:" + adresse + "' }))"]) }
+    // Aller sur une fenêtre ; réduite (Super + M), elle revient d'abord sur le bureau affiché (nc-fenetre)
+    function allerA(adresse) { Etat.faire([Etat.bin + "nc-fenetre", "aller", adresse]) }
+    function bureauNom(f) { return f.workspace.name === "special:reduites" ? "Réduite" : "Ouverte · bureau " + f.workspace.name }
     function poidsUsage(id) {
         var u = usage[id]
         if (!u) return 1
@@ -313,7 +315,7 @@ Item {
                 if (fen) {
                     let adresse = fen.address
                     prises[adresse] = true
-                    item.sous = "Ouverte · bureau " + fen.workspace.name
+                    item.sous = bureauNom(fen)
                     if (Reglages.val("SPOTLIGHT_ENTREE", "nouvelle") === "aller") {
                         item.aide = "↵ y aller · Ctrl ↵ nouvelle"
                         item.f = () => r.allerA(adresse)
@@ -337,7 +339,7 @@ Item {
             var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
             if (sf > 0) {
                 let adr = fe.address
-                out.push({ titre: fe.title, sous: "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
+                out.push({ titre: fe.title, sous: fe.workspace.name === "special:reduites" ? "Fenêtre réduite · Entrée pour la ramener" : "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
                            glyphe: "select_window", s: sf + 30, f: () => r.allerA(adr) })
             }
         }
