@@ -287,6 +287,8 @@ REGLAGES = [
     R("HZ_BALANCED_BAT", "Énergie", "Écran en Équilibré, sur batterie", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
     R("HZ_ECO", "Énergie", "Écran en Économie", "hz", "low", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
     R("ECO_BRIGHTNESS_MAX", "Énergie", "Luminosité maximale en Économie", "entier", "40", mini=0, maxi=100, pas=5, unite="%", zero="Sans limite", groupe="energie"),
+    R("JEU_PERFORMANCE", "Énergie", "Profil Performance en mode jeu", "ouinon", "oui",
+      "Super + Alt + G : la carte graphique et le processeur à fond le temps du jeu ; le profil d'avant revient en sortant.", groupe="hypr"),
     R("HALO_BATTERIE", "Énergie", "Halo musical sur batterie", "ouinon", "non",
       "Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus)."),
     # Son et luminosité
