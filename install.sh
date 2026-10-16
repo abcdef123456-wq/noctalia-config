@@ -1455,6 +1455,22 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
+  # 5d bis. Wi-Fi sans mise en veille entre deux paquets (NetworkManager ; TLP le fait aussi, 10-nc.conf) : sinon,
+  # sur beaucoup de cartes, ce qui arrive est retardé (messages en retard, voix des autres coupée en appel)
+  if have nmcli && [ -d /etc/NetworkManager ] && ! cmp -s "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" \
+       /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf; then
+    say "5d bis. Wi-Fi réactif"
+    sudo install -Dm0644 "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf &&
+      sudo nmcli general reload conf >/dev/null 2>&1 || true
+    if have iw; then
+      for i in /sys/class/net/wl*; do
+        [ -e "$i" ] || continue
+        sudo iw dev "${i##*/}" set power_save off 2>/dev/null || true
+      done
+    fi
+    ok "Wi-Fi sans mise en veille entre deux paquets (pris en compte tout de suite)."
+  fi
+
   # 5e. Pilote NVIDIA : sans lui, la carte tourne avec « nouveau » (pas d'accélération correcte, pas de mise en veille fine).
   # Cartes récentes (RTX 50, « Blackwell ») : pilote 570.169 ou plus, en version « open » (modules ouverts de NVIDIA).
   if [ "$NVIDIA" = 1 ]; then
