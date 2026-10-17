@@ -62,7 +62,7 @@ ShellRoot {
         target: "ile"
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
-        function fermer(): void { Etat.fermer() }
+        function fermer(): void { Etat.fermer(); Etat.projection = false }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
         // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, passe au mode suivant (comme Windows + P)
