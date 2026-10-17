@@ -70,6 +70,12 @@ PanelWindow {
         return e.miroir ? d + Reglages.t(" · miroir", " · mirror") : d
     }
 
+    // Son écran disparaît (éteint par la projection, débranché) : la fenêtre se ferme, sinon l'île la croirait
+    // encore ouverte et Super + O ne ferait plus rien
+    Connections {
+        target: Quickshell
+        function onScreensChanged() { if (Quickshell.screens.indexOf(w.screen) < 0) w.fermer() }
+    }
     Connections {
         target: Etat
         function onProjectionSuivante() { w.surCotes = false; w.choix = (w.choix + 1) % w.modes.length }
