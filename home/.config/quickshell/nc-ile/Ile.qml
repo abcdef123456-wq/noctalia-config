@@ -32,7 +32,9 @@ PanelWindow {
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
     HyprlandFocusGrab {
         windows: [fen]
-        active: fen.ouverte && prise.prete
+        // Ouverte au survol : pas de prise tant qu'on n'a pas cliqué dedans (elle garderait le pointeur, et l'île ne
+        // saurait plus quand il en sort)
+        active: fen.ouverte && prise.prete && !Etat.parSurvol
         onCleared: Etat.fermer()
     }
     Timer {
@@ -148,6 +150,27 @@ PanelWindow {
         height: fen.ouverte ? fen.taille.height : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.demandeClaude ? 32 : 15)
         color: Couleurs.fond                        // fond du terminal (Couleurs.qml)
+
+        // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
+        // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)
+        HoverHandler {
+            id: survol
+            enabled: Reglages.val("ILE_SURVOL", "oui") !== "non"
+            onHoveredChanged: if (hovered) { sortieSurvol.stop(); attenteSurvol.restart() } else { attenteSurvol.stop(); sortieSurvol.restart() }
+        }
+        Timer {
+            id: attenteSurvol
+            interval: 280                           // juste passer dessus (vers la barre) ne l'ouvre pas
+            onTriggered: if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.demandeClaude && !Etat.enregistre) {
+                Etat.basculer(fen.modelData.name, false)
+                Etat.parSurvol = true
+            }
+        }
+        Timer {
+            id: sortieSurvol
+            interval: 450
+            onTriggered: if (!survol.hovered && fen.ouverte && Etat.parSurvol && !Etat.recherche) Etat.fermer()
+        }
         Behavior on color { ColorAnimation { duration: 260 } }
         clip: true
 
@@ -320,5 +343,14 @@ PanelWindow {
         Keys.onEscapePressed: Etat.fermer()
         Keys.onUpPressed: Etat.changerVue(-1)
         Keys.onDownPressed: Etat.changerVue(1)
+    
+        // Clic dans l'île ouverte au survol : elle reste ouverte comme après un clic. Au-dessus de tout, le clic est
+        // seulement noté puis laissé aux boutons en dessous.
+        MouseArea {
+            anchors.fill: parent
+            enabled: Etat.parSurvol
+            acceptedButtons: Qt.AllButtons
+            onPressed: m => { Etat.parSurvol = false; m.accepted = false }
+        }
     }
 }
