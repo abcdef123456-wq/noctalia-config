@@ -55,7 +55,10 @@ Singleton {
     }
 
     // versCentre : ouvrir directement sur le centre de contrôle (Super + C) plutôt que sur ce qui se passe (clic)
+    // Ouverte en passant le curseur dessus (Ile.qml) : se referme quand il en sort, tant qu'on n'a pas cliqué dedans
+    property bool parSurvol: false
     function basculer(ecran, versCentre) {
+        parSurvol = false
         if (ecranOuvert === ecran) { fermer(); return }
         recherche = false
         vueNom = versCentre || activites.length === 0 ? "centre" : activites[0]
@@ -65,7 +68,7 @@ Singleton {
         lireLuminosite(false)
         lirePage()
     }
-    function fermer() { ecranOuvert = ""; recherche = false }
+    function fermer() { ecranOuvert = ""; recherche = false; parSurvol = false }
 
     // Spotlight (Super + R) : l'île s'ouvre en longue capsule de recherche
     property bool recherche: false
