@@ -300,7 +300,9 @@ hl.config({{
 }})
 """
     if write_if_changed(HYPR_OUT, hypr):
-        subprocess.run(["hyprctl", "reload"], capture_output=True)
+        # « config-only » : seules les couleurs changent, les écrans ne sont pas reconfigurés (un rechargement complet
+        # les réapplique à chaque fond d'écran ; soupçonné de faire planter Firefox sous Fedora)
+        subprocess.run(["hyprctl", "reload", "config-only"], capture_output=True)
         print(T("nc-theme-sync : couleurs Hyprland mises à jour", "nc-theme-sync: Hyprland colors updated"))
 
     # --- Île dynamique (Quickshell) : les couleurs du terminal ---
