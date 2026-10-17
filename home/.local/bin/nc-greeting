@@ -57,11 +57,19 @@ cut_to() {
 # un logo de fastfetch (Apple, Windows, Tux…, en couleurs du thème), ta photo de profil, ou aucun
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/style.conf" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 choix="$(reglage TERMINAL_LOGO)"; choix="${choix:-distribution}"
+# Style « dessin » (par défaut) : le logo dessiné comme une icône, sur fond sombre (nc-term-logo dessin), dans kitty
+style="$(reglage TERMINAL_LOGO_STYLE)"; style="${style:-dessin}"
+DESSIN="$HOME/.cache/nc/term-dessin.png"
 S2=$(jq -r '.mSecondary // .mTertiary // empty' "$HOME/.config/noctalia/colors.json" 2>/dev/null)
 SA="$(ansi "$S2")"; SA="${SA:-$PA}"
 LOGO_OPT=()
+if [ "$style" = dessin ] && [ "$choix" != aucun ] && [ "$choix" != photo ] && [ -n "${KITTY_WINDOW_ID:-}" ] &&
+   "$HOME/.local/bin/nc-term-logo" dessin "$choix" 2>/dev/null && [ -r "$DESSIN" ]; then
+  choix=dessin
+fi
 case "$choix" in
   distribution) ;;
+  dessin) LOGO_OPT=(--logo "$DESSIN" --logo-type kitty-direct --logo-width 20 --logo-height 10) ;;
   aucun) LOGO_OPT=(--logo none) ;;
   photo) if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$HOME/.face" ]; then
            LOGO_OPT=(--logo "$HOME/.face" --logo-type kitty-direct --logo-width 20 --logo-height 10)

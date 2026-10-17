@@ -400,10 +400,11 @@ if __name__ == "__main__":
     # Logo de l'accueil du terminal aux nouvelles couleurs (rien n'est refait si elles n'ont pas changé)
     logo = Path.home() / ".local/bin/nc-term-logo"
     if logo.exists():
-        keyf = Path.home() / ".cache/nc/term-logo.png.key"
-        before = keyf.read_text() if keyf.exists() else ""
+        # logo seul et logo dessiné (nc-term-logo dessin)
+        keys = [Path.home() / ".cache/nc/term-logo.png.key", Path.home() / ".cache/nc/term-dessin.png.key"]
+        before = [k.read_text() if k.exists() else "" for k in keys]
         subprocess.run([str(logo)], capture_output=True)
-        after = keyf.read_text() if keyf.exists() else ""
+        after = [k.read_text() if k.exists() else "" for k in keys]
         if after != before:
             # Les terminaux dont seul l'accueil est affiché le redessinent (même réaction qu'un redimensionnement)
             for pid in subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "zsh"], capture_output=True, text=True).stdout.split():

@@ -632,8 +632,18 @@ REGLAGES = [
         "The logo to the left of the PC info when you open a terminal (in the theme's colors)."),
       [("distribution", L("Celui de ta distribution", "Your distribution's")), ("macOS", "Apple"), ("Windows", "Windows"),
        ("Linux", "Tux (Linux)"), ("arch", "Arch"), ("Debian", "Debian"), ("Fedora", "Fedora"), ("ubuntu", "Ubuntu"),
-       ("CachyOS", "CachyOS"), ("NixOS", "NixOS"), ("Gentoo", "Gentoo"), ("android", "Android"),
+       ("CachyOS", "CachyOS"), ("NixOS", "NixOS"), ("Gentoo", "Gentoo"), ("nobara", "Nobara"), ("linuxmint", "Linux Mint"),
+       ("manjaro", "Manjaro"), ("EndeavourOS", "EndeavourOS"), ("opensuse", "openSUSE"), ("pop", "Pop!_OS"),
+       ("Zorin", "Zorin OS"), ("Elementary", "elementary OS"), ("void", "Void"), ("alpine", "Alpine"), ("Kali", "Kali"),
+       ("artix", "Artix"), ("rhel", "Red Hat"), ("rocky", "Rocky"), ("Almalinux", "AlmaLinux"), ("SteamOS", "SteamOS"),
+       ("asahi", "Asahi"), ("android", "Android"),
        ("photo", L("Ta photo de profil", "Your profile picture")), ("aucun", L("Aucun", "None"))]),
+    R("TERMINAL_LOGO_STYLE", "Terminal", L("Style du logo", "Logo style"), "choix", "dessin",
+      L("Dessiné : le logo en dégradé sur un fond sombre éclairé au centre, comme une icône (dans kitty). "
+        "Seul : le logo aux couleurs du thème, sans fond.",
+        "Drawn: the logo as a gradient on a dark background lit from the center, like an icon (in kitty). "
+        "Plain: the logo in the theme colors, without a background."),
+      [("dessin", L("Dessiné", "Drawn")), ("simple", L("Logo seul", "Plain logo"))]),
     R("TERMINAL_ACCUEIL", "Terminal", L("Accueil à l'ouverture", "Welcome screen on opening"), "ouinon", "oui",
       L("Logo et infos du PC à chaque nouveau terminal.", "Logo and PC info in every new terminal.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
