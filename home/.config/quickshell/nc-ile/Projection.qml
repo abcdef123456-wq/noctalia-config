@@ -2,7 +2,7 @@
 //   Écran du PC seulement · Dupliquer (miroir) · Étendre (second écran à droite, à gauche, au-dessus ou en dessous)
 //   · Second écran seulement. Le choix est retenu pour cet écran : rebranché, il reprend son mode (nc-ecrans).
 //   Clic ou Entrée : appliquer · ← → choisir · ↓ ↑ le côté du second écran (Étendre) · Échap ou clic dehors : fermer
-//   Super + O encore, fenêtre ouverte : mode suivant
+//   Super + O encore : fermer
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -75,10 +75,6 @@ PanelWindow {
     Connections {
         target: Quickshell
         function onScreensChanged() { if (Quickshell.screens.indexOf(w.screen) < 0) w.fermer() }
-    }
-    Connections {
-        target: Etat
-        function onProjectionSuivante() { w.surCotes = false; w.choix = (w.choix + 1) % w.modes.length }
     }
 
     // Ouverture : fondu et léger zoom
