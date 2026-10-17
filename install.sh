@@ -251,6 +251,9 @@ if [ "$MODE" != files ]; then
     if [ "$OSID" != fedora ] && [ "$OSID" != nobara ]; then
       die "$OSNAME n'a pas Noctalia v5 dans ses dépôts : installe-le toi-même ($NOCT_DOCS) puis relance."
     elif [ "${OSVER%%.*}" -lt 44 ] 2>/dev/null; then
+      if [ "$OSID" = nobara ]; then
+        die "Nobara $OSVER n'a pas Noctalia v5 : il faut Nobara 44 ou plus (basé sur Fedora 44)."
+      fi
       die "Fedora $OSVER n'a pas Noctalia v5 : il faut Fedora 44 ou plus (sudo dnf system-upgrade download --releasever=44)."
     fi
   fi
@@ -1497,7 +1500,8 @@ if [ "$MODE" = full ]; then
     else
       info "Pilote NVIDIA ${drv:+$drv }à installer avec la méthode de ta distribution :"
       case "$FAMILY" in
-        fedora) info "  RPM Fusion : https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)" ;;
+        fedora) if [ "$OSID" = nobara ]; then info "  Nobara : appli « Nobara Driver Manager » (pilote déjà fourni par Nobara)"
+                else info "  RPM Fusion : https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)"; fi ;;
         debian) info "  https://wiki.debian.org/NvidiaGraphicsDrivers" ;;
         suse) info "  https://en.opensuse.org/SDB:NVIDIA_drivers" ;;
         *) info "  documentation de ta distribution (pilote « nvidia-open » pour les cartes récentes)" ;;

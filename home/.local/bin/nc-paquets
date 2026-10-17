@@ -42,6 +42,8 @@ case "${1:-}" in
     fi ;;
   mettre-a-jour)
     if command -v pacman >/dev/null; then c="sudo pacman -Syu"
+    # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
+    elif command -v nobara-sync >/dev/null; then c="nobara-sync cli"
     elif command -v dnf >/dev/null; then c="sudo dnf upgrade --refresh"
     elif command -v apt >/dev/null; then c="sudo apt update && sudo apt full-upgrade"
     else c="echo 'Gestionnaire de paquets non reconnu.'"; fi
