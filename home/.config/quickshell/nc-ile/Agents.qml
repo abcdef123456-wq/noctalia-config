@@ -52,10 +52,17 @@ Singleton {
         watchChanges: true
         printErrors: false
         onFileChanged: reload()
-        onLoaded: { try { a.donnees = JSON.parse(text()) } catch (e) {} }
+        onLoaded: {
+            var t = text()
+            if (t === a.brut) return                     // inchangé : rien à redessiner (texte en cours de saisie gardé)
+            a.brut = t
+            try { a.donnees = JSON.parse(t) } catch (e) {}
+        }
     }
-    // Le fichier est remplacé d'un coup à chaque étape : relu aussi régulièrement pendant le travail (filet de sécurité)
-    Timer { interval: 1200; repeat: true; running: a.travaille || a.demande !== null; onTriggered: lecture.reload() }
+    property string brut: ""
+    // Le fichier est remplacé d'un coup à chaque étape, et la surveillance de Quickshell finit par le perdre (l'île ne
+    // voyait plus du tout Claude) : relu aussi régulièrement, vite pendant le travail
+    Timer { interval: a.travaille || a.demande !== null ? 1200 : 3000; repeat: true; running: true; onTriggered: lecture.reload() }
 
     // Fin d'une session (« Claude a terminé ») et demande dans le terminal : réaction de la pilule
     property var avant: ({})
@@ -82,8 +89,9 @@ Singleton {
     function ecrire(id, texte) {
         if (texte.trim() !== "") Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-claude", "ecrire", id, texte])
     }
-    function allerTerminal(pid) {
-        if (pid > 0) Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = 'pid:" + pid + "' })"])
+    // Son terminal, et dans kitty son onglet ; ramené s'il est réduit (nc-claude aller)
+    function allerTerminal(pid, shell) {
+        if (pid > 0) Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-claude", "aller", String(pid), String(shell || 0)])
     }
     function depuis(t) {
         var s = Math.max(0, Math.round(Etat.maintenant.getTime() / 1000 - (t || 0)))
