@@ -114,12 +114,14 @@ Singleton {
             pomoPause = true
             concentrationPomodoro(false)
             var longue = pomoSeance % 4 === 0
-            msg = ["Pause !", longue ? "15 minutes : lève-toi, bouge un peu." : "5 minutes pour souffler."]
+            msg = [Reglages.t("Pause !", "Break!"), longue ? Reglages.t("15 minutes : lève-toi, bouge un peu.", "15 minutes: stand up and move around.")
+                                                          : Reglages.t("5 minutes pour souffler.", "5 minutes to catch your breath.")]
             lancerMinuteur(longue ? 15 : 5)
         } else {
             pomoPause = false; pomoSeance++
             concentrationPomodoro(true)
-            msg = ["Au travail", "Séance " + pomoSeance + " : 25 minutes de concentration."]
+            msg = [Reglages.t("Au travail", "Back to work"), Reglages.t("Séance " + pomoSeance + " : 25 minutes de concentration.",
+                                                                      "Session " + pomoSeance + ": 25 minutes of focus.")]
             lancerMinuteur(25)
         }
         Quickshell.execDetached(["sh", "-c", "notify-send -a Pomodoro \"$1\" \"$2\"; command -v canberra-gtk-play >/dev/null && "
@@ -131,8 +133,9 @@ Singleton {
             etapePomodoro()
         } else if (minuteurFin > 0 && minuteurReste === 0) {
             minuteurFin = 0
-            Quickshell.execDetached(["sh", "-c", "notify-send -a Minuteur -u critical 'Minuteur terminé' 'Le temps est écoulé.'; "
-                + "command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i alarm-clock-elapsed || true"])
+            Quickshell.execDetached(["sh", "-c", "notify-send -a \"$1\" -u critical \"$2\" \"$3\"; "
+                + "command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i alarm-clock-elapsed || true", "sh",
+                Reglages.t("Minuteur", "Timer"), Reglages.t("Minuteur terminé", "Timer Done"), Reglages.t("Le temps est écoulé.", "Time's up.")])
             activite("minuteur-fini", 5000)
         }
     }
@@ -197,6 +200,7 @@ Singleton {
     property var telechargements: []          // { nom, taille, vitesse } (octets, octets/s)
     property string telechargeFini: ""
     property var tailles: ({})
+    readonly property string sansNom: Reglages.t("Téléchargement", "Download")    // fichier Chrome pas encore nommé
     readonly property bool telecharge: telechargements.length > 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"
     Process {
         id: lecteurTel
@@ -209,13 +213,13 @@ Singleton {
                     if (x.startsWith("#")) { dossier = x.slice(1); return }
                     var p = x.split("\t")
                     if (p.length < 2) return
-                    var nom = p[1].replace(/\.(part|crdownload)$/, "").replace(/^Unconfirmed \d+$/, "Téléchargement")
+                    var nom = p[1].replace(/\.(part|crdownload)$/, "").replace(/^Unconfirmed \d+$/, etat.sansNom)
                     var taille = parseInt(p[0]) || 0, avant = etat.tailles[p[1]]
                     vu[p[1]] = { taille: taille, nom: nom }
                     l.push({ nom: nom, taille: taille, vitesse: avant !== undefined ? Math.max(0, (taille - avant.taille) / 2) : 0 })
                 })
                 // Un fichier temporaire disparu : téléchargement fini (si le vrai fichier est là, pas annulé)
-                for (var k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== "Téléchargement") verifFin.verifier(dossier, etat.tailles[k].nom)
+                for (var k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== etat.sansNom) verifFin.verifier(dossier, etat.tailles[k].nom)
                 etat.tailles = vu
                 etat.telechargements = l
             }
@@ -229,6 +233,7 @@ Singleton {
     }
     Timer { interval: 2000; repeat: true; running: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
+        if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")
     }
     Process {
@@ -246,14 +251,19 @@ Singleton {
     // ── Heure ──
     property date maintenant: new Date()
     Timer { interval: 1000; running: true; repeat: true; onTriggered: etat.maintenant = new Date() }
-    readonly property var jours: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
-    readonly property var mois: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    // En anglais : noms de Reglages.locale (0 = dimanche, comme getDay())
+    readonly property var jours: Reglages.en ? [0, 1, 2, 3, 4, 5, 6].map(i => Reglages.locale.dayName(i, Locale.LongFormat))
+                                             : ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+    readonly property var mois: Reglages.en ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(i => Reglages.locale.standaloneMonthName(i, Locale.LongFormat))
+                                            : ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
     // Format réglable (nc-reglages, ILE_HEURE : 24 ou 12)
     readonly property string heure: Reglages.val("ILE_HEURE", "24") === "12" ? Qt.formatTime(maintenant, "h:mm AP")
                                                                             : Qt.formatTime(maintenant, "hh:mm")
-    readonly property string dateLongue: jours[maintenant.getDay()] + " " + maintenant.getDate() + " " + mois[maintenant.getMonth()]
+    readonly property string dateLongue: Reglages.en ? maintenant.toLocaleDateString(Reglages.locale, "dddd, MMMM d")
+                                                     : jours[maintenant.getDay()] + " " + maintenant.getDate() + " " + mois[maintenant.getMonth()]
     readonly property var moisCourts: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
-    readonly property string dateCourte: jours[maintenant.getDay()].slice(0, 3) + ". " + maintenant.getDate() + " " + moisCourts[maintenant.getMonth()]
+    readonly property string dateCourte: Reglages.en ? maintenant.toLocaleDateString(Reglages.locale, "ddd, MMM d")
+                                                     : jours[maintenant.getDay()].slice(0, 3) + ". " + maintenant.getDate() + " " + moisCourts[maintenant.getMonth()]
 
     // ── Musique : le lecteur qui joue, sinon le dernier qui a joué, sinon le premier qui a un titre ──
     readonly property var lecteurs: Mpris.players.values.filter(p => (p.trackTitle || "") !== "")
@@ -332,7 +342,7 @@ Singleton {
     // déconnectant le casque).
     readonly property var fluxMicro: Pipewire.nodes.values.filter(n => n.type === PwNodeType.AudioInStream
         && !/cava|pouls|pavucontrol|volume control|noctalia|peak|nc-ile|monitor/i.test((n.name || "") + " " + (n.description || "")))
-    readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].description || fluxMicro[0].name || "Une appli") : ""
+    readonly property string appliMicro: fluxMicro.length ? (fluxMicro[0].description || fluxMicro[0].name || Reglages.t("Une appli", "An app")) : ""
     // Caméra : allumée si la webcam est sortie de veille (simple fichier à lire) ; le nom de l'appli n'est cherché
     // qu'à ce moment-là (parcourir les fichiers ouverts de tous les programmes coûte cher : pas toutes les 3 s)
     property string appliCamera: ""
@@ -342,7 +352,7 @@ Singleton {
             + "s=$(cat \"$d/power/runtime_status\" 2>/dev/null || cat \"$d/../power/runtime_status\" 2>/dev/null); "
             + "[ \"$s\" = active ] || continue; "
             + "for f in /proc/[0-9]*/fd/*; do case \"$(readlink \"$f\" 2>/dev/null)\" in /dev/video*) p=${f#/proc/}; cat /proc/${p%%/*}/comm;; esac; done 2>/dev/null "
-            + "| grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1 | grep . || echo 'Une appli'; exit; done"]
+            + "| grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1 | grep . || echo '" + Reglages.t("Une appli", "An app") + "'; exit; done"]
         stdout: StdioCollector { onStreamFinished: etat.appliCamera = text.trim() }
     }
     Timer { interval: 3000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
@@ -355,7 +365,7 @@ Singleton {
     // ── Casque / écouteurs Bluetooth qui se connectent (AirPods…) : la pilule montre leur nom et leur batterie ──
     // Repérés par leur adresse (pas par le nœud PipeWire : passer en mode appel recrée le nœud sans reconnexion)
     readonly property var adressesBt: Pipewire.nodes.values.filter(n => n.isSink && !n.isStream && (n.name || "").indexOf("bluez_output.") === 0)
-        .map(n => ({ mac: n.name.split(".")[1].replace(/_/g, ":"), nom: n.description || n.nickname || "Casque" }))
+        .map(n => ({ mac: n.name.split(".")[1].replace(/_/g, ":"), nom: n.description || n.nickname || Reglages.t("Casque", "Headphones") }))
     property var btConnus: []
     property string casqueNom: ""
     property string casqueBatterie: ""
@@ -390,9 +400,11 @@ Singleton {
     }
     Process {
         id: alerteBatterie
-        command: ["notify-send", "-a", "Batterie", "-u", etat.seuilAlerte <= etat.alerte2 ? "critical" : "normal", "-i", "battery-caution",
-                  "-A", "eco=Mode Économie", "Batterie faible : " + etat.pourcent + " %",
-                  etat.seuilAlerte <= etat.alerte2 ? "Branche ton PC maintenant." : "Pense à brancher ton PC, ou passe en mode Économie."]
+        command: ["notify-send", "-a", Reglages.t("Batterie", "Battery"), "-u", etat.seuilAlerte <= etat.alerte2 ? "critical" : "normal", "-i", "battery-caution",
+                  "-A", "eco=" + Reglages.t("Mode Économie", "Low Power Mode"),
+                  Reglages.t("Batterie faible : " + etat.pourcent + " %", "Low Battery: " + etat.pourcent + "%"),
+                  etat.seuilAlerte <= etat.alerte2 ? Reglages.t("Branche ton PC maintenant.", "Plug in your computer now.")
+                                                   : Reglages.t("Pense à brancher ton PC, ou passe en mode Économie.", "Plug in your computer soon, or switch to Low Power Mode.")]
         stdout: StdioCollector { onStreamFinished: if (text.trim() === "eco") etat.choisirProfil(PowerProfile.PowerSaver) }
     }
     readonly property int profil: PowerProfiles.profile

@@ -92,7 +92,7 @@ Item {
         id: fini
         montre: c.mode === "minuteur-fini"
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "alarm"; taille: 18; color: Couleurs.orange }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Minuteur terminé"; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Minuteur terminé", "Timer Done"); font.weight: Font.DemiBold }
     }
 
     // ── Volume / luminosité : jauge blanche ──
@@ -114,7 +114,7 @@ Item {
                 Behavior on width { SpringAnimation { spring: 5; damping: 0.5 } }
             }
         }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Math.round(jauge.valeur * 100) + " %"; font.weight: Font.DemiBold; width: 42; horizontalAlignment: Text.AlignRight }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Math.round(jauge.valeur * 100) + Reglages.t(" %", "%"); font.weight: Font.DemiBold; width: 42; horizontalAlignment: Text.AlignRight }
     }
 
     // ── Nouveau morceau ──
@@ -138,7 +138,7 @@ Item {
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.branche ? "bolt" : "battery_full"; taille: 18; color: Etat.branche ? Couleurs.vert : Couleurs.texte }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: (Etat.branche ? "En charge · " : "Sur batterie · ") + Etat.pourcent + " %"
+            text: (Etat.branche ? Reglages.t("En charge · ", "Charging · ") : Reglages.t("Sur batterie · ", "On Battery · ")) + Etat.pourcent + Reglages.t(" %", "%")
             font.weight: Font.DemiBold; color: Etat.branche ? Couleurs.vert : Couleurs.texte
         }
     }
@@ -155,7 +155,7 @@ Item {
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: Etat.profil === PowerProfile.PowerSaver ? "Économie" : (Etat.profil === PowerProfile.Performance ? "Performance" : "Équilibré")
+            text: Etat.profil === PowerProfile.PowerSaver ? Reglages.t("Économie", "Power Saver") : (Etat.profil === PowerProfile.Performance ? "Performance" : Reglages.t("Équilibré", "Balanced"))
             font.weight: Font.DemiBold
         }
     }
@@ -171,7 +171,8 @@ Item {
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: Etat.cameraActive ? Etat.nomJoli(Etat.appliCamera) + " utilise la caméra" : Etat.nomJoli(Etat.appliMicro) + " utilise le micro"
+            text: Etat.cameraActive ? Etat.nomJoli(Etat.appliCamera) + Reglages.t(" utilise la caméra", " is using the camera")
+                                     : Etat.nomJoli(Etat.appliMicro) + Reglages.t(" utilise le micro", " is using the microphone")
             font.weight: Font.DemiBold
         }
     }
@@ -189,7 +190,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter; taille: 16; color: Couleurs.vert
                 nom: parseInt(Etat.casqueBatterie) > 60 ? "battery_full" : (parseInt(Etat.casqueBatterie) > 25 ? "battery_4_bar" : "battery_1_bar")
             }
-            Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueBatterie + " %"; secondaire: true }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.casqueBatterie + Reglages.t(" %", "%"); secondaire: true }
         }
     }
 
@@ -203,7 +204,8 @@ Item {
                     agent: Agents.agent(claude.terminal ? Agents.attend : claude.s) }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: claude.terminal ? Agents.nom(Agents.attend) + " t'attend dans le terminal" : (claude.s ? (claude.s.etape || "Travaille…") : "")
+            text: claude.terminal ? Agents.nom(Agents.attend) + Reglages.t(" t'attend dans le terminal", " is waiting in the terminal")
+                                  : (claude.s ? (claude.s.etape || Reglages.t("Travaille…", "Working…")) : "")
             font.weight: Font.DemiBold; color: claude.terminal ? Couleurs.orange : Couleurs.texte
             width: Math.min(implicitWidth, 250)
         }
@@ -223,7 +225,7 @@ Item {
         montre: c.mode === "claude-fini"
         Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; agent: Agents.dernierFiniAgent }
         Texte { anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
-                text: Agents.ias[Agents.dernierFiniAgent].nom + " a terminé" }
+                text: Agents.ias[Agents.dernierFiniAgent].nom + Reglages.t(" a terminé", " is done") }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.dernierFini; secondaire: true; width: Math.min(implicitWidth, 160) }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "check_circle"; taille: 17; color: Couleurs.vert }
     }
@@ -254,7 +256,7 @@ Item {
         id: telechargementFini
         montre: c.mode === "telechargement-fini"
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "download_done"; taille: 17; color: Couleurs.vert }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: "Téléchargé"; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Téléchargé", "Downloaded"); font.weight: Font.DemiBold }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.telechargeFini; secondaire: true; width: Math.min(implicitWidth, 200) }
     }
     Fondu {
@@ -277,6 +279,6 @@ Item {
         id: jeu
         montre: c.mode === "jeu"
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "sports_esports"; taille: 19; color: Etat.jeu ? Couleurs.orange : Couleurs.texteSec }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.jeu ? "Mode jeu" : "Mode jeu désactivé"; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.jeu ? Reglages.t("Mode jeu", "Game Mode") : Reglages.t("Mode jeu désactivé", "Game Mode Off"); font.weight: Font.DemiBold }
     }
 }

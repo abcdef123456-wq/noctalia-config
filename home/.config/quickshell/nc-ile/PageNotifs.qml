@@ -14,7 +14,7 @@ Item {
         Texte {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
             visible: Notifs.liste.length > 0
-            text: "Tout effacer"; color: ze.containsMouse ? Couleurs.accentClair : Couleurs.accent
+            text: Reglages.t("Tout effacer", "Clear All"); color: ze.containsMouse ? Couleurs.accentClair : Couleurs.accent
             MouseArea { id: ze; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: Notifs.toutEffacer() }
         }
     }
@@ -40,7 +40,7 @@ Item {
                     Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: Notifs.concentration ? "dark_mode" : "notifications"; taille: 30; color: Couleurs.gris4 }
                     Texte {
                         anchors.horizontalCenter: parent.horizontalCenter; secondaire: true
-                        text: Notifs.concentration ? "Concentration activée" : "Aucune notification"
+                        text: Notifs.concentration ? Reglages.t("Concentration activée", "Focus is on") : Reglages.t("Aucune notification", "No Notifications")
                     }
                 }
             }

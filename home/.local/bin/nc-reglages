@@ -34,7 +34,55 @@ try:
 except ImportError:          # Python < 3.11
     tomllib = None
 
-HOME = os.path.expanduser("~")
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the arrow keys.
+
+  nc-settings                     settings screen
+  nc-settings shortcuts           straight to keyboard shortcuts
+  nc-settings list                all settings and their values
+  nc-settings get KEY             a setting's value
+  nc-settings set KEY VALUE       change a setting (e.g. nc-settings set HZ_ECO 60)
+  nc-settings reset [KEY]         back to the config's value (every setting without KEY)
+  nc-settings apply               rewrite what depends on them (run by updates)
+  nc-settings news                what's new in the latest updates of the config
+
+On the screen: ↑ ↓ to choose, ← → to change the value (applied right away), Enter to type or open,
+r to restore the config's value, Tab to switch between sections and settings, q to quit.
+Your settings are kept in ~/.config/nc/reglages.conf (only what you change), your shortcuts in
+~/.config/nc/raccourcis.conf: updates (nc-update) never touch them. Every part of the config reads
+these files: Hyprland, the island, Noctalia (bar, dock, wallpapers…), power profiles, sleep, the terminal.
+French command and subcommand names work too (nc-reglages liste, appliquer, raccourcis…)."""
+
+HOME =os.path.expanduser("~")
 BIN = os.path.join(HOME, ".local/bin")
 FICHIER = os.path.join(HOME, ".config/nc/reglages.conf")
 STYLE_FICHIER = os.path.join(HOME, ".config/nc/style.conf")       # valeurs du style du bureau (écrit ici)
@@ -97,25 +145,42 @@ def polices(motif, preferees):
 
 
 # ── Les réglages ────────────────────────────────────────────────────────────────────────────────────────────────
+class L:
+    """Texte dans les deux langues : str(L(fr, en)) donne celui de la langue en cours (suit LANGUE sans relancer)."""
+    __slots__ = ("fr", "en")
+
+    def __init__(self, fr, en):
+        self.fr, self.en = fr, en
+
+    def __str__(self):
+        return T(self.fr, self.en)
+
+
 class R:
-    """Un réglage : clé du fichier, section, nom, genre (ouinon, choix, entier, hz, texte, dossier), valeur de la config."""
+    """Un réglage : clé du fichier, section, nom, genre (ouinon, choix, entier, hz, texte, dossier), valeur de la config.
+    Nom, aide, zero et noms des choix : texte ou L(fr, en) ; la section reste en français (clé), voir nom_section."""
 
     def __init__(self, cle, section, nom, genre, defaut, aide="", choix=None, mini=0, maxi=100, pas=1, unite="",
                  groupe="", zero="", essai=""):
-        self.cle, self.section, self.nom, self.genre, self.defaut, self.aide = cle, section, nom, genre, defaut, aide
+        self.cle, self.section, self._nom, self.genre, self.defaut, self._aide = cle, section, nom, genre, defaut, aide
         self._choix, self.mini, self.maxi, self.pas, self.unite = choix, mini, maxi, pas, unite
-        self.groupe, self.zero, self.essai = groupe, zero, essai
+        self.groupe, self._zero, self.essai = groupe, zero, essai
+
+    nom = property(lambda self: str(self._nom))
+    aide = property(lambda self: str(self._aide))
+    zero = property(lambda self: str(self._zero))
 
     def choix(self):
         """[(valeur, nom affiché)] pour ouinon, choix et hz."""
         if self.genre == "ouinon":
-            return [("oui", "Oui"), ("non", "Non")]
+            return [("oui", T("Oui", "Yes")), ("non", T("Non", "No"))]
         if self.genre == "hz":
             l = frequences()
-            res = [("max", f"La plus haute{f' ({l[-1]} Hz)' if l else ''}"), ("low", "60 Hz, sinon la plus basse")]
+            res = [("max", f"{T('La plus haute', 'Highest')}{f' ({l[-1]} Hz)' if l else ''}"),
+                   ("low", T("60 Hz, sinon la plus basse", "60 Hz, or the lowest"))]
             return res + [(str(h), f"{h} Hz") for h in l]
         c = self._choix() if callable(self._choix) else (self._choix or [])
-        return [(x, x) if isinstance(x, str) else x for x in c]
+        return [(x, x) if isinstance(x, str) else (x[0], str(x[1])) for x in c]
 
     def montrer(self, v):
         if self.genre in ("ouinon", "choix", "hz"):
@@ -126,15 +191,16 @@ class R:
         if self.genre == "entier":
             if v == "0" and self.zero:
                 return self.zero
-            return f"{v}{' ' + self.unite if self.unite else ''}"
+            sep = "" if EN and self.unite in ("%", "/s") else " "
+            return f"{v}{sep + self.unite if self.unite else ''}"
         if self.genre == "dossier" and v == "auto":
-            return "automatique"
+            return T("automatique", "automatic")
         if self.genre == "texte" and v == "systeme":
-            return "celle du système"
+            return T("celle du système", "system default")
         if self.genre == "texte" and v == "auto":
-            return "automatique"
+            return T("automatique", "automatic")
         if self.genre == "texte" and v == "aucun":
-            return "aucun"
+            return T("aucun", "none")
         return v
 
     def valider(self, v):
@@ -146,299 +212,481 @@ class R:
                 return "oui"
             if l in ("non", "n", "no", "false", "0"):
                 return "non"
-            raise ValueError("oui ou non")
+            raise ValueError(T("oui ou non", "yes or no"))
         if self.genre == "choix":
             vals = [c for c, _ in self.choix()]
             if v in vals:
                 return v
-            raise ValueError("valeurs possibles : " + ", ".join(vals))
+            raise ValueError(T("valeurs possibles : ", "possible values: ") + ", ".join(vals))
         if self.genre == "entier":
             if not re.fullmatch(r"-?\d{1,5}", v) or not self.mini <= int(v) <= self.maxi:
-                raise ValueError(f"un nombre de {self.mini} à {self.maxi}")
+                raise ValueError(T(f"un nombre de {self.mini} à {self.maxi}", f"a number from {self.mini} to {self.maxi}"))
             return str(int(v))
         if self.genre == "hz":
             if v in ("max", "low") or (v.isdigit() and 20 <= int(v) <= 500):
                 return v
-            raise ValueError("max, low ou une fréquence en Hz (ex. 60)")
+            raise ValueError(T("max, low ou une fréquence en Hz (ex. 60)", "max, low or a refresh rate in Hz (e.g. 60)"))
         if self.genre == "dossier":
             if v == "auto":
                 return v
             v = os.path.expanduser(v)
             if not v.startswith("/"):
-                raise ValueError("un chemin complet (ex. ~/Images/Captures), ou auto")
+                raise ValueError(T("un chemin complet (ex. ~/Images/Captures), ou auto",
+                                   "a full path (e.g. ~/Pictures/Screenshots), or auto"))
             return v.replace(HOME, "~", 1)
         if self.genre == "texte":
+            # Mots anglais acceptés pour les valeurs gardées en français
+            if self.cle == "CLAVIER_DISPOSITION" and v.lower() == "system":
+                v = "systeme"
+            if self.cle == "VERROU_MESSAGE" and v.lower() == "none":
+                v = "aucun"
             if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
                 if not re.fullmatch(r"[a-z]{2,3}(,[a-z]{2,3})*", v) or \
                         any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
-                    raise ValueError("codes de disposition séparés par des virgules (ex. us, fr, us,fr), ou systeme")
+                    raise ValueError(T("codes de disposition séparés par des virgules (ex. us, fr, us,fr), ou systeme",
+                                       "comma-separated layout codes (e.g. us, fr, us,fr), or system"))
             if not v:
-                raise ValueError("une valeur")
+                raise ValueError(T("une valeur", "a value"))
             return v
         return v
 
 
 def animations_bouton():
     """Ce que peut faire le bouton d'arrêt : actions, animations de nc-anim (dont les tiennes)."""
-    res = [("doigts", "Des doigts partout")]
+    res = [("doigts", T("Des doigts partout", "Fingers everywhere"))]
     for l in sortie([os.path.join(HOME, ".local/bin/nc-anim"), "liste", "--brut"]).splitlines():
         n, _, d = l.partition("\t")
         if n and n != "doigts":
             res.append((n, d))
-    return res + [("aleatoire", "Une animation au hasard"), ("menu", "Menu Éteindre / Redémarrer / Veille"),
-                  ("verrouiller", "Verrouiller l'écran"), ("veille", "Mettre en veille"),
-                  ("eteindre", "Éteindre (comme d'habitude)"), ("rien", "Rien")]
+    return res + [("aleatoire", T("Une animation au hasard", "A random animation")),
+                  ("menu", T("Menu Éteindre / Redémarrer / Veille", "Shut Down / Restart / Sleep menu")),
+                  ("verrouiller", T("Verrouiller l'écran", "Lock the screen")), ("veille", T("Mettre en veille", "Sleep")),
+                  ("eteindre", T("Éteindre (comme d'habitude)", "Shut down (as usual)")), ("rien", T("Rien", "Nothing"))]
 
+
+# Noms anglais des sections (la section française reste la clé : comparaisons, fichier, ordre)
+SECTIONS_EN = {
+    "Apparence": "Appearance", "Île": "Island", "Notifications": "Notifications", "Animations": "Animations",
+    "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
+    "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
+    "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal",
+    "Agents IA (coucou)": "AI Agents (coucou)", "Mises à jour": "Updates", "Captures": "Screenshots",
+    "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
+    # Sections des raccourcis (nc-keys)
+    "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System",
+    "Mes raccourcis": "My Shortcuts",
+}
+
+
+def nom_section(s):
+    return T(s, SECTIONS_EN.get(s, s))
+
+
+# Effets d'apparition (verrouillage et fond d'écran)
+_TRANSITIONS = [("disc", L("Disque", "Disc")), ("fade", L("Fondu", "Fade")), ("wipe", L("Balayage", "Wipe")),
+                ("stripes", L("Bandes", "Stripes")), ("honeycomb", L("Nid d'abeilles", "Honeycomb")), ("zoom", "Zoom"),
+                ("aleatoire", L("Au hasard", "Random")), ("aucune", L("Aucune", "None"))]
+_FREQ_AIDE = L("Fréquence de l'écran du portable dans ce profil.", "Refresh rate of the laptop screen in this profile.")
+_JAMAIS = L("Jamais", "Never")
 
 REGLAGES = [
     # Île
-    R("ILE_STYLE", "Île", "Couleurs", "choix", "terminal", "Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
-      [("terminal", "Couleurs du terminal"), ("noir", "Noire, façon iPhone")]),
-    R("ILE_CONTOUR", "Île", "Contour quand elle est ouverte", "choix", "degrade", "La teinte de l'accent, adoucie et légèrement nuancée : sobre même sur un fond d'écran très coloré.",
-      [("degrade", "Accent en dégradé"), ("discret", "Filet discret"), ("aucun", "Aucun")]),
-    R("ILE_HEURE", "Île", "Format de l'heure", "choix", "24", "", [("24", "24 h  (14:05)"), ("12", "12 h  (2:05 PM)")]),
-    R("ILE_DATE", "Île", "Date à côté de l'heure", "ouinon", "oui"),
-    R("ILE_BANNIERES", "Notifications", "Notifications en bannière", "ouinon", "oui",
-      "Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours."),
-    R("ILE_BANNIERE_DUREE", "Notifications", "Durée d'une bannière", "entier", "5", "Le pointeur posé dessus la garde ouverte.", mini=2, maxi=30, unite="s"),
-    R("ILE_METEO", "Île", "Météo à côté de l'heure", "ouinon", "oui", "Et une page Météo dans l'île (Open-Meteo, sans compte)."),
-    R("METEO_VILLE", "Île", "Ville de la météo", "texte", "auto", "Automatique : d'après ta connexion internet. Sinon, le nom d'une ville."),
-    R("ILE_PRESSE", "Île", "Presse-papiers dans l'île", "ouinon", "oui",
-      "Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire."),
-    R("ILE_TELECHARGEMENTS", "Île", "Téléchargements du navigateur dans l'île", "ouinon", "oui",
-      "Firefox, Chrome, Brave, Edge, Vivaldi… : le fichier, la taille reçue et la vitesse, puis « Téléchargé »."),
-    R("POMODORO_CONCENTRATION", "Île", "Pomodoro : Ne pas déranger pendant le travail", "ouinon", "oui",
-      "Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4."),
-    R("SPOTLIGHT_IA", "Île", "IA du Spotlight (« ? ta question »)", "choix", "auto",
-      "Réponse courte dans le Spotlight ; la commande qu'elle propose se lance avec Entrée.",
-      [("auto", "Automatique (la première installée)"), ("claude", "Claude"), ("opencode", "OpenCode"),
-       ("gemini", "Gemini CLI"), ("qwen", "Qwen Code"), ("non", "Aucune")]),
-    R("SPOTLIGHT_ENTREE", "Île", "Entrée sur une appli déjà ouverte", "choix", "nouvelle",
-      "Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.",
-      [("nouvelle", "Ouvre une nouvelle fenêtre"), ("aller", "Va sur la fenêtre ouverte")]),
-    R("SPOTLIGHT_FICHIERS", "Île", "Fichiers dans le Spotlight", "ouinon", "oui",
-      "Les fichiers du dossier personnel apparaissent dans les résultats (à partir de 3 lettres)."),
-    R("BATTERIE_ALERTE", "Île", "Alerte de batterie faible", "entier", "20", "Une notification à ce niveau, puis à la moitié.",
-      mini=0, maxi=50, pas=5, unite="%", zero="Jamais"),
+    R("ILE_STYLE", "Île", L("Couleurs", "Colors"), "choix", "terminal",
+      L("Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",
+        "Terminal colors: the island follows the wallpaper, like kitty and the window borders."),
+      [("terminal", L("Couleurs du terminal", "Terminal colors")), ("noir", L("Noire, façon iPhone", "Black, iPhone-style"))]),
+    R("ILE_CONTOUR", "Île", L("Contour quand elle est ouverte", "Outline when open"), "choix", "degrade",
+      L("La teinte de l'accent, adoucie et légèrement nuancée : sobre même sur un fond d'écran très coloré.",
+        "The accent tint, softened and slightly shaded: subtle even on a very colorful wallpaper."),
+      [("degrade", L("Accent en dégradé", "Accent gradient")), ("discret", L("Filet discret", "Subtle line")),
+       ("aucun", L("Aucun", "None"))]),
+    R("ILE_HEURE", "Île", L("Format de l'heure", "Time format"), "choix", "24", "",
+      [("24", L("24 h  (14:05)", "24-hour  (14:05)")), ("12", L("12 h  (2:05 PM)", "12-hour  (2:05 PM)"))]),
+    R("ILE_DATE", "Île", L("Date à côté de l'heure", "Date next to the time"), "ouinon", "oui"),
+    R("ILE_BANNIERES", "Notifications", L("Notifications en bannière", "Notification banners"), "ouinon", "oui",
+      L("Non : les notifications arrivent sans s'afficher (elles restent dans la page Notifications). Les urgentes s'affichent toujours.",
+        "No: notifications arrive without showing (they stay in the Notifications page). Urgent ones always show.")),
+    R("ILE_BANNIERE_DUREE", "Notifications", L("Durée d'une bannière", "Banner duration"), "entier", "5",
+      L("Le pointeur posé dessus la garde ouverte.", "Hovering the pointer over it keeps it open."), mini=2, maxi=30, unite="s"),
+    R("ILE_METEO", "Île", L("Météo à côté de l'heure", "Weather next to the time"), "ouinon", "oui",
+      L("Et une page Météo dans l'île (Open-Meteo, sans compte).", "And a Weather page in the island (Open-Meteo, no account).")),
+    R("METEO_VILLE", "Île", L("Ville de la météo", "Weather city"), "texte", "auto",
+      L("Automatique : d'après ta connexion internet. Sinon, le nom d'une ville.",
+        "Automatic: based on your internet connection. Otherwise, a city name.")),
+    R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
+      L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
+        "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),
+    R("ILE_TELECHARGEMENTS", "Île", L("Téléchargements du navigateur dans l'île", "Browser downloads in the island"), "ouinon", "oui",
+      L("Firefox, Chrome, Brave, Edge, Vivaldi… : le fichier, la taille reçue et la vitesse, puis « Téléchargé ».",
+        "Firefox, Chrome, Brave, Edge, Vivaldi…: the file, the size received and the speed, then “Downloaded”.")),
+    R("POMODORO_CONCENTRATION", "Île", L("Pomodoro : Ne pas déranger pendant le travail", "Pomodoro: Do Not Disturb while working"),
+      "ouinon", "oui",
+      L("Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4.",
+        "Pomodoro (the island's Timer page, or “Pomodoro” in Spotlight): 25 min of work, 5 of break, 15 every 4.")),
+    R("SPOTLIGHT_IA", "Île", L("IA du Spotlight (« ? ta question »)", "Spotlight AI (“? your question”)"), "choix", "auto",
+      L("Réponse courte dans le Spotlight ; la commande qu'elle propose se lance avec Entrée.",
+        "A short answer in Spotlight; the command it suggests runs with Enter."),
+      [("auto", L("Automatique (la première installée)", "Automatic (the first one installed)")), ("claude", "Claude"),
+       ("opencode", "OpenCode"), ("gemini", "Gemini CLI"), ("qwen", "Qwen Code"), ("non", L("Aucune", "None"))]),
+    R("SPOTLIGHT_ENTREE", "Île", L("Entrée sur une appli déjà ouverte", "Enter on an app that's already open"), "choix", "nouvelle",
+      L("Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.", "Spotlight (Super + R). Ctrl + Enter does the other one."),
+      [("nouvelle", L("Ouvre une nouvelle fenêtre", "Opens a new window")),
+       ("aller", L("Va sur la fenêtre ouverte", "Goes to the open window"))]),
+    R("SPOTLIGHT_FICHIERS", "Île", L("Fichiers dans le Spotlight", "Files in Spotlight"), "ouinon", "oui",
+      L("Les fichiers du dossier personnel apparaissent dans les résultats (à partir de 3 lettres).",
+        "Files from your home folder appear in the results (from 3 letters).")),
+    R("BATTERIE_ALERTE", "Île", L("Alerte de batterie faible", "Low battery alert"), "entier", "20",
+      L("Une notification à ce niveau, puis à la moitié.", "A notification at this level, then at half of it."),
+      mini=0, maxi=50, pas=5, unite="%", zero=_JAMAIS),
     # Notifications
-    R("NPD_NUIT", "Notifications", "Ne pas déranger la nuit", "ouinon", "non",
-      "Les notifications arrivent sans bannière ni son (les urgentes passent). Le bouton du centre de contrôle reste libre.",),
-    R("NPD_DEBUT", "Notifications", "À partir de", "choix", "22:00", "", ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '00:00', '00:30', '01:00', '01:30']),
-    R("NPD_FIN", "Notifications", "Jusqu'à", "choix", "07:00", "", ['05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30']),
+    R("NPD_NUIT", "Notifications", L("Ne pas déranger la nuit", "Do Not Disturb at night"), "ouinon", "non",
+      L("Les notifications arrivent sans bannière ni son (les urgentes passent). Le bouton du centre de contrôle reste libre.",
+        "Notifications arrive without a banner or sound (urgent ones get through). The Control Center button stays free."),),
+    R("NPD_DEBUT", "Notifications", L("À partir de", "From"), "choix", "22:00", "", ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '00:00', '00:30', '01:00', '01:30']),
+    R("NPD_FIN", "Notifications", L("Jusqu'à", "Until"), "choix", "07:00", "", ['05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30']),
     # Apparence
-    R("STYLE", "Apparence", "Style du bureau", "choix", "noctalia",
-      "Couleurs de tout le bureau (barre, applis, terminal, île) et quelques retouches assorties. noctalia-config : "
-      "couleurs du fond d'écran. Tes autres réglages passent toujours devant ceux du style.",
-      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)"), ("oled", "Noir pur (écran OLED)"),
+    R("LANGUE", "Apparence", "Langue / Language", "choix", "auto",
+      L("Réglages, île, notifications, commandes et installation. Les commandes ont aussi un nom anglais (nc-settings…).",
+        "Settings, island, notifications, commands and installation. Commands also have English names (nc-settings…)."),
+      [("auto", "Celle du système / System language"), ("fr", "Français"), ("en", "English")], groupe="langue"),
+    R("STYLE", "Apparence", L("Style du bureau", "Desktop style"), "choix", "noctalia",
+      L("Couleurs de tout le bureau (barre, applis, terminal, île) et quelques retouches assorties. noctalia-config : "
+        "couleurs du fond d'écran. Tes autres réglages passent toujours devant ceux du style.",
+        "Colors of the whole desktop (bar, apps, terminal, island) and a few matching tweaks. noctalia-config: "
+        "wallpaper colors. Your other settings always take precedence over the style's."),
+      [("noctalia", "noctalia-config"), ("apple", "Apple (macOS, iPhone)"), ("oled", L("Noir pur (écran OLED)", "Pure black (OLED screen)")),
        ("nord", "Nord"), ("catppuccin", "Catppuccin"), ("dracula", "Dracula"), ("gruvbox", "Gruvbox"),
        ("kanagawa", "Kanagawa")], groupe="style"),
-    R("THEME_MODE", "Apparence", "Thème", "choix", "dark", "Les couleurs suivent toujours le fond d'écran.",
-      [("dark", "Sombre"), ("light", "Clair")], groupe="noctalia"),
-    R("POLICE", "Apparence", "Police de l'interface", "choix", "Adwaita Sans", "Barre, panneaux et menus de Noctalia.",
+    R("THEME_MODE", "Apparence", L("Thème", "Theme"), "choix", "dark",
+      L("Les couleurs suivent toujours le fond d'écran.", "Colors always follow the wallpaper."),
+      [("dark", L("Sombre", "Dark")), ("light", L("Clair", "Light"))], groupe="noctalia"),
+    R("POLICE", "Apparence", L("Police de l'interface", "Interface font"), "choix", "Adwaita Sans",
+      L("Barre, panneaux et menus de Noctalia.", "Noctalia's bar, panels and menus."),
       lambda: polices(r"^(Inter|Noto Sans|Roboto|Ubuntu|Cantarell|Fira Sans|Open Sans|Lato|IBM Plex Sans|SF Pro)",
                       ["Adwaita Sans", "Inter", "Noto Sans", "Cantarell", "Roboto", "Ubuntu", "Fira Sans", "IBM Plex Sans"]),
       groupe="noctalia"),
-    R("COINS_ECRAN", "Apparence", "Coins de l'écran arrondis", "ouinon", "oui", groupe="noctalia"),
-    R("VERROU_HORLOGE", "Apparence", "Horloge du verrouillage", "choix", "grande", "",
-      [("grande", "Grande et grasse"), ("fine", "Grande et fine"), ("petite", "Plus petite")]),
-    R("VERROU_PHOTO", "Apparence", "Ta photo sur le verrouillage", "ouinon", "non", "Ta photo de profil (~/.face) à la place du cadenas."),
-    R("VERROU_MESSAGE", "Apparence", "Message sur le verrouillage", "texte", "aucun",
-      "Sous l'heure, par exemple « Si trouvé : 06 12 34 56 78 ». « aucun » : pas de message."),
-    R("VERROU_FLOU", "Apparence", "Flou de l'écran de verrouillage", "entier", "15", "0 : fond d'écran net.",
-      mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    R("COINS_ECRAN", "Apparence", L("Coins de l'écran arrondis", "Rounded screen corners"), "ouinon", "oui", groupe="noctalia"),
+    R("VERROU_HORLOGE", "Apparence", L("Horloge du verrouillage", "Lock screen clock"), "choix", "grande", "",
+      [("grande", L("Grande et grasse", "Large and bold")), ("fine", L("Grande et fine", "Large and thin")),
+       ("petite", L("Plus petite", "Smaller"))]),
+    R("VERROU_PHOTO", "Apparence", L("Ta photo sur le verrouillage", "Your photo on the lock screen"), "ouinon", "non",
+      L("Ta photo de profil (~/.face) à la place du cadenas.", "Your profile picture (~/.face) instead of the padlock.")),
+    R("VERROU_MESSAGE", "Apparence", L("Message sur le verrouillage", "Lock screen message"), "texte", "aucun",
+      L("Sous l'heure, par exemple « Si trouvé : 06 12 34 56 78 ». « aucun » : pas de message.",
+        "Under the time, for example “If found: +1 555 123 4567”. “none”: no message.")),
+    R("VERROU_FLOU", "Apparence", L("Flou de l'écran de verrouillage", "Lock screen blur"), "entier", "15",
+      L("0 : fond d'écran net.", "0: sharp wallpaper."), mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
     # Animations
-    R("EFFETS", "Animations", "Effets visuels", "choix", "tous",
-      "Aucun : ni animations, ni flou, ni ombres, ni transitions, ni loupe du dock, ni fond animé : plus sobre et plus "
-      "léger. Les réglages ci-dessous sont gardés pour quand tu les remets.",
-      [("tous", "Tous les effets"), ("aucun", "Aucun effet")], groupe="effets"),
-    R("BOUTON_ARRET", "Animations", "Bouton d'arrêt", "choix", "doigts",
-      "Un appui court. Le garder appuyé éteint toujours. e : essayer. Crée la tienne : nc-anim nouvelle NOM (dans un terminal).",
+    R("EFFETS", "Animations", L("Effets visuels", "Visual effects"), "choix", "tous",
+      L("Aucun : ni animations, ni flou, ni ombres, ni transitions, ni loupe du dock, ni fond animé : plus sobre et plus "
+        "léger. Les réglages ci-dessous sont gardés pour quand tu les remets.",
+        "None: no animations, blur, shadows, transitions, dock magnification or animated wallpaper: plainer and "
+        "lighter. The settings below are kept for when you turn them back on."),
+      [("tous", L("Tous les effets", "All effects")), ("aucun", L("Aucun effet", "No effects"))], groupe="effets"),
+    R("BOUTON_ARRET", "Animations", L("Bouton d'arrêt", "Power button"), "choix", "doigts",
+      L("Un appui court. Le garder appuyé éteint toujours. e : essayer. Crée la tienne : nc-anim nouvelle NOM (dans un terminal).",
+        "A short press. Holding it always shuts down. e: try it. Make your own: nc-anim nouvelle NAME (in a terminal)."),
       animations_bouton, essai="bouton"),
-    R("ANIM_VERROU", "Animations", "Apparition de l'écran de verrouillage", "choix", "disc", "e : essayer (verrouille l'écran).",
-      [("disc", "Disque"), ("fade", "Fondu"), ("wipe", "Balayage"), ("stripes", "Bandes"), ("honeycomb", "Nid d'abeilles"), ("zoom", "Zoom"), ("aleatoire", "Au hasard"), ("aucune", "Aucune")], groupe="noctalia", essai="verrou"),
-    R("ANIM_VERROU_DUREE", "Animations", "Durée de l'apparition", "entier", "1500", "", mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="verrou"),
-    R("ANIM_FOND", "Animations", "Changement de fond d'écran", "choix", "fade", "e : essayer (fond d'écran suivant).",
-      [("disc", "Disque"), ("fade", "Fondu"), ("wipe", "Balayage"), ("stripes", "Bandes"), ("honeycomb", "Nid d'abeilles"), ("zoom", "Zoom"), ("aleatoire", "Au hasard"), ("aucune", "Aucune")], groupe="noctalia", essai="fond"),
-    R("ANIM_FOND_DUREE", "Animations", "Durée du changement de fond", "entier", "1200", "", mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="fond"),
-    R("FENETRES_ANIMATIONS", "Animations", "Animations des fenêtres et des bureaux", "ouinon", "oui", groupe="hypr"),
-    R("FENETRES_ANIMATIONS_VITESSE", "Animations", "Vitesse des fenêtres et des bureaux", "choix", "normale", "",
-      [("lente", "Lente"), ("normale", "Normale"), ("rapide", "Rapide")], groupe="hypr"),
-    R("FENETRES_OUVERTURE", "Animations", "Ouverture des fenêtres", "choix", "popin", "",
-      [("popin", "Zoom léger"), ("slide", "Glissement"), ("gnomed", "Dépliée, façon GNOME")], groupe="hypr"),
-    R("ANIM_BUREAUX", "Animations", "Passage d'un bureau à l'autre", "choix", "slidefadevert", "",
-      [("slidefadevert", "Glisse vers le haut, en fondu"), ("slidefade", "Glisse sur le côté, en fondu"),
-       ("slidevert", "Glisse vers le haut"), ("slide", "Glisse sur le côté"), ("fade", "Fondu")], groupe="hypr"),
-    R("ANIMATIONS_VITESSE", "Animations", "Vitesse des menus et panneaux", "choix", "1.15", "Panneaux et menus de Noctalia.",
-      [("0.8", "Douce"), ("1.15", "Normale"), ("1.6", "Rapide")], groupe="noctalia"),
+    R("ANIM_VERROU", "Animations", L("Apparition de l'écran de verrouillage", "Lock screen appearance"), "choix", "disc",
+      L("e : essayer (verrouille l'écran).", "e: try it (locks the screen)."),
+      _TRANSITIONS, groupe="noctalia", essai="verrou"),
+    R("ANIM_VERROU_DUREE", "Animations", L("Durée de l'apparition", "Appearance duration"), "entier", "1500", "",
+      mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="verrou"),
+    R("ANIM_FOND", "Animations", L("Changement de fond d'écran", "Wallpaper change"), "choix", "fade",
+      L("e : essayer (fond d'écran suivant).", "e: try it (next wallpaper)."),
+      _TRANSITIONS, groupe="noctalia", essai="fond"),
+    R("ANIM_FOND_DUREE", "Animations", L("Durée du changement de fond", "Wallpaper change duration"), "entier", "1200", "",
+      mini=300, maxi=4000, pas=100, unite="ms", groupe="noctalia", essai="fond"),
+    R("FENETRES_ANIMATIONS", "Animations", L("Animations des fenêtres et des bureaux", "Window and workspace animations"),
+      "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_ANIMATIONS_VITESSE", "Animations", L("Vitesse des fenêtres et des bureaux", "Window and workspace speed"),
+      "choix", "normale", "",
+      [("lente", L("Lente", "Slow")), ("normale", L("Normale", "Normal")), ("rapide", L("Rapide", "Fast"))], groupe="hypr"),
+    R("FENETRES_OUVERTURE", "Animations", L("Ouverture des fenêtres", "Window opening"), "choix", "popin", "",
+      [("popin", L("Zoom léger", "Light zoom")), ("slide", L("Glissement", "Slide")),
+       ("gnomed", L("Dépliée, façon GNOME", "Unfold, GNOME-style"))], groupe="hypr"),
+    R("ANIM_BUREAUX", "Animations", L("Passage d'un bureau à l'autre", "Switching workspaces"), "choix", "slidefadevert", "",
+      [("slidefadevert", L("Glisse vers le haut, en fondu", "Slides up, with a fade")),
+       ("slidefade", L("Glisse sur le côté, en fondu", "Slides sideways, with a fade")),
+       ("slidevert", L("Glisse vers le haut", "Slides up")), ("slide", L("Glisse sur le côté", "Slides sideways")),
+       ("fade", L("Fondu", "Fade"))], groupe="hypr"),
+    R("ANIMATIONS_VITESSE", "Animations", L("Vitesse des menus et panneaux", "Menu and panel speed"), "choix", "1.15",
+      L("Panneaux et menus de Noctalia.", "Noctalia's panels and menus."),
+      [("0.8", L("Douce", "Gentle")), ("1.15", L("Normale", "Normal")), ("1.6", L("Rapide", "Fast"))], groupe="noctalia"),
     # Lumière nocturne
-    R("NUIT", "Lumière nocturne", "Lumière nocturne", "choix", "non", "Réchauffe les couleurs de l'écran pour moins fatiguer les yeux le soir.",
-      [("non", "Désactivée"), ("soir", "Le soir, aux heures ci-dessous"), ("toujours", "Toujours")], groupe="noctalia"),
-    R("NUIT_TEMPERATURE", "Lumière nocturne", "Chaleur des couleurs", "entier", "4000", "Plus c'est bas, plus c'est orangé (6500 K : normal).",
+    R("NUIT", "Lumière nocturne", L("Lumière nocturne", "Night Light"), "choix", "non",
+      L("Réchauffe les couleurs de l'écran pour moins fatiguer les yeux le soir.",
+        "Warms the screen colors to ease eye strain in the evening."),
+      [("non", L("Désactivée", "Off")), ("soir", L("Le soir, aux heures ci-dessous", "In the evening, at the times below")),
+       ("toujours", L("Toujours", "Always"))], groupe="noctalia"),
+    R("NUIT_TEMPERATURE", "Lumière nocturne", L("Chaleur des couleurs", "Color warmth"), "entier", "4000",
+      L("Plus c'est bas, plus c'est orangé (6500 K : normal).", "The lower, the more orange (6500 K: normal)."),
       mini=2500, maxi=6000, pas=250, unite="K", groupe="noctalia"),
-    R("NUIT_DEBUT", "Lumière nocturne", "Commence à", "choix", "21:00", "", ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'], groupe="noctalia"),
-    R("NUIT_FIN", "Lumière nocturne", "S'arrête à", "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
+    R("NUIT_DEBUT", "Lumière nocturne", L("Commence à", "Starts at"), "choix", "21:00", "", ['17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'], groupe="noctalia"),
+    R("NUIT_FIN", "Lumière nocturne", L("S'arrête à", "Ends at"), "choix", "07:00", "", ['04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30'], groupe="noctalia"),
     # Barre et dock
-    R("BARRE_OPACITE", "Barre et dock", "Opacité des pastilles de la barre", "entier", "82", mini=30, maxi=100, pas=2, unite="%", groupe="noctalia"),
-    R("BARRE_SYSTEME", "Barre et dock", "Processeur, température et mémoire", "ouinon", "oui", "La pastille d'infos système à droite de la barre.", groupe="noctalia"),
+    R("BARRE_OPACITE", "Barre et dock", L("Opacité des pastilles de la barre", "Bar pill opacity"), "entier", "82",
+      mini=30, maxi=100, pas=2, unite="%", groupe="noctalia"),
+    R("BARRE_SYSTEME", "Barre et dock", L("Processeur, température et mémoire", "CPU, temperature and memory"), "ouinon", "oui",
+      L("La pastille d'infos système à droite de la barre.", "The system info pill on the right of the bar."), groupe="noctalia"),
     R("DOCK", "Barre et dock", "Dock", "ouinon", "oui", groupe="noctalia"),
-    R("DOCK_AUTO", "Barre et dock", "Masquer le dock automatiquement", "ouinon", "oui", "Il apparaît quand le pointeur touche le bas de l'écran.", groupe="noctalia"),
-    R("DOCK_TAILLE", "Barre et dock", "Taille des icônes du dock", "entier", "48", mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
-    R("DOCK_LOUPE", "Barre et dock", "Effet loupe du dock", "ouinon", "oui", groupe="noctalia"),
-    R("DOCK_POSITION", "Barre et dock", "Position du dock", "choix", "bottom", "",
-      [("bottom", "En bas"), ("left", "À gauche"), ("right", "À droite")], groupe="noctalia"),
+    R("DOCK_AUTO", "Barre et dock", L("Masquer le dock automatiquement", "Automatically hide the dock"), "ouinon", "oui",
+      L("Il apparaît quand le pointeur touche le bas de l'écran.", "It appears when the pointer touches the bottom of the screen."),
+      groupe="noctalia"),
+    R("DOCK_TAILLE", "Barre et dock", L("Taille des icônes du dock", "Dock icon size"), "entier", "48",
+      mini=28, maxi=72, pas=2, unite="px", groupe="noctalia"),
+    R("DOCK_LOUPE", "Barre et dock", L("Effet loupe du dock", "Dock magnification"), "ouinon", "oui", groupe="noctalia"),
+    R("DOCK_POSITION", "Barre et dock", L("Position du dock", "Dock position"), "choix", "bottom", "",
+      [("bottom", L("En bas", "Bottom")), ("left", L("À gauche", "Left")), ("right", L("À droite", "Right"))], groupe="noctalia"),
     # Fenêtres
-    R("FENETRES_ESPACE", "Fenêtres", "Espace entre les fenêtres", "entier", "4", mini=0, maxi=40, unite="px", groupe="hypr"),
-    R("FENETRES_MARGE", "Fenêtres", "Marge au bord de l'écran", "entier", "10", mini=0, maxi=60, unite="px", groupe="hypr"),
-    R("FENETRES_BORDURE", "Fenêtres", "Épaisseur de la bordure", "entier", "2", mini=0, maxi=8, unite="px", groupe="hypr"),
-    R("FENETRES_ARRONDI", "Fenêtres", "Arrondi des coins", "entier", "14", mini=0, maxi=30, unite="px", groupe="hypr"),
-    R("FENETRES_HALO", "Fenêtres", "Halo coloré de la fenêtre active", "ouinon", "oui", "Ombre aux couleurs du fond d'écran (et halo musical).", groupe="hypr"),
-    R("FENETRES_FLOU", "Fenêtres", "Flou derrière les fenêtres transparentes", "ouinon", "oui", groupe="hypr"),
-    R("FENETRES_DISPOSITION", "Fenêtres", "Disposition des fenêtres", "choix", "dwindle",
-      "Spirale : chaque nouvelle fenêtre partage la place de l'active. Principale : une grande à gauche, les autres en pile à droite.",
-      [("dwindle", "Spirale"), ("master", "Une principale + une pile")], groupe="hypr"),
-    R("FENETRES_ASSOMBRIR", "Fenêtres", "Assombrir les fenêtres inactives", "ouinon", "oui", "La fenêtre active ressort.", groupe="hypr"),
-    R("FENETRES_OPACITE_INACTIVE", "Fenêtres", "Opacité des fenêtres inactives", "entier", "100", mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
+    R("FENETRES_ESPACE", "Fenêtres", L("Espace entre les fenêtres", "Gap between windows"), "entier", "4",
+      mini=0, maxi=40, unite="px", groupe="hypr"),
+    R("FENETRES_MARGE", "Fenêtres", L("Marge au bord de l'écran", "Margin at the screen edge"), "entier", "10",
+      mini=0, maxi=60, unite="px", groupe="hypr"),
+    R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",
+      mini=0, maxi=8, unite="px", groupe="hypr"),
+    R("FENETRES_ARRONDI", "Fenêtres", L("Arrondi des coins", "Corner rounding"), "entier", "14",
+      mini=0, maxi=30, unite="px", groupe="hypr"),
+    R("FENETRES_HALO", "Fenêtres", L("Halo coloré de la fenêtre active", "Colored glow of the active window"), "ouinon", "oui",
+      L("Ombre aux couleurs du fond d'écran (et halo musical).", "A shadow in the wallpaper's colors (and music glow)."),
+      groupe="hypr"),
+    R("FENETRES_FLOU", "Fenêtres", L("Flou derrière les fenêtres transparentes", "Blur behind transparent windows"),
+      "ouinon", "oui", groupe="hypr"),
+    R("FENETRES_DISPOSITION", "Fenêtres", L("Disposition des fenêtres", "Window layout"), "choix", "dwindle",
+      L("Spirale : chaque nouvelle fenêtre partage la place de l'active. Principale : une grande à gauche, les autres en pile à droite.",
+        "Spiral: each new window splits the space of the active one. Master: a large one on the left, the others stacked on the right."),
+      [("dwindle", L("Spirale", "Spiral")), ("master", L("Une principale + une pile", "One master + a stack"))], groupe="hypr"),
+    R("FENETRES_ASSOMBRIR", "Fenêtres", L("Assombrir les fenêtres inactives", "Dim inactive windows"), "ouinon", "oui",
+      L("La fenêtre active ressort.", "The active window stands out."), groupe="hypr"),
+    R("FENETRES_OPACITE_INACTIVE", "Fenêtres", L("Opacité des fenêtres inactives", "Inactive window opacity"), "entier", "100",
+      mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
     # Fonds d'écran
-    R("FONDS_ROTATION", "Fonds d'écran", "Changer de fond automatiquement", "ouinon", "oui", groupe="noctalia"),
-    R("FONDS_INTERVALLE", "Fonds d'écran", "Toutes les", "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
-    R("FOND_ANIME", "Fonds d'écran", "Fond animé", "choix", "non",
-      "Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. En pause dès qu'une "
-      "fenêtre est ouverte, en mode Économie et en mode jeu.",
-      [("non", "Non"), ("aurore", "Aurore")]),
-    R("FOND_ANIME_BATTERIE", "Fonds d'écran", "Fond animé aussi sur batterie", "ouinon", "non", "Consomme un peu plus."),
-    R("FONDS_DOSSIER", "Fonds d'écran", "Dossier des fonds d'écran", "dossier", "~/Pictures/Wallpapers", groupe="noctalia"),
+    R("FONDS_ROTATION", "Fonds d'écran", L("Changer de fond automatiquement", "Change wallpaper automatically"),
+      "ouinon", "oui", groupe="noctalia"),
+    R("FONDS_INTERVALLE", "Fonds d'écran", L("Toutes les", "Every"), "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
+    R("FOND_ANIME", "Fonds d'écran", L("Fond animé", "Animated wallpaper"), "choix", "non",
+      L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. En pause dès qu'une "
+        "fenêtre est ouverte, en mode Économie et en mode jeu.",
+        "Aurora: large glows in the theme's colors drift slowly over your wallpaper. Paused as soon as a "
+        "window is open, in Power Saver and in game mode."),
+      [("non", L("Non", "No")), ("aurore", L("Aurore", "Aurora"))]),
+    R("FOND_ANIME_BATTERIE", "Fonds d'écran", L("Fond animé aussi sur batterie", "Animated wallpaper on battery too"),
+      "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
+    R("FONDS_DOSSIER", "Fonds d'écran", L("Dossier des fonds d'écran", "Wallpaper folder"), "dossier", "~/Pictures/Wallpapers",
+      groupe="noctalia"),
     # Énergie
-    R("HZ_PERFORMANCE", "Énergie", "Écran en Performance", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
-    R("HZ_BALANCED_AC", "Énergie", "Écran en Équilibré, sur secteur", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
-    R("HZ_BALANCED_BAT", "Énergie", "Écran en Équilibré, sur batterie", "hz", "max", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
-    R("HZ_ECO", "Énergie", "Écran en Économie", "hz", "low", "Fréquence de l'écran du portable dans ce profil.", groupe="energie"),
-    R("ECO_BRIGHTNESS_MAX", "Énergie", "Luminosité maximale en Économie", "entier", "40", mini=0, maxi=100, pas=5, unite="%", zero="Sans limite", groupe="energie"),
-    R("JEU_PERFORMANCE", "Énergie", "Profil Performance en mode jeu", "ouinon", "oui",
-      "Super + Alt + G : la carte graphique et le processeur à fond le temps du jeu ; le profil d'avant revient en sortant.", groupe="hypr"),
-    R("HALO_BATTERIE", "Énergie", "Halo musical sur batterie", "ouinon", "non",
-      "Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus)."),
-    R("PROFIL_SECTEUR", "Énergie", "Profil en branchant le chargeur", "choix", "garder",
-      "Choisi tout seul quand tu branches le PC (tu peux toujours en changer ensuite).",
-      [("garder", "Ne pas changer"), ("performance", "Performance"), ("balanced", "Équilibré"), ("power-saver", "Économie")],
+    R("HZ_PERFORMANCE", "Énergie", L("Écran en Performance", "Screen in Performance"), "hz", "max", _FREQ_AIDE, groupe="energie"),
+    R("HZ_BALANCED_AC", "Énergie", L("Écran en Équilibré, sur secteur", "Screen in Balanced, plugged in"), "hz", "max",
+      _FREQ_AIDE, groupe="energie"),
+    R("HZ_BALANCED_BAT", "Énergie", L("Écran en Équilibré, sur batterie", "Screen in Balanced, on battery"), "hz", "max",
+      _FREQ_AIDE, groupe="energie"),
+    R("HZ_ECO", "Énergie", L("Écran en Économie", "Screen in Power Saver"), "hz", "low", _FREQ_AIDE, groupe="energie"),
+    R("ECO_BRIGHTNESS_MAX", "Énergie", L("Luminosité maximale en Économie", "Maximum brightness in Power Saver"), "entier", "40",
+      mini=0, maxi=100, pas=5, unite="%", zero=L("Sans limite", "No limit"), groupe="energie"),
+    R("JEU_PERFORMANCE", "Énergie", L("Profil Performance en mode jeu", "Performance profile in game mode"), "ouinon", "oui",
+      L("Super + Alt + G : la carte graphique et le processeur à fond le temps du jeu ; le profil d'avant revient en sortant.",
+        "Super + Alt + G: graphics card and CPU at full power while gaming; the previous profile comes back when you exit."),
+      groupe="hypr"),
+    R("HALO_BATTERIE", "Énergie", L("Halo musical sur batterie", "Music glow on battery"), "ouinon", "non",
+      L("Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus).",
+        "The active window's glow pulses with the bass on battery too, in Balanced (uses a bit more power).")),
+    R("PROFIL_SECTEUR", "Énergie", L("Profil en branchant le chargeur", "Profile when plugging in the charger"), "choix", "garder",
+      L("Choisi tout seul quand tu branches le PC (tu peux toujours en changer ensuite).",
+        "Chosen automatically when you plug in the PC (you can always change it afterwards)."),
+      [("garder", L("Ne pas changer", "Don't change")), ("performance", "Performance"),
+       ("balanced", L("Équilibré", "Balanced")), ("power-saver", L("Économie", "Power Saver"))],
       groupe="energie"),
-    R("PROFIL_BATTERIE", "Énergie", "Profil en débranchant le chargeur", "choix", "garder",
-      "Choisi tout seul quand tu passes sur batterie.",
-      [("garder", "Ne pas changer"), ("balanced", "Équilibré"), ("power-saver", "Économie")], groupe="energie"),
-    R("ECO_AUTO", "Énergie", "Économie automatique, batterie sous", "entier", "0",
-      "Sur batterie, passe en Économie à ce niveau ; le profil d'avant revient quand tu branches le chargeur.",
-      mini=0, maxi=50, pas=5, unite="%", zero="Jamais", groupe="energie"),
-    R("ECO_EFFETS", "Énergie", "Couper les effets en Économie", "ouinon", "oui",
-      "Flou, ombres et animations (Hyprland et Noctalia), rotation des fonds d'écran.", groupe="energie"),
-    R("ECO_CLAVIER", "Énergie", "Éteindre le clavier lumineux en Économie", "ouinon", "oui",
-      "Il se rallume à son niveau d'avant en quittant l'Économie.", groupe="energie"),
-    R("ECO_BLUETOOTH", "Énergie", "Couper le Bluetooth en Économie", "ouinon", "oui",
-      "Seulement si aucun appareil n'est connecté ; rallumé en quittant l'Économie.", groupe="energie"),
-    R("BORDURE_PERFORMANCE", "Énergie", "Bordure animée en Performance", "ouinon", "oui",
-      "Sur secteur, la bordure de la fenêtre active tourne en continu (l'écran est redessiné sans arrêt).", groupe="hypr"),
-    R("GPU_PERFORMANCE", "Énergie", "Carte graphique des applis en Performance", "choix", "nvidia",
-      "PC à deux cartes : les applis lancées en Performance utilisent la NVIDIA (plus puissante, consomme plus).",
-      [("nvidia", "NVIDIA"), ("integree", "Carte intégrée, comme dans les autres profils")], groupe="energie"),
+    R("PROFIL_BATTERIE", "Énergie", L("Profil en débranchant le chargeur", "Profile when unplugging the charger"), "choix", "garder",
+      L("Choisi tout seul quand tu passes sur batterie.", "Chosen automatically when you switch to battery."),
+      [("garder", L("Ne pas changer", "Don't change")), ("balanced", L("Équilibré", "Balanced")),
+       ("power-saver", L("Économie", "Power Saver"))], groupe="energie"),
+    R("ECO_AUTO", "Énergie", L("Économie automatique, batterie sous", "Automatic Power Saver, battery below"), "entier", "0",
+      L("Sur batterie, passe en Économie à ce niveau ; le profil d'avant revient quand tu branches le chargeur.",
+        "On battery, switches to Power Saver at this level; the previous profile comes back when you plug in the charger."),
+      mini=0, maxi=50, pas=5, unite="%", zero=_JAMAIS, groupe="energie"),
+    R("ECO_EFFETS", "Énergie", L("Couper les effets en Économie", "Turn off effects in Power Saver"), "ouinon", "oui",
+      L("Flou, ombres et animations (Hyprland et Noctalia), rotation des fonds d'écran.",
+        "Blur, shadows and animations (Hyprland and Noctalia), wallpaper rotation."), groupe="energie"),
+    R("ECO_CLAVIER", "Énergie", L("Éteindre le clavier lumineux en Économie", "Turn off keyboard backlight in Power Saver"),
+      "ouinon", "oui",
+      L("Il se rallume à son niveau d'avant en quittant l'Économie.", "It comes back at its previous level when leaving Power Saver."),
+      groupe="energie"),
+    R("ECO_BLUETOOTH", "Énergie", L("Couper le Bluetooth en Économie", "Turn off Bluetooth in Power Saver"), "ouinon", "oui",
+      L("Seulement si aucun appareil n'est connecté ; rallumé en quittant l'Économie.",
+        "Only if no device is connected; turned back on when leaving Power Saver."), groupe="energie"),
+    R("BORDURE_PERFORMANCE", "Énergie", L("Bordure animée en Performance", "Animated border in Performance"), "ouinon", "oui",
+      L("Sur secteur, la bordure de la fenêtre active tourne en continu (l'écran est redessiné sans arrêt).",
+        "Plugged in, the active window's border rotates continuously (the screen is redrawn all the time)."), groupe="hypr"),
+    R("GPU_PERFORMANCE", "Énergie", L("Carte graphique des applis en Performance", "Graphics card for apps in Performance"),
+      "choix", "nvidia",
+      L("PC à deux cartes : les applis lancées en Performance utilisent la NVIDIA (plus puissante, consomme plus).",
+        "PCs with two graphics cards: apps launched in Performance use the NVIDIA one (more powerful, uses more power)."),
+      [("nvidia", "NVIDIA"), ("integree", L("Carte intégrée, comme dans les autres profils",
+                                             "Integrated graphics, as in the other profiles"))], groupe="energie"),
     # Son et luminosité
-    R("VOLUME_PAS", "Son et luminosité", "Pas du volume", "entier", "5", "Touches de volume (et F2, F3).", mini=1, maxi=20, unite="%", groupe="hypr"),
-    R("VOLUME_MAX", "Son et luminosité", "Volume maximal", "choix", "100", "150 % : pour des haut-parleurs faibles (le son peut saturer).",
-      [("100", "100 %"), ("150", "150 %")], groupe="hypr"),
-    R("LUMINOSITE_PAS", "Son et luminosité", "Pas de la luminosité", "entier", "5", "Touches de luminosité (et F5, F6).", mini=1, maxi=25, unite="%"),
+    R("VOLUME_PAS", "Son et luminosité", L("Pas du volume", "Volume step"), "entier", "5",
+      L("Touches de volume (et F2, F3).", "Volume keys (and F2, F3)."), mini=1, maxi=20, unite="%", groupe="hypr"),
+    R("VOLUME_MAX", "Son et luminosité", L("Volume maximal", "Maximum volume"), "choix", "100",
+      L("150 % : pour des haut-parleurs faibles (le son peut saturer).", "150%: for weak speakers (the sound may distort)."),
+      [("100", L("100 %", "100%")), ("150", L("150 %", "150%"))], groupe="hypr"),
+    R("LUMINOSITE_PAS", "Son et luminosité", L("Pas de la luminosité", "Brightness step"), "entier", "5",
+      L("Touches de luminosité (et F5, F6).", "Brightness keys (and F5, F6)."), mini=1, maxi=25, unite="%"),
     # Clavier et souris
-    R("CLAVIER_DISPOSITION", "Clavier et souris", "Disposition du clavier", "texte", "systeme",
-      "Codes XKB : us, fr, us,fr… Avec plusieurs, Super + Espace passe de l'une à l'autre.", groupe="hypr"),
-    R("CLAVIER_REPETITION", "Clavier et souris", "Vitesse de répétition des touches", "entier", "35", mini=10, maxi=80, unite="/s", groupe="hypr"),
-    R("CLAVIER_DELAI", "Clavier et souris", "Délai avant répétition", "entier", "300", mini=150, maxi=1000, pas=25, unite="ms", groupe="hypr"),
-    R("SOURIS_VITESSE", "Clavier et souris", "Vitesse du pointeur", "entier", "0", "De -10 (lent) à 10 (rapide).", mini=-10, maxi=10, groupe="hypr"),
-    R("SAISIE", "Clavier et souris", "Clavier, souris ou les deux", "choix", "clavier",
-      "Souris et Les deux : bouton latéral arrière maintenu = déplacer la fenêtre, avant maintenu = la redimensionner "
-      "(un simple clic garde Précédent / Suivant) ; lâchée en haut de l'écran elle s'agrandit, sur un bord elle prend la "
-      "moitié ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
-      [("clavier", "Clavier (fenêtres rangées, raccourcis)"), ("souris", "Souris (fenêtres libres, comme Windows)"),
-       ("les-deux", "Les deux (rangées, plus les gestes souris)")], groupe="hypr"),
+    R("CLAVIER_DISPOSITION", "Clavier et souris", L("Disposition du clavier", "Keyboard layout"), "texte", "systeme",
+      L("Codes XKB : us, fr, us,fr… Avec plusieurs, Super + Espace passe de l'une à l'autre.",
+        "XKB codes: us, fr, us,fr… With several, Super + Space switches between them."), groupe="hypr"),
+    R("CLAVIER_REPETITION", "Clavier et souris", L("Vitesse de répétition des touches", "Key repeat rate"), "entier", "35",
+      mini=10, maxi=80, unite="/s", groupe="hypr"),
+    R("CLAVIER_DELAI", "Clavier et souris", L("Délai avant répétition", "Delay before repeat"), "entier", "300",
+      mini=150, maxi=1000, pas=25, unite="ms", groupe="hypr"),
+    R("SOURIS_VITESSE", "Clavier et souris", L("Vitesse du pointeur", "Pointer speed"), "entier", "0",
+      L("De -10 (lent) à 10 (rapide).", "From -10 (slow) to 10 (fast)."), mini=-10, maxi=10, groupe="hypr"),
+    R("SAISIE", "Clavier et souris", L("Clavier, souris ou les deux", "Keyboard, mouse or both"), "choix", "clavier",
+      L("Souris et Les deux : bouton latéral arrière maintenu = déplacer la fenêtre, avant maintenu = la redimensionner "
+        "(un simple clic garde Précédent / Suivant) ; lâchée en haut de l'écran elle s'agrandit, sur un bord elle prend la "
+        "moitié ; Super + clic molette : libre ↔ rangée. Souris : les fenêtres s'ouvrent libres, centrées, comme sur Windows.",
+        "Mouse and Both: hold the back side button = move the window, hold the forward one = resize it "
+        "(a simple click still means Back / Forward); dropped at the top of the screen it maximizes, on an edge it takes "
+        "half; Super + middle click: floating ↔ tiled. Mouse: windows open floating and centered, like on Windows."),
+      [("clavier", L("Clavier (fenêtres rangées, raccourcis)", "Keyboard (tiled windows, shortcuts)")),
+       ("souris", L("Souris (fenêtres libres, comme Windows)", "Mouse (floating windows, like Windows)")),
+       ("les-deux", L("Les deux (rangées, plus les gestes souris)", "Both (tiled, plus mouse gestures)"))], groupe="hypr"),
 ] + [
-    R(f"COIN_{_c}", "Clavier et souris", f"Coin actif {_n}", "choix", "auto",
-      "Pousser la souris dans ce coin lance l'action (pas en jeu ni en plein écran). Automatique : en mode Souris ou Les "
-      "deux, le coin en haut à gauche ouvre la vue de toutes les fenêtres ; sinon rien.",
-      [("auto", "Automatique"), ("rien", "Rien"), ("vue", "Vue de toutes les fenêtres"), ("recherche", "Recherche (Spotlight)"),
-       ("centre", "Centre de contrôle"), ("notifications", "Notifications"), ("lanceur", "Lanceur d'applis"),
-       ("verrouiller", "Verrouiller"), ("ecran", "Éteindre l'écran")])
-    for _c, _n in (("HG", "en haut à gauche"), ("HD", "en haut à droite"), ("BG", "en bas à gauche"), ("BD", "en bas à droite"))
+    R(f"COIN_{_c}", "Clavier et souris", L(f"Coin actif {_n}", f"{_ne} hot corner"), "choix", "auto",
+      L("Pousser la souris dans ce coin lance l'action (pas en jeu ni en plein écran). Automatique : en mode Souris ou Les "
+        "deux, le coin en haut à gauche ouvre la vue de toutes les fenêtres ; sinon rien.",
+        "Pushing the mouse into this corner runs the action (not in games or full screen). Automatic: in Mouse or Both "
+        "mode, the top-left corner opens the overview of all windows; otherwise nothing."),
+      [("auto", L("Automatique", "Automatic")), ("rien", L("Rien", "Nothing")),
+       ("vue", L("Vue de toutes les fenêtres", "Overview of all windows")),
+       ("recherche", L("Recherche (Spotlight)", "Search (Spotlight)")),
+       ("centre", L("Centre de contrôle", "Control Center")), ("notifications", "Notifications"),
+       ("lanceur", L("Lanceur d'applis", "App launcher")), ("verrouiller", L("Verrouiller", "Lock")),
+       ("ecran", L("Éteindre l'écran", "Turn off the screen"))])
+    for _c, _n, _ne in (("HG", "en haut à gauche", "Top-left"), ("HD", "en haut à droite", "Top-right"),
+                        ("BG", "en bas à gauche", "Bottom-left"), ("BD", "en bas à droite", "Bottom-right"))
 ] + [
-    R("SUPER_SEUL", "Clavier et souris", "Touche Super seule", "choix", "rien",
-      "Un appui sur Super, sans autre touche, comme la touche Windows. Coupé en mode jeu.",
-      [("rien", "Rien"), ("recherche", "Ouvre la recherche (Spotlight)"), ("lanceur", "Ouvre le lanceur d'applis"),
-       ("centre", "Ouvre le centre de contrôle")], groupe="hypr"),
-    R("TOUCHES_F", "Clavier et souris", "Touches F1 à F12", "choix", "media",
-      "Son (F1-F3), micro (F4), luminosité (F5-F6), musique (F7-F9), clavier (F10), pavé (F11), calculatrice (F12). "
-      "En mode jeu, elles redeviennent classiques.",
-      [("media", "Son, luminosité, musique…"), ("fonctions", "F1…F12 classiques (F5 actualise…)")], groupe="hypr"),
-    R("DEFILEMENT_NATUREL", "Clavier et souris", "Défilement naturel (pavé tactile)", "ouinon", "oui", "Le contenu suit les doigts, comme sur un téléphone.", groupe="hypr"),
-    R("TAPOTER_CLIC", "Clavier et souris", "Toucher le pavé pour cliquer", "ouinon", "oui", groupe="hypr"),
-    R("FOCUS_SOURIS", "Clavier et souris", "La fenêtre sous le pointeur devient active", "ouinon", "oui", "Non : il faut cliquer dans une fenêtre pour l'activer.", groupe="hypr"),
-    R("GESTES", "Clavier et souris", "Gestes du pavé tactile", "ouinon", "oui",
-      "3 doigts de côté : changer de bureau. 4 doigts : déplacer une fenêtre (Alt : la redimensionner), pincer : la détacher.", groupe="hypr"),
-    R("CURSEUR_TAILLE", "Clavier et souris", "Taille du pointeur", "choix", "24", "Certaines applis ne le prennent qu'à leur prochaine ouverture.",
-      [("24", "Normale (24)"), ("32", "Grande (32)"), ("40", "Très grande (40)"), ("48", "Énorme (48)")], groupe="curseur"),
+    R("SUPER_SEUL", "Clavier et souris", L("Touche Super seule", "Super key alone"), "choix", "rien",
+      L("Un appui sur Super, sans autre touche, comme la touche Windows. Coupé en mode jeu.",
+        "Pressing Super with no other key, like the Windows key. Off in game mode."),
+      [("rien", L("Rien", "Nothing")), ("recherche", L("Ouvre la recherche (Spotlight)", "Opens search (Spotlight)")),
+       ("lanceur", L("Ouvre le lanceur d'applis", "Opens the app launcher")),
+       ("centre", L("Ouvre le centre de contrôle", "Opens Control Center"))], groupe="hypr"),
+    R("TOUCHES_F", "Clavier et souris", L("Touches F1 à F12", "F1 to F12 keys"), "choix", "media",
+      L("Son (F1-F3), micro (F4), luminosité (F5-F6), musique (F7-F9), clavier (F10), pavé (F11), calculatrice (F12). "
+        "En mode jeu, elles redeviennent classiques.",
+        "Sound (F1-F3), mic (F4), brightness (F5-F6), music (F7-F9), keyboard (F10), touchpad (F11), calculator (F12). "
+        "In game mode, they become regular keys again."),
+      [("media", L("Son, luminosité, musique…", "Sound, brightness, music…")),
+       ("fonctions", L("F1…F12 classiques (F5 actualise…)", "Regular F1…F12 (F5 refreshes…)"))], groupe="hypr"),
+    R("DEFILEMENT_NATUREL", "Clavier et souris", L("Défilement naturel (pavé tactile)", "Natural scrolling (touchpad)"),
+      "ouinon", "oui", L("Le contenu suit les doigts, comme sur un téléphone.", "Content follows your fingers, like on a phone."),
+      groupe="hypr"),
+    R("TAPOTER_CLIC", "Clavier et souris", L("Toucher le pavé pour cliquer", "Tap to click"), "ouinon", "oui", groupe="hypr"),
+    R("FOCUS_SOURIS", "Clavier et souris", L("La fenêtre sous le pointeur devient active", "The window under the pointer becomes active"),
+      "ouinon", "oui",
+      L("Non : il faut cliquer dans une fenêtre pour l'activer.", "No: you have to click in a window to activate it."),
+      groupe="hypr"),
+    R("GESTES", "Clavier et souris", L("Gestes du pavé tactile", "Touchpad gestures"), "ouinon", "oui",
+      L("3 doigts de côté : changer de bureau. 4 doigts : déplacer une fenêtre (Alt : la redimensionner), pincer : la détacher.",
+        "3 fingers sideways: switch workspace. 4 fingers: move a window (Alt: resize it), pinch: detach it."), groupe="hypr"),
+    R("CURSEUR_TAILLE", "Clavier et souris", L("Taille du pointeur", "Pointer size"), "choix", "24",
+      L("Certaines applis ne le prennent qu'à leur prochaine ouverture.", "Some apps only pick it up the next time they open."),
+      [("24", L("Normale (24)", "Normal (24)")), ("32", L("Grande (32)", "Large (32)")),
+       ("40", L("Très grande (40)", "Very large (40)")), ("48", L("Énorme (48)", "Huge (48)"))], groupe="curseur"),
     # Veille
-    R("VEILLE_VERROU", "Veille", "Verrouillage automatique après", "entier", "5",
-      "L'écran s'assombrit un peu avant et s'éteint 30 s après.", mini=0, maxi=120, unite="min", zero="Jamais", groupe="veille"),
-    R("VEILLE_SUSPENSION", "Veille", "Mise en veille sur batterie après", "entier", "15",
-      "", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
-    R("VEILLE_SECTEUR", "Veille", "Mise en veille sur secteur après", "entier", "0",
-      "PC branché (ou PC de bureau).", mini=0, maxi=240, pas=5, unite="min", zero="Jamais", groupe="veille"),
-    R("COUVERCLE", "Veille", "Couvercle fermé", "choix", "veille",
-      "Écran éteint : le PC continue de tourner (téléchargements, musique…), sans veille tant que le couvercle est fermé. "
-      "Attention à la chaleur dans un sac.",
-      [("veille", "Mise en veille"), ("ecran", "Écran éteint, le PC continue")], groupe="couvercle"),
-    R("COUVERCLE_VERROU", "Veille", "Verrouiller en fermant le couvercle", "ouinon", "oui", "Quand le PC continue de tourner, couvercle fermé."),
+    R("VEILLE_VERROU", "Veille", L("Verrouillage automatique après", "Auto-lock after"), "entier", "5",
+      L("L'écran s'assombrit un peu avant et s'éteint 30 s après.", "The screen dims a little before and turns off 30 s after."),
+      mini=0, maxi=120, unite="min", zero=_JAMAIS, groupe="veille"),
+    R("VEILLE_SUSPENSION", "Veille", L("Mise en veille sur batterie après", "Sleep on battery after"), "entier", "15",
+      "", mini=0, maxi=240, pas=5, unite="min", zero=_JAMAIS, groupe="veille"),
+    R("VEILLE_SECTEUR", "Veille", L("Mise en veille sur secteur après", "Sleep when plugged in after"), "entier", "0",
+      L("PC branché (ou PC de bureau).", "PC plugged in (or desktop PC)."), mini=0, maxi=240, pas=5, unite="min",
+      zero=_JAMAIS, groupe="veille"),
+    R("COUVERCLE", "Veille", L("Couvercle fermé", "Lid closed"), "choix", "veille",
+      L("Écran éteint : le PC continue de tourner (téléchargements, musique…), sans veille tant que le couvercle est fermé. "
+        "Attention à la chaleur dans un sac.",
+        "Screen off: the PC keeps running (downloads, music…), without sleeping while the lid is closed. "
+        "Watch out for heat in a bag."),
+      [("veille", L("Mise en veille", "Sleep")), ("ecran", L("Écran éteint, le PC continue", "Screen off, the PC keeps running"))],
+      groupe="couvercle"),
+    R("COUVERCLE_VERROU", "Veille", L("Verrouiller en fermant le couvercle", "Lock when closing the lid"), "ouinon", "oui",
+      L("Quand le PC continue de tourner, couvercle fermé.", "When the PC keeps running with the lid closed.")),
     # Terminal
-    R("TERMINAL_OPACITE", "Terminal", "Opacité du fond", "entier", "88", mini=50, maxi=100, pas=2, unite="%", groupe="terminal"),
-    R("TERMINAL_TAILLE", "Terminal", "Taille du texte", "entier", "11", mini=8, maxi=24, unite="pt", groupe="terminal"),
-    R("TERMINAL_POLICE", "Terminal", "Police", "choix", "CaskaydiaCove Nerd Font Mono", "Polices « Nerd Font Mono » installées.",
+    R("TERMINAL_OPACITE", "Terminal", L("Opacité du fond", "Background opacity"), "entier", "88",
+      mini=50, maxi=100, pas=2, unite="%", groupe="terminal"),
+    R("TERMINAL_TAILLE", "Terminal", L("Taille du texte", "Text size"), "entier", "11", mini=8, maxi=24, unite="pt", groupe="terminal"),
+    R("TERMINAL_POLICE", "Terminal", L("Police", "Font"), "choix", "CaskaydiaCove Nerd Font Mono",
+      L("Polices « Nerd Font Mono » installées.", "Installed “Nerd Font Mono” fonts."),
       lambda: polices(r"Nerd Font Mono$", ["CaskaydiaCove Nerd Font Mono", "JetBrainsMono Nerd Font Mono", "FiraCode Nerd Font Mono"]),
       groupe="terminal"),
-    R("TERMINAL_CURSEUR", "Terminal", "Forme du curseur", "choix", "beam", "",
-      [("beam", "Barre fine"), ("block", "Bloc"), ("underline", "Souligné")], groupe="terminal"),
-    R("TERMINAL_TRAINEE", "Terminal", "Traînée du curseur", "ouinon", "oui", "Le curseur laisse une courte traînée quand il saute.", groupe="terminal"),
-    R("TERMINAL_MARGE", "Terminal", "Marge autour du texte", "entier", "10", mini=0, maxi=40, unite="px", groupe="terminal"),
-    R("TERMINAL_LOGO", "Terminal", "Logo de l'accueil", "choix", "distribution",
-      "Le logo à gauche des infos du PC quand tu ouvres un terminal (aux couleurs du thème).",
-      [("distribution", "Celui de ta distribution"), ("macOS", "Apple"), ("Windows", "Windows"), ("Linux", "Tux (Linux)"),
-       ("arch", "Arch"), ("Debian", "Debian"), ("Fedora", "Fedora"), ("ubuntu", "Ubuntu"), ("CachyOS", "CachyOS"),
-       ("NixOS", "NixOS"), ("Gentoo", "Gentoo"), ("android", "Android"), ("photo", "Ta photo de profil"), ("aucun", "Aucun")]),
-    R("TERMINAL_ACCUEIL", "Terminal", "Accueil à l'ouverture", "ouinon", "oui", "Logo et infos du PC à chaque nouveau terminal."),
+    R("TERMINAL_CURSEUR", "Terminal", L("Forme du curseur", "Cursor shape"), "choix", "beam", "",
+      [("beam", L("Barre fine", "Thin bar")), ("block", L("Bloc", "Block")), ("underline", L("Souligné", "Underline"))],
+      groupe="terminal"),
+    R("TERMINAL_TRAINEE", "Terminal", L("Traînée du curseur", "Cursor trail"), "ouinon", "oui",
+      L("Le curseur laisse une courte traînée quand il saute.", "The cursor leaves a short trail when it jumps."), groupe="terminal"),
+    R("TERMINAL_MARGE", "Terminal", L("Marge autour du texte", "Padding around the text"), "entier", "10",
+      mini=0, maxi=40, unite="px", groupe="terminal"),
+    R("TERMINAL_LOGO", "Terminal", L("Logo de l'accueil", "Welcome logo"), "choix", "distribution",
+      L("Le logo à gauche des infos du PC quand tu ouvres un terminal (aux couleurs du thème).",
+        "The logo to the left of the PC info when you open a terminal (in the theme's colors)."),
+      [("distribution", L("Celui de ta distribution", "Your distribution's")), ("macOS", "Apple"), ("Windows", "Windows"),
+       ("Linux", "Tux (Linux)"), ("arch", "Arch"), ("Debian", "Debian"), ("Fedora", "Fedora"), ("ubuntu", "Ubuntu"),
+       ("CachyOS", "CachyOS"), ("NixOS", "NixOS"), ("Gentoo", "Gentoo"), ("android", "Android"),
+       ("photo", L("Ta photo de profil", "Your profile picture")), ("aucun", L("Aucun", "None"))]),
+    R("TERMINAL_ACCUEIL", "Terminal", L("Accueil à l'ouverture", "Welcome screen on opening"), "ouinon", "oui",
+      L("Logo et infos du PC à chaque nouveau terminal.", "Logo and PC info in every new terminal.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
-    R("CLAUDE_ILE", "Agents IA (coucou)", "Claude Code dans l'île (coucou)", "ouinon", "oui",
-      "Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
+    R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
+      "ouinon", "oui",
+      L("Ce qu'il fait, étape par étape, quand il a fini, et ses demandes (comme l'appli coucou). Non : ses hooks sont retirés.",
+        "What it's doing, step by step, when it's done, and its requests (like the coucou app). No: its hooks are removed."),
       groupe="claude"),
-    R("CLAUDE_DEMANDES", "Agents IA (coucou)", "Demandes des IA (autoriser, questions)", "choix", "ile",
-      "Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
-      [("ile", "Dans l'île quand tu es ailleurs"), ("terminal", "Toujours dans le terminal")]),
-    R("ANTIGRAVITY_ILE", "Agents IA (coucou)", "Antigravity dans l'île aussi", "ouinon", "oui",
-      "L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
-      "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.", groupe="ia:antigravity"),
+    R("CLAUDE_DEMANDES", "Agents IA (coucou)", L("Demandes des IA (autoriser, questions)", "AI requests (permissions, questions)"),
+      "choix", "ile",
+      L("Dans l'île seulement quand tu n'es pas sur son terminal ; si tu y retournes, la question repasse dans le terminal.",
+        "In the island only when you're not on its terminal; if you go back to it, the question moves back to the terminal."),
+      [("ile", L("Dans l'île quand tu es ailleurs", "In the island when you're elsewhere")),
+       ("terminal", L("Toujours dans le terminal", "Always in the terminal"))]),
+    R("ANTIGRAVITY_ILE", "Agents IA (coucou)", L("Antigravity dans l'île aussi", "Antigravity in the island too"), "ouinon", "oui",
+      L("L'agent de Google Antigravity (appli, éditeur ou agy) : ce qu'il fait et quand il a fini, comme Claude. Ses demandes "
+        "d'autorisation restent dans Antigravity. Non : ses hooks sont retirés.",
+        "The Google Antigravity agent (app, editor or agy): what it's doing and when it's done, like Claude. Its permission "
+        "requests stay in Antigravity. No: its hooks are removed."), groupe="ia:antigravity"),
 ] + [
     # Les autres IA (nc-claude) : affichées seulement si elles sont installées
-    R(f"{_cle.upper()}_ILE", "Agents IA (coucou)", f"{_nom} dans l'île aussi", "ouinon", "oui",
-      f"Ce que fait {_nom}, quand il a fini et quand il t'attend, comme Claude ; tu peux lui écrire depuis l'île s'il "
-      f"tourne dans kitty.{_plus} Non : retiré.", groupe=f"ia:{_cle}")
-    for _cle, _nom, _plus in (
-        ("opencode", "OpenCode", ""), ("codex", "Codex", " Codex demande d'approuver ses hooks une fois : /hooks."),
-        ("gemini", "Gemini CLI", ""), ("cursor", "Cursor", " Dans l'éditeur et en terminal (cursor-agent)."),
-        ("copilot", "Copilot CLI", ""), ("qwen", "Qwen Code", ""), ("kiro", "Kiro", ""), ("amp", "Amp", ""))
+    R(f"{_cle.upper()}_ILE", "Agents IA (coucou)", L(f"{_nom} dans l'île aussi", f"{_nom} in the island too"), "ouinon", "oui",
+      L(f"Ce que fait {_nom}, quand il a fini et quand il t'attend, comme Claude ; tu peux lui écrire depuis l'île s'il "
+        f"tourne dans kitty.{_plus} Non : retiré.",
+        f"What {_nom} is doing, when it's done and when it's waiting for you, like Claude; you can write to it from the "
+        f"island if it runs in kitty.{_plus_en} No: removed."), groupe=f"ia:{_cle}")
+    for _cle, _nom, _plus, _plus_en in (
+        ("opencode", "OpenCode", "", ""),
+        ("codex", "Codex", " Codex demande d'approuver ses hooks une fois : /hooks.", " Codex asks to approve its hooks once: /hooks."),
+        ("gemini", "Gemini CLI", "", ""),
+        ("cursor", "Cursor", " Dans l'éditeur et en terminal (cursor-agent).", " In the editor and in the terminal (cursor-agent)."),
+        ("copilot", "Copilot CLI", "", ""), ("qwen", "Qwen Code", "", ""), ("kiro", "Kiro", "", ""), ("amp", "Amp", "", ""))
 ] + [
     # Mises à jour
-    R("MAJ_SYSTEME", "Mises à jour", "Mises à jour du système", "choix", "ile",
-      "Comptées toutes les 3 h (pacman, dnf ou apt, et Flatpak) ; dans l'île, page Système, un clic met tout à jour.",
-      [("ile", "Dans l'île (page Système)"), ("notif", "Dans l'île et une notification"), ("non", "Ne pas vérifier")]),
-    R("MAJ_VERIFIER", "Mises à jour", "Prévenir des nouvelles versions de la config", "ouinon", "oui",
-      "Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h)."),
+    R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "ile",
+      L("Comptées toutes les 3 h (pacman, dnf ou apt, et Flatpak) ; dans l'île, page Système, un clic met tout à jour.",
+        "Counted every 3 h (pacman, dnf or apt, and Flatpak); in the island's System page, one click updates everything."),
+      [("ile", L("Dans l'île (page Système)", "In the island (System page)")),
+       ("notif", L("Dans l'île et une notification", "In the island and a notification")),
+       ("non", L("Ne pas vérifier", "Don't check"))]),
+    R("MAJ_VERIFIER", "Mises à jour", L("Prévenir des nouvelles versions de la config", "Notify about new versions of the config"),
+      "ouinon", "oui",
+      L("Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h).",
+        "A notification with “Update” when a new version is on GitHub (checked every 6 h).")),
     # Captures
-    R("CAPTURES_DOSSIER", "Captures", "Dossier des captures d'écran", "dossier", "auto", "Automatique : Captures, dans ton dossier Images."),
-    R("VIDEO_SON", "Captures", "Son des vidéos (Super + Maj + R)", "choix", "non", "",
-      [("non", "Sans son"), ("systeme", "Le son du PC"), ("micro", "Le micro")]),
-    R("CAPTURES_COPIER", "Captures", "Copier aussi la capture", "ouinon", "oui", "Ctrl + V la colle directement."),
-    R("CAPTURES_NOTIF", "Captures", "Notification après une capture", "ouinon", "oui", "Avec les boutons Annoter, Supprimer et Ouvrir le dossier."),
+    R("CAPTURES_DOSSIER", "Captures", L("Dossier des captures d'écran", "Screenshot folder"), "dossier", "auto",
+      L("Automatique : Captures, dans ton dossier Images.", "Automatic: Captures, in your Pictures folder.")),
+    R("VIDEO_SON", "Captures", L("Son des vidéos (Super + Maj + R)", "Video sound (Super + Shift + R)"), "choix", "non", "",
+      [("non", L("Sans son", "No sound")), ("systeme", L("Le son du PC", "The PC's sound")), ("micro", L("Le micro", "The microphone"))]),
+    R("CAPTURES_COPIER", "Captures", L("Copier aussi la capture", "Also copy the screenshot"), "ouinon", "oui",
+      L("Ctrl + V la colle directement.", "Ctrl + V pastes it directly.")),
+    R("CAPTURES_NOTIF", "Captures", L("Notification après une capture", "Notification after a screenshot"), "ouinon", "oui",
+      L("Avec les boutons Annoter, Supprimer et Ouvrir le dossier.", "With Annotate, Delete and Open Folder buttons.")),
 ]
 PAR_CLE = {r.cle: r for r in REGLAGES}
 
@@ -504,7 +752,7 @@ def nouveautes(n=10):
         depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
     except OSError:
         return []
-    brut = sortie(["git", "-C", depot, "log", f"-{n}", "--date=format:%d/%m/%Y", "--format=%h%x1f%cd%x1f%s%x1e"])
+    brut = sortie(["git", "-C", depot, "log", f"-{n}", "--date=format:%Y-%m-%d", "--format=%h%x1f%cd%x1f%s%x1e"])
     res = []
     for bloc in brut.split("\x1e"):
         p = bloc.strip().split("\x1f")
@@ -521,7 +769,10 @@ def nouveautes(n=10):
         points = [x for x in points + [cur.strip()] if x]
         points = [x if x.startswith(("nc-", "nvidia-")) else x[0].upper() + x[1:] for x in points]
         titre = re.split(r"\s:\s|\s\(", points[0])[0] if points else p[2]
-        res.append({"genre": "nouveaute", "id": p[0], "date": p[1], "titre": titre, "points": points})
+        a, m, j = (p[1].split("-") + ["", "", ""])[:3]
+        mois = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+        date = (f"{mois[int(m) - 1]} {int(j)}, {a}" if EN else f"{j}/{m}/{a}") if m.isdigit() and j.isdigit() else p[1]
+        res.append({"genre": "nouveaute", "id": p[0], "date": date, "titre": titre, "points": points})
     return res
 
 
@@ -649,6 +900,10 @@ def regler(vals, cle, v):
     else:
         vals[cle] = v
     ecrire(vals)
+    if cle == "LANGUE":
+        # Langue changée : le texte suit tout de suite (écran des réglages ouvert)
+        global EN
+        EN = _langue() == "en"
     return r.groupe
 
 
@@ -920,6 +1175,9 @@ def appliquer(groupes, vals=None):
             subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
+        elif g == "langue":
+            # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
+            subprocess.run(["hyprctl", "reload"], capture_output=True)
         # île, captures, halo : relu tout seul
 
 
@@ -943,9 +1201,10 @@ def raccourcis():
         if b["id"] not in groupes[b["desc"]]:
             groupes[b["desc"]].append(b["id"])
     lignes = {s: [] for s in rc.nckeys.SECTIONS}
+    mes = "Mes raccourcis" if "Mes raccourcis" in lignes else rc.nckeys.SECTIONS[-1]
     for d in ordre:
         sec, sep, texte = d.partition("|")
-        sec = sec.strip() if sep and sec.strip() in lignes else "Mes raccourcis"
+        sec = sec.strip() if sep and sec.strip() in lignes else mes
         ids = groupes[d]
         mien = next((e for e in conf if e[0] == "ajout" and rc.id_of(e[1]) in ids), None)
         origs = [rc.original_id(i, conf) for i in ids]
@@ -954,15 +1213,15 @@ def raccourcis():
     off = {}
     for e in conf:
         if e[0] == "aucun":
-            nom = e[2] if len(e) > 2 and e[2] else "Raccourci de la config"
+            nom = e[2] if len(e) > 2 and e[2] else T("Raccourci de la config", "Config shortcut")
             off.setdefault(nom, []).append(e[1])
     for nom, ids in off.items():
-        lignes["Mes raccourcis"].append({"genre": "raccourci", "nom": nom, "ids": ids, "origs": ids, "mien": None,
+        lignes[mes].append({"genre": "raccourci", "nom": nom, "ids": ids, "origs": ids, "mien": None,
                                          "change": True, "desactive": True})
-    res = [{"genre": "ajouter", "nom": "Ajouter un raccourci…"}]
+    res = [{"genre": "ajouter", "nom": T("Ajouter un raccourci…", "Add a shortcut…")}]
     for s in rc.nckeys.SECTIONS:
         if lignes[s]:
-            res.append({"genre": "titre", "nom": s})
+            res.append({"genre": "titre", "nom": nom_section(s)})
             res += lignes[s]
     return res
 
@@ -972,7 +1231,7 @@ def touches_de(ligne):
     fins = [n.split(" + ")[-1] for n in noms]
     mods = " + ".join(noms[0].split(" + ")[:-1])
     if len(noms) > 1 and set(fins) <= {"←", "→", "↑", "↓"}:
-        return f"{mods} + flèches" if mods else "flèches"
+        return f"{mods} + {T('flèches', 'arrows')}" if mods else T("flèches", "arrows")
     if len(noms) > 3:
         return f"{noms[0]} … {noms[-1].split(' + ')[-1]}"
     return "  /  ".join(noms)
@@ -1047,7 +1306,8 @@ def capturer(ecran, ui):
     """Attend une combinaison de touches ; renvoie son texte, ou None (annulé). Hyprland passe en mode « capture »
     (aucun de ses raccourcis ne réagit) le temps de l'appui, avec un retour automatique au bout de 20 s."""
     if os.environ.get("TERM") != "xterm-kitty" and not os.environ.get("KITTY_WINDOW_ID"):
-        return ui.saisir("Nouvelles touches", "", "Ex. Super+T, Super+Maj+B, Ctrl+Alt+F")
+        return ui.saisir(T("Nouvelles touches", "New keys"), "",
+                         T("Ex. Super+T, Super+Maj+B, Ctrl+Alt+F", "E.g. Super+T, Super+Shift+B, Ctrl+Alt+F"))
     subprocess.run(["hyprctl", "eval",
                     "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if hl.get_current_submap() == 'nc-capture' "
                     "then hl.dispatch(hl.dsp.submap('reset')) end end, { timeout = 20000, type = 'oneshot' })"],
@@ -1067,7 +1327,8 @@ def capturer(ecran, ui):
             if t and ("+" in t or re.fullmatch(r"F\d+", t)):
                 return t
             if t:
-                ui.statut("Ajoute au moins Super, Ctrl ou Alt (Échap pour annuler)", erreur=True)
+                ui.statut(T("Ajoute au moins Super, Ctrl ou Alt (Échap pour annuler)",
+                            "Add at least Super, Ctrl or Alt (Esc to cancel)"), erreur=True)
                 ui.dessiner_popup_capture()
         return None
     finally:
@@ -1115,10 +1376,12 @@ class Ecran:
             return self.lignes_r
         if SECTIONS[self.sec] == "Nouveautés":
             if getattr(self, "lignes_n", None) is None:
-                self.lignes_n = ([{"genre": "titre", "nom": "Une nouvelle version est disponible : nc-maj pour l'installer"}]
+                self.lignes_n = ([{"genre": "titre", "nom": T("Une nouvelle version est disponible : nc-maj pour l'installer",
+                                                              "A new version is available: nc-update to install it")}]
                                  if maj_disponible() else []) + nouveautes()
                 if not self.lignes_n:
-                    self.lignes_n = [{"genre": "titre", "nom": "Historique introuvable (dépôt de la config absent)"}]
+                    self.lignes_n = [{"genre": "titre", "nom": T("Historique introuvable (dépôt de la config absent)",
+                                                                 "History not found (config repository missing)")}]
             return self.lignes_n
         return [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
 
@@ -1144,11 +1407,13 @@ class Ecran:
         e.erase()
         h, w = e.getmaxyx()
         if h < 14 or w < 70:
-            e.addstr(0, 0, couper("Agrandis le terminal pour voir les réglages (70 × 14 au moins).", w - 1))
+            e.addstr(0, 0, couper(T("Agrandis le terminal pour voir les réglages (70 × 14 au moins).",
+                                    "Make the terminal bigger to see the settings (at least 70 × 14)."), w - 1))
             e.refresh()
             return
-        e.addstr(0, 2, "Réglages", curses.A_BOLD | self.ACC)
-        e.addstr(0, 10, "  de noctalia-config", curses.A_DIM)
+        titre = T("Réglages", "Settings")
+        e.addstr(0, 2, titre, curses.A_BOLD | self.ACC)
+        e.addstr(0, 2 + len(titre), T("  de noctalia-config", "  of noctalia-config"), curses.A_DIM)
         chemin = "~/.config/nc/" + ("raccourcis.conf" if SECTIONS[self.sec] == "Raccourcis" else "reglages.conf")
         e.addstr(0, max(32, w - len(chemin) - 2), chemin, curses.A_DIM)
         # Sections
@@ -1166,9 +1431,9 @@ class Ecran:
             n = len(rc.read_conf()) if (s == "Raccourcis" and rc) else sum(1 for r in VISIBLES if r.section == s and r.cle in self.vals)
             if i == self.sec:
                 attr = (curses.A_REVERSE | self.ACC | curses.A_BOLD) if self.focus == "sections" else (curses.A_BOLD | self.ACC)
-                e.addstr(y, 1, couper(f" {s}", lg - 3).ljust(lg - 3), attr)
+                e.addstr(y, 1, couper(f" {nom_section(s)}", lg - 3).ljust(lg - 3), attr)
             else:
-                e.addstr(y, 1, couper(f" {s}", lg - 3))
+                e.addstr(y, 1, couper(f" {nom_section(s)}", lg - 3))
             if n:
                 e.addstr(y, lg - 2, "●", self.MOD)
         for y in range(2, h - 4):
@@ -1202,7 +1467,7 @@ class Ecran:
             elif it["genre"] == "nouveaute":
                 self.ligne(y, x0, iw, max(col, iw - 14), it["titre"], it["date"], sel, False)
             else:
-                t = "désactivé" if it["desactive"] else touches_de(it)
+                t = T("désactivé", "disabled") if it["desactive"] else touches_de(it)
                 self.ligne(y, x0, iw, col, it["nom"], t, sel, it["change"] or bool(it["mien"]), gris=it["desactive"])
         if len(its) > zone:
             e.addstr(2, w - 2, "▲" if self.haut > 0 else " ", curses.A_DIM)
@@ -1216,41 +1481,53 @@ class Ecran:
                 du_style = cur.cle in st and cur.cle != "STYLE"
                 if cur.cle in self.vals:
                     base = st[cur.cle] if du_style else cur.defaut
-                    origine = "du style Apple" if du_style else "de la config"
-                    aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
+                    if EN:
+                        origine = "Desktop style" if du_style else "Config"
+                        aide = (aide + "  " if aide else "") + f"{origine} value: {cur.montrer(base)} (r to restore it)."
+                    else:
+                        origine = "du style Apple" if du_style else "de la config"
+                        aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
                 elif du_style:
-                    aide = (aide + "  " if aide else "") + "Valeur donnée par le style Apple."
+                    aide = (aide + "  " if aide else "") + T("Valeur donnée par le style Apple.", "Value set by the desktop style.")
             elif cur["genre"] == "nouveaute":
                 aide = " · ".join(cur["points"][1:4]) or cur["points"][0]
                 aide = (aide[:240] + "…") if len(aide) > 240 else aide
             elif cur["genre"] == "ajouter":
-                aide = "Une appli (va à sa fenêtre si elle est ouverte, sinon la lance), un bureau, une page de l'île ou une commande."
+                aide = T("Une appli (va à sa fenêtre si elle est ouverte, sinon la lance), un bureau, une page de l'île ou une commande.",
+                         "An app (goes to its window if it's open, otherwise launches it), a workspace, an island page or a command.")
             elif cur["genre"] == "raccourci":
                 if cur["mien"]:
-                    aide = "Un de tes raccourcis. Entrée : changer les touches ou le retirer."
+                    aide = T("Un de tes raccourcis. Entrée : changer les touches ou le retirer.",
+                             "One of your shortcuts. Enter: change the keys or remove it.")
                 elif cur["desactive"]:
-                    aide = "Raccourci de la config désactivé. Entrée : le réactiver."
+                    aide = T("Raccourci de la config désactivé. Entrée : le réactiver.",
+                             "Config shortcut disabled. Enter: turn it back on.")
                 else:
-                    aide = "Entrée : changer les touches ou désactiver."
+                    aide = T("Entrée : changer les touches ou désactiver.", "Enter: change the keys or disable it.")
                     if cur["change"]:
-                        aide += f"  À l'origine : {' / '.join(rc.human(o) for o in cur['origs'][:3])}."
+                        aide += T("  À l'origine : ", "  Originally: ") + f"{' / '.join(rc.human(o) for o in cur['origs'][:3])}."
         elif self.focus == "sections":
-            aide = "Choisis une section. Un point marque ce que tu as changé."
+            aide = T("Choisis une section. Un point marque ce que tu as changé.",
+                     "Choose a section. A dot marks what you've changed.")
         for k, l in enumerate(textwrap.wrap(aide, w - 4)[:2]):
             e.addstr(h - 4 + k, 2, l, curses.A_DIM)
         if self.msg and time.time() < self.msg_fin:
             e.addstr(h - 2, 2, couper(("✗ " if self.msg_err else "✓ ") + self.msg, w - 4), self.ERR if self.msg_err else self.OK)
         if self.focus == "sections":
-            bas = "↑↓ section    → ou Entrée : ouvrir    q : quitter"
+            bas = T("↑↓ section    → ou Entrée : ouvrir    q : quitter", "↑↓ section    → or Enter: open    q: quit")
         elif SECTIONS[self.sec] == "Raccourcis":
-            bas = "↑↓ choisir    Entrée : modifier    Échap : sections    q : quitter"
+            bas = T("↑↓ choisir    Entrée : modifier    Échap : sections    q : quitter",
+                    "↑↓ choose    Enter: edit    Esc: sections    q: quit")
         elif SECTIONS[self.sec] == "Nouveautés":
-            bas = "↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter"
+            bas = T("↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter",
+                    "↑↓ choose    Enter: everything it brings    Esc: sections    q: quit")
         else:
-            bas = "↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter"
+            bas = T("↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter",
+                    "↑↓ choose    ← → change    Enter: pick from the list    r: config value    Esc: sections    q: quit")
             cur_r = self.courant()[0]
             if isinstance(cur_r, R) and cur_r.essai:
-                bas = "↑↓ choisir    ← → changer    Entrée : liste    e : essayer    r : valeur de la config    Échap : sections    q : quitter"
+                bas = T("↑↓ choisir    ← → changer    Entrée : liste    e : essayer    r : valeur de la config    Échap : sections    q : quitter",
+                        "↑↓ choose    ← → change    Enter: list    e: try it    r: config value    Esc: sections    q: quit")
         e.addstr(h - 1, 2, couper(bas, w - 4), curses.A_DIM)
         e.refresh()
 
@@ -1294,7 +1571,8 @@ class Ecran:
             win, larg = self.boite(titre, vue + 1, larg)
             for k, l in enumerate(lignes[haut:haut + vue]):
                 win.addstr(2 + k, 3, couper(l, larg - 6))
-            pied = "↑↓ défiler · une touche : fermer" if len(lignes) > vue else "Une touche : fermer"
+            pied = (T("↑↓ défiler · une touche : fermer", "↑↓ scroll · any key: close") if len(lignes) > vue
+                    else T("Une touche : fermer", "Any key: close"))
             win.addstr(2 + vue, 3, couper(pied, larg - 6), curses.A_DIM)
             win.refresh()
             c = win.getch()
@@ -1373,11 +1651,11 @@ class Ecran:
             debut = max(0, i - n + 1)
             self.dessiner()
             win, larg = self.boite(titre, n + 2, 64)
-            win.addstr(2, 3, ("Rechercher : " + q).ljust(larg - 6), curses.A_UNDERLINE)
+            win.addstr(2, 3, (T("Rechercher : ", "Search: ") + q).ljust(larg - 6), curses.A_UNDERLINE)
             for k, (t, _) in enumerate(vus[debut:debut + n]):
                 win.addstr(4 + k, 3, couper(t, larg - 6).ljust(larg - 6), (curses.A_REVERSE | self.ACC) if debut + k == i else 0)
             if not vus:
-                win.addstr(4, 3, "Aucun résultat", curses.A_DIM)
+                win.addstr(4, 3, T("Aucun résultat", "No results"), curses.A_DIM)
             win.refresh()
             c = win.get_wch()
             if c in ("\n", "\r", curses.KEY_ENTER):
@@ -1398,9 +1676,10 @@ class Ecran:
         win, larg = self.boite(self.titre_capture, 5, 60)
         if self.msg and time.time() < self.msg_fin and self.msg_err:
             win.addstr(2, 3, couper(self.msg, larg - 6), self.ERR)
-        win.addstr(3, 3, "Appuie sur la nouvelle combinaison…", curses.A_BOLD)
-        win.addstr(4, 3, couper("ex. Super + T, Super + Maj + B, Ctrl + Alt + F", larg - 6), curses.A_DIM)
-        win.addstr(6, 3, "Échap : annuler", curses.A_DIM)
+        win.addstr(3, 3, T("Appuie sur la nouvelle combinaison…", "Press the new key combination…"), curses.A_BOLD)
+        win.addstr(4, 3, couper(T("ex. Super + T, Super + Maj + B, Ctrl + Alt + F", "e.g. Super + T, Super + Shift + B, Ctrl + Alt + F"),
+                                larg - 6), curses.A_DIM)
+        win.addstr(6, 3, T("Échap : annuler", "Esc: cancel"), curses.A_DIM)
         win.refresh()
 
     def nouvelles_touches(self, titre):
@@ -1434,10 +1713,10 @@ class Ecran:
         if r.essai == "bouton":
             v = valeur(self.vals, r.cle)
             if v in ("menu", "verrouiller", "veille", "eteindre", "rien"):
-                self.statut("Rien à essayer : ce n'est pas une animation")
+                self.statut(T("Rien à essayer : ce n'est pas une animation", "Nothing to try: this isn't an animation"))
                 return
             subprocess.Popen([os.path.join(HOME, ".local/bin/nc-anim"), v], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.statut("Animation lancée : une touche la ferme")
+            self.statut(T("Animation lancée : une touche la ferme", "Animation started: any key closes it"))
         elif r.essai == "verrou":
             time.sleep(0.4)                          # le temps que Noctalia relise sa config
             subprocess.Popen(["loginctl", "lock-session"])
@@ -1449,12 +1728,14 @@ class Ecran:
         try:
             g = regler(self.vals, r.cle, v)
         except ValueError as err:
-            self.statut(f"Valeur refusée : {err}", erreur=True)
+            self.statut(T("Valeur refusée : ", "Value rejected: ") + str(err), erreur=True)
             return
         if g:
             self.attente.add(g)
+        if r.cle == "LANGUE":
+            self.lignes_r = self.lignes_n = None       # relues dans la nouvelle langue
         self.derniere = time.time()
-        self.statut(f"{r.nom} : {r.montrer(valeur(self.vals, r.cle))}")
+        self.statut(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(self.vals, r.cle))}")
 
     def entree(self, r):
         if r.genre == "ouinon":
@@ -1464,18 +1745,20 @@ class Ecran:
             v = valeur(self.vals, r.cle)
             opts = [("✓ " if c == v else "  ") + n for c, n in ch]
             extra = r.genre == "hz"
-            i = self.choisir(r.nom, opts + (["  Autre fréquence…"] if extra else []))
+            i = self.choisir(r.nom, opts + ([T("  Autre fréquence…", "  Other refresh rate…")] if extra else []))
             if i is None:
                 return
             if extra and i == len(ch):
-                t = self.saisir(r.nom, "", "Fréquence en Hz : la plus proche que ton écran propose sera prise")
+                t = self.saisir(r.nom, "", T("Fréquence en Hz : la plus proche que ton écran propose sera prise",
+                                             "Refresh rate in Hz: the closest one your screen offers will be used"))
                 if t:
                     self.poser(r, t)
                 return
             return self.poser(r, ch[i][0])
-        aide = {"entier": f"De {r.mini} à {r.maxi}{' ' + r.unite if r.unite else ''}",
-                "dossier": "Un chemin (ex. ~/Images/Captures), ou auto",
-                "texte": "Ex. us, fr, us,fr — ou systeme"}.get(r.genre, "")
+        sep = "" if EN and r.unite in ("%", "/s") else " "
+        aide = {"entier": T("De ", "From ") + f"{r.mini}{T(' à ', ' to ')}{r.maxi}{sep + r.unite if r.unite else ''}",
+                "dossier": T("Un chemin (ex. ~/Images/Captures), ou auto", "A path (e.g. ~/Pictures/Screenshots), or auto"),
+                "texte": T("Ex. us, fr, us,fr — ou systeme", "E.g. us, fr, us,fr — or system")}.get(r.genre, "")
         t = self.saisir(r.nom, valeur(self.vals, r.cle), aide)
         if t:
             self.poser(r, t)
@@ -1491,28 +1774,28 @@ class Ecran:
         if it["genre"] == "ajouter":
             return self.ajouter_raccourci()
         if it["desactive"]:
-            if self.choisir(it["nom"], ["Réactiver", "Annuler"]) == 0:
+            if self.choisir(it["nom"], [T("Réactiver", "Turn back on"), T("Annuler", "Cancel")]) == 0:
                 faire(rc.retablir_ids, it["ids"])
             return
         opts, fns = [], []
         if len(it["ids"]) == 1 and rc.modifiable(it["ids"][0]):
-            opts.append("Changer les touches")
+            opts.append(T("Changer les touches", "Change the keys"))
             fns.append("touches")
         if it["mien"]:
-            opts.append("Retirer ce raccourci")
+            opts.append(T("Retirer ce raccourci", "Remove this shortcut"))
             fns.append("retirer")
         else:
-            opts.append("Désactiver")
+            opts.append(T("Désactiver", "Disable"))
             fns.append("desactiver")
             if it["change"]:
-                opts.append("Remettre les touches d'origine")
+                opts.append(T("Remettre les touches d'origine", "Restore the original keys"))
                 fns.append("origine")
         i = self.choisir(f"{it['nom']}  ({touches_de(it)})", opts)
         if i is None:
             return
         f = fns[i]
         if f == "touches":
-            t = self.nouvelles_touches(f"Nouvelles touches : {it['nom']}")
+            t = self.nouvelles_touches(T("Nouvelles touches : ", "New keys: ") + it["nom"])
             if t:
                 faire(rc.changer_id, it["ids"][0], t)
         elif f == "retirer":
@@ -1523,36 +1806,39 @@ class Ecran:
             faire(rc.retablir_ids, it["origs"])
 
     def ajouter_raccourci(self):
-        i = self.choisir("Ajouter un raccourci", ["Ouvrir une appli", "Aller à un bureau", "Ouvrir une page de l'île",
-                                                   "Lancer une commande"])
+        i = self.choisir(T("Ajouter un raccourci", "Add a shortcut"),
+                         [T("Ouvrir une appli", "Open an app"), T("Aller à un bureau", "Go to a workspace"),
+                          T("Ouvrir une page de l'île", "Open an island page"), T("Lancer une commande", "Run a command")])
         if i is None:
             return
         if i == 0:
             apps = sorted(rc.apps(), key=lambda a: a["name"].lower())
-            choix = self.filtrer("Quelle appli ?", [(a["name"], a) for a in apps])
+            choix = self.filtrer(T("Quelle appli ?", "Which app?"), [(a["name"], a) for a in apps])
             if not choix:
                 return
             typ, val, nom = "appli", choix["id"], choix["name"]
         elif i == 1:
-            k = self.choisir("Quel bureau ?", [f"Bureau {n}" for n in range(1, 11)])
+            k = self.choisir(T("Quel bureau ?", "Which workspace?"), [T("Bureau ", "Workspace ") + str(n) for n in range(1, 11)])
             if k is None:
                 return
-            typ, val, nom = "bureau", str(k + 1), f"Bureau {k + 1}"
+            typ, val, nom = "bureau", str(k + 1), T("Bureau ", "Workspace ") + str(k + 1)
         elif i == 2:
-            pages = [("centre", "Centre de contrôle"), ("notifications", "Notifications"), ("son", "Son"),
-                     ("reseau", "Wi-Fi"), ("bluetooth", "Bluetooth"), ("systeme", "Système"),
-                     ("calendrier", "Calendrier"), ("minuteur", "Minuteur")]
-            k = self.choisir("Quelle page de l'île ?", [n for _, n in pages])
+            pages = [("centre", T("Centre de contrôle", "Control Center")), ("notifications", "Notifications"),
+                     ("son", T("Son", "Sound")), ("reseau", "Wi-Fi"), ("bluetooth", "Bluetooth"),
+                     ("systeme", T("Système", "System")), ("calendrier", T("Calendrier", "Calendar")),
+                     ("minuteur", T("Minuteur", "Timer"))]
+            k = self.choisir(T("Quelle page de l'île ?", "Which island page?"), [n for _, n in pages])
             if k is None:
                 return
-            typ, val, nom = "ile", pages[k][0], f"Île : {pages[k][1]}"
+            typ, val, nom = "ile", pages[k][0], T("Île : ", "Island: ") + pages[k][1]
         else:
-            c = self.saisir("Commande à lancer", "", "Ex. kitty -e htop, ou notify-send Bonjour")
+            c = self.saisir(T("Commande à lancer", "Command to run"), "",
+                            T("Ex. kitty -e htop, ou notify-send Bonjour", "E.g. kitty -e htop, or notify-send Hello"))
             if not c:
                 return
-            n = self.saisir("Nom dans la fiche Super + /", c)
+            n = self.saisir(T("Nom dans la fiche Super + /", "Name in the Super + / cheat sheet"), c)
             typ, val, nom = "commande", c, n or c
-        t = self.nouvelles_touches(f"Touches pour : {nom}")
+        t = self.nouvelles_touches(T("Touches pour : ", "Keys for: ") + nom)
         if not t:
             return
         try:
@@ -1654,7 +1940,8 @@ class Ecran:
                     st = style_vals()
                     self.poser(cur, st[cur.cle] if cur.cle in st and cur.cle != "STYLE" else cur.defaut)
                     du = cur.cle in st and cur.cle != "STYLE"
-                    self.statut(f"{cur.nom} : valeur {'du style' if du else 'de la config'}")
+                    self.statut(T(f"{cur.nom} : valeur {'du style' if du else 'de la config'}",
+                                  f"{cur.nom}: {'desktop style' if du else 'config'} value"))
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
             elif cur["genre"] == "nouveaute":
@@ -1689,7 +1976,8 @@ def cli(a):
     vals = lire()
     if a[0] in ("nouveautes", "nouveautés", "news"):
         if maj_disponible():
-            print("Une nouvelle version est disponible : nc-maj pour l'installer.\n")
+            print(T("Une nouvelle version est disponible : nc-maj pour l'installer.\n",
+                    "A new version is available: nc-update to install it.\n"))
         for x in nouveautes():
             print(f"{x['date']}  {x['titre']}")
             for p in x["points"]:
@@ -1697,11 +1985,11 @@ def cli(a):
                     print(("    • " if k == 0 else "      ") + l)
             print()
         return
-    if a[0] in ("liste", "list", "ls"):
+    if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
         for r in VISIBLES:
             if r.section != sec:
-                print(f"\n  {r.section}")
+                print(f"\n  {nom_section(r.section)}")
                 sec = r.section
             m = "●" if r.cle in vals else " "
             print(f"   {m} {r.nom:<44} {r.montrer(valeur(vals, r.cle)):<30} {r.cle}")
@@ -1712,14 +2000,14 @@ def cli(a):
         try:
             g = regler(vals, a[1], a[2])
         except ValueError as e:
-            sys.exit(f"nc-reglages : valeur refusée pour {a[1]} : {e}")
+            sys.exit(T(f"nc-reglages : valeur refusée pour {a[1]} : {e}", f"nc-settings: value rejected for {a[1]}: {e}"))
         appliquer([g] if g else [], vals)
         r = PAR_CLE[a[1]]
-        print(f"{r.nom} : {r.montrer(valeur(vals, a[1]))}")
+        print(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(vals, a[1]))}")
     elif a[0] == "reset":
         if len(a) == 2:
             if a[1] not in PAR_CLE:
-                sys.exit(f"nc-reglages : réglage inconnu : {a[1]}")
+                sys.exit(T(f"nc-reglages : réglage inconnu : {a[1]}", f"nc-settings: unknown setting: {a[1]}"))
             vals.pop(a[1], None)
             groupes = {PAR_CLE[a[1]].groupe}
         else:
@@ -1727,13 +2015,14 @@ def cli(a):
             vals = {}
         ecrire(vals)
         appliquer([g for g in groupes if g], vals)
-        print("Valeur de la config remise.")
+        print(T("Valeur de la config remise.", "Config value restored."))
     elif a[0] in ("appliquer", "apply"):
         appliquer(["style", "veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
     elif a[0] in ("-h", "--help", "aide", "help"):
-        print(__doc__.strip())
+        print(T(__doc__.strip(), USAGE_EN))
     else:
-        sys.exit("nc-reglages : commande ou réglage inconnu (nc-reglages aide, nc-reglages liste)")
+        sys.exit(T("nc-reglages : commande ou réglage inconnu (nc-reglages aide, nc-reglages liste)",
+                   "nc-settings: unknown command or setting (nc-settings help, nc-settings list)"))
 
 
 if __name__ == "__main__":

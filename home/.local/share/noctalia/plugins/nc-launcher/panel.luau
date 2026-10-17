@@ -3,6 +3,29 @@
 -- Une rangée de grosses icônes : ← → (ou Tab) pour choisir, Entrée lance, Échap ferme. Lancement : nc-apps (uwsm-app + GPU du profil).
 -- Ouverture : noctalia msg panel-toggle nc/launcher:main
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local APPS_CMD = { noctalia.expandPath("~/.local/bin/nc-apps") }
 local PINNED = { "@BROWSER@", "kitty", "org.gnome.Nautilus" }
 local MAX_TILES = 6
@@ -113,7 +136,7 @@ end
 local function buildItems()
   results = {}
   if calcValue then
-    table.insert(results, { key = "calc", name = calcValue, glyph = "calculator", hint = "copier", run = function() copyCalc(calcValue) end })
+    table.insert(results, { key = "calc", name = calcValue, glyph = "calculator", hint = tr("copier", "copy"), run = function() copyCalc(calcValue) end })
   end
   local nFiles = math.min(#files, 2)
   local nApps = math.min(#appResults, MAX_TILES - nFiles - (calcValue and 1 or 0))
@@ -283,7 +306,7 @@ local function body(items)
   if #items == 0 then
     if q == "" then return nil, 0 end
     return ui.column({ height = CALC_H, align = "center", justify = "start" }, {
-      ui.label({ text = "Aucun résultat", fontSize = px(13), color = "on_surface_variant" }) }), CALC_H
+      ui.label({ text = tr("Aucun résultat", "No results"), fontSize = px(13), color = "on_surface_variant" }) }), CALC_H
   end
   local kids, h, first = {}, 0, 1
   if items[1].key == "calc" then
@@ -296,7 +319,7 @@ local function body(items)
     }, {
       ui.glyph({ name = "calculator", size = px(26), color = "primary" }),
       ui.label({ text = items[1].name, flexGrow = 1, fontSize = px(22), fontWeight = "semibold", color = "on_surface", maxLines = 1, maxWidth = CARD_W - px(200) }),
-      ui.label({ text = "copier", fontSize = px(12), color = "on_surface_variant", opacity = 0.7 }),
+      ui.label({ text = tr("copier", "copy"), fontSize = px(12), color = "on_surface_variant", opacity = 0.7 }),
     }))
     h = h + CALC_H + 4
     first = 2
@@ -326,7 +349,7 @@ function render()
       ui.input({
         key = "q" .. inputKey,
         value = query,
-        placeholder = "Rechercher une application…",
+        placeholder = tr("Rechercher une application…", "Search for an app…"),
         fontSize = px(28),
         frameVisible = false,
         focus = true,
@@ -379,6 +402,7 @@ local function loadApps(after)
 end
 
 function onOpen(context)
+  EN = langue() == "en"
   setZoom()
   CARD_W, TILE_H, CALC_H = px(1200), px(190), px(56)
   query = context or ""   -- texte de départ facultatif : panel-toggle nc/launcher:main "fir"

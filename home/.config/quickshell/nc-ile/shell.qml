@@ -33,8 +33,9 @@ ShellRoot {
             if (racine.composantVue.status !== Component.Ready) {
                 console.warn("Vue des fenêtres indisponible : " + racine.composantVue.errorString())
                 Etat.vueFenetres = false
-                Quickshell.execDetached(["notify-send", "-a", "Vue des fenêtres", "Vue des fenêtres indisponible",
-                                         "Ta version de Quickshell n'a pas la capture des fenêtres."])
+                Quickshell.execDetached(["notify-send", "-a", Reglages.t("Vue des fenêtres", "Window Overview"),
+                                         Reglages.t("Vue des fenêtres indisponible", "Window Overview unavailable"),
+                                         Reglages.t("Ta version de Quickshell n'a pas la capture des fenêtres.", "Your Quickshell version can't capture windows.")])
                 return
             }
             racine.vues = Quickshell.screens.map(s => racine.composantVue.createObject(racine, { modelData: s }))

@@ -23,10 +23,10 @@ Item {
     // Noms lisibles pour les périphériques (« Ryzen HD Audio Controller Stéréo analogique » → « Haut-parleurs »)
     function nomAppareil(n, entree) {
         var d = n.description || n.nickname || n.name || "?", b = (n.name || "").toLowerCase(), l = d.toLowerCase()
-        if (b.indexOf("hdmi") >= 0 || l.indexOf("hdmi") >= 0 || b.indexOf("displayport") >= 0) return "Écran (HDMI)"
+        if (b.indexOf("hdmi") >= 0 || l.indexOf("hdmi") >= 0 || b.indexOf("displayport") >= 0) return Reglages.t("Écran (HDMI)", "Display (HDMI)")
         if (b.indexOf("bluez") >= 0 || l.indexOf("headphone") >= 0 || l.indexOf("casque") >= 0) return d
         if (b.indexOf("usb") >= 0) return d.replace(/ (Stéréo|Stereo|Mono|Analog|analogique).*$/i, "")
-        if (b.indexOf("alsa") >= 0 && (b.indexOf("analog") >= 0 || b.indexOf("pci") >= 0)) return entree ? "Micro intégré" : "Haut-parleurs"
+        if (b.indexOf("alsa") >= 0 && (b.indexOf("analog") >= 0 || b.indexOf("pci") >= 0)) return entree ? Reglages.t("Micro intégré", "Built-in Microphone") : Reglages.t("Haut-parleurs", "Speakers")
         return d
     }
     function iconeSortie(n) {
@@ -119,10 +119,10 @@ Item {
             // En-tête et grand curseur
             Item {
                 width: parent.width; height: 34
-                Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Son"; font.pixelSize: 20; font.weight: Font.Bold }
+                Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: Reglages.t("Son", "Sound"); font.pixelSize: 20; font.weight: Font.Bold }
                 Texte {
                     anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
-                    text: Etat.muet ? "Coupé" : Math.round(Etat.volume * 100) + " %"
+                    text: Etat.muet ? Reglages.t("Coupé", "Muted") : Math.round(Etat.volume * 100) + Reglages.t(" %", "%")
                     secondaire: true; font.pixelSize: 14; font.features: { "tnum": 1 }
                 }
             }
@@ -134,7 +134,7 @@ Item {
                 onChange: v => Etat.reglerVolume(v)
             }
 
-            Titre { text: "Sortie" }
+            Titre { text: Reglages.t("Sortie", "Output") }
             Carte {
                 Repeater {
                     model: son.sorties
@@ -150,7 +150,7 @@ Item {
                 }
             }
 
-            Titre { text: "Micro"; visible: son.micro !== null }
+            Titre { text: Reglages.t("Micro", "Microphone"); visible: son.micro !== null }
             Carte {
                 visible: son.micro !== null
                 Item {
@@ -161,7 +161,7 @@ Item {
                     Column {
                         x: 46; y: 9; width: parent.width - 46 - 70
                         Texte { text: son.micro ? son.nomAppareil(son.micro, true) : ""; font.pixelSize: 14; width: parent.width }
-                        Texte { text: mic.coupe ? "Coupé" : "Actif"; secondaire: true; font.pixelSize: 12 }
+                        Texte { text: mic.coupe ? Reglages.t("Coupé", "Muted") : Reglages.t("Actif", "On"); secondaire: true; font.pixelSize: 12 }
                     }
                     Inter {
                         anchors.right: parent.right; anchors.rightMargin: 14; y: 11
@@ -193,7 +193,7 @@ Item {
 
             Titre { text: "Applications" }
             Carte {
-                Texte { text: "Aucune application ne joue de son."; secondaire: true; visible: son.applis.length === 0; height: 46; leftPadding: 14 }
+                Texte { text: Reglages.t("Aucune application ne joue de son.", "No apps are playing sound."); secondaire: true; visible: son.applis.length === 0; height: 46; leftPadding: 14 }
                 Repeater {
                     model: son.applis
                     Item {
@@ -214,7 +214,7 @@ Item {
                                 Texte { text: son.nom(ap.modelData); font.pixelSize: 13; width: parent.width - 50 }
                                 Texte {
                                     anchors.right: parent.right; secondaire: true; font.pixelSize: 12; font.features: { "tnum": 1 }
-                                    text: ap.modelData.audio ? Math.round(ap.modelData.audio.volume * 100) + " %" : ""
+                                    text: ap.modelData.audio ? Math.round(ap.modelData.audio.volume * 100) + Reglages.t(" %", "%") : ""
                                 }
                             }
                             Piste {

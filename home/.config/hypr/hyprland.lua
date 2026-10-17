@@ -33,6 +33,30 @@ function nc.reglage(cle, defaut)
     return v
 end
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) :
+-- nc.t("texte français", "English text")
+do
+    local l = os.getenv("NC_LANGUE")
+    if l ~= "fr" and l ~= "en" then l = nc.reglages.LANGUE end
+    if l ~= "fr" and l ~= "en" then
+        local loc = os.getenv("LC_ALL") or os.getenv("LC_MESSAGES") or os.getenv("LANG") or ""
+        if loc == "" then
+            local f = io.open("/etc/locale.conf", "r")
+            if f then loc = (f:read("a"):match("LANG=\"?([%w_.@-]+)") or ""); f:close() end
+        end
+        l = loc:sub(1, 2) == "fr" and "fr" or "en"
+    end
+    nc.langue = l
+end
+function nc.t(fr, en)
+    return nc.langue == "en" and en or fr
+end
+
+-- Texte entre apostrophes pour une commande shell (hl.exec_cmd), apostrophes du texte comprises
+function nc.guillemets(texte)
+    return "'" .. tostring(texte):gsub("'", "'\\''") .. "'"
+end
+
 -- Charge un module sans arrêter la config s'il manque ou contient une erreur (renvoie sa valeur, ou nil)
 function nc.charger(nom)
     local ok, res = pcall(require, nom)

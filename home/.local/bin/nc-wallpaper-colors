@@ -10,9 +10,48 @@ Usage : nc-wallpaper-colors [IMAGE] [--dry-run]
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-wallpaper-colors: picks the Noctalia color method that best suits the wallpaper.
+
+Called by the Noctalia v5 "wallpaper_changed" hook (path in NOCTALIA_WALLPAPER_PATH) or with the image as argument.
+  - colorful image      -> "vibrant": takes the striking color (orange of the tiger, red of a car…)
+  - near-neutral image  -> "muted"  : understated palette, no invented color (black and white photo…)
+Measure: 98th percentile of the OKLCH chroma (also catches a small vivid area, e.g. a tail light) on a 64x64 thumbnail, ignoring very dark and very bright pixels.
+Usage: nc-wallpaper-colors [IMAGE] [--dry-run]
+"""
 
 THRESHOLD = 0.045  # chroma OKLCH ; au-dessous : image considérée comme neutre
 
@@ -54,11 +93,11 @@ def boot_size():
 def main():
     args = [a for a in sys.argv[1:] if a != "--dry-run"]
     src = args[0] if args else os.environ.get("NOCTALIA_WALLPAPER_PATH", "")
-    if not src:
-        sys.exit(__doc__)
+    if not src or src in ("-h", "--help"):
+        sys.exit(T(__doc__, USAGE_EN))
     img = Path(src).expanduser()
     if not img.is_file():
-        sys.exit(f"nc-wallpaper-colors : image introuvable : {img}")
+        sys.exit(T(f"nc-wallpaper-colors : image introuvable : {img}", f"nc-wallpaper-colors: image not found: {img}"))
     # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (nc-boot-wallpaper).
     if "--dry-run" not in sys.argv:
         cache = Path.home() / ".cache/nc/wallpaper-boot.jpg"

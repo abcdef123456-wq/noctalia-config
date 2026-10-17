@@ -6,21 +6,22 @@
 # garder la NVIDIA (mode « both », la NVIDIA reste alors éveillée).
 # Écoute les événements du noyau (udev) : rien n'est lu en boucle, la NVIDIA n'est pas réveillée pour rien.
 set -u
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 case "${AQ_DRM_DEVICES:-}" in ""|*:*) exit 0 ;; esac   # session sur toutes les cartes : rien à surveiller
 utilisee="$(basename "$AQ_DRM_DEVICES")"
 dernier=0
 
 prevenir() {
   local choix
-  choix="$(notify-send -a "Écrans" -i video-display -t 0 \
-    --action=session="Rouvrir la session" --action=toujours="Toujours garder la NVIDIA" \
-    "Écran branché sur la carte NVIDIA" \
-    "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." 2>/dev/null)"
+  choix="$(notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
+    --action=session="$(t "Rouvrir la session" "Log Out and Back In")" --action=toujours="$(t "Toujours garder la NVIDIA" "Always Keep NVIDIA On")" \
+    "$(t "Écran branché sur la carte NVIDIA" "Display connected to the NVIDIA GPU")" \
+    "$(t "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." "This port only works after you log out and back in (the desktop runs on the integrated GPU to save battery).")" 2>/dev/null)"
   case "$choix" in
     session) uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()' ;;
     toujours)
       mkdir -p "$HOME/.config/uwsm" && echo both > "$HOME/.config/uwsm/gpu-mode"
-      notify-send -a "Écrans" "Carte NVIDIA toujours utilisée" "À partir de la prochaine session, les écrans se branchent à tout moment. Retour : supprimer ~/.config/uwsm/gpu-mode." ;;
+      notify-send -a "$(t "Écrans" "Displays")" "$(t "Carte NVIDIA toujours utilisée" "NVIDIA GPU always on")" "$(t "À partir de la prochaine session, les écrans se branchent à tout moment. Retour : supprimer ~/.config/uwsm/gpu-mode." "From your next session on, displays can be plugged in at any time. To undo: delete ~/.config/uwsm/gpu-mode.")" ;;
   esac
 }
 

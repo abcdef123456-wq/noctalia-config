@@ -14,7 +14,12 @@ Item {
         return ""
     }
     readonly property var ecrans: Etat.liste.filter(e => e.genre === "ecran")
-    function heures(s) { return s > 0 ? Math.floor(s / 3600) + " h " + String(Math.floor((s % 3600) / 60)).padStart(2, "0") : "" }
+    function heures(s) {
+        if (s <= 0) return ""
+        var h = Math.floor(s / 3600), m = String(Math.floor((s % 3600) / 60)).padStart(2, "0")
+        return Reglages.en ? h + "h " + m + "m" : h + " h " + m
+    }
+    readonly property string pc: Reglages.t(" %", "%")     // « 42 % » en français, « 42% » en anglais
 
     component Mesure: Module {
         id: me
@@ -63,24 +68,25 @@ Item {
             Row {
                 spacing: 10; height: 34
                 Ico { nom: "memory"; taille: 24; anchors.verticalCenter: parent.verticalCenter }
-                Texte { text: "Système"; font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+                Texte { text: Reglages.t("Système", "System"); font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
                 Texte { text: sy.val("cpu_nom"); secondaire: true; anchors.verticalCenter: parent.verticalCenter; width: sy.width - 170 }
             }
             Grid {
                 columns: 2; spacing: 10
-                Mesure { icone: "speed"; titre: "Processeur"; valeur: (sy.val("cpu") || "0") + " %"; taux: (parseInt(sy.val("cpu")) || 0) / 100 }
+                Mesure { icone: "speed"; titre: Reglages.t("Processeur", "CPU"); valeur: (sy.val("cpu") || "0") + sy.pc; taux: (parseInt(sy.val("cpu")) || 0) / 100 }
                 Mesure {
-                    icone: "memory_alt"; titre: "Mémoire"; valeur: (sy.val("ram") || "0") + " %"; taux: (parseInt(sy.val("ram")) || 0) / 100
-                    detail: sy.val("ram_utilisee").replace(".", ",") + " / " + sy.val("ram_totale").replace(".", ",") + " Go"
+                    icone: "memory_alt"; titre: Reglages.t("Mémoire", "Memory"); valeur: (sy.val("ram") || "0") + sy.pc; taux: (parseInt(sy.val("ram")) || 0) / 100
+                    detail: Reglages.en ? sy.val("ram_utilisee") + " / " + sy.val("ram_totale") + " GB"
+                                        : sy.val("ram_utilisee").replace(".", ",") + " / " + sy.val("ram_totale").replace(".", ",") + " Go"
                 }
                 Mesure {
                     readonly property int t: parseInt(sy.val("temperature")) || 0
-                    icone: "device_thermostat"; titre: "Température"; valeur: t + " °C"; taux: t / 100
+                    icone: "device_thermostat"; titre: Reglages.t("Température", "Temperature"); valeur: t + Reglages.t(" °C", "°C"); taux: t / 100
                     couleur: t >= 85 ? Couleurs.rouge : (t >= 70 ? Couleurs.orange : Couleurs.vert)
                 }
                 Mesure {
-                    icone: "hard_drive"; titre: "Disque"; valeur: (sy.val("disque") || "0") + " %"; taux: (parseInt(sy.val("disque")) || 0) / 100
-                    detail: sy.val("disque_libre") + " Go libres"
+                    icone: "hard_drive"; titre: Reglages.t("Disque", "Disk"); valeur: (sy.val("disque") || "0") + sy.pc; taux: (parseInt(sy.val("disque")) || 0) / 100
+                    detail: sy.val("disque_libre") + Reglages.t(" Go libres", " GB free")
                 }
             }
             // Batterie
@@ -95,12 +101,14 @@ Item {
                     }
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
-                        Texte { text: "Batterie · " + Etat.pourcent + " %"; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                        Texte { text: Reglages.t("Batterie · ", "Battery · ") + Etat.pourcent + sy.pc; font.weight: Font.DemiBold; font.pixelSize: 14 }
                         Texte {
                             secondaire: true
-                            text: (Etat.branche ? (Etat.batterie && Etat.batterie.timeToFull > 0 ? "Pleine dans " + sy.heures(Etat.batterie.timeToFull) : "Sur secteur")
-                                                : (Etat.batterie && Etat.batterie.timeToEmpty > 0 ? "Encore " + sy.heures(Etat.batterie.timeToEmpty) : "Sur batterie"))
-                                  + (sy.val("sante") !== "" ? "  ·  santé " + sy.val("sante") + " %" : "")
+                            text: (Etat.branche ? (Etat.batterie && Etat.batterie.timeToFull > 0 ? Reglages.t("Pleine dans ", "Full in ") + sy.heures(Etat.batterie.timeToFull)
+                                                                                                   : Reglages.t("Sur secteur", "Power Adapter"))
+                                                : (Etat.batterie && Etat.batterie.timeToEmpty > 0 ? Reglages.t("Encore ", "") + sy.heures(Etat.batterie.timeToEmpty) + Reglages.t("", " left")
+                                                                                                   : Reglages.t("Sur batterie", "On Battery")))
+                                  + (sy.val("sante") !== "" ? Reglages.t("  ·  santé ", "  ·  health ") + sy.val("sante") + sy.pc : "")
                                   + (sy.val("cycles") !== "" ? " (" + sy.val("cycles") + " cycles)" : "")
                         }
                     }
@@ -119,8 +127,8 @@ Item {
                 Column {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 16
                     anchors.right: inter.left; anchors.rightMargin: 10
-                    Texte { text: "Protéger la batterie"; font.weight: Font.DemiBold; font.pixelSize: 14 }
-                    Texte { text: "Charge arrêtée vers 80 %, conseillé si le PC reste souvent branché"; secondaire: true; font.pixelSize: 11; width: parent.width }
+                    Texte { text: Reglages.t("Protéger la batterie", "Protect Battery"); font.weight: Font.DemiBold; font.pixelSize: 14 }
+                    Texte { text: Reglages.t("Charge arrêtée vers 80 %, conseillé si le PC reste souvent branché", "Stops charging around 80%, recommended if your computer is often plugged in"); secondaire: true; font.pixelSize: 11; width: parent.width }
                 }
                 Rectangle {
                     id: inter
@@ -145,9 +153,9 @@ Item {
             // Modes d'énergie
             Repeater {
                 model: [
-                    { nom: "Économie", detail: "Autonomie maximale, sans effets", icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
-                    { nom: "Équilibré", detail: "Le bon compromis au quotidien", icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
-                    { nom: "Performance", detail: "Puissance maximale, carte NVIDIA", icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
+                    { nom: Reglages.t("Économie", "Power Saver"), detail: Reglages.t("Autonomie maximale, sans effets", "Longest battery life, no effects"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                    { nom: Reglages.t("Équilibré", "Balanced"), detail: Reglages.t("Le bon compromis au quotidien", "The right balance for every day"), icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
+                    { nom: "Performance", detail: Reglages.t("Puissance maximale, carte NVIDIA", "Maximum power, NVIDIA graphics"), icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
                 ]
                 Module {
                     required property var modelData
@@ -169,15 +177,15 @@ Item {
                 }
             }
             // Outils (anciens raccourcis du centre de contrôle)
-            Texte { text: "Outils"; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+            Texte { text: Reglages.t("Outils", "Tools"); font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
             Ligne {
-                width: sy.width; icone: "coffee"; titre: "Rester éveillé"; actif: Etat.cafe
-                sous: Etat.cafe ? "L'écran ne se met pas en veille" : "Désactivé"
+                width: sy.width; icone: "coffee"; titre: Reglages.t("Rester éveillé", "Stay Awake"); actif: Etat.cafe
+                sous: Etat.cafe ? Reglages.t("L'écran ne se met pas en veille", "The screen won't go to sleep") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.basculerCafe()
             }
             Ligne {
-                width: sy.width; icone: "graphic_eq"; titre: "Halo sonore"; actif: Etat.sys.halo === "1"
-                sous: Etat.sys.halo === "1" ? "Le bord de l'écran suit la musique" : "Désactivé"
+                width: sy.width; icone: "graphic_eq"; titre: Reglages.t("Halo sonore", "Sound Halo"); actif: Etat.sys.halo === "1"
+                sous: Etat.sys.halo === "1" ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
             }
             // Mises à jour du système (nc-paquets, comptées toutes les 3 h) : un clic, tout mettre à jour dans un terminal
@@ -185,8 +193,10 @@ Item {
                 readonly property int n: parseInt((paquets.text().split("\n")[0]) || "0") || 0
                 visible: Reglages.val("MAJ_SYSTEME", "ile") !== "non" && paquets.loaded
                 width: sy.width; icone: "system_update"; actif: n > 0
-                titre: n > 0 ? n + (n > 1 ? " mises à jour du système" : " mise à jour du système") : "Système à jour"
-                sous: n > 0 ? "Clic : tout mettre à jour (ton mot de passe sera demandé)" : "Vérifié toutes les 3 heures"
+                titre: n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
+                             : Reglages.t("Système à jour", "System up to date")
+                sous: n > 0 ? Reglages.t("Clic : tout mettre à jour (ton mot de passe sera demandé)", "Click to update everything (you'll be asked for your password)")
+                            : Reglages.t("Vérifié toutes les 3 heures", "Checked every 3 hours")
                 onClic: if (n > 0) { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-paquets", "mettre-a-jour"]) }
                 FileView {
                     id: paquets
@@ -199,18 +209,19 @@ Item {
             Ligne {
                 readonly property var niv: (Etat.sys.clavier || "").split("/").map(x => parseInt(x) || 0)
                 visible: (Etat.sys.clavier || "") !== ""
-                width: sy.width; icone: "keyboard"; titre: "Éclairage du clavier"; actif: niv[0] > 0
-                sous: niv[0] === 0 ? "Éteint · Super + Ctrl + Espace" : (niv[1] <= 4 ? "Niveau " + niv[0] + " sur " + niv[1]
-                      : Math.round(niv[0] * 100 / niv[1]) + " %")
+                width: sy.width; icone: "keyboard"; titre: Reglages.t("Éclairage du clavier", "Keyboard Backlight"); actif: niv[0] > 0
+                sous: niv[0] === 0 ? Reglages.t("Éteint · Super + Ctrl + Espace", "Off · Super + Ctrl + Space")
+                      : (niv[1] <= 4 ? Reglages.t("Niveau " + niv[0] + " sur " + niv[1], "Level " + niv[0] + " of " + niv[1])
+                      : Math.round(niv[0] * 100 / niv[1]) + sy.pc)
                 onClic: Etat.faire([Etat.bin + "nc-touches", "clavier", "bascule"])
             }
             Repeater {
                 model: [
-                    { icone: "contrast", titre: "Thème clair ou sombre", cmd: ["noctalia", "msg", "theme-mode-toggle"], ferme: false },
-                    { icone: "screenshot_region", titre: "Capture d'une zone", cmd: ["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"], ferme: true },
-                    { icone: "text_select_start", titre: "Copier le texte de l'écran", cmd: ["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"], ferme: true },
-                    { icone: "content_paste", titre: "Presse-papiers", cmd: ["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"], ferme: true },
-                    { icone: "wallpaper", titre: "Fonds d'écran", cmd: [Etat.bin + "nc-shell-msg", "wallpapers"], ferme: true }
+                    { icone: "contrast", titre: Reglages.t("Thème clair ou sombre", "Light or Dark Theme"), cmd: ["noctalia", "msg", "theme-mode-toggle"], ferme: false },
+                    { icone: "screenshot_region", titre: Reglages.t("Capture d'une zone", "Capture an Area"), cmd: ["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"], ferme: true },
+                    { icone: "text_select_start", titre: Reglages.t("Copier le texte de l'écran", "Copy Text from Screen"), cmd: ["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"], ferme: true },
+                    { icone: "content_paste", titre: Reglages.t("Presse-papiers", "Clipboard"), cmd: ["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"], ferme: true },
+                    { icone: "wallpaper", titre: Reglages.t("Fonds d'écran", "Wallpapers"), cmd: [Etat.bin + "nc-shell-msg", "wallpapers"], ferme: true }
                 ]
                 Ligne {
                     required property var modelData
@@ -220,13 +231,13 @@ Item {
                 }
             }
             // Session (anciens boutons du bas du centre de contrôle)
-            Texte { text: "Session"; font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+            Texte { text: Reglages.t("Session", "Session"); font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
             Repeater {
                 model: [
-                                        { icone: "keyboard", titre: "Changer la disposition du clavier", cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
-                    { icone: "settings", titre: "Réglages de la barre", cmd: ["noctalia", "msg", "settings-open"], ferme: true },
-                    { icone: "lock", titre: "Verrouiller", cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
-                    { icone: "power_settings_new", titre: "Éteindre, redémarrer…", cmd: ["noctalia", "msg", "panel-toggle", "session"], ferme: true }
+                                        { icone: "keyboard", titre: Reglages.t("Changer la disposition du clavier", "Switch Keyboard Layout"), cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
+                    { icone: "settings", titre: Reglages.t("Réglages de la barre", "Bar Settings"), cmd: ["noctalia", "msg", "settings-open"], ferme: true },
+                    { icone: "lock", titre: Reglages.t("Verrouiller", "Lock"), cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
+                    { icone: "power_settings_new", titre: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), cmd: ["noctalia", "msg", "panel-toggle", "session"], ferme: true }
                 ]
                 Ligne {
                     required property var modelData
@@ -241,10 +252,11 @@ Item {
                 Texte {
                     required property var modelData
                     width: sy.width; secondaire: true; font.pixelSize: 12
-                    text: "Écran " + modelData.champs[0] + " : " + modelData.champs[1] + " · " + modelData.champs[2] + " · échelle " + modelData.champs[3]
+                    text: Reglages.t("Écran " + modelData.champs[0] + " : ", "Display " + modelData.champs[0] + ": ") + modelData.champs[1] + " · " + modelData.champs[2]
+                          + Reglages.t(" · échelle ", " · scale ") + modelData.champs[3]
                 }
             }
-            Texte { text: "Allumé depuis " + sy.val("allume"); secondaire: true; font.pixelSize: 12; visible: sy.val("allume") !== "" }
+            Texte { text: Reglages.t("Allumé depuis " + sy.val("allume"), "Up for " + sy.val("allume").replace(/^(\d+) h (\d+)$/, "$1h $2m")); secondaire: true; font.pixelSize: 12; visible: sy.val("allume") !== "" }
         }
     }
 }

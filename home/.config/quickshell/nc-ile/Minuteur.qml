@@ -34,7 +34,7 @@ Item {
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 2
             Texte { secondaire: true; font.pixelSize: 14
-                    text: Etat.pomodoro ? (Etat.pomoPause ? "Pause · séance " : "Travail · séance ") + Etat.pomoSeance : "Minuteur" }
+                    text: Etat.pomodoro ? (Etat.pomoPause ? Reglages.t("Pause · séance ", "Break · session ") : Reglages.t("Travail · séance ", "Focus · session ")) + Etat.pomoSeance : Reglages.t("Minuteur", "Timer") }
             Texte { text: Etat.duree(Etat.minuteurReste); font.pixelSize: 40; font.weight: Font.DemiBold; color: m.teinte }
         }
     }
@@ -53,7 +53,7 @@ Item {
         Row {
             spacing: 10
             Ico { nom: "timer"; taille: 26; color: Couleurs.orange }
-            Texte { text: "Minuteur"; font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+            Texte { text: Reglages.t("Minuteur", "Timer"); font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
         }
         Grid {
             columns: 3; spacing: 10
@@ -65,7 +65,7 @@ Item {
                     onClic: Etat.lancerMinuteur(modelData)
                     Texte {
                         anchors.centerIn: parent; font.pixelSize: 16; font.weight: Font.DemiBold
-                        text: modelData >= 60 ? "1 h" : modelData + " min"
+                        text: modelData >= 60 ? Reglages.t("1 h", "1 hr") : modelData + " min"
                     }
                 }
             }
@@ -78,7 +78,7 @@ Item {
                 anchors.centerIn: parent; spacing: 10
                 Ico { nom: "psychology"; taille: 20; color: "#ff6347"; anchors.verticalCenter: parent.verticalCenter }
                 Texte { text: "Pomodoro"; font.pixelSize: 16; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                Texte { text: "25 min de travail, 5 de pause"; secondaire: true; anchors.verticalCenter: parent.verticalCenter }
+                Texte { text: Reglages.t("25 min de travail, 5 de pause", "25 min focus, 5 min break"); secondaire: true; anchors.verticalCenter: parent.verticalCenter }
             }
         }
     }

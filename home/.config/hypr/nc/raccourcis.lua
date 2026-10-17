@@ -53,6 +53,11 @@ local function touche(touches, action, description, options)
     return hl.bind(remplace or touches, action, options)
 end
 
+-- Description dans la langue choisie : la section (avant « | ») reste en français, nc-keys s'en sert pour classer
+local function trad(fr, en)
+    return nc.t(fr, (fr:match("^[^|]*|") or "") .. en)
+end
+
 local function cmd(c) return hl.dsp.exec_cmd(c) end
 
 -- Taille logique (en points) de l'écran d'une fenêtre
@@ -68,27 +73,27 @@ local function xy(v)
 end
 
 -- ── Applis et barre ──────────────────────────────────────────────────────────
-touche(SUPER .. " + code:36", cmd(terminal),                       "Applis et barre|Terminal")
-touche(SUPER .. " + code:26", cmd(fichiers),                       "Applis et barre|Fichiers")
-touche(SUPER .. " + code:27", cmd(barre .. "menu"),                "Applis et barre|Rechercher (applis, fichiers, calculs)")
-touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          "Applis et barre|Choisir le fond d'écran")
-touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      "Applis et barre|Centre de contrôle (île)")
-touche(SUPER .. " + code:59", cmd(barre .. "settings"),            "Applis et barre|Réglages de la barre")
-touche(SUPER .. " + code:61", cmd(barre .. "keys"),                "Applis et barre|Afficher cette fiche")
-touche(SUPER .. " + code:33", cmd("~/.local/bin/nc-capture zone"), "Applis et barre|Capture d'une zone de l'écran")
-touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), "Applis et barre|Terminal déroulant (sous Échap)")
+touche(SUPER .. " + code:36", cmd(terminal),                       trad("Applis et barre|Terminal", "Terminal"))
+touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
+touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
+touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))
+touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
+touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
+touche(SUPER .. " + code:61", cmd(barre .. "keys"),                trad("Applis et barre|Afficher cette fiche", "Show this cheat sheet"))
+touche(SUPER .. " + code:33", cmd("~/.local/bin/nc-capture zone"), trad("Applis et barre|Capture d'une zone de l'écran", "Screenshot of an area"))
+touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), trad("Applis et barre|Terminal déroulant (sous Échap)", "Drop-down terminal (below Esc)"))
 -- Presse-papiers : la page de l'île (textes et images), sinon l'historique de Noctalia
 touche(SUPER .. " + SHIFT + code:55", cmd("qs -c nc-ile ipc call ile page presse 2>/dev/null || noctalia msg panel-toggle launcher /clipboard"),
-    "Applis et barre|Historique du presse-papiers")
-touche(SUPER .. " + code:60", cmd("noctalia msg panel-toggle launcher /emo"),  "Applis et barre|Émojis")
+    trad("Applis et barre|Historique du presse-papiers", "Clipboard history"))
+touche(SUPER .. " + code:60", cmd("noctalia msg panel-toggle launcher /emo"),  trad("Applis et barre|Émojis", "Emoji"))
 
 -- Captures d'écran (nc-capture) : enregistrées dans Images/Captures ET copiées, notification de l'île (clic : annoter)
-touche("Print",                 cmd("~/.local/bin/nc-capture ecran"),    "Applis et barre|Capture de l'écran")
+touche("Print",                 cmd("~/.local/bin/nc-capture ecran"),    trad("Applis et barre|Capture de l'écran", "Screenshot of the screen"))
 touche("SHIFT + Print",         cmd("~/.local/bin/nc-capture zone"))     -- comme Super + P (pas répété dans la fiche)
-touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), "Applis et barre|Capture d'une zone à annoter")
-touche(SUPER .. " + SHIFT + code:28", cmd("~/.local/bin/nc-capture texte"), "Applis et barre|Copier le texte d'une zone de l'écran")
+touche(SUPER .. " + SHIFT + code:39", cmd("~/.local/bin/nc-capture retouche"), trad("Applis et barre|Capture d'une zone à annoter", "Screenshot of an area to annotate"))
+touche(SUPER .. " + SHIFT + code:28", cmd("~/.local/bin/nc-capture texte"), trad("Applis et barre|Copier le texte d'une zone de l'écran", "Copy the text in an area of the screen"))
 -- Vidéo de l'écran (nc-video) : zone ou écran entier ; le même raccourci (ou un clic sur l'île) arrête
-touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), "Applis et barre|Enregistrer l'écran en vidéo (démarrer / arrêter)")
+touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), trad("Applis et barre|Enregistrer l'écran en vidéo (démarrer / arrêter)", "Record the screen (start / stop)"))
 
 -- ── Fenêtres ─────────────────────────────────────────────────────────────────
 -- Fermer : si c'était la seule fenêtre de son programme (Discord & co), le programme est arrêté 5 s plus tard
@@ -116,27 +121,27 @@ touche(SUPER .. " + SHIFT + code:24", function()
             "sleep 5; kill -0 %d 2>/dev/null && { kill -TERM %d; sleep 0.6; kill -0 %d 2>/dev/null && kill -KILL %d; }",
             w.pid, w.pid, w.pid, w.pid))
     end
-end, "Fenêtres|Fermer (et le programme si dernière)")
+end, trad("Fenêtres|Fermer (et le programme si dernière)", "Close (and the app if it was the last window)"))
 
-touche(SUPER .. " + code:55", hl.dsp.window.float({ action = "toggle" }), "Fenêtres|Fenêtre libre ↔ rangée")
+touche(SUPER .. " + code:55", hl.dsp.window.float({ action = "toggle" }), trad("Fenêtres|Fenêtre libre ↔ rangée", "Floating ↔ tiled window"))
 -- Réduire (comme le « _ » de Windows) : la fenêtre part dans un bureau caché ; elle revient par la vue des fenêtres,
 -- Spotlight, le dock, Alt + Tab ou Super + Ctrl + M (nc-fenetre)
-touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), "Fenêtres|Réduire la fenêtre")
-touche(SUPER .. " + CTRL + code:58", cmd("~/.local/bin/nc-fenetre restaurer"), "Fenêtres|Ramener la dernière fenêtre réduite")
-touche(SUPER .. " + code:38", cmd("qs -c nc-ile ipc call ile vue"),  "Fenêtres|Vue de toutes les fenêtres (glisser sur un bureau : l'y envoyer)")
-touche(SUPER .. " + code:41", hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }), "Fenêtres|Plein écran")
-touche(SUPER .. " + SHIFT + code:33", hl.dsp.window.pseudo(),      "Fenêtres|Garder sa taille (pseudo)")
-touche(SUPER .. " + code:44", hl.dsp.layout("togglesplit"),        "Fenêtres|Changer le sens de la division")
+touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fenêtres|Réduire la fenêtre", "Minimize the window"))
+touche(SUPER .. " + CTRL + code:58", cmd("~/.local/bin/nc-fenetre restaurer"), trad("Fenêtres|Ramener la dernière fenêtre réduite", "Restore the last minimized window"))
+touche(SUPER .. " + code:38", cmd("qs -c nc-ile ipc call ile vue"),  trad("Fenêtres|Vue de toutes les fenêtres (glisser sur un bureau : l'y envoyer)", "All windows overview (drag onto a desktop to send it there)"))
+touche(SUPER .. " + code:41", hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }), trad("Fenêtres|Plein écran", "Full screen"))
+touche(SUPER .. " + SHIFT + code:33", hl.dsp.window.pseudo(),      trad("Fenêtres|Garder sa taille (pseudo)", "Keep its size (pseudo)"))
+touche(SUPER .. " + code:44", hl.dsp.layout("togglesplit"),        trad("Fenêtres|Changer le sens de la division", "Change the split direction"))
 
 for code, sens in pairs({ [113] = "left", [114] = "right", [111] = "up", [116] = "down" }) do
-    touche(SUPER .. " + code:" .. code, hl.dsp.focus({ direction = sens }), "Fenêtres|Aller à la fenêtre voisine")
-    touche(SUPER .. " + SHIFT + code:" .. code, hl.dsp.window.move({ direction = sens }), "Fenêtres|Déplacer la fenêtre")
+    touche(SUPER .. " + code:" .. code, hl.dsp.focus({ direction = sens }), trad("Fenêtres|Aller à la fenêtre voisine", "Focus the neighboring window"))
+    touche(SUPER .. " + SHIFT + code:" .. code, hl.dsp.window.move({ direction = sens }), trad("Fenêtres|Déplacer la fenêtre", "Move the window"))
 end
 
 local pas = { [113] = { -40, 0 }, [114] = { 40, 0 }, [111] = { 0, -40 }, [116] = { 0, 40 } }
 for code, d in pairs(pas) do
     touche(SUPER .. " + CTRL + code:" .. code, hl.dsp.window.resize({ x = d[1], y = d[2], relative = true }),
-        "Fenêtres|Agrandir / rétrécir la fenêtre", { repeating = true })
+        trad("Fenêtres|Agrandir / rétrécir la fenêtre", "Grow / shrink the window"), { repeating = true })
 end
 
 -- Épingler : la fenêtre devient flottante et reste au même endroit sur tous les bureaux (même touche pour libérer)
@@ -147,7 +152,7 @@ touche(SUPER .. " + CTRL + code:33", function()
         hl.dispatch(hl.dsp.window.float({ action = "set" }))
     end
     hl.dispatch(hl.dsp.window.pin({ action = "toggle" }))
-end, "Fenêtres|Épingler sur tous les bureaux")
+end, trad("Fenêtres|Épingler sur tous les bureaux", "Pin on all desktops"))
 
 -- Taille : flottante centrée à 50 %, puis 70 %, puis 90 % de l'écran
 touche(SUPER .. " + CTRL + code:39", function()
@@ -159,28 +164,28 @@ touche(SUPER .. " + CTRL + code:39", function()
     local n = pct < 60 and 0.7 or (pct < 80 and 0.9 or 0.5)
     hl.dispatch(hl.dsp.window.resize({ x = math.floor(lw * n), y = math.floor(lh * n) }))
     hl.dispatch(hl.dsp.window.center())
-end, "Fenêtres|Taille : 50 %, 70 %, 90 % de l'écran")
+end, trad("Fenêtres|Taille : 50 %, 70 %, 90 % de l'écran", "Size: 50%, 70%, 90% of the screen"))
 
-touche(SUPER .. " + CTRL + code:54", hl.dsp.window.center(),       "Fenêtres|Recentrer la fenêtre flottante")
+touche(SUPER .. " + CTRL + code:54", hl.dsp.window.center(),       trad("Fenêtres|Recentrer la fenêtre flottante", "Recenter the floating window"))
 
-touche(SUPER .. " + code:42", hl.dsp.group.toggle(),                "Fenêtres|Grouper les fenêtres en onglets")
-touche(SUPER .. " + SHIFT + code:42", hl.dsp.window.move({ out_of_group = true }), "Fenêtres|Sortir la fenêtre du groupe")
-touche(SUPER .. " + CTRL + code:23", hl.dsp.group.next(),           "Fenêtres|Onglet suivant du groupe")
-touche(SUPER .. " + CTRL + SHIFT + code:23", hl.dsp.group.prev(),   "Fenêtres|Onglet précédent du groupe")
+touche(SUPER .. " + code:42", hl.dsp.group.toggle(),                trad("Fenêtres|Grouper les fenêtres en onglets", "Group windows into tabs"))
+touche(SUPER .. " + SHIFT + code:42", hl.dsp.window.move({ out_of_group = true }), trad("Fenêtres|Sortir la fenêtre du groupe", "Take the window out of the group"))
+touche(SUPER .. " + CTRL + code:23", hl.dsp.group.next(),           trad("Fenêtres|Onglet suivant du groupe", "Next tab in the group"))
+touche(SUPER .. " + CTRL + SHIFT + code:23", hl.dsp.group.prev(),   trad("Fenêtres|Onglet précédent du groupe", "Previous tab in the group"))
 
-touche("ALT + code:23", cmd(barre .. "window-switcher"),            "Fenêtres|Passer d'une fenêtre à l'autre")
+touche("ALT + code:23", cmd(barre .. "window-switcher"),            trad("Fenêtres|Passer d'une fenêtre à l'autre", "Switch between windows"))
 touche("ALT + SHIFT + code:23", cmd(barre .. "window-switcher"))
 touche(SUPER .. " + ALT + code:23", cmd(barre .. "window-switcher"))
 
 -- ── Bureaux ──────────────────────────────────────────────────────────────────
 for i = 1, 10 do
     local code = 9 + i   -- touches 1 à 0 de la rangée du haut
-    touche(SUPER .. " + code:" .. code, hl.dsp.focus({ workspace = i }), "Bureaux|Aller au bureau 1 à 10")
-    touche(SUPER .. " + SHIFT + code:" .. code, hl.dsp.window.move({ workspace = i }), "Bureaux|Envoyer la fenêtre au bureau 1 à 10")
+    touche(SUPER .. " + code:" .. code, hl.dsp.focus({ workspace = i }), trad("Bureaux|Aller au bureau 1 à 10", "Go to desktop 1 to 10"))
+    touche(SUPER .. " + SHIFT + code:" .. code, hl.dsp.window.move({ workspace = i }), trad("Bureaux|Envoyer la fenêtre au bureau 1 à 10", "Send the window to desktop 1 to 10"))
 end
-touche(SUPER .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }), "Bureaux|Bureau suivant / précédent")
-touche(SUPER .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }), "Bureaux|Bureau suivant / précédent")
-touche(SUPER .. " + code:23", hl.dsp.workspace.toggle_special("magic"), "Bureaux|Bureau caché (bloc-notes)")
+touche(SUPER .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }), trad("Bureaux|Bureau suivant / précédent", "Next / previous desktop"))
+touche(SUPER .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }), trad("Bureaux|Bureau suivant / précédent", "Next / previous desktop"))
+touche(SUPER .. " + code:23", hl.dsp.workspace.toggle_special("magic"), trad("Bureaux|Bureau caché (bloc-notes)", "Hidden desktop (scratchpad)"))
 
 -- Envoyer la fenêtre vers un bureau caché, ou l'en ramener si elle y est déjà.
 -- Le terminal caché n'accepte qu'une fenêtre : elle y est flottante et centrée.
@@ -195,7 +200,8 @@ local function vers_cache(nom)
             return
         end
         if nom == "term" and #hl.get_windows({ workspace = "special:term" }) > 0 then
-            hl.exec_cmd("notify-send -t 2500 'Terminal caché' 'Il contient déjà une fenêtre.'")
+            hl.exec_cmd("notify-send -t 2500 " .. nc.guillemets(nc.t("Terminal caché", "Hidden terminal")) .. " "
+                .. nc.guillemets(nc.t("Il contient déjà une fenêtre.", "It already contains a window.")))
             return
         end
         hl.dispatch(hl.dsp.window.move({ workspace = "special:" .. nom, follow = false, window = w }))
@@ -207,21 +213,21 @@ local function vers_cache(nom)
         end
     end
 end
-touche(SUPER .. " + SHIFT + code:23", vers_cache("magic"), "Bureaux|Fenêtre ↔ bureau caché")
-touche(SUPER .. " + SHIFT + code:49", vers_cache("term"),  "Bureaux|Fenêtre ↔ terminal caché")
+touche(SUPER .. " + SHIFT + code:23", vers_cache("magic"), trad("Bureaux|Fenêtre ↔ bureau caché", "Window ↔ hidden desktop"))
+touche(SUPER .. " + SHIFT + code:49", vers_cache("term"),  trad("Bureaux|Fenêtre ↔ terminal caché", "Window ↔ hidden terminal"))
 
 -- ── Souris ───────────────────────────────────────────────────────────────────
 -- Super + glisser : déplacer la tuile (la lâcher sur une autre fenêtre la place à côté) ; Super + clic droit : redimensionner.
-touche(SUPER .. " + mouse:272", hl.dsp.window.drag(),   "Souris|Déplacer la fenêtre",       { mouse = true })
-touche(SUPER .. " + mouse:273", hl.dsp.window.resize(), "Souris|Redimensionner la fenêtre", { mouse = true })
+touche(SUPER .. " + mouse:272", hl.dsp.window.drag(),   trad("Souris|Déplacer la fenêtre", "Move the window"),       { mouse = true })
+touche(SUPER .. " + mouse:273", hl.dsp.window.resize(), trad("Souris|Redimensionner la fenêtre", "Resize the window"), { mouse = true })
 -- Super + Alt : détacher la fenêtre et la poser ou la redimensionner librement (Super + V la remet dans le pavage)
 touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.float({ action = "set" }))
-touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.drag(),   "Souris|Détacher et placer librement", { mouse = true })
+touche(SUPER .. " + ALT + mouse:272", hl.dsp.window.drag(),   trad("Souris|Détacher et placer librement", "Detach and place freely"), { mouse = true })
 touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.float({ action = "set" }))
-touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.resize(), "Souris|Détacher et redimensionner librement", { mouse = true })
+touche(SUPER .. " + ALT + mouse:273", hl.dsp.window.resize(), trad("Souris|Détacher et redimensionner librement", "Detach and resize freely"), { mouse = true })
 -- Pavé tactile : Super + Maj + appuyer-glisser (un doigt)
 touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.float({ action = "set" }))
-touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), "Souris|Redimensionner (pavé tactile)", { mouse = true })
+touche(SUPER .. " + SHIFT + mouse:272", hl.dsp.window.resize(), trad("Souris|Redimensionner (pavé tactile)", "Resize (touchpad)"), { mouse = true })
 
 -- Souris sans clavier (nc-reglages → Clavier et souris, SAISIE = souris ou les-deux) : boutons latéraux maintenus pour
 -- déplacer (arrière) ou redimensionner (avant) ; un simple clic garde Précédent / Suivant (Alt + ←/→, navigateurs et
@@ -254,28 +260,32 @@ if saisie == "souris" or saisie == "les-deux" then
         local ok, b = pcall(touche, touches, action, nil, { mouse = drapeau == "click", [drapeau] = true })
         if ok and b and b[drapeau] ~= true and b.remove then pcall(b.remove, b) end
     end
-    touche("mouse:275", hl.dsp.window.drag(), "Souris|Bouton latéral arrière maintenu : déplacer", { mouse = true })
-    touche("mouse:276", hl.dsp.window.resize(), "Souris|Bouton latéral avant maintenu : redimensionner", { mouse = true })
+    touche("mouse:275", hl.dsp.window.drag(), trad("Souris|Bouton latéral arrière maintenu : déplacer", "Hold back side button: move"), { mouse = true })
+    touche("mouse:276", hl.dsp.window.resize(), trad("Souris|Bouton latéral avant maintenu : redimensionner", "Hold forward side button: resize"), { mouse = true })
     if hl.dsp.send_shortcut then
         si_compris("click", "mouse:275", hl.dsp.send_shortcut({ mods = "ALT", key = "Left" }))
         si_compris("click", "mouse:276", hl.dsp.send_shortcut({ mods = "ALT", key = "Right" }))
     end
     si_compris("drag", "mouse:275", aimanter)
     si_compris("drag", SUPER .. " + mouse:272", aimanter)
-    touche(SUPER .. " + mouse:274", hl.dsp.window.float({ action = "toggle" }), "Souris|Fenêtre libre ↔ rangée")
+    touche(SUPER .. " + mouse:274", hl.dsp.window.float({ action = "toggle" }), trad("Souris|Fenêtre libre ↔ rangée", "Floating ↔ tiled window"))
 end
 
 -- ── Système ──────────────────────────────────────────────────────────────────
-touche(SUPER .. " + code:46", cmd(barre .. "lock"),                 "Système|Verrouiller l'écran")
-touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       "Système|Verrouiller et mettre en veille")
-touche(SUPER .. " + ALT + code:33", cmd(barre .. "power-cycle"),    "Système|Changer de profil d'énergie")
-touche(SUPER .. " + ALT + code:42", function() nc.mode_jeu() end,   "Système|Mode jeu (effets coupés, pas de notifications)")
-touche(SUPER .. " + code:57", cmd("noctalia msg nightlight-force-toggle"), "Système|Lumière de nuit")
+touche(SUPER .. " + code:46", cmd(barre .. "lock"),                 trad("Système|Verrouiller l'écran", "Lock the screen"))
+touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       trad("Système|Verrouiller et mettre en veille", "Lock and sleep"))
+touche(SUPER .. " + ALT + code:33", cmd(barre .. "power-cycle"),    trad("Système|Changer de profil d'énergie", "Switch power profile"))
+touche(SUPER .. " + ALT + code:42", function() nc.mode_jeu() end,   trad("Système|Mode jeu (effets coupés, pas de notifications)", "Game Mode (effects off, no notifications)"))
+touche(SUPER .. " + code:57", cmd("noctalia msg nightlight-force-toggle"), trad("Système|Lumière de nuit", "Night light"))
+local halo = nc.guillemets(nc.t("Halo musical", "Music Glow"))
 touche(SUPER .. " + ALT + code:58", cmd("systemctl --user is-active --quiet nc-pouls"
-    .. " && { systemctl --user stop nc-pouls; notify-send -a 'Halo musical' -t 2000 'Halo musical coupé'; }"
-    .. " || { systemctl --user start nc-pouls; notify-send -a 'Halo musical' -t 2500 'Halo musical activé' 'Le halo suit les basses quand de la musique joue.'; }"),
-    "Système|Halo musical (pulse sur les basses)")
-touche(SUPER .. " + SHIFT + code:57", cmd("noctalia msg notification-dnd-toggle"), "Système|Ne pas déranger")
+    .. " && { systemctl --user stop nc-pouls; notify-send -a " .. halo .. " -t 2000 "
+    .. nc.guillemets(nc.t("Halo musical coupé", "Music glow off")) .. "; }"
+    .. " || { systemctl --user start nc-pouls; notify-send -a " .. halo .. " -t 2500 "
+    .. nc.guillemets(nc.t("Halo musical activé", "Music glow on")) .. " "
+    .. nc.guillemets(nc.t("Le halo suit les basses quand de la musique joue.", "The glow follows the bass when music is playing.")) .. "; }"),
+    trad("Système|Halo musical (pulse sur les basses)", "Music glow (pulses with the bass)"))
+touche(SUPER .. " + SHIFT + code:57", cmd("noctalia msg notification-dnd-toggle"), trad("Système|Ne pas déranger", "Do Not Disturb"))
 
 -- Loupe : zoom autour du curseur (Super + Ctrl + molette, ou Super + = / Super + -)
 local function loupe(facteur)
@@ -286,17 +296,17 @@ local function loupe(facteur)
         hl.config({ cursor = { zoom_factor = z } })
     end
 end
-touche(SUPER .. " + CTRL + mouse_up",   loupe(1.25), "Système|Loupe : zoomer / dézoomer")
-touche(SUPER .. " + CTRL + mouse_down", loupe(0.8),  "Système|Loupe : zoomer / dézoomer")
-touche(SUPER .. " + code:21", loupe(1.25), "Système|Loupe : zoomer / dézoomer", { repeating = true })
-touche(SUPER .. " + code:20", loupe(0.8),  "Système|Loupe : zoomer / dézoomer", { repeating = true })
+touche(SUPER .. " + CTRL + mouse_up",   loupe(1.25), trad("Système|Loupe : zoomer / dézoomer", "Magnifier: zoom in / out"))
+touche(SUPER .. " + CTRL + mouse_down", loupe(0.8),  trad("Système|Loupe : zoomer / dézoomer", "Magnifier: zoom in / out"))
+touche(SUPER .. " + code:21", loupe(1.25), trad("Système|Loupe : zoomer / dézoomer", "Magnifier: zoom in / out"), { repeating = true })
+touche(SUPER .. " + code:20", loupe(0.8),  trad("Système|Loupe : zoomer / dézoomer", "Magnifier: zoom in / out"), { repeating = true })
 touche(SUPER .. " + SHIFT + code:58",
-    cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), "Système|Quitter la session")
-touche(SUPER .. " + code:70", cmd("systemctl poweroff"),            "Système|Éteindre")
-touche(SUPER .. " + code:71", cmd("systemctl reboot"),              "Système|Redémarrer")
+    cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'"), trad("Système|Quitter la session", "Log out"))
+touche(SUPER .. " + code:70", cmd("systemctl poweroff"),            trad("Système|Éteindre", "Shut down"))
+touche(SUPER .. " + code:71", cmd("systemctl reboot"),              trad("Système|Redémarrer", "Restart"))
 
 -- Touches multimédia (actives aussi sur l'écran de verrouillage)
-local media = "Système|Son, luminosité, musique"
+local media = trad("Système|Son, luminosité, musique", "Sound, brightness, music")
 -- L'île dynamique (plugin nc/ile) montre le nouveau niveau, à la place des bulles de Noctalia
 local function ile(evenement)
     return "; { qs -c nc-ile ipc call ile " .. evenement .. " || noctalia msg plugin nc/ile:pilule all " .. evenement .. "; } >/dev/null 2>&1"
@@ -328,7 +338,7 @@ do
     local en_jeu = f ~= nil
     if f then f:close() end
     if nc.reglage("TOUCHES_F", "media") == "media" and not en_jeu then
-        local rangee = "Système|F1 à F12 : son, micro, luminosité, musique, clavier, pavé, calculatrice"
+        local rangee = trad("Système|F1 à F12 : son, micro, luminosité, musique, clavier, pavé, calculatrice", "F1 to F12: sound, mic, brightness, music, keyboard, touchpad, calculator")
         local nm = "~/.local/bin/nc-media "
         touche("F1",  cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" .. ile("volume")), rangee, { locked = true })
         touche("F2",  cmd(baisser .. ile("volume")), rangee, { locked = true, repeating = true })
@@ -348,13 +358,13 @@ end
 -- Autres touches spéciales des portables (selon le modèle, avec Fn) : rétroéclairage du clavier, pavé tactile,
 -- calculatrice, recherche, fichiers, navigateur, courrier, veille, verrouillage, réglages ; touche Copilot des
 -- PC récents (Super + Maj + F23) : la recherche. Une touche absente du clavier ne gêne pas.
-local portable = "Système|Touches spéciales du portable"
+local portable = trad("Système|Touches spéciales du portable", "Laptop special keys")
 local tp = "~/.local/bin/nc-touches "
 touche("XF86KbdBrightnessUp",   cmd(tp .. "clavier up"),      portable, { locked = true, repeating = true })
 touche("XF86KbdBrightnessDown", cmd(tp .. "clavier down"),    portable, { locked = true, repeating = true })
 touche("XF86KbdLightOnOff",     cmd(tp .. "clavier bascule"), portable, { locked = true })
 -- Même chose sans touche Fn dédiée (Fn + Espace n'arrive pas toujours jusqu'au système)
-touche(SUPER .. " + CTRL + code:65", cmd(tp .. "clavier bascule"), "Système|Éclairage du clavier (palier suivant)", { locked = true })
+touche(SUPER .. " + CTRL + code:65", cmd(tp .. "clavier bascule"), trad("Système|Éclairage du clavier (palier suivant)", "Keyboard backlight (next level)"), { locked = true })
 touche("XF86TouchpadToggle",    cmd(tp .. "pave bascule"),    portable, { locked = true })
 touche("XF86TouchpadOn",        cmd(tp .. "pave on"),         portable, { locked = true })
 touche("XF86TouchpadOff",       cmd(tp .. "pave off"),        portable, { locked = true })
@@ -377,13 +387,14 @@ do
     local en_jeu = f ~= nil
     if f then f:close() end
     local actions = {
-        recherche = { "~/.local/bin/nc-shell-msg menu", "la recherche (Spotlight)" },
-        lanceur   = { "noctalia msg panel-toggle launcher", "le lanceur d'applis" },
-        centre    = { "qs -c nc-ile ipc call ile basculer 2>/dev/null || noctalia msg panel-toggle control-center", "le centre de contrôle" },
+        recherche = { "~/.local/bin/nc-shell-msg menu", nc.t("la recherche (Spotlight)", "Search (Spotlight)") },
+        lanceur   = { "noctalia msg panel-toggle launcher", nc.t("le lanceur d'applis", "App launcher") },
+        centre    = { "qs -c nc-ile ipc call ile basculer 2>/dev/null || noctalia msg panel-toggle control-center",
+                      nc.t("le centre de contrôle", "Control Center") },
     }
     local a = actions[nc.reglage("SUPER_SEUL", "rien")]
     if a and not en_jeu then
-        touche(SUPER .. " + Super_L", cmd(a[1]), "Système|Super seule : " .. a[2], { release = true })
+        touche(SUPER .. " + Super_L", cmd(a[1]), "Système|" .. nc.t("Super seule : ", "Super alone: ") .. a[2], { release = true })
     end
 end
 

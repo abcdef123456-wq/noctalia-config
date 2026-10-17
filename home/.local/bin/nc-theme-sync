@@ -20,6 +20,35 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
 COLORS = Path.home() / ".config/noctalia/colors.json"
 OUT = Path.home() / ".config/kitty/themes/noctalia-dynamic.conf"
 HYPR_OUT = Path.home() / ".config/hypr/nc/couleurs.lua"
@@ -120,7 +149,7 @@ def main():
         bg_hex, fg_hex = c["mSurface"], c["mOnSurface"]
         primary = c["mPrimary"]
     except (OSError, KeyError, ValueError) as e:
-        sys.exit(f"nc-theme-sync : colors.json illisible ({e})")
+        sys.exit(T(f"nc-theme-sync : colors.json illisible ({e})", f"nc-theme-sync: unreadable colors.json ({e})"))
 
     bg, fg = hex_to_rgb(bg_hex), hex_to_rgb(fg_hex)
     dark = luminance(bg) < 0.18
@@ -209,7 +238,8 @@ def main():
                 os.kill(int(pid), signal.SIGUSR1)
             except (ProcessLookupError, PermissionError):
                 pass
-        print(f"nc-theme-sync : thème kitty mis à jour (primaire {primary}, {len(pids)} kitty rechargé(s))")
+        print(T(f"nc-theme-sync : thème kitty mis à jour (primaire {primary}, {len(pids)} kitty rechargé(s))",
+                f"nc-theme-sync: kitty theme updated (primary {primary}, {len(pids)} kitty reloaded)"))
 
     # --- Hyprland : halo coloré de la fenêtre active, bordure en dégradé, onglets de groupes ---
     def hx(key, fallback):
@@ -271,7 +301,7 @@ hl.config({{
 """
     if write_if_changed(HYPR_OUT, hypr):
         subprocess.run(["hyprctl", "reload"], capture_output=True)
-        print("nc-theme-sync : couleurs Hyprland mises à jour")
+        print(T("nc-theme-sync : couleurs Hyprland mises à jour", "nc-theme-sync: Hyprland colors updated"))
 
     # --- Île dynamique (Quickshell) : les couleurs du terminal ---
     # Fond et textes du terminal, gris en paliers au-dessus du fond (même teinte), accent et couleurs ANSI
@@ -307,7 +337,7 @@ hl.config({{
         "bordure": [bord_g, bord_m, bord_d],
     }
     if write_if_changed(ILE_OUT, json.dumps(ile, indent=1) + "\n"):
-        print("nc-theme-sync : couleurs de l'île mises à jour")
+        print(T("nc-theme-sync : couleurs de l'île mises à jour", "nc-theme-sync: island colors updated"))
 
     sync_kdeglobals()
     # Icônes du terminal et des fichiers, aux nouvelles couleurs
@@ -352,7 +382,7 @@ def sync_kdeglobals():
     buf = io.StringIO()
     dst.write(buf, space_around_delimiters=False)
     if write_if_changed(KDEGLOBALS, buf.getvalue()):
-        print("nc-theme-sync : couleurs KDE (kdeglobals) mises à jour")
+        print(T("nc-theme-sync : couleurs KDE (kdeglobals) mises à jour", "nc-theme-sync: KDE colors (kdeglobals) updated"))
 
 
 def write_if_changed(path, content):

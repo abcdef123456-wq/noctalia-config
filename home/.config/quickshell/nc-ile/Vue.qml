@@ -69,7 +69,7 @@ PanelWindow {
                 Texte {
                     id: etiq
                     anchors.centerIn: parent; font.pixelSize: 14; font.weight: Font.DemiBold
-                    text: "Bureau " + pastille.modelData.name + (pastille.modelData.toplevels.values.length
+                    text: Reglages.t("Bureau ", "Desktop ") + pastille.modelData.name + (pastille.modelData.toplevels.values.length
                           ? "  ·  " + pastille.modelData.toplevels.values.length : "")
                 }
                 MouseArea {
@@ -110,7 +110,7 @@ PanelWindow {
 
         Texte {
             anchors.centerIn: parent; visible: zone.n === 0; opacity: v.entree
-            text: "Aucune fenêtre sur ce bureau"; secondaire: true; font.pixelSize: 18
+            text: Reglages.t("Aucune fenêtre sur ce bureau", "No windows on this desktop"); secondaire: true; font.pixelSize: 18
         }
         Repeater {
             model: v.fenetres
@@ -225,7 +225,7 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 34
         spacing: 10
         opacity: v.entree
-        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: "Réduites"; color: "#ffffff"; opacity: 0.7; font.pixelSize: 13 }
+        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Réduites", "Minimized"); color: "#ffffff"; opacity: 0.7; font.pixelSize: 13 }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: 10
@@ -247,7 +247,7 @@ PanelWindow {
                         }
                         Texte {
                             anchors.verticalCenter: parent.verticalCenter; width: Math.min(implicitWidth, 170)
-                            text: red.modelData.title || red.ipc.class || "Fenêtre"; font.pixelSize: 13
+                            text: red.modelData.title || red.ipc.class || Reglages.t("Fenêtre", "Window"); font.pixelSize: 13
                         }
                     }
                     MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; onClicked: v.fenetre("aller", red.modelData) }

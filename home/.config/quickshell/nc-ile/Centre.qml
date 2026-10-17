@@ -28,7 +28,7 @@ Item {
             Row {
                 anchors.right: parent.right; anchors.rightMargin: 6; spacing: 5
                 visible: Etat.aBatterie
-                Texte { text: Etat.pourcent + " %"; font.weight: Font.DemiBold }
+                Texte { text: Etat.pourcent + Reglages.t(" %", "%"); font.weight: Font.DemiBold }
                 Ico {
                     nom: Etat.branche ? "battery_charging_full" : (Etat.pourcent > 80 ? "battery_full" : (Etat.pourcent > 30 ? "battery_5_bar" : "battery_2_bar"))
                     taille: 18; color: Etat.branche ? centre.vert : (Etat.pourcent <= 20 ? Couleurs.rouge : Couleurs.texte)
@@ -49,15 +49,15 @@ Item {
                         model: [
                             { cle: "wifi", icone: "wifi", nom: "Wi-Fi", page: "reseau" },
                             { cle: "bluetooth", icone: "bluetooth", nom: "Bluetooth", page: "bluetooth" },
-                            { cle: "dnd", icone: "dark_mode", nom: "Concentration", page: "notifications" }
+                            { cle: "dnd", icone: "dark_mode", nom: Reglages.t("Concentration", "Focus"), page: "notifications" }
                         ]
                         Item {
                             id: lc
                             required property var modelData
                             readonly property bool actif: modelData.cle === "dnd" ? Notifs.concentration : centre.s[modelData.cle] === "on"
-                            readonly property string etat: modelData.cle === "wifi" ? (actif ? (centre.s.reseau || "Activé") : "Désactivé")
-                                                        : modelData.cle === "dnd" ? (actif ? "Ne pas déranger" : "Désactivée")
-                                                        : (actif ? "Activé" : "Désactivé")
+                            readonly property string etat: modelData.cle === "wifi" ? (actif ? (centre.s.reseau || Reglages.t("Activé", "On")) : Reglages.t("Désactivé", "Off"))
+                                                        : modelData.cle === "dnd" ? (actif ? Reglages.t("Ne pas déranger", "Do Not Disturb") : Reglages.t("Désactivée", "Off"))
+                                                        : (actif ? Reglages.t("Activé", "On") : Reglages.t("Désactivé", "Off"))
                             width: parent.width; height: 41
                             Rectangle {
                                 anchors.fill: parent; anchors.leftMargin: -6; anchors.rightMargin: -6; radius: 12
@@ -101,8 +101,8 @@ Item {
                         Column {
                             width: parent.width - 64; spacing: 2
                             anchors.verticalCenter: parent.verticalCenter
-                            Texte { width: parent.width; text: Etat.titre !== "" ? Etat.titre : "Rien en lecture"; font.weight: Font.DemiBold; font.pixelSize: 14 }
-                            Texte { width: parent.width; text: Etat.artiste !== "" ? Etat.artiste : (Etat.lecteur ? Etat.lecteur.identity : "Lance une musique"); secondaire: true }
+                            Texte { width: parent.width; text: Etat.titre !== "" ? Etat.titre : Reglages.t("Rien en lecture", "Not Playing"); font.weight: Font.DemiBold; font.pixelSize: 14 }
+                            Texte { width: parent.width; text: Etat.artiste !== "" ? Etat.artiste : (Etat.lecteur ? Etat.lecteur.identity : Reglages.t("Lance une musique", "Play some music")); secondaire: true }
                         }
                     }
                     // Progression
@@ -160,11 +160,11 @@ Item {
                     }
                 }
                 Pastille {
-                    icone: "wb_twilight"; titre: "Nuit"; sous: Etat.nuit ? "Tons chauds" : "Désactivée"; actif: Etat.nuit; couleur: centre.orange
+                    icone: "wb_twilight"; titre: Reglages.t("Nuit", "Night Shift"); sous: Etat.nuit ? Reglages.t("Tons chauds", "Warmer colors") : Reglages.t("Désactivée", "Off"); actif: Etat.nuit; couleur: centre.orange
                     onClic: { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) }
                 }
                 Pastille {
-                    icone: "sports_esports"; titre: "Mode jeu"; sous: Etat.jeu ? "Effets coupés" : "Désactivé"; actif: Etat.jeu; couleur: centre.orange
+                    icone: "sports_esports"; titre: Reglages.t("Mode jeu", "Game Mode"); sous: Etat.jeu ? Reglages.t("Effets coupés", "Effects off") : Reglages.t("Désactivé", "Off"); actif: Etat.jeu; couleur: centre.orange
                     onClic: Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"])
                 }
             }
@@ -186,8 +186,8 @@ Item {
         Module {
             id: energie
             readonly property var modes: [
-                { nom: "Économie", icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
-                { nom: "Équilibré", icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
+                { nom: Reglages.t("Économie", "Power Saver"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                { nom: Reglages.t("Équilibré", "Balanced"), icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
                 { nom: "Performance", icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
             ]
             readonly property int index: Etat.profil === PowerProfile.PowerSaver ? 0 : (Etat.profil === PowerProfile.Performance ? 2 : 1)
@@ -204,7 +204,7 @@ Item {
                 }
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    Texte { text: "Énergie"; font.weight: Font.DemiBold; font.pixelSize: 14 }
+                    Texte { text: Reglages.t("Énergie", "Power"); font.weight: Font.DemiBold; font.pixelSize: 14 }
                     Texte { text: energie.mode.nom; secondaire: true }
                 }
             }

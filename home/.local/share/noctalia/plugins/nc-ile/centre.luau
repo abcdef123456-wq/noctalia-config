@@ -5,12 +5,37 @@
 --   Pages   : Wi-Fi (réseaux, mot de passe), Bluetooth (appareils), Son (sorties, micro).
 -- État lu par ~/.local/bin/nc-ile-etat à l'ouverture puis toutes les 2 s tant que le panneau est ouvert.
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local sym = require("./symboles.luau")
 local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
 local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
 local L, H = 470, 640                       -- taille du panneau (plugin.toml)
 local JOURS = { "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi" }
 local MOIS = { "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre" }
+local DAYS = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
+local MONTHS = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" }
 
 local e = {}                                -- état (clé -> texte)
 local listes = { net = {}, bt = {}, sortie = {}, entree = {} }
@@ -159,7 +184,7 @@ local function curseur(icone, valeur, bouton, change, fin, detail)
       ico(icone, BLANC, 22),
     }),
     ui.slider({ flexGrow = 1, min = 0, max = 100, step = 1, value = valeur, onChange = change, onDragEnd = fin }),
-    ui.label({ text = valeur .. " %", width = 44, fontSize = 13, fontWeight = "semibold", color = GRIS, textAlign = "end" }),
+    ui.label({ text = tr(valeur .. " %", valeur .. "%"), width = 44, fontSize = 13, fontWeight = "semibold", color = GRIS, textAlign = "end" }),
   }
   if detail then
     table.insert(enfants, ui.column({ width = 30, height = 36, align = "center", justify = "center", onClick = detail }, {
@@ -188,12 +213,12 @@ local function entete()
   local droite = {}
   if bat then
     local charge = e.batterie_etat ~= "Discharging"
-    table.insert(droite, ui.label({ text = bat .. " %", fontSize = 13, fontWeight = "semibold", color = BLANC }))
+    table.insert(droite, ui.label({ text = tr(bat .. " %", bat .. "%"), fontSize = 13, fontWeight = "semibold", color = BLANC }))
     table.insert(droite, ui.glyph({ name = charge and "battery-charging" or "battery-2", size = 18,
       color = charge and VERT or ((bat <= 20) and "#ff453a" or BLANC) }))
   end
   return ui.row({ align = "center", gap = 8, height = 26, paddingH = 6 }, {
-    ui.label({ text = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], fontSize = 13, fontWeight = "semibold", color = GRIS, flexGrow = 1 }),
+    ui.label({ text = tr(JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], DAYS[t.wday] .. ", " .. MONTHS[t.month] .. " " .. t.day), fontSize = 13, fontWeight = "semibold", color = GRIS, flexGrow = 1 }),
     ui.row({ gap = 6, align = "center" }, droite),
   })
 end
@@ -225,8 +250,8 @@ local function carteMedia()
     ui.row({ gap = 12, align = "center", height = 62 }, {
       pochette,
       ui.column({ flexGrow = 1, gap = 2 }, {
-        ui.label({ text = rien and "Rien en lecture" or (e.media_titre or ""), fontSize = 15, fontWeight = "semibold", color = BLANC, maxLines = 1, maxWidth = 230 }),
-        ui.label({ text = rien and "Lance une musique" or (e.media_artiste or ""), fontSize = 13, color = GRIS, maxLines = 1, maxWidth = 230 }),
+        ui.label({ text = rien and tr("Rien en lecture", "Not Playing") or (e.media_titre or ""), fontSize = 15, fontWeight = "semibold", color = BLANC, maxLines = 1, maxWidth = 230 }),
+        ui.label({ text = rien and tr("Lance une musique", "Play some music") or (e.media_artiste or ""), fontSize = 13, color = GRIS, maxLines = 1, maxWidth = 230 }),
       }),
       ui.row({ gap = 0, align = "center" }, {
         commande("player-skip-back-filled", 22, function() faire({ "playerctl", "previous" }) end),
@@ -258,7 +283,7 @@ local function reglages()
       rond("device-gamepad-2", jeu, ORANGE, jeu and "Mode jeu : activé" or "Mode jeu", function() faire({ "hyprctl", "eval", "nc.mode_jeu()" }) end),
     }),
   })
-  local reseau = (wifi and ((e.reseau ~= "" and e.reseau) or "Activé")) or "Coupé"
+  local reseau = (wifi and ((e.reseau ~= "" and e.reseau) or tr("Activé", "On"))) or tr("Coupé", "Off")
   return ui.row({ gap = 12, height = 150 }, {
     connexions,
     ui.column({ flexGrow = 1, gap = 8 }, {
@@ -266,9 +291,9 @@ local function reglages()
         pastille("wifi", "Wi-Fi", reseau, wifi, BLEU, function() aller("wifi") end),
       }),
       ui.row({ gap = 8, height = 71 }, {
-        pastille(nuit and "moon-stars" or "sun", "Nuit", nuit and "Tons chauds" or "Désactivée", nuit, ORANGE,
+        pastille(nuit and "moon-stars" or "sun", tr("Nuit", "Night"), nuit and tr("Tons chauds", "Warm tones") or tr("Désactivée", "Off"), nuit, ORANGE,
           function() noctalia.state.set("nuit", not nuit); msg("nightlight-force-toggle") end),
-        pastille("wave-sine", "Halo", halo and "Musique" or "Coupé", halo, ROSE,
+        pastille("wave-sine", tr("Halo", "Glow"), halo and tr("Musique", "Music") or tr("Coupé", "Off"), halo, ROSE,
           function() faire({ "systemctl", "--user", halo and "stop" or "start", "nc-pouls" }) end),
       }),
     }),
@@ -300,8 +325,8 @@ local function profils()
     })
   end
   return ui.row({ gap = 2, padding = 3, height = 40, align = "center", radius = 14, fill = MODULE }, {
-    choix("power-saver", "leaf", "Économie", VERT),
-    choix("balanced", "scale", "Équilibré", BLANC),
+    choix("power-saver", "leaf", tr("Économie", "Power Saver"), VERT),
+    choix("balanced", "scale", tr("Équilibré", "Balanced"), BLANC),
     choix("performance", "bolt", "Performance", ORANGE),
   })
 end
@@ -338,7 +363,7 @@ local function connecter(n)
   local argv = connu and { "nmcli", "con", "up", "id", nom } or { "nmcli", "dev", "wifi", "connect", nom }
   faire(argv, function(r)
     enCours[nom] = nil
-    if r.exitCode ~= 0 then noctalia.notifyError("Wi-Fi", "Connexion à « " .. nom .. " » impossible.") end
+    if r.exitCode ~= 0 then noctalia.notifyError("Wi-Fi", tr("Connexion à « " .. nom .. " » impossible.", "Couldn’t connect to “" .. nom .. "”.")) end
   end)
   dessiner()
 end
@@ -347,26 +372,27 @@ local function pageWifi()
   local wifi = e.wifi == "on"
   local lignes = {}
   if not wifi then
-    table.insert(lignes, ui.label({ text = "Le Wi-Fi est coupé.", fontSize = 13, color = GRIS }))
+    table.insert(lignes, ui.label({ text = tr("Le Wi-Fi est coupé.", "Wi-Fi is off."), fontSize = 13, color = GRIS }))
   elseif #listes.net == 0 then
-    table.insert(lignes, ui.label({ text = "Recherche des réseaux…", fontSize = 13, color = GRIS }))
+    table.insert(lignes, ui.label({ text = tr("Recherche des réseaux…", "Searching for networks…"), fontSize = 13, color = GRIS }))
   end
   for _, n in ipairs(wifi and listes.net or {}) do
     local nom, actif, sig, secu, connu = n[2], n[1] == "1", tonumber(n[3]) or 0, n[4] == "1", n[5] == "1"
     local icone = sig >= 67 and "wifi" or (sig >= 34 and "wifi-2" or "wifi-1")
-    local sous = actif and "Connecté" or (enCours[nom] and "Connexion…" or (connu and "Enregistré" or (secu and "Sécurisé" or "Ouvert")))
+    local sous = actif and tr("Connecté", "Connected") or (enCours[nom] and tr("Connexion…", "Connecting…")
+      or (connu and tr("Enregistré", "Saved") or (secu and tr("Sécurisé", "Secured") or tr("Ouvert", "Open"))))
     local droite = nil
     if actif then droite = ico("check", BLEU, 18)
     elseif secu then droite = ico("lock", GRIS, 15) end
     table.insert(lignes, ui.row({ key = "net-" .. nom, height = 54 }, { ligne(icone, nom, sous, actif, function() connecter(n) end, droite) }))
     if saisie == nom then
       table.insert(lignes, ui.row({ key = "mdp-ligne-" .. nom, gap = 8, height = 44, align = "center" }, {
-        ui.input({ key = "mdp-" .. nom, flexGrow = 1, password = true, placeholder = "Mot de passe de « " .. nom .. " »", focus = true,
+        ui.input({ key = "mdp-" .. nom, flexGrow = 1, password = true, placeholder = tr("Mot de passe de « " .. nom .. " »", "Password for “" .. nom .. "”"), focus = true,
           onSubmit = function(mdp)
             saisie = nil; enCours[nom] = true
             faire({ "nmcli", "dev", "wifi", "connect", nom, "password", mdp }, function(r)
               enCours[nom] = nil
-              if r.exitCode ~= 0 then noctalia.notifyError("Wi-Fi", "Mot de passe refusé pour « " .. nom .. " ».") end
+              if r.exitCode ~= 0 then noctalia.notifyError("Wi-Fi", tr("Mot de passe refusé pour « " .. nom .. " ».", "Wrong password for “" .. nom .. "”.")) end
             end)
             dessiner()
           end }),
@@ -378,9 +404,9 @@ local function pageWifi()
     titrePage("Wi-Fi", ui.toggle({ checked = wifi, onChange = function() msg("wifi-toggle") end })),
     ui.scroll({ flexGrow = 1, gap = 6 }, lignes),
     ui.row({ height = 40, gap = 8 }, {
-      ui.button({ text = "Actualiser", glyph = "refresh", variant = "ghost", controlSize = "sm", flexGrow = 1,
+      ui.button({ text = tr("Actualiser", "Refresh"), glyph = "refresh", variant = "ghost", controlSize = "sm", flexGrow = 1,
         onClick = function() listes.net = {}; faire({ "nmcli", "dev", "wifi", "rescan" }); dessiner() end }),
-      ui.button({ text = "Réglages réseau", glyph = "settings", variant = "ghost", controlSize = "sm", flexGrow = 1,
+      ui.button({ text = tr("Réglages réseau", "Network Settings"), glyph = "settings", variant = "ghost", controlSize = "sm", flexGrow = 1,
         onClick = function() panel.close(); noctalia.runAsync("nm-connection-editor || noctalia msg panel-toggle control-center") end }),
     }),
   }
@@ -395,19 +421,20 @@ local function pageBluetooth()
   local bt = e.bluetooth == "on"
   local lignes = {}
   if not bt then
-    table.insert(lignes, ui.label({ text = "Le Bluetooth est coupé.", fontSize = 13, color = GRIS }))
+    table.insert(lignes, ui.label({ text = tr("Le Bluetooth est coupé.", "Bluetooth is off."), fontSize = 13, color = GRIS }))
   elseif #listes.bt == 0 then
-    table.insert(lignes, ui.label({ text = "Aucun appareil associé.", fontSize = 13, color = GRIS }))
+    table.insert(lignes, ui.label({ text = tr("Aucun appareil associé.", "No paired devices."), fontSize = 13, color = GRIS }))
   end
   for _, d in ipairs(bt and listes.bt or {}) do
     local mac, nom, connecte = d[1], d[2], d[3] == "1"
-    local sous = enCours[mac] and (connecte and "Déconnexion…" or "Connexion…") or (connecte and "Connecté" or "Non connecté")
+    local sous = enCours[mac] and (connecte and tr("Déconnexion…", "Disconnecting…") or tr("Connexion…", "Connecting…"))
+      or (connecte and tr("Connecté", "Connected") or tr("Non connecté", "Not connected"))
     table.insert(lignes, ui.row({ key = "bt-" .. mac, height = 54 }, {
       ligne(ICONES_BT[d[4]] or "bluetooth", nom, sous, connecte, function()
         enCours[mac] = true
         faire({ "bluetoothctl", connecte and "disconnect" or "connect", mac }, function(r)
           enCours[mac] = nil
-          if r.exitCode ~= 0 then noctalia.notifyError("Bluetooth", "« " .. nom .. " » ne répond pas.") end
+          if r.exitCode ~= 0 then noctalia.notifyError("Bluetooth", tr("« " .. nom .. " » ne répond pas.", "“" .. nom .. "” isn’t responding.")) end
         end)
         dessiner()
       end, connecte and ico("check", BLEU, 18) or nil),
@@ -417,7 +444,7 @@ local function pageBluetooth()
     titrePage("Bluetooth", ui.toggle({ checked = bt, onChange = function() msg("bluetooth-toggle") end })),
     ui.scroll({ flexGrow = 1, gap = 6 }, lignes),
     ui.row({ height = 40 }, {
-      ui.button({ text = "Associer un nouvel appareil", glyph = "bluetooth", variant = "ghost", controlSize = "sm", flexGrow = 1,
+      ui.button({ text = tr("Associer un nouvel appareil", "Pair a New Device"), glyph = "bluetooth", variant = "ghost", controlSize = "sm", flexGrow = 1,
         onClick = function() panel.close(); noctalia.runAsync("blueman-manager || noctalia msg panel-toggle control-center") end }),
     }),
   }
@@ -426,13 +453,13 @@ end
 -- ── Page Son ────────────────────────────────────────────────────────────────
 
 local function pageSon()
-  local lignes = { ui.label({ text = "SORTIE", fontSize = 11, fontWeight = "bold", color = GRIS, height = 18 }) }
+  local lignes = { ui.label({ text = tr("SORTIE", "OUTPUT"), fontSize = 11, fontWeight = "bold", color = GRIS, height = 18 }) }
   for _, s in ipairs(listes.sortie) do
     local id, nom, defaut = s[1], s[2], s[3] == "1"
     local bas = string.lower(nom)
     local icone = (string.find(bas, "casque") or string.find(bas, "head") or string.find(bas, "airpods")) and "headphones" or "device-speaker"
     table.insert(lignes, ui.row({ key = "so-" .. id, height = 54 }, {
-      ligne(icone, nom, defaut and "Utilisée" or "Choisir", defaut, function() faire({ "wpctl", "set-default", id }) end,
+      ligne(icone, nom, defaut and tr("Utilisée", "In use") or tr("Choisir", "Select"), defaut, function() faire({ "wpctl", "set-default", id }) end,
         defaut and ico("check", BLEU, 18) or nil),
     }))
   end
@@ -446,12 +473,12 @@ local function pageSon()
         function() faire({ "wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle" }) end, 34)
     end
     table.insert(lignes, ui.row({ key = "en-" .. id, height = 54 }, {
-      ligne("microphone", nom, defaut and (muet and "Utilisé · coupé" or "Utilisé") or "Choisir", defaut,
+      ligne("microphone", nom, defaut and (muet and tr("Utilisé · coupé", "In use · muted") or tr("Utilisé", "In use")) or tr("Choisir", "Select"), defaut,
         function() faire({ "wpctl", "set-default", id }) end, droite),
     }))
   end
   return {
-    titrePage("Son"),
+    titrePage(tr("Son", "Sound")),
     curseurVolume(),
     ui.scroll({ flexGrow = 1, gap = 6 }, lignes),
   }
@@ -529,6 +556,7 @@ local function fermer()
 end
 
 function onOpen()
+  EN = langue() == "en"
   ouvert, tic, page, saisie, fermeture = true, 0, "accueil", nil, false
   local l0 = tonumber(noctalia.state.get("ile-largeur")) or 200
   anim = { w = l0, h = PILULE_H, vw = 0, vh = 0, a = 0, l0 = l0 }   -- part de la pilule, à sa taille exacte

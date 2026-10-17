@@ -7,9 +7,10 @@
 # Fichier : ~/Vidéos/Enregistrements (dossier « Vidéos » de ta langue), « Enregistrement du 2026-10-16 à 19.20.05.mp4 ».
 # Son : nc-reglages → Captures → « Son des vidéos » (VIDEO_SON : non, systeme, micro).
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 etat="${XDG_RUNTIME_DIR:-/tmp}/nc-video"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
-dire() { notify-send -a "Enregistrement d'écran" -i media-record "$@" 2>/dev/null || true; }
+dire() { notify-send -a "$(t "Enregistrement d'écran" "Screen Recording")" -i media-record "$@" 2>/dev/null || true; }
 
 arreter() {
   [ -s "$etat" ] || return 1
@@ -18,11 +19,11 @@ arreter() {
   kill -INT "$pid" 2>/dev/null
   for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done   # la vidéo est finalisée
   rm -f "$etat"
-  [ -s "$fichier" ] || { dire "Enregistrement vide" "Rien n'a été enregistré."; return 0; }
+  [ -s "$fichier" ] || { dire "$(t "Enregistrement vide" "Empty recording")" "$(t "Rien n'a été enregistré." "Nothing was recorded.")"; return 0; }
   duree=$(( $(date +%s) - debut ))
   (
-    choix="$(timeout 600 notify-send -a "Enregistrement d'écran" -i video-x-generic -A ouvrir="Ouvrir" -A dossier="Ouvrir le dossier" \
-      -A supprimer="Supprimer" "Vidéo enregistrée" "$(printf '%d:%02d' $((duree / 60)) $((duree % 60))) · ${fichier##*/}" 2>/dev/null)"
+    choix="$(timeout 600 notify-send -a "$(t "Enregistrement d'écran" "Screen Recording")" -i video-x-generic -A ouvrir="$(t "Ouvrir" "Open")" -A dossier="$(t "Ouvrir le dossier" "Show in Folder")" \
+      -A supprimer="$(t "Supprimer" "Delete")" "$(t "Vidéo enregistrée" "Recording saved")" "$(printf '%d:%02d' $((duree / 60)) $((duree % 60))) · ${fichier##*/}" 2>/dev/null)"
     case "$choix" in
       ouvrir) xdg-open "$fichier" ;;
       dossier) xdg-open "${fichier%/*}" ;;
@@ -33,11 +34,11 @@ arreter() {
   return 0
 }
 
-[ "${1:-}" = arreter ] && { arreter; exit 0; }
+case "${1:-}" in arreter|stop) arreter; exit 0 ;; esac
 # Déjà en cours : le même raccourci arrête
 if [ -s "$etat" ] && kill -0 "$(head -1 "$etat")" 2>/dev/null; then arreter; exit 0; fi
 rm -f "$etat"
-command -v wf-recorder >/dev/null || { dire "wf-recorder n'est pas installé" "nc-maj l'installe (ou ton gestionnaire de paquets : wf-recorder)."; exit 1; }
+command -v wf-recorder >/dev/null || { dire "$(t "wf-recorder n'est pas installé" "wf-recorder is not installed")" "$(t "nc-maj l'installe (ou ton gestionnaire de paquets : wf-recorder)." "nc-update installs it (or your package manager: wf-recorder).")"; exit 1; }
 
 zone="$(slurp -o -d 2>/dev/null)" || exit 0          # Échap : rien n'est fait
 [ -n "$zone" ] || exit 0
@@ -45,7 +46,8 @@ videos="$(xdg-user-dir VIDEOS 2>/dev/null)"
 [ -n "$videos" ] && [ "$videos" != "$HOME" ] && [ "$videos" != "$HOME/" ] || videos="$HOME/Videos"
 dossier="$videos/Enregistrements"
 mkdir -p "$dossier"
-fichier="$dossier/Enregistrement du $(date '+%Y-%m-%d à %H.%M.%S').mp4"
+# Nom du fichier dans la langue choisie (le dossier, lui, ne change pas)
+fichier="$dossier/$(t "Enregistrement du $(date '+%Y-%m-%d à %H.%M.%S')" "Screen Recording $(date '+%Y-%m-%d at %H.%M.%S')").mp4"
 
 son=()
 case "$(reglage VIDEO_SON)" in
@@ -56,7 +58,7 @@ setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" -c libx264 -p preset=ver
 pid=$!
 sleep 0.5
 if ! kill -0 "$pid" 2>/dev/null; then
-  dire "L'enregistrement n'a pas démarré" "$(tail -1 "$etat.log" 2>/dev/null)"
+  dire "$(t "L'enregistrement n'a pas démarré" "Recording didn't start")" "$(tail -1 "$etat.log" 2>/dev/null)"
   exit 1
 fi
 printf '%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" > "$etat"

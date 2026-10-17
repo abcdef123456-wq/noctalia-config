@@ -2,13 +2,22 @@
 # nc-limite-charge : protège la batterie en limitant sa charge (vers 80 %), pour un PC souvent branché.
 # Installé par install.sh dans /usr/local/bin (appartient à root), avec une règle sudo qui permet à l'utilisateur de le
 # lancer sans mot de passe (interrupteur « Protéger la batterie » de l'île). Il ne fait que ça.
-#   nc-limite-charge etat    1 (limite active), 0 (charge complète) ou « absent » (portable sans limite possible)
+#   nc-limite-charge etat    (ou state) 1 (limite active), 0 (charge complète) ou « absent » (portable sans limite possible)
 #   nc-limite-charge on      limite active          nc-limite-charge off     charge complète (100 %)
 # Méthodes, selon le portable : mode « Long_Life » (charge_types), seuil de fin de charge (80 %), ou mode
 # conservation des Lenovo (ideapad_laptop). TLP : son fichier /etc/tlp.d/20-battery-limit.conf (celui de
 # noctalia-config) suit le même réglage, sinon TLP remettrait l'ancien au démarrage.
 set -u
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# Langue des messages : NC_LANGUE, sinon la langue du système (français si elle commence par « fr »). Lancé en root :
+# ne lit aucun fichier de l'utilisateur (ni nc-langue ni ses réglages), seulement l'environnement et /etc/locale.conf.
+case "${NC_LANGUE:-}" in
+  fr|en) ;;
+  *) _l="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
+     [ -n "$_l" ] || _l="$(sed -n 's/^LANG=//p' /etc/locale.conf 2>/dev/null | tr -d '"')"
+     case "$_l" in fr*) NC_LANGUE=fr ;; *) NC_LANGUE=en ;; esac ;;
+esac
+t() { if [ "$NC_LANGUE" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 
 bat=""; for b in /sys/class/power_supply/BAT*; do [ -d "$b" ] && { bat="$b"; break; }; done
 cons="$(ls /sys/bus/platform/drivers/ideapad_acpi/*/conservation_mode 2>/dev/null | head -1)"
@@ -27,7 +36,7 @@ etat() {
 }
 
 regler() {   # $1 : 1 (limite) ou 0 (charge complète)
-  [ "$(id -u)" = 0 ] || { echo "nc-limite-charge : à lancer avec sudo." >&2; exit 1; }
+  [ "$(id -u)" = 0 ] || { echo "$(t "nc-limite-charge : à lancer avec sudo." "nc-limite-charge: run it with sudo.")" >&2; exit 1; }
   local n="${bat##*/}"
   if [ -n "$bat" ] && grep -q 'Long_Life' "$bat/charge_types" 2>/dev/null; then
     if [ "$1" = 1 ]; then echo Long_Life; else echo Standard; fi > "$bat/charge_types"
@@ -44,7 +53,7 @@ STOP_CHARGE_THRESH_$n=80"
     echo "$1" > "$cons"
     contenu=""
   else
-    echo "nc-limite-charge : ce portable ne permet pas de limiter la charge." >&2; exit 1
+    echo "$(t "nc-limite-charge : ce portable ne permet pas de limiter la charge." "nc-limite-charge: this laptop can't limit its charge.")" >&2; exit 1
   fi
   # TLP : même réglage au prochain démarrage (seulement le fichier de noctalia-config)
   if [ -d /etc/tlp.d ] && [ -n "$contenu" ]; then
@@ -57,8 +66,8 @@ STOP_CHARGE_THRESH_$n=80"
 }
 
 case "${1:-etat}" in
-  etat) etat ;;
+  etat|state|status) etat ;;
   on|1) regler 1; etat ;;
   off|0) regler 0; etat ;;
-  *) echo "Usage : nc-limite-charge etat | on | off" >&2; exit 2 ;;
+  *) echo "$(t "Usage : nc-limite-charge etat | on | off" "Usage: nc-limite-charge state | on | off")" >&2; exit 2 ;;
 esac

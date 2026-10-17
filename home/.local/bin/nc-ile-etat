@@ -85,7 +85,13 @@ systeme() {
   done
   [ -n "$temp" ] && echo "temperature=$((temp / 1000))"
   df -P / 2>/dev/null | awk 'NR==2 { gsub("%","",$5); printf "disque=%s\ndisque_libre=%.0f\n", $5, $4/1048576 }'
-  awk '{ s=int($1); h=int(s/3600); m=int((s%3600)/60); if (h>0) printf "allume=%d h %02d\n", h, m; else printf "allume=%d min\n", m }' /proc/uptime
+  # Durée affichée telle quelle par l'île (« Allumé depuis … ») : dans la langue choisie
+  . "$HOME/.local/bin/nc-langue" 2>/dev/null || NC_LANGUE=fr
+  if [ "$NC_LANGUE" = en ]; then
+    awk '{ s=int($1); h=int(s/3600); m=int((s%3600)/60); if (h>0) printf "allume=%dh %02dm\n", h, m; else printf "allume=%d min\n", m }' /proc/uptime
+  else
+    awk '{ s=int($1); h=int(s/3600); m=int((s%3600)/60); if (h>0) printf "allume=%d h %02d\n", h, m; else printf "allume=%d min\n", m }' /proc/uptime
+  fi
   # Santé de la batterie lissée et cycles (même calcul que l'accueil du terminal : nc-sysinfo sante)
   "$HOME/.local/bin/nc-sysinfo" sante | awk -F'\t' 'NF { print "sante=" $1; if ($2 != "") print "cycles=" $2 }'
   # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé
@@ -121,13 +127,14 @@ jeu() {
   done
 }
 
+# Noms anglais (nc-island-state media | game | system | wifi | bt | sound) ; les clés écrites restent les mêmes
 case "${1:-}" in
   media) media; exit 0 ;;
-  jeu) jeu; exit 0 ;;
-  systeme) systeme; exit 0 ;;
+  jeu|game) jeu; exit 0 ;;
+  systeme|system) systeme; exit 0 ;;
   wifi) wifi; exit 0 ;;
-  bt) bt; exit 0 ;;
-  son) son; exit 0 ;;
+  bt|bluetooth) bt; exit 0 ;;
+  son|sound|audio) son; exit 0 ;;
 esac
 
 v="$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"

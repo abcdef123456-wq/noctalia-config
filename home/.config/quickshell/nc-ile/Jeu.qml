@@ -29,8 +29,8 @@ Item {
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 2
-            Texte { text: "Mode jeu"; font.pixelSize: 22; font.weight: Font.DemiBold; color: Couleurs.orange }
-            Texte { text: "Effets coupés, notifications en pause"; secondaire: true; font.pixelSize: 12 }
+            Texte { text: Reglages.t("Mode jeu", "Game Mode"); font.pixelSize: 22; font.weight: Font.DemiBold; color: Couleurs.orange }
+            Texte { text: Reglages.t("Effets coupés, notifications en pause", "Effects off, notifications paused"); secondaire: true; font.pixelSize: 12 }
         }
     }
     Rond {
@@ -46,12 +46,12 @@ Item {
         anchors.top: tete.bottom; anchors.topMargin: 16
         columns: 2; spacing: 10
         readonly property real l: (j.width - 10) / 2
-        TuileJeu { width: grille.l; icone: "memory"; titre: "Processeur"; valeur: j.m.cpu !== undefined ? j.m.cpu + " %" : "–" }
-        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: "Processeur"; valeur: j.m.cpu_temp !== undefined ? j.m.cpu_temp + " °C" : "–"
+        TuileJeu { width: grille.l; icone: "memory"; titre: Reglages.t("Processeur", "CPU"); valeur: j.m.cpu !== undefined ? j.m.cpu + Reglages.t(" %", "%") : "–" }
+        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: Reglages.t("Processeur", "CPU"); valeur: j.m.cpu_temp !== undefined ? j.m.cpu_temp + " °C" : "–"
                 teinte: j.chaleur(parseInt(j.m.cpu_temp) || 0) }
-        TuileJeu { width: grille.l; icone: "developer_board"; titre: j.m.gpu_nom || "Carte graphique"
-                valeur: j.gpuVeille ? "en veille" : (j.m.gpu !== undefined ? j.m.gpu + " %" + (j.m.gpu_watts ? " · " + j.m.gpu_watts + " W" : "") : "–") }
-        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: "Carte graphique"; valeur: j.m.gpu_temp !== undefined ? j.m.gpu_temp + " °C" : "–"
+        TuileJeu { width: grille.l; icone: "developer_board"; titre: j.m.gpu_nom || Reglages.t("Carte graphique", "GPU")
+                valeur: j.gpuVeille ? Reglages.t("en veille", "asleep") : (j.m.gpu !== undefined ? j.m.gpu + Reglages.t(" %", "%") + (j.m.gpu_watts ? " · " + j.m.gpu_watts + " W" : "") : "–") }
+        TuileJeu { width: grille.l; icone: "device_thermostat"; titre: Reglages.t("Carte graphique", "GPU"); valeur: j.m.gpu_temp !== undefined ? j.m.gpu_temp + " °C" : "–"
                 teinte: j.chaleur(parseInt(j.m.gpu_temp) || 0) }
     }
 }

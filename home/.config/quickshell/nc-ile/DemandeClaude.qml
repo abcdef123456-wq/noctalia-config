@@ -71,9 +71,9 @@ Item {
         Row {
             visible: !d.question
             anchors.right: parent.right; spacing: 8
-            Bouton { texte: "Refuser"; onClic: d.choisir("non") }
-            Bouton { texte: "Toujours"; visible: d.vue !== null && d.vue.toujours === true; onClic: d.choisir("toujours") }
-            Bouton { texte: "Autoriser"; principal: true; teinte: d.teinte; onClic: d.choisir("oui") }
+            Bouton { texte: Reglages.t("Refuser", "Deny"); onClic: d.choisir("non") }
+            Bouton { texte: Reglages.t("Toujours", "Always"); visible: d.vue !== null && d.vue.toujours === true; onClic: d.choisir("toujours") }
+            Bouton { texte: Reglages.t("Autoriser", "Allow"); principal: true; teinte: d.teinte; onClic: d.choisir("oui") }
         }
         // Question : un bouton par réponse
         Flow {

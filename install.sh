@@ -5,6 +5,7 @@
 #   ./install.sh --no-system   seulement ta session (paquets, fichiers, terminal, services utilisateur), rien d'autre en root
 #   ./install.sh --files-only  seulement la copie des fichiers (aucun paquet, service ni sudo)
 #   ./install.sh --restore     remet les fichiers tels qu'avant la dernière installation
+#   ./install.sh --en | --fr   force la langue : anglais ou français (sinon le réglage LANGUE, puis celle du système)
 #
 # Distributions : Arch (et dérivées), Fedora, Debian/Ubuntu, openSUSE : Hyprland et Noctalia v5 sont installés
 # s'ils manquent. Autres distributions : installe Hyprland (0.55 ou plus) et Noctalia v5 toi-même
@@ -15,6 +16,11 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
+# Langue des messages : --en / --fr, sinon NC_LANGUE=en|fr, le réglage LANGUE, puis la langue du système (nc-langue)
+for a in "$@"; do case "$a" in --en) NC_LANGUE=en ;; --fr) NC_LANGUE=fr ;; esac; done
+if ! . "$REPO/home/.local/bin/nc-langue" 2>/dev/null; then
+  NC_LANGUE=fr; NOMS_ANGLAIS=""; t() { printf '%s' "$1"; }
+fi
 STATE="$HOME/.local/state/noctalia-config"
 OLD_STATE="$HOME/.local/state/legion-dotfiles"   # sauvegardes des versions « legion » de ce dépôt
 BK="$STATE/backup-$(date +%Y%m%d-%H%M%S)"
@@ -26,12 +32,13 @@ say()  { printf '\n\033[1;35m==\033[0m \033[1m%s\033[0m\n' "$*"; }
 info() { printf '   %s\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '   \033[33m! %s\033[0m\n' "$*"; }
-die()  { printf '\033[31mErreur : %s\033[0m\n' "$*" >&2; exit 1; }
-ask() { # ask "question" [o|n]  -> vrai si oui
-  local d="${2:-n}" r hint="[o/N]"
-  [ "$d" = o ] && hint="[O/n]"
+die()  { printf '\033[31m%s%s\033[0m\n' "$(t 'Erreur : ' 'Error: ')" "$*" >&2; exit 1; }
+ask() { # ask "question" [o|n]  -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
+  local d="${2:-n}" r hint
+  hint="$(t "[o/N]" "[y/N]")"
+  [ "$d" = o ] && hint="$(t "[O/n]" "[Y/n]")"
   r=""
-  if { true </dev/tty; } 2>/dev/null; then read -r -p "   $1 $hint " r </dev/tty || r=""; else info "$1 -> réponse par défaut ($d)"; fi
+  if { true </dev/tty; } 2>/dev/null; then read -r -p "   $1 $hint " r </dev/tty || r=""; else info "$1 -> $(t "réponse par défaut ($d)" "default answer ($([ "$d" = o ] && echo y || echo n))")"; fi
   r="${r:-$d}"
   [[ "$r" =~ ^[oOyY] ]]
 }
@@ -41,19 +48,20 @@ choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans 
   shift
   info "$q"
   for o in "$@"; do info "  $i) $o"; i=$((i + 1)); done
-  if { true </dev/tty; } 2>/dev/null; then read -r -p "   Ton choix [1] : " r </dev/tty || r=""; else info "-> réponse par défaut (1)"; fi
+  if { true </dev/tty; } 2>/dev/null; then read -r -p "   $(t "Ton choix [1] : " "Your choice [1]: ")" r </dev/tty || r=""; else info "$(t "-> réponse par défaut (1)" "-> default answer (1)")"; fi
   [[ "$r" =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le $# ] || r=1
   CHOIX=$r
 }
 # Longue étape sans sudo (compilation, téléchargement) : tourne en arrière-plan pendant qu'une ligne s'actualise
 # (roue, temps écoulé ; pour une compilation, avancement en %). avec_progres "Message" journal commande… -> son code
 avec_progres() {
-  local msg="$1" log="$2" pid t0=$SECONDS i=0 roue='|/-\' pc=""
+  local msg="$1" log="$2" pid t0=$SECONDS i=0 roue='|/-\' pc="" fpc
+  fpc="$(t ' · %d %%' ' · %d%%')"
   shift 2
   "$@" >"$log" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    pc="$(grep -ao '\[[0-9]*/[0-9]*\]' "$log" 2>/dev/null | tail -1 | awk -F'[][/]' '$3 > 0 { printf " · %d %%", 100 * $2 / $3 }' || true)"
+    pc="$(grep -ao '\[[0-9]*/[0-9]*\]' "$log" 2>/dev/null | tail -1 | awk -F'[][/]' -v f="$fpc" '$3 > 0 { printf f, 100 * $2 / $3 }' || true)"
     [ -t 1 ] && printf '\r   %s %s (%d min %02d s)%s   ' "${roue:$((i++ % 4)):1}" "$msg" $(((SECONDS - t0) / 60)) $(((SECONDS - t0) % 60)) "$pc"
     sleep 1
   done
@@ -66,12 +74,34 @@ for a in "$@"; do
     --no-system) MODE=nosystem ;;
     --files-only) MODE=files ;;
     --restore) MODE=restore ;;
-    --legion|--no-legion) info "Option $a ignorée : les profils d'énergie sont maintenant proposés sur tous les PC." ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
-    *) die "option inconnue : $a (voir ./install.sh --help)" ;;
+    --en|--fr) ;;   # langue : prise en compte plus haut
+    --legion|--no-legion) info "$(t "Option $a ignorée : les profils d'énergie sont maintenant proposés sur tous les PC." "Option $a ignored: power profiles are now offered on every PC.")" ;;
+    -h|--help)
+      if [ "$NC_LANGUE" = en ]; then
+        cat <<'AIDE_EN'
+install.sh: installs the noctalia-config desktop (Hyprland + Noctalia v5) on your PC.
+
+  ./install.sh               full install, with a question before each system step
+  ./install.sh --no-system   only your session (packages, files, terminal, user services), nothing else as root
+  ./install.sh --files-only  only copy the files (no packages, services or sudo)
+  ./install.sh --restore     put the files back as they were before the last install
+  ./install.sh --en | --fr   force the language: English or French (otherwise the LANGUE setting, then the system's)
+
+Distributions: Arch (and derivatives), Fedora, Debian/Ubuntu, openSUSE: Hyprland and Noctalia v5 are installed
+if missing. Other distributions: install Hyprland (0.55 or later) and Noctalia v5 yourself
+(docs.noctalia.dev), then run it again.
+Every replaced file is first backed up to ~/.local/state/noctalia-config/backup-<date>/.
+The script never runs a system update, and only touches the boot (Plymouth, GRUB, initramfs)
+if you answer yes to the matching question.
+AIDE_EN
+      else
+        sed -n '2,15p' "$0"
+      fi
+      exit 0 ;;
+    *) die "$(t "option inconnue : $a (voir ./install.sh --help)" "unknown option: $a (see ./install.sh --help)")" ;;
   esac
 done
-[ "$(id -u)" != 0 ] || die "lance ce script sans sudo : il demandera ton mot de passe quand il en aura besoin."
+[ "$(id -u)" != 0 ] || die "$(t "lance ce script sans sudo : il demandera ton mot de passe quand il en aura besoin." "run this script without sudo: it will ask for your password when it needs it.")"
 
 # ── Distribution ─────────────────────────────────────────────────────────────
 OSID=""; OSLIKE=""; OSCODE=""; OSNAME=""; OSLOGO=""; OSVER=0
@@ -99,9 +129,9 @@ BPO=""
 bpo_on() {
   [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] || return 1
   if ! apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; then
-    info "Hyprland 0.55 ou plus, TLP 1.9 ou plus : seulement dans « trixie-backports », la source officielle de Debian pour les"
-    info "versions récentes (https://backports.debian.org). Seuls les paquets demandés en viennent, le reste du système ne change pas."
-    ask "Activer trixie-backports ?" o || return 1
+    info "$(t "Hyprland 0.55 ou plus, TLP 1.9 ou plus : seulement dans « trixie-backports », la source officielle de Debian pour les" "Hyprland 0.55 or later, TLP 1.9 or later: only in “trixie-backports”, Debian's official source for")"
+    info "$(t "versions récentes (https://backports.debian.org). Seuls les paquets demandés en viennent, le reste du système ne change pas." "recent versions (https://backports.debian.org). Only the requested packages come from it; the rest of the system doesn't change.")"
+    ask "$(t "Activer trixie-backports ?" "Enable trixie-backports?")" o || return 1
     printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie-backports\nComponents: main\nEnabled: yes\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' |
       sudo tee /etc/apt/sources.list.d/debian-backports.sources >/dev/null
     sudo apt-get $APT_OPT update -q || return 1
@@ -132,7 +162,7 @@ pkg_try() {
   local p
   for p in "$@"; do
     pkg_installed "$p" && continue
-    info "installation : $p"
+    info "$(t "installation : $p" "installing: $p")"
     if [ "$FAMILY" = arch ]; then sudo pacman -S --needed --noconfirm "$p" >/dev/null 2>&1 || true
     else pkg_install "$p" >/dev/null 2>&1 || true; fi
   done
@@ -183,36 +213,36 @@ pname() {
 # ── Retour arrière ───────────────────────────────────────────────────────────
 if [ "$MODE" = restore ]; then
   last="$(ls -1d "$STATE"/backup-* "$OLD_STATE"/backup-* 2>/dev/null | awk -F/ '{ print $NF "\t" $0 }' | sort | tail -1 | cut -f2- || true)"
-  [ -n "$last" ] || die "aucune sauvegarde trouvée dans $STATE"
-  say "Restauration de $last"
-  ask "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" n || exit 0
+  [ -n "$last" ] || die "$(t "aucune sauvegarde trouvée dans $STATE" "no backup found in $STATE")"
+  say "$(t "Restauration de $last" "Restoring $last")"
+  ask "$(t "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" "Put your old files back and delete the ones added by the install?")" n || exit 0
   have systemctl && systemctl --user stop noctalia.service 2>/dev/null || true
   if [ -f "$last/.created" ]; then
     while IFS= read -r rel; do [ -n "$rel" ] && rm -rf "${HOME:?}/$rel"; done < "$last/.created"
   fi
   (cd "$last" && find . -path ./system -prune -o \( -type f -o -type l \) ! -name .created -print0 |
     while IFS= read -r -d '' f; do mkdir -p "$HOME/$(dirname "$f")"; cp -a "$last/$f" "$HOME/$f"; done)
-  [ -d "$last/system" ] && warn "Fichiers système sauvegardés dans $last/system : à remettre à la main avec sudo si besoin."
+  [ -d "$last/system" ] && warn "$(t "Fichiers système sauvegardés dans $last/system : à remettre à la main avec sudo si besoin." "System files backed up in $last/system: put them back by hand with sudo if needed.")"
   if have systemctl; then
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user start noctalia.service 2>/dev/null || true
   fi
-  ok "Fichiers restaurés. Ferme puis rouvre ta session."
+  ok "$(t "Fichiers restaurés. Ferme puis rouvre ta session." "Files restored. Log out and back in.")"
   exit 0
 fi
 
 # ── Vérifications ────────────────────────────────────────────────────────────
-say "Vérifications"
+say "$(t "Vérifications" "Checks")"
 # Outils de base du script : installés s'ils manquent (Debian neuf : jq et diffutils absents)
 manque=(); for t in jq sed find cmp awk; do have "$t" || manque+=("$t"); done
 if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ]; then
-  info "Outils nécessaires au script : ${manque[*]}"
+  info "$(t "Outils nécessaires au script : ${manque[*]}" "Tools the script needs: ${manque[*]}")"
   paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; *) paquets+=("$t") ;; esac; done
   [ "$FAMILY" = debian ] && sudo apt-get $APT_OPT update -q >/dev/null 2>&1
   pkg_install "${paquets[@]}" >/dev/null 2>&1 || true
 fi
-for t in jq sed find cmp awk; do have "$t" || die "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)"; done
-info "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)"
+for t in jq sed find cmp awk; do have "$t" || die "$(t "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: $t (install it with your distribution's package manager)")"; done
+info "$(t "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)" "Distribution: ${OSNAME:-unknown} (family: $FAMILY)")"
 
 LAPTOP=0; ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && LAPTOP=1
 # Première installation sur ce PC : quelques choix au début (assistant, étape 4)
@@ -224,7 +254,7 @@ for d in /sys/bus/pci/devices/*; do
 done
 HYBRID=$((NVIDIA && OTHER_GPU))
 dmi() { cat "/sys/class/dmi/id/$1" 2>/dev/null || true; }
-info "Portable : $([ $LAPTOP = 1 ] && echo oui || echo non) · Carte NVIDIA : $([ $NVIDIA = 1 ] && { [ $HYBRID = 1 ] && echo "oui (hybride)" || echo oui; } || echo non)"
+info "$(t "Portable : $([ $LAPTOP = 1 ] && echo oui || echo non) · Carte NVIDIA : $([ $NVIDIA = 1 ] && { [ $HYBRID = 1 ] && echo "oui (hybride)" || echo oui; } || echo non)" "Laptop: $([ $LAPTOP = 1 ] && echo yes || echo no) · NVIDIA card: $([ $NVIDIA = 1 ] && { [ $HYBRID = 1 ] && echo "yes (hybrid)" || echo yes; } || echo no)")"
 
 hypr_bin() { command -v Hyprland 2>/dev/null || command -v hyprland 2>/dev/null || true; }
 hypr_version() {
@@ -249,43 +279,43 @@ if [ "$MODE" != files ]; then
   # Fedora : Noctalia v5 n'est dans les dépôts qu'à partir de Fedora 44 ; vérifié avant de toucher à quoi que ce soit
   if [ "$FAMILY" = fedora ] && ! have noctalia; then
     if [ "$OSID" != fedora ] && [ "$OSID" != nobara ]; then
-      die "$OSNAME n'a pas Noctalia v5 dans ses dépôts : installe-le toi-même ($NOCT_DOCS) puis relance."
+      die "$(t "$OSNAME n'a pas Noctalia v5 dans ses dépôts : installe-le toi-même ($NOCT_DOCS) puis relance." "$OSNAME doesn't have Noctalia v5 in its repositories: install it yourself ($NOCT_DOCS), then run this again.")"
     elif [ "${OSVER%%.*}" -lt 44 ] 2>/dev/null; then
       if [ "$OSID" = nobara ]; then
-        die "Nobara $OSVER n'a pas Noctalia v5 : il faut Nobara 44 ou plus (basé sur Fedora 44)."
+        die "$(t "Nobara $OSVER n'a pas Noctalia v5 : il faut Nobara 44 ou plus (basé sur Fedora 44)." "Nobara $OSVER doesn't have Noctalia v5: Nobara 44 or later is required (based on Fedora 44).")"
       fi
-      die "Fedora $OSVER n'a pas Noctalia v5 : il faut Fedora 44 ou plus (sudo dnf system-upgrade download --releasever=44)."
+      die "$(t "Fedora $OSVER n'a pas Noctalia v5 : il faut Fedora 44 ou plus (sudo dnf system-upgrade download --releasever=44)." "Fedora $OSVER doesn't have Noctalia v5: Fedora 44 or later is required (sudo dnf system-upgrade download --releasever=44).")"
     fi
   fi
-  [ "$FAMILY" != other ] || have Hyprland || die "distribution non gérée par l'installateur. Installe Hyprland (0.55 ou plus) et Noctalia v5 ($NOCT_DOCS), puis relance."
+  [ "$FAMILY" != other ] || have Hyprland || die "$(t "distribution non gérée par l'installateur. Installe Hyprland (0.55 ou plus) et Noctalia v5 ($NOCT_DOCS), puis relance." "distribution not supported by the installer. Install Hyprland (0.55 or later) and Noctalia v5 ($NOCT_DOCS), then run this again.")"
 
   # Hyprland (Debian 13 : depuis trixie-backports, avec sa veille, son portail et uwsm)
   hv="$(hypr_version)"
   if [ -z "$(hypr_bin)" ] || { [ -n "$hv" ] && ! ver_ge "$hv" "$HYPR_MIN"; }; then
-    if [ -z "$(hypr_bin)" ]; then info "Hyprland n'est pas installé."; else info "Hyprland $hv est trop ancien (0.55 ou plus)."; fi
-    ask "L'installer maintenant ?" o || die "Hyprland 0.55 ou plus est nécessaire."
+    if [ -z "$(hypr_bin)" ]; then info "$(t "Hyprland n'est pas installé." "Hyprland is not installed.")"; else info "$(t "Hyprland $hv est trop ancien (0.55 ou plus)." "Hyprland $hv is too old (0.55 or later needed).")"; fi
+    ask "$(t "L'installer maintenant ?" "Install it now?")" o || die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
     if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
-      bpo_on || die "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même."
-      bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "installation de Hyprland impossible depuis trixie-backports."
+      bpo_on || die "$(t "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même." "without trixie-backports, Debian 13 doesn't have Hyprland 0.55: run this again and answer yes, or install it yourself.")"
+      bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "$(t "installation de Hyprland impossible depuis trixie-backports." "couldn't install Hyprland from trixie-backports.")"
     elif [ "$FAMILY" = fedora ] && { dv="$(dnf -q repoquery --latest-limit=1 --qf '%{version}\n' hyprland 2>/dev/null | tail -1)"
                                      [ -z "$dv" ] || ! ver_ge "$dv" "$HYPR_MIN"; }; then
       # Fedora : pas de Hyprland récent dans les dépôts officiels (ni dans l'ancien COPR solopasha, abandonné) ;
       # dépôt communautaire (COPR) le plus suivi, à jour
-      info "Pas de Hyprland 0.55 ou plus dans les dépôts de Fedora : dépôt communautaire COPR sdegler/hyprland"
+      info "$(t "Pas de Hyprland 0.55 ou plus dans les dépôts de Fedora : dépôt communautaire COPR sdegler/hyprland" "No Hyprland 0.55 or later in Fedora's repositories: community COPR repository sdegler/hyprland")"
       info "  https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/"
-      ask "Activer ce dépôt et installer Hyprland ?" o || die "Hyprland 0.55 ou plus est nécessaire."
+      ask "$(t "Activer ce dépôt et installer Hyprland ?" "Enable this repository and install Hyprland?")" o || die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
       if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi   # commande « dnf copr »
       sudo dnf -y copr disable solopasha/hyprland >/dev/null 2>&1 || true
-      sudo dnf -y copr enable sdegler/hyprland || die "activation du dépôt sdegler/hyprland impossible (paquet dnf5-plugins ?)."
+      sudo dnf -y copr enable sdegler/hyprland || die "$(t "activation du dépôt sdegler/hyprland impossible (paquet dnf5-plugins ?)." "couldn't enable the sdegler/hyprland repository (dnf5-plugins package?).")"
       sudo dnf install -y --refresh hyprland hypridle xdg-desktop-portal-hyprland uwsm ||
-        die "installation de Hyprland impossible depuis sdegler/hyprland."
+        die "$(t "installation de Hyprland impossible depuis sdegler/hyprland." "couldn't install Hyprland from sdegler/hyprland.")"
     else
-      pkg_install hyprland || die "installation de Hyprland impossible : installe-le toi-même puis relance."
+      pkg_install hyprland || die "$(t "installation de Hyprland impossible : installe-le toi-même puis relance." "couldn't install Hyprland: install it yourself, then run this again.")"
     fi
   fi
   if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
     bpo_need=(); for p in hypridle xdg-desktop-portal-hyprland uwsm; do pkg_installed "$p" || bpo_need+=("$p"); done
-    [ ${#bpo_need[@]} -eq 0 ] || { bpo_on && bpo_install "${bpo_need[@]}"; } || warn "Non installés depuis trixie-backports : ${bpo_need[*]}"
+    [ ${#bpo_need[@]} -eq 0 ] || { bpo_on && bpo_install "${bpo_need[@]}"; } || warn "$(t "Non installés depuis trixie-backports : ${bpo_need[*]}" "Not installed from trixie-backports: ${bpo_need[*]}")"
   fi
   # Plusieurs Hyprland installés (paquet, compilation à la main, mise à jour faite à la main…) : c'est le premier du
   # PATH qui démarre. S'il est trop ancien alors qu'un autre est assez récent, les anciens qui passent devant sont mis
@@ -308,13 +338,13 @@ if [ "$MODE" != files ]; then
       [ -n "$v" ] && ver_ge "$v" "$HYPR_MIN" && { [ -z "$mv_" ] || ! ver_ge "$mv_" "$v"; } && { meilleur="$b"; mv_="$v"; }
     done < <(hypr_tous)
     if [ -n "$meilleur" ]; then
-      info "Plusieurs Hyprland sont installés : $hb ($hv) démarre, alors que $meilleur ($mv_) est assez récent."
+      info "$(t "Plusieurs Hyprland sont installés : $hb ($hv) démarre, alors que $meilleur ($mv_) est assez récent." "Several Hyprland builds are installed: $hb ($hv) starts, while $meilleur ($mv_) is recent enough.")"
       gener=(); while read -r b; do
         [ "$b" = "$meilleur" ] && break
-        if du_paquet "$b"; then warn "$b vient d'un paquet de ta distribution : désinstalle ce paquet ou mets-le à jour."
+        if du_paquet "$b"; then warn "$(t "$b vient d'un paquet de ta distribution : désinstalle ce paquet ou mets-le à jour." "$b comes from one of your distribution's packages: uninstall that package or update it.")"
         else gener+=("$b"); fi
       done < <(type -aP Hyprland hyprland 2>/dev/null | awk '!vu[$0]++')
-      if [ ${#gener[@]} -gt 0 ] && ask "Mettre de côté les anciens (${gener[*]}) dans /usr/local/nc-ancien-hyprland (rien n'est supprimé) ?" o; then
+      if [ ${#gener[@]} -gt 0 ] && ask "$(t "Mettre de côté les anciens (${gener[*]}) dans /usr/local/nc-ancien-hyprland (rien n'est supprimé) ?" "Move the old ones (${gener[*]}) aside to /usr/local/nc-ancien-hyprland (nothing is deleted)?")" o; then
         cote=/usr/local/nc-ancien-hyprland
         for b in "${gener[@]}"; do
           d="$(dirname "$b")"
@@ -328,30 +358,30 @@ if [ "$MODE" != files ]; then
           esac
         done
         hash -r
-        ok "Anciens Hyprland mis de côté : $meilleur ($mv_) sera utilisé. Pour les remettre : sudo cp -a $cote/. / "
+        ok "$(t "Anciens Hyprland mis de côté : $meilleur ($mv_) sera utilisé. Pour les remettre : sudo cp -a $cote/. / " "Old Hyprland builds moved aside: $meilleur ($mv_) will be used. To put them back: sudo cp -a $cote/. / ")"
       fi
     fi
   fi
   hv="$(hypr_version)"
-  [ -n "$hv" ] || die "version de Hyprland introuvable."
+  [ -n "$hv" ] || die "$(t "version de Hyprland introuvable." "Hyprland version not found.")"
   if ! ver_ge "$hv" "$HYPR_MIN"; then
     # Diagnostic : d'où vient ce Hyprland, et que faire selon la distribution
-    warn "Hyprland $hv ($(hypr_bin)) est trop ancien : cette config utilise le format Lua de Hyprland 0.55 ou plus."
+    warn "$(t "Hyprland $hv ($(hypr_bin)) est trop ancien : cette config utilise le format Lua de Hyprland 0.55 ou plus." "Hyprland $hv ($(hypr_bin)) is too old: this config uses the Lua format of Hyprland 0.55 or later.")"
     case "$FAMILY:$OSID:$OSCODE" in
       debian:debian:trixie)
-        info "Versions disponibles :"; apt-cache policy hyprland 2>/dev/null | sed -n '1,12p' | sed 's/^/     /'
-        info "Mise à jour à la main : sudo apt install -t trixie-backports hyprland hypridle xdg-desktop-portal-hyprland uwsm" ;;
-      debian:debian:*) info "Debian $OSCODE n'a pas Hyprland 0.55 : il faut Debian 13 (trixie) ou plus récent." ;;
-      debian:*) info "$OSNAME n'a pas encore Hyprland 0.55 dans ses dépôts : installe-le autrement (https://wiki.hypr.land/Getting-Started/Installation/)." ;;
-      fedora:*) info "Mise à jour à la main : sudo dnf copr enable sdegler/hyprland && sudo dnf upgrade --refresh hyprland" ;;
+        info "$(t "Versions disponibles :" "Available versions:")"; apt-cache policy hyprland 2>/dev/null | sed -n '1,12p' | sed 's/^/     /'
+        info "$(t "Mise à jour à la main : sudo apt install -t trixie-backports hyprland hypridle xdg-desktop-portal-hyprland uwsm" "Update by hand: sudo apt install -t trixie-backports hyprland hypridle xdg-desktop-portal-hyprland uwsm")" ;;
+      debian:debian:*) info "$(t "Debian $OSCODE n'a pas Hyprland 0.55 : il faut Debian 13 (trixie) ou plus récent." "Debian $OSCODE doesn't have Hyprland 0.55: Debian 13 (trixie) or newer is required.")" ;;
+      debian:*) info "$(t "$OSNAME n'a pas encore Hyprland 0.55 dans ses dépôts : installe-le autrement (https://wiki.hypr.land/Getting-Started/Installation/)." "$OSNAME doesn't have Hyprland 0.55 in its repositories yet: install it another way (https://wiki.hypr.land/Getting-Started/Installation/).")" ;;
+      fedora:*) info "$(t "Mise à jour à la main : sudo dnf copr enable sdegler/hyprland && sudo dnf upgrade --refresh hyprland" "Update by hand: sudo dnf copr enable sdegler/hyprland && sudo dnf upgrade --refresh hyprland")" ;;
     esac
-    case "$(hypr_bin)" in /usr/local/*|"$HOME"/*) info "Ce Hyprland a été installé à la main ($(hypr_bin)) et passe avant celui de ta distribution : supprime-le ou mets-le à jour." ;; esac
-    die "Hyprland 0.55 ou plus est nécessaire."
+    case "$(hypr_bin)" in /usr/local/*|"$HOME"/*) info "$(t "Ce Hyprland a été installé à la main ($(hypr_bin)) et passe avant celui de ta distribution : supprime-le ou mets-le à jour." "This Hyprland was installed by hand ($(hypr_bin)) and takes precedence over your distribution's: remove it or update it.")" ;; esac
+    die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
   fi
 
   # Noctalia v5
   if ! have noctalia; then
-    say "Installation de Noctalia v5"
+    say "$(t "Installation de Noctalia v5" "Installing Noctalia v5")"
     case "$FAMILY" in
       arch) sudo pacman -S --needed noctalia ;;
       fedora) sudo dnf install -y noctalia ;;
@@ -361,11 +391,11 @@ if [ "$MODE" != files ]; then
           opensuse-slowroll) rp=openSUSE_Slowroll ;;
           *) rp="" ;;
         esac
-        [ -n "$rp" ] || die "version d'openSUSE non gérée : suis $NOCT_DOCS puis relance."
+        [ -n "$rp" ] || die "$(t "version d'openSUSE non gérée : suis $NOCT_DOCS puis relance." "unsupported openSUSE version: follow $NOCT_DOCS, then run this again.")"
         url="https://download.opensuse.org/repositories/home:neifua:Noctalia/$rp/home:neifua:Noctalia.repo"
-        info "Noctalia n'est pas dans les dépôts d'openSUSE : dépôt tiers indiqué par la documentation officielle :"
+        info "$(t "Noctalia n'est pas dans les dépôts d'openSUSE : dépôt tiers indiqué par la documentation officielle :" "Noctalia isn't in openSUSE's repositories: third-party repository given by the official documentation:")"
         info "$url"
-        ask "Ajouter ce dépôt et installer Noctalia ?" o || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
+        ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         sudo zypper addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --gpg-auto-import-keys refresh && sudo zypper install noctalia ;;
       debian)
         case "$OSCODE" in
@@ -374,11 +404,11 @@ if [ "$MODE" != files ]; then
           sid|"") [ "$OSID" = debian ] && src=noctalia-unstable.sources || src="" ;;
           *) src="" ;;
         esac
-        [ -n "$src" ] || die "version de ${OSID:-Debian} non gérée par l'installateur (Debian 13, Debian Sid, Ubuntu 26.04) : suis $NOCT_DOCS puis relance."
-        info "Noctalia n'est pas dans les dépôts de ta distribution : dépôt officiel indiqué par la documentation :"
-        info "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb"
-        info "  dépôt : https://pkg.noctalia.dev/deb/$src"
-        ask "Ajouter ce dépôt et installer Noctalia ?" o || die "Noctalia v5 est nécessaire : $NOCT_DOCS"
+        [ -n "$src" ] || die "$(t "version de ${OSID:-Debian} non gérée par l'installateur (Debian 13, Debian Sid, Ubuntu 26.04) : suis $NOCT_DOCS puis relance." "${OSID:-Debian} version not supported by the installer (Debian 13, Debian Sid, Ubuntu 26.04): follow $NOCT_DOCS, then run this again.")"
+        info "$(t "Noctalia n'est pas dans les dépôts de ta distribution : dépôt officiel indiqué par la documentation :" "Noctalia isn't in your distribution's repositories: official repository given by the documentation:")"
+        info "$(t "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb" "  key: https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb")"
+        info "$(t "  dépôt : https://pkg.noctalia.dev/deb/$src" "  repository: https://pkg.noctalia.dev/deb/$src")"
+        ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         have wget || sudo apt-get $APT_OPT install -y wget
         kd="$(mktemp -d)"; wget -q -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
         sudo wget -q -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
@@ -386,11 +416,11 @@ if [ "$MODE" != files ]; then
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
     esac
-    have noctalia || die "Noctalia v5 n'a pas pu être installé : $NOCT_DOCS"
+    have noctalia || die "$(t "Noctalia v5 n'a pas pu être installé : $NOCT_DOCS" "Noctalia v5 couldn't be installed: $NOCT_DOCS")"
   fi
   if [ "$FAMILY" = arch ] && pkg_installed noctalia-shell; then
-    warn "L'ancienne Noctalia v4 (noctalia-shell) est installée. Cette config utilise la v5 : le service « noctalia » de ta session lancera la v5."
-    warn "Tu pourras désinstaller la v4 ensuite : sudo pacman -Rns noctalia-shell"
+    warn "$(t "L'ancienne Noctalia v4 (noctalia-shell) est installée. Cette config utilise la v5 : le service « noctalia » de ta session lancera la v5." "The old Noctalia v4 (noctalia-shell) is installed. This config uses v5: your session's “noctalia” service will start v5.")"
+    warn "$(t "Tu pourras désinstaller la v4 ensuite : sudo pacman -Rns noctalia-shell" "You can uninstall v4 afterwards: sudo pacman -Rns noctalia-shell")"
   fi
   ok "Hyprland $hv · Noctalia v5 ($(noctalia --version 2>/dev/null | head -1))"
 fi
@@ -439,7 +469,7 @@ LCX="$(awk -v w="$LW" 'BEGIN{printf "%.1f", w/2}')"
 LCY1="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.30}')"; LCY2="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.405}')"
 LCY3="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.64}')";  LCY4="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.86}')"
 LCY5="$(awk -v h="$LH" 'BEGIN{printf "%.1f", h*0.93}')"
-ok "Écran principal : $MON, ${PXW}x${PXH} pixels, échelle $SCALE (${LW}x${LH} points)"
+ok "$(t "Écran principal : $MON, ${PXW}x${PXH} pixels, échelle $SCALE (${LW}x${LH} points)" "Main display: $MON, ${PXW}x${PXH} pixels, scale $SCALE (${LW}x${LH} points)")"
 
 # Clavier : disposition du système ; bascule Super+Espace seulement s'il y en a plusieurs.
 # Sources, dans l'ordre : localectl (X11), /etc/default/keyboard (Debian), clavier de la console (« fr-latin1 » -> fr),
@@ -465,11 +495,11 @@ for kb in \
 done
 KBL="${KBL:-us}"
 KBO=""; case "$KBL" in *,*) KBO="grp:win_space_toggle" ;; esac
-ok "Clavier : $KBL"
+ok "$(t "Clavier : $KBL" "Keyboard: $KBL")"
 # Navigateur par défaut (épinglé dans la recherche et le dock)
 BROWSER="$(xdg-settings get default-web-browser 2>/dev/null | sed 's/\.desktop$//' | head -1 || true)"
 BROWSER="${BROWSER:-firefox}"
-ok "Navigateur : $BROWSER"
+ok "$(t "Navigateur : $BROWSER" "Browser: $BROWSER")"
 # Langue (écran de connexion)
 LOCALE="$(echo "${LANG:-en_US.UTF-8}" | sed -E 's/[.@].*$//')"; [ -n "$LOCALE" ] || LOCALE=en_US
 # Logo de la distribution dans la barre (coloré aux couleurs du thème) ; vide = icône de Noctalia
@@ -484,7 +514,7 @@ else
     done
   done
 fi
-ok "Logo de la barre : ${DISTRO_LOGO:-icône de Noctalia}"
+ok "$(t "Logo de la barre : ${DISTRO_LOGO:-icône de Noctalia}" "Bar logo: ${DISTRO_LOGO:-Noctalia icon}")"
 # Demandes de mot de passe (polkit) : l'agent de KDE s'il est installé, sinon celui de Noctalia
 POLKIT=true; KDE_POLKIT=0
 if systemctl --user cat plasma-polkit-agent.service >/dev/null 2>&1; then POLKIT=false; KDE_POLKIT=1; fi
@@ -499,18 +529,18 @@ fi
 # Écran verrouillé : Noctalia (qui dessine l'écran de verrouillage) ne doit pas être relancée, sinon Hyprland affiche
 # « l'écran de verrouillage a planté ». L'installation attend que tu sois là.
 if [ "$MODE" != files ] && have noctalia && noctalia msg status 2>/dev/null | grep -qE '"locked": *true'; then
-  die "l'écran est verrouillé : relance l'installation une fois la session déverrouillée."
+  die "$(t "l'écran est verrouillé : relance l'installation une fois la session déverrouillée." "the screen is locked: run the install again once the session is unlocked.")"
 fi
 
 echo
-info "Ce script va :"
-info "  Tout ce qui est déjà en place est sauté : seul ce qui manque ou a changé est fait."
-info "  1. installer les paquets manquants (sans mise à jour système) ;"
-info "  2. sauvegarder puis remplacer ta config Hyprland, Noctalia, kitty, Qt/KDE ;"
-info "  3. te proposer la config du terminal (zsh, oh-my-zsh, powerlevel10k) et de Neovim (LazyVim) ;"
-info "  4. activer les services de ta session (barre, couleurs, miniatures, profils d'énergie, veille) ;"
-[ "$MODE" = full ] && info "  5. te proposer, une par une, les étapes système pas encore faites (énergie, Wi-Fi, démarrage, écran de connexion, pilote NVIDIA)."
-ask "On y va ?" o || exit 0
+info "$(t "Ce script va :" "This script will:")"
+info "$(t "  Tout ce qui est déjà en place est sauté : seul ce qui manque ou a changé est fait." "  Anything already in place is skipped: only what's missing or has changed is done.")"
+info "$(t "  1. installer les paquets manquants (sans mise à jour système) ;" "  1. install the missing packages (no system update);")"
+info "$(t "  2. sauvegarder puis remplacer ta config Hyprland, Noctalia, kitty, Qt/KDE ;" "  2. back up, then replace your Hyprland, Noctalia, kitty and Qt/KDE config;")"
+info "$(t "  3. te proposer la config du terminal (zsh, oh-my-zsh, powerlevel10k) et de Neovim (LazyVim) ;" "  3. offer you the terminal config (zsh, oh-my-zsh, powerlevel10k) and the Neovim config (LazyVim);")"
+info "$(t "  4. activer les services de ta session (barre, couleurs, miniatures, profils d'énergie, veille) ;" "  4. enable your session's services (bar, colors, thumbnails, power profiles, sleep);")"
+[ "$MODE" = full ] && info "$(t "  5. te proposer, une par une, les étapes système pas encore faites (énergie, Wi-Fi, démarrage, écran de connexion, pilote NVIDIA)." "  5. offer you, one by one, the system steps not done yet (power, Wi-Fi, boot, login screen, NVIDIA driver).")"
+ask "$(t "On y va ?" "Ready to go?")" o || exit 0
 
 mkdir -p "$BK"
 tmp="$(mktemp)"
@@ -529,13 +559,13 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
 # Dépôt communautaire (COPR) errornointernet/quickshell, tenu à jour (0.3.x)
 qs_ver() { qs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
 if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)" 0.3; then
-  info "L'île dynamique utilise Quickshell 0.3, absent des dépôts de Fedora : dépôt communautaire COPR errornointernet/quickshell"
-  if ask "Activer ce dépôt pour l'île dynamique ?" o; then
+  info "$(t "L'île dynamique utilise Quickshell 0.3, absent des dépôts de Fedora : dépôt communautaire COPR errornointernet/quickshell" "The dynamic island uses Quickshell 0.3, which isn't in Fedora's repositories: community COPR repository errornointernet/quickshell")"
+  if ask "$(t "Activer ce dépôt pour l'île dynamique ?" "Enable this repository for the dynamic island?")" o; then
     if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi
     sudo dnf -y copr enable errornointernet/quickshell >/dev/null 2>&1 &&
       { if have qs; then sudo dnf upgrade -y --refresh quickshell; else sudo dnf install -y --refresh quickshell; fi; } >/dev/null 2>&1 &&
-      hash -r && ver_ge "$(qs_ver)" 0.3 && ok "Quickshell $(qs_ver) installé." ||
-      warn "Quickshell non installé depuis le COPR : l'île du plugin Noctalia sera utilisée."
+      hash -r && ver_ge "$(qs_ver)" 0.3 && ok "$(t "Quickshell $(qs_ver) installé." "Quickshell $(qs_ver) installed.")" ||
+      warn "$(t "Quickshell non installé depuis le COPR : l'île du plugin Noctalia sera utilisée." "Quickshell not installed from the COPR: the Noctalia plugin island will be used.")"
     hash -r
   fi
 fi
@@ -543,7 +573,7 @@ GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty 
          jq grim slurp swappy wl-clipboard brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng checkupdates)
 if [ "$MODE" != files ]; then
-  say "1. Paquets"
+  say "$(t "1. Paquets" "1. Packages")"
   missing=(); manual=()
   for g in "${GENERIC[@]}"; do
     p="$(pname "$g")"
@@ -553,29 +583,29 @@ if [ "$MODE" != files ]; then
     missing+=("$p")
   done
   if [ ${#missing[@]} -eq 0 ]; then
-    ok "Tout est déjà installé."
+    ok "$(t "Tout est déjà installé." "Everything is already installed.")"
   elif [ "$FAMILY" = arch ]; then
     unknown=()
     for p in "${missing[@]}"; do pacman -Si "$p" >/dev/null 2>&1 || unknown+=("$p"); done
     if [ ${#unknown[@]} -gt 0 ]; then
-      warn "Introuvables dans ta base de paquets : ${unknown[*]}"
-      die "ta base de paquets est sans doute ancienne. Lance « sudo pacman -Syu », redémarre si besoin, puis relance ce script."
+      warn "$(t "Introuvables dans ta base de paquets : ${unknown[*]}" "Not found in your package database: ${unknown[*]}")"
+      die "$(t "ta base de paquets est sans doute ancienne. Lance « sudo pacman -Syu », redémarre si besoin, puis relance ce script." "your package database is probably out of date. Run “sudo pacman -Syu”, reboot if needed, then run this script again.")"
     fi
-    info "À installer : ${missing[*]}"
-    if pkg_install "${missing[@]}"; then ok "Paquets installés."; else warn "Paquets non installés : ${missing[*]} (à installer toi-même)."; fi
+    info "$(t "À installer : ${missing[*]}" "To install: ${missing[*]}")"
+    if pkg_install "${missing[@]}"; then ok "$(t "Paquets installés." "Packages installed.")"; else warn "$(t "Paquets non installés : ${missing[*]} (à installer toi-même)." "Packages not installed: ${missing[*]} (install them yourself).")"; fi
   else
     failed=()
-    for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "installé : $p" || failed+=("$p"); done
-    [ ${#failed[@]} -eq 0 ] && ok "Paquets installés." || warn "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}"
+    for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "$(t "installé : $p" "installed: $p")" || failed+=("$p"); done
+    [ ${#failed[@]} -eq 0 ] && ok "$(t "Paquets installés." "Packages installed.")" || warn "$(t "Non installés (nom différent ou absent sur ta distribution) : ${failed[*]}" "Not installed (different name, or missing on your distribution): ${failed[*]}")"
   fi
   case " ${manual[*]} " in
     *" nerdfont "*) fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font" >/dev/null ||
-                      info "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." ;;
+                      info "$(t "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." "The terminal font (CaskaydiaCove Nerd Font) will be offered for download in step 3.")" ;;
   esac
 fi
 
 # ── 2. Fichiers ──────────────────────────────────────────────────────────────
-say "2. Fichiers de configuration"
+say "$(t "2. Fichiers de configuration" "2. Configuration files")"
 NOCT_WAS_ACTIVE=0
 if [ "$MODE" != files ] && systemctl --user is-active --quiet noctalia.service 2>/dev/null; then
   NOCT_WAS_ACTIVE=1
@@ -625,7 +655,7 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
   backup .zshrc
   sed -i 's#\.config/legion/greeting\.zsh#.config/nc/greeting.zsh#g' "$HOME/.zshrc"; migrated=1
 fi
-[ "$migrated" = 1 ] && ok "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde."
+[ "$migrated" = 1 ] && ok "$(t "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde." "Old version (“legion”) converted; its files are in the backup.")"
 
 # Icônes : thème « NC » dessiné par nc-icones aux couleurs du fond d'écran (dossiers, corbeille, Terminal,
 # Fichiers), le reste vient de Papirus
@@ -639,30 +669,30 @@ ILE=noctalia
 # seulement les modules utiles à l'île, installé dans /usr/local. Testé sur Debian 13 (protocoles Wayland des backports).
 compiler_quickshell() {
   local wd prefixe="/usr/local"
-  info "Quickshell (l'île dynamique : centre de contrôle, notifications, Spotlight) n'est pas dans les dépôts de ta distribution."
-  info "Il peut être compilé depuis ses sources officielles (https://quickshell.org) : environ 5 minutes, ~400 Mo d'outils."
-  ask "Le compiler et l'installer (dans $prefixe) ?" o || return 1
+  info "$(t "Quickshell (l'île dynamique : centre de contrôle, notifications, Spotlight) n'est pas dans les dépôts de ta distribution." "Quickshell (the dynamic island: Control Center, notifications, Spotlight) isn't in your distribution's repositories.")"
+  info "$(t "Il peut être compilé depuis ses sources officielles (https://quickshell.org) : environ 5 minutes, ~400 Mo d'outils." "It can be built from its official sources (https://quickshell.org): about 5 minutes, ~400 MB of tools.")"
+  ask "$(t "Le compiler et l'installer (dans $prefixe) ?" "Build and install it (in $prefixe)?")" o || return 1
   pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
     qt6-declarative-dev qt6-declarative-private-dev qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev qt6-svg-dev \
     libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols
   # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
   wd="$(mktemp -d)"
-  info "Compilation de Quickshell (5 à 15 minutes selon le processeur) :"
-  if { avec_progres "Téléchargement des sources" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" ||
-       avec_progres "Téléchargement des sources" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
-     avec_progres "Préparation" "$wd/cmake.log" cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
+  info "$(t "Compilation de Quickshell (5 à 15 minutes selon le processeur) :" "Building Quickshell (5 to 15 minutes depending on the processor):")"
+  if { avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" ||
+       avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
+     avec_progres "$(t "Préparation" "Configuring")" "$wd/cmake.log" cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
        -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF -DSCREENCOPY=OFF \
        -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF \
        -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
        -DHYPRLAND_SURFACE_EXTENSIONS=OFF &&
-     avec_progres "Compilation" "$wd/build.log" cmake --build "$wd/build" &&
+     avec_progres "$(t "Compilation" "Building")" "$wd/build.log" cmake --build "$wd/build" &&
      sudo cmake --install "$wd/build" >/dev/null 2>&1; then
-    ok "Quickshell installé ($(qs --version 2>/dev/null | head -1))."
+    ok "$(t "Quickshell installé ($(qs --version 2>/dev/null | head -1))." "Quickshell installed ($(qs --version 2>/dev/null | head -1)).")"
     rm -rf "$wd"
     return 0
   fi
-  warn "Compilation de Quickshell impossible (journal : $wd) : l'île du plugin Noctalia est utilisée."
+  warn "$(t "Compilation de Quickshell impossible (journal : $wd) : l'île du plugin Noctalia est utilisée." "Couldn't build Quickshell (log: $wd): the Noctalia plugin island is used.")"
   return 1
 }
 # L'île Quickshell pour tout le monde : paquet sur Arch et Fedora, compilée sur Debian / Ubuntu
@@ -671,13 +701,13 @@ if have qs && ver_ge "$(qs_ver || true)" 0.3; then      # l'île demande Quicksh
   ILE=quickshell
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
   if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
-    info "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons"
-    if ask "La télécharger (15 Mo) ?" o; then
+    info "$(t "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons" "Island icons: Material Symbols Rounded font (Google), https://github.com/google/material-design-icons")"
+    if ask "$(t "La télécharger (15 Mo) ?" "Download it (15 MB)?")" o; then
       mkdir -p "$(dirname "$POLICE_ICONES")"
       if curl -fsSL -o "$POLICE_ICONES.tmp" 'https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL,GRAD,opsz,wght%5D.ttf'; then
-        mv "$POLICE_ICONES.tmp" "$POLICE_ICONES"; fc-cache -f "$(dirname "$POLICE_ICONES")" >/dev/null 2>&1 || true; ok "Police d'icônes installée."
+        mv "$POLICE_ICONES.tmp" "$POLICE_ICONES"; fc-cache -f "$(dirname "$POLICE_ICONES")" >/dev/null 2>&1 || true; ok "$(t "Police d'icônes installée." "Icon font installed.")"
       else
-        rm -f "$POLICE_ICONES.tmp"; warn "Téléchargement impossible : l'île du plugin Noctalia est utilisée."; ILE=noctalia
+        rm -f "$POLICE_ICONES.tmp"; warn "$(t "Téléchargement impossible : l'île du plugin Noctalia est utilisée." "Download failed: the Noctalia plugin island is used.")"; ILE=noctalia
       fi
     else
       ILE=noctalia
@@ -730,12 +760,19 @@ while IFS= read -r -d '' src; do
   copied=$((copied + 1))
   case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
 done < <(find "$root" -type f -print0)
-ok "$copied fichier(s) installé(s), $same déjà à jour.$([ "$copied" -gt 0 ] && echo " Sauvegarde : $BK")"
+ok "$(t "$copied fichier(s) installé(s), $same déjà à jour." "$copied file(s) installed, $same already up to date.")$([ "$copied" -gt 0 ] && echo " $(t "Sauvegarde : $BK" "Backup: $BK")")"
+# Noms anglais des commandes (nc-settings = nc-reglages…) : liens, quelle que soit la langue choisie
+# (NOMS_ANGLAIS : défini par nc-langue, lu en haut du script)
+for paire in $NOMS_ANGLAIS; do
+  [ -x "$HOME/.local/bin/${paire#*:}" ] || continue
+  [ -e "$HOME/.local/bin/${paire%%:*}" ] && [ ! -L "$HOME/.local/bin/${paire%%:*}" ] && continue   # jamais un vrai fichier
+  ln -sfn "${paire#*:}" "$HOME/.local/bin/${paire%%:*}"
+done
 
 # Session Hyprland ouverte avec l'ancien format : bascule à chaud vers hyprland.lua, avant de retirer l'ancienne config
 # (Hyprland recharge sa config dès qu'un fichier change : la retirer avant la bascule laisserait la session sans réglages).
 if have hyprctl && hyprctl systeminfo 2>/dev/null | grep 'configProvider: hyprlang' >/dev/null; then
-  hyprctl reload full-reset >/dev/null 2>&1 && ok "Session Hyprland passée au format Lua."
+  hyprctl reload full-reset >/dev/null 2>&1 && ok "$(t "Session Hyprland passée au format Lua." "Hyprland session switched to the Lua format.")"
 fi
 # Config Hyprland changée : un seul rechargement, une fois tous les fichiers en place
 [ "$hypr_changed" = 1 ] && have hyprctl && hyprctl systeminfo 2>/dev/null | grep 'configProvider: lua' >/dev/null && hyprctl reload >/dev/null 2>&1
@@ -747,8 +784,8 @@ if [ -f "$HC/hyprland.conf" ]; then
     [ -e "$HC/$rel" ] && { backup ".config/hypr/$rel"; rm -f "$HC/$rel"; }
   done
   rmdir "$HC/conf.d" "$HC/noctalia" 2>/dev/null || true
-  ok "Ancienne config Hyprland (hyprland.conf) remplacée par hyprland.lua ; elle est dans la sauvegarde."
-  [ -d "$HC/conf.d" ] && info "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin."
+  ok "$(t "Ancienne config Hyprland (hyprland.conf) remplacée par hyprland.lua ; elle est dans la sauvegarde." "Old Hyprland config (hyprland.conf) replaced by hyprland.lua; it's in the backup.")"
+  [ -d "$HC/conf.d" ] && info "$(t "Le dossier ~/.config/hypr/conf.d contient encore tes propres fichiers : à reporter dans ~/.config/hypr/perso.lua si tu en as besoin." "The ~/.config/hypr/conf.d folder still has your own files: move them to ~/.config/hypr/perso.lua if you need them.")"
 fi
 
 # Fichiers (Nautilus, style Apple) : appli par défaut pour les dossiers ; applis GTK en sombre avec les mêmes icônes
@@ -826,7 +863,21 @@ PYEOF
 # Tes réglages Hyprland personnels : fichier créé une seule fois avec des exemples, jamais remplacé ensuite
 PERSO="$HOME/.config/hypr/perso.lua"
 if [ ! -e "$PERSO" ]; then
-  cat > "$PERSO" <<'PERSO_EOF'
+  if [ "$NC_LANGUE" = en ]; then
+    cat > "$PERSO" <<'PERSO_EN'
+-- Your personal Hyprland settings: loaded last, never replaced by install.sh or nc-update.
+-- Hyprland 0.55+ Lua format (https://wiki.hypr.land). Remove "--" at the start of a line to enable it.
+--
+-- Shortcuts without editing a file: nc-shortcut (add, change or disable the config's shortcuts).
+-- Common settings (gaps, borders, touchpad, display…): nc-settings.
+--
+-- hl.bind("SUPER + B", hl.dsp.exec_cmd("firefox"), { description = "My shortcuts|Browser" })
+-- hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
+-- hl.config({ general = { gaps_out = 6 }, decoration = { rounding = 10 } })
+-- hl.on("hyprland.start", function() hl.exec_cmd("discord --start-minimized") end)
+PERSO_EN
+  else
+    cat > "$PERSO" <<'PERSO_EOF'
 -- Tes réglages Hyprland personnels : chargés en dernier, jamais remplacés par install.sh ni nc-maj.
 -- Format Lua de Hyprland 0.55+ (https://wiki.hypr.land). Enlève « -- » devant une ligne pour l'activer.
 --
@@ -838,6 +889,7 @@ if [ ! -e "$PERSO" ]; then
 -- hl.config({ general = { gaps_out = 6 }, decoration = { rounding = 10 } })
 -- hl.on("hyprland.start", function() hl.exec_cmd("discord --start-minimized") end)
 PERSO_EOF
+  fi
   echo ".config/hypr/perso.lua" >> "$BK/.created"
 fi
 # Commandes nc-* (nc-maj…) trouvées aussi dans bash, sans attendre une reconnexion ni passer à zsh
@@ -857,16 +909,16 @@ KEY="$HOME/.local/state/noctalia/storage.key"
 if [ ! -s "$KEY" ]; then
   mkdir -p "$(dirname "$KEY")"
   if ( umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$KEY" ) && [ "$(wc -c < "$KEY")" = 64 ]; then
-    chmod 600 "$KEY"; ok "Clé de l'historique du presse-papiers créée."
+    chmod 600 "$KEY"; ok "$(t "Clé de l'historique du presse-papiers créée." "Clipboard history key created.")"
   else
-    rm -f "$KEY"; warn "Clé du presse-papiers non créée : l'historique du presse-papiers ne fonctionnera pas."
+    rm -f "$KEY"; warn "$(t "Clé du presse-papiers non créée : l'historique du presse-papiers ne fonctionnera pas." "Clipboard key not created: clipboard history won't work.")"
   fi
 fi
 
-[ "$MODE" = files ] && { say "Terminé (fichiers seulement)."; info "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer."; exit 0; }
+[ "$MODE" = files ] && { say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; exit 0; }
 
 # ── 3. Terminal : zsh + oh-my-zsh + powerlevel10k ─────────────────────────────
-say "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)"
+say "$(t "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)" "3. Terminal: zsh, oh-my-zsh, powerlevel10k (two-line prompt, suggestions, colors)")"
 ZSH_DIR="$HOME/.oh-my-zsh"; ZC="$ZSH_DIR/custom"
 declare -A REPOS=(
   ["$ZSH_DIR"]=https://github.com/ohmyzsh/ohmyzsh.git
@@ -884,47 +936,47 @@ have zsh && have git && [ ${#need[@]} -eq 0 ] && has_font || term_done=0
 for f in .zshrc .p10k.zsh; do cmp -s "$REPO/home/$f" "$HOME/$f" || term_done=0; done
 [ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" = zsh ] || term_done=0
 if [ "$term_done" = 1 ]; then
-  ok "Déjà en place (zsh par défaut, oh-my-zsh, powerlevel10k, police)."
-elif ask "Installer la config du terminal (seulement ce qui manque) ?" o; then
+  ok "$(t "Déjà en place (zsh par défaut, oh-my-zsh, powerlevel10k, police)." "Already set up (zsh as default shell, oh-my-zsh, powerlevel10k, font).")"
+elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Install the terminal config (only what's missing)?")" o; then
   have zsh || pkg_try zsh
   have git || pkg_try git
   if ! have zsh || ! have git; then
-    warn "zsh ou git manquant : étape ignorée (installe-les puis relance)."
+    warn "$(t "zsh ou git manquant : étape ignorée (installe-les puis relance)." "zsh or git missing: step skipped (install them, then run this again).")"
   else
     if [ ${#need[@]} -gt 0 ]; then
-      info "Téléchargements depuis GitHub (dépôts officiels) :"
+      info "$(t "Téléchargements depuis GitHub (dépôts officiels) :" "Downloads from GitHub (official repositories):")"
       for d in "${need[@]}"; do info "  ${REPOS[$d]}"; done
-      if ask "Les télécharger ?" o; then
+      if ask "$(t "Les télécharger ?" "Download them?")" o; then
         for d in "${need[@]}"; do
-          avec_progres "Téléchargement de $(basename "$d")" /dev/null git clone -q --depth 1 "${REPOS[$d]}" "$d" && echo "${d#"$HOME/"}" >> "$BK/.created" || warn "téléchargement impossible : ${REPOS[$d]}"
+          avec_progres "$(t "Téléchargement de $(basename "$d")" "Downloading $(basename "$d")")" /dev/null git clone -q --depth 1 "${REPOS[$d]}" "$d" && echo "${d#"$HOME/"}" >> "$BK/.created" || warn "$(t "téléchargement impossible : ${REPOS[$d]}" "download failed: ${REPOS[$d]}")"
         done
       fi
     fi
     for f in .zshrc .p10k.zsh; do
       [ -f "$HOME/$f" ] && cmp -s "$REPO/home/$f" "$HOME/$f" && continue
       if [ -f "$HOME/$f" ]; then
-        ask "Remplacer ton ~/$f (il sera sauvegardé) ?" o || continue
+        ask "$(t "Remplacer ton ~/$f (il sera sauvegardé) ?" "Replace your ~/$f (it will be backed up)?")" o || continue
         backup "$f"
       else
         echo "$f" >> "$BK/.created"
       fi
       cp "$REPO/home/$f" "$HOME/$f"
     done
-    ok "Config du terminal installée. Tes alias et réglages personnels : ~/.zshrc.perso"
+    ok "$(t "Config du terminal installée. Tes alias et réglages personnels : ~/.zshrc.perso" "Terminal config installed. Your own aliases and settings: ~/.zshrc.perso")"
     if [ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" != zsh ]; then
-      ask "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" o && chsh -s "$(command -v zsh)" && ok "zsh est ton shell par défaut (à la prochaine connexion)."
+      ask "$(t "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" "Make zsh your default shell (it will ask for your password)?")" o && chsh -s "$(command -v zsh)" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
     fi
   fi
   # Police du terminal (icônes de l'invite) : paquet sur Arch, sinon téléchargement depuis la page officielle de Nerd Fonts
   if ! has_font; then
     url=https://github.com/ryanoasis/nerd-fonts/releases/latest/download/CascadiaCode.zip
-    info "Police du terminal (CaskaydiaCove Nerd Font) absente : $url"
-    if have curl && have unzip && ask "La télécharger dans ~/.local/share/fonts ?" o; then
+    info "$(t "Police du terminal (CaskaydiaCove Nerd Font) absente : $url" "Terminal font (CaskaydiaCove Nerd Font) missing: $url")"
+    if have curl && have unzip && ask "$(t "La télécharger dans ~/.local/share/fonts ?" "Download it to ~/.local/share/fonts?")" o; then
       fd="$HOME/.local/share/fonts/CaskaydiaCove"; zd="$(mktemp -d)"
       if curl -fsSL -o "$zd/f.zip" "$url" && mkdir -p "$fd" && unzip -qo "$zd/f.zip" '*.ttf' -d "$fd"; then
-        fc-cache -f "$fd" >/dev/null 2>&1 || true; ok "Police installée."
+        fc-cache -f "$fd" >/dev/null 2>&1 || true; ok "$(t "Police installée." "Font installed.")"
       else
-        warn "Téléchargement de la police impossible."
+        warn "$(t "Téléchargement de la police impossible." "Couldn't download the font.")"
       fi
       rm -rf "$zd"
     fi
@@ -932,7 +984,7 @@ elif ask "Installer la config du terminal (seulement ce qui manque) ?" o; then
 fi
 
 # ── 3b. Neovim (LazyVim) ──────────────────────────────────────────────────────
-say "3b. Neovim : LazyVim avec ses extras (C/C++, JavaScript, formatage, Git…)"
+say "$(t "3b. Neovim : LazyVim avec ses extras (C/C++, JavaScript, formatage, Git…)" "3b. Neovim: LazyVim with its extras (C/C++, JavaScript, formatting, Git…)")"
 NV="$HOME/.config/nvim"
 # Déjà fait : même config que le dépôt, plugins téléchargés, Neovim assez récent et outils essentiels présents
 # (gitui et tree-sitter sont facultatifs : absents de certaines distributions, ils ne bloquent rien)
@@ -952,12 +1004,12 @@ if [ -d "$NV" ] && { diff -rq "$REPO/home/.config/nvim" "$NV" >/dev/null 2>&1 ||
 fi
 nv_plugins=0; [ -d "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy/LazyVim" ] && nv_plugins=1
 if [ "$nv_same" = 1 ] && [ "$nv_plugins" = 1 ]; then
-  nv_q="Config déjà à jour ; installer les outils manquants (${nv_tools[*]}) ?"
+  nv_q="$(t "Config déjà à jour ; installer les outils manquants (${nv_tools[*]}) ?" "Config already up to date; install the missing tools (${nv_tools[*]})?")"
 else
-  nv_q="Installer la config Neovim (seulement ce qui manque) ?"
+  nv_q="$(t "Installer la config Neovim (seulement ce qui manque) ?" "Install the Neovim config (only what's missing)?")"
 fi
 if [ "$nv_same" = 1 ] && [ "$nv_plugins" = 1 ] && [ ${#nv_tools[@]} -eq 0 ]; then
-  ok "Déjà en place (config, plugins et outils)."
+  ok "$(t "Déjà en place (config, plugins et outils)." "Already set up (config, plugins and tools).")"
 elif ask "$nv_q" o; then
   # Outils dont LazyVim et ses extras ont besoin (noms selon la distribution ; déjà installés ou absents : ignorés)
   case "$FAMILY" in
@@ -973,29 +1025,29 @@ elif ask "$nv_q" o; then
   if [ -z "$nv" ] || ! ver_ge "$nv" 0.11.2; then
     case "$(uname -m)" in x86_64) na=nvim-linux-x86_64 ;; aarch64) na=nvim-linux-arm64 ;; *) na="" ;; esac
     url="https://github.com/neovim/neovim/releases/latest/download/$na.tar.gz"
-    info "Neovim ${nv:-absent}$([ -n "$nv" ] && echo " (trop ancien)") : LazyVim demande la 0.11.2 ou plus."
-    if [ -n "$na" ] && have curl && ask "Installer la version officielle de Neovim dans ~/.local (depuis $url) ?" o; then
+    info "$(t "Neovim ${nv:-absent}$([ -n "$nv" ] && echo " (trop ancien)") : LazyVim demande la 0.11.2 ou plus." "Neovim ${nv:-missing}$([ -n "$nv" ] && echo " (too old)"): LazyVim needs 0.11.2 or later.")"
+    if [ -n "$na" ] && have curl && ask "$(t "Installer la version officielle de Neovim dans ~/.local (depuis $url) ?" "Install the official Neovim release in ~/.local (from $url)?")" o; then
       zd="$(mktemp -d)"
       if curl -fsSL -o "$zd/nvim.tar.gz" "$url" && mkdir -p "$HOME/.local/opt" "$HOME/.local/bin" &&
          rm -rf "$HOME/.local/opt/$na" && tar -xzf "$zd/nvim.tar.gz" -C "$HOME/.local/opt"; then
         ln -sfn "$HOME/.local/opt/$na/bin/nvim" "$HOME/.local/bin/nvim"
-        nv="$(nv_ver)"; ok "Neovim $nv installé (~/.local/bin/nvim)."
+        nv="$(nv_ver)"; ok "$(t "Neovim $nv installé (~/.local/bin/nvim)." "Neovim $nv installed (~/.local/bin/nvim).")"
       else
-        warn "Téléchargement de Neovim impossible."
+        warn "$(t "Téléchargement de Neovim impossible." "Couldn't download Neovim.")"
       fi
       rm -rf "$zd"
     fi
     if [ -z "$nv" ] || ! ver_ge "$nv" 0.11.2; then
-      warn "Neovim 0.11.2 ou plus manquant : config copiée quand même, elle servira dès qu'il sera installé."
+      warn "$(t "Neovim 0.11.2 ou plus manquant : config copiée quand même, elle servira dès qu'il sera installé." "Neovim 0.11.2 or later missing: config copied anyway; it will be used once Neovim is installed.")"
     fi
   fi
   if [ "$nv_same" = 1 ]; then
-    ok "Config Neovim déjà à jour."
-  elif [ ! -e "$NV" ] || ask "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" o; then
+    ok "$(t "Config Neovim déjà à jour." "Neovim config already up to date.")"
+  elif [ ! -e "$NV" ] || ask "$(t "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" "Replace your ~/.config/nvim config (it will be backed up)?")" o; then
     if [ -e "$NV" ]; then backup .config/nvim; rm -rf "$NV"; else echo ".config/nvim" >> "$BK/.created"; fi
     mkdir -p "$HOME/.config" && cp -a "$REPO/home/.config/nvim" "$NV"
     mkdir -p "$STATE"; echo "$NV_SUM" > "$NV_STAMP"
-    ok "Config Neovim installée."
+    ok "$(t "Config Neovim installée." "Neovim config installed.")"
     nv_plugins=0
   fi
   # Plugins aux versions exactes de lazy-lock.json (sinon ils s'installent au premier lancement)
@@ -1004,7 +1056,7 @@ elif ask "$nv_q" o; then
     # abandon au bout de 10 minutes (connexion lente) : ils s'installeront alors au premier lancement de nvim.
     nv_total="$(grep -c '"branch"' "$NV/lazy-lock.json" 2>/dev/null || echo '?')"
     nv_lazy="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy"
-    info "Téléchargement des plugins Neovim ($nv_total, une à cinq minutes selon la connexion)…"
+    info "$(t "Téléchargement des plugins Neovim ($nv_total, une à cinq minutes selon la connexion)…" "Downloading Neovim plugins ($nv_total, one to five minutes depending on the connection)…")"
     timeout 600 "$(nv_bin)" --headless "+Lazy! restore" +qa >/dev/null 2>&1 &
     nv_pid=$!
     while kill -0 "$nv_pid" 2>/dev/null; do
@@ -1012,13 +1064,13 @@ elif ask "$nv_q" o; then
       sleep 2
     done
     printf '\r%60s\r' ''
-    if wait "$nv_pid"; then ok "Plugins Neovim installés."
-    else warn "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim."; fi
+    if wait "$nv_pid"; then ok "$(t "Plugins Neovim installés." "Neovim plugins installed.")"
+    else warn "$(t "Plugins non installés maintenant : ils s'installeront au premier lancement de nvim." "Plugins not installed now: they'll install the first time you start nvim.")"; fi
   fi
 fi
 
 # ── 4. Services de la session ────────────────────────────────────────────────
-say "4. Services de ta session"
+say "$(t "4. Services de ta session" "4. Your session's services")"
 UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service)
 [ "$ILE" = quickshell ] && UNITS+=(nc-ile.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
@@ -1037,8 +1089,8 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     grep -qE '^Exec=.*\b(waybar|hyprpanel|ags|eww|polybar|swaync|dunst|mako)\b' "$f" && demarrages+=("$f")
   done
   if [ ${#barres[@]} -gt 0 ] || [ ${#demarrages[@]} -gt 0 ]; then
-    info "Ton ancienne config démarre encore : ${barres[*]} ${demarrages[*]##*/}"
-    if ask "Les désactiver (la barre de Noctalia et l'île les remplacent ; rien n'est désinstallé) ?" o; then
+    info "$(t "Ton ancienne config démarre encore : ${barres[*]} ${demarrages[*]##*/}" "Your old config still starts: ${barres[*]} ${demarrages[*]##*/}")"
+    if ask "$(t "Les désactiver (la barre de Noctalia et l'île les remplacent ; rien n'est désinstallé) ?" "Disable them (Noctalia's bar and the island replace them; nothing is uninstalled)?")" o; then
       # mask, pas disable : sur Debian, waybar.service est activé pour tous les utilisateurs et reviendrait
       for b in "${barres[@]}"; do systemctl --user stop "$b.service" >/dev/null 2>&1; systemctl --user mask "$b.service" >/dev/null 2>&1 || true; done
       mkdir -p "$HOME/.config/autostart"
@@ -1048,36 +1100,36 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
         printf '\nHidden=true\n' >> "$n"
       done
       for b in waybar hyprpanel eww polybar; do pkill -x "$b" 2>/dev/null || true; done
-      ok "Ancienne barre désactivée."
+      ok "$(t "Ancienne barre désactivée." "Old bar disabled.")"
     fi
   fi
   # Démons de notifications lancés à la demande (dunst, mako, swaync) : ils prendraient la place de l'île ou de Noctalia
   for d in dunst mako swaync; do
     if [ -n "$(systemctl --user list-unit-files "$d.service" --no-legend 2>/dev/null)" ] && ! systemctl --user is-enabled "$d.service" 2>/dev/null | grep -x masked >/dev/null; then
-      systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")."
+      systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$(t "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")." "$d (notifications) disabled: notifications go through $([ "$ILE" = quickshell ] && echo "the island" || echo "Noctalia").")"
     fi
   done
   systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer hypridle.service >/dev/null 2>&1 ||
-    warn "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session."
+    warn "$(t "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session." "Some services couldn't start now: they'll start in your next session.")"
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   # Première installation : quelques choix, tout de suite (tout se change ensuite avec nc-reglages)
   if [ "$PREMIERE" = 1 ]; then
     R="$HOME/.local/bin/nc-reglages"
-    say "Quelques choix pour commencer (modifiables ensuite : nc-reglages)"
-    choisir "Style du bureau :" "noctalia-config : les couleurs de ton fond d'écran" "Apple : façon macOS et iPhone" \
-      "Noir pur (écran OLED)" "Nord" "Catppuccin"
+    say "$(t "Quelques choix pour commencer (modifiables ensuite : nc-reglages)" "A few choices to start with (you can change them later: nc-settings)")"
+    choisir "$(t "Style du bureau :" "Desktop style:")" "$(t "noctalia-config : les couleurs de ton fond d'écran" "noctalia-config: your wallpaper's colors")" "$(t "Apple : façon macOS et iPhone" "Apple: macOS and iPhone style")" \
+      "$(t "Noir pur (écran OLED)" "Pure black (OLED display)")" "Nord" "Catppuccin"
     case "$CHOIX" in 2) "$R" set STYLE apple ;; 3) "$R" set STYLE oled ;; 4) "$R" set STYLE nord ;; 5) "$R" set STYLE catppuccin ;; esac >/dev/null 2>&1
-    ask "Thème sombre ?" o || "$R" set THEME_MODE light >/dev/null 2>&1
-    ask "Changer de fond d'écran tout seul toutes les 10 minutes ?" o || "$R" set FONDS_ROTATION non >/dev/null 2>&1
-    ask "Couper les notifications la nuit (22 h à 7 h) ?" n && "$R" set NPD_NUIT oui >/dev/null 2>&1
+    ask "$(t "Thème sombre ?" "Dark theme?")" o || "$R" set THEME_MODE light >/dev/null 2>&1
+    ask "$(t "Changer de fond d'écran tout seul toutes les 10 minutes ?" "Change the wallpaper automatically every 10 minutes?")" o || "$R" set FONDS_ROTATION non >/dev/null 2>&1
+    ask "$(t "Couper les notifications la nuit (22 h à 7 h) ?" "Silence notifications at night (10 PM to 7 AM)?")" n && "$R" set NPD_NUIT oui >/dev/null 2>&1
     if [ "$LAPTOP" = 1 ]; then
-      choisir "Couvercle fermé :" "Mise en veille" "L'écran s'éteint, le PC continue (téléchargements, musique…)"
+      choisir "$(t "Couvercle fermé :" "Lid closed:")" "$(t "Mise en veille" "Sleep")" "$(t "L'écran s'éteint, le PC continue (téléchargements, musique…)" "The screen turns off, the PC keeps running (downloads, music…)")"
       [ "$CHOIX" = 2 ] && "$R" set COUVERCLE ecran >/dev/null 2>&1
     fi
-    choisir "Un appui sur le bouton d'arrêt :" "Une petite surprise (des doigts partout)" "Des confettis" \
-      "Le menu Éteindre / Redémarrer / Veille" "Éteindre, comme d'habitude"
+    choisir "$(t "Un appui sur le bouton d'arrêt :" "Pressing the power button:")" "$(t "Une petite surprise (des doigts partout)" "A little surprise (fingers everywhere)")" "$(t "Des confettis" "Confetti")" \
+      "$(t "Le menu Éteindre / Redémarrer / Veille" "The Shut Down / Restart / Sleep menu")" "$(t "Éteindre, comme d'habitude" "Shut down, as usual")"
     case "$CHOIX" in 2) "$R" set BOUTON_ARRET confettis ;; 3) "$R" set BOUTON_ARRET menu ;; 4) "$R" set BOUTON_ARRET eteindre ;; esac >/dev/null 2>&1
-    ok "C'est noté."
+    ok "$(t "C'est noté." "Got it.")"
   fi
   # Tes réglages (nc-reglages) : ~/.config/nc/reglages.conf n'est jamais touché ; ce qui en est tiré (veille, terminal)
   # est refait d'après la nouvelle version de la config
@@ -1089,8 +1141,8 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   if [ "$ILE" = quickshell ] && { have claude || [ -d "$HOME/.claude" ]; } &&
      ! grep -q "nc-claude hook" "$HOME/.claude/settings.json" 2>/dev/null &&
      ! grep -qx 'CLAUDE_ILE=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null; then
-    info "Claude Code est installé : l'île peut montrer ce qu'il fait et répondre à ses demandes (comme l'appli coucou)."
-    if ask "L'afficher dans l'île ?" o; then "$HOME/.local/bin/nc-claude" installer | head -1
+    info "$(t "Claude Code est installé : l'île peut montrer ce qu'il fait et répondre à ses demandes (comme l'appli coucou)." "Claude Code is installed: the island can show what it's doing and answer its requests (like the coucou app).")"
+    if ask "$(t "L'afficher dans l'île ?" "Show it in the island?")" o; then "$HOME/.local/bin/nc-claude" installer | head -1
     else printf 'CLAUDE_ILE=non\n' >> "$HOME/.config/nc/reglages.conf"; fi
   fi
   # Les autres IA (Antigravity, opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp) : déjà branchées, remises
@@ -1099,10 +1151,10 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     "$HOME/.local/bin/nc-claude" actualiser >/dev/null 2>&1 || true
     ias="$("$HOME/.local/bin/nc-claude" detecter 2>/dev/null || true)"
     if [ -n "$ias" ]; then
-      info "IA installées : $ias. L'île peut montrer ce qu'elles font, quand elles ont fini, et te laisser leur écrire."
-      if ask "Les afficher dans l'île ?" o; then
+      info "$(t "IA installées : $ias. L'île peut montrer ce qu'elles font, quand elles ont fini, et te laisser leur écrire." "AI tools installed: $ias. The island can show what they're doing and when they're done, and let you write to them.")"
+      if ask "$(t "Les afficher dans l'île ?" "Show them in the island?")" o; then
         for ia in $ias; do "$HOME/.local/bin/nc-claude" installer "$ia" | head -1; done
-        case " $ias " in *" codex "*) info "Codex : ouvre-le et tape /hooks une fois pour approuver ses nouveaux hooks." ;; esac
+        case " $ias " in *" codex "*) info "$(t "Codex : ouvre-le et tape /hooks une fois pour approuver ses nouveaux hooks." "Codex: open it and type /hooks once to approve its new hooks.")" ;; esac
       else
         for ia in $ias; do printf '%s_ILE=non\n' "$(printf %s "$ia" | tr a-z A-Z)" >> "$HOME/.config/nc/reglages.conf"; done
       fi
@@ -1120,13 +1172,13 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     fi
     [ "$KDE_POLKIT" = 1 ] && { systemctl --user start plasma-polkit-agent.service 2>/dev/null || true; }
   fi
-  ok "Services activés."
+  ok "$(t "Services activés." "Services enabled.")"
   if ! systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
-    info "Pour que la barre démarre à l'ouverture de session, choisis la session « Hyprland (uwsm-managed) » sur l'écran de connexion."
+    info "$(t "Pour que la barre démarre à l'ouverture de session, choisis la session « Hyprland (uwsm-managed) » sur l'écran de connexion." "For the bar to start when you log in, pick the “Hyprland (uwsm-managed)” session on the login screen.")"
   fi
 else
-  warn "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés."
-  info "Dans ta session Hyprland, lance : systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
+  warn "$(t "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés." "No active user session (installing from a login console or over SSH?): services not enabled.")"
+  info "$(t "Dans ta session Hyprland, lance :" "In your Hyprland session, run:") systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
 fi
 
 # ── 5. Étapes système (une question par étape) ───────────────────────────────
@@ -1137,7 +1189,7 @@ if [ "$MODE" = full ]; then
   # 5a. Énergie : 3 profils pour tous les PC, via un service compatible power-profiles-daemon (barre, Super + Alt + P).
   # Portable : TLP + tlp-pd avec les réglages du dépôt (mêmes profils partout) quand la distribution les propose
   # (Arch, Fedora 44+, Debian 13 via trixie-backports, openSUSE Tumbleweed) ; sinon le service de la distribution.
-  say "5a. Énergie : 3 profils (Performance / Équilibré / Économie)"
+  say "$(t "5a. Énergie : 3 profils (Performance / Équilibré / Économie)" "5a. Power: 3 profiles (Performance / Balanced / Power Saver)")"
   ppd=""
   for u in tlp-pd power-profiles-daemon tuned-ppd; do systemctl is-active --quiet "$u.service" 2>/dev/null && { ppd=$u; break; }; done
   tlp_dispo() {
@@ -1177,32 +1229,32 @@ if [ "$MODE" = full ]; then
       [ "$(cat /etc/tlp.d/11-nc-frequence.conf 2>/dev/null)" = "$freq" ] || { printf '%s\n' "$freq" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/11-nc-frequence.conf; ch=0; }
     fi
     if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
-      info "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché."
-      if ask "Activer cette limite de charge ?" o; then
+      info "$(t "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché." "Your battery supports a charge limit (about 80%), which preserves it if the PC is often plugged in.")"
+      if ask "$(t "Activer cette limite de charge ?" "Enable this charge limit?")" o; then
         printf '%s\n' "$BATLIM" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/20-battery-limit.conf; ch=0
       fi
     fi
     return $ch
   }
   if [ "$ppd" = tlp-pd ]; then
-    if tlp_regle; then sudo tlp start >/dev/null && ok "Réglages TLP mis à jour (/etc/tlp.d/10-nc.conf)."
-    elif [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ]; then ok "Déjà en place (TLP avec tes propres réglages : $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), gardés)."
-    else ok "Déjà en place (TLP et tlp-pd)."; fi
+    if tlp_regle; then sudo tlp start >/dev/null && ok "$(t "Réglages TLP mis à jour (/etc/tlp.d/10-nc.conf)." "TLP settings updated (/etc/tlp.d/10-nc.conf).")"
+    elif [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ]; then ok "$(t "Déjà en place (TLP avec tes propres réglages : $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), gardés)." "Already set up (TLP with your own settings: $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), kept).")"
+    else ok "$(t "Déjà en place (TLP et tlp-pd)." "Already set up (TLP and tlp-pd).")"; fi
   elif [ "$LAPTOP" = 1 ] && tlp_dispo; then
-    info "Portable : TLP et tlp-pd, avec des réglages valables pour tout portable (processeur, turbo, carte PCIe, plateforme)."
-    [ -n "$ppd" ] && info "Ils remplacent $ppd (même fonctionnement depuis la barre)."
-    if ask "Installer ces profils énergétiques ?" o; then
+    info "$(t "Portable : TLP et tlp-pd, avec des réglages valables pour tout portable (processeur, turbo, carte PCIe, plateforme)." "Laptop: TLP and tlp-pd, with settings that suit any laptop (processor, turbo, PCIe card, platform).")"
+    [ -n "$ppd" ] && info "$(t "Ils remplacent $ppd (même fonctionnement depuis la barre)." "They replace $ppd (works the same from the bar).")"
+    if ask "$(t "Installer ces profils énergétiques ?" "Install these power profiles?")" o; then
       sbackup /etc/tlp.conf /etc/tlp.d
       for u in auto-cpufreq tuned tuned-ppd power-profiles-daemon; do
         if systemctl is-enabled --quiet "$u.service" 2>/dev/null; then
-          info "$u entre en conflit avec TLP : il est désactivé (le paquet reste installé, sauf conflit de paquets)."
+          info "$(t "$u entre en conflit avec TLP : il est désactivé (le paquet reste installé, sauf conflit de paquets)." "$u conflicts with TLP: it's disabled (the package stays installed, unless the packages conflict).")"
           sudo systemctl disable --now "$u.service" >/dev/null 2>&1 || true
         fi
       done
       inst=1
       case "$FAMILY" in
         arch)
-          pkg_installed power-profiles-daemon && info "pacman va proposer de remplacer power-profiles-daemon : réponds oui."
+          pkg_installed power-profiles-daemon && info "$(t "pacman va proposer de remplacer power-profiles-daemon : réponds oui." "pacman will offer to replace power-profiles-daemon: answer yes.")"
           sudo pacman -S --needed tlp tlp-pd || inst=0 ;;
         fedora) sudo dnf install -y --allowerasing tlp tlp-pd || inst=0 ;;
         debian) if [ "$OSCODE" = trixie ]; then bpo_install tlp tlp-pd || inst=0; else pkg_install tlp tlp-pd || inst=0; fi ;;
@@ -1211,24 +1263,24 @@ if [ "$MODE" = full ]; then
       if [ "$inst" = 1 ]; then
         tlp_regle || true
         sudo systemctl enable --now tlp.service tlp-pd.service >/dev/null
-        sudo tlp start >/dev/null && ok "TLP actif (profil Équilibré par défaut)."
+        sudo tlp start >/dev/null && ok "$(t "TLP actif (profil Équilibré par défaut)." "TLP active (Balanced profile by default).")"
       else
-        warn "Installation de TLP impossible : $([ -n "$ppd" ] && echo "$ppd reste en place" || echo "profils non disponibles")."
+        warn "$(t "Installation de TLP impossible : $([ -n "$ppd" ] && echo "$ppd reste en place" || echo "profils non disponibles")." "Couldn't install TLP: $([ -n "$ppd" ] && echo "$ppd stays in place" || echo "profiles unavailable").")"
         if [ "$ppd" = tuned-ppd ]; then sudo systemctl enable --now tuned.service >/dev/null 2>&1 || true; fi   # tuned-ppd s'appuie sur tuned
         [ -n "$ppd" ] && sudo systemctl enable --now "$ppd.service" >/dev/null 2>&1
       fi
     fi
   elif [ -n "$ppd" ]; then
-    ok "Déjà en place (service $ppd)."
+    ok "$(t "Déjà en place (service $ppd)." "Already set up ($ppd service).")"
   else
     svc=power-profiles-daemon
     [ "$FAMILY" = fedora ] && svc=tuned-ppd   # service de profils par défaut de Fedora
-    info "Installe $svc (profils fournis par ta distribution)."
-    if ask "Installer les profils énergétiques ?" o; then
+    info "$(t "Installe $svc (profils fournis par ta distribution)." "Will install $svc (profiles provided by your distribution).")"
+    if ask "$(t "Installer les profils énergétiques ?" "Install the power profiles?")" o; then
       if pkg_install "$svc" && { [ "$svc" != tuned-ppd ] || sudo systemctl enable --now tuned.service; } && sudo systemctl enable --now "$svc.service"; then
-        ok "Profils actifs."
+        ok "$(t "Profils actifs." "Profiles active.")"
       else
-        warn "Installation de $svc impossible : les profils ne seront pas disponibles."
+        warn "$(t "Installation de $svc impossible : les profils ne seront pas disponibles." "Couldn't install $svc: profiles won't be available.")"
       fi
     fi
   fi
@@ -1240,17 +1292,17 @@ if [ "$MODE" = full ]; then
     regle=/etc/sudoers.d/nc-limite-charge
     ligne="$(id -un) ALL=(root) NOPASSWD: /usr/local/bin/nc-limite-charge"
     if cmp -s "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge && sudo grep -qxF "$ligne" "$regle" 2>/dev/null; then
-      ok "Interrupteur de protection de la batterie (île) : déjà en place."
+      ok "$(t "Interrupteur de protection de la batterie (île) : déjà en place." "Battery protection switch (island): already set up.")"
     else
-      info "Interrupteur « Protéger la batterie » dans la page Système de l'île (charge arrêtée vers 80 %) : un petit"
-      info "utilitaire qui ne fait que ça (/usr/local/bin/nc-limite-charge), lancé depuis l'île sans mot de passe."
-      if ask "L'installer ?" o; then
+      info "$(t "Interrupteur « Protéger la batterie » dans la page Système de l'île (charge arrêtée vers 80 %) : un petit" "“Protect Battery” switch on the island's System page (charging stops around 80%): a small")"
+      info "$(t "utilitaire qui ne fait que ça (/usr/local/bin/nc-limite-charge), lancé depuis l'île sans mot de passe." "tool that does only that (/usr/local/bin/nc-limite-charge), run from the island without a password.")"
+      if ask "$(t "L'installer ?" "Install it?")" o; then
         t="$(mktemp)"; printf '# noctalia-config : interrupteur « Protéger la batterie » de l'"'"'île\n%s\n' "$ligne" > "$t"
         if sudo install -Dm0755 -o root -g root "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge &&
            sudo visudo -cf "$t" >/dev/null && sudo install -m0440 -o root -g root "$t" "$regle"; then
-          ok "Interrupteur de protection de la batterie installé."
+          ok "$(t "Interrupteur de protection de la batterie installé." "Battery protection switch installed.")"
         else
-          warn "Installation de l'interrupteur de batterie impossible (règle sudo refusée par visudo)."
+          warn "$(t "Installation de l'interrupteur de batterie impossible (règle sudo refusée par visudo)." "Couldn't install the battery switch (sudo rule rejected by visudo).")"
         fi
         rm -f "$t"
       fi
@@ -1263,30 +1315,30 @@ if [ "$MODE" = full ]; then
   bouton=/etc/systemd/logind.conf.d/50-nc-bouton.conf
   contenu=$'# noctalia-config : un appui sur le bouton d\'arrêt fait apparaître les doigts (nc-finger) au lieu d\'éteindre.\n# Le garder appuyé éteint ; Super + F4 aussi. Pour revenir à l\'arrêt normal : sudo rm '"$bouton"$'\n[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=poweroff'
   if [ "$(cat "$bouton" 2>/dev/null)" = "$contenu" ] && [ ! -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf ]; then
-    ok "Bouton d'arrêt (les doigts) : déjà en place."
-  elif ask "Bouton d'arrêt : un appui fait apparaître des doigts au lieu d'éteindre (le garder appuyé éteint) ?" o; then
+    ok "$(t "Bouton d'arrêt (les doigts) : déjà en place." "Power button (the fingers): already set up.")"
+  elif ask "$(t "Bouton d'arrêt : un appui fait apparaître des doigts au lieu d'éteindre (le garder appuyé éteint) ?" "Power button: a press shows fingers instead of shutting down (holding it still shuts down)?")" o; then
     if printf '%s\n' "$contenu" | sudo install -Dm0644 /dev/stdin "$bouton"; then
       sudo rm -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf
       # Relecture de la config par logind sans le redémarrer (un redémarrage fermerait la session)
       sudo systemctl kill -s HUP systemd-logind >/dev/null 2>&1 || true
-      ok "Bouton d'arrêt : les doigts à chaque appui."
+      ok "$(t "Bouton d'arrêt : les doigts à chaque appui." "Power button: fingers on every press.")"
     else
-      warn "Réglage du bouton d'arrêt impossible."
+      warn "$(t "Réglage du bouton d'arrêt impossible." "Couldn't set up the power button.")"
     fi
   fi
 
   if [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
-    say "5b. Wi-Fi : pays de réglementation"
+    say "$(t "5b. Wi-Fi : pays de réglementation" "5b. Wi-Fi: regulatory country")"
     cc="$(sed -nE 's/^WIRELESS_REGDOM="?([A-Z]{2})"?.*/\1/p' /etc/conf.d/wireless-regdom | tail -1)"
   fi
   if [ "$FAMILY" = arch ] && [ -n "${cc:-}" ]; then
-    ok "Déjà réglé (pays : $cc)."
+    ok "$(t "Déjà réglé (pays : $cc)." "Already set (country: $cc).")"
   elif [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
-    info "Sans pays, le Wi-Fi reste bridé (canaux et puissance au minimum mondial)."
-    if ask "Régler le pays du Wi-Fi ?" o; then
+    info "$(t "Sans pays, le Wi-Fi reste bridé (canaux et puissance au minimum mondial)." "Without a country, Wi-Fi stays restricted (channels and power at the worldwide minimum).")"
+    if ask "$(t "Régler le pays du Wi-Fi ?" "Set the Wi-Fi country?")" o; then
       dflt="$(echo "${LANG:-fr_FR}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p')"; dflt="${dflt:-FR}"
       cc=""
-      { true </dev/tty; } 2>/dev/null && { read -r -p "   Code du pays (2 lettres) [$dflt] " cc </dev/tty || cc=""; }
+      { true </dev/tty; } 2>/dev/null && { read -r -p "$(t "   Code du pays (2 lettres) [$dflt] " "   Country code (2 letters) [$dflt] ")" cc </dev/tty || cc=""; }
       cc="$(echo "${cc:-$dflt}" | tr '[:lower:]' '[:upper:]')"
       if [[ "$cc" =~ ^[A-Z]{2}$ ]]; then
         sbackup /etc/conf.d/wireless-regdom
@@ -1294,9 +1346,9 @@ if [ "$MODE" = full ]; then
         sudo sed -i -E 's/^WIRELESS_REGDOM=/#&/' /etc/conf.d/wireless-regdom
         echo "WIRELESS_REGDOM=\"$cc\"" | sudo tee -a /etc/conf.d/wireless-regdom >/dev/null
         have iw && sudo iw reg set "$cc" || true
-        ok "Pays du Wi-Fi : $cc"
+        ok "$(t "Pays du Wi-Fi : $cc" "Wi-Fi country: $cc")"
       else
-        warn "Code invalide : étape ignorée."
+        warn "$(t "Code invalide : étape ignorée." "Invalid code: step skipped.")"
       fi
     fi
   fi
@@ -1342,11 +1394,11 @@ if [ "$MODE" = full ]; then
     if grep -qE '^GRUB_TERMINAL_OUTPUT="?console"?\s*$' /etc/default/grub; then
       sudo sed -i -E 's/^GRUB_TERMINAL_OUTPUT=.*/GRUB_TERMINAL_OUTPUT="gfxterm"/' /etc/default/grub
     fi
-    sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "Thème GRUB installé (visible au prochain redémarrage)."
+    sudo "$GRUBMK" -o "$GRUBDIR/grub.cfg" && ok "$(t "Thème GRUB installé (visible au prochain redémarrage)." "GRUB theme installed (visible at the next restart).")"
     if have restorecon; then sudo restorecon -RF "$GRUBDIR/themes/nc" >/dev/null 2>&1 || true; fi   # SELinux (Fedora)
     if grep -qE '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub ||
        { have grub2-editenv && sudo grub2-editenv - list 2>/dev/null | grep -q '^menu_auto_hide=1'; }; then
-      info "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap, F8) au démarrage pour le voir."
+      info "$(t "Le menu GRUB est masqué sur ta distribution : maintiens Maj (ou Échap, F8) au démarrage pour le voir." "The GRUB menu is hidden on your distribution: hold Shift (or Esc, F8) at boot to see it.")"
     fi
     return 0
   }
@@ -1366,22 +1418,22 @@ if [ "$MODE" = full ]; then
       ! grep -qE '^GRUB_TIMEOUT=([5-9]|[1-9][0-9]+)\s*$' /etc/default/grub || grub_done=0
   fi
   if [ "$plym_done" = 1 ] && [ "$grub_done" = 1 ]; then
-    say "5c. Démarrage"
-    ok "Déjà en place (logo animé$([ -n "$GRUBDIR" ] && echo ", thème GRUB « nc »"))."
+    say "$(t "5c. Démarrage" "5c. Boot")"
+    ok "$(t "Déjà en place (logo animé$([ -n "$GRUBDIR" ] && echo ", thème GRUB « nc »"))." "Already set up (animated logo$([ -n "$GRUBDIR" ] && echo ", “nc” GRUB theme")).")"
   elif [ "$plym_done" = 1 ]; then
-    say "5c. Démarrage : thème GRUB « nc » (« $BOOT_TITLE »)"
-    info "Le logo animé est déjà en place ; seul le thème GRUB est à installer ou à mettre à jour."
-    if ask "Mettre à jour le thème GRUB ?" o; then
+    say "$(t "5c. Démarrage : thème GRUB « nc » (« $BOOT_TITLE »)" "5c. Boot: “nc” GRUB theme (“$BOOT_TITLE”)")"
+    info "$(t "Le logo animé est déjà en place ; seul le thème GRUB est à installer ou à mettre à jour." "The animated logo is already set up; only the GRUB theme needs installing or updating.")"
+    if ask "$(t "Mettre à jour le thème GRUB ?" "Update the GRUB theme?")" o; then
       sbackup /etc/default/grub
       grub_nc
     fi
   elif [ -n "$INITRD" ]; then
-    say "5c. Démarrage : logo animé (Plymouth)$([ -n "$GRUBDIR" ] && echo " + thème GRUB « nc » (« $BOOT_TITLE »)")"
-    warn "Cette étape modifie le démarrage (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Tout est sauvegardé avant."
-    info "Secours si l'écran reste noir au démarrage : dans GRUB, touche « e », retirer « splash », Ctrl+X."
-    if ask "Installer l'écran de démarrage ?" n; then
+    say "$(t "5c. Démarrage : logo animé (Plymouth)$([ -n "$GRUBDIR" ] && echo " + thème GRUB « nc » (« $BOOT_TITLE »)")" "5c. Boot: animated logo (Plymouth)$([ -n "$GRUBDIR" ] && echo " + “nc” GRUB theme (“$BOOT_TITLE”)")")"
+    warn "$(t "Cette étape modifie le démarrage (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Tout est sauvegardé avant." "This step changes the boot (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Everything is backed up first.")"
+    info "$(t "Secours si l'écran reste noir au démarrage : dans GRUB, touche « e », retirer « splash », Ctrl+X." "If the screen stays black at boot: in GRUB, press “e”, remove “splash”, then Ctrl+X.")"
+    if ask "$(t "Installer l'écran de démarrage ?" "Install the boot screen?")" n; then
       sbackup /etc/default/grub /etc/mkinitcpio.conf /etc/plymouth /etc/kernel/cmdline
-      pkg_installed plymouth || pkg_install plymouth || warn "Plymouth n'a pas pu être installé."
+      pkg_installed plymouth || pkg_install plymouth || warn "$(t "Plymouth n'a pas pu être installé." "Plymouth couldn't be installed.")"
       if have plymouth || [ -x /usr/sbin/plymouthd ]; then
         theme=bgrt; [ -d /usr/share/plymouth/themes/bgrt ] || theme=spinner
         scale=1; awk -v s="$SCALE" 'BEGIN{exit !(s >= 1.5)}' && scale=2
@@ -1402,18 +1454,18 @@ if [ "$MODE" = full ]; then
           initramfs-tools) sudo update-initramfs -u -k all && rebuilt=1 ;;
         esac
         if [ "$rebuilt" = 1 ]; then
-          ok "Plymouth installé (thème $theme)."
+          ok "$(t "Plymouth installé (thème $theme)." "Plymouth installed ($theme theme).")"
           # Option « splash » du noyau (Fedora utilise « rhgb », déjà présente)
           if [ -n "$GRUBDIR" ]; then
             grub_nc
           elif [ -f /etc/kernel/cmdline ]; then
             grep -qwE 'splash|rhgb' /etc/kernel/cmdline || sudo sed -i '1 s/$/ splash/' /etc/kernel/cmdline
-            info "Option « splash » ajoutée à /etc/kernel/cmdline : elle s'appliquera à la prochaine mise à jour du noyau."
+            info "$(t "Option « splash » ajoutée à /etc/kernel/cmdline : elle s'appliquera à la prochaine mise à jour du noyau." "“splash” option added to /etc/kernel/cmdline: it will apply at the next kernel update.")"
           else
-            info "Ajoute « quiet splash » aux options du noyau de ton chargeur de démarrage pour voir le logo animé."
+            info "$(t "Ajoute « quiet splash » aux options du noyau de ton chargeur de démarrage pour voir le logo animé." "Add “quiet splash” to your boot loader's kernel options to see the animated logo.")"
           fi
         else
-          warn "La régénération de l'initramfs a échoué : le démarrage n'a pas été modifié davantage. Sauvegarde : $SBK"
+          warn "$(t "La régénération de l'initramfs a échoué : le démarrage n'a pas été modifié davantage. Sauvegarde : $SBK" "Rebuilding the initramfs failed: the boot wasn't changed any further. Backup: $SBK")"
         fi
       fi
     fi
@@ -1421,7 +1473,7 @@ if [ "$MODE" = full ]; then
 
   # 5d. Écran de connexion SDDM (thème de base : sddm-astronaut-theme)
   if have sddm; then
-    say "5d. Écran de connexion SDDM « nc »"
+    say "$(t "5d. Écran de connexion SDDM « nc »" "5d. “nc” SDDM login screen")"
     T=/usr/share/sddm/themes/sddm-astronaut-theme
     sed -e "s|@SCREEN_W@|$PXW|g" -e "s|@SCREEN_H@|$PXH|g" -e "s|@LOCALE@|$LOCALE|g" "$REPO/system/sddm/nc.conf" > "$tmp"
     sddm_done() {
@@ -1430,20 +1482,20 @@ if [ "$MODE" = full ]; then
         grep -q '^Current=sddm-astronaut-theme' /etc/sddm.conf.d/theme.conf 2>/dev/null
     }
     if sddm_done; then
-      ok "Déjà en place."
+      ok "$(t "Déjà en place." "Already set up.")"
     elif [ ! -d "$T" ]; then
-      info "Il s'appuie sur le thème libre sddm-astronaut-theme, absent : https://github.com/Keyitdev/sddm-astronaut-theme"
-      if ask "Le télécharger (et ses modules Qt) ?" o; then
+      info "$(t "Il s'appuie sur le thème libre sddm-astronaut-theme, absent : https://github.com/Keyitdev/sddm-astronaut-theme" "It builds on the free sddm-astronaut-theme, which is missing: https://github.com/Keyitdev/sddm-astronaut-theme")"
+      if ask "$(t "Le télécharger (et ses modules Qt) ?" "Download it (and its Qt modules)?")" o; then
         case "$FAMILY" in
           arch) pkg_try qt6-svg qt6-virtualkeyboard qt6-multimedia-ffmpeg ;;
           fedora) pkg_try qt6-qtsvg qt6-qtvirtualkeyboard qt6-qtmultimedia ;;
           debian) pkg_try qml6-module-qtquick-virtualkeyboard qml6-module-qtmultimedia libqt6svg6 ;;
           suse) pkg_try qt6-svg-imports qt6-virtualkeyboard-imports qt6-multimedia-imports ;;
         esac
-        sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "Téléchargement impossible."
+        sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "$(t "Téléchargement impossible." "Download failed.")"
       fi
     fi
-    if [ -d "$T" ] && ! sddm_done && ask "Installer l'écran de connexion ?" o; then
+    if [ -d "$T" ] && ! sddm_done && ask "$(t "Installer l'écran de connexion ?" "Install the login screen?")" o; then
       sbackup "$T/metadata.desktop" /etc/sddm.conf.d/theme.conf
       sudo install -Dm0644 "$tmp" "$T/Themes/nc.conf"
       sudo install -Dm0644 "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg"
@@ -1452,9 +1504,9 @@ if [ "$MODE" = full ]; then
       # Erreur du thème : sans taille dans la config, la largeur de l'écran n'était pas lue (Screen.ScreenWidth)
       sudo sed -i 's/Screen\.ScreenWidth/Screen.width/' "$T/Main.qml"
       printf '[Theme]\nCurrent=sddm-astronaut-theme\n' | sudo install -Dm0644 /dev/stdin /etc/sddm.conf.d/theme.conf
-      ok "Écran de connexion installé."
+      ok "$(t "Écran de connexion installé." "Login screen installed.")"
       systemctl is-enabled --quiet sddm.service 2>/dev/null ||
-        info "SDDM n'est pas ton écran de connexion actif : pour l'utiliser, « sudo systemctl enable sddm » (désactive l'autre avant)."
+        info "$(t "SDDM n'est pas ton écran de connexion actif : pour l'utiliser, « sudo systemctl enable sddm » (désactive l'autre avant)." "SDDM isn't your active login screen: to use it, “sudo systemctl enable sddm” (disable the other one first).")"
     fi
   fi
 
@@ -1462,7 +1514,7 @@ if [ "$MODE" = full ]; then
   # sur beaucoup de cartes, ce qui arrive est retardé (messages en retard, voix des autres coupée en appel)
   if have nmcli && [ -d /etc/NetworkManager ] && ! cmp -s "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" \
        /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf; then
-    say "5d bis. Wi-Fi réactif"
+    say "$(t "5d bis. Wi-Fi réactif" "5d bis. Responsive Wi-Fi")"
     sudo install -Dm0644 "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf &&
       sudo nmcli general reload conf >/dev/null 2>&1 || true
     if have iw; then
@@ -1471,60 +1523,60 @@ if [ "$MODE" = full ]; then
         sudo iw dev "${i##*/}" set power_save off 2>/dev/null || true
       done
     fi
-    ok "Wi-Fi sans mise en veille entre deux paquets (pris en compte tout de suite)."
+    ok "$(t "Wi-Fi sans mise en veille entre deux paquets (pris en compte tout de suite)." "Wi-Fi no longer dozes between packets (applied right away).")"
   fi
 
   # 5e. Pilote NVIDIA : sans lui, la carte tourne avec « nouveau » (pas d'accélération correcte, pas de mise en veille fine).
   # Cartes récentes (RTX 50, « Blackwell ») : pilote 570.169 ou plus, en version « open » (modules ouverts de NVIDIA).
   if [ "$NVIDIA" = 1 ]; then
-    say "5e. Carte NVIDIA"
+    say "$(t "5e. Carte NVIDIA" "5e. NVIDIA card")"
     nvdev="$(for d in /sys/bus/pci/devices/*; do [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] && [[ $(cat "$d/class" 2>/dev/null) == 0x03* ]] && cat "$d/device"; done | head -1 || true)"
     BLACKWELL=0; [ -n "$nvdev" ] && [ $((nvdev)) -ge $((0x2b00)) ] && BLACKWELL=1
     drv="$(modinfo -F version nvidia 2>/dev/null || true)"
     if [ -n "$drv" ] && { [ "$BLACKWELL" = 0 ] || ver_ge "$drv" 570.169; }; then
-      ok "Pilote NVIDIA $drv installé."
+      ok "$(t "Pilote NVIDIA $drv installé." "NVIDIA driver $drv installed.")"
     elif [ "$FAMILY" = arch ]; then
-      if [ -n "$drv" ]; then info "Pilote NVIDIA $drv trop ancien pour cette carte (570.169 ou plus)."; else info "Pilote NVIDIA absent : la carte tourne sans accélération correcte."; fi
+      if [ -n "$drv" ]; then info "$(t "Pilote NVIDIA $drv trop ancien pour cette carte (570.169 ou plus)." "NVIDIA driver $drv is too old for this card (570.169 or later needed).")"; else info "$(t "Pilote NVIDIA absent : la carte tourne sans accélération correcte." "NVIDIA driver missing: the card runs without proper acceleration.")"; fi
       mapfile -t kernels < <(cat /usr/lib/modules/*/pkgbase 2>/dev/null | sort -u)
       pk=(nvidia-utils)
       if [ "${kernels[*]}" = linux ]; then pk+=(nvidia-open); else pk+=(nvidia-open-dkms); for k in "${kernels[@]}"; do pk+=("$k-headers"); done; fi
       pacman -Sl multilib >/dev/null 2>&1 && pk+=(lib32-nvidia-utils)   # jeux 32 bits (Steam)
-      if ask "Installer le pilote officiel de NVIDIA (${pk[*]}) ?" o; then
-        if sudo pacman -S --needed "${pk[@]}"; then ok "Pilote NVIDIA installé : redémarre le PC pour l'utiliser."; else warn "Installation du pilote NVIDIA impossible."; fi
+      if ask "$(t "Installer le pilote officiel de NVIDIA (${pk[*]}) ?" "Install NVIDIA's official driver (${pk[*]})?")" o; then
+        if sudo pacman -S --needed "${pk[@]}"; then ok "$(t "Pilote NVIDIA installé : redémarre le PC pour l'utiliser." "NVIDIA driver installed: restart the PC to use it.")"; else warn "$(t "Installation du pilote NVIDIA impossible." "Couldn't install the NVIDIA driver.")"; fi
       fi
     elif [ "$FAMILY" = debian ] && [ "$BLACKWELL" = 1 ]; then
-      warn "Ta carte NVIDIA (série RTX 50) demande le pilote 570.169 ou plus ; Debian ne fournit que le 550, qui ne la gère pas."
-      info "Pilote de NVIDIA pour Debian (dépôt officiel de NVIDIA, paquet nvidia-open) :"
+      warn "$(t "Ta carte NVIDIA (série RTX 50) demande le pilote 570.169 ou plus ; Debian ne fournit que le 550, qui ne la gère pas." "Your NVIDIA card (RTX 50 series) needs driver 570.169 or later; Debian only provides 550, which doesn't support it.")"
+      info "$(t "Pilote de NVIDIA pour Debian (dépôt officiel de NVIDIA, paquet nvidia-open) :" "NVIDIA driver for Debian (NVIDIA's official repository, nvidia-open package):")"
       info "  https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/debian.html"
-      info "En attendant, l'écran interne fonctionne avec la carte intégrée."
+      info "$(t "En attendant, l'écran interne fonctionne avec la carte intégrée." "Meanwhile, the built-in display works with the integrated graphics.")"
     else
-      info "Pilote NVIDIA ${drv:+$drv }à installer avec la méthode de ta distribution :"
+      info "$(t "Pilote NVIDIA ${drv:+$drv }à installer avec la méthode de ta distribution :" "NVIDIA driver ${drv:+$drv }to install with your distribution's method:")"
       case "$FAMILY" in
-        fedora) if [ "$OSID" = nobara ]; then info "  Nobara : appli « Nobara Driver Manager » (pilote déjà fourni par Nobara)"
-                else info "  RPM Fusion : https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)"; fi ;;
+        fedora) if [ "$OSID" = nobara ]; then info "$(t "  Nobara : appli « Nobara Driver Manager » (pilote déjà fourni par Nobara)" "  Nobara: “Nobara Driver Manager” app (driver already provided by Nobara)")"
+                else info "$(t "  RPM Fusion : https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)" "  RPM Fusion: https://rpmfusion.org/Howto/NVIDIA (sudo dnf install akmod-nvidia)")"; fi ;;
         debian) info "  https://wiki.debian.org/NvidiaGraphicsDrivers" ;;
         suse) info "  https://en.opensuse.org/SDB:NVIDIA_drivers" ;;
-        *) info "  documentation de ta distribution (pilote « nvidia-open » pour les cartes récentes)" ;;
+        *) info "$(t "  documentation de ta distribution (pilote « nvidia-open » pour les cartes récentes)" "  your distribution's documentation (“nvidia-open” driver for recent cards)")" ;;
       esac
     fi
   fi
 
   if [ "$FAMILY" = arch ]; then
-    say "5f. Entretien : nettoyage automatique du cache des paquets"
+    say "$(t "5f. Entretien : nettoyage automatique du cache des paquets" "5f. Maintenance: automatic package cache cleanup")"
     if systemctl is-enabled --quiet paccache.timer 2>/dev/null; then
-      ok "Déjà en place (paccache.timer)."
-    elif ask "Garder seulement les 2 dernières versions de chaque paquet en cache (chaque semaine) ?" o; then
+      ok "$(t "Déjà en place (paccache.timer)." "Already set up (paccache.timer).")"
+    elif ask "$(t "Garder seulement les 2 dernières versions de chaque paquet en cache (chaque semaine) ?" "Keep only the last 2 versions of each package in the cache (weekly)?")" o; then
       pkg_installed pacman-contrib || sudo pacman -S --needed pacman-contrib
-      sudo systemctl enable --now paccache.timer >/dev/null && ok "paccache.timer actif."
+      sudo systemctl enable --now paccache.timer >/dev/null && ok "$(t "paccache.timer actif." "paccache.timer active.")"
     fi
   fi
 fi
 
-say "Terminé"
-info "Ferme puis rouvre ta session pour que tout s'applique (choisis « Hyprland (uwsm-managed) » sur l'écran de connexion)."
-info "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fonds d'écran · Super+Entrée terminal (liste complète : RACCOURCIS.md)."
-[ "$HYBRID" = 1 ] && info "PC hybride : lancer une appli sur la carte NVIDIA avec « nvidia-run <commande> » (Steam : nvidia-run %command%)."
-[ -n "$(ls -A "$BK" 2>/dev/null)" ] && info "Retour arrière : ./install.sh --restore   (sauvegarde : $BK)"
-info "Mise à jour plus tard, en une commande : nc-maj"
-info "Tes réglages (écran, fenêtres, île, veille, clavier, terminal…) : nc-reglages (gardés à chaque mise à jour)"
-info "Un souci ? nc-diag vérifie tout et dit quoi faire (nc-diag rapport : le bilan, prêt à envoyer). Les commandes : nc-aide"
+say "$(t "Terminé" "Done")"
+info "$(t "Ferme puis rouvre ta session pour que tout s'applique (choisis « Hyprland (uwsm-managed) » sur l'écran de connexion)." "Log out and back in for everything to apply (pick “Hyprland (uwsm-managed)” on the login screen).")"
+info "$(t "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fonds d'écran · Super+Entrée terminal (liste complète : RACCOURCIS.md)." "Shortcuts: Super+/ shows the cheat sheet · Super+R search · Super+W wallpapers · Super+Enter terminal (full list: RACCOURCIS.md).")"
+[ "$HYBRID" = 1 ] && info "$(t "PC hybride : lancer une appli sur la carte NVIDIA avec « nvidia-run <commande> » (Steam : nvidia-run %command%)." "Hybrid PC: run an app on the NVIDIA card with “nvidia-run <command>” (Steam: nvidia-run %command%).")"
+[ -n "$(ls -A "$BK" 2>/dev/null)" ] && info "$(t "Retour arrière : ./install.sh --restore   (sauvegarde : $BK)" "Undo: ./install.sh --restore   (backup: $BK)")"
+info "$(t "Mise à jour plus tard, en une commande : nc-maj" "Update later with one command: nc-update")"
+info "$(t "Tes réglages (écran, fenêtres, île, veille, clavier, terminal…) : nc-reglages (gardés à chaque mise à jour)" "Your settings (display, windows, island, sleep, keyboard, terminal…): nc-settings (kept on every update)")"
+info "$(t "Un souci ? nc-diag vérifie tout et dit quoi faire (nc-diag rapport : le bilan, prêt à envoyer). Les commandes : nc-aide" "A problem? nc-diag checks everything and tells you what to do (nc-diag report: the summary, ready to send). The commands: nc-help")"

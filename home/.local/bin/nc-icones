@@ -13,10 +13,52 @@ Relancé par nc-theme-sync à chaque changement de couleurs.   Retour aux icône
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-icons: "NC" icon theme, drawn here, in the colors of the wallpaper.
+
+Draws into ~/.local/share/icons/NC:
+  - folders (plain folder and personal folders: Documents, Downloads, Music, Pictures, Videos,
+    Desktop, Templates, Public, home folder, network) and the trash;
+  - the Terminal (instead of kitty's cat) and Files (instead of the Dolphin and Nautilus dolphins);
+    XTerm and UXTerm (old X11 icon) are hidden from the launcher when kitty is installed.
+Everything else comes from Papirus (parent theme). App shortcuts are copied into ~/.local/share/applications
+with the new icon and a simple name ("Terminal", "Files"), marked X-NC-Icone; no file of the system
+or of another theme is touched.
+Run again by nc-theme-sync on every color change.   Back to the original icons: nc-icons remove"""
 
 HOME = Path.home()
 DONNEES = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
@@ -31,7 +73,8 @@ INVENTAIRE = BASE_ICONES / ".nc-icones"                   # anciennes versions :
 
 # Raccourci d'appli -> icône, et nom affiché (simple, comme sur un téléphone)
 APPS = {"kitty.desktop": "nc-terminal", "org.kde.dolphin.desktop": "nc-fichiers", "org.gnome.Nautilus.desktop": "nc-fichiers"}
-NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": "Fichiers", "org.gnome.Nautilus.desktop": "Fichiers"}
+NOMS = {"kitty.desktop": "Terminal", "org.kde.dolphin.desktop": T("Fichiers", "Files"),
+        "org.gnome.Nautilus.desktop": T("Fichiers", "Files")}
 # Vieux terminaux installés avec le système (icône de X11) : cachés du lanceur quand kitty est là, pas désinstallés
 CACHES = ["xterm.desktop", "uxterm.desktop", "debian-xterm.desktop", "debian-uxterm.desktop"]
 # Noms d'icônes demandés directement (notifications, sélecteur de fenêtres…) : servis par le thème NC
@@ -40,7 +83,7 @@ ALIAS = {"nc-terminal": ["kitty", "utilities-terminal", "terminal", "org.gnome.T
 
 INDEX = """[Icon Theme]
 Name=NC
-Comment=Icônes de noctalia-config, aux couleurs du fond d'écran (le reste vient de Papirus)
+Comment={commentaire}
 Inherits={parents}
 Example=folder
 Directories=scalable/places,scalable/apps,scalable/mimetypes
@@ -369,15 +412,20 @@ def retirer():
     for icone in set(APPS.values()):
         (ICONES / f"{icone}.svg").unlink(missing_ok=True)
     shutil.rmtree(THEME, ignore_errors=True)
-    print("Icônes d'origine rétablies (pense à choisir un autre thème d'icônes, par exemple Papirus-Dark).")
+    print(T("Icônes d'origine rétablies (pense à choisir un autre thème d'icônes, par exemple Papirus-Dark).",
+            "Original icons restored (remember to pick another icon theme, for example Papirus-Dark)."))
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
+        return print(T(__doc__.strip(), USAGE_EN))
+    if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer", "remove", "--remove"):
         return retirer()
     remettre_autres_themes()
     tout = dessins(couleurs())
-    ecrire(THEME / "index.theme", INDEX.format(parents=parents()))
+    ecrire(THEME / "index.theme", INDEX.format(parents=parents(), commentaire=T(
+        "Icônes de noctalia-config, aux couleurs du fond d'écran (le reste vient de Papirus)",
+        "noctalia-config icons, in the colors of the wallpaper (the rest comes from Papirus)")))
     for nom, texte in tout.items():
         dossier = "apps" if nom.startswith("nc-") else ("places" if nom.startswith(("folder", "user-", "inode", "network")) else "mimetypes")
         ecrire(THEME / "scalable" / dossier / f"{nom}.svg", texte)

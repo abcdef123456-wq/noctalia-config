@@ -5,10 +5,36 @@
 -- VERROU_MESSAGE (texte ; « aucun » : rien). Relus chaque minute.
 -- Taille : box_width / box_height du widget dans config.toml (640 × 280).
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local L, H = 640, 280
 local JOURS = { "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi" }
 local MOIS = { "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
   "novembre", "décembre" }
+local DAYS = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" }
+local MONTHS = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+  "November", "December" }
 local PHOTO = noctalia.expandPath("~/.face")
 local derniere = ""
 
@@ -25,6 +51,7 @@ local function reglages()
 end
 
 function rendre()
+  EN = langue() == "en"                     -- relue chaque minute, comme les réglages
   local t = os.date("*t")
   local heure = string.format("%02d:%02d", t.hour, t.min)
   derniere = heure
@@ -40,7 +67,7 @@ function rendre()
     or ui.glyph({ name = "lock", size = 22, color = "#ffffff", opacity = 0.85 })
   local enfants = {
     haut,
-    ui.label({ text = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], fontSize = 24, fontWeight = "semibold",
+    ui.label({ text = tr(JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], DAYS[t.wday] .. ", " .. MONTHS[t.month] .. " " .. t.day), fontSize = 24, fontWeight = "semibold",
       color = "#ffffff", opacity = 0.9 }),
     ui.label({ text = heure, fontSize = taille, fontWeight = graisse, color = "#ffffff" }),
   }

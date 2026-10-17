@@ -97,7 +97,7 @@ Item {
             else {
                 var l = r.brut.trim().split("\n")
                 var c = l.length && l[l.length - 1].trim().startsWith("$ ") ? l.pop().trim().slice(2).trim() : ""
-                r.reponse = l.join("\n").trim() || "Pas de réponse."
+                r.reponse = l.join("\n").trim() || Reglages.t("Pas de réponse.", "No answer.")
                 r.commandeIA = c
             }
             r.chercher()
@@ -182,35 +182,35 @@ Item {
 
     // ── Actions et pages ──
     readonly property var actions: [
-        { t: "Verrouiller", k: "verrouiller lock écran", g: "lock", f: () => Etat.faire(["noctalia", "msg", "session", "lock"]) },
-        { t: "Mettre en veille", k: "veille suspend dormir", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
-        { t: "Éteindre, redémarrer…", k: "éteindre redémarrer arrêt shutdown reboot quitter session", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session"]) },
-        { t: "Mode jeu", k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
-        { t: "Économie d'énergie", k: "économie batterie eco énergie", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
-        { t: "Équilibré", k: "équilibré énergie normal", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },
-        { t: "Performance", k: "performance énergie puissance nvidia", g: "bolt", f: () => Etat.choisirProfil(PowerProfile.Performance) },
-        { t: "Activer ou couper le Wi-Fi", k: "wifi wi-fi réseau internet", g: "wifi", f: () => Etat.faire(["noctalia", "msg", "wifi-toggle"]) },
-        { t: "Activer ou couper le Bluetooth", k: "bluetooth", g: "bluetooth", f: () => Etat.faire(["noctalia", "msg", "bluetooth-toggle"]) },
-        { t: "Concentration", k: "concentration ne pas déranger dnd notifications", g: "dark_mode", f: () => Notifs.basculerConcentration() },
-        { t: "Nuit (tons chauds)", k: "nuit night lumière bleue", g: "wb_twilight", f: () => { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) } },
-        { t: "Thème clair ou sombre", k: "thème clair sombre dark light", g: "contrast", f: () => Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) },
-        { t: "Rester éveillé", k: "rester éveillé café caféine veille", g: "coffee", f: () => Etat.basculerCafe() },
-        { t: "Capture d'une zone", k: "capture écran screenshot", g: "screenshot_region", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"]) },
-        { t: "Pomodoro", k: "pomodoro minuteur travail concentration pause tomate", g: "psychology", f: () => { Etat.lancerPomodoro(); Etat.basculer(Etat.ecranOuvert, false) } },
-        { t: "Copier le texte de l'écran", k: "texte ocr lire image copier capture extraire", g: "text_select_start", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"]) },
-        { t: "Presse-papiers", k: "presse-papiers clipboard copier coller", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
-        { t: "Fond d'écran suivant", k: "fond écran wallpaper suivant", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
-        { t: "Raccourcis clavier", k: "raccourcis clavier touches aide", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }
+        { t: Reglages.t("Verrouiller", "Lock"), k: "verrouiller lock écran screen", g: "lock", f: () => Etat.faire(["noctalia", "msg", "session", "lock"]) },
+        { t: Reglages.t("Mettre en veille", "Sleep"), k: "veille suspend dormir sleep", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
+        { t: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), k: "éteindre redémarrer arrêt shutdown reboot quitter session shut power off restart log out logout", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session"]) },
+        { t: Reglages.t("Mode jeu", "Game Mode"), k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
+        { t: Reglages.t("Économie d'énergie", "Power Saver"), k: "économie batterie eco énergie power saver low battery energy", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
+        { t: Reglages.t("Équilibré", "Balanced"), k: "équilibré énergie normal balanced power energy", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },
+        { t: "Performance", k: "performance énergie puissance nvidia power energy", g: "bolt", f: () => Etat.choisirProfil(PowerProfile.Performance) },
+        { t: Reglages.t("Activer ou couper le Wi-Fi", "Turn Wi-Fi On or Off"), k: "wifi wi-fi réseau internet network", g: "wifi", f: () => Etat.faire(["noctalia", "msg", "wifi-toggle"]) },
+        { t: Reglages.t("Activer ou couper le Bluetooth", "Turn Bluetooth On or Off"), k: "bluetooth", g: "bluetooth", f: () => Etat.faire(["noctalia", "msg", "bluetooth-toggle"]) },
+        { t: Reglages.t("Concentration", "Do Not Disturb"), k: "concentration ne pas déranger dnd notifications focus do not disturb", g: "dark_mode", f: () => Notifs.basculerConcentration() },
+        { t: Reglages.t("Nuit (tons chauds)", "Night Light (Warm Tones)"), k: "nuit night lumière bleue blue light warm shift", g: "wb_twilight", f: () => { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) } },
+        { t: Reglages.t("Thème clair ou sombre", "Light or Dark Theme"), k: "thème clair sombre dark light theme mode appearance", g: "contrast", f: () => Etat.faire(["noctalia", "msg", "theme-mode-toggle"]) },
+        { t: Reglages.t("Rester éveillé", "Stay Awake"), k: "rester éveillé café caféine veille stay awake caffeine coffee", g: "coffee", f: () => Etat.basculerCafe() },
+        { t: Reglages.t("Capture d'une zone", "Capture an Area"), k: "capture écran screenshot screen area region", g: "screenshot_region", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture zone"]) },
+        { t: "Pomodoro", k: "pomodoro minuteur travail concentration pause tomate timer work focus break tomato", g: "psychology", f: () => { Etat.lancerPomodoro(); Etat.basculer(Etat.ecranOuvert, false) } },
+        { t: Reglages.t("Copier le texte de l'écran", "Copy Text from Screen"), k: "texte ocr lire image copier capture extraire text copy read screen extract", g: "text_select_start", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"]) },
+        { t: Reglages.t("Presse-papiers", "Clipboard"), k: "presse-papiers clipboard copier coller copy paste history", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
+        { t: Reglages.t("Fond d'écran suivant", "Next Wallpaper"), k: "fond écran wallpaper suivant next background", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
+        { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }
     ]
     readonly property var pagesIle: [
-        { t: "Son", k: "son volume audio sortie micro haut-parleurs casque", g: "volume_up", p: "son" },
-        { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux", g: "wifi", p: "reseau" },
-        { t: "Bluetooth", k: "bluetooth appareils casque souris", g: "bluetooth", p: "bluetooth" },
+        { t: Reglages.t("Son", "Sound"), k: "son volume audio sortie micro haut-parleurs casque sound output speakers headphones microphone", g: "volume_up", p: "son" },
+        { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux network networks", g: "wifi", p: "reseau" },
+        { t: "Bluetooth", k: "bluetooth appareils casque souris devices headphones mouse", g: "bluetooth", p: "bluetooth" },
         { t: "Notifications", k: "notifications messages", g: "notifications", p: "notifications" },
-        { t: "Système", k: "système processeur mémoire batterie température disque énergie", g: "memory", p: "systeme" },
-        { t: "Calendrier", k: "calendrier date agenda", g: "calendar_month", p: "calendrier" },
-        { t: "Minuteur", k: "minuteur timer chrono", g: "timer", p: "minuteur" },
-        { t: "Centre de contrôle", k: "centre contrôle réglages luminosité", g: "toggle_on", p: "centre" }
+        { t: Reglages.t("Système", "System"), k: "système processeur mémoire batterie température disque énergie system cpu processor memory ram battery temperature disk power", g: "memory", p: "systeme" },
+        { t: Reglages.t("Calendrier", "Calendar"), k: "calendrier date agenda calendar", g: "calendar_month", p: "calendrier" },
+        { t: Reglages.t("Minuteur", "Timer"), k: "minuteur timer chrono stopwatch countdown", g: "timer", p: "minuteur" },
+        { t: Reglages.t("Centre de contrôle", "Control Center"), k: "centre contrôle réglages luminosité control center settings brightness", g: "toggle_on", p: "centre" }
     ]
 
     // ── Recherche ──
@@ -253,7 +253,7 @@ Item {
     }
     // Aller sur une fenêtre ; réduite (Super + M), elle revient d'abord sur le bureau affiché (nc-fenetre)
     function allerA(adresse) { Etat.faire([Etat.bin + "nc-fenetre", "aller", adresse]) }
-    function bureauNom(f) { return f.workspace.name === "special:reduites" ? "Réduite" : "Ouverte · bureau " + f.workspace.name }
+    function bureauNom(f) { return f.workspace.name === "special:reduites" ? Reglages.t("Réduite", "Minimized") : Reglages.t("Ouverte · bureau ", "Open · Desktop ") + f.workspace.name }
     function poidsUsage(id) {
         var u = usage[id]
         if (!u) return 1
@@ -269,12 +269,12 @@ Item {
 
         // Préfixes : web et commande
         var web = [["g ", "Google", "https://www.google.com/search?q="], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
-                   ["w ", "Wikipédia", "https://fr.wikipedia.org/w/index.php?search="]]
+                   ["w ", Reglages.t("Wikipédia", "Wikipedia"), Reglages.t("https://fr.wikipedia.org/w/index.php?search=", "https://en.wikipedia.org/w/index.php?search=")]]
         for (var w = 0; w < web.length; w++) {
             if (q.startsWith(web[w][0]) && q.length > web[w][0].length) {
                 var terme = q.slice(web[w][0].length)
                 var url = web[w][2] + encodeURIComponent(terme)
-                resultats = [{ titre: terme, sous: "Rechercher sur " + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
+                resultats = [{ titre: terme, sous: Reglages.t("Rechercher sur ", "Search ") + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
                 return
             }
         }
@@ -282,18 +282,19 @@ Item {
             var question = q.slice(1).trim()
             if (r.reponse !== "" && question === r.questionPosee) {
                 let cmdIA = r.commandeIA
-                resultats = cmdIA === "" ? [] : [{ titre: cmdIA, sous: "Lancer dans le terminal", glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]
+                resultats = cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]
             } else {
                 resultats = r.reflechit ? []
-                          : nomIA === "-" ? [{ titre: "Aucune IA installée pour répondre", sous: "Claude, opencode, Gemini ou Qwen", glyphe: "block", garder: true, f: () => {} }]
-                          : [{ titre: question || "Pose ta question", sous: r.reflechit ? (nomIA + " réfléchit…") : "Demander à " + (nomIA || "l'IA"),
+                          : nomIA === "-" ? [{ titre: Reglages.t("Aucune IA installée pour répondre", "No AI installed to answer"), sous: Reglages.t("Claude, opencode, Gemini ou Qwen", "Claude, opencode, Gemini or Qwen"), glyphe: "block", garder: true, f: () => {} }]
+                          : [{ titre: question || Reglages.t("Pose ta question", "Ask your question"),
+                               sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
             }
             return
         }
         if (q.startsWith(">")) {
             var c = q.slice(1).trim()
-            resultats = c === "" ? [] : [{ titre: c, sous: "Commande dans le terminal", glyphe: "terminal",
+            resultats = c === "" ? [] : [{ titre: c, sous: Reglages.t("Commande dans le terminal", "Command in Terminal"), glyphe: "terminal",
                                           f: () => r.lancerCommande(c) }]
             return
         }
@@ -301,7 +302,7 @@ Item {
         // Calcul en tête
         if (calcul !== "") {
             var res = calcul
-            out.push({ titre: "= " + res, sous: "Calcul · Entrée pour copier", glyphe: "calculate", s: 1000,
+            out.push({ titre: "= " + res, sous: Reglages.t("Calcul · Entrée pour copier", "Calculation · Enter to copy"), glyphe: "calculate", s: 1000,
                        f: () => Quickshell.execDetached(["wl-copy", res.replace(/^≈?\s*/, "")]) })
         }
         // Applications : déjà ouverte → Entrée en ouvre une nouvelle (Ctrl + Entrée : y aller), sinon Entrée la lance
@@ -317,11 +318,11 @@ Item {
                     prises[adresse] = true
                     item.sous = bureauNom(fen)
                     if (Reglages.val("SPOTLIGHT_ENTREE", "nouvelle") === "aller") {
-                        item.aide = "↵ y aller · Ctrl ↵ nouvelle"
+                        item.aide = Reglages.t("↵ y aller · Ctrl ↵ nouvelle", "↵ go to it · Ctrl ↵ new")
                         item.f = () => r.allerA(adresse)
                         item.nouveau = () => r.lancer(id)
                     } else {
-                        item.aide = "↵ nouvelle · Ctrl ↵ y aller"
+                        item.aide = Reglages.t("↵ nouvelle · Ctrl ↵ y aller", "↵ new · Ctrl ↵ go to it")
                         item.f = () => r.lancer(id)
                         item.nouveau = () => r.allerA(adresse)
                     }
@@ -339,14 +340,16 @@ Item {
             var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
             if (sf > 0) {
                 let adr = fe.address
-                out.push({ titre: fe.title, sous: fe.workspace.name === "special:reduites" ? "Fenêtre réduite · Entrée pour la ramener" : "Fenêtre ouverte · bureau " + fe.workspace.name, icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
+                out.push({ titre: fe.title, sous: fe.workspace.name === "special:reduites" ? Reglages.t("Fenêtre réduite · Entrée pour la ramener", "Minimized window · Enter to bring it back")
+                                                                  : Reglages.t("Fenêtre ouverte · bureau ", "Open window · Desktop ") + fe.workspace.name,
+                           icone: Quickshell.iconPath(fe.class, true) || Quickshell.iconPath(fe.class.toLowerCase(), true),
                            glyphe: "select_window", s: sf + 30, f: () => r.allerA(adr) })
             }
         }
         // Pages de l'île et actions
         for (var p = 0; p < pagesIle.length; p++) {
             var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
-            if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: "Dans l'île", glyphe: pg.g, s: sp - 5, page: nom }) }
+            if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: Reglages.t("Dans l'île", "In the island"), glyphe: pg.g, s: sp - 5, page: nom }) }
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
@@ -355,7 +358,7 @@ Item {
         // Fichiers
         for (var n = 0; n < fichiers.length; n++) {
             let fi = fichiers[n], chemin = fi.path
-            out.push({ titre: fi.name, sous: (fi.dir ? "Dossier · " : "Fichier · ") + fi.parent,
+            out.push({ titre: fi.name, sous: (fi.dir ? Reglages.t("Dossier · ", "Folder · ") : Reglages.t("Fichier · ", "File · ")) + fi.parent,
                        icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
                        s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)),   // jamais devant une appli qui commence par la saisie
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
@@ -367,7 +370,7 @@ Item {
         if (execs[prog] && !q.startsWith("/")) {
             let commande = q
             out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? 5 : 4)
-            var lancerItem = { titre: commande, sous: "Lancer dans le terminal", glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
+            var lancerItem = { titre: commande, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
             // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
         }
@@ -452,7 +455,7 @@ Item {
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Rechercher  ·  > commande  ·  ? question à l'IA"; secondaire: true; font.pixelSize: 19
+                text: Reglages.t("Rechercher  ·  > commande  ·  ? question à l'IA", "Search  ·  > command  ·  ? ask the AI"); secondaire: true; font.pixelSize: 19
             }
         }
     }
@@ -474,7 +477,7 @@ Item {
                 agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen" })[r.nomIA] || "claude"
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
-                    text: zoneReponse.attend ? r.nomIA + " réfléchit…" : r.nomIA }
+                    text: zoneReponse.attend ? r.nomIA + Reglages.t(" réfléchit…", " is thinking…") : r.nomIA }
         }
         Text {
             id: texteReponse

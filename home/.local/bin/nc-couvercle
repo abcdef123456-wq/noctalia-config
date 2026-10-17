@@ -9,6 +9,7 @@
 #   nc-couvercle ferme | ouvre  appelé par Hyprland (interrupteur du couvercle)
 # Écran externe branché : le système ne met déjà pas en veille ; seul l'écran du portable s'éteint.
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 PID="$RUN/nc-couvercle-inactivite.pid"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
@@ -26,11 +27,15 @@ arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep 
   rm -f "$PID"
 }
 
-case "${1:-}" in
+action="${1:-}"
+# Noms anglais (nc-lid hold | close | open)
+case "$action" in hold) action=garde ;; close|closed) action=ferme ;; open|opened) action=ouvre ;; esac
+
+case "$action" in
   garde)
     [ "$mode" = ecran ] || exit 0
     exec systemd-inhibit --what=handle-lid-switch --who=noctalia-config --mode=block \
-      --why="Couvercle fermé : l'écran s'éteint, le PC continue de tourner (nc-reglages)" sleep infinity ;;
+      --why="$(t "Couvercle fermé : l'écran s'éteint, le PC continue de tourner (nc-reglages)" "Lid closed: the screen turns off, the PC keeps running (nc-settings)")" sleep infinity ;;
   ferme)
     [ "$mode" = ecran ] || exit 0
     if [ "$externe" = 1 ]; then
@@ -42,7 +47,7 @@ case "${1:-}" in
     [ "$(reglage COUVERCLE_VERROU)" = non ] || loginctl lock-session
     # Pas de veille pour inactivité tant que le couvercle est fermé (hypridle respecte ce verrou)
     arreter
-    setsid systemd-inhibit --what=idle --who=noctalia-config --why="Couvercle fermé, le PC continue de tourner" \
+    setsid systemd-inhibit --what=idle --who=noctalia-config --why="$(t "Couvercle fermé, le PC continue de tourner" "Lid closed, the PC keeps running")" \
       sleep infinity >/dev/null 2>&1 &
     echo $! > "$PID"
     sleep 1                                   # le verrouillage s'affiche avant que l'écran s'éteigne
@@ -56,5 +61,21 @@ case "${1:-}" in
     else
       hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
     fi ;;
-  *) sed -n '2,11p' "$0"; exit 1 ;;
+  *)
+    if [ "${NC_LANGUE:-fr}" = en ]; then
+      cat <<'FIN'
+# nc-lid: what the laptop does when you close the lid (nc-settings, Sleep → "Lid closed").
+#   COUVERCLE=veille (default)  the system puts the PC to sleep, as usual
+#   COUVERCLE=ecran             the screen turns off (and locks, unless COUVERCLE_VERROU=non); the PC keeps
+#                               running: downloads, music, sharing… It doesn't go to sleep on inactivity either
+#                               while the lid stays closed.
+#   nc-lid hold          (nc-couvercle service) in "ecran" mode, stops the system from sleeping when the lid
+#                        closes (logind inhibitor, no sudo)
+#   nc-lid close | open  called by Hyprland (lid switch)
+# External screen plugged in: the system already doesn't sleep; only the laptop screen turns off.
+FIN
+    else
+      sed -n '2,11p' "$0"
+    fi
+    exit 1 ;;
 esac

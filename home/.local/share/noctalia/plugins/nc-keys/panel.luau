@@ -2,6 +2,29 @@
 -- (lit hyprctl binds : un raccourci ajouté dans Hyprland apparaît tout seul). Échap ou clic pour fermer.
 -- Ouverture : noctalia msg panel-toggle nc/keys:main
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local KEYS_CMD = noctalia.expandPath("~/.local/bin/nc-keys")
 local FADE_MS = 150
 
@@ -24,8 +47,17 @@ local COLUMNS = {
   { "Fenêtres", "Souris" },
   { "Système", "Mes raccourcis" },
 }
+-- Titre affiché : « label » donné par nc-keys (dans la langue choisie), sinon traduit ici ; « title » est l'identifiant
+-- français de la section (un titre anglais est aussi ramené au français)
+local TITRES_EN = { ["Applis et barre"] = "Apps & Bar", ["Fenêtres"] = "Windows", ["Bureaux"] = "Desktops",
+  ["Souris"] = "Mouse", ["Système"] = "System", ["Mes raccourcis"] = "My Shortcuts" }
+local TITRES_FR = { ["apps and bar"] = "Applis et barre", ["apps & bar"] = "Applis et barre", ["apps"] = "Applis et barre",
+  ["windows"] = "Fenêtres", ["workspaces"] = "Bureaux", ["desktops"] = "Bureaux", ["mouse"] = "Souris",
+  ["system"] = "Système", ["my shortcuts"] = "Mes raccourcis", ["spaces"] = "Bureaux" }
+for fr, en in pairs(TITRES_EN) do TITRES_FR[string.lower(en)] = fr end
 
 local sections = {}
+local libelles = {}     -- titre français -> titre affiché (label de nc-keys)
 local appear = 1
 local ticking = false
 
@@ -57,7 +89,7 @@ local function column(titles)
     local sec = sections[t]
     if sec and #sec > 0 then
       if h > 0 then table.insert(kids, ui.box({ height = SEC_GAP, width = 1, opacity = 0 })); h = h + SEC_GAP end
-      table.insert(kids, ui.label({ text = t, fontSize = math.max(11, px(14)), fontWeight = "bold", color = "primary", height = TITLE_H }))
+      table.insert(kids, ui.label({ text = libelles[t] or tr(t, TITRES_EN[t] or t), fontSize = math.max(11, px(14)), fontWeight = "bold", color = "primary", height = TITLE_H }))
       h = h + TITLE_H
       for _, r in ipairs(sec) do table.insert(kids, row(r)) end
       h = h + #sec * ROW_H
@@ -76,7 +108,7 @@ function render()
   local ease = 1 - (1 - appear) * (1 - appear)
   local body
   if maxH == 0 then
-    body = ui.label({ text = "Lecture des raccourcis…", fontSize = 14, color = "on_surface_variant" })
+    body = ui.label({ text = tr("Lecture des raccourcis…", "Reading shortcuts…"), fontSize = 14, color = "on_surface_variant" })
     maxH = 40
   else
     body = ui.row({ gap = px(24), align = "start", height = maxH }, cols)
@@ -94,14 +126,20 @@ local function load()
   noctalia.runAsync({ KEYS_CMD, "json" }, function(r)
     local data = r.exitCode == 0 and noctalia.json.decode(r.stdout)
     if type(data) == "table" then
-      sections = {}
-      for _, s in ipairs(data) do sections[s.title] = s.rows end
+      sections, libelles = {}, {}
+      for _, s in ipairs(data) do
+        local titre = tostring(s.title or "")
+        titre = TITRES_FR[string.lower(titre)] or titre
+        sections[titre] = s.rows
+        if type(s.label) == "string" and s.label ~= "" then libelles[titre] = s.label end
+      end
       render()
     end
   end, 5000)
 end
 
 function onOpen()
+  EN = langue() == "en"
   setZoom()
   COL_W, KEY_W, ROW_H, TITLE_H, SEC_GAP = px(490), px(220), px(30), px(34), px(22)
   appear = 0

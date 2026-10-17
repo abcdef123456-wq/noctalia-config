@@ -22,6 +22,48 @@ import subprocess
 import sys
 import time
 
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-pouls: the glow of the active window pulses to the bass of the music.
+
+Runs as a service (nc-pouls.service): as soon as a player is playing (Spotify, browser, mpv… seen by playerctl), it
+listens to the sound output with cava and passes the bass level to Hyprland (nc.halo, in nc/automatismes.lua).
+Nothing happens in Power Saver or game mode, nor on battery outside the Performance profile (unless the
+HALO_BATTERIE=oui setting of nc-settings is on); without music, cava is stopped (no cost).
+
+  nc-pouls          service (started by systemd)
+  nc-pouls demo     8 seconds of demo pulsing, without music
+  nc-pouls diag     checks each condition and says why the glow does not pulse
+Turn off / on: Super + Alt + M, or systemctl --user disable --now nc-pouls"""
+
+
 RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 PROFIL = os.path.expanduser("~/.config/hypr/nc/profil.lua")
 REGLAGES = os.path.expanduser("~/.config/nc/reglages.conf")
@@ -120,12 +162,13 @@ def lancer_cava(methode):
 
 
 def log(msg):
-    print(f"nc-pouls : {msg}", file=sys.stderr, flush=True)
+    print(T(f"nc-pouls : {msg}", f"nc-pouls: {msg}"), file=sys.stderr, flush=True)
 
 
 def service():
     if not shutil.which("cava"):
-        log("cava introuvable : le halo ne peut pas écouter la musique (installe le paquet cava)")
+        log(T("cava introuvable : le halo ne peut pas écouter la musique (installe le paquet cava)",
+              "cava not found: the glow cannot listen to the music (install the cava package)"))
     # Entrée son de cava : PipeWire, sinon PulseAudio (cava sans PipeWire, comme sur certaines distributions)
     methodes, m = ["pipewire", "pulse"], 0
     cava, niveau, envoye, prochain_test, depart = None, 0.0, -1.0, 0.0, 0.0
@@ -151,7 +194,8 @@ def service():
         if not ligne:                              # cava arrêté (son coupé, PipeWire relancé…)
             err = cava.stderr.read().strip() if cava.stderr else ""
             if time.time() - depart < 3:           # arrêté tout de suite : essaie l'autre entrée son
-                log(f"cava ne démarre pas avec {methodes[m]} ({err[:160] or 'sans message'})")
+                log(T(f"cava ne démarre pas avec {methodes[m]} ({err[:160] or 'sans message'})",
+                      f"cava does not start with {methodes[m]} ({err[:160] or 'no message'})"))
                 m = (m + 1) % len(methodes)
             cava = None
             halo(0)
@@ -176,29 +220,33 @@ def diag():
         ok_tout = ok_tout and ok
         print(f"  {'✓' if ok else '✗'} {texte}" + (f"\n      → {conseil}" if not ok and conseil else ""))
 
-    print("Halo musical : diagnostic\n")
+    print(T("Halo musical : diagnostic\n", "Music glow: diagnostics\n"))
     actif = subprocess.run(["systemctl", "--user", "is-active", "--quiet", "nc-pouls"]).returncode == 0
-    ligne(actif, "service nc-pouls lancé", "Super + Alt + M, ou : systemctl --user enable --now nc-pouls")
-    ligne(socket_path() is not None, "Hyprland joignable")
-    ligne(shutil.which("cava") is not None, "cava installé", "installe le paquet cava")
+    ligne(actif, T("service nc-pouls lancé", "nc-pouls service running"),
+          T("Super + Alt + M, ou : systemctl --user enable --now nc-pouls", "Super + Alt + M, or: systemctl --user enable --now nc-pouls"))
+    ligne(socket_path() is not None, T("Hyprland joignable", "Hyprland reachable"))
+    ligne(shutil.which("cava") is not None, T("cava installé", "cava installed"), T("installe le paquet cava", "install the cava package"))
     try:
         out = subprocess.run(["playerctl", "-a", "status"], capture_output=True, text=True, timeout=3).stdout
     except (OSError, subprocess.TimeoutExpired):
         out = ""
-    ligne("Playing" in out, "de la musique joue (playerctl)", "lance une musique ; le halo ne pulse que pendant la lecture")
+    ligne("Playing" in out, T("de la musique joue (playerctl)", "music is playing (playerctl)"),
+          T("lance une musique ; le halo ne pulse que pendant la lecture", "play some music; the glow only pulses during playback"))
     jeu = os.path.exists(f"{RUN}/nc-mode-jeu")
-    ligne(not jeu, "mode jeu coupé", "Super + Alt + G pour quitter le mode jeu")
+    ligne(not jeu, T("mode jeu coupé", "game mode off"), T("Super + Alt + G pour quitter le mode jeu", "Super + Alt + G to leave game mode"))
     try:
         t = open(PROFIL).read()
         profil = (re.search(r'profil\s*=\s*"([a-z-]+)"', t) or [None, "balanced"])[1]
         batterie = re.search(r"batterie\s*=\s*true", t) is not None
     except OSError:
         profil, batterie = "balanced", False
-    noms = {"power-saver": "Économie", "balanced": "Équilibré", "performance": "Performance"}
-    ligne(profil != "power-saver", f"profil d'énergie : {noms.get(profil, profil)}", "pas de halo en Économie")
+    noms = {"power-saver": T("Économie", "Power Saver"), "balanced": T("Équilibré", "Balanced"), "performance": "Performance"}
+    ligne(profil != "power-saver", T(f"profil d'énergie : {noms.get(profil, profil)}", f"power profile: {noms.get(profil, profil)}"),
+          T("pas de halo en Économie", "no glow in Power Saver"))
     if batterie and profil != "performance":
-        ligne(halo_sur_batterie(), "sur batterie en Équilibré : halo autorisé",
-              "il est coupé sur batterie pour l'autonomie ; pour le garder : nc-reglages set HALO_BATTERIE oui")
+        ligne(halo_sur_batterie(), T("sur batterie en Équilibré : halo autorisé", "on battery in Balanced: glow allowed"),
+              T("il est coupé sur batterie pour l'autonomie ; pour le garder : nc-reglages set HALO_BATTERIE oui",
+                "it is off on battery to save power; to keep it: nc-settings set HALO_BATTERIE oui"))
     # cava : une entrée son qui fonctionne
     if shutil.which("cava"):
         bonne = None
@@ -210,17 +258,25 @@ def diag():
             if vivant:
                 bonne = methode
                 break
-        ligne(bonne is not None, f"cava écoute le son{f' (entrée {bonne})' if bonne else ''}",
-              "cava n'arrive pas à lire le son : vérifie PipeWire (systemctl --user status pipewire pipewire-pulse)")
+        ligne(bonne is not None, T(f"cava écoute le son{f' (entrée {bonne})' if bonne else ''}",
+                                   f"cava hears the sound{f' (input {bonne})' if bonne else ''}"),
+              T("cava n'arrive pas à lire le son : vérifie PipeWire (systemctl --user status pipewire pipewire-pulse)",
+                "cava cannot read the sound: check PipeWire (systemctl --user status pipewire pipewire-pulse)"))
     # Hyprland : la fonction du halo et les ombres
     p = subprocess.run(["hyprctl", "eval", "nc.halo(0)"], capture_output=True, text=True)
-    ligne(p.stdout.strip() == "ok", "fonction du halo présente dans Hyprland",
-          f"Hyprland répond : {p.stdout.strip() or p.stderr.strip()} (relance nc-maj, puis hyprctl reload)")
+    ligne(p.stdout.strip() == "ok", T("fonction du halo présente dans Hyprland", "glow function present in Hyprland"),
+          T(f"Hyprland répond : {p.stdout.strip() or p.stderr.strip()} (relance nc-maj, puis hyprctl reload)",
+            f"Hyprland replies: {p.stdout.strip() or p.stderr.strip()} (run nc-update again, then hyprctl reload)"))
     p = subprocess.run(["hyprctl", "getoption", "decoration:shadow:enabled", "-j"], capture_output=True, text=True)
-    ligne('"bool": true' in p.stdout.replace('":true', '": true'), "ombres des fenêtres actives",
-          "le halo est l'ombre de la fenêtre : réactive « Halo coloré de la fenêtre active » dans nc-reglages")
-    print("\n" + ("Tout est bon : lance une musique, le halo de la fenêtre active doit pulser. Essai sans musique : nc-pouls demo"
-                  if ok_tout else "Corrige les points marqués ✗, puis : systemctl --user restart nc-pouls"))
+    ligne('"bool": true' in p.stdout.replace('":true', '": true'), T("ombres des fenêtres actives", "active window shadows"),
+          T("le halo est l'ombre de la fenêtre : réactive « Halo coloré de la fenêtre active » dans nc-reglages",
+            "the glow is the window's shadow: turn \"Colored glow of the active window\" back on in nc-settings"))
+    if ok_tout:
+        print("\n" + T("Tout est bon : lance une musique, le halo de la fenêtre active doit pulser. Essai sans musique : nc-pouls demo",
+                       "All good: play some music, the glow of the active window should pulse. Try without music: nc-pouls demo"))
+    else:
+        print("\n" + T("Corrige les points marqués ✗, puis : systemctl --user restart nc-pouls",
+                       "Fix the items marked ✗, then: systemctl --user restart nc-pouls"))
 
 
 if __name__ == "__main__":
@@ -229,7 +285,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "demo":
         demo()
     elif len(sys.argv) > 1:
-        print(__doc__.strip())
+        print(T(__doc__.strip(), USAGE_EN))
     else:
         try:
             service()

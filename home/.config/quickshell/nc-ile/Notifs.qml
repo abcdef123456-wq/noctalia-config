@@ -110,13 +110,14 @@ Singleton {
     function nomAppli(notif) {
         if (!notif) return ""
         var n = (notif.appName || "").toLowerCase()
-        return ({ kitty: "Terminal", "org.gnome.nautilus": "Fichiers", nautilus: "Fichiers", dolphin: "Fichiers" })[n] || notif.appName
+        var f = Reglages.t("Fichiers", "Files")
+        return ({ kitty: "Terminal", "org.gnome.nautilus": f, nautilus: f, dolphin: f })[n] || notif.appName
     }
     // « maintenant », « il y a 5 min », sinon l'heure
     function quand(notif, maintenant) {
         var t = heures[notif.id]
         if (!t) return ""
         var m = Math.floor((maintenant - t) / 60000)
-        return m < 1 ? "maintenant" : (m < 60 ? "il y a " + m + " min" : Qt.formatTime(new Date(t), "hh:mm"))
+        return m < 1 ? Reglages.t("maintenant", "now") : (m < 60 ? Reglages.t("il y a " + m + " min", m + " min ago") : Qt.formatTime(new Date(t), "hh:mm"))
     }
 }

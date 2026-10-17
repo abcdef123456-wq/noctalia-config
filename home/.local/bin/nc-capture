@@ -9,22 +9,27 @@
 # pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
 # corbeille. Dans Swappy, l'icône de corbeille efface seulement les annotations ; Échap ferme Swappy.
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 mode="${1:-zone}"
+# Noms anglais des modes (nc-screenshot screen | area | edit | text)
+case "$mode" in
+  screen) mode=ecran ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
+esac
 
 # Texte d'une zone : lu par tesseract (français et anglais), copié ; rien n'est enregistré
 if [ "$mode" = texte ]; then
-  dire() { notify-send -a "Texte de l'écran" -i edit-copy "$@" 2>/dev/null || true; }
-  command -v tesseract >/dev/null || { dire "tesseract n'est pas installé" "nc-maj l'installe (lecture du texte des images)."; exit 1; }
+  dire() { notify-send -a "$(t "Texte de l'écran" "Screen Text")" -i edit-copy "$@" 2>/dev/null || true; }
+  command -v tesseract >/dev/null || { dire "$(t "tesseract n'est pas installé" "tesseract is not installed")" "$(t "nc-maj l'installe (lecture du texte des images)." "nc-update installs it (reads text from images).")"; exit 1; }
   zone="$(slurp -d 2>/dev/null)" || exit 0
   [ -n "$zone" ] || exit 0
   langues="$(tesseract --list-langs 2>/dev/null | grep -xE 'fra|eng' | paste -sd+)"
   # Agrandie deux fois : tesseract lit bien mieux les petits caractères d'écran
   texte="$(grim -g "$zone" -s 2 - | tesseract stdin stdout ${langues:+-l "$langues"} 2>/dev/null | sed -e 's/[[:space:]]*$//' | cat -s)"
   texte="$(printf '%s' "$texte" | sed -e '/./,$!d')"          # sans lignes vides au début
-  if [ -z "${texte//[[:space:]]/}" ]; then dire "Aucun texte trouvé" "Essaie une zone plus grande ou plus nette."; exit 0; fi
+  if [ -z "${texte//[[:space:]]/}" ]; then dire "$(t "Aucun texte trouvé" "No text found")" "$(t "Essaie une zone plus grande ou plus nette." "Try a larger or sharper area.")"; exit 0; fi
   printf '%s' "$texte" | wl-copy
-  dire "Texte copié" "$(printf '%s' "$texte" | head -c 180)"
+  dire "$(t "Texte copié" "Text copied")" "$(printf '%s' "$texte" | head -c 180)"
   exit 0
 fi
 images="$(xdg-user-dir PICTURES 2>/dev/null)"
@@ -35,7 +40,8 @@ reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | ta
 perso="$(reglage CAPTURES_DOSSIER)"
 [ -n "$perso" ] && dossier="${perso/#\~/$HOME}"
 mkdir -p "$dossier"
-fichier="$dossier/Capture du $(date '+%Y-%m-%d à %H.%M.%S').png"
+# Nom du fichier dans la langue choisie (le dossier, lui, ne change pas : les captures restent au même endroit)
+fichier="$dossier/$(t "Capture du $(date '+%Y-%m-%d à %H.%M.%S')" "Screenshot $(date '+%Y-%m-%d at %H.%M.%S')").png"
 
 case "$mode" in
   ecran)
@@ -46,7 +52,7 @@ case "$mode" in
     zone="$(slurp -d 2>/dev/null)" || exit 0            # Échap : rien n'est fait
     [ -n "$zone" ] || exit 0
     grim -g "$zone" "$fichier" || exit 1 ;;
-  *) echo "Usage : nc-capture ecran | zone | retouche | texte" >&2; exit 2 ;;
+  *) t "Usage : nc-capture ecran | zone | retouche | texte" "Usage: nc-screenshot screen | area | edit | text" >&2; echo >&2; exit 2 ;;
 esac
 
 # Copiée aussi, sauf si coupé dans nc-reglages (CAPTURES_COPIER)
@@ -56,9 +62,10 @@ if [ "$(reglage CAPTURES_COPIER)" = non ]; then copiee=0; else wl-copy --type im
 # Swappy : enregistre la version annotée dans le même dossier
 mkdir -p "$HOME/.config/swappy"
 conf="$HOME/.config/swappy/config"
-if ! grep -qF "save_dir=$dossier" "$conf" 2>/dev/null; then
-  printf '[Default]\nsave_dir=%s\nsave_filename_format=Capture annotée du %%Y-%%m-%%d à %%H.%%M.%%S.png\nshow_panel=true\nearly_exit=true\n' \
-    "$dossier" > "$conf"
+format="$(t "Capture annotée du %Y-%m-%d à %H.%M.%S.png" "Annotated Screenshot %Y-%m-%d at %H.%M.%S.png")"
+if ! grep -qF "save_dir=$dossier" "$conf" 2>/dev/null || ! grep -qxF "save_filename_format=$format" "$conf" 2>/dev/null; then
+  printf '[Default]\nsave_dir=%s\nsave_filename_format=%s\nshow_panel=true\nearly_exit=true\n' \
+    "$dossier" "$format" > "$conf"
 fi
 
 if [ "$mode" = retouche ]; then
@@ -68,10 +75,10 @@ fi
 # Notification avec la capture (sauf si coupée : CAPTURES_NOTIF) ; clic : l'annoter dans Swappy (attente en arrière-plan,
 # le raccourci rend la main)
 [ "$(reglage CAPTURES_NOTIF)" = non ] && exit 0
-if [ "$copiee" = 1 ]; then texte="Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter."; else texte="Clic pour l'annoter."; fi
+if [ "$copiee" = 1 ]; then texte="$(t "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." "Also copied: Ctrl + V to paste it. Click to annotate.")"; else texte="$(t "Clic pour l'annoter." "Click to annotate.")"; fi
 (
-  action="$(timeout 600 notify-send -a "Capture d'écran" -i "$fichier" -A "default=Annoter" -A "supprimer=Supprimer" \
-    -A "dossier=Ouvrir le dossier" "Capture enregistrée" "$texte" 2>/dev/null)"
+  action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" -A "default=$(t "Annoter" "Annotate")" -A "supprimer=$(t "Supprimer" "Delete")" \
+    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)

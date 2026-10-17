@@ -6,6 +6,7 @@
 #   nc-paquets                le nombre et la liste
 # Réglage : nc-reglages → Mises à jour → « Mises à jour du système » (MAJ_SYSTEME : ile, notif, non)
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
 fichier="$cache/paquets"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
@@ -23,7 +24,11 @@ liste() {   # un paquet par ligne
   fi
 }
 
-case "${1:-}" in
+action="${1:-}"
+# Noms anglais (nc-packages count | update)
+case "$action" in count) action=compter ;; update|upgrade) action=mettre-a-jour ;; esac
+
+case "$action" in
   compter)
     [ "$(reglage MAJ_SYSTEME)" = non ] && { rm -f "$fichier"; exit 0; }
     mkdir -p "$cache"
@@ -34,8 +39,10 @@ case "${1:-}" in
     # Notification (si choisie) seulement quand le nombre augmente
     if [ "$(reglage MAJ_SYSTEME)" = notif ] && [ "$n" -gt 0 ] && [ "$n" -gt "${avant:-0}" ]; then
       (
-        r="$(timeout 3600 notify-send -a "Mises à jour" -i system-software-update -A maj="Mettre à jour" \
-          "$n mise(s) à jour du système" "Programmes et sécurité de ta distribution." 2>/dev/null)"
+        if [ "$n" -gt 1 ]; then titre="$(t "$n mise(s) à jour du système" "$n system updates")"
+        else titre="$(t "$n mise(s) à jour du système" "1 system update")"; fi
+        r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
+          "$titre" "$(t "Programmes et sécurité de ta distribution." "Apps and security fixes for your distribution.")" 2>/dev/null)"
         [ "$r" = maj ] && exec "$0" mettre-a-jour
       ) >/dev/null 2>&1 &
       disown 2>/dev/null || true
@@ -46,10 +53,10 @@ case "${1:-}" in
     elif command -v nobara-sync >/dev/null; then c="nobara-sync cli"
     elif command -v dnf >/dev/null; then c="sudo dnf upgrade --refresh"
     elif command -v apt >/dev/null; then c="sudo apt update && sudo apt full-upgrade"
-    else c="echo 'Gestionnaire de paquets non reconnu.'"; fi
+    else c="echo '$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")'"; fi
     command -v flatpak >/dev/null && c="$c; flatpak update"
-    exec kitty --class nc-paquets --title "Mises à jour du système" sh -c "$c; \"$0\" compter; echo; printf 'Terminé. Entrée pour fermer.'; read r" ;;
+    exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" sh -c "$c; \"$0\" compter; echo; printf '$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")'; read r" ;;
   *)
-    if [ -s "$fichier" ]; then echo "$(head -1 "$fichier") mise(s) à jour :"; tail -n +2 "$fichier"
-    else echo "Pas encore compté : nc-paquets compter"; fi ;;
+    if [ -s "$fichier" ]; then t "$(head -1 "$fichier") mise(s) à jour :" "$(head -1 "$fichier") update(s):"; echo; tail -n +2 "$fichier"
+    else t "Pas encore compté : nc-paquets compter" "Not counted yet: nc-packages count"; echo; fi ;;
 esac
