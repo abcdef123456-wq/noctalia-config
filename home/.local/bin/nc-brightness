@@ -30,5 +30,18 @@ case "${1:-}" in
   restore) exec brightnessctl -r -q -d "$dev" ;;
   get)     brightnessctl -d "$dev" -e2 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
   set)     exec brightnessctl -q -d "$dev" -e2 -n2 set "${2:-50}%" ;;
-  *) sed -n '2,8p' "$0"; exit 1 ;;
+  *)
+    if [ "${NC_LANGUE:-}" = en ] || { [ -z "${NC_LANGUE:-}" ] && . "$HOME/.local/bin/nc-langue" 2>/dev/null && [ "$NC_LANGUE" = en ]; }; then
+      cat <<'FIN'
+# nc-brightness: built-in screen brightness (finds the right backlight, no hard-coded name).
+#   nc-brightness up|down   +/- 5% (step adjustable: nc-settings, LUMINOSITE_PAS)
+#   nc-brightness dim       dims to 20% (only if brighter), previous level remembered
+#   nc-brightness restore   restores the remembered level
+#   nc-brightness get       current level (0 to 100, same scale as up/down)
+#   nc-brightness set N     sets the level to N (0 to 100)
+FIN
+    else
+      sed -n '2,8p' "$0"
+    fi
+    exit 1 ;;
 esac

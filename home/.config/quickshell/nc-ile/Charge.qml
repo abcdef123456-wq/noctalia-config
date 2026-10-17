@@ -13,13 +13,13 @@ Item {
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 3
-            Texte { text: "En charge"; secondaire: true; font.pixelSize: 14 }
-            Texte { text: Etat.pourcent + " %"; font.pixelSize: 38; font.weight: Font.DemiBold; color: Couleurs.vert }
+            Texte { text: Reglages.t("En charge", "Charging"); secondaire: true; font.pixelSize: 14 }
+            Texte { text: Etat.pourcent + Reglages.t(" %", "%"); font.pixelSize: 38; font.weight: Font.DemiBold; color: Couleurs.vert }
             Texte {
                 secondaire: true
                 text: charge.restant > 60
-                      ? "Pleine dans " + Math.floor(charge.restant / 3600) + " h " + String(Math.floor((charge.restant % 3600) / 60)).padStart(2, "0")
-                      : "Branchée sur secteur"
+                      ? Reglages.t("Pleine dans ", "Full in ") + Math.floor(charge.restant / 3600) + Reglages.t(" h ", ":") + String(Math.floor((charge.restant % 3600) / 60)).padStart(2, "0")
+                      : Reglages.t("Branchée sur secteur", "Plugged in")
             }
         }
     }

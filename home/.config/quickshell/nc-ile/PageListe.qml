@@ -49,8 +49,9 @@ Item {
         if (saisie === "" || mdp === "") return
         attendre(saisie)
         Etat.faire(["sh", "-c", "nmcli dev wifi connect \"$1\" password \"$2\" >/dev/null 2>&1 || { nmcli con delete id \"$1\" >/dev/null 2>&1; "
-                    + "notify-send -a Wi-Fi -i network-wireless-offline \"Connexion impossible à $1\" \"Mot de passe incorrect, ou réseau trop loin.\"; }",
-                    "sh", saisie, mdp])
+                    + "notify-send -a Wi-Fi -i network-wireless-offline \"$3$1$4\" \"$5\"; }",
+                    "sh", saisie, mdp, Reglages.t("Connexion impossible à ", "Couldn't join “"), Reglages.t("", "”"),
+                    Reglages.t("Mot de passe incorrect, ou réseau trop loin.", "Wrong password, or the network is too far away.")])
         saisie = ""
     }
     function basculerBt(f) {
@@ -100,16 +101,16 @@ Item {
 
             Texte {
                 visible: !p.allume; height: 40; leftPadding: 8; secondaire: true
-                text: p.wifi ? "Le Wi-Fi est désactivé." : "Le Bluetooth est désactivé."
+                text: p.wifi ? Reglages.t("Le Wi-Fi est désactivé.", "Wi-Fi is off.") : Reglages.t("Le Bluetooth est désactivé.", "Bluetooth is off.")
             }
 
             // ── Wi-Fi ──
-            Titre { text: "Réseau actuel"; visible: p.wifi && p.allume && p.actuel.length > 0 }
+            Titre { text: Reglages.t("Réseau actuel", "Current Network"); visible: p.wifi && p.allume && p.actuel.length > 0 }
             Repeater {
                 model: p.wifi && p.allume ? p.actuel : []
                 Ligne {
                     required property var modelData
-                    titre: modelData.champs[1]; sous: "Connecté"; icone: p.iconeWifi(modelData.champs); actif: true
+                    titre: modelData.champs[1]; sous: Reglages.t("Connecté", "Connected"); icone: p.iconeWifi(modelData.champs); actif: true
                     droite: modelData.champs[3] === "1" ? "lock" : ""
                     onClicDroit: Etat.faire(["nmcli", "con", "down", "id", modelData.champs[1]])
                 }
@@ -119,7 +120,7 @@ Item {
             Column {
                 visible: p.wifi && p.allume && p.saisie !== ""
                 width: p.width; spacing: 6
-                Titre { text: "Mot de passe de « " + p.saisie + " »" }
+                Titre { text: Reglages.t("Mot de passe de « " + p.saisie + " »", "Password for “" + p.saisie + "”") }
                 Rectangle {
                     width: parent.width; height: 40; radius: 12; color: Couleurs.gris2
                     border.color: Couleurs.accent; border.width: 1.5
@@ -131,7 +132,7 @@ Item {
                         echoMode: voir.montre ? TextInput.Normal : TextInput.Password
                         onAccepted: p.connecterAvec(text)
                         Keys.onEscapePressed: p.saisie = ""
-                        Texte { visible: mdp.text === ""; text: "Mot de passe, puis Entrée"; secondaire: true; anchors.verticalCenter: parent.verticalCenter }
+                        Texte { visible: mdp.text === ""; text: Reglages.t("Mot de passe, puis Entrée", "Password, then Enter"); secondaire: true; anchors.verticalCenter: parent.verticalCenter }
                     }
                     // Afficher / masquer ce qu'on tape
                     Ico {
@@ -147,14 +148,15 @@ Item {
                 target: p
                 function onSaisieChanged() { mdp.text = ""; voir.montre = false; if (p.saisie !== "") mdp.forceActiveFocus() }
             }
-            Titre { text: "Autres réseaux"; visible: p.wifi && p.allume }
-            Texte { visible: p.wifi && p.allume && p.elements.length === 0; text: "Recherche des réseaux…"; secondaire: true; height: 34; leftPadding: 8 }
+            Titre { text: Reglages.t("Autres réseaux", "Other Networks"); visible: p.wifi && p.allume }
+            Texte { visible: p.wifi && p.allume && p.elements.length === 0; text: Reglages.t("Recherche des réseaux…", "Looking for networks…"); secondaire: true; height: 34; leftPadding: 8 }
             Repeater {
                 model: p.wifi && p.allume ? p.autres : []
                 Ligne {
                     required property var modelData
                     titre: modelData.champs[1]
-                    sous: p.saisie === modelData.champs[1] ? "Mot de passe demandé" : (modelData.champs[4] === "1" ? "Enregistré" : "")
+                    sous: p.saisie === modelData.champs[1] ? Reglages.t("Mot de passe demandé", "Password required")
+                                                          : (modelData.champs[4] === "1" ? Reglages.t("Enregistré", "Saved") : "")
                     icone: p.iconeWifi(modelData.champs)
                     droite: modelData.champs[3] === "1" ? "lock" : ""
                     attente: p.attente[modelData.champs[1]] === true
@@ -164,12 +166,12 @@ Item {
             }
 
             // ── Bluetooth ──
-            Titre { text: "Connectés"; visible: !p.wifi && p.allume && p.connectes.length > 0 }
+            Titre { text: Reglages.t("Connectés", "Connected"); visible: !p.wifi && p.allume && p.connectes.length > 0 }
             Repeater {
                 model: !p.wifi && p.allume ? p.connectes : []
                 Ligne {
                     required property var modelData
-                    titre: modelData.champs[1]; sous: "Connecté"
+                    titre: modelData.champs[1]; sous: Reglages.t("Connecté", "Connected")
                     icone: p.iconeBt(modelData.champs)
                     actif: modelData.champs[2] === "1"
                     attente: p.attente[modelData.champs[0]] === true
@@ -177,12 +179,12 @@ Item {
                     onClicDroit: if (modelData.champs[4] === "1") Etat.faire(["bluetoothctl", "remove", modelData.champs[0]])
                 }
             }
-            Titre { text: "Mes appareils"; visible: !p.wifi && p.allume && p.associes.length > 0 }
+            Titre { text: Reglages.t("Mes appareils", "My Devices"); visible: !p.wifi && p.allume && p.associes.length > 0 }
             Repeater {
                 model: !p.wifi && p.allume ? p.associes : []
                 Ligne {
                     required property var modelData
-                    titre: modelData.champs[1]; sous: "Non connecté"
+                    titre: modelData.champs[1]; sous: Reglages.t("Non connecté", "Not Connected")
                     icone: p.iconeBt(modelData.champs)
                     actif: modelData.champs[2] === "1"
                     attente: p.attente[modelData.champs[0]] === true
@@ -190,12 +192,12 @@ Item {
                     onClicDroit: if (modelData.champs[4] === "1") Etat.faire(["bluetoothctl", "remove", modelData.champs[0]])
                 }
             }
-            Titre { text: "À proximité"; visible: !p.wifi && p.allume && (p.proches.length > 0 || p.recherche) }
+            Titre { text: Reglages.t("À proximité", "Nearby Devices"); visible: !p.wifi && p.allume && (p.proches.length > 0 || p.recherche) }
             Repeater {
                 model: !p.wifi && p.allume ? p.proches : []
                 Ligne {
                     required property var modelData
-                    titre: modelData.champs[1]; sous: "Clic pour associer"
+                    titre: modelData.champs[1]; sous: Reglages.t("Clic pour associer", "Click to pair")
                     icone: p.iconeBt(modelData.champs)
                     actif: modelData.champs[2] === "1"
                     attente: p.attente[modelData.champs[0]] === true
@@ -203,7 +205,7 @@ Item {
                     onClicDroit: if (modelData.champs[4] === "1") Etat.faire(["bluetoothctl", "remove", modelData.champs[0]])
                 }
             }
-            Texte { visible: !p.wifi && p.allume && p.recherche && p.proches.length === 0; text: "Recherche…"; secondaire: true; height: 30; leftPadding: 8 }
+            Texte { visible: !p.wifi && p.allume && p.recherche && p.proches.length === 0; text: Reglages.t("Recherche…", "Searching…"); secondaire: true; height: 30; leftPadding: 8 }
         }
     }
 
@@ -213,7 +215,8 @@ Item {
         anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.leftMargin: 8
         height: 26
         color: zp.containsMouse ? Couleurs.accentClair : Couleurs.accent
-        text: p.wifi ? "Réglages réseau…" : (p.recherche ? "Recherche en cours…" : "Rechercher des appareils")
+        text: p.wifi ? Reglages.t("Réglages réseau…", "Network Settings…")
+                     : (p.recherche ? Reglages.t("Recherche en cours…", "Searching…") : Reglages.t("Rechercher des appareils", "Search for Devices"))
         MouseArea {
             id: zp
             anchors.fill: parent; hoverEnabled: true

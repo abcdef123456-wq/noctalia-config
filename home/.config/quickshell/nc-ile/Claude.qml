@@ -105,7 +105,7 @@ Item {
                             spacing: 8
                             Texte { text: "+" + (carte.s.ajouts || 0); color: Couleurs.vert; font.pixelSize: 12; font.weight: Font.DemiBold }
                             Texte { text: "−" + (carte.s.retraits || 0); color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold }
-                            Texte { text: "lignes"; secondaire: true; font.pixelSize: 12 }
+                            Texte { text: Reglages.t("lignes", "lines"); secondaire: true; font.pixelSize: 12 }
                         }
                         // Pas possible pour ce terminal (kitty ouvert avant la mise à jour, ou autre terminal) : on dit pourquoi
                         Row {
@@ -115,7 +115,7 @@ Item {
                             Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit_off"; taille: 14; color: Couleurs.texteSec }
                             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
                                     width: Math.min(implicitWidth, col.width - 24); elide: Text.ElideRight
-                                    text: "Pour lui écrire d'ici : lance-le dans un nouveau terminal" }
+                                    text: Reglages.t("Pour lui écrire d'ici : lance-le dans un nouveau terminal", "To write to it from here, start it in a new terminal") }
                         }
                         // Lui écrire (agent lancé dans kitty) : Entrée envoie, comme dans son terminal
                         Rectangle {
@@ -130,7 +130,7 @@ Item {
                                 onAccepted: { Agents.ecrire(carte.s.id, text); text = "" }
                                 Keys.onEscapePressed: { text = ""; focus = false }
                                 Texte { visible: msg.text === ""; anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 13
-                                        text: (carte.enCours ? "Ajouter une consigne pour " : "Répondre à ") + Agents.nom(carte.s) + "…" }
+                                        text: (carte.enCours ? Reglages.t("Ajouter une consigne pour ", "Add an instruction for ") : Reglages.t("Répondre à ", "Reply to ")) + Agents.nom(carte.s) + "…" }
                             }
                             Rectangle {
                                 id: envoi

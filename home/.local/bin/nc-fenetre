@@ -6,6 +6,7 @@
 #   nc-fenetre aller ADRESSE         va sur une fenêtre ; réduite, elle est d'abord ramenée (Spotlight, vue des fenêtres)
 # Une fenêtre réduite qu'on active autrement (dock, Alt + Tab) revient aussi d'elle-même (nc/automatismes.lua).
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 pile="${XDG_RUNTIME_DIR:-/tmp}/nc-reduites"
 CACHE="special:reduites"
 
@@ -13,7 +14,11 @@ clients() { hyprctl clients -j 2>/dev/null; }
 bureau_de() { clients | jq -r --arg a "$1" '.[] | select(.address == $a) | .workspace.name' | head -1; }
 eval_lua() { hyprctl dispatch "$1" >/dev/null 2>&1; }
 
-case "${1:-}" in
+action="${1:-}"
+# Noms anglais des actions (nc-window minimize | restore | goto)
+case "$action" in minimize) action=reduire ;; restore) action=restaurer ;; goto|go) action=aller ;; esac
+
+case "$action" in
   reduire)
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
     [ -n "$a" ] && [ "$a" != null ] || exit 0
@@ -37,5 +42,17 @@ case "${1:-}" in
       grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
     fi
     eval_lua "hl.dsp.focus({ window = 'address:$a' })" ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)
+    if [ "${NC_LANGUE:-fr}" = en ]; then
+      cat <<'FIN'
+nc-window: minimize a window (like the "_" button on Windows) and bring it back. Hyprland has no minimized windows:
+they go to a hidden workspace, "special:reduites", and come back to the visible workspace.
+  nc-window minimize [ADDRESS]   minimizes the active window (or that one)               Super + M
+  nc-window restore [ADDRESS]    brings back the last minimized window (or that one)     Super + Ctrl + M
+  nc-window goto ADDRESS         goes to a window; if minimized, it is restored first (Spotlight, window overview)
+A minimized window activated another way (dock, Alt + Tab) also comes back on its own (nc/automatismes.lua).
+FIN
+    else
+      sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+    fi ;;
 esac

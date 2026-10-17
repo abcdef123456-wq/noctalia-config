@@ -9,6 +9,29 @@
 -- Défilement animé : la position suit la cible avec un amorti exponentiel (onFrameTick).
 -- Ouverture : noctalia msg panel-toggle nc/carousel:main
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")
 local EXTS = { jpg = true, jpeg = true, png = true, webp = true, bmp = true, gif = true, jxl = true, avif = true, tif = true, tiff = true }
 local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940 }
@@ -223,7 +246,8 @@ function render()
   local middle
   if #shown == 0 then
     middle = ui.column({ height = ROW_H, align = "center", justify = "center", gap = 10 }, {
-      ui.label({ text = #all == 0 and "Aucune image dans le dossier des fonds d'écran" or "Aucun fond d'écran trouvé", fontSize = 22, fontWeight = "bold", color = "on_surface" }),
+      ui.label({ text = #all == 0 and tr("Aucune image dans le dossier des fonds d'écran", "No images in the wallpaper folder")
+        or tr("Aucun fond d'écran trouvé", "No wallpaper found"), fontSize = 22, fontWeight = "bold", color = "on_surface" }),
     })
   else
     middle = strip()
@@ -280,6 +304,7 @@ function onKey(chord, pressed)
 end
 
 function onOpen(context)
+  EN = langue() == "en"
   setZoom()
   query = ""
   holdDir = 0

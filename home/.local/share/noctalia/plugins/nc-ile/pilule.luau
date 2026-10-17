@@ -7,6 +7,29 @@
 -- Volume et luminosité arrivent des raccourcis Hyprland (noctalia msg plugin nc/ile:pilule all volume|luminosite) ;
 -- le reste est surveillé ici : fichiers du système chaque seconde, lecteur de musique toutes les 2 s.
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local sym = require("./symboles.luau")
 local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
 local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
@@ -14,7 +37,10 @@ local PROFIL = noctalia.expandPath("~/.config/hypr/nc/profil.lua")
 local JEU = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
 local JOURS = { "dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam." }
 local MOIS = { "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc." }
-local NOMS_PROFIL = { ["power-saver"] = { "feuille", "Économie" }, balanced = { "equilibre", "Équilibré" }, performance = { "eclair", "Performance" } }
+local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+local NOMS_PROFIL = { ["power-saver"] = { "feuille", "Économie", "Power Saver" }, balanced = { "equilibre", "Équilibré", "Balanced" },
+  performance = { "eclair", "Performance", "Performance" } }
 -- Couleurs façon Apple (mode sombre) : île noir pur, texte blanc, gris secondaire, vert système
 local NOIR, BLANC, GRIS, PISTE, VERT = "#000000", "#ffffff", "#98989d", "#3a3a3c", "#30d158"
 local BARRES = 5
@@ -75,7 +101,7 @@ local function repos()
     return { gauche, ui.row({ gap = 8, align = "center", flexGrow = 1, justify = "center" }, milieu), droite },
       l + 40, "media:" .. media.titre .. media.etat
   end
-  local date = JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month]
+  local date = tr(JOURS[t.wday] .. " " .. t.day .. " " .. MOIS[t.month], DAYS[t.wday] .. " " .. MONTHS[t.month] .. " " .. t.day)
   return {
     ui.label({ text = heure, fontWeight = "semibold", color = BLANC }),
     ui.label({ text = date, color = GRIS }),
@@ -86,7 +112,7 @@ local function jauge(icone, valeur, couleur)
   return {
     sym.image(icone, couleur or BLANC, 17),
     ui.progress({ width = 130, height = 6, radius = 3, progress = math.max(0, math.min(1, valeur / 100)), fill = couleur or BLANC, track = PISTE }),
-    ui.label({ text = valeur .. " %", fontWeight = "semibold", width = 42, textAlign = "end", color = BLANC }),
+    ui.label({ text = tr(valeur .. " %", valeur .. "%"), fontWeight = "semibold", width = 42, textAlign = "end", color = BLANC }),
   }, 16 + 130 + 42 + 2 * 9
 end
 
@@ -113,19 +139,21 @@ local function reaction()
     end
     return enfants, l, "piste:" .. a.titre
   elseif a.genre == "charge" then
-    local t = (a.branche and "En charge · " or "Sur batterie · ") .. (batterie or "?") .. " %"
+    local t = a.branche and tr("En charge · ", "Charging · ") or tr("Sur batterie · ", "On battery · ")
+    t = t .. (batterie or "?") .. tr(" %", "%")
     return {
       ui.glyph({ name = a.branche and "battery-charging" or "battery-2", size = 17, color = a.branche and VERT or BLANC }),
       ui.label({ text = t, fontWeight = "semibold", color = a.branche and VERT or BLANC }),
     }, 17 + texte(t) + 9, "charge" .. tostring(a.branche)
   elseif a.genre == "profil" then
-    local n = NOMS_PROFIL[a.profil] or { "equilibre", a.profil }
+    local n = NOMS_PROFIL[a.profil] or { "equilibre", a.profil, a.profil }
+    local nom = tr(n[2], n[3])
     return {
       sym.image(n[1], a.profil == "power-saver" and VERT or (a.profil == "performance" and "#ff9f0a" or BLANC), 17),
-      ui.label({ text = n[2], fontWeight = "semibold", color = BLANC }),
-    }, 16 + texte(n[2]) + 9, "profil" .. a.profil
+      ui.label({ text = nom, fontWeight = "semibold", color = BLANC }),
+    }, 16 + texte(nom) + 9, "profil" .. a.profil
   elseif a.genre == "jeu" then
-    local t = a.actif and "Mode jeu" or "Mode jeu désactivé"
+    local t = a.actif and tr("Mode jeu", "Game Mode") or tr("Mode jeu désactivé", "Game Mode off")
     return {
       sym.image("manette", a.actif and "#ff9f0a" or GRIS, 18),
       ui.label({ text = t, fontWeight = "semibold", color = BLANC }),
@@ -200,7 +228,11 @@ local function lireMedia()
   end, 3000)
 end
 
+local tours = 0
 local function surveiller()
+  -- Langue relue toutes les 10 s (nc-reglages → Apparence → Langue)
+  tours += 1
+  if tours % 10 == 0 then EN = langue() == "en" end
   -- Chargeur
   local dir = noctalia.listDir("/sys/class/power_supply") or {}
   for _, n in ipairs(dir) do

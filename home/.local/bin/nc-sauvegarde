@@ -8,10 +8,47 @@ Les fichiers générés (couleurs, thème du terminal…) ne sont pas sauvegard�
 """
 import datetime
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-backup: your noctalia-config settings in a single file, to reinstall your PC or give them to a friend.
+  nc-backup                         creates ~/nc-sauvegarde-DATE.tar.gz (settings, shortcuts, style, animations, personal
+                                    additions, profile picture, palettes); --wallpapers: with your wallpapers
+  nc-backup restore FILE            brings a backup back (what was there before is kept in ~/.cache/nc/avant-restauration)
+  nc-backup show FILE               what a backup contains
+Generated files (colors, terminal theme…) are not backed up: they are rebuilt on their own."""
 
 HOME = os.path.expanduser("~")
 # Chemins relatifs au dossier personnel : tout ce qui vient de toi, rien de ce qui se régénère
@@ -34,7 +71,7 @@ def dossier_fonds():
 
 
 def taille(o):
-    return f"{o / 1048576:.1f} Mo" if o >= 1048576 else f"{max(1, o // 1024)} Ko"
+    return f"{o / 1048576:.1f} {T('Mo', 'MB')}" if o >= 1048576 else f"{max(1, o // 1024)} {T('Ko', 'KB')}"
 
 
 def creer(avec_fonds):
@@ -44,16 +81,18 @@ def creer(avec_fonds):
     if avec_fonds and os.path.isdir(fonds):
         chemins.append(os.path.relpath(fonds, HOME))
     if not chemins:
-        sys.exit("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).")
+        sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
     with tarfile.open(nom, "w:gz") as t:
         for p in chemins:
             t.add(os.path.join(HOME, p), arcname=p)
-    print(f"Sauvegarde créée : {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})")
+    print(T(f"Sauvegarde créée : {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})",
+            f"Backup created: {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})"))
     for p in chemins:
         print(f"  • ~/{p}")
     if not avec_fonds:
-        print("Tes fonds d'écran n'y sont pas (nc-sauvegarde --fonds pour les ajouter).")
-    print("Pour la remettre : nc-sauvegarde restaurer " + nom.replace(HOME, "~"))
+        print(T("Tes fonds d'écran n'y sont pas (nc-sauvegarde --fonds pour les ajouter).",
+                "Your wallpapers are not included (nc-backup --wallpapers to add them)."))
+    print(T("Pour la remettre : nc-sauvegarde restaurer ", "To restore it: nc-backup restore ") + nom.replace(HOME, "~"))
 
 
 def membres_surs(t):
@@ -70,18 +109,19 @@ def membres_surs(t):
 def voir(fichier):
     with tarfile.open(fichier, "r:gz") as t:
         fichiers = [m for m in membres_surs(t) if m.isfile()]
-    print(f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} fichiers) :")
+    print(T(f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} fichiers) :",
+            f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} files):"))
     groupes = {}
     for m in fichiers:                       # beaucoup de fichiers (fonds d'écran) : regroupés par dossier
         cle = (os.path.dirname(m.name) or m.name) if len(fichiers) > 20 else m.name
         groupes[cle] = groupes.get(cle, 0) + 1
     for g, n in sorted(groupes.items()):
-        print(f"  • ~/{g}" + (f"  ({n} fichiers)" if n > 1 else ""))
+        print(f"  • ~/{g}" + (T(f"  ({n} fichiers)", f"  ({n} files)") if n > 1 else ""))
 
 
 def restaurer(fichier):
     if not os.path.isfile(fichier):
-        sys.exit(f"nc-sauvegarde : fichier introuvable : {fichier}")
+        sys.exit(T(f"nc-sauvegarde : fichier introuvable : {fichier}", f"nc-backup: file not found: {fichier}"))
     avant = os.path.join(HOME, ".cache/nc/avant-restauration", datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S"))
     with tarfile.open(fichier, "r:gz") as t:
         membres = membres_surs(t)
@@ -95,26 +135,27 @@ def restaurer(fichier):
             t.extractall(HOME, members=membres, filter="data")
         except TypeError:                                     # Python < 3.12 : sans filtre (chemins déjà vérifiés)
             t.extractall(HOME, members=membres)
-    print(f"Sauvegarde remise ({len(membres)} fichiers). Avant : {avant.replace(HOME, '~')}")
+    print(T(f"Sauvegarde remise ({len(membres)} fichiers). Avant : {avant.replace(HOME, '~')}",
+            f"Backup restored ({len(membres)} files). Before: {avant.replace(HOME, '~')}"))
     # Tout ce qui découle des réglages est refait, et appliqué tout de suite
     bin_ = os.path.join(HOME, ".local/bin")
     subprocess.run([os.path.join(bin_, "nc-reglages"), "appliquer"], capture_output=True)
     if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         subprocess.run(["hyprctl", "reload"], capture_output=True)
     subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
-    print("Réglages appliqués.")
+    print(T("Réglages appliqués.", "Settings applied."))
 
 
 def main():
     a = sys.argv[1:]
-    if not a or a[0] in ("--fonds", "creer", "créer"):
-        creer("--fonds" in a)
-    elif a[0] in ("restaurer", "remettre") and len(a) > 1:
+    if not a or a[0] in ("--fonds", "creer", "créer", "--wallpapers", "create"):
+        creer("--fonds" in a or "--wallpapers" in a)
+    elif a[0] in ("restaurer", "remettre", "restore") and len(a) > 1:
         restaurer(os.path.expanduser(a[1]))
-    elif a[0] == "voir" and len(a) > 1:
+    elif a[0] in ("voir", "show") and len(a) > 1:
         voir(os.path.expanduser(a[1]))
     else:
-        print(__doc__.strip())
+        print(T(__doc__.strip(), USAGE_EN))
 
 
 if __name__ == "__main__":

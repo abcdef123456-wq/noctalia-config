@@ -9,6 +9,7 @@
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
 OUT="$HOME/.cache/nc/carousel"
@@ -71,5 +72,6 @@ for t in "$OUT"/*.W.webp; do
   base="$(basename "$t" .W.webp)"
   [ -e "$src/$base" ] || rm -f "$t" "$OUT/$base.N.webp" "$OUT/$base.B.webp"
 done
-[ "$made" -gt 0 ] && echo "nc-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)"
+[ "$made" -gt 0 ] && t "nc-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)" \
+  "nc-carousel-thumbs: $made wallpaper(s) cut into slices (${CW}x${CH} and ${NW}x${NH}, scale $dpr)" && echo
 exit 0

@@ -2,8 +2,11 @@
 # Terminal déroulant (Super + ², la touche sous Échap) : l'ouvre ou le range, et donne son icône à sa fenêtre dans le dock
 Type=Application
 Name=Terminal déroulant
+Name[en]=Drop-down Terminal
 GenericName=Terminal qui descend du haut de l'écran
+GenericName[en]=Terminal that slides down from the top
 Comment=Le terminal caché, ouvert ou rangé (Super + la touche sous Échap)
+Comment[en]=The hidden terminal, shown or hidden (Super + the key below Esc)
 Exec=hyprctl dispatch "hl.dsp.workspace.toggle_special('term')"
 Icon=kitty
 StartupWMClass=dropterm

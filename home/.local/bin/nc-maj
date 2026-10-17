@@ -7,9 +7,10 @@
 #   nc-maj verifier        y a-t-il une nouvelle version ? Une notification avec « Mettre à jour » (une fois par
 #                          version ; lancé toutes les 6 h par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non)
 set -euo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
 
-if [ "${1:-}" = verifier ]; then
+if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   grep -qx 'MAJ_VERIFIER=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
   [ -d "$depot/.git" ] || exit 0
   cd "$depot"
@@ -28,7 +29,7 @@ if [ "${1:-}" = verifier ]; then
   nouveau=""
   if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$branche" 2>/dev/null; then
     nouveau="$(git log --format=%s HEAD..FETCH_HEAD 2>/dev/null | python3 -c '
-import re, sys
+import os, re, sys
 l = [x.strip() for x in sys.stdin if x.strip()]
 def idee(s):
     while re.search(r" \([^()]*\)", s):      # parenthèses retirées avant : un « ; » dedans ne coupe pas
@@ -37,31 +38,33 @@ def idee(s):
     s = re.sub(r"\s+", " ", s).strip(" ,;")
     return s if len(s) <= 48 else s[:47].rsplit(" ", 1)[0] + "…"
 texte = " · ".join(idee(s) for s in l[:4])
-print(texte + (f" (+ {len(l) - 4} autres)" if len(l) > 4 else ""))
+autres = "others" if os.environ.get("NC_LANGUE") == "en" else "autres"
+print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
 ' 2>/dev/null || true)"
   fi
-  [ -n "$nouveau" ] || nouveau="Des améliorations sont disponibles."
-  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="Mettre à jour" -A tout="Tout voir" \
-    -A tard="Plus tard" "Nouvelle version de la config" "$nouveau" 2>/dev/null || true)"
-  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf 'Entrée pour fermer'; read r"
+  [ -n "$nouveau" ] || nouveau="$(t "Des améliorations sont disponibles." "Improvements are available.")"
+  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
+    -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
+    "$(t "Nouvelle version de la config" "New version of the config")" "$nouveau" 2>/dev/null || true)"
+  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf '$(t "Entrée pour fermer" "Press Enter to close")'; read r"
   [ "$choix" = tout ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-reglages nouveautes | less -R"
   exit 0
 fi
 if [ ! -d "$depot/.git" ]; then
-  echo "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." >&2
-  echo "Clone-le puis lance l'installation une fois : git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2
+  echo "$(t "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." "noctalia-config repository not found (${depot:-unknown path}).")" >&2
+  echo "$(t "Clone-le puis lance l'installation une fois :" "Clone it, then run the installer once:") git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2
   exit 1
 fi
 cd "$depot"
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  echo "Le dépôt $depot contient des modifications locales : mise à jour annulée pour ne pas les écraser." >&2
-  echo "(git status pour les voir ; git stash pour les mettre de côté)" >&2
+  echo "$(t "Le dépôt $depot contient des modifications locales : mise à jour annulée pour ne pas les écraser." "The repository $depot has local changes: update cancelled so they are not overwritten.")" >&2
+  echo "$(t "(git status pour les voir ; git stash pour les mettre de côté)" "(git status to see them; git stash to set them aside)")" >&2
   exit 1
 fi
 avant="$(git rev-parse HEAD)"
 git pull --ff-only --quiet
-if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "Déjà à jour ($(git log -1 --format=%cd --date=short))."; else
-  echo "Nouveautés :"; git log --format='  • %s' "$avant..HEAD"
+if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."; else
+  echo "$(t "Nouveautés :" "What's new:")"; git log --format='  • %s' "$avant..HEAD"
 fi
 ./install.sh "$@"
 code=$?

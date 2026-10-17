@@ -10,11 +10,11 @@ Item {
     Item {
         id: tete
         width: parent.width; height: 34
-        Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Presse-papiers"; font.pixelSize: 20; font.weight: Font.Bold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: Reglages.t("Presse-papiers", "Clipboard"); font.pixelSize: 20; font.weight: Font.Bold }
         Texte {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
             visible: Etat.presse.length > 0
-            text: "Effacer"; color: ze.containsMouse ? Couleurs.accentClair : Couleurs.accent
+            text: Reglages.t("Effacer", "Clear"); color: ze.containsMouse ? Couleurs.accentClair : Couleurs.accent
             MouseArea { id: ze; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: Etat.oublierPresse() }
         }
     }
@@ -38,7 +38,7 @@ Item {
                 Column {
                     anchors.centerIn: parent; spacing: 6
                     Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: "content_paste"; taille: 30; color: Couleurs.gris4 }
-                    Texte { anchors.horizontalCenter: parent.horizontalCenter; text: "Ce que tu copies apparaîtra ici"; secondaire: true }
+                    Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Ce que tu copies apparaîtra ici", "Things you copy will appear here"); secondaire: true }
                 }
             }
             Repeater {

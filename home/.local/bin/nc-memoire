@@ -8,22 +8,66 @@ rend dès qu'une appli en a besoin. Seule la ligne « vraiment utilisée » comp
 """
 import os
 import re
+import sys
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-memory: who is using memory, the config on one side, your apps on the other.
+
+  nc-memory         real memory (PSS: shared memory is split between the programs that share it,
+                    nothing is counted twice), per grouped program, and the total of the config
+The system "cache" is not wasted memory: Linux keeps recently read files in memory and gives it
+back as soon as an app needs it. Only the "really used" line counts."""
 
 # Programmes de la config (noctalia-config) : nom du programme -> nom affiché
+_PORTAILS = T("Portails (partage d'écran…)", "Portals (screen sharing…)")
+_ILE = T("Île dynamique (Quickshell)", "Dynamic island (Quickshell)")
+_ENERGIE = T("Profils d'énergie", "Power profiles")
+_SON = T("Son (PipeWire)", "Sound (PipeWire)")
 CONFIG = {
-    "Hyprland": "Hyprland (gestionnaire de fenêtres)", "Xwayland": "Xwayland (vieilles applis X11)",
-    "noctalia": "Noctalia (barre, menus, fond d'écran)", "qs": "Île dynamique (Quickshell)",
-    "quickshell": "Île dynamique (Quickshell)", "hypridle": "Veille (hypridle)", "cava": "Halo musical (cava)",
-    "nc-pouls": "Halo musical", "nc-profile-sync": "Profils d'énergie", "nc-ecran-externe": "Écrans externes",
-    "playerctld": "Touches de musique (playerctld)", "xdg-desktop-portal": "Portails (partage d'écran…)",
-    "xdg-desktop-portal-hyprland": "Portails (partage d'écran…)", "xdg-desktop-portal-gtk": "Portails (partage d'écran…)",
-    "uwsm": "Session (uwsm)", "tlp-pd": "Profils d'énergie", "wireplumber": "Son (PipeWire)",
-    "pipewire": "Son (PipeWire)", "pipewire-pulse": "Son (PipeWire)",
+    "Hyprland": T("Hyprland (gestionnaire de fenêtres)", "Hyprland (window manager)"),
+    "Xwayland": T("Xwayland (vieilles applis X11)", "Xwayland (old X11 apps)"),
+    "noctalia": T("Noctalia (barre, menus, fond d'écran)", "Noctalia (bar, menus, wallpaper)"), "qs": _ILE,
+    "quickshell": _ILE, "hypridle": T("Veille (hypridle)", "Sleep (hypridle)"),
+    "cava": T("Halo musical (cava)", "Music glow (cava)"),
+    "nc-pouls": T("Halo musical", "Music glow"), "nc-profile-sync": _ENERGIE,
+    "nc-ecran-externe": T("Écrans externes", "External displays"),
+    "playerctld": T("Touches de musique (playerctld)", "Media keys (playerctld)"), "xdg-desktop-portal": _PORTAILS,
+    "xdg-desktop-portal-hyprland": _PORTAILS, "xdg-desktop-portal-gtk": _PORTAILS,
+    "uwsm": "Session (uwsm)", "tlp-pd": _ENERGIE, "wireplumber": _SON,
+    "pipewire": _SON, "pipewire-pulse": _SON,
 }
 # Applis regroupées sous un seul nom (navigateurs, Electron…)
 GROUPES = [
     (r"^(firefox|firefox-bin|Isolated Web Co|Web Content|WebExtensions|Privileged Cont|RDD Process|Socket Process|Utility Process|GeckoMain|forkserver)$", "Firefox"),
-    (r"^(chrome|chromium|brave|vivaldi|opera|thorium)", "Navigateur Chromium"),
+    (r"^(chrome|chromium|brave|vivaldi|opera|thorium)", T("Navigateur Chromium", "Chromium browser")),
     (r"^(Discord|discord|Vesktop|vesktop|WebCord)", "Discord"),
     (r"^(code|Code|electron|codium)", "VS Code / Electron"),
     (r"^(spotify|Spotify)", "Spotify"), (r"^(steam|steamwebhelper)", "Steam"), (r"^kitty$", "Terminal (kitty)"),
@@ -55,10 +99,12 @@ def nom(pid):
 
 
 def mo(o):
-    return f"{o / 1048576:7.0f} Mo" if o < 10 * 1073741824 else f"{o / 1073741824:7.1f} Go"
+    return f"{o / 1048576:7.0f} {T('Mo', 'MB')}" if o < 10 * 1073741824 else f"{o / 1073741824:7.1f} {T('Go', 'GB')}"
 
 
 def main():
+    if sys.argv[1:2] and sys.argv[1] in ("-h", "--help", "aide", "help"):
+        return print(T(__doc__.strip(), USAGE_EN))
     uid = os.getuid()
     config, applis = {}, {}
     for p in os.listdir("/proc"):
@@ -95,21 +141,25 @@ def main():
     utilisee = total - dispo
     cache = mem.get("Cached", 0) + mem.get("Buffers", 0) + mem.get("SReclaimable", 0)
 
-    print(f"\n  Mémoire : {mo(utilisee).strip()} vraiment utilisés sur {mo(total).strip()} "
-          f"({utilisee * 100 // total} %)   ·   cache rendu à la demande : {mo(cache).strip()}")
+    print(T(f"\n  Mémoire : {mo(utilisee).strip()} vraiment utilisés sur {mo(total).strip()} "
+            f"({utilisee * 100 // total} %)   ·   cache rendu à la demande : {mo(cache).strip()}",
+            f"\n  Memory: {mo(utilisee).strip()} really used out of {mo(total).strip()} "
+            f"({utilisee * 100 // total}%)   ·   cache given back on demand: {mo(cache).strip()}"))
     zram = sum(int(open(f"/sys/block/{d}/mm_stat").read().split()[1]) for d in os.listdir("/sys/block")
                if d.startswith("zram") and os.path.exists(f"/sys/block/{d}/mm_stat"))
     if zram:
-        print(f"  Mémoire compressée (zram) : {mo(zram).strip()}")
+        print(T(f"  Mémoire compressée (zram) : {mo(zram).strip()}", f"  Compressed memory (zram): {mo(zram).strip()}"))
 
     t = sum(config.values())
-    print(f"\n  La config (noctalia-config)                    {mo(t)}   ({t * 100 // total} % de la mémoire)")
+    print(T(f"\n  La config (noctalia-config)                    {mo(t)}   ({t * 100 // total} % de la mémoire)",
+            f"\n  The config (noctalia-config)                   {mo(t)}   ({t * 100 // total}% of memory)"))
     for k, v in sorted(config.items(), key=lambda x: -x[1]):
         print(f"    {k:<44} {mo(v)}")
-    print("\n  Tes applis (les 12 plus gourmandes)")
+    print(T("\n  Tes applis (les 12 plus gourmandes)", "\n  Your apps (the 12 hungriest)"))
     for k, v in sorted(applis.items(), key=lambda x: -x[1])[:12]:
         print(f"    {k[:44]:<44} {mo(v)}")
-    print("\n  PSS : mémoire réelle de chaque programme (la mémoire partagée est répartie, rien n'est compté deux fois).\n")
+    print(T("\n  PSS : mémoire réelle de chaque programme (la mémoire partagée est répartie, rien n'est compté deux fois).\n",
+            "\n  PSS: real memory of each program (shared memory is split, nothing is counted twice).\n"))
 
 
 if __name__ == "__main__":

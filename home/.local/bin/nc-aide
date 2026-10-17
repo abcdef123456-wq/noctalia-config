@@ -8,6 +8,41 @@ import re
 import shutil
 import sys
 
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+DOC_EN = """nc-help: what each noctalia-config command is for.
+  nc-help          every command, grouped: the ones you type, the ones behind shortcuts, the ones that run on their own
+  nc-help NAME     details of one command (what it does, its options)
+"""
+
 BIN = os.path.expanduser("~/.local/bin")
 
 # (commande, exemple, explication) — rangées par usage
@@ -67,6 +102,80 @@ AUTOMATIQUES = [
     ("nc-shell", "État de la barre Noctalia."),
 ]
 
+# Noms anglais des commandes (liens créés par install.sh, voir NOMS_ANGLAIS dans nc-langue) : français → anglais
+NOMS_ANGLAIS = {
+    "nc-reglages": "nc-settings", "nc-maj": "nc-update", "nc-aide": "nc-help", "nc-fenetre": "nc-window",
+    "nc-capture": "nc-screenshot", "nc-demander": "nc-ask", "nc-paquets": "nc-packages", "nc-raccourci": "nc-shortcut",
+    "nc-sauvegarde": "nc-backup", "nc-memoire": "nc-memory", "nc-meteo": "nc-weather", "nc-icones": "nc-icons",
+    "nc-fermer": "nc-close", "nc-couvercle": "nc-lid", "nc-session-propre": "nc-clean-session", "nc-langue": "nc-lang",
+    "nc-claude": "nc-agents", "nc-touches": "nc-kbd-light", "nc-ile-etat": "nc-island-state",
+}
+# En anglais : (exemple, explication), par nom français
+ANGLAIS = {
+    "nc-reglages": ("nc-settings", "Every setting, with the arrow keys: island, appearance, animations, power, keyboard, "
+                                   "sleep, terminal, shortcuts… Kept across updates."),
+    "nc-raccourci": ("nc-shortcut", "Your keyboard shortcuts: change keys, disable some, add new ones."),
+    "nc-maj": ("nc-update", "Updates the config from GitHub (only redoes what changed)."),
+    "nc-diag": ("nc-diag report", "Checks the whole installation and tells you what to do if something is wrong; "
+                                  "“report” copies the summary, ready to send when asking for help."),
+    "nc-aide": ("nc-help nc-anim", "This help; with a name, the details of one command."),
+    "nc-sauvegarde": ("nc-backup --fonds", "All your settings in a single file (to reinstall, or to give to a friend); "
+                                           "nc-backup restore FILE to bring them back."),
+    "nc-anim": ("nc-anim snow", "Animations (power button): nc-anim list, play one, nc-anim new NAME to create your own."),
+    "nc-demander": ("nc-ask \"how do I see free disk space\"", "Quick question to an installed AI (Claude, opencode, Gemini, "
+                                                               "Qwen); in Spotlight: “? your question”."),
+    "nc-claude": ("nc-agents state", "Claude Code in the island (like coucou): what it is doing, when it is done, its "
+                                     "requests, and writing to it from the island. Also opencode, Codex, Gemini CLI, Cursor, "
+                                     "Copilot, Qwen, Kiro, Amp, Antigravity: nc-agents install AI (or all); nc-agents diag "
+                                     "if nothing shows up."),
+    "nc-meteo": ("nc-weather text", "The weather (Open-Meteo, no account), as in the island; city: nc-settings → Island."),
+    "nc-memoire": ("nc-memory", "What is using memory: the config on one side, your apps on the other."),
+    "nc-pouls": ("nc-pouls diag", "Music glow: “diag” tells why it is not pulsing."),
+    "nc-sysinfo": ("nc-sysinfo health", "PC info: model, screens, disks, health (battery wear)…"),
+    "nvidia-run": ("nvidia-run steam", "Runs a program on the NVIDIA card of a hybrid laptop."),
+    "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
+    "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
+    "nc-video": ("nc-video", "Screen recording (Super + Shift + R): an area or the whole screen; same shortcut to stop."),
+    "nc-brightness": ("nc-brightness set 50", "Screen brightness (brightness keys, F5 / F6)."),
+    "nc-media": ("nc-media play-pause", "Media keys: they control the player you can hear."),
+    "nc-touches": ("nc-kbd-light touchpad toggle", "Laptop special keys: keyboard backlight, touchpad, calculator."),
+    "nc-keys": ("nc-keys", "The shortcut sheet (Super + /), in the terminal."),
+    "nc-fermer": ("", "Close a terminal where a program is running: a question with the arrow keys (Super + Shift + Q)."),
+    "nc-finger": ("nc-finger", "The fingers of the power button."),
+    "nc-shell-msg": ("", "Links the shortcuts to Noctalia or the island (menus, search, lock)."),
+    "nc-launch": ("", "Launches an app on the right graphics card for the power profile."),
+    "nc-apps": ("", "The list of apps and files for search (Super + R)."),
+    "nc-profile-sync": ("", "Adapts everything to the power profile and to AC power: refresh rate, effects, brightness."),
+    "nc-theme-sync": ("", "Terminal, border and island colors, taken from the wallpaper."),
+    "nc-wallpaper-colors": ("", "Chooses how colors are taken from the wallpaper."),
+    "nc-icones": ("", "Draws the terminal and file icons in the theme colors."),
+    "nc-couvercle": ("", "Lid closed: sleep, or screen off while the PC keeps running (configurable)."),
+    "nc-ecran-externe": ("", "Warns when a screen is plugged into a port that cannot drive it."),
+    "nc-verrou-place": ("", "Centers the lock screen on the real screen."),
+    "nc-verrou-media": ("", "Music on the lock screen."),
+    "nc-ile-etat": ("", "Battery, network, system… for the dynamic island."),
+    "nc-greeting": ("", "The terminal greeting (logo and PC info)."),
+    "nc-term-logo": ("", "The logo of that greeting, in the theme colors."),
+    "nc-carousel-thumbs": ("", "Thumbnails of the wallpaper carousel."),
+    "nc-boot-wallpaper": ("", "The wallpaper right from login (no black screen)."),
+    "nc-session-propre": ("", "Stops the bars of an old config at startup."),
+    "nc-noctalia-avant": ("", "Prepares Noctalia just before it starts."),
+    "nc-shell": ("", "State of the Noctalia bar."),
+}
+POURQUOI_EN = ("Why so many small commands? Each one does a single thing, and anything can call it: keyboard shortcuts, "
+               "the island, the bar, services, and you in the terminal. They work the same on Arch, Debian and Fedora, "
+               "can be tested one by one, and updates replace them without ever touching your settings (~/.config/nc).")
+
+
+def nom_affiche(nom):
+    return NOMS_ANGLAIS.get(nom, nom) if EN else nom
+
+
+def en_anglais(lignes):
+    """Les lignes (commande, exemple, explication) en anglais (explication française si pas encore traduite)."""
+    return [(n, *ANGLAIS.get(n, (ex, txt))) if EN else (n, ex, txt) for n, ex, txt in lignes]
+
+
 POURQUOI = ("Pourquoi autant de petites commandes ? Chacune fait une seule chose, et tout le monde peut l'appeler : "
             "les raccourcis clavier, l'île, la barre, les services et toi dans le terminal. Elles marchent pareil sur "
             "Arch, Debian et Fedora, se testent une par une, et les mises à jour les remplacent sans jamais toucher à "
@@ -97,7 +206,8 @@ def tout():
     acc, gras, doux, fin = couleurs()
     largeur = min(110, shutil.get_terminal_size((100, 30)).columns)
     col = 16
-    print(f"\n{acc}Les commandes de noctalia-config{fin}   {doux}nc-aide NOM : le détail d'une commande{fin}\n")
+    print(T(f"\n{acc}Les commandes de noctalia-config{fin}   {doux}nc-aide NOM : le détail d'une commande{fin}\n",
+            f"\n{acc}noctalia-config commands{fin}   {doux}nc-help NAME: details of one command{fin}\n"))
 
     def bloc(titre, sous_titre, lignes):
         print(f"{acc}{titre}{fin}  {doux}{sous_titre}{fin}")
@@ -105,32 +215,42 @@ def tout():
             if not os.path.exists(os.path.join(BIN, nom)) and nom not in ("nc-aide",):
                 continue
             t = couper(txt, largeur - col - 4, col + 4)
-            print(f"  {gras}{nom:<{col}}{fin}  {t}")
-            if ex and ex != nom:
-                print(f"  {'':<{col}}  {doux}ex. : {ex}{fin}")
+            print(f"  {gras}{nom_affiche(nom):<{col}}{fin}  {t}")
+            if ex and ex != nom_affiche(nom):
+                print(f"  {'':<{col}}  {doux}{T('ex. : ', 'e.g. ')}{ex}{fin}")
         print()
 
-    bloc("À taper toi-même", "", A_TAPER)
-    bloc("Derrière les raccourcis", "(tu peux aussi les taper)", RACCOURCIS)
-    bloc("Automatiques", "(rien à faire : services et démarrage)", [(n, "", t) for n, t in AUTOMATIQUES])
-    print(f"{doux}{couper(POURQUOI, largeur - 2, 0)}{fin}\n")
+    bloc(T("À taper toi-même", "Type them yourself"), "", en_anglais(A_TAPER))
+    bloc(T("Derrière les raccourcis", "Behind the shortcuts"), T("(tu peux aussi les taper)", "(you can type them too)"),
+         en_anglais(RACCOURCIS))
+    bloc(T("Automatiques", "Automatic"), T("(rien à faire : services et démarrage)", "(nothing to do: services and startup)"),
+         en_anglais([(n, "", t) for n, t in AUTOMATIQUES]))
+    print(f"{doux}{couper(T(POURQUOI, POURQUOI_EN), largeur - 2, 0)}{fin}\n")
 
 
 def detail(nom):
     if not nom.startswith(("nc-", "nvidia-", "cmatrix")):
         nom = "nc-" + nom
+    francais = {v: k for k, v in NOMS_ANGLAIS.items()}
+    nom = francais.get(nom, nom)              # nom anglais (nc-settings…) : celui du script
     chemin = os.path.join(BIN, nom)
     if not os.path.isfile(chemin):
-        sys.exit(f"nc-aide : pas de commande « {nom} » (nc-aide pour la liste)")
+        sys.exit(T(f"nc-aide : pas de commande « {nom} » (nc-aide pour la liste)",
+                   f"nc-help: no command “{nom}” (nc-help for the list)"))
     acc, gras, doux, fin = couleurs()
-    connu = {n: t for n, _, t in A_TAPER + RACCOURCIS} | dict(AUTOMATIQUES)
-    print(f"\n{acc}{nom}{fin}")
+    connu = {n: t for n, _, t in en_anglais(A_TAPER + RACCOURCIS + [(n, "", t) for n, t in AUTOMATIQUES])}
+    print(f"\n{acc}{nom_affiche(nom)}{fin}" + (f"  {doux}({nom}){fin}" if nom_affiche(nom) != nom else ""))
     if nom in connu:
         print(f"  {connu[nom]}\n")
     # L'en-tête du script : commentaires (#) ou docstring Python, jusqu'au code
     lignes = []
     with open(chemin, encoding="utf-8", errors="replace") as f:
         texte = f.read().splitlines()[1:]
+    if EN:
+        # En anglais : l'aide anglaise du script (DOC_EN = """…""" en Python), sinon rien (son en-tête est en français)
+        tout_texte = "\n".join(texte)
+        m = re.search(r'^(?:DOC_EN|USAGE_EN)\s*=\s*(?:\(\s*)?"""(.*?)"""', tout_texte, re.S | re.M)
+        texte = ['"""'] + m.group(1).splitlines() + ['"""'] if m else []
     if texte and texte[0].startswith('"""'):
         for l in texte:
             lignes.append(l.replace('"""', ""))
@@ -152,7 +272,7 @@ def main():
     if not a:
         tout()
     elif a[0] in ("-h", "--help"):
-        print(__doc__.strip())
+        print(T(__doc__, DOC_EN).strip())
     else:
         detail(a[0])
 

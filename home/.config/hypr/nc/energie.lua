@@ -67,12 +67,16 @@ function nc.mode_jeu()
         end
     end
     -- Message affiché avant la pause des notifications (en entrant) ou après (en sortant)
+    local q = nc.guillemets
+    local appli = q(nc.t("Mode jeu", "Game Mode"))
     if actif then
-        hl.exec_cmd("hyprctl reload; notify-send -a 'Mode jeu' -t 2500 'Mode jeu activé' 'Effets coupés, notifications en pause, profil Performance.';"
+        hl.exec_cmd("hyprctl reload; notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu activé", "Game Mode on")) .. " "
+            .. q(nc.t("Effets coupés, notifications en pause, profil Performance.", "Effects off, notifications paused, Performance profile.")) .. ";"
             .. " sleep 2.6; qs -c nc-ile ipc call ile concentrationRegler true 2>/dev/null || noctalia msg notification-dnd-set on")
     else
         hl.exec_cmd("{ qs -c nc-ile ipc call ile concentrationRegler false 2>/dev/null || noctalia msg notification-dnd-set off; }; hyprctl reload;"
-            .. " notify-send -a 'Mode jeu' -t 2500 'Mode jeu désactivé' 'Effets et notifications rétablis.'")
+            .. " notify-send -a " .. appli .. " -t 2500 " .. q(nc.t("Mode jeu désactivé", "Game Mode off")) .. " "
+            .. q(nc.t("Effets et notifications rétablis.", "Effects and notifications restored.")))
     end
 end
 

@@ -11,6 +11,7 @@
 # Ne lit que des fichiers de /sys mis en cache par le noyau : n'allume jamais une carte graphique en veille
 # (contrairement à lspci ou au module GPU de fastfetch).
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 gpu_name() { # $1 = dossier PCI
   local d=$1 ven dev rev name=""
@@ -27,11 +28,18 @@ gpu_name() { # $1 = dossier PCI
   fi
   name=${name#AMD }; name=${name#NVIDIA }; name=${name#GeForce }; name=${name#Intel }
   name=${name% / Mobile}; name=${name% Max-Q}; name=${name% Laptop GPU}
-  echo "${name:-carte $ven:$dev}"
+  echo "${name:-$(t carte card) $ven:$dev}"
 }
 
 # Taille lisible en français (Go, To ; puissances de 10, comme sur l'étiquette du disque)
-taille() { awk -v b="$1" 'BEGIN { if (b >= 1e12) printf "%.1f To", b / 1e12; else printf "%.0f Go", b / 1e9 }' | sed 's/\.0 To/ To/; s/\./,/'; }
+# (en anglais : TB, GB, point décimal)
+taille() {
+  if [ "${NC_LANGUE:-fr}" = en ]; then
+    awk -v b="$1" 'BEGIN { if (b >= 1e12) printf "%.1f TB", b / 1e12; else printf "%.0f GB", b / 1e9 }' | sed 's/\.0 TB/ TB/'
+  else
+    awk -v b="$1" 'BEGIN { if (b >= 1e12) printf "%.1f To", b / 1e12; else printf "%.0f Go", b / 1e9 }' | sed 's/\.0 To/ To/; s/\./,/'
+  fi
+}
 
 # Nom de marque lisible
 marque() {
@@ -71,7 +79,11 @@ sante() {
       printf "%d\t%s\n", m + 0.5, (cy > 0 ? cy : "") }'
 }
 
-case "${1:-}" in
+action="${1:-}"
+# Noms anglais (model, screens, disks, health)
+case "$action" in model) action=modele ;; screens|displays) action=ecrans ;; disks) action=disques ;; health) action=sante ;; esac
+
+case "$action" in
   sante) sante ;;
   modele)
     dmi=/sys/class/dmi/id
@@ -101,7 +113,7 @@ case "${1:-}" in
     while read -r nom octets rota tran; do
       case "$nom" in zram*|loop*|sr*|fd*) continue ;; esac
       [ "$octets" -gt 0 ] 2>/dev/null || continue
-      if [ "$tran" = nvme ]; then t="SSD NVMe"; elif [ "$rota" = 0 ]; then t="SSD"; else t="disque dur"; fi
+      if [ "$tran" = nvme ]; then t="$(t "SSD NVMe" "NVMe SSD")"; elif [ "$rota" = 0 ]; then t="SSD"; else t="$(t "disque dur" "HDD")"; fi
       [ "$tran" = usb ] && t="$t USB"
       out+=("$t $(taille "$octets")")
     done < <(lsblk -dbno NAME,SIZE,ROTA,TRAN 2>/dev/null)
@@ -113,7 +125,7 @@ case "${1:-}" in
       [[ $(<"$d/class") == 0x03* ]] || continue
       n=$(gpu_name "$d")
       if [ "$(cat "$d/boot_vga" 2>/dev/null)" != 1 ] && [ "$(cat "$d/power/runtime_status" 2>/dev/null)" = suspended ]; then
-        n="$n (en veille)"
+        n="$n $(t "(en veille)" "(asleep)")"
       fi
       # Carte principale (celle de l'écran) en premier
       if [ "$(cat "$d/boot_vga" 2>/dev/null)" = 1 ]; then out=("$n" "${out[@]}"); else out+=("$n"); fi
@@ -130,14 +142,14 @@ case "${1:-}" in
     fi
     if [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1; then
       sante=$(sante | cut -f1)
-      [ -n "$sante" ] && parts+=("$pct % (santé $sante %)") || parts+=("$pct %")
+      [ -n "$sante" ] && parts+=("$(t "$pct % (santé $sante %)" "$pct% (health $sante%)")") || parts+=("$(t "$pct %" "$pct%")")
     fi
     ac=""
     for a in /sys/class/power_supply/*; do
       [ "$(cat "$a/type" 2>/dev/null)" = Mains ] && ac=$(cat "$a/online" 2>/dev/null) && break
     done
     if [ ${#parts[@]} -gt 0 ]; then
-      [ "$ac" = 1 ] && parts+=("sur secteur") || parts+=("sur batterie")
+      [ "$ac" = 1 ] && parts+=("$(t "sur secteur" "plugged in")") || parts+=("$(t "sur batterie" "on battery")")
     fi
     # Profil de la plateforme (instantané, suit TLP / power-profiles-daemon), sinon D-Bus
     prof=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null)
@@ -145,17 +157,32 @@ case "${1:-}" in
     [ -n "$prof" ] || prof=$(busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile 2>/dev/null | awk -F'"' '{print $2}')
     case "$prof" in
       performance) parts+=("Performance") ;;
-      balanced) parts+=("Équilibré") ;;
-      power-saver) parts+=("Économie") ;;
+      balanced) parts+=("$(t "Équilibré" "Balanced")") ;;
+      power-saver) parts+=("$(t "Économie" "Power Saver")") ;;
     esac
     [ ${#parts[@]} -gt 0 ] && (IFS='|'; echo "${parts[*]}") | sed 's/|/ · /g'
     ;;
   uptime)
     read -r up _ < /proc/uptime; up=${up%.*}
     d=$((up / 86400)); h=$((up % 86400 / 3600)); m=$((up % 3600 / 60))
-    if [ $d -gt 0 ]; then echo "allumé depuis $d j $h h"
-    elif [ $h -gt 0 ]; then printf 'allumé depuis %d h %02d\n' $h $m
-    else echo "allumé depuis $m min"; fi
+    if [ $d -gt 0 ]; then t "allumé depuis $d j $h h" "up ${d}d ${h}h"; echo
+    elif [ $h -gt 0 ]; then printf "$(t 'allumé depuis %d h %02d' 'up %dh %02dm')\n" $h $m
+    else t "allumé depuis $m min" "up $m min"; echo; fi
     ;;
-  *) sed -n '2,6p' "$0"; exit 1 ;;
+  *)
+    if [ "${NC_LANGUE:-fr}" = en ]; then
+      cat <<'FIN'
+# nc-sysinfo: short lines for the terminal greeting (nc-greeting).
+#   nc-sysinfo model    brand and model of the PC (laptop) or motherboard (desktop), nothing if unknown
+#   nc-sysinfo gpu      graphics cards; the dedicated one shows whether it's asleep
+#   nc-sysinfo screens  connected displays: resolution and refresh rate (built-in first)
+#   nc-sysinfo disks    physical disks: NVMe SSD, SSD, HDD, and their size
+#   nc-sysinfo power    battery (and its health), AC, power profile; profile only on a desktop
+#   nc-sysinfo health   battery health in % (smoothed) and cycle count, tab-separated
+#   nc-sysinfo uptime   time since boot
+FIN
+    else
+      sed -n '2,6p' "$0"
+    fi
+    exit 1 ;;
 esac

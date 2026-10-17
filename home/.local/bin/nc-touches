@@ -5,17 +5,23 @@
 #   nc-touches calculatrice              calculatrice installée (Qalculate, GNOME…), sinon qalc dans le terminal
 # Un petit message dans l'île (notification passagère) dit le nouvel état.
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 
 dire() {   # dire TITRE [TEXTE] : notification passagère, remplacée par la suivante
-  notify-send -a "Clavier" -t 1500 -h string:x-canonical-private-synchronous:nc-touches -h int:transient:1 "$@" 2>/dev/null || true
+  notify-send -a "$(t "Clavier" "Keyboard")" -t 1500 -h string:x-canonical-private-synchronous:nc-touches -h int:transient:1 "$@" 2>/dev/null || true
 }
 
-case "${1:-}" in
+# Noms anglais (nc-kbd-light keyboard up|down|toggle, touchpad [toggle|on|off], calculator)
+action="${1:-}"; arg="${2:-bascule}"
+case "$action" in keyboard|kbd) action=clavier ;; touchpad) action=pave ;; calculator) action=calculatrice ;; esac
+[ "$arg" = toggle ] && arg=bascule
+
+case "$action" in
   clavier)
     dev=""
     for d in /sys/class/leds/*kbd_backlight*; do [ -e "$d" ] && { dev="${d##*/}"; break; }; done
-    [ -n "$dev" ] || { dire "Pas d'éclairage du clavier réglable" "Ton clavier ne le donne pas à Linux (souvent : Fn + Espace le règle tout seul)."; exit 0; }
+    [ -n "$dev" ] || { dire "$(t "Pas d'éclairage du clavier réglable" "No adjustable keyboard backlight")" "$(t "Ton clavier ne le donne pas à Linux (souvent : Fn + Espace le règle tout seul)." "Your keyboard doesn't expose it to Linux (often Fn + Space adjusts it on its own).")"; exit 0; }
     max=$(cat "/sys/class/leds/$dev/max_brightness" 2>/dev/null || echo 1)
     cur=$(brightnessctl -d "$dev" get 2>/dev/null || cat "/sys/class/leds/$dev/brightness")
     # Paliers : 0…max quand le clavier en a peu (souvent 3), sinon éteint, 33 %, 66 %, 100 % (certains claviers
@@ -24,7 +30,7 @@ case "${1:-}" in
     suivant=$max; precedent=0
     for v in $paliers; do [ "$v" -gt "$cur" ] && { suivant=$v; break; }; done
     for v in $paliers; do [ "$v" -lt "$cur" ] && precedent=$v; done
-    case "${2:-bascule}" in
+    case "$arg" in
       up)   new=$suivant ;;
       down) new=$precedent ;;
       *)    if [ "$cur" -ge "$max" ]; then new=0; else new=$suivant; fi ;;   # un appui : palier suivant, puis éteint
@@ -34,13 +40,13 @@ case "${1:-}" in
     brightnessctl -q -d "$dev" set "$new" 2>/dev/null ||
       busctl call org.freedesktop.login1 /org/freedesktop/login1/session/auto org.freedesktop.login1.Session \
         SetBrightness ssu leds "$dev" "$new" 2>/dev/null ||
-      { dire "Éclairage du clavier inaccessible" "Le système refuse de le changer (nc-diag pour en savoir plus)."; exit 1; }
-    if [ "$new" -eq 0 ]; then dire "Clavier éteint"
-    elif [ "$max" -le 4 ]; then dire "Clavier allumé" "Niveau $new sur $max"
-    else dire "Clavier allumé" "$(( new * 100 / max )) %"; fi ;;
+      { dire "$(t "Éclairage du clavier inaccessible" "Keyboard backlight unavailable")" "$(t "Le système refuse de le changer (nc-diag pour en savoir plus)." "The system won't let it change (run nc-diag to learn more).")"; exit 1; }
+    if [ "$new" -eq 0 ]; then dire "$(t "Clavier éteint" "Keyboard backlight off")"
+    elif [ "$max" -le 4 ]; then dire "$(t "Clavier allumé" "Keyboard backlight on")" "$(t "Niveau $new sur $max" "Level $new of $max")"
+    else dire "$(t "Clavier allumé" "Keyboard backlight on")" "$(( new * 100 / max ))$(t " %" "%")"; fi ;;
   pave)
     etat="$RUN/nc-pave-coupe"
-    case "${2:-bascule}" in
+    case "$arg" in
       on) coupe=0 ;; off) coupe=1 ;;
       *) if [ -e "$etat" ]; then coupe=0; else coupe=1; fi ;;
     esac
@@ -54,12 +60,24 @@ case "${1:-}" in
       hyprctl eval "hl.device({ name = '$nom', enabled = $([ "$coupe" = 1 ] && echo false || echo true) })" >/dev/null
       n=$((n + 1))
     done <<< "$paves"
-    [ "$n" -gt 0 ] || { dire "Pas de pavé tactile"; exit 0; }
-    if [ "$coupe" = 1 ]; then dire "Pavé tactile coupé" "La souris reste active"; else dire "Pavé tactile activé"; fi ;;
+    [ "$n" -gt 0 ] || { dire "$(t "Pas de pavé tactile" "No touchpad")"; exit 0; }
+    if [ "$coupe" = 1 ]; then dire "$(t "Pavé tactile coupé" "Touchpad off")" "$(t "La souris reste active" "The mouse still works")"; else dire "$(t "Pavé tactile activé" "Touchpad on")"; fi ;;
   calculatrice)
     for c in qalculate-gtk qalculate-qt gnome-calculator kcalc galculator; do
       command -v "$c" >/dev/null && exec "$c"
     done
     exec kitty --class nc-calculatrice -e qalc ;;
-  *) sed -n '2,6p' "$0"; exit 1 ;;
+  *)
+    if [ "${NC_LANGUE:-fr}" = en ]; then
+      cat <<'FIN'
+# nc-kbd-light: laptop special keys (F1…F12 row with Fn), whatever the model.
+#   nc-kbd-light keyboard up|down|toggle   keyboard backlight (detected: …kbd_backlight)
+#   nc-kbd-light touchpad [toggle|on|off]  touchpad on / off (all touchpads)
+#   nc-kbd-light calculator                installed calculator (Qalculate, GNOME…), otherwise qalc in the terminal
+# A short message in the island (transient notification) shows the new state.
+FIN
+    else
+      sed -n '2,6p' "$0"
+    fi
+    exit 1 ;;
 esac

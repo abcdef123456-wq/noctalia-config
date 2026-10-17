@@ -13,10 +13,41 @@ import json
 import math
 import os
 import random
+import re
 import select
 import subprocess
 import sys
 import time
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
 
 HOME = os.path.expanduser("~")
 PERSO = os.path.join(HOME, ".config/nc/animations")
@@ -338,24 +369,32 @@ def compte(e):
                         for dy in range(ly):
                             for dx in range(lx):
                                 e.pose(x0 + x * lx + dx, y0 + y * ly + dy, "█", co)
-            e.texte(y0 - 3, "Extinction dans…", melange(TEXTE, FOND, 0.3))
+            e.texte(y0 - 3, T("Extinction dans…", "Shutting down in…"), melange(TEXTE, FOND, 0.3))
             yield
     for i in range(110):
-        e.texte(e.r // 2 - 1, "Raté, je reste allumé !", ACCENT)
+        e.texte(e.r // 2 - 1, T("Raté, je reste allumé !", "Nope, still on!"), ACCENT)
         if i > 20:
-            e.texte(e.r // 2 + 1, "Pour éteindre pour de vrai : Super + F4", melange(TEXTE, FOND, 0.35))
+            e.texte(e.r // 2 + 1, T("Pour éteindre pour de vrai : Super + F4", "To shut down for real: Super + F4"),
+                    melange(TEXTE, FOND, 0.35))
         yield
 
 
 ANIMATIONS = {"confettis": confettis, "neige": neige, "matrix": matrix, "feu": feu, "etoiles": etoiles,
               "bulles": bulles, "coeurs": coeurs, "compte": compte}
-NOMS = {"doigts": "Des doigts partout", "confettis": "Confettis", "neige": "Neige",
-        "matrix": "Pluie façon Matrix", "feu": "Feu d'artifice", "etoiles": "Saut dans l'hyperespace",
-        "bulles": "Bulles", "coeurs": "Cœur qui bat", "compte": "Faux compte à rebours"}
+NOMS = {"doigts": T("Des doigts partout", "Fingers everywhere"), "confettis": T("Confettis", "Confetti"),
+        "neige": T("Neige", "Snow"), "matrix": T("Pluie façon Matrix", "Matrix rain"),
+        "feu": T("Feu d'artifice", "Fireworks"), "etoiles": T("Saut dans l'hyperespace", "Jump to hyperspace"),
+        "bulles": T("Bulles", "Bubbles"), "coeurs": T("Cœur qui bat", "Beating heart"),
+        "compte": T("Faux compte à rebours", "Fake countdown")}
 
 
 # Choix du bouton qui ne sont pas des animations : une animation perso ne peut pas porter ces noms
-RESERVES = {"aleatoire", "menu", "verrouiller", "veille", "eteindre", "rien", "bouton", "liste", "nouvelle"}
+# Noms anglais des animations (nc-anim snow…) : mêmes animations que leur nom français
+ANGLAIS = {"fingers": "doigts", "confetti": "confettis", "snow": "neige", "fireworks": "feu", "stars": "etoiles",
+           "hyperspace": "etoiles", "bubbles": "bulles", "heart": "coeurs", "hearts": "coeurs", "countdown": "compte",
+           "random": "aleatoire"}
+RESERVES = {"aleatoire", "menu", "verrouiller", "veille", "eteindre", "rien", "bouton", "liste", "nouvelle",
+            "button", "list", "new"} | set(ANGLAIS)
 
 
 def perso():
@@ -395,6 +434,7 @@ def plein_ecran(commande):
 
 
 def lancer(nom):
+    nom = ANGLAIS.get(nom, nom)
     if nom == "aleatoire":
         nom = random.choice(list(NOMS) + list(perso()))
     if nom == "doigts":
@@ -407,7 +447,7 @@ def lancer(nom):
         return
     p = perso().get(nom)
     if not p:
-        sys.exit(f"nc-anim : animation inconnue : {nom} (nc-anim liste)")
+        sys.exit(T(f"nc-anim : animation inconnue : {nom} (nc-anim liste)", f"nc-anim: unknown animation: {nom} (nc-anim list)"))
     commande = [sys.executable, p] if p.endswith(".py") else [p]
     if os.environ.get("NC_ANIM_DEDANS"):
         os.execvp(commande[0], commande)
@@ -453,44 +493,99 @@ nc.jouer(animation, duree_max=20)
 '''
 
 
+MODELE_EN = '''#!/usr/bin/env python3
+# Your animation for noctalia-config. To try it: nc-anim {nom}
+# For the power button: nc-settings → Animations → "Power button" → {nom}
+# It runs in a transparent full-screen terminal; any key or click closes it.
+#
+# What you have at hand (nc):
+#   e.c, e.r                     width (columns) and height (rows) of the screen
+#   e.pose(x, y, "●", color)     a character at column x and row y (0, 0: top left)
+#   e.texte(y, "Hello", color)   text centered on row y
+#   nc.ACCENT, nc.TEXTE, nc.FOND, nc.ROUGE, nc.VERT, nc.JAUNE, nc.BLEU, nc.VIOLET, nc.CYAN, nc.ORANGE
+#                                theme colors (accent, text, background, red, green, yellow, blue, purple, cyan,
+#                                orange: those of the wallpaper); nc.COUL: all of them, in a list
+#   nc.melange(a, b, t)          color between a (t = 0) and b (t = 1)
+# The screen is cleared before each frame: on each turn, draw everything then "yield" (30 frames per second).
+import importlib.machinery
+import importlib.util
+import math
+import os
+
+_chargeur = importlib.machinery.SourceFileLoader("nc_anim", os.path.expanduser("~/.local/bin/nc-anim"))
+nc = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_anim", _chargeur))
+_chargeur.exec_module(nc)
+
+
+def animation(e):
+    t = 0
+    while True:
+        t += 1
+        # A wave of dots in every color
+        for x in range(e.c):
+            y = e.r / 2 + math.sin((x + t) / 7) * e.r / 4
+            e.pose(x, y, "●", nc.COUL[(x // 6) % len(nc.COUL)])
+        e.texte(e.r - 3, "My animation", nc.melange(nc.TEXTE, nc.FOND, 0.3))
+        yield
+
+
+nc.jouer(animation, duree_max=20)
+'''
+
+USAGE_EN = """nc-anim: small full-screen animations in the colors of your wallpaper (power button…). Any key or click
+closes them.
+  nc-anim NAME           plays an animation (try them: nc-anim list)
+  nc-anim list           the animations, including yours
+  nc-anim button         what the power button does (nc-settings → Animations → "Power button")
+  nc-anim new NAME       creates your own animation (~/.config/nc/animations/NAME.py, to edit), then pick it in
+                         nc-settings like the others
+Your animations: ~/.config/nc/animations/, one script per animation (Python or other), run in a transparent
+full-screen terminal; never touched by updates."""
+
+
 def main():
     a = sys.argv[1:]
-    if not a or a[0] in ("-h", "--help", "aide"):
-        print(__doc__.strip())
+    if not a or a[0] in ("-h", "--help", "aide", "help"):
+        print(T(__doc__.strip(), USAGE_EN))
         return
-    if a[0] == "liste":
+    if a[0] in ("liste", "list"):
         if "--brut" in a:
             for n, d in NOMS.items():
                 print(f"{n}\t{d}")
             for n in perso():
-                print(f"{n}\tLa tienne : {n}")
+                print(T(f"{n}\tLa tienne : {n}", f"{n}\tYours: {n}"))
             return
-        print("Animations (nc-anim NOM pour en essayer une) :")
+        print(T("Animations (nc-anim NOM pour en essayer une) :", "Animations (nc-anim NAME to try one):"))
+        noms_en = {v: k for k, v in reversed(ANGLAIS.items())}      # en anglais : le nom anglais (snow…)
         for n, d in NOMS.items():
-            print(f"  {n:<12} {d}")
+            print(f"  {(noms_en.get(n, n) if EN else n):<12} {d}")
         p = perso()
         if p:
-            print("Les tiennes (~/.config/nc/animations) :")
+            print(T("Les tiennes (~/.config/nc/animations) :", "Yours (~/.config/nc/animations):"))
             for n in p:
                 print(f"  {n}")
-        print("\nNouvelle animation à toi : nc-anim nouvelle NOM")
+        print(T("\nNouvelle animation à toi : nc-anim nouvelle NOM", "\nYour own new animation: nc-anim new NAME"))
         return
-    if a[0] == "nouvelle":
+    if a[0] in ("nouvelle", "new"):
         if len(a) < 2 or not all(ch.isalnum() or ch in "-_" for ch in a[1]):
-            sys.exit("Usage : nc-anim nouvelle NOM   (lettres, chiffres, - et _)")
+            sys.exit(T("Usage : nc-anim nouvelle NOM   (lettres, chiffres, - et _)",
+                       "Usage: nc-anim new NAME   (letters, digits, - and _)"))
         if a[1] in NOMS or a[1] in RESERVES:
-            sys.exit(f"nc-anim : le nom « {a[1]} » est déjà pris par la config : choisis-en un autre")
+            sys.exit(T(f"nc-anim : le nom « {a[1]} » est déjà pris par la config : choisis-en un autre",
+                       f"nc-anim: the name \"{a[1]}\" is already used by the config: pick another one"))
         os.makedirs(PERSO, exist_ok=True)
         chemin = os.path.join(PERSO, a[1] + ".py")
         if os.path.exists(chemin):
-            sys.exit(f"nc-anim : elle existe déjà : {chemin}")
+            sys.exit(T(f"nc-anim : elle existe déjà : {chemin}", f"nc-anim: it already exists: {chemin}"))
         with open(chemin, "w", encoding="utf-8") as f:
-            f.write(MODELE.format(nom=a[1]))
+            f.write(T(MODELE, MODELE_EN).format(nom=a[1]))
         os.chmod(chemin, 0o755)
-        print(f"Créée : {chemin}\nModifie-la, essaie-la avec : nc-anim {a[1]}\n"
-              f"Puis choisis-la : nc-reglages → Animations → Bouton d'arrêt.")
+        print(T(f"Créée : {chemin}\nModifie-la, essaie-la avec : nc-anim {a[1]}\n"
+                f"Puis choisis-la : nc-reglages → Animations → Bouton d'arrêt.",
+                f"Created: {chemin}\nEdit it, try it with: nc-anim {a[1]}\n"
+                f"Then pick it: nc-settings → Animations → Power button."))
         return
-    if a[0] == "bouton":
+    if a[0] in ("bouton", "button"):
         choix = reglage("BOUTON_ARRET", "doigts")
         actions = {"rien": None, "menu": ["noctalia", "msg", "panel-toggle", "session"],
                    "verrouiller": ["loginctl", "lock-session"], "veille": ["systemctl", "suspend"],

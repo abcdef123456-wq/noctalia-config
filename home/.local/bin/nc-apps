@@ -12,10 +12,51 @@
 """
 import json
 import os
+import re
 import subprocess
 import shlex
 import shutil
 import sys
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-apps: installed applications, for the Super+R search (Noctalia v5 plugin nc/launcher).
+
+  nc-apps list        JSON: [{id, name, generic, comment, keywords, exe, icon, wmclass}, ...]
+  nc-apps launch ID   launches application ID (name of the .desktop file without the extension),
+                          in its own systemd unit (uwsm-app) and on the GPU of the profile (nc-launch).
+  nc-apps files TEXT  files and folders of the home folder whose name contains TEXT
+                          (JSON, 4 at most, hidden folders excluded)
+  nc-apps open PATH   opens a file or a folder with the default app
+  nc-apps icon NAME   path of an app's icon file (name of the player, of the window or of the .desktop),
+                          looked up in the active icon theme then Papirus and hicolor (empty if nothing)"""
 
 LAUNCH = os.path.expanduser("~/.local/bin/nc-launch")
 TERMINAL = ["kitty", "-e"]
@@ -45,6 +86,11 @@ def locales():
         out.append(lang)
         if "_" in lang:
             out.append(lang.split("_")[0])
+    # Langue de la config forcée (nc-reglages → Langue) : noms des applis dans cette langue
+    if EN and lang.startswith("fr"):
+        return []
+    if not EN and not lang.startswith("fr"):
+        return ["fr_FR", "fr"]
     return out
 
 
@@ -160,10 +206,10 @@ def cmd_launch(app_id):
     path = entries().get(app_id)
     e = parse(path) if path else None
     if not e:
-        sys.exit(f"Application inconnue : {app_id}")
+        sys.exit(T(f"Application inconnue : {app_id}", f"Unknown application: {app_id}"))
     argv = exec_argv(e)
     if not argv:
-        sys.exit(f"Commande vide : {app_id}")
+        sys.exit(T(f"Commande vide : {app_id}", f"Empty command: {app_id}"))
     if e.get("Terminal") == "true":
         argv = TERMINAL + argv
     if e.get("Path"):
@@ -213,7 +259,7 @@ def cmd_files(text):
 def cmd_open(path):
     path = os.path.expanduser(path)
     if not os.path.exists(path):
-        sys.exit(f"Introuvable : {path}")
+        sys.exit(T(f"Introuvable : {path}", f"Not found: {path}"))
     argv = ["xdg-open", path]
     if shutil.which("uwsm-app"):
         argv = ["uwsm-app", "--"] + argv
@@ -308,5 +354,5 @@ if __name__ == "__main__":
     elif len(sys.argv) == 3 and sys.argv[1] == "icon":
         cmd_icon(sys.argv[2])
     else:
-        print(__doc__.strip(), file=sys.stderr)
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
         sys.exit(1)

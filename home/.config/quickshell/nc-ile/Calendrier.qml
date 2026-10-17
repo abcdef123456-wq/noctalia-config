@@ -15,7 +15,8 @@ Item {
             width: parent.width; height: 34
             Texte {
                 anchors.verticalCenter: parent.verticalCenter
-                text: Etat.mois[ca.premier.getMonth()].charAt(0).toUpperCase() + Etat.mois[ca.premier.getMonth()].slice(1) + " " + ca.premier.getFullYear()
+                text: Reglages.en ? Reglages.locale.standaloneMonthName(ca.premier.getMonth(), Locale.LongFormat) + " " + ca.premier.getFullYear()
+                      : Etat.mois[ca.premier.getMonth()].charAt(0).toUpperCase() + Etat.mois[ca.premier.getMonth()].slice(1) + " " + ca.premier.getFullYear()
                 font.pixelSize: 20; font.weight: Font.Bold
             }
             Row {
@@ -28,7 +29,8 @@ Item {
         Grid {
             columns: 7; columnSpacing: 0; rowSpacing: 4
             Repeater {
-                model: ["L", "M", "M", "J", "V", "S", "D"]
+                model: Reglages.en ? [1, 2, 3, 4, 5, 6, 0].map(j => Reglages.locale.dayName(j, Locale.NarrowFormat))
+                                   : ["L", "M", "M", "J", "V", "S", "D"]
                 Texte { required property string modelData; width: ca.width / 7; height: 22; text: modelData; secondaire: true; horizontalAlignment: Text.AlignHCenter; font.weight: Font.DemiBold; font.pixelSize: 12 }
             }
             Repeater {

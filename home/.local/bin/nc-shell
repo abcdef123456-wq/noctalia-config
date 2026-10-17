@@ -3,11 +3,20 @@
 #   nc-shell            afficher l'état
 #   nc-shell restart    la redémarrer (les fenêtres ouvertes ne sont pas fermées)
 set -euo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 UNIT=noctalia.service
 case "${1:-}" in
-  "") systemctl --user is-active --quiet "$UNIT" && echo "Noctalia v5 active." || echo "Noctalia v5 arrêtée : nc-shell restart" ;;
+  "") { systemctl --user is-active --quiet "$UNIT" && t "Noctalia v5 active." "Noctalia v5 is running." || t "Noctalia v5 arrêtée : nc-shell restart" "Noctalia v5 is stopped: nc-shell restart"; }; echo ;;
   restart)
     systemctl --user restart "$UNIT"; sleep 2
-    systemctl --user is-active --quiet "$UNIT" && echo "Noctalia v5 redémarrée." || { echo "Noctalia n'a pas démarré : journalctl --user -u $UNIT" >&2; exit 1; } ;;
-  *) sed -n '2,4p' "$0"; exit 1 ;;
+    systemctl --user is-active --quiet "$UNIT" && { t "Noctalia v5 redémarrée." "Noctalia v5 restarted."; echo; } || { t "Noctalia n'a pas démarré : journalctl --user -u $UNIT" "Noctalia didn't start: journalctl --user -u $UNIT" >&2; echo >&2; exit 1; } ;;
+  *)
+    if [ "${NC_LANGUE:-}" = en ]; then
+      printf '%s\n' "nc-shell: status of the Noctalia v5 bar (bar, menus, wallpaper)." \
+        "  nc-shell            show the status" \
+        "  nc-shell restart    restart it (open windows are not closed)"
+    else
+      sed -n '2,4p' "$0"
+    fi
+    exit 1 ;;
 esac

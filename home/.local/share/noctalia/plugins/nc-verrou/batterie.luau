@@ -1,6 +1,29 @@
 --!nonstrict
 -- nc/verrou : batterie de l'écran de verrouillage, seulement quand le PC est branché (éclair et pourcentage).
 
+-- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
+local function env(nom)
+  local v = noctalia.getenv and noctalia.getenv(nom)
+  return (v and v ~= "") and v or nil
+end
+local function langue()
+  local l = env("NC_LANGUE")
+  if l ~= "fr" and l ~= "en" then
+    local conf = noctalia.readFile(noctalia.expandPath("~/.config/nc/reglages.conf")) or ""
+    for k, v in string.gmatch(conf, "([%u%d_]+)=([^\n]*)") do
+      if k == "LANGUE" then l = string.match(v, '^%s*"?(%a*)') end
+    end
+  end
+  if l ~= "fr" and l ~= "en" then
+    local loc = env("LC_ALL") or env("LC_MESSAGES") or env("LANG")
+      or string.match(noctalia.readFile("/etc/locale.conf") or "", 'LANG="?([%w_.@-]+)') or ""
+    l = string.sub(loc, 1, 2) == "fr" and "fr" or "en"
+  end
+  return l
+end
+local EN = langue() == "en"
+local function tr(fr, en) return EN and en or fr end
+
 local L, H = 200, 40
 local derniere = nil
 
@@ -21,7 +44,8 @@ end
 function rendre()
   local statut, pc = etat()
   local branche = statut == "Charging" or statut == "Full" or statut == "Not charging"
-  local cle = tostring(branche) .. pc
+  EN = langue() == "en"
+  local cle = tostring(branche) .. pc .. tostring(EN)
   if cle == derniere then return end
   derniere = cle
   if not statut or not branche then
@@ -30,7 +54,7 @@ function rendre()
   end
   desktopWidget.render(ui.row({ width = L, height = H, align = "center", justify = "center", gap = 6 }, {
     ui.glyph({ name = "bolt", size = 18, color = "#30d158" }),
-    ui.label({ text = pc .. " %", fontSize = 16, fontWeight = "semibold", color = "#ffffff" }),
+    ui.label({ text = tr(pc .. " %", pc .. "%"), fontSize = 16, fontWeight = "semibold", color = "#ffffff" }),
   }))
 end
 

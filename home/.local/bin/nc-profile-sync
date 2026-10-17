@@ -13,6 +13,10 @@
 # Fréquences : « max » = la plus haute de l'écran interne, « low » = 60 Hz (sinon la plus basse), ou un nombre (ex. 120).
 # Écran, rétroéclairage de l'écran et du clavier : détectés automatiquement.
 set -uo pipefail
+# Langue (nc-reglages → Apparence → Langue) : relue à chaque changement (le service tourne toute la session)
+NC_LANGUE_ENV="${NC_LANGUE:-}"
+langue() { NC_LANGUE="$NC_LANGUE_ENV"; . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }; }
+langue
 
 OUT="$HOME/.config/hypr/nc/profil.lua"
 # Noctalia v5 lit tous les *.toml de son dossier, par ordre alphabétique (le dernier l'emporte)
@@ -40,10 +44,10 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
     v="${v//\"/}"; v="${v%%[[:space:]]}"
     case "$k" in
       HZ_PERFORMANCE|HZ_BALANCED_AC|HZ_BALANCED_BAT|HZ_ECO|ECO_BRIGHTNESS_MAX)
-        [[ "$v" =~ ^([0-9]{1,3}|max|low)$ ]] && printf -v "$k" '%s' "$v" || echo "valeur ignorée : $k=$v" >&2 ;;
+        [[ "$v" =~ ^([0-9]{1,3}|max|low)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       PROFIL_SECTEUR|PROFIL_BATTERIE)
-        [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "valeur ignorée : $k=$v" >&2 ;;
-      ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "valeur ignorée : $k=$v" >&2 ;;
+        [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
+      ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
       GPU_PERFORMANCE) [[ "$v" =~ ^(nvidia|integree)$ ]] && GPU_PERFORMANCE=$v ;;
       *) ;;                                      # autres réglages : pour d'autres parties de la config
@@ -102,12 +106,12 @@ profil_auto() {
      [ "$(batterie_pct)" -le "$ECO_AUTO" ]; then
     echo "$profile" > "$ECO_AUTO_FLAG"          # une fois par décharge : si tu repasses à un autre profil, il reste
     voulu=power-saver
-    notify-send -a "Énergie" -i battery-caution "Économie activée" \
-      "Batterie à $(batterie_pct) % : le profil d'avant reviendra quand tu brancheras le chargeur." 2>/dev/null &
+    notify-send -a "$(t "Énergie" "Power")" -i battery-caution "$(t "Économie activée" "Power Saver on")" \
+      "$(t "Batterie à $(batterie_pct) % : le profil d'avant reviendra quand tu brancheras le chargeur." "Battery at $(batterie_pct)%: your previous profile will come back when you plug in the charger.")" 2>/dev/null &
   fi
   last_bat=$bat
   if [ -n "$voulu" ] && [ "$voulu" != garder ] && [ "$voulu" != "$profile" ] && set_profile "$voulu"; then
-    log "profil automatique : $voulu"
+    log "$(t "profil automatique : $voulu" "automatic profile: $voulu")"
     profile=$voulu
   fi
 }
@@ -149,7 +153,7 @@ set_gpu_default() {
   fi
   hyprctl eval "hl.env('__EGL_VENDOR_LIBRARY_FILENAMES', '$egl') hl.env('VK_DRIVER_FILES', '$vk') hl.env('__NV_PRIME_RENDER_OFFLOAD', '$off') hl.env('__VK_LAYER_NV_optimus', '$layer') hl.env('__GLX_VENDOR_LIBRARY_NAME', '$glx')" >/dev/null
   echo "$want" > "$GPU_STATE"
-  log "GPU par défaut des nouvelles applis : $want"
+  log "$(t "GPU par défaut des nouvelles applis : $want" "default GPU for new apps: $want")"
 }
 
 # Passage en Performance alors que la session tourne sur la carte intégrée seule : la NVIDIA n'entre dans la
@@ -162,9 +166,9 @@ proposer_nvidia() {
   : > "$deja"
   (
     # Dans le centre de notifications seulement : en pop-up, l'île montre déjà « ⚡ Performance » (x-nc-discret)
-    choix="$(notify-send -a "Énergie" -t 15000 -h boolean:x-nc-discret:true --action=session="Rouvrir la session" \
-      "Performance : carte NVIDIA" \
-      "Les applis que tu lances l'utilisent déjà. Pour les prises HDMI / USB-C et tout le bureau, rouvre la session : elle démarrera avec la NVIDIA." 2>/dev/null)"
+    choix="$(notify-send -a "$(t "Énergie" "Power")" -t 15000 -h boolean:x-nc-discret:true --action=session="$(t "Rouvrir la session" "Log Out and Back In")" \
+      "$(t "Performance : carte NVIDIA" "Performance: NVIDIA GPU")" \
+      "$(t "Les applis que tu lances l'utilisent déjà. Pour les prises HDMI / USB-C et tout le bureau, rouvre la session : elle démarrera avec la NVIDIA." "Apps you open already use it. For the HDMI / USB-C ports and the whole desktop, log out and back in: the session will start on the NVIDIA GPU.")" 2>/dev/null)"
     [ "$choix" = session ] && { uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()'; }
   ) &
 }
@@ -190,11 +194,11 @@ enabled = false
 transition = []'
     [ "$want" = "$(cat "$NOCTALIA_ECO" 2>/dev/null)" ] && return 0
     printf '%s\n' "$want" > "$NOCTALIA_ECO.tmp" && mv "$NOCTALIA_ECO.tmp" "$NOCTALIA_ECO"
-    log "Noctalia : mode Économie (animations et rotation des fonds coupées)"
+    log "$(t "Noctalia : mode Économie (animations et rotation des fonds coupées)" "Noctalia: Power Saver mode (animations and wallpaper rotation off)")"
   else
     [ -e "$NOCTALIA_ECO" ] || return 0
     rm -f "$NOCTALIA_ECO"
-    log "Noctalia : mode normal"
+    log "$(t "Noctalia : mode normal" "Noctalia: normal mode")"
   fi
   command -v noctalia >/dev/null && noctalia msg config-reload >/dev/null 2>&1
   return 0
@@ -203,6 +207,7 @@ transition = []'
 apply() {
   hyprctl monitors -j >/dev/null 2>&1 || return 0
   local profile bat hz
+  langue
   profile=$(get_profile)
   on_battery && bat=1 || bat=0
   profil_auto
@@ -220,7 +225,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     mkdir -p "$(dirname "$OUT")"
     printf '%s\n' "$content" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
     hyprctl reload >/dev/null
-    log "appliqué : profil=${profile:-inconnu} batterie=$bat fréquence=$hz"
+    log "$(t "appliqué : profil=${profile:-inconnu} batterie=$bat fréquence=$hz" "applied: profile=${profile:-unknown} battery=$bat refresh=$hz")"
   fi
 
   set_gpu_default "$profile"
@@ -241,10 +246,10 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   if [ "$profile" = power-saver ] && [ "$last_profile" != power-saver ] && [ "$ECO_BLUETOOTH" = oui ]; then
     if bluetoothctl show 2>/dev/null | grep -q "Powered: yes" && [ -z "$(bluetoothctl devices Connected 2>/dev/null)" ]; then
-      bluetoothctl power off >/dev/null 2>&1 && touch "$rt/nc-bt-off" && log "Bluetooth coupé (aucun appareil connecté)"
+      bluetoothctl power off >/dev/null 2>&1 && touch "$rt/nc-bt-off" && log "$(t "Bluetooth coupé (aucun appareil connecté)" "Bluetooth off (no device connected)")"
     fi
   elif [ "$profile" != power-saver ] && [ "$last_profile" = power-saver ]; then
-    [ -e "$rt/nc-bt-off" ] && bluetoothctl power on >/dev/null 2>&1 && log "Bluetooth rallumé"
+    [ -e "$rt/nc-bt-off" ] && bluetoothctl power on >/dev/null 2>&1 && log "$(t "Bluetooth rallumé" "Bluetooth back on")"
     rm -f "$rt/nc-bt-off"
   fi
 
@@ -255,9 +260,9 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     if [ "$profile" = power-saver ] && [ "$last_profile" != power-saver ]; then
       # Ne pas écraser le niveau d'origine si le service redémarre alors qu'on est déjà en Économie.
       [ -e "$kbd_saved" ] || cat "/sys/class/leds/$kbd/brightness" > "$kbd_saved"
-      brightnessctl -q -d "$kbd" set 0 && log "rétroéclairage clavier éteint"
+      brightnessctl -q -d "$kbd" set 0 && log "$(t "rétroéclairage clavier éteint" "keyboard backlight off")"
     elif [ "$profile" != power-saver ] && [ "$last_profile" = power-saver ] && [ -r "$kbd_saved" ]; then
-      brightnessctl -q -d "$kbd" set "$(cat "$kbd_saved")" && log "rétroéclairage clavier restauré"
+      brightnessctl -q -d "$kbd" set "$(cat "$kbd_saved")" && log "$(t "rétroéclairage clavier restauré" "keyboard backlight restored")"
       rm -f "$kbd_saved"
     fi
   fi
@@ -266,7 +271,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     local cur max
     cur=$(brightnessctl -d "$BACKLIGHT" get 2>/dev/null) && max=$(brightnessctl -d "$BACKLIGHT" max 2>/dev/null) &&
       if [ $(( cur * 100 / max )) -gt "$ECO_BRIGHTNESS_MAX" ]; then
-        brightnessctl -q -d "$BACKLIGHT" set "${ECO_BRIGHTNESS_MAX}%" && log "luminosité ramenée à ${ECO_BRIGHTNESS_MAX} %"
+        brightnessctl -q -d "$BACKLIGHT" set "${ECO_BRIGHTNESS_MAX}%" && log "$(t "luminosité ramenée à ${ECO_BRIGHTNESS_MAX} %" "brightness lowered to ${ECO_BRIGHTNESS_MAX}%")"
       fi
   fi
   last_profile=$profile
@@ -284,7 +289,7 @@ apply
 } 2>/dev/null | while true; do
   read -r -t 60 _line
   rc=$?
-  [ $rc -ne 0 ] && [ $rc -le 128 ] && { log "flux D-Bus interrompu"; exit 1; }
+  [ $rc -ne 0 ] && [ $rc -le 128 ] && { log "$(t "flux D-Bus interrompu" "D-Bus stream interrupted")"; exit 1; }
   sleep 0.3
   while read -r -t 0.2 _line; do :; done
   apply

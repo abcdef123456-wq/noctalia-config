@@ -32,7 +32,7 @@ Item {
             Column {
                 width: parent.width - 72 - 14 - 44; spacing: 3
                 anchors.verticalCenter: parent.verticalCenter
-                Texte { width: parent.width; text: Etat.titre !== "" ? Etat.titre : "Rien en lecture"; font.pixelSize: 17; font.weight: Font.DemiBold }
+                Texte { width: parent.width; text: Etat.titre !== "" ? Etat.titre : Reglages.t("Rien en lecture", "Not Playing"); font.pixelSize: 17; font.weight: Font.DemiBold }
                 Texte { width: parent.width; text: Etat.artiste !== "" ? Etat.artiste : (Etat.lecteur ? Etat.lecteur.identity : ""); secondaire: true; font.pixelSize: 14 }
             }
             // Onde sonore (immobile en pause)

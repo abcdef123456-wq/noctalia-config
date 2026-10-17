@@ -3,8 +3,9 @@
 # « Fermer quand même ? » s'affiche dans le lanceur de Noctalia : flèches et Entrée (Annuler en premier), Échap
 # annule. Remplace la question de kitty, qui ne répond qu'aux lettres (O/N) et pas aux flèches.
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 pid="${1:-}"; adr="${2:-}"
-[ -n "$pid" ] && [ -n "$adr" ] || { echo "Usage : nc-fermer PID ADRESSE" >&2; exit 2; }
+[ -n "$pid" ] && [ -n "$adr" ] || { t "Usage : nc-fermer PID ADRESSE" "Usage: nc-close PID ADDRESS" >&2; echo >&2; exit 2; }
 
 fermer() { hyprctl dispatch "hl.dsp.window.close({ window = 'address:$adr' })" >/dev/null; }
 # Plusieurs fenêtres dans ce même kitty (Ctrl + Maj + N) : impossible de savoir laquelle fait tourner quoi, kitty
@@ -20,8 +21,9 @@ done
 progs="$(printf '%s' "$progs" | sed '/^$/d' | sort -u | paste -sd ',' | sed 's/,/, /g')"
 [ -n "$progs" ] || { fermer; exit 0; }
 
-choix="$(printf 'Annuler\nFermer quand même\n' | noctalia dmenu -p "« $progs » tourne encore dans ce terminal" 2>/dev/null)"
+annuler="$(t "Annuler" "Cancel")"; quandmeme="$(t "Fermer quand même" "Close Anyway")"
+choix="$(printf '%s\n%s\n' "$annuler" "$quandmeme" | noctalia dmenu -p "$(t "« $progs » tourne encore dans ce terminal" "\"$progs\" is still running in this terminal")" 2>/dev/null)"
 st=$?
 if [ "$st" -ne 0 ] && ! command -v noctalia >/dev/null; then fermer; exit 0; fi   # pas de lanceur : la question de kitty
-[ "$choix" = "Fermer quand même" ] || exit 0
+[ "$choix" = "$quandmeme" ] || exit 0
 kill -TERM "$pid"                              # seule fenêtre de ce kitty : arrêté proprement, sans redemander

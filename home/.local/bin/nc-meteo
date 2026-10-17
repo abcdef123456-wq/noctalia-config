@@ -6,10 +6,45 @@ Ville : nc-reglages → Île → « Ville de la météo » (METEO_VILLE) ; vide 
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
 import urllib.request
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-weather: the weather for the island (Open-Meteo: free, no key or account), as JSON.
+  nc-weather         current weather, the next hours and the next days (cached for 20 min)
+  nc-weather text    the same thing in plain text
+City: nc-settings → Island → "Weather city" (METEO_VILLE); empty: guessed from your internet connection."""
 
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "nc", "meteo.json")
@@ -32,7 +67,17 @@ CODES = {
     95: ("thunderstorm", "thunderstorm", "Orage"), 96: ("thunderstorm", "thunderstorm", "Orage et grêle"),
     99: ("thunderstorm", "thunderstorm", "Orage et grêle"),
 }
+# Le JSON reste en français (l'île le traduit elle-même) ; en anglais, seul « nc-meteo texte » est traduit
 JOURS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+JOURS_EN = dict(zip(JOURS, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]))
+CIEL_EN = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Freezing fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle", 56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains", 80: "Showers", 81: "Showers",
+    82: "Heavy showers", 85: "Snow showers", 86: "Snow showers", 95: "Thunderstorm", 96: "Thunderstorm with hail",
+    99: "Thunderstorm with hail",
+}
 
 
 def reglage(cle, defaut=""):
@@ -55,7 +100,7 @@ def lire(url):
 def lieu(ville):
     """(latitude, longitude, nom) de la ville choisie, sinon d'après la connexion."""
     if ville:
-        r = lire("https://geocoding-api.open-meteo.com/v1/search?count=1&language=fr&name=" + urllib.parse.quote(ville))
+        r = lire(f"https://geocoding-api.open-meteo.com/v1/search?count=1&language={T('fr', 'en')}&name=" + urllib.parse.quote(ville))
         if r.get("results"):
             x = r["results"][0]
             return x["latitude"], x["longitude"], x.get("name", ville)
@@ -120,14 +165,31 @@ def meteo():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
+        return print(T(__doc__.strip(), USAGE_EN))
     m = meteo()
-    if len(sys.argv) > 1 and sys.argv[1] == "texte":
+    if len(sys.argv) > 1 and sys.argv[1] in ("texte", "text"):
         if "temp" not in m:
-            print("Météo indisponible (hors ligne ?)")
+            print(T("Météo indisponible (hors ligne ?)", "Weather unavailable (offline?)"))
             return
-        print(f"{m['ville']} : {m['temp']} °C, {m['texte'].lower()} (ressenti {m['ressenti']} °C, min {m['min']}, max {m['max']})")
-        print("  " + "   ".join(f"{x['h']} {x['t']}°" for x in m["heures"]))
-        print("  " + "   ".join(f"{x['jour']} {x['min']}/{x['max']}°" for x in m["jours"]))
+        if not EN:
+            print(f"{m['ville']} : {m['temp']} °C, {m['texte'].lower()} (ressenti {m['ressenti']} °C, min {m['min']}, max {m['max']})")
+            print("  " + "   ".join(f"{x['h']} {x['t']}°" for x in m["heures"]))
+            print("  " + "   ".join(f"{x['jour']} {x['min']}/{x['max']}°" for x in m["jours"]))
+            return
+
+        def heure(h):
+            try:
+                n = int(h.split()[0])
+            except (ValueError, IndexError):
+                return h
+            return f"{n % 12 or 12} {'AM' if n < 12 else 'PM'}"
+        def jour(j):
+            return "Today" if j == "Aujourd'hui" else JOURS_EN.get(j, j)
+        ciel = CIEL_EN.get(m.get("code"), m["texte"]).lower()
+        print(f"{m['ville']}: {m['temp']}°C, {ciel} (feels like {m['ressenti']}°C, low {m['min']}, high {m['max']})")
+        print("  " + "   ".join(f"{heure(x['h'])} {x['t']}°" for x in m["heures"]))
+        print("  " + "   ".join(f"{jour(x['jour'])} {x['min']}/{x['max']}°" for x in m["jours"]))
         return
     print(json.dumps(m, ensure_ascii=False))
 

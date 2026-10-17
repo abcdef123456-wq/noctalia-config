@@ -70,7 +70,7 @@ Singleton {
     property string dernierFiniAgent: "claude"
     // Titre de la page : selon les agents suivis
     readonly property string titreAgent: sessions.length && sessions.every(s => agent(s) === agent(sessions[0])) ? agent(sessions[0]) : ""
-    readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : (sessions.length ? "Agents IA" : "Claude Code")
+    readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : (sessions.length ? Reglages.t("Agents IA", "AI Agents") : "Claude Code")
     readonly property var attend: sessions.find(s => s.etat === "terminal") || null
     onSessionsChanged: {
         var n = {}
@@ -95,9 +95,13 @@ Singleton {
     }
     function depuis(t) {
         var s = Math.max(0, Math.round(Etat.maintenant.getTime() / 1000 - (t || 0)))
+        if (Reglages.en) return s < 60 ? "just now" : (s < 3600 ? Math.floor(s / 60) + " min ago" : Math.floor(s / 3600) + " h ago")
         return s < 60 ? "à l'instant" : (s < 3600 ? "il y a " + Math.floor(s / 60) + " min" : "il y a " + Math.floor(s / 3600) + " h")
     }
     function libelle(s) {
+        if (Reglages.en)
+            return ({ travail: "Working", demande: "Waiting for your answer", terminal: "Waiting in the terminal", attente: "Your turn",
+                      fini: "Finished " + depuis(s.fin), pret: "Ready" })[s.etat] || s.etat
         return ({ travail: "Travaille", demande: "Attend ta réponse", terminal: "T'attend dans le terminal", attente: "À toi",
                   fini: "Terminé " + depuis(s.fin), pret: "Prêt" })[s.etat] || s.etat
     }

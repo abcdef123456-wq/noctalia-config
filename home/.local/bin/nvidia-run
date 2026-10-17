@@ -4,8 +4,10 @@
 # ce lanceur rétablit les pilotes NVIDIA pour cette seule commande.
 # Exemples : nvidia-run blender   ·   Steam, options de lancement : nvidia-run %command%
 set -euo pipefail
-[ $# -ge 1 ] || { echo "Usage : nvidia-run <commande> [arguments]" >&2; exit 1; }
-[ -r /usr/share/glvnd/egl_vendor.d/10_nvidia.json ] || { echo "nvidia-run : pilote NVIDIA introuvable, lancement normal." >&2; exec "$@"; }
+[ $# -ge 1 ] || { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+  t "Usage : nvidia-run <commande> [arguments]" "Usage: nvidia-run <command> [arguments]" >&2; echo >&2; exit 1; }
+[ -r /usr/share/glvnd/egl_vendor.d/10_nvidia.json ] || { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+  t "nvidia-run : pilote NVIDIA introuvable, lancement normal." "nvidia-run: NVIDIA driver not found, launching normally." >&2; echo >&2; exec "$@"; }
 
 # Pilote Vulkan NVIDIA : nvidia_icd.json, ou nvidia_icd.x86_64.json (Fedora, RPM Fusion)
 vk=$(ls /usr/share/vulkan/icd.d/nvidia_icd*.json 2>/dev/null | grep -v i686 | paste -sd: || true)

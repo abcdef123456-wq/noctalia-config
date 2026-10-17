@@ -8,6 +8,7 @@
 #   autre (ancienne config de session…) -> arrêté
 # Rien n'est désinstallé. Une notification dit ce qui a été arrêté.   Usage : nc-session-propre [attente en secondes]
 set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 sleep "${1:-6}"
 
 barres=" waybar hyprpanel ags eww polybar nwg-panel ironbar yambar sfwbar "
@@ -56,6 +57,7 @@ done
 
 if [ ${#arretes[@]} -gt 0 ]; then
   liste="$(printf '%s\n' "${arretes[@]}" | sort -u | paste -sd ', ')"
-  notify-send -a "noctalia-config" "Ancienne barre arrêtée" "$liste : elle démarrait encore avec ta session (rien n'est désinstallé)." 2>/dev/null || true
+  notify-send -a "noctalia-config" "$(t "Ancienne barre arrêtée" "Old bar stopped")" \
+    "$(t "$liste : elle démarrait encore avec ta session (rien n'est désinstallé)." "$liste: it still started with your session (nothing was uninstalled).")" 2>/dev/null || true
 fi
 exit 0

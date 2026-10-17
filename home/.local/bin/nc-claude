@@ -33,6 +33,58 @@ import time
 import urllib.parse
 import uuid
 
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+DOC_EN = """nc-agents: Claude Code in the dynamic island (like the coucou app): what it is doing, step by step, when it is
+done, and its requests (allow a command, answer a question) from the island.
+  nc-agents install     adds the hooks to ~/.claude/settings.json (a copy of the old file is kept next to it)
+  nc-agents remove      removes them
+  nc-agents state       the tracked sessions, in plain text
+  nc-agents hook        called by Claude Code on every event (reads the event JSON on standard input)
+  nc-agents install AI | remove AI
+                        the same for the other AIs: antigravity, opencode, codex, gemini, cursor, copilot, qwen,
+                        kiro, amp (or “all”: the installed ones); what they are doing, when they are done,
+                        when they are waiting for you; their requests stay in their terminal
+  nc-agents ia AI EVENT        called by their hooks or extension; nc-agents agy EVENT: by Antigravity
+  nc-agents detect | refresh   AIs present but not hooked up yet / bring the hooked-up ones to the current format
+  nc-agents write SESSION TEXT   writes to the agent of that session (typed into its kitty terminal, then Enter)
+  nc-agents goto PID [SHELL]     goes to that terminal (and, in kitty, to that shell's tab)
+Claude's notifications (done, waiting for you): sent by nc-agents instead of its own; a click brings you back to
+its terminal, and they go away on their own when you go back there or it starts again.
+  nc-agents diag        checks that everything is in place (Claude Code and Antigravity), with the last events received
+Requests show in the island only when you are not on Claude's terminal; if you go back to it, the question goes
+back to the terminal. Without the island (or nc-settings → AI agents), nothing changes: Claude never waits.
+State: $XDG_RUNTIME_DIR/nc-claude/etat.json (read by the island); island answers: …/nc-claude/reponses/ID.
+"""
+
 HOME = os.path.expanduser("~")
 # Antigravity lance ses hooks avec un environnement réduit : dossier d'exécution et Hyprland retrouvés à la main
 if not os.environ.get("XDG_RUNTIME_DIR") and os.path.isdir(f"/run/user/{os.getuid()}"):
@@ -94,8 +146,11 @@ def court(t, n=70):
     return t if len(t) <= n else t[:n - 1] + "…"
 
 
+UN_FICHIER = T("un fichier", "a file")
+
+
 def nom_fichier(p):
-    return os.path.basename(str(p or "")) or "un fichier"
+    return os.path.basename(str(p or "")) or UN_FICHIER
 
 
 def etape(outil, e):
@@ -104,31 +159,31 @@ def etape(outil, e):
     if outil == "Bash":
         # Sans description : la commande, sans le « cd dossier && » du début (peu parlant)
         cmd = re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", str(e.get("command") or ""))
-        return "terminal", "Lance : " + court(e.get("description") or cmd, 60)
+        return "terminal", T("Lance : ", "Runs: ") + court(e.get("description") or cmd, 60)
     if outil in ("Edit", "MultiEdit"):
-        return "edit", "Modifie " + nom_fichier(e.get("file_path"))
+        return "edit", T("Modifie ", "Edits ") + nom_fichier(e.get("file_path"))
     if outil == "Write":
-        return "edit_document", "Écrit " + nom_fichier(e.get("file_path"))
+        return "edit_document", T("Écrit ", "Writes ") + nom_fichier(e.get("file_path"))
     if outil == "Read":
-        return "description", "Lit " + nom_fichier(e.get("file_path"))
+        return "description", T("Lit ", "Reads ") + nom_fichier(e.get("file_path"))
     if outil == "NotebookEdit":
-        return "edit", "Modifie " + nom_fichier(e.get("notebook_path"))
+        return "edit", T("Modifie ", "Edits ") + nom_fichier(e.get("notebook_path"))
     if outil == "Grep":
-        return "search", "Cherche « " + court(e.get("pattern"), 30) + " »"
+        return "search", T("Cherche « " + court(e.get("pattern"), 30) + " »", "Searches “" + court(e.get("pattern"), 30) + "”")
     if outil == "Glob":
-        return "search", "Cherche des fichiers"
+        return "search", T("Cherche des fichiers", "Looks for files")
     if outil == "WebFetch":
-        return "public", "Lit une page web"
+        return "public", T("Lit une page web", "Reads a web page")
     if outil == "WebSearch":
-        return "travel_explore", "Cherche sur le web : " + court(e.get("query"), 40)
+        return "travel_explore", T("Cherche sur le web : ", "Searches the web: ") + court(e.get("query"), 40)
     if outil in ("Task", "Agent"):
-        return "smart_toy", "Lance un agent : " + court(e.get("description"), 40)
+        return "smart_toy", T("Lance un agent : ", "Starts an agent: ") + court(e.get("description"), 40)
     if outil == "TodoWrite":
-        return "checklist", "Met à jour sa liste"
+        return "checklist", T("Met à jour sa liste", "Updates its to-do list")
     if outil == "AskUserQuestion":
-        return "help", "Te pose une question"
+        return "help", T("Te pose une question", "Asks you a question")
     if outil.startswith("mcp__"):
-        return "extension", "Utilise " + outil.split("__")[1].replace("_", " ")
+        return "extension", T("Utilise ", "Uses ") + outil.split("__")[1].replace("_", " ")
     return "build", court(outil, 40)
 
 
@@ -152,16 +207,18 @@ def diff(outil, e):
 def demande_texte(outil, e):
     e = e or {}
     if outil == "Bash":
-        return "Veut lancer une commande", court(e.get("command"), 160)
+        return T("Veut lancer une commande", "Wants to run a command"), court(e.get("command"), 160)
     if outil in ("Edit", "MultiEdit", "NotebookEdit"):
-        return "Veut modifier un fichier", str(e.get("file_path") or e.get("notebook_path") or "").replace(HOME, "~")
+        return (T("Veut modifier un fichier", "Wants to edit a file"),
+                str(e.get("file_path") or e.get("notebook_path") or "").replace(HOME, "~"))
     if outil == "Write":
-        return "Veut écrire un fichier", str(e.get("file_path") or "").replace(HOME, "~")
+        return T("Veut écrire un fichier", "Wants to write a file"), str(e.get("file_path") or "").replace(HOME, "~")
     if outil == "WebFetch":
-        return "Veut lire une page web", court(e.get("url"), 160)
+        return T("Veut lire une page web", "Wants to read a web page"), court(e.get("url"), 160)
     if outil.startswith("mcp__"):
-        return "Veut utiliser " + outil.split("__")[1].replace("_", " "), court(json.dumps(e, ensure_ascii=False), 160)
-    return "Veut utiliser " + outil, court(json.dumps(e, ensure_ascii=False), 160)
+        return (T("Veut utiliser ", "Wants to use ") + outil.split("__")[1].replace("_", " "),
+                court(json.dumps(e, ensure_ascii=False), 160))
+    return T("Veut utiliser ", "Wants to use ") + outil, court(json.dumps(e, ensure_ascii=False), 160)
 
 
 # ── Le terminal de la session ────────────────────────────────────────────────────────────────────────────────────
@@ -334,7 +391,9 @@ def demande(ev, genre, ia="claude"):
         repondre({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
     elif r == "non":
         repondre({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
-                                         "decision": {"behavior": "deny", "message": "Refusé depuis l'île dynamique"}}})
+                                         "decision": {"behavior": "deny",
+                                                      "message": T("Refusé depuis l'île dynamique",
+                                                                   "Denied from the dynamic island")}}})
 
 
 def hook():
@@ -363,7 +422,7 @@ def hook():
             s["etat"] = "pret"
         elif nom == "UserPromptSubmit":
             s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
-            ajouter_etape(s, "neurology", "Réfléchit…")
+            ajouter_etape(s, "neurology", T("Réfléchit…", "Thinking…"))
         elif nom == "PreToolUse" and not ev.get("agent_id"):
             if s.get("etat") not in ("demande",):
                 s["etat"] = "travail"
@@ -382,17 +441,20 @@ def hook():
             if t == "idle_prompt":
                 s["etat"] = "attente"
                 if not notif_ouverte(d, s["id"]):
-                    notifier(s, "Claude t'attend", s["projet"] + " : à toi de répondre")
+                    notifier(s, T("Claude t'attend", "Claude is waiting for you"),
+                             s["projet"] + T(" : à toi de répondre", ": your turn to answer"))
             elif t == "permission_prompt" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
                 s["etat"] = "terminal"         # Claude attend une réponse dans le terminal
-                notifier(s, "Claude demande ton accord", s["projet"] + " : " + court(ev.get("message"), 120))
+                notifier(s, T("Claude demande ton accord", "Claude needs your approval"),
+                         s["projet"] + T(" : ", ": ") + court(ev.get("message"), 120))
             elif t in ("agent_needs_input", "elicitation_dialog"):
-                notifier(s, "Claude t'attend", s["projet"] + " : " + court(ev.get("message"), 120))
+                notifier(s, T("Claude t'attend", "Claude is waiting for you"),
+                         s["projet"] + T(" : ", ": ") + court(ev.get("message"), 120))
         elif nom == "Stop":
             s["etat"] = "fini"
             s["fin"] = time.time()
             s["message"] = court(ev.get("last_assistant_message"), 160)
-            notifier(s, "Claude a terminé", s["projet"] + (" : " + s["message"] if s["message"] else ""))
+            notifier(s, T("Claude a terminé", "Claude is done"), s["projet"] + (T(" : ", ": ") + s["message"] if s["message"] else ""))
 
 
 # ── Notifications : les nôtres à la place de celles de Claude ─────────────────────────────────────────────────────────
@@ -425,7 +487,7 @@ def notification(sid, titre, texte):
         d.setdefault("notifs", {})[sid] = moi          # une seule par session : la précédente se ferme d'elle-même
         term, shell = s.get("terminal") or 0, s.get("shell") or 0
         icone = (s.get("classe") or "utilities-terminal").lower()
-    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", "default=Ouvrir", titre, texte],
+    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", "default=" + T("Ouvrir", "Open"), titre, texte],
                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nid = p.stdout.readline().strip()
     debut = time.time()
@@ -506,35 +568,37 @@ def etape_generique(outil, e):
         c = arg(e, "command", "CommandLine", "cmd")
         c = " ".join(map(str, c)) if isinstance(c, list) else str(c)
         c = re.sub(r"^(bash|sh|zsh) -l?c ", "", c)
-        return "terminal", "Lance : " + court(re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", c), 60)
+        return "terminal", T("Lance : ", "Runs: ") + court(re.sub(r"^\s*cd\s+\S+\s*(&&|;)\s*", "", c), 60)
     if o in MODIF:
         m = re.search(r"\*\*\* (?:Update|Add) File: (\S+)", str(arg(e, "command", "patch", "input")))   # apply_patch (Codex)
-        f = nom_fichier(m.group(1)) if m and f == "un fichier" else f
-        return "edit", "Modifie " + f if f != "un fichier" else "Modifie des fichiers"
+        f = nom_fichier(m.group(1)) if m and f == UN_FICHIER else f
+        return "edit", T("Modifie ", "Edits ") + f if f != UN_FICHIER else T("Modifie des fichiers", "Edits files")
     if o == "delete":
-        return "delete", "Supprime " + f
+        return "delete", T("Supprime ", "Deletes ") + f
     if o in ECRIT:
-        return "edit_document", "Écrit " + f
+        return "edit_document", T("Écrit ", "Writes ") + f
     if o in LIT:
-        return "description", "Lit " + f
+        return "description", T("Lit ", "Reads ") + f
     if o in GREP:
-        return "search", "Cherche « " + court(arg(e, "pattern", "query", "Query", "Pattern"), 30) + " »"
+        motif = court(arg(e, "pattern", "query", "Query", "Pattern"), 30)
+        return "search", T("Cherche « " + motif + " »", "Searches “" + motif + "”")
     if o in TROUVE:
-        return "search", "Cherche des fichiers"
+        return "search", T("Cherche des fichiers", "Looks for files")
     if o in LISTE:
-        return "folder_open", "Parcourt " + nom_fichier(arg(e, "DirectoryPath", "dir_path", "path"))
+        return "folder_open", T("Parcourt ", "Browses ") + nom_fichier(arg(e, "DirectoryPath", "dir_path", "path"))
     if o in PAGE:
-        return "public", "Lit une page web"
+        return "public", T("Lit une page web", "Reads a web page")
     if o in WEB:
-        return "travel_explore", "Cherche sur le web : " + court(arg(e, "query", "Query"), 40)
+        return "travel_explore", T("Cherche sur le web : ", "Searches the web: ") + court(arg(e, "query", "Query"), 40)
     if o in AGENT:
-        return "smart_toy", "Lance un agent" + (" : " + court(arg(e, "description"), 40) if arg(e, "description") else "")
+        return "smart_toy", (T("Lance un agent", "Starts an agent")
+                             + (T(" : ", ": ") + court(arg(e, "description"), 40) if arg(e, "description") else ""))
     if o in TODO:
-        return "checklist", "Met à jour sa liste"
+        return "checklist", T("Met à jour sa liste", "Updates its to-do list")
     if o.startswith("browser_"):
-        return "public", "Utilise le navigateur"
+        return "public", T("Utilise le navigateur", "Uses the browser")
     if o.startswith("mcp__") or "__" in o:
-        return "extension", "Utilise " + o.split("__")[1 if o.startswith("mcp__") else 0].replace("_", " ")
+        return "extension", T("Utilise ", "Uses ") + o.split("__")[1 if o.startswith("mcp__") else 0].replace("_", " ")
     return "build", court(str(outil).replace("_", " "), 40)
 
 
@@ -600,7 +664,7 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="")
         reperer_terminal(s)
         if quoi == "debut" or (quoi == "etape" and s.get("etat") in ("pret", "fini", "attente")):
             s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
-            ajouter_etape(s, "neurology", "Réfléchit…")
+            ajouter_etape(s, "neurology", T("Réfléchit…", "Thinking…"))
         if quoi == "etape" and outil:
             s["etat"] = "travail"
             ajouter_etape(s, *etape_generique(outil, args))
@@ -663,7 +727,8 @@ def lire_json(chemin):
     except FileNotFoundError:
         return {}
     except ValueError:
-        sys.exit(f"nc-claude : {chemin} n'est pas un JSON valide : rien n'a été changé.")
+        sys.exit(T(f"nc-claude : {chemin} n'est pas un JSON valide : rien n'a été changé.",
+                   f"nc-agents: {chemin} is not valid JSON: nothing was changed."))
 
 
 def ecrire_json(chemin, cfg):
@@ -882,10 +947,13 @@ def installer_ia(ia, bavard=True):
             hooks.setdefault(ev, []).append(g)
         ecrire_json(f, cfg)
     if bavard:
-        print(f"{NOMS[ia]} s'affiche maintenant dans l'île ({f.replace(HOME, '~')}).")
+        print(T(f"{NOMS[ia]} s'affiche maintenant dans l'île ({f.replace(HOME, '~')}).",
+                f"{NOMS[ia]} now shows in the island ({f.replace(HOME, '~')})."))
         if ia == "codex":
-            print("Codex demande d'approuver ses nouveaux hooks : ouvre-le et tape /hooks une fois.")
-        print(f"Relance {NOMS[ia]} s'il est ouvert. Pour vérifier : nc-claude diag ; pour l'enlever : nc-claude retirer {ia}")
+            print(T("Codex demande d'approuver ses nouveaux hooks : ouvre-le et tape /hooks une fois.",
+                    "Codex asks you to approve its new hooks: open it and type /hooks once."))
+        print(T(f"Relance {NOMS[ia]} s'il est ouvert. Pour vérifier : nc-claude diag ; pour l'enlever : nc-claude retirer {ia}",
+                f"Restart {NOMS[ia]} if it is open. To check: nc-agents diag; to remove it: nc-agents remove {ia}"))
 
 
 def retirer_ia(ia):
@@ -899,7 +967,7 @@ def retirer_ia(ia):
             os.remove(f)                       # fichier à nous
         else:
             ecrire_json(f, nettoyer(lire_json(f), f" ia {ia} "))
-    print(f"{NOMS[ia]} retiré de l'île.")
+    print(T(f"{NOMS[ia]} retiré de l'île.", f"{NOMS[ia]} removed from the island."))
     with Etat() as d:
         for sid in [x for x in d["sessions"] if x.startswith(ia + "-")]:
             del d["sessions"][sid]
@@ -980,7 +1048,8 @@ def lire_settings():
     except FileNotFoundError:
         return {}
     except ValueError:
-        sys.exit(f"nc-claude : {SETTINGS} n'est pas un JSON valide : rien n'a été changé.")
+        sys.exit(T(f"nc-claude : {SETTINGS} n'est pas un JSON valide : rien n'a été changé.",
+                   f"nc-agents: {SETTINGS} is not valid JSON: nothing was changed."))
 
 
 def ecrire_settings(cfg):
@@ -1015,32 +1084,38 @@ def installer(bavard=True):
         ecrire_settings(cfg)
     if not bavard:
         return
-    print(f"Claude Code s'affiche maintenant dans l'île (hooks ajoutés à {SETTINGS.replace(HOME, '~')}).")
-    print("Les sessions de Claude déjà ouvertes le prennent en compte d'elles-mêmes (sinon : relance claude).")
-    print("Pour l'enlever : nc-claude retirer")
+    print(T(f"Claude Code s'affiche maintenant dans l'île (hooks ajoutés à {SETTINGS.replace(HOME, '~')}).",
+            f"Claude Code now shows in the island (hooks added to {SETTINGS.replace(HOME, '~')})."))
+    print(T("Les sessions de Claude déjà ouvertes le prennent en compte d'elles-mêmes (sinon : relance claude).",
+            "Claude sessions already open pick it up on their own (otherwise: restart claude)."))
+    print(T("Pour l'enlever : nc-claude retirer", "To remove it: nc-agents remove"))
 
 
 def retirer():
     if not os.path.exists(SETTINGS):
-        print("Rien à retirer.")
+        print(T("Rien à retirer.", "Nothing to remove."))
         return
     cfg = retirer_de(lire_settings())
     if cfg.get("preferredNotifChannel") == "notifications_disabled":
         del cfg["preferredNotifChannel"]           # ses propres notifications reviennent
     ecrire_settings(cfg)
-    print("Hooks de l'île retirés de " + SETTINGS.replace(HOME, "~") + ".")
+    print(T("Hooks de l'île retirés de ", "Island hooks removed from ") + SETTINGS.replace(HOME, "~") + ".")
 
 
 def montrer():
     try:
         d = json.load(open(ETAT, encoding="utf-8"))
     except (OSError, ValueError):
-        print("Aucune session de Claude Code suivie.")
+        print(T("Aucune session de Claude Code suivie.", "No Claude Code session tracked."))
         return
+    # États (valeurs internes, lues par l'île) : affichés en anglais en mode anglais
+    etats = {"travail": "working", "fini": "done", "attente": "waiting", "demande": "request", "terminal": "terminal",
+             "pret": "ready"} if EN else {}
     for s in d.get("sessions", {}).values():
-        print(f"{s.get('projet')}  [{s.get('etat')}]  {s.get('etape', '')}  +{s.get('ajouts', 0)} −{s.get('retraits', 0)}")
+        etat = etats.get(s.get("etat"), s.get("etat"))
+        print(f"{s.get('projet')}  [{etat}]  {s.get('etape', '')}  +{s.get('ajouts', 0)} −{s.get('retraits', 0)}")
     for x in d.get("demandes", {}).values():
-        print(f"  demande : {x.get('titre')} {x.get('detail', '')}")
+        print(T("  demande : ", "  request: ") + f"{x.get('titre')} {x.get('detail', '')}")
 
 
 def ecrire(sid, texte):
@@ -1049,28 +1124,29 @@ def ecrire(sid, texte):
     try:
         s = json.load(open(ETAT, encoding="utf-8"))["sessions"][sid]
     except (OSError, ValueError, KeyError):
-        sys.exit("nc-claude : session inconnue.")
+        sys.exit(T("nc-claude : session inconnue.", "nc-agents: unknown session."))
     sock = socket_kitty(s.get("terminal"))
     if texte and s.get("agent") == "opencode" and not (sock and s.get("shell")) and shutil.which("opencode"):
         # OpenCode 2 tourne en service de fond : le message part dans la session par sa propre commande
         subprocess.Popen(["opencode", "run", "--session", sid.split("-", 1)[1], texte], cwd=os.path.expanduser(s.get("cwd") or "~"),
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     elif not texte or not sock or not s.get("shell"):
-        sys.exit("nc-claude : on ne peut écrire qu'à un agent lancé dans kitty.")
+        sys.exit(T("nc-claude : on ne peut écrire qu'à un agent lancé dans kitty.",
+                   "nc-agents: you can only write to an agent started in kitty."))
     else:
         envoyer_kitty(sock, s["shell"], texte)
     with Etat() as d:
         x = d["sessions"].get(sid)
         if x:
             x.update(etat="travail", maj=time.time())
-            ajouter_etape(x, "chat", "Toi : " + court(texte, 50))
+            ajouter_etape(x, "chat", T("Toi : ", "You: ") + court(texte, 50))
 
 
 def envoyer_kitty(sock, shell, texte):
     base = ["kitty", "@", "--to", "unix:" + sock, "send-text", "--match", f"pid:{shell}"]
     r = subprocess.run(base + ["--bracketed-paste", "auto", "--stdin"], input=texte, text=True, capture_output=True, timeout=5)
     if r.returncode:
-        sys.exit("nc-claude : " + (r.stderr.strip() or "kitty n'a pas accepté le texte"))
+        sys.exit(T("nc-claude : ", "nc-agents: ") + (r.stderr.strip() or T("kitty n'a pas accepté le texte", "kitty did not accept the text")))
     time.sleep(0.2)                            # Entrée à part : sinon prise pour un retour à la ligne du texte collé
     subprocess.run(base + ["--stdin"], input="\r", text=True, capture_output=True, timeout=5)
 
@@ -1079,34 +1155,41 @@ def diag():
     """Ce qui est en place, en clair : à envoyer si l'île ne montre rien."""
     def ligne(ok, texte):
         print(("  ✓ " if ok else "  ✗ ") + texte)
-    ligne(ile_active(), "île (nc-ile.service) " + ("active" if ile_active() else "arrêtée : systemctl --user start nc-ile"))
+    ligne(ile_active(), T("île (nc-ile.service) ", "island (nc-ile.service) ")
+          + (T("active", "running") if ile_active() else T("arrêtée : systemctl --user start nc-ile",
+                                                             "stopped: systemctl --user start nc-ile")))
     try:
         cc = "nc-claude hook" in open(SETTINGS, encoding="utf-8").read()
     except OSError:
         cc = False
     if cc or os.path.isdir(os.path.join(HOME, ".claude")):
         ligne(cc and reglage("CLAUDE_ILE", "oui") != "non",
-              "Claude Code : " + ("branché" if cc else "pas branché (nc-claude installer)")
-              + (" — coupé dans nc-reglages" if reglage("CLAUDE_ILE", "oui") == "non" else ""))
+              T("Claude Code : ", "Claude Code: ") + (T("branché", "hooked up") if cc else T("pas branché (nc-claude installer)",
+                                                                                         "not hooked up (nc-agents install)"))
+              + (T(" — coupé dans nc-reglages", " — turned off in nc-settings") if reglage("CLAUDE_ILE", "oui") == "non" else ""))
     for ia in IAS:
         if not present(ia) and not installe(ia):
             continue
         ok = installe(ia)
         ligne(ok and reglage(ia.upper() + "_ILE", "oui") != "non",
-              f"{NOMS[ia]} : " + (f"branché ({FICHIERS[ia]})" if ok else f"pas branché (nc-claude installer {ia})")
-              + (" — coupé dans nc-reglages" if reglage(ia.upper() + "_ILE", "oui") == "non" else ""))
+              T(f"{NOMS[ia]} : ", f"{NOMS[ia]}: ") + (T(f"branché ({FICHIERS[ia]})", f"hooked up ({FICHIERS[ia]})") if ok
+                                                       else T(f"pas branché (nc-claude installer {ia})", f"not hooked up (nc-agents install {ia})"))
+              + (T(" — coupé dans nc-reglages", " — turned off in nc-settings") if reglage(ia.upper() + "_ILE", "oui") == "non" else ""))
         if ia == "antigravity" and ok:
-            print("      agy lancé avec --dangerously-skip-permissions : selon sa version, ses hooks ne tournent pas")
+            print(T("      agy lancé avec --dangerously-skip-permissions : selon sa version, ses hooks ne tournent pas",
+                    "      agy started with --dangerously-skip-permissions: depending on its version, its hooks do not run"))
         if ia == "codex" and ok:
-            print("      Codex : ses hooks doivent être approuvés une fois (/hooks dans Codex)")
+            print(T("      Codex : ses hooks doivent être approuvés une fois (/hooks dans Codex)",
+                    "      Codex: its hooks must be approved once (/hooks in Codex)"))
     try:
         l = open(JOURNAL, encoding="utf-8").read().splitlines()
-        print(f"Derniers événements reçus des IA ({len(l)}) :")
+        print(T(f"Derniers événements reçus des IA ({len(l)}) :", f"Last events received from the AIs ({len(l)}):"))
         for x in l[-10:]:
             print("  " + x)
     except OSError:
-        print("Aucun événement reçu d'une IA (hors Claude) : relance-la après l'installation, puis donne-lui une demande.")
-    print("Sessions suivies :")
+        print(T("Aucun événement reçu d'une IA (hors Claude) : relance-la après l'installation, puis donne-lui une demande.",
+                "No event received from an AI (other than Claude): restart it after installing, then give it a request."))
+    print(T("Sessions suivies :", "Tracked sessions:"))
     montrer()
 
 
@@ -1114,8 +1197,14 @@ def main():
     a = sys.argv[1:]
     if os.environ.get("NC_ILE_SANS") and a and a[0] in ("hook", "agy", "ia"):
         return                                 # question rapide du Spotlight (nc-demander) : pas une session à suivre
+    # Sous-commandes anglaises (nc-agents install…) : ramenées aux françaises
+    if a:
+        a[0] = {"install": "installer", "remove": "retirer", "detect": "detecter", "refresh": "actualiser",
+                "write": "ecrire", "goto": "aller", "state": "etat", "status": "etat"}.get(a[0], a[0])
+    if a[0:1] in (["installer"], ["retirer"]) and len(a) > 1 and a[1] == "all":
+        a[1] = "tout"
     if not a:
-        print(__doc__.strip())
+        print(T(__doc__, DOC_EN).strip())
     elif a[0] == "hook":
         try:
             hook()
@@ -1141,7 +1230,8 @@ def main():
         elif quoi == "claude":
             installer() if a[0] == "installer" else retirer()
         else:
-            sys.exit("nc-claude : IA inconnue. Au choix : claude, " + ", ".join(IAS) + ", tout")
+            sys.exit(T("nc-claude : IA inconnue. Au choix : claude, " + ", ".join(IAS) + ", tout",
+                       "nc-agents: unknown AI. Choose from: claude, " + ", ".join(IAS) + ", all"))
     elif a[0] == "detecter":
         # IA présentes, pas encore branchées, pas refusées (pour install.sh)
         print(" ".join(ia for ia in IAS if present(ia) and not installe(ia) and reglage(ia.upper() + "_ILE", "oui") != "non"))
@@ -1166,7 +1256,7 @@ def main():
     elif a[0] == "aller" and len(a) >= 2:
         aller(a[1], a[2] if len(a) > 2 else 0)
     else:
-        print(__doc__.strip())
+        print(T(__doc__, DOC_EN).strip())
 
 
 if __name__ == "__main__":

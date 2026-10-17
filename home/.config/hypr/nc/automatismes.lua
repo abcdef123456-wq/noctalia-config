@@ -122,7 +122,8 @@ local function fenetre(adr)
 end
 
 local function notifier(titre, texte)
-    hl.exec_cmd(string.format("notify-send -a Fenêtres -t 1800 %q %q", titre, texte))
+    hl.exec_cmd(string.format("notify-send -a %s -t 1800 %s %s", nc.guillemets(nc.t("Fenêtres", "Windows")),
+        nc.guillemets(titre), nc.guillemets(texte)))
 end
 
 local function attacher(n)
@@ -131,7 +132,8 @@ local function attacher(n)
     local m = marques()
     m[n] = w.address
     sauver(m)
-    notifier("Marque-page " .. n, (w.class or "") .. " — Super + Ctrl + " .. n .. " pour y revenir")
+    notifier(nc.t("Marque-page ", "Bookmark ") .. n, (w.class or "")
+        .. nc.t(" — Super + Ctrl + " .. n .. " pour y revenir", " — Super + Ctrl + " .. n .. " to come back to it"))
 end
 
 local function rappeler(n)
@@ -151,9 +153,11 @@ nc.attacher, nc.rappeler = attacher, rappeler   -- aussi pour hyprctl eval / tes
 for n = 1, 4 do
     local code = 9 + n
     hl.bind("SUPER + CTRL + code:" .. code, function() rappeler(n) end,
-        { description = "Fenêtres|Marque-pages : attacher, puis rappeler la fenêtre (1…4)" })
+        { description = "Fenêtres|" .. nc.t("Marque-pages : attacher, puis rappeler la fenêtre (1…4)",
+            "Bookmarks: attach, then recall the window (1…4)") })
     hl.bind("SUPER + CTRL + SHIFT + code:" .. code, function() attacher(n) end,
-        { description = "Fenêtres|Marque-pages : rattacher la fenêtre active (1…4)" })
+        { description = "Fenêtres|" .. nc.t("Marque-pages : rattacher la fenêtre active (1…4)",
+            "Bookmarks: reattach the active window (1…4)") })
 end
 
 -- ── Mémoire des fenêtres flottantes ─────────────────────────────────────────
@@ -230,8 +234,11 @@ local function rapport_quickshell(w)
     if not w or w.class ~= "org.quickshell" or rapports_vus[w.address] then return end
     rapports_vus[w.address] = true
     -- Fermée un instant après son ouverture (tout de suite, la demande arrivait trop tôt et était ignorée)
-    hl.exec_cmd("sleep 0.4; hyprctl dispatch \"hl.dsp.window.close({ window = 'address:" .. w.address .. "' })\"; notify-send -a 'Île dynamique' -i dialog-warning 'L’île a redémarré' "
-        .. "'Quickshell a planté (souvent un souci de son) et s’est relancé tout seul. Détails : nc-diag rapport'")
+    local q = nc.guillemets
+    hl.exec_cmd("sleep 0.4; hyprctl dispatch \"hl.dsp.window.close({ window = 'address:" .. w.address .. "' })\"; notify-send -a "
+        .. q(nc.t("Île dynamique", "Dynamic Island")) .. " -i dialog-warning " .. q(nc.t("L’île a redémarré", "The island restarted")) .. " "
+        .. q(nc.t("Quickshell a planté (souvent un souci de son) et s’est relancé tout seul. Détails : nc-diag rapport",
+            "Quickshell crashed (often an audio glitch) and restarted on its own. Details: nc-diag report")))
 end
 hl.on("window.open", rapport_quickshell)
 hl.on("window.class", rapport_quickshell)

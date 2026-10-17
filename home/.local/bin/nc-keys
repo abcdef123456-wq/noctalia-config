@@ -8,12 +8,51 @@ Seuls les raccourcis qui ont une description apparaissent. Dans ~/.config/hypr/,
 Les touches sont nommées comme sur la disposition US (les raccourcis suivent la position des touches).
 """
 import json
+import os
 import re
 import subprocess
 import sys
 
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-keys: your Hyprland shortcuts, read live (hyprctl binds), with their description.
+
+  nc-keys          readable list in the terminal
+  nc-keys json     JSON for the Super + / cheat sheet (Noctalia v5 plugin nc/keys)
+Only shortcuts that have a description are shown. In ~/.config/hypr/, a description is written
+"Section|Text"; without a section, the shortcut goes to "My Shortcuts" (see also nc-shortcut). Example: hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Apps & Bar|Browser" })
+Keys are named as on the US layout (shortcuts follow the position of the keys)."""
+
 KEYCODES = {
-    9: "Échap", 22: "Retour arrière", 23: "Tab", 36: "Entrée", 49: "`", 65: "Espace", 61: "/",
+    9: T("Échap", "Esc"), 22: T("Retour arrière", "Backspace"), 23: "Tab", 36: T("Entrée", "Enter"), 49: "`",
+    65: T("Espace", "Space"), 61: "/",
     59: ",", 60: ".", 20: "-", 21: "=", 34: "[", 35: "]", 47: ";", 48: "'", 51: "\\",
     111: "↑", 113: "←", 114: "→", 116: "↓",
 }
@@ -26,9 +65,32 @@ for i in range(10):
     KEYCODES[67 + i] = f"F{i + 1}"
 KEYCODES[95], KEYCODES[96] = "F11", "F12"
 
-MODS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Maj"))
-MOUSE = {"mouse:272": "glisser", "mouse:273": "clic droit", "mouse_down": "molette", "mouse_up": "molette"}
+MODS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, T("Maj", "Shift")))
+MOUSE = {"mouse:272": T("glisser", "drag"), "mouse:273": T("clic droit", "right-click"), "mouse_down": T("molette", "scroll"),
+         "mouse_up": T("molette", "scroll")}
+# Sections de la fiche : les noms français servent d'identifiants (nc-reglages, plugin nc/keys) ; une description
+# peut aussi commencer par le nom anglais (« Apps & Bar|… »), rangée dans la même section
 SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "Mes raccourcis"]
+SECTIONS_EN = {"Applis et barre": "Apps & Bar", "Fenêtres": "Windows", "Bureaux": "Desktops", "Souris": "Mouse",
+               "Système": "System", "Mes raccourcis": "My Shortcuts"}
+_ALIAS = {"apps and bar": "Applis et barre", "apps": "Applis et barre", "workspaces": "Bureaux", "spaces": "Bureaux"}
+
+
+def section_id(nom):
+    """Nom de section d'une description (français ou anglais) -> identifiant (nom français), ou None."""
+    nom = nom.strip()
+    if nom in SECTIONS:
+        return nom
+    bas = nom.lower()
+    for fr, en in SECTIONS_EN.items():
+        if bas in (fr.lower(), en.lower()):
+            return fr
+    return _ALIAS.get(bas)
+
+
+def section_label(sec):
+    """Titre affiché d'une section (en anglais en mode anglais)."""
+    return SECTIONS_EN.get(sec, sec) if EN else sec
 
 
 def parse_binds(text):
@@ -49,13 +111,13 @@ def key_label(raw):
     last = raw.split("+")[-1].strip()
     m = re.fullmatch(r"code:(\d+)", last)
     if m:
-        return KEYCODES.get(int(m.group(1)), f"touche {m.group(1)}")
+        return KEYCODES.get(int(m.group(1)), T(f"touche {m.group(1)}", f"key {m.group(1)}"))
     if last.startswith("XF86"):
-        return "Touches média"
+        return T("Touches média", "Media keys")
     if last in MOUSE:
         return MOUSE[last]
     if last == "Print":
-        return "Impr. écran"
+        return T("Impr. écran", "Print Screen")
     return KEYCODES.get(last, last.capitalize() if len(last) > 1 else last.upper())
 
 
@@ -69,9 +131,7 @@ def collect():
         sec, sep, text = desc.partition("|")
         if not sep:
             sec, text = "Mes raccourcis", desc
-        sec, text = sec.strip(), text.strip()
-        if sec not in SECTIONS:
-            sec = "Mes raccourcis"
+        sec, text = section_id(sec) or "Mes raccourcis", text.strip()
         try:
             mask = int(b.get("modmask", "0"))
         except ValueError:
@@ -86,7 +146,7 @@ def collect():
     for (sec, text, mods), v in sorted(rows.items(), key=lambda kv: kv[1]["order"]):
         keys = v["keys"]
         if set(keys) >= {"←", "→", "↑", "↓"}:
-            key = "flèches"
+            key = T("flèches", "arrows")
         elif len(keys) >= 3 and all(re.fullmatch(r"F\d+", x) for x in keys):
             key = f"{keys[0]}…{keys[-1]}"
         elif len(keys) >= 3 and all(x.isdigit() for x in keys):
@@ -97,16 +157,20 @@ def collect():
     # Bascule de disposition du clavier (option XKB, pas un raccourci « bind »)
     opts = subprocess.run(["hyprctl", "getoption", "input:kb_options"], capture_output=True, text=True).stdout
     if "grp:win_space_toggle" in opts:
-        by_sec["Système"].append({"keys": ["Super", "Espace"], "text": "Changer la disposition du clavier"})
-    return [{"title": s, "rows": by_sec[s]} for s in SECTIONS if by_sec[s]]
+        by_sec["Système"].append({"keys": ["Super", T("Espace", "Space")],
+                                  "text": T("Changer la disposition du clavier", "Switch keyboard layout")})
+    # title : identifiant de la section (nom français, que le plugin nc/keys range en colonnes) ; label : titre affiché
+    return [{"title": s, "label": section_label(s), "rows": by_sec[s]} for s in SECTIONS if by_sec[s]]
 
 
 if __name__ == "__main__":
     data = collect()
-    if len(sys.argv) > 1 and sys.argv[1] == "json":
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
+        print(T(__doc__.strip(), USAGE_EN))
+    elif len(sys.argv) > 1 and sys.argv[1] == "json":
         json.dump(data, sys.stdout, ensure_ascii=False)
     else:
         for sec in data:
-            print(f"\n{sec['title']}")
+            print(f"\n{sec['label']}")
             for r in sec["rows"]:
                 print(f"  {' + '.join(r['keys']):<28} {r['text']}")

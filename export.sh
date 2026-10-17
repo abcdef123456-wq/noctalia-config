@@ -9,6 +9,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO"
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 HOME_FILES=(
   .config/hypr/hyprland.lua
@@ -44,6 +45,7 @@ HOME_FILES=(
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-fenetre
+  .local/bin/nc-langue
   .local/bin/nc-meteo
   .local/bin/nc-video
   .local/bin/nc-fermer
@@ -102,7 +104,7 @@ HOME_FILES=(
 copy_list() { # copy_list DEST_PREFIX fichier...
   local dest="$1"; shift
   for rel in "$@"; do
-    [ -e "$HOME/$rel" ] || { echo "absent, ignoré : ~/$rel"; continue; }
+    [ -e "$HOME/$rel" ] || { echo "$(t "absent, ignoré : ~/$rel" "missing, skipped: ~/$rel")"; continue; }
     mkdir -p "$dest/$(dirname "$rel")"
     cp -a "$HOME/$rel" "$dest/$rel"
   done
@@ -147,13 +149,13 @@ sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_
 
 # Écran de verrouillage : positions de cet écran (en points) -> proportions de l'écran de la machine cible
 python3 -I - "$(hyprctl monitors -j 2>/dev/null | jq -r --arg m "$mon" '.[] | select(.name == $m) | "\(.width / .scale) \(.height / .scale)"')" <<'EOF'
-import re, sys
+import os, re, sys
 p = "home/.config/noctalia/config.toml"
 s = open(p).read()
 size = sys.argv[1].split() if len(sys.argv) > 1 else []
 lw, lh = (float(size[0]), float(size[1])) if len(size) == 2 else (1600.0, 1000.0)
 head, sep, tail = s.partition("[lockscreen_widgets]")
-assert sep, "section [lockscreen_widgets] introuvable"
+assert sep, "section [lockscreen_widgets] not found" if os.environ.get("NC_LANGUE") == "en" else "section [lockscreen_widgets] introuvable"
 sec, sep2, rest = tail.partition("\n[plugins]")
 marks = {0.30: "@LCY1@", 0.405: "@LCY2@", 0.64: "@LCY3@", 0.86: "@LCY4@", 0.93: "@LCY5@"}
 def y(m):
@@ -169,5 +171,5 @@ EOF
 user=$(id -un)
 bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY" home system 2>/dev/null || true)
 [ -n "$mon" ] && bad="$bad$(grep -rIl "\"$mon\"" home 2>/dev/null || true)"
-if [ -n "$bad" ]; then echo "ATTENTION : à vérifier avant de publier :" >&2; echo "$bad" >&2; exit 1; fi
-echo "Dépôt mis à jour depuis ce PC."
+if [ -n "$bad" ]; then echo "$(t "ATTENTION : à vérifier avant de publier :" "WARNING: check before publishing:")" >&2; echo "$bad" >&2; exit 1; fi
+echo "$(t "Dépôt mis à jour depuis ce PC." "Repository updated from this PC.")"

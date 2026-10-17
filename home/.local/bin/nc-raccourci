@@ -28,6 +28,55 @@ import subprocess
 import sys
 import unicodedata
 
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-shortcut: your keyboard shortcuts, without editing a file.
+
+  nc-shortcut                                     shortcuts screen (in nc-settings)
+  nc-shortcut list                                all shortcuts, and your changes
+  nc-shortcut add KEYS TARGET [NAME]              new shortcut. TARGET:
+        an app (firefox, discord…)                goes to its window if it is open, otherwise launches it
+        desktop N                                 goes to desktop N
+        island PAGE                               opens a page of the island (sound, network, bluetooth, system…)
+        any other command                         run as is
+  nc-shortcut remap OLD NEW                       moves a shortcut of the config to other keys
+  nc-shortcut disable KEYS                        disables a shortcut of the config
+  nc-shortcut restore KEYS | all                  undoes a change (or all of them)
+  nc-shortcut remove KEYS                         removes one of your shortcuts
+Examples: nc-shortcut add "Super+B" firefox · nc-shortcut remap "Super+Enter" "Super+T"
+
+Keys: Super, Ctrl, Alt, Shift, then a letter, a digit, F1…F12, Enter, Space, Tab, Esc, Print, Delete,
+left/right/up/down. Letters follow the active keyboard layout; digits, the top row.
+Everything is kept in ~/.config/nc/raccourcis.conf, which updates never touch; your shortcuts
+show up in the Super + / cheat sheet ("My Shortcuts" section). A combination already in use is refused."""
+
 CONF = os.path.expanduser("~/.config/nc/raccourcis.conf")
 PERSO = os.path.expanduser("~/.config/hypr/perso.lua")          # ancienne version : raccourcis dans perso.lua
 TAG = "-- nc-raccourci"
@@ -63,12 +112,12 @@ def parse_keys(text):
     """« Super+Maj+B » -> (texte Hyprland, masque, touche, codes possibles)."""
     parts = [p.strip() for p in text.replace(" ", "").split("+") if p.strip()]
     if not parts:
-        raise Refus("combinaison vide")
+        raise Refus(T("combinaison vide", "empty combination"))
     mods, mask = [], 0
     for p in parts[:-1]:
         m = MODS.get(p.lower())
         if not m:
-            raise Refus(f"modificateur inconnu : {p} (Super, Ctrl, Alt, Maj)")
+            raise Refus(T(f"modificateur inconnu : {p} (Super, Ctrl, Alt, Maj)", f"unknown modifier: {p} (Super, Ctrl, Alt, Shift)"))
         if m[0] not in mods:
             mods.append(m[0])
             mask |= m[1]
@@ -91,9 +140,10 @@ def parse_keys(text):
             codes = {CODES[key]}
             key = f"code:{CODES[key]}"
     else:
-        raise Refus(f"touche inconnue : {k}")
+        raise Refus(T(f"touche inconnue : {k}", f"unknown key: {k}"))
     if not mods and not key.startswith("F") and key != "Print":
-        raise Refus("ajoute au moins un modificateur (Super, Ctrl, Alt) : sinon la touche ne marcherait plus pour taper")
+        raise Refus(T("ajoute au moins un modificateur (Super, Ctrl, Alt) : sinon la touche ne marcherait plus pour taper",
+                      "add at least one modifier (Super, Ctrl, Alt): otherwise the key would no longer work for typing"))
     return " + ".join(mods + [key]), mask, key, codes
 
 
@@ -146,7 +196,7 @@ def human(ident_or_bind):
         last = ident_or_bind.split("+")[-1].strip()
     mods = [name for bit, name in nckeys.MODS if mask & bit]
     if last.lower().startswith("xf86"):
-        return "Touches média"
+        return T("Touches média", "Media keys")
     return " + ".join(mods + [nckeys.key_label(last)])
 
 
@@ -175,7 +225,7 @@ def find_live(mask, key, codes, ignore=None):
 
 def desc_text(desc):
     sec, sep, text = desc.partition("|")
-    return (text if sep else desc).strip() or "un raccourci sans nom"
+    return (text if sep else desc).strip() or T("un raccourci sans nom", "an unnamed shortcut")
 
 
 # ── Fichier des changements ─────────────────────────────────────────────────────────────────────────────────────
@@ -204,7 +254,7 @@ def reload_or_rollback(old_entries):
     if err and err != "ok":
         write_conf(old_entries)
         subprocess.run(["hyprctl", "reload"], capture_output=True)
-        raise Refus("Hyprland a refusé ce changement, rien n'a été modifié :\n" + err)
+        raise Refus(T("Hyprland a refusé ce changement, rien n'a été modifié :\n", "Hyprland refused this change, nothing was modified:\n") + err)
 
 
 def original_id(live_id, entries):
@@ -266,12 +316,14 @@ def describe(e):
     """Ligne lisible d'un changement : (touches, texte)."""
     if e[0] == "change":
         nom = e[3] if len(e) > 3 else ""
-        return human(e[2]), f"{nom or 'raccourci de la config'}  {D}(au lieu de {human(e[1])}){N}"
+        return human(e[2]), (f"{nom or T('raccourci de la config', 'config shortcut')}  "
+                             f"{D}{T('(au lieu de ', '(instead of ')}{human(e[1])}){N}")
     if e[0] == "aucun":
         nom = e[2] if len(e) > 2 else ""
-        return human(e[1]), f"{nom or 'raccourci de la config'}  {D}(désactivé){N}"
-    t = {"appli": "appli", "bureau": "bureau", "ile": "île", "commande": "commande"}.get(e[2], e[2])
-    val = f"  {D}({t} : {e[3]}){N}" if e[2] != "appli" else f"  {D}(appli){N}"
+        return human(e[1]), f"{nom or T('raccourci de la config', 'config shortcut')}  {D}{T('(désactivé)', '(disabled)')}{N}"
+    t = {"appli": T("appli", "app"), "bureau": T("bureau", "desktop"), "ile": T("île", "island"),
+         "commande": T("commande", "command")}.get(e[2], e[2])
+    val = f"  {D}({t}{T(' : ', ': ')}{e[3]}){N}" if e[2] != "appli" else f"  {D}({T('appli', 'app')}){N}"
     return human(e[1]), f"{e[4] or e[3]}{val}"
 
 
@@ -281,34 +333,38 @@ def changes():
 
 def cmd_list():
     for sec in nckeys.collect():
-        print(f"\n  {B}{ACC}{sec['title']}{N}")
+        print(f"\n  {B}{ACC}{sec.get('label', sec['title'])}{N}")
         for r in sec["rows"]:
             print(f"    {' + '.join(r['keys']):<30} {r['text']}")
     ent = changes()
     if ent or legacy_lines():
-        print(f"\n  {B}{ACC}Tes changements{N}  {D}(nc-raccourci){N}")
+        print(f"\n  {B}{ACC}{T('Tes changements', 'Your changes')}{N}  {D}({T('nc-raccourci', 'nc-shortcut')}){N}")
         for e in ent:
             k, t = describe(e)
             print(f"    {MOD}●{N} {k:<28} {t}")
         for l in legacy_lines():
             m = re.match(r'\s*hl\.bind\("([^"]+)"', l)
-            print(f"    {MOD}●{N} {human(m.group(1)) if m else '?':<28} {D}(dans perso.lua){N}")
+            print(f"    {MOD}●{N} {human(m.group(1)) if m else '?':<28} {D}{T('(dans perso.lua)', '(in perso.lua)')}{N}")
     print()
 
 
 def target_of(cible, nom):
     """CIBLE -> (type, valeur, nom)."""
-    m = re.fullmatch(r"(?i)bureau\s+(\d+)", cible.strip())
+    m = re.fullmatch(r"(?i)(?:bureau|desktop|workspace)\s+(\d+)", cible.strip())
     if m:
-        return "bureau", m.group(1), nom or f"Bureau {m.group(1)}"
-    m = re.fullmatch(r"(?i)[iî]le\s+(\S+)", cible.strip())
+        return "bureau", m.group(1), nom or T(f"Bureau {m.group(1)}", f"Desktop {m.group(1)}")
+    m = re.fullmatch(r"(?i)(?:[iî]le|island)\s+(\S+)", cible.strip())
     if m:
         page = plain(m.group(1))
         page = {"wifi": "reseau", "wi-fi": "reseau", "bt": "bluetooth", "audio": "son", "agenda": "calendrier",
-                "notifs": "notifications", "controle": "centre"}.get(page, page)
+                "notifs": "notifications", "controle": "centre", "sound": "son", "network": "reseau",
+                "system": "systeme", "calendar": "calendrier", "timer": "minuteur", "control": "centre",
+                "center": "centre", "control-center": "centre"}.get(page, page)
         if page not in PAGES:
-            raise Refus(f"page de l'île inconnue : {m.group(1)} ({', '.join(PAGES)})")
-        return "ile", page, nom or f"Île : {page}"
+            raise Refus(T(f"page de l'île inconnue : {m.group(1)} ({', '.join(PAGES)})",
+                          f"unknown island page: {m.group(1)} (centre, notifications, sound, network, bluetooth, "
+                          f"system, calendar, timer)"))
+        return "ile", page, nom or T(f"Île : {page}", f"Island: {page}")
     a = find_app(cible)
     if a:
         return "appli", a["id"], nom or a["name"]
@@ -325,11 +381,14 @@ def ajouter(keys, typ, val, nom):
     bind, mask, key, codes = parse_keys(keys)
     who = find_live(mask, key, codes)
     if who:
-        raise Refus(f"{keys} est déjà pris : {desc_text(who['desc'])} "
-                    f"(change-le ou désactive-le d'abord : nc-raccourci change / desactive)")
+        raise Refus(T(f"{keys} est déjà pris : {desc_text(who['desc'])} "
+                      f"(change-le ou désactive-le d'abord : nc-raccourci change / desactive)",
+                      f"{keys} is already in use: {desc_text(who['desc'])} "
+                      f"(remap or disable it first: nc-shortcut remap / disable)"))
     old = read_conf()
     reload_or_rollback_after(old, old + [["ajout", bind, typ, val, nom]])
-    return f"Ajouté : {human(bind)} → {nom}" + (" (va à sa fenêtre, sinon la lance)" if typ == "appli" else "")
+    return (T(f"Ajouté : {human(bind)} → {nom}", f"Added: {human(bind)} → {nom}")
+            + (T(" (va à sa fenêtre, sinon la lance)", " (goes to its window, otherwise launches it)") if typ == "appli" else ""))
 
 
 def reload_or_rollback_after(old, new):
@@ -342,7 +401,7 @@ def find_config_bind(keys):
     bind, mask, key, codes = parse_keys(keys)
     b = find_live(mask, key, codes)
     if not b:
-        raise Refus(f"aucun raccourci sur {keys} (liste : nc-raccourci liste)")
+        raise Refus(T(f"aucun raccourci sur {keys} (liste : nc-raccourci liste)", f"no shortcut on {keys} (list: nc-shortcut list)"))
     for e in read_conf():
         if e[0] == "ajout" and id_of(e[1]) == b["id"]:
             return b, e
@@ -354,7 +413,7 @@ def cmd_change(old_keys, new_keys):
     nbind, mask, key, codes = parse_keys(new_keys)
     who = find_live(mask, key, codes, ignore=b["id"])
     if who:
-        raise Refus(f"{new_keys} est déjà pris : {desc_text(who['desc'])}")
+        raise Refus(T(f"{new_keys} est déjà pris : {desc_text(who['desc'])}", f"{new_keys} is already in use: {desc_text(who['desc'])}"))
     old = read_conf()
     if mine:
         new = [(["ajout", nbind] + e[2:]) if e == mine else e for e in old]
@@ -364,18 +423,19 @@ def cmd_change(old_keys, new_keys):
         if id_of(nbind) != orig:
             new.append(["change", orig, nbind, desc_text(b["desc"])])
     reload_or_rollback_after(old, new)
-    return f"{desc_text(b['desc'])} : {human(nbind)}"
+    return T(f"{desc_text(b['desc'])} : {human(nbind)}", f"{desc_text(b['desc'])}: {human(nbind)}")
 
 
 def cmd_disable(keys):
     b, mine = find_config_bind(keys)
     if mine:
-        raise Refus(f"{keys} est un de tes raccourcis : pour l'enlever, nc-raccourci retire \"{keys}\"")
+        raise Refus(T(f"{keys} est un de tes raccourcis : pour l'enlever, nc-raccourci retire \"{keys}\"",
+                      f"{keys} is one of your shortcuts: to remove it, nc-shortcut remove \"{keys}\""))
     old = read_conf()
     orig = original_id(b["id"], old)
     new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] == orig)] + [["aucun", orig, desc_text(b["desc"])]]
     reload_or_rollback_after(old, new)
-    return f"Désactivé : {desc_text(b['desc'])} ({human(orig)})"
+    return T(f"Désactivé : {desc_text(b['desc'])} ({human(orig)})", f"Disabled: {desc_text(b['desc'])} ({human(orig)})")
 
 
 def texte_de_id(ident):
@@ -403,21 +463,21 @@ def desactiver_ids(live_ids, nom):
     origs = [original_id(i, old) for i in live_ids]
     new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] in origs)] + [["aucun", o, nom] for o in origs]
     reload_or_rollback_after(old, new)
-    return f"Désactivé : {nom}"
+    return T(f"Désactivé : {nom}", f"Disabled: {nom}")
 
 
 def retablir_ids(orig_ids):
     old = read_conf()
     new = [e for e in old if not (e[0] in ("change", "aucun") and e[1] in orig_ids)]
     reload_or_rollback_after(old, new)
-    return "Rétabli comme dans la config"
+    return T("Rétabli comme dans la config", "Restored as in the config")
 
 
 def retirer_ajout(bind):
     old = read_conf()
     new = [e for e in old if not (e[0] == "ajout" and e[1] == bind)]
     reload_or_rollback_after(old, new)
-    return "Retiré"
+    return T("Retiré", "Removed")
 
 
 def cmd_restore(keys):
@@ -425,15 +485,16 @@ def cmd_restore(keys):
     if keys in ("tout", "tous", "all"):
         new = [e for e in old if e[0] == "ajout"]
         reload_or_rollback_after(old, new)
-        return "Raccourcis de la config remis comme à l'origine (tes raccourcis ajoutés sont gardés)."
+        return T("Raccourcis de la config remis comme à l'origine (tes raccourcis ajoutés sont gardés).",
+                 "Config shortcuts restored to their defaults (the shortcuts you added are kept).")
     bind, mask, key, codes = parse_keys(keys)
     # Par les touches actuelles (raccourci déplacé) ou d'origine (déplacé ou désactivé)
     hit = [e for e in old if e[0] in ("change", "aucun")
            and (matches(e[1], mask, key, codes) or (e[0] == "change" and matches(id_of(e[2]), mask, key, codes)))]
     if not hit:
-        raise Refus(f"aucun changement sur {keys}")
+        raise Refus(T(f"aucun changement sur {keys}", f"no change on {keys}"))
     reload_or_rollback_after(old, [e for e in old if e not in hit])
-    return "Rétabli : " + ", ".join(f"{(e[3] if e[0] == 'change' else e[2]) if len(e) > 2 else ''} ({human(e[1])})" for e in hit)
+    return T("Rétabli : ", "Restored: ") + ", ".join(f"{(e[3] if e[0] == 'change' else e[2]) if len(e) > 2 else ''} ({human(e[1])})" for e in hit)
 
 
 def cmd_remove(keys):
@@ -442,7 +503,7 @@ def cmd_remove(keys):
     new = [e for e in old if not (e[0] == "ajout" and matches(id_of(e[1]), mask, key, codes))]
     if len(new) != len(old):
         reload_or_rollback_after(old, new)
-        return f"Retiré : {keys}"
+        return T(f"Retiré : {keys}", f"Removed: {keys}")
     # Ancienne version : raccourci écrit dans perso.lua
     try:
         with open(PERSO, encoding="utf-8") as f:
@@ -452,11 +513,12 @@ def cmd_remove(keys):
     kept = [l for l in lines if not (l.rstrip().endswith(TAG) and
                                      (m := re.match(r'\s*hl\.bind\("([^"]+)"', l)) and matches(id_of(m.group(1)), mask, key, codes))]
     if len(kept) == len(lines):
-        raise Refus(f"{keys} n'est pas un de tes raccourcis (liste : nc-raccourci liste)")
+        raise Refus(T(f"{keys} n'est pas un de tes raccourcis (liste : nc-raccourci liste)",
+                      f"{keys} is not one of your shortcuts (list: nc-shortcut list)"))
     with open(PERSO, "w", encoding="utf-8") as f:
         f.write("\n".join(kept) + "\n")
     subprocess.run(["hyprctl", "reload"], capture_output=True)
-    return f"Retiré : {keys}"
+    return T(f"Retiré : {keys}", f"Removed: {keys}")
 
 
 if __name__ == "__main__":
@@ -482,8 +544,8 @@ if __name__ == "__main__":
         elif a[0] == "ouvrir" and len(a) == 2:
             cmd_ouvrir(a[1])
         else:
-            print(__doc__.strip())
-            sys.exit(0 if a and a[0] in ("-h", "--help", "aide") else 2)
+            print(T(__doc__.strip(), USAGE_EN))
+            sys.exit(0 if a and a[0] in ("-h", "--help", "aide", "help") else 2)
     except Refus as e:
-        print(f"nc-raccourci : {e}", file=sys.stderr)
+        print(T(f"nc-raccourci : {e}", f"nc-shortcut: {e}"), file=sys.stderr)
         sys.exit(1)
