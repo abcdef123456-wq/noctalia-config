@@ -73,6 +73,8 @@ A_TAPER = [
 RACCOURCIS = [
     ("nc-capture", "nc-capture zone", "Captures d'écran (Impr. écran, Super + P…), enregistrées et copiées."),
     ("nc-video", "nc-video", "Vidéo de l'écran (Super + Maj + R) : zone ou écran entier ; même raccourci pour arrêter."),
+    ("nc-ecrans", "nc-ecrans miroir", "Projeter sur un second écran ou un projecteur (Super + O), comme Windows + P : "
+                                      "écran du PC seulement, dupliquer, étendre (à droite, à gauche…), second écran seulement."),
     ("nc-brightness", "nc-brightness set 50", "Luminosité de l'écran (touches de luminosité, F5 / F6)."),
     ("nc-media", "nc-media play-pause", "Touches de musique : visent le lecteur qu'on entend."),
     ("nc-touches", "nc-touches pave bascule", "Touches spéciales des portables : clavier lumineux, pavé tactile, calculatrice."),
@@ -109,6 +111,7 @@ NOMS_ANGLAIS = {
     "nc-sauvegarde": "nc-backup", "nc-memoire": "nc-memory", "nc-meteo": "nc-weather", "nc-icones": "nc-icons",
     "nc-fermer": "nc-close", "nc-couvercle": "nc-lid", "nc-session-propre": "nc-clean-session", "nc-langue": "nc-lang",
     "nc-claude": "nc-agents", "nc-touches": "nc-kbd-light", "nc-ile-etat": "nc-island-state",
+    "nc-ecrans": "nc-displays",
 }
 # En anglais : (exemple, explication), par nom français
 ANGLAIS = {
@@ -135,6 +138,8 @@ ANGLAIS = {
     "nvidia-run": ("nvidia-run steam", "Runs a program on the NVIDIA card of a hybrid laptop."),
     "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
     "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
+    "nc-ecrans": ("nc-displays mirror", "Project to a second display or a projector (Super + O), like Windows + P: "
+                                        "PC screen only, duplicate, extend (right, left…), second screen only."),
     "nc-video": ("nc-video", "Screen recording (Super + Shift + R): an area or the whole screen; same shortcut to stop."),
     "nc-brightness": ("nc-brightness set 50", "Screen brightness (brightness keys, F5 / F6)."),
     "nc-media": ("nc-media play-pause", "Media keys: they control the player you can hear."),
