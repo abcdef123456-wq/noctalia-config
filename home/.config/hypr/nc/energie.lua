@@ -4,7 +4,8 @@
 --   Économie    : ni flou, ni ombres, ni assombrissement, ni animations
 -- La fréquence de l'écran interne est réglée dans nc/ecrans.lua.
 
-local eco = nc.profil.profil == "power-saver"
+-- Effets gardés en Économie si tu le choisis (nc-reglages → Énergie)
+local eco = nc.profil.profil == "power-saver" and nc.reglage("ECO_EFFETS", true)
 -- « Aucun effet » (nc-reglages → Animations → Effets visuels) : comme l'Économie, dans tous les profils
 local coupe = eco or nc.reglage("EFFETS", "tous") == "aucun"
 nc.flou_actif = not coupe
@@ -20,8 +21,9 @@ hl.config({
     },
 })
 
--- Bordure en rotation continue : seulement en Performance sur secteur (elle force un rendu permanent de l'écran)
-if nc.profil.profil == "performance" and not nc.profil.batterie and not coupe then
+-- Bordure en rotation continue : seulement en Performance sur secteur (elle force un rendu permanent de l'écran) ;
+-- coupable dans nc-reglages → Énergie
+if nc.profil.profil == "performance" and not nc.profil.batterie and not coupe and nc.reglage("BORDURE_PERFORMANCE", true) then
     hl.animation({ leaf = "borderangle", enabled = true, speed = 100, bezier = "linear", style = "loop" })
 else
     hl.animation({ leaf = "borderangle", enabled = true, speed = 8, bezier = "standard" })

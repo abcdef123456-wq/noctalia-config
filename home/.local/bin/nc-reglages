@@ -317,6 +317,27 @@ REGLAGES = [
       "Super + Alt + G : la carte graphique et le processeur à fond le temps du jeu ; le profil d'avant revient en sortant.", groupe="hypr"),
     R("HALO_BATTERIE", "Énergie", "Halo musical sur batterie", "ouinon", "non",
       "Le halo de la fenêtre active pulse sur les basses aussi sur batterie en Équilibré (consomme un peu plus)."),
+    R("PROFIL_SECTEUR", "Énergie", "Profil en branchant le chargeur", "choix", "garder",
+      "Choisi tout seul quand tu branches le PC (tu peux toujours en changer ensuite).",
+      [("garder", "Ne pas changer"), ("performance", "Performance"), ("balanced", "Équilibré"), ("power-saver", "Économie")],
+      groupe="energie"),
+    R("PROFIL_BATTERIE", "Énergie", "Profil en débranchant le chargeur", "choix", "garder",
+      "Choisi tout seul quand tu passes sur batterie.",
+      [("garder", "Ne pas changer"), ("balanced", "Équilibré"), ("power-saver", "Économie")], groupe="energie"),
+    R("ECO_AUTO", "Énergie", "Économie automatique, batterie sous", "entier", "0",
+      "Sur batterie, passe en Économie à ce niveau ; le profil d'avant revient quand tu branches le chargeur.",
+      mini=0, maxi=50, pas=5, unite="%", zero="Jamais", groupe="energie"),
+    R("ECO_EFFETS", "Énergie", "Couper les effets en Économie", "ouinon", "oui",
+      "Flou, ombres et animations (Hyprland et Noctalia), rotation des fonds d'écran.", groupe="energie"),
+    R("ECO_CLAVIER", "Énergie", "Éteindre le clavier lumineux en Économie", "ouinon", "oui",
+      "Il se rallume à son niveau d'avant en quittant l'Économie.", groupe="energie"),
+    R("ECO_BLUETOOTH", "Énergie", "Couper le Bluetooth en Économie", "ouinon", "oui",
+      "Seulement si aucun appareil n'est connecté ; rallumé en quittant l'Économie.", groupe="energie"),
+    R("BORDURE_PERFORMANCE", "Énergie", "Bordure animée en Performance", "ouinon", "oui",
+      "Sur secteur, la bordure de la fenêtre active tourne en continu (l'écran est redessiné sans arrêt).", groupe="hypr"),
+    R("GPU_PERFORMANCE", "Énergie", "Carte graphique des applis en Performance", "choix", "nvidia",
+      "PC à deux cartes : les applis lancées en Performance utilisent la NVIDIA (plus puissante, consomme plus).",
+      [("nvidia", "NVIDIA"), ("integree", "Carte intégrée, comme dans les autres profils")], groupe="energie"),
     # Son et luminosité
     R("VOLUME_PAS", "Son et luminosité", "Pas du volume", "entier", "5", "Touches de volume (et F2, F3).", mini=1, maxi=20, unite="%", groupe="hypr"),
     R("VOLUME_MAX", "Son et luminosité", "Volume maximal", "choix", "100", "150 % : pour des haut-parleurs faibles (le son peut saturer).",
@@ -430,12 +451,15 @@ MATERIEL = {
     "LUMINOSITE_PAS": "ecran",
     **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
+    "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
+    "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
 }
 
 
 def materiel():
+    import glob
+
     def existe(motif):
-        import glob
         return bool(glob.glob(motif))
     try:
         entrees = open("/proc/bus/input/devices", encoding="utf-8", errors="ignore").read().lower()
@@ -449,8 +473,18 @@ def materiel():
            "kiro": (("kiro-cli", "kiro"), ("~/.kiro",)), "amp": (("amp",), ("~/.config/amp",))}
     dispo = {"ia:" + k: any(shutil.which(p) for p in v[0]) or any(os.path.isdir(os.path.expanduser(d)) for d in v[1])
              for k, v in ias.items()}
+    # PC hybride : une carte NVIDIA et une autre (même détection que nc-profile-sync)
+    cartes = set()
+    for d in glob.glob("/sys/bus/pci/devices/*"):
+        try:
+            if open(d + "/class").read().startswith("0x03"):
+                cartes.add(open(d + "/vendor").read().strip() == "0x10de")
+        except OSError:
+            pass
     return {**dispo, "batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
-            "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*")}
+            "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*"),
+            "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
+            "hybride": cartes == {True, False}}
 
 
 _DISPO = materiel()
@@ -861,6 +895,7 @@ def appliquer(groupes, vals=None):
             subprocess.run(["hyprctl", "reload"], capture_output=True)
         elif g == "energie":
             subprocess.run(["systemctl", "--user", "restart", "nc-profile-sync.service"], capture_output=True)
+            subprocess.run(["hyprctl", "reload"], capture_output=True)      # effets de l'Économie (nc/energie.lua)
         elif g == "veille":
             appliquer_veille(vals)
         elif g == "terminal":
