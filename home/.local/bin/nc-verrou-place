@@ -27,11 +27,34 @@ ETAT = os.path.expanduser("~/.local/state/noctalia/settings.toml")
 HAUTEUR = {"nc/verrou:heure": 0.30, "nc/verrou:musique": 0.64, "login_box": 0.86, "nc/verrou:batterie": 0.93}
 
 
-def recentrer_etat(nom_ecran, l, h):
+def nettoyer_etat(lignes, widgets, ordre):
+    """Noctalia ajoute son propre champ de mot de passe (« lockscreen-login-box@ÉCRAN », grand cadre d'origine) pour
+    chaque écran qui n'en a pas à son nom : écran renommé (eDP-1 / eDP-2 selon la carte graphique), écran de secours
+    (FALLBACK), projecteur… et les met dans son ordre d'affichage à la place des nôtres : l'écran de verrouillage
+    redevenait celui d'origine. On les retire de l'état et on y remet l'ordre de la config."""
+    sortie, saute = [], False
+    for x in lignes:
+        m = re.match(r'\s*\[lockscreen_widgets\.widget\.(?:"([^"]*)"|([^.\]]+))', x)
+        if m:
+            nom = m.group(1) or m.group(2)
+            saute = nom.startswith("lockscreen-login-box@") and nom not in widgets
+        elif re.match(r"\s*\[", x):
+            saute = False
+        if saute:
+            continue
+        if ordre and re.match(r"\s*widget_order\s*=", x):
+            x = re.match(r"(\s*)", x).group(1) + "widget_order = [ " + ", ".join(json.dumps(o) for o in ordre) + " ]"
+        sortie.append(x)
+    return sortie
+
+
+def recentrer_etat(nom_ecran, l, h, widgets, ordre):
     """Mêmes positions dans l'état de Noctalia (édité ligne à ligne : le reste du fichier ne bouge pas). Vrai si changé."""
     try:
         with open(ETAT, encoding="utf-8") as f:
-            lignes = f.read().split("\n")
+            lignes = nettoyer_etat(f.read().split("\n"), widgets, ordre)
+            f.seek(0)
+            avant = f.read().split("\n")
     except OSError:
         return False
     # Sections [lockscreen_widgets.widget.NOM] (pas leurs .settings) : début, fin, type
@@ -41,7 +64,6 @@ def recentrer_etat(nom_ecran, l, h):
             if debut is not None:
                 sections.append((debut, i))
             debut = i if re.match(r"\s*\[lockscreen_widgets\.widget\.(\"[^\"]*\"|[^.\]]+)\]\s*$", x) else None
-    avant = list(lignes)
     for d, f in sections:
         corps = "\n".join(lignes[d:f])
         t = re.search(r'^\s*type\s*=\s*"([^"]*)"', corps, re.M)
@@ -66,7 +88,8 @@ def main():
     try:
         ecrans = json.loads(subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True).stdout)
         with open(os.path.join(DIR, "config.toml"), "rb") as f:
-            widgets = tomllib.load(f).get("lockscreen_widgets", {}).get("widget", {})
+            config = tomllib.load(f).get("lockscreen_widgets", {})
+        widgets, ordre = config.get("widget", {}), config.get("widget_order", [])
     except (OSError, ValueError):
         return
     ecrans = [e for e in ecrans if not e.get("disabled")]
@@ -84,7 +107,7 @@ def main():
         cle = nom if nom.replace("-", "").replace("_", "").isalnum() else json.dumps(nom)
         texte += (f"\n[lockscreen_widgets.widget.{cle}]\ntype = {json.dumps(w['type'])}\noutput = {json.dumps(e['name'])}\n"
                   f"cx = {l / 2:.1f}\ncy = {h * part:.1f}\n")
-    change = recentrer_etat(e["name"], l, h)
+    change = recentrer_etat(e["name"], l, h, widgets, ordre)
     try:
         if open(OUT, encoding="utf-8").read() == texte and not change:
             return
