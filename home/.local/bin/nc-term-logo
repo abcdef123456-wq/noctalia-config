@@ -1,25 +1,95 @@
 #!/usr/bin/env bash
 # nc-term-logo : logo du terminal (accueil fastfetch) aux couleurs du thème.
-# Logo officiel de la distribution (SVG) rempli d'un dégradé couleur principale -> secondaire, avec un léger halo.
-# Écrit ~/.cache/nc/term-logo.png ; ne refait rien si les couleurs n'ont pas changé.
-# Appelé par nc-theme-sync à chaque changement de couleurs.
+#   nc-term-logo              logo de la distribution (SVG officiel) rempli d'un dégradé couleur principale -> secondaire,
+#                             avec un léger halo : ~/.cache/nc/term-logo.png ; puis le dessin ci-dessous s'il est choisi
+#   nc-term-logo dessin [NOM] logo dessiné comme une icône : dégradé de haut en bas sur un fond sombre éclairé au centre
+#                             (NOM : distribution, arch, fedora, macOS, Windows… comme TERMINAL_LOGO) :
+#                             ~/.cache/nc/term-dessin.png ; logos dans ~/.local/share/nc/logos (Simple Icons, CC0)
+# Ne refait rien si les couleurs et le logo n'ont pas changé. Appelé par nc-theme-sync à chaque changement de couleurs
+# et par nc-greeting (Terminal → Style du logo : dessin).
 set -uo pipefail
 
 COLORS="$HOME/.config/noctalia/colors.json"
 OUT="$HOME/.cache/nc/term-logo.png"
+DESSIN="$HOME/.cache/nc/term-dessin.png"
+LOGOS="$HOME/.local/share/nc/logos"
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/style.conf" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 
-svg=""
 . /etc/os-release 2>/dev/null
-for n in ${LOGO:+"$LOGO"} "${ID:-linux}-logo" "${ID:-linux}linux-logo" "${ID:-linux}-logo-icon" "distributor-logo-${ID:-linux}"; do
-  for f in "/usr/share/pixmaps/$n.svg" "/usr/share/icons/hicolor/scalable/apps/$n.svg"; do
-    [ -r "$f" ] && { svg="$f"; break 2; }
+# Logo vectoriel installé par la distribution
+svg_systeme() {
+  local n f
+  for n in ${LOGO:+"$LOGO"} "${ID:-linux}-logo" "${ID:-linux}linux-logo" "${ID:-linux}-logo-icon" "distributor-logo-${ID:-linux}"; do
+    for f in "/usr/share/pixmaps/$n.svg" "/usr/share/icons/hicolor/scalable/apps/$n.svg"; do
+      [ -r "$f" ] && { echo "$f"; return 0; }
+    done
   done
-done
-[ -n "$svg" ] || exit 0   # pas de logo vectoriel : l'accueil utilisera le logo texte de fastfetch
-command -v magick >/dev/null || exit 0
+  return 1
+}
+# Logo du dépôt pour un nom de TERMINAL_LOGO ou un ID de distribution (os-release)
+svg_depot() {
+  local n
+  n="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$n" in
+    macos) n=apple ;; archlinux) n=arch ;; opensuse*) n=opensuse ;; popos|pop_os) n=pop ;; redhat) n=rhel ;;
+    mint) n=linuxmint ;; alma) n=almalinux ;;
+  esac
+  [ -r "$LOGOS/$n.svg" ] && echo "$LOGOS/$n.svg"
+}
 
+command -v magick >/dev/null || exit 0
 p=$(jq -r '.mPrimary // "#8aadf4"' "$COLORS" 2>/dev/null); [ -n "$p" ] || p="#8aadf4"
 s=$(jq -r '.mSecondary // .mTertiary // "#c6a0f6"' "$COLORS" 2>/dev/null); [ -n "$s" ] || s="#c6a0f6"
+
+# Mélange de deux couleurs #rrggbb : mix A B POURCENTAGE_DE_A
+mix() {
+  local a=${1#\#} b=${2#\#} k=$3 i r=""
+  for i in 0 2 4; do
+    r+=$(printf '%02x' $(( (16#${a:$i:2} * k + 16#${b:$i:2} * (100 - k)) / 100 )))
+  done
+  echo "#$r"
+}
+
+dessin() {
+  local nom=${1:-$(reglage TERMINAL_LOGO)} svg key tmp centre haut bas
+  nom=${nom:-distribution}
+  if [ "$nom" = distribution ]; then
+    svg="$(svg_depot "${ID:-linux}" || svg_systeme || svg_depot linux)"
+  else
+    svg="$(svg_depot "$nom" || { [ "$(echo "$nom" | tr '[:upper:]' '[:lower:]')" = "${ID:-}" ] && svg_systeme; })"
+  fi
+  [ -n "$svg" ] || return 1          # pas de dessin pour ce logo : l'accueil garde le logo de fastfetch
+  key="$p $s $nom $svg d4"
+  [ -r "$DESSIN" ] && [ "$(cat "$DESSIN.key" 2>/dev/null)" = "$key" ] && return 0
+  mkdir -p "$(dirname "$DESSIN")"
+  tmp=$(mktemp -d)
+  centre=$(mix "$p" "#07080c" 26)    # fond : la couleur principale, très assombrie, qui s'éteint vers les bords
+  haut=$(mix "#ffffff" "$p" 30)      # logo : couleur principale éclaircie en haut, secondaire en bas
+  bas=$(mix "#ffffff" "$s" 8)
+  if [ "${ID:-}" = arch ] && [ "$svg" != "${svg#/usr/}" ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
+  magick -background none -density 600 "$tmp/logo.svg" -trim +repage -resize 280x280 \
+    -gravity center -extent 512x512 -alpha extract "$tmp/mask.png" &&
+  magick -size 512x512 "radial-gradient:$centre-#07080c" -modulate 100,190 "$tmp/fond.png" &&
+  magick -size 512x512 "gradient:$haut-$bas" "$tmp/mask.png" -alpha off -compose CopyOpacity -composite "$tmp/logo.png" &&
+  magick -size 512x512 "xc:$p" \( "$tmp/mask.png" -blur 0x16 -evaluate multiply 0.22 \) \
+    -alpha off -compose CopyOpacity -composite "$tmp/halo.png" &&
+  magick "$tmp/fond.png" "$tmp/halo.png" -compose Over -composite "$tmp/logo.png" -compose Over -composite \
+    -strip "PNG24:$tmp/out.png" &&
+    mv "$tmp/out.png" "$DESSIN" && echo "$key" > "$DESSIN.key"
+  local r=$?
+  rm -rf "$tmp"
+  return $r
+}
+
+if [ "${1:-}" = dessin ] || [ "${1:-}" = drawn ]; then
+  dessin "${2:-}"
+  exit $?
+fi
+
+# Dessin choisi : refait aux nouvelles couleurs en même temps que le logo
+[ "$(reglage TERMINAL_LOGO_STYLE)" != simple ] && dessin >/dev/null 2>&1
+
+svg="$(svg_systeme)" || exit 0   # pas de logo vectoriel : l'accueil utilisera le logo texte de fastfetch
 key="$p $s $svg v2"
 [ -r "$OUT" ] && [ "$(cat "$OUT.key" 2>/dev/null)" = "$key" ] && exit 0
 

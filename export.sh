@@ -32,6 +32,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-ile
   .config/quickshell/nc-ile
   .local/share/nc/finger.png
+  .local/share/nc/logos
   .local/bin/nc-apps
   .local/bin/nc-boot-wallpaper
   .local/bin/nc-brightness
