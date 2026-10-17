@@ -74,7 +74,6 @@ Singleton {
     property bool recherche: false
     property bool vueFenetres: false       // vue de toutes les fenêtres (Vue.qml)
     property bool projection: false        // fenêtre de projection, comme Windows + P (Projection.qml, Super + O)
-    signal projectionSuivante()          // Super + O encore, fenêtre ouverte : mode suivant
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
     function chercher(ecran) {
