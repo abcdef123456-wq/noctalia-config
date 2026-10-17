@@ -90,23 +90,94 @@ local function mode_hz(m, voulu)
     return string.format("%dx%d@%.2f", choix.w, choix.h, choix.hz)
 end
 
+-- ── Projection, comme Windows + P (fenêtre : Super + O, commande nc-ecrans) ──
+-- ~/.config/nc/ecrans.conf, écrit par nc-ecrans :
+--   PRINCIPAL=nom                                   l'écran du PC (celui du portable, sinon celui choisi)
+--   ECRAN<tab>MODE<tab>CÔTÉ<tab>modèle de l'écran   un écran déjà branché et son mode, retenus par son modèle
+-- MODE : pc (cet écran éteint), miroir, etendre (vers CÔTÉ : droite, gauche, haut, bas), externe (celui du PC éteint).
+-- Un écran jamais vu étend le bureau, à droite.
+local proj = { principal = nil, ecrans = {} }
+do
+    local f = io.open((os.getenv("HOME") or "") .. "/.config/nc/ecrans.conf", "r")
+    if f then
+        for ligne in f:lines() do
+            local p = ligne:match("^PRINCIPAL=(.+)$")
+            if p then proj.principal = p end
+            local mode, cote, desc = ligne:match("^ECRAN\t([^\t]*)\t([^\t]*)\t(.+)$")
+            if mode then proj.ecrans[desc] = { mode = mode, cote = cote } end
+        end
+        f:close()
+    end
+end
+local COTES = { droite = "auto-right", gauche = "auto-left", haut = "auto-up", bas = "auto-down" }
+
+-- Écran virtuel (partage de bureau) ou de secours (créé par Hyprland quand aucun écran ne reste allumé)
+local function virtuel(m) return m.name:match("^HEADLESS") ~= nil or m.name == "FALLBACK" end
+-- Un écran est retenu par son modèle (description), sinon par sa prise
+local function retenu(m)
+    local cle = (m.description or "") ~= "" and m.description or m.name
+    return proj.ecrans[cle] or { mode = "etendre", cote = "droite" }
+end
+
+-- Écran principal : celui du portable, sinon celui retenu par nc-ecrans, sinon le premier
+local function principal()
+    if proj.principal then return proj.principal end
+    local premier
+    for _, m in ipairs(hl.get_monitors()) do
+        if m.name:match("^eDP") or m.name:match("^LVDS") or m.name:match("^DSI") then return m.name end
+        if not premier and not virtuel(m) then premier = m.name end
+    end
+    return premier
+end
+
+-- Un autre écran allumé en « second écran seulement » : celui du PC s'éteint
+local function externe_seul(p)
+    for _, m in ipairs(hl.get_monitors()) do
+        if m.name ~= p and not virtuel(m) and retenu(m).mode == "externe" then return true end
+    end
+    return false
+end
+
 local function regle(m)
     local interne = m.name:match("^eDP") ~= nil
-    hl.monitor({
+    local p = principal()
+    local spec = {
         output   = m.name,
         mode     = mode_hz(m, interne and nc.profil.hz or "max"),
         position = "auto",
         scale    = nc.echelle(m),
-    })
+    }
+    if virtuel(m) or not p then
+        -- écran virtuel (partage de bureau…) : placé automatiquement
+    elseif m.name == p then
+        if externe_seul(p) then spec = { output = m.name, disabled = true } else spec.position = "0x0" end
+    else
+        local r = retenu(m)
+        if r.mode == "pc" then spec = { output = m.name, disabled = true }
+        elseif r.mode == "miroir" then spec.mirror = p
+        else spec.position = COTES[r.cote] or "auto-right" end
+    end
+    hl.monitor(spec)
+end
+
+-- Tous les écrans, le principal d'abord (les autres se placent par rapport à lui)
+local function tout()
+    local p = principal()
+    local liste = hl.get_monitors()
+    table.sort(liste, function(a, b) return (a.name == p) and b.name ~= p end)
+    for _, m in ipairs(liste) do regle(m) end
 end
 
 -- Règle par défaut (avant que l'écran ne soit connu), puis une règle précise par écran
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
-for _, m in ipairs(hl.get_monitors()) do regle(m) end
-hl.on("monitor.added", function(m)
-    regle(m)
+tout()
+hl.on("monitor.added", function()
+    tout()
     -- Écran de verrouillage recentré sur l'écran (sa taille réelle, échelle comprise)
     hl.exec_cmd("sleep 2; ~/.local/bin/nc-verrou-place")
 end)
-hl.on("monitor.removed", function() hl.exec_cmd("sleep 2; ~/.local/bin/nc-verrou-place") end)
+hl.on("monitor.removed", function()
+    -- Second écran débranché alors que celui du PC était éteint : nc-ecrans le rallume
+    hl.exec_cmd("~/.local/bin/nc-ecrans verifier; sleep 1; ~/.local/bin/nc-verrou-place")
+end)
 hl.on("hyprland.start", function() hl.exec_cmd("sleep 3; ~/.local/bin/nc-verrou-place") end)

@@ -99,6 +99,7 @@ En mode **Souris**, les fenêtres s'ouvrent libres et centrées, comme sur Windo
 | `Super` + `Alt` + `P` | Changer de profil d'énergie |
 | `Super` + `Alt` + `G` | Mode jeu (effets coupés, pas de notifications) |
 | `Super` + `N` | Lumière de nuit |
+| `Super` + `O` | Projeter sur un second écran : miroir, étendre, un seul écran (comme Windows + P) |
 | `Super` + `Alt` + `M` | Halo musical (pulse sur les basses) |
 | `Super` + `Maj` + `N` | Ne pas déranger |
 | `Super` + `Ctrl` + `molette` | Loupe : zoomer / dézoomer |

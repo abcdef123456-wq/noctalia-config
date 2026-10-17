@@ -25,7 +25,8 @@ t() { if [ "$NC_LANGUE" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi
 NOMS_ANGLAIS="nc-settings:nc-reglages nc-update:nc-maj nc-help:nc-aide nc-window:nc-fenetre nc-screenshot:nc-capture
 nc-ask:nc-demander nc-packages:nc-paquets nc-shortcut:nc-raccourci nc-backup:nc-sauvegarde nc-memory:nc-memoire
 nc-weather:nc-meteo nc-icons:nc-icones nc-close:nc-fermer nc-lid:nc-couvercle nc-clean-session:nc-session-propre
-nc-lang:nc-langue nc-agents:nc-claude nc-kbd-light:nc-touches nc-island-state:nc-ile-etat"
+nc-lang:nc-langue nc-agents:nc-claude nc-kbd-light:nc-touches nc-island-state:nc-ile-etat
+nc-displays:nc-ecrans"
 
 # Lancé directement (pas sourcé) : la langue
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then echo "$NC_LANGUE"; fi

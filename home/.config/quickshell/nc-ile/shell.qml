@@ -7,6 +7,7 @@
 //   qs -c nc-ile ipc call ile luminosite montrer la luminosité (touches de luminosité)
 //   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son, notifications
 //   qs -c nc-ile ipc call ile effacerNotifications | concentration | recherche (Spotlight, Super + R)
+//   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -41,6 +42,11 @@ ShellRoot {
             racine.vues = Quickshell.screens.map(s => racine.composantVue.createObject(racine, { modelData: s }))
         }
     }
+    // Projection sur un second écran (Super + O, nc-ecrans) : chargée seulement à l'ouverture
+    LazyLoader {
+        active: Etat.projection
+        Projection {}
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -59,6 +65,12 @@ ShellRoot {
         function fermer(): void { Etat.fermer() }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
+        // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, passe au mode suivant (comme Windows + P)
+        function projection(): void {
+            if (Etat.projection) { Etat.projectionSuivante(); return }
+            Etat.fermer()
+            Etat.projection = true
+        }
         function rechercher(texte: string): void {
             Etat.saisie = texte
             if (!Etat.recherche) recherche()

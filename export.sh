@@ -67,6 +67,7 @@ HOME_FILES=(
   .local/bin/nc-profile-sync
   .local/bin/nc-pouls
   .local/bin/nc-ecran-externe
+  .local/bin/nc-ecrans
   .local/bin/nc-couvercle
   .local/bin/nc-verrou-place
   .local/bin/nc-raccourci

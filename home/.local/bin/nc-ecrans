@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# nc-ecrans : projection sur un second écran ou un projecteur, comme Windows + P (fenêtre : Super + O).
+#   nc-ecrans                     ouvre la fenêtre de projection
+#   nc-ecrans pc                  écran du PC seulement (le second écran s'éteint)
+#   nc-ecrans miroir              le même bureau sur les deux écrans
+#   nc-ecrans etendre [CÔTÉ]      un bureau plus grand, le second écran à droite (par défaut), gauche, haut ou bas
+#   nc-ecrans externe             second écran seulement (celui du PC s'éteint)
+#   nc-ecrans suivant             mode suivant, dans cet ordre
+#   nc-ecrans sans-fil            projeter sans fil (Miracast, avec gnome-network-displays)
+#   nc-ecrans etat                l'état en JSON (pour la fenêtre)
+# Le choix est retenu pour chaque écran (par son modèle), dans ~/.config/nc/ecrans.conf, lu par
+# ~/.config/hypr/nc/ecrans.lua : rebranché, l'écran reprend son mode ; un écran jamais vu étend le bureau.
+# Second écran débranché alors que celui du PC est éteint : il se rallume tout seul.
+set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+CONF="$HOME/.config/nc/ecrans.conf"
+MODES=(pc miroir etendre externe)
+
+# Noms anglais (nc-displays pc | mirror | extend | second | next | wireless | state)
+action="${1:-fenetre}"
+case "$action" in
+  mirror|duplicate) action=miroir ;; extend) action=etendre ;; second|external) action=externe ;;
+  next) action=suivant ;; wireless) action=sans-fil ;; state|status) action=etat ;;
+esac
+cote="${2:-}"
+case "$cote" in right) cote=droite ;; left) cote=gauche ;; up|above) cote=haut ;; down|below) cote=bas ;; esac
+
+ecrans() { hyprctl monitors all -j 2>/dev/null || echo '[]'; }
+# Un écran est retenu par son modèle (description), sinon par sa prise
+CLE='def cle: if (.description // "") == "" then .name else .description end; '
+
+# Écran principal : celui du portable, sinon celui retenu, sinon celui où l'on est
+principal() {
+  local json="$1" p
+  p="$(jq -r '[.[] | select(.name | test("^(eDP|LVDS|DSI)"))][0].name // empty' <<< "$json")"
+  [ -n "$p" ] || { p="$(sed -n 's/^PRINCIPAL=//p' "$CONF" 2>/dev/null | tail -1)"
+                   jq -e --arg p "$p" 'any(.[]; .name == $p)' <<< "$json" >/dev/null 2>&1 || p=""; }
+  [ -n "$p" ] || p="$(jq -r '([.[] | select(.focused)][0] // .[0]).name // empty' <<< "$json")"
+  echo "$p"
+}
+
+# Mode et côté retenus pour un écran (par sa description) : « mode côté »
+retenu() {
+  [ -r "$CONF" ] || { echo "etendre droite"; return; }
+  awk -F'\t' -v d="$1" '$1 == "ECRAN" && $4 == d { m = $2; c = $3 } END { print (m ? m : "etendre") " " (c ? c : "droite") }' "$CONF"
+}
+
+etat() {
+  local json p
+  json="$(ecrans)"
+  p="$(principal "$json")"
+  local logo="$HOME/.cache/nc/logo-distribution.png"
+  NC_DESSIN="$logo" "$HOME/.local/bin/nc-term-logo" dessin distribution >/dev/null 2>&1 || logo=""
+  . /etc/os-release 2>/dev/null
+  local premier="" mode="etendre" c="droite"
+  premier="$(jq -r --arg p "$p" "$CLE"'[.[] | select(.name != $p and (.name | test("^(HEADLESS|FALLBACK)") | not))][0] | cle // empty' <<< "$json")"
+  [ -n "$premier" ] && read -r mode c <<< "$(retenu "$premier")"
+  jq -c --arg p "$p" --arg mode "$mode" --arg cote "$c" --arg logo "$logo" --arg distrib "${PRETTY_NAME:-${NAME:-Linux}}" \
+        --argjson sansfil "$(command -v gnome-network-displays >/dev/null && echo true || echo false)" '
+    def ecran: { nom: .name, description: .description, actif: (.disabled | not), miroir: (.mirrorOf != "none"),
+                 interne: (.name | test("^(eDP|LVDS|DSI)")), largeur: .width, hauteur: .height,
+                 hz: ((.refreshRate // 0) | round) };
+    { mode: $mode, position: $cote, logo: $logo, distribution: $distrib, sansfil: $sansfil,
+      principal: ([.[] | select(.name == $p) | ecran][0]),
+      externes: [.[] | select(.name != $p and (.name | test("^(HEADLESS|FALLBACK)") | not)) | ecran] }' <<< "$json"
+}
+
+appliquer() {
+  local mode="$1" c="$2" json p descs
+  json="$(ecrans)"
+  p="$(principal "$json")"
+  descs="$(jq -r --arg p "$p" "$CLE"'.[] | select(.name != $p and (.name | test("^(HEADLESS|FALLBACK)") | not)) | cle' <<< "$json")"
+  if [ -z "$descs" ]; then
+    notify-send -a "$(t "Écrans" "Displays")" -i video-display "$(t "Aucun autre écran branché" "No other display connected")" \
+      "$(t "Branche un écran ou un projecteur, puis recommence." "Connect a display or a projector, then try again.")" 2>/dev/null
+    exit 1
+  fi
+  mkdir -p "$(dirname "$CONF")"
+  local tmp="$CONF.tmp"
+  {
+    echo "# Projection (nc-ecrans, Super + O) : mode de chaque écran, retenu par son modèle. Lu par ~/.config/hypr/nc/ecrans.lua."
+    echo "PRINCIPAL=$p"
+    # Les autres écrans retenus, puis ceux branchés maintenant avec le nouveau mode
+    awk -F'\t' -v liste="$descs" 'BEGIN { n = split(liste, l, "\n"); for (i = 1; i <= n; i++) ici[l[i]] = 1 }
+         $1 == "ECRAN" && !($4 in ici) { print }' "$CONF" 2>/dev/null
+    while IFS= read -r d; do printf 'ECRAN\t%s\t%s\t%s\n' "$mode" "$c" "$d"; done <<< "$descs"
+  } > "$tmp" && mv "$tmp" "$CONF"
+  hyprctl reload >/dev/null
+  # En sortant du miroir, Hyprland place d'abord l'écran tout seul (à droite) : une seconde fois pour le bon côté
+  if [ "$mode" != miroir ] && jq -e 'any(.[]; .mirrorOf != "none")' <<< "$json" >/dev/null; then
+    sleep 0.5; hyprctl reload >/dev/null
+  fi
+}
+
+case "$action" in
+  fenetre) exec qs -c nc-ile ipc call ile projection ;;
+  etat) etat ;;
+  pc|miroir|etendre|externe)
+    if [ -z "$cote" ]; then
+      json="$(ecrans)"; p="$(principal "$json")"
+      d="$(jq -r --arg p "$p" "$CLE"'[.[] | select(.name != $p and (.name | test("^(HEADLESS|FALLBACK)") | not))][0] | cle // empty' <<< "$json")"
+      read -r _ cote <<< "$(retenu "$d")"
+    fi
+    case "$cote" in droite|gauche|haut|bas) ;; *) cote=droite ;; esac
+    appliquer "$action" "$cote" ;;
+  suivant)
+    read -r m c <<< "$(etat | jq -r '"\(.mode) \(.position)"')"
+    for i in "${!MODES[@]}"; do [ "${MODES[$i]}" = "$m" ] && break; done
+    appliquer "${MODES[$(( (i + 1) % ${#MODES[@]} ))]}" "$c" ;;
+  sans-fil)
+    if command -v gnome-network-displays >/dev/null; then
+      setsid -f gnome-network-displays >/dev/null 2>&1
+    else
+      notify-send -a "$(t "Écrans" "Displays")" -i video-display "$(t "Projection sans fil" "Wireless projection")" \
+        "$(t "Installe gnome-network-displays pour projeter sans fil (Miracast) sur une télé ou un projecteur." "Install gnome-network-displays to project wirelessly (Miracast) to a TV or a projector.")" 2>/dev/null
+    fi ;;
+  verifier)
+    # Appelé quand un écran est débranché : plus aucun écran allumé (celui du PC était éteint) → on le rallume
+    sleep 1
+    if ! hyprctl monitors -j 2>/dev/null | jq -e 'any(.[]; .name | test("^(HEADLESS|FALLBACK)") | not)' >/dev/null; then
+      hyprctl reload >/dev/null
+    fi ;;
+  *)
+    if [ "${NC_LANGUE:-fr}" = en ]; then
+      cat <<'FIN'
+# nc-displays: project to a second display or a projector, like Windows + P (window: Super + O).
+#   nc-displays                   open the projection window
+#   nc-displays pc                PC screen only (the second display turns off)
+#   nc-displays mirror            the same desktop on both displays
+#   nc-displays extend [SIDE]     a bigger desktop, second display on the right (default), left, up or down
+#   nc-displays second            second screen only (the PC screen turns off)
+#   nc-displays next              next mode, in this order
+#   nc-displays wireless          project wirelessly (Miracast, with gnome-network-displays)
+#   nc-displays state             the state as JSON (for the window)
+# The choice is remembered for each display (by its model) in ~/.config/nc/ecrans.conf, read by
+# ~/.config/hypr/nc/ecrans.lua: plugged in again, a display gets its mode back; a new display extends the desktop.
+FIN
+    else
+      sed -n '2,13p' "$0"
+    fi
+    exit 1 ;;
+esac

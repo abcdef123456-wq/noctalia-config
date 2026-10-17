@@ -11,7 +11,7 @@ set -uo pipefail
 
 COLORS="$HOME/.config/noctalia/colors.json"
 OUT="$HOME/.cache/nc/term-logo.png"
-DESSIN="$HOME/.cache/nc/term-dessin.png"
+DESSIN="${NC_DESSIN:-$HOME/.cache/nc/term-dessin.png}"   # NC_DESSIN : ailleurs (logo de la fenêtre de projection)
 LOGOS="$HOME/.local/share/nc/logos"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/style.conf" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 

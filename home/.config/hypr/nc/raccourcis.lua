@@ -277,6 +277,11 @@ touche(SUPER .. " + SHIFT + code:9", cmd(barre .. "session"),       trad("Systè
 touche(SUPER .. " + ALT + code:33", cmd(barre .. "power-cycle"),    trad("Système|Changer de profil d'énergie", "Switch power profile"))
 touche(SUPER .. " + ALT + code:42", function() nc.mode_jeu() end,   trad("Système|Mode jeu (effets coupés, pas de notifications)", "Game Mode (effects off, no notifications)"))
 touche(SUPER .. " + code:57", cmd("noctalia msg nightlight-force-toggle"), trad("Système|Lumière de nuit", "Night light"))
+-- Projection (comme Windows + P) : miroir, étendre, un seul écran (nc-ecrans) ; sans l'île, passe au mode suivant.
+-- Aussi la touche « écran / projecteur » des portables (XF86Display)
+local projection = cmd("qs -c nc-ile ipc call ile projection 2>/dev/null || ~/.local/bin/nc-ecrans suivant")
+touche(SUPER .. " + code:32", projection, trad("Système|Projeter sur un second écran (miroir, étendre…)", "Project to a second display (mirror, extend…)"))
+pcall(touche, "XF86Display", projection)
 local halo = nc.guillemets(nc.t("Halo musical", "Music Glow"))
 touche(SUPER .. " + ALT + code:58", cmd("systemctl --user is-active --quiet nc-pouls"
     .. " && { systemctl --user stop nc-pouls; notify-send -a " .. halo .. " -t 2000 "
