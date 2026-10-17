@@ -2,7 +2,7 @@
 # nc-term-logo : logo du terminal (accueil fastfetch) aux couleurs du thème.
 #   nc-term-logo              logo de la distribution (SVG officiel) rempli d'un dégradé couleur principale -> secondaire,
 #                             avec un léger halo : ~/.cache/nc/term-logo.png ; puis le dessin ci-dessous s'il est choisi
-#   nc-term-logo dessin [NOM] logo dessiné comme une icône : dégradé de haut en bas sur un fond sombre éclairé au centre
+#   nc-term-logo dessin [NOM] logo dessiné : silhouette en dégradé de haut en bas (couleurs du fond d'écran), fond transparent
 #                             (NOM : distribution, arch, fedora, macOS, Windows… comme TERMINAL_LOGO) :
 #                             ~/.cache/nc/term-dessin.png ; logos dans ~/.local/share/nc/logos (Simple Icons, CC0)
 # Ne refait rien si les couleurs et le logo n'ont pas changé. Appelé par nc-theme-sync à chaque changement de couleurs
@@ -51,7 +51,7 @@ mix() {
 }
 
 dessin() {
-  local nom=${1:-$(reglage TERMINAL_LOGO)} svg key tmp centre haut bas
+  local nom=${1:-$(reglage TERMINAL_LOGO)} svg key tmp haut bas
   nom=${nom:-distribution}
   if [ "$nom" = distribution ]; then
     svg="$(svg_depot "${ID:-linux}" || svg_systeme || svg_depot linux)"
@@ -59,22 +59,18 @@ dessin() {
     svg="$(svg_depot "$nom" || { [ "$(echo "$nom" | tr '[:upper:]' '[:lower:]')" = "${ID:-}" ] && svg_systeme; })"
   fi
   [ -n "$svg" ] || return 1          # pas de dessin pour ce logo : l'accueil garde le logo de fastfetch
-  key="$p $s $nom $svg d4"
+  key="$p $s $nom $svg d5"
   [ -r "$DESSIN" ] && [ "$(cat "$DESSIN.key" 2>/dev/null)" = "$key" ] && return 0
   mkdir -p "$(dirname "$DESSIN")"
   tmp=$(mktemp -d)
-  centre=$(mix "$p" "#07080c" 26)    # fond : la couleur principale, très assombrie, qui s'éteint vers les bords
-  haut=$(mix "#ffffff" "$p" 30)      # logo : couleur principale éclaircie en haut, secondaire en bas
+  haut=$(mix "#ffffff" "$p" 30)      # couleur principale éclaircie en haut, secondaire en bas
   bas=$(mix "#ffffff" "$s" 8)
   if [ "${ID:-}" = arch ] && [ "$svg" != "${svg#/usr/}" ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
-  magick -background none -density 600 "$tmp/logo.svg" -trim +repage -resize 280x280 \
+  # Juste le logo, sur fond transparent (pas de carré autour) : silhouette remplie du dégradé
+  magick -background none -density 600 "$tmp/logo.svg" -trim +repage -resize 460x460 \
     -gravity center -extent 512x512 -alpha extract "$tmp/mask.png" &&
-  magick -size 512x512 "radial-gradient:$centre-#07080c" -modulate 100,190 "$tmp/fond.png" &&
-  magick -size 512x512 "gradient:$haut-$bas" "$tmp/mask.png" -alpha off -compose CopyOpacity -composite "$tmp/logo.png" &&
-  magick -size 512x512 "xc:$p" \( "$tmp/mask.png" -blur 0x16 -evaluate multiply 0.22 \) \
-    -alpha off -compose CopyOpacity -composite "$tmp/halo.png" &&
-  magick "$tmp/fond.png" "$tmp/halo.png" -compose Over -composite "$tmp/logo.png" -compose Over -composite \
-    -strip "PNG24:$tmp/out.png" &&
+  magick -size 512x512 "gradient:$haut-$bas" "$tmp/mask.png" -alpha off -compose CopyOpacity -composite \
+    -strip "PNG32:$tmp/out.png" &&
     mv "$tmp/out.png" "$DESSIN" && echo "$key" > "$DESSIN.key"
   local r=$?
   rm -rf "$tmp"
