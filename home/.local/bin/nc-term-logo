@@ -59,17 +59,18 @@ dessin() {
     svg="$(svg_depot "$nom" || { [ "$(echo "$nom" | tr '[:upper:]' '[:lower:]')" = "${ID:-}" ] && svg_systeme; })"
   fi
   [ -n "$svg" ] || return 1          # pas de dessin pour ce logo : l'accueil garde le logo de fastfetch
-  key="$p $s $nom $svg d5"
+  key="$p $s $nom $svg d6"
   [ -r "$DESSIN" ] && [ "$(cat "$DESSIN.key" 2>/dev/null)" = "$key" ] && return 0
   mkdir -p "$(dirname "$DESSIN")"
   tmp=$(mktemp -d)
   haut=$(mix "#ffffff" "$p" 30)      # couleur principale éclaircie en haut, secondaire en bas
   bas=$(mix "#ffffff" "$s" 8)
   if [ "${ID:-}" = arch ] && [ "$svg" != "${svg#/usr/}" ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
-  # Juste le logo, sur fond transparent (pas de carré autour) : silhouette remplie du dégradé
-  magick -background none -density 600 "$tmp/logo.svg" -trim +repage -resize 460x460 \
-    -gravity center -extent 512x512 -alpha extract "$tmp/mask.png" &&
-  magick -size 512x512 "gradient:$haut-$bas" "$tmp/mask.png" -alpha off -compose CopyOpacity -composite \
+  # Juste le logo, sur fond transparent (pas de carré autour) : silhouette remplie du dégradé, centrée dans une image
+  # un peu plus haute que large (20 colonnes x 12 lignes du terminal, la hauteur des infos de fastfetch)
+  magick -background none -density 600 "$tmp/logo.svg" -trim +repage -resize 440x440 \
+    -gravity center -extent 520x624 -alpha extract "$tmp/mask.png" &&
+  magick -size 520x624 "gradient:$haut-$bas" "$tmp/mask.png" -alpha off -compose CopyOpacity -composite \
     -strip "PNG32:$tmp/out.png" &&
     mv "$tmp/out.png" "$DESSIN" && echo "$key" > "$DESSIN.key"
   local r=$?

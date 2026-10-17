@@ -69,7 +69,8 @@ if [ "$style" = dessin ] && [ "$choix" != aucun ] && [ "$choix" != photo ] && [ 
 fi
 case "$choix" in
   distribution) ;;
-  dessin) LOGO_OPT=(--logo "$DESSIN" --logo-type kitty-direct --logo-width 20 --logo-height 10) ;;
+  # Logo dessiné : sur 12 lignes, la hauteur des infos (la marge est dans l'image, centrée), décollé du bord
+  dessin) LOGO_OPT=(--logo "$DESSIN" --logo-type kitty-direct --logo-width 20 --logo-height 12 --logo-padding-left 2 --logo-padding-right 3) ;;
   aucun) LOGO_OPT=(--logo none) ;;
   photo) if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$HOME/.face" ]; then
            LOGO_OPT=(--logo "$HOME/.face" --logo-type kitty-direct --logo-width 20 --logo-height 10)
