@@ -75,7 +75,7 @@ Item {
                                 visible: (carte.s.terminal || 0) > 0
                                 width: 30; height: 24; radius: 12; color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
                                 Ico { anchors.centerIn: parent; nom: /kitty|term|foot|alacritty|ghostty|konsole|wezterm|tilix|ptyxis/i.test(carte.s.classe || "kitty") ? "terminal" : "code"; taille: 15 }
-                                MouseArea { id: zt; anchors.fill: parent; hoverEnabled: true; onClicked: { Agents.allerTerminal(carte.s.terminal); Etat.fermer() } }
+                                MouseArea { id: zt; anchors.fill: parent; hoverEnabled: true; onClicked: { Agents.allerTerminal(carte.s.terminal, carte.s.shell); Etat.fermer() } }
                             }
                         }
                         // Dernières étapes (la plus récente en bas, en clair)

@@ -47,7 +47,11 @@ Singleton {
         onNotification: notif => {
             notif.tracked = true
             var h = Object.assign({}, n.heures); h[notif.id] = Date.now(); n.heures = h
+            if (notif.lastGeneration) return                // gardée d'avant un rechargement de l'île : déjà vue
             if (n.concentration && notif.urgency !== NotificationUrgency.Critical) return
+            // Rangée dans le centre sans bannière (indice « x-nc-discret » : la config affiche déjà une réaction
+            // rapide dans la pilule, comme ⚡ Performance, que la bannière cachait)
+            if (notif.hints && notif.hints["x-nc-discret"]) return
             // Bannières et leur durée : nc-reglages (ILE_BANNIERES, ILE_BANNIERE_DUREE en secondes)
             if (Reglages.val("ILE_BANNIERES", "oui") === "non" && notif.urgency !== NotificationUrgency.Critical) return
             n.banniere = notif

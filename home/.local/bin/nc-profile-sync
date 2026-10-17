@@ -103,7 +103,8 @@ proposer_nvidia() {
   [ -e "$deja" ] && return 0
   : > "$deja"
   (
-    choix="$(notify-send -a "Énergie" -t 15000 --action=session="Rouvrir la session" \
+    # Dans le centre de notifications seulement : en pop-up, l'île montre déjà « ⚡ Performance » (x-nc-discret)
+    choix="$(notify-send -a "Énergie" -t 15000 -h boolean:x-nc-discret:true --action=session="Rouvrir la session" \
       "Performance : carte NVIDIA" \
       "Les applis que tu lances l'utilisent déjà. Pour les prises HDMI / USB-C et tout le bureau, rouvre la session : elle démarrera avec la NVIDIA." 2>/dev/null)"
     [ "$choix" = session ] && { uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()'; }

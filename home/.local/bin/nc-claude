@@ -12,6 +12,9 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude ia IA EVENEMENT   appelé par leurs hooks ou leur extension ; nc-claude agy EVENEMENT : par Antigravity
   nc-claude detecter | actualiser   IA présentes pas encore branchées / remettre celles branchées au format du jour
   nc-claude ecrire SESSION TEXTE   écrit à l'agent de cette session (tapé dans son terminal kitty, puis Entrée)
+  nc-claude aller PID [SHELL]      va sur ce terminal (et, dans kitty, sur l'onglet de ce shell)
+Notifications de Claude (terminé, t'attend) : envoyées par nc-claude à la place des siennes ; un clic ramène sur
+son terminal, et elles s'en vont seules quand tu y retournes ou qu'il repart.
   nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
 question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
@@ -335,8 +338,6 @@ def demande(ev, genre, ia="claude"):
 
 
 def hook():
-    if reglage("CLAUDE_ILE", "oui") == "non":
-        return
     try:
         ev = json.load(sys.stdin)
     except ValueError:
@@ -346,6 +347,9 @@ def hook():
     nom = ev.get("hook_event_name") or ""
     if ev.get("agent_id") and nom not in ("PermissionRequest", "PreToolUse"):
         return                                         # sous-agents : seule la session principale est suivie
+    # Coupé dans nc-reglages : rien dans l'île (elle cache ces sessions), mais le suivi continue pour les notifications
+    if reglage("CLAUDE_ILE", "oui") == "non" and (nom == "PermissionRequest" or os.environ.get("NC_CLAUDE_SYNC")):
+        return
     if nom == "PermissionRequest":
         return demande(ev, "permission")
     if nom == "PreToolUse" and ev.get("tool_name") == "AskUserQuestion" and os.environ.get("NC_CLAUDE_SYNC"):
@@ -377,12 +381,92 @@ def hook():
             t = ev.get("notification_type") or ""
             if t == "idle_prompt":
                 s["etat"] = "attente"
+                if not notif_ouverte(d, s["id"]):
+                    notifier(s, "Claude t'attend", s["projet"] + " : à toi de répondre")
             elif t == "permission_prompt" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
                 s["etat"] = "terminal"         # Claude attend une réponse dans le terminal
+                notifier(s, "Claude demande ton accord", s["projet"] + " : " + court(ev.get("message"), 120))
+            elif t in ("agent_needs_input", "elicitation_dialog"):
+                notifier(s, "Claude t'attend", s["projet"] + " : " + court(ev.get("message"), 120))
         elif nom == "Stop":
             s["etat"] = "fini"
             s["fin"] = time.time()
             s["message"] = court(ev.get("last_assistant_message"), 160)
+            notifier(s, "Claude a terminé", s["projet"] + (" : " + s["message"] if s["message"] else ""))
+
+
+# ── Notifications : les nôtres à la place de celles de Claude ─────────────────────────────────────────────────────────
+# Claude envoie les siennes par son terminal (kitty) : elles restaient dans la liste, et un clic ramenait sur une autre
+# fenêtre que la sienne. « nc-claude installer » les coupe (preferredNotifChannel) ; celles-ci ramènent sur le bon
+# terminal (et le bon onglet de kitty) et s'en vont seules dès que tu y retournes, que Claude repart ou se ferme.
+def notif_ouverte(d, sid):
+    try:
+        os.kill(int(d.get("notifs", {}).get(sid) or 0) or -1, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def notifier(s, titre, texte):
+    """Lance la notification de cette session en arrière-plan (le hook, lui, rend la main tout de suite) ; rien si tu
+    es déjà sur son terminal."""
+    if not shutil.which("notify-send") or terminal_actif(s.get("terminal")):
+        return
+    subprocess.Popen([os.path.abspath(sys.argv[0]), "notification", s["id"], titre, texte], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def notification(sid, titre, texte):
+    moi = str(os.getpid())
+    with Etat() as d:
+        s = d["sessions"].get(sid)
+        if not s:
+            return
+        d.setdefault("notifs", {})[sid] = moi          # une seule par session : la précédente se ferme d'elle-même
+        term, shell = s.get("terminal") or 0, s.get("shell") or 0
+        icone = (s.get("classe") or "utilities-terminal").lower()
+    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", "default=Ouvrir", titre, texte],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    nid = p.stdout.readline().strip()
+    debut = time.time()
+    while p.poll() is None:
+        time.sleep(1)
+        try:
+            with open(ETAT, encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        s = d.get("sessions", {}).get(sid)
+        if (not s or d.get("notifs", {}).get(sid) != moi or terminal_actif(term) or time.time() - debut > 4 * 3600
+                or (s.get("etat") in ("travail", "demande") and s.get("maj", 0) > debut)):
+            if nid.isdigit():
+                subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
+                                "--object-path", "/org/freedesktop/Notifications",
+                                "--method", "org.freedesktop.Notifications.CloseNotification", nid],
+                               capture_output=True, timeout=5)
+            p.terminate()
+            break
+    else:
+        if p.stdout.read().strip() == "default":     # clic sur la notification
+            aller(term, shell)
+    with Etat() as d:
+        if d.get("notifs", {}).get(sid) == moi:
+            del d["notifs"][sid]
+
+
+def aller(term, shell=0):
+    """Va sur le terminal d'une session : sa fenêtre (ramenée si elle est réduite) et, dans kitty, son onglet."""
+    term, shell = int(term or 0), int(shell or 0)
+    sock = socket_kitty(term)
+    if sock and shell:
+        subprocess.run(["kitty", "@", "--to", "unix:" + sock, "focus-window", "--match", f"pid:{shell}"],
+                       capture_output=True, timeout=5)
+    a = next((w.get("address") for w in fenetres() if w.get("pid") == term), "")
+    fenetre = os.path.join(HOME, ".local/bin/nc-fenetre")
+    if a and os.access(fenetre, os.X_OK):
+        subprocess.run([fenetre, "aller", a], capture_output=True, timeout=5)
+    elif term:
+        subprocess.run(["hyprctl", "dispatch", f"hl.dsp.focus({{ window = 'pid:{term}' }})"], capture_output=True, timeout=5)
 
 
 # ── Les autres IA (Antigravity, opencode…) : même suivi, quelle que soit l'IA ────────────────────────────────────────
@@ -912,8 +996,9 @@ def ecrire_settings(cfg):
     os.replace(tmp, SETTINGS)
 
 
-def installer():
-    cfg = retirer_de(lire_settings())
+def installer(bavard=True):
+    avant = lire_settings()
+    cfg = retirer_de(json.loads(json.dumps(avant)))
     hooks = cfg.setdefault("hooks", {})
     vite = {"type": "command", "command": COMMANDE, "async": True, "timeout": 10}
     for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"):
@@ -923,7 +1008,13 @@ def installer():
         {"hooks": [{"type": "command", "command": COMMANDE, "timeout": 600}]})
     hooks.setdefault("PreToolUse", []).append(
         {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "NC_CLAUDE_SYNC=1 " + COMMANDE, "timeout": 600}]})
-    ecrire_settings(cfg)
+    # Les notifications de Claude (par son terminal) : remplacées par celles de nc-claude (voir notifier)
+    if cfg.get("preferredNotifChannel", "auto") == "auto":
+        cfg["preferredNotifChannel"] = "notifications_disabled"
+    if cfg != avant:
+        ecrire_settings(cfg)
+    if not bavard:
+        return
     print(f"Claude Code s'affiche maintenant dans l'île (hooks ajoutés à {SETTINGS.replace(HOME, '~')}).")
     print("Les sessions de Claude déjà ouvertes le prennent en compte d'elles-mêmes (sinon : relance claude).")
     print("Pour l'enlever : nc-claude retirer")
@@ -933,7 +1024,10 @@ def retirer():
     if not os.path.exists(SETTINGS):
         print("Rien à retirer.")
         return
-    ecrire_settings(retirer_de(lire_settings()))
+    cfg = retirer_de(lire_settings())
+    if cfg.get("preferredNotifChannel") == "notifications_disabled":
+        del cfg["preferredNotifChannel"]           # ses propres notifications reviennent
+    ecrire_settings(cfg)
     print("Hooks de l'île retirés de " + SETTINGS.replace(HOME, "~") + ".")
 
 
@@ -1053,6 +1147,11 @@ def main():
         print(" ".join(ia for ia in IAS if present(ia) and not installe(ia) and reglage(ia.upper() + "_ILE", "oui") != "non"))
     elif a[0] == "actualiser":
         # IA déjà branchées : remises au format du jour (nc-maj), sans rien demander
+        try:
+            if "nc-claude hook" in open(SETTINGS, encoding="utf-8").read():
+                installer(bavard=False)
+        except OSError:
+            pass
         for ia in IAS:
             if installe(ia) and reglage(ia.upper() + "_ILE", "oui") != "non":
                 installer_ia(ia, bavard=False)
@@ -1062,6 +1161,10 @@ def main():
         diag()
     elif a[0] == "ecrire" and len(a) >= 3:
         ecrire(a[1], " ".join(a[2:]))
+    elif a[0] == "notification" and len(a) >= 4:
+        notification(a[1], a[2], a[3])
+    elif a[0] == "aller" and len(a) >= 2:
+        aller(a[1], a[2] if len(a) > 2 else 0)
     else:
         print(__doc__.strip())
 
