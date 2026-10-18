@@ -87,7 +87,8 @@ Item {
                             readonly property bool masquee: groupe.modelData.masquee
                             readonly property bool active: !masquee && Hyprland.activeToplevel === modelData
                             width: liste.width; height: p.serre ? 46 : 58; radius: 14
-                            color: zone.containsMouse ? Couleurs.carteSurvol : Couleurs.carte
+                            color: survolLigne.hovered ? Couleurs.carteSurvol : Couleurs.carte
+                            HoverHandler { id: survolLigne }
                             border.width: active ? 1.5 : 0; border.color: Couleurs.accent
                             Image {
                                 id: ic

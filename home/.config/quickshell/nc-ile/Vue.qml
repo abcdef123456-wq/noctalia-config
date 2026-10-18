@@ -145,7 +145,9 @@ PanelWindow {
                     property var toplevel: case_.modelData
                     width: case_.rw * case_.echelle; height: case_.rh * case_.echelle
                     x: (case_.width - width) / 2; y: (case_.height - 34 - height) / 2
-                    scale: zf.pressed ? 0.97 : (zf.containsMouse ? 1.03 : 1)
+                    // Survol de toute la carte, boutons du coin compris : sinon, la souris sur un bouton la faisait
+                    // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
+                    scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
                     Drag.active: zf.drag.active
                     Drag.source: carte
@@ -155,7 +157,7 @@ PanelWindow {
                     Rectangle {
                         anchors.fill: parent; anchors.margins: -3; radius: 14
                         color: "transparent"; border.width: 3
-                        border.color: zf.containsMouse ? Couleurs.accent : "transparent"
+                        border.color: survol.hovered ? Couleurs.accent : "transparent"
                     }
                     ScreencopyView {
                         id: capture
