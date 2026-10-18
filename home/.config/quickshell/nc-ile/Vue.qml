@@ -1,7 +1,8 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
 //   Même allure que le carrousel (Super + W) : un cadre sous la barre, sur le fond d'écran flouté.
 //   Le bureau affiché en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
-//   les masquées dans une bande en dessous ; les bureaux de l'écran en haut.
+//   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; les bureaux de l'écran en haut.
+//   Glisser une fenêtre sur une autre : elles échangent leurs places.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
 //   Au survol : boutons Masquer et Fermer · les fenêtres masquées (Super + H, nc-fenetre) sont des cartes de la grille,
 //   marquées « Masquée » : un clic les ramène sur le bureau affiché, au premier plan
@@ -33,8 +34,9 @@ PanelWindow {
     // Bureaux de cet écran (les bureaux cachés « special: » à part), dans l'ordre
     readonly property var bureaux: Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === moniteur).sort((a, b) => a.id - b.id)
     // Fenêtres du bureau affiché, puis les masquées (sur l'écran actif seulement)
-    readonly property var reduites: Hyprland.focusedMonitor !== moniteur ? []
-        : Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.name === "special:reduites" && t.wayland)
+    // Les masquées de ce bureau (à la place qu'elles avaient) ; sans trace de leur bureau : sur l'écran actif
+    readonly property var reduites: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.name === "special:reduites" && t.wayland
+        && (tailles[adresse(t)] ? tailles[adresse(t)].ws === bureau : Hyprland.focusedMonitor === moniteur))
     readonly property var fenetres: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.id === bureau && t.wayland).concat(reduites)
     function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
@@ -62,11 +64,14 @@ PanelWindow {
                 || t.match(/\[wallpaper\.default\]\s*\npath\s*=\s*"([^"]+)"/)
         return m ? m[1] : ""
     }
-    // Taille des fenêtres masquées avant d'être cachées (nc-fenetre reduire)
+    // Place, taille et bureau des fenêtres masquées avant d'être cachées (nc-fenetre reduire)
     FileView { id: taillesMasquees; path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-reduites-tailles"; blockLoading: true }
     readonly property var tailles: {
         var r = {}
-        for (var l of (taillesMasquees.text() || "").split("\n")) { var c = l.trim().split(/\s+/); if (c.length === 3) r[c[0]] = [+c[1], +c[2]] }
+        for (var l of (taillesMasquees.text() || "").split("\n")) {
+            var c = l.trim().split(/\s+/)
+            if (c.length >= 6) r[c[0]] = { x: +c[1], y: +c[2], w: +c[3], h: +c[4], ws: +c[5] }
+        }
         return r
     }
 
@@ -158,32 +163,24 @@ PanelWindow {
         readonly property real mh: mon.height ? mon.height / ech : v.height
         readonly property real mx: mon.x || 0
         readonly property real my: mon.y || 0
+        // Taille et place (en points, sur l'écran) : celles d'avant pour une masquée
         function taille(t) {
-            if (v.masquee(t) && v.tailles[v.adresse(t)]) return v.tailles[v.adresse(t)]
+            var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
+            if (m) return [m.w, m.h]
             var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2]
         }
-        // Bande des masquées, en bas
-        readonly property var masquees: v.fenetres.filter(t => v.masquee(t))
-        readonly property real ecartM: 22
-        readonly property real air: masquees.length ? 78 : 0          // entre le bureau et la bande
-        readonly property real hM: masquees.reduce((m, t) => Math.max(m, taille(t)[1]), 0)
-        readonly property real lM: masquees.reduce((l, t) => l + taille(t)[0], 0)
-        // Une seule échelle pour tout, masquées comprises : le bureau et la bande tiennent ensemble, sans déformer
-        readonly property real e: Math.min(width / mw, (height - air) / (mh + hM),
-                                           lM > 0 ? (width - (masquees.length - 1) * ecartM) / lM : Infinity)
-        readonly property real em: e
-        readonly property real bande: hM * e
-        // Le tout centré verticalement : bureau, puis la bande
-        readonly property real by: (height - mh * e - air - bande) / 2
-        readonly property real bx: (width - mw * e) / 2
-        readonly property real yBande: by + mh * e + air
-        function xMasquee(t) {
-            var total = (masquees.length - 1) * ecartM
-            for (var u of masquees) total += taille(u)[0] * em
-            var x = (width - total) / 2
-            for (var u2 of masquees) { if (u2 === t) return x; x += taille(u2)[0] * em + ecartM }
-            return x
+        function place(t) {
+            var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
+            if (m) return [m.x, m.y]
+            var o = t.lastIpcObject || {}
+            if (o.at && !v.masquee(t)) return o.at
+            var tl = taille(t); return [mx + (mw - tl[0]) / 2, my + (mh - tl[1]) / 2]   // masquée sans trace : au milieu
         }
+        readonly property var masquees: v.fenetres.filter(t => v.masquee(t))
+        // Une seule échelle pour tout le bureau, sans déformer
+        readonly property real e: Math.min(width / mw, height / mh)
+        readonly property real bx: (width - mw * e) / 2
+        readonly property real by: (height - mh * e) / 2
 
         // Le cadre de l'écran
         Rectangle {
@@ -195,11 +192,6 @@ PanelWindow {
             visible: zone.n === zone.masquees.length; opacity: v.entree
             text: Reglages.t("Aucune fenêtre sur ce bureau", "No windows on this desktop"); secondaire: true; font.pixelSize: 18
         }
-        Texte {
-            visible: zone.masquees.length > 0; opacity: 0.8 * v.entree
-            anchors.horizontalCenter: parent.horizontalCenter; y: zone.yBande - 44
-            text: Reglages.t("Fenêtres masquées", "Hidden windows"); color: "#ffffff"; font.pixelSize: 13; font.weight: Font.DemiBold
-        }
         Repeater {
             model: v.fenetres
             Item {
@@ -209,11 +201,29 @@ PanelWindow {
                 readonly property var ipc: modelData.lastIpcObject || ({})
                 readonly property bool masquee: v.masquee(modelData)
                 readonly property var sz: zone.taille(modelData)
-                readonly property real echelle: masquee ? zone.em : zone.e
-                width: sz[0] * echelle; height: sz[1] * echelle
-                x: masquee ? zone.xMasquee(modelData) : zone.bx + ((ipc.at ? ipc.at[0] : zone.mx) - zone.mx) * zone.e
-                y: masquee ? zone.yBande : zone.by + ((ipc.at ? ipc.at[1] : zone.my) - zone.my) * zone.e
-                z: survol.hovered || zf.drag.active ? 5 : 0
+                readonly property var pl: zone.place(modelData)
+                width: sz[0] * zone.e; height: sz[1] * zone.e
+                x: zone.bx + (pl[0] - zone.mx) * zone.e
+                y: zone.by + (pl[1] - zone.my) * zone.e
+                // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus
+                z: survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0)
+
+                // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
+                DropArea {
+                    id: depot
+                    anchors.fill: parent
+                    enabled: !case_.masquee
+                    onDropped: d => {
+                        var t = d.source && d.source.toplevel
+                        if (t && t !== case_.modelData && !v.masquee(t))
+                            v.dispatch("hl.dsp.window.swap({ window = 'address:" + v.adresse(t) + "', target = 'address:" + v.adresse(case_.modelData) + "' })")
+                    }
+                }
+                Rectangle {
+                    anchors.fill: parent; anchors.margins: 2; radius: 12; z: 1
+                    visible: depot.containsDrag && depot.drag.source !== carte
+                    color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
+                }
                 opacity: v.entree
                 scale: 0.92 + 0.08 * v.entree
 
@@ -257,6 +267,12 @@ PanelWindow {
                             width: t; height: t; sourceSize: Qt.size(192, 192)
                             source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), "application-x-executable")
                         }
+                    }
+                    // Masquée : voilée et cerclée, pour la distinguer des fenêtres affichées
+                    Rectangle {
+                        visible: case_.masquee; z: 1
+                        anchors.fill: parent; radius: 10
+                        color: Qt.rgba(0, 0, 0, 0.35); border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.45)
                     }
                     // Badge « Masquée », en haut à gauche
                     Rectangle {
