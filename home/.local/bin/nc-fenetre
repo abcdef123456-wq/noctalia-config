@@ -35,6 +35,10 @@ case "$action" in
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
     [ -n "$a" ] && [ "$a" != null ] || exit 0
     [ "$(bureau_de "$a")" = "$CACHE" ] && exit 0
+    # Sa taille à l'écran, pour que la vue des fenêtres la montre à la même échelle que le bureau (cachée, elle
+    # prendrait toute la place de son bureau caché)
+    t="$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.size[0]) \(.size[1])"' | head -1)"
+    [ -n "$t" ] && { grep -v "^$a " "$pile-tailles" 2>/dev/null; echo "$a $t"; } > "$pile-tailles.tmp" && mv -f "$pile-tailles.tmp" "$pile-tailles"
     prop "$a" opacity 0; sleep 0.14
     prop "$a" no_anim 1
     eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })"

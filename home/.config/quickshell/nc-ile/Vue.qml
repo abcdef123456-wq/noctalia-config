@@ -1,4 +1,5 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
+//   Même allure que le carrousel (Super + W) : un cadre sous la barre, sur le fond d'écran flouté.
 //   Le bureau affiché en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
 //   les masquées dans une bande en dessous ; les bureaux de l'écran en haut.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
@@ -9,6 +10,9 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import Quickshell.Io
+import Quickshell.Widgets
+import QtQuick.Effects
 
 PanelWindow {
     id: v
@@ -47,9 +51,45 @@ PanelWindow {
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
     Behavior on entree { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 220; easing.type: Easing.OutCubic } }
 
+    // ── Fond comme le carrousel (Super + W) : un cadre sous la barre, le fond d'écran de cet écran flouté ──
+    readonly property int hautBarre: 42
+    readonly property int bord: 8
+    // Le fond d'écran : celui que Noctalia a retenu pour cet écran, en version floutée du carrousel s'il l'a préparée
+    FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true }
+    readonly property string fondOriginal: {
+        var t = etatNoctalia.text() || "", nom = (v.modelData.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        var m = t.match(new RegExp("\\[wallpaper\\.monitors\\.\"?" + nom + "\"?\\]\\s*\\npath\\s*=\\s*\"([^\"]+)\""))
+                || t.match(/\[wallpaper\.default\]\s*\npath\s*=\s*"([^"]+)"/)
+        return m ? m[1] : ""
+    }
+    // Taille des fenêtres masquées avant d'être cachées (nc-fenetre reduire)
+    FileView { id: taillesMasquees; path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-reduites-tailles"; blockLoading: true }
+    readonly property var tailles: {
+        var r = {}
+        for (var l of (taillesMasquees.text() || "").split("\n")) { var c = l.trim().split(/\s+/); if (c.length === 3) r[c[0]] = [+c[1], +c[2]] }
+        return r
+    }
+
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(0, 0, 0, 0.74 * v.entree)
+        color: Qt.rgba(0, 0, 0, 0.35 * v.entree)
+        MouseArea { anchors.fill: parent; onClicked: v.fermer() }
+    }
+    ClippingRectangle {
+        id: cadre
+        x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
+        radius: 10; color: Couleurs.carte
+        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
+        opacity: v.entree
+        // Flouté ici (la version floutée du carrousel est en WebP, que Qt ne lit pas toujours) ; petite image : flou léger
+        Image {
+            id: fond
+            anchors.fill: parent; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: false
+            sourceSize: Qt.size(width / 3, height / 3)
+            source: v.fondOriginal !== "" ? "file://" + v.fondOriginal : ""
+        }
+        MultiEffect { anchors.fill: parent; source: fond; blurEnabled: true; blur: 1; blurMax: 40; autoPaddingEnabled: false }
+        Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.28) }
         MouseArea { anchors.fill: parent; onClicked: v.fermer() }
     }
     Item {
@@ -63,7 +103,7 @@ PanelWindow {
     Row {
         id: rangee
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 70 + (1 - v.entree) * -20
+        y: cadre.y + 26 + (1 - v.entree) * -20
         spacing: 10
         opacity: v.entree
         Repeater {
@@ -109,7 +149,7 @@ PanelWindow {
     // ── Le bureau en miniature : une seule échelle pour toutes les fenêtres, chacune à sa place ; les masquées en dessous ──
     Item {
         id: zone
-        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: 44; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
+        anchors { top: rangee.bottom; topMargin: 32; bottom: cadre.bottom; bottomMargin: 30; left: cadre.left; leftMargin: 50; right: cadre.right; rightMargin: 50 }
         readonly property int n: v.fenetres.length
         // L'écran, en points
         readonly property var mon: v.moniteur && v.moniteur.lastIpcObject ? v.moniteur.lastIpcObject : ({})
@@ -118,7 +158,10 @@ PanelWindow {
         readonly property real mh: mon.height ? mon.height / ech : v.height
         readonly property real mx: mon.x || 0
         readonly property real my: mon.y || 0
-        function taille(t) { var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2] }
+        function taille(t) {
+            if (v.masquee(t) && v.tailles[v.adresse(t)]) return v.tailles[v.adresse(t)]
+            var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2]
+        }
         // Bande des masquées, en bas
         readonly property var masquees: v.fenetres.filter(t => v.masquee(t))
         readonly property real ecartM: 22
