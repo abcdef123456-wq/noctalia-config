@@ -1,7 +1,8 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
 //   Les fenêtres du bureau affiché en miniatures vivantes ; les bureaux de l'écran en haut.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
-//   Au survol : boutons Réduire et Fermer · en bas, les fenêtres réduites (nc-fenetre) : un clic les ramène
+//   Au survol : boutons Masquer et Fermer · les fenêtres masquées (Super + H, nc-fenetre) sont des cartes de la grille,
+//   marquées « Masquée » : un clic les ramène sur le bureau affiché, au premier plan
 //   Clic sur un bureau : y aller · Échap ou clic dans le vide : fermer
 import QtQuick
 import Quickshell
@@ -23,13 +24,18 @@ PanelWindow {
     readonly property int bureau: moniteur && moniteur.activeWorkspace ? moniteur.activeWorkspace.id : -1
     // Bureaux de cet écran (les bureaux cachés « special: » à part), dans l'ordre
     readonly property var bureaux: Hyprland.workspaces.values.filter(w => w.id > 0 && w.monitor === moniteur).sort((a, b) => a.id - b.id)
-    readonly property var fenetres: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.id === bureau && t.wayland)
-    readonly property var reduites: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.name === "special:reduites")
+    // Fenêtres du bureau affiché, puis les masquées (sur l'écran actif seulement)
+    readonly property var reduites: Hyprland.focusedMonitor !== moniteur ? []
+        : Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.name === "special:reduites" && t.wayland)
+    readonly property var fenetres: Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.id === bureau && t.wayland).concat(reduites)
     function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
     function fermer() { Etat.vueFenetres = false }
     function allerA(t) { dispatch("hl.dsp.focus({ window = 'address:" + adresse(t) + "' })"); fermer() }
+    function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
+    // Une fenêtre masquée revient sur le bureau affiché (nc-fenetre aller), les autres : on y va
+    function activer(t) { if (masquee(t)) { fenetre("aller", t); fermer() } else allerA(t) }
 
     // Ouverture : léger zoom arrière, comme macOS
     property real entree: 0
@@ -46,7 +52,7 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Keys.onEscapePressed: v.fermer()
-        Keys.onReturnPressed: if (v.fenetres.length) v.allerA(v.fenetres[0])
+        Keys.onReturnPressed: if (v.fenetres.length) v.activer(v.fenetres[0])
     }
 
     // ── Bureaux ──
@@ -99,7 +105,7 @@ PanelWindow {
     // ── Fenêtres du bureau, en grille ──
     Item {
         id: zone
-        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: v.reduites.length ? 236 : 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
+        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
         readonly property int n: v.fenetres.length
         // Colonnes : la grille la plus proche de la forme de l'écran (fenêtres en 16:10 environ)
         readonly property int colonnes: Math.max(1, Math.min(n, Math.round(Math.sqrt(n * width / Math.max(1, height) / 1.6))))
@@ -119,6 +125,7 @@ PanelWindow {
                 required property var modelData
                 required property int index
                 readonly property var ipc: modelData.lastIpcObject || ({})
+                readonly property bool masquee: v.masquee(modelData)
                 // Taille réelle de la fenêtre : celle de Hyprland, sinon celle de l'image capturée (en points)
                 readonly property real ech: v.moniteur ? v.moniteur.scale : 1
                 readonly property real rw: ipc.size ? ipc.size[0] : (capture.sourceSize.width > 0 ? capture.sourceSize.width / ech : 1600)
@@ -157,6 +164,27 @@ PanelWindow {
                         live: true
                         layer.enabled: true
                         layer.smooth: true
+                        opacity: case_.masquee ? 0.55 : 1
+                    }
+                    // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
+                    Rectangle {
+                        anchors.fill: parent; radius: 12; color: Couleurs.gris2
+                        visible: case_.masquee && !capture.hasContent
+                        Image {
+                            anchors.centerIn: parent
+                            readonly property real t: Math.min(96, parent.height * 0.4)
+                            width: t; height: t; sourceSize: Qt.size(192, 192)
+                            source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), "application-x-executable")
+                        }
+                    }
+                    // Badge « Masquée », en haut à gauche
+                    Rectangle {
+                        visible: case_.masquee; z: 2
+                        anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
+                        width: badge.implicitWidth + 34; height: 28; radius: 14; color: Qt.rgba(0, 0, 0, 0.65)
+                        Ico { anchors.verticalCenter: parent.verticalCenter; x: 9; nom: "visibility_off"; taille: 15; color: "#ffffff" }
+                        Texte { id: badge; anchors.verticalCenter: parent.verticalCenter; x: 28; text: Reglages.t("Masquée", "Hidden")
+                                font.pixelSize: 12; font.weight: Font.DemiBold; color: "#ffffff" }
                     }
                     // Boutons au survol : réduire, fermer (au-dessus de la zone de clic de la miniature)
                     HoverHandler { id: survol }
@@ -167,7 +195,8 @@ PanelWindow {
                         opacity: survol.hovered ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
                         Repeater {
-                            model: [{ ico: "remove", action: "reduire" }, { ico: "close", action: "fermer" }]
+                            model: case_.masquee ? [{ ico: "close", action: "fermer" }]
+                                                 : [{ ico: "remove", action: "reduire" }, { ico: "close", action: "fermer" }]
                             Rectangle {
                                 required property var modelData
                                 width: 30; height: 30; radius: 15
@@ -190,7 +219,7 @@ PanelWindow {
                         drag.target: carte
                         onClicked: e => {
                             if (e.button === Qt.MiddleButton) v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
-                            else v.allerA(case_.modelData)
+                            else v.activer(case_.modelData)
                         }
                         onReleased: {
                             if (carte.Drag.active) carte.Drag.drop()
@@ -214,50 +243,6 @@ PanelWindow {
                         text: case_.modelData.title || case_.ipc.class || ""; font.pixelSize: 13
                         color: "#ffffff"
                     }
-                }
-            }
-        }
-    }
-
-    // ── Fenêtres masquées (Super + M ou Super + H) : de vraies cartes, icône et nom ; un clic les ramène sur le
-    //    bureau affiché, au premier plan ──
-    Column {
-        visible: v.reduites.length > 0
-        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 30
-        spacing: 12
-        opacity: v.entree
-        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Fenêtres masquées", "Hidden windows"); color: "#ffffff"; opacity: 0.85
-                font.pixelSize: 15; font.weight: Font.DemiBold }
-        Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 14
-            Repeater {
-                model: v.reduites
-                Rectangle {
-                    id: red
-                    required property var modelData
-                    readonly property var ipc: modelData.lastIpcObject || ({})
-                    width: Math.min(170, (v.width - 140) / v.reduites.length - 14); height: 140; radius: 20
-                    color: zr.containsMouse ? Couleurs.gris4 : Couleurs.gris2
-                    border.width: zr.containsMouse ? 2 : 0; border.color: Couleurs.accent
-                    scale: zr.pressed ? 0.95 : (zr.containsMouse ? 1.04 : 1)
-                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                    Column {
-                        anchors.centerIn: parent; width: parent.width - 20; spacing: 10
-                        Image {
-                            id: ic
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: 64; height: 64; sourceSize: Qt.size(128, 128)
-                            source: Quickshell.iconPath(String(red.ipc.class || "").toLowerCase(), "application-x-executable")
-                        }
-                        Texte {
-                            width: parent.width; horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
-                            text: red.modelData.title || red.ipc.class || Reglages.t("Fenêtre", "Window"); font.pixelSize: 13
-                        }
-                    }
-                    MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                onClicked: v.fenetre("aller", red.modelData) }
                 }
             }
         }

@@ -71,9 +71,11 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `glisser` | Détacher et placer librement |
 | `Super` + `Alt` + `clic droit` | Détacher et redimensionner librement |
 | `Super` + `Maj` + `glisser` | Redimensionner (pavé tactile) |
-| `Super` + `M` | Réduire la fenêtre (elle revient par la vue des fenêtres, Spotlight, le dock ou Alt + Tab) |
-| `Super` + `Ctrl` + `M` | Ramener la dernière fenêtre réduite |
-| `Super` + `A` (ou trois doigts vers le haut) | Vue de toutes les fenêtres : clic pour y aller, glisser sur un bureau pour l'y envoyer, clic molette pour fermer |
+| `Super` + `H` ou `Super` + `M` | Masquer la fenêtre (elle revient par la vue des fenêtres, Spotlight, le dock ou Alt + Tab) |
+| Clic sur le rond jaune en haut à gauche de la fenêtre | Masquer la fenêtre (`nc-reglages` → Clavier et souris → Bouton Masquer) |
+| `Super` + `Ctrl` + `M` | Ramener la dernière fenêtre masquée |
+| `Super` + `A` (ou trois doigts vers le haut) | Vue de toutes les fenêtres, les masquées comprises (marquées « Masquée ») : clic pour y aller ou la ramener, glisser sur un bureau pour l'y envoyer, clic molette pour fermer |
+| Trois doigts vers le bas · `Échap` | Refermer la vue des fenêtres |
 | Coins actifs | Pousser la souris dans un coin (au choix dans `nc-reglages` → Clavier et souris) |
 
 Mode **Souris** ou **Les deux** (`nc-reglages` → Clavier et souris), sans toucher au clavier :
