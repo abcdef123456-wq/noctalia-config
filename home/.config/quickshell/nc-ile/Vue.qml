@@ -232,7 +232,8 @@ PanelWindow {
                 // Nom de l'appli et titre, sous la miniature
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: carte.y + carte.height + 10
+                    // Sous la miniature, même quand elle grossit au survol (elle grandit depuis son centre, contour compris)
+                    y: carte.y + carte.height * (1 + carte.scale) / 2 + 3 * carte.scale + 10
                     spacing: 8
                     Image {
                         width: 18; height: 18; sourceSize: Qt.size(36, 36); anchors.verticalCenter: parent.verticalCenter
