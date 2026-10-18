@@ -77,8 +77,8 @@ section « Mes raccourcis » de la fiche).
 | Clic sur le titre de la fenêtre, dans la barre | Page « Fenêtres » de l'île : masquer, ramener, fermer, tout masquer, tout afficher (clic droit : vue des fenêtres) |
 | `Super` + `Ctrl` + `M` | Ramener la dernière fenêtre masquée |
 | `Super` + `A` (ou trois doigts vers le haut) | Vue de toutes les fenêtres, les masquées comprises (marquées « Masquée ») : clic pour y aller ou la ramener, glisser sur un bureau pour l'y envoyer, clic molette pour fermer |
-| Trois doigts vers le bas · `Échap` | Refermer la vue des fenêtres (sans changer de bureau) |
-| Dans la vue : `←` `→`, deux doigts à l'horizontale, clic sur un bureau | Parcourir les bureaux (le cube tourne) ; `Entrée` ou clic sur le bureau : y aller. Animation au choix dans `nc-reglages` → Animations |
+| Trois doigts vers le bas · `Échap` | Refermer la vue des fenêtres : on arrive sur le bureau choisi dans la vue |
+| Dans la vue : `←` `→`, deux doigts à l'horizontale, clic sur un bureau | Parcourir les bureaux (le cube tourne) ; le vrai bureau change en quittant la vue. Animation au choix dans `nc-reglages` → Animations |
 | Coins actifs | Pousser la souris dans un coin (au choix dans `nc-reglages` → Clavier et souris) |
 
 Mode **Souris** ou **Les deux** (`nc-reglages` → Clavier et souris), sans toucher au clavier :

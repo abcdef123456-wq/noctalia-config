@@ -3,7 +3,7 @@
 //   voit derrière) ; pendant la vue, la souris ne donne plus le focus aux fenêtres de dessous.
 //   Les bureaux de l'écran en cube : le choisi devant, le bord des voisins de biais sur les côtés. Parcourir les bureaux
 //   (flèches, deux doigts à l'horizontale, clic sur un voisin ou en haut) fait tourner le cube, en reculant pendant le
-//   mouvement ; le vrai bureau ne change qu'en validant (Entrée, clic sur le bureau choisi ou sur une de ses fenêtres).
+//   mouvement ; le vrai bureau ne change qu'en quittant la vue : on arrive sur le bureau choisi.
 //   Animation, recul, voisins visibles et durée : nc-reglages, section Animations (VUE_*).
 //   Le bureau en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
 //   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; celles dont la place est prise
@@ -13,8 +13,8 @@
 //   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
 //   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Un clic sur une masquée
 //   la ramène, au premier plan, sur le bureau choisi.
-//   Échap, trois doigts vers le bas ou clic hors du bureau : fermer sans changer de bureau (les trois doigts à
-//   l'horizontale, geste de Hyprland, changent le vrai bureau : on y revient)
+//   Quitter (Échap, trois doigts vers le bas, clic hors du bureau) : on va sur le bureau choisi, qui grandit jusqu'à
+//   remplir l'écran.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -54,41 +54,35 @@ PanelWindow {
     function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
-    // Fermer sans valider (Échap, clic à côté) : retour au bureau d'avant si les trois doigts (geste de Hyprland) l'ont
-    // changé ; la vue part une fois Hyprland revenu, rien ne se voit
+    // Quitter la vue, de toutes les façons (Échap, clic, trois doigts vers le bas, une fenêtre, un bureau) : on va sur le
+    // bureau choisi. Il grandit jusqu'à remplir l'écran pendant que Hyprland y passe, derrière ; puis la vue s'efface.
     function fermer() {
-        if (!valide && origine > 0 && bureau > 0 && bureau !== origine) {
-            valide = true
-            dispatch("hl.dsp.focus({ workspace = " + origine + " })")
-            sortie.start()
-            return
-        }
-        Etat.vueFenetres = false
+        if (partant) return
+        partant = true
+        if (choisi > 0 && choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
+        fin = 1
+        sortie.start()
     }
-    Timer { id: sortie; interval: 280; onTriggered: Etat.vueFenetres = false }
-    // Fermer en validant (bureau ou fenêtre choisis) : on reste où l'on va
-    property bool valide: false
-    function quitter() { valide = true; Etat.vueFenetres = false }
-    property int origine: -1
-    // Le bureau choisi dans la vue : on le parcourt sans quitter le bureau affiché ; il suit le vrai bureau s'il change
+    property bool partant: false
+    property real fin: 0
+    readonly property int dureeFin: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 260
+    Behavior on fin { NumberAnimation { duration: v.dureeFin; easing.type: Easing.InOutCubic } }
+    Timer { id: sortie; interval: v.dureeFin + 20; onTriggered: Etat.vueFenetres = false }
+    // Le bureau choisi dans la vue : on le parcourt sans changer de bureau ; il suit le vrai bureau s'il change
     // (trois doigts, Hyprland). Un bureau inconnu un instant (Hyprland pendant une capture…) ne compte pas.
     property int choisi: bureau
-    onBureauChanged: if (bureau > 0) { choisi = bureau; if (origine < 0) origine = bureau }
+    onBureauChanged: if (bureau > 0 && !partant) choisi = bureau
     // Bureau voisin sur cet écran (flèches, clic sur un bord) : le cube tourne
     function voisin(sens) {
         var i = bureaux.findIndex(b => b.id === choisi) + sens
         if (i >= 0 && i < bureaux.length) choisi = bureaux[i].id
     }
-    // Valider : aller sur le bureau choisi
-    function valider() {
-        if (choisi > 0 && choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
-        quitter()
-    }
-    function allerA(t) { fenetre("aller", t); quitter() }   // nc-fenetre : le pointeur reste où il est
+    function valider() { fermer() }
+    function allerA(t) { fenetre("aller", t); fermer() }   // nc-fenetre : le pointeur reste où il est
     function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
     // Une fenêtre masquée revient sur le bureau choisi (nc-fenetre aller), les autres : on y va
     function activer(t) {
-        if (masquee(t)) { Quickshell.execDetached([Etat.bin + "nc-fenetre", "aller", adresse(t), String(choisi)]); quitter(); return }
+        if (masquee(t)) { Quickshell.execDetached([Etat.bin + "nc-fenetre", "aller", adresse(t), String(choisi)]); fermer(); return }
         if (enAttente[adresse(t)]) basculerAttente(t)
         allerA(t)
     }
@@ -111,7 +105,6 @@ PanelWindow {
     property real entree: 0
     Component.onCompleted: {
         Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1
-        if (bureau > 0) origine = bureau
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris == nil then _G.nc_vue_souris = hl.get_config('input:follow_mouse') end hl.config({ input = { follow_mouse = 0 } })"])
     }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
@@ -160,7 +153,7 @@ PanelWindow {
         x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
         radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
         border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
-        opacity: v.entree
+        opacity: v.entree * (1 - v.fin)
     }
     Item {
         anchors.fill: parent
@@ -178,7 +171,7 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         y: cadre.y + 16 + (1 - v.entree) * -20
         spacing: 10
-        opacity: v.entree
+        opacity: v.entree * (1 - v.fin)
         Repeater {
             model: v.bureaux
             Rectangle {
@@ -264,7 +257,7 @@ PanelWindow {
         readonly property bool voisins: anim !== "fondu" && Reglages.val("VUE_VOISINS", "oui") !== "non"
         readonly property real reculMax: Reglages.val("VUE_RECUL", "oui") !== "non" ? 0.16 : 0
         readonly property int duree: Reglages.val("EFFETS", "tous") === "aucun" ? 0
-                                     : Math.max(0, Math.min(2000, parseInt(Reglages.val("VUE_DUREE", "480")) || 0))
+                                     : Math.max(0, Math.min(2000, parseInt(Reglages.val("VUE_DUREE", "320")) || 0))
 
         // Une seule échelle pour tout le bureau, sans déformer ; de la place sur les côtés pour les bureaux voisins
         readonly property real e: Math.min(width * (voisins ? 0.78 : 0.94) / mw, height / mh)
@@ -274,10 +267,15 @@ PanelWindow {
         readonly property real by: (height - fh) / 2
 
         // ── Les bureaux en cube : le choisi au milieu, les voisins de biais de chaque côté (on en voit le bord) ──
-        readonly property int courant: Math.max(0, v.bureaux.findIndex(b => b.id === v.choisi))
-        property real pos: courant
+        // Si le bureau choisi manque un instant de la liste (Hyprland la rafraîchit), le cube reste où il est
+        readonly property int trouve: v.bureaux.findIndex(b => b.id === v.choisi)
+        property int courant: 0
+        onTrouveChanged: if (trouve >= 0) courant = trouve
+        property real pos: 0
+        property bool pret: false                    // à l'ouverture, le cube est déjà en place (pas d'animation)
+        Component.onCompleted: { courant = Math.max(0, trouve); pos = courant; pret = true }
         onCourantChanged: if (!glisse) pos = courant
-        Behavior on pos { enabled: !zone.glisse; NumberAnimation { duration: zone.duree; easing.type: Easing.InOutCubic } }
+        Behavior on pos { enabled: zone.pret && !zone.glisse; NumberAnimation { duration: zone.duree; easing.type: Easing.InOutCubic } }
         // Pas de bureau d'un côté (le premier, le dernier) : l'ensemble se décale vers ce côté, pas de vide inutile
         readonly property real gauche: Math.max(0, Math.min(1, pos))
         readonly property real droite: Math.max(0, Math.min(1, v.bureaux.length - 1 - pos))
@@ -316,8 +314,14 @@ PanelWindow {
         }
         Item {
             id: scene
-            anchors.fill: parent
-            scale: 1 - zone.reculMax * zone.recul
+            // Sortie : le bureau choisi grandit jusqu'à la taille de l'écran, à sa place (centre de l'écran)
+            readonly property real grand: 1 + (1 / zone.e - 1) * v.fin
+            readonly property real fx: zone.bx + zone.decalage + zone.fw / 2 - zone.width / 2   // centre du bureau, depuis le milieu
+            readonly property real fy: zone.by + zone.fh / 2 - zone.height / 2
+            width: zone.width; height: zone.height
+            x: v.fin * (v.width / 2 - zone.x - zone.width / 2 - grand * fx)
+            y: v.fin * (v.height / 2 - zone.y - zone.height / 2 - grand * fy)
+            scale: (1 - zone.reculMax * zone.recul) * grand
             Repeater {
                 model: v.bureaux
                 Item {
@@ -341,7 +345,8 @@ PanelWindow {
                     x: zone.bx + zone.decalage + (zone.anim === "fondu" ? 0 : dd * (zone.fw + 28))
                     y: zone.by
                     z: 10 - Math.abs(d)
-                    opacity: v.entree * (zone.anim === "fondu" ? Math.max(0, 1 - Math.abs(d)) : 1 - 0.45 * Math.min(1, Math.abs(d)))
+                    opacity: v.entree * (Math.abs(d) > 0.01 ? 1 - v.fin : 1)
+                             * (zone.anim === "fondu" ? Math.max(0, 1 - Math.abs(d)) : 1 - 0.45 * Math.min(1, Math.abs(d)))
                     // Charnière sur le bord commun avec le bureau du milieu, en perspective : une face de cube
                     transform: Rotation {
                         origin.x: face.d > 0 ? 0 : face.width; origin.y: face.height / 2
@@ -366,6 +371,7 @@ PanelWindow {
                     Rectangle {
                         x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
                         color: Qt.rgba(1, 1, 1, 0.04); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
+                        opacity: 1 - v.fin
                     }
                     Texte {
                         anchors.centerIn: parent
@@ -479,7 +485,7 @@ PanelWindow {
                                 }
                                 // Nom de l'appli et titre, dans la miniature, en bas
                                 Rectangle {
-                                    z: 2; visible: parent.width > 100
+                                    z: 2; visible: parent.width > 100; opacity: 1 - v.fin
                                     anchors.bottom: parent.bottom; anchors.bottomMargin: 8; anchors.horizontalCenter: parent.horizontalCenter
                                     width: Math.min(parent.width - 16, nom.implicitWidth + 22); height: 26; radius: 13; color: Qt.rgba(0, 0, 0, 0.65)
                                     Row {

@@ -428,7 +428,7 @@ REGLAGES = [
       "ouinon", "oui",
       L("Non : un seul bureau, plus grand ; les voisins n'apparaissent que pendant le changement.",
         "No: a single, larger desktop; the neighbors only show while switching.")),
-    R("VUE_DUREE", "Animations", L("Vue des fenêtres : durée du changement", "Window overview: switching duration"), "entier", "480", "",
+    R("VUE_DUREE", "Animations", L("Vue des fenêtres : durée du changement", "Window overview: switching duration"), "entier", "320", "",
       mini=150, maxi=1500, pas=50, unite="ms"),
     R("ANIMATIONS_VITESSE", "Animations", L("Vitesse des menus et panneaux", "Menu and panel speed"), "choix", "1.15",
       L("Panneaux et menus de Noctalia.", "Noctalia's panels and menus."),
