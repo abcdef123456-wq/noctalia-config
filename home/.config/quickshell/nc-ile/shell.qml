@@ -64,9 +64,10 @@ ShellRoot {
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
-        function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
+        function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
         function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
-        function vueFermer(): void { Etat.vueFenetres = false }
+        // Par la vue elle-même : retour au bureau d'avant si les trois doigts l'ont changé sans valider
+        function vueFermer(): void { if (racine.vues.length) racine.vues.slice().forEach(v => v.fermer()); else Etat.vueFenetres = false }
         // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, la referme
         function projection(): void {
             if (Etat.projection) { Etat.projection = false; return }

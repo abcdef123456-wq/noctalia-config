@@ -1,5 +1,6 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
-//   Même allure que le carrousel (Super + W) : un cadre sous la barre, sur le fond d'écran flouté.
+//   Même allure que le carrousel (Super + W) : un cadre sur le fond d'écran flouté, qui couvre tout l'écran (rien ne se
+//   voit derrière) ; pendant la vue, la souris ne donne plus le focus aux fenêtres de dessous.
 //   Les bureaux de l'écran en cube : le choisi devant, le bord des voisins de biais sur les côtés. Parcourir les bureaux
 //   (flèches, deux doigts à l'horizontale, clic sur un voisin ou en haut) fait tourner le cube, en reculant pendant le
 //   mouvement ; le vrai bureau ne change qu'en validant (Entrée, clic sur le bureau choisi ou sur une de ses fenêtres).
@@ -12,7 +13,8 @@
 //   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
 //   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Un clic sur une masquée
 //   la ramène, au premier plan, sur le bureau choisi.
-//   Échap ou clic hors du bureau : fermer sans changer de bureau
+//   Échap, trois doigts vers le bas ou clic hors du bureau : fermer sans changer de bureau (les trois doigts à
+//   l'horizontale, geste de Hyprland, changent le vrai bureau : on y revient)
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -52,11 +54,26 @@ PanelWindow {
     function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
-    function fermer() { Etat.vueFenetres = false }
+    // Fermer sans valider (Échap, clic à côté) : retour au bureau d'avant si les trois doigts (geste de Hyprland) l'ont
+    // changé ; la vue part une fois Hyprland revenu, rien ne se voit
+    function fermer() {
+        if (!valide && origine > 0 && bureau > 0 && bureau !== origine) {
+            valide = true
+            dispatch("hl.dsp.focus({ workspace = " + origine + " })")
+            sortie.start()
+            return
+        }
+        Etat.vueFenetres = false
+    }
+    Timer { id: sortie; interval: 280; onTriggered: Etat.vueFenetres = false }
+    // Fermer en validant (bureau ou fenêtre choisis) : on reste où l'on va
+    property bool valide: false
+    function quitter() { valide = true; Etat.vueFenetres = false }
+    property int origine: -1
     // Le bureau choisi dans la vue : on le parcourt sans quitter le bureau affiché ; il suit le vrai bureau s'il change
-    // (trois doigts, Hyprland)
+    // (trois doigts, Hyprland). Un bureau inconnu un instant (Hyprland pendant une capture…) ne compte pas.
     property int choisi: bureau
-    onBureauChanged: choisi = bureau
+    onBureauChanged: if (bureau > 0) { choisi = bureau; if (origine < 0) origine = bureau }
     // Bureau voisin sur cet écran (flèches, clic sur un bord) : le cube tourne
     function voisin(sens) {
         var i = bureaux.findIndex(b => b.id === choisi) + sens
@@ -64,14 +81,14 @@ PanelWindow {
     }
     // Valider : aller sur le bureau choisi
     function valider() {
-        if (choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
-        fermer()
+        if (choisi > 0 && choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
+        quitter()
     }
-    function allerA(t) { fenetre("aller", t); fermer() }   // nc-fenetre : le pointeur reste où il est
+    function allerA(t) { fenetre("aller", t); quitter() }   // nc-fenetre : le pointeur reste où il est
     function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
     // Une fenêtre masquée revient sur le bureau choisi (nc-fenetre aller), les autres : on y va
     function activer(t) {
-        if (masquee(t)) { Quickshell.execDetached([Etat.bin + "nc-fenetre", "aller", adresse(t), String(choisi)]); fermer(); return }
+        if (masquee(t)) { Quickshell.execDetached([Etat.bin + "nc-fenetre", "aller", adresse(t), String(choisi)]); quitter(); return }
         if (enAttente[adresse(t)]) basculerAttente(t)
         allerA(t)
     }
@@ -83,11 +100,20 @@ PanelWindow {
         if (r[a]) delete r[a]; else r[a] = true
         enAttente = r
     }
-    Component.onDestruction: { for (var a in enAttente) Quickshell.execDetached([Etat.bin + "nc-fenetre", "reduire", a]) }
+    // Vue ouverte : la souris ne donne plus le focus aux fenêtres de dessous (le titre de la barre ne défile plus) ;
+    // le réglage d'avant est remis à la fermeture
+    Component.onDestruction: {
+        for (var a in enAttente) Quickshell.execDetached([Etat.bin + "nc-fenetre", "reduire", a])
+        Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris ~= nil then hl.config({ input = { follow_mouse = _G.nc_vue_souris } }) _G.nc_vue_souris = nil end"])
+    }
 
     // Ouverture : léger zoom arrière, comme macOS
     property real entree: 0
-    Component.onCompleted: { Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1 }
+    Component.onCompleted: {
+        Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1
+        if (bureau > 0) origine = bureau
+        Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris == nil then _G.nc_vue_souris = hl.get_config('input:follow_mouse') end hl.config({ input = { follow_mouse = 0 } })"])
+    }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
     Behavior on entree { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 220; easing.type: Easing.OutCubic } }
 
@@ -113,17 +139,11 @@ PanelWindow {
         return r
     }
 
-    Rectangle {
+    // Tout l'écran couvert (barre comprise) : rien de ce qui se passe derrière ne se voit
+    Item {
         anchors.fill: parent
-        color: Qt.rgba(0, 0, 0, 0.7 * v.entree)   // assez sombre : l'animation de Hyprland derrière ne se voit pas
-        MouseArea { anchors.fill: parent; onClicked: v.fermer() }
-    }
-    ClippingRectangle {
-        id: cadre
-        x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
-        radius: 10; color: Couleurs.carte
-        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
         opacity: v.entree
+        Rectangle { anchors.fill: parent; color: Couleurs.carte }
         // Flouté ici (la version floutée du carrousel est en WebP, que Qt ne lit pas toujours) ; petite image : flou léger
         Image {
             id: fond
@@ -132,8 +152,15 @@ PanelWindow {
             source: v.fondOriginal !== "" ? "file://" + v.fondOriginal : ""
         }
         MultiEffect { anchors.fill: parent; source: fond; blurEnabled: true; blur: 1; blurMax: 40; autoPaddingEnabled: false }
-        Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.28) }
+        Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.45) }
         MouseArea { anchors.fill: parent; onClicked: v.fermer() }
+    }
+    Rectangle {
+        id: cadre
+        x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
+        radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
+        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
+        opacity: v.entree
     }
     Item {
         anchors.fill: parent
@@ -310,7 +337,8 @@ PanelWindow {
                     // Voisins cachés à l'arrêt si on ne veut pas les voir ; fondu : un seul bureau à la fois
                     visible: Math.abs(d) < (zone.anim === "fondu" ? 1 : 1.5) && (Math.abs(d) < 0.999 || zone.voisins || zone.bouge)
                     width: zone.fw; height: zone.fh
-                    x: zone.bx + zone.decalage + (zone.anim === "cube" ? dd * zone.fw : (zone.anim === "glisse" ? dd * (zone.fw + 24) : 0))
+                    // Un écart entre les faces : les cadres des écrans ne se chevauchent pas sur l'arête
+                    x: zone.bx + zone.decalage + (zone.anim === "fondu" ? 0 : dd * (zone.fw + 28))
                     y: zone.by
                     z: 10 - Math.abs(d)
                     opacity: v.entree * (zone.anim === "fondu" ? Math.max(0, 1 - Math.abs(d)) : 1 - 0.45 * Math.min(1, Math.abs(d)))
