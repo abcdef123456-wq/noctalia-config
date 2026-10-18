@@ -43,7 +43,7 @@ PanelWindow {
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
     function fermer() { Etat.vueFenetres = false }
-    function allerA(t) { dispatch("hl.dsp.focus({ window = 'address:" + adresse(t) + "' })"); fermer() }
+    function allerA(t) { fenetre("aller", t); fermer() }   // nc-fenetre : le pointeur reste où il est
     function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
     // Une fenêtre masquée revient sur le bureau affiché (nc-fenetre aller), les autres : on y va
     function activer(t) {
@@ -122,7 +122,7 @@ PanelWindow {
     Row {
         id: rangee
         anchors.horizontalCenter: parent.horizontalCenter
-        y: cadre.y + 26 + (1 - v.entree) * -20
+        y: cadre.y + 16 + (1 - v.entree) * -20
         spacing: 10
         opacity: v.entree
         Repeater {
@@ -168,7 +168,7 @@ PanelWindow {
     // ── Le bureau en miniature : une seule échelle pour toutes les fenêtres, chacune à sa place ; les masquées en dessous ──
     Item {
         id: zone
-        anchors { top: rangee.bottom; topMargin: 32; bottom: cadre.bottom; bottomMargin: 30; left: cadre.left; leftMargin: 50; right: cadre.right; rightMargin: 50 }
+        anchors { top: rangee.bottom; topMargin: 22; bottom: cadre.bottom; bottomMargin: 18; left: cadre.left; leftMargin: 22; right: cadre.right; rightMargin: 22 }
         readonly property int n: v.fenetres.length
         // L'écran, en points
         readonly property var mon: v.moniteur && v.moniteur.lastIpcObject ? v.moniteur.lastIpcObject : ({})
@@ -337,15 +337,18 @@ PanelWindow {
                         opacity: survol.hovered ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
                         Repeater {
-                            model: [{ ico: case_.estompee ? "visibility" : "visibility_off", action: "masquer" }, { ico: "close", action: "fermer" }]
+                            // Liste fixe (seule l'icône suit l'état) : refaite à chaque clic, les boutons étaient recréés
+                            // sous la souris et le survol sautait sur la croix
+                            model: ["masquer", "fermer"]
                             Rectangle {
-                                required property var modelData
+                                required property string modelData
                                 width: 30; height: 30; radius: 15
-                                color: zb.containsMouse ? (modelData.action === "fermer" ? Couleurs.rouge : Couleurs.gris4) : Qt.rgba(0, 0, 0, 0.6)
-                                Ico { anchors.centerIn: parent; nom: parent.modelData.ico; taille: 17; color: "#ffffff" }
+                                color: zb.containsMouse ? (modelData === "fermer" ? Couleurs.rouge : Couleurs.gris4) : Qt.rgba(0, 0, 0, 0.6)
+                                Ico { anchors.centerIn: parent; taille: 17; color: "#ffffff"
+                                      nom: parent.modelData === "fermer" ? "close" : (case_.estompee ? "visibility" : "visibility_off") }
                                 MouseArea {
                                     id: zb; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: parent.modelData.action === "fermer"
+                                    onClicked: parent.modelData === "fermer"
                                                ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
                                                : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData))
                                 }

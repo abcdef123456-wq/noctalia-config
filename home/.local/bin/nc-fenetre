@@ -143,7 +143,11 @@ PY
       prop "$a" no_anim 0; prop "$a" opacity 1
       grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
     fi
-    eval_lua "hl.dsp.focus({ window = 'address:$a' })" ;;
+    # Le focus sans déplacer le pointeur : Hyprland le met au milieu de la fenêtre, on le remet où il était
+    # (clic dans la barre ou dans la vue des fenêtres)
+    read -r cx cy <<< "$(hyprctl cursorpos 2>/dev/null | tr -d ',')"
+    eval_lua "hl.dsp.focus({ window = 'address:$a' })"
+    [ -n "${cy:-}" ] && eval_lua "hl.dsp.cursor.move({ x = $cx, y = $cy })" ;;
   *)
     if [ "${NC_LANGUE:-fr}" = en ]; then
       cat <<'FIN'
