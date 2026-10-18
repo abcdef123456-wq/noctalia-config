@@ -293,9 +293,17 @@ PanelWindow {
             NumberAnimation { duration: zone.glisse ? 90 : zone.duree; easing.type: zone.glisse ? Easing.OutQuad : Easing.InOutCubic }
         }
         // Pas de bureau d'un côté (le premier, le dernier) : l'ensemble se décale vers ce côté, pas de vide inutile
-        readonly property real gauche: Math.max(0, Math.min(1, pos))
-        readonly property real droite: Math.max(0, Math.min(1, v.bureaux.length - 1 - pos))
+        // Pendant un glisser, un nouveau bureau apparaît du côté où il n'y en a pas (à gauche, s'il reste un numéro libre)
+        readonly property int nouveauGauche: v.traine && anim !== "fondu" && courant === 0 && v.bureaux.length && v.bureaux[0].id > 1
+                                             ? v.bureaux[0].id - 1 : -1
+        readonly property int nouveauDroite: v.traine && anim !== "fondu" && v.bureaux.length && courant === v.bureaux.length - 1
+                                             ? v.bureaux[v.bureaux.length - 1].id + 1 : -1
+        readonly property real gauche: nouveauGauche > 0 ? 1 : Math.max(0, Math.min(1, pos))
+        readonly property real droite: nouveauDroite > 0 ? 1 : Math.max(0, Math.min(1, v.bureaux.length - 1 - pos))
         readonly property real decalage: voisins ? (gauche - droite) * (width - fw) / 4 : 0
+        // Le décalage suivi en douceur quand un nouveau bureau apparaît (pendant que le cube tourne : tel quel)
+        property real dec: decalage
+        Behavior on dec { enabled: !zone.bouge; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
         // Recul : le cube s'éloigne pendant qu'il tourne (ou qu'on glisse), et revient une fois arrêté
         readonly property bool bouge: glisse || Math.abs(pos - courant) > 0.002
@@ -336,7 +344,7 @@ PanelWindow {
             id: scene
             // Sortie : le bureau choisi grandit jusqu'à la taille de l'écran, à sa place (centre de l'écran)
             readonly property real grand: 1 + (1 / zone.e - 1) * v.fin
-            readonly property real fx: zone.bx + zone.decalage + zone.fw / 2 - zone.width / 2   // centre du bureau, depuis le milieu
+            readonly property real fx: zone.bx + zone.dec + zone.fw / 2 - zone.width / 2   // centre du bureau, depuis le milieu
             readonly property real fy: zone.by + zone.fh / 2 - zone.height / 2
             width: zone.width; height: zone.height
             x: v.fin * (v.width / 2 - zone.x - zone.width / 2 - grand * fx)
@@ -356,7 +364,7 @@ PanelWindow {
                     visible: Math.abs(d) < (zone.anim === "fondu" ? 1 : 1.5) && (Math.abs(d) < 0.999 || zone.voisins || zone.bouge)
                     width: zone.fw; height: zone.fh
                     // Un écart entre les faces : les cadres des écrans ne se chevauchent pas sur l'arête
-                    x: zone.bx + zone.decalage + (zone.anim === "fondu" ? 0 : dd * (zone.fw + 28))
+                    x: zone.bx + zone.dec + (zone.anim === "fondu" ? 0 : dd * (zone.fw + 28))
                     y: zone.by
                     z: 10 - Math.abs(d)
                     opacity: v.entree * (Math.abs(d) > 0.01 ? 1 - v.fin : 1)
@@ -378,7 +386,10 @@ PanelWindow {
                     // Le cadre de l'écran
                     Rectangle {
                         x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
-                        color: Qt.rgba(1, 1, 1, 0.04); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
+                        // Le bureau voisin sur lequel on lâcherait une fenêtre : cerclé
+                        readonly property bool vise: v.coteVise !== 0 && face.index - zone.courant === v.coteVise
+                        color: Qt.rgba(1, 1, 1, vise ? 0.1 : 0.04)
+                        border.width: vise ? 3 : 1; border.color: vise ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.12)
                         opacity: 1 - v.fin
                     }
                     Texte {
@@ -574,6 +585,38 @@ PanelWindow {
                     }
                 }
             }
+            // Le nouveau bureau qui apparaît pendant un glisser, du côté où il n'y en a pas : y lâcher la fenêtre le crée
+            Repeater {
+                model: [{ i: -1, id: zone.nouveauGauche }, { i: v.bureaux.length, id: zone.nouveauDroite }]
+                Item {
+                    id: nouveau
+                    required property var modelData
+                    readonly property real d: modelData.i - zone.pos
+                    readonly property real dd: Math.max(-1.3, Math.min(1.3, d))
+                    readonly property bool vise: v.coteVise === (modelData.i < 0 ? -1 : 1)
+                    visible: modelData.id > 0 && Math.abs(d) < 1.5
+                    width: zone.fw; height: zone.fh
+                    x: zone.bx + zone.dec + dd * (zone.fw + 28); y: zone.by
+                    z: 10 - Math.abs(d)
+                    opacity: 1 - 0.45 * Math.min(1, Math.abs(d))
+                    transform: Rotation {
+                        origin.x: nouveau.d > 0 ? 0 : nouveau.width; origin.y: nouveau.height / 2
+                        axis { x: 0; y: 1; z: 0 }
+                        angle: zone.anim === "cube" ? nouveau.dd * 72 : 0
+                        distanceToPlane: zone.fw * 1.6
+                    }
+                    Rectangle {
+                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
+                        color: Qt.rgba(1, 1, 1, nouveau.vise ? 0.1 : 0.04)
+                        border.width: nouveau.vise ? 3 : 1; border.color: nouveau.vise ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.2)
+                    }
+                    Column {
+                        anchors.centerIn: parent; spacing: 10
+                        Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: "add"; taille: 48; color: Couleurs.texteSec }
+                        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Nouveau bureau", "New desktop"); secondaire: true; font.pixelSize: 20 }
+                    }
+                }
+            }
         }
     }
 
@@ -590,33 +633,27 @@ PanelWindow {
     function lacher(annule) {
         if (!annule) main.Drag.drop()
         traine = null
+        coteVise = 0
     }
-    // Les côtés : le bureau voisin de chaque côté du bureau affiché (s'il y en a un)
+    // Les côtés : la moitié visible du bureau voisin (ou du nouveau bureau) ; lâchée là, la fenêtre y va. Rien n'est
+    // dessiné : c'est le bureau visé qui s'allume.
+    property int coteVise: 0
     Repeater {
         model: [-1, 1]
         DropArea {
             id: cote
             required property int modelData
-            readonly property var cible: v.bureaux[zone.courant + modelData] || null
-            readonly property real bordFace: zone.x + zone.bx + zone.decalage + (modelData > 0 ? zone.fw + 6 : -6)
-            visible: v.traine !== null && cible !== null
+            readonly property int cible: v.bureaux[zone.courant + modelData] ? v.bureaux[zone.courant + modelData].id
+                                         : (modelData < 0 ? zone.nouveauGauche : zone.nouveauDroite)
+            readonly property real bordFace: zone.x + zone.bx + zone.dec + (modelData > 0 ? zone.fw + 6 : -6)
+            visible: v.traine !== null && cible > 0
             x: modelData < 0 ? cadre.x : bordFace
-            width: modelData < 0 ? bordFace - cadre.x : cadre.x + cadre.width - bordFace
+            width: Math.max(0, modelData < 0 ? bordFace - cadre.x : cadre.x + cadre.width - bordFace)
             y: zone.y; height: zone.height
+            onContainsDragChanged: v.coteVise = containsDrag ? modelData : (v.coteVise === modelData ? 0 : v.coteVise)
             onDropped: d => {
                 var t = d.source && d.source.toplevel
-                if (t && cote.cible) v.dispatch("hl.dsp.window.move({ workspace = " + cote.cible.id + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
-            }
-            Rectangle {
-                anchors.fill: parent; anchors.margins: 4; radius: 16
-                color: Qt.rgba(1, 1, 1, cote.containsDrag ? 0.1 : 0.03)
-                border.width: 2; border.color: cote.containsDrag ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.12)
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Texte {
-                    anchors.centerIn: parent; width: parent.width - 8; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                    text: cote.cible ? Reglages.t("Bureau ", "Desktop ") + cote.cible.name : ""
-                    font.pixelSize: 14; font.weight: Font.DemiBold
-                }
+                if (t && cote.cible > 0) v.dispatch("hl.dsp.window.move({ workspace = " + cote.cible + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
             }
         }
     }
