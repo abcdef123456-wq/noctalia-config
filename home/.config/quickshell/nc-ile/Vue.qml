@@ -8,8 +8,9 @@
 //   Le bureau en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
 //   les masquées à la place qu'elles avaient, par-dessus (même si une autre fenêtre a pris leur place), voilées et
 //   marquées « Masquée ». Les bureaux de l'écran en haut.
-//   Glisser une fenêtre sur une autre : elles échangent leurs places.
-//   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
+//   Glisser une fenêtre : elle rétrécit dans la main ; lâchée sur un bureau (en haut, ou sur le côté : le voisin) elle
+//   y est envoyée, sur une autre fenêtre elles échangent leurs places.
+//   Clic : aller sur la fenêtre · clic molette : la fermer
 //   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
 //   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Un clic sur une masquée
 //   la ramène, au premier plan, sur le bureau choisi.
@@ -149,6 +150,7 @@ PanelWindow {
 
     // Tout l'écran couvert (barre comprise) : rien de ce qui se passe derrière ne se voit
     Item {
+        id: ecran
         anchors.fill: parent
         opacity: v.entree
         layer.enabled: true                          // flou calculé une fois, gardé en image (pas à chaque image du cube)
@@ -400,7 +402,7 @@ PanelWindow {
                             x: (pl[0] - zone.mx) * zone.e
                             y: (pl[1] - zone.my) * zone.e
                             // Les masquées par-dessus (estompées, même si une autre a pris leur place), celle qu'on traîne encore au-dessus
-                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered || carte.traine ? 5 : 0)
+                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered ? 5 : 0)
 
                             // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
                             DropArea {
@@ -415,7 +417,7 @@ PanelWindow {
                             }
                             Rectangle {
                                 anchors.fill: parent; anchors.margins: 2; radius: 12; z: 1
-                                visible: depot.containsDrag && depot.drag.source !== carte
+                                visible: depot.containsDrag && v.traine !== case_.modelData
                                 color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
                             }
                             opacity: v.entree
@@ -432,13 +434,8 @@ PanelWindow {
                                 // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
                                 scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
                                 Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                                // Glissée : levée à la main (liée à drag.active, elle retombait parfois avant le lâcher, et le
-                                // dépôt était perdu)
-                                property bool traine: false
-                                Drag.active: traine
-                                Drag.source: carte
-                                Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
-                                z: traine ? 10 : 0
+                                // Glissée : elle reste ici, effacée ; c'est sa réduction, dans la main, qui suit le pointeur
+                                opacity: v.traine === case_.modelData ? 0.3 : 1
 
                                 Rectangle {
                                     anchors.fill: parent; anchors.margins: -3; radius: 14
@@ -545,45 +542,108 @@ PanelWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-                                    drag.target: carte
+                                    // Tirer la fenêtre (plus de 10 px) : elle passe dans la main ; sinon c'est un clic
+                                    property point appui
+                                    property bool tiree: false
+                                    onPressed: e => { appui = Qt.point(e.x, e.y); tiree = false }
+                                    onPositionChanged: e => {
+                                        if (!pressed || !(e.buttons & Qt.LeftButton)) return
+                                        if (!tiree && !case_.masquee && Math.hypot(e.x - appui.x, e.y - appui.y) > 10) {
+                                            tiree = true
+                                            var o = carte.mapToItem(ecran, 0, 0), f = carte.mapToItem(ecran, carte.width, carte.height)
+                                            v.prendre(case_.modelData, o.x, o.y, f.x - o.x, f.y - o.y)
+                                        }
+                                        if (tiree) { var q = mapToItem(ecran, e.x, e.y); v.suivre(q.x, q.y) }
+                                    }
+                                    onReleased: if (tiree) v.lacher()
+                                    onCanceled: if (tiree) v.lacher(true)
                                     onClicked: e => {
+                                        if (tiree) return
                                         if (e.button === Qt.MiddleButton) v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
                                         else v.activer(case_.modelData)
                                     }
-                                    onPositionChanged: if (drag.active && !carte.traine) carte.traine = true
-                                    onReleased: {
-                                        if (carte.traine) carte.Drag.drop()
-                                        carte.traine = false
-                                        carte.x = carte.marge; carte.y = carte.marge
-                                    }
-                                    onCanceled: { carte.traine = false; carte.x = carte.marge; carte.y = carte.marge }
                                 }
                             }
                         }
                     }
-                    // Bureau voisin : un clic dessus le fait venir devant (ses fenêtres ne réagissent qu'au milieu) ;
-                    // une fenêtre lâchée dessus y est envoyée
+                    // Bureau voisin : un clic dessus le fait venir devant (ses fenêtres ne réagissent qu'au milieu)
                     MouseArea {
                         anchors.fill: parent; z: 50
                         visible: Math.abs(face.d) > 0.01
                         onClicked: v.choisi = face.bureauId
                     }
-                    DropArea {
-                        id: depotFace
-                        anchors.fill: parent; z: 51
-                        enabled: Math.abs(face.d) > 0.01
-                        onDropped: d => {
-                            var t = d.source && d.source.toplevel
-                            if (t && !v.masquee(t))
-                                v.dispatch("hl.dsp.window.move({ workspace = " + face.bureauId + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
-                        }
-                    }
-                    Rectangle {
-                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18; z: 52
-                        visible: depotFace.containsDrag
-                        color: Qt.rgba(1, 1, 1, 0.06); border.width: 2; border.color: Couleurs.accent
-                    }
                 }
+            }
+        }
+    }
+
+    // ── Glisser une fenêtre : elle rétrécit dans la main et suit le pointeur, au-dessus de tout. Lâchée sur un bureau
+    //    (en haut, ou sur le côté : le bureau voisin) elle y est envoyée ; sur une autre fenêtre, elles échangent leurs
+    //    places ; ailleurs, rien ne bouge ──
+    property var traine: null
+    function prendre(t, x, y, l, h) {
+        main.l0 = l; main.h0 = h; main.px = x + l / 2; main.py = y + h / 2; main.r = 0
+        traine = t
+        main.r = 1
+    }
+    function suivre(x, y) { main.px = x; main.py = y }
+    function lacher(annule) {
+        if (!annule) main.Drag.drop()
+        traine = null
+    }
+    // Les côtés : le bureau voisin de chaque côté du bureau affiché (s'il y en a un)
+    Repeater {
+        model: [-1, 1]
+        DropArea {
+            id: cote
+            required property int modelData
+            readonly property var cible: v.bureaux[zone.courant + modelData] || null
+            readonly property real bordFace: zone.x + zone.bx + zone.decalage + (modelData > 0 ? zone.fw + 6 : -6)
+            visible: v.traine !== null && cible !== null
+            x: modelData < 0 ? cadre.x : bordFace
+            width: modelData < 0 ? bordFace - cadre.x : cadre.x + cadre.width - bordFace
+            y: zone.y; height: zone.height
+            onDropped: d => {
+                var t = d.source && d.source.toplevel
+                if (t && cote.cible) v.dispatch("hl.dsp.window.move({ workspace = " + cote.cible.id + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
+            }
+            Rectangle {
+                anchors.fill: parent; anchors.margins: 4; radius: 16
+                color: Qt.rgba(1, 1, 1, cote.containsDrag ? 0.1 : 0.03)
+                border.width: 2; border.color: cote.containsDrag ? Couleurs.accent : Qt.rgba(1, 1, 1, 0.12)
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Texte {
+                    anchors.centerIn: parent; width: parent.width - 8; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                    text: cote.cible ? Reglages.t("Bureau ", "Desktop ") + cote.cible.name : ""
+                    font.pixelSize: 14; font.weight: Font.DemiBold
+                }
+            }
+        }
+    }
+    Item {
+        id: main
+        property var toplevel: v.traine
+        property real l0: 200
+        property real h0: 120
+        property real px: 0
+        property real py: 0
+        property real r: 0                           // 0 : taille de la miniature ; 1 : réduite dans la main
+        Behavior on r { enabled: v.traine !== null; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        readonly property real lf: Math.min(l0, 240)
+        width: l0 + (lf - l0) * r
+        height: width * h0 / Math.max(1, l0)
+        x: px - width / 2; y: py - height / 2
+        visible: v.traine !== null
+        Drag.active: v.traine !== null
+        Drag.source: main
+        Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
+        ClippingRectangle {
+            anchors.fill: parent; radius: 12; color: Couleurs.carte
+            border.width: 2; border.color: Couleurs.accent
+            ScreencopyView {
+                anchors.fill: parent; anchors.margins: 2
+                captureSource: main.toplevel ? main.toplevel.wayland : null
+                live: false
             }
         }
     }
