@@ -4,8 +4,9 @@
 //   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; les bureaux de l'écran en haut.
 //   Glisser une fenêtre sur une autre : elles échangent leurs places.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
-//   Au survol : boutons Masquer et Fermer · les fenêtres masquées (Super + H, nc-fenetre) sont des cartes de la grille,
-//   marquées « Masquée » : un clic les ramène sur le bureau affiché, au premier plan
+//   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
+//   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Les fenêtres déjà
+//   masquées (Super + H, nc-fenetre) sont translucides à leur place : un clic les ramène, au premier plan.
 //   Clic sur un bureau : y aller · Échap ou clic dans le vide : fermer
 import QtQuick
 import Quickshell
@@ -45,7 +46,20 @@ PanelWindow {
     function allerA(t) { dispatch("hl.dsp.focus({ window = 'address:" + adresse(t) + "' })"); fermer() }
     function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
     // Une fenêtre masquée revient sur le bureau affiché (nc-fenetre aller), les autres : on y va
-    function activer(t) { if (masquee(t)) { fenetre("aller", t); fermer() } else allerA(t) }
+    function activer(t) {
+        if (masquee(t)) { fenetre("aller", t); fermer(); return }
+        if (enAttente[adresse(t)]) basculerAttente(t)
+        allerA(t)
+    }
+    // « Masquer » dans la vue : rien ne bouge, la fenêtre devient translucide ; elle n'est vraiment masquée qu'à la
+    // fermeture de la vue (sinon les autres s'agrandiraient aussitôt pour prendre sa place). Un second clic annule.
+    property var enAttente: ({})
+    function basculerAttente(t) {
+        var r = Object.assign({}, enAttente), a = adresse(t)
+        if (r[a]) delete r[a]; else r[a] = true
+        enAttente = r
+    }
+    Component.onDestruction: { for (var a in enAttente) Quickshell.execDetached([Etat.bin + "nc-fenetre", "reduire", a]) }
 
     // Ouverture : léger zoom arrière, comme macOS
     property real entree: 0
@@ -200,6 +214,8 @@ PanelWindow {
                 required property int index
                 readonly property var ipc: modelData.lastIpcObject || ({})
                 readonly property bool masquee: v.masquee(modelData)
+                // Masquée ou sur le point de l'être : translucide, à sa place
+                readonly property bool estompee: masquee || !!v.enAttente[v.adresse(modelData)]
                 readonly property var sz: zone.taille(modelData)
                 readonly property var pl: zone.place(modelData)
                 width: sz[0] * zone.e; height: sz[1] * zone.e
@@ -249,8 +265,9 @@ PanelWindow {
                         border.color: survol.hovered ? Couleurs.accent : "transparent"
                     }
                     ClippingRectangle {
-                        // Masquée : fond plein (les terminaux transparents laisseraient voir la fenêtre dessous)
-                        anchors.fill: parent; radius: case_.masquee ? 10 : 0; color: case_.masquee ? Couleurs.carte : "transparent"
+                        anchors.fill: parent; radius: case_.estompee ? 10 : 0; color: "transparent"
+                        opacity: case_.estompee ? 0.38 : 1
+                        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         ScreencopyView {
                             id: capture
                             // Masquée : son image (à la taille du bureau caché) recadrée sur la place qu'elle avait
@@ -263,13 +280,7 @@ PanelWindow {
                             live: !case_.masquee          // masquée : une seule image, Hyprland ne la dessine plus
                             layer.enabled: true
                             layer.smooth: true
-                            // Effet sur une masquée : noir et blanc, floutée
-                            layer.effect: case_.masquee ? effetMasquee : null
                         }
-                    }
-                    Component {
-                        id: effetMasquee
-                        MultiEffect { saturation: -1; blurEnabled: true; blur: 0.45; blurMax: 24; brightness: -0.1 }
                     }
                     // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
                     Rectangle {
@@ -282,15 +293,15 @@ PanelWindow {
                             source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), "application-x-executable")
                         }
                     }
-                    // Masquée : voilée et cerclée, pour la distinguer des fenêtres affichées
+                    // Translucide et cerclée, pour la distinguer des fenêtres affichées
                     Rectangle {
-                        visible: case_.masquee; z: 1
+                        visible: case_.estompee; z: 1
                         anchors.fill: parent; radius: 10
-                        color: Qt.rgba(0, 0, 0, 0.35); border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.45)
+                        color: "transparent"; border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.4)
                     }
                     // Badge « Masquée », en haut à gauche
                     Rectangle {
-                        visible: case_.masquee; z: 2
+                        visible: case_.estompee; z: 2
                         anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
                         width: badge.implicitWidth + 34; height: 28; radius: 14; color: Qt.rgba(0, 0, 0, 0.65)
                         Ico { anchors.verticalCenter: parent.verticalCenter; x: 9; nom: "visibility_off"; taille: 15; color: "#ffffff" }
@@ -326,8 +337,7 @@ PanelWindow {
                         opacity: survol.hovered ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
                         Repeater {
-                            model: case_.masquee ? [{ ico: "close", action: "fermer" }]
-                                                 : [{ ico: "remove", action: "reduire" }, { ico: "close", action: "fermer" }]
+                            model: [{ ico: case_.estompee ? "visibility" : "visibility_off", action: "masquer" }, { ico: "close", action: "fermer" }]
                             Rectangle {
                                 required property var modelData
                                 width: 30; height: 30; radius: 15
@@ -337,7 +347,7 @@ PanelWindow {
                                     id: zb; anchors.fill: parent; hoverEnabled: true
                                     onClicked: parent.modelData.action === "fermer"
                                                ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
-                                               : v.fenetre("reduire", case_.modelData)
+                                               : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData))
                                 }
                             }
                         }
