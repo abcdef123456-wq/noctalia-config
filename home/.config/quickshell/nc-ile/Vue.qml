@@ -122,7 +122,7 @@ PanelWindow {
         // Bande des masquées, en bas
         readonly property var masquees: v.fenetres.filter(t => v.masquee(t))
         readonly property real bande: masquees.length ? Math.min(230, height * 0.27) : 0
-        readonly property real haut: height - (masquees.length ? bande + 40 : 0)
+        readonly property real haut: height - (masquees.length ? bande + 78 : 0)   // de l'air entre le bureau et la bande
         // Le bureau : toute la place en haut, sans déformer
         readonly property real e: Math.min(width / mw, haut / mh)
         readonly property real bx: (width - mw * e) / 2
@@ -154,7 +154,7 @@ PanelWindow {
         }
         Texte {
             visible: zone.masquees.length > 0; opacity: 0.8 * v.entree
-            anchors.horizontalCenter: parent.horizontalCenter; y: zone.haut + 10
+            anchors.horizontalCenter: parent.horizontalCenter; y: zone.haut + 34
             text: Reglages.t("Fenêtres masquées", "Hidden windows"); color: "#ffffff"; font.pixelSize: 13; font.weight: Font.DemiBold
         }
         Repeater {
