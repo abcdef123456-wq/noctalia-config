@@ -76,7 +76,8 @@ local function puce(w, masquee, a)
   local actif = not masquee and a ~= nil and w.adresse == a.adresse
   return ui.row({
     key = "w" .. w.adresse, paddingH = 6, height = 24, radius = 12, align = "center",
-    fill = actif and "primary/0.25" or (survolee == w.adresse and "on_surface/0.12" or nil),
+    -- Toujours une couleur (transparente au besoin) : un fond retiré (nil) garderait l'ancien au rendu suivant
+    fill = actif and "primary/0.25" or (survolee == w.adresse and "on_surface/0.12" or "#00000000"),
     onHover = "onSurvol",
     onClick = function() c.faire("aller", w.adresse) end,
   }, { c.image(w, 16, masquee and 0.45 or 1) })

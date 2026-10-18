@@ -46,7 +46,7 @@ local function ligne(w, masquee, grand)
   end
   return ui.row({
     key = (masquee and "m" or "f") .. w.adresse, gap = 12, paddingH = 12, height = grand and 58 or 46, radius = 14,
-    align = "center", fill = "surface_variant/0.45", border = actif and "primary" or nil, borderWidth = actif and 1.5 or 0,
+    align = "center", fill = "surface_variant/0.45", border = actif and "primary" or "#00000000", borderWidth = actif and 1.5 or 0,
     onClick = function() c.faire("aller", w.adresse); panel.close() end,
   }, {
     c.image(w, grand and 32 or 24, masquee and 0.45 or 1),
