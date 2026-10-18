@@ -65,6 +65,8 @@ ShellRoot {
         function fermer(): void { Etat.fermer(); Etat.projection = false }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { Etat.fermer(); Etat.vueFenetres = !Etat.vueFenetres }
+        function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
+        function vueFermer(): void { Etat.vueFenetres = false }
         // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, la referme
         function projection(): void {
             if (Etat.projection) { Etat.projection = false; return }

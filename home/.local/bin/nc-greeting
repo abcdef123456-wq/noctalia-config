@@ -72,13 +72,15 @@ case "$choix" in
   # Logo dessiné : sur 12 lignes, la hauteur des infos (la marge est dans l'image, centrée), décollé du bord
   dessin) LOGO_OPT=(--logo "$DESSIN" --logo-type kitty-direct --logo-width 20 --logo-height 12 --logo-padding-left 2 --logo-padding-right 3) ;;
   aucun) LOGO_OPT=(--logo none) ;;
-  # Photo de profil : comme le logo dessiné, sur 12 lignes et centrée sur les infos (copie avec la marge, refaite
-  # quand la photo change)
+  # Photo de profil : comme le logo dessiné, sur 12 lignes et centrée sur les infos ; découpée en rond comme
+  # l'avatar de Noctalia, sinon le fond carré de la photo fait un cadre (copie avec la marge, refaite quand la photo change)
   photo) if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$HOME/.face" ]; then
-           PHOTO="$HOME/.cache/nc/term-photo.png"
+           PHOTO="$HOME/.cache/nc/term-photo-rond.png"
            if [ ! -s "$PHOTO" ] || [ "$HOME/.face" -nt "$PHOTO" ]; then
              mkdir -p "$(dirname "$PHOTO")"
-             magick "$HOME/.face[0]" -resize 440x440 -background none -gravity center -extent 520x624 "PNG32:$PHOTO.tmp" 2>/dev/null &&
+             magick "$HOME/.face[0]" -resize 440x440^ -gravity center -extent 440x440 \
+               \( -size 440x440 xc:black -fill white -draw "circle 220,220 220,2" \) -alpha off -compose CopyOpacity -composite \
+               -compose Over -background none -extent 520x624 "PNG32:$PHOTO.tmp" 2>/dev/null &&
                mv "$PHOTO.tmp" "$PHOTO" || PHOTO="$HOME/.face"
            fi
            if [ "$PHOTO" = "$HOME/.face" ]; then

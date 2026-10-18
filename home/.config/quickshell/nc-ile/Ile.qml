@@ -323,7 +323,8 @@ PanelWindow {
         Column {
             anchors.right: parent.right; anchors.rightMargin: 9
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 6
+            // Resserrés si la page est basse (Recharge…) : ils ne dépassent jamais de l'île
+            spacing: Math.max(2, Math.min(6, (parent.height - 48 - 6 * Etat.vues.length) / Math.max(1, Etat.vues.length - 1)))
             visible: fen.ouverte && fen.points
             Repeater {
                 model: Etat.vues

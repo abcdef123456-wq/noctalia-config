@@ -127,6 +127,7 @@ touche(SUPER .. " + code:55", hl.dsp.window.float({ action = "toggle" }), trad("
 -- Réduire (comme le « _ » de Windows) : la fenêtre part dans un bureau caché ; elle revient par la vue des fenêtres,
 -- Spotlight, le dock, Alt + Tab ou Super + Ctrl + M (nc-fenetre)
 touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fenêtres|Réduire la fenêtre", "Minimize the window"))
+touche(SUPER .. " + code:43", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fenêtres|Masquer la fenêtre (comme macOS)", "Hide the window (like macOS)"))
 touche(SUPER .. " + CTRL + code:58", cmd("~/.local/bin/nc-fenetre restaurer"), trad("Fenêtres|Ramener la dernière fenêtre réduite", "Restore the last minimized window"))
 touche(SUPER .. " + code:38", cmd("qs -c nc-ile ipc call ile vue"),  trad("Fenêtres|Vue de toutes les fenêtres (glisser sur un bureau : l'y envoyer)", "All windows overview (drag onto a desktop to send it there)"))
 touche(SUPER .. " + code:41", hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }), trad("Fenêtres|Plein écran", "Full screen"))

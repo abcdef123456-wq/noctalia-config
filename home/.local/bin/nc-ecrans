@@ -115,11 +115,16 @@ case "$action" in
         "$(t "Installe gnome-network-displays pour projeter sans fil (Miracast) sur une télé ou un projecteur." "Install gnome-network-displays to project wirelessly (Miracast) to a TV or a projector.")" 2>/dev/null
     fi ;;
   verifier)
-    # Appelé quand un écran est débranché : plus aucun écran allumé (celui du PC était éteint) → on le rallume
-    sleep 1
-    if ! hyprctl monitors -j 2>/dev/null | jq -e 'any(.[]; .name | test("^(HEADLESS|FALLBACK)") | not)' >/dev/null; then
+    # Appelé quand un écran est débranché : l'écran du PC est éteint alors qu'aucun autre écran n'est branché → on le
+    # rallume ; plusieurs essais (le débranchement met parfois quelques secondes à se finir, avec NVIDIA surtout)
+    for _ in 1 2 3 4 5; do
+      sleep 1
+      json="$(ecrans)"
+      jq -e 'any(.[]; (.name | test("^(eDP|LVDS|DSI)")) and .disabled)
+             and ([.[] | select((.name | test("^(eDP|LVDS|DSI|HEADLESS|FALLBACK)") | not) and (.disabled | not))] | length == 0)' <<< "$json" >/dev/null ||
+        jq -e 'any(.[]; (.name | test("^(HEADLESS|FALLBACK)") | not) and (.disabled | not)) | not' <<< "$json" >/dev/null || break
       hyprctl reload >/dev/null
-    fi ;;
+    done ;;
   *)
     if [ "${NC_LANGUE:-fr}" = en ]; then
       cat <<'FIN'

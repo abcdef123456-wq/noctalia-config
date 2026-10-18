@@ -99,7 +99,7 @@ PanelWindow {
     // ── Fenêtres du bureau, en grille ──
     Item {
         id: zone
-        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: v.reduites.length ? 130 : 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
+        anchors { top: rangee.bottom; topMargin: 36; bottom: parent.bottom; bottomMargin: v.reduites.length ? 236 : 60; left: parent.left; leftMargin: 70; right: parent.right; rightMargin: 70 }
         readonly property int n: v.fenetres.length
         // Colonnes : la grille la plus proche de la forme de l'écran (fenêtres en 16:10 environ)
         readonly property int colonnes: Math.max(1, Math.min(n, Math.round(Math.sqrt(n * width / Math.max(1, height) / 1.6))))
@@ -219,38 +219,45 @@ PanelWindow {
         }
     }
 
-    // ── Fenêtres réduites : un clic les ramène sur le bureau affiché ──
+    // ── Fenêtres masquées (Super + M ou Super + H) : de vraies cartes, icône et nom ; un clic les ramène sur le
+    //    bureau affiché, au premier plan ──
     Column {
         visible: v.reduites.length > 0
-        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 34
-        spacing: 10
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 30
+        spacing: 12
         opacity: v.entree
-        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Réduites", "Minimized"); color: "#ffffff"; opacity: 0.7; font.pixelSize: 13 }
+        Texte { anchors.horizontalCenter: parent.horizontalCenter; text: Reglages.t("Fenêtres masquées", "Hidden windows"); color: "#ffffff"; opacity: 0.85
+                font.pixelSize: 15; font.weight: Font.DemiBold }
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 10
+            spacing: 14
             Repeater {
                 model: v.reduites
                 Rectangle {
                     id: red
                     required property var modelData
                     readonly property var ipc: modelData.lastIpcObject || ({})
-                    width: Math.min(240, contenu.implicitWidth + 28); height: 44; radius: 22
+                    width: Math.min(170, (v.width - 140) / v.reduites.length - 14); height: 140; radius: 20
                     color: zr.containsMouse ? Couleurs.gris4 : Couleurs.gris2
-                    Row {
-                        id: contenu
-                        anchors.verticalCenter: parent.verticalCenter; x: 14; spacing: 8
+                    border.width: zr.containsMouse ? 2 : 0; border.color: Couleurs.accent
+                    scale: zr.pressed ? 0.95 : (zr.containsMouse ? 1.04 : 1)
+                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Column {
+                        anchors.centerIn: parent; width: parent.width - 20; spacing: 10
                         Image {
-                            width: 22; height: 22; sourceSize: Qt.size(44, 44); anchors.verticalCenter: parent.verticalCenter
-                            source: Quickshell.iconPath(String(red.ipc.class || "").toLowerCase(), true)
-                            visible: source != ""
+                            id: ic
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 64; height: 64; sourceSize: Qt.size(128, 128)
+                            source: Quickshell.iconPath(String(red.ipc.class || "").toLowerCase(), "application-x-executable")
                         }
                         Texte {
-                            anchors.verticalCenter: parent.verticalCenter; width: Math.min(implicitWidth, 170)
+                            width: parent.width; horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                             text: red.modelData.title || red.ipc.class || Reglages.t("Fenêtre", "Window"); font.pixelSize: 13
                         }
                     }
-                    MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; onClicked: v.fenetre("aller", red.modelData) }
+                    MouseArea { id: zr; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: v.fenetre("aller", red.modelData) }
                 }
             }
         }

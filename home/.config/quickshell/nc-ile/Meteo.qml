@@ -1,6 +1,7 @@
 // Page « Météo » de l'île : température, ciel, ressenti, min / max, les 6 prochaines heures et les 5 prochains jours
-// (nc-meteo, Open-Meteo). Ville : nc-reglages → Île → « Ville de la météo ».
+// (nc-meteo, Open-Meteo). Ville : un clic sur son nom (ou nc-reglages → Île → « Ville de la météo »).
 import QtQuick
+import Quickshell.Io
 
 Item {
     id: p
@@ -34,7 +35,37 @@ Item {
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: p.m.icone || "cloud"; taille: 58; color: Couleurs.jaune }
         Column {
             anchors.verticalCenter: parent.verticalCenter; spacing: 1
-            Texte { text: p.m.ville || Reglages.t("Météo", "Weather"); secondaire: true; font.pixelSize: 14 }
+            // La ville : un clic pour en taper une autre (vide : d'après la connexion internet)
+            Item {
+                width: Math.max(ville.width, saisie.visible ? 220 : 0); height: 20
+                Row {
+                    id: ville
+                    visible: !saisie.visible; spacing: 4
+                    Ico { anchors.verticalCenter: parent.verticalCenter; nom: "location_on"; taille: 14; color: Couleurs.texteSec }
+                    Texte { text: p.m.ville || Reglages.t("Météo", "Weather"); secondaire: true; font.pixelSize: 14 }
+                    Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 12; color: Couleurs.texteSec; opacity: zone.containsMouse ? 1 : 0.5 }
+                }
+                MouseArea { id: zone; anchors.fill: ville; visible: ville.visible; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: { saisie.visible = true; saisie.text = ""; saisie.forceActiveFocus() } }
+                Rectangle {
+                    visible: saisie.visible; anchors.fill: parent; anchors.margins: -3; radius: 8; color: Couleurs.gris2
+                    border.width: 1.5; border.color: Couleurs.jaune
+                }
+                TextInput {
+                    id: saisie
+                    visible: false; anchors.fill: parent; anchors.leftMargin: 6
+                    color: Couleurs.texte; selectionColor: Couleurs.jaune; font.pixelSize: 14; clip: true
+                    onAccepted: { villeEcrire.command = ["sh", "-c", "f=\"$HOME/.config/nc/reglages.conf\"; mkdir -p \"${f%/*}\"; "
+                                     + "{ grep -v '^METEO_VILLE=' \"$f\" 2>/dev/null; printf 'METEO_VILLE=%s\\n' \"${1:-auto}\"; } > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"",
+                                     "sh", text.trim().replace(/[\n=]/g, " ")]
+                                  villeEcrire.running = true; visible = false }
+                    Keys.onEscapePressed: visible = false
+                    onActiveFocusChanged: if (!activeFocus) visible = false
+                    Texte { visible: saisie.text === ""; anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 13
+                            text: Reglages.t("Ville… (vide : automatique)", "City… (empty: automatic)") }
+                }
+                Process { id: villeEcrire }
+            }
             Row {
                 spacing: 10
                 Texte { text: (p.m.temp !== undefined ? p.m.temp : "–") + "°"; font.pixelSize: 44; font.weight: Font.DemiBold }

@@ -57,5 +57,7 @@ if nc.reglage("GESTES", true) then   -- nc-reglages : gestes du pavé tactile
     hl.gesture({ fingers = 4, direction = "swipe", mods = "ALT", action = "resize" })
     hl.gesture({ fingers = 4, direction = "pinch", action = "float" })
     -- Trois doigts vers le haut : vue de toutes les fenêtres (comme Mission Control)
-    hl.gesture({ fingers = 3, direction = "up", action = function() hl.exec_cmd("qs -c nc-ile ipc call ile vue") end })
+    hl.gesture({ fingers = 3, direction = "up", action = function() hl.exec_cmd("qs -c nc-ile ipc call ile vueOuvrir") end })
+    -- Trois doigts vers le bas : la referme
+    hl.gesture({ fingers = 3, direction = "down", action = function() hl.exec_cmd("qs -c nc-ile ipc call ile vueFermer") end })
 end
