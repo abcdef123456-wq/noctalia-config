@@ -371,7 +371,7 @@ PanelWindow {
                     }
                     // L'étagère des masquées recouvertes
                     Rectangle {
-                        visible: face.enBas.length > 0; z: 1
+                        visible: face.enBas.length > 0; z: 6
                         x: face.ex - 12; y: face.ey - 12; width: zone.fw - 2 * face.ex + 24; height: face.eh + 24; radius: 18
                         color: Qt.rgba(0, 0, 0, 0.5); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
                     }
@@ -404,8 +404,9 @@ PanelWindow {
                             height: rang >= 0 ? face.eh : sz[1] * zone.e
                             x: rang >= 0 ? face.ex + rang * (face.ew + 12) : (pl[0] - zone.mx) * zone.e
                             y: rang >= 0 ? face.ey : (pl[1] - zone.my) * zone.e
-                            // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus
-                            z: survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0)
+                            // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus ;
+                            // l'étagère toujours devant (une fenêtre survolée passerait sinon par-dessus)
+                            z: rang >= 0 ? (survol.hovered ? 8 : 7) : (survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0))
 
                             // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
                             DropArea {
@@ -448,8 +449,9 @@ PanelWindow {
                                     border.color: survol.hovered ? Couleurs.accent : "transparent"
                                 }
                                 ClippingRectangle {
-                                    anchors.fill: parent; radius: case_.estompee ? 10 : 0; color: "transparent"
-                                    opacity: case_.estompee ? (case_.rang >= 0 ? 0.7 : 0.38) : 1
+                                    anchors.fill: parent; radius: case_.estompee ? 10 : 0
+                                    color: case_.rang >= 0 ? Couleurs.carte : "transparent"   // sur l'étagère : fond plein (kitty est transparent)
+                                    opacity: case_.estompee && case_.rang < 0 ? 0.38 : 1
                                     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                                     ScreencopyView {
                                         id: capture
