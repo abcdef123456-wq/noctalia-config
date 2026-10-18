@@ -248,14 +248,28 @@ PanelWindow {
                         color: "transparent"; border.width: 3
                         border.color: survol.hovered ? Couleurs.accent : "transparent"
                     }
-                    ScreencopyView {
-                        id: capture
-                        anchors.fill: parent
-                        captureSource: case_.modelData.wayland
-                        live: true
-                        layer.enabled: true
-                        layer.smooth: true
-                        opacity: case_.masquee ? 0.55 : 1
+                    ClippingRectangle {
+                        // Masquée : fond plein (les terminaux transparents laisseraient voir la fenêtre dessous)
+                        anchors.fill: parent; radius: case_.masquee ? 10 : 0; color: case_.masquee ? Couleurs.carte : "transparent"
+                        ScreencopyView {
+                            id: capture
+                            // Masquée : son image (à la taille du bureau caché) recadrée sur la place qu'elle avait
+                            readonly property real ratio: sourceSize.width > 0 && sourceSize.height > 0
+                                                          ? sourceSize.width / sourceSize.height : parent.width / Math.max(1, parent.height)
+                            anchors.centerIn: parent
+                            width: case_.masquee ? Math.max(parent.width, parent.height * ratio) : parent.width
+                            height: case_.masquee ? Math.max(parent.height, parent.width / ratio) : parent.height
+                            captureSource: case_.modelData.wayland
+                            live: !case_.masquee          // masquée : une seule image, Hyprland ne la dessine plus
+                            layer.enabled: true
+                            layer.smooth: true
+                            // Effet sur une masquée : noir et blanc, floutée
+                            layer.effect: case_.masquee ? effetMasquee : null
+                        }
+                    }
+                    Component {
+                        id: effetMasquee
+                        MultiEffect { saturation: -1; blurEnabled: true; blur: 0.45; blurMax: 24; brightness: -0.1 }
                     }
                     // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
                     Rectangle {

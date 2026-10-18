@@ -35,17 +35,12 @@ case "$action" in
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
     [ -n "$a" ] && [ "$a" != null ] || exit 0
     [ "$(bureau_de "$a")" = "$CACHE" ] && exit 0
-    # Sa place, sa taille, son bureau et si elle flottait : la vue des fenêtres la montre là où elle était, et elle y
-    # revient. Dans le bureau caché, elle flotte à sa taille (sinon elle y prendrait toute la place).
+    # Sa place, sa taille et son bureau : la vue des fenêtres la montre là où elle était (rien n'est changé à la fenêtre)
     read -r x y w h ws fl <<< "$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1]) \(.workspace.id) \(.floating)"' | head -1)"
     [ -n "${h:-}" ] && { grep -v "^$a " "$pile-tailles" 2>/dev/null; echo "$a $x $y $w $h $ws $fl"; } > "$pile-tailles.tmp" && mv -f "$pile-tailles.tmp" "$pile-tailles"
     prop "$a" opacity 0; sleep 0.14
     prop "$a" no_anim 1
     eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })"
-    if [ -n "${h:-}" ]; then
-      [ "$fl" = true ] || eval_lua "hl.dsp.window.float({ window = 'address:$a', action = 'enable' })"
-      eval_lua "hl.dsp.window.resize({ window = 'address:$a', x = $w, y = $h, exact = true })"
-    fi
     prop "$a" no_anim 0; prop "$a" opacity 1
     { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp"; mv "$pile.tmp" "$pile" ;;
   basculer)
@@ -144,14 +139,6 @@ PY
       # Elle revient en fondu, à sa place, sans glisser
       prop "$a" opacity 0; prop "$a" no_anim 1
       eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })"
-      # Elle reprend sa place : de nouveau en mosaïque si elle l'était, sinon là où elle flottait
-      read -r _ x y w h _ fl <<< "$(grep "^$a " "$pile-tailles" 2>/dev/null | tail -1)"
-      if [ "${fl:-}" = false ]; then
-        eval_lua "hl.dsp.window.float({ window = 'address:$a', action = 'disable' })"
-      elif [ -n "${h:-}" ]; then
-        eval_lua "hl.dsp.window.resize({ window = 'address:$a', x = $w, y = $h, exact = true })"
-        eval_lua "hl.dsp.window.move({ window = 'address:$a', x = $x, y = $y })"
-      fi
       grep -v "^$a " "$pile-tailles" > "$pile-tailles.tmp" 2>/dev/null; mv -f "$pile-tailles.tmp" "$pile-tailles" 2>/dev/null
       prop "$a" no_anim 0; prop "$a" opacity 1
       grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
