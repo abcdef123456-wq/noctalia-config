@@ -121,19 +121,19 @@ PanelWindow {
         function taille(t) { var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2] }
         // Bande des masquées, en bas
         readonly property var masquees: v.fenetres.filter(t => v.masquee(t))
-        readonly property real bande: masquees.length ? Math.min(230, height * 0.27) : 0
-        readonly property real haut: height - (masquees.length ? bande + 78 : 0)   // de l'air entre le bureau et la bande
-        // Le bureau : toute la place en haut, sans déformer
-        readonly property real e: Math.min(width / mw, haut / mh)
-        readonly property real bx: (width - mw * e) / 2
-        readonly property real by: (haut - mh * e) / 2
-        // Les masquées : une même échelle pour toutes (celle du bureau, réduite pour tenir dans la bande), centrées
         readonly property real ecartM: 22
-        readonly property real em: {
-            var m = e, larg = 0
-            for (var t of masquees) { m = Math.min(m, (bande - 10) / taille(t)[1]); larg += taille(t)[0] }
-            return larg > 0 ? Math.min(m, (width - (masquees.length - 1) * ecartM) / larg) : m
-        }
+        readonly property real air: masquees.length ? 78 : 0          // entre le bureau et la bande
+        readonly property real hM: masquees.reduce((m, t) => Math.max(m, taille(t)[1]), 0)
+        readonly property real lM: masquees.reduce((l, t) => l + taille(t)[0], 0)
+        // Une seule échelle pour tout, masquées comprises : le bureau et la bande tiennent ensemble, sans déformer
+        readonly property real e: Math.min(width / mw, (height - air) / (mh + hM),
+                                           lM > 0 ? (width - (masquees.length - 1) * ecartM) / lM : Infinity)
+        readonly property real em: e
+        readonly property real bande: hM * e
+        // Le tout centré verticalement : bureau, puis la bande
+        readonly property real by: (height - mh * e - air - bande) / 2
+        readonly property real bx: (width - mw * e) / 2
+        readonly property real yBande: by + mh * e + air
         function xMasquee(t) {
             var total = (masquees.length - 1) * ecartM
             for (var u of masquees) total += taille(u)[0] * em
@@ -154,7 +154,7 @@ PanelWindow {
         }
         Texte {
             visible: zone.masquees.length > 0; opacity: 0.8 * v.entree
-            anchors.horizontalCenter: parent.horizontalCenter; y: zone.haut + 34
+            anchors.horizontalCenter: parent.horizontalCenter; y: zone.yBande - 44
             text: Reglages.t("Fenêtres masquées", "Hidden windows"); color: "#ffffff"; font.pixelSize: 13; font.weight: Font.DemiBold
         }
         Repeater {
@@ -169,7 +169,7 @@ PanelWindow {
                 readonly property real echelle: masquee ? zone.em : zone.e
                 width: sz[0] * echelle; height: sz[1] * echelle
                 x: masquee ? zone.xMasquee(modelData) : zone.bx + ((ipc.at ? ipc.at[0] : zone.mx) - zone.mx) * zone.e
-                y: masquee ? zone.height - zone.bande : zone.by + ((ipc.at ? ipc.at[1] : zone.my) - zone.my) * zone.e
+                y: masquee ? zone.yBande : zone.by + ((ipc.at ? ipc.at[1] : zone.my) - zone.my) * zone.e
                 z: survol.hovered || zf.drag.active ? 5 : 0
                 opacity: v.entree
                 scale: 0.92 + 0.08 * v.entree
