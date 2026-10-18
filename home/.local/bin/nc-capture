@@ -12,6 +12,16 @@ set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 mode="${1:-zone}"
+# Choisir une zone à la souris. La vue des fenêtres (nc-ile), si elle est ouverte, lâche clavier et souris le temps du
+# choix : sinon elle prenait le clic de la sélection.
+choisir_zone() {
+  local vue=0 rc
+  hyprctl layers -j 2>/dev/null | grep -q '"namespace": *"nc-vue"' && vue=1
+  [ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause true >/dev/null 2>&1
+  slurp -d 2>/dev/null; rc=$?
+  [ "$vue" = 1 ] && qs -c nc-ile ipc call ile vuePause false >/dev/null 2>&1
+  return $rc
+}
 # Noms anglais des modes (nc-screenshot screen | area | edit | text)
 case "$mode" in
   screen) mode=ecran ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
@@ -21,7 +31,7 @@ esac
 if [ "$mode" = texte ]; then
   dire() { notify-send -a "$(t "Texte de l'écran" "Screen Text")" -i edit-copy "$@" 2>/dev/null || true; }
   command -v tesseract >/dev/null || { dire "$(t "tesseract n'est pas installé" "tesseract is not installed")" "$(t "nc-maj l'installe (lecture du texte des images)." "nc-update installs it (reads text from images).")"; exit 1; }
-  zone="$(slurp -d 2>/dev/null)" || exit 0
+  zone="$(choisir_zone)" || exit 0
   [ -n "$zone" ] || exit 0
   langues="$(tesseract --list-langs 2>/dev/null | grep -xE 'fra|eng' | paste -sd+)"
   # Agrandie deux fois : tesseract lit bien mieux les petits caractères d'écran
@@ -49,7 +59,7 @@ case "$mode" in
     sortie="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null)"
     if [ -n "$sortie" ]; then grim -o "$sortie" "$fichier"; else grim "$fichier"; fi || exit 1 ;;
   zone|retouche)
-    zone="$(slurp -d 2>/dev/null)" || exit 0            # Échap : rien n'est fait
+    zone="$(choisir_zone)" || exit 0                    # Échap : rien n'est fait
     [ -n "$zone" ] || exit 0
     grim -g "$zone" "$fichier" || exit 1 ;;
   *) t "Usage : nc-capture ecran | zone | retouche | texte" "Usage: nc-screenshot screen | area | edit | text" >&2; echo >&2; exit 2 ;;

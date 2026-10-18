@@ -73,6 +73,7 @@ Singleton {
     // Spotlight (Super + R) : l'île s'ouvre en longue capsule de recherche
     property bool recherche: false
     property bool vueFenetres: false       // vue de toutes les fenêtres (Vue.qml)
+    property bool vuePause: false          // la vue lâche clavier et souris (nc-capture : choix d'une zone)
     property bool projection: false        // fenêtre de projection, comme Windows + P (Projection.qml, Super + O)
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)

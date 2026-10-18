@@ -66,6 +66,7 @@ ShellRoot {
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
         function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
+        function vuePause(oui: bool): void { Etat.vuePause = oui }      // nc-capture, le temps de choisir une zone
         // Par la vue elle-même : elle va sur le bureau choisi, en grandissant
         function vueFermer(): void { if (racine.vues.length) racine.vues.slice().forEach(v => v.fermer()); else Etat.vueFenetres = false }
         // Projection (Super + O) : ouvre la fenêtre ; déjà ouverte, la referme

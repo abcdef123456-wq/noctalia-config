@@ -34,7 +34,9 @@ PanelWindow {
     WlrLayershell.layer: Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject
                          && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0 ? WlrLayer.Overlay : WlrLayer.Top
     WlrLayershell.namespace: "nc-vue"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // Clavier et souris pour la vue, sauf pendant qu'on choisit une zone à capturer (nc-capture : vuePause), sinon
+    // le clic de la sélection tombait sur la vue
+    WlrLayershell.keyboardFocus: Etat.vuePause ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
     color: "transparent"
 
     readonly property var moniteur: Hyprland.monitorFor(modelData)
@@ -105,6 +107,7 @@ PanelWindow {
     property real entree: 0
     Component.onCompleted: {
         Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1
+        Etat.vuePause = false                      // une capture interrompue ne la laisse pas sans clavier
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris == nil then _G.nc_vue_souris = hl.get_config('input:follow_mouse') end hl.config({ input = { follow_mouse = 0 } })"])
     }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
