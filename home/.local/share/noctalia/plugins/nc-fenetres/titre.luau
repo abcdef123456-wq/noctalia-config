@@ -16,6 +16,9 @@ local dedans = {}          -- éléments survolés (le survol passe d'un éléme
 local developpe = false
 local fermerA = 0          -- fin du délai avant de se replier, quand le pointeur est sorti
 local survolee = nil       -- fenêtre sous la souris (son nom s'affiche à la place de celui de l'active)
+local oublierA = 0         -- entre deux icônes, le nom affiché reste un instant (pas de clignotement)
+local NOM = 200            -- largeur fixe du nom une fois dépliée : la zone ne change pas de taille d'une icône à l'autre
+local CAR = 7.4            -- largeur moyenne d'un caractère dans la barre, pour estimer la largeur repliée
 local signature = ""       -- pour ne redessiner que si ce qui est montré a changé
 
 local function choisir()
@@ -44,7 +47,12 @@ function onSurvol(etatSurvol, cle)
   dedans[cle ~= "" and cle or "fond"] = (etatSurvol == "true") or nil
   local avant = survolee
   if string.sub(cle, 1, 1) == "w" then
-    if etatSurvol == "true" then survolee = string.sub(cle, 2) elseif survolee == string.sub(cle, 2) then survolee = nil end
+    if etatSurvol == "true" then
+      survolee, oublierA = string.sub(cle, 2), 0
+    elseif survolee == string.sub(cle, 2) then
+      oublierA = noctalia.nowMs() + 250
+      noctalia.setUpdateInterval(60)
+    end
   end
   if survolee ~= avant and developpe then rendre() end
   if next(dedans) then
@@ -107,7 +115,7 @@ function rendre()
     local w, masquee = trouver(survolee or "")
     w = w or a
     if w then
-      table.insert(enfants, ui.label({ text = c.nom(w) .. (masquee and tr(" · masquée", " · hidden") or ""), maxWidth = 220, maxLines = 1,
+      table.insert(enfants, ui.label({ text = c.nom(w) .. (masquee and tr(" · masquée", " · hidden") or ""), width = NOM, maxWidth = NOM, maxLines = 1,
         color = masquee and "on_surface_variant" or nil }))
     end
     if a then
@@ -133,15 +141,25 @@ function rendre()
       }))
     end
   end
-  barWidget.render(ui.row({ key = "fond", gap = developpe and 4 or 7, align = "center", onHover = "onSurvol" }, enfants))
+  -- Dépliée, jamais plus étroite que repliée : sinon, la souris près du bord en sortirait, la zone se replierait sous
+  -- elle, s'y retrouverait et se déplierait encore (va-et-vient)
+  local repliee = (a and (16 + 7 + math.min(240, ((utf8 and utf8.len(c.nom(a))) or #c.nom(a)) * CAR)) or 110) + (nm > 0 and 44 or 0) + 12
+  barWidget.render(ui.row({ key = "fond", gap = developpe and 4 or 7, align = "center", onHover = "onSurvol",
+    minWidth = developpe and math.floor(repliee) or nil }, enfants))
 end
 
 -- Seulement pour se replier après le survol : le reste arrive par le flux
 function update()
+  if oublierA > 0 and noctalia.nowMs() >= oublierA then
+    oublierA = 0
+    survolee = nil
+    if developpe then rendre() end
+    if fermerA == 0 then noctalia.setUpdateInterval(60000) end
+  end
   if fermerA > 0 and noctalia.nowMs() >= fermerA then
     fermerA = 0
     noctalia.setUpdateInterval(60000)
-    if not next(dedans) then developpe = false; rendre() end
+    if not next(dedans) then developpe = false; survolee = nil; rendre() end
   end
 end
 
