@@ -217,7 +217,7 @@ PanelWindow {
                     onDropped: d => {
                         var t = d.source && d.source.toplevel
                         if (t && !v.masquee(t))
-                            v.dispatch("hl.dsp.window.move({ workspace = " + pastille.modelData.id + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
+                            v.envoyer(t, pastille.modelData.id)
                     }
                 }
             }
@@ -630,6 +630,17 @@ PanelWindow {
         main.r = 1
     }
     function suivre(x, y) { main.px = x; main.py = y }
+    // Envoyer une fenêtre sur un autre bureau, du côté le plus proche de celui d'où elle vient : vers un bureau à gauche,
+    // elle se range à droite des siennes, et inversement (Hyprland la mettait du côté de la souris, donc au bord opposé)
+    function envoyer(t, ws) {
+        var src = t.workspace ? t.workspace.id : bureau
+        var cote = ws < src ? 2 : 1                  // dwindle force_split : 1 à gauche / en haut, 2 à droite / en bas
+        Quickshell.execDetached(["hyprctl", "eval", "local a = hl.get_config('dwindle:force_split') "
+            + "hl.config({ dwindle = { force_split = " + cote + " } }) "
+            + "hl.dispatch(hl.dsp.window.move({ workspace = " + ws + ", follow = false, window = 'address:" + adresse(t) + "' })) "
+            + "hl.config({ dwindle = { force_split = a } })"])
+        relire()
+    }
     function lacher(annule) {
         if (!annule) main.Drag.drop()
         traine = null
@@ -653,7 +664,7 @@ PanelWindow {
             onContainsDragChanged: v.coteVise = containsDrag ? modelData : (v.coteVise === modelData ? 0 : v.coteVise)
             onDropped: d => {
                 var t = d.source && d.source.toplevel
-                if (t && cote.cible > 0) v.dispatch("hl.dsp.window.move({ workspace = " + cote.cible + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
+                if (t && cote.cible > 0) v.envoyer(t, cote.cible)
             }
         }
     }
