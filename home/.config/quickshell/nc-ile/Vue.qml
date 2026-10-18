@@ -136,6 +136,7 @@ PanelWindow {
     Item {
         anchors.fill: parent
         opacity: v.entree
+        layer.enabled: true                          // flou calculé une fois, gardé en image (pas à chaque image du cube)
         Rectangle { anchors.fill: parent; color: Couleurs.carte }
         // Flouté ici (la version floutée du carrousel est en WebP, que Qt ne lit pas toujours) ; petite image : flou léger
         Image {
@@ -275,7 +276,11 @@ PanelWindow {
         property bool pret: false                    // à l'ouverture, le cube est déjà en place (pas d'animation)
         Component.onCompleted: { courant = Math.max(0, trouve); pos = courant; pret = true }
         onCourantChanged: if (!glisse) pos = courant
-        Behavior on pos { enabled: zone.pret && !zone.glisse; NumberAnimation { duration: zone.duree; easing.type: Easing.InOutCubic } }
+        // Aux doigts, une courte animation lisse les saccades entre deux évènements du pavé tactile
+        Behavior on pos {
+            enabled: zone.pret
+            NumberAnimation { duration: zone.glisse ? 90 : zone.duree; easing.type: zone.glisse ? Easing.OutQuad : Easing.InOutCubic }
+        }
         // Pas de bureau d'un côté (le premier, le dernier) : l'ensemble se décale vers ce côté, pas de vide inutile
         readonly property real gauche: Math.max(0, Math.min(1, pos))
         readonly property real droite: Math.max(0, Math.min(1, v.bureaux.length - 1 - pos))
@@ -292,10 +297,12 @@ PanelWindow {
         // finit sur le bureau le plus proche (un petit geste suffit à passer au suivant)
         property bool glisse: false
         property real depart: 0
+        property real cible: 0
         Timer {
             id: finGlisse; interval: 160
             onTriggered: {
-                var i = Math.round(zone.pos + (zone.pos > zone.depart + 0.01 ? 0.3 : (zone.pos < zone.depart - 0.01 ? -0.3 : 0)))
+                var c = zone.cible
+                var i = Math.round(c + (c > zone.depart + 0.01 ? 0.3 : (c < zone.depart - 0.01 ? -0.3 : 0)))
                 i = Math.max(0, Math.min(v.bureaux.length - 1, i))
                 zone.glisse = false
                 if (v.bureaux[i]) v.choisi = v.bureaux[i].id
@@ -307,8 +314,10 @@ PanelWindow {
             onWheel: e => {
                 var dx = e.pixelDelta.x !== 0 ? e.pixelDelta.x : e.angleDelta.x / 2
                 if (dx === 0 || v.bureaux.length < 2) return
-                if (!zone.glisse) { zone.depart = zone.courant; zone.glisse = true }
-                zone.pos = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, zone.pos - dx / (zone.fw * 0.8)))
+                if (!zone.glisse) { zone.depart = zone.courant; zone.cible = zone.pos; zone.glisse = true }
+                // La cible suit les doigts ; pos la rejoint en douceur
+                zone.cible = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, zone.cible - dx / (zone.fw * 0.8)))
+                zone.pos = zone.cible
                 finGlisse.restart()
             }
         }
@@ -451,8 +460,9 @@ PanelWindow {
                                         width: case_.masquee ? Math.max(parent.width, parent.height * ratio) : parent.width
                                         height: case_.masquee ? Math.max(parent.height, parent.width / ratio) : parent.height
                                         captureSource: case_.modelData.wayland
-                                        // Masquée, ou bureau voisin à l'arrêt : une seule image (moins de travail pour la carte graphique)
-                                        live: !case_.masquee && Math.abs(face.d) < 0.999
+                                        // En direct seulement le bureau du milieu, à l'arrêt : pendant que le cube tourne ou à la sortie,
+                                        // la dernière image (fluide, moins de travail pour la carte graphique)
+                                        live: !case_.masquee && Math.abs(face.d) < 0.01 && !zone.bouge && v.fin === 0
                                         layer.enabled: true
                                         layer.smooth: true
                                     }
