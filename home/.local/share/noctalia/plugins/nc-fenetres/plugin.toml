@@ -1,0 +1,26 @@
+id          = "nc/fenetres"
+name        = "Fenêtres du bureau"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Titre de la fenêtre active dans la barre ; au survol, toutes les fenêtres du bureau (un clic pour y aller, masquer, ramener) ; un clic ouvre le menu de gestion."
+dependencies = ["jq", "python3"]
+
+# Dans la barre, à la place de active_window : clic = menu de gestion, clic droit = vue des fenêtres
+[[widget]]
+id = "titre"
+entry = "titre.luau"
+
+  [widget.actions]
+  middle = "none"
+
+# Le menu de gestion, sous le titre (flottant : la barre est transparente, un panneau attaché n'aurait pas de fond)
+[[panel]]
+id = "gestion"
+entry = "gestion.luau"
+width = 400
+height = 440
+placement = "floating"
+position = "top_left"
+open_near_click = true

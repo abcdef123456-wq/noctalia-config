@@ -70,7 +70,7 @@ capsule_thickness = 0.86
 capsule_padding = 8
 widget_spacing = 6
 font_weight = 600
-start = ["logo", "workspaces", "active_window"]
+start = ["logo", "workspaces", "nc/fenetres:titre"]   # titre de la fenêtre active ; au survol, les fenêtres du bureau (plugin nc/fenetres)
 center = [@ILE_CENTRE@]                    # île dynamique : île Quickshell par-dessus la barre (vide ici) ou plugin nc/ile
 end = ["group:sys", "tray", "power_profile", "group:status"@NOTIF_WIDGET@]
 
@@ -304,5 +304,5 @@ background = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/verrou"@PLUGIN_ILE@]
+enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/verrou", "nc/fenetres"@PLUGIN_ILE@]
 auto_update = "none"

@@ -575,11 +575,6 @@ REGLAGES = [
       [("rien", L("Rien", "Nothing")), ("recherche", L("Ouvre la recherche (Spotlight)", "Opens search (Spotlight)")),
        ("lanceur", L("Ouvre le lanceur d'applis", "Opens the app launcher")),
        ("centre", L("Ouvre le centre de contrôle", "Opens Control Center"))], groupe="hypr"),
-    R("BOUTON_MASQUER", "Clavier et souris", L("Bouton Masquer sur les fenêtres", "Hide button on windows"), "ouinon", "oui",
-      L("Un petit bouton en haut à gauche de la fenêtre active : un clic la masque, comme Super + H. Elle revient d'un clic "
-        "dans la vue des fenêtres (trois doigts vers le haut ou Super + A).",
-        "A small button at the top left of the active window: a click hides it, like Super + H. Bring it back with a click "
-        "in the windows overview (three fingers up or Super + A).")),
     R("TOUCHES_F", "Clavier et souris", L("Touches F1 à F12", "F1 to F12 keys"), "choix", "media",
       L("Son (F1-F3), micro (F4), luminosité (F5-F6), musique (F7-F9), clavier (F10), pavé (F11), calculatrice (F12). "
         "En mode jeu, elles redeviennent classiques.",

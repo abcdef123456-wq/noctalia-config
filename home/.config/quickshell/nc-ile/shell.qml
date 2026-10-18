@@ -52,11 +52,6 @@ ShellRoot {
         model: Quickshell.screens
         Coins {}
     }
-    // Bouton Masquer en haut à gauche de la fenêtre active (nc-reglages → Clavier et souris)
-    Variants {
-        model: Reglages.val("BOUTON_MASQUER", "oui") !== "non" ? Quickshell.screens : []
-        BoutonMasquer {}
-    }
     // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
     Variants {
         model: Reglages.val("FOND_ANIME", "non") === "aurore" && Reglages.val("EFFETS", "tous") !== "aucun" ? Quickshell.screens : []

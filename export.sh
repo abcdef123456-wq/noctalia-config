@@ -30,6 +30,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-verrou
   .local/share/noctalia/plugins/nc-keys
   .local/share/noctalia/plugins/nc-ile
+  .local/share/noctalia/plugins/nc-fenetres
   .config/quickshell/nc-ile
   .local/share/nc/finger.png
   .local/share/nc/logos

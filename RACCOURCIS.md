@@ -72,7 +72,8 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `clic droit` | Détacher et redimensionner librement |
 | `Super` + `Maj` + `glisser` | Redimensionner (pavé tactile) |
 | `Super` + `H` ou `Super` + `M` | Masquer la fenêtre (elle revient par la vue des fenêtres, Spotlight, le dock ou Alt + Tab) |
-| Clic sur le rond jaune en haut à gauche de la fenêtre | Masquer la fenêtre (`nc-reglages` → Clavier et souris → Bouton Masquer) |
+| Survol du titre de la fenêtre, dans la barre | Toutes les fenêtres du bureau, puis les masquées : clic pour y aller ou la ramener, `−` pour masquer la fenêtre active |
+| Clic sur le titre de la fenêtre, dans la barre | Menu des fenêtres du bureau : masquer, ramener, fermer, tout masquer, tout afficher (clic droit : vue des fenêtres) |
 | `Super` + `Ctrl` + `M` | Ramener la dernière fenêtre masquée |
 | `Super` + `A` (ou trois doigts vers le haut) | Vue de toutes les fenêtres, les masquées comprises (marquées « Masquée ») : clic pour y aller ou la ramener, glisser sur un bureau pour l'y envoyer, clic molette pour fermer |
 | Trois doigts vers le bas · `Échap` | Refermer la vue des fenêtres |
