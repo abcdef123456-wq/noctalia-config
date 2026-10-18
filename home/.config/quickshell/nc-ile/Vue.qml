@@ -53,9 +53,21 @@ PanelWindow {
         return vis.concat(red)
     }
     readonly property var fenetres: fenetresDe(bureau)
-    function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]) }
+    function fenetre(action, t) { Quickshell.execDetached([Etat.bin + "nc-fenetre", action, adresse(t)]); relire() }
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
-    function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
+    function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]); relire() }
+    // Place et taille des fenêtres relues après chaque changement (déplacer, échanger, fermer, masquer…) : sinon la
+    // mise en page restait l'ancienne. Hyprland range les fenêtres en animation : relu tout de suite, puis une fois en place.
+    function relire() { relireVite.restart(); relireApres.restart() }
+    Timer { id: relireVite; interval: 60; onTriggered: { Hyprland.refreshToplevels(); Hyprland.refreshWorkspaces() } }
+    Timer { id: relireApres; interval: 450; onTriggered: { Hyprland.refreshToplevels(); Hyprland.refreshWorkspaces() } }
+    Connections {
+        target: Hyprland
+        // Ouvertes, fermées, déplacées, flottantes… (y compris par le clavier ou une autre appli pendant la vue)
+        function onRawEvent(e) {
+            if (/^(openwindow|closewindow|movewindow|changefloatingmode|fullscreen|createworkspace|destroyworkspace|moveworkspace)/.test(e.name)) v.relire()
+        }
+    }
     // Quitter la vue, de toutes les façons (Échap, clic, trois doigts vers le bas, une fenêtre, un bureau) : on va sur le
     // bureau choisi. Il grandit jusqu'à remplir l'écran pendant que Hyprland y passe, derrière ; puis la vue s'efface.
     function fermer() {
@@ -200,8 +212,11 @@ PanelWindow {
                 // Fenêtre lâchée ici : envoyée sur ce bureau (on reste sur la vue)
                 DropArea {
                     id: depot; anchors.fill: parent
-                    onDropped: d => v.dispatch("hl.dsp.window.move({ workspace = " + pastille.modelData.id + ", follow = false, window = 'address:"
-                                               + v.adresse(d.source.toplevel) + "' })")
+                    onDropped: d => {
+                        var t = d.source && d.source.toplevel
+                        if (t && !v.masquee(t))
+                            v.dispatch("hl.dsp.window.move({ workspace = " + pastille.modelData.id + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
+                    }
                 }
             }
         }
@@ -212,7 +227,11 @@ PanelWindow {
             MouseArea { id: zn; anchors.fill: parent; hoverEnabled: true; onClicked: v.dispatch("hl.dsp.focus({ workspace = 'emptynm' })") }
             DropArea {
                 anchors.fill: parent
-                onDropped: d => v.dispatch("hl.dsp.window.move({ workspace = 'emptynm', follow = false, window = 'address:" + v.adresse(d.source.toplevel) + "' })")
+                onDropped: d => {
+                    var t = d.source && d.source.toplevel
+                    if (t && !v.masquee(t))
+                        v.dispatch("hl.dsp.window.move({ workspace = 'emptynm', follow = false, window = 'address:" + v.adresse(t) + "' })")
+                }
             }
         }
     }
@@ -381,7 +400,7 @@ PanelWindow {
                             x: (pl[0] - zone.mx) * zone.e
                             y: (pl[1] - zone.my) * zone.e
                             // Les masquées par-dessus (estompées, même si une autre a pris leur place), celle qu'on traîne encore au-dessus
-                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered || zf.drag.active ? 5 : 0)
+                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered || carte.traine ? 5 : 0)
 
                             // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
                             DropArea {
@@ -413,10 +432,13 @@ PanelWindow {
                                 // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
                                 scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
                                 Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                                Drag.active: zf.drag.active
+                                // Glissée : levée à la main (liée à drag.active, elle retombait parfois avant le lâcher, et le
+                                // dépôt était perdu)
+                                property bool traine: false
+                                Drag.active: traine
                                 Drag.source: carte
                                 Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
-                                z: zf.drag.active ? 10 : 0
+                                z: traine ? 10 : 0
 
                                 Rectangle {
                                     anchors.fill: parent; anchors.margins: -3; radius: 14
@@ -528,19 +550,38 @@ PanelWindow {
                                         if (e.button === Qt.MiddleButton) v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
                                         else v.activer(case_.modelData)
                                     }
+                                    onPositionChanged: if (drag.active && !carte.traine) carte.traine = true
                                     onReleased: {
-                                        if (carte.Drag.active) carte.Drag.drop()
+                                        if (carte.traine) carte.Drag.drop()
+                                        carte.traine = false
                                         carte.x = carte.marge; carte.y = carte.marge
                                     }
+                                    onCanceled: { carte.traine = false; carte.x = carte.marge; carte.y = carte.marge }
                                 }
                             }
                         }
                     }
-                    // Bureau voisin : un clic dessus le fait venir devant (ses fenêtres ne réagissent qu'au milieu)
+                    // Bureau voisin : un clic dessus le fait venir devant (ses fenêtres ne réagissent qu'au milieu) ;
+                    // une fenêtre lâchée dessus y est envoyée
                     MouseArea {
                         anchors.fill: parent; z: 50
                         visible: Math.abs(face.d) > 0.01
                         onClicked: v.choisi = face.bureauId
+                    }
+                    DropArea {
+                        id: depotFace
+                        anchors.fill: parent; z: 51
+                        enabled: Math.abs(face.d) > 0.01
+                        onDropped: d => {
+                            var t = d.source && d.source.toplevel
+                            if (t && !v.masquee(t))
+                                v.dispatch("hl.dsp.window.move({ workspace = " + face.bureauId + ", follow = false, window = 'address:" + v.adresse(t) + "' })")
+                        }
+                    }
+                    Rectangle {
+                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18; z: 52
+                        visible: depotFace.containsDrag
+                        color: Qt.rgba(1, 1, 1, 0.06); border.width: 2; border.color: Couleurs.accent
                     }
                 }
             }
