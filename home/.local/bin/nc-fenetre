@@ -24,6 +24,9 @@ action="${1:-}"
 # Noms anglais des actions (nc-window minimize | restore | goto)
 case "$action" in minimize|hide) action=reduire ;; restore|show) action=restaurer ;; goto|go) action=aller ;; toggle) action=basculer ;;
   close) action=fermer ;; hide-all) action=tout-masquer ;; show-all) action=tout-afficher ;; state) action=etat ;; watch) action=suivre ;; esac
+# Fondu au lieu du glissement de Hyprland (une fenêtre floutée qui glisse hors de l'écran saccade sur un petit GPU) :
+# elle s'efface, part sans animation, puis retrouve son opacité une fois cachée
+prop() { eval_lua "hl.dsp.window.set_prop({ prop = '$2', value = '$3', window = 'address:$1' })"; }
 # Bureau affiché sur l'écran actif
 bureau_actif() { hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1; }
 
@@ -32,7 +35,10 @@ case "$action" in
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
     [ -n "$a" ] && [ "$a" != null ] || exit 0
     [ "$(bureau_de "$a")" = "$CACHE" ] && exit 0
+    prop "$a" opacity 0; sleep 0.14
+    prop "$a" no_anim 1
     eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })"
+    prop "$a" no_anim 0; prop "$a" opacity 1
     { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp"; mv "$pile.tmp" "$pile" ;;
   basculer)
     a="${2:-}"; [ -n "$a" ] || exit 0
@@ -127,7 +133,10 @@ PY
       ws="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)"
       ouvert="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .specialWorkspace.name' | head -1)"
       [ "$ouvert" = "$CACHE" ] && eval_lua "hl.dsp.workspace.toggle_special('reduites')"
+      # Elle revient en fondu, à sa place, sans glisser
+      prop "$a" opacity 0; prop "$a" no_anim 1
       eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })"
+      prop "$a" no_anim 0; prop "$a" opacity 1
       grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null
     fi
     eval_lua "hl.dsp.focus({ window = 'address:$a' })" ;;

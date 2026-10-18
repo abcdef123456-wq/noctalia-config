@@ -1,6 +1,7 @@
 --!nonstrict
 -- nc/fenetres : le menu de gestion, sous le titre de la barre. Les fenêtres du bureau affiché, puis les masquées ;
--- pour chacune : y aller (clic), la masquer ou la ramener, la fermer. En bas : tout masquer, tout ramener, la vue.
+-- pour chacune : y aller (clic), la masquer ou la ramener, la fermer ; en haut : tout masquer, tout afficher.
+-- Seulement sans l'île Quickshell (sinon le titre de la barre ouvre sa page « Fenêtres ») ; même allure que l'île.
 -- Lignes plus grandes quand il y a peu de fenêtres, plus serrées quand il y en a beaucoup.
 local c = require("./commun.luau")
 local tr = c.tr
@@ -23,40 +24,40 @@ local function lire()
   end, 3000)
 end
 
-local function compte(n, un, plusieurs)
-  return n == 1 and un or (n .. " " .. plusieurs)
+-- Bouton rond, comme dans l'île
+local function rond(glyphe, action, danger)
+  return ui.column({ width = 30, height = 30, radius = 15, fill = "surface_variant", align = "center", justify = "center",
+    onClick = action }, { ui.glyph({ name = glyphe, size = 15, color = danger and "error" or "on_surface" }) })
+end
+
+-- Lien texte de l'en-tête (« Tout masquer »), comme « Effacer » dans l'île
+local function lien(texte, action)
+  return ui.row({ paddingH = 4, height = 26, align = "center", onClick = action }, {
+    ui.label({ text = texte, fontSize = 13, color = "primary" }),
+  })
 end
 
 local function ligne(w, masquee, grand)
-  local taille = grand and 30 or 22
   local actif = w.active and not masquee
-  local sous = (w.classe ~= "" and w.classe ~= c.nom(w)) and w.classe or nil
-  local texte = { ui.label({ text = c.nom(w), maxLines = 1, fontWeight = actif and "semibold" or "normal",
+  local texte = { ui.label({ text = c.nom(w), maxLines = 1, fontSize = 14, fontWeight = actif and "semibold" or "normal",
     color = masquee and "on_surface_variant" or "on_surface" }) }
-  if grand and sous then
-    table.insert(texte, ui.label({ text = sous, maxLines = 1, fontSize = 11, color = "on_surface_variant" }))
+  if grand and w.classe ~= "" then
+    table.insert(texte, ui.label({ text = w.classe, maxLines = 1, fontSize = 12, color = "on_surface_variant" }))
   end
   return ui.row({
-    key = (masquee and "m" or "f") .. w.adresse, gap = 12, paddingH = 10, height = grand and 54 or 40, radius = 12,
-    align = "center", fill = actif and "primary/0.16" or "surface_variant/0.35",
-    tooltip = masquee and tr("Ramener sur le bureau", "Bring back to the desktop") or tr("Aller sur la fenêtre", "Go to the window"),
+    key = (masquee and "m" or "f") .. w.adresse, gap = 12, paddingH = 12, height = grand and 58 or 46, radius = 14,
+    align = "center", fill = "surface_variant/0.45", border = actif and "primary" or nil, borderWidth = actif and 1.5 or 0,
     onClick = function() c.faire("aller", w.adresse); panel.close() end,
   }, {
-    c.image(w, taille, masquee and 0.5 or 1),
+    c.image(w, grand and 32 or 24, masquee and 0.45 or 1),
     ui.column({ flexGrow = 1, gap = 1 }, texte),
-    ui.button({ glyph = masquee and "eye" or "eye-off", variant = "ghost", controlSize = "sm",
-      tooltip = masquee and tr("Afficher", "Show") or tr("Masquer", "Hide"),
-      onClick = function() c.faire("basculer", w.adresse) end }),
-    ui.button({ glyph = "x", variant = "ghost", controlSize = "sm", tooltip = tr("Fermer", "Close"),
-      onClick = function() c.faire("fermer", w.adresse) end }),
+    rond(masquee and "eye" or "eye-off", function() c.faire("basculer", w.adresse) end),
+    rond("x", function() c.faire("fermer", w.adresse) end, true),
   })
 end
 
 local function section(titre, n)
-  return ui.row({ paddingH = 4, align = "center", gap = 6 }, {
-    ui.label({ text = titre, fontSize = 12, fontWeight = "semibold", color = "on_surface_variant" }),
-    ui.label({ text = tostring(n), fontSize = 12, color = "on_surface_variant/0.7" }),
-  })
+  return ui.label({ text = titre .. "  ·  " .. n, fontSize = 12, fontWeight = "semibold", color = "on_surface_variant" })
 end
 
 function render()
@@ -65,8 +66,8 @@ function render()
   local grand = nf + nm <= 5
   local corps
   if nf + nm == 0 then
-    corps = ui.column({ flexGrow = 1, align = "center", justify = "center", gap = 10 }, {
-      ui.glyph({ name = "app-window", size = 40, color = "on_surface_variant/0.6" }),
+    corps = ui.column({ flexGrow = 1, align = "center", justify = "center", gap = 8 }, {
+      ui.glyph({ name = "app-window", size = 30, color = "on_surface_variant/0.6" }),
       ui.label({ text = tr("Aucune fenêtre sur ce bureau", "No windows on this desktop"), color = "on_surface_variant" }),
     })
   else
@@ -79,26 +80,19 @@ function render()
       table.insert(liste, section(tr("Masquées", "Hidden"), nm))
       for _, w in ipairs(etat.masquees) do table.insert(liste, ligne(w, true, grand)) end
     end
-    corps = ui.scroll({ flexGrow = 1, gap = grand and 8 or 5 }, liste)
+    corps = ui.scroll({ flexGrow = 1, gap = 6 }, liste)
   end
-  panel.render(ui.column({ flexGrow = 1, padding = 16, gap = 12 }, {
-    ui.row({ align = "center", gap = 8 }, {
-      ui.glyph({ name = "app-window", size = 18, color = "primary" }),
-      ui.label({ text = tr("Fenêtres", "Windows"), fontSize = 16, fontWeight = "bold" }),
+  local liens = {}
+  if nf > 0 then table.insert(liens, lien(tr("Tout masquer", "Hide All"), function() c.faire("tout-masquer") end)) end
+  if nm > 0 then table.insert(liens, lien(tr("Tout afficher", "Show All"), function() c.faire("tout-afficher") end)) end
+  panel.render(ui.column({ flexGrow = 1, padding = 18, gap = 10 }, {
+    ui.row({ align = "center", gap = 8, height = 34 }, {
+      ui.label({ text = tr("Fenêtres", "Windows"), fontSize = 20, fontWeight = "bold" }),
+      ui.label({ text = tr("Bureau ", "Desktop ") .. etat.bureau, color = "on_surface_variant" }),
       ui.spacer({ flexGrow = 1 }),
-      ui.label({ text = tr("Bureau ", "Desktop ") .. etat.bureau .. " · "
-        .. compte(nf, tr("1 fenêtre", "1 window"), tr("fenêtres", "windows")), color = "on_surface_variant", fontSize = 12 }),
+      ui.row({ gap = 10, align = "center" }, liens),
     }),
     corps,
-    ui.row({ gap = 8 }, {
-      ui.button({ text = tr("Tout masquer", "Hide All"), glyph = "eye-off", variant = "secondary", controlSize = "sm",
-        flexGrow = 1, enabled = nf > 0, onClick = function() c.faire("tout-masquer") end }),
-      ui.button({ text = tr("Tout afficher", "Show All"), glyph = "eye", variant = "secondary", controlSize = "sm",
-        flexGrow = 1, enabled = nm > 0, onClick = function() c.faire("tout-afficher") end }),
-      ui.button({ glyph = "layout-grid", variant = "ghost", controlSize = "sm",
-        tooltip = tr("Vue de toutes les fenêtres (Super + A)", "All windows overview (Super + A)"),
-        onClick = function() panel.close(); c.vue() end }),
-    }),
   }))
 end
 

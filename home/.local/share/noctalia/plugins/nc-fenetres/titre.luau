@@ -1,9 +1,10 @@
 --!nonstrict
 -- nc/fenetres : le titre de la fenêtre active dans la barre (à la place de active_window).
 --   Repos : icône et titre de la fenêtre active de cet écran ; un badge s'il y a des fenêtres masquées.
---   Survol : la zone s'agrandit et montre toutes les fenêtres du bureau, puis les masquées (estompées) :
---   un clic va sur une fenêtre ou ramène une masquée ; « − » masque la fenêtre active, « ≡ » ouvre le menu de gestion.
---   Clic : menu de gestion.  Clic droit : vue de toutes les fenêtres.  Molette : fenêtre suivante / précédente du bureau.
+--   Survol : la zone s'agrandit et montre les icônes des fenêtres du bureau, puis des masquées (estompées), et le nom
+--   de celle sous la souris ; un clic va sur une fenêtre ou ramène une masquée ; « − » masque la fenêtre active,
+--   « ≡ » ouvre le menu des fenêtres.
+--   Clic : menu des fenêtres (page « Fenêtres » de l'île Quickshell, sinon le panneau nc/fenetres:gestion).  Clic droit : vue de toutes les fenêtres.  Molette : fenêtre suivante / précédente du bureau.
 -- L'état vient de nc-fenetre suivre : une ligne de JSON à chaque changement dans Hyprland, rien entre-temps.
 local c = require("./commun.luau")
 local tr = c.tr
@@ -14,6 +15,7 @@ local derniere = nil       -- dernière fenêtre active de cet écran (un pannea
 local dedans = {}          -- éléments survolés (le survol passe d'un élément à l'autre sans refermer)
 local developpe = false
 local fermerA = 0          -- fin du délai avant de se replier, quand le pointeur est sorti
+local survolee = nil       -- fenêtre sous la souris (son nom s'affiche à la place de celui de l'active)
 local signature = ""       -- pour ne redessiner que si ce qui est montré a changé
 
 local function choisir()
@@ -40,6 +42,11 @@ end
 -- Survol : se déplier tout de suite, se replier 350 ms après la sortie du pointeur
 function onSurvol(etatSurvol, cle)
   dedans[cle ~= "" and cle or "fond"] = (etatSurvol == "true") or nil
+  local avant = survolee
+  if string.sub(cle, 1, 1) == "w" then
+    if etatSurvol == "true" then survolee = string.sub(cle, 2) elseif survolee == string.sub(cle, 2) then survolee = nil end
+  end
+  if survolee ~= avant and developpe then rendre() end
   if next(dedans) then
     fermerA = 0
     if not developpe then developpe = true; rendre() end
@@ -49,24 +56,35 @@ function onSurvol(etatSurvol, cle)
   end
 end
 
+-- Le menu des fenêtres : la page de l'île si elle tourne (même allure que le reste), sinon le panneau de Noctalia
+local function menu()
+  noctalia.runAsync({ "qs", "-c", "nc-ile", "ipc", "call", "ile", "page", "fenetres" }, function(r)
+    if r.exitCode ~= 0 then noctalia.togglePanel("nc/fenetres:gestion") end
+  end, 3000)
+end
+
+-- Une fenêtre : son icône seule ; fond teinté pour l'active, plus léger pour celle sous la souris
 local function puce(w, masquee, a)
   local actif = not masquee and a ~= nil and w.adresse == a.adresse
-  local enfants = { c.image(w, 16, masquee and 0.45 or 1) }
-  if actif then table.insert(enfants, ui.label({ text = c.nom(w), maxWidth = 180, maxLines = 1 })) end
   return ui.row({
-    key = "w" .. w.adresse, gap = 6, paddingH = 7, height = 24, radius = 12, align = "center",
-    fill = actif and "primary/0.22" or nil,
-    tooltip = masquee and (c.nom(w) .. tr(" · masquée, clic pour la ramener", " · hidden, click to bring it back")) or c.nom(w),
+    key = "w" .. w.adresse, paddingH = 6, height = 24, radius = 12, align = "center",
+    fill = actif and "primary/0.25" or (survolee == w.adresse and "on_surface/0.12" or nil),
     onHover = "onSurvol",
     onClick = function() c.faire("aller", w.adresse) end,
-  }, enfants)
+  }, { c.image(w, 16, masquee and 0.45 or 1) })
+end
+
+local function trouver(adresse)
+  for _, w in ipairs(vue.fenetres) do if w.adresse == adresse then return w, false end end
+  for _, w in ipairs(vue.masquees) do if w.adresse == adresse then return w, true end end
+  return nil, false
 end
 
 function rendre()
   local a = active()
   local nf, nm = #vue.fenetres, #vue.masquees
   -- Signature de ce qui est montré : rien à refaire si seul un autre écran a changé
-  local sig = tostring(developpe) .. (a and (a.adresse .. a.titre) or "") .. "|" .. nm
+  local sig = tostring(developpe) .. (a and (a.adresse .. a.titre) or "") .. "|" .. nm .. "|" .. (survolee or "")
   if developpe then
     for _, w in ipairs(vue.fenetres) do sig ..= w.adresse .. w.classe end
     for _, w in ipairs(vue.masquees) do sig ..= w.adresse .. w.titre end
@@ -85,15 +103,21 @@ function rendre()
       if nf > 0 then table.insert(enfants, ui.separator({ orientation = "vertical", spacing = 2 })) end
       for _, w in ipairs(vue.masquees) do table.insert(enfants, puce(w, true, nil)) end
     end
-    table.insert(enfants, ui.separator({ orientation = "vertical", spacing = 2 }))
+    -- Le nom de la fenêtre sous la souris, sinon celui de l'active
+    local w, masquee = trouver(survolee or "")
+    w = w or a
+    if w then
+      table.insert(enfants, ui.label({ text = c.nom(w) .. (masquee and tr(" · masquée", " · hidden") or ""), maxWidth = 220, maxLines = 1,
+        color = masquee and "on_surface_variant" or nil }))
+    end
     if a then
       table.insert(enfants, ui.button({ key = "masquer", glyph = "minus", variant = "ghost", glyphSize = 14,
-        tooltip = tr("Masquer la fenêtre (Super + H)", "Hide the window (Super + H)"), onHover = "onSurvol",
+        onHover = "onSurvol",
         onClick = function() c.faire("reduire", a.adresse) end }))
     end
     table.insert(enfants, ui.button({ key = "menu", glyph = "layout-list", variant = "ghost", glyphSize = 14,
-      tooltip = tr("Gérer les fenêtres du bureau", "Manage the desktop's windows"), onHover = "onSurvol",
-      onClick = function() noctalia.togglePanel("nc/fenetres:gestion") end }))
+      onHover = "onSurvol",
+      onClick = menu }))
   else
     if a then
       table.insert(enfants, c.image(a, 16))
@@ -103,14 +127,13 @@ function rendre()
       table.insert(enfants, ui.label({ text = nf == 1 and tr("1 fenêtre", "1 window") or (nf .. tr(" fenêtres", " windows")) }))
     end
     if nm > 0 then
-      table.insert(enfants, ui.row({ gap = 3, paddingH = 6, height = 20, radius = 10, align = "center", fill = "surface_variant/0.7",
-        tooltip = nm == 1 and tr("1 fenêtre masquée", "1 hidden window") or (nm .. tr(" fenêtres masquées", " hidden windows")) }, {
+      table.insert(enfants, ui.row({ gap = 3, paddingH = 6, height = 20, radius = 10, align = "center", fill = "surface_variant/0.7" }, {
         ui.glyph({ name = "eye-off", size = 12, color = "on_surface_variant" }),
         ui.label({ text = tostring(nm), fontSize = 11, color = "on_surface_variant" }),
       }))
     end
   end
-  barWidget.render(ui.row({ key = "fond", gap = developpe and 3 or 7, align = "center", onHover = "onSurvol" }, enfants))
+  barWidget.render(ui.row({ key = "fond", gap = developpe and 4 or 7, align = "center", onHover = "onSurvol" }, enfants))
 end
 
 -- Seulement pour se replier après le survol : le reste arrive par le flux
@@ -122,7 +145,7 @@ function update()
   end
 end
 
-function onClick() noctalia.togglePanel("nc/fenetres:gestion") end
+function onClick() menu() end
 function onRightClick() c.vue() end
 
 -- Molette : fenêtre suivante ou précédente du bureau, dans l'ordre de la barre

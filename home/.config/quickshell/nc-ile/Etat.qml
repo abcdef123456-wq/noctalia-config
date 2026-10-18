@@ -35,7 +35,7 @@ Singleton {
     }
     readonly property var vues: activites.concat(["centre", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
-                                                 meteo.temp !== undefined ? ["meteo"] : [], ["presse"],
+                                                 meteo.temp !== undefined ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"])
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
