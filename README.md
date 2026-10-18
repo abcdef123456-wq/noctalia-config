@@ -7,6 +7,9 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - **île dynamique** au centre de la barre : l'heure, ta musique (pochette, égaliseur qui danse sur le son) ; elle
   s'étire comme sur iPhone pour le volume, la luminosité, un nouveau morceau, le chargeur, le profil d'énergie ; un clic
   (ou **Super + C**) et le centre de contrôle en sort : Wi-Fi, Bluetooth, son, luminosité, profils, mode jeu… ;
+- **fenêtres comme sur macOS** : **Super + H** masque la fenêtre ; dans la barre, le titre de la fenêtre s'agrandit au
+  survol et montre toutes les fenêtres du bureau, les masquées comprises (un clic les ramène), un clic ouvre le menu des
+  fenêtres, la molette passe de l'une à l'autre ; trois doigts vers le haut : la vue de toutes les fenêtres ;
 - **Super + R** : recherche compacte au centre de l'écran (applis, fichiers, calculs) ;
 - **Super + W** : carrousel de fonds d'écran ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;

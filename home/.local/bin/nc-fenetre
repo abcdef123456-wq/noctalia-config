@@ -8,8 +8,8 @@
 #   nc-fenetre fermer ADRESSE        la ferme
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
 #   nc-fenetre tout-afficher         ramène toutes les fenêtres masquées sur le bureau affiché
-#   nc-fenetre etat                  le bureau affiché, ses fenêtres et les masquées, en JSON (barre : nc/fenetres)
-#   nc-fenetre suivre                une ligne à chaque changement de fenêtres dans Hyprland (barre : nc/fenetres)
+#   nc-fenetre etat                  chaque écran, son bureau et ses fenêtres, et les masquées, en JSON (barre : nc/fenetres)
+#   nc-fenetre suivre                le même état, réécrit à chaque changement (une ligne de JSON ; barre : nc/fenetres)
 # Une fenêtre réduite qu'on active autrement (dock, Alt + Tab) revient aussi d'elle-même (nc/automatismes.lua).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -44,39 +44,74 @@ case "$action" in
     clients | jq -r --argjson w "${ws:-0}" '.[] | select(.workspace.id == $w) | .address' | while read -r a; do "$0" reduire "$a"; done ;;
   tout-afficher)
     clients | jq -r --arg c "$CACHE" '.[] | select(.workspace.name == $c) | .address' | while read -r a; do "$0" aller "$a"; done ;;
-  etat)
-    ws="$(bureau_actif)"
-    actif="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // ""')"
-    clients | jq -c --argjson w "${ws:-0}" --arg c "$CACHE" --arg actif "$actif" '
-      def f: { adresse: .address, classe: (.class // ""), titre: (.title // ""), active: (.address == $actif) };
-      { bureau: $w,
-        fenetres: [.[] | select(.workspace.id == $w and .mapped != false)] | sort_by(.at[0], .at[1]) | map(f),
-        masquees: [.[] | select(.workspace.name == $c)] | map(f) }' ;;
-  suivre)
-    # Les événements de Hyprland (socket2) qui changent la liste ; une ligne au plus toutes les 150 ms
-    exec python3 -u - <<'PY'
-import os, socket, sys, time, glob
-run = os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
+  etat|suivre)
+    # État lu directement sur les sockets de Hyprland (pas de hyprctl ni de jq) : pour chaque écran, son bureau affiché
+    # et ses fenêtres (de gauche à droite), plus les masquées. « suivre » le réécrit à chaque changement, une ligne de
+    # JSON seulement quand il a changé, une fois la rafale d'événements passée (ouvrir une fenêtre en envoie plusieurs).
+    exec python3 -u - "$action" "$CACHE" <<'PY'
+import glob, json, os, select, socket, sys, time
+mode, cache = sys.argv[1], sys.argv[2]
+run = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
-socks = [f"{run}/hypr/{sig}/.socket2.sock"] if sig else []
-socks += sorted(glob.glob(f"{run}/hypr/*/.socket2.sock"), key=os.path.getmtime, reverse=True)
-EV = (b"openwindow", b"closewindow", b"movewindow", b"activewindow", b"workspace", b"focusedmon", b"windowtitle", b"changefloatingmode")
-for chemin in socks:
-    try:
-        s = socket.socket(socket.AF_UNIX); s.connect(chemin); break
-    except OSError:
-        continue
-else:
+dossiers = ([f"{run}/hypr/{sig}"] if sig else []) + sorted(glob.glob(f"{run}/hypr/*"), key=os.path.getmtime, reverse=True)
+dossier = next((d for d in dossiers if os.path.exists(f"{d}/.socket.sock")), None)
+if not dossier:
     sys.exit(1)
-print("pret", flush=True)
-reste, dernier = b"", 0.0
+
+def demander(cmd):
+    with socket.socket(socket.AF_UNIX) as c:
+        c.connect(f"{dossier}/.socket.sock"); c.sendall(cmd.encode())
+        morceaux = []
+        while d := c.recv(65536):
+            morceaux.append(d)
+    return json.loads(b"".join(morceaux) or b"null")
+
+def etat():
+    clients, ecrans = demander("j/clients") or [], demander("j/monitors") or []
+    actif = (demander("j/activewindow") or {}).get("address", "")
+    def f(c):
+        return {"adresse": c["address"], "classe": c.get("class") or c.get("initialClass") or "",
+                "titre": c.get("title") or "", "active": c["address"] == actif}
+    visibles = [c for c in clients if c.get("mapped", True) and not c.get("hidden")]
+    moniteurs = {}
+    for m in ecrans:
+        ws = (m.get("activeWorkspace") or {}).get("id")
+        moniteurs[m["name"]] = {"bureau": ws, "fenetres": [f(c) for c in sorted(
+            (c for c in visibles if c["workspace"]["id"] == ws), key=lambda c: (c["at"][0], c["at"][1]))]}
+    focus = next((m["name"] for m in ecrans if m.get("focused")), ecrans[0]["name"] if ecrans else "")
+    return {"focus": focus, "actif": actif, "moniteurs": moniteurs,
+            "masquees": [f(c) for c in visibles if c["workspace"]["name"] == cache]}
+
+def ecrire(e):
+    # Compatibilité : bureau et fenêtres de l'écran actif à la racine aussi
+    m = e["moniteurs"].get(e["focus"], {"bureau": 0, "fenetres": []})
+    print(json.dumps({**e, "bureau": m["bureau"], "fenetres": m["fenetres"]}, ensure_ascii=False, separators=(",", ":")))
+
+if mode == "etat":
+    ecrire(etat()); sys.exit(0)
+
+EV = (b"openwindow>>", b"closewindow>>", b"movewindow", b"activewindow>>", b"workspace", b"focusedmon",
+      b"windowtitle", b"changefloatingmode", b"monitoradded", b"monitorremoved", b"urgent")
+ev = socket.socket(socket.AF_UNIX); ev.connect(f"{dossier}/.socket2.sock")
+precedent, reste = None, b""
 while True:
-    d = s.recv(4096)
-    if not d:
-        sys.exit(0)
-    lignes = (reste + d).split(b"\n"); reste = lignes.pop()
-    if any(l.startswith(EV) for l in lignes) and time.time() - dernier > 0.15:
-        dernier = time.time(); print("x", flush=True)
+    e = etat()
+    if e != precedent:
+        ecrire(e); precedent = e
+    # Attendre un événement utile, puis la fin de la rafale (60 ms de calme, 300 ms au plus)
+    utile, debut = False, None
+    while True:
+        attente = None if not utile else max(0, min(0.06, debut + 0.3 - time.time()))
+        if not select.select([ev], [], [], attente)[0]:
+            if utile:
+                break
+            continue
+        d = ev.recv(65536)
+        if not d:
+            sys.exit(0)
+        lignes = (reste + d).split(b"\n"); reste = lignes.pop()
+        if any(l.startswith(EV) for l in lignes) and not utile:
+            utile, debut = True, time.time()
 PY
     ;;
   restaurer|aller)
@@ -108,8 +143,8 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
   nc-window close ADDRESS        closes it
   nc-window hide-all             hides every window of the visible workspace
   nc-window show-all             brings every hidden window back to the visible workspace
-  nc-window state                the visible workspace, its windows and the hidden ones, as JSON (bar: nc/fenetres)
-  nc-window watch                one line each time Hyprland's windows change (bar: nc/fenetres)
+  nc-window state                each display, its workspace and windows, and the hidden ones, as JSON (bar: nc/fenetres)
+  nc-window watch                the same state, written again on each change (one JSON line; bar: nc/fenetres)
 A minimized window activated another way (dock, Alt + Tab) also comes back on its own (nc/automatismes.lua).
 FIN
     else

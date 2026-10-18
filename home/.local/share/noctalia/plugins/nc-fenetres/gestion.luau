@@ -8,13 +8,18 @@ local tr = c.tr
 local etat = { bureau = 0, fenetres = {}, masquees = {} }
 local ouvert = false
 
+-- L'écran où le menu s'ouvre : son bureau et ses fenêtres, et toutes les masquées
+local function prendre(e)
+  if type(e) ~= "table" then return end
+  local m = (e.moniteurs or {})[noctalia.focusedOutputName() or ""] or e
+  etat = { bureau = m.bureau or 0, fenetres = m.fenetres or {}, masquees = e.masquees or {} }
+end
+
+-- Sans titre dans la barre (pas d'état publié) : lu une fois
 local function lire()
   noctalia.runAsync({ c.NC, "etat" }, function(r)
     local ok, e = pcall(noctalia.json.decode, r.stdout or "")
-    if ok and type(e) == "table" then
-      etat = { bureau = e.bureau or 0, fenetres = e.fenetres or {}, masquees = e.masquees or {} }
-      render()
-    end
+    if ok then prendre(e); render() end
   end, 3000)
 end
 
@@ -41,9 +46,9 @@ local function ligne(w, masquee, grand)
     ui.column({ flexGrow = 1, gap = 1 }, texte),
     ui.button({ glyph = masquee and "eye" or "eye-off", variant = "ghost", controlSize = "sm",
       tooltip = masquee and tr("Afficher", "Show") or tr("Masquer", "Hide"),
-      onClick = function() c.faire("basculer", w.adresse, lire) end }),
+      onClick = function() c.faire("basculer", w.adresse) end }),
     ui.button({ glyph = "x", variant = "ghost", controlSize = "sm", tooltip = tr("Fermer", "Close"),
-      onClick = function() c.faire("fermer", w.adresse, lire) end }),
+      onClick = function() c.faire("fermer", w.adresse) end }),
   })
 end
 
@@ -87,9 +92,9 @@ function render()
     corps,
     ui.row({ gap = 8 }, {
       ui.button({ text = tr("Tout masquer", "Hide All"), glyph = "eye-off", variant = "secondary", controlSize = "sm",
-        flexGrow = 1, enabled = nf > 0, onClick = function() c.faire("tout-masquer", nil, lire) end }),
+        flexGrow = 1, enabled = nf > 0, onClick = function() c.faire("tout-masquer") end }),
       ui.button({ text = tr("Tout afficher", "Show All"), glyph = "eye", variant = "secondary", controlSize = "sm",
-        flexGrow = 1, enabled = nm > 0, onClick = function() c.faire("tout-afficher", nil, lire) end }),
+        flexGrow = 1, enabled = nm > 0, onClick = function() c.faire("tout-afficher") end }),
       ui.button({ glyph = "layout-grid", variant = "ghost", controlSize = "sm",
         tooltip = tr("Vue de toutes les fenêtres (Super + A)", "All windows overview (Super + A)"),
         onClick = function() panel.close(); c.vue() end }),
@@ -100,14 +105,13 @@ end
 function onOpen()
   ouvert = true
   local e = noctalia.state.get and noctalia.state.get("fenetres")
-  if type(e) == "table" then etat = e end
-  render()
-  lire()
+  if type(e) == "table" then prendre(e); render() else lire() end
 end
 
 function onClose() ouvert = false end
 
 -- Le titre de la barre publie chaque changement : le menu ouvert suit
 noctalia.state.watch("fenetres", function(e)
-  if type(e) == "table" then etat = e; render() end
+  prendre(e)
+  render()
 end)
