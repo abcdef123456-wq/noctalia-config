@@ -177,7 +177,10 @@ PanelWindow {
                 Item {
                     id: carte
                     property var toplevel: case_.modelData
-                    width: case_.width; height: case_.height
+                    // Un peu d'air entre les fenêtres collées (les espaces de Hyprland, réduits, ne se voient plus)
+                    readonly property real marge: case_.masquee ? 0 : Math.min(7, case_.width * 0.04)
+                    x: marge; y: marge
+                    width: case_.width - 2 * marge; height: case_.height - 2 * marge
                     // Survol de toute la carte, boutons du coin compris : sinon, la souris sur un bouton la faisait
                     // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
                     scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
@@ -278,7 +281,7 @@ PanelWindow {
                         }
                         onReleased: {
                             if (carte.Drag.active) carte.Drag.drop()
-                            carte.x = 0; carte.y = 0
+                            carte.x = carte.marge; carte.y = carte.marge
                         }
                     }
                 }
