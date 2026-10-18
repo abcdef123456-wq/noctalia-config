@@ -1,15 +1,18 @@
 // Vue de toutes les fenêtres (comme Mission Control) : Super + A, trois doigts vers le haut, ou un coin actif.
 //   Même allure que le carrousel (Super + W) : un cadre sous la barre, sur le fond d'écran flouté.
-//   Les bureaux de l'écran en cube : l'affiché devant, le bord des voisins de biais sur les côtés ; changer de bureau
-//   (flèches, deux doigts à l'horizontale, clic sur un voisin ou en haut) fait tourner le cube.
-//   Le bureau affiché en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
-//   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; les bureaux de l'écran en haut.
+//   Les bureaux de l'écran en cube : le choisi devant, le bord des voisins de biais sur les côtés. Parcourir les bureaux
+//   (flèches, deux doigts à l'horizontale, clic sur un voisin ou en haut) fait tourner le cube, en reculant pendant le
+//   mouvement ; le vrai bureau ne change qu'en validant (Entrée, clic sur le bureau choisi ou sur une de ses fenêtres).
+//   Animation, recul, voisins visibles et durée : nc-reglages, section Animations (VUE_*).
+//   Le bureau en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
+//   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; celles dont la place est prise
+//   (les autres se sont agrandies) rangées en bas du bureau. Les bureaux de l'écran en haut.
 //   Glisser une fenêtre sur une autre : elles échangent leurs places.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
 //   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
-//   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Les fenêtres déjà
-//   masquées (Super + H, nc-fenetre) sont translucides à leur place : un clic les ramène, au premier plan.
-//   Clic sur un bureau : y aller · Échap ou clic dans le vide : fermer
+//   « Masquée », et n'est vraiment masquée qu'à la fermeture de la vue (second clic : annulé). Un clic sur une masquée
+//   la ramène, au premier plan, sur le bureau choisi.
+//   Échap ou clic hors du bureau : fermer sans changer de bureau
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -50,16 +53,25 @@ PanelWindow {
     function adresse(t) { var a = String(t.address); return a.startsWith("0x") ? a : "0x" + a }
     function dispatch(lua) { Quickshell.execDetached(["hyprctl", "eval", "hl.dispatch(" + lua + ")"]) }
     function fermer() { Etat.vueFenetres = false }
-    // Bureau voisin sur cet écran (flèches, glisser à deux doigts, clic sur un bord) : le cube tourne
+    // Le bureau choisi dans la vue : on le parcourt sans quitter le bureau affiché ; il suit le vrai bureau s'il change
+    // (trois doigts, Hyprland)
+    property int choisi: bureau
+    onBureauChanged: choisi = bureau
+    // Bureau voisin sur cet écran (flèches, clic sur un bord) : le cube tourne
     function voisin(sens) {
-        var i = bureaux.findIndex(b => b.id === bureau) + sens
-        if (i >= 0 && i < bureaux.length) dispatch("hl.dsp.focus({ workspace = " + bureaux[i].id + " })")
+        var i = bureaux.findIndex(b => b.id === choisi) + sens
+        if (i >= 0 && i < bureaux.length) choisi = bureaux[i].id
+    }
+    // Valider : aller sur le bureau choisi
+    function valider() {
+        if (choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
+        fermer()
     }
     function allerA(t) { fenetre("aller", t); fermer() }   // nc-fenetre : le pointeur reste où il est
     function masquee(t) { return t && t.workspace && t.workspace.name === "special:reduites" }
-    // Une fenêtre masquée revient sur le bureau affiché (nc-fenetre aller), les autres : on y va
+    // Une fenêtre masquée revient sur le bureau choisi (nc-fenetre aller), les autres : on y va
     function activer(t) {
-        if (masquee(t)) { fenetre("aller", t); fermer(); return }
+        if (masquee(t)) { Quickshell.execDetached([Etat.bin + "nc-fenetre", "aller", adresse(t), String(choisi)]); fermer(); return }
         if (enAttente[adresse(t)]) basculerAttente(t)
         allerA(t)
     }
@@ -127,7 +139,8 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Keys.onEscapePressed: v.fermer()
-        Keys.onReturnPressed: if (v.fenetres.length) v.activer(v.fenetres[0])
+        Keys.onReturnPressed: v.valider()
+        Keys.onEnterPressed: v.valider()
         Keys.onLeftPressed: v.voisin(-1)
         Keys.onRightPressed: v.voisin(1)
     }
@@ -144,7 +157,7 @@ PanelWindow {
             Rectangle {
                 id: pastille
                 required property var modelData
-                readonly property bool actif: modelData.id === v.bureau
+                readonly property bool actif: modelData.id === v.choisi
                 width: Math.max(64, etiq.implicitWidth + 28); height: 40; radius: 20
                 color: depot.containsDrag ? Couleurs.accent : (actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2))
                 border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
@@ -157,7 +170,8 @@ PanelWindow {
                 }
                 MouseArea {
                     id: zp; anchors.fill: parent; hoverEnabled: true
-                    onClicked: v.dispatch("hl.dsp.focus({ workspace = " + pastille.modelData.id + " })")
+                    onClicked: v.choisi = pastille.modelData.id                    // le cube tourne jusqu'à lui
+                    onDoubleClicked: { v.choisi = pastille.modelData.id; v.valider() }
                 }
                 // Fenêtre lâchée ici : envoyée sur ce bureau (on reste sur la vue)
                 DropArea {
@@ -204,239 +218,308 @@ PanelWindow {
             if (o.at && !v.masquee(t)) return o.at
             var tl = taille(t); return [mx + (mw - tl[0]) / 2, my + (mh - tl[1]) / 2]   // masquée sans trace : au milieu
         }
+        // Une masquée dont la place est prise (les fenêtres affichées se sont agrandies) : rangée en bas du bureau
+        function recouverte(t, liste) {
+            if (!v.masquee(t)) return false
+            var s = taille(t), p = place(t), pris = 0
+            for (var u of liste) {
+                if (v.masquee(u)) continue
+                var su = taille(u), pu = place(u)
+                pris += Math.max(0, Math.min(p[0] + s[0], pu[0] + su[0]) - Math.max(p[0], pu[0]))
+                      * Math.max(0, Math.min(p[1] + s[1], pu[1] + su[1]) - Math.max(p[1], pu[1]))
+            }
+            return pris > 0.2 * s[0] * s[1]
+        }
+
+        // Réglages (nc-reglages, Animations) : cube, glisse ou fondu ; recul pendant le mouvement ; voisins visibles ; durée
+        readonly property string anim: ["cube", "glisse", "fondu"].indexOf(Reglages.val("VUE_BUREAUX", "cube")) >= 0
+                                        ? Reglages.val("VUE_BUREAUX", "cube") : "cube"
+        readonly property bool voisins: anim !== "fondu" && Reglages.val("VUE_VOISINS", "oui") !== "non"
+        readonly property real reculMax: Reglages.val("VUE_RECUL", "oui") !== "non" ? 0.16 : 0
+        readonly property int duree: Reglages.val("EFFETS", "tous") === "aucun" ? 0
+                                     : Math.max(0, Math.min(2000, parseInt(Reglages.val("VUE_DUREE", "480")) || 0))
+
         // Une seule échelle pour tout le bureau, sans déformer ; de la place sur les côtés pour les bureaux voisins
-        readonly property real e: Math.min(width * 0.78 / mw, height / mh)
+        readonly property real e: Math.min(width * (voisins ? 0.78 : 0.94) / mw, height / mh)
         readonly property real fw: mw * e
         readonly property real fh: mh * e
         readonly property real bx: (width - fw) / 2
         readonly property real by: (height - fh) / 2
 
-        // ── Les bureaux en cube : l'affiché au milieu, les voisins de biais de chaque côté (on en voit le bord) ;
-        //    changer de bureau (flèches, deux doigts, clic en haut ou sur un bord) fait tourner le cube ──
-        readonly property int courant: Math.max(0, v.bureaux.findIndex(b => b.id === v.bureau))
+        // ── Les bureaux en cube : le choisi au milieu, les voisins de biais de chaque côté (on en voit le bord) ──
+        readonly property int courant: Math.max(0, v.bureaux.findIndex(b => b.id === v.choisi))
         property real pos: courant
+        onCourantChanged: if (!glisse) pos = courant
+        Behavior on pos { enabled: !zone.glisse; NumberAnimation { duration: zone.duree; easing.type: Easing.InOutCubic } }
         // Pas de bureau d'un côté (le premier, le dernier) : l'ensemble se décale vers ce côté, pas de vide inutile
         readonly property real gauche: Math.max(0, Math.min(1, pos))
         readonly property real droite: Math.max(0, Math.min(1, v.bureaux.length - 1 - pos))
-        readonly property real decalage: (gauche - droite) * (width - fw) / 4
-        Behavior on pos { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 480; easing.type: Easing.InOutCubic } }
-        // Deux doigts à l'horizontale sur le pavé tactile (ou molette inclinée) : bureau voisin
-        property real cumul: 0
-        Timer { id: repos; interval: 450 }
+        readonly property real decalage: voisins ? (gauche - droite) * (width - fw) / 4 : 0
+
+        // Recul : le cube s'éloigne pendant qu'il tourne (ou qu'on glisse), et revient une fois arrêté
+        readonly property bool bouge: glisse || Math.abs(pos - courant) > 0.002
+        property real recul: 0
+        onBougeChanged: if (bouge) { rezoom.stop(); recul = 1 } else rezoom.restart()
+        Timer { id: rezoom; interval: 80; onTriggered: zone.recul = 0 }
+        Behavior on recul { NumberAnimation { duration: Math.min(260, zone.duree / 2); easing.type: Easing.OutCubic } }
+
+        // Deux doigts à l'horizontale sur le pavé tactile (ou molette inclinée) : le cube suit les doigts ; on lâche, il
+        // finit sur le bureau le plus proche (un petit geste suffit à passer au suivant)
+        property bool glisse: false
+        property real depart: 0
+        Timer {
+            id: finGlisse; interval: 160
+            onTriggered: {
+                var i = Math.round(zone.pos + (zone.pos > zone.depart + 0.01 ? 0.3 : (zone.pos < zone.depart - 0.01 ? -0.3 : 0)))
+                i = Math.max(0, Math.min(v.bureaux.length - 1, i))
+                zone.glisse = false
+                if (v.bureaux[i]) v.choisi = v.bureaux[i].id
+                zone.pos = zone.courant
+            }
+        }
         WheelHandler {
             orientation: Qt.Horizontal
             onWheel: e => {
-                if (repos.running) return
-                zone.cumul += e.pixelDelta.x !== 0 ? e.pixelDelta.x : e.angleDelta.x / 2
-                if (Math.abs(zone.cumul) > 90) { v.voisin(zone.cumul < 0 ? 1 : -1); zone.cumul = 0; repos.start() }
+                var dx = e.pixelDelta.x !== 0 ? e.pixelDelta.x : e.angleDelta.x / 2
+                if (dx === 0 || v.bureaux.length < 2) return
+                if (!zone.glisse) { zone.depart = zone.courant; zone.glisse = true }
+                zone.pos = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, zone.pos - dx / (zone.fw * 0.8)))
+                finGlisse.restart()
             }
         }
-        Repeater {
-            model: v.bureaux
-            Item {
-                id: face
-                required property var modelData
-                required property int index
-                readonly property int bureauId: modelData.id
-                readonly property real d: index - zone.pos           // 0 : au milieu ; ±1 : voisin
-                readonly property real dd: Math.max(-1.3, Math.min(1.3, d))
-                readonly property var fenetresIci: v.fenetresDe(bureauId)
-                visible: Math.abs(d) < 1.5
-                width: zone.fw; height: zone.fh
-                x: zone.bx + zone.decalage + dd * zone.fw; y: zone.by
-                z: 10 - Math.abs(d)
-                opacity: v.entree * (1 - 0.45 * Math.min(1, Math.abs(d)))
-                // Charnière sur le bord commun avec le bureau du milieu, en perspective : une face de cube
-                transform: Rotation {
-                    origin.x: face.d > 0 ? 0 : face.width; origin.y: face.height / 2
-                    axis { x: 0; y: 1; z: 0 }
-                    angle: face.dd * 72
-                    distanceToPlane: zone.fw * 1.6
-                }
+        Item {
+            id: scene
+            anchors.fill: parent
+            scale: 1 - zone.reculMax * zone.recul
+            Repeater {
+                model: v.bureaux
+                Item {
+                    id: face
+                    required property var modelData
+                    required property int index
+                    readonly property int bureauId: modelData.id
+                    readonly property real d: index - zone.pos           // 0 : au milieu ; ±1 : voisin
+                    readonly property real dd: Math.max(-1.3, Math.min(1.3, d))
+                    readonly property var fenetresIci: v.fenetresDe(bureauId)
+                    // Les masquées recouvertes, rangées en bas : leur taille et leur place sur l'étagère
+                    readonly property var enBas: fenetresIci.filter(t => zone.recouverte(t, fenetresIci))
+                    readonly property real eh: Math.min(zone.fh * 0.2, (zone.fw * 0.9 - (enBas.length - 1) * 12) / Math.max(1, enBas.length) / 1.6)
+                    readonly property real ew: eh * 1.6
+                    readonly property real ex: (zone.fw - enBas.length * ew - (enBas.length - 1) * 12) / 2
+                    readonly property real ey: zone.fh - eh - 62   // au-dessus des noms des fenêtres
+                    // Voisins cachés à l'arrêt si on ne veut pas les voir ; fondu : un seul bureau à la fois
+                    visible: Math.abs(d) < (zone.anim === "fondu" ? 1 : 1.5) && (Math.abs(d) < 0.999 || zone.voisins || zone.bouge)
+                    width: zone.fw; height: zone.fh
+                    x: zone.bx + zone.decalage + (zone.anim === "cube" ? dd * zone.fw : (zone.anim === "glisse" ? dd * (zone.fw + 24) : 0))
+                    y: zone.by
+                    z: 10 - Math.abs(d)
+                    opacity: v.entree * (zone.anim === "fondu" ? Math.max(0, 1 - Math.abs(d)) : 1 - 0.45 * Math.min(1, Math.abs(d)))
+                    // Charnière sur le bord commun avec le bureau du milieu, en perspective : une face de cube
+                    transform: Rotation {
+                        origin.x: face.d > 0 ? 0 : face.width; origin.y: face.height / 2
+                        axis { x: 0; y: 1; z: 0 }
+                        angle: zone.anim === "cube" ? face.dd * 72 : 0
+                        distanceToPlane: zone.fw * 1.6
+                    }
+                    // Clic sur le bureau choisi, hors des fenêtres : y aller
+                    MouseArea {
+                        anchors.fill: parent; z: -1
+                        visible: Math.abs(face.d) < 0.01
+                        onClicked: v.valider()
+                    }
+                    // L'étagère des masquées recouvertes
+                    Rectangle {
+                        visible: face.enBas.length > 0; z: 1
+                        x: face.ex - 12; y: face.ey - 12; width: zone.fw - 2 * face.ex + 24; height: face.eh + 24; radius: 18
+                        color: Qt.rgba(0, 0, 0, 0.5); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
+                    }
 
-                // Le cadre de l'écran
-                Rectangle {
-                    x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
-                    color: Qt.rgba(1, 1, 1, 0.04); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
-                }
-                Texte {
-                    anchors.centerIn: parent
-                    visible: face.fenetresIci.length === 0
-                    text: Reglages.t("Aucune fenêtre sur ce bureau", "No windows on this desktop"); secondaire: true; font.pixelSize: 18
-                }
-                Repeater {
-                    model: v.fenetresDe(face.bureauId)
-                    Item {
-                        id: case_
-                        required property var modelData
-                        required property int index
-                        readonly property var ipc: modelData.lastIpcObject || ({})
-                        readonly property bool masquee: v.masquee(modelData)
-                        // Masquée ou sur le point de l'être : translucide, à sa place
-                        readonly property bool estompee: masquee || !!v.enAttente[v.adresse(modelData)]
-                        readonly property var sz: zone.taille(modelData)
-                        readonly property var pl: zone.place(modelData)
-                        width: sz[0] * zone.e; height: sz[1] * zone.e
-                        x: (pl[0] - zone.mx) * zone.e
-                        y: (pl[1] - zone.my) * zone.e
-                        // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus
-                        z: survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0)
-
-                        // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
-                        DropArea {
-                            id: depot
-                            anchors.fill: parent
-                            enabled: !case_.masquee
-                            onDropped: d => {
-                                var t = d.source && d.source.toplevel
-                                if (t && t !== case_.modelData && !v.masquee(t))
-                                    v.dispatch("hl.dsp.window.swap({ window = 'address:" + v.adresse(t) + "', target = 'address:" + v.adresse(case_.modelData) + "' })")
-                            }
-                        }
-                        Rectangle {
-                            anchors.fill: parent; anchors.margins: 2; radius: 12; z: 1
-                            visible: depot.containsDrag && depot.drag.source !== carte
-                            color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
-                        }
-                        opacity: v.entree
-                        scale: 0.92 + 0.08 * v.entree
-
+                    // Le cadre de l'écran
+                    Rectangle {
+                        x: -8; y: -8; width: zone.fw + 16; height: zone.fh + 16; radius: 18
+                        color: Qt.rgba(1, 1, 1, 0.04); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
+                    }
+                    Texte {
+                        anchors.centerIn: parent
+                        visible: face.fenetresIci.length === 0
+                        text: Reglages.t("Aucune fenêtre sur ce bureau", "No windows on this desktop"); secondaire: true; font.pixelSize: 18
+                    }
+                    Repeater {
+                        model: face.fenetresIci
                         Item {
-                            id: carte
-                            property var toplevel: case_.modelData
-                            // Un peu d'air entre les fenêtres collées (les espaces de Hyprland, réduits, ne se voient plus)
-                            readonly property real marge: case_.masquee ? 0 : Math.min(7, case_.width * 0.04)
-                            x: marge; y: marge
-                            width: case_.width - 2 * marge; height: case_.height - 2 * marge
-                            // Survol de toute la carte, boutons du coin compris : sinon, la souris sur un bouton la faisait
-                            // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
-                            scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
-                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                            Drag.active: zf.drag.active
-                            Drag.source: carte
-                            Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
-                            z: zf.drag.active ? 10 : 0
+                            id: case_
+                            required property var modelData
+                            required property int index
+                            readonly property var ipc: modelData.lastIpcObject || ({})
+                            readonly property bool masquee: v.masquee(modelData)
+                            // Masquée ou sur le point de l'être : translucide, à sa place
+                            readonly property bool estompee: masquee || !!v.enAttente[v.adresse(modelData)]
+                            readonly property var sz: zone.taille(modelData)
+                            readonly property var pl: zone.place(modelData)
+                            readonly property int rang: face.enBas.indexOf(modelData)   // rangée en bas : sa place sur l'étagère
+                            width: rang >= 0 ? face.ew : sz[0] * zone.e
+                            height: rang >= 0 ? face.eh : sz[1] * zone.e
+                            x: rang >= 0 ? face.ex + rang * (face.ew + 12) : (pl[0] - zone.mx) * zone.e
+                            y: rang >= 0 ? face.ey : (pl[1] - zone.my) * zone.e
+                            // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus
+                            z: survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0)
 
-                            Rectangle {
-                                anchors.fill: parent; anchors.margins: -3; radius: 14
-                                color: "transparent"; border.width: 3
-                                border.color: survol.hovered ? Couleurs.accent : "transparent"
-                            }
-                            ClippingRectangle {
-                                anchors.fill: parent; radius: case_.estompee ? 10 : 0; color: "transparent"
-                                opacity: case_.estompee ? 0.38 : 1
-                                Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                                ScreencopyView {
-                                    id: capture
-                                    // Masquée : son image (à la taille du bureau caché) recadrée sur la place qu'elle avait
-                                    readonly property real ratio: sourceSize.width > 0 && sourceSize.height > 0
-                                                                  ? sourceSize.width / sourceSize.height : parent.width / Math.max(1, parent.height)
-                                    anchors.centerIn: parent
-                                    width: case_.masquee ? Math.max(parent.width, parent.height * ratio) : parent.width
-                                    height: case_.masquee ? Math.max(parent.height, parent.width / ratio) : parent.height
-                                    captureSource: case_.modelData.wayland
-                                    // Masquée, ou bureau voisin à l'arrêt : une seule image (moins de travail pour la carte graphique)
-                                    live: !case_.masquee && Math.abs(face.d) < 0.999
-                                    layer.enabled: true
-                                    layer.smooth: true
+                            // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
+                            DropArea {
+                                id: depot
+                                anchors.fill: parent
+                                enabled: !case_.masquee
+                                onDropped: d => {
+                                    var t = d.source && d.source.toplevel
+                                    if (t && t !== case_.modelData && !v.masquee(t))
+                                        v.dispatch("hl.dsp.window.swap({ window = 'address:" + v.adresse(t) + "', target = 'address:" + v.adresse(case_.modelData) + "' })")
                                 }
                             }
-                            // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
                             Rectangle {
-                                anchors.fill: parent; radius: 12; color: Couleurs.gris2
-                                visible: case_.masquee && !capture.hasContent
-                                Image {
-                                    anchors.centerIn: parent
-                                    readonly property real t: Math.min(96, parent.height * 0.4)
-                                    width: t; height: t; sourceSize: Qt.size(192, 192)
-                                    source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), "application-x-executable")
+                                anchors.fill: parent; anchors.margins: 2; radius: 12; z: 1
+                                visible: depot.containsDrag && depot.drag.source !== carte
+                                color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
+                            }
+                            opacity: v.entree
+                            scale: 0.92 + 0.08 * v.entree
+
+                            Item {
+                                id: carte
+                                property var toplevel: case_.modelData
+                                // Un peu d'air entre les fenêtres collées (les espaces de Hyprland, réduits, ne se voient plus)
+                                readonly property real marge: case_.masquee ? 0 : Math.min(7, case_.width * 0.04)
+                                x: marge; y: marge
+                                width: case_.width - 2 * marge; height: case_.height - 2 * marge
+                                // Survol de toute la carte, boutons du coin compris : sinon, la souris sur un bouton la faisait
+                                // rétrécir, le bouton sortait de sous la souris, elle regrossissait… (va-et-vient)
+                                scale: zf.pressed ? 0.97 : (survol.hovered ? 1.03 : 1)
+                                Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                                Drag.active: zf.drag.active
+                                Drag.source: carte
+                                Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
+                                z: zf.drag.active ? 10 : 0
+
+                                Rectangle {
+                                    anchors.fill: parent; anchors.margins: -3; radius: 14
+                                    color: "transparent"; border.width: 3
+                                    border.color: survol.hovered ? Couleurs.accent : "transparent"
                                 }
-                            }
-                            // Translucide et cerclée, pour la distinguer des fenêtres affichées
-                            Rectangle {
-                                visible: case_.estompee; z: 1
-                                anchors.fill: parent; radius: 10
-                                color: "transparent"; border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.4)
-                            }
-                            // Badge « Masquée », en haut à gauche
-                            Rectangle {
-                                visible: case_.estompee; z: 2
-                                anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
-                                width: badge.implicitWidth + 34; height: 28; radius: 14; color: Qt.rgba(0, 0, 0, 0.65)
-                                Ico { anchors.verticalCenter: parent.verticalCenter; x: 9; nom: "visibility_off"; taille: 15; color: "#ffffff" }
-                                Texte { id: badge; anchors.verticalCenter: parent.verticalCenter; x: 28; text: Reglages.t("Masquée", "Hidden")
-                                        font.pixelSize: 12; font.weight: Font.DemiBold; color: "#ffffff" }
-                            }
-                            // Nom de l'appli et titre, dans la miniature, en bas
-                            Rectangle {
-                                z: 2; visible: parent.width > 100
-                                anchors.bottom: parent.bottom; anchors.bottomMargin: 8; anchors.horizontalCenter: parent.horizontalCenter
-                                width: Math.min(parent.width - 16, nom.implicitWidth + 22); height: 26; radius: 13; color: Qt.rgba(0, 0, 0, 0.65)
-                                Row {
-                                    id: nom
-                                    anchors.centerIn: parent; spacing: 6
+                                ClippingRectangle {
+                                    anchors.fill: parent; radius: case_.estompee ? 10 : 0; color: "transparent"
+                                    opacity: case_.estompee ? (case_.rang >= 0 ? 0.7 : 0.38) : 1
+                                    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                                    ScreencopyView {
+                                        id: capture
+                                        // Masquée : son image (à la taille du bureau caché) recadrée sur la place qu'elle avait
+                                        readonly property real ratio: sourceSize.width > 0 && sourceSize.height > 0
+                                                                      ? sourceSize.width / sourceSize.height : parent.width / Math.max(1, parent.height)
+                                        anchors.centerIn: parent
+                                        width: case_.masquee ? Math.max(parent.width, parent.height * ratio) : parent.width
+                                        height: case_.masquee ? Math.max(parent.height, parent.width / ratio) : parent.height
+                                        captureSource: case_.modelData.wayland
+                                        // Masquée, ou bureau voisin à l'arrêt : une seule image (moins de travail pour la carte graphique)
+                                        live: !case_.masquee && Math.abs(face.d) < 0.999
+                                        layer.enabled: true
+                                        layer.smooth: true
+                                    }
+                                }
+                                // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
+                                Rectangle {
+                                    anchors.fill: parent; radius: 12; color: Couleurs.gris2
+                                    visible: case_.masquee && !capture.hasContent
                                     Image {
-                                        width: 16; height: 16; sourceSize: Qt.size(32, 32); anchors.verticalCenter: parent.verticalCenter
-                                        source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), true)
-                                        visible: source != ""
-                                    }
-                                    Texte {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: Math.min(implicitWidth, carte.width - 60); elide: Text.ElideRight
-                                        text: case_.modelData.title || case_.ipc.class || ""; font.pixelSize: 12; color: "#ffffff"
+                                        anchors.centerIn: parent
+                                        readonly property real t: Math.min(96, parent.height * 0.4)
+                                        width: t; height: t; sourceSize: Qt.size(192, 192)
+                                        source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), "application-x-executable")
                                     }
                                 }
-                            }
-                            // Boutons au survol : réduire, fermer (au-dessus de la zone de clic de la miniature)
-                            HoverHandler { id: survol }
-                            Row {
-                                z: 2
-                                anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 8
-                                spacing: 6
-                                opacity: survol.hovered ? 1 : 0
-                                Behavior on opacity { NumberAnimation { duration: 120 } }
-                                Repeater {
-                                    // Liste fixe (seule l'icône suit l'état) : refaite à chaque clic, les boutons étaient recréés
-                                    // sous la souris et le survol sautait sur la croix
-                                    model: ["masquer", "fermer"]
-                                    Rectangle {
-                                        required property string modelData
-                                        width: 30; height: 30; radius: 15
-                                        color: zb.containsMouse ? (modelData === "fermer" ? Couleurs.rouge : Couleurs.gris4) : Qt.rgba(0, 0, 0, 0.6)
-                                        Ico { anchors.centerIn: parent; taille: 17; color: "#ffffff"
-                                              nom: parent.modelData === "fermer" ? "close" : (case_.estompee ? "visibility" : "visibility_off") }
-                                        MouseArea {
-                                            id: zb; anchors.fill: parent; hoverEnabled: true
-                                            onClicked: parent.modelData === "fermer"
-                                                       ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
-                                                       : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData))
+                                // Translucide et cerclée, pour la distinguer des fenêtres affichées
+                                Rectangle {
+                                    visible: case_.estompee; z: 1
+                                    anchors.fill: parent; radius: 10
+                                    color: "transparent"; border.width: 2; border.color: Qt.rgba(1, 1, 1, 0.4)
+                                }
+                                // Badge « Masquée », en haut à gauche
+                                Rectangle {
+                                    visible: case_.estompee; z: 2
+                                    anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 8
+                                    width: badge.implicitWidth + 34; height: 28; radius: 14; color: Qt.rgba(0, 0, 0, 0.65)
+                                    Ico { anchors.verticalCenter: parent.verticalCenter; x: 9; nom: "visibility_off"; taille: 15; color: "#ffffff" }
+                                    Texte { id: badge; anchors.verticalCenter: parent.verticalCenter; x: 28; text: Reglages.t("Masquée", "Hidden")
+                                            font.pixelSize: 12; font.weight: Font.DemiBold; color: "#ffffff" }
+                                }
+                                // Nom de l'appli et titre, dans la miniature, en bas
+                                Rectangle {
+                                    z: 2; visible: parent.width > 100
+                                    anchors.bottom: parent.bottom; anchors.bottomMargin: 8; anchors.horizontalCenter: parent.horizontalCenter
+                                    width: Math.min(parent.width - 16, nom.implicitWidth + 22); height: 26; radius: 13; color: Qt.rgba(0, 0, 0, 0.65)
+                                    Row {
+                                        id: nom
+                                        anchors.centerIn: parent; spacing: 6
+                                        Image {
+                                            width: 16; height: 16; sourceSize: Qt.size(32, 32); anchors.verticalCenter: parent.verticalCenter
+                                            source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), true)
+                                            visible: source != ""
+                                        }
+                                        Texte {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: Math.min(implicitWidth, carte.width - 60); elide: Text.ElideRight
+                                            text: case_.modelData.title || case_.ipc.class || ""; font.pixelSize: 12; color: "#ffffff"
                                         }
                                     }
                                 }
-                            }
-                            MouseArea {
-                                id: zf
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-                                drag.target: carte
-                                onClicked: e => {
-                                    if (e.button === Qt.MiddleButton) v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
-                                    else v.activer(case_.modelData)
+                                // Boutons au survol : réduire, fermer (au-dessus de la zone de clic de la miniature)
+                                HoverHandler { id: survol }
+                                Row {
+                                    z: 2
+                                    anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 8
+                                    spacing: 6
+                                    opacity: survol.hovered ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                    Repeater {
+                                        // Liste fixe (seule l'icône suit l'état) : refaite à chaque clic, les boutons étaient recréés
+                                        // sous la souris et le survol sautait sur la croix
+                                        model: ["masquer", "fermer"]
+                                        Rectangle {
+                                            required property string modelData
+                                            width: 30; height: 30; radius: 15
+                                            color: zb.containsMouse ? (modelData === "fermer" ? Couleurs.rouge : Couleurs.gris4) : Qt.rgba(0, 0, 0, 0.6)
+                                            Ico { anchors.centerIn: parent; taille: 17; color: "#ffffff"
+                                                  nom: parent.modelData === "fermer" ? "close" : (case_.estompee ? "visibility" : "visibility_off") }
+                                            MouseArea {
+                                                id: zb; anchors.fill: parent; hoverEnabled: true
+                                                onClicked: parent.modelData === "fermer"
+                                                           ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
+                                                           : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData))
+                                            }
+                                        }
+                                    }
                                 }
-                                onReleased: {
-                                    if (carte.Drag.active) carte.Drag.drop()
-                                    carte.x = carte.marge; carte.y = carte.marge
+                                MouseArea {
+                                    id: zf
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                                    drag.target: carte
+                                    onClicked: e => {
+                                        if (e.button === Qt.MiddleButton) v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
+                                        else v.activer(case_.modelData)
+                                    }
+                                    onReleased: {
+                                        if (carte.Drag.active) carte.Drag.drop()
+                                        carte.x = carte.marge; carte.y = carte.marge
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                // Bureau voisin : un clic dessus y va (ses fenêtres ne réagissent qu'au milieu)
-                MouseArea {
-                    anchors.fill: parent; z: 50
-                    visible: Math.abs(face.d) > 0.01
-                    onClicked: v.dispatch("hl.dsp.focus({ workspace = " + face.bureauId + " })")
+                    // Bureau voisin : un clic dessus le fait venir devant (ses fenêtres ne réagissent qu'au milieu)
+                    MouseArea {
+                        anchors.fill: parent; z: 50
+                        visible: Math.abs(face.d) > 0.01
+                        onClicked: v.choisi = face.bureauId
+                    }
                 }
             }
         }

@@ -3,7 +3,8 @@
 # elles vont dans un bureau caché, « special:reduites », et reviennent sur le bureau affiché.
 #   nc-fenetre reduire [ADRESSE]     réduit la fenêtre active (ou celle-là)                  Super + M
 #   nc-fenetre restaurer [ADRESSE]   ramène la dernière fenêtre réduite (ou celle-là)        Super + Ctrl + M
-#   nc-fenetre aller ADRESSE         va sur une fenêtre ; réduite, elle est d'abord ramenée (Spotlight, vue des fenêtres)
+#   nc-fenetre aller ADRESSE [BUREAU] va sur une fenêtre ; réduite, elle est d'abord ramenée (sur BUREAU, sinon le bureau
+#                                    affiché ; Spotlight, vue des fenêtres)
 #   nc-fenetre basculer ADRESSE      la masque, ou la ramène si elle l'est (barre : nc/fenetres)
 #   nc-fenetre fermer ADRESSE        la ferme
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
@@ -133,7 +134,7 @@ PY
     fi
     if [ "$(bureau_de "$a")" = "$CACHE" ]; then
       # Bureau affiché sur l'écran actif (pas le bureau caché, s'il est ouvert)
-      ws="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)"
+      ws="${3:-$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)}"
       ouvert="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .specialWorkspace.name' | head -1)"
       [ "$ouvert" = "$CACHE" ] && eval_lua "hl.dsp.workspace.toggle_special('reduites')"
       # Elle revient en fondu, à sa place, sans glisser
