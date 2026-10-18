@@ -6,8 +6,8 @@
 //   mouvement ; le vrai bureau ne change qu'en quittant la vue : on arrive sur le bureau choisi.
 //   Animation, recul, voisins visibles et durée : nc-reglages, section Animations (VUE_*).
 //   Le bureau en miniature : chaque fenêtre à sa place et à sa taille, à la même échelle (comme sur l'écran) ;
-//   les masquées à la place qu'elles avaient, voilées et marquées « Masquée » ; celles dont la place est prise
-//   (les autres se sont agrandies) rangées en bas du bureau. Les bureaux de l'écran en haut.
+//   les masquées à la place qu'elles avaient, par-dessus (même si une autre fenêtre a pris leur place), voilées et
+//   marquées « Masquée ». Les bureaux de l'écran en haut.
 //   Glisser une fenêtre sur une autre : elles échangent leurs places.
 //   Clic : aller sur la fenêtre · clic molette : la fermer · la glisser sur un bureau : l'y envoyer
 //   Au survol : boutons Masquer et Fermer. Masquer ici ne bouge rien : la fenêtre devient translucide, marquée
@@ -242,19 +242,6 @@ PanelWindow {
             if (o.at && !v.masquee(t)) return o.at
             var tl = taille(t); return [mx + (mw - tl[0]) / 2, my + (mh - tl[1]) / 2]   // masquée sans trace : au milieu
         }
-        // Une masquée dont la place est prise (les fenêtres affichées se sont agrandies) : rangée en bas du bureau
-        function recouverte(t, liste) {
-            if (!v.masquee(t)) return false
-            var s = taille(t), p = place(t), pris = 0
-            for (var u of liste) {
-                if (v.masquee(u)) continue
-                var su = taille(u), pu = place(u)
-                pris += Math.max(0, Math.min(p[0] + s[0], pu[0] + su[0]) - Math.max(p[0], pu[0]))
-                      * Math.max(0, Math.min(p[1] + s[1], pu[1] + su[1]) - Math.max(p[1], pu[1]))
-            }
-            return pris > 0.2 * s[0] * s[1]
-        }
-
         // Réglages (nc-reglages, Animations) : cube, glisse ou fondu ; recul pendant le mouvement ; voisins visibles ; durée
         readonly property string anim: ["cube", "glisse", "fondu"].indexOf(Reglages.val("VUE_BUREAUX", "cube")) >= 0
                                         ? Reglages.val("VUE_BUREAUX", "cube") : "cube"
@@ -344,12 +331,6 @@ PanelWindow {
                     readonly property real d: index - zone.pos           // 0 : au milieu ; ±1 : voisin
                     readonly property real dd: Math.max(-1.3, Math.min(1.3, d))
                     readonly property var fenetresIci: v.fenetresDe(bureauId)
-                    // Les masquées recouvertes, rangées en bas : leur taille et leur place sur l'étagère
-                    readonly property var enBas: fenetresIci.filter(t => zone.recouverte(t, fenetresIci))
-                    readonly property real eh: Math.min(zone.fh * 0.2, (zone.fw * 0.9 - (enBas.length - 1) * 12) / Math.max(1, enBas.length) / 1.6)
-                    readonly property real ew: eh * 1.6
-                    readonly property real ex: (zone.fw - enBas.length * ew - (enBas.length - 1) * 12) / 2
-                    readonly property real ey: zone.fh - eh - 62   // au-dessus des noms des fenêtres
                     // Voisins cachés à l'arrêt si on ne veut pas les voir ; fondu : un seul bureau à la fois
                     visible: Math.abs(d) < (zone.anim === "fondu" ? 1 : 1.5) && (Math.abs(d) < 0.999 || zone.voisins || zone.bouge)
                     width: zone.fw; height: zone.fh
@@ -371,12 +352,6 @@ PanelWindow {
                         anchors.fill: parent; z: -1
                         visible: Math.abs(face.d) < 0.01
                         onClicked: v.valider()
-                    }
-                    // L'étagère des masquées recouvertes
-                    Rectangle {
-                        visible: face.enBas.length > 0; z: 6
-                        x: face.ex - 12; y: face.ey - 12; width: zone.fw - 2 * face.ex + 24; height: face.eh + 24; radius: 18
-                        color: Qt.rgba(0, 0, 0, 0.5); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.12)
                     }
 
                     // Le cadre de l'écran
@@ -402,14 +377,11 @@ PanelWindow {
                             readonly property bool estompee: masquee || !!v.enAttente[v.adresse(modelData)]
                             readonly property var sz: zone.taille(modelData)
                             readonly property var pl: zone.place(modelData)
-                            readonly property int rang: face.enBas.indexOf(modelData)   // rangée en bas : sa place sur l'étagère
-                            width: rang >= 0 ? face.ew : sz[0] * zone.e
-                            height: rang >= 0 ? face.eh : sz[1] * zone.e
-                            x: rang >= 0 ? face.ex + rang * (face.ew + 12) : (pl[0] - zone.mx) * zone.e
-                            y: rang >= 0 ? face.ey : (pl[1] - zone.my) * zone.e
-                            // Les masquées par-dessus (estompées), celle qu'on survole ou qu'on traîne encore au-dessus ;
-                            // l'étagère toujours devant (une fenêtre survolée passerait sinon par-dessus)
-                            z: rang >= 0 ? (survol.hovered ? 8 : 7) : (survol.hovered || zf.drag.active ? 5 : (masquee ? 2 : 0))
+                            width: sz[0] * zone.e; height: sz[1] * zone.e
+                            x: (pl[0] - zone.mx) * zone.e
+                            y: (pl[1] - zone.my) * zone.e
+                            // Les masquées par-dessus (estompées, même si une autre a pris leur place), celle qu'on traîne encore au-dessus
+                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered || zf.drag.active ? 5 : 0)
 
                             // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
                             DropArea {
@@ -453,17 +425,18 @@ PanelWindow {
                                 }
                                 ClippingRectangle {
                                     anchors.fill: parent; radius: case_.estompee ? 10 : 0
-                                    color: case_.rang >= 0 ? Couleurs.carte : "transparent"   // sur l'étagère : fond plein (kitty est transparent)
-                                    opacity: case_.estompee && case_.rang < 0 ? 0.38 : 1
+                                    // Masquée : fond plein (la fenêtre de dessous ne transparaît pas), image voilée ; sur le point de l'être : translucide
+                                    color: case_.masquee ? Qt.rgba(Couleurs.carte.r, Couleurs.carte.g, Couleurs.carte.b, 1) : "transparent"
+                                    opacity: case_.estompee && !case_.masquee ? 0.38 : 1
                                     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                                     ScreencopyView {
                                         id: capture
-                                        // Masquée : son image (à la taille du bureau caché) recadrée sur la place qu'elle avait
-                                        readonly property real ratio: sourceSize.width > 0 && sourceSize.height > 0
-                                                                      ? sourceSize.width / sourceSize.height : parent.width / Math.max(1, parent.height)
-                                        anchors.centerIn: parent
-                                        width: case_.masquee ? Math.max(parent.width, parent.height * ratio) : parent.width
-                                        height: case_.masquee ? Math.max(parent.height, parent.width / ratio) : parent.height
+                                        opacity: case_.masquee ? 0.45 : 1
+                                        // Masquée : Hyprland l'a redimensionnée dans le bureau caché ; son image à la même échelle que les autres
+                                        // fenêtres, coin en haut à gauche sur sa place d'avant (le texte garde sa taille, rien n'est tassé)
+                                        readonly property var taille: case_.masquee && case_.ipc.size ? case_.ipc.size : null
+                                        width: taille ? Math.max(parent.width, taille[0] * zone.e) : parent.width
+                                        height: taille ? Math.max(parent.height, taille[1] * zone.e) : parent.height
                                         captureSource: case_.modelData.wayland
                                         // En direct seulement le bureau du milieu, à l'arrêt : pendant que le cube tourne ou à la sortie,
                                         // la dernière image (fluide, moins de travail pour la carte graphique)
