@@ -19,6 +19,10 @@ nc-assistant etat
 nc-assistant demander "Bonjour"
 ```
 
+La même saisie est accessible dans **`nc-settings` → Agents IA (coucou) → Configurer l'assistant distant**.
+Entrée ouvre la configuration dans le même terminal, puis revient aux réglages. La clé reste masquée.
+Accès direct : `nc-settings assistant` (ou `nc-reglages assistant`).
+
 La configuration demande l'URL HTTP(S) du gateway (éventuellement avec un préfixe de chemin), sa clé `X-Secret-Key`
 et le `USER_ID`. La clé se saisit sans affichage. Le fichier `~/.config/nc/assistant.conf` est enregistré par renommage
 atomique, avec les permissions `0600`. `nc-assistant configurer` peut ensuite modifier cette connexion.

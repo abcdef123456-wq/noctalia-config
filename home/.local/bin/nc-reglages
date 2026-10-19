@@ -3,6 +3,7 @@
 
   nc-reglages                     écran des réglages
   nc-reglages raccourcis          directement les raccourcis clavier
+  nc-reglages assistant           configurer la connexion de l'assistant distant (URL et clé)
   nc-reglages liste               tous les réglages et leur valeur
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
@@ -68,6 +69,7 @@ USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the a
 
   nc-settings                     settings screen
   nc-settings shortcuts           straight to keyboard shortcuts
+  nc-settings assistant           configure the remote assistant connection (URL and key)
   nc-settings list                all settings and their values
   nc-settings get KEY             a setting's value
   nc-settings set KEY VALUE       change a setting (e.g. nc-settings set HZ_ECO 60)
@@ -1378,6 +1380,14 @@ def couper(t, w):
     return t if len(t) <= w else t[:max(0, w - 1)] + "…"
 
 
+def configurer_assistant():
+    """Saisie privée par le client : URL et clé ne passent jamais dans reglages.conf ni dans les arguments."""
+    try:
+        return subprocess.run([sys.executable, os.path.join(BIN, "nc-assistant"), "configurer"]).returncode
+    except OSError:
+        return 1
+
+
 class Ecran:
     def __init__(self, ecran, section_depart=0):
         self.e = ecran
@@ -1418,7 +1428,12 @@ class Ecran:
                     self.lignes_n = [{"genre": "titre", "nom": T("Historique introuvable (dépôt de la config absent)",
                                                                  "History not found (config repository missing)")}]
             return self.lignes_n
-        return [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
+        lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
+        if SECTIONS[self.sec] == "Agents IA (coucou)":
+            lignes.insert(0, {"genre": "assistant", "nom": T("Configurer l'assistant distant", "Configure remote assistant"),
+                              "aide": T("URL du serveur, clé secrète (saisie masquée) et utilisateur ; conservés séparément dans assistant.conf.",
+                                        "Server URL, secret key (hidden input) and user; kept separately in assistant.conf.")})
+        return lignes
 
     @staticmethod
     def selectionnable(it):
@@ -1497,6 +1512,8 @@ class Ecran:
                 self.ligne(y, x0, iw, col, it.nom, v, sel, it.cle in self.vals)
             elif it["genre"] == "titre":
                 e.addstr(y, x0, couper(it["nom"], iw), curses.A_BOLD | self.ACC)
+            elif it["genre"] == "assistant":
+                self.ligne(y, x0, iw, col, it["nom"], T("Ouvrir… ↵", "Open… ↵"), sel, False)
             elif it["genre"] == "ajouter":
                 self.ligne(y, x0, iw, col, "+ " + it["nom"], "", sel, False)
             elif it["genre"] == "nouveaute":
@@ -1524,6 +1541,8 @@ class Ecran:
                         aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
                 elif du_style:
                     aide = (aide + "  " if aide else "") + T("Valeur donnée par le style Apple.", "Value set by the desktop style.")
+            elif cur["genre"] == "assistant":
+                aide = cur["aide"]
             elif cur["genre"] == "nouveaute":
                 aide = " · ".join(cur["points"][1:4]) or cur["points"][0]
                 aide = (aide[:240] + "…") if len(aide) > 240 else aide
@@ -1556,6 +1575,9 @@ class Ecran:
         elif SECTIONS[self.sec] == "Nouveautés":
             bas = T("↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter",
                     "↑↓ choose    Enter: everything it brings    Esc: sections    q: quit")
+        elif isinstance(cur, dict) and cur["genre"] == "assistant":
+            bas = T("↑↓ choisir    Entrée : configurer la connexion    Échap : sections    q : quitter",
+                    "↑↓ choose    Enter: configure connection    Esc: sections    q: quit")
         else:
             bas = T("↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter",
                     "↑↓ choose    ← → change    Enter: pick from the list    r: config value    Esc: sections    q: quit")
@@ -1724,6 +1746,23 @@ class Ecran:
         return capturer(self.e, self)
 
     # ── Actions ──
+    def assistant(self):
+        # Le client récupère un terminal normal pour input/getpass, puis on retrouve l'écran des réglages.
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            code = configurer_assistant()
+        except KeyboardInterrupt:
+            code = 130
+        finally:
+            curses.reset_prog_mode()
+            curses.flushinp()
+            self.e.touchwin()
+            self.e.refresh()
+        self.statut(T("Connexion de l'assistant enregistrée", "Assistant connection saved") if code == 0 else
+                    T("Configuration interrompue ou échouée", "Configuration interrupted or failed"),
+                    erreur=code != 0)
+
     def changer(self, r, sens):
         """← → : valeur suivante ou précédente (ou ± pas)."""
         v = valeur(self.vals, r.cle)
@@ -1919,6 +1958,8 @@ class Ecran:
                     it = its[i]
                     if isinstance(it, R):
                         self.changer(it, 1) if it.genre in ("ouinon",) else self.entree(it)
+                    elif it["genre"] == "assistant":
+                        self.assistant()
                     else:
                         self.action_raccourci(it)
 
@@ -1979,6 +2020,11 @@ class Ecran:
                                   f"{cur.nom}: {'desktop style' if du else 'config'} value"))
                 elif c in ("e", "E") and cur.essai:
                     self.essayer(cur)
+            elif cur["genre"] == "assistant":
+                if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
+                    self.assistant()
+                elif c == curses.KEY_LEFT:
+                    self.focus = "sections"
             elif cur["genre"] == "nouveaute":
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
                     self.afficher(f"{cur['date']} · {cur['titre']}", cur["points"])
@@ -2009,6 +2055,8 @@ def tui(section=0):
 # ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
 def cli(a):
     vals = lire()
+    if a[0] == "assistant" and len(a) == 1:
+        sys.exit(configurer_assistant())
     if a[0] in ("nouveautes", "nouveautés", "news"):
         if maj_disponible():
             print(T("Une nouvelle version est disponible : nc-maj pour l'installer.\n",

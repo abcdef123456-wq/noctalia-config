@@ -3,7 +3,9 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import pty
 from pathlib import Path
+import select
 import shutil
 import subprocess
 import sys
@@ -15,6 +17,7 @@ import unittest
 from unittest.mock import patch
 import urllib.request
 import uuid
+import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
@@ -351,6 +354,106 @@ assert(launched[3] == "a 'quote' and $(false)")
                         self.assertEqual(conf.read_text(), "PERSONAL SECRET")
                         self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
                         self.assertTrue(os.access(home / ".local/bin/nc-assistant", os.X_OK))
+
+
+class ReglagesAssistant(unittest.TestCase):
+    def test_settings_action_available_and_terminal_restored_after_cancellation(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)  # lectures de matériel préexistantes dans nc-reglages
+            m = charger("nc-reglages")
+        e = m.Ecran.__new__(m.Ecran)
+        e.sec = m.SECTIONS.index("Agents IA (coucou)")
+        item = e.items()[0]
+        self.assertEqual(item["genre"], "assistant")
+        self.assertTrue(e.selectionnable(item))
+        e.e = unittest.mock.Mock()
+        with patch.object(m, "configurer_assistant", side_effect=KeyboardInterrupt), \
+                patch.object(m.curses, "def_prog_mode"), patch.object(m.curses, "endwin"), \
+                patch.object(m.curses, "reset_prog_mode") as reset, patch.object(m.curses, "flushinp"):
+            e.assistant()
+        self.assertTrue(e.msg_err)
+        reset.assert_called_once()
+        e.e.refresh.assert_called_once()
+
+    def test_settings_configures_in_terminal_without_echoing_or_storing_key_in_settings(self):
+        self.verifier_configuration_terminal(tui=False)
+
+    def test_settings_screen_opens_configuration_and_returns_to_menu(self):
+        self.verifier_configuration_terminal(tui=True)
+
+    def verifier_configuration_terminal(self, tui):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            bindir = root / ".local/bin"
+            bindir.mkdir(parents=True)
+            for nom in ("nc-assistant", "nc-reglages"):
+                shutil.copy2(BIN / nom, bindir / nom)
+            settings = root / ".config/nc/reglages.conf"
+            settings.parent.mkdir(parents=True)
+            settings.write_text("SPOTLIGHT_IA=assistant\nASSISTANT_ILE=non\n")
+            original = settings.read_bytes()
+            env = dict(os.environ, HOME=d, NC_LANGUE="en", USER="test-user", TERM="xterm")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ResourceWarning)
+                m = charger("nc-reglages")
+            pid, fd = pty.fork()
+            if pid == 0:
+                args = [] if tui else ["assistant"]
+                os.execve(sys.executable, [sys.executable, str(bindir / "nc-reglages"), *args], env)
+            contenu, stade, status = b"", 0, None
+            menu_ouvert, retour = not tui, False
+            secret = "hidden-test-key-should-never-echo"
+            try:
+                fin = time.monotonic() + 8
+                while time.monotonic() < fin:
+                    if select.select([fd], [], [], 0.1)[0]:
+                        try:
+                            bloc = os.read(fd, 8192)
+                        except OSError:
+                            break
+                        if not bloc:
+                            break
+                        contenu += bloc
+                        if not menu_ouvert and b"Settings" in contenu:
+                            os.write(fd, b"j" * m.SECTIONS.index("Agents IA (coucou)") + b"\n\n")
+                            menu_ouvert = True
+                        if stade == 0 and b"Server URL" in contenu:
+                            os.write(fd, b"http://example.test\n")
+                            stade = 1
+                        elif stade == 1 and b"Secret key" in contenu:
+                            os.write(fd, (secret + "\n").encode())
+                            stade = 2
+                        elif stade == 2 and b"USER_ID" in contenu:
+                            os.write(fd, b"\n")
+                            stade = 3
+                        if tui and not retour and b"Assistant connection saved" in contenu:
+                            retour = True
+                            os.write(fd, b"q")
+                    attendu, status = os.waitpid(pid, os.WNOHANG)
+                    if attendu:
+                        pid = None
+                        break
+                if pid is not None:
+                    attendu, status = os.waitpid(pid, os.WNOHANG)
+                    if attendu:
+                        pid = None
+                self.assertEqual(stade, 3, contenu.decode(errors="replace"))
+                self.assertIn(b"Configuration saved", contenu)
+                if tui:
+                    self.assertTrue(retour, contenu.decode(errors="replace"))
+                self.assertNotIn(secret.encode(), contenu)
+                conf = settings.with_name("assistant.conf")
+                self.assertIn(secret, conf.read_text())
+                self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(settings.read_bytes(), original)
+            finally:
+                if pid is not None:
+                    try:
+                        os.kill(pid, 9)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
+                os.close(fd)
 
 
 if __name__ == "__main__":
