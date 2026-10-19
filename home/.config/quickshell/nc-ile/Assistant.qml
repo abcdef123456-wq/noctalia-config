@@ -7,8 +7,8 @@ Item {
     property bool historiqueOuvert: dansDashboard
     property bool ecouteVocale: false
     property string information: ""
-    readonly property color cyan: "#72def5"
-    readonly property color corail: "#f2a99c"
+    readonly property color cyan: Couleurs.accent
+    readonly property color corail: Couleurs.rouge
     readonly property color teinteEtat: (AssistantEtat.erreur || ecouteVocale) ? corail : cyan
     readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant")
     readonly property var modelesDefaut: [
@@ -65,7 +65,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: page.dansDashboard ? "JARVIS" : "J.A.R.V.I.S."
                     font.family: "Adwaita Sans"; font.pixelSize: page.dansDashboard ? 20 : 19; font.weight: Font.Bold
-                    color: page.dansDashboard ? Couleurs.texte : "#f0f8fc"
+                    color: Couleurs.texte
                 }
                 Rectangle {
                     visible: !page.dansDashboard
@@ -163,7 +163,7 @@ Item {
                             ? Reglages.t("Que veux-tu faire ?\nDiscute avec JARVIS (Markdown et LaTeX pris en charge), ou ouvre ses réglages rapides en haut à droite.",
                                          "What would you like to do?\nTalk to JARVIS (Markdown and LaTeX supported), or open quick settings at the top right.")
                             : Reglages.t("La conversation apparaîtra ici.", "Your conversation will appear here.")
-                        color: page.dansDashboard ? Couleurs.texteSec : "#a5bac8"
+                        color: Couleurs.texteSec
                         wrapMode: Text.Wrap; elide: Text.ElideNone
                     }
                     Repeater {
@@ -171,9 +171,7 @@ Item {
                         Rectangle {
                             required property var modelData
                             width: liste.width; height: corps.implicitHeight + 24; radius: 16
-                            color: page.dansDashboard
-                                ? (modelData.role === "vous" ? Couleurs.gris2 : Couleurs.carte)
-                                : (modelData.role === "vous" ? "#273542" : "#1b2a37")
+                            color: modelData.role === "vous" ? Couleurs.gris2 : Couleurs.carte
                             Column {
                                 id: corps
                                 x: 12; y: 12; width: parent.width - 24; spacing: 6
@@ -189,8 +187,8 @@ Item {
                                     text: AssistantEtat.formater(modelData.texte)
                                     textFormat: TextEdit.MarkdownText
                                     readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
-                                    color: page.dansDashboard ? Couleurs.texte : "#edf7fc"
-                                    selectionColor: page.dansDashboard ? Couleurs.accent : page.cyan
+                                    color: Couleurs.texte
+                                    selectionColor: Couleurs.accent
                                     font.family: "Adwaita Sans"; font.pixelSize: 13
                                 }
                             }
@@ -201,7 +199,7 @@ Item {
                         visible: !page.dansDashboard && !!AssistantEtat.erreur
                         text: AssistantEtat.erreur; textFormat: TextEdit.PlainText
                         readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
-                        color: page.teinteEtat; selectionColor: page.cyan
+                        color: page.teinteEtat; selectionColor: Couleurs.accent
                         font.family: "Adwaita Sans"; font.pixelSize: 13
                     }
                 }
@@ -233,7 +231,7 @@ Item {
                     Ico {
                         anchors.centerIn: parent; taille: 13
                         nom: AssistantEtat.enCours ? "psychology" : (page.ecouteVocale ? "graphic_eq" : (AssistantEtat.erreur || page.derniereReponse ? "chat_bubble" : "auto_awesome"))
-                        color: page.ecouteVocale || AssistantEtat.erreur ? page.corail : "#112936"
+                        color: page.ecouteVocale || AssistantEtat.erreur ? page.corail : Couleurs.surAccent
                     }
                 }
                 Text {
@@ -241,7 +239,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, resume.width - 32)
                     text: resume.libelleStatut
-                    color: (AssistantEtat.erreur || page.ecouteVocale) ? page.corail : "#e6f4fb"
+                    color: (AssistantEtat.erreur || page.ecouteVocale) ? page.corail : Couleurs.texte
                     font.family: "Adwaita Sans"; font.pixelSize: 14; font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                     textFormat: Text.PlainText; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
@@ -255,20 +253,20 @@ Item {
             }
         }
 
-        // Carte MODÈLE IA dans la Dynamic Island uniquement (reproduisant le design de l'image jointe)
+        // Carte MODÈLE IA dans la Dynamic Island uniquement (reproduisant le design de l'image jointe avec les couleurs du terminal)
         Rectangle {
             id: modeles
             visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts
             anchors.bottom: saisie.top; anchors.bottomMargin: 12
             width: parent.width; height: 128; radius: 18
-            color: "#1f2e3b"; border.width: 1; border.color: "#3b5060"
+            color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
             Row {
                 x: 12; y: 10; spacing: 6
-                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "tune"; taille: 15; color: "#90b8cc" }
+                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "tune"; taille: 15; color: page.cyan }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: Reglages.t("MODÈLE IA", "AI MODEL")
-                    color: "#edf7fc"; font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
+                    color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
                 }
             }
             Text {
@@ -293,22 +291,22 @@ Item {
                             : (page.modeleChoisiLocal === modelData.id)
                         width: (choix.width - 8 * (Math.max(1, choix.listeModeles.length) - 1)) / Math.max(1, choix.listeModeles.length)
                         height: 38; radius: 11
-                        color: choisi ? page.cyan : (zone.containsMouse ? "#384c5c" : "#2b3c4b")
+                        color: choisi ? page.cyan : (zone.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
                         border.width: 1
-                        border.color: choisi ? page.cyan : "#3e5364"
+                        border.color: choisi ? page.cyan : Couleurs.gris3
                         enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
                         Row {
                             anchors.centerIn: parent; spacing: 5
                             Ico {
                                 anchors.verticalCenter: parent.verticalCenter
                                 nom: page.iconeModele(option.modelData, option.index); taille: 15
-                                color: option.choisi ? "#102735" : "#d8ebf5"
+                                color: option.choisi ? Couleurs.surAccent : Couleurs.texteDoux
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: Math.min(implicitWidth, option.width - 30)
                                 text: option.modelData.name || option.modelData.id
-                                color: option.choisi ? "#102735" : "#edf7fc"
+                                color: option.choisi ? Couleurs.surAccent : Couleurs.texte
                                 font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
                                 elide: Text.ElideRight; textFormat: Text.PlainText
                             }
@@ -383,9 +381,9 @@ Item {
                 anchors.right: page.dansDashboard ? envoi.left : micro.left
                 anchors.rightMargin: 8; height: parent.height
                 radius: page.dansDashboard ? 16 : height / 2
-                color: page.dansDashboard ? Couleurs.gris2 : "#21303e"
+                color: Couleurs.gris2
                 border.width: 1
-                border.color: entree.activeFocus ? (page.dansDashboard ? Couleurs.accent : page.cyan) : (page.dansDashboard ? "transparent" : "#556d7e")
+                border.color: entree.activeFocus ? Couleurs.accent : (page.dansDashboard ? "transparent" : Couleurs.gris4)
                 TextInput {
                     id: entree
                     objectName: "nc-assistant-input"
@@ -393,15 +391,15 @@ Item {
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
                     text: AssistantEtat.brouillon; onTextEdited: AssistantEtat.brouillon = text
                     maximumLength: 8000; clip: true; selectByMouse: true
-                    color: page.dansDashboard ? Couleurs.texte : "#edf7fc"
-                    selectionColor: page.dansDashboard ? Couleurs.accent : page.cyan
+                    color: Couleurs.texte
+                    selectionColor: Couleurs.accent
                     font.family: "Adwaita Sans"; font.pixelSize: 13
                     onAccepted: AssistantEtat.envoyer()
                     Text {
                         anchors.fill: parent; visible: !entree.text
                         text: page.dansDashboard ? Reglages.t("Écris ta question…", "Ask a question…") : Reglages.t("Demander ou dicter à JARVIS...", "Ask or dictate to JARVIS...")
                         font: entree.font
-                        color: page.dansDashboard ? Couleurs.texteSec : "#a9bfce"
+                        color: Couleurs.texteSec
                         elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
                     }
                 }

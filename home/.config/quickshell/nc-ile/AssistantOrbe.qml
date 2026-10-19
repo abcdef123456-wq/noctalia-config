@@ -1,4 +1,4 @@
-// Emblème de pfp.mp4 sur noir ; pas de flou ni de dépendance multimédia.
+// Emblème de pfp.mp4 sur noir ; couleurs liées à la palette du terminal (Couleurs).
 import QtQuick
 
 Item {
@@ -8,7 +8,7 @@ Item {
     property bool erreur: false
     property bool ecoute: false
     signal clic()
-    property color accent: (erreur || ecoute) ? "#f2a99c" : "#72def5"
+    property color accent: (erreur || ecoute) ? Couleurs.rouge : Couleurs.accent
     readonly property bool mouvement: anime && visible && Reglages.val("EFFETS", "tous") !== "aucun"
     objectName: "nc-jarvis-visual"
     Rectangle { anchors.fill: parent; radius: width / 2; color: "transparent"; border.width: 8; border.color: Qt.alpha(orbe.accent, 0.12) }
@@ -16,7 +16,7 @@ Item {
     Rectangle { anchors.fill: parent; anchors.margins: 8; radius: width / 2; color: "transparent"; border.width: 1.5; border.color: Qt.alpha(orbe.accent, 0.35) }
     Rectangle {
         anchors.fill: parent; anchors.margins: 12; radius: width / 2
-        color: orbe.ecoute ? "#7c4d4b" : "#000000"
+        color: orbe.ecoute ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.38)) : "#000000"
         border.width: 1.5; border.color: Qt.alpha(orbe.accent, 0.78)
         Behavior on color { ColorAnimation { duration: 180 } }
         LogoAssistant {
@@ -30,7 +30,7 @@ Item {
             y: parent.height * 0.62
             text: Reglages.t("En écoute...", "Listening...")
             font.family: "Adwaita Sans"; font.pixelSize: 15; font.weight: Font.Bold
-            color: "#ffffff"
+            color: Couleurs.texte
         }
     }
     // Tracés peints seulement au redimensionnement/changement d'état ; rotation par la scène QtQuick.
@@ -54,9 +54,13 @@ Item {
     Rectangle {
         width: 34; height: 34; radius: 17
         x: parent.width * 0.81 - width / 2; y: parent.height * 0.82 - height / 2
-        color: "#172733"; border.width: 2; border.color: Qt.alpha(orbe.accent, 0.45)
+        color: Couleurs.carte; border.width: 2; border.color: Qt.alpha(orbe.accent, 0.45)
         Rectangle { anchors.fill: parent; anchors.margins: 5; radius: width / 2; color: orbe.accent }
-        Ico { anchors.centerIn: parent; taille: 15; color: "#122936"; nom: orbe.ecoute ? "mic" : (orbe.erreur ? "priority_high" : (orbe.occupe ? "psychology" : "check")) }
+        Ico {
+            anchors.centerIn: parent; taille: 15
+            color: (orbe.erreur || orbe.ecoute) ? Couleurs.surCouleur : Couleurs.surAccent
+            nom: orbe.ecoute ? "mic" : (orbe.erreur ? "priority_high" : (orbe.occupe ? "psychology" : "check"))
+        }
     }
     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: orbe.clic() }
 }
