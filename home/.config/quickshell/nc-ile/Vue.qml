@@ -326,10 +326,18 @@ PanelWindow {
         // Si le bureau choisi manque un instant de la liste (Hyprland la rafraîchit), le cube reste où il est
         readonly property int trouve: v.bureaux.findIndex(b => b.id === v.choisi)
         property int courant: 0
-        onTrouveChanged: if (trouve >= 0) courant = trouve
+        onTrouveChanged: placerDepart()
         property real pos: 0
-        property bool pret: false                    // à l'ouverture, le cube est déjà en place (pas d'animation)
-        Component.onCompleted: { courant = Math.max(0, trouve); pos = courant; pret = true }
+        property bool initialise: false
+        // La création QML ne suffit pas : l'écran et le bureau peuvent arriver pendant le fondu d'ouverture.
+        readonly property bool pret: initialise && trouve >= 0 && v.entree >= 1
+                                     && v.width > 0 && v.height > 0 && width > 0 && height > 0
+        function placerDepart() {
+            if (trouve < 0) return
+            courant = trouve
+            if (!initialise) { pos = courant; initialise = true }
+        }
+        Component.onCompleted: placerDepart()
         onCourantChanged: if (!glisse) pos = courant
         // Aux doigts, une courte animation lisse les saccades entre deux évènements du pavé tactile
         Behavior on pos {
@@ -347,23 +355,30 @@ PanelWindow {
         readonly property real decalage: voisins ? (gauche - droite) * (width - fw) / 4 : 0
         // Le décalage suivi en douceur quand un nouveau bureau apparaît (pendant que le cube tourne : tel quel)
         property real dec: decalage
-        Behavior on dec { enabled: !zone.bouge; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        Behavior on dec { enabled: zone.pret && !zone.bouge; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
         // Recul : le cube s'éloigne pendant qu'il tourne (ou qu'on glisse), et revient une fois arrêté
         readonly property bool bouge: glisse || Math.abs(pos - courant) > 0.002
         property real recul: 0
-        onBougeChanged: if (bouge) { rezoom.stop(); recul = 1 } else rezoom.restart()
+        onPretChanged: if (!pret) { rezoom.stop(); recul = 0 }
+        onBougeChanged: {
+            if (!pret) { rezoom.stop(); recul = 0; return }
+            if (bouge) { rezoom.stop(); recul = 1 } else rezoom.restart()
+        }
         Timer { id: rezoom; interval: 80; onTriggered: zone.recul = 0 }
-        Behavior on recul { NumberAnimation { duration: Math.min(260, zone.duree / 2); easing.type: Easing.OutCubic } }
+        Behavior on recul { enabled: zone.pret; NumberAnimation { duration: Math.min(260, zone.duree / 2); easing.type: Easing.OutCubic } }
 
         // Deux doigts à l'horizontale sur le pavé tactile (ou molette inclinée) : le cube suit les doigts ; on lâche, il
         // finit sur le bureau le plus proche (un petit geste suffit à passer au suivant)
         property bool glisse: false
         property real depart: 0
         property real cible: 0
+        property real amorceHorizontale: 0
         Timer {
             id: finGlisse; interval: 160
             onTriggered: {
+                zone.amorceHorizontale = 0
+                if (!zone.glisse) return
                 var c = zone.cible
                 var i = Math.round(c + (c > zone.depart + 0.01 ? 0.3 : (c < zone.depart - 0.01 ? -0.3 : 0)))
                 i = Math.max(0, Math.min(v.bureaux.length - 1, i))
@@ -372,17 +387,32 @@ PanelWindow {
                 zone.pos = zone.courant
             }
         }
+        function defilerHorizontal(e) {
+            if (!pret || v.partant || Etat.vuePause || v.bureaux.length < 2) return
+            var precis = e.pixelDelta.x !== 0 || e.pixelDelta.y !== 0
+            var dx = precis ? e.pixelDelta.x : e.angleDelta.x / 2
+            var dy = precis ? e.pixelDelta.y : e.angleDelta.y / 2
+            // Un geste d'ouverture surtout vertical ne doit pas lancer un petit aller-retour du cube.
+            if (dx === 0 || Math.abs(dx) <= Math.abs(dy)) {
+                if (!glisse) amorceHorizontale = 0
+                return
+            }
+            if (!glisse && precis) {
+                amorceHorizontale += dx
+                finGlisse.restart()
+                if (Math.abs(amorceHorizontale) < 6) return
+                dx = amorceHorizontale
+            }
+            amorceHorizontale = 0
+            if (!glisse) { depart = courant; cible = pos; glisse = true }
+            cible = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, cible - dx / (fw * 0.8)))
+            pos = cible
+            finGlisse.restart()
+        }
         WheelHandler {
             orientation: Qt.Horizontal
-            onWheel: e => {
-                var dx = e.pixelDelta.x !== 0 ? e.pixelDelta.x : e.angleDelta.x / 2
-                if (dx === 0 || v.bureaux.length < 2) return
-                if (!zone.glisse) { zone.depart = zone.courant; zone.cible = zone.pos; zone.glisse = true }
-                // La cible suit les doigts ; pos la rejoint en douceur
-                zone.cible = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, zone.cible - dx / (zone.fw * 0.8)))
-                zone.pos = zone.cible
-                finGlisse.restart()
-            }
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: e => zone.defilerHorizontal(e)
         }
         Item {
             id: scene

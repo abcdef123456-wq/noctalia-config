@@ -323,6 +323,101 @@ MODE=files
                 self.assertEqual(r.stdout, expected)
 
 
+@unittest.skipUnless(shutil.which('qs'), 'Quickshell requis pour la vue hors écran')
+class OuvertureVue(unittest.TestCase):
+    def verifier_vue(self, scenario, bureaux='[{id:1},{id:2},{id:3}]', choisi=1):
+        # Les vrais calculs et animations de Vue.qml, avec un écran et des bureaux simulés.
+        # Aucune connexion Hyprland ni création de surface layer-shell sur la session réelle.
+        source = (QML / 'Vue.qml').read_text()
+        mouvement = source[source.index('        readonly property string anim:'):source.index('        Item {\n            id: scene')]
+        intro = next(l for l in source.splitlines() if 'Behavior on entree {' in l)
+        qml = '''import QtQuick
+import QtQuick.Window
+import Quickshell
+ShellRoot {
+ id:controle;property bool echec:false
+ function verifier(ok,message) {if(!ok){echec=true;console.error(message);Qt.exit(2)}}
+ function pixel(x,y){return {pixelDelta:{x:x,y:y},angleDelta:{x:0,y:0}}}
+ Window {id:v;visible:true;width:1600;height:1000
+  property var bureaux:BUREAUX;property int choisi:CHOISI;property var traine:null
+  property bool partant:false;property real entree:0
+  INTRO
+  Component.onCompleted: entree=1
+  Item {id:zone;width:1400;height:800
+   readonly property real mw:v.width;readonly property real mh:v.height
+   MOUVEMENT
+  }
+ }
+ SCENARIO
+ Timer {interval:1800;running:true;onTriggered:{console.error("Délai dépassé");Qt.exit(3)}}
+}'''.replace('BUREAUX', bureaux).replace('CHOISI', str(choisi)).replace('INTRO', intro).replace('MOUVEMENT', mouvement).replace('SCENARIO', scenario)
+        qml = qml.replace('Qt.quit()', 'Qt.exit(controle.echec ? 2 : 0)')
+        with tempfile.TemporaryDirectory(prefix='nc-vue-test-') as d:
+            root = Path(d)
+            (root / 'runtime').mkdir(mode=0o700)
+            (root / 'shell.qml').write_text(qml)
+            (root / 'Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function val(k,d){return d}}')
+            (root / 'Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool vuePause:false}')
+            (root / 'qmldir').write_text('singleton Reglages 1.0 Reglages.qml\nsingleton Etat 1.0 Etat.qml\n')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software',
+                       XDG_RUNTIME_DIR=str(root / 'runtime'), XDG_CACHE_HOME=str(root / 'cache'))
+            env.pop('WAYLAND_DISPLAY', None)
+            r = subprocess.run(['qs', '--no-color', '-p', str(root / 'shell.qml')], env=env,
+                               capture_output=True, text=True, timeout=5)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_initial_workspace_refresh_does_not_animate_but_later_navigation_does(self):
+        self.verifier_vue('''
+ Timer {interval:50;running:true;onTriggered:{v.choisi=2;zone.width=1420}}
+ Timer {interval:90;running:true;onTriggered:{
+  verifier(zone.pos===zone.courant,"La mise en place du bureau ne doit pas glisser")
+  verifier(zone.recul===0,"Pas de recul parasite à l'ouverture")
+  verifier(Math.abs(zone.dec-zone.decalage)<0.001,"Pas de décalage animé pendant la mise en place")
+  verifier(!zone.pret,"L'introduction n'est pas terminée")
+ }}
+ Timer {interval:300;running:true;onTriggered:{verifier(zone.pret,"Vue prête");v.choisi=3}}
+ Timer {interval:350;running:true;onTriggered:{
+  verifier(zone.pos>1&&zone.pos<2&&zone.bouge,"La navigation doit conserver son animation")
+ }}
+ Timer {interval:850;running:true;onTriggered:{verifier(zone.pos===2,"Bureau final incorrect");Qt.quit()}}
+''')
+
+    def test_first_workspace_received_after_intro_is_placed_without_recoil(self):
+        self.verifier_vue('''
+ Timer {interval:300;running:true;onTriggered:{verifier(!zone.pret,"Attendre les bureaux");v.bureaux=[{id:1},{id:2},{id:3}]}}
+ Timer {interval:350;running:true;onTriggered:{
+  verifier(zone.pret&&zone.pos===1,"Première position reçue tardivement incorrecte")
+  verifier(zone.recul===0,"Le premier placement ne doit pas provoquer un recul")
+  Qt.quit()
+ }}
+''', bureaux='[]', choisi=2)
+
+    def test_vertical_opening_motion_and_horizontal_jitter_do_not_move_desktop(self):
+        self.verifier_vue('''
+ Timer {interval:80;running:true;onTriggered:{zone.defilerHorizontal(pixel(-30,0));verifier(!zone.glisse,"Ignorer la fin du geste d'ouverture")}}
+ Timer {interval:300;running:true;onTriggered:{
+  zone.defilerHorizontal(pixel(-2,40))
+  verifier(!zone.glisse&&zone.pos===0,"Un geste surtout vertical ne doit pas bouger le bureau")
+  for(var i=0;i<5;i++)zone.defilerHorizontal(pixel(-1,0))
+  verifier(!zone.glisse&&zone.pos===0,"La petite dérive horizontale ne doit pas bouger le bureau")
+ }}
+ Timer {interval:510;running:true;onTriggered:{verifier(zone.amorceHorizontale===0,"Purger la dérive inactive");zone.defilerHorizontal(pixel(-25,1))}}
+ Timer {interval:560;running:true;onTriggered:{verifier(zone.glisse&&zone.pos>0,"Un vrai geste horizontal doit fonctionner")}}
+ Timer {interval:1150;running:true;onTriggered:{verifier(!zone.glisse&&zone.pos===zone.courant,"Fin du geste incorrecte");Qt.quit()}}
+''')
+
+    def test_mouse_horizontal_wheel_still_works_and_pause_rejects_input(self):
+        self.verifier_vue('''
+ Timer {interval:300;running:true;onTriggered:{
+  v.partant=true;zone.defilerHorizontal(pixel(-40,0));verifier(!zone.glisse,"La fermeture doit ignorer les gestes")
+  v.partant=false;Etat.vuePause=true;zone.defilerHorizontal(pixel(-40,0));verifier(!zone.glisse,"Une capture doit ignorer les gestes")
+  Etat.vuePause=false
+  zone.defilerHorizontal({pixelDelta:{x:0,y:0},angleDelta:{x:-120,y:0}})
+ }}
+ Timer {interval:350;running:true;onTriggered:{verifier(zone.glisse&&zone.pos>0,"Molette horizontale ignorée");Qt.quit()}}
+''')
+
+
 @unittest.skipUnless(shutil.which('qs'), 'Quickshell requis pour la capture hors écran')
 class ImagesQml(unittest.TestCase):
     def test_grab_survives_source_destruction(self):
