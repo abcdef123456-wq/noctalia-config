@@ -4,6 +4,7 @@
   nc-reglages                     écran des réglages
   nc-reglages raccourcis          directement les raccourcis clavier
   nc-reglages assistant           configurer la connexion de l'assistant distant (URL et clé)
+  nc-reglages assistant verifier  tester la connexion distante (réseau, clé, TLS, runner)
   nc-reglages liste               tous les réglages et leur valeur
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
@@ -70,6 +71,7 @@ USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the a
   nc-settings                     settings screen
   nc-settings shortcuts           straight to keyboard shortcuts
   nc-settings assistant           configure the remote assistant connection (URL and key)
+  nc-settings assistant verify    test the remote connection (network, key, TLS, runner)
   nc-settings list                all settings and their values
   nc-settings get KEY             a setting's value
   nc-settings set KEY VALUE       change a setting (e.g. nc-settings set HZ_ECO 60)
@@ -1388,6 +1390,20 @@ def configurer_assistant():
         return 1
 
 
+def verifier_assistant():
+    """Teste la connexion distante sans afficher la clé ; retourne (code, message court)."""
+    try:
+        r = subprocess.run([sys.executable, os.path.join(BIN, "nc-assistant"), "verifier"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, T("Test impossible.", "Test impossible.")
+    lignes = (r.stdout if r.returncode == 0 else (r.stderr or r.stdout)).strip().splitlines()
+    if r.returncode == 0:
+        return 0, (lignes[0] if lignes else T("Connexion OK.", "Connection OK."))
+    erreur = next((l for l in lignes if l.startswith(("Connexion impossible :", "Connection failed:"))), None)
+    return r.returncode, (erreur or (lignes[-1] if lignes else T("Connexion impossible.", "Connection failed.")))
+
+
 class Ecran:
     def __init__(self, ecran, section_depart=0):
         self.e = ecran
@@ -1430,9 +1446,14 @@ class Ecran:
             return self.lignes_n
         lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
         if SECTIONS[self.sec] == "Agents IA (coucou)":
-            lignes.insert(0, {"genre": "assistant", "nom": T("Configurer l'assistant distant", "Configure remote assistant"),
-                              "aide": T("URL du serveur, clé secrète (saisie masquée) et utilisateur ; conservés séparément dans assistant.conf.",
-                                        "Server URL, secret key (hidden input) and user; kept separately in assistant.conf.")})
+            lignes.insert(0, {"genre": "assistant", "action": "verifier",
+                              "nom": T("Tester l'assistant distant", "Test remote assistant"),
+                              "aide": T("Teste l'URL, la clé, le certificat TLS et l'état du runner ; la clé n'est jamais affichée.",
+                                        "Tests the URL, key, TLS certificate and runner status; the key is never displayed.")})
+            lignes.insert(0, {"genre": "assistant", "action": "configurer",
+                              "nom": T("Configurer l'assistant distant", "Configure remote assistant"),
+                              "aide": T("URL du serveur, clé secrète (saisie masquée) et utilisateur ; conservés séparément dans assistant.conf. Pour un autre réseau, utilise l'URL HTTPS d'un tunnel.",
+                                        "Server URL, secret key (hidden input) and user; kept separately in assistant.conf. For another network, use the HTTPS URL of a tunnel.")})
         return lignes
 
     @staticmethod
@@ -1513,7 +1534,8 @@ class Ecran:
             elif it["genre"] == "titre":
                 e.addstr(y, x0, couper(it["nom"], iw), curses.A_BOLD | self.ACC)
             elif it["genre"] == "assistant":
-                self.ligne(y, x0, iw, col, it["nom"], T("Ouvrir… ↵", "Open… ↵"), sel, False)
+                v = T("Tester… ↵", "Test… ↵") if it.get("action") == "verifier" else T("Ouvrir… ↵", "Open… ↵")
+                self.ligne(y, x0, iw, col, it["nom"], v, sel, False)
             elif it["genre"] == "ajouter":
                 self.ligne(y, x0, iw, col, "+ " + it["nom"], "", sel, False)
             elif it["genre"] == "nouveaute":
@@ -1576,8 +1598,12 @@ class Ecran:
             bas = T("↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter",
                     "↑↓ choose    Enter: everything it brings    Esc: sections    q: quit")
         elif isinstance(cur, dict) and cur["genre"] == "assistant":
-            bas = T("↑↓ choisir    Entrée : configurer la connexion    Échap : sections    q : quitter",
-                    "↑↓ choose    Enter: configure connection    Esc: sections    q: quit")
+            if cur.get("action") == "verifier":
+                bas = T("↑↓ choisir    Entrée : tester la connexion    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: test connection    Esc: sections    q: quit")
+            else:
+                bas = T("↑↓ choisir    Entrée : configurer la connexion    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: configure connection    Esc: sections    q: quit")
         else:
             bas = T("↑↓ choisir    ← → changer    Entrée : choisir dans la liste    r : valeur de la config    Échap : sections    q : quitter",
                     "↑↓ choose    ← → change    Enter: pick from the list    r: config value    Esc: sections    q: quit")
@@ -1746,7 +1772,13 @@ class Ecran:
         return capturer(self.e, self)
 
     # ── Actions ──
-    def assistant(self):
+    def assistant(self, it=None):
+        if isinstance(it, dict) and it.get("action") == "verifier":
+            self.statut(T("Test de la connexion…", "Testing connection…"))
+            self.dessiner()
+            code, message = verifier_assistant()
+            self.statut(message, erreur=code != 0)
+            return
         # Le client récupère un terminal normal pour input/getpass, puis on retrouve l'écran des réglages.
         curses.def_prog_mode()
         curses.endwin()
@@ -1959,7 +1991,7 @@ class Ecran:
                     if isinstance(it, R):
                         self.changer(it, 1) if it.genre in ("ouinon",) else self.entree(it)
                     elif it["genre"] == "assistant":
-                        self.assistant()
+                        self.assistant(it)
                     else:
                         self.action_raccourci(it)
 
@@ -2022,7 +2054,7 @@ class Ecran:
                     self.essayer(cur)
             elif cur["genre"] == "assistant":
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
-                    self.assistant()
+                    self.assistant(cur)
                 elif c == curses.KEY_LEFT:
                     self.focus = "sections"
             elif cur["genre"] == "nouveaute":
@@ -2055,6 +2087,10 @@ def tui(section=0):
 # ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
 def cli(a):
     vals = lire()
+    if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
+        code, message = verifier_assistant()
+        print(message, file=sys.stdout if code == 0 else sys.stderr)
+        sys.exit(code)
     if a[0] == "assistant" and len(a) == 1:
         sys.exit(configurer_assistant())
     if a[0] in ("nouveautes", "nouveautés", "news"):

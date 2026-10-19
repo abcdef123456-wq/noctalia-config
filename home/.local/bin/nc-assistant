@@ -6,10 +6,13 @@
   nc-assistant chat [question]      chat dans le terminal courant
   nc-assistant demander "question"  une réponse ; --flux : lignes JSON pour Spotlight
   nc-assistant briefing            briefing et notification
+  nc-assistant verifier            test réseau + diagnostic ; --json
   nc-assistant etat                état JSON ; --local : configuration seule, sans réseau
 
 Configuration personnelle : ~/.config/nc/assistant.conf (0600), jamais exportée.
 Le serveur est installé séparément. Aucune connexion ni scrutation en arrière-plan.
+Une URL 192.168.x.x / 10.x / *.local ne fonctionne que sur le réseau local ;
+pour un autre réseau, configure l'URL HTTPS d'un tunnel côté serveur.
 """
 import argparse
 import contextlib
@@ -18,6 +21,7 @@ import getpass
 import hashlib
 import html
 import http.client
+import ipaddress
 import json
 import math
 import os
@@ -25,9 +29,11 @@ from pathlib import Path
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,9 +47,12 @@ DOC_EN = """Remote assistant client (Python standard library only).
   nc-assistant chat [question]      chat in the current terminal
   nc-assistant demander "question"  print an answer; --flux: JSON lines for Spotlight
   nc-assistant briefing            daily briefing and notification
+  nc-assistant verifier            network test + diagnostic; --json
   nc-assistant etat                JSON status; --local: configuration only, no network
 Personal configuration: ~/.config/nc/assistant.conf (0600), never exported.
 The server is installed separately. No background polling or local model.
+A 192.168.x.x / 10.x / *.local URL only works on the server's local network;
+for any other network, configure the HTTPS URL of a tunnel on the server side.
 """
 
 
@@ -94,6 +103,20 @@ def valider(c):
     if not ident or len(ident) > 200 or any(ord(x) < 32 for x in ident):
         raise Erreur(T("USER_ID absent ou invalide.", "Missing or invalid USER_ID."))
     return dict(URL=url, SECRET_KEY=c["SECRET_KEY"], USER_ID=ident, TIMEOUT=timeout)
+
+
+def hote_prive(url):
+    """Vrai si l'hôte n'est joignable que depuis le réseau local du serveur."""
+    h = (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
+    if not h:
+        return False
+    if h == "localhost" or h.endswith(".local") or h.endswith(".lan") or h.endswith(".home.arpa"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
 
 
 def configuration():
@@ -158,6 +181,18 @@ def configurer():
     sauvegarder(dict(URL=url or c.get("URL", ""), SECRET_KEY=cle or c.get("SECRET_KEY", ""),
                      USER_ID=utilisateur, TIMEOUT=c.get("TIMEOUT", "180")))
     print(T("Configuration enregistrée (0600).", "Configuration saved (0600)."))
+    finale = url or c.get("URL", "")
+    if hote_prive(finale):
+        print(T("Attention : cette URL est locale/privée. Elle ne fonctionnera que sur le même réseau "
+                "que le serveur. Depuis un autre réseau, utilise l'URL HTTPS d'un tunnel "
+                "(Cloudflare, Tailscale) exposée par le serveur.",
+                "Warning: this is a local/private URL. It only works on the same network as the server. "
+                "From another network, use the HTTPS URL of a tunnel (Cloudflare, Tailscale) exposed by the server."))
+    elif finale.startswith("http://"):
+        print(T("Attention : HTTP en clair. Hors du réseau local, utilise impérativement HTTPS.",
+                "Warning: plain HTTP. Outside the local network, HTTPS is required."))
+    print(T("Teste la connexion avec : nc-assistant verifier",
+            "Test the connection with: nc-assistant verifier"))
 
 
 class SansRedirection(urllib.request.HTTPRedirectHandler):
@@ -176,16 +211,53 @@ def api(c, endpoint, payload=None):
             contenu = r.read(MAX_RESPONSE + 1)
     except urllib.error.HTTPError as e:
         if 300 <= e.code < 400:
-            raise Erreur(T("Redirection refusée : configure l'URL finale du serveur.",
-                           "Redirect refused: configure the server's final URL.")) from None
+            raise Erreur(T("Redirection refusée : configure directement l'URL finale, en HTTPS.",
+                           "Redirect refused: configure the final HTTPS URL directly.")) from None
+        if e.code in (401, 403):
+            raise Erreur(T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
+                           f"Server rejected the key (HTTP {e.code}): check SECRET_KEY.")) from None
+        if e.code == 404:
+            raise Erreur(T("Route introuvable (HTTP 404) : vérifie l'URL et son préfixe de chemin.",
+                           "Route not found (HTTP 404): check the URL and its path prefix.")) from None
+        if e.code == 429:
+            raise Erreur(T("Trop de requêtes (HTTP 429) : réessaie dans une minute.",
+                           "Too many requests (HTTP 429): try again in a minute.")) from None
+        if 500 <= e.code < 600:
+            raise Erreur(T(f"Erreur interne du serveur (HTTP {e.code}) : consulte ses journaux.",
+                           f"Server internal error (HTTP {e.code}): check its logs.")) from None
         raise Erreur(T(f"Erreur HTTP {e.code} du serveur.", f"Server HTTP error {e.code}.")) from None
     except (TimeoutError, socket.timeout):
-        raise Erreur(T("Le serveur n'a pas répondu à temps.", "The server did not respond in time.")) from None
-    except (urllib.error.URLError, OSError):
+        raise Erreur(T("Le serveur n'a pas répondu à temps (réseau lent, tunnel arrêté ou requête trop longue).",
+                       "The server did not respond in time (slow network, stopped tunnel or long request).")) from None
+    except urllib.error.URLError as e:
+        raison = getattr(e, "reason", None)
+        if isinstance(raison, (TimeoutError, socket.timeout)):
+            raise Erreur(T("Le serveur n'a pas répondu à temps.", "The server did not respond in time.")) from None
+        if isinstance(raison, ssl.SSLCertVerificationError) or isinstance(raison, ssl.SSLError):
+            raise Erreur(T("Certificat TLS invalide : l'URL HTTPS ne correspond pas au certificat du serveur.",
+                           "Invalid TLS certificate: the HTTPS URL does not match the server certificate.")) from None
+        if isinstance(raison, socket.gaierror):
+            raise Erreur(T("Nom du serveur introuvable (DNS) : vérifie l'URL publique.",
+                           "Server name not found (DNS): check the public URL.")) from None
+        if isinstance(raison, ConnectionRefusedError):
+            raise Erreur(T("Connexion refusée : le service ou le tunnel n'écoute pas à cette adresse.",
+                           "Connection refused: the service or tunnel is not listening at this address.")) from None
+        if isinstance(raison, (ConnectionResetError, http.client.RemoteDisconnected)):
+            raise Erreur(T("Connexion interrompue par le serveur ou le tunnel.",
+                           "Connection closed by the server or tunnel.")) from None
         raise Erreur(T("Serveur inaccessible (réseau, adresse ou certificat).",
                        "Server unreachable (network, address or certificate).")) from None
+    except ssl.SSLError:
+        raise Erreur(T("Erreur TLS : vérifie le certificat et utilise l'URL HTTPS finale.",
+                       "TLS error: check the certificate and use the final HTTPS URL.")) from None
+    except ConnectionRefusedError:
+        raise Erreur(T("Connexion refusée : le service ou le tunnel n'écoute pas à cette adresse.",
+                       "Connection refused: the service or tunnel is not listening at this address.")) from None
     except (http.client.HTTPException, UnicodeError, ValueError):
         raise Erreur(T("Réponse ou adresse HTTP invalide.", "Invalid HTTP response or address.")) from None
+    except OSError:
+        raise Erreur(T("Serveur inaccessible (réseau, adresse ou certificat).",
+                       "Server unreachable (network, address or certificate).")) from None
     if len(contenu) > MAX_RESPONSE:
         raise Erreur(T("Réponse du serveur trop volumineuse.", "Server response is too large."))
     try:
@@ -209,6 +281,71 @@ def texte_sortie(resultat):
     t = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", t)
     t = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", t)
     return "".join(x for x in t if x in "\n\t" or (ord(x) >= 32 and not 127 <= ord(x) <= 159))
+
+
+def verifier(c, json_out=False):
+    """Teste la connexion et explique précisément ce qui bloque."""
+    prive = hote_prive(c["URL"])
+    debut = time.monotonic()
+    try:
+        r = api(c, "/api/status")
+        if not any(isinstance(r.get(k), bool) for k in ("online", "runner_alive")):
+            raise Erreur(T("État du serveur invalide : online ou runner_alive attendu.",
+                           "Invalid server status: expected online or runner_alive."))
+    except Erreur as e:
+        resultat = {"configured": True, "online": False, "url": c["URL"],
+                    "private": prive, "error": str(e)}
+        if json_out:
+            print(json.dumps(resultat, ensure_ascii=False))
+        else:
+            print(T("Connexion impossible : ", "Connection failed: ") + str(e), file=sys.stderr)
+            if prive:
+                print(T("Indice : cette URL est locale/privée ; elle ne fonctionne que sur le réseau du serveur. "
+                        "Depuis un autre réseau, utilise l'URL HTTPS d'un tunnel (Cloudflare, Tailscale).",
+                        "Hint: this is a local/private URL; it only works on the server's network. "
+                        "From another network, use the HTTPS URL of a tunnel (Cloudflare, Tailscale)."),
+                      file=sys.stderr)
+            elif c["URL"].startswith("http://"):
+                print(T("Indice : utilise HTTPS hors du réseau local.",
+                        "Hint: use HTTPS outside the local network."), file=sys.stderr)
+        return 1
+
+    latence = int((time.monotonic() - debut) * 1000)
+    runner = r.get("online") is not False and r.get("runner_alive") is not False
+    public_url = (r.get("gateway") or {}).get("public_url") if isinstance(r.get("gateway"), dict) else None
+    # Les métadonnées distantes ne doivent ni contrôler le terminal ni répéter la clé.
+    def metadata(v):
+        return texte_sortie({"output": v}).replace(c["SECRET_KEY"], "[redacted]")[:300] if isinstance(v, str) and v.strip() else None
+    public_url = metadata(public_url)
+    version = metadata(r.get("version"))
+    resultat = {
+        "configured": True,
+        "online": bool(runner),
+        "runner_alive": bool(runner),
+        "url": c["URL"],
+        "private": prive,
+        "latency_ms": latence,
+        "version": version,
+        "public_url": public_url,
+        "error": None if runner else T("Le runner est hors ligne.", "The runner is offline."),
+    }
+    if json_out:
+        print(json.dumps(resultat, ensure_ascii=False))
+    else:
+        if runner:
+            version = f" v{version}" if version else ""
+            print(T(f"Connexion OK — gateway{version}, runner en ligne, {latence} ms.",
+                    f"Connection OK — gateway{version}, runner online, {latence} ms."))
+        else:
+            print(T("Gateway joignable, mais le runner est hors ligne.",
+                    "Gateway reachable, but the runner is offline."), file=sys.stderr)
+        if prive:
+            print(T("Attention : URL locale/privée, valable seulement sur le réseau du serveur.",
+                    "Warning: local/private URL, only valid on the server's network."))
+        if public_url and public_url != c["URL"].rstrip("/"):
+            print(T(f"URL publique annoncée par le serveur : {public_url}",
+                    f"Public URL announced by the server: {public_url}"))
+    return 0 if runner else 1
 
 
 def runtime():
@@ -339,6 +476,8 @@ def main():
             p.add_argument("--flux", action="store_true")
     sous.add_parser("briefing")
     sous.add_parser("requete-ile", help=argparse.SUPPRESS)
+    p = sous.add_parser("verifier", aliases=["check", "diagnostic"])
+    p.add_argument("--json", action="store_true")
     p = sous.add_parser("etat", aliases=["status"])
     p.add_argument("--local", action="store_true")
     a = parser.parse_args()
@@ -355,6 +494,8 @@ def main():
             if commande == "chat" and not CONF.exists() and sys.stdin.isatty():
                 configurer()
             c = configuration()
+            if commande in ("verifier", "check", "diagnostic"):
+                return verifier(c, getattr(a, "json", False))
             if commande in ("etat", "status"):
                 if a.local:
                     print(json.dumps({"configured": True, "checked": False}))
@@ -379,7 +520,18 @@ def main():
         if commande == "requete-ile":
             print(json.dumps({"ok": False, "error": message}, ensure_ascii=False), flush=True)
         elif commande in ("etat", "status"):
-            print(json.dumps({"online": False, "error": message}, ensure_ascii=False))
+            resultat = {"online": False, "error": message}
+            try:
+                if hote_prive(configuration()["URL"]):
+                    resultat["private"] = True
+                    resultat["hint"] = T(
+                        "URL locale/privée : utilise l'URL HTTPS d'un tunnel depuis un autre réseau.",
+                        "Local/private URL: use a tunnel's HTTPS URL from another network.")
+            except (Erreur, OSError):
+                pass
+            print(json.dumps(resultat, ensure_ascii=False))
+        elif commande in ("verifier", "check", "diagnostic") and getattr(a, "json", False):
+            print(json.dumps({"configured": False, "online": False, "error": message}, ensure_ascii=False))
         elif flux:
             print(json.dumps({"t": message}, ensure_ascii=False), flush=True)
         else:

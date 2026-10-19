@@ -322,6 +322,92 @@ class Assistant(unittest.TestCase):
         self.assertIn("private", json.loads(r.stdout)["t"])
         self.assertEqual(self.server.recus, [])
 
+    def test_private_host_detection(self):
+        for url in ("http://localhost:8000", "http://192.168.1.28:8000",
+                    "http://10.0.0.5:8000", "http://172.16.4.2:8000",
+                    "https://assistant.local", "http://[::1]:8000"):
+            with self.subTest(url=url):
+                self.assertTrue(self.m.hote_prive(url))
+        for url in ("https://assistant.example.test", "https://trycloudflare.com",
+                    "https://100.64.0.1", "https://mon-pi.tailnet.ts.net"):
+            with self.subTest(url=url):
+                self.assertFalse(self.m.hote_prive(url))
+
+    def test_verifier_json_without_configuration_and_invalid_status(self):
+        self.server.reponse = (200, b'{}')
+        r = self.cli("verifier", "--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(json.loads(r.stdout)["online"])
+        self.m.CONF.unlink()
+        for cmd in ("verifier", "check", "diagnostic"):
+            r = self.cli(cmd, "--json")
+            self.assertEqual(r.returncode, 1)
+            self.assertFalse(json.loads(r.stdout)["configured"])
+
+    def test_verifier_metadata_and_network_errors_are_safe(self):
+        self.server.reponse = (200, json.dumps(dict(online=True, version="\x1b[31m" + self.c["SECRET_KEY"],
+                                                   gateway=dict(public_url=self.c["SECRET_KEY"]))).encode())
+        r = self.cli("verifier", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+        self.assertNotIn("\x1b", json.loads(r.stdout)["version"])
+        import socket
+        import ssl
+        import urllib.error
+        for raison, attendu in ((socket.gaierror(), "DNS"), (ssl.SSLError(), "TLS"),
+                                 (TimeoutError(), "in time"), (ConnectionRefusedError(), "refused")):
+            with patch.object(urllib.request.OpenerDirector, "open", side_effect=urllib.error.URLError(raison)):
+                with self.assertRaises(self.m.Erreur) as e:
+                    self.m.api(self.m.configuration(), "/api/status")
+            self.assertIn(attendu, str(e.exception))
+
+    def test_verifier_reports_online_private_url_without_key(self):
+        r = self.cli("verifier")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Connection OK", r.stdout)
+        self.assertIn("local/private", r.stdout)
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+
+        r = self.cli("verifier", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertTrue(data["online"])
+        self.assertTrue(data["private"])
+        self.assertEqual(data["url"], self.c["URL"])
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+
+    def test_verifier_explains_auth_and_missing_route(self):
+        self.server.reponse = (401, b"private error")
+        r = self.cli("verifier")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rejected the key", r.stderr)
+        self.assertNotIn("private error", r.stdout + r.stderr)
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+
+        self.server.reponse = (404, b"")
+        r = self.cli("verifier", "--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("404", json.loads(r.stdout)["error"])
+
+    def test_verifier_reports_offline_runner(self):
+        self.server.reponse = (200, b'{"online": false}')
+        r = self.cli("verifier", "--json")
+        self.assertEqual(r.returncode, 1)
+        data = json.loads(r.stdout)
+        self.assertFalse(data["online"])
+        self.assertTrue(data["runner_alive"] is False)
+
+    def test_status_error_explains_private_url_without_leaking_key(self):
+        self.server.reponse = (500, b"private backend detail")
+        r = self.cli("etat")
+        self.assertEqual(r.returncode, 1)
+        data = json.loads(r.stdout)
+        self.assertFalse(data["online"])
+        self.assertTrue(data["private"])
+        self.assertIn("tunnel", data["hint"])
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+        self.assertNotIn("private backend detail", r.stdout + r.stderr)
+
 
 class InstallationPortable(unittest.TestCase):
     @unittest.skipUnless(shutil.which("lua"), "Lua requis pour le lanceur de repli")
@@ -450,6 +536,30 @@ ShellRoot {
 
 
 class ReglagesAssistant(unittest.TestCase):
+    def test_settings_exposes_remote_connection_test(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)
+            m = charger("nc-reglages")
+        e = m.Ecran.__new__(m.Ecran)
+        e.sec = m.SECTIONS.index("Agents IA (coucou)")
+        items = e.items()
+        self.assertEqual(items[0]["action"], "configurer")
+        self.assertEqual(items[1]["action"], "verifier")
+        with patch.object(m.subprocess, "run") as run:
+            run.return_value = unittest.mock.Mock(
+                returncode=0, stdout="Connection OK — gateway v1.0.0, 12 ms.\n", stderr="")
+            code, message = m.verifier_assistant()
+        self.assertEqual(code, 0)
+        self.assertIn("Connection OK", message)
+        self.assertEqual(run.call_args.args[0][-1], "verifier")
+
+        with patch.object(m.subprocess, "run") as run:
+            run.return_value = unittest.mock.Mock(
+                returncode=1, stdout="", stderr="detail\nServer rejected the key\n")
+            code, message = m.verifier_assistant()
+        self.assertEqual(code, 1)
+        self.assertEqual(message, "Server rejected the key")
+
     def test_settings_action_available_and_terminal_restored_after_cancellation(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceWarning)  # lectures de matériel préexistantes dans nc-reglages

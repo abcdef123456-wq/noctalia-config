@@ -206,6 +206,11 @@ prises en charge (Arch et dérivées, Fedora/Nobara, Debian/Ubuntu, openSUSE). L
 et la clé de ton serveur, puis ouvre le chat avec **Super + Alt + A**. Aucun modèle ne tourne sur le PC.
 Il fonctionne aussi sans Quickshell ; l'île affiche son activité quand elle est disponible.
 
+Depuis un autre réseau que celui du serveur, une URL `192.168.x.x` ou `*.local` ne suffit pas : expose le gateway
+avec un tunnel HTTPS côté serveur (Cloudflare Tunnel, Tailscale ou Render), puis configure cette URL publique.
+`nc-assistant verifier` (ou **nc-reglages → Agents IA → Tester l'assistant distant**) diagnostique réseau, clé,
+certificat TLS et état du runner.
+
 Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 | Fichier | Pour |

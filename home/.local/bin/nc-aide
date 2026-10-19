@@ -61,7 +61,8 @@ A_TAPER = [
     ("nc-demander", "nc-demander \"comment voir la place libre\"", "Question rapide à une IA installée (Claude, opencode, Gemini, Qwen) ; "
                                     "dans le Spotlight : « ? ta question »."),
     ("nc-assistant", "nc-assistant configurer", "Assistant personnel distant : URL et clé du serveur, chat kitty "
-                                           "(Super + Alt + A), questions, briefing ; aucun modèle local."),
+                                           "(Super + Alt + A), questions, briefing ; nc-assistant verifier teste la connexion "
+                                           "(réseau, clé, TLS, runner) ; aucun modèle local."),
     ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
                                     "demandes, et lui écrire depuis l'île. Aussi opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, "
                                     "Antigravity : nc-claude installer IA (ou tout) ; nc-claude diag si rien ne s'affiche."),
@@ -118,7 +119,8 @@ NOMS_ANGLAIS = {
 # En anglais : (exemple, explication), par nom français
 ANGLAIS = {
     "nc-assistant": ("nc-assistant configurer", "Remote personal assistant: server URL and key, kitty chat "
-                     "(Super + Alt + A), questions, daily briefing; no local model."),
+                     "(Super + Alt + A), questions, daily briefing; nc-assistant verifier tests the connection "
+                     "(network, key, TLS, runner); no local model."),
     "nc-reglages": ("nc-settings", "Every setting, with the arrow keys: island, appearance, animations, power, keyboard, "
                                    "sleep, terminal, shortcuts… Kept across updates."),
     "nc-raccourci": ("nc-shortcut", "Your keyboard shortcuts: change keys, disable some, add new ones."),

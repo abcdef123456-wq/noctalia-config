@@ -35,6 +35,38 @@ Ni `nc-assistant etat`, ni `etat --local` n'affichent la clé. `etat --local` co
 Les redirections HTTP sont refusées pour éviter de transmettre la clé à une autre adresse : configurer l'URL finale.
 Pour accéder au serveur à travers Internet, utiliser son accès HTTPS ; le certificat est vérifié par Python.
 
+## Depuis un autre réseau (Wi-Fi différent, Internet)
+
+Une URL du type `http://192.168.1.28:8000` ou `http://mon-pi.local:8000` est
+une adresse **privée** : elle exige un accès au réseau du serveur, directement ou par VPN.
+Depuis un autre réseau sans ce routage, la bonne clé ne suffit pas. Il faut exposer le gateway (port `8000`) avec un tunnel côté serveur :
+
+- **Cloudflare Tunnel** : URL HTTPS publique, aucun port à ouvrir ;
+- **Tailscale** : URL HTTPS privée, visible seulement par tes appareils ;
+- **Render** : gateway hébergé, relié au runner par un tunnel.
+
+Le dépôt du serveur fournit `scripts/expose-gateway.sh` et le guide
+`docs/ACCES_DISTANT.md`. Une fois l'URL HTTPS obtenue sur le serveur :
+
+```bash
+nc-assistant configurer
+# URL     : https://assistant.tondomaine.fr
+# Clé     : la SECRET_KEY du serveur
+# USER_ID : ton identifiant
+nc-assistant verifier
+nc-assistant demander "Bonjour"
+```
+
+`nc-assistant verifier` teste `/api/status` et distingue : URL privée, clé
+refusée (401/403), route introuvable (404), certificat TLS invalide, DNS
+introuvable, connexion refusée, délai dépassé, runner hors ligne. Il affiche
+aussi la latence et l'URL publique annoncée par le serveur. Aucune clé n'est
+affichée.
+
+`nc-settings` → **Agents IA (coucou)** contient désormais deux entrées :
+« Configurer l'assistant distant » et « Tester l'assistant distant ».
+En ligne de commande : `nc-settings assistant verifier`.
+
 ## Utilisation
 
 | Accès | Comportement |
@@ -45,6 +77,7 @@ Pour accéder au serveur à travers Internet, utiliser son accès HTTPS ; le cer
 | `nc-assistant ouvrir` | Même fenêtre, depuis une commande |
 | `nc-assistant chat` | Chat dans le terminal courant ; `exit`, `Ctrl+C` ou fin d'entrée pour quitter |
 | `nc-assistant demander "question"` | Réponse en texte ; code de sortie non nul en cas d'échec |
+| `nc-assistant verifier` | Teste URL, clé, TLS et runner ; `--json` pour un script |
 | `nc-assistant briefing` | Texte du briefing et notification si disponible |
 | `nc-reglages set SPOTLIGHT_IA assistant` | Sélection explicite pour les questions `?` dans Spotlight Quickshell |
 | `nc-reglages set ASSISTANT_ILE non` | Désactive l'affichage de son activité dans Coucou |
