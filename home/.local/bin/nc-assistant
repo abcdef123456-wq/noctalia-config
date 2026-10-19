@@ -307,6 +307,27 @@ def ouvrir(question):
         raise Erreur(T("Kitty est nécessaire pour ouvrir le chat.", "Kitty is required to open the chat.")) from None
 
 
+def requete_ile():
+    # Une ligne JSON sur stdin : la question ne figure ni dans argv ni dans un fichier.
+    try:
+        ligne = sys.stdin.buffer.readline(65537)
+        if len(ligne) > 65536:
+            raise ValueError
+        r = json.loads(ligne)
+        if not isinstance(r, dict):
+            raise ValueError
+        sid, question = r.get("session_id"), r.get("question")
+        if (not isinstance(sid, str) or not re.fullmatch(r"[a-f0-9]{32}", sid)
+                or not isinstance(question, str) or not question.strip() or len(question) > 8000):
+            raise ValueError
+    except (ValueError, UnicodeError):
+        raise Erreur(T("Question invalide ou trop longue (8 000 caractères maximum).",
+                       "Invalid question or too long (8,000 characters maximum).")) from None
+    texte = demander(configuration(), sid, question)
+    # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète.
+    print(json.dumps(dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000), ensure_ascii=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=T(__doc__, DOC_EN), formatter_class=argparse.RawDescriptionHelpFormatter)
     sous = parser.add_subparsers(dest="commande")
@@ -317,6 +338,7 @@ def main():
         if nom == "demander":
             p.add_argument("--flux", action="store_true")
     sous.add_parser("briefing")
+    sous.add_parser("requete-ile", help=argparse.SUPPRESS)
     p = sous.add_parser("etat", aliases=["status"])
     p.add_argument("--local", action="store_true")
     a = parser.parse_args()
@@ -327,6 +349,8 @@ def main():
             configurer()
         elif commande == "ouvrir":
             ouvrir(a.question)
+        elif commande == "requete-ile":
+            requete_ile()
         else:
             if commande == "chat" and not CONF.exists() and sys.stdin.isatty():
                 configurer()
@@ -352,7 +376,9 @@ def main():
             return 1
         message = str(e) if isinstance(e, Erreur) else T("Erreur locale : vérifie les droits et l'espace disque.",
                                                                       "Local error: check permissions and disk space.")
-        if commande in ("etat", "status"):
+        if commande == "requete-ile":
+            print(json.dumps({"ok": False, "error": message}, ensure_ascii=False), flush=True)
+        elif commande in ("etat", "status"):
             print(json.dumps({"online": False, "error": message}, ensure_ascii=False))
         elif flux:
             print(json.dumps({"t": message}, ensure_ascii=False), flush=True)

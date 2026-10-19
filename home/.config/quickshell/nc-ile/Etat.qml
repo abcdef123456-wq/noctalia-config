@@ -33,7 +33,7 @@ Singleton {
         if (jeu) a.push("jeu")
         return a
     }
-    readonly property var vues: activites.concat(["centre", "notifications"],
+    readonly property var vues: activites.concat(["centre", "assistant", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
                                                  meteo.temp !== undefined ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"])

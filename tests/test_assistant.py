@@ -114,6 +114,40 @@ class Assistant(unittest.TestCase):
         self.assertEqual(self.m.CONF.read_bytes(), avant)
         self.assertFalse(list(self.m.CONF.parent.glob(".assistant-*")))
 
+    def test_island_stdin_preserves_text_and_reuses_activity_session(self):
+        sid = uuid.uuid4().hex
+        question = 'Multiligne\n"quotes" $(false) <b>texte</b>'
+        for _ in range(2):
+            r = self.cli("requete-ile", input=json.dumps(dict(session_id=sid, question=question)) + "\n")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), dict(ok=True, text="Bonjour\n$ echo ok", truncated=False))
+            self.assertEqual(self.server.recus[-1][3]["prompt"], question)
+            self.assertEqual(list(self.etat()["sessions"]), ["assistant-" + sid])
+
+    def test_island_rejects_bad_input_without_network_and_reports_errors_as_json(self):
+        for entree in ('[]', '{}', 'not json', json.dumps(dict(session_id="bad", question="hello")),
+                       json.dumps(dict(session_id="a" * 32, question="x" * 8001)), "x" * 65537):
+            r = self.cli("requete-ile", input=entree)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertFalse(json.loads(r.stdout)["ok"])
+        self.assertFalse(self.server.recus)
+        self.m.CONF.unlink()
+        r = self.cli("requete-ile", input=json.dumps(dict(session_id="a" * 32, question="hello")))
+        self.assertIn("configurer", json.loads(r.stdout)["error"])
+
+    def test_island_bounds_response_and_cleans_activity_on_failure(self):
+        self.server.reponse = (200, json.dumps(dict(output="x" * 16001)).encode())
+        entree = json.dumps(dict(session_id="a" * 32, question="hello"))
+        r = self.cli("requete-ile", input=entree)
+        self.assertEqual(len(json.loads(r.stdout)["text"]), 16000)
+        self.assertTrue(json.loads(r.stdout)["truncated"])
+        self.server.reponse = (403, b'private data')
+        r = self.cli("requete-ile", input=entree)
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(json.loads(r.stdout)["ok"])
+        self.assertNotIn("private data", r.stdout + r.stderr)
+        self.assertFalse(self.etat()["sessions"])
+
     def test_invalid_configuration_does_not_replace_key(self):
         avant = self.m.CONF.read_bytes()
         for champs in ({"URL": "ftp://example.test"}, {"URL": "https://user:password@example.test"},
@@ -330,6 +364,7 @@ assert(launched[3] == "a 'quote' and $(false)")
             root = Path(d)
             depot = root / "repo/home"
             fichiers = [".local/bin/nc-assistant", ".config/quickshell/nc-ile/LogoAssistant.qml",
+                        ".config/quickshell/nc-ile/Assistant.qml", ".config/quickshell/nc-ile/AssistantEtat.qml",
                         ".config/quickshell/nc-ile/assets/assistant-animation.png"]
             for rel in fichiers:
                 cible = depot / rel

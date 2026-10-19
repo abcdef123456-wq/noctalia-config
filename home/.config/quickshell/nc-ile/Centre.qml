@@ -27,12 +27,19 @@ Item {
             Texte { anchors.left: parent.left; anchors.leftMargin: 6; text: Etat.dateLongue; secondaire: true; font.weight: Font.DemiBold }
             Row {
                 anchors.right: parent.right; anchors.rightMargin: 6; spacing: 5
-                visible: Etat.aBatterie
-                Texte { text: Etat.pourcent + Reglages.t(" %", "%"); font.weight: Font.DemiBold }
+                Texte { visible: Etat.aBatterie; text: Etat.pourcent + Reglages.t(" %", "%"); font.weight: Font.DemiBold }
                 Ico {
+                    visible: Etat.aBatterie
                     nom: Etat.branche ? "battery_charging_full" : (Etat.pourcent > 80 ? "battery_full" : (Etat.pourcent > 30 ? "battery_5_bar" : "battery_2_bar"))
                     taille: 18; color: Etat.branche ? centre.vert : (Etat.pourcent <= 20 ? Couleurs.rouge : Couleurs.texte)
                     rotation: 90
+                }
+                Ico {
+                    nom: "chat"; taille: 20; color: Couleurs.accent
+                    MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller("assistant") }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: Reglages.t("Ouvrir l’assistant", "Open assistant")
+                    Accessible.onPressAction: Etat.aller("assistant")
                 }
             }
         }

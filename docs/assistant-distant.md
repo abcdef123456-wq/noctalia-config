@@ -39,6 +39,8 @@ Pour accéder au serveur à travers Internet, utiliser son accès HTTPS ; le cer
 
 | Accès | Comportement |
 |---|---|
+| Île : `Super + C`, puis bulle de conversation en haut à droite | Page Assistant avec saisie et réponses dans l’île |
+| Recherche Spotlight : `Assistant` | Ouvre cette même page ; également accessible parmi les points de navigation de l’île |
 | `Super + Alt + A`, ou application « Assistant distant » | Chat dans une fenêtre kitty flottante, centrée, avec les couleurs du terminal |
 | `nc-assistant ouvrir` | Même fenêtre, depuis une commande |
 | `nc-assistant chat` | Chat dans le terminal courant ; `exit`, `Ctrl+C` ou fin d'entrée pour quitter |
@@ -48,6 +50,14 @@ Pour accéder au serveur à travers Internet, utiliser son accès HTTPS ; le cer
 | `nc-reglages set ASSISTANT_ILE non` | Désactive l'affichage de son activité dans Coucou |
 
 Sans configuration, l'ouverture du chat dans un terminal interactif propose de la créer.
+La roue dentée de la page Assistant ouvre la même configuration sécurisée dans un terminal.
+La page conserve son brouillon, sa requête et ses échanges quand on ferme l’île ou change d’écran/page.
+Cet affichage reste en mémoire (24 messages, 48 000 caractères maximum), jusqu’au redémarrage de l’île.
+La corbeille efface uniquement l’affichage local : elle ne réinitialise pas le contexte distant.
+Les réponses sont sélectionnables et affichées en texte brut, avec une limite de 16 000 caractères par réponse.
+Une seule question part à la fois ; fermer la page ne l’annule pas. Aucune reconnexion ou répétition automatique.
+Le client interne `requete-ile` reçoit la question par une ligne JSON sur l’entrée standard, sans fichier temporaire
+ni question dans les arguments du processus. Le terminal reste disponible pour les réponses plus longues.
 Le mode automatique du Spotlight garde la priorité des IA existantes ; l'assistant arrive en dernier,
 seulement si son fichier de connexion existe. La sélection explicite affiche une erreur utile si la connexion manque.
 Le protocole `--flux` fournit des lignes JSON compatibles avec Spotlight ; la réponse arrive en une seule fois,

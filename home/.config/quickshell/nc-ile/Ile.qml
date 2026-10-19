@@ -51,7 +51,7 @@ PanelWindow {
         musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: Qt.size(400, 140),
         jeu: Qt.size(432, 250), centre: Qt.size(432, 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410),
-        claude: adaptee("claude", 180), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
+        claude: adaptee("claude", 180), assistant: Qt.size(432, 520), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160)
     })
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
@@ -301,7 +301,7 @@ PanelWindow {
                     active: pageIle.visible || pageIle.active
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
-                                        calendrier: pCalendrier, claude: pClaude, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
+                                        calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
                 }
             }
         }
@@ -317,6 +317,7 @@ PanelWindow {
         Component { id: pSysteme; Systeme {} }
         Component { id: pCalendrier; Calendrier {} }
         Component { id: pClaude; Claude {} }
+        Component { id: pAssistant; Assistant {} }
         Component { id: pMeteo; Meteo {} }
         Component { id: pPresse; Presse {} }
         Component { id: pFenetres; Fenetres {} }
