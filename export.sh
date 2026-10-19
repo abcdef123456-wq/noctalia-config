@@ -72,6 +72,7 @@ HOME_FILES=(
   .local/bin/nc-diag
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
+  .local/bin/nc-assistant
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-fenetre
@@ -110,6 +111,7 @@ HOME_FILES=(
   .local/bin/nvidia-run
   .local/bin/cmatrix
   .local/bin/unimatrix
+  .local/share/applications/nc-assistant.desktop
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
   .config/systemd/user/noctalia.service

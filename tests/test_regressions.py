@@ -255,9 +255,13 @@ class Export(unittest.TestCase):
             (root / 'home').mkdir(); sentinel = root / 'home/local'; sentinel.write_text('preserve')
             for rel in ['.config/hypr/nc/clavier.lua', '.config/noctalia/config.toml',
                         '.local/share/noctalia/plugins/nc-launcher/panel.luau', '.config/qt6ct/qt6ct.conf',
-                        '.local/bin/nc-qs-capture']:
+                        '.local/bin/nc-qs-capture', '.local/bin/nc-assistant',
+                        '.local/share/applications/nc-assistant.desktop']:
                 dst = source / rel; dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO / 'home' / rel, dst)
+            secret = source / '.config/nc/assistant.conf'
+            secret.parent.mkdir(parents=True, exist_ok=True)
+            secret.write_text('SECRET_KEY=must-not-be-exported')
             (source / 'bin').mkdir()
             hypr = source / 'bin/hyprctl'; hypr.write_text('#!/bin/sh\necho "[]"\n'); hypr.chmod(0o755)
             r = subprocess.run(['bash', str(root / 'export.sh'), '--preview'],
@@ -265,6 +269,8 @@ class Export(unittest.TestCase):
                                capture_output=True, text=True, timeout=15)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn('nc-qs-capture', r.stdout)
+            self.assertIn('nc-assistant', r.stdout)
+            self.assertNotIn('must-not-be-exported', r.stdout)
             self.assertEqual(sentinel.read_text(), 'preserve')
             self.assertFalse(list(root.glob('.nc-export.*')))
 

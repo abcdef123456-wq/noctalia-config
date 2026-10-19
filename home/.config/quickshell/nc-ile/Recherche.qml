@@ -474,7 +474,7 @@ Item {
             x: 14; y: 12; spacing: 8
             Etincelle {
                 anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: r.reflechit
-                agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen" })[r.nomIA] || "claude"
+                agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen", Assistant: "assistant" })[r.nomIA] || "claude"
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
                     text: zoneReponse.attend ? r.nomIA + Reglages.t(" réfléchit…", " is thinking…") : r.nomIA }

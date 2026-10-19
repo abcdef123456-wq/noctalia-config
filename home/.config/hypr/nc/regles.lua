@@ -1,5 +1,11 @@
 -- Règles de fenêtres, de bureaux et de surfaces (barre, panneaux).
 
+-- Chat de l'assistant distant : suit les couleurs et le flou de kitty.
+hl.window_rule({
+    name = "assistant-chat", match = { class = "^(nc-assistant-chat)$" },
+    float = true, center = true, size = { "monitor_w*0.52", "monitor_h*0.62" },
+})
+
 -- Les applis ne se maximisent pas toutes seules
 hl.window_rule({ name = "pas-de-maximisation", match = { class = ".*" }, suppress_event = "maximize" })
 -- Fenêtres sans nom ni classe (glisser-déposer XWayland, menus fantômes) : ne prennent pas le focus en apparaissant

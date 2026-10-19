@@ -540,6 +540,7 @@ def aller(term, shell=0):
 # dans leur terminal (l'île montre « t'attend » quand l'IA le signale).
 JOURNAL = os.path.join(RUN, "agents.log")
 NOMS = {"claude": "Claude", "antigravity": "Antigravity"}
+NOMS["assistant"] = T("Assistant personnel", "Personal assistant")
 CMD = ("bash", "run_command", "run_shell_command", "shell", "exec_command", "local_shell", "terminal", "run_terminal_cmd")
 MODIF = ("edit", "multiedit", "replace", "replace_file_content", "multi_replace_file_content", "apply_patch", "patch",
          "str_replace", "str_replace_editor", "edit_file", "search_replace")
@@ -646,7 +647,7 @@ def journal(agent, nom, detail=""):
         f.write("\n".join(l) + "\n")
 
 
-def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="", terminal_cwd=None):
+def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="", terminal_cwd=None, terminal=True):
     """Met à jour la session d'une IA. quoi : debut (nouvelle demande), etape (un outil), attente (t'attend dans son
     terminal), fini (a fini sa réponse), fin (session fermée)."""
     sid = f"{agent}-{sid or '?'}"
@@ -664,7 +665,9 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
             s["cwd"] = cwd.replace(HOME, "~")
         s["projet"] = os.path.basename(cwd.rstrip("/")) or s.get("projet") or NOMS.get(agent, agent)
         s["maj"] = time.time()
-        if terminal_cwd is not None and (not cwd or os.path.realpath(cwd) != os.path.realpath(terminal_cwd)):
+        if not terminal:
+            s.update(terminal=0, shell=0, classe="", ecrire=False)
+        elif terminal_cwd is not None and (not cwd or os.path.realpath(cwd) != os.path.realpath(terminal_cwd)):
             # Un serveur OpenCode peut suivre une session ouverte par un autre client : son terminal n'est pas celui-là.
             s.update(terminal=0, shell=0, classe="", ecrire=agent == "opencode" and bool(shutil.which("opencode")))
         else:
@@ -688,6 +691,18 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
             s["fin"] = time.time()
             if message:
                 s["message"] = court(message, 160)
+
+
+def hook_assistant(evenement):
+    """Client distant : écrit via le même verrou que les hooks, jamais directement dans etat.json."""
+    ev = lire_entree()
+    sid = ev.get("session_id", "")
+    if not re.fullmatch(r"[a-f0-9]{32}", str(sid)) or evenement not in ("debut", "fini", "fin"):
+        raise ValueError("Événement assistant invalide")
+    if reglage("ASSISTANT_ILE", "oui") == "non" and evenement != "fin":
+        return
+    # Une commande ponctuelle ne doit pas proposer d'envoyer du texte au shell après sa sortie.
+    suivre("assistant", sid, "", evenement, message=ev.get("message") or "", terminal=ev.get("chat") is True)
 
 
 def lire_entree():
@@ -1289,6 +1304,8 @@ def main():
             hook_agy(a[1] if len(a) > 1 else "")
         except Exception:                      # un hook ne doit jamais gêner Antigravity
             pass
+    elif a[0] == "assistant" and len(a) == 2:
+        hook_assistant(a[1])
     elif a[0] == "ia" and len(a) >= 3:
         try:
             hook_ia(a[1], a[2])

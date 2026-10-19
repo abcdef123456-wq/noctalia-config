@@ -1,0 +1,357 @@
+"""Contrat HTTP et intégration de l'assistant : serveur local, faux Hyprland, HOME temporaire."""
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import types
+import unittest
+from unittest.mock import patch
+import urllib.request
+import uuid
+
+REPO = Path(__file__).resolve().parents[1]
+BIN = REPO / "home/.local/bin"
+
+
+def charger(nom):
+    m = types.ModuleType(nom)
+    m.__file__ = str(BIN / nom)
+    exec(compile((BIN / nom).read_text(), m.__file__, "exec"), m.__dict__)
+    return m
+
+
+class Serveur(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        self.do_POST()
+
+    def do_POST(self):
+        corps = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.server.recus.append((self.path, self.command, self.headers.get("X-Secret-Key"), json.loads(corps) if corps else None))
+        if self.server.bloquer:
+            self.server.entree.set()
+            self.server.sortie.wait(8)
+        code, reponse = self.server.reponse
+        self.send_response(code)
+        if code == 302:
+            self.send_header("Location", "/secret-must-not-arrive-here")
+        self.end_headers()
+        try:
+            self.wfile.write(reponse)
+        except BrokenPipeError:
+            pass
+
+
+class Assistant(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.bin = self.root / ".local/bin"
+        self.bin.mkdir(parents=True)
+        self.run = self.root / "run"
+        self.run.mkdir(mode=0o700)
+        for nom in ("nc-assistant", "nc-claude", "nc-demander"):
+            shutil.copy2(BIN / nom, self.bin / nom)
+        hypr = self.bin / "hyprctl"
+        hypr.write_text('#!/bin/sh\nprintf "[]\\n"\n')
+        hypr.chmod(0o755)
+        self.env = dict(os.environ, HOME=str(self.root), XDG_RUNTIME_DIR=str(self.run), NC_LANGUE="en",
+                        PATH=str(self.bin) + ":/usr/bin:/bin")
+        for cle in ("NC_ILE_SANS", "NC_CLAUDE_SYNC"):
+            self.env.pop(cle, None)
+        self.patch = patch.dict(os.environ, self.env, clear=True)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.m = charger("nc-assistant")
+        self.m.CONF = self.root / ".config/nc/assistant.conf"
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
+        self.server.recus = []
+        self.server.reponse = (200, json.dumps({"success": True, "output": "Bonjour\n$ echo ok", "runner_alive": True}).encode())
+        self.server.bloquer = False
+        self.server.entree, self.server.sortie = threading.Event(), threading.Event()
+        thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        self.addCleanup(self.arreter)
+        self.c = dict(URL=f"http://127.0.0.1:{self.server.server_port}/gateway", SECRET_KEY="test-private-key",
+                      USER_ID="test-user", TIMEOUT="2")
+        self.m.sauvegarder(self.c)
+
+    def arreter(self):
+        self.server.sortie.set()
+        self.server.shutdown()
+        self.server.server_close()
+
+    def cli(self, *args, nom="nc-assistant", input=None):
+        return subprocess.run([sys.executable, str(self.bin / nom), *args], input=input, env=self.env,
+                              text=True, capture_output=True, timeout=10)
+
+    def etat(self):
+        return json.loads((self.run / "nc-claude/etat.json").read_text())
+
+    def settings(self, texte):
+        (self.m.CONF.parent / "reglages.conf").write_text(texte)
+
+    def test_configuration_private_atomic_and_roundtrip(self):
+        self.assertEqual(self.m.CONF.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.m.configuration()["SECRET_KEY"], self.c["SECRET_KEY"])
+        avant = self.m.CONF.read_bytes()
+        with patch.object(self.m.os, "replace", side_effect=OSError("disk error")):
+            with self.assertRaises(OSError):
+                self.m.sauvegarder(dict(self.c, SECRET_KEY="replacement"))
+        self.assertEqual(self.m.CONF.read_bytes(), avant)
+        self.assertFalse(list(self.m.CONF.parent.glob(".assistant-*")))
+
+    def test_invalid_configuration_does_not_replace_key(self):
+        avant = self.m.CONF.read_bytes()
+        for champs in ({"URL": "ftp://example.test"}, {"URL": "https://user:password@example.test"},
+                       {"URL": "https://example.test?token=private"}, {"URL": "http://example.test/\x00"},
+                       {"SECRET_KEY": "bad\nheader"},
+                       {"TIMEOUT": "NaN"}, {"TIMEOUT": "0"}, {"USER_ID": ""}):
+            with self.subTest(champs=champs), self.assertRaises(self.m.Erreur):
+                self.m.sauvegarder(dict(self.c, **champs))
+        self.assertEqual(self.m.CONF.read_bytes(), avant)
+
+    def test_no_network_for_local_status_and_no_key_in_output(self):
+        r = self.cli("etat", "--local")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"configured": True, "checked": False})
+        self.assertEqual(self.server.recus, [])
+        self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+        self.m.CONF.chmod(0o644)
+        self.assertNotEqual(self.cli("etat").returncode, 0)
+        self.assertEqual(self.server.recus, [])
+
+    def test_http_request_and_coucou_lifecycle_preserve_other_agents(self):
+        p = self.run / "nc-claude"
+        p.mkdir(mode=0o700)
+        initial = {"sessions": {"codex-existing": {"agent": "codex", "maj": time.time(), "etat": "travail"}},
+                   "demandes": {"permission": {"session": "codex-existing"}}}
+        (p / "etat.json").write_text(json.dumps(initial))
+        r = self.cli("demander", "test $(false) 'quotes'")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path, methode, cle, corps = self.server.recus[0]
+        self.assertEqual((path, methode, cle), ("/gateway/api/ask", "POST", self.c["SECRET_KEY"]))
+        self.assertEqual(corps, dict(prompt="test $(false) 'quotes'", platform="desktop", user_id="test-user", continue_session=True))
+        d = self.etat()
+        self.assertEqual(d["sessions"]["codex-existing"], initial["sessions"]["codex-existing"])
+        self.assertEqual(d["demandes"], initial["demandes"])
+        s = next(v for k, v in d["sessions"].items() if k.startswith("assistant-"))
+        self.assertEqual((s["agent"], s["etat"], s["terminal"], s["ecrire"]), ("assistant", "fini", 0, False))
+        self.assertNotIn(self.c["SECRET_KEY"], json.dumps(d))
+
+    def test_status_uses_get_and_reports_offline_runner(self):
+        self.assertEqual(self.cli("etat").returncode, 0)
+        self.assertEqual(self.server.recus[0][1], "GET")
+        self.server.reponse = (200, b'{"runner_alive":false}')
+        r = self.cli("etat")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse(json.loads(r.stdout)["online"])
+
+    def test_api_errors_and_redirect_do_not_leave_busy_state_or_leak_key(self):
+        for code, corps in [(403, b'private error'), (200, b'not JSON'), (200, b'[]'),
+                            (200, b'{"success":false,"error":"private error"}'), (200, b'{"output":""}'),
+                            (302, b'')]:
+            with self.subTest(code=code, corps=corps):
+                self.server.reponse = (code, corps)
+                r = self.cli("demander", "--flux", "test")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertTrue(json.loads(r.stdout)["t"])
+                self.assertNotIn("private error", r.stdout + r.stderr)
+                self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
+                self.assertFalse(self.etat()["sessions"])
+        self.assertFalse(any(x[0].endswith("secret-must-not-arrive-here") for x in self.server.recus))
+
+    def test_response_size_and_network_timeout(self):
+        self.m.MAX_RESPONSE = 16
+        with self.assertRaises(self.m.Erreur):
+            self.m.api(self.m.configuration(), "/api/status")
+        with patch.object(urllib.request.OpenerDirector, "open", side_effect=TimeoutError):
+            with self.assertRaises(self.m.Erreur) as e:
+                self.m.api(self.m.configuration(), "/api/status")
+        self.assertIn("in time", str(e.exception))
+
+    def test_conflicting_requests_are_refused_before_contacting_server(self):
+        self.server.bloquer = True
+        p = subprocess.Popen([sys.executable, str(self.bin / "nc-assistant"), "demander", "first"],
+                             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertTrue(self.server.entree.wait(5))
+            r = self.cli("demander", "second")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("already running", r.stderr)
+            self.assertEqual(len(self.server.recus), 1)
+        finally:
+            self.server.sortie.set()
+            out, err = p.communicate(timeout=10)
+        self.assertEqual(p.returncode, 0, out + err)
+
+    def test_chat_reuses_local_session_and_removes_it_on_exit(self):
+        r = self.cli("chat", input="first\nsecond\nexit\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.server.recus), 2)
+        self.assertFalse(self.etat()["sessions"])
+
+    def test_termination_cleans_activity(self):
+        self.server.bloquer = True
+        p = subprocess.Popen([sys.executable, str(self.bin / "nc-assistant"), "demander", "test"],
+                             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertTrue(self.server.entree.wait(5))
+            self.assertEqual(next(iter(self.etat()["sessions"].values()))["etat"], "travail")
+            p.terminate()
+            p.communicate(timeout=5)
+            self.assertEqual(p.returncode, 130)
+            self.assertFalse(self.etat()["sessions"])
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.communicate()
+            self.server.sortie.set()
+
+    def test_assistant_setting_and_independent_sessions_with_concurrent_agents(self):
+        self.settings("CLAUDE_ILE=non\nASSISTANT_ILE=oui\n")
+        def evenement(n):
+            ident = uuid.uuid4().hex
+            r = self.cli("assistant", "debut", nom="nc-claude", input=json.dumps(dict(session_id=ident, chat=False)))
+            self.assertEqual(r.returncode, 0, r.stderr)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(evenement, range(8)))
+        self.assertEqual(len(self.etat()["sessions"]), 8)
+        self.settings("ASSISTANT_ILE=non\n")
+        r = self.cli("demander", "test")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.etat()["sessions"]), 8)
+
+    def test_spotlight_selection_and_json_contract(self):
+        self.settings("SPOTLIGHT_IA=assistant\n")
+        self.assertEqual(self.cli("--ia", nom="nc-demander").stdout.strip(), "Assistant")
+        r = self.cli("--flux", "test", nom="nc-demander")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["t"], "Bonjour\n$ echo ok")
+        self.assertIn("Hyprland", self.server.recus[0][3]["prompt"])
+        self.m.CONF.unlink()
+        r = self.cli("--flux", "test", nom="nc-demander")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("configurer", json.loads(r.stdout)["t"])
+
+    def test_unconfigured_assistant_is_not_auto_selected(self):
+        m = charger("nc-demander")
+        m.HOME = str(self.root)
+        with patch.object(m.shutil, "which", return_value=None):
+            self.assertEqual(m.ia(), "assistant")
+            self.m.CONF.unlink()
+            self.assertEqual(m.ia(), "")
+
+    def test_briefing_and_notification_are_arguments_without_shell(self):
+        malveillant = '$(touch should-never-exist) " <b>text</b>'
+        self.server.reponse = (200, json.dumps({"output": malveillant}).encode())
+        outil = self.bin / "notify-send"
+        outil.write_text('#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ["HOME"],"notification.json").write_text(json.dumps(sys.argv[1:]))\n')
+        outil.chmod(0o755)
+        r = self.cli("briefing")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(malveillant, r.stdout)
+        self.assertEqual(self.server.recus[0][0], "/gateway/api/briefing")
+        self.assertEqual(self.server.recus[0][3], {"force_refresh": False})
+        args = json.loads((self.root / "notification.json").read_text())
+        self.assertIn("&lt;b&gt;text&lt;/b&gt;", args[-1])
+        self.assertFalse((self.root / "should-never-exist").exists())
+
+    def test_server_output_cannot_control_terminal(self):
+        self.assertEqual(self.m.texte_sortie({"output": "\x1b]52;c;dGVzdA==\x07\x1b[31mhello\x1b[0m\x07"}), "hello")
+
+    def test_kitty_launch_preserves_question_as_one_argument(self):
+        with patch.object(self.m.subprocess, "Popen") as p:
+            self.m.ouvrir(["quotes ' and $(false)"])
+        args = p.call_args.args[0]
+        self.assertEqual(args[-3:], ["chat", "--", "quotes ' and $(false)"])
+        self.assertFalse(p.call_args.kwargs.get("shell", False))
+
+    def test_runtime_failure_is_json_for_spotlight(self):
+        cible = self.run / "nc-assistant"
+        cible.symlink_to(self.root)
+        r = self.cli("demander", "--flux", "test")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("private", json.loads(r.stdout)["t"])
+        self.assertEqual(self.server.recus, [])
+
+
+class InstallationPortable(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("lua"), "Lua requis pour le lanceur de repli")
+    def test_fallback_launcher_keeps_question_during_async_app_refresh(self):
+        script = r'''
+local callbacks, launched, closed = {}, nil, false
+noctalia = {
+ getenv = function() return "en" end, expandPath = function(p) return p end,
+ readFile = function() return "" end, pluginDataDir = function() return nil end,
+ outputs = function() return {} end, focusedOutputName = function() return nil end,
+ fileExists = function() return true end,
+ string = { trim = function(s) return s:match("^%s*(.-)%s*$") end },
+ json = { decode = function() return {} end },
+ runAsync = function(args, callback)
+  if type(args) == "table" and args[2] == "ouvrir" then launched = args
+  elseif callback then table.insert(callbacks, callback) end
+ end,
+}
+panel = { close = function() closed = true end, setNeedsFrameTick = function() end }
+dofile(arg[1])
+render = function() end
+onOpen("? a 'quote' and $(false)")
+for _, f in ipairs(callbacks) do f({exitCode=0,stdout="[]"}) end
+onKey("Return", true)
+assert(closed and launched and #launched == 3)
+assert(launched[1] == "~/.local/bin/nc-assistant" and launched[2] == "ouvrir")
+assert(launched[3] == "a 'quote' and $(false)")
+'''
+        with tempfile.TemporaryDirectory() as d:
+            harness = Path(d) / "launcher.lua"
+            harness.write_text(script)
+            r = subprocess.run(["lua", str(harness), str(REPO / "home/.local/share/noctalia/plugins/nc-launcher/panel.luau")],
+                               text=True, capture_output=True, timeout=5)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_copy_pass_preserves_secret_and_installs_client_on_all_families(self):
+        script = (REPO / "install.sh").read_text()
+        copie = script[script.index('copied=0; same=0; hypr_changed=0'):script.index('ok "$(t "$copied fichier(s)')]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            depot = root / "repo/home"
+            (depot / ".local/bin").mkdir(parents=True)
+            shutil.copy2(BIN / "nc-assistant", depot / ".local/bin/nc-assistant")
+            (depot / ".config/nc").mkdir(parents=True)
+            (depot / ".config/nc/assistant.conf").write_text("SHOULD NOT REPLACE")
+            for famille in ("arch", "fedora", "debian", "suse", "other"):
+                with self.subTest(famille=famille):
+                    home = root / famille
+                    conf = home / ".config/nc/assistant.conf"
+                    conf.parent.mkdir(parents=True)
+                    conf.write_text("PERSONAL SECRET")
+                    conf.chmod(0o600)
+                    bk = root / (famille + "-backup")
+                    bk.mkdir()
+                    prelude = 'tmp="$HOME/tmp"\nbackup() { return 42; }\n'
+                    env = dict(os.environ, HOME=str(home), REPO=str(root / "repo"), BK=str(bk), FAMILY=famille)
+                    for cle in ("MON", "KBL", "KBO", "BROWSER", "LCX", "LCY1", "LCY2", "LCY3", "LCY4", "LCY5", "LCY6",
+                                "DISTRO_LOGO", "POLKIT", "QT_STYLE", "ICON_THEME", "ILE_CENTRE", "NOTIF_NOCTALIA",
+                                "NOTIF_WIDGET", "PLUGIN_ILE"):
+                        env[cle] = "test"
+                    for _ in range(2):
+                        r = subprocess.run(["bash", "-euc", prelude + copie], env=env, capture_output=True, text=True)
+                        self.assertEqual(r.returncode, 0, r.stderr)
+                        self.assertEqual(conf.read_text(), "PERSONAL SECRET")
+                        self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
+                        self.assertTrue(os.access(home / ".local/bin/nc-assistant", os.X_OK))
+
+
+if __name__ == "__main__":
+    unittest.main()

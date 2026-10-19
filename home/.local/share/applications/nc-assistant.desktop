@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Remote Assistant
+Name[fr]=Assistant distant
+Comment=Chat with your personal remote assistant
+Comment[fr]=Discuter avec ton assistant personnel distant
+Exec="@HOME@/.local/bin/nc-assistant" ouvrir
+Icon=dialog-information
+Terminal=false
+Categories=Network;

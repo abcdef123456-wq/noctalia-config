@@ -745,7 +745,8 @@ root="$REPO/home"
 while IFS= read -r -d '' src; do
   rel="${src#"$root/"}"
   dst="$HOME/$rel"
-  case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*) continue ;; esac   # étapes 3 (terminal) et 3b (Neovim)
+  # assistant.conf contient la clé privée : aucun modèle du dépôt ne doit remplacer ce fichier personnel.
+  case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*|.config/nc/assistant.conf) continue ;; esac   # étapes 3 et 3b
   if grep -Iq . "$src" 2>/dev/null; then
     sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
@@ -929,7 +930,7 @@ if [ ! -s "$KEY" ]; then
   fi
 fi
 
-[ "$MODE" = files ] && { say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; exit 0; }
+[ "$MODE" = files ] && { say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; info "$(t "Assistant distant facultatif : nc-assistant configurer (URL et clé du serveur)." "Optional remote assistant: nc-assistant configurer (server URL and key).")"; exit 0; }
 
 # ── 3. Terminal : zsh + oh-my-zsh + powerlevel10k ─────────────────────────────
 say "$(t "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)" "3. Terminal: zsh, oh-my-zsh, powerlevel10k (two-line prompt, suggestions, colors)")"
@@ -1193,6 +1194,20 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
 else
   warn "$(t "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés." "No active user session (installing from a login console or over SSH?): services not enabled.")"
   info "$(t "Dans ta session Hyprland, lance :" "In your Hyprland session, run:") systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
+fi
+
+# Assistant distant : mêmes fichiers et dépendances sur toutes les distributions, même sans Quickshell/systemd.
+# Pas de configuration automatique sans terminal, ni de remplacement d'une connexion existante lors de nc-maj.
+if [ -e "$HOME/.config/nc/assistant.conf" ]; then
+  ok "$(t "Configuration de l'assistant distant préservée." "Remote assistant configuration preserved.")"
+elif { true </dev/tty; } 2>/dev/null && ask "$(t "Connecter un assistant distant (serveur déjà installé) ?" "Connect a remote assistant (server already installed)?")" n; then
+  if "$HOME/.local/bin/nc-assistant" configurer </dev/tty; then
+    if ask "$(t "L'utiliser pour les questions du Spotlight ?" "Use it for Spotlight questions?")" n; then
+      "$HOME/.local/bin/nc-reglages" set SPOTLIGHT_IA assistant
+    fi
+  else
+    warn "$(t "Connexion non configurée ; tu pourras lancer nc-assistant configurer plus tard." "Connection not configured; run nc-assistant configurer later.")"
+  fi
 fi
 
 # ── 5. Étapes système (une question par étape) ───────────────────────────────

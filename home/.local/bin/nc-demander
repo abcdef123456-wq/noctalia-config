@@ -5,7 +5,7 @@
   nc-demander --flux "question"                     la réponse morceau par morceau, une ligne JSON {"t": …} chacun
                                                     (le Spotlight l'affiche pendant qu'elle s'écrit)
 Dans le Spotlight de l'île : « ? ta question » puis Entrée. IA : nc-reglages → Île → « IA du Spotlight »
-(SPOTLIGHT_IA : auto, claude, opencode, gemini, qwen, non) ; auto = la première installée dans cet ordre.
+(SPOTLIGHT_IA : auto, claude, opencode, gemini, qwen, assistant, non) ; auto = la première disponible dans cet ordre.
 """
 import json
 import os
@@ -50,7 +50,7 @@ DOC_EN = """nc-ask: asks an installed AI a quick question and shows its answer (
   nc-ask --flux "question"                the answer piece by piece, one JSON line {"t": …} each
                                           (Spotlight shows it while it is being written)
 In the island's Spotlight: “? your question” then Enter. AI: nc-settings → Island → “Spotlight AI”
-(SPOTLIGHT_IA: auto, claude, opencode, gemini, qwen, non); auto = the first one installed, in that order.
+(SPOTLIGHT_IA: auto, claude, opencode, gemini, qwen, assistant, non); auto = the first available in that order.
 """
 
 HOME = os.path.expanduser("~")
@@ -63,7 +63,14 @@ CONSIGNE = ("Réponds en français, en 2 à 6 lignes au plus, en texte simple (p
 CONSIGNE_EN = ("Answer in English, in 2 to 6 lines at most, in plain text (no headings or tables). "
                "If a Linux command answers the question, end with a single line that starts with “$ ” followed "
                "by the command, and nothing else. The computer runs {distrib} with Hyprland. Question: ")
-NOMS = {"claude": "Claude", "opencode": "OpenCode", "gemini": "Gemini", "qwen": "Qwen"}
+NOMS = {"claude": "Claude", "opencode": "OpenCode", "gemini": "Gemini", "qwen": "Qwen", "assistant": "Assistant"}
+
+
+def disponible(nom, automatique=False):
+    if nom == "assistant":
+        return (os.access(os.path.join(HOME, ".local/bin/nc-assistant"), os.X_OK)
+                and (not automatique or os.path.isfile(os.path.join(HOME, ".config/nc/assistant.conf"))))
+    return bool(shutil.which(nom))
 
 
 def reglage(cle, defaut):
@@ -82,8 +89,8 @@ def ia():
     if choix == "non":
         return ""
     if choix != "auto":
-        return choix if shutil.which(choix) else ""
-    return next((x for x in NOMS if shutil.which(x)), "")
+        return choix if choix in NOMS and disponible(choix) else ""
+    return next((x for x in NOMS if disponible(x, automatique=True)), "")
 
 
 def distrib():
@@ -136,6 +143,12 @@ def main():
                "No AI installed to answer (Claude Code, opencode, Gemini CLI or Qwen Code)."))
         return
     texte = T(CONSIGNE, CONSIGNE_EN).format(distrib=distrib()) + question
+    if qui == "assistant":
+        # Le client possède son délai réseau et le format JSON de Spotlight. exec permet aussi son arrêt à la fermeture.
+        cmd = [sys.executable, os.path.join(HOME, ".local/bin/nc-assistant"), "demander"]
+        if flux:
+            cmd.append("--flux")
+        os.execv(sys.executable, cmd + ["--", texte])
     # Claude démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort le
     # plus bas et pas de réflexion étendue (ton réglage de Claude Code, souvent « high », ne compte pas ici)
     vide = ["--effort", "low", "--strict-mcp-config", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]

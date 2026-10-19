@@ -201,6 +201,11 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 ## Personnaliser sans perdre tes réglages
 
+L'[assistant personnel distant](docs/assistant-distant.md) est facultatif et disponible sur toutes les distributions
+prises en charge (Arch et dérivées, Fedora/Nobara, Debian/Ubuntu, openSUSE). Lance `nc-assistant configurer` avec l'URL
+et la clé de ton serveur, puis ouvre le chat avec **Super + Alt + A**. Aucun modèle ne tourne sur le PC.
+Il fonctionne aussi sans Quickshell ; l'île affiche son activité quand elle est disponible.
+
 Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 | Fichier | Pour |
@@ -209,6 +214,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 | `~/.config/hypr/perso.lua` | règles de fenêtres, écrans, tout réglage Hyprland en plus (format Lua de Hyprland) |
 | `~/.zshrc.perso` | tes alias et variables du terminal |
 | `~/.config/kitty/perso.conf` | tes réglages de kitty |
+| `~/.config/nc/assistant.conf` | URL et clé de ton assistant distant (0600, jamais exporté) |
 
 ## Mettre à jour ton bureau
 

@@ -9,7 +9,7 @@ Canvas {
     property real taille: 18
     property bool tourne: false
     property string agent: "claude"
-    readonly property bool tournante: agent === "claude" || agent === "gemini"
+    readonly property bool tournante: agent === "claude" || agent === "gemini" || agent === "assistant"
     property color couleur: (Agents.ias[agent] || Agents.ias.claude).couleur
     width: taille; height: taille
     onCouleurChanged: requestPaint()
@@ -26,6 +26,11 @@ Canvas {
             if (ferme) c.closePath()
         }
         switch (agent) {
+        case "assistant":
+            c.beginPath(); c.moveTo(r, h * 0.05)
+            c.quadraticCurveTo(r, r, w * 0.95, r); c.quadraticCurveTo(r, r, r, h * 0.95)
+            c.quadraticCurveTo(r, r, w * 0.05, r); c.quadraticCurveTo(r, r, r, h * 0.05); c.fill()
+            break
         case "antigravity": {
             var g = c.createLinearGradient(0, 0, w, 0)
             g.addColorStop(0, k); g.addColorStop(0.5, "#a374f0"); g.addColorStop(1, "#f0736d")

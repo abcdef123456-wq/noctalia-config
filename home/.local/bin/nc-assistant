@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Client de l'assistant distant, sans dépendance Python externe.
+
+  nc-assistant configurer          URL et clé secrète (saisie masquée)
+  nc-assistant ouvrir [question]    ouvre le chat dans kitty
+  nc-assistant chat [question]      chat dans le terminal courant
+  nc-assistant demander "question"  une réponse ; --flux : lignes JSON pour Spotlight
+  nc-assistant briefing            briefing et notification
+  nc-assistant etat                état JSON ; --local : configuration seule, sans réseau
+
+Configuration personnelle : ~/.config/nc/assistant.conf (0600), jamais exportée.
+Le serveur est installé séparément. Aucune connexion ni scrutation en arrière-plan.
+"""
+import argparse
+import contextlib
+import fcntl
+import getpass
+import hashlib
+import html
+import http.client
+import json
+import math
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+CONF = Path.home() / ".config/nc/assistant.conf"
+MAX_RESPONSE = 2 * 1024 * 1024
+DOC_EN = """Remote assistant client (Python standard library only).
+  nc-assistant configurer          server URL and secret key (hidden input)
+  nc-assistant ouvrir [question]    open a kitty chat window
+  nc-assistant chat [question]      chat in the current terminal
+  nc-assistant demander "question"  print an answer; --flux: JSON lines for Spotlight
+  nc-assistant briefing            daily briefing and notification
+  nc-assistant etat                JSON status; --local: configuration only, no network
+Personal configuration: ~/.config/nc/assistant.conf (0600), never exported.
+The server is installed separately. No background polling or local model.
+"""
+
+
+def langue():
+    choix = os.environ.get("NC_LANGUE", "")
+    if choix not in ("fr", "en"):
+        try:
+            for ligne in (CONF.parent / "reglages.conf").read_text().splitlines():
+                if ligne.startswith("LANGUE="):
+                    choix = ligne.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if choix in ("fr", "en"):
+        return choix
+    loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG", "")
+    return "fr" if loc.startswith("fr") else "en"
+
+
+def T(fr, en):
+    return en if langue() == "en" else fr
+
+
+class Erreur(Exception):
+    pass
+
+
+def valider(c):
+    url = c.get("URL", "").strip().rstrip("/")
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = u.port
+        valide = (u.scheme in ("http", "https") and u.hostname and not u.username and not u.password
+                  and not u.query and not u.fragment and not any(ord(x) <= 32 or ord(x) == 127 for x in url)
+                  and (port is None or 0 < port < 65536))
+    except ValueError:
+        valide = False
+    if not valide:
+        raise Erreur(T("URL du serveur invalide (http:// ou https://).", "Invalid server URL (http:// or https://)."))
+    if not c.get("SECRET_KEY") or any(ord(x) < 32 or ord(x) > 126 for x in c["SECRET_KEY"]):
+        raise Erreur(T("Clé secrète absente ou invalide.", "Missing or invalid secret key."))
+    try:
+        timeout = float(c.get("TIMEOUT", "180"))
+        if not math.isfinite(timeout) or not 1 <= timeout <= 600:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise Erreur(T("TIMEOUT doit être compris entre 1 et 600 secondes.", "TIMEOUT must be between 1 and 600 seconds.")) from None
+    ident = c.get("USER_ID", "").strip()
+    if not ident or len(ident) > 200 or any(ord(x) < 32 for x in ident):
+        raise Erreur(T("USER_ID absent ou invalide.", "Missing or invalid USER_ID."))
+    return dict(URL=url, SECRET_KEY=c["SECRET_KEY"], USER_ID=ident, TIMEOUT=timeout)
+
+
+def configuration():
+    try:
+        if CONF.stat().st_mode & 0o077:
+            raise Erreur(T("Protège la configuration : chmod 600 ~/.config/nc/assistant.conf",
+                           "Protect the configuration: chmod 600 ~/.config/nc/assistant.conf"))
+        lignes = CONF.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        raise Erreur(T("Assistant non configuré : lance nc-assistant configurer.",
+                       "Assistant is not configured: run nc-assistant configurer.")) from None
+    except (OSError, UnicodeError):
+        raise Erreur(T("Configuration de l'assistant illisible.", "Cannot read the assistant configuration.")) from None
+    c = {"USER_ID": os.environ.get("USER") or getpass.getuser(), "TIMEOUT": "180"}
+    for ligne in lignes:
+        if "=" not in ligne or ligne.lstrip().startswith("#"):
+            continue
+        k, v = ligne.split("=", 1)
+        v = v.strip()
+        if v.startswith('"'):
+            try:
+                v = json.loads(v)
+            except ValueError:
+                raise Erreur(T("Configuration invalide : guillemets incorrects.", "Invalid configuration: malformed quotes.")) from None
+        if not isinstance(v, str):
+            raise Erreur(T("Configuration invalide.", "Invalid configuration."))
+        c[k.strip()] = v
+    return valider(c)
+
+
+def sauvegarder(c):
+    c = valider(c)
+    if CONF.is_symlink():
+        raise Erreur(T("La configuration est un lien symbolique ; modifie sa cible manuellement.",
+                       "The configuration is a symlink; edit its target manually."))
+    CONF.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    nom = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CONF.parent,
+                                         prefix=".assistant-", delete=False) as f:
+            nom = f.name
+            for k, v in c.items():
+                f.write(k + "=" + json.dumps(str(v), ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(nom, CONF)
+    finally:
+        if nom and os.path.exists(nom):
+            os.unlink(nom)
+
+
+def configurer():
+    if not sys.stdin.isatty():
+        raise Erreur(T("Lance nc-assistant configurer dans un terminal interactif.",
+                       "Run nc-assistant configurer in an interactive terminal."))
+    c = configuration() if CONF.exists() else {}
+    url = input(T("URL du serveur", "Server URL") + (f" [{c['URL']}]" if c else "") + " : ").strip()
+    cle = getpass.getpass(T("Clé secrète (vide : garder l'existante) : ",
+                           "Secret key (empty: keep existing key): "))
+    ident = c.get("USER_ID") or os.environ.get("USER") or getpass.getuser()
+    utilisateur = input(f"USER_ID [{ident}] : ").strip() or ident
+    sauvegarder(dict(URL=url or c.get("URL", ""), SECRET_KEY=cle or c.get("SECRET_KEY", ""),
+                     USER_ID=utilisateur, TIMEOUT=c.get("TIMEOUT", "180")))
+    print(T("Configuration enregistrée (0600).", "Configuration saved (0600)."))
+
+
+class SansRedirection(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Ne jamais transmettre X-Secret-Key à une cible de redirection.
+        return None
+
+
+def api(c, endpoint, payload=None):
+    corps = None if payload is None else json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(c["URL"] + endpoint, data=corps,
+                                 headers={"Content-Type": "application/json", "X-Secret-Key": c["SECRET_KEY"]},
+                                 method="GET" if payload is None else "POST")
+    try:
+        with urllib.request.build_opener(SansRedirection()).open(req, timeout=c["TIMEOUT"] if corps else 10) as r:
+            contenu = r.read(MAX_RESPONSE + 1)
+    except urllib.error.HTTPError as e:
+        if 300 <= e.code < 400:
+            raise Erreur(T("Redirection refusée : configure l'URL finale du serveur.",
+                           "Redirect refused: configure the server's final URL.")) from None
+        raise Erreur(T(f"Erreur HTTP {e.code} du serveur.", f"Server HTTP error {e.code}.")) from None
+    except (TimeoutError, socket.timeout):
+        raise Erreur(T("Le serveur n'a pas répondu à temps.", "The server did not respond in time.")) from None
+    except (urllib.error.URLError, OSError):
+        raise Erreur(T("Serveur inaccessible (réseau, adresse ou certificat).",
+                       "Server unreachable (network, address or certificate).")) from None
+    except (http.client.HTTPException, UnicodeError, ValueError):
+        raise Erreur(T("Réponse ou adresse HTTP invalide.", "Invalid HTTP response or address.")) from None
+    if len(contenu) > MAX_RESPONSE:
+        raise Erreur(T("Réponse du serveur trop volumineuse.", "Server response is too large."))
+    try:
+        resultat = json.loads(contenu)
+    except (ValueError, UnicodeError):
+        raise Erreur(T("Le serveur n'a pas renvoyé un JSON valide.", "The server did not return valid JSON.")) from None
+    if not isinstance(resultat, dict):
+        raise Erreur(T("Format de réponse inattendu.", "Unexpected response format."))
+    if resultat.get("success") is False or resultat.get("error"):
+        # Ne pas afficher le corps d'une erreur : il peut contenir des données privées du serveur.
+        raise Erreur(T("Le serveur a signalé un échec. Consulte ses journaux.",
+                       "The server reported a failure. Check its logs."))
+    return resultat
+
+
+def texte_sortie(resultat):
+    t = resultat.get("output")
+    if not isinstance(t, str) or not t.strip():
+        raise Erreur(T("Le serveur n'a renvoyé aucune réponse.", "The server returned no answer."))
+    # Réponses distantes affichées en texte : aucun contrôle du terminal (OSC, CSI, BEL…).
+    t = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", t)
+    t = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", t)
+    return "".join(x for x in t if x in "\n\t" or (ord(x) >= 32 and not 127 <= ord(x) <= 159))
+
+
+def runtime():
+    p = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/nc-{os.getuid()}") / "nc-assistant"
+    p.mkdir(parents=True, mode=0o700, exist_ok=True)
+    st = p.lstat()
+    if p.is_symlink() or st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise Erreur(T("Dossier temporaire de l'assistant non privé.", "Assistant runtime directory is not private."))
+    return p
+
+
+@contextlib.contextmanager
+def requete_unique(c):
+    # L'API donnée n'a qu'une conversation par platform/USER_ID. Pas de requêtes simultanées vers cette identité.
+    ident = hashlib.sha256((c["URL"] + "\0" + c["USER_ID"]).encode()).hexdigest()
+    fd = os.open(runtime() / (ident + ".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Erreur(T("Une requête est déjà en cours pour cet utilisateur. Réessaie après sa réponse.",
+                           "A request is already running for this user. Try again after its response.")) from None
+        yield
+
+
+def maj_ile(sid, evenement, chat=False, message=""):
+    commande = Path(__file__).resolve().with_name("nc-claude")
+    if not commande.is_file():
+        return
+    try:
+        r = subprocess.run([sys.executable, str(commande), "assistant", evenement],
+                           input=json.dumps(dict(session_id=sid, chat=chat, message=message)),
+                           text=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=5)
+        if r.returncode:
+            print(T("Suivi dans l'île indisponible ; la requête reste utilisable.",
+                    "Island tracking unavailable; the request remains usable."), file=sys.stderr)
+    except (OSError, subprocess.TimeoutExpired):
+        print(T("Suivi dans l'île indisponible.", "Island tracking unavailable."), file=sys.stderr)
+
+
+def demander(c, sid, question, chat=False, briefing=False):
+    if not briefing and not question.strip():
+        raise Erreur(T("La question est vide.", "The question is empty."))
+    with requete_unique(c):
+        maj_ile(sid, "debut", chat)
+        try:
+            if briefing:
+                r = api(c, "/api/briefing", {"force_refresh": False})
+            else:
+                r = api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"], continue_session=True))
+            texte = texte_sortie(r)
+        except BaseException:
+            maj_ile(sid, "fin", chat)
+            raise
+        maj_ile(sid, "fini", chat, T("Briefing prêt", "Briefing ready") if briefing else T("Réponse prête", "Answer ready"))
+        return texte
+
+
+def notifier(texte):
+    try:
+        # Ni shell, ni interprétation du balisage renvoyé par le serveur.
+        subprocess.run(["notify-send", "-a", "Assistant", "-i", "dialog-information", "--",
+                        T("Briefing du jour", "Daily briefing"), html.escape(texte[:240])],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # La réponse reste disponible dans le terminal même sans démon de notifications.
+
+
+def chat(c, question=""):
+    sid = uuid.uuid4().hex
+    print(T("Assistant distant — exit ou Ctrl+C pour quitter.", "Remote assistant — exit or Ctrl+C to quit."))
+    print(T("La connexion sera vérifiée à la première question.", "The connection will be checked on the first question."))
+    try:
+        while True:
+            q = question or input(T("Vous > ", "You > ")).strip()
+            question = ""
+            if q.lower() in ("exit", "quit", "q"):
+                break
+            if not q:
+                continue
+            print(T("Réflexion en cours…", "Thinking…"), flush=True)
+            try:
+                print("\n" + demander(c, sid, q, chat=True) + "\n", flush=True)
+            except Erreur as e:
+                print(str(e), file=sys.stderr)
+    finally:
+        maj_ile(sid, "fin", chat=True)
+
+
+def ouvrir(question):
+    try:
+        subprocess.Popen(["kitty", "--class", "nc-assistant-chat", "--title", T("Assistant personnel", "Personal assistant"),
+                          "-e", sys.executable, str(Path(__file__).resolve()), "chat", "--", *question],
+                         start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        raise Erreur(T("Kitty est nécessaire pour ouvrir le chat.", "Kitty is required to open the chat.")) from None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=T(__doc__, DOC_EN), formatter_class=argparse.RawDescriptionHelpFormatter)
+    sous = parser.add_subparsers(dest="commande")
+    sous.add_parser("configurer", aliases=["configure"])
+    for nom in ("ouvrir", "chat", "demander"):
+        p = sous.add_parser(nom)
+        p.add_argument("question", nargs="*")
+        if nom == "demander":
+            p.add_argument("--flux", action="store_true")
+    sous.add_parser("briefing")
+    p = sous.add_parser("etat", aliases=["status"])
+    p.add_argument("--local", action="store_true")
+    a = parser.parse_args()
+    commande = a.commande or "chat"
+    flux = getattr(a, "flux", False)
+    try:
+        if commande in ("configurer", "configure"):
+            configurer()
+        elif commande == "ouvrir":
+            ouvrir(a.question)
+        else:
+            if commande == "chat" and not CONF.exists() and sys.stdin.isatty():
+                configurer()
+            c = configuration()
+            if commande in ("etat", "status"):
+                if a.local:
+                    print(json.dumps({"configured": True, "checked": False}))
+                else:
+                    r = api(c, "/api/status")
+                    if r.get("online") is False or r.get("runner_alive") is False:
+                        raise Erreur(T("Le serveur ou son moteur est indisponible.", "The server or its runner is unavailable."))
+                    print(json.dumps({"online": True, "checked": True, "runner_alive": r.get("runner_alive")}))
+            elif commande == "chat":
+                chat(c, " ".join(getattr(a, "question", [])))
+            else:
+                t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing")
+                print(json.dumps({"t": t}, ensure_ascii=False) if flux else t, flush=True)
+                if commande == "briefing":
+                    notifier(t)
+        return 0
+    except (Erreur, OSError) as e:
+        if isinstance(e, BrokenPipeError):
+            return 1
+        message = str(e) if isinstance(e, Erreur) else T("Erreur locale : vérifie les droits et l'espace disque.",
+                                                                      "Local error: check permissions and disk space.")
+        if commande in ("etat", "status"):
+            print(json.dumps({"online": False, "error": message}, ensure_ascii=False))
+        elif flux:
+            print(json.dumps({"t": message}, ensure_ascii=False), flush=True)
+        else:
+            print(message, file=sys.stderr)
+        return 1
+    except (KeyboardInterrupt, EOFError):
+        return 130
+
+
+def interrompre(*_):
+    raise KeyboardInterrupt
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, interrompre)
+    sys.exit(main())

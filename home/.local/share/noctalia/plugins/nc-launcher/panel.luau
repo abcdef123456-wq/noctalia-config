@@ -194,6 +194,16 @@ local function search()
   files = {}
   appResults = {}
   if q == "" then results = {} return end
+  -- Sans Quickshell : la question s'ouvre dans le même chat kitty, sans dépendance au module de capture.
+  if q:sub(1, 1) == "?" then
+    local question = noctalia.string.trim(q:sub(2))
+    results = {{ key = "assistant", name = tr("Assistant distant", "Remote assistant"), glyph = "sparkles",
+      hint = tr("Ouvrir le chat dans kitty", "Open chat in kitty"), run = function()
+        noctalia.runAsync({ noctalia.expandPath("~/.local/bin/nc-assistant"), "ouvrir", question })
+        panel.close()
+      end }}
+    return
+  end
   local expr = mathExpr(q)
   if not expr then searchApps(q) end
   buildItems()
@@ -395,7 +405,7 @@ local function loadApps(after)
       for _, a in ipairs(apps) do byId[a.id] = a end
       computeFavorites()
       local q = noctalia.string.trim(query)
-      if q ~= "" and not mathExpr(q) then searchApps(q); buildItems() end
+      if q ~= "" and q:sub(1, 1) ~= "?" and not mathExpr(q) then searchApps(q); buildItems() end
     end
     if after then after() end
   end, 5000)

@@ -14,6 +14,7 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
+| `Super` + `Alt` + `A` | Assistant personnel distant (configuration au premier lancement) |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `W` | Choisir le fond d'écran |
