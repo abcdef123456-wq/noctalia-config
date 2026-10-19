@@ -4,7 +4,7 @@ Item {
     id: page
     property bool dansDashboard: false
     property bool animationsActives: true
-    property bool historiqueOuvert: dansDashboard
+    property bool historiqueOuvert: dansDashboard || AssistantEtat.messages.length > 0
     property bool ecouteVocale: false
     property string information: ""
     readonly property color cyan: Couleurs.accent
@@ -40,7 +40,15 @@ Item {
     }
     Component.onCompleted: bas()
     onDansDashboardChanged: if (dansDashboard) historiqueOuvert = true
-    Connections { target: AssistantEtat; function onMessagesChanged() { page.information = ""; page.ecouteVocale = false; page.bas() } }
+    Connections {
+        target: AssistantEtat
+        function onMessagesChanged() {
+            page.information = ""
+            page.ecouteVocale = false
+            if (AssistantEtat.messages.length > 0) page.historiqueOuvert = true
+            page.bas()
+        }
+    }
     onHistoriqueOuvertChanged: if (historiqueOuvert) bas()
 
     Item {
@@ -87,8 +95,10 @@ Item {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 7
                 AssistantCommande {
                     visible: !page.dansDashboard && (AssistantEtat.messages.length > 0 || page.historiqueOuvert)
-                    rond: true; width: 32; height: 32; icone: "forum"
-                    choisi: page.historiqueOuvert; aide: Reglages.t("Afficher la conversation", "Show conversation")
+                    rond: true; width: 32; height: 32
+                    icone: page.historiqueOuvert ? "smart_toy" : "forum"
+                    choisi: page.historiqueOuvert
+                    aide: page.historiqueOuvert ? Reglages.t("Afficher l'accueil JARVIS", "Show JARVIS home") : Reglages.t("Afficher la conversation", "Show conversation")
                     onClic: { if (AssistantEtat.reglagesOuverts) AssistantEtat.ouvrirReglages(); page.historiqueOuvert = !page.historiqueOuvert }
                 }
                 AssistantCommande {
@@ -133,7 +143,7 @@ Item {
         Item {
             id: accueil
             anchors.top: tete.bottom; anchors.topMargin: 10
-            anchors.bottom: page.dansDashboard ? statutDashboard.top : resume.top; anchors.bottomMargin: 8
+            anchors.bottom: page.dansDashboard ? statutDashboard.top : (page.historiqueOuvert ? saisie.top : resume.top); anchors.bottomMargin: 8
             width: parent.width; visible: !AssistantEtat.reglagesOuverts
 
             AssistantOrbe {
@@ -210,7 +220,7 @@ Item {
         Item {
             id: resume
             objectName: "nc-jarvis-status"
-            visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts
+            visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts && !page.historiqueOuvert
             anchors.bottom: modeles.top; anchors.bottomMargin: 10
             width: parent.width; height: 38
             readonly property string libelleStatut: AssistantEtat.enCours
@@ -257,7 +267,7 @@ Item {
         // Carte MODÈLE IA dans la Dynamic Island uniquement (reproduisant le design de l'image jointe avec les couleurs du terminal)
         Rectangle {
             id: modeles
-            visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts
+            visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts && !page.historiqueOuvert
             anchors.bottom: saisie.top; anchors.bottomMargin: 12
             width: parent.width; height: 128; radius: 18
             color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
@@ -395,7 +405,7 @@ Item {
                     color: Couleurs.texte
                     selectionColor: Couleurs.accent
                     font.family: "Adwaita Sans"; font.pixelSize: 13
-                    onAccepted: AssistantEtat.envoyer()
+                    onAccepted: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
                     Text {
                         anchors.fill: parent; visible: !entree.text
                         text: page.dansDashboard ? Reglages.t("Écris ta question…", "Ask a question…") : Reglages.t("Demander ou dicter à JARVIS...", "Ask or dictate to JARVIS...")
@@ -424,7 +434,7 @@ Item {
                 choisi: !AssistantEtat.enCours && AssistantEtat.brouillon.trim().length > 0
                 aide: AssistantEtat.enCours ? Reglages.t("Traitement en cours", "Request in progress") : Reglages.t("Envoyer", "Send")
                 enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours && AssistantEtat.brouillon.trim().length > 0
-                onClic: AssistantEtat.envoyer()
+                onClic: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
             }
         }
     }

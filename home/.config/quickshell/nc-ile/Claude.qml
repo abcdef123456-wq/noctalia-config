@@ -48,7 +48,6 @@ Item {
                     id: carte
                     required property var modelData
                     readonly property var s: modelData
-                    readonly property bool conversationIle: Agents.agent(s) === "assistant" && s.id === "assistant-" + AssistantEtat.session
                     readonly property bool enCours: s.etat === "travail" || s.etat === "demande" || s.etat === "terminal"
                     width: liste.width; height: col.implicitHeight + 24; radius: 18; color: Couleurs.carte
 
@@ -73,12 +72,12 @@ Item {
                             }
                             Rectangle {
                                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                visible: carte.conversationIle || (carte.s.terminal || 0) > 0
+                                visible: (carte.s.terminal || 0) > 0
                                 width: 30; height: 24; radius: 12; color: zt.containsMouse ? Couleurs.gris4 : Couleurs.gris2
-                                Ico { anchors.centerIn: parent; nom: carte.conversationIle ? "chat" : (/kitty|term|foot|alacritty|ghostty|konsole|wezterm|tilix|ptyxis/i.test(carte.s.classe || "kitty") ? "terminal" : "code"); taille: 15 }
+                                Ico { anchors.centerIn: parent; nom: /kitty|term|foot|alacritty|ghostty|konsole|wezterm|tilix|ptyxis/i.test(carte.s.classe || "kitty") ? "terminal" : "code"; taille: 15 }
                                 MouseArea { id: zt; anchors.fill: parent; hoverEnabled: true; onClicked: {
-                                    if (carte.conversationIle) Etat.aller("assistant")
-                                    else { Agents.allerTerminal(carte.s.terminal, carte.s.shell); Etat.fermer() }
+                                    Agents.allerTerminal(carte.s.terminal, carte.s.shell)
+                                    Etat.fermer()
                                 } }
                             }
                         }

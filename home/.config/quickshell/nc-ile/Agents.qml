@@ -23,13 +23,16 @@ Singleton {
         copilot: { nom: "Copilot", titre: "Copilot", couleur: "#a371f7", reglage: "COPILOT_ILE" },
         qwen: { nom: "Qwen", titre: "Qwen Code", couleur: "#7a6cf2", reglage: "QWEN_ILE" },
         kiro: { nom: "Kiro", titre: "Kiro", couleur: "#9b5cff", reglage: "KIRO_ILE" },
-        amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" },
-        assistant: { nom: "JARVIS", titre: "JARVIS", couleur: "#10b981", reglage: "ASSISTANT_ILE" }
+        amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" }
     })
     function agent(s) { return s && ias[s.agent] ? s.agent : "claude" }
-    function nom(s) { return ias[agent(s)].nom }
-    function couleurDe(s) { return ias[agent(s)].couleur }
-    function suivie(s) { return Reglages.val(ias[agent(s)].reglage, "oui") !== "non" }
+    function nom(s) { return ias[agent(s)] ? ias[agent(s)].nom : "Claude" }
+    function couleurDe(s) { return ias[agent(s)] ? ias[agent(s)].couleur : couleur }
+    function suivie(s) {
+        if (!s || s.agent === "assistant") return false
+        var k = agent(s)
+        return !!ias[k] && Reglages.val(ias[k].reglage, "oui") !== "non"
+    }
     property var donnees: ({ sessions: {}, demandes: {} })
 
     readonly property var sessions: {
