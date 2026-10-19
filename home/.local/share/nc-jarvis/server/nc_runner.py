@@ -7,6 +7,9 @@ from nc_engines import install, executable
 engines=install(upstream)
 app=upstream.app
 native_health=upstream.health
+for _route in list(app.routes):
+    if getattr(_route,'path',None) in ('/nc/engines','/nc/engine'):
+        app.routes.remove(_route)
 
 
 @app.get('/nc/engines')

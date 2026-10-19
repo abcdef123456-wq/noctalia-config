@@ -18,6 +18,14 @@ natif demande Quickshell. `nc-jarvis console` donne aussi accès aux lectures de
 Le code est commun aux distributions prises en charge ; les tests de copie couvrent leurs familles, pas des
 installations complètes sur des machines Fedora/Debian distinctes.
 
+La page de l’île reprend l’orbe noir de `pfp.mp4`, ses anneaux cyan et une carte de réglages au-dessus de la
+saisie. Le bouton de conversation en haut et le clic sur l’aperçu de réponse ouvrent l’historique complet,
+y compris le détail des erreurs. Le badge « Prêt » signifie que la saisie est disponible, pas qu’une connexion
+au serveur a été vérifiée. Pendant une demande, le bouton d’envoi indique l’attente ; il ne simule pas une
+annulation que l’API ne propose pas. Les commandes vocales indiquent explicitement qu’elles ne sont pas
+configurées : la dictée et la lecture vocale des bots mobiles ne constituent pas une intégration micro du bureau.
+L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, ainsi qu’en mode sans effets.
+
 ## Architecture et contrat vérifié
 
 Référence examinée : [JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/tree/8867dd093c43a5e5d3f0a13d3e14600e57edc96a),
@@ -130,6 +138,10 @@ dans l’interface restent prioritaires aux redémarrages.
 Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et niveau de réflexion**, sans terminal.
 **Actualiser** lit les capacités du runner ; **Appliquer** change la session partagée, y compris pour Telegram
 et Discord. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
+La carte affiche au plus quatre modèles réellement annoncés par le runner, ou les quatre moteurs si aucun
+catalogue n’a été reçu. Un clic prépare le choix dans les réglages ; seule l’action **Appliquer** l’enregistre.
+Fermer les réglages abandonne les choix non appliqués. Les autres modèles et la saisie d’un identifiant restent
+accessibles dans les réglages, sans imposer les noms de modèles des captures de référence.
 Les deux adaptateurs doivent être présents : `nc_gateway:app` côté gateway, `nc_runner:app` côté runner.
 Une API d’origine reste utilisable pour le chat ; elle n’annonce pas ces nouveaux réglages.
 

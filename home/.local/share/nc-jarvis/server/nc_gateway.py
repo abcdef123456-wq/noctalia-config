@@ -4,6 +4,9 @@ from fastapi import Depends, HTTPException, Request
 from nc_management import dispatch
 
 app = upstream.app
+for _route in list(app.routes):
+    if getattr(_route, 'path', None) == '/api/nc/manage':
+        app.routes.remove(_route)
 
 
 @app.post('/api/nc/manage', dependencies=[Depends(upstream.require_secret)])

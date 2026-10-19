@@ -13,6 +13,7 @@ AnimatedSprite {
     frameCount: 161
     frameRate: 100 / 3
     interpolate: false
+    smooth: true
     running: anime && visible
     onRunningChanged: if (!running) currentFrame = 0
 }

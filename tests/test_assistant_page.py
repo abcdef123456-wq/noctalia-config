@@ -19,10 +19,10 @@ class PageAssistant(unittest.TestCase):
             (root / "run").mkdir(mode=0o700)
             (root / "assets").mkdir()
             noms = ["Assistant.qml", "AssistantEtat.qml", "Defilement.qml", "Texte.qml", "Ico.qml",
-                    "Etincelle.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml"]
+                    "Etincelle.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml"]
             for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:
                 shutil.copy2(QML / nom, root / nom)
-            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
+            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous"; function t(fr,en){return en} function val(k,d){return k==="EFFETS"?effets:d}}')
             (root / "Agents.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
             (root / "qmldir").write_text("\n".join(
                 ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml") else "")
@@ -61,8 +61,9 @@ ShellRoot {
  property int etape:0
  property var page:null
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function creer(){var c=Qt.createComponent("Assistant.qml");verifier(c.status===Component.Ready,c.errorString());page=c.createObject(w.contentItem,{width:400,height:488});verifier(page!==null,"page absente")}
- Window {id:w;visible:true;width:432;height:520}
+ Window {id:w;visible:true;width:432;height:520;color:"#151f2b"}
  Timer {interval:80;running:true;repeat:true;onTriggered:{
 ''' + scenario + '''
  }}
@@ -76,6 +77,8 @@ ShellRoot {
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertNotIn("ReferenceError", r.stdout + r.stderr)
             self.assertNotIn("TypeError", r.stdout + r.stderr)
+            self.assertNotIn("Binding loop", r.stdout + r.stderr)
+            self.assertNotIn("Cannot assign", r.stdout + r.stderr)
             recus = root / ("reglages-recus" if lectureReglages else "recus")
             return [json.loads(l) for l in recus.read_text().splitlines()] if recus.exists() else []
 
@@ -122,3 +125,54 @@ else if(etape===3){page.visible=false;verifier(!page.visible,"page visible");Qt.
         self.assertTrue(writes[0]['confirmed'])
         self.assertEqual(writes[0]['params'],dict(engine='codex',model='requested-model',effort='xhigh'))
         self.assertEqual(len(recus),3)
+
+    def test_orb_layout_lifecycle_and_complete_error_in_history(self):
+        self.executer('''
+if(etape===0){creer();etape++}
+else if(etape===1){
+ var logo=trouver(page,"nc-jarvis-hero"),orbe=trouver(page,"nc-jarvis-visual"),statut=trouver(page,"nc-jarvis-status")
+ verifier(logo&&logo.running,"emblème arrêté sur page visible")
+ verifier(orbe.width>140,"orbe écrasé à 400×488")
+ verifier(orbe.mapToItem(page,0,orbe.height).y<=statut.mapToItem(page,0,0).y,"orbe superposé au statut")
+ page.historiqueOuvert=true;verifier(!logo.running,"animation cachée par l’historique")
+ page.historiqueOuvert=false;page.animationsActives=false;verifier(!logo.running,"effets désactivés ignorés")
+ page.animationsActives=true;Reglages.effets="aucun";verifier(!logo.running,"préférence sans effets ignorée")
+ Reglages.effets="tous";page.visible=false;verifier(!logo.running,"animation de page masquée")
+ page.visible=true;page.width=434;page.height=588;AssistantEtat.erreur="Erreur très longue ".repeat(40);page.historiqueOuvert=true;etape++
+} else if(etape===2){
+ var longs=[];function chercher(i){if(i.text===AssistantEtat.erreur&&i.readOnly===true)longs.push(i);for(var j=0;j<i.children.length;j++)chercher(i.children[j])}chercher(page)
+ verifier(longs.length===1&&longs[0].height>46,"erreur complète inaccessible dans l’historique")
+ verifier(!trouver(page,"nc-jarvis-hero").running,"animation cachée encore active")
+ Qt.quit()
+}
+''')
+
+    def test_closing_settings_discards_unapplied_selection_without_server_write(self):
+        recus=self.executer('''
+if(etape===0){creer();AssistantEtat.ouvrirReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){
+ verifier(!AssistantEtat.reglagesModifies,"session confirmée marquée en attente")
+ AssistantEtat.effort="xhigh";verifier(AssistantEtat.reglagesModifies,"choix non appliqué affiché comme actif")
+ AssistantEtat.ouvrirReglages();verifier(AssistantEtat.effort==="high"&&!AssistantEtat.reglagesModifies,"choix annulé encore actif")
+ verifier(!AssistantEtat.reglagesOuverts,"réglages restés ouverts");Qt.quit()
+}
+''',lectureReglages=True)
+        self.assertEqual([r['op'] for r in recus],['quick-settings'])
+
+    def test_markdown_latex_and_island_only_visual(self):
+        self.executer('''
+if(etape===0){
+ creer()
+ var f=AssistantEtat.formater("Voici **gras**, `code $x^2$` et $\\\\frac{a+b}{2} + \\\\alpha_0^2 \\\\leq \\\\sqrt{x}$\\n$$\\\\int_0^\\\\infty e^{-x} dx = 1$$")
+ verifier(f.indexOf("**gras**")>=0,"markdown gras perdu")
+ verifier(f.indexOf("`code $x^2$`")>=0,"code en ligne altéré")
+ verifier(f.indexOf("(a+b)/2 + α₀² ≤ √x")>=0,"latex en ligne non converti: "+f)
+ verifier(f.indexOf("∫₀^(∞) e⁻ˣ dx = 1")>=0||f.indexOf("∫₀")>=0,"latex bloc non converti: "+f)
+ var orbe=trouver(page,"nc-jarvis-visual")
+ verifier(orbe&&orbe.visible,"orbe invisible dans la Dynamic Island")
+ page.dansDashboard=true
+ verifier(!orbe.visible,"orbe visible dans le dashboard plein écran")
+ Qt.quit()
+}
+''')
+

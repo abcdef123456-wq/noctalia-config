@@ -36,6 +36,10 @@ class Deploiement(unittest.TestCase):
             self.assertNotIn('0.0.0.0',value)
             self.assertNotIn('User=',value)
             self.assertIn('backend%%test',value)
+            self.assertIn('WorkingDirectory=/tmp/my backend%%test/',value)
+            self.assertIn('EnvironmentFile=/tmp/my backend%%test/',value)
+            self.assertNotIn('WorkingDirectory="',value)
+            self.assertNotIn('EnvironmentFile="',value)
         self.assertIn('nc_gateway:app',units['assistant-gateway.service'])
         self.assertIn('home-runner',units['assistant-runner.service'])
 

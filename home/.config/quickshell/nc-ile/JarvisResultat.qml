@@ -25,8 +25,8 @@ Column {
     Rectangle {
         visible:r.message!==""; width:parent.width; height:visible?texte.implicitHeight+32:0
         radius:18; color:Couleurs.carte
-        TextEdit { id:texte; x:16;y:16;width:parent.width-32;height:contentHeight;text:r.message
-                   color:Couleurs.texte; font.family:"Adwaita Sans";font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.PlainText }
+        TextEdit { id:texte; x:16;y:16;width:parent.width-32;height:contentHeight;text:AssistantEtat.formater(r.message)
+                   color:Couleurs.texte; font.family:"Adwaita Sans";font.pixelSize:14;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;textFormat:TextEdit.MarkdownText }
     }
     Repeater {
         model:r.lignes
@@ -38,11 +38,11 @@ Column {
             width:r.width; height:col.implicitHeight+28; radius:16; color:Couleurs.carte
             Column {
                 id:col;x:14;y:14;width:parent.width-28;spacing:8
-                Texte { width:parent.width;text:String(carte.item.name||carte.item.title||carte.item.prompt||carte.item.role||carte.item.text||carte.item.message||carte.item.unit||carte.item.id||"—");textFormat:Text.PlainText;wrapMode:Text.Wrap;elide:Text.ElideNone;font.weight:Font.DemiBold;font.pixelSize:14 }
+                Texte { width:parent.width;text:AssistantEtat.formater(String(carte.item.name||carte.item.title||carte.item.prompt||carte.item.role||carte.item.text||carte.item.message||carte.item.unit||carte.item.id||"—"));textFormat:Text.MarkdownText;wrapMode:Text.Wrap;elide:Text.ElideNone;font.weight:Font.DemiBold;font.pixelSize:14 }
                 Texte {
-                    width:parent.width;secondaire:true;textFormat:Text.PlainText;wrapMode:Text.Wrap;elide:Text.ElideNone
-                    text:carte.kind==="history"||carte.kind==="messages"?String(carte.item.response||carte.item.content||""):
-                         carte.kind==="value"||carte.kind==="profile"?String(carte.item.text||""):
+                    width:parent.width;secondaire:true;textFormat:Text.MarkdownText;wrapMode:Text.Wrap;elide:Text.ElideNone
+                    text:carte.kind==="history"||carte.kind==="messages"?AssistantEtat.formater(String(carte.item.response||carte.item.content||"")):
+                         carte.kind==="value"||carte.kind==="profile"?AssistantEtat.formater(String(carte.item.text||"")):
                          [carte.item.id!==undefined?"ID : "+carte.item.id:"",carte.item.desc||"",carte.item.platform||"",carte.item.remind_at||"",carte.item.state||"",carte.item.model||""].filter(x=>x!=="").join(" · ")
                     visible:text!==""
                 }

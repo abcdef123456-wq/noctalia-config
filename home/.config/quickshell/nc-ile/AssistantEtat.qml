@@ -32,6 +32,9 @@ Singleton {
     property string moteur: ""
     property string modele: ""
     property string effort: ""
+    // Valeurs confirmées par le serveur, distinctes des choix en attente d'« Appliquer ».
+    property var sessionReglages: ({engine:"", model:"", effort:""})
+    readonly property bool reglagesModifies: moteur !== sessionReglages.engine || modele !== sessionReglages.model || effort !== sessionReglages.effort
     property string erreurReglages: ""
     property string operationReglages: ""
     property var parametresReglages: ({})
@@ -47,6 +50,9 @@ Singleton {
     function ouvrirReglages() {
         reglagesOuverts = !reglagesOuverts
         if (reglagesOuverts) lireReglages()
+        else if (!reglagesEnCours) {
+            moteur = sessionReglages.engine; modele = sessionReglages.model; effort = sessionReglages.effort
+        }
     }
     function choisirMoteur(id) { moteur = id; modele = ""; effort = "" }
     function lireReglages() { lancerReglages("quick-settings", {}) }
@@ -71,6 +77,7 @@ Singleton {
             if (reglagesDisponibles) {
                 moteurs = r.data.engines; moteur = r.data.session.engine || "agy"
                 modele = r.data.session.model || ""; effort = r.data.session.effort || ""
+                sessionReglages = {engine:moteur, model:modele, effort:effort}
             } else ok = false
         }
         if (!ok) {
@@ -81,6 +88,151 @@ Singleton {
         var actualiser = ok && operationReglages === "session.update"
         sortieReglages = ""; parametresReglages = {}; reglagesEnCours = false
         if (actualiser) lireReglages()
+    }
+
+    readonly property var tableExposants: ({
+        "0":"⁰","1":"¹","2":"²","3":"³","4":"⁴","5":"⁵","6":"⁶","7":"⁷","8":"⁸","9":"⁹",
+        "+":"⁺","-":"⁻","−":"⁻","=":"⁼","(":"⁽",")":"⁾","n":"ⁿ","i":"ⁱ",
+        "a":"ᵃ","b":"ᵇ","c":"ᶜ","d":"ᵈ","e":"ᵉ","f":"ᶠ","g":"ᵍ","h":"ʰ","j":"ʲ","k":"ᵏ","l":"ˡ","m":"ᵐ",
+        "o":"ᵒ","p":"ᵖ","r":"ʳ","s":"ˢ","t":"ᵗ","u":"ᵘ","v":"ᵛ","w":"ʷ","x":"ˣ","y":"ʸ","z":"ᶻ",
+        "A":"ᴬ","B":"ᴮ","D":"ᴰ","E":"ᴱ","G":"ᴳ","H":"ᴴ","I":"ᴵ","J":"ᴶ","K":"ᴷ","L":"ᴸ","M":"ᴹ","N":"ᴺ","O":"ᴼ","P":"ᴾ","R":"ᴿ","T":"ᵀ","U":"ᵁ","V":"ⱽ","W":"ᵂ"
+    })
+    readonly property var tableIndices: ({
+        "0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉",
+        "+":"₊","-":"₋","−":"₋","=":"₌","(":"₍",")":"₎",
+        "a":"ₐ","e":"ₑ","h":"ₕ","i":"ᵢ","j":"ⱼ","k":"ₖ","l":"ₗ","m":"ₘ","n":"ₙ","o":"ₒ","p":"ₚ","r":"ᵣ","s":"ₛ","t":"ₜ","u":"ᵤ","v":"ᵥ","x":"ₓ",
+        "β":"ᵦ","γ":"ᵧ","ρ":"ᵨ","φ":"ᵩ","χ":"ᵪ"
+    })
+    readonly property var symbolesLatex: ({
+        "alpha":"α","beta":"β","gamma":"γ","delta":"δ","epsilon":"ε","varepsilon":"ε","zeta":"ζ","eta":"η",
+        "theta":"θ","vartheta":"θ","iota":"ι","kappa":"κ","lambda":"λ","mu":"μ","nu":"ν","xi":"ξ",
+        "pi":"π","varpi":"π","rho":"ρ","varrho":"ρ","sigma":"σ","varsigma":"ς","tau":"τ","upsilon":"υ",
+        "phi":"φ","varphi":"φ","chi":"χ","psi":"ψ","omega":"ω",
+        "Gamma":"Γ","Delta":"Δ","Theta":"Θ","Lambda":"Λ","Xi":"Ξ","Pi":"Π","Sigma":"Σ","Upsilon":"Υ","Phi":"Φ","Psi":"Ψ","Omega":"Ω",
+        "infty":"∞","partial":"∂","nabla":"∇","forall":"∀","exists":"∃","nexists":"∄","emptyset":"∅","varnothing":"∅",
+        "in":"∈","notin":"∉","ni":"∋","subset":"⊂","subseteq":"⊆","supset":"⊃","supseteq":"⊇","cup":"∪","cap":"∩","setminus":"∖",
+        "pm":"±","mp":"∓","times":"×","cdot":"·","div":"÷","ast":"∗","star":"⋆","circ":"∘","bullet":"∙",
+        "leq":"≤","le":"≤","geq":"≥","ge":"≥","neq":"≠","ne":"≠","approx":"≈","equiv":"≡","sim":"∼","simeq":"≃","cong":"≅","propto":"∝",
+        "to":"→","rightarrow":"→","leftarrow":"←","leftrightarrow":"↔","Rightarrow":"⇒","implies":"⇒","Leftarrow":"⇐","Leftrightarrow":"⇔","iff":"⇔","mapsto":"↦","uparrow":"↑","downarrow":"↓",
+        "sum":"∑","prod":"∏","coprod":"∐","int":"∫","iint":"∬","iiint":"∭","oint":"∮",
+        "land":"∧","wedge":"∧","lor":"∨","vee":"∨","neg":"¬","lnot":"¬","oplus":"⊕","otimes":"⊗",
+        "perp":"⊥","parallel":"∥","angle":"∠","degree":"°","prime":"′","ell":"ℓ","hbar":"ℏ","aleph":"ℵ",
+        "dots":"…","ldots":"…","cdots":"⋯","vdots":"⋮","ddots":"⋱",
+        "langle":"⟨","rangle":"⟩","lceil":"⌈","rceil":"⌉","lfloor":"⌊","rfloor":"⌋",
+        "quad":"  ","qquad":"    "
+    })
+    readonly property var ensemblesLatex: ({"R":"ℝ","N":"ℕ","Z":"ℤ","Q":"ℚ","C":"ℂ","F":"𝔽","E":"𝔼","P":"ℙ","H":"ℍ","K":"𝕂"})
+    readonly property var calligraphieLatex: ({"L":"ℒ","O":"𝒪","H":"ℋ","F":"ℱ","N":"𝒩","P":"𝒫","M":"ℳ","E":"ℰ","B":"ℬ","R":"ℛ","I":"ℐ"})
+    readonly property var fractionsUnicode: ({"1/2":"½","1/3":"⅓","2/3":"⅔","1/4":"¼","3/4":"¾","1/5":"⅕","2/5":"⅖","3/5":"⅗","4/5":"⅘","1/6":"⅙","5/6":"⅚","1/8":"⅛","3/8":"⅜","5/8":"⅝","7/8":"⅞"})
+
+    function convertirScript(s, table, prefixe) {
+        var propre = String(s || "").trim()
+        if (!propre) return ""
+        var out = ""
+        for (var i = 0; i < propre.length; i++) {
+            var ch = propre[i]
+            if (ch === " ") continue
+            var m = table[ch]
+            if (!m) return prefixe + "(" + propre + ")"
+            out += m
+        }
+        return out
+    }
+    function parentheserTerme(s) {
+        var t = String(s || "").trim()
+        return /^[a-zA-Z0-9α-ωΑ-Ωℝℕℤℚℂ∞π⁰-⁹₀-₉]+$/.test(t) ? t : "(" + t + ")"
+    }
+    function formaterCommandesLatex(s) {
+        var t = String(s || "")
+        t = t.replace(/\\(?:left|right|[bB]ig{1,2}|displaystyle|textstyle|scriptstyle|limits|nolimits)(?![a-zA-Z])\s*/g, "")
+        t = t.replace(/\\mathbb\{([A-Z])\}/g, (_, l) => a.ensemblesLatex[l] || l)
+        t = t.replace(/\\mathcal\{([A-Z])\}/g, (_, l) => a.calligraphieLatex[l] || l)
+        t = t.replace(/\\(?:text|textrm|mathrm|operatorname|mathit|textit|textbf|mathbf)\{([^{}]*)\}/g, "$1")
+        t = t.replace(/\\vec\{([^{}]*)\}/g, "$1⃗")
+        t = t.replace(/\\hat\{([^{}]*)\}/g, "$1̂")
+        t = t.replace(/\\(?:bar|overline)\{([^{}]*)\}/g, "$1̄")
+        t = t.replace(/\\tilde\{([^{}]*)\}/g, "$1̃")
+        t = t.replace(/\\ddot\{([^{}]*)\}/g, "$1̈")
+        t = t.replace(/\\dot\{([^{}]*)\}/g, "$1̇")
+        for (var n = 0; n < 4; n++) {
+            t = t.replace(/\\sqrt\[([^{}\]]+)\]\{([^{}]*)\}/g, (_, deg, rad) => a.convertirScript(a.formaterCommandesLatex(deg), a.tableExposants, "^") + "√" + a.parentheserTerme(a.formaterCommandesLatex(rad)))
+            t = t.replace(/\\sqrt\{([^{}]*)\}/g, (_, rad) => "√" + a.parentheserTerme(a.formaterCommandesLatex(rad)))
+            t = t.replace(/\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, num, den) => {
+                var u = a.formaterCommandesLatex(num).trim(), d = a.formaterCommandesLatex(den).trim()
+                if (a.fractionsUnicode[u + "/" + d]) return a.fractionsUnicode[u + "/" + d]
+                return a.parentheserTerme(u) + "/" + a.parentheserTerme(d)
+            })
+            t = t.replace(/\\binom\{([^{}]*)\}\{([^{}]*)\}/g, (_, haut, bas) => "C(" + a.formaterCommandesLatex(haut).trim() + ", " + a.formaterCommandesLatex(bas).trim() + ")")
+        }
+        t = t.replace(/\\([a-zA-Z]+)/g, (m, cmd) => a.symbolesLatex[cmd] !== undefined ? a.symbolesLatex[cmd] : cmd)
+        t = t.replace(/\\([,;:])/g, " ").replace(/\\!/g, "").replace(/\\([{}_%&#$])/g, "$1")
+        for (var k = 0; k < 3; k++) {
+            t = t.replace(/\^\{([^{}]+)\}/g, (_, exp) => a.convertirScript(exp, a.tableExposants, "^"))
+            t = t.replace(/_\{([^{}]+)\}/g, (_, ind) => a.convertirScript(ind, a.tableIndices, "_"))
+        }
+        t = t.replace(/\^([0-9+\-=ni]|[a-zA-Z])/g, (_, exp) => a.convertirScript(exp, a.tableExposants, "^"))
+        t = t.replace(/([a-zA-Z0-9α-ωΑ-Ω∑∏∫)\]⟩])_([0-9aehijklmnoprstuvxβγρφχ])/g, (_, base, ind) => base + a.convertirScript(ind, a.tableIndices, "_"))
+        return t
+    }
+    function formaterLatex(expr, bloc) {
+        var t = String(expr || "").trim()
+        t = t.replace(/\\begin\{([pbvBV]?matrix|cases)\}([\s\S]*?)\\end\{\1\}/g, (_, env, contenu) => {
+            var lignes = contenu.trim().split(/\\\\/).map(l => l.trim()).filter(l => l.length > 0).map(l => {
+                return l.split("&").map(c => a.formaterCommandesLatex(c.trim())).join(env === "cases" ? "  " : ", ")
+            })
+            if (env === "cases") return "{ " + lignes.join(" ; ")
+            var ouv = env === "pmatrix" ? "(" : (env === "Bmatrix" ? "{" : (env === "vmatrix" || env === "Vmatrix" ? "|" : "["))
+            var fer = env === "pmatrix" ? ")" : (env === "Bmatrix" ? "}" : (env === "vmatrix" || env === "Vmatrix" ? "|" : "]"))
+            return lignes.map(l => ouv + l + fer).join(bloc ? "\n" : " ; ")
+        })
+        t = t.replace(/\\\\/g, "\n").replace(/\s*&\s*/g, " ")
+        t = formaterCommandesLatex(t)
+        if (!bloc) return t.replace(/\s*\n\s*/g, " ").trim()
+        return "\n\n" + t.split("\n").map(l => "> **" + l.trim() + "**").join("\n") + "\n\n"
+    }
+    function formater(texte) {
+        if (typeof texte !== "string" || !texte.length) return ""
+        var blocs = []
+        function garder(s) {
+            var id = "\u0000BLOC" + blocs.length + "\u0000"
+            blocs.push(s)
+            return id
+        }
+        var t = texte
+        // Protéger les blocs de code et le code en ligne avant la conversion HTML / LaTeX
+        t = t.replace(/```[\s\S]*?```/g, m => garder(m))
+        t = t.replace(/`[^`\n]+`/g, m => garder(m))
+        // Balises HTML éventuelles renvoyées par un backend orienté Telegram
+        t = t.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_, c) => garder("\n```\n" + c.trim() + "\n```\n"))
+        t = t.replace(/<code>([\s\S]*?)<\/code>/gi, (_, c) => garder("`" + c + "`"))
+        t = t.replace(/<(?:b|strong)>([\s\S]*?)<\/(?:b|strong)>/gi, "**$1**")
+        t = t.replace(/<(?:i|em)>([\s\S]*?)<\/(?:i|em)>/gi, "*$1*")
+        t = t.replace(/<s>([\s\S]*?)<\/s>/gi, "~~$1~~")
+        // Pas de chargement d'image externe en Markdown
+        t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "[$1]($2)")
+        // Blocs LaTeX ($$...$$, \[...\], \begin{equation|align|gather|math|displaymath}...\end{...})
+        t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => a.formaterLatex(m, true))
+        t = t.replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => a.formaterLatex(m, true))
+        t = t.replace(/\\begin\{(equation|align|gather|math|displaymath)\*?\}([\s\S]+?)\\end\{\1\*?\}/g, (_, _env, m) => a.formaterLatex(m, true))
+        // LaTeX en ligne (\(...\) et $...$)
+        t = t.replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => a.formaterLatex(m, false))
+        t = t.replace(/\$(?!\s)([^\$\n]*?\S)\$/g, (tout, m) => {
+            if (/^\d+(?:[.,]\d+)?\s+(?:et|ou|and|or)\s+\d+/i.test(m)) return tout
+            return a.formaterLatex(m, false)
+        })
+        // Commandes LaTeX isolées hors délimiteurs $...$
+        if (/\\(?:frac|dfrac|tfrac|sqrt|binom|mathbb|mathcal|text|vec|hat|bar|overline|sum|prod|int|infty|partial|nabla|pm|mp|times|cdot|leq|geq|neq|approx|equiv|to|rightarrow|Rightarrow|iff|implies|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|tau|phi|omega|Delta|Sigma|Omega)(?![a-zA-Z])/.test(t)) {
+            t = a.formaterCommandesLatex(t)
+        }
+        return t.replace(/\u0000BLOC(\d+)\u0000/g, (_, idx) => blocs[Number(idx)] || "")
+    }
+    function apercu(texte) {
+        var t = formater(texte)
+        t = t.replace(/```[\s\S]*?```/g, m => m.replace(/```[a-zA-Z0-9_-]*\n?/g, "").trim())
+        t = t.replace(/`([^`]+)`/g, "$1")
+        t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/~~([^~]+)~~/g, "$1")
+        t = t.replace(/^\s*(?:>+|\#{1,6}|\-|\*|\d+\.)\s+/gm, "")
+        return t.replace(/\s+/g, " ").trim()
     }
 
     function ajouter(role, texte) {

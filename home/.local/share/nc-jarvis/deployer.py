@@ -14,7 +14,8 @@ import zipfile
 from datetime import datetime
 
 REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
-REVISION='8867dd093c43a5e5d3f0a13d3e14600e57edc96a'
+REVISION='9c12e00ffc6f11732013b575f0652e920331756a'
+VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a',REVISION)
 
 
 def ask(message, default=False):
@@ -62,6 +63,10 @@ def resource(name):
     with zipfile.ZipFile(sys.argv[0]) as archive:return archive.read(name)
 
 
+def unit_path(value):
+    return str(value).replace('%','%%')
+
+
 def unit_quote(value):
     return '"'+str(value).replace('%','%%').replace('\\','\\\\').replace('"','\\"')+'"'
 
@@ -74,7 +79,7 @@ def units(backend, overlay):
         args=[folder/'.venv/bin/uvicorn',module,'--app-dir',folder,'--host','127.0.0.1','--port',str(port)]
         result['assistant-'+role+'.service']='\n'.join([
             '[Unit]','Description=JARVIS '+role+' (Noctalia)', 'After=network.target', '', '[Service]',
-            'WorkingDirectory='+unit_quote(folder),'EnvironmentFile='+unit_quote(folder/'.env'),
+            'WorkingDirectory='+unit_path(folder),'EnvironmentFile='+unit_path(folder/'.env'),
             'Environment='+unit_quote('PYTHONPATH='+str(overlay)+':'+str(backend)),
             'ExecStart='+' '.join(unit_quote(a) for a in args),'Restart=on-failure','RestartSec=5',
             'UMask=0077','NoNewPrivileges=true','PrivateTmp=true','','[Install]','WantedBy=default.target',''])
@@ -136,7 +141,7 @@ def checkout(backend):
         if remote.rstrip('/').removesuffix('.git')!=REPO.removesuffix('.git'):raise ValueError('Le dépôt existant ne pointe pas vers JARVIS-BIS.')
         if subprocess.check_output(['git','-C',backend,'status','--porcelain','--untracked-files=no'],text=True).strip():raise ValueError('Modifications locales du backend : préservées, déploiement arrêté.')
         revision=subprocess.check_output(['git','-C',backend,'rev-parse','HEAD'],text=True).strip()
-        if revision!=REVISION:raise ValueError('Backend existant sur une autre révision. Vérifie sa compatibilité avant de changer de version ; aucun reset effectué.')
+        if revision not in VALIDATED_REVISIONS:raise ValueError('Backend existant sur une autre révision. Vérifie sa compatibilité avant de changer de version ; aucun reset effectué.')
 
 
 def deploy(mode, target):

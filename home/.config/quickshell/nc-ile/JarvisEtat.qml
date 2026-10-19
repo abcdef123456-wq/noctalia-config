@@ -55,7 +55,7 @@ Singleton {
     function texte(data) {
         if (!data) return ""
         var s = data.message || data.output || data.text
-        if (typeof s === "string") return s.replace(/<\/?(?:b|i|u|code|pre|s|strong|em)>/g, "").slice(0, 20000)
+        if (typeof s === "string") return s.slice(0, 20000)
         return JSON.stringify(data, null, 2).slice(0, 20000)
     }
     Process {

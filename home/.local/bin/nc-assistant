@@ -414,6 +414,84 @@ def notifier(texte):
         pass  # La réponse reste disponible dans le terminal même sans démon de notifications.
 
 
+_SYMBOLES_LATEX = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε",
+    "zeta": "ζ", "eta": "η", "theta": "θ", "vartheta": "ϑ", "iota": "ι", "kappa": "κ",
+    "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π", "rho": "ρ", "sigma": "σ",
+    "tau": "τ", "upsilon": "υ", "phi": "φ", "varphi": "ϕ", "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Xi": "Ξ", "Pi": "Π", "Sigma": "Σ",
+    "Upsilon": "Υ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω", "infty": "∞", "partial": "∂",
+    "nabla": "∇", "pm": "±", "mp": "∓", "times": "×", "cdot": "·", "div": "÷", "neq": "≠",
+    "ne": "≠", "leq": "≤", "le": "≤", "geq": "≥", "ge": "≥", "approx": "≈", "equiv": "≡",
+    "sim": "∼", "propto": "∝", "to": "→", "rightarrow": "→", "leftarrow": "←",
+    "leftrightarrow": "↔", "Rightarrow": "⇒", "Leftarrow": "⇐", "Leftrightarrow": "⇔",
+    "iff": "⟺", "mapsto": "↦", "forall": "∀", "exists": "∃", "nexists": "∄", "in": "∈",
+    "notin": "∉", "subset": "⊂", "subseteq": "⊆", "supset": "⊃", "supseteq": "⊇",
+    "cup": "∪", "cap": "∩", "emptyset": "∅", "varnothing": "∅", "sum": "∑", "prod": "∏",
+    "int": "∫", "iint": "∬", "iiint": "∭", "oint": "∮", "therefore": "∴", "because": "∵",
+    "dots": "…", "ldots": "…", "cdots": "⋯", "deg": "°", "circ": "∘", "perp": "⊥",
+    "parallel": "∥", "angle": "∠", "triangle": "△", "star": "⋆", "ell": "ℓ", "hbar": "ℏ",
+    "Re": "ℜ", "Im": "ℑ", "aleph": "ℵ", "wp": "℘", "land": "∧", "lor": "∨", "neg": "¬",
+    "lnot": "¬", "top": "⊤", "bot": "⊥", "models": "⊨", "vdash": "⊢", "oplus": "⊕", "otimes": "⊗",
+    "quad": "  ", "qquad": "    ",
+}
+_EXP_LATEX = str.maketrans({
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", "n": "ⁿ", "i": "ⁱ", "a": "ᵃ", "b": "ᵇ", "c": "ᶜ",
+    "d": "ᵈ", "e": "ᵉ", "f": "ᶠ", "g": "ᵍ", "h": "ʰ", "j": "ʲ", "k": "ᵏ", "l": "ˡ", "m": "ᵐ", "o": "ᵒ",
+    "p": "ᵖ", "r": "ʳ", "s": "ˢ", "t": "ᵗ", "u": "ᵘ", "v": "ᵛ", "w": "ʷ", "x": "ˣ", "y": "ʸ", "z": "ᶻ",
+})
+_IND_LATEX = str.maketrans({
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ",
+    "k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ", "p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ",
+    "v": "ᵥ", "x": "ₓ",
+})
+
+
+def formater_commandes_latex(expr):
+    s = str(expr or "")
+    s = re.sub(r"\\left\s*([(\[{|.])", lambda m: "" if m.group(1) == "." else m.group(1), s)
+    s = re.sub(r"\\right\s*([)\]}|.])", lambda m: "" if m.group(1) == "." else m.group(1), s)
+    s = re.sub(r"\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|operatorname)\s*\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\\mathbb\s*\{([A-Z])\}", lambda m: {"C": "ℂ", "H": "ℍ", "N": "ℕ", "P": "ℙ", "Q": "ℚ", "R": "ℝ", "Z": "ℤ"}.get(m.group(1), m.group(1)), s)
+    for _ in range(6):
+        n = re.sub(r"\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}",
+                   lambda m: f"{f'({m.group(1)})' if len(m.group(1)) > 1 else m.group(1)}/{f'({m.group(2)})' if len(m.group(2)) > 1 else m.group(2)}", s)
+        n = re.sub(r"\\sqrt\s*\[([^\[\]]+)\]\s*\{([^{}]*)\}",
+                   lambda m: f"{m.group(1).translate(_EXP_LATEX)}√({m.group(2)})", n)
+        n = re.sub(r"\\sqrt\s*\{([^{}]*)\}",
+                   lambda m: f"√{m.group(1)}" if len(m.group(1)) <= 1 else f"√({m.group(1)})", n)
+        if n == s:
+            break
+        s = n
+    s = re.sub(r"\\begin\{(?:[pbvBV]?matrix|cases|aligned|align\*?|array)\}([\s\S]*?)\\end\{(?:[pbvBV]?matrix|cases|aligned|align\*?|array)\}",
+               lambda m: " ; ".join(" ".join(x.strip() for x in l.split("&")) for l in re.split(r"\\\\", m.group(1).strip())), s)
+    s = re.sub(r"\\([A-Za-z]+)", lambda m: _SYMBOLES_LATEX.get(m.group(1), m.group(1)), s)
+    s = re.sub(r"\^\{([^{}]+)\}", lambda m: m.group(1).translate(_EXP_LATEX) if all(c in "0123456789+-=()niabcdefghjklmoprstuvwxyz" for c in m.group(1)) else f"^({m.group(1)})", s)
+    s = re.sub(r"\^([0-9+\-=niabcdefghjklmoprstuvwxyz])", lambda m: m.group(1).translate(_EXP_LATEX), s)
+    s = re.sub(r"_\{([^{}]+)\}", lambda m: m.group(1).translate(_IND_LATEX) if all(c in "0123456789+-=()aehijklmnoprstuvx" for c in m.group(1)) else f"_({m.group(1)})", s)
+    s = re.sub(r"_([0-9+\-=aehijklmnoprstuvx])", lambda m: m.group(1).translate(_IND_LATEX), s)
+    return s.replace(r"\{", "{").replace(r"\}", "}").replace(r"\,", " ").replace(r"\;", " ").replace(r"\!", "").replace("{", "").replace("}", "").strip()
+
+
+def formater_terminal(texte):
+    blocs = []
+    s = re.sub(r"```[\s\S]*?```|`[^`\n]+`", lambda m: (blocs.append(m.group(0)), f"\x00CODE{len(blocs) - 1}\x00")[1], str(texte or ""))
+    s = re.sub(r"\$\$([\s\S]+?)\$\$", lambda m: "\n  " + formater_commandes_latex(m.group(1)) + "\n", s)
+    s = re.sub(r"\\\[([\s\S]+?)\\\]", lambda m: "\n  " + formater_commandes_latex(m.group(1)) + "\n", s)
+    s = re.sub(r"\\\(([\s\S]+?)\\\)", lambda m: formater_commandes_latex(m.group(1)), s)
+    s = re.sub(r"(?<![\\$\w])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)", lambda m: formater_commandes_latex(m.group(1)), s)
+    if re.search(r"\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int|infty|alpha|beta|gamma|delta|pi|theta|lambda|sigma|omega|leq|geq|neq|approx|times|cdot|pm|to|rightarrow|Rightarrow)\b", s):
+        s = formater_commandes_latex(s)
+    s = re.sub(r"</?(?:b|strong)>", "**", s, flags=re.I)
+    s = re.sub(r"</?(?:i|em)>", "*", s, flags=re.I)
+    s = re.sub(r"</?code>", "`", s, flags=re.I)
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"\x00CODE(\d+)\x00", lambda m: blocs[int(m.group(1))], s)
+    return s
+
+
 def chat(c, question=""):
     sid = uuid.uuid4().hex
     print(T("Assistant distant — exit ou Ctrl+C pour quitter.", "Remote assistant — exit or Ctrl+C to quit."))
@@ -428,7 +506,7 @@ def chat(c, question=""):
                 continue
             print(T("Réflexion en cours…", "Thinking…"), flush=True)
             try:
-                print("\n" + demander(c, sid, q, chat=True) + "\n", flush=True)
+                print("\n" + formater_terminal(demander(c, sid, q, chat=True)) + "\n", flush=True)
             except Erreur as e:
                 print(str(e), file=sys.stderr)
     finally:

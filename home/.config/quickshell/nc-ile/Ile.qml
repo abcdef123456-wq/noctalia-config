@@ -51,7 +51,7 @@ PanelWindow {
         musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: Qt.size(400, 140),
         jeu: Qt.size(432, 250), centre: Qt.size(432, 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: Qt.size(432, 410),
-        claude: adaptee("claude", 180), assistant: Qt.size(432, 520), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
+        claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160)
     })
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
@@ -137,9 +137,9 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 220 } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
-            GradientStop { position: 0.5; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1] }
-            GradientStop { position: 1; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2] }
+            GradientStop { position: 0; color: fen.ouverte && Etat.vueActive === "assistant" ? "#72def5" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0]) }
+            GradientStop { position: 0.5; color: fen.ouverte && Etat.vueActive === "assistant" ? "#bedff4" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1]) }
+            GradientStop { position: 1; color: fen.ouverte && Etat.vueActive === "assistant" ? "#72def5" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2]) }
         }
     }
 
@@ -150,7 +150,7 @@ PanelWindow {
         width: fen.ouverte ? fen.taille.width : (fen.demandeClaude ? 460 : (fen.banniere ? 440 : compact.largeur))
         height: fen.ouverte ? fen.taille.height : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.demandeClaude ? 32 : 15)
-        color: Couleurs.fond                        // fond du terminal (Couleurs.qml)
+        color: fen.ouverte && Etat.vueActive === "assistant" ? "#151f2b" : Couleurs.fond
 
         // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
         // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)

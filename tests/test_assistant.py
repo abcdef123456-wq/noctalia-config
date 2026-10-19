@@ -233,8 +233,11 @@ class Assistant(unittest.TestCase):
         self.assertEqual(p.returncode, 0, out + err)
 
     def test_chat_reuses_local_session_and_removes_it_on_exit(self):
+        self.server.reponse = (200, json.dumps({"success": True, "output": "Formule : $\\frac{x^2}{\\alpha_0} \\leq \\sqrt{y}$ et `code $x^2$`", "runner_alive": True}).encode())
         r = self.cli("chat", input="first\nsecond\nexit\n")
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(x²)/(α₀) ≤ √y", r.stdout)
+        self.assertIn("`code $x^2$`", r.stdout)
         self.assertEqual(len(self.server.recus), 2)
         self.assertFalse(self.etat()["sessions"])
 
@@ -454,6 +457,7 @@ assert(launched[3] == "a 'quote' and $(false)")
                         ".local/share/nc-jarvis/server/nc_gateway.py", ".local/share/nc-jarvis/server/nc_management.py",
                         ".local/share/nc-jarvis/server/nc_runner.py", ".local/share/nc-jarvis/server/nc_engines.py",
                         ".config/quickshell/nc-ile/AssistantReglages.qml",
+                        ".config/quickshell/nc-ile/AssistantCommande.qml", ".config/quickshell/nc-ile/AssistantOrbe.qml",
                         ".config/quickshell/nc-ile/Jarvis.qml", ".config/quickshell/nc-ile/JarvisEtat.qml",
                         ".config/quickshell/nc-ile/JarvisChamp.qml", ".config/quickshell/nc-ile/JarvisBouton.qml",
                         ".config/quickshell/nc-ile/JarvisResultat.qml",

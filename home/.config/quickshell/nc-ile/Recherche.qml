@@ -484,10 +484,10 @@ Item {
             id: texteReponse
             anchors.top: enTete.bottom; anchors.topMargin: 6
             x: 14; width: parent.width - 28
-            text: r.reponse
+            text: AssistantEtat.formater(r.reponse)
             visible: !zoneReponse.attend
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
-            textFormat: Text.PlainText
+            textFormat: Text.MarkdownText
         }
     }
 
