@@ -232,6 +232,17 @@ pcall(hl.bind, "switch:off:Lid Switch", hl.dsp.exec_cmd("~/.local/bin/nc-couverc
 local rapports_vus = {}
 local function rapport_quickshell(w)
     if not w or w.class ~= "org.quickshell" or rapports_vus[w.address] then return end
+    -- La classe est aussi celle des fenêtres normales, dont le cockpit JARVIS.
+    -- Le vrai rapport est un processus distinct, lancé avec ces marqueurs par Quickshell
+    -- (src/crash/main.cpp, qsCheckCrash). Sans preuve, laisser la fenêtre ouverte.
+    local pid = tonumber(w.pid)
+    if not pid or pid < 1 or pid ~= math.floor(pid) then return end
+    local environnement = lire(string.format("/proc/%d/environ", pid))
+    if not environnement then return end
+    environnement = "\0" .. environnement
+    local plante = environnement:match("%z__QUICKSHELL_CRASH_DUMP_PID=(%d+)%z")
+    local dump = environnement:match("%z__QUICKSHELL_CRASH_DUMP_FD=(%d+)%z")
+    if not plante or tonumber(plante) < 1 or not dump then return end
     rapports_vus[w.address] = true
     -- Fermée un instant après son ouverture (tout de suite, la demande arrivait trop tôt et était ignorée)
     local q = nc.guillemets
