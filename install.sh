@@ -43,6 +43,17 @@ ask() { # ask "question" [o|n]  -> vrai si oui (o, oui, y, yes ; en anglais, [Y/
   [[ "$r" =~ ^[oOyY] ]]
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+# Une sonde en lecture seule ne doit pas bloquer toute l'installation. Les installations
+# de paquets gardent leurs propres délais et une sortie visible.
+sonder() { # sonder DURÉE LIBELLÉ COMMANDE…
+  local delai="$1" libelle="$2" code
+  shift 2
+  if timeout --kill-after=2s "$delai" "$@" 2>/dev/null; then return 0; else code=$?; fi
+  if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+    warn "$(t "$libelle : délai de $delai dépassé." "$libelle: timed out after $delai.")" >&2
+  fi
+  return "$code"
+}
 choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans $CHOIX (1 par défaut)
   local q="$1" i=1 r=""
   shift
@@ -234,14 +245,15 @@ fi
 # ── Vérifications ────────────────────────────────────────────────────────────
 say "$(t "Vérifications" "Checks")"
 # Outils de base du script : installés s'ils manquent (Debian neuf : jq et diffutils absents)
-manque=(); for t in jq sed find cmp awk; do have "$t" || manque+=("$t"); done
-if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ]; then
+manque=(); for t in jq sed find cmp awk timeout; do have "$t" || manque+=("$t"); done
+if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ] && [ "$MODE" != files ]; then
   info "$(t "Outils nécessaires au script : ${manque[*]}" "Tools the script needs: ${manque[*]}")"
-  paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; *) paquets+=("$t") ;; esac; done
-  [ "$FAMILY" = debian ] && sudo apt-get $APT_OPT update -q >/dev/null 2>&1
-  pkg_install "${paquets[@]}" >/dev/null 2>&1 || true
+  paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; timeout) paquets+=(coreutils) ;; *) paquets+=("$t") ;; esac; done
+  sudo -v || die "$(t "authentification sudo impossible." "sudo authentication failed.")"
+  if [ "$FAMILY" = debian ]; then sudo apt-get $APT_OPT update -q; fi
+  pkg_install "${paquets[@]}" || die "$(t "installation des outils de vérification impossible." "could not install the checking tools.")"
 fi
-for t in jq sed find cmp awk; do have "$t" || die "$(t "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: $t (install it with your distribution's package manager)")"; done
+for t in jq sed find cmp awk timeout; do have "$t" || die "$(t "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: $t (install it with your distribution's package manager)")"; done
 info "$(t "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)" "Distribution: ${OSNAME:-unknown} (family: $FAMILY)")"
 
 LAPTOP=0; ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && LAPTOP=1
@@ -261,13 +273,13 @@ hypr_version() {
   local b="${1:-}" v=""
   [ -n "$b" ] || b="$(hypr_bin)"
   # Numéro qui suit « Hyprland » (ou « Tag: v… ») : la suite de --version liste aussi les bibliothèques (0.5.1…)
-  [ -n "$b" ] && v="$("$b" --version 2>/dev/null | grep -oE '^Hyprland v?[0-9]+\.[0-9]+\.[0-9]+|^Tag: v[0-9]+\.[0-9]+\.[0-9]+' |
+  [ -n "$b" ] && v="$(sonder 5s 'Hyprland --version' "$b" --version | grep -oE '^Hyprland v?[0-9]+\.[0-9]+\.[0-9]+|^Tag: v[0-9]+\.[0-9]+\.[0-9]+' |
     head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
   if [ -z "$v" ]; then   # repli : version du paquet (la commande peut échouer sans écran)
     case "$FAMILY" in
-      arch) v="$(pacman -Q hyprland 2>/dev/null | awk '{print $2}')" ;;
-      fedora|suse) v="$(rpm -q --qf '%{VERSION}' hyprland 2>/dev/null || true)" ;;
-      debian) v="$(dpkg-query -W -f='${Version}' hyprland 2>/dev/null || true)" ;;
+      arch) v="$(sonder 5s 'pacman -Q hyprland' pacman -Q hyprland | awk '{print $2}' || true)" ;;
+      fedora|suse) v="$(sonder 5s 'rpm -q hyprland' rpm -q --qf '%{VERSION}' hyprland || true)" ;;
+      debian) v="$(sonder 5s 'dpkg-query hyprland' dpkg-query -W -f='${Version}' hyprland || true)" ;;
     esac
     v="$(echo "$v" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
   fi
@@ -290,15 +302,21 @@ if [ "$MODE" != files ]; then
   [ "$FAMILY" != other ] || have Hyprland || die "$(t "distribution non gérée par l'installateur. Installe Hyprland (0.55 ou plus) et Noctalia v5 ($NOCT_DOCS), puis relance." "distribution not supported by the installer. Install Hyprland (0.55 or later) and Noctalia v5 ($NOCT_DOCS), then run this again.")"
 
   # Hyprland (Debian 13 : depuis trixie-backports, avec sa veille, son portail et uwsm)
+  info "$(t "Vérification de la version de Hyprland…" "Checking the Hyprland version…")"
   hv="$(hypr_version)"
   if [ -z "$(hypr_bin)" ] || { [ -n "$hv" ] && ! ver_ge "$hv" "$HYPR_MIN"; }; then
     if [ -z "$(hypr_bin)" ]; then info "$(t "Hyprland n'est pas installé." "Hyprland is not installed.")"; else info "$(t "Hyprland $hv est trop ancien (0.55 ou plus)." "Hyprland $hv is too old (0.55 or later needed).")"; fi
     ask "$(t "L'installer maintenant ?" "Install it now?")" o || die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
+    dv=""
+    if [ "$FAMILY" = fedora ]; then
+      info "$(t "Recherche de Hyprland dans DNF (30 s maximum)…" "Checking Hyprland in DNF (30 s maximum)…")"
+      dv="$(sonder 30s 'DNF repoquery hyprland' dnf -q repoquery --latest-limit=1 --qf '%{version}\n' hyprland | tail -1)" ||
+        die "$(t "DNF n'a pas pu consulter les dépôts. Vérifie le réseau et les dépôts, puis relance ; aucun COPR ajouté." "DNF could not query repositories. Check the network and repositories, then retry; no COPR was added.")"
+    fi
     if [ "$OSID" = debian ] && [ "$OSCODE" = trixie ]; then
       bpo_on || die "$(t "sans trixie-backports, Debian 13 n'a pas Hyprland 0.55 : relance et réponds oui, ou installe-le toi-même." "without trixie-backports, Debian 13 doesn't have Hyprland 0.55: run this again and answer yes, or install it yourself.")"
       bpo_install hyprland hypridle xdg-desktop-portal-hyprland uwsm || die "$(t "installation de Hyprland impossible depuis trixie-backports." "couldn't install Hyprland from trixie-backports.")"
-    elif [ "$FAMILY" = fedora ] && { dv="$(dnf -q repoquery --latest-limit=1 --qf '%{version}\n' hyprland 2>/dev/null | tail -1)"
-                                     [ -z "$dv" ] || ! ver_ge "$dv" "$HYPR_MIN"; }; then
+    elif [ "$FAMILY" = fedora ] && { [ -z "$dv" ] || ! ver_ge "$dv" "$HYPR_MIN"; }; then
       # Fedora : pas de Hyprland récent dans les dépôts officiels (ni dans l'ancien COPR solopasha, abandonné) ;
       # dépôt communautaire (COPR) le plus suivi, à jour
       info "$(t "Pas de Hyprland 0.55 ou plus dans les dépôts de Fedora : dépôt communautaire COPR sdegler/hyprland" "No Hyprland 0.55 or later in Fedora's repositories: community COPR repository sdegler/hyprland")"
@@ -422,16 +440,20 @@ if [ "$MODE" != files ]; then
     warn "$(t "L'ancienne Noctalia v4 (noctalia-shell) est installée. Cette config utilise la v5 : le service « noctalia » de ta session lancera la v5." "The old Noctalia v4 (noctalia-shell) is installed. This config uses v5: your session's “noctalia” service will start v5.")"
     warn "$(t "Tu pourras désinstaller la v4 ensuite : sudo pacman -Rns noctalia-shell" "You can uninstall v4 afterwards: sudo pacman -Rns noctalia-shell")"
   fi
-  ok "Hyprland $hv · Noctalia v5 ($(noctalia --version 2>/dev/null | head -1))"
+  info "$(t "Vérification de la version de Noctalia (5 s maximum)…" "Checking the Noctalia version (5 s maximum)…")"
+  nv="$(sonder 5s 'noctalia --version' noctalia --version | head -1 || true)"
+  [ -n "$nv" ] || warn "$(t "Noctalia est présent mais sa version ne répond pas ; poursuite des autres vérifications." "Noctalia is present but its version is unavailable; continuing the other checks.")"
+  ok "Hyprland $hv · Noctalia (${nv:-$(t 'version inconnue' 'unknown version')})"
 fi
 
 # ── Écran ────────────────────────────────────────────────────────────────────
 # Écran principal : l'écran interne d'un portable (eDP), sinon le premier branché.
 # Sa définition (pixels), sa taille physique (mm), puis l'échelle que choisira la config (nc/ecrans.lua : mêmes
 # seuils que Hyprland, sans descendre sous 1600 x 900 points) et donc sa taille « logique » en points.
+info "$(t "Détection des écrans…" "Detecting displays…")"
 MON=""; PXW=0; PXH=0; MMW=0; MMH=0
-if have hyprctl && hyprctl monitors -j >/dev/null 2>&1; then
-  mj="$(hyprctl monitors all -j | jq -c '([.[] | select(.name | startswith("eDP"))][0]) // .[0] // empty')"
+if have hyprctl && mj="$(sonder 5s 'hyprctl monitors' hyprctl monitors all -j)"; then
+  mj="$(jq -c '([.[] | select(.name | startswith("eDP"))][0]) // .[0] // empty' <<<"$mj" 2>/dev/null || true)"
   if [ -n "$mj" ]; then
     MON="$(jq -r .name <<<"$mj")"
     read -r PXW PXH < <(jq -r '[.availableModes[]? | capture("^(?<w>[0-9]+)x(?<h>[0-9]+)@") | {w: (.w|tonumber), h: (.h|tonumber)}]
@@ -485,10 +507,12 @@ kb_valide() { # kb_valide "fr,us" : vrai si chaque disposition existe
   done
 }
 KBL=""
+info "$(t "Détection du clavier…" "Detecting keyboard…")"
+lc_etat="$(sonder 5s 'localectl status' localectl status || true)"
 for kb in \
-  "$(localectl status 2>/dev/null | sed -n 's/.*X11 Layout: *//p' | head -1 || true)" \
+  "$(sed -n 's/.*X11 Layout: *//p' <<<"$lc_etat" | head -1)" \
   "$(sed -n 's/^XKBLAYOUT="\{0,1\}\([^"]*\)"\{0,1\}/\1/p' /etc/default/keyboard 2>/dev/null | head -1 || true)" \
-  "$(localectl status 2>/dev/null | sed -n 's/.*VC Keymap: *//p' | head -1 | sed -E 's/[-_].*//' || true)" \
+  "$(sed -n 's/.*VC Keymap: *//p' <<<"$lc_etat" | head -1 | sed -E 's/[-_].*//')" \
   "$(echo "${LANG:-}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p' | tr '[:upper:]' '[:lower:]')"; do
   kb="$(echo "$kb" | tr -d ' ')"
   if kb_valide "$kb"; then KBL="$kb"; break; fi
@@ -497,7 +521,8 @@ KBL="${KBL:-us}"
 KBO=""; case "$KBL" in *,*) KBO="grp:win_space_toggle" ;; esac
 ok "$(t "Clavier : $KBL" "Keyboard: $KBL")"
 # Navigateur par défaut (épinglé dans la recherche et le dock)
-BROWSER="$(xdg-settings get default-web-browser 2>/dev/null | sed 's/\.desktop$//' | head -1 || true)"
+info "$(t "Détection du navigateur par défaut…" "Detecting default browser…")"
+BROWSER="$(sonder 5s 'xdg-settings' xdg-settings get default-web-browser | sed 's/\.desktop$//' | head -1 || true)"
 BROWSER="${BROWSER:-firefox}"
 ok "$(t "Navigateur : $BROWSER" "Browser: $BROWSER")"
 # Langue (écran de connexion)
@@ -517,7 +542,8 @@ fi
 ok "$(t "Logo de la barre : ${DISTRO_LOGO:-icône de Noctalia}" "Bar logo: ${DISTRO_LOGO:-Noctalia icon}")"
 # Demandes de mot de passe (polkit) : l'agent de KDE s'il est installé, sinon celui de Noctalia
 POLKIT=true; KDE_POLKIT=0
-if systemctl --user cat plasma-polkit-agent.service >/dev/null 2>&1; then POLKIT=false; KDE_POLKIT=1; fi
+info "$(t "Vérification de l’agent polkit…" "Checking the polkit agent…")"
+if sonder 5s 'systemctl polkit' systemctl --user cat plasma-polkit-agent.service >/dev/null; then POLKIT=false; KDE_POLKIT=1; fi
 # Nom affiché au démarrage (GRUB) : modèle du PC s'il est lisible, sinon nom de la distribution
 BOOT_TITLE="$( { [ "$(dmi sys_vendor)" = LENOVO ] && dmi product_version || dmi product_name; } | tr -cd 'A-Za-z0-9 ._-' | sed -E 's/ +/ /g; s/^ //; s/ $//')"
 w_last="${BOOT_TITLE##* }"
@@ -528,8 +554,16 @@ fi
 
 # Écran verrouillé : Noctalia (qui dessine l'écran de verrouillage) ne doit pas être relancée, sinon Hyprland affiche
 # « l'écran de verrouillage a planté ». L'installation attend que tu sois là.
-if [ "$MODE" != files ] && have noctalia && noctalia msg status 2>/dev/null | grep -qE '"locked": *true'; then
-  die "$(t "l'écran est verrouillé : relance l'installation une fois la session déverrouillée." "the screen is locked: run the install again once the session is unlocked.")"
+if [ "$MODE" != files ] && have noctalia; then
+  info "$(t "Vérification du verrouillage Noctalia (5 s maximum)…" "Checking the Noctalia lock status (5 s maximum)…")"
+  statut_code=0
+  statut="$(sonder 5s 'noctalia msg status' noctalia msg status)" || statut_code=$?
+  if [ "$statut_code" = 124 ] || [ "$statut_code" = 137 ]; then
+    die "$(t "Noctalia ne répond pas : impossible de vérifier le verrouillage. Installation arrêtée avant la copie ; vérifie Noctalia puis relance." "Noctalia is unresponsive: cannot check the lock status. Installation stopped before copying; check Noctalia and retry.")"
+  fi
+  if [ "$statut_code" = 0 ] && grep -qE '"locked": *true' <<<"$statut"; then
+    die "$(t "l'écran est verrouillé : relance l'installation une fois la session déverrouillée." "the screen is locked: run the install again once the session is unlocked.")"
+  fi
 fi
 
 echo
