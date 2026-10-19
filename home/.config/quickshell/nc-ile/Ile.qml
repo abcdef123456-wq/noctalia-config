@@ -137,9 +137,9 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 220 } }
         gradient: Gradient {
             orientation: Gradient.Horizontal
-            GradientStop { position: 0; color: fen.ouverte && Etat.vueActive === "assistant" ? "#72def5" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0]) }
-            GradientStop { position: 0.5; color: fen.ouverte && Etat.vueActive === "assistant" ? "#bedff4" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1]) }
-            GradientStop { position: 1; color: fen.ouverte && Etat.vueActive === "assistant" ? "#72def5" : (Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2]) }
+            GradientStop { position: 0; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[0] }
+            GradientStop { position: 0.5; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[1] }
+            GradientStop { position: 1; color: Couleurs.contour === "discret" ? Qt.alpha(Couleurs.accent, 0.45) : Couleurs.degrade[2] }
         }
     }
 
