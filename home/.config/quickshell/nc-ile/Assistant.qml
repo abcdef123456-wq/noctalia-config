@@ -226,12 +226,13 @@ Item {
                 Rectangle {
                     id: iconeStatut
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 20; height: 20; radius: 10
-                    color: page.ecouteVocale || AssistantEtat.erreur ? Qt.alpha(page.corail, 0.22) : page.cyan
+                    width: 22; height: 22; radius: 11
+                    color: Qt.alpha(page.teinteEtat, 0.16)
+                    border.width: 1; border.color: Qt.alpha(page.teinteEtat, 0.35)
                     Ico {
                         anchors.centerIn: parent; taille: 13
                         nom: AssistantEtat.enCours ? "psychology" : (page.ecouteVocale ? "graphic_eq" : (AssistantEtat.erreur || page.derniereReponse ? "chat_bubble" : "auto_awesome"))
-                        color: page.ecouteVocale || AssistantEtat.erreur ? page.corail : Couleurs.surAccent
+                        color: page.teinteEtat
                     }
                 }
                 Text {
@@ -262,17 +263,17 @@ Item {
             color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
             Row {
                 x: 12; y: 10; spacing: 6
-                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "tune"; taille: 15; color: page.cyan }
+                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "tune"; taille: 15; color: Couleurs.texteSec }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: Reglages.t("MODÈLE IA", "AI MODEL")
-                    color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
+                    color: Couleurs.texteSec; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.Bold; font.letterSpacing: 0.5
                 }
             }
             Text {
                 anchors.right: parent.right; anchors.rightMargin: 14; y: 10
                 text: AssistantEtat.reglagesModifies ? Reglages.t("À APPLIQUER", "PENDING") : (AssistantEtat.effort || "LOW").toUpperCase()
-                color: page.cyan; font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
+                color: page.cyan; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.Bold
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.reglages() }
             }
             Row {

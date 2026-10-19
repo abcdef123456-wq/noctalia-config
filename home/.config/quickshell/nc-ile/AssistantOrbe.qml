@@ -16,7 +16,7 @@ Item {
     Rectangle { anchors.fill: parent; anchors.margins: 8; radius: width / 2; color: "transparent"; border.width: 1.5; border.color: Qt.alpha(orbe.accent, 0.35) }
     Rectangle {
         anchors.fill: parent; anchors.margins: 12; radius: width / 2
-        color: orbe.ecoute ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.38)) : "#000000"
+        color: orbe.ecoute ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.38)) : Couleurs.fond
         border.width: 1.5; border.color: Qt.alpha(orbe.accent, 0.78)
         Behavior on color { ColorAnimation { duration: 180 } }
         LogoAssistant {
@@ -54,8 +54,8 @@ Item {
     Rectangle {
         width: 34; height: 34; radius: 17
         x: parent.width * 0.81 - width / 2; y: parent.height * 0.82 - height / 2
-        color: Couleurs.carte; border.width: 2; border.color: Qt.alpha(orbe.accent, 0.45)
-        Rectangle { anchors.fill: parent; anchors.margins: 5; radius: width / 2; color: orbe.accent }
+        color: Couleurs.fond; border.width: 2; border.color: Qt.alpha(orbe.accent, 0.45)
+        Rectangle { anchors.fill: parent; anchors.margins: 4; radius: width / 2; color: orbe.accent }
         Ico {
             anchors.centerIn: parent; taille: 15
             color: (orbe.erreur || orbe.ecoute) ? Couleurs.surCouleur : Couleurs.surAccent

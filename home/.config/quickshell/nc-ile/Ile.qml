@@ -150,7 +150,7 @@ PanelWindow {
         width: fen.ouverte ? fen.taille.width : (fen.demandeClaude ? 460 : (fen.banniere ? 440 : compact.largeur))
         height: fen.ouverte ? fen.taille.height : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.demandeClaude ? 32 : 15)
-        color: fen.ouverte && Etat.vueActive === "assistant" ? "#151f2b" : Couleurs.fond
+        color: Couleurs.fond
 
         // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
         // referme quand il en sort, sauf si tu as cliqué dedans (elle reste alors ouverte comme après un clic)
