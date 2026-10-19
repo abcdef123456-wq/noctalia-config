@@ -5,11 +5,39 @@
 #   @BROWSER@  navigateur par défaut      @LCX@ @LCY1@..@LCY4@  position des éléments de l'écran de verrouillage
 #   @DISTRO_LOGO@  logo de la barre       @POLKIT@  agent des demandes de mot de passe
 # Aucun secret n'est copié (liste blanche de fichiers). Contrôle final : rien qui ressemble à un secret.
-# Usage : ./export.sh   puis   git add -A && git commit -m "…" && git push
+# Usage : ./export.sh [--preview]   puis vérifier le diff avant de publier
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO"
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+
+preview=0
+case "${1:-}" in
+  --preview) preview=1 ;;
+  "") ;;
+  *) echo "Usage: $0 [--preview]" >&2; exit 2 ;;
+esac
+# Ne jamais remplacer du travail local par une version installée plus ancienne.
+verifier_propre() {
+  local etat
+  etat="$(git -C "$REPO" --no-optional-locks status --porcelain --untracked-files=all -- home)" || return 1
+  if [ -n "$etat" ]; then
+    echo "$(t "Export annulé : home/ contient des modifications locales. Utilise --preview pour comparer sans les remplacer." "Export cancelled: home/ has local changes. Use --preview to compare without replacing them.")" >&2
+    return 1
+  fi
+}
+if [ "$preview" = 0 ]; then verifier_propre || exit 1; fi
+
+# Toutes les substitutions et vérifications se font à côté du dépôt existant.
+stage="$(mktemp -d "$REPO/.nc-export.XXXXXX")"
+nettoyer() {
+  if [ ! -e "$REPO/home" ] && [ -d "$stage/previous-home" ]; then
+    mv "$stage/previous-home" "$REPO/home"
+  fi
+  rm -rf -- "$stage"
+}
+trap nettoyer EXIT
+cd "$stage"
 
 HOME_FILES=(
   .config/hypr/hyprland.lua
@@ -47,6 +75,7 @@ HOME_FILES=(
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-fenetre
+  .local/bin/nc-qs-capture
   .local/bin/nc-langue
   .local/bin/nc-meteo
   .local/bin/nc-video
@@ -113,7 +142,6 @@ copy_list() { # copy_list DEST_PREFIX fichier...
   done
 }
 
-rm -rf home
 copy_list home "${HOME_FILES[@]}"
 
 # Nettoyage : sauvegardes temporaires, caches Python, réglages personnels (jamais publiés)
@@ -172,7 +200,14 @@ EOF
 
 # Contrôle final : rien qui ressemble à un secret, au nom du compte ou à l'écran de cette machine
 user=$(id -un)
-bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY" home system 2>/dev/null || true)
+bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY" home "$REPO/system" 2>/dev/null || true)
 [ -n "$mon" ] && bad="$bad$(grep -rIl "\"$mon\"" home 2>/dev/null || true)"
 if [ -n "$bad" ]; then echo "$(t "ATTENTION : à vérifier avant de publier :" "WARNING: check before publishing:")" >&2; echo "$bad" >&2; exit 1; fi
+if [ "$preview" = 1 ]; then
+  git --no-pager diff --no-index -- "$REPO/home" home && exit 0
+  code=$?; [ "$code" = 1 ] && exit 0; exit "$code"
+fi
+verifier_propre || exit 1
+mv "$REPO/home" "$stage/previous-home"
+mv home "$REPO/home"
 echo "$(t "Dépôt mis à jour depuis ce PC." "Repository updated from this PC.")"

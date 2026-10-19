@@ -25,7 +25,6 @@ Singleton {
         kiro: { nom: "Kiro", titre: "Kiro", couleur: "#9b5cff", reglage: "KIRO_ILE" },
         amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" }
     })
-    readonly property bool active: Reglages.val("CLAUDE_ILE", "oui") !== "non"
     function agent(s) { return s && ias[s.agent] ? s.agent : "claude" }
     function nom(s) { return ias[agent(s)].nom }
     function couleurDe(s) { return ias[agent(s)].couleur }
@@ -37,7 +36,8 @@ Singleton {
         l.sort((x, y) => (y.maj || 0) - (x.maj || 0))
         return l
     }
-    readonly property var demandes: active ? Object.values(donnees.demandes || {}).sort((x, y) => (x.t || 0) - (y.t || 0)) : []
+    readonly property var demandes: Object.values(donnees.demandes || {}).filter(d =>
+        suivie((donnees.sessions || {})[d.session] || d)).sort((x, y) => (x.t || 0) - (y.t || 0))
     readonly property var demande: demandes.length ? demandes[0] : null
     readonly property var enCours: sessions.filter(s => s.etat === "travail" || s.etat === "demande" || s.etat === "terminal")
     readonly property bool travaille: enCours.length > 0

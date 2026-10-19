@@ -23,6 +23,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Widgets
 import QtQuick.Effects
+import "Geometrie.js" as Geometrie
 
 PanelWindow {
     id: v
@@ -76,13 +77,22 @@ PanelWindow {
         partant = true
         if (choisi > 0 && choisi !== bureau) dispatch("hl.dsp.focus({ workspace = " + choisi + " })")
         fin = 1
+        limiteCapture = Date.now() + dureeFin + 1000
         sortie.start()
     }
     property bool partant: false
     property real fin: 0
     readonly property int dureeFin: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 260
     Behavior on fin { NumberAnimation { duration: v.dureeFin; easing.type: Easing.InOutCubic } }
-    Timer { id: sortie; interval: v.dureeFin + 20; onTriggered: Etat.vueFenetres = false }
+    property real limiteCapture: 0
+    Timer {
+        id: sortie; interval: v.dureeFin + 20; repeat: true
+        onTriggered: {
+            // Un clic Masquer suivi aussitôt d'Échap laisse finir la copie de l'image, sans attente illimitée.
+            if (Object.keys(Etat.vueCaptures).length && Date.now() < v.limiteCapture) { interval = 50; return }
+            stop(); Etat.vueFenetres = false
+        }
+    }
     // Le bureau choisi dans la vue : on le parcourt sans changer de bureau ; il suit le vrai bureau s'il change
     // (trois doigts, Hyprland). Un bureau inconnu un instant (Hyprland pendant une capture…) ne compte pas.
     property int choisi: bureau
@@ -101,18 +111,40 @@ PanelWindow {
         if (enAttente[adresse(t)]) basculerAttente(t)
         allerA(t)
     }
-    // « Masquer » dans la vue : rien ne bouge, la fenêtre devient translucide ; elle n'est vraiment masquée qu'à la
+    // « Masquer » dans la vue : rien ne bouge, la fenêtre est estompée ; elle n'est vraiment masquée qu'à la
     // fermeture de la vue (sinon les autres s'agrandiraient aussitôt pour prendre sa place). Un second clic annule.
     property var enAttente: ({})
-    function basculerAttente(t) {
+    function annulerAttente(t) {
+        var a = adresse(t), r = Object.assign({}, enAttente), images = Object.assign({}, Etat.vueImages)
+        delete r[a]; delete images[a]
+        enAttente = r; Etat.vueImages = images
+    }
+    function basculerAttente(t, source) {
         var r = Object.assign({}, enAttente), a = adresse(t)
-        if (r[a]) delete r[a]; else r[a] = true
+        if (r[a]) { annulerAttente(t); return }
+        else {
+            var o = t.lastIpcObject || {}
+            if (!o.at || !o.size || !t.workspace) return
+            var entree = { address: a, x: o.at[0], y: o.at[1], w: o.size[0], h: o.size[1],
+                           ws: t.workspace.id, fl: !!o.floating, mx: zone.mx, my: zone.my, mw: zone.mw, mh: zone.mh }
+            r[a] = entree
+            if (source && source.hasContent) {
+                var token = a + ":" + Date.now(), e = Math.min(1, 1280 / Math.max(o.size[0], o.size[1]))
+                var taille = Qt.size(Math.max(1, Math.round(o.size[0] * e)), Math.max(1, Math.round(o.size[1] * e)))
+                Etat.captureVue(token, true)
+                if (!source.grabToImage(resultat => {
+                    Etat.captureVue(token, false)
+                    if (v.enAttente[a] === entree) Etat.conserverVueImage(a, resultat, taille.width * taille.height)
+                }, taille)) Etat.captureVue(token, false)
+            }
+        }
         enAttente = r
     }
     // Vue ouverte : la souris ne donne plus le focus aux fenêtres de dessous (le titre de la barre ne défile plus) ;
     // le réglage d'avant est remis à la fermeture
     Component.onDestruction: {
-        for (var a in enAttente) Quickshell.execDetached([Etat.bin + "nc-fenetre", "reduire", a])
+        var lot = Object.values(enAttente)
+        if (lot.length) Etat.masquerVue(lot)
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris ~= nil then hl.config({ input = { follow_mouse = _G.nc_vue_souris } }) _G.nc_vue_souris = nil end"])
     }
 
@@ -122,6 +154,11 @@ PanelWindow {
         Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1
         Etat.vuePause = false                      // une capture interrompue ne la laisse pas sans clavier
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris == nil then _G.nc_vue_souris = hl.get_config('input:follow_mouse') end hl.config({ input = { follow_mouse = 0 } })"])
+        // Écarter les images des fenêtres fermées ou restaurées depuis la dernière ouverture.
+        var images = Object.assign({}, Etat.vueImages)
+        var cachees = Hyprland.toplevels.values.filter(t => v.masquee(t)).map(t => v.adresse(t))
+        for (var a in images) if (!Etat.vueMasquageEnCours && cachees.indexOf(a) < 0) delete images[a]
+        Etat.vueImages = images
     }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
     Behavior on entree { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 220; easing.type: Easing.OutCubic } }
@@ -138,12 +175,20 @@ PanelWindow {
         return m ? m[1] : ""
     }
     // Place, taille et bureau des fenêtres masquées avant d'être cachées (nc-fenetre reduire)
-    FileView { id: taillesMasquees; path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-reduites-tailles"; blockLoading: true }
+    FileView {
+        id: taillesMasquees
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/nc-reduites-tailles"
+        blockLoading: true
+        watchChanges: true
+        onFileChanged: reload()
+        printErrors: false
+    }
     readonly property var tailles: {
         var r = {}
         for (var l of (taillesMasquees.text() || "").split("\n")) {
             var c = l.trim().split(/\s+/)
-            if (c.length >= 6) r[c[0]] = { x: +c[1], y: +c[2], w: +c[3], h: +c[4], ws: +c[5] }
+            if (c.length >= 6) r[c[0]] = { x: +c[1], y: +c[2], w: +c[3], h: +c[4], ws: +c[5],
+                                          mx: +c[7], my: +c[8], mw: +c[9], mh: +c[10] }
         }
         return r
     }
@@ -197,7 +242,7 @@ PanelWindow {
                 required property var modelData
                 readonly property bool actif: modelData.id === v.choisi
                 width: Math.max(64, etiq.implicitWidth + 28); height: 40; radius: 20
-                color: depot.containsDrag ? Couleurs.accent : (actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2))
+                color: depotBureau.containsDrag ? Couleurs.accent : (actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2))
                 border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
                 Behavior on color { ColorAnimation { duration: 120 } }
                 Texte {
@@ -213,7 +258,7 @@ PanelWindow {
                 }
                 // Fenêtre lâchée ici : envoyée sur ce bureau (on reste sur la vue)
                 DropArea {
-                    id: depot; anchors.fill: parent
+                    id: depotBureau; anchors.fill: parent
                     onDropped: d => {
                         var t = d.source && d.source.toplevel
                         if (t && !v.masquee(t))
@@ -238,27 +283,26 @@ PanelWindow {
         }
     }
 
-    // ── Le bureau en miniature : une seule échelle pour toutes les fenêtres, chacune à sa place ; les masquées en dessous ──
+    // ── Le bureau en miniature : une seule échelle pour toutes les fenêtres, chacune à sa place ; les masquées par-dessus ──
     Item {
         id: zone
         anchors { top: rangee.bottom; topMargin: 22; bottom: cadre.bottom; bottomMargin: 18; left: cadre.left; leftMargin: 22; right: cadre.right; rightMargin: 22 }
         readonly property int n: v.fenetres.length
         // L'écran, en points
         readonly property var mon: v.moniteur && v.moniteur.lastIpcObject ? v.moniteur.lastIpcObject : ({})
-        readonly property real ech: mon.scale || (v.moniteur ? v.moniteur.scale : 1) || 1
-        readonly property real mw: mon.width ? mon.width / ech : v.width
-        readonly property real mh: mon.height ? mon.height / ech : v.height
+        readonly property real mw: v.width
+        readonly property real mh: v.height
         readonly property real mx: mon.x || 0
         readonly property real my: mon.y || 0
         // Taille et place (en points, sur l'écran) : celles d'avant pour une masquée
         function taille(t) {
             var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
-            if (m) return [m.w, m.h]
+            if (m) { var r = Geometrie.adapter(m, mx, my, mw, mh); return [r.w, r.h] }
             var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2]
         }
         function place(t) {
             var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
-            if (m) return [m.x, m.y]
+            if (m) { var r = Geometrie.adapter(m, mx, my, mw, mh); return [r.x, r.y] }
             var o = t.lastIpcObject || {}
             if (o.at && !v.masquee(t)) return o.at
             var tl = taille(t); return [mx + (mw - tl[0]) / 2, my + (mh - tl[1]) / 2]   // masquée sans trace : au milieu
@@ -413,7 +457,8 @@ PanelWindow {
                             x: (pl[0] - zone.mx) * zone.e
                             y: (pl[1] - zone.my) * zone.e
                             // Les masquées par-dessus (estompées, même si une autre a pris leur place), celle qu'on traîne encore au-dessus
-                            z: masquee ? (survol.hovered ? 8 : 7) : (survol.hovered ? 5 : 0)
+                            z: estompee ? (survol.hovered ? 8 : 7) : (survol.hovered ? 5 : 0)
+                            readonly property var instantane: estompee ? Etat.vueImages[v.adresse(modelData)] : null
 
                             // Déposer une autre fenêtre ici : elles échangent leurs places (fenêtres affichées seulement)
                             DropArea {
@@ -422,8 +467,10 @@ PanelWindow {
                                 enabled: !case_.masquee
                                 onDropped: d => {
                                     var t = d.source && d.source.toplevel
-                                    if (t && t !== case_.modelData && !v.masquee(t))
+                                    if (t && t !== case_.modelData && !v.masquee(t)) {
+                                        v.annulerAttente(t); v.annulerAttente(case_.modelData)
                                         v.dispatch("hl.dsp.window.swap({ window = 'address:" + v.adresse(t) + "', target = 'address:" + v.adresse(case_.modelData) + "' })")
+                                    }
                                 }
                             }
                             Rectangle {
@@ -438,7 +485,7 @@ PanelWindow {
                                 id: carte
                                 property var toplevel: case_.modelData
                                 // Un peu d'air entre les fenêtres collées (les espaces de Hyprland, réduits, ne se voient plus)
-                                readonly property real marge: case_.masquee ? 0 : Math.min(7, case_.width * 0.04)
+                                readonly property real marge: Math.min(7, case_.width * 0.04)
                                 x: marge; y: marge
                                 width: case_.width - 2 * marge; height: case_.height - 2 * marge
                                 // Survol de toute la carte, boutons du coin compris : sinon, la souris sur un bouton la faisait
@@ -455,30 +502,40 @@ PanelWindow {
                                 }
                                 ClippingRectangle {
                                     anchors.fill: parent; radius: case_.estompee ? 10 : 0
-                                    // Masquée : fond plein (la fenêtre de dessous ne transparaît pas), image voilée ; sur le point de l'être : translucide
-                                    color: case_.masquee ? Qt.rgba(Couleurs.carte.r, Couleurs.carte.g, Couleurs.carte.b, 1) : "transparent"
-                                    opacity: case_.estompee && !case_.masquee ? 0.38 : 1
-                                    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                                    ScreencopyView {
-                                        id: capture
-                                        opacity: case_.masquee ? 0.45 : 1
-                                        // Masquée : Hyprland l'a redimensionnée dans le bureau caché ; son image à la même échelle que les autres
-                                        // fenêtres, coin en haut à gauche sur sa place d'avant (le texte garde sa taille, rien n'est tassé)
-                                        readonly property var taille: case_.masquee && case_.ipc.size ? case_.ipc.size : null
-                                        width: taille ? Math.max(parent.width, taille[0] * zone.e) : parent.width
-                                        height: taille ? Math.max(parent.height, taille[1] * zone.e) : parent.height
-                                        captureSource: case_.modelData.wayland
-                                        // En direct seulement le bureau du milieu, à l'arrêt : pendant que le cube tourne ou à la sortie,
-                                        // la dernière image (fluide, moins de travail pour la carte graphique)
-                                        live: !case_.masquee && Math.abs(face.d) < 0.01 && !zone.bouge && v.fin === 0
-                                        layer.enabled: true
-                                        layer.smooth: true
+                                    // Même superposition avant et après fermeture : fond plein et contenu estompé.
+                                    color: case_.estompee ? Qt.rgba(Couleurs.carte.r, Couleurs.carte.g, Couleurs.carte.b, 1) : "transparent"
+                                    Item {
+                                        anchors.fill: parent
+                                        visible: !imageGardee.visible
+                                        opacity: case_.estompee ? 0.45 : 1
+                                        ScreencopyView {
+                                            id: capture
+                                            // Masquée : Hyprland l'a redimensionnée dans le bureau caché ; son image à la même échelle que les autres
+                                            // fenêtres, coin en haut à gauche sur sa place d'avant (le texte garde sa taille, rien n'est tassé)
+                                            readonly property var taille: case_.masquee && case_.ipc.size ? case_.ipc.size : null
+                                            width: taille ? Math.max(parent.width, taille[0] * zone.e) : parent.width
+                                            height: taille ? Math.max(parent.height, taille[1] * zone.e) : parent.height
+                                            captureSource: case_.modelData.wayland
+                                            // En direct seulement le bureau du milieu, à l'arrêt : pendant que le cube tourne ou à la sortie,
+                                            // la dernière image (fluide, moins de travail pour la carte graphique)
+                                            live: !case_.estompee && Math.abs(face.d) < 0.01 && !zone.bouge && v.fin === 0
+                                            layer.enabled: true
+                                            layer.smooth: true
+                                        }
+                                    }
+                                    Image {
+                                        id: imageGardee
+                                        anchors.fill: parent
+                                        visible: case_.estompee && status === Image.Ready
+                                        source: case_.instantane ? case_.instantane.url : ""
+                                        opacity: 0.45
+                                        cache: false
                                     }
                                 }
                                 // Masquée sans image (Hyprland ne la dessine plus) : une carte avec la grande icône de l'appli
                                 Rectangle {
                                     anchors.fill: parent; radius: 12; color: Couleurs.gris2
-                                    visible: case_.masquee && !capture.hasContent
+                                    visible: case_.masquee && !imageGardee.visible && !capture.hasContent
                                     Image {
                                         anchors.centerIn: parent
                                         readonly property real t: Math.min(96, parent.height * 0.4)
@@ -543,7 +600,7 @@ PanelWindow {
                                                 id: zb; anchors.fill: parent; hoverEnabled: true
                                                 onClicked: parent.modelData === "fermer"
                                                            ? v.dispatch("hl.dsp.window.close({ window = 'address:" + v.adresse(case_.modelData) + "' })")
-                                                           : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData))
+                                                           : (case_.masquee ? v.activer(case_.modelData) : v.basculerAttente(case_.modelData, capture))
                                             }
                                         }
                                     }
@@ -625,6 +682,7 @@ PanelWindow {
     //    places ; ailleurs, rien ne bouge ──
     property var traine: null
     function prendre(t, x, y, l, h) {
+        annulerAttente(t)
         main.l0 = l; main.h0 = h; main.px = x + l / 2; main.py = y + h / 2; main.r = 0
         traine = t
         main.r = 1
@@ -633,6 +691,7 @@ PanelWindow {
     // Envoyer une fenêtre sur un autre bureau, du côté le plus proche de celui d'où elle vient : vers un bureau à gauche,
     // elle se range à droite des siennes, et inversement (Hyprland la mettait du côté de la souris, donc au bord opposé)
     function envoyer(t, ws) {
+        annulerAttente(t)
         var src = t.workspace ? t.workspace.id : bureau
         var cote = ws < src ? 2 : 1                  // dwindle force_split : 1 à gauche / en haut, 2 à droite / en bas
         Quickshell.execDetached(["hyprctl", "eval", "local a = hl.get_config('dwindle:force_split') "

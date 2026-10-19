@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Vérifie les imports de l'île et le type de capture. Ne teste pas le protocole du compositeur ni une capture réelle.
+set -euo pipefail
+command -v qs >/dev/null 2>&1 || exit 1
+dossier=$(mktemp -d)
+trap 'rm -rf "$dossier"' EXIT
+mkdir -p "$dossier/runtime" "$dossier/cache"
+cat > "$dossier/shell.qml" <<'QML'
+import QtQuick
+import Quickshell
+import Quickshell.Wayland
+import Quickshell.Hyprland
+import Quickshell.Widgets
+import Quickshell.Io
+import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
+import Quickshell.Services.UPower
+import Quickshell.Services.Notifications
+import QtQuick.Effects
+import QtQuick.Shapes
+ShellRoot {
+    property Component capture: Component { ScreencopyView {} }
+    Timer { interval: 1; running: true; onTriggered: Qt.quit() }
+}
+QML
+timeout 10 env -u WAYLAND_DISPLAY QT_QPA_PLATFORM=offscreen XDG_RUNTIME_DIR="$dossier/runtime" \
+    XDG_CACHE_HOME="$dossier/cache" qs -p "$dossier/shell.qml" >/dev/null 2>&1

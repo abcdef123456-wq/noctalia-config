@@ -8,6 +8,7 @@
 #   nc-fenetre basculer ADRESSE      la masque, ou la ramène si elle l'est (barre : nc/fenetres)
 #   nc-fenetre fermer ADRESSE        la ferme
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
+#   nc-fenetre reduire-lot JSON      masque un lot avec ses géométries prises avant tout déplacement (vue)
 #   nc-fenetre tout-afficher         ramène toutes les fenêtres masquées sur le bureau affiché
 #   nc-fenetre etat                  chaque écran, son bureau et ses fenêtres, et les masquées, en JSON (barre : nc/fenetres)
 #   nc-fenetre suivre                le même état, réécrit à chaque changement (une ligne de JSON ; barre : nc/fenetres)
@@ -25,25 +26,72 @@ action="${1:-}"
 # Noms anglais des actions (nc-window minimize | restore | goto)
 case "$action" in minimize|hide) action=reduire ;; restore|show) action=restaurer ;; goto|go) action=aller ;; toggle) action=basculer ;;
   close) action=fermer ;; hide-all) action=tout-masquer ;; show-all) action=tout-afficher ;; state) action=etat ;; watch) action=suivre ;; esac
+# La fermeture de la vue lance plusieurs masquages en parallèle. Ils partageaient le même fichier .tmp : une
+# écriture pouvait effacer la géométrie d'une autre fenêtre, qui réapparaissait mal placée à la prochaine ouverture.
+# Même verrou à la restauration, qui retire une entrée des mêmes fichiers.
+case "$action" in
+  reduire|reduire-lot|tout-masquer|restaurer|aller)
+    exec 9>"$pile.lock"
+    flock -x 9 || exit 1
+    ;;
+esac
 # Fondu au lieu du glissement de Hyprland (une fenêtre floutée qui glisse hors de l'écran saccade sur un petit GPU) :
 # elle s'efface, part sans animation, puis retrouve son opacité une fois cachée
 prop() { eval_lua "hl.dsp.window.set_prop({ prop = '$2', value = '$3', window = 'address:$1' })"; }
 # Bureau affiché sur l'écran actif
 bureau_actif() { hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1; }
 
+# Un seul instantané pour tout le lot : les fenêtres suivantes ne doivent pas être mesurées après le retiling.
+geometries() {
+  local fenetres moniteurs
+  fenetres="$(clients)" || return 1
+  moniteurs="$(hyprctl monitors -j 2>/dev/null)" || return 1
+  jq --argjson ms "$moniteurs" '[.[] | . as $c |
+    ($ms | map(select(.id == $c.monitor)) | .[0] // {}) as $m |
+    {address, x: .at[0], y: .at[1], w: .size[0], h: .size[1], ws: .workspace.id, fl: .floating,
+     mx: ($m.x // 0), my: ($m.y // 0),
+     mw: ((if (($m.transform // 0) % 2) == 1 then $m.height else $m.width end) // 0) / ($m.scale // 1),
+     mh: ((if (($m.transform // 0) % 2) == 1 then $m.width else $m.height end) // 0) / ($m.scale // 1)}]' <<< "$fenetres"
+}
+
+reduire_lot() {
+  local lignes a x y w h ws fl mx my mw mh courant statut=0
+  # Aucune chaîne de l'appelant ne doit pouvoir être interprétée comme du Lua.
+  lignes="$(jq -er 'if type != "array" then error("expected array") else . end |
+    .[] | select(.address | type == "string" and test("^0x[0-9a-fA-F]+$")) |
+    select([.x,.y,.w,.h,.ws] | all(.[]; type == "number")) |
+    select(.w > 0 and .h > 0 and .ws > 0 and .ws == (.ws | floor)) |
+    [.address,.x,.y,.w,.h,.ws,(.fl == true),(.mx // 0),(.my // 0),(.mw // 0),(.mh // 0)] | @tsv' <<< "$1")" || return 1
+  while read -r a x y w h ws fl mx my mw mh; do
+    [ -n "$a" ] || continue
+    # Fermée ou déjà masquée entre le clic et la fermeture de la vue : ne pas créer d'entrée fantôme.
+    courant="$(bureau_de "$a")"
+    [ -n "$courant" ] && [ "$courant" != "$CACHE" ] || continue
+    prop "$a" opacity 0; sleep 0.14
+    prop "$a" no_anim 1
+    if eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })" && [ "$(bureau_de "$a")" = "$CACHE" ]; then
+      { grep -v "^$a " "$pile-tailles" 2>/dev/null; echo "$a $x $y $w $h $ws $fl $mx $my $mw $mh"; } > "$pile-tailles.tmp" &&
+        mv -f "$pile-tailles.tmp" "$pile-tailles" || statut=1
+      { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp" && mv -f "$pile.tmp" "$pile" || statut=1
+    else
+      echo "nc-fenetre: masquage impossible : $a" >&2
+      statut=1
+    fi
+    prop "$a" no_anim 0; prop "$a" opacity 1
+  done <<< "$lignes"
+  return "$statut"
+}
+
 case "$action" in
   reduire)
     a="${2:-$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')}"
     [ -n "$a" ] && [ "$a" != null ] || exit 0
-    [ "$(bureau_de "$a")" = "$CACHE" ] && exit 0
-    # Sa place, sa taille et son bureau : la vue des fenêtres la montre là où elle était (rien n'est changé à la fenêtre)
-    read -r x y w h ws fl <<< "$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1]) \(.workspace.id) \(.floating)"' | head -1)"
-    [ -n "${h:-}" ] && { grep -v "^$a " "$pile-tailles" 2>/dev/null; echo "$a $x $y $w $h $ws $fl"; } > "$pile-tailles.tmp" && mv -f "$pile-tailles.tmp" "$pile-tailles"
-    prop "$a" opacity 0; sleep 0.14
-    prop "$a" no_anim 1
-    eval_lua "hl.dsp.window.move({ workspace = '$CACHE', follow = false, window = 'address:$a' })"
-    prop "$a" no_anim 0; prop "$a" opacity 1
-    { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp"; mv "$pile.tmp" "$pile" ;;
+    instantane="$(geometries)" || exit 1
+    lot="$(jq --arg a "$a" 'map(select(.address == $a and .ws > 0))' <<< "$instantane")" || exit 1
+    [ "$lot" != '[]' ] || exit 0
+    reduire_lot "$lot" ;;
+  reduire-lot)
+    reduire_lot "${2:-[]}" ;;
   basculer)
     a="${2:-}"; [ -n "$a" ] || exit 0
     if [ "$(bureau_de "$a")" = "$CACHE" ]; then exec "$0" aller "$a"; else exec "$0" reduire "$a"; fi ;;
@@ -51,7 +99,10 @@ case "$action" in
     [ -n "${2:-}" ] && eval_lua "hl.dsp.window.close({ window = 'address:$2' })" ;;
   tout-masquer)
     ws="$(bureau_actif)"
-    clients | jq -r --argjson w "${ws:-0}" '.[] | select(.workspace.id == $w) | .address' | while read -r a; do "$0" reduire "$a"; done ;;
+    instantane="$(geometries)" || exit 1
+    lot="$(jq --argjson w "${ws:-0}" 'map(select(.ws == $w))' <<< "$instantane")" || exit 1
+    [ "$lot" != '[]' ] || exit 0
+    reduire_lot "$lot" ;;
   tout-afficher)
     clients | jq -r --arg c "$CACHE" '.[] | select(.workspace.name == $c) | .address' | while read -r a; do "$0" aller "$a"; done ;;
   etat|suivre)
@@ -132,14 +183,20 @@ PY
       [ -n "$a" ] || a="$(printf '%s\n' "$reduites" | head -1)"
       [ -n "$a" ] || exit 0
     fi
+    [[ "$a" =~ ^0x[0-9a-fA-F]+$ ]] || exit 1
     if [ "$(bureau_de "$a")" = "$CACHE" ]; then
       # Bureau affiché sur l'écran actif (pas le bureau caché, s'il est ouvert)
       ws="${3:-$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)}"
+      [[ "$ws" =~ ^[1-9][0-9]*$ ]] || exit 1
       ouvert="$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .specialWorkspace.name' | head -1)"
       [ "$ouvert" = "$CACHE" ] && eval_lua "hl.dsp.workspace.toggle_special('reduites')"
       # Elle revient en fondu, à sa place, sans glisser
       prop "$a" opacity 0; prop "$a" no_anim 1
-      eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })"
+      if ! eval_lua "hl.dsp.window.move({ workspace = ${ws:-1}, follow = true, window = 'address:$a' })" ||
+          [ "$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.id')" != "$ws" ]; then
+        prop "$a" no_anim 0; prop "$a" opacity 1
+        exit 1
+      fi
       grep -v "^$a " "$pile-tailles" > "$pile-tailles.tmp" 2>/dev/null; mv -f "$pile-tailles.tmp" "$pile-tailles" 2>/dev/null
       prop "$a" no_anim 0; prop "$a" opacity 1
       grep -vx "$a" "$pile" > "$pile.tmp" 2>/dev/null; mv -f "$pile.tmp" "$pile" 2>/dev/null

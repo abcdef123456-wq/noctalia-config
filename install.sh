@@ -674,7 +674,9 @@ compiler_quickshell() {
   ask "$(t "Le compiler et l'installer (dans $prefixe) ?" "Build and install it (in $prefixe)?")" o || return 1
   pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
     qt6-declarative-dev qt6-declarative-private-dev qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev qt6-svg-dev \
-    libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols
+    libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols \
+    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects \
+    qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models
   # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
   wd="$(mktemp -d)"
@@ -682,7 +684,8 @@ compiler_quickshell() {
   if { avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" ||
        avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
      avec_progres "$(t "Préparation" "Configuring")" "$wd/cmake.log" cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
-       -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF -DSCREENCOPY=OFF \
+       -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF \
+       -DSCREENCOPY=ON -DSCREENCOPY_HYPRLAND_TOPLEVEL=ON \
        -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF \
        -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
        -DHYPRLAND_SURFACE_EXTENSIONS=OFF &&
@@ -696,8 +699,17 @@ compiler_quickshell() {
   return 1
 }
 # L'île Quickshell pour tout le monde : paquet sur Arch et Fedora, compilée sur Debian / Ubuntu
-if ! have qs && [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then compiler_quickshell || true; hash -r; fi
-if have qs && ver_ge "$(qs_ver || true)" 0.3; then      # l'île demande Quickshell 0.3
+if [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then
+  # Les anciennes installations étaient compilées sans capture : leur numéro de version ne suffit pas.
+  if ! have qs || ! ver_ge "$(qs_ver || true)" 0.3 || ! bash "$REPO/home/.local/bin/nc-qs-capture"; then
+    if have qs; then
+      warn "$(t "Quickshell doit être recompilé avec la capture pour la vue des fenêtres (Super + A)." "Quickshell must be rebuilt with capture support for the window overview (Super + A).")"
+    fi
+    compiler_quickshell || true
+    hash -r
+  fi
+fi
+if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-qs-capture"; then
   ILE=quickshell
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
   if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
@@ -714,6 +726,8 @@ if have qs && ver_ge "$(qs_ver || true)" 0.3; then      # l'île demande Quicksh
     fi
   fi
   [ -s "$POLICE_ICONES" ] || ILE=noctalia
+elif have qs; then
+  warn "$(t "Quickshell est incompatible ou ses modules sont incomplets : l'île du plugin Noctalia est utilisée." "Quickshell is incompatible or its modules are incomplete: the Noctalia plugin island is used.")"
 fi
 if [ "$ILE" = quickshell ]; then ILE_CENTRE=""; else ILE_CENTRE='"nc/ile:pilule"'; fi
 # Notifications : affichées par l'île Quickshell (bannière qui sort de la pilule, historique dans l'île) ; sinon par

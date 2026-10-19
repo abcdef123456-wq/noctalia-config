@@ -69,7 +69,7 @@ faites) : seul ce qui manque ou a changé est fait.
 | Distribution | Hyprland et Noctalia v5 |
 |---|---|
 | Arch et dérivées (CachyOS, EndeavourOS, Manjaro…) | installés depuis les dépôts officiels |
-| Fedora (44 ou plus) | Noctalia et Quickshell depuis les dépôts officiels ; Hyprland depuis le dépôt communautaire COPR `sdegler/hyprland` (le script te le montre et demande avant) |
+| Fedora (44 ou plus) | Noctalia depuis les dépôts officiels ; Quickshell récent via le COPR `errornointernet/quickshell` si nécessaire ; Hyprland via le COPR `sdegler/hyprland` (le script propose les dépôts avant de les activer) |
 | Debian 13, Debian Sid, Ubuntu 26.04 | Noctalia via le dépôt officiel de Noctalia (le script te montre les adresses et demande avant). Debian 13 : Hyprland 0.55, Noctalia et TLP viennent de « trixie-backports », la source officielle de Debian pour les versions récentes, que le script propose d'activer ; Neovim récent (0.11+) proposé depuis neovim.io |
 | openSUSE Tumbleweed et Slowroll | Noctalia via le dépôt indiqué par la documentation (idem) |
 | Autres (NixOS, Gentoo…) | installe-les toi-même ([guide](https://docs.noctalia.dev/noctalia/getting-started/installation/)), puis relance le script |
@@ -235,6 +235,14 @@ cd ~/noctalia-config
 ./export.sh        # recopie la config actuelle ; ce qui est propre au PC devient un repère (@HOME@, @MONITOR@…)
 git add -A && git commit -m "Mise à jour" && git push
 ```
+
+L'export refuse de remplacer `home/` s'il contient des modifications locales, y compris de nouveaux fichiers.
+Utilise `./export.sh --preview` pour comparer la configuration installée au dépôt sans remplacer ton travail.
+Les fichiers sont préparés et contrôlés avant le remplacement.
+
+Les corrections de la vue des fenêtres, de Coucou et des contrôles Quickshell sont détaillées dans la
+[note de validation](docs/corrections-2026-10-19.md), avec les essais graphiques restant à effectuer sur Debian,
+Fedora/Nobara et les configurations à plusieurs écrans.
 
 ## Contenu
 

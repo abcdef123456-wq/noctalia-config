@@ -192,6 +192,15 @@ def verifier(b):
                       "update Quickshell (Fedora: COPR errornointernet/quickshell)"))
         else:
             b.ok(T(f"Quickshell {qv} (île dynamique)", f"Quickshell {qv} (dynamic island)"))
+        capture = os.path.join(HOME, ".local/bin/nc-qs-capture")
+        if not os.path.isfile(capture):
+            b.avert(T("vérificateur des modules Quickshell absent", "Quickshell module checker missing"),
+                    T("réinstalle les fichiers de la configuration", "reinstall the configuration files"))
+        elif sortie(["bash", capture], 15)[1] != 0:
+            b.avert(T("imports Quickshell ou type de capture indisponibles : l'île complète ne peut pas être sélectionnée",
+                      "Quickshell imports or capture type unavailable: the full island cannot be selected"),
+                    T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
+                      "run nc-update again; on Debian, accept rebuilding Quickshell"))
         _, active = sortie(["systemctl", "--user", "is-enabled", "nc-ile.service"])
         if active != 0:
             b.avert(T("île simplifiée du plugin Noctalia (l'île Quickshell n'est pas activée)",

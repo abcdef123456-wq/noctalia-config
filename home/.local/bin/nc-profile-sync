@@ -232,15 +232,6 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   proposer_nvidia "$profile"
   if [ "$ECO_EFFETS" = oui ]; then noctalia_eco "$profile"; else noctalia_eco balanced; fi
 
-  # PC hybride : applications lancées ensuite sur la carte intégrée seule en Économie (la NVIDIA peut s'endormir)
-  if [ "$HYBRID" = 1 ]; then
-    if [ "$profile" = power-saver ]; then
-      hyprctl eval "hl.env('__EGL_VENDOR_LIBRARY_FILENAMES', '$EGL_DIR/50_mesa.json')" >/dev/null
-    else
-      hyprctl eval "hl.env('__EGL_VENDOR_LIBRARY_FILENAMES', '$EGL_DIR/10_nvidia.json:$EGL_DIR/50_mesa.json')" >/dev/null
-    fi
-  fi
-
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
   # seulement si c'est ce script qui l'avait coupé.
   local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"

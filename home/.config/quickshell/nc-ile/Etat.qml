@@ -74,6 +74,48 @@ Singleton {
     property bool recherche: false
     property bool vueFenetres: false       // vue de toutes les fenêtres (Vue.qml)
     property bool vuePause: false          // la vue lâche clavier et souris (nc-capture : choix d'une zone)
+    // Les ItemGrabResult sont gardés avec leur URL : l'image survit à la destruction de Vue.qml, sans fichier disque.
+    // Au plus 12 images et 8 millions de pixels (~32 Mio RGBA), libérés avec le processus de l'île.
+    property var vueImages: ({})
+    property var vueCaptures: ({})
+    property var vueLots: []
+    readonly property bool vueMasquageEnCours: vueLots.length > 0
+    function masquerVue(lot) {
+        vueLots = vueLots.concat([lot])
+        executerMasquageVue()
+    }
+    function executerMasquageVue() {
+        if (masquageVue.running || vueLots.length === 0) return
+        masquageVue.command = [bin + "nc-fenetre", "reduire-lot", JSON.stringify(vueLots[0])]
+        masquageVue.running = true
+    }
+    Process {
+        id: masquageVue
+        onExited: code => {
+            if (code !== 0) {
+                console.warn("nc-fenetre: échec d'un lot de masquages (" + code + ")")
+                Quickshell.execDetached(["notify-send", "-a", Reglages.t("Fenêtres", "Windows"),
+                    Reglages.t("Certaines fenêtres n'ont pas pu être masquées.", "Some windows couldn't be hidden.")])
+            }
+            etat.vueLots = etat.vueLots.slice(1)
+            Qt.callLater(etat.executerMasquageVue)
+        }
+    }
+    function conserverVueImage(adresse, resultat, pixels) {
+        var images = Object.assign({}, vueImages)
+        delete images[adresse]
+        images[adresse] = { resultat: resultat, url: resultat.url, pixels: pixels }
+        var cles = Object.keys(images), total = cles.reduce((n, k) => n + images[k].pixels, 0)
+        while (cles.length > 12 || total > 8 * 1024 * 1024) {
+            var k = cles.shift(); total -= images[k].pixels; delete images[k]
+        }
+        vueImages = images
+    }
+    function captureVue(token, enCours) {
+        var c = Object.assign({}, vueCaptures)
+        if (enCours) c[token] = true; else delete c[token]
+        vueCaptures = c
+    }
     property bool projection: false        // fenêtre de projection, comme Windows + P (Projection.qml, Super + O)
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
@@ -164,12 +206,18 @@ Singleton {
     // ── Presse-papiers : les 12 derniers textes ou images copiés (en mémoire seulement ; jamais ce qu'un gestionnaire
     //    de mots de passe marque comme secret) ; un clic les recopie ──
     property var presse: []
+    property bool pressePrete: false
     Process {
-        running: Reglages.val("ILE_PRESSE", "oui") !== "non"
+        running: true
+        command: ["sh", "-c", "d=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\"; [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f -name '*.png' -delete"]
+        onExited: etat.pressePrete = true
+    }
+    Process {
+        running: etat.pressePrete && Reglages.val("ILE_PRESSE", "oui") !== "non"
         command: ["wl-paste", "--watch", "sh", "-c",
             "t=$(wl-paste --list-types 2>/dev/null); case \"$t\" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0;; esac; "
             + "if printf '%s' \"$t\" | grep -q '^image/png'; then d=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\"; mkdir -p \"$d\"; "
-            + "f=\"$d/$(date +%s%N).png\"; wl-paste -t image/png > \"$f\" && printf 'I:%s\\n' \"$f\"; "
+            + "f=$(mktemp \"$d/XXXXXXXX.png\"); if wl-paste -t image/png > \"$f\"; then printf 'I:%s:%s\\n' \"$(wc -c < \"$f\")\" \"$f\"; else rm -f -- \"$f\"; fi; "
             + "elif printf '%s' \"$t\" | grep -qE '^(text/plain|UTF8_STRING|STRING|TEXT)'; then "
             + "printf 'T:'; wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | tr '\\n\\r' '\\037\\037'; printf '\\n'; fi"]
         stdout: SplitParser {
@@ -179,12 +227,22 @@ Singleton {
                     var t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
                     if (t.trim() === "") return
                     e = { genre: "texte", texte: t }
-                } else if (ligne.indexOf("I:") === 0) e = { genre: "image", chemin: ligne.slice(2) }
+                } else if (ligne.indexOf("I:") === 0) {
+                    var image = ligne.match(/^I:(\d+):(.*)$/)
+                    if (image) e = { genre: "image", chemin: image[2], octets: +image[1] }
+                }
                 if (!e) return
                 e.t = Date.now()
                 var l = etat.presse.filter(x => !(x.genre === "texte" && e.genre === "texte" && x.texte === e.texte))
                 l.unshift(e)
-                etat.presse = l.slice(0, 12)
+                // 12 entrées et 64 Mio de PNG au plus : les fichiers évincés sont supprimés aussi.
+                var total = l.reduce((n, x) => n + (x.octets || 0), 0), retirees = []
+                while (l.length > 12 || total > 64 * 1024 * 1024) {
+                    var ancienne = l.pop(); total -= ancienne.octets || 0
+                    if (ancienne.genre === "image") retirees.push(ancienne.chemin)
+                }
+                etat.presse = l
+                if (retirees.length) Quickshell.execDetached(["rm", "-f", "--"].concat(retirees))
             }
         }
     }
@@ -236,7 +294,7 @@ Singleton {
         function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
         onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
     }
-    Timer { interval: 2000; repeat: true; running: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    Timer { interval: 2000; repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
         if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")

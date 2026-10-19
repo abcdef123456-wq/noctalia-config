@@ -29,6 +29,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import uuid
@@ -336,6 +337,8 @@ def demande(ev, genre, ia="claude"):
     """Demande d'autorisation (PermissionRequest) ou question (AskUserQuestion) : dans l'île si tu n'es pas sur le
     terminal de l'IA. Rien sur la sortie standard = la question s'affiche dans le terminal, comme d'habitude.
     Claude, et les IA qui répondent de la même façon (Codex, Qwen Code)."""
+    if reglage(ia.upper() + "_ILE", "oui") == "non":
+        return
     if reglage("CLAUDE_DEMANDES", "ile") != "ile" or not ile_active():
         if ia != "claude":
             suivre(ia, ev.get("session_id"), ev.get("cwd"), "attente")
@@ -359,7 +362,7 @@ def demande(ev, genre, ia="claude"):
             q = e["questions"][0]
             d["demandes"][ident] = {"id": ident, "session": s["id"], "projet": s["projet"], "terminal": pid,
                                     "genre": "question", "titre": court(q.get("question"), 140),
-                                    "options": [court(o.get("label"), 40) for o in q.get("options", [])][:4],
+                                    "options": [court(o.get("label"), 40) for o in q.get("options", [])][:4], "agent": ia,
                                     "t": time.time()}
         else:
             titre, detail = demande_texte(outil, e)
@@ -643,7 +646,7 @@ def journal(agent, nom, detail=""):
         f.write("\n".join(l) + "\n")
 
 
-def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message=""):
+def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="", terminal_cwd=None):
     """Met à jour la session d'une IA. quoi : debut (nouvelle demande), etape (un outil), attente (t'attend dans son
     terminal), fini (a fini sa réponse), fin (session fermée)."""
     sid = f"{agent}-{sid or '?'}"
@@ -661,7 +664,11 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="")
             s["cwd"] = cwd.replace(HOME, "~")
         s["projet"] = os.path.basename(cwd.rstrip("/")) or s.get("projet") or NOMS.get(agent, agent)
         s["maj"] = time.time()
-        reperer_terminal(s)
+        if terminal_cwd is not None and (not cwd or os.path.realpath(cwd) != os.path.realpath(terminal_cwd)):
+            # Un serveur OpenCode peut suivre une session ouverte par un autre client : son terminal n'est pas celui-là.
+            s.update(terminal=0, shell=0, classe="", ecrire=agent == "opencode" and bool(shutil.which("opencode")))
+        else:
+            reperer_terminal(s)
         if quoi == "debut" or (quoi == "etape" and s.get("etat") in ("pret", "fini", "attente")):
             s.update(etat="travail", etapes=[], ajouts=0, retraits=0, depart=time.time(), message="")
             ajouter_etape(s, "neurology", T("Réfléchit…", "Thinking…"))
@@ -772,7 +779,7 @@ FICHIERS = {
 # Événements écoutés, par IA (rien qui décide : seulement observer ; PostToolUse là où un hook avant l'outil pourrait
 # le bloquer en cas d'erreur)
 EVENEMENTS = {
-    "codex": ("UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"),
+    "codex": ("SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "Interrupt", "SessionEnd"),
     "gemini": ("BeforeAgent", "AfterTool", "AfterAgent", "Notification", "SessionEnd"),
     "qwen": ("UserPromptSubmit", "PostToolUse", "PermissionRequest", "Notification", "Stop"),
     "cursor": ("beforeSubmitPrompt", "postToolUse", "stop", "sessionEnd"),
@@ -783,7 +790,7 @@ DEMANDES_ILE = ("codex", "qwen")     # IA qui acceptent « autoriser / refuser �
 DEBUT = ("userpromptsubmit", "beforeagent", "userpromptsubmitted", "beforesubmitprompt", "prompt")
 ETAPE = ("pretooluse", "posttooluse", "aftertool", "tool")
 ATTENTE = ("permissionrequest", "permission")
-FINI = ("stop", "afteragent", "agentstop")
+FINI = ("stop", "afteragent", "agentstop", "interrupt")
 
 
 def chemin(ia):
@@ -836,44 +843,82 @@ import { spawn } from "node:child_process"
 const envoyer = (ev, o) => {
   try {
     const p = spawn(@PY@, [@NC@, "ia", "opencode", ev], { stdio: ["pipe", "ignore", "ignore"], detached: true })
-    p.on("error", () => {})
+    const fini = new Promise(resolve => { p.once("close", resolve); p.once("error", () => resolve(1)) })
     p.stdin.on("error", () => {})
     p.stdin.end(JSON.stringify(o))
     p.unref()
-  } catch {}
+    return fini
+  } catch { return Promise.resolve(1) }
 }
 // Événements : OpenCode 1 (properties, session.idle…) et 2 (data, session.execution.succeeded…)
 const FIN = ["session.idle", "session.execution.succeeded", "session.execution.interrupted", "session.execution.failed"]
 const ATTENTE = ["permission.asked", "question.asked", "form.created"]
 const REPRISE = ["permission.replied", "permission.rejected", "question.replied", "form.replied", "form.cancelled"]
-const evenement = (e, dir) => {
+const evenement = (e, transmettre) => {
   if (!e) return
   const p = e.properties || e.data || {}
   const sid = p.sessionID || (p.info && p.info.id) || (p.form && p.form.sessionID)
   if (!sid) return
-  if (FIN.includes(e.type) || (e.type === "session.status" && p.status && p.status.type === "idle")) envoyer("stop", { session_id: sid, cwd: dir })
-  else if (ATTENTE.includes(e.type)) envoyer("permission", { session_id: sid, cwd: dir })
-  else if (REPRISE.includes(e.type)) envoyer("reprise", { session_id: sid, cwd: dir })
-  else if (e.type === "session.deleted") envoyer("fin", { session_id: sid, cwd: dir })
+  const o = { session_id: sid }
+  if (e.type === "session.execution.started") transmettre("prompt", o)
+  else if (FIN.includes(e.type) || (e.type === "session.status" && p.status && p.status.type === "idle")) transmettre("stop", o)
+  else if (ATTENTE.includes(e.type)) transmettre("permission", o)
+  else if (REPRISE.includes(e.type)) transmettre("reprise", o)
+  else if (e.type === "session.deleted") transmettre("fin", o)
 }
+// Une seule instance par emplacement transmet les événements ; le flux peut couvrir plusieurs projets.
+const instances = globalThis[Symbol.for("nc-ile.opencode.instances")] ||= new Map()
 export default {
   id: "nc-ile",
   async setup(ctx) {
     const dir = (ctx.location && ctx.location.directory) || process.cwd()
+    const ident = Symbol("nc-ile"), sessions = new Map()
+    instances.set(ident, dir)
     const c = new AbortController()
-    try { await ctx.session.hook("prompt", (e) => envoyer("prompt", { session_id: e && e.sessionID, cwd: dir })) } catch {}
-    try { await ctx.tool.hook("execute.after", (e) => envoyer("tool", { session_id: e.sessionID, cwd: dir, tool: e.tool, args: e.input })) } catch {}
+    const inscriptions = []
+    let file = Promise.resolve()
+    const transmettre = (ev, o) => {
+      if (!o.session_id) return
+      // Sérialiser les lectures asynchrones : une réponse lente ne remet pas « travail » après « fini ».
+      file = file.then(async () => {
+        if (c.signal.aborted) return
+        let info = sessions.get(o.session_id)
+        if (!info || info.expire < Date.now() || ev === "prompt") {
+          try {
+            const r = await ctx.session.get({ sessionID: o.session_id })
+            const s = r.data || r
+            info = { cwd: s.location?.directory || s.directory || "", expire: Date.now() + 30000 }
+            sessions.delete(o.session_id); sessions.set(o.session_id, info)
+            if (sessions.size > 256) sessions.delete(sessions.keys().next().value)
+          } catch {
+            // Une session supprimée reste identifiable grâce au dernier emplacement connu.
+            info ||= { cwd: "" }
+          }
+        }
+        const proprietaire = [...instances].find(([, d]) => d === info.cwd) || instances.entries().next().value
+        if (proprietaire?.[0] !== ident) return
+        await envoyer(ev, { ...o, cwd: info.cwd, terminal_cwd: dir })
+        if (ev === "fin") sessions.delete(o.session_id)
+      }).catch(e => console.warn("nc-ile: OpenCode event:", e.message))
+    }
+    try { inscriptions.push(await ctx.session.hook("prompt", (e) => { transmettre("prompt", { session_id: e && e.sessionID }) })) } catch (e) { console.warn("nc-ile: prompt hook:", e.message) }
+    try { inscriptions.push(await ctx.tool.hook("execute.after", (e) => { transmettre("tool", { session_id: e.sessionID, tool: e.tool, args: e.input, erreur: e.status === "error" }) })) } catch (e) { console.warn("nc-ile: tool hook:", e.message) }
     ;(async () => {
-      try { for await (const e of ctx.event.subscribe({ signal: c.signal })) evenement(e, dir) } catch {}
+      try { for await (const e of ctx.event.subscribe({ signal: c.signal })) evenement(e, transmettre) }
+      catch (e) { if (!c.signal.aborted) console.warn("nc-ile: event subscription:", e.message) }
     })()
-    return () => c.abort()
+    return async () => {
+      c.abort()
+      instances.delete(ident)
+      for (const r of inscriptions) if (r && r.dispose) await r.dispose()
+    }
   },
   async server(input) {
     const dir = (input && input.directory) || process.cwd()
     return {
       "chat.message": async (i) => envoyer("prompt", { session_id: i.sessionID, cwd: dir }),
       "tool.execute.after": async (i) => envoyer("tool", { session_id: i.sessionID, cwd: dir, tool: i.tool, args: i.args }),
-      event: async ({ event }) => evenement(event, dir),
+      event: async ({ event }) => evenement(event, (ev, o) => envoyer(ev, { ...o, cwd: dir })),
     }
   },
 }
@@ -911,8 +956,26 @@ def installer_ia(ia, bavard=True):
     elif ia in ("opencode", "amp"):
         os.makedirs(os.path.dirname(f), exist_ok=True)
         js = (PLUGIN_OPENCODE if ia == "opencode" else PLUGIN_AMP).replace("@PY@", json.dumps(sys.executable))
-        with open(f, "w", encoding="utf-8") as x:
-            x.write(js.replace("@NC@", json.dumps(os.path.realpath(__file__))))
+        contenu = js.replace("@NC@", json.dumps(os.path.realpath(__file__)))
+        try:
+            with open(f, encoding="utf-8") as x:
+                ancien = x.read()
+        except FileNotFoundError:
+            ancien = None
+        if ancien != contenu:
+            if ancien is not None and not os.path.exists(f + ".avant-nc-claude"):
+                shutil.copy2(f, f + ".avant-nc-claude")
+            tmp = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=os.path.dirname(f),
+                                                 prefix=".nc-ile-", delete=False) as x:
+                    tmp = x.name
+                    x.write(contenu)
+                os.chmod(tmp, os.stat(f).st_mode & 0o777 if ancien is not None else 0o644)
+                os.replace(tmp, f)
+            finally:
+                if tmp and os.path.exists(tmp):
+                    os.remove(tmp)
     elif ia in ("copilot", "kiro"):
         if ia == "copilot":
             cfg = {"version": 1, "hooks": {ev: [{"type": "command", "bash": commande(ia, ev), "timeoutSec": 5}]
@@ -947,8 +1010,8 @@ def installer_ia(ia, bavard=True):
             hooks.setdefault(ev, []).append(g)
         ecrire_json(f, cfg)
     if bavard:
-        print(T(f"{NOMS[ia]} s'affiche maintenant dans l'île ({f.replace(HOME, '~')}).",
-                f"{NOMS[ia]} now shows in the island ({f.replace(HOME, '~')})."))
+        print(T(f"Intégration {NOMS[ia]} installée ({f.replace(HOME, '~')}) ; les événements restent à vérifier.",
+                f"{NOMS[ia]} integration installed ({f.replace(HOME, '~')}); events still need to be checked."))
         if ia == "codex":
             print(T("Codex demande d'approuver ses nouveaux hooks : ouvre-le et tape /hooks une fois.",
                     "Codex asks you to approve its new hooks: open it and type /hooks once."))
@@ -989,11 +1052,15 @@ def hook_ia(ia, nom):
         return
     sid = ev.get("session_id") or ev.get("sessionId") or ev.get("conversation_id") or ev.get("conversationId")
     cwd = ev.get("cwd") or (ev.get("workspace_roots") or [""])[0] or ev.get("directory") or ""
+    def suivre_evenement(quoi, outil="", args=None, erreur=False, message=""):
+        suivre(ia, sid, cwd, quoi, outil, args, erreur, message, terminal_cwd=ev.get("terminal_cwd"))
     if n == "permissionrequest" and ia in DEMANDES_ILE:
         ev.setdefault("session_id", sid)
         demande(ev, "permission", ia)          # attend ta réponse dans l'île (ou ton retour sur son terminal)
+    elif n == "sessionstart":
+        suivre_evenement("pret")
     elif n in DEBUT:
-        suivre(ia, sid, cwd, "debut")
+        suivre_evenement("debut")
     elif n in ETAPE and outil:
         args = ev.get("tool_input") or ev.get("toolArgs") or ev.get("args") or ev.get("input") or {}
         if isinstance(args, str):
@@ -1001,19 +1068,19 @@ def hook_ia(ia, nom):
                 args = json.loads(args)
             except ValueError:
                 args = {"command": args}
-        suivre(ia, sid, cwd, "etape", outil, args, bool(ev.get("erreur") or ev.get("error")))
+        suivre_evenement("etape", outil, args, bool(ev.get("erreur") or ev.get("error")))
     elif n in ATTENTE or (n == "notification" and str(ev.get("notification_type") or "").lower()
                           in ("permission_prompt", "toolpermission", "elicitation_dialog")):
-        suivre(ia, sid, cwd, "attente")
+        suivre_evenement("attente")
     elif n == "reprise":
         with Etat() as d:
             s = d["sessions"].get(f"{ia}-{sid}")
             if s and s.get("etat") == "terminal":
                 s["etat"] = "travail"
     elif n in FINI:
-        suivre(ia, sid, cwd, "fini", message=ev.get("last_assistant_message") or ev.get("prompt_response") or "")
+        suivre_evenement("fini", message=ev.get("last_assistant_message") or ev.get("prompt_response") or "")
     elif n in ("sessionend", "fin"):
-        suivre(ia, sid, cwd, "fin")
+        suivre_evenement("fin")
 
 
 # ── Installation des hooks ───────────────────────────────────────────────────────────────────────────────────────
@@ -1181,6 +1248,13 @@ def diag():
         if ia == "codex" and ok:
             print(T("      Codex : ses hooks doivent être approuvés une fois (/hooks dans Codex)",
                     "      Codex: its hooks must be approved once (/hooks in Codex)"))
+        try:
+            with open(ETAT, encoding="utf-8") as f:
+                recues = [s for s in json.load(f).get("sessions", {}).values() if s.get("agent") == ia]
+        except (OSError, ValueError):
+            recues = []
+        print(T("      Session de cette IA conservée dans l'état actuel : ",
+                "      AI session retained in current state: ") + (T("oui", "yes") if recues else T("non", "no")))
     try:
         l = open(JOURNAL, encoding="utf-8").read().splitlines()
         print(T(f"Derniers événements reçus des IA ({len(l)}) :", f"Last events received from the AIs ({len(l)}):"))

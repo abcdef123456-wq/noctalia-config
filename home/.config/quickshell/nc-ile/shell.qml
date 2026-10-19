@@ -29,14 +29,14 @@ ShellRoot {
         function onVueFenetresChanged() {
             racine.vues.forEach(v => v.destroy())
             racine.vues = []
-            if (!Etat.vueFenetres) return
+            if (!Etat.vueFenetres) { Etat.vueCaptures = ({}); return }
             if (!racine.composantVue) racine.composantVue = Qt.createComponent("Vue.qml")
             if (racine.composantVue.status !== Component.Ready) {
                 console.warn("Vue des fenêtres indisponible : " + racine.composantVue.errorString())
                 Etat.vueFenetres = false
                 Quickshell.execDetached(["notify-send", "-a", Reglages.t("Vue des fenêtres", "Window Overview"),
                                          Reglages.t("Vue des fenêtres indisponible", "Window Overview unavailable"),
-                                         Reglages.t("Ta version de Quickshell n'a pas la capture des fenêtres.", "Your Quickshell version can't capture windows.")])
+                                         Reglages.t("Impossible de charger la vue. Consulte le journal de nc-ile pour l'erreur détaillée.", "Couldn't load the overview. Check the nc-ile journal for the detailed error.")])
                 return
             }
             racine.vues = Quickshell.screens.map(s => racine.composantVue.createObject(racine, { modelData: s }))
