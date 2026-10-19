@@ -43,12 +43,19 @@ Singleton {
     readonly property var demandes: Object.values(donnees.demandes || {}).filter(d =>
         suivie((donnees.sessions || {})[d.session] || d)).sort((x, y) => (x.t || 0) - (y.t || 0))
     readonly property var demande: demandes.length ? demandes[0] : null
-    readonly property var enCours: sessions.filter(s => s.etat === "travail" || s.etat === "demande" || s.etat === "terminal")
+    function sessionActive(s) {
+        if (!s || s.agent === "assistant") return false
+        var age = Etat.maintenant.getTime() / 1000 - (s.maj || 0)
+        if (s.etat === "travail") return age < 120
+        if (s.etat === "demande" || s.etat === "terminal") return age < 900
+        return false
+    }
+    readonly property var enCours: sessions.filter(s => sessionActive(s))
     readonly property bool travaille: enCours.length > 0
     readonly property var principale: enCours.length ? enCours[0] : (sessions.length ? sessions[0] : null)
     // Page de l'île : tant qu'une session a fait quelque chose il y a moins de 30 min
     readonly property bool aPage: sessions.some(s => s.etat !== "pret" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 1800)
-    readonly property bool attendTerminal: sessions.some(s => s.etat === "terminal")
+    readonly property bool attendTerminal: sessions.some(s => s.etat === "terminal" && sessionActive(s))
 
     FileView {
         id: lecture

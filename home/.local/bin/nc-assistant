@@ -386,9 +386,212 @@ def maj_ile(sid, evenement, chat=False, message=""):
         print(T("Suivi dans l'île indisponible.", "Island tracking unavailable."), file=sys.stderr)
 
 
+def executer_commande(c, sid, cmd_brute):
+    morceaux = cmd_brute.strip().split(maxsplit=1)
+    nom_cmd = morceaux[0].lower()
+    arg = morceaux[1].strip() if len(morceaux) > 1 else ""
+
+    if nom_cmd in ("/reset", "/clear", "/nouveau"):
+        try:
+            api(c, "/api/nc/manage", {"op": "session.reset", "params": {}, "confirmed": True})
+        except Exception:
+            pass
+        return T("✨ **Session réinitialisée**\n\nL'historique et la mémoire de session sur le serveur ont été remis à zéro. Vous pouvez démarrer une nouvelle conversation.",
+                 "✨ **Session reset**\n\nActive session history and server memory have been reset. Ready for a new conversation!")
+
+    if nom_cmd in ("/help", "/aide", "/commandes", "/commands"):
+        return T(
+            "🤖 **Commandes JARVIS (identiques au bot Telegram) :**\n\n"
+            "• `/reset` ou `/clear` — Réinitialiser la session active\n"
+            "• `/status` ou `/etat` — État du serveur, moteur et modèle\n"
+            "• `/briefing` — Générer et afficher le briefing du jour\n"
+            "• `/models` ou `/modeles` — Lister les modèles IA disponibles\n"
+            "• `/model <nom>` — Sélectionner un modèle\n"
+            "• `/engine <moteur>` — Changer de moteur (`agy`, `codex`, `claude`, `opencode`)\n"
+            "• `/effort <niveau>` — Niveau de réflexion (`low`, `medium`, `high`, `xhigh`, `max`)\n"
+            "• `/courses` [ajouter <articles>] — Consulter ou ajouter des courses\n"
+            "• `/depenses` [montant desc] — Bilan mensuel ou ajout d'une dépense\n"
+            "• `/devoirs` — Consulter les devoirs (Moodle)\n"
+            "• `/rappel <délai> <message>` — Programmer un rappel Telegram/Discord\n"
+            "• `/memoire` [texte] — Consulter ou enregistrer un fait en mémoire",
+            "🤖 **JARVIS Commands (same as Telegram bot):**\n\n"
+            "• `/reset` or `/clear` — Reset active session\n"
+            "• `/status` — Server state, active engine and model\n"
+            "• `/briefing` — Generate and display daily briefing\n"
+            "• `/models` — List available AI models\n"
+            "• `/model <name>` — Select model\n"
+            "• `/engine <engine>` — Switch engine (`agy`, `codex`, `claude`, `opencode`)\n"
+            "• `/effort <level>` — Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`)\n"
+            "• `/shopping` [add <text>] — View or add grocery items\n"
+            "• `/expenses` [amount desc] — Monthly summary or add an expense\n"
+            "• `/moodle` — View homework\n"
+            "• `/remind <delay> <message>` — Schedule a Telegram/Discord reminder\n"
+            "• `/memory` [text] — View or record a fact in memory"
+        )
+
+    if nom_cmd in ("/status", "/etat", "/diag"):
+        try:
+            st = api(c, "/api/status")
+        except Exception as e:
+            st = {"online": False, "error": str(e)}
+        try:
+            qs = api(c, "/api/nc/manage", {"op": "quick-settings", "params": {}})
+        except Exception:
+            qs = {}
+        sess = qs.get("session") or {}
+        gw = st.get("gateway") or {}
+        moteur = sess.get("engine") or st.get("engine") or "agy"
+        modele = sess.get("model") or "défaut"
+        effort = sess.get("effort") or "défaut"
+        online = st.get("online") is not False and st.get("runner_alive") is not False
+        tg = ("✅ " + T("Configuré", "Configured")) if gw.get("telegram_configured") else ("❌ " + T("Non configuré", "Not configured"))
+        dc = ("✅ " + T("Configuré", "Configured")) if gw.get("discord_configured") else ("❌ " + T("Non configuré", "Not configured"))
+        return (
+            f"⚡ **{T('État du système JARVIS', 'JARVIS System Status')} :**\n\n"
+            f"• **{T('Serveur', 'Server')}** : {'🟢 ' + T('En ligne', 'Online') if online else '🔴 ' + T('Hors ligne', 'Offline')}\n"
+            f"• **{T('Moteur actif', 'Active Engine')}** : `{moteur}`\n"
+            f"• **{T('Modèle', 'Model')}** : `{modele}`\n"
+            f"• **{T('Réflexion', 'Effort')}** : `{effort}`\n"
+            f"• **Telegram** : {tg}\n"
+            f"• **Discord** : {dc}"
+        )
+
+    if nom_cmd in ("/briefing",):
+        r = api(c, "/api/briefing", {"force_refresh": False})
+        return texte_sortie(r)
+
+    if nom_cmd in ("/models", "/modeles"):
+        try:
+            qs = api(c, "/api/nc/manage", {"op": "quick-settings", "params": {}})
+            engines = qs.get("engines") or []
+            sess = qs.get("session") or {}
+            curr_eng = sess.get("engine", "agy")
+            target = next((e for e in engines if e.get("id") == curr_eng), None)
+            models = target.get("models") if target else []
+            if not models:
+                return T("Aucun modèle spécifique listé pour le moteur actif.", "No specific models listed for active engine.")
+            lignes = [f"• `{m.get('id')}` : **{m.get('name', m.get('id'))}**" for m in models[:20]]
+            return f"🧠 **{T('Modèles disponibles pour', 'Available models for')} `{curr_eng}` :**\n\n" + "\n".join(lignes)
+        except Exception as e:
+            return T(f"Impossible de lister les modèles : {e}", f"Unable to list models: {e}")
+
+    if nom_cmd in ("/model", "/modele"):
+        if not arg:
+            return T("Précise le nom du modèle (ex: `/model flash`).", "Specify model name (e.g. `/model flash`).")
+        try:
+            api(c, "/api/nc/manage", {"op": "session.update", "params": {"model": arg}, "confirmed": True})
+            return T(f"✅ Modèle mis à jour : **{arg}**", f"✅ Model updated: **{arg}**")
+        except Exception as e:
+            return T(f"Erreur changement modèle : {e}", f"Error updating model: {e}")
+
+    if nom_cmd in ("/engine", "/moteur"):
+        if not arg or arg.lower() not in ("agy", "codex", "claude", "opencode"):
+            return T("Moteurs acceptés : `agy`, `codex`, `claude`, `opencode`.", "Supported engines: `agy`, `codex`, `claude`, `opencode`.")
+        try:
+            api(c, "/api/nc/manage", {"op": "session.update", "params": {"engine": arg.lower()}, "confirmed": True})
+            return T(f"✅ Moteur basculé sur : **{arg.lower()}**", f"✅ Engine switched to: **{arg.lower()}**")
+        except Exception as e:
+            return T(f"Erreur changement moteur : {e}", f"Error updating engine: {e}")
+
+    if nom_cmd in ("/effort",):
+        if not arg:
+            return T("Niveaux d'effort acceptés : `low`, `medium`, `high`, `xhigh`, `max`.", "Supported effort levels: `low`, `medium`, `high`, `xhigh`, `max`.")
+        try:
+            api(c, "/api/nc/manage", {"op": "session.update", "params": {"effort": arg.lower()}, "confirmed": True})
+            return T(f"✅ Niveau de réflexion réglé sur : **{arg.lower()}**", f"✅ Reasoning effort set to: **{arg.lower()}**")
+        except Exception as e:
+            return T(f"Erreur réglage effort : {e}", f"Error setting effort: {e}")
+
+    if nom_cmd in ("/courses", "/shopping"):
+        sub = arg.split(maxsplit=1)
+        if sub and sub[0].lower() in ("add", "ajouter", "+"):
+            items = sub[1] if len(sub) > 1 else ""
+            if not items:
+                return T("Précise les articles à ajouter.", "Specify items to add.")
+            try:
+                api(c, "/api/action", {"tool": "shopping", "action": "add", "params": {"text": items}, "platform": "desktop"})
+                return T(f"🛒 **Articles ajoutés aux courses :** {items}", f"🛒 **Items added to shopping list:** {items}")
+            except Exception as e:
+                return T(f"Erreur ajout courses : {e}", f"Error adding shopping items: {e}")
+        else:
+            try:
+                res = api(c, "/api/action", {"tool": "shopping", "action": "list", "params": {}, "platform": "desktop"})
+                txt = texte_sortie(res)
+                return f"🛒 **{T('Liste de courses', 'Shopping List')} :**\n\n{txt}"
+            except Exception as e:
+                return T(f"Erreur consultation courses : {e}", f"Error viewing shopping list: {e}")
+
+    if nom_cmd in ("/depenses", "/expenses"):
+        if arg:
+            try:
+                res = api(c, "/api/action", {"tool": "expenses", "action": "add", "params": {"description": arg}, "platform": "desktop"})
+                return texte_sortie(res)
+            except Exception as e:
+                return T(f"Erreur ajout dépense : {e}", f"Error adding expense: {e}")
+        else:
+            try:
+                res = api(c, "/api/action", {"tool": "expenses", "action": "summary", "params": {}, "platform": "desktop"})
+                return f"💳 **{T('Bilan des dépenses', 'Expenses Summary')} :**\n\n{texte_sortie(res)}"
+            except Exception as e:
+                return T(f"Erreur bilan dépenses : {e}", f"Error viewing expenses: {e}")
+
+    if nom_cmd in ("/devoirs", "/moodle"):
+        try:
+            res = api(c, "/api/action", {"tool": "moodle", "action": "devoirs", "params": {}, "platform": "desktop"})
+            return f"📚 **{T('Devoirs à rendre', 'Homework')} :**\n\n{texte_sortie(res)}"
+        except Exception as e:
+            return T(f"Erreur consultation devoirs : {e}", f"Error viewing homework: {e}")
+
+    if nom_cmd in ("/rappel", "/remind"):
+        parts = arg.split(maxsplit=1)
+        if len(parts) < 2:
+            return T("Syntaxe : `/rappel <délai> <message>` (ex: `/rappel 15m sortir le pain`)",
+                     "Syntax: `/remind <delay> <message>` (e.g. `/remind 15m take out bread`)")
+        delai, msg = parts[0], parts[1]
+        try:
+            api(c, "/api/reminders", {"platform": "telegram", "delay": delai, "message": msg})
+            return T(f"⏰ **Rappel programmé dans {delai} :** {msg}", f"⏰ **Reminder scheduled in {delai}:** {msg}")
+        except Exception as e:
+            return T(f"Erreur création rappel : {e}", f"Error creating reminder: {e}")
+
+    if nom_cmd in ("/memoire", "/memory"):
+        if arg:
+            try:
+                api(c, "/api/nc/manage", {"op": "memory.add", "params": {"text": arg}, "confirmed": True})
+                return T(f"🧠 **Fait enregistré en mémoire :** {arg}", f"🧠 **Fact saved in memory:** {arg}")
+            except Exception as e:
+                return T(f"Erreur enregistrement mémoire : {e}", f"Error saving memory fact: {e}")
+        else:
+            try:
+                res = api(c, "/api/nc/manage", {"op": "memory", "params": {}})
+                facts = res.get("facts") or []
+                if not facts:
+                    return T("🧠 Mémoire vide.", "🧠 Empty memory.")
+                lignes = [f"• {f.get('text', f)}" for f in facts[:15]]
+                return f"🧠 **{T('Mémoire persistante JARVIS', 'JARVIS Persistent Memory')} :**\n\n" + "\n".join(lignes)
+            except Exception as e:
+                return T(f"Erreur lecture mémoire : {e}", f"Error reading memory: {e}")
+
+    return T(
+        f"Commande inconnue `{nom_cmd}`. Tape `/help` pour voir la liste des commandes du bot JARVIS.",
+        f"Unknown command `{nom_cmd}`. Type `/help` to see the list of JARVIS bot commands."
+    )
+
+
 def demander(c, sid, question, chat=False, briefing=False):
     if not briefing and not question.strip():
         raise Erreur(T("La question est vide.", "The question is empty."))
+    q_propre = question.strip()
+    if not briefing and q_propre.startswith("/"):
+        with requete_unique(c):
+            maj_ile(sid, "debut", chat)
+            try:
+                texte = executer_commande(c, sid, q_propre)
+            except BaseException:
+                maj_ile(sid, "fin", chat)
+                raise
+            maj_ile(sid, "fini", chat, T("Commande exécutée", "Command executed"))
+            return texte
     with requete_unique(c):
         maj_ile(sid, "debut", chat)
         try:

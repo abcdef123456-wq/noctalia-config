@@ -55,18 +55,44 @@ Singleton {
             // Bannières et leur durée : nc-reglages (ILE_BANNIERES, ILE_BANNIERE_DUREE en secondes)
             if (Reglages.val("ILE_BANNIERES", "oui") === "non" && notif.urgency !== NotificationUrgency.Critical) return
             n.banniere = notif
-            fin.interval = notif.urgency === NotificationUrgency.Critical ? 12000
-                         : Math.max(2, Math.min(30, parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "5")) || 5)) * 1000
+            fin.prolonge = false
+            fin.interval = Math.max(3000, Math.min(5000, Math.round((parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "3.5")) || 3.5) * 1000)))
             fin.restart()
+            plafond.restart()
         }
     }
-    Timer { id: fin; onTriggered: if (n.survol) restart(); else n.banniere = null }
+    Timer {
+        id: fin
+        property bool prolonge: false
+        onTriggered: {
+            if (n.survol && !prolonge) {
+                prolonge = true
+                interval = 1500
+                restart()
+            } else {
+                prolonge = false
+                n.survol = false
+                n.banniere = null
+            }
+        }
+    }
+    // Plafond strict : 5 secondes maximum pour faire disparaître le popup sans jamais rester coincé
+    Timer {
+        id: plafond
+        interval: 5000
+        onTriggered: {
+            n.survol = false
+            fin.prolonge = false
+            n.banniere = null
+        }
+    }
     onSurvolChanged: if (!survol && banniere) fin.restart()
+    onBanniereChanged: if (!banniere) { fin.stop(); plafond.stop(); n.survol = false }
 
     // Une notification qui disparaît (fermée par l'appli ou par toi) quitte aussi la bannière
     Connections {
         target: n.banniere
-        function onClosed() { n.banniere = null }
+        function onClosed() { fin.stop(); plafond.stop(); n.survol = false; n.banniere = null }
     }
 
     // Clic : action par défaut de l'appli (ouvrir le message…), sinon rien ; la notification est ensuite rangée

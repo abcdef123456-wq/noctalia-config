@@ -85,6 +85,7 @@ Item {
         id: minuteur
         montre: c.mode === "minuteur"
         readonly property color teinte: Etat.pomodoro ? (Etat.pomoPause ? Couleurs.vert : "#ff6347") : Couleurs.orange
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.pomodoro ? (Etat.pomoPause ? "coffee" : "psychology") : "timer"; taille: 17; color: minuteur.teinte }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.duree(Etat.minuteurReste); font.weight: Font.DemiBold; color: minuteur.teinte; font.features: { "tnum": 1 } }
     }
@@ -200,6 +201,7 @@ Item {
         readonly property var s: Agents.principale
         readonly property bool terminal: Agents.attendTerminal
         montre: c.mode === "claude"
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; tourne: !claude.terminal; visible: claude.montre || opacity > 0
                     agent: Agents.agent(claude.terminal ? Agents.attend : claude.s) }
         Texte {
@@ -207,7 +209,7 @@ Item {
             text: claude.terminal ? Agents.nom(Agents.attend) + Reglages.t(" t'attend dans le terminal", " is waiting in the terminal")
                                   : (claude.s ? (claude.s.etape || Reglages.t("Travaille…", "Working…")) : "")
             font.weight: Font.DemiBold; color: claude.terminal ? Couleurs.orange : Couleurs.texte
-            width: Math.min(implicitWidth, 250)
+            width: Math.min(implicitWidth, 200)
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
@@ -223,6 +225,7 @@ Item {
     Fondu {
         id: claudeFini
         montre: c.mode === "claude-fini"
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
         Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 16; agent: Agents.dernierFiniAgent }
         Texte { anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
                 text: Agents.ias[Agents.dernierFiniAgent].nom + Reglages.t(" a terminé", " is done") }

@@ -266,7 +266,9 @@ Singleton {
         demarrage.stop()
         var r = null
         try { r = JSON.parse(reponse) } catch (_) {}
+        var estReset = question.startsWith("/reset") || question.startsWith("/clear") || question.startsWith("/nouveau")
         if (code === 0 && r && r.ok === true && typeof r.text === "string" && r.text.length) {
+            if (estReset) messages = []
             ajouter("assistant", r.text.slice(0, 16000) + (r.truncated ? Reglages.t("\n\n[Réponse abrégée dans l’île]", "\n\n[Answer shortened in the island]") : ""))
         } else {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
@@ -280,6 +282,11 @@ Singleton {
         enCours = false
     }
     function effacer() { if (!enCours) { messages = []; erreur = "" } }
+    function resetSession() {
+        if (enCours || reglagesEnCours) return
+        brouillon = "/reset"
+        envoyer()
+    }
     function configurer() { Quickshell.execDetached(["kitty", "--class", "nc-reglages", "-e", bin + "nc-reglages", "assistant"]) }
     function ouvrirDashboard() { Quickshell.execDetached([bin + "nc-jarvis", "tableau"]) }
 

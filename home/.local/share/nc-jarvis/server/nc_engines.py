@@ -240,8 +240,10 @@ class Engines:
             ident=self.state['active'].get(engine) if continue_session and not reset_session_flag else None
             conv=next((c for c in self.state['conversations'] if c['id']==ident),None)
             history=list(conv['history']) if conv else []
+            while sum(len(h['prompt'])+len(h['response']) for h in history)>12000 or len(history)>10: history.pop(0)
             context='\n\n'.join('Utilisateur : '+h['prompt']+'\nAssistant : '+h['response'] for h in history)
-            full=('Historique récent de cette conversation JARVIS :\n'+context+'\n\nNouvelle demande :\n' if context else '')+prompt
+            directive="Consigne : sois direct, concis et précis. Utilise Markdown et LaTeX si pertinent. Pas de bavardage superflu."
+            full=directive+'\n\n'+(('Historique récent de cette conversation JARVIS :\n'+context+'\n\nNouvelle demande :\n' if context else '')+prompt)
             memory=self.up.render_memory_prompt()
             if memory: full=memory+'\n\n'+full
             try:
@@ -253,7 +255,7 @@ class Engines:
                     if not conv:
                         conv=dict(id='nc-'+uuid.uuid4().hex,engine=engine,title=prompt[:100],history=[])
                     history.append(dict(prompt=prompt[:16000],response=answer[:16000]))
-                    while sum(len(h['prompt'])+len(h['response']) for h in history)>32000 or len(history)>20: history.pop(0)
+                    while sum(len(h['prompt'])+len(h['response']) for h in history)>12000 or len(history)>10: history.pop(0)
                     conversations=[c for c in self.state['conversations'] if c['id']!=conv['id']]+[dict(conv,history=history)]
                     state=dict(self.state,conversations=conversations[-30:],active=dict(self.state['active'],**{engine:conv['id']}))
                     await asyncio.to_thread(atomique,self.path,state); self.state=state

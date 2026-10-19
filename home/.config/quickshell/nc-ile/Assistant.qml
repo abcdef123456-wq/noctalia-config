@@ -108,7 +108,13 @@ Item {
                     onClic: page.voix()
                 }
                 AssistantCommande {
-                    rond: true; width: 32; height: 32; icone: page.dansDashboard ? "delete_sweep" : "restart_alt"
+                    rond: true; width: 32; height: 32; icone: "restart_alt"
+                    aide: Reglages.t("Réinitialiser la session JARVIS (serveur et mémoire)", "Reset JARVIS session (server and memory)")
+                    enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
+                    onClic: { AssistantEtat.resetSession(); page.historiqueOuvert = true }
+                }
+                AssistantCommande {
+                    rond: true; width: 32; height: 32; icone: "delete_sweep"
                     aide: Reglages.t("Effacer l’affichage local", "Clear local display")
                     enabled: !AssistantEtat.enCours && (AssistantEtat.messages.length > 0 || page.historiqueOuvert || !!AssistantEtat.erreur)
                     onClic: { AssistantEtat.effacer(); if (!page.dansDashboard) page.historiqueOuvert = false }
@@ -408,10 +414,29 @@ Item {
                     onAccepted: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
                     Text {
                         anchors.fill: parent; visible: !entree.text
-                        text: page.dansDashboard ? Reglages.t("Écris ta question…", "Ask a question…") : Reglages.t("Demander ou dicter à JARVIS...", "Ask or dictate to JARVIS...")
+                        text: page.dansDashboard ? Reglages.t("Écris ta question ou commande (/help, /reset)…", "Ask a question or command (/help, /reset)…")
+                                                 : Reglages.t("Question ou commande (/reset, /help, /status)…", "Question or command (/reset, /help, /status)…")
                         font: entree.font
                         color: Couleurs.texteSec
                         elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+            Row {
+                visible: !AssistantEtat.reglagesOuverts && entree.text.startsWith("/")
+                anchors.bottom: parent.top; anchors.bottomMargin: 6
+                spacing: 6
+                Repeater {
+                    model: ["/help", "/reset", "/status", "/briefing", "/courses", "/models", "/effort"]
+                    Rectangle {
+                        required property string modelData
+                        width: chipTxt.implicitWidth + 14; height: 24; radius: 12
+                        color: chipMa.containsMouse ? Couleurs.accent : Couleurs.carte
+                        border.width: 1; border.color: Couleurs.gris3
+                        Text { id: chipTxt; anchors.centerIn: parent; text: parent.modelData; color: chipMa.containsMouse ? Couleurs.surAccent : Couleurs.texte; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: {
+                            AssistantEtat.brouillon = parent.modelData + (parent.modelData === "/reset" || parent.modelData === "/help" || parent.modelData === "/status" || parent.modelData === "/briefing" || parent.modelData === "/models" ? "" : " ")
+                        } }
                     }
                 }
             }
