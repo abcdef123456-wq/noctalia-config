@@ -20,9 +20,9 @@ installations complètes sur des machines Fedora/Debian distinctes.
 
 ## Architecture et contrat vérifié
 
-Référence examinée : [JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/tree/554bbf077c0b50baa25f61dc53c0c6e434cda0a9),
-notamment [le guide API](https://github.com/RaphaelBlanc/JARVIS-BIS/blob/554bbf077c0b50baa25f61dc53c0c6e434cda0a9/docs/NOCTALIA_API.md)
-et le code de `render-gateway/main.py`, `home-runner/main.py` et `core/tools/dispatcher.py`.
+Référence examinée : [JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/tree/8867dd093c43a5e5d3f0a13d3e14600e57edc96a),
+notamment [le guide API](https://github.com/RaphaelBlanc/JARVIS-BIS/blob/8867dd093c43a5e5d3f0a13d3e14600e57edc96a/docs/NOCTALIA_API.md)
+et le code de `gateway/main.py`, `home-runner/main.py` et `core/tools/dispatcher.py`.
 Les anciennes notes `INTEGRATION_NOCTALIA.md` décrivent parfois des routes encore à créer : le code actuel prévaut.
 
 ```mermaid
@@ -33,8 +33,7 @@ flowchart LR
     T[Telegram sur téléphone] --> G
     B[Discord sur téléphone] --> G
     G --> R[Runner privé :8080]
-    R --> A[Antigravity CLI]
-    G -. relais facultatif .-> P[PC-agent sur le bureau]
+    R --> A[agy / Codex / Claude Code / OpenCode]
 ```
 
 Le chat fonctionne avec l’API d’origine (`POST /api/ask`). Les modules utilisent `POST /api/action`, les rappels
@@ -43,7 +42,7 @@ Le chat fonctionne avec l’API d’origine (`POST /api/ask`). Les modules utili
 de démarrage, le scheduler et les bots. Le client bureau ne contacte jamais le runner sur 8080.
 
 L’adaptateur relaie uniquement les opérations prévues : modèles, session, conversations/historique, mémoire,
-usage, configuration des modules/bots/briefing, état et journaux des services, redémarrages de trois services
+usage, configuration des modules/bots/briefing, état et journaux des services, redémarrages des deux services
 utilisateur nommés. Il ne fournit ni chemin HTTP libre vers le runner, ni shell arbitraire.
 L’ancien backend reste utilisable pour le chat ; le cockpit indique que l’adaptateur manque au lieu de simuler ses fonctions.
 
@@ -69,9 +68,8 @@ Le terminal propose, séparément :
    unités existantes ; leur activation/démarrage est une proposition distincte.
 4. La connexion client locale. Une connexion existante n’est remplacée qu’après choix explicite.
 
-Les services utilisent les chemins réels, les venv du projet et le gateway enrichi `nc_gateway:app`.
-Ils écoutent sur **127.0.0.1:8000** et **127.0.0.1:8080**. Antigravity CLI doit être installé et authentifié
-avec `agy login` sur l’hôte du runner ; cette authentification n’est pas fabriquée par l’intégration.
+Les services utilisent les chemins réels, les venv du projet et le gateway enrichi `nc_gateway:app` et le runner `nc_runner:app`.
+Ils écoutent sur **127.0.0.1:8000** et **127.0.0.1:8080**. Le CLI choisi doit être installé et authentifié sur l’hôte du runner ; cette authentification n’est pas fabriquée par l’intégration.
 
 Le déploiement ne réinitialise pas un checkout existant : il refuse un autre dépôt, une révision différente ou des
 modifications suivies. Les fichiers `.env` des composants gardent leurs valeurs propres ; les réglages changés sont
@@ -106,20 +104,62 @@ est éteint ; un backend installé uniquement sur le PC s’arrête quand celui-
 deux bots Telegram en polling avec le même token. Choisir l’hôte du backend existant pour conserver ses données.
 Une installation de la config ou l’ouverture du cockpit ne démarre aucun backend.
 
-Pour l’accès distant du bureau, suivre le [guide réseau JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/blob/554bbf077c0b50baa25f61dc53c0c6e434cda0a9/docs/ACCES_DISTANT.md)
+Pour l’accès distant du bureau, suivre le [guide réseau JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/blob/8867dd093c43a5e5d3f0a13d3e14600e57edc96a/docs/ACCES_DISTANT.md)
 et son `scripts/expose-gateway.sh` : tunnel HTTPS vers le gateway, **jamais vers le runner**. Avec Tailscale et un
 bind local, on peut par exemple utiliser Tailscale Serve comme proxy local ; accéder directement à une IP LAN/VPN
 exige un bind et un pare-feu adaptés sur le serveur. Les tokens des bots et leurs whitelists restent ceux du backend.
 
-## Relais matériel facultatif
+## Matériel local et changement du dépôt upstream
 
-Avec un backend distant, **Relier le matériel de ce PC** ou `nc-jarvis agent` prépare un checkout séparé
-`~/.local/share/jarvis-bis-pc-agent` et son venv. Il réutilise la connexion privée du client pour ouvrir le WebSocket
-sortant `/ws/pc-agent` du gateway. L’installation et le démarrage du service demandent un choix explicite.
+La révision `8867dd0` renomme `render-gateway/` en `gateway/` et supprime le relais WebSocket PC-agent.
+Les fonctions matérielles s’exécutent désormais sur **l’hôte de JARVIS**. Un serveur sans session graphique
+ne pilote donc pas le bureau de ce PC. L’interface désactive ces actions en mode serveur ; le déploiement
+local reste le parcours prévu pour piloter le bureau. La commande historique `nc-jarvis agent` explique
+cette limite et n’installe aucun ancien relais.
 
-Ce relais peut piloter le presse-papiers, les fenêtres et les commandes système du PC. Il est attaché à la session
-graphique et n’est jamais activé par `nc-maj`. Activer le module matériel côté serveur reste nécessaire. Les fonctions
-matérielles exigent leurs outils (Hyprland, PipeWire, grim, etc.) et le bon environnement de session.
+Un backend existant sur une autre révision n’est pas réinitialisé ni déplacé automatiquement : le déployeur
+s’arrête avant modification. Pour migrer une instance, sauvegarder ses données et fichiers privés et examiner
+le renommage du dossier gateway, des chemins des services et de leurs venv avant de reprendre. Ne pas créer
+un second backend avec les mêmes tokens pour contourner ce contrôle.
+
+## Réglages rapides et moteurs
+
+Le déployeur propose le moteur initial pour le parcours local comme pour SSH ; les choix enregistrés ensuite
+dans l’interface restent prioritaires aux redémarrages.
+
+Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et niveau de réflexion**, sans terminal.
+**Actualiser** lit les capacités du runner ; **Appliquer** change la session partagée, y compris pour Telegram
+et Discord. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
+Les deux adaptateurs doivent être présents : `nc_gateway:app` côté gateway, `nc_runner:app` côté runner.
+Une API d’origine reste utilisable pour le chat ; elle n’annonce pas ces nouveaux réglages.
+
+- **agy** conserve le bridge upstream, son worker et ses conversations natives.
+- **Codex** utilise `codex exec`, reçoit le prompt sur stdin et lit les réponses JSONL. Les modèles et efforts
+  disponibles sont repris du cache local du CLI **sur le runner**, quand il existe. Sinon, saisir l’identifiant
+  exact ; l’authentification et les droits du compte sont vérifiés par le CLI lors de la demande.
+- **Claude Code** utilise `claude --print --output-format json`, avec `--model` et `--effort`.
+- **OpenCode** utilise `opencode run --format json --agent plan`. Un modèle se saisit sous la forme
+  `provider/modèle#variante`, conformément au CLI installé. Aucune variante n’est inventée par le client.
+
+Les trois nouveaux moteurs utilisent leurs protections habituelles (Codex en lecture seule, Claude/OpenCode
+en mode plan), sans ajout de contournement d’approbation. Ils répondent aux chats ; des actions nécessitant
+une autorisation interactive peuvent être refusées. Les outils explicites JARVIS passent toujours par son
+catalogue et `/api/action`. Les CLI et leurs comptes doivent être installés/authentifiés sur l’hôte du runner ;
+aucune installation de moteur ni copie d’identifiants n’est faite depuis l’île.
+
+Pour ces trois moteurs, JARVIS conserve son propre historique privé, **distinct des sessions CLI personnelles**,
+dans `home-runner/.nc-jarvis-engines.json` (0600) : au plus 30 conversations, 20 tours et 32 000 caractères
+récents par conversation. La mémoire durable JARVIS est ajoutée à chaque demande. Changer de moteur conserve
+les conversations de chacun ; **nouvelle conversation**, reprise et suppression visent le moteur actif.
+Les préférences survivent au redémarrage du runner. Les tokens ne sont pas agrégés pour ces moteurs ; l’interface
+l’indique. Il ne s’agit pas de sessions natives CLI à contexte illimité.
+
+Les sous-processus sont sérialisés sur le runner, avec timeout et sorties bornées ; leur groupe est arrêté sur
+échec ou dépassement. Aucune demande n’est rejouée automatiquement après erreur.
+
+Le visuel de `pfp.mp4` apparaît sur fond noir au-dessus de la saisie : atlas QtQuick, sans dépendance codec.
+Son animation s’arrête quand la page est cachée ou quand les effets sont désactivés. Les réglages sont chargés
+à l’ouverture manuelle du panneau et à l’application, sans scrutation périodique.
 
 ## Gestion et extensions
 
@@ -159,8 +199,7 @@ Le suivi d’activité réutilise les verrous de `nc-claude` ; les requêtes mut
 - Le verrou du PC ne coordonne pas les autres appareils. Aucune requête n’est rejouée automatiquement après une
   coupure : le moteur peut continuer à la traiter.
 - « Bot configuré » indique un token présent, pas la réception vérifiée d’un message mobile.
-- Les services gérés sont les **services utilisateur du gateway**. Une installation en services système root ou
-  Render demande son propre mode de gestion ; le cockpit ne l’assimile pas à `systemctl --user`.
+- Les services gérés sont les **services utilisateur du gateway**. Une installation en services système root demande son propre mode de gestion ; le cockpit ne l’assimile pas à `systemctl --user`.
 - Le chat local reste borné en RAM (24 messages, 48 000 caractères) et disparaît au redémarrage de l’île.
   Les conversations persistantes du moteur sont consultables séparément dans le cockpit.
 
@@ -170,6 +209,8 @@ Les tests isolent HOME et l’API : authentification de l’adaptateur, confirma
 rollback des réglages, masquage des secrets, services à écoute locale, bootstrap SSH sans secrets, échanges du vrai
 client avec un faux gateway, états de l’île, copie sur les familles de distributions et navigation QML hors écran.
 Les tests de l’adaptateur demandent FastAPI/httpx/python-dotenv dans un **venv de test**, pas sur le client utilisateur.
+Le test de contrat opt-in `NC_JARVIS_UPSTREAM=/chemin/JARVIS-BIS` charge le vrai runner et le forward du gateway,
+avec HOME temporaire et faux CLI ; il ne contacte ni modèle ni bot.
 
 ```sh
 python3 -B -m unittest discover -s tests -q
@@ -177,6 +218,8 @@ python3 -B -m unittest discover -s tests -q
 /path/venv/bin/python -B -m unittest discover -s tests -q
 ```
 
-Restent nécessaires sur un backend réellement déployé : authentification `agy`, réponse modèle, réception Telegram
+Restent nécessaires sur un backend réellement déployé : authentification de chaque CLI, réponse modèle, réception Telegram
 et Discord depuis le téléphone, livraison d’un rappel mobile, accès HTTPS/VPN, reconnexion du relais matériel et
 redémarrage après boot. Les tests simulés ne constituent pas cette validation en production.
+
+Options des CLI vérifiées dans leur aide installée et les références officielles : [Codex](https://developers.openai.com/codex/cli/reference/), [Claude Code](https://code.claude.com/docs/en/cli-reference), [OpenCode](https://opencode.ai/docs/cli/).

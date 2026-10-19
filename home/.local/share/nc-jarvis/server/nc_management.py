@@ -14,7 +14,7 @@ import tempfile
 from urllib.parse import quote
 
 PROTOCOL = 1
-UNITS = ('assistant-runner.service', 'assistant-gateway.service', 'assistant-pc-agent.service')
+UNITS = ('assistant-runner.service', 'assistant-gateway.service')
 BASE_FIELDS = [
     ('TELEGRAM_TOKEN', 'Token Telegram', True), ('TELEGRAM_ALLOWED_USER_IDS', 'Utilisateurs Telegram autorisés', False),
     ('DISCORD_TOKEN', 'Token Discord', True), ('DISCORD_ALLOWED_USER_IDS', 'Utilisateurs Discord autorisés', False),
@@ -49,7 +49,7 @@ def schema():
         if field.get('kind')=='bool': value='1' if value.lower() in ('1','true','yes','on','oui') else '0'
         field['configured'] = bool(value)
         field['value'] = '' if field['secret'] else value
-    return dict(protocol=PROTOCOL, modules=modules, fields=fields, shared_session=True)
+    return dict(protocol=PROTOCOL, modules=modules, fields=fields, shared_session=True, hardware_relay=False)
 
 
 def rewrite_env(original, values):
@@ -91,7 +91,7 @@ def update_config(values, clear=None):
         if key=='BRIEFING_TIME' and not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',value): raise ValueError
         if key in ('TELEGRAM_ALLOWED_USER_IDS','DISCORD_ALLOWED_USER_IDS','DISCORD_GUILD_ID') and value and any(not x.strip().isascii() or not x.strip().isdigit() for x in value.split(',')): raise ValueError
         selected[key]=value
-    paths = [root()/'.env', root()/'render-gateway/.env', root()/'home-runner/.env']
+    paths = [root()/'.env', root()/('gateway' if (root()/'gateway').is_dir() else 'render-gateway')/'.env', root()/'home-runner/.env']
     lock = os.open(root()/'.nc-jarvis-config.lock', os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock,'w') as f:
         try: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -148,7 +148,7 @@ def identifier(value):
 
 
 async def dispatch(op, p, confirmed=False):
-    read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs'}
+    read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings'}
     write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart'}
     if op not in read|write: raise ValueError
     if op in write and not confirmed: return dict(error='Confirmation explicite requise')
@@ -156,9 +156,10 @@ async def dispatch(op, p, confirmed=False):
     paths={'models':'/models','session':'/session','memory':'/memory','conversations':'/conversations?limit=25','usage':'/usage/stats'}
     if op in paths: return await runner('GET',paths[op])
     if op=='conversation.history': return await runner('GET','/conversation/'+identifier(p['id'])+'/history')
+    if op=='quick-settings': return await runner('GET','/nc/engines')
     if op=='session.update':
-        if not p or set(p)-{'model','effort','mode','permission_mode'} or any(not isinstance(v,str) or len(v)>200 for v in p.values()): raise ValueError
-        return await runner('POST','/session',p)
+        if not p or set(p)-{'engine','model','effort','mode','permission_mode'} or any(not isinstance(v,str) or len(v)>200 for v in p.values()): raise ValueError
+        return await runner('POST','/nc/engine' if 'engine' in p else '/session',p)
     if op=='session.reset': return await runner('POST','/session/reset')
     if op=='conversation.resume': return await runner('POST','/conversation/resume',dict(conversation_id=identifier(p['id'])))
     if op=='conversation.delete': return await runner('DELETE','/conversation/'+identifier(p['id']))
@@ -185,7 +186,7 @@ async def dispatch(op, p, confirmed=False):
     if op=='logs':
         _,text=await command('journalctl','--user','-u',unit,'-n','60','--no-pager','-o','cat')
         from dotenv import dotenv_values
-        for path in (root()/'.env',root()/'render-gateway/.env',root()/'home-runner/.env'):
+        for path in (root()/'.env',root()/('gateway' if (root()/'gateway').is_dir() else 'render-gateway')/'.env',root()/'home-runner/.env'):
             for k,v in dotenv_values(path,interpolate=False).items():
                 if v and re.search('TOKEN|SECRET|PASSWORD|API_KEY',k): text=text.replace(v,'[masqué]')
         return dict(text=re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',text))

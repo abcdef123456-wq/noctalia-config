@@ -452,11 +452,13 @@ assert(launched[3] == "a 'quote' and $(false)")
             fichiers = [".local/bin/nc-assistant", ".config/quickshell/nc-ile/LogoAssistant.qml",
                         ".local/bin/nc-jarvis", ".local/share/nc-jarvis/deployer.py", ".local/share/nc-jarvis/actions.json",
                         ".local/share/nc-jarvis/server/nc_gateway.py", ".local/share/nc-jarvis/server/nc_management.py",
+                        ".local/share/nc-jarvis/server/nc_runner.py", ".local/share/nc-jarvis/server/nc_engines.py",
+                        ".config/quickshell/nc-ile/AssistantReglages.qml",
                         ".config/quickshell/nc-ile/Jarvis.qml", ".config/quickshell/nc-ile/JarvisEtat.qml",
                         ".config/quickshell/nc-ile/JarvisChamp.qml", ".config/quickshell/nc-ile/JarvisBouton.qml",
                         ".config/quickshell/nc-ile/JarvisResultat.qml",
                         ".config/quickshell/nc-ile/Assistant.qml", ".config/quickshell/nc-ile/AssistantEtat.qml",
-                        ".config/quickshell/nc-ile/assets/assistant-animation.png"]
+                        ".config/quickshell/nc-ile/assets/assistant-animation.png", ".config/quickshell/nc-ile/assets/jarvis-animation.png"]
             for rel in fichiers:
                 cible = depot / rel
                 cible.parent.mkdir(parents=True, exist_ok=True)

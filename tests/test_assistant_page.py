@@ -13,14 +13,14 @@ QML = REPO / "home/.config/quickshell/nc-ile"
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class PageAssistant(unittest.TestCase):
-    def executer(self, scenario, absent=False):
+    def executer(self, scenario, absent=False, lectureReglages=False):
         with tempfile.TemporaryDirectory(prefix="nc-assistant-page-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
             (root / "assets").mkdir()
             noms = ["Assistant.qml", "AssistantEtat.qml", "Defilement.qml", "Texte.qml", "Ico.qml",
-                    "Etincelle.qml", "LogoAssistant.qml", "Couleurs.qml"]
-            for nom in noms + ["assets/assistant-animation.png"]:
+                    "Etincelle.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml"]
+            for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
             (root / "Agents.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
@@ -43,6 +43,16 @@ if r["question"]=="invalide":print("not json",flush=True);sys.exit(0)
 print(json.dumps(dict(ok=True,text="<b>Réponse</b>\\n"+r["question"])),flush=True)
 ''')
                 helper.chmod(0o755)
+                jarvis=bin/"nc-jarvis"
+                jarvis.write_text('''#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+r=json.loads(sys.stdin.readline())
+with Path(os.environ['HOME'],'reglages-recus').open('a') as f:f.write(json.dumps(r)+'\\n')
+session=dict(engine='codex',model='requested-model',effort='high')
+print(json.dumps(dict(ok=True,data=dict(session=session,engines=[dict(id='codex',name='Codex',installed=True,models=[dict(id='requested-model',name='Requested',efforts=['high','xhigh'])])]))),flush=True)
+''')
+                jarvis.chmod(0o755)
             (root / "shell.qml").write_text('''import QtQuick
 import QtQuick.Window
 import Quickshell
@@ -66,7 +76,7 @@ ShellRoot {
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertNotIn("ReferenceError", r.stdout + r.stderr)
             self.assertNotIn("TypeError", r.stdout + r.stderr)
-            recus = root / "recus"
+            recus = root / ("reglages-recus" if lectureReglages else "recus")
             return [json.loads(l) for l in recus.read_text().splitlines()] if recus.exists() else []
 
     def test_request_survives_page_destruction_and_blocks_double_send(self):
@@ -99,3 +109,16 @@ else if(etape===1&&!AssistantEtat.enCours){verifier(AssistantEtat.erreur!=="","e
         self.executer('''
 if(etape===0){creer();for(var i=0;i<100;i++)AssistantEtat.ajouter("assistant","x".repeat(16000));verifier(AssistantEtat.messages.length<=3,"historique trop grand");AssistantEtat.messages=[];for(var j=0;j<100;j++)AssistantEtat.ajouter("vous","x");verifier(AssistantEtat.messages.length===24,"trop de messages");AssistantEtat.brouillon="gardé";AssistantEtat.effacer();verifier(AssistantEtat.brouillon==="gardé","brouillon effacé");Qt.quit()}
 ''')
+
+    def test_quick_settings_preserve_draft_and_visual_stops_when_hidden(self):
+        recus=self.executer('''
+if(etape===0){creer();AssistantEtat.brouillon="brouillon";AssistantEtat.ouvrirReglages();etape++}
+else if(etape===1&&!AssistantEtat.reglagesEnCours){verifier(AssistantEtat.reglagesDisponibles,"réglages absents");verifier(AssistantEtat.modele==="requested-model","modèle perdu");verifier(AssistantEtat.efforts.join(",")==="high,xhigh","efforts inventés");AssistantEtat.effort="xhigh";AssistantEtat.appliquerReglages();etape++}
+else if(etape===2&&!AssistantEtat.reglagesEnCours){verifier(AssistantEtat.brouillon==="brouillon","brouillon perdu");AssistantEtat.ouvrirReglages();page.animationsActives=false;etape++}
+else if(etape===3){page.visible=false;verifier(!page.visible,"page visible");Qt.quit()}
+''',lectureReglages=True)
+        writes=[r for r in recus if r['op']=='session.update']
+        self.assertEqual(len(writes),1)
+        self.assertTrue(writes[0]['confirmed'])
+        self.assertEqual(writes[0]['params'],dict(engine='codex',model='requested-model',effort='xhigh'))
+        self.assertEqual(len(recus),3)

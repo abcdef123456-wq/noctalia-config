@@ -26,6 +26,7 @@ ShellRoot {
     property var vues: []
     // Cockpit chargé seulement à la demande ; aucune capture ni connexion de backend au démarrage.
     property var jarvisFenetre: null
+    property Component composantJarvis: null
     Connections {
         target: Etat
         function onVueFenetresChanged() {
@@ -95,6 +96,7 @@ ShellRoot {
         function concentrationEtat(): string { return Notifs.concentration ? "oui" : "non" }
         // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
         function page(nom: string): void {
+            if (nom === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
             if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
@@ -102,17 +104,17 @@ ShellRoot {
         function jarvis(): void {
             Etat.fermer()
             if (!racine.jarvisFenetre) {
-                var composant = Qt.createComponent("Jarvis.qml")
-                if (composant.status !== Component.Ready) {
-                    console.warn("Cockpit JARVIS indisponible : " + composant.errorString())
+                if (!racine.composantJarvis) racine.composantJarvis = Qt.createComponent("Jarvis.qml")
+                if (racine.composantJarvis.status !== Component.Ready) {
+                    console.warn("Cockpit JARVIS indisponible : " + racine.composantJarvis.errorString())
                     return
                 }
-                racine.jarvisFenetre = composant.createObject(racine)
+                racine.jarvisFenetre = racine.composantJarvis.createObject(racine)
             }
             if (racine.jarvisFenetre) {
-                racine.jarvisFenetre.surEcran(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
-                racine.jarvisFenetre.visible = true; racine.jarvisFenetre.requestActivate()
+                racine.jarvisFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
             }
         }
+        function jarvisFermer(): void { if (racine.jarvisFenetre) racine.jarvisFenetre.close() }
     }
 }

@@ -4,7 +4,10 @@ Item {
     id: page
     property bool dansDashboard: false
     property bool animationsActives: true
-    function defiler(dy) { return defil.defiler(dy) }
+    function defiler(dy) {
+        if (!AssistantEtat.reglagesOuverts) return defil.defiler(dy)
+        return reglagesRapides.defiler(dy)
+    }
     function bas() { Qt.callLater(() => { defil.cible = Math.max(0, defil.contentHeight - defil.height); defil.contentY = defil.cible }) }
     Component.onCompleted: bas()
     Connections { target: AssistantEtat; function onMessagesChanged() { page.bas() } }
@@ -37,13 +40,14 @@ Item {
             Bouton { visible: !page.dansDashboard; icone: "open_in_full"; aide: Reglages.t("Ouvrir le cockpit JARVIS", "Open JARVIS dashboard"); onClic: AssistantEtat.ouvrirDashboard() }
             Bouton { icone: "delete_sweep"; aide: Reglages.t("Effacer l’affichage local", "Clear local display")
                      enabled: !AssistantEtat.enCours && AssistantEtat.messages.length > 0; onClic: AssistantEtat.effacer() }
-            Bouton { icone: "settings"; aide: Reglages.t("Configurer la connexion", "Configure connection"); onClic: AssistantEtat.configurer() }
+            Bouton { icone: "tune"; aide: Reglages.t("Modèle, réflexion et moteur", "Model, reasoning and engine"); onClic: AssistantEtat.ouvrirReglages() }
         }
     }
     Defilement {
         id: defil
         anchors.top: tete.bottom; anchors.topMargin: 12
-        anchors.bottom: statut.top; anchors.bottomMargin: 10
+        anchors.bottom: visuel.top; anchors.bottomMargin: 10
+        visible: !AssistantEtat.reglagesOuverts
         width: parent.width
         contentHeight: liste.implicitHeight
         Column {
@@ -51,8 +55,8 @@ Item {
             width: parent.width; spacing: 10
             Texte {
                 width: parent.width; visible: AssistantEtat.messages.length === 0
-                text: Reglages.t("Que veux-tu faire ?\nÉcris à ton assistant ici. La roue dentée permet de configurer sa connexion.",
-                                 "What would you like to do?\nWrite to your assistant here. Use the cog to configure its connection.")
+                text: Reglages.t("Que veux-tu faire ?\nDiscute avec JARVIS, ou ouvre ses réglages rapides en haut à droite.",
+                                 "What would you like to do?\nTalk to JARVIS, or open quick settings at the top right.")
                 wrapMode: Text.Wrap; elide: Text.ElideNone; secondaire: true; textFormat: Text.PlainText
             }
             Repeater {
@@ -77,8 +81,28 @@ Item {
             }
         }
     }
+    AssistantReglages {
+        id:reglagesRapides
+        anchors.top:tete.bottom; anchors.topMargin:12; anchors.bottom:parent.bottom
+        width:parent.width; visible:AssistantEtat.reglagesOuverts
+    }
+    Rectangle {
+        id:visuel
+        visible:!AssistantEtat.reglagesOuverts
+        objectName:"nc-jarvis-visual"
+        anchors.bottom:statut.top; anchors.bottomMargin:8
+        width:parent.width; height:AssistantEtat.reglagesOuverts ? 64 : (AssistantEtat.messages.length ? 88 : 140)
+        color:"#000000"; radius:16
+        LogoAssistant {
+            objectName:"nc-jarvis-hero"
+            grand:true
+            anchors.centerIn:parent; width:parent.height; height:width
+            anime:page.visible && page.animationsActives && Reglages.val("EFFETS", "tous")!=="aucun"
+        }
+    }
     Texte {
         id: statut
+        visible:!AssistantEtat.reglagesOuverts
         anchors.bottom: saisie.top; anchors.bottomMargin: 8
         width: parent.width
         text: AssistantEtat.enCours ? Reglages.t("Réflexion en cours…", "Thinking…") : AssistantEtat.erreur
@@ -88,6 +112,7 @@ Item {
     }
     Rectangle {
         id: saisie
+        visible:!AssistantEtat.reglagesOuverts
         anchors.bottom: parent.bottom
         width: parent.width; height: 48; radius: 16; color: Couleurs.gris2
         border.width: entree.activeFocus ? 1 : 0; border.color: Couleurs.accent
@@ -109,7 +134,7 @@ Item {
             id: envoi
             anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
             icone: "arrow_upward"; aide: Reglages.t("Envoyer", "Send")
-            enabled: !AssistantEtat.enCours && AssistantEtat.brouillon.trim().length > 0
+            enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours && AssistantEtat.brouillon.trim().length > 0
             onClic: AssistantEtat.envoyer()
         }
     }

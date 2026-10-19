@@ -19,7 +19,7 @@ class CockpitJarvis(unittest.TestCase):
             (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
             (root/'qml/Agents.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
             singletons={'Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat'}
-            noms=['Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','Texte','Ico','Etincelle','LogoAssistant','Defilement']
+            noms=['Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','Texte','Ico','Etincelle','LogoAssistant','Defilement']
             (root/'qml/qmldir').write_text('\n'.join(('singleton ' if n in singletons else '')+n+' 1.0 '+n+'.qml' for n in noms))
             if not absent:
                 b=root/'.local/bin';b.mkdir(parents=True)
@@ -46,10 +46,11 @@ print(json.dumps(dict(ok=True,data=data)),flush=True)
             (root/'qml/shell.qml').write_text('''import QtQuick
 import Quickshell
 ShellRoot {
+ id:racine
  property int etape:0
  property var dashboard:null
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
- function creer(){var c=Qt.createComponent("Jarvis.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(null);verifier(dashboard!==null,"création du cockpit");dashboard.surEcran(Qt.application.screens[0].name);}
+ function creer(){var c=Qt.createComponent("Jarvis.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(racine);verifier(dashboard!==null,"création du cockpit");dashboard.afficher(Quickshell.screens[0].name);}
  Timer {interval:100;running:true;repeat:true;onTriggered:{
 '''+scenario+'''
  }}
@@ -91,3 +92,14 @@ else{dashboard.destroy();Qt.quit()}
 if(etape===0){creer();etape++;return}
 if(!JarvisEtat.enCours){verifier(JarvisEtat.erreur!=="","erreur absente");dashboard.ouvrir("chat");dashboard.destroy();Qt.quit()}
 ''',absent=True)
+
+    def test_close_reopen_and_screen_selection_keep_shell_and_chat_alive(self):
+        calls=self.executer('''
+if(etape===0){creer();AssistantEtat.brouillon="ne pas perdre";etape++;return}
+if(JarvisEtat.enCours)return
+if(etape===1||etape===3||etape===5){dashboard.close();verifier(!dashboard.visible,"fermeture incomplète");etape++;return}
+if(etape===2||etape===4||etape===6){dashboard.afficher(Quickshell.screens[0].name);verifier(dashboard.visible&&dashboard.fullscreen,"réouverture impossible");verifier(AssistantEtat.brouillon==="ne pas perdre","chat perdu");etape++;return}
+if(etape===7){JarvisEtat.executer("session",{},false);etape++;return}
+if(etape===8){dashboard.close();Qt.quit()}
+''')
+        self.assertTrue(any(c['data'].get('op')=='session' for c in calls),"Quickshell a quitté avant la réouverture")

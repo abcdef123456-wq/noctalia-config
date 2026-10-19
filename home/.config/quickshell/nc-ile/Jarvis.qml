@@ -1,13 +1,12 @@
 import QtQuick
-import QtQuick.Window
 import Quickshell
 
-Window {
+FloatingWindow {
     id: fen
     title: "JARVIS"
-    visible: true
-    visibility: Window.FullScreen
-    width: 1280; height: 800; minimumWidth: 860; minimumHeight: 600
+    visible: false
+    fullscreen: true
+    implicitWidth: 1280; implicitHeight: 800; minimumSize: Qt.size(860, 600)
     color: Couleurs.fond
     property bool pret: false
     property string page: "accueil"
@@ -17,7 +16,7 @@ Window {
     property string moduleId: ""
     property string resultatOp: ""
     readonly property var moduleCourant: JarvisEtat.modules.find(m => m.id === moduleId) || ({})
-    readonly property bool materielDisponible: !(moduleCourant.hardware || moduleCourant.requires_local_hardware) || JarvisEtat.etat.deploy_mode !== "server" || JarvisEtat.etat.pc_agent_connected === true
+    readonly property bool materielDisponible: !(moduleCourant.hardware || moduleCourant.requires_local_hardware) || JarvisEtat.etat.deploy_mode !== "server"
     readonly property var navigation: [
         {id:"accueil",nom:Reglages.t("Vue d’ensemble", "Overview"),icone:"space_dashboard"},
         {id:"chat",nom:"Conversation",icone:"chat"}, {id:"modules",nom:Reglages.t("Modules", "Tools"),icone:"extension"},
@@ -29,11 +28,13 @@ Window {
         {id:"services",nom:"Services",icone:"dns"},
         {id:"deploiement",nom:Reglages.t("Déploiement", "Deployment"),icone:"cloud_upload"}
     ]
-    Component.onCompleted: { pret = true; JarvisEtat.ouvert = true; JarvisEtat.actualiser() }
+    Component.onCompleted: { pret = true }
     onVisibleChanged: { JarvisEtat.ouvert = visible; if (pret && visible) JarvisEtat.actualiser() }
-    onClosing: { JarvisEtat.ouvert = false; attente = null }
+    onClosed: close()
+    function close() { attente = null; visible = false; JarvisEtat.ouvert = false }
+    function afficher(nom) { surEcran(nom); fullscreen = true; visible = true; contentItem.forceActiveFocus() }
     function surEcran(nom) {
-        var ecrans = Qt.application.screens
+        var ecrans = Quickshell.screens
         for (var i=0;i<ecrans.length;i++) if (ecrans[i].name===nom) { screen=ecrans[i]; return }
     }
     function ouvrir(id) {
@@ -80,9 +81,10 @@ Window {
         function onTermine(op, succes) {
             if (op === "config.update" && succes) { fen.valeurs = {}; fen.selection = {} }
             if ((op === "session.reset" || op === "conversation.resume") && succes) AssistantEtat.effacer()
+            if (op === "session.update" && succes) AssistantEtat.lireReglages()
         }
     }
-    Shortcut { sequence: "F11"; onActivated: fen.visibility = fen.visibility === Window.FullScreen ? Window.Maximized : Window.FullScreen }
+    Shortcut { sequence: "F11"; onActivated: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
     Shortcut { sequence: "Escape"; onActivated: { if (fen.attente) fen.attente = null; else fen.close() } }
 
     component Note: Texte { width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText; secondaire: true }
@@ -117,7 +119,8 @@ Window {
             anchors.right:parent.right; anchors.rightMargin:24; anchors.verticalCenter:parent.verticalCenter; spacing:10
             Texte { anchors.verticalCenter:parent.verticalCenter; text: JarvisEtat.enCours ? Reglages.t("Connexion…", "Connecting…") : (JarvisEtat.etat.online ? Reglages.t("En ligne", "Online") : Reglages.t("Non connecté", "Disconnected")); color:JarvisEtat.etat.online ? Couleurs.vert : Couleurs.texteSec }
             JarvisBouton { texte:Reglages.t("Actualiser", "Refresh"); enabled:!JarvisEtat.enCours; onClic:JarvisEtat.actualiser() }
-            JarvisBouton { texte:"F11"; onClic:fen.visibility=fen.visibility===Window.FullScreen?Window.Maximized:Window.FullScreen }
+            JarvisBouton { texte:"F11"; onClic:{fen.fullscreen=!fen.fullscreen;fen.maximized=!fen.fullscreen} }
+            JarvisBouton { texte:Reglages.t("L’île", "Island"); onClic:{fen.close();Quickshell.execDetached([Quickshell.env("HOME")+"/.local/bin/nc-jarvis","ile"])} }
             JarvisBouton { texte:"×"; onClic:fen.close() }
         }
     }
@@ -177,7 +180,7 @@ Window {
                         {t:"Telegram",v:(JarvisEtat.etat.gateway||{}).telegram_configured?Reglages.t("Configuré", "Configured"):Reglages.t("Non configuré", "Not configured")},
                         {t:"Discord",v:(JarvisEtat.etat.gateway||{}).discord_configured?Reglages.t("Configuré", "Configured"):Reglages.t("Non configuré", "Not configured")},
                         {t:Reglages.t("Hébergement", "Hosting"),v:JarvisEtat.etat.deploy_mode||"—"},
-                        {t:Reglages.t("Relais PC", "PC relay"),v:JarvisEtat.etat.pc_agent_connected?Reglages.t("Connecté", "Connected"):Reglages.t("Non connecté", "Not connected")}
+                        {t:Reglages.t("Matériel", "Hardware"),v:JarvisEtat.etat.deploy_mode==="server"?Reglages.t("Hôte serveur", "Server host"):Reglages.t("Ce PC", "This PC")}
                     ]
                     Rectangle {
                         required property var modelData
@@ -214,7 +217,7 @@ Window {
                 }
                 Note { text:(JarvisEtat.modules.find(m=>m.id===fen.moduleId)||{}).description||"" }
                 Note { visible:fen.moduleId!=="" && fen.moduleCourant.enabled!==true; text:Reglages.t("Module désactivé : active-le dans ses réglages, puis redémarre le gateway pour appliquer le changement.", "Tool disabled: enable it in settings, then restart the gateway to apply the change.") }
-                Note { visible:fen.moduleId!=="" && !fen.materielDisponible; text:Reglages.t("Ce module demande le relais matériel du PC. Prépare-le depuis Déploiement, puis vérifie sa connexion au serveur.", "This tool needs the PC hardware relay. Prepare it from Deployment, then check its server connection.") }
+                Note { visible:fen.moduleId!=="" && !fen.materielDisponible; text:Reglages.t("Le dépôt actuel n’a plus de relais PC : les commandes matérielles concernent uniquement la machine hébergeant JARVIS. Utilise le déploiement local pour piloter ce bureau.", "The current repository no longer has a PC relay: hardware commands target the JARVIS host. Use local deployment to control this desktop.") }
                 JarvisBouton { visible:fen.moduleId!==""; texte:Reglages.t("Configurer ce module", "Configure this tool"); enabled:JarvisEtat.administration; onClic:fen.configurerGroupe(fen.moduleId) }
                 Flow {
                     width:parent.width; spacing:8
@@ -242,13 +245,14 @@ Window {
             Column {
                 id:col; width:parent.width; spacing:16
                 Section { text:Reglages.t("Modèle et conversation active", "Model and active conversation") }
-                Note { text:Reglages.t("Ces réglages concernent aussi les bots mobiles. Les modèles disponibles sont fournis par ton moteur, sans liste codée en dur.", "These settings also affect mobile bots. Available models come from your engine.") }
+                Note { text:Reglages.t("Ces réglages concernent aussi les bots mobiles. Choisis le moteur, le modèle et la réflexion dans les réglages rapides ci-dessous.", "These settings also affect mobile bots. Choose the engine, model and reasoning in quick settings below.") }
+                AssistantReglages { width:parent.width; height:420; Component.onCompleted:AssistantEtat.lireReglages() }
                 Flow {
                     width:parent.width; spacing:8
                     Action { texte:Reglages.t("Voir les modèles", "Available models"); onClic:{fen.resultatOp="models";JarvisEtat.executer("models",{},false)} }
                     Action { texte:Reglages.t("Session active", "Active session"); onClic:{fen.resultatOp="session";JarvisEtat.executer("session",{},false)} }
                     Action { texte:Reglages.t("Consommation", "Usage"); onClic:{fen.resultatOp="usage";JarvisEtat.executer("usage",{},false)} }
-                    Action { texte:Reglages.t("Changer les réglages", "Change settings"); onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session partagée", "Apply to shared session"),[fen.champ("model","Modèle"),fen.champ("effort","Effort (low, medium, high, xhigh, max)"),fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, always-proceed)")]) }
+                    Action { texte:Reglages.t("Modes et permissions AGY", "AGY modes and permissions"); visible:AssistantEtat.moteur==="agy"; onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session partagée", "Apply to shared session"),[fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, always-proceed)")]) }
                     Action { texte:Reglages.t("Nouvelle conversation", "New conversation"); onClic:{fen.resultatOp="session.reset";fen.attente={op:"session.reset",params:{},titre:Reglages.t("Réinitialiser la session partagée", "Reset shared session")}} }
                 }
                 Loader { width:parent.width; active:!!fen.selection.op; sourceComponent:pFormulaire }
@@ -360,12 +364,11 @@ Window {
                     JarvisBouton { texte:Reglages.t("Déployer sur ce PC…", "Deploy on this PC…"); primaire:true; onClic:JarvisEtat.terminal("deployer") }
                     JarvisBouton { texte:Reglages.t("Déployer sur un serveur SSH…", "Deploy on an SSH server…"); onClic:JarvisEtat.terminal("serveur") }
                     JarvisBouton { texte:Reglages.t("Connecter un serveur existant…", "Connect an existing server…"); onClic:AssistantEtat.configurer() }
-                    JarvisBouton { texte:Reglages.t("Relier le matériel de ce PC…", "Connect this PC’s hardware…"); onClic:JarvisEtat.terminal("agent") }
                 }
                 Section { text:Reglages.t("Un backend, plusieurs accès", "One backend, multiple clients") }
                 Note { text:Reglages.t("Les assistants d’installation s’ouvrent dans un terminal pour les clés et l’authentification SSH. Ils préparent les environnements Python, conservent les fichiers existants et proposent les services utilisateur. Rien ne démarre en ouvrant ce tableau de bord.", "Setup opens in a terminal for keys and SSH authentication. It prepares Python environments, preserves existing files and proposes user services. Opening this dashboard starts no backend.") }
                 Note { text:Reglages.t("Le gateway écoute sur 127.0.0.1:8000 ; le runner reste privé sur 8080. Pour le bureau distant : tunnel HTTPS ou VPN vers le gateway. Telegram en polling et Discord utilisent des connexions sortantes.", "The gateway binds to 127.0.0.1:8000; the runner stays private on 8080. For a remote desktop: use an HTTPS tunnel or VPN to the gateway. Telegram polling and Discord use outbound connections.") }
-                Note { text:Reglages.t("Prérequis du moteur : Python 3.11+, Git et Antigravity CLI authentifié sur l’hôte du runner. L’agent matériel PC est facultatif ; il n’est jamais activé automatiquement.", "Engine prerequisites: Python 3.11+, Git and authenticated Antigravity CLI on the runner host. The PC hardware agent is optional and never enabled automatically.") }
+                Note { text:Reglages.t("Prérequis : Python 3.11+, Git et le CLI choisi (agy, Codex, Claude Code ou OpenCode) installé et authentifié sur l’hôte du runner. Les commandes matérielles s’exécutent sur cet hôte ; le dépôt a supprimé le relais PC distant.", "Prerequisites: Python 3.11+, Git and your chosen CLI (agy, Codex, Claude Code or OpenCode), installed and signed in on the runner host. Hardware commands run on that host; the repository removed the remote PC relay.") }
             }
         }
     }

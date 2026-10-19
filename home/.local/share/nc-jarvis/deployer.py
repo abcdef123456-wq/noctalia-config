@@ -14,7 +14,7 @@ import zipfile
 from datetime import datetime
 
 REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
-REVISION='554bbf077c0b50baa25f61dc53c0c6e434cda0a9'
+REVISION='8867dd093c43a5e5d3f0a13d3e14600e57edc96a'
 
 
 def ask(message, default=False):
@@ -69,8 +69,8 @@ def unit_quote(value):
 def units(backend, overlay):
     result={}
     for role,port in (('runner',8080),('gateway',8000)):
-        folder=backend/('home-runner' if role=='runner' else 'render-gateway')
-        module='main:app' if role=='runner' else 'nc_gateway:app'
+        folder=backend/('home-runner' if role=='runner' else 'gateway')
+        module='nc_runner:app' if role=='runner' else 'nc_gateway:app'
         args=[folder/'.venv/bin/uvicorn',module,'--app-dir',folder,'--host','127.0.0.1','--port',str(port)]
         result['assistant-'+role+'.service']='\n'.join([
             '[Unit]','Description=JARVIS '+role+' (Noctalia)', 'After=network.target', '', '[Service]',
@@ -82,7 +82,7 @@ def units(backend, overlay):
 
 
 def configure(backend, mode):
-    paths=[backend/'.env',backend/'home-runner/.env',backend/'render-gateway/.env']
+    paths=[backend/'.env',backend/'home-runner/.env',backend/'gateway/.env']
     configs=[read_env(p) for p in paths]
     keys={c['SECRET_KEY'] for c in configs if c.get('SECRET_KEY') and not c['SECRET_KEY'].lower().startswith('change_me')}
     if len(keys)>1:raise ValueError('Les composants ont des clés différentes ; harmonise-les avant le déploiement.')
@@ -90,6 +90,10 @@ def configure(backend, mode):
     for config in reversed(configs):current.update(config)
     changes={'SECRET_KEY':next(iter(keys),secrets.token_hex(32)), 'DEPLOY_MODE':mode,
              'HOME_SERVER_URL':current.get('HOME_SERVER_URL','http://127.0.0.1:8080')}
+    initial=current.get('NC_JARVIS_ENGINE','agy')
+    engine=input('Moteur initial : agy, codex, claude, opencode ['+initial+'] : ').strip() or initial
+    if engine not in ('agy','codex','claude','opencode'):raise ValueError('Moteur inconnu.')
+    changes['NC_JARVIS_ENGINE']=engine
     print('Les clés existantes sont conservées. Une saisie secrète vide conserve sa valeur.')
     for key,label,secret in [('TELEGRAM_TOKEN','Token Telegram',True),('TELEGRAM_ALLOWED_USER_IDS','IDs Telegram autorisés',False),
                               ('DISCORD_TOKEN','Token Discord',True),('DISCORD_ALLOWED_USER_IDS','IDs Discord autorisés',False)]:
@@ -142,7 +146,7 @@ def deploy(mode, target):
     if any(c in str(backend) for c in '\n\r:'):raise ValueError('Chemin non pris en charge.')
     # Garder le dossier de données d'une instance existante : une unité sauvegardée
     # ne suffit pas à éviter de relancer les bots sur une base vierge ailleurs.
-    for role,folder in (('runner','home-runner'),('gateway','render-gateway')):
+    for role,folder in (('runner','home-runner'),('gateway','gateway')):
         unit=Path.home()/'.config/systemd/user'/('assistant-'+role+'.service')
         if unit.exists():
             working=next((line.split('=',1)[1].strip().strip('"') for line in unit.read_text().splitlines() if line.startswith('WorkingDirectory=')),None)
@@ -155,17 +159,17 @@ def deploy(mode, target):
     if not ask('Préparer ce backend (Git, venv et dépendances Python) ?'):return
     checkout(backend)
     # Le guide utilise deux venv ; aucune installation pip globale.
-    for folder in ('home-runner','render-gateway'):
+    for folder in ('home-runner','gateway'):
         directory=backend/folder
         if not (directory/'.venv/bin/python').exists():run([sys.executable,'-m','venv',directory/'.venv'])
         python=directory/'.venv/bin/python'
         run([python,'-m','pip','install','-r',directory/'requirements.txt'])
-        if folder=='render-gateway':run([python,'-m','pip','install','-r',backend/'requirements.txt'])
+        if folder=='gateway':run([python,'-m','pip','install','-r',backend/'requirements.txt'])
     secret=configure(backend,mode)
     connection=Path.home()/'.local/state/nc-jarvis/connection.conf'
     merge_env(connection,dict(URL='http://127.0.0.1:8000',SECRET_KEY=secret,USER_ID=getpass.getuser(),TIMEOUT='180'))
     overlay=Path.home()/'.local/share/nc-jarvis/server';overlay.mkdir(parents=True,exist_ok=True)
-    for name in ('nc_gateway.py','nc_management.py'):
+    for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py'):
         data=resource('server/'+name)
         (overlay/name).write_bytes(data)
     service_dir=Path.home()/'.config/systemd/user';service_dir.mkdir(parents=True,exist_ok=True)
@@ -180,8 +184,7 @@ def deploy(mode, target):
         run(['systemctl','--user','daemon-reload'])
         if ask('Activer et démarrer/redémarrer ces deux services maintenant ?'):
             run(['systemctl','--user','enable',*generated]);run(['systemctl','--user','restart',*generated])
-    if not shutil.which('agy') and not (Path.home()/'.gemini/antigravity-cli/agy').exists():
-        print('Moteur non prêt : installe Antigravity CLI et authentifie-le avec agy login sur cette machine.')
+    print('Choisis ensuite un moteur dans l’île : agy, Codex, Claude Code ou OpenCode. Le CLI choisi doit être installé et authentifié sur la machine du runner.')
     client=Path.home()/'.config/nc/assistant.conf'
     if not client.exists() or ask('Remplacer la connexion client existante par ce backend local ?'):
         if client.exists():shutil.copy2(client,client.with_name('assistant.conf.backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')))
@@ -195,38 +198,11 @@ def bundle(path):
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr('__main__.py','from deployer import main\nmain()\n')
         z.writestr('deployer.py',resource('deployer.py'))
-        for name in ('nc_gateway.py','nc_management.py'):z.writestr('server/'+name,resource('server/'+name))
+        for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py'):z.writestr('server/'+name,resource('server/'+name))
 
 
 def agent():
-    if not sys.stdin.isatty():raise ValueError('Terminal interactif nécessaire.')
-    path=Path.home()/'.config/nc/assistant.conf'
-    if path.exists() and path.stat().st_mode&0o077:raise ValueError('Protège assistant.conf avec chmod 600 avant de configurer le relais.')
-    config=read_env(path)
-    if not config.get('URL') or not config.get('SECRET_KEY'):raise ValueError('Configure d’abord le gateway distant avec nc-assistant configurer.')
-    from urllib.parse import urlsplit
-    parsed=urlsplit(config['URL'])
-    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:raise ValueError('URL du gateway invalide.')
-    print('Le relais autorise le gateway choisi à piloter le matériel de ce PC (presse-papiers, fenêtres, commandes système).')
-    if not ask('Préparer ce relais matériel facultatif ?'):return
-    backend=Path.home()/'.local/share/jarvis-bis-pc-agent'
-    checkout(backend)
-    if not (backend/'.venv-agent/bin/python').exists():run([sys.executable,'-m','venv',backend/'.venv-agent'])
-    run([backend/'.venv-agent/bin/python','-m','pip','install','aiohttp','python-dotenv','httpx'])
-    merge_env(backend/'.env',dict(DEPLOY_MODE='pc-agent',HOME_SERVER_URL=config['URL'],SECRET_KEY=config['SECRET_KEY']))
-    content='\n'.join(['[Unit]','Description=JARVIS PC relay','After=graphical-session.target network.target',
-                       'PartOf=graphical-session.target','','[Service]','WorkingDirectory='+unit_quote(backend),
-                       'EnvironmentFile='+unit_quote(backend/'.env'),
-                       'ExecStart='+unit_quote(backend/'.venv-agent/bin/python')+' '+unit_quote(backend/'pc-agent/agent.py'),
-                       'Restart=on-failure','RestartSec=5','UMask=0077','NoNewPrivileges=true','PrivateTmp=true',
-                       '','[Install]','WantedBy=graphical-session.target',''])
-    path=Path.home()/'.config/systemd/user/assistant-pc-agent.service'
-    if path.is_symlink():raise ValueError('Service symbolique : aucune copie.')
-    if ask('Installer et démarrer ce relais pendant ta session graphique ?'):
-        path.parent.mkdir(parents=True,exist_ok=True)
-        if path.exists():shutil.copy2(path,path.with_name(path.name+'.backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')))
-        path.write_text(content);run(['systemctl','--user','daemon-reload'])
-        run(['systemctl','--user','enable','--now','assistant-pc-agent.service'])
+    raise ValueError("Le dépôt JARVIS actuel a supprimé le relais PC. Les fonctions matérielles s’exécutent sur la machine hébergeant JARVIS ; aucun ancien relais n’est installé.")
 
 
 def remote(host):
