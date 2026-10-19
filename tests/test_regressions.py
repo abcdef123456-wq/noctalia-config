@@ -325,12 +325,17 @@ MODE=files
 
 @unittest.skipUnless(shutil.which('qs'), 'Quickshell requis pour la vue hors écran')
 class OuvertureVue(unittest.TestCase):
-    def verifier_vue(self, scenario, bureaux='[{id:1},{id:2},{id:3}]', choisi=1):
+    def verifier_vue(self, scenario, bureaux='[{id:1},{id:2},{id:3}]', choisi=1, avec_scene=False, avant_ouverture=''):
         # Les vrais calculs et animations de Vue.qml, avec un écran et des bureaux simulés.
         # Aucune connexion Hyprland ni création de surface layer-shell sur la session réelle.
         source = (QML / 'Vue.qml').read_text()
         mouvement = source[source.index('        readonly property string anim:'):source.index('        Item {\n            id: scene')]
-        intro = next(l for l in source.splitlines() if 'Behavior on entree {' in l)
+        intro = source[source.index('    property bool partant:'):source.index('    property real limiteCapture:')]
+        if avec_scene:
+            debut = source.index('        Item {\n            id: scene')
+            mouvement += source[debut:source.index('            Repeater {', debut)]
+            mouvement += '''Rectangle {id:bureauTest;x:zone.bx+zone.dec;y:zone.by;width:zone.fw;height:zone.fh}
+}'''
         qml = '''import QtQuick
 import QtQuick.Window
 import Quickshell
@@ -340,17 +345,16 @@ ShellRoot {
  function pixel(x,y){return {pixelDelta:{x:x,y:y},angleDelta:{x:0,y:0}}}
  Window {id:v;visible:true;width:1600;height:1000
   property var bureaux:BUREAUX;property int choisi:CHOISI;property var traine:null
-  property bool partant:false;property real entree:0
   INTRO
-  Component.onCompleted: entree=1
-  Item {id:zone;width:1400;height:800
+  Component.onCompleted: {AVANT;fin=0}
+  Item {id:zone;x:28;y:120;width:1400;height:800
    readonly property real mw:v.width;readonly property real mh:v.height
    MOUVEMENT
   }
  }
  SCENARIO
  Timer {interval:1800;running:true;onTriggered:{console.error("Délai dépassé");Qt.exit(3)}}
-}'''.replace('BUREAUX', bureaux).replace('CHOISI', str(choisi)).replace('INTRO', intro).replace('MOUVEMENT', mouvement).replace('SCENARIO', scenario)
+}'''.replace('BUREAUX', bureaux).replace('CHOISI', str(choisi)).replace('INTRO', intro).replace('MOUVEMENT', mouvement).replace('SCENARIO', scenario).replace('AVANT', avant_ouverture)
         qml = qml.replace('Qt.quit()', 'Qt.exit(controle.echec ? 2 : 0)')
         with tempfile.TemporaryDirectory(prefix='nc-vue-test-') as d:
             root = Path(d)
@@ -416,6 +420,51 @@ ShellRoot {
  }}
  Timer {interval:350;running:true;onTriggered:{verifier(zone.glisse&&zone.pos>0,"Molette horizontale ignorée");Qt.quit()}}
 ''')
+
+    def test_opening_and_closing_use_same_geometry_in_reverse(self):
+        for choisi in (1, 2, 3):
+            with self.subTest(bureau=choisi):
+                self.verifier_vue('''
+ function rectangleBureau(){
+  var a=bureauTest.mapToItem(v.contentItem,0,0),b=bureauTest.mapToItem(v.contentItem,bureauTest.width,bureauTest.height)
+  return {x:a.x,y:a.y,w:b.x-a.x,h:b.y-a.y}
+ }
+ function pleinEcran(){
+  var r=rectangleBureau()
+  verifier(Math.abs(r.x)<0.001&&Math.abs(r.y)<0.001,"Le bureau grandeur réelle doit être à son emplacement")
+  verifier(Math.abs(r.w-v.width)<0.001&&Math.abs(r.h-v.height)<0.001,"Dimensions grandeur réelle incorrectes")
+ }
+ Timer {interval:120;running:true;onTriggered:{
+  var r=rectangleBureau()
+  verifier(v.fin>0&&v.fin<1&&r.w>zone.fw&&r.w<v.width,"L'ouverture doit réduire le bureau grandeur réelle")
+ }}
+ Timer {interval:300;running:true;onTriggered:{
+  var r=rectangleBureau()
+  verifier(v.fin===0&&Math.abs(r.w-zone.fw)<0.001,"La vue doit atteindre la miniature")
+  verifier(Math.abs(r.x-zone.x-zone.bx-zone.dec)<0.001&&Math.abs(r.y-zone.y-zone.by)<0.001,"Emplacement de la miniature incorrect")
+  v.partant=true;v.fin=1
+  verifier(Math.abs(rectangleBureau().w-r.w)<0.001,"Pas de saut au début de la fermeture")
+ }}
+ Timer {interval:420;running:true;onTriggered:{
+  var r=rectangleBureau()
+  verifier(v.fin>0&&v.fin<1&&r.w>zone.fw&&r.w<v.width,"La fermeture doit agrandir la même miniature")
+ }}
+ Timer {interval:650;running:true;onTriggered:{pleinEcran();Qt.quit()}}
+''', choisi=choisi, avec_scene=True, avant_ouverture='pleinEcran()')
+
+    def test_closing_during_opening_reverses_without_position_jump(self):
+        self.verifier_vue('''
+ Timer {interval:80;running:true;onTriggered:{
+  var avant=bureauTest.mapToItem(v.contentItem,0,0),taille=bureauTest.mapToItem(v.contentItem,bureauTest.width,bureauTest.height)
+  var phase=v.fin
+  v.partant=true;v.fin=1
+  var apres=bureauTest.mapToItem(v.contentItem,0,0),tailleApres=bureauTest.mapToItem(v.contentItem,bureauTest.width,bureauTest.height)
+  verifier(Math.abs(v.fin-phase)<0.001,"Le zoom ne doit pas repartir de zéro")
+  verifier(Math.abs(apres.x-avant.x)<0.001&&Math.abs(apres.y-avant.y)<0.001,"Pas de saut de position à l'inversion")
+  verifier(Math.abs(tailleApres.x-taille.x)<0.001&&Math.abs(tailleApres.y-taille.y)<0.001,"Pas de saut de taille à l'inversion")
+ }}
+ Timer {interval:430;running:true;onTriggered:{verifier(v.fin===1,"Retour grandeur réelle incomplet");Qt.quit()}}
+''', avec_scene=True)
 
 
 @unittest.skipUnless(shutil.which('qs'), 'Quickshell requis pour la capture hors écran')

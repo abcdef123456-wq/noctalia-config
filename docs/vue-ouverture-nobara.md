@@ -29,6 +29,18 @@ sur le PC Nobara reste à confirmer par un essai réel.
 Aucun délai fixe de démarrage, sous-processus ou timer supplémentaire n'est ajouté. L'introduction existante et les
 choix d'animation sont conservés. Ce changement est commun aux distributions ; il ne dépend pas d'un nom de machine.
 
+## Ouverture inverse de la fermeture
+
+À la demande de l'utilisateur, l'ouverture reprend désormais le trajet de fermeture en sens inverse : le bureau
+part à sa taille réelle, à sa place sur l'écran, puis recule jusqu'à sa miniature. Un seul paramètre de zoom commande
+les deux sens, avec la même durée de 260 ms et la même courbe. Refermer pendant l'ouverture inverse le mouvement
+depuis sa position courante, sans le remettre au début.
+
+Le grossissement indépendant des miniatures et le glissement vertical des boutons de bureaux ont été retirés.
+Le bureau principal garde son opacité pendant le zoom ; ses voisins et les commandes apparaissent à mesure qu'il recule.
+La capture du bureau principal reste active pendant l'ouverture pour disposer de son image avant la fin du zoom.
+Sans effets, le passage est immédiat. Les protections contre la dérive du geste restent en place.
+
 Le comportement des animations et des événements de défilement est décrit dans la documentation primaire de Qt :
 [Behavior](https://doc.qt.io/qt-6/qml-qtquick-behavior.html) et
 [WheelHandler](https://doc.qt.io/qt-6/qml-qtquick-wheelhandler.html).
@@ -38,6 +50,8 @@ Le comportement des animations et des événements de défilement est décrit da
 Les tests QML hors écran couvrent l'actualisation du bureau pendant l'introduction, une première liste de bureaux
 arrivant après l'introduction, les petites dérives, la navigation horizontale volontaire et la molette.
 Ils vérifient aussi que la navigation conserve son animation après l'ouverture.
+Les tests de géométrie vérifient les positions et dimensions au début et à la fin des deux sens, depuis le premier,
+un bureau intermédiaire et le dernier bureau, ainsi que la fermeture pendant l'ouverture.
 
 À vérifier sur Nobara après mise à jour :
 

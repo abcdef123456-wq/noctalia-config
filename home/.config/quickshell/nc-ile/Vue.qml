@@ -81,9 +81,11 @@ PanelWindow {
         sortie.start()
     }
     property bool partant: false
-    property real fin: 0
+    // Même trajet dans les deux sens : 1 = bureau grandeur réelle, 0 = vue d'ensemble.
+    property real fin: 1
     readonly property int dureeFin: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 260
     Behavior on fin { NumberAnimation { duration: v.dureeFin; easing.type: Easing.InOutCubic } }
+    readonly property real entree: partant ? 1 : 1 - fin
     property real limiteCapture: 0
     Timer {
         id: sortie; interval: v.dureeFin + 20; repeat: true
@@ -148,10 +150,9 @@ PanelWindow {
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris ~= nil then hl.config({ input = { follow_mouse = _G.nc_vue_souris } }) _G.nc_vue_souris = nil end"])
     }
 
-    // Ouverture : léger zoom arrière, comme macOS
-    property real entree: 0
+    // Ouverture : reprendre exactement le zoom de fermeture, en sens inverse.
     Component.onCompleted: {
-        Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); entree = 1
+        Hyprland.refreshToplevels(); Hyprland.refreshMonitors(); fin = 0
         Etat.vuePause = false                      // une capture interrompue ne la laisse pas sans clavier
         Quickshell.execDetached(["hyprctl", "eval", "if _G.nc_vue_souris == nil then _G.nc_vue_souris = hl.get_config('input:follow_mouse') end hl.config({ input = { follow_mouse = 0 } })"])
         // Écarter les images des fenêtres fermées ou restaurées depuis la dernière ouverture.
@@ -161,7 +162,6 @@ PanelWindow {
         Etat.vueImages = images
     }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
-    Behavior on entree { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 220; easing.type: Easing.OutCubic } }
 
     // ── Fond comme le carrousel (Super + W) : un cadre sous la barre, le fond d'écran de cet écran flouté ──
     readonly property int hautBarre: 42
@@ -197,7 +197,6 @@ PanelWindow {
     Item {
         id: ecran
         anchors.fill: parent
-        opacity: v.entree
         layer.enabled: true                          // flou calculé une fois, gardé en image (pas à chaque image du cube)
         Rectangle { anchors.fill: parent; color: Couleurs.carte }
         // Flouté ici (la version floutée du carrousel est en WebP, que Qt ne lit pas toujours) ; petite image : flou léger
@@ -216,7 +215,7 @@ PanelWindow {
         x: v.bord; y: v.hautBarre + v.bord; width: v.width - 2 * v.bord; height: v.height - y - v.bord
         radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
         border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
-        opacity: v.entree * (1 - v.fin)
+        opacity: 1 - v.fin
     }
     Item {
         anchors.fill: parent
@@ -232,9 +231,9 @@ PanelWindow {
     Row {
         id: rangee
         anchors.horizontalCenter: parent.horizontalCenter
-        y: cadre.y + 16 + (1 - v.entree) * -20
+        y: cadre.y + 16
         spacing: 10
-        opacity: v.entree * (1 - v.fin)
+        opacity: 1 - v.fin
         Repeater {
             model: v.bureaux
             Rectangle {
@@ -416,7 +415,7 @@ PanelWindow {
         }
         Item {
             id: scene
-            // Sortie : le bureau choisi grandit jusqu'à la taille de l'écran, à sa place (centre de l'écran)
+            // Ouverture / fermeture : même géométrie, du bureau grandeur réelle à la miniature et inversement.
             readonly property real grand: 1 + (1 / zone.e - 1) * v.fin
             readonly property real fx: zone.bx + zone.dec + zone.fw / 2 - zone.width / 2   // centre du bureau, depuis le milieu
             readonly property real fy: zone.by + zone.fh / 2 - zone.height / 2
@@ -441,7 +440,7 @@ PanelWindow {
                     x: zone.bx + zone.dec + (zone.anim === "fondu" ? 0 : dd * (zone.fw + 28))
                     y: zone.by
                     z: 10 - Math.abs(d)
-                    opacity: v.entree * (Math.abs(d) > 0.01 ? 1 - v.fin : 1)
+                    opacity: (Math.abs(d) > 0.01 ? 1 - v.fin : 1)
                              * (zone.anim === "fondu" ? Math.max(0, 1 - Math.abs(d)) : 1 - 0.45 * Math.min(1, Math.abs(d)))
                     // Charnière sur le bord commun avec le bureau du milieu, en perspective : une face de cube
                     transform: Rotation {
@@ -508,8 +507,6 @@ PanelWindow {
                                 visible: depot.containsDrag && v.traine !== case_.modelData
                                 color: Qt.rgba(1, 1, 1, 0.08); border.width: 2; border.color: Couleurs.accent
                             }
-                            opacity: v.entree
-                            scale: 0.92 + 0.08 * v.entree
 
                             Item {
                                 id: carte
@@ -548,7 +545,7 @@ PanelWindow {
                                             captureSource: case_.modelData.wayland
                                             // En direct seulement le bureau du milieu, à l'arrêt : pendant que le cube tourne ou à la sortie,
                                             // la dernière image (fluide, moins de travail pour la carte graphique)
-                                            live: !case_.estompee && Math.abs(face.d) < 0.01 && !zone.bouge && v.fin === 0
+                                            live: !case_.estompee && Math.abs(face.d) < 0.01 && !zone.bouge && !v.partant
                                             layer.enabled: true
                                             layer.smooth: true
                                         }
