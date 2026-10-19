@@ -73,7 +73,8 @@ En ligne de commande : `nc-settings assistant verifier`.
 |---|---|
 | Île : `Super + C`, puis bulle de conversation en haut à droite | Page Assistant avec saisie et réponses dans l’île |
 | Recherche Spotlight : `Assistant` | Ouvre cette même page ; également accessible parmi les points de navigation de l’île |
-| `Super + Alt + A`, ou application « Assistant distant » | Chat dans une fenêtre kitty flottante, centrée, avec les couleurs du terminal |
+| `Super + Alt + A`, ou application JARVIS | Cockpit natif plein écran ; voir [JARVIS](jarvis.md) |
+| Application « Assistant distant » | Chat dans une fenêtre kitty flottante, centrée, avec les couleurs du terminal |
 | `nc-assistant ouvrir` | Même fenêtre, depuis une commande |
 | `nc-assistant chat` | Chat dans le terminal courant ; `exit`, `Ctrl+C` ou fin d'entrée pour quitter |
 | `nc-assistant demander "question"` | Réponse en texte ; code de sortie non nul en cas d'échec |

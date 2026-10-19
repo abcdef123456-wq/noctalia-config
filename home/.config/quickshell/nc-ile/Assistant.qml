@@ -2,6 +2,8 @@ import QtQuick
 
 Item {
     id: page
+    property bool dansDashboard: false
+    property bool animationsActives: true
     function defiler(dy) { return defil.defiler(dy) }
     function bas() { Qt.callLater(() => { defil.cible = Math.max(0, defil.contentHeight - defil.height); defil.contentY = defil.cible }) }
     Component.onCompleted: bas()
@@ -27,11 +29,12 @@ Item {
         width: parent.width; height: 36
         Row {
             anchors.verticalCenter: parent.verticalCenter; spacing: 8
-            Etincelle { taille: 28; agent: "assistant"; tourne: AssistantEtat.enCours }
-            Texte { anchors.verticalCenter: parent.verticalCenter; text: "Assistant"; font.pixelSize: 20; font.weight: Font.Bold }
+            Etincelle { taille: 28; agent: "assistant"; tourne: page.animationsActives && AssistantEtat.enCours }
+            Texte { anchors.verticalCenter: parent.verticalCenter; text: "JARVIS"; font.pixelSize: 20; font.weight: Font.Bold }
         }
         Row {
             anchors.right: parent.right; spacing: 6
+            Bouton { visible: !page.dansDashboard; icone: "open_in_full"; aide: Reglages.t("Ouvrir le cockpit JARVIS", "Open JARVIS dashboard"); onClic: AssistantEtat.ouvrirDashboard() }
             Bouton { icone: "delete_sweep"; aide: Reglages.t("Effacer l’affichage local", "Clear local display")
                      enabled: !AssistantEtat.enCours && AssistantEtat.messages.length > 0; onClic: AssistantEtat.effacer() }
             Bouton { icone: "settings"; aide: Reglages.t("Configurer la connexion", "Configure connection"); onClic: AssistantEtat.configurer() }
@@ -81,7 +84,7 @@ Item {
         text: AssistantEtat.enCours ? Reglages.t("Réflexion en cours…", "Thinking…") : AssistantEtat.erreur
         color: AssistantEtat.erreur ? Couleurs.rouge : Couleurs.texteSec
         textFormat: Text.PlainText; wrapMode: Text.Wrap; elide: Text.ElideRight; maximumLineCount: 4
-        height: text ? Math.min(implicitHeight, 80) : 0
+        height: text ? (AssistantEtat.erreur ? 64 : 20) : 0
     }
     Rectangle {
         id: saisie

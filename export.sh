@@ -73,6 +73,11 @@ HOME_FILES=(
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
   .local/bin/nc-assistant
+  .local/bin/nc-jarvis
+  .local/share/nc-jarvis/actions.json
+  .local/share/nc-jarvis/deployer.py
+  .local/share/nc-jarvis/server/nc_gateway.py
+  .local/share/nc-jarvis/server/nc_management.py
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-fenetre
@@ -112,6 +117,7 @@ HOME_FILES=(
   .local/bin/cmatrix
   .local/bin/unimatrix
   .local/share/applications/nc-assistant.desktop
+  .local/share/applications/nc-jarvis.desktop
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
   .config/systemd/user/noctalia.service

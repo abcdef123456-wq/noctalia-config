@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=JARVIS
+Comment=Assistant chat and management dashboard
+Comment[fr]=Conversation et cockpit de gestion de l’assistant
+Exec="@HOME@/.local/bin/nc-jarvis" tableau
+Icon=dialog-information
+Terminal=false
+Categories=Network;

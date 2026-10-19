@@ -540,7 +540,7 @@ def aller(term, shell=0):
 # dans leur terminal (l'île montre « t'attend » quand l'IA le signale).
 JOURNAL = os.path.join(RUN, "agents.log")
 NOMS = {"claude": "Claude", "antigravity": "Antigravity"}
-NOMS["assistant"] = T("Assistant personnel", "Personal assistant")
+NOMS["assistant"] = "JARVIS"
 CMD = ("bash", "run_command", "run_shell_command", "shell", "exec_command", "local_shell", "terminal", "run_terminal_cmd")
 MODIF = ("edit", "multiedit", "replace", "replace_file_content", "multi_replace_file_content", "apply_patch", "patch",
          "str_replace", "str_replace_editor", "edit_file", "search_replace")

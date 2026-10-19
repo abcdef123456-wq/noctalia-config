@@ -1,0 +1,335 @@
+{
+  "shopping": [
+    {
+      "id": "list",
+      "label": "Voir les courses",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "add",
+      "label": "Ajouter des articles",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Articles",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "toggle",
+      "label": "Cocher ou décocher",
+      "fields": [
+        {
+          "key": "item_id",
+          "label": "Identifiant",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "clear_done",
+      "label": "Retirer les articles cochés",
+      "fields": [],
+      "readonly": false
+    },
+    {
+      "id": "clear_all",
+      "label": "Vider la liste",
+      "fields": [],
+      "readonly": false
+    }
+  ],
+  "moodle": [
+    {
+      "id": "devoirs",
+      "label": "Voir les devoirs",
+      "fields": [],
+      "readonly": true
+    }
+  ],
+  "expenses": [
+    {
+      "id": "summary",
+      "label": "Bilan du mois",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "add",
+      "label": "Ajouter une dépense",
+      "fields": [
+        {
+          "key": "amount",
+          "label": "Montant",
+          "kind": "number"
+        },
+        {
+          "key": "description",
+          "label": "Description",
+          "kind": "text"
+        },
+        {
+          "key": "category",
+          "label": "Catégorie",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "budget",
+      "label": "Budget",
+      "fields": [
+        {
+          "key": "subaction",
+          "label": "Action (status ou set)",
+          "kind": "text"
+        },
+        {
+          "key": "cap",
+          "label": "Plafond",
+          "kind": "number"
+        }
+      ],
+      "readonly": false
+    }
+  ],
+  "obsidian": [
+    {
+      "id": "overview",
+      "label": "Vue du coffre",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "search",
+      "label": "Chercher une note",
+      "fields": [
+        {
+          "key": "query",
+          "label": "Recherche",
+          "kind": "text"
+        }
+      ],
+      "readonly": true
+    },
+    {
+      "id": "note",
+      "label": "Créer une note",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Texte",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    }
+  ],
+  "focus": [
+    {
+      "id": "stats",
+      "label": "Statistiques",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "start",
+      "label": "Démarrer une séance",
+      "fields": [
+        {
+          "key": "duration",
+          "label": "Durée en minutes",
+          "kind": "number"
+        },
+        {
+          "key": "topic",
+          "label": "Sujet",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    }
+  ],
+  "ideas": [
+    {
+      "id": "list",
+      "label": "Voir les idées",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "incubate",
+      "label": "Développer une idée",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Idée",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    }
+  ],
+  "projects": [
+    {
+      "id": "list",
+      "label": "Voir les projets",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "cockpit",
+      "label": "Ouvrir un projet",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Nom",
+          "kind": "text"
+        }
+      ],
+      "readonly": true
+    }
+  ],
+  "inbox": [
+    {
+      "id": "radar",
+      "label": "Radar",
+      "fields": [
+        {
+          "key": "topic",
+          "label": "Sujet",
+          "kind": "text"
+        }
+      ],
+      "readonly": true
+    },
+    {
+      "id": "capture",
+      "label": "Enregistrer un lien",
+      "fields": [
+        {
+          "key": "url",
+          "label": "URL",
+          "kind": "text"
+        },
+        {
+          "key": "note",
+          "label": "Note",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    }
+  ],
+  "travel": [
+    {
+      "id": "plan",
+      "label": "Préparer un trajet",
+      "fields": [
+        {
+          "key": "destination",
+          "label": "Destination",
+          "kind": "text"
+        },
+        {
+          "key": "time",
+          "label": "Heure d’arrivée",
+          "kind": "text"
+        }
+      ],
+      "readonly": true
+    }
+  ],
+  "security_pin": [
+    {
+      "id": "status",
+      "label": "État de la protection",
+      "fields": [
+        {
+          "key": "user_id",
+          "label": "Identifiant utilisateur",
+          "kind": "number"
+        }
+      ],
+      "readonly": true
+    }
+  ],
+  "system_pc": [
+    {
+      "id": "hardware_health",
+      "label": "Santé du PC",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "windows",
+      "label": "Fenêtres",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "media",
+      "label": "Contrôle multimédia",
+      "fields": [
+        {
+          "key": "subaction",
+          "label": "Action (play-pause, next, volume…)",
+          "kind": "text"
+        },
+        {
+          "key": "value",
+          "label": "Valeur",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "lock",
+      "label": "Verrouiller le PC",
+      "fields": [],
+      "readonly": false
+    },
+    {
+      "id": "say",
+      "label": "Lire un texte",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Texte",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "clipboard_get",
+      "label": "Lire le presse-papiers",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "clipboard_set",
+      "label": "Écrire au presse-papiers",
+      "fields": [
+        {
+          "key": "text",
+          "label": "Texte",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "git_scan",
+      "label": "Projets Git",
+      "fields": [],
+      "readonly": true
+    }
+  ]
+}

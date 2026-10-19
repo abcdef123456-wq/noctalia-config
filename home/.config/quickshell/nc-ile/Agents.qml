@@ -24,7 +24,7 @@ Singleton {
         qwen: { nom: "Qwen", titre: "Qwen Code", couleur: "#7a6cf2", reglage: "QWEN_ILE" },
         kiro: { nom: "Kiro", titre: "Kiro", couleur: "#9b5cff", reglage: "KIRO_ILE" },
         amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" },
-        assistant: { nom: "Assistant", titre: "Assistant personnel", couleur: "#10b981", reglage: "ASSISTANT_ILE" }
+        assistant: { nom: "JARVIS", titre: "JARVIS", couleur: "#10b981", reglage: "ASSISTANT_ILE" }
     })
     function agent(s) { return s && ias[s.agent] ? s.agent : "claude" }
     function nom(s) { return ias[agent(s)].nom }

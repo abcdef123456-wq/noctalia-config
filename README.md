@@ -201,10 +201,12 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 ## Personnaliser sans perdre tes réglages
 
-L'[assistant personnel distant](docs/assistant-distant.md) est facultatif et disponible sur toutes les distributions
-prises en charge (Arch et dérivées, Fedora/Nobara, Debian/Ubuntu, openSUSE). Lance `nc-assistant configurer` avec l'URL
-et la clé de ton serveur, puis ouvre le chat avec **Super + Alt + A**. Aucun modèle ne tourne sur le PC.
-Il fonctionne aussi sans Quickshell ; l'île affiche son activité quand elle est disponible.
+[JARVIS](docs/jarvis.md) relie le chat de l’île à un cockpit extensible en plein écran (**Super + Alt + A**,
+ou application JARVIS). Il gère les modules, le modèle et la session, la mémoire, les rappels mobiles,
+Telegram/Discord et les services. **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs
+sur ce PC ou sur un serveur SSH. Le client n’exécute pas lui-même de modèle ; le backend JARVIS-BIS reste séparé.
+Le même client est fourni sur Arch, Fedora/Nobara, Debian/Ubuntu et openSUSE. Sans Quickshell, les commandes
+et le [chat terminal](docs/assistant-distant.md) restent accessibles. Aucun backend n’est installé ni démarré par `nc-maj`.
 
 Depuis un autre réseau que celui du serveur, une URL `192.168.x.x` ou `*.local` ne suffit pas : expose le gateway
 avec un tunnel HTTPS côté serveur (Cloudflare Tunnel, Tailscale ou Render), puis configure cette URL publique.

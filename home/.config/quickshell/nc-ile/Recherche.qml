@@ -203,7 +203,7 @@ Item {
         { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }
     ]
     readonly property var pagesIle: [
-        { t: "Assistant", k: "assistant chat ia distant conversation question", g: "chat", p: "assistant" },
+        { t: "JARVIS", k: "jarvis assistant chat ia distant conversation question", g: "chat", p: "assistant" },
         { t: Reglages.t("Son", "Sound"), k: "son volume audio sortie micro haut-parleurs casque sound output speakers headphones microphone", g: "volume_up", p: "son" },
         { t: "Wi-Fi", k: "wifi wi-fi réseau internet réseaux network networks", g: "wifi", p: "reseau" },
         { t: "Bluetooth", k: "bluetooth appareils casque souris devices headphones mouse", g: "bluetooth", p: "bluetooth" },

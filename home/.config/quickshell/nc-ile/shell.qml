@@ -24,6 +24,8 @@ ShellRoot {
     // (un message le dit) ; déclarée ici directement, c'est toute l'île qui ne se chargeait plus.
     property Component composantVue: null
     property var vues: []
+    // Cockpit chargé seulement à la demande ; aucune capture ni connexion de backend au démarrage.
+    property var jarvisFenetre: null
     Connections {
         target: Etat
         function onVueFenetresChanged() {
@@ -96,6 +98,21 @@ ShellRoot {
             if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
+        }
+        function jarvis(): void {
+            Etat.fermer()
+            if (!racine.jarvisFenetre) {
+                var composant = Qt.createComponent("Jarvis.qml")
+                if (composant.status !== Component.Ready) {
+                    console.warn("Cockpit JARVIS indisponible : " + composant.errorString())
+                    return
+                }
+                racine.jarvisFenetre = composant.createObject(racine)
+            }
+            if (racine.jarvisFenetre) {
+                racine.jarvisFenetre.surEcran(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+                racine.jarvisFenetre.visible = true; racine.jarvisFenetre.requestActivate()
+            }
         }
     }
 }

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""JARVIS : cockpit natif, API d'administration et déploiement local/SSH."""
+import argparse
+import contextlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import types
+import uuid
+
+BIN=Path(__file__).resolve().parent
+SHARE=BIN.parent/'share/nc-jarvis'
+
+
+def client():
+    m=types.ModuleType('nc_assistant_client');m.__file__=str(BIN/'nc-assistant')
+    exec(compile((BIN/'nc-assistant').read_text(),m.__file__,'exec'),m.__dict__)
+    return m
+
+
+def catalogue():
+    base=json.loads((SHARE/'actions.json').read_text())
+    perso=Path.home()/'.config/nc/jarvis-actions.json'
+    if perso.exists():
+        if perso.stat().st_size>65536:raise ValueError('Catalogue personnel trop volumineux')
+        extra=json.loads(perso.read_text())
+        if not isinstance(extra,dict):raise ValueError('Catalogue personnel invalide')
+        for tool, actions in extra.items():
+            if not isinstance(actions,list) or any(not isinstance(a,dict) or not isinstance(a.get('id'),str) for a in actions):raise ValueError('Actions personnelles invalides')
+            merged={a['id']:a for a in base.get(tool,[])}
+            merged.update({a['id']:a for a in actions});base[tool]=list(merged.values())
+    return base
+
+
+def clean(value, secret, level=0):
+    if level>10:return None
+    if isinstance(value,str):
+        value=value.replace(secret,'[masqué]') if secret else value
+        value=re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]','',value)
+        return ''.join(c for c in value if c in '\n\t' or (ord(c)>=32 and not 127<=ord(c)<=159))[:16000]
+    if isinstance(value,list):return [clean(v,secret,level+1) for v in value[:256]]
+    if isinstance(value,dict):return {str(k)[:200]:clean(v,secret,level+1) for k,v in list(value.items())[:256] if not re.search(r'^(secret_key|telegram_token|discord_token)$',str(k),re.I)}
+    return value
+
+
+@contextlib.contextmanager
+def activity(m):
+    sid=uuid.uuid4().hex
+    m.maj_ile(sid,'debut')
+    try:yield
+    except BaseException:
+        m.maj_ile(sid,'fin');raise
+    else:m.maj_ile(sid,'fini',message='JARVIS a terminé')
+
+
+def request(body):
+    m=client();c=m.configuration()
+    op=body.get('op');p=body.get('params',{});confirmed=body.get('confirmed') is True
+    if not isinstance(p,dict):raise ValueError('Paramètres invalides')
+    if op=='overview':
+        data=m.api(c,'/api/status')
+        try:
+            data['management']=m.api(c,'/api/nc/manage',dict(op='capabilities',params={}))
+        except m.Erreur:
+            data['management']=dict(unavailable=True,message="Le chat reste disponible. Installe l’adaptateur de gestion avec le déploiement JARVIS pour activer le cockpit complet.")
+        data['catalogue']=catalogue()
+        return clean(data,c['SECRET_KEY'])
+    reads={'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','reminders'}
+    writes={'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','action','reminder.create','reminder.cancel','briefing'}
+    if op not in reads|writes:raise ValueError('Opération inconnue')
+    if op in writes and not confirmed:raise ValueError('Confirmation requise')
+    with (m.requete_unique(c) if op in writes else contextlib.nullcontext()), (activity(m) if op in writes else contextlib.nullcontext()):
+        if op=='action':
+            if not isinstance(p.get('tool'),str) or not isinstance(p.get('action'),str) or not isinstance(p.get('params',{}),dict):raise ValueError('Action invalide')
+            data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
+        elif op=='briefing':data=m.api(c,'/api/briefing',dict(force_refresh=False))
+        elif op=='reminders':data=m.api(c,'/api/reminders')
+        elif op=='reminder.create':
+            allowed={'platform','chat_id','target_id','message','delay','remind_at','recurrence'}
+            if set(p)-allowed:raise ValueError('Paramètre de rappel inconnu')
+            if p.get('platform') not in ('telegram','discord'):raise ValueError('Choisis Telegram ou Discord pour recevoir ce rappel.')
+            data=m.api(c,'/api/reminders',p)
+        elif op=='reminder.cancel':
+            ident=str(p.get('id',''))
+            if not ident.isascii() or not ident.isdigit():raise ValueError('Identifiant de rappel invalide')
+            data=m.api(c,'/api/reminders/'+ident+'/cancel',{})
+        else:data=m.api(c,'/api/nc/manage',dict(op=op,params=p,confirmed=confirmed))
+    return clean(data,c['SECRET_KEY'])
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('commande',nargs='?',default='tableau',choices=['tableau','ile','requete','deployer','serveur','agent','console'])
+    args,rest=parser.parse_known_args()
+    try:
+        if args.commande in ('tableau','ile'):
+            if rest:raise ValueError('Arguments inconnus')
+            cmd=['qs','-c','nc-ile','ipc','call','ile']+(['jarvis'] if args.commande=='tableau' else ['page','assistant'])
+            try:subprocess.run(cmd,check=True,timeout=8,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            except (OSError,subprocess.SubprocessError):
+                print('Cockpit Quickshell indisponible : ouverture du chat terminal.',file=sys.stderr)
+                subprocess.run([sys.executable,str(BIN/'nc-assistant'),'ouvrir'],check=True,timeout=8)
+                return 0
+        elif args.commande in ('deployer','serveur','agent'):
+            sys.path.insert(0,str(SHARE))
+            import deployer
+            if args.commande=='serveur' and not rest:rest=['--serveur',input('Adresse SSH (utilisateur@serveur) : ').strip()]
+            if args.commande=='agent':rest=['--agent']
+            deployer.main(rest)
+        elif args.commande=='requete':
+            raw=sys.stdin.buffer.readline(65537)
+            if len(raw)>65536:raise ValueError('Requête trop volumineuse')
+            body=json.loads(raw)
+            if not isinstance(body,dict):raise ValueError('Requête invalide')
+            print(json.dumps(dict(ok=True,data=request(body)),ensure_ascii=False),flush=True)
+        else:
+            print('JARVIS — status, modules, models, memory, conversations, reminders ; exit pour quitter.')
+            while True:
+                op=input('Jarvis > ').strip()
+                if op in ('exit','quit'):break
+                if op in ('status','modules'):op='overview'
+                try:print(json.dumps(request(dict(op=op)),ensure_ascii=False,indent=2))
+                except Exception:print('Requête impossible. Vérifie nc-assistant verifier.')
+        return 0
+    except (KeyboardInterrupt,EOFError):return 130
+    except Exception as e:
+        # Aucun détail brut d'exception réseau/fichier/serveur susceptible d'exposer un token.
+        message='JARVIS indisponible. Vérifie la connexion avec nc-assistant verifier et la présence de l’adaptateur serveur.'
+        if isinstance(e,ValueError) or type(e).__module__=='nc_assistant_client':message=str(e)[:400]
+        if args.commande=='requete':print(json.dumps(dict(ok=False,error=message),ensure_ascii=False),flush=True)
+        else:print(message,file=sys.stderr)
+        return 1
+
+
+if __name__=='__main__':sys.exit(main())

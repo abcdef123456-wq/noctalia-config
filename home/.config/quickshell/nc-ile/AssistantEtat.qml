@@ -69,6 +69,7 @@ Singleton {
     }
     function effacer() { if (!enCours) { messages = []; erreur = "" } }
     function configurer() { Quickshell.execDetached(["kitty", "--class", "nc-reglages", "-e", bin + "nc-reglages", "assistant"]) }
+    function ouvrirDashboard() { Quickshell.execDetached([bin + "nc-jarvis", "tableau"]) }
 
     Process {
         id: requete

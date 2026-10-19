@@ -74,7 +74,7 @@ end
 
 -- ── Applis et barre ──────────────────────────────────────────────────────────
 touche(SUPER .. " + code:36", cmd(terminal),                       trad("Applis et barre|Terminal", "Terminal"))
-touche(SUPER .. " + ALT + code:38", cmd("~/.local/bin/nc-assistant ouvrir"), trad("Applis et barre|Assistant personnel distant", "Remote personal assistant"))
+touche(SUPER .. " + ALT + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad("Applis et barre|Cockpit JARVIS", "JARVIS dashboard"))
 touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
 touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))

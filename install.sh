@@ -1245,6 +1245,7 @@ elif { true </dev/tty; } 2>/dev/null && ask "$(t "Connecter un assistant distant
 fi
 
 # ── 5. Étapes système (une question par étape) ───────────────────────────────
+info "$(t "JARVIS facultatif : nc-jarvis tableau ; déploiement local/serveur dans le cockpit ou nc-settings → Agents IA." "Optional JARVIS: nc-jarvis tableau; local/server deployment in the dashboard or nc-settings → AI agents.")"
 if [ "$MODE" = full ]; then
   SBK="$BK/system"
   sbackup() { sudo mkdir -p "$SBK"; local f; for f in "$@"; do [ -e "$f" ] && sudo cp -a --parents "$f" "$SBK/"; done; sudo chown -R "$(id -u):$(id -g)" "$SBK"; }

@@ -1446,6 +1446,12 @@ class Ecran:
             return self.lignes_n
         lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
         if SECTIONS[self.sec] == "Agents IA (coucou)":
+            for action, nom, aide in [
+                ("tableau", T("Ouvrir le cockpit JARVIS", "Open JARVIS dashboard"), T("Chat et gestion plein écran, partagés avec l’île.", "Fullscreen chat and management, shared with the island.")),
+                ("deployer", T("Déployer JARVIS sur ce PC", "Deploy JARVIS on this PC"), T("Assistant d’installation facultatif ; aucun backend installé par nc-maj.", "Optional setup; nc-update does not install a backend.")),
+                ("serveur", T("Déployer JARVIS sur serveur SSH", "Deploy JARVIS on an SSH server"), T("Saisit la cible SSH, prépare les services et conserve les réglages existants.", "Enter an SSH host, prepare services and preserve existing settings.")),
+            ]:
+                lignes.append({"genre": "assistant", "action": action, "nom": nom, "aide": aide})
             lignes.insert(0, {"genre": "assistant", "action": "verifier",
                               "nom": T("Tester l'assistant distant", "Test remote assistant"),
                               "aide": T("Teste l'URL, la clé, le certificat TLS et l'état du runner ; la clé n'est jamais affichée.",
@@ -1783,15 +1789,20 @@ class Ecran:
         curses.def_prog_mode()
         curses.endwin()
         try:
-            code = configurer_assistant()
-        except KeyboardInterrupt:
+            action = it.get("action") if isinstance(it, dict) else None
+            if action in ("tableau", "deployer", "serveur"):
+                code = subprocess.run([sys.executable, os.path.join(BIN, "nc-jarvis"), action]).returncode
+            else:
+                code = configurer_assistant()
+        except (KeyboardInterrupt, OSError):
             code = 130
         finally:
             curses.reset_prog_mode()
             curses.flushinp()
             self.e.touchwin()
             self.e.refresh()
-        self.statut(T("Connexion de l'assistant enregistrée", "Assistant connection saved") if code == 0 else
+        message = T("Action JARVIS terminée", "JARVIS action finished") if action in ("tableau", "deployer", "serveur") else T("Connexion de l'assistant enregistrée", "Assistant connection saved")
+        self.statut(message if code == 0 else
                     T("Configuration interrompue ou échouée", "Configuration interrupted or failed"),
                     erreur=code != 0)
 
