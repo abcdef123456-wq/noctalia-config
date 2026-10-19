@@ -101,11 +101,21 @@ touche(SUPER .. " + SHIFT + code:27", cmd("~/.local/bin/nc-video"), trad("Applis
 touche(SUPER .. " + SHIFT + code:24", function()
     local w = hl.get_active_window()
     if not w then return end
+    -- Un cockpit Quickshell partage son processus avec les surfaces de l'île,
+    -- absentes de get_windows() : sa « dernière fenêtre » n'est pas la dernière interface.
+    if w.class == "org.quickshell" then
+        hl.dispatch(hl.dsp.window.close())
+        return
+    end
     -- Terminal kitty : nc-fermer demande, aux flèches, s'il faut fermer alors qu'un programme y tourne encore
     local comm = w.pid and io.open("/proc/" .. w.pid .. "/comm", "r")
     if comm then
         local nom = comm:read("l")
         comm:close()
+        if nom == "quickshell" or nom == "qs" then
+            hl.dispatch(hl.dsp.window.close())
+            return
+        end
         if nom == "kitty" then
             hl.exec_cmd(string.format("~/.local/bin/nc-fermer %d %s", w.pid, w.address))
             return
