@@ -329,8 +329,12 @@ assert(launched[3] == "a 'quote' and $(false)")
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             depot = root / "repo/home"
-            (depot / ".local/bin").mkdir(parents=True)
-            shutil.copy2(BIN / "nc-assistant", depot / ".local/bin/nc-assistant")
+            fichiers = [".local/bin/nc-assistant", ".config/quickshell/nc-ile/LogoAssistant.qml",
+                        ".config/quickshell/nc-ile/assets/assistant-animation.png"]
+            for rel in fichiers:
+                cible = depot / rel
+                cible.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO / "home" / rel, cible)
             (depot / ".config/nc").mkdir(parents=True)
             (depot / ".config/nc/assistant.conf").write_text("SHOULD NOT REPLACE")
             for famille in ("arch", "fedora", "debian", "suse", "other"):
@@ -354,6 +358,60 @@ assert(launched[3] == "a 'quote' and $(false)")
                         self.assertEqual(conf.read_text(), "PERSONAL SECRET")
                         self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
                         self.assertTrue(os.access(home / ".local/bin/nc-assistant", os.X_OK))
+                        for rel in fichiers:
+                            self.assertEqual((home / rel).read_bytes(), (depot / rel).read_bytes())
+
+
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis pour le logo hors écran")
+class LogoAssistant(unittest.TestCase):
+    def test_logo_animates_stops_when_hidden_or_disabled_and_unloads_for_other_agents(self):
+        qml = '''import QtQuick
+import QtQuick.Window
+import Quickshell
+ShellRoot {
+ property var logo:null; property int etape:0
+ function sprite(item) {
+  if(item.objectName==="nc-assistant-logo") return item
+  for(var i=0;i<item.children.length;i++){var s=sprite(item.children[i]);if(s)return s}
+  return null
+ }
+ Window {id:w;visible:true;width:64;height:64;color:"#17171f"}
+ Component.onCompleted: {
+  var c=Qt.createComponent("Etincelle.qml")
+  if(c.status!==Component.Ready){console.error(c.errorString());Qt.exit(2);return}
+  logo=c.createObject(w.contentItem,{taille:64,agent:"assistant",tourne:true})
+ }
+ Timer {interval:240;running:true;repeat:true;onTriggered:{
+  var s= sprite(logo)
+  if(etape===0){if(!s||!s.running||s.currentFrame===0){Qt.exit(3);return};logo.tourne=false}
+  else if(etape===1){if(s.running||s.currentFrame!==0){Qt.exit(4);return};logo.tourne=true;logo.visible=false}
+  else if(etape===2){if(s.running||s.currentFrame!==0){Qt.exit(5);return};logo.visible=true}
+  else if(etape===3){if(!s.running||s.currentFrame===0){Qt.exit(6);return};Reglages.effets="aucun"}
+  else if(etape===4){if(s.running||s.currentFrame!==0){Qt.exit(7);return};logo.agent="claude"}
+  else if(etape===5){if(s){Qt.exit(8);return};console.log("ASSISTANT_LOGO_LIFECYCLE_OK");Qt.quit()}
+  etape++
+ }}
+ Timer {interval:2400;running:true;onTriggered:Qt.exit(9)}
+}'''
+        with tempfile.TemporaryDirectory(prefix="nc-logo-test-") as d:
+            root = Path(d)
+            (root / "runtime").mkdir(mode=0o700)
+            (root / "assets").mkdir()
+            src = REPO / "home/.config/quickshell/nc-ile"
+            for nom in ("Etincelle.qml", "LogoAssistant.qml", "assets/assistant-animation.png"):
+                shutil.copy2(src / nom, root / nom)
+            (root / "Agents.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
+            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous";function val(k,d){return k==="EFFETS"?effets:d}}')
+            (root / "qmldir").write_text('singleton Agents 1.0 Agents.qml\nsingleton Reglages 1.0 Reglages.qml\n'
+                                         'LogoAssistant 1.0 LogoAssistant.qml\nEtincelle 1.0 Etincelle.qml\n')
+            (root / "shell.qml").write_text(qml)
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
+                       XDG_RUNTIME_DIR=str(root / "runtime"), XDG_CACHE_HOME=str(root / "cache"))
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env,
+                               capture_output=True, text=True, timeout=5)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("ASSISTANT_LOGO_LIFECYCLE_OK", r.stdout + r.stderr)
 
 
 class ReglagesAssistant(unittest.TestCase):

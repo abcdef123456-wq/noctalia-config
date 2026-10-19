@@ -56,6 +56,13 @@ car le contrat HTTP fourni ne décrit pas de flux de tokens.
 Sans Quickshell, le lanceur de repli Noctalia accepte `? question` pour ouvrir le chat kitty avec cette question.
 La réponse apparaît dans kitty. Les commandes, le raccourci et le briefing restent disponibles.
 
+Le logo de l'assistant dans l'île reprend l'emblème blanc animé de `pfp.mp4` fourni par l'utilisateur.
+Les images sont livrées dans un atlas PNG transparent (161 images de 64 × 64, à 100/3 images par seconde),
+affiché par QtQuick : aucun codec vidéo, QtMultimedia ou ffmpeg n'est nécessaire sur la machine cible.
+Un fond noir rond conserve le contraste du logo blanc, y compris dans les thèmes clairs.
+Il s'anime pendant l'activité, reste fixe au repos et lorsque les effets sont désactivés, et s'arrête quand il est masqué.
+Le même logo apparaît dans la pilule, la page des agents et les réponses du Spotlight ; le chat kitty garde son affichage texte.
+
 ## Activité, concurrence et limites du contrat serveur
 
 Les requêtes passent par `nc-claude assistant debut|fini|fin`, avec le même verrou et la même écriture atomique

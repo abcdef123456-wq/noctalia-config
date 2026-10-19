@@ -2,6 +2,7 @@
 //   claude : étincelle à huit rayons (tourne) ; gemini : étoile à quatre branches (tourne)
 //   antigravity : arche en dégradé ; opencode : carré dans un carré ; codex : invite >_ ; cursor : cube ;
 //   copilot : lunettes ; qwen : hexagone ; kiro : fantôme ; amp : « A » en flèche (flottent)
+//   assistant : emblème animé fourni par l'utilisateur (atlas PNG, immobile au repos)
 import QtQuick
 
 Canvas {
@@ -9,7 +10,7 @@ Canvas {
     property real taille: 18
     property bool tourne: false
     property string agent: "claude"
-    readonly property bool tournante: agent === "claude" || agent === "gemini" || agent === "assistant"
+    readonly property bool tournante: agent === "claude" || agent === "gemini"
     property color couleur: (Agents.ias[agent] || Agents.ias.claude).couleur
     width: taille; height: taille
     onCouleurChanged: requestPaint()
@@ -27,10 +28,7 @@ Canvas {
         }
         switch (agent) {
         case "assistant":
-            c.beginPath(); c.moveTo(r, h * 0.05)
-            c.quadraticCurveTo(r, r, w * 0.95, r); c.quadraticCurveTo(r, r, r, h * 0.95)
-            c.quadraticCurveTo(r, r, w * 0.05, r); c.quadraticCurveTo(r, r, r, h * 0.05); c.fill()
-            break
+            break  // rendu par LogoAssistant, sans ajouter de rotation au mouvement de la vidéo
         case "antigravity": {
             var g = c.createLinearGradient(0, 0, w, 0)
             g.addColorStop(0, k); g.addColorStop(0.5, "#a374f0"); g.addColorStop(1, "#f0736d")
@@ -94,6 +92,15 @@ Canvas {
         }
         }
     }
+    Loader {
+        anchors.fill: parent
+        active: e.agent === "assistant"
+        sourceComponent: Item {
+            // Garder le blanc sur noir de la vidéo, y compris avec un thème clair.
+            Rectangle { anchors.fill: parent; radius: width / 2; color: "#000000" }
+            LogoAssistant { anchors.fill: parent; anime: e.tourne && Reglages.val("EFFETS", "tous") !== "aucun" }
+        }
+    }
     RotationAnimation on rotation { running: e.tourne && e.visible && e.tournante; from: 0; to: 360; duration: 2600; loops: Animation.Infinite }
     Behavior on rotation { enabled: !e.tourne; NumberAnimation { duration: 300 } }
     onTourneChanged: if (!tourne) { rotation = 0; flotte = 0 }
@@ -102,7 +109,7 @@ Canvas {
     property real flotte: 0
     transform: Translate { y: -e.flotte * e.taille * 0.16 }
     SequentialAnimation on flotte {
-        running: e.tourne && e.visible && !e.tournante; loops: Animation.Infinite
+        running: e.tourne && e.visible && !e.tournante && e.agent !== "assistant"; loops: Animation.Infinite
         NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
         NumberAnimation { to: 0; duration: 900; easing.type: Easing.InOutSine }
     }
