@@ -40,6 +40,19 @@ partagent le reste de la ligne, l’énergie prend un bandeau) : sans changement
 d’avant. L’ordre et les modules masqués sont gardés dans `~/.local/state/nc/ile/centre.json` (`nc-ile-memo`, fichier
 privé écrit d’un bloc) et relus au démarrage de l’île.
 
+## Presse-papiers
+
+L’historique est gardé d’une session à l’autre (`~/.local/state/nc/ile/presse.json`, les images en fichiers privés
+0600 dans `~/.local/state/nc/ile/images`, écrits d’un bloc par `nc-ile-memo`) : 50 textes et 12 images au plus, 64 Mio
+d’images en tout ; les plus anciens non épinglés partent, leurs fichiers aussi. La capture (`nc-presse-capture`, lancé
+par `wl-paste --watch`) ignore toujours ce qu’un gestionnaire de mots de passe marque comme secret
+(`x-kde-passwordManagerHint`, `x-nc-secret`) et ne journalise jamais le contenu. Dans la page : recherche, filtre
+Tout / Textes / Images, épinglés en tête (épingle sur la carte), suppression d’une carte (croix ou Suppr), aperçu
+complet d’un texte long (flèche), « Coller en texte brut » (recopie en `text/plain`, ferme l’île et envoie Ctrl + V
+à la fenêtre active par `hyprctl dispatch sendshortcut`), « Effacer » (les épinglés restent). Clavier : ↑ ↓ choisir,
+Entrée recopier, Suppr supprimer, `/` ou Ctrl + F chercher, Échap vider la recherche. Réglage `ILE_PRESSE` (non : plus
+de capture).
+
 ## Intégration Google
 
 `nc-settings → Intégration Google` : **Google dans l’île** (`GOOGLE_INTEGRATION`, non par défaut) et, en dessous,

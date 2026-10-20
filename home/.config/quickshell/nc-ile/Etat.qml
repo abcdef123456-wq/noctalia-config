@@ -214,57 +214,10 @@ Singleton {
             onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
     Connections { target: Reglages; function onValeursChanged() { if (!lireMeteo.running) lireMeteo.running = true } }
 
-    // ── Presse-papiers : les 12 derniers textes ou images copiés (en mémoire seulement ; jamais ce qu'un gestionnaire
-    //    de mots de passe marque comme secret) ; un clic les recopie ──
-    property var presse: []
-    property bool pressePrete: false
-    Process {
-        running: true
-        command: ["sh", "-c", "d=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\"; [ ! -d \"$d\" ] || find \"$d\" -maxdepth 1 -type f -name '*.png' -delete"]
-        onExited: etat.pressePrete = true
-    }
-    Process {
-        running: etat.pressePrete && Reglages.val("ILE_PRESSE", "oui") !== "non"
-        command: ["wl-paste", "--watch", "sh", "-c",
-            "t=$(wl-paste --list-types 2>/dev/null); case \"$t\" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0;; esac; "
-            + "if printf '%s' \"$t\" | grep -q '^image/png'; then d=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\"; mkdir -p \"$d\"; "
-            + "f=$(mktemp \"$d/XXXXXXXX.png\"); if wl-paste -t image/png > \"$f\"; then printf 'I:%s:%s\\n' \"$(wc -c < \"$f\")\" \"$f\"; else rm -f -- \"$f\"; fi; "
-            + "elif printf '%s' \"$t\" | grep -qE '^(text/plain|UTF8_STRING|STRING|TEXT)'; then "
-            + "printf 'T:'; wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | tr '\\n\\r' '\\037\\037'; printf '\\n'; fi"]
-        stdout: SplitParser {
-            onRead: ligne => {
-                var e = null
-                if (ligne.indexOf("T:") === 0) {
-                    var t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
-                    if (t.trim() === "") return
-                    e = { genre: "texte", texte: t }
-                } else if (ligne.indexOf("I:") === 0) {
-                    var image = ligne.match(/^I:(\d+):(.*)$/)
-                    if (image) e = { genre: "image", chemin: image[2], octets: +image[1] }
-                }
-                if (!e) return
-                e.t = Date.now()
-                var l = etat.presse.filter(x => !(x.genre === "texte" && e.genre === "texte" && x.texte === e.texte))
-                l.unshift(e)
-                // 12 entrées et 64 Mio de PNG au plus : les fichiers évincés sont supprimés aussi.
-                var total = l.reduce((n, x) => n + (x.octets || 0), 0), retirees = []
-                while (l.length > 12 || total > 64 * 1024 * 1024) {
-                    var ancienne = l.pop(); total -= ancienne.octets || 0
-                    if (ancienne.genre === "image") retirees.push(ancienne.chemin)
-                }
-                etat.presse = l
-                if (retirees.length) Quickshell.execDetached(["rm", "-f", "--"].concat(retirees))
-            }
-        }
-    }
-    function recopier(e) {
-        if (e.genre === "texte") Quickshell.execDetached(["wl-copy", "--", e.texte])
-        else Quickshell.execDetached(["sh", "-c", "wl-copy -t image/png < \"$1\"", "sh", e.chemin])
-    }
-    function oublierPresse() {
-        presse = []
-        Quickshell.execDetached(["sh", "-c", "rm -rf \"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-presse\""])
-    }
+    // ── Presse-papiers : voir PressePapiers.qml (gardé d'une session à l'autre, épinglés, limites) ──
+    readonly property var presse: PressePapiers.liste
+    function recopier(e) { PressePapiers.recopier(e) }
+    function oublierPresse() { PressePapiers.toutEffacer() }
 
     // ── Enregistrement d'écran (nc-video) : point rouge et durée dans la pilule ; un clic dessus l'arrête ──
     property real debutVideo: 0

@@ -8,7 +8,9 @@ temporaire puis renommage : jamais de fichier à moitié écrit).
   nc-ile-memo oublier NOM          le supprimer
   nc-ile-memo image NOM < PNG      garder une image (presse-papiers) dans ~/.local/state/nc/ile/images/NOM.png (0600) ;
                                    affiche son chemin
-  nc-ile-memo images-garder NOM…   ne garder que ces images (les autres sont supprimées)
+  nc-ile-memo images-garder NOM…   ne garder que ces images : les autres, vieilles d'au moins une minute (une image
+                                   copiée à l'instant n'est jamais touchée), sont supprimées — au démarrage de l'île
+  nc-ile-memo images-supprimer NOM…  supprimer ces images (entrées évincées ou supprimées)
 Le contenu n'est jamais journalisé.
 """
 import json
@@ -80,11 +82,17 @@ def main():
             garder = {n for n in a[1:] if NOM.fullmatch(n)}
             dossier = DOSSIER / "images"
             if dossier.is_dir():
+                import time
                 for f in dossier.glob("*.png"):
-                    if f.stem not in garder:
+                    if f.stem not in garder and time.time() - f.stat().st_mtime > 60:
                         f.unlink(missing_ok=True)
             return 0
-        print("nc-ile-memo lire NOM | ecrire NOM | oublier NOM | image NOM | images-garder NOM…", file=sys.stderr)
+        if a and a[0] == "images-supprimer":
+            for n in a[1:]:
+                if NOM.fullmatch(n):
+                    (DOSSIER / "images" / (n + ".png")).unlink(missing_ok=True)
+            return 0
+        print("nc-ile-memo lire NOM | ecrire NOM | oublier NOM | image NOM | images-garder NOM… | images-supprimer NOM…", file=sys.stderr)
         return 1
     except (OSError, ValueError) as e:
         print("nc-ile-memo : " + str(e), file=sys.stderr)       # jamais le contenu

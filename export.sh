@@ -101,6 +101,7 @@ HOME_FILES=(
   .local/bin/nc-icones
   .local/bin/nc-ile-etat
   .local/bin/nc-ile-memo
+  .local/bin/nc-presse-capture
   .local/bin/nc-verrou-media
   .local/bin/nc-media
   .local/bin/nc-touches

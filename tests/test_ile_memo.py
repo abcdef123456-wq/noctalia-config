@@ -50,8 +50,12 @@ class Memo(unittest.TestCase):
         self.assertEqual(self.lancer("image", "pasimage", entree=b"GIF89a").returncode, 1)
         self.lancer("image", "def456", entree=PNG)
         self.assertEqual(self.lancer("images-garder", "def456").returncode, 0)
-        self.assertEqual(sorted(p.name for p in chemin.parent.iterdir()), ["def456.png"])
-        self.assertEqual(self.lancer("images-garder").returncode, 0)
+        self.assertEqual(sorted(p.name for p in chemin.parent.iterdir()), ["abc123.png", "def456.png"], "une image toute fraîche n'est jamais purgée")
+        vieux = os.stat(chemin).st_mtime - 600
+        os.utime(chemin, (vieux, vieux))
+        self.assertEqual(self.lancer("images-garder", "def456").returncode, 0)
+        self.assertEqual(sorted(p.name for p in chemin.parent.iterdir()), ["def456.png"], "une orpheline d'il y a dix minutes est purgée")
+        self.assertEqual(self.lancer("images-supprimer", "def456", "../x").returncode, 0)
         self.assertEqual(list(chemin.parent.iterdir()), [])
 
 
