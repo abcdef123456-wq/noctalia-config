@@ -5,8 +5,11 @@ import gateway as runner_gateway
 import httpx
 from fastapi import Depends, HTTPException, Request
 from nc_management import dispatch, runner_connections, RunnerHttpx
+import nc_telegram
 
 app = upstream.app
+# Polling Telegram : les messages reçus pendant que le PC était éteint sont traités au démarrage (nc_telegram)
+nc_telegram.installer(upstream)
 # Toutes les fonctions HTTP upstream (bureau, Telegram et Discord) gardent leur contrat.
 # Seule leur fabrique de clients emprunte les connexions du gateway actif.
 runner_gateway.httpx = RunnerHttpx(httpx, runner_connections)

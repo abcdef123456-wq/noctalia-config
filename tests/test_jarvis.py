@@ -65,7 +65,7 @@ class Deploiement(unittest.TestCase):
             p=Path(d)/'bootstrap.pyz';self.d.bundle(p)
             import zipfile
             with zipfile.ZipFile(p) as z:
-                self.assertEqual(set(z.namelist()),{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py'})
+                self.assertEqual(set(z.namelist()),{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py','server/nc_telegram.py'})
             r=subprocess.run([sys.executable,str(p),'--help'],capture_output=True,text=True,timeout=5)
             self.assertEqual(r.returncode,0,r.stderr)
             self.assertIn('--mode',r.stdout)

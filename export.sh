@@ -81,6 +81,7 @@ HOME_FILES=(
   .local/share/nc-jarvis/server/nc_management.py
   .local/share/nc-jarvis/server/nc_runner.py
   .local/share/nc-jarvis/server/nc_engines.py
+  .local/share/nc-jarvis/server/nc_telegram.py
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-fenetre
