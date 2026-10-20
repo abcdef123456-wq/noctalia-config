@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""nc-ile-memo : ce que l'île garde d'une session à l'autre (disposition du centre de contrôle, état des notifications,
+historique du presse-papiers), dans ~/.local/state/nc/ile/, en fichiers privés (0600) écrits d'un bloc (fichier
+temporaire puis renommage : jamais de fichier à moitié écrit).
+
+  nc-ile-memo lire NOM             le JSON gardé sous ce nom (« null » s'il n'y en a pas)
+  nc-ile-memo ecrire NOM < JSON    le garder (JSON sur l'entrée standard, 2 Mio au plus)
+  nc-ile-memo oublier NOM          le supprimer
+  nc-ile-memo image NOM < PNG      garder une image (presse-papiers) dans ~/.local/state/nc/ile/images/NOM.png (0600) ;
+                                   affiche son chemin
+  nc-ile-memo images-garder NOM…   ne garder que ces images (les autres sont supprimées)
+Le contenu n'est jamais journalisé.
+"""
+import json
+import os
+from pathlib import Path
+import re
+import sys
+
+DOSSIER = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "nc/ile"
+NOM = re.compile(r"[a-z0-9][a-z0-9_-]{0,60}")
+MAX = 2 * 1024 * 1024
+
+
+def chemin(nom, suffixe=".json", sous=None):
+    if not NOM.fullmatch(nom):
+        raise ValueError("nom invalide")
+    base = DOSSIER / sous if sous else DOSSIER
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return base / (nom + suffixe)
+
+
+def ecrire_prive(fichier, donnees):
+    """Écriture d'un bloc, fichier privé : temporaire 0600 puis renommage."""
+    tmp = fichier.with_name(fichier.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(donnees)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, fichier)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def main():
+    os.umask(0o077)
+    a = sys.argv[1:]
+    try:
+        if len(a) == 2 and a[0] == "lire":
+            f = chemin(a[1])
+            if not f.is_file():
+                print("null")
+                return 0
+            if f.stat().st_size > MAX:
+                raise ValueError("fichier trop gros")
+            sys.stdout.write(f.read_text(encoding="utf-8"))
+            return 0
+        if len(a) == 2 and a[0] == "ecrire":
+            brut = sys.stdin.buffer.read(MAX + 1)
+            if len(brut) > MAX:
+                raise ValueError("JSON trop gros (2 Mio au plus)")
+            json.loads(brut.decode("utf-8"))          # seulement du JSON valide
+            ecrire_prive(chemin(a[1]), brut)
+            return 0
+        if len(a) == 2 and a[0] == "oublier":
+            chemin(a[1]).unlink(missing_ok=True)
+            return 0
+        if len(a) == 2 and a[0] == "image":
+            brut = sys.stdin.buffer.read(64 * 1024 * 1024 + 1)
+            if not brut.startswith(b"\x89PNG\r\n\x1a\n") or len(brut) > 64 * 1024 * 1024:
+                raise ValueError("pas un PNG, ou plus de 64 Mio")
+            f = chemin(a[1], ".png", "images")
+            ecrire_prive(f, brut)
+            print(f)
+            return 0
+        if a and a[0] == "images-garder":
+            garder = {n for n in a[1:] if NOM.fullmatch(n)}
+            dossier = DOSSIER / "images"
+            if dossier.is_dir():
+                for f in dossier.glob("*.png"):
+                    if f.stem not in garder:
+                        f.unlink(missing_ok=True)
+            return 0
+        print("nc-ile-memo lire NOM | ecrire NOM | oublier NOM | image NOM | images-garder NOM…", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as e:
+        print("nc-ile-memo : " + str(e), file=sys.stderr)       # jamais le contenu
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -28,6 +28,18 @@ conservées ; une session qui reprend son travail réapparaît. Aucun fichier d�
 Validation isolée : `python3 -B -m unittest tests.test_island_pages tests.test_assistant_page -q`.
 Les essais QML nécessitent Quickshell et QtTest (dépendance de test uniquement).
 
+## Centre de contrôle personnalisable
+
+Le crayon en haut à droite du centre de contrôle ouvre le mode édition : chaque module (connexions, musique, nuit,
+mode jeu, luminosité, volume, énergie) montre un œil (masquer) et deux flèches (monter, descendre) ; les modules masqués
+sont listés en dessous, un clic les remontre ; « Réinitialiser » rend la disposition de départ, « Terminer » ferme le
+mode. Au moins un module reste visible. Clavier : ↑ ↓ choisissent un module, Maj + ↑ ↓ le déplacent, Espace ou Entrée
+le masquent ou le remontrent, Échap termine ; les boutons portent un nom d’accessibilité et une infobulle s’affiche
+en bas pendant le survol. Les modules se rangent en lignes de 168 points (deux pastilles s’empilent, les glissières se
+partagent le reste de la ligne, l’énergie prend un bandeau) : sans changement, la disposition est exactement celle
+d’avant. L’ordre et les modules masqués sont gardés dans `~/.local/state/nc/ile/centre.json` (`nc-ile-memo`, fichier
+privé écrit d’un bloc) et relus au démarrage de l’île.
+
 ## Intégration Google
 
 `nc-settings → Intégration Google` : **Google dans l’île** (`GOOGLE_INTEGRATION`, non par défaut) et, en dessous,
