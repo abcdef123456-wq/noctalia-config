@@ -83,6 +83,7 @@ HOME_FILES=(
   .local/share/nc-jarvis/server/nc_engines.py
   .local/share/nc-jarvis/server/nc_telegram.py
   .local/share/nc-jarvis/server/nc_noctalia.py
+  .local/share/nc-jarvis/server/nc_google.py
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-alertes
@@ -99,6 +100,7 @@ HOME_FILES=(
   .local/bin/nc-keys
   .local/bin/nc-icones
   .local/bin/nc-ile-etat
+  .local/bin/nc-ile-memo
   .local/bin/nc-verrou-media
   .local/bin/nc-media
   .local/bin/nc-touches

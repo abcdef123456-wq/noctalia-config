@@ -211,9 +211,13 @@ def identifier(value):
 
 
 async def dispatch(op, p, confirmed=False):
-    read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings'}
+    read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings','google.status','google.calendar'}
     write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','notify','noctalia'}
     if op not in read|write: raise ValueError
+    if op in ('google.status','google.calendar'):
+        # Google Agenda pour l'île, par le jeton Google de JARVIS (nc_google) ; jamais le jeton lui-même
+        import nc_google
+        return await nc_google.dispatch(op, p)
     if op=='noctalia':
         # Réglages du PC (nc_noctalia) : lecture sans confirmation, le reste avec ; seulement en déploiement local
         import nc_noctalia

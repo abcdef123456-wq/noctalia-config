@@ -72,7 +72,7 @@ def request(body):
             data['management']=dict(unavailable=True,message="Le chat reste disponible. Installe l’adaptateur de gestion avec le déploiement JARVIS pour activer le cockpit complet.")
         data['catalogue']=catalogue()
         return clean(data,c['SECRET_KEY'])
-    reads={'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','reminders','quick-settings'}
+    reads={'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','reminders','quick-settings','google.status','google.calendar'}
     writes={'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','action','reminder.create','reminder.cancel','briefing','notify','noctalia'}
     if op not in reads|writes:raise ValueError('Opération inconnue')
     if op in writes and not confirmed:raise ValueError('Confirmation requise')

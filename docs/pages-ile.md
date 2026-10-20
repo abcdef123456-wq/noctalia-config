@@ -27,3 +27,20 @@ conservées ; une session qui reprend son travail réapparaît. Aucun fichier d�
 
 Validation isolée : `python3 -B -m unittest tests.test_island_pages tests.test_assistant_page -q`.
 Les essais QML nécessitent Quickshell et QtTest (dépendance de test uniquement).
+
+## Intégration Google
+
+`nc-settings → Intégration Google` : **Google dans l’île** (`GOOGLE_INTEGRATION`, non par défaut) et, en dessous,
+un interrupteur par fonction (`GOOGLE_CALENDRIER`, oui). Sans l’interrupteur général, rien de Google n’apparaît et
+aucun appel n’est fait : les pages restent celles de quelqu’un qui n’a pas de compte Google relié. Les données passent
+par la connexion Google déjà faite pour JARVIS (`integrations/google-workspace/setup_oauth.py` côté JARVIS, qui écrit
+`token.json`) : le gateway rafraîchit le jeton et lit l’API, le jeton ne quitte jamais le serveur, l’île ne reçoit
+que les événements (`nc-jarvis requete`, op `google.calendar` ; `google.status` dit si c’est relié).
+
+Page **Calendrier** avec Google Agenda : un point coloré sous les jours qui ont des événements (une couleur par
+calendrier, tous les calendriers cochés dans Google Agenda), le prochain événement sous le titre, et au clic sur un
+jour son agenda (heure ou « Toute la journée », titre, lieu, calendrier). Chargement, erreur et état vide sont
+affichés ; « Actualiser » relit ; « + » ouvre JARVIS avec une demande de création d’événement déjà écrite (le jour
+choisi). Rien n’est demandé au démarrage de l’île : seulement à l’ouverture de la page, un mois à la fois, gardé
+5 minutes. Fuseau : `BRIEFING_TIMEZONE` du gateway, sinon Europe/Paris.
+

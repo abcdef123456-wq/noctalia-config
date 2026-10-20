@@ -274,7 +274,7 @@ SECTIONS_EN = {
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal",
-    "Agents IA (coucou)": "AI Agents (coucou)", "Mises à jour": "Updates", "Captures": "Screenshots",
+    "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
     "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System",
@@ -722,6 +722,18 @@ REGLAGES = [
         ("cursor", "Cursor", " Dans l'éditeur et en terminal (cursor-agent).", " In the editor and in the terminal (cursor-agent)."),
         ("copilot", "Copilot CLI", "", ""), ("qwen", "Qwen Code", "", ""), ("kiro", "Kiro", "", ""), ("amp", "Amp", "", ""))
 ] + [
+    # Google, par la connexion Google déjà faite pour JARVIS (integrations/google-workspace, setup_oauth.py) : rien dans
+    # l'île sans ce réglage, pour ne rien changer à l'affichage de ceux qui n'ont pas de compte Google relié
+    R("GOOGLE_INTEGRATION", "Intégration Google", L("Google dans l'île", "Google in the island"), "ouinon", "non",
+      L("Les services Google reliés à JARVIS (setup_oauth.py côté JARVIS : agenda, puis le reste). Non : rien de Google "
+        "n'apparaît dans l'île, aucun appel.",
+        "The Google services linked to JARVIS (setup_oauth.py on the JARVIS side: calendar, then the rest). No: nothing "
+        "from Google appears in the island, no request.")),
+    R("GOOGLE_CALENDRIER", "Intégration Google", L("Google Agenda dans le calendrier", "Google Calendar in the calendar"), "ouinon", "oui",
+      L("Un point coloré sous les jours qui ont des événements, le prochain événement, l'agenda du jour au clic ; lu à "
+        "l'ouverture de la page, gardé 5 minutes.",
+        "A colored dot under days with events, the next event, the day's agenda on click; read when the page opens, "
+        "kept 5 minutes.")),
     # Mises à jour
     R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "ile",
       L("Comptées toutes les 3 h (pacman, dnf ou apt, et Flatpak) ; dans l'île, page Système, un clic met tout à jour.",
