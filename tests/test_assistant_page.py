@@ -319,7 +319,7 @@ else if(etape===1){
 if(etape===0){
  creer();var entree=trouver(page,"nc-assistant-input")
  AssistantEtat.brouillon="/rapp 15m sortir le pain";entree.cursorPosition=5
- verifier(page.propositions.length===1,"préfixe avec arguments non reconnu")
+ verifier(page.propositions.length===2&&page.propositions[0].texte==="/rappel","préfixe avec arguments non reconnu (/rappel puis /rappels)")
  page.completer(0);verifier(AssistantEtat.brouillon==="/rappel 15m sortir le pain","arguments écrasés")
  verifier(entree.cursorPosition===7,"curseur déplacé au mauvais endroit")
  AssistantEtat.brouillon="/sh";entree.cursorPosition=3;page.completer(0)

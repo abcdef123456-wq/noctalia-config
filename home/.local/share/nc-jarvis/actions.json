@@ -331,5 +331,78 @@
       "fields": [],
       "readonly": true
     }
+  ],
+  "noctalia": [
+    {
+      "id": "etat",
+      "label": "État du PC (énergie, batterie, écrans, mises à jour, thème)",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "energie",
+      "label": "Profil d'énergie",
+      "fields": [
+        {
+          "key": "profil",
+          "label": "performance, equilibre ou eco (vide : lire)",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "theme",
+      "label": "Thème de Noctalia",
+      "fields": [
+        {
+          "key": "theme",
+          "label": "sombre ou clair (vide : lire)",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "fond",
+      "label": "Fond d'écran suivant",
+      "fields": [],
+      "readonly": false
+    },
+    {
+      "id": "ecran",
+      "label": "Projection (pc et externe éteignent un écran)",
+      "fields": [
+        {
+          "key": "mode",
+          "label": "pc, miroir, etendre ou externe (vide : état)",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    },
+    {
+      "id": "maj",
+      "label": "Mises à jour du système en attente",
+      "fields": [],
+      "readonly": true
+    },
+    {
+      "id": "reglage",
+      "label": "Un réglage de nc-reglages",
+      "fields": [
+        {
+          "key": "cle",
+          "label": "Clé (nc-reglages liste)",
+          "kind": "text"
+        },
+        {
+          "key": "valeur",
+          "label": "Nouvelle valeur (vide : lire)",
+          "kind": "text"
+        }
+      ],
+      "readonly": false
+    }
   ]
 }

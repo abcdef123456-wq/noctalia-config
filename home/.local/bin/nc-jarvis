@@ -73,13 +73,15 @@ def request(body):
         data['catalogue']=catalogue()
         return clean(data,c['SECRET_KEY'])
     reads={'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','reminders','quick-settings'}
-    writes={'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','action','reminder.create','reminder.cancel','briefing'}
+    writes={'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','action','reminder.create','reminder.cancel','briefing','notify','noctalia'}
     if op not in reads|writes:raise ValueError('Opération inconnue')
     if op in writes and not confirmed:raise ValueError('Confirmation requise')
     with (m.requete_unique(c) if op in writes else contextlib.nullcontext()), (activity(m) if op in writes else contextlib.nullcontext()):
         if op=='action':
             if not isinstance(p.get('tool'),str) or not isinstance(p.get('action'),str) or not isinstance(p.get('params',{}),dict):raise ValueError('Action invalide')
-            data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
+            # Les réglages du PC (catalogue noctalia) passent par l'adaptateur de gestion, pas par les outils upstream
+            if p['tool']=='noctalia':data=m.api(c,'/api/nc/manage',dict(op='noctalia',params=dict(action=p['action'],params=p.get('params',{})),confirmed=confirmed))
+            else:data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
         elif op=='briefing':data=m.api(c,'/api/briefing',dict(force_refresh=False))
         elif op=='reminders':data=m.api(c,'/api/reminders')
         elif op=='reminder.create':

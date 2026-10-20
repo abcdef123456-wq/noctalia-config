@@ -195,11 +195,17 @@ class Demarrage(unittest.TestCase):
         self.chemin = Path(self.tmp.name) / "offset.json"
         faux_telegram = types.ModuleType("telegram")
         faux_telegram.Update = Update
+        faux_telegram.BotCommand = lambda command, description: types.SimpleNamespace(command=command, description=description)
         faux_ext = types.ModuleType("telegram.ext")
         class TypeHandler:
             def __init__(self, type_, callback):
                 self.type_, self.callback = type_, callback
-        faux_ext.TypeHandler = TypeHandler
+        class CommandHandler:
+            def __init__(self, commands, callback):
+                self.commands, self.callback = commands, callback
+            async def callback(self, update, context):
+                pass
+        faux_ext.TypeHandler, faux_ext.CommandHandler = TypeHandler, CommandHandler
         self.anciens = {k: sys.modules.get(k) for k in ("telegram", "telegram.ext")}
         sys.modules.update({"telegram": faux_telegram, "telegram.ext": faux_ext})
         def restaurer():
@@ -211,8 +217,10 @@ class Demarrage(unittest.TestCase):
         self.addCleanup(restaurer)
 
     def faux_bot_module(self, app, token="123:abc"):
+        async def annuler(update, context):
+            pass
         return types.SimpleNamespace(TELEGRAM_TOKEN=token, BOT_COMMANDS=["start"], _stop_event=threading.Event(),
-                                     _polling_thread=None, _TELEGRAM_LOOP=None, get_application=lambda: app)
+                                     _polling_thread=None, _TELEGRAM_LOOP=None, get_application=lambda: app, cmd_annuler_rappel=annuler)
 
     def test_demarrage_garde_les_messages_en_attente_puis_polling_puis_arret(self):
         avant = datetime.datetime.fromtimestamp(time.time() - 60, UTC)
@@ -229,11 +237,13 @@ class Demarrage(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertEqual(bot.webhook, dict(drop_pending_updates=False), "les messages en attente ne sont plus jetés")
-        self.assertEqual(bot.commandes, ["start"])
+        self.assertEqual([getattr(c, "command", c) for c in bot.commandes], ["start", "supprimer"], "les commandes de l'overlay sont déclarées à Telegram")
         self.assertEqual(app.etapes, ["initialize", "start", "polling"], "rattrapage entre start et le polling")
         self.assertEqual(len(app.traites), 1)
         self.assertTrue(app.traites[0].startswith("[Reçu pendant l'arrêt à "))
-        self.assertEqual([g for _, g in app.handlers], [-100], "handler d'offset avant tout autre")
+        self.assertEqual([g for _, g in app.handlers], [-100, 0], "handler d'offset avant tout autre, puis /supprimer")
+        self.assertEqual(getattr(app.handlers[1][0], "commands", None), ["supprimer"])
+        self.assertEqual([getattr(c, "command", c) for c in tb.BOT_COMMANDS], ["start", "supprimer"], "sans nc_noctalia sur le chemin : /supprimer seulement")
         self.assertEqual(self.m.lire_offset(chemin), 6)
         self.assertIsNotNone(tb._TELEGRAM_LOOP)
         tb._stop_event.set()
@@ -254,3 +264,79 @@ class Demarrage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Extensions(unittest.TestCase):
+    """Rappels « toutes les N heures », diffusion aux chats connus, commandes ajoutées au bot."""
+    def setUp(self):
+        self.m = module()
+
+    def faux_reminders(self):
+        r = types.ModuleType("reminders")
+        r.strip_recurrence_prefix = lambda text: ("daily", text[15:].strip()) if text.startswith("tous les jours ") else (None, text.strip())
+        r.compute_next_occurrence = lambda current, recurrence: current + datetime.timedelta(days=1) if recurrence == "daily" else None
+        r.recurrence_label = lambda recurrence: "Tous les jours" if recurrence == "daily" else (recurrence or "")
+        return r
+
+    def test_toutes_les_n_heures(self):
+        r = self.faux_reminders()
+        tb = types.SimpleNamespace(recurrence_label=r.recurrence_label)
+        self.m.etendre_rappels(r, tb)
+        self.m.etendre_rappels(r, tb)      # idempotent
+        self.assertEqual(r.strip_recurrence_prefix("toutes les 3 heures boire"), ("every:hours:3", "boire"))
+        self.assertEqual(r.strip_recurrence_prefix("Chaque heure, respirer"), ("every:hours:1", "respirer"))
+        self.assertEqual(r.strip_recurrence_prefix("tous les jours 8h pain"), ("daily", "8h pain"), "les autres règles passent à upstream")
+        self.assertEqual(r.strip_recurrence_prefix("8h pain"), (None, "8h pain"))
+        t = datetime.datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+        self.assertEqual(r.compute_next_occurrence(t, "every:hours:3"), t + datetime.timedelta(hours=3))
+        self.assertEqual(r.compute_next_occurrence(t, "daily"), t + datetime.timedelta(days=1))
+        self.assertEqual(r.recurrence_label("every:hours:3"), "Toutes les 3 heures")
+        self.assertEqual(r.recurrence_label("every:hours:1"), "Toutes les heures")
+        self.assertEqual(tb.recurrence_label("daily"), "Tous les jours", "le nom importé dans le module du bot est remplacé aussi")
+
+    def test_diffusion(self):
+        envoyes = []
+        async def send_broadcast_message(texte):
+            envoyes.append(texte)
+            return bool(envoyes) and texte != "personne"
+        tb = types.SimpleNamespace(TELEGRAM_TOKEN="123:abc", send_broadcast_message=send_broadcast_message)
+        self.assertEqual(asyncio.run(self.m.diffuser("🔋 Batterie à 15 %", tb)), dict(sent=True))
+        self.assertEqual(envoyes, ["🔋 Batterie à 15 %"])
+        self.assertFalse(asyncio.run(self.m.diffuser("personne", tb))["sent"])
+        self.assertFalse(asyncio.run(self.m.diffuser("", tb))["sent"])
+        self.assertFalse(asyncio.run(self.m.diffuser("x" * 4001, tb))["sent"])
+        self.assertIn("TELEGRAM_TOKEN", asyncio.run(self.m.diffuser("x", types.SimpleNamespace(TELEGRAM_TOKEN="")))["error"])
+        self.assertEqual(envoyes, ["🔋 Batterie à 15 %", "personne"])
+
+    def test_commandes_ajoutees_au_bot(self):
+        faux_telegram = types.ModuleType("telegram")
+        class BotCommand:
+            def __init__(self, command, description):
+                self.command, self.description = command, description
+        faux_telegram.BotCommand = BotCommand
+        faux_ext = types.ModuleType("telegram.ext")
+        class CommandHandler:
+            def __init__(self, commands, callback):
+                self.commands, self.callback = commands, callback
+        faux_ext.CommandHandler = CommandHandler
+        faux_noctalia = types.ModuleType("nc_noctalia")
+        faux_noctalia.handler = lambda tb: "handler-nc"
+        anciens = {k: sys.modules.get(k) for k in ("telegram", "telegram.ext", "nc_noctalia")}
+        sys.modules.update({"telegram": faux_telegram, "telegram.ext": faux_ext, "nc_noctalia": faux_noctalia})
+        try:
+            app = Application(Bot([]))
+            async def annuler(update, context):
+                pass
+            tb = types.SimpleNamespace(cmd_annuler_rappel=annuler, BOT_COMMANDS=[BotCommand("rappel", "x")])
+            self.m.commandes_nc(app, tb)
+            self.assertEqual([(h.commands, h.callback) for h, _ in app.handlers], [(["supprimer"], annuler), (["nc", "pc"], "handler-nc")])
+            self.assertEqual([c.command for c in tb.BOT_COMMANDS], ["rappel", "nc", "supprimer"])
+            self.m.commandes_nc(app, tb)
+            self.assertEqual([c.command for c in tb.BOT_COMMANDS], ["rappel", "nc", "supprimer"], "pas de doublon")
+        finally:
+            for k, v in anciens.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+

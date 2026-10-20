@@ -13,6 +13,12 @@ l'héberge est éteint est jeté au démarrage suivant. Ici, sans toucher à ups
 Limites : Telegram ne garde un message non récupéré que 24 heures (rien à rattraper au-delà) et en rend au plus 100 par
 appel (plusieurs appels sont faits). En mode webhook (TELEGRAM_WEBHOOK_URL renseignée), Telegram rejoue lui-même les
 messages non livrés quand le serveur revient : ce module ne s'en mêle pas.
+
+Aussi, dans le même overlay (installer) :
+  - rappels « toutes les N heures » (every:hours:N) en plus des récurrences upstream (jour, semaine, mois), pour
+    /rappel de Telegram comme pour l'API ; alias /supprimer de /annuler_rappel ;
+  - diffuser(texte) : un message Telegram aux chats connus du bot (alertes machine, op notify de /api/nc/manage) ;
+  - les commandes /nc de réglage du PC (nc_noctalia), seulement en déploiement local.
 """
 import asyncio
 import datetime
@@ -21,6 +27,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import threading
 import time
 
@@ -123,6 +130,79 @@ def noter_offset(chemin):
     return handler
 
 
+HEURES = re.compile(r"^\s*(?:toutes\s+les|tous\s+les|chaque)\s+(\d{1,3})\s+heures?\b[,\s]*|^\s*(?:toutes\s+les|chaque)\s+heures?\b[,\s]*", re.IGNORECASE)
+
+
+def etendre_rappels(reminders, tb=None):
+    """Récurrence « toutes les N heures » (every:hours:N) dans le module reminders upstream : le préfixe de /rappel, la
+    prochaine occurrence (le planificateur) et le libellé. Les autres règles passent aux fonctions d'origine."""
+    if getattr(reminders, "_nc_heures", False):
+        return
+    origine_prefixe, origine_suivante, origine_libelle = reminders.strip_recurrence_prefix, reminders.compute_next_occurrence, reminders.recurrence_label
+
+    def strip_recurrence_prefix(text):
+        m = HEURES.match(text or "")
+        if m:
+            return "every:hours:%d" % max(1, int(m.group(1) or 1)), text[m.end():].strip()
+        return origine_prefixe(text)
+
+    def compute_next_occurrence(current, recurrence):
+        m = re.fullmatch(r"every:hours:(\d+)", recurrence or "")
+        if m:
+            return current + datetime.timedelta(hours=max(1, int(m.group(1))))
+        return origine_suivante(current, recurrence)
+
+    def recurrence_label(recurrence):
+        m = re.fullmatch(r"every:hours:(\d+)", recurrence or "")
+        if m:
+            n = int(m.group(1))
+            return "Toutes les heures" if n == 1 else "Toutes les %d heures" % n
+        return origine_libelle(recurrence)
+
+    reminders.strip_recurrence_prefix, reminders.compute_next_occurrence, reminders.recurrence_label = strip_recurrence_prefix, compute_next_occurrence, recurrence_label
+    if tb is not None and hasattr(tb, "recurrence_label"):
+        tb.recurrence_label = recurrence_label      # importé par son nom dans le module du bot
+    reminders._nc_heures = True
+
+
+async def diffuser(texte, tb=None):
+    """Un message Telegram à tous les chats que le bot connaît (ceux qui lui ont écrit) ; {sent, error?}."""
+    if not isinstance(texte, str) or not 1 <= len(texte.strip()) <= 4000:
+        return dict(sent=False, error="Texte vide ou trop long (4 000 caractères)")
+    if tb is None:
+        try:
+            tb = importlib.import_module("bots.telegram_bot")
+        except ImportError:
+            return dict(sent=False, error="Bot Telegram absent de ce gateway")
+    if not getattr(tb, "TELEGRAM_TOKEN", ""):
+        return dict(sent=False, error="Telegram non configuré (TELEGRAM_TOKEN)")
+    try:
+        envoye = await tb.send_broadcast_message(texte.strip())
+    except Exception as exc:
+        logger.warning("Diffusion Telegram impossible : %s", exc)
+        return dict(sent=False, error="Envoi Telegram impossible")
+    return dict(sent=bool(envoye)) if envoye else dict(sent=False, error="Aucun chat Telegram connu : écris d'abord au bot")
+
+
+def commandes_nc(app, tb, chemin_offset=None):
+    """Handlers de l'overlay sur l'application upstream : /supprimer (alias de /annuler_rappel) et /nc (nc_noctalia)."""
+    from telegram import BotCommand
+    from telegram.ext import CommandHandler
+    if hasattr(tb, "cmd_annuler_rappel"):
+        app.add_handler(CommandHandler(["supprimer"], tb.cmd_annuler_rappel))
+    try:
+        import nc_noctalia
+        app.add_handler(CommandHandler(["nc", "pc"], nc_noctalia.handler(tb)))
+        descriptions = [("nc", "Réglages du PC Noctalia (/nc aide)"), ("supprimer", "Supprimer un rappel : /supprimer <id>")]
+    except ImportError as exc:
+        logger.warning("Commandes /nc indisponibles : %s", exc)
+        descriptions = [("supprimer", "Supprimer un rappel : /supprimer <id>")]
+    existantes = {getattr(c, "command", None) for c in tb.BOT_COMMANDS}
+    for nom, description in descriptions:
+        if nom not in existantes:
+            tb.BOT_COMMANDS.append(BotCommand(nom, description))
+
+
 def demarrer_polling(tb, chemin):
     """Même thread et même boucle que start_telegram_polling upstream, sans jeter les messages en attente."""
     if not tb.TELEGRAM_TOKEN:
@@ -143,14 +223,18 @@ def demarrer_polling(tb, chemin):
             await app.initialize()
             # Le webhook est retiré pour le polling, mais les messages reçus pendant l'arrêt sont gardés
             await app.bot.delete_webhook(drop_pending_updates=False)
+            if id(app) not in _avec_suivi:
+                app.add_handler(TypeHandler(Update, noter_offset(chemin)), group=-100)
+                _avec_suivi.add(id(app))
+                try:
+                    commandes_nc(app, tb)
+                except Exception as exc:     # le bot démarre quand même, sans /nc ni /supprimer
+                    logger.warning("Commandes de l'overlay non ajoutées : %s", exc)
             try:
                 await app.bot.set_my_commands(tb.BOT_COMMANDS)
                 logger.info("Commandes Telegram enregistrées avec succès (autocomplétion active).")
             except Exception as exc:
                 logger.warning("Impossible d'enregistrer les commandes Telegram: %s", exc)
-            if id(app) not in _avec_suivi:
-                app.add_handler(TypeHandler(Update, noter_offset(chemin)), group=-100)
-                _avec_suivi.add(id(app))
             await app.start()
             retard = await rattraper(app, chemin, demarrage, Update.de_json)
             logger.info("Telegram : %d message(s) reçu(s) pendant l'arrêt traité(s) ; offset gardé dans %s", retard, chemin)
@@ -190,4 +274,8 @@ def installer(upstream, tb=None, chemin=None):
             return None
     chemin = Path(chemin) if chemin else fichier_offset(upstream)
     upstream.start_telegram_polling = lambda: demarrer_polling(tb, chemin)
+    try:
+        etendre_rappels(importlib.import_module("reminders"), tb)
+    except ImportError as exc:
+        logger.warning("Rappels « toutes les N heures » indisponibles : %s", exc)
     return chemin

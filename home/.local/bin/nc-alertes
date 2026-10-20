@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""nc-alertes : alertes de la machine vers Telegram, par le bot JARVIS (op notify de /api/nc/manage du gateway).
+
+  nc-alertes verifier       batterie sous le seuil de l'île (BATTERIE_ALERTE, une fois par passage sous le seuil) et
+                            services utilisateur nc-* en échec (une fois par échec) ; toutes les 5 min (nc-alertes.timer)
+  nc-alertes maj N          fin de la mise à jour du système (lancé par nc-paquets) : N mises à jour restantes
+  nc-alertes envoyer TEXTE  un message libre
+
+Rien n'est envoyé sans ALERTES_TELEGRAM=oui (nc-reglages → Agents IA) ni sans connexion configurée (nc-assistant
+configurer) ; le message part aux chats Telegram qui ont déjà écrit au bot. État : ~/.local/state/nc/alertes.json.
+Les erreurs vont sur stderr ; le code de sortie reste 0 (minuterie).
+"""
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import types
+
+BIN = Path(__file__).resolve().parent
+ETAT = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "nc/alertes.json"
+SYSFS = Path(os.environ.get("NC_ALERTES_SYSFS") or "/sys/class/power_supply")
+SERVICES = re.compile(r"^(nc-|noctalia|assistant-|hypridle)")
+
+
+def client():
+    m = types.ModuleType("nc_assistant_client")
+    m.__file__ = str(BIN / "nc-assistant")
+    exec(compile((BIN / "nc-assistant").read_text(encoding="utf-8"), m.__file__, "exec"), m.__dict__)
+    return m
+
+
+def reglages():
+    valeurs = {}
+    try:
+        for ligne in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if "=" in ligne and not ligne.lstrip().startswith("#"):
+                k, v = ligne.split("=", 1)
+                valeurs[k.strip()] = v.strip().strip('"')
+    except OSError:
+        pass
+    return valeurs
+
+
+def lire_etat():
+    try:
+        d = json.loads(ETAT.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ecrire_etat(d):
+    try:
+        ETAT.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ETAT.with_name(ETAT.name + ".tmp")
+        tmp.write_text(json.dumps(d), encoding="utf-8")
+        os.replace(tmp, ETAT)
+    except OSError as exc:
+        print("nc-alertes : état non enregistré : " + str(exc), file=sys.stderr)
+
+
+def batterie():
+    """(pourcentage, en décharge) de la première batterie, ou None sans batterie."""
+    try:
+        for d in sorted(SYSFS.iterdir()):
+            try:
+                if (d / "type").read_text().strip() != "Battery":
+                    continue
+                pct = int((d / "capacity").read_text().strip())
+                statut = (d / "status").read_text().strip().lower()
+            except (OSError, ValueError):
+                continue
+            return pct, statut == "discharging"
+    except OSError:
+        pass
+    return None
+
+
+def services_en_echec():
+    try:
+        r = subprocess.run(["systemctl", "--user", "list-units", "--state=failed", "--plain", "--no-legend"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    unites = [ligne.split()[0] for ligne in r.stdout.splitlines() if ligne.split()]
+    return sorted(u for u in unites if SERVICES.match(u))
+
+
+def envoyer(m, texte):
+    """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion."""
+    if reglages().get("ALERTES_TELEGRAM", "non") != "oui":
+        return False
+    try:
+        c = m.configuration()
+        r = m.api(c, "/api/nc/manage", {"op": "notify", "params": {"text": texte[:4000]}, "confirmed": True})
+    except m.Erreur as exc:
+        print("nc-alertes : " + str(exc), file=sys.stderr)
+        return False
+    if not isinstance(r, dict) or not r.get("sent"):
+        print("nc-alertes : " + str((r or {}).get("error") if isinstance(r, dict) else r), file=sys.stderr)
+        return False
+    return True
+
+
+def verifier(m):
+    T = m.T
+    etat = lire_etat()
+    seuil = reglages().get("BATTERIE_ALERTE", "20")
+    seuil = int(seuil) if seuil.isdigit() else 20
+    b = batterie()
+    if b and seuil > 0:
+        pct, decharge = b
+        if decharge and pct <= seuil and not etat.get("batterie_sous"):
+            if envoyer(m, T(f"🔋 Batterie à {pct} % (seuil {seuil} %) : branche le PC.", f"🔋 Battery at {pct}% (threshold {seuil}%): plug in the PC.")):
+                etat["batterie_sous"] = True
+        elif not decharge or pct > seuil + 5:
+            etat["batterie_sous"] = False      # rebranché ou remonté : le prochain passage sous le seuil alerte de nouveau
+    echecs = services_en_echec()
+    nouveaux = [u for u in echecs if u not in etat.get("echecs", [])]
+    if nouveaux:
+        texte = T("⚠️ Service en échec sur le PC : ", "⚠️ Failed service on the PC: ") + ", ".join(nouveaux) + \
+            T(" (journalctl --user -u …).", " (journalctl --user -u …).")
+        if not envoyer(m, texte):
+            echecs = [u for u in echecs if u not in nouveaux]     # non prévenu : on réessaiera
+    etat["echecs"] = echecs
+    ecrire_etat(etat)
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else "verifier"
+    m = client()
+    T = m.T
+    try:
+        if action == "verifier":
+            verifier(m)
+        elif action == "maj":
+            n = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].isdigit() else "0"
+            if n == "0":
+                texte = T("✅ Mise à jour du système terminée : système à jour.", "✅ System update finished: system up to date.")
+            else:
+                texte = T(f"✅ Mise à jour du système terminée, {n} encore en attente.", f"✅ System update finished, {n} still pending.")
+            envoyer(m, texte)
+        elif action == "envoyer" and len(sys.argv) > 2 and sys.argv[2].strip():
+            envoyer(m, " ".join(sys.argv[2:]))
+        else:
+            print("nc-alertes verifier | maj N | envoyer TEXTE", file=sys.stderr)
+            return 1
+    except Exception as exc:     # jamais d'échec d'unité pour une alerte manquée
+        print("nc-alertes : " + str(exc)[:300], file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

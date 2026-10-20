@@ -16,7 +16,7 @@ pour un autre réseau, configure l'URL HTTPS d'un tunnel côté serveur.
 """
 import argparse
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import fcntl
 import getpass
 import hashlib
@@ -388,35 +388,165 @@ def maj_ile(sid, evenement, chat=False, message=""):
         print(T("Suivi dans l'île indisponible.", "Island tracking unavailable."), file=sys.stderr)
 
 
-def lire_rappel(arg):
-    morceaux = arg.split(maxsplit=2)
+JOURS = {"lundi":0,"mardi":1,"mercredi":2,"jeudi":3,"vendredi":4,"samedi":5,"dimanche":6,
+         "monday":0,"tuesday":1,"wednesday":2,"thursday":3,"friday":4,"saturday":5,"sunday":6}
+# Récurrences de /rappel (français et anglais), dans les mots du gateway JARVIS : daily, weekdays, weekly, weekly:N,
+# monthly, every:days:N, every:weeks:N, every:months:N ; every:hours:N est ajouté par l'overlay nc_telegram du gateway
+RECURRENCES = [
+    (r"(?:en\s+semaine|jours\s+ouvr[ée]s|du\s+lundi\s+au\s+vendredi|(?:on\s+)?weekdays|every\s+weekday)", lambda m: "weekdays"),
+    (r"(?:tous\s+les\s+jours|chaque\s+jour|quotidien(?:nement)?|tous\s+les\s+(?:matins|soirs)|chaque\s+(?:matin|soir)|daily|every\s+day)", lambda m: "daily"),
+    (r"(?:chaque|tous\s+les|every|on)\s+(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?", lambda m: "weekly:%d" % JOURS[m[1].lower()]),
+    (r"(?:chaque|toutes\s+les)\s+semaines?|weekly|every\s+week", lambda m: "weekly"),
+    (r"(?:chaque|tous\s+les)\s+mois|monthly|every\s+month", lambda m: "monthly"),
+    (r"(?:toutes\s+les|chaque|every)\s+heures?|hourly|every\s+hour", lambda m: "every:hours:1"),
+    (r"(?:toutes\s+les|tous\s+les|chaque|every)\s+(\d{1,3})\s+(?:heures?|hours?|h)", lambda m: "every:hours:%d" % int(m[1])),
+    (r"(?:tous\s+les|toutes\s+les|chaque|every)\s+(\d{1,3})\s+(?:jours?|days?)", lambda m: "every:days:%d" % int(m[1])),
+    (r"(?:toutes\s+les|tous\s+les|chaque|every)\s+(\d{1,3})\s+(?:semaines?|weeks?)", lambda m: "every:weeks:%d" % int(m[1])),
+    (r"(?:tous\s+les|toutes\s+les|chaque|every)\s+(\d{1,3})\s+(?:mois|months?)", lambda m: "every:months:%d" % int(m[1])),
+]
+DELAI = re.compile(r"([0-9]{1,8})([smhd])")
+HEURE = re.compile(r"([01]?[0-9]|2[0-3])(?::|h)([0-5][0-9])?")
+
+
+def etiquette_recurrence(r):
+    jours = [T("lundi", "Monday"), T("mardi", "Tuesday"), T("mercredi", "Wednesday"), T("jeudi", "Thursday"),
+             T("vendredi", "Friday"), T("samedi", "Saturday"), T("dimanche", "Sunday")]
+    fixes = {"daily": T("tous les jours", "every day"), "weekdays": T("du lundi au vendredi", "Monday to Friday"),
+             "weekly": T("toutes les semaines", "every week"), "monthly": T("tous les mois", "every month")}
+    if not r:
+        return ""
+    if r in fixes:
+        return fixes[r]
+    m = re.fullmatch(r"weekly:([0-6])", r)
+    if m:
+        return T("chaque ", "every ") + jours[int(m[1])]
+    m = re.fullmatch(r"every:(hours|days|weeks|months):(\d+)", r)
+    if m:
+        n = int(m[2])
+        unites = {"hours": T("heure", "hour"), "days": T("jour", "day"), "weeks": T("semaine", "week"), "months": T("mois", "month")}
+        u = unites[m[1]]
+        if n > 1 and not u.endswith("s") and u != "mois":
+            u += "s"
+        return T(f"toutes les {n} {u}" if m[1] in ("hours", "weeks") else f"tous les {n} {u}", f"every {n} {u}")
+    return r
+
+
+def premiere_occurrence(recurrence, heure, minute, maintenant):
+    """La première échéance d'un rappel à heure fixe : aujourd'hui, sinon demain ; alignée sur le jour de la récurrence."""
+    cible = maintenant.replace(hour=heure, minute=minute, second=0, microsecond=0)
+    if cible <= maintenant:
+        cible += timedelta(days=1)
+    m = re.fullmatch(r"weekly:([0-6])", recurrence or "")
+    if m:
+        cible += timedelta(days=(int(m[1]) - cible.weekday()) % 7)
+    elif recurrence == "weekdays":
+        while cible.weekday() >= 5:
+            cible += timedelta(days=1)
+    elif recurrence == "monthly" and cible.date() != maintenant.date():
+        # L'heure est passée aujourd'hui : le même jour du mois prochain, pas demain
+        mois, annee = (maintenant.month % 12) + 1, maintenant.year + (maintenant.month == 12)
+        import calendar
+        cible = maintenant.replace(year=annee, month=mois, day=min(maintenant.day, calendar.monthrange(annee, mois)[1]),
+                                   hour=heure, minute=minute, second=0, microsecond=0)
+    return cible
+
+
+def lire_rappel(arg, maintenant=None):
+    """/rappel [bureau|telegram|discord] [récurrence] <délai|heure> <message>
+    → (plateformes, récurrence ou None, délai « 15m » ou None, échéance (datetime) ou None, message)."""
+    maintenant = maintenant or datetime.now().astimezone()
+    syntaxe = T("Syntaxe : /rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures…] <délai ou heure> <message> "
+                "(ex. 15m sortir le pain ; telegram tous les jours 08:30 vitamines).",
+                "Syntax: /remind [desktop|telegram|discord] [every day|every saturday|every 3 hours…] <delay or time> <message> "
+                "(e.g. 15m take out bread; telegram every day 08:30 vitamins).")
+    reste = arg.strip()
     plateformes = ["desktop"]
-    if morceaux and not re.fullmatch(r"[0-9]+[smhd]", morceaux[0]):
-        plateformes = list(dict.fromkeys("desktop" if p in ("bureau", "desktop") else p
-                                         for p in morceaux.pop(0).lower().split(",")))
+    premier = reste.split(maxsplit=1)[0].lower() if reste else ""
+    if premier and re.fullmatch(r"[a-z,]+", premier) and not DELAI.fullmatch(premier) and not HEURE.fullmatch(premier) \
+            and not any(re.match(motif + r"\b", reste, re.IGNORECASE) for motif, _ in RECURRENCES):
+        plateformes = list(dict.fromkeys("desktop" if p in ("bureau", "desktop") else p for p in premier.split(",")))
         if not plateformes or any(p not in ("desktop", "telegram", "discord") for p in plateformes):
             raise Erreur(T("Plateforme : bureau, telegram, discord ou une liste séparée par des virgules.",
                            "Platform: desktop, telegram, discord, or a comma-separated list."))
-        morceaux = " ".join(morceaux).split(maxsplit=1)
+        reste = reste.split(maxsplit=1)[1] if " " in reste else ""
+    recurrence = None
+    for motif, valeur in RECURRENCES:
+        m = re.match(motif + r"\b[,\s]*", reste, re.IGNORECASE)
+        if m:
+            recurrence = valeur(m)
+            reste = reste[m.end():]
+            break
+    morceaux = reste.split(maxsplit=1)
+    if not morceaux:
+        raise Erreur(syntaxe)
+    delai = echeance = None
+    quand = morceaux[0].lower()
+    # Avec une récurrence, « 10h » est une heure du jour ; sans, c'est un délai de dix heures (comme avant)
+    if HEURE.fullmatch(quand) and (recurrence or not DELAI.fullmatch(quand)):
+        h, mn = HEURE.fullmatch(quand).groups()
+        echeance = premiere_occurrence(recurrence, int(h), int(mn or 0), maintenant)
+    elif DELAI.fullmatch(quand):
+        if recurrence and not recurrence.startswith("every:hours:"):
+            raise Erreur(T("Rappel récurrent : donne une heure (ex. 08:30), pas un délai.", "Recurring reminder: give a time (e.g. 08:30), not a delay."))
+        n, u = DELAI.fullmatch(quand).groups()
+        if not 1 <= int(n) * {"s":1,"m":60,"h":3600,"d":86400}[u] <= 366 * 86400:
+            raise Erreur(T("Délai : de 1 seconde à 366 jours, avec s, m, h ou d.", "Delay: 1 second to 366 days, using s, m, h or d."))
+        delai = quand
+    elif recurrence and recurrence.startswith("every:hours:"):
+        # « toutes les 3 heures boire » : la première fois dans 3 heures
+        delai = recurrence.rsplit(":", 1)[1] + "h"
+        morceaux = [quand, reste.strip()]
+    elif recurrence:
+        raise Erreur(T("Rappel récurrent : donne une heure, par exemple 08:30 ou 8h.", "Recurring reminder: give a time, for example 08:30 or 8am."))
     else:
-        morceaux = arg.split(maxsplit=1)
-    if len(morceaux) != 2 or not morceaux[1].strip():
-        raise Erreur(T("Syntaxe : /rappel [bureau|telegram|discord] <délai> <message> (ex. 15m sortir le pain).",
-                       "Syntax: /remind [desktop|telegram|discord] <delay> <message> (e.g. 15m take out bread)."))
-    delai, message = morceaux
-    m = re.fullmatch(r"([0-9]{1,8})([smhd])", delai)
-    if not m or not 1 <= int(m[1]) * {"s":1,"m":60,"h":3600,"d":86400}[m[2]] <= 366 * 86400:
-        raise Erreur(T("Délai : de 1 seconde à 366 jours, avec s, m, h ou d.", "Delay: 1 second to 366 days, using s, m, h or d."))
+        raise Erreur(syntaxe)
+    message = morceaux[1].strip() if len(morceaux) > 1 else ""
+    if not message:
+        raise Erreur(syntaxe)
     if len(message) > 4000 or any(ord(c) < 32 and c not in "\n\t" for c in message):
         raise Erreur(T("Message de rappel invalide (4 000 caractères maximum).", "Invalid reminder message (4,000 characters maximum)."))
-    return plateformes, delai, message
+    if recurrence and "desktop" in plateformes:
+        raise Erreur(T("Rappel récurrent : telegram ou discord (il est gardé sur le serveur JARVIS) ; le bureau ne prend qu'un rappel ponctuel.",
+                       "Recurring reminder: telegram or discord (it is kept on the JARVIS server); desktop takes a one-off reminder only."))
+    return plateformes, recurrence, delai, echeance, message
+
+
+def corps_rappel(plateforme, recurrence, delai, echeance, message):
+    """Le corps envoyé à POST /api/reminders (un délai relatif, sinon l'échéance en ISO 8601 locale)."""
+    corps = {"platform": plateforme, "message": message}
+    if delai:
+        corps["delay"] = delai
+    else:
+        corps["remind_at"] = echeance.isoformat(timespec="seconds")
+    if recurrence:
+        corps["recurrence"] = recurrence
+    return corps
+
+
+def lister_rappels(c):
+    res = api(c, "/api/reminders")
+    rappels = res.get("reminders") if isinstance(res, dict) else None
+    if not rappels:
+        return T("⏰ Aucun rappel en attente sur le serveur.", "⏰ No pending reminder on the server.")
+    lignes = []
+    for r in rappels[:50]:
+        try:
+            quand = datetime.fromisoformat(str(r.get("remind_at"))).astimezone().strftime("%d/%m %H:%M")
+        except ValueError:
+            quand = str(r.get("remind_at", ""))[:16]
+        ligne = f"• #{r.get('id')} — {str(r.get('message', ''))[:200]} — {quand} — {r.get('platform', '')}"
+        if r.get("recurrence"):
+            ligne += " — 🔁 " + etiquette_recurrence(str(r["recurrence"]))
+        lignes.append(ligne)
+    return f"⏰ **{T('Rappels en attente', 'Pending reminders')} :**\n\n" + "\n".join(lignes) + \
+        T("\n\nSupprimer : /supprimer <numéro>", "\n\nDelete: /supprimer <number>")
 
 
 def configuration_question(question):
     # Les rappels de ce bureau ne nécessitent ni clé, ni serveur JARVIS disponible.
     morceaux = question.strip().split(maxsplit=1)
     if morceaux and morceaux[0].lower() in ("/rappel", "/remind"):
-        plateformes, _, _ = lire_rappel(morceaux[1] if len(morceaux) > 1 else "")
+        plateformes = lire_rappel(morceaux[1] if len(morceaux) > 1 else "")[0]
         if plateformes == ["desktop"]:
             return {"URL":"local:desktop", "USER_ID":str(os.getuid())}
     return configuration()
@@ -496,7 +626,8 @@ def executer_commande(c, sid, cmd_brute):
             "• `/courses` [ajouter <articles>] — Consulter ou ajouter des courses\n"
             "• `/depenses` [montant desc] — Bilan mensuel ou ajout d'une dépense\n"
             "• `/devoirs` — Consulter les devoirs (Moodle)\n"
-            "• `/rappel [bureau|telegram|discord|bureau,telegram] <délai> <message>` — Rappel (bureau par défaut)\n"
+            "• `/rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures] <délai ou heure> <message>` — Rappel (bureau par défaut ; récurrent : telegram ou discord)\n"
+            "• `/rappels` — Rappels en attente sur le serveur ; `/supprimer <numéro>` en retire un\n"
             "• `/memoire` [texte] — Consulter ou enregistrer un fait en mémoire",
             "🤖 **JARVIS Commands (same as Telegram bot):**\n\n"
             "• `/reset` or `/clear` — Reset active session\n"
@@ -509,7 +640,8 @@ def executer_commande(c, sid, cmd_brute):
             "• `/shopping` [add <text>] — View or add grocery items\n"
             "• `/expenses` [amount desc] — Monthly summary or add an expense\n"
             "• `/moodle` — View homework\n"
-            "• `/remind [desktop|telegram|discord|desktop,telegram] <delay> <message>` — Reminder (desktop by default)\n"
+            "• `/remind [desktop|telegram|discord] [every day|every saturday|every 3 hours] <delay or time> <message>` — Reminder (desktop by default; recurring: telegram or discord)\n"
+            "• `/rappels` — Pending reminders on the server; `/supprimer <number>` removes one\n"
             "• `/memory` [text] — View or record a fact in memory"
         )
 
@@ -627,19 +759,37 @@ def executer_commande(c, sid, cmd_brute):
             return T(f"Erreur consultation devoirs : {e}", f"Error viewing homework: {e}")
 
     if nom_cmd in ("/rappel", "/remind"):
-        plateformes, delai, msg = lire_rappel(arg)
+        plateformes, recurrence, delai, echeance, msg = lire_rappel(arg)
+        quand = T(f"dans {delai}", f"in {delai}") if delai else T("le ", "on ") + echeance.strftime("%d/%m %H:%M")
+        if recurrence:
+            quand += ", 🔁 " + etiquette_recurrence(recurrence)
         resultats = []
         for plateforme in plateformes:
             try:
                 if plateforme == "desktop":
-                    programmer_rappel_bureau(delai, msg)
+                    programmer_rappel_bureau(delai or str(max(1, int((echeance - datetime.now().astimezone()).total_seconds()))) + "s", msg)
                 else:
-                    api(c, "/api/reminders", {"platform": plateforme, "delay": delai, "message": msg})
-                resultats.append(T(f"⏰ **Rappel {plateforme} programmé dans {delai} :** {msg}",
-                                   f"⏰ **{plateforme} reminder scheduled in {delai}:** {msg}"))
+                    api(c, "/api/reminders", corps_rappel(plateforme, recurrence, delai, echeance, msg))
+                resultats.append(T(f"⏰ **Rappel {plateforme} programmé {quand} :** {msg}",
+                                   f"⏰ **{plateforme} reminder scheduled {quand}:** {msg}"))
             except (Erreur, OSError, subprocess.SubprocessError) as e:
                 resultats.append(T(f"Rappel {plateforme} non créé : {e}", f"{plateforme} reminder not created: {e}"))
         return "\n\n".join(resultats)
+
+    if nom_cmd in ("/rappels", "/reminders"):
+        try:
+            return lister_rappels(c)
+        except Exception as e:
+            return T(f"Erreur lecture des rappels : {e}", f"Error reading reminders: {e}")
+
+    if nom_cmd in ("/supprimer", "/delrappel", "/cancelreminder", "/annuler_rappel"):
+        if not re.fullmatch(r"[0-9]{1,12}", arg.strip()):
+            return T("Syntaxe : /supprimer <numéro du rappel> (voir /rappels).", "Syntax: /supprimer <reminder number> (see /rappels).")
+        try:
+            api(c, "/api/reminders/" + arg.strip() + "/cancel", {})
+            return T(f"🗑 Rappel #{arg.strip()} supprimé.", f"🗑 Reminder #{arg.strip()} deleted.")
+        except Exception as e:
+            return T(f"Rappel non supprimé : {e}", f"Reminder not deleted: {e}")
 
     if nom_cmd in ("/memoire", "/memory"):
         if arg:

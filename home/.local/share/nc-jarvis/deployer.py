@@ -174,7 +174,7 @@ def deploy(mode, target):
     connection=Path.home()/'.local/state/nc-jarvis/connection.conf'
     merge_env(connection,dict(URL='http://127.0.0.1:8000',SECRET_KEY=secret,USER_ID=getpass.getuser(),TIMEOUT='180'))
     overlay=Path.home()/'.local/share/nc-jarvis/server';overlay.mkdir(parents=True,exist_ok=True)
-    for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py'):
+    for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py'):
         data=resource('server/'+name)
         (overlay/name).write_bytes(data)
     service_dir=Path.home()/'.config/systemd/user';service_dir.mkdir(parents=True,exist_ok=True)
@@ -203,7 +203,7 @@ def bundle(path):
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr('__main__.py','from deployer import main\nmain()\n')
         z.writestr('deployer.py',resource('deployer.py'))
-        for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py'):z.writestr('server/'+name,resource('server/'+name))
+        for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py'):z.writestr('server/'+name,resource('server/'+name))
 
 
 def agent():

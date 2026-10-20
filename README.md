@@ -210,7 +210,10 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 sur tous les bureaux avec Super + Ctrl + P) et à un cockpit extensible en plein écran (**Super + Alt + Maj + A**,
 ou application JARVIS). Il gère les modules, le modèle et la session, la mémoire, les rappels mobiles,
 Telegram/Discord et les services. Dans l’île, le micro dicte dans le champ de saisie (`nc-dictee`, transcription
-par le serveur), sans envoi automatique. **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs
+par le serveur), sans envoi automatique. Rappels récurrents (`/rappel telegram tous les jours 08:30 …`, `/rappels`,
+`/supprimer`), alertes Telegram de la machine (batterie faible, service en échec, fin de mise à jour : réglage
+« Alertes Telegram ») et réglages du PC depuis le bot (`/nc`, déploiement local seulement) sont décrits dans
+[docs/jarvis.md](docs/jarvis.md). **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs
 sur ce PC ou sur un serveur SSH. Le client n’exécute pas lui-même de modèle ; le backend JARVIS-BIS reste séparé.
 Le même client est fourni sur Arch, Fedora/Nobara, Debian/Ubuntu et openSUSE. Sans Quickshell, les commandes
 et le [chat terminal](docs/assistant-distant.md) restent accessibles. Aucun backend n’est installé ni démarré par `nc-maj`.

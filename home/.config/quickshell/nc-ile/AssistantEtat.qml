@@ -41,7 +41,9 @@ Singleton {
         {nom:Reglages.t("/courses","/shopping"), alias:["/courses","/shopping"], arguments:true, description:Reglages.t("Voir les courses ou ajouter des articles", "View groceries or add items")},
         {nom:Reglages.t("/depenses","/expenses"), alias:["/depenses","/expenses"], arguments:true, description:Reglages.t("Bilan ou ajout d’une dépense", "Summary or add an expense")},
         {nom:Reglages.t("/devoirs","/moodle"), alias:["/devoirs","/moodle"], arguments:false, description:Reglages.t("Consulter les devoirs", "View homework")},
-        {nom:Reglages.t("/rappel","/remind"), alias:["/rappel","/remind"], arguments:true, description:Reglages.t("Rappel : /rappel [bureau|telegram|discord] <délai> <message>", "Reminder: /remind [desktop|telegram|discord] <delay> <message>")},
+        {nom:Reglages.t("/rappel","/remind"), alias:["/rappel","/remind"], arguments:true, description:Reglages.t("Rappel : /rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures] <délai ou heure> <message>", "Reminder: /remind [desktop|telegram|discord] [every day|every saturday|every 3 hours] <delay or time> <message>")},
+        {nom:Reglages.t("/rappels","/reminders"), alias:["/rappels","/reminders"], arguments:false, description:Reglages.t("Rappels en attente sur le serveur", "Pending reminders on the server")},
+        {nom:"/supprimer", alias:["/supprimer","/delrappel"], arguments:true, description:Reglages.t("Supprimer un rappel : /supprimer <numéro>", "Delete a reminder: /supprimer <number>")},
         {nom:Reglages.t("/memoire","/memory"), alias:["/memoire","/memory"], arguments:true, description:Reglages.t("Consulter ou enrichir la mémoire", "View or add to memory")}
     ]
     function proposerCommandes(texte, position) {

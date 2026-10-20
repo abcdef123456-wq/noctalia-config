@@ -1165,7 +1165,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
       systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$(t "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")." "$d (notifications) disabled: notifications go through $([ "$ILE" = quickshell ] && echo "the island" || echo "Noctalia").")"
     fi
   done
-  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer hypridle.service >/dev/null 2>&1 ||
+  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer nc-alertes.timer hypridle.service >/dev/null 2>&1 ||
     warn "$(t "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session." "Some services couldn't start now: they'll start in your next session.")"
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   # Première installation : quelques choix, tout de suite (tout se change ensuite avec nc-reglages)

@@ -212,9 +212,21 @@ def identifier(value):
 
 async def dispatch(op, p, confirmed=False):
     read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings'}
-    write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart'}
+    write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','notify','noctalia'}
     if op not in read|write: raise ValueError
+    if op=='noctalia':
+        # Réglages du PC (nc_noctalia) : lecture sans confirmation, le reste avec ; seulement en déploiement local
+        import nc_noctalia
+        action=p.get('action'); params=p.get('params',{})
+        if action not in nc_noctalia.ACTIONS or not isinstance(params,dict): raise ValueError
+        if not nc_noctalia.ACTIONS[action]['readonly'] and not confirmed: return dict(error='Confirmation explicite requise')
+        arguments=[str(params[f['key']])[:200] for f in nc_noctalia.ACTIONS[action]['fields'] if params.get(f['key'])]
+        return await nc_noctalia.agir(action, arguments, confirme=confirmed)
     if op in write and not confirmed: return dict(error='Confirmation explicite requise')
+    if op=='notify':
+        # Un message Telegram aux chats connus du bot (alertes de la machine : nc-alertes)
+        import nc_telegram
+        return await nc_telegram.diffuser(p.get('text'))
     if op=='capabilities': return schema()
     paths={'models':'/models','session':'/session','memory':'/memory','conversations':'/conversations?limit=25','usage':'/usage/stats'}
     if op in paths: return await runner('GET',paths[op])

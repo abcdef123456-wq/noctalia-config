@@ -71,6 +71,8 @@ case "$action" in
     n=$(head -1 "$fichier" 2>/dev/null || echo 0)
     if [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi
+    # Alerte Telegram de fin de mise à jour (nc-alertes décide : réglage ALERTES_TELEGRAM, connexion configurée)
+    [ -x "$HOME/.local/bin/nc-alertes" ] && "$HOME/.local/bin/nc-alertes" maj "${n:-0}" >/dev/null 2>&1 || true
     echo; printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"; read -r r 2>/dev/null || true ;;
   *)
     if [ -s "$fichier" ]; then t "$(head -1 "$fichier") mise(s) à jour :" "$(head -1 "$fichier") update(s):"; echo; tail -n +2 "$fichier"

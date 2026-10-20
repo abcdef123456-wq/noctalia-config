@@ -686,6 +686,11 @@ REGLAGES = [
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : nc-assistant configurer.",
         "Its activity during requests and when answers are ready. Connection: nc-assistant configurer.")),
+    R("ALERTES_TELEGRAM", "Agents IA (coucou)", L("Alertes Telegram", "Telegram alerts"), "ouinon", "non",
+      L("Batterie faible (seuil de l'île), fin de mise à jour du système, service en échec : un message Telegram par le "
+        "bot JARVIS (nc-alertes, toutes les 5 min). Rien sans connexion configurée.",
+        "Low battery (the island's threshold), system update finished, failed service: a Telegram message through the "
+        "JARVIS bot (nc-alertes, every 5 min). Nothing without a configured connection.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
     R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
       "ouinon", "oui",

@@ -1,0 +1,8 @@
+[Unit]
+Description=Alertes de la machine vers Telegram (batterie faible, service en échec), si le réglage le demande
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nc-alertes verifier
+Slice=background.slice
+Nice=10

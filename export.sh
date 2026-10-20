@@ -82,8 +82,10 @@ HOME_FILES=(
   .local/share/nc-jarvis/server/nc_runner.py
   .local/share/nc-jarvis/server/nc_engines.py
   .local/share/nc-jarvis/server/nc_telegram.py
+  .local/share/nc-jarvis/server/nc_noctalia.py
   .local/bin/nc-demander
   .local/bin/nc-paquets
+  .local/bin/nc-alertes
   .local/bin/nc-fenetre
   .local/bin/nc-qs-capture
   .local/bin/nc-langue
@@ -139,6 +141,8 @@ HOME_FILES=(
   .config/systemd/user/nc-maj-verif.timer
   .config/systemd/user/nc-paquets.service
   .config/systemd/user/nc-paquets.timer
+  .config/systemd/user/nc-alertes.service
+  .config/systemd/user/nc-alertes.timer
   .zshrc
   .p10k.zsh
   .config/nvim
