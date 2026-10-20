@@ -154,7 +154,7 @@ FloatingWindow {
         Column {
             id: barre
             anchors.left: parent.left; anchors.leftMargin: 10; anchors.top: tete.bottom; anchors.topMargin: 12
-            width: 206; spacing: 2
+            width: 252; spacing: 2            // assez large pour « Modèle et session » (Ligne garde 110 points à droite)
             Repeater {
                 model: fen.navigation
                 Ligne {

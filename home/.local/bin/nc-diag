@@ -326,7 +326,7 @@ def verifier(b):
         "wf-recorder": T("vidéos de l'écran", "screen recordings"), "tesseract": T("copier le texte d'une capture", "copy text from a screenshot"),
         "fastfetch": T("accueil du terminal", "terminal greeting"), "magick": T("fonds d'écran", "wallpapers"),
     }
-    manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c)]
+    manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c) and not (c == "magick" and a("convert"))]   # ImageMagick 6 : convert
     if manquants:
         b.avert(T("absents : ", "missing: ") + ", ".join(manquants),
                 T("relance install.sh, ou installe-les avec ton gestionnaire de paquets",

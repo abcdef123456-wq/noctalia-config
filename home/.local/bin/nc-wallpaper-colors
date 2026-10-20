@@ -11,9 +11,13 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
+MAGICK = shutil.which("magick") or shutil.which("convert") or "magick"
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
 def _langue():
@@ -72,7 +76,7 @@ def oklch(r, g, b):
 
 
 def colorfulness(path):
-    raw = subprocess.run(["magick", str(path) + "[0]", "-resize", "64x64!", "-colorspace", "sRGB", "-depth", "8", "rgb:-"],
+    raw = subprocess.run([MAGICK, str(path) + "[0]", "-resize", "64x64!", "-colorspace", "sRGB", "-depth", "8", "rgb:-"],
                          capture_output=True, check=True).stdout
     chromas = sorted(c for L, c in (oklch(*raw[i:i + 3]) for i in range(0, len(raw) - 2, 3)) if 0.08 < L < 0.95)
     if not chromas:
@@ -103,7 +107,7 @@ def main():
         cache = Path.home() / ".cache/nc/wallpaper-boot.jpg"
         cache.parent.mkdir(parents=True, exist_ok=True)
         size = boot_size()
-        subprocess.Popen(["magick", str(img) + "[0]", "-resize", size + "^", "-gravity", "center",
+        subprocess.Popen([MAGICK, str(img) + "[0]", "-resize", size + "^", "-gravity", "center",
                           "-extent", size, "-quality", "90", str(cache)])
     c = colorfulness(img)
     method = "vibrant" if c >= THRESHOLD else "muted"

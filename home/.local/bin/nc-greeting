@@ -7,6 +7,8 @@
 # Le .zshrc le relance quand la fenêtre change de taille, tant qu'aucune commande n'a été tapée.
 set -uo pipefail
 command -v fastfetch >/dev/null || exit 0
+# ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
+IM=$(command -v magick >/dev/null && echo magick || echo convert)
 # Accueil coupé dans nc-reglages (TERMINAL_ACCUEIL=non)
 grep -qx 'TERMINAL_ACCUEIL=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
 
@@ -78,7 +80,7 @@ case "$choix" in
            PHOTO="$HOME/.cache/nc/term-photo-rond.png"
            if [ ! -s "$PHOTO" ] || [ "$HOME/.face" -nt "$PHOTO" ]; then
              mkdir -p "$(dirname "$PHOTO")"
-             magick "$HOME/.face[0]" -resize 440x440^ -gravity center -extent 440x440 \
+             "$IM" "$HOME/.face[0]" -resize 440x440^ -gravity center -extent 440x440 \
                \( -size 440x440 xc:black -fill white -draw "circle 220,220 220,2" \) -alpha off -compose CopyOpacity -composite \
                -compose Over -background none -extent 520x624 "PNG32:$PHOTO.tmp" 2>/dev/null &&
                mv "$PHOTO.tmp" "$PHOTO" || PHOTO="$HOME/.face"
