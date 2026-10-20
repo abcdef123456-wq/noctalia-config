@@ -40,6 +40,20 @@ partagent le reste de la ligne, l’énergie prend un bandeau) : sans changement
 d’avant. L’ordre et les modules masqués sont gardés dans `~/.local/state/nc/ile/centre.json` (`nc-ile-memo`, fichier
 privé écrit d’un bloc) et relus au démarrage de l’île.
 
+## Notifications
+
+La page groupe les cartes par application (compteur, groupe repliable d’un clic sur son titre, la plus récente reste
+visible). Filtres **Toutes / Non lues / Urgentes** et recherche sur le titre, le texte et l’application (`/` ou
+Ctrl + F). Une notification est non lue (point bleu, titre en gras) jusqu’à ce qu’elle soit ouverte, répondue ou
+marquée lue (bouton sur la carte, ou « Tout lu »). Sur une carte, au survol : marquer lue, **reporter** (15 min, 1 h,
+demain à 9 h : la notification disparaît et revient en bannière à l’heure dite, même après un redémarrage de l’île —
+elle est alors recréée à partir du texte gardé), **masquer cette application** (1 h ou toujours : ni bannière ni carte,
+les applications masquées sont listées en haut, un clic les remontre), **répondre** quand l’application le permet
+(réponse rapide `sendInlineReply` ; sinon le clic ouvre l’application), retirer. Clavier : ↑ ↓ choisir, Entrée ouvrir,
+Suppr retirer, Échap vider la recherche. Les bannières, la concentration (et sa plage horaire) et les boutons d’action
+des applications restent comme avant. L’état (lus, reports, applications masquées) est gardé dans
+`~/.local/state/nc/ile/notifs.json` par `nc-ile-memo`.
+
 ## Presse-papiers
 
 L’historique est gardé d’une session à l’autre (`~/.local/state/nc/ile/presse.json`, les images en fichiers privés
