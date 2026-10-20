@@ -28,6 +28,15 @@ annulation que l’API ne propose pas. Le micro dicte dans le champ de saisie (v
 haut-parleur indique qu’il n’y a pas de sortie vocale sur ce client.
 L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, ainsi qu’en mode sans effets.
 
+## Cockpit
+
+Le cockpit (Super + Alt + Maj + A, `nc-jarvis tableau`, application JARVIS) est une fenêtre Quickshell dessinée comme
+une grande page de l’île : une feuille centrée aux coins arrondis sur le fond de la config (1040 × 800 au plus, F11
+pour le plein écran), un en-tête sobre (emblème, titre, état de la connexion, commandes rondes : actualiser, plein
+écran, continuer dans l’île, fermer), la navigation à gauche en lignes façon macOS (icône dans un rond, accent sur la
+page ouverte) et le contenu à droite ; boutons en pastilles, champs de formulaire en pastilles, cartes aux coins
+arrondis (`Couleurs`, `Texte`, `Ico`, `Ligne`, `AssistantCommande`). Les pages et leurs actions sont celles d’avant.
+
 ## Fenêtre de chat
 
 `JarvisChat.qml` est une petite fenêtre flottante Quickshell (environ 420 × 560 points, centrée par la règle Hyprland

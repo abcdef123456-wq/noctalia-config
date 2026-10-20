@@ -1,3 +1,7 @@
+// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau) : une feuille centrée aux coins arrondis, dans le style de
+// l'île (Couleurs, Texte, Ico, Ligne, pastilles) ; navigation à gauche en lignes façon macOS, contenu à droite.
+// Pages : vue d'ensemble, conversation (la même que l'île), modules, modèle et session, mémoire, conversations,
+// rappels, bots et réglages, services, déploiement. F11 : plein écran ; Échap : fermer (ou la confirmation en cours).
 import QtQuick
 import Quickshell
 
@@ -6,7 +10,7 @@ FloatingWindow {
     title: "JARVIS"
     visible: false
     fullscreen: true
-    implicitWidth: 1280; implicitHeight: 800; minimumSize: Qt.size(860, 600)
+    implicitWidth: 1100; implicitHeight: 820; minimumSize: Qt.size(820, 560)
     color: Couleurs.fond
     property bool pret: false
     property string page: "accueil"
@@ -91,8 +95,8 @@ FloatingWindow {
         onActivated: { if (fen.attente) fen.attente = null; else fen.close() }
     }
 
-    component Note: Texte { width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText; secondaire: true }
-    component Section: Texte { width: parent.width; font.pixelSize: 22; font.weight: Font.Bold; textFormat: Text.PlainText }
+    component Note: Texte { width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText; secondaire: true; font.pixelSize: 13 }
+    component Section: Texte { width: parent.width; font.pixelSize: 17; font.weight: Font.Bold; textFormat: Text.PlainText }
     component Action: JarvisBouton { property bool modifie: true; enabled: !JarvisEtat.enCours && (!modifie || !AssistantEtat.enCours) }
     component Resultat: JarvisResultat {
         operation: fen.resultatOp
@@ -108,62 +112,81 @@ FloatingWindow {
         WheelHandler { onWheel: e => { parent.contentY = Math.max(0, Math.min(Math.max(0,parent.contentHeight-parent.height),parent.contentY-e.angleDelta.y)); e.accepted=true } }
     }
 
+    // ── Le cadre : une feuille centrée aux coins arrondis, comme une grande page de l'île ──
+    Rectangle { anchors.fill: parent; color: Couleurs.fond }
     Rectangle {
-        id: tete
-        width: parent.width; height: 76; color: Couleurs.carte
-        Row {
-            anchors.left:parent.left; anchors.leftMargin:24; anchors.verticalCenter:parent.verticalCenter; spacing:14
-            Etincelle { taille:38; agent:"assistant"; tourne:fen.visible && (AssistantEtat.enCours || JarvisEtat.enCours) }
-            Column {
-                Texte { text:"JARVIS"; font.pixelSize:24; font.weight:Font.Bold; font.letterSpacing:3 }
-                Texte { text:Reglages.t("Ton assistant, sur tous tes écrans", "Your assistant, across your devices"); secondaire:true; font.pixelSize:12 }
+        id: feuille
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 32, 1040); height: Math.min(parent.height - 32, 800)
+        radius: 28; color: Couleurs.carte; clip: true
+        border.width: 1; border.color: Couleurs.gris3
+
+        // En-tête : emblème, titre, état ; commandes rondes (actualiser, plein écran, île, fermer)
+        Item {
+            id: tete
+            width: parent.width; height: 66
+            Row {
+                anchors.left: parent.left; anchors.leftMargin: 22; anchors.verticalCenter: parent.verticalCenter; spacing: 12
+                Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 30; agent: "assistant"; tourne: fen.visible && (AssistantEtat.enCours || JarvisEtat.enCours) }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter; spacing: 1
+                    Texte { text: "JARVIS"; font.pixelSize: 20; font.weight: Font.Bold; font.letterSpacing: 2 }
+                    Texte { text: Reglages.t("Ton assistant, sur tous tes écrans", "Your assistant, across your devices"); secondaire: true; font.pixelSize: 12 }
+                }
+            }
+            Row {
+                anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter; spacing: 6; rightPadding: 6
+                    Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: JarvisEtat.enCours ? Couleurs.jaune : (JarvisEtat.etat.online ? Couleurs.vert : Couleurs.gris4) }
+                    Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; secondaire: true
+                            text: JarvisEtat.enCours ? Reglages.t("Connexion…", "Connecting…") : (JarvisEtat.etat.online ? Reglages.t("En ligne", "Online") : Reglages.t("Non connecté", "Disconnected")) }
+                }
+                AssistantCommande { rond: true; width: 32; height: 32; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
+                AssistantCommande { rond: true; width: 32; height: 32; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
+                AssistantCommande { rond: true; width: 32; height: 32; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
+                AssistantCommande { rond: true; width: 32; height: 32; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
             }
         }
-        Row {
-            anchors.right:parent.right; anchors.rightMargin:24; anchors.verticalCenter:parent.verticalCenter; spacing:10
-            Texte { anchors.verticalCenter:parent.verticalCenter; text: JarvisEtat.enCours ? Reglages.t("Connexion…", "Connecting…") : (JarvisEtat.etat.online ? Reglages.t("En ligne", "Online") : Reglages.t("Non connecté", "Disconnected")); color:JarvisEtat.etat.online ? Couleurs.vert : Couleurs.texteSec }
-            JarvisBouton { texte:Reglages.t("Actualiser", "Refresh"); enabled:!JarvisEtat.enCours; onClic:JarvisEtat.actualiser() }
-            JarvisBouton { texte:"F11"; onClic:{fen.fullscreen=!fen.fullscreen;fen.maximized=!fen.fullscreen} }
-            JarvisBouton { texte:Reglages.t("L’île", "Island"); onClic:{fen.close();Quickshell.execDetached([Quickshell.env("HOME")+"/.local/bin/nc-jarvis","ile"])} }
-            JarvisBouton { texte:"×"; onClic:fen.close() }
-        }
-    }
-    Rectangle {
-        id: barre
-        anchors.top:tete.bottom; anchors.bottom:parent.bottom; width:210; color:Couleurs.carte
+        Rectangle { anchors.top: tete.bottom; width: parent.width; height: 1; color: Couleurs.gris3 }
+
+        // Navigation : lignes façon macOS, comme dans les pages de l'île
         Column {
-            x:12; y:20; width:parent.width-24; spacing:5
+            id: barre
+            anchors.left: parent.left; anchors.leftMargin: 10; anchors.top: tete.bottom; anchors.topMargin: 12
+            width: 206; spacing: 2
             Repeater {
-                model:fen.navigation
-                Rectangle {
+                model: fen.navigation
+                Ligne {
                     required property var modelData
-                    width:parent.width; height:43; radius:12
-                    color:fen.page===modelData.id ? Couleurs.gris3 : "transparent"
-                    Row {
-                        x:12; anchors.verticalCenter:parent.verticalCenter; spacing:10
-                        Ico { nom:modelData.icone; taille:19; color:fen.page===modelData.id?Couleurs.accent:Couleurs.texteSec }
-                        Texte { text:modelData.nom; font.weight:fen.page===modelData.id?Font.DemiBold:Font.Normal }
-                    }
-                    MouseArea { anchors.fill:parent; onClicked:fen.ouvrir(parent.modelData.id) }
+                    width: barre.width; height: 40
+                    icone: modelData.icone; titre: modelData.nom; actif: fen.page === modelData.id
+                    droite: fen.page === modelData.id ? "chevron_right" : ""
+                    onClic: fen.ouvrir(modelData.id)
+                    Accessible.role: Accessible.Button
+                    Accessible.name: modelData.nom
                 }
             }
         }
-    }
-    Item {
-        id: zone
-        anchors.left:barre.right; anchors.right:parent.right; anchors.top:tete.bottom; anchors.bottom:parent.bottom
-        anchors.margins:24
-        Column {
-            id: messages
-            width:parent.width; spacing:6
-            Note { visible:JarvisEtat.erreur!==""; text:JarvisEtat.erreur; color:Couleurs.rouge }
-            Note { visible:!JarvisEtat.administration && fen.page!=="chat"; text:Reglages.t("Connecte ton gateway, puis installe l’adaptateur de gestion depuis Déploiement. Le chat fonctionne aussi avec l’API d’origine.", "Connect your gateway and install the management adapter from Deployment. Chat also works with the original API.") }
-        }
-        Loader {
-            id: pageChargee
-            anchors.top:messages.bottom; anchors.topMargin:16; anchors.bottom:parent.bottom; width:parent.width
-            sourceComponent: ({accueil:accueil,chat:chat,modules:modules,session:session,memoire:memoire,
-                               conversations:conversations,rappels:rappels,configuration:configuration,services:services,deploiement:deploiement})[fen.page]
+        Rectangle { anchors.left: barre.right; anchors.leftMargin: 10; anchors.top: tete.bottom; anchors.bottom: parent.bottom; width: 1; color: Couleurs.gris3 }
+
+        // Contenu
+        Item {
+            id: zone
+            anchors.left: barre.right; anchors.leftMargin: 30; anchors.right: parent.right; anchors.rightMargin: 24
+            anchors.top: tete.bottom; anchors.topMargin: 18; anchors.bottom: parent.bottom; anchors.bottomMargin: 18
+            Column {
+                id: messages
+                width: parent.width; spacing: 6
+                Note { visible: JarvisEtat.erreur !== ""; text: JarvisEtat.erreur; color: Couleurs.rouge }
+                Note { visible: !JarvisEtat.administration && fen.page !== "chat"; text: Reglages.t("Connecte ton gateway, puis installe l’adaptateur de gestion depuis Déploiement. Le chat fonctionne aussi avec l’API d’origine.", "Connect your gateway and install the management adapter from Deployment. Chat also works with the original API.") }
+            }
+            Loader {
+                id: pageChargee
+                anchors.top: messages.bottom; anchors.topMargin: messages.implicitHeight > 0 ? 12 : 0; anchors.bottom: parent.bottom; width: parent.width
+                sourceComponent: ({accueil:accueil,chat:chat,modules:modules,session:session,memoire:memoire,
+                                   conversations:conversations,rappels:rappels,configuration:configuration,services:services,deploiement:deploiement})[fen.page]
+            }
         }
     }
     Component {
@@ -189,7 +212,7 @@ FloatingWindow {
                     ]
                     Rectangle {
                         required property var modelData
-                        width:col.width; height:64; radius:16; color:Couleurs.carte
+                        width:col.width; height:58; radius:16; color:Couleurs.gris2
                         Texte { x:18; anchors.verticalCenter:parent.verticalCenter; text:parent.modelData.t; font.weight:Font.DemiBold }
                         Texte { anchors.right:parent.right; anchors.rightMargin:18; anchors.verticalCenter:parent.verticalCenter; text:parent.modelData.v; secondaire:true }
                     }
@@ -404,7 +427,7 @@ FloatingWindow {
         MouseArea { anchors.fill:parent }
         Rectangle {
             anchors.centerIn:parent; width:Math.min(520,fen.width-48); height:confirmCol.implicitHeight+48
-            radius:24; color:Couleurs.carte
+            radius:22; color:Couleurs.carte; border.width:1; border.color:Couleurs.gris3
             Column {
                 id:confirmCol; x:24; y:24; width:parent.width-48; spacing:20
                 Section { text:Reglages.t("Confirmer l’action", "Confirm action") }
