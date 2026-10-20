@@ -171,7 +171,9 @@ FloatingWindow {
         id: rangee
         anchors.horizontalCenter: parent.horizontalCenter
         y: cadre.y + 16 + 40 + 12
-        width: cadre.width - 40
+        // Aussi large que ses pastilles (centrée, comme les bureaux de la vue), sur deux lignes si l'écran est étroit
+        readonly property real besoin: { var w = 0; for (var i = 0; i < children.length; i++) if (children[i].width > 0) w += children[i].width + spacing; return Math.max(0, w - spacing) }
+        width: Math.min(cadre.width - 40, besoin)
         spacing: 8
         Repeater {
             model: fen.navigation
