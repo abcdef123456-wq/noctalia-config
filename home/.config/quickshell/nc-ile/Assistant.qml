@@ -1,4 +1,6 @@
 import QtQuick
+import Quickshell
+import Quickshell.Io
 
 Item {
     id: page
@@ -60,11 +62,29 @@ Item {
     onVisibleChanged: if (visible) { bas(); Qt.callLater(chargerReglagesRapides) }
     onAnimationsActivesChanged: if (animationsActives) bas()
     function reglages() { information = ""; ecouteVocale = false; AssistantEtat.ouvrirReglages() }
-    function voix() {
+    // Haut-parleur : pas de synthèse vocale sur ce client, le bouton le dit
+    function sortieVocale() {
         ecouteVocale = false
-        information = Reglages.t("Dictée et sortie vocale non configurées sur ce client.", "Dictation and voice output are not configured on this client.")
+        information = Reglages.t("Sortie vocale non configurée sur ce client.", "Voice output is not configured on this client.")
+    }
+    // Micro : un clic enregistre (nc-dictee start), le suivant arrête et transcrit sur le serveur (nc-dictee stop) ;
+    // le texte est ajouté au brouillon, sans envoi. Rien pendant une demande ni tant que nc-dictee tourne (double clic).
+    function voix() {
+        if (AssistantEtat.enCours || dictee.running) return
+        if (ecouteVocale) {
+            ecouteVocale = false
+            information = Reglages.t("Transcription…", "Transcribing…")
+            dictee.commande = "stop"
+        } else {
+            ecouteVocale = true
+            information = Reglages.t("Écoute vocale…", "Listening…")
+            dictee.commande = "start"
+        }
+        dictee.running = true
     }
     Component.onCompleted: { bas(); Qt.callLater(chargerReglagesRapides) }
+    // Page détruite (île fermée) en pleine écoute : le micro ne reste pas ouvert
+    Component.onDestruction: if (ecouteVocale) Quickshell.execDetached([AssistantEtat.bin + "nc-dictee", "cancel"])
     onDansDashboardChanged: if (dansDashboard) historiqueOuvert = true
     Connections {
         target: AssistantEtat
@@ -130,9 +150,10 @@ Item {
                 }
                 AssistantCommande {
                     visible: !page.dansDashboard
+                    objectName: "nc-jarvis-voice-output"
                     rond: true; width: 32; height: 32; icone: "volume_off"
                     aide: Reglages.t("Sortie vocale désactivée", "Voice output disabled")
-                    onClic: page.voix()
+                    onClic: page.sortieVocale()
                 }
                 AssistantCommande {
                     rond: true; width: 32; height: 32; icone: "restart_alt"
@@ -502,6 +523,7 @@ Item {
             }
             AssistantCommande {
                 id: micro
+                objectName: "nc-jarvis-mic"
                 visible: !page.dansDashboard
                 anchors.right: envoi.left; anchors.rightMargin: 8
                 rond: true; width: 46; height: 46
@@ -524,5 +546,36 @@ Item {
                 onClic: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
             }
         }
+    }
+
+    // Dictée : nc-dictee start | stop, une ligne de JSON en réponse ({ ok, recording } ou { ok, text } ou { ok: false, error })
+    Process {
+        id: dictee
+        property string commande: "start"
+        command: [AssistantEtat.bin + "nc-dictee", commande]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var r = null
+                try { r = JSON.parse(text) } catch (_) {}
+                var erreur = r && r.error ? String(r.error).slice(0, 300) : ""
+                if (dictee.commande === "start") {
+                    if (!r || r.ok !== true) {
+                        page.ecouteVocale = false
+                        page.information = erreur || Reglages.t("Micro indisponible.", "Microphone unavailable.")
+                    }
+                    return
+                }
+                page.ecouteVocale = false
+                if (r && r.ok === true && typeof r.text === "string" && r.text.trim().length) {
+                    var t = r.text.trim(), b = AssistantEtat.brouillon.trim()
+                    AssistantEtat.brouillon = b.length ? b + " " + t : t
+                    page.information = ""
+                    Qt.callLater(function() { entree.forceActiveFocus(); entree.cursorPosition = entree.text.length })
+                } else {
+                    page.information = erreur || Reglages.t("Transcription vide.", "Empty transcription.")
+                }
+            }
+        }
+        stderr: StdioCollector {}
     }
 }

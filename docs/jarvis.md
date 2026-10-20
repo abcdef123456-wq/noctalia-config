@@ -22,8 +22,8 @@ La page de l’île reprend l’orbe noir de `pfp.mp4`, ses anneaux cyan et une 
 saisie. Le bouton de conversation en haut et le clic sur l’aperçu de réponse ouvrent l’historique complet,
 y compris le détail des erreurs. Le badge « Prêt » signifie que la saisie est disponible, pas qu’une connexion
 au serveur a été vérifiée. Pendant une demande, le bouton d’envoi indique l’attente ; il ne simule pas une
-annulation que l’API ne propose pas. Les commandes vocales indiquent explicitement qu’elles ne sont pas
-configurées : la dictée et la lecture vocale des bots mobiles ne constituent pas une intégration micro du bureau.
+annulation que l’API ne propose pas. Le micro dicte dans le champ de saisie (voir « Dictée vocale ») ; le
+haut-parleur indique qu’il n’y a pas de sortie vocale sur ce client.
 L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, ainsi qu’en mode sans effets.
 
 ## Conversation dans l’île et le cockpit
@@ -59,6 +59,21 @@ français/anglais sont reconnus ; les noms principaux sont proposés avant les a
 Les tests d’interaction utilisent QtTest uniquement dans le banc de test : ce module n’est pas requis
 pour utiliser le bureau. Ils exercent les vrais clics et événements clavier hors écran, ainsi que les
 réouvertures, le défilement et l’arrêt des animations masquées.
+
+## Dictée vocale
+
+Dans l’île, le bouton micro (ou l’orbe pendant l’écoute) dicte dans le champ de saisie : un clic démarre
+l’enregistrement (badge **Écoute vocale…**), le suivant l’arrête et l’envoie au serveur (**Transcription…**) ;
+le texte est ajouté au brouillon, avec le focus et le curseur en fin, sans envoi automatique. Relire, corriger,
+puis Entrée. Le script `nc-dictee` (`start`, `stop`, `cancel`, `status`) enregistre en 16 kHz mono avec `parec`,
+sinon `pw-record`, sinon `arecord` (PipeWire ou PulseAudio suffisent ; `alsa-utils` à défaut), dans
+`$XDG_RUNTIME_DIR`, et envoie le WAV à `POST /api/transcribe` du gateway avec `X-Secret-Key`, sans suivre de
+redirection ; l’audio est supprimé après la réponse. Serveur, clé et délai sont ceux de
+`~/.config/nc/assistant.conf` (`nc-assistant configurer`) : aucune clé de transcription côté client, le serveur
+choisit son moteur (Groq Whisper, OpenAI ou `faster-whisper` local). Une erreur (serveur arrêté, micro coupé,
+clé refusée, gateway sans `/api/transcribe` → HTTP 404) s’affiche sous l’orbe, l’écoute s’arrête. Un clic pendant
+une demande ou pendant que `nc-dictee` tourne (double clic) est ignoré ; fermer l’île en pleine écoute annule
+l’enregistrement. Pas de dictée dans le cockpit plein écran, pas de synthèse vocale.
 
 ## Architecture et contrat vérifié
 

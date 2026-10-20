@@ -74,6 +74,7 @@ HOME_FILES=(
   .local/bin/nc-claude
   .local/bin/nc-assistant
   .local/bin/nc-jarvis
+  .local/bin/nc-dictee
   .local/share/nc-jarvis/actions.json
   .local/share/nc-jarvis/deployer.py
   .local/share/nc-jarvis/server/nc_gateway.py

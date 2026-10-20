@@ -208,7 +208,8 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 [JARVIS](docs/jarvis.md) relie le chat de l’île à un cockpit extensible en plein écran (**Super + Alt + A**,
 ou application JARVIS). Il gère les modules, le modèle et la session, la mémoire, les rappels mobiles,
-Telegram/Discord et les services. **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs
+Telegram/Discord et les services. Dans l’île, le micro dicte dans le champ de saisie (`nc-dictee`, transcription
+par le serveur), sans envoi automatique. **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs
 sur ce PC ou sur un serveur SSH. Le client n’exécute pas lui-même de modèle ; le backend JARVIS-BIS reste séparé.
 Le même client est fourni sur Arch, Fedora/Nobara, Debian/Ubuntu et openSUSE. Sans Quickshell, les commandes
 et le [chat terminal](docs/assistant-distant.md) restent accessibles. Aucun backend n’est installé ni démarré par `nc-maj`.

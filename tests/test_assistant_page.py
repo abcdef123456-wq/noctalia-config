@@ -13,7 +13,7 @@ QML = REPO / "home/.config/quickshell/nc-ile"
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class PageAssistant(unittest.TestCase):
-    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False):
+    def executer(self, scenario, absent=False, lectureReglages=False, evenements=False, delai=.2, configuration=None, compact=False, dictee=None):
         with tempfile.TemporaryDirectory(prefix="nc-assistant-page-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -69,6 +69,17 @@ if catalogue.exists():
 print(json.dumps(dict(ok=True,data=dict(session=session,engines=[dict(id='codex',name='Codex',installed=True,models=[dict(id='requested-model',name='Requested',efforts=['high','xhigh'])])]))),flush=True)
 ''')
                 jarvis.chmod(0o755)
+                if dictee is not None:
+                    (root / "dictee.json").write_text(json.dumps(dictee))
+                    faux = bin / "nc-dictee"
+                    faux.write_text('''#!/usr/bin/env python3
+import json,os,sys,time
+from pathlib import Path
+with Path(os.environ['HOME'],'dictee-recus').open('a') as f:f.write(json.dumps(sys.argv[1:])+'\\n')
+time.sleep(.05)
+print(json.dumps(json.loads(Path(os.environ['HOME'],'dictee.json').read_text())[sys.argv[1]]),flush=True)
+''')
+                    faux.chmod(0o755)
             shell=(('import QtTest\n' if evenements else '')+'''import QtQuick
 import QtQuick.Window
 import Quickshell
@@ -103,7 +114,7 @@ ShellRoot {
             self.assertNotIn("TypeError", r.stdout + r.stderr)
             self.assertNotIn("Binding loop", r.stdout + r.stderr)
             self.assertNotIn("Cannot assign", r.stdout + r.stderr)
-            recus = root / ("reglages-recus" if lectureReglages else "recus")
+            recus = root / ("reglages-recus" if lectureReglages else "dictee-recus" if dictee is not None else "recus")
             return [json.loads(l) for l in recus.read_text().splitlines()] if recus.exists() else []
 
     def test_request_survives_page_destruction_and_blocks_double_send(self):
@@ -455,3 +466,29 @@ else if(etape===1&&!AssistantEtat.enCours){verifier(!AssistantEtat.reponseRecent
 else if(etape===2&&!AssistantEtat.enCours){verifier(AssistantEtat.reponseRecente,"réponse non signalée");AssistantEtat.brouillon="encore";AssistantEtat.envoyer();verifier(!AssistantEtat.reponseRecente&&AssistantEtat.activitePilule==="jarvis","ancienne confirmation conservée");etape++}
 else if(etape===3&&!AssistantEtat.enCours){Qt.quit()}
 ''')
+
+    # Dictée vocale (bouton micro → nc-dictee start / stop) : le texte transcrit va dans le brouillon, sans envoi
+    def test_dictation_fills_draft_without_sending(self):
+        appels = self.executer('''
+if(etape===0){creer();AssistantEtat.brouillon="Note :";memo.micro=trouver(page,"nc-jarvis-mic");verifier(memo.micro!==null,"micro absent");memo.micro.clic();verifier(page.ecouteVocale,"écoute non démarrée");verifier(page.information==="Listening…","badge écoute : "+page.information);etape++}
+else if(etape===1&&page.ecouteVocale&&Date.now()-memo.t0>300){memo.micro.clic();verifier(!page.ecouteVocale,"écoute non arrêtée");verifier(page.information==="Transcribing…","badge transcription : "+page.information);etape++}
+else if(etape===1){memo.t0=memo.t0||Date.now()}
+else if(etape===2&&page.information===""){verifier(AssistantEtat.brouillon==="Note : bonjour jarvis","brouillon : "+AssistantEtat.brouillon);verifier(trouver(page,"nc-assistant-input").activeFocus,"saisie sans focus");verifier(AssistantEtat.messages.length===0&&!AssistantEtat.enCours,"envoi automatique");Qt.quit()}
+''', dictee={"start": {"ok": True, "recording": True}, "stop": {"ok": True, "text": " bonjour jarvis ", "engine": "test"}})
+        self.assertEqual(appels, [["start"], ["stop"]])
+
+    def test_dictation_errors_are_shown_without_crash(self):
+        appels = self.executer('''
+if(etape===0){creer();memo.micro=trouver(page,"nc-jarvis-mic");memo.micro.clic();memo.micro.clic();verifier(page.ecouteVocale,"second clic pris pour un arrêt");etape++}
+else if(etape===1&&page.ecouteVocale&&Date.now()-memo.t0>300){memo.micro.clic();etape++}
+else if(etape===1){memo.t0=memo.t0||Date.now()}
+else if(etape===2&&page.information!=="Transcribing…"){verifier(page.information==="Transcription impossible : serveur arrêté","erreur : "+page.information);verifier(!page.ecouteVocale&&AssistantEtat.brouillon==="","brouillon modifié");trouver(page,"nc-jarvis-voice-output").clic();verifier(page.information==="Voice output is not configured on this client.","haut-parleur : "+page.information);verifier(!page.ecouteVocale,"haut-parleur lance une écoute");Qt.quit()}
+''', dictee={"start": {"ok": True, "recording": True}, "stop": {"ok": False, "error": "Transcription impossible : serveur arrêté"}})
+        self.assertEqual(appels, [["start"], ["stop"]], "double clic : un seul démarrage ; haut-parleur : aucun appel")
+
+    def test_dictation_start_failure_resets_listening(self):
+        self.executer('''
+if(etape===0){creer();trouver(page,"nc-jarvis-mic").clic();verifier(page.ecouteVocale,"écoute non démarrée");etape++}
+else if(etape===1&&!page.ecouteVocale){verifier(page.information==="Micro coupé","erreur : "+page.information);Qt.quit()}
+''', dictee={"start": {"ok": False, "error": "Micro coupé"}})
+

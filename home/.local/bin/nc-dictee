@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""nc-dictee : dictée vocale du chat JARVIS (bouton micro de l'île).
+
+  nc-dictee start    démarre l'enregistrement du micro
+  nc-dictee stop     l'arrête, envoie l'audio au serveur (POST /api/transcribe) et affiche le texte
+  nc-dictee cancel   l'arrête et supprime l'enregistrement
+  nc-dictee status   dit si un enregistrement est en cours
+
+Une ligne de JSON sur la sortie : {"ok": true, "text": "…", "engine": "…"} après une transcription,
+{"ok": true, "recording": true} après un démarrage, {"ok": false, "error": "…"} sinon.
+Le serveur et la clé sont ceux de ~/.config/nc/assistant.conf (nc-assistant configurer) ; la clé n'est jamais
+écrite ailleurs, l'audio (16 kHz mono, dans XDG_RUNTIME_DIR) est supprimé après la transcription.
+Enregistreur : parec (PulseAudio ou PipeWire), sinon pw-record, sinon arecord. Pas de synthèse vocale.
+"""
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import types
+import urllib.error
+import urllib.request
+
+BIN = Path(__file__).resolve().parent
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
+ETAT = RUNTIME / "nc-dictee.json"       # { pid } de l'enregistreur en cours
+AUDIO = RUNTIME / "nc-dictee.wav"
+JOURNAL = RUNTIME / "nc-dictee.log"     # sortie de l'enregistreur (jamais la clé)
+MAX_REPONSE = 1024 * 1024
+
+
+def client():
+    """nc-assistant comme module : sa configuration, sa langue, son refus des redirections."""
+    m = types.ModuleType("nc_assistant_client")
+    m.__file__ = str(BIN / "nc-assistant")
+    exec(compile((BIN / "nc-assistant").read_text(encoding="utf-8"), m.__file__, "exec"), m.__dict__)
+    return m
+
+
+def sortie(**champs):
+    print(json.dumps(champs, ensure_ascii=False), flush=True)
+
+
+def lire_etat():
+    try:
+        etat = json.loads(ETAT.read_text(encoding="utf-8"))
+        return etat if isinstance(etat, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def actif(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def enregistreur(T):
+    if shutil.which("parec"):
+        return ["parec", "--format=s16le", "--rate=16000", "--channels=1", "--file-format=wav", str(AUDIO)]
+    if shutil.which("pw-record"):
+        return ["pw-record", "--format", "s16", "--rate", "16000", "--channels", "1", str(AUDIO)]
+    if shutil.which("arecord"):
+        return ["arecord", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav", str(AUDIO)]
+    raise RuntimeError(T("Aucun enregistreur audio trouvé (parec, pw-record ou arecord).",
+                         "No audio recorder found (parec, pw-record or arecord)."))
+
+
+def arreter():
+    """Arrête l'enregistreur en cours ; renvoie son état, ou None s'il n'y en avait pas."""
+    etat = lire_etat()
+    if not etat:
+        return None
+    pid = etat.get("pid")
+    if actif(pid):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+        for _ in range(30):
+            if not actif(pid):
+                break
+            time.sleep(0.1)
+        if actif(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+    try:
+        ETAT.unlink()
+    except OSError:
+        pass
+    return etat
+
+
+def demarrer(T):
+    etat = lire_etat()
+    if etat and actif(etat.get("pid")):
+        sortie(ok=True, recording=True, message=T("Enregistrement déjà en cours.", "Already recording."))
+        return 0
+    try:
+        AUDIO.unlink()
+    except OSError:
+        pass
+    commande = enregistreur(T)
+    with open(JOURNAL, "ab") as journal:
+        proc = subprocess.Popen(commande, stdin=subprocess.DEVNULL, stdout=journal, stderr=journal, start_new_session=True)
+    time.sleep(0.25)
+    if proc.poll() is not None:
+        sortie(ok=False, error=T("L'enregistrement n'a pas démarré : vérifie le micro.",
+                                 "Recording did not start: check the microphone."))
+        return 1
+    ETAT.write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
+    sortie(ok=True, recording=True)
+    return 0
+
+
+def transcrire(m):
+    T = m.T
+    if not arreter():
+        sortie(ok=False, error=T("Aucun enregistrement en cours.", "No recording in progress."))
+        return 1
+    try:
+        if not AUDIO.is_file() or AUDIO.stat().st_size < 1000:
+            sortie(ok=False, error=T("Enregistrement vide ou micro coupé.", "Empty recording or muted microphone."))
+            return 1
+        try:
+            c = m.configuration()
+            req = urllib.request.Request(c["URL"].rstrip("/") + "/api/transcribe", data=AUDIO.read_bytes(),
+                                         headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
+            with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
+                resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))
+            if not isinstance(resultat, dict):
+                raise ValueError
+        except m.Erreur as e:
+            sortie(ok=False, error=str(e))
+            return 1
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                sortie(ok=False, error=T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
+                                         f"Server rejected the key (HTTP {e.code}): check SECRET_KEY."))
+            elif e.code == 404:
+                sortie(ok=False, error=T("Le serveur n'a pas de transcription (HTTP 404) : mets à jour le gateway.",
+                                         "The server has no transcription (HTTP 404): update the gateway."))
+            else:
+                sortie(ok=False, error=T(f"Erreur HTTP {e.code} du serveur.", f"HTTP error {e.code} from the server."))
+            return 1
+        except Exception as e:   # réseau, délai, JSON : le détail sans la clé
+            sortie(ok=False, error=T("Transcription impossible : ", "Transcription failed: ") + str(e)[:200])
+            return 1
+    finally:
+        try:
+            AUDIO.unlink()
+        except OSError:
+            pass
+    texte = resultat.get("text")
+    if not resultat.get("success") or not isinstance(texte, str) or not texte.strip():
+        erreur = resultat.get("error")
+        sortie(ok=False, error=str(erreur)[:300] if erreur else T("Transcription vide.", "Empty transcription."))
+        return 1
+    sortie(ok=True, text=texte.strip()[:16000], engine=str(resultat.get("engine") or ""))
+    return 0
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else "status"
+    m = client()
+    try:
+        if action == "start":
+            return demarrer(m.T)
+        if action == "stop":
+            return transcrire(m)
+        if action == "cancel":
+            arreter()
+            try:
+                AUDIO.unlink()
+            except OSError:
+                pass
+            sortie(ok=True, recording=False)
+            return 0
+        if action == "status":
+            etat = lire_etat()
+            sortie(ok=True, recording=bool(etat and actif(etat.get("pid"))))
+            return 0
+        sortie(ok=False, error="nc-dictee start | stop | cancel | status")
+        return 1
+    except (RuntimeError, OSError) as e:
+        sortie(ok=False, error=str(e))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
