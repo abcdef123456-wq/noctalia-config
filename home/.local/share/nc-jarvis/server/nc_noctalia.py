@@ -17,7 +17,6 @@ l'environnement de la session Hyprland (importé dans systemd --user à l'ouvert
   /nc oui                          confirmer l'action sensible en attente
 """
 import asyncio
-import json
 import logging
 import os
 from pathlib import Path

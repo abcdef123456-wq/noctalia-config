@@ -10,7 +10,7 @@ Item {
     id: ca
     property int decalage: 0
     property int jourChoisi: 0                  // jour montré en détail (0 : aucun)
-    readonly property date premier: new Date(Etat.maintenant.getFullYear(), Etat.maintenant.getMonth() + decalage, 1)
+    readonly property date premier: new Date(Etat.minute.getFullYear(), Etat.minute.getMonth() + decalage, 1)
     readonly property int nbJours: new Date(premier.getFullYear(), premier.getMonth() + 1, 0).getDate()
     readonly property int debut: (premier.getDay() + 6) % 7          // lundi en premier
     readonly property bool google: Reglages.val("GOOGLE_INTEGRATION", "non") === "oui" && Reglages.val("GOOGLE_CALENDRIER", "oui") !== "non"
@@ -19,7 +19,7 @@ Item {
     readonly property var evenements: mois ? mois.events : []
     readonly property bool chargement: google && GoogleAgenda.enCours === cle
     readonly property string erreur: google ? GoogleAgenda.erreur(cle) : ""
-    readonly property var prochain: google && GoogleAgenda.cache !== undefined ? GoogleAgenda.prochain(Etat.maintenant) : null
+    readonly property var prochain: google && GoogleAgenda.cache !== undefined ? GoogleAgenda.prochain(Etat.minute) : null
     readonly property var duJour: jourChoisi > 0 ? evenementsDu(jourChoisi) : []
     function defiler(dy) { return defil.defiler(dy) }
     function iso(j) { return GoogleAgenda.iso(new Date(premier.getFullYear(), premier.getMonth(), j)) }
@@ -41,10 +41,10 @@ Item {
                            : ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."][d.getDay()] + " " + d.getDate()
     }
     // La date est recalculée ici : au changement de mois, la liaison « premier » n'est pas forcément déjà à jour
-    function charger(force) { if (google && visible) GoogleAgenda.charger(new Date(Etat.maintenant.getFullYear(), Etat.maintenant.getMonth() + decalage, 1), force) }
+    function charger(force) { if (google && visible) GoogleAgenda.charger(new Date(Etat.minute.getFullYear(), Etat.minute.getMonth() + decalage, 1), force) }
     // « + » : JARVIS, avec une demande de création prête à compléter (le jour choisi, sinon aujourd'hui)
     function creer() {
-        var j = jourChoisi > 0 ? iso(jourChoisi) : GoogleAgenda.iso(Etat.maintenant)
+        var j = jourChoisi > 0 ? iso(jourChoisi) : GoogleAgenda.iso(Etat.minute)
         AssistantEtat.brouillon = Reglages.t("Crée un événement dans mon Google Agenda le " + j + " : ", "Create an event in my Google Calendar on " + j + ": ")
         Etat.aller("assistant")
     }
@@ -111,7 +111,7 @@ Item {
                         id: cellule
                         required property int index
                         readonly property int jour: index - ca.debut + 1
-                        readonly property bool aujourdhui: ca.decalage === 0 && jour === Etat.maintenant.getDate()
+                        readonly property bool aujourdhui: ca.decalage === 0 && jour === Etat.minute.getDate()
                         readonly property bool choisi: ca.google && jour > 0 && jour === ca.jourChoisi
                         readonly property var points: ca.google && jour > 0 ? ca.couleurs(jour) : []
                         objectName: jour > 0 ? "nc-cal-jour-" + jour : ""

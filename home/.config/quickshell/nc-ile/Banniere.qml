@@ -38,7 +38,7 @@ Item {
             Texte { text: b.vue ? Notifs.nomAppli(b.vue) : ""; secondaire: true; font.pixelSize: 12; width: parent.width - 90 }
             Texte {
                 anchors.right: parent.right
-                text: b.vue ? Notifs.quand(b.vue, Etat.maintenant.getTime()) : ""
+                text: b.vue ? Notifs.quand(b.vue, Etat.minute.getTime()) : ""
                 secondaire: true; font.pixelSize: 12
             }
         }

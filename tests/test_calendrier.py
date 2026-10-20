@@ -44,6 +44,7 @@ class Calendrier(unittest.TestCase):
                 import QtQuick
                 QtObject {
                     property var maintenant: new Date(2026, 9, 20, 18, 0)
+                    property var minute: new Date(2026, 9, 20, 18, 0)
                     readonly property var mois: ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"]
                     property var hauteurs: ({})
                     property var allees: []

@@ -295,7 +295,6 @@ def dessins(c):
     pleine = CORBEILLE.format(papiers=PAPIERS.format(**c), **teintes)
     out["user-trash"] = svg(defs.format(**teintes) + "\n  " + vide)
     out["user-trash-full"] = svg(defs.format(**teintes) + "\n  " + pleine)
-    dossier = DOSSIER.format(symbole="", **teintes)
     # Accent presque gris (fond d'écran en noir et blanc) : tuile Fichiers d'un bleu de dossier, sinon elle serait terne
     r, g, b = rvb(c["accent"])
     gris = (max(r, g, b) - min(r, g, b)) / 255 < 0.15

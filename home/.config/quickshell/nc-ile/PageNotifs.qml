@@ -218,7 +218,7 @@ Item {
                                 y: 12; spacing: 1
                                 Item {
                                     width: parent.width; height: 16
-                                    Texte { text: (groupe.replie && groupe.modelData.notifs.length > 1 ? "+" + (groupe.modelData.notifs.length - 1) + "  " : "") + Notifs.quand(carte.modelData, Etat.maintenant.getTime()); secondaire: true; font.pixelSize: 12; visible: !zc.containsMouse && !carte.choisie }
+                                    Texte { text: (groupe.replie && groupe.modelData.notifs.length > 1 ? "+" + (groupe.modelData.notifs.length - 1) + "  " : "") + Notifs.quand(carte.modelData, Etat.minute.getTime()); secondaire: true; font.pixelSize: 12; visible: !zc.containsMouse && !carte.choisie }
                                     // Actions au survol : lue, reporter, masquer l'appli, répondre
                                     Row {
                                         anchors.right: parent.right; spacing: 2; visible: zc.containsMouse || carte.choisie || carte.menu !== ""

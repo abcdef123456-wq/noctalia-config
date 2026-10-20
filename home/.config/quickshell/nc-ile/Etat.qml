@@ -220,8 +220,18 @@ Singleton {
     function oublierPresse() { PressePapiers.toutEffacer() }
 
     // ── Enregistrement d'écran (nc-video) : point rouge et durée dans la pilule ; un clic dessus l'arrête ──
+    // Le fichier d'état de nc-video (XDG_RUNTIME_DIR/nc-video : pid, début) est surveillé : plus de sondage chaque
+    // seconde ; à chaque changement, lireVideo vérifie que l'enregistreur tourne encore, et toutes les 15 s pendant un
+    // enregistrement au cas où il aurait planté
     property real debutVideo: 0
     readonly property bool enregistre: debutVideo > 0
+    readonly property string dossierSession: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
+    FileView {
+        path: etat.dossierSession + "/nc-video"; watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: if (!lireVideo.running) lireVideo.running = true
+        onLoadFailed: etat.debutVideo = 0
+    }
 
     // ── Téléchargements du navigateur (fichiers .part de Firefox, .crdownload des Chrome) : taille, vitesse, fin ──
     property var telechargements: []          // { nom, taille, vitesse } (octets, octets/s)
@@ -258,7 +268,8 @@ Singleton {
         function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
         onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
     }
-    Timer { interval: 2000; repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    // Toutes les 2 s pendant un téléchargement (vitesse), toutes les 6 s sinon (un find du dossier Téléchargements)
+    Timer { interval: etat.telechargements.length ? 2000 : 6000; repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
         if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")
@@ -268,7 +279,7 @@ Singleton {
         command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-video\"; [ -s \"$f\" ] && kill -0 \"$(head -1 \"$f\")\" 2>/dev/null && sed -n 2p \"$f\" || echo 0"]
         stdout: StdioCollector { onStreamFinished: etat.debutVideo = parseInt(text) || 0 }
     }
-    Timer { interval: 1000; repeat: true; running: true; onTriggered: if (!lireVideo.running) lireVideo.running = true }
+    Timer { interval: 15000; repeat: true; running: etat.enregistre; onTriggered: if (!lireVideo.running) lireVideo.running = true }
     function arreterVideo() { Quickshell.execDetached([bin + "nc-video", "arreter"]); debutVideo = 0 }
 
     // ── Café : empêche la mise en veille (Noctalia) ──
@@ -277,7 +288,11 @@ Singleton {
 
     // ── Heure ──
     property date maintenant: new Date()
-    Timer { interval: 1000; running: true; repeat: true; onTriggered: etat.maintenant = new Date() }
+    property date minute: new Date()        // ne change qu'au changement de minute : moins de recalculs (calendrier, notifications)
+    Timer { interval: 1000; running: true; repeat: true; onTriggered: {
+        var d = new Date(); etat.maintenant = d
+        if (d.getMinutes() !== etat.minute.getMinutes() || d.getHours() !== etat.minute.getHours() || d.getDate() !== etat.minute.getDate()) etat.minute = d
+    } }
     // En anglais : noms de Reglages.locale (0 = dimanche, comme getDay())
     readonly property var jours: Reglages.en ? [0, 1, 2, 3, 4, 5, 6].map(i => Reglages.locale.dayName(i, Locale.LongFormat))
                                              : ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
@@ -382,7 +397,7 @@ Singleton {
             + "| grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1 | grep . || echo '" + Reglages.t("Une appli", "An app") + "'; exit; done"]
         stdout: StdioCollector { onStreamFinished: etat.appliCamera = text.trim() }
     }
-    Timer { interval: 3000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
+    Timer { interval: 5000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
     readonly property bool microActif: appliMicro !== ""
     readonly property bool cameraActive: appliCamera !== ""
     onMicroActifChanged: if (microActif) activite("micro", 3200)
@@ -465,21 +480,17 @@ Singleton {
     }
     function reglerLuminosite(v) { luminosite = Math.max(0, Math.min(1, v)); luminositeVoulue = luminosite }
 
-    // ── Mode jeu (fichier de la session) ──
+    // ── Mode jeu (fichier de la session, posé et retiré par nc.mode_jeu dans Hyprland) : surveillé, pas sondé ──
     property bool jeu: false
     property bool jeuEnCours: false
-    Process {
-        id: testeJeu
-        command: ["sh", "-c", "[ -e \"${XDG_RUNTIME_DIR:-/tmp}/nc-mode-jeu\" ] && echo 1 || echo 0"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var j = this.text.trim() === "1"
-                if (j !== etat.jeu) { etat.jeu = j; etat.jeuEnCours = true; activite("jeu"); finJeu.restart() }
-            }
-        }
+    function majJeu(j) { if (j !== jeu) { jeu = j; jeuEnCours = true; activite("jeu"); finJeu.restart() } }
+    FileView {
+        path: etat.dossierSession + "/nc-mode-jeu"; watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: etat.majJeu(true)
+        onLoadFailed: etat.majJeu(false)
     }
     Timer { id: finJeu; interval: 4000; onTriggered: etat.jeuEnCours = false }
-    Timer { interval: 1500; repeat: true; running: true; onTriggered: if (!testeJeu.running) testeJeu.running = true }
 
     // ── État du système (centre de contrôle ouvert) ──
     property var sys: ({})
@@ -499,8 +510,11 @@ Singleton {
             }
         }
     }
-    function lire() { if (!lecteurEtat.running) lecteurEtat.running = true }
-    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== ""; onTriggered: { etat.lire(); etat.lirePage() } }
+    // nc-ile-etat (une centaine de ms de calcul) : seulement pour les pages qui lisent Etat.sys
+    readonly property bool pageSys: ["centre", "systeme", "reseau", "bluetooth"].indexOf(vueActive) >= 0
+    function lire() { if (pageSys && !lecteurEtat.running) lecteurEtat.running = true }
+    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== "" && etat.pageSys; onTriggered: { etat.lire(); etat.lirePage() } }
+    onPageSysChanged: if (pageSys && ecranOuvert !== "") lire()
 
     // Listes des pages Wi-Fi, Bluetooth, et mesures de la page Système
     property var liste: []

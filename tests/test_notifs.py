@@ -30,7 +30,7 @@ class Notifications(unittest.TestCase):
             for nom in ("Notifs.qml", "PageNotifs.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k]!==undefined?valeurs[k]:d}}')
-            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var maintenant: new Date(); property var hauteurs: ({}); property int fermetures: 0; function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
+            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var maintenant: new Date(); property var minute: new Date(); property var hauteurs: ({}); property int fermetures: 0; function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
             (root / "qmldir").write_text("\n".join(
                 ("singleton " if n in ("Notifs", "Memo", "Couleurs", "Reglages", "Etat") else "") + n + " 1.0 " + n + ".qml"
                 for n in ("PageNotifs", "Notifs", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat")))
