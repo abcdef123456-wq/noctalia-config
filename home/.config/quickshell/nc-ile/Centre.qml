@@ -91,6 +91,7 @@ Item {
     Component.onCompleted: {
         Etat.annoncerHauteur("centre", hauteurVoulue)
         Memo.lire("centre", v => {
+            if (!centre) return              // page déjà détruite (l'île a changé de page avant la relecture)
             if (v && Array.isArray(v.ordre)) {
                 var o = v.ordre.filter(id => centre.modules[id] !== undefined)
                 centre.defaut.forEach(id => { if (o.indexOf(id) < 0) o.push(id) })
