@@ -2,8 +2,12 @@
 # nc-paquets : les mises à jour du système (pas de la config : ça, c'est nc-maj).
 #   nc-paquets compter        compte les paquets à mettre à jour (pacman, dnf ou apt, et Flatpak) ; toutes les 3 h
 #                             (nc-paquets.timer) ; résultat dans ~/.cache/nc/paquets, lu par l'île (page Système)
+#   nc-paquets compter local  pareil, sans resynchroniser les dépôts (juste après une mise à jour : instantané)
 #   nc-paquets mettre-a-jour  ouvre un terminal qui met tout à jour (demande ton mot de passe), puis recompte
 #   nc-paquets                le nombre et la liste
+# Le recompte après la mise à jour se fait dans le terminal, avec les dépôts que la mise à jour vient de synchroniser
+# (pacman -Qu, dnf sans --refresh), en quelques secondes, et va au bout même si la fenêtre est fermée avant ; si la
+# mise à jour a échoué (mot de passe, réseau), c'est le compte complet qui est refait.
 # Réglage : nc-reglages → Mises à jour → « Mises à jour du système » (MAJ_SYSTEME : ile, notif, non)
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -11,11 +15,13 @@ cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
 fichier="$cache/paquets"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 
-liste() {   # un paquet par ligne
+liste() {   # un paquet par ligne ; « local » : avec les dépôts déjà synchronisés (pas de réseau, sauf Flatpak)
   if command -v pacman >/dev/null; then
-    if command -v checkupdates >/dev/null; then checkupdates 2>/dev/null | awk '{print $1}'; fi
+    # checkupdates synchronise une copie des dépôts (long) ; juste après pacman -Syu, les vrais dépôts sont à jour
+    if [ "${1:-}" = local ]; then pacman -Qu 2>/dev/null | grep -v '\[ignored\]' | awk '{print $1}'
+    elif command -v checkupdates >/dev/null; then checkupdates 2>/dev/null | awk '{print $1}'; fi
   elif command -v dnf >/dev/null; then
-    dnf -q check-update --refresh 2>/dev/null | awk 'NF == 3 && $1 ~ /\./ {print $1}'
+    dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null | awk 'NF == 3 && $1 ~ /\./ {print $1}'
   elif command -v apt >/dev/null; then
     apt list --upgradable 2>/dev/null | awk -F/ '/upgradable/ {print $1}'
   fi
@@ -32,7 +38,7 @@ case "$action" in
   compter)
     [ "$(reglage MAJ_SYSTEME)" = non ] && { rm -f "$fichier"; exit 0; }
     mkdir -p "$cache"
-    l="$(liste | sort -u)"
+    l="$(liste "${2:-}" | sort -u)"
     n=$(printf '%s' "$l" | grep -c . || true)
     avant=$(head -1 "$fichier" 2>/dev/null || echo 0)
     { echo "$n"; printf '%s\n' "$l"; } > "$fichier.tmp" && mv "$fichier.tmp" "$fichier"
@@ -48,14 +54,24 @@ case "$action" in
       disown 2>/dev/null || true
     fi ;;
   mettre-a-jour)
-    if command -v pacman >/dev/null; then c="sudo pacman -Syu"
+    exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" "$0" terminal ;;
+  terminal)   # dans le terminal ouvert par mettre-a-jour : la mise à jour, puis le recompte
+    # Fenêtre fermée pendant le recompte : il va quand même au bout (sinon l'île garderait l'ancien nombre 3 h)
+    trap '' HUP
+    ok=0
+    if command -v pacman >/dev/null; then sudo pacman -Syu || ok=1
     # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
-    elif command -v nobara-sync >/dev/null; then c="nobara-sync cli"
-    elif command -v dnf >/dev/null; then c="sudo dnf upgrade --refresh"
-    elif command -v apt >/dev/null; then c="sudo apt update && sudo apt full-upgrade"
-    else c="echo '$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")'"; fi
-    command -v flatpak >/dev/null && c="$c; flatpak update"
-    exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" sh -c "$c; \"$0\" compter; echo; printf '$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")'; read r" ;;
+    elif command -v nobara-sync >/dev/null; then nobara-sync cli || ok=1
+    elif command -v dnf >/dev/null; then sudo dnf upgrade --refresh || ok=1
+    elif command -v apt >/dev/null; then { sudo apt update && sudo apt full-upgrade; } || ok=1
+    else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; ok=1; fi
+    if command -v flatpak >/dev/null; then flatpak update || ok=1; fi
+    echo; t "Recompte des mises à jour…" "Recounting updates…"; echo
+    if [ "$ok" = 0 ]; then "$0" compter local; else "$0" compter; fi
+    n=$(head -1 "$fichier" 2>/dev/null || echo 0)
+    if [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
+    else t "Système à jour." "System up to date."; fi
+    echo; printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"; read -r r 2>/dev/null || true ;;
   *)
     if [ -s "$fichier" ]; then t "$(head -1 "$fichier") mise(s) à jour :" "$(head -1 "$fichier") update(s):"; echo; tail -n +2 "$fichier"
     else t "Pas encore compté : nc-paquets compter" "Not counted yet: nc-packages count"; echo; fi ;;

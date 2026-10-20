@@ -188,9 +188,13 @@ Item {
                 sous: Etat.sys.halo === "1" ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
             }
-            // Mises à jour du système (nc-paquets, comptées toutes les 3 h) : un clic, tout mettre à jour dans un terminal
+            // Mises à jour du système (nc-paquets, comptées toutes les 3 h) : un clic, tout mettre à jour dans un terminal.
+            // Le nombre est la première ligne de ~/.cache/nc/paquets, relu à chaque réécriture (le recompte après la mise
+            // à jour) et quand la page revient à l'écran
             Ligne {
-                readonly property int n: parseInt((paquets.text().split("\n")[0]) || "0") || 0
+                id: maj
+                objectName: "nc-paquets"
+                property int n: 0
                 visible: Reglages.val("MAJ_SYSTEME", "ile") !== "non" && paquets.loaded
                 width: sy.width; icone: "system_update"; actif: n > 0
                 titre: n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
@@ -203,7 +207,9 @@ Item {
                     path: Quickshell.env("HOME") + "/.cache/nc/paquets"
                     watchChanges: true; printErrors: false
                     onFileChanged: reload()
+                    onLoaded: maj.n = parseInt(text().split("\n")[0]) || 0
                 }
+                Connections { target: sy; function onVisibleChanged() { if (sy.visible) paquets.reload() } }
             }
             // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
             Ligne {
