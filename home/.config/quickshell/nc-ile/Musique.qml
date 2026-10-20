@@ -21,7 +21,7 @@ Item {
             width: parent.width; height: 72; spacing: 14
             ClippingRectangle {
                 width: 72; height: 72; radius: 16; color: Couleurs.gris2
-                Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
+                Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
                 Image { anchors.centerIn: parent; width: 44; height: 44; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(88, 88); visible: Etat.pochette === "" }
                 Ico { anchors.centerIn: parent; nom: "music_note"; taille: 32; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                 MouseArea {

@@ -346,7 +346,7 @@ Item {
                     spacing: 10; width: parent.width
                     ClippingRectangle {
                         width: 54; height: 54; radius: 12; color: Couleurs.gris2
-                        Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true }
+                        Image { anchors.fill: parent; source: Etat.pochette; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize: Qt.size(144, 144) }
                         Image { anchors.centerIn: parent; width: 34; height: 34; source: Etat.pochette === "" ? Etat.iconeLecteur : ""; sourceSize: Qt.size(68, 68); visible: Etat.pochette === "" }
                         Ico { anchors.centerIn: parent; nom: "music_note"; taille: 26; color: Couleurs.texteSec; visible: Etat.pochette === "" && Etat.iconeLecteur === "" }
                     }

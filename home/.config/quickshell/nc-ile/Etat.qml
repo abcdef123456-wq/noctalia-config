@@ -370,8 +370,8 @@ Singleton {
 
     // ── Batterie et profils d'énergie ──
     readonly property var batterie: UPower.displayDevice
-    readonly property bool aBatterie: batterie && batterie.isLaptopBattery
-    readonly property int pourcent: batterie ? Math.round(batterie.percentage * (batterie.percentage <= 1 ? 100 : 1)) : 0
+    readonly property bool aBatterie: !!(batterie && batterie.isLaptopBattery)    // sans UPower (PC fixe) : faux, pas « undefined »
+    readonly property int pourcent: batterie && batterie.percentage > 0 ? Math.round(batterie.percentage * (batterie.percentage <= 1 ? 100 : 1)) : 0
     readonly property bool branche: !UPower.onBattery
     // Vraie recharge (pas seulement branché : la limite de charge peut la bloquer vers 80 %)
     readonly property bool enCharge: aBatterie && batterie.state === UPowerDeviceState.Charging
