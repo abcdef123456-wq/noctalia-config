@@ -19,7 +19,7 @@ class CockpitJarvis(unittest.TestCase):
             (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
             (root/'qml/Agents.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
             singletons={'Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat'}
-            noms=['Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','Texte','Ico','Etincelle','LogoAssistant','Defilement']
+            noms=['Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisChat','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','Texte','Ico','Etincelle','LogoAssistant','Defilement']
             (root/'qml/qmldir').write_text('\n'.join(('singleton ' if n in singletons else '')+n+' 1.0 '+n+'.qml' for n in noms))
             if not absent:
                 b=root/'.local/bin';b.mkdir(parents=True)
@@ -128,3 +128,31 @@ if(etape===1){
  clavier.keyClick(Qt.Key_Escape);etape++
 }else if(etape===4){verifier(!dashboard.visible,"second Échap n'a pas fermé le cockpit");Qt.quit()}
 ''',evenements=True)
+
+    # Petite fenêtre de chat (Super + Alt + A) : vierge à l'ouverture, envoi par AssistantEtat, nouvelle conversation, Échap
+    def test_compact_chat_window_is_blank_shares_the_session_and_closes_on_escape(self):
+        calls=self.executer('''
+if(etape===0){
+ AssistantEtat.ajouter("vous","ancienne question");AssistantEtat.ajouter("assistant","ancienne réponse")
+ var c=Qt.createComponent("JarvisChat.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(racine);verifier(dashboard!==null,"création de la fenêtre")
+ dashboard.afficher(Quickshell.screens[0].name);etape++;return}
+if(AssistantEtat.enCours)return
+if(etape===1){
+ verifier(dashboard.visible&&dashboard.title==="JARVIS Chat","fenêtre absente ou mal nommée")
+ verifier(dashboard.page.nombre===0,"conversation non vierge : "+dashboard.page.nombre)
+ verifier(AssistantEtat.messages.length===2,"l'historique de l'île a été perdu")
+ var entree=trouver(dashboard.contentItem,"nc-assistant-input");verifier(entree!==null&&entree.activeFocus,"saisie sans focus à l'ouverture")
+ entree.forceActiveFocus();clavier.keyClick("s");clavier.keyClick("a");clavier.keyClick("l");clavier.keyClick("u");clavier.keyClick("t");clavier.keyClick(Qt.Key_Return);verifier(AssistantEtat.enCours,"Entrée n'envoie pas");etape++
+}else if(etape===2){
+ var conv=dashboard.page.conversation()
+ verifier(conv.length===2&&conv[0].texte==="salut"&&conv[1].texte==="Réponse native","conversation de la fenêtre : "+JSON.stringify(conv))
+ verifier(AssistantEtat.messages.length===4,"historique partagé : "+AssistantEtat.messages.length)
+ trouver(dashboard.contentItem,"nc-jarvis-chat-new").clic();verifier(AssistantEtat.enCours,"nouvelle conversation sans reset");etape++
+}else if(etape===3){
+ verifier(dashboard.page.nombre===0,"fenêtre non vide après la nouvelle conversation")
+ verifier(AssistantEtat.messages.length===1,"session non remise à zéro : "+AssistantEtat.messages.length)
+ clavier.keyClick(Qt.Key_Escape);etape++
+}else if(etape===4){verifier(!dashboard.visible,"Échap n'a pas fermé la fenêtre");dashboard.afficher(Quickshell.screens[0].name);verifier(dashboard.visible&&dashboard.page.nombre===0,"réouverture non vierge");Qt.quit()}
+''',evenements=True)
+        self.assertEqual([c['data']['question'] for c in calls if c['argv']==['requete-ile']],['salut','/reset'])
+

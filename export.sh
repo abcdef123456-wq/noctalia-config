@@ -121,6 +121,7 @@ HOME_FILES=(
   .local/bin/unimatrix
   .local/share/applications/nc-assistant.desktop
   .local/share/applications/nc-jarvis.desktop
+  .local/share/applications/nc-jarvis-chat.desktop
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
   .config/systemd/user/noctalia.service

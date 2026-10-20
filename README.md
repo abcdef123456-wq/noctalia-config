@@ -206,7 +206,8 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 ## Personnaliser sans perdre tes réglages
 
-[JARVIS](docs/jarvis.md) relie le chat de l’île à un cockpit extensible en plein écran (**Super + Alt + A**,
+[JARVIS](docs/jarvis.md) relie le chat de l’île à une petite fenêtre de chat vierge (**Super + Alt + A**, épinglable
+sur tous les bureaux avec Super + Ctrl + P) et à un cockpit extensible en plein écran (**Super + Alt + Maj + A**,
 ou application JARVIS). Il gère les modules, le modèle et la session, la mémoire, les rappels mobiles,
 Telegram/Discord et les services. Dans l’île, le micro dicte dans le champ de saisie (`nc-dictee`, transcription
 par le serveur), sans envoi automatique. **nc-settings → Agents IA** propose la connexion et les déploiements facultatifs

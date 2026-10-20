@@ -145,8 +145,8 @@ else if(etape===1&&!AssistantEtat.enCours){verifier(AssistantEtat.erreur!=="","e
 
     def test_history_is_bounded_and_draft_survives_clear(self):
         self.executer('''
-if(etape===0){creer();for(var i=0;i<100;i++)AssistantEtat.ajouter("assistant","x".repeat(16000));verifier(AssistantEtat.messages.length<=3,"historique trop grand");AssistantEtat.messages=[];for(var j=0;j<100;j++)AssistantEtat.ajouter("vous","x");verifier(AssistantEtat.messages.length===24,"trop de messages");AssistantEtat.brouillon="gardé";AssistantEtat.effacer();verifier(AssistantEtat.brouillon==="gardé","brouillon effacé");Qt.quit()}
-''')
+if(etape===0){for(var i=0;i<100;i++)AssistantEtat.ajouter("assistant","x".repeat(16000));verifier(AssistantEtat.messages.length<=3,"historique trop grand");AssistantEtat.messages=[];for(var j=0;j<100;j++)AssistantEtat.ajouter("vous","x");verifier(AssistantEtat.messages.length===24,"trop de messages");creer();verifier(page.nombre===24&&trouver(page,"nc-jarvis-message")!==null,"messages non affichés");AssistantEtat.brouillon="gardé";AssistantEtat.effacer();verifier(AssistantEtat.brouillon==="gardé","brouillon effacé");verifier(page.nombre===0,"affichage non vidé");etape=99;Qt.quit()}
+''')   # etape=99 : la minuterie peut refaire un tour avant la fin du processus ; rejouer le flot redessinerait 100 fois les messages
 
     def test_quick_settings_preserve_draft_and_visual_stops_when_hidden(self):
         recus=self.executer('''

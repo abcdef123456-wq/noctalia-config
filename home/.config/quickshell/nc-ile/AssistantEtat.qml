@@ -303,8 +303,9 @@ Singleton {
         return t.replace(/\s+/g, " ").trim()
     }
 
+    property int dernierId: 0               // identifiant du dernier message ajouté (une fenêtre de chat part de là)
     function ajouter(role, texte) {
-        var m = messages.concat([{role: role, texte: texte}]).slice(-24)
+        var m = messages.concat([{role: role, texte: texte, num: ++dernierId}]).slice(-24)
         var total = m.reduce((n, x) => n + x.texte.length, 0)
         while (total > 48000 && m.length > 1) total -= m.shift().texte.length
         messages = m

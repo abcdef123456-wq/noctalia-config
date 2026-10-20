@@ -6,6 +6,10 @@ hl.window_rule({
     float = true, center = true, size = { "monitor_w*0.52", "monitor_h*0.62" },
 })
 
+-- Petite fenêtre de chat JARVIS (Super + Alt + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
+-- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.
+hl.window_rule({ name = "jarvis-chat", match = { title = "^(JARVIS Chat)$" }, float = true, center = true, size = { "420", "560" } })
+
 -- Les applis ne se maximisent pas toutes seules
 hl.window_rule({ name = "pas-de-maximisation", match = { class = ".*" }, suppress_event = "maximize" })
 -- Fenêtres sans nom ni classe (glisser-déposer XWayland, menus fantômes) : ne prennent pas le focus en apparaissant

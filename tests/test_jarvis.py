@@ -305,3 +305,29 @@ class TransportJarvis(unittest.TestCase):
         self.assertEqual([row[0] for row in self.server.recus],['/gateway/api/status','/gateway/api/nc/manage'])
         self.assertEqual(json.loads(r.stdout)['data']['management']['protocol'],1)
         self.assertNotIn(self.c['SECRET_KEY'],r.stdout+r.stderr)
+
+
+class CommandeChat(unittest.TestCase):
+    """nc-jarvis chat : la petite fenêtre par l'IPC de l'île, sinon le chat dans un terminal."""
+    def lancer(self, qs_ok):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);bin=root/'bin';bin.mkdir()
+            shutil.copy2(BIN/'nc-jarvis',bin/'nc-jarvis')
+            (bin/'nc-assistant').write_text('import json,os,sys\nfrom pathlib import Path\nPath(os.environ["HOME"],"assistant").write_text(json.dumps(sys.argv[1:]))\n')
+            (bin/'qs').write_text('#!/bin/sh\necho "$*" > "$HOME/qs"\nexit %d\n'%(0 if qs_ok else 1));(bin/'qs').chmod(0o755)
+            env=dict(os.environ,HOME=d,PATH=str(bin)+os.pathsep+os.environ['PATH'])
+            r=subprocess.run([sys.executable,str(bin/'nc-jarvis'),'chat'],env=env,capture_output=True,text=True,timeout=20)
+            qs=(root/'qs').read_text().strip() if (root/'qs').exists() else None
+            assistant=json.loads((root/'assistant').read_text()) if (root/'assistant').exists() else None
+            return r,qs,assistant
+
+    def test_chat_opens_the_island_window_or_falls_back_to_the_terminal(self):
+        r,qs,assistant=self.lancer(True)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(qs,'-c nc-ile ipc call ile jarvisChat')
+        self.assertIsNone(assistant,'avec Quickshell, pas de terminal')
+        r,qs,assistant=self.lancer(False)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(assistant,['ouvrir'],'sans Quickshell : le chat terminal')
+        self.assertIn('indisponible',r.stderr)
+

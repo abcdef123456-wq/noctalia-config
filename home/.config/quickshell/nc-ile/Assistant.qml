@@ -5,8 +5,13 @@ import Quickshell.Io
 Item {
     id: page
     property bool dansDashboard: false
+    property bool fenetre: false            // petite fenêtre de chat (JarvisChat) : défilement à la molette, conversation vierge
+    property int depuis: 0                  // n'afficher que les messages d'identifiant supérieur (conversation vierge)
+    readonly property int nombre: depuis > 0 ? AssistantEtat.messages.filter(m => m.num > depuis).length : AssistantEtat.messages.length
+    function conversation() { return AssistantEtat.messages.filter(m => m.num > depuis) }   // les messages affichés
     property bool animationsActives: true
-    property bool historiqueOuvert: dansDashboard || AssistantEtat.messages.length > 0
+    property bool historiqueOuvert: dansDashboard || nombre > 0
+    function focaliser() { entree.forceActiveFocus(); entree.cursorPosition = entree.text.length }
     property bool ecouteVocale: false
     property string information: ""
     property bool suivreFin: true
@@ -23,7 +28,7 @@ Item {
     readonly property color cyan: Couleurs.accent
     readonly property color corail: Couleurs.rouge
     readonly property color teinteEtat: (AssistantEtat.erreur || ecouteVocale) ? corail : cyan
-    readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant")
+    readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant" && m.num > depuis)
     function chargerReglagesRapides() {
         if (visible && !dansDashboard && !historiqueOuvert && !entree.activeFocus && !AssistantEtat.brouillon
             && !AssistantEtat.reglagesDemandes && !AssistantEtat.enCours)
@@ -91,7 +96,7 @@ Item {
         function onMessagesChanged() {
             page.information = ""
             page.ecouteVocale = false
-            if (AssistantEtat.messages.length > 0) page.historiqueOuvert = true
+            if (page.nombre > 0) page.historiqueOuvert = true
             page.bas()
         }
         function onReglagesOuvertsChanged() { if (!AssistantEtat.reglagesOuverts) page.bas() }
@@ -141,7 +146,7 @@ Item {
             Row {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 7
                 AssistantCommande {
-                    visible: !page.dansDashboard && (AssistantEtat.messages.length > 0 || page.historiqueOuvert)
+                    visible: !page.dansDashboard && (page.nombre > 0 || page.historiqueOuvert)
                     rond: true; width: 32; height: 32
                     icone: page.historiqueOuvert ? "smart_toy" : "forum"
                     choisi: page.historiqueOuvert
@@ -164,7 +169,7 @@ Item {
                 AssistantCommande {
                     rond: true; width: 32; height: 32; icone: "delete_sweep"
                     aide: Reglages.t("Effacer l’affichage local", "Clear local display")
-                    enabled: !AssistantEtat.enCours && (AssistantEtat.messages.length > 0 || page.historiqueOuvert || !!AssistantEtat.erreur)
+                    enabled: !AssistantEtat.enCours && (page.nombre > 0 || page.historiqueOuvert || !!AssistantEtat.erreur)
                     onClic: { AssistantEtat.effacer(); if (!page.dansDashboard) page.historiqueOuvert = false }
                 }
                 AssistantCommande {
@@ -209,7 +214,7 @@ Item {
                 occupe: AssistantEtat.enCours; erreur: !!AssistantEtat.erreur; ecoute: page.ecouteVocale
                 onClic: {
                     if (page.ecouteVocale) page.voix()
-                    else if (AssistantEtat.messages.length > 0 || AssistantEtat.erreur) page.historiqueOuvert = true
+                    else if (page.nombre > 0 || AssistantEtat.erreur) page.historiqueOuvert = true
                 }
             }
 
@@ -217,7 +222,7 @@ Item {
                 id: defil
                 objectName: "nc-jarvis-history"
                 anchors.fill: parent; visible: page.dansDashboard || page.historiqueOuvert
-                interactive: page.dansDashboard
+                interactive: page.dansDashboard || page.fenetre
                 contentHeight: liste.implicitHeight
                 onContentHeightChanged: if (page.suivreFin) Qt.callLater(page.placerEnBas)
                 onHeightChanged: if (page.suivreFin) Qt.callLater(page.placerEnBas)
@@ -231,7 +236,7 @@ Item {
                     id: liste
                     width: parent.width; spacing: 10
                     Texte {
-                        width: parent.width; visible: !AssistantEtat.messages.length
+                        width: parent.width; visible: !page.nombre
                         text: page.dansDashboard
                             ? Reglages.t("Que veux-tu faire ?\nDiscute avec JARVIS (Markdown et LaTeX pris en charge), ou ouvre ses réglages rapides en haut à droite.",
                                          "What would you like to do?\nTalk to JARVIS (Markdown and LaTeX supported), or open quick settings at the top right.")
@@ -243,6 +248,7 @@ Item {
                         model: AssistantEtat.messages
                         Rectangle {
                             required property var modelData
+                            visible: modelData.num > page.depuis      // fenêtre de chat : les messages d'avant son ouverture restent dans l'île
                             width: liste.width; height: corps.implicitHeight + 24; radius: 16
                             color: modelData.role === "vous" ? Couleurs.gris2 : Couleurs.carte
                             Column {

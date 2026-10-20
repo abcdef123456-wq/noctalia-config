@@ -27,6 +27,9 @@ ShellRoot {
     // Cockpit chargé seulement à la demande ; aucune capture ni connexion de backend au démarrage.
     property var jarvisFenetre: null
     property Component composantJarvis: null
+    // Petite fenêtre de chat JARVIS (Super + Alt + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
+    property var jarvisChatFenetre: null
+    property Component composantJarvisChat: null
     Connections {
         target: Etat
         function onVueFenetresChanged() {
@@ -117,5 +120,18 @@ ShellRoot {
             }
         }
         function jarvisFermer(): void { if (racine.jarvisFenetre) racine.jarvisFenetre.close() }
+        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, elle est seulement ramenée devant
+        function jarvisChat(): void {
+            if (!racine.jarvisChatFenetre) {
+                if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
+                if (racine.composantJarvisChat.status !== Component.Ready) {
+                    console.warn("Chat JARVIS indisponible : " + racine.composantJarvisChat.errorString())
+                    return
+                }
+                racine.jarvisChatFenetre = racine.composantJarvisChat.createObject(racine)
+            }
+            if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+        }
+        function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
     }
 }

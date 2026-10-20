@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=JARVIS Chat
+Comment=Small assistant chat window
+Comment[fr]=Petite fenêtre de conversation avec l’assistant
+Exec="@HOME@/.local/bin/nc-jarvis" chat
+Icon=dialog-information
+Terminal=false
+Categories=Network;

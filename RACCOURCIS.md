@@ -14,7 +14,8 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
-| `Super` + `Alt` + `A` | Assistant personnel distant (configuration au premier lancement) |
+| `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) |
+| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS en plein écran |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `W` | Choisir le fond d'écran |
