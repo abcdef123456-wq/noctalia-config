@@ -165,6 +165,8 @@ que tu peux aussi éditer (exemples dedans) et qu'aucune mise à jour ne remplac
 
 Chaque écran reçoit sa définition native et une échelle choisie d'après sa densité de pixels (mêmes seuils que Hyprland), sans
 jamais descendre sous 1600 x 900 points utiles : un portable 15" en 1920 x 1080 est à 1,2 (et non 1,5, où tout paraît zoomé).
+Sur un écran à haute fréquence, la définition native est le mode que l'écran dit préférer : un écran 1440p à 144 Hz branché
+en HDMI annonce aussi un 3840 x 2160 à 60 Hz (compatibilité consoles) qui n'est pas sa dalle ; il reste en 1440p à 144 Hz.
 La recherche, la fiche des raccourcis et le carrousel se dessinent à la taille de l'écran et restent centrés.
 
 Pour forcer une échelle, dans `~/.config/hypr/perso.lua` :

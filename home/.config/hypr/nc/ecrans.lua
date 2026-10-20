@@ -12,7 +12,7 @@
 
 local MIN_W, MIN_H = 1600, 900
 
--- Modes disponibles : { w, h, hz }, triés comme Hyprland (plus grande définition d'abord)
+-- Modes disponibles : { w, h, hz }, dans l'ordre de Hyprland (le mode préféré de l'écran, puis par définition décroissante)
 local function modes(m)
     local liste = {}
     for _, v in ipairs(type(m.available_modes) == "table" and m.available_modes or {}) do
@@ -31,8 +31,17 @@ local function modes(m)
     return liste
 end
 
--- Définition native : la plus grande proposée par l'écran
+-- Définition native. Le premier mode de la liste est celui que l'écran dit préférer (sa dalle) ; sur un écran à haute
+-- fréquence (100 Hz et plus), c'est lui : beaucoup d'écrans 1440p à 144 Hz annoncent aussi un 3840x2160 à 60 Hz, un
+-- mode de compatibilité HDMI pour les consoles, qui n'est pas leur dalle (image réduite par l'écran, 60 Hz, échelle
+-- calculée sur une fausse définition). Sinon (écran 4K à 60 Hz, écran sans liste de modes) : la plus grande proposée.
 local function native(m, liste)
+    local pref = liste[1]
+    if pref then
+        local max_hz = 0
+        for _, md in ipairs(liste) do if md.hz > max_hz then max_hz = md.hz end end
+        if max_hz >= 100 and pref.hz >= 100 then return pref.w, pref.h end
+    end
     local w, h = m.width or 0, m.height or 0
     for _, md in ipairs(liste) do
         if md.w * md.h > w * h then w, h = md.w, md.h end
