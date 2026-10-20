@@ -109,8 +109,11 @@ Le même logo apparaît dans la pilule, la page des agents et les réponses du S
 
 ## Activité, concurrence et limites du contrat serveur
 
-Les requêtes passent par `nc-claude assistant debut|fini|fin`, avec le même verrou et la même écriture atomique
-que les autres agents. Le client ne réécrit jamais lui-même `etat.json`.
+Le chat intégré à l’île et au cockpit utilise `AssistantEtat` pour son activité ; il n’attend pas de hooks
+Coucou avant ou après l’appel HTTP. Les commandes et le chat terminal passent encore par
+`nc-claude assistant debut|fini|fin`, avec le même verrou et la même écriture atomique que les autres agents.
+Le client ne réécrit jamais lui-même `etat.json`. Pour mesurer le délai d’une demande réelle, voir
+[les mesures de durée JARVIS](jarvis.md#attente-avant-une-réponse).
 Chaque chat ou commande ponctuelle reçoit un identifiant local distinct. Une commande ponctuelle ne permet pas
 d'envoyer du texte depuis l'île vers un shell redevenu inactif. Un chat ouvert dans kitty peut être retrouvé depuis l'île.
 À la fermeture du chat ou lors d'une erreur/interruption réseau, son activité est nettoyée.

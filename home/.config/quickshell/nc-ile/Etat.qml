@@ -33,13 +33,22 @@ Singleton {
         if (jeu) a.push("jeu")
         return a
     }
-    readonly property var vues: activites.concat(["centre", "assistant", "notifications"],
+    readonly property var vues: Reglages.filtrerPages(activites.concat(["centre", "assistant", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
                                                  meteo.temp !== undefined ? ["meteo"] : [], ["presse", "fenetres"],
-                                                 minuteurFin > 0 ? [] : ["minuteur"])
+                                                 minuteurFin > 0 ? [] : ["minuteur"]))
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
-    readonly property string vueActive: vues[vue]
+    readonly property string vueActive: vues[vue] || ""
+    onVuesChanged: {
+        if (vues.indexOf(vueNom) < 0) {
+            vueNom = vues[0] || ""
+            if (ecranOuvert !== "" && !recherche) {
+                if (!vues.length) fermer()
+                else Qt.callLater(lirePage)
+            }
+        }
+    }
     // Hauteur du contenu annoncée par les pages à liste (Son, Wi-Fi, Bluetooth) : l'île s'y ajuste
     property var hauteurs: ({})
     function annoncerHauteur(nom, h) {
@@ -60,8 +69,10 @@ Singleton {
     function basculer(ecran, versCentre) {
         parSurvol = false
         if (ecranOuvert === ecran) { fermer(); return }
+        if (!vues.length) return
         recherche = false
-        vueNom = versCentre || activites.length === 0 ? "centre" : activites[0]
+        var disponibles = Reglages.filtrerPages(activites)
+        vueNom = versCentre || disponibles.length === 0 ? (vues.indexOf("centre") >= 0 ? "centre" : vues[0]) : disponibles[0]
         ecranOuvert = ecran
         activiteType = ""
         lire()

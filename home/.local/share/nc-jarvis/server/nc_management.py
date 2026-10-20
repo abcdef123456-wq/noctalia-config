@@ -8,6 +8,7 @@ import fcntl
 import json
 import math
 import os
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
 import re
 import tempfile
@@ -25,6 +26,68 @@ BASE_FIELDS = [
 ]
 DEFAULTS = dict(BRIEFING_ENABLED='1', BRIEFING_TIME='08:00', BRIEFING_DAYS='mon,tue,wed,thu,fri,sat,sun',
                 BRIEFING_TIMEZONE='Europe/Paris', BRIEFING_SECTIONS='agenda,news,email,weather,tasks')
+
+
+class RequestOptions:
+    """Délais propres à chaque appel, sans modifier le client partagé concurrent."""
+    def __init__(self, client, timeout):
+        self.client, self.timeout = client, timeout
+
+    def __getattr__(self, name):
+        method = getattr(self.client, name)
+        if name not in {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request', 'stream'}:
+            return method
+        def request(*args, **kwargs):
+            kwargs.setdefault('timeout', self.timeout)
+            return method(*args, **kwargs)
+        return request
+
+
+class NoRunnerCookies(DefaultCookiePolicy):
+    def set_ok(self, cookie, request):
+        return False
+
+
+class RunnerConnections:
+    """Connexions bornées, ouvertes/fermées avec le gateway ; aucun cache de réponses."""
+    def __init__(self):
+        self.client = None
+
+    @contextlib.asynccontextmanager
+    async def lifespan(self):
+        import httpx
+        if self.client is not None:
+            raise RuntimeError('Pool runner déjà ouvert')
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False,
+                cookies=CookieJar(policy=NoRunnerCookies()),
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8, keepalive_expiry=60)) as client:
+            self.client = client
+            try:
+                yield
+            finally:
+                self.client = None
+
+    @contextlib.asynccontextmanager
+    async def lease(self, **options):
+        # Une future option upstream non prise en charge garde exactement son client dédié.
+        if self.client is not None and set(options) <= {'timeout', 'follow_redirects'} and not options.get('follow_redirects', False):
+            yield RequestOptions(self.client, options.get('timeout', 5.0))
+        else:
+            import httpx
+            async with httpx.AsyncClient(**options) as client:
+                yield client
+
+
+class RunnerHttpx:
+    """Façade limitée au module gateway upstream ; le module httpx global reste intact."""
+    def __init__(self, original, connections):
+        self.original, self.connections = original, connections
+
+    def __getattr__(self, name):
+        return self.connections.lease if name == 'AsyncClient' else getattr(self.original, name)
+
+
+runner_connections = RunnerConnections()
 
 
 def root():
@@ -117,7 +180,7 @@ async def runner(method, path, body=None):
     import main
     if not main.HOME_SERVER_URL: return dict(error='Runner non configuré')
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        async with runner_connections.lease(timeout=30, follow_redirects=False) as client:
             async with client.stream(method, main.HOME_SERVER_URL.rstrip('/')+path,
                                      headers={'X-Secret-Key':main.SECRET_KEY}, json=body) as response:
                 if response.status_code != 200: return dict(error='Le runner a refusé la requête (HTTP '+str(response.status_code)+').')

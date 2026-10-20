@@ -26,6 +26,40 @@ annulation que l’API ne propose pas. Les commandes vocales indiquent explicite
 configurées : la dictée et la lecture vocale des bots mobiles ne constituent pas une intégration micro du bureau.
 L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, ainsi qu’en mode sans effets.
 
+## Conversation dans l’île et le cockpit
+
+Les liens Markdown, les URL brutes reconnues par Qt et les liens `file:///…` s’ouvrent au clic
+dans l’application associée. Le texte reste sélectionnable ; le survol d’un lien affiche le curseur
+de clic. Les URL sont préservées lors de la conversion des formules LaTeX. L’ouverture utilise
+[le signal `linkActivated` de QtQuick](https://doc.qt.io/qt-6/qml-qtquick-textedit.html#linkActivated-signal).
+
+Pendant une demande réelle, une bulle **JARVIS ···** apparaît à la fin de la conversation.
+Les points s’animent seulement lorsque le chat est visible et les effets activés. La bulle disparaît
+à la réponse ou à l’erreur ; elle n’est pas enregistrée dans l’historique et ne simule pas un flux de texte.
+
+Quand l’île est fermée, la pilule affiche le logo animé et **JARVIS réfléchit…** pendant la demande,
+puis **JARVIS a répondu** pendant trois secondes après réception d’une réponse réussie. Une erreur ne déclenche
+pas cette confirmation. Les alertes ponctuelles et l’enregistrement vidéo gardent leur priorité.
+Le bouton d’envoi affiche un indicateur rotatif pendant la requête, sans promettre une annulation distante.
+Ces animations respectent la visibilité et le réglage des effets.
+
+Rouvrir le chat affiche sa fin, après le calcul des hauteurs et du retour à la taille du panneau.
+Cela vaut aussi après un redimensionnement, une recréation de la page et un retour depuis les réglages.
+Le défilement manuel vers les anciens messages reste possible.
+
+Dans les deux interfaces, taper `/` affiche les commandes prises en charge et leur description.
+La liste est filtrée à chaque frappe, sans requête réseau ni processus supplémentaire. Les alias
+français/anglais sont reconnus ; les noms principaux sont proposés avant les alias.
+
+- **Tab** ou un clic complète la proposition ; les arguments déjà saisis sont conservés.
+- **↑ / ↓** change la sélection ; **Entrée** valide cette sélection ou complète un préfixe incomplet.
+- **Entrée** sur une commande déjà complète l’envoie normalement ; compléter seul n’envoie rien.
+- **Échap** masque d’abord les propositions ; dans le cockpit, un second Échap ferme la fenêtre.
+
+Les tests d’interaction utilisent QtTest uniquement dans le banc de test : ce module n’est pas requis
+pour utiliser le bureau. Ils exercent les vrais clics et événements clavier hors écran, ainsi que les
+réouvertures, le défilement et l’arrêt des animations masquées.
+
 ## Architecture et contrat vérifié
 
 Référence examinée : [JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/tree/8867dd093c43a5e5d3f0a13d3e14600e57edc96a),
@@ -130,6 +164,51 @@ s’arrête avant modification. Pour migrer une instance, sauvegarder ses donné
 le renommage du dossier gateway, des chemins des services et de leurs venv avant de reprendre. Ne pas créer
 un second backend avec les mêmes tokens pour contourner ce contrôle.
 
+## Attente avant une réponse
+
+Le chat de l’île et du cockpit est suivi par `AssistantEtat` : il ne lance plus les hooks Coucou
+avant et après chaque réponse. Ces deux sous-processus étaient inutiles depuis la séparation de JARVIS
+et d’Agents IA ; chacun pouvait attendre jusqu’à cinq secondes si le suivi se bloquait. Le suivi des
+commandes et du chat terminal est conservé. Ce correctif ne prouve pas que le suivi causait une attente
+de dix secondes sur une instance particulière.
+
+Pour mesurer une demande réelle sur la machine déjà connectée :
+
+```sh
+nc-assistant demander --mesurer "Réponds simplement OK."
+```
+
+La réponse reste sur stdout ; stderr contient un objet JSON `timings_ms` : `request_ms` mesure l’appel
+HTTP et le décodage de la réponse (réseau, gateway et moteur ensemble), `activity_ms` le suivi Coucou,
+et `total_ms` la fonction de requête entière, y compris son verrou. Le démarrage de Python et le rendu
+QML ne sont pas compris. Il s’agit d’une seule question, qui rejoint la session partagée, sans répétition
+automatique ni appel de diagnostic supplémentaire. Les mesures sont aussi affichées en cas d’échec
+de la demande. Elles ne contiennent ni URL, ni clé, ni question. `--timings` est un alias.
+
+AGY conserve son worker et les réglages de session upstream. L’intégration n’impose pas un autre
+modèle ou un effort moindre pour masquer la lenteur : vérifier le modèle et la réflexion effectifs
+dans les réglages. La route `/api/ask` répond après traitement complet ; l’interface ne dispose pas
+d’un vrai flux de génération. Ces mesures ne garantissent donc pas un délai inférieur à dix secondes.
+
+Dans le gateway enrichi `nc_gateway:app`, les appels vers le runner partagent un pool HTTP ouvert
+avec le service et fermé après l’arrêt des bots. Cela concerne les quatre moteurs, le bureau et les
+bots Telegram/Discord, ainsi que les lectures et réglages du cockpit. Le code upstream garde ses
+routes, délais et erreurs ; le pool ne met pas de réponses en cache et ne rejoue pas une demande.
+Chaque appel conserve son propre délai, sans modifier ceux des requêtes concurrentes. Les cookies
+ne sont pas conservés entre appels. Le pool garde au plus 16 connexions, dont 8 inactives, pendant
+60 secondes maximum au repos ; aucun maintien artificiel ni appel périodique n’est ajouté.
+
+Le runner réutilise le gestionnaire des moteurs déjà présent sur la révision récente de JARVIS :
+un seul état et un seul verrou, sans envelopper AGY dans un deuxième gestionnaire. Sur l’ancienne
+révision prise en charge, l’adaptateur continue de l’installer. Le repérage des terminaux Coucou utilise
+un seul instantané Hyprland pour le PID, le shell et la classe, commun à tous les agents suivis.
+
+Les tests HTTP locaux vérifient quatre appels successifs sur une même connexion, l’absence de cache,
+les délais concurrents, l’annulation et la fermeture du pool. Ils ne mesurent pas la vitesse d’un vrai
+modèle. Les mises à jour copient les adaptateurs, mais n’appliquent pas ces changements à un backend
+déjà démarré sans son redémarrage explicite. Un gateway lancé avec `main:app` seul ne bénéficie pas
+du pool de `nc_gateway:app`.
+
 ## Réglages rapides et moteurs
 
 Le déployeur propose le moteur initial pour le parcours local comme pour SSH ; les choix enregistrés ensuite
@@ -138,10 +217,16 @@ dans l’interface restent prioritaires aux redémarrages.
 Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et niveau de réflexion**, sans terminal.
 **Actualiser** lit les capacités du runner ; **Appliquer** change la session partagée, y compris pour Telegram
 et Discord. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
-La carte affiche au plus quatre modèles réellement annoncés par le runner, ou les quatre moteurs si aucun
-catalogue n’a été reçu. Un clic prépare le choix dans les réglages ; seule l’action **Appliquer** l’enregistre.
-Fermer les réglages abandonne les choix non appliqués. Les autres modèles et la saisie d’un identifiant restent
-accessibles dans les réglages, sans imposer les noms de modèles des captures de référence.
+La carte d’accueil présente les familles **Flash, Argon, Opus et Sonnet**, avec **low / medium / high** séparés.
+Les boutons utilisent uniquement les identifiants annoncés pour le moteur courant ; les familles et variantes
+absentes sont grisées. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
+présumé actif avant lecture de la session du serveur. Le catalogue est lu une fois à l’ouverture d’un accueil
+sans saisie en cours ; le bouton réglages permet de le charger ou de l’actualiser explicitement.
+Un clic prépare le choix ; seule l’action **Appliquer** change la session partagée. Les identifiants qui encodent
+l’effort sont alignés sur la variante annoncée correspondante. Fermer les réglages abandonne les choix non
+appliqués. Les autres modèles et la saisie d’un identifiant restent accessibles dans les réglages.
+L’accueil affiche un statut bref, sans citer la réponse ou l’erreur technique. La conversation garde leur texte
+complet et les liens. Aucun dossier fictif n’est affiché.
 Les deux adaptateurs doivent être présents : `nc_gateway:app` côté gateway, `nc_runner:app` côté runner.
 Une API d’origine reste utilisable pour le chat ; elle n’annonce pas ces nouveaux réglages.
 
@@ -235,3 +320,31 @@ et Discord depuis le téléphone, livraison d’un rappel mobile, accès HTTPS/V
 redémarrage après boot. Les tests simulés ne constituent pas cette validation en production.
 
 Options des CLI vérifiées dans leur aide installée et les références officielles : [Codex](https://developers.openai.com/codex/cli/reference/), [Claude Code](https://code.claude.com/docs/en/cli-reference), [OpenCode](https://opencode.ai/docs/cli/).
+
+## Rappels du bureau et du téléphone
+
+Dans la conversation de l’île, du cockpit ou du terminal :
+
+```text
+/rappel 15m sortir le pain
+/rappel bureau 15m sortir le pain
+/rappel telegram 2h relire le rapport
+/rappel discord 30m réunion
+/rappel bureau,telegram 15m sortir le pain
+```
+
+Sans plateforme, le rappel vise désormais **ce bureau**. `desktop` et `/remind` sont les alias anglais.
+Les délais acceptent `s`, `m`, `h` ou `d`, de 1 seconde à 366 jours. Les rappels bureau ne nécessitent pas de
+connexion JARVIS ; ceux du téléphone passent par le gateway et ses bots configurés, comme auparavant.
+Une création sur plusieurs plateformes indique séparément les réussites et les échecs, sans nouvelle tentative automatique.
+
+Le bureau utilise `systemd-run --user` et `notify-send` : la notification arrive dans le centre actif de la session
+(île Quickshell ou Noctalia). Aucun processus Python ne dort pendant le délai. Un fichier privé dans
+`$XDG_RUNTIME_DIR/nc-assistant` conserve le texte jusqu’à la notification ; l’unité ne contient que son identifiant.
+L’échéance est en UTC : un rappel échu pendant la veille est déclenché au réveil, sans réveiller lui-même le PC.
+Un échec de programmation supprime le fichier ; un échec de notification le conserve pour diagnostic.
+
+Ces timers sont **locaux et temporaires** : ils survivent à la fermeture du chat et au redémarrage de l’île,
+mais pas au redémarrage du PC ni à l’arrêt du gestionnaire systemd utilisateur. Pour un rappel durable sur le
+téléphone, choisir Telegram ou Discord. La page Rappels du cockpit liste les rappels mobiles du serveur ;
+les rappels bureau ne sont pas ajoutés à cette liste distante.

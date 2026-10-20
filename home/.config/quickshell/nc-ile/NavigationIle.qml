@@ -1,0 +1,39 @@
+import QtQuick
+
+// Une fenêtre bornée autour de la page active, même sur Recharge (140 px).
+Item {
+    id: navigation
+    property var pages: []
+    property int courant: 0
+    signal choisir(string nom)
+    clip: true
+    implicitWidth: 18
+    Repeater {
+        model: navigation.pages
+        Item {
+            id: point
+            required property string modelData
+            required property int index
+            readonly property int distance: Math.abs(index - navigation.courant)
+            readonly property real bord: Math.min(y, navigation.height - y - height)
+            width: navigation.width; height: 14
+            y: (navigation.height - height) / 2 + (index - navigation.courant) * 14
+            opacity: distance === 0 ? 1 : Math.pow(0.62, distance) * Math.max(0, Math.min(1, bord / 12))
+            visible: navigation.height >= height && bord >= 0 && opacity > 0.02
+            Rectangle {
+                anchors.centerIn: parent
+                width: 6; height: point.distance === 0 ? 14 : 6; radius: 3
+                color: Couleurs.texte
+            }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: navigation.choisir(point.modelData) }
+            activeFocusOnTab: visible
+            Keys.onReturnPressed: navigation.choisir(modelData)
+            Keys.onSpacePressed: navigation.choisir(modelData)
+            Accessible.role: Accessible.Button
+            Accessible.name: modelData
+            Accessible.checkable: true
+            Accessible.checked: distance === 0
+            Accessible.onPressAction: navigation.choisir(modelData)
+        }
+    }
+}

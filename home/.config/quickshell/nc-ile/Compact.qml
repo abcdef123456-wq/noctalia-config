@@ -11,6 +11,7 @@ Item {
     id: c
     readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
                                    : Etat.enregistre ? "video"
+                                   : AssistantEtat.activitePilule !== "" ? AssistantEtat.activitePilule
                                    : Etat.telecharge && !Etat.aMusique && !Agents.travaille ? "telechargement"
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))))
@@ -20,7 +21,7 @@ Item {
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
-                                      claude: claude, "claude-fini": claudeFini, video: video,
+                                      claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video,
                                       telechargement: telechargement, "telechargement-fini": telechargementFini })[mode] || repos
 
     component Fondu: Row {
@@ -30,6 +31,22 @@ Item {
         opacity: montre ? 1 : 0
         visible: opacity > 0.01
         Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    }
+
+    Fondu {
+        id: jarvis
+        objectName: "nc-jarvis-pill"
+        montre: c.mode === "jarvis" || c.mode === "jarvis-fini"
+        LogoAssistant {
+            anchors.verticalCenter: parent.verticalCenter; width: 22; height: 22
+            anime: jarvis.montre && c.visible && c.opacity > 0.01 && AssistantEtat.enCours
+                && Reglages.val("EFFETS", "tous") !== "aucun"
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
+            text: AssistantEtat.enCours ? Reglages.t("JARVIS réfléchit…", "JARVIS is thinking…")
+                : Reglages.t("JARVIS a répondu", "JARVIS replied")
+        }
     }
 
     // ── Repos : heure et date ──

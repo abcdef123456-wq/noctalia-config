@@ -17,7 +17,7 @@ Item {
         }
         Texte {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            text: Agents.sessions.length > 1 ? Agents.sessions.length + " sessions" : ""; secondaire: true
+            text: Agents.sessionsVisibles.length > 1 ? Agents.sessionsVisibles.length + " sessions" : ""; secondaire: true
         }
     }
 
@@ -43,7 +43,7 @@ Item {
             }
 
             Repeater {
-                model: Agents.sessions.slice(0, 4)
+                model: Agents.sessionsVisibles.slice(0, 4)
                 Rectangle {
                     id: carte
                     required property var modelData
@@ -96,12 +96,6 @@ Item {
                                 Texte { anchors.verticalCenter: parent.verticalCenter; visible: (parent.modelData.diff || "") !== ""
                                         text: parent.modelData.diff || ""; font.pixelSize: 12; color: Couleurs.vert }
                             }
-                        }
-                        // Fin : son dernier message ; total des lignes modifiées
-                        Texte {
-                            visible: carte.s.etat === "fini" && (carte.s.message || "") !== ""
-                            width: parent.width; text: carte.s.message || ""; color: Couleurs.texteDoux; font.pixelSize: 12
-                            wrapMode: Text.Wrap; maximumLineCount: 2
                         }
                         Row {
                             visible: (carte.s.ajouts || 0) + (carte.s.retraits || 0) > 0

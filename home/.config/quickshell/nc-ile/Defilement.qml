@@ -9,6 +9,13 @@ Flickable {
     interactive: false
     // Un geste (pavé tactile ou cran de molette) fait défiler d'un grand coup : presque une hauteur de liste
     property real cible: 0
+    property bool placementDirect: false
+    function positionner(y) {
+        placementDirect = true
+        cible = Math.max(0, Math.min(y, Math.max(0, contentHeight - height)))
+        contentY = cible
+        placementDirect = false
+    }
     onContentHeightChanged: cible = Math.min(cible, Math.max(0, contentHeight - height))
     // Rend vrai si la liste a bougé (sinon, l'île passe à la page voisine) ; dy > 0 : vers le haut
     function defiler(dy) {
@@ -19,5 +26,5 @@ Flickable {
         contentY = n
         return true
     }
-    Behavior on contentY { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+    Behavior on contentY { enabled: !f.placementDirect; NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
 }

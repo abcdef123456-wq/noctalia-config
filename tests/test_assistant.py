@@ -114,7 +114,7 @@ class Assistant(unittest.TestCase):
         self.assertEqual(self.m.CONF.read_bytes(), avant)
         self.assertFalse(list(self.m.CONF.parent.glob(".assistant-*")))
 
-    def test_island_stdin_preserves_text_and_reuses_activity_session(self):
+    def test_island_stdin_preserves_text_without_duplicate_coucou_tracking(self):
         sid = uuid.uuid4().hex
         question = 'Multiligne\n"quotes" $(false) <b>texte</b>'
         for _ in range(2):
@@ -122,7 +122,41 @@ class Assistant(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(json.loads(r.stdout), dict(ok=True, text="Bonjour\n$ echo ok", truncated=False))
             self.assertEqual(self.server.recus[-1][3]["prompt"], question)
-            self.assertEqual(list(self.etat()["sessions"]), ["assistant-" + sid])
+            self.assertFalse((self.run / "nc-claude/etat.json").exists())
+
+    def test_island_never_waits_for_an_unavailable_activity_hook(self):
+        # Un hook bloqué (verrou Coucou, terminal…) ne doit même pas être lancé par l'île.
+        (self.bin / "nc-claude").write_text('raise RuntimeError("Unexpected Coucou hook")\n')
+        for question in ("bonjour", "/help"):
+            r = self.cli("requete-ile", input=json.dumps(dict(session_id="a" * 32, question=question)))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(json.loads(r.stdout)["ok"])
+            self.assertNotIn("tracking", r.stderr.lower())
+        self.assertEqual(len(self.server.recus), 1)  # /help reste une commande locale, sans modèle.
+
+    def test_request_timings_do_not_repeat_the_question_or_change_stdout(self):
+        for option in ("--mesurer", "--timings"):
+            r = self.cli("demander", "--flux", option, "question privée")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), {"t": "Bonjour\n$ echo ok"})
+            mesures = json.loads(r.stderr)["timings_ms"]
+            self.assertEqual(set(mesures), {"request_ms", "activity_ms", "total_ms"})
+            self.assertTrue(all(isinstance(x, (int, float)) and x >= 0 for x in mesures.values()))
+            self.assertGreaterEqual(mesures["total_ms"] + 0.01, mesures["request_ms"] + mesures["activity_ms"])
+            for prive in ("question privée", self.c["SECRET_KEY"], self.c["URL"]):
+                self.assertNotIn(prive, r.stderr)
+        self.assertEqual(len(self.server.recus), 2)
+
+    def test_request_timings_are_available_on_failure_without_retry(self):
+        self.server.reponse = (503, b'private backend error')
+        r = self.cli("demander", "--mesurer", "question privée")
+        self.assertEqual(r.returncode, 1)
+        mesures = json.loads(r.stderr.splitlines()[0])["timings_ms"]
+        self.assertIn("request_ms", mesures)
+        self.assertIn("total_ms", mesures)
+        self.assertEqual(len(self.server.recus), 1)
+        self.assertFalse(self.etat()["sessions"])
+        self.assertNotIn("private backend error", r.stderr)
 
     def test_island_rejects_bad_input_without_network_and_reports_errors_as_json(self):
         for entree in ('[]', '{}', 'not json', json.dumps(dict(session_id="bad", question="hello")),
@@ -135,7 +169,7 @@ class Assistant(unittest.TestCase):
         r = self.cli("requete-ile", input=json.dumps(dict(session_id="a" * 32, question="hello")))
         self.assertIn("configurer", json.loads(r.stdout)["error"])
 
-    def test_island_bounds_response_and_cleans_activity_on_failure(self):
+    def test_island_bounds_response_and_does_not_create_activity_on_failure(self):
         self.server.reponse = (200, json.dumps(dict(output="x" * 16001)).encode())
         entree = json.dumps(dict(session_id="a" * 32, question="hello"))
         r = self.cli("requete-ile", input=entree)
@@ -146,7 +180,7 @@ class Assistant(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertFalse(json.loads(r.stdout)["ok"])
         self.assertNotIn("private data", r.stdout + r.stderr)
-        self.assertFalse(self.etat()["sessions"])
+        self.assertFalse((self.run / "nc-claude/etat.json").exists())
 
     def test_invalid_configuration_does_not_replace_key(self):
         avant = self.m.CONF.read_bytes()
@@ -410,6 +444,74 @@ class Assistant(unittest.TestCase):
         self.assertIn("tunnel", data["hint"])
         self.assertNotIn(self.c["SECRET_KEY"], r.stdout + r.stderr)
         self.assertNotIn("private backend detail", r.stdout + r.stderr)
+
+
+    def installer_rappels_factices(self):
+        for name, destination in [('systemd-run','timer.json'),('notify-send','notification.json')]:
+            p=self.bin/name
+            p.write_text('#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ["HOME"],'+repr(destination)+').write_text(json.dumps(sys.argv[1:]))\nsys.exit(int(os.environ.get("NC_TEST_FAIL_'+name.upper().replace('-','_')+'","0")))\n')
+            p.chmod(0o755)
+
+    def test_desktop_reminder_needs_no_backend_keeps_text_private_and_notifies_without_shell(self):
+        self.installer_rappels_factices();self.m.CONF.unlink()
+        msg='$(touch should-never-exist) <b>pain</b> " test $HOME %h'
+        r=self.cli('requete-ile',input=json.dumps(dict(session_id='a'*32,question='/rappel 15m '+msg))+'\n')
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        self.assertTrue(json.loads(r.stdout)['ok']);self.assertFalse(self.server.recus)
+        args=json.loads((self.root/'timer.json').read_text())
+        self.assertTrue(any(a.startswith('--on-calendar=') and a.endswith(' UTC') for a in args));self.assertIn('--user',args)
+        self.assertNotIn(msg,repr(args))
+        ident=args[-1];self.assertEqual(args[-2],'rappel-notifier')
+        payload=self.run/'nc-assistant'/('rappel-'+ident+'.json')
+        self.assertEqual(payload.stat().st_mode&0o777,0o600)
+        self.assertEqual(json.loads(payload.read_text())['message'],msg)
+        r=self.cli('rappel-notifier',ident)
+        self.assertEqual(r.returncode,0,r.stderr)
+        notice=json.loads((self.root/'notification.json').read_text())
+        self.assertIn('--app-name=JARVIS',notice);self.assertIn('&lt;b&gt;pain&lt;/b&gt;',notice[-1])
+        self.assertIn('$(touch should-never-exist)',notice[-1]);self.assertFalse(payload.exists())
+        self.assertFalse((self.root/'should-never-exist').exists())
+        self.assertFalse(self.server.recus)
+
+    def test_reminders_choose_mobile_platforms_and_report_partial_failure(self):
+        self.installer_rappels_factices()
+        for platform in ('telegram','discord'):
+            r=self.cli('demander','/rappel '+platform+' 2h message à rappeler')
+            self.assertEqual(r.returncode,0,r.stderr)
+            self.assertEqual(self.server.recus[-1][0],'/gateway/api/reminders')
+            self.assertEqual(self.server.recus[-1][3],dict(platform=platform,delay='2h',message='message à rappeler'))
+        self.server.reponse=(401,b'private error')
+        r=self.cli('demander','/rappel bureau,telegram 15m pain')
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertIn('desktop reminder scheduled',r.stdout);self.assertIn('telegram reminder not created',r.stdout)
+        self.assertNotIn('private error',r.stdout+r.stderr)
+        self.assertEqual(len(list((self.run/'nc-assistant').glob('rappel-*.json'))),1)
+
+    def test_reminder_failures_keep_no_false_timer_and_delivery_failure_keeps_payload(self):
+        self.installer_rappels_factices()
+        self.env['NC_TEST_FAIL_SYSTEMD_RUN']='1'
+        r=self.cli('demander','/rappel bureau 15m pain')
+        self.assertIn('No desktop reminder created',r.stdout)
+        self.assertFalse(list((self.run/'nc-assistant').glob('rappel-*.json')))
+        self.env.pop('NC_TEST_FAIL_SYSTEMD_RUN')
+        r=self.cli('demander','/rappel bureau,desktop 15m pain')
+        self.assertEqual(r.returncode,0,r.stderr)
+        payloads=list((self.run/'nc-assistant').glob('rappel-*.json'));self.assertEqual(len(payloads),1)
+        ident=json.loads((self.root/'timer.json').read_text())[-1]
+        self.env['NC_TEST_FAIL_NOTIFY_SEND']='1'
+        r=self.cli('rappel-notifier',ident)
+        self.assertNotEqual(r.returncode,0);self.assertTrue(payloads[0].exists())
+        self.assertFalse(self.server.recus)
+
+    def test_invalid_reminders_do_not_schedule_or_contact_server(self):
+        self.installer_rappels_factices()
+        for command in ('/rappel','/rappel 0s pain','/rappel matrix 15m pain','/rappel 999999999d pain','/rappel bureau 15m','/rappel 1s '+('x'*4001)):
+            with self.subTest(command=command[:40]):
+                r=self.cli('demander',command)
+                self.assertNotEqual(r.returncode,0,r.stdout+r.stderr)
+        self.assertFalse((self.root/'timer.json').exists());self.assertFalse(self.server.recus)
+        r=self.cli('rappel-notifier','../invalid')
+        self.assertNotEqual(r.returncode,0)
 
 
 class InstallationPortable(unittest.TestCase):

@@ -287,7 +287,7 @@ PanelWindow {
                 readonly property size t: fen.tailles[modelData] || fen.tailles.centre
                 readonly property bool active: modelData === Etat.vueActive
                 x: (ile.width - t.width) / 2 + 16
-                width: t.width - 32 - (fen.points ? 14 : 0)
+                width: Math.max(0, t.width - 32 - (fen.points ? 22 : 0))
                 height: t.height - 32
                 y: 16 + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
@@ -323,24 +323,13 @@ PanelWindow {
         Component { id: pFenetres; Fenetres {} }
 
         // Points de page sur le bord droit (comme le Centre de contrôle de l'iPhone)
-        Column {
-            anchors.right: parent.right; anchors.rightMargin: 9
+        NavigationIle {
+            anchors.right: parent.right; anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            // Resserrés si la page est basse (Recharge…) : ils ne dépassent jamais de l'île
-            spacing: Math.max(2, Math.min(6, (parent.height - 48 - 6 * Etat.vues.length) / Math.max(1, Etat.vues.length - 1)))
+            width: 18; height: Math.max(0, Math.min(parent.height - 64, Etat.vues.length * 14))
             visible: fen.ouverte && fen.points
-            Repeater {
-                model: Etat.vues
-                Rectangle {
-                    required property string modelData
-                    required property int index
-                    readonly property bool active: modelData === Etat.vueActive
-                    width: 6; height: active ? 14 : 6; radius: 3
-                    color: active ? Couleurs.texte : Couleurs.gris5
-                    Behavior on height { SpringAnimation { spring: 5; damping: 0.5 } }
-                    MouseArea { anchors.fill: parent; anchors.margins: -5; onClicked: Etat.aller(parent.modelData) }
-                }
-            }
+            pages: Etat.vues; courant: Etat.vue
+            onChoisir: nom => Etat.aller(nom)
         }
 
         focus: fen.ouverte

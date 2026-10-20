@@ -26,7 +26,14 @@ def module(path,name):
 
 
 class Deploiement(unittest.TestCase):
-    def setUp(self): self.d=module(SHARE/'deployer.py','deploy_test')
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.home=Path(self.tmp.name)
+        self.env_mock=patch.dict(os.environ,HOME=str(self.home))
+        self.env_mock.start();self.addCleanup(self.env_mock.stop)
+        self.home_mock=patch.object(Path,'home',return_value=self.home)
+        self.home_mock.start();self.addCleanup(self.home_mock.stop)
+        self.d=module(SHARE/'deployer.py','deploy_test')
 
     def test_user_services_bind_locally_keep_bots_and_quote_paths(self):
         units=self.d.units(Path('/tmp/my backend%test'),Path('/tmp/nc addon'))
@@ -71,7 +78,7 @@ class Deploiement(unittest.TestCase):
             with self.assertRaises(ValueError):self.d.remote(host)
 
     def test_ssh_connection_import_is_private_and_keeps_client_identity(self):
-        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,HOME=d):
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,HOME=d), patch.object(Path,'home',return_value=Path(d)):
             path=Path(d)/'.config/nc/assistant.conf'
             self.d.merge_env(path,dict(URL='https://old.example',SECRET_KEY='old-test-key',USER_ID='my-user',TIMEOUT='120',PERSONAL='keep'))
             calls=[]
@@ -92,7 +99,7 @@ class Deploiement(unittest.TestCase):
             self.assertNotIn('new-test-key',output.getvalue()+repr(calls))
 
     def test_existing_backend_cannot_be_retargeted_to_an_empty_data_folder(self):
-        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,HOME=d),patch.object(self.d.sys.stdin,'isatty',return_value=True),patch.object(self.d,'run') as run:
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,HOME=d),patch.object(Path,'home',return_value=Path(d)),patch.object(self.d.sys.stdin,'isatty',return_value=True),patch.object(self.d,'run') as run:
             unit=Path(d)/'.config/systemd/user/assistant-gateway.service';unit.parent.mkdir(parents=True)
             original='[Service]\nWorkingDirectory=%h/existing-jarvis/render-gateway\n'
             unit.write_text(original)
@@ -130,9 +137,18 @@ class Management(unittest.TestCase):
                                    params=[types.SimpleNamespace(name='SHOPPING_SECRET',label='Jeton',secret=True,default='')])
         registry=types.SimpleNamespace(list_tools=lambda:[tool])
         base=types.ModuleType('core.tools.base');base.ToolRegistry=registry
+        gateway=types.ModuleType('gateway');gateway.httpx=httpx
         self.m=module(SHARE/'server/nc_management.py','nc_management')
-        self.patch=patch.dict(sys.modules,{'main':self.up,'nc_management':self.m,'core.tools.base':base})
-        self.patch.start();self.addCleanup(self.patch.stop)
+        # Ne restaurer que nos modules : retirer des imports paresseux d'anyio/httpcore
+        # casserait l'identité de SocketAttribute lors des tests HTTP suivants.
+        replacements={'main':self.up,'gateway':gateway,'nc_management':self.m,'core.tools.base':base}
+        previous={key:sys.modules.get(key) for key in replacements}
+        sys.modules.update(replacements)
+        def restore():
+            for key,value in previous.items():
+                if value is None:sys.modules.pop(key,None)
+                else:sys.modules[key]=value
+        self.addCleanup(restore)
         self.api=module(SHARE/'server/nc_gateway.py','nc_gateway')
         from fastapi.testclient import TestClient
         self.client=TestClient(self.api.app);self.client.__enter__();self.addCleanup(self.client.__exit__,None,None,None)
@@ -202,8 +218,9 @@ class Management(unittest.TestCase):
         def handler(request):
             seen.append(request)
             return httpx.Response(200,json={'models':['one-model']})
-        original=httpx.AsyncClient
-        with patch.object(httpx,'AsyncClient',side_effect=lambda **kw:original(transport=httpx.MockTransport(handler),**kw)):
+        transport_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        self.addCleanup(lambda:asyncio.run(transport_client.aclose()))
+        with patch.object(self.m.runner_connections,'client',transport_client):
             result=asyncio.run(self.m.runner('GET','/models'))
         self.assertEqual(result,dict(models=['one-model']))
         self.assertEqual(str(seen[0].url),'http://private-runner:8080/models')
@@ -232,7 +249,10 @@ class ClientJarvis(unittest.TestCase):
             self.assertIn('shopping',result);self.assertIn('extra',result)
 
 
-import test_assistant as assistant_fixtures
+try:
+    from . import test_assistant as assistant_fixtures
+except ImportError:  # unittest discover -s tests importe les modules sans paquet.
+    import test_assistant as assistant_fixtures
 
 
 class TransportJarvis(unittest.TestCase):

@@ -16,6 +16,7 @@ pour un autre réseau, configure l'URL HTTPS d'un tunnel côté serveur.
 """
 import argparse
 import contextlib
+from datetime import datetime, timezone
 import fcntl
 import getpass
 import hashlib
@@ -28,6 +29,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import socket
 import ssl
 import subprocess
@@ -386,6 +388,88 @@ def maj_ile(sid, evenement, chat=False, message=""):
         print(T("Suivi dans l'île indisponible.", "Island tracking unavailable."), file=sys.stderr)
 
 
+def lire_rappel(arg):
+    morceaux = arg.split(maxsplit=2)
+    plateformes = ["desktop"]
+    if morceaux and not re.fullmatch(r"[0-9]+[smhd]", morceaux[0]):
+        plateformes = list(dict.fromkeys("desktop" if p in ("bureau", "desktop") else p
+                                         for p in morceaux.pop(0).lower().split(",")))
+        if not plateformes or any(p not in ("desktop", "telegram", "discord") for p in plateformes):
+            raise Erreur(T("Plateforme : bureau, telegram, discord ou une liste séparée par des virgules.",
+                           "Platform: desktop, telegram, discord, or a comma-separated list."))
+        morceaux = " ".join(morceaux).split(maxsplit=1)
+    else:
+        morceaux = arg.split(maxsplit=1)
+    if len(morceaux) != 2 or not morceaux[1].strip():
+        raise Erreur(T("Syntaxe : /rappel [bureau|telegram|discord] <délai> <message> (ex. 15m sortir le pain).",
+                       "Syntax: /remind [desktop|telegram|discord] <delay> <message> (e.g. 15m take out bread)."))
+    delai, message = morceaux
+    m = re.fullmatch(r"([0-9]{1,8})([smhd])", delai)
+    if not m or not 1 <= int(m[1]) * {"s":1,"m":60,"h":3600,"d":86400}[m[2]] <= 366 * 86400:
+        raise Erreur(T("Délai : de 1 seconde à 366 jours, avec s, m, h ou d.", "Delay: 1 second to 366 days, using s, m, h or d."))
+    if len(message) > 4000 or any(ord(c) < 32 and c not in "\n\t" for c in message):
+        raise Erreur(T("Message de rappel invalide (4 000 caractères maximum).", "Invalid reminder message (4,000 characters maximum)."))
+    return plateformes, delai, message
+
+
+def configuration_question(question):
+    # Les rappels de ce bureau ne nécessitent ni clé, ni serveur JARVIS disponible.
+    morceaux = question.strip().split(maxsplit=1)
+    if morceaux and morceaux[0].lower() in ("/rappel", "/remind"):
+        plateformes, _, _ = lire_rappel(morceaux[1] if len(morceaux) > 1 else "")
+        if plateformes == ["desktop"]:
+            return {"URL":"local:desktop", "USER_ID":str(os.getuid())}
+    return configuration()
+
+
+def programmer_rappel_bureau(delai, message):
+    if not shutil.which("systemd-run") or not shutil.which("notify-send"):
+        raise Erreur(T("Rappel bureau : systemd-run et notify-send sont nécessaires.", "Desktop reminder requires systemd-run and notify-send."))
+    dossier = runtime()
+    ident = uuid.uuid4().hex
+    fichier = dossier / ("rappel-" + ident + ".json")
+    fd = os.open(fichier, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"message":message}, f); f.flush(); os.fsync(f.fileno())
+        secondes = int(delai[:-1]) * {"s":1,"m":60,"h":3600,"d":86400}[delai[-1]]
+        echeance = datetime.fromtimestamp(math.ceil(time.time() + secondes), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        # Échéance civile : un rappel échu pendant la veille arrive au réveil.
+        # Le message reste dans le fichier privé, jamais dans l'unité ou une commande shell.
+        r = subprocess.run(["systemd-run", "--user", "--quiet", "--collect", "--unit=nc-jarvis-rappel-" + ident,
+                            "--on-calendar=" + echeance, "--timer-property=AccuracySec=1s", "--property=UMask=0077",
+                            "--setenv=XDG_RUNTIME_DIR=" + str(dossier.parent), "--", sys.executable,
+                            str(Path(__file__).resolve()), "rappel-notifier", ident],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode:
+            raise Erreur(T("Le gestionnaire systemd utilisateur a refusé le rappel. Aucun rappel bureau créé.",
+                           "The user systemd manager rejected the reminder. No desktop reminder created."))
+    except BaseException:
+        fichier.unlink(missing_ok=True)
+        raise
+    return ident
+
+
+def notifier_rappel(ident):
+    if not re.fullmatch(r"[a-f0-9]{32}", ident):
+        raise Erreur(T("Identifiant de rappel invalide.", "Invalid reminder identifier."))
+    fichier = runtime() / ("rappel-" + ident + ".json")
+    fd = os.open(fichier, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd) as f:
+        st = os.fstat(f.fileno())
+        if st.st_uid != os.getuid() or st.st_mode & 0o077 or st.st_size > 32000:
+            raise Erreur(T("Fichier de rappel non privé ou invalide.", "Reminder file is not private or invalid."))
+        message = json.load(f).get("message")
+    if not isinstance(message, str) or not message or len(message) > 4000:
+        raise Erreur(T("Message de rappel invalide.", "Invalid reminder message."))
+    r = subprocess.run(["notify-send", "--app-name=JARVIS", "--icon=alarm", "--",
+                        T("Rappel JARVIS", "JARVIS reminder"), html.escape(message)],
+                       capture_output=True, text=True, timeout=10)
+    if r.returncode:
+        raise Erreur(T("Notification bureau refusée ; le rappel privé est conservé.", "Desktop notification failed; the private reminder was kept."))
+    fichier.unlink()
+
+
 def executer_commande(c, sid, cmd_brute):
     morceaux = cmd_brute.strip().split(maxsplit=1)
     nom_cmd = morceaux[0].lower()
@@ -412,7 +496,7 @@ def executer_commande(c, sid, cmd_brute):
             "• `/courses` [ajouter <articles>] — Consulter ou ajouter des courses\n"
             "• `/depenses` [montant desc] — Bilan mensuel ou ajout d'une dépense\n"
             "• `/devoirs` — Consulter les devoirs (Moodle)\n"
-            "• `/rappel <délai> <message>` — Programmer un rappel Telegram/Discord\n"
+            "• `/rappel [bureau|telegram|discord|bureau,telegram] <délai> <message>` — Rappel (bureau par défaut)\n"
             "• `/memoire` [texte] — Consulter ou enregistrer un fait en mémoire",
             "🤖 **JARVIS Commands (same as Telegram bot):**\n\n"
             "• `/reset` or `/clear` — Reset active session\n"
@@ -425,7 +509,7 @@ def executer_commande(c, sid, cmd_brute):
             "• `/shopping` [add <text>] — View or add grocery items\n"
             "• `/expenses` [amount desc] — Monthly summary or add an expense\n"
             "• `/moodle` — View homework\n"
-            "• `/remind <delay> <message>` — Schedule a Telegram/Discord reminder\n"
+            "• `/remind [desktop|telegram|discord|desktop,telegram] <delay> <message>` — Reminder (desktop by default)\n"
             "• `/memory` [text] — View or record a fact in memory"
         )
 
@@ -543,16 +627,19 @@ def executer_commande(c, sid, cmd_brute):
             return T(f"Erreur consultation devoirs : {e}", f"Error viewing homework: {e}")
 
     if nom_cmd in ("/rappel", "/remind"):
-        parts = arg.split(maxsplit=1)
-        if len(parts) < 2:
-            return T("Syntaxe : `/rappel <délai> <message>` (ex: `/rappel 15m sortir le pain`)",
-                     "Syntax: `/remind <delay> <message>` (e.g. `/remind 15m take out bread`)")
-        delai, msg = parts[0], parts[1]
-        try:
-            api(c, "/api/reminders", {"platform": "telegram", "delay": delai, "message": msg})
-            return T(f"⏰ **Rappel programmé dans {delai} :** {msg}", f"⏰ **Reminder scheduled in {delai}:** {msg}")
-        except Exception as e:
-            return T(f"Erreur création rappel : {e}", f"Error creating reminder: {e}")
+        plateformes, delai, msg = lire_rappel(arg)
+        resultats = []
+        for plateforme in plateformes:
+            try:
+                if plateforme == "desktop":
+                    programmer_rappel_bureau(delai, msg)
+                else:
+                    api(c, "/api/reminders", {"platform": plateforme, "delay": delai, "message": msg})
+                resultats.append(T(f"⏰ **Rappel {plateforme} programmé dans {delai} :** {msg}",
+                                   f"⏰ **{plateforme} reminder scheduled in {delai}:** {msg}"))
+            except (Erreur, OSError, subprocess.SubprocessError) as e:
+                resultats.append(T(f"Rappel {plateforme} non créé : {e}", f"{plateforme} reminder not created: {e}"))
+        return "\n\n".join(resultats)
 
     if nom_cmd in ("/memoire", "/memory"):
         if arg:
@@ -578,32 +665,44 @@ def executer_commande(c, sid, cmd_brute):
     )
 
 
-def demander(c, sid, question, chat=False, briefing=False):
+@contextlib.contextmanager
+def chronometrer(mesures, cle):
+    if mesures is None:
+        yield
+        return
+    debut = time.perf_counter()
+    try:
+        yield
+    finally:
+        mesures[cle] = round(mesures.get(cle, 0) + (time.perf_counter() - debut) * 1000, 3)
+
+
+def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=None):
     if not briefing and not question.strip():
         raise Erreur(T("La question est vide.", "The question is empty."))
     q_propre = question.strip()
-    if not briefing and q_propre.startswith("/"):
-        with requete_unique(c):
-            maj_ile(sid, "debut", chat)
-            try:
-                texte = executer_commande(c, sid, q_propre)
-            except BaseException:
-                maj_ile(sid, "fin", chat)
-                raise
-            maj_ile(sid, "fini", chat, T("Commande exécutée", "Command executed"))
-            return texte
-    with requete_unique(c):
-        maj_ile(sid, "debut", chat)
+    commande = not briefing and q_propre.startswith("/")
+
+    def signaler(evenement, message=""):
+        if suivi:
+            with chronometrer(mesures, "activity_ms"):
+                maj_ile(sid, evenement, chat, message)
+
+    with chronometrer(mesures, "total_ms"), requete_unique(c):
+        signaler("debut")
         try:
-            if briefing:
-                r = api(c, "/api/briefing", {"force_refresh": False})
-            else:
-                r = api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"], continue_session=True))
-            texte = texte_sortie(r)
+            with chronometrer(mesures, "request_ms"):
+                if commande:
+                    texte = executer_commande(c, sid, q_propre)
+                elif briefing:
+                    texte = texte_sortie(api(c, "/api/briefing", {"force_refresh": False}))
+                else:
+                    texte = texte_sortie(api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"], continue_session=True)))
         except BaseException:
-            maj_ile(sid, "fin", chat)
+            signaler("fin")
             raise
-        maj_ile(sid, "fini", chat, T("Briefing prêt", "Briefing ready") if briefing else T("Réponse prête", "Answer ready"))
+        message = T("Commande exécutée", "Command executed") if commande else (T("Briefing prêt", "Briefing ready") if briefing else T("Réponse prête", "Answer ready"))
+        signaler("fini", message)
         return texte
 
 
@@ -741,7 +840,8 @@ def requete_ile():
     except (ValueError, UnicodeError):
         raise Erreur(T("Question invalide ou trop longue (8 000 caractères maximum).",
                        "Invalid question or too long (8,000 characters maximum).")) from None
-    texte = demander(configuration(), sid, question)
+    # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
+    texte = demander(configuration_question(question), sid, question, suivi=False)
     # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète.
     print(json.dumps(dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000), ensure_ascii=False), flush=True)
 
@@ -755,8 +855,11 @@ def main():
         p.add_argument("question", nargs="*")
         if nom == "demander":
             p.add_argument("--flux", action="store_true")
+            p.add_argument("--mesurer", "--timings", action="store_true", help=T("Mesures de durée sur stderr (JSON, sans requête supplémentaire)", "Timings on stderr (JSON, no extra request)"))
     sous.add_parser("briefing")
     sous.add_parser("requete-ile", help=argparse.SUPPRESS)
+    p = sous.add_parser("rappel-notifier", help=argparse.SUPPRESS)
+    p.add_argument("ident")
     p = sous.add_parser("verifier", aliases=["check", "diagnostic"])
     p.add_argument("--json", action="store_true")
     p = sous.add_parser("etat", aliases=["status"])
@@ -771,10 +874,12 @@ def main():
             ouvrir(a.question)
         elif commande == "requete-ile":
             requete_ile()
+        elif commande == "rappel-notifier":
+            notifier_rappel(a.ident)
         else:
             if commande == "chat" and not CONF.exists() and sys.stdin.isatty():
                 configurer()
-            c = configuration()
+            c = configuration_question(" ".join(a.question)) if commande == "demander" else configuration()
             if commande in ("verifier", "check", "diagnostic"):
                 return verifier(c, getattr(a, "json", False))
             if commande in ("etat", "status"):
@@ -788,7 +893,12 @@ def main():
             elif commande == "chat":
                 chat(c, " ".join(getattr(a, "question", [])))
             else:
-                t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing")
+                mesures = {} if getattr(a, "mesurer", False) else None
+                try:
+                    t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing", mesures=mesures)
+                finally:
+                    if mesures:
+                        print(json.dumps({"timings_ms": mesures}), file=sys.stderr, flush=True)
                 print(json.dumps({"t": t}, ensure_ascii=False) if flux else t, flush=True)
                 if commande == "briefing":
                     notifier(t)

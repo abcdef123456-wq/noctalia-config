@@ -17,6 +17,10 @@ Singleton {
     property var messages: []
     property string erreur: ""
     property bool enCours: false
+    property bool reponseRecente: false
+    readonly property string activitePilule: enCours ? "jarvis" : (reponseRecente ? "jarvis-fini" : "")
+    onEnCoursChanged: if (enCours) { reponseRecente = false; finReponse.stop() }
+    Timer { id: finReponse; interval: 3000; onTriggered: a.reponseRecente = false }
     property string question: ""
     property bool sortieFinie: false
     property bool processusFini: false
@@ -24,7 +28,37 @@ Singleton {
     property string reponse: ""
     property bool reglagesOuverts: false
     property bool reglagesEnCours: false
+    readonly property bool ecritureReglagesEnCours: reglagesEnCours && operationReglages !== "quick-settings"
+    readonly property var commandes: [
+        {nom:"/help", alias:["/aide","/commandes","/commands"], arguments:false, description:Reglages.t("Afficher les commandes", "Show commands")},
+        {nom:"/reset", alias:["/clear","/nouveau"], arguments:false, description:Reglages.t("Réinitialiser la session partagée", "Reset the shared session")},
+        {nom:"/status", alias:["/etat","/diag"], arguments:false, description:Reglages.t("État du serveur et du moteur", "Server and engine status")},
+        {nom:"/briefing", alias:[], arguments:false, description:Reglages.t("Briefing du jour", "Daily briefing")},
+        {nom:"/models", alias:["/modeles"], arguments:false, description:Reglages.t("Lister les modèles disponibles", "List available models")},
+        {nom:"/model", alias:["/modele"], arguments:true, description:Reglages.t("Choisir un modèle : /model <nom>", "Choose a model: /model <name>")},
+        {nom:"/engine", alias:["/moteur"], arguments:true, description:Reglages.t("Choisir un moteur : agy, codex, claude, opencode", "Choose an engine: agy, codex, claude, opencode")},
+        {nom:"/effort", alias:[], arguments:true, description:Reglages.t("Régler le niveau de réflexion", "Set reasoning effort")},
+        {nom:Reglages.t("/courses","/shopping"), alias:["/courses","/shopping"], arguments:true, description:Reglages.t("Voir les courses ou ajouter des articles", "View groceries or add items")},
+        {nom:Reglages.t("/depenses","/expenses"), alias:["/depenses","/expenses"], arguments:true, description:Reglages.t("Bilan ou ajout d’une dépense", "Summary or add an expense")},
+        {nom:Reglages.t("/devoirs","/moodle"), alias:["/devoirs","/moodle"], arguments:false, description:Reglages.t("Consulter les devoirs", "View homework")},
+        {nom:Reglages.t("/rappel","/remind"), alias:["/rappel","/remind"], arguments:true, description:Reglages.t("Rappel : /rappel [bureau|telegram|discord] <délai> <message>", "Reminder: /remind [desktop|telegram|discord] <delay> <message>")},
+        {nom:Reglages.t("/memoire","/memory"), alias:["/memoire","/memory"], arguments:true, description:Reglages.t("Consulter ou enrichir la mémoire", "View or add to memory")}
+    ]
+    function proposerCommandes(texte, position) {
+        var m = /^(\/[^\s]*)([\s\S]*)$/.exec(texte)
+        if (!m || position < 1 || position > m[1].length) return []
+        var prefixe = m[1].slice(0, position).toLowerCase()
+        return commandes.map((c, ordre) => {
+            var nom = [c.nom].concat(c.alias).find(n => n.indexOf(prefixe) === 0)
+            return nom ? {texte:nom, description:c.description, arguments:c.arguments, fin:m[1].length, principal:nom === c.nom, ordre:ordre} : null
+        }).filter(c => c !== null).sort((x,y) => Number(y.principal) - Number(x.principal) || x.ordre - y.ordre)
+    }
+    function commandeComplete(texte) {
+        var nom = texte.trim().split(/\s+/)[0].toLowerCase()
+        return commandes.some(c => c.nom === nom || c.alias.indexOf(nom) >= 0)
+    }
     property bool reglagesDisponibles: false
+    property bool reglagesDemandes: false
     property var moteurs: [
         {id:"agy", name:"Antigravity", installed:false}, {id:"codex", name:"Codex", installed:false},
         {id:"claude", name:"Claude Code", installed:false}, {id:"opencode", name:"OpenCode", installed:false}
@@ -46,6 +80,38 @@ Singleton {
     readonly property var modeles: moteurCourant.models || []
     readonly property var modeleCourant: modeles.find(m => m.id === modele) || ({})
     readonly property var efforts: modeleCourant.efforts || moteurCourant.efforts || []
+    readonly property var famillesModeles: ["Flash", "Argon", "Opus", "Sonnet"]
+    function familleModele(item) {
+        var mots = ((item.id || "") + " " + (item.name || "")).toLowerCase().split(/[^a-z0-9]+/)
+        return famillesModeles.find(nom => mots.indexOf(nom.toLowerCase()) >= 0) || ""
+    }
+    function modelePourFamille(nom) {
+        var candidats = modeles.filter(m => familleModele(m) === nom)
+        return candidats.find(m => m.id === modele)
+            || candidats.find(m => effort && m.id.endsWith("-" + effort)) || candidats[0] || null
+    }
+    function modelePourEffort(niveau) {
+        if (efforts.indexOf(niveau) < 0) return null
+        // Certains CLI encodent aussi l'effort dans l'identifiant du modèle.
+        var suffixe = /-(low|medium|high)$/.exec(modele)
+        if (!suffixe) return modele
+        var identifiant = modele.slice(0, -suffixe[0].length) + "-" + niveau
+        return modeles.some(m => m.id === identifiant) ? identifiant : null
+    }
+    function choisirFamille(nom) {
+        if (!reglagesDisponibles || enCours || reglagesEnCours || !moteurCourant.installed) return
+        var m = modelePourFamille(nom)
+        if (!m) return
+        modele = m.id
+        var suffixe = /-(low|medium|high)$/.exec(m.id)
+        effort = suffixe ? suffixe[1] : (efforts.indexOf(effort) >= 0 ? effort : "")
+    }
+    function choisirEffort(niveau) {
+        if (!reglagesDisponibles || enCours || reglagesEnCours) return
+        var identifiant = modelePourEffort(niveau)
+        if (identifiant === null) return
+        modele = identifiant; effort = niveau
+    }
 
     function ouvrirReglages() {
         reglagesOuverts = !reglagesOuverts
@@ -55,7 +121,7 @@ Singleton {
         }
     }
     function choisirMoteur(id) { moteur = id; modele = ""; effort = "" }
-    function lireReglages() { lancerReglages("quick-settings", {}) }
+    function lireReglages() { reglagesDemandes = true; lancerReglages("quick-settings", {}) }
     function appliquerReglages() {
         if (enCours || !reglagesDisponibles) return
         lancerReglages("session.update", {engine:moteur, model:modele.trim(), effort:effort})
@@ -210,6 +276,8 @@ Singleton {
         t = t.replace(/<s>([\s\S]*?)<\/s>/gi, "~~$1~~")
         // Pas de chargement d'image externe en Markdown
         t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "[$1]($2)")
+        // Les caractères LaTeX d'une URL (notamment $, _ et \\) font partie du lien.
+        t = t.replace(/(?:https?:\/\/|file:\/\/\/|mailto:)[^\s<>"`]+/gi, m => garder(m))
         // Blocs LaTeX ($$...$$, \[...\], \begin{equation|align|gather|math|displaymath}...\end{...})
         t = t.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => a.formaterLatex(m, true))
         t = t.replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => a.formaterLatex(m, true))
@@ -243,7 +311,7 @@ Singleton {
     }
     function envoyer() {
         var q = brouillon.trim()
-        if (enCours || reglagesEnCours || !q) return
+        if (enCours || ecritureReglagesEnCours || !q) return
         if (q.length > 8000) {
             erreur = Reglages.t("8 000 caractères maximum.", "8,000 characters maximum.")
             return
@@ -270,6 +338,8 @@ Singleton {
         if (code === 0 && r && r.ok === true && typeof r.text === "string" && r.text.length) {
             if (estReset) messages = []
             ajouter("assistant", r.text.slice(0, 16000) + (r.truncated ? Reglages.t("\n\n[Réponse abrégée dans l’île]", "\n\n[Answer shortened in the island]") : ""))
+            reponseRecente = true
+            finReponse.restart()
         } else {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
                     : Reglages.t("Impossible de recevoir la réponse. Vérifie la connexion et la configuration.",

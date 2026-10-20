@@ -43,7 +43,7 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
             def load(path,name):
                 spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec)
                 sys.modules[name]=module;spec.loader.exec_module(module);return module
-            names=('main','agy_bridge','memory','nc_runner','nc_engines','gateway_test_contract','uvicorn')
+            names=('main','agy_bridge','memory','nc_runner','nc_engines','nc_management','gateway_test_contract','uvicorn')
             previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
             try:
                 with patch.dict(os.environ,env):
@@ -53,7 +53,11 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
                     sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
                     main=load(runtime/'main.py','main')
                     runner=load(REPO/'home/.local/share/nc-jarvis/server/nc_runner.py','nc_runner')
+                    self.assertIs(main.run_agy.__self__,runner.engines)
+                    if hasattr(main,'engines'):
+                        self.assertIs(runner.engines,main.engines)
                     gateway=load(UPSTREAM/'gateway/gateway.py','gateway_test_contract')
+                    management=load(REPO/'home/.local/share/nc-jarvis/server/nc_management.py','nc_management')
                     async def scenario():
                         transport=httpx.ASGITransport(app=runner.app)
                         headers={'X-Secret-Key':env['SECRET_KEY']}
@@ -69,10 +73,16 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
                             response=await client.post('/run',json={'prompt':'depuis le bureau'},headers=headers)
                             self.assertTrue(response.json()['success'],response.text)
                             # Les bots utilisent exactement ce forward_to_runner upstream.
-                            with patch.object(httpx,'AsyncClient',side_effect=lambda **kw:original(transport=transport,**kw)):
-                                mobile=await gateway.forward_to_runner('depuis Telegram ou Discord')
+                            with patch.object(httpx,'AsyncClient',side_effect=lambda **kw:original(transport=transport,**kw)) as factory:
+                                async with management.runner_connections.lifespan():
+                                    gateway.httpx=management.RunnerHttpx(httpx,management.runner_connections)
+                                    mobile=await gateway.forward_to_runner('depuis Telegram ou Discord')
+                                    remote_session=await gateway.fetch_session()
+                                    factory.assert_called_once()
+                            gateway.httpx=httpx
                             self.assertTrue(mobile['success'],mobile)
                             self.assertEqual(mobile['session']['engine'],'codex')
+                            self.assertEqual(remote_session['engine'],'codex')
                             conversations=(await client.get('/conversations',headers=headers)).json()['conversations']
                             self.assertEqual(len(conversations),1)
                             ident=conversations[0]['id']

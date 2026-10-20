@@ -231,10 +231,10 @@ def fenetres():
         return []
 
 
-def terminal_et_shell():
+def terminal_et_shell(fenetres_connues=None):
     """Le programme à fenêtre (kitty…) dont descend cet agent, et le processus juste en dessous (le shell de l'onglet,
     pour écrire à l'agent depuis l'île) : on remonte les parents jusqu'à une fenêtre."""
-    pids = {w.get("pid") for w in fenetres()}
+    pids = {w.get("pid") for w in (fenetres() if fenetres_connues is None else fenetres_connues)}
     p, avant = os.getppid(), 0
     for _ in range(30):
         if p in pids:
@@ -262,8 +262,9 @@ def socket_kitty(pid):
 def reperer_terminal(s):
     """Fenêtre, shell et « peut-on lui écrire depuis l'île » d'une session (une fois pour toutes)."""
     if not s.get("terminal") or not s.get("shell") or "classe" not in s:
-        s["terminal"], s["shell"] = terminal_et_shell()
-        s["classe"] = next((w.get("class", "") for w in fenetres() if w.get("pid") == s["terminal"]), "")
+        connues = fenetres()
+        s["terminal"], s["shell"] = terminal_et_shell(connues)
+        s["classe"] = next((w.get("class", "") for w in connues if w.get("pid") == s["terminal"]), "")
     s["ecrire"] = bool(s.get("shell") and socket_kitty(s.get("terminal"))) or (s.get("agent") == "opencode" and bool(shutil.which("opencode")))
 
 

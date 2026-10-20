@@ -130,3 +130,20 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
         self.assertIn('missing command: jq',texte)
         self.assertNotIn('PACKAGE_INSTALL',texte)
         self.assertNotIn('["sudo"',appels)
+
+
+class NettoyageCockpit(unittest.TestCase):
+    def test_old_dashboard_is_backed_up_once_without_touching_current_cockpit(self):
+        block=SOURCE[SOURCE.index('# Ancien cockpit QML orphelin'):SOURCE.index('# Ancienne version de ce dépôt')]
+        with tempfile.TemporaryDirectory() as d:
+            home=Path(d);folder=home/'.config/quickshell/nc-ile';folder.mkdir(parents=True)
+            old=folder/'JarvisDashboard.qml';old.write_text('ancien cockpit personnalisé')
+            current=folder/'Jarvis.qml';current.write_text('cockpit actif')
+            script='''set -eu
+backup() { mkdir -p "$HOME/backup/$(dirname "$1")"; cp -a -- "$HOME/$1" "$HOME/backup/$1"; }
+'''+block
+            for _ in range(2):
+                r=subprocess.run(['bash','-c',script],env=dict(os.environ,HOME=d),text=True,capture_output=True,timeout=3)
+                self.assertEqual(r.returncode,0,r.stderr)
+                self.assertFalse(old.exists());self.assertEqual(current.read_text(),'cockpit actif')
+                self.assertEqual((home/'backup/.config/quickshell/nc-ile/JarvisDashboard.qml').read_text(),'ancien cockpit personnalisé')

@@ -43,6 +43,8 @@ Singleton {
     readonly property var demandes: Object.values(donnees.demandes || {}).filter(d =>
         suivie((donnees.sessions || {})[d.session] || d)).sort((x, y) => (x.t || 0) - (y.t || 0))
     readonly property var demande: demandes.length ? demandes[0] : null
+    // Garder les transitions de fin pour la pilule, sans conserver leurs cartes dans la page.
+    readonly property var sessionsVisibles: sessions.filter(s => s.etat !== "fini")
     function sessionActive(s) {
         if (!s || s.agent === "assistant") return false
         var age = Etat.maintenant.getTime() / 1000 - (s.maj || 0)
@@ -54,7 +56,7 @@ Singleton {
     readonly property bool travaille: enCours.length > 0
     readonly property var principale: enCours.length ? enCours[0] : (sessions.length ? sessions[0] : null)
     // Page de l'île : tant qu'une session a fait quelque chose il y a moins de 30 min
-    readonly property bool aPage: sessions.some(s => s.etat !== "pret" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 1800)
+    readonly property bool aPage: sessionsVisibles.some(s => s.etat !== "pret" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 1800)
     readonly property bool attendTerminal: sessions.some(s => s.etat === "terminal" && sessionActive(s))
 
     FileView {
@@ -80,8 +82,8 @@ Singleton {
     property string dernierFini: ""
     property string dernierFiniAgent: "claude"
     // Titre de la page : selon les agents suivis
-    readonly property string titreAgent: sessions.length && sessions.every(s => agent(s) === agent(sessions[0])) ? agent(sessions[0]) : ""
-    readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : (sessions.length ? Reglages.t("Agents IA", "AI Agents") : "Claude Code")
+    readonly property string titreAgent: sessionsVisibles.length && sessionsVisibles.every(s => agent(s) === agent(sessionsVisibles[0])) ? agent(sessionsVisibles[0]) : ""
+    readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : Reglages.t("Agents IA", "AI Agents")
     readonly property var attend: sessions.find(s => s.etat === "terminal") || null
     onSessionsChanged: {
         var n = {}

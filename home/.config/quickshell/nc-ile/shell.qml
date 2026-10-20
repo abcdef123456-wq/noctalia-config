@@ -96,6 +96,7 @@ ShellRoot {
         function concentrationEtat(): string { return Notifs.concentration ? "oui" : "non" }
         // Ouvre l'île sur une page ; si elle y est déjà, la referme (clic sur une icône de la barre)
         function page(nom: string): void {
+            if (Etat.vues.indexOf(nom) < 0) return
             if (nom === "assistant" && racine.jarvisFenetre) racine.jarvisFenetre.close()
             if (Etat.ecranOuvert !== "" && !Etat.recherche && Etat.vueActive === nom) { Etat.fermer(); return }
             if (Etat.ecranOuvert === "") basculer()

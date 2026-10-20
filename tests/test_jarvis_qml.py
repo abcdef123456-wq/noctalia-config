@@ -13,7 +13,7 @@ QML=REPO/'home/.config/quickshell/nc-ile'
 
 @unittest.skipUnless(shutil.which('qs'),'Quickshell requis')
 class CockpitJarvis(unittest.TestCase):
-    def executer(self,scenario,absent=False):
+    def executer(self,scenario,absent=False,evenements=False):
         with tempfile.TemporaryDirectory(prefix='nc-jarvis-qml-') as d:
             root=Path(d);shutil.copytree(QML,root/'qml');(root/'runtime').mkdir(mode=0o700)
             (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
@@ -43,19 +43,27 @@ print(json.dumps(dict(ok=True,data=data)),flush=True)
 '''
                 for n in ('nc-assistant','nc-jarvis'):
                     p=b/n;p.write_text(script);p.chmod(0o755)
-            (root/'qml/shell.qml').write_text('''import QtQuick
+            shell=(('import QtTest\n' if evenements else '')+'''import QtQuick
 import Quickshell
 ShellRoot {
  id:racine
  property int etape:0
+ property bool dansEtape:false
  property var dashboard:null
+ // TEST_INPUT
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
  function creer(){var c=Qt.createComponent("Jarvis.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(racine);verifier(dashboard!==null,"création du cockpit");dashboard.afficher(Quickshell.screens[0].name);}
  Timer {interval:100;running:true;repeat:true;onTriggered:{
+ if(racine.dansEtape)return
+ racine.dansEtape=true
+ try {
 '''+scenario+'''
+ }finally{racine.dansEtape=false}
  }}
  Timer {interval:9000;running:true;onTriggered:Qt.exit(9)}
 }''')
+            (root/'qml/shell.qml').write_text(shell.replace('// TEST_INPUT','TestCase {id:clavier;name:"DashboardInput";when:false}' if evenements else ''))
             env=dict(os.environ,HOME=d,QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',XDG_RUNTIME_DIR=str(root/'runtime'),XDG_CACHE_HOME=str(root/'cache'))
             env.pop('WAYLAND_DISPLAY',None)
             r=subprocess.run(['qs','--no-color','-p',str(root/'qml/shell.qml')],env=env,text=True,capture_output=True,timeout=12)
@@ -103,3 +111,20 @@ if(etape===7){JarvisEtat.executer("session",{},false);etape++;return}
 if(etape===8){dashboard.close();Qt.quit()}
 ''')
         self.assertTrue(any(c['data'].get('op')=='session' for c in calls),"Quickshell a quitté avant la réouverture")
+
+    def test_escape_closes_completions_before_closing_dashboard(self):
+        self.executer('''
+if(etape===0){creer();dashboard.ouvrir("chat");etape++;return}
+if(JarvisEtat.enCours)return
+if(etape===1){
+ var entree=trouver(dashboard.contentItem,"nc-assistant-input");verifier(entree!==null,"saisie absente")
+ entree.forceActiveFocus();clavier.keyClick("/");clavier.keyClick("e");etape++
+}else if(etape===2){
+ verifier(trouver(dashboard.contentItem,"nc-jarvis-completions").visible,"complétion absente dans le vrai cockpit")
+ clavier.keyClick(Qt.Key_Escape);etape++
+}else if(etape===3){
+ verifier(dashboard.visible,"Échap a fermé le dashboard au lieu des suggestions")
+ verifier(!trouver(dashboard.contentItem,"nc-jarvis-completions").visible,"suggestions encore ouvertes")
+ clavier.keyClick(Qt.Key_Escape);etape++
+}else if(etape===4){verifier(!dashboard.visible,"second Échap n'a pas fermé le cockpit");Qt.quit()}
+''',evenements=True)

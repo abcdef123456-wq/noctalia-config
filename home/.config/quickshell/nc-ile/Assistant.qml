@@ -7,38 +7,64 @@ Item {
     property bool historiqueOuvert: dansDashboard || AssistantEtat.messages.length > 0
     property bool ecouteVocale: false
     property string information: ""
+    property bool suivreFin: true
+    property int indiceSuggestion: 0
+    property bool selectionExplicite: false
+    property string suggestionsMasqueesPour: ""
+    property var ouvrirLien: lien => Qt.openUrlExternally(lien)
+    readonly property var propositions: AssistantEtat.proposerCommandes(entree.text, entree.cursorPosition)
+    readonly property bool propositionsVisibles: visible && !AssistantEtat.reglagesOuverts && !AssistantEtat.enCours
+        && !AssistantEtat.ecritureReglagesEnCours && entree.activeFocus && !entree.inputMethodComposing
+        && propositions.length > 0 && entree.text !== suggestionsMasqueesPour
+    readonly property bool animeAttente: visible && animationsActives && !AssistantEtat.reglagesOuverts
+        && (dansDashboard || historiqueOuvert) && AssistantEtat.enCours && Reglages.val("EFFETS", "tous") !== "aucun"
     readonly property color cyan: Couleurs.accent
     readonly property color corail: Couleurs.rouge
     readonly property color teinteEtat: (AssistantEtat.erreur || ecouteVocale) ? corail : cyan
     readonly property var derniereReponse: AssistantEtat.messages.slice().reverse().find(m => m.role === "assistant")
-    readonly property var modelesDefaut: [
-        {id: "flash", name: "Flash", icone: "bolt", engine: "agy"},
-        {id: "high", name: "High", icone: "psychology", engine: "agy"},
-        {id: "sonnet", name: "Sonnet", icone: "auto_awesome", engine: "claude"},
-        {id: "gpt-5", name: "GPT-5", icone: "smart_toy", engine: "codex"}
-    ]
-    property string modeleChoisiLocal: "flash"
-
-    function iconeModele(item, idx) {
-        if (item.icone) return item.icone
-        var s = ((item.id || "") + " " + (item.name || "")).toLowerCase()
-        if (s.indexOf("flash") >= 0 || s.indexOf("fast") >= 0 || s.indexOf("mini") >= 0) return "bolt"
-        if (s.indexOf("high") >= 0 || s.indexOf("pro") >= 0 || s.indexOf("opus") >= 0 || s.indexOf("reason") >= 0) return "psychology"
-        if (s.indexOf("sonnet") >= 0 || s.indexOf("claude") >= 0) return "auto_awesome"
-        if (s.indexOf("gpt") >= 0 || s.indexOf("codex") >= 0 || s.indexOf("o3") >= 0 || s.indexOf("o4") >= 0) return "smart_toy"
-        return ["bolt", "psychology", "auto_awesome", "smart_toy"][idx % 4]
+    function chargerReglagesRapides() {
+        if (visible && !dansDashboard && !historiqueOuvert && !entree.activeFocus && !AssistantEtat.brouillon
+            && !AssistantEtat.reglagesDemandes && !AssistantEtat.enCours)
+            AssistantEtat.lireReglages()
     }
     function defiler(dy) {
         if (AssistantEtat.reglagesOuverts) return reglagesRapides.defiler(dy)
-        return (dansDashboard || historiqueOuvert) ? defil.defiler(dy) : false
+        if (!dansDashboard && !historiqueOuvert) return false
+        var bouge = defil.defiler(dy)
+        if (bouge) suivreFin = defil.cible >= Math.max(0, defil.contentHeight - defil.height) - 1
+        return bouge
     }
-    function bas() { Qt.callLater(() => { defil.cible = Math.max(0, defil.contentHeight - defil.height); defil.contentY = defil.cible }) }
+    function placerEnBas() {
+        if (visible && defil.visible && suivreFin) defil.positionner(Math.max(0, defil.contentHeight - defil.height))
+    }
+    function bas() { suivreFin = true; Qt.callLater(placerEnBas) }
+    function completer(index) {
+        if (index < 0 || index >= propositions.length) return
+        var p = propositions[index], suite = entree.text.slice(p.fin)
+        var ajout = p.arguments && !suite ? " " : ""
+        var texte = p.texte + ajout + suite
+        suggestionsMasqueesPour = texte
+        AssistantEtat.brouillon = texte
+        entree.forceActiveFocus()
+        entree.cursorPosition = p.texte.length + ajout.length
+    }
+    function validerSaisie() {
+        if (propositionsVisibles && (selectionExplicite || !AssistantEtat.commandeComplete(entree.text))) {
+            completer(indiceSuggestion)
+            return
+        }
+        historiqueOuvert = true
+        AssistantEtat.envoyer()
+    }
+    onPropositionsChanged: { indiceSuggestion = 0; selectionExplicite = false }
+    onVisibleChanged: if (visible) { bas(); Qt.callLater(chargerReglagesRapides) }
+    onAnimationsActivesChanged: if (animationsActives) bas()
     function reglages() { information = ""; ecouteVocale = false; AssistantEtat.ouvrirReglages() }
     function voix() {
         ecouteVocale = false
         information = Reglages.t("Dictée et sortie vocale non configurées sur ce client.", "Dictation and voice output are not configured on this client.")
     }
-    Component.onCompleted: bas()
+    Component.onCompleted: { bas(); Qt.callLater(chargerReglagesRapides) }
     onDansDashboardChanged: if (dansDashboard) historiqueOuvert = true
     Connections {
         target: AssistantEtat
@@ -48,6 +74,7 @@ Item {
             if (AssistantEtat.messages.length > 0) page.historiqueOuvert = true
             page.bas()
         }
+        function onReglagesOuvertsChanged() { if (!AssistantEtat.reglagesOuverts) page.bas() }
     }
     onHistoriqueOuvertChanged: if (historiqueOuvert) bas()
 
@@ -167,9 +194,18 @@ Item {
 
             Defilement {
                 id: defil
+                objectName: "nc-jarvis-history"
                 anchors.fill: parent; visible: page.dansDashboard || page.historiqueOuvert
                 interactive: page.dansDashboard
                 contentHeight: liste.implicitHeight
+                onContentHeightChanged: if (page.suivreFin) Qt.callLater(page.placerEnBas)
+                onHeightChanged: if (page.suivreFin) Qt.callLater(page.placerEnBas)
+                onVisibleChanged: if (visible) page.bas()
+                onMovementStarted: page.suivreFin = false
+                onMovementEnded: {
+                    cible = contentY
+                    page.suivreFin = contentY >= Math.max(0, contentHeight - height) - 1
+                }
                 Column {
                     id: liste
                     width: parent.width; spacing: 10
@@ -206,6 +242,38 @@ Item {
                                     color: Couleurs.texte
                                     selectionColor: Couleurs.accent
                                     font.family: "Adwaita Sans"; font.pixelSize: 13
+                                    onLinkActivated: lien => page.ouvrirLien(lien)
+                                    HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        objectName: "nc-jarvis-thinking"
+                        width: liste.width; height: visible ? 62 : 0; radius: 16
+                        visible: AssistantEtat.enCours
+                        color: Couleurs.carte
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: Reglages.t("JARVIS réfléchit…", "JARVIS is thinking…")
+                        Column {
+                            x: 12; y: 12; spacing: 10
+                            Texte { text: "JARVIS"; color: page.cyan; font.weight: Font.DemiBold }
+                            Row {
+                                spacing: 5
+                                Repeater {
+                                    model: 3
+                                    Rectangle {
+                                        required property int index
+                                        objectName: "nc-jarvis-thinking-dot"
+                                        width: 5; height: 5; radius: 2.5; color: Couleurs.texte; opacity: 0.4
+                                        SequentialAnimation on opacity {
+                                            running: page.animeAttente; loops: Animation.Infinite
+                                            PauseAnimation { duration: index * 140 }
+                                            NumberAnimation { to: 1; duration: 200 }
+                                            NumberAnimation { to: 0.4; duration: 360 }
+                                            PauseAnimation { duration: (2 - index) * 140 }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -230,12 +298,11 @@ Item {
             anchors.bottom: modeles.top; anchors.bottomMargin: 10
             width: parent.width; height: 38
             readonly property string libelleStatut: AssistantEtat.enCours
-                ? Reglages.t("Traitement de votre requête...", "Processing your request...")
-                : (page.ecouteVocale
-                    ? Reglages.t("À votre écoute... Cliquez sur l'orbe pour valider", "Listening... Click the orb to confirm")
-                    : (AssistantEtat.erreur
-                        ? ("« " + AssistantEtat.erreur + " »")
-                        : (page.information || (page.derniereReponse ? ("« " + AssistantEtat.apercu(page.derniereReponse.texte) + " »") : Reglages.t("Comment puis-je vous aider ?", "How can I help you?")))))
+                ? Reglages.t("Réflexion en cours…", "Thinking…")
+                : (AssistantEtat.erreur ? Reglages.t("Une erreur est survenue — ouvrir la conversation", "An error occurred — open conversation")
+                    : (page.information || (page.derniereReponse
+                        ? Reglages.t("Réponse reçue — ouvrir la conversation", "Reply received — open conversation")
+                        : Reglages.t("Comment puis-je vous aider ?", "How can I help you?"))))
             Row {
                 anchors.centerIn: parent; spacing: 8
                 width: Math.min(parent.width, iconeStatut.width + 8 + texteStatut.implicitWidth)
@@ -270,108 +337,73 @@ Item {
             }
         }
 
-        // Carte MODÈLE IA dans la Dynamic Island uniquement (reproduisant le design de l'image jointe avec les couleurs du terminal)
+        // Une entrée par famille ; l'effort reste un choix séparé.
         Rectangle {
             id: modeles
             visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts && !page.historiqueOuvert
             anchors.bottom: saisie.top; anchors.bottomMargin: 12
-            width: parent.width; height: 128; radius: 18
+            width: parent.width; height: 140; radius: 18
             color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
-            Row {
-                x: 12; y: 10; spacing: 6
-                Ico { anchors.verticalCenter: parent.verticalCenter; nom: "tune"; taille: 15; color: Couleurs.texteSec }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: Reglages.t("MODÈLE IA", "AI MODEL")
-                    color: Couleurs.texteSec; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.Bold; font.letterSpacing: 0.5
-                }
+            Texte {
+                x: 12; y: 12; font.pixelSize: 11; font.weight: Font.Bold
+                text: Reglages.t("MODÈLE IA", "AI MODEL"); secondaire: true
             }
-            Text {
-                anchors.right: parent.right; anchors.rightMargin: 14; y: 10
-                text: AssistantEtat.reglagesModifies ? Reglages.t("À APPLIQUER", "PENDING") : (AssistantEtat.effort || "LOW").toUpperCase()
-                color: page.cyan; font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.Bold
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.reglages() }
+            Row {
+                anchors.right: parent.right; anchors.rightMargin: 10; y: 5; spacing: 6
+                JarvisBouton {
+                    objectName: "nc-jarvis-apply-model"
+                    texte: Reglages.t("Appliquer", "Apply"); height: 28; primaire: true
+                    visible: AssistantEtat.reglagesModifies && AssistantEtat.reglagesDisponibles
+                    enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
+                    onClic: AssistantEtat.appliquerReglages()
+                }
+                AssistantCommande {
+                    rond: true; width: 28; height: 28; icone: "tune"
+                    aide: Reglages.t("Moteur, modèles et connexion", "Engine, models and connection")
+                    onClic: page.reglages()
+                }
             }
             Row {
                 id: choix
-                x: 10; y: 38; width: parent.width - 20; spacing: 8
-                readonly property var listeModeles: AssistantEtat.modeles.length ? AssistantEtat.modeles.slice(0, 4) : page.modelesDefaut
+                x: 10; y: 38; width: parent.width - 20; spacing: 6
                 Repeater {
-                    model: choix.listeModeles
-                    Rectangle {
-                        id: option
-                        required property var modelData
-                        required property int index
-                        readonly property bool estBackend: AssistantEtat.modeles.length > 0
-                        readonly property bool choisi: estBackend
-                            ? (AssistantEtat.reglagesDisponibles && !AssistantEtat.reglagesModifies && AssistantEtat.modele === modelData.id)
-                            : (page.modeleChoisiLocal === modelData.id)
-                        width: (choix.width - 8 * (Math.max(1, choix.listeModeles.length) - 1)) / Math.max(1, choix.listeModeles.length)
-                        height: 38; radius: 11
-                        color: choisi ? page.cyan : (zone.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
-                        border.width: 1
-                        border.color: choisi ? page.cyan : Couleurs.gris3
-                        enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
-                        Row {
-                            anchors.centerIn: parent; spacing: 5
-                            Ico {
-                                anchors.verticalCenter: parent.verticalCenter
-                                nom: page.iconeModele(option.modelData, option.index); taille: 15
-                                color: option.choisi ? Couleurs.surAccent : Couleurs.texteDoux
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(implicitWidth, option.width - 30)
-                                text: option.modelData.name || option.modelData.id
-                                color: option.choisi ? Couleurs.surAccent : Couleurs.texte
-                                font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.Bold
-                                elide: Text.ElideRight; textFormat: Text.PlainText
-                            }
-                        }
-                        function ouvrir() {
-                            page.modeleChoisiLocal = modelData.id
-                            if (!AssistantEtat.reglagesDisponibles) {
-                                if (modelData.engine) AssistantEtat.choisirMoteur(modelData.engine)
-                                page.reglages()
-                                return
-                            }
-                            if (estBackend) {
-                                AssistantEtat.modele = modelData.id
-                                AssistantEtat.effort = ""
-                            } else if (modelData.engine) {
-                                AssistantEtat.choisirMoteur(modelData.engine)
-                            }
-                            AssistantEtat.reglagesOuverts = true
-                        }
-                        MouseArea { id: zone; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: option.ouvrir() }
-                        activeFocusOnTab: true
-                        Keys.onReturnPressed: ouvrir()
-                        Keys.onSpacePressed: ouvrir()
-                        Accessible.role: Accessible.Button
-                        Accessible.name: modelData.name || modelData.id
-                        Accessible.onPressAction: ouvrir()
+                    model: AssistantEtat.famillesModeles
+                    JarvisBouton {
+                        required property string modelData
+                        objectName: "nc-jarvis-model-" + modelData.toLowerCase()
+                        width: (choix.width - 18) / 4; height: 34
+                        texte: modelData
+                        primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.familleModele(AssistantEtat.modeleCourant) === modelData
+                        enabled: AssistantEtat.reglagesDisponibles && !!AssistantEtat.moteurCourant.installed
+                            && !!AssistantEtat.modelePourFamille(modelData) && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
+                        onClic: AssistantEtat.choisirFamille(modelData)
                     }
                 }
             }
             Row {
-                x: 10; y: 86; width: parent.width - 20; spacing: 8
-                AssistantCommande {
-                    height: 30; icone: "bolt"
-                    texte: "Effort: " + (AssistantEtat.effort || "LOW").toUpperCase()
-                    aide: Reglages.t("Niveau de réflexion", "Reasoning effort")
-                    onClic: page.reglages()
+                id: reflexion
+                x: 10; y: 80; width: parent.width - 20; spacing: 6
+                Repeater {
+                    model: ["low", "medium", "high"]
+                    JarvisBouton {
+                        required property string modelData
+                        objectName: "nc-jarvis-effort-" + modelData
+                        width: (reflexion.width - 12) / 3; height: 28
+                        texte: modelData
+                        primaire: AssistantEtat.reglagesDisponibles && AssistantEtat.effort === modelData
+                        enabled: AssistantEtat.reglagesDisponibles && AssistantEtat.modelePourEffort(modelData) !== null
+                            && !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours
+                        onClic: AssistantEtat.choisirEffort(modelData)
+                    }
                 }
-                AssistantCommande {
-                    height: 30; icone: "volume_off"
-                    texte: Reglages.t("Voix: OFF", "Voice: OFF")
-                    onClic: page.voix()
-                }
-                AssistantCommande {
-                    height: 30; icone: "folder"
-                    texte: AssistantEtat.moteurCourant.name || "ReconForge"
-                    aide: Reglages.t("Moteur, modèle et connexion", "Engine, model and connection")
-                    onClic: page.reglages()
-                }
+            }
+            Texte {
+                x: 12; y: 116; width: parent.width - 24; font.pixelSize: 10; secondaire: true
+                text: AssistantEtat.reglagesEnCours ? Reglages.t("Chargement…", "Loading…")
+                    : (!AssistantEtat.reglagesDisponibles ? Reglages.t("Configurer la connexion avec ⚙", "Configure connection with ⚙")
+                    : (AssistantEtat.reglagesModifies ? Reglages.t("Choix en attente d’Appliquer", "Selection pending Apply")
+                    : Reglages.t("Grisé : absent du catalogue de ce moteur", "Disabled: absent from this engine’s catalog")))
+                elide: Text.ElideRight; textFormat: Text.PlainText
             }
         }
 
@@ -411,7 +443,20 @@ Item {
                     color: Couleurs.texte
                     selectionColor: Couleurs.accent
                     font.family: "Adwaita Sans"; font.pixelSize: 13
-                    onAccepted: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
+                    onAccepted: page.validerSaisie()
+                    Keys.onPressed: event => {
+                        event.accepted = false
+                        if (!page.propositionsVisibles || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) return
+                        if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
+                            var n = page.propositions.length
+                            page.indiceSuggestion = (page.indiceSuggestion + (event.key === Qt.Key_Down ? 1 : -1) + n) % n
+                            page.selectionExplicite = true
+                            listeSuggestions.positionViewAtIndex(page.indiceSuggestion, ListView.Contain)
+                        } else if (event.key === Qt.Key_Tab) page.completer(page.indiceSuggestion)
+                        else if (event.key === Qt.Key_Escape) page.suggestionsMasqueesPour = text
+                        else return
+                        event.accepted = true
+                    }
                     Text {
                         anchors.fill: parent; visible: !entree.text
                         text: page.dansDashboard ? Reglages.t("Écris ta question ou commande (/help, /reset)…", "Ask a question or command (/help, /reset)…")
@@ -422,21 +467,36 @@ Item {
                     }
                 }
             }
-            Row {
-                visible: !AssistantEtat.reglagesOuverts && entree.text.startsWith("/")
+            Rectangle {
+                id: suggestions
+                objectName: "nc-jarvis-completions"
+                visible: page.propositionsVisibles
                 anchors.bottom: parent.top; anchors.bottomMargin: 6
-                spacing: 6
-                Repeater {
-                    model: ["/help", "/reset", "/status", "/briefing", "/courses", "/models", "/effort"]
-                    Rectangle {
-                        required property string modelData
-                        width: chipTxt.implicitWidth + 14; height: 24; radius: 12
-                        color: chipMa.containsMouse ? Couleurs.accent : Couleurs.carte
-                        border.width: 1; border.color: Couleurs.gris3
-                        Text { id: chipTxt; anchors.centerIn: parent; text: parent.modelData; color: chipMa.containsMouse ? Couleurs.surAccent : Couleurs.texte; font.pixelSize: 11; font.weight: Font.DemiBold }
-                        MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: {
-                            AssistantEtat.brouillon = parent.modelData + (parent.modelData === "/reset" || parent.modelData === "/help" || parent.modelData === "/status" || parent.modelData === "/briefing" || parent.modelData === "/models" ? "" : " ")
-                        } }
+                z: 10; width: parent.width; height: Math.min(5, page.propositions.length) * 42 + 12
+                radius: 14; color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
+                ListView {
+                    id: listeSuggestions
+                    anchors.fill: parent; anchors.margins: 6; clip: true
+                    model: page.propositions; currentIndex: page.indiceSuggestion
+                    boundsBehavior: Flickable.StopAtBounds
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+                        width: listeSuggestions.width; height: 42; radius: 8
+                        color: index === page.indiceSuggestion ? Couleurs.gris3 : "transparent"
+                        Column {
+                            x: 10; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 20; spacing: 2
+                            Texte { text: modelData.texte; color: page.cyan; font.weight: Font.DemiBold }
+                            Texte { width: parent.width; text: modelData.description; font.pixelSize: 11; color: Couleurs.texteSec }
+                        }
+                        MouseArea {
+                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onEntered: { page.indiceSuggestion = parent.index; page.selectionExplicite = true }
+                            onClicked: page.completer(parent.index)
+                        }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: modelData.texte + " — " + modelData.description
+                        Accessible.onPressAction: page.completer(index)
                     }
                 }
             }
@@ -452,13 +512,15 @@ Item {
             }
             AssistantCommande {
                 id: envoi
+                objectName: "nc-jarvis-send"
                 anchors.right: parent.right
                 rond: true; width: 46; height: 46
-                icone: AssistantEtat.enCours ? "stop" : "arrow_upward"
-                alerte: AssistantEtat.enCours
+                icone: "arrow_upward"
+                occupe: AssistantEtat.enCours
+                animationsActives: page.animationsActives
                 choisi: !AssistantEtat.enCours && AssistantEtat.brouillon.trim().length > 0
                 aide: AssistantEtat.enCours ? Reglages.t("Traitement en cours", "Request in progress") : Reglages.t("Envoyer", "Send")
-                enabled: !AssistantEtat.enCours && !AssistantEtat.reglagesEnCours && AssistantEtat.brouillon.trim().length > 0
+                enabled: !AssistantEtat.enCours && !AssistantEtat.ecritureReglagesEnCours && AssistantEtat.brouillon.trim().length > 0
                 onClic: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
             }
         }

@@ -646,6 +646,13 @@ if [ "$MODE" != files ] && systemctl --user is-active --quiet noctalia.service 2
   systemctl --user stop noctalia.service   # Noctalia réécrit ses réglages : on l'arrête pendant la copie
 fi
 
+# Ancien cockpit QML orphelin : remplacé par Jarvis.qml, sauvegardé avant retrait.
+rel=.config/quickshell/nc-ile/JarvisDashboard.qml
+if [ -f "$HOME/$rel" ] || [ -L "$HOME/$rel" ]; then
+  backup "$rel"
+  rm -f -- "$HOME/$rel"
+fi
+
 # Ancienne version de ce dépôt (noms « legion ») : fichiers retirés après sauvegarde, réglages renommés
 migrated=0
 OLD_UNITS=(legion-theme-sync.path legion-theme-sync.service legion-carousel-thumbs.path legion-carousel-thumbs.service legion-profile-sync.service)

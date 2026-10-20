@@ -270,7 +270,7 @@ def animations_bouton():
 
 # Noms anglais des sections (la section française reste la clé : comparaisons, fichier, ordre)
 SECTIONS_EN = {
-    "Apparence": "Appearance", "Île": "Island", "Notifications": "Notifications", "Animations": "Animations",
+    "Apparence": "Appearance", "Île": "Island", "Pages de l’île": "Island pages", "Notifications": "Notifications", "Animations": "Animations",
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal",
@@ -294,6 +294,17 @@ _FREQ_AIDE = L("Fréquence de l'écran du portable dans ce profil.", "Refresh ra
 _JAMAIS = L("Jamais", "Never")
 
 REGLAGES = [
+    *[R("ILE_PAGE_" + cle.upper(), "Pages de l’île", L(fr, en), "ouinon", "oui",
+        L("Afficher cette page dans l’île. Les fonctions et les notifications restent disponibles. Toutes désactivées : seule la pilule reste, avec le Spotlight.",
+          "Show this island page. Features and notifications remain available. All disabled: keep only the pill and Spotlight."))
+      for cle, fr, en in (
+          ("musique", "Musique", "Music"), ("claude", "Agents IA", "AI agents"),
+          ("minuteur", "Minuteur", "Timer"), ("charge", "Recharge", "Charging"), ("jeu", "Jeu", "Gaming"),
+          ("centre", "Centre de contrôle", "Control center"), ("assistant", "JARVIS", "JARVIS"),
+          ("notifications", "Notifications", "Notifications"), ("son", "Son", "Sound"),
+          ("reseau", "Réseau", "Network"), ("bluetooth", "Bluetooth", "Bluetooth"),
+          ("systeme", "Système", "System"), ("calendrier", "Calendrier", "Calendar"),
+          ("meteo", "Météo", "Weather"), ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"))],
     # Île
     R("ILE_STYLE", "Île", L("Couleurs", "Colors"), "choix", "terminal",
       L("Couleurs du terminal : l'île suit le fond d'écran, comme kitty et les bordures des fenêtres.",

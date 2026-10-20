@@ -124,6 +124,9 @@ capture, notifications, réglages, verrouillage, extinction. **Appui long (ou cl
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
 se referme dans la pilule.
 
+Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
+Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
+
 Sur Arch, l'île est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
 service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même île est fournie par le plugin Noctalia
 `nc/ile` (un peu moins libre : elle s'ouvre juste sous la barre).

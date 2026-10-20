@@ -17,6 +17,8 @@ Singleton {
         if (style[cle] !== undefined && style[cle] !== "") return style[cle]
         return defaut
     }
+    function pageActive(nom) { return val("ILE_PAGE_" + nom.toUpperCase(), "oui") !== "non" }
+    function filtrerPages(pages) { return pages.filter(nom => pageActive(nom)) }
     readonly property bool en: {
         var l = Quickshell.env("NC_LANGUE") || ""
         if (l !== "fr" && l !== "en") l = val("LANGUE", "auto")

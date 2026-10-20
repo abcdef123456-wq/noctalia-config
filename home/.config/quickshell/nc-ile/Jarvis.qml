@@ -85,7 +85,11 @@ FloatingWindow {
         }
     }
     Shortcut { sequence: "F11"; onActivated: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
-    Shortcut { sequence: "Escape"; onActivated: { if (fen.attente) fen.attente = null; else fen.close() } }
+    Shortcut {
+        sequence: "Escape"
+        enabled: !!fen.attente || fen.page !== "chat" || !pageChargee.item || !pageChargee.item.propositionsVisibles
+        onActivated: { if (fen.attente) fen.attente = null; else fen.close() }
+    }
 
     component Note: Texte { width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText; secondaire: true }
     component Section: Texte { width: parent.width; font.pixelSize: 22; font.weight: Font.Bold; textFormat: Text.PlainText }
@@ -156,6 +160,7 @@ FloatingWindow {
             Note { visible:!JarvisEtat.administration && fen.page!=="chat"; text:Reglages.t("Connecte ton gateway, puis installe l’adaptateur de gestion depuis Déploiement. Le chat fonctionne aussi avec l’API d’origine.", "Connect your gateway and install the management adapter from Deployment. Chat also works with the original API.") }
         }
         Loader {
+            id: pageChargee
             anchors.top:messages.bottom; anchors.topMargin:16; anchors.bottom:parent.bottom; width:parent.width
             sourceComponent: ({accueil:accueil,chat:chat,modules:modules,session:session,memoire:memoire,
                                conversations:conversations,rappels:rappels,configuration:configuration,services:services,deploiement:deploiement})[fen.page]

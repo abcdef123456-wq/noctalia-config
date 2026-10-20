@@ -4,7 +4,11 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from nc_engines import install, executable
 
-engines=install(upstream)
+# Le backend récent installe déjà le gestionnaire : garder le même état et verrou,
+# plutôt que d'envelopper ses quatre moteurs dans un second gestionnaire.
+engines=getattr(upstream.run_agy,'__self__',None)
+if not all(callable(getattr(engines,name,None)) for name in ('snapshot','choose','session')):
+    engines=install(upstream)
 app=upstream.app
 native_health=upstream.health
 for _route in list(app.routes):
