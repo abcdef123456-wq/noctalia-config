@@ -1,9 +1,11 @@
-// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau) : une feuille centrée aux coins arrondis, dans le style de
-// l'île (Couleurs, Texte, Ico, Ligne, pastilles) ; navigation à gauche en lignes façon macOS, contenu à droite.
+// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau), dans le style de la vue des fenêtres et du carrousel : tout
+// l'écran, le fond d'écran flouté et assombri, un cadre discret, les pages en pastilles en haut, le contenu en cartes.
 // Pages : vue d'ensemble, conversation (la même que l'île), modules, modèle et session, mémoire, conversations,
 // rappels, bots et réglages, services, déploiement. F11 : plein écran ; Échap : fermer (ou la confirmation en cours).
 import QtQuick
+import QtQuick.Effects
 import Quickshell
+import Quickshell.Io
 
 FloatingWindow {
     id: fen
@@ -22,13 +24,13 @@ FloatingWindow {
     readonly property var moduleCourant: JarvisEtat.modules.find(m => m.id === moduleId) || ({})
     readonly property bool materielDisponible: !(moduleCourant.hardware || moduleCourant.requires_local_hardware) || JarvisEtat.etat.deploy_mode !== "server"
     readonly property var navigation: [
-        {id:"accueil",nom:Reglages.t("Vue d’ensemble", "Overview"),icone:"space_dashboard"},
-        {id:"chat",nom:"Conversation",icone:"chat"}, {id:"modules",nom:Reglages.t("Modules", "Tools"),icone:"extension"},
-        {id:"session",nom:Reglages.t("Modèle et session", "Model and session"),icone:"neurology"},
+        {id:"accueil",nom:Reglages.t("Accueil", "Home"),icone:"space_dashboard"},
+        {id:"chat",nom:"Chat",icone:"chat"}, {id:"modules",nom:Reglages.t("Modules", "Tools"),icone:"extension"},
+        {id:"session",nom:Reglages.t("Modèle", "Model"),icone:"neurology"},
         {id:"memoire",nom:Reglages.t("Mémoire", "Memory"),icone:"psychology"},
         {id:"conversations",nom:Reglages.t("Conversations", "Conversations"),icone:"history"},
         {id:"rappels",nom:Reglages.t("Rappels", "Reminders"),icone:"notifications_active"},
-        {id:"configuration",nom:Reglages.t("Bots et réglages", "Bots and settings"),icone:"tune"},
+        {id:"configuration",nom:Reglages.t("Bots", "Bots"),icone:"tune"},
         {id:"services",nom:"Services",icone:"dns"},
         {id:"deploiement",nom:Reglages.t("Déploiement", "Deployment"),icone:"cloud_upload"}
     ]
@@ -112,82 +114,103 @@ FloatingWindow {
         WheelHandler { onWheel: e => { parent.contentY = Math.max(0, Math.min(Math.max(0,parent.contentHeight-parent.height),parent.contentY-e.angleDelta.y)); e.accepted=true } }
     }
 
-    // ── Le cadre : une feuille centrée aux coins arrondis, comme une grande page de l'île ──
-    Rectangle { anchors.fill: parent; color: Couleurs.fond }
+    // ── Comme la vue des fenêtres et le carrousel : tout l'écran, le fond d'écran de cet écran flouté et assombri,
+    //    un cadre discret, les pages en pastilles en haut, le contenu en cartes ──
+    readonly property int bord: 8
+    FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true; printErrors: false }
+    readonly property string fondOriginal: {
+        var t = etatNoctalia.text() || "", nom = (fen.screen ? fen.screen.name : "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        var m = (nom ? t.match(new RegExp("\\[wallpaper\\.monitors\\.\"?" + nom + "\"?\\]\\s*\\npath\\s*=\\s*\"([^\"]+)\"")) : null)
+                || t.match(/\[wallpaper\.default\]\s*\npath\s*=\s*"([^"]+)"/)
+        return m ? m[1] : ""
+    }
+    Item {
+    id: tout                                     // tout le cockpit (une capture hors écran en prend l'image)
+    anchors.fill: parent
+    Item {
+        id: ecran
+        anchors.fill: parent
+        layer.enabled: true                          // flou calculé une fois, gardé en image
+        Rectangle { anchors.fill: parent; color: Couleurs.carte }
+        Image {
+            id: fond
+            anchors.fill: parent; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: false
+            sourceSize: Qt.size(Math.max(1, width / 3), Math.max(1, height / 3))
+            source: fen.fondOriginal !== "" ? "file://" + fen.fondOriginal : ""
+        }
+        MultiEffect { anchors.fill: parent; source: fond; blurEnabled: true; blur: 1; blurMax: 40; autoPaddingEnabled: false }
+        Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.45) }
+    }
     Rectangle {
-        id: feuille
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 32, 1040); height: Math.min(parent.height - 32, 800)
-        radius: 28; color: Couleurs.carte; clip: true
-        border.width: 1; border.color: Couleurs.gris3
+        id: cadre
+        x: fen.bord; y: fen.bord; width: parent.width - 2 * fen.bord; height: parent.height - 2 * fen.bord
+        radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
+        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
+    }
 
-        // En-tête : emblème, titre, état ; commandes rondes (actualiser, plein écran, île, fermer)
-        Item {
-            id: tete
-            width: parent.width; height: 66
-            Row {
-                anchors.left: parent.left; anchors.leftMargin: 22; anchors.verticalCenter: parent.verticalCenter; spacing: 12
-                Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 30; agent: "assistant"; tourne: fen.visible && (AssistantEtat.enCours || JarvisEtat.enCours) }
-                Column {
-                    anchors.verticalCenter: parent.verticalCenter; spacing: 1
-                    Texte { text: "JARVIS"; font.pixelSize: 20; font.weight: Font.Bold; font.letterSpacing: 2 }
-                    Texte { text: Reglages.t("Ton assistant, sur tous tes écrans", "Your assistant, across your devices"); secondaire: true; font.pixelSize: 12 }
-                }
-            }
-            Row {
-                anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 8
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter; spacing: 6; rightPadding: 6
-                    Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: JarvisEtat.enCours ? Couleurs.jaune : (JarvisEtat.etat.online ? Couleurs.vert : Couleurs.gris4) }
-                    Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; secondaire: true
-                            text: JarvisEtat.enCours ? Reglages.t("Connexion…", "Connecting…") : (JarvisEtat.etat.online ? Reglages.t("En ligne", "Online") : Reglages.t("Non connecté", "Disconnected")) }
-                }
-                AssistantCommande { rond: true; width: 32; height: 32; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
-                AssistantCommande { rond: true; width: 32; height: 32; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
-                AssistantCommande { rond: true; width: 32; height: 32; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
-                AssistantCommande { rond: true; width: 32; height: 32; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
+    // En haut à gauche : emblème, JARVIS, état ; en haut à droite : commandes rondes
+    Row {
+        id: coinGauche
+        x: cadre.x + 18; y: cadre.y + 16; height: 40; spacing: 10
+        Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 26; agent: "assistant"; tourne: fen.visible && (AssistantEtat.enCours || JarvisEtat.enCours) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: "JARVIS"; font.pixelSize: 18; font.weight: Font.Bold; font.letterSpacing: 2 }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: JarvisEtat.enCours ? Couleurs.jaune : (JarvisEtat.etat.online ? Couleurs.vert : Couleurs.gris4) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; secondaire: true
+                text: JarvisEtat.enCours ? Reglages.t("Connexion…", "Connecting…") : (JarvisEtat.etat.online ? Reglages.t("En ligne", "Online") : Reglages.t("Non connecté", "Disconnected")) }
+    }
+    Row {
+        id: coinDroit
+        anchors.right: cadre.right; anchors.rightMargin: 14; y: cadre.y + 16; height: 40; spacing: 8
+        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
+        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
+        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
+        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
+    }
+    // Les pages, en pastilles comme les bureaux de la vue des fenêtres, sur leur propre ligne sous l'en-tête
+    Flow {
+        id: rangee
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: cadre.y + 16 + 40 + 12
+        width: cadre.width - 40
+        spacing: 8
+        Repeater {
+            model: fen.navigation
+            Rectangle {
+                id: pastille
+                required property var modelData
+                readonly property bool actif: fen.page === modelData.id
+                width: etiq.implicitWidth + 50; height: 40; radius: 20
+                color: actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
+                border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Ico { x: 14; anchors.verticalCenter: parent.verticalCenter; nom: pastille.modelData.icone; taille: 17; color: pastille.actif ? Couleurs.accent : Couleurs.texteSec }
+                Texte { id: etiq; x: 36; anchors.verticalCenter: parent.verticalCenter; text: pastille.modelData.nom; font.pixelSize: 14; font.weight: Font.DemiBold }
+                MouseArea { id: zp; anchors.fill: parent; hoverEnabled: true; onClicked: fen.ouvrir(pastille.modelData.id) }
+                Accessible.role: Accessible.Button
+                Accessible.name: pastille.modelData.nom
             }
         }
-        Rectangle { anchors.top: tete.bottom; width: parent.width; height: 1; color: Couleurs.gris3 }
-
-        // Navigation : lignes façon macOS, comme dans les pages de l'île
+    }
+    // Le contenu : une colonne centrée, lisible même sur un grand écran
+    Item {
+        id: zone
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(cadre.width - 48, 1100)
+        y: rangee.y + rangee.height + 18
+        height: cadre.y + cadre.height - 24 - y
         Column {
-            id: barre
-            anchors.left: parent.left; anchors.leftMargin: 10; anchors.top: tete.bottom; anchors.topMargin: 12
-            width: 252; spacing: 2            // assez large pour « Modèle et session » (Ligne garde 110 points à droite)
-            Repeater {
-                model: fen.navigation
-                Ligne {
-                    required property var modelData
-                    width: barre.width; height: 40
-                    icone: modelData.icone; titre: modelData.nom; actif: fen.page === modelData.id
-                    droite: fen.page === modelData.id ? "chevron_right" : ""
-                    onClic: fen.ouvrir(modelData.id)
-                    Accessible.role: Accessible.Button
-                    Accessible.name: modelData.nom
-                }
-            }
+            id: messages
+            width: parent.width; spacing: 6
+            Note { visible: JarvisEtat.erreur !== ""; text: JarvisEtat.erreur; color: Couleurs.rouge }
+            Note { visible: !JarvisEtat.administration && fen.page !== "chat"; text: Reglages.t("Connecte ton gateway, puis installe l’adaptateur de gestion depuis Déploiement. Le chat fonctionne aussi avec l’API d’origine.", "Connect your gateway and install the management adapter from Deployment. Chat also works with the original API.") }
         }
-        Rectangle { anchors.left: barre.right; anchors.leftMargin: 10; anchors.top: tete.bottom; anchors.bottom: parent.bottom; width: 1; color: Couleurs.gris3 }
-
-        // Contenu
-        Item {
-            id: zone
-            anchors.left: barre.right; anchors.leftMargin: 30; anchors.right: parent.right; anchors.rightMargin: 24
-            anchors.top: tete.bottom; anchors.topMargin: 18; anchors.bottom: parent.bottom; anchors.bottomMargin: 18
-            Column {
-                id: messages
-                width: parent.width; spacing: 6
-                Note { visible: JarvisEtat.erreur !== ""; text: JarvisEtat.erreur; color: Couleurs.rouge }
-                Note { visible: !JarvisEtat.administration && fen.page !== "chat"; text: Reglages.t("Connecte ton gateway, puis installe l’adaptateur de gestion depuis Déploiement. Le chat fonctionne aussi avec l’API d’origine.", "Connect your gateway and install the management adapter from Deployment. Chat also works with the original API.") }
-            }
-            Loader {
-                id: pageChargee
-                anchors.top: messages.bottom; anchors.topMargin: messages.implicitHeight > 0 ? 12 : 0; anchors.bottom: parent.bottom; width: parent.width
-                sourceComponent: ({accueil:accueil,chat:chat,modules:modules,session:session,memoire:memoire,
-                                   conversations:conversations,rappels:rappels,configuration:configuration,services:services,deploiement:deploiement})[fen.page]
-            }
+        Loader {
+            id: pageChargee
+            anchors.top: messages.bottom; anchors.topMargin: messages.implicitHeight > 0 ? 12 : 0; anchors.bottom: parent.bottom; width: parent.width
+            sourceComponent: ({accueil:accueil,chat:chat,modules:modules,session:session,memoire:memoire,
+                               conversations:conversations,rappels:rappels,configuration:configuration,services:services,deploiement:deploiement})[fen.page]
         }
+    }
     }
     Component {
         id: accueil
