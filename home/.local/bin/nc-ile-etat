@@ -11,7 +11,7 @@
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
 media() {
   local m art cache
-  m="$(playerctl metadata --format $'{{status}}\t{{title}}\t{{artist}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{playerName}}' 2>/dev/null | head -1)"
+  m="$(timeout 3 playerctl metadata --format $'{{status}}\t{{title}}\t{{artist}}\t{{mpris:artUrl}}\t{{mpris:length}}\t{{playerName}}' 2>/dev/null | head -1)"
   [ -n "$m" ] || { echo "media=0"; return; }
   IFS=$'\t' read -r st titre artiste art duree joueur <<<"$m"
   case "$art" in
@@ -29,16 +29,16 @@ media() {
   echo "media_artiste=$artiste"
   echo "media_pochette=$art"
   echo "media_duree=${duree:-0}"
-  echo "media_position=$(playerctl position 2>/dev/null | cut -d. -f1)"
+  echo "media_position=$(timeout 3 playerctl position 2>/dev/null | cut -d. -f1)"
   echo "media_joueur=$joueur"
 }
 
 wifi() {
   local connus
-  connus="$(nmcli -t -f NAME,TYPE con show 2>/dev/null | sed -n 's/:802-11-wireless$//p' | sed 's/\\:/:/g')"
+  connus="$(timeout 3 nmcli -t -f NAME,TYPE con show 2>/dev/null | sed -n 's/:802-11-wireless$//p' | sed 's/\\:/:/g')"
   # Un même nom peut venir de plusieurs bornes (2,4 et 5 GHz) : une seule ligne par nom, active si l'une l'est,
   # avec le meilleur signal.
-  nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | sed 's/\\:/\x1f/g' |
+  timeout 3 nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | sed 's/\\:/\x1f/g' |
     awk -F: -v connus="$connus" 'BEGIN { n = split(connus, c, "\n"); for (i = 1; i <= n; i++) k[c[i]] = 1 }
       { gsub("\x1f", ":", $2); if ($2 == "") next
         if (!($2 in sig)) ordre[++m] = $2
@@ -52,8 +52,8 @@ wifi() {
 bt() {
   # Tous les appareils connus (associés ou vus pendant une recherche) : bt=adresse, nom, connecté, icône, associé
   local mac nom info
-  bluetoothctl devices 2>/dev/null | while read -r _ mac nom; do
-    info="$(bluetoothctl info "$mac" 2>/dev/null)"
+  timeout 3 bluetoothctl devices 2>/dev/null | while read -r _ mac nom; do
+    info="$(timeout 3 bluetoothctl info "$mac" 2>/dev/null)"
     printf 'bt=%s\t%s\t%s\t%s\t%s\n' "$mac" "$nom" \
       "$(grep -q 'Connected: yes' <<<"$info" && echo 1 || echo 0)" "$(sed -n 's/^\s*Icon: //p' <<<"$info" | head -1)" \
       "$(grep -q 'Paired: yes' <<<"$info" && echo 1 || echo 0)"
@@ -61,7 +61,7 @@ bt() {
 }
 
 son() {
-  wpctl status 2>/dev/null | awk '
+  timeout 3 wpctl status 2>/dev/null | awk '
     /^Audio/ { audio = 1 } /^Video/ { audio = 0 }
     audio && /Sinks:/ { s = "sortie"; next } audio && /Sources:/ { s = "entree"; next }
     audio && /(Filters|Streams|Devices):/ { s = ""; next }
@@ -109,11 +109,11 @@ jeu() {
     case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|zenpower|cpu_thermal) temp="$(cat "$h/temp1_input" 2>/dev/null)"; break ;; esac
   done
   [ -n "$temp" ] && echo "cpu_temp=$((temp / 1000))"
-  # NVIDIA : seulement si la carte est déjà réveillée (nvidia-smi la sortirait de veille)
+  # NVIDIA : seulement si la carte est déjà réveillée (nvidia-smi la sortirait de veille) ; 3 s au plus pour chaque appel
   for d in /sys/bus/pci/drivers/nvidia/0000:*; do
     [ -e "$d" ] || continue
     if [ "$(cat "$d/power/runtime_status" 2>/dev/null)" = suspended ]; then echo "gpu=veille"; return; fi
-    v="$(nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1)"
+    v="$(timeout 3 nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1)"
     [ -n "$v" ] && echo "$v" | awk -F', ' '{ sub(/^NVIDIA (GeForce )?/, "", $1); printf "gpu_nom=%s\ngpu=%d\ngpu_temp=%d\ngpu_watts=%d\n", $1, $2, $3, $4 }'
     return
   done
@@ -137,13 +137,13 @@ case "${1:-}" in
   son|sound|audio) son; exit 0 ;;
 esac
 
-v="$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"
+v="$(timeout 3 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)"
 echo "volume=$(awk '{ printf "%d", $2 * 100 + 0.5 }' <<<"$v")"
 case "$v" in *MUTED*) echo "muet=1" ;; *) echo "muet=0" ;; esac
-case "$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)" in *MUTED*) echo "micro_muet=1" ;; *) echo "micro_muet=0" ;; esac
+case "$(timeout 3 wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)" in *MUTED*) echo "micro_muet=1" ;; *) echo "micro_muet=0" ;; esac
 echo "luminosite=$("$HOME/.local/bin/nc-brightness" get 2>/dev/null)"
 echo "wifi=$(noctalia msg wifi-status 2>/dev/null)"
-echo "reseau=$(nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep -v -e ':loopback' -e ':bridge' | head -1 | cut -d: -f1)"
+echo "reseau=$(timeout 3 nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep -v -e ':loopback' -e ':bridge' | head -1 | cut -d: -f1)"
 echo "bluetooth=$(noctalia msg bluetooth-status 2>/dev/null)"
 echo "dnd=$(noctalia msg notification-dnd-status 2>/dev/null)"
 echo "profil=$(gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \
