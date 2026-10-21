@@ -24,10 +24,14 @@ hl.config({
 
         follow_mouse = nc.reglage("FOCUS_SOURIS", true) and 1 or 0,
         sensitivity  = math.max(-1, math.min(1, nc.reglage("SOURIS_VITESSE", 0) / 10)),   -- nc-reglages : -10 à 10
+        accel_profile = (nc.reglage("SOURIS_ACCELERATION", "adaptative") == "plate") and "flat" or "adaptive",
+        scroll_factor = math.max(0.1, nc.reglage("SOURIS_DEFILEMENT", 100) / 100),       -- molette
+        numlock_by_default = nc.reglage("CLAVIER_VERR_NUM", false),
 
         touchpad = {
             natural_scroll       = nc.reglage("DEFILEMENT_NATUREL", true),
             tap_to_click         = nc.reglage("TAPOTER_CLIC", true),
+            scroll_factor        = math.max(0.1, nc.reglage("PAVE_DEFILEMENT", 100) / 100),
             drag_lock            = false,
             disable_while_typing = true,
             clickfinger_behavior = true,

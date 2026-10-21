@@ -5,7 +5,9 @@
   nc-reglages raccourcis          directement les raccourcis clavier
   nc-reglages assistant           configurer la connexion de l'assistant distant (URL et clé)
   nc-reglages assistant verifier  tester la connexion distante (réseau, clé, TLS, runner)
+  nc-reglages fenetre             la fenêtre graphique des réglages (île ; aussi Super + Alt + , et l'appli Réglages)
   nc-reglages liste               tous les réglages et leur valeur
+  nc-reglages catalogue           les réglages en JSON (ce que lit la fenêtre graphique)
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
@@ -512,6 +514,23 @@ REGLAGES = [
       L("La fenêtre active ressort.", "The active window stands out."), groupe="hypr"),
     R("FENETRES_OPACITE_INACTIVE", "Fenêtres", L("Opacité des fenêtres inactives", "Inactive window opacity"), "entier", "100",
       mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
+    R("FENETRES_ASSOMBRIR_FORCE", "Fenêtres", L("Force de l'assombrissement", "Dimming strength"), "entier", "10",
+      L("Quand « Assombrir les fenêtres inactives » est activé.", "When “Dim inactive windows” is on."), mini=0, maxi=60, pas=5, unite="%", groupe="hypr"),
+    R("FENETRES_FLOU_FORCE", "Fenêtres", L("Force du flou", "Blur strength"), "choix", "normal",
+      L("Derrière les fenêtres transparentes, la barre et les panneaux. Fort : plus doux, mais plus de travail pour la carte graphique.",
+        "Behind transparent windows, the bar and panels. Strong: softer, but more work for the graphics card."),
+      [("leger", L("Léger", "Light")), ("normal", L("Normal", "Normal")), ("fort", L("Fort", "Strong"))], groupe="hypr"),
+    R("FENETRES_AIMANT", "Fenêtres", L("Aimanter les fenêtres flottantes", "Snap floating windows"), "ouinon", "oui",
+      L("En les déplaçant, elles s'alignent sur les bords de l'écran et sur les autres fenêtres.",
+        "While dragging, they align with the screen edges and the other windows."), groupe="hypr"),
+    R("FENETRES_BORDURE_REDIM", "Fenêtres", L("Redimensionner en tirant la bordure", "Resize by dragging the border"), "ouinon", "oui",
+      L("Non : seulement avec Super + clic droit (ou le raccourci).", "No: only with Super + right click (or the shortcut)."), groupe="hypr"),
+    R("FENETRES_FOCUS_DEMANDE", "Fenêtres", L("Une appli qui réclame l'attention passe devant", "An app asking for attention comes to front"), "ouinon", "oui",
+      L("Non : elle clignote dans la barre, tu décides.", "No: it blinks in the bar, you decide."), groupe="hypr"),
+    R("ECRAN_VRR", "Fenêtres", L("Fréquence variable de l'écran (FreeSync, G-Sync)", "Variable refresh rate (FreeSync, G-Sync)"), "choix", "auto",
+      L("Automatique : seulement pour un jeu ou une vidéo en plein écran. Toujours : aussi sur le bureau (peut scintiller).",
+        "Automatic: only for a fullscreen game or video. Always: on the desktop too (may flicker)."),
+      [("auto", L("Automatique", "Automatic")), ("plein-ecran", L("En plein écran", "In fullscreen")), ("oui", L("Toujours", "Always")), ("non", L("Jamais", "Never"))], groupe="hypr"),
     # Fonds d'écran
     R("FONDS_ROTATION", "Fonds d'écran", L("Changer de fond automatiquement", "Change wallpaper automatically"),
       "ouinon", "oui", groupe="noctalia"),
@@ -646,6 +665,19 @@ REGLAGES = [
       L("Certaines applis ne le prennent qu'à leur prochaine ouverture.", "Some apps only pick it up the next time they open."),
       [("24", L("Normale (24)", "Normal (24)")), ("32", L("Grande (32)", "Large (32)")),
        ("40", L("Très grande (40)", "Very large (40)")), ("48", L("Énorme (48)", "Huge (48)"))], groupe="curseur"),
+    R("SOURIS_ACCELERATION", "Clavier et souris", L("Accélération du pointeur", "Pointer acceleration"), "choix", "adaptative",
+      L("Adaptative : le pointeur va plus loin quand la main va vite. Plate : un mouvement, une distance (jeux, précision).",
+        "Adaptive: the pointer goes further when the hand moves fast. Flat: one movement, one distance (games, precision)."),
+      [("adaptative", L("Adaptative", "Adaptive")), ("plate", L("Plate", "Flat"))], groupe="hypr"),
+    R("SOURIS_DEFILEMENT", "Clavier et souris", L("Vitesse de la molette", "Mouse wheel speed"), "entier", "100",
+      "", mini=25, maxi=300, pas=25, unite="%", groupe="hypr"),
+    R("PAVE_DEFILEMENT", "Clavier et souris", L("Vitesse du défilement au pavé tactile", "Touchpad scroll speed"), "entier", "100",
+      "", mini=25, maxi=300, pas=25, unite="%", groupe="hypr"),
+    R("CLAVIER_VERR_NUM", "Clavier et souris", L("Verrouillage numérique à l'ouverture", "Num Lock at login"), "ouinon", "non",
+      L("Le pavé numérique tape des chiffres dès l'ouverture de session.", "The numeric keypad types digits as soon as you log in."), groupe="hypr"),
+    R("CURSEUR_CACHER", "Clavier et souris", L("Cacher le pointeur immobile après", "Hide the idle pointer after"), "entier", "8",
+      L("Il réapparaît au premier mouvement. Il se cache aussi quand tu tapes.", "It comes back at the first move. It also hides while you type."),
+      mini=0, maxi=60, pas=1, unite="s", zero=_JAMAIS, groupe="hypr"),
     # Veille
     R("VEILLE_VERROU", "Veille", L("Verrouillage automatique après", "Auto-lock after"), "entier", "5",
       L("L'écran s'assombrit un peu avant et s'éteint 30 s après.", "The screen dims a little before and turns off 30 s after."),
@@ -655,6 +687,9 @@ REGLAGES = [
     R("VEILLE_SECTEUR", "Veille", L("Mise en veille sur secteur après", "Sleep when plugged in after"), "entier", "0",
       L("PC branché (ou PC de bureau).", "PC plugged in (or desktop PC)."), mini=0, maxi=240, pas=5, unite="min",
       zero=_JAMAIS, groupe="veille"),
+    R("VEILLE_ECRAN", "Veille", L("Écran éteint après", "Screen off after"), "entier", "0",
+      L("0 : juste après le verrouillage.", "0: right after the lock."), mini=0, maxi=120, pas=1, unite="min",
+      zero=L("Avec le verrouillage", "With the lock"), groupe="veille"),
     R("COUVERCLE", "Veille", L("Couvercle fermé", "Lid closed"), "choix", "veille",
       L("Écran éteint : le PC continue de tourner (téléchargements, musique…), sans veille tant que le couvercle est fermé. "
         "Attention à la chaleur dans un sac.",
@@ -698,6 +733,11 @@ REGLAGES = [
       [("dessin", L("Dessiné", "Drawn")), ("simple", L("Texte", "Text"))]),
     R("TERMINAL_ACCUEIL", "Terminal", L("Accueil à l'ouverture", "Welcome screen on opening"), "ouinon", "oui",
       L("Logo et infos du PC à chaque nouveau terminal.", "Logo and PC info in every new terminal.")),
+    R("TERMINAL_HISTORIQUE", "Terminal", L("Lignes d'historique", "Scrollback lines"), "entier", "10000",
+      L("Ce qu'on peut remonter avec la molette ou Maj + Page haut.", "How far you can scroll back with the wheel or Shift + Page Up."),
+      mini=1000, maxi=100000, pas=1000, groupe="terminal"),
+    R("TERMINAL_CLOCHE", "Terminal", L("Cloche sonore", "Audible bell"), "ouinon", "non",
+      L("Le bip des programmes (sinon un bref clignotement).", "Programs' beep (otherwise a brief flash)."), groupe="terminal"),
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : nc-assistant configurer.",
@@ -707,6 +747,12 @@ REGLAGES = [
         "bot JARVIS (nc-alertes, toutes les 5 min). Rien sans connexion configurée.",
         "Low battery (the island's threshold), system update finished, failed service: a Telegram message through the "
         "JARVIS bot (nc-alertes, every 5 min). Nothing without a configured connection.")),
+    R("ALERTES_BATTERIE", "Agents IA (coucou)", L("Alerte Telegram : batterie faible", "Telegram alert: low battery"), "ouinon", "oui",
+      L("Au passage sous le seuil « Alerte de batterie faible ».", "When dropping below the “Low battery alert” threshold.")),
+    R("ALERTES_SERVICES", "Agents IA (coucou)", L("Alerte Telegram : service en échec", "Telegram alert: failed service"), "ouinon", "oui",
+      L("Un service de ta session qui s'arrête en erreur.", "A session service that stops with an error.")),
+    R("ALERTES_MAJ", "Agents IA (coucou)", L("Alerte Telegram : fin de mise à jour", "Telegram alert: update finished"), "ouinon", "oui",
+      L("Quand nc-paquets a fini de mettre le système à jour.", "When nc-packages has finished updating the system.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
     R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
       "ouinon", "oui",
@@ -993,7 +1039,8 @@ def regler(vals, cle, v):
 # ── Application ─────────────────────────────────────────────────────────────────────────────────────────────────
 def appliquer_veille(vals):
     verrou, susp, secteur = vals.get("VEILLE_VERROU"), vals.get("VEILLE_SUSPENSION"), vals.get("VEILLE_SECTEUR")
-    if verrou is None and susp is None and secteur is None:
+    ecran = int(vals.get("VEILLE_ECRAN") or 0)
+    if verrou is None and susp is None and secteur is None and not ecran:
         if os.path.exists(VEILLE_UNITE):
             for f in (VEILLE_UNITE, VEILLE_OUT):
                 try:
@@ -1016,7 +1063,7 @@ def appliquer_veille(vals):
         if "nc-brightness dim" in b:
             t = max(30, verrou * 60 - 150) if verrou else 0
         elif "dpms" in b:
-            t = verrou * 60 + 30 if verrou else 0
+            t = ecran * 60 if ecran else (verrou * 60 + 30 if verrou else 0)
         elif "lock-session" in b:
             t = verrou * 60
         elif "suspend" in b:
@@ -1058,6 +1105,10 @@ def appliquer_terminal(vals):
         c.append("cursor_trail 0")
     if "TERMINAL_MARGE" in vals:
         c.append(f"window_padding_width {vals['TERMINAL_MARGE']}")
+    if "TERMINAL_HISTORIQUE" in vals:
+        c.append(f"scrollback_lines {vals['TERMINAL_HISTORIQUE']}")
+    if vals.get("TERMINAL_CLOCHE") == "oui":
+        c.append("enable_audio_bell yes")
     texte = "# Écrit par nc-reglages. Ne pas éditer.\n" + "\n".join(c) + "\n" if c else ""
     ancien = open(KITTY_OUT, encoding="utf-8").read() if os.path.exists(KITTY_OUT) else ""
     if texte == ancien:
@@ -2148,6 +2199,18 @@ def tui(section=0):
 
 
 # ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
+def catalogue(vals):
+    """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
+    res = []
+    for r in VISIBLES:
+        v = valeur(vals, r.cle)
+        res.append(dict(cle=r.cle, section=r.section, sectionNom=nom_section(r.section), nom=r.nom, genre=r.genre,
+                        defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
+                        mini=r.mini, maxi=r.maxi, pas=r.pas, unite=r.unite, zero=r.zero, valeur=v, affiche=r.montrer(v),
+                        modifie=r.cle in vals, groupe=r.groupe))
+    return res
+
+
 def cli(a):
     vals = lire()
     if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
@@ -2167,6 +2230,12 @@ def cli(a):
                     print(("    • " if k == 0 else "      ") + l)
             print()
         return
+    if a[0] in ("catalogue", "catalog"):
+        # Tout ce que la fenêtre graphique des réglages (île, Parametres.qml) a besoin de savoir, en JSON
+        print(json.dumps(catalogue(vals), ensure_ascii=False))
+        return
+    if a[0] in ("fenetre", "fenêtre", "window", "gui"):
+        sys.exit(subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True).returncode)
     if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
         for r in VISIBLES:

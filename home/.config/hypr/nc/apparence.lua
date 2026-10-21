@@ -7,7 +7,7 @@ hl.config({
         gaps_in                 = nc.reglage("FENETRES_ESPACE", 4),
         gaps_out                = nc.reglage("FENETRES_MARGE", 10),
         border_size             = nc.reglage("FENETRES_BORDURE", 2),
-        resize_on_border        = true,
+        resize_on_border        = nc.reglage("FENETRES_BORDURE_REDIM", true),
         extend_border_grab_area = 20,
         allow_tearing           = false,
         -- Disposition des fenêtres (nc-reglages) : dwindle (spirale) ou master (une grande + une pile)
@@ -15,7 +15,7 @@ hl.config({
 
         -- Aimantation des fenêtres flottantes aux bords de l'écran et aux autres fenêtres
         snap = {
-            enabled      = true,
+            enabled      = nc.reglage("FENETRES_AIMANT", true),
             window_gap   = 14,
             monitor_gap  = 14,
             respect_gaps = true,
@@ -32,7 +32,7 @@ hl.config({
 
         -- Fenêtres inactives légèrement assombries : la fenêtre active ressort
         dim_inactive = true,
-        dim_strength = 0.10,
+        dim_strength = math.max(0, math.min(0.9, nc.reglage("FENETRES_ASSOMBRIR_FORCE", 10) / 100)),   -- nc-reglages
 
         shadow = {
             enabled        = true,
@@ -46,8 +46,9 @@ hl.config({
         -- Valeurs modérées : un processeur graphique intégré doit tenir un grand écran à haute fréquence
         blur = {
             enabled           = true,
-            size              = 3,
-            passes            = 2,
+            -- Force du flou (nc-reglages, FENETRES_FLOU_FORCE) : léger, normal ou fort
+            size              = ({ leger = 2, normal = 3, fort = 6 })[nc.reglage("FENETRES_FLOU_FORCE", "normal")] or 3,
+            passes            = ({ leger = 1, normal = 2, fort = 3 })[nc.reglage("FENETRES_FLOU_FORCE", "normal")] or 2,
             noise             = 0.015,
             contrast          = 0.9,
             brightness        = 1.0,
@@ -94,12 +95,12 @@ hl.config({
         disable_splash_rendering = true,
         background_color         = "rgb(0b0d12)",
         animate_manual_resizes   = false,
-        focus_on_activate        = true,
+        focus_on_activate        = nc.reglage("FENETRES_FOCUS_DEMANDE", true),
         key_press_enables_dpms   = true,
         mouse_move_enables_dpms  = true,
         -- Fréquence variable (FreeSync / G-Sync) seulement pour un jeu ou une vidéo en plein écran : plus fluide,
         -- sans scintillement sur le bureau
-        vrr                      = 3,
+        vrr                      = ({ auto = 3, ["plein-ecran"] = 2, oui = 1, non = 0 })[nc.reglage("ECRAN_VRR", "auto")] or 3,   -- nc-reglages
         -- Si Noctalia redémarre pendant que l'écran est verrouillé, elle reprend le verrouillage
         -- (au lieu de l'écran rouge « lockscreen app died »)
         allow_session_lock_restore = true,
@@ -121,7 +122,7 @@ hl.config({
     },
 
     cursor = {
-        inactive_timeout  = 8,
+        inactive_timeout  = nc.reglage("CURSEUR_CACHER", 8),   -- nc-reglages (0 : jamais caché)
         hide_on_key_press = true,
     },
 

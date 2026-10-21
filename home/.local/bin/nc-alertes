@@ -110,7 +110,7 @@ def verifier(m):
     seuil = reglages().get("BATTERIE_ALERTE", "20")
     seuil = int(seuil) if seuil.isdigit() else 20
     b = batterie()
-    if b and seuil > 0:
+    if b and seuil > 0 and reglages().get("ALERTES_BATTERIE", "oui") != "non":
         pct, decharge = b
         if decharge and pct <= seuil and not etat.get("batterie_sous"):
             if envoyer(m, T(f"🔋 Batterie à {pct} % (seuil {seuil} %) : branche le PC.", f"🔋 Battery at {pct}% (threshold {seuil}%): plug in the PC.")):
@@ -118,7 +118,7 @@ def verifier(m):
         elif not decharge or pct > seuil + 5:
             etat["batterie_sous"] = False      # rebranché ou remonté : le prochain passage sous le seuil alerte de nouveau
     echecs = services_en_echec()
-    nouveaux = [u for u in echecs if u not in etat.get("echecs", [])]
+    nouveaux = [u for u in echecs if u not in etat.get("echecs", [])] if reglages().get("ALERTES_SERVICES", "oui") != "non" else []
     if nouveaux:
         texte = T("⚠️ Service en échec sur le PC : ", "⚠️ Failed service on the PC: ") + ", ".join(nouveaux) + \
             T(" (journalctl --user -u …).", " (journalctl --user -u …).")
@@ -136,6 +136,8 @@ def main():
         if action == "verifier":
             verifier(m)
         elif action == "maj":
+            if reglages().get("ALERTES_MAJ", "oui") == "non":
+                return
             n = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].isdigit() else "0"
             if n == "0":
                 texte = T("✅ Mise à jour du système terminée : système à jour.", "✅ System update finished: system up to date.")
