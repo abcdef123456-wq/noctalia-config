@@ -50,6 +50,8 @@ Item {
     property var paquets: []
     property string paquetsPour: ""
     readonly property string modePaquets: Reglages.val("SPOTLIGHT_PAQUETS", "auto")
+    // Nombre de lignes de résultats (nc-reglages : SPOTLIGHT_RESULTATS, 3 à 10)
+    readonly property int nbResultats: Math.max(3, Math.min(10, parseInt(Reglages.val("SPOTLIGHT_RESULTATS", "6")) || 6))
     property int sel: 0
     readonly property string q: champ.text.trim()
 
@@ -202,10 +204,20 @@ Item {
     function installer(p) {
         Quickshell.execDetached([Etat.bin + "nc-logiciels", "installer", p.source, p.nom].concat(p.source === "flatpak" ? [p.depot] : []))
     }
+    // Icône d'un logiciel à installer : celle du catalogue de la distribution ou de Flatpak, sinon du thème d'icônes ;
+    // aucune en Économie (réglage ECO_IMAGES)
+    function iconePaquet(p) {
+        if (Reglages.imagesLegeres) return ""
+        if (p.icone) return "file://" + p.icone
+        var n = p.noms_icone || []
+        for (var i = 0; i < n.length; i++) { var c = Quickshell.iconPath(n[i], true); if (c) return c }
+        return ""
+    }
     function itemPaquet(p, s) {
         var origine = p.source === "aur" ? "AUR" : p.source === "flatpak" ? "Flatpak" : Reglages.t("Dépôt ", "Repo ") + p.depot
         var desc = (p.description || "").length > 70 ? p.description.slice(0, 68) + "…" : (p.description || "")
         return { titre: p.titre || p.nom, sous: origine + (desc ? " · " + desc : ""), glyphe: p.installe ? "check_circle" : "download", s: s,
+                 icone: iconePaquet(p),
                  aide: p.installe ? Reglages.t("déjà installé", "already installed") : Reglages.t("↵ installer", "↵ install"),
                  garder: p.installe, f: p.installe ? (() => {}) : (() => r.installer(p)) }
     }
@@ -348,7 +360,7 @@ Item {
                                               sous: Reglages.t("Dépôts, AUR et Flatpak", "Repos, AUR and Flatpak"), glyphe: "download", garder: true, f: () => {} }]
             else if (paquetsPour !== tp) resultats = [{ titre: tp, sous: Reglages.t("Recherche dans les logiciels…", "Searching apps…"), glyphe: "hourglass_top", garder: true, f: () => {} }]
             else if (!paquets.length) resultats = [{ titre: Reglages.t("Aucun logiciel ne correspond", "No app matches"), sous: tp, glyphe: "search_off", garder: true, f: () => {} }]
-            else resultats = paquets.slice(0, 7).map(p => itemPaquet(p, p.score))
+            else resultats = paquets.slice(0, nbResultats + 1).map(p => itemPaquet(p, p.score))
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
@@ -424,18 +436,18 @@ Item {
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
         }
         out.sort((x, y) => y.s - x.s)
-        out = out.slice(0, 6)
+        out = out.slice(0, nbResultats)
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
         if (modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
             var noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
             var aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
-            if (aInstaller.length) out = out.slice(0, 6 - aInstaller.length).concat(aInstaller.map(p => itemPaquet(p, 0)))
+            if (aInstaller.length) out = out.slice(0, nbResultats - aInstaller.length).concat(aInstaller.map(p => itemPaquet(p, 0)))
         }
         // Saisie qui commence par un programme (« htop », « ping google.fr ») : la lancer dans le terminal
         var prog = q.split(/\s+/)[0]
         if (execs[prog] && !q.startsWith("/")) {
             let commande = q
-            out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? 5 : 4)
+            out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? nbResultats - 1 : nbResultats - 2)
             var lancerItem = { titre: commande, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
             // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)

@@ -11,8 +11,12 @@
         l'installation elle-même, dans ce terminal
 
 SOURCE : depot, aur ou flatpak. Rien n'est installé sans le terminal : il montre la commande et attend ta confirmation.
+Icônes : celles des catalogues AppStream de la distribution quand ils sont là (XML d'Arch, Fedora, openSUSE ; YAML de
+Debian et Ubuntu : index gardé dans ~/.cache/nc/logiciels-icones.json, refait quand un catalogue change), puis celles
+de Flatpak ; sinon des noms à chercher dans le thème d'icônes (champ « noms_icone », pour le Spotlight).
 Les noms sont vérifiés (lettres, chiffres, @ . _ + -) et passés en arguments, jamais à un shell.
 """
+import gzip
 import json
 import math
 import os
@@ -70,6 +74,137 @@ def assistant_aur():
 def mots(terme):
     """Les mots de la recherche, réduits aux caractères d'un nom de paquet (pas d'expression régulière surprise)."""
     return [m for m in re.split(r"[^A-Za-z0-9@._+-]+", terme.lower()) if m][:4]
+
+
+# ── Icônes ─────────────────────────────────────────────────────────────────────────────────────────────────────
+CATALOGUES = [Path(d) for d in (os.environ.get("NC_SWCATALOG_DIRS") or
+              "/usr/share/swcatalog:/var/lib/swcatalog:/var/cache/swcatalog:/usr/share/app-info:/var/lib/app-info:/var/cache/app-info").split(":") if d]
+FLATPAK_APPSTREAM = [Path(d) for d in (os.environ.get("NC_FLATPAK_APPSTREAM") or
+                     "/var/lib/flatpak/appstream:" + str(HOME / ".local/share/flatpak/appstream")).split(":") if d]
+CACHE_ICONES = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc/logiciels-icones.json"
+SUFFIXES = re.compile(r"-(bin|git|appimage|nightly|beta|stable|wayland|electron|desktop|latest|official|stable-bin)$")
+
+
+def fichiers_catalogue():
+    res = []
+    for d in CATALOGUES:
+        for sous in ("xml", "xmls", "yaml"):
+            if (d / sous).is_dir():
+                res += sorted(f for f in (d / sous).iterdir() if f.is_file() and re.search(r"\.(xml|yml|yaml)(\.gz)?$", f.name))
+    return res
+
+
+def lire_texte(f):
+    with (gzip.open(f, "rt", encoding="utf-8", errors="replace") if f.name.endswith(".gz") else open(f, encoding="utf-8", errors="replace")) as h:
+        return h.read()
+
+
+def chemin_icone(racine, origine, nom):
+    """Icône « en cache » d'un catalogue : icons/<origine>/<taille>/<nom>, la plus proche de 64 px."""
+    for taille in ("64x64", "128x128", "48x48", "64x64@2"):
+        f = racine / "icons" / origine / taille / nom
+        if f.is_file():
+            return str(f)
+    return ""
+
+
+def icone_yaml(doc):
+    """Dans un composant DEP-11 (Debian, Ubuntu) : le premier nom de fichier sous « Icon: » → « cached: »."""
+    lignes = doc.splitlines()
+    for i, l in enumerate(lignes):
+        if l.startswith("Icon:"):
+            bloc = []
+            for m in lignes[i + 1:]:
+                if m and not m[0].isspace():
+                    break
+                bloc.append(m)
+            cache = "\n".join(bloc).split("cached:", 1)
+            n = re.search(r"name:\s*(\S+)", cache[1]) if len(cache) == 2 else None
+            return n[1] if n else ""
+    return ""
+
+
+def construire_index():
+    """{paquet: chemin de l'icône} depuis les catalogues AppStream (XML ou YAML DEP-11), sans bibliothèque externe."""
+    index = {}
+    for f in fichiers_catalogue():
+        racine = f.parent.parent
+        try:
+            texte = lire_texte(f)
+        except (OSError, EOFError, ValueError):
+            continue
+        if f.name.endswith((".xml", ".xml.gz")):
+            origine = (re.search(r'<components[^>]*\sorigin="([^"]+)"', texte) or [None, ""])[1]
+            for c in re.finditer(r"<component\b.*?</component>", texte, re.S):
+                bloc = c.group(0)
+                paquet = re.search(r"<pkgname>([^<]+)</pkgname>", bloc)
+                icone = re.search(r'<icon type="cached"[^>]*>([^<]+)</icon>', bloc)
+                if paquet and icone and paquet[1] not in index:
+                    chemin = chemin_icone(racine, origine, icone[1].strip())
+                    if chemin:
+                        index[paquet[1].strip()] = chemin
+        else:
+            origine = (re.search(r"^Origin:\s*(\S+)", texte, re.M) or [None, ""])[1]
+            for doc in texte.split("\n---"):
+                paquet = re.search(r"^Package:\s*(\S+)", doc, re.M)
+                nom = icone_yaml(doc)
+                if paquet and nom and paquet[1] not in index:
+                    chemin = chemin_icone(racine, origine, nom)
+                    if chemin:
+                        index[paquet[1]] = chemin
+    return index
+
+
+def index_icones():
+    """L'index, depuis le cache s'il correspond encore aux catalogues (chemins et dates), sinon refait."""
+    signature = [[str(f), f.stat().st_mtime_ns] for f in fichiers_catalogue()]
+    if not signature:
+        return {}
+    try:
+        c = json.loads(CACHE_ICONES.read_text(encoding="utf-8"))
+        if c.get("signature") == signature:
+            return c.get("index", {})
+    except (OSError, ValueError):
+        pass
+    index = construire_index()
+    try:
+        CACHE_ICONES.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_ICONES.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"signature": signature, "index": index}), encoding="utf-8")
+        tmp.replace(CACHE_ICONES)
+    except OSError:
+        pass
+    return index
+
+
+def icone_flatpak(appid):
+    for d in FLATPAK_APPSTREAM:
+        if not d.is_dir():
+            continue
+        for f in d.glob(f"*/*/active/icons/*/{appid}.png"):
+            if "128x128" in str(f) or "64x64" in str(f):
+                return str(f)
+    return ""
+
+
+def noms_icone(x):
+    """Noms à chercher dans le thème d'icônes (Papirus en a beaucoup, même d'applis non installées)."""
+    n = x["nom"].lower()
+    noms = [x["nom"]] if x["source"] == "flatpak" else []
+    noms += [n, SUFFIXES.sub("", n)]
+    if x.get("titre"):
+        noms.append(x["titre"].lower().replace(" ", "-"))
+    if "-" in n and len(n.split("-")[0]) > 2:
+        noms.append(n.split("-")[0])
+    return list(dict.fromkeys(noms))
+
+
+def ajouter_icones(res):
+    index = index_icones() if any(x["source"] == "depot" for x in res) else {}
+    for x in res:
+        x["icone"] = index.get(x["nom"], "") if x["source"] == "depot" else icone_flatpak(x["nom"]) if x["source"] == "flatpak" else ""
+        x["noms_icone"] = noms_icone(x)
+    return res
 
 
 # ── Sources ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -201,7 +336,7 @@ def chercher(terme, rapide=False, maximum=30):
         installes = [x["nom"] + "-" for x in res if x["installe"]]
         res = [x for x in res if x["installe"] or not any(x["nom"].startswith(i) for i in installes)]
     res.sort(key=lambda x: -x["score"])
-    return res[:maximum]
+    return ajouter_icones(res[:maximum])
 
 
 # ── Installation ───────────────────────────────────────────────────────────────────────────────────────────────
