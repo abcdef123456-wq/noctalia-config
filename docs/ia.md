@@ -60,6 +60,18 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Terminal** : **Alt + I** transforme la description tapée (« trouver les fichiers de plus de 1 Go ») en commande,
   laissée dans l'invite pour être relue — jamais lancée toute seule. `ia question` répond ; `journalctl -b -p err | ia
   résume` travaille sur la sortie d'une commande.
+- **Centre de contrôle** : la pastille **IA** coupe l'IA partout d'un clic, ou la rallume dans le mode d'avant
+  (automatique ou choisie) ; dessous, celle qui répond.
+- **Presse-papiers de l'île** : le bouton ✦ d'une entrée ouvre le Spotlight sur `! ` avec ce texte-là (résumer,
+  traduire…), ou fait expliquer une image.
+- **Notifications** : « Résumer » (à partir de deux) : ce qui demande une action d'abord, le reste par appli ; envoyé
+  seulement quand tu cliques.
+- **Captures** : la notification d'une capture a un bouton « Demander à l'IA ».
+- **Fichiers** : clic droit → Scripts → IA (Nautilus), le sous-menu IA de Dolphin ou les actions de Nemo : résumer,
+  expliquer, traduire, corriger un texte, du code, un PDF (avec pdftotext) ou une image ; `nc-ia fichier CHEMIN`.
+- **Neovim** : `Espace i i` demander (avec les lignes choisies en contexte), en visuel `Espace i e` expliquer,
+  `Espace i t` transformer selon une consigne, `Espace i c` corriger (annulable avec `u`). `Espace a` reste Claude Code.
+- **Diagnostic** : `nc-diag ia` explique ce que `nc-diag` a trouvé et dit quoi faire (rien n'est envoyé si tout va bien).
 - **Dictée** (micro du chat) : par JARVIS ; sans JARVIS, ou s'il ne répond pas, par Groq, OpenAI ou Gemini (Whisper).
 - **Agents** (Claude Code, Codex, OpenCode… dans l'île) : section « Agents IA » des réglages ; coupés avec le reste.
 - `nc-diag` dit quelle IA répond et vérifie que le fichier des clés est privé.

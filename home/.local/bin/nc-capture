@@ -86,11 +86,15 @@ fi
 # le raccourci rend la main)
 [ "$(reglage CAPTURES_NOTIF)" = non ] && exit 0
 if [ "$copiee" = 1 ]; then texte="$(t "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." "Also copied: Ctrl + V to paste it. Click to annotate.")"; else texte="$(t "Clic pour l'annoter." "Click to annotate.")"; fi
+# « Demander à l'IA » : seulement si l'IA est permise (nc-ia actif) et l'explication des captures pas coupée
+ia=()
+if [ "$(reglage IA_CAPTURE)" != non ] && "$HOME/.local/bin/nc-ia" actif 2>/dev/null; then ia=(-A "ia=$(t "Demander à l'IA" "Ask the AI")"); fi
 (
   action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" -A "default=$(t "Annoter" "Annotate")" -A "supprimer=$(t "Supprimer" "Delete")" \
-    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
+    -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
+    ia) "$HOME/.local/bin/nc-ia" fichier "$fichier" --notifier ;;     # l'IA du bureau l'explique (notification)
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)
     dossier) xdg-open "$dossier" ;;
   esac

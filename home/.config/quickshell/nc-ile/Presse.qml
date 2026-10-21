@@ -148,6 +148,8 @@ Item {
                             model: [
                                 { id: "deplier", icone: el.deplie ? "expand_less" : "expand_more", aide: Reglages.t("Aperçu complet", "Full preview"), visible: p.longue(el.modelData), fixe: true },
                                 { id: "epingler", icone: "push_pin", aide: el.modelData.epingle ? Reglages.t("Désépingler", "Unpin") : Reglages.t("Épingler", "Pin"), visible: true, fixe: el.modelData.epingle },
+                                { id: "ia", icone: "auto_awesome", aide: el.image ? Reglages.t("Expliquer l'image avec l'IA", "Explain the image with AI") : Reglages.t("L'IA sur ce texte (résumer, traduire…)", "AI on this text (summarize, translate…)"),
+                                  visible: !Reglages.iaCoupee && Reglages.val(el.image ? "IA_CAPTURE" : "IA_TEXTE", "oui") !== "non", fixe: false },
                                 { id: "coller", icone: "keyboard_return", aide: Reglages.t("Coller en texte brut dans la fenêtre active", "Paste as plain text in the active window"), visible: !el.image, fixe: false },
                                 { id: "supprimer", icone: "close", aide: Reglages.t("Supprimer", "Delete"), visible: true, fixe: false }
                             ]
@@ -165,6 +167,7 @@ Item {
                                         if (action.modelData.id === "deplier") p.deplier(el.modelData)
                                         else if (action.modelData.id === "epingler") PressePapiers.epingler(el.modelData)
                                         else if (action.modelData.id === "coller") PressePapiers.coller(el.modelData)
+                                        else if (action.modelData.id === "ia") PressePapiers.demanderIA(el.modelData)
                                         else PressePapiers.supprimer(el.modelData)
                                     }
                                 }

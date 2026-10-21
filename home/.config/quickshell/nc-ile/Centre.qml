@@ -8,6 +8,7 @@
 // les glissières se partagent le reste), l'énergie en bandeau.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.UPower
 
@@ -31,9 +32,10 @@ Item {
         jeu: { nom: Reglages.t("Mode jeu", "Game Mode"), icone: "sports_esports", forme: "petit" },
         luminosite: { nom: Reglages.t("Luminosité", "Brightness"), icone: "light_mode", forme: "flex", maxi: 168 },
         volume: { nom: "Volume", icone: "volume_up", forme: "flex", maxi: 168 },
-        energie: { nom: Reglages.t("Énergie", "Power"), icone: "bolt", forme: "bande" }
+        energie: { nom: Reglages.t("Énergie", "Power"), icone: "bolt", forme: "bande" },
+        ia: { nom: Reglages.t("IA", "AI"), icone: "auto_awesome", forme: "petit" }
     })
-    readonly property var defaut: ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie"]
+    readonly property var defaut: ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie", "ia"]
     property var ordre: defaut
     property var masques: []
     readonly property var visibles: ordre.filter(id => masques.indexOf(id) < 0)
@@ -187,7 +189,7 @@ Item {
                 Behavior on y { enabled: centre.pret; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                 Loader {
                     anchors.fill: parent
-                    sourceComponent: ({ connexions: cConnexions, musique: cMusique, nuit: cNuit, jeu: cJeu, luminosite: cLuminosite, volume: cVolume, energie: cEnergie })[case_.identifiant]
+                    sourceComponent: ({ connexions: cConnexions, musique: cMusique, nuit: cNuit, jeu: cJeu, luminosite: cLuminosite, volume: cVolume, energie: cEnergie, ia: cIA })[case_.identifiant]
                 }
                 // Mode édition : voile, nom, œil et flèches ; le module en dessous ne réagit plus
                 Rectangle {
@@ -414,6 +416,29 @@ Item {
         Pastille {
             icone: "wb_twilight"; titre: Reglages.t("Nuit", "Night Shift"); sous: Etat.nuit ? Reglages.t("Tons chauds", "Warmer colors") : Reglages.t("Désactivée", "Off"); actif: Etat.nuit; couleur: centre.orange
             onClic: { Etat.nuit = !Etat.nuit; Etat.faire(["noctalia", "msg", "nightlight-force-toggle"]) }
+        }
+    }
+    // IA du bureau (nc-ia) : clic, coupée partout ou rallumée (le mode d'avant, automatique ou choisi, revient) ;
+    // en dessous, celle qui répond
+    Component {
+        id: cIA
+        Pastille {
+            id: pIA
+            property string qui: ""
+            icone: "auto_awesome"; titre: Reglages.t("IA", "AI"); actif: !Reglages.iaCoupee; couleur: Couleurs.violet
+            sous: Reglages.iaCoupee ? Reglages.t("Coupée partout", "Off everywhere") : (qui || Reglages.t("Aucune disponible", "None available"))
+            Process {
+                id: lireQui
+                running: true
+                command: [Quickshell.env("HOME") + "/.local/bin/nc-ia", "quelle", "--json"]
+                stdout: StdioCollector { onStreamFinished: { try { pIA.qui = JSON.parse(text).nom || "" } catch (e) {} } }
+            }
+            Connections { target: Reglages; function onIaCoupeeChanged() { if (!Reglages.iaCoupee) lireQui.running = true } }
+            onClic: {
+                var bin = Quickshell.env("HOME") + "/.local/bin/nc-reglages"
+                if (Reglages.iaCoupee) Memo.lire("ia-avant", v => Etat.faire([bin, "set", "IA_MODE", v && (v.mode === "manuel" || v.mode === "auto") ? v.mode : "auto"]))
+                else { Memo.ecrire("ia-avant", { mode: Reglages.val("IA_MODE", "auto") }); Etat.faire([bin, "set", "IA_MODE", "non"]) }
+            }
         }
     }
     Component {

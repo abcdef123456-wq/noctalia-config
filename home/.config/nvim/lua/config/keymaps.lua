@@ -31,3 +31,11 @@ map("n", "N", "Nzzzv")
 
 -- Ctrl + Entrée en insertion : nouvelle ligne en dessous sans couper la ligne courante
 map("i", "<C-CR>", "<Esc>o", { desc = "Nouvelle ligne en dessous" })
+
+-- IA du bureau (nc-ia, lua/config/ia.lua) : Espace i… ; en visuel, sur les lignes choisies
+local ia = require("config.ia")
+map("n", "<leader>ii", function() ia.demander(false) end, { desc = "Demander à l'IA" })
+map("x", "<leader>ii", "<Esc><Cmd>lua require('config.ia').demander(true)<CR>", { desc = "Demander à l'IA (sur la sélection)" })
+map("x", "<leader>ie", "<Esc><Cmd>lua require('config.ia').expliquer()<CR>", { desc = "Expliquer la sélection" })
+map("x", "<leader>it", "<Esc><Cmd>lua require('config.ia').transformer()<CR>", { desc = "Transformer la sélection (consigne)" })
+map("x", "<leader>ic", "<Esc><Cmd>lua require('config.ia').corriger()<CR>", { desc = "Corriger la sélection" })

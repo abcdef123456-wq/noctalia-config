@@ -75,6 +75,17 @@ Singleton {
         Etat.fermer()
         Quickshell.execDetached(["sh", "-c", "sleep 0.2; hyprctl dispatch \"hl.dsp.send_shortcut({ mods = 'CTRL', key = 'V' })\" >/dev/null 2>&1"])
     }
+    // L'IA du bureau sur une entrée : un texte ouvre le Spotlight sur « ! » (résumer, traduire… ce texte-là) ; une image
+    // est expliquée dans une notification (nc-ia fichier)
+    function demanderIA(e) {
+        if (e.genre === "texte") {
+            Etat.texteIA = e.texte; Etat.saisie = "! "
+            Etat.chercher(Etat.ecranOuvert)                // l'île est déjà ouverte sur cet écran : elle passe au Spotlight
+        } else {
+            Quickshell.execDetached([bin + "nc-ia", "fichier", e.chemin, "--notifier"])
+            Etat.fermer()
+        }
+    }
     function correspond(e, recherche, filtre) {
         if (filtre === "textes" && e.genre !== "texte") return false
         if (filtre === "images" && e.genre !== "image") return false

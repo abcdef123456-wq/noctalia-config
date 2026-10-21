@@ -252,6 +252,52 @@ class IA(unittest.TestCase):
         self.assertFalse(json.loads(r.stdout)["ok"])
         self.assertFalse(Faux.requetes)
 
+    def test_texte_par_l_entree_standard_et_fichiers(self):
+        r = self.lancer("texte", "resumer", "--stdin", entree="un long texte à résumer")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("un long texte à résumer", envoye)
+        self.assertIn("Résume", envoye)
+        f = self.home / "notes.md"
+        f.write_text("# Courses\n- pain\n- lait\n")
+        r = self.lancer("fichier", str(f), "expliquer")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("=== notes.md ===", envoye)
+        self.assertIn("Explique", envoye)
+        img = self.home / "ecran.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")
+        r = self.lancer("fichier", str(img))
+        bloc = Faux.requetes[-1]["corps"]["messages"][0]["content"][0]
+        self.assertEqual(bloc["type"], "image", r.stderr)
+        binaire = self.home / "prog.bin"
+        binaire.write_bytes(b"\0\1\2" * 100)
+        r = self.lancer("fichier", str(binaire))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("ni un texte", r.stderr)
+
+    def test_diagnostic(self):
+        diag = self.home / ".local/bin/nc-diag"
+        diag.write_text("#!/bin/sh\necho 'Wi-Fi'\necho '  ✓ carte présente'\necho '  ✗ portail arrêté'\n")
+        diag.chmod(0o755)
+        r = self.lancer("diagnostic")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("portail arrêté", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+        Faux.requetes.clear()
+        diag.write_text("#!/bin/sh\necho '  ✓ tout va bien'\n")
+        r = self.lancer("diagnostic")
+        self.assertIn("rien à corriger", r.stdout)
+        self.assertFalse(Faux.requetes, "rien à expliquer : aucune IA appelée")
+
+    def test_scripts_des_gestionnaires_de_fichiers(self):
+        nautilus = REPO / "home/.local/share/nautilus/scripts/IA"
+        for f in nautilus.iterdir():
+            self.assertTrue(os.access(f, os.X_OK), f)
+            self.assertIn('nc-ia" fichier "$@"', f.read_text())
+            self.assertIn("--notifier", f.read_text())
+        self.assertIn("X-KDE-Submenu=IA", (REPO / "home/.local/share/kio/servicemenus/nc-ia.desktop").read_text())
+        self.assertTrue(list((REPO / "home/.local/share/nemo/actions").glob("nc-ia-*.nemo_action")))
+
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):
         r = self.lancer("cle", "openai", entree=CLE_O + "\n")

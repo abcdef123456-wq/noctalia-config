@@ -31,7 +31,8 @@ end
 return {
   {
     "folke/which-key.nvim",
-    opts = { spec = { { "<leader>n", group = "Noctalia (bureau)", icon = { icon = "󰍹", color = "cyan" } } } },
+    opts = { spec = { { "<leader>n", group = "Noctalia (bureau)", icon = { icon = "󰍹", color = "cyan" } },
+                      { "<leader>i", group = "IA du bureau", icon = { icon = "󰚩", color = "purple" }, mode = { "n", "x" } } } },
   },
   {
     "folke/snacks.nvim",

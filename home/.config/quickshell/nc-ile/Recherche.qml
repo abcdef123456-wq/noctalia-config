@@ -36,6 +36,8 @@ Item {
     property string agentReponse: "claude"
     property bool iaCoupee: false            // aucune IA (réglage général, ou « IA du Spotlight : Aucune »)
     property bool modeTexte: false           // la réponse en cours est celle d'une action sur le texte (« ! »)
+    property string texteSource: ""          // « ! » sur ce texte-là (une entrée du presse-papiers de l'île), sinon la sélection
+    property string texteEnvoi: ""           // le texte écrit sur l'entrée standard de nc-ia au démarrage de la demande
     readonly property bool texteActif: !Reglages.iaCoupee && Reglages.val("IA_TEXTE", "oui") !== "non"
     readonly property var actionsTexte: [
         { id: "resumer", t: Reglages.t("Résumer", "Summarize"), k: "résumer résumé synthèse summarize summary tldr", g: "short_text" },
@@ -60,7 +62,9 @@ Item {
     function demanderTexte(action) {
         if (action === "" || demandeur.running) return
         questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = true; iaReponse = nomIA; agentReponse = agentIA
-        demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"]
+        demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"].concat(texteSource !== "" ? ["--stdin"] : [])
+        texteEnvoi = texteSource
+        demandeur.stdinEnabled = texteSource !== ""
         demandeur.running = true
         chercher()
     }
@@ -118,6 +122,7 @@ Item {
     onActifChanged: if (actif && cree) demarrer()
     Component.onCompleted: { cree = true; if (actif) demarrer() }
     function demarrer() {
+        texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
@@ -164,6 +169,7 @@ Item {
     property string brut: ""
     Process {
         id: demandeur
+        onStarted: if (demandeur.stdinEnabled) { write(r.texteEnvoi); r.texteEnvoi = ""; stdinEnabled = false }
         onRunningChanged: {
             if (running) { r.brut = "" }
             else if (r.modeTexte) {
@@ -469,7 +475,8 @@ Item {
             var qt = sansAccents(consigneT)
             var lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
                 let id = a.id
-                return { titre: a.t, sous: Reglages.t("Texte sélectionné ou copié · ", "Selected or copied text · ") + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
+                return { titre: a.t, sous: (texteSource !== "" ? Reglages.t("Texte du presse-papiers · ", "Clipboard text · ") : Reglages.t("Texte sélectionné ou copié · ", "Selected or copied text · "))
+                                           + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
                          glyphe: a.g, garder: true, f: () => r.demanderTexte(id) }
             })
             // Une consigne qui n'est pas une action connue : appliquée telle quelle (« ! en liste à puces »)

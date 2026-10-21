@@ -1,0 +1,31 @@
+# Clic droit dans Dolphin : l'IA du bureau (nc-ia) sur les fichiers choisis ; réponse en notification et copiée
+[Desktop Entry]
+Type=Service
+MimeType=text/plain;application/pdf;image/png;image/jpeg;image/webp;application/x-shellscript;text/x-python;application/json;text/markdown;
+Actions=resumer;expliquer;traduire;corriger
+X-KDE-Submenu=IA
+X-KDE-Submenu[en]=AI
+
+[Desktop Action resumer]
+Name=Résumer
+Name[en]=Summarize
+Icon=view-list-text
+Exec=sh -c 'exec "$HOME/.local/bin/nc-ia" fichier "$@" resumer --notifier' _ %F
+
+[Desktop Action expliquer]
+Name=Expliquer
+Name[en]=Explain
+Icon=help-hint
+Exec=sh -c 'exec "$HOME/.local/bin/nc-ia" fichier "$@" expliquer --notifier' _ %F
+
+[Desktop Action traduire]
+Name=Traduire
+Name[en]=Translate
+Icon=preferences-desktop-locale
+Exec=sh -c 'exec "$HOME/.local/bin/nc-ia" fichier "$@" traduire --notifier' _ %F
+
+[Desktop Action corriger]
+Name=Corriger
+Name[en]=Fix spelling
+Icon=tools-check-spelling
+Exec=sh -c 'exec "$HOME/.local/bin/nc-ia" fichier "$@" corriger --notifier' _ %F

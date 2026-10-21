@@ -29,7 +29,7 @@ class Centre(unittest.TestCase):
                 (etat / "centre.json").write_text(json.dumps(memo))
             for nom in ("Centre.qml", "Memo.qml", "Module.qml", "Rond.qml", "Glissiere.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
                 shutil.copy2(QML / nom, root / nom)
-            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: false; function t(fr,en){return fr} function val(k,d){return d}}')
+            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: false; readonly property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d}}')
             (root / "Notifs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool concentration: false; function basculerConcentration(){concentration=!concentration}}')
             (root / "Etat.qml").write_text(textwrap.dedent('''\
                 pragma Singleton
@@ -106,7 +106,8 @@ class Centre(unittest.TestCase):
             return json.loads(f.read_text()) if f.exists() else None
 
     DEFAUT = {"connexions": "0,0,168,168", "musique": "180,0,220,168", "nuit": "0,180,168,78", "jeu": "0,270,168,78",
-              "luminosite": "180,180,104,168", "volume": "296,180,104,168", "energie": "0,360,400,64"}
+              "luminosite": "180,180,104,168", "volume": "296,180,104,168", "energie": "0,360,400,64",
+              "ia": "0,436,168,78"}
 
     def test_disposition_de_depart_edition_et_sauvegarde(self):
         memo = self.executer('''
@@ -116,15 +117,15 @@ function etapeSuivante() { etape++ }
 if (etape === 1) {
     var attendu = %s
     for (var id in attendu) verifier(pos("nc-centre-" + id) === attendu[id], id + " : " + pos("nc-centre-" + id) + " au lieu de " + attendu[id])
-    verifier(page.disposition.hauteur === 424 && Etat.hauteurs.centre === 458, "hauteur : " + page.disposition.hauteur + " / " + Etat.hauteurs.centre)
+    verifier(page.disposition.hauteur === 514 && Etat.hauteurs.centre === 548, "hauteur : " + page.disposition.hauteur + " / " + Etat.hauteurs.centre)
     verifier(!page.edition && !trouver(page, "nc-centre-terminer").visible, "mode édition actif au départ")
     cliquer("nc-centre-crayon"); verifier(page.edition && trouver(page, "nc-centre-terminer").visible, "crayon sans effet")
-    verifier(Etat.hauteurs.centre > 458, "l'île ne grandit pas pour les outils")
+    verifier(Etat.hauteurs.centre > 548, "l'île ne grandit pas pour les outils")
     cliquer("nc-centre-jeu-masquer"); etapeSuivante()
 } else if (etape === 2) {
     verifier(page.masques.join() === "jeu" && trouver(page, "nc-centre-jeu") === null && trouver(page, "nc-centre-masque-jeu") !== null, "jeu non masqué")
     verifier(pos("nc-centre-nuit") === "0,180,168,78" && pos("nc-centre-luminosite") === "180,180,104,168", "disposition après masquage : " + pos("nc-centre-luminosite"))
-    memo.reste = ["nuit", "luminosite", "volume", "energie", "musique"]; etapeSuivante()
+    memo.reste = ["nuit", "luminosite", "volume", "energie", "musique", "ia"]; etapeSuivante()
 } else if (etape === 3) {
     if (memo.reste.length) { cliquer("nc-centre-" + memo.reste.shift() + "-masquer"); return }
     verifier(page.visibles.join() === "connexions", "visibles : " + page.visibles.join())
@@ -138,7 +139,8 @@ if (etape === 1) {
     verifier(page.masques.length === 0 && page.ordre.join() === page.defaut.join(), "réinitialiser")
     cliquer("nc-centre-energie-monter"); etapeSuivante()
 } else if (etape === 6) {
-    verifier(page.ordre.join() === "connexions,musique,nuit,jeu,luminosite,energie,volume", "monter : " + page.ordre.join())
+    verifier(page.ordre.join() === "connexions,musique,nuit,jeu,luminosite,energie,volume,ia", "monter : " + page.ordre.join())
+    verifier(pos("nc-centre-ia") === "180,436,168,78", "la pastille IA à côté de la glissière : " + pos("nc-centre-ia"))
     verifier(pos("nc-centre-energie") === "0,360,400,64" && pos("nc-centre-volume") === "0,436,168,168", "bandeau remonté, glissière seule étroite : " + pos("nc-centre-volume"))
     cliquer("nc-centre-energie-monter"); etapeSuivante()
 } else if (etape === 7) {
@@ -147,16 +149,16 @@ if (etape === 1) {
     cliquer("nc-centre-terminer"); verifier(!page.edition, "Terminer"); etapeSuivante()
 } else if (etape === 9 && Memo.enAttente === 0 && Memo.courant === null) { Qt.quit() }
 ''' % json.dumps(self.DEFAUT))
-        self.assertEqual(memo, {"ordre": ["connexions", "musique", "nuit", "jeu", "energie", "luminosite", "volume"], "masques": ["jeu"]})
+        self.assertEqual(memo, {"ordre": ["connexions", "musique", "nuit", "jeu", "energie", "luminosite", "volume", "ia"], "masques": ["jeu"]})
 
     def test_largeur_reelle_de_l_ile(self):
         # Dans l'île, la page fait 378 points (432 moins les marges et les points de navigation) : même disposition qu'avant
         self.executer('''
 if (etape === 0) { creer(); page.width = 378; etape++; return }
 if (!page.pret) return
-var attendu = { connexions: "0,0,168,168", musique: "180,0,198,168", nuit: "0,180,168,78", jeu: "0,270,168,78", luminosite: "180,180,93,168", volume: "285,180,93,168", energie: "0,360,378,64" }
+var attendu = { connexions: "0,0,168,168", musique: "180,0,198,168", nuit: "0,180,168,78", jeu: "0,270,168,78", luminosite: "180,180,93,168", volume: "285,180,93,168", energie: "0,360,378,64", ia: "0,436,168,78" }
 for (var id in attendu) verifier(pos("nc-centre-" + id) === attendu[id], id + " : " + pos("nc-centre-" + id) + " au lieu de " + attendu[id])
-verifier(page.disposition.hauteur === 424, "hauteur : " + page.disposition.hauteur)
+verifier(page.disposition.hauteur === 514, "hauteur : " + page.disposition.hauteur)
 Qt.quit()
 ''')
 
@@ -165,27 +167,27 @@ Qt.quit()
 if (etape === 0) { creer(); etape++; return }
 if (!page.pret) return
 if (etape === 1) {
-    verifier(page.ordre.join() === "energie,connexions,musique,nuit,jeu,luminosite,volume" && page.masques.join() === "jeu,volume", "disposition non relue : " + page.ordre.join() + " / " + page.masques.join())
+    verifier(page.ordre.join() === "energie,connexions,musique,nuit,jeu,luminosite,volume,ia" && page.masques.join() === "jeu,volume", "disposition non relue : " + page.ordre.join() + " / " + page.masques.join())
     verifier(pos("nc-centre-energie") === "0,0,400,64" && pos("nc-centre-connexions") === "0,76,168,168" && pos("nc-centre-musique") === "180,76,220,168", "bandeau en premier : " + pos("nc-centre-connexions"))
     verifier(pos("nc-centre-nuit") === "0,256,168,78" && pos("nc-centre-luminosite") === "180,256,168,168", "nuit seule, glissière seule étroite : " + pos("nc-centre-luminosite"))
     page.editer(true); verifier(page.activeFocus && page.choix === 0, "focus clavier")
     clavier.keyClick(Qt.Key_Down); verifier(page.choix === 1 && page.visibles[1] === "connexions", "flèche bas")
-    clavier.keyClick(Qt.Key_Down, Qt.ShiftModifier); verifier(page.ordre.join() === "energie,musique,connexions,nuit,jeu,luminosite,volume" && page.choix === 2, "Maj + bas : " + page.ordre.join())
+    clavier.keyClick(Qt.Key_Down, Qt.ShiftModifier); verifier(page.ordre.join() === "energie,musique,connexions,nuit,jeu,luminosite,volume,ia" && page.choix === 2, "Maj + bas : " + page.ordre.join())
     clavier.keyClick(Qt.Key_Space); verifier(page.masques.join() === "jeu,volume,connexions", "Espace masque : " + page.masques.join())
     clavier.keyClick(Qt.Key_Up); clavier.keyClick(Qt.Key_Up); clavier.keyClick(Qt.Key_Up); verifier(page.choix === 0, "flèche haut bornée")
     clavier.keyClick(Qt.Key_Escape); verifier(!page.edition, "Échap termine")
     etape++
 } else if (etape === 2 && Memo.enAttente === 0 && Memo.courant === null) { Qt.quit() }
 ''', memo={"ordre": ["energie", "connexions", "musique", "nuit", "jeu", "luminosite", "volume", "inconnu"], "masques": ["jeu", "volume", "inconnu"]})
-        self.assertEqual(memo, {"ordre": ["energie", "musique", "connexions", "nuit", "jeu", "luminosite", "volume"], "masques": ["jeu", "volume", "connexions"]})
+        self.assertEqual(memo, {"ordre": ["energie", "musique", "connexions", "nuit", "jeu", "luminosite", "volume", "ia"], "masques": ["jeu", "volume", "connexions"]})
 
     def test_tout_masque_dans_le_fichier_est_repare(self):
         memo = self.executer('''
 if (etape === 0) { creer(); etape++; return }
 if (!page.pret) return
-verifier(page.visibles.length === 7 && page.masques.length === 0, "tout masqué accepté")
+verifier(page.visibles.length === 8 && page.masques.length === 0, "tout masqué accepté")
 Qt.quit()
-''', memo={"ordre": ["connexions"], "masques": ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie"]})
+''', memo={"ordre": ["connexions"], "masques": ["connexions", "musique", "nuit", "jeu", "luminosite", "volume", "energie", "ia"]})
 
 
 if __name__ == "__main__":

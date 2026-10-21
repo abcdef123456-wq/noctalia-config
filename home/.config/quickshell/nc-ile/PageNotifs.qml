@@ -37,12 +37,43 @@ Item {
         else if (e.key === Qt.Key_Slash || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { champ.forceActiveFocus(); e.accepted = true }
     }
 
+    // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard
+    property string resumeIA: ""
+    property string resumeQui: ""
+    function texteNotifs() {
+        return Notifs.liste.slice(0, 40).map(x => (x.appName || x.app || "?") + " : " + (x.summary || "")
+            + (x.body ? " — " + String(x.body).replace(/<[^>]+>/g, "").slice(0, 400) : "")).join("\n")
+    }
+    function resumer() {
+        if (resumeur.running) return
+        resumeIA = ""; resumeQui = ""
+        resumeur.stdinEnabled = true; resumeur.running = true
+    }
+    Process {
+        id: resumeur
+        command: [Quickshell.env("HOME") + "/.local/bin/nc-ia", "texte", "notifications", "--stdin", "--flux"]
+        onStarted: { write(p.texteNotifs()); stdinEnabled = false }
+        stdout: SplitParser {
+            onRead: l => { try { var d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
+        }
+        stderr: StdioCollector {}
+    }
+
     Item {
         id: tete
         width: parent.width; height: 34
         Texte { anchors.verticalCenter: parent.verticalCenter; leftPadding: 4; text: "Notifications" + (Notifs.nonLues ? "  ·  " + Notifs.nonLues : ""); font.pixelSize: 20; font.weight: Font.Bold }
         Row {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 12
+            Texte {
+                objectName: "nc-notifs-resumer"
+                visible: Notifs.liste.length >= 2 && !Reglages.iaCoupee && Reglages.val("IA_TEXTE", "oui") !== "non"
+                text: resumeur.running ? Reglages.t("Résumé…", "Summarizing…") : Reglages.t("Résumer", "Summarize")
+                color: zr.containsMouse ? Couleurs.accentClair : Couleurs.accent
+                MouseArea { id: zr; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: p.resumer() }
+                Accessible.role: Accessible.Button
+                Accessible.name: Reglages.t("Résumer les notifications avec l'IA", "Summarize notifications with AI")
+            }
             Texte {
                 objectName: "nc-notifs-tout-lu"
                 visible: Notifs.nonLues > 0
@@ -138,6 +169,26 @@ Item {
             readonly property real voulue: 34 + (outils.visible ? outils.height + 8 : 0) + 10 + implicitHeight
             onVoulueChanged: Etat.annoncerHauteur("notifications", voulue)
             Component.onCompleted: Etat.annoncerHauteur("notifications", voulue)
+
+            // ── Résumé par l'IA ──
+            Rectangle {
+                objectName: "nc-notifs-resume"
+                visible: p.resumeIA !== "" || resumeur.running
+                width: parent.width; height: visible ? colResume.implicitHeight + 24 : 0; radius: 16; color: Couleurs.carte
+                Column {
+                    id: colResume
+                    x: 14; y: 12; width: parent.width - 28 - 24; spacing: 4
+                    Texte { secondaire: true; font.pixelSize: 12
+                            text: resumeur.running && p.resumeIA === "" ? (p.resumeQui || Reglages.t("L'IA", "The AI")) + Reglages.t(" résume…", " is summarizing…")
+                                                                        : Reglages.t("Résumé · ", "Summary · ") + p.resumeQui }
+                    Text { width: parent.width; text: p.resumeIA; textFormat: Text.MarkdownText; wrapMode: Text.Wrap
+                           color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13; visible: p.resumeIA !== "" }
+                }
+                Ico {
+                    anchors.right: parent.right; anchors.rightMargin: 12; y: 12; nom: "close"; taille: 16; color: Couleurs.texteSec
+                    MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: { resumeur.running = false; p.resumeIA = "" } }
+                }
+            }
 
             // ── Mises à jour du système ──
             Rectangle {

@@ -6,11 +6,15 @@
         --flux                         morceau par morceau : une ligne JSON {"t": …} chacun ({"ia": …} avant)
         --usage question|texte|commande|image   (question par défaut)
         --ia ID                        cette IA-là (sinon : le réglage) ; --image FICHIER : une image jointe
-  nc-ia texte ACTION [--presse|--selection] [--copier] [--flux]
+  nc-ia texte ACTION [--presse|--selection|--stdin] [--copier] [--flux]
                                        sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
                                        reformuler, expliquer, repondre, ou une consigne libre entre guillemets
   nc-ia menu                           les actions sur le texte (Super + Alt + I) : le Spotlight sur « ! », sinon un menu
   nc-ia terminal QUESTION              la réponse dans un terminal (« ? » du lanceur de Noctalia, sans l'île)
+  nc-ia fichier CHEMIN… [ACTION|consigne] [--notifier]
+                                       un texte, du code, un PDF ou une image : résumé par défaut (clic droit dans
+                                       Fichiers → Scripts → IA)
+  nc-ia diagnostic                     ce que nc-diag a trouvé, expliqué, avec quoi faire (nc-diag ia)
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
   nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Alt + Maj + I)
   nc-ia configurer                     les clés d'API : la fenêtre « Clés des IA » de l'île, sinon au clavier
@@ -114,6 +118,10 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        or a free instruction in quotes
   nc-ai menu                           the text actions (Super + Alt + I): Spotlight on “!”, otherwise a menu
   nc-ai terminal QUESTION              the answer in a terminal (“?” in the Noctalia launcher, without the island)
+  nc-ai file PATH… [ACTION|instruction] [--notifier]
+                                       a text, code, a PDF or an image: summarized by default (right click in Files →
+                                       Scripts → AI)
+  nc-ai diagnostic                     what nc-diag found, explained, with what to do (nc-diag ia)
   nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
   nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Alt + Shift + I)
   nc-ai configure                      the API keys from the keyboard (hidden), each one tested right away
@@ -834,6 +842,11 @@ ACTIONS = {
                                                             "langue.", "Draft a short, polite reply to this message, in "
                                                             "its language.")),
 }
+ACTIONS["notifications"] = (("Résumer les notifications", "Summarize the notifications"),
+                           ("Résume ces notifications en quelques points courts, en français : d'abord ce qui demande une "
+                            "action ou une réponse, puis le reste regroupé par appli.",
+                            "Summarize these notifications in a few short points, in English: first what needs an action or "
+                            "a reply, then the rest grouped by app."))
 ACTIONS_EN = {"summarize": "resumer", "translate": "traduire", "fix": "corriger", "rephrase": "reformuler",
               "explain": "expliquer", "reply": "repondre"}
 
@@ -972,9 +985,11 @@ def notifier(titre, corps, lire=True):
         pass
 
 
-def texte_action(action, source="", copie=False, flux=False):
+def texte_action(action, source="", copie=False, flux=False, texte=None):
     action = ACTIONS_EN.get(action, action)
-    if source == "presse":
+    if texte is not None:
+        t = texte
+    elif source == "presse":
         t = presse()
     elif source == "selection":
         t = presse(True)
@@ -991,6 +1006,88 @@ def texte_action(action, source="", copie=False, flux=False):
         copier(rep)
         notifier(T(f"{T(*titre)} : copié", f"{T(*titre)}: copied") + f" · {nom(ident)}", rep)
     return rep
+
+
+# ── Fichiers (Fichiers / Nautilus, Dolphin, nc-capture) : texte, code, PDF, image ───────────────────────────────
+TEXTE_MAX = 60000
+
+
+def contenu_fichier(chemin):
+    """(texte, image) d'un fichier : le texte (≤ 60 000 caractères), ou le chemin d'une image ; ErreurIA sinon."""
+    f = Path(chemin)
+    if not f.is_file():
+        raise ErreurIA(T(f"{f.name} n'est pas un fichier.", f"{f.name} is not a file."))
+    ext = f.suffix.lower()
+    if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return "", str(f)
+    if ext == ".pdf":
+        if not shutil.which("pdftotext"):
+            raise ErreurIA(T("pdftotext (poppler) est nécessaire pour lire un PDF.", "pdftotext (poppler) is needed to read a PDF."))
+        r = subprocess.run(["pdftotext", "-layout", "-l", "40", str(f), "-"], capture_output=True, text=True, timeout=60)
+        t = r.stdout
+    else:
+        data = f.read_bytes()[:TEXTE_MAX * 4]
+        if b"\0" in data[:8000]:
+            raise ErreurIA(T(f"{f.name} n'est ni un texte, ni un PDF, ni une image.", f"{f.name} is not text, a PDF or an image."))
+        t = data.decode("utf-8", "replace")
+    if not t.strip():
+        raise ErreurIA(T(f"{f.name} est vide.", f"{f.name} is empty."))
+    return t[:TEXTE_MAX] + ("\n[…]" if len(t) > TEXTE_MAX else ""), None
+
+
+def fichier_ia(chemins, consigne_f="", notif=False, flux=False):
+    if coupee():
+        raise ErreurIA(message_coupee())
+    if not chemins:
+        raise ErreurIA(T("Aucun fichier.", "No file."))
+    action = ACTIONS_EN.get(consigne_f, consigne_f) or "resumer"
+    titre, ordre = ACTIONS.get(action, ((consigne_f, consigne_f), (consigne_f, consigne_f)))
+    instruction = T(*ordre)
+    images = []
+    morceaux = []
+    for c in chemins[:6]:
+        t, img = contenu_fichier(c)
+        if img:
+            images.append(img)
+        else:
+            morceaux.append(f"=== {Path(c).name} ===\n{t}")
+    if images and morceaux:
+        raise ErreurIA(T("Une image ou des textes, pas les deux à la fois.", "An image or texts, not both at once."))
+    if len(images) > 1:
+        raise ErreurIA(T("Une seule image à la fois.", "One image at a time."))
+    sortie = (lambda m: None) if notif else None
+    if images:
+        question = instruction if consigne_f else T("Que montre cette image ? Si c'est une erreur, comment la corriger ?",
+                                                     "What does this image show? If it is an error, how to fix it?")
+        rep, ident = demander(question, "image", image=images[0], flux=flux, sortie=sortie)
+    else:
+        rep, ident = demander(f"{instruction}\n\n" + "\n\n".join(morceaux), "texte", flux=flux, sortie=sortie)
+    if notif:
+        copier(rep)
+        noms = ", ".join(Path(c).name for c in chemins[:3])
+        notifier(f"{T(*titre) if consigne_f in ACTIONS or not consigne_f else consigne_f[:40]} · {noms}", rep + "\n\n— " + nom(ident))
+    return rep
+
+
+# ── Diagnostic : ce que nc-diag a trouvé, expliqué ──────────────────────────────────────────────────────────────
+def diagnostic(flux=False):
+    if coupee():
+        raise ErreurIA(message_coupee())
+    r = subprocess.run([str(HOME / ".local/bin/nc-diag")], capture_output=True, text=True, timeout=120,
+                       env=dict(os.environ, NO_COLOR="1"))
+    bilan = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout).strip()
+    if not re.search(r"^\s*[✗!⚠]", bilan, re.M):
+        m = T("✓ nc-diag ne trouve rien à corriger.", "✓ nc-diag finds nothing to fix.")
+        print(json.dumps({"t": m}, ensure_ascii=False) if flux else m)
+        return
+    question = T("Voici le bilan de vérification de mon bureau (noctalia-config, Hyprland). Explique simplement chaque "
+                 "problème (✗) et chaque point d'attention (!), dans l'ordre d'importance, et dis exactement quoi faire "
+                 "pour chacun (commandes sur des lignes « $ … »).\n\n",
+                 "Here is my desktop's check report (noctalia-config, Hyprland). Simply explain each problem (✗) and each "
+                 "warning (!), most important first, and say exactly what to do for each (commands on “$ …” lines).\n\n")
+    demander(question + bilan, "texte", flux=flux,
+             consigne_=T("Tu aides à réparer un bureau Linux. Réponds en français, concret et bref.",
+                         "You help fix a Linux desktop. Answer in English, concrete and brief."))
 
 
 # ── Capture d'une zone ──────────────────────────────────────────────────────────────────────────────────────────
@@ -1220,7 +1317,18 @@ def main(a):
                 return 2
             source = "presse" if "--presse" in a else "selection" if "--selection" in a else ""
             mots = [x for x in a if not x.startswith("--")]
-            texte_action(" ".join(mots), source, copie="--copier" in a, flux="--flux" in a)
+            entree = sys.stdin.read(200000) if "--stdin" in a else None      # l'île, Neovim : le texte sans passer par le presse-papiers
+            texte_action(" ".join(mots), source, copie="--copier" in a, flux="--flux" in a, texte=entree)
+            return 0
+        if c in ("fichier", "file"):
+            if not a:
+                raise ErreurIA("nc-ia fichier CHEMIN [ACTION|consigne] [--notifier]")
+            chemins = [x for x in a if not x.startswith("--") and os.path.exists(x)]
+            consigne_f = " ".join(x for x in a if not x.startswith("--") and x not in chemins)
+            fichier_ia(chemins, consigne_f, notif="--notifier" in a, flux="--flux" in a)
+            return 0
+        if c in ("diagnostic", "diag"):
+            diagnostic(flux="--flux" in a)
             return 0
         if c == "capture":
             if coupee():
@@ -1303,14 +1411,18 @@ def main(a):
                     print(f"  {'✓' if x['ok'] else '✗'} {x['nom']:<26} " + (f"{x['ms']} ms" if x["ok"] else x.get("erreur", "")))
             return 0 if res and all(x["ok"] for x in res) else 1
     except ErreurIA as e:
-        if c in ("capture", "menu") or (c == "texte" and "--copier" in a):     # lancé par un raccourci : pas de terminal
+        if c in ("capture", "menu") or (c == "texte" and "--copier" in a) or "--notifier" in a:   # raccourci, menu : pas de terminal
             notifier("IA", str(e), lire=False)
         if "--flux" in a:
             print(json.dumps({"t": str(e), "erreur": True}, ensure_ascii=False), flush=True)
         else:
             print(str(e), file=sys.stderr)
         return 3 if coupee() else 1
-    except BrokenPipeError:                      # le Spotlight a été fermé pendant la réponse
+    except BrokenPipeError:                      # le Spotlight a été fermé pendant la réponse (ou « | head »)
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())   # pas d'erreur à la sortie de Python
+        except OSError:
+            pass
         return 1
     except KeyboardInterrupt:
         return 130

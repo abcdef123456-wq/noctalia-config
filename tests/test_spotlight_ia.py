@@ -32,6 +32,7 @@ import QtQuick
 import Quickshell
 QtObject {
  property string saisie: ""
+ property string texteIA: ""
  property bool recherche: true
  property bool nuit: false
  readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
@@ -57,6 +58,7 @@ esac
 ''',
                 "nc-ia": '''#!/bin/sh
 echo "nc-ia $*" >> "$HOME/appels"
+case "$*" in *--stdin*) cat > "$HOME/stdin-ia" ;; esac
 echo '{"ia": "Claude (API Anthropic)", "id": "anthropic", "agent": "claude"}'
 echo '{"t": "", "erreur": false}'
 echo '{"ia": "Codex", "id": "codex", "agent": "codex"}'
@@ -112,6 +114,13 @@ ShellRoot {
    verifier(titres().indexOf("IA sur le texte copié") < 0, "actions d'IA cachées : " + JSON.stringify(titres()))
    champ.text = "rallumer"
    verifier(titres().indexOf("Rallumer l'IA") >= 0, "on peut la rallumer depuis le Spotlight : " + JSON.stringify(titres()))
+   // Une entrée du presse-papiers de l'île : « ! » sur ce texte-là, passé par l'entrée standard
+   Reglages.v = {}; spot.iaCoupee = false
+   Etat.texteIA = "texte du presse-papiers"; Etat.saisie = "! "; spot.demarrer()
+   verifier(spot.texteSource === "texte du presse-papiers" && Etat.texteIA === "", "texte repris : " + spot.texteSource)
+   verifier(titres()[0] === "Résumer" && spot.resultats[0].sous.indexOf("presse-papiers") >= 0, "source affichée : " + JSON.stringify(spot.resultats[0]))
+   spot.valider(0, false); etape++; return }
+  if (etape === 6) { if (spot.reflechit) return
    Qt.quit() }
  } }
  Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
@@ -128,7 +137,9 @@ ShellRoot {
             self.assertIn("nc-ia texte traduire --flux", appels)
             self.assertIn("wl-copy -- Texte traduit", appels)
             self.assertIn("nc-demander --flux lister les fichiers", appels)
-            self.assertEqual(appels.count("nc-ia texte"), 1, "rien de lancé une fois l'IA coupée")
+            self.assertEqual(appels.count("nc-ia texte traduire"), 1, "rien de lancé une fois l'IA coupée")
+            self.assertIn("nc-ia texte resumer --flux --stdin", appels)
+            self.assertEqual((root / "stdin-ia").read_text(), "texte du presse-papiers")
 
 
 if __name__ == "__main__":

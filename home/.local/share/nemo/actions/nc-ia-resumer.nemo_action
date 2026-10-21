@@ -1,0 +1,9 @@
+# Clic droit dans Nemo : l'IA du bureau (nc-ia) ; réponse en notification et copiée
+[Nemo Action]
+Name=IA : Résumer
+Name[en]=AI: Summarize
+Comment=nc-ia fichier
+Exec=sh -c 'exec "$HOME/.local/bin/nc-ia" fichier "$@" resumer --notifier' _ %F
+Icon-Name=dialog-information
+Selection=notnone
+Extensions=any;

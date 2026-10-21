@@ -130,6 +130,7 @@ Singleton {
     }
     property bool projection: false        // fenêtre de projection, comme Windows + P (Projection.qml, Super + O)
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
+    property string texteIA: ""          // « ! » du Spotlight sur ce texte-là (presse-papiers de l'île), pas la sélection
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
     function chercher(ecran) {
         if (ecranOuvert === ecran && recherche) { fermer(); return }

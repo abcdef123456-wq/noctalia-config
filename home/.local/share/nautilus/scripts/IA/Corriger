@@ -1,0 +1,3 @@
+#!/bin/sh
+# Clic droit dans Fichiers (Nautilus) → Scripts → IA → Corriger : l'IA du bureau (nc-ia), réponse en notification et copiée
+exec "$HOME/.local/bin/nc-ia" fichier "$@" corriger --notifier
