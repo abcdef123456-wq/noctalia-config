@@ -1,174 +1,69 @@
 #!/usr/bin/env python3
-"""nc-demander : pose une question rapide à une IA installée et affiche sa réponse (courte, en français).
+"""nc-demander : pose une question rapide à l'IA et affiche sa réponse (courte, en français).
   nc-demander "comment décompresser un .tar.xz"     la réponse ; une commande utile sur une ligne « $ … » à la fin
-  nc-demander --ia                                  l'IA utilisée (pour le Spotlight)
+  nc-demander --ia [--json]                         l'IA qui répondrait (pour le Spotlight)
   nc-demander --flux "question"                     la réponse morceau par morceau, une ligne JSON {"t": …} chacun
                                                     (le Spotlight l'affiche pendant qu'elle s'écrit)
-Dans le Spotlight de l'île : « ? ta question » puis Entrée. IA : nc-reglages → Île → « IA du Spotlight »
-(SPOTLIGHT_IA : auto, claude, opencode, gemini, qwen, assistant, non) ; auto = la première disponible dans cet ordre.
+Dans le Spotlight de l'île : « ? ta question » puis Entrée. L'IA : celle de nc-ia (nc-reglages → Intelligence
+artificielle : automatique, choisie ou aucune), sauf si « IA du Spotlight » (SPOTLIGHT_IA) en impose une.
 """
+import importlib.machinery
+import importlib.util
 import json
 import os
-import re
-import shutil
-import subprocess
 import sys
 
-
-# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
-def _langue():
-    l = os.environ.get("NC_LANGUE", "")
-    if l not in ("fr", "en"):
-        try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
-                for x in f:
-                    if x.startswith("LANGUE="):
-                        l = x.split("=", 1)[1].strip().strip('"')
-        except OSError:
-            pass
-    if l not in ("fr", "en"):
-        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
-        if not loc:
-            try:
-                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
-            except (OSError, TypeError):
-                loc = ""
-        l = "fr" if loc.startswith("fr") else "en"
-    return l
-
-
-EN = _langue() == "en"
-
-
-def T(fr, en):
-    return en if EN else fr
-
-
-DOC_EN = """nc-ask: asks an installed AI a quick question and shows its answer (short, in English).
+DOC_EN = """nc-ask: asks the AI a quick question and shows its answer (short, in English).
   nc-ask "how do I extract a .tar.xz"     the answer; a useful command on a last line “$ …”
-  nc-ask --ia                             the AI in use (for Spotlight)
+  nc-ask --ia [--json]                    the AI that would answer (for Spotlight)
   nc-ask --flux "question"                the answer piece by piece, one JSON line {"t": …} each
                                           (Spotlight shows it while it is being written)
-In the island's Spotlight: “? your question” then Enter. AI: nc-settings → Island → “Spotlight AI”
-(SPOTLIGHT_IA: auto, claude, opencode, gemini, qwen, assistant, non); auto = the first available in that order.
+In the island's Spotlight: “? your question” then Enter. The AI: nc-ai's (nc-settings → Artificial intelligence:
+automatic, chosen or none), unless “Spotlight AI” (SPOTLIGHT_IA) forces one.
 """
 
-HOME = os.path.expanduser("~")
-# L'île tourne avec le PATH du système : les IA installées pour l'utilisateur sont souvent ailleurs
-os.environ["PATH"] = os.pathsep.join([os.path.join(HOME, d) for d in (".local/bin", "bin", ".npm-global/bin", ".bun/bin",
-                                      ".opencode/bin", ".cargo/bin")] + [os.environ.get("PATH", "/usr/bin")])
-CONSIGNE = ("Réponds en français, en 2 à 6 lignes au plus, en texte simple (pas de titres ni de tableaux). "
-            "Si une commande Linux répond à la question, termine par une seule ligne qui commence par « $ » suivie "
-            "de la commande, sans rien d'autre. L'ordinateur est sous {distrib} avec Hyprland. Question : ")
-CONSIGNE_EN = ("Answer in English, in 2 to 6 lines at most, in plain text (no headings or tables). "
-               "If a Linux command answers the question, end with a single line that starts with “$ ” followed "
-               "by the command, and nothing else. The computer runs {distrib} with Hyprland. Question: ")
-NOMS = {"claude": "Claude", "opencode": "OpenCode", "gemini": "Gemini", "qwen": "Qwen", "assistant": "Assistant"}
 
-
-def disponible(nom, automatique=False):
-    if nom == "assistant":
-        return (os.access(os.path.join(HOME, ".local/bin/nc-assistant"), os.X_OK)
-                and (not automatique or os.path.isfile(os.path.join(HOME, ".config/nc/assistant.conf"))))
-    return bool(shutil.which(nom))
-
-
-def reglage(cle, defaut):
-    try:
-        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
-            for l in f:
-                if l.startswith(cle + "="):
-                    defaut = l.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
-    return defaut
-
-
-def ia():
-    choix = reglage("SPOTLIGHT_IA", "auto")
-    if choix == "non":
-        return ""
-    if choix != "auto":
-        return choix if choix in NOMS and disponible(choix) else ""
-    return next((x for x in NOMS if disponible(x, automatique=True)), "")
-
-
-def distrib():
-    try:
-        for l in open("/etc/os-release", encoding="utf-8"):
-            if l.startswith("PRETTY_NAME="):
-                return l.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
-    return "Linux"
-
-
-def flux_claude(cmd, env):
-    """Réponse de Claude morceau par morceau, dès qu'ils arrivent (premiers mots en 1 à 2 s)."""
-    p = subprocess.Popen(cmd[:-1] + ["--output-format", "stream-json", "--include-partial-messages", "--verbose", cmd[-1]],
-                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True, env=env, cwd=HOME)
-    rien = True
-    try:
-        for l in p.stdout:
-            try:
-                e = json.loads(l)
-            except ValueError:
-                continue
-            d = (e.get("event") or {}).get("delta") or {}
-            if e.get("type") == "stream_event" and d.get("type") == "text_delta":
-                print(json.dumps({"t": d.get("text", "")}, ensure_ascii=False), flush=True)
-                rien = False
-            elif e.get("type") == "result" and rien:
-                print(json.dumps({"t": e.get("result") or T("Claude n'a rien répondu.", "Claude gave no answer.")}, ensure_ascii=False), flush=True)
-        p.wait()
-    except BrokenPipeError:                      # le Spotlight a été fermé : on arrête Claude
-        p.kill()
+def charger_ia():
+    chemin = os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-ia")
+    l = importlib.machinery.SourceFileLoader("nc_ia", chemin)
+    s = importlib.util.spec_from_loader("nc_ia", l)
+    m = importlib.util.module_from_spec(s)
+    l.exec_module(m)
+    return m
 
 
 def main():
+    ia = charger_ia()
     a = sys.argv[1:]
-    qui = ia()
-    if a and a[0] == "--ia":
-        print(NOMS.get(qui, ""))
-        return
-    flux = bool(a) and a[0] == "--flux"
+    # « IA du Spotlight » : auto (celle de nc-ia), une IA précise, ou aucune pour le Spotlight seulement
+    choix = ia.reglage("SPOTLIGHT_IA", "auto")
+    force = "" if choix in ("auto", "non") else ia.ANCIENS.get(choix, choix)
+    if force not in ia.FOURNISSEURS:
+        force = ""
+    if a[:1] == ["--ia"]:
+        try:
+            qui = "" if choix == "non" else (ia.candidats("question", force) or [""])[0]
+        except ia.ErreurIA:
+            qui = ""
+        if "--json" in a:
+            print(json.dumps({"nom": ia.nom(qui) if qui else "", "agent": ia.FOURNISSEURS[qui]["agent"] if qui else "",
+                              "coupee": ia.coupee() or choix == "non"}, ensure_ascii=False))
+        else:
+            print(ia.nom(qui) if qui else "")
+        return 0
+    flux = a[:1] == ["--flux"]
     if flux:
         a = a[1:]
     question = " ".join(a).strip()
     if not question:
-        sys.exit(T(__doc__, DOC_EN).strip())
-    dire = lambda m: print(json.dumps({"t": m}, ensure_ascii=False) if flux else m, flush=True)
-    if not qui:
-        dire(T("Aucune IA installée pour répondre (Claude Code, opencode, Gemini CLI ou Qwen Code).",
-               "No AI installed to answer (Claude Code, opencode, Gemini CLI or Qwen Code)."))
-        return
-    texte = T(CONSIGNE, CONSIGNE_EN).format(distrib=distrib()) + question
-    if qui == "assistant":
-        # Le client possède son délai réseau et le format JSON de Spotlight. exec permet aussi son arrêt à la fermeture.
-        cmd = [sys.executable, os.path.join(HOME, ".local/bin/nc-assistant"), "demander"]
-        if flux:
-            cmd.append("--flux")
-        os.execv(sys.executable, cmd + ["--", texte])
-    # Claude démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort le
-    # plus bas et pas de réflexion étendue (ton réglage de Claude Code, souvent « high », ne compte pas ici)
-    vide = ["--effort", "low", "--strict-mcp-config", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]
-    cmd = {"claude": ["claude", "-p", "--model", "haiku"] + vide + [texte], "opencode": ["opencode", "run", texte],
-           "gemini": ["gemini", "-p", texte], "qwen": ["qwen", "-p", texte]}[qui]
-    # NC_ILE_SANS : ses hooks ne l'affichent pas dans l'île comme une session de travail ; dossier neutre
-    env = dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1", MAX_THINKING_TOKENS="0")
-    if flux and qui == "claude":
-        flux_claude(cmd, env)
-        return
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env, cwd=HOME, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        dire(T(f"{NOMS[qui]} n'a pas répondu à temps.", f"{NOMS[qui]} did not answer in time."))
-        return
-    sortie = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", r.stdout).strip()
-    if qui == "opencode":                      # lignes d'état d'opencode (« > build · modèle », outils…)
-        sortie = "\n".join(l for l in sortie.splitlines() if not re.match(r"^\s*(>|→|\$ ?cat|⚙)", l) or l.startswith("$ ")).strip()
-    dire(sortie or (r.stderr.strip().splitlines() or [T(f"{NOMS[qui]} n'a rien répondu.", f"{NOMS[qui]} gave no answer.")])[-1])
+        sys.exit(ia.T(__doc__, DOC_EN).strip())
+    if choix == "non" and not ia.coupee():
+        m = ia.T("Pas d'IA dans le Spotlight (nc-reglages → Île → IA du Spotlight).",
+                 "No AI in Spotlight (nc-settings → Island → Spotlight AI).")
+        print(json.dumps({"t": m, "erreur": True}, ensure_ascii=False) if flux else m)
+        return 1
+    return ia.main(["demander"] + (["--flux"] if flux else []) + (["--ia", force] if force else []) + ["--", question])
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

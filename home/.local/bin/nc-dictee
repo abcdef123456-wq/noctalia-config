@@ -10,8 +10,12 @@ Une ligne de JSON sur la sortie : {"ok": true, "text": "…", "engine": "…"} a
 {"ok": true, "recording": true} après un démarrage, {"ok": false, "error": "…"} sinon.
 Le serveur et la clé sont ceux de ~/.config/nc/assistant.conf (nc-assistant configurer) ; la clé n'est jamais
 écrite ailleurs, l'audio (16 kHz mono, dans XDG_RUNTIME_DIR) est supprimé après la transcription.
+Sans JARVIS (ou s'il ne répond pas, en mode automatique) : la transcription d'une API de nc-ia (Groq, OpenAI, Gemini).
+IA du bureau coupée (IA_MODE=non) : pas de dictée.
 Enregistreur : parec (PulseAudio ou PipeWire), sinon pw-record, sinon arecord. Pas de synthèse vocale.
 """
+import importlib.machinery
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -121,6 +125,45 @@ def demarrer(T):
     return 0
 
 
+def ia():
+    """nc-ia comme module : ses clés, ses fournisseurs de transcription."""
+    l = importlib.machinery.SourceFileLoader("nc_ia", str(BIN / "nc-ia"))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_ia", l))
+    l.exec_module(mod)
+    return mod
+
+
+def par_jarvis(m):
+    """JARVIS transcrit s'il est relié, sauf si une autre IA est choisie à la main (et qu'elle sait transcrire)."""
+    if not m.CONF.exists():
+        return False
+    try:
+        i = ia()
+        return not (i.mode() == "manuel" and i.reglage("IA_CHOIX", "") in i.fournisseurs_transcription())
+    except Exception:
+        return True
+
+
+def secours():
+    """Mode automatique et une API de transcription disponible : elle prend le relais de JARVIS."""
+    try:
+        i = ia()
+        return i.mode() == "auto" and bool(i.fournisseurs_transcription())
+    except Exception:
+        return False
+
+
+def par_ia(T):
+    try:
+        i = ia()
+        texte, ident = i.transcrire(str(AUDIO))
+    except Exception as e:
+        sortie(ok=False, error=str(e)[:300])
+        return 1
+    sortie(ok=True, text=texte[:16000], engine=i.nom(ident))
+    return 0
+
+
 def transcrire(m):
     T = m.T
     if not arreter():
@@ -130,6 +173,9 @@ def transcrire(m):
         if not AUDIO.is_file() or AUDIO.stat().st_size < 1000:
             sortie(ok=False, error=T("Enregistrement vide ou micro coupé.", "Empty recording or muted microphone."))
             return 1
+        # Sans JARVIS (ou une autre IA choisie à la main) : la transcription des API de nc-ia (Groq, OpenAI, Gemini)
+        if not par_jarvis(m):
+            return par_ia(T)
         try:
             c = m.configuration()
             req = urllib.request.Request(c["URL"].rstrip("/") + "/api/transcribe", data=AUDIO.read_bytes(),
@@ -142,6 +188,8 @@ def transcrire(m):
             sortie(ok=False, error=str(e))
             return 1
         except urllib.error.HTTPError as e:
+            if e.code >= 500 and secours():
+                return par_ia(T)
             if e.code in (401, 403):
                 sortie(ok=False, error=T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
                                          f"Server rejected the key (HTTP {e.code}): check SECRET_KEY."))
@@ -152,6 +200,8 @@ def transcrire(m):
                 sortie(ok=False, error=T(f"Erreur HTTP {e.code} du serveur.", f"HTTP error {e.code} from the server."))
             return 1
         except Exception as e:   # réseau, délai, JSON : le détail sans la clé
+            if secours():                                     # serveur injoignable : une API de transcription
+                return par_ia(T)
             sortie(ok=False, error=T("Transcription impossible : ", "Transcription failed: ") + str(e)[:200])
             return 1
     finally:
@@ -171,6 +221,10 @@ def transcrire(m):
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "status"
     m = client()
+    if action in ("start", "stop") and m.ia_coupee():
+        arreter()
+        sortie(ok=False, error=m.T(*m.MESSAGE_COUPEE))
+        return 1
     try:
         if action == "start":
             return demarrer(m.T)

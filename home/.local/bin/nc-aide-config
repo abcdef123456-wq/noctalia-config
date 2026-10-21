@@ -25,8 +25,8 @@ HOME = Path.home()
 BIN = HOME / ".local/bin"
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
 CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc/aide-config.json"
-VERSION = 1
-DOCS = ["README.md", "docs/jarvis.md", "docs/pages-ile.md", "docs/assistant-distant.md", "docs/installation-checks.md",
+VERSION = 2
+DOCS = ["README.md", "docs/ia.md", "docs/jarvis.md", "docs/pages-ile.md", "docs/assistant-distant.md", "docs/installation-checks.md",
         "docs/vue-ouverture-nobara.md"]
 
 # Mots qui ne disent rien de la question (gardés hors de l'index et de la recherche)
@@ -62,7 +62,7 @@ SYNONYMES = [
     "capture captures screenshot copie",
     "verrouillage verrou lock verrouiller",
     "wifi reseau network internet",
-    "jarvis assistant ia agent agents",
+    "jarvis assistant ia agent agents intelligence artificielle ai llm chatgpt",
     "animation animations effets effet",
     "flou blur transparence",
     "police font texte",
@@ -142,8 +142,10 @@ def depuis_reglages():
             res.append(entree("raccourci", l["nom"], (l.get("affiche") or "") + " · " + (l.get("aide") or ""),
                               section=l.get("aide") or "", touches=l.get("affiche") or ""))
         else:
-            res.append(entree("reglage", l["nom"], l.get("aide") or "", section=l.get("sectionNom") or "", cle=l.get("cle") or "",
-                              valeur=l.get("affiche") or ""))
+            # Les noms des choix comptent aussi (« Aucune (tout couper) » répond à « couper l'IA »)
+            choix = " ".join(str(c[1]) for c in l.get("choix") or [] if isinstance(c, list) and len(c) > 1)
+            res.append(entree("reglage", l["nom"], l.get("aide") or "", section=(l.get("sectionNom") or "") + " " + choix,
+                              cle=l.get("cle") or "", valeur=l.get("affiche") or ""))
     return res
 
 

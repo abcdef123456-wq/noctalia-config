@@ -16,6 +16,9 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Entrée` | Terminal |
 | `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
 | `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
+| `Super` + `Alt` + `I` | IA sur le texte sélectionné (sinon copié) : résumer, traduire, corriger, reformuler, expliquer, répondre, ou une consigne libre (le Spotlight sur `!`) ; résultat copié |
+| `Super` + `Alt` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA (notification, réponse copiée) |
+| `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) ; « + nom » : un logiciel à installer (dépôts, AUR, Flatpak), Entrée l'installe |
 | `Super` + `W` | Choisir le fond d'écran |

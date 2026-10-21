@@ -390,7 +390,15 @@ Singleton {
         command: [a.bin + "nc-assistant", "requete-ile"]
         onStarted: {
             demarrage.stop()
-            write(JSON.stringify({session_id: a.session, question: a.question}) + "\n")
+            // L'historique sert quand une autre IA que JARVIS répond (pas connecté, ou choisie à la main) : borné
+            // pour tenir dans la ligne lue par nc-assistant
+            var h = [], total = 0
+            for (var i = a.messages.length - 2; i >= 0 && h.length < 12; i--) {
+                var t = a.messages[i].texte.slice(0, 3000)
+                if ((total += t.length) > 16000) break
+                h.unshift({role: a.messages[i].role === "vous" ? "user" : "assistant", texte: t})
+            }
+            write(JSON.stringify({session_id: a.session, question: a.question, historique: h}) + "\n")
             stdinEnabled = false
         }
         stdout: StdioCollector {

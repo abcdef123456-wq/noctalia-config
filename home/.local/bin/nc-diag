@@ -338,6 +338,36 @@ def verifier(b):
         b.avert(T("aucune police « Nerd Font » : icônes du terminal en carrés", "no “Nerd Font” font: terminal icons show as squares"),
                 T("relance install.sh (étape du terminal)", "run install.sh again (terminal step)"))
 
+    # ── Intelligence artificielle (nc-ia) : sans réseau, sans clé affichée ──
+    b.titre(T("Intelligence artificielle", "Artificial intelligence"))
+    ia, _ = sortie([os.path.join(HOME, ".local/bin/nc-ia"), "etat", "--json"])
+    try:
+        e = json.loads(ia)
+        dispo = [i["nom"] for i in e["ias"] if i["disponible"]]
+        if e["coupee"]:
+            b.ok(T("IA coupée partout (choisi dans nc-reglages)", "AI turned off everywhere (chosen in nc-settings)"))
+        elif not dispo:
+            b.avert(T("aucune IA disponible : Spotlight « ? », texte, terminal et captures sans réponse",
+                      "no AI available: Spotlight “?”, text, terminal and screenshots get no answer"),
+                    T("nc-ia configurer (une clé d'API), ou installe Claude Code, Codex, Gemini CLI, OpenCode ou Ollama",
+                      "nc-ai configure (an API key), or install Claude Code, Codex, Gemini CLI, OpenCode or Ollama"))
+        else:
+            q = e["usages"]["question"]["nom"]
+            b.ok(T(f"{q} répond ({len(dispo)} disponible(s) : {', '.join(dispo[:5])})",
+                   f"{q} answers ({len(dispo)} available: {', '.join(dispo[:5])})"))
+            if e["mode"] == "manuel" and not q:
+                b.avert(T("l'IA choisie à la main n'est pas disponible", "the AI chosen manually is not available"),
+                        T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"))
+            if not e["usages"]["image"]["nom"]:
+                b.avert(T("aucune IA disponible ne lit les images (Super + Alt + Maj + I)", "no available AI reads images (Super + Alt + Shift + I)"),
+                        T("une clé Anthropic, OpenAI ou Gemini, Claude Code, Codex ou Ollama", "an Anthropic, OpenAI or Gemini key, Claude Code, Codex or Ollama"))
+        conf = os.path.join(HOME, ".config/nc/ia.conf")
+        if os.path.exists(conf) and os.stat(conf).st_mode & 0o077:
+            b.faux(T("~/.config/nc/ia.conf lisible par d'autres comptes (clés d'API)", "~/.config/nc/ia.conf readable by other accounts (API keys)"),
+                   "chmod 600 ~/.config/nc/ia.conf")
+    except (ValueError, KeyError, TypeError):
+        b.avert(T("nc-ia ne répond pas", "nc-ai does not respond"), T("nc-maj", "nc-update"))
+
     # ── Tes réglages ──
     b.titre(T("Tes réglages", "Your settings"))
     conf = os.path.join(HOME, ".config/nc/reglages.conf")

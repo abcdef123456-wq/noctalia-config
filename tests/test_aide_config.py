@@ -122,7 +122,7 @@ class SpotlightQuestions(unittest.TestCase):
             root = Path(d); q = root / "qml"; shutil.copytree(QML, q); (root / "runtime").mkdir(mode=0o700)
             (root / "cache/nc").mkdir(parents=True)
             (root / "cache/nc/aide-config.json").write_text(json.dumps(index, ensure_ascii=False))
-            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d} function pageActive(n){return true}}')
             (q / "Etat.qml").write_text('''pragma Singleton
 import QtQuick
 import Quickshell

@@ -144,7 +144,7 @@ class Spotlight(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-spotlight-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             q = root / "qml"
-            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d} function pageActive(n){return true}}')
             (q / "Etat.qml").write_text('''pragma Singleton
 import QtQuick
 import Quickshell

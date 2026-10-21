@@ -1,0 +1,323 @@
+"""nc-ia, l'IA du bureau : chaque API (Anthropic, OpenAI, Gemini, Ollama, transcription) contre un faux serveur local,
+le mode automatique et son repli, le mode manuel, la coupure totale (IA_MODE=non) jusque dans JARVIS, la dictée et les
+hooks des agents, les clés (0600, jamais affichées ni passées en argument), les actions sur le texte et le terminal."""
+import base64
+import http.server
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import subprocess
+import tempfile
+import threading
+import unittest
+
+REPO = Path(__file__).resolve().parents[1]
+BIN = REPO / "home/.local/bin"
+CLE_A, CLE_O = "sk-ant-test-0123456789abcdef", "sk-oai-test-abcdef0123456789"
+
+
+class Faux(http.server.BaseHTTPRequestHandler):
+    """Répond comme les vraies API ; garde chaque requête (chemin, en-têtes, corps) pour les vérifications."""
+    requetes = []
+    anthropic_refuse = False
+
+    def log_message(self, *a):
+        pass
+
+    def envoyer(self, code, corps, type_="application/json"):
+        data = corps.encode() if isinstance(corps, str) else corps
+        self.send_response(code)
+        self.send_header("Content-Type", type_)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=None))
+        if self.path.startswith("/oai/models"):
+            return self.envoyer(200, json.dumps({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-5-mini"}, {"id": "gpt-5.1-mini"}]}))
+        if self.path.startswith("/ollama/api/tags"):
+            return self.envoyer(200, json.dumps({"models": [{"name": "vieux:1b", "modified_at": "2025-01-01"},
+                                                            {"name": "llama3.2:3b", "modified_at": "2026-01-01"}]}))
+        if self.path.startswith("/gem/models"):
+            return self.envoyer(200, json.dumps({"models": [{"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                                                            {"name": "models/gemini-3.0-flash", "supportedGenerationMethods": ["generateContent"]}]}))
+        self.envoyer(404, "{}")
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        brut = self.rfile.read(n)
+        try:
+            corps = json.loads(brut)
+        except ValueError:
+            corps = brut
+        Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=corps))
+        sse = lambda evs: "".join(f"data: {json.dumps(e)}\n\n" for e in evs)
+        if self.path == "/ant/messages":
+            if Faux.anthropic_refuse:
+                return self.envoyer(401, json.dumps({"error": {"message": "invalid x-api-key"}}))
+            return self.envoyer(200, "event: message_start\n" + sse([
+                {"type": "message_start", "message": {"id": "m"}},
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Bon"}},
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "jour"}},
+                {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}, {"type": "message_stop"}]), "text/event-stream")
+        if self.path == "/oai/chat/completions":
+            return self.envoyer(200, sse([{"choices": [{"delta": {"content": "Salut"}}]},
+                                          {"choices": [{"delta": {"content": " toi"}}]}]) + "data: [DONE]\n\n", "text/event-stream")
+        if self.path.startswith("/gem/models/") and "streamGenerateContent" in self.path:
+            return self.envoyer(200, sse([{"candidates": [{"content": {"parts": [{"text": "Gem"}]}}]},
+                                          {"candidates": [{"content": {"parts": [{"text": "ini"}]}}]}]), "text/event-stream")
+        if self.path == "/ollama/api/chat":
+            return self.envoyer(200, "".join(json.dumps(e) + "\n" for e in (
+                {"message": {"content": "Lo"}, "done": False}, {"message": {"content": "cal"}, "done": True})), "application/x-ndjson")
+        if self.path == "/groq/audio/transcriptions":
+            return self.envoyer(200, json.dumps({"text": "bonjour le monde"}))
+        self.envoyer(404, "{}")
+
+
+@unittest.skipUnless(shutil.which("zsh") or True, "")
+class IA(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Faux)
+        cls.port = cls.serveur.server_address[1]
+        threading.Thread(target=cls.serveur.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.serveur.shutdown()
+        cls.serveur.server_close()
+
+    def setUp(self):
+        Faux.requetes.clear()
+        Faux.anthropic_refuse = False
+        d = tempfile.TemporaryDirectory(prefix="nc-ia-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        (self.home / ".config/nc").mkdir(parents=True)
+        (self.home / "run").mkdir(mode=0o700)
+        b = self.home / ".local/bin"
+        b.mkdir(parents=True)
+        for f in ("nc-ia", "nc-demander", "nc-assistant", "nc-claude", "nc-dictee", "nc-jarvis"):
+            os.symlink(BIN / f, b / f)
+        self.faux = self.home / "faux"
+        self.faux.mkdir()
+        self.journal = self.home / "journal"
+        u = f"http://127.0.0.1:{self.port}"
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nURL_OPENAI={u}/oai\nURL_GOOGLE={u}/gem\n"
+                  f"URL_GROQ={u}/groq\nOLLAMA_HOST=http://127.0.0.1:1\n")
+        self.reglages("IA_PREFERENCE=rapide\n")
+
+    def cles(self, texte):
+        f = self.home / ".config/nc/ia.conf"
+        f.write_text(texte)
+        f.chmod(0o600)
+
+    def reglages(self, texte):
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n" + texte)
+
+    def programme(self, nom, corps):
+        f = self.faux / nom
+        f.write_text("#!/bin/sh\n" + corps + "\n")
+        f.chmod(0o755)
+
+    def lancer(self, *args, entree=None, prog="nc-ia"):
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
+                   XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                   JOURNAL=str(self.journal))
+        # Les programmes d'IA installés sur la machine de test ne doivent pas répondre à la place des faux serveurs
+        for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
+            self.programme(nom, "exit 1") if not (self.faux / nom).exists() else None
+        return subprocess.run([str(self.home / ".local/bin" / prog), *args], env=env, input=entree or "", capture_output=True,
+                              text=True, timeout=30)
+
+    def flux(self, r):
+        lignes = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+        return lignes, "".join(l.get("t", "") for l in lignes)
+
+    # ── API ──
+    def test_anthropic_en_flux(self):
+        r = self.lancer("demander", "--flux", "dis bonjour")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lignes, texte = self.flux(r)
+        self.assertEqual(lignes[0]["id"], "anthropic")
+        self.assertEqual(texte, "Bonjour")
+        q = Faux.requetes[-1]
+        self.assertEqual(q["entetes"].get("x-api-key"), CLE_A)
+        self.assertEqual(q["entetes"].get("anthropic-version"), "2023-06-01")
+        self.assertEqual(q["entetes"].get("anthropic-beta"), "server-side-fallback-2026-07-01")
+        self.assertEqual(q["corps"]["model"], "claude-opus-5-5")
+        self.assertEqual(q["corps"]["fallbacks"], "default")
+        self.assertEqual(q["corps"]["output_config"], {"effort": "low"})
+        self.assertTrue(q["corps"]["stream"])
+        self.assertIn("dis bonjour", json.dumps(q["corps"]["messages"], ensure_ascii=False))
+
+    def test_repli_automatique_puis_memoire_de_l_echec(self):
+        self.cles((self.home / ".config/nc/ia.conf").read_text() + f"OPENAI_API_KEY={CLE_O}\n")
+        Faux.anthropic_refuse = True
+        r = self.lancer("demander", "--flux", "question")
+        lignes, texte = self.flux(r)
+        self.assertEqual(texte, "Salut toi", r.stdout + r.stderr)
+        self.assertEqual([l["id"] for l in lignes if "id" in l], ["anthropic", "openai"])
+        oai = [q for q in Faux.requetes if q["chemin"] == "/oai/chat/completions"][-1]
+        self.assertEqual(oai["entetes"]["authorization"], "Bearer " + CLE_O)
+        self.assertEqual(oai["corps"]["model"], "gpt-5.1-mini", "le plus récent des « mini » de la liste")
+        self.assertIn("max_completion_tokens", oai["corps"])
+        # L'échec est retenu : la question suivante part d'abord vers OpenAI, sans attendre Anthropic
+        Faux.requetes.clear()
+        r = self.lancer("quelle", "--json")
+        self.assertEqual(json.loads(r.stdout)["id"], "openai")
+
+    def test_manuel_une_seule_ia(self):
+        self.cles((self.home / ".config/nc/ia.conf").read_text() + f"OPENAI_API_KEY={CLE_O}\n")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=openai\n")
+        r = self.lancer("demander", "question")
+        self.assertEqual(r.stdout.strip(), "Salut toi")
+        self.assertFalse([q for q in Faux.requetes if q["chemin"].startswith("/ant")])
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=mistral\n")
+        r = self.lancer("demander", "question")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Mistral", r.stderr)
+
+    def test_gemini_et_ollama(self):
+        self.cles(f"GEMINI_API_KEY=AIzaTest0123456789\nURL_GOOGLE=http://127.0.0.1:{self.port}/gem\n"
+                  f"OLLAMA_HOST=http://127.0.0.1:{self.port}/ollama\n")
+        r = self.lancer("demander", "--ia", "google", "q")
+        self.assertEqual(r.stdout.strip(), "Gemini", r.stderr)
+        g = [q for q in Faux.requetes if "streamGenerateContent" in q["chemin"]][-1]
+        self.assertIn("gemini-3.0-flash", g["chemin"])
+        self.assertEqual(g["entetes"].get("x-goog-api-key"), "AIzaTest0123456789")
+        self.assertNotIn("AIzaTest", g["chemin"], "la clé dans un en-tête, jamais dans l'adresse")
+        r = self.lancer("demander", "--ia", "ollama", "q")
+        self.assertEqual(r.stdout.strip(), "Local", r.stderr)
+        o = [q for q in Faux.requetes if q["chemin"] == "/ollama/api/chat"][-1]
+        self.assertEqual(o["corps"]["model"], "llama3.2:3b", "le modèle le plus récent")
+
+    def test_image_jointe(self):
+        img = self.home / "c.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")
+        r = self.lancer("demander", "--image", str(img), "que vois-tu")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        bloc = Faux.requetes[-1]["corps"]["messages"][0]["content"][0]
+        self.assertEqual(bloc["type"], "image")
+        self.assertEqual(base64.b64decode(bloc["source"]["data"]), img.read_bytes())
+
+    def test_commande_seule(self):
+        self.programme("claude", 'echo \'{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"```bash\\n$ du -sh *\\n```"}}}\'')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
+        r = self.lancer("commande", "taille des dossiers")
+        self.assertEqual(r.stdout.strip(), "du -sh *", r.stderr)
+
+    def test_actions_sur_le_texte(self):
+        self.programme("wl-paste", 'case "$*" in *-p*) printf "texte sélectionné";; *) printf "copié";; esac')
+        self.programme("wl-copy", 'echo "wl-copy $*" >> "$JOURNAL"')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        r = self.lancer("texte", "traduire", "--copier")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("texte sélectionné", envoye)
+        self.assertIn("Traduis", envoye)
+        self.assertIn("wl-copy -- Bonjour", self.journal.read_text())
+        r = self.lancer("texte", "en liste à puces", "--presse")
+        self.assertIn("en liste à puces", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+        self.assertIn("copié", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+
+    def test_transcription(self):
+        self.cles(f"GROQ_API_KEY=gsk_test0123456789\nURL_GROQ=http://127.0.0.1:{self.port}/groq\n")
+        wav = self.home / "d.wav"
+        wav.write_bytes(b"RIFF" + b"\0" * 2000)
+        r = self.lancer("transcrire", str(wav), "--json")
+        self.assertEqual(json.loads(r.stdout)["text"], "bonjour le monde", r.stderr)
+        q = Faux.requetes[-1]
+        self.assertTrue(q["entetes"]["content-type"].startswith("multipart/form-data"))
+        self.assertIn(b"whisper-large-v3-turbo", q["corps"])
+
+    def test_chat_de_l_ile_sans_jarvis(self):
+        """La fenêtre de chat : sans JARVIS relié, l'IA du bureau répond, avec la conversation, et le dit."""
+        entree = json.dumps({"session_id": "a" * 32, "question": "et demain ?",
+                             "historique": [{"role": "user", "texte": "quel temps fait-il"}, {"role": "assistant", "texte": "Soleil."}]})
+        r = self.lancer("requete-ile", entree=entree + "\n", prog="nc-assistant")
+        d = json.loads(r.stdout)
+        self.assertTrue(d["ok"], r.stdout + r.stderr)
+        self.assertTrue(d["text"].startswith("Bonjour"))
+        self.assertIn("Claude (API Anthropic)", d["text"])
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("quel temps fait-il", envoye)
+        self.assertIn("et demain ?", envoye)
+        # Les commandes « / » restent celles de JARVIS : pas envoyées à une autre IA
+        Faux.requetes.clear()
+        r = self.lancer("requete-ile", entree=json.dumps({"session_id": "a" * 32, "question": "/reset"}) + "\n", prog="nc-assistant")
+        self.assertFalse(json.loads(r.stdout)["ok"])
+        self.assertFalse(Faux.requetes)
+
+    # ── Clés ──
+    def test_cles_privees_jamais_affichees(self):
+        r = self.lancer("cle", "openai", entree=CLE_O + "\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = self.home / ".config/nc/ia.conf"
+        self.assertEqual(stat.S_IMODE(f.stat().st_mode), 0o600)
+        self.assertIn("OPENAI_API_KEY=" + CLE_O, f.read_text())
+        for args in (("etat",), ("etat", "--json"), ("cles",), ("cles", "--json")):
+            r = self.lancer(*args)
+            self.assertNotIn(CLE_O, r.stdout + r.stderr)
+            self.assertNotIn(CLE_A, r.stdout + r.stderr)
+        self.assertIn("…6789", self.lancer("cles").stdout)
+        r = self.lancer("cle", "openai", entree="pas une clé ; rm -rf\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("OPENAI_API_KEY=" + CLE_O, f.read_text(), "une saisie invalide ne remplace pas la clé")
+
+    def test_url_en_clair_refusee(self):
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC=http://exemple.com/v1\n")
+        r = self.lancer("demander", "--ia", "anthropic", "q")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("https://", r.stderr)
+        self.assertFalse(Faux.requetes)
+
+    # ── Tout couper ──
+    def test_ia_coupee_partout(self):
+        self.reglages("IA_MODE=non\n")
+        r = self.lancer("demander", "--flux", "q")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("désactivée", r.stdout)
+        self.assertEqual(self.lancer("actif").returncode, 1)
+        self.assertTrue(json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)["coupee"])
+        r = self.lancer("demander", "--flux", "q", prog="nc-assistant")
+        self.assertIn("désactivée", r.stdout)
+        r = self.lancer("start", prog="nc-dictee")
+        self.assertFalse(json.loads(r.stdout)["ok"])
+        r = self.lancer("requete", entree="{}\n", prog="nc-jarvis")
+        self.assertFalse(json.loads(r.stdout)["ok"])
+        # Un hook d'agent ne laisse aucune trace dans l'île (et rend la main tout de suite)
+        r = self.lancer("hook", entree=json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "x"}),
+                        prog="nc-claude")
+        self.assertEqual(r.returncode, 0)
+        self.assertFalse((self.home / "run/nc-claude/etat.json").exists())
+        self.assertFalse(Faux.requetes, "rien n'est envoyé quand l'IA est coupée")
+
+    def test_spotlight_peut_imposer_ou_couper(self):
+        self.reglages("SPOTLIGHT_IA=non\n")
+        d = json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)
+        self.assertTrue(d["coupee"])
+        self.reglages("SPOTLIGHT_IA=anthropic\n")
+        d = json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)
+        self.assertEqual((d["nom"], d["agent"], d["coupee"]), ("Claude (API Anthropic)", "claude", False))
+        self.reglages("SPOTLIGHT_IA=assistant\n")       # ancienne valeur : JARVIS, pas configuré ici
+        self.assertEqual(json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)["nom"], "")
+
+    # ── Terminal ──
+    @unittest.skipUnless(shutil.which("zsh"), "zsh requis")
+    def test_zsh(self):
+        f = REPO / "home/.config/nc/ia.zsh"
+        r = subprocess.run(["zsh", "-n", str(f)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        texte = f.read_text()
+        self.assertIn("bindkey '^[i' _nc_ia_commande", texte)
+        self.assertIn("(( ! $+commands[ia] ))", texte, "ne cache pas une commande « ia » déjà installée")
+        self.assertNotRegex(texte, r"BUFFER=.*\n\s*zle accept-line", "la commande proposée n'est jamais lancée seule")
+        self.assertIn("ia.zsh", (REPO / "home/.zshrc").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

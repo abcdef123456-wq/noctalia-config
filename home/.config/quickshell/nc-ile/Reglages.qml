@@ -18,7 +18,10 @@ Singleton {
         if (style[cle] !== undefined && style[cle] !== "") return style[cle]
         return defaut
     }
-    function pageActive(nom) { return val("ILE_PAGE_" + nom.toUpperCase(), "oui") !== "non" }
+    // IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : plus de pages JARVIS ni Agents, plus d'IA
+    // dans le Spotlight ; les réponses de la config (sans IA) restent
+    readonly property bool iaCoupee: val("IA_MODE", "auto") === "non"
+    function pageActive(nom) { return !(iaCoupee && (nom === "claude" || nom === "assistant")) && val("ILE_PAGE_" + nom.toUpperCase(), "oui") !== "non" }
     function filtrerPages(pages) { return pages.filter(nom => pageActive(nom)) }
     readonly property bool en: {
         var l = Quickshell.env("NC_LANGUE") || ""

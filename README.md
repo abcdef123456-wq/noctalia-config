@@ -113,6 +113,8 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
+| IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + Alt + I** · **Super + Alt + Maj + I** |
+| Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
 
 ## Île dynamique
 
@@ -132,6 +134,14 @@ proposée en dernier ; la recherche de la fenêtre des réglages comprend aussi 
 Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). En tapant sans
 préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
 installer dans le Spotlight »).
+
+**L'IA du bureau** ([détails](docs/ia.md)) : une clé d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek,
+OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Ollama ou JARVIS — **automatique** (la meilleure disponible, la
+suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur toutes les distributions) dans
+**nc-reglages → Intelligence artificielle**. Elle répond au `? ` du Spotlight, travaille sur le texte sélectionné
+(**Super + Alt + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran
+(**Super + Alt + Maj + I**), écrit une commande dans le terminal (**Alt + I**, à relire avant Entrée ; `ia question`).
+Clés : `nc-ia configurer` (privées, jamais affichées).
 
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.

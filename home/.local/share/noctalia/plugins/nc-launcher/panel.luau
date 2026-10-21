@@ -194,12 +194,12 @@ local function search()
   files = {}
   appResults = {}
   if q == "" then results = {} return end
-  -- Sans Quickshell : la question s'ouvre dans le même chat kitty, sans dépendance au module de capture.
+  -- Sans Quickshell : la question va à l'IA du bureau (nc-ia : automatique, choisie ou coupée), réponse dans un terminal
   if q:sub(1, 1) == "?" then
     local question = noctalia.string.trim(q:sub(2))
-    results = {{ key = "assistant", name = tr("Assistant distant", "Remote assistant"), glyph = "sparkles",
-      hint = tr("Ouvrir le chat dans kitty", "Open chat in kitty"), run = function()
-        noctalia.runAsync({ noctalia.expandPath("~/.local/bin/nc-assistant"), "ouvrir", question })
+    results = {{ key = "assistant", name = tr("Demander à l'IA", "Ask the AI"), glyph = "sparkles",
+      hint = tr("La réponse dans un terminal", "The answer in a terminal"), run = function()
+        if question ~= "" then noctalia.runAsync({ noctalia.expandPath("~/.local/bin/nc-ia"), "terminal", question }) end
         panel.close()
       end }}
     return

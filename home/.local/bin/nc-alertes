@@ -90,7 +90,7 @@ def services_en_echec():
 
 def envoyer(m, texte):
     """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion."""
-    if reglages().get("ALERTES_TELEGRAM", "non") != "oui":
+    if reglages().get("ALERTES_TELEGRAM", "non") != "oui" or reglages().get("IA_MODE", "auto") == "non":
         return False
     try:
         c = m.configuration()

@@ -102,10 +102,38 @@ def request(body):
     return clean(data,c['SECRET_KEY'])
 
 
+def reglage(cle):
+    try:
+        for l in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8').splitlines():
+            if l.startswith(cle+'='):return l.split('=',1)[1].strip().strip('"')
+    except OSError:pass
+    return ''
+
+
+def ia_coupee():
+    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : ni cockpit, ni chat."""
+    return reglage('IA_MODE')=='non'
+
+
+def langue_en():
+    l=os.environ.get('NC_LANGUE') or reglage('LANGUE')
+    if l not in ('fr','en'):l='fr' if (os.environ.get('LC_ALL') or os.environ.get('LANG') or 'fr').startswith('fr') else 'en'
+    return l=='en'
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('commande',nargs='?',default='tableau',choices=['tableau','ile','chat','requete','deployer','serveur','agent','console'])
     args,rest=parser.parse_known_args()
+    # IA du bureau coupée : ni cockpit, ni chat, ni requêtes (le déploiement reste possible)
+    if args.commande in ('tableau','ile','chat','requete','console') and ia_coupee():
+        message=('AI is turned off (nc-settings → Artificial intelligence → Desktop AI).' if langue_en() else
+                 "L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).")
+        if args.commande=='requete':print(json.dumps(dict(ok=False,error=message),ensure_ascii=False),flush=True)
+        else:
+            print(message,file=sys.stderr)
+            subprocess.run(['notify-send','-a','JARVIS','--','JARVIS',message],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return 1
     try:
         if args.commande in ('tableau','ile','chat'):
             if rest:raise ValueError('Arguments inconnus')

@@ -319,12 +319,27 @@ SECTIONS_EN = {
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
     "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal", "Applications": "Applications",
-    "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
+    "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
     "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System",
     "Mes raccourcis": "My Shortcuts",
 }
+
+
+_CHOIX_IA = []
+
+
+def choix_ia():
+    """Les IA de nc-ia, marquées si elles ne sont pas disponibles : pour IA_CHOIX et SPOTLIGHT_IA (lues une fois)."""
+    if not _CHOIX_IA:
+        try:
+            ia = charger("ncia", "nc-ia")
+            _CHOIX_IA.extend((i, ia.nom(i) + ("" if ia.disponible(i) else T(" (non disponible)", " (not available)")))
+                             for i in ia.FOURNISSEURS)
+        except Exception:
+            return [("claude", "Claude Code"), ("jarvis", "JARVIS")]
+    return list(_CHOIX_IA)
 
 
 def nom_section(s):
@@ -386,12 +401,6 @@ REGLAGES = [
       "ouinon", "oui",
       L("Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4.",
         "Pomodoro (the island's Timer page, or “Pomodoro” in Spotlight): 25 min of work, 5 of break, 15 every 4.")),
-    R("SPOTLIGHT_IA", "Île", L("IA du Spotlight (« ? ta question »)", "Spotlight AI (“? your question”)"), "choix", "auto",
-      L("Réponse courte dans le Spotlight ; la commande qu'elle propose se lance avec Entrée.",
-        "A short answer in Spotlight; the command it suggests runs with Enter."),
-      [("auto", L("Automatique (la première installée)", "Automatic (the first one installed)")), ("claude", "Claude"),
-       ("opencode", "OpenCode"), ("gemini", "Gemini CLI"), ("qwen", "Qwen Code"),
-       ("assistant", L("Assistant distant", "Remote assistant")), ("non", L("Aucune", "None"))]),
     R("SPOTLIGHT_ENTREE", "Île", L("Entrée sur une appli déjà ouverte", "Enter on an app that's already open"), "choix", "nouvelle",
       L("Spotlight (Super + R). Ctrl + Entrée fait l'autre choix.", "Spotlight (Super + R). Ctrl + Enter does the other one."),
       [("nouvelle", L("Ouvre une nouvelle fenêtre", "Opens a new window")),
@@ -879,6 +888,48 @@ REGLAGES = [
       L("Sélectionner suffit à copier dans le presse-papiers (sans Ctrl + Maj + C).", "Selecting is enough to copy to the clipboard (no Ctrl + Shift + C)."), groupe="terminal"),
     R("TERMINAL_LIGATURES", "Terminal", L("Ligatures de la police", "Font ligatures"), "ouinon", "oui",
       L("« -> », « != », « >= » dessinés en un seul signe.", "“->”, “!=”, “>=” drawn as one symbol."), groupe="terminal"),
+    # Intelligence artificielle (nc-ia) : une seule IA pour tout le bureau, ou aucune
+    R("IA_MODE", "Intelligence artificielle", L("IA du bureau", "Desktop AI"), "choix", "auto",
+      L("Automatique : la meilleure disponible (clés d'API, Claude Code, Codex, Gemini CLI, OpenCode, Ollama, JARVIS), "
+        "et la suivante si elle échoue. Aucune : plus d'IA nulle part (Spotlight, texte, terminal, captures, JARVIS, "
+        "dictée, agents dans l'île), sur toutes les distributions ; rien n'est désinstallé.",
+        "Automatic: the best available one (API keys, Claude Code, Codex, Gemini CLI, OpenCode, Ollama, JARVIS), and the "
+        "next one if it fails. None: no AI anywhere any more (Spotlight, text, terminal, screenshots, JARVIS, dictation, "
+        "agents in the island), on every distribution; nothing is uninstalled."),
+      [("auto", L("Automatique", "Automatic")), ("manuel", L("Celle que je choisis", "The one I choose")),
+       ("non", L("Aucune (tout couper)", "None (turn everything off)"))]),
+    R("IA_CHOIX", "Intelligence artificielle", L("IA choisie (mode manuel)", "Chosen AI (manual mode)"), "choix", "claude",
+      L("Utilisée pour tout quand « IA du bureau » est sur « Celle que je choisis ». Une IA qui ne lit pas les images "
+        "laisse les captures à la meilleure qui sait le faire.",
+        "Used for everything when “Desktop AI” is set to “The one I choose”. An AI that can't read images leaves "
+        "screenshots to the best one that can."),
+      lambda: choix_ia()),
+    R("IA_PREFERENCE", "Intelligence artificielle", L("Ordre du mode automatique", "Automatic mode order"), "choix", "rapide",
+      L("Laquelle passe d'abord quand plusieurs sont disponibles. Une IA qui vient d'échouer passe en dernier pendant 10 min.",
+        "Which one goes first when several are available. An AI that just failed goes last for 10 min."),
+      [("rapide", L("La plus rapide (API, puis JARVIS, puis les programmes)", "The fastest (APIs, then JARVIS, then programs)")),
+       ("abonnements", L("Mes abonnements d'abord (Claude Code, Codex…)", "My subscriptions first (Claude Code, Codex…)")),
+       ("local", L("Sur ce PC d'abord (Ollama)", "On this PC first (Ollama)")),
+       ("jarvis", L("JARVIS d'abord", "JARVIS first"))]),
+    R("SPOTLIGHT_IA", "Intelligence artificielle", L("IA du Spotlight (« ? ta question »)", "Spotlight AI (“? your question”)"), "choix", "auto",
+      L("Réponse courte dans le Spotlight ; la commande qu'elle propose se lance avec Entrée.",
+        "A short answer in Spotlight; the command it suggests runs with Enter."),
+      lambda: [("auto", L("Comme l'IA du bureau", "Same as the desktop AI"))] + choix_ia() + [("non", L("Aucune", "None"))]),
+    R("IA_TEXTE", "Intelligence artificielle", L("IA sur le texte sélectionné", "AI on the selected text"), "ouinon", "oui",
+      L("Super + Alt + I, ou « ! » dans le Spotlight : résumer, traduire, corriger, reformuler, expliquer ou répondre au "
+        "texte sélectionné (sinon copié) ; le résultat est copié.",
+        "Super + Alt + I, or “!” in Spotlight: summarize, translate, fix, rephrase, explain or reply to the selected "
+        "(otherwise copied) text; the result is copied.")),
+    R("IA_TERMINAL", "Intelligence artificielle", L("IA dans le terminal", "AI in the terminal"), "ouinon", "oui",
+      L("Alt + I : la description tapée devient une commande (relue avant Entrée) ; « ia question » répond, « … | ia "
+        "résume » travaille sur la sortie d'une commande.",
+        "Alt + I: the typed description becomes a command (reviewed before Enter); “ia question” answers, “… | ia "
+        "summarize” works on a command's output.")),
+    R("IA_CAPTURE", "Intelligence artificielle", L("Expliquer une zone de l'écran", "Explain an area of the screen"), "ouinon", "oui",
+      L("Super + Alt + Maj + I : choisis une zone (un message d'erreur, un graphique…), l'IA l'explique dans une "
+        "notification. Demande une IA qui lit les images.",
+        "Super + Alt + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
+        "Needs an AI that reads images.")),
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : la fenêtre « Connexion JARVIS » (ligne ci-dessus).",
@@ -1716,6 +1767,12 @@ class Ecran:
                                                                  "History not found (config repository missing)")}]
             return self.lignes_n
         lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
+        if SECTIONS[self.sec] == "Intelligence artificielle":
+            lignes += [{"genre": "assistant", "action": "ia-cles", "nom": T("Clés d'API des IA", "AI API keys"),
+                        "aide": T("Saisie masquée, chaque clé essayée tout de suite (nc-ia configurer).",
+                                  "Hidden input, each key tested right away (nc-ai configure).")},
+                       {"genre": "assistant", "action": "ia-tester", "nom": T("Tester les IA disponibles", "Test the available AIs"),
+                        "aide": T("Une question d'un mot à chacune (nc-ia tester).", "A one-word question to each (nc-ai test).")}]
         if SECTIONS[self.sec] == "Agents IA (coucou)":
             for action, nom, aide in [
                 ("tableau", T("Ouvrir le cockpit JARVIS", "Open JARVIS dashboard"), T("Chat et gestion plein écran, partagés avec l’île.", "Fullscreen chat and management, shared with the island.")),
@@ -2056,6 +2113,17 @@ class Ecran:
             code, message = verifier_assistant()
             self.statut(message, erreur=code != 0)
             return
+        if isinstance(it, dict) and it.get("action") == "ia-tester":
+            self.statut(T("Essai des IA…", "Testing the AIs…"))
+            self.dessiner()
+            r = subprocess.run([os.path.join(BIN, "nc-ia"), "tester", "--json"], capture_output=True, text=True)
+            try:
+                res = json.loads(r.stdout)
+                message = " · ".join(("✓ " if x["ok"] else "✗ ") + x["nom"] for x in res) or T("Aucune IA disponible", "No AI available")
+            except ValueError:
+                message = (r.stderr.strip() or T("Essai impossible", "Test failed"))[:200]
+            self.statut(message, erreur=r.returncode != 0)
+            return
         # Le client récupère un terminal normal pour input/getpass, puis on retrouve l'écran des réglages.
         curses.def_prog_mode()
         curses.endwin()
@@ -2063,6 +2131,8 @@ class Ecran:
             action = it.get("action") if isinstance(it, dict) else None
             if action in ("tableau", "deployer", "serveur"):
                 code = subprocess.run([sys.executable, os.path.join(BIN, "nc-jarvis"), action]).returncode
+            elif action == "ia-cles":
+                code = subprocess.run([os.path.join(BIN, "nc-ia"), "configurer"]).returncode
             else:
                 code = configurer_assistant()
         except (KeyboardInterrupt, OSError):
@@ -2072,7 +2142,8 @@ class Ecran:
             curses.flushinp()
             self.e.touchwin()
             self.e.refresh()
-        message = T("Action JARVIS terminée", "JARVIS action finished") if action in ("tableau", "deployer", "serveur") else T("Connexion de l'assistant enregistrée", "Assistant connection saved")
+        message = T("Action JARVIS terminée", "JARVIS action finished") if action in ("tableau", "deployer", "serveur") \
+            else T("Clés des IA enregistrées", "AI keys saved") if action == "ia-cles" else T("Connexion de l'assistant enregistrée", "Assistant connection saved")
         self.statut(message if code == 0 else
                     T("Configuration interrompue ou échouée", "Configuration interrupted or failed"),
                     erreur=code != 0)
@@ -2426,6 +2497,19 @@ def catalogue(vals):
                            "Server address, secret key and connection test, in a window."),
                     choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="", affiche=T("Configurer…", "Configure…"),
                     modifie=False, groupe="", commande=["nc-assistant", "configurer"])]
+    sec_ia = "Intelligence artificielle"
+    for cle_a, nom_a, aide_a, cmd in reversed((
+            ("action:ia-cles", T("Clés d'API des IA", "AI API keys"),
+             T("Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, OpenRouter et l'adresse d'Ollama : saisie masquée, "
+               "chaque clé essayée tout de suite, gardée dans ~/.config/nc/ia.conf (0600).",
+               "Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, OpenRouter and the Ollama address: hidden input, each "
+               "key tested right away, kept in ~/.config/nc/ia.conf (0600)."), ["nc-ia", "configurer"]),
+            ("action:ia-tester", T("Tester les IA disponibles", "Test the available AIs"),
+             T("Une question d'un mot à chacune : laquelle répond, et en combien de temps.",
+               "A one-word question to each: which one answers, and how fast."), ["nc-ia", "fenetre-test"]))):
+        actions.append(dict(cle=cle_a, section=sec_ia, sectionNom=nom_section(sec_ia), nom=nom_a, genre="action", defaut="",
+                            aide=aide_a, choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="",
+                            affiche=T("Ouvrir…", "Open…"), modifie=False, groupe="", commande=cmd))
     for a in actions:
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)

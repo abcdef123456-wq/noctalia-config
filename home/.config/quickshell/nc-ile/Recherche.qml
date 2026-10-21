@@ -5,7 +5,8 @@
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal, « ? » question à une IA
-// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander), « + » logiciel à installer
+// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander), « ! » l'IA sur le texte
+// sélectionné ou copié (résumer, traduire, corriger… ou une consigne libre : nc-ia texte), « + » logiciel à installer
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
 // Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
 // Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
@@ -30,14 +31,36 @@ Item {
     // Question à une IA (« ? … ») : réponse, et la commande qu'elle propose
     property var execs: ({})                 // programmes du PATH (saisie qui commence par une commande)
     property string nomIA: ""
+    property string agentIA: "claude"        // logo (Etincelle) de l'IA qui répondrait à la prochaine question
+    property string iaReponse: ""            // l'IA qui a vraiment répondu (repli compris) et son logo
+    property string agentReponse: "claude"
+    property bool iaCoupee: false            // aucune IA (réglage général, ou « IA du Spotlight : Aucune »)
+    property bool modeTexte: false           // la réponse en cours est celle d'une action sur le texte (« ! »)
+    readonly property bool texteActif: !Reglages.iaCoupee && Reglages.val("IA_TEXTE", "oui") !== "non"
+    readonly property var actionsTexte: [
+        { id: "resumer", t: Reglages.t("Résumer", "Summarize"), k: "résumer résumé synthèse summarize summary tldr", g: "short_text" },
+        { id: "traduire", t: Reglages.t("Traduire", "Translate"), k: "traduire traduction anglais français translate translation english french", g: "translate" },
+        { id: "corriger", t: Reglages.t("Corriger l'orthographe", "Fix Spelling and Grammar"), k: "corriger orthographe grammaire fautes fix spelling grammar typos", g: "spellcheck" },
+        { id: "reformuler", t: Reglages.t("Reformuler", "Rephrase"), k: "reformuler simplifier clarifier réécrire rephrase rewrite simplify", g: "edit_note" },
+        { id: "expliquer", t: Reglages.t("Expliquer", "Explain"), k: "expliquer comprendre code erreur explain understand error", g: "lightbulb" },
+        { id: "repondre", t: Reglages.t("Rédiger une réponse", "Draft a Reply"), k: "répondre réponse mail courriel message reply answer email", g: "reply" }
+    ]
     property string questionPosee: ""
     property string reponse: ""
     property string commandeIA: ""
     readonly property bool reflechit: demandeur.running
     function demander(question) {
         if (question === "" || demandeur.running) return
-        questionPosee = question; reponse = ""; commandeIA = ""
+        questionPosee = question; reponse = ""; commandeIA = ""; modeTexte = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-demander", "--flux", question]
+        demandeur.running = true
+        chercher()
+    }
+    // « ! » : une action (ou une consigne libre) sur le texte sélectionné, sinon copié ; le résultat se copie avec Entrée
+    function demanderTexte(action) {
+        if (action === "" || demandeur.running) return
+        questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = true; iaReponse = nomIA; agentReponse = agentIA
+        demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"]
         demandeur.running = true
         chercher()
     }
@@ -99,7 +122,7 @@ Item {
         lireApplis.running = true
         lireFenetres.running = true
         if (Object.keys(execs).length === 0) lireExecs.running = true
-        if (nomIA === "") lireIA.running = true
+        lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
         fichierUsage.reload()
         champ.forceActiveFocus()
@@ -128,8 +151,14 @@ Item {
     }
     Process {
         id: lireIA
-        command: [Etat.bin + "nc-demander", "--ia"]
-        stdout: StdioCollector { onStreamFinished: r.nomIA = text.trim() || "-" }
+        command: [Etat.bin + "nc-demander", "--ia", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // Ancien nc-demander (pendant une mise à jour) : le nom seul, en texte
+                try { var d = JSON.parse(text); r.nomIA = d.nom || "-"; r.agentIA = d.agent || "claude"; r.iaCoupee = !!d.coupee }
+                catch (e) { r.nomIA = text.trim() || "-" }
+            }
+        }
     }
     // Réponse affichée pendant qu'elle s'écrit ; à la fin, la ligne « $ … » devient la commande à lancer
     property string brut: ""
@@ -137,17 +166,25 @@ Item {
         id: demandeur
         onRunningChanged: {
             if (running) { r.brut = "" }
+            else if (r.modeTexte) {
+                r.reponse = r.brut.trim() || Reglages.t("Pas de réponse.", "No answer.")
+            }
             else {
                 var l = r.brut.trim().split("\n")
                 var c = l.length && l[l.length - 1].trim().startsWith("$ ") ? l.pop().trim().slice(2).trim() : ""
                 r.reponse = l.join("\n").trim() || Reglages.t("Pas de réponse.", "No answer.")
                 r.commandeIA = c
             }
+            if (!running) lireIA.running = true      // la prochaine question peut aller à une autre IA (repli, choix)
             r.chercher()
         }
         stdout: SplitParser {
             onRead: ligne => {
-                try { r.brut += JSON.parse(ligne).t || "" } catch (e) { return }
+                try {
+                    var d = JSON.parse(ligne)
+                    if (d.ia) { r.iaReponse = d.ia; r.agentReponse = d.agent || r.agentReponse }    // repli compris
+                    r.brut += d.t || ""
+                } catch (e) { return }
                 r.reponse = r.brut
             }
         }
@@ -208,7 +245,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|g |yt |w |\/)/.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|g |yt |w |\/)/.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -263,7 +300,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -296,7 +333,18 @@ Item {
         { t: Reglages.t("Copier le texte de l'écran", "Copy Text from Screen"), k: "texte ocr lire image copier capture extraire text copy read screen extract", g: "text_select_start", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"]) },
         { t: Reglages.t("Presse-papiers", "Clipboard"), k: "presse-papiers clipboard copier coller copy paste history", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
         { t: Reglages.t("Fond d'écran suivant", "Next Wallpaper"), k: "fond écran wallpaper suivant next background", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
-        { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) }
+        { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) },
+        // IA (cachées quand elle est coupée)
+        { t: Reglages.t("IA sur le texte copié", "AI on Copied Text"), k: "ia ai résumer traduire corriger reformuler texte summarize translate fix rephrase text", g: "auto_awesome",
+          ia: "IA_TEXTE", garder: true, f: () => { champ.text = "! "; champ.cursorPosition = 2 } },
+        { t: Reglages.t("Expliquer une zone de l'écran", "Explain an Area of the Screen"), k: "ia ai capture écran expliquer erreur image screenshot explain error", g: "center_focus_strong",
+          ia: "IA_CAPTURE", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; exec \"$HOME/.local/bin/nc-ia\" capture"]) },
+        { t: Reglages.t("Tester les IA", "Test the AIs"), k: "ia ai tester essai clé api claude openai gemini ollama test key", g: "science", ia: "IA_MODE",
+          f: () => Quickshell.execDetached([Etat.bin + "nc-ia", "fenetre-test"]) },
+        { t: Reglages.t("Couper l'IA partout", "Turn AI Off Everywhere"), k: "ia ai couper désactiver aucune arrêter intelligence artificielle turn off disable none", g: "block", ia: "IA_MODE",
+          f: () => Quickshell.execDetached([Etat.bin + "nc-reglages", "set", "IA_MODE", "non"]) },
+        { t: Reglages.t("Rallumer l'IA", "Turn AI Back On"), k: "ia ai rallumer activer intelligence artificielle turn on enable", g: "auto_awesome", siCoupee: true,
+          f: () => Quickshell.execDetached([Etat.bin + "nc-reglages", "set", "IA_MODE", "auto"]) }
     ]
     readonly property var pagesIle: [
         { t: "JARVIS", k: "jarvis assistant chat ia distant conversation question", g: "chat", p: "assistant" },
@@ -389,12 +437,46 @@ Item {
                 resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]).concat(deLaConfig)
             } else {
                 var ia = r.reflechit ? []
-                          : nomIA === "-" ? (deLaConfig.length ? [] : [{ titre: Reglages.t("Aucune IA installée pour répondre", "No AI installed to answer"), sous: Reglages.t("Claude, opencode, Gemini ou Qwen", "Claude, opencode, Gemini or Qwen"), glyphe: "block", garder: true, f: () => {} }])
+                          : iaCoupee ? [{ titre: Reglages.t("L'IA est désactivée", "AI is turned off"), sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
+                                          glyphe: "block", f: () => r.ouvrirReglage(Reglages.t("IA du bureau", "Desktop AI")) }]
+                          : nomIA === "-" ? [{ titre: Reglages.t("Aucune IA disponible pour répondre", "No AI available to answer"),
+                                               sous: Reglages.t("Ajouter une clé d'API, Claude Code, Ollama…", "Add an API key, Claude Code, Ollama…"),
+                                               glyphe: "key", f: () => Quickshell.execDetached([Etat.bin + "nc-ia", "configurer"]) }]
                           : [{ titre: question || Reglages.t("Pose ta question", "Ask your question"),
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
                 resultats = deLaConfig.concat(ia)
             }
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+            return
+        }
+        if (q.startsWith("!")) {
+            var consigneT = q.slice(1).trim()
+            if (!texteActif) {
+                resultats = [{ titre: Reglages.iaCoupee ? Reglages.t("L'IA est désactivée", "AI is turned off") : Reglages.t("L'IA sur le texte est désactivée", "AI on text is turned off"),
+                               sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"), glyphe: "block",
+                               f: () => r.ouvrirReglage(Reglages.iaCoupee ? Reglages.t("IA du bureau", "Desktop AI") : Reglages.t("IA sur le texte sélectionné", "AI on the selected text")) }]
+                return
+            }
+            // demandeur.running plutôt que reflechit : à la fin de la réponse, sa liaison n'est pas encore à jour
+            if (r.modeTexte && q === r.questionPosee && (demandeur.running || r.reponse !== "")) {
+                let resultat = r.reponse
+                resultats = demandeur.running ? [] : [{ titre: Reglages.t("Copier le résultat", "Copy the Result"), sous: r.iaReponse, glyphe: "content_copy",
+                                                  f: () => Quickshell.execDetached(["wl-copy", "--", resultat]) }]
+                sel = 0
+                return
+            }
+            var qt = sansAccents(consigneT)
+            var lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
+                let id = a.id
+                return { titre: a.t, sous: Reglages.t("Texte sélectionné ou copié · ", "Selected or copied text · ") + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
+                         glyphe: a.g, garder: true, f: () => r.demanderTexte(id) }
+            })
+            // Une consigne qui n'est pas une action connue : appliquée telle quelle (« ! en liste à puces »)
+            if (consigneT.length >= 3 && !lignesT.some(l => sansAccents(l.titre) === qt))
+                lignesT.push({ titre: "« " + consigneT + " »", sous: Reglages.t("Consigne libre sur le texte sélectionné ou copié", "Free instruction on the selected or copied text"),
+                               glyphe: "auto_awesome", garder: true, f: () => r.demanderTexte(consigneT) })
+            resultats = lignesT
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
@@ -465,11 +547,14 @@ Item {
         // Pages de l'île et actions
         for (var p = 0; p < pagesIle.length; p++) {
             var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
+            if (!Reglages.pageActive(pg.p)) continue
             if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: Reglages.t("Dans l'île", "In the island"), glyphe: pg.g, s: sp - 5, page: nom }) }
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
-            if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f })
+            if (ac.ia && (Reglages.iaCoupee || Reglages.val(ac.ia, "oui") === "non")) continue
+            if (ac.siCoupee && !Reglages.iaCoupee) continue
+            if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }
         // Fichiers
         for (var n = 0; n < fichiers.length; n++) {
@@ -546,8 +631,8 @@ Item {
     readonly property bool occupe: suivi.running || entreeEnAttente
     function valider(i, nouveau) {
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
-        // (pas pour « ? », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^[?>+]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
+        // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
+        if ((lireApplis.running || applis.length === 0) && !/^[?>+!]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
@@ -589,7 +674,7 @@ Item {
     // Réponse de l'IA (« ? … »)
     Rectangle {
         id: zoneReponse
-        visible: r.reponseAide !== "" || (r.q.startsWith("?") && (r.reflechit || r.reponse !== ""))
+        visible: r.reponseAide !== "" || ((r.q.startsWith("?") || (r.q.startsWith("!") && r.modeTexte && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
         readonly property bool attend: r.reflechit && r.reponse === ""
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
@@ -600,11 +685,11 @@ Item {
             x: 14; y: 12; spacing: 8
             Etincelle {
                 anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: r.reflechit
-                agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen", Assistant: "assistant" })[r.nomIA] || "claude"
+                agent: r.agentReponse
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
                     text: r.reponseAide !== "" ? Reglages.t("Aide de la config · ", "Config help · ") + r.titreAide
-                        : zoneReponse.attend ? r.nomIA + Reglages.t(" réfléchit…", " is thinking…") : r.nomIA }
+                        : zoneReponse.attend ? r.iaReponse + Reglages.t(" réfléchit…", " is thinking…") : r.iaReponse }
         }
         Text {
             id: texteReponse

@@ -58,7 +58,12 @@ A_TAPER = [
                                                "un ami) ; nc-sauvegarde restaurer FICHIER pour les remettre."),
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
-    ("nc-demander", "nc-demander \"comment voir la place libre\"", "Question rapide à une IA installée (Claude, opencode, Gemini, Qwen) ; "
+    ("nc-ia", "nc-ia etat", "L'IA du bureau, une seule pour tout : clés d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, "
+                            "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Ollama ou JARVIS ; "
+                            "automatique, choisie ou aucune (nc-reglages → Intelligence artificielle). nc-ia configurer : "
+                            "les clés ; nc-ia tester ; Super + Alt + I : le texte sélectionné ; Super + Alt + Maj + I : "
+                            "une zone de l'écran ; Alt + I dans le terminal : une commande ; « ia question »."),
+    ("nc-demander", "nc-demander \"comment voir la place libre\"", "Question rapide à l'IA du bureau (nc-ia) ; "
                                     "dans le Spotlight : « ? ta question »."),
     ("nc-assistant", "nc-assistant configurer", "Assistant personnel distant : URL et clé du serveur, chat kitty "
                                            "(Super + Alt + A), questions, briefing ; nc-assistant verifier teste la connexion "
@@ -118,7 +123,7 @@ NOMS_ANGLAIS = {
     "nc-sauvegarde": "nc-backup", "nc-memoire": "nc-memory", "nc-meteo": "nc-weather", "nc-icones": "nc-icons",
     "nc-fermer": "nc-close", "nc-couvercle": "nc-lid", "nc-session-propre": "nc-clean-session", "nc-langue": "nc-lang",
     "nc-claude": "nc-agents", "nc-touches": "nc-kbd-light", "nc-ile-etat": "nc-island-state",
-    "nc-ecrans": "nc-displays",
+    "nc-ecrans": "nc-displays", "nc-ia": "nc-ai",
 }
 # En anglais : (exemple, explication), par nom français
 ANGLAIS = {
@@ -139,8 +144,13 @@ ANGLAIS = {
     "nc-logiciels": ("nc-logiciels chercher obs", "Search an app to install (repos, AUR, Flatpak) and install it in a terminal; in Spotlight: “+ name”."),
     "nc-firefox": ("nc-firefox install", "The repo's Firefox config (prefs and island style) in your profile; "
                    "nc-firefox uninstall puts everything back."),
-    "nc-demander": ("nc-ask \"how do I see free disk space\"", "Quick question to an installed AI (Claude, opencode, Gemini, "
-                                                               "Qwen); in Spotlight: “? your question”."),
+    "nc-demander": ("nc-ask \"how do I see free disk space\"", "Quick question to the desktop AI (nc-ai); in Spotlight: "
+                                                               "“? your question”."),
+    "nc-ia": ("nc-ai status", "The desktop AI, one for everything: API keys (Anthropic, OpenAI, Gemini, Mistral, Groq, "
+                              "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Ollama or JARVIS; "
+                              "automatic, chosen or none (nc-settings → Artificial intelligence). nc-ai configure: the "
+                              "keys; nc-ai test; Super + Alt + I: the selected text; Super + Alt + Shift + I: an area of "
+                              "the screen; Alt + I in the terminal: a command; “ia question”."),
     "nc-claude": ("nc-agents state", "Claude Code in the island (like coucou): what it is doing, when it is done, its "
                                      "requests, and writing to it from the island. Also opencode, Codex, Gemini CLI, Cursor, "
                                      "Copilot, Qwen, Kiro, Amp, Antigravity: nc-agents install AI (or all); nc-agents diag "

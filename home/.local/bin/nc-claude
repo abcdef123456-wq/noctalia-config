@@ -1287,6 +1287,8 @@ def main():
     a = sys.argv[1:]
     if os.environ.get("NC_ILE_SANS") and a and a[0] in ("hook", "agy", "ia"):
         return                                 # question rapide du Spotlight (nc-demander) : pas une session à suivre
+    if a and a[0] in ("hook", "agy", "ia", "assistant") and reglage("IA_MODE", "auto") == "non":
+        return                                 # IA du bureau coupée : plus rien dans l'île, l'agent travaille comme sans elle
     # Sous-commandes anglaises (nc-agents install…) : ramenées aux françaises
     if a:
         a[0] = {"install": "installer", "remove": "retirer", "detect": "detecter", "refresh": "actualiser",

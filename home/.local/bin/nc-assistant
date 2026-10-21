@@ -82,6 +82,21 @@ class Erreur(Exception):
     pass
 
 
+def ia_coupee():
+    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : JARVIS ne répond plus nulle part."""
+    try:
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith("IA_MODE="):
+                return l.split("=", 1)[1].strip().strip('"') == "non"
+    except OSError:
+        pass
+    return False
+
+
+MESSAGE_COUPEE = ("L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).",
+                  "AI is turned off (nc-settings → Artificial intelligence → Desktop AI).")
+
+
 def valider(c):
     url = c.get("URL", "").strip().rstrip("/")
     try:
@@ -1056,6 +1071,30 @@ def ouvrir(question):
         raise Erreur(T("Kitty est nécessaire pour ouvrir le chat.", "Kitty is required to open the chat.")) from None
 
 
+def ia_du_bureau():
+    """nc-ia (même dossier) comme module, ou None s'il manque."""
+    try:
+        import importlib.machinery
+        import importlib.util
+        l = importlib.machinery.SourceFileLoader("nc_ia", str(Path(__file__).resolve().parent / "nc-ia"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_ia", l))
+        l.exec_module(m)
+        return m
+    except (OSError, SyntaxError, ImportError):
+        return None
+
+
+def repondre_par_ia(ia, historique, question):
+    try:
+        texte, qui = ia.chat(historique, question)
+    except ia.ErreurIA as e:
+        conseil = "" if CONF.exists() or "nc-assistant configurer" in str(e) else \
+            T(" Pour JARVIS : nc-assistant configurer.", " For JARVIS: nc-assistant configurer.")
+        raise Erreur(str(e) + conseil) from None
+    texte = texte[:15900] + f"\n\n*— {ia.nom(qui)}*"
+    print(json.dumps(dict(ok=True, text=texte, truncated=False, engine=ia.nom(qui)), ensure_ascii=False), flush=True)
+
+
 def requete_ile():
     # Une ligne JSON sur stdin : la question ne figure ni dans argv ni dans un fichier.
     try:
@@ -1072,8 +1111,22 @@ def requete_ile():
     except (ValueError, UnicodeError):
         raise Erreur(T("Question invalide ou trop longue (8 000 caractères maximum).",
                        "Invalid question or too long (8,000 characters maximum).")) from None
-    # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
-    texte = demander(configuration_question(question), sid, question, suivi=False)
+    historique = r.get("historique") if isinstance(r.get("historique"), list) else []
+    # JARVIS répond s'il est relié, sauf si une autre IA est choisie à la main (nc-reglages → Intelligence artificielle) ;
+    # sinon, ou s'il est injoignable en mode automatique, l'IA du bureau (nc-ia) répond à sa place
+    ia = ia_du_bureau()
+    commande = question.lstrip().startswith("/")
+    choix = ia.ANCIENS.get(ia.reglage("IA_CHOIX", ""), ia.reglage("IA_CHOIX", "")) if ia else ""
+    par_jarvis = CONF.exists() and not (ia and ia.mode() == "manuel" and choix in ia.FOURNISSEURS and choix != "jarvis")
+    if ia and not par_jarvis and not commande:
+        return repondre_par_ia(ia, historique, question)
+    try:
+        # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
+        texte = demander(configuration_question(question), sid, question, suivi=False)
+    except Erreur:
+        if ia and par_jarvis and not commande and ia.mode() == "auto" and [i for i in ia.candidats("question") if i != "jarvis"]:
+            return repondre_par_ia(ia, historique, question)
+        raise
     # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète.
     print(json.dumps(dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000), ensure_ascii=False), flush=True)
 
@@ -1107,6 +1160,8 @@ def main():
             configurer(getattr(a, "terminal", False))
         elif commande == "config-ile":
             return configuration_ile(a.action)
+        elif commande in ("ouvrir", "chat", "demander", "briefing", "requete-ile") and ia_coupee():
+            raise Erreur(T(*MESSAGE_COUPEE))
         elif commande == "ouvrir":
             ouvrir(a.question)
         elif commande == "requete-ile":

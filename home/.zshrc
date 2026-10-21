@@ -19,4 +19,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # Accueil du terminal (logo aux couleurs du fond d'écran + infos système)
 [[ -r ~/.config/nc/greeting.zsh ]] && source ~/.config/nc/greeting.zsh
 
+# IA dans le terminal : Alt + I (description → commande), « ia question » (nc-ia)
+[[ -r ~/.config/nc/ia.zsh ]] && source ~/.config/nc/ia.zsh
+
 [[ -r ~/.zshrc.perso ]] && source ~/.zshrc.perso

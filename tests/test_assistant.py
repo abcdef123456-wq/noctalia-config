@@ -63,8 +63,12 @@ class Assistant(unittest.TestCase):
         self.bin.mkdir(parents=True)
         self.run = self.root / "run"
         self.run.mkdir(mode=0o700)
-        for nom in ("nc-assistant", "nc-claude", "nc-demander"):
+        for nom in ("nc-assistant", "nc-claude", "nc-demander", "nc-ia"):
             shutil.copy2(BIN / nom, self.bin / nom)
+        # Les IA installées sur la machine de test ne répondent pas à la place du faux serveur
+        for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
+            (self.bin / nom).write_text("#!/bin/sh\nexit 1\n")
+            (self.bin / nom).chmod(0o755)
         hypr = self.bin / "hyprctl"
         hypr.write_text('#!/bin/sh\nprintf "[]\\n"\n')
         hypr.chmod(0o755)
@@ -307,11 +311,14 @@ class Assistant(unittest.TestCase):
         self.assertEqual(len(self.etat()["sessions"]), 8)
 
     def test_spotlight_selection_and_json_contract(self):
+        # « assistant » (ancienne valeur du réglage) : JARVIS, par nc-ia
         self.settings("SPOTLIGHT_IA=assistant\n")
-        self.assertEqual(self.cli("--ia", nom="nc-demander").stdout.strip(), "Assistant")
+        self.assertEqual(self.cli("--ia", nom="nc-demander").stdout.strip(), "JARVIS")
         r = self.cli("--flux", "test", nom="nc-demander")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads(r.stdout)["t"], "Bonjour\n$ echo ok")
+        lignes = [json.loads(l) for l in r.stdout.splitlines()]
+        self.assertEqual(lignes[0]["id"], "jarvis")
+        self.assertEqual("".join(l.get("t", "") for l in lignes), "Bonjour\n$ echo ok")
         self.assertIn("Hyprland", self.server.recus[0][3]["prompt"])
         self.m.CONF.unlink()
         r = self.cli("--flux", "test", nom="nc-demander")
@@ -319,12 +326,12 @@ class Assistant(unittest.TestCase):
         self.assertIn("configurer", json.loads(r.stdout)["t"])
 
     def test_unconfigured_assistant_is_not_auto_selected(self):
-        m = charger("nc-demander")
-        m.HOME = str(self.root)
-        with patch.object(m.shutil, "which", return_value=None):
-            self.assertEqual(m.ia(), "assistant")
+        m = charger("nc-ia")
+        with patch.object(m.shutil, "which", return_value=None), patch.object(m, "ollama_present", return_value=False), \
+                patch.object(m, "cle", return_value=("", "")):
+            self.assertEqual(m.candidats("question"), ["jarvis"])
             self.m.CONF.unlink()
-            self.assertEqual(m.ia(), "")
+            self.assertEqual(m.candidats("question"), [])
 
     def test_briefing_and_notification_are_arguments_without_shell(self):
         malveillant = '$(touch should-never-exist) " <b>text</b>'

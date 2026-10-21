@@ -122,7 +122,11 @@ class Dictee(unittest.TestCase):
     def test_non_configure_et_annulation(self):
         (self.home / ".config/nc/assistant.conf").unlink()
         self.lancer("start")
-        self.assertEqual(self.lancer("stop"), (1, {"ok": False, "error": "Assistant non configuré : lance nc-assistant configurer."}))
+        # Sans JARVIS ni clé d'API de transcription : le message dit quoi faire (nc-ia transcrit sinon)
+        code, r = self.lancer("stop")
+        self.assertEqual((code, r["ok"]), (1, False))
+        self.assertIn("relie JARVIS", r["error"])
+        self.assertIn("nc-ia configurer", r["error"])
         self.lancer("start")
         self.assertEqual(self.lancer("cancel"), (0, {"ok": True, "recording": False}))
         self.assertFalse((self.home / "run/nc-dictee.wav").exists())

@@ -1,0 +1,1311 @@
+#!/usr/bin/env python3
+"""nc-ia : l'IA du bureau, une seule porte pour tout (Spotlight, texte copié, terminal, captures, JARVIS).
+
+  nc-ia etat [--json]                  le mode, l'IA choisie pour chaque usage, celles qui sont disponibles
+  nc-ia demander [options] QUESTION    la réponse (QUESTION « - » : lue sur l'entrée standard)
+        --flux                         morceau par morceau : une ligne JSON {"t": …} chacun ({"ia": …} avant)
+        --usage question|texte|commande|image   (question par défaut)
+        --ia ID                        cette IA-là (sinon : le réglage) ; --image FICHIER : une image jointe
+  nc-ia texte ACTION [--presse|--selection] [--copier] [--flux]
+                                       sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
+                                       reformuler, expliquer, repondre, ou une consigne libre entre guillemets
+  nc-ia menu                           les actions sur le texte (Super + Alt + I) : le Spotlight sur « ! », sinon un menu
+  nc-ia terminal QUESTION              la réponse dans un terminal (« ? » du lanceur de Noctalia, sans l'île)
+  nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
+  nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Alt + Maj + I)
+  nc-ia configurer                     les clés d'API au clavier (masquées), chacune essayée tout de suite
+  nc-ia cle FOURNISSEUR                enregistre sa clé d'API, lue sur l'entrée standard (vide : l'efface)
+  nc-ia cles [--json]                  les clés enregistrées, masquées, et d'où elles viennent
+  nc-ia modele FOURNISSEUR [NOM]       le modèle utilisé (sans NOM : retour au choix automatique)
+  nc-ia tester [ID] [--json]           un essai court de chaque IA disponible (ou de celle-ci)
+  nc-ia quelle [--usage U] [--json]    l'IA qui répondrait maintenant
+  nc-ia actif                          code 0 si l'IA est permise, 1 si elle est coupée (IA_MODE=non)
+  nc-ia derniere                       la dernière réponse en entier (lue dans le terminal)
+  nc-ia transcrire FICHIER.wav [--json]   le texte d'un enregistrement (dictée sans JARVIS : Groq, OpenAI, Gemini)
+
+Réglages (nc-reglages → Intelligence artificielle) : IA_MODE auto (la meilleure disponible, la suivante si elle
+échoue), manuel (IA_CHOIX) ou non (plus aucune IA nulle part : Spotlight, JARVIS, dictée, agents dans l'île) ;
+IA_PREFERENCE pour l'ordre du mode auto (rapide, abonnements, local, jarvis).
+Clés : ~/.config/nc/ia.conf (0600, jamais en argument ni dans un journal), sinon les variables d'environnement
+habituelles (ANTHROPIC_API_KEY, OPENAI_API_KEY…). Aussi dans ia.conf : MODELE_<FOURNISSEUR> (nc-ia modele),
+URL_<FOURNISSEUR> (une passerelle ou un serveur compatible, en HTTPS), OLLAMA_HOST.
+Rien ne tourne en arrière-plan : une IA n'est appelée que sur demande.
+"""
+import base64
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        l = reglage("LANGUE", "")
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+HOME = Path.home()
+CONFIG = HOME / ".config"           # comme nc-reglages et nc-assistant (pas XDG_CONFIG_HOME : un seul endroit)
+REGLAGES = CONFIG / "nc/reglages.conf"
+CLES = CONFIG / "nc/ia.conf"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc"
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "nc-ia"
+DERNIERE = RUN / "derniere.md"
+MAX_REPONSE = 4 * 1024 * 1024
+# L'île tourne avec le PATH du système : les IA installées pour l'utilisateur sont souvent ailleurs
+os.environ["PATH"] = os.pathsep.join([str(HOME / d) for d in (".local/bin", "bin", ".npm-global/bin", ".bun/bin",
+                                      ".opencode/bin", ".cargo/bin", ".deno/bin")] + [os.environ.get("PATH", "/usr/bin")])
+
+_reglages = None
+
+
+def reglage(cle, defaut):
+    global _reglages
+    if _reglages is None:
+        _reglages = {}
+        try:
+            for l in REGLAGES.read_text(encoding="utf-8").splitlines():
+                k, s, v = l.partition("=")
+                if s and re.fullmatch(r"[A-Z0-9_]+", k.strip()):
+                    _reglages[k.strip()] = v.strip().strip('"')
+        except OSError:
+            pass
+    return _reglages.get(cle, defaut)
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, copied text, terminal, screenshots, JARVIS).
+
+  nc-ai status [--json]                the mode, the AI chosen for each use, the available ones
+  nc-ai ask [options] QUESTION         the answer (QUESTION “-”: read from standard input)
+        --flux                         piece by piece: one JSON line {"t": …} each ({"ia": …} first)
+        --usage question|texte|commande|image   (question by default)
+        --ia ID                        that AI (otherwise: the setting); --image FILE: an attached image
+  nc-ai text ACTION [--presse|--selection] [--copier] [--flux]
+                                       on the selected (else copied) text: resumer (summarize), traduire (translate),
+                                       corriger (fix), reformuler (rephrase), expliquer (explain), repondre (reply),
+                                       or a free instruction in quotes
+  nc-ai menu                           the text actions (Super + Alt + I): Spotlight on “!”, otherwise a menu
+  nc-ai terminal QUESTION              the answer in a terminal (“?” in the Noctalia launcher, without the island)
+  nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
+  nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Alt + Shift + I)
+  nc-ai configure                      the API keys from the keyboard (hidden), each one tested right away
+  nc-ai key PROVIDER                   saves its API key, read from standard input (empty: removes it)
+  nc-ai keys [--json]                  the saved keys, masked, and where they come from
+  nc-ai model PROVIDER [NAME]          the model used (no NAME: back to automatic choice)
+  nc-ai test [ID] [--json]             a short test of each available AI (or of this one)
+  nc-ai which [--usage U] [--json]     the AI that would answer now
+  nc-ai enabled                        exit code 0 if AI is allowed, 1 if it is turned off (IA_MODE=non)
+  nc-ai last                           the last answer in full (read in the terminal)
+  nc-ai transcribe FILE.wav [--json]   the text of a recording (dictation without JARVIS: Groq, OpenAI, Gemini)
+
+Settings (nc-settings → Artificial intelligence): IA_MODE auto (the best available one, the next if it fails), manuel
+(IA_CHOIX) or non (no AI anywhere any more: Spotlight, JARVIS, dictation, agents in the island);
+IA_PREFERENCE for the auto order (rapide, abonnements, local, jarvis).
+Keys: ~/.config/nc/ia.conf (0600, never in arguments or logs), otherwise the usual environment variables
+(ANTHROPIC_API_KEY, OPENAI_API_KEY…). Nothing runs in the background: an AI is only called on request.
+"""
+
+
+class ErreurIA(Exception):
+    pass
+
+
+# ── Fournisseurs ────────────────────────────────────────────────────────────────────────────────────────────────
+# genre : api (HTTP, clé), local (Ollama), cli (programme installé), jarvis (nc-assistant)
+# vision : accepte une image ; agent : le logo dessiné dans l'île (Etincelle)
+FOURNISSEURS = {
+    "anthropic": dict(nom="Claude (API Anthropic)", genre="api", cle="ANTHROPIC_API_KEY", vision=True, agent="claude",
+                      modele="claude-opus-5-5"),
+    "openai": dict(nom="ChatGPT (API OpenAI)", genre="api", cle="OPENAI_API_KEY", vision=True, agent="codex",
+                   url="https://api.openai.com/v1", modele=None),
+    "google": dict(nom="Gemini (API Google)", genre="api", cle="GEMINI_API_KEY", autres=("GOOGLE_API_KEY",), vision=True,
+                   agent="gemini", modele=None),
+    "mistral": dict(nom="Mistral (API)", genre="api", cle="MISTRAL_API_KEY", vision=False, agent="kiro",
+                    url="https://api.mistral.ai/v1", modele="mistral-small-latest"),
+    "groq": dict(nom="Groq (API)", genre="api", cle="GROQ_API_KEY", vision=False, agent="amp",
+                 url="https://api.groq.com/openai/v1", modele=None),
+    "deepseek": dict(nom="DeepSeek (API)", genre="api", cle="DEEPSEEK_API_KEY", vision=False, agent="cursor",
+                     url="https://api.deepseek.com/v1", modele="deepseek-chat"),
+    "openrouter": dict(nom="OpenRouter (API)", genre="api", cle="OPENROUTER_API_KEY", vision=True, agent="copilot",
+                       url="https://openrouter.ai/api/v1", modele="openrouter/auto"),
+    "jarvis": dict(nom="JARVIS", genre="jarvis", vision=False, agent="assistant"),
+    "claude": dict(nom="Claude Code", genre="cli", prog="claude", vision=True, agent="claude", modele="haiku"),
+    "codex": dict(nom="Codex", genre="cli", prog="codex", vision=True, agent="codex"),
+    "gemini-cli": dict(nom="Gemini CLI", genre="cli", prog="gemini", vision=True, agent="gemini"),
+    "opencode": dict(nom="OpenCode", genre="cli", prog="opencode", vision=False, agent="opencode"),
+    "qwen": dict(nom="Qwen Code", genre="cli", prog="qwen", vision=False, agent="qwen"),
+    "ollama": dict(nom="Ollama (sur ce PC)", genre="local", vision=True, agent="qwen", modele=None),
+}
+NOMS_EN = {"ollama": "Ollama (on this PC)"}
+APIS = [k for k, f in FOURNISSEURS.items() if f["genre"] == "api"]
+CLIS = [k for k, f in FOURNISSEURS.items() if f["genre"] == "cli"]
+# Ordre du mode automatique (IA_PREFERENCE)
+ORDRES = {
+    # Les API répondent le plus vite (premiers mots en moins d'une seconde), puis JARVIS, puis les programmes installés
+    "rapide": APIS + ["jarvis"] + CLIS + ["ollama"],
+    # Ce qui est déjà payé par un abonnement (Claude Code, Codex…) ou gratuit avant les API facturées à l'usage
+    "abonnements": CLIS + ["ollama", "jarvis"] + APIS,
+    # Rien ne sort du PC tant qu'Ollama répond
+    "local": ["ollama"] + APIS + ["jarvis"] + CLIS,
+    "jarvis": ["jarvis"] + APIS + CLIS + ["ollama"],
+}
+# Anciennes valeurs de SPOTLIGHT_IA (« gemini » y était Gemini CLI) → fournisseur
+ANCIENS = {"gemini": "gemini-cli", "assistant": "jarvis"}
+# Pour les clés et les modèles (seules les API en ont) : « gemini » désigne l'API de Google
+ALIAS_API = {"gemini": "google", "claude": "anthropic", "chatgpt": "openai"}
+
+
+def nom(ident):
+    f = FOURNISSEURS.get(ident)
+    return (NOMS_EN.get(ident) if EN else None) or (f["nom"] if f else ident)
+
+
+# ── Clés (fichier 0600, jamais en argument) ─────────────────────────────────────────────────────────────────────
+def lire_cles():
+    res = {}
+    try:
+        for l in CLES.read_text(encoding="utf-8").splitlines():
+            k, s, v = l.partition("=")
+            if s and re.fullmatch(r"[A-Z0-9_]+", k.strip()):
+                res[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return res
+
+
+def ecrire_cles(d):
+    CLES.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CLES.with_name(".ia.conf.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(T("# Clés d'API et modèles des IA (nc-ia cle, nc-ia modele). Privé : ne pas partager.\n",
+                  "# AI API keys and models (nc-ai key, nc-ai model). Private: do not share.\n"))
+        for k in sorted(d):
+            if d[k]:
+                f.write(f"{k}={d[k]}\n")
+    os.chmod(tmp, 0o600)
+    tmp.replace(CLES)
+
+
+def cle(ident):
+    """(clé, origine) ; origine : fichier, env ou ''."""
+    f = FOURNISSEURS[ident]
+    noms = (f["cle"],) + tuple(f.get("autres", ()))
+    d = lire_cles()
+    for n in noms:
+        if d.get(n):
+            return d[n], "fichier"
+    for n in noms:
+        if os.environ.get(n):
+            return os.environ[n], "env"
+    return "", ""
+
+
+def masquer(c):
+    return "…" + c[-4:] if len(c) > 8 else "…"
+
+
+BASES = {"anthropic": "https://api.anthropic.com/v1", "google": "https://generativelanguage.googleapis.com/v1beta"}
+
+
+def base(ident):
+    """L'adresse de l'API : la sienne, ou URL_<FOURNISSEUR> de ia.conf (passerelle, serveur compatible) ; HTTPS
+    obligatoire (HTTP seulement vers ce PC) : la clé ne circule jamais en clair sur le réseau."""
+    u = lire_cles().get("URL_" + ident.upper().replace("-", "_"), "").rstrip("/")
+    if u:
+        h = urllib.parse.urlparse(u)
+        if h.scheme == "https" or (h.scheme == "http" and h.hostname in ("127.0.0.1", "localhost", "::1")):
+            return u
+        raise ErreurIA(T(f"URL_{ident.upper()} doit commencer par https:// (http seulement vers ce PC).",
+                         f"URL_{ident.upper()} must start with https:// (http only towards this PC)."))
+    return BASES.get(ident) or FOURNISSEURS[ident]["url"]
+
+
+def modele_choisi(ident):
+    return lire_cles().get("MODELE_" + ident.upper().replace("-", "_"), "")
+
+
+# ── Disponibilité (instantanée : aucune requête réseau sauf Ollama, en local et gardé 30 s) ───────────────────────
+def ollama_url():
+    h = lire_cles().get("OLLAMA_HOST") or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
+    if not h.startswith("http"):
+        h = "http://" + h
+    return h.rstrip("/")
+
+
+def ollama_present():
+    memo = RUN / "ollama.json"
+    try:
+        d = json.loads(memo.read_text())
+        if time.time() - d["t"] < 30 and d.get("url") == ollama_url():
+            return d["ok"]
+    except (OSError, ValueError, KeyError):
+        pass
+    u = urllib.parse.urlparse(ollama_url())
+    try:
+        with socket.create_connection((u.hostname or "127.0.0.1", u.port or 11434), timeout=0.25):
+            ok = True
+    except OSError:
+        ok = False
+    try:
+        RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+        memo.write_text(json.dumps({"t": time.time(), "ok": ok, "url": ollama_url()}))
+    except OSError:
+        pass
+    return ok
+
+
+def disponible(ident):
+    f = FOURNISSEURS[ident]
+    if f["genre"] == "api":
+        return bool(cle(ident)[0])
+    if f["genre"] == "cli":
+        return bool(shutil.which(f["prog"]))
+    if f["genre"] == "jarvis":
+        return (HOME / ".local/bin/nc-assistant").exists() and (CONFIG / "nc/assistant.conf").is_file()
+    return ollama_present()
+
+
+def mode():
+    m = reglage("IA_MODE", "auto")
+    return m if m in ("auto", "manuel", "non") else "auto"
+
+
+def coupee():
+    return mode() == "non"
+
+
+def candidats(usage="question", force=""):
+    """Les IA à essayer, dans l'ordre : une seule en manuel (ou --ia), toutes celles disponibles en auto."""
+    if coupee():
+        return []
+    vision = usage == "image"
+    if force:
+        force = ANCIENS.get(force, force)
+        if force not in FOURNISSEURS:
+            raise ErreurIA(T(f"IA inconnue : {force}", f"Unknown AI: {force}"))
+        return [force] if disponible(force) and (not vision or FOURNISSEURS[force]["vision"]) else []
+    if mode() == "manuel":
+        c = reglage("IA_CHOIX", "")
+        c = ANCIENS.get(c, c)
+        if c in FOURNISSEURS and disponible(c) and (not vision or FOURNISSEURS[c]["vision"]):
+            return [c]
+        if not (vision and c in FOURNISSEURS):     # le choix ne voit pas les images : on cherche quand même
+            return []
+    ordre = ORDRES.get(reglage("IA_PREFERENCE", "rapide"), ORDRES["rapide"])
+    liste = [i for i in ordre if (not vision or FOURNISSEURS[i]["vision"]) and disponible(i)]
+    # Une IA qui vient d'échouer (pas connectée, crédit épuisé…) passe en dernier pendant 10 min : elle ne retarde
+    # plus chaque question, et revient d'elle-même en tête ensuite
+    e = echecs()
+    return sorted(liste, key=lambda i: i in e)
+
+
+ECHECS = RUN / "echecs.json"
+
+
+def echecs():
+    try:
+        d = json.loads(ECHECS.read_text())
+        return {k for k, t in d.items() if time.time() - t < 600}
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def noter_echec(ident, ok=False):
+    try:
+        d = json.loads(ECHECS.read_text())
+    except (OSError, ValueError):
+        d = {}
+    if ok:
+        if ident not in d:
+            return
+        d.pop(ident)
+    else:
+        d[ident] = time.time()
+    try:
+        RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ECHECS.write_text(json.dumps(d))
+    except OSError:
+        pass
+
+
+# ── HTTP (bibliothèque standard ; jamais de redirection : la clé ne part que vers l'hôte prévu) ─────────────────
+class _SansRedirection(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+OUVREUR = urllib.request.build_opener(_SansRedirection(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+
+
+def message_http(e, ident):
+    try:
+        corps = e.read(20000).decode("utf-8", "replace")
+        d = json.loads(corps)
+        m = d.get("error", d)
+        m = m.get("message") if isinstance(m, dict) else m
+        detail = str(m or "")[:200]
+    except Exception:
+        detail = ""
+    if e.code in (401, 403):
+        return T(f"clé refusée par {nom(ident)} (nc-ia cle {ident})", f"key refused by {nom(ident)} (nc-ai key {ident})")
+    if e.code == 429:
+        return T("limite atteinte ou crédit épuisé", "rate limit reached or credit exhausted") + (f" : {detail}" if detail else "")
+    if e.code == 404:
+        return T(f"modèle introuvable (nc-ia modele {ident} NOM)", f"model not found (nc-ai model {ident} NAME)") + (f" : {detail}" if detail else "")
+    return f"HTTP {e.code}" + (f" : {detail}" if detail else "")
+
+
+def requete(ident, url, corps=None, entetes=None, delai=120):
+    data = json.dumps(corps).encode() if corps is not None else None
+    req = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET",
+                                 headers={"Content-Type": "application/json", "User-Agent": "noctalia-config nc-ia",
+                                          **(entetes or {})})
+    try:
+        return OUVREUR.open(req, timeout=delai)
+    except urllib.error.HTTPError as e:
+        raise ErreurIA(message_http(e, ident))
+    except (urllib.error.URLError, OSError) as e:
+        raison = getattr(e, "reason", e)
+        raise ErreurIA(T("connexion impossible", "cannot connect") + f" ({str(raison)[:120]})")
+
+
+def lignes_sse(r):
+    """Les données d'un flux d'événements (data: …), décodées en JSON."""
+    lu = 0
+    for brut in r:
+        lu += len(brut)
+        if lu > MAX_REPONSE:
+            break
+        l = brut.decode("utf-8", "replace").strip()
+        if not l.startswith("data:"):
+            continue
+        l = l[5:].strip()
+        if l == "[DONE]":
+            break
+        try:
+            yield json.loads(l)
+        except ValueError:
+            continue
+
+
+def image_b64(chemin):
+    data = Path(chemin).read_bytes()
+    if len(data) > 15 * 1024 * 1024:
+        raise ErreurIA(T("image trop grande", "image too large"))
+    ext = Path(chemin).suffix.lower().lstrip(".")
+    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+    return mime, base64.b64encode(data).decode()
+
+
+# ── Modèle : celui choisi, sinon le meilleur rapide de la liste du fournisseur (gardée une semaine) ─────────────
+def version(m):
+    return tuple(int(x) for x in re.findall(r"\d+", m)[:3])
+
+
+def liste_modeles(ident):
+    memo = CACHE / "ia-modeles.json"
+    try:
+        d = json.loads(memo.read_text())
+    except (OSError, ValueError):
+        d = {}
+    e = d.get(ident)
+    if e and time.time() - e.get("t", 0) < 7 * 86400:
+        return e["ids"]
+    c = cle(ident)[0]
+    try:
+        if ident == "google":
+            r = requete(ident, base("google") + "/models?pageSize=200", entetes={"x-goog-api-key": c}, delai=8)
+            ids = [m["name"].split("/", 1)[-1] for m in json.loads(r.read(MAX_REPONSE)).get("models", [])
+                   if "generateContent" in m.get("supportedGenerationMethods", [])]
+        else:
+            r = requete(ident, base(ident) + "/models", entetes={"Authorization": "Bearer " + c}, delai=8)
+            ids = [m["id"] for m in json.loads(r.read(MAX_REPONSE)).get("data", []) if isinstance(m, dict) and m.get("id")]
+    except (ErreurIA, ValueError, KeyError):
+        return []
+    d[ident] = {"t": time.time(), "ids": ids}
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        memo.write_text(json.dumps(d))
+    except OSError:
+        pass
+    return ids
+
+
+def modele(ident):
+    m = modele_choisi(ident) or FOURNISSEURS[ident].get("modele")
+    if m:
+        return m
+    ids = liste_modeles(ident)
+    if ident == "openai":
+        mini = [i for i in ids if re.fullmatch(r"gpt-\d+(\.\d+)?-mini", i)]
+        return max(mini, key=version) if mini else "gpt-4o-mini"
+    if ident == "google":
+        flash = [i for i in ids if re.fullmatch(r"gemini-\d+(\.\d+)?-flash", i)]
+        return max(flash, key=version) if flash else "gemini-flash-latest"
+    if ident == "groq":
+        for p in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+            if p in ids:
+                return p
+        return ids[0] if ids else "llama-3.3-70b-versatile"
+    return ids[0] if ids else ""
+
+
+def modele_ollama():
+    m = modele_choisi("ollama")
+    if m:
+        return m
+    r = requete("ollama", ollama_url() + "/api/tags", delai=3)
+    mods = json.loads(r.read(MAX_REPONSE)).get("models", [])
+    if not mods:
+        raise ErreurIA(T("aucun modèle dans Ollama (ollama pull llama3.2)", "no model in Ollama (ollama pull llama3.2)"))
+    mods.sort(key=lambda m: m.get("modified_at", ""), reverse=True)
+    return mods[0]["name"]
+
+
+# ── Les appels (chacun : générateur de morceaux de texte) ────────────────────────────────────────────────────────
+def appel_anthropic(consigne, texte, image, usage):
+    c = cle("anthropic")[0]
+    contenu = [{"type": "text", "text": texte}]
+    if image:
+        mime, b64 = image_b64(image)
+        contenu.insert(0, {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
+    m = modele("anthropic")
+    corps = {"model": m, "max_tokens": 16000, "stream": True, "system": consigne,
+             "messages": [{"role": "user", "content": contenu}]}
+    entetes = {"x-api-key": c, "anthropic-version": "2023-06-01"}
+    # Effort bas : une réponse courte de bureau, sans longue réflexion (modèles qui le comprennent)
+    if re.match(r"claude-(opus|sonnet|haiku|fable)-[5-9]", m):
+        corps["output_config"] = {"effort": "low"}
+    # Un refus d'une catégorie sensible est relancé par Anthropic sur le modèle prévu pour elle
+    if m in ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5", "claude-sonnet-5-5"):
+        corps["fallbacks"] = "default"
+        entetes["anthropic-beta"] = "server-side-fallback-2026-07-01"
+    r = requete("anthropic", base("anthropic") + "/messages", corps, entetes)
+    for e in lignes_sse(r):
+        if e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
+            yield e["delta"].get("text", "")
+        elif e.get("type") == "message_delta" and (e.get("delta") or {}).get("stop_reason") == "refusal":
+            yield "\n" + T("(Claude a refusé de répondre à cette demande.)", "(Claude declined to answer this request.)")
+        elif e.get("type") == "error":
+            raise ErreurIA(str((e.get("error") or {}).get("message", "erreur"))[:200])
+
+
+def appel_compatible(ident, consigne, texte, image, usage):
+    """OpenAI et les API au même format (Mistral, Groq, DeepSeek, OpenRouter)."""
+    f = FOURNISSEURS[ident]
+    c = cle(ident)[0]
+    contenu = texte
+    if image:
+        mime, b64 = image_b64(image)
+        contenu = [{"type": "text", "text": texte}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]
+    corps = {"model": modele(ident), "stream": True,
+             "messages": [{"role": "system", "content": consigne}, {"role": "user", "content": contenu}]}
+    # Les modèles récents d'OpenAI refusent max_tokens (raisonnement) : max_completion_tokens
+    corps["max_completion_tokens" if ident == "openai" else "max_tokens"] = 8000
+    entetes = {"Authorization": "Bearer " + c}
+    if ident == "openrouter":
+        entetes.update({"HTTP-Referer": "https://github.com/noctalia-config", "X-Title": "noctalia-config"})
+    r = requete(ident, base(ident) + "/chat/completions", corps, entetes)
+    for e in lignes_sse(r):
+        for ch in e.get("choices") or []:
+            t = (ch.get("delta") or {}).get("content")
+            if t:
+                yield t
+        if e.get("error"):
+            raise ErreurIA(str(e["error"].get("message", e["error"]))[:200])
+
+
+def appel_gemini(consigne, texte, image, usage, audio=None):
+    c = cle("google")[0]
+    parts = [{"text": texte}]
+    if audio:
+        parts.insert(0, {"inline_data": {"mime_type": "audio/wav", "data": audio}})
+    if image:
+        mime, b64 = image_b64(image)
+        parts.insert(0, {"inline_data": {"mime_type": mime, "data": b64}})
+    corps = {"system_instruction": {"parts": [{"text": consigne}]}, "contents": [{"role": "user", "parts": parts}]}
+    url = f"{base('google')}/models/{urllib.parse.quote(modele('google'))}:streamGenerateContent?alt=sse"
+    r = requete("google", url, corps, {"x-goog-api-key": c})
+    for e in lignes_sse(r):
+        for cand in e.get("candidates") or []:
+            for p in (cand.get("content") or {}).get("parts") or []:
+                if p.get("text") and not p.get("thought"):
+                    yield p["text"]
+
+
+def appel_ollama(consigne, texte, image, usage):
+    msg = {"role": "user", "content": texte}
+    if image:
+        msg["images"] = [image_b64(image)[1]]
+    corps = {"model": modele_ollama(), "stream": True, "messages": [{"role": "system", "content": consigne}, msg]}
+    r = requete("ollama", ollama_url() + "/api/chat", corps, delai=300)
+    for brut in r:
+        try:
+            e = json.loads(brut)
+        except ValueError:
+            continue
+        if e.get("error"):
+            raise ErreurIA(str(e["error"])[:200])
+        t = (e.get("message") or {}).get("content")
+        if t:
+            yield t
+        if e.get("done"):
+            break
+
+
+def env_cli():
+    # NC_ILE_SANS : ses hooks ne l'affichent pas dans l'île comme une session de travail
+    return dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1", MAX_THINKING_TOKENS="0", TERM="dumb")
+
+
+def derniere_ligne(f):
+    f.seek(0)
+    l = [re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", x).strip() for x in f.read()[-20000:].splitlines()]
+    l = [x for x in l if x]
+    return l[-1][:200] if l else ""
+
+
+def appel_claude(consigne, texte, image, usage):
+    # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
+    vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
+    outils = ["--tools", "Read", "--allowedTools", "Read"] if image else ["--tools", ""]
+    invite = consigne + "\n\n" + texte + (f"\n\n{T('Image à analyser', 'Image to analyze')} : {image}" if image else "")
+    cmd = ["claude", "-p", "--model", modele_choisi("claude") or FOURNISSEURS["claude"]["modele"]] + vide + outils + \
+          ["--output-format", "stream-json", "--include-partial-messages", "--verbose", invite]
+    err = tempfile.TemporaryFile(mode="w+")             # pas de tube : un programme bavard ne bloque jamais
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
+                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME))
+    rien = True
+    try:
+        for l in p.stdout:
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            d = (e.get("event") or {}).get("delta") or {}
+            if e.get("type") == "stream_event" and d.get("type") == "text_delta":
+                rien = False
+                yield d.get("text", "")
+            elif e.get("type") == "result":
+                if e.get("is_error") and rien:
+                    raise ErreurIA(str(e.get("result") or "Claude Code")[:200])
+                if rien and e.get("result"):
+                    rien = False
+                    yield e["result"]
+        p.wait(timeout=10)
+        if rien:
+            raise ErreurIA(derniere_ligne(err) or T("Claude Code n'a rien répondu", "Claude Code gave no answer"))
+    finally:
+        if p.poll() is None:
+            p.kill()
+        err.close()
+
+
+def appel_programme(ident, consigne, texte, image, usage):
+    """Codex, Gemini CLI, OpenCode, Qwen Code : la sortie du programme, ligne par ligne."""
+    invite = consigne + "\n\n" + texte
+    if ident == "codex":
+        cmd = ["codex", "exec", "--skip-git-repo-check", "--color", "never"] + (["-i", image] if image else []) + [invite]
+    elif ident == "gemini-cli":
+        cmd = ["gemini", "-p", invite + (f"\n\n@{image}" if image else "")]
+    elif ident == "opencode":
+        cmd = ["opencode", "run", invite]
+    else:
+        cmd = ["qwen", "-p", invite]
+    err = tempfile.TemporaryFile(mode="w+")
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
+                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME))
+    rien = True
+    debut = time.time()
+    try:
+        for l in p.stdout:
+            l = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", l)
+            # lignes d'état d'opencode (« > build · modèle », outils…)
+            if ident == "opencode" and re.match(r"^\s*(>|→|\$ ?cat|⚙)", l) and not l.startswith("$ "):
+                continue
+            if rien and not l.strip():
+                continue
+            rien = False
+            yield l
+            if time.time() - debut > 180:
+                break
+        p.wait(timeout=10)
+        if rien:
+            raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} n'a rien répondu", f"{nom(ident)} gave no answer"))
+    finally:
+        if p.poll() is None:
+            p.kill()
+        err.close()
+
+
+def appel_jarvis(consigne, texte, image, usage):
+    r = subprocess.run([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--", consigne + "\n\n" + texte],
+                       capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        raise ErreurIA((r.stderr.strip().splitlines() or ["JARVIS"])[-1][:200])
+    yield r.stdout.strip()
+
+
+def appeler(ident, consigne, texte, image=None, usage="question"):
+    g = FOURNISSEURS[ident]["genre"]
+    if ident == "anthropic":
+        return appel_anthropic(consigne, texte, image, usage)
+    if ident == "google":
+        return appel_gemini(consigne, texte, image, usage)
+    if g == "api":
+        return appel_compatible(ident, consigne, texte, image, usage)
+    if g == "local":
+        return appel_ollama(consigne, texte, image, usage)
+    if g == "jarvis":
+        return appel_jarvis(consigne, texte, image, usage)
+    if ident == "claude":
+        return appel_claude(consigne, texte, image, usage)
+    return appel_programme(ident, consigne, texte, image, usage)
+
+
+# ── Transcription d'un enregistrement (dictée sans JARVIS) ──────────────────────────────────────────────────────
+TRANSCRIPTION = ["groq", "openai", "google"]          # Groq d'abord : Whisper, le plus rapide et le moins cher
+
+
+def multipart(champs, fichier):
+    """Corps multipart/form-data (bibliothèque standard) : champs texte et un fichier."""
+    limite = "nc-ia-" + os.urandom(12).hex()
+    morceaux = []
+    for k, v in champs.items():
+        morceaux.append(f'--{limite}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+    nom_f, data, mime = fichier
+    morceaux.append(f'--{limite}\r\nContent-Disposition: form-data; name="file"; filename="{nom_f}"\r\n'
+                    f'Content-Type: {mime}\r\n\r\n'.encode() + data + b"\r\n")
+    morceaux.append(f"--{limite}--\r\n".encode())
+    return b"".join(morceaux), "multipart/form-data; boundary=" + limite
+
+
+def fournisseurs_transcription():
+    if coupee():
+        return []
+    liste = [i for i in TRANSCRIPTION if cle(i)[0]]
+    c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+    if mode() == "manuel" and c in liste:                  # celle choisie d'abord (si elle sait transcrire)
+        liste = [c] + [i for i in liste if i != c]
+    e = echecs()
+    return sorted(liste, key=lambda i: i in e)
+
+
+def transcrire(chemin):
+    """(texte, ia) d'un enregistrement WAV ; ErreurIA si aucune IA ne sait le faire ou si toutes échouent."""
+    if coupee():
+        raise ErreurIA(message_coupee())
+    data = Path(chemin).read_bytes()
+    if len(data) > 24 * 1024 * 1024:
+        raise ErreurIA(T("enregistrement trop long", "recording too long"))
+    liste = fournisseurs_transcription()
+    if not liste:
+        raise ErreurIA(T("Aucune IA pour transcrire : relie JARVIS, ou ajoute une clé Groq, OpenAI ou Gemini (nc-ia configurer).",
+                         "No AI to transcribe: connect JARVIS, or add a Groq, OpenAI or Gemini key (nc-ai configure)."))
+    rates = []
+    for ident in liste:
+        try:
+            if ident == "google":
+                texte = "".join(appel_gemini(T("Tu transcris des enregistrements.", "You transcribe recordings."),
+                                             T("Transcris exactement ce qui est dit, sans rien ajouter.",
+                                               "Transcribe exactly what is said, adding nothing."), None, "texte",
+                                             audio=base64.b64encode(data).decode()))
+            else:
+                m = modele_choisi("transcription_" + ident) or {"groq": "whisper-large-v3-turbo", "openai": "whisper-1"}[ident]
+                corps, type_ = multipart({"model": m, "response_format": "json"}, ("dictee.wav", data, "audio/wav"))
+                req = urllib.request.Request(base(ident) + "/audio/transcriptions", data=corps, method="POST",
+                                             headers={"Content-Type": type_, "Authorization": "Bearer " + cle(ident)[0],
+                                                      "User-Agent": "noctalia-config nc-ia"})
+                try:
+                    with OUVREUR.open(req, timeout=120) as r:
+                        texte = json.loads(r.read(MAX_REPONSE)).get("text", "")
+                except urllib.error.HTTPError as e:
+                    raise ErreurIA(message_http(e, ident))
+                except (urllib.error.URLError, OSError) as e:
+                    raise ErreurIA(T("connexion impossible", "cannot connect") + f" ({str(getattr(e, 'reason', e))[:120]})")
+            if texte.strip():
+                noter_echec(ident, ok=True)
+                return texte.strip(), ident
+            raise ErreurIA(T("transcription vide", "empty transcription"))
+        except (ErreurIA, ValueError) as e:
+            noter_echec(ident)
+            rates.append(f"{nom(ident)} : {e}")
+    raise ErreurIA(T("Transcription impossible", "Transcription failed") + " — " + " ; ".join(rates))
+
+
+# ── Consignes ───────────────────────────────────────────────────────────────────────────────────────────────────
+def distrib():
+    try:
+        for l in open("/etc/os-release", encoding="utf-8"):
+            if l.startswith("PRETTY_NAME="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return "Linux"
+
+
+def gestionnaire():
+    for p in ("pacman", "dnf", "apt", "zypper", "xbps-install", "apk", "emerge", "nix-env"):
+        if shutil.which(p):
+            return p
+    return ""
+
+
+def consigne(usage):
+    systeme = f"{distrib()}, Hyprland" + (f", {gestionnaire()}" if gestionnaire() else "")
+    if usage == "commande":
+        return T(f"Tu écris des commandes shell pour {systeme}, shell zsh. Réponds uniquement par une seule commande sur "
+                 "une ligne, sans explication, sans balises de code, sans « $ ». Si la demande est dangereuse "
+                 "(effacement, formatage), ajoute « # attention » à la fin de la commande.",
+                 f"You write shell commands for {systeme}, zsh shell. Answer with a single command on one line only, "
+                 "no explanation, no code fences, no “$”. If the request is dangerous (deletion, formatting), add "
+                 "“# careful” at the end of the command.")
+    if usage == "texte":
+        return T("Tu transformes le texte que l'on te donne selon la consigne. Réponds seulement par le résultat, sans "
+                 "introduction ni commentaire, en texte simple.",
+                 "You transform the given text according to the instruction. Answer only with the result, no "
+                 "introduction or comment, in plain text.")
+    if usage == "chat":
+        return T(f"Tu es l'assistant personnel de l'utilisateur, sur son ordinateur ({systeme}). Réponds en français, "
+                 "clairement et sans détour ; le Markdown est permis (listes, code). Tiens compte de la conversation.",
+                 f"You are the user's personal assistant, on their computer ({systeme}). Answer in English, clearly and "
+                 "directly; Markdown is allowed (lists, code). Take the conversation into account.")
+    if usage == "image":
+        return T(f"L'ordinateur est sous {systeme}. Explique en français, en quelques lignes, ce que montre cette capture "
+                 "d'écran ; s'il s'agit d'une erreur, dis comment la corriger, avec la commande sur une dernière ligne "
+                 "« $ … » si une commande aide.",
+                 f"The computer runs {systeme}. Explain in English, in a few lines, what this screenshot shows; if it "
+                 "is an error, say how to fix it, with the command on a last line “$ …” if a command helps.")
+    return T(f"Réponds en français, en 2 à 6 lignes au plus, en texte simple (pas de titres ni de tableaux). Si une "
+             f"commande Linux répond à la question, termine par une seule ligne qui commence par « $ » suivie de la "
+             f"commande, sans rien d'autre. L'ordinateur est sous {systeme}.",
+             f"Answer in English, in 2 to 6 lines at most, in plain text (no headings or tables). If a Linux command "
+             f"answers the question, end with a single line that starts with “$ ” followed by the command, and nothing "
+             f"else. The computer runs {systeme}.")
+
+
+ACTIONS = {
+    "resumer": (("Résumer", "Summarize"), ("Résume ce texte en quelques phrases, dans sa langue.",
+                                           "Summarize this text in a few sentences, in its language.")),
+    "traduire": (("Traduire", "Translate"), ("Traduis ce texte en français ; s'il est déjà en français, traduis-le en "
+                                             "anglais. Donne seulement la traduction.",
+                                             "Translate this text into English; if it is already in English, translate "
+                                             "it into French. Give only the translation.")),
+    "corriger": (("Corriger", "Fix"), ("Corrige l'orthographe, la grammaire et la ponctuation sans changer le sens, le "
+                                       "ton ni la langue. Donne seulement le texte corrigé.",
+                                       "Fix spelling, grammar and punctuation without changing the meaning, tone or "
+                                       "language. Give only the corrected text.")),
+    "reformuler": (("Reformuler", "Rephrase"), ("Reformule ce texte plus clairement et plus simplement, dans sa langue.",
+                                                "Rephrase this text more clearly and simply, in its language.")),
+    "expliquer": (("Expliquer", "Explain"), ("Explique simplement ce texte (ou ce code, ou ce message d'erreur), en "
+                                             "français, en quelques lignes.",
+                                             "Explain this text (or code, or error message) simply, in English, in a "
+                                             "few lines.")),
+    "repondre": (("Rédiger une réponse", "Draft a reply"), ("Rédige une réponse courte et polie à ce message, dans sa "
+                                                            "langue.", "Draft a short, polite reply to this message, in "
+                                                            "its language.")),
+}
+ACTIONS_EN = {"summarize": "resumer", "translate": "traduire", "fix": "corriger", "rephrase": "reformuler",
+              "explain": "expliquer", "reply": "repondre"}
+
+
+# ── Demander (avec repli sur l'IA suivante en mode auto) ────────────────────────────────────────────────────────
+def message_coupee():
+    return T("L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).",
+             "AI is turned off (nc-settings → Artificial intelligence → Desktop AI).")
+
+
+def message_aucune(usage):
+    if mode() == "manuel" and reglage("IA_CHOIX", ""):
+        c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+        return T(f"{nom(c)} n'est pas disponible (choisie dans nc-reglages → Intelligence artificielle).",
+                 f"{nom(c)} is not available (chosen in nc-settings → Artificial intelligence).")
+    if usage == "image":
+        return T("Aucune IA disponible ne sait lire une image (une clé d'API Anthropic, OpenAI ou Gemini, Claude Code, "
+                 "Codex ou Ollama).", "No available AI can read images (an Anthropic, OpenAI or Gemini API key, Claude "
+                 "Code, Codex or Ollama).")
+    return T("Aucune IA disponible : ajoute une clé d'API (nc-ia cle anthropic), installe Claude Code, Codex, Gemini "
+             "CLI, OpenCode ou Ollama, ou relie JARVIS (nc-assistant configurer).",
+             "No AI available: add an API key (nc-ai key anthropic), install Claude Code, Codex, Gemini CLI, OpenCode "
+             "or Ollama, or connect JARVIS (nc-assistant configurer).")
+
+
+def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=()):
+    """Écrit la réponse (texte brut, ou lignes JSON en flux) ; renvoie (réponse, ia) ; ErreurIA si aucune n'a pu.
+    exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre)."""
+    ecrire = sortie or (lambda m: (sys.stdout.write(m), sys.stdout.flush()))
+    if coupee():
+        raise ErreurIA(message_coupee())
+    liste = [i for i in candidats(usage, force) if i not in exclure]
+    if not liste:
+        raise ErreurIA(message_aucune(usage))
+    rates = []
+    for ident in liste:
+        morceaux = []
+        try:
+            if flux:
+                ecrire(json.dumps({"ia": nom(ident), "id": ident, "agent": FOURNISSEURS[ident]["agent"]}, ensure_ascii=False) + "\n")
+            for m in appeler(ident, consigne_ or consigne(usage), texte, image, usage):
+                if not m:
+                    continue
+                morceaux.append(m)
+                ecrire(json.dumps({"t": m}, ensure_ascii=False) + "\n" if flux else m)
+            if not morceaux:
+                raise ErreurIA(T("réponse vide", "empty answer"))
+            rep = "".join(morceaux).strip()
+            garder(rep, ident)
+            noter_echec(ident, ok=True)
+            if not flux and not rep.endswith("\n"):
+                ecrire("\n")
+            return rep, ident
+        except (ErreurIA, OSError, subprocess.SubprocessError, ValueError) as e:
+            if morceaux:                                        # déjà en partie affichée : pas de mélange de deux IA
+                ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
+                raise ErreurIA(f"{nom(ident)} : {e}")
+            noter_echec(ident)
+            rates.append(f"{nom(ident)} : {e}")
+    raise ErreurIA(T("Aucune IA n'a pu répondre", "No AI could answer") + " — " + " ; ".join(rates))
+
+
+def garder(rep, ident):
+    try:
+        RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+        DERNIERE.write_text(f"{rep}\n\n— {nom(ident)}\n", encoding="utf-8")
+        os.chmod(DERNIERE, 0o600)
+    except OSError:
+        pass
+
+
+def conversation(historique, question):
+    """Le texte envoyé pour une réponse de chat : les derniers échanges, puis la question."""
+    lignes = []
+    for m in (historique or [])[-12:]:
+        if isinstance(m, dict) and isinstance(m.get("texte"), str) and m["texte"].strip():
+            qui = T("Utilisateur", "User") if m.get("role") in ("user", "vous") else T("Assistant", "Assistant")
+            lignes.append(f"{qui} : {m['texte'][:4000]}")
+    if not lignes:
+        return question
+    return T("Conversation jusqu'ici :\n", "Conversation so far:\n") + "\n\n".join(lignes)[-20000:] + \
+        T("\n\nNouveau message de l'utilisateur :\n", "\n\nNew message from the user:\n") + question
+
+
+def chat(historique, question):
+    """(réponse, ia) pour la fenêtre de chat quand ce n'est pas JARVIS qui répond."""
+    return demander(conversation(historique, question), "chat", sortie=lambda m: None, exclure={"jarvis"})
+
+
+# ── Texte copié ou sélectionné ──────────────────────────────────────────────────────────────────────────────────
+def presse(selection=False):
+    if not shutil.which("wl-paste"):
+        return ""
+    try:
+        r = subprocess.run(["wl-paste", "-n"] + (["-p"] if selection else []) + ["-t", "text"], capture_output=True,
+                           timeout=3)
+        return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def copier(t):
+    if shutil.which("wl-copy"):
+        try:
+            subprocess.run(["wl-copy", "--", t], timeout=3, stdin=subprocess.DEVNULL)     # la réponse, pas un secret
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def notifier(titre, corps, lire=True):
+    if not shutil.which("notify-send"):
+        return
+    import html
+    cmd = ["notify-send", "-a", "IA", "-i", "dialog-information"]
+    if lire:
+        cmd += ["-A", "lire=" + T("Lire en entier", "Read in full")]
+    try:
+        p = subprocess.Popen(cmd + ["--", titre, html.escape(corps[:400])], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+        if lire:
+            # La notification attend son bouton dans un processus détaché : la commande rend la main tout de suite
+            if os.fork() == 0:
+                # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
+                nul = os.open(os.devnull, os.O_RDWR)
+                for fd in (0, 1, 2):
+                    os.dup2(nul, fd)
+                try:
+                    if (p.communicate(timeout=600)[0] or "").strip() == "lire":
+                        subprocess.Popen(["kitty", "--class", "nc-ia", "--title", "IA", "sh", "-c",
+                                          f'"{HOME}/.local/bin/nc-ia" derniere; printf "\\n"; read -r _'],
+                                         start_new_session=True)
+                except Exception:
+                    pass
+                os._exit(0)
+    except OSError:
+        pass
+
+
+def texte_action(action, source="", copie=False, flux=False):
+    action = ACTIONS_EN.get(action, action)
+    if source == "presse":
+        t = presse()
+    elif source == "selection":
+        t = presse(True)
+    else:
+        t = presse(True).strip() or presse()
+    if not t.strip():
+        raise ErreurIA(T("Aucun texte sélectionné ni copié.", "No selected or copied text."))
+    if len(t) > 60000:
+        raise ErreurIA(T("Texte trop long (plus de 60 000 caractères).", "Text too long (over 60,000 characters)."))
+    titre, ordre = ACTIONS.get(action, ((action, action), (action, action)))
+    instruction = T(*ordre)
+    rep, ident = demander(f"{instruction}\n\n---\n{t}\n---", "texte", flux=flux)
+    if copie:
+        copier(rep)
+        notifier(T(f"{T(*titre)} : copié", f"{T(*titre)}: copied") + f" · {nom(ident)}", rep)
+    return rep
+
+
+# ── Capture d'une zone ──────────────────────────────────────────────────────────────────────────────────────────
+def capture(question=""):
+    if not (shutil.which("grim") and shutil.which("slurp")):
+        raise ErreurIA(T("grim et slurp sont nécessaires (capture d'une zone).", "grim and slurp are needed (area capture)."))
+    zone = subprocess.run(["slurp"], capture_output=True, text=True)
+    if zone.returncode != 0 or not zone.stdout.strip():
+        return ""
+    RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+    img = RUN / "capture.png"
+    subprocess.run(["grim", "-g", zone.stdout.strip(), str(img)], check=False)
+    if not img.exists():
+        raise ErreurIA(T("capture impossible", "capture failed"))
+    notifier(T("L'IA regarde la capture…", "The AI is looking at the screenshot…"), "", lire=False)
+    try:
+        rep, ident = demander(question or T("Que montre cette capture ?", "What does this screenshot show?"), "image",
+                              image=str(img), sortie=lambda m: None)
+    finally:
+        img.unlink(missing_ok=True)
+    notifier(T("Capture expliquée", "Screenshot explained") + f" · {nom(ident)}", rep)
+    copier(rep)
+    return rep
+
+
+# ── Configuration des clés, au clavier (masquées), avec un essai tout de suite ──────────────────────────────────
+INSCRIPTION = {
+    "anthropic": "https://console.anthropic.com/settings/keys", "openai": "https://platform.openai.com/api-keys",
+    "google": "https://aistudio.google.com/apikey", "mistral": "https://console.mistral.ai/api-keys",
+    "groq": "https://console.groq.com/keys", "deepseek": "https://platform.deepseek.com/api_keys",
+    "openrouter": "https://openrouter.ai/keys",
+}
+
+
+def dans_terminal(args, titre, attendre=False):
+    """Depuis la fenêtre des réglages ou un raccourci (pas de terminal) : la commande dans un terminal."""
+    moi = str(Path(__file__).resolve())
+    cmd = ["sh", "-c", '"$0" "$@"; printf "\\n%s" "$NC_FIN"; read -r _', moi] + args if attendre else [moi] + args
+    env = dict(os.environ, NC_FIN=T("Entrée pour fermer", "Enter to close"))
+    for t in ("kitty", "foot", "alacritty", "wezterm", "gnome-terminal", "konsole", "xterm"):
+        if shutil.which(t):
+            arg = {"gnome-terminal": ["--"], "wezterm": ["start", "--"]}.get(t, ["-e"])
+            extra = ["--class", "nc-ia", "--title", titre] if t == "kitty" else []
+            subprocess.Popen([t] + extra + arg + cmd, start_new_session=True, env=env)
+            return 0
+    raise ErreurIA(T("Aucun terminal trouvé : lance « nc-ia " + args[0] + " » dans un terminal.",
+                     "No terminal found: run “nc-ai " + args[0] + "” in a terminal."))
+
+
+def configurer():
+    if not sys.stdin.isatty():
+        return dans_terminal(["configurer"], T("Clés des IA", "AI keys"))
+    import getpass
+    while True:
+        print("\n" + T("Clés d'API des IA (Entrée seule : terminer)", "AI API keys (Enter alone: finish)"))
+        for n, i in enumerate(APIS, 1):
+            c, o = cle(i)
+            print(f"  {n}. {nom(i):<26} {masquer(c) + ' (' + o + ')' if c else '—'}")
+        print(f"  o. Ollama : {ollama_url()} " + (T("(répond)", "(responding)") if ollama_present() else T("(absent)", "(not found)")))
+        r = input(T("Numéro : ", "Number: ")).strip().lower()
+        if not r:
+            return 0
+        if r == "o":
+            u = input(T("Adresse d'Ollama (Entrée : http://127.0.0.1:11434) : ", "Ollama address (Enter: http://127.0.0.1:11434): ")).strip()
+            if u and not re.fullmatch(r"https?://[\w.\-\[\]:]+/?", u):
+                print(T("Adresse invalide.", "Invalid address."))
+                continue
+            d = lire_cles(); d["OLLAMA_HOST"] = u; ecrire_cles(d)
+            (RUN / "ollama.json").unlink(missing_ok=True)
+            continue
+        if not r.isdigit() or not 1 <= int(r) <= len(APIS):
+            continue
+        i = APIS[int(r) - 1]
+        print(T(f"Clé {nom(i)} : à créer sur {INSCRIPTION[i]}", f"{nom(i)} key: create it at {INSCRIPTION[i]}"))
+        v = getpass.getpass(T("Colle la clé (masquée ; vide : l'effacer) : ", "Paste the key (hidden; empty: remove it): ")).strip()
+        if v and not re.fullmatch(r"[A-Za-z0-9_\-.:]{8,400}", v):
+            print(T("Cette clé ne ressemble pas à une clé d'API.", "This doesn't look like an API key."))
+            continue
+        d = lire_cles(); d[FOURNISSEURS[i]["cle"]] = v; ecrire_cles(d)
+        (CACHE / "ia-modeles.json").unlink(missing_ok=True)
+        if not v:
+            print(T("Clé effacée.", "Key removed."))
+            continue
+        print(T("Essai…", "Testing…"), end=" ", flush=True)
+        try:
+            t = "".join(appeler(i, T("Réponds en un seul mot.", "Answer with a single word."), "OK ?")).strip()
+            print("✓ " + T("elle marche", "it works") + (f" ({modele(i)})" if modele(i) else ""))
+            noter_echec(i, ok=True)
+        except ErreurIA as e:
+            print("✗ " + str(e))
+
+
+# ── Menu des actions sur le texte (Super + Alt + I) ─────────────────────────────────────────────────────────────
+def menu():
+    """Le Spotlight de l'île sur « ! » ; sans l'île, un menu (fuzzel, wofi, rofi, bemenu) puis le résultat copié."""
+    if coupee():
+        raise ErreurIA(message_coupee())
+    if reglage("IA_TEXTE", "oui") == "non":
+        raise ErreurIA(T("L'IA sur le texte est désactivée (nc-reglages → Intelligence artificielle).",
+                         "AI on text is turned off (nc-settings → Artificial intelligence)."))
+    if shutil.which("qs"):
+        try:
+            if subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "rechercher", "! "], capture_output=True,
+                              timeout=5).returncode == 0:
+                return 0
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    noms = {T(*v[0]): k for k, v in ACTIONS.items()}
+    for prog, args in (("fuzzel", ["--dmenu"]), ("wofi", ["--dmenu"]), ("rofi", ["-dmenu"]), ("bemenu", []),
+                       ("tofi", [])):
+        if shutil.which(prog):
+            r = subprocess.run([prog] + args + (["-p", "IA "] if prog in ("fuzzel", "rofi", "bemenu") else []),
+                               input="\n".join(noms), capture_output=True, text=True)
+            choix = r.stdout.strip()
+            if not choix:
+                return 0
+            texte_action(noms.get(choix, choix), copie=True)
+            return 0
+    texte_action("expliquer", copie=True)                       # aucun menu installé : l'action la plus utile
+    return 0
+
+
+# ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────
+def etat():
+    usages = ("question", "texte", "commande", "image")
+    choix = {u: (candidats(u) or [""])[0] for u in usages}
+    return {
+        "mode": mode(), "coupee": coupee(), "choix": reglage("IA_CHOIX", ""), "preference": reglage("IA_PREFERENCE", "rapide"),
+        "usages": {u: {"id": c, "nom": nom(c) if c else ""} for u, c in choix.items()},
+        "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
+                     cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i))
+                for i, f in FOURNISSEURS.items()],
+    }
+
+
+def afficher_etat(e):
+    m = {"auto": T("automatique", "automatic"), "manuel": T("manuel", "manual"), "non": T("coupée partout", "off everywhere")}[e["mode"]]
+    print(T("Mode : ", "Mode: ") + m + (f" ({nom(e['choix'])})" if e["mode"] == "manuel" and e["choix"] else ""))
+    if not e["coupee"]:
+        for u, x in e["usages"].items():
+            print(f"  {u:<9} → {x['nom'] or T('aucune', 'none')}")
+    print(T("IA :", "AIs:"))
+    for i in e["ias"]:
+        etiquette = T("disponible", "available") if i["disponible"] else "—"
+        extra = (f" · {T('clé', 'key')} ({i['cle']})" if i["cle"] else "") + (f" · {i['modele']}" if i["modele"] else "")
+        print(f"  {'●' if i['disponible'] else '○'} {i['id']:<11} {i['nom']:<26} {etiquette}{extra}")
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "aide", "help"):
+        print(T(__doc__, DOC_EN).strip())
+        return 0 if a else 2
+    c, a = a[0], a[1:]
+    c = {"status": "etat", "ask": "demander", "text": "texte", "command": "commande", "screenshot": "capture",
+         "key": "cle", "keys": "cles", "model": "modele", "test": "tester", "which": "quelle", "enabled": "actif",
+         "last": "derniere"}.get(c, c)
+    json_out = "--json" in a
+    a = [x for x in a if x != "--json"]
+    try:
+        if c == "actif":
+            return 1 if coupee() else 0
+        if c == "etat":
+            e = etat()
+            print(json.dumps(e, ensure_ascii=False)) if json_out else afficher_etat(e)
+            return 0
+        if c == "quelle":
+            usage = a[a.index("--usage") + 1] if "--usage" in a and a.index("--usage") + 1 < len(a) else "question"
+            i = (candidats(usage) or [""])[0]
+            if json_out:
+                print(json.dumps({"id": i, "nom": nom(i) if i else "", "agent": FOURNISSEURS[i]["agent"] if i else "",
+                                  "coupee": coupee()}, ensure_ascii=False))
+            else:
+                print(nom(i) if i else "")
+            return 0
+        if c == "derniere":
+            try:
+                print(DERNIERE.read_text(encoding="utf-8"))
+            except OSError:
+                print(T("Aucune réponse pour l'instant.", "No answer yet."))
+            return 0
+        if c in ("demander", "commande"):
+            flux = "--flux" in a
+            usage, force, image, reste = ("commande" if c == "commande" else "question"), "", None, []
+            i = 0
+            while i < len(a):
+                if a[i] == "--flux":
+                    pass
+                elif a[i] in ("--usage", "--ia", "--image") and i + 1 < len(a):
+                    usage, force, image = (a[i + 1], force, image) if a[i] == "--usage" else \
+                                          (usage, a[i + 1], image) if a[i] == "--ia" else (usage, force, a[i + 1])
+                    i += 1
+                elif a[i] == "--":
+                    reste += a[i + 1:]
+                    break
+                else:
+                    reste.append(a[i])
+                i += 1
+            q = " ".join(reste).strip()
+            if q == "-":
+                q = sys.stdin.read(200000).strip()
+            if not q:
+                print(T(__doc__, DOC_EN).strip(), file=sys.stderr)
+                return 2
+            if image:
+                usage = "image"
+            if c == "commande" and not flux:
+                tampon = []
+                rep, _ = demander(q, usage, force, image, sortie=tampon.append)
+                rep = rep.strip().strip("`").strip()
+                rep = re.sub(r"^(bash|zsh|sh|shell)\n", "", rep).strip()
+                l = [x for x in rep.splitlines() if x.strip()]
+                print(re.sub(r"^\$\s*", "", l[0]) if l else "")
+                return 0
+            demander(q, usage, force, image, flux=flux)
+            return 0
+        if c == "texte":
+            if not a:
+                print(T(__doc__, DOC_EN).strip(), file=sys.stderr)
+                return 2
+            source = "presse" if "--presse" in a else "selection" if "--selection" in a else ""
+            mots = [x for x in a if not x.startswith("--")]
+            texte_action(" ".join(mots), source, copie="--copier" in a, flux="--flux" in a)
+            return 0
+        if c == "capture":
+            if coupee():
+                raise ErreurIA(message_coupee())
+            if reglage("IA_CAPTURE", "oui") == "non":
+                raise ErreurIA(T("L'explication des captures est désactivée (nc-reglages → Intelligence artificielle).",
+                                 "Screenshot explanation is turned off (nc-settings → Artificial intelligence)."))
+            capture(" ".join(a))
+            return 0
+        if c == "menu":
+            return menu()
+        if c in ("transcrire", "transcribe"):
+            if not a:
+                raise ErreurIA("nc-ia transcrire FICHIER.wav")
+            texte, ident = transcrire(a[0])
+            print(json.dumps({"ok": True, "text": texte, "engine": nom(ident)}, ensure_ascii=False) if json_out else texte)
+            return 0
+        if c in ("configurer", "configure", "setup"):
+            return configurer()
+        if c == "terminal":                     # une question, la réponse dans un terminal (lanceur sans l'île)
+            q = " ".join(x for x in a if x != "--").strip()
+            if not q:
+                return 2
+            if sys.stdout.isatty():
+                demander(q)
+                return 0
+            return dans_terminal(["demander", "--", q], "IA", attendre=True)
+        if c == "fenetre-test":
+            return dans_terminal(["tester"], T("Essai des IA", "AI test"), attendre=True)
+        if c in ("cle", "modele") and a:
+            a[0] = ALIAS_API.get(a[0], a[0]) if c == "cle" or a[0] not in FOURNISSEURS else a[0]
+        if c == "cle":
+            if not a or a[0] not in APIS:
+                raise ErreurIA(T("Fournisseur : ", "Provider: ") + ", ".join(APIS))
+            v = sys.stdin.readline().strip()
+            if v and not re.fullmatch(r"[A-Za-z0-9_\-.:]{8,400}", v):
+                raise ErreurIA(T("Cette clé ne ressemble pas à une clé d'API.", "This doesn't look like an API key."))
+            d = lire_cles()
+            d[FOURNISSEURS[a[0]]["cle"]] = v
+            ecrire_cles(d)
+            (CACHE / "ia-modeles.json").unlink(missing_ok=True)
+            print(T("Clé enregistrée.", "Key saved.") if v else T("Clé effacée.", "Key removed."))
+            return 0
+        if c == "cles":
+            res = {i: {"origine": cle(i)[1], "fin": masquer(cle(i)[0]) if cle(i)[0] else ""} for i in APIS}
+            if json_out:
+                print(json.dumps(res, ensure_ascii=False))
+            else:
+                for i, x in res.items():
+                    print(f"  {i:<11} {x['fin'] + ' (' + x['origine'] + ')' if x['origine'] else '—'}")
+            return 0
+        if c == "modele":
+            if not a or a[0] not in FOURNISSEURS:
+                raise ErreurIA(T("Fournisseur : ", "Provider: ") + ", ".join(FOURNISSEURS))
+            if len(a) > 1 and not re.fullmatch(r"[\w.:/@+\-]{1,120}", a[1]):
+                raise ErreurIA(T("Nom de modèle invalide.", "Invalid model name."))
+            d = lire_cles()
+            d["MODELE_" + a[0].upper().replace("-", "_")] = a[1] if len(a) > 1 else ""
+            ecrire_cles(d)
+            print(a[1] if len(a) > 1 else T("Modèle automatique.", "Automatic model."))
+            return 0
+        if c == "tester":
+            if coupee():
+                raise ErreurIA(message_coupee())
+            ids = [a[0]] if a else [i for i in FOURNISSEURS if disponible(i)]
+            res = []
+            for i in ids:
+                debut = time.time()
+                try:
+                    t = "".join(appeler(i, T("Réponds en un seul mot.", "Answer with a single word."), "OK ?"))
+                    res.append({"id": i, "nom": nom(i), "ok": bool(t.strip()), "ms": int((time.time() - debut) * 1000)})
+                except Exception as e:
+                    res.append({"id": i, "nom": nom(i), "ok": False, "erreur": str(e)[:200]})
+            if json_out:
+                print(json.dumps(res, ensure_ascii=False))
+            else:
+                for x in res:
+                    print(f"  {'✓' if x['ok'] else '✗'} {x['nom']:<26} " + (f"{x['ms']} ms" if x["ok"] else x.get("erreur", "")))
+            return 0 if res and all(x["ok"] for x in res) else 1
+    except ErreurIA as e:
+        if c in ("capture", "menu") or (c == "texte" and "--copier" in a):     # lancé par un raccourci : pas de terminal
+            notifier("IA", str(e), lire=False)
+        if "--flux" in a:
+            print(json.dumps({"t": str(e), "erreur": True}, ensure_ascii=False), flush=True)
+        else:
+            print(str(e), file=sys.stderr)
+        return 3 if coupee() else 1
+    except BrokenPipeError:                      # le Spotlight a été fermé pendant la réponse
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    print(T(__doc__, DOC_EN).strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
