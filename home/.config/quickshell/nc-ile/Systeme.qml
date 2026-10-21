@@ -197,10 +197,17 @@ Item {
                 property int n: 0
                 visible: Reglages.val("MAJ_SYSTEME", "ile") !== "non" && paquets.loaded
                 width: sy.width; icone: "system_update"; actif: n > 0
+                // ~/.cache/nc/paquets-erreur (la dernière vérification n'a pas abouti) : jamais « Système à jour » faute de réponse
+                property bool echec: false
                 titre: n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
+                             : echec ? Reglages.t("Vérification impossible", "Could not check for updates")
                              : Reglages.t("Système à jour", "System up to date")
                 sous: n > 0 ? Reglages.t("Clic : tout mettre à jour (ton mot de passe sera demandé)", "Click to update everything (you'll be asked for your password)")
-                            : Reglages.t("Vérifié toutes les 3 heures", "Checked every 3 hours")
+                            : echec ? Reglages.t("Pas de réponse (réseau ou dépôt) : nouvel essai plus tard", "No answer (network or repository): retrying later")
+                            : ({ "3h": Reglages.t("Vérifié toutes les 3 heures", "Checked every 3 hours"),
+                                 "6h": Reglages.t("Vérifié toutes les 6 heures", "Checked every 6 hours"),
+                                 "jour": Reglages.t("Vérifié une fois par jour", "Checked once a day") })[Reglages.val("MAJ_FREQUENCE", "1h")]
+                              || Reglages.t("Vérifié chaque heure", "Checked every hour")
                 onClic: if (n > 0) { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-paquets", "mettre-a-jour"]) }
                 FileView {
                     id: paquets
@@ -209,7 +216,15 @@ Item {
                     onFileChanged: reload()
                     onLoaded: maj.n = parseInt(text().split("\n")[0]) || 0
                 }
-                Connections { target: sy; function onVisibleChanged() { if (sy.visible) paquets.reload() } }
+                FileView {
+                    id: paquetsErreur
+                    path: Quickshell.env("HOME") + "/.cache/nc/paquets-erreur"
+                    watchChanges: true; printErrors: false
+                    onFileChanged: reload()
+                    onLoaded: maj.echec = text().trim() !== ""
+                    onLoadFailed: maj.echec = false
+                }
+                Connections { target: sy; function onVisibleChanged() { if (sy.visible) { paquets.reload(); paquetsErreur.reload() } } }
             }
             // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
             Ligne {

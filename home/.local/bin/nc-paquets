@@ -39,7 +39,8 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
     # checkupdates synchronise une copie des dépôts (long) ; juste après pacman -Syu, les vrais dépôts sont à jour
     sortie=""
     if [ "${1:-}" = local ]; then sortie="$(pacman -Qu 2>/dev/null)"; c=$?; [ "$c" -le 1 ] || echec depot
-    elif command -v checkupdates >/dev/null; then sortie="$(checkupdates 2>/dev/null)"; c=$?; [ "$c" = 0 ] || [ "$c" = 2 ] || echec depot; fi
+    elif command -v checkupdates >/dev/null; then sortie="$(checkupdates 2>/dev/null)"; c=$?; [ "$c" = 0 ] || [ "$c" = 2 ] || echec depot
+    else echec depot; fi                 # Arch sans pacman-contrib (checkupdates) : les dépôts ne sont pas vérifiés
     printf '%s\n' "$sortie" | grep -v '\[ignored\]' | awk 'NF >= 1 {print "depot\t" $1 "\t" $2 "\t" $4}'
     # AUR : paru ou yay interrogent l'API de l'AUR (quelques Ko) ; sans mise à jour, ils finissent en code 1 sans
     # rien dire : seul un message « error » est un échec
@@ -142,8 +143,14 @@ try:
 except (OSError, ValueError):
     etat = {}
 maintenant = int(time.time())
-detail = dict(date=maintenant, total=len(paquets), sources=sources, noyau=noyau, paquets=paquets[:300],
-              derniere_notif=etat.get("date", 0), incomplet=manque)
+# date_ok : le dernier compte complet (« vérifié il y a… » de l'île) ; un compte incomplet garde celui d'avant
+try:
+    ancien = json.load(open(os.path.join(cache, "paquets.json")))
+    date_ok = ancien.get("date_ok", 0 if ancien.get("incomplet") else ancien.get("date", 0))
+except (OSError, ValueError, AttributeError):
+    date_ok = 0
+detail = dict(date=maintenant, date_ok=date_ok if manque else maintenant, total=len(paquets), sources=sources, noyau=noyau,
+              paquets=paquets[:300], derniere_notif=etat.get("date", 0), incomplet=manque)
 tmp = os.path.join(cache, "paquets.json.tmp")
 json.dump(detail, open(tmp, "w"), ensure_ascii=False)
 os.replace(tmp, os.path.join(cache, "paquets.json"))
@@ -280,7 +287,8 @@ case "$action" in
     if [ -n "$a_dire" ]; then notifier "${a_dire%%$'\t'*}" "${a_dire#*$'\t'}"; fi
     # Le minuteur se tait (il réessaiera) ; lancé à la main, un compte incomplet le dit et finit en échec
     if [ -n "$manque" ] && [ "$mode" != auto ]; then
-      t "Vérification incomplète, pas de réponse : $manque (dernier état gardé)" "Incomplete check, no answer from: $manque (last state kept)" >&2
+      noms="$(sed -e "s/depot/$(t "dépôts" "repositories")/" -e 's/aur/AUR/' -e 's/flatpak/Flatpak/' -e 's/,/, /g' <<<"$manque")"
+      t "Vérification incomplète, pas de réponse : $noms (dernier état gardé)" "Incomplete check, no answer from: $noms (last state kept)" >&2
       echo >&2; exit 1
     fi ;;
   mettre-a-jour)

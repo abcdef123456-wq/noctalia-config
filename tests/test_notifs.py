@@ -109,6 +109,24 @@ class Notifications(unittest.TestCase):
         ''', preparer=preparer, apres=apres)
         self.assertEqual(vu["appels"], ["verifier", "mettre-a-jour"])
 
+    def test_carte_des_mises_a_jour_verification_impossible(self):
+        """Revue PKG-03 : une vérification qui n'aboutit pas ne s'affiche jamais « À jour » ; l'heure est celle du
+        dernier compte complet."""
+        import time
+        def preparer(root):
+            (root / "cache/nc").mkdir(parents=True)
+            (root / "cache/nc/paquets.json").write_text(json.dumps({
+                "date": int(time.time()), "date_ok": int(time.time()) - 3 * 3600, "total": 0, "incomplet": ["depot", "flatpak"],
+                "noyau": False, "sources": {"depot": 0, "aur": 0, "flatpak": 0}, "paquets": []}))
+        self.executer('''
+                if (etape === 0) { creer(); page.visible = true; etape++; return }
+                if (etape === 1) {
+                    var r = trouver(page, "nc-notifs-maj-resume"); verifier(r !== null, "carte des mises à jour absente")
+                    if (r.text.indexOf("Could not") < 0) return
+                    verifier(r.text.indexOf("Up to date") < 0 && r.text.indexOf("repositories, Flatpak") > 0 && r.text.indexOf("3 h ago") > 0, "résumé : " + r.text)
+                    Qt.quit() }
+        ''', preparer=preparer)
+
     def test_groupes_filtres_lecture_report_masquage_clavier(self):
         memo = self.executer('''
 if (etape === 0) { creer(); etape++; return }

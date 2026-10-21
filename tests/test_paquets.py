@@ -161,6 +161,8 @@ class Paquets(unittest.TestCase):
         self.assertEqual(self.cache.read_text(), "3\naur:zen-browser-bin\nlinux\nzsh\n", "le dernier état des dépôts est gardé")
         d = json.loads((self.home / ".cache/nc/paquets.json").read_text())
         self.assertEqual(d["incomplet"], ["depot"])
+        self.assertLessEqual(d["date_ok"], d["date"], "l'heure du dernier compte complet, pas celle de l'échec")
+        self.assertIn("pas de réponse : dépôts", r.stderr, "noms traduits, comme la notification")
         titre, corps = self.notifs(2)[-1]
         self.assertNotEqual(titre, "Système à jour")
         self.assertIn("Pas vérifié cette fois : dépôts", corps)
@@ -357,14 +359,17 @@ class LigneMisesAJour(unittest.TestCase):
                     function trouver(item, nom) { if (item.objectName === nom) return item; for (var i = 0; i < item.children.length; i++) { var r = trouver(item.children[i], nom); if (r) return r } return null }
                     Window { id: w; visible: true; width: 420; height: 600; color: "#151f2b" }
                     Process { id: recompte; command: ["sh", "-c", "printf '0\\\\n\\\\n' > \\"$HOME/.cache/nc/paquets.tmp\\" && mv \\"$HOME/.cache/nc/paquets.tmp\\" \\"$HOME/.cache/nc/paquets\\""] }
+                    Process { id: erreur; command: ["sh", "-c", "echo '1 depot' > \\"$HOME/.cache/nc/paquets-erreur\\""] }
                     Timer { interval: 100; running: true; repeat: true; onTriggered: {
                         if (etape === 0) { var c = Qt.createComponent("Systeme.qml"); verifier(c.status === Component.Ready, c.errorString()); page = c.createObject(w.contentItem, { width: 400, height: 580 }); verifier(page !== null, "page absente"); etape++ }
                         else if (etape === 1) { ligne = trouver(page, "nc-paquets"); verifier(ligne !== null, "ligne absente"); if (!ligne.visible) return
                             verifier(ligne.titre === "3 system updates", "titre initial : " + ligne.titre); verifier(ligne.actif, "ligne inactive"); recompte.running = true; etape++ }
                         else if (etape === 2) { if (ligne.titre !== "System up to date") return
-                            verifier(ligne.n === 0 && !ligne.actif, "état après recompte"); verifier(ligne.sous === "Checked every 3 hours", "sous-titre : " + ligne.sous)
+                            verifier(ligne.n === 0 && !ligne.actif, "état après recompte"); verifier(ligne.sous === "Checked every hour", "sous-titre (MAJ_FREQUENCE) : " + ligne.sous)
                             page.visible = false; page.visible = true; etape++ }
-                        else if (etape === 3) { verifier(ligne.titre === "System up to date", "titre après réaffichage : " + ligne.titre); Qt.quit() } } }
+                        else if (etape === 3) { verifier(ligne.titre === "System up to date", "titre après réaffichage : " + ligne.titre); erreur.running = true; etape++ }
+                        // PKG-03 : la vérification n'aboutit pas (cache à 0 gardé) : jamais « à jour »
+                        else if (etape === 4) { if (ligne.titre !== "Could not check for updates") return; Qt.quit() } } }
                     Timer { interval: 6000; running: true; onTriggered: Qt.exit(9) }
                 }'''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",

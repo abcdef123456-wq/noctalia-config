@@ -210,10 +210,18 @@ Item {
                     var h = Math.round(m / 60)
                     return h < 48 ? Reglages.t("il y a " + h + " h", h + " h ago") : Reglages.t("il y a " + Math.round(h / 24) + " jours", Math.round(h / 24) + " days ago")
                 }
+                // Vérification incomplète (réseau, dépôt indisponible) : jamais « À jour », et l'heure du dernier compte complet
+                readonly property var incomplet: detail ? (detail.incomplet || []) : []
                 readonly property string resume: {
                     if (verif.running) return Reglages.t("Recherche en cours…", "Checking…")
                     if (!detail) return Reglages.t("Pas encore vérifié", "Not checked yet")
-                    var quand = Reglages.t("vérifié ", "checked ") + ilYa(detail.date || 0)
+                    var ok = detail.date_ok !== undefined ? detail.date_ok : (detail.date || 0)
+                    var quand = ok ? Reglages.t("vérifié ", "checked ") + ilYa(ok) : Reglages.t("jamais vérifié en entier", "never fully checked")
+                    if (incomplet.length) {
+                        var noms = incomplet.map(x => x === "depot" ? Reglages.t("dépôts", "repositories") : x === "aur" ? "AUR" : x === "flatpak" ? "Flatpak" : x)
+                        return (total ? total + Reglages.t(" en attente (dernier état)", " pending (last state)") : Reglages.t("Vérification impossible", "Could not check"))
+                               + " · " + Reglages.t("pas de réponse : ", "no answer: ") + noms.join(", ") + " · " + quand
+                    }
                     if (!total) return Reglages.t("À jour", "Up to date") + " · " + quand
                     var imp = (detail.paquets || []).filter(x => x.important).map(x => x.nom).slice(0, 2)
                     return total + Reglages.t(" en attente", " pending") + (imp.length ? " · " + imp.join(", ") : "")
