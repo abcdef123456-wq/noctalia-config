@@ -16,6 +16,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "AideConfig.js" as Aide
 
 FloatingWindow {
     id: fen
@@ -38,18 +39,45 @@ FloatingWindow {
     readonly property bool enCours: lecture.running || ecriture.running || relire || file.length > 0
     readonly property var sections: { var s = []; catalogue.forEach(r => { if (s.indexOf(r.sectionNom) < 0) s.push(r.sectionNom) }); return s }
     // Recherche : chaque mot doit se trouver (dans le nom, l'aide, la clé, la section ou la valeur) ; espaces et « + »
-    // séparent les mots, donc « super a », « super+a » et « Super + A » trouvent le même raccourci
+    // séparent les mots, donc « super a », « super+a » et « Super + A » trouvent le même raccourci. Une question
+    // (« comment changer le fond d'écran ») ou peu de résultats : les réglages trouvés par l'index de nc-aide-config
+    // (synonymes, mots outils ignorés) s'ajoutent, puis jusqu'à deux passages de la documentation.
+    property var prepAide: null
+    FileView {
+        id: indexAide
+        path: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/nc/aide-config.json"
+        printErrors: false
+        onLoaded: { try { fen.prepAide = Aide.preparer(JSON.parse(text())) } catch (e) { fen.prepAide = null } }
+    }
+    Process { id: majAide; command: [fen.bin + "nc-aide-config", "index"]; onExited: indexAide.reload() }
+    function ligneDoc(e) {
+        return { cle: "doc:" + e.fichier + ":" + e.titre + ":" + e.texte.length, section: "", sectionNom: Reglages.t("Documentation", "Documentation"),
+                 nom: e.titre, genre: "doc", aide: e.texte, choix: [], valeur: "", affiche: "", modifie: false, defaut: "", mini: 0, maxi: 0, pas: 1, unite: "", zero: "" }
+    }
     readonly property var visibles: {
         var mots = normaliser(recherche).split(/[\s+]+/).filter(m => m !== "")
-        if (mots.length) return catalogue.filter(r => {
+        if (!mots.length) return catalogue.filter(r => r.sectionNom === section)
+        var exacts = catalogue.filter(r => {
             var t = normaliser(r.nom + " " + r.aide + " " + r.cle + " " + r.sectionNom + " " + r.affiche)
             return mots.every(m => t.indexOf(m) >= 0)
         })
-        return catalogue.filter(r => r.sectionNom === section)
+        if (!prepAide || (!Aide.estQuestion(recherche) && exacts.length >= 3)) return exacts
+        var deja = {}, plus = [], docs = []
+        exacts.forEach(r => deja[r.cle] = true)
+        Aide.chercher(prepAide, recherche, 10).forEach(e => {
+            if (e.type === "doc") { if (docs.length < 2) docs.push(ligneDoc(e)) }
+            else {
+                var r = catalogue.find(x => x.nom === e.titre && !deja[x.cle])
+                if (r) { deja[r.cle] = true; plus.push(r) }
+            }
+        })
+        return exacts.concat(plus, docs)
     }
+    // Ouvert depuis le Spotlight (réponse « réglage ») : la recherche est déjà tapée
+    function chercherTexte(t) { champRecherche.text = t; liste.forceActiveFocus() }
     // Sans accent ni majuscule ; sans String.normalize (moteur JavaScript d'un Qt ancien), seulement sans majuscule
     function normaliser(t) { var s = String(t).toLowerCase(); try { return s.normalize("NFD").replace(/[̀-ͯ]/g, "") } catch (e) { return s } }
-    function afficher(nom) { surEcran(nom); visible = true; charger(); liste.forceActiveFocus() }
+    function afficher(nom) { surEcran(nom); visible = true; charger(); if (!majAide.running) majAide.running = true; liste.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
         for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }

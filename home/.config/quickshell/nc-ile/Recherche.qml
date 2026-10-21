@@ -9,12 +9,16 @@
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
 // Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
 // Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
+// Questions sur la config (« ? question », ou une phrase comme « comment changer le fond d'écran ») : réponses
+// instantanées de l'index de nc-aide-config (réglages, raccourcis, commandes, documentation), sans IA ; « Demander à
+// l'IA » reste en dernier. Réglage SPOTLIGHT_AIDE.
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.UPower
+import "AideConfig.js" as Aide
 
 Item {
     id: r
@@ -46,6 +50,36 @@ Item {
     property var fichiers: []
     property string calcul: ""
     property var resultats: []
+    // Aide sur la config : l'index (nc-aide-config index, refait seulement si une source a changé), et la réponse affichée
+    readonly property bool aideActive: Reglages.val("SPOTLIGHT_AIDE", "oui") !== "non"
+    property var aide: null
+    property string reponseAide: ""
+    property string titreAide: ""
+    FileView {
+        id: indexAide
+        path: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/nc/aide-config.json"
+        printErrors: false
+        onLoaded: { try { r.aide = Aide.preparer(JSON.parse(text())) } catch (e) { r.aide = null } r.chercher() }
+    }
+    Process { id: majAide; command: [Etat.bin + "nc-aide-config", "index"]; onExited: indexAide.reload() }
+    function reponsesAide(question, nombre) { return aideActive && aide ? Aide.chercher(aide, question, nombre) : [] }
+    function itemAide(e, s) {
+        var court = t => t.length > 80 ? t.slice(0, 78) + "…" : t
+        if (e.type === "reglage")
+            return { titre: e.titre, sous: Reglages.t("Réglage · ", "Setting · ") + e.section + (e.valeur ? " · " + e.valeur : ""), glyphe: "tune", s: s,
+                     aide: Reglages.t("↵ ouvrir le réglage", "↵ open the setting"), f: () => r.ouvrirReglage(e.titre) }
+        if (e.type === "raccourci")
+            return { titre: e.titre, sous: Reglages.t("Raccourci · ", "Shortcut · ") + e.touches, glyphe: "keyboard", s: s,
+                     aide: Reglages.t("↵ le changer", "↵ change it"), f: () => r.ouvrirReglage(e.titre) }
+        if (e.type === "commande")
+            return { titre: e.titre, sous: court(e.texte), glyphe: "terminal", s: s, aide: Reglages.t("↵ son aide", "↵ its help"),
+                     f: () => r.lancerCommande("nc-aide " + e.titre) }
+        return { titre: e.titre, sous: court(e.texte), glyphe: "menu_book", s: s, garder: true, aide: Reglages.t("↵ lire", "↵ read"),
+                 f: () => { r.titreAide = e.titre; r.reponseAide = e.texte } }
+    }
+    // La fenêtre des réglages, cherchant ce réglage (ou ce raccourci)
+    function ouvrirReglage(nom) { Quickshell.execDetached(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglagesChercher", nom]) }
+
     // Logiciels à installer (nc-logiciels) : la liste et le terme qu'elle concerne
     property var paquets: []
     property string paquetsPour: ""
@@ -66,6 +100,7 @@ Item {
         lireFenetres.running = true
         if (Object.keys(execs).length === 0) lireExecs.running = true
         if (nomIA === "") lireIA.running = true
+        if (aideActive && !majAide.running) majAide.running = true
         fichierUsage.reload()
         champ.forceActiveFocus()
         prendreClavier.essais = 0
@@ -233,7 +268,7 @@ Item {
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
             }
-            if (/\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q)) {
+            if (Reglages.val("SPOTLIGHT_CALCULS", "oui") !== "non" && /\d/.test(q) && /[-+*/^%()√]|\s(en|to|in)\s|sqrt|sin|cos|log/.test(q)) {
                 calculer.pour = q
                 calculer.command = ["qalc", "-t", "-set", "mix 0", q.replace(/\s+en\s+/g, " to ")]
                 calculer.running = true
@@ -323,14 +358,19 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; fichiers = []; calcul = ""; attente.restart(); attentePaquets.restart(); chercher() }
+    onQChanged: { sel = 0; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
         if (q === "") { resultats = []; return }
 
         // Préfixes : web et commande
-        var web = [["g ", "Google", "https://www.google.com/search?q="], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
+        // « g … » : le moteur choisi (SPOTLIGHT_MOTEUR)
+        var moteur = ({ google: ["Google", "https://www.google.com/search?q="], duckduckgo: ["DuckDuckGo", "https://duckduckgo.com/?q="],
+                        qwant: ["Qwant", "https://www.qwant.com/?q="], startpage: ["Startpage", "https://www.startpage.com/do/search?q="],
+                        brave: ["Brave Search", "https://search.brave.com/search?q="], ecosia: ["Ecosia", "https://www.ecosia.org/search?q="] })[Reglages.val("SPOTLIGHT_MOTEUR", "google")]
+                     || ["Google", "https://www.google.com/search?q="]
+        var web = [["g ", moteur[0], moteur[1]], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
                    ["w ", Reglages.t("Wikipédia", "Wikipedia"), Reglages.t("https://fr.wikipedia.org/w/index.php?search=", "https://en.wikipedia.org/w/index.php?search=")]]
         for (var w = 0; w < web.length; w++) {
             if (q.startsWith(web[w][0]) && q.length > web[w][0].length) {
@@ -342,16 +382,20 @@ Item {
         }
         if (q.startsWith("?")) {
             var question = q.slice(1).trim()
+            // D'abord les réponses de la config (instantanées), puis l'IA en dernier
+            var deLaConfig = question.length >= 2 ? reponsesAide(question, nbResultats - 1).map(e => itemAide(e, 0)) : []
             if (r.reponse !== "" && question === r.questionPosee) {
                 let cmdIA = r.commandeIA
-                resultats = cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]
+                resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]).concat(deLaConfig)
             } else {
-                resultats = r.reflechit ? []
-                          : nomIA === "-" ? [{ titre: Reglages.t("Aucune IA installée pour répondre", "No AI installed to answer"), sous: Reglages.t("Claude, opencode, Gemini ou Qwen", "Claude, opencode, Gemini or Qwen"), glyphe: "block", garder: true, f: () => {} }]
+                var ia = r.reflechit ? []
+                          : nomIA === "-" ? (deLaConfig.length ? [] : [{ titre: Reglages.t("Aucune IA installée pour répondre", "No AI installed to answer"), sous: Reglages.t("Claude, opencode, Gemini ou Qwen", "Claude, opencode, Gemini or Qwen"), glyphe: "block", garder: true, f: () => {} }])
                           : [{ titre: question || Reglages.t("Pose ta question", "Ask your question"),
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
+                resultats = deLaConfig.concat(ia)
             }
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
         if (q.startsWith("+") && modePaquets !== "non") {
@@ -406,7 +450,7 @@ Item {
             }
         }
         // Fenêtres ouvertes (celles qui ne sont pas déjà proposées par leur appli)
-        for (var i = 0; i < fenetres.length; i++) {
+        for (var i = 0; i < (Reglages.val("SPOTLIGHT_FENETRES", "oui") !== "non" ? fenetres.length : 0); i++) {
             var fe = fenetres[i]
             if (prises[fe.address]) continue
             var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
@@ -435,6 +479,8 @@ Item {
                        s: Math.min(70, Math.max(15, score(qa, fi.name, true) * 0.75)),   // jamais devant une appli qui commence par la saisie
                        f: () => Quickshell.execDetached([Etat.bin + "nc-apps", "open", chemin]) })
         }
+        // Une question en langage naturel (« comment changer le fond d'écran ») : les réponses de la config en tête
+        if (Aide.estQuestion(q)) reponsesAide(q, 3).forEach(e => out.push(itemAide(e, 500 + e.score)))
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
@@ -500,7 +546,8 @@ Item {
     readonly property bool occupe: suivi.running || entreeEnAttente
     function valider(i, nouveau) {
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
-        if (lireApplis.running || applis.length === 0) { entreeEnAttente = true; return }
+        // (pas pour « ? », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
+        if ((lireApplis.running || applis.length === 0) && !/^[?>+]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
@@ -534,7 +581,7 @@ Item {
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: Reglages.t("Rechercher  ·  > commande  ·  ? question à l'IA  ·  + installer", "Search  ·  > command  ·  ? ask the AI  ·  + install"); secondaire: true; font.pixelSize: 19
+                text: Reglages.t("Rechercher  ·  ? question  ·  > commande  ·  + installer", "Search  ·  ? question  ·  > command  ·  + install"); secondaire: true; font.pixelSize: 19
             }
         }
     }
@@ -542,7 +589,7 @@ Item {
     // Réponse de l'IA (« ? … »)
     Rectangle {
         id: zoneReponse
-        visible: r.q.startsWith("?") && (r.reflechit || r.reponse !== "")
+        visible: r.reponseAide !== "" || (r.q.startsWith("?") && (r.reflechit || r.reponse !== ""))
         readonly property bool attend: r.reflechit && r.reponse === ""
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
@@ -556,16 +603,17 @@ Item {
                 agent: ({ Claude: "claude", OpenCode: "opencode", Gemini: "gemini", Qwen: "qwen", Assistant: "assistant" })[r.nomIA] || "claude"
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
-                    text: zoneReponse.attend ? r.nomIA + Reglages.t(" réfléchit…", " is thinking…") : r.nomIA }
+                    text: r.reponseAide !== "" ? Reglages.t("Aide de la config · ", "Config help · ") + r.titreAide
+                        : zoneReponse.attend ? r.nomIA + Reglages.t(" réfléchit…", " is thinking…") : r.nomIA }
         }
         Text {
             id: texteReponse
             anchors.top: enTete.bottom; anchors.topMargin: 6
             x: 14; width: parent.width - 28
-            text: AssistantEtat.formater(r.reponse)
-            visible: !zoneReponse.attend
+            text: r.reponseAide !== "" ? r.reponseAide : AssistantEtat.formater(r.reponse)
+            visible: !zoneReponse.attend || r.reponseAide !== ""
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
-            textFormat: Text.MarkdownText
+            textFormat: r.reponseAide !== "" ? Text.PlainText : Text.MarkdownText
         }
     }
 

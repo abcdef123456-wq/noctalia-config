@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""nc-aide-config : réponses aux questions sur la config, sans IA, instantanées (Spotlight : « ? ta question »,
+fenêtre des réglages : sa recherche).
+
+  nc-aide-config index             construit (ou garde, s'il est à jour) l'index ~/.cache/nc/aide-config.json :
+                                   réglages et raccourcis (nc-reglages catalogue), commandes (nc-aide), sections de la
+                                   documentation du dépôt (README, docs/) ; refait seulement si une source a changé
+  nc-aide-config chercher QUESTION les meilleures réponses, en texte (--json : en JSON)
+
+La recherche ignore les mots outils (comment, le, de, how, the…), comprend les synonymes courants (fond d'écran et
+wallpaper, raccourci et touche, son et volume…) et les débuts de mots ; l'île fait la même chose en JavaScript
+(AideConfig.js) sur l'index déjà chargé : aucune commande lancée pendant la frappe.
+"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import unicodedata
+
+HOME = Path.home()
+BIN = HOME / ".local/bin"
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc/aide-config.json"
+VERSION = 1
+DOCS = ["README.md", "docs/jarvis.md", "docs/pages-ile.md", "docs/assistant-distant.md", "docs/installation-checks.md",
+        "docs/vue-ouverture-nobara.md"]
+
+# Mots qui ne disent rien de la question (gardés hors de l'index et de la recherche)
+VIDES = set("""comment pourquoi quoi quel quelle quels quelles ou est ce c qu que qui quand combien je j tu il elle on nous vous
+mon ma mes ton ta tes son sa ses le la les l un une des de du d a au aux en et pour par sur dans avec sans se s y ne pas
+peux peut puis veux voudrais faire fait fais possible moyen il-y-a ya ca cela cette cet ces leur leurs plus tres bien
+the a an to of in on at for with my is are do does how can i what where why which when it this that be from by or and
+your you me""".split())
+# Familles de mots équivalents (une question en touche une, la réponse en contient une autre)
+SYNONYMES = [
+    "fond fonds wallpaper papier peint arriere plan image",
+    "ecran ecrans moniteur display screen affichage",
+    "raccourci raccourcis touche touches shortcut keybind combinaison",
+    "son volume audio sound haut parleur",
+    "luminosite brightness lumineux",
+    "veille sleep suspension suspend dormir",
+    "energie batterie economie power battery autonomie profil",
+    "theme couleur couleurs color sombre clair dark light",
+    "notification notifications notifs banniere",
+    "fenetre fenetres window windows",
+    "bureau bureaux workspace workspaces espace",
+    "ile island pilule spotlight",
+    "clavier keyboard azerty qwerty",
+    "disposition layout agencement",
+    "changer choisir modifier regler mettre change set modify choose",
+    "desactiver couper arreter enlever retirer supprimer disable remove turn off",
+    "activer allumer enable",
+    "souris mouse pointeur curseur cursor",
+    "pave touchpad trackpad",
+    "terminal kitty console",
+    "maj mise jour update updates paquets paquet upgrade",
+    "installer install logiciel logiciels application applications appli applis app",
+    "capture captures screenshot copie",
+    "verrouillage verrou lock verrouiller",
+    "wifi reseau network internet",
+    "jarvis assistant ia agent agents",
+    "animation animations effets effet",
+    "flou blur transparence",
+    "police font texte",
+    "reglage reglages parametre parametres setting settings option",
+]
+GROUPE = {}
+for _i, _l in enumerate(SYNONYMES):
+    for _m in _l.split():
+        GROUPE.setdefault(_m, _i)
+
+
+def normaliser(t):
+    t = unicodedata.normalize("NFD", str(t).lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+def racine(m):
+    """Pluriels et fins courantes retirés (fenêtres → fenetre, notifications → notification)."""
+    if len(m) > 4 and m.endswith(("s", "x")):
+        m = m[:-1]
+    return m
+
+
+def mots(t):
+    return [racine(m) for m in normaliser(t).split() if m not in VIDES and len(m) > 1]
+
+
+def charger(nom, fichier):
+    l = importlib.machinery.SourceFileLoader(nom, str(BIN / fichier))
+    s = importlib.util.spec_from_loader(nom, l)
+    m = importlib.util.module_from_spec(s)
+    l.exec_module(m)
+    return m
+
+
+def depot():
+    try:
+        d = Path((CONFIG / "nc/depot").read_text(encoding="utf-8").strip())
+        return d if d.is_dir() else None
+    except OSError:
+        return None
+
+
+def sources():
+    s = [BIN / "nc-reglages", BIN / "nc-aide", CONFIG / "nc/raccourcis.conf", CONFIG / "hypr/nc/raccourcis.lua"]
+    d = depot()
+    if d:
+        s += [d / f for f in DOCS]
+    return [f for f in s if f.exists()]
+
+
+def signature():
+    langue = os.environ.get("NC_LANGUE") or ""
+    try:
+        langue = langue or re.search(r"^LANGUE=\"?(\w+)", (CONFIG / "nc/reglages.conf").read_text(), re.M)[1]
+    except (OSError, TypeError):
+        pass
+    return [VERSION, langue] + [[str(f), f.stat().st_mtime_ns] for f in sources()]
+
+
+def entree(type_, titre, texte, **extra):
+    e = dict(type=type_, titre=titre, texte=texte, mt=sorted(set(mots(titre))), mx=sorted(set(mots(texte + " " + extra.get("section", "")))))
+    e.update(extra)
+    return e
+
+
+def depuis_reglages():
+    try:
+        r = subprocess.run([str(BIN / "nc-reglages"), "catalogue"], capture_output=True, text=True, timeout=20)
+        lignes = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+    res = []
+    for l in lignes:
+        if l.get("genre") == "raccourci":
+            res.append(entree("raccourci", l["nom"], (l.get("affiche") or "") + " · " + (l.get("aide") or ""),
+                              section=l.get("aide") or "", touches=l.get("affiche") or ""))
+        else:
+            res.append(entree("reglage", l["nom"], l.get("aide") or "", section=l.get("sectionNom") or "", cle=l.get("cle") or "",
+                              valeur=l.get("affiche") or ""))
+    return res
+
+
+def depuis_commandes():
+    try:
+        a = charger("ncaide", "nc-aide")
+    except Exception:
+        return []
+    res = []
+    for liste in (getattr(a, "A_TAPER", []), getattr(a, "RACCOURCIS", []), getattr(a, "AUTOMATIQUES", [])):
+        for x in liste:
+            if len(x) >= 3:
+                nom, exemple, texte = x[0], x[1], x[2]
+                res.append(entree("commande", nom, f"{texte} Exemple : {exemple}", exemple=exemple))
+            elif len(x) == 2:
+                res.append(entree("commande", x[0], x[1], exemple=x[0]))
+    return res
+
+
+def nettoyer_md(t):
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)                 # liens : leur texte
+    t = re.sub(r"[*_`]+", "", t)
+    t = re.sub(r"^\s*[-•]\s+", "• ", t, flags=re.M)
+    return re.sub(r"[ \t]+", " ", t).strip()
+
+
+def depuis_docs():
+    d = depot()
+    if not d:
+        return []
+    res = []
+    for f in DOCS:
+        chemin = d / f
+        try:
+            texte = chemin.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        texte = re.sub(r"```.*?```", "", texte, flags=re.S)           # blocs de code : pas des réponses
+        titre, paragraphe = Path(f).stem, []
+        def vider():
+            p = nettoyer_md("\n".join(paragraphe))
+            if len(p) > 40:
+                for i in range(0, len(p), 700):                       # longs paragraphes : en morceaux lisibles
+                    res.append(entree("doc", titre, p[i:i + 700], fichier=f))
+            paragraphe.clear()
+        for ligne in texte.splitlines():
+            h = re.match(r"^#{1,4}\s+(.*)", ligne)
+            if h:
+                vider()
+                titre = nettoyer_md(h[1])
+            elif not ligne.strip():
+                vider()
+            elif not ligne.lstrip().startswith("|"):                  # tableaux : peu lisibles en réponse
+                paragraphe.append(ligne)
+        vider()
+    return res
+
+
+def construire(force=False):
+    sig = signature()
+    if not force:
+        try:
+            ancien = json.loads(CACHE.read_text(encoding="utf-8"))
+            if ancien.get("signature") == sig:
+                return ancien
+        except (OSError, ValueError):
+            pass
+    index = dict(signature=sig, synonymes=SYNONYMES, vides=sorted(VIDES),
+                 entrees=depuis_reglages() + depuis_commandes() + depuis_docs())
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(index, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    tmp.replace(CACHE)
+    return index
+
+
+# Même calcul que AideConfig.js (l'île) : à garder identiques. Un mot court (4 lettres) ne correspond qu'à lui-même ou à
+# sa forme en -s, -x, -e (« vide » ne trouve pas « video ») ; plus long, à un mot qui le prolonge.
+def correspond(q, ws):
+    for w in ws:
+        if w == q:
+            return True
+        for a, b in ((q, w), (w, q)):
+            if len(a) >= 5 and b.startswith(a):
+                return True
+            if len(a) == 4 and len(b) == 5 and b.startswith(a) and b[4] in "sxe":
+                return True
+    return False
+
+
+def chercher(index, question, maximum=5):
+    concepts = []
+    for m in dict.fromkeys(mots(question)):
+        g = GROUPE.get(m)
+        famille = SYNONYMES[g].split() if g is not None else []
+        concepts.append([m] + [racine(x) for x in famille if racine(x) != m])
+    if not concepts:
+        return []
+    res = []
+    for e in index.get("entrees", []):
+        score, trouves = 0.0, 0
+        for c in concepts:
+            meilleur = 0.0
+            for i, q in enumerate(c):
+                poids = 1.0 if i == 0 else 0.8                         # le mot tapé lui-même compte un peu plus
+                if correspond(q, e["mt"]):
+                    meilleur = max(meilleur, 3 * poids)
+                elif correspond(q, e["mx"]):
+                    meilleur = max(meilleur, 1 * poids)
+            if meilleur:
+                trouves += 1
+                score += meilleur
+        couverture = trouves / len(concepts)
+        if trouves and (couverture >= 0.5 or len(concepts) == 1):
+            bonus = {"reglage": 0.6, "raccourci": 0.4, "commande": 0.2, "doc": 0}.get(e["type"], 0)
+            res.append((score * (0.4 + couverture) + bonus, e))
+    res.sort(key=lambda x: -x[0])
+    return [dict(e, score=round(s, 2)) for s, e in res[:maximum]]
+
+
+def main(a):
+    if a[:1] == ["index"]:
+        i = construire("--force" in a)
+        print(f"{len(i['entrees'])} entrées · {CACHE}")
+        return 0
+    if a[:1] in (["chercher"], ["search"]) and len(a) >= 2:
+        q = " ".join(x for x in a[1:] if x != "--json")
+        r = chercher(construire(), q)
+        if "--json" in a:
+            print(json.dumps([{k: v for k, v in e.items() if k not in ("mt", "mx")} for e in r], ensure_ascii=False))
+        else:
+            for e in r:
+                print(f"[{e['type']}] {e['titre']}\n    {e['texte'][:300]}")
+            if not r:
+                print("Rien trouvé : essaie d'autres mots, ou « ? ta question » dans le Spotlight pour une IA.")
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

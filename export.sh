@@ -91,6 +91,7 @@ HOME_FILES=(
   .local/bin/nc-fenetre
   .local/bin/nc-firefox
   .local/bin/nc-logiciels
+  .local/bin/nc-aide-config
   .local/bin/nc-qs-capture
   .local/bin/nc-langue
   .local/bin/nc-meteo

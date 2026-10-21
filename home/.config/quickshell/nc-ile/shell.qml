@@ -180,6 +180,11 @@ ShellRoot {
             if (racine.reglagesFenetre) racine.reglagesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
         function reglagesFermer(): void { if (racine.reglagesFenetre) racine.reglagesFenetre.close() }
+        // Réglages ouverts sur une recherche (réponses du Spotlight) : la fenêtre vient au premier plan, recherche tapée
+        function reglagesChercher(texte: string): void {
+            if (!racine.reglagesFenetre || !racine.reglagesFenetre.visible) reglages()
+            if (racine.reglagesFenetre) racine.reglagesFenetre.chercherTexte(texte)
+        }
         // Connexion à JARVIS en graphique (adresse, clé, test) ; déjà ouverte : ramenée ici, mise devant ou rangée
         function connexionJarvis(): void {
             if (racine.connexionFenetre && racine.connexionFenetre.visible) { racine.basculerOutil(racine.connexionFenetre, "Connexion JARVIS"); return }
