@@ -59,7 +59,7 @@ function theme(p) {
       toolbar_field: carte, toolbar_field_text: texte, toolbar_field_focus: carte, toolbar_field_text_focus: texte,
       toolbar_field_border: fond, toolbar_field_border_focus: accent,
       toolbar_field_highlight: accent, toolbar_field_highlight_text: surAccent,
-      popup: fond, popup_text: texte, popup_border: carteSurvol, popup_highlight: carteSurvol, popup_highlight_text: texte,
+      popup: fond, popup_text: texte, popup_border: carteSurvol, popup_highlight: melange(fond, texte, 0.18), popup_highlight_text: texte,
       sidebar: fond, sidebar_text: texte, sidebar_border: carte, sidebar_highlight: carteSurvol, sidebar_highlight_text: texte,
       ntp_background: fond, ntp_text: texte, icons: texte, icons_attention: accent,
       button_background_hover: carte, button_background_active: carteSurvol,

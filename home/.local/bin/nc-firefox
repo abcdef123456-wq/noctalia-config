@@ -23,6 +23,7 @@ rouvre-le. Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais accept
 colors, status, extension.
 """
 import configparser
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -124,10 +125,66 @@ def bloc_reglages():
 
 def ecrire_user_js(p):
     """user.js = celui du dépôt, tes réglages, plus le bloc de l'extension si elle est installée."""
+    garder_avant(p, "user.js", lire_empreintes(p))   # retouché à la main depuis : gardé avant la réécriture (revue FF-01b)
     texte = (SOURCE / "user.js").read_text(encoding="utf-8") + bloc_reglages()
     if extension_etat(p) == 0:
         texte += BLOC_EXTENSION
     (p / "user.js").write_text(texte, encoding="utf-8")
+    # Réécrit par nc-firefox lui-même (extension, réglages) : son empreinte suit, ce n'est pas une retouche
+    d = lire_empreintes(p)
+    if d:
+        d["user.js"] = empreinte(p / "user.js")
+        (p / EMPREINTES).write_text(json.dumps(d, indent=1), encoding="utf-8")
+
+
+# Tes fichiers à toi ne sont jamais perdus : un fichier qui n'est pas de nc-firefox est gardé en NOM.avant-nc avant la
+# première installation (une sauvegarde déjà faite n'est jamais écrasée) et remis à la désinstallation ; un fichier de
+# nc-firefox que tu as retouché depuis (empreinte différente de celle notée dans .nc-firefox.json) est gardé en
+# NOM.retouche-nc avant d'être remplacé ou retiré.
+EMPREINTES = ".nc-firefox.json"
+
+
+def empreinte(f):
+    try:
+        return hashlib.sha256(f.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def lire_empreintes(p):
+    try:
+        d = json.loads((p / EMPREINTES).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def garder_avant(p, rel, empreintes):
+    """Avant de poser (ou de retirer) rel : ta version est mise de côté si elle n'est pas celle de nc-firefox."""
+    f = p / rel
+    if not f.is_file():
+        return
+    if not pose_par_nc(f):
+        sauve = f.with_name(f.name + ".avant-nc")
+        if not sauve.exists():
+            shutil.copy2(f, sauve)
+            print(f"ton {rel} est gardé en {sauve}")
+    elif empreintes.get(rel) and empreinte(f) != empreintes[rel]:
+        # Une sauvegarde par version retouchée : une deuxième retouche n'écrase jamais la première
+        sauve = f.with_name(f.name + ".retouche-nc")
+        if sauve.exists() and empreinte(sauve) == empreinte(f):
+            return
+        n = 1
+        while sauve.exists():
+            sauve = f.with_name(f"{f.name}.retouche-nc.{time.strftime('%Y%m%d-%H%M%S')}" + (f"-{n}" if n > 1 else ""))
+            n += 1
+        shutil.copy2(f, sauve)
+        print(f"tes retouches de {rel} sont gardées en {sauve}")
+
+
+def noter_empreintes(p):
+    d = {rel: empreinte(p / rel) for rel in FICHIERS if pose_par_nc(p / rel)}
+    (p / EMPREINTES).write_text(json.dumps(d, indent=1), encoding="utf-8")
 
 
 def installer(p):
@@ -136,32 +193,35 @@ def installer(p):
         if not src.is_file():
             print(f"nc-firefox : source absente, {src}", file=sys.stderr)
             return 1
-    ancien = p / "user.js"
-    if ancien.is_file() and not pose_par_nc(ancien):
-        shutil.copy2(ancien, p / "user.js.avant-nc")
-        print(f"ton user.js est gardé en {p / 'user.js.avant-nc'}")
+    empreintes = lire_empreintes(p)
     (p / "chrome").mkdir(exist_ok=True)
+    for rel in FICHIERS:
+        garder_avant(p, rel, empreintes)
     for rel in FICHIERS[1:]:
         shutil.copyfile(SOURCE / rel, p / rel)
     ecrire_user_js(p)
     couleurs(p)
+    noter_empreintes(p)
     print(f"config Firefox installée dans {p} (relance Firefox)")
     return 0
 
 
 def desinstaller(p):
-    extension_desinstaller(p, silencieux=True)
+    extension_desinstaller(p, silencieux=True, complet=True)
+    empreintes = lire_empreintes(p)
     for rel in FICHIERS:
         f = p / rel
         if pose_par_nc(f):
+            garder_avant(p, rel, empreintes)       # retouchée depuis l'installation : tes retouches gardées
             f.unlink()
+        avant = f.with_name(f.name + ".avant-nc")
+        if avant.is_file() and not f.exists():
+            avant.replace(f)
+            print(f"ton {rel} d'avant est remis")
     css = p / "chrome/nc-couleurs.css"
     if pose_par_nc(css):
         css.unlink()
-    avant = p / "user.js.avant-nc"
-    if avant.is_file():
-        avant.replace(p / "user.js")
-        print("ton user.js d'avant est remis")
+    (p / EMPREINTES).unlink(missing_ok=True)
     print(f"config Firefox retirée de {p} (relance Firefox)")
     return 0
 
@@ -188,6 +248,14 @@ def couleurs(p):
     """chrome/nc-couleurs.css : les couleurs de l'île en variables CSS. Seulement si le style est installé."""
     if not pose_par_nc(p / "chrome/userChrome.css"):
         return 0
+    f = p / "chrome/nc-couleurs.css"
+    if extension_etat(p) == 0:
+        # L'extension « Couleurs de l'île » donne déjà les couleurs à Firefox, en direct : des variables figées ici (lues
+        # seulement au démarrage) masqueraient les nouvelles après un changement de fond. Le style suit alors le thème.
+        css = (f"/* {MARQUE} : l'extension « Couleurs de l'île » donne les couleurs en direct ; rien de figé ici. */\n")
+        if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
+            f.write_text(css, encoding="utf-8")
+        return 0
     pal = lire_palette()
     if not pal:
         return 0
@@ -201,7 +269,6 @@ def couleurs(p):
     css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
            "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
            f"@media (prefers-color-scheme: {'dark' if pal['sombre'] else 'light'}) {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
-    f = p / "chrome/nc-couleurs.css"
     if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
         f.write_text(css, encoding="utf-8")
     return 0
@@ -257,11 +324,13 @@ def extension_installer(p):
             installer(p)
         else:
             ecrire_user_js(p)
+    couleurs(p)                                  # plus de couleurs figées : l'extension les donne en direct
     print(f"extension « Couleurs de l'île » posée dans {p} (relance Firefox : elle s'active au démarrage)")
     return 0
 
 
-def extension_desinstaller(p, silencieux=False):
+def extension_desinstaller(p, silencieux=False, complet=False):
+    """complet : tout est retiré juste après ; user.js n'est pas réécrit (une retouche serait effacée avant d'être gardée)."""
     xpi = p / "extensions" / (EXTENSION_ID + ".xpi")
     if xpi.is_file():
         xpi.unlink()
@@ -269,8 +338,11 @@ def extension_desinstaller(p, silencieux=False):
         f = d / (HOTE + ".json")
         if f.is_file():
             f.unlink()
+    if complet:
+        return 0
     if pose_par_nc(p / "user.js"):
         ecrire_user_js(p)
+    couleurs(p)                                  # sans l'extension : les couleurs du fond, lues au démarrage
     if not silencieux:
         print(f"extension retirée de {p} (relance Firefox : il revient au thème d'avant)")
     return 0

@@ -6,13 +6,18 @@
    Firefox relit ces feuilles au démarrage (toolkit.legacyUserProfileCustomizations.stylesheets dans user.js). */
 @import url("nc-couleurs.css");
 
+/* Replis : les jetons du thème Firefox, nouveaux noms d'abord (Firefox 159 : --toolbar-background-color,
+   --toolbar-text-color, --toolbar-field-border-color-focus), anciens ensuite (--toolbar-bgcolor, --toolbar-color…) */
 :root {
-  --nc-fond: var(--nc-couleur-fond, var(--toolbar-bgcolor));
-  --nc-carte: var(--nc-couleur-carte, var(--urlbar-box-bgcolor, var(--toolbarbutton-hover-background)));
-  --nc-carte-survol: var(--nc-couleur-carte-survol, var(--toolbarbutton-hover-background));
-  --nc-accent: var(--nc-couleur-accent, AccentColor);
-  --nc-texte: var(--nc-couleur-texte, var(--toolbar-color));
-  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--toolbar-color) 70%, transparent));
+  --nc-theme-fond: var(--toolbar-background-color, var(--toolbox-background-color, var(--toolbar-bgcolor, Canvas)));
+  --nc-theme-survol: var(--toolbarbutton-background-color-hover, var(--toolbarbutton-hover-background));
+  --nc-theme-texte: var(--toolbar-text-color, var(--toolbar-color, CanvasText));
+  --nc-fond: var(--nc-couleur-fond, var(--nc-theme-fond));
+  --nc-carte: var(--nc-couleur-carte, var(--toolbar-field-background-color, var(--urlbar-box-bgcolor, var(--nc-theme-survol))));
+  --nc-carte-survol: var(--nc-couleur-carte-survol, var(--nc-theme-survol));
+  --nc-accent: var(--nc-couleur-accent, var(--toolbar-field-border-color-focus, var(--toolbar-field-focus-border-color, AccentColor)));
+  --nc-texte: var(--nc-couleur-texte, var(--nc-theme-texte));
+  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-theme-texte) 70%, transparent));
   --nc-arrondi: 11px;
   --tab-min-height: 34px !important;
   --toolbarbutton-border-radius: 9px !important;
@@ -55,28 +60,58 @@
 .tabbrowser-tab .tab-line { display: none !important; }
 
 /* Barre d'adresse et recherche : une pastille, un liseré accent quand elle a le focus */
+/* Hors focus, un contour discret : le champ ne se distinguait du fond qu'à 1,10:1 */
+/* Le texte du champ suit la même palette que son fond (sinon celui du thème Firefox, d'un autre côté possible) */
+#urlbar,
+#searchbar {
+  --toolbar-field-text-color: var(--nc-texte) !important;
+  --toolbar-field-text-color-focus: var(--nc-texte) !important;
+}
 #urlbar-background,
+#urlbar > .urlbar-background,
 #searchbar {
   border-radius: var(--nc-arrondi) !important;
   background-color: var(--nc-carte) !important;
-  border: 1px solid transparent !important;
+  border: 1px solid color-mix(in srgb, var(--nc-texte) 14%, var(--nc-fond)) !important;
   box-shadow: none !important;
 }
 /* Au focus, Firefox garde son propre liseré (la couleur d'accent du système) : il se dessine hors de ces éléments */
 #urlbar[focused] > #urlbar-background,
-#urlbar[focused="true"] > #urlbar-background {
+#urlbar[focused="true"] > #urlbar-background,
+#urlbar[focused] > .urlbar-background {
   border-color: var(--nc-accent) !important;
 }
+/* Liste des suggestions (la recherche) : lisible quelle que soit la palette. Mesuré : la ligne choisie au fond
+   « carte-survol » ne se distinguait du fond qu'à 1,16:1, et « — Rechercher avec… » prenait la couleur de lien du
+   thème GTK (jusqu'à 1,8:1 sur un fond sombre). Ligne choisie nettement plus claire, avec le liseré d'accent des
+   onglets ; textes secondaires et actions aux couleurs de la palette (accent : 6:1 et plus sur le fond). */
 #urlbar[open] > .urlbarView,
 .urlbarView {
   background-color: var(--nc-fond) !important;
   color: var(--nc-texte) !important;
+  --nc-ligne-choisie: color-mix(in srgb, var(--nc-texte) 18%, var(--nc-fond));
+  --urlbarview-text-color-action: var(--nc-accent) !important;
+  --urlbarview-text-color-secondary: var(--nc-texte-sec) !important;
+  --urlbarview-text-color-selected: var(--nc-texte) !important;
+  --urlbarview-text-color-hover: var(--nc-texte) !important;
+  --urlbarview-background-color-selected: var(--nc-ligne-choisie) !important;
+  --urlbarview-background-color-hover: color-mix(in srgb, var(--nc-texte) 9%, var(--nc-fond)) !important;
+  --urlbarView-highlight-background: var(--nc-ligne-choisie) !important;
+  --urlbarView-highlight-color: var(--nc-texte) !important;
 }
-.urlbarView-row[selected] > .urlbarView-row-inner,
 .urlbarView-row:hover > .urlbarView-row-inner {
-  background-color: var(--nc-carte-survol) !important;
+  background-color: color-mix(in srgb, var(--nc-texte) 9%, var(--nc-fond)) !important;
   border-radius: 8px !important;
 }
+.urlbarView-row[selected] > .urlbarView-row-inner {
+  background-color: var(--nc-ligne-choisie) !important;
+  color: var(--nc-texte) !important;
+  box-shadow: inset 3px 0 0 0 var(--nc-accent) !important;
+  border-radius: 8px !important;
+}
+.urlbarView-row[selected] .urlbarView-action,
+.urlbarView-row[selected] .urlbarView-url,
+.urlbarView-row[selected] .urlbarView-title-separator::before { color: var(--nc-texte-sec) !important; }
 
 /* Boutons des barres, menus et panneaux : coins arrondis, mêmes couleurs */
 .toolbarbutton-1 > .toolbarbutton-icon,
@@ -94,3 +129,10 @@
 
 /* Barre de recherche dans la page et barre de téléchargements : discrètes */
 .browserContainer > findbar { background-color: var(--nc-fond) !important; color: var(--nc-texte) !important; border: none !important; }
+.browserContainer > findbar .findbar-textbox {
+  background-color: var(--nc-carte) !important;
+  color: var(--nc-texte) !important;
+  border: 1px solid color-mix(in srgb, var(--nc-texte) 14%, var(--nc-fond)) !important;
+  border-radius: 8px !important;
+}
+.browserContainer > findbar .findbar-textbox[status="notfound"] { border-color: #e66a6a !important; }

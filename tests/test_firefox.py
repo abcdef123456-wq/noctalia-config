@@ -144,6 +144,91 @@ class Firefox(unittest.TestCase):
         (p / "compatibility.ini").write_text("[Compatibility]\nLastVersion=140.4.0_20261001/20261001\nLastPlatformDir=/usr/lib/firefox-esr\n")
         self.assertEqual(self.lancer("extension", "installer").returncode, 0, "ESR (Debian 13) l'accepte")
 
+    def test_tes_fichiers_ne_sont_jamais_perdus(self):
+        """Retour de Codex (FF-01) : un userChrome.css / userContent.css personnel était écrasé puis supprimé."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        (p / "chrome").mkdir(parents=True)
+        (p / "chrome/userChrome.css").write_text("/* mon style */")
+        (p / "chrome/userContent.css").write_text("/* mes pages */")
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertEqual(self.lancer("installer").returncode, 0)          # deux fois : la sauvegarde reste la mienne
+        self.assertEqual((p / "chrome/userChrome.css.avant-nc").read_text(), "/* mon style */")
+        # Retouché après l'installation : mes retouches gardées avant d'être remplacées
+        (p / "chrome/userChrome.css").write_text((p / "chrome/userChrome.css").read_text() + "\n/* retouche */")
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertIn("/* retouche */", (p / "chrome/userChrome.css.retouche-nc").read_text())
+        self.assertEqual((p / "chrome/userChrome.css.avant-nc").read_text(), "/* mon style */")
+        # user.js réécrit par nc-firefox lui-même : pas pris pour une retouche
+        self.assertFalse((p / "user.js.retouche-nc").exists())
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertEqual((p / "chrome/userChrome.css").read_text(), "/* mon style */")
+        self.assertEqual((p / "chrome/userContent.css").read_text(), "/* mes pages */")
+        self.assertFalse((p / "chrome/userChrome.css.avant-nc").exists())
+
+    def test_retouches_de_user_js_jamais_perdues(self):
+        """Contre-relecture de Codex (FF-01b) : une retouche de user.js disparaissait à la désinstallation (réécrit par
+        le retrait de l'extension avant d'être gardé) ; deux retouches successives n'en gardaient qu'une."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        tout = lambda: "".join(f.read_text(errors="replace") for f in p.rglob("*") if f.is_file())
+        self.lancer("installer")
+        (p / "user.js").write_text((p / "user.js").read_text() + 'user_pref("mes.retouche.une", true);\n')
+        self.assertEqual(self.lancer("extension", "desinstaller").returncode, 0)      # réécrit user.js : retouche gardée
+        self.assertIn("mes.retouche.une", (p / "user.js.retouche-nc").read_text())
+        self.assertNotIn("mes.retouche.une", (p / "user.js").read_text())
+        (p / "user.js").write_text((p / "user.js").read_text() + 'user_pref("mes.retouche.deux", true);\n')
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertFalse((p / "user.js").exists())
+        self.assertIn("mes.retouche.une", tout())
+        self.assertIn("mes.retouche.deux", tout(), "la deuxième retouche n'écrase pas la première")
+        self.assertEqual(len(list(p.glob("user.js.retouche-nc*"))), 2)
+
+    def test_extension_active_pas_de_couleurs_figees(self):
+        """Retour de Codex (FF-03) : avec l'extension, des variables lues au démarrage masquaient les couleurs en direct."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        (self.home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        (self.home / ".config/nc/palette-ile.json").write_text(json.dumps({"sombre": True, "fond": "#101010", "texte": "#eeeeee"}))
+        self.lancer("installer")
+        self.assertIn("--nc-couleur-fond", (p / "chrome/nc-couleurs.css").read_text())
+        (p / "extensions").mkdir(exist_ok=True)
+        (p / "extensions/nc-couleurs@noctalia-config.xpi").write_bytes(b"PK")   # extension posée
+        self.assertEqual(self.lancer("couleurs").returncode, 0)
+        self.assertNotIn("--nc-couleur", (p / "chrome/nc-couleurs.css").read_text())
+        css = (REPO / "home/.local/share/nc/firefox/chrome/userChrome.css").read_text()
+        self.assertIn("var(--toolbar-field-border-color-focus, var(--toolbar-field-focus-border-color, AccentColor))", css,
+                      "l'accent suit le thème en direct")
+        # Revue Codex FF-04 (Firefox 159, DOM réelle) : .urlbar-background n'a plus d'id ; --toolbar-bgcolor renommé
+        self.assertIn("#urlbar > .urlbar-background", css)
+        self.assertIn("#urlbar[focused] > .urlbar-background", css)
+        self.assertIn("var(--toolbar-background-color, var(--toolbox-background-color, var(--toolbar-bgcolor, Canvas)))", css)
+
+    def test_suggestions_lisibles(self):
+        """La liste de la barre d'adresse (la recherche) : couleurs de la palette, jamais celles du thème GTK (lien à
+        1,8:1 sur fond sombre), ligne choisie nettement distincte du fond (elle ne l'était qu'à 1,16:1)."""
+        css = (REPO / "home/.local/share/nc/firefox/chrome/userChrome.css").read_text()
+        for jeton in ("--urlbarview-text-color-action: var(--nc-accent)", "--urlbarview-text-color-secondary: var(--nc-texte-sec)",
+                      "--urlbarview-text-color-selected: var(--nc-texte)", "--urlbarview-background-color-selected: var(--nc-ligne-choisie)"):
+            self.assertIn(jeton, css)
+        self.assertIn("--nc-ligne-choisie: color-mix(in srgb, var(--nc-texte) 18%, var(--nc-fond))", css)
+        self.assertNotIn("background-color: var(--nc-carte-survol) !important;\n  border-radius: 8px", css)
+        js = (REPO / "home/.local/share/nc/firefox/extension/fond.js").read_text()
+        self.assertIn("popup_highlight: melange(fond, texte, 0.18)", js)
+
+        def lum(h):
+            r, g, b = (int(h[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        def melange(a, b, t):
+            return "#" + "".join(f"{round(int(a[i:i+2], 16) + (int(b[i:i+2], 16) - int(a[i:i+2], 16)) * t):02x}" for i in (1, 3, 5))
+        contraste = lambda a, b: (max(lum(a), lum(b)) + 0.05) / (min(lum(a), lum(b)) + 0.05)
+        for fond, texte in (("#1c1d21", "#f2f2f3"), ("#101012", "#e6e6e8"), ("#2b2d33", "#ffffff")):
+            choisie = melange(fond, texte, 0.18)
+            self.assertGreater(contraste(choisie, fond), 1.4, "ligne choisie visible")
+            self.assertGreater(contraste(texte, choisie), 7, "texte de la ligne choisie lisible")
+
     def test_user_js_bien_forme(self):
         cles = []
         for n, ligne in enumerate((SOURCE / "user.js").read_text().splitlines(), 1):
