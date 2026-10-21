@@ -47,7 +47,7 @@ BIN = os.path.expanduser("~/.local/bin")
 
 # (commande, exemple, explication) — rangées par usage
 A_TAPER = [
-    ("nc-reglages", "nc-reglages", "Tous les réglages, aux flèches : île, apparence, animations, énergie, clavier, veille, "
+    ("nc-reglages", "nc-reglages fenetre", "Tous les réglages : en fenêtre graphique avec recherche (fenetre, Super + Alt + ,), ou aux flèches dans le terminal : île, apparence, animations, énergie, clavier, veille, "
                                    "terminal, raccourcis… Gardés à chaque mise à jour."),
     ("nc-raccourci", "nc-raccourci", "Tes raccourcis clavier : changer les touches, en désactiver, en ajouter."),
     ("nc-maj", "nc-maj", "Met la config à jour depuis GitHub (ne refait que ce qui a changé)."),

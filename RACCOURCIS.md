@@ -21,6 +21,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `W` | Choisir le fond d'écran |
 | `Super` + `C` | Centre de contrôle |
 | `Super` + `,` | Réglages de la barre |
+| `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) |
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `` ` `` | Terminal déroulant (sous Échap) |

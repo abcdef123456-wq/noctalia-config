@@ -11,6 +11,9 @@ hl.window_rule({
 -- fenêtre maximisée par Hyprland n'aurait pas les marges). Super + F la passe en plein écran et la rend, comme toute fenêtre.
 hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true })
 
+-- Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : flottante, centrée, aux deux tiers de l'écran
+hl.window_rule({ name = "nc-reglages-fenetre", match = { title = "^(Réglages du bureau)$" }, float = true, center = true, size = { "monitor_w*0.66", "monitor_h*0.78" } })
+
 -- Petite fenêtre de chat JARVIS (Super + Alt + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
 -- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.
 hl.window_rule({ name = "jarvis-chat", match = { title = "^(JARVIS Chat)$" }, float = true, center = true, size = { "420", "560" } })

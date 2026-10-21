@@ -81,6 +81,7 @@ touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis 
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))
 touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
+touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), trad("Applis et barre|Réglages du bureau (fenêtre, avec recherche)", "Desktop settings (window, with search)"))
 touche(SUPER .. " + code:61", cmd(barre .. "keys"),                trad("Applis et barre|Afficher cette fiche", "Show this cheat sheet"))
 touche(SUPER .. " + code:33", cmd("~/.local/bin/nc-capture zone"), trad("Applis et barre|Capture d'une zone de l'écran", "Screenshot of an area"))
 touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), trad("Applis et barre|Terminal déroulant (sous Échap)", "Drop-down terminal (below Esc)"))

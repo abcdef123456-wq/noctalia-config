@@ -30,6 +30,9 @@ ShellRoot {
     // Petite fenêtre de chat JARVIS (Super + Alt + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
     property var jarvisChatFenetre: null
     property Component composantJarvisChat: null
+    // Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : une fenêtre classique, créée à la demande
+    property var reglagesFenetre: null
+    property Component composantReglages: null
     Connections {
         target: Etat
         function onVueFenetresChanged() {
@@ -136,5 +139,19 @@ ShellRoot {
             if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
         function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
+        // Réglages en fenêtre : le même appel la referme si elle est ouverte
+        function reglages(): void {
+            if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.reglagesFenetre.close(); return }
+            if (!racine.reglagesFenetre) {
+                if (!racine.composantReglages) racine.composantReglages = Qt.createComponent("Parametres.qml")
+                if (racine.composantReglages.status !== Component.Ready) {
+                    console.warn("Fenêtre des réglages indisponible : " + racine.composantReglages.errorString())
+                    return
+                }
+                racine.reglagesFenetre = racine.composantReglages.createObject(racine)
+            }
+            if (racine.reglagesFenetre) racine.reglagesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+        }
+        function reglagesFermer(): void { if (racine.reglagesFenetre) racine.reglagesFenetre.close() }
     }
 }

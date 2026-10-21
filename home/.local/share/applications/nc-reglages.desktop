@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop settings
+Name[fr]=Réglages du bureau
+Comment=Every setting of the desktop, with search
+Comment[fr]=Tous les réglages du bureau, avec recherche
+Exec="@HOME@/.local/bin/nc-reglages" fenetre
+Icon=preferences-desktop
+Terminal=false
+Categories=Settings;
