@@ -298,7 +298,27 @@ class TransportJarvis(unittest.TestCase):
         r=self.req('reminder.create',dict(platform='desktop',chat_id='me',message='test',delay='15m'),True)
         self.assertEqual(r.returncode,1);self.assertFalse(self.server.recus)
 
+    def test_management_requests_give_up_quickly_but_long_operations_keep_the_timeout(self):
+        # Un gateway muet ne fige pas le cockpit ni l'île : les opérations de gestion sont bornées (ici 1 s) alors que
+        # le briefing garde le délai configuré (2 s dans ce harnais)
+        import threading,time
+        self.env['NC_JARVIS_GESTION_DELAI']='1'
+        self.server.reponse=(200,b'{"models": []}')
+        self.server.bloquer=True
+        self.server.entree,self.server.sortie=threading.Event(),threading.Event()
+        threading.Timer(1.5,self.server.sortie.set).start()
+        debut=time.monotonic();r=self.req('models');duree=time.monotonic()-debut
+        self.assertEqual(r.returncode,1,r.stdout+r.stderr);self.assertFalse(json.loads(r.stdout)['ok'])
+        self.assertLess(duree,1.4,'la gestion devait abandonner après 1 s')
+        self.server.sortie.wait(3)
+        self.server.entree,self.server.sortie=threading.Event(),threading.Event()
+        threading.Timer(1.2,self.server.sortie.set).start()
+        self.server.reponse=(200,b'{"briefing": "ok"}')
+        r=self.req('briefing',confirmed=True)
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertTrue(json.loads(r.stdout)['ok'],'le briefing garde ses 2 s')
+
     def test_overview_loads_status_and_capabilities_and_keeps_secret_hidden(self):
+
         self.server.reponse=(200,b'{"online":true,"protocol":1,"modules":[],"fields":[]}')
         r=self.req('overview')
         self.assertEqual(r.returncode,0,r.stderr+r.stdout)

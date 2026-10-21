@@ -7,6 +7,7 @@
 import argparse
 import contextlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -59,9 +60,14 @@ def activity(m):
     else:m.maj_ile(sid,'fini',message='JARVIS a terminé')
 
 
+GESTION_DELAI=float(os.environ.get('NC_JARVIS_GESTION_DELAI') or 20)   # secondes : les opérations de gestion (cockpit, réglages rapides de l'île) n'attendent pas les 180 s du chat
+
 def request(body):
     m=client();c=m.configuration()
     op=body.get('op');p=body.get('params',{});confirmed=body.get('confirmed') is True
+    # Un gateway qui ne répond pas ne doit pas figer le cockpit et l'île trois minutes : seules les actions des
+    # modules et le briefing (longs par nature) gardent le délai configuré
+    if op not in ('action','briefing'):c=dict(c,TIMEOUT=min(float(c.get('TIMEOUT',GESTION_DELAI)),GESTION_DELAI))
     if not isinstance(p,dict):raise ValueError('Paramètres invalides')
     if op=='overview':
         data=m.api(c,'/api/status')
