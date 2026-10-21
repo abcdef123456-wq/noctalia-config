@@ -169,6 +169,18 @@ ShellRoot {
             }
             if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
+        // Une réponse de l'IA du bureau (nc-ia : fichier d'échange privé), versée dans la conversation
+        function iaReponse(chemin: string): void { AssistantEtat.recevoirReponse(chemin) }
+        // Notification de cette réponse cliquée : la fenêtre de chat, sur l'échange
+        function chatReponse(): void {
+            if (!racine.jarvisChatFenetre) {
+                if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
+                if (racine.composantJarvisChat.status !== Component.Ready) return
+                racine.jarvisChatFenetre = racine.composantJarvisChat.createObject(racine)
+                racine.brancherIle(racine.jarvisChatFenetre)
+            }
+            racine.jarvisChatFenetre.montrerEchange(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+        }
         function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
         // Réglages en fenêtre : déjà ouverte, le même appel la ramène ici, la met devant ou la range (basculerOutil)
         function reglages(): void {

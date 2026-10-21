@@ -1136,7 +1136,9 @@ def requete_ile():
     commande = question.lstrip().startswith("/")
     choix = ia.ANCIENS.get(ia.reglage("IA_CHOIX", ""), ia.reglage("IA_CHOIX", "")) if ia else ""
     par_jarvis = CONF.exists() and not (ia and ia.mode() == "manuel" and choix in ia.FOURNISSEURS and choix != "jarvis")
-    if ia and not par_jarvis and not commande:
+    # La suite d'une réponse donnée par l'IA du bureau (capture, fichier, texte… versés dans le chat) : la même IA, avec
+    # le contexte, plutôt que JARVIS qui ne l'a pas vue
+    if ia and not commande and (not par_jarvis or r.get("ia_du_bureau") is True):
         return repondre_par_ia(ia, historique, question)
     try:
         # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.

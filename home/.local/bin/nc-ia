@@ -1004,6 +1004,17 @@ def garder(rep, ident):
         pass
 
 
+def qui_chat():
+    """L'IA de la fenêtre de chat : JARVIS s'il est relié (sauf une autre IA choisie à la main), sinon celle du bureau
+    (comme nc-assistant requete-ile)."""
+    if coupee():
+        return ""
+    c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+    if disponible("jarvis") and not (mode() == "manuel" and c in FOURNISSEURS and c != "jarvis"):
+        return "jarvis"
+    return next((i for i in candidats("question") if i != "jarvis"), "")
+
+
 def conversation(historique, question):
     """Le texte envoyé pour une réponse de chat : les derniers échanges, puis la question."""
     lignes = []
@@ -1042,33 +1053,69 @@ def copier(t):
             pass
 
 
-def notifier(titre, corps, lire=True):
+def notifier(titre, corps, action=None):
+    """Une notification ; action = (texte, commande) : un clic dessus lance la commande (attendue dans un processus
+    détaché : celui qui a lancé nc-ia n'attend pas)."""
     if not shutil.which("notify-send"):
         return
     import html
     cmd = ["notify-send", "-a", "IA", "-i", "dialog-information"]
-    if lire:
-        cmd += ["-A", "lire=" + T("Lire en entier", "Read in full")]
+    if action:
+        cmd += ["-A", "default=" + action[0]]
     try:
-        p = subprocess.Popen(cmd + ["--", titre, html.escape(corps[:400])], stdout=subprocess.PIPE,
+        p = subprocess.Popen(cmd + ["--", titre, html.escape(corps[:1500])], stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True, start_new_session=True)
-        if lire:
-            # La notification attend son bouton dans un processus détaché : la commande rend la main tout de suite
-            if os.fork() == 0:
-                # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
-                nul = os.open(os.devnull, os.O_RDWR)
-                for fd in (0, 1, 2):
-                    os.dup2(nul, fd)
-                try:
-                    if (p.communicate(timeout=600)[0] or "").strip() == "lire":
-                        subprocess.Popen(["kitty", "--class", "nc-ia", "--title", "IA", "sh", "-c",
-                                          f'"{HOME}/.local/bin/nc-ia" derniere; printf "\\n"; read -r _'],
-                                         start_new_session=True)
-                except Exception:
-                    pass
-                os._exit(0)
+        if action and os.fork() == 0:
+            # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
+            nul = os.open(os.devnull, os.O_RDWR)
+            for fd in (0, 1, 2):
+                os.dup2(nul, fd)
+            try:
+                if (p.communicate(timeout=3600)[0] or "").strip() == "default":
+                    subprocess.Popen(action[1], start_new_session=True)
+            except Exception:
+                pass
+            os._exit(0)
     except OSError:
         pass
+
+
+def apercu(t, n=280):
+    t = re.sub(r"[*_`#>]+", "", t).strip()
+    return t if len(t) <= n else t[:n].rsplit(" ", 1)[0] + "…"
+
+
+def vers_chat(question, rep, ident):
+    """L'échange dans la conversation de l'île (fenêtre de chat, celle de JARVIS) : vrai si l'île l'a reçu."""
+    if not shutil.which("qs"):
+        return False
+    d = RUN / "chat"
+    try:
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        f = d / f"{int(time.time() * 1000)}-{os.getpid()}.json"
+        f.write_text(json.dumps({"question": question, "reponse": rep, "ia": nom(ident),
+                                 "agent": FOURNISSEURS.get(ident, {}).get("agent", "claude")}, ensure_ascii=False))
+        os.chmod(f, 0o600)
+        r = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "iaReponse", str(f)], capture_output=True, timeout=5)
+        if r.returncode != 0:
+            f.unlink(missing_ok=True)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def livrer(titre, question, rep, ident):
+    """La réponse d'une action lancée par un raccourci, un menu ou un clic droit (pas d'un terminal) : dans la
+    conversation (IA_REPONSES=chat, par défaut), annoncée par une notification qui l'ouvre ; sinon (ou sans l'île) dans
+    une notification seule. Copiée aussi (IA_COPIER). Jamais de terminal ouvert."""
+    if reglage("IA_COPIER", "oui") != "non":
+        copier(rep)
+    titre = f"{titre} · {nom(ident)}"
+    if reglage("IA_REPONSES", "chat") != "notification" and vers_chat(question, rep, ident):
+        notifier(titre, apercu(rep), (T("Ouvrir la conversation", "Open the conversation"),
+                                      ["qs", "-c", "nc-ile", "ipc", "call", "ile", "chatReponse"]))
+    else:
+        notifier(titre, rep)
 
 
 def texte_action(action, source="", copie=False, flux=False, texte=None):
@@ -1089,8 +1136,8 @@ def texte_action(action, source="", copie=False, flux=False, texte=None):
     instruction = T(*ordre)
     rep, ident = demander(f"{instruction}\n\n---\n{t}\n---", "texte", flux=flux)
     if copie:
-        copier(rep)
-        notifier(T(f"{T(*titre)} : copié", f"{T(*titre)}: copied") + f" · {nom(ident)}", rep)
+        extrait = apercu(t.strip(), 300)
+        livrer(T(*titre), f"{T(*titre)} : « {extrait} »", rep, ident)
     return rep
 
 
@@ -1149,9 +1196,9 @@ def fichier_ia(chemins, consigne_f="", notif=False, flux=False):
     else:
         rep, ident = demander(f"{instruction}\n\n" + "\n\n".join(morceaux), "texte", flux=flux, sortie=sortie)
     if notif:
-        copier(rep)
         noms = ", ".join(Path(c).name for c in chemins[:3])
-        notifier(f"{T(*titre) if consigne_f in ACTIONS or not consigne_f else consigne_f[:40]} · {noms}", rep + "\n\n— " + nom(ident))
+        quoi = T(*titre) if consigne_f in ACTIONS or not consigne_f else consigne_f[:60]
+        livrer(f"{quoi} · {noms}", ("🖼 " if images else "📄 ") + f"{noms} : {quoi}", rep, ident)
     return rep
 
 
@@ -1482,14 +1529,14 @@ def capture(question=""):
     subprocess.run(["grim", "-g", zone.stdout.strip(), str(img)], check=False)
     if not img.exists():
         raise ErreurIA(T("capture impossible", "capture failed"))
-    notifier(T("L'IA regarde la capture…", "The AI is looking at the screenshot…"), "", lire=False)
+    notifier(T("L'IA regarde la capture…", "The AI is looking at the screenshot…"), "")
     try:
         rep, ident = demander(question or T("Que montre cette capture ?", "What does this screenshot show?"), "image",
                               image=str(img), sortie=lambda m: None)
     finally:
         img.unlink(missing_ok=True)
-    notifier(T("Capture expliquée", "Screenshot explained") + f" · {nom(ident)}", rep)
-    copier(rep)
+    livrer(T("Capture expliquée", "Screenshot explained"),
+           "📷 " + T("Zone de l'écran : ", "Screen area: ") + (question or T("que montre-t-elle ?", "what does it show?")), rep, ident)
     return rep
 
 
@@ -1645,7 +1692,7 @@ def main(a):
             return 0
         if c == "quelle":
             usage = a[a.index("--usage") + 1] if "--usage" in a and a.index("--usage") + 1 < len(a) else "question"
-            i = (candidats(usage) or [""])[0]
+            i = qui_chat() if "--chat" in a else (candidats(usage) or [""])[0]
             if json_out:
                 print(json.dumps({"id": i, "nom": nom(i) if i else "", "agent": FOURNISSEURS[i]["agent"] if i else "",
                               "coupee": coupee(), "en_ligne": en_ligne(), "agir": actions_mode() == "confirmer"}, ensure_ascii=False))
@@ -1817,7 +1864,7 @@ def main(a):
             return 0 if res and all(x["ok"] for x in res) else 1
     except ErreurIA as e:
         if c in ("capture", "menu") or (c == "texte" and "--copier" in a) or "--notifier" in a:   # raccourci, menu : pas de terminal
-            notifier("IA", str(e), lire=False)
+            notifier("IA", str(e))
         if "--flux" in a:
             print(json.dumps({"t": str(e), "erreur": True}, ensure_ascii=False), flush=True)
         else:

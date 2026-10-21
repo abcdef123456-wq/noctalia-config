@@ -19,7 +19,14 @@ FloatingWindow {
 
     function afficher(nom) {
         surEcran(nom)
-        if (!visible) vider()               // déjà ouverte : seulement ramenée devant, la conversation en cours reste
+        if (!visible) { vider(); AssistantEtat.suiteParIA = false; AssistantEtat.lireQuiChat() }   // repart vers JARVIS s'il est relié
+        visible = true
+        Qt.callLater(chat.focaliser)
+    }
+    // Ouverte par la notification d'une réponse de l'IA (zone de l'écran, texte, fichier…) : sur cet échange, pour continuer
+    function montrerEchange(nom) {
+        surEcran(nom)
+        chat.depuis = Math.max(0, AssistantEtat.idEchange - 1); chat.historiqueOuvert = false
         visible = true
         Qt.callLater(chat.focaliser)
     }
@@ -49,8 +56,10 @@ FloatingWindow {
             width: parent.width; height: 46
             Row {
                 anchors.left: parent.left; anchors.leftMargin: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 10
-                Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 22; agent: "assistant"; tourne: fen.visible && AssistantEtat.enCours }
-                Texte { anchors.verticalCenter: parent.verticalCenter; text: "JARVIS"; font.weight: Font.Bold; font.letterSpacing: 2 }
+                // JARVIS, ou l'IA du bureau qui répond quand JARVIS n'est pas relié (ou pour la suite d'une de ses réponses)
+                Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 22; agent: AssistantEtat.agentChat || "assistant"; tourne: fen.visible && AssistantEtat.enCours }
+                Texte { anchors.verticalCenter: parent.verticalCenter; text: AssistantEtat.nomChat || "JARVIS"; font.weight: Font.Bold
+                        font.letterSpacing: (AssistantEtat.nomChat || "JARVIS") === "JARVIS" ? 2 : 0 }
                 Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Chat", "Chat"); secondaire: true }
             }
             Row {

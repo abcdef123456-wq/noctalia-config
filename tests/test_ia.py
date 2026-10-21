@@ -302,6 +302,52 @@ class IA(unittest.TestCase):
         self.assertIn("X-KDE-Submenu=IA", (REPO / "home/.local/share/kio/servicemenus/nc-ia.desktop").read_text())
         self.assertTrue(list((REPO / "home/.local/share/nemo/actions").glob("nc-ia-*.nemo_action")))
 
+    # ── Réponses des raccourcis : dans la conversation, une notification qui l'ouvre ──
+    def preparer_capture(self):
+        self.programme("slurp", 'echo "10,10 100x100"')
+        self.programme("grim", 'for a; do f="$a"; done; printf "\\211PNG\\r\\n\\032\\nfaux" > "$f"')
+        self.programme("qs", 'echo "qs $*" >> "$JOURNAL"; exit ${QS_CODE:-0}')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        self.programme("wl-copy", 'echo "wl-copy $*" >> "$JOURNAL"')
+
+    def test_reponse_versee_dans_le_chat(self):
+        self.preparer_capture()
+        r = self.lancer("capture")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        j = self.appels()
+        self.assertIn("ipc call ile iaReponse", j)
+        f = Path(j.split("iaReponse ")[1].split()[0])
+        d = json.loads(f.read_text())
+        self.assertEqual((d["reponse"], d["ia"], d["agent"]), ("Bonjour", "Claude (API Anthropic)", "claude"))
+        self.assertTrue(d["question"].startswith("📷"))
+        self.assertEqual(oct(f.stat().st_mode & 0o777), "0o600")
+        self.assertIn("-A default=Ouvrir la conversation", j)
+        self.assertIn("wl-copy -- Bonjour", j)
+        self.assertNotIn("kitty", j, "plus de terminal")
+
+    def test_reponse_en_notification_seule_ou_sans_ile(self):
+        self.preparer_capture()
+        self.reglages("IA_REPONSES=notification\nIA_COPIER=non\n")
+        self.lancer("capture")
+        j = self.appels()
+        self.assertNotIn("iaReponse", j)
+        self.assertNotIn("wl-copy", j)
+        self.assertIn("Bonjour", j.splitlines()[-1])
+        self.journal.unlink()
+        self.reglages("")
+        self.lancer("capture", env_plus={"QS_CODE": "1"})          # l'île ne répond pas : notification seule
+        self.assertIn("Bonjour", self.appels().splitlines()[-1])
+        self.assertNotIn("default=", self.appels().splitlines()[-1])
+
+    def test_la_suite_va_a_l_ia_qui_a_repondu(self):
+        conf = self.home / ".config/nc/assistant.conf"
+        conf.write_text('URL="http://127.0.0.1:9/gateway"\nSECRET_KEY="cle-de-test"\nUSER_ID="moi"\nTIMEOUT="5"\n')
+        conf.chmod(0o600)
+        entree = {"session_id": "a" * 32, "question": "et ensuite ?", "historique": [{"role": "assistant", "texte": "Une capture."}]}
+        d = json.loads(self.lancer("requete-ile", entree=json.dumps(dict(entree, ia_du_bureau=True)) + "\n", prog="nc-assistant").stdout)
+        self.assertTrue(d["ok"] and d["engine"] == "Claude (API Anthropic)", d)
+        self.assertIn("Une capture.", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+
     # ── Économie sur batterie, sans connexion ──
     def test_pause_en_economie_sur_batterie(self):
         eco = {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "power-saver"}

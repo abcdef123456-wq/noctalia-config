@@ -920,6 +920,17 @@ REGLAGES = [
       L("Réponse courte dans le Spotlight ; la commande qu'elle propose se lance avec Entrée.",
         "A short answer in Spotlight; the command it suggests runs with Enter."),
       lambda: [("auto", L("Comme l'IA du bureau", "Same as the desktop AI"))] + choix_ia() + [("non", L("Aucune", "None"))]),
+    R("IA_REPONSES", "Intelligence artificielle", L("Où arrivent les réponses", "Where answers go"), "choix", "chat",
+      L("Pour ce que tu lances par un raccourci ou un clic droit (zone de l'écran, texte sélectionné, fichier, capture) : "
+        "dans la conversation (la fenêtre de chat, celle de JARVIS si JARVIS répond), annoncée par une notification qui "
+        "l'ouvre, et tu peux continuer à poser des questions ; ou dans une notification seule.",
+        "For what you start with a shortcut or a right click (screen area, selected text, file, screenshot): in the "
+        "conversation (the chat window, JARVIS's when JARVIS answers), announced by a notification that opens it, and you "
+        "can keep asking; or in a notification only."),
+      [("chat", L("Dans la conversation (notification, clic : le chat)", "In the conversation (notification, click: the chat)")),
+       ("notification", L("Dans une notification seule", "In a notification only"))]),
+    R("IA_COPIER", "Intelligence artificielle", L("Copier aussi les réponses", "Also copy answers"), "ouinon", "oui",
+      L("Ces réponses sont aussi dans le presse-papiers (Ctrl + V).", "These answers are also in the clipboard (Ctrl + V).")),
     R("IA_TEXTE", "Intelligence artificielle", L("IA sur le texte sélectionné", "AI on the selected text"), "ouinon", "oui",
       L("Super + I, ou « ! » dans le Spotlight : résumer, traduire, corriger, reformuler, expliquer ou répondre au "
         "texte sélectionné (sinon copié) ; le résultat est copié.",

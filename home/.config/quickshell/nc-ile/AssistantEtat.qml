@@ -313,6 +313,47 @@ Singleton {
     }
 
     property int dernierId: 0               // identifiant du dernier message ajouté (une fenêtre de chat part de là)
+    // Réponses de l'IA du bureau versées dans la conversation (nc-ia : zone de l'écran, texte, fichier…) : la suite part
+    // vers la même IA (avec le contexte), pas vers JARVIS qui ne les a pas vues ; nomChat : qui répond dans la fenêtre
+    property bool suiteParIA: false
+    property string nomChat: ""
+    property string agentChat: ""
+    property int idEchange: 0               // premier message du dernier échange versé (la fenêtre de chat s'ouvre dessus)
+    property var arrivees: []               // fichiers d'échange en attente de lecture
+    function recevoirReponse(chemin) {
+        if (!/^\/[^\0]*\/nc-ia\/chat\/[0-9]+-[0-9]+\.json$/.test(chemin)) return      // seulement les fichiers de nc-ia
+        arrivees = arrivees.concat([chemin])
+        if (!lectureEchange.running) lireSuivant()
+    }
+    function lireSuivant() {
+        if (!arrivees.length) return
+        lectureEchange.chemin = arrivees[0]; arrivees = arrivees.slice(1)
+        lectureEchange.command = ["sh", "-c", "cat -- \"$1\" && rm -f -- \"$1\"", "sh", lectureEchange.chemin]
+        lectureEchange.running = true
+    }
+    Process {
+        id: lectureEchange
+        property string chemin: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    var d = JSON.parse(text)
+                    a.ajouter("vous", String(d.question || "").slice(0, 4000))
+                    a.idEchange = a.dernierId
+                    a.ajouter("assistant", String(d.reponse || "").slice(0, 16000) + "\n\n*— " + (d.ia || "IA") + "*")
+                    a.suiteParIA = d.ia !== "JARVIS"; a.nomChat = d.ia || ""; a.agentChat = d.agent || ""
+                } catch (e) {}
+                a.lireSuivant()
+            }
+        }
+    }
+    // Qui répondra dans une fenêtre de chat ouverte à neuf (JARVIS s'il est relié, sinon l'IA du bureau)
+    function lireQuiChat() { if (!quiChat.running) quiChat.running = true }
+    Process {
+        id: quiChat
+        command: [a.bin + "nc-ia", "quelle", "--chat", "--json"]
+        stdout: StdioCollector { onStreamFinished: { try { var d = JSON.parse(text); a.nomChat = d.nom || ""; a.agentChat = d.agent || "" } catch (e) {} } }
+    }
     function ajouter(role, texte) {
         var m = messages.concat([{role: role, texte: texte, num: ++dernierId}]).slice(-24)
         var total = m.reduce((n, x) => n + x.texte.length, 0)
@@ -349,6 +390,9 @@ Singleton {
             if (estReset) messages = []
             ajouter("assistant", r.text.slice(0, 16000) + (r.truncated ? Reglages.t("\n\n[Réponse abrégée dans l’île]", "\n\n[Answer shortened in the island]") : ""))
             reponseRecente = true
+            // Réponse de JARVIS, ou de l'IA du bureau (le champ engine) : la suite part vers la même
+            a.suiteParIA = typeof r.engine === "string" && r.engine !== ""
+            a.nomChat = a.suiteParIA ? r.engine : "JARVIS"; if (!a.suiteParIA) a.agentChat = "assistant"
             finReponse.restart()
         } else {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
@@ -398,7 +442,7 @@ Singleton {
                 if ((total += t.length) > 16000) break
                 h.unshift({role: a.messages[i].role === "vous" ? "user" : "assistant", texte: t})
             }
-            write(JSON.stringify({session_id: a.session, question: a.question, historique: h}) + "\n")
+            write(JSON.stringify({session_id: a.session, question: a.question, historique: h, ia_du_bureau: a.suiteParIA}) + "\n")
             stdinEnabled = false
         }
         stdout: StdioCollector {

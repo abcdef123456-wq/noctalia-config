@@ -59,9 +59,15 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   imposer une autre, ou aucune pour le Spotlight seulement.
 - **Texte sélectionné (Super + I)**, ou `! ` dans le Spotlight : résumer, traduire, corriger, reformuler,
   expliquer, rédiger une réponse, ou une consigne libre (`! en liste à puces`). Le texte sélectionné, sinon le texte
-  copié ; Entrée copie le résultat. Sans l'île, un menu (fuzzel, wofi, rofi ou bemenu) puis le résultat copié.
-- **Une zone de l'écran (Super + Maj + I)** : un message d'erreur, un graphique… l'IA l'explique dans une
-  notification (« Lire en entier » ouvre la réponse complète) ; la réponse est aussi copiée.
+  copié ; Entrée copie le résultat. Sans l'île, un menu (fuzzel, wofi, rofi ou bemenu), et la réponse comme
+  ci-dessous.
+- **Une zone de l'écran (Super + Maj + I)** : le curseur devient une croix, entoure un message d'erreur, un graphique…
+  l'IA l'explique.
+- **Où arrivent ces réponses** (zone de l'écran, texte par le menu, clic droit sur un fichier, bouton des captures) :
+  dans la conversation — la fenêtre de chat, celle de JARVIS quand JARVIS répond, sinon au nom de l'IA qui a répondu.
+  Une notification l'annonce, un clic ouvre la conversation sur cette réponse, et tu peux continuer à poser des
+  questions : la suite va à la même IA, avec le contexte. Rien de plus dans l'île. Réglages « Où arrivent les
+  réponses » (la conversation, ou une notification seule) et « Copier aussi les réponses ».
 - **Terminal** : **Alt + I** transforme la description tapée (« trouver les fichiers de plus de 1 Go ») en commande,
   laissée dans l'invite pour être relue — jamais lancée toute seule. `ia question` répond ; `journalctl -b -p err | ia
   résume` travaille sur la sortie d'une commande.

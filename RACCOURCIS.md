@@ -126,7 +126,7 @@ batterie et sans connexion). Détails : [docs/ia.md](docs/ia.md).
 | `Super` + `Maj` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
 | `Super` + `Ctrl` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
 | `Super` + `I` | IA sur le texte sélectionné (sinon copié) : résumer, traduire, corriger, reformuler, expliquer, répondre, ou une consigne libre (le Spotlight sur `!`) ; résultat copié |
-| `Super` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA (notification, réponse copiée) |
+| `Super` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA : la réponse arrive dans la conversation (une notification l'ouvre), pour continuer à poser des questions |
 | `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |
 | `Super` + `R` puis `?` | Question à l'IA (d'abord les réponses de la config) ; la commande proposée se lance avec Entrée |
 | `Super` + `R` puis `!` | L'IA sur le texte sélectionné ou copié : résumer, traduire, corriger… ou une consigne libre |

@@ -13,7 +13,7 @@ QML=REPO/'home/.config/quickshell/nc-ile'
 
 @unittest.skipUnless(shutil.which('qs'),'Quickshell requis')
 class CockpitJarvis(unittest.TestCase):
-    def executer(self,scenario,absent=False,evenements=False):
+    def executer(self,scenario,absent=False,evenements=False,avant=None):
         with tempfile.TemporaryDirectory(prefix='nc-jarvis-qml-') as d:
             root=Path(d);shutil.copytree(QML,root/'qml');(root/'runtime').mkdir(mode=0o700)
             (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
@@ -64,6 +64,7 @@ ShellRoot {
  Timer {interval:9000;running:true;onTriggered:Qt.exit(9)}
 }''')
             (root/'qml/shell.qml').write_text(shell.replace('// TEST_INPUT','TestCase {id:clavier;name:"DashboardInput";when:false}' if evenements else ''))
+            if avant:avant(root)
             env=dict(os.environ,HOME=d,QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',XDG_RUNTIME_DIR=str(root/'runtime'),XDG_CACHE_HOME=str(root/'cache'))
             env.pop('WAYLAND_DISPLAY',None)
             r=subprocess.run(['qs','--no-color','-p',str(root/'qml/shell.qml')],env=env,text=True,capture_output=True,timeout=12)
@@ -73,6 +74,27 @@ ShellRoot {
                 self.assertNotIn(error,output)
             p=root/'calls'
             return [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []
+
+    def test_reponse_de_l_ia_versee_dans_le_chat_puis_suite(self):
+        """Une réponse de l'IA du bureau (nc-ia, zone de l'écran) arrive dans la conversation, la fenêtre de chat s'ouvre
+        dessus avec le nom de l'IA, et la suite lui est envoyée (ia_du_bureau) ; une réponse de JARVIS rend la main."""
+        def avant(root):
+            c=root/'runtime/nc-ia/chat';c.mkdir(parents=True)
+            (c/'1-2.json').write_text(json.dumps(dict(question='📷 Zone de l\'écran : que montre-t-elle ?',reponse='Un message d\'erreur.',ia='Claude Code',agent='claude')))
+        calls=self.executer('''
+if(etape===0){AssistantEtat.recevoirReponse(Quickshell.env("XDG_RUNTIME_DIR")+"/nc-ia/chat/1-2.json");etape++}
+else if(etape===1){if(AssistantEtat.idEchange===0)return
+ verifier(AssistantEtat.messages.length===2&&AssistantEtat.messages[0].texte.indexOf("Zone")>=0&&AssistantEtat.messages[1].texte.indexOf("— Claude Code")>=0,"échange : "+JSON.stringify(AssistantEtat.messages))
+ verifier(AssistantEtat.suiteParIA&&AssistantEtat.nomChat==="Claude Code","IA de la suite : "+AssistantEtat.nomChat)
+ var c=Qt.createComponent("JarvisChat.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(racine);dashboard.montrerEchange(Quickshell.screens[0].name)
+ verifier(dashboard.visible&&dashboard.page.depuis===AssistantEtat.idEchange-1,"fenêtre sur l'échange : "+dashboard.page.depuis)
+ AssistantEtat.brouillon="et ensuite ?";AssistantEtat.envoyer();etape++}
+else if(etape===2&&!AssistantEtat.enCours){verifier(!AssistantEtat.suiteParIA&&AssistantEtat.nomChat==="JARVIS","réponse de JARVIS : la suite repart vers lui");Qt.quit()}
+''',avant=avant)
+        demandes=[c for c in calls if c['argv']==['requete-ile']]
+        self.assertEqual(len(demandes),1)
+        self.assertIs(demandes[0]['data']['ia_du_bureau'],True)
+        self.assertEqual(demandes[0]['data']['historique'][-1]['texte'].split('\n')[0],"Un message d'erreur.")
 
     def test_all_pages_load_and_share_the_island_chat_without_duplicate_request(self):
         calls=self.executer('''
