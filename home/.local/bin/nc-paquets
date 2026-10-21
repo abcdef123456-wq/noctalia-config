@@ -171,6 +171,38 @@ notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jo
   disown 2>/dev/null || true
 }
 
+# Instantané de / avant la mise à jour (MAJ_INSTANTANE, « auto » : seulement sur Btrfs) : pour revenir en arrière si une
+# mise à jour casse quelque chose. Rien si un outil le fait déjà à chaque mise à jour (snap-pac sur Arch, snapper avec
+# zypper ou dnf) ; sinon snapper ou Timeshift s'ils sont configurés ; sinon un instantané Btrfs en lecture seule dans
+# /.snapshots, les 3 derniers de nc-paquets gardés. Démarrer dessus depuis GRUB demande grub-btrfs.
+instantane() {
+  [ "$(reglage MAJ_INSTANTANE)" = non ] && return 0
+  [ "$(findmnt -no FSTYPE / 2>/dev/null)" = btrfs ] || return 0
+  local quand; quand="$(date +%Y-%m-%d_%H-%M-%S)"
+  if ls /usr/share/libalpm/hooks/*snap-pac* /usr/lib/zypp/plugins/commit/snapper* /usr/lib/python3*/site-packages/dnf-plugins/snapper.py \
+       /etc/dnf/libdnf5-plugins/actions.d/snapper.actions >/dev/null 2>&1; then
+    t "Instantané : fait par snapper à la mise à jour." "Snapshot: taken by snapper during the update."; echo; return 0
+  fi
+  t "Instantané du système avant la mise à jour…" "System snapshot before the update…"; echo
+  if command -v snapper >/dev/null && sudo snapper -c root list >/dev/null 2>&1; then
+    sudo snapper -c root create -t single -c number -d "nc-paquets : avant la mise à jour" && return 0
+  elif command -v timeshift >/dev/null && sudo timeshift --list >/dev/null 2>&1; then
+    sudo timeshift --create --scripted --tags O --comments "nc-paquets : avant la mise à jour" >/dev/null && return 0
+  else
+    [ -d /.snapshots ] || sudo btrfs subvolume create /.snapshots >/dev/null || return 0
+    if sudo btrfs subvolume snapshot -r / "/.snapshots/nc-avant-maj-$quand" >/dev/null; then
+      # Les 3 plus récents de nc-paquets gardés (les autres instantanés ne sont jamais touchés)
+      sudo find /.snapshots -mindepth 1 -maxdepth 1 -name 'nc-avant-maj-*' -printf '%f\n' | sort -r | tail -n +4 |
+        while read -r vieux; do sudo btrfs subvolume delete "/.snapshots/$vieux" >/dev/null; done
+      t "Instantané : /.snapshots/nc-avant-maj-$quand" "Snapshot: /.snapshots/nc-avant-maj-$quand"; echo
+      ls /etc/grub.d/*btrfs* >/dev/null 2>&1 ||
+        { t "(pour démarrer dessus depuis GRUB : installe grub-btrfs)" "(to boot it from GRUB: install grub-btrfs)"; echo; }
+      return 0
+    fi
+  fi
+  t "Instantané impossible : la mise à jour continue sans." "Snapshot failed: the update goes on without it."; echo
+}
+
 action="${1:-}"
 # Noms anglais (nc-packages count | update | check)
 case "$action" in count) action=compter ;; update|upgrade) action=mettre-a-jour ;; check|verify) action=verifier ;; esac
@@ -194,6 +226,7 @@ case "$action" in
     trap '' HUP
     unset LC_ALL     # la mise à jour parle la langue du système
     ok=0
+    instantane
     # Arch : paru ou yay mettent à jour les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
     if command -v pacman >/dev/null; then
       if a="$(aur_outil)"; then "$a" -Syu || ok=1; else sudo pacman -Syu || ok=1; fi

@@ -290,6 +290,11 @@ nc-anim liste # les animations du bouton d'arrêt (nc-anim NOM pour en voir une)
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
 ne sont jamais remplacés.
 
+**Mises à jour du système** (île, page Notifications → « Mettre à jour », ou `nc-paquets mettre-a-jour`) : sur un disque
+en **Btrfs**, un instantané du système est pris juste avant (snapper ou Timeshift s'ils sont là, sinon
+`/.snapshots/nc-avant-maj-…`, les 3 derniers gardés) pour revenir en arrière si une mise à jour casse quelque chose ;
+avec **grub-btrfs**, on démarre dessus depuis le menu GRUB. Réglage « Instantané avant chaque mise à jour ».
+
 ## Mettre à jour le dépôt depuis ta machine
 
 ```bash

@@ -1057,6 +1057,13 @@ REGLAGES = [
     R("MAJ_RAPPEL", "Mises à jour", L("Rappel s'il en reste", "Reminder if some are left"), "choix", "jour",
       L("Une nouvelle notification quand des mises à jour attendent encore.", "A new notification while updates are still waiting."),
       [("jour", L("Chaque jour", "Every day")), ("semaine", L("Chaque semaine", "Every week")), ("jamais", L("Jamais", "Never"))]),
+    R("MAJ_INSTANTANE", "Mises à jour", L("Instantané avant chaque mise à jour", "Snapshot before each update"), "choix", "auto",
+      L("Disque en Btrfs : un instantané du système juste avant la mise à jour, pour revenir en arrière si elle casse "
+        "quelque chose (snapper ou Timeshift s'ils sont là, sinon /.snapshots, les 3 derniers gardés). Pour démarrer dessus "
+        "depuis GRUB : grub-btrfs.",
+        "Btrfs disk: a system snapshot right before the update, to roll back if it breaks something (snapper or Timeshift "
+        "if present, otherwise /.snapshots, the last 3 kept). To boot it from GRUB: grub-btrfs."),
+      [("auto", L("Oui", "Yes")), ("non", L("Non", "No"))]),
     R("MAJ_AUR", "Mises à jour", L("Compter et mettre à jour l'AUR", "Count and update the AUR"), "ouinon", "oui",
       L("Avec paru ou yay : la mise à jour passe alors par eux (dépôts et AUR ensemble).",
         "With paru or yay: updating then goes through them (repos and AUR together).")),
@@ -1087,7 +1094,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
-    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 
 
@@ -1120,7 +1127,8 @@ def materiel():
             "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*"),
             "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
             "hybride": cartes == {True, False},
-            "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak"))}
+            "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak")),
+            "btrfs": sortie(["findmnt", "-no", "FSTYPE", "/"]).strip() == "btrfs"}
 
 
 _DISPO = materiel()

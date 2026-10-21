@@ -42,6 +42,9 @@ echo "flatpak $*" >> "$HOME/appels"
 exit 0
 """
 FAUX_SUDO = '#!/bin/sh\nexec "$@"\n'
+# Faux findmnt (système de fichiers de /, NC_TEST_FS, ext4 par défaut) et faux btrfs : jamais le vrai disque
+FAUX_FINDMNT = '#!/bin/sh\necho "${NC_TEST_FS:-ext4}"\n'
+FAUX_BTRFS = '#!/bin/sh\necho "btrfs $*" >> "$HOME/appels"\n'
 # Faux paru : -Qua liste ce que dit NC_TEST_AUR ; -Syu réussit (ou échoue avec NC_TEST_MAJ_ECHEC) ; note l'appel
 FAUX_PARU = """#!/bin/sh
 echo "paru $*" >> "$HOME/appels"
@@ -59,7 +62,8 @@ class Paquets(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         (self.home / "bin").mkdir()
-        for nom, code in [("pacman", FAUX_PACMAN), ("checkupdates", FAUX_CHECKUPDATES), ("flatpak", FAUX_FLATPAK), ("sudo", FAUX_SUDO), ("paru", FAUX_PARU), ("notify-send", FAUX_NOTIFY)]:
+        for nom, code in [("pacman", FAUX_PACMAN), ("checkupdates", FAUX_CHECKUPDATES), ("flatpak", FAUX_FLATPAK), ("sudo", FAUX_SUDO), ("paru", FAUX_PARU), ("notify-send", FAUX_NOTIFY),
+                          ("findmnt", FAUX_FINDMNT), ("btrfs", FAUX_BTRFS)]:
             p = self.home / "bin" / nom
             p.write_text(code)
             p.chmod(0o755)
@@ -142,6 +146,22 @@ class Paquets(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.notifs(4)[-1][0], "Système à jour")
         self.assertEqual(self.cache.read_text(), "0\n\n")
+
+    def test_instantane_btrfs_avant_la_mise_a_jour(self):
+        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.appels()
+        prises = [x for x in a if x.startswith("btrfs subvolume snapshot -r / /.snapshots/nc-avant-maj-")]
+        self.assertEqual(len(prises), 1, a)
+        self.assertLess(a.index(prises[0]), a.index("paru -Syu"), "l'instantané avant la mise à jour")
+        self.assertIn("Instantané : /.snapshots/nc-avant-maj-", r.stdout)
+
+    def test_pas_d_instantane_hors_btrfs_ou_si_coupe(self):
+        self.lancer("terminal", NC_TEST_LOCAL="")
+        self.assertFalse([x for x in self.appels() if x.startswith("btrfs")], "ext4 : rien")
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_INSTANTANE=non\n")
+        self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
+        self.assertFalse([x for x in self.appels() if x.startswith("btrfs")], "réglage coupé : rien")
 
     def test_cadence_sobre(self):
         import os, time
