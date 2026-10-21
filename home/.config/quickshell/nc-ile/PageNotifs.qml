@@ -8,6 +8,7 @@
 // notification), « Mettre à jour » ouvre le terminal de mise à jour.
 import QtQuick
 import Quickshell
+import Quickshell.Networking
 import Quickshell.Io
 import Quickshell.Widgets
 
@@ -37,6 +38,9 @@ Item {
         else if (e.key === Qt.Key_Slash || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { champ.forceActiveFocus(); e.accepted = true }
     }
 
+    // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
+    // Inconnue (pas de NetworkManager) : considérée comme là.
+    readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
     // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard
     property string resumeIA: ""
     property string resumeQui: ""
@@ -67,7 +71,7 @@ Item {
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 12
             Texte {
                 objectName: "nc-notifs-resumer"
-                visible: Notifs.liste.length >= 2 && !Reglages.iaCoupee && Reglages.val("IA_TEXTE", "oui") !== "non"
+                visible: Notifs.liste.length >= 2 && !Reglages.iaCoupee && p.enLigne && Reglages.val("IA_TEXTE", "oui") !== "non"
                 text: resumeur.running ? Reglages.t("Résumé…", "Summarizing…") : Reglages.t("Résumer", "Summarize")
                 color: zr.containsMouse ? Couleurs.accentClair : Couleurs.accent
                 MouseArea { id: zr; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: p.resumer() }

@@ -83,7 +83,14 @@ class Erreur(Exception):
 
 
 def ia_coupee():
-    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : JARVIS ne répond plus nulle part."""
+    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune), ou en pause (Économie sur batterie, vu
+    par nc-ia) : JARVIS ne répond plus nulle part."""
+    ia = ia_du_bureau()
+    if ia:
+        try:
+            return ia.coupee()
+        except Exception:
+            pass
     try:
         for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
             if l.startswith("IA_MODE="):
@@ -91,6 +98,17 @@ def ia_coupee():
     except OSError:
         pass
     return False
+
+
+def message_ia_coupee():
+    """Pourquoi l'IA ne répond pas : coupée, ou en pause en Économie sur batterie (le message de nc-ia)."""
+    ia = ia_du_bureau()
+    try:
+        if ia and ia.coupee():
+            return ia.message_coupee()
+    except Exception:
+        pass
+    return T(*MESSAGE_COUPEE)
 
 
 MESSAGE_COUPEE = ("L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).",
@@ -1161,7 +1179,7 @@ def main():
         elif commande == "config-ile":
             return configuration_ile(a.action)
         elif commande in ("ouvrir", "chat", "demander", "briefing", "requete-ile") and ia_coupee():
-            raise Erreur(T(*MESSAGE_COUPEE))
+            raise Erreur(message_ia_coupee())
         elif commande == "ouvrir":
             ouvrir(a.question)
         elif commande == "requete-ile":

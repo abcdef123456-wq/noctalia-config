@@ -17,6 +17,11 @@ dépendance à installer (Python seul).
   répondent « IA désactivée », et les hooks des agents (Claude Code, Codex…) ne montrent plus rien dans l'île. Rien
   n'est désinstallé : remettre « Automatique » rallume tout.
 
+**Sans connexion internet**, l'IA disparaît partout (Spotlight, presse-papiers, notifications, raccourcis, terminal)
+et revient d'elle-même avec la connexion ; seule une IA de ce PC (Ollama) reste proposée. **En profil Économie sur
+batterie**, elle se met en pause partout (rien n'est appelé) et revient sur secteur ou hors Économie (réglage « En pause
+en Économie sur batterie »).
+
 **Ordre du mode automatique** : la plus rapide (les API, puis JARVIS, puis les programmes), mes abonnements d'abord
 (Claude Code, Codex… déjà payés), sur ce PC d'abord (Ollama : rien ne sort du PC tant qu'il répond), ou JARVIS d'abord.
 
@@ -78,7 +83,8 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 
 ## L'IA qui gère le bureau (avec ta confirmation)
 
-Coupée par défaut : **nc-reglages → Intelligence artificielle → L'IA peut agir → Oui, après ma confirmation**. Ensuite,
+Coupée par défaut : **nc-reglages → Intelligence artificielle → L'IA peut agir → Oui, après ma confirmation** (ou, la
+première fois, Entrée sur « Autoriser l'IA à proposer des actions » en tapant `@` dans le Spotlight). Ensuite,
 `@ ` dans le Spotlight (ou `nc-ia agir "…"`) : « @ redémarre l'île », « @ coupe le Bluetooth et passe en économie »,
 « @ un service est en échec, répare-le ». L'IA voit l'état du bureau (services de ta session, Wi-Fi, Bluetooth, profil
 d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît comme une ligne, faite seulement quand tu

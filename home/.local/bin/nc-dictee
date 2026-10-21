@@ -223,7 +223,7 @@ def main():
     m = client()
     if action in ("start", "stop") and m.ia_coupee():
         arreter()
-        sortie(ok=False, error=m.T(*m.MESSAGE_COUPEE))
+        sortie(ok=False, error=m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else m.T(*m.MESSAGE_COUPEE))
         return 1
     try:
         if action == "start":

@@ -898,6 +898,11 @@ REGLAGES = [
         "agents in the island), on every distribution; nothing is uninstalled."),
       [("auto", L("Automatique", "Automatic")), ("manuel", L("Celle que je choisis", "The one I choose")),
        ("non", L("Aucune (tout couper)", "None (turn everything off)"))]),
+    R("IA_ECONOMIE", "Intelligence artificielle", L("En pause en Économie sur batterie", "Paused in Power Saver on battery"), "ouinon", "oui",
+      L("Profil Économie et PC sur batterie : plus d'IA nulle part (rien n'est appelé) ; elle revient toute seule sur "
+        "secteur ou hors Économie. Sans connexion internet aussi, seule une IA de ce PC (Ollama) reste.",
+        "Power Saver profile and PC on battery: no AI anywhere (nothing is called); it comes back on its own on AC power "
+        "or outside Power Saver. Without an internet connection too, only an AI on this PC (Ollama) remains.")),
     R("IA_CHOIX", "Intelligence artificielle", L("IA choisie (mode manuel)", "Chosen AI (manual mode)"), "choix", "claude",
       L("Utilisée pour tout quand « IA du bureau » est sur « Celle que je choisis ». Une IA qui ne lit pas les images "
         "laisse les captures à la meilleure qui sait le faire.",

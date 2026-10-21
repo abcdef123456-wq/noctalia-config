@@ -28,6 +28,7 @@
   nc-ia tester [ID] [--json]           un essai court de chaque IA disponible (ou de celle-ci)
   nc-ia quelle [--usage U] [--json]    l'IA qui répondrait maintenant
   nc-ia actif                          code 0 si l'IA est permise, 1 si elle est coupée (IA_MODE=non)
+  nc-ia disponible                     code 0 si une IA peut répondre maintenant (permise, et connexion ou IA locale)
   nc-ia derniere                       la dernière réponse en entier (lue dans le terminal)
   nc-ia transcrire FICHIER.wav [--json]   le texte d'un enregistrement (dictée sans JARVIS : Groq, OpenAI, Gemini)
 
@@ -297,8 +298,48 @@ def ollama_present():
     return ok
 
 
+def en_ligne():
+    """Vrai si une connexion internet est là (NetworkManager : ni « none » ni portail captif ; sans lui, une route par
+    défaut). Gardé 5 s. Sans connexion, seules les IA de ce PC (Ollama local) restent proposées ; les autres reviennent
+    d'elles-mêmes avec la connexion."""
+    if os.environ.get("NC_IA_EN_LIGNE") in ("0", "1"):           # forcé (tests)
+        return os.environ["NC_IA_EN_LIGNE"] == "1"
+    memo = RUN / "en-ligne.json"
+    try:
+        d = json.loads(memo.read_text())
+        if time.time() - d["t"] < 5:
+            return d["ok"]
+    except (OSError, ValueError, KeyError):
+        pass
+    ok = True
+    if shutil.which("nmcli"):
+        try:
+            r = subprocess.run(["nmcli", "networking", "connectivity"], capture_output=True, text=True, timeout=3)
+            ok = r.stdout.strip() not in ("none", "portal")
+        except (OSError, subprocess.TimeoutExpired):
+            ok = True
+    else:
+        try:
+            ok = any(l.split()[1] == "00000000" for l in open("/proc/net/route").read().splitlines()[1:] if len(l.split()) > 1)
+        except OSError:
+            ok = True
+    try:
+        RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+        memo.write_text(json.dumps({"t": time.time(), "ok": ok}))
+    except OSError:
+        pass
+    return ok
+
+
+def locale(ident):
+    """Une IA qui marche sans internet : Ollama sur ce PC."""
+    return FOURNISSEURS[ident]["genre"] == "local" and urllib.parse.urlparse(ollama_url()).hostname in ("127.0.0.1", "localhost", "::1")
+
+
 def disponible(ident):
     f = FOURNISSEURS[ident]
+    if not locale(ident) and not en_ligne():
+        return False
     if f["genre"] == "api":
         return bool(cle(ident)[0])
     if f["genre"] == "cli":
@@ -313,8 +354,39 @@ def mode():
     return m if m in ("auto", "manuel", "non") else "auto"
 
 
+def sur_batterie():
+    """Vrai si le PC tourne sur batterie : aucune alimentation secteur (Mains, USB) branchée, et une batterie présente."""
+    if os.environ.get("NC_POWER_SUPPLY") in ("batterie", "secteur"):     # forcé (tests), comme nc-paquets
+        return os.environ["NC_POWER_SUPPLY"] == "batterie"
+    batterie, secteur = False, False
+    for d in Path("/sys/class/power_supply").glob("*"):
+        try:
+            t = (d / "type").read_text().strip()
+            if t == "Battery":
+                batterie = True
+            elif t in ("Mains", "USB", "USB_C") and (d / "online").read_text().strip() == "1":
+                secteur = True
+        except OSError:
+            continue
+    return batterie and not secteur
+
+
+def profil_energie():
+    if os.environ.get("NC_PROFIL"):                                     # forcé (tests)
+        return os.environ["NC_PROFIL"]
+    code, t = sortie_cmd(["busctl", "get-property", "org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles",
+                          "org.freedesktop.UPower.PowerProfiles", "ActiveProfile"], 3)
+    return t.split('"')[1] if code == 0 and '"' in t else ""
+
+
+def pause_economie():
+    """L'IA en pause en profil Économie sur batterie (IA_ECONOMIE, oui par défaut) ; elle revient seule sur secteur ou
+    hors Économie. Rien n'est appelé pendant la pause."""
+    return reglage("IA_ECONOMIE", "oui") != "non" and sur_batterie() and profil_energie() == "power-saver"
+
+
 def coupee():
-    return mode() == "non"
+    return mode() == "non" or pause_economie()
 
 
 def candidats(usage="question", force=""):
@@ -859,11 +931,19 @@ ACTIONS_EN = {"summarize": "resumer", "translate": "traduire", "fix": "corriger"
 
 # ── Demander (avec repli sur l'IA suivante en mode auto) ────────────────────────────────────────────────────────
 def message_coupee():
+    if mode() != "non" and pause_economie():
+        return T("L'IA est en pause : profil Économie sur batterie (elle revient sur secteur ou hors Économie ; "
+                 "nc-reglages → Intelligence artificielle → En pause en Économie sur batterie).",
+                 "AI is paused: Power Saver on battery (it comes back on AC power or outside Power Saver; "
+                 "nc-settings → Artificial intelligence → Paused in Power Saver on battery).")
     return T("L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).",
              "AI is turned off (nc-settings → Artificial intelligence → Desktop AI).")
 
 
 def message_aucune(usage):
+    if not en_ligne():
+        return T("Pas de connexion internet : l'IA revient dès que la connexion revient (ou Ollama, une IA sur ce PC).",
+                 "No internet connection: AI comes back as soon as the connection does (or Ollama, an AI on this PC).")
     if mode() == "manuel" and reglage("IA_CHOIX", ""):
         c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
         return T(f"{nom(c)} n'est pas disponible (choisie dans nc-reglages → Intelligence artificielle).",
@@ -1523,7 +1603,7 @@ def etat():
     usages = ("question", "texte", "commande", "image")
     choix = {u: (candidats(u) or [""])[0] for u in usages}
     return {
-        "mode": mode(), "coupee": coupee(), "choix": reglage("IA_CHOIX", ""), "preference": reglage("IA_PREFERENCE", "rapide"),
+        "mode": mode(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", ""), "preference": reglage("IA_PREFERENCE", "rapide"),
         "usages": {u: {"id": c, "nom": nom(c) if c else ""} for u, c in choix.items()},
         "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
                      cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""))
@@ -1557,6 +1637,8 @@ def main(a):
     try:
         if c == "actif":
             return 1 if coupee() else 0
+        if c in ("disponible", "available"):        # permise et une IA joignable maintenant (connexion comprise)
+            return 0 if not coupee() and candidats("question") else 1
         if c == "etat":
             e = etat()
             print(json.dumps(e, ensure_ascii=False)) if json_out else afficher_etat(e)
@@ -1566,7 +1648,7 @@ def main(a):
             i = (candidats(usage) or [""])[0]
             if json_out:
                 print(json.dumps({"id": i, "nom": nom(i) if i else "", "agent": FOURNISSEURS[i]["agent"] if i else "",
-                                  "coupee": coupee()}, ensure_ascii=False))
+                              "coupee": coupee(), "en_ligne": en_ligne(), "agir": actions_mode() == "confirmer"}, ensure_ascii=False))
             else:
                 print(nom(i) if i else "")
             return 0

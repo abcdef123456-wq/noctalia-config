@@ -20,6 +20,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.UPower
+import Quickshell.Networking
 import "AideConfig.js" as Aide
 
 Item {
@@ -51,6 +52,18 @@ Item {
     property string questionPosee: ""
     property string reponse: ""
     property string commandeIA: ""
+    // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
+    // Inconnue (pas de NetworkManager) : considérée comme là.
+    readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
+    onEnLigneChanged: if (actif) lireIA.running = true          // l'IA disponible change avec la connexion
+    // Pas d'IA joignable parce que la connexion manque (une IA locale, Ollama, reste proposée : nomIA n'est pas « - »)
+    readonly property bool horsLigne: nomIA === "-" && !enLigne
+    readonly property var ligneHorsLigne: ({ titre: Reglages.t("Pas de connexion internet", "No internet connection"),
+                                             sous: Reglages.t("L'IA revient dès que la connexion revient", "AI comes back as soon as the connection does"),
+                                             glyphe: "wifi_off", garder: true, f: () => {} })
+    // Pourquoi l'IA ne répond pas : coupée dans les réglages, ou en pause (Économie sur batterie : elle revient seule)
+    readonly property string motifCoupee: Reglages.iaPause ? Reglages.t("L'IA est en pause (Économie sur batterie)", "AI is paused (Power Saver on battery)")
+                                                           : Reglages.t("L'IA est désactivée", "AI is turned off")
     readonly property bool reflechit: demandeur.running || agent.running
     // « @ » : le plan de l'IA (nc-ia agir --json), puis chaque action confirmée par Entrée (nc-ia executer)
     property var plan: null
@@ -64,6 +77,7 @@ Item {
         agent.running = true
         chercher()
     }
+    Timer { id: relireAgent; interval: 700; onTriggered: r.chercher() }      // après l'autorisation : le fichier relu
     function executerPlan(n) {
         if (!plan || executeur.running) return
         executeur.command = [Etat.bin + "nc-ia", "executer", plan.id].concat(n === null ? [] : [String(n)]).concat(["--json"])
@@ -484,8 +498,9 @@ Item {
                 resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]).concat(deLaConfig)
             } else {
                 var ia = r.reflechit ? []
-                          : iaCoupee ? [{ titre: Reglages.t("L'IA est désactivée", "AI is turned off"), sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
+                          : iaCoupee ? [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
                                           glyphe: "block", f: () => r.ouvrirReglage(Reglages.t("IA du bureau", "Desktop AI")) }]
+                          : horsLigne ? [ligneHorsLigne]
                           : nomIA === "-" ? [{ titre: Reglages.t("Aucune IA disponible pour répondre", "No AI available to answer"),
                                                sous: Reglages.t("Ajouter une clé d'API, Claude Code, Ollama…", "Add an API key, Claude Code, Ollama…"),
                                                glyphe: "key", f: () => Quickshell.execDetached([Etat.bin + "nc-ia", "configurer"]) }]
@@ -500,7 +515,7 @@ Item {
         if (q.startsWith("!")) {
             var consigneT = q.slice(1).trim()
             if (!texteActif) {
-                resultats = [{ titre: Reglages.iaCoupee ? Reglages.t("L'IA est désactivée", "AI is turned off") : Reglages.t("L'IA sur le texte est désactivée", "AI on text is turned off"),
+                resultats = [{ titre: Reglages.iaCoupee ? r.motifCoupee : Reglages.t("L'IA sur le texte est désactivée", "AI on text is turned off"),
                                sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"), glyphe: "block",
                                f: () => r.ouvrirReglage(Reglages.iaCoupee ? Reglages.t("IA du bureau", "Desktop AI") : Reglages.t("IA sur le texte sélectionné", "AI on the selected text")) }]
                 return
@@ -513,6 +528,7 @@ Item {
                 sel = 0
                 return
             }
+            if (horsLigne) { resultats = [ligneHorsLigne]; return }
             var qt = sansAccents(consigneT)
             var lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
                 let id = a.id
@@ -530,12 +546,19 @@ Item {
         }
         if (q.startsWith("@")) {
             var demandeA = q.slice(1).trim()
-            if (!agentPermis) {
-                resultats = [{ titre: Reglages.iaCoupee ? Reglages.t("L'IA est désactivée", "AI is turned off") : Reglages.t("L'IA n'a pas le droit d'agir", "The AI is not allowed to act"),
-                               sous: Reglages.t("Réglages · L'IA peut agir", "Settings · The AI can act"), glyphe: "block",
-                               f: () => r.ouvrirReglage(Reglages.t("L'IA peut agir", "The AI can act")) }]
+            if (Reglages.iaCoupee) {
+                resultats = [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
+                               glyphe: "block", f: () => r.ouvrirReglage(Reglages.t("IA du bureau", "Desktop AI")) }]
                 return
             }
+            // Pas encore permis : l'autoriser ici même (rien ne se fera pour autant sans ta confirmation, action par action)
+            if (!agentPermis) {
+                resultats = [{ titre: Reglages.t("Autoriser l'IA à proposer des actions", "Allow the AI to propose actions"),
+                               sous: Reglages.t("Tu confirmeras chacune · ↵", "You'll confirm each one · ↵"), glyphe: "lock_open", garder: true,
+                               f: () => { Quickshell.execDetached([Etat.bin + "nc-reglages", "set", "IA_ACTIONS", "confirmer"]); relireAgent.restart() } }]
+                return
+            }
+            if (horsLigne) { resultats = [ligneHorsLigne]; return }
             if (r.modeAgent && q === r.questionPosee && (agent.running || r.plan)) {
                 if (agent.running || !r.plan) { resultats = []; return }
                 var lignesA = [], restantes = r.plan.actions.filter(a => !a.fait)
@@ -630,7 +653,7 @@ Item {
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
-            if (ac.ia && (Reglages.iaCoupee || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
+            if (ac.ia && (Reglages.iaCoupee || (ac.ia !== "IA_MODE" && horsLigne) || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
             if (ac.siCoupee && !Reglages.iaCoupee) continue
             if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }

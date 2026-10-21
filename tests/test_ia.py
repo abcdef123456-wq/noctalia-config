@@ -125,10 +125,12 @@ class IA(unittest.TestCase):
         f.write_text("#!/bin/sh\n" + corps + "\n")
         f.chmod(0o755)
 
-    def lancer(self, *args, entree=None, prog="nc-ia"):
+    def lancer(self, *args, entree=None, prog="nc-ia", env_plus=None):
+        # Sur secteur, en ligne, profil équilibré : rien ne dépend de la machine qui lance les tests
         env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
                    XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
-                   JOURNAL=str(self.journal))
+                   JOURNAL=str(self.journal), NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+        env.update(env_plus or {})
         # Les programmes d'IA installés sur la machine de test ne doivent pas répondre à la place des faux serveurs
         for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
             self.programme(nom, "exit 1") if not (self.faux / nom).exists() else None
@@ -299,6 +301,35 @@ class IA(unittest.TestCase):
             self.assertIn("--notifier", f.read_text())
         self.assertIn("X-KDE-Submenu=IA", (REPO / "home/.local/share/kio/servicemenus/nc-ia.desktop").read_text())
         self.assertTrue(list((REPO / "home/.local/share/nemo/actions").glob("nc-ia-*.nemo_action")))
+
+    # ── Économie sur batterie, sans connexion ──
+    def test_pause_en_economie_sur_batterie(self):
+        eco = {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "power-saver"}
+        r = self.lancer("demander", "--flux", "q", env_plus=eco)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("en pause", r.stdout)
+        self.assertEqual(self.lancer("actif", env_plus=eco).returncode, 1)
+        self.assertTrue(json.loads(self.lancer("--ia", "--json", prog="nc-demander", env_plus=eco).stdout)["coupee"])
+        self.assertIn("pause", self.lancer("demander", "--flux", "q", prog="nc-assistant", env_plus=eco).stdout)
+        self.assertFalse(Faux.requetes, "rien n'est appelé pendant la pause")
+        # Sur secteur, ou hors Économie, ou réglage à non : elle répond
+        for env in ({"NC_POWER_SUPPLY": "secteur", "NC_PROFIL": "power-saver"}, {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "balanced"}):
+            self.assertEqual(self.lancer("demander", "q", env_plus=env).stdout.strip(), "Bonjour")
+        self.reglages("IA_ECONOMIE=non\n")
+        self.assertEqual(self.lancer("demander", "q", env_plus=eco).stdout.strip(), "Bonjour")
+
+    def test_sans_connexion_seule_une_ia_locale(self):
+        hors = {"NC_IA_EN_LIGNE": "0"}
+        r = self.lancer("demander", "q", env_plus=hors)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Pas de connexion", r.stderr)
+        self.assertEqual(self.lancer("disponible", env_plus=hors).returncode, 1)
+        self.assertFalse(Faux.requetes)
+        # Ollama sur ce PC répond toujours ; revenue, la connexion rend les autres
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC=http://127.0.0.1:{self.port}/ant\nOLLAMA_HOST=http://127.0.0.1:{self.port}/ollama\n")
+        self.assertEqual(json.loads(self.lancer("quelle", "--json", env_plus=hors).stdout)["id"], "ollama")
+        self.assertEqual(self.lancer("demander", "q", env_plus=hors).stdout.strip(), "Local")
+        self.assertEqual(json.loads(self.lancer("quelle", "--json").stdout)["id"], "anthropic")
 
     # ── L'IA qui agit ──
     def preparer_agent(self):

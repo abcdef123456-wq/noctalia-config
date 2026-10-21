@@ -47,7 +47,7 @@ def main():
             qui = ""
         if "--json" in a:
             print(json.dumps({"nom": ia.nom(qui) if qui else "", "agent": ia.FOURNISSEURS[qui]["agent"] if qui else "",
-                              "coupee": ia.coupee() or choix == "non"}, ensure_ascii=False))
+                              "coupee": ia.coupee() or choix == "non", "en_ligne": ia.en_ligne()}, ensure_ascii=False))
         else:
             print(ia.nom(qui) if qui else "")
         return 0
