@@ -16,12 +16,23 @@ user_pref("widget.use-xdg-desktop-portal.mime-handler", 1);               // ouv
 user_pref("media.ffmpeg.vaapi.enabled", true);                            // décodage vidéo par la carte graphique (VA-API)
 user_pref("gfx.webrender.all", true);                                     // rendu accéléré partout
 user_pref("general.autoScroll", true);                                    // clic molette : défilement automatique
+user_pref("widget.wayland.fractional-scale.enabled", true);               // net sur un écran à l'échelle 1,25 ou 1,6 (Wayland)
+user_pref("full-screen-api.transition-duration.enter", "0 0");            // plein écran instantané (pas de fondu noir)
+user_pref("full-screen-api.transition-duration.leave", "0 0");
+user_pref("accessibility.browsewithcaret_shortcut.enabled", false);       // F7 ne propose plus la navigation au curseur
+user_pref("ui.key.menuAccessKey", 0);                                     // aucune touche n'ouvre la barre de menus par erreur
 
 // --- Session ---
 user_pref("browser.startup.page", 3);                                     // rouvre les onglets de la dernière fois
 user_pref("browser.sessionstore.interval", 60000);                        // session enregistrée toutes les 60 s (moins d'écritures disque)
 user_pref("browser.shell.checkDefaultBrowser", false);                    // ne demande plus s'il doit être le navigateur par défaut
 user_pref("browser.aboutConfig.showWarning", false);                      // about:config sans avertissement
+user_pref("browser.urlbar.trimHttps", true);                              // https:// masqué dans la barre d'adresse, http:// reste visible
+user_pref("findbar.highlightAll", true);                                  // Ctrl + F surligne toutes les occurrences
+user_pref("browser.download.alwaysOpenPanel", false);                     // le panneau des téléchargements ne s'ouvre pas tout seul
+user_pref("browser.toolbars.bookmarks.visibility", "newtab");             // barre de favoris seulement sur un nouvel onglet
+user_pref("browser.tabs.hoverPreview.enabled", true);                     // aperçu de l'onglet au survol
+user_pref("network.IDN_show_punycode", true);                             // adresses trompeuses (lettres sosies) affichées telles quelles
 
 // --- Moins de bruit : pas de contenu sponsorisé, de Pocket ni d'études ---
 user_pref("extensions.pocket.enabled", false);
@@ -31,6 +42,7 @@ user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
 user_pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);
 user_pref("browser.discovery.enabled", false);                            // pas de recommandations d'extensions
+user_pref("browser.ml.chat.enabled", false);                              // pas de chatbot IA dans la barre latérale
 user_pref("app.shield.optoutstudies.enabled", false);                     // pas d'études Shield
 user_pref("app.normandy.enabled", false);                                 // pas de réglages poussés à distance
 user_pref("datareporting.healthreport.uploadEnabled", false);             // pas d'envoi de télémétrie

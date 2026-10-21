@@ -226,7 +226,8 @@ avec un tunnel HTTPS côté serveur (Cloudflare Tunnel, Tailscale ou Render), pu
 `nc-assistant verifier` (ou **nc-reglages → Agents IA → Tester l'assistant distant**) diagnostique réseau, clé,
 certificat TLS et état du runner.
 
-**Firefox** (étape facultative de `install.sh`, ou `nc-firefox installer`) : les préférences du dépôt vont dans ton
+**Firefox** (étape facultative de `install.sh`, réglage « Firefox au style de l’île » dans nc-reglages → Apparence,
+ou `nc-firefox installer`) : les préférences du dépôt vont dans ton
 profil (`user.js` : barres compactes, sélecteur de fichiers du bureau, vidéo décodée par la carte graphique, session
 rouverte, sans contenu sponsorisé ni télémétrie) avec le style de l’île (`chrome/userChrome.css` : onglets et barre
 d’adresse en pastilles, aux couleurs du fond d’écran quand le thème de Firefox est du même côté, sombre ou clair).

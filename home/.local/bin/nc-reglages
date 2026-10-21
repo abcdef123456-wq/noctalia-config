@@ -395,6 +395,13 @@ REGLAGES = [
         "Under the time, for example “If found: +1 555 123 4567”. “none”: no message.")),
     R("VERROU_FLOU", "Apparence", L("Flou de l'écran de verrouillage", "Lock screen blur"), "entier", "15",
       L("0 : fond d'écran net.", "0: sharp wallpaper."), mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    R("FIREFOX_STYLE", "Apparence", L("Firefox au style de l'île", "Firefox in the island style"), "ouinon", "non",
+      L("Pose dans ton profil Firefox les préférences du dépôt (barres compactes, sélecteur de fichiers du bureau, vidéo "
+        "par la carte graphique, session rouverte, sans contenu sponsorisé ni télémétrie) et le style de l'île (onglets et "
+        "barre d'adresse en pastilles). Relance Firefox ensuite. Non : tout est retiré, ton user.js d'avant remis.",
+        "Puts the repo's preferences in your Firefox profile (compact bars, desktop file picker, GPU video, session "
+        "restored, no sponsored content or telemetry) and the island style (pill tabs and address bar). Restart Firefox "
+        "afterwards. No: everything is removed, your previous user.js put back."), groupe="firefox"),
     R("FIREFOX_COULEURS", "Apparence", L("Firefox aux couleurs du fond d'écran", "Firefox in the wallpaper colors"), "ouinon", "non",
       L("Une petite extension (« Couleurs de l'île ») fait suivre au thème de Firefox les couleurs du fond d'écran, en "
         "direct, sans relancer. Un thème choisi dans Firefox reste prioritaire (seuls Système, et Sombre ou Clair du "
@@ -1252,8 +1259,13 @@ def appliquer(groupes, vals=None):
         elif g == "curseur":
             appliquer_curseur(vals)
         elif g == "firefox":
-            quoi = "installer" if vals.get("FIREFOX_COULEURS") == "oui" else "desinstaller"
-            subprocess.run([os.path.join(HOME, ".local/bin/nc-firefox"), "extension", quoi], capture_output=True)
+            ff = os.path.join(HOME, ".local/bin/nc-firefox")
+            if vals.get("FIREFOX_STYLE") == "oui":
+                subprocess.run([ff, "installer"], capture_output=True)
+                quoi = "installer" if vals.get("FIREFOX_COULEURS") == "oui" else "desinstaller"
+                subprocess.run([ff, "extension", quoi], capture_output=True)
+            else:
+                subprocess.run([ff, "desinstaller"], capture_output=True)      # retire aussi l'extension
         elif g == "langue":
             # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
             subprocess.run(["hyprctl", "reload"], capture_output=True)
