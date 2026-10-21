@@ -5,6 +5,7 @@ pragma Singleton
 // s'étire quelques secondes pour montrer un changement, comme sur iPhone.
 
 import QtQuick
+import QtQml
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
@@ -398,7 +399,37 @@ Singleton {
             + "| grep -v -x -E 'pipewire|wireplumber|xdg-desktop-por.*' | head -1 | grep . || echo '" + Reglages.t("Une appli", "An app") + "'; exit; done"]
         stdout: StdioCollector { onStreamFinished: etat.appliCamera = text.trim() }
     }
-    Timer { interval: 5000; repeat: true; running: true; onTriggered: if (!lireCamera.running) lireCamera.running = true }
+    // État des webcams lu directement (fichiers runtime_status trouvés au démarrage, puis chaque minute pour une webcam
+    // USB branchée plus tard) : aucun processus toutes les 5 s tant qu'aucune caméra n'est allumée
+    property var fichiersCamera: []
+    Process {
+        id: trouverCameras
+        running: true
+        command: ["sh", "-c", "for v in /sys/class/video4linux/video*; do d=$(readlink -f \"$v/device\"); "
+            + "for f in \"$d/power/runtime_status\" \"$d/../power/runtime_status\"; do [ -r \"$f\" ] && { readlink -f \"$f\"; break; }; done; done | sort -u"]
+        stdout: StdioCollector { onStreamFinished: { var l = text.split("\n").filter(x => x !== ""); if (JSON.stringify(l) !== JSON.stringify(etat.fichiersCamera)) etat.fichiersCamera = l } }
+    }
+    Instantiator {
+        id: etatsCamera
+        model: etat.fichiersCamera
+        delegate: FileView { required property string modelData; path: modelData; blockLoading: true; printErrors: false }
+    }
+    Timer {
+        interval: 5000; repeat: true; running: true
+        property int tours: 0
+        onTriggered: {
+            if (++tours % 12 === 0 && !trouverCameras.running) trouverCameras.running = true
+            var allumee = false
+            for (var i = 0; i < etatsCamera.count; i++) {
+                var f = etatsCamera.objectAt(i)
+                if (!f) continue
+                f.reload()
+                if (f.text().trim() === "active") allumee = true
+            }
+            if (!allumee) etat.appliCamera = ""
+            else if (!lireCamera.running) lireCamera.running = true     // allumée : quelle appli s'en sert
+        }
+    }
     readonly property bool microActif: appliMicro !== ""
     readonly property bool cameraActive: appliCamera !== ""
     onMicroActifChanged: if (microActif) activite("micro", 3200)
