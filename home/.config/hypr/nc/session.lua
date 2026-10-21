@@ -5,6 +5,14 @@
 -- Taille du curseur : nc-reglages (CURSEUR_TAILLE)
 local curseur = tostring(math.floor(nc.reglage("CURSEUR_TAILLE", 24)))
 hl.env("XCURSOR_SIZE", curseur)
+-- Thème du pointeur : nc-reglages (CURSEUR_THEME) ; « systeme » : celui de la distribution
+do
+    local theme = nc.reglage("CURSEUR_THEME", "systeme")
+    if theme ~= "systeme" and theme:match("^[%w%._%- ]+$") then
+        hl.env("XCURSOR_THEME", theme)
+        hl.env("HYPRCURSOR_THEME", theme)
+    end
+end
 hl.env("HYPRCURSOR_SIZE", curseur)
 
 hl.on("hyprland.start", function()

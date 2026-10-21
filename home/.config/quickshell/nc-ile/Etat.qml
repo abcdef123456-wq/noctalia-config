@@ -341,7 +341,8 @@ Singleton {
         : (morceauxOnglet.length > 1 ? morceauxOnglet.slice(0, -1).join(" – ") : (lecteur.trackTitle || "").replace(/^\(\d+\)\s*/, ""))
     readonly property string artiste: !lecteur ? ""
         : ((lecteur.trackArtist || "") !== "" ? lecteur.trackArtist : (morceauxOnglet.length > 1 ? morceauxOnglet[morceauxOnglet.length - 1] : ""))
-    readonly property string pochette: lecteur ? (lecteur.trackArtUrl || "") : ""
+    // Pas de pochette en Économie (ECO_IMAGES) : l'icône du lecteur la remplace partout
+    readonly property string pochette: lecteur && !Reglages.imagesLegeres ? (lecteur.trackArtUrl || "") : ""
     // Sans pochette : icône de l'appli qui joue (Firefox, Spotify…)
     readonly property string iconeLecteur: !lecteur ? ""
         : (Quickshell.iconPath(lecteur.desktopEntry || "", true) || Quickshell.iconPath((lecteur.identity || "").toLowerCase(), true) || "")
@@ -593,10 +594,12 @@ Singleton {
     // ── Onde sonore (pilule, page Musique) : basses lues par cava pendant la lecture ; si cava n'entend rien (son
     //    coupé, cava absent), une onde douce tourne quand même, pour ne pas laisser des barres à plat ──
     property var bandes: [0, 0, 0, 0, 0]
+    // Économie ou sans effets : l'onde se pose sur une forme calme au lieu de rester figée au milieu d'un mouvement
+    Connections { target: Reglages; function onSobreChanged() { if (Reglages.sobre) etat.bandes = [0.3, 0.45, 0.55, 0.45, 0.3] } }
     property real dernierSon: 0
     Timer {
         interval: 110; repeat: true
-        running: etat.joue && etat.maintenant.getTime() - etat.dernierSon > 1500
+        running: etat.joue && etat.maintenant.getTime() - etat.dernierSon > 1500 && !Reglages.sobre
         property real t: 0
         onTriggered: {
             t += 0.55
@@ -605,8 +608,9 @@ Singleton {
             etat.bandes = b
         }
     }
+    // cava (analyse du son, 30 fois par seconde) : pas en Économie ni sans effets ; l'onde reste alors immobile
     Process {
-        running: etat.joue
+        running: etat.joue && !Reglages.sobre
         command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-cava.conf\"; printf '[general]\\nbars = 10\\nframerate = 30\\n[input]\\nmethod = pipewire\\nsource = auto\\n[output]\\nmethod = raw\\nraw_target = /dev/stdout\\ndata_format = ascii\\nascii_max_range = 100\\nbar_delimiter = 59\\nframe_delimiter = 10\\n' > \"$f\"; exec cava -p \"$f\""]
         stdout: SplitParser {
             onRead: data => {

@@ -98,7 +98,7 @@ Canvas {
         sourceComponent: Item {
             // Garder le blanc sur noir de la vidéo, y compris avec un thème clair.
             Rectangle { anchors.fill: parent; radius: width / 2; color: "#000000" }
-            LogoAssistant { anchors.fill: parent; anime: e.tourne && Reglages.val("EFFETS", "tous") !== "aucun" }
+            LogoAssistant { anchors.fill: parent; anime: e.tourne && !Reglages.sobre }
         }
     }
     RotationAnimation on rotation { running: e.tourne && e.visible && e.tournante; from: 0; to: 360; duration: 2600; loops: Animation.Infinite }

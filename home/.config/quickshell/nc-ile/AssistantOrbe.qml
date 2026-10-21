@@ -9,7 +9,7 @@ Item {
     property bool ecoute: false
     signal clic()
     property color accent: (erreur || ecoute) ? Couleurs.rouge : Couleurs.accent
-    readonly property bool mouvement: anime && visible && Reglages.val("EFFETS", "tous") !== "aucun"
+    readonly property bool mouvement: anime && visible && !Reglages.sobre
     objectName: "nc-jarvis-visual"
     Rectangle { anchors.fill: parent; radius: width / 2; color: "transparent"; border.width: 8; border.color: Qt.alpha(orbe.accent, 0.12) }
     Rectangle { anchors.fill: parent; anchors.margins: 4; radius: width / 2; color: "transparent"; border.width: 2.5; border.color: Qt.alpha(orbe.accent, 0.88) }

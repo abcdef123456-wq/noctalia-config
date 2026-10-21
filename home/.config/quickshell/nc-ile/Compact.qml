@@ -40,7 +40,7 @@ Item {
         LogoAssistant {
             anchors.verticalCenter: parent.verticalCenter; width: 22; height: 22
             anime: jarvis.montre && c.visible && c.opacity > 0.01 && AssistantEtat.enCours
-                && Reglages.val("EFFETS", "tous") !== "aucun"
+                && !Reglages.sobre
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold

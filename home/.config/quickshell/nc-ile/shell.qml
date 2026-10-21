@@ -83,7 +83,7 @@ ShellRoot {
     }
     // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
     Variants {
-        model: Reglages.val("FOND_ANIME", "non") === "aurore" && Reglages.val("EFFETS", "tous") !== "aucun" ? Quickshell.screens : []
+        model: Reglages.val("FOND_ANIME", "non") === "aurore" && !Reglages.sobre ? Quickshell.screens : []
         Fond {}
     }
 

@@ -7,6 +7,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.UPower
 
 Singleton {
     id: r
@@ -26,6 +27,13 @@ Singleton {
         return l === "en"
     }
     function t(fr, en) { return r.en ? en : fr }
+    // Économie (profil d'énergie, quel que soit le service : power-profiles-daemon, tuned-ppd, tlp-pd) : l'île coupe ses
+    // animations et l'analyse du son (ECO_EFFETS, comme Hyprland et Noctalia) et ses images décoratives (ECO_IMAGES :
+    // pochettes, images des notifications, fond flouté de la vue des fenêtres, icônes des logiciels à installer).
+    // « Effets visuels : aucun » coupe les animations dans tous les profils.
+    readonly property bool economie: PowerProfiles.profile === PowerProfile.PowerSaver
+    readonly property bool sobre: val("EFFETS", "tous") === "aucun" || (economie && val("ECO_EFFETS", "oui") !== "non")
+    readonly property bool imagesLegeres: economie && val("ECO_IMAGES", "oui") !== "non"
     readonly property var locale: Qt.locale(en ? "en_US" : "fr_FR")
     function lire(texte) {
         var v = {}

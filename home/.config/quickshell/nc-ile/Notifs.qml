@@ -270,7 +270,7 @@ Singleton {
         var fichierPerso = img.startsWith("image://icon//home/") || img.startsWith("image://icon//tmp/")
         var contenu = img !== "" && img !== notif.appIcon && (fichierPerso || (!img.startsWith("image://icon/")
                       && !img.startsWith("/usr/") && !img.startsWith("file:///usr/")))
-        if (contenu) return img
+        if (contenu && !Reglages.imagesLegeres) return img          // pas d'image de contenu en Économie (ECO_IMAGES)
         var nom = (notif.desktopEntry || notif.appName || "").toLowerCase()
         var duTheme = nom !== "" ? Quickshell.iconPath(nom, true) : ""
         if (duTheme) return duTheme

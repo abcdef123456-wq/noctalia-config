@@ -24,7 +24,7 @@ Item {
         && !AssistantEtat.ecritureReglagesEnCours && entree.activeFocus && !entree.inputMethodComposing
         && propositions.length > 0 && entree.text !== suggestionsMasqueesPour
     readonly property bool animeAttente: visible && animationsActives && !AssistantEtat.reglagesOuverts
-        && (dansDashboard || historiqueOuvert) && AssistantEtat.enCours && Reglages.val("EFFETS", "tous") !== "aucun"
+        && (dansDashboard || historiqueOuvert) && AssistantEtat.enCours && !Reglages.sobre
     readonly property color cyan: Couleurs.accent
     readonly property color corail: Couleurs.rouge
     readonly property color teinteEtat: (AssistantEtat.erreur || ecouteVocale) ? corail : cyan

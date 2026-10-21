@@ -26,7 +26,7 @@ class PageAssistant(unittest.TestCase):
                 noms.append("Compact.qml")
             for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:
                 shutil.copy2(QML / nom, root / nom)
-            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous"; function t(fr,en){return en} function val(k,d){return k==="EFFETS"?effets:d}}')
+            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous"; readonly property bool sobre: effets==="aucun"; function t(fr,en){return en} function val(k,d){return k==="EFFETS"?effets:d}}')
             (root / "Agents.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757",nom:"Claude"},assistant:{couleur:"#10b981"}}); property bool travaille:false; property bool attendTerminal:false; property var principale:null; property var attend:null; property string dernierFini:""; property string dernierFiniAgent:"claude"; function agent(s){return "claude"} function nom(s){return "Claude"}}')
             if compact:
                 champs = {k:'""' for k in ('activiteType','heure','dateCourte','iconeLecteur','pochette','titre','artiste','appliCamera','appliMicro','casqueBatterie','casqueNom','telechargeFini')}

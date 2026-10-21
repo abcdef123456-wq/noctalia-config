@@ -39,7 +39,7 @@ Rectangle {
         objectName: "nc-assistant-button-spinner"
         anchors.centerIn: parent; width: 22; height: 22
         visible: bouton.occupe
-        readonly property bool anime: visible && bouton.animationsActives && bouton.opacity > 0.01 && Reglages.val("EFFETS", "tous") !== "aucun"
+        readonly property bool anime: visible && bouton.animationsActives && bouton.opacity > 0.01 && !Reglages.sobre
         Ico { anchors.centerIn: parent; nom: "progress_activity"; taille: 22; color: bouton.accent }
         RotationAnimator on rotation { from: 0; to: 360; duration: 900; loops: Animation.Infinite; running: attente.anime }
     }

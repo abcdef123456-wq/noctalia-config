@@ -80,7 +80,7 @@ PanelWindow {
     // Ouverture : fondu et léger zoom
     property real entree: 0
     Component.onCompleted: entree = 1
-    Behavior on entree { NumberAnimation { duration: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 200; easing.type: Easing.OutCubic } }
+    Behavior on entree { NumberAnimation { duration: Reglages.sobre ? 0 : 200; easing.type: Easing.OutCubic } }
 
     Rectangle {
         anchors.fill: parent

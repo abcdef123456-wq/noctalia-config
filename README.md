@@ -187,7 +187,10 @@ Trois profils, à choisir dans la barre (icône d'énergie) ou avec **Super + Al
 
 - **Performance** : fréquence maximale de l'écran interne, effets complets, processeur à fond ;
 - **Équilibré** (par défaut) ;
-- **Économie** : écran interne à 60 Hz, sans flou ni animations, luminosité limitée, clavier éteint, Bluetooth coupé s'il est inutilisé.
+- **Économie** : écran interne à 60 Hz, sans flou ni animations, luminosité limitée, clavier éteint, Bluetooth coupé s'il est inutilisé ;
+  l'île coupe aussi ses animations et l'analyse du son de l'onde musicale (cava), et ne charge plus d'images décoratives
+  (pochettes, images des notifications, fond flouté de la vue des fenêtres, icônes des logiciels à installer). Chaque
+  coupure se règle dans nc-reglages → Énergie (« Couper les effets », « Pas d'images décoratives en Économie »).
 
 Les profils viennent du service de ta distribution : TLP sur un portable sous Arch (réglages communs à tous les portables, limite
 de charge à environ 80 % proposée si la batterie la gère), `tuned-ppd` sur Fedora, `power-profiles-daemon` ailleurs. Un service

@@ -164,6 +164,19 @@ GESTIONNAIRES = [("nautilus", "Fichiers (Nautilus)"), ("thunar", "Thunar"), ("do
                  ("pcmanfm-qt", "PCManFM-Qt"), ("yazi", "Yazi (dans le terminal)")]
 
 
+def themes_curseur():
+    """Thèmes de pointeur installés : dossiers d'icônes qui ont un sous-dossier « cursors »."""
+    noms = set()
+    for d in ("/usr/share/icons", os.path.join(HOME, ".local/share/icons"), os.path.join(HOME, ".icons")):
+        try:
+            for n in os.listdir(d):
+                if os.path.isdir(os.path.join(d, n, "cursors")) and re.fullmatch(r"[\w .+-]{1,60}", n):
+                    noms.add(n)
+        except OSError:
+            pass
+    return [(n, n) for n in sorted(noms, key=str.lower)]
+
+
 def applis_installees(liste):
     res = [(c, n) for c, n in liste if shutil.which(c)]
     return res or liste[:1]
@@ -394,6 +407,8 @@ REGLAGES = [
         "(password asked). Suggestions: while typing, two apps to install whose name starts with your text appear at the bottom."),
       [("auto", L("Suggestions et « + »", "Suggestions and “+”")), ("prefixe", L("Seulement avec « + »", "Only with “+”")),
        ("non", L("Non", "No"))]),
+    R("SPOTLIGHT_RESULTATS", "Île", L("Résultats affichés dans le Spotlight", "Results shown in Spotlight"), "entier", "6",
+      L("Le nombre de lignes sous la barre de recherche.", "The number of lines under the search bar."), mini=3, maxi=10, pas=1),
     R("SPOTLIGHT_AUR", "Île", L("Logiciels de l'AUR dans le Spotlight", "AUR apps in Spotlight"), "ouinon", "oui",
       L("Avec paru ou yay. Les paquets de l'AUR viennent de la communauté : paru te montre leur recette (PKGBUILD) avant "
         "de les construire.", "With paru or yay. AUR packages come from the community: paru shows you their recipe "
@@ -622,6 +637,11 @@ REGLAGES = [
     R("ECO_EFFETS", "Énergie", L("Couper les effets en Économie", "Turn off effects in Power Saver"), "ouinon", "oui",
       L("Flou, ombres et animations (Hyprland et Noctalia), rotation des fonds d'écran.",
         "Blur, shadows and animations (Hyprland and Noctalia), wallpaper rotation."), groupe="energie"),
+    R("ECO_IMAGES", "Énergie", L("Pas d'images décoratives en Économie", "No decorative images in Power Saver"), "ouinon", "oui",
+      L("En Économie, l'île ne charge plus les pochettes de musique (l'icône du lecteur les remplace), les images des "
+        "notifications, le fond flouté de la vue des fenêtres ni les icônes des logiciels à installer.",
+        "In Power Saver, the island no longer loads music covers (the player icon replaces them), notification images, "
+        "the blurred background of the window overview or the icons of apps to install.")),
     R("ECO_CLAVIER", "Énergie", L("Éteindre le clavier lumineux en Économie", "Turn off keyboard backlight in Power Saver"),
       "ouinon", "oui",
       L("Il se rallume à son niveau d'avant en quittant l'Économie.", "It comes back at its previous level when leaving Power Saver."),
@@ -709,6 +729,10 @@ REGLAGES = [
       L("Certaines applis ne le prennent qu'à leur prochaine ouverture.", "Some apps only pick it up the next time they open."),
       [("24", L("Normale (24)", "Normal (24)")), ("32", L("Grande (32)", "Large (32)")),
        ("40", L("Très grande (40)", "Very large (40)")), ("48", L("Énorme (48)", "Huge (48)"))], groupe="curseur"),
+    R("CURSEUR_THEME", "Clavier et souris", L("Thème du pointeur", "Pointer theme"), "choix", "systeme",
+      L("Les thèmes de pointeur installés. Les applis déjà ouvertes le prennent à leur prochaine ouverture.",
+        "Installed pointer themes. Apps already open pick it up the next time they start."),
+      lambda: [("systeme", L("Celui du système", "The system one"))] + themes_curseur(), groupe="curseur"),
     R("SOURIS_ACCELERATION", "Clavier et souris", L("Accélération du pointeur", "Pointer acceleration"), "choix", "adaptative",
       L("Adaptative : le pointeur va plus loin quand la main va vite. Plate : un mouvement, une distance (jeux, précision).",
         "Adaptive: the pointer goes further when the hand moves fast. Flat: one movement, one distance (games, precision)."),
@@ -1297,8 +1321,12 @@ def appliquer_noctalia(vals):
 
 def appliquer_curseur(vals):
     taille = valeur(vals, "CURSEUR_TAILLE")
-    theme = os.environ.get("XCURSOR_THEME") or sortie(["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"]).strip().strip("'") or "Adwaita"
+    choisi = valeur(vals, "CURSEUR_THEME")
+    theme = (choisi if choisi != "systeme" else "") or os.environ.get("XCURSOR_THEME") or \
+        sortie(["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"]).strip().strip("'") or "Adwaita"
     subprocess.run(["hyprctl", "setcursor", theme, taille], capture_output=True)
+    if choisi != "systeme":
+        subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "cursor-theme", theme], capture_output=True)
     subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "cursor-size", taille], capture_output=True)
     subprocess.run(["hyprctl", "reload"], capture_output=True)      # variables XCURSOR_SIZE des applis lancées ensuite
 

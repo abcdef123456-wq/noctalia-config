@@ -83,7 +83,7 @@ PanelWindow {
     property bool partant: false
     // Même trajet dans les deux sens : 1 = bureau grandeur réelle, 0 = vue d'ensemble.
     property real fin: 1
-    readonly property int dureeFin: Reglages.val("EFFETS", "tous") === "aucun" ? 0 : 260
+    readonly property int dureeFin: Reglages.sobre ? 0 : 260
     Behavior on fin { NumberAnimation { duration: v.dureeFin; easing.type: Easing.InOutCubic } }
     readonly property real entree: partant ? 1 : 1 - fin
     property real limiteCapture: 0
@@ -205,7 +205,8 @@ PanelWindow {
             id: fond
             anchors.fill: parent; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: false
             sourceSize: Qt.size(width / 3, height / 3)
-            source: v.fondOriginal !== "" ? "file://" + v.fondOriginal : ""
+            // Ni chargement ni flou en Économie ou sans effets : le fond uni suffit
+            source: v.fondOriginal !== "" && !Reglages.sobre && !Reglages.imagesLegeres ? "file://" + v.fondOriginal : ""
         }
         MultiEffect { anchors.fill: parent; source: fond; blurEnabled: true; blur: 1; blurMax: 40; autoPaddingEnabled: false }
         Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.45) }
@@ -312,7 +313,7 @@ PanelWindow {
                                         ? Reglages.val("VUE_BUREAUX", "cube") : "cube"
         readonly property bool voisins: anim !== "fondu" && Reglages.val("VUE_VOISINS", "oui") !== "non"
         readonly property real reculMax: Reglages.val("VUE_RECUL", "oui") !== "non" ? 0.16 : 0
-        readonly property int duree: Reglages.val("EFFETS", "tous") === "aucun" ? 0
+        readonly property int duree: Reglages.sobre ? 0
                                      : Math.max(0, Math.min(2000, parseInt(Reglages.val("VUE_DUREE", "320")) || 0))
 
         // Une seule échelle pour tout le bureau, sans déformer ; de la place sur les côtés pour les bureaux voisins
