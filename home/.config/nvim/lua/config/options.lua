@@ -5,8 +5,15 @@
 -- Le curseur garde 8 lignes de marge en haut et en bas en défilant
 vim.opt.scrolloff = 8
 
--- Pas de retour à la ligne automatique dans le texte (Markdown garde le sien via LazyVim)
-vim.opt.wrap = false
+local nc = require("config.nc")
+
+-- Retour à la ligne (nc-reglages → Terminal → Retour à la ligne dans Neovim) ; Markdown garde le sien via LazyVim
+vim.opt.wrap = nc.reglage("NVIM_RETOUR_LIGNE", "non") == "oui"
+
+-- Numéros de ligne (nc-reglages → Terminal → Numéros de ligne de Neovim) : relatifs, absolus ou aucun
+local numeros = nc.reglage("NVIM_NUMEROS", "relatifs")
+vim.opt.number = numeros ~= "aucun"
+vim.opt.relativenumber = numeros == "relatifs"
 
 -- Fenêtres flottantes (aide, survol LSP, menus) aux coins arrondis, comme l'île
 vim.opt.winborder = "rounded"

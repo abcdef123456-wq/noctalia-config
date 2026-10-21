@@ -24,9 +24,9 @@ hl.config({
 
     decoration = {
         rounding       = nc.reglage("FENETRES_ARRONDI", 14),
-        rounding_power = 2.5,
+        rounding_power = ({ rond = 2, doux = 2.5, carres = 4 })[nc.reglage("FENETRES_COINS_FORME", "doux")] or 2.5,   -- nc-reglages
 
-        active_opacity   = 1.0,
+        active_opacity   = math.max(0.7, math.min(1, nc.reglage("FENETRES_OPACITE_ACTIVE", 100) / 100)),   -- nc-reglages
         inactive_opacity = math.max(0.3, math.min(1, nc.reglage("FENETRES_OPACITE_INACTIVE", 100) / 100)),   -- nc-reglages
         dim_special      = 0.35,
 
@@ -36,7 +36,7 @@ hl.config({
 
         shadow = {
             enabled        = true,
-            range          = 22,
+            range          = math.max(0, nc.reglage("FENETRES_OMBRE", 22)),   -- nc-reglages (0 : pas d'ombre)
             render_power   = 3,
             offset         = { 0, 4 },
             color          = "rgba(00000088)",
@@ -96,6 +96,7 @@ hl.config({
         background_color         = "rgb(0b0d12)",
         animate_manual_resizes   = false,
         focus_on_activate        = nc.reglage("FENETRES_FOCUS_DEMANDE", true),
+        middle_click_paste       = nc.reglage("COLLER_CLIC_MILIEU", true),   -- nc-reglages
         key_press_enables_dpms   = true,
         mouse_move_enables_dpms  = true,
         -- Fréquence variable (FreeSync / G-Sync) seulement pour un jeu ou une vidéo en plein écran : plus fluide,
@@ -113,7 +114,7 @@ hl.config({
 
     -- Super + chiffre du bureau où l'on est déjà : retour au bureau précédent
     binds = {
-        workspace_back_and_forth = true,
+        workspace_back_and_forth = nc.reglage("BUREAU_ALLER_RETOUR", true),   -- nc-reglages
     },
 
     ecosystem = {
@@ -123,6 +124,7 @@ hl.config({
 
     cursor = {
         inactive_timeout  = nc.reglage("CURSEUR_CACHER", 8),   -- nc-reglages (0 : jamais caché)
+        no_warps          = not nc.reglage("CURSEUR_SUIT_FOCUS", true),   -- nc-reglages
         hide_on_key_press = true,
     },
 

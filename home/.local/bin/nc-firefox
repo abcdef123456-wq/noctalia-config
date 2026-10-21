@@ -102,9 +102,29 @@ def pose_par_nc(f):
         return False
 
 
+def reglage(cle, defaut):
+    try:
+        for l in (Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"') or defaut
+    except OSError:
+        pass
+    return defaut
+
+
+def bloc_reglages():
+    """Préférences qui suivent nc-reglages (Apparence → Firefox : …) ; plus bas dans user.js, elles l'emportent."""
+    verticaux = reglage("FIREFOX_ONGLETS_VERTICAUX", "non") == "oui"
+    return (f"\n// --- {MARQUE} : tes réglages (nc-reglages → Apparence) ---\n"
+            f'user_pref("sidebar.revamp", {"true" if verticaux else "false"});\n'
+            f'user_pref("sidebar.verticalTabs", {"true" if verticaux else "false"});\n'
+            f'user_pref("browser.startup.page", {3 if reglage("FIREFOX_SESSION", "oui") != "non" else 1});\n'
+            f'user_pref("general.smoothScroll", {"false" if reglage("FIREFOX_DEFILEMENT_DOUX", "oui") == "non" else "true"});\n')
+
+
 def ecrire_user_js(p):
-    """user.js = celui du dépôt, plus le bloc de l'extension si elle est installée."""
-    texte = (SOURCE / "user.js").read_text(encoding="utf-8")
+    """user.js = celui du dépôt, tes réglages, plus le bloc de l'extension si elle est installée."""
+    texte = (SOURCE / "user.js").read_text(encoding="utf-8") + bloc_reglages()
     if extension_etat(p) == 0:
         texte += BLOC_EXTENSION
     (p / "user.js").write_text(texte, encoding="utf-8")

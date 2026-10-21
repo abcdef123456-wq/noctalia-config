@@ -409,6 +409,16 @@ REGLAGES = [
        ("non", L("Non", "No"))]),
     R("SPOTLIGHT_RESULTATS", "Île", L("Résultats affichés dans le Spotlight", "Results shown in Spotlight"), "entier", "6",
       L("Le nombre de lignes sous la barre de recherche.", "The number of lines under the search bar."), mini=3, maxi=10, pas=1),
+    R("SPOTLIGHT_AIDE", "Île", L("Réponses sur la config dans le Spotlight", "Config answers in Spotlight"), "ouinon", "oui",
+      L("« ? ta question » ou une question (« comment changer le fond d'écran ») : réglages, raccourcis, commandes et "
+        "passages de la documentation, instantanément et sans IA (nc-aide-config). L'IA reste proposée en dernier.",
+        "“? your question” or a question (“how to change the wallpaper”): settings, shortcuts, commands and documentation "
+        "passages, instantly and without AI (nc-aide-config). The AI is still offered last.")),
+    R("SPOTLIGHT_MOTEUR", "Île", L("Moteur de recherche du Spotlight (« g … »)", "Spotlight search engine (“g …”)"), "choix", "google",
+      "", [("google", "Google"), ("duckduckgo", "DuckDuckGo"), ("qwant", "Qwant"), ("startpage", "Startpage"), ("brave", "Brave Search"), ("ecosia", "Ecosia")]),
+    R("SPOTLIGHT_CALCULS", "Île", L("Calculs et conversions dans le Spotlight", "Calculations and conversions in Spotlight"), "ouinon", "oui",
+      L("« 1,5 h en min », « 100 € en $ » (avec qalc).", "“1.5 h to min”, “100 € to $” (with qalc).")),
+    R("SPOTLIGHT_FENETRES", "Île", L("Fenêtres ouvertes dans le Spotlight", "Open windows in Spotlight"), "ouinon", "oui", ""),
     R("SPOTLIGHT_AUR", "Île", L("Logiciels de l'AUR dans le Spotlight", "AUR apps in Spotlight"), "ouinon", "oui",
       L("Avec paru ou yay. Les paquets de l'AUR viennent de la communauté : paru te montre leur recette (PKGBUILD) avant "
         "de les construire.", "With paru or yay. AUR packages come from the community: paru shows you their recipe "
@@ -472,6 +482,13 @@ REGLAGES = [
         "A theme you pick in Firefox stays in charge (only System, and Dark or Light matching the wallpaper, get colored). "
         "Unsigned: Firefox Developer Edition, Nightly or ESR only. Yes: installed in your profile, active at Firefox's "
         "next start; no: removed, Firefox goes back to its theme."), groupe="firefox"),
+    R("FIREFOX_ONGLETS_VERTICAUX", "Apparence", L("Firefox : onglets verticaux", "Firefox: vertical tabs"), "ouinon", "non",
+      L("Les onglets dans une colonne à gauche (Firefox 136 ou plus). Avec « Firefox au style de l'île ».",
+        "Tabs in a column on the left (Firefox 136 or later). With “Firefox in the island style”."), groupe="firefox"),
+    R("FIREFOX_SESSION", "Apparence", L("Firefox : rouvrir les onglets de la dernière fois", "Firefox: reopen last session's tabs"), "ouinon", "oui",
+      "", groupe="firefox"),
+    R("FIREFOX_DEFILEMENT_DOUX", "Apparence", L("Firefox : défilement doux", "Firefox: smooth scrolling"), "ouinon", "oui",
+      L("Non : la page saute d'un cran à chaque tour de molette (plus réactif sur un PC lent).", "No: the page jumps one step per wheel notch (snappier on a slow PC)."), groupe="firefox"),
     # Animations
     R("EFFETS", "Animations", L("Effets visuels", "Visual effects"), "choix", "tous",
       L("Aucun : ni animations, ni flou, ni ombres, ni transitions, ni loupe du dock, ni fond animé : plus sobre et plus "
@@ -573,6 +590,22 @@ REGLAGES = [
       L("La fenêtre active ressort.", "The active window stands out."), groupe="hypr"),
     R("FENETRES_OPACITE_INACTIVE", "Fenêtres", L("Opacité des fenêtres inactives", "Inactive window opacity"), "entier", "100",
       mini=50, maxi=100, pas=5, unite="%", groupe="hypr"),
+    R("FENETRES_OPACITE_ACTIVE", "Fenêtres", L("Opacité de la fenêtre active", "Active window opacity"), "entier", "100",
+      L("Sous 100 % : on devine le fond d'écran à travers (avec le flou).", "Below 100%: the wallpaper shows through (with blur)."),
+      mini=70, maxi=100, pas=5, unite="%", groupe="hypr"),
+    R("FENETRES_OMBRE", "Fenêtres", L("Taille de l'ombre (halo)", "Shadow (halo) size"), "entier", "22",
+      L("0 : pas d'ombre. Coupée en Économie.", "0: no shadow. Off in Power Saver."), mini=0, maxi=60, pas=2, unite="px", groupe="hypr"),
+    R("FENETRES_COINS_FORME", "Fenêtres", L("Forme des coins", "Corner shape"), "choix", "doux",
+      L("Doux : courbe continue, comme sur un iPhone.", "Smooth: continuous curve, like on an iPhone."),
+      [("rond", L("Arrondis", "Round")), ("doux", L("Doux (continus)", "Smooth (continuous)")), ("carres", L("Presque carrés", "Almost square"))], groupe="hypr"),
+    R("CURSEUR_SUIT_FOCUS", "Fenêtres", L("Le pointeur suit la fenêtre activée au clavier", "Pointer follows the window focused by keyboard"), "ouinon", "oui",
+      L("En passant d'une fenêtre à l'autre au clavier, le pointeur saute au centre de la nouvelle.",
+        "When switching windows by keyboard, the pointer jumps to the centre of the new one."), groupe="hypr"),
+    R("BUREAU_ALLER_RETOUR", "Fenêtres", L("Super + chiffre du bureau affiché : retour au précédent", "Super + number of the current workspace: back to the previous one"), "ouinon", "oui",
+      "", groupe="hypr"),
+    R("COLLER_CLIC_MILIEU", "Fenêtres", L("Clic du milieu : coller la sélection", "Middle click: paste the selection"), "ouinon", "oui",
+      L("Le texte sélectionné se colle au clic du milieu (habitude Linux). Non : le clic du milieu ne colle rien.",
+        "Selected text is pasted with a middle click (Linux habit). No: middle click pastes nothing."), groupe="hypr"),
     R("FENETRES_ASSOMBRIR_FORCE", "Fenêtres", L("Force de l'assombrissement", "Dimming strength"), "entier", "10",
       L("Quand « Assombrir les fenêtres inactives » est activé.", "When “Dim inactive windows” is on."), mini=0, maxi=60, pas=5, unite="%", groupe="hypr"),
     R("FENETRES_FLOU_FORCE", "Fenêtres", L("Force du flou", "Blur strength"), "choix", "normal",
@@ -822,6 +855,13 @@ REGLAGES = [
       [("auto", L("Automatique (suit le bureau)", "Automatic (follows the desktop)")), ("tokyonight-moon", "Tokyo Night Moon"),
        ("tokyonight-night", "Tokyo Night"), ("tokyonight-day", "Tokyo Night Day"), ("catppuccin-mocha", "Catppuccin Mocha"),
        ("catppuccin-latte", "Catppuccin Latte"), ("habamax", "Habamax")]),
+    R("NVIM_NUMEROS", "Terminal", L("Numéros de ligne de Neovim", "Neovim line numbers"), "choix", "relatifs",
+      L("Relatifs : la distance depuis la ligne du curseur (pratique pour 5j, 3k).", "Relative: distance from the cursor line (handy for 5j, 3k)."),
+      [("relatifs", L("Relatifs", "Relative")), ("absolus", L("Absolus", "Absolute")), ("aucun", L("Aucun", "None"))]),
+    R("NVIM_RETOUR_LIGNE", "Terminal", L("Retour à la ligne dans Neovim", "Line wrapping in Neovim"), "ouinon", "non",
+      L("Les longues lignes passent à la ligne au lieu de déborder.", "Long lines wrap instead of overflowing."))  ,
+    R("NVIM_TRANSPARENT", "Terminal", L("Fond transparent dans Neovim", "Transparent background in Neovim"), "ouinon", "non",
+      L("Le fond du terminal (et sa transparence) se voit derrière le texte.", "The terminal background (and its transparency) shows behind the text.")),
     R("APPLI_TERMINAL", "Applications", L("Terminal (Super + Entrée)", "Terminal (Super + Enter)"), "choix", "kitty",
       L("Les terminaux installés. L'île, le terminal déroulant et les outils gardent kitty (ils s'appuient sur ses fonctions).",
         "Installed terminals. The island, the drop-down terminal and the tools keep kitty (they rely on its features)."),
@@ -834,6 +874,11 @@ REGLAGES = [
       mini=1000, maxi=100000, pas=1000, groupe="terminal"),
     R("TERMINAL_CLOCHE", "Terminal", L("Cloche sonore", "Audible bell"), "ouinon", "non",
       L("Le bip des programmes (sinon un bref clignotement).", "Programs' beep (otherwise a brief flash)."), groupe="terminal"),
+    R("TERMINAL_CLIGNOTE", "Terminal", L("Curseur clignotant", "Blinking cursor"), "ouinon", "oui", "", groupe="terminal"),
+    R("TERMINAL_COPIE_SELECTION", "Terminal", L("Copier le texte sélectionné", "Copy selected text"), "ouinon", "non",
+      L("Sélectionner suffit à copier dans le presse-papiers (sans Ctrl + Maj + C).", "Selecting is enough to copy to the clipboard (no Ctrl + Shift + C)."), groupe="terminal"),
+    R("TERMINAL_LIGATURES", "Terminal", L("Ligatures de la police", "Font ligatures"), "ouinon", "oui",
+      L("« -> », « != », « >= » dessinés en un seul signe.", "“->”, “!=”, “>=” drawn as one symbol."), groupe="terminal"),
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : la fenêtre « Connexion JARVIS » (ligne ci-dessus).",
@@ -1222,6 +1267,12 @@ def appliquer_terminal(vals):
         c.append(f"scrollback_lines {vals['TERMINAL_HISTORIQUE']}")
     if vals.get("TERMINAL_CLOCHE") == "oui":
         c.append("enable_audio_bell yes")
+    if vals.get("TERMINAL_CLIGNOTE") == "non":
+        c.append("cursor_blink_interval 0")
+    if vals.get("TERMINAL_COPIE_SELECTION") == "oui":
+        c.append("copy_on_select clipboard")
+    if vals.get("TERMINAL_LIGATURES") == "non":
+        c.append("disable_ligatures always")
     texte = "# Écrit par nc-reglages. Ne pas éditer.\n" + "\n".join(c) + "\n" if c else ""
     ancien = open(KITTY_OUT, encoding="utf-8").read() if os.path.exists(KITTY_OUT) else ""
     if texte == ancien:

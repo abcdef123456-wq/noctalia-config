@@ -17,7 +17,7 @@ hl.config({
     decoration = {
         dim_inactive = not coupe and nc.reglage("FENETRES_ASSOMBRIR", true),
         blur   = { enabled = not coupe and nc.reglage("FENETRES_FLOU", true) },
-        shadow = { enabled = not coupe and nc.reglage("FENETRES_HALO", true) },
+        shadow = { enabled = not coupe and nc.reglage("FENETRES_HALO", true) and nc.reglage("FENETRES_OMBRE", 22) > 0 },
     },
 })
 

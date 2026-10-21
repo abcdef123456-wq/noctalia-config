@@ -37,9 +37,23 @@ return {
       end,
     },
   },
+  -- Fond transparent (nc-reglages → Terminal → Fond transparent dans Neovim) : celui du terminal se voit derrière
   {
     "folke/tokyonight.nvim",
-    opts = { transparent = false, styles = { floats = "normal", sidebars = "normal" } },
+    opts = function(_, opts)
+      local transparent = require("config.nc").reglage("NVIM_TRANSPARENT", "non") == "oui"
+      opts.transparent = transparent
+      opts.styles = { floats = transparent and "transparent" or "normal", sidebars = transparent and "transparent" or "normal" }
+      return opts
+    end,
+  },
+  {
+    "catppuccin/nvim",
+    optional = true,
+    opts = function(_, opts)
+      opts.transparent_background = require("config.nc").reglage("NVIM_TRANSPARENT", "non") == "oui"
+      return opts
+    end,
   },
   {
     "folke/snacks.nvim",

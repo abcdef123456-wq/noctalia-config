@@ -56,8 +56,13 @@ class Firefox(unittest.TestCase):
         (p / "user.js").write_text('user_pref("a.moi", true);\n')
         r = self.lancer("installer")
         self.assertEqual(r.returncode, 0, r.stderr)
-        for rel in ("user.js", "chrome/userChrome.css", "chrome/userContent.css"):
+        for rel in ("chrome/userChrome.css", "chrome/userContent.css"):
             self.assertEqual((p / rel).read_text(), (SOURCE / rel).read_text(), rel)
+        # user.js : celui du dépôt, suivi des préférences qui suivent nc-reglages (Apparence → Firefox : …)
+        u = (p / "user.js").read_text()
+        self.assertTrue(u.startswith((SOURCE / "user.js").read_text()), "user.js du dépôt en tête")
+        self.assertIn('user_pref("sidebar.verticalTabs", false);', u)
+        self.assertIn('user_pref("browser.startup.page", 3);', u)
         self.assertEqual((p / "user.js.avant-nc").read_text(), 'user_pref("a.moi", true);\n', "le user.js de l'utilisateur est gardé")
         self.assertEqual(self.lancer("etat").returncode, 0)
         self.assertFalse((p / "chrome/nc-couleurs.css").exists(), "pas de palette : pas de fichier de couleurs")
