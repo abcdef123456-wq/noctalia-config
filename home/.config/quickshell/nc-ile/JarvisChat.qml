@@ -1,10 +1,10 @@
-// Petite fenêtre de chat JARVIS (Super + Alt + A, nc-jarvis chat, application « JARVIS Chat ») : une conversation
+// Petite fenêtre de chat JARVIS (Super + Maj + A, nc-jarvis chat, application « JARVIS Chat ») : une conversation
 // vierge à chaque ouverture, dans le style de l'île (orbe, en-tête J.A.R.V.I.S., micro, Markdown et LaTeX), envoyée par
 // AssistantEtat comme le chat de l'île. La session moteur reste celle de l'île, du cockpit, de Telegram et de Discord ;
 // « Nouvelle conversation » la remet à zéro (le /reset existant) et repart d'une fenêtre vide.
 // Fenêtre flottante ordinaire de Hyprland (règle jarvis-chat : centrée, 420 x 560) : Super + Ctrl + P l'épingle sur
 // tous les bureaux comme n'importe quelle fenêtre ; l'île ne la ferme pas. Entrée envoie, Échap ferme ; le bouton
-// d'agrandissement et Super + Alt + Maj + A ouvrent le cockpit complet.
+// d'agrandissement et Super + Ctrl + A ouvrent le cockpit complet.
 import QtQuick
 import Quickshell
 
@@ -65,7 +65,7 @@ FloatingWindow {
                 AssistantCommande {
                     objectName: "nc-jarvis-chat-dashboard"
                     rond: true; width: 30; height: 30; icone: "open_in_full"
-                    aide: Reglages.t("Cockpit complet · Super + Alt + Maj + A", "Full dashboard · Super + Alt + Shift + A")
+                    aide: Reglages.t("Cockpit complet · Super + Ctrl + A", "Full dashboard · Super + Ctrl + A")
                     onClic: fen.cockpit()
                 }
                 AssistantCommande {

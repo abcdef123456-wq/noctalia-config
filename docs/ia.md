@@ -57,10 +57,10 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Spotlight (Super + R)** : `? ta question` — d'abord les réponses de la config (instantanées, sans IA), puis l'IA ;
   la commande qu'elle propose se lance avec Entrée. L'en-tête dit quelle IA a répondu. « IA du Spotlight » peut en
   imposer une autre, ou aucune pour le Spotlight seulement.
-- **Texte sélectionné (Super + Alt + I)**, ou `! ` dans le Spotlight : résumer, traduire, corriger, reformuler,
+- **Texte sélectionné (Super + I)**, ou `! ` dans le Spotlight : résumer, traduire, corriger, reformuler,
   expliquer, rédiger une réponse, ou une consigne libre (`! en liste à puces`). Le texte sélectionné, sinon le texte
   copié ; Entrée copie le résultat. Sans l'île, un menu (fuzzel, wofi, rofi ou bemenu) puis le résultat copié.
-- **Une zone de l'écran (Super + Alt + Maj + I)** : un message d'erreur, un graphique… l'IA l'explique dans une
+- **Une zone de l'écran (Super + Maj + I)** : un message d'erreur, un graphique… l'IA l'explique dans une
   notification (« Lire en entier » ouvre la réponse complète) ; la réponse est aussi copiée.
 - **Terminal** : **Alt + I** transforme la description tapée (« trouver les fichiers de plus de 1 Go ») en commande,
   laissée dans l'invite pour être relue — jamais lancée toute seule. `ia question` répond ; `journalctl -b -p err | ia

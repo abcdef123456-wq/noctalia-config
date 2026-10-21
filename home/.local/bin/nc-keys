@@ -172,10 +172,10 @@ def collect():
     # L'IA ailleurs que dans Hyprland : préfixes du Spotlight, terminal, Neovim (pas si elle est coupée dans les réglages)
     if reglage("IA_MODE") != "non":
         by_sec["IA"] += [
-            {"keys": ["Super", "R"], "text": T("puis « ? » : poser une question à l'IA", "then “?”: ask the AI a question")},
-            {"keys": ["Super", "R"], "text": T("puis « ! » : l'IA sur le texte sélectionné", "then “!”: AI on the selected text")},
-            {"keys": ["Super", "R"], "text": T("puis « @ » : l'IA agit (tu confirmes)", "then “@”: the AI acts (you confirm)")},
-            {"keys": ["Alt", "I"], "text": T("Terminal : la description devient une commande", "Terminal: the description becomes a command")},
+            {"keys": ["Super", "R", "?"], "text": T("Poser une question à l'IA", "Ask the AI a question")},
+            {"keys": ["Super", "R", "!"], "text": T("L'IA sur le texte sélectionné", "AI on the selected text")},
+            {"keys": ["Super", "R", "@"], "text": T("L'IA agit (tu confirmes)", "The AI acts (you confirm)")},
+            {"keys": ["Alt", "I"], "text": T("Terminal : écrire la commande décrite", "Terminal: write the described command")},
             {"keys": [T("Espace", "Space"), "i"], "text": T("Neovim : demander, expliquer, corriger", "Neovim: ask, explain, fix")},
         ]
     # title : identifiant de la section (nom français, que le plugin nc/keys range en colonnes) ; label : titre affiché

@@ -921,9 +921,9 @@ REGLAGES = [
         "A short answer in Spotlight; the command it suggests runs with Enter."),
       lambda: [("auto", L("Comme l'IA du bureau", "Same as the desktop AI"))] + choix_ia() + [("non", L("Aucune", "None"))]),
     R("IA_TEXTE", "Intelligence artificielle", L("IA sur le texte sélectionné", "AI on the selected text"), "ouinon", "oui",
-      L("Super + Alt + I, ou « ! » dans le Spotlight : résumer, traduire, corriger, reformuler, expliquer ou répondre au "
+      L("Super + I, ou « ! » dans le Spotlight : résumer, traduire, corriger, reformuler, expliquer ou répondre au "
         "texte sélectionné (sinon copié) ; le résultat est copié.",
-        "Super + Alt + I, or “!” in Spotlight: summarize, translate, fix, rephrase, explain or reply to the selected "
+        "Super + I, or “!” in Spotlight: summarize, translate, fix, rephrase, explain or reply to the selected "
         "(otherwise copied) text; the result is copied.")),
     R("IA_TERMINAL", "Intelligence artificielle", L("IA dans le terminal", "AI in the terminal"), "ouinon", "oui",
       L("Alt + I : la description tapée devient une commande (relue avant Entrée) ; « ia question » répond, « … | ia "
@@ -931,9 +931,9 @@ REGLAGES = [
         "Alt + I: the typed description becomes a command (reviewed before Enter); “ia question” answers, “… | ia "
         "summarize” works on a command's output.")),
     R("IA_CAPTURE", "Intelligence artificielle", L("Expliquer une zone de l'écran", "Explain an area of the screen"), "ouinon", "oui",
-      L("Super + Alt + Maj + I : choisis une zone (un message d'erreur, un graphique…), l'IA l'explique dans une "
+      L("Super + Maj + I : choisis une zone (un message d'erreur, un graphique…), l'IA l'explique dans une "
         "notification. Demande une IA qui lit les images.",
-        "Super + Alt + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
+        "Super + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
         "Needs an AI that reads images.")),
     # L'IA qui agit (nc-ia agir, « @ » dans le Spotlight) : coupée par défaut ; ce qu'elle peut proposer, jamais fait sans toi
     R("IA_ACTIONS", "Intelligence artificielle", L("L'IA peut agir (avec ta confirmation)", "The AI can act (with your confirmation)"),

@@ -78,11 +78,11 @@ end
 
 -- ── Applis et barre ──────────────────────────────────────────────────────────
 touche(SUPER .. " + code:36", cmd(terminal),                       trad("Applis et barre|Terminal", "Terminal"))
-touche(SUPER .. " + ALT + code:38", cmd("~/.local/bin/nc-jarvis chat"),    trad("IA|Chat JARVIS (petite fenêtre)", "JARVIS chat (small window)"))
-touche(SUPER .. " + ALT + SHIFT + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad("IA|Cockpit JARVIS (grande fenêtre)", "JARVIS dashboard (large window)"))
+touche(SUPER .. " + SHIFT + code:38", cmd("~/.local/bin/nc-jarvis chat"),    trad("IA|Chat JARVIS", "JARVIS chat"))
+touche(SUPER .. " + CTRL + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad("IA|Cockpit JARVIS", "JARVIS dashboard"))
 -- IA du bureau (nc-ia : celle choisie dans nc-reglages → Intelligence artificielle ; coupée, ces touches le disent)
-touche(SUPER .. " + ALT + code:31", cmd("~/.local/bin/nc-ia menu"), trad("IA|IA sur le texte sélectionné (résumer, traduire, corriger…)", "AI on the selected text (summarize, translate, fix…)"))
-touche(SUPER .. " + ALT + SHIFT + code:31", cmd("~/.local/bin/nc-ia capture"), trad("IA|Expliquer une zone de l'écran avec l'IA", "Explain an area of the screen with AI"))
+touche(SUPER .. " + code:31", cmd("~/.local/bin/nc-ia menu"), trad("IA|Résumer, traduire… le texte sélectionné", "Summarize, translate… the selected text"))
+touche(SUPER .. " + SHIFT + code:31", cmd("~/.local/bin/nc-ia capture"), trad("IA|Expliquer une zone de l'écran", "Explain an area of the screen"))
 touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
 touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))

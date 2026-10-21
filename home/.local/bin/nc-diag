@@ -361,7 +361,7 @@ def verifier(b):
                 b.avert(T("l'IA choisie à la main n'est pas disponible", "the AI chosen manually is not available"),
                         T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"))
             if not e["usages"]["image"]["nom"]:
-                b.avert(T("aucune IA disponible ne lit les images (Super + Alt + Maj + I)", "no available AI reads images (Super + Alt + Shift + I)"),
+                b.avert(T("aucune IA disponible ne lit les images (Super + Maj + I)", "no available AI reads images (Super + Shift + I)"),
                         T("une clé Anthropic, OpenAI ou Gemini, Claude Code, Codex ou Ollama", "an Anthropic, OpenAI or Gemini key, Claude Code, Codex or Ollama"))
         conf = os.path.join(HOME, ".config/nc/ia.conf")
         if os.path.exists(conf) and os.stat(conf).st_mode & 0o077:

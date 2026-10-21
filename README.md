@@ -113,7 +113,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
-| IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + Alt + I** · **Super + Alt + Maj + I** |
+| IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
 
 ## Île dynamique
@@ -139,8 +139,8 @@ installer dans le Spotlight »).
 OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Ollama ou JARVIS — **automatique** (la meilleure disponible, la
 suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur toutes les distributions) dans
 **nc-reglages → Intelligence artificielle**. Elle répond au `? ` du Spotlight, travaille sur le texte sélectionné
-(**Super + Alt + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran
-(**Super + Alt + Maj + I**), écrit une commande dans le terminal (**Alt + I**, à relire avant Entrée ; `ia question`).
+(**Super + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran
+(**Super + Maj + I**), écrit une commande dans le terminal (**Alt + I**, à relire avant Entrée ; `ia question`).
 Aussi : pastille IA du centre de contrôle, presse-papiers et notifications de l'île, bouton des captures, clic droit
 dans les fichiers, Neovim (`Espace i`), `nc-diag ia`, et, si tu l'actives, `@ ` dans le Spotlight : l'IA propose de
 gérer les services de ta session, le Wi-Fi, le Bluetooth, l'énergie, le son, les réglages ou les mises à jour, et
@@ -234,8 +234,8 @@ Les services Google (agenda dans le calendrier de l’île, par la connexion Goo
 
 ## Personnaliser sans perdre tes réglages
 
-[JARVIS](docs/jarvis.md) relie le chat de l’île à une petite fenêtre de chat vierge (**Super + Alt + A**, épinglable
-sur tous les bureaux avec Super + Ctrl + P) et à un cockpit extensible en plein écran (**Super + Alt + Maj + A**,
+[JARVIS](docs/jarvis.md) relie le chat de l’île à une petite fenêtre de chat vierge (**Super + Maj + A**, épinglable
+sur tous les bureaux avec Super + Ctrl + P) et à un cockpit extensible en plein écran (**Super + Ctrl + A**,
 ou application JARVIS). Il gère les modules, le modèle et la session, la mémoire, les rappels mobiles,
 Telegram/Discord et les services. Dans l’île, le micro dicte dans le champ de saisie (`nc-dictee`, transcription
 par le serveur), sans envoi automatique. Rappels récurrents (`/rappel telegram tous les jours 08:30 …`, `/rappels`,

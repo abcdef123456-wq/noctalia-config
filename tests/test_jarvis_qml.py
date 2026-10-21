@@ -129,7 +129,7 @@ if(etape===1){
 }else if(etape===4){verifier(!dashboard.visible,"second Échap n'a pas fermé le cockpit");Qt.quit()}
 ''',evenements=True)
 
-    # Petite fenêtre de chat (Super + Alt + A) : vierge à l'ouverture, envoi par AssistantEtat, nouvelle conversation, Échap
+    # Petite fenêtre de chat (Super + Maj + A) : vierge à l'ouverture, envoi par AssistantEtat, nouvelle conversation, Échap
     def test_compact_chat_window_is_blank_shares_the_session_and_closes_on_escape(self):
         calls=self.executer('''
 if(etape===0){

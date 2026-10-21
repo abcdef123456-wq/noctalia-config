@@ -7,11 +7,11 @@ l’assistant. Les appels passent par `nc-assistant` / `nc-jarvis`, jamais direc
 ## Accès
 
 - Île : Super + C, bulle de conversation ; bouton d’agrandissement pour le cockpit.
-- Chat compact : **Super + Alt + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat ») ; le
+- Chat compact : **Super + Maj + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat ») ; le
   même raccourci, fenêtre déjà ouverte, la ramène sur ton bureau si elle est ailleurs (ou masquée), la met devant si
   elle est derrière, et la masque si elle est active ; masquée, elle garde sa forme (rangée avec Super + V ou libre) et
   sa conversation. Pareil pour le cockpit et la fenêtre des réglages.
-- Cockpit : **Super + Alt + Maj + A**, application **JARVIS**, `nc-jarvis tableau`, le bouton d’agrandissement
+- Cockpit : **Super + Ctrl + A**, application **JARVIS**, `nc-jarvis tableau`, le bouton d’agrandissement
   de la fenêtre de chat ou de la page de l’île.
 - Retour au chat de l’île : `nc-jarvis ile`. F11 bascule plein écran/fenêtre ; Échap ferme le cockpit.
 - **nc-settings → Agents IA (coucou)** : connexion, diagnostic, cockpit et déploiements local/SSH.
@@ -33,7 +33,7 @@ L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, a
 
 ## Cockpit
 
-Le cockpit (Super + Alt + Maj + A, `nc-jarvis tableau`, application JARVIS) est une fenêtre Quickshell classique, avec
+Le cockpit (Super + Ctrl + A, `nc-jarvis tableau`, application JARVIS) est une fenêtre Quickshell classique, avec
 la bordure, l’arrondi et les marges de Hyprland : la règle `jarvis-cockpit` la met flottante et `nc/automatismes.lua` la
 place à l’ouverture à la taille d’une fenêtre rangée seule sous la barre (zone réservée de l’écran moins la marge des
 fenêtres ; une fenêtre maximisée par Hyprland n’aurait pas les marges). Fond uni ; en haut l’emblème, le titre et l’état de la connexion (commandes rondes à
@@ -56,7 +56,7 @@ serveur et mémoire de travail remises à zéro, pour toutes les interfaces) pui
 C’est une fenêtre ordinaire de Hyprland, sans épinglage forcé : **Super + Ctrl + P** l’épingle sur tous les bureaux comme
 n’importe quelle fenêtre (elle reste au-dessus et garde le clavier quand on clique dedans ; la même touche la libère).
 L’île ne la ferme pas et ne la masque pas ; Super + Maj + Q la ferme sans toucher à l’île. Le bouton d’agrandissement,
-Super + Alt + Maj + A, `nc-jarvis tableau`, l’application JARVIS et la page de l’île donnent toujours le cockpit complet.
+Super + Ctrl + A, `nc-jarvis tableau`, l’application JARVIS et la page de l’île donnent toujours le cockpit complet.
 
 ## Conversation dans l’île et le cockpit
 

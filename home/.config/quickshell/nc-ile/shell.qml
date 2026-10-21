@@ -27,7 +27,7 @@ ShellRoot {
     // Cockpit chargé seulement à la demande ; aucune capture ni connexion de backend au démarrage.
     property var jarvisFenetre: null
     property Component composantJarvis: null
-    // Petite fenêtre de chat JARVIS (Super + Alt + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
+    // Petite fenêtre de chat JARVIS (Super + Maj + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
     property var jarvisChatFenetre: null
     property Component composantJarvisChat: null
     // Fenêtre « Connexion JARVIS » (nc-assistant configurer) : créée à la demande

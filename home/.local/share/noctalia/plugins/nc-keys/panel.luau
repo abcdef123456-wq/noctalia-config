@@ -71,15 +71,22 @@ local function plus()
   return ui.label({ text = "+", fontSize = math.max(9, px(11)), color = "on_surface_variant" })
 end
 
+-- Une description trop longue pour sa colonne passe sur deux lignes (la ligne grandit) au lieu d'être coupée
+local function hauteur(r)
+  local place = COL_W - KEY_W - px(14)
+  local n = utf8.len(r.text or "") or #(r.text or "")
+  return n * math.max(10, px(13)) * 0.56 > place and ROW_H + px(18) or ROW_H
+end
+
 local function row(r)
   local keys = {}
   for i, k in ipairs(r.keys) do
     if i > 1 then table.insert(keys, plus()) end
     table.insert(keys, chip(k))
   end
-  return ui.row({ height = ROW_H, gap = px(14), align = "center" }, {
+  return ui.row({ height = hauteur(r), gap = px(14), align = "center" }, {
     ui.row({ width = KEY_W, gap = px(5), align = "center" }, keys),
-    ui.label({ text = r.text, fontSize = math.max(10, px(13)), color = "on_surface_variant", maxLines = 1, maxWidth = COL_W - KEY_W - px(14) }),
+    ui.label({ text = r.text, fontSize = math.max(10, px(13)), color = "on_surface_variant", maxLines = 2, maxWidth = COL_W - KEY_W - px(14) }),
   })
 end
 
@@ -91,8 +98,7 @@ local function column(titles)
       if h > 0 then table.insert(kids, ui.box({ height = SEC_GAP, width = 1, opacity = 0 })); h = h + SEC_GAP end
       table.insert(kids, ui.label({ text = libelles[t] or tr(t, TITRES_EN[t] or t), fontSize = math.max(11, px(14)), fontWeight = "bold", color = "primary", height = TITLE_H }))
       h = h + TITLE_H
-      for _, r in ipairs(sec) do table.insert(kids, row(r)) end
-      h = h + #sec * ROW_H
+      for _, r in ipairs(sec) do table.insert(kids, row(r)); h = h + hauteur(r) end
     end
   end
   return ui.column({ width = COL_W, height = h, align = "stretch", gap = 0 }, kids), h

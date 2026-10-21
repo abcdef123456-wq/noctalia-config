@@ -9,7 +9,7 @@
   nc-ia texte ACTION [--presse|--selection|--stdin] [--copier] [--flux]
                                        sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
                                        reformuler, expliquer, repondre, ou une consigne libre entre guillemets
-  nc-ia menu                           les actions sur le texte (Super + Alt + I) : le Spotlight sur « ! », sinon un menu
+  nc-ia menu                           les actions sur le texte (Super + I) : le Spotlight sur « ! », sinon un menu
   nc-ia terminal QUESTION              la réponse dans un terminal (« ? » du lanceur de Noctalia, sans l'île)
   nc-ia fichier CHEMIN… [ACTION|consigne] [--notifier]
                                        un texte, du code, un PDF ou une image : résumé par défaut (clic droit dans
@@ -19,7 +19,7 @@
                                        réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
                                        (« @ » dans le Spotlight) ; nc-ia executer PLAN [N…] le réalise
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
-  nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Alt + Maj + I)
+  nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Maj + I)
   nc-ia configurer                     les clés d'API : la fenêtre « Clés des IA » de l'île, sinon au clavier
                                        (masquées), chacune essayée tout de suite ; --terminal : au clavier
   nc-ia cle FOURNISSEUR                enregistre sa clé d'API, lue sur l'entrée standard (vide : l'efface)
@@ -120,7 +120,7 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        on the selected (else copied) text: resumer (summarize), traduire (translate),
                                        corriger (fix), reformuler (rephrase), expliquer (explain), repondre (reply),
                                        or a free instruction in quotes
-  nc-ai menu                           the text actions (Super + Alt + I): Spotlight on “!”, otherwise a menu
+  nc-ai menu                           the text actions (Super + I): Spotlight on “!”, otherwise a menu
   nc-ai terminal QUESTION              the answer in a terminal (“?” in the Noctalia launcher, without the island)
   nc-ai file PATH… [ACTION|instruction] [--notifier]
                                        a text, code, a PDF or an image: summarized by default (right click in Files →
@@ -130,7 +130,7 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        settings, updates): a plan of allowed actions, confirmed before acting (“@” in
                                        Spotlight); nc-ai execute PLAN [N…] carries it out
   nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
-  nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Alt + Shift + I)
+  nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Shift + I)
   nc-ai configure                      the API keys from the keyboard (hidden), each one tested right away
   nc-ai key PROVIDER                   saves its API key, read from standard input (empty: removes it)
   nc-ai keys [--json]                  the saved keys, masked, and where they come from
@@ -1568,7 +1568,7 @@ def configurer():
             print("✗ " + str(e))
 
 
-# ── Menu des actions sur le texte (Super + Alt + I) ─────────────────────────────────────────────────────────────
+# ── Menu des actions sur le texte (Super + I) ─────────────────────────────────────────────────────────────
 def menu():
     """Le Spotlight de l'île sur « ! » ; sans l'île, un menu (fuzzel, wofi, rofi, bemenu) puis le résultat copié."""
     if coupee():

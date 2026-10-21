@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """JARVIS : cockpit natif, API d'administration et déploiement local/SSH.
 
-  nc-jarvis chat     petite fenêtre de chat (Super + Alt + A) ; sans Quickshell, le chat dans un terminal
-  nc-jarvis tableau  cockpit complet (Super + Alt + Maj + A) ; nc-jarvis ile : la page JARVIS de l'île
+  nc-jarvis chat     petite fenêtre de chat (Super + Maj + A) ; sans Quickshell, le chat dans un terminal
+  nc-jarvis tableau  cockpit complet (Super + Ctrl + A) ; nc-jarvis ile : la page JARVIS de l'île
 """
 import argparse
 import contextlib

@@ -1,4 +1,4 @@
-// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau) : une fenêtre classique, avec la bordure, l'arrondi et les
+// Cockpit JARVIS (Super + Ctrl + A, nc-jarvis tableau) : une fenêtre classique, avec la bordure, l'arrondi et les
 // marges de Hyprland, flottante (règle jarvis-cockpit) et placée à l'ouverture par nc/automatismes.lua à la place et à
 // la taille d'une fenêtre rangée seule sous la barre (une fenêtre maximisée par Hyprland n'aurait pas les marges).
 // Fond uni, l'en-tête, les pages en pastilles, le contenu en cartes. Super + F : plein écran comme toute fenêtre ;
