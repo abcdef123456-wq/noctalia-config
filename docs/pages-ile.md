@@ -63,7 +63,7 @@ par `wl-paste --watch`) ignore toujours ce qu’un gestionnaire de mots de passe
 (`x-kde-passwordManagerHint`, `x-nc-secret`) et ne journalise jamais le contenu. Dans la page : recherche, filtre
 Tout / Textes / Images, épinglés en tête (épingle sur la carte), suppression d’une carte (croix ou Suppr), aperçu
 complet d’un texte long (flèche), « Coller en texte brut » (recopie en `text/plain`, ferme l’île et envoie Ctrl + V
-à la fenêtre active par `hyprctl dispatch sendshortcut`), « Effacer » (les épinglés restent). Clavier : ↑ ↓ choisir,
+à la fenêtre active par le dispatcher `send_shortcut` de Hyprland), « Effacer » (les épinglés restent). Clavier : ↑ ↓ choisir,
 Entrée recopier, Suppr supprimer, `/` ou Ctrl + F chercher, Échap vider la recherche. Réglage `ILE_PRESSE` (non : plus
 de capture).
 

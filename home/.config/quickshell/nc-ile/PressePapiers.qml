@@ -68,11 +68,12 @@ Singleton {
         if (e.genre === "texte") Quickshell.execDetached(["wl-copy", "-t", "text/plain", "--", e.texte])
         else Quickshell.execDetached(["sh", "-c", "wl-copy -t image/png < \"$1\"", "sh", e.chemin])
     }
-    // Coller en texte brut dans la fenêtre active : recopie, ferme l'île, puis Ctrl + V (sendshortcut de Hyprland)
+    // Coller en texte brut dans la fenêtre active : recopie, ferme l'île, puis Ctrl + V (send_shortcut de Hyprland, en
+    // Lua : depuis Hyprland 0.56, hyprctl dispatch évalue hl.dispatch(...), l'ancienne forme « sendshortcut CTRL,V, » échoue)
     function coller(e) {
         recopier(e)
         Etat.fermer()
-        Quickshell.execDetached(["sh", "-c", "sleep 0.2; hyprctl dispatch sendshortcut 'CTRL,V,' >/dev/null 2>&1"])
+        Quickshell.execDetached(["sh", "-c", "sleep 0.2; hyprctl dispatch \"hl.dsp.send_shortcut({ mods = 'CTRL', key = 'V' })\" >/dev/null 2>&1"])
     }
     function correspond(e, recherche, filtre) {
         if (filtre === "textes" && e.genre !== "texte") return false
