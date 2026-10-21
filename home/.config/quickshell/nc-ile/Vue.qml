@@ -164,7 +164,8 @@ PanelWindow {
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
 
     // ── Fond comme le carrousel (Super + W) : un cadre sous la barre, le fond d'écran de cet écran flouté ──
-    readonly property int hautBarre: 42
+    // Hauteur réservée en haut de cet écran par la barre de Noctalia (hyprctl monitors : reserved = gauche, haut, droite, bas)
+    readonly property int hautBarre: { var r = moniteur && moniteur.lastIpcObject ? moniteur.lastIpcObject.reserved : null; return r && r.length > 1 && r[1] > 0 ? r[1] : 42 }
     readonly property int bord: 8
     // Le fond d'écran : celui que Noctalia a retenu pour cet écran, en version floutée du carrousel s'il l'a préparée
     FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true }

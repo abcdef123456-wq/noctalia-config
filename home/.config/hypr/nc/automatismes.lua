@@ -199,6 +199,7 @@ end
 
 hl.on("window.close", function(w)
     if not w or not w.floating or exclue(w) then return end
+    if (tonumber(w.fullscreen) or 0) ~= 0 then return end   -- maximisée ou en plein écran : pas sa vraie place
     local mx, my, lw, lh = ecran(w)
     local x, y = xy(w.at)
     local l, h = xy(w.size)
