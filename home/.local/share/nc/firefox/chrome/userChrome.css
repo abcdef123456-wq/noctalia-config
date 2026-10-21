@@ -1,16 +1,18 @@
 /* nc-firefox : les barres de Firefox au style de l'île — onglets et barre d'adresse en pastilles arrondies, un seul
-   fond uni, pas de traits de séparation. Les couleurs viennent de nc-couleurs.css (celles du fond d'écran, écrites
-   par nc-theme-sync via « nc-firefox couleurs ») ; sans ce fichier, celles du thème Firefox en place.
+   fond uni, pas de traits de séparation. Le thème choisi dans Firefox (Paramètres → Apparence : sombre, clair,
+   système) reste respecté : les couleurs du fond d'écran (nc-couleurs.css, écrites par nc-theme-sync via
+   « nc-firefox couleurs ») ne s'appliquent que quand le thème est du même côté que le fond (sombre avec sombre) ;
+   sinon, ce sont les couleurs du thème Firefox, avec seulement la forme de l'île.
    Firefox relit ces feuilles au démarrage (toolkit.legacyUserProfileCustomizations.stylesheets dans user.js). */
 @import url("nc-couleurs.css");
 
 :root {
-  --nc-fond: var(--nc-couleur-fond, var(--toolbar-bgcolor, #1c1b22));
-  --nc-carte: var(--nc-couleur-carte, color-mix(in srgb, var(--nc-fond) 88%, white));
-  --nc-carte-survol: var(--nc-couleur-carte-survol, color-mix(in srgb, var(--nc-fond) 82%, white));
+  --nc-fond: var(--nc-couleur-fond, var(--toolbar-bgcolor));
+  --nc-carte: var(--nc-couleur-carte, var(--urlbar-box-bgcolor, var(--toolbarbutton-hover-background)));
+  --nc-carte-survol: var(--nc-couleur-carte-survol, var(--toolbarbutton-hover-background));
   --nc-accent: var(--nc-couleur-accent, AccentColor);
-  --nc-texte: var(--nc-couleur-texte, var(--toolbar-color, #fbfbfe));
-  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-texte) 65%, var(--nc-fond)));
+  --nc-texte: var(--nc-couleur-texte, var(--toolbar-color));
+  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--toolbar-color) 70%, transparent));
   --nc-arrondi: 11px;
   --tab-min-height: 34px !important;
   --toolbarbutton-border-radius: 9px !important;

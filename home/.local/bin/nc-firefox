@@ -136,9 +136,11 @@ def couleurs(p):
     if not lignes:
         return 0
     sombre = pal.get("sombre", True)
+    # Seulement si le thème de Firefox (sombre, clair ou système) est du même côté que le fond d'écran : avec un thème
+    # clair sur un fond sombre, les barres gardent les couleurs du thème de Firefox et seulement la forme de l'île
     css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
            "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
-           ":root {\n" + "\n".join(lignes) + f"\n  color-scheme: {'dark' if sombre else 'light'};\n}}\n")
+           f"@media (prefers-color-scheme: {'dark' if sombre else 'light'}) {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
     f = p / "chrome/nc-couleurs.css"
     if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
         f.write_text(css, encoding="utf-8")

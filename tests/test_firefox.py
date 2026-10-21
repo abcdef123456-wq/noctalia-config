@@ -66,7 +66,7 @@ class Firefox(unittest.TestCase):
         css = (p / "chrome/nc-couleurs.css").read_text()
         self.assertIn("--nc-couleur-fond: #f1f1f4;", css)
         self.assertIn("--nc-couleur-accent: #5a3cc8;", css)
-        self.assertIn("color-scheme: light;", css)
+        self.assertIn("@media (prefers-color-scheme: light)", css, "palette claire : seulement avec un thème Firefox clair")
         self.assertNotIn("bidon", css, "une valeur qui n'est pas une couleur est ignorée")
         self.assertNotIn("#111;", css)
         (p / "chrome/perso.css").write_text("/* à moi */")
