@@ -19,8 +19,8 @@ from pathlib import Path
 H = Path(os.environ["HOME"])
 if sys.argv[1:3] == ["clients", "-j"]:
     print((H / "clients.json").read_text())
-elif sys.argv[1] == "dispatch":
-    with (H / "appels").open("a") as f: f.write("dispatch " + sys.argv[2] + "\n")
+elif sys.argv[1] in ("dispatch", "eval"):
+    with (H / "appels").open("a") as f: f.write(sys.argv[1] + " " + sys.argv[2] + "\n")
 '''
 # Faux nc-apps : la liste des applis ; « launch » ajoute la fenêtre de l'appli (comme si elle s'ouvrait)
 FAUX_APPS = r'''#!/usr/bin/env python3
@@ -31,10 +31,17 @@ if sys.argv[1] == "list":
     print(json.dumps([{"id": "firefox", "wmclass": "firefox"}, {"id": "discord", "wmclass": "discord"}]))
 elif sys.argv[1] == "launch":
     with (H / "appels").open("a") as f: f.write("launch " + sys.argv[2] + "\n")
-    c = json.loads((H / "clients.json").read_text())
-    c.append({"address": "0xnouveau", "class": sys.argv[2], "title": sys.argv[2], "mapped": True, "workspace": {"id": 1},
-              "floating": False, "at": [0, 0], "size": [800, 600], "pid": 1})
-    (H / "clients.json").write_text(json.dumps(c))
+    def ajouter(adresse, titre):
+        c = [x for x in json.loads((H / "clients.json").read_text()) if x["address"] != "0xmaj"]
+        c.append({"address": adresse, "class": sys.argv[2], "title": titre, "mapped": True, "workspace": {"id": 1},
+                  "floating": False, "at": [0, 0], "size": [800, 600], "pid": 1})
+        (H / "clients.json").write_text(json.dumps(c))
+    if sys.argv[2] == "discord":
+        ajouter("0xmaj", "Discord Updater")            # l'écran de mise à jour, puis la vraie fenêtre
+        if os.fork() == 0:
+            import time; time.sleep(1); ajouter("0xnouveau", "Discord"); os._exit(0)
+    else:
+        ajouter("0xnouveau", sys.argv[2])
 '''
 
 
@@ -59,7 +66,7 @@ class Sessions(unittest.TestCase):
         (self.home / "clients.json").write_text(json.dumps(list(c)))
 
     def lancer(self, *a):
-        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr", NC_SESSION_DELAI="2")
+        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr", NC_SESSION_DELAI="4", NC_SESSION_CALME="1.5")
         return subprocess.run([str(SCRIPT), *a], env=env, capture_output=True, text=True, timeout=30)
 
     def appels(self):
@@ -89,8 +96,29 @@ class Sessions(unittest.TestCase):
         self.assertIn("hl.dsp.window.float({ action = 'set', window = 'address:0xnouveau' })", a)
         self.assertIn("hl.dsp.window.resize({ x = 640, y = 480, window = 'address:0xnouveau' })", a)
         self.assertIn("kitty --directory", a)
+        # La fenêtre de mise à jour de Discord, puis la vraie : toutes deux sur le bureau 3 ; la règle temporaire posée puis retirée
+        self.assertIn("dispatch hl.dsp.window.move({ workspace = 3, follow = false, window = 'address:0xmaj' })", a)
+        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = true, match = { class = [[^(discord)$]] }, workspace = '3 silent' })", a)
+        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = false,", a)
+        self.assertLess(a.index("enabled = true"), a.index("launch discord"), "la règle avant le lancement")
         l = json.loads(self.lancer("liste", "--json").stdout)
         self.assertEqual((l[0]["nom"], l[0]["fenetres"]), ("Dev", 3))
+
+    def test_terminal_deja_ouvert_et_plein_ecran(self):
+        dossier = self.home / "projet"; dossier.mkdir()
+        shell = subprocess.Popen(["sh", "-c", f"cd {dossier} && sleep 30 & wait"])     # un « terminal » dont le shell est dans le dossier
+        self.addCleanup(shell.kill)
+        import time; time.sleep(0.3)
+        (self.home / ".config/nc/sessions").mkdir(parents=True)
+        (self.home / ".config/nc/sessions/T.json").write_text(json.dumps({"version": 1, "nom": "T", "fenetres": [
+            {"classe": "kitty", "bureau": 4, "flottant": False, "plein_ecran": 2,
+             "terminal": {"programme": "kitty", "dossier": str(dossier), "commande": None}}]}))
+        self.clients(client("0xk", "kitty", 1, pid=shell.pid))
+        self.lancer("ouvrir", "T")
+        a = self.appels()
+        self.assertNotIn("kitty --directory", a, "pas de second terminal dans le même dossier")
+        self.assertIn("dispatch hl.dsp.window.move({ workspace = 4, follow = false, window = 'address:0xk' })", a)
+        self.assertIn("hl.dsp.window.fullscreen({ action = 'set', mode = 'fullscreen', window = 'address:0xk' })", a)
 
     def test_noms_refuses(self):
         self.clients(client("0xa", "firefox", 2))

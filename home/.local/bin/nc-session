@@ -168,7 +168,7 @@ def enregistrer(nom):
             continue
         e = dict(classe=classe, titre=(c.get("title") or "")[:80], bureau=ws.get("id"), ecran=c.get("monitor"),
                  flottant=bool(c.get("floating")), position=c.get("at"), taille=c.get("size"),
-                 plein_ecran=bool(c.get("fullscreen")))
+                 plein_ecran=int(c.get("fullscreen") or 0))     # 0 : non, 1 : agrandie, 2 : plein écran
         if classe.lower() in TERMINAUX:
             dossier, commande = terminal(c.get("pid", 0))
             e["terminal"] = dict(programme=TERMINAUX[classe.lower()], dossier=dossier, commande=commande)
@@ -220,39 +220,82 @@ def placer(adresse, e):
             dispatch(f"hl.dsp.window.resize({{ x = {int(e['taille'][0])}, y = {int(e['taille'][1])}, window = '{sel}' }})")
         if e.get("position"):
             dispatch(f"hl.dsp.window.move({{ x = {int(e['position'][0])}, y = {int(e['position'][1])}, window = '{sel}' }})")
+    # Plein écran ou agrandie comme à l'enregistrement (true des anciennes sessions : plein écran)
+    pe = 2 if e.get("plein_ecran") is True else int(e.get("plein_ecran") or 0)
+    if pe:
+        dispatch(f"hl.dsp.window.fullscreen({{ action = 'set', mode = '{'maximized' if pe == 1 else 'fullscreen'}', window = '{sel}' }})")
+
+
+def regle(n, classe, bureau, active=True):
+    """Règle Hyprland nommée, le temps de la réouverture : toute fenêtre de cette appli (écran de chargement, fenêtre de
+    mise à jour, puis la vraie) s'ouvre directement sur son bureau, sans passer par le bureau affiché. Désactivée à la
+    fin (même nom, enabled = false), sans recharger Hyprland."""
+    motif = "^(" + re.escape(classe) + ")$"
+    if "]]" in motif:
+        return False
+    lua = (f"hl.window_rule({{ name = 'nc-session-{n}', enabled = {'true' if active else 'false'}, "
+           f"match = {{ class = [[{motif}]] }}, workspace = '{int(bureau)} silent' }})")
+    return subprocess.run(["hyprctl", "eval", lua], capture_output=True, timeout=5).returncode == 0
 
 
 def ouvrir(nom, delai=None):
-    delai = float(os.environ.get("NC_SESSION_DELAI", 20)) if delai is None else delai     # attente des fenêtres (s)
+    delai = float(os.environ.get("NC_SESSION_DELAI", 30)) if delai is None else delai     # attente des fenêtres (s)
     try:
         s = json.loads(fichier(nom).read_text())
     except (OSError, ValueError):
         raise Erreur(T(f"Session inconnue : {nom}", f"Unknown session: {nom}")) from None
     avant = clients()
     pris = set()
-    attente = []                                        # (entrée, classe) dont la fenêtre doit encore apparaître
-    for e in s.get("fenetres", []):
-        # Une appli déjà ouverte (pas un terminal : chacun a son dossier) va simplement sur son bureau
-        deja = None if "terminal" in e else next((c for c in avant if c.get("class") == e["classe"] and c["address"] not in pris), None)
+    lances = []                                         # entrées lancées : leurs fenêtres seront placées dès qu'elles s'ouvrent
+    fenetres = s.get("fenetres", [])
+    for e in fenetres:
+        if "terminal" in e:
+            # Un terminal déjà ouvert dans le même dossier, sinon déjà sur ce bureau, sert au lieu d'en rouvrir un
+            libres = [c for c in avant if c.get("class") == e["classe"] and c["address"] not in pris]
+            deja = next((c for c in libres if terminal(c.get("pid", 0))[0] == e["terminal"].get("dossier")), None) \
+                or next((c for c in libres if (c.get("workspace") or {}).get("id") == e["bureau"]), None)
+        else:
+            deja = next((c for c in avant if c.get("class") == e["classe"] and c["address"] not in pris), None)
         if deja:
             pris.add(deja["address"])
             placer(deja["address"], e)
         else:
-            lancer(e)
-            attente.append(e)
+            lances.append(e)
+    # Une règle par appli lancée (sauf les terminaux, et une appli lancée deux fois sur des bureaux différents) : ses
+    # fenêtres, écran de chargement compris, apparaissent directement sur leur bureau
+    classes = [e["classe"] for e in lances]
+    regles = []
+    for n, e in enumerate(lances):
+        if "terminal" not in e and classes.count(e["classe"]) == 1 and regle(n, e["classe"], e["bureau"]):
+            regles.append((n, e))
+    for e in lances:
+        lancer(e)
+    # Jusqu'à la fin du délai, chaque nouvelle fenêtre d'une appli lancée est placée (pas seulement la première :
+    # Discord, Steam ou JetBrains ouvrent d'abord une fenêtre de mise à jour, puis la vraie)
     connues = {c["address"] for c in avant}
+    places = {id(e): 0 for e in lances}
     fin = time.time() + delai
-    while attente and time.time() < fin:
+    calme = float(os.environ.get("NC_SESSION_CALME", 12))    # sans nouvelle fenêtre depuis ce temps : fini
+    derniere = time.time()
+    while lances and time.time() < fin:
         time.sleep(0.4)
         for c in clients():
             if c["address"] in connues:
                 continue
-            e = next((x for x in attente if x["classe"] == c.get("class")), None)
-            if e:
-                connues.add(c["address"])
-                attente.remove(e)
-                placer(c["address"], e)
-    return len(s.get("fenetres", [])) - len(attente), len(attente)
+            candidates = [x for x in lances if x["classe"] == c.get("class")]
+            if not candidates:
+                continue
+            e = min(candidates, key=lambda x: places[id(x)])        # deux fenêtres d'une même appli : une chacune
+            connues.add(c["address"])
+            places[id(e)] += 1
+            derniere = time.time()
+            placer(c["address"], e)
+        if all(places.values()) and time.time() - derniere > calme:
+            break                                       # tout est là, et plus rien ne s'ouvre : inutile d'attendre
+    for n, e in regles:
+        regle(n, e["classe"], e["bureau"], active=False)
+    manquantes = sum(1 for e in lances if not places[id(e)])
+    return len(fenetres) - manquantes, manquantes
 
 
 def liste():
