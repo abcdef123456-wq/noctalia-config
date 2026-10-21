@@ -58,13 +58,11 @@
   border: 1px solid transparent !important;
   box-shadow: none !important;
 }
+/* Au focus, Firefox garde son propre liseré (la couleur d'accent du système) : il se dessine hors de ces éléments */
 #urlbar[focused] > #urlbar-background,
 #urlbar[focused="true"] > #urlbar-background {
   border-color: var(--nc-accent) !important;
-  outline: 1.5px solid var(--nc-accent) !important;   /* Firefox dessine sinon son propre liseré de focus (bleu système) */
-  outline-offset: 0 !important;
 }
-#urlbar[focused] > .urlbar-input-container, #searchbar:focus-within { outline: none !important; }
 #urlbar[open] > .urlbarView,
 .urlbarView {
   background-color: var(--nc-fond) !important;
