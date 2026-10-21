@@ -1125,6 +1125,18 @@ elif ask "$nv_q" o; then
   fi
 fi
 
+# ── 3c. Firefox ──────────────────────────────────────────────────────────────
+# Préférences (user.js) et style de l'île (chrome/userChrome.css) dans le profil Firefox par défaut : facultatif,
+# proposé seulement si Firefox a un profil ici ; « nc-firefox desinstaller » pour revenir en arrière
+if "$HOME/.local/bin/nc-firefox" profil >/dev/null 2>&1; then
+  say "$(t "3c. Firefox : préférences et style de l'île dans ton profil (facultatif)" "3c. Firefox: preferences and island style in your profile (optional)")"
+  if "$HOME/.local/bin/nc-firefox" etat >/dev/null 2>&1; then
+    ok "$(t "Déjà en place." "Already set up.")"
+  elif ask "$(t "Installer la config Firefox (user.js, userChrome.css ; Firefox à relancer ; nc-firefox desinstaller l'enlève) ?" "Install the Firefox config (user.js, userChrome.css; restart Firefox; nc-firefox uninstall removes it)?")" n; then
+    "$HOME/.local/bin/nc-firefox" installer || warn "$(t "Config Firefox non installée." "Firefox config not installed.")"
+  fi
+fi
+
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "$(t "4. Services de ta session" "4. Your session's services")"
 UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service)

@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""nc-firefox : la config Firefox du dépôt (préférences et style de l'île) dans ton profil.
+
+  nc-firefox profil        affiche le dossier du profil par défaut (profiles.ini de ~/.config/mozilla/firefox,
+                           ~/.mozilla/firefox, ou des versions Flatpak et Snap ; NC_FIREFOX_PROFIL le force)
+  nc-firefox installer     copie user.js et chrome/ (userChrome.css, userContent.css) dans le profil, puis écrit
+                           les couleurs ; un user.js à toi est gardé en user.js.avant-nc
+  nc-firefox desinstaller  retire ce que nc-firefox a posé (rien d'autre), remet user.js.avant-nc s'il existe
+  nc-firefox couleurs      écrit chrome/nc-couleurs.css depuis la palette de l'île (~/.config/nc/palette-ile.json) ;
+                           appelé par nc-theme-sync à chaque fond d'écran, sans effet tant que rien n'est installé
+  nc-firefox etat          0 si la config est en place dans le profil, 1 sinon
+
+Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit tout ça au démarrage : ferme-le et rouvre-le.
+Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais acceptés : profile, install, uninstall, colors, status.
+"""
+import configparser
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+
+HOME = Path.home()
+SOURCE = Path(os.environ.get("NC_FIREFOX_SOURCE") or HOME / ".local/share/nc/firefox")
+PALETTE = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/palette-ile.json"
+MARQUE = "nc-firefox"
+FICHIERS = ("user.js", "chrome/userChrome.css", "chrome/userContent.css")
+ACTIONS = {"profile": "profil", "install": "installer", "uninstall": "desinstaller", "colors": "couleurs", "status": "etat"}
+
+
+def dossiers_candidats():
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config")
+    return [xdg / "mozilla/firefox", HOME / ".mozilla/firefox",
+            HOME / ".var/app/org.mozilla.firefox/.mozilla/firefox", HOME / "snap/firefox/common/.mozilla/firefox"]
+
+
+def profil():
+    """Le dossier du profil par défaut, ou None. Priorité : NC_FIREFOX_PROFIL, puis le profil « Default » de la
+    section [Install…] (celui que Firefox ouvre), puis Default=1, puis le premier profil existant."""
+    force = os.environ.get("NC_FIREFOX_PROFIL")
+    if force:
+        return Path(force) if Path(force).is_dir() else None
+    for base in dossiers_candidats():
+        ini = base / "profiles.ini"
+        if not ini.is_file():
+            continue
+        cfg = configparser.RawConfigParser()
+        cfg.optionxform = str
+        try:
+            cfg.read(ini, encoding="utf-8")
+        except configparser.Error:
+            continue
+
+        def chemin(section):
+            p = cfg.get(section, "Path", fallback=None)
+            if not p:
+                return None
+            rel = cfg.get(section, "IsRelative", fallback="1") == "1"
+            d = base / p if rel else Path(p)
+            return d if d.is_dir() else None
+
+        for s in cfg.sections():
+            if s.startswith("Install"):
+                p = cfg.get(s, "Default", fallback="")
+                if p and (base / p).is_dir():
+                    return base / p
+        profils = [s for s in cfg.sections() if s.startswith("Profile")]
+        for s in profils:
+            if cfg.get(s, "Default", fallback="0") == "1" and chemin(s):
+                return chemin(s)
+        for s in profils:
+            if chemin(s):
+                return chemin(s)
+    return None
+
+
+def pose_par_nc(f):
+    try:
+        return f.is_file() and MARQUE in f.read_text(encoding="utf-8", errors="replace")[:400]
+    except OSError:
+        return False
+
+
+def installer(p):
+    for rel in FICHIERS:
+        src = SOURCE / rel
+        if not src.is_file():
+            print(f"nc-firefox : source absente, {src}", file=sys.stderr)
+            return 1
+    ancien = p / "user.js"
+    if ancien.is_file() and not pose_par_nc(ancien):
+        shutil.copy2(ancien, p / "user.js.avant-nc")
+        print(f"ton user.js est gardé en {p / 'user.js.avant-nc'}")
+    (p / "chrome").mkdir(exist_ok=True)
+    for rel in FICHIERS:
+        shutil.copyfile(SOURCE / rel, p / rel)
+    couleurs(p)
+    print(f"config Firefox installée dans {p} (relance Firefox)")
+    return 0
+
+
+def desinstaller(p):
+    for rel in FICHIERS:
+        f = p / rel
+        if pose_par_nc(f):
+            f.unlink()
+    css = p / "chrome/nc-couleurs.css"
+    if pose_par_nc(css):
+        css.unlink()
+    avant = p / "user.js.avant-nc"
+    if avant.is_file():
+        avant.replace(p / "user.js")
+        print("ton user.js d'avant est remis")
+    print(f"config Firefox retirée de {p} (relance Firefox)")
+    return 0
+
+
+def etat(p):
+    return 0 if all(pose_par_nc(p / rel) for rel in FICHIERS) else 1
+
+
+def couleurs(p):
+    """chrome/nc-couleurs.css : les couleurs de l'île en variables CSS. Seulement si le style est installé."""
+    if not pose_par_nc(p / "chrome/userChrome.css"):
+        return 0
+    try:
+        pal = json.loads(PALETTE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    def couleur(cle):
+        v = pal.get(cle)
+        return v if isinstance(v, str) and len(v) in (7, 9) and v.startswith("#") and all(c in "0123456789abcdefABCDEF" for c in v[1:]) else None
+    paires = [("fond", "fond"), ("carte", "carte"), ("carte-survol", "carteSurvol"), ("accent", "accent"),
+              ("texte", "texte"), ("texte-sec", "texteSec")]
+    lignes = [f"  --nc-couleur-{nom}: {couleur(cle)};" for nom, cle in paires if couleur(cle)]
+    if not lignes:
+        return 0
+    sombre = pal.get("sombre", True)
+    css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
+           "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
+           ":root {\n" + "\n".join(lignes) + f"\n  color-scheme: {'dark' if sombre else 'light'};\n}}\n")
+    f = p / "chrome/nc-couleurs.css"
+    if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
+        f.write_text(css, encoding="utf-8")
+    return 0
+
+
+def main(argv):
+    action = ACTIONS.get(argv[0], argv[0]) if argv else "profil"
+    if action not in ("profil", "installer", "desinstaller", "couleurs", "etat"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    p = profil()
+    if not p:
+        if action == "profil":
+            print("nc-firefox : aucun profil Firefox trouvé", file=sys.stderr)
+        return 1
+    if action == "profil":
+        print(p)
+        return 0
+    return {"installer": installer, "desinstaller": desinstaller, "couleurs": couleurs, "etat": etat}[action](p)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

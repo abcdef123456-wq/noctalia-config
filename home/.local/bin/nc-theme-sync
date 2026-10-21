@@ -344,6 +344,8 @@ hl.config({{
     sync_kdeglobals()
     # Icônes du terminal et des fichiers, aux nouvelles couleurs
     subprocess.run([str(Path.home() / ".local/bin/nc-icones")], capture_output=True)
+    # Firefox : chrome/nc-couleurs.css du profil (sans effet tant que nc-firefox installer n'a pas été lancé)
+    subprocess.run([str(Path.home() / ".local/bin/nc-firefox"), "couleurs"], capture_output=True)
 
 
 def sync_kdeglobals():

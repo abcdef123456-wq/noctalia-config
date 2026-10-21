@@ -1,0 +1,91 @@
+/* nc-firefox : les barres de Firefox au style de l'île — onglets et barre d'adresse en pastilles arrondies, un seul
+   fond uni, pas de traits de séparation. Les couleurs viennent de nc-couleurs.css (celles du fond d'écran, écrites
+   par nc-theme-sync via « nc-firefox couleurs ») ; sans ce fichier, celles du thème Firefox en place.
+   Firefox relit ces feuilles au démarrage (toolkit.legacyUserProfileCustomizations.stylesheets dans user.js). */
+@import url("nc-couleurs.css");
+
+:root {
+  --nc-fond: var(--nc-couleur-fond, var(--toolbar-bgcolor, #1c1b22));
+  --nc-carte: var(--nc-couleur-carte, color-mix(in srgb, var(--nc-fond) 88%, white));
+  --nc-carte-survol: var(--nc-couleur-carte-survol, color-mix(in srgb, var(--nc-fond) 82%, white));
+  --nc-accent: var(--nc-couleur-accent, AccentColor);
+  --nc-texte: var(--nc-couleur-texte, var(--toolbar-color, #fbfbfe));
+  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-texte) 65%, var(--nc-fond)));
+  --nc-arrondi: 11px;
+  --tab-min-height: 34px !important;
+  --toolbarbutton-border-radius: 9px !important;
+}
+
+/* Un seul fond pour la zone des onglets et la barre d'adresse */
+#navigator-toolbox,
+#TabsToolbar,
+#nav-bar,
+#PersonalToolbar {
+  background-color: var(--nc-fond) !important;
+  background-image: none !important;
+  color: var(--nc-texte) !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+#navigator-toolbox::after { display: none !important; }
+
+/* Onglets en pastilles */
+.tabbrowser-tab .tab-background {
+  border-radius: var(--nc-arrondi) !important;
+  margin-block: 4px !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.tabbrowser-tab[selected] .tab-background,
+.tabbrowser-tab[multiselected] .tab-background {
+  background-color: var(--nc-carte-survol) !important;
+  background-image: none !important;
+}
+.tabbrowser-tab:hover:not([selected]) .tab-background {
+  background-color: var(--nc-carte) !important;
+}
+.tabbrowser-tab[selected] .tab-content { color: var(--nc-texte) !important; }
+.tabbrowser-tab:not([selected]) .tab-content { color: var(--nc-texte-sec) !important; }
+.tabbrowser-tab::before, .tabbrowser-tab::after,
+.tabbrowser-tab .tab-line { display: none !important; }
+.tabbrowser-tab[selected] .tab-background::before { border-left: 2px solid var(--nc-accent) !important; border-radius: 2px; }
+
+/* Barre d'adresse et recherche : une pastille, un liseré accent quand elle a le focus */
+#urlbar-background,
+#searchbar {
+  border-radius: var(--nc-arrondi) !important;
+  background-color: var(--nc-carte) !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+#urlbar[focused] > #urlbar-background,
+#urlbar[focused="true"] > #urlbar-background {
+  border-color: var(--nc-accent) !important;
+}
+#urlbar[open] > .urlbarView,
+.urlbarView {
+  background-color: var(--nc-fond) !important;
+  color: var(--nc-texte) !important;
+}
+.urlbarView-row[selected] > .urlbarView-row-inner,
+.urlbarView-row:hover > .urlbarView-row-inner {
+  background-color: var(--nc-carte-survol) !important;
+  border-radius: 8px !important;
+}
+
+/* Boutons des barres, menus et panneaux : coins arrondis, mêmes couleurs */
+.toolbarbutton-1 > .toolbarbutton-icon,
+.toolbarbutton-1 > .toolbarbutton-badge-stack {
+  border-radius: var(--toolbarbutton-border-radius) !important;
+}
+#sidebar-box, #sidebar-header, #sidebar-main {
+  background-color: var(--nc-fond) !important;
+  color: var(--nc-texte) !important;
+  border: none !important;
+}
+.panel-arrowcontent, #appMenu-popup, #PanelUI-menu-button + .panel-arrowcontent {
+  border-radius: 12px !important;
+}
+
+/* Barre de recherche dans la page et barre de téléchargements : discrètes */
+.browserContainer > findbar { background-color: var(--nc-fond) !important; color: var(--nc-texte) !important; border: none !important; }

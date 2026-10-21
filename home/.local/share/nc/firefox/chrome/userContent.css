@@ -1,0 +1,14 @@
+/* nc-firefox : pas de page blanche qui flashe — les pages internes (nouvel onglet, page vide, navigation privée)
+   prennent le fond de l'île (nc-couleurs.css, sinon un gris sombre). Voir userChrome.css. */
+@import url("nc-couleurs.css");
+
+@-moz-document url("about:blank"), url("about:newtab"), url("about:home"), url("about:privatebrowsing") {
+  :root, body {
+    background-color: var(--nc-couleur-fond, #1c1b22) !important;
+  }
+}
+
+/* Pages du navigateur (réglages, modules…) : coins arrondis sur les cartes, dans l'esprit de l'île */
+@-moz-document url-prefix("about:preferences"), url-prefix("about:addons") {
+  :root { --in-content-border-radius: 10px; }
+}

@@ -60,6 +60,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-ile
   .local/share/noctalia/plugins/nc-fenetres
   .config/quickshell/nc-ile
+  .local/share/nc/firefox
   .local/share/nc/finger.png
   .local/share/nc/logos
   .local/bin/nc-apps
@@ -88,6 +89,7 @@ HOME_FILES=(
   .local/bin/nc-paquets
   .local/bin/nc-alertes
   .local/bin/nc-fenetre
+  .local/bin/nc-firefox
   .local/bin/nc-qs-capture
   .local/bin/nc-langue
   .local/bin/nc-meteo
