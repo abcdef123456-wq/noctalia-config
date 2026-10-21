@@ -1,7 +1,8 @@
 // Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau), dans le style et au cadrage de la vue des fenêtres et du
-// carrousel : une fenêtre flottante maximisée (sous la barre, aux marges de tes fenêtres : règle jarvis-cockpit, sans
-// bordure ni arrondi de Hyprland), le fond d'écran flouté et assombri, un cadre discret, les pages en pastilles en haut,
-// le contenu en cartes. F11 : plein écran ; Échap : fermer.
+// carrousel : une fenêtre flottante que Hyprland maximise sous la barre à la pose (règle jarvis-cockpit : maximize,
+// sans bordure ni arrondi ; maximized ci-dessous ne sert qu'aux tests, Hyprland 0.56 ignore la demande d'une appli avant
+// sa pose), le fond d'écran flouté et assombri, un cadre à 8 points, les pages en pastilles en haut, le contenu en
+// cartes. F11 : plein écran, et Hyprland rend la fenêtre maximisée au retour ; Échap : fermer.
 // Pages : vue d'ensemble, conversation (la même que l'île), modules, modèle et session, mémoire, conversations,
 // rappels, bots et réglages, services, déploiement. F11 : plein écran ; Échap : fermer (ou la confirmation en cours).
 import QtQuick
@@ -93,7 +94,7 @@ FloatingWindow {
             if (op === "session.update" && succes) AssistantEtat.lireReglages()
         }
     }
-    Shortcut { sequence: "F11"; onActivated: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
+    Shortcut { sequence: "F11"; onActivated: fen.fullscreen = !fen.fullscreen }
     Shortcut {
         sequence: "Escape"
         enabled: !!fen.attente || fen.page !== "chat" || !pageChargee.item || !pageChargee.item.propositionsVisibles
@@ -119,7 +120,7 @@ FloatingWindow {
 
     // ── Comme la vue des fenêtres et le carrousel : tout l'écran, le fond d'écran de cet écran flouté et assombri,
     //    un cadre discret, les pages en pastilles en haut, le contenu en cartes ──
-    readonly property int bord: 0                 // la fenêtre maximisée a déjà les marges de Hyprland (comme la vue)
+    readonly property int bord: 8                 // même cadre que la vue des fenêtres : 8 points sous la barre et sur les côtés
     FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true; printErrors: false }
     readonly property string fondOriginal: {
         var t = etatNoctalia.text() || "", nom = (fen.screen ? fen.screen.name : "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -165,7 +166,7 @@ FloatingWindow {
         id: coinDroit
         anchors.right: cadre.right; anchors.rightMargin: 14; y: cadre.y + 16; height: 40; spacing: 8
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
-        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: { fen.fullscreen = !fen.fullscreen; fen.maximized = !fen.fullscreen } }
+        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: fen.fullscreen = !fen.fullscreen }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
     }

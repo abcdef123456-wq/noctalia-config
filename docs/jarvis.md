@@ -32,12 +32,12 @@ L’animation s’arrête quand la page, l’orbe ou le cockpit sont masqués, a
 ## Cockpit
 
 Le cockpit (Super + Alt + Maj + A, `nc-jarvis tableau`, application JARVIS) est une fenêtre Quickshell au style et au
-cadrage de la vue des fenêtres et du carrousel : flottante et maximisée (sous la barre, aux marges de tes fenêtres ;
-règle Hyprland `jarvis-cockpit` sans bordure ni arrondi), le fond d’écran de l’écran flouté et assombri, un cadre
+cadrage de la vue des fenêtres et du carrousel : flottante, maximisée sous la barre par la règle Hyprland `jarvis-cockpit`
+(`maximize`, sans bordure ni arrondi), le fond d’écran de l’écran flouté et assombri, un cadre
 discret, en haut l’emblème, le titre et l’état de la connexion (commandes rondes à droite : actualiser, plein écran,
 continuer dans l’île, fermer), puis les pages en pastilles (icône et nom court) et le contenu en colonne centrée ;
 boutons et champs en pastilles, cartes aux coins arrondis (`Couleurs`, `Texte`, `Ico`, `AssistantCommande`). F11 passe
-en plein écran. Le même raccourci referme le cockpit. Les pages et leurs actions sont celles d’avant.
+en plein écran et en revient. Le même raccourci referme le cockpit. Les pages et leurs actions sont celles d’avant.
 
 ## Fenêtre de chat
 
