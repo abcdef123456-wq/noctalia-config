@@ -836,8 +836,8 @@ REGLAGES = [
       L("Le bip des programmes (sinon un bref clignotement).", "Programs' beep (otherwise a brief flash)."), groupe="terminal"),
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
-      L("Son activité pendant les requêtes et la fin des réponses. Connexion : nc-assistant configurer.",
-        "Its activity during requests and when answers are ready. Connection: nc-assistant configurer.")),
+      L("Son activité pendant les requêtes et la fin des réponses. Connexion : la fenêtre « Connexion JARVIS » (ligne ci-dessus).",
+        "Its activity during requests and when answers are ready. Connection: the “JARVIS Connection” window (line above).")),
     R("ALERTES_TELEGRAM", "Agents IA (coucou)", L("Alertes Telegram", "Telegram alerts"), "ouinon", "non",
       L("Batterie faible (seuil de l'île), fin de mise à jour du système, service en échec : un message Telegram par le "
         "bot JARVIS (nc-alertes, toutes les 5 min). Rien sans connexion configurée.",
@@ -2368,6 +2368,16 @@ def catalogue(vals):
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
                         mini=r.mini, maxi=r.maxi, pas=r.pas, unite=r.unite, zero=r.zero, valeur=v, affiche=r.montrer(v),
                         modifie=r.cle in vals, groupe=r.groupe))
+    # Actions qui ouvrent une fenêtre (pas des valeurs) : en tête de leur section
+    actions = [dict(cle="action:jarvis-connexion", section="Agents IA (coucou)", sectionNom=nom_section("Agents IA (coucou)"),
+                    nom=T("Connexion à l'assistant JARVIS", "JARVIS assistant connection"), genre="action", defaut="",
+                    aide=T("Adresse du serveur, clé secrète et test de la connexion, dans une fenêtre.",
+                           "Server address, secret key and connection test, in a window."),
+                    choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="", affiche=T("Configurer…", "Configure…"),
+                    modifie=False, groupe="", commande=["nc-assistant", "configurer"])]
+    for a in actions:
+        i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
+        res.insert(i, a)
     return res + catalogue_raccourcis()
 
 

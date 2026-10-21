@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Client de l'assistant distant, sans dépendance Python externe.
 
-  nc-assistant configurer          URL et clé secrète (saisie masquée)
+  nc-assistant configurer          URL et clé secrète : la fenêtre « Connexion JARVIS » de l'île (session
+                                   graphique), sinon les questions dans le terminal (--terminal pour les forcer)
   nc-assistant ouvrir [question]    ouvre le chat dans kitty
   nc-assistant chat [question]      chat dans le terminal courant
   nc-assistant demander "question"  une réponse ; --flux : lignes JSON pour Spotlight
@@ -170,10 +171,91 @@ def sauvegarder(c):
             os.unlink(nom)
 
 
-def configurer():
+def fenetre_configuration():
+    """La fenêtre « Connexion JARVIS » de l'île (Quickshell) ; vrai si elle s'est ouverte."""
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")) or not shutil.which("qs"):
+        return False
+    try:
+        return subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "connexionJarvis"], capture_output=True,
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def configuration_brute():
+    """Ce qui est enregistré, sans validation (pré-remplir la fenêtre, garder la clé) ; {} sans fichier."""
+    try:
+        lignes = CONF.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return {}
+    c = {}
+    for ligne in lignes:
+        if "=" in ligne and not ligne.lstrip().startswith("#"):
+            k, v = ligne.split("=", 1)
+            v = v.strip()
+            try:
+                v = json.loads(v) if v.startswith('"') else v
+            except ValueError:
+                continue
+            if isinstance(v, str):
+                c[k.strip()] = v
+    return c
+
+
+def configuration_depuis(d):
+    """Les valeurs de la fenêtre (JSON sur l'entrée standard, jamais en argument : la clé n'apparaît pas dans la liste
+    des processus) ; une clé vide garde celle qui est enregistrée."""
+    if not isinstance(d, dict):
+        raise Erreur(T("Données invalides.", "Invalid data."))
+    avant = configuration_brute()
+    champ = lambda k: d.get(k) if isinstance(d.get(k), str) else ""
+    return valider(dict(URL=champ("url").strip(), SECRET_KEY=champ("secret_key") or avant.get("SECRET_KEY", ""),
+                        USER_ID=champ("user_id").strip() or avant.get("USER_ID") or os.environ.get("USER") or getpass.getuser(),
+                        TIMEOUT=champ("timeout").strip() or avant.get("TIMEOUT", "180")))
+
+
+def avertissement(url):
+    if hote_prive(url):
+        return T("Adresse locale ou privée : elle ne marche que sur le réseau du serveur. Depuis ailleurs, utilise l'adresse "
+                 "HTTPS d'un tunnel (Cloudflare, Tailscale).",
+                 "Local or private address: it only works on the server's network. From elsewhere, use a tunnel's HTTPS "
+                 "address (Cloudflare, Tailscale).")
+    if url.startswith("http://"):
+        return T("HTTP en clair : hors du réseau local, utilise HTTPS.", "Plain HTTP: outside the local network, use HTTPS.")
+    return ""
+
+
+def configuration_ile(action):
+    """Commandes de la fenêtre « Connexion JARVIS » : lire (sans la clé), tester ou enregistrer (JSON sur l'entrée)."""
+    if action == "lire":
+        c = configuration_brute()
+        print(json.dumps(dict(existe=CONF.exists(), url=c.get("URL", ""), user_id=c.get("USER_ID") or os.environ.get("USER") or "",
+                              timeout=c.get("TIMEOUT", "180"), cle=bool(c.get("SECRET_KEY"))), ensure_ascii=False))
+        return 0
+    try:
+        c = configuration_depuis(json.loads(sys.stdin.readline(65537) or "null"))
+    except (Erreur, ValueError) as e:
+        print(json.dumps(dict(ok=False, error=str(e) if isinstance(e, Erreur) else T("Données invalides.", "Invalid data.")), ensure_ascii=False))
+        return 1
+    if action == "tester":
+        return verifier(c, json_out=True)
+    try:
+        sauvegarder(c)
+    except (Erreur, OSError) as e:
+        print(json.dumps(dict(ok=False, error=str(e) if isinstance(e, Erreur) else T("Écriture impossible : vérifie les droits.",
+                                                                                     "Cannot write: check permissions.")), ensure_ascii=False))
+        return 1
+    print(json.dumps(dict(ok=True, warning=avertissement(c["URL"])), ensure_ascii=False))
+    return 0
+
+
+def configurer(terminal=False):
+    if not terminal and fenetre_configuration():
+        print(T("Fenêtre « Connexion JARVIS » ouverte.", "“JARVIS Connection” window opened."))
+        return
     if not sys.stdin.isatty():
-        raise Erreur(T("Lance nc-assistant configurer dans un terminal interactif.",
-                       "Run nc-assistant configurer in an interactive terminal."))
+        raise Erreur(T("Ni fenêtre ni terminal : lance nc-assistant configurer dans ta session graphique ou un terminal.",
+                       "Neither window nor terminal: run nc-assistant configurer in your graphical session or a terminal."))
     c = configuration() if CONF.exists() else {}
     url = input(T("URL du serveur", "Server URL") + (f" [{c['URL']}]" if c else "") + " : ").strip()
     cle = getpass.getpass(T("Clé secrète (vide : garder l'existante) : ",
@@ -999,7 +1081,10 @@ def requete_ile():
 def main():
     parser = argparse.ArgumentParser(description=T(__doc__, DOC_EN), formatter_class=argparse.RawDescriptionHelpFormatter)
     sous = parser.add_subparsers(dest="commande")
-    sous.add_parser("configurer", aliases=["configure"])
+    p = sous.add_parser("configurer", aliases=["configure"])
+    p.add_argument("--terminal", action="store_true", help=T("Questions dans le terminal plutôt que la fenêtre", "Terminal prompts instead of the window"))
+    p = sous.add_parser("config-ile", help=argparse.SUPPRESS)
+    p.add_argument("action", choices=["lire", "tester", "enregistrer"])
     for nom in ("ouvrir", "chat", "demander"):
         p = sous.add_parser(nom)
         p.add_argument("question", nargs="*")
@@ -1019,7 +1104,9 @@ def main():
     flux = getattr(a, "flux", False)
     try:
         if commande in ("configurer", "configure"):
-            configurer()
+            configurer(getattr(a, "terminal", False))
+        elif commande == "config-ile":
+            return configuration_ile(a.action)
         elif commande == "ouvrir":
             ouvrir(a.question)
         elif commande == "requete-ile":

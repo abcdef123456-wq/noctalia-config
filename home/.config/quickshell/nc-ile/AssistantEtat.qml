@@ -367,7 +367,8 @@ Singleton {
         brouillon = "/reset"
         envoyer()
     }
-    function configurer() { Quickshell.execDetached(["kitty", "--class", "nc-reglages", "-e", bin + "nc-reglages", "assistant"]) }
+    // La fenêtre « Connexion JARVIS » (nc-assistant configurer l'ouvre dans la session graphique)
+    function configurer() { Quickshell.execDetached([bin + "nc-assistant", "configurer"]) }
     function ouvrirDashboard() { Quickshell.execDetached([bin + "nc-jarvis", "tableau"]) }
 
     Process {

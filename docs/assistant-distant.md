@@ -11,20 +11,24 @@ Cela décrit la portabilité du code et de l'installation ; chaque distribution 
 ## Connexion
 
 Le serveur doit déjà être déployé séparément. Ce dépôt ne lance pas le `deploy.sh` du serveur et n'installe pas son backend.
-Dans un terminal :
+
+La connexion se configure dans une **fenêtre « Connexion JARVIS »** : bouton « Configurer la connexion » du cockpit ou
+de l'île, ligne « Connexion à l'assistant JARVIS » de la fenêtre des réglages (Super + Alt + ,), ou `nc-assistant
+configurer` (aussi depuis `nc-settings assistant`). Elle demande l'adresse du gateway (éventuellement avec un préfixe de
+chemin), sa clé `X-Secret-Key` (masquée ; laissée vide, celle qui est enregistrée est gardée), le `USER_ID` et le délai
+d'attente, prévient en direct d'une adresse locale ou d'un HTTP en clair, et **teste la connexion** avec les valeurs
+saisies avant de les enregistrer (en ligne, latence, version, adresse publique annoncée). La clé passe à `nc-assistant`
+par son entrée standard, jamais en argument, et n'est jamais relue ni affichée.
+
+Sans session graphique (serveur, SSH), ou avec `nc-assistant configurer --terminal`, les mêmes questions se posent dans
+le terminal :
 
 ```bash
-nc-assistant configurer
+nc-assistant configurer --terminal
 nc-assistant etat
 nc-assistant demander "Bonjour"
 ```
-
-La même saisie est accessible dans **`nc-settings` → Agents IA (coucou) → Configurer l'assistant distant**.
-Entrée ouvre la configuration dans le même terminal, puis revient aux réglages. La clé reste masquée.
-Accès direct : `nc-settings assistant` (ou `nc-reglages assistant`).
-
-La configuration demande l'URL HTTP(S) du gateway (éventuellement avec un préfixe de chemin), sa clé `X-Secret-Key`
-et le `USER_ID`. La clé se saisit sans affichage. Le fichier `~/.config/nc/assistant.conf` est enregistré par renommage
+ Le fichier `~/.config/nc/assistant.conf` est enregistré par renommage
 atomique, avec les permissions `0600`. `nc-assistant configurer` peut ensuite modifier cette connexion.
 La configuration n'est pas un script shell : ne pas la charger avec `source`.
 

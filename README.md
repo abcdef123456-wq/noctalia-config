@@ -232,8 +232,9 @@ et le [chat terminal](docs/assistant-distant.md) restent accessibles. Aucun back
 
 Depuis un autre réseau que celui du serveur, une URL `192.168.x.x` ou `*.local` ne suffit pas : expose le gateway
 avec un tunnel HTTPS côté serveur (Cloudflare Tunnel, Tailscale ou Render), puis configure cette URL publique.
-`nc-assistant verifier` (ou **nc-reglages → Agents IA → Tester l'assistant distant**) diagnostique réseau, clé,
-certificat TLS et état du runner.
+La connexion se règle dans une fenêtre (**Connexion JARVIS** : « Configurer la connexion » du cockpit, la fenêtre des
+réglages, ou `nc-assistant configurer`), avec un bouton « Tester la connexion ». `nc-assistant verifier` (ou
+**nc-reglages → Agents IA → Tester l'assistant distant**) diagnostique réseau, clé, certificat TLS et état du runner.
 
 **Firefox** (étape facultative de `install.sh`, réglage « Firefox au style de l’île » dans nc-reglages → Apparence,
 ou `nc-firefox installer`) : les préférences du dépôt vont dans ton

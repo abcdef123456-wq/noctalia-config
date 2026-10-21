@@ -11,6 +11,9 @@ hl.window_rule({
 -- fenêtre maximisée par Hyprland n'aurait pas les marges). Super + F la passe en plein écran et la rend, comme toute fenêtre.
 hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true })
 
+-- Fenêtre « Connexion JARVIS » (nc-assistant configurer) : petite fenêtre flottante, centrée
+hl.window_rule({ name = "nc-connexion-jarvis", match = { title = "^(Connexion JARVIS)$" }, float = true, center = true, size = { "600", "660" } })
+
 -- Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : comme le cockpit, une fenêtre classique placée par
 -- nc/automatismes.lua à la taille d'une fenêtre rangée seule sous la barre
 hl.window_rule({ name = "nc-reglages-fenetre", match = { title = "^(Réglages du bureau)$" }, float = true })

@@ -67,6 +67,11 @@ FloatingWindow {
         ecriture.command = file.shift(); file = file
         ecriture.running = true
     }
+    // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin
+    function lancerAction(r) {
+        if (!r || !Array.isArray(r.commande) || !r.commande.length) return
+        Quickshell.execDetached([bin + r.commande[0]].concat(r.commande.slice(1)))
+    }
     // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — nc-reglages raccourci JSON
     function raccourci(r, action, touches) {
         commande(["raccourci", JSON.stringify({action: action, ids: r.ids, origs: r.origs, nom: r.nom, mien: r.mien, touches: touches || ""})])
@@ -138,6 +143,7 @@ FloatingWindow {
     function basculer(r) {
         if (!r) return
         if (r.genre === "raccourci") { if (r.desactive) raccourci(r, "reactiver"); else capturer(r); return }
+        if (r.genre === "action") { lancerAction(r); return }
         if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
         else changer(r, 1)
     }
@@ -417,6 +423,9 @@ FloatingWindow {
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }
                         }
                     }
+                    // Action : un bouton qui ouvre sa fenêtre
+                    Pastille { visible: ligne.r.genre === "action"; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               objectName: "nc-reglage-action-" + ligne.r.cle; texte: ligne.r.affiche; onClic: fen.lancerAction(ligne.r) }
                     // Raccourci : ses touches en touche de clavier, puis changer, désactiver / réactiver, retirer
                     Rectangle {
                         visible: ligne.r.genre === "raccourci"; anchors.verticalCenter: parent.verticalCenter

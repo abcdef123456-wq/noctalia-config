@@ -746,6 +746,54 @@ class ReglagesAssistant(unittest.TestCase):
         reset.assert_called_once()
         e.e.refresh.assert_called_once()
 
+    def test_configuration_graphique_lire_tester_enregistrer(self):
+        """Fenêtre « Connexion JARVIS » : lecture sans la clé, test des valeurs saisies sans les enregistrer, enregistrement
+        qui garde la clé laissée vide, refus d'une adresse invalide ; « configurer » ouvre la fenêtre en session graphique."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); b = root / ".local/bin"; b.mkdir(parents=True)
+            shutil.copy2(BIN / "nc-assistant", b / "nc-assistant")
+            conf = root / ".config/nc/assistant.conf"; conf.parent.mkdir(parents=True, mode=0o700)
+            conf.write_text('URL="https://ancien.example"\nSECRET_KEY="cle-tres-secrete"\nUSER_ID="moi"\nTIMEOUT="120"\n'); conf.chmod(0o600)
+            env = dict(os.environ, HOME=d, NC_LANGUE="fr", PATH=str(b) + ":/usr/bin:/bin")
+            env.pop("WAYLAND_DISPLAY", None); env.pop("DISPLAY", None)
+            def cli(*args, entree=""):
+                return subprocess.run([sys.executable, str(b / "nc-assistant"), *args], input=entree, env=env, capture_output=True, text=True, timeout=20)
+            r = cli("config-ile", "lire")
+            self.assertEqual(json.loads(r.stdout), {"existe": True, "url": "https://ancien.example", "user_id": "moi", "timeout": "120", "cle": True})
+            self.assertNotIn("cle-tres-secrete", r.stdout + r.stderr, "la clé n'est jamais renvoyée")
+            # Adresse invalide : refusée, rien d'écrit
+            avant = conf.read_text()
+            r = cli("config-ile", "enregistrer", entree=json.dumps({"url": "ftp://x", "secret_key": "", "user_id": "moi", "timeout": "120"}) + "\n")
+            self.assertEqual(r.returncode, 1); self.assertFalse(json.loads(r.stdout)["ok"]); self.assertEqual(conf.read_text(), avant)
+            # Clé laissée vide : gardée ; adresse privée : avertissement ; fichier 0600
+            r = cli("config-ile", "enregistrer", entree=json.dumps({"url": "http://192.168.1.28:8000", "secret_key": "", "user_id": "moi", "timeout": "60"}) + "\n")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            rep = json.loads(r.stdout); self.assertTrue(rep["ok"]); self.assertIn("privée", rep["warning"])
+            self.assertIn('SECRET_KEY="cle-tres-secrete"', conf.read_text()); self.assertIn('URL="http://192.168.1.28:8000"', conf.read_text())
+            self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
+            self.assertNotIn("cle-tres-secrete", r.stdout + r.stderr)
+            # Test des valeurs saisies, sans les enregistrer : le faux serveur des tests reçoit la nouvelle clé
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
+            srv.recus = []; srv.reponse = (200, b'{"online": true, "runner_alive": true, "version": "2.1"}'); srv.bloquer = False
+            threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+            self.addCleanup(srv.server_close); self.addCleanup(srv.shutdown)
+            r = cli("config-ile", "tester", entree=json.dumps({"url": f"http://127.0.0.1:{srv.server_port}", "secret_key": "nouvelle-cle", "user_id": "moi", "timeout": "5"}) + "\n")
+            res = json.loads(r.stdout)
+            self.assertTrue(res["online"], r.stdout + r.stderr); self.assertEqual(res["version"], "2.1")
+            self.assertEqual(srv.recus[-1][2], "nouvelle-cle")
+            self.assertIn('SECRET_KEY="cle-tres-secrete"', conf.read_text(), "tester n'enregistre rien")
+            self.assertNotIn("nouvelle-cle", r.stdout + r.stderr)
+            # Session graphique : « configurer » ouvre la fenêtre de l'île (faux qs) au lieu des questions
+            (b / "qs").write_text('#!/bin/sh\necho "$*" > "$HOME/qs-appel"\n'); (b / "qs").chmod(0o755)
+            env["WAYLAND_DISPLAY"] = "wayland-test"
+            r = cli("configurer")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual((root / "qs-appel").read_text().strip(), "-c nc-ile ipc call ile connexionJarvis")
+            # Sans fenêtre ni terminal : erreur claire, pas d'attente
+            env.pop("WAYLAND_DISPLAY")
+            r = cli("configurer")
+            self.assertEqual(r.returncode, 1); self.assertIn("graphique", r.stderr)
+
     def test_settings_configures_in_terminal_without_echoing_or_storing_key_in_settings(self):
         self.verifier_configuration_terminal(tui=False)
 
@@ -764,6 +812,8 @@ class ReglagesAssistant(unittest.TestCase):
             settings.write_text("SPOTLIGHT_IA=assistant\nASSISTANT_ILE=non\n")
             original = settings.read_bytes()
             env = dict(os.environ, HOME=d, NC_LANGUE="en", USER="test-user", TERM="xterm")
+            # Sans session graphique (serveur, SSH) : les questions dans le terminal ; avec, c'est la fenêtre de l'île
+            env.pop("WAYLAND_DISPLAY", None); env.pop("DISPLAY", None)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ResourceWarning)
                 m = charger("nc-reglages")

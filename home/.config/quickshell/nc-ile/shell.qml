@@ -30,6 +30,9 @@ ShellRoot {
     // Petite fenêtre de chat JARVIS (Super + Alt + A, nc-jarvis chat) : une fenêtre flottante ordinaire, que l'île ne ferme pas
     property var jarvisChatFenetre: null
     property Component composantJarvisChat: null
+    // Fenêtre « Connexion JARVIS » (nc-assistant configurer) : créée à la demande
+    property var connexionFenetre: null
+    property Component composantConnexion: null
     // Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : une fenêtre classique, créée à la demande
     property var reglagesFenetre: null
     property Component composantReglages: null
@@ -177,5 +180,19 @@ ShellRoot {
             if (racine.reglagesFenetre) racine.reglagesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
         function reglagesFermer(): void { if (racine.reglagesFenetre) racine.reglagesFenetre.close() }
+        // Connexion à JARVIS en graphique (adresse, clé, test) ; déjà ouverte : ramenée ici, mise devant ou rangée
+        function connexionJarvis(): void {
+            if (racine.connexionFenetre && racine.connexionFenetre.visible) { racine.basculerOutil(racine.connexionFenetre, "Connexion JARVIS"); return }
+            if (!racine.connexionFenetre) {
+                if (!racine.composantConnexion) racine.composantConnexion = Qt.createComponent("ConnexionJarvis.qml")
+                if (racine.composantConnexion.status !== Component.Ready) {
+                    console.warn("Fenêtre de connexion JARVIS indisponible : " + racine.composantConnexion.errorString())
+                    return
+                }
+                racine.connexionFenetre = racine.composantConnexion.createObject(racine)
+                racine.brancherIle(racine.connexionFenetre)
+            }
+            if (racine.connexionFenetre) racine.connexionFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+        }
     }
 }
