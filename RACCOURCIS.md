@@ -27,7 +27,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) ; déjà ouverte : la ramène, la met devant, ou la masque |
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
-| `Super` + `` ` `` | Terminal déroulant (sous Échap) |
+| `Super` + `` ` `` | Terminal déroulant (sous Échap) ; rangé tout seul dès que tu vas ailleurs (clic sur une autre fenêtre ou sur le bureau à côté, Alt + Tab, autre bureau), il revient tel quel |
 | `Super` + `Maj` + `V` | Historique du presse-papiers |
 | `Super` + `.` | Émojis |
 | `Impr. écran` | Capture de l'écran |

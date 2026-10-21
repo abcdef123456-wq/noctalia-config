@@ -279,6 +279,33 @@ end
 hl.on("window.open", rapport_quickshell)
 hl.on("window.class", rapport_quickshell)
 
+-- Terminal déroulant (Super + touche sous Échap, bureau caché « special:term ») : rangé dès qu'on va ailleurs — une autre
+-- fenêtre activée (clic, Alt + Tab, appli qui s'ouvre) ou un autre bureau ; il revient tel quel au prochain appel.
+-- Un clic sur le bureau vide à côté : l'île le range aussi (nc-ile, RangeTerminal.qml).
+local function ecran_du_terminal()
+    for _, m in ipairs(hl.get_monitors()) do
+        local s = m.active_special_workspace
+        if s and s.name == "special:term" then return m end
+    end
+end
+local function ranger_terminal(m, w)
+    local actif = hl.get_active_monitor()
+    -- toggle_special agit sur l'écran actif : passer un instant sur celui du terminal, puis revenir à la fenêtre choisie
+    if actif and actif.name ~= m.name then hl.dispatch(hl.dsp.focus({ monitor = m.name })) end
+    hl.dispatch(hl.dsp.workspace.toggle_special("term"))
+    if w and actif and actif.name ~= m.name then hl.dispatch(hl.dsp.focus({ window = "address:" .. w.address })) end
+end
+hl.on("window.active", function(w)
+    if not w or not w.workspace or w.workspace.name == "special:term" then return end
+    local m = ecran_du_terminal()
+    if m then ranger_terminal(m, w) end
+end)
+hl.on("workspace.active", function(ws)
+    if not ws or not ws.name or ws.name:sub(1, 8) == "special:" then return end
+    local m = ecran_du_terminal()
+    if m and ws.monitor and ws.monitor.name == m.name then ranger_terminal(m) end
+end)
+
 -- Fenêtre réduite (nc-fenetre : bureau caché « special:reduites ») activée par le dock, Alt + Tab ou une notification :
 -- elle revient sur le bureau affiché au lieu d'ouvrir le bureau caché par-dessus
 hl.on("window.active", function(w)

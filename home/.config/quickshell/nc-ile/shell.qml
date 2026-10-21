@@ -87,6 +87,8 @@ ShellRoot {
         model: Quickshell.screens
         Coins {}
     }
+    // Terminal déroulant sorti : un clic sur le bureau vide à côté le range
+    RangeTerminal {}
     // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
     Variants {
         model: Reglages.val("FOND_ANIME", "non") === "aurore" && !Reglages.sobre ? Quickshell.screens : []
