@@ -10,21 +10,35 @@ ile_prete() {
   for _ in 1 2 3 4 5 6 7 8 9 10; do qs -c nc-ile ipc show >/dev/null 2>&1 && return 0; sleep 0.3; done
   return 1
 }
+# Noctalia arrêté (barre, menus, fiche des raccourcis) : relancé ; s'il ne répond toujours pas, une notification
+# plutôt qu'un raccourci qui ne fait rien
+noctalia_prete() {
+  pgrep -u "$(id -u)" -x noctalia >/dev/null && return 0
+  systemctl --user reset-failed noctalia.service 2>/dev/null
+  systemctl --user start noctalia.service 2>/dev/null
+  for _ in $(seq 20); do noctalia msg status >/dev/null 2>&1 && return 0; sleep 0.2; done
+  . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+  notify-send -u critical -a Noctalia "$(t "Noctalia ne démarre pas" "Noctalia won't start")" \
+    "$(t "La barre et ses menus ne répondent pas. Dans un terminal : nc-shell restart, puis nc-diag." \
+         "The bar and its menus aren't responding. In a terminal: nc-shell restart, then nc-diag.")" 2>/dev/null
+  return 1
+}
+nmsg() { noctalia_prete || exit 1; exec noctalia msg "$@"; }
 
 case "${1:-}" in
   menu)                                       # recherche : Spotlight de l'île Quickshell, sinon lanceur Noctalia
     ile_prete && exec qs -c nc-ile ipc call ile recherche
-    exec noctalia msg panel-toggle nc/launcher:main ;;
-  session)         exec noctalia msg session lock-and-suspend ;;
-  lock)            exec noctalia msg session lock ;;
-  power-cycle)     exec noctalia msg power-cycle ;;
+    nmsg panel-toggle nc/launcher:main ;;
+  session)         nmsg session lock-and-suspend ;;
+  lock)            nmsg session lock ;;
+  power-cycle)     nmsg power-cycle ;;
   control-center)                             # centre de contrôle de l'île dynamique : ouverture, ou fermeture animée
     # Île Quickshell (au-dessus de la barre), sinon île du plugin Noctalia
     ile_prete && exec qs -c nc-ile ipc call ile basculer
     if noctalia msg status 2>/dev/null | grep -q '"activePanelId": *"nc/ile:centre"'; then
-      exec noctalia msg plugin nc/ile:centre all fermer
+      nmsg plugin nc/ile:centre all fermer
     fi
-    exec noctalia msg panel-toggle nc/ile:centre ;;
+    nmsg panel-toggle nc/ile:centre ;;
   ile)                                        # icônes de la barre : page de l'île Quickshell, sinon centre de Noctalia
     page="${2:-centre}"
     if ile_prete; then
@@ -35,9 +49,10 @@ case "${1:-}" in
       reseau) ctx=network ;; bluetooth) ctx=bluetooth ;; son) ctx=audio ;; systeme) ctx=system ;;
       notifications) ctx=notifications ;; *) ctx=home ;;
     esac
-    exec noctalia msg panel-toggle control-center "$ctx" ;;
-  settings)        exec noctalia msg settings-toggle ;;
+    nmsg panel-toggle control-center "$ctx" ;;
+  settings)        nmsg settings-toggle ;;
   wallpapers)
+    noctalia_prete || exit 1
     # Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant que le carrousel est ouvert,
     # remis à la fermeture (sauf en profil Économie, où il reste coupé : voir nc.flou dans ~/.config/hypr/nc/energie.lua).
     lock="${XDG_RUNTIME_DIR:-/tmp}/nc-carousel-blur"
@@ -47,9 +62,9 @@ case "${1:-}" in
         hyprctl eval 'nc.flou(true)' >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
       disown
     fi
-    exec noctalia msg panel-toggle nc/carousel:main ;;
-  window-switcher) exec noctalia msg window-switcher hold ;;
-  keys)            exec noctalia msg panel-toggle nc/keys:main ;;
+    nmsg panel-toggle nc/carousel:main ;;
+  window-switcher) nmsg window-switcher hold ;;
+  keys)            nmsg panel-toggle nc/keys:main ;;
 esac
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 { t "Action inconnue : ${1:-}" "Unknown action: ${1:-}"; echo; } >&2

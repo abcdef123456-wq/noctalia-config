@@ -15,4 +15,4 @@ placement = "floating"
 position = "center"
 layer = "overlay"
 keyboard_focus = "exclusive"
-capture_keys = ["Left", "Right", "Up", "Down", "Tab", "shift+Tab", "ISO_Left_Tab", "Return", "KP_Enter", "Home", "End"]
+capture_keys = ["Escape", "Left", "Right", "Up", "Down", "Tab", "shift+Tab", "ISO_Left_Tab", "Return", "KP_Enter", "Home", "End"]

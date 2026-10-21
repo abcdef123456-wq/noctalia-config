@@ -298,6 +298,8 @@ function onKey(chord, pressed)
   if not pressed then return end
   if chord == "Home" then target = target - (wrap(target) - 1); setTicking(true)
   elseif chord == "End" then target = target + (#shown - wrap(target)); setTicking(true)
+  elseif chord == "Escape" then
+    panel.close()
   elseif chord == "Return" or chord == "KP_Enter" then
     if #shown > 0 then apply(shown[wrap(target)]) end
   end

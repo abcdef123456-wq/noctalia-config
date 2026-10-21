@@ -382,6 +382,8 @@ end
 -- ── Clavier ─────────────────────────────────────────────────────────────────
 function onKey(chord, pressed)
   if not pressed then return end
+  -- Échap capturé (plugin.toml) : le panneau prend tout le clavier, il doit se fermer lui-même
+  if chord == "Escape" then panel.close() return end
   local nextKey = chord == "Right" or chord == "Down" or chord == "Tab" or chord == "ctrl+j" or chord == "ctrl+n"
   local prevKey = chord == "Left" or chord == "Up" or chord == "shift+Tab" or chord == "ISO_Left_Tab" or chord == "ctrl+k" or chord == "ctrl+p"
   local enter = chord == "Return" or chord == "KP_Enter"

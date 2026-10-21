@@ -118,7 +118,9 @@ touche(SUPER .. " + SHIFT + code:24", function()
     if comm then
         local nom = comm:read("l")
         comm:close()
-        if nom == "quickshell" or nom == "qs" then
+        -- Shells de la session (île, barre Noctalia et ses réglages) : fermer la fenêtre, jamais le processus,
+        -- sinon la barre, les menus et Super + / disparaissent avec elle
+        if nom == "quickshell" or nom == "qs" or nom == "noctalia" then
             hl.dispatch(hl.dsp.window.close())
             return
         end
