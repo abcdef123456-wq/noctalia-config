@@ -226,6 +226,8 @@ case "$action" in
     trap '' HUP
     unset LC_ALL     # la mise à jour parle la langue du système
     ok=0
+    # La liste d'avant la mise à jour (versions, paquets importants) : pour le rapport de l'IA à la fin
+    cp -f "$cache/paquets.json" "$cache/paquets-avant.json" 2>/dev/null || true
     instantane
     # Arch : paru ou yay mettent à jour les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
     if command -v pacman >/dev/null; then
@@ -240,6 +242,10 @@ case "$action" in
     if command -v flatpak >/dev/null; then flatpak update || ok=1; fi
     echo; t "Recompte des mises à jour…" "Recounting updates…"; echo
     if [ "$ok" = 0 ]; then "$0" compter local; else "$0" compter; fi
+    # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
+    if [ "$ok" = 0 ] && [ -x "$HOME/.local/bin/nc-ia" ] && [ -s "$cache/paquets-avant.json" ]; then
+      setsid "$HOME/.local/bin/nc-ia" rapport-maj systeme "$cache/paquets-avant.json" >/dev/null 2>&1 < /dev/null &
+    fi
     n=$(head -1 "$fichier" 2>/dev/null || echo 0)
     if [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi

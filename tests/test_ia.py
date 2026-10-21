@@ -472,6 +472,35 @@ class IA(unittest.TestCase):
         self.reglages("IA_MODE=non\nIA_ACTIONS=confirmer\n")
         self.assertEqual(self.lancer("executer", plan["id"]).returncode, 3)
 
+    # ── Rapports de mise à jour ──
+    def test_rapport_de_mise_a_jour(self):
+        depot = self.home / "depot"; depot.mkdir()
+        g = lambda *a: subprocess.run(["git", "-C", str(depot), *a], capture_output=True, text=True, check=True).stdout.strip()
+        g("init", "-q"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+        g("commit", "-q", "--allow-empty", "-m", "départ"); avant = g("rev-parse", "HEAD")
+        g("commit", "-q", "--allow-empty", "-m", "Nouvelle pastille IA ; corrections")
+        (self.home / ".config/nc/depot").write_text(str(depot))
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        self.programme("qs", "exit 0")
+        r = self.lancer("rapport-maj", "config", avant, "HEAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads((self.home / "cache/nc/rapports/config.json").read_text())
+        self.assertEqual((d["resume"], d["details"], d["titre"]), ("Bonjour", ["Nouvelle pastille IA ; corrections"], "Ce qui a changé dans le bureau"))
+        self.assertIn("Nouvelle pastille IA", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+        self.assertIn("-A default=Voir le rapport", self.appels())
+        # Système : les paquets d'avant la mise à jour
+        avant_f = self.home / "avant.json"
+        avant_f.write_text(json.dumps({"paquets": [{"nom": "linux", "avant": "6.1", "apres": "6.2", "important": True, "source": "depot"}]}))
+        self.lancer("rapport-maj", "systeme", str(avant_f))
+        self.assertEqual(json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())["details"], ["★ linux 6.1 → 6.2"])
+        # En Économie sur batterie (automatique), sans connexion : rien de plus que d'habitude
+        (self.home / "cache/nc/rapports/config.json").unlink()
+        Faux.requetes.clear()
+        for env in ({"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "power-saver"}, {"NC_IA_EN_LIGNE": "0"}):
+            self.assertEqual(self.lancer("rapport-maj", "config", avant, "HEAD", env_plus=env).returncode, 0)
+        self.assertFalse((self.home / "cache/nc/rapports/config.json").exists())
+        self.assertFalse(Faux.requetes)
+
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):
         r = self.lancer("cle", "openai", entree=CLE_O + "\n")

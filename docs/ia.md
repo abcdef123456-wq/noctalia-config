@@ -82,6 +82,10 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   expliquer, traduire, corriger un texte, du code, un PDF (avec pdftotext) ou une image ; `nc-ia fichier CHEMIN`.
 - **Neovim** : `Espace i i` demander (avec les lignes choisies en contexte), en visuel `Espace i e` expliquer,
   `Espace i t` transformer selon une consigne, `Espace i c` corriger (annulable avec `u`). `Espace a` reste Claude Code.
+- **Mises à jour expliquées** : après une mise à jour de la config (`nc-maj`) ou du système, l'IA écrit un rapport
+  facile à comprendre (ce qui se voit d'abord, s'il faut redémarrer) en tête de **Mises à jour** dans la fenêtre des
+  réglages, avec **Détails** (la liste complète) ; une notification y mène. C'est automatique : sans connexion, sans
+  IA, ou en Économie sur batterie, rien de plus que d'habitude.
 - **Diagnostic** : `nc-diag ia` explique ce que `nc-diag` a trouvé et dit quoi faire (rien n'est envoyé si tout va bien).
 - **Dictée partout (Super + D)** : maintiens Super + D et parle, relâche : le texte est écrit dans la fenêtre active
   (Discord, navigateur, Neovim, terminal…). Un appui bref lance une dictée longue, le suivant l'écrit. Transcription par

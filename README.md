@@ -298,7 +298,8 @@ lancées puis placées. Une session peut se rouvrir à chaque ouverture de sessi
 **Mises à jour du système** (île, page Notifications → « Mettre à jour », ou `nc-paquets mettre-a-jour`) : sur un disque
 en **Btrfs**, un instantané du système est pris juste avant (snapper ou Timeshift s'ils sont là, sinon
 `/.snapshots/nc-avant-maj-…`, les 3 derniers gardés) pour revenir en arrière si une mise à jour casse quelque chose ;
-avec **grub-btrfs**, on démarre dessus depuis le menu GRUB. Réglage « Instantané avant chaque mise à jour ».
+avec **grub-btrfs**, on démarre dessus depuis le menu GRUB. Réglage « Instantané avant chaque mise à jour ». Avec l'IA, chaque mise à jour (config ou système) laisse un rapport en clair dans les réglages → Mises à jour,
+annoncé par une notification.
 
 ## Mettre à jour le dépôt depuis ta machine
 

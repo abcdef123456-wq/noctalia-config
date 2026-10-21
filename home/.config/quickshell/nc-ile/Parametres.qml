@@ -172,6 +172,7 @@ FloatingWindow {
         if (!r) return
         if (r.genre === "raccourci") { if (r.desactive) raccourci(r, "reactiver"); else capturer(r); return }
         if (r.genre === "action") { lancerAction(r); return }
+        if (r.genre === "rapport") { if (liste.currentItem) liste.currentItem.deplie = !liste.currentItem.deplie; return }
         if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
         else changer(r, 1)
     }
@@ -362,6 +363,7 @@ FloatingWindow {
                 required property int index
                 objectName: "nc-reglage-" + modelData.cle
                 readonly property var r: modelData
+                property bool deplie: false            // rapport de mise à jour : le détail affiché
                 width: liste.width; height: Math.max(62, contenu.implicitHeight + 24); radius: 16
                 color: ligne.ListView.isCurrentItem ? Couleurs.carteSurvol : Couleurs.carte
                 border.width: ligne.ListView.isCurrentItem && liste.activeFocus ? 1.5 : 0; border.color: Couleurs.accent
@@ -377,7 +379,20 @@ FloatingWindow {
                                     Texte { id: sec; anchors.centerIn: parent; text: ligne.r.sectionNom; font.pixelSize: 11; secondaire: true } }
                         Ico { visible: ligne.r.modifie; anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 14; color: Couleurs.accent }
                     }
-                    Texte { visible: ligne.r.aide !== ""; width: parent.width; text: ligne.r.aide; secondaire: true; font.pixelSize: 12; wrapMode: Text.Wrap; elide: Text.ElideNone }
+                    Texte { visible: ligne.r.aide !== "" && ligne.r.genre !== "rapport"; width: parent.width; text: ligne.r.aide; secondaire: true; font.pixelSize: 12; wrapMode: Text.Wrap; elide: Text.ElideNone }
+                    // Rapport de mise à jour : le résumé de l'IA (Markdown), puis le détail à la demande
+                    Text { visible: ligne.r.genre === "rapport"; width: parent.width; text: ligne.r.aide || ""; textFormat: Text.MarkdownText
+                           wrapMode: Text.Wrap; color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13 }
+                    Texte { visible: ligne.r.genre === "rapport" && !!ligne.r.ia; text: Reglages.t("Résumé par ", "Summary by ") + (ligne.r.ia || ""); secondaire: true; font.pixelSize: 11 }
+                    Column {
+                        objectName: "nc-rapport-details-" + ligne.r.cle
+                        visible: ligne.r.genre === "rapport" && ligne.deplie; width: parent.width; spacing: 2; topPadding: 4
+                        Repeater {
+                            model: ligne.deplie ? (ligne.r.details || []) : []
+                            Texte { required property var modelData; width: parent.width; text: "• " + modelData; secondaire: true; font.pixelSize: 11
+                                    wrapMode: Text.Wrap; elide: Text.ElideNone }
+                        }
+                    }
                 }
                 // La commande, selon le genre du réglage
                 Row {
@@ -454,6 +469,10 @@ FloatingWindow {
                     // Action : un bouton qui ouvre sa fenêtre
                     Pastille { visible: ligne.r.genre === "action"; anchors.verticalCenter: parent.verticalCenter; petit: true
                                objectName: "nc-reglage-action-" + ligne.r.cle; texte: ligne.r.affiche; onClic: fen.lancerAction(ligne.r) }
+                    Pastille { visible: ligne.r.genre === "rapport"; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               objectName: "nc-rapport-bouton-" + ligne.r.cle
+                               texte: ligne.deplie ? Reglages.t("Masquer", "Hide") : ligne.r.affiche
+                               onClic: { liste.currentIndex = ligne.index; ligne.deplie = !ligne.deplie } }
                     // Raccourci : ses touches en touche de clavier, puis changer, désactiver / réactiver, retirer
                     Rectangle {
                         visible: ligne.r.genre === "raccourci"; anchors.verticalCenter: parent.verticalCenter

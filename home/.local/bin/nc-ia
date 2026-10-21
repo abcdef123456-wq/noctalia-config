@@ -1634,6 +1634,85 @@ def afficher_plan(plan):
         print("  ⨯ " + r)
 
 
+# ── Rapports de mise à jour (config : nc-maj ; système : nc-paquets) ─────────────────────────────────────────────
+# Après une mise à jour, l'IA (si elle est permise et joignable ; automatique, donc en pause en Économie sur batterie)
+# écrit un résumé facile à comprendre ; il apparaît en tête de « Mises à jour » dans la fenêtre des réglages, avec le
+# détail, et une notification y mène. Sans IA ni connexion : rien de plus que d'habitude.
+RAPPORTS = CACHE / "rapports"
+TITRES_RAPPORT = {"config": ("Ce qui a changé dans le bureau", "What changed in the desktop"),
+                  "systeme": ("Ce qui a changé dans le système", "What changed in the system")}
+
+
+def depot():
+    """Le dépôt noctalia-config de ce PC (noté par nc-maj dans ~/.config/nc/depot), ou None."""
+    try:
+        d = Path((CONFIG / "nc/depot").read_text(encoding="utf-8").strip())
+        return d if (d / ".git").exists() else None
+    except OSError:
+        return None
+
+
+def details_config(avant, apres):
+    d = depot()
+    if not d or not re.fullmatch(r"[0-9a-f]{7,40}", avant or "") or not re.fullmatch(r"[0-9a-fA-F]{7,40}|HEAD", apres or ""):
+        return []
+    r = subprocess.run(["git", "-C", str(d), "log", "--format=%s", f"{avant}..{apres}"], capture_output=True, text=True, timeout=10)
+    return [l.strip() for l in r.stdout.splitlines() if l.strip()][:60]
+
+
+def details_systeme(fichier):
+    try:
+        d = json.loads(Path(fichier).read_text())
+    except (OSError, ValueError):
+        return []
+    res = []
+    for x in d.get("paquets", [])[:200]:
+        v = f"{x.get('avant', '')} → {x.get('apres', '')}".strip(" →")
+        res.append(("★ " if x.get("important") else "") + f"{x.get('nom')} {v}".strip() + (f" ({x.get('source')})" if x.get("source") not in (None, "depot") else ""))
+    return res
+
+
+def rapport_maj(genre, args):
+    global FOND
+    FOND = True                                   # automatique : en pause en Économie sur batterie
+    details = details_config(*(args + ["", ""])[:2]) if genre == "config" else details_systeme(args[0] if args else "")
+    if not details or coupee() or not candidats("texte"):
+        return 0                                  # rien à résumer, IA coupée, en pause ou injoignable : comme d'habitude
+    if genre == "config":
+        consigne_r = T("Voici les messages des mises à jour qui viennent d'être installées sur le bureau de l'utilisateur "
+                       "(noctalia-config : Hyprland, île dynamique, réglages, IA…). Explique en 3 à 6 points très courts (une phrase "
+                       "chacun, raccourci en gras au besoin), en tutoyant, en français simple et sans jargon, ce qui change "
+                       "pour lui, ce qui se voit d'abord ; un point par nouveauté importante, les petites corrections "
+                       "regroupées en un seul point. Pas d'introduction.",
+                       "Here are the messages of the updates just installed on the user's desktop (noctalia-config: "
+                       "Hyprland, dynamic island, settings, AI…). Explain in 3 to 6 very short points, in plain English "
+                       "without jargon, what changes for them, what shows first; one point per important feature, small "
+                       "fixes grouped into one point.")
+    else:
+        consigne_r = T("Voici les paquets du système qui viennent d'être mis à jour (★ : important). Explique en 3 à 6 "
+                       "points très courts (une phrase chacun), en tutoyant, en français simple, sans introduction, ce qui compte : noyau, pilotes graphiques, Hyprland et le "
+                       "bureau, navigateur, gros logiciels ; dis s'il faut redémarrer ; ignore les bibliothèques sans "
+                       "intérêt pour l'utilisateur.",
+                       "Here are the system packages just updated (★: important). Explain in 3 to 6 very short points, in "
+                       "plain English, what matters: kernel, graphics drivers, Hyprland and the desktop, browser, big "
+                       "apps; say whether a restart is needed; ignore libraries of no interest to the user.")
+    try:
+        rep, ident = demander("\n".join(details), "texte", consigne_=consigne_r, sortie=lambda m: None)
+    except ErreurIA:
+        return 0
+    RAPPORTS.mkdir(parents=True, exist_ok=True)
+    titre = T(*TITRES_RAPPORT[genre])
+    f = RAPPORTS / f"{genre}.json"
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dict(genre=genre, date=int(time.time()), titre=titre, resume=rep.strip(), ia=nom(ident),
+                                   details=details, nombre=len(details)), ensure_ascii=False))
+    tmp.replace(f)
+    premier = next((l.strip(" -•*") for l in rep.splitlines() if l.strip(" -•*")), "")
+    notifier(titre, apercu(premier, 200), (T("Voir le rapport", "See the report"),
+                                           ["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglagesChercher", titre]))
+    return 0
+
+
 # ── Capture d'une zone ──────────────────────────────────────────────────────────────────────────────────────────
 def capture(question=""):
     if not (shutil.which("grim") and shutil.which("slurp")):
@@ -1913,6 +1992,10 @@ def main(a):
             return 0
         if c == "menu":
             return menu()
+        if c in ("rapport-maj", "update-report"):
+            if not a or a[0] not in TITRES_RAPPORT:
+                raise ErreurIA("nc-ia rapport-maj config AVANT APRES | systeme FICHIER.json")
+            return rapport_maj(a[0], a[1:])
         if c in ("organiser", "organize"):
             # Super + Maj + O : tous les bureaux ; Super + Ctrl + O (--bureau) : celui qui est affiché
             demande = T("Organise les fenêtres du bureau affiché : une meilleure disposition, sans les changer de bureau.",

@@ -2582,6 +2582,19 @@ def catalogue(vals):
         actions.append(dict(cle=cle_a, section=sec_ia, sectionNom=nom_section(sec_ia), nom=nom_a, genre="action", defaut="",
                             aide=aide_a, choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="",
                             affiche=T("Ouvrir…", "Open…"), modifie=False, groupe="", commande=cmd))
+    # Rapports de l'IA sur les dernières mises à jour (nc-ia rapport-maj) : en tête de « Mises à jour », le résumé et le détail
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path(HOME, ".cache")) / "nc/rapports"
+    for genre in ("systeme", "config"):
+        try:
+            d = json.loads((cache / f"{genre}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        quand = time.strftime("%d/%m/%Y" if not EN else "%b %d, %Y", time.localtime(d.get("date", 0)))
+        actions.append(dict(cle="rapport:" + genre, section="Mises à jour", sectionNom=nom_section("Mises à jour"),
+                            nom=f"{d.get('titre', '')} · {quand}", genre="rapport", defaut="",
+                            aide=str(d.get("resume", ""))[:3000], details=[str(x)[:300] for x in d.get("details", [])][:200],
+                            ia=d.get("ia", ""), choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="",
+                            affiche=T("Détails", "Details"), modifie=False, groupe=""))
     for a in actions:
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)

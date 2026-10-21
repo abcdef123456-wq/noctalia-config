@@ -68,6 +68,10 @@ if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "$(t "Déjà à jour" "Alre
 fi
 ./install.sh "$@"
 code=$?
+# Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
+if [ "$code" = 0 ] && [ "$avant" != "$(git rev-parse HEAD)" ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
+  setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$avant" "$(git rev-parse HEAD)" >/dev/null 2>&1 < /dev/null &
+fi
 # Bilan après la mise à jour : seulement ce qui cloche (rien de plus si tout va bien)
 if [ "$code" = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -x "$HOME/.local/bin/nc-diag" ]; then
   echo; "$HOME/.local/bin/nc-diag" court
