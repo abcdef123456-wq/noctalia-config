@@ -6,6 +6,9 @@
 #   nc-fenetre aller ADRESSE [BUREAU] va sur une fenêtre ; réduite, elle est d'abord ramenée (sur BUREAU, sinon le bureau
 #                                    affiché ; Spotlight, vue des fenêtres)
 #   nc-fenetre basculer ADRESSE      la masque, ou la ramène si elle l'est (barre : nc/fenetres)
+#   nc-fenetre outil TITRE           fenêtre-outil de l'île (réglages, cockpit, chat JARVIS) : sur un autre bureau ou
+#                                    masquée, ramenée sur le bureau affiché ; ici sans le focus, le prend ; ici et
+#                                    active, masquée (forme gardée : rangée ou libre) ; absente, code 3
 #   nc-fenetre fermer ADRESSE        la ferme
 #   nc-fenetre tout-masquer          masque toutes les fenêtres du bureau affiché
 #   nc-fenetre reduire-lot JSON      masque un lot avec ses géométries prises avant tout déplacement (vue)
@@ -25,7 +28,7 @@ eval_lua() { hyprctl dispatch "$1" >/dev/null 2>&1; }
 action="${1:-}"
 # Noms anglais des actions (nc-window minimize | restore | goto)
 case "$action" in minimize|hide) action=reduire ;; restore|show) action=restaurer ;; goto|go) action=aller ;; toggle) action=basculer ;;
-  close) action=fermer ;; hide-all) action=tout-masquer ;; show-all) action=tout-afficher ;; state) action=etat ;; watch) action=suivre ;; esac
+  close) action=fermer ;; tool) action=outil ;; hide-all) action=tout-masquer ;; show-all) action=tout-afficher ;; state) action=etat ;; watch) action=suivre ;; esac
 # La fermeture de la vue lance plusieurs masquages en parallèle. Ils partageaient le même fichier .tmp : une
 # écriture pouvait effacer la géométrie d'une autre fenêtre, qui réapparaissait mal placée à la prochaine ouverture.
 # Même verrou à la restauration, qui retire une entrée des mêmes fichiers.
@@ -175,6 +178,28 @@ while True:
             utile, debut = True, time.time()
 PY
     ;;
+  outil)
+    # Les fenêtres de l'île n'ont qu'un titre pour se distinguer (classe org.quickshell commune)
+    titre="${2:-}"; [ -n "$titre" ] || exit 2
+    a="$(clients | jq -r --arg t "$titre" '[.[] | select(.class == "org.quickshell" and .title == $t)][0].address // empty')"
+    [ -n "$a" ] || exit 3
+    ici="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .activeWorkspace.id' | head -1)"
+    [[ "$ici" =~ ^[1-9][0-9]*$ ]] || exit 1
+    la="$(clients | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.name')"
+    # Venu du clavier : le pointeur suit la fenêtre (remis à sa place, il rendrait le focus à la fenêtre d'en dessous
+    # quand « la fenêtre sous le pointeur devient active »)
+    export NC_FENETRE_POINTEUR=suivre
+    if [ "$la" = "$CACHE" ]; then exec "$0" aller "$a"; fi            # masquée : revient ici, en fondu
+    if [ "$la" = "$ici" ]; then
+      actif="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')"
+      if [ "$actif" = "$a" ]; then exec "$0" reduire "$a"; fi       # ici et active : rangée
+      exec "$0" aller "$a"                                         # ici, derrière : au premier plan
+    fi
+    # Sur un autre bureau : amenée sur le bureau affiché, en fondu, sans y emmener la vue
+    prop "$a" opacity 0; prop "$a" no_anim 1
+    eval_lua "hl.dsp.window.move({ workspace = $ici, follow = false, window = 'address:$a' })"
+    prop "$a" no_anim 0; prop "$a" opacity 1
+    exec "$0" aller "$a" ;;
   restaurer|aller)
     a="${2:-}"
     if [ -z "$a" ]; then                                  # la dernière réduite encore là
@@ -203,9 +228,11 @@ PY
     fi
     # Le focus sans déplacer le pointeur : Hyprland le met au milieu de la fenêtre, on le remet où il était
     # (clic dans la barre ou dans la vue des fenêtres)
-    read -r cx cy <<< "$(hyprctl cursorpos 2>/dev/null | tr -d ',')"
+    # (NC_FENETRE_POINTEUR=suivre : le pointeur reste là où Hyprland le met, dans la fenêtre — raccourci clavier)
+    cx=""; cy=""
+    [ "${NC_FENETRE_POINTEUR:-}" = suivre ] || read -r cx cy <<< "$(hyprctl cursorpos 2>/dev/null | tr -d ',')"
     eval_lua "hl.dsp.focus({ window = 'address:$a' })"
-    [ -n "${cy:-}" ] && eval_lua "hl.dsp.cursor.move({ x = $cx, y = $cy })" ;;
+    if [ -n "${cy:-}" ]; then eval_lua "hl.dsp.cursor.move({ x = $cx, y = $cy })"; fi ;;
   *)
     if [ "${NC_LANGUE:-fr}" = en ]; then
       cat <<'FIN'
@@ -215,6 +242,9 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
   nc-window restore [ADDRESS]    brings back the last minimized window (or that one)     Super + Ctrl + M
   nc-window goto ADDRESS         goes to a window; if minimized, it is restored first (Spotlight, window overview)
   nc-window toggle ADDRESS       hides it, or brings it back if hidden (bar: nc/fenetres)
+  nc-window tool TITLE           island tool window (settings, JARVIS dashboard or chat): on another workspace or
+                                 hidden, brought to the visible workspace; here but unfocused, focused; here and
+                                 active, hidden (its shape is kept: tiled or floating); absent, exit code 3
   nc-window close ADDRESS        closes it
   nc-window hide-all             hides every window of the visible workspace
   nc-window show-all             brings every hidden window back to the visible workspace
@@ -223,6 +253,6 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
 A minimized window activated another way (dock, Alt + Tab) also comes back on its own (nc/automatismes.lua).
 FIN
     else
-      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     fi ;;
 esac

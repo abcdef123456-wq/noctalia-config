@@ -94,8 +94,10 @@ FloatingWindow {
     Shortcut {
         sequence: "Escape"
         enabled: !!fen.attente || fen.page !== "chat" || !pageChargee.item || !pageChargee.item.propositionsVisibles
-        onActivated: { if (fen.attente) fen.attente = null; else fen.close() }
+        onActivated: { if (fen.ileOuverte) fen.fermerIle(); else if (fen.attente) fen.attente = null; else fen.close() }
     }
+    property bool ileOuverte: false                  // l'île est ouverte (shell.qml) : Échap la ferme d'abord
+    signal fermerIle()
 
     component Note: Texte { width: parent.width; wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText; secondaire: true; font.pixelSize: 13 }
     component Section: Texte { width: parent.width; font.pixelSize: 17; font.weight: Font.Bold; textFormat: Text.PlainText }

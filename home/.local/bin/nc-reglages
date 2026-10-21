@@ -7,7 +7,10 @@
   nc-reglages assistant verifier  tester la connexion distante (réseau, clé, TLS, runner)
   nc-reglages fenetre             la fenêtre graphique des réglages (île ; aussi Super + Alt + , et l'appli Réglages)
   nc-reglages liste               tous les réglages et leur valeur
-  nc-reglages catalogue           les réglages en JSON (ce que lit la fenêtre graphique)
+  nc-reglages catalogue           les réglages et les raccourcis en JSON (ce que lit la fenêtre graphique)
+  nc-reglages raccourci JSON      un changement de raccourci de la fenêtre graphique (changer, desactiver, reactiver,
+                                  origine, retirer)
+  nc-reglages capture [fin]       Hyprland sans ses raccourcis le temps de taper une combinaison (20 s au plus), puis rendu
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
@@ -2199,6 +2202,49 @@ def tui(section=0):
 
 
 # ── Ligne de commande ───────────────────────────────────────────────────────────────────────────────────────────
+def catalogue_raccourcis():
+    """Les raccourcis (section Raccourcis du terminal) en lignes de catalogue, genre « raccourci » ; [] sans Hyprland."""
+    try:
+        lignes = raccourcis()
+    except Exception:
+        return []
+    res, groupe = [], ""
+    for l in lignes:
+        if l["genre"] == "titre":
+            groupe = l["nom"]
+            continue
+        if l["genre"] != "raccourci":
+            continue
+        t = touches_de(l)
+        res.append(dict(cle="raccourci:" + ",".join(l["ids"]), section="Raccourcis", sectionNom=nom_section("Raccourcis"),
+                        nom=l["nom"], genre="raccourci", defaut="", aide=groupe, choix=[], mini=0, maxi=0, pas=1, unite="",
+                        zero="", valeur=t, affiche=t, modifie=bool(l["change"] or l["desactive"]), groupe="",
+                        ids=l["ids"], origs=l["origs"], mien=(l["mien"][1] if l["mien"] else ""),
+                        desactive=bool(l["desactive"]), change=bool(l["change"]),
+                        modifiable=len(l["ids"]) == 1 and not l["desactive"] and bool(rc.modifiable(l["ids"][0]))))
+    return res
+
+
+def action_raccourci(d):
+    """Un changement de raccourci venu de la fenêtre graphique : {action, ids, origs, touches, nom, mien} ; message."""
+    global rc
+    if rc is None:
+        rc = charger("ncraccourci", "nc-raccourci")
+    a = d.get("action")
+    ids = [str(i) for i in d.get("ids") or []]
+    if a == "changer" and len(ids) == 1 and isinstance(d.get("touches"), str):
+        return rc.changer_id(ids[0], d["touches"])
+    if a == "desactiver" and ids:
+        return rc.desactiver_ids(ids, str(d.get("nom") or ""))
+    if a == "reactiver" and ids:
+        return rc.retablir_ids(ids)
+    if a == "origine" and d.get("origs"):
+        return rc.retablir_ids([str(i) for i in d["origs"]])
+    if a == "retirer" and isinstance(d.get("mien"), str) and d["mien"]:
+        return rc.retirer_ajout(d["mien"])
+    raise ValueError(T("action de raccourci invalide", "invalid shortcut action"))
+
+
 def catalogue(vals):
     """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
     res = []
@@ -2208,7 +2254,7 @@ def catalogue(vals):
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
                         mini=r.mini, maxi=r.maxi, pas=r.pas, unite=r.unite, zero=r.zero, valeur=v, affiche=r.montrer(v),
                         modifie=r.cle in vals, groupe=r.groupe))
-    return res
+    return res + catalogue_raccourcis()
 
 
 def cli(a):
@@ -2233,6 +2279,26 @@ def cli(a):
     if a[0] in ("catalogue", "catalog"):
         # Tout ce que la fenêtre graphique des réglages (île, Parametres.qml) a besoin de savoir, en JSON
         print(json.dumps(catalogue(vals), ensure_ascii=False))
+        return
+    if a[0] in ("raccourci", "shortcut") and len(a) == 2:
+        # Fenêtre graphique : un changement de raccourci, en JSON (jamais passé à un shell)
+        try:
+            d = json.loads(a[1])
+            if not isinstance(d, dict):
+                raise ValueError("JSON")
+            print(action_raccourci(d))
+        except (ValueError, rc.Refus if rc else ValueError) as e:
+            sys.exit(T(f"nc-reglages : {e}", f"nc-settings: {e}"))
+        return
+    if a[0] in ("capture", "capturer"):
+        # Fenêtre graphique : Hyprland sans ses raccourcis le temps de taper une combinaison (20 s au plus) ; « fin » rend
+        if len(a) == 2 and a[1] in ("fin", "end"):
+            subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.submap('reset'))"], capture_output=True)
+        else:
+            subprocess.run(["hyprctl", "eval",
+                            "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if hl.get_current_submap() == 'nc-capture' "
+                            "then hl.dispatch(hl.dsp.submap('reset')) end end, { timeout = 20000, type = 'oneshot' })"],
+                           capture_output=True)
         return
     if a[0] in ("fenetre", "fenêtre", "window", "gui"):
         sys.exit(subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True).returncode)

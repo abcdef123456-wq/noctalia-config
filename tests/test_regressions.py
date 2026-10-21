@@ -37,7 +37,10 @@ elif cmd.startswith('dispatch'):
    elif c['workspace']['id']>0: c.update(at=[0,0],size=[1500,900])
   if m!='special:reduites' and d.get('fail_query_after_restore'): d['clients_unavailable']=True
   p.write_text(json.dumps(d))
+ elif 'focus({' in cmd and 'address:' in cmd:
+  d['active']=re.search("address:(0x[0-9a-fA-F]+)",cmd)[1]; d.setdefault('focus',[]).append(d['active']); p.write_text(json.dumps(d))
 elif cmd=='cursorpos': print('12, 34')
+elif cmd=='activewindow -j': print(json.dumps(next((c for c in d['clients'] if c['address']==d.get('active')),{})))
 else: sys.exit(1)
 '''
 
@@ -61,6 +64,34 @@ class Fenetres(unittest.TestCase):
 
     def write_state(self, fail=()):
         self.state.write_text(json.dumps(dict(clients=self.original, fail=fail)))
+
+    def test_outil_ramene_ici_met_devant_puis_range(self):
+        """Le raccourci d'une fenêtre-outil de l'île : ailleurs, elle vient ici ; ici derrière, devant ; ici active, rangée ;
+        rangée, elle revient ici ; une fenêtre d'une autre appli au même titre est ignorée."""
+        outil = dict(address="0xa1", at=[10, 52], size=[1580, 938], workspace=dict(id=3, name="3"), monitor=0, floating=True,
+                     title="Réglages du bureau", **{"class": "org.quickshell"})
+        intrus = dict(address="0xb2", at=[0, 0], size=[100, 100], workspace=dict(id=1, name="1"), monitor=0, floating=False,
+                      title="Réglages du bureau", **{"class": "firefox"})
+        self.original = [*self.original, intrus, outil]
+        self.write_state()
+        def etat():
+            return json.loads(self.state.read_text())
+        def ou():
+            return next(c for c in etat()["clients"] if c["address"] == "0xa1")["workspace"]["name"]
+        r = self.run_window("outil", "Réglages du bureau")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(ou(), "1", "sur un autre bureau : amenée sur le bureau affiché")
+        self.assertEqual(etat().get("active"), "0xa1", "et active")
+        d = etat(); d["active"] = "0x1"; self.state.write_text(json.dumps(d))
+        self.assertEqual(self.run_window("outil", "Réglages du bureau").returncode, 0)
+        self.assertEqual((ou(), etat().get("active")), ("1", "0xa1"), "ici mais derrière : mise au premier plan, pas rangée")
+        self.assertEqual(self.run_window("outil", "Réglages du bureau").returncode, 0)
+        self.assertEqual(ou(), "special:reduites", "ici et active : rangée")
+        self.assertEqual(self.run_window("outil", "Réglages du bureau").returncode, 0)
+        self.assertEqual(ou(), "1", "rangée : revient sur le bureau affiché")
+        self.assertEqual(next(c for c in etat()["clients"] if c["address"] == "0xb2")["workspace"]["name"], "1", "l'intrus n'a pas bougé")
+        self.assertEqual(self.run_window("outil", "Absente").returncode, 3)
+        self.assertEqual(self.run_window("outil").returncode, 2)
 
     def run_window(self, *args):
         return subprocess.run(["bash", str(BIN / "nc-fenetre"), *args], env=self.env,

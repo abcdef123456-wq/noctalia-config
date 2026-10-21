@@ -9,6 +9,10 @@
 // Tout en haut de la liste, ↑ monte sur la rangée des onglets : ← → y changent d'onglet, ↓ redescend dans la liste,
 // ↑ encore va à la recherche (dont ↓ ramène aux onglets).
 // Même cadrage que le cockpit : nc/automatismes.lua la place à l'ouverture.
+// Section Raccourcis : tous les raccourcis clavier (ceux de la config et les tiens), cherchables par nom ou par touches ;
+// Entrée sur l'un d'eux attend la nouvelle combinaison (Hyprland coupe ses raccourcis le temps de la taper, comme dans
+// le terminal), Suppr le désactive (ou retire l'un des tiens), r le remet comme dans la config.
+// Échap avec l'île ouverte ferme l'île, pas la fenêtre (ileOuverte et fermerIle, branchés par shell.qml).
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -25,13 +29,22 @@ FloatingWindow {
     property string recherche: ""
     property string message: ""
     property bool erreur: false
-    property var file: []                           // écritures en attente : [[cle, valeur]]
+    property var file: []                           // écritures en attente : des commandes nc-reglages, une par une
+    property var capture: null                      // le raccourci dont on attend les nouvelles touches
+    property string captureMessage: ""
+    property bool ileOuverte: false                 // l'île est ouverte (shell.qml) : Échap la ferme d'abord
+    signal fermerIle()
     property bool relire: false                     // une relecture demandée pendant qu'une autre tournait
     readonly property bool enCours: lecture.running || ecriture.running || relire || file.length > 0
     readonly property var sections: { var s = []; catalogue.forEach(r => { if (s.indexOf(r.sectionNom) < 0) s.push(r.sectionNom) }); return s }
+    // Recherche : chaque mot doit se trouver (dans le nom, l'aide, la clé, la section ou la valeur) ; espaces et « + »
+    // séparent les mots, donc « super a », « super+a » et « Super + A » trouvent le même raccourci
     readonly property var visibles: {
-        var q = normaliser(recherche.trim())
-        if (q) return catalogue.filter(r => normaliser(r.nom + " " + r.aide + " " + r.cle + " " + r.sectionNom + " " + r.affiche).indexOf(q) >= 0)
+        var mots = normaliser(recherche).split(/[\s+]+/).filter(m => m !== "")
+        if (mots.length) return catalogue.filter(r => {
+            var t = normaliser(r.nom + " " + r.aide + " " + r.cle + " " + r.sectionNom + " " + r.affiche)
+            return mots.every(m => t.indexOf(m) >= 0)
+        })
         return catalogue.filter(r => r.sectionNom === section)
     }
     function normaliser(t) { return String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") }
@@ -45,19 +58,74 @@ FloatingWindow {
     // Relecture du catalogue ; si une lecture tourne déjà (lancée avant la dernière écriture), une autre suit
     function charger() { if (lecture.running) relire = true; else lecture.running = true }
     // Une valeur : nc-reglages set (ou reset pour revenir à la config) ; les demandes se suivent une par une
-    function regler(cle, valeur) { file.push([cle, valeur]); file = file; suivant() }
-    function remettre(cle) { regler(cle, null) }
+    function commande(args) { file.push([bin + "nc-reglages"].concat(args)); file = file; suivant() }
+    function regler(cle, valeur) { commande(["set", cle, String(valeur)]) }
+    function remettre(cle) { commande(["reset", cle]) }
     function suivant() {
         if (ecriture.running || !file.length) return
-        var d = file.shift(); file = file
-        ecriture.command = d[1] === null ? [bin + "nc-reglages", "reset", d[0]] : [bin + "nc-reglages", "set", d[0], String(d[1])]
+        ecriture.command = file.shift(); file = file
         ecriture.running = true
+    }
+    // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — nc-reglages raccourci JSON
+    function raccourci(r, action, touches) {
+        commande(["raccourci", JSON.stringify({action: action, ids: r.ids, origs: r.origs, nom: r.nom, mien: r.mien, touches: touches || ""})])
+    }
+    // r ou ↺ : la valeur de la config (réglage), ou le raccourci d'origine / réactivé
+    function remettreLigne(r) {
+        if (!r || !r.modifie) return
+        if (r.genre !== "raccourci") remettre(r.cle)
+        else if (r.desactive) raccourci(r, "reactiver")
+        else if (r.mien === "") raccourci(r, "origine")
+    }
+    // Suppr : désactiver un raccourci de la config, retirer l'un des tiens
+    function supprimerLigne(r) {
+        if (!r || r.genre !== "raccourci") return
+        if (r.mien !== "") raccourci(r, "retirer")
+        else if (!r.desactive) raccourci(r, "desactiver")
+    }
+    // Capture des nouvelles touches d'un raccourci : Hyprland en mode « nc-capture » (sans raccourcis, 20 s au plus)
+    function capturer(r) {
+        if (!r || !r.modifiable) return
+        capture = r; captureMessage = ""
+        Quickshell.execDetached([bin + "nc-reglages", "capture"])
+        zoneCapture.forceActiveFocus()
+    }
+    function finCapture(touches) {
+        var r = capture
+        capture = null
+        Quickshell.execDetached([bin + "nc-reglages", "capture", "fin"])
+        liste.forceActiveFocus()
+        if (r && touches) raccourci(r, "changer", touches)
+    }
+    // Une touche du clavier -> « Super+Maj+T » (noms de nc-raccourci) ; "" pour un modificateur seul ; "annuler" pour Échap
+    function combinaison(event) {
+        var k = event.key
+        if ([Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_Super_L, Qt.Key_Super_R, Qt.Key_AltGr, Qt.Key_CapsLock].indexOf(k) >= 0) return ""
+        var mods = []
+        if (event.modifiers & Qt.MetaModifier) mods.push("Super")
+        if (event.modifiers & Qt.ControlModifier) mods.push("Ctrl")
+        if (event.modifiers & Qt.AltModifier) mods.push("Alt")
+        if (event.modifiers & Qt.ShiftModifier) mods.push("Maj")
+        if (k === Qt.Key_Escape && !mods.length) return "annuler"
+        var t = "", sc = event.nativeScanCode
+        var noms = {}
+        noms[Qt.Key_Return] = "Entrée"; noms[Qt.Key_Enter] = "Entrée"; noms[Qt.Key_Space] = "Espace"; noms[Qt.Key_Tab] = "Tab"
+        noms[Qt.Key_Escape] = "Échap"; noms[Qt.Key_Print] = "Impr"; noms[Qt.Key_Delete] = "Suppr"
+        noms[Qt.Key_Left] = "gauche"; noms[Qt.Key_Right] = "droite"; noms[Qt.Key_Up] = "haut"; noms[Qt.Key_Down] = "bas"
+        if (sc >= 10 && sc <= 19) t = String((sc - 9) % 10)           // rangée des chiffres, quelle que soit la disposition
+        else if (k >= Qt.Key_A && k <= Qt.Key_Z) t = String.fromCharCode(k)
+        else if (k >= Qt.Key_0 && k <= Qt.Key_9) t = String.fromCharCode(k)
+        else if (k >= Qt.Key_F1 && k <= Qt.Key_F12) t = "F" + (k - Qt.Key_F1 + 1)
+        else t = noms[k] || ""
+        if (!t) return "?"
+        if (!mods.length && !/^F\d+$/.test(t)) return "?"
+        return mods.concat([t]).join("+")
     }
     function reglage(cle) { for (var i = 0; i < catalogue.length; i++) if (catalogue[i].cle === cle) return catalogue[i]; return null }
     function borner(r, v) { v = Math.round(v / r.pas) * r.pas; return Math.max(r.mini, Math.min(r.maxi, v)) }
     // ← → : la valeur d'après (d = 1) ou d'avant (d = -1), selon le genre du réglage
     function changer(r, d) {
-        if (!r) return
+        if (!r || r.genre === "raccourci") return
         if (r.genre === "ouinon") regler(r.cle, r.valeur === "oui" ? "non" : "oui")
         else if (r.genre === "choix" || r.genre === "hz") {
             var c = r.choix, i = 0
@@ -68,6 +136,7 @@ FloatingWindow {
     // Entrée ou Espace : bascule, choix suivant, ou saisie du texte
     function basculer(r) {
         if (!r) return
+        if (r.genre === "raccourci") { if (r.desactive) raccourci(r, "reactiver"); else capturer(r); return }
         if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
         else changer(r, 1)
     }
@@ -113,8 +182,12 @@ FloatingWindow {
     }
     Timer { id: effaceMessage; interval: 6000; running: fen.message !== "" && !fen.erreur; onTriggered: fen.message = "" }
 
-    Shortcut { sequence: "Escape"; onActivated: { if (fen.recherche !== "") { fen.recherche = ""; champRecherche.text = "" } else fen.close() } }
-    Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; onActivated: { champRecherche.forceActiveFocus(); champRecherche.selectAll() } }
+    Shortcut {
+        sequence: "Escape"; enabled: !fen.capture
+        onActivated: { if (fen.ileOuverte) fen.fermerIle(); else if (fen.recherche !== "") { fen.recherche = ""; champRecherche.text = "" } else fen.close() }
+    }
+    Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; enabled: !fen.capture; onActivated: { champRecherche.forceActiveFocus(); champRecherche.selectAll() } }
+    onVisibleChanged: if (!visible && capture) finCapture("")
 
     component Pastille: Rectangle {
         id: pastille
@@ -235,7 +308,8 @@ FloatingWindow {
                 else if (event.key === Qt.Key_End) currentIndex = count - 1
                 else if (event.key === Qt.Key_PageDown) currentIndex = Math.min(count - 1, currentIndex + 8)
                 else if (event.key === Qt.Key_PageUp) currentIndex = Math.max(0, currentIndex - 8)
-                else if ((event.key === Qt.Key_R || event.key === Qt.Key_Delete) && !(event.modifiers & Qt.ControlModifier)) { if (r && r.modifie) fen.remettre(r.cle) }
+                else if (event.key === Qt.Key_R && !(event.modifiers & Qt.ControlModifier)) fen.remettreLigne(r)
+                else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) { if (r && r.genre === "raccourci") fen.supprimerLigne(r); else fen.remettreLigne(r) }
                 else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) && fen.lettre(event) !== "") {
                     // Une lettre ou un chiffre : la recherche commence
                     champRecherche.text = fen.lettre(event); champRecherche.forceActiveFocus(); champRecherche.cursorPosition = 1
@@ -340,10 +414,65 @@ FloatingWindow {
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }
                         }
                     }
-                    // Revenir à la valeur de la config
-                    AssistantCommande { rond: true; width: 30; height: 30; icone: "restart_alt"; visible: ligne.r.modifie; aide: Reglages.t("Valeur de la config", "Config value"); onClic: fen.remettre(ligne.r.cle) }
+                    // Raccourci : ses touches en touche de clavier, puis changer, désactiver / réactiver, retirer
+                    Rectangle {
+                        visible: ligne.r.genre === "raccourci"; anchors.verticalCenter: parent.verticalCenter
+                        width: touches.implicitWidth + 24; height: 32; radius: 9; color: Couleurs.gris2
+                        border.width: 1; border.color: Couleurs.gris4
+                        opacity: ligne.r.desactive ? 0.5 : 1
+                        Texte { id: touches; anchors.centerIn: parent; text: ligne.r.affiche; font.pixelSize: 13; font.weight: Font.DemiBold
+                                font.strikeout: !!ligne.r.desactive }
+                    }
+                    Pastille { visible: ligne.r.genre === "raccourci" && !!ligne.r.modifiable; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               texte: Reglages.t("Changer", "Change"); onClic: { liste.currentIndex = ligne.index; fen.capturer(ligne.r) } }
+                    Pastille { visible: ligne.r.genre === "raccourci" && ligne.r.mien === ""; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               texte: ligne.r.desactive ? Reglages.t("Réactiver", "Turn on") : Reglages.t("Désactiver", "Disable")
+                               onClic: { if (ligne.r.desactive) fen.raccourci(ligne.r, "reactiver"); else fen.raccourci(ligne.r, "desactiver") } }
+                    Pastille { visible: ligne.r.genre === "raccourci" && ligne.r.mien !== ""; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               texte: Reglages.t("Retirer", "Remove"); onClic: fen.raccourci(ligne.r, "retirer") }
+                    // Revenir à la valeur de la config (ou aux touches d'origine d'un raccourci)
+                    AssistantCommande { rond: true; width: 30; height: 30; icone: "restart_alt"
+                                        visible: ligne.r.modifie && !(ligne.r.genre === "raccourci" && (ligne.r.desactive || ligne.r.mien !== ""))
+                                        aide: ligne.r.genre === "raccourci" ? Reglages.t("Touches d'origine", "Original keys") : Reglages.t("Valeur de la config", "Config value")
+                                        onClic: fen.remettreLigne(ligne.r) }
                 }
             }
+        }
+
+        // ── Capture des nouvelles touches d'un raccourci ──
+        Rectangle {
+            anchors.fill: parent; visible: !!fen.capture; color: Qt.rgba(0, 0, 0, 0.55); z: 20
+            MouseArea { anchors.fill: parent; onClicked: fen.finCapture("") }
+            Rectangle {
+                anchors.centerIn: parent; width: Math.min(560, parent.width - 80); height: colCapture.implicitHeight + 48; radius: 22
+                color: Couleurs.carte; border.width: 1.5; border.color: Couleurs.accent
+                Column {
+                    id: colCapture
+                    anchors.centerIn: parent; width: parent.width - 48; spacing: 12
+                    Ico { anchors.horizontalCenter: parent.horizontalCenter; nom: "keyboard"; taille: 34; color: Couleurs.accent }
+                    Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; font.pixelSize: 16; font.weight: Font.Bold
+                            text: fen.capture ? fen.capture.nom : "" }
+                    Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; secondaire: true
+                            text: Reglages.t("Appuie sur la nouvelle combinaison (avec Super, Ctrl ou Alt). Échap : annuler.",
+                                             "Press the new combination (with Super, Ctrl or Alt). Esc: cancel.") }
+                    Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; visible: fen.captureMessage !== ""; color: Couleurs.rouge; text: fen.captureMessage }
+                }
+            }
+            Item {
+                id: zoneCapture
+                objectName: "nc-reglages-capture"
+                anchors.fill: parent
+                Keys.onPressed: event => {
+                    event.accepted = true
+                    var t = fen.combinaison(event)
+                    if (t === "") return
+                    if (t === "annuler") { fen.finCapture(""); return }
+                    if (t === "?") { fen.captureMessage = Reglages.t("Ajoute au moins Super, Ctrl ou Alt (Échap pour annuler).", "Add at least Super, Ctrl or Alt (Esc to cancel)."); return }
+                    fen.finCapture(t)
+                }
+                Keys.onShortcutOverride: event => { event.accepted = true }
+            }
+            Timer { running: !!fen.capture; interval: 20000; onTriggered: fen.finCapture("") }   // comme le retour automatique de Hyprland
         }
 
         // ── Pied : message de la dernière action ──
@@ -356,7 +485,10 @@ FloatingWindow {
                 Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; elide: Text.ElideRight; width: pied.width - 30
                         color: fen.erreur ? Couleurs.rouge : Couleurs.texteSec
                         text: fen.enCours && !fen.message ? Reglages.t("Application…", "Applying…")
-                            : (fen.message || (rangee.activeFocus ? Reglages.t("← → changer d'onglet   ↓ Entrée : les réglages   ↑ chercher   une lettre : chercher   Échap fermer",
+                            : (fen.message || (fen.courant && fen.courant.genre === "raccourci" && liste.activeFocus
+                                ? Reglages.t("↑ ↓ choisir   Entrée nouvelles touches (ou réactiver)   Suppr désactiver / retirer   r touches d'origine   une lettre : chercher   Échap fermer",
+                                             "↑ ↓ choose   Enter new keys (or turn on)   Del disable / remove   r original keys   a letter: search   Esc close") :
+                                rangee.activeFocus ? Reglages.t("← → changer d'onglet   ↓ Entrée : les réglages   ↑ chercher   une lettre : chercher   Échap fermer",
                                                                             "← → switch tab   ↓ Enter: the settings   ↑ search   a letter: search   Esc close")
                                                 : Reglages.t("↑ ↓ choisir (tout en haut : les onglets)   ← → changer   Entrée basculer   Tab section   r valeur de la config   une lettre : chercher   Échap fermer",
                                                              "↑ ↓ choose (at the top: the tabs)   ← → change   Enter toggle   Tab section   r config value   a letter: search   Esc close"))) }

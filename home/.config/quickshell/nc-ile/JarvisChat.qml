@@ -37,7 +37,9 @@ FloatingWindow {
         target: AssistantEtat
         function onEnCoursChanged() { if (!AssistantEtat.enCours && fen.reinit) { fen.reinit = false; if (!AssistantEtat.erreur) fen.vider() } }
     }
-    Shortcut { sequence: "Escape"; enabled: fen.visible && !chat.propositionsVisibles; onActivated: fen.close() }
+    Shortcut { sequence: "Escape"; enabled: fen.visible && !chat.propositionsVisibles; onActivated: { if (fen.ileOuverte) fen.fermerIle(); else fen.close() } }
+    property bool ileOuverte: false                  // l'île est ouverte (shell.qml) : Échap la ferme d'abord
+    signal fermerIle()
 
     Item {
         anchors.fill: parent

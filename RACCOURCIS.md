@@ -14,14 +14,14 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
-| `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) |
-| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) |
+| `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
+| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `W` | Choisir le fond d'écran |
 | `Super` + `C` | Centre de contrôle |
 | `Super` + `,` | Réglages de la barre |
-| `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) |
+| `Super` + `Alt` + `,` | Réglages du bureau (fenêtre, avec recherche) ; déjà ouverte : la ramène, la met devant, ou la masque |
 | `Super` + `/` | Afficher cette fiche |
 | `Super` + `P` | Capture d'une zone de l'écran |
 | `Super` + `` ` `` | Terminal déroulant (sous Échap) |

@@ -33,6 +33,26 @@ ShellRoot {
     // Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : une fenêtre classique, créée à la demande
     property var reglagesFenetre: null
     property Component composantReglages: null
+    // Raccourci d'une fenêtre-outil déjà ouverte (réglages, cockpit, chat JARVIS) : nc-fenetre outil décide — sur un
+    // autre bureau ou masquée, elle vient sur le bureau affiché ; ici derrière, elle passe devant ; ici et active, elle
+    // est masquée comme avec Super + H (rangée ou libre, elle garde sa forme). Introuvable dans Hyprland : fermée.
+    Process {
+        id: outil
+        property var fenetre: null
+        onExited: (code, status) => { if (code === 3 && outil.fenetre) outil.fenetre.close(); outil.fenetre = null }
+    }
+    // Une fenêtre-outil sait si l'île est ouverte : Échap ferme alors l'île, pas la fenêtre
+    function brancherIle(fenetre) {
+        if (!fenetre) return
+        fenetre.ileOuverte = Qt.binding(() => Etat.ecranOuvert !== "")
+        fenetre.fermerIle.connect(() => { Etat.fermer(); Etat.projection = false })
+    }
+    function basculerOutil(fenetre, titre) {
+        if (outil.running) return
+        outil.fenetre = fenetre
+        outil.command = [Quickshell.env("HOME") + "/.local/bin/nc-fenetre", "outil", titre]
+        outil.running = true
+    }
     Connections {
         target: Etat
         function onVueFenetresChanged() {
@@ -108,9 +128,9 @@ ShellRoot {
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
         }
-        // Cockpit : le même raccourci le referme s'il est ouvert
+        // Cockpit : déjà ouvert, le même raccourci le ramène ici, le met devant ou le range (basculerOutil)
         function jarvis(): void {
-            if (racine.jarvisFenetre && racine.jarvisFenetre.visible) { racine.jarvisFenetre.close(); return }
+            if (racine.jarvisFenetre && racine.jarvisFenetre.visible) { racine.basculerOutil(racine.jarvisFenetre, "JARVIS"); return }
             Etat.fermer()
             if (!racine.jarvisFenetre) {
                 if (!racine.composantJarvis) racine.composantJarvis = Qt.createComponent("Jarvis.qml")
@@ -119,15 +139,17 @@ ShellRoot {
                     return
                 }
                 racine.jarvisFenetre = racine.composantJarvis.createObject(racine)
+                racine.brancherIle(racine.jarvisFenetre)
             }
             if (racine.jarvisFenetre) {
                 racine.jarvisFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
             }
         }
         function jarvisFermer(): void { if (racine.jarvisFenetre) racine.jarvisFenetre.close() }
-        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, le même raccourci la referme
+        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, le même raccourci la ramène ici, la met devant ou la
+        // range (basculerOutil : la conversation reste)
         function jarvisChat(): void {
-            if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible) { racine.jarvisChatFenetre.close(); return }
+            if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible) { racine.basculerOutil(racine.jarvisChatFenetre, "JARVIS Chat"); return }
             if (!racine.jarvisChatFenetre) {
                 if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
                 if (racine.composantJarvisChat.status !== Component.Ready) {
@@ -135,13 +157,14 @@ ShellRoot {
                     return
                 }
                 racine.jarvisChatFenetre = racine.composantJarvisChat.createObject(racine)
+                racine.brancherIle(racine.jarvisChatFenetre)
             }
             if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
         function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
-        // Réglages en fenêtre : le même appel la referme si elle est ouverte
+        // Réglages en fenêtre : déjà ouverte, le même appel la ramène ici, la met devant ou la range (basculerOutil)
         function reglages(): void {
-            if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.reglagesFenetre.close(); return }
+            if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.basculerOutil(racine.reglagesFenetre, "Réglages du bureau"); return }
             if (!racine.reglagesFenetre) {
                 if (!racine.composantReglages) racine.composantReglages = Qt.createComponent("Parametres.qml")
                 if (racine.composantReglages.status !== Component.Ready) {
@@ -149,6 +172,7 @@ ShellRoot {
                     return
                 }
                 racine.reglagesFenetre = racine.composantReglages.createObject(racine)
+                racine.brancherIle(racine.reglagesFenetre)
             }
             if (racine.reglagesFenetre) racine.reglagesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }

@@ -240,7 +240,7 @@ Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 
 | Fichier | Pour |
 |---|---|
-| `~/.config/nc/reglages.conf`, `~/.config/nc/raccourcis.conf` | tes réglages (`nc-reglages`, ou la fenêtre avec recherche : **Super + Alt + ,**, `nc-reglages fenetre`, appli « Réglages du bureau ») et tes raccourcis (`nc-raccourci`) |
+| `~/.config/nc/reglages.conf`, `~/.config/nc/raccourcis.conf` | tes réglages (`nc-reglages`, ou la fenêtre avec recherche : **Super + Alt + ,**, `nc-reglages fenetre`, appli « Réglages du bureau ») et tes raccourcis (`nc-raccourci`, ou la section Raccourcis de cette fenêtre : Entrée puis la nouvelle combinaison) |
 | `~/.config/hypr/perso.lua` | règles de fenêtres, écrans, tout réglage Hyprland en plus (format Lua de Hyprland) |
 | `~/.zshrc.perso` | tes alias et variables du terminal |
 | `~/.config/kitty/perso.conf` | tes réglages de kitty |

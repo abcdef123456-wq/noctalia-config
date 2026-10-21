@@ -8,7 +8,9 @@ l’assistant. Les appels passent par `nc-assistant` / `nc-jarvis`, jamais direc
 
 - Île : Super + C, bulle de conversation ; bouton d’agrandissement pour le cockpit.
 - Chat compact : **Super + Alt + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat ») ; le
-  même raccourci referme la fenêtre ouverte (pareil pour le cockpit).
+  même raccourci, fenêtre déjà ouverte, la ramène sur ton bureau si elle est ailleurs (ou masquée), la met devant si
+  elle est derrière, et la masque si elle est active ; masquée, elle garde sa forme (rangée avec Super + V ou libre) et
+  sa conversation. Pareil pour le cockpit et la fenêtre des réglages.
 - Cockpit : **Super + Alt + Maj + A**, application **JARVIS**, `nc-jarvis tableau`, le bouton d’agrandissement
   de la fenêtre de chat ou de la page de l’île.
 - Retour au chat de l’île : `nc-jarvis ile`. F11 bascule plein écran/fenêtre ; Échap ferme le cockpit.
@@ -37,8 +39,8 @@ place à l’ouverture à la taille d’une fenêtre rangée seule sous la barre
 fenêtres ; une fenêtre maximisée par Hyprland n’aurait pas les marges). Fond uni ; en haut l’emblème, le titre et l’état de la connexion (commandes rondes à
 droite : actualiser, continuer dans l’île, fermer), puis les pages en pastilles (icône et nom court) et le contenu en
 colonne centrée ; boutons et champs en pastilles, cartes aux coins arrondis (`Couleurs`, `Texte`, `Ico`,
-`AssistantCommande`). Super + F la passe en plein écran et la rend, comme toute fenêtre. Le même raccourci referme le
-cockpit. Les pages et leurs actions sont celles d’avant.
+`AssistantCommande`). Super + F la passe en plein écran et la rend, comme toute fenêtre. Super + V la range parmi tes
+fenêtres comme les autres ; le même raccourci la ramène, la met devant ou la masque (voir plus haut). Les pages et leurs actions sont celles d’avant.
 
 ## Fenêtre de chat
 
