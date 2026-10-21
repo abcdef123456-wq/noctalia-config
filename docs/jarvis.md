@@ -7,7 +7,8 @@ l’assistant. Les appels passent par `nc-assistant` / `nc-jarvis`, jamais direc
 ## Accès
 
 - Île : Super + C, bulle de conversation ; bouton d’agrandissement pour le cockpit.
-- Chat compact : **Super + Alt + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat »).
+- Chat compact : **Super + Alt + A**, application **JARVIS Chat**, ou `nc-jarvis chat` (voir « Fenêtre de chat ») ; le
+  même raccourci referme la fenêtre ouverte (pareil pour le cockpit).
 - Cockpit : **Super + Alt + Maj + A**, application **JARVIS**, `nc-jarvis tableau`, le bouton d’agrandissement
   de la fenêtre de chat ou de la page de l’île.
 - Retour au chat de l’île : `nc-jarvis ile`. F11 bascule plein écran/fenêtre ; Échap ferme le cockpit.

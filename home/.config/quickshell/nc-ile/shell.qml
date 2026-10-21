@@ -105,7 +105,9 @@ ShellRoot {
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
         }
+        // Cockpit : le même raccourci le referme s'il est ouvert
         function jarvis(): void {
+            if (racine.jarvisFenetre && racine.jarvisFenetre.visible) { racine.jarvisFenetre.close(); return }
             Etat.fermer()
             if (!racine.jarvisFenetre) {
                 if (!racine.composantJarvis) racine.composantJarvis = Qt.createComponent("Jarvis.qml")
@@ -120,8 +122,9 @@ ShellRoot {
             }
         }
         function jarvisFermer(): void { if (racine.jarvisFenetre) racine.jarvisFenetre.close() }
-        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, elle est seulement ramenée devant
+        // Petite fenêtre de chat : ouverte vierge ; déjà ouverte, le même raccourci la referme
         function jarvisChat(): void {
+            if (racine.jarvisChatFenetre && racine.jarvisChatFenetre.visible) { racine.jarvisChatFenetre.close(); return }
             if (!racine.jarvisChatFenetre) {
                 if (!racine.composantJarvisChat) racine.composantJarvisChat = Qt.createComponent("JarvisChat.qml")
                 if (racine.composantJarvisChat.status !== Component.Ready) {
