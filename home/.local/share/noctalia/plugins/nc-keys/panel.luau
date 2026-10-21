@@ -45,12 +45,12 @@ local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- pré
 local COLUMNS = {
   { "Applis et barre", "Bureaux" },
   { "Fenêtres", "Souris" },
-  { "Système", "Mes raccourcis" },
+  { "Système", "IA", "Mes raccourcis" },
 }
 -- Titre affiché : « label » donné par nc-keys (dans la langue choisie), sinon traduit ici ; « title » est l'identifiant
 -- français de la section (un titre anglais est aussi ramené au français)
 local TITRES_EN = { ["Applis et barre"] = "Apps & Bar", ["Fenêtres"] = "Windows", ["Bureaux"] = "Desktops",
-  ["Souris"] = "Mouse", ["Système"] = "System", ["Mes raccourcis"] = "My Shortcuts" }
+  ["Souris"] = "Mouse", ["Système"] = "System", ["IA"] = "AI", ["Mes raccourcis"] = "My Shortcuts" }
 local TITRES_FR = { ["apps and bar"] = "Applis et barre", ["apps & bar"] = "Applis et barre", ["apps"] = "Applis et barre",
   ["windows"] = "Fenêtres", ["workspaces"] = "Bureaux", ["desktops"] = "Bureaux", ["mouse"] = "Souris",
   ["system"] = "Système", ["my shortcuts"] = "Mes raccourcis", ["spaces"] = "Bureaux" }

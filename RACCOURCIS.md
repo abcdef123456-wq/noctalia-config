@@ -14,11 +14,6 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
-| `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
-| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
-| `Super` + `Alt` + `I` | IA sur le texte sélectionné (sinon copié) : résumer, traduire, corriger, reformuler, expliquer, répondre, ou une consigne libre (le Spotlight sur `!`) ; résultat copié |
-| `Super` + `Alt` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA (notification, réponse copiée) |
-| `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) ; « + nom » : un logiciel à installer (dépôts, AUR, Flatpak), Entrée l'installe |
 | `Super` + `W` | Choisir le fond d'écran |
@@ -120,6 +115,23 @@ En mode **Souris**, les fenêtres s'ouvrent libres et centrées, comme sur Windo
 | `Super` + `F5` | Redémarrer |
 | `Touches média` | Son, luminosité, musique |
 | `Super` + `Espace` | Changer la disposition du clavier |
+
+## IA
+
+L'IA du bureau (nc-reglages → Intelligence artificielle : automatique, choisie ou aucune ; en pause en Économie sur
+batterie et sans connexion). Détails : [docs/ia.md](docs/ia.md).
+
+| Touches | Action |
+|---|---|
+| `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
+| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
+| `Super` + `Alt` + `I` | IA sur le texte sélectionné (sinon copié) : résumer, traduire, corriger, reformuler, expliquer, répondre, ou une consigne libre (le Spotlight sur `!`) ; résultat copié |
+| `Super` + `Alt` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA (notification, réponse copiée) |
+| `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |
+| `Super` + `R` puis `?` | Question à l'IA (d'abord les réponses de la config) ; la commande proposée se lance avec Entrée |
+| `Super` + `R` puis `!` | L'IA sur le texte sélectionné ou copié : résumer, traduire, corriger… ou une consigne libre |
+| `Super` + `R` puis `@` | L'IA agit : un plan (services de la session, Wi-Fi, Bluetooth, énergie, son, réglages, mises à jour), chaque action confirmée par Entrée |
+| `Espace` + `i` (Neovim) | `i` demander, `e` expliquer, `t` transformer selon une consigne, `c` corriger la sélection |
 
 ## Recherche (Super + R)
 

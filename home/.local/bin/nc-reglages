@@ -322,7 +322,7 @@ SECTIONS_EN = {
     "Intelligence artificielle": "Artificial intelligence", "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
-    "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System",
+    "Applis et barre": "Apps and Bar", "Bureaux": "Workspaces", "Souris": "Mouse", "Système": "System", "IA": "AI",
     "Mes raccourcis": "My Shortcuts",
 }
 

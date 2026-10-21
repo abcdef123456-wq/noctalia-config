@@ -70,10 +70,20 @@ MOUSE = {"mouse:272": T("glisser", "drag"), "mouse:273": T("clic droit", "right-
          "mouse_up": T("molette", "scroll")}
 # Sections de la fiche : les noms français servent d'identifiants (nc-reglages, plugin nc/keys) ; une description
 # peut aussi commencer par le nom anglais (« Apps & Bar|… »), rangée dans la même section
-SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "Mes raccourcis"]
+SECTIONS = ["Applis et barre", "Fenêtres", "Bureaux", "Souris", "Système", "IA", "Mes raccourcis"]
 SECTIONS_EN = {"Applis et barre": "Apps & Bar", "Fenêtres": "Windows", "Bureaux": "Desktops", "Souris": "Mouse",
-               "Système": "System", "Mes raccourcis": "My Shortcuts"}
+               "Système": "System", "IA": "AI", "Mes raccourcis": "My Shortcuts"}
 _ALIAS = {"apps and bar": "Applis et barre", "apps": "Applis et barre", "workspaces": "Bureaux", "spaces": "Bureaux"}
+
+
+def reglage(cle):
+    try:
+        for l in open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8"):
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
 
 
 def section_id(nom):
@@ -159,6 +169,15 @@ def collect():
     if "grp:win_space_toggle" in opts:
         by_sec["Système"].append({"keys": ["Super", T("Espace", "Space")],
                                   "text": T("Changer la disposition du clavier", "Switch keyboard layout")})
+    # L'IA ailleurs que dans Hyprland : préfixes du Spotlight, terminal, Neovim (pas si elle est coupée dans les réglages)
+    if reglage("IA_MODE") != "non":
+        by_sec["IA"] += [
+            {"keys": ["Super", "R"], "text": T("puis « ? » : poser une question à l'IA", "then “?”: ask the AI a question")},
+            {"keys": ["Super", "R"], "text": T("puis « ! » : l'IA sur le texte sélectionné", "then “!”: AI on the selected text")},
+            {"keys": ["Super", "R"], "text": T("puis « @ » : l'IA agit (tu confirmes)", "then “@”: the AI acts (you confirm)")},
+            {"keys": ["Alt", "I"], "text": T("Terminal : la description devient une commande", "Terminal: the description becomes a command")},
+            {"keys": [T("Espace", "Space"), "i"], "text": T("Neovim : demander, expliquer, corriger", "Neovim: ask, explain, fix")},
+        ]
     # title : identifiant de la section (nom français, que le plugin nc/keys range en colonnes) ; label : titre affiché
     return [{"title": s, "label": section_label(s), "rows": by_sec[s]} for s in SECTIONS if by_sec[s]]
 
