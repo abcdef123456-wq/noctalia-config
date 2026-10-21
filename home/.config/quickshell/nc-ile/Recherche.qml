@@ -176,6 +176,7 @@ Item {
     Component.onCompleted: { cree = true; if (actif) demarrer() }
     function demarrer() {
         texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
+        var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
@@ -183,6 +184,9 @@ Item {
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
+        // Demandé par un raccourci (organiser les fenêtres) : le plan tout de suite si l'IA a le droit d'agir, sinon la
+        // ligne qui propose de l'autoriser
+        if (agirTout && agentPermis && champ.text.startsWith("@")) Qt.callLater(() => r.lancerAgent(champ.text.slice(1).trim()))
         fichierUsage.reload()
         champ.forceActiveFocus()
         prendreClavier.essais = 0

@@ -117,6 +117,11 @@ ShellRoot {
             if (!Etat.recherche) recherche()
         }
         function valider(): void { Etat.validerRecherche() }
+        // L'IA qui agit, sur cette demande (nc-ia organiser) : le Spotlight sur « @ », le plan demandé tout de suite
+        function agirIA(demande: string): void {
+            Etat.saisie = "@ " + demande; Etat.agirAuto = true
+            if (!Etat.recherche) recherche()
+        }
         function recherche(): void { Etat.chercher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name) }
         function suivante(): void { Etat.changerVue(1) }
         function precedente(): void { Etat.changerVue(-1) }

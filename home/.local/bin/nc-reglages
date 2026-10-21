@@ -974,6 +974,11 @@ REGLAGES = [
        ("confirmer", L("Oui, après ma confirmation", "Yes, after my confirmation"))]),
     *[R(cle_, "Intelligence artificielle", L(fr_, en_), "ouinon", "oui", L(aide_fr, aide_en))
       for cle_, fr_, en_, aide_fr, aide_en in (
+        ("IA_GERER_FENETRES", "Elle peut proposer : fenêtres et bureaux", "It can propose: windows and desktops",
+         "Organiser les fenêtres (Super + Maj + O : tous les bureaux, Super + Ctrl + O : celui-ci) : les regrouper par "
+         "activité sur des bureaux nommés, les placer, les échanger, les rendre libres ou plein écran.",
+         "Organize windows (Super + Shift + O: all desktops, Super + Ctrl + O: this one): group them by activity on named "
+         "desktops, place them, swap them, make them floating or fullscreen."),
         ("IA_GERER_SERVICES", "Elle peut proposer : services de la session", "It can propose: session services",
          "Redémarrer, démarrer ou arrêter les services de ta session (l'île, la barre, le son…) et lire leur journal pour "
          "comprendre un échec. Jamais ceux du système.",

@@ -428,6 +428,36 @@ class IA(unittest.TestCase):
         self.assertEqual(self.appels().count("bluetoothctl power off"), 1, "une action faite ne se refait pas")
         self.assertEqual(self.lancer("executer", "pas-un-plan").returncode, 1)
 
+    def test_agir_organise_les_fenetres(self):
+        clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
+                   {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
+                   {"address": "0xc3", "class": "dropterm", "title": "t", "mapped": True, "workspace": {"id": -98}, "floating": True, "size": [1, 1]}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'workspaces) echo \'[{"id": 2, "name": "2", "windows": 2, "monitor": "eDP-1"}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
+        for p in ("systemctl", "bluetoothctl", "nmcli", "wpctl", "busctl"):
+            self.programme(p, "exit 0")
+        Faux.texte_ant = json.dumps({"reponse": "Code sur le 1, navigateur sur le 2.", "actions": [
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xa1", "bureau": 1}},
+            {"outil": "bureau_nommer", "args": {"bureau": 1, "nom": "Code"}},
+            {"outil": "fenetre_echanger", "args": {"adresse": "0xa1", "autre": "0xb2"}},
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xc3", "bureau": 4}},
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xb2", "bureau": 11}},
+            {"outil": "bureau_nommer", "args": {"bureau": 2, "nom": "x]]; os.exit()"}}]})
+        self.reglages("IA_ACTIONS=confirmer\n")
+        plan = json.loads(self.lancer("agir", "--json", "organise mes fenêtres").stdout)
+        self.assertEqual([x["libelle"] for x in plan["actions"]],
+                         ["kitty → bureau 1", "Bureau 1 nommé « Code »", "Échanger kitty et firefox"])
+        self.assertEqual(len(plan["refus"]), 3, plan["refus"])     # terminal déroulant, bureau 11, nom piégé
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("0xa1 · kitty", envoye, "l'IA voit les fenêtres")
+        self.assertNotIn("dropterm", envoye)
+        self.assertNotIn("dispatch", self.appels(), "rien avant la confirmation")
+        self.lancer("executer", plan["id"], "--json")
+        j = self.appels()
+        self.assertIn("dispatch hl.dsp.window.move({ workspace = 1, follow = false, window = 'address:0xa1' })", j)
+        self.assertIn("dispatch hl.dsp.workspace.rename({ workspace = 1, name = [[Code]] })", j)
+        self.assertIn("dispatch hl.dsp.window.swap({ window = 'address:0xa1', target = 'address:0xb2' })", j)
+
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()
         self.reglages("IA_ACTIONS=confirmer\nIA_GERER_RESEAU=non\n")

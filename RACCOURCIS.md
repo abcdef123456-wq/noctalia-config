@@ -127,6 +127,8 @@ batterie et sans connexion). Détails : [docs/ia.md](docs/ia.md).
 | `Super` + `Maj` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) ; déjà ouverte : la ramène sur ton bureau, la met devant, ou la masque |
 | `Super` + `Ctrl` + `A` | Cockpit JARVIS (grande fenêtre) ; déjà ouvert : le ramène, le met devant, ou le masque |
 | `Super` + `I` | IA sur le texte sélectionné (sinon copié) : résumer, traduire, corriger, reformuler, expliquer, répondre, ou une consigne libre (le Spotlight sur `!`) ; résultat copié |
+| `Super` + `Maj` + `O` | L'IA organise toutes les fenêtres : regroupées par activité sur des bureaux nommés, puis bien disposées (un plan, chaque action confirmée) |
+| `Super` + `Ctrl` + `O` | L'IA organise les fenêtres du bureau affiché |
 | `Super` + `D` (maintenir) | Dicter : parle, relâche, le texte est écrit dans la fenêtre active ; un appui bref lance une dictée longue, le suivant l'écrit |
 | `Super` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA : la réponse arrive dans la conversation (une notification l'ouvre), pour continuer à poser des questions |
 | `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |

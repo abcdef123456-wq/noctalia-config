@@ -83,6 +83,9 @@ touche(SUPER .. " + CTRL + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad
 -- IA du bureau (nc-ia : celle choisie dans nc-reglages → Intelligence artificielle ; coupée, ces touches le disent)
 touche(SUPER .. " + code:31", cmd("~/.local/bin/nc-ia menu"), trad("IA|Résumer, traduire… le texte sélectionné", "Summarize, translate… the selected text"))
 touche(SUPER .. " + SHIFT + code:31", cmd("~/.local/bin/nc-ia capture"), trad("IA|Expliquer une zone de l'écran", "Explain an area of the screen"))
+-- L'IA organise les fenêtres (« L'IA peut agir » : un plan, chaque action confirmée)
+touche(SUPER .. " + SHIFT + code:32", cmd("~/.local/bin/nc-ia organiser"), trad("IA|Organiser toutes les fenêtres et les bureaux", "Organize all windows and desktops"))
+touche(SUPER .. " + CTRL + code:32", cmd("~/.local/bin/nc-ia organiser --bureau"), trad("IA|Organiser les fenêtres de ce bureau", "Organize this desktop's windows"))
 -- Dictée partout (nc-dictee) : maintenir Super + D et parler, relâcher : le texte est écrit dans la fenêtre active ; un
 -- appui bref lance une dictée longue, le suivant l'écrit. Relâcher Super avant D finit aussi la dictée (sinon elle
 -- resterait ouverte) ; ce test-là ne lance rien tant qu'aucune dictée n'est en cours.

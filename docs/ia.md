@@ -101,6 +101,9 @@ première fois, Entrée sur « Autoriser l'IA à proposer des actions » en tapa
 d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît comme une ligne, faite seulement quand tu
 appuies sur Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit domaine par domaine :
 
+- **fenêtres et bureaux** : **Super + Maj + O** organise toutes les fenêtres (regroupées par activité sur des
+  bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché ; déplacer, échanger, rendre libre ou
+  plein écran, nommer un bureau. L'IA voit l'appli, le titre (50 caractères) et la place de chaque fenêtre ;
 - **services de la session** : redémarrer, démarrer, arrêter (signalé ⚠), lire le journal pour comprendre un échec —
   jamais les services du système ;
 - **Wi-Fi et Bluetooth** : allumer, couper ;
