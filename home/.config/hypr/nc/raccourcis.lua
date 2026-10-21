@@ -89,8 +89,10 @@ touche(SUPER .. " + CTRL + code:32", cmd("~/.local/bin/nc-ia organiser --bureau"
 -- Dictée partout (nc-dictee) : maintenir Super + D et parler, relâcher : le texte est écrit dans la fenêtre active ; un
 -- appui bref lance une dictée longue, le suivant l'écrit. Relâcher Super avant D finit aussi la dictée (sinon elle
 -- resterait ouverte) ; ce test-là ne lance rien tant qu'aucune dictée n'est en cours.
-touche(SUPER .. " + code:40", cmd("~/.local/bin/nc-dictee ptt-debut"), trad("IA|Dicter (maintenir, relâcher pour écrire)", "Dictate (hold, release to write)"))
-local fin_dictee = cmd([[sh -c '[ -e "${XDG_RUNTIME_DIR:-/tmp}/nc-dictee-ptt.json" ] && exec ~/.local/bin/nc-dictee ptt-fin']])
+touche(SUPER .. " + code:40", cmd([[sh -c ': > "${XDG_RUNTIME_DIR:-/tmp}/nc-dictee-appui"; exec ~/.local/bin/nc-dictee ptt-debut']]), trad("IA|Dicter (maintenir, relâcher pour écrire)", "Dictate (hold, release to write)"))
+-- L'appui et, sans dictée en cours, le relâchement sont notés : un appui si bref qu'il finit avant que nc-dictee ait
+-- démarré n'est pas perdu (le micro resterait ouvert)
+local fin_dictee = cmd([[sh -c 'r="${XDG_RUNTIME_DIR:-/tmp}"; [ -e "$r/nc-dictee-ptt.json" ] && exec ~/.local/bin/nc-dictee ptt-fin; : > "$r/nc-dictee-relache"']])
 hl.bind(SUPER .. " + code:40", fin_dictee, { release = true })
 hl.bind(SUPER .. " + Super_L", fin_dictee, { release = true, non_consuming = true })
 hl.bind(SUPER .. " + Super_R", fin_dictee, { release = true, non_consuming = true })

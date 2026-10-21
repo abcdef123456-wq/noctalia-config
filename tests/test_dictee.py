@@ -170,6 +170,64 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
         self.assertIn("wtype -- bonjour jarvis", self.appels())
 
+    def ptt_fond(self, action):
+        b = self.home / "bin"
+        env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
+                   PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+        return subprocess.Popen([str(SCRIPT), action], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def test_relache_pendant_le_demarrage_du_micro(self):
+        """Revue Codex DICT-01 : un relâchement arrivé pendant que le micro démarre était perdu (le micro restait ouvert)."""
+        self.ptt("ptt-fin")                                   # prépare les faux programmes ; rien en cours
+        etat = self.home / "run/nc-dictee-ptt.json"
+        p = self.ptt_fond("ptt-debut")
+        fin = time.time() + 5
+        while time.time() < fin and not etat.exists():
+            time.sleep(0.005)
+        self.assertFalse(json.loads(etat.read_text()).get("pret"), "relâché pendant le démarrage")
+        self.assertEqual(self.ptt("ptt-fin"), 0)
+        p.wait(20)
+        e = json.loads(etat.read_text())
+        self.assertTrue(e.get("bascule"), "appui bref (relâché pendant le démarrage) : dictée longue")
+        self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
+        self.assertIn("wtype -- bonjour jarvis", self.appels())
+
+    def test_relache_avant_meme_le_lancement(self):
+        """Le raccourci note chaque relâchement sans dictée : un appui plus bref que le lancement de nc-dictee compte."""
+        self.ptt("ptt-fin")
+        (self.home / "run/nc-dictee-appui").write_text("")       # ce que fait le raccourci à l'appui…
+        time.sleep(0.01)
+        (self.home / "run/nc-dictee-relache").write_text("")     # … et au relâchement, avant que nc-dictee démarre
+        p = self.ptt_fond("ptt-debut")
+        p.wait(20)
+        e = json.loads((self.home / "run/nc-dictee-ptt.json").read_text())
+        self.assertTrue(e.get("bascule"))
+        # Un relâchement d'avant l'appui ne compte pas
+        self.ptt("ptt-debut")
+        time.sleep(0.01)
+        (self.home / "run/nc-dictee-appui").write_text("")
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        self.assertFalse(json.loads((self.home / "run/nc-dictee-ptt.json").read_text()).get("bascule"))
+        r = (REPO / "home/.config/hypr/nc/raccourcis.lua").read_text()
+        self.assertIn(': > "$r/nc-dictee-relache"', r)
+        self.assertIn('nc-dictee-appui"; exec ~/.local/bin/nc-dictee ptt-debut', r)
+
+    def test_enregistreur_mort_ne_bloque_pas(self):
+        """Une dictée laissée par un nc-dictee tué (enregistreur mort) ne bloque pas l'appui suivant."""
+        self.ptt("ptt-fin")
+        (self.home / "run/nc-dictee-ptt.json").write_text(json.dumps({"t": time.time(), "pret": True}))
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        self.assertEqual(self.lancer("status"), (0, {"ok": True, "recording": True}))
+
+    def test_ia_coupee_pendant_la_dictee_rien_ne_part(self):
+        """Revue Codex DICT-02 : IA coupée pendant l'enregistrement, l'audio partait quand même vers JARVIS."""
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", "IA_MODE=non\n"), 1)
+        self.assertEqual(Serveur.recus, [])
+        self.assertNotIn("wtype", self.appels())
+        self.assertFalse((self.home / "run/nc-dictee.wav").exists(), "l'audio est supprimé sans être envoyé")
+
     def test_desactivee_ou_rien_en_cours(self):
         self.assertEqual(self.ptt("ptt-fin"), 0)
         self.assertEqual(self.appels(), "", "relâcher Super sans dictée ne fait rien")

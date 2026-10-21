@@ -178,6 +178,10 @@ def transcrire(m):
         sortie(ok=False, error=T("Aucun enregistrement en cours.", "No recording in progress."))
         return 1
     try:
+        # IA coupée pendant l'enregistrement : rien ne part, l'audio est supprimé (revue Codex DICT-02)
+        if m.ia_coupee():
+            sortie(ok=False, error=m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else T(*m.MESSAGE_COUPEE))
+            return 1
         if not AUDIO.is_file() or AUDIO.stat().st_size < 1000:
             sortie(ok=False, error=T("Enregistrement vide ou micro coupé.", "Empty recording or muted microphone."))
             return 1
@@ -227,7 +231,47 @@ def transcrire(m):
 
 
 # ── Dictée partout (Super + D) ──────────────────────────────────────────────────────────────────────────────────
-PTT = RUNTIME / "nc-dictee-ptt.json"     # { t : début, bascule : appui bref (dictée longue) }
+PTT = RUNTIME / "nc-dictee-ptt.json"     # { t : appui, pret : micro lancé (son heure), relache : relâché avant, bascule : dictée longue }
+RELACHE = RUNTIME / "nc-dictee-relache"  # touché par le raccourci à chaque relâchement de Super sans dictée en cours
+APPUI = RUNTIME / "nc-dictee-appui"      # touché par le raccourci à l'appui, avant de lancer nc-dictee (Python est lent)
+
+
+def instant_appui():
+    try:
+        t = APPUI.stat().st_mtime
+        if 0 <= time.time() - t < 5:
+            return t
+    except OSError:
+        pass
+    return time.time()
+
+
+DEBUT = instant_appui()
+VERROU = RUNTIME / "nc-dictee-ptt.lock"  # appui et relâchements (D, Super) arrivent ensemble : un seul décide à la fois
+
+
+class Verrou:
+    def __enter__(self):
+        import fcntl
+        self.f = open(VERROU, "a")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def lire_ptt():
+    try:
+        etat = json.loads(PTT.read_text())
+        etat = etat if isinstance(etat, dict) else None
+    except (OSError, ValueError):
+        return None
+    # Une intention restée d'un démarrage interrompu (plus de 15 s sans micro prêt) ne compte plus
+    if etat and not etat.get("pret") and time.time() - etat.get("t", 0) > 15:
+        PTT.unlink(missing_ok=True)
+        return None
+    return etat
 TERMINAUX = ("kitty", "foot", "alacritty", "org.wezfurlong.wezterm", "com.mitchellh.ghostty", "org.kde.konsole",
              "org.gnome.terminal", "org.gnome.ptyxis", "xterm", "dropterm")
 
@@ -284,11 +328,22 @@ def ptt_debut(m):
     if reglage("IA_DICTEE", "oui") == "non":
         notifier(T, T("Dictée désactivée", "Dictation turned off"), T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"), True)
         return 1
-    try:
-        etat = json.loads(PTT.read_text())
-    except (OSError, ValueError):
-        etat = None
-    if etat and etat.get("bascule"):                       # second appui d'une dictée longue : on écrit
+    with Verrou():
+        etat = lire_ptt()
+        if etat and etat.get("bascule"):                   # second appui d'une dictée longue : on écrit
+            PTT.unlink(missing_ok=True)
+            finir = True
+        elif etat and (not etat.get("pret") or actif((lire_etat() or {}).get("pid"))):
+            return 0                                       # un démarrage déjà en cours (répétition de la touche)
+        else:
+            # (une dictée dont l'enregistreur est mort — nc-dictee tué — ne bloque pas les appuis suivants)
+            PTT.unlink(missing_ok=True)
+            finir = False
+            if not m.ia_coupee():
+                # L'intention d'abord, datée de l'appui : un relâchement pendant le démarrage du micro est gardé
+                # (revue Codex DICT-01)
+                PTT.write_text(json.dumps({"t": DEBUT, "pret": False}))
+    if finir:
         return ptt_finir(m)
     if m.ia_coupee():
         notifier(T, T("Dictée impossible", "Dictation unavailable"), m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else "", True)
@@ -297,22 +352,43 @@ def ptt_debut(m):
     code = demarrer(T)
     CAPTURE, res = None, CAPTURE
     if code != 0 or not res or not res[-1].get("ok"):
+        with Verrou():
+            PTT.unlink(missing_ok=True)
         notifier(T, T("Dictée impossible", "Dictation unavailable"), (res[-1].get("error") if res else "") or "")
         return 1
-    PTT.write_text(json.dumps({"t": time.time()}))
-    notifier(T, T("🎙 Je t'écoute…", "🎙 Listening…"), T("Relâche pour écrire", "Release to write"))
+    with Verrou():
+        etat = lire_ptt() or {"t": DEBUT}
+        relache = etat.get("relache")
+        try:                                               # relâché avant même que l'intention soit écrite
+            if relache is None and RELACHE.stat().st_mtime >= DEBUT:
+                relache = RELACHE.stat().st_mtime
+        except OSError:
+            pass
+        # Relâché avant que le micro soit prêt : rien d'enregistré, c'est un appui bref → dictée longue
+        PTT.write_text(json.dumps(dict(etat, pret=time.time(), bascule=relache is not None)))
+    if relache is None:
+        notifier(T, T("🎙 Je t'écoute…", "🎙 Listening…"), T("Relâche pour écrire", "Release to write"))
+    else:
+        notifier(T, T("🎙 Dictée longue…", "🎙 Long dictation…"), T("Super + D pour écrire", "Super + D to write"))
     return 0
 
 
 def ptt_fin(m):
-    try:
-        etat = json.loads(PTT.read_text())
-    except (OSError, ValueError):
-        return 0                                          # pas de dictée en cours (relâchement de Super seul)
-    if etat.get("bascule"):
-        return 0                                          # dictée longue : elle continue jusqu'au prochain appui
-    if time.time() - etat.get("t", 0) < 0.45:             # appui bref : dictée longue
-        PTT.write_text(json.dumps(dict(etat, bascule=True)))
+    with Verrou():
+        etat = lire_ptt()
+        if not etat or etat.get("bascule") or etat.get("relache"):
+            return 0                                      # rien en cours, dictée longue qui continue, ou déjà relâché
+        if not etat.get("pret"):                          # micro pas encore lancé : ptt-debut décidera
+            PTT.write_text(json.dumps(dict(etat, relache=time.time())))
+            return 0
+        # Appui bref (moins de 0,45 s enregistrées, quelle que soit la lenteur du démarrage) : dictée longue
+        if time.time() - float(etat.get("pret") or 0) < 0.45:
+            PTT.write_text(json.dumps(dict(etat, bascule=True)))
+            longue = True
+        else:
+            PTT.unlink(missing_ok=True)                   # un seul relâchement finit (D et Super arrivent ensemble)
+            longue = False
+    if longue:
         notifier(m.T, m.T("🎙 Dictée longue…", "🎙 Long dictation…"), m.T("Super + D pour écrire", "Super + D to write"))
         return 0
     return ptt_finir(m)
