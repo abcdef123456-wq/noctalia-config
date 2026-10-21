@@ -103,6 +103,25 @@ if(etape===5){verifier(fen.reglage("FENETRES_FLOU_FORCE").valeur==="normal"&&!fe
 ''', evenements=True)
         self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [["set", "SOURIS_VITESSE", "1"], ["set", "GESTES", "non"], ["set", "FENETRES_FLOU_FORCE", "leger"], ["reset", "FENETRES_FLOU_FORCE"]])
 
+    def test_onglets_aux_fleches_depuis_le_haut(self):
+        appels = self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+var liste=trouver(fen.contentItem,"nc-reglages-liste"),rangee=trouver(fen.contentItem,"nc-reglages-sections"),champ=trouver(fen.contentItem,"nc-reglages-recherche")
+if(etape===1){
+ verifier(liste.activeFocus&&liste.currentIndex===0,"départ sur la première ligne")
+ clavier.keyClick(Qt.Key_Up);verifier(rangee.activeFocus,"↑ depuis la première ligne ne monte pas sur les onglets")
+ clavier.keyClick(Qt.Key_Right);verifier(fen.section==="Fenêtres"&&rangee.activeFocus,"→ sur les onglets : "+fen.section)
+ clavier.keyClick(Qt.Key_Right);verifier(fen.section==="Clavier et souris","→ revient au premier onglet après le dernier")
+ clavier.keyClick(Qt.Key_Left);verifier(fen.section==="Fenêtres","← onglet précédent")
+ verifier(appels_vides(),"rien n'est écrit en changeant d'onglet")
+ clavier.keyClick(Qt.Key_Down);verifier(liste.activeFocus&&fen.courant.cle==="FENETRES_FLOU_FORCE","↓ redescend dans la liste de l'onglet")
+ clavier.keyClick(Qt.Key_Up);clavier.keyClick(Qt.Key_Up);verifier(champ.activeFocus,"↑ depuis les onglets va à la recherche")
+ clavier.keyClick(Qt.Key_Down);verifier(rangee.activeFocus,"↓ depuis une recherche vide revient aux onglets")
+ Qt.quit()}
+'''.replace("appels_vides()", "true"), evenements=True)
+        self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [], "changer d'onglet n'écrit rien")
+
 
 if __name__ == "__main__":
     unittest.main()

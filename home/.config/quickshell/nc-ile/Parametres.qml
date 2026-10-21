@@ -6,6 +6,8 @@
 // bascule oui/non, pastilles de choix, curseur pour les nombres, champ pour le texte ; ↺ remet la valeur de la config.
 // Au clavier : ↑ ↓ choisir, ← → changer la valeur, Entrée ou Espace basculer (ou saisir un texte), r valeur de la
 // config, Tab et Maj + Tab changer de section, une lettre lance la recherche, Échap vide la recherche puis ferme.
+// Tout en haut de la liste, ↑ monte sur la rangée des onglets : ← → y changent d'onglet, ↓ redescend dans la liste,
+// ↑ encore va à la recherche (dont ↓ ramène aux onglets).
 // Même cadrage que le cockpit : nc/automatismes.lua la place à l'ouverture.
 import QtQuick
 import Quickshell
@@ -24,7 +26,8 @@ FloatingWindow {
     property string message: ""
     property bool erreur: false
     property var file: []                           // écritures en attente : [[cle, valeur]]
-    readonly property bool enCours: lecture.running || ecriture.running
+    property bool relire: false                     // une relecture demandée pendant qu'une autre tournait
+    readonly property bool enCours: lecture.running || ecriture.running || relire || file.length > 0
     readonly property var sections: { var s = []; catalogue.forEach(r => { if (s.indexOf(r.sectionNom) < 0) s.push(r.sectionNom) }); return s }
     readonly property var visibles: {
         var q = normaliser(recherche.trim())
@@ -39,7 +42,8 @@ FloatingWindow {
     }
     onClosed: close()
     function close() { visible = false }
-    function charger() { if (!lecture.running) lecture.running = true }
+    // Relecture du catalogue ; si une lecture tourne déjà (lancée avant la dernière écriture), une autre suit
+    function charger() { if (lecture.running) relire = true; else lecture.running = true }
     // Une valeur : nc-reglages set (ou reset pour revenir à la config) ; les demandes se suivent une par une
     function regler(cle, valeur) { file.push([cle, valeur]); file = file; suivant() }
     function remettre(cle) { regler(cle, null) }
@@ -84,6 +88,7 @@ FloatingWindow {
     Process {
         id: lecture
         command: [fen.bin + "nc-reglages", "catalogue"]
+        onRunningChanged: if (!running && fen.relire) Qt.callLater(() => { fen.relire = false; lecture.running = true })
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -116,10 +121,13 @@ FloatingWindow {
         property string texte: ""
         property bool actif: false
         property bool petit: false
+        property bool clavier: false                 // l'onglet choisi quand la rangée a le focus du clavier
         signal clic()
         width: etiquette.implicitWidth + (petit ? 22 : 30); height: petit ? 30 : 36; radius: height / 2
-        color: actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
-        border.width: actif ? 1.5 : 0; border.color: Couleurs.accent
+        color: clavier ? Couleurs.gris5 : (actif ? Couleurs.gris4 : (zp.containsMouse ? Couleurs.gris3 : Couleurs.gris2))
+        border.width: clavier ? 2.5 : (actif ? 1.5 : 0); border.color: Couleurs.accent
+        scale: clavier ? 1.06 : 1
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         Behavior on color { ColorAnimation { duration: 120 } }
         Texte { id: etiquette; anchors.centerIn: parent; text: pastille.texte; font.pixelSize: petit ? 12 : 13; font.weight: Font.DemiBold
                 color: pastille.actif ? Couleurs.texte : Couleurs.texteSec }
@@ -153,7 +161,7 @@ FloatingWindow {
                 verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
                 color: Couleurs.texte; selectionColor: Couleurs.accent; font.pixelSize: 13
                 onTextChanged: { fen.recherche = text; liste.currentIndex = liste.count ? 0 : -1 }
-                Keys.onDownPressed: liste.forceActiveFocus()
+                Keys.onDownPressed: { if (fen.recherche.trim()) liste.forceActiveFocus(); else rangee.forceActiveFocus() }
                 Keys.onReturnPressed: liste.forceActiveFocus()
                 Keys.onTabPressed: fen.sectionSuivante(1)
                 Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; visible: !champRecherche.text; color: Couleurs.texteSec; font: champRecherche.font
@@ -173,11 +181,30 @@ FloatingWindow {
         // ── Sections en pastilles (grisées pendant une recherche, qui couvre tout) ──
         Flow {
             id: rangee
+            objectName: "nc-reglages-sections"
             x: 22; y: entete.y + entete.height + 14; width: tout.width - 44; spacing: 8
-            opacity: fen.recherche.trim() ? 0.45 : 1
+            opacity: fen.recherche.trim() && !activeFocus ? 0.45 : 1
+            // Au clavier : ← → changent d'onglet (et effacent une recherche), ↓ Entrée Espace descendent dans la liste,
+            // ↑ va à la recherche, une lettre la commence
+            Keys.onPressed: event => {
+                event.accepted = true
+                if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab) fen.sectionSuivante(1)
+                else if (event.key === Qt.Key_Left || event.key === Qt.Key_Backtab) fen.sectionSuivante(-1)
+                else if (event.key === Qt.Key_Home) { if (fen.sections.length) { fen.sectionSuivante(0); fen.section = fen.sections[0] } }
+                else if (event.key === Qt.Key_End) { if (fen.sections.length) { fen.sectionSuivante(0); fen.section = fen.sections[fen.sections.length - 1] } }
+                else if (event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                    liste.currentIndex = liste.count ? 0 : -1; liste.forceActiveFocus()
+                }
+                else if (event.key === Qt.Key_Up) champRecherche.forceActiveFocus()
+                else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) && fen.lettre(event) !== "") {
+                    champRecherche.text = fen.lettre(event); champRecherche.forceActiveFocus(); champRecherche.cursorPosition = 1
+                }
+                else event.accepted = false
+            }
             Repeater {
                 model: fen.sections
                 Pastille { required property string modelData; texte: modelData; actif: !fen.recherche.trim() && fen.section === modelData
+                           clavier: rangee.activeFocus && fen.section === modelData
                            onClic: { fen.section = modelData; champRecherche.text = ""; fen.recherche = "" } }
             }
         }
@@ -198,7 +225,7 @@ FloatingWindow {
                 var r = fen.courant
                 event.accepted = true
                 if (event.key === Qt.Key_Down) { if (currentIndex < count - 1) currentIndex++ }
-                else if (event.key === Qt.Key_Up) { if (currentIndex > 0) currentIndex--; else champRecherche.forceActiveFocus() }
+                else if (event.key === Qt.Key_Up) { if (currentIndex > 0) currentIndex--; else if (fen.recherche.trim()) champRecherche.forceActiveFocus(); else rangee.forceActiveFocus() }
                 else if (event.key === Qt.Key_Right || event.key === Qt.Key_Plus) fen.changer(r, 1)
                 else if (event.key === Qt.Key_Left || event.key === Qt.Key_Minus) fen.changer(r, -1)
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) fen.basculer(r)
@@ -329,8 +356,10 @@ FloatingWindow {
                 Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; elide: Text.ElideRight; width: pied.width - 30
                         color: fen.erreur ? Couleurs.rouge : Couleurs.texteSec
                         text: fen.enCours && !fen.message ? Reglages.t("Application…", "Applying…")
-                            : (fen.message || Reglages.t("↑ ↓ choisir   ← → changer   Entrée basculer   Tab section   r valeur de la config   une lettre : chercher   Échap fermer",
-                                                         "↑ ↓ choose   ← → change   Enter toggle   Tab section   r config value   a letter: search   Esc close")) }
+                            : (fen.message || (rangee.activeFocus ? Reglages.t("← → changer d'onglet   ↓ Entrée : les réglages   ↑ chercher   une lettre : chercher   Échap fermer",
+                                                                            "← → switch tab   ↓ Enter: the settings   ↑ search   a letter: search   Esc close")
+                                                : Reglages.t("↑ ↓ choisir (tout en haut : les onglets)   ← → changer   Entrée basculer   Tab section   r valeur de la config   une lettre : chercher   Échap fermer",
+                                                             "↑ ↓ choose (at the top: the tabs)   ← → change   Enter toggle   Tab section   r config value   a letter: search   Esc close"))) }
             }
         }
     }
