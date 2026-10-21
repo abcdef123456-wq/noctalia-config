@@ -193,13 +193,15 @@ Item {
                 Rectangle {
                     anchors.fill: parent; radius: 18
                     visible: centre.edition
-                    color: Qt.rgba(0, 0, 0, 0.45)
+                    color: Qt.rgba(0, 0, 0, 0.62)
                     border.width: case_.choisi ? 2 : 0; border.color: Couleurs.accent
                     MouseArea { anchors.fill: parent; onClicked: centre.choix = centre.visibles.indexOf(case_.identifiant) }
-                    Texte {
+                    // Le nom du module, dans une petite pastille lisible par-dessus le contenu voilé
+                    Rectangle {
                         anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8
-                        text: centre.modules[case_.identifiant].nom; font.pixelSize: 12; font.weight: Font.DemiBold
+                        width: nomModule.implicitWidth + 16; height: 22; radius: 11; color: Couleurs.gris3
                         visible: parent.width >= 150
+                        Texte { id: nomModule; anchors.centerIn: parent; text: centre.modules[case_.identifiant].nom; font.pixelSize: 12; font.weight: Font.DemiBold }
                     }
                     Row {
                         anchors.centerIn: parent; spacing: 4
