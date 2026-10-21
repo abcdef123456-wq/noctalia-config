@@ -382,13 +382,16 @@ def profil_energie():
 
 
 def pause_economie():
-    """L'IA en pause en profil Économie sur batterie (IA_ECONOMIE, oui par défaut) ; elle revient seule sur secteur ou
-    hors Économie. Rien n'est appelé pendant la pause."""
+    """En profil Économie sur batterie (IA_ECONOMIE, oui par défaut), l'IA qui tourne en arrière-plan (alertes, tout
+    ce qui se lance tout seul : nc-ia --fond) se met en pause ; ce que tu lances toi-même marche toujours."""
     return reglage("IA_ECONOMIE", "oui") != "non" and sur_batterie() and profil_energie() == "power-saver"
 
 
+FOND = False                              # appel d'arrière-plan (--fond, NC_IA_FOND=1) : en pause en Économie sur batterie
+
+
 def coupee():
-    return mode() == "non" or pause_economie()
+    return mode() == "non" or ((FOND or os.environ.get("NC_IA_FOND") == "1") and pause_economie())
 
 
 def candidats(usage="question", force=""):
@@ -965,10 +968,8 @@ ACTIONS_EN = {"summarize": "resumer", "translate": "traduire", "fix": "corriger"
 # ── Demander (avec repli sur l'IA suivante en mode auto) ────────────────────────────────────────────────────────
 def message_coupee():
     if mode() != "non" and pause_economie():
-        return T("L'IA est en pause : profil Économie sur batterie (elle revient sur secteur ou hors Économie ; "
-                 "nc-reglages → Intelligence artificielle → En pause en Économie sur batterie).",
-                 "AI is paused: Power Saver on battery (it comes back on AC power or outside Power Saver; "
-                 "nc-settings → Artificial intelligence → Paused in Power Saver on battery).")
+        return T("L'IA d'arrière-plan est en pause : profil Économie sur batterie (elle revient sur secteur ou hors Économie).",
+                 "Background AI is paused: Power Saver on battery (it comes back on AC power or outside Power Saver).")
     return T("L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).",
              "AI is turned off (nc-settings → Artificial intelligence → Desktop AI).")
 
@@ -1708,7 +1709,11 @@ def main(a):
     if not a or a[0] in ("-h", "--help", "aide", "help"):
         print(T(__doc__, DOC_EN).strip())
         return 0 if a else 2
+    global FOND
     c, a = a[0], a[1:]
+    if "--fond" in a:                          # lancé par un automatisme, pas par toi
+        FOND = True
+        a = [x for x in a if x != "--fond"]
     c = {"status": "etat", "ask": "demander", "text": "texte", "command": "commande", "screenshot": "capture",
          "key": "cle", "keys": "cles", "model": "modele", "test": "tester", "which": "quelle", "enabled": "actif",
          "last": "derniere"}.get(c, c)

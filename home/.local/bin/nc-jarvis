@@ -111,15 +111,9 @@ def reglage(cle):
 
 
 def ia_coupee():
-    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune), ou en pause (Économie sur batterie, vu
-    par nc-ia) : ni cockpit, ni chat."""
-    if reglage('IA_MODE')=='non':return True
-    try:
-        import importlib.machinery,importlib.util
-        l=importlib.machinery.SourceFileLoader('nc_ia',str(BIN/'nc-ia'))
-        m=importlib.util.module_from_spec(importlib.util.spec_from_loader('nc_ia',l));l.exec_module(m)
-        return m.pause_economie()
-    except Exception:return False
+    """IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : ni cockpit, ni chat. (En Économie sur
+    batterie, seule l'IA d'arrière-plan s'arrête : ce que tu ouvres toi-même marche.)"""
+    return reglage('IA_MODE')=='non'
 
 
 def langue_en():
@@ -134,10 +128,8 @@ def main():
     args,rest=parser.parse_known_args()
     # IA du bureau coupée : ni cockpit, ni chat, ni requêtes (le déploiement reste possible)
     if args.commande in ('tableau','ile','chat','requete','console') and ia_coupee():
-        message=(('AI is paused: Power Saver on battery.' if langue_en() else "L'IA est en pause : profil Économie sur batterie.")
-                 if reglage('IA_MODE')!='non' else
-                 ('AI is turned off (nc-settings → Artificial intelligence → Desktop AI).' if langue_en() else
-                  "L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau)."))
+        message=('AI is turned off (nc-settings → Artificial intelligence → Desktop AI).' if langue_en() else
+                 "L'IA est désactivée (nc-reglages → Intelligence artificielle → IA du bureau).")
         if args.commande=='requete':print(json.dumps(dict(ok=False,error=message),ensure_ascii=False),flush=True)
         else:
             print(message,file=sys.stderr)

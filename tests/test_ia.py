@@ -349,20 +349,24 @@ class IA(unittest.TestCase):
         self.assertIn("Une capture.", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
 
     # ── Économie sur batterie, sans connexion ──
-    def test_pause_en_economie_sur_batterie(self):
+    def test_economie_sur_batterie_seul_l_arriere_plan_s_arrete(self):
         eco = {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "power-saver"}
-        r = self.lancer("demander", "--flux", "q", env_plus=eco)
-        self.assertEqual(r.returncode, 3)
-        self.assertIn("en pause", r.stdout)
-        self.assertEqual(self.lancer("actif", env_plus=eco).returncode, 1)
-        self.assertTrue(json.loads(self.lancer("--ia", "--json", prog="nc-demander", env_plus=eco).stdout)["coupee"])
-        self.assertIn("pause", self.lancer("demander", "--flux", "q", prog="nc-assistant", env_plus=eco).stdout)
-        self.assertFalse(Faux.requetes, "rien n'est appelé pendant la pause")
-        # Sur secteur, ou hors Économie, ou réglage à non : elle répond
-        for env in ({"NC_POWER_SUPPLY": "secteur", "NC_PROFIL": "power-saver"}, {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "balanced"}):
-            self.assertEqual(self.lancer("demander", "q", env_plus=env).stdout.strip(), "Bonjour")
-        self.reglages("IA_ECONOMIE=non\n")
+        # Ce que tu lances toi-même marche toujours
         self.assertEqual(self.lancer("demander", "q", env_plus=eco).stdout.strip(), "Bonjour")
+        self.assertFalse(json.loads(self.lancer("--ia", "--json", prog="nc-demander", env_plus=eco).stdout)["coupee"])
+        self.assertEqual(self.lancer("actif", env_plus=eco).returncode, 0)
+        # Un automatisme (--fond, NC_IA_FOND=1) se met en pause, sans rien appeler
+        Faux.requetes.clear()
+        r = self.lancer("demander", "--fond", "--flux", "q", env_plus=eco)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("arrière-plan est en pause", r.stdout)
+        self.assertEqual(self.lancer("demander", "q", env_plus=dict(eco, NC_IA_FOND="1")).returncode, 3)
+        self.assertFalse(Faux.requetes, "rien n'est appelé en arrière-plan pendant la pause")
+        # Sur secteur, hors Économie, ou réglage à non : l'arrière-plan répond
+        for env in ({"NC_POWER_SUPPLY": "secteur", "NC_PROFIL": "power-saver"}, {"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "balanced"}):
+            self.assertEqual(self.lancer("demander", "--fond", "q", env_plus=env).stdout.strip(), "Bonjour")
+        self.reglages("IA_ECONOMIE=non\n")
+        self.assertEqual(self.lancer("demander", "--fond", "q", env_plus=eco).stdout.strip(), "Bonjour")
 
     def test_sans_connexion_seule_une_ia_locale(self):
         hors = {"NC_IA_EN_LIGNE": "0"}

@@ -88,9 +88,22 @@ def services_en_echec():
     return sorted(u for u in unites if SERVICES.match(u))
 
 
+def en_pause():
+    """Arrière-plan en Économie sur batterie (nc-ia, réglage « En pause en Économie sur batterie ») : pas d'envoi."""
+    try:
+        import importlib.machinery
+        import importlib.util
+        l = importlib.machinery.SourceFileLoader("nc_ia", str(Path(__file__).resolve().parent / "nc-ia"))
+        ia = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_ia", l))
+        l.exec_module(ia)
+        return ia.pause_economie()
+    except Exception:
+        return False
+
+
 def envoyer(m, texte):
     """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion."""
-    if reglages().get("ALERTES_TELEGRAM", "non") != "oui" or reglages().get("IA_MODE", "auto") == "non":
+    if reglages().get("ALERTES_TELEGRAM", "non") != "oui" or reglages().get("IA_MODE", "auto") == "non" or en_pause():
         return False
     try:
         c = m.configuration()

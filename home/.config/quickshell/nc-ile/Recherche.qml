@@ -61,9 +61,8 @@ Item {
     readonly property var ligneHorsLigne: ({ titre: Reglages.t("Pas de connexion internet", "No internet connection"),
                                              sous: Reglages.t("L'IA revient dès que la connexion revient", "AI comes back as soon as the connection does"),
                                              glyphe: "wifi_off", garder: true, f: () => {} })
-    // Pourquoi l'IA ne répond pas : coupée dans les réglages, ou en pause (Économie sur batterie : elle revient seule)
-    readonly property string motifCoupee: Reglages.iaPause ? Reglages.t("L'IA est en pause (Économie sur batterie)", "AI is paused (Power Saver on battery)")
-                                                           : Reglages.t("L'IA est désactivée", "AI is turned off")
+    // Pourquoi l'IA ne répond pas : coupée dans les réglages
+    readonly property string motifCoupee: Reglages.t("L'IA est désactivée", "AI is turned off")
     readonly property bool reflechit: demandeur.running || agent.running
     // « @ » : le plan de l'IA (nc-ia agir --json), puis chaque action confirmée par Entrée (nc-ia executer)
     property var plan: null

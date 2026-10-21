@@ -45,7 +45,7 @@ class Alertes(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         (self.home / "bin").mkdir()
-        for nom in ("nc-alertes", "nc-assistant"):
+        for nom in ("nc-alertes", "nc-assistant", "nc-ia"):
             shutil.copy2(BIN / nom, self.home / "bin" / nom)
         (self.home / "bin/systemctl").write_text('#!/bin/sh\nprintf "%s" "${NC_TEST_ECHECS:-}"\n')
         (self.home / "bin/systemctl").chmod(0o755)
@@ -68,9 +68,10 @@ class Alertes(unittest.TestCase):
         (self.home / "sys/BAT0/capacity").write_text("%d\n" % pct)
         (self.home / "sys/BAT0/status").write_text(statut + "\n")
 
-    def lancer(self, *args, echecs=""):
+    def lancer(self, *args, echecs="", eco=False):
         env = dict(HOME=str(self.home), XDG_STATE_HOME=str(self.home / "state"), NC_ALERTES_SYSFS=str(self.home / "sys"),
-                   NC_TEST_ECHECS=echecs, NC_LANGUE="fr", PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin")
+                   NC_TEST_ECHECS=echecs, NC_LANGUE="fr", PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin",
+                   NC_POWER_SUPPLY="batterie" if eco else "secteur", NC_PROFIL="power-saver" if eco else "balanced")
         r = subprocess.run([str(self.home / "bin/nc-alertes"), *args], env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
@@ -115,6 +116,13 @@ class Alertes(unittest.TestCase):
         self.lancer("envoyer", "Bonjour", "le", "monde")
         self.assertEqual(self.textes(), ["✅ Mise à jour du système terminée : système à jour.",
                                          "✅ Mise à jour du système terminée, 3 encore en attente.", "Bonjour le monde"])
+
+    def test_en_pause_en_economie_sur_batterie(self):
+        """Une alerte part d'un automatisme (toutes les 5 min) : arrière-plan, en pause en Économie sur batterie."""
+        self.lancer("maj", "0", eco=True)
+        self.assertEqual(self.textes(), [])
+        self.lancer("maj", "0")
+        self.assertEqual(len(self.textes()), 1, "sur secteur, elle part")
 
     def test_rien_sans_reglage_ni_connexion(self):
         self.batterie(5, "Discharging")

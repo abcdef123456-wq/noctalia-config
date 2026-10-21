@@ -430,8 +430,7 @@ Item {
             readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
             onEnLigneChanged: lireQui.running = true
             icone: "auto_awesome"; titre: Reglages.t("IA", "AI"); actif: !Reglages.iaCoupee; couleur: Couleurs.violet
-            sous: Reglages.iaPause && Reglages.val("IA_MODE", "auto") !== "non" ? Reglages.t("En pause · Économie", "Paused · Power Saver")
-                  : Reglages.iaCoupee ? Reglages.t("Coupée partout", "Off everywhere")
+            sous: Reglages.iaCoupee ? Reglages.t("Coupée partout", "Off everywhere")
                   : (qui || (enLigne ? Reglages.t("Aucune disponible", "None available") : Reglages.t("Hors ligne", "Offline")))
             Process {
                 id: lireQui
@@ -442,7 +441,6 @@ Item {
             Connections { target: Reglages; function onIaCoupeeChanged() { if (!Reglages.iaCoupee) lireQui.running = true } }
             onClic: {
                 var bin = Quickshell.env("HOME") + "/.local/bin/nc-reglages"
-                if (Reglages.iaPause && Reglages.val("IA_MODE", "auto") !== "non") return     // revient seule hors Économie / sur secteur
                 if (Reglages.iaCoupee) Memo.lire("ia-avant", v => Etat.faire([bin, "set", "IA_MODE", v && (v.mode === "manuel" || v.mode === "auto") ? v.mode : "auto"]))
                 else { Memo.ecrire("ia-avant", { mode: Reglages.val("IA_MODE", "auto") }); Etat.faire([bin, "set", "IA_MODE", "non"]) }
             }

@@ -19,8 +19,8 @@ dépendance à installer (Python seul).
 
 **Sans connexion internet**, l'IA disparaît partout (Spotlight, presse-papiers, notifications, raccourcis, terminal)
 et revient d'elle-même avec la connexion ; seule une IA de ce PC (Ollama) reste proposée. **En profil Économie sur
-batterie**, elle se met en pause partout (rien n'est appelé) et revient sur secteur ou hors Économie (réglage « En pause
-en Économie sur batterie »).
+batterie**, l'IA qui tourne toute seule (alertes Telegram, automatismes) se met en pause et revient sur secteur ou hors
+Économie ; ce que tu lances toi-même marche toujours (réglage « Arrière-plan en pause en Économie sur batterie »).
 
 **Ordre du mode automatique** : la plus rapide (les API, puis JARVIS, puis les programmes), mes abonnements d'abord
 (Claude Code, Codex… déjà payés), sur ce PC d'abord (Ollama : rien ne sort du PC tant qu'il répond), ou JARVIS d'abord.

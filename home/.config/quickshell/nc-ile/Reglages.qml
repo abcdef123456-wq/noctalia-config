@@ -20,10 +20,9 @@ Singleton {
     }
     // IA du bureau coupée (nc-reglages → Intelligence artificielle → Aucune) : plus de pages JARVIS ni Agents, plus d'IA
     // dans le Spotlight ; les réponses de la config (sans IA) restent
-    // En profil Économie sur batterie, l'IA se met en pause partout (IA_ECONOMIE, oui par défaut) et revient seule sur
-    // secteur ou hors Économie : comptée comme coupée
-    readonly property bool iaPause: economie && UPower.onBattery && val("IA_ECONOMIE", "oui") !== "non"
-    readonly property bool iaCoupee: val("IA_MODE", "auto") === "non" || iaPause
+    // En profil Économie sur batterie, seule l'IA d'arrière-plan se met en pause (IA_ECONOMIE, nc-ia --fond) : rien dans
+    // l'île ne tourne tout seul, tout ce qu'on y lance reste disponible
+    readonly property bool iaCoupee: val("IA_MODE", "auto") === "non"
     function pageActive(nom) { return !(iaCoupee && (nom === "claude" || nom === "assistant")) && val("ILE_PAGE_" + nom.toUpperCase(), "oui") !== "non" }
     function filtrerPages(pages) { return pages.filter(nom => pageActive(nom)) }
     readonly property bool en: {
