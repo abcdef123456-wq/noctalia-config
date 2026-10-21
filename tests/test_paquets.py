@@ -147,6 +147,50 @@ class Paquets(unittest.TestCase):
         self.assertEqual(self.notifs(4)[-1][0], "Système à jour")
         self.assertEqual(self.cache.read_text(), "0\n\n")
 
+    def test_echec_de_verification_jamais_a_jour(self):
+        """Revue Codex PKG-01 : checkupdates en échec (réseau) vidait le compte et annonçait « Système à jour »."""
+        import json
+        depots = "zsh 5-1 -> 5-2\nlinux 6.1-1 -> 6.2-1\n"
+        self.lancer("compter", NC_TEST_DEPOTS=depots, NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(self.cache.read_text().splitlines()[0], "3")
+        ck = self.home / "bin/checkupdates"
+        ck.write_text('#!/bin/sh\necho "checkupdates" >> "$HOME/appels"\necho "==> ERROR: Cannot fetch updates" >&2\nexit 1\n')
+        r = self.lancer("verifier", NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(r.returncode, 1, "lancé à la main : un compte incomplet est un échec")
+        self.assertIn("incomplète", r.stderr)
+        self.assertEqual(self.cache.read_text(), "3\naur:zen-browser-bin\nlinux\nzsh\n", "le dernier état des dépôts est gardé")
+        d = json.loads((self.home / ".cache/nc/paquets.json").read_text())
+        self.assertEqual(d["incomplet"], ["depot"])
+        titre, corps = self.notifs(2)[-1]
+        self.assertNotEqual(titre, "Système à jour")
+        self.assertIn("Pas vérifié cette fois : dépôts", corps)
+        self.assertTrue((self.home / ".cache/nc/paquets-erreur").exists())
+        # Rien de connu et tout en échec : « Vérification impossible », jamais « à jour »
+        (self.home / ".cache/nc/paquets.json").unlink()
+        self.lancer("verifier")
+        self.assertEqual(self.notifs(3)[-1][0], "Vérification impossible")
+        # « compter » à la main échoue aussi ; la source revient : l'état d'erreur disparaît
+        self.assertEqual(self.lancer("compter").returncode, 1)
+        ck.write_text(FAUX_CHECKUPDATES)
+        self.assertEqual(self.lancer("compter", NC_TEST_DEPOTS="").returncode, 0)
+        self.assertFalse((self.home / ".cache/nc/paquets-erreur").exists())
+        self.assertEqual(self.cache.read_text(), "0\n\n")
+
+    def test_instantane_si_crochet_snapper_d_une_seule_distribution(self):
+        """Revue Codex PKG-02 : snap-pac présent (Arch) mais pas les crochets des autres distributions : « ls » échouait
+        et nc-paquets prenait un instantané en double."""
+        crochet = self.home / "snap-pac.hook"; crochet.write_text("")
+        racine = self.home / "snapper-root"; racine.write_text("")
+        env = dict(NC_TEST_FS="btrfs", NC_TEST_LOCAL="", NC_CROCHETS_SNAPPER=f"{crochet} /nulle/part/snapper.py",
+                   NC_SNAPPER_ROOT=str(racine))
+        r = self.lancer("terminal", **env)
+        self.assertIn("fait par snapper", r.stdout)
+        self.assertFalse([x for x in self.appels() if x.startswith("btrfs")])
+        # Crochet sans configuration de / : il ne sert à rien, nc-paquets fait l'instantané
+        racine.unlink()
+        self.lancer("terminal", **env)
+        self.assertTrue([x for x in self.appels() if x.startswith("btrfs subvolume snapshot")])
+
     def test_instantane_btrfs_avant_la_mise_a_jour(self):
         r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
         self.assertEqual(r.returncode, 0, r.stderr)

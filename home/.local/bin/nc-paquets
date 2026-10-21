@@ -26,25 +26,43 @@ export LC_ALL=C          # sorties des gestionnaires de paquets en anglais (anal
 
 aur_outil() { [ "$(reglage MAJ_AUR)" = non ] && return 1; command -v paru 2>/dev/null || command -v yay 2>/dev/null; }
 
+# Une source qui n'a pas pu être lue (réseau, dépôt indisponible, verrou) est notée dans $echecs : « rien à mettre à
+# jour » et « pas pu vérifier » ne se confondent jamais (revue Codex PKG-01). Codes de sortie : checkupdates 2 = rien,
+# pacman -Qu 1 = rien, dnf check-update 100 = des mises à jour, 0 = rien ; tout autre code est un échec.
+echecs=""
+echec() { [ -n "$echecs" ] && printf '%s\n' "$1" >> "$echecs"; }
+
 details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local » : dépôts déjà synchronisés
-  local a
+  local a sortie c err
+  err="$cache/.paquets-erreurs.$$"
   if command -v pacman >/dev/null; then
     # checkupdates synchronise une copie des dépôts (long) ; juste après pacman -Syu, les vrais dépôts sont à jour
-    { if [ "${1:-}" = local ]; then pacman -Qu 2>/dev/null
-      elif command -v checkupdates >/dev/null; then checkupdates 2>/dev/null; fi; } |
-      grep -v '\[ignored\]' | awk 'NF >= 1 {print "depot\t" $1 "\t" $2 "\t" $4}'
-    # AUR : paru ou yay interrogent l'API de l'AUR (quelques Ko)
-    if a="$(aur_outil)"; then "$a" -Qua --color never 2>/dev/null | grep -v '\[ignored\]' | awk 'NF >= 4 {print "aur\t" $1 "\t" $2 "\t" $4}'; fi
+    sortie=""
+    if [ "${1:-}" = local ]; then sortie="$(pacman -Qu 2>/dev/null)"; c=$?; [ "$c" -le 1 ] || echec depot
+    elif command -v checkupdates >/dev/null; then sortie="$(checkupdates 2>/dev/null)"; c=$?; [ "$c" = 0 ] || [ "$c" = 2 ] || echec depot; fi
+    printf '%s\n' "$sortie" | grep -v '\[ignored\]' | awk 'NF >= 1 {print "depot\t" $1 "\t" $2 "\t" $4}'
+    # AUR : paru ou yay interrogent l'API de l'AUR (quelques Ko) ; sans mise à jour, ils finissent en code 1 sans
+    # rien dire : seul un message « error » est un échec
+    if a="$(aur_outil)"; then
+      sortie="$("$a" -Qua --color never 2>"$err")"; c=$?
+      [ "$c" = 0 ] || ! grep -qi 'error' "$err" || echec aur
+      printf '%s\n' "$sortie" | grep -v '\[ignored\]' | awk 'NF >= 4 {print "aur\t" $1 "\t" $2 "\t" $4}'
+    fi
   elif command -v dnf >/dev/null; then
-    dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null |
-      awk 'NF == 3 && $1 ~ /\./ {n = $1; sub(/\.[^.]*$/, "", n); print "depot\t" n "\t\t" $2}'
+    sortie="$(dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null)"; c=$?
+    [ "$c" = 0 ] || [ "$c" = 100 ] || echec depot
+    printf '%s\n' "$sortie" | awk 'NF == 3 && $1 ~ /\./ {n = $1; sub(/\.[^.]*$/, "", n); print "depot\t" n "\t\t" $2}'
   elif command -v apt >/dev/null; then
-    apt list --upgradable 2>/dev/null |
+    sortie="$(apt list --upgradable 2>/dev/null)" || echec depot
+    printf '%s\n' "$sortie" |
       sed -n 's#^\([^/]*\)/[^ ]* \([^ ]*\) [^ ]* \[upgradable from: \([^]]*\)\].*#depot\t\1\t\3\t\2#p'
   elif command -v zypper >/dev/null; then
     # openSUSE : sans root, zypper ne rafraîchit pas les dépôts ; la liste vient de leur cache (rafraîchi par la mise à
-    # jour elle-même, ou par le service de rafraîchissement de la distribution). Sortie XML : indépendante de la langue
-    zypper --non-interactive --no-refresh --xmlout list-updates 2>/dev/null | grep '<update ' | grep 'kind="package"' |
+    # jour elle-même, ou par le service de rafraîchissement de la distribution). Sortie XML : indépendante de la langue.
+    # Codes 100 et plus : des informations (mises à jour, redémarrage), pas des échecs
+    sortie="$(zypper --non-interactive --no-refresh --xmlout list-updates 2>/dev/null)"; c=$?
+    [ "$c" = 0 ] || [ "$c" -ge 100 ] || echec depot
+    printf '%s\n' "$sortie" | grep '<update ' | grep 'kind="package"' |
       while IFS= read -r l; do
         n="$(sed -n 's/.* name="\([^"]*\)".*/\1/p' <<<"$l")"; v="$(sed -n 's/.* edition="\([^"]*\)".*/\1/p' <<<"$l")"
         o="$(sed -n 's/.* edition-old="\([^"]*\)".*/\1/p' <<<"$l")"
@@ -52,8 +70,24 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
       done
   fi
   if command -v flatpak >/dev/null; then
-    flatpak remote-ls --updates --columns=application,version 2>/dev/null | awk -F'\t' 'NF >= 1 && $1 != "" {print "flatpak\t" $1 "\t\t" $2}'
+    sortie="$(flatpak remote-ls --updates --columns=application,version 2>/dev/null)" || echec flatpak
+    printf '%s\n' "$sortie" | awk -F'\t' 'NF >= 1 && $1 != "" {print "flatpak\t" $1 "\t\t" $2}'
   fi
+  rm -f "$err"
+}
+
+# Les paquets connus d'une source qui n'a pas pu être lue cette fois : ceux du dernier compte, gardés tels quels
+anciens() {
+  python3 - "$cache/paquets.json" "$@" <<'PY' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    sys.exit()
+for p in d.get("paquets", []):
+    if p.get("source") in sys.argv[2:]:
+        print("\t".join(str(p.get(k, "")).replace("\t", " ") for k in ("source", "nom", "avant", "apres")))
+PY
 }
 
 # Le minuteur passe chaque heure ; compter seulement s'il est temps (secteur, batterie, Économie, connexion limitée)
@@ -81,7 +115,8 @@ analyser() {
   local code
   code="$(cat <<'PY'
 import json, os, re, sys, time
-mode, cache, choix, rappel, langue = sys.argv[1:6]
+mode, cache, choix, rappel, langue, manque = sys.argv[1:7]
+manque = [m for m in manque.split(",") if m]
 en = langue.startswith("en")
 T = lambda fr, e: e if en else fr
 lignes = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
@@ -108,7 +143,7 @@ except (OSError, ValueError):
     etat = {}
 maintenant = int(time.time())
 detail = dict(date=maintenant, total=len(paquets), sources=sources, noyau=noyau, paquets=paquets[:300],
-              derniere_notif=etat.get("date", 0))
+              derniere_notif=etat.get("date", 0), incomplet=manque)
 tmp = os.path.join(cache, "paquets.json.tmp")
 json.dump(detail, open(tmp, "w"), ensure_ascii=False)
 os.replace(tmp, os.path.join(cache, "paquets.json"))
@@ -120,8 +155,15 @@ def ligne(p):
     nom = p["nom"].split(".")[-1] if p["source"] == "flatpak" else p["nom"]
     return nom + v
 
+NOMS = {"depot": T("dépôts", "repositories"), "aur": "AUR", "flatpak": "Flatpak"}
+pas_lu = ", ".join(NOMS.get(m, m) for m in manque)
+
 def texte():
     n = len(paquets)
+    if manque and n == 0:
+        return (T("Vérification impossible", "Could not check for updates"),
+                T(f"Pas de réponse : {pas_lu} (réseau ou dépôt indisponible). Réessaie plus tard.",
+                  f"No answer from: {pas_lu} (network or repository unavailable). Try again later."))
     if n == 0:
         return T("Système à jour", "System up to date"), T("Aucune mise à jour en attente.", "No pending update.")
     titre = T(f"{n} mise{'s' if n > 1 else ''} à jour", f"{n} update{'s' if n > 1 else ''}")
@@ -131,6 +173,8 @@ def texte():
     corps += "\n" + " · ".join(x for x in parts if x)
     if noyau:
         corps += "\n" + T("Nouveau noyau : redémarre après la mise à jour.", "New kernel: restart after updating.")
+    if manque:
+        corps += "\n" + T(f"Pas vérifié cette fois : {pas_lu} (dernier état gardé).", f"Not checked this time: {pas_lu} (last state kept).")
     return titre, corps
 
 noms = sorted(f"{p['source']}:{p['nom']}:{p['apres']}" for p in paquets)
@@ -146,14 +190,14 @@ if envoyer:
     json.dump(dict(date=maintenant, noms=noms), open(etat_f, "w"))
     titre, corps = texte()
     print(f"{titre}\t{corps}".replace("\n", "\\n"))
-elif not paquets:
+elif not paquets and not manque:
     try:
         os.remove(etat_f)            # tout est à jour : la prochaine mise à jour sera de nouveau annoncée
     except OSError:
         pass
 PY
 )"
-  python3 -c "$code" "$1" "$cache" "$(reglage MAJ_SYSTEME)" "$(reglage MAJ_RAPPEL)" "${NC_LANGUE:-}"
+  python3 -c "$code" "$1" "$cache" "$(reglage MAJ_SYSTEME)" "$(reglage MAJ_RAPPEL)" "${NC_LANGUE:-}" "${2:-}"
 }
 
 notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jour » ouvre le terminal
@@ -179,8 +223,14 @@ instantane() {
   [ "$(reglage MAJ_INSTANTANE)" = non ] && return 0
   [ "$(findmnt -no FSTYPE / 2>/dev/null)" = btrfs ] || return 0
   local quand; quand="$(date +%Y-%m-%d_%H-%M-%S)"
-  if ls /usr/share/libalpm/hooks/*snap-pac* /usr/lib/zypp/plugins/commit/snapper* /usr/lib/python3*/site-packages/dnf-plugins/snapper.py \
-       /etc/dnf/libdnf5-plugins/actions.d/snapper.actions >/dev/null 2>&1; then
+  # N'importe lequel de ces crochets suffit (un seul existe selon la distribution ; « ls a b » échouait dès qu'un
+  # manquait, revue Codex PKG-02), et snapper doit avoir une configuration de / pour qu'il serve vraiment
+  local h crochet=0
+  for h in ${NC_CROCHETS_SNAPPER:-/usr/share/libalpm/hooks/*snap-pac* /usr/lib/zypp/plugins/commit/snapper* \
+           /usr/lib/python3*/site-packages/dnf-plugins/snapper.py /etc/dnf/libdnf5-plugins/actions.d/snapper.actions}; do
+    [ -e "$h" ] && crochet=1 && break
+  done
+  if [ "$crochet" = 1 ] && [ -e "${NC_SNAPPER_ROOT:-/etc/snapper/configs/root}" ]; then
     t "Instantané : fait par snapper à la mise à jour." "Snapshot: taken by snapper during the update."; echo; return 0
   fi
   t "Instantané du système avant la mise à jour…" "System snapshot before the update…"; echo
@@ -213,12 +263,26 @@ case "$action" in
     [ "$(reglage MAJ_SYSTEME)" = non ] && [ "$mode" != force ] && { rm -f "$fichier" "$cache/paquets.json"; exit 0; }
     [ "$mode" = auto ] && ! il_est_temps && exit 0
     mkdir -p "$cache"
+    echecs="$cache/.paquets-echecs.$$"; : > "$echecs"
     d="$(details "$([ "$mode" = local ] && echo local)")"
+    manque="$(sort -u "$echecs" | tr '\n' ',' | sed 's/,$//')"; rm -f "$echecs"
+    # Une source muette : ses paquets du dernier compte restent (jamais « à jour » faute de réponse), l'état est daté
+    if [ -n "$manque" ]; then
+      d="$d"$'\n'"$(anciens ${manque//,/ })"
+      printf '%s\t%s\n' "$(date +%s)" "$manque" > "$cache/paquets-erreur"
+    else
+      rm -f "$cache/paquets-erreur"
+    fi
     l="$(printf '%s\n' "$d" | awk -F'\t' 'NF >= 2 {print ($1 == "depot" ? "" : $1 ":") $2}' | sort -u)"
     n=$(printf '%s' "$l" | grep -c . || true)
     { echo "$n"; printf '%s\n' "$l"; } > "$fichier.tmp" && mv "$fichier.tmp" "$fichier"
-    a_dire="$(printf '%s\n' "$d" | analyser "$mode" 2>/dev/null)"
-    if [ -n "$a_dire" ]; then notifier "${a_dire%%$'\t'*}" "${a_dire#*$'\t'}"; fi ;;
+    a_dire="$(printf '%s\n' "$d" | analyser "$mode" "$manque" 2>/dev/null)"
+    if [ -n "$a_dire" ]; then notifier "${a_dire%%$'\t'*}" "${a_dire#*$'\t'}"; fi
+    # Le minuteur se tait (il réessaiera) ; lancé à la main, un compte incomplet le dit et finit en échec
+    if [ -n "$manque" ] && [ "$mode" != auto ]; then
+      t "Vérification incomplète, pas de réponse : $manque (dernier état gardé)" "Incomplete check, no answer from: $manque (last state kept)" >&2
+      echo >&2; exit 1
+    fi ;;
   mettre-a-jour)
     exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" "$0" terminal ;;
   terminal)   # dans le terminal ouvert par mettre-a-jour : la mise à jour, puis le recompte
@@ -241,13 +305,15 @@ case "$action" in
     else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; ok=1; fi
     if command -v flatpak >/dev/null; then flatpak update || ok=1; fi
     echo; t "Recompte des mises à jour…" "Recounting updates…"; echo
-    if [ "$ok" = 0 ]; then "$0" compter local; else "$0" compter; fi
+    incomplet=0
+    if [ "$ok" = 0 ]; then "$0" compter local || incomplet=1; else "$0" compter || incomplet=1; fi
     # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
     if [ "$ok" = 0 ] && [ -x "$HOME/.local/bin/nc-ia" ] && [ -s "$cache/paquets-avant.json" ]; then
       setsid "$HOME/.local/bin/nc-ia" rapport-maj systeme "$cache/paquets-avant.json" >/dev/null 2>&1 < /dev/null &
     fi
     n=$(head -1 "$fichier" 2>/dev/null || echo 0)
-    if [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
+    if [ "$incomplet" = 1 ]; then t "Recompte incomplet : relance « nc-paquets verifier » plus tard." "Incomplete recount: run “nc-packages check” later."
+    elif [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi
     # Alerte Telegram de fin de mise à jour (nc-alertes décide : réglage ALERTES_TELEGRAM, connexion configurée)
     [ -x "$HOME/.local/bin/nc-alertes" ] && "$HOME/.local/bin/nc-alertes" maj "${n:-0}" >/dev/null 2>&1 || true
