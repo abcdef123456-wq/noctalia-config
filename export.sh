@@ -76,6 +76,9 @@ HOME_FILES=(
   .local/bin/nc-assistant
   .local/bin/nc-jarvis
   .local/bin/nc-dictee
+  .local/bin/nc-ia
+  .local/bin/nc-session
+  .local/bin/nc-panne
   .local/share/nc-jarvis/actions.json
   .local/share/nc-jarvis/deployer.py
   .local/share/nc-jarvis/server/nc_gateway.py
@@ -133,8 +136,16 @@ HOME_FILES=(
   .local/share/applications/nc-jarvis.desktop
   .local/share/applications/nc-jarvis-chat.desktop
   .local/share/applications/nc-reglages.desktop
+  .local/share/applications/dropterm.desktop
+  .local/share/kio/servicemenus/nc-ia.desktop
+  .local/share/nautilus/scripts/IA
+  .local/share/nemo/actions/nc-ia-expliquer.nemo_action
+  .local/share/nemo/actions/nc-ia-resumer.nemo_action
+  .config/xdg-desktop-portal/hyprland-portals.conf
+  .config/noctalia/palettes/Apple.json
   .config/fastfetch/nc.jsonc
   .config/nc/greeting.zsh
+  .config/nc/ia.zsh
   .config/systemd/user/noctalia.service
   .config/systemd/user/nc-theme-sync.path
   .config/systemd/user/nc-theme-sync.service
@@ -151,6 +162,10 @@ HOME_FILES=(
   .config/systemd/user/nc-paquets.timer
   .config/systemd/user/nc-alertes.service
   .config/systemd/user/nc-alertes.timer
+  .config/systemd/user/nc-panne@.service
+  .config/systemd/user/nc-panne@.service.d/sans-boucle.conf
+  .config/systemd/user/service.d/nc-panne.conf
+  .config/systemd/user/plasma-polkit-agent.service.d/nc-apres-session.conf
   .zshrc
   .p10k.zsh
   .config/nvim
