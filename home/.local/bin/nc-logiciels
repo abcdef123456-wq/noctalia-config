@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""nc-logiciels : chercher un logiciel à installer et l'installer (Spotlight : Super + R, préfixe « + »).
+
+  nc-logiciels chercher TERME [--rapide] [--max N]
+        les paquets qui correspondent, en JSON (le plus pertinent d'abord) : dépôts de la distribution (pacman, dnf,
+        apt ou zypper), AUR (avec paru ou yay, sur Arch) et Flatpak. --rapide : seulement les dépôts de la
+        distribution (suggestions du Spotlight pendant la frappe). Réglages SPOTLIGHT_AUR et SPOTLIGHT_FLATPAK.
+  nc-logiciels installer SOURCE NOM
+        ouvre un terminal qui l'installe (ton mot de passe y est demandé ; paru ou yay te montrent le PKGBUILD)
+  nc-logiciels terminal SOURCE NOM
+        l'installation elle-même, dans ce terminal
+
+SOURCE : depot, aur ou flatpak. Rien n'est installé sans le terminal : il montre la commande et attend ta confirmation.
+Les noms sont vérifiés (lettres, chiffres, @ . _ + -) et passés en arguments, jamais à un shell.
+"""
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+HOME = Path.home()
+BIN = HOME / ".local/bin"
+REGLAGES = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/reglages.conf"
+AUR_RPC = os.environ.get("NC_AUR_RPC") or "https://aur.archlinux.org/rpc/v5/search/"
+NOM = re.compile(r"[A-Za-z0-9@._+-]{1,120}")
+ENV_C = dict(os.environ, LC_ALL="C", LANG="C")          # sorties des gestionnaires de paquets en anglais (analysables)
+# Paquets rarement voulus depuis un lanceur : bibliothèques, modules de langages, symboles de débogage
+ANNEXES = re.compile(r"^(lib|python-|python3-|perl-|ruby-|rubygem-|haskell-|ghc-|r-|node-|nodejs-|golang-|rust-|texlive-|php-|lua-|ocaml-)|-(debug|debuginfo|debugsource|dev|devel|doc|docs|headers|static)$")
+
+
+def T(fr, en):
+    return en if os.environ.get("NC_LANGUE", "").startswith("en") or reglage("LANGUE", "") == "en" else fr
+
+
+def reglage(cle, defaut):
+    try:
+        for l in REGLAGES.read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+def lancer(cmd, delai=8):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=delai, env=ENV_C, stdin=subprocess.DEVNULL)
+        return r.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def famille():
+    for outil, nom in (("pacman", "arch"), ("dnf", "fedora"), ("apt-get", "debian"), ("zypper", "suse")):
+        if shutil.which(outil):
+            return nom
+    return ""
+
+
+def assistant_aur():
+    return next((a for a in ("paru", "yay") if shutil.which(a)), "")
+
+
+def mots(terme):
+    """Les mots de la recherche, réduits aux caractères d'un nom de paquet (pas d'expression régulière surprise)."""
+    return [m for m in re.split(r"[^A-Za-z0-9@._+-]+", terme.lower()) if m][:4]
+
+
+# ── Sources ────────────────────────────────────────────────────────────────────────────────────────────────────
+def depot_arch(m):
+    # pacman -Ss : expressions régulières POSIX, mots combinés en ET ; . et + échappés
+    sortie = lancer(["pacman", "-Ss", "--"] + [re.sub(r"([.+])", r"\\\1", x) for x in m])
+    res, cur = [], None
+    for l in sortie.splitlines():
+        if not l.startswith(" "):
+            r = re.match(r"(\S+)/(\S+) (\S+)(.*)", l)
+            cur = r and dict(source="depot", depot=r[1], nom=r[2], version=r[3], description="", installe="[installed" in r[4])
+            if cur:
+                res.append(cur)
+        elif cur is not None:
+            cur["description"] = l.strip()
+    return res
+
+
+def depot_fedora(m):
+    # Cache seulement (-C) : pas de téléchargement des métadonnées à chaque touche
+    sortie = lancer(["dnf", "-q", "-C", "search", "--"] + m, delai=10)
+    res = []
+    for l in sortie.splitlines():
+        r = re.match(r"\s*([A-Za-z0-9@._+-]+)\.(?:x86_64|aarch64|noarch|i686)\s*:?\s*(.*)", l)
+        if r:
+            res.append(dict(source="depot", depot="fedora", nom=r[1], version="", description=r[2].strip(" :"), installe=False))
+    if res:
+        sortie = lancer(["rpm", "-q", "--qf", "%{NAME}\\n"] + [x["nom"] for x in res[:60]])
+        installes = {l.strip() for l in sortie.splitlines() if l.strip() and " " not in l}
+        for x in res:
+            x["installe"] = x["nom"] in installes
+    return res
+
+
+def depot_debian(m):
+    sortie = lancer(["apt-cache", "search", "--"] + m)
+    res = []
+    for l in sortie.splitlines():
+        nom, _, desc = l.partition(" - ")
+        if NOM.fullmatch(nom.strip()):
+            res.append(dict(source="depot", depot="debian", nom=nom.strip(), version="", description=desc.strip(), installe=False))
+    if res:
+        sortie = lancer(["dpkg-query", "-W", "-f=${Package} ${db:Status-Abbrev}\n"] + [x["nom"] for x in res[:80]])
+        installes = {l.split()[0] for l in sortie.splitlines() if len(l.split()) > 1 and l.split()[1].startswith("ii")}
+        for x in res:
+            x["installe"] = x["nom"] in installes
+    return res
+
+
+def depot_suse(m):
+    sortie = lancer(["zypper", "--non-interactive", "--no-refresh", "--xmlout", "search", "-t", "package", "--"] + m, delai=10)
+    res = []
+    for l in re.findall(r"<solvable [^>]*>", sortie):
+        a = dict(re.findall(r'(\w+)="([^"]*)"', l))
+        if a.get("name") and NOM.fullmatch(a["name"]):
+            res.append(dict(source="depot", depot="opensuse", nom=a["name"], version="", description=a.get("summary", ""),
+                            installe=a.get("status") == "installed"))
+    return res
+
+
+def aur(m):
+    """L'API de l'AUR (recherche par nom et description sur le premier mot, puis filtre sur les autres)."""
+    if not m:
+        return []
+    try:
+        url = AUR_RPC + urllib.parse.quote(m[0]) + "?by=name-desc"
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "nc-logiciels"}), timeout=4) as r:
+            d = json.loads(r.read(4_000_000))
+    except (OSError, ValueError):
+        return []
+    installes = set(lancer(["pacman", "-Qq"]).split())
+    res = []
+    for p in d.get("results") or []:
+        nom, desc = str(p.get("Name", "")), str(p.get("Description") or "")
+        if not NOM.fullmatch(nom) or not all(x in (nom + " " + desc).lower() for x in m[1:]):
+            continue
+        res.append(dict(source="aur", depot="aur", nom=nom, version=str(p.get("Version", "")), description=desc,
+                        installe=nom in installes, popularite=float(p.get("Popularity") or 0)))
+    return res
+
+
+def flatpak(m):
+    sortie = lancer(["flatpak", "search", "--columns=application,name,description,version,remotes", "--"] + m, delai=10)
+    installes = set(lancer(["flatpak", "list", "--app", "--columns=application"]).split())
+    res = []
+    for l in sortie.splitlines():
+        c = l.split("\t")
+        if len(c) >= 5 and NOM.fullmatch(c[0]) and "." in c[0]:
+            res.append(dict(source="flatpak", depot=c[4].split(",")[0].strip() or "flathub", nom=c[0], titre=c[1],
+                            version=c[3], description=c[2], installe=c[0] in installes))
+    return res
+
+
+def score(x, m):
+    q = " ".join(m)
+    n, t = x["nom"].lower(), (x.get("titre") or "").lower()
+    if n == q or t == q:
+        s = 100
+    elif n.startswith(q) or t.startswith(q):
+        s = 85
+    elif all(w in n or w in t for w in m):
+        s = 65
+    else:
+        s = 30                                                  # trouvé dans la description
+    if ANNEXES.search(n):
+        s -= 25
+    # Les dépôts officiels d'abord à pertinence égale ; dans l'AUR, un paquet populaire passe devant un abandonné
+    s += {"depot": 8, "flatpak": 4, "aur": 0}[x["source"]]
+    s += min(5, 2 * math.log10(1 + x.get("popularite", 0) * 10)) if x["source"] == "aur" else 0
+    return s - len(n) / 100                                     # à égalité, le nom le plus court
+
+
+def chercher(terme, rapide=False, maximum=30):
+    m = mots(terme)
+    if not m or len(" ".join(m)) < 2:
+        return []
+    res = {"arch": depot_arch, "fedora": depot_fedora, "debian": depot_debian, "suse": depot_suse}.get(famille(), lambda _: [])(m)
+    if not rapide:
+        if famille() == "arch" and assistant_aur() and reglage("SPOTLIGHT_AUR", "oui") != "non":
+            vus = {x["nom"] for x in res}
+            res += [x for x in aur(m) if x["nom"] not in vus]
+        if shutil.which("flatpak") and reglage("SPOTLIGHT_FLATPAK", "oui") != "non":
+            res += flatpak(m)
+    for x in res:
+        x["score"] = round(score(x, m), 2)
+    if rapide:
+        # Suggestions pendant la frappe : pas les modules d'une appli déjà installée (« firefox-adblock-plus » quand
+        # on tape « fire » pour lancer Firefox)
+        installes = [x["nom"] + "-" for x in res if x["installe"]]
+        res = [x for x in res if x["installe"] or not any(x["nom"].startswith(i) for i in installes)]
+    res.sort(key=lambda x: -x["score"])
+    return res[:maximum]
+
+
+# ── Installation ───────────────────────────────────────────────────────────────────────────────────────────────
+def commande(source, nom, depot=""):
+    if not NOM.fullmatch(nom):
+        raise ValueError(T("nom de paquet invalide", "invalid package name"))
+    if source == "aur":
+        a = assistant_aur()
+        if not a:
+            raise ValueError(T("ni paru ni yay : l'AUR n'est pas disponible", "neither paru nor yay: the AUR is unavailable"))
+        return [a, "-S", "--", nom]
+    if source == "flatpak":
+        if not shutil.which("flatpak"):
+            raise ValueError(T("Flatpak n'est pas installé", "Flatpak is not installed"))
+        return ["flatpak", "install", depot if NOM.fullmatch(depot or "") else "flathub", nom]
+    if source == "depot":
+        f = famille()
+        return {"arch": ["sudo", "pacman", "-S", "--needed", "--", nom], "fedora": ["sudo", "dnf", "install", "--", nom],
+                "debian": ["sudo", "apt", "install", "--", nom], "suse": ["sudo", "zypper", "install", "--", nom]}.get(f) or \
+            (_ for _ in ()).throw(ValueError(T("gestionnaire de paquets non reconnu", "unrecognized package manager")))
+    raise ValueError(T("source inconnue (depot, aur ou flatpak)", "unknown source (depot, aur or flatpak)"))
+
+
+def installer(source, nom, depot=""):
+    commande(source, nom, depot)                                # vérifié avant d'ouvrir un terminal
+    moi = str(BIN / "nc-logiciels")
+    args = [moi, "terminal", source, nom] + ([depot] if depot else [])
+    terminal = shutil.which("kitty")
+    if terminal:
+        cmd = [terminal, "--class", "nc-logiciels", "--title", T("Installer ", "Install ") + nom, "-e"] + args
+    else:
+        autre = next((t for t in ("foot", "alacritty", "wezterm", "ghostty", "konsole", "gnome-terminal", "xterm") if shutil.which(t)), "")
+        if not autre:
+            raise ValueError(T("aucun terminal trouvé", "no terminal found"))
+        cmd = [autre, "-e"] + args if autre not in ("gnome-terminal",) else [autre, "--"] + args
+    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def terminal(source, nom, depot=""):
+    cmd = commande(source, nom, depot)
+    print(T(f"Installation de {nom} : ", f"Installing {nom}: ") + " ".join(cmd) + "\n", flush=True)
+    code = subprocess.run(cmd).returncode
+    if code == 0:
+        texte = T(f"{nom} est installé : tu le trouves dans le Spotlight (Super + R).", f"{nom} is installed: find it in the Spotlight (Super + R).")
+        try:
+            subprocess.run(["notify-send", "-a", "Spotlight", "-i", "system-software-install", T("Installé", "Installed"), texte],
+                           capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass                                                # pas de notify-send : le message du terminal suffit
+    else:
+        texte = T(f"Installation non terminée (code {code}).", f"Installation not completed (code {code}).")
+    print("\n" + texte)
+    try:
+        input(T("Entrée pour fermer.", "Press Enter to close."))
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return code
+
+
+def main(a):
+    try:
+        if a[:1] in (["chercher"], ["search"]) and len(a) >= 2:
+            rapide = "--rapide" in a or "--fast" in a
+            maximum = 30
+            if "--max" in a:
+                i = a.index("--max")
+                maximum = max(1, min(100, int(a[i + 1]))) if i + 1 < len(a) and a[i + 1].isdigit() else 30
+            terme = a[1]
+            print(json.dumps(chercher(terme, rapide, maximum), ensure_ascii=False))
+            return 0
+        if a[:1] in (["installer"], ["install"]) and len(a) in (3, 4):
+            installer(a[1], a[2], a[3] if len(a) == 4 else "")
+            return 0
+        if a[:1] == ["terminal"] and len(a) in (3, 4):
+            return terminal(a[1], a[2], a[3] if len(a) == 4 else "")
+    except ValueError as e:
+        print("nc-logiciels : " + str(e), file=sys.stderr)
+        return 1
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

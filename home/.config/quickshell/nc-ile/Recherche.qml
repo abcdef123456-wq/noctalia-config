@@ -5,8 +5,10 @@
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal, « ? » question à une IA
-// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander). Une saisie qui commence par
-// un programme (htop, ping…) propose aussi de la lancer dans le terminal.
+// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander), « + » logiciel à installer
+// (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
+// Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
+// Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -44,6 +46,10 @@ Item {
     property var fichiers: []
     property string calcul: ""
     property var resultats: []
+    // Logiciels à installer (nc-logiciels) : la liste et le terme qu'elle concerne
+    property var paquets: []
+    property string paquetsPour: ""
+    readonly property string modePaquets: Reglages.val("SPOTLIGHT_PAQUETS", "auto")
     property int sel: 0
     readonly property string q: champ.text.trim()
 
@@ -161,6 +167,49 @@ Item {
             }
         }
     }
+    // Logiciels à installer : « + terme » cherche partout (dépôts, AUR, Flatpak) ; sans préfixe, les dépôts seulement
+    function termePaquets() {
+        if (modePaquets === "non") return ""
+        if (q.startsWith("+")) return q.slice(1).trim()
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|g |yt |w |\/)/.test(q) ? q : ""
+    }
+    Process {
+        id: chercheurPaquets
+        property string pour: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var p = []
+                try { p = JSON.parse(text) } catch (e) {}
+                r.paquets = Array.isArray(p) ? p : []
+                r.paquetsPour = chercheurPaquets.pour
+                r.chercher()
+            }
+        }
+        // La saisie a changé pendant la recherche : la suivante part tout de suite
+        onRunningChanged: if (!running && r.termePaquets() !== "" && r.termePaquets() !== pour) attentePaquets.restart()
+    }
+    Timer {
+        id: attentePaquets
+        interval: 320
+        onTriggered: {
+            var t = r.termePaquets()
+            if (t.length < 2 || chercheurPaquets.running || t === r.paquetsPour) return
+            chercheurPaquets.pour = t
+            chercheurPaquets.command = [Etat.bin + "nc-logiciels", "chercher", t].concat(r.q.startsWith("+") ? ["--max", "12"] : ["--rapide", "--max", "6"])
+            chercheurPaquets.running = true
+        }
+    }
+    function installer(p) {
+        Quickshell.execDetached([Etat.bin + "nc-logiciels", "installer", p.source, p.nom].concat(p.source === "flatpak" ? [p.depot] : []))
+    }
+    function itemPaquet(p, s) {
+        var origine = p.source === "aur" ? "AUR" : p.source === "flatpak" ? "Flatpak" : Reglages.t("Dépôt ", "Repo ") + p.depot
+        var desc = (p.description || "").length > 70 ? p.description.slice(0, 68) + "…" : (p.description || "")
+        return { titre: p.titre || p.nom, sous: origine + (desc ? " · " + desc : ""), glyphe: p.installe ? "check_circle" : "download", s: s,
+                 aide: p.installe ? Reglages.t("déjà installé", "already installed") : Reglages.t("↵ installer", "↵ install"),
+                 garder: p.installe, f: p.installe ? (() => {}) : (() => r.installer(p)) }
+    }
+
     // Fichiers et calcul : lancés un instant après la dernière touche
     Timer {
         id: attente
@@ -262,7 +311,7 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; fichiers = []; calcul = ""; attente.restart(); chercher() }
+    onQChanged: { sel = 0; fichiers = []; calcul = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -291,6 +340,16 @@ Item {
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
             }
+            return
+        }
+        if (q.startsWith("+") && modePaquets !== "non") {
+            var tp = q.slice(1).trim()
+            if (tp.length < 2) resultats = [{ titre: Reglages.t("Tape le nom d'un logiciel à installer", "Type the name of an app to install"),
+                                              sous: Reglages.t("Dépôts, AUR et Flatpak", "Repos, AUR and Flatpak"), glyphe: "download", garder: true, f: () => {} }]
+            else if (paquetsPour !== tp) resultats = [{ titre: tp, sous: Reglages.t("Recherche dans les logiciels…", "Searching apps…"), glyphe: "hourglass_top", garder: true, f: () => {} }]
+            else if (!paquets.length) resultats = [{ titre: Reglages.t("Aucun logiciel ne correspond", "No app matches"), sous: tp, glyphe: "search_off", garder: true, f: () => {} }]
+            else resultats = paquets.slice(0, 7).map(p => itemPaquet(p, p.score))
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
         if (q.startsWith(">")) {
@@ -366,6 +425,12 @@ Item {
         }
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, 6)
+        // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
+        if (modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
+            var noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
+            var aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
+            if (aInstaller.length) out = out.slice(0, 6 - aInstaller.length).concat(aInstaller.map(p => itemPaquet(p, 0)))
+        }
         // Saisie qui commence par un programme (« htop », « ping google.fr ») : la lancer dans le terminal
         var prog = q.split(/\s+/)[0]
         if (execs[prog] && !q.startsWith("/")) {
@@ -441,6 +506,7 @@ Item {
         Ico { id: loupe; x: 22; anchors.verticalCenter: parent.verticalCenter; nom: "search"; taille: 22; color: Couleurs.texteSec }
         TextInput {
             id: champ
+            objectName: "nc-spotlight-champ"
             anchors.left: loupe.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 22
             anchors.verticalCenter: parent.verticalCenter
             color: Couleurs.texte; selectionColor: Couleurs.accent; selectedTextColor: Couleurs.surAccent
@@ -456,7 +522,7 @@ Item {
             Texte {
                 visible: champ.text === ""
                 anchors.verticalCenter: parent.verticalCenter
-                text: Reglages.t("Rechercher  ·  > commande  ·  ? question à l'IA", "Search  ·  > command  ·  ? ask the AI"); secondaire: true; font.pixelSize: 19
+                text: Reglages.t("Rechercher  ·  > commande  ·  ? question à l'IA  ·  + installer", "Search  ·  > command  ·  ? ask the AI  ·  + install"); secondaire: true; font.pixelSize: 19
             }
         }
     }

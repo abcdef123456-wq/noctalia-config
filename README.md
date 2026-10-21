@@ -124,6 +124,12 @@ capture, notifications, réglages, verrouillage, extinction. **Appui long (ou cl
 volume : page de détails (réseaux avec mot de passe, appareils, sorties audio et micro). Clic ailleurs ou **Échap** : elle
 se referme dans la pilule.
 
+**Super + R** ouvre le Spotlight : applis, fenêtres, fichiers, calculs, `> commande`, `? question à une IA`, et
+**`+ nom` pour installer un logiciel** (dépôts de ta distribution, AUR avec paru ou yay, Flatpak ; `nc-logiciels`) :
+Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). En tapant sans
+préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
+installer dans le Spotlight »).
+
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
 

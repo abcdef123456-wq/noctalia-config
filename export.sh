@@ -90,6 +90,7 @@ HOME_FILES=(
   .local/bin/nc-alertes
   .local/bin/nc-fenetre
   .local/bin/nc-firefox
+  .local/bin/nc-logiciels
   .local/bin/nc-qs-capture
   .local/bin/nc-langue
   .local/bin/nc-meteo

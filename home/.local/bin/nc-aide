@@ -105,6 +105,7 @@ AUTOMATIQUES = [
     ("nc-session-propre", "Arrête les barres d'une ancienne config au démarrage."),
     ("nc-noctalia-avant", "Prépare Noctalia juste avant son démarrage."),
     ("nc-shell", "État de la barre Noctalia."),
+    ("nc-logiciels", "Chercher un logiciel à installer (dépôts, AUR, Flatpak) et l'installer dans un terminal ; dans le Spotlight : « + nom »."),
     ("nc-firefox", "La config Firefox du dépôt dans ton profil (préférences, style de l'île) : installer, desinstaller, couleurs ; "
                    "nc-firefox extension installer : le thème suit le fond d'écran en direct (réglage Firefox aux couleurs du fond d'écran)."),
 ]
@@ -133,6 +134,7 @@ ANGLAIS = {
     "nc-sauvegarde": ("nc-backup --fonds", "All your settings in a single file (to reinstall, or to give to a friend); "
                                            "nc-backup restore FILE to bring them back."),
     "nc-anim": ("nc-anim snow", "Animations (power button): nc-anim list, play one, nc-anim new NAME to create your own."),
+    "nc-logiciels": ("nc-logiciels chercher obs", "Search an app to install (repos, AUR, Flatpak) and install it in a terminal; in Spotlight: “+ name”."),
     "nc-firefox": ("nc-firefox install", "The repo's Firefox config (prefs and island style) in your profile; "
                    "nc-firefox uninstall puts everything back."),
     "nc-demander": ("nc-ask \"how do I see free disk space\"", "Quick question to an installed AI (Claude, opencode, Gemini, "
