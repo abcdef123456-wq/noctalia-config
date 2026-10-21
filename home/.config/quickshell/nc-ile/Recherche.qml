@@ -125,6 +125,7 @@ Item {
     function lancerCommande(c) { Quickshell.execDetached(["kitty", "--hold", "sh", "-c", "PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; " + c]) }
 
     property var applis: []
+    property var sessions: []                // dispositions enregistrées (nc-session) : « session NOM » ou leur nom
     property var fenetres: []
     property var usage: ({})
     property var fichiers: []
@@ -179,6 +180,7 @@ Item {
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true
+        lireSessions.running = true
         if (Object.keys(execs).length === 0) lireExecs.running = true
         lireIA.running = true
         if (aideActive && !majAide.running) majAide.running = true
@@ -261,6 +263,17 @@ Item {
         }
     }
     Process {
+        id: lireSessions
+        command: [Etat.bin + "nc-session", "liste", "--json"]
+        stdout: StdioCollector { onStreamFinished: { try { r.sessions = JSON.parse(text) } catch (e) { r.sessions = [] } r.chercher() } }
+    }
+    function itemSession(x, s) {
+        let nom = x.nom
+        return { titre: Reglages.t("Session « ", "Session “") + nom + Reglages.t(" »", "”"), glyphe: "view_quilt", s: s,
+                 sous: x.fenetres + Reglages.t(" fenêtre(s) · ", " window(s) · ") + (x.applis || []).join(", "),
+                 aide: Reglages.t("↵ l'ouvrir", "↵ open it"), f: () => Quickshell.execDetached([Etat.bin + "nc-session", "ouvrir", nom]) }
+    }
+    Process {
         id: lireFenetres
         command: ["hyprctl", "clients", "-j"]
         stdout: StdioCollector {
@@ -304,7 +317,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/)/.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/|sessions? )/i.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -359,7 +372,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|@|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|g |yt |w |sessions? )/i.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -581,6 +594,22 @@ Item {
                            glyphe: "smart_toy", garder: true, f: () => r.lancerAgent(demandeA) }]
             return
         }
+        // « session NOM » : ouvrir une disposition enregistrée, ou enregistrer celle d'aujourd'hui sous ce nom
+        if (/^\s*sessions?\s/i.test(champ.text)) {          // le texte brut : « session » seul reste la recherche (déconnexion…)
+            var nomS = q.replace(/^sessions?\s*/i, "").trim(), qs = sansAccents(nomS)
+            var lignesS = sessions.filter(x => qs === "" || sansAccents(x.nom).indexOf(qs) >= 0).map(x => itemSession(x, 0))
+            if (nomS !== "" && /^[\w][\w .\-]{0,39}$/.test(nomS) && !sessions.some(x => x.nom === nomS)) {
+                let n = nomS
+                lignesS.push({ titre: Reglages.t("Enregistrer la disposition actuelle sous « ", "Save the current layout as “") + n + Reglages.t(" »", "”"),
+                               sous: Reglages.t("Applis ouvertes, leurs bureaux et leur place", "Open apps, their desktops and places"), glyphe: "save",
+                               f: () => Quickshell.execDetached([Etat.bin + "nc-session", "enregistrer", n]) })
+            }
+            if (!lignesS.length) lignesS = [{ titre: Reglages.t("Tape un nom pour enregistrer la disposition actuelle", "Type a name to save the current layout"),
+                                             sous: "Sessions", glyphe: "view_quilt", garder: true, f: () => {} }]
+            resultats = lignesS
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+            return
+        }
         if (q.startsWith("+") && modePaquets !== "non") {
             var tp = q.slice(1).trim()
             if (tp.length < 2) resultats = [{ titre: Reglages.t("Tape le nom d'un logiciel à installer", "Type the name of an app to install"),
@@ -650,6 +679,11 @@ Item {
             var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
             if (!Reglages.pageActive(pg.p)) continue
             if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: Reglages.t("Dans l'île", "In the island"), glyphe: pg.g, s: sp - 5, page: nom }) }
+        }
+        // Sessions enregistrées : par leur nom (« dev » trouve la session « Dev »)
+        for (var ss = 0; ss < sessions.length; ss++) {
+            var sc2 = Math.max(score(qa, sessions[ss].nom, true), score(qa, "session " + sessions[ss].nom, false) - 10)
+            if (sc2 > 0) out.push(itemSession(sessions[ss], sc2 - 4))
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
@@ -733,7 +767,7 @@ Item {
     function valider(i, nouveau) {
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^[?>+!@]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
+        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@]|sessions? )/i.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }

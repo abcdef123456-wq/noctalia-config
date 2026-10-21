@@ -22,4 +22,6 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("playerctld daemon")
     -- Ancienne barre (Waybar, HyprPanel, ancienne Noctalia…) qui démarrerait encore : arrêtée et désactivée
     hl.exec_cmd("~/.local/bin/nc-session-propre")
+    -- Disposition de fenêtres à rouvrir à l'ouverture de session (nc-reglages → Fenêtres → Session à l'ouverture)
+    if nc.reglage("SESSION_DEMARRAGE", "aucune") ~= "aucune" then hl.exec_cmd("~/.local/bin/nc-session demarrage") end
 end)

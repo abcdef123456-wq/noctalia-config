@@ -1,0 +1,152 @@
+"""nc-session : enregistrer la disposition (applis, bureaux, places des fenêtres libres, terminaux), la rouvrir (une
+appli déjà ouverte va sur son bureau, une absente est lancée puis placée quand sa fenêtre apparaît), et le Spotlight
+(« session NOM »)."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+REPO = Path(__file__).resolve().parents[1]
+SCRIPT = REPO / "home/.local/bin/nc-session"
+QML = REPO / "home/.config/quickshell/nc-ile"
+
+FAUX_HYPRCTL = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+H = Path(os.environ["HOME"])
+if sys.argv[1:3] == ["clients", "-j"]:
+    print((H / "clients.json").read_text())
+elif sys.argv[1] == "dispatch":
+    with (H / "appels").open("a") as f: f.write("dispatch " + sys.argv[2] + "\n")
+'''
+# Faux nc-apps : la liste des applis ; « launch » ajoute la fenêtre de l'appli (comme si elle s'ouvrait)
+FAUX_APPS = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+H = Path(os.environ["HOME"])
+if sys.argv[1] == "list":
+    print(json.dumps([{"id": "firefox", "wmclass": "firefox"}, {"id": "discord", "wmclass": "discord"}]))
+elif sys.argv[1] == "launch":
+    with (H / "appels").open("a") as f: f.write("launch " + sys.argv[2] + "\n")
+    c = json.loads((H / "clients.json").read_text())
+    c.append({"address": "0xnouveau", "class": sys.argv[2], "title": sys.argv[2], "mapped": True, "workspace": {"id": 1},
+              "floating": False, "at": [0, 0], "size": [800, 600], "pid": 1})
+    (H / "clients.json").write_text(json.dumps(c))
+'''
+
+
+def client(adresse, classe, bureau, flottant=False, at=(0, 0), taille=(800, 600), titre=None, pid=1):
+    return {"address": adresse, "class": classe, "title": titre or classe, "mapped": True, "workspace": {"id": bureau},
+            "monitor": 0, "floating": flottant, "at": list(at), "size": list(taille), "fullscreen": 0, "pid": pid}
+
+
+class Sessions(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-session-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        b = self.home / ".local/bin"
+        b.mkdir(parents=True)
+        for nom, code in (("hyprctl", FAUX_HYPRCTL), ("nc-apps", FAUX_APPS)):
+            (b / nom).write_text(code); (b / nom).chmod(0o755)
+        for nom in ("notify-send", "kitty"):
+            (b / nom).write_text('#!/bin/sh\necho "' + nom + ' $*" >> "$HOME/appels"\n'); (b / nom).chmod(0o755)
+
+    def clients(self, *c):
+        (self.home / "clients.json").write_text(json.dumps(list(c)))
+
+    def lancer(self, *a):
+        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr", NC_SESSION_DELAI="2")
+        return subprocess.run([str(SCRIPT), *a], env=env, capture_output=True, text=True, timeout=30)
+
+    def appels(self):
+        f = self.home / "appels"
+        return f.read_text() if f.exists() else ""
+
+    def test_enregistrer_puis_rouvrir(self):
+        self.clients(client("0xa", "firefox", 2), client("0xb", "discord", 3, flottant=True, at=(100, 200), taille=(640, 480)),
+                     client("0xc", "kitty", 1, pid=999999), client("0xd", "dropterm", -98), client("0xe", "org.quickshell", 1, titre="JARVIS"))
+        r = self.lancer("enregistrer", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = json.loads((self.home / ".config/nc/sessions/Dev.json").read_text())
+        self.assertEqual([(f["classe"], f["bureau"]) for f in s["fenetres"]], [("kitty", 1), ("firefox", 2), ("discord", 3)],
+                         "ni le terminal déroulant, ni les fenêtres du bureau")
+        self.assertEqual(s["fenetres"][1]["appli"], "firefox")
+        self.assertIn("terminal", s["fenetres"][0])
+        # Rouvrir : Firefox déjà là (sur le bureau 5) y retourne ; Discord absent est lancé puis placé ; un terminal est rouvert
+        (self.home / "appels").unlink()
+        self.clients(client("0xf", "firefox", 5))
+        r = self.lancer("ouvrir", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.appels()
+        self.assertIn("dispatch hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xf' })", a)
+        self.assertIn("launch discord", a)
+        self.assertNotIn("launch firefox", a, "pas de seconde fenêtre pour une appli déjà ouverte")
+        self.assertIn("dispatch hl.dsp.window.move({ workspace = 3, follow = false, window = 'address:0xnouveau' })", a)
+        self.assertIn("hl.dsp.window.float({ action = 'set', window = 'address:0xnouveau' })", a)
+        self.assertIn("hl.dsp.window.resize({ x = 640, y = 480, window = 'address:0xnouveau' })", a)
+        self.assertIn("kitty --directory", a)
+        l = json.loads(self.lancer("liste", "--json").stdout)
+        self.assertEqual((l[0]["nom"], l[0]["fenetres"]), ("Dev", 3))
+
+    def test_noms_refuses(self):
+        self.clients(client("0xa", "firefox", 2))
+        for nom in ("../evil", "", "a/b"):
+            self.assertNotEqual(self.lancer("enregistrer", nom).returncode, 0)
+        self.assertFalse((self.home / ".config/nc/sessions").exists() and list((self.home / ".config/nc/sessions").glob("*.json")))
+
+
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+class SpotlightSessions(unittest.TestCase):
+    def test_session_nom(self):
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-sessions-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Recherche", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                       "nc-demander": '#!/bin/sh\necho \'{"nom": "", "agent": "", "coupee": false}\'\n',
+                       "nc-session": '#!/bin/sh\necho "nc-session $*" >> "$HOME/appels"\n[ "$1" = liste ] && echo \'[{"nom": "Dev", "fenetres": 3, "applis": ["kitty", "firefox"]}]\'\n'}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (!spot.sessions.length) return; champ.text = "session "; etape++; return }
+  if (etape === 1) { verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Dev »"]), JSON.stringify(titres()))
+   champ.text = "session Cours"
+   verifier(titres()[0] === "Enregistrer la disposition actuelle sous « Cours »", JSON.stringify(titres()))
+   spot.valider(0, false); champ.text = "dev"; etape++; return }
+  if (etape === 2) { verifier(titres().indexOf("Session « Dev »") >= 0, "par son nom : " + JSON.stringify(titres()))
+   Qt.quit() }
+ } }
+ Timer { interval: 9000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("nc-session enregistrer Cours", (root / "appels").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

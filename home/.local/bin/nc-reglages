@@ -28,6 +28,7 @@ import importlib.util
 import json
 import locale
 import os
+from pathlib import Path
 import re
 import shutil
 import signal
@@ -580,6 +581,12 @@ REGLAGES = [
     # Fenêtres
     R("FENETRES_ESPACE", "Fenêtres", L("Espace entre les fenêtres", "Gap between windows"), "entier", "4",
       mini=0, maxi=40, unite="px", groupe="hypr"),
+    R("SESSION_DEMARRAGE", "Fenêtres", L("Session à l'ouverture", "Session at login"), "choix", "aucune",
+      L("Une disposition enregistrée (Super + Maj + W, ou nc-session enregistrer NOM) rouverte à chaque ouverture de "
+        "session : ses applis lancées et placées sur leur bureau.",
+        "A saved layout (Super + Shift + W, or nc-session save NAME) reopened at every login: its apps started and placed "
+        "on their desktop."),
+      lambda: [("aucune", L("Aucune", "None"))] + [(f.stem, f.stem) for f in sorted(Path(HOME, ".config/nc/sessions").glob("*.json"))]),
     R("FENETRES_MARGE", "Fenêtres", L("Marge au bord de l'écran", "Margin at the screen edge"), "entier", "10",
       mini=0, maxi=60, unite="px", groupe="hypr"),
     R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",

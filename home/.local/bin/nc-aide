@@ -71,6 +71,10 @@ A_TAPER = [
     ("nc-claude", "nc-claude etat", "Claude Code dans l'île (comme coucou) : ce qu'il fait, quand il a fini, ses "
                                     "demandes, et lui écrire depuis l'île. Aussi opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, "
                                     "Antigravity : nc-claude installer IA (ou tout) ; nc-claude diag si rien ne s'affiche."),
+    ("nc-session", "nc-session enregistrer Dev", "Tes dispositions de fenêtres par projet : enregistrer celle d'aujourd'hui "
+                                               "(applis, bureaux, places, dossier des terminaux), la rouvrir d'un coup "
+                                               "(nc-session ouvrir Dev) ; Super + Maj + W ou « session » dans le Spotlight ; "
+                                               "à l'ouverture de session : nc-reglages → Fenêtres."),
     ("nc-meteo", "nc-meteo texte", "La météo (Open-Meteo, sans compte), comme dans l'île ; ville : nc-reglages → Île."),
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
     ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),
@@ -155,6 +159,9 @@ ANGLAIS = {
                                      "requests, and writing to it from the island. Also opencode, Codex, Gemini CLI, Cursor, "
                                      "Copilot, Qwen, Kiro, Amp, Antigravity: nc-agents install AI (or all); nc-agents diag "
                                      "if nothing shows up."),
+    "nc-session": ("nc-session save Dev", "Your window layouts per project: save today's one (apps, desktops, places, "
+                                          "terminals' folders), reopen it at once (nc-session open Dev); Super + Shift + W or "
+                                          "“session” in Spotlight; at login: nc-settings → Windows."),
     "nc-meteo": ("nc-weather text", "The weather (Open-Meteo, no account), as in the island; city: nc-settings → Island."),
     "nc-memoire": ("nc-memory", "What is using memory: the config on one side, your apps on the other."),
     "nc-pouls": ("nc-pouls diag", "Music glow: “diag” tells why it is not pulsing."),

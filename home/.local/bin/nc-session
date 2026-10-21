@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""nc-session : tes dispositions de fenêtres par projet (« Dev », « Cours »…), enregistrées puis rouvertes d'un coup.
+
+  nc-session enregistrer NOM     la disposition actuelle : les applis ouvertes, leur bureau, leur place si elles sont
+                                 libres ; pour un terminal, son dossier et le programme qui y tourne (Neovim…)
+  nc-session ouvrir NOM          la rouvre : les applis déjà ouvertes vont sur leur bureau, les autres sont lancées
+                                 puis placées dès que leur fenêtre apparaît
+  nc-session liste [--json]      les sessions enregistrées
+  nc-session supprimer NOM
+  nc-session menu                le Spotlight sur « session » (Super + Maj + W) ; sans l'île, un menu
+  nc-session demarrage           ouvre la session choisie pour l'ouverture de session (réglage SESSION_DEMARRAGE)
+Rangées dans ~/.config/nc/sessions/NOM.json. Le navigateur rouvre lui-même ses onglets (sa session à lui).
+"""
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def reglage(cle, defaut=""):
+    try:
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+def _langue():
+    l = os.environ.get("NC_LANGUE", "") or reglage("LANGUE")
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+DOC_EN = """nc-session: your window layouts per project (“Dev”, “Classes”…), saved then reopened at once.
+
+  nc-session save NAME       the current layout: open apps, their desktop, their place if they float; for a terminal,
+                             its folder and the program running in it (Neovim…)
+  nc-session open NAME       reopens it: apps already open go to their desktop, the others are started then placed as
+                             soon as their window appears
+  nc-session list [--json]   the saved sessions
+  nc-session delete NAME
+  nc-session menu            Spotlight on “session” (Super + Shift + W); without the island, a menu
+  nc-session startup         opens the session chosen for login (setting SESSION_DEMARRAGE)
+Stored in ~/.config/nc/sessions/NAME.json. The browser reopens its tabs itself (its own session).
+"""
+
+HOME = Path.home()
+DOSSIER = HOME / ".config/nc/sessions"
+BIN = HOME / ".local/bin"
+TERMINAUX = {"kitty": "kitty", "foot": "foot", "alacritty": "alacritty", "org.wezfurlong.wezterm": "wezterm",
+             "com.mitchellh.ghostty": "ghostty"}
+# Les fenêtres du bureau lui-même : jamais dans une session
+EXCLUS_CLASSES = {"dropterm", "org.quickshell", "nc-ia", "nctest", "nc-paquets", "fingerpop"}
+EXCLUS_TITRES = {"JARVIS", "JARVIS Chat", "Réglages du bureau", "Connexion JARVIS", "Clés des IA", "AI keys"}
+INTERACTIFS = {"nvim", "vim", "vi", "nano", "helix", "hx", "htop", "btop", "top", "less", "man", "lazygit", "ranger", "yazi",
+               "ncdu", "python", "python3", "ipython", "node", "ssh", "tmux", "zellij", "gitui", "nnn", "mc", "micro"}
+
+
+class Erreur(Exception):
+    pass
+
+
+def nom_valide(nom):
+    nom = nom.strip()
+    if not re.fullmatch(r"[\w][\w .\-]{0,39}", nom):
+        raise Erreur(T("Nom de session : lettres, chiffres, espaces, - . _ (40 au plus).",
+                       "Session name: letters, digits, spaces, - . _ (40 at most)."))
+    return nom
+
+
+def fichier(nom):
+    return DOSSIER / (nom_valide(nom) + ".json")
+
+
+def hypr(*a):
+    r = subprocess.run(["hyprctl", *a], capture_output=True, text=True, timeout=5)
+    return r.stdout
+
+
+def clients():
+    try:
+        return [c for c in json.loads(hypr("clients", "-j") or "[]") if c.get("mapped")]
+    except ValueError:
+        return []
+
+
+def dispatch(lua):
+    subprocess.run(["hyprctl", "dispatch", lua], capture_output=True, timeout=5)
+
+
+def applis():
+    """{classe en minuscules: id .desktop} d'après nc-apps (StartupWMClass, ou le nom du fichier)."""
+    try:
+        liste = json.loads(subprocess.run([str(BIN / "nc-apps"), "list"], capture_output=True, text=True, timeout=10).stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+    res = {}
+    for a in liste:
+        for k in (a.get("wmclass") or "", a.get("id") or "", (a.get("id") or "").split(".")[-1]):
+            if k:
+                res.setdefault(k.lower(), a["id"])
+    return res
+
+
+def enfants(pid):
+    res = []
+    for t in Path(f"/proc/{pid}/task").glob("*/children"):
+        try:
+            res += [int(x) for x in t.read_text().split()]
+        except (OSError, ValueError):
+            pass
+    return res
+
+
+def ligne_commande(pid):
+    try:
+        return [x for x in Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0") if x]
+    except OSError:
+        return []
+
+
+def terminal(pid):
+    """Le dossier du shell d'un terminal et le programme interactif qui y tourne (Neovim, htop…), s'il y en a un."""
+    for shell in enfants(pid):
+        try:
+            dossier = os.readlink(f"/proc/{shell}/cwd")
+        except OSError:
+            continue
+        commande = None
+        for p in enfants(shell):
+            cmd = ligne_commande(p)
+            if cmd and Path(cmd[0]).name in INTERACTIFS:
+                try:
+                    dossier = os.readlink(f"/proc/{p}/cwd")
+                except OSError:
+                    pass
+                commande = [Path(cmd[0]).name] + cmd[1:]
+                break
+        return dossier, commande
+    return str(HOME), None
+
+
+def enregistrer(nom):
+    f = fichier(nom)
+    app = applis()
+    fenetres = []
+    for c in sorted(clients(), key=lambda c: (c["workspace"]["id"], c.get("at", [0, 0]))):
+        classe = c.get("class") or c.get("initialClass") or ""
+        ws = c.get("workspace") or {}
+        if not classe or ws.get("id", 0) <= 0 or classe in EXCLUS_CLASSES or (c.get("title") or "") in EXCLUS_TITRES:
+            continue
+        e = dict(classe=classe, titre=(c.get("title") or "")[:80], bureau=ws.get("id"), ecran=c.get("monitor"),
+                 flottant=bool(c.get("floating")), position=c.get("at"), taille=c.get("size"),
+                 plein_ecran=bool(c.get("fullscreen")))
+        if classe.lower() in TERMINAUX:
+            dossier, commande = terminal(c.get("pid", 0))
+            e["terminal"] = dict(programme=TERMINAUX[classe.lower()], dossier=dossier, commande=commande)
+        elif classe.lower() in app:
+            e["appli"] = app[classe.lower()]
+        else:
+            cmd = ligne_commande(c.get("pid", 0))
+            if not cmd:
+                continue
+            e["commande"] = cmd
+        fenetres.append(e)
+    if not fenetres:
+        raise Erreur(T("Aucune fenêtre à enregistrer.", "No window to save."))
+    DOSSIER.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dict(version=1, nom=nom.strip(), date=int(time.time()), fenetres=fenetres), ensure_ascii=False, indent=1))
+    tmp.replace(f)
+    return len(fenetres)
+
+
+def lancer(e):
+    if "terminal" in e:
+        t = e["terminal"]
+        prog = t.get("programme") or "kitty"
+        if not shutil.which(prog):
+            return
+        dossier = t.get("dossier") if t.get("dossier") and Path(t["dossier"]).is_dir() else str(HOME)
+        cmd = [prog, "--directory", dossier] if prog == "kitty" else [prog]
+        if t.get("commande"):
+            # Le programme, puis le shell quand il se termine (le terminal reste ouvert)
+            suite = " ".join(shlex.quote(x) for x in t["commande"]) + '; exec "${SHELL:-sh}"'
+            cmd += (["--", "sh", "-c", suite] if prog == "kitty" else ["-e", "sh", "-c", f"cd {shlex.quote(dossier)}; {suite}"])
+        subprocess.Popen(cmd, cwd=dossier, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    elif "appli" in e:
+        subprocess.Popen([str(BIN / "nc-apps"), "launch", e["appli"]], start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif e.get("commande") and shutil.which(e["commande"][0]):
+        subprocess.Popen(e["commande"], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, cwd=str(HOME))
+
+
+def placer(adresse, e):
+    sel = f"address:{adresse}"
+    dispatch(f"hl.dsp.window.move({{ workspace = {int(e['bureau'])}, follow = false, window = '{sel}' }})")
+    if e.get("flottant"):
+        dispatch(f"hl.dsp.window.float({{ action = 'set', window = '{sel}' }})")
+        if e.get("taille"):
+            dispatch(f"hl.dsp.window.resize({{ x = {int(e['taille'][0])}, y = {int(e['taille'][1])}, window = '{sel}' }})")
+        if e.get("position"):
+            dispatch(f"hl.dsp.window.move({{ x = {int(e['position'][0])}, y = {int(e['position'][1])}, window = '{sel}' }})")
+
+
+def ouvrir(nom, delai=None):
+    delai = float(os.environ.get("NC_SESSION_DELAI", 20)) if delai is None else delai     # attente des fenêtres (s)
+    try:
+        s = json.loads(fichier(nom).read_text())
+    except (OSError, ValueError):
+        raise Erreur(T(f"Session inconnue : {nom}", f"Unknown session: {nom}")) from None
+    avant = clients()
+    pris = set()
+    attente = []                                        # (entrée, classe) dont la fenêtre doit encore apparaître
+    for e in s.get("fenetres", []):
+        # Une appli déjà ouverte (pas un terminal : chacun a son dossier) va simplement sur son bureau
+        deja = None if "terminal" in e else next((c for c in avant if c.get("class") == e["classe"] and c["address"] not in pris), None)
+        if deja:
+            pris.add(deja["address"])
+            placer(deja["address"], e)
+        else:
+            lancer(e)
+            attente.append(e)
+    connues = {c["address"] for c in avant}
+    fin = time.time() + delai
+    while attente and time.time() < fin:
+        time.sleep(0.4)
+        for c in clients():
+            if c["address"] in connues:
+                continue
+            e = next((x for x in attente if x["classe"] == c.get("class")), None)
+            if e:
+                connues.add(c["address"])
+                attente.remove(e)
+                placer(c["address"], e)
+    return len(s.get("fenetres", [])) - len(attente), len(attente)
+
+
+def liste():
+    res = []
+    for f in sorted(DOSSIER.glob("*.json")):
+        try:
+            d = json.loads(f.read_text())
+            res.append(dict(nom=d.get("nom") or f.stem, fenetres=len(d.get("fenetres", [])), date=d.get("date", 0),
+                            applis=sorted({x.get("classe", "") for x in d.get("fenetres", [])})[:6]))
+        except (OSError, ValueError):
+            continue
+    return res
+
+
+def notifier(titre, corps=""):
+    if shutil.which("notify-send"):
+        subprocess.Popen(["notify-send", "-a", "Sessions", "-i", "view-grid", "--", titre, corps],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def menu():
+    if shutil.which("qs"):
+        try:
+            if subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "rechercher", "session "], capture_output=True,
+                              timeout=5).returncode == 0:
+                return 0
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    noms = [s["nom"] for s in liste()]
+    for prog, args in (("fuzzel", ["--dmenu"]), ("wofi", ["--dmenu"]), ("rofi", ["-dmenu"]), ("bemenu", [])):
+        if shutil.which(prog):
+            r = subprocess.run([prog] + args, input="\n".join(noms), capture_output=True, text=True)
+            choix = r.stdout.strip()
+            if choix in noms:
+                return main(["ouvrir", choix])
+            if choix:
+                return main(["enregistrer", choix])
+            return 0
+    notifier(T("Sessions", "Sessions"), T("nc-session enregistrer NOM, puis nc-session ouvrir NOM", "nc-session save NAME, then nc-session open NAME"))
+    return 0
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "aide", "help"):
+        print(T(__doc__, DOC_EN).strip())
+        return 0 if a else 2
+    c = {"save": "enregistrer", "open": "ouvrir", "list": "liste", "delete": "supprimer", "startup": "demarrage"}.get(a[0], a[0])
+    reste = " ".join(x for x in a[1:] if not x.startswith("--")).strip()
+    try:
+        if c == "enregistrer" and reste:
+            n = enregistrer(reste)
+            notifier(T(f"Session « {reste} » enregistrée", f"Session “{reste}” saved"), T(f"{n} fenêtre(s)", f"{n} window(s)"))
+            print(T(f"{n} fenêtre(s) enregistrée(s) dans « {reste} ».", f"{n} window(s) saved in “{reste}”."))
+            return 0
+        if c == "ouvrir" and reste:
+            places, manquantes = ouvrir(reste)
+            if manquantes:
+                notifier(T(f"Session « {reste} »", f"Session “{reste}”"),
+                         T(f"{manquantes} appli(s) n'ont pas ouvert de fenêtre à temps.", f"{manquantes} app(s) did not open a window in time."))
+            return 0
+        if c == "liste":
+            l = liste()
+            if "--json" in a:
+                print(json.dumps(l, ensure_ascii=False))
+            else:
+                for s in l:
+                    print(f"  {s['nom']:<20} {s['fenetres']} " + T("fenêtre(s) : ", "window(s): ") + ", ".join(s["applis"]))
+                if not l:
+                    print(T("Aucune session : nc-session enregistrer NOM", "No session: nc-session save NAME"))
+            return 0
+        if c == "supprimer" and reste:
+            fichier(reste).unlink(missing_ok=True)
+            return 0
+        if c == "menu":
+            return menu()
+        if c == "demarrage":
+            nom = reglage("SESSION_DEMARRAGE", "aucune")
+            if nom and nom != "aucune" and fichier(nom).exists():
+                time.sleep(2)                           # la barre et l'île d'abord
+                ouvrir(nom, delai=40)
+            return 0
+    except Erreur as e:
+        print(str(e), file=sys.stderr)
+        notifier(T("Sessions", "Sessions"), str(e)) if not sys.stderr.isatty() else None
+        return 1
+    print(T(__doc__, DOC_EN).strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

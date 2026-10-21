@@ -290,6 +290,11 @@ nc-anim liste # les animations du bouton d'arrêt (nc-anim NOM pour en voir une)
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
 ne sont jamais remplacés.
 
+**Sessions** (`nc-session`, **Super + Maj + W** ou `session ` dans le Spotlight) : enregistre la disposition du moment
+— applis ouvertes, leur bureau, leur place si elles sont libres, le dossier et le programme des terminaux (Neovim…) —
+sous un nom (« Dev », « Cours »…), et rouvre-la d'un coup : les applis déjà ouvertes vont sur leur bureau, les autres sont
+lancées puis placées. Une session peut se rouvrir à chaque ouverture de session (nc-reglages → Fenêtres).
+
 **Mises à jour du système** (île, page Notifications → « Mettre à jour », ou `nc-paquets mettre-a-jour`) : sur un disque
 en **Btrfs**, un instantané du système est pris juste avant (snapper ou Timeshift s'ils sont là, sinon
 `/.snapshots/nc-avant-maj-…`, les 3 derniers gardés) pour revenir en arrière si une mise à jour casse quelque chose ;

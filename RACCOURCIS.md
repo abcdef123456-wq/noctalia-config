@@ -62,6 +62,7 @@ section « Mes raccourcis » de la fiche).
 | `Super` + `Tab` | Bureau caché (bloc-notes) |
 | `Super` + `Maj` + `Tab` | Fenêtre ↔ bureau caché |
 | `Super` + `Maj` + `` ` `` | Fenêtre ↔ terminal caché |
+| `Super` + `Maj` + `W` | Sessions : rouvrir une disposition de fenêtres enregistrée (« Dev », « Cours »…) ou enregistrer celle d'aujourd'hui (le Spotlight sur `session`) |
 
 ## Souris
 
