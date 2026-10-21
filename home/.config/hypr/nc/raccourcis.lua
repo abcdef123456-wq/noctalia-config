@@ -83,6 +83,14 @@ touche(SUPER .. " + CTRL + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad
 -- IA du bureau (nc-ia : celle choisie dans nc-reglages → Intelligence artificielle ; coupée, ces touches le disent)
 touche(SUPER .. " + code:31", cmd("~/.local/bin/nc-ia menu"), trad("IA|Résumer, traduire… le texte sélectionné", "Summarize, translate… the selected text"))
 touche(SUPER .. " + SHIFT + code:31", cmd("~/.local/bin/nc-ia capture"), trad("IA|Expliquer une zone de l'écran", "Explain an area of the screen"))
+-- Dictée partout (nc-dictee) : maintenir Super + D et parler, relâcher : le texte est écrit dans la fenêtre active ; un
+-- appui bref lance une dictée longue, le suivant l'écrit. Relâcher Super avant D finit aussi la dictée (sinon elle
+-- resterait ouverte) ; ce test-là ne lance rien tant qu'aucune dictée n'est en cours.
+touche(SUPER .. " + code:40", cmd("~/.local/bin/nc-dictee ptt-debut"), trad("IA|Dicter (maintenir, relâcher pour écrire)", "Dictate (hold, release to write)"))
+local fin_dictee = cmd([[sh -c '[ -e "${XDG_RUNTIME_DIR:-/tmp}/nc-dictee-ptt.json" ] && exec ~/.local/bin/nc-dictee ptt-fin']])
+hl.bind(SUPER .. " + code:40", fin_dictee, { release = true })
+hl.bind(SUPER .. " + Super_L", fin_dictee, { release = true, non_consuming = true })
+hl.bind(SUPER .. " + Super_R", fin_dictee, { release = true, non_consuming = true })
 touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
 touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))

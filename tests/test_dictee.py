@@ -138,5 +138,45 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.lancer("stop"), (1, {"ok": False, "error": "Audio trop court"}))
 
 
+    # ── Dictée partout (Super + D) ──
+    def ptt(self, action, reglages=""):
+        b = self.home / "bin"
+        for nom in ("wtype", "notify-send"):
+            (b / nom).write_text('#!/bin/sh\necho "' + nom + ' $*" >> "$HOME/appels"\n'); (b / nom).chmod(0o755)
+        (self.home / ".config/nc/reglages.conf").write_text(reglages)
+        env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
+                   PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+        return subprocess.run([str(SCRIPT), action], env=env, capture_output=True, text=True, timeout=20).returncode
+
+    def appels(self):
+        f = self.home / "appels"
+        return f.read_text() if f.exists() else ""
+
+    def test_maintenir_puis_relacher_ecrit_dans_la_fenetre(self):
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin"), 0)
+        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
+        self.assertFalse((self.home / "run/nc-dictee.wav").exists(), "l'audio est supprimé")
+
+    def test_appui_bref_dictee_longue(self):
+        self.ptt("ptt-debut")
+        self.ptt("ptt-fin")                                   # relâché tout de suite : la dictée continue
+        self.assertNotIn("wtype", self.appels())
+        self.assertTrue((self.home / "run/nc-dictee-ptt.json").exists())
+        self.ptt("ptt-fin")                                   # Super relâché : rien ne change
+        self.assertNotIn("wtype", self.appels())
+        self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
+        self.assertIn("wtype -- bonjour jarvis", self.appels())
+
+    def test_desactivee_ou_rien_en_cours(self):
+        self.assertEqual(self.ptt("ptt-fin"), 0)
+        self.assertEqual(self.appels(), "", "relâcher Super sans dictée ne fait rien")
+        self.assertEqual(self.ptt("ptt-debut", "IA_DICTEE=non\n"), 1)
+        self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
+        self.assertEqual(Serveur.recus, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,8 @@
   nc-dictee stop     l'arrête, envoie l'audio au serveur (POST /api/transcribe) et affiche le texte
   nc-dictee cancel   l'arrête et supprime l'enregistrement
   nc-dictee status   dit si un enregistrement est en cours
+  nc-dictee ptt-debut | ptt-fin   dictée partout (Super + D) : maintenu, la voix est écrite dans la fenêtre active au
+                     relâchement ; un appui bref lance une dictée longue, le suivant l'écrit (réglage IA_DICTEE)
 
 Une ligne de JSON sur la sortie : {"ok": true, "text": "…", "engine": "…"} après une transcription,
 {"ok": true, "recording": true} après un démarrage, {"ok": false, "error": "…"} sinon.
@@ -45,7 +47,13 @@ def client():
     return m
 
 
+CAPTURE = None                          # dictée partout : les résultats gardés ici au lieu d'être écrits
+
+
 def sortie(**champs):
+    if CAPTURE is not None:
+        CAPTURE.append(champs)
+        return
     print(json.dumps(champs, ensure_ascii=False), flush=True)
 
 
@@ -218,9 +226,126 @@ def transcrire(m):
     return 0
 
 
+# ── Dictée partout (Super + D) ──────────────────────────────────────────────────────────────────────────────────
+PTT = RUNTIME / "nc-dictee-ptt.json"     # { t : début, bascule : appui bref (dictée longue) }
+TERMINAUX = ("kitty", "foot", "alacritty", "org.wezfurlong.wezterm", "com.mitchellh.ghostty", "org.kde.konsole",
+             "org.gnome.terminal", "org.gnome.ptyxis", "xterm", "dropterm")
+
+
+def reglage(cle, defaut):
+    try:
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+def notifier(T, titre, corps="", court=False):
+    try:
+        subprocess.Popen(["notify-send", "-a", T("Dictée", "Dictation"), "-i", "audio-input-microphone",
+                          "-h", "string:x-canonical-private-synchronous:nc-dictee"] + (["-t", "1800"] if court else [])
+                         + ["--", titre, corps], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def ecrire_dans_la_fenetre(texte):
+    """Le texte tapé dans la fenêtre active : wtype s'il est là, sinon collé (Ctrl + V, Ctrl + Maj + V dans un
+    terminal), le presse-papiers d'avant remis ensuite."""
+    if shutil.which("wtype"):
+        if subprocess.run(["wtype", "--", texte], stdin=subprocess.DEVNULL, capture_output=True).returncode == 0:
+            return True
+    if not shutil.which("wl-copy"):
+        return False
+    avant = None
+    if shutil.which("wl-paste"):
+        r = subprocess.run(["wl-paste", "-n", "-t", "text"], capture_output=True, timeout=2)
+        avant = r.stdout if r.returncode == 0 else None
+    subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL)
+    classe = ""
+    try:
+        classe = json.loads(subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout or "{}").get("class", "")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    mods = "CTRL SHIFT" if classe.lower() in TERMINAUX else "CTRL"
+    time.sleep(0.08)
+    subprocess.run(["hyprctl", "dispatch", f"hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V' }})"], capture_output=True)
+    if avant is not None:
+        time.sleep(0.4)
+        subprocess.run(["wl-copy", "--"], input=avant, capture_output=True)
+    return True
+
+
+def ptt_debut(m):
+    global CAPTURE
+    T = m.T
+    if reglage("IA_DICTEE", "oui") == "non":
+        notifier(T, T("Dictée désactivée", "Dictation turned off"), T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"), True)
+        return 1
+    try:
+        etat = json.loads(PTT.read_text())
+    except (OSError, ValueError):
+        etat = None
+    if etat and etat.get("bascule"):                       # second appui d'une dictée longue : on écrit
+        return ptt_finir(m)
+    if m.ia_coupee():
+        notifier(T, T("Dictée impossible", "Dictation unavailable"), m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else "", True)
+        return 1
+    CAPTURE = []
+    code = demarrer(T)
+    CAPTURE, res = None, CAPTURE
+    if code != 0 or not res or not res[-1].get("ok"):
+        notifier(T, T("Dictée impossible", "Dictation unavailable"), (res[-1].get("error") if res else "") or "")
+        return 1
+    PTT.write_text(json.dumps({"t": time.time()}))
+    notifier(T, T("🎙 Je t'écoute…", "🎙 Listening…"), T("Relâche pour écrire", "Release to write"))
+    return 0
+
+
+def ptt_fin(m):
+    try:
+        etat = json.loads(PTT.read_text())
+    except (OSError, ValueError):
+        return 0                                          # pas de dictée en cours (relâchement de Super seul)
+    if etat.get("bascule"):
+        return 0                                          # dictée longue : elle continue jusqu'au prochain appui
+    if time.time() - etat.get("t", 0) < 0.45:             # appui bref : dictée longue
+        PTT.write_text(json.dumps(dict(etat, bascule=True)))
+        notifier(m.T, m.T("🎙 Dictée longue…", "🎙 Long dictation…"), m.T("Super + D pour écrire", "Super + D to write"))
+        return 0
+    return ptt_finir(m)
+
+
+def ptt_finir(m):
+    global CAPTURE
+    T = m.T
+    PTT.unlink(missing_ok=True)
+    notifier(T, T("✍ Transcription…", "✍ Transcribing…"), "", True)
+    CAPTURE = []
+    transcrire(m)
+    CAPTURE, res = None, CAPTURE
+    r = res[-1] if res else {"ok": False}
+    if not r.get("ok"):
+        notifier(T, T("Dictée : rien d'écrit", "Dictation: nothing written"), str(r.get("error") or ""))
+        return 1
+    if not ecrire_dans_la_fenetre(r["text"]):
+        notifier(T, T("Dictée (copie impossible)", "Dictation (could not type)"), r["text"][:300])
+        return 1
+    notifier(T, T("✓ Écrit", "✓ Written"), r["text"][:120], True)
+    return 0
+
+
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if action == "ptt-fin" and not PTT.exists():
+        return 0                                          # le plus fréquent (Super relâché) : rien à charger
     m = client()
+    if action == "ptt-fin":
+        return ptt_fin(m)
+    if action == "ptt-debut":
+        return ptt_debut(m)
     if action in ("start", "stop") and m.ia_coupee():
         arreter()
         sortie(ok=False, error=m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else m.T(*m.MESSAGE_COUPEE))

@@ -199,6 +199,8 @@ ALIAS_API = {"gemini": "google", "claude": "anthropic", "chatgpt": "openai"}
 
 
 def nom(ident):
+    if ident == "whisper":
+        return T("Whisper (sur ce PC)", "Whisper (on this PC)")
     f = FOURNISSEURS.get(ident)
     return (NOMS_EN.get(ident) if EN else None) or (f["nom"] if f else ident)
 
@@ -795,10 +797,30 @@ def multipart(champs, fichier):
     return b"".join(morceaux), "multipart/form-data; boundary=" + limite
 
 
+def modele_whisper():
+    """Un modèle whisper.cpp sur ce PC (dictée sans internet ni compte) : MODELE_WHISPER de ia.conf, sinon le premier
+    trouvé dans ~/.local/share/nc/whisper ou les dossiers des paquets ; seulement si whisper-cli est installé."""
+    if not shutil.which("whisper-cli"):
+        return ""
+    m = modele_choisi("whisper")
+    if m and Path(m).expanduser().is_file():
+        return str(Path(m).expanduser())
+    for motif in (str(HOME / ".local/share/nc/whisper/ggml-*.bin"), "/usr/share/whisper.cpp-model-*/*.bin",
+                  "/usr/share/whisper.cpp/models/ggml-*.bin", "/usr/share/whisper/ggml-*.bin"):
+        import glob
+        trouves = sorted(glob.glob(motif))
+        if trouves:
+            return trouves[0]
+    return ""
+
+
 def fournisseurs_transcription():
     if coupee():
         return []
-    liste = [i for i in TRANSCRIPTION if cle(i)[0]]
+    liste = [i for i in TRANSCRIPTION if cle(i)[0] and en_ligne()]
+    if modele_whisper():
+        # Sur ce PC : d'abord sans connexion, ou si « Sur ce PC d'abord » est choisi ; sinon après les API
+        liste = ["whisper"] + liste if (not en_ligne() or reglage("IA_PREFERENCE", "rapide") == "local") else liste + ["whisper"]
     c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
     if mode() == "manuel" and c in liste:                  # celle choisie d'abord (si elle sait transcrire)
         liste = [c] + [i for i in liste if i != c]
@@ -815,11 +837,22 @@ def transcrire(chemin):
         raise ErreurIA(T("enregistrement trop long", "recording too long"))
     liste = fournisseurs_transcription()
     if not liste:
-        raise ErreurIA(T("Aucune IA pour transcrire : relie JARVIS, ou ajoute une clé Groq, OpenAI ou Gemini (nc-ia configurer).",
-                         "No AI to transcribe: connect JARVIS, or add a Groq, OpenAI or Gemini key (nc-ai configure)."))
+        raise ErreurIA(T("Aucune IA pour transcrire : relie JARVIS, ajoute une clé Groq, OpenAI ou Gemini (nc-ia configurer), "
+                         "ou installe whisper.cpp et un modèle pour dicter sans internet.",
+                         "No AI to transcribe: connect JARVIS, add a Groq, OpenAI or Gemini key (nc-ai configure), or install "
+                         "whisper.cpp and a model to dictate offline."))
     rates = []
     for ident in liste:
         try:
+            if ident == "whisper":
+                r = subprocess.run(["whisper-cli", "-m", modele_whisper(), "-f", str(chemin), "-nt", "-np", "-l", "auto"],
+                                   capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+                texte = " ".join(l.strip() for l in r.stdout.splitlines() if l.strip())
+                if r.returncode != 0:
+                    raise ErreurIA((r.stderr.strip().splitlines() or ["whisper-cli"])[-1][:200])
+                if texte.strip():
+                    return texte.strip(), ident
+                raise ErreurIA(T("transcription vide", "empty transcription"))
             if ident == "google":
                 texte = "".join(appel_gemini(T("Tu transcris des enregistrements.", "You transcribe recordings."),
                                              T("Transcris exactement ce qui est dit, sans rien ajouter.",

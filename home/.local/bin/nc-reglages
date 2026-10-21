@@ -936,6 +936,13 @@ REGLAGES = [
         "texte sélectionné (sinon copié) ; le résultat est copié.",
         "Super + I, or “!” in Spotlight: summarize, translate, fix, rephrase, explain or reply to the selected "
         "(otherwise copied) text; the result is copied.")),
+    R("IA_DICTEE", "Intelligence artificielle", L("Dictée partout (Super + D)", "Dictate anywhere (Super + D)"), "ouinon", "oui",
+      L("Maintiens Super + D et parle, relâche : le texte est écrit dans la fenêtre active (Discord, navigateur, Neovim, "
+        "terminal…). Un appui bref lance une dictée longue, le suivant l'écrit. Transcription : JARVIS, une clé Groq, "
+        "OpenAI ou Gemini, ou whisper.cpp sur ce PC (sans internet). wtype écrit directement ; sans lui, le texte est collé.",
+        "Hold Super + D and speak, release: the text is written in the active window (Discord, browser, Neovim, terminal…). "
+        "A short press starts a long dictation, the next one writes it. Transcription: JARVIS, a Groq, OpenAI or Gemini key, "
+        "or whisper.cpp on this PC (offline). wtype types directly; without it, the text is pasted.")),
     R("IA_TERMINAL", "Intelligence artificielle", L("IA dans le terminal", "AI in the terminal"), "ouinon", "oui",
       L("Alt + I : la description tapée devient une commande (relue avant Entrée) ; « ia question » répond, « … | ia "
         "résume » travaille sur la sortie d'une commande.",
