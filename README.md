@@ -142,7 +142,9 @@ suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur tout
 (**Super + Alt + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran
 (**Super + Alt + Maj + I**), écrit une commande dans le terminal (**Alt + I**, à relire avant Entrée ; `ia question`).
 Aussi : pastille IA du centre de contrôle, presse-papiers et notifications de l'île, bouton des captures, clic droit
-dans les fichiers, Neovim (`Espace i`), `nc-diag ia`. Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
+dans les fichiers, Neovim (`Espace i`), `nc-diag ia`, et, si tu l'actives, `@ ` dans le Spotlight : l'IA propose de
+gérer les services de ta session, le Wi-Fi, le Bluetooth, l'énergie, le son, les réglages ou les mises à jour, et
+chaque action attend ta confirmation. Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
 
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.

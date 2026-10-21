@@ -22,6 +22,7 @@ class Faux(http.server.BaseHTTPRequestHandler):
     """Répond comme les vraies API ; garde chaque requête (chemin, en-têtes, corps) pour les vérifications."""
     requetes = []
     anthropic_refuse = False
+    texte_ant = "Bonjour"                    # ce que « Claude » répond (un plan JSON pour nc-ia agir)
 
     def log_message(self, *a):
         pass
@@ -60,8 +61,8 @@ class Faux(http.server.BaseHTTPRequestHandler):
                 return self.envoyer(401, json.dumps({"error": {"message": "invalid x-api-key"}}))
             return self.envoyer(200, "event: message_start\n" + sse([
                 {"type": "message_start", "message": {"id": "m"}},
-                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Bon"}},
-                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "jour"}},
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": Faux.texte_ant[:3]}},
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": Faux.texte_ant[3:]}},
                 {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}, {"type": "message_stop"}]), "text/event-stream")
         if self.path == "/oai/chat/completions":
             return self.envoyer(200, sse([{"choices": [{"delta": {"content": "Salut"}}]},
@@ -93,6 +94,7 @@ class IA(unittest.TestCase):
     def setUp(self):
         Faux.requetes.clear()
         Faux.anthropic_refuse = False
+        Faux.texte_ant = "Bonjour"
         d = tempfile.TemporaryDirectory(prefix="nc-ia-")
         self.addCleanup(d.cleanup)
         self.home = Path(d.name)
@@ -297,6 +299,67 @@ class IA(unittest.TestCase):
             self.assertIn("--notifier", f.read_text())
         self.assertIn("X-KDE-Submenu=IA", (REPO / "home/.local/share/kio/servicemenus/nc-ia.desktop").read_text())
         self.assertTrue(list((REPO / "home/.local/share/nemo/actions").glob("nc-ia-*.nemo_action")))
+
+    # ── L'IA qui agit ──
+    def preparer_agent(self):
+        self.programme("systemctl", 'echo "systemctl $*" >> "$JOURNAL"; case "$*" in *list-units*) echo "nc-ile.service loaded active running Ile";; '
+                                    '*is-active*) echo active;; esac')
+        for p in ("bluetoothctl", "nmcli", "wpctl", "busctl", "journalctl"):
+            self.programme(p, f'echo "{p} $*" >> "$JOURNAL"')
+        Faux.texte_ant = json.dumps({"reponse": "Je redémarre l'île et coupe le Bluetooth.", "actions": [
+            {"outil": "service_redemarrer", "args": {"nom": "nc-ile.service"}},
+            {"outil": "bluetooth", "args": {"etat": "off"}},
+            {"outil": "reglage", "args": {"cle": "IA_ACTIONS", "valeur": "auto"}},
+            {"outil": "service_redemarrer", "args": {"nom": "sshd.service"}},
+            {"outil": "shell", "args": {"cmd": "rm -rf ~"}}]})
+
+    def appels(self):
+        return self.journal.read_text() if self.journal.exists() else ""
+
+    def test_agir_coupe_par_defaut(self):
+        self.preparer_agent()
+        r = self.lancer("agir", "coupe le bluetooth")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("pas le droit", r.stderr)
+        self.assertFalse(Faux.requetes)
+
+    def test_agir_propose_puis_seulement_ce_qui_est_confirme(self):
+        self.preparer_agent()
+        self.reglages("IA_ACTIONS=confirmer\n")
+        r = self.lancer("agir", "--json", "redémarre l'île et coupe le bluetooth")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        plan = json.loads(r.stdout)
+        self.assertEqual([a["libelle"] for a in plan["actions"]], ["Redémarrer nc-ile.service", "Bluetooth : off"])
+        self.assertFalse(any(a["fait"] for a in plan["actions"]), "rien n'est fait avant la confirmation")
+        self.assertEqual(len(plan["refus"]), 3, plan["refus"])          # son propre réglage, service hors session, outil inconnu
+        self.assertNotIn("restart", self.appels())
+        self.assertNotIn("bluetoothctl power", self.appels())
+        consigne = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("service_redemarrer", consigne)
+        self.assertIn("nc-ile.service", consigne, "l'IA voit l'état des services")
+        # Une seule action confirmée : seulement elle
+        r = self.lancer("executer", plan["id"], "1", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("bluetoothctl power off", self.appels())
+        self.assertNotIn("systemctl --user restart", self.appels())
+        r = self.lancer("executer", plan["id"], "--json")
+        self.assertIn("systemctl --user restart nc-ile.service", self.appels())
+        self.assertEqual(self.appels().count("bluetoothctl power off"), 1, "une action faite ne se refait pas")
+        self.assertEqual(self.lancer("executer", "pas-un-plan").returncode, 1)
+
+    def test_agir_permissions_reverifiees(self):
+        self.preparer_agent()
+        self.reglages("IA_ACTIONS=confirmer\nIA_GERER_RESEAU=non\n")
+        plan = json.loads(self.lancer("agir", "--json", "x").stdout)
+        self.assertEqual([a["outil"] for a in plan["actions"]], ["service_redemarrer"])
+        self.assertNotIn("bluetooth(", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False), "outil non proposé à l'IA")
+        # Permission retirée entre la proposition et la confirmation : refusée à l'exécution
+        self.reglages("IA_ACTIONS=confirmer\nIA_GERER_RESEAU=non\nIA_GERER_SERVICES=non\n")
+        d = json.loads(self.lancer("executer", plan["id"], "--json").stdout)
+        self.assertFalse(d["actions"][0]["ok"])
+        self.assertNotIn("restart", self.appels())
+        self.reglages("IA_MODE=non\nIA_ACTIONS=confirmer\n")
+        self.assertEqual(self.lancer("executer", plan["id"]).returncode, 3)
 
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):

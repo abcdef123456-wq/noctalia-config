@@ -15,6 +15,9 @@
                                        un texte, du code, un PDF ou une image : résumé par défaut (clic droit dans
                                        Fichiers → Scripts → IA)
   nc-ia diagnostic                     ce que nc-diag a trouvé, expliqué, avec quoi faire (nc-diag ia)
+  nc-ia agir DEMANDE [--json]          l'IA gère le bureau (services de la session, Wi-Fi, Bluetooth, énergie, son,
+                                       réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
+                                       (« @ » dans le Spotlight) ; nc-ia executer PLAN [N…] le réalise
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
   nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Alt + Maj + I)
   nc-ia configurer                     les clés d'API : la fenêtre « Clés des IA » de l'île, sinon au clavier
@@ -122,6 +125,9 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        a text, code, a PDF or an image: summarized by default (right click in Files →
                                        Scripts → AI)
   nc-ai diagnostic                     what nc-diag found, explained, with what to do (nc-diag ia)
+  nc-ai act REQUEST [--json]           the AI manages the desktop (session services, Wi-Fi, Bluetooth, power, sound,
+                                       settings, updates): a plan of allowed actions, confirmed before acting (“@” in
+                                       Spotlight); nc-ai execute PLAN [N…] carries it out
   nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
   nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Alt + Shift + I)
   nc-ai configure                      the API keys from the keyboard (hidden), each one tested right away
@@ -1090,6 +1096,300 @@ def diagnostic(flux=False):
                          "You help fix a Linux desktop. Answer in English, concrete and brief."))
 
 
+# ── Gestion du bureau par l'IA (nc-reglages → Intelligence artificielle → L'IA peut agir) ────────────────────────
+# L'IA ne lance jamais de commande à elle : elle propose un plan fait seulement des outils ci-dessous, dans les
+# domaines permis (IA_GERER_*) ; chaque action est revérifiée (nom de service existant, valeurs bornées) avant de
+# s'exécuter, et n'est faite qu'après ta confirmation (jamais toute seule). Coupé par défaut (IA_ACTIONS=non).
+# Ses propres réglages (IA_*, SPOTLIGHT_IA) lui sont interdits.
+PROFILS = ("performance", "balanced", "power-saver")
+OUTILS = {
+    "service_journal": dict(domaine="services", lecture=True, args=("nom",), fr="Lire le journal de {nom}", en="Read the log of {nom}"),
+    "service_redemarrer": dict(domaine="services", args=("nom",), fr="Redémarrer {nom}", en="Restart {nom}"),
+    "service_demarrer": dict(domaine="services", args=("nom",), fr="Démarrer {nom}", en="Start {nom}"),
+    "service_arreter": dict(domaine="services", args=("nom",), danger=True, fr="Arrêter {nom}", en="Stop {nom}"),
+    "wifi": dict(domaine="reseau", args=("etat",), fr="Wi-Fi : {etat}", en="Wi-Fi: {etat}"),
+    "bluetooth": dict(domaine="reseau", args=("etat",), fr="Bluetooth : {etat}", en="Bluetooth: {etat}"),
+    "profil_energie": dict(domaine="energie", args=("profil",), fr="Profil d'énergie : {profil}", en="Power profile: {profil}"),
+    "luminosite": dict(domaine="energie", args=("pourcent",), fr="Luminosité : {pourcent} %", en="Brightness: {pourcent}%"),
+    "volume": dict(domaine="son", args=("pourcent",), fr="Volume : {pourcent} %", en="Volume: {pourcent}%"),
+    "muet": dict(domaine="son", args=("etat",), fr="Son coupé : {etat}", en="Muted: {etat}"),
+    "reglage": dict(domaine="reglages", args=("cle", "valeur"), fr="Réglage {cle} = {valeur}", en="Setting {cle} = {valeur}"),
+    "maj_verifier": dict(domaine="maj", args=(), fr="Chercher les mises à jour", en="Check for updates"),
+    "maj_installer": dict(domaine="maj", args=(), danger=True, fr="Installer les mises à jour (terminal, mot de passe)",
+                          en="Install the updates (terminal, password)"),
+}
+DOMAINES = {"services": "IA_GERER_SERVICES", "reseau": "IA_GERER_RESEAU", "energie": "IA_GERER_ENERGIE",
+            "son": "IA_GERER_SON", "reglages": "IA_GERER_REGLAGES", "maj": "IA_GERER_MAJ"}
+PLANS = RUN / "plans"
+
+
+def actions_mode():
+    return "confirmer" if reglage("IA_ACTIONS", "non") == "confirmer" else "non"
+
+
+def domaines_permis():
+    return [d for d, cle_ in DOMAINES.items() if reglage(cle_, "oui") != "non"]
+
+
+def sortie_cmd(cmd, delai=10):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=delai, stdin=subprocess.DEVNULL)
+        return r.returncode, (r.stdout + r.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+
+
+def services_session():
+    """{nom: (actif, sous-état)} des services de ta session (systemctl --user), jamais ceux du système."""
+    code, t = sortie_cmd(["systemctl", "--user", "list-units", "--type=service", "--all", "--no-legend", "--plain"])
+    res = {}
+    for l in t.splitlines():
+        c = l.split(None, 4)
+        if len(c) >= 4 and c[0].endswith(".service") and c[1] == "loaded":
+            res[c[0]] = (c[2], c[3])
+    code, t = sortie_cmd(["systemctl", "--user", "list-unit-files", "--type=service", "--no-legend"])
+    for l in t.splitlines():
+        c = l.split()
+        if c and c[0].endswith(".service") and "@." not in c[0] and c[0] not in res:
+            res[c[0]] = ("inactive", "dead")
+    return res
+
+
+def etat_bureau(domaines):
+    """Ce que l'IA voit avant de proposer : seulement les domaines permis."""
+    l = []
+    if "services" in domaines:
+        sv = services_session()
+        echec = [n for n, (a, _) in sv.items() if a == "failed"]
+        nc = sorted(n for n in sv if n.startswith(("nc-", "noctalia", "hypridle", "pipewire", "wireplumber", "xdg-desktop-portal")))
+        l.append(T("Services de la session en échec : ", "Failed session services: ") + (", ".join(echec) or T("aucun", "none")))
+        l.append(T("Services du bureau : ", "Desktop services: ") + ", ".join(f"{n} ({sv[n][0]})" for n in nc[:40]))
+    if "reseau" in domaines:
+        l.append("Wi-Fi : " + (sortie_cmd(["nmcli", "radio", "wifi"])[1] if shutil.which("nmcli") else "?"))
+        bt = sortie_cmd(["bluetoothctl", "show"])[1] if shutil.which("bluetoothctl") else ""
+        l.append("Bluetooth : " + ("on" if "Powered: yes" in bt else "off" if bt else "?"))
+    if "energie" in domaines:
+        pp = sortie_cmd(["busctl", "get-property", "org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles",
+                         "org.freedesktop.UPower.PowerProfiles", "ActiveProfile"])[1]
+        l.append(T("Profil d'énergie : ", "Power profile: ") + (pp.split('"')[1] if '"' in pp else "?"))
+        l.append(T("Luminosité : ", "Brightness: ") + sortie_cmd([str(HOME / ".local/bin/nc-brightness"), "get"])[1] + " %")
+    if "son" in domaines and shutil.which("wpctl"):
+        l.append(T("Volume : ", "Volume: ") + sortie_cmd(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])[1])
+    return "\n".join(l)
+
+
+def consigne_agent(domaines):
+    outils = []
+    for n, o in OUTILS.items():
+        if o["domaine"] in domaines:
+            outils.append(f"- {n}(" + ", ".join(o["args"]) + ")" + (T(" : lecture seule", ": read only") if o.get("lecture") else ""))
+    return T(
+        "Tu pilotes le bureau Linux de l'utilisateur, seulement avec ces outils :\n" + "\n".join(outils) +
+        "\nValeurs : etat = on ou off ; profil = performance, balanced ou power-saver ; pourcent = un entier ; nom = un "
+        "service listé dans l'état. Réponds UNIQUEMENT par un objet JSON, sans texte autour : "
+        '{"reponse": "une ou deux phrases en français pour l\'utilisateur", "actions": [{"outil": "...", "args": {...}}]}. '
+        "N'utilise que les outils de la liste ; si la demande ne demande aucune action, ou si aucun outil ne le permet, "
+        "actions vide et explique-le. Pour comprendre un service en échec, demande d'abord service_journal.",
+        "You control the user's Linux desktop, only with these tools:\n" + "\n".join(outils) +
+        "\nValues: etat = on or off; profil = performance, balanced or power-saver; pourcent = an integer; nom = a service "
+        "listed in the state. Answer ONLY with a JSON object, no text around it: "
+        '{"reponse": "one or two sentences in English for the user", "actions": [{"outil": "...", "args": {...}}]}. '
+        "Only use tools from the list; if the request needs no action, or no tool allows it, leave actions empty and say "
+        "so. To understand a failed service, first ask for service_journal.")
+
+
+def lire_json(texte):
+    t = re.sub(r"^```(?:json)?|```$", "", texte.strip(), flags=re.M).strip()
+    debut, fin = t.find("{"), t.rfind("}")
+    if debut < 0 or fin <= debut:
+        raise ErreurIA(T("L'IA n'a pas répondu par un plan lisible.", "The AI did not answer with a readable plan."))
+    try:
+        d = json.loads(t[debut:fin + 1])
+    except ValueError:
+        raise ErreurIA(T("L'IA n'a pas répondu par un plan lisible.", "The AI did not answer with a readable plan.")) from None
+    if not isinstance(d, dict):
+        raise ErreurIA(T("Plan illisible.", "Unreadable plan."))
+    return d
+
+
+def valider_action(a, domaines, services=None):
+    """L'action normalisée {outil, args, libelle, danger, lecture}, ou ErreurIA (outil inconnu ou interdit, valeur hors bornes)."""
+    if not isinstance(a, dict) or a.get("outil") not in OUTILS:
+        raise ErreurIA(T("outil inconnu", "unknown tool") + f" : {str(a.get('outil') if isinstance(a, dict) else a)[:40]}")
+    nom_o, o = a["outil"], OUTILS[a["outil"]]
+    if o["domaine"] not in domaines:
+        raise ErreurIA(T(f"{nom_o} n'est pas permis (nc-reglages → Intelligence artificielle)",
+                         f"{nom_o} is not allowed (nc-settings → Artificial intelligence)"))
+    brut = a.get("args") if isinstance(a.get("args"), dict) else {}
+    args = {}
+    for k in o["args"]:
+        v = str(brut.get(k, "")).strip()
+        if k == "nom":
+            services = services if services is not None else services_session()
+            if v not in services:
+                raise ErreurIA(T(f"service inconnu de ta session : {v[:60]}", f"service not in your session: {v[:60]}"))
+        elif k == "etat":
+            v = {"on": "on", "off": "off", "oui": "on", "non": "off", "true": "on", "false": "off"}.get(v.lower(), "")
+            if not v:
+                raise ErreurIA(T("état attendu : on ou off", "expected state: on or off"))
+        elif k == "profil":
+            v = {"economie": "power-saver", "économie": "power-saver", "equilibre": "balanced", "équilibré": "balanced"}.get(v.lower(), v.lower())
+            if v not in PROFILS:
+                raise ErreurIA(T("profil inconnu", "unknown profile") + f" : {v[:30]}")
+        elif k == "pourcent":
+            try:
+                n = int(float(v.rstrip("%")))
+            except ValueError:
+                raise ErreurIA(T("pourcentage attendu", "percentage expected")) from None
+            v = str(max(0, min(150 if nom_o == "volume" else 100, n)))
+        elif k == "cle":
+            if not re.fullmatch(r"[A-Z0-9_]{2,60}", v) or v.startswith("IA_") or v in ("SPOTLIGHT_IA", "ALERTES_TELEGRAM"):
+                raise ErreurIA(T(f"réglage interdit à l'IA : {v[:40]}", f"setting forbidden to the AI: {v[:40]}"))
+        elif k == "valeur":
+            if not re.fullmatch(r"[^\n\x00]{0,200}", v):
+                raise ErreurIA(T("valeur invalide", "invalid value"))
+        args[k] = v
+    libelle = (o["en"] if EN else o["fr"]).format(**args)
+    return dict(outil=nom_o, args=args, libelle=libelle, danger=bool(o.get("danger")), lecture=bool(o.get("lecture")))
+
+
+def executer_action(a):
+    """(réussi, message) ; a est une action déjà validée."""
+    o, g = a["outil"], a["args"]
+    nb = str(HOME / ".local/bin/")
+    if o.startswith("service_"):
+        if o == "service_journal":
+            code, t = sortie_cmd(["journalctl", "--user", "-u", g["nom"], "-n", "40", "--no-pager", "-o", "cat"])
+            return code == 0, t[-6000:]
+        verbe = {"service_redemarrer": "restart", "service_demarrer": "start", "service_arreter": "stop"}[o]
+        code, t = sortie_cmd(["systemctl", "--user", verbe, g["nom"]], 30)
+        etat = sortie_cmd(["systemctl", "--user", "is-active", g["nom"]])[1]
+        return code == 0, (t or etat)
+    if o == "wifi":
+        cmd = ["nmcli", "radio", "wifi", g["etat"]] if shutil.which("nmcli") else ["rfkill", "unblock" if g["etat"] == "on" else "block", "wifi"]
+        code, t = sortie_cmd(cmd)
+        return code == 0, t
+    if o == "bluetooth":
+        cmd = ["bluetoothctl", "power", g["etat"]] if shutil.which("bluetoothctl") else ["rfkill", "unblock" if g["etat"] == "on" else "block", "bluetooth"]
+        code, t = sortie_cmd(cmd)
+        return code == 0, t
+    if o == "profil_energie":
+        code, t = sortie_cmd(["busctl", "set-property", "org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles",
+                              "org.freedesktop.UPower.PowerProfiles", "ActiveProfile", "s", g["profil"]])
+        return code == 0, t
+    if o == "luminosite":
+        code, t = sortie_cmd([nb + "nc-brightness", "set", g["pourcent"]])
+        return code == 0, t
+    if o == "volume":
+        code, t = sortie_cmd(["wpctl", "set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", g["pourcent"] + "%"])
+        return code == 0, t
+    if o == "muet":
+        code, t = sortie_cmd(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if g["etat"] == "on" else "0"])
+        return code == 0, t
+    if o == "reglage":
+        code, t = sortie_cmd([nb + "nc-reglages", "set", g["cle"], g["valeur"]], 60)
+        return code == 0, t
+    if o == "maj_verifier":
+        code, t = sortie_cmd([nb + "nc-paquets", "verifier"], 300)
+        return code == 0, t
+    if o == "maj_installer":
+        code, t = sortie_cmd([nb + "nc-paquets", "mettre-a-jour"], 30)
+        return code == 0, t
+    return False, T("outil inconnu", "unknown tool")
+
+
+def agir(demande):
+    """Le plan de l'IA pour cette demande : {id, reponse, ia, actions: [{n, libelle, danger, fait, ok, resultat}], refus}."""
+    if coupee():
+        raise ErreurIA(message_coupee())
+    if actions_mode() == "non":
+        raise ErreurIA(T("L'IA n'a pas le droit d'agir (nc-reglages → Intelligence artificielle → L'IA peut agir).",
+                         "The AI is not allowed to act (nc-settings → Artificial intelligence → The AI can act)."))
+    domaines = domaines_permis()
+    if not domaines:
+        raise ErreurIA(T("Aucun domaine permis à l'IA (nc-reglages → Intelligence artificielle).",
+                         "No domain allowed to the AI (nc-settings → Artificial intelligence)."))
+    services = services_session() if "services" in domaines else {}
+    texte = T("État du bureau :\n", "Desktop state:\n") + etat_bureau(domaines) + T("\n\nDemande : ", "\n\nRequest: ") + demande
+    consigne_a = consigne_agent(domaines)
+    d, ident = None, ""
+    for tour in range(2):                       # un second tour seulement pour lire des journaux
+        rep, ident = demander(texte, "texte", consigne_=consigne_a, sortie=lambda m: None)
+        d = lire_json(rep)
+        lectures = [a for a in (d.get("actions") or []) if isinstance(a, dict) and OUTILS.get(a.get("outil"), {}).get("lecture")]
+        if not lectures or tour == 1:
+            break
+        resultats = []
+        for a in lectures[:4]:
+            try:
+                v = valider_action(a, domaines, services)
+                resultats.append(f"=== {v['libelle']} ===\n" + executer_action(v)[1])
+            except ErreurIA as e:
+                resultats.append(f"=== {a.get('outil')} === {e}")
+        texte += T("\n\nRésultats de tes lectures :\n", "\n\nResults of your reads:\n") + "\n".join(resultats) + \
+            T("\n\nPropose maintenant le plan final (sans nouvelle lecture).", "\n\nNow propose the final plan (no more reads).")
+    plan = dict(id=os.urandom(8).hex(), t=time.time(), reponse=str(d.get("reponse") or "")[:2000], ia=nom(ident),
+                agent=FOURNISSEURS.get(ident, {}).get("agent", "claude"), actions=[], refus=[])
+    for a in (d.get("actions") or [])[:8]:
+        try:
+            v = valider_action(a, domaines, services)
+        except ErreurIA as e:
+            plan["refus"].append(str(e))
+            continue
+        if v["lecture"]:
+            continue
+        v.update(n=len(plan["actions"]), fait=False, ok=None, resultat="")
+        plan["actions"].append(v)
+    garder_plan(plan)                           # rien n'est fait : chaque action attend ta confirmation
+    return plan
+
+
+def garder_plan(plan):
+    PLANS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    f = PLANS / f"{plan['id']}.json"
+    f.write_text(json.dumps(plan, ensure_ascii=False))
+    os.chmod(f, 0o600)
+
+
+def executer_plan(ident, numeros=None):
+    """Exécute les actions encore à faire d'un plan proposé il y a moins de 10 min (toutes, ou ces numéros)."""
+    if coupee() or actions_mode() == "non":
+        raise ErreurIA(message_coupee() if coupee() else T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
+    if not re.fullmatch(r"[0-9a-f]{16}", ident or ""):
+        raise ErreurIA(T("plan inconnu", "unknown plan"))
+    f = PLANS / f"{ident}.json"
+    try:
+        plan = json.loads(f.read_text())
+    except (OSError, ValueError):
+        raise ErreurIA(T("Plan introuvable ou expiré : redemande.", "Plan not found or expired: ask again.")) from None
+    if time.time() - plan.get("t", 0) > 600:
+        f.unlink(missing_ok=True)
+        raise ErreurIA(T("Plan expiré (plus de 10 min) : redemande.", "Plan expired (over 10 min): ask again."))
+    domaines = domaines_permis()
+    services = services_session() if "services" in domaines else {}
+    for a in plan["actions"]:
+        if a.get("fait") or (numeros is not None and a["n"] not in numeros):
+            continue
+        try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
+            v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services)
+            a["ok"], a["resultat"] = executer_action(v)
+        except ErreurIA as e:
+            a["ok"], a["resultat"] = False, str(e)
+        a["fait"] = True
+    garder_plan(plan)
+    return plan
+
+
+def afficher_plan(plan):
+    if plan["reponse"]:
+        print(plan["reponse"])
+    for a in plan["actions"]:
+        etat = ("✓" if a["ok"] else "✗") if a["fait"] else ("⚠" if a["danger"] else "•")
+        print(f"  {etat} {a['libelle']}" + (f" — {a['resultat'][:200]}" if a["fait"] and a["resultat"] and not a["ok"] else ""))
+    for r in plan["refus"]:
+        print("  ⨯ " + r)
+
+
 # ── Capture d'une zone ──────────────────────────────────────────────────────────────────────────────────────────
 def capture(question=""):
     if not (shutil.which("grim") and shutil.which("slurp")):
@@ -1327,6 +1627,29 @@ def main(a):
             consigne_f = " ".join(x for x in a if not x.startswith("--") and x not in chemins)
             fichier_ia(chemins, consigne_f, notif="--notifier" in a, flux="--flux" in a)
             return 0
+        if c in ("agir", "act"):
+            q = " ".join(x for x in a if not x.startswith("--")).strip()
+            if not q:
+                raise ErreurIA("nc-ia agir \"coupe le Bluetooth et passe en économie\"")
+            plan = agir(q)
+            if json_out:
+                print(json.dumps(plan, ensure_ascii=False))
+                return 0
+            afficher_plan(plan)
+            reste = [x for x in plan["actions"] if not x["fait"]]
+            if reste and sys.stdin.isatty():
+                if input(T("Faire ces actions ? [o/N] ", "Do these actions? [y/N] ")).strip().lower() in ("o", "oui", "y", "yes"):
+                    afficher_plan(dict(executer_plan(plan["id"]), reponse=""))
+            elif reste:
+                print(T(f"À confirmer : nc-ia executer {plan['id']}", f"To confirm: nc-ai execute {plan['id']}"))
+            return 0
+        if c in ("executer", "execute"):
+            if not a:
+                raise ErreurIA("nc-ia executer PLAN [N…]")
+            nums = [int(x) for x in a[1:] if x.isdigit()] or None
+            plan = executer_plan(a[0], nums)
+            print(json.dumps(plan, ensure_ascii=False)) if json_out else afficher_plan(dict(plan, reponse=""))
+            return 0 if all(x["ok"] for x in plan["actions"] if x["fait"]) else 1
         if c in ("diagnostic", "diag"):
             diagnostic(flux="--flux" in a)
             return 0

@@ -6,7 +6,8 @@
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal, « ? » question à une IA
 // (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander), « ! » l'IA sur le texte
-// sélectionné ou copié (résumer, traduire, corriger… ou une consigne libre : nc-ia texte), « + » logiciel à installer
+// sélectionné ou copié (résumer, traduire, corriger… ou une consigne libre : nc-ia texte), « @ » l'IA qui agit (un plan
+// d'actions permises, chacune faite seulement avec Entrée : nc-ia agir, réglage IA_ACTIONS), « + » logiciel à installer
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
 // Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
 // Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
@@ -50,10 +51,48 @@ Item {
     property string questionPosee: ""
     property string reponse: ""
     property string commandeIA: ""
-    readonly property bool reflechit: demandeur.running
+    readonly property bool reflechit: demandeur.running || agent.running
+    // « @ » : le plan de l'IA (nc-ia agir --json), puis chaque action confirmée par Entrée (nc-ia executer)
+    property var plan: null
+    property bool modeAgent: false
+    readonly property bool agentPermis: !Reglages.iaCoupee && Reglages.val("IA_ACTIONS", "non") === "confirmer"
+    function lancerAgent(demande) {
+        if (demande === "" || agent.running) return
+        questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = false; modeAgent = true; plan = null
+        iaReponse = nomIA; agentReponse = agentIA
+        agent.command = [Etat.bin + "nc-ia", "agir", "--json", demande]
+        agent.running = true
+        chercher()
+    }
+    function executerPlan(n) {
+        if (!plan || executeur.running) return
+        executeur.command = [Etat.bin + "nc-ia", "executer", plan.id].concat(n === null ? [] : [String(n)]).concat(["--json"])
+        executeur.running = true
+    }
+    Process {
+        id: agent
+        stdout: StdioCollector { id: sortieAgent }
+        stderr: StdioCollector { id: erreurAgent }
+        onExited: code => {
+            var d = null
+            try { d = JSON.parse(sortieAgent.text) } catch (e) {}
+            if (code === 0 && d) { r.plan = d; r.reponse = d.reponse || Reglages.t("Plan prêt.", "Plan ready."); r.iaReponse = d.ia || r.iaReponse; r.agentReponse = d.agent || r.agentReponse }
+            else { r.plan = { actions: [], refus: [] }; r.reponse = erreurAgent.text.trim() || Reglages.t("L'IA n'a pas pu proposer de plan.", "The AI couldn't propose a plan.") }
+            r.chercher()
+        }
+    }
+    Process {
+        id: executeur
+        stdout: StdioCollector { id: sortieExec }
+        stderr: StdioCollector { id: erreurExec }
+        onExited: code => {
+            try { r.plan = JSON.parse(sortieExec.text) } catch (e) { r.reponse = erreurExec.text.trim() || r.reponse }
+            r.chercher()
+        }
+    }
     function demander(question) {
         if (question === "" || demandeur.running) return
-        questionPosee = question; reponse = ""; commandeIA = ""; modeTexte = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = question; reponse = ""; commandeIA = ""; modeTexte = false; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-demander", "--flux", question]
         demandeur.running = true
         chercher()
@@ -61,7 +100,7 @@ Item {
     // « ! » : une action (ou une consigne libre) sur le texte sélectionné, sinon copié ; le résultat se copie avec Entrée
     function demanderTexte(action) {
         if (action === "" || demandeur.running) return
-        questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = true; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"].concat(texteSource !== "" ? ["--stdin"] : [])
         texteEnvoi = texteSource
         demandeur.stdinEnabled = texteSource !== ""
@@ -251,7 +290,7 @@ Item {
     function termePaquets() {
         if (modePaquets === "non") return ""
         if (q.startsWith("+")) return q.slice(1).trim()
-        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|g |yt |w |\/)/.test(q) ? q : ""
+        return modePaquets === "auto" && q.length >= 3 && !/^(>|\?|!|@|g |yt |w |\/)/.test(q) ? q : ""
     }
     Process {
         id: chercheurPaquets
@@ -306,7 +345,7 @@ Item {
         interval: 120
         onTriggered: {
             var q = r.q
-            if (q.length >= 3 && !/^(>|!|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
+            if (q.length >= 3 && !/^(>|!|@|g |yt |w )/.test(q) && Reglages.val("SPOTLIGHT_FICHIERS", "oui") !== "non") {
                 lireFichiers.pour = q
                 lireFichiers.command = [Etat.bin + "nc-apps", "files", q]
                 lireFichiers.running = true
@@ -347,6 +386,8 @@ Item {
           ia: "IA_CAPTURE", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; exec \"$HOME/.local/bin/nc-ia\" capture"]) },
         { t: Reglages.t("Tester les IA", "Test the AIs"), k: "ia ai tester essai clé api claude openai gemini ollama test key", g: "science", ia: "IA_MODE",
           f: () => Quickshell.execDetached([Etat.bin + "nc-ia", "fenetre-test"]) },
+        { t: Reglages.t("Demander à l'IA d'agir", "Ask the AI to Act"), k: "ia ai agir gérer service redémarrer réparer act manage restart fix", g: "smart_toy", ia: "IA_ACTIONS", garder: true,
+          f: () => { champ.text = "@ "; champ.cursorPosition = 2 } },
         { t: Reglages.t("Couper l'IA partout", "Turn AI Off Everywhere"), k: "ia ai couper désactiver aucune arrêter intelligence artificielle turn off disable none", g: "block", ia: "IA_MODE",
           f: () => Quickshell.execDetached([Etat.bin + "nc-reglages", "set", "IA_MODE", "non"]) },
         { t: Reglages.t("Rallumer l'IA", "Turn AI Back On"), k: "ia ai rallumer activer intelligence artificielle turn on enable", g: "auto_awesome", siCoupee: true,
@@ -487,6 +528,36 @@ Item {
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
         }
+        if (q.startsWith("@")) {
+            var demandeA = q.slice(1).trim()
+            if (!agentPermis) {
+                resultats = [{ titre: Reglages.iaCoupee ? Reglages.t("L'IA est désactivée", "AI is turned off") : Reglages.t("L'IA n'a pas le droit d'agir", "The AI is not allowed to act"),
+                               sous: Reglages.t("Réglages · L'IA peut agir", "Settings · The AI can act"), glyphe: "block",
+                               f: () => r.ouvrirReglage(Reglages.t("L'IA peut agir", "The AI can act")) }]
+                return
+            }
+            if (r.modeAgent && q === r.questionPosee && (agent.running || r.plan)) {
+                if (agent.running || !r.plan) { resultats = []; return }
+                var lignesA = [], restantes = r.plan.actions.filter(a => !a.fait)
+                if (restantes.length > 1)
+                    lignesA.push({ titre: Reglages.t("Tout faire", "Do Everything"), sous: restantes.length + Reglages.t(" actions", " actions"), glyphe: "done_all",
+                                   garder: true, aide: Reglages.t("↵ confirmer", "↵ confirm"), f: () => r.executerPlan(null) })
+                r.plan.actions.forEach(a => {
+                    let n = a.n
+                    lignesA.push(a.fait ? { titre: (a.ok ? "✓ " : "✗ ") + a.libelle, sous: a.ok ? Reglages.t("Fait", "Done") : (a.resultat || "").slice(0, 60), glyphe: a.ok ? "check_circle" : "error", garder: true, f: () => {} }
+                                        : { titre: a.libelle, sous: a.danger ? Reglages.t("⚠ à confirmer", "⚠ to confirm") : Reglages.t("À confirmer", "To confirm"), glyphe: "play_arrow",
+                                            garder: true, aide: Reglages.t("↵ le faire", "↵ do it"), f: () => r.executerPlan(n) })
+                })
+                ;(r.plan.refus || []).forEach(t => lignesA.push({ titre: t, sous: Reglages.t("Refusé", "Refused"), glyphe: "block", garder: true, f: () => {} }))
+                resultats = lignesA
+                if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+                return
+            }
+            resultats = [{ titre: demandeA || Reglages.t("Dis ce que l'IA doit faire", "Say what the AI should do"),
+                           sous: Reglages.t("Elle propose, tu confirmes · ", "It proposes, you confirm · ") + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
+                           glyphe: "smart_toy", garder: true, f: () => r.lancerAgent(demandeA) }]
+            return
+        }
         if (q.startsWith("+") && modePaquets !== "non") {
             var tp = q.slice(1).trim()
             if (tp.length < 2) resultats = [{ titre: Reglages.t("Tape le nom d'un logiciel à installer", "Type the name of an app to install"),
@@ -559,7 +630,7 @@ Item {
         }
         for (var k = 0; k < actions.length; k++) {
             var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
-            if (ac.ia && (Reglages.iaCoupee || Reglages.val(ac.ia, "oui") === "non")) continue
+            if (ac.ia && (Reglages.iaCoupee || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
             if (ac.siCoupee && !Reglages.iaCoupee) continue
             if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }
@@ -639,7 +710,7 @@ Item {
     function valider(i, nouveau) {
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^[?>+!]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
+        if ((lireApplis.running || applis.length === 0) && !/^[?>+!@]/.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
@@ -681,7 +752,7 @@ Item {
     // Réponse de l'IA (« ? … »)
     Rectangle {
         id: zoneReponse
-        visible: r.reponseAide !== "" || ((r.q.startsWith("?") || (r.q.startsWith("!") && r.modeTexte && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
+        visible: r.reponseAide !== "" || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
         readonly property bool attend: r.reflechit && r.reponse === ""
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2

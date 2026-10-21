@@ -76,5 +76,25 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Agents** (Claude Code, Codex, OpenCode… dans l'île) : section « Agents IA » des réglages ; coupés avec le reste.
 - `nc-diag` dit quelle IA répond et vérifie que le fichier des clés est privé.
 
+## L'IA qui gère le bureau (avec ta confirmation)
+
+Coupée par défaut : **nc-reglages → Intelligence artificielle → L'IA peut agir → Oui, après ma confirmation**. Ensuite,
+`@ ` dans le Spotlight (ou `nc-ia agir "…"`) : « @ redémarre l'île », « @ coupe le Bluetooth et passe en économie »,
+« @ un service est en échec, répare-le ». L'IA voit l'état du bureau (services de ta session, Wi-Fi, Bluetooth, profil
+d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît comme une ligne, faite seulement quand tu
+appuies sur Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit domaine par domaine :
+
+- **services de la session** : redémarrer, démarrer, arrêter (signalé ⚠), lire le journal pour comprendre un échec —
+  jamais les services du système ;
+- **Wi-Fi et Bluetooth** : allumer, couper ;
+- **énergie** : profil d'énergie, luminosité ;
+- **son** : volume, son coupé ;
+- **réglages du bureau** : ceux de nc-reglages, jamais ceux de l'IA ;
+- **mises à jour** : les chercher ; les installer ouvre un terminal qui demande ton mot de passe.
+
+L'IA ne lance jamais de commande elle-même : son plan ne peut contenir que ces actions, chaque action est revérifiée
+au moment de la faire (service qui existe dans ta session, valeurs bornées, domaine toujours permis), un plan expire
+après 10 minutes, et rien ne se fait sans toi.
+
 Chaque usage se coupe à part : « IA sur le texte sélectionné », « IA dans le terminal », « Expliquer une zone de
 l'écran ». Rien ne tourne en arrière-plan : une IA n'est appelée que quand tu le demandes.

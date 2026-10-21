@@ -1,6 +1,7 @@
 """L'IA dans le Spotlight (Recherche.qml) hors écran : « ! » sur le texte sélectionné (filtre des actions, consigne
 libre, réponse en flux puis « Copier le résultat »), « ? » avec la commande proposée, le nom et le logo de l'IA qui
 répond réellement (repli compris), et l'IA coupée : messages clairs, page JARVIS cachée, aucune commande d'IA lancée."""
+import json
 import os
 from pathlib import Path
 import shutil
@@ -140,6 +141,62 @@ ShellRoot {
             self.assertEqual(appels.count("nc-ia texte traduire"), 1, "rien de lancé une fois l'IA coupée")
             self.assertIn("nc-ia texte resumer --flux --stdin", appels)
             self.assertEqual((root / "stdin-ia").read_text(), "texte du presse-papiers")
+
+
+    def test_arobase_plan_puis_confirmation(self):
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-agent-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({IA_ACTIONS: "confirmer"}); readonly property bool iaCoupee: false\n'
+                                            ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Recherche", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            plan = {"id": "0123456789abcdef", "reponse": "Je coupe le Bluetooth.", "ia": "Claude Code", "agent": "claude", "refus": [],
+                    "actions": [{"n": 0, "libelle": "Bluetooth : off", "danger": False, "fait": False, "ok": None, "resultat": ""},
+                                {"n": 1, "libelle": "Arrêter nc-pouls.service", "danger": True, "fait": False, "ok": None, "resultat": ""}]}
+            fait = dict(plan, actions=[dict(plan["actions"][0], fait=True, ok=True), plan["actions"][1]])
+            scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                       "nc-demander": '#!/bin/sh\necho \'{"nom": "Claude Code", "agent": "claude", "coupee": false}\'\n',
+                       "nc-ia": "#!/bin/sh\necho \"nc-ia $*\" >> \"$HOME/appels\"\ncase \"$1\" in agir) echo '" + json.dumps(plan) + "' ;; executer) echo '" + json.dumps(fait) + "' ;; esac\n"}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "") return; champ.text = "@ coupe le bluetooth"; etape++; return }
+  if (etape === 1) { verifier(spot.resultats[0].titre === "coupe le bluetooth", JSON.stringify(titres())); spot.valider(0, false); etape++; return }
+  if (etape === 2) { if (spot.reflechit || !spot.plan) return
+   verifier(spot.reponse === "Je coupe le Bluetooth.", "réponse : " + spot.reponse)
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Tout faire", "Bluetooth : off", "Arrêter nc-pouls.service"]), "plan : " + JSON.stringify(titres()))
+   verifier(spot.resultats[2].sous.indexOf("⚠") === 0, "action risquée signalée")
+   spot.valider(1, false); verifier(Etat.fermetures === 0, "le Spotlight reste ouvert"); etape++; return }
+  if (etape === 3) { if (spot.plan.actions[0].fait !== true) return
+   verifier(JSON.stringify(titres()) === JSON.stringify(["✓ Bluetooth : off", "Arrêter nc-pouls.service"]), "après : " + JSON.stringify(titres()))
+   Qt.quit() }
+ } }
+ Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            appels = (root / "appels").read_text().splitlines()
+            self.assertEqual(appels, ["nc-ia agir --json coupe le bluetooth", "nc-ia executer 0123456789abcdef 0 --json"])
 
 
 if __name__ == "__main__":

@@ -930,6 +930,33 @@ REGLAGES = [
         "notification. Demande une IA qui lit les images.",
         "Super + Alt + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
         "Needs an AI that reads images.")),
+    # L'IA qui agit (nc-ia agir, « @ » dans le Spotlight) : coupée par défaut ; ce qu'elle peut proposer, jamais fait sans toi
+    R("IA_ACTIONS", "Intelligence artificielle", L("L'IA peut agir (avec ta confirmation)", "The AI can act (with your confirmation)"),
+      "choix", "non",
+      L("« @ coupe le Bluetooth », « @ redémarre l'île » dans le Spotlight : l'IA propose un plan fait seulement des "
+        "actions permises ci-dessous, chacune revérifiée, et rien n'est fait avant que tu confirmes. Ses propres "
+        "réglages lui sont interdits.",
+        "“@ turn Bluetooth off”, “@ restart the island” in Spotlight: the AI proposes a plan made only of the actions "
+        "allowed below, each one checked again, and nothing is done until you confirm. Its own settings are off-limits."),
+      [("non", L("Non : elle répond seulement", "No: it only answers")),
+       ("confirmer", L("Oui, après ma confirmation", "Yes, after my confirmation"))]),
+    *[R(cle_, "Intelligence artificielle", L(fr_, en_), "ouinon", "oui", L(aide_fr, aide_en))
+      for cle_, fr_, en_, aide_fr, aide_en in (
+        ("IA_GERER_SERVICES", "Elle peut proposer : services de la session", "It can propose: session services",
+         "Redémarrer, démarrer ou arrêter les services de ta session (l'île, la barre, le son…) et lire leur journal pour "
+         "comprendre un échec. Jamais ceux du système.",
+         "Restart, start or stop your session's services (the island, the bar, sound…) and read their log to understand "
+         "a failure. Never the system's ones."),
+        ("IA_GERER_RESEAU", "Elle peut proposer : Wi-Fi et Bluetooth", "It can propose: Wi-Fi and Bluetooth",
+         "Les allumer ou les couper.", "Turn them on or off."),
+        ("IA_GERER_ENERGIE", "Elle peut proposer : énergie", "It can propose: power",
+         "Le profil d'énergie et la luminosité.", "The power profile and the brightness."),
+        ("IA_GERER_SON", "Elle peut proposer : son", "It can propose: sound", "Le volume et le son coupé.", "The volume and mute."),
+        ("IA_GERER_REGLAGES", "Elle peut proposer : réglages du bureau", "It can propose: desktop settings",
+         "Ceux de nc-reglages (thème, île, fenêtres…), sauf ceux de l'IA.", "Those of nc-settings (theme, island, windows…), except the AI's."),
+        ("IA_GERER_MAJ", "Elle peut proposer : mises à jour", "It can propose: updates",
+         "Les chercher ; les installer ouvre un terminal qui demande ton mot de passe.",
+         "Check for them; installing opens a terminal that asks for your password."))],
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : la fenêtre « Connexion JARVIS » (ligne ci-dessus).",
