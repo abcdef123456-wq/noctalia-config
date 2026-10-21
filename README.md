@@ -229,8 +229,11 @@ certificat TLS et état du runner.
 **Firefox** (étape facultative de `install.sh`, ou `nc-firefox installer`) : les préférences du dépôt vont dans ton
 profil (`user.js` : barres compactes, sélecteur de fichiers du bureau, vidéo décodée par la carte graphique, session
 rouverte, sans contenu sponsorisé ni télémétrie) avec le style de l’île (`chrome/userChrome.css` : onglets et barre
-d’adresse en pastilles, aux couleurs du fond d’écran, suivies par `nc-theme-sync`). Relance Firefox ensuite ;
-`nc-firefox desinstaller` remet tout comme avant. Les fichiers : `home/.local/share/nc/firefox/`.
+d’adresse en pastilles, aux couleurs du fond d’écran quand le thème de Firefox est du même côté, sombre ou clair).
+Relance Firefox ensuite ; `nc-firefox desinstaller` remet tout comme avant. Pour que le thème de Firefox suive le fond
+d’écran **en direct**, le réglage « Firefox aux couleurs du fond d’écran » (nc-reglages → Apparence) pose une petite
+extension non signée (Developer Edition, Nightly ou ESR) reliée à `nc-firefox` par la messagerie native ; un thème
+choisi dans Firefox reste prioritaire. Les fichiers : `home/.local/share/nc/firefox/`.
 
 Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 

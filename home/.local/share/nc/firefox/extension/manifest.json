@@ -1,0 +1,22 @@
+{
+  "manifest_version": 2,
+  "name": "Couleurs de l'île (noctalia-config)",
+  "description": "Le thème de Firefox suit en direct les couleurs du fond d'écran du bureau (nc-theme-sync), via l'hôte natif nc-firefox. Un thème choisi dans Firefox reste prioritaire.",
+  "version": "1.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "nc-couleurs@noctalia-config",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "theme",
+    "nativeMessaging",
+    "management"
+  ],
+  "background": {
+    "scripts": [
+      "fond.js"
+    ]
+  }
+}

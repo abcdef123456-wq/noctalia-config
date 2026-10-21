@@ -105,7 +105,8 @@ AUTOMATIQUES = [
     ("nc-session-propre", "Arrête les barres d'une ancienne config au démarrage."),
     ("nc-noctalia-avant", "Prépare Noctalia juste avant son démarrage."),
     ("nc-shell", "État de la barre Noctalia."),
-    ("nc-firefox", "La config Firefox du dépôt dans ton profil (préférences, style de l'île) : installer, desinstaller, couleurs."),
+    ("nc-firefox", "La config Firefox du dépôt dans ton profil (préférences, style de l'île) : installer, desinstaller, couleurs ; "
+                   "nc-firefox extension installer : le thème suit le fond d'écran en direct (réglage Firefox aux couleurs du fond d'écran)."),
 ]
 
 # Noms anglais des commandes (liens créés par install.sh, voir NOMS_ANGLAIS dans nc-langue) : français → anglais

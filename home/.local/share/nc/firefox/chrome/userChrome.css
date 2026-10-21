@@ -31,26 +31,28 @@
 }
 #navigator-toolbox::after { display: none !important; }
 
-/* Onglets en pastilles */
+/* Onglets en pastilles : l'onglet ouvert nettement plus clair que la barre, un liseré d'accent en haut ; les autres
+   sans fond, texte atténué, fond léger au survol */
 .tabbrowser-tab .tab-background {
   border-radius: var(--nc-arrondi) !important;
   margin-block: 4px !important;
   box-shadow: none !important;
   outline: none !important;
+  background-image: none !important;
 }
 .tabbrowser-tab[selected] .tab-background,
 .tabbrowser-tab[multiselected] .tab-background {
-  background-color: var(--nc-carte-survol) !important;
-  background-image: none !important;
+  background-color: color-mix(in srgb, var(--nc-texte) 16%, var(--nc-fond)) !important;
+  box-shadow: inset 0 2px 0 0 var(--nc-accent) !important;
 }
 .tabbrowser-tab:hover:not([selected]) .tab-background {
   background-color: var(--nc-carte) !important;
 }
 .tabbrowser-tab[selected] .tab-content { color: var(--nc-texte) !important; }
 .tabbrowser-tab:not([selected]) .tab-content { color: var(--nc-texte-sec) !important; }
+.tabbrowser-tab:hover:not([selected]) .tab-content { color: var(--nc-texte) !important; }
 .tabbrowser-tab::before, .tabbrowser-tab::after,
 .tabbrowser-tab .tab-line { display: none !important; }
-.tabbrowser-tab[selected] .tab-background::before { border-left: 2px solid var(--nc-accent) !important; border-radius: 2px; }
 
 /* Barre d'adresse et recherche : une pastille, un liseré accent quand elle a le focus */
 #urlbar-background,

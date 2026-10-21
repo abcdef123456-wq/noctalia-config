@@ -395,6 +395,15 @@ REGLAGES = [
         "Under the time, for example “If found: +1 555 123 4567”. “none”: no message.")),
     R("VERROU_FLOU", "Apparence", L("Flou de l'écran de verrouillage", "Lock screen blur"), "entier", "15",
       L("0 : fond d'écran net.", "0: sharp wallpaper."), mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
+    R("FIREFOX_COULEURS", "Apparence", L("Firefox aux couleurs du fond d'écran", "Firefox in the wallpaper colors"), "ouinon", "non",
+      L("Une petite extension (« Couleurs de l'île ») fait suivre au thème de Firefox les couleurs du fond d'écran, en "
+        "direct, sans relancer. Un thème choisi dans Firefox reste prioritaire (seuls Système, et Sombre ou Clair du "
+        "même côté que le fond, sont colorés). Non signée : Firefox Developer Edition, Nightly ou ESR seulement. Oui : "
+        "posée dans ton profil, active au prochain démarrage de Firefox ; non : retirée, Firefox revient à son thème.",
+        "A small extension (“Island colors”) makes the Firefox theme follow the wallpaper colors live, without a restart. "
+        "A theme you pick in Firefox stays in charge (only System, and Dark or Light matching the wallpaper, get colored). "
+        "Unsigned: Firefox Developer Edition, Nightly or ESR only. Yes: installed in your profile, active at Firefox's "
+        "next start; no: removed, Firefox goes back to its theme."), groupe="firefox"),
     # Animations
     R("EFFETS", "Animations", L("Effets visuels", "Visual effects"), "choix", "tous",
       L("Aucun : ni animations, ni flou, ni ombres, ni transitions, ni loupe du dock, ni fond animé : plus sobre et plus "
@@ -1242,6 +1251,9 @@ def appliquer(groupes, vals=None):
             subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
+        elif g == "firefox":
+            quoi = "installer" if vals.get("FIREFOX_COULEURS") == "oui" else "desinstaller"
+            subprocess.run([os.path.join(HOME, ".local/bin/nc-firefox"), "extension", quoi], capture_output=True)
         elif g == "langue":
             # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
             subprocess.run(["hyprctl", "reload"], capture_output=True)

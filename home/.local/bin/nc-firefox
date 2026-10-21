@@ -10,22 +10,42 @@
                            appelé par nc-theme-sync à chaque fond d'écran, sans effet tant que rien n'est installé
   nc-firefox etat          0 si la config est en place dans le profil, 1 sinon
 
-Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit tout ça au démarrage : ferme-le et rouvre-le.
-Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais acceptés : profile, install, uninstall, colors, status.
+  nc-firefox extension installer | desinstaller | etat
+      L'extension « Couleurs de l'île » : le thème de Firefox suit en direct les couleurs du fond d'écran, sans
+      relancer (réglage FIREFOX_COULEURS de nc-reglages → Apparence). Elle est posée dans extensions/ du profil
+      (chargée au prochain démarrage de Firefox, activée d'elle-même) avec son hôte natif (ce script, déclaré dans
+      native-messaging-hosts). Non signée : Firefox Developer Edition, Nightly et ESR l'acceptent
+      (xpinstall.signatures.required à faux) ; la version grand public de Firefox la refuse.
+
+Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit user.js et chrome/ au démarrage : ferme-le et
+rouvre-le. Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais acceptés : profile, install, uninstall,
+colors, status, extension.
 """
 import configparser
 import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import sys
+import threading
+import time
+import zipfile
 
 HOME = Path.home()
 SOURCE = Path(os.environ.get("NC_FIREFOX_SOURCE") or HOME / ".local/share/nc/firefox")
 PALETTE = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/palette-ile.json"
 MARQUE = "nc-firefox"
 FICHIERS = ("user.js", "chrome/userChrome.css", "chrome/userContent.css")
+EXTENSION_ID = "nc-couleurs@noctalia-config"
+HOTE = "nc_firefox"
 ACTIONS = {"profile": "profil", "install": "installer", "uninstall": "desinstaller", "colors": "couleurs", "status": "etat"}
+BLOC_EXTENSION = f"""
+// --- {MARQUE} extension : « Couleurs de l'île » (nc-firefox extension installer) ---
+user_pref("xpinstall.signatures.required", false);                         // extension non signée (Developer Edition, Nightly, ESR)
+user_pref("extensions.sideloadScopes", 1);                                 // extensions/ du profil lu au démarrage
+user_pref("extensions.autoDisableScopes", 14);                             // celles du profil sont activées d'elles-mêmes
+"""
 
 
 def dossiers_candidats():
@@ -81,6 +101,14 @@ def pose_par_nc(f):
         return False
 
 
+def ecrire_user_js(p):
+    """user.js = celui du dépôt, plus le bloc de l'extension si elle est installée."""
+    texte = (SOURCE / "user.js").read_text(encoding="utf-8")
+    if extension_etat(p) == 0:
+        texte += BLOC_EXTENSION
+    (p / "user.js").write_text(texte, encoding="utf-8")
+
+
 def installer(p):
     for rel in FICHIERS:
         src = SOURCE / rel
@@ -92,14 +120,16 @@ def installer(p):
         shutil.copy2(ancien, p / "user.js.avant-nc")
         print(f"ton user.js est gardé en {p / 'user.js.avant-nc'}")
     (p / "chrome").mkdir(exist_ok=True)
-    for rel in FICHIERS:
+    for rel in FICHIERS[1:]:
         shutil.copyfile(SOURCE / rel, p / rel)
+    ecrire_user_js(p)
     couleurs(p)
     print(f"config Firefox installée dans {p} (relance Firefox)")
     return 0
 
 
 def desinstaller(p):
+    extension_desinstaller(p, silencieux=True)
     for rel in FICHIERS:
         f = p / rel
         if pose_par_nc(f):
@@ -119,35 +149,153 @@ def etat(p):
     return 0 if all(pose_par_nc(p / rel) for rel in FICHIERS) else 1
 
 
+def lire_palette():
+    try:
+        pal = json.loads(PALETTE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(pal, dict):
+        return None
+    def couleur(v):
+        return isinstance(v, str) and len(v) == 7 and v.startswith("#") and all(c in "0123456789abcdefABCDEF" for c in v[1:])
+    propre = {k: v for k, v in pal.items() if couleur(v)}
+    propre["sombre"] = pal.get("sombre") is not False
+    return propre
+
+
 def couleurs(p):
     """chrome/nc-couleurs.css : les couleurs de l'île en variables CSS. Seulement si le style est installé."""
     if not pose_par_nc(p / "chrome/userChrome.css"):
         return 0
-    try:
-        pal = json.loads(PALETTE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    pal = lire_palette()
+    if not pal:
         return 0
-    def couleur(cle):
-        v = pal.get(cle)
-        return v if isinstance(v, str) and len(v) in (7, 9) and v.startswith("#") and all(c in "0123456789abcdefABCDEF" for c in v[1:]) else None
     paires = [("fond", "fond"), ("carte", "carte"), ("carte-survol", "carteSurvol"), ("accent", "accent"),
               ("texte", "texte"), ("texte-sec", "texteSec")]
-    lignes = [f"  --nc-couleur-{nom}: {couleur(cle)};" for nom, cle in paires if couleur(cle)]
+    lignes = [f"  --nc-couleur-{nom}: {pal[cle]};" for nom, cle in paires if cle in pal]
     if not lignes:
         return 0
-    sombre = pal.get("sombre", True)
     # Seulement si le thème de Firefox (sombre, clair ou système) est du même côté que le fond d'écran : avec un thème
     # clair sur un fond sombre, les barres gardent les couleurs du thème de Firefox et seulement la forme de l'île
     css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
            "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
-           f"@media (prefers-color-scheme: {'dark' if sombre else 'light'}) {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
+           f"@media (prefers-color-scheme: {'dark' if pal['sombre'] else 'light'}) {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
     f = p / "chrome/nc-couleurs.css"
     if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
         f.write_text(css, encoding="utf-8")
     return 0
 
 
+# ── Extension « Couleurs de l'île » ───────────────────────────────────────────
+
+def dossiers_hotes(p):
+    """Où Firefox cherche les hôtes natifs de l'utilisateur : à côté de profiles.ini (jamais ~/.mozilla créé de
+    toutes pièces : Firefox y chercherait alors ses profils)."""
+    base = p.parent.parent          # …/mozilla/firefox/<profil> → …/mozilla
+    return [base / "native-messaging-hosts"]
+
+
+def extension_installer(p):
+    src = SOURCE / "extension"
+    if not (src / "manifest.json").is_file():
+        print(f"nc-firefox : extension absente, {src}", file=sys.stderr)
+        return 1
+    (p / "extensions").mkdir(exist_ok=True)
+    xpi = p / "extensions" / (EXTENSION_ID + ".xpi")
+    with zipfile.ZipFile(xpi, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(src.iterdir()):
+            if f.is_file():
+                z.write(f, f.name)
+    manifest = {"name": HOTE, "description": "Couleurs de l'île (noctalia-config) : la palette du fond d'écran pour Firefox",
+                "path": str(HOME / ".local/bin/nc-firefox"), "type": "stdio", "allowed_extensions": [EXTENSION_ID]}
+    for d in dossiers_hotes(p):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / (HOTE + ".json")).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if pose_par_nc(p / "user.js") or not (p / "user.js").exists():
+        if not pose_par_nc(p / "user.js"):
+            installer(p)
+        else:
+            ecrire_user_js(p)
+    print(f"extension « Couleurs de l'île » posée dans {p} (relance Firefox : elle s'active au démarrage)")
+    return 0
+
+
+def extension_desinstaller(p, silencieux=False):
+    xpi = p / "extensions" / (EXTENSION_ID + ".xpi")
+    if xpi.is_file():
+        xpi.unlink()
+    for d in dossiers_hotes(p):
+        f = d / (HOTE + ".json")
+        if f.is_file():
+            f.unlink()
+    if pose_par_nc(p / "user.js"):
+        ecrire_user_js(p)
+    if not silencieux:
+        print(f"extension retirée de {p} (relance Firefox : il revient au thème d'avant)")
+    return 0
+
+
+def extension_etat(p):
+    return 0 if (p / "extensions" / (EXTENSION_ID + ".xpi")).is_file() else 1
+
+
+def hote():
+    """Hôte natif (lancé par Firefox : nc-firefox CHEMIN_DU_MANIFESTE ID_EXTENSION) : envoie la palette tout de suite,
+    puis à chaque changement de ~/.config/nc/palette-ile.json ; s'arrête quand Firefox ferme la liaison."""
+    sortie = sys.stdout.buffer
+    entree = sys.stdin.buffer
+    fini = threading.Event()
+
+    def envoyer(obj):
+        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        try:
+            sortie.write(struct.pack("<I", len(data)) + data)
+            sortie.flush()
+        except (OSError, ValueError):
+            fini.set()
+
+    def lire():
+        while not fini.is_set():
+            en_tete = entree.read(4)
+            if len(en_tete) < 4:
+                break
+            n = struct.unpack("<I", en_tete)[0]
+            entree.read(n)                      # seule demande possible : « couleurs »
+            pal = lire_palette()
+            if pal:
+                envoyer({"palette": pal})
+        fini.set()
+
+    threading.Thread(target=lire, daemon=True).start()
+    derniere = None
+    parent = os.getppid()
+    while not fini.is_set():
+        if os.getppid() != parent:          # Firefox parti sans fermer la liaison (tué) : on ne reste pas orphelin
+            break
+        try:
+            m = PALETTE.stat().st_mtime_ns
+        except OSError:
+            m = None
+        if m is not None and m != derniere:
+            derniere = m
+            pal = lire_palette()
+            if pal:
+                envoyer({"palette": pal})
+        fini.wait(1.0)
+    os._exit(0)                              # sans attendre le fil bloqué sur l'entrée
+
+
 def main(argv):
+    if len(argv) >= 2 and argv[0].endswith(".json") and argv[1].startswith(EXTENSION_ID):
+        return hote()
+    if argv and argv[0] == "extension":
+        sous = ACTIONS.get(argv[1], argv[1]) if len(argv) > 1 else "etat"
+        fn = {"installer": extension_installer, "desinstaller": extension_desinstaller, "etat": extension_etat}.get(sous)
+        if not fn:
+            print(__doc__.strip(), file=sys.stderr)
+            return 2
+        p = profil()
+        return fn(p) if p else 1
     action = ACTIONS.get(argv[0], argv[0]) if argv else "profil"
     if action not in ("profil", "installer", "desinstaller", "couleurs", "etat"):
         print(__doc__.strip(), file=sys.stderr)
