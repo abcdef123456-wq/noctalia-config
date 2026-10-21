@@ -122,10 +122,25 @@ def sortie(cmd):
 
 
 # ── Choix calculés sur ce PC ────────────────────────────────────────────────────────────────────────────────────
+_MEMO = {}
+
+
+def sortie_memo(cmd, duree=30):
+    """sortie(cmd), gardée `duree` secondes : chaque liste de choix (polices, animations, fréquences) est relue deux
+    fois par réglage et par affichage (choix et valeur affichée) ; une fois suffit, et elle reste fraîche (écran
+    branché pendant que les réglages sont ouverts)."""
+    cle = tuple(cmd)
+    t, texte = _MEMO.get(cle, (0, ""))
+    if time.time() - t > duree:
+        texte = sortie(cmd)
+        _MEMO[cle] = (time.time(), texte)
+    return texte
+
+
 def frequences():
     """Fréquences de l'écran du portable dans sa définition native (de la plus basse à la plus haute)."""
     try:
-        mons = json.loads(sortie(["hyprctl", "monitors", "all", "-j"]) or "[]")
+        mons = json.loads(sortie_memo(["hyprctl", "monitors", "all", "-j"]) or "[]")
     except ValueError:
         return []
     m = next((x for x in mons if x.get("name", "").startswith("eDP")), None)
@@ -145,7 +160,7 @@ def frequences():
 def polices(motif, preferees):
     """Polices installées : d'abord celles de la liste (si présentes), puis les autres qui suivent le motif."""
     familles = set()
-    for l in sortie(["fc-list", ":", "family"]).splitlines():
+    for l in sortie_memo(["fc-list", ":", "family"]).splitlines():
         for f in l.split(","):
             familles.add(f.strip())
     res = [p for p in preferees if p in familles]
@@ -263,7 +278,7 @@ class R:
 def animations_bouton():
     """Ce que peut faire le bouton d'arrêt : actions, animations de nc-anim (dont les tiennes)."""
     res = [("doigts", T("Des doigts partout", "Fingers everywhere"))]
-    for l in sortie([os.path.join(HOME, ".local/bin/nc-anim"), "liste", "--brut"]).splitlines():
+    for l in sortie_memo([os.path.join(HOME, ".local/bin/nc-anim"), "liste", "--brut"]).splitlines():
         n, _, d = l.partition("\t")
         if n and n != "doigts":
             res.append((n, d))
@@ -2301,7 +2316,19 @@ def cli(a):
                            capture_output=True)
         return
     if a[0] in ("fenetre", "fenêtre", "window", "gui"):
-        sys.exit(subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True).returncode)
+        # La fenêtre graphique vit dans l'île Quickshell ; sans elle (openSUSE, Debian sans Quickshell compilé), l'écran
+        # des réglages s'ouvre dans un terminal
+        try:
+            code = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True, timeout=5).returncode
+        except (OSError, subprocess.TimeoutExpired):
+            code = 1
+        if code != 0:
+            terminal = shutil.which("kitty")
+            if terminal:
+                subprocess.Popen([terminal, "--class", "nc-reglages", "-e", os.path.join(BIN, "nc-reglages")],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                code = 0
+        sys.exit(code)
     if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
         for r in VISIBLES:

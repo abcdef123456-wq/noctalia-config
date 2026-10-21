@@ -75,6 +75,42 @@ class Paquets(unittest.TestCase):
         self.assertIn("Système à jour.", r.stdout)
         self.assertIn("Recompte des mises à jour", r.stdout)
 
+    def test_opensuse_zypper(self):
+        """openSUSE : compte depuis le XML de zypper (sans rafraîchir, pas de root), mise à jour par zypper dup."""
+        nu = self.home / "nu"; nu.mkdir()
+        # Un PATH sans le pacman, dnf ou apt de la machine : seulement les outils de base et les faux
+        for outil in ("sh", "bash", "sed", "awk", "grep", "head", "tail", "tr", "mkdir", "rm", "mv", "cat", "wc", "sort", "date", "env", "basename", "dirname", "sleep", "printf", "cp", "touch"):
+            vrai = shutil.which(outil)
+            if vrai:
+                (nu / outil).symlink_to(vrai)
+        (nu / "zypper").write_text("""#!/bin/sh
+echo "zypper $*" >> "$HOME/appels"
+case "$*" in
+  *list-updates*) cat <<'XML'
+<?xml version='1.0'?>
+<stream>
+<update-status version="0.6">
+<update-list>
+<update kind="package" name="mesa" edition="25.2-1.1" arch="x86_64" edition-old="25.1-1.1"><summary>Mesa</summary></update>
+<update kind="package" name="firefox" edition="144.0-1.1" arch="x86_64" edition-old="143.0-1.1"><summary>Firefox</summary></update>
+<update kind="patch" name="openSUSE-2026-1" edition="1" arch="noarch"><summary>Correctif</summary></update>
+</update-list>
+</update-status>
+</stream>
+XML
+  ;;
+esac
+""")
+        (nu / "zypper").chmod(0o755)
+        (nu / "sudo").write_text('#!/bin/sh\nexec "$@"\n'); (nu / "sudo").chmod(0o755)
+        r = self.lancer("compter", PATH=str(nu))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.cache.read_text().splitlines(), ["2", "firefox", "mesa"], "les paquets seulement (triés), pas les correctifs")
+        self.assertIn("zypper --non-interactive --no-refresh --xmlout list-updates", self.appels())
+        r = subprocess.run([str(BIN / "nc-paquets"), "terminal"], env=dict(HOME=str(self.home), PATH=str(nu), NC_LANGUE="fr"),
+                           input="\n", capture_output=True, text=True, timeout=20)
+        self.assertIn("zypper dup", self.appels(), "la mise à jour passe par zypper dup")
+
     def test_paquets_restants_et_ignores(self):
         r = self.lancer("terminal", NC_TEST_LOCAL="linux 6.1-1 -> 6.2-1\nnvidia 1-1 -> 1-2 [ignored]\n")
         self.assertEqual(r.returncode, 0, r.stderr)

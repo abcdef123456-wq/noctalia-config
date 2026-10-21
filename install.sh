@@ -1073,7 +1073,9 @@ elif ask "$nv_q" o; then
     fedora) pkg_try neovim git ripgrep fd-find gcc make tree-sitter-cli gitui
             # Fedora 44 : nodejs24 / nodejs24-npm (plus de paquet « nodejs ») ; demandés par la commande fournie
             have node || sudo dnf install -y /usr/bin/node /usr/bin/npm >/dev/null 2>&1 || true ;;
-    debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui ;;
+    # python3-venv : Mason installe ruff et le serveur Python (extra Python) dans un environnement virtuel, que Debian
+    # et Ubuntu séparent de python3
+    debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui python3-venv ;;
     suse)   pkg_try neovim git ripgrep fd gcc make nodejs-default npm-default tree-sitter gitui ;;
   esac
   nv="$(nv_ver)"

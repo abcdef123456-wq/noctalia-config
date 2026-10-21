@@ -215,7 +215,7 @@ Item {
     ]
 
     // ── Recherche ──
-    function sansAccents(s) { return (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") }
+    function sansAccents(s) { s = (s || "").toLowerCase(); try { return s.normalize("NFD").replace(/[̀-ͯ]/g, "") } catch (e) { return s } }
     // Score d'un nom : début 100, début d'un mot 80, dedans 55 (seulement si large), sinon 0.
     // Mots : séparés par espace, tiret, point, tiret bas (« org.gnome.Nautilus », « Wi-Fi »).
     function score(q, texte, large) {

@@ -128,6 +128,17 @@ class Firefox(unittest.TestCase):
         self.assertEqual(self.lancer("desinstaller").returncode, 0)
         self.assertFalse(xpi.exists(), "desinstaller retire aussi l'extension")
 
+    def test_extension_refusee_par_le_firefox_grand_public(self):
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        (p / "compatibility.ini").write_text("[Compatibility]\nLastVersion=144.0_20261001/20261001\nLastPlatformDir=/usr/lib64/firefox\n")
+        r = self.lancer("extension", "installer")
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("non signées", r.stderr)
+        self.assertFalse((p / "extensions").exists(), "rien de posé")
+        (p / "compatibility.ini").write_text("[Compatibility]\nLastVersion=140.4.0_20261001/20261001\nLastPlatformDir=/usr/lib/firefox-esr\n")
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0, "ESR (Debian 13) l'accepte")
+
     def test_user_js_bien_forme(self):
         cles = []
         for n, ligne in enumerate((SOURCE / "user.js").read_text().splitlines(), 1):

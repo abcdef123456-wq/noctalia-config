@@ -15,7 +15,8 @@
       relancer (réglage FIREFOX_COULEURS de nc-reglages → Apparence). Elle est posée dans extensions/ du profil
       (chargée au prochain démarrage de Firefox, activée d'elle-même) avec son hôte natif (ce script, déclaré dans
       native-messaging-hosts). Non signée : Firefox Developer Edition, Nightly et ESR l'acceptent
-      (xpinstall.signatures.required à faux) ; la version grand public de Firefox la refuse.
+      (xpinstall.signatures.required à faux) ; avec la version grand public (Fedora, Snap d'Ubuntu, Flatpak),
+      l'installation est refusée (code 4) au lieu de poser une extension que Firefox rejetterait.
 
 Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit user.js et chrome/ au démarrage : ferme-le et
 rouvre-le. Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais acceptés : profile, install, uninstall,
@@ -195,8 +196,28 @@ def dossiers_hotes(p):
     return [base / "native-messaging-hosts"]
 
 
+def accepte_non_signee(p):
+    """Firefox Developer Edition, Nightly ou ESR (Debian) acceptent une extension non signée ; le Firefox normal
+    (Fedora, Arch « firefox », Flatpak, Snap d'Ubuntu) la refuse. Lu dans compatibility.ini du profil ; un profil
+    jamais ouvert ne dit rien : on essaie."""
+    cfg = configparser.RawConfigParser()
+    try:
+        cfg.read(p / "compatibility.ini", encoding="utf-8")
+    except configparser.Error:
+        return True
+    dossier = cfg.get("Compatibility", "LastPlatformDir", fallback="").lower()
+    version = cfg.get("Compatibility", "LastVersion", fallback="").split("_")[0].lower()
+    if not dossier and not version:
+        return True
+    return any(m in dossier for m in ("developer", "nightly", "esr", "aurora")) or "a1" in version or "esr" in version
+
+
 def extension_installer(p):
     src = SOURCE / "extension"
+    if not accepte_non_signee(p):
+        print("nc-firefox : ce Firefox refuse les extensions non signées (seuls Developer Edition, Nightly et ESR les "
+              "acceptent) ; le style de l'île et ses couleurs au démarrage restent (nc-firefox installer)", file=sys.stderr)
+        return 4
     if not (src / "manifest.json").is_file():
         print(f"nc-firefox : extension absente, {src}", file=sys.stderr)
         return 1

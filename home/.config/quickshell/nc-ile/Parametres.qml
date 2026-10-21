@@ -47,7 +47,8 @@ FloatingWindow {
         })
         return catalogue.filter(r => r.sectionNom === section)
     }
-    function normaliser(t) { return String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") }
+    // Sans accent ni majuscule ; sans String.normalize (moteur JavaScript d'un Qt ancien), seulement sans majuscule
+    function normaliser(t) { var s = String(t).toLowerCase(); try { return s.normalize("NFD").replace(/[̀-ͯ]/g, "") } catch (e) { return s } }
     function afficher(nom) { surEcran(nom); visible = true; charger(); liste.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
@@ -148,7 +149,9 @@ FloatingWindow {
     }
     // Le caractère d'une touche lettre ou chiffre (le texte de l'événement, sinon le code de la touche), ou ""
     function lettre(event) {
-        if (event.text && /^[\p{L}\p{N}]$/u.test(event.text)) return event.text
+        // Une lettre (toute écriture : elle a une majuscule) ou un chiffre ; sans regex Unicode (Qt 6.8 de Debian 13)
+        var c = event.text || ""
+        if (c.length === 1 && (c.toLowerCase() !== c.toUpperCase() || (c >= "0" && c <= "9"))) return c
         if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z) || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)) return String.fromCharCode(event.key).toLowerCase()
         return ""
     }
