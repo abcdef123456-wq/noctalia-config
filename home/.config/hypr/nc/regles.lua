@@ -13,6 +13,8 @@ hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, floa
 
 -- Fenêtre « Connexion JARVIS » (nc-assistant configurer) : petite fenêtre flottante, centrée
 hl.window_rule({ name = "nc-connexion-jarvis", match = { title = "^(Connexion JARVIS)$" }, float = true, center = true, size = { "600", "660" } })
+-- Fenêtre « Clés des IA » (nc-ia configurer) : flottante, centrée
+hl.window_rule({ name = "nc-cles-ia", match = { title = "^(Clés des IA|AI keys)$" }, float = true, center = true, size = { "640", "720" } })
 
 -- Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : comme le cockpit, une fenêtre classique placée par
 -- nc/automatismes.lua à la taille d'une fenêtre rangée seule sous la barre

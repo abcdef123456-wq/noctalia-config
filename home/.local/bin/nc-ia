@@ -13,7 +13,8 @@
   nc-ia terminal QUESTION              la réponse dans un terminal (« ? » du lanceur de Noctalia, sans l'île)
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
   nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Alt + Maj + I)
-  nc-ia configurer                     les clés d'API au clavier (masquées), chacune essayée tout de suite
+  nc-ia configurer                     les clés d'API : la fenêtre « Clés des IA » de l'île, sinon au clavier
+                                       (masquées), chacune essayée tout de suite ; --terminal : au clavier
   nc-ia cle FOURNISSEUR                enregistre sa clé d'API, lue sur l'entrée standard (vide : l'efface)
   nc-ia cles [--json]                  les clés enregistrées, masquées, et d'où elles viennent
   nc-ia modele FOURNISSEUR [NOM]       le modèle utilisé (sans NOM : retour au choix automatique)
@@ -1041,6 +1042,14 @@ def dans_terminal(args, titre, attendre=False):
 
 def configurer():
     if not sys.stdin.isatty():
+        # Session graphique avec l'île : la fenêtre « Clés des IA » ; sinon les questions dans un terminal
+        if shutil.which("qs") and os.environ.get("WAYLAND_DISPLAY"):
+            try:
+                if subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "clesIA"], capture_output=True,
+                                  timeout=5).returncode == 0:
+                    return 0
+            except (OSError, subprocess.TimeoutExpired):
+                pass
         return dans_terminal(["configurer"], T("Clés des IA", "AI keys"))
     import getpass
     while True:
@@ -1120,7 +1129,7 @@ def etat():
         "mode": mode(), "coupee": coupee(), "choix": reglage("IA_CHOIX", ""), "preference": reglage("IA_PREFERENCE", "rapide"),
         "usages": {u: {"id": c, "nom": nom(c) if c else ""} for u, c in choix.items()},
         "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
-                     cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i))
+                     cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""))
                 for i, f in FOURNISSEURS.items()],
     }
 
@@ -1230,6 +1239,8 @@ def main(a):
             print(json.dumps({"ok": True, "text": texte, "engine": nom(ident)}, ensure_ascii=False) if json_out else texte)
             return 0
         if c in ("configurer", "configure", "setup"):
+            if "--terminal" in a and not sys.stdin.isatty():
+                return dans_terminal(["configurer"], T("Clés des IA", "AI keys"))
             return configurer()
         if c == "terminal":                     # une question, la réponse dans un terminal (lanceur sans l'île)
             q = " ".join(x for x in a if x != "--").strip()

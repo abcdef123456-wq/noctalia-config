@@ -589,7 +589,7 @@ noctalia = {
  string = { trim = function(s) return s:match("^%s*(.-)%s*$") end },
  json = { decode = function() return {} end },
  runAsync = function(args, callback)
-  if type(args) == "table" and args[2] == "ouvrir" then launched = args
+  if type(args) == "table" and args[2] == "terminal" then launched = args
   elseif callback then table.insert(callbacks, callback) end
  end,
 }
@@ -600,7 +600,7 @@ onOpen("? a 'quote' and $(false)")
 for _, f in ipairs(callbacks) do f({exitCode=0,stdout="[]"}) end
 onKey("Return", true)
 assert(closed and launched and #launched == 3)
-assert(launched[1] == "~/.local/bin/nc-assistant" and launched[2] == "ouvrir")
+assert(launched[1] == "~/.local/bin/nc-ia" and launched[2] == "terminal")
 assert(launched[3] == "a 'quote' and $(false)")
 '''
         with tempfile.TemporaryDirectory() as d:

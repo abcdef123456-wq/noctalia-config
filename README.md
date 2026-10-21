@@ -141,7 +141,7 @@ suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur tout
 **nc-reglages → Intelligence artificielle**. Elle répond au `? ` du Spotlight, travaille sur le texte sélectionné
 (**Super + Alt + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran
 (**Super + Alt + Maj + I**), écrit une commande dans le terminal (**Alt + I**, à relire avant Entrée ; `ia question`).
-Clés : `nc-ia configurer` (privées, jamais affichées).
+Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
 
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.

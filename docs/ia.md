@@ -37,8 +37,10 @@ d'un mot à chacune (réglages → « Tester les IA disponibles »).
 
 ## Clés d'API
 
-`nc-ia configurer` (ou la ligne « Clés d'API des IA » de la fenêtre des réglages) : choisis le service, colle la clé
-(saisie masquée), elle est essayée tout de suite. Les clés sont dans `~/.config/nc/ia.conf` (lisible par toi seul,
+`nc-ia configurer` (ou la ligne « Clés d'API des IA » de la fenêtre des réglages) ouvre la fenêtre **Clés des IA** :
+pour chaque service, colle la clé (masquée), « Enregistrer » l'essaie tout de suite, « Créer une clé » ouvre la page du
+service ; en bas, ce qui est déjà sur le PC (Claude Code, Codex, Ollama, JARVIS…) et « Essayer toutes les IA ». Sans
+l'île (ou `nc-ia configurer --terminal`), les mêmes questions au clavier. Les clés sont dans `~/.config/nc/ia.conf` (lisible par toi seul,
 0600) ; elles ne passent jamais en argument d'une commande ni dans un journal, et ne partent que vers l'adresse du
 service (aucune redirection suivie). Les variables habituelles (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`…) marchent aussi.
 

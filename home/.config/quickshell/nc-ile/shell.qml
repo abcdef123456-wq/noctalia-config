@@ -33,6 +33,9 @@ ShellRoot {
     // Fenêtre « Connexion JARVIS » (nc-assistant configurer) : créée à la demande
     property var connexionFenetre: null
     property Component composantConnexion: null
+    // Fenêtre « Clés des IA » (nc-ia configurer), créée à la demande
+    property var clesFenetre: null
+    property Component composantCles: null
     // Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : une fenêtre classique, créée à la demande
     property var reglagesFenetre: null
     property Component composantReglages: null
@@ -186,6 +189,20 @@ ShellRoot {
             if (racine.reglagesFenetre) racine.reglagesFenetre.chercherTexte(texte)
         }
         // Connexion à JARVIS en graphique (adresse, clé, test) ; déjà ouverte : ramenée ici, mise devant ou rangée
+        // Fenêtre « Clés des IA » (nc-ia configurer, réglages → Clés d'API des IA)
+        function clesIA(): void {
+            if (racine.clesFenetre && racine.clesFenetre.visible) { racine.basculerOutil(racine.clesFenetre, Reglages.t("Clés des IA", "AI keys")); return }
+            if (!racine.clesFenetre) {
+                if (!racine.composantCles) racine.composantCles = Qt.createComponent("ClesIA.qml")
+                if (racine.composantCles.status !== Component.Ready) {
+                    console.warn("Fenêtre des clés des IA indisponible : " + racine.composantCles.errorString())
+                    return
+                }
+                racine.clesFenetre = racine.composantCles.createObject(racine)
+                racine.brancherIle(racine.clesFenetre)
+            }
+            if (racine.clesFenetre) racine.clesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
+        }
         function connexionJarvis(): void {
             if (racine.connexionFenetre && racine.connexionFenetre.visible) { racine.basculerOutil(racine.connexionFenetre, "Connexion JARVIS"); return }
             if (!racine.connexionFenetre) {
