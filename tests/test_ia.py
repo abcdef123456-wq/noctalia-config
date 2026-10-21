@@ -472,6 +472,57 @@ class IA(unittest.TestCase):
         self.reglages("IA_MODE=non\nIA_ACTIONS=confirmer\n")
         self.assertEqual(self.lancer("executer", plan["id"]).returncode, 3)
 
+    def test_agir_lance_les_outils_du_bureau(self):
+        # Revue Codex IA-01 : les programmes de ~/.local/bin (nc-brightness, nc-paquets) sont bien trouvés
+        b = self.home / ".local/bin"
+        for nom in ("nc-brightness", "nc-paquets"):
+            (b / nom).write_text(f'#!/bin/sh\necho "{nom} $*" >> "$JOURNAL"\n')
+            (b / nom).chmod(0o755)
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [{"outil": "luminosite", "args": {"pourcent": 40}},
+                                                                  {"outil": "maj_verifier", "args": {}}]})
+        self.reglages("IA_ACTIONS=confirmer\nIA_GERER_MAJ=oui\n")
+        plan = json.loads(self.lancer("agir", "--json", "baisse la luminosité").stdout)
+        self.assertEqual([a["outil"] for a in plan["actions"]], ["luminosite", "maj_verifier"], plan)
+        d = json.loads(self.lancer("executer", plan["id"], "--json").stdout)
+        self.assertTrue(all(a["ok"] for a in d["actions"]), d)
+        self.assertIn("nc-brightness set 40", self.appels())
+        self.assertIn("nc-paquets verifier", self.appels())
+
+    def test_executer_deux_fois_en_meme_temps(self):
+        # Revue Codex IA-02 : deux confirmations simultanées, l'action n'est faite qu'une fois
+        self.preparer_agent()
+        self.programme("bluetoothctl", 'echo "bluetoothctl $*" >> "$JOURNAL"; sleep 1')
+        self.reglages("IA_ACTIONS=confirmer\n")
+        plan = json.loads(self.lancer("agir", "--json", "x").stdout)
+        resultats = []
+        fils = [threading.Thread(target=lambda: resultats.append(self.lancer("executer", plan["id"], "1", "--json")))
+                for _ in range(2)]
+        for f in fils:
+            f.start()
+        for f in fils:
+            f.join()
+        self.assertEqual(self.appels().count("bluetoothctl power off"), 1, self.appels())
+        self.assertEqual(sorted(r.returncode for r in resultats), [0, 0])
+
+    def test_programme_qui_echoue_apres_un_debut(self):
+        # Revue Codex IA-03 : un début de réponse puis un code d'erreur, c'est un échec, pas une réponse
+        self.programme("opencode", 'echo "début de réponse"; echo "plantage" >&2; exit 9')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        r = self.lancer("demander", "question")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("incomplète", r.stderr)
+
+    def test_programme_muet_arrete_a_l_echeance(self):
+        # Revue Codex IA-04 : un programme qui n'écrit jamais de fin de ligne est arrêté à l'échéance
+        self.programme("opencode", 'printf "a"; exec sleep 60')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        import time
+        debut = time.time()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "1"})
+        self.assertLess(time.time() - debut, 15)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("délai dépassé", r.stderr)
+
     # ── Rapports de mise à jour ──
     def test_rapport_de_mise_a_jour(self):
         depot = self.home / "depot"; depot.mkdir()

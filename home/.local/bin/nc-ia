@@ -685,6 +685,31 @@ def derniere_ligne(f):
     return l[-1][:200] if l else ""
 
 
+DELAI_CLI = float(os.environ.get("NC_IA_DELAI_CLI", 180))   # au plus, pour toute la réponse d'un programme
+
+
+class GardeTemps:
+    """Arrête le programme à l'échéance, même s'il garde sa sortie ouverte sans rien écrire (revue Codex IA-04) : son
+    propre groupe de processus seulement (lancé avec start_new_session), jamais une autre session."""
+    def __init__(self, p, delai=None):
+        import threading
+        self.depasse = False
+        self.p = p
+        self.t = threading.Timer(DELAI_CLI if delai is None else delai, self._arreter)
+        self.t.daemon = True
+        self.t.start()
+
+    def _arreter(self):
+        self.depasse = True
+        try:
+            os.killpg(self.p.pid, 9)
+        except OSError:
+            pass
+
+    def fin(self):
+        self.t.cancel()
+
+
 def appel_claude(consigne, texte, image, usage):
     # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
     vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
@@ -694,7 +719,8 @@ def appel_claude(consigne, texte, image, usage):
           ["--output-format", "stream-json", "--include-partial-messages", "--verbose", invite]
     err = tempfile.TemporaryFile(mode="w+")             # pas de tube : un programme bavard ne bloque jamais
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
-                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME))
+                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME), start_new_session=True)
+    garde = GardeTemps(p)
     rien = True
     try:
         for l in p.stdout:
@@ -707,15 +733,20 @@ def appel_claude(consigne, texte, image, usage):
                 rien = False
                 yield d.get("text", "")
             elif e.get("type") == "result":
-                if e.get("is_error") and rien:
+                if e.get("is_error"):                   # même après un début de réponse : un échec (revue IA-03)
                     raise ErreurIA(str(e.get("result") or "Claude Code")[:200])
                 if rien and e.get("result"):
                     rien = False
                     yield e["result"]
         p.wait(timeout=10)
+        if garde.depasse:
+            raise ErreurIA(T("délai dépassé", "timed out"))
+        if p.returncode != 0:
+            raise ErreurIA(derniere_ligne(err) or T(f"Claude Code a échoué (code {p.returncode})", f"Claude Code failed (code {p.returncode})"))
         if rien:
             raise ErreurIA(derniere_ligne(err) or T("Claude Code n'a rien répondu", "Claude Code gave no answer"))
     finally:
+        garde.fin()
         if p.poll() is None:
             p.kill()
         err.close()
@@ -734,9 +765,9 @@ def appel_programme(ident, consigne, texte, image, usage):
         cmd = ["qwen", "-p", invite]
     err = tempfile.TemporaryFile(mode="w+")
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
-                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME))
+                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME), start_new_session=True)
+    garde = GardeTemps(p)
     rien = True
-    debut = time.time()
     try:
         for l in p.stdout:
             l = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", l)
@@ -747,12 +778,16 @@ def appel_programme(ident, consigne, texte, image, usage):
                 continue
             rien = False
             yield l
-            if time.time() - debut > 180:
-                break
         p.wait(timeout=10)
+        if garde.depasse:
+            raise ErreurIA(T("délai dépassé", "timed out"))
+        # Code d'erreur : un échec, même après un début de réponse (revue Codex IA-03)
+        if p.returncode != 0:
+            raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} a échoué (code {p.returncode})", f"{nom(ident)} failed (code {p.returncode})"))
         if rien:
             raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} n'a rien répondu", f"{nom(ident)} gave no answer"))
     finally:
+        garde.fin()
         if p.poll() is None:
             p.kill()
         err.close()
@@ -1022,8 +1057,9 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
             return rep, ident
         except (ErreurIA, OSError, subprocess.SubprocessError, ValueError) as e:
             if morceaux:                                        # déjà en partie affichée : pas de mélange de deux IA
+                noter_echec(ident)                              # incomplète : un échec, l'IA passe en dernier
                 ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
-                raise ErreurIA(f"{nom(ident)} : {e}")
+                raise ErreurIA(T(f"{nom(ident)} : réponse incomplète ({e})", f"{nom(ident)}: incomplete answer ({e})"))
             noter_echec(ident)
             rates.append(f"{nom(ident)} : {e}")
     raise ErreurIA(T("Aucune IA n'a pu répondre", "No AI could answer") + " — " + " ; ".join(rates))
@@ -1488,7 +1524,7 @@ def valider_action(a, domaines, services=None, fenetres=None):
 def executer_action(a):
     """(réussi, message) ; a est une action déjà validée."""
     o, g = a["outil"], a["args"]
-    nb = str(HOME / ".local/bin/")
+    nb = str(HOME / ".local/bin") + os.sep          # le séparateur final : Path le retirerait (revue Codex IA-01)
     if o.startswith("service_"):
         if o == "service_journal":
             code, t = sortie_cmd(["journalctl", "--user", "-u", g["nom"], "-n", "40", "--no-pager", "-o", "cat"])
@@ -1590,16 +1626,32 @@ def agir(demande):
 def garder_plan(plan):
     PLANS.mkdir(mode=0o700, parents=True, exist_ok=True)
     f = PLANS / f"{plan['id']}.json"
-    f.write_text(json.dumps(plan, ensure_ascii=False))
-    os.chmod(f, 0o600)
+    tmp = f.with_name(f".{f.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as o:
+        o.write(json.dumps(plan, ensure_ascii=False))
+    tmp.replace(f)                                       # atomique : jamais un plan à moitié écrit
 
 
 def executer_plan(ident, numeros=None):
-    """Exécute les actions encore à faire d'un plan proposé il y a moins de 10 min (toutes, ou ces numéros)."""
+    """Exécute les actions encore à faire d'un plan proposé il y a moins de 10 min (toutes, ou ces numéros). Un verrou
+    par plan couvre lecture, vérification, exécution et écriture : deux confirmations en même temps n'exécutent jamais
+    une action deux fois (revue Codex IA-02) ; le fichier de verrou n'est jamais supprimé."""
     if coupee() or actions_mode() == "non":
         raise ErreurIA(message_coupee() if coupee() else T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
     if not re.fullmatch(r"[0-9a-f]{16}", ident or ""):
         raise ErreurIA(T("plan inconnu", "unknown plan"))
+    import fcntl
+    PLANS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(PLANS / f"{ident}.lock", "a") as verrou:
+        fcntl.flock(verrou, fcntl.LOCK_EX)
+        try:
+            return _executer_plan(ident, numeros)
+        finally:
+            fcntl.flock(verrou, fcntl.LOCK_UN)
+
+
+def _executer_plan(ident, numeros):
     f = PLANS / f"{ident}.json"
     try:
         plan = json.loads(f.read_text())
