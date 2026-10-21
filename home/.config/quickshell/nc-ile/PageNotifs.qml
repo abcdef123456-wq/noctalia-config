@@ -3,7 +3,12 @@
 // texte, appli). Clic sur une carte : action de l'appli ; croix (au survol) ou clic droit : la retirer ; sur une carte :
 // marquer lue, reporter (15 min, 1 h, demain), masquer l'appli (1 h, toujours), réponse rapide si l'appli le permet ;
 // « Tout marquer comme lu », « Tout effacer ». Clavier : ↑ ↓ choisir, Entrée ouvrir, Suppr retirer, / chercher, Échap.
+// En tête, les mises à jour du système (nc-paquets : ~/.cache/nc/paquets.json) : combien attendent, les importantes,
+// quand la dernière vérification a eu lieu ; « Chercher » vérifie tout de suite (le résultat arrive aussi en
+// notification), « Mettre à jour » ouvre le terminal de mise à jour.
 import QtQuick
+import Quickshell
+import Quickshell.Io
 import Quickshell.Widgets
 
 Item {
@@ -133,6 +138,74 @@ Item {
             readonly property real voulue: 34 + (outils.visible ? outils.height + 8 : 0) + 10 + implicitHeight
             onVoulueChanged: Etat.annoncerHauteur("notifications", voulue)
             Component.onCompleted: Etat.annoncerHauteur("notifications", voulue)
+
+            // ── Mises à jour du système ──
+            Rectangle {
+                id: maj
+                objectName: "nc-notifs-maj"
+                visible: Reglages.val("MAJ_SYSTEME", "notif") !== "non"
+                width: parent.width; height: visible ? 56 : 0; radius: 16; color: Couleurs.carte
+                property var detail: null
+                readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
+                readonly property int total: detail ? (detail.total || 0) : 0
+                function ilYa(t) {
+                    var m = Math.max(0, Math.round((Etat.minute.getTime() / 1000 - t) / 60))
+                    if (m < 1) return Reglages.t("à l'instant", "just now")
+                    if (m < 60) return Reglages.t("il y a " + m + " min", m + " min ago")
+                    var h = Math.round(m / 60)
+                    return h < 48 ? Reglages.t("il y a " + h + " h", h + " h ago") : Reglages.t("il y a " + Math.round(h / 24) + " jours", Math.round(h / 24) + " days ago")
+                }
+                readonly property string resume: {
+                    if (verif.running) return Reglages.t("Recherche en cours…", "Checking…")
+                    if (!detail) return Reglages.t("Pas encore vérifié", "Not checked yet")
+                    var quand = Reglages.t("vérifié ", "checked ") + ilYa(detail.date || 0)
+                    if (!total) return Reglages.t("À jour", "Up to date") + " · " + quand
+                    var imp = (detail.paquets || []).filter(x => x.important).map(x => x.nom).slice(0, 2)
+                    return total + Reglages.t(" en attente", " pending") + (imp.length ? " · " + imp.join(", ") : "")
+                           + (detail.noyau ? Reglages.t(" · noyau", " · kernel") : "") + " · " + quand
+                }
+                FileView {
+                    path: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/nc/paquets.json"
+                    watchChanges: true; printErrors: false
+                    onFileChanged: reload()
+                    onLoaded: { try { maj.detail = JSON.parse(text()) } catch (e) { maj.detail = null } }
+                }
+                Process { id: verif; command: [maj.bin + "nc-paquets", "verifier"] }
+                Ico { id: icMaj; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: maj.total ? "system_update" : "verified"; taille: 22
+                      color: maj.total ? Couleurs.accent : Couleurs.texteSec }
+                Column {
+                    anchors.left: icMaj.right; anchors.leftMargin: 12; anchors.right: boutonsMaj.left; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                    Texte { width: parent.width; text: Reglages.t("Mises à jour du système", "System updates"); font.weight: Font.DemiBold; font.pixelSize: 13; elide: Text.ElideRight }
+                    Texte { objectName: "nc-notifs-maj-resume"; width: parent.width; text: maj.resume; secondaire: true; font.pixelSize: 11; elide: Text.ElideRight }
+                }
+                Row {
+                    id: boutonsMaj
+                    anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                    Repeater {
+                        model: maj.total ? [{ id: "chercher", nom: Reglages.t("Chercher", "Check") }, { id: "maj", nom: Reglages.t("Mettre à jour", "Update") }]
+                                         : [{ id: "chercher", nom: Reglages.t("Chercher des mises à jour", "Check for updates") }]
+                        Rectangle {
+                            id: bm
+                            required property var modelData
+                            objectName: "nc-notifs-maj-" + modelData.id
+                            width: lbm.implicitWidth + 20; height: 28; radius: 14
+                            opacity: modelData.id === "chercher" && verif.running ? 0.5 : 1
+                            color: modelData.id === "maj" ? Couleurs.accent : (zbm.containsMouse ? Couleurs.gris3 : Couleurs.gris2)
+                            Texte { id: lbm; anchors.centerIn: parent; text: bm.modelData.nom; font.pixelSize: 12; font.weight: Font.DemiBold
+                                    color: bm.modelData.id === "maj" ? Couleurs.surAccent : Couleurs.texte }
+                            MouseArea {
+                                id: zbm; anchors.fill: parent; hoverEnabled: true
+                                onClicked: {
+                                    if (bm.modelData.id === "maj") { Quickshell.execDetached([maj.bin + "nc-paquets", "mettre-a-jour"]); Etat.fermer() }
+                                    else if (!verif.running) verif.running = true
+                                }
+                            }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: bm.modelData.nom
+                        }
+                    }
+                }
+            }
 
             Item {
                 visible: p.visibles.length === 0

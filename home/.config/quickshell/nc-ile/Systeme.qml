@@ -188,7 +188,7 @@ Item {
                 sous: Etat.sys.halo === "1" ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
             }
-            // Mises à jour du système (nc-paquets, comptées toutes les 3 h) : un clic, tout mettre à jour dans un terminal.
+            // Mises à jour du système (nc-paquets, comptées chaque heure au plus, moins sur batterie ou en Économie) : un clic, tout mettre à jour dans un terminal.
             // Le nombre est la première ligne de ~/.cache/nc/paquets, relu à chaque réécriture (le recompte après la mise
             // à jour) et quand la page revient à l'écran
             Ligne {

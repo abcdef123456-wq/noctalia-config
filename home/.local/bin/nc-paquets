@@ -1,70 +1,202 @@
 #!/usr/bin/env bash
 # nc-paquets : les mises à jour du système (pas de la config : ça, c'est nc-maj).
-#   nc-paquets compter        compte les paquets à mettre à jour (pacman, dnf, apt ou zypper, et Flatpak) ; toutes les 3 h
-#                             (nc-paquets.timer) ; résultat dans ~/.cache/nc/paquets, lu par l'île (page Système)
-#   nc-paquets compter local  pareil, sans resynchroniser les dépôts (juste après une mise à jour : instantané)
+#   nc-paquets compter        compte les paquets à mettre à jour (pacman et AUR avec paru ou yay, dnf, apt ou zypper,
+#                             et Flatpak) ; résultat dans ~/.cache/nc/paquets (le nombre, puis un paquet par ligne : page
+#                             Système de l'île) et le détail dans ~/.cache/nc/paquets.json (versions, sources, importants)
+#   nc-paquets compter auto   le passage du minuteur (nc-paquets.timer, chaque heure) : ne compte que s'il est temps
+#   nc-paquets compter local  sans resynchroniser les dépôts (juste après une mise à jour : instantané)
+#   nc-paquets verifier       compte tout de suite et notifie le résultat, même « à jour » (page Notifications de l'île)
 #   nc-paquets mettre-a-jour  ouvre un terminal qui met tout à jour (demande ton mot de passe), puis recompte
 #   nc-paquets                le nombre et la liste
+# Fréquence (nc-reglages → Mises à jour, MAJ_FREQUENCE : 1h, 3h, 6h, jour) adaptée pour ne pas gaspiller : au plus toutes
+# les 3 h sur batterie, 6 h en Économie, 12 h sur une connexion limitée (partage de connexion du téléphone) ; un passage
+# du minuteur qui n'a rien à faire ne lit que quelques fichiers. Le compte tourne en priorité basse (processeur, disque).
+# Notification (MAJ_SYSTEME=notif) : quand de nouveaux paquets arrivent, avec leurs versions, les importants d'abord
+# (noyau, pilotes, Mesa, systemd, Hyprland…), la répartition dépôts / AUR / Flatpak ; rappel s'il en reste
+# (MAJ_RAPPEL : jour, semaine, jamais). Un clic sur « Mettre à jour » ouvre le terminal de mise à jour.
 # Le recompte après la mise à jour se fait dans le terminal, avec les dépôts que la mise à jour vient de synchroniser
 # (pacman -Qu, dnf sans --refresh), en quelques secondes, et va au bout même si la fenêtre est fermée avant ; si la
 # mise à jour a échoué (mot de passe, réseau), c'est le compte complet qui est refait.
-# Réglage : nc-reglages → Mises à jour → « Mises à jour du système » (MAJ_SYSTEME : ile, notif, non)
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
 fichier="$cache/paquets"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+export LC_ALL=C          # sorties des gestionnaires de paquets en anglais (analysables) ; nos messages passent par t()
 
-liste() {   # un paquet par ligne ; « local » : avec les dépôts déjà synchronisés (pas de réseau, sauf Flatpak)
+aur_outil() { [ "$(reglage MAJ_AUR)" = non ] && return 1; command -v paru 2>/dev/null || command -v yay 2>/dev/null; }
+
+details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local » : dépôts déjà synchronisés
+  local a
   if command -v pacman >/dev/null; then
     # checkupdates synchronise une copie des dépôts (long) ; juste après pacman -Syu, les vrais dépôts sont à jour
-    if [ "${1:-}" = local ]; then pacman -Qu 2>/dev/null | grep -v '\[ignored\]' | awk '{print $1}'
-    elif command -v checkupdates >/dev/null; then checkupdates 2>/dev/null | awk '{print $1}'; fi
+    { if [ "${1:-}" = local ]; then pacman -Qu 2>/dev/null
+      elif command -v checkupdates >/dev/null; then checkupdates 2>/dev/null; fi; } |
+      grep -v '\[ignored\]' | awk 'NF >= 1 {print "depot\t" $1 "\t" $2 "\t" $4}'
+    # AUR : paru ou yay interrogent l'API de l'AUR (quelques Ko)
+    if a="$(aur_outil)"; then "$a" -Qua --color never 2>/dev/null | grep -v '\[ignored\]' | awk 'NF >= 4 {print "aur\t" $1 "\t" $2 "\t" $4}'; fi
   elif command -v dnf >/dev/null; then
-    dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null | awk 'NF == 3 && $1 ~ /\./ {print $1}'
+    dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null |
+      awk 'NF == 3 && $1 ~ /\./ {n = $1; sub(/\.[^.]*$/, "", n); print "depot\t" n "\t\t" $2}'
   elif command -v apt >/dev/null; then
-    apt list --upgradable 2>/dev/null | awk -F/ '/upgradable/ {print $1}'
+    apt list --upgradable 2>/dev/null |
+      sed -n 's#^\([^/]*\)/[^ ]* \([^ ]*\) [^ ]* \[upgradable from: \([^]]*\)\].*#depot\t\1\t\3\t\2#p'
   elif command -v zypper >/dev/null; then
     # openSUSE : sans root, zypper ne rafraîchit pas les dépôts ; la liste vient de leur cache (rafraîchi par la mise à
     # jour elle-même, ou par le service de rafraîchissement de la distribution). Sortie XML : indépendante de la langue
     zypper --non-interactive --no-refresh --xmlout list-updates 2>/dev/null | grep '<update ' | grep 'kind="package"' |
-      sed -n 's/.* name="\([^"]*\)".*/\1/p'
+      while IFS= read -r l; do
+        n="$(sed -n 's/.* name="\([^"]*\)".*/\1/p' <<<"$l")"; v="$(sed -n 's/.* edition="\([^"]*\)".*/\1/p' <<<"$l")"
+        o="$(sed -n 's/.* edition-old="\([^"]*\)".*/\1/p' <<<"$l")"
+        [ -n "$n" ] && printf 'depot\t%s\t%s\t%s\n' "$n" "$o" "$v"
+      done
   fi
   if command -v flatpak >/dev/null; then
-    flatpak remote-ls --updates --columns=application 2>/dev/null | sed 's/^/flatpak:/'
+    flatpak remote-ls --updates --columns=application,version 2>/dev/null | awk -F'\t' 'NF >= 1 && $1 != "" {print "flatpak\t" $1 "\t\t" $2}'
   fi
 }
 
+# Le minuteur passe chaque heure ; compter seulement s'il est temps (secteur, batterie, Économie, connexion limitée)
+il_est_temps() {
+  local base min=0 dernier maintenant secteur=0 bat=0 s
+  case "$(reglage MAJ_FREQUENCE)" in 3h) base=180 ;; 6h) base=360 ;; jour) base=1440 ;; *) base=60 ;; esac
+  for s in "${NC_POWER_SUPPLY:-/sys/class/power_supply}"/*; do
+    [ -r "$s/type" ] || continue
+    case "$(cat "$s/type" 2>/dev/null)" in Mains) [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && secteur=1 ;; Battery) bat=1 ;; esac
+  done
+  [ "$bat" = 1 ] && [ "$secteur" = 0 ] && min=180
+  grep -q 'profil *= *"power-saver"' "$HOME/.config/hypr/nc/profil.lua" 2>/dev/null && [ "$min" -lt 360 ] && min=360
+  # Connexion limitée selon NetworkManager (1 : oui, 3 : sans doute)
+  case "${NC_METERED:-$(busctl get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered 2>/dev/null)}" in
+    "u 1"|"u 3") [ "$min" -lt 720 ] && min=720 ;;
+  esac
+  [ "$min" -gt "$base" ] && base=$min
+  dernier=$(stat -c %Y "$fichier" 2>/dev/null || echo 0); maintenant=$(date +%s)
+  [ $((maintenant - dernier)) -ge $((base * 60 - 300)) ]
+}
+
+# Détail (JSON), et ce qu'il faut notifier : « titre<TAB>texte » sur la sortie, ou rien
+analyser() {
+  # Le code passe par -c : l'entrée standard reste celle du tube (la liste des paquets)
+  local code
+  code="$(cat <<'PY'
+import json, os, re, sys, time
+mode, cache, choix, rappel, langue = sys.argv[1:6]
+en = langue.startswith("en")
+T = lambda fr, e: e if en else fr
+lignes = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
+paquets, vus = [], set()
+for c in lignes:
+    c += [""] * (4 - len(c))
+    source, nom, avant, apres = c[:4]
+    if not nom or (source, nom) in vus:
+        continue
+    vus.add((source, nom))
+    paquets.append(dict(source=source, nom=nom, avant=avant, apres=apres))
+IMPORTANT = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kernel(-core)?|nvidia.*|mesa|vulkan-.*|systemd|glibc|"
+                       r"hyprland|quickshell|noctalia.*|pipewire|wireplumber|xdg-desktop-portal.*|firmware|linux-firmware)$")
+NOYAU = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kernel(-core)?)$")
+for p in paquets:
+    p["important"] = bool(IMPORTANT.match(p["nom"]))
+paquets.sort(key=lambda p: (not p["important"], p["source"] != "depot", p["nom"]))
+sources = {s: sum(1 for p in paquets if p["source"] == s) for s in ("depot", "aur", "flatpak")}
+noyau = any(NOYAU.match(p["nom"]) for p in paquets)
+etat_f = os.path.join(cache, "paquets-notif.json")
+try:
+    etat = json.load(open(etat_f))
+except (OSError, ValueError):
+    etat = {}
+maintenant = int(time.time())
+detail = dict(date=maintenant, total=len(paquets), sources=sources, noyau=noyau, paquets=paquets[:300],
+              derniere_notif=etat.get("date", 0))
+tmp = os.path.join(cache, "paquets.json.tmp")
+json.dump(detail, open(tmp, "w"), ensure_ascii=False)
+os.replace(tmp, os.path.join(cache, "paquets.json"))
+
+def ligne(p):
+    sans_epoque = lambda x: re.sub(r"^\d+:", "", x)           # « 1:26.2.4-1 » → « 26.2.4-1 »
+    avant, apres = sans_epoque(p["avant"]), sans_epoque(p["apres"])
+    v = f" {avant} → {apres}" if avant and apres else (f" {apres}" if apres else "")
+    nom = p["nom"].split(".")[-1] if p["source"] == "flatpak" else p["nom"]
+    return nom + v
+
+def texte():
+    n = len(paquets)
+    if n == 0:
+        return T("Système à jour", "System up to date"), T("Aucune mise à jour en attente.", "No pending update.")
+    titre = T(f"{n} mise{'s' if n > 1 else ''} à jour", f"{n} update{'s' if n > 1 else ''}")
+    corps = ", ".join(ligne(p) for p in paquets[:5]) + (T(f" et {n - 5} autres", f" and {n - 5} more") if n > 5 else "")
+    parts = [f"{T('Dépôts', 'Repos')} {sources['depot']}" if sources["depot"] else "", f"AUR {sources['aur']}" if sources["aur"] else "",
+             f"Flatpak {sources['flatpak']}" if sources["flatpak"] else ""]
+    corps += "\n" + " · ".join(x for x in parts if x)
+    if noyau:
+        corps += "\n" + T("Nouveau noyau : redémarre après la mise à jour.", "New kernel: restart after updating.")
+    return titre, corps
+
+noms = sorted(f"{p['source']}:{p['nom']}:{p['apres']}" for p in paquets)
+deja = set(etat.get("noms", []))
+nouveaux = [x for x in noms if x not in deja]
+envoyer = False
+if mode == "force":
+    envoyer = True
+elif choix != "ile" and choix != "non" and paquets:
+    delai = {"semaine": 7 * 86400, "jamais": None}.get(rappel, 86400)
+    envoyer = bool(nouveaux) or (delai is not None and maintenant - etat.get("date", 0) >= delai)
+if envoyer:
+    json.dump(dict(date=maintenant, noms=noms), open(etat_f, "w"))
+    titre, corps = texte()
+    print(f"{titre}\t{corps}".replace("\n", "\\n"))
+elif not paquets:
+    try:
+        os.remove(etat_f)            # tout est à jour : la prochaine mise à jour sera de nouveau annoncée
+    except OSError:
+        pass
+PY
+)"
+  python3 -c "$code" "$1" "$cache" "$(reglage MAJ_SYSTEME)" "$(reglage MAJ_RAPPEL)" "${NC_LANGUE:-}"
+}
+
+notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jour » ouvre le terminal
+  local titre="$1" corps
+  corps="$(printf '%b' "$2")"
+  (
+    if [ "$titre" = "$(t "Système à jour" "System up to date")" ]; then
+      notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update "$titre" "$corps" 2>/dev/null
+    else
+      r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
+        "$titre" "$corps" 2>/dev/null)"
+      [ "$r" = maj ] && exec "$0" mettre-a-jour
+    fi
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
 action="${1:-}"
-# Noms anglais (nc-packages count | update)
-case "$action" in count) action=compter ;; update|upgrade) action=mettre-a-jour ;; esac
+# Noms anglais (nc-packages count | update | check)
+case "$action" in count) action=compter ;; update|upgrade) action=mettre-a-jour ;; check|verify) action=verifier ;; esac
 
 case "$action" in
-  compter)
-    [ "$(reglage MAJ_SYSTEME)" = non ] && { rm -f "$fichier"; exit 0; }
+  compter|verifier)
+    mode="${2:-}"; [ "$action" = verifier ] && mode=force
+    [ "$(reglage MAJ_SYSTEME)" = non ] && [ "$mode" != force ] && { rm -f "$fichier" "$cache/paquets.json"; exit 0; }
+    [ "$mode" = auto ] && ! il_est_temps && exit 0
     mkdir -p "$cache"
-    l="$(liste "${2:-}" | sort -u)"
+    d="$(details "$([ "$mode" = local ] && echo local)")"
+    l="$(printf '%s\n' "$d" | awk -F'\t' 'NF >= 2 {print ($1 == "depot" ? "" : $1 ":") $2}' | sort -u)"
     n=$(printf '%s' "$l" | grep -c . || true)
-    avant=$(head -1 "$fichier" 2>/dev/null || echo 0)
     { echo "$n"; printf '%s\n' "$l"; } > "$fichier.tmp" && mv "$fichier.tmp" "$fichier"
-    # Notification (si choisie) seulement quand le nombre augmente
-    if [ "$(reglage MAJ_SYSTEME)" = notif ] && [ "$n" -gt 0 ] && [ "$n" -gt "${avant:-0}" ]; then
-      (
-        if [ "$n" -gt 1 ]; then titre="$(t "$n mise(s) à jour du système" "$n system updates")"
-        else titre="$(t "$n mise(s) à jour du système" "1 system update")"; fi
-        r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
-          "$titre" "$(t "Programmes et sécurité de ta distribution." "Apps and security fixes for your distribution.")" 2>/dev/null)"
-        [ "$r" = maj ] && exec "$0" mettre-a-jour
-      ) >/dev/null 2>&1 &
-      disown 2>/dev/null || true
-    fi ;;
+    a_dire="$(printf '%s\n' "$d" | analyser "$mode" 2>/dev/null)"
+    if [ -n "$a_dire" ]; then notifier "${a_dire%%$'\t'*}" "${a_dire#*$'\t'}"; fi ;;
   mettre-a-jour)
     exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" "$0" terminal ;;
   terminal)   # dans le terminal ouvert par mettre-a-jour : la mise à jour, puis le recompte
-    # Fenêtre fermée pendant le recompte : il va quand même au bout (sinon l'île garderait l'ancien nombre 3 h)
+    # Fenêtre fermée pendant le recompte : il va quand même au bout (sinon l'île garderait l'ancien nombre)
     trap '' HUP
+    unset LC_ALL     # la mise à jour parle la langue du système
     ok=0
-    if command -v pacman >/dev/null; then sudo pacman -Syu || ok=1
+    # Arch : paru ou yay mettent à jour les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
+    if command -v pacman >/dev/null; then
+      if a="$(aur_outil)"; then "$a" -Syu || ok=1; else sudo pacman -Syu || ok=1; fi
     # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
     elif command -v nobara-sync >/dev/null; then nobara-sync cli || ok=1
     elif command -v dnf >/dev/null; then sudo dnf upgrade --refresh || ok=1

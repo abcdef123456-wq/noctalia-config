@@ -1,8 +1,10 @@
 [Unit]
-Description=Compte les mises à jour du système (pour l'île : page Système)
+Description=Compte les mises à jour du système (île : page Système et page Notifications ; notification)
+After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/nc-paquets compter
+ExecStart=%h/.local/bin/nc-paquets compter auto
 Slice=background.slice
-Nice=10
+Nice=19
+IOSchedulingClass=idle

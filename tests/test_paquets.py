@@ -30,11 +30,27 @@ echo "checkupdates" >> "$HOME/appels"
 printf '%s' "${NC_TEST_DEPOTS:-}"
 [ -n "${NC_TEST_DEPOTS:-}" ] && exit 0 || exit 2
 """
+# Fausse notify-send : note titre et texte (une ligne JSON) au lieu d'afficher
+FAUX_NOTIFY = """#!/usr/bin/env python3
+import json, os, sys
+a = [x for x in sys.argv[1:]]
+libres = [x for i, x in enumerate(a) if not x.startswith("-") and (i == 0 or a[i - 1] not in ("-a", "-i", "-A", "-t", "-u"))]
+open(os.path.join(os.environ["HOME"], "notifs"), "a").write(json.dumps(libres[-2:]) + "\\n")
+"""
 FAUX_FLATPAK = """#!/bin/sh
 echo "flatpak $*" >> "$HOME/appels"
 exit 0
 """
 FAUX_SUDO = '#!/bin/sh\nexec "$@"\n'
+# Faux paru : -Qua liste ce que dit NC_TEST_AUR ; -Syu réussit (ou échoue avec NC_TEST_MAJ_ECHEC) ; note l'appel
+FAUX_PARU = """#!/bin/sh
+echo "paru $*" >> "$HOME/appels"
+case "$1" in
+  -Qua) printf '%s' "${NC_TEST_AUR:-}"; exit 0 ;;
+  -Syu) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; exit 0 ;;
+esac
+exit 1
+"""
 
 
 class Paquets(unittest.TestCase):
@@ -43,7 +59,7 @@ class Paquets(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         (self.home / "bin").mkdir()
-        for nom, code in [("pacman", FAUX_PACMAN), ("checkupdates", FAUX_CHECKUPDATES), ("flatpak", FAUX_FLATPAK), ("sudo", FAUX_SUDO)]:
+        for nom, code in [("pacman", FAUX_PACMAN), ("checkupdates", FAUX_CHECKUPDATES), ("flatpak", FAUX_FLATPAK), ("sudo", FAUX_SUDO), ("paru", FAUX_PARU), ("notify-send", FAUX_NOTIFY)]:
             p = self.home / "bin" / nom
             p.write_text(code)
             p.chmod(0o755)
@@ -64,16 +80,110 @@ class Paquets(unittest.TestCase):
         r = self.lancer("compter", NC_TEST_DEPOTS="avahi 1-1 -> 1-2\nbaloo 6-1 -> 6-2\nzsh 5-1 -> 5-2\n")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.cache.read_text(), "3\navahi\nbaloo\nzsh\n")
-        self.assertEqual(self.appels(), ["checkupdates", "flatpak remote-ls --updates --columns=application"])
+        self.assertEqual(self.appels(), ["checkupdates", "paru -Qua --color never", "flatpak remote-ls --updates --columns=application,version"])
         (self.home / "appels").unlink()
         # La mise à jour dans le terminal : pacman -Syu puis flatpak update, puis le recompte avec les dépôts synchronisés
         r = self.lancer("terminal", NC_TEST_DEPOTS="avahi 1-1 -> 1-2\n", NC_TEST_LOCAL="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.cache.read_text(), "0\n\n", "le cache doit passer à 0 après la mise à jour")
-        self.assertEqual(self.appels(), ["pacman -Syu", "flatpak update", "pacman -Qu", "flatpak remote-ls --updates --columns=application"],
+        self.assertEqual(self.appels(), ["paru -Syu", "flatpak update", "pacman -Qu", "paru -Qua --color never", "flatpak remote-ls --updates --columns=application,version"],
                          "après une mise à jour réussie, pas de checkupdates (resynchronisation réseau, longue)")
         self.assertIn("Système à jour.", r.stdout)
         self.assertIn("Recompte des mises à jour", r.stdout)
+
+    def notifs(self, attendu, delai=3.0):
+        """Les notifications reçues (la fausse notify-send part en arrière-plan) : attend d'en avoir « attendu »."""
+        import json, time
+        f = self.home / "notifs"
+        fin = time.time() + delai
+        while time.time() < fin:
+            n = [json.loads(l) for l in f.read_text().splitlines()] if f.exists() else []
+            if len(n) >= attendu:
+                return n
+            time.sleep(0.05)
+        return [json.loads(l) for l in f.read_text().splitlines()] if f.exists() else []
+
+    def test_details_notification_nouveautes_et_rappel(self):
+        import json, os, time
+        depots = "zsh 5-1 -> 5-2\nlinux 6.1-1 -> 6.2-1\n"
+        r = self.lancer("compter", NC_TEST_DEPOTS=depots, NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.cache.read_text(), "3\naur:zen-browser-bin\nlinux\nzsh\n")
+        d = json.loads((self.home / ".cache/nc/paquets.json").read_text())
+        self.assertEqual((d["total"], d["sources"], d["noyau"]), (3, {"depot": 2, "aur": 1, "flatpak": 0}, True))
+        self.assertEqual(d["paquets"][0]["nom"], "linux", "les importants d'abord")
+        n = self.notifs(1)
+        self.assertEqual(len(n), 1, "nouvelles mises à jour : une notification (réglage par défaut)")
+        titre, corps = n[0]
+        self.assertEqual(titre, "3 mises à jour")
+        self.assertIn("linux 6.1-1 → 6.2-1", corps)
+        self.assertIn("Dépôts 2 · AUR 1", corps)
+        self.assertIn("redémarre", corps)
+        # Les mêmes : rien de nouveau, pas de notification
+        self.lancer("compter", NC_TEST_DEPOTS=depots, NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(len(self.notifs(2, 0.6)), 1)
+        # Une nouvelle arrive : notifiée
+        self.lancer("compter", NC_TEST_DEPOTS=depots + "mesa 25-1 -> 25-2\n", NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(len(self.notifs(2)), 2)
+        # Toujours là un jour plus tard : rappel (sauf MAJ_RAPPEL=jamais)
+        etat = self.home / ".cache/nc/paquets-notif.json"
+        e = json.loads(etat.read_text()); e["date"] = int(time.time()) - 2 * 86400; etat.write_text(json.dumps(e))
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_RAPPEL=jamais\n")
+        self.lancer("compter", NC_TEST_DEPOTS=depots + "mesa 25-1 -> 25-2\n", NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(len(self.notifs(3, 0.6)), 2, "MAJ_RAPPEL=jamais : pas de rappel")
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n")
+        self.lancer("compter", NC_TEST_DEPOTS=depots + "mesa 25-1 -> 25-2\n", NC_TEST_AUR="zen-browser-bin 1.0-1 -> 1.1-1\n")
+        self.assertEqual(len(self.notifs(3)), 3, "rappel quotidien")
+        # Seulement dans l'île : pas de notification ; « Chercher » notifie quand même, même à jour
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_SYSTEME=ile\n")
+        self.lancer("compter", NC_TEST_DEPOTS=depots + "vlc 3-1 -> 3-2\n")
+        self.assertEqual(len(self.notifs(4, 0.6)), 3)
+        r = self.lancer("verifier", NC_TEST_DEPOTS="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.notifs(4)[-1][0], "Système à jour")
+        self.assertEqual(self.cache.read_text(), "0\n\n")
+
+    def test_cadence_sobre(self):
+        import os, time
+        # Alimentation et connexion simulées (pas celles de la machine qui lance les tests)
+        alim = self.home / "alim"
+        for nom, fichiers in (("AC", {"type": "Mains", "online": "1"}), ("BAT0", {"type": "Battery"})):
+            (alim / nom).mkdir(parents=True)
+            for f, v in fichiers.items():
+                (alim / nom / f).write_text(v + "\n")
+        lancer = lambda *a, **e: self.lancer(*a, NC_POWER_SUPPLY=str(alim), NC_METERED="u 4", **e)
+        # Compte tout juste fait : le passage du minuteur ne fait rien (aucun gestionnaire de paquets lancé)
+        lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        (self.home / "appels").unlink()
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertEqual(self.appels(), [], "trop tôt : rien")
+        # Compte d'il y a 2 h : il est temps (une fois par heure par défaut)…
+        vieux = time.time() - 2 * 3600
+        os.utime(self.cache, (vieux, vieux))
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertIn("checkupdates", self.appels())
+        # … sauf en Économie : au plus toutes les 6 h
+        (self.home / "appels").unlink()
+        os.utime(self.cache, (vieux, vieux))
+        (self.home / ".config/hypr/nc").mkdir(parents=True)
+        (self.home / ".config/hypr/nc/profil.lua").write_text('return { profil = "power-saver", batterie = false, hz = "max" }\n')
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertEqual(self.appels(), [], "Économie : pas avant 6 h")
+        # Sur batterie (hors Économie) : au plus toutes les 3 h ; sur une connexion limitée : 12 h
+        (self.home / ".config/hypr/nc/profil.lua").unlink()
+        (alim / "AC/online").write_text("0\n")
+        os.utime(self.cache, (vieux, vieux))
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertEqual(self.appels(), [], "batterie : pas avant 3 h")
+        tres_vieux = time.time() - 4 * 3600
+        os.utime(self.cache, (tres_vieux, tres_vieux))
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertIn("checkupdates", self.appels(), "batterie, 4 h après : il est temps")
+        (self.home / "appels").unlink()
+        (alim / "AC/online").write_text("1\n")
+        os.utime(self.cache, (tres_vieux, tres_vieux))
+        self.lancer("compter", "auto", NC_POWER_SUPPLY=str(alim), NC_METERED="u 1", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertEqual(self.appels(), [], "connexion limitée : pas avant 12 h")
 
     def test_opensuse_zypper(self):
         """openSUSE : compte depuis le XML de zypper (sans rafraîchir, pas de root), mise à jour par zypper dup."""

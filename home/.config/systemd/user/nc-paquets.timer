@@ -1,10 +1,12 @@
 [Unit]
-Description=Compte les mises à jour du système toutes les 3 heures
+Description=Mises à jour du système : passage chaque heure (nc-paquets décide s'il est temps : secteur, batterie, Économie, connexion limitée)
 
 [Timer]
-OnStartupSec=5min
-OnUnitActiveSec=3h
-RandomizedDelaySec=5min
+OnStartupSec=3min
+OnUnitActiveSec=1h
+RandomizedDelaySec=3min
+# Regroupé avec les autres réveils du système (moins de sorties de veille du processeur)
+AccuracySec=10min
 
 [Install]
 WantedBy=timers.target

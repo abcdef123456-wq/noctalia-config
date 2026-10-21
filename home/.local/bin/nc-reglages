@@ -893,12 +893,27 @@ REGLAGES = [
         "A colored dot under days with events, the next event, the day's agenda on click; read when the page opens, "
         "kept 5 minutes.")),
     # Mises à jour
-    R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "ile",
-      L("Comptées toutes les 3 h (pacman, dnf ou apt, et Flatpak) ; dans l'île, page Système, un clic met tout à jour.",
-        "Counted every 3 h (pacman, dnf or apt, and Flatpak); in the island's System page, one click updates everything."),
-      [("ile", L("Dans l'île (page Système)", "In the island (System page)")),
-       ("notif", L("Dans l'île et une notification", "In the island and a notification")),
+    R("MAJ_SYSTEME", "Mises à jour", L("Mises à jour du système", "System updates"), "choix", "notif",
+      L("Paquets des dépôts, de l'AUR (paru ou yay) et Flatpak. Notification : quand de nouvelles arrivent, avec les versions "
+        "et les paquets importants d'abord ; dans l'île, page Système et page Notifications (« Chercher »).",
+        "Repo, AUR (paru or yay) and Flatpak packages. Notification: when new ones arrive, with versions and important "
+        "packages first; in the island, System page and Notifications page (“Check”)."),
+      [("notif", L("Dans l'île et une notification", "In the island and a notification")),
+       ("ile", L("Dans l'île seulement", "In the island only")),
        ("non", L("Ne pas vérifier", "Don't check"))]),
+    R("MAJ_FREQUENCE", "Mises à jour", L("Chercher les mises à jour", "Check for updates"), "choix", "1h",
+      L("Sans gaspiller : au plus toutes les 3 h sur batterie, 6 h en Économie, 12 h sur une connexion limitée ; un passage "
+        "qui n'a rien à faire ne coûte presque rien.",
+        "Without waste: at most every 3 h on battery, 6 h in Power Saver, 12 h on a metered connection; a pass with nothing "
+        "to do costs next to nothing."),
+      [("1h", L("Chaque heure", "Every hour")), ("3h", L("Toutes les 3 h", "Every 3 h")), ("6h", L("Toutes les 6 h", "Every 6 h")),
+       ("jour", L("Une fois par jour", "Once a day"))]),
+    R("MAJ_RAPPEL", "Mises à jour", L("Rappel s'il en reste", "Reminder if some are left"), "choix", "jour",
+      L("Une nouvelle notification quand des mises à jour attendent encore.", "A new notification while updates are still waiting."),
+      [("jour", L("Chaque jour", "Every day")), ("semaine", L("Chaque semaine", "Every week")), ("jamais", L("Jamais", "Never"))]),
+    R("MAJ_AUR", "Mises à jour", L("Compter et mettre à jour l'AUR", "Count and update the AUR"), "ouinon", "oui",
+      L("Avec paru ou yay : la mise à jour passe alors par eux (dépôts et AUR ensemble).",
+        "With paru or yay: updating then goes through them (repos and AUR together).")),
     R("MAJ_VERIFIER", "Mises à jour", L("Prévenir des nouvelles versions de la config", "Notify about new versions of the config"),
       "ouinon", "oui",
       L("Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h).",
@@ -926,7 +941,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
-    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur",
 }
 
 

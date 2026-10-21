@@ -17,12 +17,14 @@ BIN = REPO / "home/.local/bin"
 
 @unittest.skipUnless(shutil.which("qs") and shutil.which("dbus-run-session") and shutil.which("notify-send"), "Quickshell, dbus-run-session et notify-send requis")
 class Notifications(unittest.TestCase):
-    def executer(self, scenario, memo=None):
+    def executer(self, scenario, memo=None, preparer=None, apres=None):
         with tempfile.TemporaryDirectory(prefix="nc-notifs-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
             bin = root / ".local/bin"
             bin.mkdir(parents=True)
+            if preparer:
+                preparer(root)
             shutil.copy2(BIN / "nc-ile-memo", bin / "nc-ile-memo")
             if memo is not None:
                 (root / ".local/state/nc/ile").mkdir(parents=True, mode=0o700)
@@ -76,8 +78,36 @@ class Notifications(unittest.TestCase):
             self.assertEqual(r.returncode, 0, sortie)
             for e in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
                 self.assertNotIn(e, sortie)
+            if apres:
+                apres(root)
             f = root / ".local/state/nc/ile/notifs.json"
             return json.loads(f.read_text()) if f.exists() else None
+
+    def test_carte_des_mises_a_jour(self):
+        import time
+        def preparer(root):
+            (root / "cache/nc").mkdir(parents=True)
+            (root / "cache/nc/paquets.json").write_text(json.dumps({
+                "date": int(time.time()) - 7200, "total": 3, "noyau": True, "sources": {"depot": 2, "aur": 1, "flatpak": 0},
+                "paquets": [{"source": "depot", "nom": "linux", "avant": "6.1", "apres": "6.2", "important": True},
+                            {"source": "depot", "nom": "zsh", "avant": "5.1", "apres": "5.2", "important": False}]}))
+            f = root / ".local/bin/nc-paquets"
+            f.write_text('#!/bin/sh\necho "$1" >> "$HOME/appels-maj"\n'); f.chmod(0o755)
+        vu = {}
+        def apres(root):
+            a = root / "appels-maj"
+            vu["appels"] = a.read_text().split() if a.exists() else []
+        self.executer('''
+                if (etape === 0) { creer(); page.visible = true; etape++; return }
+                if (etape === 1) {
+                    var r = trouver(page, "nc-notifs-maj-resume"); verifier(r !== null, "carte des mises à jour absente")
+                    if (r.text.indexOf("pending") < 0) return
+                    verifier(r.text.indexOf("3 pending") === 0 && r.text.indexOf("linux") > 0 && r.text.indexOf("kernel") > 0 && r.text.indexOf("2 h ago") > 0, "résumé : " + r.text)
+                    cliquer("nc-notifs-maj-chercher"); etape++; return }
+                if (etape === 2) { cliquer("nc-notifs-maj-maj"); verifier(Etat.fermetures === 1, "« Mettre à jour » ferme l'île"); etape++; return }
+                if (etape === 3) Qt.quit()
+        ''', preparer=preparer, apres=apres)
+        self.assertEqual(vu["appels"], ["verifier", "mettre-a-jour"])
 
     def test_groupes_filtres_lecture_report_masquage_clavier(self):
         memo = self.executer('''
