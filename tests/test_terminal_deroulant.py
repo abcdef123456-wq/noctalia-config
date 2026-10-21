@@ -1,6 +1,7 @@
 """Terminal déroulant (special:term) rangé dès qu'on va ailleurs : une autre fenêtre activée, sur cet écran ou un autre
 (l'écran du terminal repris un instant, puis la fenêtre choisie), un autre bureau ; jamais quand c'est lui qui s'active.
-La zone de l'île qui range au clic sur le bureau vide n'existe que tant qu'il est sorti."""
+Ce qu'on y lance s'ouvre sur le bureau du dessous. La zone de l'île qui range au clic sur le bureau vide n'existe que
+tant qu'il est sorti."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,7 +24,8 @@ hl = {
  get_active_monitor = function() return actif end,
  dispatch = function(a) actions[#actions + 1] = a end,
  dsp = { focus = function(t) return t.monitor and ("focus monitor " .. t.monitor) or ("focus " .. t.window) end,
-         workspace = { toggle_special = function(n) return "toggle " .. n end } },
+         workspace = { toggle_special = function(n) return "toggle " .. n end },
+         window = { move = function(t) return "move " .. t.window.address .. " " .. tostring(t.workspace) .. (t.follow == false and " sans suivre" or "") end } },
 }
 ''' + source[debut:fin] + r'''
 local function etat(term_sur)
@@ -53,6 +55,15 @@ etat("A"); handlers["workspace.active"]({ name = "3", monitor = { name = "B" } }
 assert(#actions == 0, "bureau d'un autre écran")
 etat("A"); handlers["workspace.active"]({ name = "special:term", monitor = { name = "A" } })
 assert(#actions == 0, "le bureau caché lui-même")
+-- Une appli lancée depuis le terminal : sur le bureau du dessous, avec la main ; le terminal lui-même reste
+etat("A"); actif = monitors[1]
+local ecranA = { name = "A", active_workspace = { id = 4 } }
+handlers["window.open"]({ address = "0x5", class = "firefox", workspace = { name = "special:term" }, monitor = ecranA })
+assert(table.concat(actions, ", ") == "move 0x5 4 sans suivre, focus address:0x5", table.concat(actions, ", "))
+etat("A"); handlers["window.open"]({ address = "0x6", class = "dropterm", workspace = { name = "special:term" }, monitor = ecranA })
+assert(#actions == 0, "le terminal déroulant reste dans son bureau caché")
+etat("A"); handlers["window.open"]({ address = "0x7", class = "firefox", workspace = { name = "2" }, monitor = ecranA })
+assert(#actions == 0, "une fenêtre ouverte ailleurs ne bouge pas")
 print("TERMINAL_OK")
 '''
         r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5)
