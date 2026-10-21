@@ -13,12 +13,27 @@ local function bureau_sombre()
   return texte:match('"sombre"%s*:%s*false') == nil
 end
 
+-- Thème choisi dans nc-reglages → Terminal → Thème de Neovim (NVIM_THEME) ; « auto » : d'après le bureau
+local function theme_choisi()
+  local chemin = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/nc/reglages.conf"
+  local f = io.open(chemin)
+  if not f then
+    return "auto"
+  end
+  local texte = f:read("*a") or ""
+  f:close()
+  return texte:match("\nNVIM_THEME=\"?([%w%-]+)") or texte:match("^NVIM_THEME=\"?([%w%-]+)") or "auto"
+end
+
 return {
   {
     "LazyVim/LazyVim",
     opts = {
       colorscheme = function()
-        vim.cmd.colorscheme(bureau_sombre() and "tokyonight-moon" or "tokyonight-day")
+        local choix = theme_choisi()
+        if choix == "auto" or not pcall(vim.cmd.colorscheme, choix) then
+          vim.cmd.colorscheme(bureau_sombre() and "tokyonight-moon" or "tokyonight-day")
+        end
       end,
     },
   },

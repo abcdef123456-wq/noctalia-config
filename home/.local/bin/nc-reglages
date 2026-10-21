@@ -157,6 +157,18 @@ def frequences():
     return sorted({hz for p, hz in modes if p == px})
 
 
+# Applis par défaut proposées : seulement celles installées (et la valeur actuelle, même désinstallée entre-temps)
+TERMINAUX = [("kitty", "kitty"), ("foot", "foot"), ("alacritty", "Alacritty"), ("wezterm", "WezTerm"), ("ghostty", "Ghostty"),
+             ("konsole", "Konsole"), ("gnome-terminal", "GNOME Terminal"), ("ptyxis", "Ptyxis")]
+GESTIONNAIRES = [("nautilus", "Fichiers (Nautilus)"), ("thunar", "Thunar"), ("dolphin", "Dolphin"), ("nemo", "Nemo"),
+                 ("pcmanfm-qt", "PCManFM-Qt"), ("yazi", "Yazi (dans le terminal)")]
+
+
+def applis_installees(liste):
+    res = [(c, n) for c, n in liste if shutil.which(c)]
+    return res or liste[:1]
+
+
 def polices(motif, preferees):
     """Polices installées : d'abord celles de la liste (si présentes), puis les autres qui suivent le motif."""
     familles = set()
@@ -293,7 +305,7 @@ SECTIONS_EN = {
     "Apparence": "Appearance", "Île": "Island", "Pages de l’île": "Island pages", "Notifications": "Notifications", "Animations": "Animations",
     "Lumière nocturne": "Night Light", "Barre et dock": "Bar and Dock", "Fenêtres": "Windows",
     "Fonds d'écran": "Wallpapers", "Énergie": "Power", "Son et luminosité": "Sound and Brightness",
-    "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal",
+    "Clavier et souris": "Keyboard and Mouse", "Veille": "Sleep", "Terminal": "Terminal", "Applications": "Applications",
     "Agents IA (coucou)": "AI Agents (coucou)", "Intégration Google": "Google integration", "Mises à jour": "Updates", "Captures": "Screenshots",
     "Raccourcis": "Shortcuts", "Nouveautés": "What's New",
     # Sections des raccourcis (nc-keys)
@@ -374,6 +386,20 @@ REGLAGES = [
     R("SPOTLIGHT_FICHIERS", "Île", L("Fichiers dans le Spotlight", "Files in Spotlight"), "ouinon", "oui",
       L("Les fichiers du dossier personnel apparaissent dans les résultats (à partir de 3 lettres).",
         "Files from your home folder appear in the results (from 3 letters).")),
+    R("SPOTLIGHT_PAQUETS", "Île", L("Logiciels à installer dans le Spotlight", "Apps to install in Spotlight"), "choix", "auto",
+      L("« + nom » cherche un logiciel dans les dépôts de ta distribution, l'AUR et Flatpak ; Entrée ouvre un terminal "
+        "qui l'installe (mot de passe demandé). Suggestions : en tapant, deux logiciels à installer dont le nom commence "
+        "par la saisie s'ajoutent en bas.",
+        "“+ name” searches your distribution's repos, the AUR and Flatpak; Enter opens a terminal that installs it "
+        "(password asked). Suggestions: while typing, two apps to install whose name starts with your text appear at the bottom."),
+      [("auto", L("Suggestions et « + »", "Suggestions and “+”")), ("prefixe", L("Seulement avec « + »", "Only with “+”")),
+       ("non", L("Non", "No"))]),
+    R("SPOTLIGHT_AUR", "Île", L("Logiciels de l'AUR dans le Spotlight", "AUR apps in Spotlight"), "ouinon", "oui",
+      L("Avec paru ou yay. Les paquets de l'AUR viennent de la communauté : paru te montre leur recette (PKGBUILD) avant "
+        "de les construire.", "With paru or yay. AUR packages come from the community: paru shows you their recipe "
+        "(PKGBUILD) before building them.")),
+    R("SPOTLIGHT_FLATPAK", "Île", L("Applis Flatpak dans le Spotlight", "Flatpak apps in Spotlight"), "ouinon", "oui",
+      L("Les applis de Flathub (isolées du système).", "Flathub apps (sandboxed from the system).")),
     R("BATTERIE_ALERTE", "Île", L("Alerte de batterie faible", "Low battery alert"), "entier", "20",
       L("Une notification à ce niveau, puis à la moitié.", "A notification at this level, then at half of it."),
       mini=0, maxi=50, pas=5, unite="%", zero=_JAMAIS),
@@ -696,6 +722,21 @@ REGLAGES = [
     R("CURSEUR_CACHER", "Clavier et souris", L("Cacher le pointeur immobile après", "Hide the idle pointer after"), "entier", "8",
       L("Il réapparaît au premier mouvement. Il se cache aussi quand tu tapes.", "It comes back at the first move. It also hides while you type."),
       mini=0, maxi=60, pas=1, unite="s", zero=_JAMAIS, groupe="hypr"),
+    R("CLAVIER_MAJ", "Clavier et souris", L("Touche Verr. Maj", "Caps Lock key"), "choix", "normal",
+      L("La touche Verr. Maj, rarement utile, peut devenir un Ctrl (raccourcis plus confortables), Échap (Neovim) ou Super.",
+        "The rarely useful Caps Lock key can become Ctrl (comfier shortcuts), Escape (Neovim) or Super."),
+      [("normal", L("Verr. Maj", "Caps Lock")), ("ctrl", "Ctrl"), ("echap", L("Échap", "Escape")), ("super", "Super")], groupe="hypr"),
+    R("CLAVIER_COMPOSE", "Clavier et souris", L("Touche compose", "Compose key"), "choix", "non",
+      L("Pour taper « œ », « ß », « → »… en deux touches : compose puis o e, s s, - >.",
+        "To type “œ”, “ß”, “→”… in two keys: compose then o e, s s, - >."),
+      [("non", L("Aucune", "None")), ("menu", L("Touche Menu", "Menu key")), ("ctrl-droit", L("Ctrl droit", "Right Ctrl"))], groupe="hypr"),
+    R("SOURIS_GAUCHER", "Clavier et souris", L("Souris pour gaucher", "Left-handed mouse"), "ouinon", "non",
+      L("Les boutons gauche et droit sont inversés.", "Left and right buttons are swapped."), groupe="hypr"),
+    R("PAVE_PENDANT_FRAPPE", "Clavier et souris", L("Couper le pavé tactile pendant la frappe", "Disable the touchpad while typing"), "ouinon", "oui",
+      L("Évite les clics involontaires de la paume.", "Avoids accidental palm clicks."), groupe="hypr"),
+    R("PAVE_CLIC_MILIEU", "Clavier et souris", L("Clic du milieu au pavé tactile", "Middle click on the touchpad"), "ouinon", "non",
+      L("Appuyer à gauche et à droite en même temps fait un clic du milieu (coller la sélection, ouvrir un lien dans un onglet).",
+        "Pressing left and right together does a middle click (paste the selection, open a link in a tab)."), groupe="hypr"),
     # Veille
     R("VEILLE_VERROU", "Veille", L("Verrouillage automatique après", "Auto-lock after"), "entier", "5",
       L("L'écran s'assombrit un peu avant et s'éteint 30 s après.", "The screen dims a little before and turns off 30 s after."),
@@ -751,6 +792,19 @@ REGLAGES = [
       [("dessin", L("Dessiné", "Drawn")), ("simple", L("Texte", "Text"))]),
     R("TERMINAL_ACCUEIL", "Terminal", L("Accueil à l'ouverture", "Welcome screen on opening"), "ouinon", "oui",
       L("Logo et infos du PC à chaque nouveau terminal.", "Logo and PC info in every new terminal.")),
+    R("NVIM_THEME", "Terminal", L("Thème de Neovim", "Neovim theme"), "choix", "auto",
+      L("Automatique : sombre ou clair selon les couleurs du fond d'écran. Pris en compte à la prochaine ouverture de nvim.",
+        "Automatic: dark or light following the wallpaper colors. Applied the next time nvim opens."),
+      [("auto", L("Automatique (suit le bureau)", "Automatic (follows the desktop)")), ("tokyonight-moon", "Tokyo Night Moon"),
+       ("tokyonight-night", "Tokyo Night"), ("tokyonight-day", "Tokyo Night Day"), ("catppuccin-mocha", "Catppuccin Mocha"),
+       ("catppuccin-latte", "Catppuccin Latte"), ("habamax", "Habamax")]),
+    R("APPLI_TERMINAL", "Applications", L("Terminal (Super + Entrée)", "Terminal (Super + Enter)"), "choix", "kitty",
+      L("Les terminaux installés. L'île, le terminal déroulant et les outils gardent kitty (ils s'appuient sur ses fonctions).",
+        "Installed terminals. The island, the drop-down terminal and the tools keep kitty (they rely on its features)."),
+      lambda: applis_installees(TERMINAUX), groupe="hypr"),
+    R("APPLI_FICHIERS", "Applications", L("Gestionnaire de fichiers (Super + E)", "File manager (Super + E)"), "choix", "nautilus",
+      L("Les gestionnaires de fichiers installés.", "Installed file managers."),
+      lambda: applis_installees(GESTIONNAIRES), groupe="hypr"),
     R("TERMINAL_HISTORIQUE", "Terminal", L("Lignes d'historique", "Scrollback lines"), "entier", "10000",
       L("Ce qu'on peut remonter avec la molette ou Maj + Page haut.", "How far you can scroll back with the wheel or Shift + Page Up."),
       mini=1000, maxi=100000, pas=1000, groupe="terminal"),
@@ -848,6 +902,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak",
 }
 
 
@@ -879,7 +934,8 @@ def materiel():
     return {**dispo, "batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
             "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*"),
             "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
-            "hybride": cartes == {True, False}}
+            "hybride": cartes == {True, False},
+            "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak"))}
 
 
 _DISPO = materiel()

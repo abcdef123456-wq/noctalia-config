@@ -4,8 +4,12 @@
 -- ajouté avec une description y apparaît tout seul. Sections : Applis et barre, Fenêtres, Bureaux, Souris, Système.
 
 local SUPER    = "SUPER"
-local terminal = "kitty"
-local fichiers = "nautilus --new-window"
+-- Terminal et gestionnaire de fichiers des raccourcis (nc-reglages → Applications) ; un nom de commande simple seulement
+local terminal = nc.reglage("APPLI_TERMINAL", "kitty")
+if not terminal:match("^[%w%.%-]+$") then terminal = "kitty" end
+local fichiers = ({ nautilus = "nautilus --new-window", thunar = "thunar", dolphin = "dolphin --new-window", nemo = "nemo",
+                    ["pcmanfm-qt"] = "pcmanfm-qt", yazi = terminal .. " -e yazi" })[nc.reglage("APPLI_FICHIERS", "nautilus")]
+    or "nautilus --new-window"
 local barre    = "~/.local/bin/nc-shell-msg "   -- actions envoyées à Noctalia v5
 
 -- Tes changements (commande nc-raccourci) : ~/.config/nc/raccourcis.conf, jamais remplacé par les mises à jour.

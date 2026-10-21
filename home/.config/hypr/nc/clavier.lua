@@ -10,6 +10,15 @@ else
     options = options:gsub(",?grp:[%w_]+", ""):gsub("^,", "")
 end
 
+-- Verr. Maj et touche compose (nc-reglages → Clavier et souris)
+do
+    local maj = ({ ctrl = "ctrl:nocaps", echap = "caps:escape", super = "caps:super" })[nc.reglage("CLAVIER_MAJ", "normal")]
+    local compose = ({ menu = "compose:menu", ["ctrl-droit"] = "compose:rctrl" })[nc.reglage("CLAVIER_COMPOSE", "non")]
+    for _, o in ipairs({ maj or "", compose or "" }) do
+        if o ~= "" and not options:find(o, 1, true) then options = (options ~= "" and options .. "," or "") .. o end
+    end
+end
+
 hl.config({
     input = {
         kb_layout  = disposition,
@@ -27,13 +36,15 @@ hl.config({
         accel_profile = (nc.reglage("SOURIS_ACCELERATION", "adaptative") == "plate") and "flat" or "adaptive",
         scroll_factor = math.max(0.1, nc.reglage("SOURIS_DEFILEMENT", 100) / 100),       -- molette
         numlock_by_default = nc.reglage("CLAVIER_VERR_NUM", false),
+        left_handed   = nc.reglage("SOURIS_GAUCHER", false),
 
         touchpad = {
             natural_scroll       = nc.reglage("DEFILEMENT_NATUREL", true),
             tap_to_click         = nc.reglage("TAPOTER_CLIC", true),
             scroll_factor        = math.max(0.1, nc.reglage("PAVE_DEFILEMENT", 100) / 100),
             drag_lock            = false,
-            disable_while_typing = true,
+            disable_while_typing = nc.reglage("PAVE_PENDANT_FRAPPE", true),
+            middle_button_emulation = nc.reglage("PAVE_CLIC_MILIEU", false),
             clickfinger_behavior = true,
         },
     },
