@@ -67,12 +67,13 @@ Item {
     // « @ » : le plan de l'IA (nc-ia agir --json), puis chaque action confirmée par Entrée (nc-ia executer)
     property var plan: null
     property bool modeAgent: false
+    property string porteeAgent: ""      // « Organiser ce bureau » : le plan ne peut toucher que ce bureau
     readonly property bool agentPermis: !Reglages.iaCoupee && Reglages.val("IA_ACTIONS", "non") === "confirmer"
     function lancerAgent(demande) {
         if (demande === "" || agent.running) return
         questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = false; modeAgent = true; plan = null
         iaReponse = nomIA; agentReponse = agentIA
-        agent.command = [Etat.bin + "nc-ia", "agir", "--json", demande]
+        agent.command = [Etat.bin + "nc-ia", "agir", "--json"].concat(porteeAgent !== "" ? ["--bureau", porteeAgent] : []).concat([demande])
         agent.running = true
         chercher()
     }
@@ -177,6 +178,7 @@ Item {
     function demarrer() {
         texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
         var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
+        porteeAgent = agirTout ? Etat.agirPortee : ""; Etat.agirPortee = ""
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
         lireApplis.running = true
         lireFenetres.running = true

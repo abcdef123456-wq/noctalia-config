@@ -132,6 +132,7 @@ Singleton {
     property string saisie: ""           // texte déjà tapé à l'ouverture (commande « rechercher »)
     property string texteIA: ""          // « ! » du Spotlight sur ce texte-là (presse-papiers de l'île), pas la sélection
     property bool agirAuto: false        // « @ » lancé tout de suite à l'ouverture (raccourcis « Organiser les fenêtres »)
+    property string agirPortee: ""       // son bureau seulement (Super + Ctrl + O) : nc-ia agir --bureau N
     signal validerRecherche()            // comme Entrée dans le Spotlight (commande « valider »)
     function chercher(ecran) {
         if (ecranOuvert === ecran && recherche) { fermer(); return }

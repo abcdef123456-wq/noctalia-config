@@ -85,7 +85,8 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Mises à jour expliquées** : après une mise à jour de la config (`nc-maj`) ou du système, l'IA écrit un rapport
   facile à comprendre (ce qui se voit d'abord, s'il faut redémarrer) en tête de **Mises à jour** dans la fenêtre des
   réglages, avec **Détails** (la liste complète) ; une notification y mène. C'est automatique : sans connexion, sans
-  IA, ou en Économie sur batterie, rien de plus que d'habitude.
+  IA, ou en Économie sur batterie, le rapport ne donne que les faits (les nouveautés, les paquets importants, s'il faut
+  redémarrer), sans notification.
 - **Services en panne** : quand un service du bureau s'arrête en échec (l'île, Noctalia, le son, les portails, l'agent
   polkit…), une notification propose **Redémarrer** (le compteur de démarrages remis à zéro, puis « reparti » ou
   l'erreur) et, si l'IA est permise, **Expliquer** : l'IA lit son état et la fin de son journal (clés et mots de passe
@@ -109,11 +110,12 @@ Coupée par défaut : **nc-reglages → Intelligence artificielle → L'IA peut 
 première fois, Entrée sur « Autoriser l'IA à proposer des actions » en tapant `@` dans le Spotlight). Ensuite,
 `@ ` dans le Spotlight (ou `nc-ia agir "…"`) : « @ redémarre l'île », « @ coupe le Bluetooth et passe en économie »,
 « @ un service est en échec, répare-le ». L'IA voit l'état du bureau (services de ta session, Wi-Fi, Bluetooth, profil
-d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît comme une ligne, faite seulement quand tu
-appuies sur Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit domaine par domaine :
+d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît comme une ligne, avec l'état d'aujourd'hui
+lu sans IA (« Luminosité : 70 % (maintenant : 40 %) », ou « (déjà le cas) »), faite seulement quand tu appuies sur
+Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit domaine par domaine :
 
 - **fenêtres et bureaux** : **Super + Maj + O** organise toutes les fenêtres (regroupées par activité sur des
-  bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché ; déplacer, échanger, rendre libre ou
+  bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché (l'IA ne voit alors que lui, et rien ne peut en sortir) ; déplacer, échanger, rendre libre ou
   plein écran, nommer un bureau. L'IA voit l'appli, le titre (50 caractères) et la place de chaque fenêtre ;
 - **services de la session** : redémarrer, démarrer, arrêter (signalé ⚠), lire le journal pour comprendre un échec —
   jamais les services du système ;

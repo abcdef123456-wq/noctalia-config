@@ -1405,24 +1405,38 @@ DIRECTIONS = {"gauche": "left", "droite": "right", "haut": "up", "bas": "down", 
 DIRECTIONS_FR = {"left": "la gauche", "right": "la droite", "up": "le haut", "down": "le bas"}
 
 
-def fenetres_bureau():
-    """{adresse: fenêtre} des fenêtres rangées sur un bureau (ni les bureaux cachés, ni celles du bureau lui-même)."""
+def fenetres_bureau(bureau=None):
+    """{adresse: fenêtre} des fenêtres rangées sur un bureau (ni les bureaux cachés, ni celles du bureau lui-même) ;
+    bureau : seulement celles de ce bureau-là (« Organiser ce bureau »)."""
     try:
         c = json.loads(subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {}
     return {x["address"]: x for x in c if x.get("mapped") and (x.get("workspace") or {}).get("id", 0) > 0
-            and x.get("class") not in ("org.quickshell", "dropterm")}
+            and x.get("class") not in ("org.quickshell", "dropterm")
+            and (bureau is None or x["workspace"]["id"] == bureau)}
 
 
-def etat_fenetres():
-    f = fenetres_bureau()
+def bureau_affiche():
+    try:
+        return int(json.loads(subprocess.run(["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True,
+                                             timeout=5).stdout or "{}").get("id"))
+    except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return None
+
+
+def etat_fenetres(bureau=None):
+    f = fenetres_bureau(bureau)
     try:
         bureaux = json.loads(subprocess.run(["hyprctl", "workspaces", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
         actif = json.loads(subprocess.run(["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, timeout=5).stdout or "{}")
     except (OSError, ValueError, subprocess.TimeoutExpired):
         bureaux, actif = [], {}
-    l = [T("Bureau affiché : ", "Shown desktop: ") + str(actif.get("id", "?")),
+    if bureau is not None:                       # portée limitée : l'IA ne voit que ce bureau
+        bureaux = [b for b in bureaux if b.get("id") == bureau]
+    l = [T("Bureau affiché : ", "Shown desktop: ") + str(actif.get("id", "?")) +
+         (T(f" (seulement lui : les fenêtres restent sur le bureau {bureau})", f" (only this one: windows stay on desktop {bureau})")
+          if bureau is not None else ""),
          T("Bureaux : ", "Desktops: ") + ", ".join(f"{b['id']} « {b.get('name')} » ({b.get('windows', 0)} fenêtre(s), écran {b.get('monitor')})"
                                                    for b in sorted(bureaux, key=lambda b: b.get("id", 0)) if b.get("id", 0) > 0)]
     l.append(T("Fenêtres (adresse · appli · titre · bureau · rangée ou libre · taille) :", "Windows (address · app · title · desktop · tiled or floating · size):"))
@@ -1432,11 +1446,11 @@ def etat_fenetres():
     return "\n".join(l[:80])
 
 
-def etat_bureau(domaines):
+def etat_bureau(domaines, bureau=None):
     """Ce que l'IA voit avant de proposer : seulement les domaines permis."""
     l = []
     if "fenetres" in domaines:
-        l.append(etat_fenetres())
+        l.append(etat_fenetres(bureau))
     if "services" in domaines:
         sv = services_session()
         echec = [n for n, (a, _) in sv.items() if a == "failed"]
@@ -1498,8 +1512,10 @@ def lire_json(texte):
     return d
 
 
-def valider_action(a, domaines, services=None, fenetres=None):
-    """L'action normalisée {outil, args, libelle, danger, lecture}, ou ErreurIA (outil inconnu ou interdit, valeur hors bornes)."""
+def valider_action(a, domaines, services=None, fenetres=None, bureau=None):
+    """L'action normalisée {outil, args, libelle, danger, lecture}, ou ErreurIA (outil inconnu ou interdit, valeur hors
+    bornes). bureau : la portée du plan (« Organiser ce bureau ») — aucune fenêtre d'ailleurs (fenetres ne contient que
+    les siennes), aucun déplacement vers un autre bureau, aucun autre bureau renommé (revue IA-06)."""
     if not isinstance(a, dict) or a.get("outil") not in OUTILS:
         raise ErreurIA(T("outil inconnu", "unknown tool") + f" : {str(a.get('outil') if isinstance(a, dict) else a)[:40]}")
     nom_o, o = a["outil"], OUTILS[a["outil"]]
@@ -1528,6 +1544,8 @@ def valider_action(a, domaines, services=None, fenetres=None):
                 raise ErreurIA(T("numéro de bureau attendu", "desktop number expected")) from None
             if not 1 <= int(v) <= 10:
                 raise ErreurIA(T("bureau de 1 à 10", "desktop from 1 to 10"))
+            if bureau is not None and int(v) != bureau:
+                raise ErreurIA(T(f"hors de ce bureau (seulement le bureau {bureau})", f"outside this desktop (only desktop {bureau})"))
         elif k == "direction":
             v = DIRECTIONS.get(v.lower(), "")
             if not v:
@@ -1562,6 +1580,58 @@ def valider_action(a, domaines, services=None, fenetres=None):
         args_l = args
     libelle = (o["en"] if EN else o["fr"]).format(**args_l)
     return dict(outil=nom_o, args=args, libelle=libelle, danger=bool(o.get("danger")), lecture=bool(o.get("lecture")))
+
+
+def actuel(v, fenetres):
+    """Aperçu sans IA : la valeur d'aujourd'hui de ce que l'action changerait (« 40 % », « bureau 2 », « off »), ou
+    "" si elle ne se lit pas ; à côté de l'action, avant ta confirmation."""
+    o, g = v["outil"], v["args"]
+    try:
+        if o in ("fenetre_bureau", "fenetre_libre", "fenetre_plein_ecran"):
+            x = fenetres.get(g.get("adresse"), {})
+            if o == "fenetre_bureau":
+                return T("bureau ", "desktop ") + str((x.get("workspace") or {}).get("id", "?"))
+            if o == "fenetre_libre":
+                return "on" if x.get("floating") else "off"
+            return "on" if x.get("fullscreen") else "off"
+        if o == "luminosite":
+            n = re.search(r"\d+", sortie_cmd([str(HOME / ".local/bin/nc-brightness"), "get"])[1])
+            return f"{n[0]} %" if n else ""
+        if o in ("volume", "muet") and shutil.which("wpctl"):
+            t = sortie_cmd(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])[1]
+            if o == "muet":
+                return "on" if "MUTED" in t else "off" if t else ""
+            n = re.search(r"(\d+\.\d+)", t)
+            return f"{round(float(n[1]) * 100)} %" if n else ""
+        if o == "wifi" and shutil.which("nmcli"):
+            t = sortie_cmd(["nmcli", "radio", "wifi"])[1]
+            return "on" if t == "enabled" else "off" if t == "disabled" else ""
+        if o == "bluetooth" and shutil.which("bluetoothctl"):
+            t = sortie_cmd(["bluetoothctl", "show"])[1]
+            return "on" if "Powered: yes" in t else "off" if "Powered: no" in t else ""
+        if o == "profil_energie":
+            t = sortie_cmd(["busctl", "get-property", "org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles",
+                            "org.freedesktop.UPower.PowerProfiles", "ActiveProfile"])[1]
+            return t.split('"')[1] if t.count('"') >= 2 else ""
+        if o == "reglage":
+            return reglage(g["cle"], "") or T("par défaut", "default")
+    except (OSError, ValueError, IndexError, KeyError):
+        pass
+    return ""
+
+
+def apercu_action(v, fenetres):
+    """Le libellé avec l'état d'aujourd'hui : « Luminosité : 70 % (maintenant : 40 %) », ou « (déjà le cas) »."""
+    avant = actuel(v, fenetres)
+    if not avant:
+        return v
+    cible = {"fenetre_bureau": T("bureau ", "desktop ") + str(v["args"].get("bureau")), "luminosite": f"{v['args'].get('pourcent')} %",
+             "volume": f"{v['args'].get('pourcent')} %", "reglage": v["args"].get("valeur")}.get(v["outil"])
+    if cible is None:
+        cible = v["args"].get("etat") or v["args"].get("profil")
+    v["avant"] = avant
+    v["libelle"] += T(" (déjà le cas)", " (already so)") if avant == cible else T(f" (maintenant : {avant})", f" (now: {avant})")
+    return v
 
 
 def executer_action(a):
@@ -1619,8 +1689,9 @@ def executer_action(a):
     return False, T("outil inconnu", "unknown tool")
 
 
-def agir(demande):
-    """Le plan de l'IA pour cette demande : {id, reponse, ia, actions: [{n, libelle, danger, fait, ok, resultat}], refus}."""
+def agir(demande, bureau=None):
+    """Le plan de l'IA pour cette demande : {id, reponse, ia, actions: [{n, libelle, danger, fait, ok, resultat}], refus}.
+    bureau : portée « ce bureau seulement », gardée dans le plan et revérifiée à l'exécution."""
     if coupee():
         raise ErreurIA(message_coupee())
     if actions_mode() == "non":
@@ -1631,8 +1702,8 @@ def agir(demande):
         raise ErreurIA(T("Aucun domaine permis à l'IA (nc-reglages → Intelligence artificielle).",
                          "No domain allowed to the AI (nc-settings → Artificial intelligence)."))
     services = services_session() if "services" in domaines else {}
-    fenetres = fenetres_bureau() if "fenetres" in domaines else {}
-    texte = T("État du bureau :\n", "Desktop state:\n") + etat_bureau(domaines) + T("\n\nDemande : ", "\n\nRequest: ") + demande
+    fenetres = fenetres_bureau(bureau) if "fenetres" in domaines else {}
+    texte = T("État du bureau :\n", "Desktop state:\n") + etat_bureau(domaines, bureau) + T("\n\nDemande : ", "\n\nRequest: ") + demande
     consigne_a = consigne_agent(domaines)
     d, ident = None, ""
     for tour in range(2):                       # un second tour seulement pour lire des journaux
@@ -1644,17 +1715,18 @@ def agir(demande):
         resultats = []
         for a in lectures[:4]:
             try:
-                v = valider_action(a, domaines, services, fenetres)
+                v = valider_action(a, domaines, services, fenetres, bureau)
                 resultats.append(f"=== {v['libelle']} ===\n" + executer_action(v)[1])
             except ErreurIA as e:
                 resultats.append(f"=== {a.get('outil')} === {e}")
         texte += T("\n\nRésultats de tes lectures :\n", "\n\nResults of your reads:\n") + "\n".join(resultats) + \
             T("\n\nPropose maintenant le plan final (sans nouvelle lecture).", "\n\nNow propose the final plan (no more reads).")
     plan = dict(id=os.urandom(8).hex(), t=time.time(), reponse=str(d.get("reponse") or "")[:2000], ia=nom(ident),
-                agent=FOURNISSEURS.get(ident, {}).get("agent", "claude"), actions=[], refus=[])
+                agent=FOURNISSEURS.get(ident, {}).get("agent", "claude"), actions=[], refus=[],
+                portee={"bureau": bureau} if bureau is not None else {})
     for a in (d.get("actions") or [])[:8]:
         try:
-            v = valider_action(a, domaines, services, fenetres)
+            v = apercu_action(valider_action(a, domaines, services, fenetres, bureau), fenetres)
         except ErreurIA as e:
             plan["refus"].append(str(e))
             continue
@@ -1709,13 +1781,14 @@ def _executer_plan(ident, numeros):
         f.unlink(missing_ok=True)
         raise ErreurIA(T("Plan expiré (plus de 10 min) : redemande.", "Plan expired (over 10 min): ask again."))
     domaines = domaines_permis()
+    bureau = (plan.get("portee") or {}).get("bureau")
     services = services_session() if "services" in domaines else {}
-    fenetres = fenetres_bureau() if "fenetres" in domaines else {}
+    fenetres = fenetres_bureau(bureau) if "fenetres" in domaines else {}
     for a in plan["actions"]:
         if a.get("fait") or (numeros is not None and a["n"] not in numeros):
             continue
         try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
-            v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres)
+            v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres, bureau)
             a["ok"], a["resultat"] = executer_action(v)
         except ErreurIA as e:
             a["ok"], a["resultat"] = False, str(e)
@@ -1772,12 +1845,39 @@ def details_systeme(fichier):
     return res
 
 
+def resume_sans_ia(genre, details):
+    """Le rapport sans IA (coupée, en pause, injoignable) : les faits seulement, en quelques lignes."""
+    if genre == "config":
+        idees = [re.split(r" : | ; ", d, 1)[0].strip()[:90] for d in details[:4]]
+        reste = len(details) - len(idees)
+        return "\n".join(f"- {x}" for x in idees) + (T(f"\n- et {reste} autre(s)", f"\n- and {reste} more") if reste > 0 else "")
+    importants = [d[2:] for d in details if d.startswith("★ ")]
+    l = [T(f"{len(details)} paquet(s) mis à jour.", f"{len(details)} package(s) updated.")]
+    l += [f"- **{x}**" for x in importants[:5]]
+    if any(re.match(r"(linux|kernel)\S*\s", x) for x in importants):
+        l.append(T("Redémarre pour utiliser le nouveau noyau.", "Restart to use the new kernel."))
+    return "\n".join(l)
+
+
+def ecrire_rapport(genre, details, resume, ia=""):
+    RAPPORTS.mkdir(parents=True, exist_ok=True)
+    f = RAPPORTS / f"{genre}.json"
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dict(genre=genre, date=int(time.time()), titre=T(*TITRES_RAPPORT[genre]), resume=resume, ia=ia,
+                                   details=details, nombre=len(details)), ensure_ascii=False))
+    tmp.replace(f)
+
+
 def rapport_maj(genre, args):
     global FOND
     FOND = True                                   # automatique : en pause en Économie sur batterie
     details = details_config(*(args + ["", ""])[:2]) if genre == "config" else details_systeme(args[0] if args else "")
-    if not details or coupee() or not candidats("texte"):
-        return 0                                  # rien à résumer, IA coupée, en pause ou injoignable : comme d'habitude
+    if not details:
+        return 0
+    if coupee() or not candidats("texte"):
+        # Sans IA (coupée, en pause, injoignable) : le rapport des faits, sans notification (rien de plus que d'habitude)
+        ecrire_rapport(genre, details, resume_sans_ia(genre, details))
+        return 0
     if genre == "config":
         consigne_r = T("Voici les messages des mises à jour qui viennent d'être installées sur le bureau de l'utilisateur "
                        "(noctalia-config : Hyprland, île dynamique, réglages, IA…). Explique en 3 à 6 points très courts (une phrase "
@@ -1799,14 +1899,10 @@ def rapport_maj(genre, args):
     try:
         rep, ident = demander("\n".join(details), "texte", consigne_=consigne_r, sortie=lambda m: None)
     except ErreurIA:
+        ecrire_rapport(genre, details, resume_sans_ia(genre, details))
         return 0
-    RAPPORTS.mkdir(parents=True, exist_ok=True)
     titre = T(*TITRES_RAPPORT[genre])
-    f = RAPPORTS / f"{genre}.json"
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps(dict(genre=genre, date=int(time.time()), titre=titre, resume=rep.strip(), ia=nom(ident),
-                                   details=details, nombre=len(details)), ensure_ascii=False))
-    tmp.replace(f)
+    ecrire_rapport(genre, details, rep.strip(), nom(ident))
     premier = next((l.strip(" -•*") for l in rep.splitlines() if l.strip(" -•*")), "")
     notifier(titre, apercu(premier, 200), (T("Voir le rapport", "See the report"),
                                            ["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglagesChercher", titre]))
@@ -2060,7 +2156,16 @@ def main(a):
             q = " ".join(x for x in a if not x.startswith("--")).strip()
             if not q:
                 raise ErreurIA("nc-ia agir \"coupe le Bluetooth et passe en économie\"")
-            plan = agir(q)
+            bureau = None
+            if "--bureau" in a:                  # « Organiser ce bureau » : nc-ia agir --bureau N "…"
+                i = a.index("--bureau")
+                try:
+                    bureau = int(a[i + 1])
+                except (IndexError, ValueError):
+                    raise ErreurIA("nc-ia agir --bureau N \"…\"") from None
+                a = a[:i] + a[i + 2:]
+                q = " ".join(x for x in a if not x.startswith("--")).strip()
+            plan = agir(q, bureau)
             if json_out:
                 print(json.dumps(plan, ensure_ascii=False))
                 return 0
@@ -2109,7 +2214,8 @@ def main(a):
                 T("Organise toutes mes fenêtres : regroupe-les par activité sur des bureaux, nomme les bureaux, puis "
                   "dispose-les bien sur chacun.", "Organize all my windows: group them by activity on desktops, name the "
                   "desktops, then lay them out well on each one.")
-            if shutil.which("qs") and subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "agirIA", demande],
+            portee = str(bureau_affiche() or "") if "--bureau" in a else ""
+            if shutil.which("qs") and subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "agirIA", demande, portee],
                                                      capture_output=True, timeout=5).returncode == 0:
                 return 0
             raise ErreurIA(T("Organiser les fenêtres demande l'île (Quickshell) : nc-ia agir \"…\" dans un terminal sinon.",

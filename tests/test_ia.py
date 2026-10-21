@@ -446,7 +446,7 @@ class IA(unittest.TestCase):
         self.reglages("IA_ACTIONS=confirmer\n")
         plan = json.loads(self.lancer("agir", "--json", "organise mes fenêtres").stdout)
         self.assertEqual([x["libelle"] for x in plan["actions"]],
-                         ["kitty → bureau 1", "Bureau 1 nommé « Code »", "Échanger kitty et firefox"])
+                         ["kitty → bureau 1 (maintenant : bureau 2)", "Bureau 1 nommé « Code »", "Échanger kitty et firefox"])
         self.assertEqual(len(plan["refus"]), 3, plan["refus"])     # terminal déroulant, bureau 11, nom piégé
         envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
         self.assertIn("0xa1 · kitty", envoye, "l'IA voit les fenêtres")
@@ -457,6 +457,33 @@ class IA(unittest.TestCase):
         self.assertIn("dispatch hl.dsp.window.move({ workspace = 1, follow = false, window = 'address:0xa1' })", j)
         self.assertIn("dispatch hl.dsp.workspace.rename({ workspace = 1, name = [[Code]] })", j)
         self.assertIn("dispatch hl.dsp.window.swap({ window = 'address:0xa1', target = 'address:0xb2' })", j)
+
+    def test_organiser_ce_bureau_seulement(self):
+        """Revue IA-06 : « Organiser ce bureau » ne touchait ce bureau que par la consigne ; maintenant la portée est dans
+        le plan : l'IA ne voit que ses fenêtres, et rien ne peut en sortir ni renommer un autre bureau."""
+        clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
+                   {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": True, "size": [800, 600]},
+                   {"address": "0xd4", "class": "discord", "title": "Discord", "mapped": True, "workspace": {"id": 3}, "floating": False, "size": [800, 600]}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'workspaces) echo \'[{"id": 2, "name": "2", "windows": 2}, {"id": 3, "name": "3", "windows": 1}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
+        for p in ("systemctl", "bluetoothctl", "nmcli", "wpctl", "busctl"):
+            self.programme(p, "exit 0")
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [
+            {"outil": "fenetre_echanger", "args": {"adresse": "0xa1", "autre": "0xb2"}},
+            {"outil": "fenetre_libre", "args": {"adresse": "0xb2", "etat": "on"}},
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xa1", "bureau": 5}},
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xd4", "bureau": 2}},
+            {"outil": "bureau_nommer", "args": {"bureau": 3, "nom": "Jeux"}}]})
+        self.reglages("IA_ACTIONS=confirmer\n")
+        r = self.lancer("agir", "--json", "--bureau", "2", "organise ce bureau")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        plan = json.loads(r.stdout)
+        self.assertEqual(plan["portee"], {"bureau": 2})
+        self.assertEqual([x["libelle"] for x in plan["actions"]], ["Échanger kitty et firefox", "firefox libre : on (déjà le cas)"])
+        self.assertEqual(len(plan["refus"]), 3, plan["refus"])   # vers le bureau 5, une fenêtre du bureau 3, renommer le 3
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertNotIn("0xd4", envoye, "l'IA ne voit que les fenêtres de ce bureau")
+        self.assertNotIn("organise ce bureau 2", envoye)
 
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()
@@ -589,10 +616,19 @@ class IA(unittest.TestCase):
         # En Économie sur batterie (automatique), sans connexion : rien de plus que d'habitude
         (self.home / "cache/nc/rapports/config.json").unlink()
         Faux.requetes.clear()
+        # → le rapport des faits, sans IA ni notification
+        notifs = self.appels().count("notify")
         for env in ({"NC_POWER_SUPPLY": "batterie", "NC_PROFIL": "power-saver"}, {"NC_IA_EN_LIGNE": "0"}):
+            (self.home / "cache/nc/rapports/config.json").unlink(missing_ok=True)
             self.assertEqual(self.lancer("rapport-maj", "config", avant, "HEAD", env_plus=env).returncode, 0)
-        self.assertFalse((self.home / "cache/nc/rapports/config.json").exists())
+            d = json.loads((self.home / "cache/nc/rapports/config.json").read_text())
+            self.assertEqual((d["ia"], d["resume"]), ("", "- Nouvelle pastille IA"))
         self.assertFalse(Faux.requetes)
+        self.assertEqual(self.appels().count("notify"), notifs, "sans IA : pas de notification de plus")
+        # Système sans IA : le nombre, les importants, et redémarrer pour un nouveau noyau
+        self.lancer("rapport-maj", "systeme", str(avant_f), env_plus={"NC_IA_EN_LIGNE": "0"})
+        d = json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())
+        self.assertEqual(d["resume"], "1 paquet(s) mis à jour.\n- **linux 6.1 → 6.2**\nRedémarre pour utiliser le nouveau noyau.")
 
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):
