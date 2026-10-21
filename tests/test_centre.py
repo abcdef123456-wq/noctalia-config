@@ -149,6 +149,17 @@ if (etape === 1) {
 ''' % json.dumps(self.DEFAUT))
         self.assertEqual(memo, {"ordre": ["connexions", "musique", "nuit", "jeu", "energie", "luminosite", "volume"], "masques": ["jeu"]})
 
+    def test_largeur_reelle_de_l_ile(self):
+        # Dans l'île, la page fait 378 points (432 moins les marges et les points de navigation) : même disposition qu'avant
+        self.executer('''
+if (etape === 0) { creer(); page.width = 378; etape++; return }
+if (!page.pret) return
+var attendu = { connexions: "0,0,168,168", musique: "180,0,198,168", nuit: "0,180,168,78", jeu: "0,270,168,78", luminosite: "180,180,93,168", volume: "285,180,93,168", energie: "0,360,378,64" }
+for (var id in attendu) verifier(pos("nc-centre-" + id) === attendu[id], id + " : " + pos("nc-centre-" + id) + " au lieu de " + attendu[id])
+verifier(page.disposition.hauteur === 424, "hauteur : " + page.disposition.hauteur)
+Qt.quit()
+''')
+
     def test_disposition_relue_et_clavier(self):
         memo = self.executer('''
 if (etape === 0) { creer(); etape++; return }

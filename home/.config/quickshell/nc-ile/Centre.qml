@@ -21,8 +21,9 @@ Item {
     readonly property var s: Etat.sys
 
     // ── Disposition ──
-    // forme : grand (168 x 168), flex (le reste de la ligne, 104 au moins ; maxi : pas plus large que ça, une glissière seule
-    // reste étroite), petit (168 x 78, deux s'empilent), bande (toute la largeur, 64)
+    // forme : grand (168 x 168), flex (le reste de la ligne, 88 au moins : dans l'île la page fait 378 points et les deux
+    // glissières y ont 93 points chacune, comme avant ; maxi : pas plus large que ça, une glissière seule reste étroite),
+    // petit (168 x 78, deux s'empilent), bande (toute la largeur, 64)
     readonly property var modules: ({
         connexions: { nom: Reglages.t("Connexions", "Connections"), icone: "wifi", forme: "grand" },
         musique: { nom: Reglages.t("Musique", "Music"), icone: "music_note", forme: "flex" },
@@ -67,7 +68,7 @@ Item {
                 y += 64 + centre.ecart
                 continue
             }
-            var libre = largeur - fixe - nflex * 104 - centre.ecart * ligne.length
+            var libre = largeur - fixe - nflex * 88 - centre.ecart * ligne.length
             if (forme === "petit") {
                 // Deux pastilles de suite s'empilent dans la même case (cellule remplacée, pas modifiée en place)
                 var derniere = ligne.length ? ligne[ligne.length - 1] : null
@@ -78,7 +79,7 @@ Item {
                 if (libre < 168) fermer()
                 ligne.push({ forme: "grand", ids: [id] }); fixe += 168
             } else {
-                if (libre < 104) fermer()
+                if (libre < 88) fermer()
                 ligne.push({ forme: "flex", ids: [id], maxi: centre.modules[id].maxi || 0 }); nflex++
             }
         }
