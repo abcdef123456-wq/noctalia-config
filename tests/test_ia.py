@@ -504,6 +504,27 @@ class IA(unittest.TestCase):
         self.assertEqual(self.appels().count("bluetoothctl power off"), 1, self.appels())
         self.assertEqual(sorted(r.returncode for r in resultats), [0, 0])
 
+    def test_ia_coupee_pendant_l_attente_du_verrou(self):
+        # Revue IA-05 : une confirmation qui attend le verrou relit les réglages ; l'IA coupée entre-temps, rien ne se fait
+        import fcntl, time
+        self.preparer_agent()
+        self.reglages("IA_ACTIONS=confirmer\n")
+        plan = json.loads(self.lancer("agir", "--json", "x").stdout)
+        verrou = open(self.home / "run/nc-ia/plans" / f"{plan['id']}.lock", "a")
+        fcntl.flock(verrou, fcntl.LOCK_EX)
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
+                   XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                   JOURNAL=str(self.journal), NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+        p = subprocess.Popen([str(self.home / ".local/bin/nc-ia"), "executer", plan["id"], "1", "--json"], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.8)                                    # elle a vérifié les réglages et attend le verrou
+        self.reglages("IA_MODE=non\nIA_ACTIONS=confirmer\n")
+        fcntl.flock(verrou, fcntl.LOCK_UN)
+        verrou.close()
+        p.wait(20)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertNotIn("bluetoothctl power", self.appels())
+
     def test_programme_qui_echoue_apres_un_debut(self):
         # Revue Codex IA-03 : un début de réponse puis un code d'erreur, c'est un échec, pas une réponse
         self.programme("opencode", 'echo "début de réponse"; echo "plantage" >&2; exit 9')
@@ -522,6 +543,27 @@ class IA(unittest.TestCase):
         self.assertLess(time.time() - debut, 15)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("délai dépassé", r.stderr)
+
+    def test_expliquer_une_panne(self):
+        """nc-panne → « Expliquer » : l'état et la fin du journal du service, secrets masqués, jamais un service inconnu."""
+        self.programme("systemctl", 'case "$*" in *nc-ile.service*) printf "Description=Île\\nLoadState=loaded\\nResult=core-dump\\n";; '
+                                    '*) echo "LoadState=not-found";; esac')
+        self.programme("journalctl", f'echo "Erreur : token=abc123secretXYZ et cle {CLE_O} refusée"; echo "Segmentation fault"')
+        r = self.lancer("panne", "nc-ile.service")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "Bonjour")
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("nc-ile.service", envoye)
+        self.assertIn("Result=core-dump", envoye)
+        self.assertIn("Segmentation fault", envoye)
+        self.assertNotIn("abc123secretXYZ", envoye)
+        self.assertNotIn(CLE_O, envoye)
+        Faux.requetes.clear()
+        self.assertNotEqual(self.lancer("panne", "sshd.service").returncode, 0)
+        self.assertNotEqual(self.lancer("panne", "x;id").returncode, 0)
+        self.reglages("IA_MODE=non\n")
+        self.assertNotEqual(self.lancer("panne", "nc-ile.service").returncode, 0)
+        self.assertFalse(Faux.requetes)
 
     # ── Rapports de mise à jour ──
     def test_rapport_de_mise_a_jour(self):

@@ -15,6 +15,7 @@
                                        un texte, du code, un PDF ou une image : résumé par défaut (clic droit dans
                                        Fichiers → Scripts → IA)
   nc-ia diagnostic                     ce que nc-diag a trouvé, expliqué, avec quoi faire (nc-diag ia)
+  nc-ia panne SERVICE.service [--livrer]  pourquoi ce service de ta session est tombé en panne (nc-panne)
   nc-ia agir DEMANDE [--json]          l'IA gère le bureau (services de la session, Wi-Fi, Bluetooth, énergie, son,
                                        réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
                                        (« @ » dans le Spotlight) ; nc-ia executer PLAN [N…] le réalise
@@ -126,6 +127,7 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        a text, code, a PDF or an image: summarized by default (right click in Files →
                                        Scripts → AI)
   nc-ai diagnostic                     what nc-diag found, explained, with what to do (nc-diag ia)
+  nc-ai failure SERVICE.service [--livrer]  why this session service failed (nc-failure)
   nc-ai act REQUEST [--json]           the AI manages the desktop (session services, Wi-Fi, Bluetooth, power, sound,
                                        settings, updates): a plan of allowed actions, confirmed before acting (“@” in
                                        Spotlight); nc-ai execute PLAN [N…] carries it out
@@ -1293,6 +1295,47 @@ def diagnostic(flux=False):
                          "You help fix a Linux desktop. Answer in English, concrete and brief."))
 
 
+# ── Un service en panne (nc-panne : notification « Expliquer ») ─────────────────────────────────────────────────
+UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
+
+
+def caviarder(t):
+    """Ce qui ressemble à un secret (clé d'API, jeton, mot de passe) est masqué avant de partir vers une IA."""
+    t = re.sub(r"\b(sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|"
+               r"gsk_[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)", "[…]", t)
+    return re.sub(r"(?i)\b(bearer|token|password|passwd|mot de passe|secret|api[_-]?key)(\s*[=:]\s*|\s+)[^\s,;]+", r"\1\2[…]", t)
+
+
+def panne(unite, flux=False, livraison=False):
+    """Pourquoi ce service de ta session s'est arrêté, et quoi faire : son état et la fin de son journal (secrets
+    masqués) envoyés à l'IA seulement quand tu le demandes (bouton « Expliquer » de la notification de nc-panne)."""
+    if coupee():
+        raise ErreurIA(message_coupee())
+    if not UNITE_RE.fullmatch(unite or ""):
+        raise ErreurIA(T("service inconnu", "unknown service"))
+    _, etat = sortie_cmd(["systemctl", "--user", "show", unite, "-p",
+                          "Description,LoadState,ActiveState,SubState,Result,ExecMainStatus,NRestarts,FragmentPath"])
+    if "LoadState=loaded" not in etat:
+        raise ErreurIA(T("service inconnu", "unknown service"))
+    desc = (re.search(r"^Description=(.*)$", etat, re.M) or [None, unite])[1]
+    _, journal = sortie_cmd(["journalctl", "--user", "-u", unite, "-n", "60", "--no-pager", "-o", "short-iso"])
+    if not journal.strip() or "No entries" in journal:   # journal non persistant : ce que systemd en a gardé
+        _, journal = sortie_cmd(["systemctl", "--user", "status", unite, "-n", "40", "--no-pager"])
+    question = T(f"Le service « {unite} » de ma session ({desc}) s'est arrêté en panne. Explique simplement pourquoi, "
+                 "d'après son état et la fin de son journal, puis dis quoi faire, dans l'ordre (commandes sur des lignes "
+                 "« $ … »). Si c'est passager, dis-le.\n\n",
+                 f"The service “{unite}” of my session ({desc}) stopped with a failure. Simply explain why, from its state "
+                 "and the end of its log, then say what to do, in order (commands on “$ …” lines). If it is transient, "
+                 "say so.\n\n") + caviarder(f"{etat}\n\n{journal[-12000:]}")
+    consigne = T("Tu aides à réparer un bureau Linux (noctalia-config, Hyprland). Réponds en français, concret et bref.",
+                 "You help fix a Linux desktop (noctalia-config, Hyprland). Answer in English, concrete and brief.")
+    if not livraison:
+        demander(question, "texte", flux=flux, consigne_=consigne)
+        return
+    rep, ident = demander(question, "texte", consigne_=consigne, sortie=lambda m: None)
+    livrer(T(f"Panne de {desc}", f"{desc} failure"), T(f"Pourquoi {unite} s'est arrêté ?", f"Why did {unite} stop?"), rep, ident)
+
+
 # ── Gestion du bureau par l'IA (nc-reglages → Intelligence artificielle → L'IA peut agir) ────────────────────────
 # L'IA ne lance jamais de commande à elle : elle propose un plan fait seulement des outils ci-dessous, dans les
 # domaines permis (IA_GERER_*) ; chaque action est revérifiée (nom de service existant, valeurs bornées) avant de
@@ -1646,6 +1689,11 @@ def executer_plan(ident, numeros=None):
     with open(PLANS / f"{ident}.lock", "a") as verrou:
         fcntl.flock(verrou, fcntl.LOCK_EX)
         try:
+            # Les réglages ont pu changer pendant l'attente du verrou (IA coupée) : relus (revue IA-05)
+            global _reglages
+            _reglages = None
+            if coupee() or actions_mode() == "non":
+                raise ErreurIA(message_coupee() if coupee() else T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
             return _executer_plan(ident, numeros)
         finally:
             fcntl.flock(verrou, fcntl.LOCK_UN)
@@ -2044,6 +2092,11 @@ def main(a):
             return 0
         if c == "menu":
             return menu()
+        if c in ("panne", "failure"):
+            if not a:
+                raise ErreurIA("nc-ia panne SERVICE.service [--livrer]")
+            panne(a[0], flux="--flux" in a, livraison="--livrer" in a)
+            return 0
         if c in ("rapport-maj", "update-report"):
             if not a or a[0] not in TITRES_RAPPORT:
                 raise ErreurIA("nc-ia rapport-maj config AVANT APRES | systeme FICHIER.json")

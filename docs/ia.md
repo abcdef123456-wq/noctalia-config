@@ -86,6 +86,13 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   facile à comprendre (ce qui se voit d'abord, s'il faut redémarrer) en tête de **Mises à jour** dans la fenêtre des
   réglages, avec **Détails** (la liste complète) ; une notification y mène. C'est automatique : sans connexion, sans
   IA, ou en Économie sur batterie, rien de plus que d'habitude.
+- **Services en panne** : quand un service du bureau s'arrête en échec (l'île, Noctalia, le son, les portails, l'agent
+  polkit…), une notification propose **Redémarrer** (le compteur de démarrages remis à zéro, puis « reparti » ou
+  l'erreur) et, si l'IA est permise, **Expliquer** : l'IA lit son état et la fin de son journal (clés et mots de passe
+  masqués) et répond dans la conversation. Rien n'est envoyé sans ton clic ; une fois par demi-heure au plus pour un
+  même service ; rien pendant la fermeture de la session ; jamais les services du système. `nc-ia panne SERVICE`,
+  réglages « Signaler les services en panne » (ceux du bureau, tous ceux de ta session, aucun) et « Services à ne
+  jamais signaler » (nc-reglages → Notifications).
 - **Diagnostic** : `nc-diag ia` explique ce que `nc-diag` a trouvé et dit quoi faire (rien n'est envoyé si tout va bien).
 - **Dictée partout (Super + D)** : maintiens Super + D et parle, relâche : le texte est écrit dans la fenêtre active
   (Discord, navigateur, Neovim, terminal…). Un appui bref lance une dictée longue, le suivant l'écrit. Transcription par

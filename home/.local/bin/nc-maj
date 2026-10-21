@@ -15,9 +15,11 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   [ -d "$depot/.git" ] || exit 0
   cd "$depot"
   # Adresse publique (https), sans clé ni mot de passe : jamais de question en arrière-plan
-  url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#')"
+  # (« || … » : avec pipefail, un échec dans le tube quitterait le script en erreur, et le service avec : hors ligne,
+  # ce n'est pas une panne — revue MAJ-01)
+  url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#')" || exit 0
   branche="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$branche" 2>/dev/null | cut -f1)"
+  distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$branche" 2>/dev/null | cut -f1)" || distant=""
   [ -n "$distant" ] || exit 0                                  # hors ligne
   # À jour : la version publiée est déjà ici (ou plus ancienne que la tienne)
   git merge-base --is-ancestor "$distant" HEAD 2>/dev/null && exit 0

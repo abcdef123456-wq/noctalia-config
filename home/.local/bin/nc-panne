@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""nc-panne : un service de ta session qui tombe en panne (l'île, Noctalia, PipeWire, un service à toi…) est signalé
+par une notification, avec « Redémarrer » et, si une IA est disponible, « Expliquer » : l'IA lit alors son état et la
+fin de son journal (secrets masqués) et répond dans la conversation (nc-ia panne). Rien n'est envoyé sans ton clic.
+
+Lancé par systemd (OnFailure= de tous les services de ta session : ~/.config/systemd/user/service.d/nc-panne.conf),
+seulement quand un service finit en échec — pas pendant ses redémarrages automatiques, ni pendant la fermeture de la
+session. Par défaut, seulement les services du bureau (PANNES=nc : nc-*, Noctalia, PipeWire, WirePlumber, portails,
+agent polkit) ; PANNES=tous pour tous ceux de ta session, PANNES_IGNORER pour en écarter. Un même service n'est
+signalé qu'une fois par demi-heure. Les services du système ne sont jamais concernés.
+
+  nc-panne signaler SERVICE.service   (systemd) la notification
+  nc-panne essai                      une notification d'exemple, sans panne
+Couper : nc-reglages → Notifications → « Signaler les services en panne » (PANNES=non).
+« Redémarrer » remet d'abord le compteur de démarrages à zéro (systemctl reset-failed : un service en panne a souvent
+atteint sa limite) et dit si le service est reparti.
+"""
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+HOME = Path.home()
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc"
+NB = HOME / ".local/bin"
+UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
+DELAI = 1800                         # un même service : une notification par demi-heure au plus
+# PANNES=nc : les services du bureau seulement (ceux des applis, de GNOME ou KDE installés à côté restent muets)
+DU_BUREAU = re.compile(r"(nc-|noctalia|pipewire|wireplumber|xdg-desktop-portal|plasma-polkit-agent|hyprpolkitagent|"
+                       r"polkit-gnome|hypridle|hyprpaper|hyprsunset|uwsm)")
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(HOME / ".config/nc/reglages.conf", encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+T = lambda fr, en: en if EN else fr
+
+
+def reglage(cle, defaut):
+    try:
+        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"') or defaut
+    except OSError:
+        pass
+    return defaut
+
+
+def sortie(cmd, delai=10):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=delai, stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def deja_signale(unite):
+    """Vrai si ce service a été signalé il y a moins d'une demi-heure ; sinon, note maintenant."""
+    f = CACHE / "pannes.json"
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d = d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        d = {}
+    maintenant = time.time()
+    d = {k: v for k, v in d.items() if isinstance(v, (int, float)) and maintenant - v < DELAI}
+    if unite in d:
+        return True
+    d[unite] = maintenant
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(d), encoding="utf-8")
+    except OSError:
+        pass
+    return False
+
+
+def ia_permise():
+    """L'IA n'est pas coupée (lecture des réglages seulement, sans réseau : la notification part tout de suite)."""
+    ia = NB / "nc-ia"
+    if not ia.exists():
+        return False
+    try:
+        return subprocess.run([str(ia), "actif"], capture_output=True, timeout=5, stdin=subprocess.DEVNULL).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def concerne(unite):
+    portee = reglage("PANNES", "nc")
+    if portee == "non":
+        return False
+    if unite in re.split(r"[\s,;]+", reglage("PANNES_IGNORER", "")):
+        return False
+    return portee == "tous" or bool(DU_BUREAU.match(unite))
+
+
+def session_ouverte():
+    """Pendant la fermeture de la session, les services s'arrêtent (et parfois échouent) : rien à signaler."""
+    if sortie(["systemctl", "--user", "is-system-running"]) == "stopping":
+        return False
+    return sortie(["systemctl", "--user", "is-active", "graphical-session.target"]) == "active"
+
+
+def notifier(titre, corps):
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "-a", T("Système", "System"), "-i", "dialog-information", "--", titre, corps],
+                       capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
+
+
+def redemarrer(unite, desc):
+    subprocess.run(["systemctl", "--user", "reset-failed", unite], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
+    r = subprocess.run(["systemctl", "--user", "restart", unite], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=90)
+    time.sleep(2)
+    if r.returncode == 0 and sortie(["systemctl", "--user", "is-active", unite]) == "active":
+        notifier(T(f"{desc} est reparti", f"{desc} is running again"), unite)
+    else:
+        notifier(T(f"{desc} ne repart pas", f"{desc} does not start"),
+                 (r.stderr.strip() or sortie(["systemctl", "--user", "is-active", unite]))[-300:])
+
+
+def derniere_ligne(unite):
+    l = sortie(["journalctl", "--user", "-u", unite, "-n", "1", "--no-pager", "-o", "cat"])
+    if not l:                            # journal non persistant (Debian minimale…) : l'état de systemd
+        l = sortie(["systemctl", "--user", "status", unite, "-n", "3", "--no-pager"]).splitlines()[-1:] or [""]
+        l = l[0].strip()
+    return l[-300:]
+
+
+def signaler(unite, essai=False):
+    if not UNITE_RE.fullmatch(unite) or unite.startswith("nc-panne@"):
+        return 2
+    if not essai and (not concerne(unite) or not session_ouverte() or deja_signale(unite)):
+        return 0
+    if not shutil.which("notify-send"):
+        return 0
+    if essai:
+        desc, ligne = T("Service d'exemple", "Example service"), T("(essai : aucun service n'est en panne)", "(test: no service failed)")
+    else:
+        desc = sortie(["systemctl", "--user", "show", unite, "-p", "Description", "--value"]) or unite
+        ligne = derniere_ligne(unite)
+    cmd = ["notify-send", "-a", T("Système", "System"), "-i", "dialog-warning",
+           "-A", "redemarrer=" + T("Redémarrer", "Restart")]
+    ia = not essai and ia_permise()
+    if ia:
+        cmd += ["-A", "expliquer=" + T("Expliquer", "Explain")]
+    corps = T(f"{unite} s'est arrêté en échec.", f"{unite} stopped with a failure.") + (f"\n{ligne}" if ligne else "")
+    try:
+        choix = subprocess.run(cmd + ["--", T(f"{desc} est en panne", f"{desc} has failed"), corps], capture_output=True,
+                               text=True, timeout=3600, stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if essai:
+        return 0
+    if choix == "redemarrer":
+        redemarrer(unite, desc)
+    elif choix == "expliquer" and ia:
+        try:
+            r = subprocess.run([str(NB / "nc-ia"), "panne", unite, "--livrer"], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL, timeout=600)
+            if r.returncode != 0:                        # aucune IA joignable, coupée entre-temps…
+                notifier(T("Explication impossible", "No explanation"), (r.stderr.strip() or "nc-ia")[-300:])
+        except (OSError, subprocess.TimeoutExpired):
+            notifier(T("Explication impossible", "No explanation"), T("délai dépassé", "timed out"))
+    return 0
+
+
+def main(a):
+    if a[:1] == ["signaler"] and len(a) == 2:
+        return signaler(a[1])
+    if a[:1] in (["essai"], ["test"]):
+        return signaler("exemple.service", essai=True)
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

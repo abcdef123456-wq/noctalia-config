@@ -439,6 +439,17 @@ REGLAGES = [
       L("Une notification à ce niveau, puis à la moitié.", "A notification at this level, then at half of it."),
       mini=0, maxi=50, pas=5, unite="%", zero=_JAMAIS),
     # Notifications
+    R("PANNES", "Notifications", L("Signaler les services en panne", "Report failed services"), "choix", "nc",
+      L("Un service qui s'arrête en échec (l'île, Noctalia, le son…) : une notification avec Redémarrer et, si l'IA est "
+        "permise, Expliquer (elle lit son journal, secrets masqués, seulement si tu cliques). Une fois par demi-heure au "
+        "plus pour un même service ; rien pendant la fermeture de la session.",
+        "A service that stops with a failure (the island, Noctalia, sound…): a notification with Restart and, if AI is "
+        "allowed, Explain (it reads its log, secrets masked, only if you click). At most once per half hour for the same "
+        "service; nothing while the session closes."),
+      [("nc", L("Ceux du bureau", "Desktop ones")), ("tous", L("Tous ceux de ma session", "All of my session's")),
+       ("non", L("Aucun", "None"))]),
+    R("PANNES_IGNORER", "Notifications", L("Services à ne jamais signaler", "Services never to report"), "texte", "",
+      L("Noms séparés par des espaces (exemple : gvfs-daemon.service).", "Names separated by spaces (example: gvfs-daemon.service).")),
     R("NPD_NUIT", "Notifications", L("Ne pas déranger la nuit", "Do Not Disturb at night"), "ouinon", "non",
       L("Les notifications arrivent sans bannière ni son (les urgentes passent). Le bouton du centre de contrôle reste libre.",
         "Notifications arrive without a banner or sound (urgent ones get through). The Control Center button stays free."),),

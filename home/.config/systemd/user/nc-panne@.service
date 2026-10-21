@@ -1,0 +1,10 @@
+[Unit]
+Description=Signale la panne de %i (noctalia-config)
+# Lui-même n'est jamais signalé (pas de boucle) : voir nc-panne@.service.d/
+CollectMode=inactive-or-failed
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nc-panne signaler %i
+RuntimeMaxSec=4000
+Slice=background.slice
