@@ -6,6 +6,10 @@ hl.window_rule({
     float = true, center = true, size = { "monitor_w*0.52", "monitor_h*0.62" },
 })
 
+-- Cockpit JARVIS (Super + Alt + Maj + A) : flottant et maximisé par Quickshell, au cadrage de la vue des fenêtres (sous
+-- la barre, aux marges de tes fenêtres) ; ni bordure ni arrondi de Hyprland, le cockpit dessine son propre cadre
+hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true, border_size = 0, rounding = 0 })
+
 -- Petite fenêtre de chat JARVIS (Super + Alt + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
 -- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.
 hl.window_rule({ name = "jarvis-chat", match = { title = "^(JARVIS Chat)$" }, float = true, center = true, size = { "420", "560" } })

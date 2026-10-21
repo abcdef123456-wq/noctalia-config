@@ -1,5 +1,7 @@
-// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau), dans le style de la vue des fenêtres et du carrousel : tout
-// l'écran, le fond d'écran flouté et assombri, un cadre discret, les pages en pastilles en haut, le contenu en cartes.
+// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau), dans le style et au cadrage de la vue des fenêtres et du
+// carrousel : une fenêtre flottante maximisée (sous la barre, aux marges de tes fenêtres : règle jarvis-cockpit, sans
+// bordure ni arrondi de Hyprland), le fond d'écran flouté et assombri, un cadre discret, les pages en pastilles en haut,
+// le contenu en cartes. F11 : plein écran ; Échap : fermer.
 // Pages : vue d'ensemble, conversation (la même que l'île), modules, modèle et session, mémoire, conversations,
 // rappels, bots et réglages, services, déploiement. F11 : plein écran ; Échap : fermer (ou la confirmation en cours).
 import QtQuick
@@ -11,7 +13,8 @@ FloatingWindow {
     id: fen
     title: "JARVIS"
     visible: false
-    fullscreen: true
+    fullscreen: false
+    maximized: true
     implicitWidth: 1100; implicitHeight: 820; minimumSize: Qt.size(820, 560)
     color: Couleurs.fond
     property bool pret: false
@@ -38,7 +41,7 @@ FloatingWindow {
     onVisibleChanged: { JarvisEtat.ouvert = visible; if (pret && visible) JarvisEtat.actualiser() }
     onClosed: close()
     function close() { attente = null; visible = false; JarvisEtat.ouvert = false }
-    function afficher(nom) { surEcran(nom); fullscreen = true; visible = true; contentItem.forceActiveFocus() }
+    function afficher(nom) { surEcran(nom); fullscreen = false; maximized = true; visible = true; contentItem.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
         for (var i=0;i<ecrans.length;i++) if (ecrans[i].name===nom) { screen=ecrans[i]; return }
@@ -116,7 +119,7 @@ FloatingWindow {
 
     // ── Comme la vue des fenêtres et le carrousel : tout l'écran, le fond d'écran de cet écran flouté et assombri,
     //    un cadre discret, les pages en pastilles en haut, le contenu en cartes ──
-    readonly property int bord: 8
+    readonly property int bord: 0                 // la fenêtre maximisée a déjà les marges de Hyprland (comme la vue)
     FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true; printErrors: false }
     readonly property string fondOriginal: {
         var t = etatNoctalia.text() || "", nom = (fen.screen ? fen.screen.name : "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
