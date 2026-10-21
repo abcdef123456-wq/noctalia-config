@@ -106,7 +106,7 @@ if(!JarvisEtat.enCours){verifier(JarvisEtat.erreur!=="","erreur absente");dashbo
 if(etape===0){creer();AssistantEtat.brouillon="ne pas perdre";etape++;return}
 if(JarvisEtat.enCours)return
 if(etape===1||etape===3||etape===5){dashboard.close();verifier(!dashboard.visible,"fermeture incomplète");etape++;return}
-if(etape===2||etape===4||etape===6){dashboard.afficher(Quickshell.screens[0].name);verifier(dashboard.visible&&dashboard.maximized&&!dashboard.fullscreen,"réouverture impossible (maximisée sous la barre, pas plein écran)");verifier(AssistantEtat.brouillon==="ne pas perdre","chat perdu");etape++;return}
+if(etape===2||etape===4||etape===6){dashboard.afficher(Quickshell.screens[0].name);verifier(dashboard.visible&&!dashboard.fullscreen,"réouverture impossible");verifier(AssistantEtat.brouillon==="ne pas perdre","chat perdu");etape++;return}
 if(etape===7){JarvisEtat.executer("session",{},false);etape++;return}
 if(etape===8){dashboard.close();Qt.quit()}
 ''')

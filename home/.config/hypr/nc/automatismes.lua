@@ -162,7 +162,8 @@ end
 
 -- ── Mémoire des fenêtres flottantes ─────────────────────────────────────────
 -- À la fermeture d'une fenêtre flottante, sa taille et sa place (en proportion de l'écran) sont notées par appli ;
--- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, incrustation vidéo, jeux.
+-- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, incrustation vidéo, jeux,
+-- cockpit JARVIS (sa place est fixe, voir plus bas).
 local MEMOIRE = STATE .. "fenetres-flottantes"
 os.execute("mkdir -p '" .. STATE .. "'")
 
@@ -174,6 +175,7 @@ local function exclue(w)
     local c, t = w.class or "", w.initial_title or ""
     return c == "" or c == "dropterm" or c == "fingerpop" or est_jeu(w) or w.pinned
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
+        or t == "JARVIS" or w.title == "JARVIS"
 end
 
 local function memoire()
@@ -218,6 +220,24 @@ hl.on("window.open", function(w)
     if l < 120 or h < 80 then return end
     hl.dispatch(hl.dsp.window.resize({ x = l, y = h, window = w }))
     hl.dispatch(hl.dsp.window.move({ x = math.floor(mx + v[1] * lw + 0.5), y = math.floor(my + v[2] * lh + 0.5), window = w }))
+end)
+
+-- ── Cockpit JARVIS ──────────────────────────────────────────────────────────
+-- Une fenêtre classique (règle jarvis-cockpit : flottante, bordure et arrondi de Hyprland) à la place et à la taille
+-- d'une fenêtre rangée seule : la zone utile de son écran (sous la barre et les panneaux réservés) moins la marge des
+-- fenêtres (FENETRES_MARGE). Placé ici, à l'ouverture : la zone réservée n'est connue qu'à ce moment-là, et une fenêtre
+-- maximisée par Hyprland n'aurait pas les marges.
+hl.on("window.open", function(w)
+    if not w or not w.floating or (w.title or w.initial_title) ~= "JARVIS" then return end
+    local m = w.monitor or hl.get_active_monitor()
+    local mx, my, lw, lh = ecran(w)
+    if not (m and lw) then return end
+    local r = type(m.reserved) == "table" and m.reserved or {}
+    local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
+    local g = nc.reglage("FENETRES_MARGE", 10)
+    local arrondi = function(v) return math.floor(v + 0.5) end     -- 2560 / 1,6 vaut 1599,999… en virgule flottante
+    hl.dispatch(hl.dsp.window.resize({ x = arrondi(lw - rg - rd - 2 * g), y = arrondi(lh - rh - rb - 2 * g), window = w }))
+    hl.dispatch(hl.dsp.window.move({ x = arrondi(mx + rg + g), y = arrondi(my + rh + g), window = w }))
 end)
 
 -- Couvercle du portable : en mode « l'écran s'éteint, le PC continue » (nc-reglages, COUVERCLE=ecran), nc-couvercle

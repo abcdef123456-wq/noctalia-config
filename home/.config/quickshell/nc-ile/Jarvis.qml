@@ -1,12 +1,11 @@
-// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau), dans le style et au cadrage de la vue des fenêtres et du
-// carrousel : une fenêtre flottante que Hyprland maximise sous la barre à la pose (règle jarvis-cockpit : maximize,
-// sans bordure ni arrondi ; maximized ci-dessous ne sert qu'aux tests, Hyprland 0.56 ignore la demande d'une appli avant
-// sa pose), le fond d'écran flouté et assombri, un cadre à 8 points, les pages en pastilles en haut, le contenu en
-// cartes. F11 : plein écran, et Hyprland rend la fenêtre maximisée au retour ; Échap : fermer.
+// Cockpit JARVIS (Super + Alt + Maj + A, nc-jarvis tableau) : une fenêtre classique, avec la bordure, l'arrondi et les
+// marges de Hyprland, flottante (règle jarvis-cockpit) et placée à l'ouverture par nc/automatismes.lua à la place et à
+// la taille d'une fenêtre rangée seule sous la barre (une fenêtre maximisée par Hyprland n'aurait pas les marges).
+// Fond uni, l'en-tête, les pages en pastilles, le contenu en cartes. Super + F : plein écran comme toute fenêtre ;
+// Échap : fermer (ou la confirmation en cours).
 // Pages : vue d'ensemble, conversation (la même que l'île), modules, modèle et session, mémoire, conversations,
-// rappels, bots et réglages, services, déploiement. F11 : plein écran ; Échap : fermer (ou la confirmation en cours).
+// rappels, bots et réglages, services, déploiement.
 import QtQuick
-import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 
@@ -14,8 +13,6 @@ FloatingWindow {
     id: fen
     title: "JARVIS"
     visible: false
-    fullscreen: false
-    maximized: true
     implicitWidth: 1100; implicitHeight: 820; minimumSize: Qt.size(820, 560)
     color: Couleurs.fond
     property bool pret: false
@@ -42,7 +39,7 @@ FloatingWindow {
     onVisibleChanged: { JarvisEtat.ouvert = visible; if (pret && visible) JarvisEtat.actualiser() }
     onClosed: close()
     function close() { attente = null; visible = false; JarvisEtat.ouvert = false }
-    function afficher(nom) { surEcran(nom); fullscreen = false; maximized = true; visible = true; contentItem.forceActiveFocus() }
+    function afficher(nom) { surEcran(nom); visible = true; contentItem.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
         for (var i=0;i<ecrans.length;i++) if (ecrans[i].name===nom) { screen=ecrans[i]; return }
@@ -94,7 +91,6 @@ FloatingWindow {
             if (op === "session.update" && succes) AssistantEtat.lireReglages()
         }
     }
-    Shortcut { sequence: "F11"; onActivated: fen.fullscreen = !fen.fullscreen }
     Shortcut {
         sequence: "Escape"
         enabled: !!fen.attente || fen.page !== "chat" || !pageChargee.item || !pageChargee.item.propositionsVisibles
@@ -118,39 +114,13 @@ FloatingWindow {
         WheelHandler { onWheel: e => { parent.contentY = Math.max(0, Math.min(Math.max(0,parent.contentHeight-parent.height),parent.contentY-e.angleDelta.y)); e.accepted=true } }
     }
 
-    // ── Comme la vue des fenêtres et le carrousel : tout l'écran, le fond d'écran de cet écran flouté et assombri,
-    //    un cadre discret, les pages en pastilles en haut, le contenu en cartes ──
-    readonly property int bord: 8                 // même cadre que la vue des fenêtres : 8 points sous la barre et sur les côtés
-    FileView { id: etatNoctalia; path: Quickshell.env("HOME") + "/.local/state/noctalia/settings.toml"; blockLoading: true; printErrors: false }
-    readonly property string fondOriginal: {
-        var t = etatNoctalia.text() || "", nom = (fen.screen ? fen.screen.name : "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-        var m = (nom ? t.match(new RegExp("\\[wallpaper\\.monitors\\.\"?" + nom + "\"?\\]\\s*\\npath\\s*=\\s*\"([^\"]+)\"")) : null)
-                || t.match(/\[wallpaper\.default\]\s*\npath\s*=\s*"([^"]+)"/)
-        return m ? m[1] : ""
-    }
+    // ── Une fenêtre classique : fond uni (Hyprland dessine la bordure, l'arrondi et les marges), l'en-tête, les pages
+    //    en pastilles, le contenu en cartes ──
     Item {
     id: tout                                     // tout le cockpit (une capture hors écran en prend l'image)
     anchors.fill: parent
-    Item {
-        id: ecran
-        anchors.fill: parent
-        layer.enabled: true                          // flou calculé une fois, gardé en image
-        Rectangle { anchors.fill: parent; color: Couleurs.carte }
-        Image {
-            id: fond
-            anchors.fill: parent; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: false
-            sourceSize: Qt.size(Math.max(1, width / 3), Math.max(1, height / 3))
-            source: fen.fondOriginal !== "" ? "file://" + fen.fondOriginal : ""
-        }
-        MultiEffect { anchors.fill: parent; source: fond; blurEnabled: true; blur: 1; blurMax: 40; autoPaddingEnabled: false }
-        Rectangle { anchors.fill: parent; color: Qt.rgba(0, 0, 0, 0.45) }
-    }
-    Rectangle {
-        id: cadre
-        x: fen.bord; y: fen.bord; width: parent.width - 2 * fen.bord; height: parent.height - 2 * fen.bord
-        radius: 10; color: Qt.rgba(1, 1, 1, 0.03)
-        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
-    }
+    Rectangle { anchors.fill: parent; color: Couleurs.fond }   // opaque, aussi pour la capture hors écran
+    Item { id: cadre; anchors.fill: parent }     // repère des marges intérieures de l'en-tête et du contenu
 
     // En haut à gauche : emblème, JARVIS, état ; en haut à droite : commandes rondes
     Row {
@@ -166,7 +136,6 @@ FloatingWindow {
         id: coinDroit
         anchors.right: cadre.right; anchors.rightMargin: 14; y: cadre.y + 16; height: 40; spacing: 8
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "refresh"; aide: Reglages.t("Actualiser", "Refresh"); enabled: !JarvisEtat.enCours; onClic: JarvisEtat.actualiser() }
-        AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: fen.fullscreen ? "fullscreen_exit" : "fullscreen"; aide: Reglages.t("Plein écran (F11)", "Full screen (F11)"); onClic: fen.fullscreen = !fen.fullscreen }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "dock_to_bottom"; aide: Reglages.t("Continuer dans l’île", "Continue in the island"); onClic: { fen.close(); Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/nc-jarvis", "ile"]) } }
         AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
     }

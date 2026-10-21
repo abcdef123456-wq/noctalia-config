@@ -6,11 +6,10 @@ hl.window_rule({
     float = true, center = true, size = { "monitor_w*0.52", "monitor_h*0.62" },
 })
 
--- Cockpit JARVIS (Super + Alt + Maj + A) : flottant et maximisé par Hyprland à la pose (maximize = true : Hyprland 0.56
--- ignore la maximisation demandée par une appli avant sa pose, et pas-de-maximisation supprime les suivantes ; F11 passe
--- en plein écran et revient maximisé), au cadrage de la vue des fenêtres (tout l'écran sous la barre, le cockpit dessine
--- son cadre à 8 points) ; ni bordure ni arrondi de Hyprland
-hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true, maximize = true, border_size = 0, rounding = 0 })
+-- Cockpit JARVIS (Super + Alt + Maj + A) : une fenêtre classique (bordure, arrondi et marges de Hyprland), flottante ;
+-- nc/automatismes.lua la met à l'ouverture à la place et à la taille d'une fenêtre rangée seule sous la barre (une
+-- fenêtre maximisée par Hyprland n'aurait pas les marges). Super + F la passe en plein écran et la rend, comme toute fenêtre.
+hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true })
 
 -- Petite fenêtre de chat JARVIS (Super + Alt + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
 -- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.

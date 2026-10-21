@@ -15,7 +15,7 @@ section « Mes raccourcis » de la fiche).
 |---|---|
 | `Super` + `Entrée` | Terminal |
 | `Super` + `Alt` + `A` | Chat JARVIS : petite fenêtre de conversation vierge (`Super` + `Ctrl` + `P` l'épingle sur tous les bureaux) |
-| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS en plein écran |
+| `Super` + `Alt` + `Maj` + `A` | Cockpit JARVIS (grande fenêtre) |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) |
 | `Super` + `W` | Choisir le fond d'écran |
