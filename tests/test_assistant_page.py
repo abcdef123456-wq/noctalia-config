@@ -351,7 +351,7 @@ else if(etape===1){
     def test_model_families_and_reasoning_send_real_ids_only_after_apply(self):
         models = [dict(id='gemini-flash-'+e, name='Gemini Flash ('+e+')') for e in ('low','medium','high')]
         models += [dict(id='gemini-argon-'+e, name='Gemini Argon ('+e+')') for e in ('low','medium','high')]
-        models += [dict(id='claude-opus-thinking',name='Claude Opus'),dict(id='claude-sonnet',name='Claude Sonnet')]
+        models += [dict(id='claude-opus-4-6-thinking',name='Claude Opus 4.6 (Thinking)'),dict(id='claude-sonnet',name='Claude Sonnet',efforts='high')]
         config=dict(session=dict(engine='agy',model='gemini-flash-low',effort='low'),engines=[dict(id='agy',name='Antigravity',installed=True,models=models,efforts=['low','medium','high'])])
         recus=self.executer('''
 if(etape===0){creer();AssistantEtat.lireReglages();etape++}
@@ -369,9 +369,18 @@ else if(etape===1&&!AssistantEtat.reglagesEnCours){
  clavier.mouseClick(appliquer,appliquer.width/2,appliquer.height/2);verifier(AssistantEtat.reglagesEnCours,"clic Appliquer perdu");etape++
 }else if(etape===3&&!AssistantEtat.reglagesEnCours){
  verifier(!AssistantEtat.reglagesModifies&&AssistantEtat.sessionReglages.model==="gemini-argon-high","confirmation serveur perdue")
- AssistantEtat.choisirFamille("Opus");verifier(AssistantEtat.modele==="claude-opus-thinking","mauvais Opus")
+ AssistantEtat.choisirFamille("Opus");verifier(AssistantEtat.modele==="claude-opus-4-6-thinking","mauvais Opus")
+ // Opus : réflexion intégrée, aucun effort (agy refuse --effort) ; l'effort hérité (high) n'est pas gardé
+ for(var n of ["low","medium","high"]){verifier(AssistantEtat.modelePourEffort(n)===null,"Opus accepte l'effort "+n);verifier(!trouver(page,"nc-jarvis-effort-"+n).enabled,"bouton "+n+" actif sous Opus")}
+ verifier(AssistantEtat.effort==="","effort hérité gardé sous Opus : "+AssistantEtat.effort)
+ AssistantEtat.choisirEffort("high");verifier(AssistantEtat.modele==="claude-opus-4-6-thinking"&&AssistantEtat.effort==="","effort imposé à Opus")
+ // Sonnet : les trois niveaux du moteur (son champ efforts n'est pas un tableau : ignoré)
  AssistantEtat.choisirFamille("Sonnet");verifier(AssistantEtat.modele==="claude-sonnet","mauvais Sonnet")
- AssistantEtat.choisirFamille("Flash");verifier(AssistantEtat.modele==="gemini-flash-high","effort oublié au changement de famille")
+ for(var n2 of ["low","medium","high"]){verifier(AssistantEtat.modelePourEffort(n2)==="claude-sonnet","Sonnet refuse "+n2);verifier(trouver(page,"nc-jarvis-effort-"+n2).enabled,"bouton "+n2+" grisé sous Sonnet")}
+ AssistantEtat.choisirEffort("medium");verifier(AssistantEtat.effort==="medium","Sonnet : effort non appliqué")
+ // Flash : les identifiants -low, -medium, -high
+ AssistantEtat.choisirFamille("Flash");verifier(AssistantEtat.modele==="gemini-flash-medium","effort oublié au changement de famille : "+AssistantEtat.modele)
+ for(var n3 of ["low","medium","high"]){AssistantEtat.choisirEffort(n3);verifier(AssistantEtat.modele==="gemini-flash-"+n3&&AssistantEtat.effort===n3,"Flash "+n3)}
  page.width=330;page.height=410;etape++
 }else if(etape===4){
  var low=trouver(page,"nc-jarvis-effort-low"),high=trouver(page,"nc-jarvis-effort-high")

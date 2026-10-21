@@ -81,7 +81,12 @@ Singleton {
     readonly property var moteurCourant: moteurs.find(m => m.id === moteur) || ({})
     readonly property var modeles: moteurCourant.models || []
     readonly property var modeleCourant: modeles.find(m => m.id === modele) || ({})
-    readonly property var efforts: modeleCourant.efforts || moteurCourant.efforts || []
+    // Niveaux de réflexion proposés : ceux du modèle s'il en annonce (un tableau, même vide), sinon ceux du moteur ; aucun
+    // pour un modèle à réflexion fixe (Claude Opus « thinking » : agy refuse --effort, JARVIS-BIS l'ignore)
+    function reflexionFixe(id) { return id === "claude-opus-4-6-thinking" || /opus.*thinking/i.test(id || "") }
+    readonly property var efforts: reflexionFixe(modele) ? []
+        : Array.isArray(modeleCourant.efforts) ? modeleCourant.efforts
+        : Array.isArray(moteurCourant.efforts) ? moteurCourant.efforts : []
     readonly property var famillesModeles: ["Flash", "Argon", "Opus", "Sonnet"]
     function familleModele(item) {
         var mots = ((item.id || "") + " " + (item.name || "")).toLowerCase().split(/[^a-z0-9]+/)
@@ -94,6 +99,8 @@ Singleton {
     }
     function modelePourEffort(niveau) {
         if (efforts.indexOf(niveau) < 0) return null
+        // Opus intègre sa propre réflexion et ne supporte aucun paramètre d'effort : boutons grisés
+        if (reflexionFixe(modele)) return null
         // Certains CLI encodent aussi l'effort dans l'identifiant du modèle.
         var suffixe = /-(low|medium|high)$/.exec(modele)
         if (!suffixe) return modele
@@ -126,7 +133,7 @@ Singleton {
     function lireReglages() { reglagesDemandes = true; lancerReglages("quick-settings", {}) }
     function appliquerReglages() {
         if (enCours || !reglagesDisponibles) return
-        lancerReglages("session.update", {engine:moteur, model:modele.trim(), effort:effort})
+        lancerReglages("session.update", {engine:moteur, model:modele.trim(), effort:reflexionFixe(modele) ? "" : effort})
     }
     function lancerReglages(op, params) {
         if (reglagesEnCours) return
