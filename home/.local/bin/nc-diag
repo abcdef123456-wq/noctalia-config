@@ -242,6 +242,21 @@ def verifier(b):
         else:
             b.avert(T(f"{nom} ({s}) : {etat or 'inconnu'}", f"{nom} ({s}): {etat or 'unknown'}"), f"systemctl --user enable --now {s}")
 
+    # Demandes de mot de passe (polkit) : l'agent de Noctalia (polkit_agent = true), sinon un agent qui tourne
+    try:
+        noct = open(os.path.join(HOME, ".config/noctalia/config.toml"), encoding="utf-8").read()
+    except OSError:
+        noct = ""
+    if not re.search(r"^\s*polkit_agent\s*=\s*true", noct, re.M):
+        agents, _ = sortie(["pgrep", "-l", "-f", "polkit-kde-authentication-agent|hyprpolkitagent|polkit-gnome-authentication|"
+                                             "polkit-mate-authentication|lxpolkit|xfce-polkit"])
+        if agents:
+            b.ok(T("agent des demandes de mot de passe (polkit)", "password prompt agent (polkit)"))
+        else:
+            b.faux(T("aucun agent polkit : les fenêtres de mot de passe des applis ne s'affichent pas",
+                     "no polkit agent: apps' password windows don't show"),
+                   "systemctl --user reset-failed plasma-polkit-agent.service; systemctl --user start plasma-polkit-agent.service")
+
     # ── Énergie ──
     b.titre(T("Énergie", "Power"))
     prof, code = sortie(["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
