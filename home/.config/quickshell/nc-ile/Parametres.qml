@@ -4,7 +4,9 @@
 // (Hyprland, Noctalia, île, veille, terminal…). Une fenêtre classique de Hyprland (règle nc-reglages-fenetre).
 // Sections en pastilles ; une recherche (Ctrl + F) cherche dans toutes les sections, sans accent ni majuscule ;
 // bascule oui/non, pastilles de choix, curseur pour les nombres, champ pour le texte ; ↺ remet la valeur de la config.
-// Échap : vide la recherche, puis ferme.
+// Au clavier : ↑ ↓ choisir, ← → changer la valeur, Entrée ou Espace basculer (ou saisir un texte), r valeur de la
+// config, Tab et Maj + Tab changer de section, une lettre lance la recherche, Échap vide la recherche puis ferme.
+// Même cadrage que le cockpit : nc/automatismes.lua la place à l'ouverture.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -30,7 +32,7 @@ FloatingWindow {
         return catalogue.filter(r => r.sectionNom === section)
     }
     function normaliser(t) { return String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") }
-    function afficher(nom) { surEcran(nom); visible = true; charger(); champRecherche.forceActiveFocus() }
+    function afficher(nom) { surEcran(nom); visible = true; charger(); liste.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
         for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
@@ -49,6 +51,35 @@ FloatingWindow {
     }
     function reglage(cle) { for (var i = 0; i < catalogue.length; i++) if (catalogue[i].cle === cle) return catalogue[i]; return null }
     function borner(r, v) { v = Math.round(v / r.pas) * r.pas; return Math.max(r.mini, Math.min(r.maxi, v)) }
+    // ← → : la valeur d'après (d = 1) ou d'avant (d = -1), selon le genre du réglage
+    function changer(r, d) {
+        if (!r) return
+        if (r.genre === "ouinon") regler(r.cle, r.valeur === "oui" ? "non" : "oui")
+        else if (r.genre === "choix" || r.genre === "hz") {
+            var c = r.choix, i = 0
+            for (var k = 0; k < c.length; k++) if (c[k][0] === r.valeur) i = k
+            if (c.length) regler(r.cle, c[(i + d + c.length) % c.length][0])
+        } else if (r.genre === "entier") regler(r.cle, borner(r, Number(r.valeur) + d * r.pas))
+    }
+    // Entrée ou Espace : bascule, choix suivant, ou saisie du texte
+    function basculer(r) {
+        if (!r) return
+        if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
+        else changer(r, 1)
+    }
+    function sectionSuivante(d) {
+        if (!sections.length) return
+        champRecherche.text = ""; recherche = ""
+        section = sections[(Math.max(0, sections.indexOf(section)) + d + sections.length) % sections.length]
+        liste.currentIndex = liste.count ? 0 : -1
+    }
+    // Le caractère d'une touche lettre ou chiffre (le texte de l'événement, sinon le code de la touche), ou ""
+    function lettre(event) {
+        if (event.text && /^[\p{L}\p{N}]$/u.test(event.text)) return event.text
+        if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z) || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9)) return String.fromCharCode(event.key).toLowerCase()
+        return ""
+    }
+    readonly property var courant: liste.currentIndex >= 0 && liste.currentIndex < visibles.length ? visibles[liste.currentIndex] : null
 
     Process {
         id: lecture
@@ -121,8 +152,10 @@ FloatingWindow {
                 anchors.fill: parent; anchors.leftMargin: 40; anchors.rightMargin: 36
                 verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
                 color: Couleurs.texte; selectionColor: Couleurs.accent; font.pixelSize: 13
-                onTextChanged: fen.recherche = text
+                onTextChanged: { fen.recherche = text; liste.currentIndex = liste.count ? 0 : -1 }
                 Keys.onDownPressed: liste.forceActiveFocus()
+                Keys.onReturnPressed: liste.forceActiveFocus()
+                Keys.onTabPressed: fen.sectionSuivante(1)
                 Text { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; visible: !champRecherche.text; color: Couleurs.texteSec; font: champRecherche.font
                        text: Reglages.t("Chercher un réglage (Ctrl + F)…", "Search a setting (Ctrl + F)…") }
             }
@@ -156,7 +189,32 @@ FloatingWindow {
             x: 22; y: rangee.y + rangee.height + 14; width: tout.width - 44; height: pied.y - y - 10
             clip: true; spacing: 8; model: fen.visibles
             boundsBehavior: Flickable.StopAtBounds
-            keyNavigationEnabled: true
+            focus: true
+            currentIndex: 0
+            highlightMoveDuration: 80
+            onCountChanged: if (currentIndex < 0 && count) currentIndex = 0
+            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            Keys.onPressed: event => {
+                var r = fen.courant
+                event.accepted = true
+                if (event.key === Qt.Key_Down) { if (currentIndex < count - 1) currentIndex++ }
+                else if (event.key === Qt.Key_Up) { if (currentIndex > 0) currentIndex--; else champRecherche.forceActiveFocus() }
+                else if (event.key === Qt.Key_Right || event.key === Qt.Key_Plus) fen.changer(r, 1)
+                else if (event.key === Qt.Key_Left || event.key === Qt.Key_Minus) fen.changer(r, -1)
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) fen.basculer(r)
+                else if (event.key === Qt.Key_Tab) fen.sectionSuivante(1)
+                else if (event.key === Qt.Key_Backtab) fen.sectionSuivante(-1)
+                else if (event.key === Qt.Key_Home) currentIndex = count ? 0 : -1
+                else if (event.key === Qt.Key_End) currentIndex = count - 1
+                else if (event.key === Qt.Key_PageDown) currentIndex = Math.min(count - 1, currentIndex + 8)
+                else if (event.key === Qt.Key_PageUp) currentIndex = Math.max(0, currentIndex - 8)
+                else if ((event.key === Qt.Key_R || event.key === Qt.Key_Delete) && !(event.modifiers & Qt.ControlModifier)) { if (r && r.modifie) fen.remettre(r.cle) }
+                else if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) && fen.lettre(event) !== "") {
+                    // Une lettre ou un chiffre : la recherche commence
+                    champRecherche.text = fen.lettre(event); champRecherche.forceActiveFocus(); champRecherche.cursorPosition = 1
+                }
+                else event.accepted = false
+            }
             WheelHandler { onWheel: e => { liste.contentY = Math.max(0, Math.min(Math.max(0, liste.contentHeight - liste.height), liste.contentY - e.angleDelta.y)); e.accepted = true } }
             Texte { anchors.centerIn: parent; visible: liste.count === 0 && !fen.enCours; secondaire: true
                     text: fen.recherche.trim() ? Reglages.t("Aucun réglage ne correspond.", "No setting matches.") : Reglages.t("Chargement…", "Loading…") }
@@ -168,6 +226,9 @@ FloatingWindow {
                 readonly property var r: modelData
                 width: liste.width; height: Math.max(62, contenu.implicitHeight + 24); radius: 16
                 color: ligne.ListView.isCurrentItem ? Couleurs.carteSurvol : Couleurs.carte
+                border.width: ligne.ListView.isCurrentItem && liste.activeFocus ? 1.5 : 0; border.color: Couleurs.accent
+                function editer() { saisie.forceActiveFocus(); saisie.selectAll() }
+                MouseArea { anchors.fill: parent; z: -1; onClicked: { liste.currentIndex = ligne.index; liste.forceActiveFocus() } }
                 Column {
                     id: contenu
                     x: 18; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 36 - commande.width - 16; spacing: 3
@@ -247,7 +308,8 @@ FloatingWindow {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
                             color: Couleurs.texte; selectionColor: Couleurs.accent; font.pixelSize: 12
                             text: ligne.r.valeur
-                            onAccepted: fen.regler(ligne.r.cle, text)
+                            onAccepted: { fen.regler(ligne.r.cle, text); liste.forceActiveFocus() }
+                            Keys.onEscapePressed: { text = ligne.r.valeur; liste.forceActiveFocus() }
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }
                         }
                     }
@@ -264,8 +326,11 @@ FloatingWindow {
             Row {
                 anchors.verticalCenter: parent.verticalCenter; spacing: 8
                 Ico { visible: fen.message !== ""; anchors.verticalCenter: parent.verticalCenter; nom: fen.erreur ? "error" : "check_circle"; taille: 16; color: fen.erreur ? Couleurs.rouge : Couleurs.vert }
-                Texte { anchors.verticalCenter: parent.verticalCenter; text: fen.enCours && !fen.message ? Reglages.t("Application…", "Applying…") : fen.message; font.pixelSize: 12
-                        color: fen.erreur ? Couleurs.rouge : Couleurs.texteSec; elide: Text.ElideRight; width: pied.width - 30 }
+                Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; elide: Text.ElideRight; width: pied.width - 30
+                        color: fen.erreur ? Couleurs.rouge : Couleurs.texteSec
+                        text: fen.enCours && !fen.message ? Reglages.t("Application…", "Applying…")
+                            : (fen.message || Reglages.t("↑ ↓ choisir   ← → changer   Entrée basculer   Tab section   r valeur de la config   une lettre : chercher   Échap fermer",
+                                                         "↑ ↓ choose   ← → change   Enter toggle   Tab section   r config value   a letter: search   Esc close")) }
             }
         }
     }

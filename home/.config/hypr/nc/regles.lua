@@ -11,8 +11,9 @@ hl.window_rule({
 -- fenêtre maximisée par Hyprland n'aurait pas les marges). Super + F la passe en plein écran et la rend, comme toute fenêtre.
 hl.window_rule({ name = "jarvis-cockpit", match = { title = "^(JARVIS)$" }, float = true })
 
--- Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : flottante, centrée, aux deux tiers de l'écran
-hl.window_rule({ name = "nc-reglages-fenetre", match = { title = "^(Réglages du bureau)$" }, float = true, center = true, size = { "monitor_w*0.66", "monitor_h*0.78" } })
+-- Fenêtre des réglages (Super + Alt + , ; nc-reglages fenetre) : comme le cockpit, une fenêtre classique placée par
+-- nc/automatismes.lua à la taille d'une fenêtre rangée seule sous la barre
+hl.window_rule({ name = "nc-reglages-fenetre", match = { title = "^(Réglages du bureau)$" }, float = true })
 
 -- Petite fenêtre de chat JARVIS (Super + Alt + A) : flottante, centrée, 420 x 560. Pas d'épinglage forcé : Super + Ctrl + P
 -- l'épingle sur tous les bureaux comme n'importe quelle fenêtre.
@@ -25,7 +26,7 @@ hl.window_rule({ name = "sans-nom", match = { class = "^$", title = "^$" }, no_i
 -- Mode souris (nc-reglages → Clavier et souris, SAISIE=souris) : fenêtres libres et centrées, comme sur Windows
 -- (automatismes.lua les rouvre ensuite à la place et à la taille où tu les as laissées)
 if nc.reglage("SAISIE", "clavier") == "souris" then
-    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS)$" }, float = true, center = true })   -- sauf le cockpit, placé par nc/automatismes.lua
+    hl.window_rule({ name = "souris-libres", match = { class = ".*", title = "negative:^(JARVIS|Réglages du bureau)$" }, float = true, center = true })   -- sauf le cockpit et les réglages, placés par nc/automatismes.lua
     hl.window_rule({ name = "souris-terminal", match = { class = "^(kitty)$" }, size = { "monitor_w*0.5", "monitor_h*0.55" } })
 end
 hl.window_rule({ name = "hyprland-run",match = { class = "hyprland-run" }, float = true, move = "20 monitor_h-120" })

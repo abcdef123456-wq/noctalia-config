@@ -160,6 +160,10 @@ for n = 1, 4 do
             "Bookmarks: reattach the active window (1…4)") })
 end
 
+-- Fenêtres de l'île qui prennent toute la place d'une fenêtre rangée seule (voir « Cockpit JARVIS » plus bas) :
+-- ni mémorisées ici, ni centrées par la règle souris-libres
+local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true }
+
 -- ── Mémoire des fenêtres flottantes ─────────────────────────────────────────
 -- À la fermeture d'une fenêtre flottante, sa taille et sa place (en proportion de l'écran) sont notées par appli ;
 -- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, incrustation vidéo, jeux,
@@ -175,7 +179,7 @@ local function exclue(w)
     local c, t = w.class or "", w.initial_title or ""
     return c == "" or c == "dropterm" or c == "fingerpop" or est_jeu(w) or w.pinned
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
-        or t == "JARVIS" or w.title == "JARVIS"
+        or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
 end
 
 local function memoire()
@@ -223,13 +227,13 @@ hl.on("window.open", function(w)
     hl.dispatch(hl.dsp.window.move({ x = math.floor(mx + v[1] * lw + 0.5), y = math.floor(my + v[2] * lh + 0.5), window = w }))
 end)
 
--- ── Cockpit JARVIS ──────────────────────────────────────────────────────────
--- Une fenêtre classique (règle jarvis-cockpit : flottante, bordure et arrondi de Hyprland) à la place et à la taille
--- d'une fenêtre rangée seule : la zone utile de son écran (sous la barre et les panneaux réservés) moins la marge des
--- fenêtres (FENETRES_MARGE). Placé ici, à l'ouverture : la zone réservée n'est connue qu'à ce moment-là, et une fenêtre
--- maximisée par Hyprland n'aurait pas les marges.
+-- ── Cockpit JARVIS et fenêtre des réglages ─────────────────────────────────
+-- Des fenêtres classiques (règles jarvis-cockpit et nc-reglages-fenetre : flottantes, bordure et arrondi de Hyprland)
+-- à la place et à la taille d'une fenêtre rangée seule : la zone utile de leur écran (sous la barre et les panneaux
+-- réservés) moins la marge des fenêtres (FENETRES_MARGE). Placées ici, à l'ouverture : la zone réservée n'est connue
+-- qu'à ce moment-là, et une fenêtre maximisée par Hyprland n'aurait pas les marges.
 hl.on("window.open", function(w)
-    if not w or not w.floating or (w.title or w.initial_title) ~= "JARVIS" then return end
+    if not w or not w.floating or not PLEINE_PLACE[w.title or w.initial_title or ""] then return end
     local m = w.monitor or hl.get_active_monitor()
     local mx, my, lw, lh = ecran(w)
     if not (m and lw) then return end

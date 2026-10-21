@@ -30,7 +30,7 @@ elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class FenetreReglages(unittest.TestCase):
-    def executer(self, scenario):
+    def executer(self, scenario, evenements=False):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
@@ -38,13 +38,14 @@ class FenetreReglages(unittest.TestCase):
             (root / "qml/qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
-            (root / "qml/shell.qml").write_text('''import QtQuick
+            (root / "qml/shell.qml").write_text((('import QtTest\n' if evenements else '') + '''import QtQuick
 import Quickshell
 ShellRoot {
  id:racine
  property int etape:0
  property bool dansEtape:false
  property var fen:null
+ // TEST_INPUT
  function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
  function creer(){var c=Qt.createComponent("Parametres.qml");verifier(c.status===Component.Ready,c.errorString());fen=c.createObject(racine);verifier(fen!==null,"création");fen.afficher(Quickshell.screens[0].name)}
@@ -56,7 +57,7 @@ ShellRoot {
  }finally{racine.dansEtape=false}
  }}
  Timer {interval:9000;running:true;onTriggered:Qt.exit(9)}
-}''')
+}''').replace('// TEST_INPUT', 'TestCase {id:clavier;name:"Reglages";when:false}' if evenements else ''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"), XDG_CACHE_HOME=str(root / "cache"))
             env.pop("WAYLAND_DISPLAY", None)
             r = subprocess.run(["qs", "--no-color", "-p", str(root / "qml/shell.qml")], env=env, text=True, capture_output=True, timeout=12)
@@ -88,6 +89,19 @@ if(etape===4){fen.close();verifier(!fen.visible,"fermeture");Qt.quit()}
         sets = [a for a in appels if a[0] in ("set", "reset")]
         self.assertEqual(sets, [["set", "GESTES", "non"], ["set", "SOURIS_VITESSE", "5"], ["reset", "GESTES"]])
         self.assertGreaterEqual(sum(1 for a in appels if a[0] == "catalogue"), 3, "le catalogue est relu après les écritures")
+
+    def test_tout_au_clavier(self):
+        appels = self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+var liste=trouver(fen.contentItem,"nc-reglages-liste");var champ=trouver(fen.contentItem,"nc-reglages-recherche")
+if(etape===1){verifier(liste!==null&&liste.activeFocus,"la liste n'a pas le focus à l'ouverture");verifier(fen.courant.cle==="SOURIS_VITESSE","première ligne");clavier.keyClick(Qt.Key_Right);etape++;return}
+if(etape===2){verifier(fen.reglage("SOURIS_VITESSE").valeur==="1","→ n'a pas augmenté : "+fen.reglage("SOURIS_VITESSE").valeur);clavier.keyClick(Qt.Key_Down);verifier(fen.courant.cle==="GESTES","↓");clavier.keyClick(Qt.Key_Return);etape++;return}
+if(etape===3){verifier(fen.reglage("GESTES").valeur==="non","Entrée n'a pas basculé");clavier.keyClick(Qt.Key_Tab);verifier(fen.section==="Fenêtres"&&fen.courant.cle==="FENETRES_FLOU_FORCE","Tab section : "+fen.section);clavier.keyClick(Qt.Key_Left);etape++;return}
+if(etape===4){verifier(fen.reglage("FENETRES_FLOU_FORCE").valeur==="leger","← choix précédent : "+fen.reglage("FENETRES_FLOU_FORCE").valeur);clavier.keyClick(Qt.Key_R);etape++;return}
+if(etape===5){verifier(fen.reglage("FENETRES_FLOU_FORCE").valeur==="normal"&&!fen.reglage("FENETRES_FLOU_FORCE").modifie,"r : valeur de la config");clavier.keyClick(Qt.Key_G);verifier(champ.activeFocus&&champ.text==="g"&&fen.visibles.length===1&&fen.visibles[0].cle==="GESTES","une lettre lance la recherche : "+champ.text+" / "+fen.visibles.length);clavier.keyClick(Qt.Key_Escape);verifier(fen.recherche===""&&fen.visible,"Échap vide la recherche sans fermer");clavier.keyClick(Qt.Key_Escape);verifier(!fen.visible,"second Échap ferme");Qt.quit()}
+''', evenements=True)
+        self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [["set", "SOURIS_VITESSE", "1"], ["set", "GESTES", "non"], ["set", "FENETRES_FLOU_FORCE", "leger"], ["reset", "FENETRES_FLOU_FORCE"]])
 
 
 if __name__ == "__main__":
