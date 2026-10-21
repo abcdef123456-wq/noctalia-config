@@ -98,11 +98,27 @@ class Sessions(unittest.TestCase):
         self.assertIn("kitty --directory", a)
         # La fenêtre de mise à jour de Discord, puis la vraie : toutes deux sur le bureau 3 ; la règle temporaire posée puis retirée
         self.assertIn("dispatch hl.dsp.window.move({ workspace = 3, follow = false, window = 'address:0xmaj' })", a)
-        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = true, match = { class = [[^(discord)$]] }, workspace = '3 silent' })", a)
-        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = false,", a)
+        import re
+        pose = re.search(r"eval hl.window_rule\(\{ name = '(nc-session-\d+-1)', enabled = true, match = \{ class = \[\[\^\(discord\)\$\]\] \}, workspace = '3 silent' \}\)", a)
+        self.assertTrue(pose, "règle nommée pour cette ouverture seulement (pid-numéro)")
+        self.assertIn(f"eval hl.window_rule({{ name = '{pose[1]}', enabled = false,", a)
         self.assertLess(a.index("enabled = true"), a.index("launch discord"), "la règle avant le lancement")
         l = json.loads(self.lancer("liste", "--json").stdout)
         self.assertEqual((l[0]["nom"], l[0]["fenetres"]), ("Dev", 3))
+
+    def test_regles_retirees_meme_si_le_lancement_echoue(self):
+        """Revue SESSION-01 : une erreur de lancement laissait la règle temporaire active (toute fenêtre de l'appli
+        partait ensuite sur son bureau)."""
+        self.clients(client("0xb", "discord", 3))
+        self.assertEqual(self.lancer("enregistrer", "Jeu").returncode, 0)
+        self.clients()
+        (self.home / ".local/bin/nc-apps").write_text("#!/bin/sh\n[ \"$1\" = list ] && echo '[]' || exit 1\n")
+        os.remove(self.home / ".local/bin/kitty")
+        # nc-apps en échec, et plus aucun moyen de lancer : l'ouverture échoue, la règle est quand même retirée
+        r = self.lancer("ouvrir", "Jeu")
+        a = self.appels()
+        self.assertIn("enabled = true", a, r.stderr)
+        self.assertIn("enabled = false", a, "règle retirée malgré l'échec")
 
     def test_terminal_deja_ouvert_et_plein_ecran(self):
         dossier = self.home / "projet"; dossier.mkdir()

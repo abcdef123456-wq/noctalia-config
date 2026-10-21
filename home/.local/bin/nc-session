@@ -229,16 +229,35 @@ def placer(adresse, e):
 def regle(n, classe, bureau, active=True):
     """Règle Hyprland nommée, le temps de la réouverture : toute fenêtre de cette appli (écran de chargement, fenêtre de
     mise à jour, puis la vraie) s'ouvre directement sur son bureau, sans passer par le bureau affiché. Désactivée à la
-    fin (même nom, enabled = false), sans recharger Hyprland."""
+    fin (même nom, enabled = false), sans recharger Hyprland. n : nom propre à cette ouverture (« pid-numéro »), jamais
+    partagé avec une autre."""
     motif = "^(" + re.escape(classe) + ")$"
     if "]]" in motif:
         return False
     lua = (f"hl.window_rule({{ name = 'nc-session-{n}', enabled = {'true' if active else 'false'}, "
            f"match = {{ class = [[{motif}]] }}, workspace = '{int(bureau)} silent' }})")
-    return subprocess.run(["hyprctl", "eval", lua], capture_output=True, timeout=5).returncode == 0
+    try:
+        return subprocess.run(["hyprctl", "eval", lua], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def ouvrir(nom, delai=None):
+    """Une ouverture à la fois : deux à la fois se disputeraient les mêmes fenêtres (revue SESSION-01)."""
+    import fcntl
+    verrou = open(Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "nc-session.lock", "a")
+    try:
+        fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        verrou.close()
+        raise Erreur(T("Une session est déjà en train de s'ouvrir.", "A session is already opening.")) from None
+    try:
+        return _ouvrir(nom, delai)
+    finally:
+        verrou.close()
+
+
+def _ouvrir(nom, delai):
     delai = float(os.environ.get("NC_SESSION_DELAI", 30)) if delai is None else delai     # attente des fenêtres (s)
     try:
         s = json.loads(fichier(nom).read_text())
@@ -265,9 +284,18 @@ def ouvrir(nom, delai=None):
     # fenêtres, écran de chargement compris, apparaissent directement sur leur bureau
     classes = [e["classe"] for e in lances]
     regles = []
-    for n, e in enumerate(lances):
-        if "terminal" not in e and classes.count(e["classe"]) == 1 and regle(n, e["classe"], e["bureau"]):
-            regles.append((n, e))
+    try:
+        for n, e in enumerate(lances):
+            if "terminal" not in e and classes.count(e["classe"]) == 1 and regle(f"{os.getpid()}-{n}", e["classe"], e["bureau"]):
+                regles.append((f"{os.getpid()}-{n}", e))
+        return attendre(fenetres, lances, avant, delai)
+    finally:
+        # Même après une erreur (lancement, Hyprland qui ne répond plus) : chaque règle posée est retirée, chacune à part
+        for n, e in regles:
+            regle(n, e["classe"], e["bureau"], active=False)
+
+
+def attendre(fenetres, lances, avant, delai):
     for e in lances:
         lancer(e)
     # Jusqu'à la fin du délai, chaque nouvelle fenêtre d'une appli lancée est placée (pas seulement la première :
@@ -292,8 +320,6 @@ def ouvrir(nom, delai=None):
             placer(c["address"], e)
         if all(places.values()) and time.time() - derniere > calme:
             break                                       # tout est là, et plus rien ne s'ouvre : inutile d'attendre
-    for n, e in regles:
-        regle(n, e["classe"], e["bureau"], active=False)
     manquantes = sum(1 for e in lances if not places[id(e)])
     return len(fenetres) - manquantes, manquantes
 
