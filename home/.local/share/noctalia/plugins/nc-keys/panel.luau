@@ -29,7 +29,10 @@ local KEYS_CMD = noctalia.expandPath("~/.local/bin/nc-keys")
 local FADE_MS = 150
 
 -- Taille : dessinée pour un écran de 1600 x 1000 points, réduite sur un écran plus petit (jamais agrandie)
+-- La fiche tient toujours dans l'écran : si ses colonnes (descriptions sur deux lignes comprises) sont plus hautes que la
+-- place sous la barre, tout est réduit d'autant (render) ; jamais sous 0,55
 local Z = 1
+local ECRAN_H = 1000
 local function px(v) return math.floor(v * Z + 0.5) end
 local function setZoom()
   local name, out = noctalia.focusedOutputName(), nil
@@ -38,8 +41,12 @@ local function setZoom()
   end
   out = out or noctalia.outputs()[1]
   Z = out and math.max(0.6, math.min(1, out.width / 1600, out.height / 1000)) or 1
+  ECRAN_H = out and out.height or 1000
 end
 local COL_W, KEY_W, ROW_H, TITLE_H, SEC_GAP = 490, 220, 30, 34, 22
+local function tailles()
+  COL_W, KEY_W, ROW_H, TITLE_H, SEC_GAP = px(490), px(220), px(30), px(34), px(22)
+end
 local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
 -- Sections par colonne (titres produits par nc-keys)
 local COLUMNS = {
@@ -104,12 +111,24 @@ local function column(titles)
   return ui.column({ width = COL_W, height = h, align = "stretch", gap = 0 }, kids), h
 end
 
-function render()
+local function colonnes()
   local cols, maxH = {}, 0
   for _, titles in ipairs(COLUMNS) do
     local c, h = column(titles)
     table.insert(cols, c)
     if h > maxH then maxH = h end
+  end
+  return cols, maxH
+end
+
+function render()
+  local cols, maxH = colonnes()
+  -- Place sous la barre (et les marges du panneau) : trop haute, la fiche est réduite pour y tenir
+  local dispo = ECRAN_H - 120
+  if maxH > dispo and Z > 0.55 then
+    Z = math.max(0.55, Z * dispo / maxH)
+    tailles()
+    cols, maxH = colonnes()
   end
   local ease = 1 - (1 - appear) * (1 - appear)
   local body
@@ -118,6 +137,8 @@ function render()
     maxH = 40
   else
     body = ui.row({ gap = px(24), align = "start", height = maxH }, cols)
+    -- Même réduite au plus petit, encore trop haute (petit écran, beaucoup de raccourcis) : elle défile à la molette
+    if maxH > dispo then body = ui.scroll({ height = dispo, gap = 0 }, { body }) end
   end
   panel.render(ui.column({ flexGrow = 1, align = "center", justify = "center", paddingH = px(32), paddingV = px(28), opacity = ease }, { body }))
 end
@@ -147,7 +168,7 @@ end
 function onOpen()
   EN = langue() == "en"
   setZoom()
-  COL_W, KEY_W, ROW_H, TITLE_H, SEC_GAP = px(490), px(220), px(30), px(34), px(22)
+  tailles()
   appear = 0
   ticking = true
   if noctalia.fileExists(ECO) then appear = 1; ticking = false end
