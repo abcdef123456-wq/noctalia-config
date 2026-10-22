@@ -2578,6 +2578,10 @@ def action_raccourci(d):
         return rc.retablir_ids([str(i) for i in d["origs"]])
     if a == "retirer" and isinstance(d.get("mien"), str) and d["mien"]:
         return rc.retirer_ajout(d["mien"])
+    if a == "renommer" and isinstance(d.get("mien"), str) and d["mien"] and isinstance(d.get("nom"), str):
+        return rc.renommer_ajout(d["mien"], d["nom"])
+    if a == "ajouter" and isinstance(d.get("touches"), str) and isinstance(d.get("cible"), str) and d["cible"].strip():
+        return rc.cmd_add(d["touches"], d["cible"].strip(), str(d.get("nom") or "").strip())
     raise ValueError(T("action de raccourci invalide", "invalid shortcut action"))
 
 

@@ -31,7 +31,7 @@ FloatingWindow {
     property string message: ""
     property bool erreur: false
     property var file: []                           // écritures en attente : des commandes nc-reglages, une par une
-    property var capture: null                      // le raccourci dont on attend les nouvelles touches
+    readonly property var capture: Raccourcis.capture   // le raccourci dont on attend les nouvelles touches (Raccourcis.qml)
     property string captureMessage: ""
     property bool ileOuverte: false                 // l'île est ouverte (shell.qml) : Échap la ferme d'abord
     signal fermerIle()
@@ -100,9 +100,13 @@ FloatingWindow {
         if (!r || !Array.isArray(r.commande) || !r.commande.length) return
         Quickshell.execDetached([bin + r.commande[0]].concat(r.commande.slice(1)))
     }
-    // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — nc-reglages raccourci JSON
-    function raccourci(r, action, touches) {
-        commande(["raccourci", JSON.stringify({action: action, ids: r.ids, origs: r.origs, nom: r.nom, mien: r.mien, touches: touches || ""})])
+    // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — la logique commune (Raccourcis.qml),
+    // partagée avec la fiche Super + /
+    function raccourci(r, action, touches) { Raccourcis.raccourci(r, action, touches) }
+    Connections {
+        target: Raccourcis
+        function onEcrit() { if (Raccourcis.message) { fen.message = Raccourcis.message; fen.erreur = Raccourcis.erreur }; fen.charger() }
+        function onCaptureFinie() { if (fen.visible) liste.forceActiveFocus() }
     }
     // r ou ↺ : la valeur de la config (réglage), ou le raccourci d'origine / réactivé
     function remettreLigne(r) {
@@ -119,42 +123,12 @@ FloatingWindow {
     }
     // Capture des nouvelles touches d'un raccourci : Hyprland en mode « nc-capture » (sans raccourcis, 20 s au plus)
     function capturer(r) {
-        if (!r || !r.modifiable) return
-        capture = r; captureMessage = ""
-        Quickshell.execDetached([bin + "nc-reglages", "capture"])
+        if (!Raccourcis.capturer(r)) return
+        captureMessage = ""
         zoneCapture.forceActiveFocus()
     }
-    function finCapture(touches) {
-        var r = capture
-        capture = null
-        Quickshell.execDetached([bin + "nc-reglages", "capture", "fin"])
-        liste.forceActiveFocus()
-        if (r && touches) raccourci(r, "changer", touches)
-    }
-    // Une touche du clavier -> « Super+Maj+T » (noms de nc-raccourci) ; "" pour un modificateur seul ; "annuler" pour Échap
-    function combinaison(event) {
-        var k = event.key
-        if ([Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_Super_L, Qt.Key_Super_R, Qt.Key_AltGr, Qt.Key_CapsLock].indexOf(k) >= 0) return ""
-        var mods = []
-        if (event.modifiers & Qt.MetaModifier) mods.push("Super")
-        if (event.modifiers & Qt.ControlModifier) mods.push("Ctrl")
-        if (event.modifiers & Qt.AltModifier) mods.push("Alt")
-        if (event.modifiers & Qt.ShiftModifier) mods.push("Maj")
-        if (k === Qt.Key_Escape && !mods.length) return "annuler"
-        var t = "", sc = event.nativeScanCode
-        var noms = {}
-        noms[Qt.Key_Return] = "Entrée"; noms[Qt.Key_Enter] = "Entrée"; noms[Qt.Key_Space] = "Espace"; noms[Qt.Key_Tab] = "Tab"
-        noms[Qt.Key_Escape] = "Échap"; noms[Qt.Key_Print] = "Impr"; noms[Qt.Key_Delete] = "Suppr"
-        noms[Qt.Key_Left] = "gauche"; noms[Qt.Key_Right] = "droite"; noms[Qt.Key_Up] = "haut"; noms[Qt.Key_Down] = "bas"
-        if (sc >= 10 && sc <= 19) t = String((sc - 9) % 10)           // rangée des chiffres, quelle que soit la disposition
-        else if (k >= Qt.Key_A && k <= Qt.Key_Z) t = String.fromCharCode(k)
-        else if (k >= Qt.Key_0 && k <= Qt.Key_9) t = String.fromCharCode(k)
-        else if (k >= Qt.Key_F1 && k <= Qt.Key_F12) t = "F" + (k - Qt.Key_F1 + 1)
-        else t = noms[k] || ""
-        if (!t) return "?"
-        if (!mods.length && !/^F\d+$/.test(t)) return "?"
-        return mods.concat([t]).join("+")
-    }
+    function finCapture(touches) { Raccourcis.finCapture(touches) }
+    function combinaison(event) { return Raccourcis.combinaison(event) }   // Raccourcis.qml
     function reglage(cle) { for (var i = 0; i < catalogue.length; i++) if (catalogue[i].cle === cle) return catalogue[i]; return null }
     function borner(r, v) { v = Math.round(v / r.pas) * r.pas; return Math.max(r.mini, Math.min(r.maxi, v)) }
     // ← → : la valeur d'après (d = 1) ou d'avant (d = -1), selon le genre du réglage
@@ -531,7 +505,6 @@ FloatingWindow {
                 }
                 Keys.onShortcutOverride: event => { event.accepted = true }
             }
-            Timer { running: !!fen.capture; interval: 20000; onTriggered: fen.finCapture("") }   // comme le retour automatique de Hyprland
         }
 
         // ── Pied : message de la dernière action ──

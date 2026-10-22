@@ -480,6 +480,19 @@ def retirer_ajout(bind):
     return T("Retiré", "Removed")
 
 
+def renommer_ajout(bind, nom):
+    """Le nom affiché d'un de tes raccourcis (fiche Super + /, mode Modifier)."""
+    nom = re.sub(r"[\t\n\r]", " ", str(nom)).strip()[:80]
+    if not nom:
+        raise Refus(T("nom vide", "empty name"))
+    old = read_conf()
+    if not any(e[0] == "ajout" and e[1] == bind for e in old):
+        raise Refus(T("raccourci introuvable", "shortcut not found"))
+    new = [(e[:4] + [nom] if e[0] == "ajout" and e[1] == bind else e) for e in old]
+    reload_or_rollback_after(old, new)
+    return T(f"Renommé : {nom}", f"Renamed: {nom}")
+
+
 def cmd_restore(keys):
     old = read_conf()
     if keys in ("tout", "tous", "all"):
