@@ -31,6 +31,23 @@ async function appliquer() {
 browser.management.onEnabled.addListener((e) => { if (e.type === "theme") appliquer(); });
 browser.management.onDisabled.addListener((e) => { if (e.type === "theme") appliquer(); });
 
+// Au démarrage, Firefox pose son propre thème après nous et la palette était perdue jusqu'au fond d'écran suivant
+// (revue EXT-01) : quand un thème qui n'est pas le nôtre arrive sur un thème de base, on réapplique. Pas de boucle :
+// le nôtre est reconnu, reset() n'arrive que hors des thèmes de base, et au plus 5 reprises par 10 s.
+let reprises = [];
+browser.theme.onUpdated.addListener(async ({ theme: t }) => {
+  if (!palette) return;
+  const actif = await themeActif();
+  const eligible = actif === SYSTEME || actif === (palette.sombre !== false ? SOMBRE : CLAIR);
+  const nous = t && t.colors && t.colors.frame === couleur(palette, "fond", "#1c1b22");
+  const maintenant = Date.now();
+  reprises = reprises.filter((x) => maintenant - x < 10000);
+  if (eligible && !nous && reprises.length < 5) {
+    reprises.push(maintenant);
+    setTimeout(appliquer, 300);
+  }
+});
+
 function couleur(p, cle, sinon) {
   const v = p[cle];
   return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : sinon;

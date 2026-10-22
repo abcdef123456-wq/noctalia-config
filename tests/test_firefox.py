@@ -247,3 +247,50 @@ class Firefox(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(__import__("shutil").which("node"), "Node requis pour les tests JavaScript")
+class ExtensionDemarrage(unittest.TestCase):
+    """Revue EXT-01 : au démarrage, Firefox posait son thème après celui de l'extension (palette perdue jusqu'au fond
+    d'écran suivant). fond.js réapplique quand un thème qui n'est pas le sien arrive, sans boucle."""
+    def test_reapplique_sans_boucle(self):
+        code = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("node:assert/strict");
+const ecouteurs = {}, appels = [];
+let actif = "firefox-compact-dark@mozilla.org";
+const ev = (nom) => ({ addListener: (f) => { ecouteurs[nom] = f; } });
+const port = { onMessage: ev("message"), onDisconnect: ev("deconnexion"), postMessage: () => {} };
+const browser = {
+  runtime: { connectNative: () => port },
+  management: { getAll: async () => [{ type: "theme", enabled: true, id: actif }], onEnabled: ev("on"), onDisabled: ev("off") },
+  theme: { update: (t) => appels.push(["update", t.colors.frame]), reset: () => appels.push(["reset"]), onUpdated: ev("maj") },
+};
+const minuteurs = [];
+vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), { browser, setTimeout: (f) => minuteurs.push(f), Date, console });
+const attendre = async () => { for (let i = 0; i < 20; i++) { await new Promise((r) => setImmediate(r)); while (minuteurs.length) await minuteurs.shift()(); } };
+(async () => {
+  ecouteurs.message({ palette: { fond: "#1c1d21", texte: "#eeeeee", sombre: true } });
+  await attendre();
+  assert.deepEqual(appels, [["update", "#1c1d21"]]);
+  // Firefox pose son thème par-dessus (démarrage) : réappliqué
+  await ecouteurs.maj({ theme: { colors: { frame: "#2b2a33" } } }); await attendre();
+  assert.deepEqual(appels.at(-1), ["update", "#1c1d21"]);
+  const n = appels.length;
+  // Le nôtre : rien
+  await ecouteurs.maj({ theme: { colors: { frame: "#1c1d21" } } }); await attendre();
+  assert.equal(appels.length, n);
+  // Un thème choisi (Alpenglow) : reset, puis son onUpdated vide ne relance rien
+  actif = "alpenglow@mozilla.org";
+  ecouteurs.off({ type: "theme" }); await attendre();
+  assert.deepEqual(appels.at(-1), ["reset"]);
+  await ecouteurs.maj({ theme: {} }); await attendre();
+  assert.deepEqual(appels.at(-1), ["reset"]);
+  // Un Firefox qui réécrirait sans fin : au plus 5 reprises par 10 s
+  actif = "firefox-compact-dark@mozilla.org";
+  const m = appels.length;
+  for (let i = 0; i < 20; i++) { await ecouteurs.maj({ theme: { colors: { frame: "#000000" } } }); await attendre(); }
+  assert.ok(appels.length - m <= 5, String(appels.length - m));
+})().catch((e) => { console.error(e); process.exit(1); });
+'''
+        r = subprocess.run(["node", "-e", code, str(SOURCE / "extension/fond.js")], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0, r.stderr)
