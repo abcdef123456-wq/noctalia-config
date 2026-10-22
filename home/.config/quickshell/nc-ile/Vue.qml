@@ -340,10 +340,16 @@ PanelWindow {
         }
         Component.onCompleted: placerDepart()
         onCourantChanged: if (!glisse) pos = courant
-        // Aux doigts, une courte animation lisse les saccades entre deux évènements du pavé tactile
+        // L'arrivée sur un bureau : une animation. Aux doigts, la position suit la cible image par image (lissage
+        // exponentiel, à la cadence de l'écran) : une animation relancée à chaque évènement du pavé tactile repartait
+        // à pleine vitesse à chaque fois et faisait trembler le cube (revue PERF-03)
         Behavior on pos {
-            enabled: zone.pret
-            NumberAnimation { duration: zone.glisse ? 90 : zone.duree; easing.type: zone.glisse ? Easing.OutQuad : Easing.InOutCubic }
+            enabled: zone.pret && !zone.glisse
+            NumberAnimation { duration: zone.duree; easing.type: Easing.InOutCubic }
+        }
+        FrameAnimation {
+            running: zone.glisse
+            onTriggered: zone.pos += (zone.cible - zone.pos) * (1 - Math.exp(-frameTime / 0.035))
         }
         // Pas de bureau d'un côté (le premier, le dernier) : l'ensemble se décale vers ce côté, pas de vide inutile
         // Pendant un glisser, un nouveau bureau apparaît du côté où il n'y en a pas (à gauche, s'il reste un numéro libre)
@@ -407,8 +413,7 @@ PanelWindow {
             amorceHorizontale = 0
             if (!glisse) { depart = courant; cible = pos; glisse = true }
             cible = Math.max(-0.3, Math.min(v.bureaux.length - 0.7, cible - dx / (fw * 0.8)))
-            pos = cible
-            finGlisse.restart()
+            finGlisse.restart()                          // la position suit la cible (FrameAnimation)
         }
         WheelHandler {
             orientation: Qt.Horizontal

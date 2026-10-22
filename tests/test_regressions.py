@@ -439,8 +439,9 @@ ShellRoot {
   for(var i=0;i<5;i++)zone.defilerHorizontal(pixel(-1,0))
   verifier(!zone.glisse&&zone.pos===0,"La petite dérive horizontale ne doit pas bouger le bureau")
  }}
- Timer {interval:510;running:true;onTriggered:{verifier(zone.amorceHorizontale===0,"Purger la dérive inactive");zone.defilerHorizontal(pixel(-25,1))}}
- Timer {interval:560;running:true;onTriggered:{verifier(zone.glisse&&zone.pos>0,"Un vrai geste horizontal doit fonctionner")}}
+ Timer {interval:510;running:true;onTriggered:{verifier(zone.amorceHorizontale===0,"Purger la dérive inactive");zone.defilerHorizontal(pixel(-25,1))
+  verifier(zone.pos===0&&zone.cible>0,"PERF-03 : la position suit la cible image par image, sans saut")}}
+ Timer {interval:560;running:true;onTriggered:{verifier(zone.glisse&&zone.pos>0&&zone.pos<=zone.cible,"Un vrai geste horizontal doit fonctionner")}}
  Timer {interval:1150;running:true;onTriggered:{verifier(!zone.glisse&&zone.pos===zone.courant,"Fin du geste incorrecte");Qt.quit()}}
 ''')
 
