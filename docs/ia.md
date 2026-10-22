@@ -81,7 +81,14 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
 - **Fichiers** : clic droit → Scripts → IA (Nautilus), le sous-menu IA de Dolphin ou les actions de Nemo : résumer,
   expliquer, traduire, corriger un texte, du code, un PDF (avec pdftotext) ou une image ; `nc-ia fichier CHEMIN`.
 - **Neovim** : `Espace i i` demander (avec les lignes choisies en contexte), en visuel `Espace i e` expliquer,
-  `Espace i t` transformer selon une consigne, `Espace i c` corriger (annulable avec `u`). `Espace a` reste Claude Code.
+  `Espace i t` transformer selon une consigne, `Espace i c` corriger (annulable avec `u` ; un échec de l'IA ne touche
+  à rien). Les demandes s'écrivent dans une fenêtre où tout se voit et où l'on colle (`p`, `Ctrl + R "`) : `Ctrl + S`
+  envoie, `q` annule, `Ctrl + P` / `Ctrl + N` rappellent les 20 dernières. La réponse : `y` copie, `i` insère, `q` ferme.
+  `Espace i f` fait la tâche décrite (la sélection, ou ce qu'on tape) avec le fichier en contexte : le code s'ouvre dans
+  un aperçu, `a` l'ajoute dessous, `r` remplace la sélection, `y` le copie ; rien n'est remplacé d'office.
+  `Espace i a` ouvre l'agent de l'IA choisie (Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code…) dans un terminal
+  en bas, à la racine du projet, la sélection pour demande ; `Espace i A` pour en choisir un autre parmi les IA
+  disponibles. L'agent garde ses propres demandes de permission. `Espace a` reste Claude Code.
 - **Mises à jour expliquées** : après une mise à jour de la config (`nc-maj`) ou du système, l'IA écrit un rapport
   facile à comprendre (ce qui se voit d'abord, s'il faut redémarrer) en tête de **Mises à jour** dans la fenêtre des
   réglages, avec **Détails** (la liste complète) ; une notification y mène. C'est automatique : sans connexion, sans

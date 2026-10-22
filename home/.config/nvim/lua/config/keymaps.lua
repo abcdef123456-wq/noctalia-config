@@ -32,10 +32,20 @@ map("n", "N", "Nzzzv")
 -- Ctrl + Entrée en insertion : nouvelle ligne en dessous sans couper la ligne courante
 map("i", "<C-CR>", "<Esc>o", { desc = "Nouvelle ligne en dessous" })
 
--- IA du bureau (nc-ia, lua/config/ia.lua) : Espace i… ; en visuel, sur les lignes choisies
+-- IA du bureau (nc-ia, lua/config/ia.lua) : Espace i… ; en visuel, sur les lignes choisies.
+-- Les demandes s'écrivent dans une fenêtre (Ctrl + S envoie, q annule, Ctrl + P / Ctrl + N l'historique).
 local ia = require("config.ia")
+local function visuel(f)
+  return "<Esc><Cmd>lua require('config.ia')." .. f .. "(true)<CR>"
+end
 map("n", "<leader>ii", function() ia.demander(false) end, { desc = "Demander à l'IA" })
-map("x", "<leader>ii", "<Esc><Cmd>lua require('config.ia').demander(true)<CR>", { desc = "Demander à l'IA (sur la sélection)" })
-map("x", "<leader>ie", "<Esc><Cmd>lua require('config.ia').expliquer()<CR>", { desc = "Expliquer la sélection" })
-map("x", "<leader>it", "<Esc><Cmd>lua require('config.ia').transformer()<CR>", { desc = "Transformer la sélection (consigne)" })
-map("x", "<leader>ic", "<Esc><Cmd>lua require('config.ia').corriger()<CR>", { desc = "Corriger la sélection" })
+map("x", "<leader>ii", visuel("demander"), { desc = "Demander à l'IA (sur la sélection)" })
+map("x", "<leader>ie", visuel("expliquer"), { desc = "Expliquer la sélection" })
+map("x", "<leader>it", visuel("transformer"), { desc = "Transformer la sélection (consigne)" })
+map("x", "<leader>ic", visuel("corriger"), { desc = "Corriger la sélection" })
+map("n", "<leader>if", function() ia.faire(false) end, { desc = "Faire une tâche (aperçu avant d'insérer)" })
+map("x", "<leader>if", visuel("faire"), { desc = "Faire la tâche décrite (aperçu avant d'insérer)" })
+map("n", "<leader>ia", function() ia.agent(false) end, { desc = "Agent sur le projet (IA choisie)" })
+map("x", "<leader>ia", visuel("agent"), { desc = "Agent sur le projet, la sélection pour demande" })
+map("n", "<leader>iA", function() ia.choisir_agent(false) end, { desc = "Agent sur le projet (choisir l'IA)" })
+map("x", "<leader>iA", visuel("choisir_agent"), { desc = "Agent sur le projet (choisir l'IA), la sélection pour demande" })

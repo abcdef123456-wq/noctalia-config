@@ -15,8 +15,14 @@ local numeros = nc.reglage("NVIM_NUMEROS", "relatifs")
 vim.opt.number = numeros ~= "aucun"
 vim.opt.relativenumber = numeros == "relatifs"
 
--- Fenêtres flottantes (aide, survol LSP, menus) aux coins arrondis, comme l'île
-vim.opt.winborder = "rounded"
+-- Fenêtres flottantes (aide, survol LSP, menus) aux coins arrondis, comme l'île (option de Neovim 0.11 ;
+-- Debian 13 a la 0.10.4, où elle n'existe pas)
+if vim.fn.has("nvim-0.11") == 1 then
+  vim.opt.winborder = "rounded"
+end
+
+-- Presse-papiers : LazyVim prend déjà celui du système (« unnamedplus », par wl-copy), sauf en SSH où il laisse
+-- passer l'OSC 52 du terminal ; rien à changer ici.
 
 -- Les tabulations et espaces de fin se voient (utile dans les scripts et les .conf)
 vim.opt.list = true
