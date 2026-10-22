@@ -1,8 +1,10 @@
 """Portable à MUX (nc-gpu-mode : Hybride ou Dédiée), propositions de nc-profile-sync aux changements d'alimentation :
-débranché en Dédiée, une notification [Changer de mode] (carte de l'île gpuModeVers hybride, sinon nc-reglages
-mode-graphique) ; branché en Hybride, [Passer en Dédiée] [Non] au plus une fois par jour, plus jamais après trois
-« Non » de suite, rien avec GPU_MUX_PROPOSER=non. nc-gpu-mode n'est lu qu'aux changements, une seule fois. En Dédiée,
-la carte des applis, la question de la session et le guet de la NVIDIA ne font rien.
+débranché en Dédiée, une notification [Changer de mode] [Non] (carte de l'île gpuModeVers hybride, sinon nc-reglages
+mode-graphique), plus jamais après trois « Non » de suite, rien avec GPU_MUX_AVERTIR=non ; branché en Hybride,
+[Passer en Dédiée] [Non] au plus une fois par jour, plus jamais après trois « Non » de suite, rien avec
+GPU_MUX_PROPOSER=non. Deux comptes séparés ; remettre un réglage à « oui » (nc-reglages set) relance son rappel.
+nc-gpu-mode n'est lu qu'aux changements, une seule fois. En Dédiée, la carte des applis, la question de la session et
+le guet de la NVIDIA ne font rien.
 
 Faux gdbus : son « monitor » UPower change l'alimentation du faux /sys (NC_TEST_EVENEMENTS : 0 débranché, 1 branché,
 dans l'ordre), annonce chaque changement, puis ferme le flux (le service sort). Faux nc-gpu-mode, nc-reglages, qs,
@@ -37,6 +39,8 @@ FAUX = {
     "bluetoothctl": "exit 0",
     "nc-gpu-mode": 'echo "nc-gpu-mode $*" >> "@J@"\necho "$NC_TEST_MODE"',
     "nc-reglages": 'echo "nc-reglages $*" >> "@J@"\nexit 0',
+    # Le vrai nc-reglages set (groupe energie) relance le service : jamais le vrai systemctl
+    "systemctl": 'echo "systemctl $*" >> "@J@"\nexit 0',
     # NC_TEST_QS : ok (l'île répond), arretee (aucune île, comme Quickshell : code 255), inconnue (ancienne île),
     # lente (ne répond pas)
     "qs": 'echo "qs $*" >> "@J@"\n'
@@ -110,6 +114,22 @@ class Mux(unittest.TestCase):
     def notifications(self, texte):
         return [n for n in (json.loads(l[len("notify "):]) for l in self.lignes("notify")) if texte in n]
 
+    def etat_vals(self):
+        """Le fichier d'état gpu-mux, ligne par ligne (cle=valeur)."""
+        if not self.etat.exists():
+            return {}
+        return dict(l.split("=", 1) for l in self.etat.read_text().splitlines() if "=" in l)
+
+    def nc_reglages(self, *args):
+        """Le vrai nc-reglages, HOME temporaire (systemctl et hyprctl : les faux)."""
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   XDG_STATE_HOME=str(self.home / "state"))
+        r = subprocess.run(["python3", str(REGLAGES), *args], env=env, capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
     def hier(self):
         """La dernière proposition date d'avant aujourd'hui (le compte des « Non » reste)."""
         t = self.etat.read_text().replace(f"jour={date.today():%Y-%m-%d}", "jour=2000-01-01")
@@ -121,8 +141,10 @@ class Mux(unittest.TestCase):
         n = self.notifications(DEBRANCHE)
         self.assertEqual(len(n), 1, self.journal.read_text())
         self.assertIn("--action=changer=Changer de mode", n[0])
+        self.assertIn("--action=non=Non", n[0])
         self.assertEqual(self.lignes("qs"), ["qs -c nc-ile ipc call ile gpuModeVers hybride"])
         self.assertEqual(self.lignes("nc-reglages"), [], "l'île a répondu : pas de repli")
+        self.assertEqual(self.etat_vals().get("avertir_non"), "0")
 
     def test_debranche_sans_clic_rien_ne_change(self):
         self.lancer("dediee", "0")
@@ -142,6 +164,67 @@ class Mux(unittest.TestCase):
         self.lancer("dediee", "0 1 0")
         self.assertEqual(len(self.notifications(DEBRANCHE)), 2)
         self.assertEqual(self.notifications(BRANCHE), [], "en Dédiée, rien à proposer au branchement")
+
+    def test_trois_non_a_l_avertissement(self):
+        # Plus d'avertissement au débranchement, mais la proposition au branchement continue (compte à part)
+        for i in range(3):
+            self.lancer("dediee", "0", clic="non")
+            self.assertEqual(len(self.notifications(DEBRANCHE)), 1, f"avertissement {i + 1}")
+            self.assertEqual(self.lignes("qs"), [])
+        self.assertEqual(self.etat_vals(), {"avertir_non": "3"})
+        self.lancer("dediee", "0")
+        self.assertEqual(self.lignes("notify"), [])
+        self.assertEqual(self.lignes("nc-gpu-mode"), [], "plus d'avertissement : nc-gpu-mode n'est même pas lu")
+        self.lancer("hybride", "1", secteur=False, clic="non")
+        self.assertEqual(len(self.notifications(BRANCHE)), 1)
+        self.assertEqual(self.etat_vals(), {"avertir_non": "3", "jour": f"{date.today():%Y-%m-%d}", "non": "1"})
+
+    def test_fermee_sans_reponse_ne_compte_pas(self):
+        self.lancer("dediee", "0", clic="non")
+        self.lancer("dediee", "0", clic="")
+        self.assertEqual(self.etat_vals(), {"avertir_non": "1"})
+
+    def test_avertir_non_rien(self):
+        self.reglages("GPU_MUX_AVERTIR=non\n")
+        self.lancer("dediee", "0")
+        self.assertEqual(self.lignes("notify"), [])
+        self.assertEqual(self.lignes("nc-gpu-mode"), [])
+
+    def test_proposer_non_avertit_quand_meme(self):
+        # L'avertissement est une alerte d'autonomie : GPU_MUX_PROPOSER ne le coupe pas
+        self.reglages("GPU_MUX_PROPOSER=non\n")
+        self.lancer("dediee", "0")
+        self.assertEqual(len(self.notifications(DEBRANCHE)), 1)
+
+    def test_remettre_oui_relance(self):
+        auj = f"{date.today():%Y-%m-%d}"
+        self.etat.parent.mkdir(parents=True)
+        self.etat.write_text(f"jour={auj}\nnon=3\navertir_non=3\n")
+        # Déjà « oui » : rien n'est effacé
+        self.nc_reglages("set", "GPU_MUX_AVERTIR", "oui")
+        self.assertEqual(self.etat_vals(), {"jour": auj, "non": "3", "avertir_non": "3"})
+        # GPU_MUX_AVERTIR : non puis oui → son compte seul est effacé, l'avertissement revient
+        self.nc_reglages("set", "GPU_MUX_AVERTIR", "non")
+        self.assertEqual(self.etat_vals(), {"jour": auj, "non": "3", "avertir_non": "3"})
+        self.nc_reglages("set", "GPU_MUX_AVERTIR", "oui")
+        self.assertEqual(self.etat_vals(), {"jour": auj, "non": "3"})
+        self.assertIn("systemctl --user restart nc-profile-sync.service", self.journal.read_text())
+        self.lancer("dediee", "0")
+        self.assertEqual(len(self.notifications(DEBRANCHE)), 1)
+        self.lancer("hybride", "1", secteur=False)
+        self.assertEqual(self.notifications(BRANCHE), [], "la proposition reste muette")
+        # GPU_MUX_PROPOSER : non puis oui → la proposition revient, même aujourd'hui ; le compte de l'avertissement reste
+        self.nc_reglages("set", "GPU_MUX_PROPOSER", "non")
+        self.nc_reglages("set", "GPU_MUX_PROPOSER", "oui")
+        self.assertNotIn("non", self.etat_vals())
+        self.assertNotIn("jour", self.etat_vals())
+        self.lancer("hybride", "1", secteur=False)
+        self.assertEqual(len(self.notifications(BRANCHE)), 1)
+        # Retour à « oui » par reset (la valeur de la config) : même effet
+        self.etat.write_text(f"jour={auj}\nnon=3\n")
+        self.nc_reglages("set", "GPU_MUX_PROPOSER", "non")
+        self.nc_reglages("reset", "GPU_MUX_PROPOSER")
+        self.assertEqual(self.etat_vals(), {})
 
     def test_debranche_en_hybride_rien(self):
         self.lancer("hybride", "0")
@@ -234,6 +317,8 @@ class Dediee(unittest.TestCase):
         texte = REGLAGES.read_text()
         self.assertIn('R("GPU_MUX_PROPOSER", "Énergie"', texte)
         self.assertIn('"GPU_MUX_PROPOSER": "mux"', texte)
+        self.assertIn('R("GPU_MUX_AVERTIR", "Énergie"', texte)
+        self.assertIn('"GPU_MUX_AVERTIR": "mux"', texte)
         self.assertIn('"mux": True in cartes and existe("/sys/class/drm/card*-eDP-*")', texte)
 
 

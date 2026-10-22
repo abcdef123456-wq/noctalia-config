@@ -7,8 +7,9 @@
 # (règle de nc-gpu-regle, réglage GPU_REGLE), et dit pourquoi la NVIDIA reste allumée quand elle devrait dormir
 # (nc-rtx-veille).
 # Portable à MUX (nc-gpu-mode : Hybride ou Dédiée) : en débranchant en mode Dédiée, une notification propose de repasser
-# en Hybride ; en branchant en mode Hybride, elle propose le mode Dédiée (GPU_MUX_PROPOSER). En Dédiée, la carte des
-# applis, la question de la session et le guet de la NVIDIA sont sans objet : tout est déjà sur la NVIDIA.
+# en Hybride (GPU_MUX_AVERTIR) ; en branchant en mode Hybride, elle propose le mode Dédiée (GPU_MUX_PROPOSER). En
+# Dédiée, la carte des applis, la question de la session et le guet de la NVIDIA sont sans objet : tout est déjà sur
+# la NVIDIA.
 # Réglages facultatifs (commande nc-reglages, ~/.config/nc/reglages.conf ; ancien fichier ~/.config/nc-profile.conf
 # encore lu) :
 #   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=max  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
@@ -22,6 +23,9 @@
 #                         niveau d'avant rendu au branchement
 #   GPU_MUX_PROPOSER=oui|non   portable à MUX en mode Hybride : en branchant, proposer le mode Dédiée (une fois par
 #                              jour au plus ; plus jamais après trois « Non » de suite)
+#   GPU_MUX_AVERTIR=oui|non    portable à MUX en mode Dédiée : en débranchant, prévenir que l'autonomie fond et proposer
+#                              le mode Hybride (plus jamais après trois « Non » de suite ; compte à part)
+#   Remettre l'un des deux à « oui » (nc-reglages) efface ses « Non » : le rappel revient.
 # Fréquences : « max » = la plus haute de l'écran interne, « low » = 60 Hz (sinon la plus basse), ou un nombre (ex. 120).
 # Écran, rétroéclairage de l'écran et du clavier : détectés automatiquement.
 set -uo pipefail
@@ -58,6 +62,7 @@ ECO_BLUETOOTH=oui
 BAT_RELEVES=oui
 BAT_CLAVIER=oui
 GPU_MUX_PROPOSER=oui
+GPU_MUX_AVERTIR=oui
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
   [ -r "$f" ] || continue
@@ -69,7 +74,7 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
       PROFIL_SECTEUR|PROFIL_BATTERIE)
         [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
-      ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER|GPU_MUX_PROPOSER) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
+      ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER|GPU_MUX_PROPOSER|GPU_MUX_AVERTIR) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
       *) ;;                                      # autres réglages : pour d'autres parties de la config
     esac
   done < "$f"
@@ -231,7 +236,9 @@ GPU_MODE_CMD="${NC_GPU_MODE_CMD:-${BASH_SOURCE[0]%/*}/nc-gpu-mode}"
 [ -x "$GPU_MODE_CMD" ] || GPU_MODE_CMD="$HOME/.local/bin/nc-gpu-mode"
 REGLAGES_CMD="${NC_REGLAGES_CMD:-${BASH_SOURCE[0]%/*}/nc-reglages}"
 [ -x "$REGLAGES_CMD" ] || REGLAGES_CMD="$HOME/.local/bin/nc-reglages"
-# Propositions au branchement : jour de la dernière, nombre de « Non » de suite (même dossier que dispositions.json)
+# Rappels du MUX (même dossier que dispositions.json), une ligne par valeur : jour= (dernière proposition au
+# branchement), non= (ses « Non » de suite), avertir_non= (les « Non » de suite à l'avertissement du débranchement).
+# nc-reglages efface les lignes d'un rappel quand son réglage repasse à « oui ».
 MUX_ETAT="${XDG_STATE_HOME:-$HOME/.local/state}/noctalia-config/gpu-mux"
 MODE_GPU=""                                     # hybride, dediee ou sans-objet ; vide tant qu'il n'est pas lu
 
@@ -255,32 +262,49 @@ changer_mode_gpu() {
   "$REGLAGES_CMD" mode-graphique >/dev/null 2>&1
 }
 
-# Débranché en mode Dédiée : la NVIDIA porte l'écran et ne dort jamais. Une notification par débranchement. En fond :
-# la boucle D-Bus n'attend pas le clic.
+# Un compte du fichier d'état (0 s'il manque ou s'il est abîmé)
+mux_compte() {
+  local n; n=$(sed -n "s/^$1=//p" "$MUX_ETAT" 2>/dev/null | tail -n 1)
+  [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 0
+}
+
+# mux_noter cle=valeur… : change ces lignes et garde les autres (celles de l'autre rappel) ; fichier remplacé d'un coup
+mux_noter() {
+  local p tmp="$MUX_ETAT.$BASHPID" filtre=()
+  for p; do filtre+=(-e "^${p%%=*}="); done
+  mkdir -p "${MUX_ETAT%/*}" || return 0
+  { grep -v "${filtre[@]}" "$MUX_ETAT" 2>/dev/null; printf '%s\n' "$@"; } > "$tmp" && mv -f "$tmp" "$MUX_ETAT"
+}
+
+# Débranché en mode Dédiée : la NVIDIA porte l'écran et ne dort jamais. Une notification par débranchement
+# (GPU_MUX_AVERTIR), plus jamais après trois « Non » de suite (une notification fermée sans réponse ne compte pas).
+# En fond : la boucle D-Bus n'attend pas le clic. Les « Non » sont relus à la réponse (nc-reglages a pu les effacer
+# entre-temps) ; même chose au branchement.
+mux_avertissable() { [ "$GPU_MUX_AVERTIR" = oui ] && [ "$(mux_compte avertir_non)" -lt 3 ]; }
+
 mux_debranche() {
   (
     choix="$(notify-send -a "$(t "Énergie" "Power")" -i battery-caution -t 20000 \
-      --action=changer="$(t "Changer de mode" "Switch mode")" \
+      --action=changer="$(t "Changer de mode" "Switch mode")" --action=non="$(t "Non" "No")" \
       "$(t "Mode Dédiée sur batterie" "Discrete mode on battery")" \
       "$(t "Sur batterie en mode Dédiée : la carte NVIDIA reste allumée, l'autonomie fond. Repasser en mode Hybride ?" \
            "On battery in Discrete mode: the NVIDIA GPU stays on and the battery drains fast. Switch back to Hybrid mode?")" 2>/dev/null)"
-    [ "$choix" = changer ] && changer_mode_gpu hybride
+    case "$choix" in
+      changer) mux_noter avertir_non=0; changer_mode_gpu hybride ;;
+      non) mux_noter "avertir_non=$(( $(mux_compte avertir_non) + 1 ))" ;;
+    esac
   ) &
 }
 
 # Branché en mode Hybride : proposer le mode Dédiée (GPU_MUX_PROPOSER), au plus une fois par jour, plus jamais après
 # trois « Non » de suite (une notification fermée sans réponse ne compte pas). Le jour est noté dès la proposition.
-mux_non() { local n; n=$(sed -n 's/^non=//p' "$MUX_ETAT" 2>/dev/null); [[ "$n" =~ ^[0-9]+$ ]] && echo "$n" || echo 0; }
-
 mux_proposable() {
   [ "$GPU_MUX_PROPOSER" = oui ] || return 1
-  [ "$(mux_non)" -lt 3 ] && [ "$(sed -n 's/^jour=//p' "$MUX_ETAT" 2>/dev/null)" != "$(date +%F)" ]
+  [ "$(mux_compte non)" -lt 3 ] && [ "$(sed -n 's/^jour=//p' "$MUX_ETAT" 2>/dev/null)" != "$(date +%F)" ]
 }
 
 mux_branche() {
-  local auj non
-  auj=$(date +%F); non=$(mux_non)
-  mkdir -p "${MUX_ETAT%/*}" && printf 'jour=%s\nnon=%s\n' "$auj" "$non" > "$MUX_ETAT"
+  mux_noter "jour=$(date +%F)" "non=$(mux_compte non)"
   (
     choix="$(notify-send -a "$(t "Énergie" "Power")" -i video-display -t 20000 \
       --action=dediee="$(t "Passer en Dédiée" "Switch to Discrete")" --action=non="$(t "Non" "No")" \
@@ -288,15 +312,17 @@ mux_branche() {
       "$(t "Branché : passer en mode Dédiée pour un bureau plus fluide ?" \
            "Plugged in: switch to Discrete mode for a smoother desktop?")" 2>/dev/null)"
     case "$choix" in
-      dediee) printf 'jour=%s\nnon=0\n' "$auj" > "$MUX_ETAT"; changer_mode_gpu dediee ;;
-      non) printf 'jour=%s\nnon=%s\n' "$auj" "$((non + 1))" > "$MUX_ETAT" ;;
+      dediee) mux_noter non=0; changer_mode_gpu dediee ;;
+      non) mux_noter "non=$(( $(mux_compte non) + 1 ))" ;;
     esac
   ) &
 }
 
-# Seulement quand l'alimentation vient de changer (1 : débranché, 0 : branché)
+# Seulement quand l'alimentation vient de changer (1 : débranché, 0 : branché). Rappel coupé ou trois « Non » : pas même
+# une lecture de nc-gpu-mode.
 mux_alimentation() {
   if [ "$1" = 1 ]; then
+    mux_avertissable || return 0
     en_dediee && mux_debranche
   else
     mux_proposable || return 0

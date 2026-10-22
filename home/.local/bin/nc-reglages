@@ -753,9 +753,17 @@ REGLAGES = [
     R("GPU_MUX_PROPOSER", "Énergie", L("Proposer le mode Dédiée en branchant", "Offer Discrete mode when plugging in"),
       "ouinon", "oui",
       L("En mode Hybride, quand tu branches le chargeur : une notification propose le mode Dédiée (bureau plus fluide), "
-        "une fois par jour au plus. Après trois « Non » de suite, elle ne revient plus.",
+        "une fois par jour au plus. Après trois « Non » de suite, elle ne revient plus (remettre « Oui » la relance).",
         "In Hybrid mode, when you plug in the charger: a notification offers Discrete mode (smoother desktop), at most "
-        "once a day. After three \"No\" in a row, it stops."), groupe="energie"),
+        "once a day. After three \"No\" in a row, it stops (turning this back on restarts it)."), groupe="energie"),
+    R("GPU_MUX_AVERTIR", "Énergie", L("Prévenir en débranchant en mode Dédiée", "Warn when unplugging in Discrete mode"),
+      "ouinon", "oui",
+      L("En mode Dédiée, quand tu débranches le chargeur : une notification prévient que la carte NVIDIA reste allumée "
+        "(l'autonomie fond) et propose le mode Hybride. Après trois « Non » de suite, elle ne revient plus (remettre "
+        "« Oui » la relance).",
+        "In Discrete mode, when you unplug the charger: a notification warns that the NVIDIA card stays on (the battery "
+        "drains fast) and offers Hybrid mode. After three \"No\" in a row, it stops (turning this back on restarts it)."),
+      groupe="energie"),
     # Son et luminosité
     R("VOLUME_PAS", "Son et luminosité", L("Pas du volume", "Volume step"), "entier", "5",
       L("Touches de volume (et F2, F3).", "Volume keys (and F2, F3)."), mini=1, maxi=20, unite="%", groupe="hypr"),
@@ -1196,7 +1204,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
-    "GPU_MUX_PROPOSER": "mux",
+    "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
@@ -1378,7 +1386,33 @@ def lire():
     return vals
 
 
+# Rappels qui se taisent après trois « Non » de suite (nc-profile-sync, fichier d'état gpu-mux) : le réglage qui les
+# coupe, et ses lignes dans le fichier d'état. Le réglage repasse de « non » à « oui » : ses lignes sont effacées, le
+# rappel revient (une fois par jour au plus pour la proposition au branchement, comme avant).
+RAPPELS = {"GPU_MUX_PROPOSER": ("jour", "non"), "GPU_MUX_AVERTIR": ("avertir_non",)}
+
+
+def relancer_rappels(avant, apres):
+    effacer = [l for cle, lignes in RAPPELS.items()
+               if valeur(avant, cle) == "non" and valeur(apres, cle) == "oui" for l in lignes]
+    if not effacer:
+        return
+    etat = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"),
+                        "noctalia-config/gpu-mux")
+    try:
+        with open(etat, encoding="utf-8") as f:
+            garder = [l for l in f if l.split("=", 1)[0] not in effacer]
+        with open(etat + ".tmp", "w", encoding="utf-8") as f:
+            f.writelines(garder)
+        os.replace(etat + ".tmp", etat)
+    except OSError:
+        pass                                     # pas de fichier d'état : rien à effacer
+
+
 def ecrire(vals):
+    # Seul chemin d'écriture (regler : écran, fenêtre graphique, set ; reset) : l'ancien fichier sert à voir quels
+    # rappels repassent à « oui »
+    avant = lire()
     os.makedirs(os.path.dirname(FICHIER), exist_ok=True)
     lignes = ["# Tes réglages de noctalia-config : seulement ce que tu as changé, le reste suit la config.",
               "# Gardé tel quel par les mises à jour. Le plus simple pour le changer : la commande nc-reglages."]
@@ -1396,6 +1430,7 @@ def ecrire(vals):
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(lignes) + "\n")
     os.replace(tmp, FICHIER)
+    relancer_rappels(avant, vals)
 
 
 # Ce que change chaque style (en plus de sa palette, de la barre et du dock, voir appliquer_style et
