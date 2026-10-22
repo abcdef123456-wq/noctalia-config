@@ -212,7 +212,7 @@ Item {
         texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
         var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
         porteeAgent = agirTout ? Etat.agirPortee : ""; Etat.agirPortee = ""
-        champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false
+        champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
         lireApplis.running = true
         lireFenetres.running = true
         lireSessions.running = true
@@ -317,13 +317,66 @@ Item {
                  suppr: { libelle: Reglages.t("Supprimer la session « ", "Delete the session “") + nom + Reglages.t(" » ?", "”?"),
                           f: () => r.supprimerSession(nom) } }
     }
+    // Nom accepté par nc-session (\w de Python : lettres accentuées comprises, ce que \w ne fait pas en JavaScript)
+    function nomSessionValide(n) {
+        let c = Array.from(n || "")
+        let lettre = x => /[0-9A-Za-z_]/.test(x) || x.toLowerCase() !== x.toUpperCase()
+        return c.length >= 1 && c.length <= 40 && lettre(c[0]) && c.every(x => lettre(x) || " .-".indexOf(x) >= 0)
+    }
+    // Retour d'un enregistrement ou d'une suppression, en tête des résultats jusqu'à la prochaine saisie : { titre, sous, ok }
+    // (nc-session envoie aussi sa notification, gardée dans l'historique et en bannière si le Spotlight est refermé)
+    property var retourSession: null
+    function ligneRetour() {
+        let x = retourSession
+        return { titre: x.titre, sous: x.sous || "Sessions", glyphe: x.ok === undefined ? "hourglass_top" : (x.ok ? "check_circle" : "error"),
+                 garder: true, f: () => { r.retourSession = null; r.chercher() } }
+    }
+    function nomGuillemets(nom) { return Reglages.t("« ", "“") + nom + Reglages.t(" »", "”") }
+    // Enregistrer la disposition actuelle : le Spotlight reste ouvert, la ligne de la nouvelle session y apparaît
+    // (running ne passe à vrai qu'un instant après le lancement : « en cours » se lit aussi dans le retour)
+    readonly property bool enregistrementEnCours: enregistreur.running || (retourSession !== null && retourSession.ok === undefined)
+    function enregistrerSession(nom) {
+        if (enregistrementEnCours) return
+        enregistreur.nom = nom
+        enregistreur.command = [Etat.bin + "nc-session", "enregistrer", nom]
+        retourSession = { titre: Reglages.t("Enregistrement de la session ", "Saving the session ") + nomGuillemets(nom) + "…" }
+        enregistreur.running = true
+        chercher()
+    }
+    Process {
+        id: enregistreur
+        property string nom: ""
+        stdout: StdioCollector { id: sortieEnr }
+        stderr: StdioCollector { id: erreurEnr }
+        onExited: code => {
+            let n = (sortieEnr.text.match(/\d+/) || [""])[0]
+            r.retourSession = code === 0
+                ? { ok: true, titre: Reglages.t("Session ", "Session ") + r.nomGuillemets(enregistreur.nom) + Reglages.t(" enregistrée", " saved")
+                                     + (n !== "" ? " (" + n + (n === "1" ? Reglages.t(" fenêtre)", " window)") : Reglages.t(" fenêtres)", " windows)")) : "") }
+                : { ok: false, titre: Reglages.t("Session ", "Session ") + r.nomGuillemets(enregistreur.nom) + Reglages.t(" non enregistrée", " not saved"),
+                    sous: erreurEnr.text.trim().split("\n").pop() || Reglages.t("Erreur de nc-session", "nc-session error") }
+            lireSessions.running = true                 // la nouvelle ligne, sans rouvrir le Spotlight
+        }
+    }
     // Supprimer une session, puis relire la liste (et la recherche avec elle) : le Spotlight reste ouvert
     function supprimerSession(nom) {
         if (supprimeur.running) return
+        supprimeur.nom = nom
         supprimeur.command = [Etat.bin + "nc-session", "supprimer", nom]
         supprimeur.running = true
     }
-    Process { id: supprimeur; onExited: lireSessions.running = true }
+    Process {
+        id: supprimeur
+        property string nom: ""
+        stderr: StdioCollector { id: erreurSuppr }
+        onExited: code => {
+            r.retourSession = code === 0
+                ? { ok: true, titre: Reglages.t("Session ", "Session ") + r.nomGuillemets(supprimeur.nom) + Reglages.t(" supprimée", " deleted") }
+                : { ok: false, titre: Reglages.t("Session ", "Session ") + r.nomGuillemets(supprimeur.nom) + Reglages.t(" non supprimée", " not deleted"),
+                    sous: erreurSuppr.text.trim().split("\n").pop() || Reglages.t("Erreur de nc-session", "nc-session error") }
+            lireSessions.running = true
+        }
+    }
     Process {
         id: lireFenetres
         command: ["hyprctl", "clients", "-j"]
@@ -531,7 +584,7 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; annulerSuppr(); fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+    onQChanged: { sel = 0; annulerSuppr(); retourSession = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -652,14 +705,19 @@ Item {
         if (/^\s*sessions?\s/i.test(champ.text)) {          // le texte brut : « session » seul reste la recherche (déconnexion…)
             let nomS = q.replace(/^sessions?\s*/i, "").trim(), qs = sansAccents(nomS)
             let lignesS = sessions.filter(x => qs === "" || sansAccents(x.nom).indexOf(qs) >= 0).map(x => itemSession(x, 0))
-            if (nomS !== "" && /^[\w][\w .\-]{0,39}$/.test(nomS) && !sessions.some(x => x.nom === nomS)) {
+            if (nomS !== "" && nomSessionValide(nomS) && !sessions.some(x => x.nom === nomS) && !enregistrementEnCours) {
                 let n = nomS
                 lignesS.push({ titre: Reglages.t("Enregistrer la disposition actuelle sous « ", "Save the current layout as “") + n + Reglages.t(" »", "”"),
                                sous: Reglages.t("Applis ouvertes, leurs bureaux et leur place", "Open apps, their desktops and places"), glyphe: "save",
-                               f: () => Quickshell.execDetached([Etat.bin + "nc-session", "enregistrer", n]) })
+                               garder: true, f: () => r.enregistrerSession(n) })
             }
-            if (!lignesS.length) lignesS = [{ titre: Reglages.t("Tape un nom pour enregistrer la disposition actuelle", "Type a name to save the current layout"),
+            // Un nom refusé (« a/b », 41 caractères…) : dire pourquoi, plutôt qu'une ligne qui ne fait rien
+            if (nomS !== "" && !nomSessionValide(nomS) && !lignesS.length)
+                lignesS = [{ titre: Reglages.t("Nom de session : lettres, chiffres, espaces, - . _ (40 au plus)", "Session name: letters, digits, spaces, - . _ (40 at most)"),
+                             sous: nomS, glyphe: "error", garder: true, f: () => {} }]
+            if (!lignesS.length && !retourSession) lignesS = [{ titre: Reglages.t("Tape un nom pour enregistrer la disposition actuelle", "Type a name to save the current layout"),
                                              sous: "Sessions", glyphe: "view_quilt", garder: true, f: () => {} }]
+            if (retourSession) lignesS.unshift(ligneRetour())
             resultats = lignesS
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
@@ -772,6 +830,7 @@ Item {
             // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
         }
+        if (retourSession) out.unshift(ligneRetour())     // une session supprimée depuis la recherche ordinaire
         resultats = out
         if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
     }
@@ -822,7 +881,9 @@ Item {
     }
     property bool entreeEnAttente: false
     // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
-    readonly property bool occupe: suivi.running || entreeEnAttente
+    // Un enregistrement ou une suppression de session en cours aussi : décharger le Spotlight arrêterait nc-session
+    // (running seul : un nc-session introuvable, jamais lancé, ne garderait pas le Spotlight chargé pour rien)
+    readonly property bool occupe: suivi.running || entreeEnAttente || enregistreur.running || supprimeur.running
     function valider(i, nouveau) {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir

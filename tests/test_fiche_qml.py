@@ -61,8 +61,12 @@ class FicheEditable(unittest.TestCase):
             source = (QML / "Fiche.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
             source = source.replace("import Quickshell.Wayland\n", "import QtQuick.Window\n").replace("PanelWindow {", "Window {")
-            for l in ("    anchors { top: true; bottom: true; left: true; right: true }\n", "    exclusionMode: ExclusionMode.Ignore\n",
-                      "    WlrLayershell.layer: WlrLayer.Overlay\n", '    WlrLayershell.namespace: "nc-fiche"\n',
+            # Calque Top, sous l'île (Overlay) : la pilule n'est plus couverte ; Overlay seulement devant un plein écran,
+            # qui couvre le calque Top (la fiche y serait invisible en gardant le clavier)
+            for l in ("import Quickshell.Hyprland\n", "    anchors { top: true; bottom: true; left: true; right: true }\n", "    exclusionMode: ExclusionMode.Ignore\n",
+                      "    WlrLayershell.layer: Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject\n"
+                      "                         && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0 ? WlrLayer.Overlay : WlrLayer.Top\n",
+                      '    WlrLayershell.namespace: "nc-fiche"\n',
                       "    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive\n"):
                 self.assertIn(l, source); source = source.replace(l, "")
             source = source.replace("fiche.screen ? fiche.screen.width : 1600", "1600").replace("fiche.screen ? fiche.screen.height : 1000", "1000")

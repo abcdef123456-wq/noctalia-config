@@ -13,6 +13,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import Quickshell.Wayland
 
 PanelWindow {
@@ -20,7 +21,12 @@ PanelWindow {
     signal fermer()
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.layer: WlrLayer.Overlay
+    // Calque Top, sous l'île (Overlay) : la pilule, ses bannières et ses activités restent au-dessus de la fiche (entre
+    // surfaces du même calque, la plus récente passerait devant). La barre de Noctalia est aussi en Top, créée avant :
+    // la fiche la couvre, et un clic dessus ferme la fiche. Overlay seulement devant une fenêtre en plein écran, qui
+    // passe au-dessus du calque Top : la fiche y serait invisible tout en gardant le clavier (même règle que Vue.qml)
+    WlrLayershell.layer: Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject
+                         && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0 ? WlrLayer.Overlay : WlrLayer.Top
     WlrLayershell.namespace: "nc-fiche"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     color: "transparent"

@@ -224,9 +224,20 @@ class SpotlightSessions(unittest.TestCase):
             noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
+            # Faux nc-session : son dossier vient de son propre chemin (jamais le vrai HOME) ; il journalise chaque argument
+            # entre crochets (accents et espaces compris) ; « enregistrer Vide » échoue comme le vrai (aucune fenêtre)
+            faux_session = r'''#!/bin/sh
+H="$(cd "$(dirname "$0")/../.." && pwd)"
+{ printf 'nc-session'; for a in "$@"; do printf ' [%s]' "$a"; done; echo; } >> "$H/appels"
+case "$1" in
+  liste) if [ -e "$H/enregistree" ]; then echo '[{"nom": "Dev", "fenetres": 3, "applis": ["kitty", "firefox"]}, {"nom": "Mon travail", "fenetres": 4, "applis": ["kitty"]}]'
+         else echo '[{"nom": "Dev", "fenetres": 3, "applis": ["kitty", "firefox"]}]'; fi ;;
+  enregistrer) if [ "$2" = Vide ]; then echo "Aucune fenêtre à enregistrer." >&2; exit 1; fi
+               : > "$H/enregistree"; echo "4 fenêtre(s) enregistrée(s) dans « $2 »." ;;
+esac
+'''
             scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
-                       "nc-demander": '#!/bin/sh\necho \'{"nom": "", "agent": "", "coupee": false}\'\n',
-                       "nc-session": '#!/bin/sh\necho "nc-session $*" >> "$HOME/appels"\n[ "$1" = liste ] && echo \'[{"nom": "Dev", "fenetres": 3, "applis": ["kitty", "firefox"]}]\'\n'}
+                       "nc-demander": '#!/bin/sh\necho \'{"nom": "", "agent": "", "coupee": false}\'\n', "nc-session": faux_session}
             for nom, code in scripts.items():
                 (b / nom).write_text(code); (b / nom).chmod(0o755)
             (q / "shell.qml").write_text('''import QtQuick
@@ -242,10 +253,34 @@ ShellRoot {
   var champ = trouver(spot, "nc-spotlight-champ")
   if (etape === 0) { if (!spot.sessions.length) return; champ.text = "session "; etape++; return }
   if (etape === 1) { verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Dev »"]), JSON.stringify(titres()))
-   champ.text = "session Cours"
-   verifier(titres()[0] === "Enregistrer la disposition actuelle sous « Cours »", JSON.stringify(titres()))
-   spot.valider(0, false); champ.text = "dev"; etape++; return }
-  if (etape === 2) { verifier(titres().indexOf("Session « Dev »") >= 0, "par son nom : " + JSON.stringify(titres()))
+   // Un nom refusé : la règle, pas une ligne qui ne fait rien ; un nom accentué est accepté (\\w de Python)
+   champ.text = "session a/b"
+   verifier(titres()[0] === "Nom de session : lettres, chiffres, espaces, - . _ (40 au plus)", "nom refusé : " + JSON.stringify(titres()))
+   champ.text = "session Été 2"
+   verifier(titres()[0] === "Enregistrer la disposition actuelle sous « Été 2 »", "accents : " + JSON.stringify(titres()))
+   // Un échec : le message de nc-session, le Spotlight reste ouvert
+   champ.text = "session Vide"
+   spot.valider(0, false)
+   verifier(Etat.fermetures === 0, "le Spotlight reste ouvert")
+   etape++; return }
+  if (etape === 2) { if (!spot.retourSession || spot.retourSession.ok === undefined || spot.occupe) return
+   verifier(titres()[0] === "Session « Vide » non enregistrée" && spot.resultats[0].sous === "Aucune fenêtre à enregistrer."
+            && spot.resultats[0].glyphe === "error", "échec : " + JSON.stringify(spot.resultats[0]))
+   champ.text = "session Mon travail"
+   verifier(spot.retourSession === null, "une nouvelle saisie efface le retour")
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Enregistrer la disposition actuelle sous « Mon travail »"]), JSON.stringify(titres()))
+   spot.valider(0, false)
+   verifier(Etat.fermetures === 0 && spot.enregistrementEnCours, "le Spotlight reste ouvert pendant l'enregistrement")
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Enregistrement de la session « Mon travail »…"]), "en cours : " + JSON.stringify(titres()))
+   etape++; return }
+  if (etape === 3) { if (spot.sessions.length !== 2) return
+   // La liste relue : le retour en tête, la nouvelle session dessous, plus de ligne « Enregistrer… »
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Mon travail » enregistrée (4 fenêtres)", "Session « Mon travail »"]),
+            "liste relue : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].glyphe === "check_circle" && Etat.fermetures === 0, "retour réussi")
+   champ.text = "dev"; etape++; return }
+  if (etape === 4) { verifier(titres().indexOf("Session « Dev »") >= 0 && titres().every(t => t.indexOf("enregistrée") < 0),
+                              "par son nom : " + JSON.stringify(titres()))
    Qt.quit() }
  } }
  Timer { interval: 9000; running: true; onTriggered: Qt.exit(9) }
@@ -254,8 +289,14 @@ ShellRoot {
                        XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
             env.pop("WAYLAND_DISPLAY", None)
             r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
-            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("nc-session enregistrer Cours", (root / "appels").read_text())
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            for erreur in ("ReferenceError", "TypeError", "is not a type"):
+                self.assertNotIn(erreur, sortie)
+            appels = (root / "appels").read_text().splitlines()
+            # La commande exacte : le nom en un seul argument, espace compris, une seule fois ; la liste relue après
+            self.assertEqual([a for a in appels if "[enregistrer]" in a], ["nc-session [enregistrer] [Vide]", "nc-session [enregistrer] [Mon travail]"])
+            self.assertIn("nc-session [liste] [--json]", appels[appels.index("nc-session [enregistrer] [Mon travail]") + 1:])
 
     def test_supprimer_une_session(self):
         # Issue #11 : Suppr (ou le rond « − ») demande confirmation sur la ligne ; Entrée supprime puis relit la liste,
@@ -332,7 +373,8 @@ ShellRoot {
    verifier(Etat.fermetures === 0 && spot.confirmer === -1, "Entrée supprime sans fermer")
    etape++; return }
   if (etape === 2) { if (spot.sessions.length !== 1) return
-   verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Cours »"]), "liste relue : " + JSON.stringify(titres()))
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Dev » supprimée", "Session « Cours »"]), "liste relue : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].glyphe === "check_circle" && !spot.resultats[0].suppr, "retour de la suppression")
    Qt.quit() }
  } }
  Timer { interval: 9000; running: true; onTriggered: Qt.exit(9) }
