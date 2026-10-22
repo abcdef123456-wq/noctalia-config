@@ -2658,6 +2658,77 @@ def catalogue(vals):
     return res + catalogue_raccourcis()
 
 
+def ile_appel_reglages(delai):
+    """Demande à l'île d'ouvrir ses réglages. Rend « ok », « absente » (pas de qs), « arretee » (aucune île ne
+    répond), « lente » (pas de réponse dans le délai) ou « inconnue » (une île tourne mais ne connaît pas la fonction :
+    ancienne config gardée après un rechargement à chaud raté)."""
+    if not shutil.which("qs"):
+        return "absente"
+    try:
+        p = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True, text=True,
+                           timeout=delai)
+    except subprocess.TimeoutExpired:
+        return "lente"
+    except OSError:
+        return "absente"
+    sortie = (p.stdout + p.stderr).lower()
+    # Quickshell 0.3 répond « Function not found. » (ou « Target not found. ») avec le code 0 : le code seul ne suffit pas
+    if "not found" in sortie or "no function" in sortie:
+        return "inconnue"
+    return "ok" if p.returncode == 0 else "arretee"      # ex. « No running instances… », code 255
+
+
+def ile_reparer(attente=4.0):
+    """Une seule tentative : redémarre nc-ile.service, puis attend (au plus `attente` s) que l'île annonce reglages().
+    Rien si l'île est désactivée exprès (comme nc-shell-msg). Rend True si le redémarrage a eu lieu."""
+    try:
+        if subprocess.run(["systemctl", "--user", "is-enabled", "--quiet", "nc-ile.service"], capture_output=True,
+                          timeout=3).returncode != 0:
+            return False
+        if subprocess.run(["systemctl", "--user", "restart", "nc-ile.service"], capture_output=True,
+                          timeout=10).returncode != 0:
+            return False
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    fin = time.monotonic() + attente
+    while time.monotonic() < fin:
+        try:
+            p = subprocess.run(["qs", "-c", "nc-ile", "ipc", "show"], capture_output=True, text=True,
+                               timeout=max(0.3, min(1.0, fin - time.monotonic())))
+            if re.search(r"\bfunction reglages\(", p.stdout):
+                break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(0.25)
+    return True                                          # le second essai dira si l'île répond
+
+
+def fenetre_graphique():
+    """nc-reglages fenetre : la fenêtre graphique vit dans l'île Quickshell. Si l'île ne répond pas (arrêtée, ou
+    tournant encore avec l'ancienne config après une mise à jour), un redémarrage, puis un second essai ; sinon une
+    notification et l'écran des réglages dans un terminal (aussi sans Quickshell : openSUSE, Debian sans qs compilé)."""
+    etat = ile_appel_reglages(5)                         # premier essai : l'île peut être occupée au démarrage
+    if etat == "ok":
+        return 0
+    if etat != "absente" and ile_reparer():
+        etat = ile_appel_reglages(2)
+        if etat == "ok":
+            return 0
+    try:                                                 # avant le terminal, plus de silence
+        subprocess.run(["notify-send", "-a", "noctalia-config", "-i", "preferences-system",
+                        T("L'île ne répond pas : réglages ouverts dans le terminal. Diagnostic : nc-diag",
+                          "The island is not responding: settings opened in the terminal. Diagnosis: nc-diag")],
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    terminal = shutil.which("kitty")
+    if not terminal:
+        return 1
+    subprocess.Popen([terminal, "--class", "nc-reglages", "-e", os.path.join(BIN, "nc-reglages")],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
 def cli(a):
     vals = lire()
     if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
@@ -2703,19 +2774,7 @@ def cli(a):
                            capture_output=True)
         return
     if a[0] in ("fenetre", "fenêtre", "window", "gui"):
-        # La fenêtre graphique vit dans l'île Quickshell ; sans elle (openSUSE, Debian sans Quickshell compilé), l'écran
-        # des réglages s'ouvre dans un terminal
-        try:
-            code = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True, timeout=5).returncode
-        except (OSError, subprocess.TimeoutExpired):
-            code = 1
-        if code != 0:
-            terminal = shutil.which("kitty")
-            if terminal:
-                subprocess.Popen([terminal, "--class", "nc-reglages", "-e", os.path.join(BIN, "nc-reglages")],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                code = 0
-        sys.exit(code)
+        sys.exit(fenetre_graphique())
     if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
         for r in VISIBLES:
