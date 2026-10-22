@@ -2,7 +2,9 @@
 // mode graphique (ConfirmationGpu.qml). « JARVIS (depuis <serveur>) veut : <ce qui sera fait exactement> », le texte
 // concerné en police de terminal (commande entière, aperçu du fichier, texte à copier), coupé à 400 caractères avec
 // « Voir tout », puis [Refuser] et [Autoriser] ; rien n'est fait avant Autoriser. Refus tout seul à la fin du
-// compte à rebours (25 s : le serveur abandonne à 30 s).
+// compte à rebours, qui part du délai de cette action (12 s pour un fichier, une capture ou le presse-papiers, 17 s
+// pour une action relayée, jusqu'à 25 s pour une commande : toujours 3 s avant que le serveur abandonne). Autoriser
+// au-delà : « Trop tard : JARVIS a déjà abandonné », rien n'est fait.
 // Fichier à part (pas un composant interne d'Ile.qml) : le rechargement à chaud de Quickshell ne connaît pas les
 // nouveaux composants internes d'un fichier déjà chargé.
 import QtQuick
@@ -35,7 +37,7 @@ Item {
         objectName: "nc-noeud-reste"
         anchors.right: parent.right; anchors.rightMargin: 18; y: 14
         secondaire: true; font.pixelSize: 12
-        text: Noeud.reste > 0 ? Noeud.reste + " s" : ""
+        text: Noeud.reste > 0 && !Noeud.tropTard ? Noeud.reste + " s" : ""
     }
     Column {
         id: col
@@ -68,8 +70,18 @@ Item {
                 }
             }
         }
+        // Autorisé après l'échéance : rien n'est fait, la carte le dit avant de se fermer
+        Texte {
+            objectName: "nc-noeud-trop-tard"
+            visible: Noeud.tropTard
+            width: parent.width; height: 34; verticalAlignment: Text.AlignVCenter
+            font.pixelSize: 13; font.weight: Font.DemiBold
+            text: Reglages.t("Trop tard : JARVIS a déjà abandonné.", "Too late: JARVIS already gave up.")
+        }
         // Voir tout · Refuser · Autoriser (le bouton principal en clair, à droite comme sur iPhone)
         Item {
+            objectName: "nc-noeud-boutons"
+            visible: !Noeud.tropTard
             width: parent.width; height: 34
             Rectangle {
                 objectName: "nc-noeud-voir-tout"

@@ -9,7 +9,9 @@ tout sans te demander ; celui-ci applique une politique par action :
   - sans confirmation (sauf si « Actions sans confirmation » est sur non dans nc-reglages) : musique (playerctl),
     notification, lecture du presse-papiers, verrouillage, liste d'un dossier (sans contenu) ;
   - avec ta confirmation dans l'île (ou une notification à boutons sans l'île) : commande, lecture ou écriture d'un
-    fichier, capture d'écran, écriture du presse-papiers ; refus automatique au bout de 25 s ;
+    fichier, capture d'écran, écriture du presse-papiers ; refus automatique avant que le serveur abandonne (12 s
+    pour un fichier, une capture ou le presse-papiers, 17 s pour une action relayée, jusqu'à 17 s pour une commande
+    selon son délai) : jamais rien n'est fait après coup ;
   - toujours refusées : les chemins protégés (clés SSH et GPG, démarrage automatique, shells, secrets des
     navigateurs, de gh, de Claude, de l'assistant…), tout pendant que l'IA est coupée (IA_MODE=non), toute autre action.
 Connexion wss://, ou ws:// seulement vers un hôte privé ou Tailscale. La clé secrète part dans l'en-tête X-Secret-Key,
@@ -25,6 +27,7 @@ import html
 import importlib.machinery
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -47,13 +50,28 @@ DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, 
   nc-noeud aide       this help
 
 No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
-notification with buttons): command, file read or write, screenshot, clipboard write; denied after 25 s. Always
+notification with buttons): command, file read or write, screenshot, clipboard write; denied before the server gives
+up (12 s for a file, screenshot or clipboard, 17 s for a relayed action, up to 17 s for a command): never done late. Always
 denied: protected paths, everything while AI is off (IA_MODE=non), any other action. wss://, or ws:// only to a private
 or Tailscale host; the secret key goes in the X-Secret-Key header, never in the URL. Log:
 ~/.local/state/noctalia-config/noeud.log (0600).
 """
 
-DELAI_CONFIRMATION = 25            # secondes ; le serveur abandonne à 30 s (send_action)
+# Délai de confirmation par action, toujours 3 s sous celui du serveur JARVIS-BIS (révision 8ff25c3) : passé ce délai,
+# le serveur a déjà répondu « échec » à JARVIS, et rien ne doit plus être fait. Côté serveur (core/node_hub.py,
+# core/hardware_relay.py, core/tools/dispatcher.py) :
+#   - read_file, write_file : 15 s (NodeHub.read_file, write_file) ;
+#   - exec : timeout demandé + 5 s (NodeHub.exec_cmd, qui envoie toujours « timeout ») ;
+#   - HardwareRelay.execute (outils « matériels ») : 20 s pour screenshot, lock, clipboard_set, clipboard_get, media,
+#     notify et run_shell (envoyé en « exec », avec les paramètres de l'outil : node_id ou node, pas toujours timeout),
+#     et pour toute action quand un nœud est désigné ;
+#   - send_action par défaut, /api/node/{id}/action : 30 s.
+MARGE_SERVEUR = 3
+DELAI_CONFIRMATION = 25            # le plus long possible (une commande au long délai)
+DELAI_RELAIS = 20 - MARGE_SERVEUR  # 17 s : action peut-être relayée par HardwareRelay (20 s)
+DELAIS_FIXES = {"read_file": 15 - MARGE_SERVEUR, "write_file": 15 - MARGE_SERVEUR,
+                "screenshot": 12, "clipboard_write": 12}
+EXEC_MIN = 2 * MARGE_SERVEUR       # commande au délai plus court : pas le temps de te demander, refus direct
 MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le client de l'upstream
 MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
 MAX_TEXTE = 64 * 1024              # ce que la carte peut montrer en entier : au-delà, pas de confirmation possible
@@ -104,6 +122,37 @@ class Refus(Exception):
 
 class Definitif(Exception):
     """Impossible de se connecter tant que la configuration ne change pas (pas de relance)."""
+
+
+def horloge():
+    """Horloge monotone des échéances (remplacée dans les tests)."""
+    return time.monotonic()
+
+
+def delai_confirmation(nom, p):
+    """Secondes laissées pour confirmer cette action, sous le délai du serveur ; Refus si c'est impossible."""
+    if nom in DELAIS_FIXES:
+        return DELAIS_FIXES[nom]
+    if nom != "exec":
+        return DELAI_RELAIS
+    # exec_cmd envoie {command, timeout} et attend timeout + 5 s ; HardwareRelay (run_shell) attend 20 s, et sa forme
+    # ne se distingue pas toujours d'exec_cmd (un timeout peut y figurer) : 17 s au plus dans tous les cas
+    t = p.get("timeout")
+    d = DELAI_CONFIRMATION
+    if t is not None:
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            t = float("nan")
+        if not math.isfinite(t):
+            raise Refus(T("Délai de la commande illisible : refusé.", "Unreadable command timeout: denied."))
+        if t < EXEC_MIN:
+            raise Refus(T(f"Délai de la commande trop court ({t:g} s) pour te demander confirmation "
+                          f"({EXEC_MIN} s au moins) : refusé.",
+                          f"Command timeout too short ({t:g} s) to ask for your confirmation (at least {EXEC_MIN} s): denied."))
+        d = min(d, t - MARGE_SERVEUR)
+    d = min(d, DELAI_RELAIS)
+    return max(d, MARGE_SERVEUR)
 
 
 def reglage(cle, defaut):
@@ -616,12 +665,12 @@ async def notification_a_boutons():
 class Confirmation:
     def __init__(self, serveur):
         self.serveur = serveur
-        self.verrou = asyncio.Lock()           # une carte à la fois ; les autres attendent (et expirent à 25 s)
+        self.verrou = asyncio.Lock()           # une carte à la fois ; les autres attendent (et expirent à leur échéance)
 
     async def demander(self, action, decrite, limite):
         """« autorise », « refuse », « expire » ou « indisponible »."""
         async with self.verrou:
-            reste = limite - time.monotonic()
+            reste = limite - horloge()
             if reste < 1:
                 return "expire"
             d = dossier_runtime()
@@ -629,6 +678,8 @@ class Confirmation:
             for vieux in (d / "reponses").iterdir():                   # réponses à d'anciennes cartes
                 with contextlib.suppress(OSError):
                     vieux.unlink()
+            # « expire » : l'échéance de CETTE action (heure murale), d'où part le compte à rebours de la carte ;
+            # au-delà, la carte n'envoie plus « autoriser » (« Trop tard ») et nc-noeud n'exécute plus rien
             demande = {"id": ident, "serveur": self.serveur, "action": action, "resume": decrite.resume,
                        "texte": decrite.texte, "court": COURT, "expire": time.time() + reste, "duree": round(reste)}
             fichier = d / "demande.json"
@@ -649,12 +700,14 @@ class Confirmation:
                     await asyncio.shield(ile_prevenue())           # la carte se ferme tout de suite
 
     async def attendre(self, reponse, limite):
-        while time.monotonic() < limite:
+        while horloge() < limite:
             try:
                 s = os.lstat(reponse)
                 if stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid():
                     v = reponse.read_text(encoding="utf-8").strip()
                     if v in ("autoriser", "refuser"):
+                        if horloge() >= limite:                    # lue après l'échéance : trop tard
+                            return "tard" if v == "autoriser" else "expire"
                         return "autorise" if v == "autoriser" else "refuse"
             except (FileNotFoundError, UnicodeError):
                 pass
@@ -663,7 +716,7 @@ class Confirmation:
 
     async def par_notification(self, ns, decrite, limite):
         """Sans l'île (openSUSE…) : une notification avec Autoriser et Refuser ; le texte entier doit y tenir."""
-        reste = limite - time.monotonic()
+        reste = limite - horloge()
         corps = decrite.resume + ("\n\n" + decrite.texte if decrite.texte else "")
         args = [ns, "-a", "JARVIS", "-u", "critical", "-t", str(int(reste * 1000)),
                 "-A", "autoriser=" + T("Autoriser", "Allow"), "-A", "refuser=" + T("Refuser", "Deny"), "--",
@@ -678,7 +731,9 @@ class Confirmation:
 
 
 DECISIONS = {"refuse": ("refusé", "Refusé sur le PC.", "Denied on the PC."),
-             "expire": ("expiré (refusé)", "Pas de réponse sur le PC en 25 s : refusé.", "No answer on the PC within 25 s: denied."),
+             "expire": ("expiré (refusé)", "Pas de réponse sur le PC en {s} s : refusé.", "No answer on the PC within {s} s: denied."),
+             "tard": ("autorisé trop tard (rien fait)", "Autorisé sur le PC après {s} s, trop tard : rien n'a été fait.",
+                      "Allowed on the PC after {s} s, too late: nothing was done."),
              "indisponible": ("refusé (pas de confirmation possible)",
                               "Confirmation impossible sur le PC (ni l'île ni notification à boutons) : refusé.",
                               "Cannot confirm on the PC (neither the island nor a notification with buttons): denied.")}
@@ -693,15 +748,18 @@ class Noeud:
         self.ws = None
         self.taches = set()
 
-    def delai(self):
+    @staticmethod
+    def delai(nom, p):
+        """Le délai de confirmation de cette action ; NC_NOEUD_DELAI (tests) ne peut que le raccourcir."""
+        d = delai_confirmation(nom, p)
         try:
-            return min(max(float(os.environ.get("NC_NOEUD_DELAI", DELAI_CONFIRMATION)), 1.0), DELAI_CONFIRMATION)
+            return min(max(float(os.environ.get("NC_NOEUD_DELAI", d)), 0.5), d)
         except ValueError:
-            return DELAI_CONFIRMATION
+            return d
 
     async def decider(self, action, params):
         """Le résultat à renvoyer au serveur, selon la politique ; tout est noté dans le journal."""
-        limite = time.monotonic() + self.delai()
+        recu = horloge()                                             # l'échéance part de la réception
         nom = ALIAS.get(action, action)
         if ia_coupee():
             journal(nom, "", "refusé (IA coupée)")
@@ -713,8 +771,9 @@ class Noeud:
         if nom not in SANS_CONFIRMATION and nom not in AVEC_CONFIRMATION:
             journal(nom, "", "refusé (action non permise)")
             return {"success": False, "error": T(f"Action non permise sur ce PC : {nom[:40]}", f"Action not allowed on this PC: {nom[:40]}")}
+        p = params if isinstance(params, dict) else {}
         try:
-            decrite = preparer(nom, params if isinstance(params, dict) else {})
+            decrite = preparer(nom, p)
         except Refus as e:
             journal(nom, str(e), e.decision)
             return {"success": False, "error": str(e)}
@@ -722,14 +781,22 @@ class Noeud:
         confirmer = nom in AVEC_CONFIRMATION or reglage("NOEUD_SANS_CONFIRMATION", "oui") == "non"
         if confirmer:
             try:
+                delai = self.delai(nom, p)
+            except Refus as e:
+                journal(nom, resume, e.decision + " (délai trop court)")
+                return {"success": False, "error": str(e), "denied": True}
+            limite = recu + delai                                    # échéance absolue, horloge monotone
+            try:
                 decision = await self.confirmation.demander(nom, decrite, limite)
             except Refus as e:
                 decision = "indisponible"
                 print(f"nc-noeud : {e}", file=sys.stderr, flush=True)
+            if decision == "autorise" and horloge() >= limite:      # le serveur a déjà abandonné : rien n'est fait
+                decision = "tard"
             if decision != "autorise":
                 d = DECISIONS[decision]
                 journal(nom, resume, d[0])
-                return {"success": False, "error": T(d[1], d[2]), "denied": True}
+                return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}"), "denied": True}
         try:
             res = await decrite.executer()
         except Refus as e:

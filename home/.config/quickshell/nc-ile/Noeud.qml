@@ -2,8 +2,10 @@ pragma Singleton
 // JARVIS qui pilote ce PC (nc-noeud, issue #12) : une action qui demande ta confirmation (commande, fichier, capture,
 // presse-papiers) arrive dans …/nc-noeud/demande.json (XDG_RUNTIME_DIR, 0700) ; nc-noeud prévient l'île par
 // « qs -c nc-ile ipc call ile noeud » (shell.qml), qui relit le fichier. La carte (ConfirmationNoeud.qml) écrit
-// « autoriser » ou « refuser » dans …/nc-noeud/reponses/ID, que nc-noeud attend. Sans réponse à l'heure dite (25 s),
-// la carte se ferme et nc-noeud refuse. Rien n'est relu en boucle : la minuterie ne tourne que pendant une demande.
+// « autoriser » ou « refuser » dans …/nc-noeud/reponses/ID, que nc-noeud attend. Sans réponse à l'échéance de cette
+// action (« expire », 3 à 17 s selon l'action, toujours avant que le serveur abandonne), la carte se ferme et nc-noeud
+// refuse. Un « Autoriser » qui arrive trop tard n'est pas envoyé : la carte dit « Trop tard » et rien n'est fait.
+// Rien n'est relu en boucle : la minuterie ne tourne que pendant une demande.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -16,9 +18,13 @@ Singleton {
     readonly property int reste: demande ? Math.max(0, Math.ceil(demande.expire - maintenant)) : 0
     property bool toutVoir: false                     // « Voir tout » : le texte entier, pas seulement le début
     property string repondue: ""                      // la carte déjà répondue ne revient pas avant que le fichier parte
+    property bool tropTard: false                     // « Autoriser » après l'échéance : rien n'est envoyé, la carte le dit
+    readonly property real marge: 0.5                 // nc-noeud relit la réponse toutes les 0,15 s : un clic au ras de
+                                                      // l'échéance compte déjà comme trop tard
 
     function relire() { fichier.reload() }
     function lire(t) {
+        if (tropTard) return                          // le message reste affiché ; relu à la fin (finTropTard)
         var d = null
         try { d = JSON.parse(t) } catch (e) { d = null }
         if (d && (typeof d.id !== "string" || !/^[0-9a-f]{32}$/.test(d.id) || d.id === repondue
@@ -32,9 +38,15 @@ Singleton {
         if (nouvelle && Etat.ecranOuvert !== "" && !Etat.recherche) Etat.fermer()
     }
     function repondre(choix) {
-        if (!demande) return
+        if (!demande || tropTard) return
         var id = demande.id
         repondue = id
+        if (choix === "autoriser" && Date.now() / 1000 >= Number(demande.expire) - marge) {
+            // JARVIS a déjà abandonné : rien n'est écrit, nc-noeud a refusé (une seule réponse au serveur)
+            tropTard = true
+            finTropTard.restart()
+            return
+        }
         demande = null
         // Écrite d'un coup (fichier caché puis renommé) : nc-noeud ne lit jamais une réponse à moitié écrite
         Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf %s \"$2\" > \"$1/.$3\" && mv -f \"$1/.$3\" \"$1/$3\"",
@@ -54,7 +66,13 @@ Singleton {
     }
     // Compte à rebours de la carte, seulement pendant une demande
     Timer {
-        interval: 1000; repeat: true; running: n.demande !== null
+        interval: 1000; repeat: true; running: n.demande !== null && !n.tropTard
         onTriggered: { n.maintenant = Date.now() / 1000; if (n.reste <= 0) n.demande = null }
+    }
+    // « Trop tard » se lit 2,5 s, puis la carte se ferme (ou montre la demande suivante)
+    Timer {
+        id: finTropTard
+        interval: 2500
+        onTriggered: { n.tropTard = false; n.demande = null; fichier.reload() }
     }
 }

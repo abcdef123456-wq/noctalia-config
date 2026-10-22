@@ -1089,9 +1089,9 @@ REGLAGES = [
     R("NOEUD_JARVIS", "Intelligence artificielle", L("Laisser JARVIS piloter ce PC", "Let JARVIS control this PC"),
       "ouinon", "non",
       L("Attention : JARVIS pourra lancer des commandes, lire ou écrire tes fichiers et voir ton écran.\n"
-        "Chaque action attend ton « Autoriser » dans l'île (25 s, sinon refus) ; clés et secrets restent interdits.",
+        "Chaque action attend ton « Autoriser » dans l'île (3 à 17 s, sinon refus) ; clés et secrets restent interdits.",
         "Warning: JARVIS will be able to run commands, read or write your files and see your screen.\n"
-        "Each action waits for your “Allow” in the island (25 s, otherwise denied); keys and secrets stay off-limits."),
+        "Each action waits for your “Allow” in the island (3 to 17 s, otherwise denied); keys and secrets stay off-limits."),
       groupe="noeud"),
     R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
       L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",

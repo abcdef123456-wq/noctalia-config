@@ -23,6 +23,7 @@ import time
 import unittest
 import unittest.mock
 import uuid
+import asyncio
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
@@ -335,9 +336,47 @@ class Politique(Base):
         r = self.serveur.demander("exec", {"command": f"touch {marque}"})
         self.assertLess(time.monotonic() - debut, 10)
         self.assertFalse(r["success"])
-        self.assertIn("25 s", r["error"])
+        self.assertIn("en 2 s", r["error"])
         self.assertFalse(marque.exists())
         self.assertIn("expiré", self.journal())
+
+    def test_delai_de_l_action_dans_la_carte(self):
+        self.ile("refuser")
+        self.demarrer()
+        r = self.serveur.demander("exec", {"command": "true", "timeout": 10})
+        self.assertTrue(r.get("denied"), r)
+        demande = json.loads((self.home / "derniere-demande.json").read_text())
+        self.assertEqual(demande["duree"], 7, "délai de la commande (10 s) moins 3 s")
+        self.assertLessEqual(demande["expire"] - time.time(), 7.5)
+        (self.home / "a.txt").write_text("x")
+        r = self.serveur.demander("read_file", {"path": "~/a.txt"})
+        self.assertTrue(r.get("denied"), r)
+        demande = json.loads((self.home / "derniere-demande.json").read_text())
+        self.assertEqual(demande["duree"], 12, "read_file : le serveur abandonne à 15 s")
+        # Délai demandé sous 6 s : refus direct, sans carte
+        avant = len([l for l in self.appels() if l.startswith("qs ")])
+        r = self.serveur.demander("exec", {"command": "true", "timeout": 5})
+        self.assertFalse(r["success"])
+        self.assertIn("trop court", r["error"])
+        self.assertEqual(len([l for l in self.appels() if l.startswith("qs ")]), avant, "aucune carte")
+
+    def test_autoriser_apres_l_echeance_un_seul_message(self):
+        self.ile("silence")
+        self.demarrer(NC_NOEUD_DELAI="1.5")
+        (self.home / "a.txt").write_text("contenu secret")
+        r = self.serveur.demander("read_file", {"path": "~/a.txt"})
+        self.assertFalse(r["success"])
+        self.assertTrue(r.get("denied"))
+        self.assertNotIn("contenu secret", json.dumps(r))
+        # « Autoriser » qui arrive après coup : ni lecture, ni deuxième réponse au serveur
+        ident = json.loads((self.home / "derniere-demande.json").read_text())["id"]
+        (self.run_dir / "nc-noeud/reponses" / ident).write_text("autoriser")
+        self.serveur.c.settimeout(2)
+        with self.assertRaises(OSError):                 # socket.timeout : plus rien n'arrive
+            self.serveur.recevoir()
+        lignes = [l for l in self.journal().splitlines() if "\tread_file\t" in l]
+        self.assertEqual(len(lignes), 1, lignes)
+        self.assertIn("expiré", lignes[0])
 
     def test_ia_coupee_tout_refuse(self):
         self.regler(NOEUD_JARVIS="oui", IA_MODE="non")
@@ -443,7 +482,8 @@ class Politique(Base):
 # ── La carte de l'île, hors écran ─────────────────────────────────────────────────────────────────────────────────
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Carte(unittest.TestCase):
-    def executer(self, bouton):
+    def executer(self, bouton, expire_dans=60, tard=False):
+        tard_js = "true" if tard else "false"
         with tempfile.TemporaryDirectory(prefix="nc-noeud-carte-") as d:
             home = Path(d)
             root = home / "qml"; root.mkdir()
@@ -453,7 +493,7 @@ class Carte(unittest.TestCase):
             commande = "rm -rf ~/Téléchargements/vieux && " + "echo x; " * 80
             (run / "nc-noeud/demande.json").write_text(json.dumps({
                 "id": ident, "serveur": "jarvis.example.com", "action": "exec", "resume": "exécuter cette commande",
-                "texte": commande, "court": 400, "expire": time.time() + 60, "duree": 25}))
+                "texte": commande, "court": 400, "expire": time.time() + expire_dans, "duree": 25}))
             for nom in ("Noeud", "ConfirmationNoeud", "Texte", "Ico"):
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool sobre: true\n'
@@ -485,6 +525,7 @@ ShellRoot {
   occupe = true
   try {
    if (etape === 0) { if (!Noeud.demande) return
+    if (''' + tard_js + ''' && Date.now() / 1000 < Noeud.demande.expire - 0.4) return
     verifier(Etat.ecranOuvert === "", "l'île ouverte se referme pour montrer la carte")
     var t = trouver(carte, "nc-noeud-titre").text
     verifier(t === "JARVIS (depuis jarvis.example.com) veut : exécuter cette commande", "titre : " + t)
@@ -502,7 +543,12 @@ ShellRoot {
     var d2 = trouver(carte, "nc-noeud-detail")
     verifier(d2.text === Noeud.demande.texte, "Voir tout : la commande entière")
     souris.mouseClick(trouver(carte, "''' + bouton + '''"))
-    verifier(Noeud.demande === null, "la carte se ferme")
+    if (''' + tard_js + ''') {
+     var tt = trouver(carte, "nc-noeud-trop-tard")
+     verifier(Noeud.tropTard && Noeud.demande !== null, "trop tard : la carte reste pour le dire")
+     verifier(tt.visible && tt.text === "Trop tard : JARVIS a déjà abandonné.", "message Trop tard : " + tt.text)
+     verifier(!trouver(carte, "nc-noeud-boutons").visible, "plus de boutons")
+    } else verifier(Noeud.demande === null, "la carte se ferme")
     etape++; return }
    if (etape === 2) Qt.quit()
   } finally { occupe = false } } }
@@ -517,7 +563,7 @@ ShellRoot {
             for erreur in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
                 self.assertNotIn(erreur, sortie)
             reponse = run / "nc-noeud/reponses" / ident
-            fin = time.monotonic() + 4
+            fin = time.monotonic() + (1 if tard else 4)
             while not reponse.exists() and time.monotonic() < fin:
                 time.sleep(0.05)
             return reponse.read_text() if reponse.exists() else None
@@ -527,6 +573,88 @@ ShellRoot {
 
     def test_refuser(self):
         self.assertEqual(self.executer("nc-noeud-refuser"), "refuser")
+
+    def test_autoriser_trop_tard_rien_n_est_envoye(self):
+        self.assertIsNone(self.executer("nc-noeud-autoriser", expire_dans=2.5, tard=True))
+
+
+class Echeances(Base):
+    """Délai de confirmation par action et échéance absolue, avec une horloge injectée (aucune attente réelle)."""
+    def charger(self):
+        env = {"HOME": str(self.home), "XDG_RUNTIME_DIR": str(self.run_dir), "XDG_STATE_HOME": str(self.etat),
+               "PATH": self.env["PATH"], "NC_LANGUE": "fr"}
+        p = unittest.mock.patch.dict(os.environ, env)
+        p.start()
+        self.addCleanup(p.stop)
+        os.environ.pop("NC_NOEUD_DELAI", None)
+        chargeur = importlib.machinery.SourceFileLoader("nc_noeud_echeances", str(self.bin / "nc-noeud"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader(chargeur.name, chargeur))
+        chargeur.exec_module(m)
+        self.assertEqual(m.HOME, self.home, "jamais le vrai dossier personnel")
+        m.A = m.charger_assistant()
+        self.t = 1000.0
+        m.horloge = lambda: self.t
+        return m
+
+    def test_delais_par_action(self):
+        m = self.charger()
+        d = m.delai_confirmation
+        for nom in ("read_file", "write_file", "screenshot", "clipboard_write"):
+            self.assertEqual(d(nom, {}), 12, nom)
+        for nom in ("media", "notify", "lock", "clipboard_read", "list_files"):
+            self.assertEqual(d(nom, {}), 17, nom)            # relayées par HardwareRelay (20 s)
+        self.assertEqual(d("exec", {"command": "x", "timeout": 10}), 7)
+        self.assertEqual(d("exec", {"command": "x", "timeout": 6}), 3)
+        self.assertEqual(d("exec", {"command": "x", "timeout": 60}), 17)   # plafond du relais (20 s - 3), même avec un long timeout
+        self.assertEqual(d("exec", {"command": "x"}), 17, "sans timeout : peut-être relayée (20 s)")
+        self.assertEqual(d("exec", {"command": "x", "timeout": 60, "node_id": "pc"}), 17, "relayée")
+        for t in (5, 0, -1, "nan", "abc"):
+            with self.assertRaises(m.Refus):
+                d("exec", {"command": "x", "timeout": t})
+
+    def lire_autorise_a(self, m, secondes):
+        """read_file autorisé dans l'île au bout de « secondes » (horloge injectée)."""
+        (self.home / "a.txt").write_text("contenu secret")
+        noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+        debut = self.t
+
+        async def demander(nom, decrite, limite):
+            self.assertEqual(limite - debut, 12)
+            self.t = debut + secondes                         # le clic sur « Autoriser » arrive à ce moment
+            return "autorise"
+        noeud.confirmation.demander = demander
+        return asyncio.run(noeud.decider("read_file", {"path": "~/a.txt"}))
+
+    def test_autoriser_a_13_s_rien_n_est_lu(self):
+        m = self.charger()
+        r = self.lire_autorise_a(m, 13)
+        self.assertFalse(r["success"])
+        self.assertTrue(r.get("denied"))
+        self.assertNotIn("content", r)
+        self.assertIn("trop tard", r["error"])
+        self.assertIn("trop tard", self.journal())
+
+    def test_autoriser_pile_a_l_echeance_rien_n_est_lu(self):
+        m = self.charger()
+        r = self.lire_autorise_a(m, 12)
+        self.assertFalse(r["success"])
+        self.assertNotIn("content", r)
+
+    def test_autoriser_a_10_s_lu(self):
+        m = self.charger()
+        r = self.lire_autorise_a(m, 10)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "contenu secret")
+
+    def test_reponse_lue_apres_l_echeance(self):
+        m = self.charger()
+        conf = m.Confirmation("test")
+        reponse = self.run_dir / "reponse"
+        reponse.write_text("autoriser")
+        self.assertEqual(asyncio.run(conf.attendre(reponse, self.t + 5)), "autorise")
+        instants = iter([self.t + 11, self.t + 13])           # boucle avant l'échéance, lecture après
+        m.horloge = lambda: next(instants)
+        self.assertEqual(asyncio.run(conf.attendre(reponse, self.t + 12)), "tard")
 
 
 class Cablage(unittest.TestCase):

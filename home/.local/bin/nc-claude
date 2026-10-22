@@ -719,6 +719,8 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
     cwd = str(cwd or "")
     if cwd.startswith("file://"):
         cwd = urllib.parse.unquote(cwd[7:])
+    # Avant le verrou : savoir si Codex notifie peut lancer « codex --version »
+    notre_voir = quoi == "attente" and agent in IAS and not notif_propre(agent)
     with Etat() as d:
         if quoi == "fin":
             d["sessions"].pop(sid, None)
@@ -753,7 +755,7 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
             s["etat"] = "terminal"
             poser_question(s, T("T'attend dans le terminal", "Waiting in the terminal"), message)
             # Sans notification à elle (OpenCode…), notre « Voir » la remplace ; les autres ont déjà la leur (doublon)
-            if agent in IAS and agent not in NOTIF_PROPRE:
+            if notre_voir:
                 notifier(s, T(f"{NOMS.get(agent, agent)} t'attend", f"{NOMS.get(agent, agent)} is waiting for you"),
                          s["projet"] + T(" : ", ": ") + (court(message, 120) if message
                                                           else T("à toi de répondre", "your turn to answer")), voir=True)
@@ -877,8 +879,50 @@ DEMANDES_ILE = ("codex", "qwen")     # IA qui acceptent « autoriser / refuser �
 # IA qui préviennent déjà elles-mêmes quand elles t'attendent (notification de bureau ou du terminal) : pas de seconde
 # notification « Voir » de notre part. Les autres IA suivies par l'île qui signalent une attente (OpenCode : son
 # extension transmet permission.asked, question.asked, form.created) reçoivent la nôtre. Antigravity, Cursor, Kiro et
-# Amp ne signalent aucune attente à leurs hooks : rien à notifier.
-NOTIF_PROPRE = ("gemini", "qwen", "copilot", "codex")
+# Amp ne signalent aucune attente à leurs hooks : rien à notifier. Codex : seulement si tui.notifications est actif
+# (codex_notifie), sinon il reçoit notre « Voir ».
+NOTIF_PROPRE = ("gemini", "qwen", "copilot")
+# tui.notifications de Codex : actif par défaut depuis Codex 0.59.0 (Notifications::Enabled(true) dans
+# codex-rs/core/src/config/types.rs, aujourd'hui codex-rs/config/src/types.rs), coupé jusqu'à 0.58.0 (« Defaults to
+# false » dans docs/config.md)
+CODEX_NOTIF_DEPUIS = (0, 59, 0)
+
+
+def version_codex():
+    """(majeure, mineure, correctif) de « codex --version » (codex-cli 0.163.0), None si inconnue."""
+    try:
+        r = subprocess.run(["codex", "--version"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", r.stdout or "")
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def codex_notifie():
+    """Codex prévient-il lui-même quand il demande ton accord ? tui.notifications de sa config ($CODEX_HOME ou
+    ~/.codex/config.toml, lue, jamais écrite) : vrai ou faux, ou une liste qui doit contenir « approval-requested » ;
+    absent : le défaut de la version installée (inconnue : on suppose que oui, pas de doublon)."""
+    v = None
+    try:
+        import tomllib
+        with open(os.path.join(os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex"), "config.toml"), "rb") as f:
+            tui = tomllib.load(f).get("tui")
+        v = tui.get("notifications") if isinstance(tui, dict) else None
+    except (OSError, ValueError, ImportError):                 # absente, illisible, Python < 3.11
+        pass
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, list):
+        return "approval-requested" in v
+    version = version_codex()
+    return version is None or version >= CODEX_NOTIF_DEPUIS
+
+
+def notif_propre(agent):
+    """L'IA t'avertit-elle déjà elle-même quand elle t'attend (pas de « Voir » de notre part) ?"""
+    return agent in NOTIF_PROPRE or (agent == "codex" and codex_notifie())
+
+
 DEBUT = ("userpromptsubmit", "beforeagent", "userpromptsubmitted", "beforesubmitprompt", "prompt")
 ETAPE = ("pretooluse", "posttooluse", "aftertool", "tool")
 ATTENTE = ("permissionrequest", "permission")

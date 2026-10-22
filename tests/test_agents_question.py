@@ -44,6 +44,12 @@ class Module(unittest.TestCase):
         m.reperer_terminal = lambda s: s.update(terminal=50, shell=60, classe="kitty")
         self.notifs = []
         m.notifier = lambda s, titre, texte, voir=False: self.notifs.append((s["id"], titre, texte, voir))
+        # Codex : jamais le vrai « codex --version » ni la vraie ~/.codex (CODEX_HOME retiré, HOME temporaire)
+        m.version_codex = lambda: (0, 163, 0)
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CODEX_HOME", None)
 
     def hook(self, **ev):
         with contextlib.redirect_stdout(io.StringIO()) as sortie, patch("sys.stdin", io.StringIO(json.dumps(ev))):
@@ -152,11 +158,45 @@ class AutresAgents(Module):
         self.assertEqual(s["etat"], "travail")
         self.assertGreater(s["maj"], avant)
 
-    def test_codex_sans_reponse_pas_de_doublon(self):
-        self.m.ile_active = lambda: False                     # pas d'île : la demande reste dans le terminal de Codex
+    def codex_attend(self, config=None, version=(0, 163, 0)):
+        """Demande de Codex sans île (elle reste dans son terminal) ; config : contenu de ~/.codex/config.toml."""
+        self.notifs.clear()
+        f = self.root / ".codex/config.toml"
+        if config is None:
+            with contextlib.suppress(FileNotFoundError):
+                f.unlink()
+        else:
+            f.parent.mkdir(exist_ok=True)
+            f.write_text(config)
+        self.m.version_codex = lambda: version
+        self.m.ile_active = lambda: False
         self.m.demande(dict(session_id="Z", cwd="/p", tool_name="Bash", tool_input={"command": "ls"}), "permission", "codex")
         self.assertEqual(self.session("codex-Z")["etat"], "terminal")
-        self.assertEqual(self.notifs, [], "Codex a sa propre notification")
+        return [n for n in self.notifs if n[0] == "codex-Z" and n[3]]
+
+    def test_codex_notifications_par_defaut_pas_de_doublon(self):
+        # tui.notifications actif par défaut depuis Codex 0.59.0 : il a sa propre notification
+        self.assertEqual(self.codex_attend(), [])
+        self.assertEqual(self.codex_attend("[tui]\nscreen_reader_detection_done = true\n"), [])
+        self.assertEqual(self.codex_attend(version=None), [], "version inconnue : pas de doublon")
+
+    def test_codex_ancien_ou_notifications_coupees_recoit_voir(self):
+        self.assertEqual(len(self.codex_attend(version=(0, 58, 0))), 1, "défaut coupé jusqu'à 0.58.0")
+        self.assertEqual(len(self.codex_attend("[tui]\nnotifications = false\n")), 1)
+        self.assertEqual(len(self.codex_attend('[tui]\nnotifications = ["agent-turn-complete"]\n')), 1,
+                         "liste sans approval-requested")
+
+    def test_codex_notifications_activees_dans_sa_config(self):
+        self.assertEqual(self.codex_attend("[tui]\nnotifications = true\n", version=(0, 58, 0)), [])
+        self.assertEqual(self.codex_attend('[tui]\nnotifications = ["approval-requested"]\n', version=(0, 58, 0)), [])
+        # Config illisible : le défaut de la version
+        self.assertEqual(len(self.codex_attend("[tui\n", version=(0, 50, 0))), 1)
+        # $CODEX_HOME l'emporte sur ~/.codex
+        autre = self.root / "codex-home"
+        autre.mkdir()
+        (autre / "config.toml").write_text("[tui]\nnotifications = false\n")
+        os.environ["CODEX_HOME"] = str(autre)
+        self.assertEqual(len(self.codex_attend("[tui]\nnotifications = true\n")), 1)
 
     def test_antigravity_cursor_kiro_amp_sans_attente(self):
         """Aucun de leurs événements n'est une attente : jamais de notification « Voir »."""
