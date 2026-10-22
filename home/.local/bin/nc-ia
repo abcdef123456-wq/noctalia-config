@@ -20,6 +20,8 @@
                                        réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
                                        (« @ » dans le Spotlight) ; nc-ia executer PLAN [N…] le réalise
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
+  nc-ia raccourci DESCRIPTION [--json]  un raccourci clavier décrit en français (« Super + F ouvre Firefox ») :
+                                       proposé, vérifié (touches, appli, bureau, page de l'île), jamais ajouté
   nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Maj + I)
   nc-ia configurer                     les clés d'API : la fenêtre « Clés des IA » de l'île, sinon au clavier
                                        (masquées), chacune essayée tout de suite ; --terminal : au clavier
@@ -46,6 +48,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import socket
 import ssl
@@ -132,6 +135,8 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        settings, updates): a plan of allowed actions, confirmed before acting (“@” in
                                        Spotlight); nc-ai execute PLAN [N…] carries it out
   nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
+  nc-ai shortcut DESCRIPTION [--json]  a keyboard shortcut described in words (“Super + F opens Firefox”):
+                                       proposed, checked (keys, app, desktop, island page), never added
   nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Shift + I)
   nc-ai configure                      the API keys from the keyboard (hidden), each one tested right away
   nc-ai key PROVIDER                   saves its API key, read from standard input (empty: removes it)
@@ -963,6 +968,23 @@ def consigne(usage):
                  f"You write shell commands for {systeme}, zsh shell. Answer with a single command on one line only, "
                  "no explanation, no code fences, no “$”. If the request is dangerous (deletion, formatting), add "
                  "“# careful” at the end of the command.")
+    if usage == "raccourci":
+        return T("Tu traduis la description d'un raccourci clavier de ce bureau (Hyprland) en JSON. Réponds UNIQUEMENT par "
+                 "un objet JSON, sans balises de code ni texte autour : {\"touches\": \"Super+F\", \"cible\": \"firefox\", "
+                 "\"nom\": \"Firefox\"}. touches : des modificateurs parmi Super, Ctrl, Alt, Maj, puis une seule touche (une "
+                 "lettre, un chiffre, F1 à F12, Entrée, Espace, Tab, Échap, Impr, Suppr, gauche, droite, haut, bas), joints "
+                 "par « + ». cible : l'identifiant d'une appli de la liste donnée, ou « bureau N » (N de 1 à 10), ou "
+                 "« ile PAGE » (PAGE parmi centre, notifications, son, reseau, bluetooth, systeme, calendrier, minuteur), "
+                 "ou une commande shell d'une ligne. Une seule cible : si la description en demande plusieurs, garde la "
+                 "principale. nom : un nom court en français. Si la demande n'est pas un raccourci, réponds {}.",
+                 "You turn the description of a keyboard shortcut of this desktop (Hyprland) into JSON. Answer ONLY with "
+                 "a JSON object, no code fences or text around it: {\"touches\": \"Super+F\", \"cible\": \"firefox\", "
+                 "\"nom\": \"Firefox\"}. touches: modifiers among Super, Ctrl, Alt, Shift, then a single key (a letter, a "
+                 "digit, F1 to F12, Enter, Space, Tab, Esc, Print, Delete, left, right, up, down), joined by “+”. cible: "
+                 "the id of an app from the given list, or “desktop N” (N from 1 to 10), or “island PAGE” (PAGE among "
+                 "centre, notifications, son, reseau, bluetooth, systeme, calendrier, minuteur), or a one-line shell "
+                 "command. A single target: if the description asks for several, keep the main one. nom: a short name in "
+                 "English. If the request is not a shortcut, answer {}.")
     if usage == "texte":
         return T("Tu transformes le texte que l'on te donne selon la consigne. Réponds seulement par le résultat, sans "
                  "introduction ni commentaire, en texte simple.",
@@ -2610,6 +2632,93 @@ def menu():
     return 0
 
 
+# ── Raccourci décrit en mots (« + Ajouter » de la fiche Super + /) ──────────────────────────────────────────────
+# L'IA propose seulement : sa réponse est vérifiée ici avec les règles de nc-raccourci (touches, appli installée,
+# bureau 1 à 10, page de l'île), puis montrée dans la fiche, où rien n'est ajouté sans un clic sur « Ajouter »
+TOUCHES_LISIBLES = {"Return": "Entrée", "space": "Espace", "Tab": "Tab", "Escape": "Échap", "Print": "Impr", "Delete": "Suppr",
+                    "Home": "Début", "End": "Fin", "left": "gauche", "right": "droite", "up": "haut", "down": "bas"}
+
+
+def module_raccourci():
+    import importlib.machinery
+    import importlib.util
+    chemin = HOME / ".local/bin/nc-raccourci"
+    if not chemin.exists():
+        raise ErreurIA(T("nc-raccourci est introuvable (~/.local/bin).", "nc-raccourci was not found (~/.local/bin)."))
+    chargeur = importlib.machinery.SourceFileLoader("ncraccourci", str(chemin))
+    rc = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncraccourci", chargeur))
+    chargeur.exec_module(rc)
+    # Vérifier sans rien demander à Hyprland : la position des lettres ne compte que pour l'ajout lui-même
+    rc.letter_codes = lambda lettre: {rc.QWERTY.get(lettre)}
+    return rc
+
+
+def valider_raccourci(rep, rc, applis):
+    """La réponse de l'IA -> {touches, cible, genre, nom, detail} ; ErreurIA si quoi que ce soit ne va pas."""
+    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(rep).strip())
+    m = re.search(r"\{.*\}", t, re.S)
+    try:
+        d = json.loads(m.group(0)) if m else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict):
+        raise ErreurIA(T("L'IA n'a pas donné de raccourci lisible : reformule, ou crée-le à la main.",
+                         "The AI did not give a readable shortcut: rephrase, or create it by hand."))
+    if not d:
+        raise ErreurIA(T("Ce n'est pas un raccourci que je sais créer : reformule (« Super + F ouvre Firefox »).",
+                         "This is not a shortcut I can create: rephrase (“Super + F opens Firefox”)."))
+    touches, cible, nom = d.get("touches"), d.get("cible"), d.get("nom", "")
+    if not isinstance(touches, str) or not isinstance(cible, str) or not isinstance(nom, str) \
+            or not cible.strip() or len(cible) > 300 or "\n" in cible or len(touches) > 60:
+        raise ErreurIA(T("La proposition de l'IA est incomplète (touches ou cible).", "The AI's proposal is incomplete (keys or target)."))
+    try:
+        bind, _, cle_, _ = rc.parse_keys(touches)
+    except rc.Refus as e:
+        raise ErreurIA(T(f"Touches refusées : {e}", f"Keys refused: {e}")) from None
+    # Les touches lisibles, comme les tape la capture (« Super+Maj+F ») : relues telles quelles par nc-reglages
+    mods = {"SUPER": "Super", "CTRL": "Ctrl", "ALT": "Alt", "SHIFT": "Maj"}
+    derniere = touches.replace(" ", "").split("+")[-1]
+    if re.fullmatch(r"[A-Za-z]|[Ff]\d+", derniere):
+        derniere = derniere.upper()
+    elif derniere.lower() in rc.NAMES:
+        derniere = TOUCHES_LISIBLES.get(rc.NAMES[derniere.lower()], derniere)
+    touches = "+".join([mods[x] for x in bind.split(" + ")[:-1]] + [derniere])
+    cible = cible.strip()
+    nom = re.sub(r"[\t\r\n]+", " ", nom).strip()[:80]
+    b = re.fullmatch(r"(?i)(?:bureau|desktop|workspace)\s+(\d+)", cible)
+    if b and not 1 <= int(b.group(1)) <= 10:
+        raise ErreurIA(T(f"Bureau inconnu : {b.group(1)} (de 1 à 10).", f"Unknown desktop: {b.group(1)} (1 to 10)."))
+    rc.apps = lambda: applis                         # les applis déjà lues (nc-apps list), pas une seconde fois
+    try:
+        genre, valeur, nom = rc.target_of(cible, nom)
+    except rc.Refus as e:
+        raise ErreurIA(str(e)[:1].upper() + str(e)[1:] + ".") from None
+    if genre == "commande":
+        # Une commande seulement si son programme existe : sinon c'est une appli inventée par l'IA
+        try:
+            prog = shlex.split(valeur)[0]
+        except (ValueError, IndexError):
+            prog = ""
+        if not prog or not shutil.which(prog, path=os.environ.get("PATH", "") + os.pathsep + str(HOME / ".local/bin")):
+            raise ErreurIA(T(f"Cible inconnue : « {cible} » n'est ni une appli installée, ni un bureau, ni une page de l'île.",
+                             f"Unknown target: “{cible}” is neither an installed app, a desktop nor an island page."))
+    cible = {"bureau": f"bureau {valeur}", "ile": f"ile {valeur}"}.get(genre, valeur)
+    quoi = {"appli": T("appli", "app"), "bureau": T("bureau", "desktop"), "ile": T("île", "island"),
+            "commande": T("commande", "command")}[genre]
+    return {"touches": touches, "cible": cible, "genre": genre, "nom": nom, "detail": f"{valeur} ({quoi})"}
+
+
+def raccourci_ia(description):
+    if coupee():
+        raise ErreurIA(message_coupee())
+    rc = module_raccourci()
+    applis = rc.apps()
+    liste = "\n".join(f"{a.get('id', '')} : {a.get('name', '')}" for a in applis[:400] if isinstance(a, dict))
+    texte = description.strip()[:500] + "\n\n" + T("Applis installées (identifiant : nom) :", "Installed apps (id: name):") + "\n" + liste
+    rep, _ = demander(texte, "raccourci", sortie=lambda m: None)
+    return valider_raccourci(rep, rc, applis)
+
+
 # ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────
 def etat():
     usages = ("question", "texte", "commande", "image")
@@ -2647,7 +2756,7 @@ def main(a):
         a = [x for x in a if x != "--fond"]
     c = {"status": "etat", "ask": "demander", "text": "texte", "command": "commande", "screenshot": "capture",
          "key": "cle", "keys": "cles", "model": "modele", "test": "tester", "which": "quelle", "enabled": "actif",
-         "last": "derniere"}.get(c, c)
+         "last": "derniere", "shortcut": "raccourci"}.get(c, c)
     json_out = "--json" in a
     a = [x for x in a if x != "--json"]
     try:
@@ -2708,6 +2817,18 @@ def main(a):
                 print(re.sub(r"^\$\s*", "", l[0]) if l else "")
                 return 0
             demander(q, usage, force, image, flux=flux)
+            return 0
+        if c == "raccourci":
+            q = " ".join(x for x in a if not x.startswith("--")).strip()
+            if not q:
+                raise ErreurIA("nc-ia raccourci \"Super + F ouvre Firefox\" [--json]")
+            r = raccourci_ia(q)
+            if json_out:
+                print(json.dumps(dict(r, ok=True), ensure_ascii=False))
+            else:
+                print(f"{r['touches']} → {r['nom']}  ({r['detail']})")
+                print(T(f"Pour l'ajouter : nc-raccourci ajoute \"{r['touches']}\" \"{r['cible']}\"",
+                        f"To add it: nc-shortcut add \"{r['touches']}\" \"{r['cible']}\""))
             return 0
         if c == "texte":
             if not a:
@@ -2877,7 +2998,9 @@ def main(a):
     except ErreurIA as e:
         if c in ("capture", "menu", "organiser", "organize") or (c == "texte" and "--copier" in a) or "--notifier" in a:   # raccourci, menu : pas de terminal
             notifier("IA", str(e))
-        if "--flux" in a:
+        if c == "raccourci" and json_out:          # la fiche Super + / lit toujours un JSON
+            print(json.dumps({"ok": False, "erreur": str(e)}, ensure_ascii=False), flush=True)
+        elif "--flux" in a:
             print(json.dumps({"t": str(e), "erreur": True}, ensure_ascii=False), flush=True)
         else:
             print(str(e), file=sys.stderr)

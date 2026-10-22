@@ -999,6 +999,68 @@ class IA(unittest.TestCase):
         self.reglages("SPOTLIGHT_IA=assistant\n")       # ancienne valeur : JARVIS, pas configuré ici
         self.assertEqual(json.loads(self.lancer("--ia", "--json", prog="nc-demander").stdout)["nom"], "")
 
+    # ── Raccourci décrit en mots (« + Ajouter » de la fiche Super + /) ──
+    def preparer_raccourci(self):
+        b = self.home / ".local/bin"
+        for f in ("nc-raccourci", "nc-keys"):
+            os.symlink(BIN / f, b / f)
+        (b / "nc-apps").write_text('#!/bin/sh\necho \'[{"id": "firefox", "name": "Firefox", "exe": "firefox"}, '
+                                   '{"id": "org.gnome.Nautilus", "name": "Fichiers", "exe": "nautilus"}]\'\n')
+        (b / "nc-apps").chmod(0o755)
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"')        # jamais appelé pour vérifier
+
+    def raccourci(self, reponse, *args):
+        Faux.texte_ant = reponse if isinstance(reponse, str) else json.dumps(reponse, ensure_ascii=False)
+        r = self.lancer("raccourci", "--json", *(args or ("Super + F ouvre Firefox sur le bureau 2",)))
+        return r, json.loads(r.stdout)
+
+    def test_raccourci_propose_et_verifie(self):
+        self.preparer_raccourci()
+        r, d = self.raccourci({"touches": "super + shift + f", "cible": "firefox", "nom": "Firefox"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(d, {"ok": True, "touches": "Super+Maj+F", "cible": "firefox", "genre": "appli", "nom": "Firefox",
+                             "detail": "firefox (appli)"})
+        q = Faux.requetes[-1]["corps"]
+        self.assertIn("JSON", q["system"], "la consigne de l'usage « raccourci »")
+        texte = json.dumps(q["messages"], ensure_ascii=False)
+        self.assertIn("Super + F ouvre Firefox sur le bureau 2", texte)
+        self.assertIn("org.gnome.Nautilus : Fichiers", texte, "l'IA connaît les applis installées")
+        self.assertNotIn("hyprctl", self.appels(), "rien n'est demandé à Hyprland, rien n'est ajouté")
+        self.assertFalse((self.home / ".config/nc/raccourcis.conf").exists(), "proposé seulement, jamais ajouté")
+        # Entre balises de code, un bureau, une page de l'île (alias), une touche nommée
+        r, d = self.raccourci('```json\n{"touches": "Super+Ctrl+2", "cible": "Bureau 2", "nom": ""}\n```')
+        self.assertEqual((d["touches"], d["cible"], d["genre"], d["nom"]), ("Super+Ctrl+2", "bureau 2", "bureau", "Bureau 2"))
+        r, d = self.raccourci({"touches": "Alt+enter", "cible": "île wifi", "nom": "Réseau"})
+        self.assertEqual((d["touches"], d["cible"], d["genre"]), ("Alt+Entrée", "ile reseau", "ile"))
+        # Une commande seulement si son programme existe
+        self.programme("monscript", "true")
+        r, d = self.raccourci({"touches": "Super+M", "cible": "monscript --vite", "nom": "Mon script"})
+        self.assertEqual((d["ok"], d["genre"], d["cible"]), (True, "commande", "monscript --vite"))
+
+    def test_raccourci_refuse(self):
+        self.preparer_raccourci()
+        for reponse, attendu in (("Voici votre raccourci !", "lisible"), ({}, "pas un raccourci"),
+                                 ({"touches": "F", "cible": "firefox"}, "modificateur"),
+                                 ({"touches": "Super+Hyper+F", "cible": "firefox"}, "modificateur inconnu"),
+                                 ({"touches": "Super+F", "cible": "bureau 11"}, "Bureau inconnu"),
+                                 ({"touches": "Super+F", "cible": "ile cuisine"}, "Page de l'île inconnue"),
+                                 ({"touches": "Super+F", "cible": "appli-inventee --x"}, "Cible inconnue"),
+                                 ({"touches": "Super+F", "cible": ""}, "incomplète"),
+                                 ({"touches": ["Super", "F"], "cible": "firefox"}, "incomplète")):
+            r, d = self.raccourci(reponse)
+            self.assertEqual(r.returncode, 1, reponse)
+            self.assertFalse(d["ok"])
+            self.assertIn(attendu, d["erreur"], reponse)
+        self.assertFalse((self.home / ".config/nc/raccourcis.conf").exists())
+
+    def test_raccourci_ia_coupee(self):
+        self.preparer_raccourci()
+        self.reglages("IA_MODE=non\n")
+        r, d = self.raccourci({"touches": "Super+F", "cible": "firefox"})
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("désactivée", d["erreur"])
+        self.assertFalse(Faux.requetes, "rien n'est envoyé quand l'IA est coupée")
+
     # ── Terminal ──
     @unittest.skipUnless(shutil.which("zsh"), "zsh requis")
     def test_zsh(self):

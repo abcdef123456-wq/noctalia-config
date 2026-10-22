@@ -5,11 +5,14 @@
 // y ajoute un léger zoom à l'entrée. « Modifier » passe en mode édition, comme le
 // Centre de contrôle de l'iPhone : l'interrupteur éteint ou rallume un raccourci de la config (éteint, il reste dans la
 // fiche, grisé), − supprime l'un des tiens (ceux de la config ne se suppriment pas), un toucher sur les touches attend
-// la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config, « + Ajouter » crée un
-// raccourci (une appli, « bureau N », « ile PAGE » ou une commande). Toute l'édition passe par Raccourcis.qml, comme la
-// page « Raccourcis » des réglages.
-// Verre : flou de Hyprland derrière (règle de calque nc-fiche, regles.lua), fond de la palette à 80 % (le texte reste lisible même sur un fond d'écran
-// blanc) ; sans flou (Économie, flou coupé) : 92 %. Clavier : Échap annule la capture, quitte l'édition, ferme.
+// la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config. « + Ajouter », dans l'en-tête
+// et toujours là, crée un raccourci (une appli, « bureau N », « ile PAGE » ou une commande) ; si l'IA est permise
+// (nc-ia actif), il peut aussi être décrit en mots : l'IA propose (nc-ia raccourci), on corrige, rien n'est ajouté sans
+// un clic. Toute l'édition passe par Raccourcis.qml, comme la page « Raccourcis » des réglages.
+// Verre : flou de Hyprland derrière (règle de calque nc-fiche, regles.lua), fond de la palette à 58 %, et sous chaque
+// colonne un voile du fond à 25 % (rayon 10, il ne se voit pas comme une carte) : le texte reste lisible sur un fond
+// d'écran clair flouté ; sans flou (Économie, flou coupé) : 92 %, lisible même sur du blanc pur. Le texte secondaire y
+// est un cran plus proche du texte (texteSecondaire). Clavier : Échap annule la capture, quitte l'édition, ferme.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -39,12 +42,59 @@ PanelWindow {
     property var conflit: null
     property bool ajout: false                      // la petite carte « + Ajouter » est ouverte
     property var applis: []                         // pour les suggestions de « + Ajouter » (nc-apps list, lu à l'ouverture)
-    onAjoutChanged: if (ajout && !applis.length && !lectureApplis.running) lectureApplis.running = true
+    onAjoutChanged: {
+        if (ajout && !applis.length && !lectureApplis.running) lectureApplis.running = true
+        if (ajout && !iaActif.running) iaActif.running = true
+        if (!ajout) { demandeIA.running = false; proposition = null; erreurIA = "" }
+    }
     Process {
         id: lectureApplis
         command: [Raccourcis.bin + "nc-apps", "list"]
         stdout: StdioCollector { onStreamFinished: { try { fiche.applis = JSON.parse(text) } catch (e) { fiche.applis = [] } } }
     }
+    // ── « + Ajouter » par l'IA : seulement si nc-ia est installé et l'IA permise (nc-ia actif : 0 ; IA_MODE=non : 1 ;
+    // absent : ne démarre pas). Vérifié à l'ouverture de la carte ; l'IA n'est appelée que sur demande ──
+    property bool iaPermise: false
+    readonly property bool iaPrete: iaPermise && !Reglages.iaCoupee
+    property var proposition: null                  // ce que l'IA propose : {touches, cible, genre, nom, detail}
+    property string erreurIA: ""
+    Process {
+        id: iaActif
+        command: [Raccourcis.bin + "nc-ia", "actif"]
+        onExited: code => fiche.iaPermise = code === 0
+    }
+    Process {
+        id: demandeIA
+        stdout: StdioCollector { onStreamFinished: fiche.lireProposition(text) }
+    }
+    function proposer() {
+        var t = champIA.texte.trim()
+        if (!t || demandeIA.running || !iaPrete) return
+        proposition = null; erreurIA = ""
+        demandeIA.command = [Raccourcis.bin + "nc-ia", "raccourci", "--json", t]
+        demandeIA.running = true
+    }
+    // La réponse de nc-ia raccourci (déjà vérifiée : touches, appli, bureau, page de l'île) : proposée, jamais ajoutée
+    function lireProposition(texte) {
+        if (!ajout) return                          // carte refermée pendant la demande
+        var d = null
+        try { d = JSON.parse(String(texte).trim().split("\n").pop()) } catch (e) {}
+        if (d && d.ok && d.touches && d.cible) {
+            proposition = d; champTouchesIA.texte = d.touches; champNomIA.texte = d.nom || ""
+        } else erreurIA = d && d.erreur ? d.erreur : Reglages.t("L'IA n'a pas répondu de façon lisible : réessaie, ou crée-le à la main.",
+                                                                 "The AI did not answer readably: try again, or create it by hand.")
+    }
+    // [Ajouter] : par le même chemin que l'ajout à la main (Raccourcis.ajouter), touches prises comprises (« Remplacer »)
+    function ajouterProposition() {
+        var p = proposition, touches = champTouchesIA.texte.trim(), nom = champNomIA.texte.trim() || (p ? p.nom : "")
+        if (!p || !touches) return
+        tentative = { r: { modifiable: true, nom: nom, ajout: { cible: p.cible, nom: nom } }, touches: touches }
+        Raccourcis.ajouter(touches, p.cible, nom)
+        annulerProposition(); champIA.texte = ""; ajout = false; zoneClavier.forceActiveFocus()
+    }
+    function annulerProposition() { proposition = null; erreurIA = ""; champTouchesIA.texte = ""; champNomIA.texte = "" }
+    // Ouvrir « + Ajouter » (depuis l'en-tête) : passe en édition, où s'affichent le résultat et « Remplacer »
+    function ouvrirAjout() { edition = true; conflit = null; ajout = true; champCible.forceActiveFocus() }
     // Les applis dont le nom ou l'identifiant contient ce qui est tapé (6 au plus)
     function suggestions(t) {
         t = String(t || "").trim().toLowerCase()
@@ -52,9 +102,14 @@ PanelWindow {
         return applis.filter(a => String(a.name || "").toLowerCase().indexOf(t) >= 0 || String(a.id || "").toLowerCase().indexOf(t) >= 0).slice(0, 6)
     }
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
-    readonly property real opaciteFond: verre ? 0.8 : 0.92
+    readonly property real opaciteFond: verre ? 0.58 : 0.92
+    // Sous chaque colonne de texte : le fond de la palette, en plus, à 25 % (remonte le contraste sans faire de carte)
+    readonly property real voileColonne: 0.25
+    // Texte secondaire de la fiche : texteSec un cran vers le texte (plus clair sur une palette sombre, plus foncé sur
+    // une claire). Pas texteDoux : c'est le blanc ANSI du terminal, pâle aussi sur une palette claire
+    readonly property color texteSecondaire: Qt.tint(Couleurs.texteSec, Qt.alpha(Couleurs.texte, 0.35))
     // Interrupteur éteint : le verre voilé du texte, pour se détacher de la carte (3:1, même sur le pire fond derrière)
-    readonly property real voilePiste: 0.6
+    readonly property real voilePiste: 0.7
     readonly property real largeurEcran: fiche.screen ? fiche.screen.width : 1600
     readonly property real hauteurEcran: fiche.screen ? fiche.screen.height : 1000
 
@@ -71,7 +126,6 @@ PanelWindow {
     readonly property var parSection: {
         var s = {}
         lignes.forEach(r => { var n = section(r); (s[n] = s[n] || []).push(r) })   // les désactivés aussi, grisés
-        if (edition && !s["Mes raccourcis"]) s["Mes raccourcis"] = []
         return s
     }
     readonly property var titres: ({ "Applis et barre": "Apps & Bar", "Fenêtres": "Windows", "Bureaux": "Desktops",
@@ -105,7 +159,7 @@ PanelWindow {
     // Hauteur estimée d'une section (comme Ligne : rangées de pastilles, description sur 3 lignes au plus)
     function hauteurSection(n) {
         var rs = parSection[n] || []
-        if (!rs.length && !(edition && n === "Mes raccourcis")) return 0
+        if (!rs.length) return 0
         var kw = Math.min(190, Math.max(60, ...rs.map(largeurTouches))), h = 56, place = largeurColonne - (edition ? 44 : 0)
         var lignesTexte = (r, l) => Math.min(3, Math.max(1, Math.ceil(r.nom.length * 7.3 / Math.max(1, l))))
         rs.forEach(r => {
@@ -113,7 +167,7 @@ PanelWindow {
             if (t > kw) h += 3 + Math.ceil(t / place) * 29 - 5 + 4 + 17 * lignesTexte(r, place) + 6
             else h += Math.max(30, 12 + 17 * lignesTexte(r, place - kw - 14))
         })
-        return h + (edition && n === "Mes raccourcis" ? 34 : 0)
+        return h
     }
     readonly property var colonnes: {
         var c = [], h = []
@@ -207,8 +261,23 @@ PanelWindow {
             x: Gabarit.marge; y: 24; font.pixelSize: 18; font.weight: Font.Bold
             text: fiche.edition ? Reglages.t("Modifier les raccourcis", "Edit shortcuts") : Reglages.t("Raccourcis", "Shortcuts")
         }
+        // « + Ajouter », toujours là (même hors édition) : ouvre la carte « Nouveau raccourci »
+        Rectangle {
+            id: boutonAjouter
+            objectName: "nc-fiche-plus"
+            anchors.right: boutonModifier.left; anchors.rightMargin: 10; y: 20
+            width: rangeeAjouter.implicitWidth + 24; height: 30; radius: 15
+            color: zAjouter.containsMouse ? Couleurs.gris3 : Couleurs.gris2
+            Row {
+                id: rangeeAjouter; anchors.centerIn: parent; spacing: 6
+                Texte { text: "+"; font.pixelSize: 16; font.weight: Font.Bold; color: Couleurs.accent }
+                Texte { text: Reglages.t("Ajouter", "Add"); font.weight: Font.DemiBold }
+            }
+            MouseArea { id: zAjouter; objectName: "nc-fiche-ajouter"; anchors.fill: parent; hoverEnabled: true; onClicked: fiche.ouvrirAjout() }
+        }
         // « Modifier » / « OK »
         Rectangle {
+            id: boutonModifier
             objectName: "nc-fiche-modifier"
             anchors.right: parent.right; anchors.rightMargin: 28; y: 20
             width: libModifier.implicitWidth + 28; height: 30; radius: 15
@@ -233,21 +302,32 @@ PanelWindow {
                 cumul = 0
             }
         }
+        // La liste déborde de 10 de chaque côté : la place du voile des colonnes, sans le couper
         Defilement {
             id: defilement
             objectName: "nc-fiche-liste"
-            x: Gabarit.marge; y: 66
-            width: parent.width - 2 * Gabarit.marge; height: parent.height - y - 56
-            contentWidth: width; contentHeight: contenu.height
+            x: Gabarit.marge - 10; y: 56
+            width: parent.width - 2 * Gabarit.marge + 20; height: parent.height - y - 46
+            contentWidth: width; contentHeight: contenu.height + 20
             Row {
                 id: contenu
+                x: 10; y: 10
                 spacing: 24
                 Repeater {
                     model: fiche.colonnes
-                    Column {
+                    Item {
                         id: colonne
                         required property var modelData
-                        width: fiche.largeurColonne
+                        width: fiche.largeurColonne; height: pile.height
+                        // Le voile : le fond de la palette à 25 %, sous le texte de la colonne
+                        Rectangle {
+                            objectName: "nc-fiche-voile"
+                            anchors.fill: parent; anchors.margins: -10; radius: 10
+                            color: Qt.alpha(Couleurs.fond, fiche.voileColonne)
+                        }
+                        Column {
+                        id: pile
+                        width: parent.width
                         spacing: 0
                         clip: true                      // rien ne déborde dans la colonne voisine
                         Repeater {
@@ -258,7 +338,7 @@ PanelWindow {
                                 required property int index
                                 readonly property var rangees: fiche.parSection[modelData] || []
                                 readonly property real kw: Math.min(190, Math.max(60, ...rangees.map(fiche.largeurTouches)))
-                                visible: rangees.length > 0 || (fiche.edition && modelData === "Mes raccourcis")
+                                visible: rangees.length > 0
                                 width: colonne.width
                                 Item { width: 1; height: bloc.index > 0 ? 22 : 0 }
                                 Texte {
@@ -269,19 +349,8 @@ PanelWindow {
                                     model: bloc.rangees
                                     Ligne { required property var modelData; r: modelData; kw: bloc.kw; largeur: colonne.width }
                                 }
-                                // « + Ajouter », à la fin de « Mes raccourcis »
-                                Item {
-                                    visible: fiche.edition && bloc.modelData === "Mes raccourcis"
-                                    width: colonne.width; height: visible ? 34 : 0
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter; spacing: 8
-                                        Rectangle { width: 22; height: 22; radius: 11; color: Couleurs.vert
-                                                    Texte { anchors.centerIn: parent; text: "+"; font.pixelSize: 16; font.weight: Font.Bold; color: "#ffffff" } }
-                                        Texte { text: Reglages.t("Ajouter un raccourci", "Add a shortcut"); color: Couleurs.vert }
-                                    }
-                                    MouseArea { objectName: "nc-fiche-ajouter"; anchors.fill: parent; onClicked: { fiche.ajout = true; champCible.forceActiveFocus() } }
-                                }
                             }
+                        }
                         }
                     }
                 }
@@ -289,13 +358,20 @@ PanelWindow {
         }
 
         // Message : résultat d'une écriture, ou combinaison déjà prise avec « Remplacer »
+        // Sur un voile du fond, comme les colonnes (un peu plus marqué : il apparaît seul, au bas de la carte)
+        Rectangle {
+            anchors.centerIn: rangeeMessage; width: rangeeMessage.width + 24; height: 34; radius: 17
+            visible: rangeeMessage.visible; color: Qt.alpha(Couleurs.fond, 0.5)
+        }
         Row {
-            anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 18
+            id: rangeeMessage
+            objectName: "nc-fiche-message"
+            anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 14
             spacing: 10
             visible: Raccourcis.message !== "" && fiche.edition
             Texte {
                 anchors.verticalCenter: parent.verticalCenter
-                text: Raccourcis.message; color: Raccourcis.erreur ? Couleurs.rouge : Couleurs.texteSec; font.pixelSize: 12
+                text: Raccourcis.message; color: Raccourcis.erreur ? Couleurs.rouge : Couleurs.texte; font.pixelSize: 12
             }
             Rectangle {
                 visible: !!fiche.conflit; width: libRemplacer.implicitWidth + 22; height: 26; radius: 13; color: Couleurs.rouge
@@ -429,7 +505,7 @@ PanelWindow {
             width: ligne.longues ? ligne.largeur - x - ligne.droite : ligne.placeTexte
             y: ligne.longues ? ligne.basTouches + 4 : (ligne.height - implicitHeight) / 2
             opacity: ligne.attenue
-            text: ligne.r.nom; secondaire: true
+            text: ligne.r.nom; color: fiche.texteSecondaire
             wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideNone    // entre les mots, au milieu d'un mot trop long
         }
         Rectangle {
@@ -535,7 +611,7 @@ PanelWindow {
                 width: libChoisir.implicitWidth + 28; height: 32; radius: 16
                 color: champCible.texte.trim() ? Couleurs.accent : Couleurs.gris3
                 Texte { id: libChoisir; anchors.centerIn: parent; text: Reglages.t("Choisir les touches", "Choose the keys")
-                        color: champCible.texte.trim() ? Couleurs.surAccent : Couleurs.texteSec }
+                        color: champCible.texte.trim() ? Couleurs.surAccent : fiche.texteSecondaire }
                 MouseArea {
                     objectName: "nc-fiche-choisir"
                     anchors.fill: parent; enabled: champCible.texte.trim() !== ""
@@ -547,11 +623,72 @@ PanelWindow {
                     }
                 }
             }
+            // ── Par l'IA (seulement si elle est permise) : décrire, l'IA propose, on corrige, [Ajouter] ou [Annuler] ──
+            Item { visible: fiche.iaPrete; width: 1; height: 4 }
+            Texte { visible: fiche.iaPrete; text: Reglages.t("Ou décris-le à l'IA", "Or describe it to the AI"); font.pixelSize: 12
+                    font.weight: Font.Bold; color: Couleurs.accent }
+            Champ {
+                id: champIA; objectName: "nc-fiche-ia"
+                visible: fiche.iaPrete && !fiche.proposition
+                indice: Reglages.t("Décris ton raccourci… (Super + F ouvre Firefox sur le bureau 2)", "Describe your shortcut… (Super + F opens Firefox on desktop 2)")
+                onValide: fiche.proposer()
+            }
+            Rectangle {
+                visible: fiche.iaPrete && !fiche.proposition && (champIA.texte.trim() !== "" || demandeIA.running)
+                width: libProposer.implicitWidth + 28; height: 32; radius: 16
+                color: demandeIA.running ? Couleurs.gris3 : Couleurs.accent
+                Texte { id: libProposer; anchors.centerIn: parent
+                        text: demandeIA.running ? Reglages.t("L'IA réfléchit…", "The AI is thinking…") : Reglages.t("Proposer", "Suggest")
+                        color: demandeIA.running ? Couleurs.texte : Couleurs.surAccent }
+                MouseArea { objectName: "nc-fiche-ia-proposer"; anchors.fill: parent; enabled: !demandeIA.running; onClicked: fiche.proposer() }
+            }
+            Texte {
+                objectName: "nc-fiche-ia-erreur"
+                visible: fiche.iaPrete && fiche.erreurIA !== ""; width: parent.width
+                text: fiche.erreurIA; color: Couleurs.orange; font.pixelSize: 12; wrapMode: Text.Wrap; maximumLineCount: 3
+            }
+            // La proposition, à corriger au besoin : touches et nom ; la cible est dite telle qu'elle a été vérifiée
+            Column {
+                objectName: "nc-fiche-ia-proposition"
+                visible: fiche.iaPrete && !!fiche.proposition
+                width: parent.width; spacing: 8
+                Texte { width: parent.width; wrapMode: Text.Wrap; maximumLineCount: 2; color: fiche.texteSecondaire; font.pixelSize: 12
+                        text: fiche.proposition ? Reglages.t("Proposé par l'IA : ", "Suggested by the AI: ") + fiche.proposition.detail : "" }
+                Row {
+                    width: parent.width; spacing: 10
+                    Texte { width: 56; height: 32; text: Reglages.t("Touches", "Keys"); color: fiche.texteSecondaire; font.pixelSize: 12 }
+                    Champ { id: champTouchesIA; objectName: "nc-fiche-ia-touches"; width: parent.width - 66; onValide: fiche.ajouterProposition() }
+                }
+                Row {
+                    width: parent.width; spacing: 10
+                    Texte { width: 56; height: 32; text: Reglages.t("Nom", "Name"); color: fiche.texteSecondaire; font.pixelSize: 12 }
+                    Champ { id: champNomIA; objectName: "nc-fiche-ia-nom"; width: parent.width - 66; onValide: fiche.ajouterProposition() }
+                }
+                Row {
+                    spacing: 8
+                    Rectangle {
+                        width: libAjouterIA.implicitWidth + 28; height: 32; radius: 16
+                        color: champTouchesIA.texte.trim() ? Couleurs.accent : Couleurs.gris3
+                        Texte { id: libAjouterIA; anchors.centerIn: parent; text: Reglages.t("Ajouter", "Add")
+                                color: champTouchesIA.texte.trim() ? Couleurs.surAccent : fiche.texteSecondaire }
+                        MouseArea { objectName: "nc-fiche-ia-ajouter"; anchors.fill: parent; enabled: champTouchesIA.texte.trim() !== ""
+                                    onClicked: fiche.ajouterProposition() }
+                    }
+                    Rectangle {
+                        width: libAnnulerIA.implicitWidth + 28; height: 32; radius: 16
+                        color: zAnnulerIA.containsMouse ? Couleurs.gris3 : Couleurs.gris2
+                        Texte { id: libAnnulerIA; anchors.centerIn: parent; text: Reglages.t("Annuler", "Cancel") }
+                        MouseArea { id: zAnnulerIA; objectName: "nc-fiche-ia-annuler"; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: { fiche.annulerProposition(); champIA.forceActiveFocus() } }
+                    }
+                }
+            }
         }
     }
     component Champ: Rectangle {
         property alias texte: saisie.text
         property string indice: ""
+        signal valide()                             // Entrée
         function forceActiveFocus() { saisie.forceActiveFocus() }
         width: parent.width; height: 32; radius: 9
         color: Qt.alpha(Couleurs.carte, 0.8); border.width: 1; border.color: saisie.activeFocus ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
@@ -561,7 +698,8 @@ PanelWindow {
             verticalAlignment: TextInput.AlignVCenter; clip: true
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13
             Keys.onEscapePressed: { fiche.ajout = false; zoneClavier.forceActiveFocus() }
-            Texte { anchors.fill: parent; visible: !saisie.text && !saisie.activeFocus; text: parent.parent.indice; secondaire: true; font.pixelSize: 12 }
+            onAccepted: parent.valide()
+            Texte { anchors.fill: parent; visible: !saisie.text && !saisie.activeFocus; text: parent.parent.indice; color: fiche.texteSecondaire; font.pixelSize: 12 }
         }
     }
 
@@ -578,10 +716,10 @@ PanelWindow {
             anchors.centerIn: parent; spacing: 8; width: parent.width - 40
             Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 15; font.weight: Font.Bold
                     text: Reglages.t("Tape les nouvelles touches…", "Type the new keys…") }
-            Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; secondaire: true
+            Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; color: fiche.texteSecondaire
                     text: Raccourcis.capture ? "« " + Raccourcis.capture.nom + " »" : "" }
             Texte { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 12
-                    color: capture.aide ? Couleurs.orange : Couleurs.texteSec
+                    color: capture.aide ? Couleurs.orange : fiche.texteSecondaire
                     text: capture.aide || Reglages.t("Échap pour annuler", "Esc to cancel") }
         }
     }

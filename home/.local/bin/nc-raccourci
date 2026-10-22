@@ -141,7 +141,7 @@ def parse_keys(text):
             key = f"code:{CODES[key]}"
     else:
         raise Refus(T(f"touche inconnue : {k}", f"unknown key: {k}"))
-    if not mods and not key.startswith("F") and key != "Print":
+    if not mods and not re.fullmatch(r"F\d+", key) and key != "Print":      # F1…F12 seules, pas la lettre F
         raise Refus(T("ajoute au moins un modificateur (Super, Ctrl, Alt) : sinon la touche ne marcherait plus pour taper",
                       "add at least one modifier (Super, Ctrl, Alt): otherwise the key would no longer work for typing"))
     return " + ".join(mods + [key]), mask, key, codes
