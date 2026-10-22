@@ -122,6 +122,17 @@ ShellRoot {
    verifier(titres()[0] === "Résumer" && spot.resultats[0].sous.indexOf("presse-papiers") >= 0, "source affichée : " + JSON.stringify(spot.resultats[0]))
    spot.valider(0, false); etape++; return }
   if (etape === 6) { if (spot.reflechit) return
+   // Plan de rangement en zones, « me montrer le plan d'abord » : une mini-carte de l'écran (IDÉE-2)
+   champ.text = "@ range"; spot.questionPosee = "@ range"; spot.modeAgent = true; spot.reponse = "Plan prêt."
+   spot.plan = { actions: [ { n: 1, outil: "fenetre_zone", libelle: "code : 60 × 100 %", fait: false, args: { x: "0", y: "0", largeur: "60", hauteur: "100" } },
+                            { n: 2, outil: "fenetre_zone", libelle: "firefox : 40 × 100 %", fait: false, args: { x: "60", y: "0", largeur: "40", hauteur: "100" } } ], refus: [] }
+   etape++; return }
+  if (etape === 7) {
+   var carte = trouver(spot, "nc-spotlight-mini-carte")
+   verifier(carte && carte.visible, "mini-carte affichée")
+   var zones = carte.children.filter(c => c.width > 4 && c.height > 4)
+   verifier(zones.length === 2, "deux zones : " + zones.length)
+   verifier(Math.abs(zones[0].width / carte.width - 0.6) < 0.05 && zones[1].x > zones[0].x, "proportions de l'écran")
    Qt.quit() }
  } }
  Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }

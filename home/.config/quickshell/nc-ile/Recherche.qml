@@ -815,9 +815,12 @@ Item {
         id: zoneReponse
         visible: r.reponseAide !== "" || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
         readonly property bool attend: r.reflechit && r.reponse === ""
+        // Plan de rangement en zones (« me montrer le plan d'abord ») : une mini-carte de l'écran plutôt qu'une liste
+        readonly property var zones: r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
-        height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0) + 14, 320)
+        height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0)
+                         + (miniCarte.visible ? 10 + miniCarte.height : 0) + 14, 420)
         clip: true
         Row {
             id: enTete
@@ -838,6 +841,34 @@ Item {
             visible: !zoneReponse.attend || r.reponseAide !== ""
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
             textFormat: r.reponseAide !== "" ? Text.PlainText : Text.MarkdownText
+        }
+        // Mini-carte : l'écran aux proportions 16:10, chaque zone en carte arrondie avec le nom de son appli
+        Rectangle {
+            id: miniCarte
+            objectName: "nc-spotlight-mini-carte"
+            visible: zoneReponse.zones.length > 0 && !zoneReponse.attend && r.reponseAide === ""
+            anchors.top: texteReponse.bottom; anchors.topMargin: 10
+            x: 14; width: Math.min(parent.width - 28, 300); height: Math.round(width * 10 / 16)
+            radius: 12; color: Qt.alpha(Couleurs.fond, 0.6)
+            Repeater {
+                model: zoneReponse.zones
+                Rectangle {
+                    required property var modelData
+                    required property int index
+                    readonly property real e: 3
+                    x: miniCarte.width * Number(modelData.args.x) / 100 + e
+                    y: miniCarte.height * Number(modelData.args.y) / 100 + e
+                    width: Math.max(4, miniCarte.width * Number(modelData.args.largeur) / 100 - 2 * e)
+                    height: Math.max(4, miniCarte.height * Number(modelData.args.hauteur) / 100 - 2 * e)
+                    radius: Math.min(9, Math.min(width, height) / 3)
+                    color: index % 2 ? Couleurs.carteSurvol : Couleurs.carte
+                    border.width: modelData.fait ? 1.5 : 0; border.color: Couleurs.accent
+                    Texte {
+                        anchors.centerIn: parent; width: parent.width - 8; horizontalAlignment: Text.AlignHCenter
+                        text: String(modelData.libelle || "").split(" :")[0]; font.pixelSize: 11; secondaire: true
+                    }
+                }
+            }
         }
     }
 
