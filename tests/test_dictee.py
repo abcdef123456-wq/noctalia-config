@@ -72,9 +72,11 @@ class Dictee(unittest.TestCase):
         f.write_text('URL="%s"\nSECRET_KEY="%s"\n' % (url or "http://127.0.0.1:%d" % self.serveur.server_port, cle))
         f.chmod(0o600)
 
-    def lancer(self, action, octets=4000):
+    def lancer(self, action, octets=4000, **langue):
         env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS=str(octets),
                    PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin")
+        env.update(langue)
+        env = {k: v for k, v in env.items() if v is not None}
         r = subprocess.run([str(SCRIPT), action], env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(r.stderr, "")
         lignes = r.stdout.splitlines()
@@ -93,10 +95,28 @@ class Dictee(unittest.TestCase):
         code, r = self.lancer("start")
         self.assertEqual((code, r["ok"], r["recording"]), (0, True, True), "second start : l'enregistrement continue")
         self.assertEqual(self.lancer("stop"), (0, {"ok": True, "text": "bonjour jarvis", "engine": "test-whisper"}))
-        self.assertEqual(Serveur.recus, [dict(chemin="/api/transcribe", cle=CLE, type="audio/wav", taille=4000)])
+        self.assertEqual(Serveur.recus, [dict(chemin="/api/transcribe?language=fr", cle=CLE, type="audio/wav", taille=4000)])
         self.assertFalse((self.home / "run/nc-dictee.wav").exists(), "audio conservé après la transcription")
         self.assertEqual(self.lancer("status"), (0, {"ok": True, "recording": False}))
         self.assertEqual(self.lancer("stop"), (1, {"ok": False, "error": "Aucun enregistrement en cours."}))
+
+    def test_langue_envoyee(self):
+        # JARVIS-BIS 64523e5 transcrit en français si on ne dit rien (WHISPER_LANGUAGE="fr") : la langue part toujours
+        reglages = self.home / ".config/nc/reglages.conf"
+        for env, reglage, attendu in [(dict(NC_LANGUE="en", LANG="fr_FR.UTF-8"), None, "en"),
+                                      (dict(NC_LANGUE=None, LANG="fr_FR.UTF-8"), 'LANGUE="en"\n', "en"),
+                                      (dict(NC_LANGUE=None, LANG="de_DE.UTF-8"), None, "de"),
+                                      (dict(NC_LANGUE=None, LANG="de_DE.UTF-8"), "LANGUE=auto\n", "de"),
+                                      (dict(NC_LANGUE=None, LANG="C.UTF-8"), None, "auto")]:
+            with self.subTest(env=env, reglage=reglage):
+                if reglage:
+                    reglages.write_text(reglage)
+                elif reglages.exists():
+                    reglages.unlink()
+                Serveur.recus = []
+                self.lancer("start", **env)
+                self.assertEqual(self.lancer("stop", **env)[0], 0)
+                self.assertEqual(Serveur.recus[0]["chemin"], "/api/transcribe?language=" + attendu)
 
     def test_micro_coupe(self):
         self.lancer("start", octets=0)

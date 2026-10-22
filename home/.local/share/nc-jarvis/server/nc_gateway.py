@@ -153,6 +153,7 @@ async def manage(request: Request):
         body = json.loads(raw)
         if not isinstance(body, dict) or not isinstance(body.get('params', {}), dict):
             raise ValueError
-        return await dispatch(body.get('op'), body.get('params', {}), body.get('confirmed') is True)
+        return await dispatch(body.get('op'), body.get('params', {}), body.get('confirmed') is True,
+                              session_key=body.get('session_key'))
     except (ValueError, TypeError, KeyError):
         raise HTTPException(400, 'Paramètres invalides') from None

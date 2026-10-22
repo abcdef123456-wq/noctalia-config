@@ -48,9 +48,11 @@ fenêtres comme les autres ; le même raccourci la ramène, la met devant ou la 
 `jarvis-chat`, titre « JARVIS Chat »), dans le style de l’île : orbe, en-tête J.A.R.V.I.S., micro, Markdown et LaTeX.
 Le champ de saisie a le focus à l’ouverture, Entrée envoie, Échap ferme (un premier Échap masque les propositions
 de commandes). Elle s’ouvre **vierge** à chaque ouverture : les messages plus anciens restent dans l’île et le cockpit,
-qui partagent la même liste locale. L’envoi passe par `AssistantEtat` comme dans l’île, donc **la session moteur reste
-partagée** avec l’île, le cockpit, Telegram et Discord ; « Nouvelle conversation » envoie le `/reset` existant (session
-serveur et mémoire de travail remises à zéro, pour toutes les interfaces) puis vide la fenêtre. Sans Quickshell,
+qui partagent la même liste locale. L’envoi passe par `AssistantEtat` comme dans l’île, donc la fenêtre, l’île et le
+cockpit de ce PC parlent dans **la même session**. Avec AGY (révision `64523e5`), chaque PC a la sienne, Telegram et
+Discord aussi ; avec Claude Code, Codex ou OpenCode, une seule session reste partagée par tous (voir « Réglages rapides
+et moteurs »). « Nouvelle conversation » envoie le `/reset` existant (session serveur et mémoire de travail remises à
+zéro : celle de ce PC avec AGY, celle de tout le monde sinon) puis vide la fenêtre. Sans Quickshell,
 `nc-jarvis chat` ouvre le chat dans un terminal.
 
 C’est une fenêtre ordinaire de Hyprland, sans épinglage forcé : **Super + Ctrl + P** l’épingle sur tous les bureaux comme
@@ -102,7 +104,12 @@ sinon `pw-record`, sinon `arecord` (PipeWire ou PulseAudio suffisent ; `alsa-uti
 `$XDG_RUNTIME_DIR`, et envoie le WAV à `POST /api/transcribe` du gateway avec `X-Secret-Key`, sans suivre de
 redirection ; l’audio est supprimé après la réponse. Serveur, clé et délai sont ceux de
 `~/.config/nc/assistant.conf` (`nc-assistant configurer`) : aucune clé de transcription côté client, le serveur
-choisit son moteur (Groq Whisper, OpenAI ou `faster-whisper` local). Une erreur (serveur arrêté, micro coupé,
+choisit son moteur (Groq Whisper, OpenAI ou `faster-whisper` local). `nc-dictee` lui dit aussi la langue parlée
+(`?language=`) : `fr` ou `en` selon `NC_LANGUE` ou le réglage Langue, sinon la langue du système (`de`, `es`…), sinon
+`auto` (Whisper devine). C’est nécessaire depuis `64523e5`, où le serveur transcrit en français si on ne lui dit rien
+(`WHISPER_LANGUAGE="fr"` dans son `.env`, à mettre à `auto` pour l’ancien comportement) ; `3d1c6b6` lit le même
+paramètre. Ce serveur souffle aussi « Transcription en français. » à Whisper, quelle que soit la langue : en anglais,
+la transcription reste bonne, mais un mot peut parfois sortir en français. Une erreur (serveur arrêté, micro coupé,
 clé refusée, gateway sans `/api/transcribe` → HTTP 404) s’affiche sous l’orbe, l’écoute s’arrête. Un clic pendant
 une demande ou pendant que `nc-dictee` tourne (double clic) est ignoré ; fermer l’île en pleine écoute annule
 l’enregistrement. Pas de dictée dans le cockpit plein écran, pas de synthèse vocale.
@@ -207,16 +214,22 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-La révision `3d1c6b6` ajoute aux précédentes (dictée côté serveur, accès Tailscale) : les choix proposés par
-JARVIS extraits par le serveur (marqueur `[CHOIX: A | B]`, affichés en boutons sur le bureau), des délais par
-défaut de 600 s pour les tâches longues, et la correction d'une erreur 500.
+La révision validée est `64523e5`. Elle ajoute à `3d1c6b6` (choix en boutons, délais de 600 s, dictée côté serveur,
+accès Tailscale) :
 
-Le déployeur installe la révision validée (`3d1c6b6`) sur un nouveau
-serveur, mais ne change jamais celle d'un serveur déjà installé. Pour le faire, sur la machine du backend (dossier
-par défaut `~/.local/share/jarvis-bis`) :
+- **une session par PC avec AGY** : le serveur range chaque conversation sous une clé, `desktop:` suivi du nom du PC
+  (le `client_id` que `nc-assistant` envoie déjà), `telegram:…` ou `discord:…` pour les bots. Avec nos autres moteurs
+  (Claude Code, Codex, OpenCode), rien ne change : une seule session partagée ;
+- **la dictée en français par défaut** (`WHISPER_LANGUAGE`, voir « Dictée vocale ») ;
+- **des nœuds plus sûrs** pour `nc-noeud` : la clé seulement dans l’en-tête, `ws://` refusé vers un hôte public,
+  les commandes coupées par défaut (voir « Laisser JARVIS piloter ce PC »).
+
+Le déployeur installe la révision validée (`64523e5`) sur un nouveau serveur, et accepte un serveur resté sur une
+révision validée plus ancienne (`3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà installé. Pour le
+faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 64523e57c958f23af459c8069d1a6985bf349640
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 
@@ -226,18 +239,50 @@ les unités, l'overlay en tête (à faire de toute façon depuis la correction D
 Ne lance pas `scripts/switch-to-unified.sh` ni `deploy.sh setup` du dépôt du serveur : ils écoutent sur toutes les
 interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env`.
 
+N’installe pas à la main les révisions intermédiaires `1ae55f3`, `8ff25c3` ou `4d279b6` : elles passent une clé de
+session à des fonctions que l’overlay d’avant `64523e5` ne connaissait pas, et chaque question finit en erreur 500.
+Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `64523e5`.
+
 ## Matériel local et changement du dépôt upstream
 
 La révision `8867dd0` renomme `render-gateway/` en `gateway/` et supprime le relais WebSocket PC-agent.
 Les fonctions matérielles s’exécutent désormais sur **l’hôte de JARVIS**. Un serveur sans session graphique
 ne pilote donc pas le bureau de ce PC. L’interface désactive ces actions en mode serveur ; le déploiement
 local reste le parcours prévu pour piloter le bureau. La commande historique `nc-jarvis agent` explique
-cette limite et n’installe aucun ancien relais.
+cette limite et n’installe aucun ancien relais. Pour qu’un serveur distant agisse quand même sur ce PC, avec ta
+confirmation, voir la section suivante.
 
 Un backend existant sur une autre révision n’est pas réinitialisé ni déplacé automatiquement : le déployeur
 s’arrête avant modification. Pour migrer une instance, sauvegarder ses données et fichiers privés et examiner
 le renommage du dossier gateway, des chemins des services et de leurs venv avant de reprendre. Ne pas créer
 un second backend avec les mêmes tokens pour contourner ce contrôle.
+
+## Laisser JARVIS piloter ce PC
+
+`nc-noeud` fait de ce PC un « nœud » de JARVIS : le serveur peut lui demander une action (musique, notification,
+capture, fichier, commande…). Il remplace le client `clients/node_agent.py` du serveur, qui exécute tout sans
+demander.
+
+- **Coupé par défaut.** Pour l’activer : nc-reglages → Intelligence artificielle → « Laisser JARVIS piloter ce PC »
+  (cela démarre ou arrête le service `nc-noeud.service`). Si l’IA du bureau est coupée (`IA_MODE=non`), tout est
+  refusé.
+- **Ta confirmation dans l’île** pour ce qui compte : une commande, lire ou écrire un fichier, une capture d’écran,
+  écrire le presse-papiers. Une carte s’affiche avec « Autoriser » ; sans l’île, une notification à boutons. Musique,
+  notification, lecture du presse-papiers, verrouillage et liste d’un dossier passent seuls (réglable). Les clés SSH
+  et GPG, les mots de passe des navigateurs, les identifiants, le démarrage automatique et les réglages restent
+  interdits, même confirmés. Chaque demande est notée dans `~/.local/state/noctalia-config/noeud.log`.
+- **Délais : 12 s ou 17 s.** Passé ce délai, la demande est refusée : 12 s pour un fichier, une capture ou le
+  presse-papiers, 17 s pour une action relayée ou une commande. Pourquoi si court ? Le serveur abandonne de son côté
+  et répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. `64523e5` attend 35 s, mais des
+  révisions plus anciennes attendaient 15 à 20 s, et le serveur n’annonce ni son délai ni sa révision. `nc-noeud`
+  garde donc 3 s de marge sous le délai le plus court connu : rien n’est jamais fait trop tard. Un « Autoriser » tardif
+  affiche « Trop tard » et le serveur reçoit un seul refus.
+- **La clé secrète part seulement dans l’en-tête** `X-Secret-Key`, jamais dans l’adresse. La connexion est en
+  `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
+  vers un hôte public).
+- **Côté serveur**, dans son `.env` : `ENABLE_TOOL_NODES=1` active le module des nœuds, et `ENABLE_NODE_EXEC=1`
+  autorise en plus les commandes (coupées par défaut depuis `64523e5`). Sans ce second réglage, JARVIS ne peut pas
+  lancer de commande sur ce PC, même si tu l’accepterais.
 
 ## Attente avant une réponse
 
@@ -290,14 +335,16 @@ Le déployeur propose le moteur initial pour le parcours local comme pour SSH ; 
 dans l’interface restent prioritaires aux redémarrages.
 
 Dans l’île, le bouton **réglages** ouvre le choix du **moteur, modèle et niveau de réflexion**, sans terminal.
-**Actualiser** lit les capacités du runner ; **Appliquer** change la session partagée, y compris pour Telegram
-et Discord. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
+**Actualiser** lit les capacités du runner ; **Appliquer** change la session. Avec Claude Code, Codex ou OpenCode,
+c’est la session partagée par tous, Telegram et Discord compris. Avec AGY (`64523e5`), c’est celle de ce PC : le
+client envoie sa clé (`desktop:` et le nom du PC) avec chaque réglage, chaque reprise et chaque réinitialisation, et
+`/nc/engines` répond `shared_session` vrai seulement quand la session l’est. Changer de moteur vaut pour tout le monde. Les moteurs absents du runner sont grisés. Le bouton **Connexion…** ouvre la configuration privée.
 La carte d’accueil présente les familles **Flash, Argon, Opus et Sonnet**, avec **low / medium / high** séparés.
 Les boutons utilisent uniquement les identifiants annoncés pour le moteur courant ; les familles et variantes
 absentes sont grisées. Plusieurs variantes Flash ne prennent donc plus plusieurs boutons. Aucun modèle n’est
 présumé actif avant lecture de la session du serveur. Le catalogue est lu une fois à l’ouverture d’un accueil
 sans saisie en cours ; le bouton réglages permet de le charger ou de l’actualiser explicitement.
-Un clic prépare le choix ; seule l’action **Appliquer** change la session partagée. Les identifiants qui encodent
+Un clic prépare le choix ; seule l’action **Appliquer** change la session. Les identifiants qui encodent
 l’effort sont alignés sur la variante annoncée correspondante. Fermer les réglages abandonne les choix non
 appliqués. Les autres modèles et la saisie d’un identifiant restent accessibles dans les réglages.
 L’accueil affiche un statut bref, sans citer la réponse ou l’erreur technique. La conversation garde leur texte
@@ -363,9 +410,11 @@ Le suivi d’activité réutilise les verrous de `nc-claude` ; les requêtes mut
 
 ## Limites à connaître
 
-- **Session globale actuelle** : le code JARVIS-BIS partage la session moteur entre bureau, Telegram et Discord.
-  Changer de modèle, reprendre ou réinitialiser une conversation affecte les autres interfaces. La mémoire durable
-  est également partagée. Le cockpit l’indique ; il ne revendique pas une isolation inexistante.
+- **Session partagée ou par PC** : avec AGY et `64523e5`, chaque PC a sa session, Telegram et Discord aussi (une par
+  utilisateur). Avec Claude Code, Codex ou OpenCode, notre gestionnaire garde une seule session pour tous : changer de
+  modèle, reprendre ou réinitialiser une conversation touche les autres interfaces, et une seule question à la fois.
+  Le choix du moteur et la mémoire durable sont toujours partagés. Avec `3d1c6b6` ou plus ancien, tout est partagé.
+  Le runner le dit (`shared_session` de `/nc/engines`) ; rien ne revendique une isolation inexistante.
 - Le serveur upstream marque les rappels `desktop` comme traités après les avoir seulement journalisés. Le cockpit
   propose donc Telegram/Discord pour une livraison effective ; il n’invente pas un flux d’événements bureau fiable.
 - Le verrou du PC ne coordonne pas les autres appareils. Aucune requête n’est rejouée automatiquement après une

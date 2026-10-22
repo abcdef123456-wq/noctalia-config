@@ -132,4 +132,85 @@ else: print(json.dumps(dict(type='text',part=dict(text='réponse OpenCode'))))
         self.assertLess(self.e.path.stat().st_size,2*1024*1024)
 
 
+class UpstreamParPC(unittest.TestCase):
+    """JARVIS-BIS 64523e5 (session_key partout) et 3d1c6b6 (aucune) : mêmes appels, aucun TypeError."""
+    def charge(self,nouvelle):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);root=Path(tmp.name)
+        m=types.ModuleType('engines_pc');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),m.__dict__)
+        appels=[];sessions={};versions={}
+        if nouvelle:
+            def info(session_key='default'):return dict(sessions.setdefault(session_key,dict(model='agy',has_active_session=False)),cle=session_key)
+            def update(model=None,effort=None,mode=None,permission_mode=None,session_key='default'):
+                appels.append(('update',session_key));sessions.setdefault(session_key,{})['effort']=effort;return info(session_key)
+            async def reset(session_key='default'):appels.append(('reset',session_key));return info(session_key)
+            def resume(conv_id,session_key='default'):appels.append(('resume',conv_id,session_key));return dict(session=info(session_key),history=[])
+            async def run(prompt,timeout=600,model=None,effort=None,mode=None,continue_session=True,reset_session_flag=False,permission_mode=None,session_key='default'):
+                appels.append(('run',prompt,session_key));await asyncio.sleep(.05);return dict(success=True,output=session_key,session=info(session_key))
+            def reset_memoire(session_key='default'):appels.append(('oubli',session_key));versions.pop(session_key,None)
+            def should(version,session_key='default'):appels.append(('inject',session_key));return True
+        else:
+            def info():return dict(model='agy',has_active_session=False)
+            def update(model=None,effort=None,mode=None,permission_mode=None):appels.append(('update',));return info()
+            async def reset():appels.append(('reset',));return info()
+            def resume(conv_id):appels.append(('resume',conv_id));return dict(session=info(),history=[])
+            async def run(prompt,timeout=600,model=None,effort=None,mode=None,continue_session=True,reset_session_flag=False,permission_mode=None):
+                appels.append(('run',prompt));await asyncio.sleep(.05);return dict(success=True,output='seul',session=info())
+            def reset_memoire():appels.append(('oubli',))
+            def should(version):appels.append(('inject',));return True
+        up=types.SimpleNamespace(__file__=str(root/'main.py'),KNOWN_MODELS=[],run_agy=run,get_session_info=info,update_session=update,
+            reset_session_async=reset,list_recent_conversations=lambda limit=8:[],get_conversation_history=lambda *a,**kw:[],
+            resume_conversation=resume,delete_conversation=lambda *a:{},delete_all_conversations=lambda:{},get_token_usage=lambda:{},
+            _reset_memory_injection=reset_memoire,_should_inject_memory=should,render_memory_prompt=lambda:'',_LAST_INJECTED_MEMORY_VERSIONS=versions)
+        env=patch.dict(os.environ,HOME=str(root));env.start();self.addCleanup(env.stop)
+        return m,up,m.install(up),appels
+
+    def appels_comme_main(self,up):
+        """Exactement les appels de home-runner/main.py à 64523e5."""
+        async def scenario():
+            self.assertTrue(up._should_inject_memory('v',session_key='client:bureau'))
+            up.get_session_info(session_key='client:bureau');up.update_session(model=None,effort='high',mode=None,permission_mode=None,session_key='client:bureau')
+            await up.reset_session_async(session_key='client:bureau');up.resume_conversation('c1',session_key='client:bureau')
+            return await asyncio.gather(up.run_agy(prompt='a',timeout=5,session_key='client:bureau'),up.run_agy(prompt='b',timeout=5,session_key='client:portable'))
+        return asyncio.run(scenario())
+
+    def test_agy_recent_recoit_la_cle_de_chaque_pc_et_tourne_en_parallele(self):
+        m,up,e,appels=self.charge(True)
+        a,b=self.appels_comme_main(up)
+        self.assertEqual((a['output'],b['output']),('client:bureau','client:portable'))  # deux PC, deux sessions, sans attente
+        for attendu in [('inject','client:bureau'),('update','client:bureau'),('reset','client:bureau'),('resume','c1','client:bureau'),('run','a','client:bureau'),('run','b','client:portable')]:
+            self.assertIn(attendu,appels)
+        self.assertEqual(up.get_session_info('client:portable')['cle'],'client:portable')  # appel positionnel de _should_inject_memory
+        self.assertFalse(e.snapshot()['shared_session'])
+        self.assertEqual(e.agy_en_cours,0)
+
+    def test_agy_ancien_ne_recoit_jamais_session_key(self):
+        m,up,e,appels=self.charge(False)
+        a,b=self.appels_comme_main(up)
+        self.assertTrue(a['success'] and b['success'])
+        self.assertTrue(all(len(x)<=2 for x in appels),appels)  # aucun appel n'a reçu de clé
+        self.assertTrue(e.snapshot()['shared_session'])
+
+    def test_nos_cli_gardent_une_session_partagee_et_un_seul_verrou(self):
+        m,up,e,appels=self.charge(True)
+        cli=Path(os.environ['HOME'])/'fake-cli'
+        cli.write_text('#!'+sys.executable+"""
+import json,sys,time
+sys.stdin.read();time.sleep(.3)
+print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text='commune'))))
+""");cli.chmod(0o755)
+        with patch.object(m,'executable',return_value=str(cli)):
+            e.choose(engine='codex',session_key='client:bureau')
+            self.assertIn(('oubli','client:bureau'),appels)
+            self.assertTrue(e.snapshot()['shared_session'])
+            async def scenario():
+                return await asyncio.gather(up.run_agy(prompt='bureau',session_key='client:bureau',futur=1),
+                                            up.run_agy(prompt='portable',session_key='client:portable'))
+            a,b=asyncio.run(scenario())
+            self.assertTrue(a['success'],a);self.assertFalse(b['success'])  # un seul verrou pour tous les PC
+            self.assertEqual(up.get_session_info(session_key='client:portable')['conversation_id'],e.session()['conversation_id'])
+            self.assertFalse(up._should_inject_memory('v',session_key='client:bureau'))
+            with self.assertRaises(ValueError):e.choose(session_key='x',inconnu='1')
+        self.assertFalse(any(x[0]=='run' for x in appels))
+
+
 if __name__=='__main__':unittest.main()

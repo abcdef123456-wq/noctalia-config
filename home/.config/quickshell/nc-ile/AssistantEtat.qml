@@ -31,7 +31,7 @@ Singleton {
     readonly property bool ecritureReglagesEnCours: reglagesEnCours && operationReglages !== "quick-settings"
     readonly property var commandes: [
         {nom:"/help", alias:["/aide","/commandes","/commands"], arguments:false, description:Reglages.t("Afficher les commandes", "Show commands")},
-        {nom:"/reset", alias:["/clear","/nouveau"], arguments:false, description:Reglages.t("Réinitialiser la session partagée", "Reset the shared session")},
+        {nom:"/reset", alias:["/clear","/nouveau"], arguments:false, description:Reglages.t("Réinitialiser la session", "Reset the session")},
         {nom:"/status", alias:["/etat","/diag"], arguments:false, description:Reglages.t("État du serveur et du moteur", "Server and engine status")},
         {nom:"/briefing", alias:[], arguments:false, description:Reglages.t("Briefing du jour", "Daily briefing")},
         {nom:"/models", alias:["/modeles"], arguments:false, description:Reglages.t("Lister les modèles disponibles", "List available models")},

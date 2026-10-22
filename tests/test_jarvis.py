@@ -212,6 +212,29 @@ class Management(unittest.TestCase):
             self.assertEqual(self.call('conversation.delete',{'id':'../../run'},True).status_code,400)
         self.assertEqual(self.call('service.restart',{'unit':'sshd.service'},True).status_code,400)
 
+    def test_session_key_du_pc_suit_les_reglages_de_session(self):
+        # JARVIS-BIS 64523e5 : avec AGY, une session par PC ; modèle, reset, reprise et lecture visent celle du PC
+        def appel(op,params=None,confirmed=False,**extra):
+            return self.client.post('/api/nc/manage',headers=self.headers,json=dict(op=op,params=params or {},confirmed=confirmed,**extra))
+        with patch.object(self.m,'runner',new_callable=AsyncMock,return_value={'success':True}) as runner:
+            k='desktop:pc-bureau'
+            appel('session.reset',{},True,session_key=k);runner.assert_awaited_with('POST','/session/reset?session_key=desktop%3Apc-bureau')
+            appel('session.update',{'effort':'high'},True,session_key=k)
+            runner.assert_awaited_with('POST','/session',{'effort':'high','session_key':k})
+            appel('session.update',{'engine':'codex'},True,session_key=k)
+            runner.assert_awaited_with('POST','/nc/engine',{'engine':'codex','session_key':k})
+            appel('conversation.resume',{'id':'abc'},True,session_key=k)
+            runner.assert_awaited_with('POST','/conversation/resume',{'conversation_id':'abc','session_key':k})
+            appel('quick-settings',session_key=k);runner.assert_awaited_with('GET','/nc/engines?session_key=desktop%3Apc-bureau')
+            appel('session',session_key=k);runner.assert_awaited_with('GET','/session?session_key=desktop%3Apc-bureau')
+            # Ancien client, sans clé : la session « default », comme avant
+            appel('session.reset',{},True);runner.assert_awaited_with('POST','/session/reset')
+            appel('session.update',{'effort':'low'},True);runner.assert_awaited_with('POST','/session',{'effort':'low'})
+            calls=runner.await_count
+            self.assertEqual(appel('session',session_key='x&y=1').status_code,400)
+            self.assertEqual(appel('session',session_key=5).status_code,400)
+            self.assertEqual(runner.await_count,calls)
+
     def test_config_updates_preserve_secrets_and_component_values(self):
         paths=[self.root/'.env',self.root/'render-gateway/.env',self.root/'home-runner/.env']
         for i,p in enumerate(paths):p.write_text('DISCORD_TOKEN="keep-secret"\nPERSONAL='+str(i)+'\n')
@@ -308,6 +331,8 @@ class TransportJarvis(unittest.TestCase):
         self.assertTrue(json.loads(r.stdout)['ok'])
         path,method,key,body=self.server.recus[-1]
         self.assertEqual(path,'/gateway/api/nc/manage');self.assertEqual(method,'POST')
+        # La clé de session de ce PC accompagne la gestion (une session AGY par PC depuis JARVIS-BIS 64523e5)
+        self.assertRegex(body.pop('session_key'),r'^desktop:[\w.-]+$')
         self.assertEqual(key,self.c['SECRET_KEY']);self.assertEqual(body,dict(op='models',params={},confirmed=False))
         self.assertNotIn(key,r.stdout+r.stderr)
 

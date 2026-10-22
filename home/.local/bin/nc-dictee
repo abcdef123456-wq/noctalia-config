@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -29,6 +30,7 @@ import tempfile
 import time
 import types
 import urllib.error
+import urllib.parse
 import urllib.request
 
 BIN = Path(__file__).resolve().parent
@@ -152,6 +154,26 @@ def par_jarvis(m):
         return True
 
 
+def langue_dictee(m):
+    """La langue parlée, envoyée au serveur (?language=) : depuis 64523e5, JARVIS-BIS transcrit en français par défaut
+    (WHISPER_LANGUAGE="fr"), un anglophone serait donc écrit en français. Le choix explicite (NC_LANGUE ou le réglage
+    LANGUE, fr ou en) d'abord, puis la langue du système (de, es…), sinon « auto » (détection par Whisper). 3d1c6b6 lit
+    le même paramètre, avec « auto » par défaut."""
+    choix = os.environ.get("NC_LANGUE", "")
+    if choix not in ("fr", "en"):
+        try:
+            for ligne in (m.CONF.parent / "reglages.conf").read_text(encoding="utf-8").splitlines():
+                if ligne.startswith("LANGUE="):
+                    choix = ligne.split("=", 1)[1].strip().strip('"')
+        except (OSError, AttributeError, UnicodeDecodeError):
+            pass
+    if choix in ("fr", "en"):
+        return choix
+    loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG", "")
+    code = re.split(r"[_.@-]", loc, maxsplit=1)[0].lower()
+    return code if re.fullmatch(r"[a-z]{2}", code) else "auto"     # C, POSIX ou rien : détection
+
+
 def secours():
     """Mode automatique et une API de transcription disponible : elle prend le relais de JARVIS."""
     try:
@@ -190,7 +212,8 @@ def transcrire(m):
             return par_ia(T)
         try:
             c = m.configuration()
-            req = urllib.request.Request(c["URL"].rstrip("/") + "/api/transcribe", data=AUDIO.read_bytes(),
+            adresse = c["URL"].rstrip("/") + "/api/transcribe?" + urllib.parse.urlencode({"language": langue_dictee(m)})
+            req = urllib.request.Request(adresse, data=AUDIO.read_bytes(),
                                          headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
             with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
                 resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))

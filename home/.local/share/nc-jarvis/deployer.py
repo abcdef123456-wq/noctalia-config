@@ -19,9 +19,13 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # chez nous : ports sur 0.0.0.0, sans overlay, et son .env par-dessus les nôtres.
 # 3d1c6b6 (issue #10) : choix interactifs extraits par le serveur ([CHOIX: A | B], gardés par notre nc_gateway s'ils
 # respectent nos limites), import re manquant (HTTP 500), délais par défaut à 600 s
-REVISION='3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175'
+# 64523e5 : une session AGY par PC (session_key tiré du client_id, accepté par notre nc_engines), dictée en français
+# par défaut (WHISPER_LANGUAGE ; nc-dictee envoie la langue de l'utilisateur), nœuds durcis (secret dans l'en-tête
+# seulement, ws:// refusé sur un hôte public, exec coupé par défaut). 1ae55f3, 8ff25c3 et 4d279b6 restent exclues :
+# elles passent session_key à des fonctions que notre overlay remplaçait sans ce paramètre (HTTP 500 à chaque /run).
+REVISION='64523e57c958f23af459c8069d1a6985bf349640'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
-                     '9cd91bbb6235116e3cadd433eb68fcd9b17203bf',REVISION)
+                     '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',REVISION)
 
 
 def ask(message, default=False):

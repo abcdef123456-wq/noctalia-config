@@ -41,9 +41,11 @@ for _route in list(app.routes):
 
 
 @app.get('/nc/engines')
-async def settings(request: Request):
+async def settings(request: Request, session_key: str | None = None):
     upstream._check_secret(request)
-    return engines.snapshot()
+    # Avec AGY récent, la session montrée est celle du PC qui demande (session_key) ; nos CLI : la session commune
+    if session_key is not None and len(session_key)>200: raise HTTPException(400)
+    return engines.snapshot(session_key)
 
 
 @app.post('/nc/engine')

@@ -12,7 +12,7 @@ from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
 import re
 import tempfile
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 PROTOCOL = 1
 UNITS = ('assistant-runner.service', 'assistant-gateway.service')
@@ -210,7 +210,17 @@ def identifier(value):
     return quote(value,safe='')
 
 
-async def dispatch(op, p, confirmed=False):
+def cle_session(value):
+    """Clé de session du PC qui demande (« desktop:nom-du-pc ») : avec AGY depuis 64523e5, chaque PC a sa session.
+    Absente (ancien client) : la session « default » du runner, comme avant."""
+    if value is None: return None
+    if not isinstance(value,str) or not re.fullmatch(r'[\w:.@-]{1,200}',value,flags=re.ASCII): raise ValueError
+    return value
+
+
+async def dispatch(op, p, confirmed=False, session_key=None):
+    session_key=cle_session(session_key)
+    cle='?'+urlencode(dict(session_key=session_key)) if session_key else ''
     read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings','google.status','google.calendar'}
     write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','notify','noctalia'}
     if op not in read|write: raise ValueError
@@ -232,15 +242,16 @@ async def dispatch(op, p, confirmed=False):
         import nc_telegram
         return await nc_telegram.diffuser(p.get('text'))
     if op=='capabilities': return schema()
-    paths={'models':'/models','session':'/session','memory':'/memory','conversations':'/conversations?limit=25','usage':'/usage/stats'}
+    paths={'models':'/models','session':'/session'+cle,'memory':'/memory','conversations':'/conversations?limit=25','usage':'/usage/stats'}
     if op in paths: return await runner('GET',paths[op])
     if op=='conversation.history': return await runner('GET','/conversation/'+identifier(p['id'])+'/history')
-    if op=='quick-settings': return await runner('GET','/nc/engines')
+    if op=='quick-settings': return await runner('GET','/nc/engines'+cle)
     if op=='session.update':
         if not p or set(p)-{'engine','model','effort','mode','permission_mode'} or any(not isinstance(v,str) or len(v)>200 for v in p.values()): raise ValueError
-        return await runner('POST','/nc/engine' if 'engine' in p else '/session',p)
-    if op=='session.reset': return await runner('POST','/session/reset')
-    if op=='conversation.resume': return await runner('POST','/conversation/resume',dict(conversation_id=identifier(p['id'])))
+        return await runner('POST','/nc/engine' if 'engine' in p else '/session',dict(p,session_key=session_key) if session_key else p)
+    if op=='session.reset': return await runner('POST','/session/reset'+cle)
+    if op=='conversation.resume':
+        return await runner('POST','/conversation/resume',dict(conversation_id=identifier(p['id']),**({'session_key':session_key} if session_key else {})))
     if op=='conversation.delete': return await runner('DELETE','/conversation/'+identifier(p['id']))
     if op=='memory.add':
         text=p['text']

@@ -66,6 +66,7 @@ or Tailscale host; the secret key goes in the X-Secret-Key header, never in the 
 #     notify et run_shell (envoyé en « exec », avec les paramètres de l'outil : node_id ou node, pas toujours timeout),
 #     et pour toute action quand un nœud est désigné ;
 #   - send_action par défaut, /api/node/{id}/action : 30 s.
+# 64523e5 attend 35 s partout, mais le serveur n'annonce ni son délai ni sa révision : on garde le plus court connu.
 MARGE_SERVEUR = 3
 DELAI_CONFIRMATION = 25            # le plus long possible (une commande au long délai)
 DELAI_RELAIS = 20 - MARGE_SERVEUR  # 17 s : action peut-être relayée par HardwareRelay (20 s)

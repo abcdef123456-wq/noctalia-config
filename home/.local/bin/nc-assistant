@@ -164,8 +164,8 @@ def nom_du_pc():
 
 def client_id(c):
     """L'identifiant de ce PC envoyé à /api/ask : une session par machine pour un même USER_ID (issue #12).
-    JARVIS-BIS le lit depuis 8ff25c3 ; la révision validée (3d1c6b6) ignore ce champ inconnu sans erreur (modèle
-    Pydantic sans extra="forbid") : il part donc toujours."""
+    JARVIS-BIS le lit depuis 8ff25c3 (la révision validée, 64523e5, en fait la clé de session AGY) ; 3d1c6b6 ignore ce
+    champ inconnu sans erreur (modèle Pydantic sans extra="forbid") : il part donc toujours."""
     return c.get("CLIENT_ID") or nom_du_pc()
 
 
@@ -364,7 +364,17 @@ class SansRedirection(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def cle_session(c):
+    """La clé de session de ce PC, celle que le gateway (JARVIS-BIS 64523e5) donne à nos /api/ask :
+    « platform:client_id », sinon « platform:USER_ID ». Envoyée avec la gestion (modèle, nouvelle conversation, reprise)
+    pour que, avec AGY, ces réglages touchent la session de ce PC et pas une session « default » que personne n'utilise.
+    3d1c6b6 et un ancien adaptateur l'ignorent."""
+    return "desktop:" + (client_id(c) or str(c.get("USER_ID") or ""))
+
+
 def api(c, endpoint, payload=None):
+    if endpoint == "/api/nc/manage" and isinstance(payload, dict) and "session_key" not in payload:
+        payload = dict(payload, session_key=cle_session(c))
     corps = None if payload is None else json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(c["URL"] + endpoint, data=corps,
                                  headers={"Content-Type": "application/json", "X-Secret-Key": c["SECRET_KEY"]},

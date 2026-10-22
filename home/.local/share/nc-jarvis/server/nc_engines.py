@@ -4,6 +4,8 @@ Aucun shell ni contournement d'approbation n'est ajouté.
 """
 import asyncio
 import contextlib
+import functools
+import inspect
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,29 @@ def executable(engine):
     candidates = [Path.home()/'.local/bin'/engine, Path.home()/'.cargo/bin'/engine]
     if engine == 'agy': candidates += [Path.home()/'.gemini/antigravity-cli/agy']
     return next((str(p) for p in candidates if p.is_file() and os.access(p, os.X_OK)), None)
+
+
+def _signature(fn):
+    try: params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError): return frozenset()
+    if any(p.kind == p.VAR_KEYWORD for p in params): return None
+    return frozenset(p.name for p in params if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY))
+
+
+_signature_en_cache = functools.lru_cache(maxsize=64)(_signature)
+
+
+def _parametres(fn):
+    """Noms acceptés par une fonction upstream (None : tous, elle a **kwargs). Mis en cache."""
+    try: return _signature_en_cache(fn)
+    except TypeError: return _signature(fn)  # objet non hachable : pas de cache
+
+
+def compatibles(fn, **valeurs):
+    """Garde les mots-clés (non nuls) que fn connaît. JARVIS-BIS ajoute session_key depuis 1ae55f3 ;
+    3d1c6b6 ne le connaît pas : on l'omet au lieu de faire échouer la requête."""
+    connus = _parametres(fn)
+    return {k: v for k, v in valeurs.items() if v is not None and (connus is None or k in connus)}
 
 
 def atomique(path, data):
@@ -123,6 +148,7 @@ class Engines:
         self.agy_models = list(upstream.KNOWN_MODELS)
         self.path = Path(upstream.__file__).resolve().parent/'.nc-jarvis-engines.json'
         self.lock = asyncio.Lock()
+        self.agy_en_cours = 0  # requêtes AGY en vol : chaque PC a sa session, l'upstream a ses propres verrous
         initial=os.getenv('NC_JARVIS_ENGINE','agy')
         if initial not in ENGINES: raise ValueError('NC_JARVIS_ENGINE invalide.')
         self.state = dict(engine=initial, settings={}, conversations=[], active={})
@@ -136,9 +162,32 @@ class Engines:
         if self.state['engine']=='agy' and self.state['settings'].get('agy'):
             self.original['update_session'](**{k:v for k,v in self.state['settings']['agy'].items() if k in ('model','effort','mode','permission_mode')})
 
-    def session(self):
+    def occupe(self):
+        return self.lock.locked() or self.agy_en_cours > 0
+
+    def par_pc(self):
+        """Vrai si l'AGY upstream isole une session par PC (session_key, depuis 1ae55f3)."""
+        return bool(compatibles(self.original['run_agy'], session_key='default'))
+
+    def appel(self, nom, *args, session_key=None, **valeurs):
+        fn = self.original[nom]
+        return fn(*args, **valeurs, **compatibles(fn, session_key=session_key))
+
+    def oublie_memoire(self, session_key=None, tout=False):
+        versions = getattr(self.up, '_LAST_INJECTED_MEMORY_VERSIONS', None)
+        if tout and isinstance(versions, dict): versions.clear()
+        fn = self.up._reset_memory_injection
+        fn(**compatibles(fn, session_key=session_key))
+
+    def inject(self, version, session_key=None, **_futurs):
+        # Nos CLI reçoivent la mémoire dans run() ; seul AGY passe par l'injection upstream.
+        if self.state['engine'] != 'agy': return False
+        return self.should_inject(version, **compatibles(self.should_inject, session_key=session_key))
+
+    def session(self, session_key=None, **_futurs):
+        # Nos CLI : une seule session partagée par tous les PC, la clé est ignorée.
         engine = self.state['engine']
-        if engine == 'agy': return dict(self.original['get_session_info'](), engine='agy')
+        if engine == 'agy': return dict(self.appel('get_session_info', session_key=session_key), engine='agy')
         settings = self.state['settings'].get(engine, {})
         ident = self.state['active'].get(engine)
         conv = next((c for c in self.state['conversations'] if c['id']==ident), {})
@@ -159,35 +208,36 @@ class Engines:
                 except (ValueError, KeyError, TypeError, OSError): pass
         return []  # Ne pas présenter une liste inventée comme celle du compte distant.
 
-    def snapshot(self):
-        return dict(session=self.session(), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
+    def snapshot(self, session_key=None):
+        return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
             efforts=(['low','medium','high'] if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
-            shared_session=True, context_limit=32000)
+            shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
-    def choose(self, **values):
-        if self.lock.locked(): raise ValueError('Une réponse est en cours ; attends avant de changer de moteur.')
+    def choose(self, session_key=None, **values):
+        if self.occupe(): raise ValueError('Une réponse est en cours ; attends avant de changer de moteur.')
         if set(values)-{'engine','model','effort','mode','permission_mode'}: raise ValueError('Réglage inconnu.')
         engine = values.get('engine',self.state['engine'])
         if engine not in ENGINES: raise ValueError('Moteur inconnu.')
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
         if engine == 'agy':
-            result = self.original['update_session'](**{k:v for k,v in values.items() if k!='engine'})
+            result = self.appel('update_session', session_key=session_key, **{k:v for k,v in values.items() if k!='engine'})
         else:
             if any(values.get(k) not in (None,'',v) for k,v in (('mode','plan'),('permission_mode','request-review'))):
                 raise ValueError('Ce moteur utilise le mode plan avec ses protections habituelles.')
             result = dict(self.state['settings'].get(engine,{}))
             result.update({k:v for k,v in values.items() if k in ('model','effort') and v is not None})
             commande(engine, executable(engine) or engine, result.get('model',''), result.get('effort',''))
+        change = engine != self.state['engine']
         state = dict(self.state, engine=engine, settings=dict(self.state['settings'], **{engine:result}))
         atomique(self.path,state); self.state = state
         self.up.KNOWN_MODELS = self.models()
-        self.up._reset_memory_injection()
-        return self.session()
+        self.oublie_memoire(session_key, tout=change)
+        return self.session(session_key)
 
-    async def reset(self):
-        if self.lock.locked(): raise ValueError('Une réponse est en cours.')
+    async def reset(self, session_key=None, **_futurs):
+        if self.occupe(): raise ValueError('Une réponse est en cours.')
         async with self.lock:
-            if self.state['engine']=='agy': return await self.original['reset_session_async']()
+            if self.state['engine']=='agy': return await self.appel('reset_session_async', session_key=session_key)
             active=dict(self.state['active']); active.pop(self.state['engine'],None)
             state=dict(self.state,active=active); atomique(self.path,state); self.state=state
             return self.session()
@@ -200,16 +250,16 @@ class Engines:
         if self.state['engine']=='agy': return self.original['get_conversation_history'](ident,max_turns=max_turns)
         return next((c['history'][-max(1,min(max_turns,20)):] for c in self.state['conversations'] if c['id']==ident and c['engine']==self.state['engine']), [])
 
-    def resume(self, ident):
-        if self.lock.locked(): raise ValueError('Une réponse est en cours.')
-        if self.state['engine']=='agy': return self.original['resume_conversation'](ident)
+    def resume(self, ident, session_key=None, **_futurs):
+        if self.occupe(): raise ValueError('Une réponse est en cours.')
+        if self.state['engine']=='agy': return self.appel('resume_conversation', ident, session_key=session_key)
         if not any(c['id']==ident and c['engine']==self.state['engine'] for c in self.state['conversations']): raise ValueError('Conversation inconnue pour ce moteur.')
         state=dict(self.state,active=dict(self.state['active'],**{self.state['engine']:ident}))
         atomique(self.path,state); self.state=state; self.up._reset_memory_injection()
         return dict(session=self.session(),history=self.history(ident))
 
     def delete(self, ident):
-        if self.lock.locked(): return dict(success=False,error='Une réponse est en cours.')
+        if self.occupe(): return dict(success=False,error='Une réponse est en cours.')
         if self.state['engine']=='agy': return self.original['delete_all_conversations']() if ident=='all' else self.original['delete_conversation'](ident)
         engine=self.state['engine']
         before=len(self.state['conversations'])
@@ -224,14 +274,23 @@ class Engines:
         return dict(engine=self.state['engine'],tokens_available=False,message='Les tokens de ce CLI ne sont pas agrégés par JARVIS.')
 
     async def run(self, prompt, timeout=120, model=None, effort=None, mode=None,
-                  continue_session=True, reset_session_flag=False, permission_mode=None):
-        def failure(message): return dict(success=False,output='',error=message,session=self.session())
+                  continue_session=True, reset_session_flag=False, permission_mode=None, session_key=None, **futurs):
+        def failure(message): return dict(success=False,output='',error=message,session=self.session(session_key))
         if self.lock.locked(): return failure('Une autre requête JARVIS est déjà en cours.')
+        if self.state['engine']=='agy':
+            # Pas de verrou commun : chaque PC a sa session et l'upstream refuse lui-même deux requêtes sur la même.
+            # Le compteur empêche seulement de changer de moteur ou de réinitialiser pendant ce temps.
+            fn=self.original['run_agy']
+            self.agy_en_cours+=1
+            try:
+                return await fn(prompt=prompt,timeout=timeout,model=model,effort=effort,mode=mode,
+                    continue_session=continue_session,reset_session_flag=reset_session_flag,permission_mode=permission_mode,
+                    **compatibles(fn,session_key=session_key,**futurs))
+            finally: self.agy_en_cours-=1
+        if self.agy_en_cours: return failure('Une autre requête JARVIS est déjà en cours.')
+        # Nos CLI : session partagée par tous les PC, un seul verrou ; session_key et mots-clés futurs ignorés.
         async with self.lock:
             engine=self.state['engine']
-            if engine=='agy':
-                return await self.original['run_agy'](prompt=prompt,timeout=timeout,model=model,effort=effort,mode=mode,
-                    continue_session=continue_session,reset_session_flag=reset_session_flag,permission_mode=permission_mode)
             path=executable(engine)
             if not path: return failure('CLI '+ENGINES[engine]+' absent sur la machine du runner.')
             if prompt.lstrip().startswith('/'):
@@ -274,5 +333,5 @@ def install(upstream):
     upstream.get_conversation_history=engines.history; upstream.resume_conversation=engines.resume
     upstream.delete_conversation=engines.delete; upstream.delete_all_conversations=lambda:engines.delete('all')
     upstream.get_token_usage=engines.usage; upstream.KNOWN_MODELS=engines.models()
-    upstream._should_inject_memory=lambda version: engines.should_inject(version) if engines.state['engine']=='agy' else False
+    upstream._should_inject_memory=engines.inject
     return engines
