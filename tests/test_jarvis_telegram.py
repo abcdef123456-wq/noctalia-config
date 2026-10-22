@@ -188,6 +188,19 @@ class Rattrapage(unittest.TestCase):
         self.assertEqual([c for c, _ in bot.envoyes], [7])
         self.assertEqual(len(app.traites), 2, "le message de l'inconnu passe quand même à upstream, qui décide")
 
+    def test_ordres_du_pc_recus_pendant_l_arret_ignores(self):
+        """Revue SRV-03 : « /nc ecran externe » puis « /nc oui » envoyés PC éteint étaient exécutés au démarrage."""
+        bot = Bot([Update(1, Message("/nc ecran externe", self.avant, chat=7, auteur=7)), Update(2, Message("/nc oui", self.avant, chat=7, auteur=7)),
+                   Update(3, Message("/PC@MonBot energie performance", self.avant, chat=8, auteur=8)),
+                   Update(4, Message("/rappels", self.avant, chat=7, auteur=7)), Update(5, Message("/nc etat", self.pendant, chat=7, auteur=7))])
+        app = Application(bot)
+        n = asyncio.run(self.m.rattraper(app, self.chemin, self.demarrage, Update.de_json, lambda uid: uid == 7))
+        self.assertEqual(app.traites, ["/rappels", "/nc etat"], "ni les ordres d'avant, ni leur confirmation ; le récent passe")
+        heure = self.m.quand(self.avant)
+        self.assertEqual(bot.envoyes[:2], [(7, "⏱ Commande ignorée : reçue pendant l'arrêt à " + heure + ". Renvoie-la si tu la veux toujours.")] * 2)
+        self.assertNotIn(8, [c for c, _ in bot.envoyes], "l'inconnu n'a pas d'avis (liste blanche du bot)")
+        self.assertEqual((n, self.m.lire_offset(self.chemin)), (4, 6))
+
     def test_attend_que_le_runner_ecoute(self):
         """Revue SRV-01 : au démarrage du PC, le runner écoutait parfois après le rattrapage (messages perdus)."""
         import http.server, socket

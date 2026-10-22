@@ -109,6 +109,16 @@ class Noctalia(unittest.TestCase):
         asyncio.run(handler(update, types.SimpleNamespace(args=["energie", "performance"])))
         self.assertEqual(reponses[-1], "⛔ Accès non autorisé.")
         self.assertEqual(self.appels[-1], ["powerprofilesctl", "set", "power-saver"], "utilisateur refusé : rien lancé")
+        # Revue SRV-03 : la confirmation se mesure à l'heure des messages, pas à celle du traitement
+        import datetime
+        update.effective_user.id = 42
+        date = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
+        update.message.date = date(5000)
+        asyncio.run(handler(update, types.SimpleNamespace(args=["ecran", "externe"])))
+        update.message.date = date(5000 + 3600)                 # « oui » envoyé une heure plus tard
+        asyncio.run(handler(update, types.SimpleNamespace(args=["oui"])))
+        self.assertIn("Rien à confirmer", reponses[-1])
+        self.assertNotEqual(self.appels[-1], ["nc-ecrans", "externe"])
 
     def test_execution_reelle_sans_shell(self):
         m = module()      # executer réel, avec un faux programme dans BIN

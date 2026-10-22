@@ -182,6 +182,10 @@ def handler(tb):
             logger.warning("/nc refusé à l'utilisateur Telegram %s.", user.id)
             await update.message.reply_text("⛔ Accès non autorisé.")
             return
-        reponse = await commande(" ".join(context.args or []), update.effective_chat.id)
+        # L'heure du message, pas celle du traitement : une confirmation « /nc oui » ne vaut que dans les deux minutes
+        # qui suivent l'envoi de sa commande (revue SRV-03)
+        date = getattr(update.message, "date", None)
+        reponse = await commande(" ".join(context.args or []), update.effective_chat.id,
+                                 date.timestamp() if date is not None else None)
         await update.message.reply_text(reponse[:4000])
     return nc
