@@ -37,3 +37,28 @@ class ConnexionIle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModulesCompilesSurDebian(unittest.TestCase):
+    """Sur Debian, install.sh compile Quickshell sans certains modules : aucune page de l'île ne doit les importer
+    directement (un seul import manquant et toute l'île refuse de se charger, comme Quickshell.Networking)."""
+    MODULES = {"Quickshell.Networking": "NETWORK", "Quickshell.Bluetooth": "BLUETOOTH", "Quickshell.Services.Pam": "SERVICE_PAM",
+               "Quickshell.Services.Polkit": "SERVICE_POLKIT", "Quickshell.Services.Greetd": "SERVICE_GREETD",
+               "Quickshell.Services.SystemTray": "SERVICE_STATUS_NOTIFIER"}
+    TYPES = {"WlSessionLock": "WAYLAND_SESSION_LOCK", "GlobalShortcut": "HYPRLAND_GLOBAL_SHORTCUTS"}
+
+    def test_aucun_module_desactive_importe(self):
+        import re
+        install = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+        compilation = install[install.index("compiler_quickshell() {"):install.index("\n}\n", install.index("compiler_quickshell() {"))]
+        desactives = set(re.findall(r"-D([A-Z_]+)=OFF", compilation))
+        self.assertIn("BLUETOOTH", desactives)
+        for f in QML.glob("*.qml"):
+            texte = f.read_text()
+            for module, option in self.MODULES.items():
+                if option in desactives:
+                    self.assertNotRegex(texte, r"(?m)^import " + re.escape(module) + r"\s*$",
+                                        f"{f.name} importe {module}, absent de la compilation Debian (-D{option}=OFF)")
+            for type_, option in self.TYPES.items():
+                if option in desactives:
+                    self.assertNotRegex(texte, r"\b" + type_ + r"\s*\{", f"{f.name} utilise {type_} (-D{option}=OFF)")
