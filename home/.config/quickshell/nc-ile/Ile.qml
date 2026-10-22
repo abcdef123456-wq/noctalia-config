@@ -286,19 +286,27 @@ PanelWindow {
                 required property int index
                 readonly property size t: fen.tailles[modelData] || fen.tailles.centre
                 readonly property bool active: modelData === Etat.vueActive
+                // Une page visitée reste prête tant que l'île est ouverte, et les deux voisines de la page affichée sont
+                // préparées à l'avance, sans bloquer (asynchrone) : glisser vers elles ne fige plus l'île le temps de les
+                // construire (revue PERF-02) ; tout est libéré quand l'île se ferme
+                property bool dejaVue: false
+                onActiveChanged: if (active) dejaVue = true
+                readonly property bool voisine: Math.abs(index - Etat.vue) <= 1
+                Connections { target: fen; function onOuverteChanged() { if (!fen.ouverte) pageIle.dejaVue = false } }
                 x: (ile.width - t.width) / 2 + 16
                 width: Math.max(0, t.width - 32 - (fen.points ? 22 : 0))
                 height: t.height - 32
                 y: 16 + (index - Etat.vue) * (ile.height * 0.6)
                 Behavior on y { SpringAnimation { spring: 3.6; damping: 0.4 } }
                 // Le contenu apparaît quand l'île a presque sa taille ; s'efface dès qu'elle se referme ou change de page
-                opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 ? 1 : 0
+                opacity: fen.ouverte && !fen.recherche && active && ile.height > t.height * 0.72 && chargeur.status === Loader.Ready ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: fen.ouverte ? 200 : 80; easing.type: Easing.OutCubic } }
                 Loader {
                     id: chargeur
                     anchors.fill: parent
-                    active: pageIle.visible || pageIle.active
+                    asynchronous: true
+                    active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
