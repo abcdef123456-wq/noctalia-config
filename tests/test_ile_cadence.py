@@ -63,5 +63,17 @@ class Surface(unittest.TestCase):
         self.assertIn("Math.max(ile.width, compact.largeur) + 140", self.ile)
 
 
+class Batterie(unittest.TestCase):
+    """Sur batterie, l'île réveille moins souvent le processeur : météo toutes les 30 min (10 sur secteur), dossier des
+    téléchargements toutes les 30 s (6 sur secteur, 2 pendant un téléchargement). Sans FolderListModel : un paquet de
+    plus sous Debian, et l'île entière ne se chargerait plus chez qui ne l'a pas (DEB-03)."""
+    def test_releves(self):
+        etat = (QML / "Etat.qml").read_text()
+        self.assertIn("interval: (UPower.onBattery ? 30 : 10) * 60000", etat)
+        self.assertIn("interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000)", etat)
+        for f in QML.glob("*.qml"):
+            self.assertNotRegex(f.read_text(), r"import\s+Qt\.labs\.folderlistmodel", f.name)
+
+
 if __name__ == "__main__":
     unittest.main()

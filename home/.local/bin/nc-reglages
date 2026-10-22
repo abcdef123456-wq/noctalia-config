@@ -850,6 +850,17 @@ REGLAGES = [
     R("VEILLE_ECRAN", "Veille", L("Écran éteint après", "Screen off after"), "entier", "0",
       L("0 : juste après le verrouillage.", "0: right after the lock."), mini=0, maxi=120, pas=1, unite="min",
       zero=L("Avec le verrouillage", "With the lock"), groupe="veille"),
+    # Sur batterie seulement (portable débranché) : rien ne change sur secteur ni sur un PC de bureau
+    R("VEILLE_BAISSE_BATTERIE", "Veille", L("Sur batterie, assombrir après", "On battery, dim after"), "entier", "60",
+      L("Sans activité, l'écran s'assombrit plus tôt sur batterie. 0 : comme sur secteur.",
+        "When idle, the screen dims sooner on battery. 0: same as plugged in."),
+      mini=0, maxi=600, pas=10, unite="s", zero=L("Comme sur secteur", "Same as plugged in"), groupe="veille"),
+    R("VEILLE_ECRAN_BATTERIE", "Veille", L("Sur batterie, écran verrouillé éteint après", "On battery, locked screen off after"),
+      "entier", "60",
+      L("Une fois l'écran verrouillé (Super + L ou automatiquement), il s'éteint après ce délai sans activité. "
+        "0 : comme sur secteur.",
+        "Once the screen is locked (Super + L or automatically), it turns off after this idle time. 0: same as plugged in."),
+      mini=0, maxi=600, pas=10, unite="s", zero=L("Comme sur secteur", "Same as plugged in"), groupe="veille"),
     R("COUVERCLE", "Veille", L("Couvercle fermé", "Lid closed"), "choix", "veille",
       L("Écran éteint : le PC continue de tourner (téléchargements, musique…), sans veille tant que le couvercle est fermé. "
         "Attention à la chaleur dans un sac.",
@@ -1151,6 +1162,7 @@ PAR_CLE = {r.cle: r for r in REGLAGES}
 # ni couvercle, ni pavé tactile, ni écran intégré). Ils restent utilisables en ligne de commande.
 MATERIEL = {
     "BATTERIE_ALERTE": "batterie", "HZ_BALANCED_BAT": "batterie", "HALO_BATTERIE": "batterie", "VEILLE_SUSPENSION": "batterie",
+    "VEILLE_BAISSE_BATTERIE": "batterie", "VEILLE_ECRAN_BATTERIE": "batterie",
     "COUVERCLE": "couvercle", "COUVERCLE_VERROU": "couvercle",
     "DEFILEMENT_NATUREL": "pave", "TAPOTER_CLIC": "pave", "GESTES": "pave",
     "LUMINOSITE_PAS": "ecran",
@@ -1370,33 +1382,34 @@ def regler(vals, cle, v):
 
 
 # ── Application ─────────────────────────────────────────────────────────────────────────────────────────────────
-def appliquer_veille(vals):
-    verrou, susp, secteur = vals.get("VEILLE_VERROU"), vals.get("VEILLE_SUSPENSION"), vals.get("VEILLE_SECTEUR")
-    ecran = int(vals.get("VEILLE_ECRAN") or 0)
-    if verrou is None and susp is None and secteur is None and not ecran:
-        if os.path.exists(VEILLE_UNITE):
-            for f in (VEILLE_UNITE, VEILLE_OUT):
-                try:
-                    os.remove(f)
-                except FileNotFoundError:
-                    pass
-            subprocess.run(["systemctl", "--user", "daemon-reload"])
-            subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
-        return
-    try:
-        src = open(VEILLE_SRC, encoding="utf-8").read()
-    except OSError:
-        return
-    verrou = int(verrou or PAR_CLE["VEILLE_VERROU"].defaut)
-    susp = int(susp or PAR_CLE["VEILLE_SUSPENSION"].defaut)
-    secteur = int(secteur or 0)
+VEILLE_CLES = ("VEILLE_VERROU", "VEILLE_SUSPENSION", "VEILLE_SECTEUR", "VEILLE_ECRAN", "VEILLE_BAISSE_BATTERIE",
+               "VEILLE_ECRAN_BATTERIE")
+
+
+def texte_veille(vals, src):
+    """Config de hypridle avec tes délais, tirée de ~/.config/hypr/hypridle.conf (src) : chaque listener de src est
+    reconnu à sa commande, son délai remplacé, ou il est retiré (délai 0). Les deux listeners « sur batterie »
+    (assombrir plus tôt, écran verrouillé éteint) testent le secteur eux-mêmes et ne font rien sur secteur."""
+    def entier(cle):
+        v = vals.get(cle)
+        return int(v if v not in (None, "") else PAR_CLE[cle].defaut)
+    verrou, susp, secteur = entier("VEILLE_VERROU"), entier("VEILLE_SUSPENSION"), entier("VEILLE_SECTEUR")
+    ecran, baisse_bat, ecran_bat = entier("VEILLE_ECRAN"), entier("VEILLE_BAISSE_BATTERIE"), entier("VEILLE_ECRAN_BATTERIE")
+    t_baisse = max(30, verrou * 60 - 150) if verrou else 0
+    t_ecran = ecran * 60 if ecran else (verrou * 60 + 30 if verrou else 0)
 
     def bloc(m):
         b = m.group(0)
-        if "nc-brightness dim" in b:
-            t = max(30, verrou * 60 - 150) if verrou else 0
+        if "power_supply" in b and "nc-brightness dim" in b:
+            # Sur batterie : assombrir plus tôt ; inutile sans assombrissement normal ou s'il vient avant
+            t = baisse_bat if baisse_bat and t_baisse and baisse_bat < t_baisse else 0
+        elif "power_supply" in b and "dpms" in b:
+            # Sur batterie, écran verrouillé : éteint après ce délai ; inutile si l'écran s'éteint déjà avant
+            t = ecran_bat if ecran_bat and not (t_ecran and t_ecran <= ecran_bat) else 0
+        elif "nc-brightness dim" in b:
+            t = t_baisse
         elif "dpms" in b:
-            t = ecran * 60 if ecran else (verrou * 60 + 30 if verrou else 0)
+            t = t_ecran
         elif "lock-session" in b:
             t = verrou * 60
         elif "suspend" in b:
@@ -1412,16 +1425,47 @@ def appliquer_veille(vals):
                   "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; for s in /sys/class/power_supply/*; "
                   "do [ \"$(cat $s/type)\" = Mains ] && [ \"$(cat $s/online)\" = 1 ] && exec systemctl suspend; done; exit 0'\n}\n"
                   % (secteur * 60))
+    return (f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
+            f"veille : {susp} min, sur secteur : {secteur or 'jamais'}, sur batterie : assombri après "
+            f"{baisse_bat or 'comme sur secteur'} s, écran verrouillé éteint après {ecran_bat or 'comme sur secteur'} s). "
+            f"Ne pas éditer.\n" + texte)
+
+
+def relancer_hypridle():
+    # Marque « écran verrouillé » (on_lock_cmd de hypridle) retirée : hypridle relancé pendant un verrouillage ne la
+    # retirerait pas au déverrouillage (au pire, l'écran verrouillé ne s'éteint pas plus tôt jusqu'au suivant)
+    try:
+        os.remove(os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "nc-verrouille"))
+    except OSError:
+        pass
+    subprocess.run(["systemctl", "--user", "daemon-reload"])
+    subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
+
+
+def appliquer_veille(vals):
+    if all(vals.get(c) is None for c in VEILLE_CLES if c != "VEILLE_ECRAN") and not int(vals.get("VEILLE_ECRAN") or 0):
+        # Délais de la config : hypridle lit ~/.config/hypr/hypridle.conf tel quel
+        if os.path.exists(VEILLE_UNITE):
+            for f in (VEILLE_UNITE, VEILLE_OUT):
+                try:
+                    os.remove(f)
+                except FileNotFoundError:
+                    pass
+            relancer_hypridle()
+        return
+    try:
+        with open(VEILLE_SRC, encoding="utf-8") as f:
+            src = f.read()
+    except OSError:
+        return
     os.makedirs(os.path.dirname(VEILLE_OUT), exist_ok=True)
     with open(VEILLE_OUT, "w", encoding="utf-8") as f:
-        f.write(f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
-                f"veille : {susp} min, sur secteur : {secteur or 'jamais'}). Ne pas éditer.\n" + texte)
+        f.write(texte_veille(vals, src))
     hi = sortie(["sh", "-c", "command -v hypridle"]).strip() or "/usr/bin/hypridle"
     os.makedirs(os.path.dirname(VEILLE_UNITE), exist_ok=True)
     with open(VEILLE_UNITE, "w", encoding="utf-8") as f:
         f.write(f"# nc-reglages : la veille avec tes délais\n[Service]\nExecStart=\nExecStart={hi} -c %h/.config/nc/hypridle.conf\n")
-    subprocess.run(["systemctl", "--user", "daemon-reload"])
-    subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
+    relancer_hypridle()
 
 
 def appliquer_terminal(vals):

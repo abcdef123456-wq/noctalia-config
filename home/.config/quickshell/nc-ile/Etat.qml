@@ -214,8 +214,9 @@ Singleton {
         command: [etat.bin + "nc-meteo"]
         stdout: StdioCollector { onStreamFinished: { try { var m = JSON.parse(text); if (m.temp !== undefined) etat.meteo = m } catch (e) {} } }
     }
-    Timer { interval: 10 * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"; triggeredOnStart: true
-            onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
+    // Toutes les 10 min ; toutes les 30 min sur batterie (moins de réveils et de réseau, la météo change peu)
+    Timer { interval: (UPower.onBattery ? 30 : 10) * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"
+            triggeredOnStart: true; onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
     Connections { target: Reglages; function onValeursChanged() { if (!lireMeteo.running) lireMeteo.running = true } }
 
     // ── Presse-papiers : voir PressePapiers.qml (gardé d'une session à l'autre, épinglés, limites) ──
@@ -272,8 +273,10 @@ Singleton {
         function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
         onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
     }
-    // Toutes les 2 s pendant un téléchargement (vitesse), toutes les 6 s sinon (un find du dossier Téléchargements)
-    Timer { interval: etat.telechargements.length ? 2000 : 6000; repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    // Toutes les 2 s pendant un téléchargement (vitesse) ; sinon un find du dossier Téléchargements toutes les 6 s, toutes
+    // les 30 s sur batterie (moins de réveils). Pas de FolderListModel : un paquet de plus sous Debian, absent des
+    // installations déjà faites, et l'île entière ne se chargerait plus
+    Timer { interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000); repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
         if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")
