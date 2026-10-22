@@ -59,6 +59,7 @@ HOME_FILES=(
   .local/share/noctalia/plugins/nc-keys
   .local/share/noctalia/plugins/nc-ile
   .local/share/noctalia/plugins/nc-fenetres
+  .local/share/noctalia/plugins/nc-batterie
   .config/quickshell/nc-ile
   .local/share/nc/firefox
   .local/share/nc/finger.png
@@ -216,7 +217,7 @@ sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_th
 
 # Centre de la barre : île Quickshell (vide) ou plugin nc/ile, choisi par install.sh
 sed -i -E 's/^center = \[("nc\/ile:pilule")?\]/center = [@ILE_CENTRE@]/' home/.config/noctalia/config.toml
-sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?\]/"group:status"@NOTIF_WIDGET@]/; s/"nc\/verrou"(, "nc\/ile")?\]/"nc\/verrou"@PLUGIN_ILE@]/' home/.config/noctalia/config.toml
+sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?\]/"group:status"@NOTIF_WIDGET@]/; /^enabled = \[/s/(, "nc\/ile")?\]/@PLUGIN_ILE@]/' home/.config/noctalia/config.toml
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml

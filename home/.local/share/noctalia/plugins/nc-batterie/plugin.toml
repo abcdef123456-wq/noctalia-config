@@ -1,0 +1,12 @@
+id          = "nc/batterie"
+name        = "Batterie"
+version     = "1.0.0"
+plugin_api  = 32
+author      = "noctalia-config"
+license     = "MIT"
+description = "Batterie de la barre, même dessin que le widget battery de Noctalia ; au survol, consommation réelle (lue chaque seconde, lissée sur 5 s) et temps restant."
+
+# Dans la capsule status de la barre, à la place de battery : clic = île, page Système (actions dans config.toml)
+[[widget]]
+id = "batterie"
+entry = "batterie.luau"

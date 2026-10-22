@@ -10,6 +10,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 - **fenêtres comme sur macOS** : **Super + H** masque la fenêtre ; dans la barre, le titre de la fenêtre s'agrandit au
   survol et montre toutes les fenêtres du bureau, les masquées comprises (un clic les ramène), un clic ouvre le menu des
   fenêtres, la molette passe de l'une à l'autre ; trois doigts vers le haut : la vue de toutes les fenêtres ;
+- batterie de la barre : au survol, la consommation réelle (relue chaque seconde) et le temps restant ;
 - **Super + R** : recherche compacte au centre de l'écran (applis, fichiers, calculs) ;
 - **Super + W** : carrousel de fonds d'écran ; **Super + /** : fiche de tes raccourcis ;
 - s'adapte à chaque écran : échelle choisie d'après sa taille réelle, panneaux et carrousel à la bonne taille et centrés ;
