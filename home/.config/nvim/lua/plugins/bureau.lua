@@ -54,7 +54,19 @@ return {
         end,
         desc = "Dépôt noctalia-config",
       },
-      { "<leader>nc", terminal({ maison .. "/.local/bin/nc-reglages" }), desc = "nc-reglages" },
+      -- La fenêtre des réglages (nc-reglages fenetre : l'écran du terminal tout seul sans l'île) ; sans bureau
+      -- graphique (SSH, console), l'écran du terminal dans Neovim
+      {
+        "<leader>nc",
+        function()
+          if os.getenv("WAYLAND_DISPLAY") then
+            vim.fn.jobstart({ maison .. "/.local/bin/nc-reglages", "fenetre" }, { detach = true })
+          else
+            terminal({ maison .. "/.local/bin/nc-reglages" })()
+          end
+        end,
+        desc = "Réglages du bureau",
+      },
       { "<leader>nl", terminal({ "journalctl", "--user", "-u", "nc-ile", "-f", "-n", "80" }), desc = "Journal de l'île" },
       { "<leader>nt", terminal({ maison .. "/.local/bin/nc-theme-sync" }), desc = "Resynchroniser les couleurs" },
     },

@@ -64,12 +64,12 @@ class Fenetre(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.faux), NC_LANGUE="fr",
                         XDG_CONFIG_HOME=str(self.home / ".config"))
 
-    def lancer(self, mode=None):
+    def lancer(self, mode=None, *args, code=0):
         if mode:
             (self.home / "qs-mode").write_text(mode + "\n")
-        r = subprocess.run([str(self.home / ".local/bin/nc-reglages"), "fenetre"], env=self.env, capture_output=True,
-                           text=True, timeout=30)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        r = subprocess.run([str(self.home / ".local/bin/nc-reglages"), "fenetre", *args], env=self.env,
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, code, r.stderr)
         return r
 
     def appels(self, attendre=None):
@@ -127,6 +127,36 @@ class Fenetre(unittest.TestCase):
         a = self.appels(attendre="kitty")
         self.assertFalse(any(l.startswith(("systemctl", "qs")) for l in a), a)
         self.assertEqual([l.split(" ", 1)[0] for l in a], ["notify-send", "kitty"])
+
+    def test_e_section(self):
+        # Nom français ou anglais, sans accent : l'île reçoit le nom affiché de la section
+        self.lancer("ok", "nouveautes")
+        self.lancer("ok", "Shortcuts")
+        time.sleep(0.3)
+        self.assertEqual(self.appels(), ["qs -c nc-ile ipc call ile reglagesSection Nouveautés",
+                                         "qs -c nc-ile ipc call ile reglagesSection Raccourcis"])
+
+    def test_e_section_en_anglais(self):
+        self.env["NC_LANGUE"] = "en"
+        self.lancer("ok", "Nouveautés")
+        time.sleep(0.3)
+        self.assertEqual(self.appels(), ["qs -c nc-ile ipc call ile reglagesSection What's New"])
+
+    def test_e_section_inconnue(self):
+        r = self.lancer("ok", "Nulle part", code=1)
+        self.assertIn("section inconnue : Nulle part", r.stderr)
+        self.assertFalse((self.home / "appels").exists())
+
+    def test_f_repli_sur_la_meme_section(self):
+        # Sans l'île : l'écran du terminal, sur les raccourcis ou les nouveautés (comme avant « Tout voir »)
+        (self.faux / "qs").unlink()
+        self.lancer(None, "Raccourcis")
+        a = self.appels(attendre="kitty")
+        self.assertTrue(a[-1].startswith("kitty --class nc-reglages -e ") and a[-1].endswith("/nc-reglages raccourcis"), a)
+        (self.home / "appels").unlink()
+        self.lancer(None, "Nouveautés")
+        a = self.appels(attendre="kitty")
+        self.assertIn("-e sh -c \"$0\" nouveautes | less -R ", a[-1])
 
     def test_notification_en_anglais(self):
         self.env["NC_LANGUE"] = "en"

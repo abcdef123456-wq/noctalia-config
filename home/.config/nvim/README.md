@@ -11,7 +11,8 @@ Une [LazyVim](https://lazyvim.github.io) avec ses extras, et des choix maison po
   CSS, Markdown…), serveur shell avec shellcheck, QML si `qmlls` est installé, scripts `nc-*` reconnus d'après leur
   shebang, `.conf` de nc-reglages.
 - `lua/plugins/bureau.lua` : le menu **Espace n** (Noctalia) : config Hyprland, île, scripts `nc-*`, tes réglages,
-  `perso.lua`, le dépôt, `nc-reglages` et le journal de l'île dans un terminal flottant, `nc-theme-sync`. Les fichiers
+  `perso.lua`, le dépôt, la fenêtre des réglages (`nc-reglages fenetre` ; sans bureau graphique, `nc-reglages` dans
+  un terminal flottant), le journal de l'île dans un terminal flottant, `nc-theme-sync`. Les fichiers
   du bureau ne sont jamais reformatés à l'enregistrement (ils gardent leur style).
 - `lua/plugins/interface.lua` : thème sombre ou clair d'après les couleurs du fond d'écran, tableau de bord Snacks,
   fenêtres flottantes arrondies comme l'île.

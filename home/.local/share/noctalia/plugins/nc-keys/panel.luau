@@ -182,10 +182,11 @@ function render()
     -- Même réduite au plus petit, encore trop haute (petit écran, beaucoup de raccourcis) : elle défile à la molette
     if maxH > dispo then body = ui.scroll({ height = dispo, gap = 0 }, { body }) end
   end
-  -- « Modifier » : l'écran des raccourcis de nc-reglages, dans un terminal (la fiche éditable est celle de l'île Quickshell)
+  -- « Modifier » : la section Raccourcis de la fenêtre des réglages (île) ; sans l'île, nc-reglages ouvre de lui-même
+  -- l'écran des raccourcis dans un terminal
   local modifier = ui.row({ key = "modifier", height = px(28), paddingH = px(14), radius = px(14), align = "center",
                             fill = "on_surface/0.08", onClick = function()
-                              noctalia.runAsync({ "sh", "-c", "kitty --class nc-reglages -e ~/.local/bin/nc-raccourci || ~/.local/bin/nc-reglages fenetre" })
+                              noctalia.runAsync({ "sh", "-c", "~/.local/bin/nc-reglages fenetre Raccourcis" })
                               panel.close()
                             end }, {
     ui.label({ text = tr("Modifier", "Edit"), fontSize = math.max(10, px(13)), fontWeight = "semibold", color = "on_surface" }),

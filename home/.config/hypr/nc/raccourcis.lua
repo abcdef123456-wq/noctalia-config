@@ -434,7 +434,7 @@ touche("XF86MyComputer",        cmd(fichiers),                portable)
 touche("XF86HomePage",          cmd("xdg-open https://"),     portable)
 touche("XF86WWW",               cmd("xdg-open https://"),     portable)
 touche("XF86Mail",              cmd("xdg-open mailto:"),      portable)
-touche("XF86Tools",             cmd("kitty --class nc-reglages -e ~/.local/bin/nc-reglages"), portable)
+touche("XF86Tools",             cmd("~/.local/bin/nc-reglages fenetre"), portable)   -- sans l'île : l'écran du terminal
 touche("XF86ScreenSaver",       cmd(barre .. "lock"),         portable, { locked = true })
 touche("XF86Sleep",             cmd("systemctl suspend"),     portable, { locked = true })
 

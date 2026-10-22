@@ -169,6 +169,15 @@ ShellRoot {
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
         }
+        // Notification d'un agent qui t'attend, cliquée (« Voir », nc-claude) : l'île sur sa question, jamais refermée
+        // (sa demande avec ses choix, sinon sa session en tête de la page des agents, avec le texte entier)
+        // « non » : page des agents coupée dans les réglages, nc-claude va alors sur le terminal
+        function agent(session: string): string {
+            if (!Reglages.pageActive("claude")) return "non"
+            if (Etat.ecranOuvert === "") basculer()
+            Agents.montrer(session)
+            return "oui"
+        }
         // La même, avec une page de repli si celle-ci n'existe pas (coupée dans les réglages, PC sans batterie…)
         function pageOu(nom: string, repli: string): void { page(Etat.pageOu(nom, repli)) }
         // Cockpit : déjà ouvert, le même raccourci le ramène ici, le met devant ou le range (basculerOutil)
@@ -236,6 +245,11 @@ ShellRoot {
         function reglagesChercher(texte: string): void {
             if (!racine.reglagesFenetre || !racine.reglagesFenetre.visible) reglages()
             if (racine.reglagesFenetre) racine.reglagesFenetre.chercherTexte(texte)
+        }
+        // Réglages ouverts sur une section (nc-reglages fenetre SECTION : Raccourcis, Nouveautés…), nom tel qu'affiché
+        function reglagesSection(nom: string): void {
+            if (!racine.reglagesFenetre || !racine.reglagesFenetre.visible) reglages()
+            if (racine.reglagesFenetre) racine.reglagesFenetre.allerSection(nom)
         }
         // Connexion à JARVIS en graphique (adresse, clé, test) ; déjà ouverte : ramenée ici, mise devant ou rangée
         // Fenêtre « Clés des IA » (nc-ia configurer, réglages → Clés d'API des IA)

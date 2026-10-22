@@ -138,6 +138,8 @@ def depuis_reglages():
         return []
     res = []
     for l in lignes:
+        if l.get("section") == "Nouveautés":                       # l'historique des mises à jour : pas des réglages
+            continue
         if l.get("genre") == "raccourci":
             res.append(entree("raccourci", l["nom"], (l.get("affiche") or "") + " · " + (l.get("aide") or ""),
                               section=l.get("aide") or "", touches=l.get("affiche") or ""))

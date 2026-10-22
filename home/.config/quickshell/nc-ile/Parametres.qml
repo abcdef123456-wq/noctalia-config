@@ -12,6 +12,7 @@
 // Section Raccourcis : tous les raccourcis clavier (ceux de la config et les tiens), cherchables par nom ou par touches ;
 // Entrée sur l'un d'eux attend la nouvelle combinaison (Hyprland coupe ses raccourcis le temps de la taper, comme dans
 // le terminal), Suppr le désactive (ou retire l'un des tiens), r le remet comme dans la config.
+// Section Nouveautés : les dernières mises à jour, leurs points en détail (« Tout voir » de la notification de nc-maj).
 // Échap avec l'île ouverte ferme l'île, pas la fenêtre (ileOuverte et fermerIle, branchés par shell.qml).
 import QtQuick
 import Quickshell
@@ -75,6 +76,8 @@ FloatingWindow {
     }
     // Ouvert depuis le Spotlight (réponse « réglage ») : la recherche est déjà tapée
     function chercherTexte(t) { champRecherche.text = t; liste.forceActiveFocus() }
+    // Ouvert sur une section (nc-reglages fenetre SECTION) : gardée à la lecture du catalogue si elle y est
+    function allerSection(s) { champRecherche.text = ""; recherche = ""; section = s; liste.currentIndex = 0; liste.forceActiveFocus() }
     // Sans accent ni majuscule ; sans String.normalize (moteur JavaScript d'un Qt ancien), seulement sans majuscule
     function normaliser(t) { var s = String(t).toLowerCase(); try { return s.normalize("NFD").replace(/[̀-ͯ]/g, "") } catch (e) { return s } }
     function afficher(nom) { surEcran(nom); visible = true; charger(); if (!majAide.running) majAide.running = true; liste.forceActiveFocus() }
@@ -276,8 +279,6 @@ FloatingWindow {
         Row {
             anchors.right: parent.right; anchors.rightMargin: 14; y: 18; height: 40; spacing: 8
             AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "refresh"; aide: Reglages.t("Relire", "Reload"); enabled: !fen.enCours; onClic: fen.charger() }
-            AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "keyboard"; aide: Reglages.t("Raccourcis clavier (terminal)", "Keyboard shortcuts (terminal)")
-                                onClic: Quickshell.execDetached(["kitty", "--class", "nc-reglages", "-e", fen.bin + "nc-reglages", "raccourcis"]) }
             AssistantCommande { anchors.verticalCenter: parent.verticalCenter; rond: true; width: 34; height: 34; icone: "close"; aide: Reglages.t("Fermer (Échap)", "Close (Esc)"); onClic: fen.close() }
         }
 

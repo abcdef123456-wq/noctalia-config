@@ -70,7 +70,8 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
     -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
     "$(t "Nouvelle version de la config" "New version of the config")" "$nouveau" 2>/dev/null || true)"
   [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf '$(t "Entrée pour fermer" "Press Enter to close")'; read r"
-  [ "$choix" = tout ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-reglages nouveautes | less -R"
+  # « Tout voir » : la section Nouveautés de la fenêtre des réglages ; sans l'île, nc-reglages les montre dans un terminal
+  [ "$choix" = tout ] && exec "$HOME/.local/bin/nc-reglages" fenetre Nouveautés
   wait || true                                                 # l'envoi Telegram finit avant le service
   exit 0
 fi
