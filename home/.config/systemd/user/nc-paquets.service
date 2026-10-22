@@ -1,6 +1,8 @@
 [Unit]
 Description=Compte les mises à jour du système (île : page Système et page Notifications ; notification)
 After=network-online.target
+# Sur batterie, le passage du minuteur ne fait rien : la vérification attend le secteur
+ConditionACPower=true
 
 [Service]
 Type=oneshot

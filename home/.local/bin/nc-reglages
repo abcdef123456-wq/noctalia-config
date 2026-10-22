@@ -710,6 +710,18 @@ REGLAGES = [
     R("ECO_BLUETOOTH", "Énergie", L("Couper le Bluetooth en Économie", "Turn off Bluetooth in Power Saver"), "ouinon", "oui",
       L("Seulement si aucun appareil n'est connecté ; rallumé en quittant l'Économie.",
         "Only if no device is connected; turned back on when leaving Power Saver."), groupe="energie"),
+    R("BAT_RELEVES", "Énergie", L("Relevés de la barre moins fréquents sur batterie", "Less frequent bar readings on battery"),
+      "ouinon", "oui",
+      L("Sur batterie (sauf en Performance), la barre relève le processeur toutes les 5 s, la mémoire et le réseau toutes "
+        "les 6 s, le disque toutes les 30 s, la carte graphique plus du tout. Rien d'autre ne change à l'écran.",
+        "On battery (except in Performance), the bar reads the CPU every 5 s, memory and network every 6 s, the disk "
+        "every 30 s, and the graphics card no more. Nothing else changes on screen."), groupe="energie"),
+    R("BAT_CLAVIER", "Énergie", L("Clavier lumineux au plus bas sur batterie", "Keyboard backlight at lowest on battery"),
+      "ouinon", "oui",
+      L("Sur batterie (sauf en Performance), ramené au niveau 1 s'il était plus haut ; son niveau d'avant revient quand "
+        "tu branches le chargeur.",
+        "On battery (except in Performance), lowered to level 1 if it was higher; its previous level comes back when "
+        "you plug in the charger."), groupe="energie"),
     R("BORDURE_PERFORMANCE", "Énergie", L("Bordure animée en Performance", "Animated border in Performance"), "ouinon", "oui",
       L("Sur secteur, la bordure de la fenêtre active tourne en continu (l'écran est redessiné sans arrêt).",
         "Plugged in, the active window's border rotates continuously (the screen is redrawn all the time)."), groupe="hypr"),
@@ -1136,6 +1148,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
+    "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 
@@ -1168,6 +1181,7 @@ def materiel():
     return {**dispo, "batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
             "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*"),
             "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
+            "clavier-batterie": existe("/sys/class/leds/*kbd_backlight*") and existe("/sys/class/power_supply/BAT*"),
             "hybride": cartes == {True, False},
             "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak")),
             "btrfs": sortie(["findmnt", "-no", "FSTYPE", "/"]).strip() == "btrfs"}

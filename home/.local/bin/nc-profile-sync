@@ -10,6 +10,10 @@
 #   PROFIL_SECTEUR / PROFIL_BATTERIE=garder|performance|balanced|power-saver   profil choisi en branchant / débranchant
 #   ECO_AUTO=20 (0 = jamais)   Économie sur batterie sous ce niveau, profil d'avant rendu en branchant
 #   ECO_EFFETS / ECO_CLAVIER / ECO_BLUETOOTH=oui|non   ce que coupe l'Économie   GPU_PERFORMANCE=nvidia|integree
+#   BAT_RELEVES=oui|non   sur batterie hors Performance, la barre Noctalia relève processeur, mémoire, réseau et disque
+#                         moins souvent (et plus la carte graphique)
+#   BAT_CLAVIER=oui|non   sur batterie hors Performance, clavier lumineux ramené au niveau 1 (s'il était plus haut),
+#                         niveau d'avant rendu au branchement
 # Fréquences : « max » = la plus haute de l'écran interne, « low » = 60 Hz (sinon la plus basse), ou un nombre (ex. 120).
 # Écran, rétroéclairage de l'écran et du clavier : détectés automatiquement.
 set -uo pipefail
@@ -21,6 +25,10 @@ langue
 OUT="$HOME/.config/hypr/nc/profil.lua"
 # Noctalia v5 lit tous les *.toml de son dossier, par ordre alphabétique (le dernier l'emporte)
 NOCTALIA_ECO="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/zz-economie.toml"
+NOCTALIA_BAT="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/zz-batterie.toml"   # avant zz-economie : l'Économie gagne
+# Dossiers du noyau (remplaçables pour les tests)
+ALIM="${NC_POWER_SUPPLY:-/sys/class/power_supply}"
+LEDS="${NC_LEDS:-/sys/class/leds}"
 CFG="$HOME/.config/nc-profile.conf"
 # Rétroéclairage de l'écran : le premier qui n'est pas celui de la carte NVIDIA
 BACKLIGHT=$(for d in /sys/class/backlight/*; do n=${d##*/}; case $n in nvidia*|\*) ;; *) echo "$n"; break ;; esac; done)
@@ -36,6 +44,8 @@ ECO_AUTO=0
 ECO_EFFETS=oui
 ECO_CLAVIER=oui
 ECO_BLUETOOTH=oui
+BAT_RELEVES=oui
+BAT_CLAVIER=oui
 GPU_PERFORMANCE=nvidia
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
@@ -48,7 +58,7 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
       PROFIL_SECTEUR|PROFIL_BATTERIE)
         [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
-      ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
+      ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
       GPU_PERFORMANCE) [[ "$v" =~ ^(nvidia|integree)$ ]] && GPU_PERFORMANCE=$v ;;
       *) ;;                                      # autres réglages : pour d'autres parties de la config
     esac
@@ -65,7 +75,7 @@ get_profile() {
 
 on_battery() {
   local s
-  for s in /sys/class/power_supply/*; do
+  for s in "$ALIM"/*; do
     [ "$(cat "$s/type" 2>/dev/null)" = Mains ] && [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && return 1
   done
   return 0
@@ -73,6 +83,7 @@ on_battery() {
 
 last_profile=""
 last_bat=""
+last_kbd=""                                     # état du clavier lumineux au dernier passage : normal, bas, eteint
 ECO_AUTO_FLAG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-eco-auto"   # profil d'avant l'Économie automatique
 
 set_profile() {
@@ -83,7 +94,7 @@ set_profile() {
 
 batterie_pct() {
   local b
-  for b in /sys/class/power_supply/BAT*; do [ -r "$b/capacity" ] && { cat "$b/capacity"; return; }; done
+  for b in "$ALIM"/BAT*; do [ -r "$b/capacity" ] && { cat "$b/capacity"; return; }; done
   echo 100
 }
 
@@ -173,14 +184,30 @@ proposer_nvidia() {
   ) &
 }
 
-# Noctalia v5 en Économie : animations coupées, panneaux opaques (le flou de Hyprland est coupé),
-# rotation des fonds en pause, verrouillage sans transition. Fichier retiré en sortant d'Économie.
-noctalia_eco() {
-  local dir want
+# Écrit (ou retire, si le contenu voulu est vide) un fichier de réglages de Noctalia ; réussit s'il a changé.
+fichier_noctalia() {
+  local f=$1 want=$2
+  if [ -n "$want" ]; then
+    [ "$want" = "$(cat "$f" 2>/dev/null)" ] && return 1
+    printf '%s\n' "$want" > "$f.tmp" && mv "$f.tmp" "$f"
+  else
+    [ -e "$f" ] || return 1
+    rm -f "$f"
+  fi
+}
+
+# Noctalia v5, fichiers lus après sa config (ordre alphabétique, le dernier l'emporte) :
+#   - zz-batterie.toml, sur batterie hors Performance (BAT_RELEVES) : la barre relève processeur, mémoire, réseau
+#     et disque moins souvent, la carte graphique plus du tout (rien d'autre ne change à l'écran) ;
+#   - zz-economie.toml, en Économie (ECO_EFFETS) : animations coupées, panneaux opaques (le flou de Hyprland est
+#     coupé), rotation des fonds en pause, verrouillage sans transition, relevés encore plus espacés.
+# Un seul « config-reload », et seulement si l'un des deux a changé.
+noctalia_config() {
+  local profile=$1 bat=$2 dir eco="" batt="" change=0
   dir=$(dirname "$NOCTALIA_ECO")
   [ -d "$dir" ] || return 0
-  if [ "$1" = power-saver ]; then
-    want='# Généré par nc-profile-sync en mode Économie, supprimé en sortant. Ne pas éditer.
+  if [ "$profile" = power-saver ] && [ "$ECO_EFFETS" = oui ]; then
+    eco='# Généré par nc-profile-sync en mode Économie, supprimé en sortant. Ne pas éditer.
 [shell.animation]
 enabled = false
 
@@ -191,16 +218,35 @@ transparency_mode = "solid"
 enabled = false
 
 [lockscreen]
-transition = []'
-    [ "$want" = "$(cat "$NOCTALIA_ECO" 2>/dev/null)" ] && return 0
-    printf '%s\n' "$want" > "$NOCTALIA_ECO.tmp" && mv "$NOCTALIA_ECO.tmp" "$NOCTALIA_ECO"
-    log "$(t "Noctalia : mode Économie (animations et rotation des fonds coupées)" "Noctalia: Power Saver mode (animations and wallpaper rotation off)")"
-  else
-    [ -e "$NOCTALIA_ECO" ] || return 0
-    rm -f "$NOCTALIA_ECO"
-    log "$(t "Noctalia : mode normal" "Noctalia: normal mode")"
+transition = []
+
+[system.monitor]
+cpu_poll_seconds = 10.0
+memory_poll_seconds = 10.0
+network_poll_seconds = 10.0
+disk_poll_seconds = 60.0
+gpu_poll_seconds = 0.0'
   fi
-  command -v noctalia >/dev/null && noctalia msg config-reload >/dev/null 2>&1
+  if [ "$bat" = 1 ] && [ "$profile" != performance ] && [ "$BAT_RELEVES" = oui ]; then
+    batt='# Généré par nc-profile-sync sur batterie (hors Performance), supprimé au branchement. Ne pas éditer.
+[system.monitor]
+cpu_poll_seconds = 5.0
+memory_poll_seconds = 6.0
+network_poll_seconds = 6.0
+disk_poll_seconds = 30.0
+gpu_poll_seconds = 0.0'
+  fi
+  if fichier_noctalia "$NOCTALIA_ECO" "$eco"; then
+    change=1
+    if [ -n "$eco" ]; then log "$(t "Noctalia : mode Économie (animations et rotation des fonds coupées)" "Noctalia: Power Saver mode (animations and wallpaper rotation off)")"
+    else log "$(t "Noctalia : mode normal" "Noctalia: normal mode")"; fi
+  fi
+  if fichier_noctalia "$NOCTALIA_BAT" "$batt"; then
+    change=1
+    if [ -n "$batt" ]; then log "$(t "Noctalia : relevés de la barre espacés (batterie)" "Noctalia: fewer bar readings (battery)")"
+    else log "$(t "Noctalia : relevés de la barre normaux" "Noctalia: normal bar readings")"; fi
+  fi
+  [ "$change" = 1 ] && command -v noctalia >/dev/null && noctalia msg config-reload >/dev/null 2>&1
   return 0
 }
 
@@ -230,7 +276,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
 
   set_gpu_default "$profile"
   proposer_nvidia "$profile"
-  if [ "$ECO_EFFETS" = oui ]; then noctalia_eco "$profile"; else noctalia_eco balanced; fi
+  noctalia_config "$profile" "$bat"
 
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
   # seulement si c'est ce script qui l'avait coupé.
@@ -244,19 +290,37 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     rm -f "$rt/nc-bt-off"
   fi
 
-  # Rétroéclairage du clavier : éteint en Économie, niveau précédent restauré en sortant.
-  local kbd kbd_saved="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-kbd-saved"
-  kbd=$(ls /sys/class/leds 2>/dev/null | grep -m1 'kbd_backlight')
-  if [ -n "$kbd" ] && [ -e "/sys/class/leds/$kbd" ] && { [ "$ECO_CLAVIER" = oui ] || [ -e "$kbd_saved" ]; }; then
-    if [ "$profile" = power-saver ] && [ "$last_profile" != power-saver ]; then
-      # Ne pas écraser le niveau d'origine si le service redémarre alors qu'on est déjà en Économie.
-      [ -e "$kbd_saved" ] || cat "/sys/class/leds/$kbd/brightness" > "$kbd_saved"
-      brightnessctl -q -d "$kbd" set 0 && log "$(t "rétroéclairage clavier éteint" "keyboard backlight off")"
-    elif [ "$profile" != power-saver ] && [ "$last_profile" = power-saver ] && [ -r "$kbd_saved" ]; then
-      brightnessctl -q -d "$kbd" set "$(cat "$kbd_saved")" && log "$(t "rétroéclairage clavier restauré" "keyboard backlight restored")"
-      rm -f "$kbd_saved"
-    fi
+  # Rétroéclairage du clavier : éteint en Économie (ECO_CLAVIER), ramené au niveau 1 sur batterie hors Performance
+  # (BAT_CLAVIER, s'il était plus haut) ; le niveau d'avant revient en sortant. Seulement aux changements : un niveau
+  # choisi à la main entre-temps reste.
+  local kbd kbd_mode=normal ref kbd_saved="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-kbd-saved"
+  kbd=$(ls "$LEDS" 2>/dev/null | grep -m1 'kbd_backlight')
+  if [ "$profile" = power-saver ] && [ "$ECO_CLAVIER" = oui ]; then kbd_mode=eteint
+  elif [ "$bat" = 1 ] && [ "$profile" != performance ] && [ "$BAT_CLAVIER" = oui ]; then kbd_mode=bas
   fi
+  if [ -n "$kbd" ] && [ -e "$LEDS/$kbd" ] && [ "$kbd_mode" != "$last_kbd" ]; then
+    case $kbd_mode in
+      eteint)
+        # Ne pas écraser le niveau d'origine si le service redémarre alors qu'on est déjà en Économie.
+        [ -e "$kbd_saved" ] || cat "$LEDS/$kbd/brightness" > "$kbd_saved"
+        brightnessctl -q -d "$kbd" set 0 && log "$(t "rétroéclairage clavier éteint" "keyboard backlight off")" ;;
+      bas)
+        ref=$(cat "$kbd_saved" 2>/dev/null || cat "$LEDS/$kbd/brightness")
+        if [ "${ref:-0}" -gt 1 ]; then
+          [ -e "$kbd_saved" ] || echo "$ref" > "$kbd_saved"
+          brightnessctl -q -d "$kbd" set 1 && log "$(t "rétroéclairage clavier au niveau 1 (batterie)" "keyboard backlight at level 1 (battery)")"
+        elif [ -e "$kbd_saved" ]; then           # sortie d'Économie : le niveau d'avant, déjà 1 ou moins
+          brightnessctl -q -d "$kbd" set "$ref" && log "$(t "rétroéclairage clavier restauré" "keyboard backlight restored")"
+          rm -f "$kbd_saved"
+        fi ;;
+      *)
+        if [ -r "$kbd_saved" ]; then
+          brightnessctl -q -d "$kbd" set "$(cat "$kbd_saved")" && log "$(t "rétroéclairage clavier restauré" "keyboard backlight restored")"
+          rm -f "$kbd_saved"
+        fi ;;
+    esac
+  fi
+  last_kbd=$kbd_mode
 
   if [ -n "$BACKLIGHT" ] && [ "$profile" = power-saver ] && [ "$last_profile" != power-saver ] && [ "$ECO_BRIGHTNESS_MAX" -gt 0 ]; then
     local cur max
