@@ -83,6 +83,42 @@ def _horodatage(date):
     return float(date)
 
 
+def autorise(message):
+    """L'avis de retard ne part qu'à un utilisateur de la liste blanche (TELEGRAM_ALLOWED_USER_IDS) : un inconnu qui a
+    écrit pendant l'arrêt n'apprend pas que le bot est tenu par quelqu'un (revue SRV-02). Liste vide : comme le bot."""
+    liste = {x.strip() for x in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if x.strip()}
+    if not liste:
+        return True
+    auteur = getattr(getattr(message, "from_user", None), "id", None)
+    return auteur is not None and str(auteur) in liste
+
+
+def _repond(url):
+    import urllib.error
+    import urllib.request
+    try:
+        urllib.request.urlopen(url, timeout=2).close()
+    except urllib.error.HTTPError:
+        pass                                   # une réponse, même une erreur : il écoute
+
+
+async def attendre_runner(url=None, delai=30.0, pas=1.0):
+    """Au démarrage du PC, le runner (les réponses de JARVIS) peut écouter quelques secondes après le gateway : sans
+    cette attente, les messages en attente recevaient une erreur et étaient perdus (revue SRV-01). Vrai s'il répond."""
+    url = (os.environ.get("HOME_SERVER_URL", "") if url is None else url).rstrip("/")
+    if not url:
+        return True
+    fin = time.monotonic() + delai
+    while True:
+        try:
+            await asyncio.to_thread(_repond, url + "/")
+            return True
+        except Exception:
+            if time.monotonic() >= fin:
+                return False
+            await asyncio.sleep(pas)
+
+
 async def rattraper(app, chemin, demarrage=None, reconstruire=None):
     """Traite, dans l'ordre, les messages en attente chez Telegram depuis l'offset gardé ; renvoie combien étaient
     arrivés pendant l'arrêt. Le dernier appel (liste vide) confirme le tout à Telegram ; ``reconstruire(dict, bot)``
@@ -105,7 +141,8 @@ async def rattraper(app, chemin, demarrage=None, reconstruire=None):
                 retard += 1
                 logger.info("Telegram : message %d reçu pendant l'arrêt à %s, traité maintenant", numero, heure)
                 try:
-                    await app.bot.send_message(chat_id=message.chat.id, text="⏱ Reçu pendant l'arrêt à " + heure + " : traité maintenant.")
+                    if autorise(message):
+                        await app.bot.send_message(chat_id=message.chat.id, text="⏱ Reçu pendant l'arrêt à " + heure + " : traité maintenant.")
                 except Exception as exc:
                     logger.warning("Telegram : avertissement de retard non envoyé (%s)", exc)
                 if reconstruire is not None and isinstance(texte, str) and texte.strip() and not texte.lstrip().startswith("/"):
@@ -236,6 +273,8 @@ def demarrer_polling(tb, chemin):
             except Exception as exc:
                 logger.warning("Impossible d'enregistrer les commandes Telegram: %s", exc)
             await app.start()
+            if not await attendre_runner():
+                logger.warning("Telegram : le runner ne répond pas encore ; messages en attente traités quand même")
             retard = await rattraper(app, chemin, demarrage, Update.de_json)
             logger.info("Telegram : %d message(s) reçu(s) pendant l'arrêt traité(s) ; offset gardé dans %s", retard, chemin)
             await app.updater.start_polling()

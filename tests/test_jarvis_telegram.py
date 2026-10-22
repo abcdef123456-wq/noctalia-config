@@ -34,8 +34,9 @@ class Chat:
 
 
 class Message:
-    def __init__(self, text, date, chat=42):
+    def __init__(self, text, date, chat=42, auteur=None):
         self.text, self.date, self.chat = text, date, Chat(chat)
+        self.from_user = types.SimpleNamespace(id=auteur) if auteur is not None else None
 
 
 class Update:
@@ -178,6 +179,39 @@ class Rattrapage(unittest.TestCase):
         self.assertEqual(len(app.traites), 149, "le message dont le handler échoue ne bloque pas les suivants")
         self.assertEqual(bot.appels, [None, 101, 151], "au plus 100 par appel, puis confirmation")
         self.assertEqual(self.m.lire_offset(self.chemin), 151)
+
+    def test_avis_de_retard_seulement_aux_autorises(self):
+        """Revue SRV-02 : un inconnu qui avait écrit pendant l'arrêt recevait « ⏱ Reçu pendant l'arrêt »."""
+        bot = Bot([Update(1, Message("moi", self.avant, chat=7, auteur=7)), Update(2, Message("inconnu", self.avant, chat=8, auteur=8))])
+        with mock.patch.dict("os.environ", {"TELEGRAM_ALLOWED_USER_IDS": "7, 9"}):
+            n, app = self.rattraper(bot)
+        self.assertEqual([c for c, _ in bot.envoyes], [7])
+        self.assertEqual(len(app.traites), 2, "le message de l'inconnu passe quand même à upstream, qui décide")
+
+    def test_attend_que_le_runner_ecoute(self):
+        """Revue SRV-01 : au démarrage du PC, le runner écoutait parfois après le rattrapage (messages perdus)."""
+        import http.server, socket
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+        url = "http://127.0.0.1:%d" % port
+        self.assertFalse(asyncio.run(self.m.attendre_runner(url, delai=0.5, pas=0.1)), "personne n'écoute")
+
+        class R(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(404); self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        def plus_tard():
+            time.sleep(0.8)
+            serveur = http.server.HTTPServer(("127.0.0.1", port), R)
+            self.addCleanup(serveur.server_close)
+            serveur.handle_request()
+        threading.Thread(target=plus_tard, daemon=True).start()
+        debut = time.monotonic()
+        self.assertTrue(asyncio.run(self.m.attendre_runner(url, delai=10, pas=0.1)), "une réponse, même 404, suffit")
+        self.assertGreater(time.monotonic() - debut, 0.5)
+        self.assertTrue(asyncio.run(self.m.attendre_runner("", delai=0)), "sans runner configuré : rien à attendre")
 
     def test_offset_garde_en_polling_normal(self):
         app = Application(Bot([]))

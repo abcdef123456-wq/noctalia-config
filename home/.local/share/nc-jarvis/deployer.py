@@ -78,7 +78,9 @@ def units(backend, overlay):
         module='nc_runner:app' if role=='runner' else 'nc_gateway:app'
         args=[folder/'.venv/bin/uvicorn',module,'--app-dir',folder,'--host','127.0.0.1','--port',str(port)]
         result['assistant-'+role+'.service']='\n'.join([
-            '[Unit]','Description=JARVIS '+role+' (Noctalia)', 'After=network.target', '', '[Service]',
+            '[Unit]','Description=JARVIS '+role+' (Noctalia)', 'After=network.target', *(
+                # Le gateway répond aux messages Telegram en attente dès son démarrage : le runner d'abord (revue SRV-01)
+                ['Wants=assistant-runner.service','After=assistant-runner.service'] if role=='gateway' else []), '', '[Service]',
             'WorkingDirectory='+unit_path(folder),'EnvironmentFile='+unit_path(folder/'.env'),
             'Environment='+unit_quote('PYTHONPATH='+str(overlay)+':'+str(backend)),
             'ExecStart='+' '.join(unit_quote(a) for a in args),'Restart=on-failure','RestartSec=5',

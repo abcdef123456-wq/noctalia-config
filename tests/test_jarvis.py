@@ -48,6 +48,9 @@ class Deploiement(unittest.TestCase):
             self.assertNotIn('WorkingDirectory="',value)
             self.assertNotIn('EnvironmentFile="',value)
         self.assertIn('nc_gateway:app',units['assistant-gateway.service'])
+        # Revue SRV-01 : le gateway rattrape les messages Telegram en attente dès son démarrage, le runner d'abord
+        self.assertIn('Wants=assistant-runner.service\nAfter=assistant-runner.service',units['assistant-gateway.service'])
+        self.assertNotIn('assistant-runner.service',units['assistant-runner.service'])
         self.assertIn('home-runner',units['assistant-runner.service'])
 
     def test_env_merge_preserves_personal_fields_private_mode_and_symlinks(self):
