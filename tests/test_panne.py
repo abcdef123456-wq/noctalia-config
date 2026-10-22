@@ -232,3 +232,14 @@ class VersionParTelegram(unittest.TestCase):
             (home / ".cache/nc/maj-telegram").unlink()
             verifier()
             self.assertEqual(lire("alertes").count("version"), 3, "MAJ_VERIFIER=non : rien")
+            # Revue MAJ-02 : JARVIS lent ou injoignable ne retarde pas la notification du bureau
+            (home / ".config/nc/reglages.conf").unlink()
+            for f in (".cache/nc/maj-telegram", ".cache/nc/maj-annoncee"):
+                (home / f).unlink(missing_ok=True)
+            alertes.write_text('#!/bin/sh\nsleep 4; echo "$*" >> "$HOME/alertes"\n')
+            (faux / "notify-send").write_text('#!/bin/sh\ndate +%s.%N >> "$HOME/heure-notif"\n')
+            import time
+            debut = time.time()
+            self.assertEqual(verifier().returncode, 0)
+            self.assertLess(float(lire("heure-notif").split()[-1]) - debut, 2.5, "la notification part sans attendre Telegram")
+            self.assertTrue((home / ".cache/nc/maj-telegram").exists(), "et Telegram a quand même fini (wait)")

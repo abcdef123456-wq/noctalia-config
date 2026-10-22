@@ -1033,8 +1033,10 @@ REGLAGES = [
       L("Quand nc-paquets a fini de mettre le système à jour.", "When nc-packages has finished updating the system.")),
     R("ALERTES_VERSION", "Agents IA (coucou)", L("Alerte Telegram : nouvelle version de la config", "Telegram alert: new config version"),
       "ouinon", "oui",
-      L("Dès qu'une nouvelle version de noctalia-config est publiée (vérifié toutes les heures), avec ses nouveautés.",
-        "As soon as a new noctalia-config version is published (checked every hour), with what's new.")),
+      L("Dès qu'une nouvelle version de noctalia-config est publiée (vérifié toutes les heures), avec ses nouveautés. "
+        "Activé après coup, il prévient à partir de la version suivante.",
+        "As soon as a new noctalia-config version is published (checked every hour), with what's new. Turned on later, "
+        "it notifies from the next version on.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
     R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
       "ouinon", "oui",
