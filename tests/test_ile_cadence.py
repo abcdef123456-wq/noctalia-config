@@ -52,7 +52,8 @@ class Surface(unittest.TestCase):
 
     def test_tailles(self):
         self.assertIn("(grande ? 700 : 56)", self.ile)
-        self.assertRegex(self.ile, r"Math\.min\(modelData\.width, grande \? Math\.max\(800, largeurUtile\)")
+        # Largeur FIXE hors Spotlight (issue #13 : un changement de largeur faisait sauter l'île de côté en se fermant)
+        self.assertIn("implicitWidth: pleinEcran ? modelData.width : Math.min(modelData.width, 800)", self.ile)
         # enCarte : demande de Claude Code ou confirmation du mode graphique (île fermée étirée en carte)
         self.assertIn("readonly property bool grandeVoulue: ouverte || banniere || enCarte", self.ile)
         self.assertIn("readonly property bool enCarte: demandeClaude || confirmGpu", self.ile)
@@ -61,7 +62,9 @@ class Surface(unittest.TestCase):
     def test_retour_apres_le_ressort(self):
         # La surface ne rapetisse qu'une fois l'île revenue à la pilule (900 ms au plus) : sinon elle serait coupée
         self.assertIn("Timer { id: retour; interval: 900 }", self.ile)
-        self.assertRegex(self.ile, r"ile\.height <= 31 && ile\.width <= compact\.largeur \+ 1\) retour\.stop\(\)")
+        # Repos des ressorts : taille voulue à 0,5 près, constatée après 120 ms sans mouvement (pas au premier passage)
+        self.assertIn("interval: 120", self.ile)
+        self.assertRegex(self.ile, r"Math\.abs\(ile\.width - ile\.cibleLargeur\) <= 0\.5 && Math\.abs\(ile\.height - ile\.cibleHauteur\) <= 0\.5")
         self.assertEqual(len(re.findall(r"on(Width|Height)Changed: fen\.revenue\(\)", self.ile)), 2)
 
     def test_tout_tient_dans_la_surface(self):
@@ -70,7 +73,7 @@ class Surface(unittest.TestCase):
             hauteur = int(next(x for x in h if x))
             self.assertLessEqual(hauteur * 1.1 + 9, 700, hauteur)
         # Bulle (7 + 30) et point du micro (44 + 8) à droite de la pilule : 70 de marge de chaque côté
-        self.assertIn("Math.max(ile.width, compact.largeur) + 140", self.ile)
+        self.assertIn("Math.min(modelData.width, 800)", self.ile)          # 800 de large : de quoi loger bulle et point
 
 
 class Batterie(unittest.TestCase):

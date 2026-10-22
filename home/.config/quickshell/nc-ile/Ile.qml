@@ -22,28 +22,31 @@ PanelWindow {
     // pleinEcran reste donc vrai après la recherche, le temps que l'île revienne à sa taille
     anchors.top: true
     readonly property bool pleinEcran: recherche || retourRecherche.running
-    onRechercheChanged: if (recherche) retourRecherche.stop(); else retourRecherche.restart()
+    onRechercheChanged: if (recherche) retourRecherche.stop(); else { retourRecherche.restart(); repos.restart() }
     Timer { id: retourRecherche; interval: 900 }
     // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
     // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
     // 200 x 30 coûtait les trois quarts de l'iGPU dès que quelque chose bougeait dans l'île (étincelle, onde, minuteur).
-    // Pilule : sa largeur et 70 de chaque côté (bulle, point du micro) ; ouverte, en bannière ou en demande : 800 x 700.
-    // À l'ouverture, la surface grandit dans le même tour (le ressort part de la pilule, centrée : rien ne dépasse) ; à
-    // la fermeture, elle ne rapetisse qu'une fois le ressort revenu à la pilule (900 ms au plus), sinon l'île serait coupée
+    // Largeur fixe de 800 (le coût est par image, pas par pixel) : une couche centrée en haut qui change de largeur est
+    // recentrée par Hyprland avec une image de retard, et l'île faisait un saut de côté en se refermant (issue #13).
+    // Seule la hauteur change (56 pour la pilule, 700 ouverte, en bannière ou en demande) : le bord haut reste fixe.
+    // À l'ouverture, la surface grandit dans le même tour ; à la fermeture, elle ne rapetisse qu'une fois les ressorts au
+    // repos (taille voulue à 0,5 près pendant 120 ms, 900 ms au plus), sinon l'île serait coupée pendant son rebond
     readonly property bool grandeVoulue: ouverte || banniere || enCarte
     readonly property bool grande: grandeVoulue || retour.running
-    onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else retour.restart()
+    onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else { retour.restart(); repos.restart() }
     Timer { id: retour; interval: 900 }
-    function revenue() {
-        if (retour.running && ile.height <= 31 && ile.width <= compact.largeur + 1) retour.stop()
-        // Île arrivée à sa taille voulue (ressort fini, à 1 près) : la surface peut quitter le plein écran
-        if (retourRecherche.running && Math.abs(ile.width - ile.cibleLargeur) <= 1 && Math.abs(ile.height - ile.cibleHauteur) <= 1)
-            retourRecherche.stop()
+    // Appelée à chaque pas des ressorts : le repos n'est constaté qu'après 120 ms sans mouvement (un ressort passe sous sa
+    // cible avant de rebondir)
+    function revenue() { if (retour.running || retourRecherche.running) repos.restart() }
+    Timer {
+        id: repos
+        interval: 120
+        onTriggered: if (Math.abs(ile.width - ile.cibleLargeur) <= 0.5 && Math.abs(ile.height - ile.cibleHauteur) <= 0.5) {
+            retour.stop(); retourRecherche.stop()
+        }
     }
-    readonly property real largeurUtile: Math.max(ile.width, compact.largeur) + 140
-    // Par paliers de 40 : pendant le ressort de la pilule, la surface change de taille quelques fois, pas à chaque image
-    implicitWidth: pleinEcran ? modelData.width
-                              : Math.min(modelData.width, grande ? Math.max(800, largeurUtile) : Math.ceil(largeurUtile / 40) * 40)
+    implicitWidth: pleinEcran ? modelData.width : Math.min(modelData.width, 800)
     implicitHeight: pleinEcran ? modelData.height : (grande ? 700 : 56)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
