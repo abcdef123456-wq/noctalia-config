@@ -49,7 +49,7 @@ Item {
                 c.beginPath(); c.arc(width / 2, height / 2, r, a, a + 0.75); c.stroke()
             }
         }
-        RotationAnimation on rotation { from: 0; to: 360; duration: orbe.occupe ? 4500 : 18000; loops: Animation.Infinite; running: orbe.mouvement }
+        RotationAnimator on rotation { from: 0; to: 360; duration: orbe.occupe ? 4500 : 18000; loops: Animation.Infinite; running: orbe.mouvement }
     }
     Rectangle {
         width: 34; height: 34; radius: 17

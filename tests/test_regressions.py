@@ -568,3 +568,23 @@ class AnimationsSobres(unittest.TestCase):
                 expr = condition[1].strip()
                 propre = "sobre" in expr or re.search(r"(bouge|clignote|anime|mouvement)\b", expr)
                 self.assertTrue(propre, f"{f.name} : une animation sans fin ignore Reglages.sobre : {ligne.strip()}")
+
+
+class AnimationsFilDeRendu(unittest.TestCase):
+    """PERF-01 : les rotations sans fin de l'île sont des RotationAnimator (fil de rendu), plus des RotationAnimation
+    (fil principal, une propriété QML réécrite à chaque image)."""
+
+    def test_rotations_sans_fin_en_animator(self):
+        import re
+        for nom in ("Etincelle.qml", "AssistantOrbe.qml", "Calendrier.qml", "Ligne.qml"):
+            texte = (QML / nom).read_text()
+            self.assertNotRegex(texte, r"RotationAnimation\s+on\s+rotation", nom)
+            infinies = [m.start() for m in re.finditer(r"loops: Animation\.Infinite", texte)]
+            self.assertTrue(infinies, nom)
+            for debut in infinies:
+                bloc = texte[max(0, texte.rfind("{", 0, debut) - 40):debut]   # le type de l'animation et sa ligne
+                self.assertNotIn("RotationAnimation ", bloc, f"{nom} : {bloc.strip()}")
+        etincelle = (QML / "Etincelle.qml").read_text()
+        self.assertRegex(etincelle, r"RotationAnimator on rotation \{[^}]*duration: e\.dureeTour")
+        self.assertIn('Reglages.val("ILE_ANIM_BATTERIE", "douces")', etincelle)
+        self.assertIn("UPower.onBattery", etincelle)

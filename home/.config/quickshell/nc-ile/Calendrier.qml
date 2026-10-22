@@ -155,7 +155,7 @@ Item {
                     visible: ca.chargement && !ca.mois
                     spacing: 8; leftPadding: 4
                     Ico { anchors.verticalCenter: parent.verticalCenter; nom: "progress_activity"; taille: 16; color: Couleurs.texteSec
-                          RotationAnimation on rotation { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: ca.chargement } }
+                          RotationAnimator on rotation { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: ca.chargement } }
                     Texte { text: Reglages.t("Chargement de Google Agenda…", "Loading Google Calendar…"); secondaire: true; font.pixelSize: 12 }
                 }
                 Column {

@@ -36,10 +36,13 @@ Rectangle {
         }
     }
     Ico {
+        id: icoDroite
         anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
         nom: l.attente ? "progress_activity" : l.droite; taille: 18; color: l.attente ? Couleurs.accent : l.couleurDroite
         visible: l.attente || l.droite !== ""
-        RotationAnimation on rotation { running: l.attente; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
+        // Animator (fil de rendu) : il écrit l'angle à l'arrêt ; l'icône de droite revient alors droite
+        RotationAnimator on rotation { running: l.attente; from: 0; to: 360; duration: 900; loops: Animation.Infinite
+                                       onStopped: icoDroite.rotation = 0 }
     }
     MouseArea {
         id: zone
