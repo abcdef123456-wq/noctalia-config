@@ -18,6 +18,8 @@
   --nc-accent: var(--nc-couleur-accent, var(--toolbar-field-border-color-focus, var(--toolbar-field-focus-border-color, AccentColor)));
   --nc-texte: var(--nc-couleur-texte, var(--nc-theme-texte));
   --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-theme-texte) 70%, transparent));
+  /* Contour d'un champ au repos : 3:1 sur la barre (35 % en sombre, 50 % en clair, mesuré dans Firefox 159) */
+  --nc-contour-champ: light-dark(color-mix(in srgb, var(--nc-texte) 50%, var(--nc-fond)), color-mix(in srgb, var(--nc-texte) 35%, var(--nc-fond)));
   --nc-arrondi: 11px;
   --tab-min-height: 34px !important;
   --toolbarbutton-border-radius: 9px !important;
@@ -60,7 +62,7 @@
 .tabbrowser-tab .tab-line { display: none !important; }
 
 /* Barre d'adresse et recherche : une pastille, un liseré accent quand elle a le focus */
-/* Hors focus, un contour discret : le champ ne se distinguait du fond qu'à 1,10:1 */
+/* Hors focus, un contour visible (3:1 sur la barre) : le champ ne se distinguait du fond qu'à 1,10:1 */
 /* Le texte du champ suit la même palette que son fond (sinon celui du thème Firefox, d'un autre côté possible) */
 #urlbar,
 #searchbar {
@@ -72,7 +74,7 @@
 #searchbar {
   border-radius: var(--nc-arrondi) !important;
   background-color: var(--nc-carte) !important;
-  border: 1px solid color-mix(in srgb, var(--nc-texte) 14%, var(--nc-fond)) !important;
+  border: 1px solid var(--nc-contour-champ) !important;
   box-shadow: none !important;
 }
 /* Au focus, Firefox garde son propre liseré (la couleur d'accent du système) : il se dessine hors de ces éléments */
@@ -132,7 +134,8 @@
 .browserContainer > findbar .findbar-textbox {
   background-color: var(--nc-carte) !important;
   color: var(--nc-texte) !important;
-  border: 1px solid color-mix(in srgb, var(--nc-texte) 14%, var(--nc-fond)) !important;
+  border: 1px solid var(--nc-contour-champ) !important;
   border-radius: 8px !important;
 }
-.browserContainer > findbar .findbar-textbox[status="notfound"] { border-color: #e66a6a !important; }
+/* Introuvable : un rouge lisible des deux côtés (#e66a6a n'avait que 2,4:1 sur un champ clair) */
+.browserContainer > findbar .findbar-textbox[status="notfound"] { border-color: light-dark(#c83c3c, #e66a6a) !important; }
