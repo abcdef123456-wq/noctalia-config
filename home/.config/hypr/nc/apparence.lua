@@ -23,7 +23,7 @@ hl.config({
     },
 
     decoration = {
-        rounding       = nc.reglage("FENETRES_ARRONDI", 14),
+        rounding       = math.min(20, nc.reglage("FENETRES_ARRONDI", 14)),   -- Hyprland : 20 au plus (une valeur plus haute = erreur)
         rounding_power = ({ rond = 2, doux = 2.5, carres = 4 })[nc.reglage("FENETRES_COINS_FORME", "doux")] or 2.5,   -- nc-reglages
 
         active_opacity   = math.max(0.7, math.min(1, nc.reglage("FENETRES_OPACITE_ACTIVE", 100) / 100)),   -- nc-reglages
@@ -123,7 +123,7 @@ hl.config({
     },
 
     cursor = {
-        inactive_timeout  = nc.reglage("CURSEUR_CACHER", 8),   -- nc-reglages (0 : jamais caché)
+        inactive_timeout  = math.min(20, nc.reglage("CURSEUR_CACHER", 8)),   -- nc-reglages (0 : jamais caché ; 20 s au plus)
         no_warps          = not nc.reglage("CURSEUR_SUIT_FOCUS", true),   -- nc-reglages
         hide_on_key_press = true,
     },
@@ -159,3 +159,8 @@ hl.animation({ leaf = "workspaces",       enabled = true, speed = 3.5 * duree, b
 -- Bureaux cachés (terminal déroulant, bloc-notes) : descendent du haut de l'écran et y remontent
 hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.5 * duree, bezier = "emphasized",      style = "slidevert -100%" })
 hl.animation({ leaf = "zoomFactor",       enabled = true, speed = 5 * duree,   bezier = "standard" })
+
+-- Hyprland 0.56 et plus : pas de barre d'onglets pour un groupe d'une seule fenêtre (option absente avant : ignorée)
+if nc.hypr_min and nc.hypr_min(0, 56, 0) then
+    pcall(hl.config, { group = { groupbar = { disable_when_only = true } } })
+end

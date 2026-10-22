@@ -28,8 +28,9 @@ end
 -- ── Barre après le plein écran ──────────────────────────────────────────────
 -- Une fenêtre sort du plein écran (Super + F, vidéo, jeu) : la barre de Noctalia est réaffichée. Avec certaines
 -- versions de Noctalia et de Hyprland (Debian), elle restait cachée alors que l'île revenait.
+-- Corrigé dans Hyprland 0.56 (#15370) : seulement avant, un processus de moins à chaque sortie de plein écran.
 hl.on("window.fullscreen", function(w)
-    if w and (tonumber(w.fullscreen) or 0) == 0 then
+    if not nc.hypr_min(0, 56, 0) and w and (tonumber(w.fullscreen) or 0) == 0 then
         hl.exec_cmd("sleep 0.3; noctalia msg bar-show >/dev/null 2>&1")
     end
 end)
@@ -54,7 +55,8 @@ function nc.halo(n)
     if not nc.flou_actif then return end
     n = math.max(0, math.min(1, tonumber(n) or 0))
     local reglage = { decoration = { shadow = { range = math.floor(base_portee + n * 18 + 0.5) } } }
-    local a, r, g, b = argb(base_ombre and base_ombre.colors and base_ombre.colors[1])
+    -- Hyprland 0.56 : un dégradé ({ colors = … }) ; 0.55 : une couleur simple
+    local a, r, g, b = argb(type(base_ombre) == "table" and base_ombre.colors and base_ombre.colors[1] or base_ombre)
     if a then reglage.decoration.shadow.color = rgba(r, g, b, a + (0xF0 - a) * n) end
     if base_bord and base_bord.colors then
         local couleurs = {}

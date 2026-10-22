@@ -608,7 +608,7 @@ REGLAGES = [
     R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",
       mini=0, maxi=8, unite="px", groupe="hypr"),
     R("FENETRES_ARRONDI", "Fenêtres", L("Arrondi des coins", "Corner rounding"), "entier", "14",
-      mini=0, maxi=30, unite="px", groupe="hypr"),
+      mini=0, maxi=20, unite="px", groupe="hypr"),     # Hyprland refuse plus de 20 (0.55 et 0.56)
     R("FENETRES_HALO", "Fenêtres", L("Halo coloré de la fenêtre active", "Colored glow of the active window"), "ouinon", "oui",
       L("Ombre aux couleurs du fond d'écran (et halo musical).", "A shadow in the wallpaper's colors (and music glow)."),
       groupe="hypr"),
@@ -822,7 +822,7 @@ REGLAGES = [
       L("Le pavé numérique tape des chiffres dès l'ouverture de session.", "The numeric keypad types digits as soon as you log in."), groupe="hypr"),
     R("CURSEUR_CACHER", "Clavier et souris", L("Cacher le pointeur immobile après", "Hide the idle pointer after"), "entier", "8",
       L("Il réapparaît au premier mouvement. Il se cache aussi quand tu tapes.", "It comes back at the first move. It also hides while you type."),
-      mini=0, maxi=60, pas=1, unite="s", zero=_JAMAIS, groupe="hypr"),
+      mini=0, maxi=20, pas=1, unite="s", zero=_JAMAIS, groupe="hypr"),     # Hyprland refuse plus de 20 s
     R("CLAVIER_MAJ", "Clavier et souris", L("Touche Verr. Maj", "Caps Lock key"), "choix", "normal",
       L("La touche Verr. Maj, rarement utile, peut devenir un Ctrl (raccourcis plus confortables), Échap (Neovim) ou Super.",
         "The rarely useful Caps Lock key can become Ctrl (comfier shortcuts), Escape (Neovim) or Super."),
