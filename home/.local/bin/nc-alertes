@@ -62,12 +62,19 @@ def ecrire_etat(d):
 
 
 def batterie():
-    """(pourcentage, en décharge) de la première batterie, ou None sans batterie."""
+    """(pourcentage, en décharge) de la batterie du PC, ou None sans batterie. Les piles des souris, claviers et
+    manettes sans fil (scope = Device) ne comptent pas : sur un PC fixe, « branche le PC » pour une souris à 12 %
+    (revue ALERT-01)."""
     try:
         for d in sorted(SYSFS.iterdir()):
             try:
                 if (d / "type").read_text().strip() != "Battery":
                     continue
+                try:
+                    if (d / "scope").read_text().strip().lower() == "device":
+                        continue
+                except OSError:
+                    pass                                   # pas de scope : la batterie du PC
                 pct = int((d / "capacity").read_text().strip())
                 statut = (d / "status").read_text().strip().lower()
             except (OSError, ValueError):

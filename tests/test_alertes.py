@@ -94,6 +94,22 @@ class Alertes(unittest.TestCase):
         self.assertEqual(len(self.textes()), 2, "nouveau passage sous le seuil après une charge : nouveau message")
         self.assertEqual(json.loads((self.home / "state/nc/alertes.json").read_text())["batterie_sous"], True)
 
+    def test_pile_d_une_souris_n_est_pas_la_batterie(self):
+        """Revue ALERT-01 : sur un PC fixe, la pile d'une souris sans fil (scope Device) donnait « branche le PC »."""
+        import shutil
+        shutil.rmtree(self.home / "sys/BAT0")
+        souris = self.home / "sys/hidpp_battery_0"; souris.mkdir()
+        for nom, v in (("type", "Battery"), ("scope", "Device"), ("capacity", "12"), ("status", "Discharging")):
+            (souris / nom).write_text(v + "\n")
+        self.lancer("verifier")
+        self.assertEqual(self.textes(), [], "PC fixe : pas d'alerte de batterie")
+        # Un portable : sa batterie (sans scope, ou System) compte, même si la souris trie avant
+        bat = self.home / "sys/zBAT1"; bat.mkdir()
+        for nom, v in (("type", "Battery"), ("scope", "System"), ("capacity", "15"), ("status", "Discharging")):
+            (bat / nom).write_text(v + "\n")
+        self.lancer("verifier")
+        self.assertEqual(self.textes(), ["🔋 Batterie à 15 % (seuil 20 %) : branche le PC."])
+
     def test_services_en_echec_une_fois(self):
         self.batterie(80, "Charging")
         self.lancer("verifier", echecs="nc-pouls.service loaded failed failed Halo\nfoo.service loaded failed failed x\n")
