@@ -38,6 +38,7 @@ elif op=='memory':data=dict(facts=[dict(id='one',text='Une mémoire')],profile=d
 elif op=='conversations':data=dict(conversations=[dict(id='conv-one',title='Conversation')])
 elif op=='reminders':data=dict(reminders=[dict(id=1,message='Test',platform='telegram')])
 elif op=='services':data=dict(services=[])
+elif op=='conversation.resume':data=dict(success=True,message='Conversation reprise',history=[dict(prompt='Première question',response='Première réponse'),dict(prompt='Deuxième question',response='Deuxième réponse')])
 else:data=dict(success=True,message='Action terminée')
 print(json.dumps(dict(ok=True,data=data)),flush=True)
 '''
@@ -200,3 +201,50 @@ if(etape===1){
 ''',evenements=True)
         self.assertEqual([c['data']['question'] for c in calls if c['argv']==['requete-ile']],['salut','/reset'])
 
+
+    # Issue #9 : reprendre une conversation affiche l'échange repris dans le chat (et ouvre le chat) au lieu de le vider
+    def test_reprise_charge_l_historique_et_ouvre_le_chat_puis_reset_vide(self):
+        uuid='1b4e28ba-2fa1-11d2-883f-0016d3cca427'
+        calls=self.executer('''
+var bouton=function bouton(item,texte){if(item.texte===texte&&item.visible&&item.clic)return item;for(var i=0;i<item.children.length;i++){var r=bouton(item.children[i],texte);if(r)return r}return null}
+if(etape===0){creer();etape++;return}
+if(JarvisEtat.enCours||AssistantEtat.enCours)return
+if(etape===1){AssistantEtat.ajouter("vous","ancienne");AssistantEtat.ajouter("assistant","ancienne réponse");dashboard.ouvrir("conversations");etape++}
+else if(etape===2){
+ var b=bouton(dashboard.contentItem,"Resume");verifier(b!==null,"bouton Reprendre absent");b.clic()
+ verifier(dashboard.selection.op==="conversation.resume","formulaire absent")
+ dashboard.valeurs={id:" '''+uuid+''' "};dashboard.soumettre()
+ verifier(dashboard.attente!==null&&dashboard.attente.params.id==="'''+uuid+'''","confirmation : "+JSON.stringify(dashboard.attente))
+ var demande=dashboard.attente;dashboard.attente=null;JarvisEtat.executer(demande.op,demande.params,true);etape++}
+else if(etape===3){
+ var m=AssistantEtat.messages
+ verifier(m.length===4,"messages repris : "+JSON.stringify(m))
+ verifier(m.map(x=>x.role).join(",")==="vous,assistant,vous,assistant","rôles : "+m.map(x=>x.role).join(","))
+ verifier(m[0].texte==="Première question"&&m[3].texte==="Deuxième réponse","textes : "+JSON.stringify(m))
+ verifier(m.every(x=>Array.isArray(x.choix)&&x.choix.length===0&&x.choixFait===""&&x.num>0),"champs des messages : "+JSON.stringify(m))
+ verifier(dashboard.page==="chat","onglet : "+dashboard.page)
+ JarvisEtat.executer("session.reset",{},true);etape++}
+else if(etape===4){verifier(AssistantEtat.messages.length===0,"session.reset ne vide plus : "+AssistantEtat.messages.length);dashboard.close();Qt.quit()}
+''')
+        reprises=[c['data'] for c in calls if c['data'].get('op')=='conversation.resume']
+        self.assertEqual(reprises,[dict(op='conversation.resume',params=dict(id=uuid),confirmed=True)])
+
+    def test_reprise_sans_identifiant_valide_n_envoie_rien(self):
+        calls=self.executer('''
+var tous=function tous(item,acc){if(item.objectName==="nc-jarvis-champ-erreur"&&item.visible)acc.push(item);for(var i=0;i<item.children.length;i++)tous(item.children[i],acc);return acc}
+var bouton=function bouton(item,texte){if(item.texte===texte&&item.visible&&item.clic)return item;for(var i=0;i<item.children.length;i++){var r=bouton(item.children[i],texte);if(r)return r}return null}
+if(etape===0){creer();etape++;return}
+if(JarvisEtat.enCours)return
+if(etape===1){dashboard.ouvrir("conversations");etape++}
+else if(etape===2){
+ bouton(dashboard.contentItem,"Resume").clic()
+ verifier(tous(dashboard.contentItem,[]).length===0,"message avant toute saisie")
+ bouton(dashboard.contentItem,"Continue").clic()
+ verifier(dashboard.attente===null&&!JarvisEtat.enCours,"identifiant vide accepté");etape++}
+else if(etape===3){
+ var e=tous(dashboard.contentItem,[]);verifier(e.length===1&&e[0].text.indexOf("conversation ID")>=0,"message sous le champ vide : "+e.length)
+ dashboard.valeurs={id:"1b4e28ba-2fa1-11d2"};dashboard.soumettre()
+ verifier(dashboard.attente===null&&!JarvisEtat.enCours,"identifiant incomplet accepté");etape++}
+else if(etape===4){verifier(tous(dashboard.contentItem,[]).length===1,"message sous le champ incomplet");dashboard.close();Qt.quit()}
+''')
+        self.assertFalse([c for c in calls if c['data'].get('op')=='conversation.resume'])

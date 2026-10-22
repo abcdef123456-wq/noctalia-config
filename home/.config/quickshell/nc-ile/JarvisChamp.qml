@@ -5,6 +5,7 @@ Column {
     id: champ
     property string titre
     property string aide: ""
+    property string erreur: ""                 // message sous le champ (valeur refusée) ; vide : rien
     property bool secret: false
     property bool booleen: false
     property alias texte: input.text
@@ -29,4 +30,6 @@ Column {
         JarvisBouton { anchors.fill: parent; visible: champ.booleen; texte: input.text === "1" ? Reglages.t("Activé", "Enabled") : Reglages.t("Désactivé", "Disabled"); primaire: input.text === "1"; onClic: { input.text = input.text === "1" ? "0" : "1"; champ.change(input.text) } }
         Texte { anchors.fill: parent; anchors.leftMargin: 14; verticalAlignment: Text.AlignVCenter; text: champ.aide; visible: !champ.booleen && !input.text && !input.activeFocus; secondaire: true; font.pixelSize: 12 }
     }
+    Texte { objectName: "nc-jarvis-champ-erreur"; width: parent.width; visible: champ.erreur !== ""; text: champ.erreur; textFormat: Text.PlainText
+            wrapMode: Text.Wrap; elide: Text.ElideNone; color: Couleurs.rouge; font.pixelSize: 12; leftPadding: 4 }
 }

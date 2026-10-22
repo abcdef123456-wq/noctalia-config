@@ -22,6 +22,7 @@ FloatingWindow {
     property var attente: null
     property string moduleId: ""
     property string resultatOp: ""
+    property bool essaiEnvoi: false               // « Continuer » cliqué : les champs invalides montrent leur message
     readonly property var moduleCourant: JarvisEtat.modules.find(m => m.id === moduleId) || ({})
     readonly property bool materielDisponible: !(moduleCourant.hardware || moduleCourant.requires_local_hardware) || JarvisEtat.etat.deploy_mode !== "server"
     readonly property var navigation: [
@@ -50,11 +51,21 @@ FloatingWindow {
         if (op) { resultatOp = op; JarvisEtat.executer(op, {}, false) }
     }
     function formulaire(op, titre, champs, initial) {
-        selection = {op:op,titre:titre,champs:champs || []}; valeurs = initial || {}; resultatOp = op
+        selection = {op:op,titre:titre,champs:champs || []}; valeurs = initial || {}; resultatOp = op; essaiEnvoi = false
     }
     function champ(cle, titre, type, secret) { return {key:cle,label:titre,kind:type || "text",secret:secret || false} }
+    // forme "uuid" : l'identifiant d'une conversation (sinon le serveur répond 400) ; "" quand la valeur convient
+    function erreurChamp(f, v) {
+        if (f.forme === "uuid" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v === undefined ? "" : v).trim()))
+            return Reglages.t("Colle l’identifiant complet de la conversation, de la forme 1b4e28ba-2fa1-11d2-883f-0016d3cca427.",
+                              "Paste the full conversation ID, like 1b4e28ba-2fa1-11d2-883f-0016d3cca427.")
+        return ""
+    }
     function soumettre() {
+        var champs = selection.champs || []
+        if (champs.some(f => erreurChamp(f, valeurs[f.key]) !== "")) { essaiEnvoi = true; return }
         var p = Object.assign({}, valeurs)
+        champs.forEach(f => { if (f.forme === "uuid") p[f.key] = String(p[f.key]).trim() })
         if (selection.op === "action") {
             var params = {}
             for (var i=0;i<selection.champs.length;i++) {
@@ -87,7 +98,12 @@ FloatingWindow {
         target: JarvisEtat
         function onTermine(op, succes) {
             if (op === "config.update" && succes) { fen.valeurs = {}; fen.selection = {} }
-            if ((op === "session.reset" || op === "conversation.resume") && succes) AssistantEtat.effacer()
+            if (op === "session.reset" && succes) AssistantEtat.effacer()
+            // Reprise : le chat montre l'échange repris (history du serveur), et le cockpit passe sur le chat
+            if (op === "conversation.resume" && succes) {
+                AssistantEtat.chargerHistorique((JarvisEtat.resultats["conversation.resume"] || {}).history)
+                fen.ouvrir("chat")
+            }
             if (op === "session.update" && succes) AssistantEtat.lireReglages()
         }
     }
@@ -318,7 +334,7 @@ FloatingWindow {
                 Flow {
                     width:parent.width; spacing:8
                     Action { texte:Reglages.t("Actualiser", "Refresh"); onClic:{fen.resultatOp="conversations";JarvisEtat.executer("conversations",{},false)} }
-                    Action { texte:Reglages.t("Reprendre", "Resume"); onClic:fen.formulaire("conversation.resume",Reglages.t("Reprendre cette conversation pour tous les clients", "Resume this conversation for all clients"),[fen.champ("id","Identifiant")]) }
+                    Action { texte:Reglages.t("Reprendre", "Resume"); onClic:fen.formulaire("conversation.resume",Reglages.t("Reprendre cette conversation pour tous les clients", "Resume this conversation for all clients"),[Object.assign(fen.champ("id","Identifiant"),{forme:"uuid"})]) }
                     Action { texte:Reglages.t("Supprimer", "Delete"); onClic:fen.formulaire("conversation.delete",Reglages.t("Supprimer cette conversation", "Delete conversation"),[fen.champ("id","Identifiant (all = toutes)")]) }
                 }
                 Loader { width:parent.width; active:!!fen.selection.op; sourceComponent:pFormulaire }
@@ -415,6 +431,8 @@ FloatingWindow {
                     width:form.width; titre:modelData.label; secret:modelData.secret||false; booleen:modelData.kind === "bool"
                     aide:secret ? (modelData.configured?Reglages.t("Configuré · vide pour conserver", "Configured · empty to keep"):Reglages.t("Non renseigné", "Not set")):""
                     texte:String(fen.valeurs[modelData.key]===undefined?"":fen.valeurs[modelData.key])
+                    // Sous le champ : ce qui ne va pas, dès qu'une saisie est commencée ou que « Continuer » a été cliqué
+                    erreur:(fen.essaiEnvoi||texte!=="")?fen.erreurChamp(modelData,fen.valeurs[modelData.key]):""
                     onChange:valeur=>{var copie=Object.assign({},fen.valeurs);copie[modelData.key]=valeur;fen.valeurs=copie}
                 }
             }

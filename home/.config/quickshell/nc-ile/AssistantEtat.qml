@@ -421,6 +421,20 @@ Singleton {
         if (enCours) messages = messages.map(x => x.num === num ? Object.assign({}, x, {choixFait: libelle}) : x)
     }
     function effacer() { if (!enCours) { messages = []; erreur = "" } }
+    // Conversation reprise depuis le cockpit (issue #9) : le chat repart de l'échange renvoyé par le serveur (history :
+    // [{prompt, response}]) au lieu de rester vide ; la suite part vers JARVIS, qui tient cette conversation
+    function chargerHistorique(historique) {
+        if (enCours) return
+        messages = []; erreur = ""
+        var h = Array.isArray(historique) ? historique : []
+        for (var i = 0; i < h.length; i++) {
+            if (!h[i] || typeof h[i] !== "object") continue
+            var q = String(h[i].prompt || "").slice(0, 4000), r = String(h[i].response || "").slice(0, 16000)
+            if (q) ajouter("vous", q)
+            if (r) ajouter("assistant", r)
+        }
+        suiteParIA = false; nomChat = "JARVIS"; agentChat = "assistant"
+    }
     function resetSession() {
         if (enCours || reglagesEnCours) return
         brouillon = "/reset"
