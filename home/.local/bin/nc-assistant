@@ -138,7 +138,35 @@ def valider(c):
     ident = c.get("USER_ID", "").strip()
     if not ident or len(ident) > 200 or any(ord(x) < 32 for x in ident):
         raise Erreur(T("USER_ID absent ou invalide.", "Missing or invalid USER_ID."))
-    return dict(URL=url, SECRET_KEY=c["SECRET_KEY"], USER_ID=ident, TIMEOUT=timeout)
+    v = dict(URL=url, SECRET_KEY=c["SECRET_KEY"], USER_ID=ident, TIMEOUT=timeout)
+    # CLIENT_ID (facultatif, issue #12) : le nom de ce PC pour JARVIS ; absent, c'est le nom d'hôte (nom_du_pc)
+    client = (c.get("CLIENT_ID") or "").strip()
+    if client:
+        if not NOM_PC.fullmatch(client):
+            raise Erreur(T("Nom de ce PC pour JARVIS invalide : lettres, chiffres et tirets, 32 caractères au plus.",
+                           "Invalid PC name for JARVIS: letters, digits and dashes, 32 characters at most."))
+        v["CLIENT_ID"] = client
+    return v
+
+
+NOM_PC = re.compile(r"[A-Za-z0-9-]{1,32}")
+
+
+def nom_du_pc():
+    """Le nom d'hôte ramené à la règle de CLIENT_ID (sans domaine, autres caractères en tirets, 32 au plus) ; "" s'il
+    n'en reste rien (le serveur se rabat alors sur USER_ID)."""
+    try:
+        h = socket.gethostname().split(".")[0]
+    except OSError:
+        return ""
+    return re.sub(r"[^A-Za-z0-9-]+", "-", h).strip("-")[:32].strip("-")
+
+
+def client_id(c):
+    """L'identifiant de ce PC envoyé à /api/ask : une session par machine pour un même USER_ID (issue #12).
+    JARVIS-BIS le lit depuis 8ff25c3 ; la révision validée (3d1c6b6) ignore ce champ inconnu sans erreur (modèle
+    Pydantic sans extra="forbid") : il part donc toujours."""
+    return c.get("CLIENT_ID") or nom_du_pc()
 
 
 def hote_tailscale(url):
@@ -256,7 +284,9 @@ def configuration_depuis(d):
     champ = lambda k: d.get(k) if isinstance(d.get(k), str) else ""
     return valider(dict(URL=champ("url").strip(), SECRET_KEY=champ("secret_key") or avant.get("SECRET_KEY", ""),
                         USER_ID=champ("user_id").strip() or avant.get("USER_ID") or os.environ.get("USER") or getpass.getuser(),
-                        TIMEOUT=champ("timeout").strip() or avant.get("TIMEOUT", "180")))
+                        TIMEOUT=champ("timeout").strip() or avant.get("TIMEOUT", "180"),
+                        # Champ vide : le nom d'hôte ; champ absent (ancien appelant) : le nom enregistré
+                        CLIENT_ID=champ("client_id").strip() if "client_id" in d else avant.get("CLIENT_ID", "")))
 
 
 def avertissement(url):
@@ -275,7 +305,8 @@ def configuration_ile(action):
     if action == "lire":
         c = configuration_brute()
         print(json.dumps(dict(existe=CONF.exists(), url=c.get("URL", ""), user_id=c.get("USER_ID") or os.environ.get("USER") or "",
-                              timeout=c.get("TIMEOUT", "180"), cle=bool(c.get("SECRET_KEY"))), ensure_ascii=False))
+                              timeout=c.get("TIMEOUT", "180"), cle=bool(c.get("SECRET_KEY")),
+                              client_id=c.get("CLIENT_ID", ""), hote=nom_du_pc()), ensure_ascii=False))
         return 0
     try:
         c = configuration_depuis(json.loads(sys.stdin.readline(65537) or "null"))
@@ -307,8 +338,11 @@ def configurer(terminal=False):
                            "Secret key (empty: keep existing key): "))
     ident = c.get("USER_ID") or os.environ.get("USER") or getpass.getuser()
     utilisateur = input(f"USER_ID [{ident}] : ").strip() or ident
+    # Vide : garder le nom enregistré, sinon le nom d'hôte (qui suit alors un renommage du PC)
+    pc = input(T("Nom de ce PC pour JARVIS", "Name of this PC for JARVIS")
+               + f" [{c.get('CLIENT_ID') or nom_du_pc()}] : ").strip()
     sauvegarder(dict(URL=url or c.get("URL", ""), SECRET_KEY=cle or c.get("SECRET_KEY", ""),
-                     USER_ID=utilisateur, TIMEOUT=c.get("TIMEOUT", "180")))
+                     USER_ID=utilisateur, TIMEOUT=c.get("TIMEOUT", "180"), CLIENT_ID=pc or c.get("CLIENT_ID", "")))
     print(T("Configuration enregistrée (0600).", "Configuration saved (0600)."))
     finale = url or c.get("URL", "")
     if hote_prive(finale):
@@ -1027,8 +1061,13 @@ def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=N
                     # Le serveur garde son délai à lui (180 s par défaut) si on ne lui donne pas le nôtre : une tâche longue
                     # y était coupée alors qu'on attendait jusqu'à TIMEOUT (issue #6). Il accepte de 5 à 600 s
                     delai = max(5, min(600, round(c["TIMEOUT"])))
-                    r = api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"],
-                                                continue_session=True, timeout=delai))
+                    corps = dict(prompt=question, platform="desktop", user_id=c["USER_ID"], continue_session=True, timeout=delai)
+                    # Une conversation par PC pour un même USER_ID (issue #12) ; sans nom d'hôte utilisable, le serveur
+                    # se rabat sur USER_ID
+                    pc = client_id(c)
+                    if pc:
+                        corps["client_id"] = pc
+                    r = api(c, "/api/ask", corps)
                     texte, proposes = choix_reponse(r, texte_sortie(r))
                     if choix is not None:
                         choix[:] = proposes

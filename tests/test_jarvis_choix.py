@@ -276,5 +276,17 @@ class Spotlight(unittest.TestCase):
             self.assertEqual(json.loads(r.stdout.splitlines()[-1]), {"t": ["Quelle couleur ?"], "c": ["Rouge", "Vert"]})
 
 
+
+class DocAlignee(unittest.TestCase):
+    """docs/jarvis.md donne la même révision que le déployeur (elle était restée sur l'ancienne)."""
+    def test_revision_de_la_doc(self):
+        import re
+        racine = Path(__file__).resolve().parents[1]
+        rev = re.search(r"(?m)^REVISION='([0-9a-f]{40})'", (racine / "home/.local/share/nc-jarvis/deployer.py").read_text()).group(1)
+        doc = (racine / "docs/jarvis.md").read_text()
+        self.assertIn("origin " + rev, doc)
+        self.assertIn("`" + rev[:7] + "`", doc)
+
+
 if __name__ == "__main__":
     unittest.main()

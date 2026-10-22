@@ -1,5 +1,6 @@
 // Fenêtre « Connexion JARVIS » (nc-assistant configurer, « Configurer la connexion » du cockpit et de l'île, fenêtre des
-// réglages) : l'adresse du serveur JARVIS-BIS, sa clé secrète, ton identifiant et le délai d'attente, en graphique.
+// réglages) : l'adresse du serveur JARVIS-BIS, sa clé secrète, ton identifiant, le délai d'attente et le nom de ce PC
+// (facultatif, une conversation par machine), en graphique.
 // « Tester la connexion » essaie les valeurs saisies sans les enregistrer (réseau, clé, TLS, moteur) ; « Enregistrer »
 // les écrit dans ~/.config/nc/assistant.conf (0600). La clé passe par l'entrée standard de nc-assistant, jamais en
 // argument ; elle n'est jamais relue ni affichée : laissée vide, celle qui est enregistrée est gardée.
@@ -12,7 +13,7 @@ FloatingWindow {
     id: fen
     title: "Connexion JARVIS"
     visible: false
-    implicitWidth: 600; implicitHeight: 660; minimumSize: Qt.size(460, 560)
+    implicitWidth: 600; implicitHeight: 740; minimumSize: Qt.size(460, 560)
     color: Couleurs.fond
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
     property bool cleEnregistree: false
@@ -38,6 +39,10 @@ FloatingWindow {
         return ""
     }
     readonly property bool urlValide: /^https?:\/\/[^\s/@?#]+(:\d+)?(\/[^\s?#]*)?$/i.test(url.text.trim())
+    // Nom de ce PC pour JARVIS (CLIENT_ID, issue #12) : une conversation par machine ; vide, le nom d'hôte (hote, lu
+    // par nc-assistant, qui revalide la règle)
+    property string hote: ""
+    readonly property bool nomValide: /^[A-Za-z0-9-]{0,32}$/.test(nomPc.text.trim())
 
     function afficher(nom) {
         var ecrans = Quickshell.screens
@@ -50,15 +55,16 @@ FloatingWindow {
     function close() { visible = false; cle.text = "" }
     onClosed: close()
     function valeurs() {
-        return JSON.stringify({ url: url.text.trim(), secret_key: cle.text, user_id: ident.text.trim(), timeout: delai.text.trim() })
+        return JSON.stringify({ url: url.text.trim(), secret_key: cle.text, user_id: ident.text.trim(), timeout: delai.text.trim(),
+                                client_id: nomPc.text.trim() })
     }
     function tester() {
-        if (occupe || !urlValide) return
+        if (occupe || !urlValide || !nomValide) return
         resultat = null; message = ""; erreur = false
         test.stdinEnabled = true; test.running = true
     }
     function enregistrer() {
-        if (occupe || !urlValide || (!cle.text && !cleEnregistree)) return
+        if (occupe || !urlValide || !nomValide || (!cle.text && !cleEnregistree)) return
         message = ""; erreur = false
         enregistrement.stdinEnabled = true; enregistrement.running = true
     }
@@ -71,6 +77,7 @@ FloatingWindow {
                 try {
                     let d = JSON.parse(text)
                     url.text = d.url || ""; ident.text = d.user_id || ""; delai.text = String(d.timeout || "180")
+                    nomPc.text = d.client_id || ""; fen.hote = d.hote || ""
                     fen.cleEnregistree = !!d.cle; fen.existe = !!d.existe
                 } catch (e) {}
             }
@@ -184,12 +191,22 @@ FloatingWindow {
                     Champ { id: champIdent; width: (parent.width - 12) * 0.62; titre: Reglages.t("Identifiant", "User ID"); indication: Quickshell.env("USER") || "" }
                     Champ { id: champDelai; width: (parent.width - 12) * 0.38; titre: Reglages.t("Délai d'attente (s)", "Timeout (s)"); indication: "180" }
                 }
+                Champ {
+                    id: champPc
+                    objectName: "nc-connexion-pc"
+                    titre: Reglages.t("Nom de ce PC pour JARVIS", "Name of this PC for JARVIS")
+                    indication: fen.hote
+                    aide: fen.nomValide ? Reglages.t("Facultatif. Chaque PC a sa propre conversation avec JARVIS. Vide : le nom de la machine.",
+                                                     "Optional. Each PC has its own conversation with JARVIS. Empty: the machine name.")
+                                        : Reglages.t("Lettres, chiffres et tirets seulement, 32 caractères au plus.",
+                                                     "Letters, digits and dashes only, 32 characters at most.")
+                }
                 Row {
                     spacing: 10
                     JarvisBouton { objectName: "nc-connexion-tester"; texte: test.running ? Reglages.t("Test en cours…", "Testing…") : Reglages.t("Tester la connexion", "Test connection")
-                                   enabled: fen.urlValide && !fen.occupe; onClic: fen.tester() }
+                                   enabled: fen.urlValide && fen.nomValide && !fen.occupe; onClic: fen.tester() }
                     JarvisBouton { objectName: "nc-connexion-enregistrer"; primaire: true; texte: Reglages.t("Enregistrer", "Save")
-                                   enabled: fen.urlValide && !fen.occupe && (champCle.texte !== "" || fen.cleEnregistree); onClic: fen.enregistrer() }
+                                   enabled: fen.urlValide && fen.nomValide && !fen.occupe && (champCle.texte !== "" || fen.cleEnregistree); onClic: fen.enregistrer() }
                     JarvisBouton { texte: Reglages.t("Fermer", "Close"); onClic: fen.close() }
                 }
                 // Résultat du test
@@ -237,4 +254,5 @@ FloatingWindow {
     property alias cle: champCle.saisie
     property alias ident: champIdent.saisie
     property alias delai: champDelai.saisie
+    property alias nomPc: champPc.saisie
 }

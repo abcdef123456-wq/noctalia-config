@@ -207,12 +207,16 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-Le déployeur installe la révision validée (`9cd91bbb`, dictée côté serveur et accès Tailscale) sur un nouveau
+La révision `3d1c6b6` ajoute aux précédentes (dictée côté serveur, accès Tailscale) : les choix proposés par
+JARVIS extraits par le serveur (marqueur `[CHOIX: A | B]`, affichés en boutons sur le bureau), des délais par
+défaut de 600 s pour les tâches longues, et la correction d'une erreur 500.
+
+Le déployeur installe la révision validée (`3d1c6b6`) sur un nouveau
 serveur, mais ne change jamais celle d'un serveur déjà installé. Pour le faire, sur la machine du backend (dossier
 par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 9cd91bbb6235116e3cadd433eb68fcd9b17203bf
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 

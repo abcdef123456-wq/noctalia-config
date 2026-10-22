@@ -5,8 +5,10 @@ import json
 import os
 import pty
 from pathlib import Path
+import re
 import select
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -191,7 +193,9 @@ class Assistant(unittest.TestCase):
         for champs in ({"URL": "ftp://example.test"}, {"URL": "https://user:password@example.test"},
                        {"URL": "https://example.test?token=private"}, {"URL": "http://example.test/\x00"},
                        {"SECRET_KEY": "bad\nheader"},
-                       {"TIMEOUT": "NaN"}, {"TIMEOUT": "0"}, {"USER_ID": ""}):
+                       {"TIMEOUT": "NaN"}, {"TIMEOUT": "0"}, {"USER_ID": ""},
+                       {"CLIENT_ID": "mon pc"}, {"CLIENT_ID": "tour_1"}, {"CLIENT_ID": "été"}, {"CLIENT_ID": "a" * 33},
+                       {"CLIENT_ID": "pc\nX=1"}, {"CLIENT_ID": "pc.lan"}):
             with self.subTest(champs=champs), self.assertRaises(self.m.Erreur):
                 self.m.sauvegarder(dict(self.c, **champs))
         self.assertEqual(self.m.CONF.read_bytes(), avant)
@@ -217,14 +221,35 @@ class Assistant(unittest.TestCase):
         path, methode, cle, corps = self.server.recus[0]
         self.assertEqual((path, methode, cle), ("/gateway/api/ask", "POST", self.c["SECRET_KEY"]))
         # TIMEOUT transmis au serveur (issue #6), ramené à son minimum de 5 s (TIMEOUT="2" dans ce test)
+        # client_id (issue #12) : sans CLIENT_ID, le nom d'hôte ramené à la règle
         self.assertEqual(corps, dict(prompt="test $(false) 'quotes'", platform="desktop", user_id="test-user", continue_session=True,
-                                     timeout=5))
+                                     timeout=5, client_id=self.m.nom_du_pc()))
         d = self.etat()
         self.assertEqual(d["sessions"]["codex-existing"], initial["sessions"]["codex-existing"])
         self.assertEqual(d["demandes"], initial["demandes"])
         s = next(v for k, v in d["sessions"].items() if k.startswith("assistant-"))
         self.assertEqual((s["agent"], s["etat"], s["terminal"], s["ecrire"]), ("assistant", "fini", 0, False))
         self.assertNotIn(self.c["SECRET_KEY"], json.dumps(d))
+
+    def test_client_id_from_configuration_or_hostname(self):
+        """Issue #12 : CLIENT_ID enregistré envoyé tel quel à /api/ask ; sans lui, le nom d'hôte ramené à la règle
+        (sans domaine, 32 caractères au plus), ou rien s'il n'en reste rien."""
+        self.m.sauvegarder(dict(self.c, CLIENT_ID="tour-2"))
+        self.assertIn('CLIENT_ID="tour-2"', self.m.CONF.read_text())
+        self.assertEqual(self.m.configuration()["CLIENT_ID"], "tour-2")
+        r = self.cli("demander", "bonjour")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.server.recus[-1][3]["client_id"], "tour-2")
+        # Vide : pas de CLIENT_ID dans le fichier (le nom d'hôte suit un renommage du PC)
+        self.m.sauvegarder(dict(self.c, CLIENT_ID=""))
+        self.assertNotIn("CLIENT_ID", self.m.CONF.read_text())
+        for hote, attendu in (("portable.maison.lan", "portable"), ("PC_à moi", "PC-moi"), ("x" * 40, "x" * 32),
+                              ("___", "")):
+            with self.subTest(hote=hote), patch.object(self.m.socket, "gethostname", return_value=hote):
+                self.assertEqual(self.m.nom_du_pc(), attendu)
+                self.assertEqual(self.m.client_id(self.m.configuration()), attendu)
+                if attendu:
+                    self.assertTrue(self.m.NOM_PC.fullmatch(attendu))
 
     def test_status_uses_get_and_reports_offline_runner(self):
         self.assertEqual(self.cli("etat").returncode, 0)
@@ -788,7 +813,9 @@ class ReglagesAssistant(unittest.TestCase):
             def cli(*args, entree=""):
                 return subprocess.run([sys.executable, str(b / "nc-assistant"), *args], input=entree, env=env, capture_output=True, text=True, timeout=20)
             r = cli("config-ile", "lire")
-            self.assertEqual(json.loads(r.stdout), {"existe": True, "url": "https://ancien.example", "user_id": "moi", "timeout": "120", "cle": True})
+            hote = re.sub(r"[^A-Za-z0-9-]+", "-", socket.gethostname().split(".")[0]).strip("-")[:32].strip("-")
+            self.assertEqual(json.loads(r.stdout), {"existe": True, "url": "https://ancien.example", "user_id": "moi", "timeout": "120", "cle": True,
+                                                    "client_id": "", "hote": hote})
             self.assertNotIn("cle-tres-secrete", r.stdout + r.stderr, "la clé n'est jamais renvoyée")
             # Adresse invalide : refusée, rien d'écrit
             avant = conf.read_text()
@@ -801,6 +828,19 @@ class ReglagesAssistant(unittest.TestCase):
             self.assertIn('SECRET_KEY="cle-tres-secrete"', conf.read_text()); self.assertIn('URL="http://192.168.1.28:8000"', conf.read_text())
             self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
             self.assertNotIn("cle-tres-secrete", r.stdout + r.stderr)
+            # Nom de ce PC pour JARVIS (issue #12) : invalide refusé sans rien écrire ; valide enregistré, relu, et gardé
+            # quand un ancien appelant n'envoie pas le champ
+            avant = conf.read_text()
+            for nom in ("mon pc", "a" * 33, "tour_1"):
+                r = cli("config-ile", "enregistrer", entree=json.dumps({"url": "http://192.168.1.28:8000", "secret_key": "", "user_id": "moi",
+                                                                        "timeout": "60", "client_id": nom}) + "\n")
+                self.assertEqual(r.returncode, 1, nom); self.assertIn("PC", json.loads(r.stdout)["error"]); self.assertEqual(conf.read_text(), avant)
+            r = cli("config-ile", "enregistrer", entree=json.dumps({"url": "http://192.168.1.28:8000", "secret_key": "", "user_id": "moi",
+                                                                    "timeout": "60", "client_id": "tour"}) + "\n")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr); self.assertIn('CLIENT_ID="tour"', conf.read_text())
+            self.assertEqual(json.loads(cli("config-ile", "lire").stdout)["client_id"], "tour")
+            r = cli("config-ile", "enregistrer", entree=json.dumps({"url": "http://192.168.1.28:8000", "secret_key": "", "user_id": "moi", "timeout": "60"}) + "\n")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr); self.assertIn('CLIENT_ID="tour"', conf.read_text())
             # Test des valeurs saisies, sans les enregistrer : le faux serveur des tests reçoit la nouvelle clé
             srv = ThreadingHTTPServer(("127.0.0.1", 0), Serveur)
             srv.recus = []; srv.reponse = (200, b'{"online": true, "runner_alive": true, "version": "2.1"}'); srv.bloquer = False
@@ -876,6 +916,9 @@ class ReglagesAssistant(unittest.TestCase):
                         elif stade == 2 and b"USER_ID" in contenu:
                             os.write(fd, b"\n")
                             stade = 3
+                        elif stade == 3 and b"this PC for JARVIS" in contenu:
+                            os.write(fd, b"tour-2\n")
+                            stade = 4
                         if tui and not retour and b"Assistant connection saved" in contenu:
                             retour = True
                             os.write(fd, b"q")
@@ -887,13 +930,14 @@ class ReglagesAssistant(unittest.TestCase):
                     attendu, status = os.waitpid(pid, os.WNOHANG)
                     if attendu:
                         pid = None
-                self.assertEqual(stade, 3, contenu.decode(errors="replace"))
+                self.assertEqual(stade, 4, contenu.decode(errors="replace"))
                 self.assertIn(b"Configuration saved", contenu)
                 if tui:
                     self.assertTrue(retour, contenu.decode(errors="replace"))
                 self.assertNotIn(secret.encode(), contenu)
                 conf = settings.with_name("assistant.conf")
                 self.assertIn(secret, conf.read_text())
+                self.assertIn('CLIENT_ID="tour-2"', conf.read_text())
                 self.assertEqual(conf.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(settings.read_bytes(), original)
             finally:

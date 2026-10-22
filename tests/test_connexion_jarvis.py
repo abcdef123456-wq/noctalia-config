@@ -19,7 +19,7 @@ H = Path(os.environ["HOME"])
 with (H / "argv").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
 action = sys.argv[2]
 if action == "lire":
-    print(json.dumps({"existe": True, "url": "https://ancien.example", "user_id": "moi", "timeout": "120", "cle": True}))
+    print(json.dumps({"existe": True, "url": "https://ancien.example", "user_id": "moi", "timeout": "120", "cle": True, "client_id": "tour", "hote": "machine"}))
 else:
     d = json.loads(sys.stdin.readline())
     with (H / "stdin").open("a") as f: f.write(json.dumps([action, d]) + "\n")
@@ -58,6 +58,10 @@ ShellRoot {
   if (etape === 1) {
    verifier(fen.url.text === "https://ancien.example" && fen.ident.text === "moi" && fen.delai.text === "120", "pré-remplissage : " + fen.url.text)
    verifier(fen.cleEnregistree && fen.cle.text === "", "la clé n'est jamais relue")
+   // Nom de ce PC (issue #12) : pré-rempli, nom d'hôte en indication ; un nom invalide bloque test et enregistrement
+   verifier(fen.nomPc.text === "tour" && fen.hote === "machine" && fen.nomValide, "nom du PC : " + fen.nomPc.text + " / " + fen.hote)
+   fen.nomPc.text = "mon pc"; verifier(!fen.nomValide, "espace accepté"); fen.nomPc.text = "a".repeat(33); verifier(!fen.nomValide, "33 caractères acceptés")
+   fen.nomPc.text = "tour-2"; verifier(fen.nomValide, "tour-2 refusé")
    verifier(fen.avertissement === "", "pas d'avertissement pour une adresse HTTPS publique")
    // Issue #5 : Tailscale (100.64.0.0/10, *.ts.net) en http:// : chiffré par Tailscale, aucun avertissement
    fen.url.text = "http://100.101.2.3:8000"; verifier(fen.avertissement === "", "Tailscale (IP) : " + fen.avertissement)
@@ -91,7 +95,8 @@ ShellRoot {
             envois = [json.loads(l) for l in (root / "stdin").read_text().splitlines()]
             self.assertEqual([a for a, _ in envois], ["tester", "enregistrer"])
             for _, d in envois:
-                self.assertEqual((d["url"], d["secret_key"], d["user_id"], d["timeout"]), ("http://192.168.1.28:8000", "nouvelle-cle-secrete", "moi", "120"))
+                self.assertEqual((d["url"], d["secret_key"], d["user_id"], d["timeout"], d["client_id"]),
+                                 ("http://192.168.1.28:8000", "nouvelle-cle-secrete", "moi", "120", "tour-2"))
 
 
 if __name__ == "__main__":
