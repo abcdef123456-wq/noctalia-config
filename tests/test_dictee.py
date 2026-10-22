@@ -170,6 +170,27 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
         self.assertIn("wtype -- bonjour jarvis", self.appels())
 
+    def test_duree_de_l_appui_mesuree_par_le_raccourci(self):
+        """Revue DICT-03 : l'appui bref se mesurait depuis le micro prêt (~0,4 s après l'appui) : un maintien de 0,6 s
+        (un seul mot) ouvrait une dictée longue. La durée est celle notée par le raccourci (appui → relâchement)."""
+        run = self.home / "run"
+        self.ptt("ptt-fin")
+        for tenue, longue in ((0.6, False), (0.2, True)):
+            (run / "appels").unlink(missing_ok=True)
+            (self.home / "appels").unlink(missing_ok=True)
+            (run / "nc-dictee-appui").write_text("")
+            appui = (run / "nc-dictee-appui").stat().st_mtime
+            self.assertEqual(self.ptt("ptt-debut"), 0)        # le micro est prêt après l'appui (Python, démarrage)
+            time.sleep(max(0, appui + tenue - time.time()) + 0.05)
+            (run / "nc-dictee-relache").write_text("")
+            os.utime(run / "nc-dictee-relache", (appui + tenue, appui + tenue))
+            self.assertEqual(self.ptt("ptt-fin"), 0)
+            if longue:
+                self.assertNotIn("wtype", self.appels(), "appui bref : dictée longue")
+                self.assertTrue(json.loads((run / "nc-dictee-ptt.json").read_text()).get("bascule"))
+                self.assertEqual(self.ptt("ptt-debut"), 0)    # second appui : écrit
+            self.assertIn("wtype -- bonjour jarvis", self.appels(), f"tenue {tenue} s")
+
     def ptt_fond(self, action):
         b = self.home / "bin"
         env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
@@ -209,7 +230,7 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut"), 0)
         self.assertFalse(json.loads((self.home / "run/nc-dictee-ptt.json").read_text()).get("bascule"))
         r = (REPO / "home/.config/hypr/nc/raccourcis.lua").read_text()
-        self.assertIn(': > "$r/nc-dictee-relache"', r)
+        self.assertIn(': > "$r/nc-dictee-relache"; [ -e', r, "relâchement noté avant tout, même pendant une dictée")
         self.assertIn('nc-dictee-appui"; exec ~/.local/bin/nc-dictee ptt-debut', r)
 
     def test_enregistreur_mort_ne_bloque_pas(self):

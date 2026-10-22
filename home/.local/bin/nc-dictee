@@ -232,8 +232,9 @@ def transcrire(m):
 
 # ── Dictée partout (Super + D) ──────────────────────────────────────────────────────────────────────────────────
 PTT = RUNTIME / "nc-dictee-ptt.json"     # { t : appui, pret : micro lancé (son heure), relache : relâché avant, bascule : dictée longue }
-RELACHE = RUNTIME / "nc-dictee-relache"  # touché par le raccourci à chaque relâchement de Super sans dictée en cours
+RELACHE = RUNTIME / "nc-dictee-relache"  # touché par le raccourci à chaque relâchement (D ou Super), avant nc-dictee
 APPUI = RUNTIME / "nc-dictee-appui"      # touché par le raccourci à l'appui, avant de lancer nc-dictee (Python est lent)
+BREF = 0.45                              # appui plus court (relâchement − appui, deux heures du raccourci) : dictée longue
 
 
 def instant_appui():
@@ -247,6 +248,18 @@ def instant_appui():
 
 
 DEBUT = instant_appui()
+
+
+def instant_relache(appui):
+    """Heure du relâchement notée par le raccourci (celui de cet appui), sinon maintenant : la durée de la pression ne
+    dépend pas du temps que Python met à démarrer (revue DICT-03)."""
+    try:
+        t = RELACHE.stat().st_mtime
+        if t >= appui and 0 <= time.time() - t < 5:
+            return t
+    except OSError:
+        pass
+    return time.time()
 VERROU = RUNTIME / "nc-dictee-ptt.lock"  # appui et relâchements (D, Super) arrivent ensemble : un seul décide à la fois
 
 
@@ -379,10 +392,11 @@ def ptt_fin(m):
         if not etat or etat.get("bascule") or etat.get("relache"):
             return 0                                      # rien en cours, dictée longue qui continue, ou déjà relâché
         if not etat.get("pret"):                          # micro pas encore lancé : ptt-debut décidera
-            PTT.write_text(json.dumps(dict(etat, relache=time.time())))
+            PTT.write_text(json.dumps(dict(etat, relache=instant_relache(etat.get("t") or DEBUT))))
             return 0
-        # Appui bref (moins de 0,45 s enregistrées, quelle que soit la lenteur du démarrage) : dictée longue
-        if time.time() - float(etat.get("pret") or 0) < 0.45:
+        # Appui bref (moins de 0,45 s entre l'appui et le relâchement, quelle que soit la lenteur de Python) : dictée longue
+        appui = float(etat.get("t") or DEBUT)
+        if instant_relache(appui) - appui < BREF:
             PTT.write_text(json.dumps(dict(etat, bascule=True)))
             longue = True
         else:
