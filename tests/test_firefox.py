@@ -262,7 +262,8 @@ const ev = (nom) => ({ addListener: (f) => { ecouteurs[nom] = f; } });
 const port = { onMessage: ev("message"), onDisconnect: ev("deconnexion"), postMessage: () => {} };
 const browser = {
   runtime: { connectNative: () => port },
-  management: { getAll: async () => [{ type: "theme", enabled: true, id: actif }], onEnabled: ev("on"), onDisabled: ev("off") },
+  management: { getAll: async () => [{ type: "theme", enabled: true, id: actif }], onEnabled: ev("on"), onDisabled: ev("off"),
+                setEnabled: async (id, oui) => { appels.push(["setEnabled", id, oui]); await (oui ? ecouteurs.on : ecouteurs.off)({ type: "theme" }); } },
   theme: { update: (t) => appels.push(["update", t.colors.frame]), reset: () => appels.push(["reset"]), onUpdated: ev("maj") },
 };
 const minuteurs = [];
@@ -279,12 +280,14 @@ const attendre = async () => { for (let i = 0; i < 20; i++) { await new Promise(
   // Le nôtre : rien
   await ecouteurs.maj({ theme: { colors: { frame: "#1c1d21" } } }); await attendre();
   assert.equal(appels.length, n);
-  // Un thème choisi (Alpenglow) : reset, puis son onUpdated vide ne relance rien
+  // Un thème choisi (Alpenglow) : reset, puis ce thème repris (revue EXT-02), sans boucle
   actif = "alpenglow@mozilla.org";
   ecouteurs.off({ type: "theme" }); await attendre();
-  assert.deepEqual(appels.at(-1), ["reset"]);
+  assert.deepEqual(appels.slice(-3), [["reset"], ["setEnabled", "alpenglow@mozilla.org", false], ["setEnabled", "alpenglow@mozilla.org", true]]);
+  const k = appels.length;
   await ecouteurs.maj({ theme: {} }); await attendre();
-  assert.deepEqual(appels.at(-1), ["reset"]);
+  ecouteurs.off({ type: "theme" }); await attendre();
+  assert.equal(appels.length, k, "pas de second reset : notre thème n'est plus posé");
   // Un Firefox qui réécrirait sans fin : au plus 5 reprises par 10 s
   actif = "firefox-compact-dark@mozilla.org";
   const m = appels.length;

@@ -13,6 +13,8 @@ const SOMBRE = "firefox-compact-dark@mozilla.org";
 const CLAIR = "firefox-compact-light@mozilla.org";
 let port = null;
 let palette = null;
+let applique = false;    // notre thème est posé : à retirer seulement dans ce cas
+let reprise = false;     // thème choisi en train d'être repris : les événements qu'on provoque sont ignorés
 
 async function themeActif() {
   const tous = await browser.management.getAll();
@@ -21,11 +23,28 @@ async function themeActif() {
 }
 
 async function appliquer() {
-  if (!palette) return;
+  if (!palette || reprise) return;
   const actif = await themeActif();
   const sombre = palette.sombre !== false;
-  if (actif === SYSTEME || actif === (sombre ? SOMBRE : CLAIR)) browser.theme.update(theme(palette));
-  else browser.theme.reset();
+  if (actif === SYSTEME || actif === (sombre ? SOMBRE : CLAIR)) {
+    browser.theme.update(theme(palette));
+    applique = true;
+  } else if (applique) {
+    applique = false;
+    browser.theme.reset();
+    // Après reset(), Firefox (Developer Edition 159) retombait sur son repli clair au lieu du thème choisi (revue
+    // EXT-02) : ce thème est repris (désactivé puis réactivé)
+    if (actif !== SYSTEME) {
+      reprise = true;
+      try {
+        await browser.management.setEnabled(actif, false);
+        await browser.management.setEnabled(actif, true);
+      } catch (e) {
+        // thème introuvable entre-temps : rien à reprendre
+      }
+      setTimeout(() => { reprise = false; }, 1000);
+    }
+  }
 }
 
 browser.management.onEnabled.addListener((e) => { if (e.type === "theme") appliquer(); });
@@ -36,7 +55,7 @@ browser.management.onDisabled.addListener((e) => { if (e.type === "theme") appli
 // le nôtre est reconnu, reset() n'arrive que hors des thèmes de base, et au plus 5 reprises par 10 s.
 let reprises = [];
 browser.theme.onUpdated.addListener(async ({ theme: t }) => {
-  if (!palette) return;
+  if (!palette || reprise) return;
   const actif = await themeActif();
   const eligible = actif === SYSTEME || actif === (palette.sombre !== false ? SOMBRE : CLAIR);
   const nous = t && t.colors && t.colors.frame === couleur(palette, "fond", "#1c1b22");
