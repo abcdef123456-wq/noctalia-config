@@ -216,7 +216,9 @@ class Assistant(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         path, methode, cle, corps = self.server.recus[0]
         self.assertEqual((path, methode, cle), ("/gateway/api/ask", "POST", self.c["SECRET_KEY"]))
-        self.assertEqual(corps, dict(prompt="test $(false) 'quotes'", platform="desktop", user_id="test-user", continue_session=True))
+        # TIMEOUT transmis au serveur (issue #6), ramené à son minimum de 5 s (TIMEOUT="2" dans ce test)
+        self.assertEqual(corps, dict(prompt="test $(false) 'quotes'", platform="desktop", user_id="test-user", continue_session=True,
+                                     timeout=5))
         d = self.etat()
         self.assertEqual(d["sessions"]["codex-existing"], initial["sessions"]["codex-existing"])
         self.assertEqual(d["demandes"], initial["demandes"])

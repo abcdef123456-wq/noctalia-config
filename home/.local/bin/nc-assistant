@@ -993,7 +993,11 @@ def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=N
                 elif briefing:
                     texte = texte_sortie(api(c, "/api/briefing", {"force_refresh": False}))
                 else:
-                    texte = texte_sortie(api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"], continue_session=True)))
+                    # Le serveur garde son délai à lui (180 s par défaut) si on ne lui donne pas le nôtre : une tâche longue
+                    # y était coupée alors qu'on attendait jusqu'à TIMEOUT (issue #6). Il accepte de 5 à 600 s
+                    delai = max(5, min(600, round(c["TIMEOUT"])))
+                    texte = texte_sortie(api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"],
+                                                                 continue_session=True, timeout=delai)))
         except BaseException:
             signaler("fin")
             raise
