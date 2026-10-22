@@ -4,9 +4,22 @@
 #   NVIDIA voulue (en auto : Performance, ou Équilibré sur secteur) -> NVIDIA, via nvidia-run
 #   Sinon, ou PC non hybride                                          -> environnement de la session
 # Le choix est écrit par nc-profile-sync dans $XDG_RUNTIME_DIR/nc-gpu-default.
+# Jamais sur la NVIDIA, même quand la règle la permet : les applis de GPU_JAMAIS_RTX (nc-reglages → Énergie ; par
+# défaut les terminaux et les gestionnaires de fichiers). Elles n'en profitent pas et la garderaient éveillée des
+# heures (environ 5 W, même une fois passé sur batterie).
 [ $# -ge 1 ] || { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
   t "Usage : nc-launch <commande> [arguments]" "Usage: nc-launch <command> [arguments]" >&2; echo >&2; exit 1; }
 state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
+jamais="kitty foot alacritty wezterm ghostty konsole gnome-terminal ptyxis xterm nautilus thunar dolphin nemo pcmanfm nc-reglages"
+v="$(sed -n 's/^GPU_JAMAIS_RTX=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1)"; v="${v#\"}"; v="${v%\"}"
+[ -n "$v" ] && jamais="${v//,/ }"
+# Le programme lancé : le premier mot qui n'est ni « env » ni une affectation VAR=valeur, sans son dossier
+prog=""
+for a in "$@"; do
+  case "$a" in env|*=*) continue ;; esac
+  prog="${a##*/}"; break
+done
+for j in $jamais; do [ "$prog" = "$j" ] && exec "$@"; done
 if [ "$(cat "$state" 2>/dev/null)" = nvidia ]; then
   exec "$HOME/.local/bin/nvidia-run" "$@"
 fi
