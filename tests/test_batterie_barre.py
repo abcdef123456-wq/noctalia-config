@@ -258,7 +258,7 @@ class Configuration(unittest.TestCase):
         self.assertEqual(groupes["status"], ["network", "bluetooth", "volume", "nc/batterie:batterie"])
         self.assertNotIn("battery", conf["widget"], "l'ancien widget battery n'est plus utilisé")
         self.assertEqual(conf["widget"]["nc/batterie:batterie"]["actions"]["left"],
-                         "exec /.local/bin/nc-shell-msg ile systeme")
+                         "exec /.local/bin/nc-shell-msg ile charge systeme", "page Batterie, Système en repli")
         self.assertIn("nc/batterie", conf["plugins"]["enabled"])
         manifeste = tomllib.loads((PLUGIN / "plugin.toml").read_text())
         self.assertEqual(manifeste["id"], "nc/batterie")

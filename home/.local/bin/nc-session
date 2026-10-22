@@ -2,15 +2,24 @@
 """nc-session : tes dispositions de fenêtres par projet (« Dev », « Cours »…), enregistrées puis rouvertes d'un coup.
 
   nc-session enregistrer NOM     la disposition actuelle : les applis ouvertes, leur bureau, leur place si elles sont
-                                 libres ; pour un terminal, son dossier et le programme qui y tourne (Neovim…)
-  nc-session ouvrir NOM          la rouvre : les applis déjà ouvertes vont sur leur bureau, les autres sont lancées
-                                 puis placées dès que leur fenêtre apparaît
+                                 libres ; pour un terminal, son dossier et le programme qui y tourne (Neovim…) ; et un
+                                 aperçu de l'écran (réglage SESSIONS_CAPTURE ; sans grim, le schéma seul)
+  nc-session ouvrir NOM          la rouvre : son fond, son profil d'énergie, Ne pas déranger, les autres fenêtres
+                                 fermées si demandé, puis les applis déjà ouvertes vont sur leur bureau, les autres sont
+                                 lancées puis placées dès que leur fenêtre apparaît ; enfin les noms et zones des bureaux
   nc-session liste [--json]      les sessions enregistrées
+  nc-session json                tout, pour le carrousel des sessions (une ligne JSON)
+  nc-session modifier NOM CLE VALEUR   icone, couleur, fond, profil, npd, demarrage, fermer_autres, raccourci,
+                                 bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID
+                                 (VALEUR vide : remise à défaut)
+  nc-session renommer NOM NOUVEAU · nc-session dupliquer NOM COPIE · nc-session apercu NOM (refait la capture)
   nc-session supprimer NOM
   nc-session menu                le Spotlight sur « session » (Super + Maj + W) ; sans l'île, un menu
   nc-session demarrage           ouvre la session choisie pour l'ouverture de session (réglage SESSION_DEMARRAGE)
-Rangées dans ~/.config/nc/sessions/NOM.json. Le navigateur rouvre lui-même ses onglets (sa session à lui).
+Rangées dans ~/.config/nc/sessions/NOM.json, leurs aperçus dans ~/.local/state/noctalia-config/sessions. Le
+navigateur rouvre lui-même ses onglets (sa session à lui).
 """
+import datetime
 import json
 import os
 from pathlib import Path
@@ -51,14 +60,22 @@ def T(fr, en):
 DOC_EN = """nc-session: your window layouts per project (“Dev”, “Classes”…), saved then reopened at once.
 
   nc-session save NAME       the current layout: open apps, their desktop, their place if they float; for a terminal,
-                             its folder and the program running in it (Neovim…)
-  nc-session open NAME       reopens it: apps already open go to their desktop, the others are started then placed as
-                             soon as their window appears
+                             its folder and the program running in it (Neovim…); and a preview of the screen (setting
+                             SESSIONS_CAPTURE; without grim, the outline only)
+  nc-session open NAME       reopens it: its wallpaper, power profile, Do Not Disturb, other windows closed if asked,
+                             then apps already open go to their desktop, the others are started then placed as soon as
+                             their window appears; finally the desktop names and zones
   nc-session list [--json]   the saved sessions
+  nc-session json            everything, for the session carousel (one JSON line)
+  nc-session edit NAME KEY VALUE   icone, couleur, fond, profil, npd, demarrage, fermer_autres, raccourci,
+                             bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID
+                             (empty VALUE: back to default)
+  nc-session rename NAME NEW · nc-session duplicate NAME COPY · nc-session preview NAME (takes the capture again)
   nc-session delete NAME
   nc-session menu            Spotlight on “session” (Super + Shift + W); without the island, a menu
   nc-session startup         opens the session chosen for login (setting SESSION_DEMARRAGE)
-Stored in ~/.config/nc/sessions/NAME.json. The browser reopens its tabs itself (its own session).
+Stored in ~/.config/nc/sessions/NAME.json, their previews in ~/.local/state/noctalia-config/sessions. The browser
+reopens its tabs itself (its own session).
 """
 
 HOME = Path.home()
@@ -80,6 +97,168 @@ SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|^-
 
 class Erreur(Exception):
     pass
+
+
+# Version 2 (carrousel des sessions) : la personnalisation de la session. Une version 1 se lit telle quelle (ces champs
+# prennent leur valeur par défaut) et n'est réécrite en version 2 qu'à sa première modification.
+APERCUS = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config/sessions"
+PROFILS = ("garder", "performance", "balanced", "power-saver")
+FERMER = ("non", "demander", "oui")
+# Rôles des couleurs du thème (ceux des plugins Noctalia)
+ROLES = {"primary", "secondary", "tertiary", "error", "surface", "surface_variant", "outline", "shadow", "hover",
+         "on_primary", "on_secondary", "on_tertiary", "on_error", "on_surface", "on_surface_variant", "on_hover"}
+IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".jxl", ".tif", ".tiff", ".svg"}
+OUI, NON = {"oui", "vrai", "true", "1", "on", "yes"}, {"non", "faux", "false", "0", "off", "no"}
+# Touches de nc-raccourci (mêmes noms, mêmes règles : un modificateur, sauf F1…F12 et Impr)
+MODS = {"super": "Super", "win": "Super", "meta": "Super", "ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt",
+        "maj": "Maj", "shift": "Maj"}
+TOUCHES = {"entrée", "entree", "enter", "return", "espace", "space", "tab", "échap", "echap", "esc", "escape", "impr",
+           "print", "suppr", "delete", "début", "home", "fin", "end", "gauche", "left", "droite", "right", "haut", "up",
+           "bas", "down"}
+
+
+def defauts():
+    return dict(icone=None, couleur=None, fond=None, profil="garder", npd=False, demarrage=False, fermer_autres="non",
+                raccourci=None, bureaux_noms={}, zones={})
+
+
+def completer(d):
+    """La session avec tous les champs de la version 2 (valeurs par défaut pour une version 1 ou un champ abîmé)."""
+    s = defauts()
+    s.update({k: v for k, v in d.items() if k not in ("version", "schema")})
+    for k, ok in (("profil", PROFILS), ("fermer_autres", FERMER)):
+        if s[k] not in ok:
+            s[k] = defauts()[k]
+    for k in ("npd", "demarrage"):
+        s[k] = s[k] is True
+    for k in ("bureaux_noms", "zones"):
+        if not isinstance(s[k], dict):
+            s[k] = {}
+    s["fenetres"] = [dict(e, inclure=e.get("inclure", True) is not False) for e in d.get("fenetres", []) if isinstance(e, dict)]
+    return s
+
+
+def lire(nom):
+    f = fichier(nom)
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = None
+    if not isinstance(d, dict):
+        raise Erreur(T(f"Session inconnue : {nom}", f"Unknown session: {nom}"))
+    return f, d
+
+
+def ecrire(f, d):
+    """En version 2, privée (titres de fenêtres et lignes de commande : pour toi seul, revue SESS-02), d'un coup."""
+    s = completer(d)
+    s.update(version=2, nom=f.stem, date=int(time.time()), demarrage=reglage("SESSION_DEMARRAGE", "aucune") == f.stem)
+    s["schema"] = schema(s)
+    ordre = ["version", "nom", "date"] + list(defauts()) + ["ecrans", "schema", "fenetres"]
+    s = {k: s[k] for k in ordre if k in s} | {k: v for k, v in s.items() if k not in ordre}
+    DOSSIER.mkdir(parents=True, exist_ok=True, mode=0o700)
+    DOSSIER.chmod(0o700)
+    tmp = f.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as sortie:
+        sortie.write(json.dumps(s, ensure_ascii=False, indent=1))
+    tmp.replace(f)
+
+
+def ecrans():
+    """{nom: id, x, y, largeur, hauteur, actif} : les écrans, en points logiques (ceux des positions des fenêtres)."""
+    try:
+        l = json.loads(hypr("monitors", "-j") or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+    res = {}
+    for m in l if isinstance(l, list) else []:
+        try:
+            echelle = float(m.get("scale") or 1) or 1
+            w, h = int(m["width"]), int(m["height"])
+            if int(m.get("transform") or 0) % 2:               # écran tourné d'un quart
+                w, h = h, w
+            res[str(m["name"])] = dict(id=m.get("id"), x=int(m.get("x") or 0), y=int(m.get("y") or 0),
+                                       largeur=round(w / echelle), hauteur=round(h / echelle), actif=bool(m.get("focused")))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return res
+
+
+def boite(e):
+    try:
+        (x, y), (w, h) = e["position"], e["taille"]
+        return float(x), float(y), float(w), float(h)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def schema(s):
+    """Le dessin des fenêtres incluses, un élément par écran et bureau : rectangles normalisés (0 à 1) dans l'écran
+    (enregistré avec la session ; sinon, une ancienne session, le cadre de ses fenêtres)."""
+    geo = s.get("ecrans") if isinstance(s.get("ecrans"), dict) else {}
+    groupes = {}
+    for e in s.get("fenetres", []):
+        if e.get("inclure", True) is False:
+            continue
+        cle = ("" if e.get("ecran") is None else str(e["ecran"]), int(e.get("bureau") or 0))
+        groupes.setdefault(cle, []).append(e)
+    res = []
+    for (ecran, bureau), fen in groupes.items():
+        g = geo.get(ecran)
+        boites = [b for b in map(boite, fen) if b]
+        try:
+            ex, ey, ew, eh = float(g["x"]), float(g["y"]), float(g["largeur"]), float(g["hauteur"])
+        except (TypeError, KeyError, ValueError):
+            ex, ey = min((b[0] for b in boites), default=0), min((b[1] for b in boites), default=0)
+            ew = max((b[0] + b[2] for b in boites), default=0) - ex
+            eh = max((b[1] + b[3] for b in boites), default=0) - ey
+        rects = []
+        for e in fen:
+            b = boite(e)
+            if e.get("plein_ecran"):
+                x, y, w, h = 0.0, 0.0, 1.0, 1.0
+            elif b and ew > 0 and eh > 0:
+                x, y = min(max((b[0] - ex) / ew, 0.0), 1.0), min(max((b[1] - ey) / eh, 0.0), 1.0)
+                w, h = min(max(b[2] / ew, 0.0), 1.0 - x), min(max(b[3] / eh, 0.0), 1.0 - y)
+            else:
+                continue
+            rects.append(dict(x=round(x, 4), y=round(y, 4), w=round(w, 4), h=round(h, 4), classe=e.get("classe") or ""))
+        res.append(dict(ecran=ecran, bureau=bureau, largeur=round(ew), hauteur=round(eh), rects=rects))
+    return res
+
+
+def apercu_fichier(nom):
+    return APERCUS / (nom_valide(nom) + ".png")
+
+
+def capturer(nom):
+    """L'aperçu : l'écran actif réduit au quart (grim), privé (0600). Pas de capture (SESSIONS_CAPTURE=non, pour la vie
+    privée ; grim absent ; échec) : le schéma seul, et l'ancien aperçu est effacé (il ne montrerait plus la session)."""
+    png = apercu_fichier(nom)
+    ecran = next((n for n, m in ecrans().items() if m["actif"]), None) if shutil.which("grim") else None
+    if reglage("SESSIONS_CAPTURE", "oui") == "non" or not ecran:
+        png.unlink(missing_ok=True)
+        return None
+    APERCUS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    APERCUS.chmod(0o700)
+    tmp = png.with_name("." + png.stem + ".part")
+    tmp.unlink(missing_ok=True)
+    masque = os.umask(0o077)                               # grim crée le fichier : 0600 dès sa création
+    try:
+        ok = subprocess.run(["grim", "-o", ecran, "-s", "0.25", "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
+                            capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    finally:
+        os.umask(masque)
+    if not ok or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        png.unlink(missing_ok=True)
+        return None
+    tmp.chmod(0o600)
+    tmp.replace(png)
+    return png
 
 
 def nom_valide(nom):
@@ -168,15 +347,18 @@ def terminal(pid):
 def enregistrer(nom):
     f = fichier(nom)
     app = applis()
+    mon = ecrans()
+    par_id = {m["id"]: n for n, m in mon.items()}
     fenetres = []
     for c in sorted(clients(), key=lambda c: (c["workspace"]["id"], c.get("at", [0, 0]))):
         classe = c.get("class") or c.get("initialClass") or ""
         ws = c.get("workspace") or {}
         if not classe or ws.get("id", 0) <= 0 or classe in EXCLUS_CLASSES or (c.get("title") or "") in EXCLUS_TITRES:
             continue
-        e = dict(classe=classe, titre=(c.get("title") or "")[:80], bureau=ws.get("id"), ecran=c.get("monitor"),
+        e = dict(classe=classe, titre=(c.get("title") or "")[:80], bureau=ws.get("id"),
+                 ecran=par_id.get(c.get("monitor"), c.get("monitor")),          # son nom (eDP-1…)
                  flottant=bool(c.get("floating")), position=c.get("at"), taille=c.get("size"),
-                 plein_ecran=int(c.get("fullscreen") or 0))     # 0 : non, 1 : agrandie, 2 : plein écran
+                 plein_ecran=int(c.get("fullscreen") or 0), inclure=True)     # 0 : non, 1 : agrandie, 2 : plein écran
         if classe.lower() in TERMINAUX:
             dossier, commande = terminal(c.get("pid", 0))
             e["terminal"] = dict(programme=TERMINAUX[classe.lower()], dossier=dossier, commande=commande)
@@ -190,15 +372,16 @@ def enregistrer(nom):
         fenetres.append(e)
     if not fenetres:
         raise Erreur(T("Aucune fenêtre à enregistrer.", "No window to save."))
-    # Titres de fenêtres et lignes de commande : pour toi seul (revue SESS-02)
-    DOSSIER.mkdir(parents=True, exist_ok=True, mode=0o700)
-    DOSSIER.chmod(0o700)
-    tmp = f.with_suffix(".tmp")
-    tmp.unlink(missing_ok=True)
-    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as sortie:
-        sortie.write(json.dumps(dict(version=1, nom=nom.strip(), date=int(time.time()), fenetres=fenetres), ensure_ascii=False, indent=1))
-    tmp.replace(f)
-    return len(fenetres)
+    # Réenregistrée : sa personnalisation est gardée (pas ses zones : elles désignent les fenêtres par leur rang)
+    try:
+        d = {k: v for k, v in completer(lire(nom)[1]).items() if k in defauts() and k != "zones"}
+    except Erreur:
+        d = {}
+    utilises = {e["ecran"] for e in fenetres}
+    d.update(nom=nom.strip(), fenetres=fenetres,
+             ecrans={n: {k: m[k] for k in ("x", "y", "largeur", "hauteur")} for n, m in mon.items() if n in utilises})
+    ecrire(f, d)
+    return len(fenetres), capturer(nom)
 
 
 def lancer(e):
@@ -289,16 +472,125 @@ def ouvrir(nom, delai=None):
         verrou.close()
 
 
+def executer(cmd, timeout=10):
+    """Une commande d'appoint (fond, profil, Ne pas déranger…) : réussie ou non, jamais d'erreur."""
+    try:
+        return subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=timeout).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def etapes_avant(s):
+    """Avant les fenêtres, chacune seulement si son champ est donné et son outil présent (sinon : sautée en silence)."""
+    # a. Le fond : comme le carrousel des fonds (plugin nc-carousel)
+    fond = s.get("fond")
+    if fond and Path(fond).is_file() and shutil.which("noctalia"):
+        executer(["noctalia", "msg", "wallpaper-set", fond])
+    # b. Le profil d'énergie : powerprofilesctl, sinon le service lui-même (comme nc-profile-sync)
+    p = s.get("profil")
+    if p in PROFILS and p != "garder":
+        if not (shutil.which("powerprofilesctl") and executer(["powerprofilesctl", "set", p])) and shutil.which("gdbus"):
+            executer(["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
+                      "/net/hadess/PowerProfiles", "--method", "org.freedesktop.DBus.Properties.Set",
+                      "net.hadess.PowerProfiles", "ActiveProfile", f"<'{p}'>"])
+    # c. Ne pas déranger : la concentration de l'île si elle tourne, sinon celle de Noctalia (comme le mode jeu)
+    if s.get("npd") is True:
+        if not (shutil.which("qs") and executer(["qs", "-c", "nc-ile", "ipc", "call", "ile", "concentrationRegler", "true"])) \
+                and shutil.which("noctalia"):
+            executer(["noctalia", "msg", "notification-dnd-set", "on"])
+
+
+def occupe(pid):
+    """Un terminal dont un shell fait tourner quelque chose (ou qu'on ne sait pas lire) : jamais fermé."""
+    if not pid or pid <= 0 or not Path(f"/proc/{pid}").exists():
+        return True
+    return any(enfants(sh) for sh in enfants(pid))
+
+
+def a_fermer(s, garder=()):
+    """Les fenêtres hors de la session : ni ses applis, ni le bureau lui-même (barre, île, terminal déroulant, bureaux
+    spéciaux), ni une fenêtre épinglée, ni un terminal qui fait tourner quelque chose."""
+    classes = {e.get("classe") for e in s["fenetres"] if e["inclure"]}
+    res = []
+    for c in clients():
+        classe = c.get("class") or c.get("initialClass") or ""
+        if (not classe or c.get("address") in garder or classe in classes or classe in EXCLUS_CLASSES
+                or (c.get("workspace") or {}).get("id", 0) <= 0 or (c.get("title") or "") in EXCLUS_TITRES
+                or c.get("pinned") or (classe.lower() in TERMINAUX and occupe(c.get("pid", 0)))):
+            continue
+        res.append(c["address"])
+    return res
+
+
+def fermer(adresses):
+    for a in adresses:
+        if re.fullmatch(r"0x[0-9a-fA-F]+", str(a)):
+            dispatch(f"hl.dsp.window.close({{ window = 'address:{a}' }})")
+
+
+def demander_fermer(nom):
+    """« demander » : une notification avec un bouton ; rien n'est fermé sans ce bouton (ni sans notify-send)."""
+    s = completer(lire(nom)[1])
+    n = len(a_fermer(s))
+    if not n or not shutil.which("notify-send"):
+        return 0
+    try:
+        r = subprocess.run(["notify-send", "-a", "Sessions", "-i", "view-grid", "-A",
+                            "fermer=" + T("Fermer les autres", "Close the others"), "--",
+                            T(f"Session « {nom} »", f"Session “{nom}”"),
+                            T(f"{n} autre(s) fenêtre(s) ouverte(s). Les fermer ?", f"{n} other window(s) open. Close them?")],
+                           capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if r.stdout.strip() == "fermer":
+        fermer(a_fermer(s))
+    return 0
+
+
+def lua_zone(n, par_indice, prof=0):
+    """L'arbre de zones d'une session (feuilles : rang de la fenêtre) en arbre nc-zones (feuilles : adresse) ; une
+    fenêtre absente est retirée, sa voisine prend sa place."""
+    if prof > 16 or not isinstance(n, dict):
+        return None
+    if "f" in n:
+        a = par_indice.get(n["f"]) if isinstance(n["f"], int) else None
+        return f'{{ f = "{a}" }}' if a and re.fullmatch(r"0x[0-9a-fA-F]+", a) else None
+    a, b = lua_zone(n.get("a"), par_indice, prof + 1), lua_zone(n.get("b"), par_indice, prof + 1)
+    if not (a and b):
+        return a or b
+    try:
+        r = min(max(float(n.get("r") or 0.5), 0.1), 0.9)
+    except (TypeError, ValueError):
+        r = 0.5
+    return f'{{ sens = "{"h" if n.get("sens") == "h" else "v"}", r = {r}, a = {a}, b = {b} }}'
+
+
+def etapes_apres(s, adresses):
+    """Après les fenêtres (leurs bureaux existent, leurs adresses sont connues) : noms des bureaux, puis zones."""
+    # d. Les noms des bureaux (comme « Nommer ce bureau » de l'IA)
+    for b, n in s["bureaux_noms"].items():
+        if str(b).isdigit() and isinstance(n, str) and n and "]]" not in n and "\n" not in n:
+            dispatch(f"hl.dsp.workspace.rename({{ workspace = {int(b)}, name = [[{n}]] }})")
+    # e. Les zones (nc.zones_poser), si la disposition nc-zones est chargée dans Hyprland
+    zones = {b: z for b, z in s["zones"].items() if str(b).isdigit()}
+    if zones and executer(["hyprctl", "eval", "if not (nc and nc.zones_dispo) then error('absent') end"], 5):
+        par_indice = {i: adresses[id(e)] for i, e in enumerate(s["fenetres"]) if id(e) in adresses}
+        for b, z in zones.items():
+            lua = lua_zone(z, par_indice)
+            if lua:
+                executer(["hyprctl", "eval", f"nc.zones_poser({int(b)}, {lua})"], 5)
+
+
 def _ouvrir(nom, delai):
     delai = float(os.environ.get("NC_SESSION_DELAI", 30)) if delai is None else delai     # attente des fenêtres (s)
-    try:
-        s = json.loads(fichier(nom).read_text())
-    except (OSError, ValueError):
-        raise Erreur(T(f"Session inconnue : {nom}", f"Unknown session: {nom}")) from None
+    s = completer(lire(nom)[1])
+    etapes_avant(s)
     avant = clients()
     pris = set()
+    adresses = {}                                       # id(entrée) : adresse de sa fenêtre (pour les zones)
     lances = []                                         # entrées lancées : leurs fenêtres seront placées dès qu'elles s'ouvrent
-    fenetres = s.get("fenetres", [])
+    fenetres = [e for e in s["fenetres"] if e["inclure"]]
     for e in fenetres:
         if "terminal" in e:
             # Un terminal déjà ouvert dans le même dossier, sinon déjà sur ce bureau, sert au lieu d'en rouvrir un
@@ -309,9 +601,20 @@ def _ouvrir(nom, delai):
             deja = next((c for c in avant if c.get("class") == e["classe"] and c["address"] not in pris), None)
         if deja:
             pris.add(deja["address"])
-            placer(deja["address"], e)
+            adresses[id(e)] = deja["address"]
         else:
             lances.append(e)
+    # f. Les autres fenêtres : « oui », fermées (jamais celles que la session reprend) ; « demander », une notification
+    # avec un bouton, à part (l'ouverture n'attend pas la réponse) ; « non », rien
+    if s["fermer_autres"] == "oui":
+        fermer(a_fermer(s, pris))
+    elif s["fermer_autres"] == "demander" and shutil.which("notify-send"):
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "fermer-autres", nom], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Puis les fenêtres : celles déjà ouvertes vont à leur place, les autres sont lancées (attendre)
+    for e in fenetres:
+        if id(e) in adresses:
+            placer(adresses[id(e)], e)
     # Une règle par appli lancée (sauf les terminaux, et une appli lancée deux fois sur des bureaux différents) : ses
     # fenêtres, écran de chargement compris, apparaissent directement sur leur bureau
     classes = [e["classe"] for e in lances]
@@ -322,7 +625,9 @@ def _ouvrir(nom, delai):
                 regles.append((n, e))                           # notée avant d'être posée : retirée même si on est tué
                 POSEES.write_text(json.dumps([(m, f["classe"], f["bureau"]) for m, f in regles]))
                 regle(n, e["classe"], e["bureau"])
-        return attendre(fenetres, lances, avant, delai)
+        res = attendre(fenetres, lances, avant, delai, adresses)
+        etapes_apres(s, adresses)
+        return res
     finally:
         # Même après une erreur (lancement, Hyprland qui ne répond plus, arrêt) : chaque règle posée est retirée
         for n, e in regles:
@@ -330,7 +635,8 @@ def _ouvrir(nom, delai):
         POSEES.unlink(missing_ok=True)
 
 
-def attendre(fenetres, lances, avant, delai):
+def attendre(fenetres, lances, avant, delai, adresses=None):
+    adresses = {} if adresses is None else adresses
     for e in lances:
         lancer(e)
     # Jusqu'à la fin du délai, chaque nouvelle fenêtre d'une appli lancée est placée (pas seulement la première :
@@ -351,6 +657,7 @@ def attendre(fenetres, lances, avant, delai):
             e = min(candidates, key=lambda x: places[id(x)])        # deux fenêtres d'une même appli : une chacune
             connues.add(c["address"])
             places[id(e)] += 1
+            adresses[id(e)] = c["address"]                          # la dernière : la vraie, après l'écran de chargement
             derniere = time.time()
             placer(c["address"], e)
         if all(places.values()) and time.time() - derniere > calme:
@@ -369,6 +676,282 @@ def liste():
         except (OSError, ValueError):
             continue
     return res
+
+
+def iso(date):
+    try:
+        return datetime.datetime.fromtimestamp(float(date)).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return datetime.datetime.fromtimestamp(0).isoformat(timespec="seconds")
+
+
+def sortie_json():
+    """Tout, pour le carrousel des sessions : format figé (version 2), une ligne."""
+    demarrage = reglage("SESSION_DEMARRAGE", "aucune")
+    res = []
+    for f in sorted(DOSSIER.glob("*.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                continue
+            nom_valide(f.stem)
+        except (OSError, ValueError, Erreur):
+            continue
+        s = completer(d)
+        incluses = [e for e in s["fenetres"] if e["inclure"]]
+        png = APERCUS / (f.stem + ".png")
+        fenetres = []
+        for e in s["fenetres"]:
+            t = e.get("terminal") if isinstance(e.get("terminal"), dict) else None
+            cmd = t.get("commande") if t else None
+            fenetres.append(dict(classe=e.get("classe") or "", titre=e.get("titre") or "", bureau=e.get("bureau"),
+                                 ecran="" if e.get("ecran") is None else str(e["ecran"]), flottant=bool(e.get("flottant")),
+                                 plein_ecran=bool(e.get("plein_ecran")), inclure=e["inclure"],
+                                 terminal=None if not t else dict(
+                                     programme=t.get("programme"), dossier=t.get("dossier"),
+                                     commande=shlex.join(cmd) if isinstance(cmd, list) and cmd else None)))
+        res.append(dict(nom=f.stem, date=iso(d.get("date") or f.stat().st_mtime), nb_fenetres=len(incluses),
+                        applis=list(dict.fromkeys(e.get("classe") for e in incluses if e.get("classe"))),
+                        icone=s["icone"], couleur=s["couleur"], fond=s["fond"], profil=s["profil"], npd=s["npd"],
+                        demarrage=demarrage == f.stem, fermer_autres=s["fermer_autres"], raccourci=s["raccourci"],
+                        bureaux_noms={str(k): str(v) for k, v in s["bureaux_noms"].items()},
+                        apercu=str(png) if png.is_file() else None, schema=schema(s), fenetres=fenetres))
+    return dict(version=2, sessions=res)
+
+
+def booleen(v, cle, defaut):
+    if v == "":
+        return defaut
+    if v.lower() in OUI:
+        return True
+    if v.lower() in NON:
+        return False
+    raise Erreur(T(f"{cle} : oui ou non.", f"{cle}: yes or no."))
+
+
+def raccourci_valide(v):
+    """« Super+Alt+1 » : la forme de nc-raccourci (Super, Ctrl, Alt, Maj, puis une lettre, un chiffre, F1…F12…)."""
+    parts = [p for p in v.replace(" ", "").split("+") if p]
+    if not parts:
+        raise Erreur(T("Raccourci vide.", "Empty shortcut."))
+    mods = []
+    for p in parts[:-1]:
+        m = MODS.get(p.lower())
+        if not m:
+            raise Erreur(T(f"Modificateur inconnu : {p} (Super, Ctrl, Alt, Maj).", f"Unknown modifier: {p} (Super, Ctrl, Alt, Shift)."))
+        if m not in mods:
+            mods.append(m)
+    k = parts[-1]
+    if re.fullmatch(r"[0-9]|code:\d+", k) or k.lower() in TOUCHES:
+        pass
+    elif re.fullmatch(r"[A-Za-z]|[Ff]([1-9]|1[0-2])", k):
+        k = k.upper()
+    else:
+        raise Erreur(T(f"Touche inconnue : {k}.", f"Unknown key: {k}."))
+    if not mods and not re.fullmatch(r"F([1-9]|1[0-2])", k) and k.lower() not in ("impr", "print"):
+        raise Erreur(T("Raccourci : au moins un modificateur (Super, Ctrl, Alt).", "Shortcut: at least one modifier (Super, Ctrl, Alt)."))
+    return "+".join(mods + [k])
+
+
+def lier_raccourci(ancien, nouveau, nom):
+    """Le raccourci de la session parmi tes raccourcis (nc-raccourci, fiche Super + /), s'il est installé. Une
+    combinaison déjà prise est refusée et l'ancien raccourci remis."""
+    outil = BIN / "nc-raccourci"
+    if not os.access(outil, os.X_OK):
+        return
+    def appel(*a):
+        try:
+            return subprocess.run([str(outil), *a], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return subprocess.CompletedProcess(a, 1, "", str(e))
+    cible = lambda n: "nc-session ouvrir " + shlex.quote(n)
+    if ancien:
+        appel("retire", ancien)
+    if nouveau:
+        r = appel("ajoute", nouveau, cible(nom), T(f"Session « {nom} »", f"Session “{nom}”"))
+        if r.returncode != 0:
+            if ancien:
+                appel("ajoute", ancien, cible(nom), T(f"Session « {nom} »", f"Session “{nom}”"))
+            raise Erreur((r.stderr or r.stdout).strip() or T("Raccourci refusé.", "Shortcut refused."))
+
+
+def regler_demarrage(valeur):
+    """Le réglage SESSION_DEMARRAGE (nc-reglages → Fenêtres), que nc-session demarrage suit."""
+    outil = BIN / "nc-reglages"
+    if os.access(outil, os.X_OK):
+        executer([str(outil), "set", "SESSION_DEMARRAGE", valeur], 30)
+
+
+def arbre_valide(n, nb, vues, prof=0):
+    if prof > 16 or not isinstance(n, dict):
+        raise Erreur(T("Zones : arbre mal formé.", "Zones: malformed tree."))
+    if set(n) == {"f"}:
+        if type(n["f"]) is not int or not 0 <= n["f"] < nb or n["f"] in vues:
+            raise Erreur(T(f"Zones : fenêtre {n['f']} hors de la session (0 à {nb - 1}), ou en double.",
+                           f"Zones: window {n['f']} not in the session (0 to {nb - 1}), or twice."))
+        vues.add(n["f"])
+        return
+    r = n.get("r", 0.5)
+    if set(n) - {"sens", "r", "a", "b"} or n.get("sens") not in ("v", "h") or type(r) not in (int, float) or not 0.1 <= r <= 0.9:
+        raise Erreur(T("Zones : découpe { sens = v ou h, r = 0.1 à 0.9, a, b }.", "Zones: split { sens = v or h, r = 0.1 to 0.9, a, b }."))
+    arbre_valide(n.get("a"), nb, vues, prof + 1)
+    arbre_valide(n.get("b"), nb, vues, prof + 1)
+
+
+def modifier(nom, cle, v):
+    """Une clé de la session, validée strictement (refus : Erreur, rien n'est écrit) ; VALEUR vide : son défaut."""
+    f, d = lire(nom)
+    s = completer(d)
+    v = v.strip()
+    fen = s["fenetres"]
+    m = re.fullmatch(r"fenetre\.(\d+)\.(inclure|dossier|commande)", cle)
+    b = re.fullmatch(r"bureau\.(\d+)\.nom", cle)
+    z = re.fullmatch(r"zones\.(\d+)", cle)
+    apres = None
+    if cle == "icone":
+        if v and not re.fullmatch(r"[a-z0-9_]{1,64}", v):
+            raise Erreur(T("Icône : un nom Material Symbols (minuscules, chiffres, _).", "Icon: a Material Symbols name (lowercase, digits, _)."))
+        s["icone"] = v or None
+    elif cle == "couleur":
+        if v and v not in ROLES and not re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+            raise Erreur(T("Couleur : un rôle du thème (" + ", ".join(sorted(ROLES)) + ") ou #rrggbb.",
+                           "Color: a theme role (" + ", ".join(sorted(ROLES)) + ") or #rrggbb."))
+        s["couleur"] = (v.lower() if v.startswith("#") else v) or None
+    elif cle == "fond":
+        p = Path(v).expanduser() if v else None
+        if p and (not p.is_absolute() or not p.is_file() or p.suffix.lower() not in IMAGES):
+            raise Erreur(T(f"Fond : aucune image à ce chemin : {v}", f"Wallpaper: no image at this path: {v}"))
+        s["fond"] = str(p.resolve()) if p else None
+    elif cle == "profil":
+        if v and v not in PROFILS:
+            raise Erreur(T("Profil : " + ", ".join(PROFILS) + ".", "Profile: " + ", ".join(PROFILS) + "."))
+        s["profil"] = v or "garder"
+    elif cle == "npd":
+        s["npd"] = booleen(v, cle, False)
+    elif cle == "fermer_autres":
+        if v and v not in FERMER:
+            raise Erreur(T("Fermer les autres : non, demander ou oui.", "Close the others: non, demander or oui."))
+        s["fermer_autres"] = v or "non"
+    elif cle == "demarrage":
+        oui = booleen(v, cle, False)
+        avant = reglage("SESSION_DEMARRAGE", "aucune")
+        apres = (lambda: regler_demarrage(f.stem)) if oui else \
+            (lambda: regler_demarrage("aucune")) if avant == f.stem else None
+    elif cle == "raccourci":
+        r = raccourci_valide(v) if v else None
+        if r != s["raccourci"]:
+            lier_raccourci(s["raccourci"], r, f.stem)
+        s["raccourci"] = r
+    elif b:
+        if not 1 <= int(b[1]) <= 999:
+            raise Erreur(T("Bureau : de 1 à 999.", "Desktop: 1 to 999."))
+        if v and (len(v) > 32 or not v.isprintable() or "[[" in v or "]]" in v):
+            raise Erreur(T("Nom de bureau : 32 caractères au plus, sans [[ ni ]].", "Desktop name: 32 characters at most, without [[ or ]]."))
+        noms = {str(k): x for k, x in s["bureaux_noms"].items()}
+        noms.pop(str(int(b[1])), None)
+        if v:
+            noms[str(int(b[1]))] = v
+        s["bureaux_noms"] = dict(sorted(noms.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0))
+    elif m:
+        i = int(m[1])
+        if not 0 <= i < len(fen):
+            raise Erreur(T(f"Fenêtre {i} : la session en a {len(fen)} (0 à {len(fen) - 1}).",
+                           f"Window {i}: the session has {len(fen)} (0 to {len(fen) - 1})."))
+        e, quoi = fen[i], m[2]
+        if quoi == "inclure":
+            e["inclure"] = booleen(v, cle, True)
+        elif "terminal" not in e and not (quoi == "commande" and "commande" in e):
+            raise Erreur(T(f"Fenêtre {i} ({e.get('classe')}) : pas un terminal.", f"Window {i} ({e.get('classe')}): not a terminal."))
+        elif quoi == "dossier":
+            p = Path(v).expanduser() if v else None
+            if p and (not p.is_absolute() or not p.is_dir()):
+                raise Erreur(T(f"Dossier introuvable : {v}", f"Folder not found: {v}"))
+            e["terminal"]["dossier"] = str(p) if p else None
+        else:
+            try:
+                cmd = shlex.split(v)
+            except ValueError:
+                raise Erreur(T("Commande : guillemets mal fermés.", "Command: unclosed quotes.")) from None
+            if "terminal" in e:
+                e["terminal"]["commande"] = cmd or None
+            elif not cmd:
+                raise Erreur(T(f"Fenêtre {i} : sa commande la lance, elle ne peut pas être vide.", f"Window {i}: its command starts it, it cannot be empty."))
+            else:
+                e["commande"] = cmd
+    elif z:
+        zones = {str(k): x for k, x in s["zones"].items()}
+        zones.pop(z[1], None)
+        if v:
+            try:
+                arbre = json.loads(v)
+            except ValueError:
+                raise Erreur(T("Zones : du JSON, { \"f\": 0 } ou { \"sens\": \"v\", \"r\": 0.5, \"a\": …, \"b\": … }.",
+                               "Zones: JSON, { \"f\": 0 } or { \"sens\": \"v\", \"r\": 0.5, \"a\": …, \"b\": … }.")) from None
+            arbre_valide(arbre, len(fen), set())
+            zones[z[1]] = arbre
+        s["zones"] = zones
+    else:
+        raise Erreur(T(f"Clé inconnue : {cle} (icone, couleur, fond, profil, npd, demarrage, fermer_autres, raccourci, "
+                       "bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID).",
+                       f"Unknown key: {cle} (icone, couleur, fond, profil, npd, demarrage, fermer_autres, raccourci, "
+                       "bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID)."))
+    if apres:
+        apres()
+    ecrire(f, s)
+    return T(f"Session « {f.stem} » : {cle} = {v or 'par défaut'}.", f"Session “{f.stem}”: {cle} = {v or 'default'}.")
+
+
+def copier_apercu(a, b, deplacer):
+    pa, pb = apercu_fichier(a), apercu_fichier(b)
+    pb.unlink(missing_ok=True)
+    if not pa.is_file():
+        return
+    if deplacer:
+        pa.replace(pb)
+        return
+    with open(pa, "rb") as src, os.fdopen(os.open(pb, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+
+def renommer(a, b):
+    fa, d = lire(a)
+    fb = fichier(b)
+    if fb.name == fa.name:
+        raise Erreur(T("C'est déjà son nom.", "That is already its name."))
+    if fb.exists():
+        raise Erreur(T(f"Une session « {b.strip()} » existe déjà.", f"A session “{b.strip()}” already exists."))
+    s = completer(d)
+    ecrire(fb, s)
+    fa.unlink()
+    copier_apercu(fa.stem, fb.stem, True)
+    if s["raccourci"]:
+        try:
+            lier_raccourci(s["raccourci"], s["raccourci"], fb.stem)           # il ouvre la session sous son nouveau nom
+        except Erreur:
+            pass
+    if reglage("SESSION_DEMARRAGE", "aucune") == fa.stem:
+        regler_demarrage(fb.stem)
+    return T(f"Session « {fa.stem} » renommée « {fb.stem} ».", f"Session “{fa.stem}” renamed “{fb.stem}”.")
+
+
+def dupliquer(a, b):
+    fa, d = lire(a)
+    fb = fichier(b)
+    if fb.exists():
+        raise Erreur(T(f"Une session « {b.strip()} » existe déjà.", f"A session “{b.strip()}” already exists."))
+    s = completer(d)
+    s.update(raccourci=None)                            # un raccourci n'ouvre qu'une session
+    ecrire(fb, s)
+    copier_apercu(fa.stem, fb.stem, False)
+    return T(f"Session « {fa.stem} » copiée dans « {fb.stem} ».", f"Session “{fa.stem}” copied to “{fb.stem}”.")
+
+
+def apercu(nom):
+    f, _ = lire(nom)
+    if capturer(f.stem):
+        return T(f"Aperçu de « {f.stem} » refait.", f"Preview of “{f.stem}” taken again.")
+    return T(f"« {f.stem} » : schéma seulement (capture désactivée ou grim absent).",
+             f"“{f.stem}”: outline only (capture disabled or grim missing).")
 
 
 def notifier(titre, corps=""):
@@ -403,20 +986,39 @@ def main(a):
     if not a or a[0] in ("-h", "--help", "aide", "help"):
         print(T(__doc__, DOC_EN).strip())
         return 0 if a else 2
-    c = {"save": "enregistrer", "open": "ouvrir", "list": "liste", "delete": "supprimer", "startup": "demarrage"}.get(a[0], a[0])
+    c = {"save": "enregistrer", "open": "ouvrir", "list": "liste", "delete": "supprimer", "startup": "demarrage",
+         "edit": "modifier", "rename": "renommer", "duplicate": "dupliquer", "preview": "apercu"}.get(a[0], a[0])
     reste = " ".join(x for x in a[1:] if not x.startswith("--")).strip()
+    # Commandes du carrousel : une ligne sur la sortie, ou le refus sur stderr (code 1), sans notification
+    carrousel = ("json", "modifier", "renommer", "dupliquer", "apercu", "fermer-autres")
     try:
         if c == "enregistrer" and reste:
-            n = enregistrer(reste)
+            n, png = enregistrer(reste)
             notifier(T(f"Session « {reste} » enregistrée", f"Session “{reste}” saved"), T(f"{n} fenêtre(s)", f"{n} window(s)"))
-            print(T(f"{n} fenêtre(s) enregistrée(s) dans « {reste} ».", f"{n} window(s) saved in “{reste}”."))
+            print(T(f"{n} fenêtre(s) enregistrée(s) dans « {reste} »", f"{n} window(s) saved in “{reste}”")
+                  + ("." if png else T(" (schéma seulement).", " (outline only).")))
             return 0
         if c == "ouvrir" and reste:
             places, manquantes = ouvrir(reste)
             if manquantes:
                 notifier(T(f"Session « {reste} »", f"Session “{reste}”"),
                          T(f"{manquantes} appli(s) n'ont pas ouvert de fenêtre à temps.", f"{manquantes} app(s) did not open a window in time."))
+            print(T(f"Session « {reste} » ouverte : {places} fenêtre(s).", f"Session “{reste}” opened: {places} window(s)."))
             return 0
+        if c == "json" and len(a) == 1:
+            print(json.dumps(sortie_json(), ensure_ascii=False))
+            return 0
+        if c == "modifier" and len(a) in (3, 4):
+            print(modifier(a[1], a[2], a[3] if len(a) == 4 else ""))
+            return 0
+        if c in ("renommer", "dupliquer") and len(a) == 3:
+            print((renommer if c == "renommer" else dupliquer)(a[1], a[2]))
+            return 0
+        if c == "apercu" and reste:
+            print(apercu(reste))
+            return 0
+        if c == "fermer-autres" and reste:
+            return demander_fermer(reste)
         if c == "liste":
             l = liste()
             if "--json" in a:
@@ -433,7 +1035,17 @@ def main(a):
             if not f.exists():
                 print(T(f"Aucune session « {reste} ».", f"No session “{reste}”."), file=sys.stderr)
                 return 1
+            try:
+                racc = completer(lire(reste)[1])["raccourci"]
+            except Erreur:
+                racc = None
             f.unlink()
+            apercu_fichier(reste).unlink(missing_ok=True)
+            if racc:
+                try:
+                    lier_raccourci(racc, None, f.stem)          # son raccourci n'ouvrirait plus rien
+                except Erreur:
+                    pass
             print(T(f"Session « {reste} » supprimée.", f"Session “{reste}” deleted."))
             return 0
         if c == "menu":
@@ -446,7 +1058,7 @@ def main(a):
             return 0
     except Erreur as e:
         print(str(e), file=sys.stderr)
-        notifier(T("Sessions", "Sessions"), str(e)) if not sys.stderr.isatty() else None
+        notifier(T("Sessions", "Sessions"), str(e)) if not sys.stderr.isatty() and c not in carrousel else None
         return 1
     print(T(__doc__, DOC_EN).strip(), file=sys.stderr)
     return 2

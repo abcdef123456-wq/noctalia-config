@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""nc-conso : qu'est-ce qui vide la batterie ? Pour la page Charge de l'île. Lecture seule : ne règle rien, n'écrit rien.
+  nc-conso                  une mesure en JSON (deux relevés à 1 s d'écart, pour avoir déjà les programmes)
+  nc-conso suivre           une ligne JSON toutes les 2 s, tant qu'on le laisse tourner (l'île le lance quand la page
+                            Charge est affichée et l'arrête dès qu'elle ne l'est plus : rien en arrière-plan)
+  nc-conso suivre --fois N  N lignes puis s'arrête
+  nc-conso a-batterie       code 0 si le PC a une batterie (pas celle d'une souris), 1 sinon (l'île : page Batterie)
+Une ligne :
+  batterie  statut (Charging, Discharging…), pct, watts (puissance lissée sur 5 s), restant (secondes avant vide, ou
+            avant pleine en charge) ; null sans batterie
+  top       les 5 programmes qui ont pris le plus de processeur sur les 30 dernières secondes, regroupés par appli (même
+            programme), sans les fils du noyau : nom, pct (du processeur entier), watts (leur part estimée de la
+            consommation : part du temps processeur utilisé × puissance, seulement en décharge ; sinon null)
+  rtx       carte NVIDIA d'un PC hybride (par nc-rtx-veille, qui ne la réveille pas) : etat (endormie ou allumee) et
+            cause ; null sans NVIDIA ou sur un PC non hybride
+  sante     garde (capacité gardée, en % de celle d'origine), cycles, limite (active, seuil) ; null si rien n'est connu
+Calcul de la batterie : le même que le widget de la barre (nc-batterie/calcul.luau) : µW, µWh, µA × µV, µAh × V,
+plusieurs batteries additionnées.
+Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), NC_RTX_VEILLE (commande à la place de nc-rtx-veille, vide : aucune),
+NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut).
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+SYS = os.environ.get("NC_SYSFS") or "/sys"
+PROC = os.environ.get("NC_PROC") or "/proc"
+ICI = os.path.dirname(os.path.realpath(__file__))
+
+FENETRE_W = 5.0        # lissage de la puissance : moyenne des mesures des 5 dernières secondes (comme la barre)
+FENETRE_CPU = 30.0     # programmes : temps processeur des 30 dernières secondes
+TOP = 5
+RTX_TOUS = 5           # nc-rtx-veille une mesure sur 5 (toutes les 10 s) : il parcourt les fichiers ouverts de tous les processus
+PF_KTHREAD = 0x00200000
+# Programmes lancés par un interprète : le nom du script (comm) dit mieux de qui il s'agit que « python3 »
+INTERPRETES = re.compile(r"^(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|sh|bash|dash|zsh|fish|lua[0-9.]*|env)$")
+
+
+def lire(chemin):
+    try:
+        with open(chemin, encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def nombre(v):
+    """Valeur absolue (certains pilotes donnent un courant ou une puissance négatifs en décharge) ; None si illisible."""
+    try:
+        return abs(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+# ── Batterie ──
+def batteries():
+    """Les propriétés (uevent) des batteries du PC (pas celle d'une souris : scope Device)."""
+    d = os.path.join(SYS, "class/power_supply")
+    try:
+        noms = sorted(os.listdir(d))
+    except OSError:
+        return []
+    liste = []
+    for n in noms:
+        p = {}
+        for cle, v in re.findall(r"POWER_SUPPLY_([A-Z0-9_]+)=([^\n]*)", lire(os.path.join(d, n, "uevent")) or ""):
+            p[cle] = v
+        type_ = p.get("TYPE") or lire(os.path.join(d, n, "type"))
+        if type_ != "Battery" or (p.get("SCOPE") or lire(os.path.join(d, n, "scope"))) == "Device":
+            continue
+        p["_dossier"] = os.path.join(d, n)
+        liste.append(p)
+    return liste
+
+
+def volts(p):
+    v = nombre(p.get("VOLTAGE_NOW"))
+    if not v:
+        v = nombre(p.get("VOLTAGE_MIN_DESIGN"))
+    return v / 1e6 if v else None
+
+
+def wh(p, energie, charge):
+    """Énergie en Wh : energy_* (µWh), sinon charge_* (µAh) × tension."""
+    e = nombre(p.get(energie))
+    if e is not None:
+        return e / 1e6
+    c = nombre(p.get(charge))
+    v = volts(p)
+    if c is not None and v:
+        return c / 1e6 * v
+    return None
+
+
+def une_batterie(p):
+    w = nombre(p.get("POWER_NOW"))
+    if w is not None:
+        w = w / 1e6
+    else:
+        i, v = nombre(p.get("CURRENT_NOW")), volts(p)
+        w = i / 1e6 * v if i is not None and v else None
+    pct = nombre(p.get("CAPACITY"))
+    return {"pct": pct, "statut": p.get("STATUS") or "", "energie": wh(p, "ENERGY_NOW", "CHARGE_NOW"),
+            "pleine": wh(p, "ENERGY_FULL", "CHARGE_FULL"), "puissance": w}
+
+
+def resumer(liste):
+    """Toutes les batteries en une (énergies et puissances additionnées), comme calcul.luau."""
+    bats = [b for b in map(une_batterie, liste) if b["pct"] is not None or b["energie"] is not None]
+    if not bats:
+        return None
+    statuts = {b["statut"] for b in bats}
+    r = {"statut": "Charging" if "Charging" in statuts else ("Discharging" if "Discharging" in statuts else bats[0]["statut"])}
+    r["energie"] = sum(b["energie"] for b in bats) if all(b["energie"] is not None for b in bats) else None
+    r["pleine"] = sum(b["pleine"] for b in bats) if all(b["pleine"] is not None for b in bats) else None
+    ps = [b["puissance"] for b in bats if b["puissance"] is not None]
+    r["puissance"] = sum(ps) if ps else None
+    pcts = [b["pct"] for b in bats if b["pct"] is not None]
+    if len(bats) == 1 and bats[0]["pct"] is not None:
+        pct = bats[0]["pct"]
+    elif r["energie"] is not None and r["pleine"]:
+        pct = r["energie"] / r["pleine"] * 100
+    elif pcts:
+        pct = sum(pcts) / len(pcts)
+    else:
+        pct = 0
+    r["pct"] = max(0, min(100, pct))
+    return r
+
+
+def restant(r, w):
+    """Secondes avant vide (décharge) ou avant pleine (charge), avec la puissance lissée ; None au-delà de deux jours."""
+    if not r or not w or w < 0.05 or r["energie"] is None:
+        return None
+    if r["statut"] == "Discharging":
+        e = r["energie"]
+    elif r["statut"] == "Charging" and r["pleine"] is not None:
+        e = max(0.0, r["pleine"] - r["energie"])
+    else:
+        return None
+    s = e / w * 3600
+    return round(s) if s <= 48 * 3600 else None
+
+
+# ── Santé de la batterie ──
+def historique_sante():
+    """Médiane des 30 derniers relevés quotidiens de nc-sysinfo (la même santé que la page Système), ou None."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local/state")
+    t = lire(os.path.join(base, "nc/batterie-sante"))
+    v = []
+    for ligne in (t or "").splitlines()[-30:]:
+        c = ligne.split()
+        if len(c) == 3 and nombre(c[1]) is not None and nombre(c[2]):
+            v.append(nombre(c[1]) * 100 / nombre(c[2]))
+    if not v:
+        return None
+    v.sort()
+    n = len(v)
+    return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+
+def limite(liste):
+    """Limite de charge (mêmes méthodes que nc-limite-charge) : {active, seuil}, ou None si le portable n'en a pas."""
+    for p in liste:
+        d = p["_dossier"]
+        types = lire(os.path.join(d, "charge_types")) or ""
+        if "Long_Life" in types:
+            return {"active": "[Long_Life]" in types, "seuil": None}
+        seuil = nombre(lire(os.path.join(d, "charge_control_end_threshold")))
+        if seuil is not None:
+            return {"active": seuil < 100, "seuil": int(seuil) if seuil < 100 else None}
+    racine = os.path.join(SYS, "bus/platform/drivers/ideapad_acpi")
+    try:
+        for n in sorted(os.listdir(racine)):
+            v = lire(os.path.join(racine, n, "conservation_mode"))
+            if v in ("0", "1"):
+                return {"active": v == "1", "seuil": None}
+    except OSError:
+        pass
+    return None
+
+
+def sante(liste):
+    pleines, origines, ratios, cycles = 0.0, 0.0, [], 0
+    for p in liste:
+        pl, orig = wh(p, "ENERGY_FULL", "CHARGE_FULL"), wh(p, "ENERGY_FULL_DESIGN", "CHARGE_FULL_DESIGN")
+        if pl is not None and orig:
+            pleines += pl
+            origines += orig
+        else:
+            # Charge sans tension connue : le rapport reste juste dans l'unité du pilote (µAh / µAh)
+            a = nombre(p.get("ENERGY_FULL") or p.get("CHARGE_FULL"))
+            b = nombre(p.get("ENERGY_FULL_DESIGN") or p.get("CHARGE_FULL_DESIGN"))
+            if a is not None and b:
+                ratios.append(a / b)
+        c = nombre(p.get("CYCLE_COUNT"))
+        if c:
+            cycles = max(cycles, int(c))
+    garde = None
+    if origines:
+        garde = pleines / origines * 100
+    elif ratios:
+        garde = sum(ratios) / len(ratios) * 100
+    if garde is not None:
+        h = historique_sante()
+        garde = round(min(100.0, h if h is not None else garde))
+    lim = limite(liste)
+    if garde is None and not cycles and lim is None:
+        return None
+    return {"garde": garde, "cycles": cycles or None, "limite": lim}
+
+
+# ── Programmes ──
+def nom_programme(pid, comm):
+    """Le programme d'un processus : celui de sa ligne de commande (les processus « Isolated Web Co » de Firefox sont
+    tous Firefox), le nom du script pour un interprète, sinon comm."""
+    cmd = lire(os.path.join(PROC, str(pid), "cmdline")) or ""
+    argv0 = cmd.split("\0")[0].split(" --")[0]          # Chrome réécrit sa ligne de commande en une seule chaîne
+    n = re.split(r"[/\\]", argv0)[-1].strip()
+    if not n or INTERPRETES.match(n):
+        n = comm
+    if n.lower().endswith(".exe"):
+        n = n[:-4]
+    return n or "?"
+
+
+def temps_processeur():
+    """(occupé, total) en ticks pour tout le processeur, d'après /proc/stat ; None si illisible."""
+    t = lire(os.path.join(PROC, "stat")) or ""
+    for ligne in t.splitlines():
+        if ligne.startswith("cpu "):
+            v = [int(x) for x in ligne.split()[1:] if x.isdigit()]
+            if len(v) >= 4:
+                total = sum(v[:8])
+                inactif = v[3] + (v[4] if len(v) > 4 else 0)
+                return total - inactif, total
+    return None
+
+
+class Mesureur:
+    def __init__(self):
+        self.puissances = []      # (t, W)
+        self.precedent = None     # {(pid, début): ticks}
+        self.noms = {}            # (pid, début) → nom du programme (lu une seule fois par processus)
+        self.cpu_avant = None
+        self.fenetre = []         # (t, {appli: ticks}, ticks occupés, ticks total)
+        self.n = 0
+        self.rtx = None
+
+    def processus(self):
+        moi = os.getpid()
+        vus = {}
+        try:
+            pids = [p for p in os.listdir(PROC) if p.isdigit()]
+        except OSError:
+            return vus
+        for pid in pids:
+            if int(pid) == moi:
+                continue
+            t = lire(os.path.join(PROC, pid, "stat"))
+            if not t or ")" not in t:
+                continue
+            comm = t[t.find("(") + 1:t.rfind(")")]
+            c = t[t.rfind(")") + 2:].split()
+            try:
+                ppid, drapeaux, ticks, debut = int(c[1]), int(c[6]), int(c[11]) + int(c[12]), c[19]
+            except (IndexError, ValueError):
+                continue
+            if drapeaux & PF_KTHREAD or pid == "2" or ppid == 2:      # fils du noyau : pas un programme
+                continue
+            cle = (pid, debut)
+            if cle not in self.noms:
+                self.noms[cle] = nom_programme(pid, comm)
+            vus[cle] = ticks
+        for cle in [k for k in self.noms if k not in vus]:
+            del self.noms[cle]
+        return vus
+
+    def releve_cpu(self, t):
+        vus = self.processus()
+        cpu = temps_processeur()
+        if self.precedent is not None:
+            par_appli = {}
+            for cle, ticks in vus.items():
+                d = ticks - self.precedent.get(cle, 0)      # nouveau processus : tout son temps est récent
+                if d > 0:
+                    nom = self.noms[cle]
+                    a = par_appli.setdefault(nom.lower(), [nom, 0])
+                    a[1] += d
+            occupe = total = None
+            if cpu and self.cpu_avant:
+                occupe, total = cpu[0] - self.cpu_avant[0], cpu[1] - self.cpu_avant[1]
+            self.fenetre.append((t, par_appli, occupe, total))
+        self.precedent, self.cpu_avant = vus, cpu
+        self.fenetre = [f for f in self.fenetre if f[0] > t - FENETRE_CPU]
+
+    def top(self, w):
+        somme = {}
+        occupe = total = 0
+        connu = bool(self.fenetre)
+        for _, par_appli, o, tt in self.fenetre:
+            for cle, (nom, d) in par_appli.items():
+                a = somme.setdefault(cle, [nom, 0])
+                a[1] += d
+            if o is None or tt is None:
+                connu = False
+            else:
+                occupe, total = occupe + o, total + tt
+        if not connu or occupe <= 0 or total <= 0:
+            # Sans /proc/stat : les programmes seuls (le noyau n'est pas compté)
+            occupe = sum(d for _, d in somme.values())
+            total = None
+        liste = sorted(somme.values(), key=lambda a: -a[1])[:TOP]
+        sortie = []
+        for nom, d in liste:
+            if d <= 0 or not occupe:
+                continue
+            part = min(1.0, d / occupe)
+            sortie.append({"nom": nom[:1].upper() + nom[1:], "pct": round(d / total * 100, 1) if total else None,
+                           "watts": round(part * w, 1) if w is not None else None})
+        return sortie
+
+    def lire_rtx(self):
+        """État de la carte NVIDIA, une mesure sur RTX_TOUS ; rien du tout sans carte NVIDIA (vendor 0x10de)."""
+        if self.n % RTX_TOUS:
+            return self.rtx
+        self.rtx = None
+        if not nvidia_presente():
+            return None
+        cmd = os.environ.get("NC_RTX_VEILLE")
+        if cmd is None:
+            cmd = os.path.join(ICI, "nc-rtx-veille")
+            if not os.access(cmd, os.X_OK):
+                cmd = shutil.which("nc-rtx-veille") or ""
+        if not cmd:
+            return None
+        try:
+            r = subprocess.run([cmd, "etat"], capture_output=True, text=True, timeout=8)
+            e = json.loads(r.stdout)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return None
+        if not isinstance(e, dict) or not e.get("hybride"):
+            return None
+        if e.get("runtime_status") == "suspended":
+            self.rtx = {"etat": "endormie", "cause": None}
+        elif e.get("runtime_status") == "active":
+            # La cause la plus probable, en court : le nom de l'appli, ou le texte de nc-rtx-veille ; aucune si inconnue
+            c = (e.get("causes") or [{}])[0]
+            cause = c.get("nom") or ("nvidia-persistenced" if c.get("cle") == "persistenced" else None)
+            if not cause and c.get("cle") not in (None, "inconnue"):
+                cause = c.get("texte")
+            self.rtx = {"etat": "allumee", "cause": cause}
+        return self.rtx
+
+    def mesurer(self, t):
+        """Une mesure (t en secondes, horloge monotone)."""
+        liste = batteries()
+        r = resumer(liste)
+        if r and r["puissance"] is not None:
+            self.puissances.append((t, r["puissance"]))
+        self.puissances = [x for x in self.puissances if x[0] > t - FENETRE_W]
+        w = sum(x[1] for x in self.puissances) / len(self.puissances) if self.puissances and r else None
+        self.releve_cpu(t)
+        bat = None
+        if r:
+            bat = {"statut": r["statut"], "pct": round(r["pct"]), "watts": round(w, 1) if w is not None else None,
+                   "restant": restant(r, w)}
+        # La part de chaque programme en watts n'a de sens qu'en décharge : en charge, la batterie mesure ce qui entre
+        w_programmes = w if r and r["statut"] == "Discharging" else None
+        sortie = {"batterie": bat, "top": self.top(w_programmes), "rtx": self.lire_rtx(), "sante": sante(liste)}
+        self.n += 1
+        return sortie
+
+
+def nvidia_presente():
+    d = os.path.join(SYS, "bus/pci/devices")
+    try:
+        return any(lire(os.path.join(d, n, "vendor")) == "0x10de" for n in os.listdir(d))
+    except OSError:
+        return False
+
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] in (["a-batterie"], ["has-battery"]):
+        return 0 if batteries() else 1
+    m = Mesureur()
+    try:
+        if not a:
+            m.mesurer(time.monotonic())
+            time.sleep(1)
+            m.n = 0                                  # l'état de la carte NVIDIA sur la mesure affichée
+            print(json.dumps(m.mesurer(time.monotonic()), ensure_ascii=False))
+            return 0
+        if a[0] in ("suivre", "follow"):
+            fois = int(a[a.index("--fois") + 1]) if "--fois" in a and a.index("--fois") + 1 < len(a) else 0
+            pas = nombre(os.environ.get("NC_CONSO_PAS")) or 2.0
+            # Un premier relevé muet, une demi-pause : la première ligne a déjà les programmes (pas de saut de taille)
+            m.mesurer(time.monotonic())
+            m.n = 0
+            time.sleep(pas / 4)
+            i = 0
+            while not fois or i < fois:
+                print(json.dumps(m.mesurer(time.monotonic()), ensure_ascii=False), flush=True)
+                i += 1
+                if not fois or i < fois:
+                    time.sleep(pas)
+            return 0
+    except (BrokenPipeError, KeyboardInterrupt):
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

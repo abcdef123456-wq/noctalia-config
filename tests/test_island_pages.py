@@ -51,6 +51,7 @@ QtObject {
  property real finLecture: 0
  property real minuteurFin: 0
  property bool enCharge: false
+ property bool batteriePc: false
  property bool jeu: false
  property var meteo: ({})
  property bool recherche: false
@@ -135,6 +136,32 @@ else if(etape===1){
  Etat.changerVue(1);Reglages.valeurs={};etape++
 }else if(etape===4){
  Etat.basculer("TEST",true);verifier(Etat.vueActive==="centre"&&Etat.ecranOuvert==="TEST","réactivation impossible");Qt.quit()
+}
+''', etat_reel=True)
+
+    def test_page_batterie_apres_le_centre_seulement_avec_une_batterie(self):
+        # Page Batterie (charge) : juste après le centre sur un PC à batterie, jamais deux fois pendant une recharge
+        # (elle est alors en tête, comme activité), absente sans batterie ou avec ILE_PAGE_CHARGE=non ; le clic sur la
+        # batterie de la barre (pageOu) revient alors à Système
+        self.executer('''
+if(etape===0){
+ verifier(Etat.vues.indexOf("charge")<0,"page Batterie sur un PC sans batterie")
+ verifier(Etat.pageOu("charge","systeme")==="systeme","repli sans batterie")
+ Etat.batteriePc=true;etape++
+}else if(etape===1){
+ var v=Etat.vues
+ verifier(v[v.indexOf("centre")+1]==="charge","Batterie pas juste après le centre : "+v)
+ verifier(Etat.pageOu("charge","systeme")==="charge","clic vers Batterie")
+ Etat.basculer("TEST",false);verifier(Etat.vueActive==="centre","sans activité, l'île s'ouvre sur le centre");Etat.fermer()
+ Etat.enCharge=true;etape++
+}else if(etape===2){
+ var v=Etat.vues
+ verifier(v.filter(n=>n==="charge").length===1,"Batterie deux fois : "+v)
+ verifier(v[0]==="charge","recharge : la page en tête, comme activité")
+ Etat.enCharge=false;Reglages.valeurs={ILE_PAGE_CHARGE:"non"};etape++
+}else if(etape===3){
+ verifier(Etat.vues.indexOf("charge")<0,"ILE_PAGE_CHARGE=non : page affichée")
+ verifier(Etat.pageOu("charge","systeme")==="systeme","ILE_PAGE_CHARGE=non : pas de repli vers Système");Qt.quit()
 }
 ''', etat_reel=True)
 

@@ -55,6 +55,7 @@ HOME_FILES=(
   .config/noctalia/arch-logo.png
   .local/share/noctalia/plugins/nc-launcher
   .local/share/noctalia/plugins/nc-carousel
+  .local/share/noctalia/plugins/nc-sessions
   .local/share/noctalia/plugins/nc-verrou
   .local/share/noctalia/plugins/nc-keys
   .local/share/noctalia/plugins/nc-ile
@@ -128,6 +129,7 @@ HOME_FILES=(
   .local/bin/nc-shell
   .local/bin/nc-shell-msg
   .local/bin/nc-sysinfo
+  .local/bin/nc-conso
   .local/bin/nc-term-logo
   .local/bin/nc-theme-sync
   .local/bin/nc-wallpaper-colors

@@ -34,7 +34,11 @@ Singleton {
         if (jeu) a.push("jeu")
         return a
     }
-    readonly property var vues: Reglages.filtrerPages(activites.concat(["centre", "assistant", "notifications"],
+    // Page Batterie (Charge.qml) juste après le centre, seulement sur un PC qui a une batterie ; pendant une recharge,
+    // elle est déjà en tête parmi les activités : jamais deux fois
+    readonly property var vues: Reglages.filtrerPages(activites.concat(["centre"],
+                                                 batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
+                                                 ["assistant", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
                                                  meteo.temp !== undefined ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))
@@ -57,6 +61,8 @@ Singleton {
         var t = Object.assign({}, hauteurs); t[nom] = Math.round(h); hauteurs = t
     }
     function changerVue(d) { aller(vues[Math.max(0, Math.min(vues.length - 1, vue + d))]) }
+    // La page voulue si elle est affichable, sinon le repli (clic sur la batterie de la barre : Batterie, sinon Système)
+    function pageOu(nom, repli) { return vues.indexOf(nom) >= 0 ? nom : repli }
     function aller(nom) {
         if (vues.indexOf(nom) < 0) return
         recherche = false
@@ -385,6 +391,14 @@ Singleton {
     // Vraie recharge (pas seulement branché : la limite de charge peut la bloquer vers 80 %)
     readonly property bool enCharge: aBatterie && batterie.state === UPowerDeviceState.Charging
     onBrancheChanged: { if (aBatterie) activite("charge"); if (branche) seuilAlerte = 100 }
+    // Une vraie batterie du PC dans /sys (pas celle d'une souris : scope Device), lue une fois au démarrage par
+    // nc-conso (sans UPower aussi) : la page Batterie n'existe que là
+    property bool batteriePc: false
+    Process {
+        running: true
+        command: [etat.bin + "nc-conso", "a-batterie"]
+        onExited: code => etat.batteriePc = code === 0
+    }
 
     // ── Micro et caméra utilisés (point orange / vert à côté de la pilule, comme sur iPhone) ──
     // Micro : flux PipeWire qui enregistre (pas les captures du son des haut-parleurs : cava, halo, indicateurs).

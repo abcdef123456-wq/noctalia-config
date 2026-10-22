@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nc-shell-msg : actions des raccourcis Hyprland, envoyées à Noctalia v5.
-#   menu  session  lock  power-cycle  control-center  settings  wallpapers  window-switcher  keys
-#   ile PAGE  (icônes de la barre : centre, reseau, bluetooth, son, systeme, notifications)
+#   menu  session  lock  power-cycle  control-center  settings  wallpapers  sessions  window-switcher  keys
+#   ile PAGE [REPLI]  (icônes de la barre : centre, reseau, bluetooth, son, systeme, notifications, charge)
 # Île Quickshell installée (service activé) : relancée si elle s'est arrêtée ; vrai si elle répond
 ile_prete() {
   systemctl --user is-enabled --quiet nc-ile.service 2>/dev/null || return 1
@@ -24,6 +24,16 @@ noctalia_prete() {
   return 1
 }
 nmsg() { noctalia_prete || exit 1; exec noctalia msg "$@"; }
+# Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant qu'un carrousel (fonds, sessions) est
+# ouvert, remis à la fermeture (sauf en profil Économie, où il reste coupé : voir nc.flou dans ~/.config/hypr/nc/energie.lua).
+sans_flou() {
+  local lock="${XDG_RUNTIME_DIR:-/tmp}/nc-carousel-blur"
+  [ -e "$lock" ] && return 0
+  : > "$lock"; hyprctl eval 'nc.flou(false)' >/dev/null
+  ( sleep 1; while hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 0.3; done
+    hyprctl eval 'nc.flou(true)' >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
+  disown
+}
 
 case "${1:-}" in
   menu)                                       # recherche : Spotlight de l'île Quickshell, sinon lanceur Noctalia
@@ -40,11 +50,15 @@ case "${1:-}" in
     fi
     nmsg panel-toggle nc/ile:centre ;;
   ile)                                        # icônes de la barre : page de l'île Quickshell, sinon centre de Noctalia
-    page="${2:-centre}"
+    # ile PAGE [REPLI] : REPLI si l'île n'a pas cette page (coupée dans les réglages, PC sans batterie…) ; sans l'île,
+    # le centre de Noctalia s'ouvre sur l'onglet du repli
+    page="${2:-centre}"; repli="${3:-}"
     if ile_prete; then
       [ "$page" = centre ] && exec qs -c nc-ile ipc call ile basculer
+      [ -n "$repli" ] && exec qs -c nc-ile ipc call ile pageOu "$page" "$repli"
       exec qs -c nc-ile ipc call ile page "$page"
     fi
+    [ -n "$repli" ] && page="$repli"
     case "$page" in
       reseau) ctx=network ;; bluetooth) ctx=bluetooth ;; son) ctx=audio ;; systeme) ctx=system ;;
       notifications) ctx=notifications ;; *) ctx=home ;;
@@ -53,16 +67,15 @@ case "${1:-}" in
   settings)        nmsg settings-toggle ;;
   wallpapers)
     noctalia_prete || exit 1
-    # Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant que le carrousel est ouvert,
-    # remis à la fermeture (sauf en profil Économie, où il reste coupé : voir nc.flou dans ~/.config/hypr/nc/energie.lua).
-    lock="${XDG_RUNTIME_DIR:-/tmp}/nc-carousel-blur"
-    if [ ! -e "$lock" ]; then
-      : > "$lock"; hyprctl eval 'nc.flou(false)' >/dev/null
-      ( sleep 1; while hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 0.3; done
-        hyprctl eval 'nc.flou(true)' >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
-      disown
-    fi
+    sans_flou
     nmsg panel-toggle nc/carousel:main ;;
+  sessions)                                   # carrousel des sessions (plugin nc/sessions), sinon le menu de nc-session
+    if [ -f "$HOME/.local/share/noctalia/plugins/nc-sessions/plugin.toml" ] \
+       && grep -qs '"nc/sessions"' "${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml" && noctalia_prete; then
+      sans_flou
+      noctalia msg panel-toggle nc/sessions:main ${2:+"$2"} && exit 0
+    fi
+    exec "$HOME/.local/bin/nc-session" menu ;;
   window-switcher) nmsg window-switcher hold ;;
   keys)            nmsg panel-toggle nc/keys:main ;;
 esac

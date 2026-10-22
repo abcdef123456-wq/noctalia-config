@@ -509,6 +509,7 @@ Item {
         { t: Reglages.t("Copier le texte de l'écran", "Copy Text from Screen"), k: "texte ocr lire image copier capture extraire text copy read screen extract", g: "text_select_start", f: () => Quickshell.execDetached(["sh", "-c", "sleep 0.4; ~/.local/bin/nc-capture texte"]) },
         { t: Reglages.t("Presse-papiers", "Clipboard"), k: "presse-papiers clipboard copier coller copy paste history", g: "content_paste", f: () => Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher", "/clipboard"]) },
         { t: Reglages.t("Fond d'écran suivant", "Next Wallpaper"), k: "fond écran wallpaper suivant next background", g: "wallpaper", f: () => Etat.faire(["noctalia", "msg", "wallpaper-next"]) },
+        { t: Reglages.t("Toutes les sessions…", "All sessions…"), k: "sessions dispositions carrousel enregistrées layouts saved all", g: "view_carousel", f: () => Etat.faire([Etat.bin + "nc-shell-msg", "sessions"]) },
         { t: Reglages.t("Raccourcis clavier", "Keyboard Shortcuts"), k: "raccourcis clavier touches aide keyboard shortcuts keys help", g: "keyboard", f: () => Quickshell.execDetached([Etat.bin + "nc-shell-msg", "keys"]) },
         // IA (cachées quand elle est coupée)
         { t: Reglages.t("IA sur le texte copié", "AI on Copied Text"), k: "ia ai résumer traduire corriger reformuler texte summarize translate fix rephrase text", g: "auto_awesome",

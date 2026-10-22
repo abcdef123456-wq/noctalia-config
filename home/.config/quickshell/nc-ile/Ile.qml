@@ -74,7 +74,7 @@ PanelWindow {
     // Taille de chaque page
     function adaptee(nom, mini) { return Qt.size(432, Math.max(mini, Math.min(580, (Etat.hauteurs[nom] || mini) + 32))) }
     readonly property var tailles: ({
-        musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: Qt.size(400, 140),
+        musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: adaptee("charge", 140),
         jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: adaptee("calendrier", 410),
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),

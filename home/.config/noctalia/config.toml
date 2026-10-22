@@ -156,7 +156,7 @@ left = "exec @HOME@/.local/bin/nc-shell-msg ile son"   # l'île (sinon le centre
 # Batterie (plugin nc/batterie, à la place de battery) : même dessin que son mode graphic ; au survol, la conso réelle
 # lue chaque seconde et le temps restant
 [widget."nc/batterie:batterie".actions]
-left = "exec @HOME@/.local/bin/nc-shell-msg ile systeme"   # l'île (sinon le centre de contrôle de Noctalia)
+left = "exec @HOME@/.local/bin/nc-shell-msg ile charge systeme"   # page Batterie de l'île (sinon Système, sinon le centre de Noctalia)
 [widget.bluetooth]
 
 [widget.bluetooth.actions]
@@ -301,5 +301,5 @@ background = false
 
 # ---------------------------------------------------------------- Plugins locaux (~/.local/share/noctalia/plugins)
 [plugins]
-enabled = ["nc/launcher", "nc/carousel", "nc/keys", "nc/verrou", "nc/fenetres", "nc/batterie"@PLUGIN_ILE@]
+enabled = ["nc/launcher", "nc/carousel", "nc/sessions", "nc/keys", "nc/verrou", "nc/fenetres", "nc/batterie"@PLUGIN_ILE@]
 auto_update = "none"

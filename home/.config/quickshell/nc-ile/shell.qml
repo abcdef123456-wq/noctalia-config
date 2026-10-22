@@ -5,7 +5,8 @@
 //   qs -c nc-ile ipc call ile basculer   ouvrir / fermer sur l'écran actif, sur le centre de contrôle (Super + C)
 //   qs -c nc-ile ipc call ile ouvrir     ouvrir sur ce qui se passe (musique…) ; … suivante / precedente : changer de page
 //   qs -c nc-ile ipc call ile luminosite montrer la luminosité (touches de luminosité)
-//   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son, notifications
+//   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son, notifications, charge (Batterie)
+//   qs -c nc-ile ipc call ile pageOu charge systeme   la même, avec une page de repli si elle n'existe pas
 //   qs -c nc-ile ipc call ile effacerNotifications | concentration | recherche (Spotlight, Super + R)
 //   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
@@ -168,6 +169,8 @@ ShellRoot {
             if (Etat.ecranOuvert === "") basculer()
             Etat.aller(nom)
         }
+        // La même, avec une page de repli si celle-ci n'existe pas (coupée dans les réglages, PC sans batterie…)
+        function pageOu(nom: string, repli: string): void { page(Etat.pageOu(nom, repli)) }
         // Cockpit : déjà ouvert, le même raccourci le ramène ici, le met devant ou le range (basculerOutil)
         function jarvis(): void {
             if (racine.jarvisFenetre && racine.jarvisFenetre.visible) { racine.basculerOutil(racine.jarvisFenetre, "JARVIS"); return }

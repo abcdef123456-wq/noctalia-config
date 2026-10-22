@@ -104,7 +104,8 @@ end
 touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
 touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))
-touche(SUPER .. " + SHIFT + code:25", cmd("~/.local/bin/nc-session menu"), trad("Bureaux|Sessions : ouvrir ou enregistrer une disposition", "Sessions: open or save a layout"))
+-- Carrousel des sessions (plugin nc/sessions) ; sans lui, le menu de nc-session
+touche(SUPER .. " + SHIFT + code:25", cmd(barre .. "sessions"),    trad("Bureaux|Sessions : ouvrir ou enregistrer une disposition", "Sessions: open or save a layout"))
 touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
 touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), trad("Applis et barre|Réglages du bureau (fenêtre, avec recherche)", "Desktop settings (window, with search)"))

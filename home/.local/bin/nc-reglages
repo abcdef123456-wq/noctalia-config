@@ -362,7 +362,7 @@ REGLAGES = [
           "Show this island page. Features and notifications remain available. All disabled: keep only the pill and Spotlight."))
       for cle, fr, en in (
           ("musique", "Musique", "Music"), ("claude", "Agents IA", "AI agents"),
-          ("minuteur", "Minuteur", "Timer"), ("charge", "Recharge", "Charging"), ("jeu", "Jeu", "Gaming"),
+          ("minuteur", "Minuteur", "Timer"), ("charge", "Batterie", "Battery"), ("jeu", "Jeu", "Gaming"),
           ("centre", "Centre de contrôle", "Control center"), ("assistant", "JARVIS", "JARVIS"),
           ("notifications", "Notifications", "Notifications"), ("son", "Son", "Sound"),
           ("reseau", "Réseau", "Network"), ("bluetooth", "Bluetooth", "Bluetooth"),
@@ -605,6 +605,11 @@ REGLAGES = [
         "A saved layout (Super + Shift + W, or nc-session save NAME) reopened at every login: its apps started and placed "
         "on their desktop."),
       lambda: [("aucune", L("Aucune", "None"))] + [(f.stem, f.stem) for f in sorted(Path(HOME, ".config/nc/sessions").glob("*.json"))]),
+    R("SESSIONS_CAPTURE", "Fenêtres", L("Aperçu des sessions : capture de l'écran", "Session previews: screen capture"), "ouinon", "oui",
+      L("En enregistrant une session, une petite capture de l'écran sert d'aperçu dans le carrousel des sessions. "
+        "Non : seulement le dessin des fenêtres, rien de ce qui était à l'écran n'est gardé.",
+        "When saving a session, a small screen capture is its preview in the session carousel. "
+        "No: only the outline of the windows, nothing that was on screen is kept.")),
     R("FENETRES_MARGE", "Fenêtres", L("Marge au bord de l'écran", "Margin at the screen edge"), "entier", "10",
       mini=0, maxi=60, unite="px", groupe="hypr"),
     R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",
