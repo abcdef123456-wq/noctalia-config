@@ -171,6 +171,32 @@ class Sessions(unittest.TestCase):
         self.assertIn("dispatch hl.dsp.window.move({ workspace = 4, follow = false, window = 'address:0xk' })", a)
         self.assertIn("hl.dsp.window.fullscreen({ action = 'set', mode = 'fullscreen', window = 'address:0xk' })", a)
 
+    def test_pas_de_script_rejoue_et_fichier_prive(self):
+        """Revues SESS-01 et SESS-02 : un terminal qui faisait tourner « python3 migrer.py --oui » le relançait à chaque
+        ouverture de la session ; et la session (titres, lignes de commande) était lisible par tous (0644)."""
+        import importlib.machinery, importlib.util
+        from unittest import mock
+        l = importlib.machinery.SourceFileLoader("ncsession", str(SCRIPT))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncsession", l)); l.exec_module(m)
+        cas = {("python3", "migrer.py", "--oui"): None, ("python3",): ["python3"], ("/usr/bin/python3", "-q"): ["python3", "-q"],
+               ("python3", "-m", "http.server"): None, ("node", "deploiement.js"): None, ("node",): ["node"],
+               ("nvim", "notes.md"): ["nvim", "notes.md"], ("ssh", "serveur"): ["ssh", "serveur"],
+               ("mysql", "--password=zzz"): None}
+        for cmd, attendu in cas.items():
+            m.INTERACTIFS.add("mysql")
+            with mock.patch.object(m, "enfants", lambda pid: [pid + 1]), \
+                    mock.patch.object(m, "ligne_commande", lambda pid, c=cmd: list(c)), mock.patch("os.readlink", lambda x: "/projet"):
+                self.assertEqual(m.terminal(1), ("/projet", attendu), cmd)
+        # Une fenêtre sans fichier .desktop dont la commande porte un jeton : seulement le programme
+        p = subprocess.Popen(["sh", "-c", "sleep 30; :", "--token=zzz"])
+        self.addCleanup(p.kill)
+        self.clients(client("0xa", "monappli", 2, pid=p.pid))
+        self.assertEqual(self.lancer("enregistrer", "Privee").returncode, 0)
+        f = self.home / ".config/nc/sessions/Privee.json"
+        self.assertEqual(json.loads(f.read_text())["fenetres"][0]["commande"], ["sh"])
+        self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(f.parent.stat().st_mode & 0o777, 0o700)
+
     def test_noms_refuses(self):
         self.clients(client("0xa", "firefox", 2))
         for nom in ("../evil", "", "a/b"):

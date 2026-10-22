@@ -71,6 +71,11 @@ EXCLUS_CLASSES = {"dropterm", "org.quickshell", "nc-ia", "nctest", "nc-paquets",
 EXCLUS_TITRES = {"JARVIS", "JARVIS Chat", "Réglages du bureau", "Connexion JARVIS", "Clés des IA", "AI keys"}
 INTERACTIFS = {"nvim", "vim", "vi", "nano", "helix", "hx", "htop", "btop", "top", "less", "man", "lazygit", "ranger", "yazi",
                "ncdu", "python", "python3", "ipython", "node", "ssh", "tmux", "zellij", "gitui", "nnn", "mc", "micro"}
+# Une console Python ou Node est rouverte, pas un script : python3 migrer.py --oui serait relancé à chaque ouverture
+# de la session sans qu'on l'ait décidé (revue SESS-01)
+CONSOLES = {"python", "python3", "ipython", "node"}
+ARGS_SCRIPT = {"-m", "-c", "-e", "-p", "--eval", "--print", "-r", "--require"}
+SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|auth")
 
 
 class Erreur(Exception):
@@ -151,7 +156,10 @@ def terminal(pid):
                     dossier = os.readlink(f"/proc/{p}/cwd")
                 except OSError:
                     pass
-                commande = [Path(cmd[0]).name] + cmd[1:]
+                nom = re.sub(r"\d+(\.\d+)*$", "", Path(cmd[0]).name) or Path(cmd[0]).name   # python3.14 → python
+                script = nom in CONSOLES and any(not a.startswith("-") or a in ARGS_SCRIPT for a in cmd[1:])
+                if not script and not any(SECRET.search(a) for a in cmd[1:]):
+                    commande = [Path(cmd[0]).name] + cmd[1:]
                 break
         return dossier, commande
     return str(HOME), None
@@ -178,13 +186,17 @@ def enregistrer(nom):
             cmd = ligne_commande(c.get("pid", 0))
             if not cmd:
                 continue
-            e["commande"] = cmd
+            e["commande"] = cmd[:1] if any(SECRET.search(a) for a in cmd[1:]) else cmd     # pas de jeton dans le fichier
         fenetres.append(e)
     if not fenetres:
         raise Erreur(T("Aucune fenêtre à enregistrer.", "No window to save."))
-    DOSSIER.mkdir(parents=True, exist_ok=True)
+    # Titres de fenêtres et lignes de commande : pour toi seul (revue SESS-02)
+    DOSSIER.mkdir(parents=True, exist_ok=True, mode=0o700)
+    DOSSIER.chmod(0o700)
     tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps(dict(version=1, nom=nom.strip(), date=int(time.time()), fenetres=fenetres), ensure_ascii=False, indent=1))
+    tmp.unlink(missing_ok=True)
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as sortie:
+        sortie.write(json.dumps(dict(version=1, nom=nom.strip(), date=int(time.time()), fenetres=fenetres), ensure_ascii=False, indent=1))
     tmp.replace(f)
     return len(fenetres)
 
