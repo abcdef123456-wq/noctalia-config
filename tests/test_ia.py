@@ -163,8 +163,14 @@ class IA(unittest.TestCase):
         Faux.anthropic_refuse = True
         r = self.lancer("demander", "--flux", "question")
         lignes, texte = self.flux(r)
-        self.assertEqual(texte, "Salut toi", r.stdout + r.stderr)
+        # Issue #4 : le relais est dit avant la réponse, pas en silence
+        self.assertTrue(texte.startswith("⚠ Claude (API Anthropic) n'a pas répondu — clé refusée"), texte)
+        self.assertIn(": ChatGPT (API OpenAI) prend le relais.\n\n", texte)
+        self.assertTrue(texte.endswith("Salut toi"), r.stdout + r.stderr)
+        self.assertEqual(len([l for l in lignes if "relais" in l]), 1)
         self.assertEqual([l["id"] for l in lignes if "id" in l], ["anthropic", "openai"])
+        gardee = next((self.home / "run").rglob("derniere*")).read_text()
+        self.assertTrue(gardee.startswith("Salut toi"), "la réponse gardée, sans l'avis")
         oai = [q for q in Faux.requetes if q["chemin"] == "/oai/chat/completions"][-1]
         self.assertEqual(oai["entetes"]["authorization"], "Bearer " + CLE_O)
         self.assertEqual(oai["corps"]["model"], "gpt-5.1-mini", "le plus récent des « mini » de la liste")
@@ -255,6 +261,19 @@ class IA(unittest.TestCase):
         r = self.lancer("requete-ile", entree=json.dumps({"session_id": "a" * 32, "question": "/reset"}) + "\n", prog="nc-assistant")
         self.assertFalse(json.loads(r.stdout)["ok"])
         self.assertFalse(Faux.requetes)
+
+    def test_chat_jarvis_injoignable_le_relais_est_dit(self):
+        """Issue #4 : JARVIS relié mais injoignable (tunnel coupé…) : l'IA du bureau répond, et le chat le dit en tête."""
+        import socket
+        so = socket.socket(); so.bind(("127.0.0.1", 0)); port = so.getsockname()[1]; so.close()     # personne n'écoute
+        conf = self.home / ".config/nc/assistant.conf"
+        conf.write_text(f'URL="http://127.0.0.1:{port}"\nSECRET_KEY="{"k" * 40}"\n'); conf.chmod(0o600)
+        r = self.lancer("requete-ile", entree=json.dumps({"session_id": "a" * 32, "question": "bonjour"}) + "\n", prog="nc-assistant")
+        d = json.loads(r.stdout)
+        self.assertTrue(d["ok"], r.stdout + r.stderr)
+        self.assertTrue(d["text"].startswith("⚠ JARVIS n'a pas répondu"), d["text"][:200])
+        self.assertIn("Claude (API Anthropic) prend le relais.", d["text"])
+        self.assertIn("Bonjour", d["text"])
 
     def test_texte_par_l_entree_standard_et_fichiers(self):
         r = self.lancer("texte", "resumer", "--stdin", entree="un long texte à résumer")

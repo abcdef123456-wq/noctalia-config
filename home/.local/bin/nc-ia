@@ -1035,6 +1035,19 @@ def message_aucune(usage):
              "or Ollama, or connect JARVIS (nc-assistant configurer).")
 
 
+RELAIS = []      # l'avis de relais de la dernière réponse (« JARVIS n'a pas répondu : Gemini prend le relais »)
+
+
+def avis_relais(rates, ident):
+    """Une IA a échoué et la suivante répond (mode auto) : dit lesquelles et pourquoi, au lieu de passer en silence
+    (issue #4 : on recevait la réponse de Gemini sans savoir que JARVIS avait échoué)."""
+    qui, raison = rates[0]
+    raison = re.sub(r"\s+", " ", str(raison)).strip()[:90]
+    autres = T(f" (puis {len(rates) - 1} autre(s))", f" (then {len(rates) - 1} more)") if len(rates) > 1 else ""
+    return T(f"⚠ {qui} n'a pas répondu{autres} — {raison} : {nom(ident)} prend le relais.",
+             f"⚠ {qui} did not answer{autres} — {raison}: {nom(ident)} takes over.")
+
+
 def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=()):
     """Écrit la réponse (texte brut, ou lignes JSON en flux) ; renvoie (réponse, ia) ; ErreurIA si aucune n'a pu.
     exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre)."""
@@ -1045,11 +1058,17 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
     if not liste:
         raise ErreurIA(message_aucune(usage))
     rates = []
+    RELAIS.clear()
     for ident in liste:
         morceaux = []
         try:
             if flux:
                 ecrire(json.dumps({"ia": nom(ident), "id": ident, "agent": FOURNISSEURS[ident]["agent"]}, ensure_ascii=False) + "\n")
+            if rates and not RELAIS:
+                # Affiché avant la réponse, mais pas gardé avec elle (historique, rapports, plans : la réponse seule)
+                RELAIS.append(avis_relais(rates, ident))
+                ecrire(json.dumps({"t": RELAIS[0] + "\n\n", "relais": RELAIS[0]}, ensure_ascii=False) + "\n" if flux
+                       else RELAIS[0] + "\n\n")
             for m in appeler(ident, consigne_ or consigne(usage), texte, image, usage):
                 if not m:
                     continue
@@ -1069,8 +1088,8 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
                 ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
                 raise ErreurIA(T(f"{nom(ident)} : réponse incomplète ({e})", f"{nom(ident)}: incomplete answer ({e})"))
             noter_echec(ident)
-            rates.append(f"{nom(ident)} : {e}")
-    raise ErreurIA(T("Aucune IA n'a pu répondre", "No AI could answer") + " — " + " ; ".join(rates))
+            rates.append((nom(ident), str(e)))
+    raise ErreurIA(T("Aucune IA n'a pu répondre", "No AI could answer") + " — " + " ; ".join(f"{q} : {r}" for q, r in rates))
 
 
 def garder(rep, ident):
@@ -1204,11 +1223,12 @@ def livrer(titre, question, rep, ident):
     if reglage("IA_COPIER", "oui") != "non":
         copier(rep)
     titre = f"{titre} · {nom(ident)}"
-    if reglage("IA_REPONSES", "chat") != "notification" and vers_chat(question, rep, ident):
-        notifier(titre, apercu(rep), (T("Ouvrir la conversation", "Open the conversation"),
-                                      ["qs", "-c", "nc-ile", "ipc", "call", "ile", "chatReponse"]))
+    vu = (RELAIS[0] + "\n\n" + rep) if RELAIS else rep      # l'avis de relais se lit, mais ne se copie pas
+    if reglage("IA_REPONSES", "chat") != "notification" and vers_chat(question, vu, ident):
+        notifier(titre, apercu(vu), (T("Ouvrir la conversation", "Open the conversation"),
+                                     ["qs", "-c", "nc-ile", "ipc", "call", "ile", "chatReponse"]))
     else:
-        notifier(titre, rep)
+        notifier(titre, vu)
 
 
 def texte_action(action, source="", copie=False, flux=False, texte=None):

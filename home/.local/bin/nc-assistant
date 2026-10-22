@@ -1117,14 +1117,20 @@ def ia_du_bureau():
         return None
 
 
-def repondre_par_ia(ia, historique, question):
+def repondre_par_ia(ia, historique, question, echec_jarvis=None):
+    """echec_jarvis : JARVIS a échoué en mode automatique ; l'IA du bureau répond, et c'est dit en tête (issue #4)."""
     try:
         texte, qui = ia.chat(historique, question)
     except ia.ErreurIA as e:
         conseil = "" if CONF.exists() or "nc-assistant configurer" in str(e) else \
             T(" Pour JARVIS : nc-assistant configurer.", " For JARVIS: nc-assistant configurer.")
         raise Erreur(str(e) + conseil) from None
-    texte = texte[:15900] + f"\n\n*— {ia.nom(qui)}*"
+    avis = list(getattr(ia, "RELAIS", []))
+    if echec_jarvis is not None:
+        raison = re.sub(r"\s+", " ", str(echec_jarvis)).strip()[:90]
+        avis = [T(f"⚠ JARVIS n'a pas répondu — {raison} : {ia.nom(qui)} prend le relais.",
+                  f"⚠ JARVIS did not answer — {raison}: {ia.nom(qui)} takes over.")]
+    texte = ("\n\n".join(avis) + "\n\n" if avis else "") + texte[:15900] + f"\n\n*— {ia.nom(qui)}*"
     print(json.dumps(dict(ok=True, text=texte, truncated=False, engine=ia.nom(qui)), ensure_ascii=False), flush=True)
 
 
@@ -1158,9 +1164,9 @@ def requete_ile():
     try:
         # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
         texte = demander(configuration_question(question), sid, question, suivi=False)
-    except Erreur:
+    except Erreur as e:
         if ia and par_jarvis and not commande and ia.mode() == "auto" and [i for i in ia.candidats("question") if i != "jarvis"]:
-            return repondre_par_ia(ia, historique, question)
+            return repondre_par_ia(ia, historique, question, echec_jarvis=e)
         raise
     # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète.
     print(json.dumps(dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000), ensure_ascii=False), flush=True)
