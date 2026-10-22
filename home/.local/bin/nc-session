@@ -75,7 +75,7 @@ INTERACTIFS = {"nvim", "vim", "vi", "nano", "helix", "hx", "htop", "btop", "top"
 # de la session sans qu'on l'ait décidé (revue SESS-01)
 CONSOLES = {"python", "python3", "ipython", "node"}
 ARGS_SCRIPT = {"-m", "-c", "-e", "-p", "--eval", "--print", "-r", "--require"}
-SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|auth")
+SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|^--?auth\b")   # pas « auth.lua », « author@ »
 
 
 class Erreur(Exception):

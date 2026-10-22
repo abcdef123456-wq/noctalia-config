@@ -181,7 +181,8 @@ class Sessions(unittest.TestCase):
         cas = {("python3", "migrer.py", "--oui"): None, ("python3",): ["python3"], ("/usr/bin/python3", "-q"): ["python3", "-q"],
                ("python3", "-m", "http.server"): None, ("node", "deploiement.js"): None, ("node",): ["node"],
                ("nvim", "notes.md"): ["nvim", "notes.md"], ("ssh", "serveur"): ["ssh", "serveur"],
-               ("mysql", "--password=zzz"): None}
+               ("mysql", "--password=zzz"): None, ("nvim", "auth.lua"): ["nvim", "auth.lua"],
+               ("ssh", "author@hote"): ["ssh", "author@hote"], ("ssh", "--auth=x", "h"): None}
         for cmd, attendu in cas.items():
             m.INTERACTIFS.add("mysql")
             with mock.patch.object(m, "enfants", lambda pid: [pid + 1]), \
