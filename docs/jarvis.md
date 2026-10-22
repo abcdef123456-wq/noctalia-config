@@ -198,6 +198,11 @@ et son `scripts/expose-gateway.sh` : tunnel HTTPS vers le gateway, **jamais vers
 bind local, on peut par exemple utiliser Tailscale Serve comme proxy local ; accéder directement à une IP LAN/VPN
 exige un bind et un pare-feu adaptés sur le serveur. Les tokens des bots et leurs whitelists restent ceux du backend.
 
+**Un gateway exposé n'a qu'une protection : sa `SECRET_KEY`.** La confirmation des actions sensibles de l'interface
+(`confirmed` de `/api/nc/manage` : éteindre un écran, changer un réglage du PC) protège d'un clic accidentel, pas d'un
+programme qui connaît la clé : celui-ci peut tout demander. Garde la clé longue et privée, ne l'écris dans aucun
+dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-assistant configurer` sur chaque PC).
+
 ## Matériel local et changement du dépôt upstream
 
 La révision `8867dd0` renomme `render-gateway/` en `gateway/` et supprime le relais WebSocket PC-agent.
