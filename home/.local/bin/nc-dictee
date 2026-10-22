@@ -235,6 +235,7 @@ PTT = RUNTIME / "nc-dictee-ptt.json"     # { t : appui, pret : micro lancé (son
 RELACHE = RUNTIME / "nc-dictee-relache"  # touché par le raccourci à chaque relâchement (D ou Super), avant nc-dictee
 APPUI = RUNTIME / "nc-dictee-appui"      # touché par le raccourci à l'appui, avant de lancer nc-dictee (Python est lent)
 BREF = 0.45                              # appui plus court (relâchement − appui, deux heures du raccourci) : dictée longue
+# (lancé à la main, sans le raccourci, il n'y a pas d'heures notées : la durée compte alors le démarrage de Python)
 
 
 def instant_appui():
@@ -308,9 +309,23 @@ def notifier(T, titre, corps="", court=False):
         pass
 
 
+def presse_papiers():
+    """(type, octets) du presse-papiers d'avant (texte, image, fichiers…), None s'il est vide ; lève OSError ou
+    TimeoutExpired si on ne peut pas le lire (propriétaire bloqué)."""
+    r = subprocess.run(["wl-paste", "--list-types"], capture_output=True, text=True, timeout=2)
+    liste = [t.strip() for t in r.stdout.splitlines() if t.strip()] if r.returncode == 0 else []
+    if not liste:
+        return None
+    mime = next((t for t in liste if t.startswith("text/plain")), None) or next((t for t in liste if "/" in t), liste[0])
+    r = subprocess.run(["wl-paste", "-n", "-t", mime], capture_output=True, timeout=2)
+    if r.returncode != 0:
+        raise OSError(r.stderr.decode(errors="replace").strip() or mime)
+    return mime, r.stdout
+
+
 def ecrire_dans_la_fenetre(texte):
     """Le texte tapé dans la fenêtre active : wtype s'il est là, sinon collé (Ctrl + V, Ctrl + Maj + V dans un
-    terminal), le presse-papiers d'avant remis ensuite."""
+    terminal), le presse-papiers d'avant (texte, image ou fichiers) remis ensuite. Faux si rien n'a pu être écrit."""
     if shutil.which("wtype"):
         if subprocess.run(["wtype", "--", texte], stdin=subprocess.DEVNULL, capture_output=True).returncode == 0:
             return True
@@ -318,9 +333,11 @@ def ecrire_dans_la_fenetre(texte):
         return False
     avant = None
     if shutil.which("wl-paste"):
-        r = subprocess.run(["wl-paste", "-n", "-t", "text"], capture_output=True, timeout=2)
-        avant = r.stdout if r.returncode == 0 else None
-    subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL)
+        try:
+            avant = presse_papiers()
+        except (OSError, subprocess.TimeoutExpired):
+            return False            # ne pas écraser ce qu'on ne saurait pas remettre (revue DICT-04/05)
+    subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL, timeout=5)
     classe = ""
     try:
         classe = json.loads(subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout or "{}").get("class", "")
@@ -328,11 +345,23 @@ def ecrire_dans_la_fenetre(texte):
         pass
     mods = "CTRL SHIFT" if classe.lower() in TERMINAUX else "CTRL"
     time.sleep(0.08)
-    subprocess.run(["hyprctl", "dispatch", f"hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V' }})"], capture_output=True)
+    subprocess.run(["hyprctl", "dispatch", f"hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V' }})"], capture_output=True, timeout=5)
     if avant is not None:
         time.sleep(0.4)
-        subprocess.run(["wl-copy", "--"], input=avant, capture_output=True)
+        subprocess.run(["wl-copy", "--type", avant[0], "--"], input=avant[1], capture_output=True, timeout=5)
     return True
+
+
+SECOURS = RUNTIME / "nc-dictee-derniere.txt"   # la dernière dictée, jamais perdue (effacée à la fin de la session)
+
+
+def garder(texte):
+    try:
+        fd = os.open(SECOURS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+    except OSError:
+        pass
 
 
 def ptt_debut(m):
@@ -420,8 +449,18 @@ def ptt_finir(m):
     if not r.get("ok"):
         notifier(T, T("Dictée : rien d'écrit", "Dictation: nothing written"), str(r.get("error") or ""))
         return 1
-    if not ecrire_dans_la_fenetre(r["text"]):
-        notifier(T, T("Dictée (copie impossible)", "Dictation (could not type)"), r["text"][:300])
+    garder(r["text"])                                   # une dictée longue ne se perd pas si le collage échoue
+    try:
+        ecrit = ecrire_dans_la_fenetre(r["text"])
+    except (OSError, subprocess.SubprocessError):
+        ecrit = False
+    if not ecrit:
+        try:
+            subprocess.run(["wl-copy", "--", r["text"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+            copie = T("Copié : colle-le avec Ctrl + V.", "Copied: paste it with Ctrl + V.")
+        except (OSError, subprocess.SubprocessError):
+            copie = T(f"Gardé dans {SECOURS}", f"Kept in {SECOURS}")
+        notifier(T, T("Dictée (pas écrite dans la fenêtre)", "Dictation (not typed)"), f"{copie}\n{r['text'][:300]}")
         return 1
     notifier(T, T("✓ Écrit", "✓ Written"), r["text"][:120], True)
     return 0
