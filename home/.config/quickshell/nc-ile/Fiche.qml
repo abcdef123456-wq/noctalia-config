@@ -1,6 +1,8 @@
-// Fiche des raccourcis (Super + /), éditable sur place : la même fiche que celle de Noctalia (sections de nc-keys, deux
-// colonnes, à la taille des autres menus : Gabarit.qml), en verre aux couleurs du bureau. Elle n'apparaît qu'une fois
-// ses raccourcis connus (gardés par Raccourcis.qml), en fondu et léger zoom ; elle repart de même. « Modifier » passe en mode édition, comme le
+// Fiche des raccourcis (Super + /), éditable sur place : la même fiche que celle de Noctalia (sections de nc-keys, trois
+// ou quatre colonnes selon la place), dans le cadre du carrousel des fonds (Gabarit.qml), en verre aux couleurs du
+// bureau. Créée seulement une fois ses raccourcis connus (gardés par Raccourcis.qml : jamais une carte vide). Le fondu
+// d'entrée et de sortie est celui de Hyprland (animations des couches), qui fond le flou et la carte ensemble ; la carte
+// y ajoute un léger zoom à l'entrée. « Modifier » passe en mode édition, comme le
 // Centre de contrôle de l'iPhone : − désactive un raccourci de la config (ou retire l'un des tiens), un toucher sur
 // les touches attend la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config,
 // « + Ajouter » crée un raccourci (une appli, « bureau N », « ile PAGE » ou une commande). Toute l'édition passe par
@@ -24,8 +26,8 @@ PanelWindow {
 
     property bool edition: false
     readonly property var lignes: Raccourcis.lignes // les raccourcis du catalogue de nc-reglages (gardé par Raccourcis.qml)
-    property bool sortie: false                     // le mouvement de sortie, avant fermer()
-    Component.onCompleted: Raccourcis.relire()
+    property real hautReserve: Gabarit.barre        // place réservée en haut de l'écran (la barre), donnée par shell.qml
+    Component.onCompleted: { Raccourcis.relire(); entree = true }
     property var tentative: null                    // dernière capture envoyée : pour « Remplacer » si les touches sont prises
     property var conflit: null
     property bool ajout: false                      // la petite carte « + Ajouter » est ouverte
@@ -71,11 +73,12 @@ PanelWindow {
     function touches(r) { return String(r.valeur || "").split(/\s*\+\s*/).filter(t => t !== "") }
     function norm(t) { return String(t).replace(/\s+/g, "").toLowerCase() }
 
-    // ── Disposition : la taille des autres menus (Gabarit.qml), bornée à l'écran ; deux colonnes de même largeur, les
-    // sections réparties pour que les deux finissent à peu près à la même hauteur ; la liste défile ──
-    readonly property real largeurCarte: Math.min(Gabarit.largeur, largeurEcran - 2 * Gabarit.bordEcran)
-    readonly property real hauteurCarte: Math.min(Gabarit.hauteur, hauteurEcran - 2 * Gabarit.bordEcran)
-    readonly property real largeurColonne: Math.floor((largeurCarte - 2 * Gabarit.marge - 24) / 2)
+    // ── Disposition : le cadre du carrousel (Gabarit.qml) ; trois ou quatre colonnes de même largeur selon la place,
+    // les sections réparties pour que toutes finissent à peu près à la même hauteur ; la liste défile seulement si elle
+    // ne tient pas (petit écran) ──
+    readonly property rect cadre: Gabarit.cadre(largeurEcran, hauteurEcran, hautReserve)
+    readonly property int nbColonnes: Math.max(2, Math.min(4, Math.floor((cadre.width - 2 * Gabarit.marge + 24) / (340 + 24))))
+    readonly property real largeurColonne: Math.floor((cadre.width - 2 * Gabarit.marge - 24 * (nbColonnes - 1)) / nbColonnes)
     readonly property var ordreSections: ["Applis et barre", "Fenêtres", "Bureaux", "Système", "IA", "Souris", "Mes raccourcis"]
     function largeurTouches(r) {
         var l = 0
@@ -90,31 +93,29 @@ PanelWindow {
         return h + (edition && n === "Mes raccourcis" ? 34 : 0)
     }
     readonly property var colonnes: {
-        var c = [[], []], h = [0, 0]
+        var c = [], h = []
+        for (var k = 0; k < nbColonnes; k++) { c.push([]); h.push(0) }
         ordreSections.forEach(n => {
             var hs = hauteurSection(n)
             if (!hs) return
-            var i = h[0] <= h[1] ? 0 : 1
+            var i = h.indexOf(Math.min(...h))       // la colonne la plus courte
             c[i].push(n); h[i] += hs
         })
-        if (c[1].indexOf("Mes raccourcis") < 0 && c[0].indexOf("Mes raccourcis") < 0 && edition) c[1].push("Mes raccourcis")
         return c
     }
 
     // ── Fermer, quitter l'édition ; une capture interrompue rend TOUJOURS ses raccourcis à Hyprland ──
     function quitter() {
         if (Raccourcis.capture) Raccourcis.finCapture("")
-        if (Reglages.sobre || sortie) { fiche.fermer(); return }
-        sortie = true                               // le mouvement d'entrée à l'envers, puis fermer
-        finSortie.start()
+        fiche.fermer()                              // Hyprland fait le fondu de sortie (flou et carte ensemble)
     }
-    Timer { id: finSortie; interval: Gabarit.sortie; onTriggered: fiche.fermer() }
     Component.onDestruction: if (Raccourcis.capture) Raccourcis.finCapture("")
     onVisibleChanged: if (!visible && Raccourcis.capture) Raccourcis.finCapture("")
 
     MouseArea { anchors.fill: parent; onClicked: fiche.quitter() }          // un clic à côté ferme
-    // Montrée seulement quand ses raccourcis sont là (jamais une carte vide qui clignote), cachée pendant la sortie
-    readonly property bool montree: lignes.length > 0 && !sortie
+    // Montrée seulement quand ses raccourcis sont là (jamais une carte vide qui clignote)
+    readonly property bool montree: lignes.length > 0
+    property bool entree: false
 
     FocusScope {
         id: zoneClavier
@@ -145,16 +146,12 @@ PanelWindow {
     // ── La carte de verre ──
     Item {
         id: carte
-        anchors.centerIn: parent
-        width: fiche.largeurCarte; height: fiche.hauteurCarte
-        // Entrée : fondu et zoom de 0,96 à 1 (200 ms) ; sortie : à l'envers, plus vite (120 ms) ; directe en sobre
-        visible: opacity > 0
-        opacity: fiche.montree ? 1 : 0
-        scale: fiche.montree ? 1 : 0.96
-        Behavior on opacity { enabled: !Reglages.sobre
-            NumberAnimation { duration: fiche.sortie ? Gabarit.sortie : Gabarit.entree; easing.type: fiche.sortie ? Easing.InCubic : Easing.OutCubic } }
-        Behavior on scale { enabled: !Reglages.sobre
-            NumberAnimation { duration: fiche.sortie ? Gabarit.sortie : Gabarit.entree; easing.type: fiche.sortie ? Easing.InCubic : Easing.OutCubic } }
+        x: fiche.cadre.x; y: fiche.cadre.y
+        width: fiche.cadre.width; height: fiche.cadre.height
+        // Entrée : zoom de 0,96 à 1 (200 ms, ralenti à la fin) pendant le fondu de Hyprland ; direct en sobre
+        visible: fiche.montree
+        scale: fiche.entree ? 1 : 0.96
+        Behavior on scale { enabled: !Reglages.sobre; NumberAnimation { duration: Gabarit.entree; easing.type: Easing.OutCubic } }
         // Contour aux couleurs de l'île (ILE_CONTOUR : dégradé de l'accent, discret, aucun)
         Rectangle {
             anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
@@ -311,7 +308,8 @@ PanelWindow {
         readonly property bool longues: fiche.largeurTouches(r) > kw
         readonly property real placeTexte: largeur - kw - 14 - (fiche.edition ? 30 : 0)
         width: largeur
-        height: longues || r.nom.length * 7.3 > placeTexte ? 48 : 30
+        // Deux lignes seulement si la description en prend vraiment deux (taille réelle du texte, pas une estimation)
+        height: longues ? 48 : Math.max(30, description.implicitHeight + 12)
         opacity: r.desactive ? 0.45 : 1
         transformOrigin: Item.Center
         // En édition, la ligne survolée frétille une fois, comme sur l'iPhone (deux allers-retours, 300 ms) ; à refaire en
@@ -375,11 +373,11 @@ PanelWindow {
         }
         // Description : texte, ou le nom de l'un des tiens à renommer en édition
         Texte {
+            id: description
             visible: !(fiche.edition && ligne.mien)
             x: ligne.longues ? (fiche.edition ? 30 : 0) : blocTouches.x + ligne.kw + 14
-            y: ligne.longues ? 28 : 0
             width: ligne.longues ? ligne.largeur - x - 30 : ligne.placeTexte
-            height: ligne.longues ? 18 : ligne.height
+            y: ligne.longues ? 28 : (ligne.height - implicitHeight) / 2
             text: ligne.r.nom; secondaire: true; wrapMode: Text.Wrap; maximumLineCount: 2
         }
         Rectangle {

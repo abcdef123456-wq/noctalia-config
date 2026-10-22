@@ -87,11 +87,15 @@ ShellRoot {
     // Super + / ouvre la fiche de Noctalia
     property bool ficheOuverte: false
     Component.onCompleted: Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
+    // Créée seulement une fois ses raccourcis connus : jamais une carte vide
     LazyLoader {
         id: chargeurFiche
-        active: racine.ficheOuverte
+        active: racine.ficheOuverte && Raccourcis.lignes.length > 0
         Fiche {
             screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            // Place réservée en haut par la barre (hyprctl monitors : reserved = gauche, haut, droite, bas)
+            hautReserve: { var m = Hyprland.focusedMonitor, r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
+                           return r && r.length > 1 ? r[1] : Gabarit.barre }
             onFermer: racine.ficheOuverte = false
         }
     }
@@ -115,8 +119,8 @@ ShellRoot {
         function fermer(): void { Etat.fermer(); Etat.projection = false }
         function fiche(): void {                                                            // Super + /
             Etat.fermer()
-            if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // en douceur, comme Échap
-            else racine.ficheOuverte = !racine.ficheOuverte
+            if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // comme Échap
+            else { Hyprland.refreshMonitors(); Raccourcis.relire(); racine.ficheOuverte = !racine.ficheOuverte }
         }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }

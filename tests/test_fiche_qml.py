@@ -1,6 +1,6 @@
 """Fiche des raccourcis éditable (Fiche.qml, Super + /) hors écran, avec un faux nc-reglages : rien de montré avant
-les raccourcis, la taille des autres menus (Gabarit.qml) en deux colonnes équilibrées, le frétillement seulement au
-survol, chaque action d'édition envoie le bon JSON (Raccourcis.qml), une capture interrompue rend
+les raccourcis, le cadre du carrousel (Gabarit.qml : 8, 50, 1584 x 942, rayon 10 sous une barre de 42) en quatre
+colonnes équilibrées, le frétillement seulement au survol, chaque action d'édition envoie le bon JSON (Raccourcis.qml), une capture interrompue rend
 toujours ses raccourcis à Hyprland, « Remplacer » quand les touches sont prises ; et les contrastes du verre."""
 import json
 import os
@@ -101,10 +101,12 @@ ShellRoot {
         r, appels = self.executer('''
   if (etape === 1) { verifier(fiche.montree, "montrée une fois les raccourcis lus")
                      var carte = trouver(fiche.contentItem, "nc-fiche-liste").parent
-                     verifier(carte.width === 1040 && carte.height === 740, "taille des autres menus : " + carte.width + " x " + carte.height)
-                     verifier(fiche.colonnes.length === 2 && fiche.colonnes[0].length && fiche.colonnes[1].length, "deux colonnes : " + JSON.stringify(fiche.colonnes))
+                     verifier(carte.x === 8 && carte.y === 50 && carte.width === 1584 && carte.height === 942,
+                              "cadre du carrousel : " + carte.x + ", " + carte.y + ", " + carte.width + " x " + carte.height)
+                     verifier(Gabarit.rayon === 10, "rayon du carrousel")
+                     verifier(fiche.colonnes.length === 4 && fiche.colonnes.every(c => c.length > 0), "quatre colonnes : " + JSON.stringify(fiche.colonnes))
                      var h = fiche.colonnes.map(c => c.reduce((t, n) => t + fiche.hauteurSection(n), 0))
-                     verifier(Math.abs(h[0] - h[1]) < 400, "colonnes équilibrées : " + h)
+                     verifier(Math.max(...h) - Math.min(...h) < 400, "colonnes équilibrées : " + h)
                      verifier(!trouver(fiche.contentItem, "nc-fiche-moins-raccourci:64:q").visible, "hors édition : pas de −")
                      var l = trouver(fiche.contentItem, "nc-fiche-ligne-raccourci:64:q")
                      l.survoler(); verifier(!l.fretille, "hors édition : pas de frétillement")
@@ -117,8 +119,8 @@ ShellRoot {
   if (etape === 4) { var n = trouver(fiche.contentItem, "nc-fiche-nom-raccourci:64:b"); n.text = "Jeux vidéo"; n.accepted(); etape++; return }
   if (etape === 5) { cliquer("nc-fiche-touches-raccourci:64:t"); verifier(Raccourcis.capture !== null, "capture lancée"); etape++; return }
   if (etape === 6) { verifier(!trouver(fiche.contentItem, "nc-fiche-ligne-raccourci:64:q").fretille, "un seul frétillement")
-                     fiche.quitter(); verifier(Raccourcis.capture === null, "capture rendue à la fermeture"); etape++; return }
-  if (etape === 7) { verifier(racine.fermee, "fermée après le mouvement de sortie"); Qt.quit() }''')
+                     fiche.quitter(); verifier(Raccourcis.capture === null, "capture rendue à la fermeture")
+                     verifier(racine.fermee, "fermée tout de suite (le fondu est celui de Hyprland)"); Qt.quit() }''')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         actions = [json.loads(a[1]) for a in appels if a[0] == "raccourci"]
         self.assertEqual([(a["action"], a["ids"]) for a in actions[:2]], [("desactiver", ["64:q"]), ("origine", ["64:t"])])
