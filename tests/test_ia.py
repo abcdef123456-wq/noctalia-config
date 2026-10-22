@@ -581,6 +581,34 @@ class IA(unittest.TestCase):
         self.lancer("organiser")
         self.assertFalse(Faux.requetes, "IA coupée : rien ne part")
 
+    def test_ranger_ce_bureau_en_zones_libres(self):
+        """Super + Ctrl + O : la meilleure disposition, sans suivre les tuiles de Hyprland : chaque fenêtre dans sa zone
+        (pourcentages de la place sous la barre, marges de Hyprland déduites), devenue libre."""
+        clients = [{"address": "0xa1", "class": "code", "title": "projet", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [12, 54], "size": [780, 934]},
+                   {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [800, 54], "size": [780, 934]}]
+        ecran = [{"id": 0, "x": 0, "y": 0, "width": 2560, "height": 1600, "scale": 1.6, "transform": 0, "reserved": [0, 42, 0, 0], "focused": True}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'monitors) echo \'' + json.dumps(ecran) + '\';; getoption) case "$2" in *gaps_out) echo \'{"css": "10 10 10 10"}\';; '
+                                  '*) echo \'{"css": "4 4 4 4"}\';; esac;; workspaces) echo \'[{"id": 2, "name": "2", "windows": 2}]\';; '
+                                  'activeworkspace) echo \'{"id": 2}\';; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [
+            {"outil": "fenetre_zone", "args": {"adresse": "0xa1", "x": 0, "y": 0, "largeur": 60, "hauteur": 100}},
+            {"outil": "fenetre_zone", "args": {"adresse": "0xb2", "x": 60, "y": 0, "largeur": 40, "hauteur": 100}},
+            {"outil": "fenetre_zone", "args": {"adresse": "0xb2", "x": 70, "y": 0, "largeur": 40, "hauteur": 100}}]})
+        r = self.lancer("organiser", "--bureau")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.appels()
+        self.assertIn("1600 x 1000 points", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False), "l'IA connaît l'écran")
+        self.assertIn("fenetre_zone", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+        # Place utile : x 10 → 1590, y 52 (barre 42 + marge 10) → 990 ; 8 points entre deux fenêtres
+        self.assertIn("hl.dsp.window.float({ action = 'set', window = 'address:0xa1' })", a)
+        self.assertIn("hl.dsp.window.resize({ x = 944, y = 938, window = 'address:0xa1' })", a)
+        self.assertIn("hl.dsp.window.move({ x = 10, y = 52, window = 'address:0xa1' })", a)
+        self.assertIn("hl.dsp.window.resize({ x = 628, y = 938, window = 'address:0xb2' })", a)
+        self.assertIn("hl.dsp.window.move({ x = 962, y = 52, window = 'address:0xb2' })", a)
+        self.assertEqual(a.count("window.move({ x ="), 2, "une zone qui sort de l'écran est refusée")
+
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()
         self.reglages("IA_ACTIONS=confirmer\nIA_GERER_RESEAU=non\n")

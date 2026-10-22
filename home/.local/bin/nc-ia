@@ -1414,6 +1414,11 @@ OUTILS = {
     "fenetre_echanger": dict(domaine="fenetres", args=("adresse", "autre"), fr="Échanger {nom_fenetre} et {nom_autre}", en="Swap {nom_fenetre} and {nom_autre}"),
     "fenetre_libre": dict(domaine="fenetres", args=("adresse", "etat"), fr="{nom_fenetre} libre : {etat}", en="{nom_fenetre} floating: {etat}"),
     "fenetre_plein_ecran": dict(domaine="fenetres", args=("adresse", "etat"), fr="{nom_fenetre} plein écran : {etat}", en="{nom_fenetre} fullscreen: {etat}"),
+    # Une zone de l'écran en pourcentages de la place utile (sous la barre, marges comprises) : la fenêtre devient libre
+    # et y est posée, quelle que soit la disposition automatique en tuiles
+    "fenetre_zone": dict(domaine="fenetres", args=("adresse", "x", "y", "largeur", "hauteur"),
+                         fr="{nom_fenetre} : {largeur} × {hauteur} % de l'écran, à {x} % / {y} %",
+                         en="{nom_fenetre}: {largeur} × {hauteur} % of the screen, at {x} % / {y} %"),
     "bureau_nommer": dict(domaine="fenetres", args=("bureau", "nom"), fr="Bureau {bureau} nommé « {nom} »", en="Desktop {bureau} named “{nom}”"),
     "maj_verifier": dict(domaine="maj", args=(), fr="Chercher les mises à jour", en="Check for updates"),
     "maj_installer": dict(domaine="maj", args=(), danger=True, fr="Installer les mises à jour (terminal, mot de passe)",
@@ -1489,7 +1494,14 @@ def etat_fenetres(bureau=None):
         bureaux, actif = [], {}
     if bureau is not None:                       # portée limitée : l'IA ne voit que ce bureau
         bureaux = [b for b in bureaux if b.get("id") == bureau]
-    l = [T("Bureau affiché : ", "Shown desktop: ") + str(actif.get("id", "?")) +
+    try:
+        m = next(e for e in json.loads(subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True,
+                                                     timeout=5).stdout or "[]") if e.get("focused"))
+        k = float(m.get("scale") or 1)
+        ecran = T(f"Écran : {round(m['width'] / k)} x {round(m['height'] / k)} points", f"Screen: {round(m['width'] / k)} x {round(m['height'] / k)} points")
+    except (OSError, ValueError, StopIteration, KeyError, subprocess.TimeoutExpired):
+        ecran = ""
+    l = ([ecran] if ecran else []) + [T("Bureau affiché : ", "Shown desktop: ") + str(actif.get("id", "?")) +
          (T(f" (seulement lui : les fenêtres restent sur le bureau {bureau})", f" (only this one: windows stay on desktop {bureau})")
           if bureau is not None else ""),
          T("Bureaux : ", "Desktops: ") + ", ".join(f"{b['id']} « {b.get('name')} » ({b.get('windows', 0)} fenêtre(s), écran {b.get('monitor')})"
@@ -1540,7 +1552,10 @@ def consigne_agent(domaines):
         "actions vide et explique-le. Pour comprendre un service en échec, demande d'abord service_journal."
         + (" Pour organiser les fenêtres : regroupe-les par activité (code, navigateur, discussion, musique, documents…) "
            "sur des bureaux numérotés de 1 à 10 et nomme ces bureaux ; sur un bureau, l'appli principale à gauche, les "
-           "outils à droite ; adresse = l'adresse 0x… d'une fenêtre listée ; ne déplace que ce qui y gagne."
+           "outils à droite ; adresse = l'adresse 0x… d'une fenêtre listée ; ne déplace que ce qui y gagne. Pour la "
+           "meilleure disposition d'un bureau, tu peux poser chaque fenêtre dans une zone avec fenetre_zone (x, y, "
+           "largeur, hauteur en pourcentages entiers de l'écran utile), sans suivre la disposition automatique en tuiles : "
+           "les zones d'un même bureau couvrent l'écran sans se chevaucher, la plus grande pour l'activité principale."
            if "fenetres" in domaines else ""),
         "You control the user's Linux desktop, only with these tools:\n" + "\n".join(outils) +
         "\nValues: etat = on or off; profil = performance, balanced or power-saver; pourcent = an integer; nom = a service "
@@ -1550,7 +1565,10 @@ def consigne_agent(domaines):
         "so. To understand a failed service, first ask for service_journal."
         + (" To organize windows: group them by activity (code, browser, chat, music, documents…) on desktops numbered 1 "
            "to 10 and name those desktops; on a desktop, the main app on the left, tools on the right; adresse = the 0x… "
-           "address of a listed window; only move what benefits from it." if "fenetres" in domaines else ""))
+           "address of a listed window; only move what benefits from it. For the best layout of a desktop, you can put "
+           "each window in a zone with fenetre_zone (x, y, largeur = width, hauteur = height as integer percentages of the "
+           "usable screen), regardless of the automatic tiling layout: the zones of one desktop cover the screen without "
+           "overlapping, the biggest for the main activity." if "fenetres" in domaines else ""))
 
 
 def lire_json(texte):
@@ -1625,7 +1643,16 @@ def valider_action(a, domaines, services=None, fenetres=None, bureau=None):
         elif k == "valeur":
             if not re.fullmatch(r"[^\n\x00]{0,200}", v):
                 raise ErreurIA(T("valeur invalide", "invalid value"))
+        elif k in ("x", "y", "largeur", "hauteur"):
+            try:
+                v = str(max(0, min(100, int(round(float(v.rstrip("%")))))))
+            except ValueError:
+                raise ErreurIA(T("zone : pourcentages entiers attendus", "zone: integer percentages expected")) from None
         args[k] = v
+    if nom_o == "fenetre_zone":
+        x, y, l_, h_ = (int(args[k]) for k in ("x", "y", "largeur", "hauteur"))
+        if l_ < 10 or h_ < 10 or x + l_ > 100 or y + h_ > 100:
+            raise ErreurIA(T("zone hors de l'écran ou trop petite (10 % au moins)", "zone off screen or too small (10 % at least)"))
     if "adresse" in args or "autre" in args:
         fenetres = fenetres if fenetres is not None else fenetres_bureau()
         court = lambda ad: (fenetres.get(ad, {}).get("class") or ad)
@@ -1689,6 +1716,53 @@ def apercu_action(v, fenetres):
     return v
 
 
+def placer_zone(g):
+    """Pose la fenêtre dans sa zone : la place utile de son écran (sous la barre et ses réservations, marges de Hyprland
+    déduites), découpée en pourcentages, avec l'écart entre fenêtres de Hyprland ; la fenêtre devient libre."""
+    def lire(cmd):
+        try:
+            return json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or "null")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return None
+
+    def ecart(option, defaut):                   # « 10 10 10 10 » (css) ou un entier selon la version de Hyprland
+        v = lire(["hyprctl", "getoption", option, "-j"])
+        v = v if isinstance(v, dict) else {}
+        m = re.match(r"\s*(\d+)", str(v.get("css", v.get("int", ""))))
+        return int(m[1]) if m else defaut
+    adr = g["adresse"]
+    fenetre = next((c for c in (lire(["hyprctl", "clients", "-j"]) or []) if c.get("address") == adr), None)
+    ecran = next((m for m in (lire(["hyprctl", "monitors", "-j"]) or []) if fenetre and m.get("id") == fenetre.get("monitor")), None)
+    if not fenetre or not ecran:
+        return False, T("fenêtre ou écran introuvable", "window or screen not found")
+    k = float(ecran.get("scale") or 1)
+    lw, lh = ecran["width"] / k, ecran["height"] / k
+    if int(ecran.get("transform") or 0) % 2:
+        lw, lh = lh, lw
+    gauche, haut, droite, bas = (list(ecran.get("reserved") or []) + [0, 0, 0, 0])[:4]
+    dehors, dedans = ecart("general:gaps_out", 10), ecart("general:gaps_in", 4) * 2
+    ax, ay = ecran.get("x", 0) + gauche + dehors, ecran.get("y", 0) + haut + dehors
+    aw, ah = lw - gauche - droite - 2 * dehors, lh - haut - bas - 2 * dehors
+    x, y, l_, h_ = (int(g[c]) for c in ("x", "y", "largeur", "hauteur"))
+    px_ = ax + aw * x / 100 + (dedans / 2 if x > 0 else 0)
+    py_ = ay + ah * y / 100 + (dedans / 2 if y > 0 else 0)
+    pw = aw * l_ / 100 - (dedans / 2 if x > 0 else 0) - (dedans / 2 if x + l_ < 100 else 0)
+    ph = ah * h_ / 100 - (dedans / 2 if y > 0 else 0) - (dedans / 2 if y + h_ < 100 else 0)
+    sel = f"address:{adr}"
+    lua = []
+    if fenetre.get("fullscreen"):
+        lua.append(f"hl.dsp.window.fullscreen({{ action = 'unset', window = '{sel}' }})")
+    if not fenetre.get("floating"):
+        lua.append(f"hl.dsp.window.float({{ action = 'set', window = '{sel}' }})")
+    lua += [f"hl.dsp.window.resize({{ x = {round(pw)}, y = {round(ph)}, window = '{sel}' }})",
+            f"hl.dsp.window.move({{ x = {round(px_)}, y = {round(py_)}, window = '{sel}' }})"]
+    for l in lua:
+        code, t = sortie_cmd(["hyprctl", "dispatch", l])
+        if code != 0 or "error" in t.lower():
+            return False, t
+    return True, ""
+
+
 def executer_action(a):
     """(réussi, message) ; a est une action déjà validée."""
     o, g = a["outil"], a["args"]
@@ -1725,6 +1799,8 @@ def executer_action(a):
     if o == "reglage":
         code, t = sortie_cmd([nb + "nc-reglages", "set", g["cle"], g["valeur"]], 60)
         return code == 0, t
+    if o == "fenetre_zone":
+        return placer_zone(g)
     if o.startswith("fenetre_") or o == "bureau_nommer":
         sel = f"address:{g.get('adresse', '')}"
         lua = {"fenetre_bureau": f"hl.dsp.window.move({{ workspace = {g.get('bureau')}, follow = false, window = '{sel}' }})",
@@ -1915,8 +1991,12 @@ def ranger(bureau_seul):
         dire(titre, T("Aucune fenêtre à ranger.", "No window to tidy."))
         return 0
     dire(titre, T("L'IA range tes fenêtres…", "The AI is tidying your windows…"))
-    demande = T("Organise les fenêtres du bureau affiché : une meilleure disposition, sans les changer de bureau.",
-                "Organize the windows of the shown desktop: a better layout, without changing their desktop.") if bureau_seul else \
+    demande = T("Range les fenêtres du bureau affiché de la façon la plus utile, sans les changer de bureau : pose "
+                "chacune dans sa zone (fenetre_zone), toutes ensemble couvrant l'écran sans se chevaucher, sans suivre "
+                "la disposition automatique ; la plus grande zone pour l'appli principale.",
+                "Tidy the windows of the shown desktop in the most useful way, without changing their desktop: put each "
+                "one in its zone (fenetre_zone), all together covering the screen without overlapping, regardless of the "
+                "automatic layout; the biggest zone for the main app.") if bureau_seul else \
         T("Organise toutes mes fenêtres : regroupe-les par activité sur des bureaux, nomme les bureaux, puis dispose-les "
           "bien sur chacun.", "Organize all my windows: group them by activity on desktops, name the desktops, then lay "
           "them out well on each one.")

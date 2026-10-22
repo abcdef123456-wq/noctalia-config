@@ -119,7 +119,9 @@ Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit do
 
 - **fenêtres et bureaux** : **Super + Maj + O** range toutes les fenêtres (regroupées par activité sur des
   bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché (l'IA ne voit alors que lui, et rien
-  ne peut en sortir). Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
+  ne peut en sortir) : là, l'IA cherche la disposition la plus utile sans suivre les tuiles automatiques de Hyprland —
+  chaque fenêtre posée dans sa zone de l'écran (par exemple l'éditeur sur 60 % à gauche, le navigateur sur 40 % à
+  droite), sous la barre et avec les marges de Hyprland. Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
   si « L'IA peut agir » est coupé — seulement des fenêtres et des bureaux, chaque action revérifiée — puis une
   notification de l'île dit ce qui a bougé, avec **Annuler** (bureau, état libre ou plein écran, place et nom des
   bureaux remis comme avant). Réglage « Ranger les fenêtres » : tout de suite (défaut), me montrer le plan d'abord,
