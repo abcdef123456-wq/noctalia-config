@@ -3,10 +3,11 @@
 // bureau. Créée seulement une fois ses raccourcis connus (gardés par Raccourcis.qml : jamais une carte vide). Le fondu
 // d'entrée et de sortie est celui de Hyprland (animations des couches), qui fond le flou et la carte ensemble ; la carte
 // y ajoute un léger zoom à l'entrée. « Modifier » passe en mode édition, comme le
-// Centre de contrôle de l'iPhone : − désactive un raccourci de la config (ou retire l'un des tiens), un toucher sur
-// les touches attend la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config,
-// « + Ajouter » crée un raccourci (une appli, « bureau N », « ile PAGE » ou une commande). Toute l'édition passe par
-// Raccourcis.qml, comme la page « Raccourcis » des réglages.
+// Centre de contrôle de l'iPhone : l'interrupteur éteint ou rallume un raccourci de la config (éteint, il reste dans la
+// fiche, grisé), − supprime l'un des tiens (ceux de la config ne se suppriment pas), un toucher sur les touches attend
+// la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config, « + Ajouter » crée un
+// raccourci (une appli, « bureau N », « ile PAGE » ou une commande). Toute l'édition passe par Raccourcis.qml, comme la
+// page « Raccourcis » des réglages.
 // Verre : flou de Hyprland derrière (règle de calque nc-fiche, regles.lua), fond de la palette à 80 % (le texte reste lisible même sur un fond d'écran
 // blanc) ; sans flou (Économie, flou coupé) : 92 %. Clavier : Échap annule la capture, quitte l'édition, ferme.
 import QtQuick
@@ -46,6 +47,8 @@ PanelWindow {
     }
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
     readonly property real opaciteFond: verre ? 0.8 : 0.92
+    // Interrupteur éteint : le verre voilé du texte, pour se détacher de la carte (3:1, même sur le pire fond derrière)
+    readonly property real voilePiste: 0.6
     readonly property real largeurEcran: fiche.screen ? fiche.screen.width : 1600
     readonly property real hauteurEcran: fiche.screen ? fiche.screen.height : 1000
 
@@ -61,17 +64,20 @@ PanelWindow {
     function section(r) { return r.mien !== "" ? "Mes raccourcis" : (r.aide || "Système") }
     readonly property var parSection: {
         var s = {}
-        lignes.forEach(r => {
-            if (r.desactive && !edition) return     // hors édition : seulement ceux qui marchent
-            var n = section(r); (s[n] = s[n] || []).push(r)
-        })
+        lignes.forEach(r => { var n = section(r); (s[n] = s[n] || []).push(r) })   // les désactivés aussi, grisés
         if (edition && !s["Mes raccourcis"]) s["Mes raccourcis"] = []
         return s
     }
     readonly property var titres: ({ "Applis et barre": "Apps & Bar", "Fenêtres": "Windows", "Bureaux": "Desktops",
                                      "Souris": "Mouse", "Système": "System", "IA": "AI", "Mes raccourcis": "My Shortcuts" })
-    function touches(r) { return String(r.valeur || "").split(/\s*\+\s*/).filter(t => t !== "") }
-    function norm(t) { return String(t).replace(/\s+/g, "").toLowerCase() }
+    // Les touches d'un raccourci, en groupes : « Super + Ctrl + molette / Super + = » -> [["Super", "Ctrl", "molette"],
+    // ["Super", "="]] ; « / » sépare deux combinaisons, « + » deux touches, toujours entre espaces (la touche « + » ou
+    // « - » n'est pas un séparateur)
+    function groupes(r) {
+        return String(r.valeur || "").split(/\s+\/\s+/).map(g => g.trim().split(/\s+\+\s+/).filter(t => t !== "")).filter(g => g.length)
+    }
+    // Une combinaison comparable : « Super + Q », « Super+Q » ou ["Super", "Q"] -> « super+q »
+    function norm(t) { return (Array.isArray(t) ? t.join("+") : String(t)).replace(/\s+/g, "").toLowerCase() }
 
     // ── Disposition : le cadre du carrousel (Gabarit.qml) ; trois ou quatre colonnes de même largeur selon la place,
     // les sections réparties pour que toutes finissent à peu près à la même hauteur ; la liste défile seulement si elle
@@ -80,16 +86,27 @@ PanelWindow {
     readonly property int nbColonnes: Math.max(2, Math.min(4, Math.floor((cadre.width - 2 * Gabarit.marge + 24) / (340 + 24))))
     readonly property real largeurColonne: Math.floor((cadre.width - 2 * Gabarit.marge - 24 * (nbColonnes - 1)) / nbColonnes)
     readonly property var ordreSections: ["Applis et barre", "Fenêtres", "Bureaux", "Système", "IA", "Souris", "Mes raccourcis"]
+    // Largeur estimée des pastilles d'un raccourci (7,4 points par caractère) : la colonne des touches de chaque section,
+    // et l'équilibrage des colonnes ; une ligne décide de passer ses touches au-dessus d'après leur largeur réelle
     function largeurTouches(r) {
         var l = 0
-        touches(r).forEach((k, i) => { l += (i > 0 ? 17 : 0) + k.length * 7.4 + 16 })
+        groupes(r).forEach((g, j) => {
+            if (j > 0) l += 24                      // « ou »
+            g.forEach((k, i) => { l += (i > 0 ? 17 : 0) + k.length * 7.4 + 16 })
+        })
         return l
     }
+    // Hauteur estimée d'une section (comme Ligne : rangées de pastilles, description sur 3 lignes au plus)
     function hauteurSection(n) {
         var rs = parSection[n] || []
         if (!rs.length && !(edition && n === "Mes raccourcis")) return 0
-        var kw = Math.min(190, Math.max(60, ...rs.map(largeurTouches))), h = 56
-        rs.forEach(r => { h += largeurTouches(r) > kw || r.nom.length * 7.3 > largeurColonne - kw - 14 - (edition ? 30 : 0) ? 48 : 30 })
+        var kw = Math.min(190, Math.max(60, ...rs.map(largeurTouches))), h = 56, place = largeurColonne - (edition ? 44 : 0)
+        var lignesTexte = (r, l) => Math.min(3, Math.max(1, Math.ceil(r.nom.length * 7.3 / Math.max(1, l))))
+        rs.forEach(r => {
+            var t = largeurTouches(r)
+            if (t > kw) h += 3 + Math.ceil(t / place) * 29 - 5 + 4 + 17 * lignesTexte(r, place) + 6
+            else h += Math.max(30, 12 + 17 * lignesTexte(r, place - kw - 14))
+        })
         return h + (edition && n === "Mes raccourcis" ? 34 : 0)
     }
     readonly property var colonnes: {
@@ -226,6 +243,7 @@ PanelWindow {
                         required property var modelData
                         width: fiche.largeurColonne
                         spacing: 0
+                        clip: true                      // rien ne déborde dans la colonne voisine
                         Repeater {
                             model: colonne.modelData
                             Column {
@@ -238,7 +256,7 @@ PanelWindow {
                                 width: colonne.width
                                 Item { width: 1; height: bloc.index > 0 ? 22 : 0 }
                                 Texte {
-                                    height: 34; color: Couleurs.accent; font.pixelSize: 14; font.weight: Font.Bold
+                                    width: colonne.width; height: 34; color: Couleurs.accent; font.pixelSize: 14; font.weight: Font.Bold
                                     text: Reglages.en ? (fiche.titres[bloc.modelData] || bloc.modelData) : bloc.modelData
                                 }
                                 Repeater {
@@ -290,14 +308,15 @@ PanelWindow {
         var c = conflit
         conflit = null
         if (!c) return
-        var autre = lignes.find(x => !x.desactive && norm(x.valeur) === norm(c.touches) && x !== c.r && x.cle !== (c.r && c.r.cle))
+        var autre = lignes.find(x => !x.desactive && groupes(x).some(g => norm(g) === norm(c.touches)) && x !== c.r && x.cle !== (c.r && c.r.cle))
         if (autre) Raccourcis.supprimer(autre)
         tentative = c
         if (c.r && c.r.ajout) Raccourcis.ajouter(c.touches, c.r.ajout.cible, c.r.ajout.nom)
         else Raccourcis.raccourci(c.r, "changer", c.touches)
     }
 
-    // ── Une ligne : touches, puis description ; en édition : −, touches à changer, nom à renommer, ↺ ──
+    // ── Une ligne : touches, puis description ; en édition : − (les tiens), touches à changer, nom à renommer, ↺,
+    // interrupteur (ceux de la config) ──
     component Ligne: Item {
         id: ligne
         objectName: "nc-fiche-ligne-" + r.cle
@@ -305,12 +324,22 @@ PanelWindow {
         property real kw: 220
         property real largeur: 490
         readonly property bool mien: r.mien !== ""
-        readonly property bool longues: fiche.largeurTouches(r) > kw
-        readonly property real placeTexte: largeur - kw - 14 - (fiche.edition ? 30 : 0)
+        // Éteint : touches et description grisées, pas l'interrupteur (à pleine opacité, pour le rallumer)
+        readonly property real attenue: r.desactive ? 0.45 : 1
+        readonly property bool origine: fiche.edition && r.modifie && !mien && !r.desactive          // ↺ montré
+        // En édition : − à gauche pour les tiens ; à droite, l'interrupteur (34) et le ↺ pour ceux de la config
+        readonly property real gauche: fiche.edition && mien ? 30 : 0
+        readonly property real droite: !fiche.edition || mien ? 0 : 44 + (origine ? 26 : 0)
+        // Touches au-dessus de la description quand elles ne tiennent pas dans la colonne des touches (largeur réelle,
+        // mesurée hors écran, pas l'estimation)
+        readonly property bool longues: mesure.implicitWidth > kw
+        readonly property real placeTexte: largeur - gauche - kw - 14 - droite
+        readonly property real hauteurTexte: fiche.edition && mien ? 24 : description.implicitHeight
         width: largeur
-        // Deux lignes seulement si la description en prend vraiment deux (taille réelle du texte, pas une estimation)
-        height: longues ? 48 : Math.max(30, description.implicitHeight + 12)
-        opacity: r.desactive ? 0.45 : 1
+        // La hauteur suit le vrai texte (3 lignes au plus) et les rangées de pastilles ; jamais d'après leur y, qui dépend
+        // de la hauteur hors mode longues (boucle de liaison au changement de mode)
+        readonly property real basTouches: 3 + blocTouches.height
+        height: longues ? basTouches + 4 + hauteurTexte + 6 : Math.max(30, hauteurTexte + 12)
         transformOrigin: Item.Center
         // En édition, la ligne survolée frétille une fois, comme sur l'iPhone (deux allers-retours, 300 ms) ; à refaire en
         // ressortant puis en revenant. Rien sans survol, rien en sobre (Économie, sans effets)
@@ -326,42 +355,47 @@ PanelWindow {
             RotationAnimator { target: ligne; from: 0.6; to: -0.6; duration: 75 }
             RotationAnimator { target: ligne; from: -0.6; to: 0; duration: 37 }
         }
-        // − (ou ↺ pour un désactivé)
+        // − : supprimer l'un des tiens. En verre, comme l'interrupteur ; rouge seulement au survol
         Rectangle {
             id: moins
-            visible: fiche.edition
+            visible: fiche.edition && ligne.mien
             anchors.verticalCenter: parent.verticalCenter
             width: 22; height: 22; radius: 11
-            color: ligne.r.desactive ? Couleurs.vert : Couleurs.rouge
-            Texte { anchors.centerIn: parent; text: ligne.r.desactive ? "+" : "−"; font.pixelSize: 16; font.weight: Font.Bold; color: "#ffffff" }
+            color: zMoins.containsMouse ? Qt.alpha(Couleurs.carteSurvol, 0.75) : Qt.alpha(Couleurs.carte, 0.55)
+            border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.28)
+            Reflet {}
+            Texte { anchors.centerIn: parent; text: "−"; font.pixelSize: 16; font.weight: Font.Bold
+                    color: zMoins.containsMouse ? Couleurs.rouge : Couleurs.texte }
             MouseArea {
+                id: zMoins
                 objectName: "nc-fiche-moins-" + ligne.r.cle
-                anchors.fill: parent; anchors.margins: -4
-                onClicked: { if (ligne.r.desactive) Raccourcis.raccourci(ligne.r, "reactiver"); else Raccourcis.supprimer(ligne.r) }
+                anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                onClicked: if (ligne.mien) Raccourcis.supprimer(ligne.r)          // un des tiens : retirer
             }
         }
+        // Les pastilles, groupe par groupe (« ou » entre deux combinaisons) ; un groupe ne se coupe pas
         Flow {
             id: blocTouches
-            x: fiche.edition ? 30 : 0
-            width: ligne.longues ? ligne.largeur - x : ligne.kw
-            anchors.verticalCenter: ligne.longues ? undefined : parent.verticalCenter
-            y: ligne.longues ? 2 : 0
+            objectName: "nc-fiche-pastilles-" + ligne.r.cle
+            x: ligne.gauche
+            width: ligne.longues ? ligne.largeur - x - ligne.droite : ligne.kw
+            y: ligne.longues ? 3 : (ligne.height - height) / 2
             spacing: 5
+            opacity: ligne.attenue
             Repeater {
-                model: fiche.touches(ligne.r)
-                Row {
-                    required property string modelData
-                    required property int index
-                    spacing: 5
-                    Texte { visible: index > 0; text: "+"; secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-                    Rectangle {
-                        height: 24; width: libTouche.implicitWidth + 16; radius: 7
-                        color: Qt.alpha(Couleurs.carte, 0.6)
-                        border.width: fiche.edition && ligne.r.modifiable ? 1.5 : 1
-                        border.color: fiche.edition && ligne.r.modifiable ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
-                        Texte { id: libTouche; anchors.centerIn: parent; text: modelData; font.pixelSize: 12; font.weight: Font.DemiBold }
-                    }
-                }
+                model: fiche.groupes(ligne.r)
+                Groupe { required property var modelData; required property int index; touches: modelData; premier: index === 0
+                         edite: fiche.edition && ligne.r.modifiable }
+            }
+        }
+        // Les mêmes pastilles sur une seule rangée, invisibles : leur vraie largeur (hors du Flow, qui en dépend)
+        Row {
+            id: mesure
+            opacity: 0; enabled: false
+            spacing: blocTouches.spacing
+            Repeater {
+                model: fiche.groupes(ligne.r)
+                Groupe { required property var modelData; required property int index; touches: modelData; premier: index === 0 }
             }
         }
         // Hors du Flow (dedans, sa taille dépendrait du Flow lui-même : boucle de mise en page)
@@ -371,19 +405,23 @@ PanelWindow {
             enabled: fiche.edition && ligne.r.modifiable
             onClicked: { if (Raccourcis.capturer(ligne.r)) { capture.aide = ""; zoneClavier.forceActiveFocus() } }
         }
-        // Description : texte, ou le nom de l'un des tiens à renommer en édition
+        // Description : le texte entier (3 lignes au plus, sans « … »), dans sa place ; ou le nom de l'un des tiens à
+        // renommer en édition
         Texte {
             id: description
+            objectName: "nc-fiche-description-" + ligne.r.cle
             visible: !(fiche.edition && ligne.mien)
-            x: ligne.longues ? (fiche.edition ? 30 : 0) : blocTouches.x + ligne.kw + 14
-            width: ligne.longues ? ligne.largeur - x - 30 : ligne.placeTexte
-            y: ligne.longues ? 28 : (ligne.height - implicitHeight) / 2
-            text: ligne.r.nom; secondaire: true; wrapMode: Text.Wrap; maximumLineCount: 2
+            x: ligne.longues ? ligne.gauche : ligne.gauche + ligne.kw + 14
+            width: ligne.longues ? ligne.largeur - x - ligne.droite : ligne.placeTexte
+            y: ligne.longues ? ligne.basTouches + 4 : (ligne.height - implicitHeight) / 2
+            opacity: ligne.attenue
+            text: ligne.r.nom; secondaire: true
+            wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideNone    // entre les mots, au milieu d'un mot trop long
         }
         Rectangle {
             visible: fiche.edition && ligne.mien
-            x: blocTouches.x + (ligne.longues ? 0 : ligne.kw + 14); y: ligne.longues ? 26 : (ligne.height - 24) / 2
-            width: (ligne.longues ? ligne.largeur - x : ligne.placeTexte) - 30; height: 24; radius: 7
+            x: description.x; y: ligne.longues ? description.y : (ligne.height - 24) / 2
+            width: description.width; height: 24; radius: 7
             color: Qt.alpha(Couleurs.carte, 0.6); border.width: 1; border.color: champNom.activeFocus ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
             TextInput {
                 id: champNom
@@ -396,13 +434,81 @@ PanelWindow {
                 Keys.onEscapePressed: { text = ligne.r.nom; zoneClavier.forceActiveFocus() }
             }
         }
-        // ↺ : comme dans la config
+        // ↺ : comme dans la config, juste avant l'interrupteur
         Texte {
-            visible: fiche.edition && ligne.r.modifie && !ligne.mien && !ligne.r.desactive
-            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            visible: ligne.origine
+            anchors.right: interrupteur.left; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+            width: 16; horizontalAlignment: Text.AlignHCenter
             text: "↺"; color: Couleurs.accent; font.pixelSize: 16
             MouseArea { objectName: "nc-fiche-origine-" + ligne.r.cle; anchors.fill: parent; anchors.margins: -6
                         onClicked: Raccourcis.raccourci(ligne.r, "origine") }
+        }
+        // Interrupteur façon iPhone, en verre : allumé (l'accent) ou éteint ; la pastille glisse avec le ressort de l'île
+        Item {
+            id: interrupteur
+            visible: fiche.edition && !ligne.mien
+            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            width: 34; height: 20
+            property bool allume: !ligne.r.desactive     // tout de suite au clic ; la ligne relue confirme
+            Rectangle {
+                anchors.fill: parent; radius: height / 2
+                color: Qt.alpha(Couleurs.carte, 0.55)
+                Rectangle {
+                    anchors.fill: parent; radius: parent.radius
+                    color: interrupteur.allume ? Couleurs.accent : Qt.alpha(Couleurs.texte, fiche.voilePiste)
+                    Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 160 } }
+                }
+                Reflet {}
+            }
+            Rectangle {
+                width: 16; height: 16; radius: 8; y: 2
+                x: interrupteur.allume ? interrupteur.width - width - 2 : 2
+                color: "#ffffff"                         // blanche, comme sur l'iPhone
+                Behavior on x { enabled: !Reglages.sobre; SpringAnimation { spring: 3.4; damping: 0.36 } }
+            }
+            MouseArea {
+                objectName: "nc-fiche-interrupteur-" + ligne.r.cle
+                anchors.fill: parent; anchors.margins: -4
+                onClicked: {
+                    if (ligne.mien) return
+                    Raccourcis.raccourci(ligne.r, interrupteur.allume ? "desactiver" : "reactiver")
+                    interrupteur.allume = !interrupteur.allume
+                }
+            }
+        }
+    }
+    // Un groupe de touches : « Super + Ctrl + molette », précédé de « ou » s'il n'est pas le premier
+    component Groupe: Row {
+        id: groupe
+        property var touches: []
+        property bool premier: true
+        property bool edite: false                      // les touches se changent d'un toucher : bord de l'accent
+        spacing: 5
+        Texte { visible: !groupe.premier; text: Reglages.t("ou", "or"); secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+        Repeater {
+            model: groupe.touches
+            Row {
+                id: touche
+                required property string modelData
+                required property int index
+                spacing: 5
+                Texte { visible: touche.index > 0; text: "+"; secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                Rectangle {
+                    height: 24; width: libTouche.implicitWidth + 16; radius: 7
+                    color: Qt.alpha(Couleurs.carte, 0.6)
+                    border.width: groupe.edite ? 1.5 : 1
+                    border.color: groupe.edite ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
+                    Texte { id: libTouche; anchors.centerIn: parent; text: touche.modelData; font.pixelSize: 12; font.weight: Font.DemiBold }
+                }
+            }
+        }
+    }
+    // Reflet du verre d'un bouton rond : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
+    component Reflet: Rectangle {
+        anchors.fill: parent; anchors.margins: 1; radius: height / 2
+        gradient: Gradient {
+            GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
+            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
         }
     }
 
