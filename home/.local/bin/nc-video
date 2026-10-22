@@ -6,6 +6,7 @@
 #   nc-video arreter    arrête l'enregistrement en cours
 # Fichier : ~/Vidéos/Enregistrements (dossier « Vidéos » de ta langue), « Enregistrement du 2026-10-16 à 19.20.05.mp4 ».
 # Son : nc-reglages → Captures → « Son des vidéos » (VIDEO_SON : non, systeme, micro).
+# Encodage : nc-reglages → Captures → « Encodage des vidéos » (VIDEO_ENCODEUR : auto, carte, processeur).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 etat="${XDG_RUNTIME_DIR:-/tmp}/nc-video"
@@ -54,9 +55,83 @@ case "$(reglage VIDEO_SON)" in
   systeme) s="$(pactl get-default-sink 2>/dev/null)"; [ -n "$s" ] && son=(--audio="$s.monitor") ;;
   micro) son=(--audio) ;;
 esac
-setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" -c libx264 -p preset=veryfast -p crf=23 >/dev/null 2>"$etat.log" < /dev/null &
-pid=$!
-sleep 0.5
+
+# ── Encodeur : la carte graphique plutôt que le processeur (bien moins d'énergie, le PC reste frais) ──
+# Dans l'ordre :
+#   1. NVENC, si la NVIDIA est la carte des applis (profil Performance, $XDG_RUNTIME_DIR/nc-gpu-default) et que
+#      ffmpeg connaît h264_nvenc ;
+#   2. VAAPI sur la carte qui affiche la session (1re de AQ_DRM_DEVICES, sinon celle qui porte un écran branché),
+#      si vainfo y voit un encodeur H.264 ;
+#   3. le processeur (libx264), toujours là.
+# Le matériel est détecté, jamais supposé : Fedora n'a le H.264 matériel qu'avec mesa-va-drivers-freeworld (RPM
+# Fusion), un ffmpeg peut être sans NVENC. Et si l'enregistrement ne démarre pas avec la carte, il repart sur le
+# processeur. VIDEO_ENCODEUR : auto (ce qui précède), carte (VAAPI essayé même sans vainfo pour le vérifier),
+# processeur (toujours libx264).
+SYSFS="${NC_SYSFS:-/sys}"
+PROCESSEUR=(-c libx264 -p preset=veryfast -p crf=23)
+
+# cardN de la carte qui affiche la session
+carte_session() {
+  local premier n c
+  premier="${AQ_DRM_DEVICES:-}"; premier="${premier%%:*}"
+  if [ -n "$premier" ]; then
+    # /dev/dri/card1, ou un lien vers lui (/dev/dri/amd-igpu, créé par une règle udev : les liens by-path ont des
+    # « : », le séparateur de la liste, et n'y vont pas)
+    n="$(readlink -f -- "$premier" 2>/dev/null)" || n="$premier"
+    n="${n##*/}"
+    case "$n" in card[0-9]*) echo "$n"; return 0 ;; esac
+    return 1
+  fi
+  for c in "$SYSFS"/class/drm/card*-*/status; do
+    [ "$(cat "$c" 2>/dev/null)" = connected ] || continue
+    c="${c%/status}"; c="${c##*/}"; echo "${c%%-*}"; return 0
+  done
+  return 1
+}
+
+# /dev/dri/renderDN de la carte $1
+rendu_de() {
+  local r
+  for r in "$SYSFS/class/drm/$1/device/drm"/renderD*; do
+    [ -e "$r" ] && { echo "/dev/dri/${r##*/}"; return 0; }
+  done
+  return 1
+}
+
+choisir_encodeur() {
+  local mode encodeurs="" carte rendu profils
+  mode="$(reglage VIDEO_ENCODEUR)"
+  enc=("${PROCESSEUR[@]}")
+  [ "$mode" = processeur ] && return 0
+  command -v ffmpeg >/dev/null && encodeurs="$(timeout 5 ffmpeg -hide_banner -encoders 2>/dev/null)"
+  if [ "$(cat "${XDG_RUNTIME_DIR:-/tmp}/nc-gpu-default" 2>/dev/null)" = nvidia ] && grep -qw h264_nvenc <<<"$encodeurs"; then
+    enc=(-c h264_nvenc -p preset=p4 -p cq=23); return 0
+  fi
+  # ffmpeg présent mais sans VAAPI : wf-recorder (même bibliothèque) ne l'aura pas non plus
+  [ -n "$encodeurs" ] && ! grep -qw h264_vaapi <<<"$encodeurs" && return 0
+  carte="$(carte_session)" && rendu="$(rendu_de "$carte")" || return 0
+  if command -v vainfo >/dev/null; then
+    # Sortie gardée avant grep -q : avec pipefail, vainfo coupé par grep ferait croire à un échec
+    profils="$(timeout 5 vainfo --display drm --device "$rendu" 2>/dev/null)" || return 0
+    grep -qE 'VAProfileH264[^:]*:[[:space:]]*VAEntrypointEncSlice' <<<"$profils" || return 0
+  elif [ "$mode" != carte ]; then
+    return 0   # rien pour vérifier : le processeur
+  fi
+  enc=(-c h264_vaapi -d "$rendu")
+}
+
+lancer() {
+  setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" "$@" >/dev/null 2>"$etat.log" < /dev/null &
+  pid=$!
+  sleep 0.5
+  kill -0 "$pid" 2>/dev/null
+}
+
+choisir_encodeur
+if ! lancer "${enc[@]}" && [ "${enc[1]}" != libx264 ]; then
+  rm -f "$fichier"   # sinon wf-recorder demanderait s'il faut l'écraser
+  lancer "${PROCESSEUR[@]}"
+fi
 if ! kill -0 "$pid" 2>/dev/null; then
   dire "$(t "L'enregistrement n'a pas démarré" "Recording didn't start")" "$(tail -1 "$etat.log" 2>/dev/null)"
   exit 1

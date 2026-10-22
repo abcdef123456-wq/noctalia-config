@@ -223,6 +223,14 @@ pname() {
     enregistreur:debian) echo pipewire-bin ;;
     enregistreur:suse) echo pipewire-tools ;;
     enregistreur:*) ;;
+    # Vidéos de l'écran (nc-video) encodées par la carte graphique (VAAPI) : pilotes VA de Mesa et vainfo, qui vérifie
+    # que la carte sait encoder en H.264. Seulement depuis les dépôts de base : sur Fedora (le H.264 matériel n'est
+    # que dans mesa-va-drivers-freeworld, RPM Fusion) et openSUSE, ou sans pilote, le processeur encode, comme avant.
+    pilotes-va:arch) echo libva-mesa-driver ;;   # fourni par mesa depuis 2025 (alors rien à installer)
+    pilotes-va:debian) echo mesa-va-drivers ;;
+    pilotes-va:*) ;;
+    vainfo:debian) echo vainfo ;;
+    vainfo:*) echo libva-utils ;;
     *) echo "$1" ;;
   esac
 }
@@ -611,7 +619,7 @@ if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)
 fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard wtype brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng checkupdates
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
          enregistreur)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
@@ -621,6 +629,8 @@ if [ "$MODE" != files ]; then
     if [ -z "$p" ]; then manual+=("$g"); continue; fi
     pkg_installed "$p" && continue
     [ "$g" = enregistreur ] && { have pw-record || have parec || have arecord; } && continue
+    # Arch : libva-mesa-driver n'est plus un paquet à part (dans mesa) ; ne pas le croire « introuvable »
+    [ "$g" = pilotes-va ] && [ "$FAMILY" = arch ] && ! pacman -Si "$p" >/dev/null 2>&1 && continue
     [ "$g" = nerdfont ] && [ -n "$(fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font")" ] && continue
     missing+=("$p")
   done
