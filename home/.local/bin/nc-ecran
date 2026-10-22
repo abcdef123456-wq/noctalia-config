@@ -1,0 +1,54 @@
+#!/bin/sh
+# nc-ecran : allume ou éteint les écrans (DPMS de Hyprland), par un seul chemin pour tout le dépôt.
+#   nc-ecran on    allume
+#   nc-ecran off   éteint
+# Appelé par hypridle (écran éteint à l'inactivité, au retour, au réveil), le couvercle (nc-couvercle) et le coin de
+# l'île. Au retour d'inactivité, hypridle lance tous ses « on-resume » dans la même milliseconde : deux allumages DPMS
+# simultanés ont déjà planté un PC (amdgpu, micrologiciel d'affichage fragile). Ici, un verrou (flock) fait passer les
+# appels l'un après l'autre, et une action n'est jamais refaite :
+#   - même action faite il y a moins de 5 s (état dans $XDG_RUNTIME_DIR/nc-ecran.etat) : rien ;
+#   - écrans déjà dans cet état d'après Hyprland (dpmsStatus de « hyprctl monitors ») : rien (une touche ou la souris
+#     ont déjà rallumé l'écran, par exemple).
+# Hors Hyprland, ou sans hyprctl : ne fait rien, sans erreur.
+case "${1:-}" in
+  on|off) action=$1 ;;
+  *) sed -n '2,4p' "$0"; exit 1 ;;
+esac
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+command -v hyprctl >/dev/null 2>&1 || exit 0
+# Session Hyprland : la variable de la session, sinon la seule instance ouverte (service lancé sans elle)
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  for s in "$RUN"/hypr/*/.socket.sock; do
+    [ -S "$s" ] || continue
+    s=${s%/.socket.sock}; HYPRLAND_INSTANCE_SIGNATURE=${s##*/}
+  done
+  [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || exit 0
+  export HYPRLAND_INSTANCE_SIGNATURE
+fi
+ETAT="$RUN/nc-ecran.etat"
+# Délai de garde : un hyprctl bloqué ne retient pas le verrou indéfiniment
+h() { if command -v timeout >/dev/null 2>&1; then timeout 5 hyprctl "$@"; else hyprctl "$@"; fi; }
+
+# Verrou : les appels simultanés passent l'un après l'autre ; s'il n'est pas libre au bout de 10 s, rien n'est fait
+# (un autre appel est en cours, mieux vaut ne pas en ajouter un)
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$RUN/nc-ecran.verrou" || exit 0
+  flock -w 10 9 || exit 0
+fi
+
+maintenant=$(date +%s)
+fait=""; quand=0
+[ -f "$ETAT" ] && read -r fait quand < "$ETAT"
+case "$quand" in ''|*[!0-9]*) quand=0 ;; esac
+# Déjà fait à l'instant (ou en cours juste avant nous, derrière le verrou)
+[ "$fait" = "$action" ] && [ $((maintenant - quand)) -lt 5 ] && exit 0
+
+# Déjà dans cet état d'après Hyprland : rien à faire (l'heure notée ne change pas : seul un vrai appel ouvre les 5 s
+# de garde). Sans réponse (aucun écran listé) : on agit.
+voulu=true; [ "$action" = off ] && voulu=false
+etats=$(h monitors -j 2>/dev/null | tr -d ' \t\n' | grep -o '"dpmsStatus":[a-z]*' | sed 's/.*://')
+[ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ] && exit 0
+
+h dispatch "hl.dsp.dpms({ action = \"$action\" })" >/dev/null 2>&1
+printf '%s %s\n' "$action" "$(date +%s)" > "$ETAT"
+exit 0

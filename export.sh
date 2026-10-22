@@ -122,6 +122,7 @@ HOME_FILES=(
   .local/bin/nc-maj
   .local/bin/nc-profile-sync
   .local/bin/nc-pouls
+  .local/bin/nc-ecran
   .local/bin/nc-ecran-externe
   .local/bin/nc-ecrans
   .local/bin/nc-couvercle

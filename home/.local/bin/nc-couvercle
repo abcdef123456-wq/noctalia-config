@@ -52,14 +52,14 @@ case "$action" in
     echo $! > "$PID"
     sleep 1                                   # le verrouillage s'affiche avant que l'écran s'éteigne
     couvercle_ferme || { arreter; exit 0; }   # rouvert entre-temps
-    hyprctl dispatch 'hl.dsp.dpms({ action = "off" })' >/dev/null ;;
+    "$HOME/.local/bin/nc-ecran" off ;;        # par nc-ecran : jamais en même temps qu'un autre allumage
   ouvre)
     arreter
     # Écran du portable retiré (écran externe) : la config des écrans (nc/ecrans.lua) le remet ; sinon il est rallumé
     if hyprctl monitors all -j 2>/dev/null | jq -e '.[] | select((.name | test("^(eDP|LVDS|DSI)")) and .disabled)' >/dev/null 2>&1; then
       hyprctl reload >/dev/null
     else
-      hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
+      "$HOME/.local/bin/nc-ecran" on
     fi ;;
   *)
     if [ "${NC_LANGUE:-fr}" = en ]; then

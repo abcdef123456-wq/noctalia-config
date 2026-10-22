@@ -70,22 +70,22 @@ class TexteVeille(unittest.TestCase):
         # Sans aucun réglage, hypridle lit ce fichier tel quel : les deux listeners y sont, à 60 s
         l = listeners(SRC)
         self.assertEqual([x["timeout"] for x in batterie(l, "nc-brightness dim")], [60])
-        self.assertEqual([x["timeout"] for x in batterie(l, "dpms")], [60])
+        self.assertEqual([x["timeout"] for x in batterie(l, "nc-ecran off")], [60])
         self.assertIn("on_lock_cmd", SRC)
         self.assertIn("on_unlock_cmd", SRC)
 
     def test_par_defaut(self):
         l = listeners(self.texte(VEILLE_VERROU=5))
         self.assertEqual([x["timeout"] for x in l], [150, 60, 300, 330, 60, 900])
-        dim, ecran = batterie(l, "nc-brightness dim")[0], batterie(l, "dpms")[0]
+        dim, ecran = batterie(l, "nc-brightness dim")[0], batterie(l, "nc-ecran off")[0]
         self.assertIn("restore", dim["on-resume"])
-        self.assertIn("[[on]]", ecran["on-resume"])
+        self.assertIn("nc-ecran on", ecran["on-resume"])
         self.assertIn("nc-verrouille", ecran["on-timeout"])
 
     def test_reglages_choisis(self):
         l = listeners(self.texte(VEILLE_BAISSE_BATTERIE=90, VEILLE_ECRAN_BATTERIE=20))
         self.assertEqual(batterie(l, "nc-brightness dim")[0]["timeout"], 90)
-        self.assertEqual(batterie(l, "dpms")[0]["timeout"], 20)
+        self.assertEqual(batterie(l, "nc-ecran off")[0]["timeout"], 20)
         # Sur secteur : rien ne bouge
         self.assertEqual([x["timeout"] for x in l if "power_supply" not in x["on-timeout"]], [150, 300, 330])
 
@@ -93,7 +93,7 @@ class TexteVeille(unittest.TestCase):
         t = self.texte(VEILLE_BAISSE_BATTERIE=0, VEILLE_ECRAN_BATTERIE=0)
         l = listeners(t)
         self.assertEqual(batterie(l, "nc-brightness dim"), [])
-        self.assertEqual(batterie(l, "dpms"), [])
+        self.assertEqual(batterie(l, "nc-ecran off"), [])
         self.assertEqual([x["timeout"] for x in l], [150, 300, 330, 900])
         self.assertIn("comme sur secteur", t.splitlines()[0])
 
@@ -104,10 +104,10 @@ class TexteVeille(unittest.TestCase):
         # Jamais de verrouillage : pas d'assombrissement du tout, mais l'écran verrouillé à la main s'éteint quand même
         l = listeners(self.texte(VEILLE_VERROU=0))
         self.assertEqual([x for x in l if "nc-brightness dim" in x["on-timeout"]], [])
-        self.assertEqual(batterie(l, "dpms")[0]["timeout"], 60)
+        self.assertEqual(batterie(l, "nc-ecran off")[0]["timeout"], 60)
         # Écran éteint déjà après 1 min sans activité : le listener de la batterie est retiré
         l = listeners(self.texte(VEILLE_ECRAN=1))
-        self.assertEqual(batterie(l, "dpms"), [])
+        self.assertEqual(batterie(l, "nc-ecran off"), [])
 
     def test_veille_sur_secteur_garde_son_listener(self):
         l = listeners(self.texte(VEILLE_SECTEUR=30))
@@ -128,7 +128,7 @@ class AppliquerVeille(unittest.TestCase):
                 run.return_value = subprocess.CompletedProcess([], 0, "", "")
                 nc.appliquer_veille({"VEILLE_ECRAN_BATTERIE": "0"})
                 sortie = Path(nc.VEILLE_OUT).read_text(encoding="utf-8")
-                self.assertEqual(batterie(listeners(sortie), "dpms"), [])
+                self.assertEqual(batterie(listeners(sortie), "nc-ecran off"), [])
                 self.assertEqual(len(batterie(listeners(sortie), "nc-brightness dim")), 1)
                 self.assertTrue(Path(nc.VEILLE_UNITE).exists())
                 # hypridle relancé : la marque « écran verrouillé » ne peut pas rester
@@ -155,9 +155,13 @@ class CommandesListeners(unittest.TestCase):
         faux = self.r / "faux"
         faux.mkdir()
         for nom, dossier in (("nc-brightness", bin_), ("hyprctl", faux)):
-            (dossier / nom).write_text(f'#!/bin/sh\nprintf "%s\\n" "{nom} $*" >> "$HOME/appels"\n')
+            # hyprctl monitors (lu par nc-ecran) : aucun écran listé, rien de noté
+            (dossier / nom).write_text(f'#!/bin/sh\n[ "$1" = monitors ] && exit 0\nprintf "%s\\n" "{nom} $*" >> "$HOME/appels"\n')
             (dossier / nom).chmod(0o755)
-        self.env = dict(os.environ, HOME=str(self.r), XDG_RUNTIME_DIR=str(self.run), PATH=f"{faux}:/usr/bin:/bin")
+        # Le vrai nc-ecran (les listeners l'appellent par ~/.local/bin), devant un faux hyprctl
+        shutil.copy2(REPO / "home/.local/bin/nc-ecran", bin_ / "nc-ecran")
+        self.env = dict(os.environ, HOME=str(self.r), XDG_RUNTIME_DIR=str(self.run), PATH=f"{faux}:/usr/bin:/bin",
+                        HYPRLAND_INSTANCE_SIGNATURE="test")
         self.l = listeners(SRC)
 
     def tearDown(self):
@@ -206,9 +210,9 @@ class CommandesListeners(unittest.TestCase):
         general = re.search(r"(?ms)^general\s*\{.*?^\}", SRC).group(0)
         verrou = re.search(r"on_lock_cmd\s*=\s*(.*)", general).group(1)
         deverrou = re.search(r"on_unlock_cmd\s*=\s*(.*)", general).group(1)
-        ecran = batterie(self.l, "dpms")[0]
-        eteint = ['hyprctl dispatch hl.dsp.dpms({ action = [[off]] })']
-        allume = ['hyprctl dispatch hl.dsp.dpms({ action = [[on]] })']
+        ecran = batterie(self.l, "nc-ecran off")[0]
+        eteint = ['hyprctl dispatch hl.dsp.dpms({ action = "off" })']
+        allume = ['hyprctl dispatch hl.dsp.dpms({ action = "on" })']
         # Batterie, pas verrouillé : rien
         self.materiel(secteur=False)
         self.assertEqual(self.jouer(ecran["on-timeout"]), [])

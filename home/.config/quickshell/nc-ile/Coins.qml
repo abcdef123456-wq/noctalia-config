@@ -25,7 +25,7 @@ Scope {
         else if (a === "notifications") { Etat.basculer(ecran, true); Etat.aller("notifications") }
         else if (a === "lanceur") Quickshell.execDetached(["noctalia", "msg", "panel-toggle", "launcher"])
         else if (a === "verrouiller") Quickshell.execDetached(["noctalia", "msg", "lock"])
-        else if (a === "ecran") Quickshell.execDetached(["sh", "-c", "sleep 0.5; hyprctl dispatch 'hl.dsp.dpms({ action = \"off\" })'"])
+        else if (a === "ecran") Quickshell.execDetached(["sh", "-c", "sleep 0.5; exec \"$HOME/.local/bin/nc-ecran\" off"])
     }
     readonly property bool coupe: Etat.jeu || (Hyprland.activeToplevel && Hyprland.activeToplevel.lastIpcObject
                                               && (Hyprland.activeToplevel.lastIpcObject.fullscreen || 0) > 0)

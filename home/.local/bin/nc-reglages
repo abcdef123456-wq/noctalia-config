@@ -1593,15 +1593,17 @@ def texte_veille(vals, src):
 
     def bloc(m):
         b = m.group(0)
+        # Écran éteint : « nc-ecran off » (ou un ancien hypridle.conf, à dpms direct)
+        eteint = "nc-ecran off" in b or "dpms" in b
         if "power_supply" in b and "nc-brightness dim" in b:
             # Sur batterie : assombrir plus tôt ; inutile sans assombrissement normal ou s'il vient avant
             t = baisse_bat if baisse_bat and t_baisse and baisse_bat < t_baisse else 0
-        elif "power_supply" in b and "dpms" in b:
+        elif "power_supply" in b and eteint:
             # Sur batterie, écran verrouillé : éteint après ce délai ; inutile si l'écran s'éteint déjà avant
             t = ecran_bat if ecran_bat and not (t_ecran and t_ecran <= ecran_bat) else 0
         elif "nc-brightness dim" in b:
             t = t_baisse
-        elif "dpms" in b:
+        elif eteint:
             t = t_ecran
         elif "lock-session" in b:
             t = verrou * 60
