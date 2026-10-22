@@ -126,6 +126,12 @@ class GpuMode(unittest.TestCase):
         self.assertEqual(self.notifs(), [])
         self.assertNotIn("systemctl", self.appels())
 
+    def test_dediee_meme_si_la_carte_integree_a_disparu(self):
+        # En mode Dédiée, certains BIOS retirent la carte intégrée du bus : seule la NVIDIA reste, avec l'écran interne
+        self.machine()
+        self.carte(0, NVIDIA, "connected")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "dediee")
+
     def test_sans_argument_vers_l_autre_mode(self):
         self.legion()
         self.lancer("basculer")

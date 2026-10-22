@@ -749,6 +749,13 @@ REGLAGES = [
         "Noms des programmes, séparés par des espaces.",
         "They don't benefit from it and would keep it awake (about 5 W): terminals, file managers… "
         "Program names, separated by spaces."), groupe="energie"),
+    # Lu par nc-profile-sync (portable à MUX, nc-gpu-mode) ; caché sans mode graphique à choisir
+    R("GPU_MUX_PROPOSER", "Énergie", L("Proposer le mode Dédiée en branchant", "Offer Discrete mode when plugging in"),
+      "ouinon", "oui",
+      L("En mode Hybride, quand tu branches le chargeur : une notification propose le mode Dédiée (bureau plus fluide), "
+        "une fois par jour au plus. Après trois « Non » de suite, elle ne revient plus.",
+        "In Hybrid mode, when you plug in the charger: a notification offers Discrete mode (smoother desktop), at most "
+        "once a day. After three \"No\" in a row, it stops."), groupe="energie"),
     # Son et luminosité
     R("VOLUME_PAS", "Son et luminosité", L("Pas du volume", "Volume step"), "entier", "5",
       L("Touches de volume (et F2, F3).", "Volume keys (and F2, F3)."), mini=1, maxi=20, unite="%", groupe="hypr"),
@@ -1189,6 +1196,7 @@ MATERIEL = {
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
+    "GPU_MUX_PROPOSER": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
@@ -1224,6 +1232,9 @@ def materiel():
             "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
             "clavier-batterie": existe("/sys/class/leds/*kbd_backlight*") and existe("/sys/class/power_supply/BAT*"),
             "hybride": cartes == {True, False},
+            # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
+            # cacher la carte intégrée), sans lancer nc-gpu-mode
+            "mux": True in cartes and existe("/sys/class/drm/card*-eDP-*"),
             "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak")),
             "btrfs": sortie(["findmnt", "-no", "FSTYPE", "/"]).strip() == "btrfs"}
 

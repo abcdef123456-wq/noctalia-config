@@ -286,6 +286,19 @@ class Alertes(Base):
         self.veille("alerter", NC_TEST_PERSIST="active", NC_TEST_PROFIL="balanced")
         self.assertEqual(self.notifications(), [])
 
+    def test_rien_en_mode_dediee(self):
+        # Mode Dédiée (écran interne sur la NVIDIA) : elle porte l'écran, rester allumée est normal. Même en Économie
+        # sur batterie, avec nvidia-persistenced et une appli dessus : aucune alerte, rien de noté
+        (self.sys / "class/drm/card1-eDP-1/status").write_text("disconnected\n")
+        self.ecrire(self.sys / "class/drm/card0-eDP-1/status", "connected")
+        self.etat_carte("active")
+        self.processus(4242, "firefox", [str(self.dev / "nvidia0")])
+        r = self.veille("alerter", NC_TEST_PERSIST="active")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertEqual(self.notifications(), [])
+        self.assertFalse((self.run_dir / "nc-rtx-alertes").exists())
+
 
 class Relance(Base):
     def vrai_sleep(self):
@@ -437,6 +450,19 @@ class ProfileSync(Base):
         self.etat_carte("active")
         self.lancer(NC_TEST_PERSIST="active", AQ_DRM_DEVICES="")
         self.assertEqual(self.notifications(), [])
+
+    def test_mode_dediee_aucun_guet(self):
+        # En Dédiée, même si la session a été ouverte avec AQ_DRM_DEVICES : ni guet, ni carte des applis, ni alerte
+        (self.sys / "class/drm/card1-eDP-1/status").write_text("disconnected\n")
+        self.ecrire(self.sys / "class/drm/card0-eDP-1/status", "connected")
+        self.etat_carte("active")
+        r = self.lancer(NC_TEST_PERSIST="active", AQ_DRM_DEVICES="/dev/dri/card0")
+        self.assertEqual(self.notifications(), [])
+        self.assertEqual(self.appels("systemctl"), [], "nc-rtx-veille n'est même pas lancé")
+        self.assertNotIn("hl.env", self.journal.read_text(), "la carte des applis ne change pas")
+        self.assertFalse((self.run_dir / "nc-gpu-default").exists())
+        self.assertNotIn("en_dediee", r.stderr)
+        self.assertNotIn("nc-gpu-mode", r.stderr)
 
     def test_guet_en_fond(self):
         # Le minuteur ne bloque pas le service : avec 30 s d'attente, le passage finit tout de suite

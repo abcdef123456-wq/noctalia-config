@@ -56,6 +56,9 @@ carte_ecran_interne() {
 
 actuel() {
   local carte
+  # Écran interne sur la NVIDIA : mode Dédiée, même si le BIOS a fait disparaître la carte intégrée du bus
+  carte="$(carte_ecran_interne)"
+  if [ -n "$carte" ] && [ "$(lire "$SYS/class/drm/$carte/device/vendor")" = "$NVIDIA" ]; then echo dediee; return; fi
   [ "$(nb_cartes)" -ge 2 ] || { echo sans-objet; return; }
   ls -d "$SYS"/class/drm/card*-eDP-* >/dev/null 2>&1 || { echo sans-objet; return; }   # pas d'écran interne
   carte="$(carte_ecran_interne)"
