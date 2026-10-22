@@ -11,7 +11,7 @@ Column {
     readonly property string message: (typeof donnees.message === "string" || typeof donnees.output === "string" || typeof donnees.text === "string") ? JarvisEtat.texte(donnees) : ""
     readonly property var lignes: {
         var list=[],kind=""
-        for (var k of ["models","conversations","facts","reminders","services","history","messages"]) {
+        for (let k of ["models","conversations","facts","reminders","services","history","messages"]) {
             if (Array.isArray(contenuDonnees[k])) { list=contenuDonnees[k];kind=k;break }
         }
         var rows=list.slice(0,100).map((x,i)=>({kind:kind,item:typeof x==="string"?{id:x,name:x}:x}))

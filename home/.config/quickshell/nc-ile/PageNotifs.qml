@@ -57,7 +57,7 @@ Item {
         command: [Quickshell.env("HOME") + "/.local/bin/nc-ia", "texte", "notifications", "--stdin", "--flux"]
         onStarted: { write(p.texteNotifs()); stdinEnabled = false }
         stdout: SplitParser {
-            onRead: l => { try { var d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
+            onRead: l => { try { let d = JSON.parse(l); if (d.ia) p.resumeQui = d.ia; p.resumeIA += d.t || "" } catch (e) {} }
         }
         stderr: StdioCollector {}
     }
@@ -217,7 +217,7 @@ Item {
                     var ok = detail.date_ok !== undefined ? detail.date_ok : (detail.date || 0)
                     var quand = ok ? Reglages.t("vérifié ", "checked ") + ilYa(ok) : Reglages.t("jamais vérifié en entier", "never fully checked")
                     if (incomplet.length) {
-                        var noms = incomplet.map(x => x === "depot" ? Reglages.t("dépôts", "repositories") : x === "aur" ? "AUR" : x === "flatpak" ? "Flatpak" : x)
+                        let noms = incomplet.map(x => x === "depot" ? Reglages.t("dépôts", "repositories") : x === "aur" ? "AUR" : x === "flatpak" ? "Flatpak" : x)
                         return (total ? total + Reglages.t(" en attente (dernier état)", " pending (last state)") : Reglages.t("Vérification impossible", "Could not check"))
                                + " · " + Reglages.t("pas de réponse : ", "no answer: ") + noms.join(", ") + " · " + quand
                     }

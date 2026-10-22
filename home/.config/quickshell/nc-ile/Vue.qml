@@ -125,14 +125,14 @@ PanelWindow {
         var r = Object.assign({}, enAttente), a = adresse(t)
         if (r[a]) { annulerAttente(t); return }
         else {
-            var o = t.lastIpcObject || {}
+            let o = t.lastIpcObject || {}
             if (!o.at || !o.size || !t.workspace) return
-            var entree = { address: a, x: o.at[0], y: o.at[1], w: o.size[0], h: o.size[1],
+            let entree = { address: a, x: o.at[0], y: o.at[1], w: o.size[0], h: o.size[1],
                            ws: t.workspace.id, fl: !!o.floating, mx: zone.mx, my: zone.my, mw: zone.mw, mh: zone.mh }
             r[a] = entree
             if (source && source.hasContent) {
-                var token = a + ":" + Date.now(), e = Math.min(1, 1280 / Math.max(o.size[0], o.size[1]))
-                var taille = Qt.size(Math.max(1, Math.round(o.size[0] * e)), Math.max(1, Math.round(o.size[1] * e)))
+                let token = a + ":" + Date.now(), e = Math.min(1, 1280 / Math.max(o.size[0], o.size[1]))
+                let taille = Qt.size(Math.max(1, Math.round(o.size[0] * e)), Math.max(1, Math.round(o.size[1] * e)))
                 Etat.captureVue(token, true)
                 if (!source.grabToImage(resultat => {
                     Etat.captureVue(token, false)
@@ -158,7 +158,7 @@ PanelWindow {
         // Écarter les images des fenêtres fermées ou restaurées depuis la dernière ouverture.
         var images = Object.assign({}, Etat.vueImages)
         var cachees = Hyprland.toplevels.values.filter(t => v.masquee(t)).map(t => v.adresse(t))
-        for (var a in images) if (!Etat.vueMasquageEnCours && cachees.indexOf(a) < 0) delete images[a]
+        for (let a in images) if (!Etat.vueMasquageEnCours && cachees.indexOf(a) < 0) delete images[a]
         Etat.vueImages = images
     }
     Timer { interval: 60; running: true; onTriggered: { Hyprland.refreshToplevels() } }
@@ -186,8 +186,8 @@ PanelWindow {
     }
     readonly property var tailles: {
         var r = {}
-        for (var l of (taillesMasquees.text() || "").split("\n")) {
-            var c = l.trim().split(/\s+/)
+        for (let l of (taillesMasquees.text() || "").split("\n")) {
+            let c = l.trim().split(/\s+/)
             if (c.length >= 6) r[c[0]] = { x: +c[1], y: +c[2], w: +c[3], h: +c[4], ws: +c[5],
                                           mx: +c[7], my: +c[8], mw: +c[9], mh: +c[10] }
         }
@@ -298,12 +298,12 @@ PanelWindow {
         // Taille et place (en points, sur l'écran) : celles d'avant pour une masquée
         function taille(t) {
             var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
-            if (m) { var r = Geometrie.adapter(m, mx, my, mw, mh); return [r.w, r.h] }
+            if (m) { let r = Geometrie.adapter(m, mx, my, mw, mh); return [r.w, r.h] }
             var o = t.lastIpcObject || {}; return o.size ? o.size : [mw / 2, mh / 2]
         }
         function place(t) {
             var m = v.masquee(t) ? v.tailles[v.adresse(t)] : null
-            if (m) { var r = Geometrie.adapter(m, mx, my, mw, mh); return [r.x, r.y] }
+            if (m) { let r = Geometrie.adapter(m, mx, my, mw, mh); return [r.x, r.y] }
             var o = t.lastIpcObject || {}
             if (o.at && !v.masquee(t)) return o.at
             var tl = taille(t); return [mx + (mw - tl[0]) / 2, my + (mh - tl[1]) / 2]   // masquée sans trace : au milieu
@@ -603,7 +603,7 @@ PanelWindow {
                                         Image {
                                             width: 16; height: 16; sourceSize: Qt.size(32, 32); anchors.verticalCenter: parent.verticalCenter
                                             source: Quickshell.iconPath(String(case_.ipc.class || "").toLowerCase(), true)
-                                            visible: source != ""
+                                            visible: String(source) !== ""
                                         }
                                         Texte {
                                             anchors.verticalCenter: parent.verticalCenter
@@ -652,10 +652,10 @@ PanelWindow {
                                         if (!pressed || !(e.buttons & Qt.LeftButton)) return
                                         if (!tiree && !case_.masquee && Math.hypot(e.x - appui.x, e.y - appui.y) > 10) {
                                             tiree = true
-                                            var o = carte.mapToItem(ecran, 0, 0), f = carte.mapToItem(ecran, carte.width, carte.height)
+                                            let o = carte.mapToItem(ecran, 0, 0), f = carte.mapToItem(ecran, carte.width, carte.height)
                                             v.prendre(case_.modelData, o.x, o.y, f.x - o.x, f.y - o.y)
                                         }
-                                        if (tiree) { var q = mapToItem(ecran, e.x, e.y); v.suivre(q.x, q.y) }
+                                        if (tiree) { let q = mapToItem(ecran, e.x, e.y); v.suivre(q.x, q.y) }
                                     }
                                     onReleased: if (tiree) v.lacher()
                                     onCanceled: if (tiree) v.lacher(true)

@@ -10,7 +10,7 @@ Item {
     function defiler(dy) { return defil.defiler(dy) }
     function val(k) {
         var l = Etat.liste
-        for (var i = 0; i < l.length; i++) if (l[i].genre === k) return l[i].champs[0]
+        for (let i = 0; i < l.length; i++) if (l[i].genre === k) return l[i].champs[0]
         return ""
     }
     readonly property var ecrans: Etat.liste.filter(e => e.genre === "ecran")

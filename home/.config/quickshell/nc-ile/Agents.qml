@@ -87,8 +87,8 @@ Singleton {
     readonly property var attend: sessions.find(s => s.etat === "terminal") || null
     onSessionsChanged: {
         var n = {}
-        for (var i = 0; i < sessions.length; i++) {
-            var s = sessions[i], e = avant[s.id]
+        for (let i = 0; i < sessions.length; i++) {
+            let s = sessions[i], e = avant[s.id]
             n[s.id] = s.etat
             if (e && e !== s.etat && s.etat === "fini") { dernierFini = s.projet; dernierFiniAgent = agent(s); Etat.activite("claude-fini", 4500) }
         }

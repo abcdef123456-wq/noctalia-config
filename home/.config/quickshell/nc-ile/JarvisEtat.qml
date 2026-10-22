@@ -37,7 +37,7 @@ Singleton {
         try { r = JSON.parse(sortie) } catch (_) {}
         var ok = code === 0 && r && r.ok === true && r.data && !r.data.error
         if (ok) {
-            var copie = Object.assign({}, resultats); copie[operation] = r.data; resultats = copie
+            let copie = Object.assign({}, resultats); copie[operation] = r.data; resultats = copie
             if (operation === "overview") { etat = r.data; catalogue = r.data.catalogue || {} }
         } else {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)

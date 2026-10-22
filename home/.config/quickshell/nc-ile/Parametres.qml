@@ -67,7 +67,7 @@ FloatingWindow {
         Aide.chercher(prepAide, recherche, 10).forEach(e => {
             if (e.type === "doc") { if (docs.length < 2) docs.push(ligneDoc(e)) }
             else {
-                var r = catalogue.find(x => x.nom === e.titre && !deja[x.cle])
+                let r = catalogue.find(x => x.nom === e.titre && !deja[x.cle])
                 if (r) { deja[r.cle] = true; plus.push(r) }
             }
         })
@@ -80,7 +80,7 @@ FloatingWindow {
     function afficher(nom) { surEcran(nom); visible = true; charger(); if (!majAide.running) majAide.running = true; liste.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
-        for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
+        for (let i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
     }
     onClosed: close()
     function close() { visible = false }
@@ -132,15 +132,15 @@ FloatingWindow {
     }
     function finCapture(touches) { Raccourcis.finCapture(touches) }
     function combinaison(event) { return Raccourcis.combinaison(event) }   // Raccourcis.qml
-    function reglage(cle) { for (var i = 0; i < catalogue.length; i++) if (catalogue[i].cle === cle) return catalogue[i]; return null }
+    function reglage(cle) { for (let i = 0; i < catalogue.length; i++) if (catalogue[i].cle === cle) return catalogue[i]; return null }
     function borner(r, v) { v = Math.round(v / r.pas) * r.pas; return Math.max(r.mini, Math.min(r.maxi, v)) }
     // ← → : la valeur d'après (d = 1) ou d'avant (d = -1), selon le genre du réglage
     function changer(r, d) {
         if (!r || r.genre === "raccourci") return
         if (r.genre === "ouinon") regler(r.cle, r.valeur === "oui" ? "non" : "oui")
         else if (r.genre === "choix" || r.genre === "hz") {
-            var c = r.choix, i = 0
-            for (var k = 0; k < c.length; k++) if (c[k][0] === r.valeur) i = k
+            let c = r.choix, i = 0
+            for (let k = 0; k < c.length; k++) if (c[k][0] === r.valeur) i = k
             if (c.length) regler(r.cle, c[(i + d + c.length) % c.length][0])
         } else if (r.genre === "entier") regler(r.cle, borner(r, Number(r.valeur) + d * r.pas))
     }
@@ -177,7 +177,7 @@ FloatingWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
-                    var d = JSON.parse(text)
+                    let d = JSON.parse(text)
                     if (!Array.isArray(d)) throw new Error("catalogue")
                     fen.catalogue = d
                     if (!fen.section || fen.sections.indexOf(fen.section) < 0) fen.section = fen.sections.length ? fen.sections[0] : ""
@@ -399,7 +399,7 @@ FloatingWindow {
                         visible: (ligne.r.genre === "choix" || ligne.r.genre === "hz") && ligne.r.choix.length > 4; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                         function decaler(d) {
                             var c = ligne.r.choix, i = 0
-                            for (var k = 0; k < c.length; k++) if (c[k][0] === ligne.r.valeur) i = k
+                            for (let k = 0; k < c.length; k++) if (c[k][0] === ligne.r.valeur) i = k
                             fen.regler(ligne.r.cle, c[(i + d + c.length) % c.length][0])
                         }
                         AssistantCommande { rond: true; width: 30; height: 30; icone: "chevron_left"; onClic: parent.decaler(-1) }

@@ -53,7 +53,7 @@ Singleton {
         var textes = l.filter(e => e.genre === "texte" && !e.epingle), images = l.filter(e => e.genre === "image" && !e.epingle)
         var retirer = textes.slice(maxTextes).concat(images.slice(maxImages))
         var total = l.reduce((n, e) => n + (e.genre === "image" ? (e.octets || 0) : 0), 0)
-        for (var i = images.length - 1; i >= 0 && total > maxOctets; i--) {
+        for (let i = images.length - 1; i >= 0 && total > maxOctets; i--) {
             if (retirer.indexOf(images[i]) < 0) retirer.push(images[i])
             total -= images[i].octets || 0
         }
@@ -101,10 +101,10 @@ Singleton {
         stdout: SplitParser {
             onRead: ligne => {
                 if (ligne.indexOf("T:") === 0) {
-                    var t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
+                    let t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
                     if (t.trim() !== "") pp.ajouter({ genre: "texte", texte: t })
                 } else if (ligne.indexOf("I:") === 0) {
-                    var image = ligne.match(/^I:(\d+):([a-z0-9_-]+):(.*)$/)
+                    let image = ligne.match(/^I:(\d+):([a-z0-9_-]+):(.*)$/)
                     if (image) pp.ajouter({ genre: "image", octets: +image[1], id: image[2], chemin: image[3] })
                 }
             }

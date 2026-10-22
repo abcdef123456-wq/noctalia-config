@@ -41,7 +41,7 @@ FloatingWindow {
 
     function afficher(nom) {
         var ecrans = Quickshell.screens
-        for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; break }
+        for (let i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; break }
         resultat = null; message = ""; erreur = false; cle.text = ""
         visible = true
         lecture.running = true
@@ -69,7 +69,7 @@ FloatingWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
-                    var d = JSON.parse(text)
+                    let d = JSON.parse(text)
                     url.text = d.url || ""; ident.text = d.user_id || ""; delai.text = String(d.timeout || "180")
                     fen.cleEnregistree = !!d.cle; fen.existe = !!d.existe
                 } catch (e) {}

@@ -10,7 +10,7 @@ Singleton {
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
     readonly property string session: {
         var s = ""
-        for (var i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16)
+        for (let i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16)
         return s
     }
     property string brouillon: ""
@@ -204,10 +204,10 @@ Singleton {
         var propre = String(s || "").trim()
         if (!propre) return ""
         var out = ""
-        for (var i = 0; i < propre.length; i++) {
-            var ch = propre[i]
+        for (let i = 0; i < propre.length; i++) {
+            let ch = propre[i]
             if (ch === " ") continue
-            var m = table[ch]
+            let m = table[ch]
             if (!m) return prefixe + "(" + propre + ")"
             out += m
         }
@@ -229,7 +229,7 @@ Singleton {
         t = t.replace(/\\tilde\{([^{}]*)\}/g, "$1̃")
         t = t.replace(/\\ddot\{([^{}]*)\}/g, "$1̈")
         t = t.replace(/\\dot\{([^{}]*)\}/g, "$1̇")
-        for (var n = 0; n < 4; n++) {
+        for (let n = 0; n < 4; n++) {
             t = t.replace(/\\sqrt\[([^{}\]]+)\]\{([^{}]*)\}/g, (_, deg, rad) => a.convertirScript(a.formaterCommandesLatex(deg), a.tableExposants, "^") + "√" + a.parentheserTerme(a.formaterCommandesLatex(rad)))
             t = t.replace(/\\sqrt\{([^{}]*)\}/g, (_, rad) => "√" + a.parentheserTerme(a.formaterCommandesLatex(rad)))
             t = t.replace(/\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, num, den) => {
@@ -241,7 +241,7 @@ Singleton {
         }
         t = t.replace(/\\([a-zA-Z]+)/g, (m, cmd) => a.symbolesLatex[cmd] !== undefined ? a.symbolesLatex[cmd] : cmd)
         t = t.replace(/\\([,;:])/g, " ").replace(/\\!/g, "").replace(/\\([{}_%&#$])/g, "$1")
-        for (var k = 0; k < 3; k++) {
+        for (let k = 0; k < 3; k++) {
             t = t.replace(/\^\{([^{}]+)\}/g, (_, exp) => a.convertirScript(exp, a.tableExposants, "^"))
             t = t.replace(/_\{([^{}]+)\}/g, (_, ind) => a.convertirScript(ind, a.tableIndices, "_"))
         }
@@ -337,7 +337,7 @@ Singleton {
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
-                    var d = JSON.parse(text)
+                    let d = JSON.parse(text)
                     a.ajouter("vous", String(d.question || "").slice(0, 4000))
                     a.idEchange = a.dernierId
                     a.ajouter("assistant", String(d.reponse || "").slice(0, 16000) + "\n\n*— " + (d.ia || "IA") + "*")
@@ -352,7 +352,7 @@ Singleton {
     Process {
         id: quiChat
         command: [a.bin + "nc-ia", "quelle", "--chat", "--json"]
-        stdout: StdioCollector { onStreamFinished: { try { var d = JSON.parse(text); a.nomChat = d.nom || ""; a.agentChat = d.agent || "" } catch (e) {} } }
+        stdout: StdioCollector { onStreamFinished: { try { let d = JSON.parse(text); a.nomChat = d.nom || ""; a.agentChat = d.agent || "" } catch (e) {} } }
     }
     // Choix proposés par JARVIS (champ choices de la réponse, issue #7) : gardés avec son message ; choixFait : le libellé
     // cliqué (les pastilles de ce message ne servent plus)
@@ -427,9 +427,9 @@ Singleton {
         if (enCours) return
         messages = []; erreur = ""
         var h = Array.isArray(historique) ? historique : []
-        for (var i = 0; i < h.length; i++) {
+        for (let i = 0; i < h.length; i++) {
             if (!h[i] || typeof h[i] !== "object") continue
-            var q = String(h[i].prompt || "").slice(0, 4000), r = String(h[i].response || "").slice(0, 16000)
+            let q = String(h[i].prompt || "").slice(0, 4000), r = String(h[i].response || "").slice(0, 16000)
             if (q) ajouter("vous", q)
             if (r) ajouter("assistant", r)
         }
@@ -466,8 +466,8 @@ Singleton {
             // L'historique sert quand une autre IA que JARVIS répond (pas connecté, ou choisie à la main) : borné
             // pour tenir dans la ligne lue par nc-assistant
             var h = [], total = 0
-            for (var i = a.messages.length - 2; i >= 0 && h.length < 12; i--) {
-                var t = a.messages[i].texte.slice(0, 3000)
+            for (let i = a.messages.length - 2; i >= 0 && h.length < 12; i--) {
+                let t = a.messages[i].texte.slice(0, 3000)
                 if ((total += t.length) > 16000) break
                 h.unshift({role: a.messages[i].role === "vous" ? "user" : "assistant", texte: t})
             }

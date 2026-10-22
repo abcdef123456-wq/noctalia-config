@@ -156,9 +156,9 @@ PanelWindow {
                 if (w.surCotes) w.appliquer("etendre", w.cote); else w.appliquer(w.modes[w.choix].id)
             }
             else if (e.key === Qt.Key_Left || e.key === Qt.Key_Right) {
-                var d = e.key === Qt.Key_Left ? -1 : 1
+                let d = e.key === Qt.Key_Left ? -1 : 1
                 if (w.surCotes) {
-                    var i = w.cotes.findIndex(c => c.id === w.cote)
+                    let i = w.cotes.findIndex(c => c.id === w.cote)
                     w.cote = w.cotes[(i + d + w.cotes.length) % w.cotes.length].id
                 } else w.choix = (w.choix + d + w.modes.length) % w.modes.length
             }

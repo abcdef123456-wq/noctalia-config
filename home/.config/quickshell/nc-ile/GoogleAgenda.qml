@@ -39,17 +39,17 @@ Singleton {
         var k = enCours, r = null
         try { r = JSON.parse(texte) } catch (_) {}
         if (r && r.ok === true && r.data && Array.isArray(r.data.events)) {
-            var c = Object.assign({}, cache)
+            let c = Object.assign({}, cache)
             c[k] = { t: Date.now(), events: r.data.events, calendars: r.data.calendars || [] }
             cache = c
         } else {
-            var e = Object.assign({}, erreurs)
+            let e = Object.assign({}, erreurs)
             e[k] = r && typeof (r.error || (r.data || {}).error) === "string" ? String(r.error || r.data.error).slice(0, 300)
                  : Reglages.t("JARVIS ne répond pas (nc-jarvis).", "JARVIS is not responding (nc-jarvis).")
             erreurs = e
         }
         enCours = ""
-        if (attente) { var a = attente; attente = null; charger(a.d, a.force) }
+        if (attente) { let a = attente; attente = null; charger(a.d, a.force) }
     }
     Process {
         id: requete
@@ -65,11 +65,11 @@ Singleton {
     function prochain(maintenant) {
         var jour = iso(maintenant), instant = jour + "T" + Qt.formatTime(maintenant, "HH:mm")
         var cles = Object.keys(cache).sort()
-        for (var i = 0; i < cles.length; i++) {
+        for (let i = 0; i < cles.length; i++) {
             if (cles[i] < jour.slice(0, 7)) continue
-            var l = cache[cles[i]].events.slice().sort((a, b) => a.debut < b.debut ? -1 : (a.debut > b.debut ? 1 : 0))
-            for (var j = 0; j < l.length; j++) {
-                var e = l[j]
+            let l = cache[cles[i]].events.slice().sort((a, b) => a.debut < b.debut ? -1 : (a.debut > b.debut ? 1 : 0))
+            for (let j = 0; j < l.length; j++) {
+                let e = l[j]
                 if (e.journee ? (e.fin ? jour < e.fin : e.debut >= jour) : e.debut.slice(0, 16) >= instant) return e
             }
         }

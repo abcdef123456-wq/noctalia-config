@@ -111,7 +111,7 @@ PanelWindow {
     }
     readonly property var colonnes: {
         var c = [], h = []
-        for (var k = 0; k < nbColonnes; k++) { c.push([]); h.push(0) }
+        for (let k = 0; k < nbColonnes; k++) { c.push([]); h.push(0) }
         ordreSections.forEach(n => {
             var hs = hauteurSection(n)
             if (!hs) return
@@ -141,7 +141,7 @@ PanelWindow {
         Component.onCompleted: forceActiveFocus()
         Keys.onPressed: event => {
             if (Raccourcis.capture) {
-                var t = Raccourcis.combinaison(event)
+                let t = Raccourcis.combinaison(event)
                 event.accepted = true
                 if (t === "") return
                 if (t === "annuler") { Raccourcis.finCapture(""); return }

@@ -25,7 +25,7 @@ Singleton {
         id: lecture
         command: [rac.bin + "nc-reglages", "catalogue"]
         stdout: StdioCollector {
-            onStreamFinished: { try { var l = JSON.parse(text).filter(r => r.genre === "raccourci"); if (l.length) rac.lignes = l } catch (e) {} }
+            onStreamFinished: { try { let l = JSON.parse(text).filter(r => r.genre === "raccourci"); if (l.length) rac.lignes = l } catch (e) {} }
         }
     }
     signal ecrit()                                  // une écriture finie : relire le catalogue

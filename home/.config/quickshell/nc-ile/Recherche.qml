@@ -224,7 +224,7 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 // Ancien nc-demander (pendant une mise à jour) : le nom seul, en texte
-                try { var d = JSON.parse(text); r.nomIA = d.nom || "-"; r.agentIA = d.agent || "claude"; r.iaCoupee = !!d.coupee }
+                try { let d = JSON.parse(text); r.nomIA = d.nom || "-"; r.agentIA = d.agent || "claude"; r.iaCoupee = !!d.coupee }
                 catch (e) { r.nomIA = text.trim() || "-" }
             }
         }
@@ -240,8 +240,8 @@ Item {
                 r.reponse = r.brut.trim() || Reglages.t("Pas de réponse.", "No answer.")
             }
             else {
-                var l = r.brut.trim().split("\n")
-                var c = l.length && l[l.length - 1].trim().startsWith("$ ") ? l.pop().trim().slice(2).trim() : ""
+                let l = r.brut.trim().split("\n")
+                let c = l.length && l[l.length - 1].trim().startsWith("$ ") ? l.pop().trim().slice(2).trim() : ""
                 r.reponse = l.join("\n").trim() || Reglages.t("Pas de réponse.", "No answer.")
                 r.commandeIA = c
             }
@@ -251,7 +251,7 @@ Item {
         stdout: SplitParser {
             onRead: ligne => {
                 try {
-                    var d = JSON.parse(ligne)
+                    let d = JSON.parse(ligne)
                     if (d.ia) { r.iaReponse = d.ia; r.agentReponse = d.agent || r.agentReponse }    // repli compris
                     if (Array.isArray(d.choices))          // 5 au plus, de 80 caractères au plus, sans doublon
                         r.choixIA = d.choices.filter(x => typeof x === "string" && x.trim() !== "").map(x => x.trim().slice(0, 80))
@@ -366,7 +366,7 @@ Item {
         if (Reglages.imagesLegeres) return ""
         if (p.icone) return "file://" + p.icone
         var n = p.noms_icone || []
-        for (var i = 0; i < n.length; i++) { var c = Quickshell.iconPath(n[i], true); if (c) return c }
+        for (let i = 0; i < n.length; i++) { let c = Quickshell.iconPath(n[i], true); if (c) return c }
         return ""
     }
     function itemPaquet(p, s) {
@@ -453,7 +453,7 @@ Item {
         if (t === "" || q === "") return 0
         if (t.startsWith(q)) return 100
         var mots = t.split(/[\s._\-/]+/)
-        for (var i = 0; i < mots.length; i++) if (mots[i].startsWith(q)) return 80
+        for (let i = 0; i < mots.length; i++) if (mots[i].startsWith(q)) return 80
         return large && t.indexOf(q) >= 0 ? 55 : 0
     }
     // Icône d'un fichier selon son extension (icônes du thème NC)
@@ -476,8 +476,8 @@ Item {
     function fenetreDe(ap) {
         var noms = [ap.wmclass, ap.id, ap.exe === "env" ? "" : ap.exe].filter(x => x).map(x => x.toLowerCase())
         var meilleure = null
-        for (var i = 0; i < fenetres.length; i++) {
-            var c = (fenetres[i].class || "").toLowerCase()
+        for (let i = 0; i < fenetres.length; i++) {
+            let c = (fenetres[i].class || "").toLowerCase()
             if (noms.indexOf(c) >= 0 && (!meilleure || fenetres[i].focusHistoryID < meilleure.focusHistoryID)) meilleure = fenetres[i]
         }
         return meilleure
@@ -506,18 +506,18 @@ Item {
                      || ["Google", "https://www.google.com/search?q="]
         var web = [["g ", moteur[0], moteur[1]], ["yt ", "YouTube", "https://www.youtube.com/results?search_query="],
                    ["w ", Reglages.t("Wikipédia", "Wikipedia"), Reglages.t("https://fr.wikipedia.org/w/index.php?search=", "https://en.wikipedia.org/w/index.php?search=")]]
-        for (var w = 0; w < web.length; w++) {
+        for (let w = 0; w < web.length; w++) {
             if (q.startsWith(web[w][0]) && q.length > web[w][0].length) {
-                var terme = q.slice(web[w][0].length)
-                var url = web[w][2] + encodeURIComponent(terme)
+                let terme = q.slice(web[w][0].length)
+                let url = web[w][2] + encodeURIComponent(terme)
                 resultats = [{ titre: terme, sous: Reglages.t("Rechercher sur ", "Search ") + web[w][1], glyphe: "travel_explore", f: () => Qt.openUrlExternally(url) }]
                 return
             }
         }
         if (q.startsWith("?")) {
-            var question = q.slice(1).trim()
+            let question = q.slice(1).trim()
             // D'abord les réponses de la config (instantanées), puis l'IA en dernier
-            var deLaConfig = question.length >= 2 ? reponsesAide(question, nbResultats - 1).map(e => itemAide(e, 0)) : []
+            let deLaConfig = question.length >= 2 ? reponsesAide(question, nbResultats - 1).map(e => itemAide(e, 0)) : []
             if (r.reponse !== "" && question === r.questionPosee) {
                 let cmdIA = r.commandeIA
                 let choix = r.choixIA.map(c => ({ titre: c, sous: Reglages.t("Répondre à ", "Reply to ") + r.iaReponse, glyphe: "chevron_right",
@@ -525,7 +525,7 @@ Item {
                 resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }])
                             .concat(choix, deLaConfig)
             } else {
-                var ia = r.reflechit ? []
+                let ia = r.reflechit ? []
                           : iaCoupee ? [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
                                           glyphe: "block", f: () => r.ouvrirReglage(Reglages.t("IA du bureau", "Desktop AI")) }]
                           : horsLigne ? [ligneHorsLigne]
@@ -541,7 +541,7 @@ Item {
             return
         }
         if (q.startsWith("!")) {
-            var consigneT = q.slice(1).trim()
+            let consigneT = q.slice(1).trim()
             if (!texteActif) {
                 resultats = [{ titre: Reglages.iaCoupee ? r.motifCoupee : Reglages.t("L'IA sur le texte est désactivée", "AI on text is turned off"),
                                sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"), glyphe: "block",
@@ -557,8 +557,8 @@ Item {
                 return
             }
             if (horsLigne) { resultats = [ligneHorsLigne]; return }
-            var qt = sansAccents(consigneT)
-            var lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
+            let qt = sansAccents(consigneT)
+            let lignesT = actionsTexte.filter(a => qt === "" || score(qt, a.t, true) > 0 || score(qt, a.k, false) > 0).map(a => {
                 let id = a.id
                 return { titre: a.t, sous: (texteSource !== "" ? Reglages.t("Texte du presse-papiers · ", "Clipboard text · ") : Reglages.t("Texte sélectionné ou copié · ", "Selected or copied text · "))
                                            + (nomIA === "-" ? Reglages.t("aucune IA", "no AI") : nomIA),
@@ -573,7 +573,7 @@ Item {
             return
         }
         if (q.startsWith("@")) {
-            var demandeA = q.slice(1).trim()
+            let demandeA = q.slice(1).trim()
             if (Reglages.iaCoupee) {
                 resultats = [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),
                                glyphe: "block", f: () => r.ouvrirReglage(Reglages.t("IA du bureau", "Desktop AI")) }]
@@ -589,7 +589,7 @@ Item {
             if (horsLigne) { resultats = [ligneHorsLigne]; return }
             if (r.modeAgent && q === r.questionPosee && (agent.running || r.plan)) {
                 if (agent.running || !r.plan) { resultats = []; return }
-                var lignesA = [], restantes = r.plan.actions.filter(a => !a.fait)
+                let lignesA = [], restantes = r.plan.actions.filter(a => !a.fait)
                 if (restantes.length > 1)
                     lignesA.push({ titre: Reglages.t("Tout faire", "Do Everything"), sous: restantes.length + Reglages.t(" actions", " actions"), glyphe: "done_all",
                                    garder: true, aide: Reglages.t("↵ confirmer", "↵ confirm"), f: () => r.executerPlan(null) })
@@ -611,8 +611,8 @@ Item {
         }
         // « session NOM » : ouvrir une disposition enregistrée, ou enregistrer celle d'aujourd'hui sous ce nom
         if (/^\s*sessions?\s/i.test(champ.text)) {          // le texte brut : « session » seul reste la recherche (déconnexion…)
-            var nomS = q.replace(/^sessions?\s*/i, "").trim(), qs = sansAccents(nomS)
-            var lignesS = sessions.filter(x => qs === "" || sansAccents(x.nom).indexOf(qs) >= 0).map(x => itemSession(x, 0))
+            let nomS = q.replace(/^sessions?\s*/i, "").trim(), qs = sansAccents(nomS)
+            let lignesS = sessions.filter(x => qs === "" || sansAccents(x.nom).indexOf(qs) >= 0).map(x => itemSession(x, 0))
             if (nomS !== "" && /^[\w][\w .\-]{0,39}$/.test(nomS) && !sessions.some(x => x.nom === nomS)) {
                 let n = nomS
                 lignesS.push({ titre: Reglages.t("Enregistrer la disposition actuelle sous « ", "Save the current layout as “") + n + Reglages.t(" »", "”"),
@@ -626,7 +626,7 @@ Item {
             return
         }
         if (q.startsWith("+") && modePaquets !== "non") {
-            var tp = q.slice(1).trim()
+            let tp = q.slice(1).trim()
             if (tp.length < 2) resultats = [{ titre: Reglages.t("Tape le nom d'un logiciel à installer", "Type the name of an app to install"),
                                               sous: Reglages.t("Dépôts, AUR et Flatpak", "Repos, AUR and Flatpak"), glyphe: "download", garder: true, f: () => {} }]
             else if (paquetsPour !== tp) resultats = [{ titre: tp, sous: Reglages.t("Recherche dans les logiciels…", "Searching apps…"), glyphe: "hourglass_top", garder: true, f: () => {} }]
@@ -636,7 +636,7 @@ Item {
             return
         }
         if (q.startsWith(">")) {
-            var c = q.slice(1).trim()
+            let c = q.slice(1).trim()
             resultats = c === "" ? [] : [{ titre: c, sous: Reglages.t("Commande dans le terminal", "Command in Terminal"), glyphe: "terminal",
                                           f: () => r.lancerCommande(c) }]
             return
@@ -644,18 +644,18 @@ Item {
 
         // Calcul en tête
         if (calcul !== "") {
-            var res = calcul
+            let res = calcul
             out.push({ titre: "= " + res, sous: Reglages.t("Calcul · Entrée pour copier", "Calculation · Enter to copy"), glyphe: "calculate", s: 1000,
                        f: () => Quickshell.execDetached(["wl-copy", res.replace(/^≈?\s*/, "")]) })
         }
         // Applications : déjà ouverte → Entrée en ouvre une nouvelle (Ctrl + Entrée : y aller), sinon Entrée la lance
         var prises = {}
-        for (var a = 0; a < applis.length; a++) {
-            var ap = applis[a]
-            var sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
+        for (let a = 0; a < applis.length; a++) {
+            let ap = applis[a]
+            let sa = Math.max(score(qa, ap.name, true), score(qa, ap.generic, false) - 20, score(qa, ap.id, false) - 15, score(qa, ap.keywords, false) - 30)
             if (sa > 0) {
                 let id = ap.id, fen = fenetreDe(ap)
-                var item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0) }
+                let item = { titre: ap.name, icone: Quickshell.iconPath(ap.icon, true), glyphe: "apps", s: sa * poidsUsage(id) + (fen ? 15 : 0) }
                 if (fen) {
                     let adresse = fen.address
                     prises[adresse] = true
@@ -677,10 +677,10 @@ Item {
             }
         }
         // Fenêtres ouvertes (celles qui ne sont pas déjà proposées par leur appli)
-        for (var i = 0; i < (Reglages.val("SPOTLIGHT_FENETRES", "oui") !== "non" ? fenetres.length : 0); i++) {
-            var fe = fenetres[i]
+        for (let i = 0; i < (Reglages.val("SPOTLIGHT_FENETRES", "oui") !== "non" ? fenetres.length : 0); i++) {
+            let fe = fenetres[i]
             if (prises[fe.address]) continue
-            var sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
+            let sf = Math.max(score(qa, fe.class, false), score(qa, fe.initialTitle, false), score(qa, fe.title, false) - 25)
             if (sf > 0) {
                 let adr = fe.address
                 out.push({ titre: fe.title, sous: fe.workspace.name === "special:reduites" ? Reglages.t("Fenêtre réduite · Entrée pour la ramener", "Minimized window · Enter to bring it back")
@@ -690,24 +690,24 @@ Item {
             }
         }
         // Pages de l'île et actions
-        for (var p = 0; p < pagesIle.length; p++) {
-            var pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
+        for (let p = 0; p < pagesIle.length; p++) {
+            let pg = pagesIle[p], sp = Math.max(score(qa, pg.t, true), score(qa, pg.k, false) - 15)
             if (!Reglages.pageActive(pg.p)) continue
             if (sp > 0) { let nom = pg.p; out.push({ titre: pg.t, sous: Reglages.t("Dans l'île", "In the island"), glyphe: pg.g, s: sp - 5, page: nom }) }
         }
         // Sessions enregistrées : par leur nom (« dev » trouve la session « Dev »)
-        for (var ss = 0; ss < sessions.length; ss++) {
-            var sc2 = Math.max(score(qa, sessions[ss].nom, true), score(qa, "session " + sessions[ss].nom, false) - 10)
+        for (let ss = 0; ss < sessions.length; ss++) {
+            let sc2 = Math.max(score(qa, sessions[ss].nom, true), score(qa, "session " + sessions[ss].nom, false) - 10)
             if (sc2 > 0) out.push(itemSession(sessions[ss], sc2 - 4))
         }
-        for (var k = 0; k < actions.length; k++) {
-            var ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
+        for (let k = 0; k < actions.length; k++) {
+            let ac = actions[k], sc = Math.max(score(qa, ac.t, true), score(qa, ac.k, false) - 15)
             if (ac.ia && (Reglages.iaCoupee || (ac.ia !== "IA_MODE" && horsLigne) || (ac.ia === "IA_ACTIONS" ? !agentPermis : Reglages.val(ac.ia, "oui") === "non"))) continue
             if (ac.siCoupee && !Reglages.iaCoupee) continue
             if (sc > 0) out.push({ titre: ac.t, sous: "Action", glyphe: ac.g, s: sc - 8, f: ac.f, garder: ac.garder })
         }
         // Fichiers
-        for (var n = 0; n < fichiers.length; n++) {
+        for (let n = 0; n < fichiers.length; n++) {
             let fi = fichiers[n], chemin = fi.path
             out.push({ titre: fi.name, sous: (fi.dir ? Reglages.t("Dossier · ", "Folder · ") : Reglages.t("Fichier · ", "File · ")) + fi.parent,
                        icone: Quickshell.iconPath(iconeFichier(fi.name, fi.dir), true), glyphe: "description",
@@ -720,8 +720,8 @@ Item {
         out = out.slice(0, nbResultats)
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
         if (modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
-            var noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
-            var aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
+            let noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
+            let aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
             if (aInstaller.length) out = out.slice(0, nbResultats - aInstaller.length).concat(aInstaller.map(p => itemPaquet(p, 0)))
         }
         // Saisie qui commence par un programme (« htop », « ping google.fr ») : la lancer dans le terminal
@@ -729,7 +729,7 @@ Item {
         if (execs[prog] && !q.startsWith("/")) {
             let commande = q
             out = out.slice(0, out.length && out[0].s >= 90 && q.indexOf(" ") < 0 ? nbResultats - 1 : nbResultats - 2)
-            var lancerItem = { titre: commande, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
+            let lancerItem = { titre: commande, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", aide: "↵", f: () => r.lancerCommande(commande) }
             // Avec des arguments, ou si rien ne lui correspond vraiment : en tête
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
         }
@@ -749,8 +749,8 @@ Item {
             suivi.restart()
         }
         try {
-            var u = Object.assign({}, usage)
-            var e = u[id] || { n: 0 }
+            let u = Object.assign({}, usage)
+            let e = u[id] || { n: 0 }
             u[id] = { n: (e.n || 0) + 1, t: Math.floor(Date.now() / 1000) }
             usage = u
             fichierUsage.setText(JSON.stringify(u))

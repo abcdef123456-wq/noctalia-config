@@ -32,7 +32,7 @@ FloatingWindow {
     }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
-        for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
+        for (let i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; return }
     }
     // La fenêtre repart vide ; l'historique de l'île reste dans l'île (même liste, messages plus anciens masqués ici)
     function vider() { chat.depuis = AssistantEtat.dernierId; chat.historiqueOuvert = false }

@@ -31,7 +31,7 @@ Item {
     }
     function couleurs(j) {
         var l = [], ev = evenementsDu(j)
-        for (var i = 0; i < ev.length && l.length < 3; i++) if (l.indexOf(ev[i].couleur) < 0) l.push(ev[i].couleur)
+        for (let i = 0; i < ev.length && l.length < 3; i++) if (l.indexOf(ev[i].couleur) < 0) l.push(ev[i].couleur)
         return l
     }
     function heure(e) { return e.journee ? Reglages.t("Toute la journée", "All day") : e.debut.slice(11, 16) + (e.fin && !e.journee ? " – " + e.fin.slice(11, 16) : "") }

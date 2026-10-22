@@ -82,9 +82,9 @@ Item {
                 id: cmd
                 signal clic()
                 color: Etat.lecteur ? Couleurs.texte : Couleurs.gris4
-                scale: z.pressed ? 0.85 : 1
+                scale: zoneClic.pressed ? 0.85 : 1
                 Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
-                MouseArea { id: z; anchors.fill: parent; anchors.margins: -10; onClicked: cmd.clic() }
+                MouseArea { id: zoneClic; anchors.fill: parent; anchors.margins: -10; onClicked: cmd.clic() }
             }
             Commande { nom: "fast_rewind"; taille: 34; onClic: if (Etat.lecteur) Etat.lecteur.previous() }
             Commande { nom: Etat.joue ? "pause" : "play_arrow"; taille: 44; onClic: Etat.lecturePause() }

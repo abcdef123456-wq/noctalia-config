@@ -29,7 +29,7 @@ FloatingWindow {
 
     function afficher(nom) {
         var ecrans = Quickshell.screens
-        for (var i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; break }
+        for (let i = 0; i < ecrans.length; i++) if (ecrans[i].name === nom) { screen = ecrans[i]; break }
         essais = ({}); message = ""
         visible = true
         relire()

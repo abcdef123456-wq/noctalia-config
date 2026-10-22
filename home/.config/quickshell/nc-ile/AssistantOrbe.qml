@@ -44,8 +44,8 @@ Item {
             var c = getContext("2d"); c.reset()
             var r = Math.max(0, width / 2 - 8)
             c.strokeStyle = String(orbe.accent); c.lineWidth = 2; c.lineCap = "round"
-            for (var i = 0; i < 3; i++) {
-                var a = i * Math.PI * 2 / 3
+            for (let i = 0; i < 3; i++) {
+                let a = i * Math.PI * 2 / 3
                 c.beginPath(); c.arc(width / 2, height / 2, r, a, a + 0.75); c.stroke()
             }
         }

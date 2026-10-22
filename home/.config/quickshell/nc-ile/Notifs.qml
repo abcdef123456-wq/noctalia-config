@@ -64,8 +64,8 @@ Singleton {
         var ids = {}
         serveur.trackedNotifications.values.forEach(x => ids[x.id] = true)     // la liste du serveur, à jour, pas sa copie liée
         var l = {}, h = {}
-        for (var k in lus) if (ids[k]) l[k] = true
-        for (var k2 in heures) if (ids[k2]) h[k2] = heures[k2]
+        for (let k in lus) if (ids[k]) l[k] = true
+        for (let k2 in heures) if (ids[k2]) h[k2] = heures[k2]
         Memo.ecrire("notifs", { masques: masques, lus: l, heures: h, attentes: attentes })
     }
 
@@ -190,14 +190,14 @@ Singleton {
     function toutEffacer() {
         banniere = null
         var l = liste
-        for (var i = 0; i < l.length; i++) { if (l[i].synthetique) retirerRevenue(l[i]); else l[i].dismiss() }
+        for (let i = 0; i < l.length; i++) { if (l[i].synthetique) retirerRevenue(l[i]); else l[i].dismiss() }
     }
 
     // ── Reporter : 15 min, 1 h, demain (à 9 h) ──
     function reporter(notif, quand) {
         if (!notif) return
         var due = Date.now() + (quand === "15m" ? 15 * 60000 : quand === "1h" ? 3600000 : 0)
-        if (quand === "demain") { var d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); due = d.getTime() }
+        if (quand === "demain") { let d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); due = d.getTime() }
         if (banniere === notif) banniere = null
         if (notif.synthetique) retirerRevenue(notif)
         var r = Object.assign({}, reports); r[notif.id] = due; reports = r
@@ -207,7 +207,7 @@ Singleton {
     }
     function verifierReports() {
         var maintenant = Date.now(), r = Object.assign({}, reports), change = false
-        for (var k in r) if (r[k] <= maintenant) { delete r[k]; change = true }
+        for (let k in r) if (r[k] <= maintenant) { delete r[k]; change = true }
         if (change) reports = r
         var dues = attentes.filter(a => a.due <= maintenant)
         if (!dues.length) return

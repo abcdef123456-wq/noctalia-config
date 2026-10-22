@@ -31,14 +31,14 @@ Item {
             c.lineWidth = Math.max(1.6, w * 0.13)
             function chemin(points, ferme) {
                 c.beginPath(); c.moveTo(points[0][0] * w, points[0][1] * h)
-                for (var i = 1; i < points.length; i++) c.lineTo(points[i][0] * w, points[i][1] * h)
+                for (let i = 1; i < points.length; i++) c.lineTo(points[i][0] * w, points[i][1] * h)
                 if (ferme) c.closePath()
             }
             switch (e.agent) {
             case "assistant":
                 break  // rendu par LogoAssistant, sans ajouter de rotation au mouvement de la vidéo
             case "antigravity": {
-                var g = c.createLinearGradient(0, 0, w, 0)
+                let g = c.createLinearGradient(0, 0, w, 0)
                 g.addColorStop(0, k); g.addColorStop(0.5, "#a374f0"); g.addColorStop(1, "#f0736d")
                 c.strokeStyle = g; c.lineWidth = Math.max(2, w * 0.2)
                 c.beginPath(); c.moveTo(w * 0.14, h * 0.86)
@@ -46,7 +46,7 @@ Item {
                 break
             }
             case "gemini": {
-                var gg = c.createLinearGradient(0, h, w, 0)
+                let gg = c.createLinearGradient(0, h, w, 0)
                 gg.addColorStop(0, "#4796e3"); gg.addColorStop(0.6, "#9177c7"); gg.addColorStop(1, "#ca6673")
                 c.fillStyle = gg; c.beginPath(); c.moveTo(r, 0)
                 c.quadraticCurveTo(r, r, w, r); c.quadraticCurveTo(r, r, r, h)
@@ -93,8 +93,8 @@ Item {
                 break
             default: {                                         // claude : rayons alternés, comme le logo
                 c.translate(r, r)
-                for (var i = 0; i < 8; i++) {
-                    var a = i * Math.PI / 4, l = i % 2 ? r * 0.62 : r * 0.92
+                for (let i = 0; i < 8; i++) {
+                    let a = i * Math.PI / 4, l = i % 2 ? r * 0.62 : r * 0.92
                     c.beginPath(); c.moveTo(Math.cos(a) * r * 0.18, Math.sin(a) * r * 0.18); c.lineTo(Math.cos(a) * l, Math.sin(a) * l); c.stroke()
                 }
             }

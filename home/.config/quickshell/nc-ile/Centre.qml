@@ -52,28 +52,28 @@ Item {
             var reste = Math.max(0, largeur - fixe - centre.ecart * (ligne.length - 1))
             var x = 0, haut = 168, seulPetit = ligne.length === 1 && ligne[0].forme === "petit" && ligne[0].ids.length === 1
             if (seulPetit) haut = 78
-            for (var i = 0; i < ligne.length; i++) {
-                var c = ligne[i], w = c.forme === "flex" ? Math.min(c.maxi || reste, Math.floor(reste / nflex)) : 168
+            for (let i = 0; i < ligne.length; i++) {
+                let c = ligne[i], w = c.forme === "flex" ? Math.min(c.maxi || reste, Math.floor(reste / nflex)) : 168
                 if (c.forme === "petit") {
-                    for (var k = 0; k < c.ids.length; k++) res.push({ id: c.ids[k], x: x, y: y + k * (78 + centre.ecart), w: 168, h: 78 })
+                    for (let k = 0; k < c.ids.length; k++) res.push({ id: c.ids[k], x: x, y: y + k * (78 + centre.ecart), w: 168, h: 78 })
                 } else res.push({ id: c.ids[0], x: x, y: y, w: w, h: 168 })
                 x += w + centre.ecart
             }
             y += haut + centre.ecart
             ligne = []; fixe = 0; nflex = 0
         }
-        for (var i = 0; i < ids.length; i++) {
-            var id = ids[i], forme = centre.modules[id].forme
+        for (let i = 0; i < ids.length; i++) {
+            let id = ids[i], forme = centre.modules[id].forme
             if (forme === "bande") {
                 fermer()
                 res.push({ id: id, x: 0, y: y, w: largeur, h: 64 })
                 y += 64 + centre.ecart
                 continue
             }
-            var libre = largeur - fixe - nflex * 88 - centre.ecart * ligne.length
+            let libre = largeur - fixe - nflex * 88 - centre.ecart * ligne.length
             if (forme === "petit") {
                 // Deux pastilles de suite s'empilent dans la même case (cellule remplacée, pas modifiée en place)
-                var derniere = ligne.length ? ligne[ligne.length - 1] : null
+                let derniere = ligne.length ? ligne[ligne.length - 1] : null
                 if (derniere && derniere.forme === "petit" && derniere.ids.length === 1) { ligne[ligne.length - 1] = { forme: "petit", ids: [derniere.ids[0], id] }; continue }
                 if (libre < 168) fermer()
                 ligne.push({ forme: "petit", ids: [id] }); fixe += 168
@@ -96,7 +96,7 @@ Item {
         Memo.lire("centre", v => {
             if (!centre) return              // page déjà détruite (l'île a changé de page avant la relecture)
             if (v && Array.isArray(v.ordre)) {
-                var o = v.ordre.filter(id => centre.modules[id] !== undefined)
+                let o = v.ordre.filter(id => centre.modules[id] !== undefined)
                 centre.defaut.forEach(id => { if (o.indexOf(id) < 0) o.push(id) })
                 centre.ordre = o
             }
@@ -378,9 +378,9 @@ Item {
                         id: cmd
                         signal clic()
                         color: Etat.lecteur ? Couleurs.texte : Couleurs.gris4
-                        scale: z.pressed ? 0.85 : 1
+                        scale: zoneClic.pressed ? 0.85 : 1
                         Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
-                        MouseArea { id: z; anchors.fill: parent; anchors.margins: -8; onClicked: cmd.clic() }
+                        MouseArea { id: zoneClic; anchors.fill: parent; anchors.margins: -8; onClicked: cmd.clic() }
                     }
                     Commande { nom: "fast_rewind"; taille: 30; onClic: if (Etat.lecteur) Etat.lecteur.previous() }
                     Commande { nom: Etat.joue ? "pause" : "play_arrow"; taille: 38; onClic: Etat.lecturePause() }

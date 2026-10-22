@@ -119,7 +119,7 @@ Singleton {
         images[adresse] = { resultat: resultat, url: resultat.url, pixels: pixels }
         var cles = Object.keys(images), total = cles.reduce((n, k) => n + images[k].pixels, 0)
         while (cles.length > 12 || total > 8 * 1024 * 1024) {
-            var k = cles.shift(); total -= images[k].pixels; delete images[k]
+            let k = cles.shift(); total -= images[k].pixels; delete images[k]
         }
         vueImages = images
     }
@@ -175,7 +175,7 @@ Singleton {
         if (!pomoPause) {
             pomoPause = true
             concentrationPomodoro(false)
-            var longue = pomoSeance % 4 === 0
+            let longue = pomoSeance % 4 === 0
             msg = [Reglages.t("Pause !", "Break!"), longue ? Reglages.t("15 minutes : lève-toi, bouge un peu.", "15 minutes: stand up and move around.")
                                                           : Reglages.t("5 minutes pour souffler.", "5 minutes to catch your breath.")]
             lancerMinuteur(longue ? 15 : 5)
@@ -212,7 +212,7 @@ Singleton {
     Process {
         id: lireMeteo
         command: [etat.bin + "nc-meteo"]
-        stdout: StdioCollector { onStreamFinished: { try { var m = JSON.parse(text); if (m.temp !== undefined) etat.meteo = m } catch (e) {} } }
+        stdout: StdioCollector { onStreamFinished: { try { let m = JSON.parse(text); if (m.temp !== undefined) etat.meteo = m } catch (e) {} } }
     }
     // Toutes les 10 min ; toutes les 30 min sur batterie (moins de réveils et de réseau, la météo change peu)
     Timer { interval: (UPower.onBattery ? 30 : 10) * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"
@@ -261,7 +261,7 @@ Singleton {
                     l.push({ nom: nom, taille: taille, vitesse: avant !== undefined ? Math.max(0, (taille - avant.taille) / 2) : 0 })
                 })
                 // Un fichier temporaire disparu : téléchargement fini (si le vrai fichier est là, pas annulé)
-                for (var k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== etat.sansNom) verifFin.verifier(dossier, etat.tailles[k].nom)
+                for (let k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== etat.sansNom) verifFin.verifier(dossier, etat.tailles[k].nom)
                 etat.tailles = vu
                 etat.telechargements = l
             }
@@ -320,7 +320,7 @@ Singleton {
     property real finLecture: 0          // heure de la dernière pause (ms)
     readonly property var lecteur: {
         var l = lecteurs
-        for (var i = 0; i < l.length; i++) if (l[i].isPlaying) return l[i]
+        for (let i = 0; i < l.length; i++) if (l[i].isPlaying) return l[i]
         if (dernierLecteur && l.indexOf(dernierLecteur) >= 0) return dernierLecteur
         return l.length > 0 ? l[0] : null
     }
@@ -427,8 +427,8 @@ Singleton {
         onTriggered: {
             if (++tours % 12 === 0 && !trouverCameras.running) trouverCameras.running = true
             var allumee = false
-            for (var i = 0; i < etatsCamera.count; i++) {
-                var f = etatsCamera.objectAt(i)
+            for (let i = 0; i < etatsCamera.count; i++) {
+                let f = etatsCamera.objectAt(i)
                 if (!f) continue
                 f.reload()
                 if (f.text().trim() === "active") allumee = true
@@ -452,8 +452,8 @@ Singleton {
     property string casqueBatterie: ""
     onAdressesBtChanged: {
         var avant = btConnus, macs = []
-        for (var i = 0; i < adressesBt.length; i++) {
-            var a = adressesBt[i]
+        for (let i = 0; i < adressesBt.length; i++) {
+            let a = adressesBt[i]
             macs.push(a.mac)
             if (avant.indexOf(a.mac) < 0 && macs.indexOf(a.mac) === macs.length - 1 && pret) {
                 casqueNom = a.nom; casqueBatterie = ""
@@ -541,8 +541,8 @@ Singleton {
             onStreamFinished: {
                 var t = {}
                 var lignes = this.text.split("\n")
-                for (var i = 0; i < lignes.length; i++) {
-                    var p = lignes[i].indexOf("=")
+                for (let i = 0; i < lignes.length; i++) {
+                    let p = lignes[i].indexOf("=")
                     if (p > 0) t[lignes[i].slice(0, p)] = lignes[i].slice(p + 1)
                 }
                 etat.sys = t
@@ -563,8 +563,8 @@ Singleton {
             onStreamFinished: {
                 var l = []
                 var lignes = this.text.split("\n")
-                for (var i = 0; i < lignes.length; i++) {
-                    var p = lignes[i].indexOf("=")
+                for (let i = 0; i < lignes.length; i++) {
+                    let p = lignes[i].indexOf("=")
                     if (p > 0) l.push({ genre: lignes[i].slice(0, p), champs: lignes[i].slice(p + 1).split("\t") })
                 }
                 etat.liste = l
@@ -611,7 +611,7 @@ Singleton {
         onTriggered: {
             t += 0.165
             var b = []
-            for (var i = 0; i < 5; i++) b.push(0.25 + 0.22 * Math.sin(t + i * 1.3) + 0.12 * Math.sin(t * 1.7 + i))
+            for (let i = 0; i < 5; i++) b.push(0.25 + 0.22 * Math.sin(t + i * 1.3) + 0.12 * Math.sin(t * 1.7 + i))
             etat.bandes = b
         }
     }
@@ -625,7 +625,7 @@ Singleton {
                 if (v.length < 6) return
                 var b = []
                 var somme = 0
-                for (var i = 0; i < 5; i++) { b.push(Math.min(1, (parseInt(v[i]) || 0) / 100)); somme += b[i] }
+                for (let i = 0; i < 5; i++) { b.push(Math.min(1, (parseInt(v[i]) || 0) / 100)); somme += b[i] }
                 if (somme < 0.04) return
                 etat.dernierSon = Date.now()
                 etat.bandes = b

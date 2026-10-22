@@ -43,7 +43,7 @@ FloatingWindow {
     function afficher(nom) { surEcran(nom); visible = true; contentItem.forceActiveFocus() }
     function surEcran(nom) {
         var ecrans = Quickshell.screens
-        for (var i=0;i<ecrans.length;i++) if (ecrans[i].name===nom) { screen=ecrans[i]; return }
+        for (let i=0;i<ecrans.length;i++) if (ecrans[i].name===nom) { screen=ecrans[i]; return }
     }
     function ouvrir(id) {
         page = id; selection = {}; valeurs = {}; resultatOp = ""
@@ -67,9 +67,9 @@ FloatingWindow {
         var p = Object.assign({}, valeurs)
         champs.forEach(f => { if (f.forme === "uuid") p[f.key] = String(p[f.key]).trim() })
         if (selection.op === "action") {
-            var params = {}
-            for (var i=0;i<selection.champs.length;i++) {
-                var f=selection.champs[i], v=p[f.key]
+            let params = {}
+            for (let i=0;i<selection.champs.length;i++) {
+                let f=selection.champs[i], v=p[f.key]
                 if (v === undefined || v === "") continue
                 if (f.kind === "number") { v=Number(v); if (!isFinite(v)) return }
                 params[f.key]=v
@@ -163,7 +163,7 @@ FloatingWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         y: cadre.y + 16 + 40 + 12
         // Aussi large que ses pastilles (centrée, comme les bureaux de la vue), sur deux lignes si l'écran est étroit
-        readonly property real besoin: { var w = 0; for (var i = 0; i < children.length; i++) if (children[i].width > 0) w += children[i].width + spacing; return Math.max(0, w - spacing) }
+        readonly property real besoin: { var w = 0; for (let i = 0; i < children.length; i++) if (children[i].width > 0) w += children[i].width + spacing; return Math.max(0, w - spacing) }
         width: Math.min(cadre.width - 40, besoin)
         spacing: 8
         Repeater {

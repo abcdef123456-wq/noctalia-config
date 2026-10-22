@@ -524,7 +524,7 @@ Item {
                         event.accepted = false
                         if (!page.propositionsVisibles || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) return
                         if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
-                            var n = page.propositions.length
+                            let n = page.propositions.length
                             page.indiceSuggestion = (page.indiceSuggestion + (event.key === Qt.Key_Down ? 1 : -1) + n) % n
                             page.selectionExplicite = true
                             listeSuggestions.positionViewAtIndex(page.indiceSuggestion, ListView.Contain)
@@ -622,7 +622,7 @@ Item {
                 }
                 page.ecouteVocale = false
                 if (r && r.ok === true && typeof r.text === "string" && r.text.trim().length) {
-                    var t = r.text.trim(), b = AssistantEtat.brouillon.trim()
+                    let t = r.text.trim(), b = AssistantEtat.brouillon.trim()
                     AssistantEtat.brouillon = b.length ? b + " " + t : t
                     page.information = ""
                     Qt.callLater(function() { entree.forceActiveFocus(); entree.cursorPosition = entree.text.length })
