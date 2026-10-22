@@ -1,6 +1,8 @@
 """nc-session : enregistrer la disposition (applis, bureaux, places des fenêtres libres, terminaux), la rouvrir (une
 appli déjà ouverte va sur son bureau, une absente est lancée puis placée quand sa fenêtre apparaît), et le Spotlight
-(« session NOM »)."""
+(« session NOM »). Et nc-reglages, section Fenêtres : les sessions enregistrées, chacune supprimable après confirmation."""
+import importlib.machinery
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,8 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
+import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "home/.local/bin/nc-session"
@@ -345,6 +349,125 @@ ShellRoot {
             self.assertEqual([a for a in appels if "supprimer" in a], ["nc-session supprimer Dev"], "la commande exacte, une seule fois")
             self.assertIn("nc-session liste --json", appels[appels.index("nc-session supprimer Dev") + 1:], "liste relue après")
             self.assertNotIn("ouvrir", " ".join(appels), "aucune session ouverte")
+
+
+# Le vrai nc-session, enveloppé : HOME pris du chemin de l'enveloppe (<home>/.local/bin), jamais le vrai ; chaque appel
+# noté (ses arguments en JSON) dans <home>/appels-session
+ENVELOPPE = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+H = Path(__file__).resolve().parents[2]
+with (H / "appels-session").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
+os.environ["HOME"] = str(H)
+os.execv(sys.executable, [sys.executable, "@SCRIPT@"] + sys.argv[1:])
+'''
+
+
+class ReglagesSessions(unittest.TestCase):
+    """nc-reglages : une ligne par session enregistrée (fenêtres, applis) et « Supprimer… », qui demande confirmation
+    (terminal : une question ; fenêtre graphique : le champ « confirmer » du catalogue) puis lance nc-session supprimer NOM."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-reglages-sessions-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        b = self.home / ".local/bin"
+        b.mkdir(parents=True)
+        (b / "nc-session").write_text(ENVELOPPE.replace("@SCRIPT@", str(SCRIPT))); (b / "nc-session").chmod(0o755)
+        self.dossier = self.home / ".config/nc/sessions"
+        self.dossier.mkdir(parents=True)
+        env = mock.patch.dict(os.environ, HOME=str(self.home), NC_LANGUE="fr")
+        env.start()
+        self.addCleanup(env.stop)
+
+    def session(self, nom, *classes):
+        (self.dossier / f"{nom}.json").write_text(json.dumps(dict(version=1, nom=nom, date=1, fenetres=[{"classe": c} for c in classes])))
+
+    def charger(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ResourceWarning)              # lecture de /sys par materiel()
+            chargeur = importlib.machinery.SourceFileLoader("nc_reglages_sessions", str(SCRIPT.parent / "nc-reglages"))
+            mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(chargeur.name, chargeur))
+            chargeur.exec_module(mod)
+        mod.catalogue_raccourcis = lambda: []
+        return mod
+
+    def appels(self):
+        f = self.home / "appels-session"
+        return [json.loads(l) for l in f.read_text().splitlines()] if f.exists() else []
+
+    def test_catalogue_une_ligne_par_session_a_la_fin_de_fenetres(self):
+        self.session("Dev", "kitty", "firefox", "kitty")
+        self.session("Cours", "evince")
+        mod = self.charger()
+        fen = [x for x in mod.catalogue({}) if x["section"] == "Fenêtres"]
+        self.assertGreater(len(fen), 2)
+        self.assertEqual([x["cle"] for x in fen[-2:]], ["session:Cours", "session:Dev"], "à la fin de la section Fenêtres")
+        cours, dev = fen[-2:]
+        self.assertEqual((dev["nom"], dev["genre"], dev["affiche"]), ("Session « Dev »", "action", "Supprimer…"))
+        self.assertEqual(dev["aide"], "3 fenêtres : firefox, kitty")
+        self.assertEqual(cours["aide"], "1 fenêtre : evince")
+        self.assertEqual(dev["commande"], ["nc-session", "supprimer", "Dev"])
+        self.assertIn("Supprimer la session « Dev » ?", dev["confirmer"])
+        self.assertEqual(dev["bouton"], "Supprimer")
+        self.assertTrue(dev["relire"])
+        self.assertEqual(self.appels(), [["liste", "--json"]], "lue une fois, rien de supprimé en affichant")
+        self.assertTrue((self.dossier / "Dev.json").exists())
+
+    def test_catalogue_sans_session(self):
+        mod = self.charger()
+        fen = [x for x in mod.catalogue({}) if x["section"] == "Fenêtres"]
+        self.assertEqual((fen[-1]["cle"], fen[-1]["genre"], fen[-1]["nom"]), ("info:sessions", "info", "Aucune session enregistrée"))
+        self.assertNotIn("commande", fen[-1])
+        # nc-session absent : la même ligne, sans erreur
+        (self.home / ".local/bin/nc-session").unlink()
+        self.assertEqual(mod.lignes_sessions()[0]["cle"], "info:sessions")
+
+    def ecran(self, mod, reponses):
+        """L'écran du terminal sans curses ; chaque question répond la suivante de `reponses` (0 : Supprimer)."""
+        e = mod.Ecran.__new__(mod.Ecran)
+        e.messages, e.questions, e.pos, e.vals = [], [], {}, {}
+        e.sec = mod.SECTIONS.index("Fenêtres")
+        e.statut = lambda texte, erreur=False: e.messages.append((texte, erreur))
+        e.dessiner = lambda: None
+        e.choisir = lambda titre, options, aide="", texte="": e.questions.append((titre, options, texte)) or reponses.pop(0)
+        return e
+
+    def test_terminal_refus_puis_suppression(self):
+        self.session("Dev", "kitty")
+        mod = self.charger()
+        e = self.ecran(mod, [1, None, 0])
+        lignes = e.items()
+        self.assertEqual(lignes[-2], {"genre": "titre", "nom": "Sessions enregistrées"})
+        dev = lignes[-1]
+        self.assertEqual((dev["genre"], dev["action"], dev["session"]), ("assistant", "session-supprimer", "Dev"))
+        e.items(); e.items()
+        self.assertEqual(self.appels(), [["liste", "--json"]], "lue à l'affichage de la section, pas à chaque dessin")
+        # Annuler, puis Échap : rien
+        e.assistant(dev)
+        e.assistant(dev)
+        self.assertEqual(e.questions[0][:2], ("Session « Dev »", ["Supprimer", "Annuler"]))
+        self.assertIn("Ses fenêtres restent ouvertes", e.questions[0][2])
+        self.assertTrue((self.dossier / "Dev.json").exists())
+        self.assertNotIn("supprimer", [a[0] for a in self.appels()])
+        self.assertEqual(e.messages, [("Rien n'a changé", False)] * 2)
+        # Supprimer : nc-session supprimer Dev, exactement ; la liste est relue
+        e.assistant(dev)
+        self.assertEqual([a for a in self.appels() if a[0] == "supprimer"], [["supprimer", "Dev"]])
+        self.assertFalse((self.dossier / "Dev.json").exists())
+        self.assertEqual(e.messages[-1], ("Session « Dev » supprimée.", False))
+        self.assertEqual(e.items()[-1]["nom"], "Aucune session enregistrée")
+        # Une autre section, puis Fenêtres à nouveau : relue
+        n = len(self.appels())
+        e.sec = mod.SECTIONS.index("Énergie"); e.items()
+        e.sec = mod.SECTIONS.index("Fenêtres"); e.items()
+        self.assertEqual(len(self.appels()), n + 1)
+
+    def test_supprimer_une_session_absente(self):
+        env = dict(HOME=str(self.home), PATH="/usr/bin:/bin", NC_LANGUE="fr")
+        r = subprocess.run([str(SCRIPT), "supprimer", "Rien"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Aucune session « Rien »", r.stderr)
 
 
 if __name__ == "__main__":

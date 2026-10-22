@@ -24,16 +24,26 @@ if a[0]=='catalogue':
       dict(cle="FENETRES_FLOU_FORCE",section="Fenêtres",sectionNom="Fenêtres",nom="Force du flou",genre="choix",defaut="normal",aide="Derrière les fenêtres transparentes.",choix=[["leger","Léger"],["normal","Normal"],["fort","Fort"]],mini=0,maxi=100,pas=1,unite="",zero="",valeur=d["FENETRES_FLOU_FORCE"],affiche=d["FENETRES_FLOU_FORCE"].capitalize(),modifie=d["FENETRES_FLOU_FORCE"]!="normal",groupe="hypr"),
     ]+([dict(cle="info:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Mode graphique",genre="info",defaut="",aide="Conseil : Hybride sur batterie.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Hybride · se change dans le BIOS",affiche="Hybride · se change dans le BIOS",modifie=False,groupe=""),
         dict(cle="action:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Changer de mode graphique…",genre="action",defaut="",aide="Une confirmation s'ouvre dans l'île.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Passer en Dédiée…",modifie=False,groupe="",commande=["nc-reglages","mode-graphique"])] if (H/'gpu').exists() else [])
-     +([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else []),ensure_ascii=False))
+     +([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else [])
+     +([dict(cle="session:Dev",section="Fenêtres",sectionNom="Fenêtres",nom="Session « Dev »",genre="action",defaut="",aide="3 fenêtres : firefox, kitty",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Supprimer…",modifie=False,groupe="",commande=["nc-session","supprimer","Dev"],confirmer="Supprimer la session « Dev » ?",bouton="Supprimer",relire=True)] if (H/'sessions').exists() else []),ensure_ascii=False))
 elif a[0] in ('raccourci','capture'): print("ok")
 elif a[0]=='set': d[a[1]]=a[2]; etat.write_text(json.dumps(d)); print(a[1]+" : "+a[2])
 elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_FORCE":"normal"}[a[1]]; etat.write_text(json.dumps(d)); print("Valeur de la config remise.")
+'''
+# Faux nc-session : son dossier vient de son propre chemin (<home>/.local/bin), jamais de $HOME ; « supprimer » note
+# l'appel et retire la session du faux catalogue
+FAUX_SESSION = r'''#!/usr/bin/env python3
+import json,sys
+from pathlib import Path
+H=Path(__file__).resolve().parents[2]
+with (H/'calls').open('a') as f: f.write(json.dumps(["nc-session"]+sys.argv[1:])+'\n')
+if sys.argv[1:2]==['supprimer']: (H/'sessions').unlink(missing_ok=True); print("Session « Dev » supprimée.")
 '''
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class FenetreReglages(unittest.TestCase):
-    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False):
+    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False, sessions=False):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
@@ -45,6 +55,9 @@ class FenetreReglages(unittest.TestCase):
                 (root / "raccourcis").write_text("")
             if gpu:
                 (root / "gpu").write_text("")
+            if sessions:
+                (root / "sessions").write_text("")
+                (b / "nc-session").write_text(FAUX_SESSION); (b / "nc-session").chmod(0o755)
             (root / "qml/shell.qml").write_text((('import QtTest\n' if evenements else '') + '''import QtQuick
 import Quickshell
 ShellRoot {
@@ -176,6 +189,42 @@ Qt.quit()
 ''', gpu=True)
         self.assertIn(["mode-graphique"], appels, "le bouton lance nc-reglages mode-graphique")
         self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [], "l'information ne s'écrit jamais")
+
+    def test_action_a_confirmer_sur_sa_ligne(self):
+        """Une action avec « confirmer » (supprimer une session) : le bouton pose d'abord la question sur sa ligne ;
+        Annuler, Échap ou une autre ligne n'appellent rien ; le bouton rouge lance la
+        commande exacte, puis le catalogue est relu."""
+        appels = self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+var liste=trouver(fen.contentItem,"nc-reglages-liste")
+var b=trouver(fen.contentItem,"nc-reglage-action-session:Dev"),ok=trouver(fen.contentItem,"nc-reglage-confirmer-session:Dev")
+var non=trouver(fen.contentItem,"nc-reglage-annuler-session:Dev"),q=trouver(fen.contentItem,"nc-reglage-question-session:Dev")
+if(etape===1){fen.section="Fenêtres";etape++;return}
+if(etape===2){
+ verifier(fen.visibles.length===2&&fen.visibles[1].cle==="session:Dev","lignes de Fenêtres : "+fen.visibles.length)
+ if(!b)return
+ fen.lancerAction(fen.visibles[1])
+ verifier(b.visible&&b.texte==="Supprimer…"&&!ok.visible&&!non.visible&&!q.visible,"au repos : seulement « Supprimer… »")
+ b.clic()
+ verifier(fen.confirmation&&liste.currentIndex===1&&!b.visible&&ok.visible&&ok.texte==="Supprimer"&&non.visible,"le bouton ne pose pas la question")
+ verifier(q.visible&&q.text==="Supprimer la session « Dev » ?","question : "+q.text)
+ non.clic();verifier(!fen.confirmation&&b.visible,"Annuler")
+ liste.forceActiveFocus()
+ clavier.keyClick(Qt.Key_Return);verifier(fen.confirmation,"Entrée pose la question")
+ clavier.keyClick(Qt.Key_Escape);verifier(!fen.confirmation&&fen.visible,"Échap annule sans fermer")
+ clavier.keyClick(Qt.Key_Return);clavier.keyClick(Qt.Key_Up);verifier(!fen.confirmation&&liste.currentIndex===0,"une autre ligne annule")
+ clavier.keyClick(Qt.Key_Down);verifier(!fen.confirmation,"revenir ne la repose pas")
+ b.clic();ok.clic();etape++;return}
+if(etape===3){
+ verifier(fen.reglage("session:Dev")===null,"catalogue non relu après la suppression")
+ verifier(fen.message==="Session « Dev » supprimée.","message : "+fen.message)
+ Qt.quit()}
+''', evenements=True, sessions=True)
+        self.assertEqual([a for a in appels if a[0] == "nc-session"], [["nc-session", "supprimer", "Dev"]],
+                         "une seule suppression, après la confirmation")
+        i = next(k for k, a in enumerate(appels) if a[0] == "nc-session")
+        self.assertIn(["catalogue"], appels[i + 1:], "le catalogue est relu après")
 
 
 if __name__ == "__main__":

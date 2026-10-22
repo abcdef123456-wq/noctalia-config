@@ -1316,6 +1316,41 @@ def question_gpu(g):
             T("Redémarrer", "Restart"))
 
 
+# ── Sessions enregistrées (nc-session) : une ligne par session, et sa suppression ───────────────────────────────────
+# Pas des réglages : la liste de ~/.config/nc/sessions, lue par « nc-session liste --json » à l'affichage de la section
+# Fenêtres (terminal) ou du catalogue (fenêtre graphique), jamais en boucle. Supprimer demande toujours confirmation.
+def sessions():
+    """[{nom, fenetres, applis}] des sessions enregistrées ; [] sans nc-session ou s'il ne répond pas."""
+    try:
+        d = json.loads(sortie([os.path.join(BIN, "nc-session"), "liste", "--json"]) or "[]")
+    except ValueError:
+        return []
+    return [s for s in d if isinstance(s, dict) and isinstance(s.get("nom"), str) and s["nom"]] if isinstance(d, list) else []
+
+
+def lignes_sessions():
+    """Section Fenêtres : une ligne par session (bouton « Supprimer… », confirmation d'abord), ou « Aucune session
+    enregistrée »."""
+    res = []
+    for s in sessions():
+        nom, n = s["nom"], int(s.get("fenetres") or 0)
+        applis = ", ".join(str(a) for a in (s.get("applis") or []) if a)
+        compte = T(f"{n} fenêtre{'s' if n > 1 else ''}", f"{n} window{'s' if n != 1 else ''}")
+        res.append({"genre": "assistant", "action": "session-supprimer", "session": nom, "cle": "session:" + nom,
+                    "nom": T(f"Session « {nom} »", f"Session “{nom}”"),
+                    "affiche": T("Supprimer…", "Delete…"),
+                    "aide": compte + (T(" : ", ": ") + applis if applis else ""),
+                    "confirmer": T(f"Supprimer la session « {nom} » ? Ses fenêtres restent ouvertes : seule la disposition "
+                                   "enregistrée est effacée.",
+                                   f"Delete the session “{nom}”? Its windows stay open: only the saved layout is erased.")})
+    if not res:
+        res.append({"genre": "info", "cle": "info:sessions", "nom": T("Aucune session enregistrée", "No saved session"),
+                    "valeur": "",
+                    "aide": T("Super + Maj + W (ou nc-session enregistrer NOM) enregistre la disposition actuelle des fenêtres.",
+                              "Super + Shift + W (or nc-session save NAME) saves the current window layout.")})
+    return res
+
+
 VISIBLES =[r for r in REGLAGES if _DISPO.get(MATERIEL.get(r.cle, ""), True)]
 SECTIONS = []
 for _r in VISIBLES:
@@ -2060,6 +2095,8 @@ class Ecran:
 
     # Lignes de la section courante
     def items(self):
+        if getattr(self, "sec_vue", None) != self.sec:     # une section affichée (à nouveau) : ses sessions relues
+            self.sec_vue, self.lignes_s = self.sec, None
         if SECTIONS[self.sec] == "Raccourcis":
             if self.lignes_r is None:
                 self.lignes_r = raccourcis()
@@ -2076,6 +2113,10 @@ class Ecran:
         lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
         if SECTIONS[self.sec] == "Énergie":
             lignes = lignes_gpu() + lignes                 # le mode graphique en tête (rien sans objet)
+        if SECTIONS[self.sec] == "Fenêtres":
+            if getattr(self, "lignes_s", None) is None:
+                self.lignes_s = lignes_sessions()          # lue une fois par affichage de la section, pas à chaque dessin
+            lignes = lignes + [{"genre": "titre", "nom": T("Sessions enregistrées", "Saved sessions")}] + self.lignes_s
         if SECTIONS[self.sec] == "Intelligence artificielle":
             lignes += [{"genre": "assistant", "action": "ia-cles", "nom": T("Clés d'API des IA", "AI API keys"),
                         "aide": T("Saisie masquée, chaque clé essayée tout de suite (nc-ia configurer).",
@@ -2246,7 +2287,10 @@ class Ecran:
         elif isinstance(cur, dict) and cur["genre"] == "info":
             bas = T("↑↓ choisir    Échap : sections    q : quitter", "↑↓ choose    Esc: sections    q: quit")
         elif isinstance(cur, dict) and cur["genre"] == "assistant":
-            if cur.get("action") == "mode-graphique":
+            if cur.get("action") == "session-supprimer":
+                bas = T("↑↓ choisir    Entrée : supprimer (une confirmation d'abord)    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: delete (confirmation first)    Esc: sections    q: quit")
+            elif cur.get("action") == "mode-graphique":
                 bas = T("↑↓ choisir    Entrée : changer de mode (une confirmation d'abord)    Échap : sections    q : quitter",
                         "↑↓ choose    Enter: change mode (confirmation first)    Esc: sections    q: quit")
             elif cur.get("action") == "verifier":
@@ -2462,9 +2506,29 @@ class Ecran:
         if code != 0:
             self.statut(T("Le changement de mode a échoué", "The mode change failed"), erreur=True)
 
+    def supprimer_session(self, it):
+        """Supprimer une session enregistrée (nc-session supprimer NOM), après confirmation ; Annuler ou Échap : rien."""
+        nom = it["session"]
+        if self.choisir(it["nom"], [T("Supprimer", "Delete"), T("Annuler", "Cancel")], texte=it["confirmer"]) != 0:
+            self.statut(T("Rien n'a changé", "Nothing changed"))
+            return
+        try:
+            r = subprocess.run([os.path.join(BIN, "nc-session"), "supprimer", nom], capture_output=True, text=True, timeout=10)
+            code, message = r.returncode, (r.stdout.strip() or r.stderr.strip()).split("\n")[-1]
+        except (OSError, subprocess.TimeoutExpired):
+            code, message = 1, ""
+        self.lignes_s = None                               # relue : la session n'y est plus
+        if code == 0:
+            self.statut(message or T(f"Session « {nom} » supprimée", f"Session “{nom}” deleted"))
+        else:
+            self.statut(message or T("Suppression impossible", "Could not delete"), erreur=True)
+
     def assistant(self, it=None):
         if isinstance(it, dict) and it.get("action") == "mode-graphique":
             self.mode_graphique()
+            return
+        if isinstance(it, dict) and it.get("action") == "session-supprimer":
+            self.supprimer_session(it)
             return
         if isinstance(it, dict) and it.get("action") == "verifier":
             self.statut(T("Test de la connexion…", "Testing connection…"))
@@ -2900,6 +2964,19 @@ def catalogue(vals):
     for a in actions:
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)
+    # Sessions enregistrées : à la fin de Fenêtres. Le bouton demande confirmation sur sa ligne (« confirmer » : la
+    # question, « bouton » : le mot du bouton qui confirme), puis la fenêtre relit le catalogue (« relire »)
+    fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Fenêtres"), default=len(res))
+    lignes = []
+    for s in lignes_sessions():
+        ligne = dict(cle=s["cle"], section="Fenêtres", sectionNom=nom_section("Fenêtres"), nom=s["nom"], genre=s["genre"],
+                     defaut="", aide=s["aide"], choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur=s.get("valeur", ""),
+                     affiche=s.get("affiche", s.get("valeur", "")), modifie=False, groupe="")
+        if s["genre"] == "assistant":
+            ligne.update(genre="action", commande=["nc-session", "supprimer", s["session"]], confirmer=s["confirmer"],
+                         bouton=T("Supprimer", "Delete"), relire=True)
+        lignes.append(ligne)
+    res[fin:fin] = lignes
     return res + catalogue_raccourcis()
 
 

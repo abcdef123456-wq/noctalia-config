@@ -428,7 +428,13 @@ def main(a):
                     print(T("Aucune session : nc-session enregistrer NOM", "No session: nc-session save NAME"))
             return 0
         if c == "supprimer" and reste:
-            fichier(reste).unlink(missing_ok=True)
+            # Le message est la dernière ligne lue par la fenêtre des réglages (bouton « Supprimer » d'une session)
+            f = fichier(reste)
+            if not f.exists():
+                print(T(f"Aucune session « {reste} ».", f"No session “{reste}”."), file=sys.stderr)
+                return 1
+            f.unlink()
+            print(T(f"Session « {reste} » supprimée.", f"Session “{reste}” deleted."))
             return 0
         if c == "menu":
             return menu()

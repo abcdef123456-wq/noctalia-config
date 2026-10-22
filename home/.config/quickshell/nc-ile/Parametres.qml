@@ -98,11 +98,25 @@ FloatingWindow {
     // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin.
     // Recopiée en vrai tableau : venue du délégué de la liste (clic sur le bouton), c'est une liste Qt, pour laquelle
     // Array.isArray est faux (le bouton ne faisait alors rien ; seule Entrée marchait)
-    function lancerAction(r) {
+    // Une action dangereuse (supprimer une session) a une question, « confirmer » : jamais lancée sans confirme, qui
+    // vient de la confirmation sur sa ligne. Avec « relire », elle passe par la file des écritures : son message
+    // s'affiche en bas, puis le catalogue est relu (la session supprimée disparaît)
+    function lancerAction(r, confirme) {
         var c = r && r.commande ? Array.prototype.slice.call(r.commande).map(String) : []
-        if (!c.length) return
-        Quickshell.execDetached([bin + c[0]].concat(c.slice(1)))
+        if (!c.length || (r.confirmer && !confirme)) return
+        if (r.relire) { file.push([bin + c[0]].concat(c.slice(1))); file = file; suivant() }
+        else Quickshell.execDetached([bin + c[0]].concat(c.slice(1)))
     }
+    // Le bouton d'une action, ou Entrée : une action à confirmer pose d'abord sa question sur sa ligne (Entrée ou le
+    // bouton rouge confirment ; Échap, Annuler ou une autre ligne annulent)
+    function demanderAction(r) {
+        if (!r || !r.confirmer) { lancerAction(r); return }
+        var l = liste.currentItem
+        if (!l || l.r.cle !== r.cle) return
+        if (l.aConfirmer) { l.aConfirmer = false; lancerAction(r, true) }
+        else l.aConfirmer = true
+    }
+    readonly property bool confirmation: !!(liste.currentItem && liste.currentItem.aConfirmer)
     // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — la logique commune (Raccourcis.qml),
     // partagée avec la fiche Super + /
     function raccourci(r, action, touches) { Raccourcis.raccourci(r, action, touches) }
@@ -148,7 +162,7 @@ FloatingWindow {
     function basculer(r) {
         if (!r) return
         if (r.genre === "raccourci") { if (r.desactive) raccourci(r, "reactiver"); else capturer(r); return }
-        if (r.genre === "action") { lancerAction(r); return }
+        if (r.genre === "action") { demanderAction(r); return }
         if (r.genre === "info") return                // en lecture seule
         if (r.genre === "rapport") { if (liste.currentItem) liste.currentItem.deplie = !liste.currentItem.deplie; return }
         if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
@@ -200,7 +214,7 @@ FloatingWindow {
 
     Shortcut {
         sequence: "Escape"; enabled: !fen.capture
-        onActivated: { if (fen.ileOuverte) fen.fermerIle(); else if (fen.recherche !== "") { fen.recherche = ""; champRecherche.text = "" } else fen.close() }
+        onActivated: { if (fen.confirmation) liste.currentItem.aConfirmer = false; else if (fen.ileOuverte) fen.fermerIle(); else if (fen.recherche !== "") { fen.recherche = ""; champRecherche.text = "" } else fen.close() }
     }
     Shortcut { sequences: ["Ctrl+F", "Ctrl+K"]; enabled: !fen.capture; onActivated: { champRecherche.forceActiveFocus(); champRecherche.selectAll() } }
     onVisibleChanged: if (!visible && capture) finCapture("")
@@ -342,6 +356,9 @@ FloatingWindow {
                 objectName: "nc-reglage-" + modelData.cle
                 readonly property var r: modelData
                 property bool deplie: false            // rapport de mise à jour : le détail affiché
+                property bool aConfirmer: false        // action dangereuse : sa question est posée sur la ligne
+                readonly property bool estCourante: ListView.isCurrentItem
+                onEstCouranteChanged: if (!estCourante) aConfirmer = false
                 width: liste.width; height: Math.max(62, contenu.implicitHeight + 24); radius: 16
                 color: ligne.ListView.isCurrentItem ? Couleurs.carteSurvol : Couleurs.carte
                 border.width: ligne.ListView.isCurrentItem && liste.activeFocus ? 1.5 : 0; border.color: Couleurs.accent
@@ -358,6 +375,8 @@ FloatingWindow {
                         Ico { visible: ligne.r.modifie; anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 14; color: Couleurs.accent }
                     }
                     Texte { visible: ligne.r.aide !== "" && ligne.r.genre !== "rapport"; width: parent.width; text: ligne.r.aide; secondaire: true; font.pixelSize: 12; wrapMode: Text.Wrap; elide: Text.ElideNone }
+                    Texte { visible: ligne.aConfirmer; objectName: "nc-reglage-question-" + ligne.r.cle; width: parent.width; text: ligne.r.confirmer || ""
+                            color: Couleurs.rouge; font.pixelSize: 12; font.weight: Font.DemiBold; wrapMode: Text.Wrap; elide: Text.ElideNone }
                     // Rapport de mise à jour : le résumé de l'IA (Markdown), puis le détail à la demande
                     Text { visible: ligne.r.genre === "rapport"; width: parent.width; text: ligne.r.aide || ""; textFormat: Text.MarkdownText
                            wrapMode: Text.Wrap; color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 13 }
@@ -449,8 +468,16 @@ FloatingWindow {
                             objectName: "nc-reglage-info-" + ligne.r.cle; text: ligne.r.affiche; secondaire: true; font.pixelSize: 13
                             width: Math.min(implicitWidth, ligne.width * 0.45) }
                     // Action : un bouton qui ouvre sa fenêtre
-                    Pastille { visible: ligne.r.genre === "action"; anchors.verticalCenter: parent.verticalCenter; petit: true
-                               objectName: "nc-reglage-action-" + ligne.r.cle; texte: ligne.r.affiche; onClic: fen.lancerAction(ligne.r) }
+                    Pastille { visible: ligne.r.genre === "action" && !ligne.aConfirmer; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               objectName: "nc-reglage-action-" + ligne.r.cle; texte: ligne.r.affiche
+                               onClic: { liste.currentIndex = ligne.index; fen.demanderAction(ligne.r) } }
+                    // Confirmation d'une action dangereuse, sur sa ligne : le bouton qui confirme (rouge), puis Annuler
+                    Pastille { visible: ligne.aConfirmer; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               objectName: "nc-reglage-confirmer-" + ligne.r.cle; texte: ligne.r.bouton || Reglages.t("Confirmer", "Confirm")
+                               actif: true; color: Couleurs.rouge; onClic: { ligne.aConfirmer = false; fen.lancerAction(ligne.r, true) } }
+                    Pastille { visible: ligne.aConfirmer; anchors.verticalCenter: parent.verticalCenter; petit: true
+                               objectName: "nc-reglage-annuler-" + ligne.r.cle; texte: Reglages.t("Annuler", "Cancel")
+                               onClic: { ligne.aConfirmer = false; liste.forceActiveFocus() } }
                     Pastille { visible: ligne.r.genre === "rapport"; anchors.verticalCenter: parent.verticalCenter; petit: true
                                objectName: "nc-rapport-bouton-" + ligne.r.cle
                                texte: ligne.deplie ? Reglages.t("Masquer", "Hide") : ligne.r.affiche
@@ -525,7 +552,8 @@ FloatingWindow {
                 Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; elide: Text.ElideRight; width: pied.width - 30
                         color: fen.erreur ? Couleurs.rouge : Couleurs.texteSec
                         text: fen.enCours && !fen.message ? Reglages.t("Application…", "Applying…")
-                            : (fen.message || (fen.courant && fen.courant.genre === "raccourci" && liste.activeFocus
+                            : (fen.message || (fen.confirmation ? Reglages.t("Entrée : confirmer   Échap : annuler", "Enter: confirm   Esc: cancel") :
+                                fen.courant && fen.courant.genre === "raccourci" && liste.activeFocus
                                 ? Reglages.t("↑ ↓ choisir   Entrée nouvelles touches (ou réactiver)   Suppr désactiver / retirer   r touches d'origine   une lettre : chercher   Échap fermer",
                                              "↑ ↓ choose   Enter new keys (or turn on)   Del disable / remove   r original keys   a letter: search   Esc close") :
                                 rangee.activeFocus ? Reglages.t("← → changer d'onglet   ↓ Entrée : les réglages   ↑ chercher   une lettre : chercher   Échap fermer",
