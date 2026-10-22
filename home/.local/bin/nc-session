@@ -229,8 +229,8 @@ def placer(adresse, e):
 def regle(n, classe, bureau, active=True):
     """Règle Hyprland nommée, le temps de la réouverture : toute fenêtre de cette appli (écran de chargement, fenêtre de
     mise à jour, puis la vraie) s'ouvre directement sur son bureau, sans passer par le bureau affiché. Désactivée à la
-    fin (même nom, enabled = false), sans recharger Hyprland. n : nom propre à cette ouverture (« pid-numéro »), jamais
-    partagé avec une autre."""
+    fin (même nom, enabled = false), sans recharger Hyprland. Une seule ouverture à la fois (verrou) : les noms
+    nc-session-0, -1… resservent, et une règle laissée par une ouverture tuée net est retirée par la suivante."""
     motif = "^(" + re.escape(classe) + ")$"
     if "]]" in motif:
         return False
@@ -242,16 +242,36 @@ def regle(n, classe, bureau, active=True):
         return False
 
 
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+POSEES = RUNTIME / "nc-session-regles.json"           # règles actives de l'ouverture en cours (n, classe, bureau)
+
+
+def retirer_orphelines():
+    """Règles d'une ouverture tuée net (SIGKILL, coupure) : sans cela, l'appli s'ouvrirait en silence sur son ancien
+    bureau jusqu'au rechargement de Hyprland (revue SESSION-02)."""
+    try:
+        for n, classe, bureau in json.loads(POSEES.read_text()):
+            regle(n, classe, bureau, active=False)
+    except (OSError, ValueError, TypeError):
+        pass
+    POSEES.unlink(missing_ok=True)
+
+
 def ouvrir(nom, delai=None):
     """Une ouverture à la fois : deux à la fois se disputeraient les mêmes fenêtres (revue SESSION-01)."""
     import fcntl
-    verrou = open(Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "nc-session.lock", "a")
+    import signal
+    verrou = open(RUNTIME / "nc-session.lock", "a")
     try:
         fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         verrou.close()
         raise Erreur(T("Une session est déjà en train de s'ouvrir.", "A session is already opening.")) from None
+    # Arrêtée (île relancée, fin de session) : sortir proprement, pour que les règles posées soient retirées
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda s, _f: sys.exit(128 + s))
     try:
+        retirer_orphelines()
         return _ouvrir(nom, delai)
     finally:
         verrou.close()
@@ -286,13 +306,16 @@ def _ouvrir(nom, delai):
     regles = []
     try:
         for n, e in enumerate(lances):
-            if "terminal" not in e and classes.count(e["classe"]) == 1 and regle(f"{os.getpid()}-{n}", e["classe"], e["bureau"]):
-                regles.append((f"{os.getpid()}-{n}", e))
+            if "terminal" not in e and classes.count(e["classe"]) == 1:
+                regles.append((n, e))                           # notée avant d'être posée : retirée même si on est tué
+                POSEES.write_text(json.dumps([(m, f["classe"], f["bureau"]) for m, f in regles]))
+                regle(n, e["classe"], e["bureau"])
         return attendre(fenetres, lances, avant, delai)
     finally:
-        # Même après une erreur (lancement, Hyprland qui ne répond plus) : chaque règle posée est retirée, chacune à part
+        # Même après une erreur (lancement, Hyprland qui ne répond plus, arrêt) : chaque règle posée est retirée
         for n, e in regles:
             regle(n, e["classe"], e["bureau"], active=False)
+        POSEES.unlink(missing_ok=True)
 
 
 def attendre(fenetres, lances, avant, delai):

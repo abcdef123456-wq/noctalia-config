@@ -5,8 +5,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -66,7 +68,8 @@ class Sessions(unittest.TestCase):
         (self.home / "clients.json").write_text(json.dumps(list(c)))
 
     def lancer(self, *a):
-        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr", NC_SESSION_DELAI="4", NC_SESSION_CALME="1.5")
+        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr", NC_SESSION_DELAI="4", NC_SESSION_CALME="1.5",
+                   XDG_RUNTIME_DIR=str(self.home))
         return subprocess.run([str(SCRIPT), *a], env=env, capture_output=True, text=True, timeout=30)
 
     def appels(self):
@@ -99,9 +102,9 @@ class Sessions(unittest.TestCase):
         # La fenêtre de mise à jour de Discord, puis la vraie : toutes deux sur le bureau 3 ; la règle temporaire posée puis retirée
         self.assertIn("dispatch hl.dsp.window.move({ workspace = 3, follow = false, window = 'address:0xmaj' })", a)
         import re
-        pose = re.search(r"eval hl.window_rule\(\{ name = '(nc-session-\d+-1)', enabled = true, match = \{ class = \[\[\^\(discord\)\$\]\] \}, workspace = '3 silent' \}\)", a)
-        self.assertTrue(pose, "règle nommée pour cette ouverture seulement (pid-numéro)")
-        self.assertIn(f"eval hl.window_rule({{ name = '{pose[1]}', enabled = false,", a)
+        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = true, match = { class = [[^(discord)$]] }, workspace = '3 silent' })", a)
+        self.assertIn("eval hl.window_rule({ name = 'nc-session-1', enabled = false,", a)
+        self.assertFalse((self.home / "nc-session-regles.json").exists(), "plus rien à retirer après une ouverture finie")
         self.assertLess(a.index("enabled = true"), a.index("launch discord"), "la règle avant le lancement")
         l = json.loads(self.lancer("liste", "--json").stdout)
         self.assertEqual((l[0]["nom"], l[0]["fenetres"]), ("Dev", 3))
@@ -119,6 +122,38 @@ class Sessions(unittest.TestCase):
         a = self.appels()
         self.assertIn("enabled = true", a, r.stderr)
         self.assertIn("enabled = false", a, "règle retirée malgré l'échec")
+
+    def test_regles_retirees_si_l_ouverture_est_arretee(self):
+        """Revue SESSION-02 : un nc-session arrêté (SIGTERM : île relancée, fin de session) pendant l'attente des
+        fenêtres laissait sa règle active pour toujours ; tué net (SIGKILL), l'ouverture suivante la retire."""
+        self.clients(client("0xb", "discord", 3))
+        self.assertEqual(self.lancer("enregistrer", "Jeu").returncode, 0)
+        self.clients()
+        (self.home / ".local/bin/nc-apps").write_text("#!/bin/sh\n[ \"$1\" = list ] && echo '[]'\nexit 0\n")   # la fenêtre ne vient jamais
+        env = dict(HOME=str(self.home), PATH=str(self.home / ".local/bin") + ":/usr/bin:/bin", NC_LANGUE="fr",
+                   NC_SESSION_DELAI="20", XDG_RUNTIME_DIR=str(self.home))
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            (self.home / "appels").unlink(missing_ok=True)
+            p = subprocess.Popen([str(SCRIPT), "ouvrir", "Jeu"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(100):
+                if "enabled = true" in self.appels():
+                    break
+                time.sleep(0.05)
+            p.send_signal(sig)
+            self.assertEqual(p.wait(timeout=10), 143 if sig == signal.SIGTERM else -9)
+            a = self.appels()
+            self.assertIn("name = 'nc-session-0', enabled = true", a)
+            if sig == signal.SIGTERM:
+                self.assertIn("name = 'nc-session-0', enabled = false", a, "retirée à l'arrêt")
+            else:
+                self.assertNotIn("enabled = false", a)
+        # Après le SIGKILL : la suivante retire l'orpheline avant toute chose
+        (self.home / "appels").unlink()
+        self.clients(client("0xb", "discord", 3))
+        self.assertEqual(self.lancer("ouvrir", "Jeu").returncode, 0)
+        a = self.appels()
+        self.assertTrue(a.startswith("eval hl.window_rule({ name = 'nc-session-0', enabled = false,"), a[:200])
+        self.assertFalse((self.home / "nc-session-regles.json").exists())
 
     def test_terminal_deja_ouvert_et_plein_ecran(self):
         dossier = self.home / "projet"; dossier.mkdir()
