@@ -714,6 +714,11 @@ ICON_THEME=NC
 # sinon celle du plugin Noctalia. La version Quickshell utilise la police d'icônes Material Symbols Rounded (Google,
 # licence Apache 2.0), téléchargée une fois dans ~/.local/share/fonts.
 ILE=noctalia
+# Debian / Ubuntu : chaque module QML de Qt est un paquet à part. Un seul module importé par l'île sans son paquet, et
+# toute l'île refuse de se charger : cette liste est installée à la compilation et à chaque passage si Quickshell est
+# déjà là (un module ajouté à l'île plus tard). tests/test_connexion_ile.py vérifie qu'elle couvre tous les imports.
+QS_QML_DEBIAN="qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects
+  qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models"
 # Debian / Ubuntu : Quickshell n'est pas dans les dépôts : compilé depuis ses sources officielles (version 0.3.2),
 # seulement les modules utiles à l'île, installé dans /usr/local. Testé sur Debian 13 (protocoles Wayland des backports).
 compiler_quickshell() {
@@ -724,8 +729,7 @@ compiler_quickshell() {
   pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
     qt6-declarative-dev qt6-declarative-private-dev qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev qt6-svg-dev \
     libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols \
-    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects \
-    qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models
+    $QS_QML_DEBIAN
   # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
   wd="$(mktemp -d)"
@@ -757,6 +761,8 @@ if [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then
     compiler_quickshell || true
     hash -r
   fi
+  # Quickshell déjà compilé : les modules QML de Qt dont l'île a besoin (rien n'est fait s'ils sont tous là)
+  if have qs; then pkg_try $QS_QML_DEBIAN; fi
 fi
 # La capture ne sert qu'aux aperçus de la vue des fenêtres (Super + A) : sans elle, l'île Quickshell reste (avant, un
 # Quickshell compilé sans capture faisait perdre toute l'île et ses réglages à la mise à jour, sur Debian)

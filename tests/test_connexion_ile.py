@@ -35,10 +35,6 @@ class ConnexionIle(unittest.TestCase):
         self.assertRegex(sortie, r"RESULTAT (true|false) true")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ModulesCompilesSurDebian(unittest.TestCase):
     """Sur Debian, install.sh compile Quickshell sans certains modules : aucune page de l'île ne doit les importer
     directement (un seul import manquant et toute l'île refuse de se charger, comme Quickshell.Networking)."""
@@ -62,3 +58,84 @@ class ModulesCompilesSurDebian(unittest.TestCase):
             for type_, option in self.TYPES.items():
                 if option in desactives:
                     self.assertNotRegex(texte, r"\b" + type_ + r"\s*\{", f"{f.name} utilise {type_} (-D{option}=OFF)")
+
+
+class PaquetsQmlDebian(unittest.TestCase):
+    """Sur Debian, chaque module QML de Qt est un paquet à part (qml6-module-*) : un seul import de l'île sans son
+    paquet et toute l'île refuse de se charger. Chaque module importé (en tête de fichier, mais aussi dans une chaîne
+    passée à Qt.createQmlObject) doit être fourni par la compilation de Quickshell ou avoir son paquet dans la liste
+    QS_QML_DEBIAN d'install.sh, installée à la compilation et quand Quickshell est déjà là."""
+    # Module QML -> paquet Debian 13 (trixie), noms vérifiés sur packages.debian.org
+    TABLE = {
+        "QtQml": "qml6-module-qtqml",
+        "QtQml.Models": "qml6-module-qtqml-models",
+        "QtQml.WorkerScript": "qml6-module-qtqml-workerscript",
+        "QtQml.XmlListModel": "qml6-module-qtqml-xmllistmodel",
+        "QtQml.StateMachine": "qml6-module-qtqml-statemachine",
+        "QtCore": "qml6-module-qtcore",
+        "QtQuick": "qml6-module-qtquick",
+        "QtQuick.Window": "qml6-module-qtquick-window",
+        "QtQuick.Shapes": "qml6-module-qtquick-shapes",
+        "QtQuick.Effects": "qml6-module-qtquick-effects",
+        "QtQuick.Controls": "qml6-module-qtquick-controls",
+        "QtQuick.Templates": "qml6-module-qtquick-templates",
+        "QtQuick.Layouts": "qml6-module-qtquick-layouts",
+        "QtQuick.Dialogs": "qml6-module-qtquick-dialogs",
+        "QtQuick.Particles": "qml6-module-qtquick-particles",
+        "QtQuick.LocalStorage": "qml6-module-qtquick-localstorage",
+        "QtQuick.VectorImage": "qml6-module-qtquick-vectorimage",
+        "QtQuick.VirtualKeyboard": "qml6-module-qtquick-virtualkeyboard",
+        "Qt.labs.folderlistmodel": "qml6-module-qt-labs-folderlistmodel",
+        "Qt.labs.platform": "qml6-module-qt-labs-platform",
+        "Qt.labs.settings": "qml6-module-qt-labs-settings",
+        "Qt.labs.qmlmodels": "qml6-module-qt-labs-qmlmodels",
+        "Qt5Compat.GraphicalEffects": "qml6-module-qt5compat-graphicaleffects",
+        "QtMultimedia": "qml6-module-qtmultimedia",
+        "QtNetwork": "qml6-module-qtnetwork",
+        "QtPositioning": "qml6-module-qtpositioning",
+    }
+
+    @staticmethod
+    def imports(texte, js=False):
+        """Modules importés par un fichier : lignes « import X » (« .import X » en JavaScript) et « import X » écrits
+        dans une chaîne (Qt.createQmlObject, Qt.createComponent depuis un texte…)."""
+        import re
+        nom = r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
+        trouves = set(re.findall(r"(?m)^\s*" + (r"\." if js else "") + r"import\s+" + nom, texte))
+        for chaine in re.findall(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|`[^`]*`', texte):
+            trouves |= set(re.findall(r"(?:^|[\s;{])import\s+" + nom, chaine[1:-1]))
+        return trouves
+
+    def test_chaque_import_a_son_paquet(self):
+        import re
+        install = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+        m = re.search(r'(?m)^QS_QML_DEBIAN="([^"]*)"', install)
+        self.assertIsNotNone(m, "liste QS_QML_DEBIAN introuvable dans install.sh")
+        liste = set(m.group(1).split())
+        # Les deux usages : à la compilation, et pour un Quickshell déjà compilé
+        debut = install.index("compiler_quickshell() {")
+        compilation = install[debut:install.index("\n}\n", debut)]
+        self.assertRegex(compilation, r"pkg_try [^\n]*(\\\n[^\n]*)*\$QS_QML_DEBIAN", "compilation sans QS_QML_DEBIAN")
+        self.assertRegex(install[install.index("\n}\n", debut):], r"have qs; then pkg_try \$QS_QML_DEBIAN",
+                         "Quickshell déjà compilé : QS_QML_DEBIAN n'est pas installée")
+
+        trouves = {}
+        for f in sorted(QML.rglob("*.qml")) + sorted(QML.rglob("*.js")):
+            for module in self.imports(f.read_text(), js=f.suffix == ".js"):
+                trouves.setdefault(module, set()).add(f.name)
+        # L'extraction voit bien les imports écrits dans une chaîne (Connexion.qml, Qt.createQmlObject)
+        self.assertIn("Connexion.qml", trouves.get("Quickshell.Networking", set()))
+        for module, fichiers in sorted(trouves.items()):
+            if module == "Quickshell" or module.startswith("Quickshell."):
+                continue   # fourni par la compilation (modules désactivés : ModulesCompilesSurDebian)
+            with self.subTest(module=module):
+                self.assertTrue(module in self.TABLE,
+                                f"{', '.join(sorted(fichiers))} importe {module}, absent de la table : ajoute son paquet "
+                                "Debian à install.sh (QS_QML_DEBIAN) et à la table de ce test")
+                self.assertTrue(self.TABLE[module] in liste,
+                                f"{', '.join(sorted(fichiers))} importe {module} : ajoute son paquet Debian "
+                                f"{self.TABLE[module]} à install.sh (QS_QML_DEBIAN)")
+
+
+if __name__ == "__main__":
+    unittest.main()
