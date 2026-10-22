@@ -547,3 +547,24 @@ class IsolationDesTests(unittest.TestCase):
             self.assertTrue(os.environ.get(cle), cle)
             self.assertFalse(os.environ[cle].startswith(str(Path.home())), cle + " : " + os.environ[cle])
             self.assertNotEqual(os.environ[cle], os.environ.get("NC_TEST_VRAI_RUNTIME"), cle)
+
+
+class AnimationsSobres(unittest.TestCase):
+    """Revue E1 : en Économie (ou « Effets visuels : aucun »), aucune animation sans fin de l'île ne tourne ; seuls des
+    indicateurs d'attente bornés (une lecture, une réponse en cours) gardent la leur."""
+    BORNEES = {"Calendrier.qml", "Ligne.qml", "Assistant.qml"}     # chargement de l'agenda, d'une ligne, attente d'une réponse
+
+    def test_animations_infinies_coupees_en_sobre(self):
+        import re
+        dossier = REPO / "home/.config/quickshell/nc-ile"
+        for f in sorted(dossier.glob("*.qml")):
+            if f.name in self.BORNEES:
+                continue
+            texte = f.read_text()
+            for m in re.finditer(r"loops: Animation\.Infinite", texte):
+                ligne = texte[texte.rfind("\n", 0, m.start()) + 1:texte.find("\n", m.end())]
+                condition = re.search(r"running: ([^;}]+)", ligne)
+                self.assertTrue(condition, f"{f.name} : {ligne.strip()}")
+                expr = condition[1].strip()
+                propre = "sobre" in expr or re.search(r"(bouge|clignote|anime|mouvement)\b", expr)
+                self.assertTrue(propre, f"{f.name} : une animation sans fin ignore Reglages.sobre : {ligne.strip()}")

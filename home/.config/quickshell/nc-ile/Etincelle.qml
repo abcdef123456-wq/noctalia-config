@@ -101,15 +101,17 @@ Canvas {
             LogoAssistant { anchors.fill: parent; anime: e.tourne && !Reglages.sobre }
         }
     }
-    RotationAnimation on rotation { running: e.tourne && e.visible && e.tournante; from: 0; to: 360; duration: 2600; loops: Animation.Infinite }
-    Behavior on rotation { enabled: !e.tourne; NumberAnimation { duration: 300 } }
-    onTourneChanged: if (!tourne) { rotation = 0; flotte = 0 }
+    // En Économie ou sans effets (Reglages.sobre) : immobile ; Hyprland n'a plus à recomposer l'écran à chaque image
+    readonly property bool bouge: e.tourne && e.visible && !Reglages.sobre
+    RotationAnimation on rotation { running: e.bouge && e.tournante; from: 0; to: 360; duration: 2600; loops: Animation.Infinite }
+    Behavior on rotation { enabled: !e.bouge; NumberAnimation { duration: 300 } }
+    onBougeChanged: if (!bouge) { rotation = 0; flotte = 0 }
 
     // Les autres : flottent (montent et redescendent) pendant le travail
     property real flotte: 0
     transform: Translate { y: -e.flotte * e.taille * 0.16 }
     SequentialAnimation on flotte {
-        running: e.tourne && e.visible && !e.tournante && e.agent !== "assistant"; loops: Animation.Infinite
+        running: e.bouge && !e.tournante && e.agent !== "assistant"; loops: Animation.Infinite
         NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
         NumberAnimation { to: 0; duration: 900; easing.type: Easing.InOutSine }
     }

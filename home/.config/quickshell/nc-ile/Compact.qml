@@ -257,8 +257,12 @@ Item {
         readonly property var t: Etat.telechargements.length ? Etat.telechargements[0] : null
         montre: c.mode === "telechargement"
         Ico {
+            id: flecheTelechargement
             anchors.verticalCenter: parent.verticalCenter; nom: "arrow_downward"; taille: 17; color: Couleurs.accent
-            SequentialAnimation on anchors.verticalCenterOffset { running: telechargement.montre; loops: Animation.Infinite
+            // Immobile en Économie ou sans effets (Reglages.sobre)
+            readonly property bool bouge: telechargement.montre && !Reglages.sobre
+            onBougeChanged: if (!bouge) anchors.verticalCenterOffset = 0
+            SequentialAnimation on anchors.verticalCenterOffset { running: flecheTelechargement.bouge; loops: Animation.Infinite
                 NumberAnimation { from: -3; to: 3; duration: 600; easing.type: Easing.InOutSine }
                 NumberAnimation { from: 3; to: -3; duration: 600; easing.type: Easing.InOutSine } }
         }
@@ -283,8 +287,12 @@ Item {
         id: video
         montre: c.mode === "video"
         Rectangle {
+            id: pointVideo
             anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.rouge
-            SequentialAnimation on opacity { running: video.montre; loops: Animation.Infinite
+            // Point rouge fixe en Économie ou sans effets (Reglages.sobre)
+            readonly property bool clignote: video.montre && !Reglages.sobre
+            onClignoteChanged: if (!clignote) opacity = 1
+            SequentialAnimation on opacity { running: pointVideo.clignote; loops: Animation.Infinite
                 NumberAnimation { to: 0.35; duration: 700 } NumberAnimation { to: 1; duration: 700 } }
         }
         Texte {

@@ -6,7 +6,7 @@
 # PC hybride (carte intégrée + NVIDIA) : choisit aussi la carte des applis lancées selon le profil.
 # Réglages facultatifs (commande nc-reglages, ~/.config/nc/reglages.conf ; ancien fichier ~/.config/nc-profile.conf
 # encore lu) :
-#   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=low  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
+#   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=max  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
 #   PROFIL_SECTEUR / PROFIL_BATTERIE=garder|performance|balanced|power-saver   profil choisi en branchant / débranchant
 #   ECO_AUTO=20 (0 = jamais)   Économie sur batterie sous ce niveau, profil d'avant rendu en branchant
 #   ECO_EFFETS / ECO_CLAVIER / ECO_BLUETOOTH=oui|non   ce que coupe l'Économie   GPU_PERFORMANCE=nvidia|integree
