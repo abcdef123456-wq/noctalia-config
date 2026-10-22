@@ -160,6 +160,16 @@ class ErreurIA(Exception):
     pass
 
 
+class ErreurOutils(ErreurIA):
+    """La réponse contient des appels d'outils écrits en texte (aucun outil n'est donné ici) : la demande ne convient
+    pas à une IA de bureau. Pas une panne de l'IA : ni relais vers une autre, ni « échec » noté (REL-01)."""
+    def __init__(self):
+        super().__init__(T("L'IA a voulu utiliser des outils qui ne sont pas disponibles ici. Pour une tâche sur le "
+                           "projet, utilise l'agent (Espace i a).",
+                           "The AI tried to use tools that are not available here. For a task on the project, use "
+                           "the agent (Space i a)."))
+
+
 # ── Fournisseurs ────────────────────────────────────────────────────────────────────────────────────────────────
 # genre : api (HTTP, clé), local (Ollama), cli (programme installé), jarvis (nc-assistant)
 # vision : accepte une image ; agent : le logo dessiné dans l'île (Etincelle)
@@ -959,6 +969,11 @@ def gestionnaire():
     return ""
 
 
+# Les usages texte et question : sans quoi le modèle « fait la tâche » en écrivant des appels d'outils en texte
+SANS_OUTILS = ("Tu n'as accès à aucun outil, aucun fichier et aucune commande : réponds directement à partir du texte "
+               "fourni.", "You have no access to any tool, file or command: answer directly from the given text.")
+
+
 def consigne(usage):
     systeme = f"{distrib()}, Hyprland" + (f", {gestionnaire()}" if gestionnaire() else "")
     if usage == "commande":
@@ -987,9 +1002,9 @@ def consigne(usage):
                  "English. If the request is not a shortcut, answer {}.")
     if usage == "texte":
         return T("Tu transformes le texte que l'on te donne selon la consigne. Réponds seulement par le résultat, sans "
-                 "introduction ni commentaire, en texte simple.",
+                 "introduction ni commentaire, en texte simple. " + SANS_OUTILS[0],
                  "You transform the given text according to the instruction. Answer only with the result, no "
-                 "introduction or comment, in plain text.")
+                 "introduction or comment, in plain text. " + SANS_OUTILS[1])
     if usage == "chat":
         return T(f"Tu es l'assistant personnel de l'utilisateur, sur son ordinateur ({systeme}). Réponds en français, "
                  "clairement et sans détour ; le Markdown est permis (listes, code). Tiens compte de la conversation.",
@@ -1003,10 +1018,10 @@ def consigne(usage):
                  "is an error, say how to fix it, with the command on a last line “$ …” if a command helps.")
     return T(f"Réponds en français, en 2 à 6 lignes au plus, en texte simple (pas de titres ni de tableaux). Si une "
              f"commande Linux répond à la question, termine par une seule ligne qui commence par « $ » suivie de la "
-             f"commande, sans rien d'autre. L'ordinateur est sous {systeme}.",
+             f"commande, sans rien d'autre. L'ordinateur est sous {systeme}. " + SANS_OUTILS[0],
              f"Answer in English, in 2 to 6 lines at most, in plain text (no headings or tables). If a Linux command "
              f"answers the question, end with a single line that starts with “$ ” followed by the command, and nothing "
-             f"else. The computer runs {systeme}.")
+             f"else. The computer runs {systeme}. " + SANS_OUTILS[1])
 
 
 ACTIONS = {
@@ -1082,6 +1097,67 @@ def avis_relais(rates, ident):
              f"⚠ {liste} did not answer ({qui[0]}: {raison}): {nom(ident)} takes over.")
 
 
+# Balisage d'un appel d'outil écrit en texte (Claude, Codex, Gemini… sans outils, qui « font la tâche » quand même) :
+# <invoke name=…>, <parameter name=…>, <function_calls>, préfixe antml:, ou un JSON {"tool_use"…} en tête de réponse.
+# Le mot « invoke » dans une phrase passe : seul le balisage compte.
+MOTIF_OUTILS = re.compile(r"<\s{0,3}/?\s{0,3}(invoke|function_calls)\b|<\s{0,3}parameter\s{1,3}name\s{0,3}=|antml:",
+                          re.IGNORECASE)
+MOTIF_OUTILS_TETE = re.compile(r'^\s*(```[a-z]*\s*)?\[?\s*\{\s*"(tool_use|type"\s*:\s*"tool_use)')
+
+
+class FiltreOutils:
+    """Laisse passer le texte d'une réponse en flux, sauf du balisage d'outil (ErreurOutils dès qu'il paraît, avant
+    d'en avoir rien écrit). Ne retient que ce qui pourrait commencer un motif : les 64 premiers caractères d'une réponse
+    qui commence par « { », « [ » ou « ``` » (le JSON de tête), puis, dans les 32 derniers caractères, la fin à partir
+    du dernier « < » (ou un début de « antml: ») : un motif coupé entre deux morceaux est vu en entier au suivant, et
+    le texte ordinaire passe sans attendre."""
+    TETE, FENETRE = 64, 32
+
+    def __init__(self):
+        self.debut = ""          # le début de la réponse, jusqu'à TETE caractères (sans les blancs de tête)
+        self.reste = ""          # pas encore écrit
+
+    def _verifier(self):
+        if MOTIF_OUTILS.search(self.reste) or MOTIF_OUTILS_TETE.match(self.debut):
+            raise ErreurOutils()
+
+    def passer(self, m):
+        """Le texte sûr à écrire maintenant (parfois un peu en retard sur m)."""
+        self.reste += m
+        if len(self.debut) < self.TETE:
+            self.debut = (self.debut + m).lstrip()[:self.TETE]
+        self._verifier()
+        if not self.debut or (self.debut[0] in "{[`" and len(self.debut) < self.TETE):
+            return ""
+        r = self.reste
+        coupe = len(r)
+        i = r.rfind("<", max(0, len(r) - self.FENETRE))
+        if i >= 0:
+            coupe = i
+        for k in range(min(5, len(r)), 0, -1):                 # « a », « an »… « antml » en fin de morceau
+            if "antml:".startswith(r[-k:].lower()):
+                coupe = min(coupe, len(r) - k)
+                break
+        sur, self.reste = r[:coupe], r[coupe:]
+        return sur
+
+    def finir(self):
+        self._verifier()
+        sur, self.reste = self.reste, ""
+        return sur
+
+    def filtrer(self, morceaux):
+        """Les morceaux d'une réponse, filtrés, au fil de l'eau (puis ce que la fenêtre retenait)."""
+        try:
+            for m in morceaux:
+                if m:
+                    yield self.passer(m)
+        finally:
+            if hasattr(morceaux, "close"):
+                morceaux.close()                # balisage vu : le programme d'IA s'arrête tout de suite (ses finally)
+        yield self.finir()
+
+
 def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=()):
     """Écrit la réponse (texte brut, ou lignes JSON en flux) ; renvoie (réponse, ia) ; ErreurIA si aucune n'a pu.
     exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre)."""
@@ -1096,10 +1172,11 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
     for ident in liste:
         morceaux = []
         CHOIX.clear()
+        filtre = FiltreOutils()
         try:
             if flux:
                 ecrire(json.dumps({"ia": nom(ident), "id": ident, "agent": FOURNISSEURS[ident]["agent"]}, ensure_ascii=False) + "\n")
-            for m in appeler(ident, consigne_ or consigne(usage), texte, image, usage):
+            for m in filtre.filtrer(appeler(ident, consigne_ or consigne(usage), texte, image, usage)):
                 if not m:
                     continue
                 if rates and not morceaux:
@@ -1120,6 +1197,11 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
             if not flux and not rep.endswith("\n"):
                 ecrire("\n")
             return rep, ident
+        except ErreurOutils:
+            # La demande ne convient pas (une tâche sur le projet) : échec direct, ni relais ni échec noté pour l'IA
+            if morceaux:
+                ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
+            raise
         except (ErreurIA, OSError, subprocess.SubprocessError, ValueError) as e:
             if morceaux:                                        # déjà en partie affichée : pas de mélange de deux IA
                 noter_echec(ident)                              # incomplète : un échec, l'IA passe en dernier
@@ -2720,14 +2802,33 @@ def raccourci_ia(description):
 
 
 # ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────
+# Le programme agentique (qui sait lire et modifier un projet) de chaque IA, pour Neovim (Espace i a) : le sien pour
+# un programme installé, celui du même éditeur pour une API ; aucun pour les autres (JARVIS, Mistral, Ollama…)
+CLI_AGENT = {"anthropic": "claude", "openai": "codex", "google": "gemini", "claude": "claude", "codex": "codex",
+             "gemini-cli": "gemini", "opencode": "opencode", "qwen": "qwen"}
+
+
+def cli_agent(ident):
+    """(programme, prêt) : prêt s'il est installé et que la connexion est là (la connexion à son compte n'est pas
+    vérifiée ici : ce serait un appel réseau)."""
+    p = CLI_AGENT.get(ident, "")
+    return p, bool(p and shutil.which(p) and en_ligne())
+
+
 def etat():
     usages = ("question", "texte", "commande", "image")
     choix = {u: (candidats(u) or [""])[0] for u in usages}
+    c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
     return {
         "mode": mode(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", "claude"), "preference": reglage("IA_PREFERENCE", "rapide"),
-        "usages": {u: {"id": c, "nom": nom(c) if c else ""} for u, c in choix.items()},
+        # l'IA choisie (IA_CHOIX) et son programme agentique
+        "choisie": dict(id=c, nom=nom(c), disponible=disponible(c), cli=cli_agent(c)[0], cli_disponible=cli_agent(c)[1])
+                   if c in FOURNISSEURS else {},
+        "usages": {u: {"id": i, "nom": nom(i) if i else "", "cli": cli_agent(i)[0] if i else "",
+                       "cli_disponible": cli_agent(i)[1] if i else False} for u, i in choix.items()},
         "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
-                     cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""))
+                     cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""),
+                     cli=cli_agent(i)[0], cli_disponible=cli_agent(i)[1])
                 for i, f in FOURNISSEURS.items()],
     }
 

@@ -1061,6 +1061,112 @@ class IA(unittest.TestCase):
         self.assertIn("désactivée", d["erreur"])
         self.assertFalse(Faux.requetes, "rien n'est envoyé quand l'IA est coupée")
 
+    # ── Balisage d'outil écrit en texte (Neovim : « transformer » remplaçait la sélection par <invoke …>) ──
+    BALISAGE = ['<invoke name="Bash">\n<parameter name="command">pwd; find ../.. -maxdepth 3</parameter>\n</invoke>\n',
+                "erreur\n"] * 3
+    MESSAGE_OUTILS = "L'IA a voulu utiliser des outils qui ne sont pas disponibles ici."
+
+    def faux_claude(self, morceaux):
+        """Un faux Claude Code (stream-json) qui envoie ces morceaux de texte, un par événement."""
+        lignes = [json.dumps({"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": m}}}) for m in morceaux]
+        lignes.append(json.dumps({"type": "result", "is_error": False, "result": "".join(morceaux)}))
+        (self.faux / "claude.jsonl").write_text("\n".join(lignes) + "\n")
+        self.programme("claude", f'printf "%s\\n" "$@" >> "$JOURNAL"; cat "{self.faux / "claude.jsonl"}"')
+
+    def verifier_refus_outils(self, r, flux=False):
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("<invoke", r.stdout)
+        self.assertNotIn("<parameter", r.stdout)
+        if flux:
+            lignes, _ = self.flux(r)
+            self.assertTrue(lignes[-1].get("erreur"), lignes)
+            self.assertIn(self.MESSAGE_OUTILS, lignes[-1]["t"])
+            self.assertIn("(Espace i a)", lignes[-1]["t"])
+        else:
+            self.assertIn(self.MESSAGE_OUTILS, r.stderr)
+            self.assertIn("(Espace i a)", r.stderr)
+        # Pas de relais : ni l'API Anthropic ni un autre programme n'ont été appelés, et l'IA n'est pas notée en échec
+        self.assertNotIn("prend le relais", r.stdout + r.stderr)
+        self.assertFalse([q for q in Faux.requetes if q["chemin"].startswith("/ant")], "aucun relais")
+        e = self.home / "run/nc-ia/echecs.json"
+        echecs = json.loads(e.read_text()) if e.exists() else {}
+        self.assertEqual(echecs, {}, "la demande ne convenait pas : pas une panne de l'IA")
+
+    def test_claude_qui_ecrit_des_appels_d_outils(self):
+        self.reglages("IA_PREFERENCE=abonnements\n")         # Claude Code d'abord, l'API Anthropic en relais possible
+        self.faux_claude(self.BALISAGE)
+        r = self.lancer("texte", "transformer en code C", "--stdin", entree="Écrire un programme qui lit un entier.")
+        self.verifier_refus_outils(r)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertIn("Tu n'as accès à aucun outil, aucun fichier et aucune commande", self.journal.read_text())
+        # En flux, le motif coupé entre deux morceaux (« <inv » puis « oke ») est vu, après un début de réponse normal
+        debut = "Voici ce que je vais faire pour cet exercice, étape par étape, sans rien oublier.\n"
+        self.faux_claude([debut, "Je regarde le projet : <inv", 'oke name="Bash">', "<parameter name=\"command\">pwd",
+                          "</parameter></invoke>"])
+        r = self.lancer("texte", "transformer", "--stdin", "--flux", entree="exercice")
+        self.verifier_refus_outils(r, flux=True)
+        _, texte = self.flux(r)
+        # Le texte d'avant passe (sans attendre : seul « <inv » est retenu), le balisage jamais
+        self.assertTrue(texte.startswith(debut + "Je regarde le projet : \n…"), texte)
+        self.assertNotIn("<inv", texte)
+
+    def test_motif_coupe_sur_parameter(self):
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
+        self.faux_claude(["Je ", "lance <para", "meter na", "me=\"x\">"])
+        r = self.lancer("demander", "--flux", "question")
+        self.verifier_refus_outils(r, flux=True)
+
+    def test_codex_et_gemini_qui_ecrivent_des_appels_d_outils(self):
+        sortie = "".join(self.BALISAGE).replace('"', '\\"')
+        for ident, prog in (("codex", "codex"), ("gemini-cli", "gemini")):
+            with self.subTest(ident):
+                Faux.requetes.clear()
+                self.programme(prog, f'printf "%s" "{sortie}"')
+                self.reglages(f"IA_MODE=manuel\nIA_CHOIX={ident}\n")
+                r = self.lancer("texte", "transformer", "--stdin", entree="exercice")
+                self.verifier_refus_outils(r)
+                r = self.lancer("demander", "--flux", "question")
+                self.verifier_refus_outils(r, flux=True)
+        # Un JSON d'outil en tête de réponse, aussi
+        self.programme("codex", 'echo \'{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}\'')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=codex\n")
+        self.verifier_refus_outils(self.lancer("demander", "question"))
+
+    def test_le_mot_invoke_et_un_json_legitime_passent(self):
+        Faux.texte_ant = "En Python, on invoke une fonction par son nom suivi de parenthèses : f(x)."
+        r = self.lancer("demander", "--flux", "question")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.flux(r)[1], Faux.texte_ant)
+        Faux.texte_ant = '{"actions": [{"type": "wifi", "args": {"etat": "on"}}], "tool": "aucun"}'
+        r = self.lancer("demander", "question")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), Faux.texte_ant)
+        # Une réponse courte (moins que la fenêtre retenue) arrive entière
+        Faux.texte_ant = "Oui."
+        self.assertEqual(self.lancer("demander", "question").stdout.strip(), "Oui.")
+        # La consigne des usages texte et question dit qu'il n'y a aucun outil
+        for args in (("demander", "question"), ("texte", "resumer", "--stdin")):
+            self.lancer(*args, entree="un texte")
+            envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+            self.assertIn("Tu n'as accès à aucun outil, aucun fichier et aucune commande", envoye)
+
+    def test_etat_donne_le_programme_agentique(self):
+        self.programme("claude", "exit 0")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=anthropic\n")
+        e = json.loads(self.lancer("etat", "--json").stdout)
+        self.assertEqual(e["choix"], "anthropic")                          # les champs d'avant restent
+        self.assertEqual(e["choisie"], {"id": "anthropic", "nom": "Claude (API Anthropic)", "disponible": True,
+                                        "cli": "claude", "cli_disponible": True})
+        self.assertEqual((e["usages"]["texte"]["id"], e["usages"]["texte"]["cli"]), ("anthropic", "claude"))
+        ias = {i["id"]: i for i in e["ias"]}
+        self.assertEqual((ias["codex"]["cli"], ias["gemini-cli"]["cli"], ias["jarvis"]["cli"]), ("codex", "gemini", ""))
+        self.assertTrue(ias["codex"]["cli_disponible"])                    # le faux codex est installé
+        self.assertFalse(ias["jarvis"]["cli_disponible"])
+        self.assertIn("agent", ias["codex"])
+        # Sans connexion, aucun programme agentique n'est prêt
+        e = json.loads(self.lancer("etat", "--json", env_plus={"NC_IA_EN_LIGNE": "0"}).stdout)
+        self.assertFalse(e["choisie"]["cli_disponible"])
+
     # ── Terminal ──
     @unittest.skipUnless(shutil.which("zsh"), "zsh requis")
     def test_zsh(self):
