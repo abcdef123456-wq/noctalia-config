@@ -12,6 +12,9 @@
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
 // Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
 // Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
+// Action secondaire d'un résultat (champ facultatif suppr: { libelle, f }, une session par exemple) : Suppr (curseur en fin
+// de saisie) ou Maj + Suppr, ou le rond « − » de la ligne, demande confirmation sur la ligne même ; Entrée la fait, Échap
+// ou une autre ligne l'annule, le Spotlight reste ouvert.
 // Questions sur la config (« ? question », ou une phrase comme « comment changer le fond d'écran ») : réponses
 // instantanées de l'index de nc-aide-config (réglages, raccourcis, commandes, documentation), sans IA ; « Demander à
 // l'IA » reste en dernier. Réglage SPOTLIGHT_AIDE.
@@ -173,6 +176,32 @@ Item {
     readonly property int nbResultats: Math.max(3, Math.min(10, parseInt(Reglages.val("SPOTLIGHT_RESULTATS", "6")) || 6))
     property int sel: 0
     readonly property string q: champ.text.trim()
+    // Suppression demandée sur la ligne confirmer (son titre retenu : une liste refaite entre-temps l'annule) ; -1 : aucune
+    property int confirmer: -1
+    property string titreConfirme: ""
+    onSelChanged: annulerSuppr()                 // changer de ligne annule
+    function demanderSuppr(i) {
+        let x = resultats[i]
+        if (!x || !x.suppr) return
+        sel = i; confirmer = i; titreConfirme = x.titre
+    }
+    function annulerSuppr() { confirmer = -1; titreConfirme = "" }
+    function confirmerSuppr() {
+        let x = resultats[confirmer]
+        annulerSuppr()
+        if (x && x.suppr) x.suppr.f()
+    }
+    // Touche Suppr : sur la ligne choisie si elle se supprime et que la touche n'a rien à effacer dans la saisie (curseur
+    // à la fin, rien de sélectionné) ; Maj + Suppr toujours. Faux : la touche revient à la saisie
+    function toucheSuppr(maj) {
+        let x = resultats[sel]
+        if (!x || !x.suppr) return false
+        if (!maj && (champ.cursorPosition < champ.text.length || champ.selectedText !== "")) return false
+        demanderSuppr(sel)
+        return true
+    }
+    // Échap : annule d'abord une suppression demandée, sinon referme
+    function echap() { if (confirmer >= 0) annulerSuppr(); else Etat.fermer() }
 
     // Chargée à la demande : déjà active à sa création (une seule initialisation, une fois tout créé) ; rouverte avant
     // d'être déchargée : réinitialisée au changement de « actif »
@@ -283,8 +312,18 @@ Item {
         let nom = x.nom
         return { titre: Reglages.t("Session « ", "Session “") + nom + Reglages.t(" »", "”"), glyphe: "view_quilt", s: s,
                  sous: x.fenetres + Reglages.t(" fenêtre(s) · ", " window(s) · ") + (x.applis || []).join(", "),
-                 aide: Reglages.t("↵ l'ouvrir", "↵ open it"), f: () => Quickshell.execDetached([Etat.bin + "nc-session", "ouvrir", nom]) }
+                 aide: Reglages.t("↵ l'ouvrir · Suppr la supprimer", "↵ open it · Del delete it"),
+                 f: () => Quickshell.execDetached([Etat.bin + "nc-session", "ouvrir", nom]),
+                 suppr: { libelle: Reglages.t("Supprimer la session « ", "Delete the session “") + nom + Reglages.t(" » ?", "”?"),
+                          f: () => r.supprimerSession(nom) } }
     }
+    // Supprimer une session, puis relire la liste (et la recherche avec elle) : le Spotlight reste ouvert
+    function supprimerSession(nom) {
+        if (supprimeur.running) return
+        supprimeur.command = [Etat.bin + "nc-session", "supprimer", nom]
+        supprimeur.running = true
+    }
+    Process { id: supprimeur; onExited: lireSessions.running = true }
     Process {
         id: lireFenetres
         command: ["hyprctl", "clients", "-j"]
@@ -492,7 +531,7 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+    onQChanged: { sel = 0; annulerSuppr(); fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -736,6 +775,11 @@ Item {
         resultats = out
         if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
     }
+    // Liste refaite (sources arrivées, saisie changée) : la suppression demandée ne vaut que pour la même ligne
+    onResultatsChanged: {
+        let x = confirmer >= 0 ? resultats[confirmer] : null
+        if (confirmer >= 0 && (!x || !x.suppr || x.titre !== titreConfirme)) annulerSuppr()
+    }
 
     function lancer(id) {
         Quickshell.execDetached([Etat.bin + "nc-apps", "launch", id])
@@ -780,6 +824,7 @@ Item {
     // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
     readonly property bool occupe: suivi.running || entreeEnAttente
     function valider(i, nouveau) {
+        if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
         if ((lireApplis.running || applis.length === 0) && !/^([?>+!@]|sessions? )/i.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
@@ -807,7 +852,8 @@ Item {
             font.family: "Adwaita Sans"; font.pixelSize: 19
             clip: true
             cursorVisible: activeFocus
-            Keys.onEscapePressed: Etat.fermer()
+            Keys.onEscapePressed: r.echap()
+            Keys.onDeletePressed: e => { e.accepted = r.toucheSuppr((e.modifiers & Qt.ShiftModifier) !== 0) }
             Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
             Keys.onUpPressed: r.sel = Math.max(0, r.sel - 1)
             Keys.onTabPressed: r.sel = r.resultats.length > 0 ? (r.sel + 1) % r.resultats.length : 0
@@ -895,8 +941,12 @@ Item {
                 required property var modelData
                 required property int index
                 readonly property bool choisi: index === r.sel
+                readonly property bool confirme: index === r.confirmer
+                readonly property bool supprimable: !!modelData.suppr
                 width: liste.width; height: r.hauteurLigne; radius: 14
-                color: choisi ? Couleurs.gris2 : "transparent"
+                // En confirmation : le fond de l'île à peine teinté de rouge (le texte rouge y garde son contraste, ce
+                // qu'il ne ferait pas sur gris2)
+                color: confirme ? Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.rouge, 0.14)) : choisi ? Couleurs.gris2 : "transparent"
                 Item {
                     id: ic
                     x: 12; anchors.verticalCenter: parent.verticalCenter
@@ -911,21 +961,63 @@ Item {
                     Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: Couleurs.texteDoux; visible: img.status !== Image.Ready }
                 }
                 Texte {
+                    visible: !ligne.confirme
                     anchors.left: ic.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 12 - 28 - 12 - sous.width - 40
+                    width: parent.width - 12 - 28 - 12 - sous.width - 40 - (moins.visible ? 32 : 0)
                     text: ligne.modelData.titre; font.pixelSize: 15; font.weight: ligne.choisi ? Font.DemiBold : Font.Normal
                 }
                 Texte {
                     id: sous
-                    anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                    visible: !ligne.confirme
+                    anchors.right: parent.right; anchors.rightMargin: moins.visible ? 14 + 22 + 10 : 14; anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, 320)
                     text: ligne.modelData.sous + (ligne.choisi ? "  ·  " + (ligne.modelData.aide || "↵") : ""); secondaire: true; font.pixelSize: 13
                     horizontalAlignment: Text.AlignRight
                 }
+                // Suppression demandée : la question sur la ligne même, en rouge
+                Texte {
+                    objectName: "nc-spotlight-confirmation"
+                    visible: ligne.confirme
+                    anchors.left: ic.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: ligne.confirme ? ligne.modelData.suppr.libelle + "  " + Reglages.t("↵ oui · Échap non", "↵ yes · Esc no") : ""
+                    color: Couleurs.rouge; font.pixelSize: 15; font.weight: Font.DemiBold
+                }
                 MouseArea {
+                    id: zoneLigne
                     anchors.fill: parent; hoverEnabled: true
                     onEntered: r.sel = ligne.index
                     onClicked: e => r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
+                }
+                // − : la même suppression, à la souris (au survol ou sur la ligne choisie). En verre, comme celui de la
+                // fiche des raccourcis ; rouge seulement au survol
+                Rectangle {
+                    id: moins
+                    objectName: "nc-spotlight-moins"
+                    readonly property bool montre: ligne.supprimable && !ligne.confirme && (ligne.choisi || zoneLigne.containsMouse || zMoins.containsMouse)
+                    opacity: montre ? 1 : 0
+                    visible: opacity > 0
+                    Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: 120 } }
+                    anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                    width: 22; height: 22; radius: 11
+                    color: zMoins.containsMouse ? Qt.alpha(Couleurs.carteSurvol, 0.75) : Qt.alpha(Couleurs.carte, 0.55)
+                    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.28)
+                    // Reflet du verre : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: 1; radius: height / 2
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
+                            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
+                        }
+                    }
+                    Texte { anchors.centerIn: parent; text: "−"; font.pixelSize: 16; font.weight: Font.Bold
+                            color: zMoins.containsMouse ? Couleurs.rouge : Couleurs.texte }
+                    MouseArea {
+                        id: zMoins
+                        anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                        enabled: moins.montre
+                        onClicked: r.demanderSuppr(ligne.index)
+                    }
                 }
             }
         }

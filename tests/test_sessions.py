@@ -253,6 +253,99 @@ ShellRoot {
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("nc-session enregistrer Cours", (root / "appels").read_text())
 
+    def test_supprimer_une_session(self):
+        # Issue #11 : Suppr (ou le rond « − ») demande confirmation sur la ligne ; Entrée supprime puis relit la liste,
+        # Échap ou une autre ligne annule, le Spotlight reste ouvert ; une ligne sans suppr ne réagit pas
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-suppr-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool iaCoupee: false; readonly property bool sobre: true; function t(fr,en){return fr} function val(k,d){return d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            # Faux nc-session : journalise ses appels ; « supprimer Dev » la retire de la liste
+            faux_session = '''#!/bin/sh
+echo "nc-session $*" >> "$HOME/appels"
+case "$1" in
+  liste) if [ -e "$HOME/dev-supprimee" ]; then echo '[{"nom": "Cours", "fenetres": 1, "applis": ["kitty"]}]'
+         else echo '[{"nom": "Dev", "fenetres": 3, "applis": ["kitty", "firefox"]}, {"nom": "Cours", "fenetres": 1, "applis": ["kitty"]}]'; fi ;;
+  supprimer) [ "$2" = Dev ] && : > "$HOME/dev-supprimee" ;;
+esac
+'''
+            scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                       "nc-demander": '#!/bin/sh\necho \'{"nom": "", "agent": "", "coupee": false}\'\n', "nc-session": faux_session}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.sessions.length !== 2) return
+   // Une ligne sans suppr : Suppr ne fait rien (la touche revient à la saisie)
+   champ.text = "session Zzz"; champ.cursorPosition = champ.text.length
+   verifier(!spot.resultats[0].suppr, "« Enregistrer… » n'a pas de suppr")
+   verifier(!spot.toucheSuppr(false) && !spot.toucheSuppr(true) && spot.confirmer === -1, "ligne sans suppr : Suppr ne fait rien")
+   champ.text = "session "; champ.cursorPosition = champ.text.length; etape++; return }
+  if (etape === 1) {
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Dev »", "Session « Cours »"]), JSON.stringify(titres()))
+   verifier(spot.resultats[0].aide === "↵ l'ouvrir · Suppr la supprimer", "aide : " + spot.resultats[0].aide)
+   var moins = trouver(spot, "nc-spotlight-moins")
+   verifier(moins !== null && moins.montre, "le rond − est montré sur la ligne choisie")
+   // Suppr : la confirmation sur la ligne, en rouge
+   verifier(spot.toucheSuppr(false) && spot.confirmer === 0, "Suppr demande confirmation")
+   var conf = trouver(spot, "nc-spotlight-confirmation")
+   verifier(conf.visible && conf.text === "Supprimer la session « Dev » ?  ↵ oui · Échap non", "confirmation : " + conf.visible + " " + conf.text)
+   verifier(String(conf.color) === String(Couleurs.rouge), "en rouge : " + conf.color)
+   verifier(!moins.montre, "pas de − pendant la confirmation")
+   // Échap : annule, rien n'est lancé, le Spotlight reste ouvert
+   spot.echap()
+   verifier(spot.confirmer === -1 && !conf.visible && Etat.fermetures === 0, "Échap annule sans fermer")
+   // Une autre ligne annule aussi
+   verifier(spot.toucheSuppr(true) && spot.confirmer === 0, "Maj + Suppr demande confirmation")
+   spot.sel = 1
+   verifier(spot.confirmer === -1, "changer de ligne annule")
+   // Le rond − : la même confirmation
+   spot.sel = 0
+   var zone = moins.children[moins.children.length - 1]
+   zone.clicked(null)
+   verifier(spot.confirmer === 0 && conf.visible, "le − demande confirmation")
+   spot.echap()
+   // Entrée : supprime, sans fermer le Spotlight
+   spot.toucheSuppr(false)
+   spot.valider(spot.sel, false)
+   verifier(Etat.fermetures === 0 && spot.confirmer === -1, "Entrée supprime sans fermer")
+   etape++; return }
+  if (etape === 2) { if (spot.sessions.length !== 1) return
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Session « Cours »"]), "liste relue : " + JSON.stringify(titres()))
+   Qt.quit() }
+ } }
+ Timer { interval: 9000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            for erreur in ("ReferenceError", "TypeError", "is not a type"):
+                self.assertNotIn(erreur, sortie)
+            appels = (root / "appels").read_text().splitlines()
+            self.assertEqual([a for a in appels if "supprimer" in a], ["nc-session supprimer Dev"], "la commande exacte, une seule fois")
+            self.assertIn("nc-session liste --json", appels[appels.index("nc-session supprimer Dev") + 1:], "liste relue après")
+            self.assertNotIn("ouvrir", " ".join(appels), "aucune session ouverte")
+
 
 if __name__ == "__main__":
     unittest.main()
