@@ -204,8 +204,8 @@ def verifier(b):
                     T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
                       "run nc-update again; on Debian, accept rebuilding Quickshell"))
         elif sortie(["bash", capture], 15)[1] != 0:
-            b.avert(T("Quickshell sans capture : vue des fenêtres (Super + A) indisponible, le reste de l'île marche",
-                      "Quickshell without capture: window overview (Super + A) unavailable, the rest of the island works"),
+            b.avert(T("Quickshell sans capture ou sans réseau : vue des fenêtres (Super + A) ou suivi de la connexion indisponible, le reste de l'île marche",
+                      "Quickshell without capture or networking: window overview (Super + A) or connection tracking unavailable, the rest of the island works"),
                     T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
                       "run nc-update again; on Debian, accept rebuilding Quickshell"))
         _, active = sortie(["systemctl", "--user", "is-enabled", "nc-ile.service"])

@@ -27,7 +27,7 @@ class Centre(unittest.TestCase):
                 etat = root / ".local/state/nc/ile"
                 etat.mkdir(parents=True, mode=0o700)
                 (etat / "centre.json").write_text(json.dumps(memo))
-            for nom in ("Centre.qml", "Memo.qml", "Module.qml", "Rond.qml", "Glissiere.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
+            for nom in ("Centre.qml", "Connexion.qml", "Memo.qml", "Module.qml", "Rond.qml", "Glissiere.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: false; readonly property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return d}}')
             (root / "Notifs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool concentration: false; function basculerConcentration(){concentration=!concentration}}')
@@ -64,8 +64,8 @@ class Centre(unittest.TestCase):
                     function annoncerHauteur(nom, h) { var t = Object.assign({}, hauteurs); t[nom] = Math.round(h); hauteurs = t }
                 }'''))
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("Memo", "Couleurs", "Reglages", "Etat", "Notifs") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Centre", "Memo", "Module", "Rond", "Glissiere", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Notifs")))
+                ("singleton " if n in ("Memo", "Couleurs", "Reglages", "Etat", "Notifs", "Connexion") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("Centre", "Connexion", "Memo", "Module", "Rond", "Glissiere", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Notifs")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window

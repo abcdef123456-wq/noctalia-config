@@ -8,7 +8,6 @@
 // notification), « Mettre à jour » ouvre le terminal de mise à jour.
 import QtQuick
 import Quickshell
-import Quickshell.Networking
 import Quickshell.Io
 import Quickshell.Widgets
 
@@ -40,7 +39,7 @@ Item {
 
     // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
     // Inconnue (pas de NetworkManager) : considérée comme là.
-    readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
+    readonly property bool enLigne: Connexion.enLigne
     // Résumé par l'IA du bureau (nc-ia), seulement sur demande : le texte des notifications passe par l'entrée standard
     property string resumeIA: ""
     property string resumeQui: ""

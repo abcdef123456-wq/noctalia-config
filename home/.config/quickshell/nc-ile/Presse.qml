@@ -4,13 +4,12 @@
 // long se déplie d'un clic sur sa flèche ; « Effacer » vide l'historique (les épinglés restent).
 // Clavier : ↑ ↓ choisir, Entrée recopier, Suppr supprimer, Échap vider la recherche.
 import QtQuick
-import Quickshell.Networking
 import Quickshell.Widgets
 
 Item {
     id: p
     // Connexion internet (NetworkManager) : hors ligne, le bouton ✦ de l'IA disparaît, il revient avec la connexion
-    readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
+    readonly property bool enLigne: Connexion.enLigne
     property string recherche: ""
     property string filtre: "tout"           // tout, textes, images
     property int choix: -1                   // carte choisie au clavier

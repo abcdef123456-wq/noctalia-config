@@ -736,7 +736,7 @@ compiler_quickshell() {
        -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF \
        -DSCREENCOPY=ON -DSCREENCOPY_HYPRLAND_TOPLEVEL=ON \
        -DSERVICE_PAM=OFF -DSERVICE_POLKIT=OFF -DSERVICE_GREETD=OFF -DSERVICE_STATUS_NOTIFIER=OFF \
-       -DNETWORK=OFF -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
+       -DNETWORK=ON -DBLUETOOTH=OFF -DWAYLAND_SESSION_LOCK=OFF -DHYPRLAND_GLOBAL_SHORTCUTS=OFF \
        -DHYPRLAND_SURFACE_EXTENSIONS=OFF &&
      avec_progres "$(t "Compilation" "Building")" "$wd/build.log" cmake --build "$wd/build" &&
      sudo cmake --install "$wd/build" >/dev/null 2>&1; then
@@ -752,7 +752,7 @@ if [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then
   # Les anciennes installations étaient compilées sans capture : leur numéro de version ne suffit pas.
   if ! have qs || ! ver_ge "$(qs_ver || true)" 0.3 || ! bash "$REPO/home/.local/bin/nc-qs-capture"; then
     if have qs; then
-      warn "$(t "Quickshell doit être recompilé avec la capture pour la vue des fenêtres (Super + A)." "Quickshell must be rebuilt with capture support for the window overview (Super + A).")"
+      warn "$(t "Quickshell doit être recompilé avec la capture (vue des fenêtres, Super + A) et le réseau (suivi de la connexion)." "Quickshell must be rebuilt with capture (window overview, Super + A) and networking (connection tracking).")"
     fi
     compiler_quickshell || true
     hash -r
@@ -763,7 +763,7 @@ fi
 if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-qs-capture" --modules; then
   ILE=quickshell
   bash "$REPO/home/.local/bin/nc-qs-capture" ||
-    warn "$(t "Quickshell sans capture : la vue des fenêtres (Super + A) est indisponible ; relance nc-maj et accepte sa recompilation." "Quickshell without capture: the window overview (Super + A) is unavailable; run nc-update again and accept rebuilding it.")"
+    warn "$(t "Quickshell sans capture ou sans réseau : la vue des fenêtres (Super + A) ou le suivi de la connexion est indisponible ; relance nc-maj et accepte sa recompilation." "Quickshell without capture or networking: the window overview (Super + A) or connection tracking is unavailable; run nc-update again and accept rebuilding it.")"
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
   if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
     info "$(t "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons" "Island icons: Material Symbols Rounded font (Google), https://github.com/google/material-design-icons")"

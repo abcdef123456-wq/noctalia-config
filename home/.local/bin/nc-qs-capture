@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Vérifie les imports de l'île et le type de capture. Ne teste pas le protocole du compositeur ni une capture réelle.
-#   nc-qs-capture            les modules de l'île et la capture (aperçus de la vue des fenêtres, Super + A)
-#   nc-qs-capture --modules  seulement les modules de l'île : sans capture, l'île marche (la vue des fenêtres non)
+#   nc-qs-capture            les modules de l'île, la capture (aperçus de la vue des fenêtres, Super + A) et le réseau
+#                            (Quickshell.Networking : l'IA suit la connexion)
+#   nc-qs-capture --modules  seulement les modules indispensables : sans capture ni réseau, l'île marche quand même
 set -euo pipefail
 capture='    property Component capture: Component { ScreencopyView {} }'
-[ "${1:-}" = --modules ] && capture=''
+reseau='import Quickshell.Networking'
+[ "${1:-}" = --modules ] && capture='' && reseau=''
 
 command -v qs >/dev/null 2>&1 || exit 1
 dossier=$(mktemp -d)
@@ -23,6 +25,7 @@ import Quickshell.Services.UPower
 import Quickshell.Services.Notifications
 import QtQuick.Effects
 import QtQuick.Shapes
+$reseau
 ShellRoot {
 $capture
     Timer { interval: 1; running: true; onTriggered: Qt.quit() }

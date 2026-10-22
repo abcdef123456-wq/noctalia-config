@@ -20,7 +20,6 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.UPower
-import Quickshell.Networking
 import "AideConfig.js" as Aide
 
 Item {
@@ -54,7 +53,7 @@ Item {
     property string commandeIA: ""
     // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
     // Inconnue (pas de NetworkManager) : considérée comme là.
-    readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
+    readonly property bool enLigne: Connexion.enLigne
     onEnLigneChanged: if (actif) lireIA.running = true          // l'IA disponible change avec la connexion
     // Pas d'IA joignable parce que la connexion manque (une IA locale, Ollama, reste proposée : nomIA n'est pas « - »)
     readonly property bool horsLigne: nomIA === "-" && !enLigne

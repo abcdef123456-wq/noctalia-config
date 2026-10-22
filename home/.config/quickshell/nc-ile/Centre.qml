@@ -9,7 +9,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Networking
 import Quickshell.Widgets
 import Quickshell.Services.UPower
 
@@ -427,7 +426,7 @@ Item {
             id: pIA
             property string qui: ""
             // Hors ligne : seule une IA de ce PC (Ollama) reste ; relu quand la connexion change
-            readonly property bool enLigne: Networking.connectivity !== NetworkConnectivity.None && Networking.connectivity !== NetworkConnectivity.Portal
+            readonly property bool enLigne: Connexion.enLigne
             onEnLigneChanged: lireQui.running = true
             icone: "auto_awesome"; titre: Reglages.t("IA", "AI"); actif: !Reglages.iaCoupee; couleur: Couleurs.violet
             sous: Reglages.iaCoupee ? Reglages.t("Coupée partout", "Off everywhere")
