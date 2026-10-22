@@ -1822,11 +1822,28 @@ def _executer_plan(ident, numeros):
         try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
             v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres, bureau)
             a["ok"], a["resultat"] = executer_action(v)
+            if bureau is not None and a["outil"] == "fenetre_direction":
+                a["resultat"] = garder_sur_bureau(v["args"]["adresse"], bureau, a["resultat"])
         except ErreurIA as e:
             a["ok"], a["resultat"] = False, str(e)
         a["fait"] = True
     garder_plan(plan)
     return plan
+
+
+def garder_sur_bureau(adresse, bureau, resultat):
+    """« Organiser ce bureau » : poussée au bord de l'écran, une fenêtre passe sur l'écran voisin (donc un autre bureau) ;
+    elle est remise sur ce bureau, et c'est dit."""
+    try:
+        c = json.loads(subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
+        ici = next((x.get("workspace") or {}).get("id") for x in c if x.get("address") == adresse)
+    except (OSError, ValueError, StopIteration, subprocess.TimeoutExpired):
+        return resultat
+    if ici == bureau:
+        return resultat
+    sortie_cmd(["hyprctl", "dispatch", f"hl.dsp.window.move({{ workspace = {int(bureau)}, follow = false, window = 'address:{adresse}' }})"])
+    return ((resultat + " ") if resultat else "") + T(f"(remise sur le bureau {bureau} : bord de l'écran)",
+                                                        f"(put back on desktop {bureau}: edge of the screen)")
 
 
 def afficher_plan(plan):

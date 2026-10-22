@@ -512,6 +512,15 @@ class IA(unittest.TestCase):
         envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
         self.assertNotIn("0xd4", envoye, "l'IA ne voit que les fenêtres de ce bureau")
         self.assertNotIn("organise ce bureau 2", envoye)
+        # Poussée au bord de l'écran, une fenêtre passe sur l'écran voisin : remise sur ce bureau, et c'est dit
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [{"outil": "fenetre_direction", "args": {"adresse": "0xa1", "direction": "droite"}}]})
+        plan = json.loads(self.lancer("agir", "--json", "--bureau", "2", "kitty à droite").stdout)
+        apres = json.loads(json.dumps(clients)); apres[0]["workspace"]["id"] = 7       # après le déplacement : l'écran voisin
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in dispatch) : > "$HOME/bouge";; clients) '
+                                  'if [ -e "$HOME/bouge" ]; then echo \'' + json.dumps(apres) + '\'; else echo \'' + json.dumps(clients) + '\'; fi;; esac')
+        d = json.loads(self.lancer("executer", plan["id"], "--json").stdout)
+        self.assertIn("remise sur le bureau 2", d["actions"][0]["resultat"])
+        self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", self.appels())
 
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()
