@@ -117,6 +117,15 @@ proposer_redemarrage() {
   fi
 }
 
+# Le micrologiciel sait-il démarrer directement dans le BIOS (UEFI, bit 0 de OsIndicationsSupported, comme
+# « bootctl reboot-to-firmware ») ? La variable : 4 octets d'attributs, puis la valeur (petit-boutiste)
+bios_au_redemarrage() {
+  local v
+  v="$(od -An -tu1 -j4 -N1 "$SYS/firmware/efi/efivars/OsIndicationsSupported-8be4df61-93ca-11d2-aa0d-00e098032b8c" 2>/dev/null)" || return 1
+  v="${v// /}"
+  [ -n "$v" ] && [ $((v & 1)) = 1 ]
+}
+
 # Écrit dans /sys : directement si possible, sinon avec pkexec (session graphique) ou sudo
 ecrire_sys() {
   local f="$1" v="$2"
@@ -161,6 +170,13 @@ basculer() {
       if [ "$cible" = dediee ]; then ecrire_sys "$f" 1 || return 1; else ecrire_sys "$f" 0 || return 1; fi
       proposer_redemarrage "$cible" ;;
     *)
+      # Sans démarrage direct dans le BIOS (BIOS ancien, variables EFI absentes) : seulement dire comment y entrer
+      if ! bios_au_redemarrage; then
+        t "Ton PC change de mode graphique dans son BIOS : GPU Working Mode (ou Mode graphique) → $(nom_mode "$cible"). Pour y entrer, redémarre et appuie sur F2 (ou Suppr, F1, Échap selon le PC) dès l'allumage." \
+          "Your PC switches graphics mode in its BIOS: GPU Working Mode (or Graphics Mode) → $(nom_mode "$cible"). To enter it, restart and press F2 (or Del, F1, Esc depending on the PC) right at power-on."
+        echo
+        return 0
+      fi
       if demander "$(t "Mode graphique : $(nom_mode "$cible")" "Graphics mode: $(nom_mode "$cible")")" \
           "$(t "Ton PC change de mode graphique dans son BIOS : GPU Working Mode (ou Mode graphique) → $(nom_mode "$cible"). Les applis ouvertes seront fermées. Redémarrer dans le BIOS ?" \
                "Your PC switches graphics mode in its BIOS: GPU Working Mode (or Graphics Mode) → $(nom_mode "$cible"). Open apps will be closed. Restart into the BIOS?")" \

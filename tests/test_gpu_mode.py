@@ -56,7 +56,11 @@ class GpuMode(unittest.TestCase):
         if edp:
             self.ecrire(f"class/drm/card{n}-eDP-{n + 1}/status", edp)
 
-    def machine(self, vendeur="LENOVO", nom="83LT", famille="Legion Pro 5 16ADR10"):
+    def machine(self, vendeur="LENOVO", nom="83LT", famille="Legion Pro 5 16ADR10", uefi=True):
+        if uefi:   # OsIndicationsSupported : 4 octets d'attributs, puis 0x7f (bit 0 : démarrage dans le BIOS possible)
+            efi = self.sys / "firmware/efi/efivars/OsIndicationsSupported-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+            efi.parent.mkdir(parents=True, exist_ok=True)
+            efi.write_bytes(bytes([6, 0, 0, 0, 0x7f, 0, 0, 0, 0, 0, 0, 0]))
         self.ecrire("class/dmi/id/sys_vendor", vendeur)
         self.ecrire("class/dmi/id/product_name", nom)
         self.ecrire("class/dmi/id/product_family", famille)
@@ -107,6 +111,18 @@ class GpuMode(unittest.TestCase):
         self.lancer("basculer", "dediee")
         self.assertEqual([l for l in self.appels().splitlines() if l.startswith("systemctl")],
                          ["systemctl reboot --firmware-setup"])
+
+    def test_bios_sans_demarrage_direct_explique_la_touche(self):
+        # BIOS ancien ou variables EFI absentes : pas de bouton qui ne marcherait pas, seulement la touche à presser
+        self.machine(uefi=False)
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, AMD, "connected")
+        self.clic("oui")
+        r = self.lancer("basculer", "dediee")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("F2", r.stdout)
+        self.assertEqual(self.notifs(), [])
+        self.assertNotIn("systemctl", self.appels())
 
     def test_sans_argument_vers_l_autre_mode(self):
         self.legion()
