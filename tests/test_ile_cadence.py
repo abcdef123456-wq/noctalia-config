@@ -40,11 +40,19 @@ class Surface(unittest.TestCase):
         self.ile = (QML / "Ile.qml").read_text()
 
     def test_ancrage(self):
-        self.assertIn("anchors { top: true; left: fen.recherche; right: fen.recherche; bottom: fen.recherche }", self.ile)
+        # Ancrée en haut seulement, toujours : changer les ancres faisait disparaître l'île quelques images. En recherche,
+        # la surface prend la taille de l'écran, et la garde jusqu'à ce que l'île soit revenue (sinon elle sautait de côté)
+        self.assertIn("    anchors.top: true\n", self.ile)
+        self.assertEqual(re.findall(r"(?m)^    anchors\b.*$", self.ile), ["    anchors.top: true"])   # ancres de la fenêtre
+        self.assertIn("readonly property bool pleinEcran: recherche || retourRecherche.running", self.ile)
+        self.assertIn("implicitWidth: pleinEcran ? modelData.width", self.ile)
+        self.assertIn("implicitHeight: pleinEcran ? modelData.height", self.ile)
+        # Le masque suit la recherche, pas pleinEcran : après la fermeture, l'écran ne bloque pas les clics
+        self.assertIn("mask: Region { item: fen.recherche ? fondClic : ile", self.ile)
 
     def test_tailles(self):
-        self.assertIn("implicitHeight: grande ? 700 : 56", self.ile)
-        self.assertRegex(self.ile, r"implicitWidth: Math\.min\(modelData\.width, grande \? Math\.max\(800, largeurUtile\)")
+        self.assertIn("(grande ? 700 : 56)", self.ile)
+        self.assertRegex(self.ile, r"Math\.min\(modelData\.width, grande \? Math\.max\(800, largeurUtile\)")
         # enCarte : demande de Claude Code ou confirmation du mode graphique (île fermée étirée en carte)
         self.assertIn("readonly property bool grandeVoulue: ouverte || banniere || enCarte", self.ile)
         self.assertIn("readonly property bool enCarte: demandeClaude || confirmGpu", self.ile)

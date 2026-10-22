@@ -17,7 +17,13 @@ PanelWindow {
 
     // Recherche : la fenêtre couvre tout l'écran (invisible) pour qu'un clic à côté la referme. L'île prend alors le
     // clavier en exclusif, et Hyprland ne laisse aucun clic arriver ailleurs : une couche séparée ne les recevait pas
-    anchors { top: true; left: fen.recherche; right: fen.recherche; bottom: fen.recherche }
+    // Toujours ancrée en haut seulement : en recherche, la surface prend la taille de l'écran. Changer les ancres faisait
+    // disparaître l'île quelques images, et changer la géométrie pendant le ressort la faisait sauter d'un côté à l'autre :
+    // pleinEcran reste donc vrai après la recherche, le temps que l'île revienne à sa taille
+    anchors.top: true
+    readonly property bool pleinEcran: recherche || retourRecherche.running
+    onRechercheChanged: if (recherche) retourRecherche.stop(); else retourRecherche.restart()
+    Timer { id: retourRecherche; interval: 900 }
     // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
     // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
     // 200 x 30 coûtait les trois quarts de l'iGPU dès que quelque chose bougeait dans l'île (étincelle, onde, minuteur).
@@ -28,11 +34,17 @@ PanelWindow {
     readonly property bool grande: grandeVoulue || retour.running
     onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else retour.restart()
     Timer { id: retour; interval: 900 }
-    function revenue() { if (retour.running && ile.height <= 31 && ile.width <= compact.largeur + 1) retour.stop() }
+    function revenue() {
+        if (retour.running && ile.height <= 31 && ile.width <= compact.largeur + 1) retour.stop()
+        // Île arrivée à sa taille voulue (ressort fini, à 1 près) : la surface peut quitter le plein écran
+        if (retourRecherche.running && Math.abs(ile.width - ile.cibleLargeur) <= 1 && Math.abs(ile.height - ile.cibleHauteur) <= 1)
+            retourRecherche.stop()
+    }
     readonly property real largeurUtile: Math.max(ile.width, compact.largeur) + 140
     // Par paliers de 40 : pendant le ressort de la pilule, la surface change de taille quelques fois, pas à chaque image
-    implicitWidth: Math.min(modelData.width, grande ? Math.max(800, largeurUtile) : Math.ceil(largeurUtile / 40) * 40)
-    implicitHeight: grande ? 700 : 56
+    implicitWidth: pleinEcran ? modelData.width
+                              : Math.min(modelData.width, grande ? Math.max(800, largeurUtile) : Math.ceil(largeurUtile / 40) * 40)
+    implicitHeight: pleinEcran ? modelData.height : (grande ? 700 : 56)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
@@ -168,9 +180,12 @@ PanelWindow {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
-        width: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
-        height: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.demandeClaude ? fen.hauteurDemande
+        // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
+        readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
+        readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.demandeClaude ? fen.hauteurDemande
                                                                                    : (fen.banniere ? fen.hauteurBanniere : 30)))
+        width: cibleLargeur
+        height: cibleHauteur
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
         color: Couleurs.fond
 
