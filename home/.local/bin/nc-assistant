@@ -566,10 +566,25 @@ def premiere_occurrence(recurrence, heure, minute, maintenant):
     return cible
 
 
+def fuseau_local():
+    """Le fuseau de ce PC avec ses changements d'heure (Europe/Paris…), ou None. datetime.now().astimezone() donne un
+    décalage figé : une échéance après le changement d'heure tombait une heure à côté (revue REM-01)."""
+    from zoneinfo import ZoneInfo
+    nom = os.environ.get("TZ", "").lstrip(":")
+    if not nom:
+        chemin = os.path.realpath("/etc/localtime")
+        nom = chemin.split("zoneinfo/", 1)[1] if "zoneinfo/" in chemin else ""
+    try:
+        return ZoneInfo(nom) if nom else None
+    except (ValueError, OSError, KeyError):
+        return None
+
+
 def lire_rappel(arg, maintenant=None):
     """/rappel [bureau|telegram|discord] [récurrence] <délai|heure> <message>
     → (plateformes, récurrence ou None, délai « 15m » ou None, échéance (datetime) ou None, message)."""
-    maintenant = maintenant or datetime.now().astimezone()
+    fuseau = fuseau_local()
+    maintenant = maintenant or (datetime.now(fuseau) if fuseau else datetime.now().astimezone())
     syntaxe = T("Syntaxe : /rappel [bureau|telegram|discord] [tous les jours|chaque samedi|toutes les 3 heures…] <délai ou heure> <message> "
                 "(ex. 15m sortir le pain ; telegram tous les jours 08:30 vitamines).",
                 "Syntax: /remind [desktop|telegram|discord] [every day|every saturday|every 3 hours…] <delay or time> <message> "

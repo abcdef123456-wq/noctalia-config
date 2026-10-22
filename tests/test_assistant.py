@@ -519,6 +519,18 @@ class Assistant(unittest.TestCase):
         self.assertEqual((r,e.isoformat()),('every:days:10','2026-10-21T12:00:00+02:00'))
         p,r,d,e,m=lire('20:30 Appeler Paul')
         self.assertEqual((p,r,d,e.isoformat(),m),(['desktop'],None,None,'2026-10-20T20:30:00+02:00','Appeler Paul'))
+        # Revue REM-01 : avec le vrai fuseau, l'échéance après le changement d'heure garde l'heure voulue
+        from zoneinfo import ZoneInfo
+        paris=datetime(2026,10,24,22,0,tzinfo=ZoneInfo('Europe/Paris'))           # samedi, l'heure d'hiver arrive dimanche
+        self.assertEqual(self.m.lire_rappel('telegram chaque lundi 08:30 sport',paris)[3].isoformat(),'2026-10-26T08:30:00+01:00')
+        self.assertEqual(self.m.lire_rappel('telegram tous les jours 08:30 vitamines',paris)[3].isoformat(),'2026-10-25T08:30:00+01:00')
+        ny=datetime(2026,10,31,22,0,tzinfo=ZoneInfo('America/New_York'))
+        self.assertEqual(self.m.lire_rappel('telegram every day 08:30 x',ny)[3].isoformat(),'2026-11-01T08:30:00-05:00')
+        ancien=os.environ.get('TZ')
+        try:
+            os.environ['TZ']='Europe/Paris';self.assertEqual(str(self.m.fuseau_local()),'Europe/Paris')
+        finally:
+            os.environ.pop('TZ') if ancien is None else os.environ.__setitem__('TZ',ancien)
         for mauvais in ('tous les jours 15m pain','bureau tous les jours 8h pain','chaque samedi pain','telegram 8h','jeudi 8h pain'):
             with self.assertRaises(self.m.Erreur):lire(mauvais)
         self.assertEqual(self.m.corps_rappel('telegram','daily',None,e,'x'),dict(platform='telegram',message='x',remind_at='2026-10-20T20:30:00+02:00',recurrence='daily'))
