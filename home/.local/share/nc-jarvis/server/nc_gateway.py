@@ -32,7 +32,7 @@ import gateway as runner_gateway
 import httpx
 from fastapi import Depends, HTTPException, Request
 from nc_management import dispatch, runner_connections, RunnerHttpx
-from nc_choix import extraire_choix
+from nc_choix import extraire_choix, verifier_choix
 import nc_telegram
 
 app = upstream.app
@@ -79,8 +79,12 @@ def _avec_choix(corps):
     if not isinstance(donnees, dict) or not isinstance(donnees.get('output'), str):
         return corps
     donnees['output'], choix = extraire_choix(donnees['output'])
+    # Le serveur (JARVIS-BIS depuis 3d1c6b6) a pu les extraire lui-même : gardés s'ils respectent nos limites
+    choix = choix or verifier_choix(donnees.get('choices'))
     if choix:
         donnees['choices'] = choix
+    else:
+        donnees.pop('choices', None)
     return json.dumps(donnees, ensure_ascii=False).encode()
 
 

@@ -45,6 +45,9 @@ class Extraction(unittest.TestCase):
         self.assertEqual(C.extraire_choix("Texte\n[[choix: court | " + "x" * 81 + "]]"), ("Texte", []))
         # Rien que le marqueur : la réponse n'est pas vidée
         self.assertEqual(C.extraire_choix("[[choix: A | B]]"), ("[[choix: A | B]]", []))
+        # La forme du serveur JARVIS-BIS (3d1c6b6), en français ou en anglais
+        self.assertEqual(C.extraire_choix("Laquelle ?\n[CHOIX: Paris | Lyon]"), ("Laquelle ?", ["Paris", "Lyon"]))
+        self.assertEqual(C.extraire_choix("Which?\n[CHOICES: A | B]"), ("Which?", ["A", "B"]))
 
     def test_liste_finale_apres_une_question(self):
         for liste in ("1. Paris\n2. Lyon\n3. **Marseille**", "1) Paris\n2) Lyon\n3) Marseille", "- Paris\n- Lyon\n- Marseille"):
@@ -168,6 +171,13 @@ class Passerelle(unittest.TestCase):
         self.assertEqual(json.loads(self.appeler("/api/ask", dict(prompt="q"))[1]), dict(success=True, output="Bonjour."))
         # Les autres réponses (erreurs comprises) passent telles quelles
         self.assertEqual(self.appeler("/api/refus", {})[0], 401)
+
+    def test_choix_deja_extraits_par_le_serveur(self):
+        # JARVIS-BIS 3d1c6b6 renvoie lui-même « choices » : gardés s'ils respectent nos limites, retirés sinon
+        f = self.api._avec_choix
+        self.assertEqual(json.loads(f(json.dumps(dict(output="Laquelle ?", choices=["Paris", "Lyon"])).encode())),
+                         dict(output="Laquelle ?", choices=["Paris", "Lyon"]))
+        self.assertEqual(json.loads(f(json.dumps(dict(output="Texte", choices=list("abcdef"))).encode())), dict(output="Texte"))
 
     def test_les_bots_recoivent_le_texte_sans_marqueur(self):
         self.assertIs(self.bot.forward_to_runner, sys.modules["gateway"].forward_to_runner)

@@ -4,7 +4,7 @@ Une seule fonction, partagée par le gateway (/api/ask, nc_gateway) et le client
 fichier, installé à côté : ~/.local/share/nc-jarvis/server/nc_choix.py). Sans dépendance : bibliothèque standard seule.
 
 D'où viennent les choix, dans cet ordre :
-  a) le marqueur que l'agent écrit en dernière ligne, [[choix: Option A | Option B]] ; il est retiré du texte ;
+  a) le marqueur que l'agent écrit en dernière ligne, [CHOIX: Option A | Option B] ; il est retiré du texte ;
   b) sinon, une liste en fin de réponse (2 à 5 lignes « 1. … », « 1) … » ou « - … » de 60 caractères au plus), juste
      après une phrase qui finit par « ? », et rien après ; le texte reste tel quel ;
   c) sinon, aucun.
@@ -17,7 +17,9 @@ MAX_LONGUEUR = 80
 MAX_LIGNE_LISTE = 60
 
 # Dernière ligne seulement : un marqueur au milieu du texte n'est pas une demande de choix
-_MARQUEUR = re.compile(r"(?:^|\n)[ \t]*\[\[[ \t]*choix[ \t]*:([^\n\]]*)\]\][ \t]*\Z", re.I)
+# [CHOIX: A | B] (la forme du serveur JARVIS-BIS depuis 3d1c6b6, qui l'extrait lui aussi) ou [[choix: A | B]] (la nôtre
+# avant) ; CHOICES en anglais
+_MARQUEUR = re.compile(r"(?:^|\n)[ \t]*\[\[?[ \t]*(?:choix|choices)[ \t]*:([^\n\]]*)\]\]?[ \t]*\Z", re.I)
 _NUMERO = re.compile(r"^[ \t]*\d{1,2}[.)][ \t]+(\S.*?)[ \t]*$")
 _TIRET = re.compile(r"^[ \t]*[-*•][ \t]+(\S.*?)[ \t]*$")
 _CONTROLE = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏ -‮⁦-⁩]")

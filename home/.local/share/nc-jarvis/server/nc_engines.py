@@ -245,7 +245,7 @@ class Engines:
             # Choix cliquables (issue #7) : le gateway retire ce marqueur et en fait des boutons (nc_choix)
             directive=("Consigne : sois direct, concis et précis. Utilise Markdown et LaTeX si pertinent. Pas de bavardage superflu. "
                        "Seulement si l'utilisateur doit choisir parmi quelques options (2 à 5), ajoute en toute dernière ligne "
-                       "[[choix: Option A | Option B]], avec des options courtes.")
+                       "[CHOIX: Option A | Option B], avec des options courtes.")
             full=directive+'\n\n'+(('Historique récent de cette conversation JARVIS :\n'+context+'\n\nNouvelle demande :\n' if context else '')+prompt)
             memory=self.up.render_memory_prompt()
             if memory: full=memory+'\n\n'+full
