@@ -93,9 +93,14 @@ touche(SUPER .. " + code:40", cmd([[sh -c ': > "${XDG_RUNTIME_DIR:-/tmp}/nc-dict
 -- L'appui et le relâchement sont notés ici, à l'heure exacte : un appui si bref qu'il finit avant que nc-dictee ait
 -- démarré n'est pas perdu (le micro resterait ouvert), et sa durée ne dépend pas de la lenteur de Python
 local fin_dictee = cmd([[sh -c 'r="${XDG_RUNTIME_DIR:-/tmp}"; : > "$r/nc-dictee-relache"; [ -e "$r/nc-dictee-ptt.json" ] && exec ~/.local/bin/nc-dictee ptt-fin']])
-hl.bind(SUPER .. " + code:40", fin_dictee, { release = true })
-hl.bind(SUPER .. " + Super_L", fin_dictee, { release = true, non_consuming = true })
-hl.bind(SUPER .. " + Super_R", fin_dictee, { release = true, non_consuming = true })
+-- Le relâchement suit le raccourci choisi (nc-raccourci) : Super + S à la place de Super + D, il était attendu sur D et
+-- la dictée restait ouverte (issue #2)
+local dictee = perso.change[id_touches(SUPER .. " + code:40")]
+if dictee ~= false then
+    hl.bind(dictee or (SUPER .. " + code:40"), fin_dictee, { release = true })
+    hl.bind(SUPER .. " + Super_L", fin_dictee, { release = true, non_consuming = true })
+    hl.bind(SUPER .. " + Super_R", fin_dictee, { release = true, non_consuming = true })
+end
 touche(SUPER .. " + code:26", cmd(fichiers),                       trad("Applis et barre|Fichiers", "Files"))
 touche(SUPER .. " + code:27", cmd(barre .. "menu"),                trad("Applis et barre|Rechercher (applis, fichiers, calculs)", "Search (apps, files, calculations)"))
 touche(SUPER .. " + code:25", cmd(barre .. "wallpapers"),          trad("Applis et barre|Choisir le fond d'écran", "Choose the wallpaper"))

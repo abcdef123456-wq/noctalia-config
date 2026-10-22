@@ -280,6 +280,27 @@ class Dictee(unittest.TestCase):
         self.assertIn(': > "$r/nc-dictee-relache"; [ -e', r, "relâchement noté avant tout, même pendant une dictée")
         self.assertIn('nc-dictee-appui"; exec ~/.local/bin/nc-dictee ptt-debut', r)
 
+    def test_relachement_perdu_l_appui_suivant_ecrit(self):
+        """Issue #2 : un relâchement perdu laissait le micro ouvert, et chaque appui suivant était ignoré sans rien dire."""
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-debut"), 0)               # le relâchement n'est jamais arrivé
+        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
+
+    def test_message_avec_le_raccourci_choisi(self):
+        (self.home / ".config/nc/raccourcis.conf").write_text("change\t64:code:40\tSUPER + S\t(Dicter)\n")
+        run = self.home / "run"
+        self.ptt("ptt-fin")
+        (run / "nc-dictee-appui").write_text("")
+        appui = (run / "nc-dictee-appui").stat().st_mtime
+        self.ptt("ptt-debut")
+        (run / "nc-dictee-relache").write_text("")
+        os.utime(run / "nc-dictee-relache", (appui + 0.2, appui + 0.2))
+        self.ptt("ptt-fin")                                       # appui bref : dictée longue
+        self.assertIn("Super + S pour écrire", self.appels())
+        self.assertNotIn("Super + D", self.appels())
+
     def test_enregistreur_mort_ne_bloque_pas(self):
         """Une dictée laissée par un nc-dictee tué (enregistreur mort) ne bloque pas l'appui suivant."""
         self.ptt("ptt-fin")
@@ -303,6 +324,32 @@ class Dictee(unittest.TestCase):
         self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
         self.assertEqual(Serveur.recus, [])
 
+
+
+
+@unittest.skipUnless(__import__("shutil").which("lua"), "Lua requis")
+class RaccourciDictee(unittest.TestCase):
+    """Issue #2 : avec un autre raccourci (nc-raccourci : Super + S), le relâchement restait attendu sur D."""
+    def binds(self, conf):
+        import tempfile
+        src = (REPO / "home/.config/hypr/nc/raccourcis.lua").read_text()
+        debut = src[src.index('local SUPER    = "SUPER"'):src.index("-- Taille logique")]
+        dictee = src[src.index("-- Dictée partout (nc-dictee)"):src.index('touche(SUPER .. " + code:26"')]
+        harnais = ('nc = { reglage = function(_, d) return d end, t = function(fr) return fr end }\n'
+                   'hl = { bind = function(t, _, o) print("BIND " .. t .. ((o and o.release) and " release" or "")) end,'
+                   ' dsp = { exec_cmd = function(c) return c end } }\n' + debut + dictee)
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".config/nc").mkdir(parents=True)
+            (Path(d) / ".config/nc/raccourcis.conf").write_text(conf)
+            r = subprocess.run(["lua", "-"], input=harnais, text=True, capture_output=True, timeout=10, env=dict(os.environ, HOME=d))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [l[5:] for l in r.stdout.splitlines() if l.startswith("BIND ")]
+
+    def test_relachement_sur_le_raccourci_choisi(self):
+        self.assertIn("SUPER + code:40 release", self.binds(""))
+        b = self.binds("change\t64:code:40\tSUPER + S\t(Dicter)\n")
+        self.assertEqual([x for x in b if not x.startswith("SUPER + Super_")], ["SUPER + S", "SUPER + S release"])
+        self.assertEqual(self.binds("aucun\t64:code:40\n"), [], "dictée désactivée : rien, ni appui ni relâchement")
 
 if __name__ == "__main__":
     unittest.main()

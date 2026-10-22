@@ -364,6 +364,20 @@ def garder(texte):
         pass
 
 
+def raccourci_dictee():
+    """Le raccourci de la dictée tel que tu l'as choisi (nc-raccourci : « change 64:code:40 SUPER + S »), pour les
+    messages ; Super + D sinon (issue #2 : « Super + D pour écrire » alors que c'était Super + S)."""
+    try:
+        for ligne in (Path.home() / ".config/nc/raccourcis.conf").read_text(encoding="utf-8").splitlines():
+            c = ligne.split("\t")
+            if len(c) >= 3 and c[0] == "change" and c[1] == "64:code:40" and c[2].strip():
+                return " + ".join(x.strip().capitalize() if len(x.strip()) > 1 else x.strip().upper()
+                                  for x in c[2].replace("code:40", "D").split("+"))
+    except OSError:
+        pass
+    return "Super + D"
+
+
 def ptt_debut(m):
     global CAPTURE
     T = m.T
@@ -375,8 +389,13 @@ def ptt_debut(m):
         if etat and etat.get("bascule"):                   # second appui d'une dictée longue : on écrit
             PTT.unlink(missing_ok=True)
             finir = True
-        elif etat and (not etat.get("pret") or actif((lire_etat() or {}).get("pid"))):
+        elif etat and not etat.get("pret"):
             return 0                                       # un démarrage déjà en cours (répétition de la touche)
+        elif etat and actif((lire_etat() or {}).get("pid")):
+            # Micro ouvert sans relâchement reçu (relâchement perdu) : ce nouvel appui écrit la dictée au lieu d'être
+            # ignoré sans rien dire, ce qui bloquait tous les appuis suivants (issue #2)
+            PTT.unlink(missing_ok=True)
+            finir = True
         else:
             # (une dictée dont l'enregistreur est mort — nc-dictee tué — ne bloque pas les appuis suivants)
             PTT.unlink(missing_ok=True)
@@ -411,7 +430,7 @@ def ptt_debut(m):
     if relache is None:
         notifier(T, T("🎙 Je t'écoute…", "🎙 Listening…"), T("Relâche pour écrire", "Release to write"))
     else:
-        notifier(T, T("🎙 Dictée longue…", "🎙 Long dictation…"), T("Super + D pour écrire", "Super + D to write"))
+        notifier(T, T("🎙 Dictée longue…", "🎙 Long dictation…"), T(f"{raccourci_dictee()} pour écrire", f"{raccourci_dictee()} to write"))
     return 0
 
 
@@ -432,7 +451,7 @@ def ptt_fin(m):
             PTT.unlink(missing_ok=True)                   # un seul relâchement finit (D et Super arrivent ensemble)
             longue = False
     if longue:
-        notifier(m.T, m.T("🎙 Dictée longue…", "🎙 Long dictation…"), m.T("Super + D pour écrire", "Super + D to write"))
+        notifier(m.T, m.T("🎙 Dictée longue…", "🎙 Long dictation…"), m.T(f"{raccourci_dictee()} pour écrire", f"{raccourci_dictee()} to write"))
         return 0
     return ptt_finir(m)
 
