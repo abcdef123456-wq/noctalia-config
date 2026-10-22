@@ -76,13 +76,15 @@ def units(backend, overlay):
     for role,port in (('runner',8080),('gateway',8000)):
         folder=backend/('home-runner' if role=='runner' else 'gateway')
         module='nc_runner:app' if role=='runner' else 'nc_gateway:app'
-        args=[folder/'.venv/bin/uvicorn',module,'--app-dir',folder,'--host','127.0.0.1','--port',str(port)]
+        # --app-dir passe en tête de sys.path : l'overlay, pour que nos nc_* l'emportent sur les copies du dépôt
+        # (gateway/nc_management.py, home-runner/nc_engines.py…) ; main, gateway et bots viennent de folder (revue DEP-01)
+        args=[folder/'.venv/bin/uvicorn',module,'--app-dir',overlay,'--host','127.0.0.1','--port',str(port)]
         result['assistant-'+role+'.service']='\n'.join([
             '[Unit]','Description=JARVIS '+role+' (Noctalia)', 'After=network.target', *(
                 # Le gateway répond aux messages Telegram en attente dès son démarrage : le runner d'abord (revue SRV-01)
                 ['Wants=assistant-runner.service','After=assistant-runner.service'] if role=='gateway' else []), '', '[Service]',
             'WorkingDirectory='+unit_path(folder),'EnvironmentFile='+unit_path(folder/'.env'),
-            'Environment='+unit_quote('PYTHONPATH='+str(overlay)+':'+str(backend)),
+            'Environment='+unit_quote('PYTHONPATH='+str(folder)+':'+str(backend)),
             'ExecStart='+' '.join(unit_quote(a) for a in args),'Restart=on-failure','RestartSec=5',
             'UMask=0077','NoNewPrivileges=true','PrivateTmp=true','','[Install]','WantedBy=default.target',''])
     return result

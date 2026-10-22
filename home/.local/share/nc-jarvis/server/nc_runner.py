@@ -1,4 +1,28 @@
 """Application runner d'origine enrichie : mêmes routes, mémoire et lifespan."""
+# Nos modules d'abord : le dépôt du serveur a ses propres copies (anciennes) de nc_engines ; chargées à la place des
+# nôtres, elles perdraient sans bruit les corrections (DEP-01). Une mauvaise résolution échoue franchement.
+import importlib.util as _iu
+import sys as _sys
+from pathlib import Path as _P
+
+
+def _origine(nom):
+    m = _sys.modules.get(nom)
+    if m is not None:
+        return getattr(m, "__file__", None)          # déjà chargé (un test injecte des modules sans fichier : rien)
+    try:
+        s = _iu.find_spec(nom)
+    except (ImportError, ValueError):
+        return None
+    return s.origin if s else None
+
+
+if "__file__" in globals():
+    for _m in ("nc_engines",):
+        _o = _origine(_m)
+        if _o and _P(_o).resolve().parent != _P(__file__).resolve().parent:
+            raise RuntimeError(f"{_m} ne vient pas de l'overlay noctalia-config ({_o}) : relance le déployeur "
+                               "(nc-jarvis), qui place l'overlay en tête (--app-dir)")
 import main as upstream
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse

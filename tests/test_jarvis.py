@@ -35,6 +35,34 @@ class Deploiement(unittest.TestCase):
         self.home_mock.start();self.addCleanup(self.home_mock.stop)
         self.d=module(SHARE/'deployer.py','deploy_test')
 
+    def test_overlay_avant_les_copies_du_depot(self):
+        """Revue DEP-01 : uvicorn --app-dir passait le dossier du dépôt AVANT l'overlay ; ses copies (anciennes) de
+        nc_management, nc_telegram, nc_engines… étaient chargées à la place des nôtres (gateway cassé à l'import, et les
+        corrections Telegram perdues en silence). Le sys.path des unités générées, rejoué dans un vrai processus."""
+        import shlex, re, tempfile, subprocess
+        with tempfile.TemporaryDirectory() as d:
+            backend = Path(d) / "backend"
+            for dossier, nom in (("gateway", "nc_management"), ("gateway", "nc_telegram"), ("home-runner", "nc_engines")):
+                (backend / dossier).mkdir(parents=True, exist_ok=True)
+                (backend / dossier / (nom + ".py")).write_text("COPIE_DU_DEPOT = True\n")
+            (backend / "gateway/main.py").write_text("raise SystemExit('main du dépôt atteint')\n")
+            overlay = SHARE / "server"
+            for unite, module in (("assistant-gateway.service", "nc_management"), ("assistant-runner.service", "nc_engines")):
+                texte = self.d.units(backend, overlay)[unite]
+                pythonpath = re.search(r'^Environment="PYTHONPATH=(.*)"$', texte, re.M)[1]
+                argv = shlex.split(re.search(r"^ExecStart=(.*)$", texte, re.M)[1])
+                app_dir = argv[argv.index("--app-dir") + 1]
+                code = (f"import sys; sys.path.insert(0, {app_dir!r}); import {module}; "
+                        f"print({module}.__file__)")
+                r = subprocess.run([sys.executable, "-I", "-c", f"import sys; sys.path[1:1] = {pythonpath.split(':')!r}; " + code],
+                                   capture_output=True, text=True, timeout=20)
+                self.assertEqual(Path(r.stdout.strip()).parent, overlay, unite + " : " + r.stdout + r.stderr)
+            # Garde-fou : si une copie du dépôt passe quand même devant, nc_gateway échoue franchement
+            code = (f"import sys; sys.path[:0] = [{str(backend / 'gateway')!r}, {str(overlay)!r}]; "
+                    f"import runpy; runpy.run_path({str(overlay / 'nc_gateway.py')!r})")
+            r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=20)
+            self.assertIn("RuntimeError: nc_management ne vient pas de l'overlay", r.stderr)
+
     def test_user_services_bind_locally_keep_bots_and_quote_paths(self):
         units=self.d.units(Path('/tmp/my backend%test'),Path('/tmp/nc addon'))
         self.assertEqual(set(units),{'assistant-runner.service','assistant-gateway.service'})
