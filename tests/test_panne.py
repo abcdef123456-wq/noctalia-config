@@ -28,6 +28,7 @@ class Panne(unittest.TestCase):
         self.programme("journalctl", 'echo "Segmentation fault (core dumped)"')
         self.choix("expliquer")
         self.ia(disponible=True)
+        self.programme("gdbus", "echo \"(['body', 'actions'],)\"")      # l'île : sans balisage
 
     def systemctl(self, systeme="running", graphique="active", service="active"):
         self.programme("systemctl", 'echo "systemctl $*" >> "$JOURNAL"; case "$*" in *Description*) echo "Île dynamique";; '
@@ -53,8 +54,13 @@ class Panne(unittest.TestCase):
 
     def lancer(self, *args):
         env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
-                   XDG_CACHE_HOME=str(self.home / "cache"))
+                   XDG_CACHE_HOME=str(self.home / "cache"), NC_PANNES_ATTENTE="0.05")
         return subprocess.run([str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=20)
+
+    def lancer_fond(self, *args):
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
+                   XDG_CACHE_HOME=str(self.home / "cache"), NC_PANNES_ATTENTE="1.5")
+        return subprocess.Popen([str(SCRIPT), *args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def appels(self):
         return self.journal.read_text() if self.journal.exists() else ""
@@ -74,6 +80,40 @@ class Panne(unittest.TestCase):
         # Le même service retombe tout de suite : pas de deuxième notification
         self.lancer("signaler", "nc-ile.service")
         self.assertEqual(len(self.notifs()), 1)
+
+    def test_pannes_ensemble_une_seule_notification(self):
+        """Revues PANNE-02 et PANNE-03 : douze pannes en même temps faisaient douze notifications, et le registre
+        anti-répétition (écrit sans verrou) en perdait : en relançant, des doublons."""
+        unites = [f"nc-test{i}.service" for i in range(12)]
+        for _ in range(2):
+            ps = [self.lancer_fond("signaler", u) for u in unites]
+            for p in ps:
+                self.assertEqual(p.wait(20), 0)
+        n = self.notifs()
+        self.assertEqual(len(n), 1, "une seule notification, et aucune la seconde fois")
+        self.assertIn("12 services en panne", n[0])
+        self.assertIn("redemarrer=Redémarrer tout", n[0])
+        self.assertIn("• et 6 autre(s)", n[0][-1])
+        self.assertEqual(sorted(json.loads((self.home / "cache/nc/pannes.json").read_text())), sorted(unites))
+        expl = next(l for l in self.appels().splitlines() if l.startswith("nc-ia panne"))
+        self.assertEqual(sorted(expl.split()[2:-1]), sorted(unites), "« Expliquer » : toutes ensemble")
+        self.assertFalse((self.home / "cache/nc/pannes-lot.json").exists())
+
+    def test_redemarrer_tout(self):
+        self.choix("redemarrer")
+        ps = [self.lancer_fond("signaler", u) for u in ("nc-a.service", "nc-b.service")]
+        for p in ps:
+            p.wait(20)
+        self.assertEqual(self.appels().count("systemctl --user restart"), 2)
+        self.assertEqual(self.notifs()[-1][-2:], ["Services repartis", "Île dynamique, Île dynamique"])
+
+    def test_corps_echappe_seulement_si_le_serveur_lit_le_balisage(self):
+        self.programme("journalctl", 'echo "erreur <b>gras</b> & co"')
+        self.lancer("signaler", "nc-ile.service")
+        self.assertIn("erreur <b>gras</b> & co", self.notifs()[-1][-1], "l'île affiche le texte tel quel")
+        self.programme("gdbus", "echo \"(['body', 'body-markup', 'actions'],)\"")
+        self.lancer("signaler", "nc-dock.service")
+        self.assertIn("erreur &lt;b&gt;gras&lt;/b&gt; &amp; co", self.notifs()[-1][-1])
 
     def test_redemarrer_et_sans_ia(self):
         self.choix("redemarrer")

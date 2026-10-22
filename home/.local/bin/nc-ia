@@ -1306,34 +1306,54 @@ def caviarder(t):
     return re.sub(r"(?i)\b(bearer|token|password|passwd|mot de passe|secret|api[_-]?key)(\s*[=:]\s*|\s+)[^\s,;]+", r"\1\2[…]", t)
 
 
-def panne(unite, flux=False, livraison=False):
-    """Pourquoi ce service de ta session s'est arrêté, et quoi faire : son état et la fin de son journal (secrets
-    masqués) envoyés à l'IA seulement quand tu le demandes (bouton « Expliquer » de la notification de nc-panne)."""
+def panne(unites, flux=False, livraison=False):
+    """Pourquoi ce service de ta session s'est arrêté (ou ces services, tombés ensemble), et quoi faire : leur état et
+    la fin de leur journal (secrets masqués) envoyés à l'IA seulement quand tu le demandes (bouton « Expliquer » de la
+    notification de nc-panne)."""
     if coupee():
         raise ErreurIA(message_coupee())
-    if not UNITE_RE.fullmatch(unite or ""):
+    unites = list(dict.fromkeys(unites))[:6]
+    if not unites or not all(UNITE_RE.fullmatch(u or "") for u in unites):
         raise ErreurIA(T("service inconnu", "unknown service"))
-    _, etat = sortie_cmd(["systemctl", "--user", "show", unite, "-p",
-                          "Description,LoadState,ActiveState,SubState,Result,ExecMainStatus,NRestarts,FragmentPath"])
-    if "LoadState=loaded" not in etat:
-        raise ErreurIA(T("service inconnu", "unknown service"))
-    desc = (re.search(r"^Description=(.*)$", etat, re.M) or [None, unite])[1]
-    _, journal = sortie_cmd(["journalctl", "--user", "-u", unite, "-n", "60", "--no-pager", "-o", "short-iso"])
-    if not journal.strip() or "No entries" in journal:   # journal non persistant : ce que systemd en a gardé
-        _, journal = sortie_cmd(["systemctl", "--user", "status", unite, "-n", "40", "--no-pager"])
-    question = T(f"Le service « {unite} » de ma session ({desc}) s'est arrêté en panne. Explique simplement pourquoi, "
-                 "d'après son état et la fin de son journal, puis dis quoi faire, dans l'ordre (commandes sur des lignes "
-                 "« $ … »). Si c'est passager, dis-le.\n\n",
-                 f"The service “{unite}” of my session ({desc}) stopped with a failure. Simply explain why, from its state "
-                 "and the end of its log, then say what to do, in order (commands on “$ …” lines). If it is transient, "
-                 "say so.\n\n") + caviarder(f"{etat}\n\n{journal[-12000:]}")
+    lignes = 60 if len(unites) == 1 else 25
+    faits, descs = [], []
+    for unite in unites:
+        _, etat = sortie_cmd(["systemctl", "--user", "show", unite, "-p",
+                              "Description,LoadState,ActiveState,SubState,Result,ExecMainStatus,NRestarts,FragmentPath"])
+        if "LoadState=loaded" not in etat:
+            raise ErreurIA(T("service inconnu", "unknown service"))
+        descs.append((re.search(r"^Description=(.*)$", etat, re.M) or [None, unite])[1])
+        _, journal = sortie_cmd(["journalctl", "--user", "-u", unite, "-n", str(lignes), "--no-pager", "-o", "short-iso"])
+        if not journal.strip() or "No entries" in journal:   # journal non persistant : ce que systemd en a gardé
+            _, journal = sortie_cmd(["systemctl", "--user", "status", unite, "-n", "40", "--no-pager"])
+        faits.append(f"{etat}\n\n{journal[-12000 // len(unites):]}")
+    if len(unites) == 1:
+        unite, desc = unites[0], descs[0]
+        question = T(f"Le service « {unite} » de ma session ({desc}) s'est arrêté en panne. Explique simplement pourquoi, "
+                     "d'après son état et la fin de son journal, puis dis quoi faire, dans l'ordre (commandes sur des lignes "
+                     "« $ … »). Si c'est passager, dis-le.\n\n",
+                     f"The service “{unite}” of my session ({desc}) stopped with a failure. Simply explain why, from its state "
+                     "and the end of its log, then say what to do, in order (commands on “$ …” lines). If it is transient, "
+                     "say so.\n\n")
+        titre, q = T(f"Panne de {desc}", f"{desc} failure"), T(f"Pourquoi {unite} s'est arrêté ?", f"Why did {unite} stop?")
+    else:
+        liste = ", ".join(unites)
+        question = T(f"Ces services de ma session se sont arrêtés en panne en même temps : {liste}. Dis s'ils ont une cause "
+                     "commune (lequel est tombé d'abord, lequel entraîne les autres), simplement, d'après leur état et la fin "
+                     "de leur journal, puis quoi faire, dans l'ordre (commandes sur des lignes « $ … »).\n\n",
+                     f"These services of my session failed at the same time: {liste}. Say whether they share a cause (which "
+                     "one fell first, which one drags the others), simply, from their state and the end of their logs, then "
+                     "what to do, in order (commands on “$ …” lines).\n\n")
+        titre = T(f"{len(unites)} services en panne", f"{len(unites)} services failed")
+        q = T(f"Pourquoi {liste} se sont arrêtés ?", f"Why did {liste} stop?")
+    question += caviarder("\n\n────\n\n".join(faits))
     consigne = T("Tu aides à réparer un bureau Linux (noctalia-config, Hyprland). Réponds en français, concret et bref.",
                  "You help fix a Linux desktop (noctalia-config, Hyprland). Answer in English, concrete and brief.")
     if not livraison:
         demander(question, "texte", flux=flux, consigne_=consigne)
         return
     rep, ident = demander(question, "texte", consigne_=consigne, sortie=lambda m: None)
-    livrer(T(f"Panne de {desc}", f"{desc} failure"), T(f"Pourquoi {unite} s'est arrêté ?", f"Why did {unite} stop?"), rep, ident)
+    livrer(titre, q, rep, ident)
 
 
 # ── Gestion du bureau par l'IA (nc-reglages → Intelligence artificielle → L'IA peut agir) ────────────────────────
@@ -2211,8 +2231,8 @@ def main(a):
             return menu()
         if c in ("panne", "failure"):
             if not a:
-                raise ErreurIA("nc-ia panne SERVICE.service [--livrer]")
-            panne(a[0], flux="--flux" in a, livraison="--livrer" in a)
+                raise ErreurIA("nc-ia panne SERVICE.service… [--livrer]")
+            panne([x for x in a if not x.startswith("--")], flux="--flux" in a, livraison="--livrer" in a)
             return 0
         if c in ("rapport-maj", "update-report"):
             if not a or a[0] not in TITRES_RAPPORT:

@@ -585,6 +585,14 @@ class IA(unittest.TestCase):
         self.assertIn("Segmentation fault", envoye)
         self.assertNotIn("abc123secretXYZ", envoye)
         self.assertNotIn(CLE_O, envoye)
+        # Plusieurs services tombés ensemble (nc-panne les regroupe) : une seule question, sur tous
+        self.programme("systemctl", 'case "$*" in *nc-*.service*) printf "Description=Île\\nLoadState=loaded\\nResult=core-dump\\n";; '
+                                    '*) echo "LoadState=not-found";; esac')
+        self.assertEqual(self.lancer("panne", "nc-ile.service", "nc-dock.service").returncode, 0)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("en même temps : nc-ile.service, nc-dock.service", envoye)
+        self.assertNotIn(CLE_O, envoye)
+        self.assertNotEqual(self.lancer("panne", "nc-ile.service", "sshd.service").returncode, 0, "un inconnu : rien")
         Faux.requetes.clear()
         self.assertNotEqual(self.lancer("panne", "sshd.service").returncode, 0)
         self.assertNotEqual(self.lancer("panne", "x;id").returncode, 0)

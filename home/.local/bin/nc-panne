@@ -7,7 +7,9 @@ Lancé par systemd (OnFailure= de tous les services de ta session : ~/.config/sy
 seulement quand un service finit en échec — pas pendant ses redémarrages automatiques, ni pendant la fermeture de la
 session. Par défaut, seulement les services du bureau (PANNES=nc : nc-*, Noctalia, PipeWire, WirePlumber, portails,
 agent polkit) ; PANNES=tous pour tous ceux de ta session, PANNES_IGNORER pour en écarter. Un même service n'est
-signalé qu'une fois par demi-heure. Les services du système ne sont jamais concernés.
+signalé qu'une fois par demi-heure ; plusieurs pannes à quelques secondes d'écart (session cassée, mise à jour qui
+n'a pas relancé ses services) font une seule notification, avec « Redémarrer tout ». Les services du système ne sont
+jamais concernés.
 
   nc-panne signaler SERVICE.service   (systemd) la notification
   nc-panne essai                      une notification d'exemple, sans panne
@@ -29,6 +31,8 @@ CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "nc"
 NB = HOME / ".local/bin"
 UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
 DELAI = 1800                         # un même service : une notification par demi-heure au plus
+ATTENTE = float(os.environ.get("NC_PANNES_ATTENTE") or 3)   # les pannes de ces secondes-là sont regroupées
+LOT = CACHE / "pannes-lot.json"      # { debut, pid : celui qui notifiera, unites : les pannes regroupées }
 # PANNES=nc : les services du bureau seulement (ceux des applis, de GNOME ou KDE installés à côté restent muets)
 DU_BUREAU = re.compile(r"(nc-|noctalia|pipewire|wireplumber|xdg-desktop-portal|plasma-polkit-agent|hyprpolkitagent|"
                        r"polkit-gnome|hypridle|hyprpaper|hyprsunset|uwsm)")
@@ -72,25 +76,76 @@ def sortie(cmd, delai=10):
         return ""
 
 
-def deja_signale(unite):
-    """Vrai si ce service a été signalé il y a moins d'une demi-heure ; sinon, note maintenant."""
-    f = CACHE / "pannes.json"
+class Verrou:
+    """Plusieurs pannes arrivent souvent ensemble : un seul nc-panne lit et écrit les registres à la fois."""
+    def __enter__(self):
+        import fcntl
+        CACHE.mkdir(parents=True, exist_ok=True)
+        self.f = open(CACHE / "pannes.lock", "a")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def lire_json(f, defaut):
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
-        d = d if isinstance(d, dict) else {}
+        return d if isinstance(d, type(defaut)) else defaut
     except (OSError, ValueError):
-        d = {}
+        return defaut
+
+
+def ecrire_json(f, d):
+    try:
+        tmp = f.with_name(f"{f.name}.{os.getpid()}")
+        tmp.write_text(json.dumps(d), encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+def deja_signale(unite):
+    """Vrai si ce service a été signalé il y a moins d'une demi-heure ; sinon, note maintenant (sous le verrou)."""
+    f = CACHE / "pannes.json"
     maintenant = time.time()
-    d = {k: v for k, v in d.items() if isinstance(v, (int, float)) and maintenant - v < DELAI}
+    d = {k: v for k, v in lire_json(f, {}).items() if isinstance(v, (int, float)) and maintenant - v < DELAI}
     if unite in d:
         return True
     d[unite] = maintenant
-    try:
-        CACHE.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(d), encoding="utf-8")
-    except OSError:
-        pass
+    ecrire_json(f, d)
     return False
+
+
+def vivant(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def rejoindre_lot(unite):
+    """Sous le verrou : vrai si un autre nc-panne rassemble déjà les pannes de ces secondes-ci (il signalera aussi
+    celle-ci) ; sinon, ouvre un lot dont ce processus notifiera."""
+    lot = lire_json(LOT, {})
+    if lot.get("pid") != os.getpid() and 0 <= time.time() - float(lot.get("debut") or 0) < ATTENTE + 5 \
+            and vivant(lot.get("pid")) and isinstance(lot.get("unites"), list):
+        lot["unites"].append(unite)
+        ecrire_json(LOT, lot)
+        return True
+    ecrire_json(LOT, {"debut": time.time(), "pid": os.getpid(), "unites": [unite]})
+    return False
+
+
+def fermer_lot(unite):
+    """Sous le verrou : les pannes regroupées dans le lot de ce processus (au moins la sienne)."""
+    lot = lire_json(LOT, {})
+    if lot.get("pid") != os.getpid():
+        return [unite]
+    LOT.unlink(missing_ok=True)
+    return [u for u in dict.fromkeys(lot.get("unites") or [unite]) if isinstance(u, str) and UNITE_RE.fullmatch(u)] or [unite]
 
 
 def ia_permise():
@@ -120,21 +175,90 @@ def session_ouverte():
     return sortie(["systemctl", "--user", "is-active", "graphical-session.target"]) == "active"
 
 
+_BALISAGE = []
+
+
+def corps_sur(texte):
+    """Le corps d'une notification : une ligne de journal peut contenir < > & ; échappés seulement pour un serveur qui
+    lit le balisage (mako, dunst…). L'île ne le lit pas (elle les afficherait tels quels)."""
+    if not _BALISAGE:
+        _BALISAGE.append("body-markup" in sortie(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
+                                                  "--object-path", "/org/freedesktop/Notifications", "--method",
+                                                  "org.freedesktop.Notifications.GetCapabilities"], 3)
+                         if shutil.which("gdbus") else False)
+    return texte.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if _BALISAGE[0] else texte
+
+
 def notifier(titre, corps):
     if shutil.which("notify-send"):
-        subprocess.run(["notify-send", "-a", T("Système", "System"), "-i", "dialog-information", "--", titre, corps],
+        subprocess.run(["notify-send", "-a", T("Système", "System"), "-i", "dialog-information", "--", titre, corps_sur(corps)],
                        capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
 
 
-def redemarrer(unite, desc):
-    subprocess.run(["systemctl", "--user", "reset-failed", unite], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
-    r = subprocess.run(["systemctl", "--user", "restart", unite], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=90)
+def relancer(unites):
+    """{unité: (repartie, erreur)} : le compteur de démarrages d'abord remis à zéro (un service en panne a souvent
+    atteint sa limite), puis deux secondes pour voir s'il tient."""
+    erreurs = {}
+    for u in unites:
+        subprocess.run(["systemctl", "--user", "reset-failed", u], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
+        try:
+            r = subprocess.run(["systemctl", "--user", "restart", u], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=90)
+            erreurs[u] = r.stderr.strip() if r.returncode else ""
+        except subprocess.TimeoutExpired:
+            erreurs[u] = T("délai dépassé", "timed out")
     time.sleep(2)
-    if r.returncode == 0 and sortie(["systemctl", "--user", "is-active", unite]) == "active":
+    res = {}
+    for u in unites:
+        actif = sortie(["systemctl", "--user", "is-active", u])
+        res[u] = (not erreurs[u] and actif == "active", (erreurs[u] or actif)[-300:])
+    return res
+
+
+def redemarrer(unite, desc):
+    ok, erreur = relancer([unite])[unite]
+    if ok:
         notifier(T(f"{desc} est reparti", f"{desc} is running again"), unite)
     else:
-        notifier(T(f"{desc} ne repart pas", f"{desc} does not start"),
-                 (r.stderr.strip() or sortie(["systemctl", "--user", "is-active", unite]))[-300:])
+        notifier(T(f"{desc} ne repart pas", f"{desc} does not start"), erreur)
+
+
+def expliquer(unites):
+    try:
+        r = subprocess.run([str(NB / "nc-ia"), "panne", *unites, "--livrer"], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=600)
+        if r.returncode != 0:                        # aucune IA joignable, coupée entre-temps…
+            notifier(T("Explication impossible", "No explanation"), (r.stderr.strip() or "nc-ia")[-300:])
+    except (OSError, subprocess.TimeoutExpired):
+        notifier(T("Explication impossible", "No explanation"), T("délai dépassé", "timed out"))
+
+
+def signaler_groupe(unites):
+    """Plusieurs pannes ensemble : une seule notification, « Redémarrer tout » et, si l'IA est permise, « Expliquer »."""
+    descs = {u: sortie(["systemctl", "--user", "show", u, "-p", "Description", "--value"]) or u for u in unites}
+    lignes = [f"• {descs[u]} ({u})" for u in unites[:6]] + ([T(f"• et {len(unites) - 6} autre(s)", f"• and {len(unites) - 6} more")]
+                                                            if len(unites) > 6 else [])
+    cmd = ["notify-send", "-a", T("Système", "System"), "-i", "dialog-warning", "-A", "redemarrer=" + T("Redémarrer tout", "Restart all")]
+    ia = ia_permise()
+    if ia:
+        cmd += ["-A", "expliquer=" + T("Expliquer", "Explain")]
+    try:
+        choix = subprocess.run(cmd + ["--", T(f"{len(unites)} services en panne", f"{len(unites)} services failed"),
+                                      corps_sur("\n".join(lignes))],
+                               capture_output=True, text=True, timeout=3600, stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if choix == "redemarrer":
+        resultats = [(u, *v) for u, v in relancer(unites).items()]
+        ok = [descs[u] for u, bon, _ in resultats if bon]
+        ko = [f"{descs[u]} : {e}" for u, bon, e in resultats if not bon]
+        if not ko:
+            notifier(T("Services repartis", "Services running again"), ", ".join(ok))
+        else:
+            notifier(T(f"{len(ko)} service(s) ne repartent pas", f"{len(ko)} service(s) do not start"),
+                     "\n".join(ko + ([T("Repartis : ", "Running again: ") + ", ".join(ok)] if ok else [])))
+    elif choix == "expliquer" and ia:
+        expliquer(unites)
+    return 0
 
 
 def derniere_ligne(unite):
@@ -148,10 +272,19 @@ def derniere_ligne(unite):
 def signaler(unite, essai=False):
     if not UNITE_RE.fullmatch(unite) or unite.startswith("nc-panne@"):
         return 2
-    if not essai and (not concerne(unite) or not session_ouverte() or deja_signale(unite)):
-        return 0
     if not shutil.which("notify-send"):
         return 0
+    if not essai:
+        if not concerne(unite) or not session_ouverte():
+            return 0
+        with Verrou():
+            if deja_signale(unite) or rejoindre_lot(unite):
+                return 0                             # déjà signalé, ou un autre nc-panne la signalera avec la sienne
+        time.sleep(ATTENTE)                          # d'autres pannes en même temps ? une seule notification
+        with Verrou():
+            unites = fermer_lot(unite)
+        if len(unites) > 1:
+            return signaler_groupe(unites)
     if essai:
         desc, ligne = T("Service d'exemple", "Example service"), T("(essai : aucun service n'est en panne)", "(test: no service failed)")
     else:
@@ -162,7 +295,7 @@ def signaler(unite, essai=False):
     ia = not essai and ia_permise()
     if ia:
         cmd += ["-A", "expliquer=" + T("Expliquer", "Explain")]
-    corps = T(f"{unite} s'est arrêté en échec.", f"{unite} stopped with a failure.") + (f"\n{ligne}" if ligne else "")
+    corps = corps_sur(T(f"{unite} s'est arrêté en échec.", f"{unite} stopped with a failure.") + (f"\n{ligne}" if ligne else ""))
     try:
         choix = subprocess.run(cmd + ["--", T(f"{desc} est en panne", f"{desc} has failed"), corps], capture_output=True,
                                text=True, timeout=3600, stdin=subprocess.DEVNULL).stdout.strip()
@@ -173,13 +306,7 @@ def signaler(unite, essai=False):
     if choix == "redemarrer":
         redemarrer(unite, desc)
     elif choix == "expliquer" and ia:
-        try:
-            r = subprocess.run([str(NB / "nc-ia"), "panne", unite, "--livrer"], capture_output=True, text=True,
-                               stdin=subprocess.DEVNULL, timeout=600)
-            if r.returncode != 0:                        # aucune IA joignable, coupée entre-temps…
-                notifier(T("Explication impossible", "No explanation"), (r.stderr.strip() or "nc-ia")[-300:])
-        except (OSError, subprocess.TimeoutExpired):
-            notifier(T("Explication impossible", "No explanation"), T("délai dépassé", "timed out"))
+        expliquer([unite])
     return 0
 
 
