@@ -43,7 +43,7 @@ Item {
             }
 
             Repeater {
-                model: Agents.sessionsVisibles.slice(0, 4)
+                model: Agents.sessionsPage.slice(0, 4)
                 Rectangle {
                     id: carte
                     required property var modelData
@@ -79,6 +79,50 @@ Item {
                                     Agents.allerTerminal(carte.s.terminal, carte.s.shell)
                                     Etat.fermer()
                                 } }
+                            }
+                        }
+                        // Sa question, en entier (notification « Voir », clic sur la pilule) : elle se répond dans son
+                        // terminal ; le bouton y mène
+                        Rectangle {
+                            id: question
+                            readonly property var q: carte.s.question || null
+                            objectName: "nc-question-" + carte.s.id
+                            visible: q !== null && (carte.s.etat === "terminal" || carte.s.etat === "attente" || carte.s.etat === "demande")
+                            width: parent.width; height: visible ? colQ.implicitHeight + 20 : 0; radius: 14; color: Couleurs.gris2
+                            border.width: 1; border.color: Qt.alpha(Couleurs.orange, 0.45)
+                            Column {
+                                id: colQ
+                                x: 12; y: 10; width: parent.width - 24; spacing: 8
+                                Row {
+                                    spacing: 6
+                                    Ico { anchors.verticalCenter: parent.verticalCenter; nom: "help"; taille: 15; color: Couleurs.orange }
+                                    Texte { anchors.verticalCenter: parent.verticalCenter; font.pixelSize: 12; font.weight: Font.DemiBold
+                                            color: Couleurs.orange; text: question.q ? question.q.titre || "" : ""
+                                            width: Math.min(implicitWidth, colQ.width - 24) }
+                                }
+                                Texte {
+                                    objectName: "nc-question-texte"
+                                    width: parent.width; text: question.q ? question.q.texte || "" : ""; font.pixelSize: 13
+                                    wrapMode: Text.Wrap; elide: Text.ElideNone; textFormat: Text.PlainText
+                                }
+                                Rectangle {
+                                    visible: (carte.s.terminal || 0) > 0
+                                    anchors.right: parent.right
+                                    width: rq.implicitWidth + 28; height: 30; radius: 15
+                                    color: zq.containsMouse ? Qt.lighter(Agents.couleurDe(carte.s), 1.12) : Agents.couleurDe(carte.s)
+                                    scale: zq.pressed ? 0.94 : 1
+                                    Behavior on scale { SpringAnimation { spring: 6; damping: 0.4 } }
+                                    Row {
+                                        id: rq; anchors.centerIn: parent; spacing: 6
+                                        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "terminal"; taille: 15; color: "#ffffff" }
+                                        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Aller au terminal", "Go to the terminal")
+                                                font.pixelSize: 13; font.weight: Font.DemiBold; color: "#ffffff" }
+                                    }
+                                    MouseArea { id: zq; anchors.fill: parent; hoverEnabled: true; onClicked: {
+                                        Agents.allerTerminal(carte.s.terminal, carte.s.shell)
+                                        Etat.fermer()
+                                    } }
+                                }
                             }
                         }
                         // Dernières étapes (la plus récente en bas, en clair)

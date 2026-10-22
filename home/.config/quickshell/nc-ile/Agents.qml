@@ -42,9 +42,15 @@ Singleton {
     }
     readonly property var demandes: Object.values(donnees.demandes || {}).filter(d =>
         suivie((donnees.sessions || {})[d.session] || d)).sort((x, y) => (x.t || 0) - (y.t || 0))
-    readonly property var demande: demandes.length ? demandes[0] : null
+    // La demande montrée : celle de la session voulue (notification « Voir »), sinon la plus ancienne
+    readonly property var demande: demandes.find(d => d.session === cible) || (demandes.length ? demandes[0] : null)
+    // Session montrée en premier dans la page (notification « Voir », clic sur la pilule) ; oubliée à la fermeture
+    property string cible: ""
+    property bool allerCible: false
     // Garder les transitions de fin pour la pilule, sans conserver leurs cartes dans la page.
     readonly property var sessionsVisibles: sessions.filter(s => s.etat !== "fini")
+    // Celles de la page : la session voulue d'abord
+    readonly property var sessionsPage: sessionsVisibles.filter(s => s.id === cible).concat(sessionsVisibles.filter(s => s.id !== cible))
     function sessionActive(s) {
         if (!s || s.agent === "assistant") return false
         var age = Etat.maintenant.getTime() / 1000 - (s.maj || 0)
@@ -55,9 +61,14 @@ Singleton {
     readonly property var enCours: sessions.filter(s => sessionActive(s))
     readonly property bool travaille: enCours.length > 0
     readonly property var principale: enCours.length ? enCours[0] : (sessions.length ? sessions[0] : null)
-    // Page de l'île : tant qu'une session a fait quelque chose il y a moins de 30 min
-    readonly property bool aPage: sessionsVisibles.some(s => s.etat !== "pret" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 1800)
-    readonly property bool attendTerminal: sessions.some(s => s.etat === "terminal" && sessionActive(s))
+    // Page de l'île : tant qu'une session a fait quelque chose il y a moins de 30 min, attend ta réponse (aussi vieille
+    // soit la question), ou vient d'être demandée (notification « Voir »)
+    readonly property bool aPage: attendTerminal || sessionsVisibles.some(s => s.etat !== "pret"
+        && (s.id === cible || Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 1800))
+    // Une question laissée dans le terminal ne quitte pas la pilule tant qu'elle n'est pas traitée (6 h au plus, comme
+    // nc-claude, au cas où l'agent aurait été tué sans prévenir)
+    function attendReponse(s) { return !!s && s.etat === "terminal" && Etat.maintenant.getTime() / 1000 - (s.maj || 0) < 6 * 3600 }
+    readonly property bool attendTerminal: sessions.some(s => attendReponse(s))
 
     FileView {
         id: lecture
@@ -70,6 +81,7 @@ Singleton {
             if (t === a.brut) return                     // inchangé : rien à redessiner (texte en cours de saisie gardé)
             a.brut = t
             try { a.donnees = JSON.parse(t) } catch (e) {}
+            Qt.callLater(a.versCible)
         }
     }
     property string brut: ""
@@ -84,7 +96,7 @@ Singleton {
     // Titre de la page : selon les agents suivis
     readonly property string titreAgent: sessionsVisibles.length && sessionsVisibles.every(s => agent(s) === agent(sessionsVisibles[0])) ? agent(sessionsVisibles[0]) : ""
     readonly property string titre: titreAgent !== "" ? ias[titreAgent].titre : Reglages.t("Agents IA", "AI Agents")
-    readonly property var attend: sessions.find(s => s.etat === "terminal") || null
+    readonly property var attend: sessions.find(s => attendReponse(s)) || null
     onSessionsChanged: {
         var n = {}
         for (let i = 0; i < sessions.length; i++) {
@@ -94,6 +106,33 @@ Singleton {
         }
         avant = n
     }
+
+    // L'île sur cette session (notification « Voir » d'un agent qui t'attend) : sa demande avec ses choix en haut de la
+    // page, sinon sa carte en premier, avec le texte entier de sa question. L'état est relu (la notification est
+    // souvent plus récente que la dernière lecture) : la page s'ouvre dès que la session y est
+    function montrer(sid) {
+        cible = sid
+        allerCible = true
+        oubli.restart()
+        lecture.reload()
+        versCible()
+    }
+    function versCible() {
+        if (!allerCible || Etat.ecranOuvert === "" || Etat.vues.indexOf("claude") < 0) return
+        allerCible = false
+        Etat.aller("claude")
+    }
+    Timer { id: oubli; interval: 4000; onTriggered: a.allerCible = false }
+    // Clic sur la pilule fermée pendant qu'un agent attend dans son terminal : sa question, directement ; faux sinon
+    function ouvrirAttente(ecran) {
+        if (!attend) return false
+        var sid = attend.id
+        Etat.basculer(ecran, false)
+        cible = sid
+        Etat.aller("claude")
+        return true
+    }
+    Connections { target: Etat; function onEcranOuvertChanged() { if (Etat.ecranOuvert === "") { a.cible = ""; a.allerCible = false } } }
 
     function repondre(id, choix) {
         Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && printf %s \"$2\" > \"$1/$3\"", "sh", dossier + "/reponses", choix, id])

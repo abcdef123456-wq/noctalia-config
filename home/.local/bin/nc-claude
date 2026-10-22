@@ -13,8 +13,9 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude detecter | actualiser   IA présentes pas encore branchées / remettre celles branchées au format du jour
   nc-claude ecrire SESSION TEXTE   écrit à l'agent de cette session (tapé dans son terminal kitty, puis Entrée)
   nc-claude aller PID [SHELL]      va sur ce terminal (et, dans kitty, sur l'onglet de ce shell)
-Notifications de Claude (terminé, t'attend) : envoyées par nc-claude à la place des siennes ; un clic ramène sur
-son terminal, et elles s'en vont seules quand tu y retournes ou qu'il repart.
+Notifications de Claude (terminé, t'attend) : envoyées par nc-claude à la place des siennes ; un clic sur « t'attend »
+(Voir) ouvre l'île sur sa question en entier, sur « terminé » ramène sur son terminal ; elles s'en vont seules quand
+tu y retournes ou qu'il repart.
   nc-claude diag        vérifie que tout est en place (Claude Code et Antigravity), avec les derniers événements reçus
 Les demandes s'affichent dans l'île seulement quand tu n'es pas sur le terminal de Claude ; si tu y retournes, la
 question repasse dans le terminal. Sans l'île (ou nc-reglages → Agents IA), rien ne change : Claude n'attend jamais.
@@ -78,8 +79,9 @@ done, and its requests (allow a command, answer a question) from the island.
   nc-agents detect | refresh   AIs present but not hooked up yet / bring the hooked-up ones to the current format
   nc-agents write SESSION TEXT   writes to the agent of that session (typed into its kitty terminal, then Enter)
   nc-agents goto PID [SHELL]     goes to that terminal (and, in kitty, to that shell's tab)
-Claude's notifications (done, waiting for you): sent by nc-agents instead of its own; a click brings you back to
-its terminal, and they go away on their own when you go back there or it starts again.
+Claude's notifications (done, waiting for you): sent by nc-agents instead of its own; a click on “waiting” (View)
+opens the island on its whole question, on “done” brings you back to its terminal; they go away on their own when
+you go back there or it starts again.
   nc-agents diag        checks that everything is in place (Claude Code and Antigravity), with the last events received
 Requests show in the island only when you are not on Claude's terminal; if you go back to it, the question goes
 back to the terminal. Without the island (or nc-settings → AI agents), nothing changes: Claude never waits.
@@ -302,6 +304,24 @@ def session(d, ev, ia="claude"):
     return s
 
 
+# La question en attente d'une session (t'attend dans son terminal) : son texte entier, montré dans l'île (page de
+# l'agent) quand on clique sur la notification ou sur la pilule. La notification, elle, n'en garde qu'un extrait.
+QUESTION_MAX = 4000
+ATTEND = ("demande", "terminal", "attente")
+
+
+def poser_question(s, titre, texte):
+    texte = str(texte or "").strip()
+    if texte:
+        s["question"] = {"titre": titre, "texte": texte[:QUESTION_MAX], "t": time.time()}
+
+
+def oublier_question(s):
+    """Plus de question une fois que l'agent est reparti (ou a fini)."""
+    if s.get("etat") not in ATTEND:
+        s.pop("question", None)
+
+
 def ajouter_etape(s, icone, texte):
     s["icone"], s["etape"] = icone, texte
     l = s.setdefault("etapes", [])
@@ -342,7 +362,8 @@ def demande(ev, genre, ia="claude"):
         return
     if reglage("CLAUDE_DEMANDES", "ile") != "ile" or not ile_active():
         if ia != "claude":
-            suivre(ia, ev.get("session_id"), ev.get("cwd"), "attente")
+            titre, detail = demande_texte(ev.get("tool_name") or "", ev.get("tool_input") or {})
+            suivre(ia, ev.get("session_id"), ev.get("cwd"), "attente", message=titre + ("\n" + detail if detail else ""))
         return
     outil, e = ev.get("tool_name") or "", ev.get("tool_input") or {}
     if genre == "question":
@@ -377,8 +398,20 @@ def demande(ev, genre, ia="claude"):
             d["demandes"].pop(ident, None)
             s = d["sessions"].get(cle_session(ev, ia))
             if s and s.get("etat") == "demande" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
-                # Pas de réponse dans l'île : la question passe dans le terminal (les autres IA ne le signalent pas)
-                s["etat"] = "terminal" if ia != "claude" and (not r or r == "terminal") else "travail"
+                # Pas de réponse dans l'île : la question passe dans le terminal, et reste visible dans l'île (pilule,
+                # page de l'agent) jusqu'à ce que l'agent reparte
+                if not r or r == "terminal":
+                    s["etat"] = "terminal"
+                    if genre == "question":
+                        q = e["questions"][0]
+                        poser_question(s, T("Te pose une question", "Asks you a question"),
+                                       "\n".join([str(q.get("question") or "")]
+                                                 + ["• " + str(o.get("label") or "") for o in q.get("options", [])]))
+                    else:
+                        titre, detail = demande_texte(outil, e)
+                        poser_question(s, titre, titre + ("\n" + detail if detail else ""))
+                else:
+                    s["etat"] = "travail"
     if not r or r == "terminal":
         return
     if genre == "question":
@@ -438,27 +471,37 @@ def hook():
                 s["retraits"] = s.get("retraits", 0) + r
                 if s.get("etapes"):
                     s["etapes"][-1]["diff"] = f"+{a} −{r}"
+            # (pas « terminal » : avec des outils en parallèle, un autre peut finir pendant que la question attend)
             if s.get("etat") == "demande" and not d["demandes"]:
                 s["etat"] = "travail"
         elif nom == "Notification":
             t = ev.get("notification_type") or ""
+            message = ev.get("message") or ""
+            # Toutes ces notifications portent « Voir » : l'île s'ouvre sur la question (texte entier), à défaut le terminal
             if t == "idle_prompt":
                 s["etat"] = "attente"
+                # Sa dernière réponse en entier (souvent une question posée en clair), sinon le message de Claude
+                poser_question(s, T("À toi de répondre", "Your turn to answer"), s.get("reponse") or message)
                 if not notif_ouverte(d, s["id"]):
                     notifier(s, T("Claude t'attend", "Claude is waiting for you"),
-                             s["projet"] + T(" : à toi de répondre", ": your turn to answer"))
+                             s["projet"] + T(" : à toi de répondre", ": your turn to answer"), voir=True)
             elif t == "permission_prompt" and not any(x["session"] == s["id"] for x in d["demandes"].values()):
                 s["etat"] = "terminal"         # Claude attend une réponse dans le terminal
-                notifier(s, T("Claude demande ton accord", "Claude needs your approval"),
-                         s["projet"] + T(" : ", ": ") + court(ev.get("message"), 120))
+                titre = T("Claude demande ton accord", "Claude needs your approval")
+                poser_question(s, titre, message)
+                notifier(s, titre, s["projet"] + T(" : ", ": ") + court(message, 120), voir=True)
             elif t in ("agent_needs_input", "elicitation_dialog"):
-                notifier(s, T("Claude t'attend", "Claude is waiting for you"),
-                         s["projet"] + T(" : ", ": ") + court(ev.get("message"), 120))
+                s["etat"] = "terminal"         # une question dans le terminal : la pilule la garde en vue
+                titre = T("Claude t'attend", "Claude is waiting for you")
+                poser_question(s, titre, message)
+                notifier(s, titre, s["projet"] + T(" : ", ": ") + court(message, 120), voir=True)
         elif nom == "Stop":
             s["etat"] = "fini"
             s["fin"] = time.time()
             s["message"] = court(ev.get("last_assistant_message"), 160)
+            s["reponse"] = str(ev.get("last_assistant_message") or "").strip()[:QUESTION_MAX]
             notifier(s, T("Claude a terminé", "Claude is done"), s["projet"] + (T(" : ", ": ") + s["message"] if s["message"] else ""))
+        oublier_question(s)
 
 
 # ── Notifications : les nôtres à la place de celles de Claude ─────────────────────────────────────────────────────────
@@ -467,22 +510,39 @@ def hook():
 # terminal (et le bon onglet de kitty) et s'en vont seules dès que tu y retournes, que Claude repart ou se ferme.
 def notif_ouverte(d, sid):
     try:
-        os.kill(int(d.get("notifs", {}).get(sid) or 0) or -1, 0)
+        pid = int(d.get("notifs", {}).get(sid) or 0)
+        if pid <= 0:
+            return False                               # os.kill(-1, 0) viserait tous nos processus : toujours « ouverte »
+        os.kill(pid, 0)
         return True
     except (OSError, ValueError):
         return False
 
 
-def notifier(s, titre, texte):
+def notifier(s, titre, texte, voir=False):
     """Lance la notification de cette session en arrière-plan (le hook, lui, rend la main tout de suite) ; rien si tu
-    es déjà sur son terminal."""
+    es déjà sur son terminal. voir : l'agent t'attend, le clic ouvre l'île sur sa question (sinon : son terminal)."""
     if not shutil.which("notify-send") or terminal_actif(s.get("terminal")):
         return
-    subprocess.Popen([os.path.abspath(sys.argv[0]), "notification", s["id"], titre, texte], start_new_session=True,
+    subprocess.Popen([os.path.abspath(sys.argv[0]), "notification", s["id"], titre, texte] + (["voir"] if voir else []),
+                     start_new_session=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def notification(sid, titre, texte):
+def montrer_dans_ile(sid):
+    """L'île ouverte sur la question de cette session (sa demande avec ses choix, sinon sa page) ; faux si l'île
+    ne répond pas."""
+    if not shutil.which("qs") or not ile_active():
+        return False
+    try:
+        r = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "agent", sid], capture_output=True, text=True,
+                           timeout=5)
+        return r.returncode == 0 and r.stdout.strip() == "oui"     # « non » : page des agents coupée
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def notification(sid, titre, texte, voir=False):
     moi = str(os.getpid())
     with Etat() as d:
         s = d["sessions"].get(sid)
@@ -491,7 +551,8 @@ def notification(sid, titre, texte):
         d.setdefault("notifs", {})[sid] = moi          # une seule par session : la précédente se ferme d'elle-même
         term, shell = s.get("terminal") or 0, s.get("shell") or 0
         icone = (s.get("classe") or "utilities-terminal").lower()
-    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", "default=" + T("Ouvrir", "Open"), titre, texte],
+    action = "default=" + (T("Voir", "View") if voir else T("Ouvrir", "Open"))
+    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", action, titre, texte],
                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nid = p.stdout.readline().strip()
     debut = time.time()
@@ -513,8 +574,9 @@ def notification(sid, titre, texte):
             p.terminate()
             break
     else:
-        if p.stdout.read().strip() == "default":     # clic sur la notification
-            aller(term, shell)
+        if p.stdout.read().strip() == "default":     # clic sur la notification (son corps ou « Voir »)
+            if not (voir and montrer_dans_ile(sid)):
+                aller(term, shell)
     with Etat() as d:
         if d.get("notifs", {}).get(sid) == moi:
             del d["notifs"][sid]
@@ -687,11 +749,13 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
                     s["etapes"][-1]["diff"] = f"+{a} −{r}"
         elif quoi == "attente":
             s["etat"] = "terminal"
+            poser_question(s, T("T'attend dans le terminal", "Waiting in the terminal"), message)
         elif quoi == "fini" and s.get("etat") in ("travail", "terminal"):
             s["etat"] = "fini"
             s["fin"] = time.time()
             if message:
                 s["message"] = court(message, 160)
+        oublier_question(s)
 
 
 def hook_assistant(evenement):
@@ -1087,7 +1151,8 @@ def hook_ia(ia, nom):
         suivre_evenement("etape", outil, args, bool(ev.get("erreur") or ev.get("error")))
     elif n in ATTENTE or (n == "notification" and str(ev.get("notification_type") or "").lower()
                           in ("permission_prompt", "toolpermission", "elicitation_dialog")):
-        suivre_evenement("attente")
+        # Le texte de la question quand l'IA le donne (Gemini, Copilot : message ; Qwen : message ou détails)
+        suivre_evenement("attente", message=ev.get("message") or ev.get("details") or "")
     elif n == "reprise":
         with Etat() as d:
             s = d["sessions"].get(f"{ia}-{sid}")
@@ -1346,7 +1411,7 @@ def main():
     elif a[0] == "ecrire" and len(a) >= 3:
         ecrire(a[1], " ".join(a[2:]))
     elif a[0] == "notification" and len(a) >= 4:
-        notification(a[1], a[2], a[3])
+        notification(a[1], a[2], a[3], voir=a[4:5] == ["voir"])
     elif a[0] == "aller" and len(a) >= 2:
         aller(a[1], a[2] if len(a) > 2 else 0)
     else:
