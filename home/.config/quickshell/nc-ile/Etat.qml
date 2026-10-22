@@ -600,12 +600,13 @@ Singleton {
     // Économie ou sans effets : l'onde se pose sur une forme calme au lieu de rester figée au milieu d'un mouvement
     Connections { target: Reglages; function onSobreChanged() { if (Reglages.sobre) etat.bandes = [0.3, 0.45, 0.55, 0.45, 0.3] } }
     property real dernierSon: 0
+    // 30 images/s, sans animation entre deux pas (une animation de 70 ms à chaque pas faisait redessiner l'île à 165 Hz)
     Timer {
-        interval: 110; repeat: true
+        interval: 33; repeat: true
         running: etat.joue && etat.maintenant.getTime() - etat.dernierSon > 1500 && !Reglages.sobre
         property real t: 0
         onTriggered: {
-            t += 0.55
+            t += 0.165
             var b = []
             for (var i = 0; i < 5; i++) b.push(0.25 + 0.22 * Math.sin(t + i * 1.3) + 0.12 * Math.sin(t * 1.7 + i))
             etat.bandes = b

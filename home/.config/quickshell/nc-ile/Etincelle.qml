@@ -3,8 +3,8 @@
 //   antigravity : arche en dégradé ; opencode : carré dans un carré ; codex : invite >_ ; cursor : cube ;
 //   copilot : lunettes ; qwen : hexagone ; kiro : fantôme ; amp : « A » en flèche (flottent)
 //   assistant : emblème animé fourni par l'utilisateur (atlas PNG, immobile au repos)
-// Les mouvements sans fin sont des Animator (fil de rendu) : aucune propriété QML n'est réécrite à chaque image.
-// Un Animator n'écrit sa propriété qu'à l'arrêt : c'est donc dans onStopped que le logo revient droit et en place.
+// Les mouvements sans fin suivent Pas.qml, à 30 images par seconde : à la fréquence de l'écran (165 Hz), cette seule
+// étincelle occupait le cinquième de l'iGPU, car chaque image de l'île coûte presque autant, même pour 16 px qui bougent.
 import QtQuick
 import Quickshell.Services.UPower
 
@@ -19,7 +19,7 @@ Item {
     onCouleurChanged: dessin.requestPaint()
     onAgentChanged: { retour.stop(); rotation = 0; dessin.requestPaint() }   // les autres logos ne gardent pas l'angle de l'étincelle
 
-    // Le dessin, sans ancres : le « flotte » des autres logos anime son y (YAnimator) dans le cadre de e
+    // Le dessin, sans ancres : le « flotte » des autres logos anime son y dans le cadre de e
     Canvas {
         id: dessin
         width: e.width; height: e.height
@@ -113,22 +113,22 @@ Item {
     // En Économie ou sans effets (Reglages.sobre) : immobile ; Hyprland n'a plus à recomposer l'écran à chaque image
     readonly property bool bouge: e.tourne && e.visible && !Reglages.sobre
     // Sur batterie, avec « Animations de l'île sur batterie : douces » (par défaut) : un tour en 4 s au lieu de 2,6.
-    // Un Animator garde la durée de son départ : la nouvelle vaut à la prochaine mise en route.
+    // La durée change aussi en cours de route (le pas suivant tourne à la nouvelle vitesse).
     readonly property int dureeTour: UPower.onBattery && Reglages.val("ILE_ANIM_BATTERIE", "douces") !== "continues" ? 4000 : 2600
-    RotationAnimator on rotation {
-        running: e.bouge && e.tournante; from: 0; to: 360; duration: e.dureeTour; loops: Animation.Infinite
-        onStarted: retour.stop()
-        // L'angle réel vient d'être écrit : l'étincelle qui s'arrête de travailler revient droite en douceur,
-        // celle qui laisse la place à un logo qui ne tourne pas revient d'un coup
-        onStopped: if (e.tournante) retour.start(); else e.rotation = 0
+    Pas {
+        running: e.bouge && e.tournante
+        onTriggered: e.rotation = (e.rotation + 360 * interval / e.dureeTour) % 360
+        // L'étincelle qui s'arrête de travailler revient droite en douceur, celle qui laisse la place à un logo qui ne
+        // tourne pas revient d'un coup
+        onRunningChanged: if (running) retour.stop(); else if (e.tournante) retour.start(); else e.rotation = 0
     }
     NumberAnimation { id: retour; target: e; property: "rotation"; to: 0; duration: 300 }
 
-    // Les autres : flottent (montent et redescendent) pendant le travail
-    SequentialAnimation {
-        running: e.bouge && !e.tournante && e.agent !== "assistant"; loops: Animation.Infinite
-        YAnimator { target: dessin; from: 0; to: -e.taille * 0.16; duration: 900; easing.type: Easing.InOutSine }
-        YAnimator { target: dessin; from: -e.taille * 0.16; to: 0; duration: 900; easing.type: Easing.InOutSine }
-        onStopped: dessin.y = 0                        // l'Animator a écrit sa dernière hauteur : le logo revient en place
+    // Les autres : flottent (montent et redescendent, 1,8 s l'aller-retour) pendant le travail
+    Pas {
+        id: flotte
+        running: e.bouge && !e.tournante && e.agent !== "assistant"
+        onTriggered: dessin.y = -e.taille * 0.08 * (1 - Math.cos(2 * Math.PI * t / 1.8))
+        onRunningChanged: if (!running) dessin.y = 0
     }
 }

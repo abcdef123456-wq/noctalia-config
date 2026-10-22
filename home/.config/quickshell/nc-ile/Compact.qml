@@ -90,7 +90,6 @@ Item {
                     height: 6 + Etat.bandes[index] * 10
                     anchors.verticalCenter: parent.verticalCenter
                     color: Couleurs.texte
-                    Behavior on height { NumberAnimation { duration: 70 } }
                 }
             }
         }
@@ -256,7 +255,7 @@ Item {
         id: telechargement
         readonly property var t: Etat.telechargements.length ? Etat.telechargements[0] : null
         montre: c.mode === "telechargement"
-        // Un YAnimator (fil de rendu) ne peut pas animer une ancre : la rangée place ce cadre, à la taille de la flèche,
+        // Une ancre ne se déplace pas : la rangée place ce cadre, à la taille de la flèche,
         // et la flèche monte et descend dedans
         Item {
             anchors.verticalCenter: parent.verticalCenter
@@ -266,10 +265,9 @@ Item {
                 nom: "arrow_downward"; taille: 17; color: Couleurs.accent
                 // Immobile en Économie ou sans effets (Reglages.sobre)
                 readonly property bool bouge: telechargement.montre && !Reglages.sobre
-                SequentialAnimation { running: flecheTelechargement.bouge; loops: Animation.Infinite
-                    YAnimator { target: flecheTelechargement; from: -3; to: 3; duration: 600; easing.type: Easing.InOutSine }
-                    YAnimator { target: flecheTelechargement; from: 3; to: -3; duration: 600; easing.type: Easing.InOutSine }
-                    onStopped: flecheTelechargement.y = 0 }    // l'Animator écrit sa dernière hauteur à l'arrêt
+                Pas { running: flecheTelechargement.bouge            // 30 images/s (voir Pas.qml)
+                      onTriggered: flecheTelechargement.y = -3 * Math.cos(2 * Math.PI * t / 1.2)
+                      onRunningChanged: if (!running) flecheTelechargement.y = 0 }
             }
         }
         Texte {
@@ -297,11 +295,10 @@ Item {
             anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.rouge
             // Point rouge fixe en Économie ou sans effets (Reglages.sobre)
             readonly property bool clignote: video.montre && !Reglages.sobre
-            // OpacityAnimator (fil de rendu) : il écrit l'opacité à l'arrêt ; le point redevient alors plein
-            SequentialAnimation { running: pointVideo.clignote; loops: Animation.Infinite
-                OpacityAnimator { target: pointVideo; from: 1; to: 0.35; duration: 700 }
-                OpacityAnimator { target: pointVideo; from: 0.35; to: 1; duration: 700 }
-                onStopped: pointVideo.opacity = 1 }
+            // 30 images/s (voir Pas.qml) ; à l'arrêt, le point redevient plein
+            Pas { running: pointVideo.clignote
+                  onTriggered: pointVideo.opacity = 0.675 + 0.325 * Math.cos(2 * Math.PI * t / 1.4)
+                  onRunningChanged: if (!running) pointVideo.opacity = 1 }
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold; font.features: { "tnum": 1 }

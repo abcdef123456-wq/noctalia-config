@@ -47,7 +47,6 @@ Item {
                         height: Etat.joue ? 8 + Etat.bandes[index] * 20 : 8
                         anchors.verticalCenter: parent.verticalCenter
                         color: Couleurs.texte; opacity: Etat.joue ? 1 : 0.4
-                        Behavior on height { NumberAnimation { duration: 70 } }
                     }
                 }
             }

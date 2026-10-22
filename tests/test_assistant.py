@@ -714,12 +714,12 @@ ShellRoot {
             (root / "runtime").mkdir(mode=0o700)
             (root / "assets").mkdir()
             src = REPO / "home/.config/quickshell/nc-ile"
-            for nom in ("Etincelle.qml", "LogoAssistant.qml", "assets/assistant-animation.png"):
+            for nom in ("Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "assets/assistant-animation.png"):
                 shutil.copy2(src / nom, root / nom)
             (root / "Agents.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property string effets:"tous"; readonly property bool sobre: effets==="aucun";function val(k,d){return k==="EFFETS"?effets:d}}')
             (root / "qmldir").write_text('singleton Agents 1.0 Agents.qml\nsingleton Reglages 1.0 Reglages.qml\n'
-                                         'LogoAssistant 1.0 LogoAssistant.qml\nEtincelle 1.0 Etincelle.qml\n')
+                                         'LogoAssistant 1.0 LogoAssistant.qml\nEtincelle 1.0 Etincelle.qml\nPas 1.0 Pas.qml\n')
             (root / "shell.qml").write_text(qml)
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        XDG_RUNTIME_DIR=str(root / "runtime"), XDG_CACHE_HOME=str(root / "cache"))

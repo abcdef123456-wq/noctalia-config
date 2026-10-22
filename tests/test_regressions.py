@@ -571,12 +571,13 @@ class AnimationsSobres(unittest.TestCase):
 
 
 class AnimationsFilDeRendu(unittest.TestCase):
-    """PERF-01 : les rotations sans fin de l'île sont des RotationAnimator (fil de rendu), plus des RotationAnimation
-    (fil principal, une propriété QML réécrite à chaque image)."""
+    """PERF-01 : les rotations sans fin des pages de l'île sont des RotationAnimator (fil de rendu), plus des
+    RotationAnimation (fil principal, une propriété QML réécrite à chaque image). L'étincelle de la pilule, toujours
+    affichée, tourne par Pas.qml à 30 images/s (ILE-GPU, tests/test_ile_cadence.py)."""
 
     def test_rotations_sans_fin_en_animator(self):
         import re
-        for nom in ("Etincelle.qml", "AssistantOrbe.qml", "Calendrier.qml", "Ligne.qml"):
+        for nom in ("AssistantOrbe.qml", "Calendrier.qml", "Ligne.qml"):
             texte = (QML / nom).read_text()
             self.assertNotRegex(texte, r"RotationAnimation\s+on\s+rotation", nom)
             infinies = [m.start() for m in re.finditer(r"loops: Animation\.Infinite", texte)]
@@ -585,6 +586,6 @@ class AnimationsFilDeRendu(unittest.TestCase):
                 bloc = texte[max(0, texte.rfind("{", 0, debut) - 40):debut]   # le type de l'animation et sa ligne
                 self.assertNotIn("RotationAnimation ", bloc, f"{nom} : {bloc.strip()}")
         etincelle = (QML / "Etincelle.qml").read_text()
-        self.assertRegex(etincelle, r"RotationAnimator on rotation \{[^}]*duration: e\.dureeTour")
+        self.assertRegex(etincelle, r"Pas \{\s*running: e\.bouge && e\.tournante\s*onTriggered: e\.rotation = \(e\.rotation \+ 360 \* interval / e\.dureeTour\)")
         self.assertIn('Reglages.val("ILE_ANIM_BATTERIE", "douces")', etincelle)
         self.assertIn("UPower.onBattery", etincelle)

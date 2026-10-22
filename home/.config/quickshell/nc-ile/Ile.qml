@@ -17,8 +17,22 @@ PanelWindow {
 
     // Recherche : la fenêtre couvre tout l'écran (invisible) pour qu'un clic à côté la referme. L'île prend alors le
     // clavier en exclusif, et Hyprland ne laisse aucun clic arriver ailleurs : une couche séparée ne les recevait pas
-    anchors { top: true; left: true; right: true; bottom: fen.recherche }
-    implicitHeight: 700
+    anchors { top: true; left: fen.recherche; right: fen.recherche; bottom: fen.recherche }
+    // Hors recherche, la surface suit la taille utile de l'île, centrée en haut par Hyprland : Qt redessine toute la
+    // fenêtre à chaque image, et Hyprland recompose toute la zone. Une surface de 1600 x 700 pour une pilule de
+    // 200 x 30 coûtait les trois quarts de l'iGPU dès que quelque chose bougeait dans l'île (étincelle, onde, minuteur).
+    // Pilule : sa largeur et 70 de chaque côté (bulle, point du micro) ; ouverte, en bannière ou en demande : 800 x 700.
+    // À l'ouverture, la surface grandit dans le même tour (le ressort part de la pilule, centrée : rien ne dépasse) ; à
+    // la fermeture, elle ne rapetisse qu'une fois le ressort revenu à la pilule (900 ms au plus), sinon l'île serait coupée
+    readonly property bool grandeVoulue: ouverte || banniere || demandeClaude
+    readonly property bool grande: grandeVoulue || retour.running
+    onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else retour.restart()
+    Timer { id: retour; interval: 900 }
+    function revenue() { if (retour.running && ile.height <= 31 && ile.width <= compact.largeur + 1) retour.stop() }
+    readonly property real largeurUtile: Math.max(ile.width, compact.largeur) + 140
+    // Par paliers de 40 : pendant le ressort de la pilule, la surface change de taille quelques fois, pas à chaque image
+    implicitWidth: Math.min(modelData.width, grande ? Math.max(800, largeurUtile) : Math.ceil(largeurUtile / 40) * 40)
+    implicitHeight: grande ? 700 : 56
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
@@ -179,6 +193,8 @@ PanelWindow {
         Behavior on width { SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
         Behavior on height { SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
         Behavior on radius { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+        onWidthChanged: fen.revenue()
+        onHeightChanged: fen.revenue()
 
         Compact {
             id: compact
