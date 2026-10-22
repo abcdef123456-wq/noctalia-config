@@ -1360,7 +1360,18 @@ if [ "$MODE" = full ]; then
     fi
     return $ch
   }
+  # Fichier TLP à toi qui garde balance_performance sur batterie : rien n'est modifié, une ligne de conseil seulement
+  tlp_conseil_perso() {
+    local f
+    for f in "$@"; do
+      grep -qE '^[[:space:]]*CPU_ENERGY_PERF_POLICY_ON_BAT[[:space:]]*=[[:space:]]*"?balance_performance' "$f" 2>/dev/null &&
+        info "$(t "Pour économiser 2 à 3 W sur batterie : CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power dans $f" "To save 2 to 3 W on battery: CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power in $f")"
+    done
+    return 0
+  }
   if [ "$ppd" = tlp-pd ]; then
+    # shellcheck disable=SC2086
+    [ -n "$TLP_PERSO" ] && tlp_conseil_perso $TLP_PERSO
     if tlp_regle; then sudo tlp start >/dev/null && ok "$(t "Réglages TLP mis à jour (/etc/tlp.d/10-nc.conf)." "TLP settings updated (/etc/tlp.d/10-nc.conf).")"
     elif [ -n "$TLP_PERSO" ] && [ ! -f /etc/tlp.d/10-nc.conf ]; then ok "$(t "Déjà en place (TLP avec tes propres réglages : $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), gardés)." "Already set up (TLP with your own settings: $(echo $TLP_PERSO | xargs -n1 basename | paste -sd' '), kept).")"
     else ok "$(t "Déjà en place (TLP et tlp-pd)." "Already set up (TLP and tlp-pd).")"; fi

@@ -288,6 +288,7 @@ def verifier(b):
                       "no backlight: the brightness keys will do nothing"),
                     T("écran externe seul, ou pilote graphique pas encore chargé",
                       "external screen only, or graphics driver not loaded yet"))
+        energie_processeur(b, bats)
 
     rtx(b)
 
@@ -428,6 +429,28 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+
+
+def energie_processeur(b, bats):
+    """EPP du processeur et politique ASPM (PCIe) : sur batterie, balance_performance coûte 2 à 3 W pour rien (mesuré)."""
+    def lire(f):
+        try:
+            return open(f).read().strip()
+        except OSError:
+            return ""
+    epp = lire("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference")
+    aspm = re.search(r"\[(\w+)\]", lire("/sys/module/pcie_aspm/parameters/policy"))
+    aspm = aspm.group(1) if aspm else ""
+    if not epp and not aspm:
+        return
+    secteur = any(lire(f"/sys/class/power_supply/{d}/online") == "1" for d in os.listdir("/sys/class/power_supply")
+                  if lire(f"/sys/class/power_supply/{d}/type") in ("Mains", "USB", "USB_C"))
+    texte = T(f"processeur : EPP {epp or '?'}, PCIe (ASPM) : {aspm or '?'}", f"processor: EPP {epp or '?'}, PCIe (ASPM): {aspm or '?'}")
+    if bats and not secteur and epp == "balance_performance":
+        b.avert(texte, T("sur batterie, CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power dans /etc/tlp.d économise 2 à 3 W",
+                         "on battery, CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power in /etc/tlp.d saves 2 to 3 W"))
+    else:
+        b.ok(texte)
 
 
 def rtx(b):
