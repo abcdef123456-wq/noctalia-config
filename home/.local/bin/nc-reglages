@@ -727,8 +727,12 @@ REGLAGES = [
         "On battery (except in Performance), lowered to level 1 if it was higher; its previous level comes back when "
         "you plug in the charger."), groupe="energie"),
     R("BORDURE_PERFORMANCE", "Énergie", L("Bordure animée en Performance", "Animated border in Performance"), "ouinon", "oui",
-      L("Sur secteur, la bordure de la fenêtre active tourne en continu (l'écran est redessiné sans arrêt).",
-        "Plugged in, the active window's border rotates continuously (the screen is redrawn all the time)."), groupe="hypr"),
+      L("En Performance sur secteur, quand l'écran est rendu par une carte graphique dédiée (mode Dédiée du BIOS, PC fixe) : "
+        "la bordure de la fenêtre active tourne. Sur une carte intégrée, elle reste figée (elle forcerait un rendu permanent "
+        "de tout l'écran).",
+        "In Performance when plugged in, if the screen is rendered by a dedicated graphics card (Dedicated mode in the BIOS, "
+        "desktop PC): the active window's border rotates. On an integrated card it stays still (it would force the whole "
+        "screen to be redrawn all the time)."), groupe="hypr"),
     R("GPU_PERFORMANCE", "Énergie", L("Carte graphique des applis en Performance", "Graphics card for apps in Performance"),
       "choix", "nvidia",
       L("PC à deux cartes : les applis lancées en Performance utilisent la NVIDIA (plus puissante, consomme plus).",

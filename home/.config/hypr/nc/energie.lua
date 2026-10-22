@@ -21,9 +21,51 @@ hl.config({
     },
 })
 
--- Bordure en rotation continue : seulement en Performance sur secteur (elle force un rendu permanent de l'écran) ;
--- coupable dans nc-reglages → Énergie
-if nc.profil.profil == "performance" and not nc.profil.batterie and not coupe and nc.reglage("BORDURE_PERFORMANCE", true) then
+-- La session est-elle rendue par une carte graphique dédiée (mode Dédiée du BIOS d'un portable à MUX, PC fixe) ?
+-- Lu dans /sys pendant le chargement, sans rien lancer : la carte de AQ_DRM_DEVICES (la première), sinon celle de
+-- l'écran interne allumé, sinon celle d'un écran branché. Dédiée = NVIDIA, ou AMD / Intel avec au moins 2 Gio de
+-- mémoire vidéo (une carte intégrée en annonce peu). Dans le doute : non. NC_SYSFS : un faux /sys, pour les tests.
+local function lire(chemin)
+    local f = io.open((os.getenv("NC_SYSFS") or "/sys") .. chemin)
+    if not f then return nil end
+    local t = f:read("*a")
+    f:close()
+    return t
+end
+local function carte_de_la_session()
+    local premiere = (os.getenv("AQ_DRM_DEVICES") or ""):match("^[^:]+")
+    if premiere and premiere ~= "" then
+        -- /dev/dri/cardN (env-hyprland) ; un chemin by-path ne peut pas y figurer (ses « : » séparent la liste)
+        local n = premiere:match("card(%d+)$")
+        return n and ("card" .. n) or nil
+    end
+    local function branche(prises)
+        for i = 0, 7 do
+            for _, prise in ipairs(prises) do
+                for j = 1, 4 do
+                    if (lire("/class/drm/card" .. i .. "-" .. prise .. "-" .. j .. "/status") or ""):match("^connected") then
+                        return "card" .. i
+                    end
+                end
+            end
+        end
+    end
+    return branche({ "eDP" }) or branche({ "DP", "HDMI-A", "DVI-D", "DVI-I", "VGA" })
+end
+function nc.session_sur_carte_dediee()
+    local carte = carte_de_la_session()
+    if not carte then return false end
+    local vendeur = (lire("/class/drm/" .. carte .. "/device/vendor") or ""):match("0x%x+")
+    if vendeur == "0x10de" then return true end
+    local vram = tonumber((lire("/class/drm/" .. carte .. "/device/mem_info_vram_total") or ""):match("%d+"))
+    return (vendeur == "0x1002" or vendeur == "0x8086") and vram ~= nil and vram >= 2 * 1024 ^ 3
+end
+
+-- Bordure en rotation continue : seulement en Performance sur secteur, et quand la session est rendue par une carte
+-- dédiée. Elle fait redessiner tout l'écran à chaque image : sur une carte intégrée (Radeon 610M à 165 Hz), environ la
+-- moitié du GPU et des images perdues au changement de bureau. Coupable dans nc-reglages → Énergie
+if nc.profil.profil == "performance" and not nc.profil.batterie and not coupe and nc.reglage("BORDURE_PERFORMANCE", true)
+        and nc.session_sur_carte_dediee() then
     hl.animation({ leaf = "borderangle", enabled = true, speed = 100, bezier = "linear", style = "loop" })
 else
     hl.animation({ leaf = "borderangle", enabled = true, speed = 8, bezier = "standard" })
