@@ -14,8 +14,11 @@ import zipfile
 from datetime import datetime
 
 REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
-REVISION='9c12e00ffc6f11732013b575f0652e920331756a'
-VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a',REVISION)
+# 9cd91bbb : dictée côté serveur (POST /api/transcribe), accès par Tailscale ; ses propres copies de nos nc_* restent
+# derrière l'overlay (--app-dir, revue DEP-01). Ne jamais lancer ses scripts/switch-to-unified.sh ni « deploy.sh setup »
+# chez nous : ports sur 0.0.0.0, sans overlay, et son .env par-dessus les nôtres.
+REVISION='9cd91bbb6235116e3cadd433eb68fcd9b17203bf'
+VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',REVISION)
 
 
 def ask(message, default=False):

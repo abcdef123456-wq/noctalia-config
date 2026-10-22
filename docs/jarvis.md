@@ -205,6 +205,23 @@ exige un bind et un pare-feu adaptés sur le serveur. Les tokens des bots et leu
 programme qui connaît la clé : celui-ci peut tout demander. Garde la clé longue et privée, ne l'écris dans aucun
 dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-assistant configurer` sur chaque PC).
 
+## Passer un serveur déjà installé à la révision validée
+
+Le déployeur installe la révision validée (`9cd91bbb`, dictée côté serveur et accès Tailscale) sur un nouveau
+serveur, mais ne change jamais celle d'un serveur déjà installé. Pour le faire, sur la machine du backend (dossier
+par défaut `~/.local/share/jarvis-bis`) :
+
+```bash
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 9cd91bbb6235116e3cadd433eb68fcd9b17203bf
+git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
+```
+
+puis relance `nc-jarvis deployer` (ou `nc-jarvis deployer --serveur utilisateur@serveur`) depuis le PC : il réécrit
+les unités, l'overlay en tête (à faire de toute façon depuis la correction DEP-01), et redémarre les services.
+
+Ne lance pas `scripts/switch-to-unified.sh` ni `deploy.sh setup` du dépôt du serveur : ils écoutent sur toutes les
+interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env`.
+
 ## Matériel local et changement du dépôt upstream
 
 La révision `8867dd0` renomme `render-gateway/` en `gateway/` et supprime le relais WebSocket PC-agent.
