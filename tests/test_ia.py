@@ -699,9 +699,15 @@ class IA(unittest.TestCase):
                          {"sens": "v", "r": 0.5, "a": {"f": "a"}, "b": {"sens": "h", "r": 0.6, "a": {"f": "b"}, "b": {"f": "c"}}})
         # Des zones avec des marges ou des trous se découpent quand même
         self.assertEqual(m.arbre_zones({"a": (0, 0, 48, 100), "b": (52, 0, 48, 100)})["sens"], "v")
-        # Un moulinet (aucune coupe ne traverse sans couper une zone) : rien
-        self.assertIsNone(m.arbre_zones({"a": (0, 0, 60, 40), "b": (60, 0, 40, 60), "c": (40, 60, 60, 40), "d": (0, 40, 40, 60),
-                                         "e": (40, 40, 20, 20)}))
+        # Revue ZON-02 : un arrondi de l'IA (61 % à côté de 60 %) reste une coupe, posée entre les deux bords
+        t = m.arbre_zones({"a": (0, 0, 61, 100), "b": (60, 0, 40, 50), "c": (60, 50, 40, 50)})
+        self.assertEqual((t["sens"], t["r"], t["b"]["sens"]), ("v", 0.605, "h"))
+        self.assertEqual(m.arbre_zones({"a": (0, 0, 33, 100), "b": (33, 0, 33, 100), "c": (66, 0, 34, 100)})["sens"], "v")
+        # Un moulinet (aucune coupe ne traverse sans couper une zone) : une découpe simple, jamais rien
+        moulinet = {"a": (0, 0, 60, 40), "b": (60, 0, 40, 60), "c": (40, 60, 60, 40), "d": (0, 40, 40, 60), "e": (40, 40, 20, 20)}
+        t = m.arbre_zones(moulinet)
+        feuilles = lambda n: [n["f"]] if "f" in n else feuilles(n["a"]) + feuilles(n["b"])
+        self.assertEqual(sorted(feuilles(t)), sorted(moulinet))
 
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()

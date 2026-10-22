@@ -1579,7 +1579,8 @@ def consigne_agent(domaines):
            "outils à droite ; adresse = l'adresse 0x… d'une fenêtre listée ; ne déplace que ce qui y gagne. Pour la "
            "meilleure disposition d'un bureau, tu peux poser chaque fenêtre dans une zone avec fenetre_zone (x, y, "
            "largeur, hauteur en pourcentages entiers de l'écran utile), sans suivre la disposition automatique en tuiles : "
-           "les zones d'un même bureau couvrent l'écran sans se chevaucher, la plus grande pour l'activité principale."
+           "les zones d'un même bureau couvrent l'écran sans se chevaucher, la plus grande pour l'activité principale ; "
+           "donne une zone à chaque fenêtre du bureau."
            if "fenetres" in domaines else ""),
         "You control the user's Linux desktop, only with these tools:\n" + "\n".join(outils) +
         "\nValues: etat = on or off; profil = performance, balanced or power-saver; pourcent = an integer; nom = a service "
@@ -1592,7 +1593,8 @@ def consigne_agent(domaines):
            "address of a listed window; only move what benefits from it. For the best layout of a desktop, you can put "
            "each window in a zone with fenetre_zone (x, y, largeur = width, hauteur = height as integer percentages of the "
            "usable screen), regardless of the automatic tiling layout: the zones of one desktop cover the screen without "
-           "overlapping, the biggest for the main activity." if "fenetres" in domaines else ""))
+           "overlapping, the biggest for the main activity; give a zone to every window of the desktop."
+           if "fenetres" in domaines else ""))
 
 
 def lire_json(texte):
@@ -2006,29 +2008,45 @@ def photo_fenetres():
                 bureaux={str(x["id"]): x.get("name") for x in b if x.get("id", 0) > 0})
 
 
-def arbre_zones(zones):
+def arbre_zones(zones, marge=3):
     """{adresse: (x, y, largeur, hauteur)} en pourcentages → l'arbre de découpes de la disposition nc-zones
-    (hypr/nc/zones.lua) : une coupe verticale ou horizontale qu'aucune zone ne traverse, sa position relative r, puis
-    pareil de chaque côté. None si les zones ne se découpent pas ainsi (chevauchements, disposition en moulinet)."""
+    (hypr/nc/zones.lua) : une coupe verticale ou horizontale qu'aucune zone ne traverse (à `marge` % près : l'IA
+    arrondit, 61 % à côté de 60 % reste une coupe, posée entre les deux bords), sa position relative r, puis pareil de
+    chaque côté. Des zones qui ne se découpent pas ainsi (moulinet, gros chevauchement) : une découpe simple, les
+    zones triées dans le sens de l'écran et coupées en deux par le plus grand côté — jamais rien (revue ZON-02)."""
     def couper(adrs, bx, by, bw, bh):
         if len(adrs) == 1:
             return {"f": adrs[0]}
         for sens, debut, fin, b0, bt in (("v", 0, 2, bx, bw), ("h", 1, 3, by, bh)):
-            positions = sorted({zones[a][debut] + zones[a][fin] for a in adrs} | {zones[a][debut] for a in adrs})
-            for c in positions:
-                if not b0 < c < b0 + bt:
+            for c in sorted({zones[a][debut] + zones[a][fin] for a in adrs}):
+                gauche = [a for a in adrs if zones[a][debut] + zones[a][fin] <= c + marge]
+                droite = [a for a in adrs if zones[a][debut] >= c - marge and a not in gauche]
+                if not gauche or not droite or len(gauche) + len(droite) != len(adrs):
                     continue
-                a_ = [a for a in adrs if zones[a][debut] + zones[a][fin] <= c]
-                b_ = [a for a in adrs if zones[a][debut] >= c]
-                if a_ and b_ and len(a_) + len(b_) == len(adrs):
-                    boite_a = (bx, by, c - bx, bh) if sens == "v" else (bx, by, bw, c - by)
-                    boite_b = (c, by, bx + bw - c, bh) if sens == "v" else (bx, c, bw, by + bh - c)
-                    ga, gb = couper(a_, *boite_a), couper(b_, *boite_b)
-                    if ga and gb:
-                        return {"sens": sens, "r": round((c - b0) / bt, 4), "a": ga, "b": gb}
+                coupe = (max(zones[a][debut] + zones[a][fin] for a in gauche) + min(zones[a][debut] for a in droite)) / 2
+                if not b0 < coupe < b0 + bt:
+                    continue
+                boite_a = (bx, by, coupe - bx, bh) if sens == "v" else (bx, by, bw, coupe - by)
+                boite_b = (coupe, by, bx + bw - coupe, bh) if sens == "v" else (bx, coupe, bw, by + bh - coupe)
+                ga, gb = couper(gauche, *boite_a), couper(droite, *boite_b)
+                if ga and gb:
+                    return {"sens": sens, "r": round((coupe - b0) / bt, 4), "a": ga, "b": gb}
         return None
+
+    def simple(adrs, bw, bh):
+        if len(adrs) == 1:
+            return {"f": adrs[0]}
+        sens = "v" if bw >= bh else "h"
+        adrs = sorted(adrs, key=lambda a: (zones[a][0] + zones[a][2] / 2, zones[a][1]) if sens == "v"
+                      else (zones[a][1] + zones[a][3] / 2, zones[a][0]))
+        n = len(adrs) // 2
+        r = round(n / len(adrs), 4)
+        return {"sens": sens, "r": r, "a": simple(adrs[:n], bw * r if sens == "v" else bw, bh * r if sens == "h" else bh),
+                "b": simple(adrs[n:], bw * (1 - r) if sens == "v" else bw, bh * (1 - r) if sens == "h" else bh)}
     adrs = sorted(zones, key=lambda a: (zones[a][0], zones[a][1]))
-    return couper(adrs, 0, 0, 100, 100) if adrs else None
+    if not adrs:
+        return None
+    return couper(adrs, 0, 0, 100, 100) or simple(adrs, 100, 100)
 
 
 def lua_arbre(n):
@@ -2140,7 +2158,7 @@ def ranger(bureau_seul):
             if v["outil"] == "fenetre_direction":
                 garder_sur_bureau(v["args"]["adresse"], bureau)
     if avant:
-        time.sleep(0.3)                                  # l'état final (les animations ne changent pas la cible)
+        time.sleep(0.8)                                  # la fin du glissement des fenêtres (windowsMove)
         try:
             ANNULER_RANGEMENT.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(ANNULER_RANGEMENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
