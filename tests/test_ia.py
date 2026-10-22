@@ -621,6 +621,42 @@ class IA(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("délai dépassé", r.stderr)
 
+    def test_demande_abandonnee_arrete_le_programme_et_ses_enfants(self):
+        """Revue IA-07 : Échap (nc-ia arrêté par SIGTERM) laissait le programme d'IA et ses sous-processus aller au bout."""
+        import signal, time
+        self.programme("opencode", 'sleep 7654321 & echo "début"; sleep 7654322')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        self.lancer("etat")                                    # prépare les faux programmes
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
+                   XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                   JOURNAL=str(self.journal), NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+
+        def vivants():
+            r = []
+            for d in Path("/proc").iterdir():
+                try:
+                    argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
+                except OSError:
+                    continue
+                if d.name.isdigit() and argv in ([b"sleep", b"7654321"], [b"sleep", b"7654322"]):
+                    r.append(int(d.name))
+            return r
+
+        def nettoyer():
+            for pid in vivants():
+                os.kill(pid, signal.SIGKILL)
+        self.addCleanup(nettoyer)
+        p = subprocess.Popen([str(self.home / ".local/bin/nc-ia"), "demander", "--flux", "question"], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        while "début" not in p.stdout.readline():                # (la première ligne dit quelle IA répond)
+            pass
+        self.assertEqual(len(vivants()), 2)
+        p.send_signal(signal.SIGTERM)
+        self.assertEqual(p.wait(10), 143)
+        time.sleep(0.3)
+        self.assertEqual(vivants(), [], "ni le programme, ni son sous-processus")
+        p.stdout.close()
+
     def test_expliquer_une_panne(self):
         """nc-panne → « Expliquer » : l'état et la fin du journal du service, secrets masqués, jamais un service inconnu."""
         self.programme("systemctl", 'case "$*" in *nc-ile.service*) printf "Description=Île\\nLoadState=loaded\\nResult=core-dump\\n";; '

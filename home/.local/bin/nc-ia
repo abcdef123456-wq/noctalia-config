@@ -712,6 +712,14 @@ class GardeTemps:
         self.t.cancel()
 
 
+def arreter_groupe(p):
+    """Le programme d'IA fini ou abandonné : ce qu'il a lancé dans son groupe (serveurs MCP, scripts) s'arrête aussi."""
+    try:
+        os.killpg(p.pid, 9)
+    except OSError:
+        pass
+
+
 def appel_claude(consigne, texte, image, usage):
     # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
     vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
@@ -749,8 +757,7 @@ def appel_claude(consigne, texte, image, usage):
             raise ErreurIA(derniere_ligne(err) or T("Claude Code n'a rien répondu", "Claude Code gave no answer"))
     finally:
         garde.fin()
-        if p.poll() is None:
-            p.kill()
+        garde._arreter() if p.poll() is None else arreter_groupe(p)   # et ses sous-processus (revue IA-07)
         err.close()
 
 
@@ -790,8 +797,7 @@ def appel_programme(ident, consigne, texte, image, usage):
             raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} n'a rien répondu", f"{nom(ident)} gave no answer"))
     finally:
         garde.fin()
-        if p.poll() is None:
-            p.kill()
+        garde._arreter() if p.poll() is None else arreter_groupe(p)   # et ses sous-processus (revue IA-07)
         err.close()
 
 
@@ -2374,4 +2380,9 @@ def main(a):
 
 
 if __name__ == "__main__":
+    # Échap dans le Spotlight, île fermée : arrêté par SIGTERM ; sortir proprement pour que le programme d'IA lancé
+    # s'arrête avec (les finally), au lieu d'aller au bout sans personne pour lire (revue IA-07)
+    import signal
+    for _sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(_sig, lambda s, _f: sys.exit(128 + s))
     sys.exit(main(sys.argv[1:]))
