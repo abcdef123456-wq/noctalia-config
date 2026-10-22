@@ -98,7 +98,7 @@ Singleton {
     function montrer(notif) {
         banniere = notif
         fin.prolonge = false
-        fin.interval = Math.max(3000, Math.min(5000, Math.round((parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "3.5")) || 3.5) * 1000)))
+        fin.interval = Math.max(3000, Math.min(5000, Math.round((parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "4")) || 4) * 1000)))
         fin.restart()
         plafond.restart()
     }
