@@ -6,8 +6,9 @@ author      = "noctalia-config"
 license     = "MIT"
 description = "Carrousel plein écran des sessions enregistrées (nc-session) : aperçu de chacune, ouvrir, enregistrer, supprimer."
 
-# Même cadre que le carrousel des fonds (nc/carousel). « e » : modifier la session ; capturé, il n'arrive plus au champ
-# du nom d'une nouvelle session : le panneau l'y ajoute lui-même.
+# Même cadre que le carrousel des fonds (nc/carousel). Aucune lettre capturée : une capture ne dépend pas du focus, et
+# les lettres doivent toujours arriver au champ qui l'a (nom d'une nouvelle session, champs de l'éditeur). L'éditeur
+# s'ouvre par un clic droit ou le bouton « Modifier ».
 [[panel]]
 id = "main"
 entry = "panel.luau"
@@ -17,4 +18,4 @@ placement = "floating"
 position = "center"
 layer = "overlay"
 keyboard_focus = "exclusive"
-capture_keys = ["Escape", "Left", "Right", "Up", "Down", "Tab", "shift+Tab", "ISO_Left_Tab", "Return", "KP_Enter", "Home", "End", "shift+Delete", "e"]
+capture_keys = ["Escape", "Left", "Right", "Up", "Down", "Tab", "shift+Tab", "ISO_Left_Tab", "Return", "KP_Enter", "Home", "End", "shift+Delete"]
