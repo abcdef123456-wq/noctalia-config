@@ -236,6 +236,22 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 - Pilote : sur Arch, le script installe le pilote officiel s'il manque (`nvidia-open`, nécessaire aux RTX 50). Sur Debian 13,
   les RTX 50 demandent le pilote de NVIDIA (celui de Debian, 550, est trop ancien) : le script donne la marche à suivre.
 
+### Mode graphique : Hybride ou Dédiée
+
+Sur un portable à MUX (Lenovo Legion, ASUS ROG, System76…), l'écran interne peut être branché sur l'une ou l'autre carte :
+
+- **Hybride** : l'écran passe par la carte intégrée ; la NVIDIA dort tant qu'aucune appli ne la demande. Le bon choix sur batterie.
+- **Dédiée** : l'écran est branché sur la NVIDIA. Le bureau est plus fluide à la pleine fréquence de l'écran (G-Sync),
+  pour environ 10 à 20 W de plus. Le bon choix sur secteur.
+
+Le mode actuel s'affiche dans `nc-reglages` → Énergie (« Mode graphique ») et dans la page Système de l'île
+(« Mode graphique : Hybride »). Pour en changer : ce bouton de l'île, ou « Changer de mode graphique… » dans les réglages.
+Une carte de l'île demande d'abord confirmation, car le PC redémarre : sur la plupart des Lenovo, il redémarre dans son
+BIOS, où tu choisis **GPU Working Mode** → Dédiée (ou Hybride), puis **F10** pour enregistrer. Avec supergfxctl (ASUS),
+system76-power ou le module legion_laptop, la bascule est faite pour toi, puis le PC redémarre. Rien n'apparaît sur un
+PC à une seule carte graphique, ni sur un PC fixe. En ligne de commande : `nc-gpu-mode info` (mode, manière de basculer
+sur ce PC) et `nc-gpu-mode basculer` (avec une question avant le redémarrage).
+
 Les services Google (agenda dans le calendrier de l’île, par la connexion Google de JARVIS) ne s’affichent que si
 **nc-settings → Intégration Google** est activé : sans compte Google relié, rien ne change (voir [docs/pages-ile.md](docs/pages-ile.md)).
 

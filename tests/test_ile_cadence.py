@@ -45,7 +45,9 @@ class Surface(unittest.TestCase):
     def test_tailles(self):
         self.assertIn("implicitHeight: grande ? 700 : 56", self.ile)
         self.assertRegex(self.ile, r"implicitWidth: Math\.min\(modelData\.width, grande \? Math\.max\(800, largeurUtile\)")
-        self.assertIn("readonly property bool grandeVoulue: ouverte || banniere || demandeClaude", self.ile)
+        # enCarte : demande de Claude Code ou confirmation du mode graphique (île fermée étirée en carte)
+        self.assertIn("readonly property bool grandeVoulue: ouverte || banniere || enCarte", self.ile)
+        self.assertIn("readonly property bool enCarte: demandeClaude || confirmGpu", self.ile)
         self.assertIn("readonly property bool grande: grandeVoulue || retour.running", self.ile)
 
     def test_retour_apres_le_ressort(self):

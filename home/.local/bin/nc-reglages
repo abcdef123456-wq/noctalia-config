@@ -10,6 +10,7 @@
   nc-reglages catalogue           les réglages et les raccourcis en JSON (ce que lit la fenêtre graphique)
   nc-reglages raccourci JSON      un changement de raccourci de la fenêtre graphique (changer, desactiver, reactiver,
                                   origine, retirer)
+  nc-reglages mode-graphique      changer de mode graphique (Hybride ↔ Dédiée) : confirmation dans l'île, sinon ici
   nc-reglages capture [fin]       Hyprland sans ses raccourcis le temps de taper une combinaison (20 s au plus), puis rendu
   nc-reglages get CLE             valeur d'un réglage
   nc-reglages set CLE VALEUR      changer un réglage (ex. nc-reglages set HZ_ECO 60)
@@ -79,6 +80,7 @@ USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the a
   nc-settings assistant           configure the remote assistant connection (URL and key)
   nc-settings assistant verify    test the remote connection (network, key, TLS, runner)
   nc-settings list                all settings and their values
+  nc-settings graphics-mode       change graphics mode (Hybrid ↔ Discrete): confirmation in the island, otherwise here
   nc-settings get KEY             a setting's value
   nc-settings set KEY VALUE       change a setting (e.g. nc-settings set HZ_ECO 60)
   nc-settings reset [KEY]         back to the config's value (every setting without KEY)
@@ -1227,7 +1229,75 @@ def materiel():
 
 
 _DISPO = materiel()
-VISIBLES = [r for r in REGLAGES if _DISPO.get(MATERIEL.get(r.cle, ""), True)]
+
+
+# ── Mode graphique (portable à MUX : Hybride ou Dédiée, nc-gpu-mode) ─────────────────────────────────────────────
+# Pas un réglage du fichier : une information (le mode actuel) et une action (en changer, ce qui redémarre le PC).
+# Cachées comme un réglage sans le matériel voulu, quand nc-gpu-mode répond « sans-objet » (une seule carte
+# graphique, ou pas d'écran interne). Lu seulement pour la section Énergie et le catalogue, pas à chaque commande.
+def etat_gpu():
+    """{mode, methode, bios_direct, carte_ecran} de « nc-gpu-mode json », ou {} s'il n'y a pas de mode à choisir."""
+    try:
+        d = json.loads(sortie_memo([os.path.join(BIN, "nc-gpu-mode"), "json"]) or "{}")
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) and d.get("mode") in ("hybride", "dediee") else {}
+
+
+def nom_mode_gpu(m):
+    return {"dediee": T("Dédiée", "Discrete"), "hybride": T("Hybride", "Hybrid")}.get(m, m)
+
+
+def lignes_gpu():
+    """Section Énergie : [information, action] du mode graphique, ou [] (sans objet)."""
+    g = etat_gpu()
+    if not g:
+        return []
+    m = g.get("methode", "")
+    autre = "dediee" if g["mode"] == "hybride" else "hybride"
+    maniere = T("se change dans le BIOS", "changed in the BIOS") if m in ("bios", "") else T(f"se change par {m}", f"changed with {m}")
+    info = {"genre": "info", "cle": "info:mode-graphique", "nom": T("Mode graphique", "Graphics mode"),
+            "valeur": f"{nom_mode_gpu(g['mode'])} · {maniere}",
+            "aide": T("Hybride : l'écran passe par la carte intégrée, la carte NVIDIA dort tant qu'aucune appli ne la demande "
+                      "(autonomie). Dédiée : l'écran est branché sur la carte NVIDIA, pour un bureau plus fluide (G-Sync), "
+                      "environ 10 à 20 W de plus. Conseil : Hybride sur batterie, Dédiée sur secteur.",
+                      "Hybrid: the screen goes through the integrated graphics, the NVIDIA card sleeps until an app asks for "
+                      "it (battery life). Discrete: the screen is wired to the NVIDIA card, for a smoother desktop (G-Sync), "
+                      "about 10 to 20 W more. Tip: Hybrid on battery, Discrete when plugged in.")}
+    action = {"genre": "assistant", "action": "mode-graphique", "cle": "action:mode-graphique",
+              "nom": T("Changer de mode graphique…", "Change graphics mode…"),
+              "affiche": T(f"Passer en {nom_mode_gpu(autre)}…", f"Switch to {nom_mode_gpu(autre)}…"),
+              "aide": T(f"Passer en {nom_mode_gpu(autre)} : une confirmation s'ouvre dans l'île (sinon ici), puis le PC "
+                        f"redémarre{' dans son BIOS' if m in ('bios', '') else ''}.",
+                        f"Switch to {nom_mode_gpu(autre)}: a confirmation opens in the island (otherwise here), then the PC "
+                        f"restarts{' into its BIOS' if m in ('bios', '') else ''}.")}
+    return [info, action]
+
+
+def question_gpu(g):
+    """(cible, titre, texte, bouton) de la confirmation, comme la carte de l'île (ModeGraphique.qml) ; bouton vide :
+    rien à confirmer (BIOS sans démarrage direct : seulement la touche à presser)."""
+    cible = "dediee" if g.get("mode") == "hybride" else "hybride"
+    n = nom_mode_gpu(cible)
+    titre = T(f"Passer en mode {n} ?", f"Switch to {n} mode?")
+    if g.get("methode", "") in ("bios", ""):
+        if not g.get("bios_direct"):
+            return (cible, titre,
+                    T(f"Ton PC change de mode dans son BIOS : redémarre, appuie sur F2 dès l'allumage, choisis GPU Working "
+                      f"Mode → {n}, puis F10.",
+                      f"Your PC switches mode in its BIOS: restart, press F2 right at power-on, choose GPU Working Mode → "
+                      f"{n}, then F10."), "")
+        return (cible, titre,
+                T(f"Ton PC redémarre dans son BIOS : choisis GPU Working Mode → {n}, puis F10. Les applis ouvertes seront fermées.",
+                  f"Your PC restarts into its BIOS: choose GPU Working Mode → {n}, then F10. Open apps will be closed."),
+                T("Redémarrer dans le BIOS", "Restart into BIOS"))
+    return (cible, titre,
+            T(f"Ton PC passe en mode {n}, puis redémarre. Les applis ouvertes seront fermées.",
+              f"Your PC switches to {n} mode, then restarts. Open apps will be closed."),
+            T("Redémarrer", "Restart"))
+
+
+VISIBLES =[r for r in REGLAGES if _DISPO.get(MATERIEL.get(r.cle, ""), True)]
 SECTIONS = []
 for _r in VISIBLES:
     if _r.section not in SECTIONS:
@@ -1958,6 +2028,8 @@ class Ecran:
                                                                  "History not found (config repository missing)")}]
             return self.lignes_n
         lignes = [r for r in VISIBLES if r.section == SECTIONS[self.sec]]
+        if SECTIONS[self.sec] == "Énergie":
+            lignes = lignes_gpu() + lignes                 # le mode graphique en tête (rien sans objet)
         if SECTIONS[self.sec] == "Intelligence artificielle":
             lignes += [{"genre": "assistant", "action": "ia-cles", "nom": T("Clés d'API des IA", "AI API keys"),
                         "aide": T("Saisie masquée, chaque clé essayée tout de suite (nc-ia configurer).",
@@ -2059,8 +2131,11 @@ class Ecran:
             elif it["genre"] == "titre":
                 e.addstr(y, x0, couper(it["nom"], iw), curses.A_BOLD | self.ACC)
             elif it["genre"] == "assistant":
-                v = T("Tester… ↵", "Test… ↵") if it.get("action") == "verifier" else T("Ouvrir… ↵", "Open… ↵")
+                v = T("Tester… ↵", "Test… ↵") if it.get("action") == "verifier" else \
+                    f"{it['affiche']} ↵" if it.get("affiche") else T("Ouvrir… ↵", "Open… ↵")
                 self.ligne(y, x0, iw, col, it["nom"], v, sel, False)
+            elif it["genre"] == "info":
+                self.ligne(y, x0, iw, col, it["nom"], it["valeur"], sel, False)
             elif it["genre"] == "ajouter":
                 self.ligne(y, x0, iw, col, "+ " + it["nom"], "", sel, False)
             elif it["genre"] == "nouveaute":
@@ -2088,7 +2163,7 @@ class Ecran:
                         aide = (aide + "  " if aide else "") + f"Valeur {origine} : {cur.montrer(base)} (r pour la remettre)."
                 elif du_style:
                     aide = (aide + "  " if aide else "") + T("Valeur donnée par le style Apple.", "Value set by the desktop style.")
-            elif cur["genre"] == "assistant":
+            elif cur["genre"] in ("assistant", "info"):
                 aide = cur["aide"]
             elif cur["genre"] == "nouveaute":
                 aide = " · ".join(cur["points"][1:4]) or cur["points"][0]
@@ -2122,8 +2197,13 @@ class Ecran:
         elif SECTIONS[self.sec] == "Nouveautés":
             bas = T("↑↓ choisir    Entrée : tout ce qu'elle apporte    Échap : sections    q : quitter",
                     "↑↓ choose    Enter: everything it brings    Esc: sections    q: quit")
+        elif isinstance(cur, dict) and cur["genre"] == "info":
+            bas = T("↑↓ choisir    Échap : sections    q : quitter", "↑↓ choose    Esc: sections    q: quit")
         elif isinstance(cur, dict) and cur["genre"] == "assistant":
-            if cur.get("action") == "verifier":
+            if cur.get("action") == "mode-graphique":
+                bas = T("↑↓ choisir    Entrée : changer de mode (une confirmation d'abord)    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: change mode (confirmation first)    Esc: sections    q: quit")
+            elif cur.get("action") == "verifier":
                 bas = T("↑↓ choisir    Entrée : tester la connexion    Échap : sections    q : quitter",
                         "↑↓ choose    Enter: test connection    Esc: sections    q: quit")
             else:
@@ -2191,17 +2271,22 @@ class Ecran:
             elif c not in (curses.KEY_DOWN, curses.KEY_UP, ord("j"), ord("k"), -1):
                 return
 
-    def choisir(self, titre, options, aide=""):
-        """Liste d'options (↑↓ Entrée, Échap) ; renvoie l'indice ou None."""
+    def choisir(self, titre, options, aide="", texte=""):
+        """Liste d'options (↑↓ Entrée, Échap) ; renvoie l'indice ou None. texte : une explication sur plusieurs lignes,
+        au-dessus des options (une question)."""
         i = 0
-        larg = max(44, len(titre) + 8, *(len(o) + 8 for o in options))
+        larg = max(44, len(titre) + 8, *(len(o) + 8 for o in options), 66 if texte else 0)
         while True:
             self.dessiner()
-            win, larg = self.boite(titre, len(options) + (2 if aide else 0), larg)
+            lt = textwrap.wrap(texte, min(larg, self.e.getmaxyx()[1] - 4) - 6) if texte else []
+            nt = len(lt) + 1 if lt else 0
+            win, larg = self.boite(titre, nt + len(options) + (2 if aide else 0), larg)
+            for k, l in enumerate(lt):
+                win.addstr(2 + k, 3, couper(l, larg - 6))
             for k, o in enumerate(options):
-                win.addstr(2 + k, 3, couper(o, larg - 6).ljust(larg - 6), (curses.A_REVERSE | self.ACC) if k == i else 0)
+                win.addstr(2 + nt + k, 3, couper(o, larg - 6).ljust(larg - 6), (curses.A_REVERSE | self.ACC) if k == i else 0)
             if aide:
-                win.addstr(3 + len(options), 3, couper(aide, larg - 6), curses.A_DIM)
+                win.addstr(3 + nt + len(options), 3, couper(aide, larg - 6), curses.A_DIM)
             win.refresh()
             c = win.getch()
             if c in (curses.KEY_UP, ord("k")):
@@ -2297,7 +2382,44 @@ class Ecran:
         return capturer(self.e, self)
 
     # ── Actions ──
+    def mode_graphique(self):
+        """Changer de mode graphique : la carte de confirmation de l'île si elle tourne, sinon la question ici ; le
+        redémarrage seulement après « Redémarrer… » (nc-gpu-mode basculer --sans-question)."""
+        self.statut(T("Ouverture de la confirmation…", "Opening the confirmation…"))
+        self.dessiner()
+        if ile_appel("gpuMode", 3) == "ok":
+            self.statut(T("Confirmation ouverte dans l'île", "Confirmation opened in the island"))
+            return
+        g = etat_gpu()
+        if not g:
+            self.statut(T("Ce PC n'a pas de mode graphique à changer", "This PC has no graphics mode to change"), erreur=True)
+            return
+        cible, titre, texte, bouton = question_gpu(g)
+        if not bouton:
+            self.afficher(titre, [texte])
+            return
+        if self.choisir(titre, [bouton, T("Annuler", "Cancel")], texte=texte) != 0:
+            self.statut(T("Rien n'a changé", "Nothing changed"))
+            return
+        # Un terminal normal : pkexec ou sudo peuvent demander le mot de passe (bascule par le module legion_laptop)
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            code = subprocess.run([os.path.join(BIN, "nc-gpu-mode"), "basculer", "--sans-question", cible]).returncode
+        except (KeyboardInterrupt, OSError):
+            code = 130
+        finally:
+            curses.reset_prog_mode()
+            curses.flushinp()
+            self.e.touchwin()
+            self.e.refresh()
+        if code != 0:
+            self.statut(T("Le changement de mode a échoué", "The mode change failed"), erreur=True)
+
     def assistant(self, it=None):
+        if isinstance(it, dict) and it.get("action") == "mode-graphique":
+            self.mode_graphique()
+            return
         if isinstance(it, dict) and it.get("action") == "verifier":
             self.statut(T("Test de la connexion…", "Testing connection…"))
             self.dessiner()
@@ -2536,7 +2658,7 @@ class Ecran:
                         self.changer(it, 1) if it.genre in ("ouinon",) else self.entree(it)
                     elif it["genre"] == "assistant":
                         self.assistant(it)
-                    else:
+                    elif it["genre"] != "info":
                         self.action_raccourci(it)
 
     def boucle(self):
@@ -2605,6 +2727,9 @@ class Ecran:
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
                     self.afficher(f"{cur['date']} · {cur['titre']}", cur["points"])
                 elif c == curses.KEY_LEFT:
+                    self.focus = "sections"
+            elif cur["genre"] == "info":                   # lecture seule
+                if c == curses.KEY_LEFT:
                     self.focus = "sections"
             else:
                 if c in ("\n", "\r", " ", curses.KEY_ENTER, curses.KEY_RIGHT):
@@ -2718,20 +2843,64 @@ def catalogue(vals):
                             aide=str(d.get("resume", ""))[:3000], details=[str(x)[:300] for x in d.get("details", [])][:200],
                             ia=d.get("ia", ""), choix=[], mini=0, maxi=0, pas=1, unite="", zero="", valeur="",
                             affiche=T("Détails", "Details"), modifie=False, groupe=""))
+    # Mode graphique (Énergie) : l'information puis l'action, en tête ; rien sans objet. Chaque ligne passe devant la
+    # première de sa section : l'action est donc posée avant l'information
+    for g in reversed(lignes_gpu()):
+        actions.append(dict(cle=g["cle"], section="Énergie", sectionNom=nom_section("Énergie"), nom=g["nom"],
+                            genre="info" if g["genre"] == "info" else "action", defaut="", aide=g["aide"], choix=[],
+                            mini=0, maxi=0, pas=1, unite="", zero="", valeur=g.get("valeur", ""),
+                            affiche=g.get("valeur") or g.get("affiche", ""), modifie=False, groupe="",
+                            **({} if g["genre"] == "info" else {"commande": ["nc-reglages", "mode-graphique"]})))
     for a in actions:
         i = next((k for k, x in enumerate(res) if x["section"] == a["section"]), len(res))
         res.insert(i, a)
     return res + catalogue_raccourcis()
 
 
+def mode_graphique_cli():
+    """nc-reglages mode-graphique (bouton de la fenêtre des réglages) : la carte de confirmation de l'île ; sans île, la
+    question au terminal ; sans terminal non plus, dans un terminal ouvert pour elle. Jamais de redémarrage sans « oui »."""
+    if ile_appel("gpuMode", 5) == "ok":
+        return 0
+    g = etat_gpu()
+    if not g:
+        print(T("Ce PC n'a pas de mode graphique à changer (une seule carte graphique, ou pas d'écran interne).",
+                "This PC has no graphics mode to change (single GPU, or no built-in display)."))
+        return 0
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        cible, titre, texte, bouton = question_gpu(g)
+        print(f"{titre}\n{texte}")
+        if not bouton:
+            return 0
+        try:
+            rep = input(f"{bouton} ? {T('[o/N]', '[y/N]')} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+        if rep not in ("o", "oui", "y", "yes"):
+            return 0
+        return subprocess.run([os.path.join(BIN, "nc-gpu-mode"), "basculer", "--sans-question", cible]).returncode
+    terminal = shutil.which("kitty")
+    if not terminal:
+        return 1
+    subprocess.Popen([terminal, "--class", "nc-reglages", "-e", os.path.join(BIN, "nc-reglages"), "mode-graphique"],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
 def ile_appel_reglages(delai):
-    """Demande à l'île d'ouvrir ses réglages. Rend « ok », « absente » (pas de qs), « arretee » (aucune île ne
-    répond), « lente » (pas de réponse dans le délai) ou « inconnue » (une île tourne mais ne connaît pas la fonction :
-    ancienne config gardée après un rechargement à chaud raté)."""
+    """Demande à l'île d'ouvrir ses réglages (voir ile_appel)."""
+    return ile_appel("reglages", delai)
+
+
+def ile_appel(fonction, delai):
+    """Appelle une fonction de l'île (IpcHandler « ile » de shell.qml). Rend « ok », « absente » (pas de qs), « arretee »
+    (aucune île ne répond), « lente » (pas de réponse dans le délai) ou « inconnue » (une île tourne mais ne connaît pas
+    la fonction : ancienne config gardée après un rechargement à chaud raté)."""
     if not shutil.which("qs"):
         return "absente"
     try:
-        p = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglages"], capture_output=True, text=True,
+        p = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", fonction], capture_output=True, text=True,
                            timeout=delai)
     except subprocess.TimeoutExpired:
         return "lente"
@@ -2841,6 +3010,8 @@ def cli(a):
         return
     if a[0] in ("fenetre", "fenêtre", "window", "gui"):
         sys.exit(fenetre_graphique())
+    if a[0] in ("mode-graphique", "graphics-mode"):
+        sys.exit(mode_graphique_cli())
     if a[0] in ("liste", "list", "ls", "settings"):
         sec = None
         for r in VISIBLES:

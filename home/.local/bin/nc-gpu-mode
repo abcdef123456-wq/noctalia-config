@@ -3,7 +3,13 @@
 #   nc-gpu-mode actuel                    affiche « hybride », « dediee » ou « sans-objet » (une seule carte graphique)
 #   nc-gpu-mode info                      mode actuel, manière de basculer sur ce PC, et conseil
 #   nc-gpu-mode methode                   affiche la manière de basculer : supergfxctl, system76-power, gsync ou bios
-#   nc-gpu-mode basculer [hybride|dediee] change de mode (sans argument : vers l'autre mode)
+#   nc-gpu-mode basculer [hybride|dediee] change de mode (sans argument : vers l'autre mode), après une question
+#   nc-gpu-mode basculer --sans-question CIBLE
+#                                         la même bascule sans rien demander, puis le redémarrage tout de suite (dans le
+#                                         BIOS pour la méthode bios) : l'appelant a déjà eu la confirmation (carte de
+#                                         l'île, question de nc-reglages)
+#   nc-gpu-mode json                      l'état, pour l'île et nc-reglages :
+#                                         {"mode": …, "methode": …, "bios_direct": true|false, "carte_ecran": "AMD"…}
 # Mode actuel : l'écran interne (connecteur eDP branché) est-il relié à la carte NVIDIA ? Oui : dédiée (le MUX a
 # branché l'écran sur la NVIDIA) ; non : hybride. Rien n'est lu en boucle, la NVIDIA n'est pas réveillée.
 # Bascule, selon le constructeur :
@@ -11,7 +17,10 @@
 #   System76 avec system76-power  system76-power graphics nvidia | hybrid, puis redémarrage
 #   Lenovo Legion, module legion_laptop chargé et attribut gsync présent : 1 (dédiée) ou 0 (hybride), puis redémarrage
 #   sinon (la plupart des Lenovo)  le mode se change dans le BIOS : une notification propose d'y redémarrer, et ne
-#                                  redémarre que sur un clic (hors session graphique : la même question au terminal)
+#                                  redémarre que sur un clic (hors session graphique : la même question au terminal).
+#                                  L'île et nc-reglages posent leur propre question, puis passent --sans-question : un
+#                                  redémarrage ne dépend pas d'un bouton de notification, que tous les démons
+#                                  n'affichent pas
 # Aucun module tiers n'est installé. NC_SYSFS : racine de /sys (tests).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -105,8 +114,9 @@ demander() {
   return 1
 }
 
-# Après une bascule par logiciel : proposer de redémarrer, jamais d'office
+# Après une bascule par logiciel : proposer de redémarrer, jamais d'office (--sans-question : déjà confirmé ailleurs)
 proposer_redemarrage() {
+  [ "$SANS_QUESTION" = 1 ] && { systemctl reboot; return; }
   if demander "$(t "Mode graphique : $(nom_mode "$1")" "Graphics mode: $(nom_mode "$1")")" \
       "$(t "Le changement se fait au redémarrage. Les applis ouvertes seront fermées. Redémarrer maintenant ?" \
            "The change takes effect after a restart. Open apps will be closed. Restart now?")" \
@@ -137,8 +147,21 @@ ecrire_sys() {
   fi
 }
 
+SANS_QUESTION=0
+
 basculer() {
-  local cible="${1:-}" mode m f
+  local cible="" mode m f a
+  for a in "$@"; do
+    case "$a" in
+      --sans-question|--no-prompt) SANS_QUESTION=1 ;;
+      *) cible="$a" ;;
+    esac
+  done
+  # Sans question, le mode voulu est toujours nommé : jamais de redémarrage vers un mode deviné
+  if [ "$SANS_QUESTION" = 1 ] && [ -z "$cible" ]; then
+    t "--sans-question : précise le mode (hybride ou dediee)" "--sans-question: give the mode (hybride or dediee)" >&2; echo >&2
+    return 1
+  fi
   mode="$(actuel)"
   if [ "$mode" = sans-objet ]; then
     t "Ce PC n'a qu'une carte graphique (ou pas d'écran interne) : pas de mode à changer." \
@@ -177,6 +200,7 @@ basculer() {
         echo
         return 0
       fi
+      [ "$SANS_QUESTION" = 1 ] && { systemctl reboot --firmware-setup; return; }
       if demander "$(t "Mode graphique : $(nom_mode "$cible")" "Graphics mode: $(nom_mode "$cible")")" \
           "$(t "Ton PC change de mode graphique dans son BIOS : GPU Working Mode (ou Mode graphique) → $(nom_mode "$cible"). Les applis ouvertes seront fermées. Redémarrer dans le BIOS ?" \
                "Your PC switches graphics mode in its BIOS: GPU Working Mode (or Graphics Mode) → $(nom_mode "$cible"). Open apps will be closed. Restart into the BIOS?")" \
@@ -184,6 +208,27 @@ basculer() {
         systemctl reboot --firmware-setup
       fi ;;
   esac
+}
+
+# Une chaîne JSON : les valeurs viennent de ce script (mots fixes), rien à protéger
+chaine_json() { printf '"%s"' "$1"; }
+
+# État pour l'île et nc-reglages, sur une ligne. Sans objet : ni méthode ni carte
+json() {
+  local mode m="" direct=false carte="" c
+  mode="$(actuel)"
+  if [ "$mode" != sans-objet ]; then
+    m="$(methode)"
+    bios_au_redemarrage && direct=true
+    c="$(carte_ecran_interne)"
+    if [ -n "$c" ]; then
+      case "$(lire "$SYS/class/drm/$c/device/vendor")" in
+        0x10de) carte=NVIDIA ;; 0x1002) carte=AMD ;; 0x8086) carte=Intel ;;
+      esac
+    fi
+  fi
+  printf '{"mode": %s, "methode": %s, "bios_direct": %s, "carte_ecran": %s}\n' \
+    "$(chaine_json "$mode")" "$(chaine_json "$m")" "$direct" "$(chaine_json "$carte")"
 }
 
 info() {
@@ -217,7 +262,8 @@ case "${1:-info}" in
   actuel|current) actuel ;;
   info) info ;;
   methode|method) methode ;;
-  basculer|switch) shift; basculer "${1:-}" ;;
-  *) t "Usage : nc-gpu-mode actuel | info | methode | basculer [hybride|dediee]" \
-       "Usage: nc-gpu-mode current | info | method | switch [hybride|dediee]" >&2; echo >&2; exit 1 ;;
+  basculer|switch) shift; basculer "$@" ;;
+  json) json ;;
+  *) t "Usage : nc-gpu-mode actuel | info | methode | json | basculer [--sans-question] [hybride|dediee]" \
+       "Usage: nc-gpu-mode current | info | method | json | switch [--sans-question] [hybride|dediee]" >&2; echo >&2; exit 1 ;;
 esac

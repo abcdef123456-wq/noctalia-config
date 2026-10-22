@@ -320,7 +320,7 @@ class LigneMisesAJour(unittest.TestCase):
             (root / "run").mkdir(mode=0o700)
             (root / ".cache/nc").mkdir(parents=True)
             (root / ".cache/nc/paquets").write_text("3\navahi\nbaloo\nzsh\n")
-            for nom in ("Systeme.qml", "Ligne.qml", "Module.qml", "Texte.qml", "Ico.qml", "Defilement.qml", "Couleurs.qml"):
+            for nom in ("Systeme.qml", "Ligne.qml", "Module.qml", "Texte.qml", "Ico.qml", "Defilement.qml", "Couleurs.qml", "ModeGraphique.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; function t(fr,en){return en} function val(k,d){return d}}')
             (root / "Etat.qml").write_text(textwrap.dedent('''\
@@ -343,8 +343,8 @@ class LigneMisesAJour(unittest.TestCase):
                     function basculerCafe() {}
                 }'''))
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("Couleurs", "Reglages", "Etat") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Systeme", "Ligne", "Module", "Texte", "Ico", "Defilement", "Couleurs", "Reglages", "Etat")))
+                ("singleton " if n in ("Couleurs", "Reglages", "Etat", "ModeGraphique") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("Systeme", "Ligne", "Module", "Texte", "Ico", "Defilement", "Couleurs", "Reglages", "Etat", "ModeGraphique")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window

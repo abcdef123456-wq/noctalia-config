@@ -1,6 +1,8 @@
 """nc-gpu-mode : mode graphique d'un portable à MUX (hybride, dédiée, sans objet) lu dans un faux /sys (NC_SYSFS),
 et la bascule selon le constructeur : supergfxctl (ASUS), system76-power, attribut gsync du module legion_laptop,
-sinon le BIOS (notification à bouton, redémarrage dans le BIOS seulement sur un clic). Toutes les commandes
+sinon le BIOS (notification à bouton, redémarrage dans le BIOS seulement sur un clic) ; l'état en JSON pour l'île, et
+--sans-question (confirmation déjà donnée par l'île ou nc-reglages : aucune question, la bascule puis le redémarrage
+tout de suite). Toutes les commandes
 extérieures sont fausses (en tête du PATH) : rien ne bascule ni ne redémarre pour de vrai."""
 import json
 from pathlib import Path
@@ -252,6 +254,88 @@ class GpuMode(unittest.TestCase):
         (self.sys / "module/legion_laptop").mkdir(parents=True)
         (self.sys / "bus/platform/drivers/legion/PNP0C09:00").mkdir(parents=True)
         self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+
+    # --- (f) état pour l'île, et bascule déjà confirmée ailleurs (--sans-question) ---
+    def json(self):
+        r = self.lancer("json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_json_legion(self):
+        self.legion()
+        self.assertEqual(self.json(), {"mode": "hybride", "methode": "bios", "bios_direct": True, "carte_ecran": "AMD"})
+        (self.sys / "class/drm/card0-eDP-1/status").write_text("connected\n")
+        (self.sys / "class/drm/card1-eDP-2/status").write_text("disconnected\n")
+        self.assertEqual(self.json(), {"mode": "dediee", "methode": "bios", "bios_direct": True, "carte_ecran": "NVIDIA"})
+        self.assertEqual(self.appels(), "", "lire l'état n'appelle rien")
+
+    def test_json_sans_demarrage_direct(self):
+        self.machine(uefi=False)
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, AMD, "connected")
+        self.assertFalse(self.json()["bios_direct"])
+        self.assertEqual(self.lancer("json", langue="en").stdout, self.lancer("json").stdout, "même JSON en anglais")
+
+    def test_json_sans_objet(self):
+        self.machine()
+        self.carte(0, AMD, "connected")
+        self.assertEqual(self.json(), {"mode": "sans-objet", "methode": "", "bios_direct": False, "carte_ecran": ""})
+
+    def test_sans_question_bios_redemarre_dans_le_bios(self):
+        self.legion()
+        self.clic("")                            # une notification fermée ne doit rien empêcher : il n'y en a pas
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.notifs(), [], "aucune question")
+        self.assertEqual(self.appels().splitlines(), ["systemctl reboot --firmware-setup"])
+        # Hors session graphique non plus, aucune question (rien n'est lu au terminal), option après le mode aussi
+        self.journal.unlink()
+        r = self.lancer("basculer", "dediee", "--sans-question", graphique=False, entree="")
+        self.assertNotIn("[o/N]", r.stdout)
+        self.assertEqual(self.appels().splitlines(), ["systemctl reboot --firmware-setup"])
+
+    def test_sans_question_exige_le_mode(self):
+        self.legion()
+        r = self.lancer("basculer", "--sans-question")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.appels(), "")
+
+    def test_sans_question_deja_dans_le_mode(self):
+        self.legion()
+        self.lancer("basculer", "--sans-question", "hybride")
+        self.assertEqual(self.appels(), "", "déjà en Hybride : pas de redémarrage")
+
+    def test_sans_question_une_seule_carte(self):
+        self.machine()
+        self.carte(0, AMD, "connected")
+        self.lancer("basculer", "--sans-question", "dediee")
+        self.assertEqual(self.appels(), "", "une seule carte : rien")
+
+    def test_sans_question_bios_sans_demarrage_direct(self):
+        # Pas de démarrage direct dans le BIOS : même confirmé, seulement l'explication (la touche à presser)
+        self.machine(uefi=False)
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, AMD, "connected")
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertIn("F2", r.stdout)
+        self.assertEqual(self.appels(), "")
+
+    def test_sans_question_par_logiciel_puis_redemarrage(self):
+        self.machine("System76", "Oryx Pro", "Oryx Pro")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.lancer("basculer", "--sans-question", "dediee")
+        self.assertEqual(self.appels().splitlines(), ["system76-power graphics nvidia", "systemctl reboot"])
+        self.assertEqual(self.notifs(), [])
+
+    def test_sans_question_methode_en_echec_ne_redemarre_pas(self):
+        self.machine("System76", "Oryx Pro", "Oryx Pro")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("system76-power", 'echo "system76-power $*" >> "$JOURNAL"; exit 1')
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("systemctl", self.appels())
 
     # --- langue ---
     def test_en_anglais(self):

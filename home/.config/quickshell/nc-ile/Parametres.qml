@@ -95,10 +95,13 @@ FloatingWindow {
         ecriture.command = file.shift(); file = file
         ecriture.running = true
     }
-    // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin
+    // Une action (ouvre une fenêtre, comme la connexion à JARVIS) : la commande de la ligne, depuis ~/.local/bin.
+    // Recopiée en vrai tableau : venue du délégué de la liste (clic sur le bouton), c'est une liste Qt, pour laquelle
+    // Array.isArray est faux (le bouton ne faisait alors rien ; seule Entrée marchait)
     function lancerAction(r) {
-        if (!r || !Array.isArray(r.commande) || !r.commande.length) return
-        Quickshell.execDetached([bin + r.commande[0]].concat(r.commande.slice(1)))
+        var c = r && r.commande ? Array.prototype.slice.call(r.commande).map(String) : []
+        if (!c.length) return
+        Quickshell.execDetached([bin + c[0]].concat(c.slice(1)))
     }
     // Un raccourci : changer (touches), desactiver, reactiver, origine, retirer — la logique commune (Raccourcis.qml),
     // partagée avec la fiche Super + /
@@ -146,6 +149,7 @@ FloatingWindow {
         if (!r) return
         if (r.genre === "raccourci") { if (r.desactive) raccourci(r, "reactiver"); else capturer(r); return }
         if (r.genre === "action") { lancerAction(r); return }
+        if (r.genre === "info") return                // en lecture seule
         if (r.genre === "rapport") { if (liste.currentItem) liste.currentItem.deplie = !liste.currentItem.deplie; return }
         if (r.genre === "texte" || r.genre === "dossier") { if (liste.currentItem) liste.currentItem.editer() }
         else changer(r, 1)
@@ -440,6 +444,10 @@ FloatingWindow {
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }
                         }
                     }
+                    // Information en lecture seule (le mode graphique actuel…) : seulement sa valeur
+                    Texte { visible: ligne.r.genre === "info"; anchors.verticalCenter: parent.verticalCenter
+                            objectName: "nc-reglage-info-" + ligne.r.cle; text: ligne.r.affiche; secondaire: true; font.pixelSize: 13
+                            width: Math.min(implicitWidth, ligne.width * 0.45) }
                     // Action : un bouton qui ouvre sa fenêtre
                     Pastille { visible: ligne.r.genre === "action"; anchors.verticalCenter: parent.verticalCenter; petit: true
                                objectName: "nc-reglage-action-" + ligne.r.cle; texte: ligne.r.affiche; onClic: fen.lancerAction(ligne.r) }

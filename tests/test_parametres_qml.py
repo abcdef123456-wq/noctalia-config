@@ -22,7 +22,9 @@ if a[0]=='catalogue':
       dict(cle="SOURIS_VITESSE",section="Clavier et souris",sectionNom="Clavier et souris",nom="Vitesse du pointeur",genre="entier",defaut="0",aide="",choix=[],mini=-10,maxi=10,pas=1,unite="",zero="",valeur=d["SOURIS_VITESSE"],affiche=d["SOURIS_VITESSE"],modifie=d["SOURIS_VITESSE"]!="0",groupe="hypr"),
       dict(cle="GESTES",section="Clavier et souris",sectionNom="Clavier et souris",nom="Gestes du pavé tactile",genre="ouinon",defaut="oui",aide="Trois doigts : bureaux.",choix=[["oui","Oui"],["non","Non"]],mini=0,maxi=100,pas=1,unite="",zero="",valeur=d["GESTES"],affiche="Oui" if d["GESTES"]=="oui" else "Non",modifie=d["GESTES"]!="oui",groupe="hypr"),
       dict(cle="FENETRES_FLOU_FORCE",section="Fenêtres",sectionNom="Fenêtres",nom="Force du flou",genre="choix",defaut="normal",aide="Derrière les fenêtres transparentes.",choix=[["leger","Léger"],["normal","Normal"],["fort","Fort"]],mini=0,maxi=100,pas=1,unite="",zero="",valeur=d["FENETRES_FLOU_FORCE"],affiche=d["FENETRES_FLOU_FORCE"].capitalize(),modifie=d["FENETRES_FLOU_FORCE"]!="normal",groupe="hypr"),
-    ]+([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else []),ensure_ascii=False))
+    ]+([dict(cle="info:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Mode graphique",genre="info",defaut="",aide="Conseil : Hybride sur batterie.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Hybride · se change dans le BIOS",affiche="Hybride · se change dans le BIOS",modifie=False,groupe=""),
+        dict(cle="action:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Changer de mode graphique…",genre="action",defaut="",aide="Une confirmation s'ouvre dans l'île.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Passer en Dédiée…",modifie=False,groupe="",commande=["nc-reglages","mode-graphique"])] if (H/'gpu').exists() else [])
+     +([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else []),ensure_ascii=False))
 elif a[0] in ('raccourci','capture'): print("ok")
 elif a[0]=='set': d[a[1]]=a[2]; etat.write_text(json.dumps(d)); print(a[1]+" : "+a[2])
 elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_FORCE":"normal"}[a[1]]; etat.write_text(json.dumps(d)); print("Valeur de la config remise.")
@@ -31,7 +33,7 @@ elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class FenetreReglages(unittest.TestCase):
-    def executer(self, scenario, evenements=False, raccourcis=False):
+    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
@@ -41,6 +43,8 @@ class FenetreReglages(unittest.TestCase):
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
             if raccourcis:
                 (root / "raccourcis").write_text("")
+            if gpu:
+                (root / "gpu").write_text("")
             (root / "qml/shell.qml").write_text((('import QtTest\n' if evenements else '') + '''import QtQuick
 import Quickshell
 ShellRoot {
@@ -150,6 +154,28 @@ if(etape===3){
         self.assertEqual([(d["action"], d["ids"], d["touches"]) for d in actions], [("changer", ["64:t"], "Ctrl+T"), ("desactiver", ["64:t"], "")])
         captures = [a for a in appels if a[0] == "capture"]
         self.assertEqual(captures, [["capture"], ["capture", "fin"]], "Hyprland sans raccourcis le temps de la capture, puis rendu")
+
+    def test_mode_graphique_information_et_bouton(self):
+        """Énergie : le mode graphique en lecture seule (sa valeur, rien à changer), et l'action en bouton, qui lance
+        « nc-reglages mode-graphique » (la confirmation dans l'île)."""
+        appels = self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+if(etape===1){fen.section="Énergie";etape++;return}
+if(etape===2){
+ verifier(fen.visibles.length===2&&fen.visibles[0].genre==="info"&&fen.visibles[1].genre==="action","lignes d'Énergie : "+fen.visibles.length)
+ var info=trouver(fen.contentItem,"nc-reglage-info-info:mode-graphique");if(!info)return
+ verifier(info.visible&&info.text==="Hybride · se change dans le BIOS","information : "+info.text)
+ verifier(!trouver(fen.contentItem,"nc-reglage-action-info:mode-graphique").visible,"pas de bouton sur l'information")
+ fen.basculer(fen.visibles[0]);fen.changer(fen.visibles[0],1);fen.remettreLigne(fen.visibles[0])
+ var b=trouver(fen.contentItem,"nc-reglage-action-action:mode-graphique")
+ verifier(b&&b.visible&&b.texte==="Passer en Dédiée…","bouton de l'action : "+(b?b.texte:"absent"))
+ b.clic();etape++;return}
+if(etape<8){etape++;return}
+Qt.quit()
+''', gpu=True)
+        self.assertIn(["mode-graphique"], appels, "le bouton lance nc-reglages mode-graphique")
+        self.assertEqual([a for a in appels if a[0] in ("set", "reset")], [], "l'information ne s'écrit jamais")
 
 
 if __name__ == "__main__":

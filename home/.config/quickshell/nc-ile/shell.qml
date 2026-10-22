@@ -9,6 +9,7 @@
 //   qs -c nc-ile ipc call ile effacerNotifications | concentration | recherche (Spotlight, Super + R)
 //   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
+//   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -147,6 +148,10 @@ ShellRoot {
         function recherche(): void { Etat.chercher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name) }
         function suivante(): void { Etat.changerVue(1) }
         function precedente(): void { Etat.changerVue(-1) }
+        // Mode graphique (nc-reglages → Énergie, nc-gpu-mode) : la carte de confirmation, vers l'autre mode ou vers
+        // celui-ci (hybride, dediee) ; rien ne redémarre avant son bouton
+        function gpuMode(): void { Etat.fermer(); ModeGraphique.demander("") }
+        function gpuModeVers(cible: string): void { Etat.fermer(); ModeGraphique.demander(cible) }
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}

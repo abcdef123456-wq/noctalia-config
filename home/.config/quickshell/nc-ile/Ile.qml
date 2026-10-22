@@ -24,7 +24,7 @@ PanelWindow {
     // Pilule : sa largeur et 70 de chaque côté (bulle, point du micro) ; ouverte, en bannière ou en demande : 800 x 700.
     // À l'ouverture, la surface grandit dans le même tour (le ressort part de la pilule, centrée : rien ne dépasse) ; à
     // la fermeture, elle ne rapetisse qu'une fois le ressort revenu à la pilule (900 ms au plus), sinon l'île serait coupée
-    readonly property bool grandeVoulue: ouverte || banniere || demandeClaude
+    readonly property bool grandeVoulue: ouverte || banniere || enCarte
     readonly property bool grande: grandeVoulue || retour.running
     onGrandeVoulueChanged: if (grandeVoulue) retour.stop(); else retour.restart()
     Timer { id: retour; interval: 900 }
@@ -71,12 +71,19 @@ PanelWindow {
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
     readonly property bool points: Etat.vues.length > 1 && !recherche
     // Notification en cours : l'île fermée s'étire en bannière (sur l'écran actif seulement)
+    // Confirmation du mode graphique (ModeGraphique.qml, ConfirmationGpu.qml) : c'est toi qui l'as demandée, elle passe
+    // avant tout le reste
+    readonly property bool confirmGpu: !ouverte && ModeGraphique.demande
+        && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
+    readonly property int hauteurGpu: chargeurGpu.item ? Math.ceil(chargeurGpu.item.implicitHeight) : 176
     // Demande de Claude Code (autoriser, question) : l'île s'étire en bannière, avant les notifications
-    readonly property bool demandeClaude: !ouverte && Agents.demande !== null
+    readonly property bool demandeClaude: !ouverte && !confirmGpu && Agents.demande !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurDemande: Agents.demande && Agents.demande.genre === "question"
                                           ? 78 + 40 * Math.ceil((Agents.demande.options || []).length / 2) : 146
-    readonly property bool banniere: !ouverte && !demandeClaude && Notifs.banniere !== null
+    // L'île fermée étirée en carte à boutons (demande de Claude Code ou confirmation du mode graphique)
+    readonly property bool enCarte: demandeClaude || confirmGpu
+    readonly property bool banniere: !ouverte && !enCarte && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
                                            + (Notifs.boutons(Notifs.banniere).length > 0 ? 36 : 0)
@@ -97,7 +104,7 @@ PanelWindow {
     }
     Rectangle {
         id: pointPrive
-        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.demandeClaude && (Etat.microActif || Etat.cameraActive)
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && (Etat.microActif || Etat.cameraActive)
         x: ile.x + ile.width + (bulle.montre ? 44 : 9)
         y: 9 + 15 - height / 2
         width: 8; height: 8; radius: 4
@@ -113,7 +120,7 @@ PanelWindow {
         id: bulle
         // Minuteur, sinon Claude Code qui travaille (étincelle), pendant la musique
         readonly property bool minuteur: Etat.minuteurFin > 0
-        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.demandeClaude && Etat.aMusique
+        readonly property bool montre: !fen.ouverte && !fen.banniere && !fen.enCarte && Etat.aMusique
                                        && (minuteur || Agents.travaille) && Etat.activiteType === ""
         x: ile.x + ile.width + (montre ? 7 : -30)
         y: 9; width: 30; height: 30; radius: 15
@@ -142,7 +149,7 @@ PanelWindow {
     // l'île et dépassant de son épaisseur ; pilule fermée : sans contour, couleur du terminal (voir Couleurs.qml)
     Rectangle {
         id: cadre
-        readonly property real e: (fen.ouverte || fen.banniere || fen.demandeClaude) && Couleurs.aContour ? 2 : 0
+        readonly property real e: (fen.ouverte || fen.banniere || fen.enCarte) && Couleurs.aContour ? 2 : 0
         x: ile.x - e; y: ile.y - e
         width: ile.width + 2 * e; height: ile.height + 2 * e
         radius: ile.radius + e
@@ -161,9 +168,10 @@ PanelWindow {
         id: ile
         anchors.horizontalCenter: parent.horizontalCenter
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
-        width: fen.ouverte ? fen.taille.width : (fen.demandeClaude ? 460 : (fen.banniere ? 440 : compact.largeur))
-        height: fen.ouverte ? fen.taille.height : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))
-        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.demandeClaude ? 32 : 15)
+        width: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
+        height: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.demandeClaude ? fen.hauteurDemande
+                                                                                   : (fen.banniere ? fen.hauteurBanniere : 30)))
+        radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
         color: Couleurs.fond
 
         // Survol (nc-reglages → Île → Ouvrir au survol) : l'île s'ouvre quand le curseur s'attarde sur la pilule, et se
@@ -176,7 +184,7 @@ PanelWindow {
         Timer {
             id: attenteSurvol
             interval: 280                           // juste passer dessus (vers la barre) ne l'ouvre pas
-            onTriggered: if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.demandeClaude && !Etat.enregistre) {
+            onTriggered: if (survol.hovered && Etat.ecranOuvert === "" && !fen.banniere && !fen.enCarte && !Etat.enregistre) {
                 Etat.basculer(fen.modelData.name, false)
                 Etat.parSurvol = true
             }
@@ -200,8 +208,8 @@ PanelWindow {
             id: compact
             anchors.centerIn: parent
             width: parent.width
-            opacity: fen.ouverte || fen.banniere || fen.demandeClaude ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere || fen.demandeClaude ? 90 : 220; easing.type: Easing.OutCubic } }
+            opacity: fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1
+            Behavior on opacity { NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
         }
 
         // Spotlight : longue capsule de recherche
@@ -249,12 +257,25 @@ PanelWindow {
             }
         }
         Timer { id: garderDemande; interval: 400 }
+        // Confirmation du mode graphique (ConfirmationGpu.qml), gardée le temps de la fermeture
+        Loader {
+            id: chargeurGpu
+            anchors.fill: parent
+            active: fen.confirmGpu || garderGpu.running
+            sourceComponent: ConfirmationGpu {
+                opacity: fen.confirmGpu && ile.height > fen.hauteurGpu * 0.7 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.confirmGpu ? 180 : 90; easing.type: Easing.OutCubic } }
+            }
+        }
+        Timer { id: garderGpu; interval: 400 }
+        Connections { target: fen; function onConfirmGpuChanged() { if (!fen.confirmGpu) garderGpu.restart() } }
         Connections { target: fen; function onDemandeClaudeChanged() { if (!fen.demandeClaude) garderDemande.restart() } }
         Connections { target: fen; function onBanniereChanged() { if (!fen.banniere) garderBanniere.restart() } }
 
         MouseArea {
             anchors.fill: parent
-            enabled: !fen.ouverte && !fen.banniere && !fen.demandeClaude
+            enabled: !fen.ouverte && !fen.banniere && !fen.enCarte
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo() : Etat.basculer(fen.modelData.name, false))

@@ -178,6 +178,22 @@ Item {
             }
             // Outils (anciens raccourcis du centre de contrôle)
             Texte { text: Reglages.t("Outils", "Tools"); font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
+            // Mode graphique d'un portable à MUX (nc-gpu-mode json, ModeGraphique.qml) : relu quand la page s'affiche,
+            // sans sondage ; seulement s'il y a un mode à choisir. Un clic ferme l'île et ouvre la carte de confirmation
+            // (le changement redémarre le PC)
+            Ligne {
+                objectName: "nc-mode-graphique"
+                visible: ModeGraphique.possible
+                width: sy.width; icone: "developer_board"; actif: ModeGraphique.mode === "dediee"
+                titre: Reglages.t("Mode graphique : ", "Graphics mode: ") + ModeGraphique.nom(ModeGraphique.mode)
+                sous: ModeGraphique.mode === "hybride"
+                      ? Reglages.t("Clic : passer en Dédiée, plus fluide sur secteur", "Click to switch to Discrete, smoother when plugged in")
+                      : Reglages.t("Clic : passer en Hybride, pour la batterie", "Click to switch to Hybrid, for battery life")
+                droite: "chevron_right"
+                onClic: { Etat.fermer(); ModeGraphique.demander("") }
+                Component.onCompleted: ModeGraphique.lire()
+                Connections { target: sy; function onVisibleChanged() { if (sy.visible) ModeGraphique.lire() } }
+            }
             Ligne {
                 width: sy.width; icone: "coffee"; titre: Reglages.t("Rester éveillé", "Stay Awake"); actif: Etat.cafe
                 sous: Etat.cafe ? Reglages.t("L'écran ne se met pas en veille", "The screen won't go to sleep") : Reglages.t("Désactivé", "Off")
