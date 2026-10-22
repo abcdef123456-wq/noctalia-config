@@ -3,3 +3,6 @@ __pycache__/
 *.tmp
 *.bak
 home/.config/nc/assistant.conf
+
+# Dossiers et notes de travail de la machine, jamais publiés
+.claude/
