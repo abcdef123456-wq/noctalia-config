@@ -286,6 +286,112 @@ class EnvHyprland(Base):
         self.assertEqual(self.session("performance", 0), self.amd)
 
 
+class EnvDediee(Base):
+    """env-hyprland en mode carte dédiée du MUX (écran interne sur la NVIDIA, comme un Legion : card0 NVIDIA avec
+    l'eDP, card1 AMD sans écran) : la NVIDIA seule, ses variables si le pilote est là, rien de Mesa seul.
+    Sourcé par sh et par bash --posix (et dash s'il est installé) ; faux /usr (NC_USR)."""
+
+    VARIABLES = ("AQ_DRM_DEVICES", "__GLX_VENDOR_LIBRARY_NAME", "LIBVA_DRIVER_NAME", "NVD_BACKEND",
+                 "__EGL_VENDOR_LIBRARY_FILENAMES", "VK_DRIVER_FILES", "GBM_BACKEND")
+
+    def setUp(self):
+        super().setUp()
+        bin_ = self.home / ".local/bin"
+        bin_.mkdir(parents=True)
+        shutil.copy2(REGLE, bin_ / "nc-gpu-regle")
+        drm = self.sys / "class/drm"
+        self.ecrire(drm / "card0/device/vendor", "0x10de")
+        self.ecrire(drm / "card0/card0-eDP-2/status", "connected")
+        self.ecrire(drm / "card0/card0-HDMI-A-1/status", "disconnected")
+        self.ecrire(drm / "card1/device/vendor", "0x1002")
+        self.ecrire(drm / "card1/card1-eDP-1/status", "disconnected")
+        self.ecrire(drm / "card1/card1-Writeback-1/status", "unknown")
+        self.dri = self.home / "dri"
+        self.dri.mkdir()
+        for c in ("card0", "card1"):
+            (self.dri / c).symlink_to("/dev/null")
+        # Faux /usr : Mesa et NVIDIA installés (EGL, Vulkan) ; le pilote VA NVIDIA seulement si un test l'ajoute
+        self.usr = self.home / "usr"
+        for f in ("share/glvnd/egl_vendor.d/10_nvidia.json", "share/glvnd/egl_vendor.d/50_mesa.json",
+                  "share/vulkan/icd.d/radeon_icd.x86_64.json", "share/vulkan/icd.d/nvidia_icd.json"):
+            self.ecrire(self.usr / f, "{}")
+        self.coquilles = [["sh"], ["bash", "--posix"]] + ([["dash"]] if shutil.which("dash") else [])
+
+    def session(self, gpu_mode=None):
+        """Variables exportées par env-hyprland, les mêmes pour chaque shell ; aucune _nc_* ne doit rester."""
+        if gpu_mode:
+            self.ecrire(self.home / ".config/uwsm/gpu-mode", gpu_mode)
+        self.faux_programme("gdbus", "case \"$*\" in *Properties.Get*) echo \"(<'balanced'>,)\" ;; esac")
+        code = (f'. "{ENV_HYPRLAND}"; '
+                + "".join(f'printf "%s=%s\\n" {v} "${{{v}-absent}}"; ' for v in self.VARIABLES)
+                + "set | grep '^_nc_' | sed 's/^/reste /'; :")
+        resultats = {}
+        for coquille in self.coquilles:
+            r = subprocess.run(coquille + ["-c", code], capture_output=True, text=True, timeout=30,
+                               env=self.env(NC_DEV_DRI=str(self.dri), NC_USR=str(self.usr),
+                                            NC_POWER_SUPPLY="batterie"))
+            self.assertEqual(r.returncode, 0, f"{coquille} : {r.stderr}")
+            self.assertEqual(r.stderr, "", coquille)
+            self.assertNotIn("reste ", r.stdout, coquille)
+            resultats[" ".join(coquille)] = dict(l.split("=", 1) for l in r.stdout.splitlines())
+        valeurs = list(resultats.values())
+        for v in valeurs[1:]:
+            self.assertEqual(v, valeurs[0], resultats)
+        return {k: v for k, v in valeurs[0].items() if v != "absent"}
+
+    def test_dediee_nvidia_seule(self):
+        self.assertEqual(self.session(), {"AQ_DRM_DEVICES": f"{self.dri}/card0",
+                                          "__GLX_VENDOR_LIBRARY_NAME": "nvidia"})
+
+    def test_dediee_pilote_va_nvidia(self):
+        # Arch (/usr/lib/dri), Fedora et openSUSE (/usr/lib64/dri), Debian (/usr/lib/x86_64-linux-gnu/dri)
+        for dossier in ("lib/dri", "lib64/dri", "lib/x86_64-linux-gnu/dri"):
+            with self.subTest(dossier=dossier):
+                shutil.rmtree(self.usr / "lib", ignore_errors=True)
+                shutil.rmtree(self.usr / "lib64", ignore_errors=True)
+                self.ecrire(self.usr / dossier / "nvidia_drv_video.so", "")
+                self.assertEqual(self.session(), {"AQ_DRM_DEVICES": f"{self.dri}/card0",
+                                                  "__GLX_VENDOR_LIBRARY_NAME": "nvidia",
+                                                  "LIBVA_DRIVER_NAME": "nvidia", "NVD_BACKEND": "direct"})
+
+    def test_dediee_sans_glvnd_nvidia(self):
+        (self.usr / "share/glvnd/egl_vendor.d/10_nvidia.json").unlink()
+        self.assertEqual(self.session(), {"AQ_DRM_DEVICES": f"{self.dri}/card0"})
+
+    def test_dediee_carte_absente_de_dev_dri(self):
+        (self.dri / "card0").unlink()
+        self.ecrire(self.usr / "lib/dri/nvidia_drv_video.so", "")
+        self.assertEqual(self.session(), {})
+        # Un fichier ordinaire n'est pas un nœud de carte non plus
+        self.ecrire(self.dri / "card0", "")
+        self.assertEqual(self.session(), {})
+
+    def test_dediee_ecran_sur_la_carte_integree(self):
+        self.ecrire(self.sys / "class/drm/card1/card1-DP-3/status", "connected")
+        self.assertEqual(self.session()["AQ_DRM_DEVICES"], f"{self.dri}/card0:{self.dri}/card1")
+
+    def test_dediee_modes(self):
+        self.assertEqual(self.session("off"), {})
+        for mode in ("igpu", "both"):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.session(mode)["AQ_DRM_DEVICES"], f"{self.dri}/card0")
+
+    def test_hybride_comme_avant(self):
+        # Le même PC en mode Hybride : l'eDP sur l'AMD ; Équilibré sur batterie → AMD seule, Mesa seul
+        self.ecrire(self.sys / "class/drm/card0/card0-eDP-2/status", "disconnected")
+        self.ecrire(self.sys / "class/drm/card1/card1-eDP-1/status", "connected")
+        self.ecrire(self.usr / "lib/dri/nvidia_drv_video.so", "")
+        self.assertEqual(self.session(), {
+            "AQ_DRM_DEVICES": f"{self.dri}/card1",
+            "__EGL_VENDOR_LIBRARY_FILENAMES": f"{self.usr}/share/glvnd/egl_vendor.d/50_mesa.json",
+            "VK_DRIVER_FILES": f"{self.usr}/share/vulkan/icd.d/radeon_icd.x86_64.json"})
+
+    def test_pc_sans_nvidia(self):
+        shutil.rmtree(self.sys / "class/drm/card0")
+        self.ecrire(self.sys / "class/drm/card1/card1-eDP-1/status", "connected")
+        self.assertEqual(self.session(), {})
+
+
 class ProfileSync(Base):
     """nc-profile-sync : nc-gpu-default et l'environnement de Hyprland suivent la règle, et basculent quand on
     débranche le chargeur pendant que le service tourne (événement UPower simulé)."""
