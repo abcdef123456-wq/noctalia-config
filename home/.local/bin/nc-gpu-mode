@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# nc-gpu-mode : dans quel mode graphique est le portable (hybride ou carte dédiée, via un MUX), et aide à basculer.
+#   nc-gpu-mode actuel                    affiche « hybride », « dediee » ou « sans-objet » (une seule carte graphique)
+#   nc-gpu-mode info                      mode actuel, manière de basculer sur ce PC, et conseil
+#   nc-gpu-mode methode                   affiche la manière de basculer : supergfxctl, system76-power, gsync ou bios
+#   nc-gpu-mode basculer [hybride|dediee] change de mode (sans argument : vers l'autre mode)
+# Mode actuel : l'écran interne (connecteur eDP branché) est-il relié à la carte NVIDIA ? Oui : dédiée (le MUX a
+# branché l'écran sur la NVIDIA) ; non : hybride. Rien n'est lu en boucle, la NVIDIA n'est pas réveillée.
+# Bascule, selon le constructeur :
+#   ASUS avec supergfxctl         supergfxctl --mode AsusMuxDgpu | Hybrid (si ce PC le propose), puis redémarrage
+#   System76 avec system76-power  system76-power graphics nvidia | hybrid, puis redémarrage
+#   Lenovo Legion, module legion_laptop chargé et attribut gsync présent : 1 (dédiée) ou 0 (hybride), puis redémarrage
+#   sinon (la plupart des Lenovo)  le mode se change dans le BIOS : une notification propose d'y redémarrer, et ne
+#                                  redémarre que sur un clic (hors session graphique : la même question au terminal)
+# Aucun module tiers n'est installé. NC_SYSFS : racine de /sys (tests).
+set -uo pipefail
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+SYS="${NC_SYSFS:-/sys}"
+NVIDIA=0x10de
+
+lire() { local v; v="$(cat "$1" 2>/dev/null)" || return 1; printf '%s' "${v//$'\n'/}"; }
+
+# Nombre de cartes graphiques : cartes DRM d'un vrai périphérique, ou contrôleurs d'affichage PCI (classe 0x03…),
+# pour compter aussi une carte dont le pilote n'est pas chargé
+nb_cartes() {
+  local c n=0 p=0
+  for c in "$SYS"/class/drm/card*; do
+    case "${c##*/}" in *-*) continue ;; esac
+    [ -r "$c/device/vendor" ] && n=$((n + 1))
+  done
+  for c in "$SYS"/bus/pci/devices/*; do
+    case "$(lire "$c/class")" in 0x03*) p=$((p + 1)) ;; esac
+  done
+  [ "$p" -gt "$n" ] && n=$p
+  echo "$n"
+}
+
+# Carte de l'écran interne (connecteur eDP branché), par exemple « card1 » ; vide si aucun
+carte_ecran_interne() {
+  local s c
+  for s in "$SYS"/class/drm/card*-eDP-*/status; do
+    [ "$(lire "$s")" = connected ] || continue
+    c="${s%/status}"; c="${c##*/}"; echo "${c%%-*}"; return 0
+  done
+  return 1
+}
+
+actuel() {
+  local carte
+  [ "$(nb_cartes)" -ge 2 ] || { echo sans-objet; return; }
+  ls -d "$SYS"/class/drm/card*-eDP-* >/dev/null 2>&1 || { echo sans-objet; return; }   # pas d'écran interne
+  carte="$(carte_ecran_interne)"
+  if [ -n "$carte" ] && [ "$(lire "$SYS/class/drm/$carte/device/vendor")" = "$NVIDIA" ]; then echo dediee; else echo hybride; fi
+}
+
+nom_vendeur() {
+  case "$1" in
+    0x10de) echo NVIDIA ;; 0x1002) echo AMD ;; 0x8086) echo Intel ;; *) t "intégrée" "integrated" ;;
+  esac
+}
+
+dmi() { lire "$SYS/class/dmi/id/$1"; }
+
+# Attribut gsync du module legion_laptop (LenovoLegionLinux), seulement s'il existe vraiment
+fichier_gsync() {
+  local f
+  [ -d "$SYS/module/legion_laptop" ] || return 1
+  for f in "$SYS"/bus/platform/drivers/legion/*/gsync; do
+    [ -f "$f" ] && { echo "$f"; return 0; }
+  done
+  return 1
+}
+
+methode() {
+  local vendeur famille
+  vendeur="$(dmi sys_vendor)"
+  famille="$(dmi product_family) $(dmi product_name) $(dmi product_version)"
+  case "$vendeur" in
+    ASUS*|asus*)
+      if command -v supergfxctl >/dev/null 2>&1 && supergfxctl --supported 2>/dev/null | grep -qw AsusMuxDgpu; then
+        echo supergfxctl; return
+      fi ;;
+    System76*|system76*)
+      command -v system76-power >/dev/null 2>&1 && { echo system76-power; return; } ;;
+    LENOVO*|Lenovo*)
+      case "$famille" in *Legion*|*LEGION*) fichier_gsync >/dev/null && { echo gsync; return; } ;; esac ;;
+  esac
+  echo bios
+}
+
+nom_mode() { case "$1" in dediee) t "Dédiée" "Discrete" ;; hybride) t "Hybride" "Hybrid" ;; *) t "sans objet" "not applicable" ;; esac; }
+
+# Pose une question oui/non : notification à bouton en session graphique, sinon au terminal. Vrai si accepté.
+#   demander <titre> <texte> <bouton>
+demander() {
+  local choix rep
+  if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v notify-send >/dev/null 2>&1; then
+    choix="$(notify-send -a noctalia-config -i video-display -t 0 -A oui="$3" -- "$1" "$2" 2>/dev/null)" || true
+    [ "$choix" = oui ]
+    return
+  fi
+  printf '%s\n%s\n%s %s ' "$1" "$2" "$3" "$(t "? [o/N]" "? [y/N]")"
+  read -r rep || { echo; return 1; }
+  case "$rep" in o|O|oui|Oui|OUI|y|Y|yes|Yes|YES) return 0 ;; esac
+  return 1
+}
+
+# Après une bascule par logiciel : proposer de redémarrer, jamais d'office
+proposer_redemarrage() {
+  if demander "$(t "Mode graphique : $(nom_mode "$1")" "Graphics mode: $(nom_mode "$1")")" \
+      "$(t "Le changement se fait au redémarrage. Les applis ouvertes seront fermées. Redémarrer maintenant ?" \
+           "The change takes effect after a restart. Open apps will be closed. Restart now?")" \
+      "$(t "Redémarrer" "Restart")"; then
+    systemctl reboot
+  else
+    t "Le mode $(nom_mode "$1") sera pris au prochain démarrage." "$(nom_mode "$1") mode will apply at next boot."; echo
+  fi
+}
+
+# Écrit dans /sys : directement si possible, sinon avec pkexec (session graphique) ou sudo
+ecrire_sys() {
+  local f="$1" v="$2"
+  if [ -w "$f" ]; then printf '%s\n' "$v" > "$f"; return; fi
+  if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&1; then
+    printf '%s\n' "$v" | pkexec tee "$f" >/dev/null
+  else
+    printf '%s\n' "$v" | sudo tee "$f" >/dev/null
+  fi
+}
+
+basculer() {
+  local cible="${1:-}" mode m f
+  mode="$(actuel)"
+  if [ "$mode" = sans-objet ]; then
+    t "Ce PC n'a qu'une carte graphique (ou pas d'écran interne) : pas de mode à changer." \
+      "This PC has a single GPU (or no built-in display): no mode to switch."; echo
+    return 0
+  fi
+  case "$cible" in
+    "") [ "$mode" = hybride ] && cible=dediee || cible=hybride ;;
+    hybride|hybrid) cible=hybride ;;
+    dediee|dédiée|dedicated|discrete|dgpu) cible=dediee ;;
+    *) t "Mode inconnu : $cible (hybride ou dediee)" "Unknown mode: $cible (hybride or dediee)" >&2; echo >&2; return 1 ;;
+  esac
+  if [ "$cible" = "$mode" ]; then
+    t "Déjà en mode $(nom_mode "$mode") : rien à faire." "Already in $(nom_mode "$mode") mode: nothing to do."; echo
+    return 0
+  fi
+  m="$(methode)"
+  case "$m" in
+    supergfxctl)
+      if [ "$cible" = dediee ]; then supergfxctl --mode AsusMuxDgpu || return 1
+      else supergfxctl --mode Hybrid || return 1; fi
+      proposer_redemarrage "$cible" ;;
+    system76-power)
+      if [ "$cible" = dediee ]; then system76-power graphics nvidia || return 1
+      else system76-power graphics hybrid || return 1; fi
+      proposer_redemarrage "$cible" ;;
+    gsync)
+      f="$(fichier_gsync)" || return 1
+      if [ "$cible" = dediee ]; then ecrire_sys "$f" 1 || return 1; else ecrire_sys "$f" 0 || return 1; fi
+      proposer_redemarrage "$cible" ;;
+    *)
+      if demander "$(t "Mode graphique : $(nom_mode "$cible")" "Graphics mode: $(nom_mode "$cible")")" \
+          "$(t "Ton PC change de mode graphique dans son BIOS : GPU Working Mode (ou Mode graphique) → $(nom_mode "$cible"). Les applis ouvertes seront fermées. Redémarrer dans le BIOS ?" \
+               "Your PC switches graphics mode in its BIOS: GPU Working Mode (or Graphics Mode) → $(nom_mode "$cible"). Open apps will be closed. Restart into the BIOS?")" \
+          "$(t "Redémarrer dans le BIOS" "Restart into BIOS")"; then
+        systemctl reboot --firmware-setup
+      fi ;;
+  esac
+}
+
+info() {
+  local mode carte m
+  mode="$(actuel)"
+  if [ "$mode" = sans-objet ]; then
+    t "Mode graphique : sans objet (une seule carte graphique, ou pas d'écran interne)." \
+      "Graphics mode: not applicable (single GPU, or no built-in display)."; echo
+    return 0
+  fi
+  carte="$(carte_ecran_interne)"
+  t "Mode graphique : $(nom_mode "$mode")" "Graphics mode: $(nom_mode "$mode")"
+  [ -n "$carte" ] && t " (écran interne sur la carte $(nom_vendeur "$(lire "$SYS/class/drm/$carte/device/vendor")"))" \
+                       " (built-in display on the $(nom_vendeur "$(lire "$SYS/class/drm/$carte/device/vendor")") GPU)"
+  echo
+  m="$(methode)"
+  case "$m" in
+    supergfxctl)    t "Bascule : supergfxctl (ASUS), puis redémarrage" "Switching: supergfxctl (ASUS), then restart" ;;
+    system76-power) t "Bascule : system76-power, puis redémarrage" "Switching: system76-power, then restart" ;;
+    gsync)          t "Bascule : module legion_laptop (gsync), puis redémarrage" "Switching: legion_laptop module (gsync), then restart" ;;
+    *)              t "Bascule : dans le BIOS (GPU Working Mode ou Mode graphique), avec un redémarrage" \
+                      "Switching: in the BIOS (GPU Working Mode or Graphics Mode), with a restart" ;;
+  esac
+  echo
+  t "Conseil : Hybride sur batterie ; Dédiée sur secteur pour un bureau fluide à la pleine fréquence de l'écran, G-Sync, environ 10 à 20 W de plus." \
+    "Tip: Hybrid on battery; Discrete when plugged in for a smooth desktop at the screen's full refresh rate, G-Sync, about 10 to 20 W more."
+  echo
+}
+
+case "${1:-info}" in
+  actuel|current) actuel ;;
+  info) info ;;
+  methode|method) methode ;;
+  basculer|switch) shift; basculer "${1:-}" ;;
+  *) t "Usage : nc-gpu-mode actuel | info | methode | basculer [hybride|dediee]" \
+       "Usage: nc-gpu-mode current | info | method | switch [hybride|dediee]" >&2; echo >&2; exit 1 ;;
+esac

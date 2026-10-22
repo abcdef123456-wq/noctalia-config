@@ -130,6 +130,7 @@ HOME_FILES=(
   .local/bin/nc-theme-sync
   .local/bin/nc-wallpaper-colors
   .local/bin/nvidia-run
+  .local/bin/nc-gpu-mode
   .local/bin/cmatrix
   .local/bin/unimatrix
   .local/share/applications/nc-assistant.desktop

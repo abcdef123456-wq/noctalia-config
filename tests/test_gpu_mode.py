@@ -1,0 +1,253 @@
+"""nc-gpu-mode : mode graphique d'un portable à MUX (hybride, dédiée, sans objet) lu dans un faux /sys (NC_SYSFS),
+et la bascule selon le constructeur : supergfxctl (ASUS), system76-power, attribut gsync du module legion_laptop,
+sinon le BIOS (notification à bouton, redémarrage dans le BIOS seulement sur un clic). Toutes les commandes
+extérieures sont fausses (en tête du PATH) : rien ne bascule ni ne redémarre pour de vrai."""
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+REPO = Path(__file__).resolve().parents[1]
+SCRIPT = REPO / "home/.local/bin/nc-gpu-mode"
+NVIDIA, AMD = "0x10de", "0x1002"
+
+
+class GpuMode(unittest.TestCase):
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-gpu-mode-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        self.sys = self.home / "sys"
+        self.faux = self.home / "faux"
+        self.faux.mkdir()
+        (self.home / ".local/bin").mkdir(parents=True)
+        (self.home / ".local/bin/nc-langue").symlink_to(REPO / "home/.local/bin/nc-langue")
+        self.journal = self.home / "journal"
+        # Jamais de vrai systemctl, pkexec ni sudo : des faux qui notent leurs arguments
+        for nom in ("systemctl", "pkexec", "sudo", "system76-power"):
+            self.programme(nom, f'echo "{nom} $*" >> "$JOURNAL"')
+        self.clic("")
+
+    # --- faux système ---
+    def programme(self, nom, corps):
+        f = self.faux / nom
+        f.write_text("#!/bin/sh\n" + corps + "\n")
+        f.chmod(0o755)
+
+    def clic(self, action):
+        """Fausse notify-send : note ses arguments (une ligne JSON) et répond l'action « cliquée » (vide : fermée)."""
+        f = self.faux / "notify-send"
+        f.write_text("#!/usr/bin/env python3\nimport json, os, sys\n"
+                     "open(os.environ['JOURNAL'], 'a').write('notify ' + json.dumps(sys.argv[1:], ensure_ascii=False) + '\\n')\n"
+                     f"print({action!r})\n")
+        f.chmod(0o755)
+
+    def ecrire(self, chemin, texte):
+        p = self.sys / chemin
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(texte + "\n")
+        return p
+
+    def carte(self, n, vendeur, edp=None):
+        """Carte DRM cardN ; edp : None (pas de connecteur eDP), « connected » ou « disconnected »."""
+        self.ecrire(f"class/drm/card{n}/device/vendor", vendeur)
+        self.ecrire(f"class/drm/card{n}-HDMI-A-{n}/status", "disconnected")
+        if edp:
+            self.ecrire(f"class/drm/card{n}-eDP-{n + 1}/status", edp)
+
+    def machine(self, vendeur="LENOVO", nom="83LT", famille="Legion Pro 5 16ADR10"):
+        self.ecrire("class/dmi/id/sys_vendor", vendeur)
+        self.ecrire("class/dmi/id/product_name", nom)
+        self.ecrire("class/dmi/id/product_family", famille)
+        self.ecrire("class/dmi/id/product_version", famille)
+
+    def legion(self, ecran_sur_nvidia=False):
+        """Le portable de l'utilisateur : card0 NVIDIA, card1 AMD ; l'écran interne branché sur l'une des deux."""
+        self.machine()
+        self.carte(0, NVIDIA, "connected" if ecran_sur_nvidia else "disconnected")
+        self.carte(1, AMD, "disconnected" if ecran_sur_nvidia else "connected")
+
+    def lancer(self, *args, graphique=True, entree="", langue="fr"):
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE=langue, NC_SYSFS=str(self.sys),
+                   JOURNAL=str(self.journal))
+        if graphique:
+            env["WAYLAND_DISPLAY"] = "wayland-test"
+        return subprocess.run([str(SCRIPT), *args], env=env, input=entree, capture_output=True, text=True, timeout=20)
+
+    def appels(self):
+        return self.journal.read_text() if self.journal.exists() else ""
+
+    def notifs(self):
+        return [json.loads(l[7:]) for l in self.appels().splitlines() if l.startswith("notify ")]
+
+    # --- (a) Legion sans legion_laptop, écran interne sur l'AMD ---
+    def test_legion_hybride_bascule_par_le_bios(self):
+        self.legion()
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+        info = self.lancer("info").stdout
+        self.assertIn("Hybride", info)
+        self.assertIn("carte AMD", info)
+        self.assertIn("BIOS", info)
+        self.assertIn("G-Sync", info)
+        # Notification fermée sans clic : aucun redémarrage
+        r = self.lancer("basculer", "dediee")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        n = self.notifs()
+        self.assertEqual(len(n), 1)
+        self.assertEqual(n[0][:2], ["-a", "noctalia-config"])
+        self.assertIn("-A", n[0])
+        self.assertIn("oui=Redémarrer dans le BIOS", n[0])
+        self.assertIn("GPU Working Mode (ou Mode graphique) → Dédiée", n[0][-1])
+        self.assertIn("Les applis ouvertes seront fermées", n[0][-1])
+        self.assertNotIn("systemctl", self.appels())
+        # Clic sur le bouton : redémarrage dans le BIOS, et rien d'autre
+        self.clic("oui")
+        self.lancer("basculer", "dediee")
+        self.assertEqual([l for l in self.appels().splitlines() if l.startswith("systemctl")],
+                         ["systemctl reboot --firmware-setup"])
+
+    def test_sans_argument_vers_l_autre_mode(self):
+        self.legion()
+        self.lancer("basculer")
+        self.assertIn("→ Dédiée", self.notifs()[0][-1])
+
+    def test_hors_session_graphique_question_au_terminal(self):
+        self.legion()
+        r = self.lancer("basculer", "dediee", graphique=False, entree="\n")
+        self.assertIn("Redémarrer dans le BIOS", r.stdout)
+        self.assertEqual(self.notifs(), [])
+        self.assertNotIn("systemctl", self.appels(), "réponse vide : non")
+        self.lancer("basculer", "dediee", graphique=False, entree="")           # pas d'entrée du tout : non
+        self.assertNotIn("systemctl", self.appels())
+        self.lancer("basculer", "dediee", graphique=False, entree="o\n")
+        self.assertIn("systemctl reboot --firmware-setup", self.appels())
+
+    def test_deja_dans_le_mode_demande(self):
+        self.legion()
+        r = self.lancer("basculer", "hybride")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Déjà en mode Hybride", r.stdout)
+        self.assertEqual(self.appels(), "")
+
+    def test_mode_inconnu(self):
+        self.legion()
+        r = self.lancer("basculer", "turbo")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.appels(), "")
+
+    # --- (b) écran interne sur la NVIDIA ---
+    def test_ecran_interne_sur_la_nvidia(self):
+        self.legion(ecran_sur_nvidia=True)
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "dediee")
+        self.assertIn("carte NVIDIA", self.lancer("info").stdout)
+        self.assertIn("Déjà en mode Dédiée", self.lancer("basculer", "dediee").stdout)
+        self.lancer("basculer", "hybride")
+        self.assertIn("→ Hybride", self.notifs()[0][-1])
+
+    # --- (c) ASUS avec supergfxctl ---
+    def test_asus_supergfxctl(self):
+        self.machine("ASUSTeK COMPUTER INC.", "ROG Strix G614JV", "ROG Strix")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("supergfxctl", 'echo "supergfxctl $*" >> "$JOURNAL"\n'
+                       '[ "$1" = --supported ] && echo "[Integrated, Hybrid, AsusMuxDgpu]"; exit 0')
+        self.assertEqual(self.lancer("methode").stdout.strip(), "supergfxctl")
+        self.lancer("basculer", "dediee")
+        lignes = self.appels().splitlines()
+        self.assertIn("supergfxctl --supported", lignes, "les noms de modes sont vérifiés avant")
+        self.assertIn("supergfxctl --mode AsusMuxDgpu", lignes)
+        self.assertNotIn("systemctl", self.appels(), "le redémarrage est seulement proposé")
+        self.assertIn("oui=Redémarrer", self.notifs()[-1])
+        self.clic("oui")
+        self.lancer("basculer", "dediee")
+        self.assertIn("systemctl reboot\n", self.appels())
+        self.assertNotIn("--firmware-setup", self.appels())
+
+    def test_asus_sans_mux_passe_par_le_bios(self):
+        self.machine("ASUSTeK COMPUTER INC.", "Vivobook", "Vivobook")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("supergfxctl", 'echo "supergfxctl $*" >> "$JOURNAL"\n'
+                       '[ "$1" = --supported ] && echo "[Integrated, Hybrid]"; exit 0')
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+        self.lancer("basculer", "dediee")
+        self.assertNotIn("--mode", self.appels())
+
+    def test_system76(self):
+        self.machine("System76", "Oryx Pro", "Oryx Pro")
+        self.carte(0, NVIDIA, "connected")
+        self.carte(1, "0x8086", "disconnected")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "system76-power")
+        self.lancer("basculer", "hybride")
+        self.assertIn("system76-power graphics hybrid", self.appels())
+
+    # --- (d) une seule carte ---
+    def test_une_seule_carte_sans_objet(self):
+        self.machine()
+        self.carte(0, AMD, "connected")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "sans-objet")
+        self.assertIn("sans objet", self.lancer("info").stdout)
+        for cible in ("dediee", "hybride", ""):
+            r = self.lancer("basculer", *([cible] if cible else []))
+            self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.appels(), "", "rien n'est appelé")
+
+    def test_pc_fixe_deux_cartes_sans_ecran_interne(self):
+        self.machine("Micro-Star International Co., Ltd.", "MS-7C02", "Default string")
+        self.carte(0, NVIDIA)
+        self.carte(1, AMD)
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "sans-objet")
+
+    def test_carte_nvidia_sans_pilote_comptee_par_le_pci(self):
+        """Pilote NVIDIA non chargé : pas de card0, mais deux contrôleurs d'affichage PCI → hybride."""
+        self.machine()
+        self.carte(1, AMD, "connected")
+        self.ecrire("bus/pci/devices/0000:01:00.0/class", "0x030000")
+        self.ecrire("bus/pci/devices/0000:06:00.0/class", "0x030000")
+        self.ecrire("bus/pci/devices/0000:06:00.1/class", "0x040300")    # le son HDMI ne compte pas
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
+
+    # --- (e) Legion avec le module legion_laptop et un attribut gsync ---
+    def test_legion_gsync(self):
+        self.legion()
+        (self.sys / "module/legion_laptop").mkdir(parents=True)
+        gsync = self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "gsync")
+        self.lancer("basculer", "dediee")
+        self.assertEqual(gsync.read_text().strip(), "1")
+        self.assertNotIn("pkexec", self.appels(), "fichier modifiable : écrit sans root")
+        self.assertNotIn("sudo", self.appels())
+        self.assertNotIn("systemctl", self.appels())
+        # Retour en hybride, une fois l'écran passé sur la NVIDIA
+        (self.sys / "class/drm/card0-eDP-1/status").write_text("connected\n")
+        (self.sys / "class/drm/card1-eDP-2/status").write_text("disconnected\n")
+        self.lancer("basculer", "hybride")
+        self.assertEqual(gsync.read_text().strip(), "0")
+
+    def test_gsync_sans_module_charge_ignore(self):
+        self.legion()
+        self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+
+    def test_module_sans_attribut_gsync_ignore(self):
+        self.legion()
+        (self.sys / "module/legion_laptop").mkdir(parents=True)
+        (self.sys / "bus/platform/drivers/legion/PNP0C09:00").mkdir(parents=True)
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+
+    # --- langue ---
+    def test_en_anglais(self):
+        self.legion()
+        info = self.lancer("info", langue="en").stdout
+        self.assertIn("Graphics mode: Hybrid", info)
+        self.assertIn("Tip: Hybrid on battery", info)
+        self.assertEqual(self.lancer("actuel", langue="en").stdout.strip(), "hybride", "la sortie d'actuel ne change pas")
+        self.lancer("basculer", "dediee", langue="en")
+        self.assertIn("oui=Restart into BIOS", self.notifs()[0])
+        self.assertIn("→ Discrete", self.notifs()[0][-1])
+
+
+if __name__ == "__main__":
+    unittest.main()
