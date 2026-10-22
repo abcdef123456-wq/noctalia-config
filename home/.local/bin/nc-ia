@@ -407,7 +407,7 @@ def candidats(usage="question", force=""):
             raise ErreurIA(T(f"IA inconnue : {force}", f"Unknown AI: {force}"))
         return [force] if disponible(force) and (not vision or FOURNISSEURS[force]["vision"]) else []
     if mode() == "manuel":
-        c = reglage("IA_CHOIX", "")
+        c = reglage("IA_CHOIX", "claude")
         c = ANCIENS.get(c, c)
         if c in FOURNISSEURS and disponible(c) and (not vision or FOURNISSEURS[c]["vision"]):
             return [c]
@@ -867,7 +867,7 @@ def fournisseurs_transcription():
     if modele_whisper():
         # Sur ce PC : d'abord sans connexion, ou si « Sur ce PC d'abord » est choisi ; sinon après les API
         liste = ["whisper"] + liste if (not en_ligne() or reglage("IA_PREFERENCE", "rapide") == "local") else liste + ["whisper"]
-    c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+    c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
     if mode() == "manuel" and c in liste:                  # celle choisie d'abord (si elle sait transcrire)
         liste = [c] + [i for i in liste if i != c]
     e = echecs()
@@ -1021,8 +1021,8 @@ def message_aucune(usage):
     if not en_ligne():
         return T("Pas de connexion internet : l'IA revient dès que la connexion revient (ou Ollama, une IA sur ce PC).",
                  "No internet connection: AI comes back as soon as the connection does (or Ollama, an AI on this PC).")
-    if mode() == "manuel" and reglage("IA_CHOIX", ""):
-        c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+    if mode() == "manuel" and reglage("IA_CHOIX", "claude"):
+        c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
         return T(f"{nom(c)} n'est pas disponible (choisie dans nc-reglages → Intelligence artificielle).",
                  f"{nom(c)} is not available (chosen in nc-settings → Artificial intelligence).")
     if usage == "image":
@@ -1087,7 +1087,7 @@ def qui_chat():
     (comme nc-assistant requete-ile)."""
     if coupee():
         return ""
-    c = ANCIENS.get(reglage("IA_CHOIX", ""), reglage("IA_CHOIX", ""))
+    c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
     if disponible("jarvis") and not (mode() == "manuel" and c in FOURNISSEURS and c != "jarvis"):
         return "jarvis"
     return next((i for i in candidats("question") if i != "jarvis"), "")
@@ -2111,7 +2111,7 @@ def etat():
     usages = ("question", "texte", "commande", "image")
     choix = {u: (candidats(u) or [""])[0] for u in usages}
     return {
-        "mode": mode(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", ""), "preference": reglage("IA_PREFERENCE", "rapide"),
+        "mode": mode(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", "claude"), "preference": reglage("IA_PREFERENCE", "rapide"),
         "usages": {u: {"id": c, "nom": nom(c) if c else ""} for u, c in choix.items()},
         "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
                      cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""))

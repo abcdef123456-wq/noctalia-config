@@ -147,7 +147,7 @@ def par_jarvis(m):
         return False
     try:
         i = ia()
-        return not (i.mode() == "manuel" and i.reglage("IA_CHOIX", "") in i.fournisseurs_transcription())
+        return not (i.mode() == "manuel" and i.reglage("IA_CHOIX", "claude") in i.fournisseurs_transcription())
     except Exception:
         return True
 

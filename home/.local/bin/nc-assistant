@@ -1149,7 +1149,7 @@ def requete_ile():
     # sinon, ou s'il est injoignable en mode automatique, l'IA du bureau (nc-ia) répond à sa place
     ia = ia_du_bureau()
     commande = question.lstrip().startswith("/")
-    choix = ia.ANCIENS.get(ia.reglage("IA_CHOIX", ""), ia.reglage("IA_CHOIX", "")) if ia else ""
+    choix = ia.ANCIENS.get(ia.reglage("IA_CHOIX", "claude"), ia.reglage("IA_CHOIX", "claude")) if ia else ""
     par_jarvis = CONF.exists() and not (ia and ia.mode() == "manuel" and choix in ia.FOURNISSEURS and choix != "jarvis")
     # La suite d'une réponse donnée par l'IA du bureau (capture, fichier, texte… versés dans le chat) : la même IA, avec
     # le contexte, plutôt que JARVIS qui ne l'a pas vue

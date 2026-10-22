@@ -456,6 +456,19 @@ class IA(unittest.TestCase):
         for x in ("zzz", "ZZZ", str(self.home)):
             self.assertNotIn(x, envoye)
 
+    def test_mode_manuel_sans_choix_enregistre(self):
+        """Revue IA-08 : en « Celle que je choisis » sans choix écrit, nc-reglages affichait Claude (son défaut) mais
+        nc-ia lisait un choix vide : aucune IA nulle part, sans explication."""
+        self.programme("claude", "exit 0")
+        self.reglages("IA_MODE=manuel\n")
+        self.lancer("etat")
+        e = json.loads(self.lancer("etat", "--json").stdout)
+        self.assertEqual(e["choix"], "claude")
+        self.assertEqual({u: v["id"] for u, v in e["usages"].items()}, {u: "claude" for u in e["usages"]})
+        reglages = subprocess.run([str(BIN / "nc-reglages"), "get", "IA_CHOIX"], capture_output=True, text=True,
+                                  env=dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config")))
+        self.assertEqual(reglages.stdout.strip(), "claude", "le même défaut des deux côtés")
+
     def test_masquage_rapide_sur_un_long_mot(self):
         """Revue PRIV-02 : 12 000 caractères sans espace (base64, JSON minifié) prenaient ~10 s (expression quadratique)."""
         import importlib.machinery, importlib.util, time
