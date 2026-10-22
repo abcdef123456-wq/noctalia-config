@@ -99,7 +99,10 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   (Discord, navigateur, Neovim, terminal…). Un appui bref lance une dictée longue, le suivant l'écrit. Transcription par
   JARVIS, une clé Groq, OpenAI ou Gemini, ou **whisper.cpp** sur ce PC (`whisper-cli` et un modèle dans
   `~/.local/share/nc/whisper/`, sans internet). `wtype` écrit directement ; sans lui, le texte est collé et ton
-  presse-papiers remis. Réglage « Dictée partout ».
+  presse-papiers remis (texte, image ou fichiers, avec un seul type : une copie web revient sans sa mise en forme, et
+  des fichiers coupés dans Fichiers redeviennent copiés). S'il ne peut pas être lu, rien n'est collé : le texte est
+  copié pour Ctrl + V, et la dernière dictée reste dans `$XDG_RUNTIME_DIR/nc-dictee-derniere.txt` jusqu'à la fin de
+  la session. Réglage « Dictée partout ».
 - **Dictée** (micro du chat) : par JARVIS ; sans JARVIS, ou s'il ne répond pas, par Groq, OpenAI ou Gemini (Whisper).
 - **Agents** (Claude Code, Codex, OpenCode… dans l'île) : section « Agents IA » des réglages ; coupés avec le reste.
 - `nc-diag` dit quelle IA répond et vérifie que le fichier des clés est privé.

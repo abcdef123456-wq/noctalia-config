@@ -336,7 +336,7 @@ def ecrire_dans_la_fenetre(texte):
         try:
             avant = presse_papiers()
         except (OSError, subprocess.TimeoutExpired):
-            return False            # ne pas écraser ce qu'on ne saurait pas remettre (revue DICT-04/05)
+            return False            # pas de collage par-dessus ce qu'on ne saurait pas remettre (revue DICT-04/05)
     subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL, timeout=5)
     classe = ""
     try:
@@ -357,7 +357,7 @@ SECOURS = RUNTIME / "nc-dictee-derniere.txt"   # la dernière dictée, jamais pe
 
 def garder(texte):
     try:
-        fd = os.open(SECOURS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(SECOURS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)   # /tmp sans XDG_RUNTIME_DIR
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(texte)
     except OSError:
@@ -455,9 +455,12 @@ def ptt_finir(m):
     except (OSError, subprocess.SubprocessError):
         ecrit = False
     if not ecrit:
+        # La dictée prime : elle est copiée même si le presse-papiers d'avant n'a pas pu être sauvé (il est remplacé, et
+        # c'est dit), pour être collée à la main (revue DICT-06)
         try:
             subprocess.run(["wl-copy", "--", r["text"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
-            copie = T("Copié : colle-le avec Ctrl + V.", "Copied: paste it with Ctrl + V.")
+            copie = T("Copié (ton presse-papiers a été remplacé) : colle-le avec Ctrl + V.",
+                      "Copied (your clipboard was replaced): paste it with Ctrl + V.")
         except (OSError, subprocess.SubprocessError):
             copie = T(f"Gardé dans {SECOURS}", f"Kept in {SECOURS}")
         notifier(T, T("Dictée (pas écrite dans la fenêtre)", "Dictation (not typed)"), f"{copie}\n{r['text'][:300]}")
