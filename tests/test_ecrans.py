@@ -16,6 +16,14 @@ LUA = REPO / "home/.config/hypr/nc/ecrans.lua"
 ASUS = dict(name="HDMI-A-1", description="ASUS VG32VQR", width=3840, height=2160, physical_width=700, physical_height=390,
             available_modes=["2560x1440@143.97Hz", "3840x2160@60.00Hz", "3840x2160@59.94Hz", "2560x1440@120.00Hz",
                              "2560x1440@59.95Hz", "1920x1080@143.86Hz", "1920x1080@60.00Hz"])
+# Revue ECR-01 : écrans 144 Hz qui disent préférer un mode à 60 Hz, avec un faux 4K de compatibilité
+PREF60 = dict(name="HDMI-A-3", description="", width=3840, height=2160, physical_width=700, physical_height=390,
+              available_modes=["2560x1440@59.95Hz", "2560x1440@143.97Hz", "3840x2160@60.00Hz"])
+FHD144 = dict(name="HDMI-A-4", description="", width=3840, height=2160, physical_width=530, physical_height=300,
+              available_modes=["1920x1080@60.00Hz", "1920x1080@144.00Hz", "3840x2160@30.00Hz"])
+# Téléviseur 4K qui préfère 60 Hz et propose 120 Hz
+TV = dict(name="HDMI-A-5", description="", width=3840, height=2160, physical_width=1210, physical_height=680,
+          available_modes=["3840x2160@60.00Hz", "3840x2160@120.00Hz", "1920x1080@120.00Hz"])
 # Vrai écran 4K à 60 Hz de 27"
 UHD = dict(name="DP-1", description="Dell U2720Q", width=3840, height=2160, physical_width=600, physical_height=340,
            available_modes=["3840x2160@60.00Hz", "3840x2160@30.00Hz", "2560x1440@59.95Hz", "1920x1080@60.00Hz"])
@@ -67,6 +75,12 @@ for _, r in ipairs(regles) do print(r.output, r.mode, r.scale, r.disabled and "o
         self.assertEqual(r["mode"], "2560x1440@143.97", "la dalle est en 1440p, pas le 4K de compatibilité HDMI")
         self.assertEqual(round(float(r["mode"].split("@")[1])), 144)
         self.assertEqual(r["echelle"], 1, "31,5 pouces en 1440p : 93 points par pouce, échelle 1")
+
+    def test_ecran_144hz_qui_prefere_60hz(self):
+        r = self.regles([PREF60, FHD144, TV])
+        self.assertEqual(r["HDMI-A-3"]["mode"], "2560x1440@143.97", "le 144 Hz vient en second : la dalle reste en 1440p")
+        self.assertEqual(r["HDMI-A-4"]["mode"], "1920x1080@144.00", "1080p à 144 Hz, pas le faux 4K à 30 Hz")
+        self.assertEqual(r["HDMI-A-5"]["mode"], "3840x2160@120.00", "un vrai 4K à 120 Hz reste en 4K")
 
     def test_vrai_4k_60hz_inchange(self):
         r = self.regles([UHD])["DP-1"]
