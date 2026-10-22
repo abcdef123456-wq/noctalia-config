@@ -1290,7 +1290,7 @@ def diagnostic(flux=False):
                  "pour chacun (commandes sur des lignes « $ … »).\n\n",
                  "Here is my desktop's check report (noctalia-config, Hyprland). Simply explain each problem (✗) and each "
                  "warning (!), most important first, and say exactly what to do for each (commands on “$ …” lines).\n\n")
-    demander(question + bilan, "texte", flux=flux,
+    demander(question + caviarder(bilan), "texte", flux=flux,
              consigne_=T("Tu aides à réparer un bureau Linux. Réponds en français, concret et bref.",
                          "You help fix a Linux desktop. Answer in English, concrete and brief."))
 
@@ -1299,11 +1299,23 @@ def diagnostic(flux=False):
 UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
 
 
+_NOM_SECRET = r"[\w.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|credential|private[_-]?key|auth)[\w.-]*"
+
+
 def caviarder(t):
-    """Ce qui ressemble à un secret (clé d'API, jeton, mot de passe) est masqué avant de partir vers une IA."""
+    """Ce qui ressemble à un secret est masqué avant de partir vers une IA (toujours, même locale) : clés et jetons
+    reconnaissables, toute valeur d'un nom de clé (DB_PASSWORD=, TELEGRAM_TOKEN=, X-Secret-Key:, "access_token":…),
+    identifiants dans une URL, jetons de bot Telegram, en-têtes Basic et Bearer, clés privées PEM, clés AWS ; et le
+    dossier personnel devient ~ (le nom du compte ne part pas). Revue PRIV-01."""
+    t = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", "[clé privée …]", t, flags=re.S)
     t = re.sub(r"\b(sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|"
-               r"gsk_[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)", "[…]", t)
-    return re.sub(r"(?i)\b(bearer|token|password|passwd|mot de passe|secret|api[_-]?key)(\s*[=:]\s*|\s+)[^\s,;]+", r"\1\2[…]", t)
+               r"gsk_[A-Za-z0-9]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+)", "[…]", t)
+    t = re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1[…]@", t)
+    t = re.sub(r"/bot\d{5,}:[\w-]{20,}", "/bot[…]", t)
+    t = re.sub(r"(?i)\b(basic|bearer)\s+[A-Za-z0-9._~+/=-]{6,}", r"\1 […]", t)
+    t = re.sub(r"(?i)(" + _NOM_SECRET + r")([\"']?\s*[=:]\s*[\"']?)(?!\[…\])[^\s,;\"'&]+", r"\1\2[…]", t)
+    t = re.sub(r"(?i)\b(password|passwd|mot de passe|token|secret)(\s+)(?![=:\[])[^\s,;]+", r"\1\2[…]", t)
+    return t.replace(str(HOME), "~")
 
 
 def panne(unites, flux=False, livraison=False):
@@ -1661,7 +1673,7 @@ def executer_action(a):
     if o.startswith("service_"):
         if o == "service_journal":
             code, t = sortie_cmd(["journalctl", "--user", "-u", g["nom"], "-n", "40", "--no-pager", "-o", "cat"])
-            return code == 0, t[-6000:]
+            return code == 0, caviarder(t[-6000:])           # lu pour l'IA, sans confirmation : secrets masqués
         verbe = {"service_redemarrer": "restart", "service_demarrer": "start", "service_arreter": "stop"}[o]
         code, t = sortie_cmd(["systemctl", "--user", verbe, g["nom"]], 30)
         etat = sortie_cmd(["systemctl", "--user", "is-active", g["nom"]])[1]
@@ -1736,7 +1748,7 @@ def agir(demande, bureau=None):
         for a in lectures[:4]:
             try:
                 v = valider_action(a, domaines, services, fenetres, bureau)
-                resultats.append(f"=== {v['libelle']} ===\n" + executer_action(v)[1])
+                resultats.append(f"=== {v['libelle']} ===\n" + caviarder(executer_action(v)[1]))
             except ErreurIA as e:
                 resultats.append(f"=== {a.get('outil')} === {e}")
         texte += T("\n\nRésultats de tes lectures :\n", "\n\nResults of your reads:\n") + "\n".join(resultats) + \

@@ -428,6 +428,34 @@ class IA(unittest.TestCase):
         self.assertEqual(self.appels().count("bluetoothctl power off"), 1, "une action faite ne se refait pas")
         self.assertEqual(self.lancer("executer", "pas-un-plan").returncode, 1)
 
+    def test_secrets_masques_avant_l_ia(self):
+        """Revue PRIV-01 : les secrets nommés par une variable (DB_PASSWORD=, TELEGRAM_TOKEN=, X-Secret-Key:…) passaient,
+        et le journal lu par « L'IA peut agir » (service_journal, sans confirmation) partait en clair."""
+        secrets = ["DB_PASSWORD=zzz1", "MY_API_KEY=zzz2", "TELEGRAM_TOKEN=zzz3", "SECRET_KEY=zzz4", "X-Secret-Key: zzz5",
+                   '{"access_token":"zzz6"}', "https://alice:zzz7@hote/x", "api.telegram.org/bot123456789:AAzzz8zzzzzzzzzzzzzzzzzzzz/getMe",
+                   "Authorization: Basic enp6OTp4eA==", "-----BEGIN PRIVATE KEY-----", "zzz10", "-----END PRIVATE KEY-----",
+                   "AKIAZZZ1100000000000", f"chemin {self.home}/.config/x"]
+        self.preparer_agent()
+        self.programme("journalctl", "cat <<'FIN'\n" + "\n".join(secrets) + "\nauthentication failed for user\nFIN")
+        self.reglages("IA_ACTIONS=confirmer\n")
+        Faux.texte_ant = json.dumps({"reponse": "Je lis le journal.", "actions": [{"outil": "service_journal", "args": {"nom": "nc-ile.service"}}]})
+        r = self.lancer("agir", "--json", "pourquoi l'île plante")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("Résultats de tes lectures", envoye)
+        envoye = envoye[envoye.index("Résultats de tes lectures"):]
+        self.assertIn("authentication failed for user", envoye, "le reste du journal est gardé")
+        self.assertIn("chemin ~/.config/x", envoye, "le dossier personnel devient ~")
+        for x in ("zzz", "ZZZ", "enp6OTp4eA", str(self.home)):
+            self.assertNotIn(x, envoye)
+        # « Expliquer » une panne : même masquage
+        self.programme("systemctl", f'printf "Description=Île\\nLoadState=loaded\\nFragmentPath={self.home}/.config/systemd/user/nc-ile.service\\n"')
+        self.assertEqual(self.lancer("panne", "nc-ile.service").returncode, 0)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("FragmentPath=~/.config/systemd/user/nc-ile.service", envoye)
+        for x in ("zzz", "ZZZ", str(self.home)):
+            self.assertNotIn(x, envoye)
+
     def test_agir_organise_les_fenetres(self):
         clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
                    {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
