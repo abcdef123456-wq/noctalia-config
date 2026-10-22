@@ -126,6 +126,52 @@ class AutresAgents(Module):
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.m.hook_ia(ia, "PostToolUse" if ia != "gemini" else "AfterTool")
                 self.assertNotIn("question", self.session(ia + "-X"))
+        self.assertEqual(self.notifs, [], "Gemini, Copilot et Qwen ont leur propre notification : pas de doublon")
+
+    def evenements(self, ia, *noms, **ev):
+        for nom in noms:
+            self.m.lire_entree = lambda: dict(ev, session_id="O", cwd="/projets/site")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.m.hook_ia(ia, nom)
+
+    def test_agent_sans_notification_propre_recoit_voir(self):
+        # OpenCode (son extension : permission.asked → « permission ») n'avertit pas lui-même : notre « Voir »
+        self.evenements("opencode", "prompt", "permission")
+        s = self.session("opencode-O")
+        self.assertEqual(s["etat"], "terminal")
+        self.assertEqual(len(self.notifs), 1, "notification « Voir » absente pour OpenCode")
+        sid, titre, texte, voir = self.notifs[0]
+        self.assertEqual((sid, voir), ("opencode-O", True))
+        self.assertIn("OpenCode", titre)
+        self.assertIn("site", texte)
+        # Reprise (réponse donnée dans son terminal) : la session repart, et la notification sait qu'elle peut partir
+        avant = s["maj"]
+        time.sleep(0.01)
+        self.evenements("opencode", "reprise")
+        s = self.session("opencode-O")
+        self.assertEqual(s["etat"], "travail")
+        self.assertGreater(s["maj"], avant)
+
+    def test_codex_sans_reponse_pas_de_doublon(self):
+        self.m.ile_active = lambda: False                     # pas d'île : la demande reste dans le terminal de Codex
+        self.m.demande(dict(session_id="Z", cwd="/p", tool_name="Bash", tool_input={"command": "ls"}), "permission", "codex")
+        self.assertEqual(self.session("codex-Z")["etat"], "terminal")
+        self.assertEqual(self.notifs, [], "Codex a sa propre notification")
+
+    def test_antigravity_cursor_kiro_amp_sans_attente(self):
+        """Aucun de leurs événements n'est une attente : jamais de notification « Voir »."""
+        for nom in self.m.AGY_EVENEMENTS:
+            self.m.lire_entree = lambda: {"conversationId": "A", "workspacePaths": ["/p"],
+                                          "toolCall": {"name": "run_command", "args": {"CommandLine": "ls"}}}
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.m.hook_agy(nom)
+        for ia in ("cursor", "kiro"):
+            self.evenements(ia, *self.m.EVENEMENTS[ia], tool_name="read_file", tool_input={})
+        self.evenements("amp", "prompt", "tool", "stop", tool="read", args={})
+        self.assertEqual(self.notifs, [])
+        sessions = json.loads(Path(self.m.ETAT).read_text())["sessions"]   # (cursor : sessionEnd l'a retirée)
+        self.assertTrue({"antigravity-A", "kiro-O", "amp-O"} <= set(sessions))
+        self.assertFalse([k for k, s in sessions.items() if s["etat"] == "terminal"])
 
     def test_demande_codex_sans_reponse_reste_en_vue(self):
         self.m.attendre = lambda ident, pid: None

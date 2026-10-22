@@ -1,3 +1,13 @@
 # Sourcé par uwsm pour toute la session graphique (noctalia-config).
 # Applications Qt/KDE (Dolphin…) : palette Noctalia et icônes via qt6ct.
 export QT_QPA_PLATFORMTHEME=qt6ct
+# ~/.local/bin en tête du PATH de toute la session, une seule fois (remis devant s'il y était déjà plus loin) : les
+# commandes nc-* et le Neovim récent qu'install.sh y installe passent avant ceux de /usr/bin, même pour une appli
+# lancée hors d'un terminal (Neovim depuis le lanceur, son terminal d'agent…).
+_nc_p=":$PATH:"
+while case "$_nc_p" in *":$HOME/.local/bin:"*) true ;; *) false ;; esac; do
+  _nc_p="${_nc_p%%":$HOME/.local/bin:"*}:${_nc_p#*":$HOME/.local/bin:"}"
+done
+_nc_p="${_nc_p#:}"; _nc_p="${_nc_p%:}"
+export PATH="$HOME/.local/bin${_nc_p:+:$_nc_p}"
+unset _nc_p

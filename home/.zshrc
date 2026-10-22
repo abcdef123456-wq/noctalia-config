@@ -14,7 +14,11 @@ plugins=(
 [[ -r "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
 [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
 
-export PATH="$HOME/.local/bin:$PATH"
+# ~/.local/bin en tête du PATH, une seule fois (remis devant s'il y était déjà plus loin) : les commandes nc-* et le
+# Neovim récent qu'install.sh y installe passent avant ceux de /usr/bin (Debian 13 : Neovim 0.10, trop ancien)
+typeset -U path PATH
+path=("$HOME/.local/bin" $path)
+export PATH
 
 # Accueil du terminal (logo aux couleurs du fond d'écran + infos système)
 [[ -r ~/.config/nc/greeting.zsh ]] && source ~/.config/nc/greeting.zsh

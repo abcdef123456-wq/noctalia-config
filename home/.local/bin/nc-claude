@@ -551,8 +551,10 @@ def notification(sid, titre, texte, voir=False):
         d.setdefault("notifs", {})[sid] = moi          # une seule par session : la précédente se ferme d'elle-même
         term, shell = s.get("terminal") or 0, s.get("shell") or 0
         icone = (s.get("classe") or "utilities-terminal").lower()
+        agent = s.get("agent") or "claude"
+    appli = "Claude Code" if agent == "claude" else NOMS.get(agent, agent)
     action = "default=" + (T("Voir", "View") if voir else T("Ouvrir", "Open"))
-    p = subprocess.Popen(["notify-send", "-a", "Claude Code", "-i", icone, "-p", "-A", action, titre, texte],
+    p = subprocess.Popen(["notify-send", "-a", appli, "-i", icone, "-p", "-A", action, titre, texte],
                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nid = p.stdout.readline().strip()
     debut = time.time()
@@ -750,6 +752,11 @@ def suivre(agent, sid, cwd, quoi, outil="", args=None, erreur=False, message="",
         elif quoi == "attente":
             s["etat"] = "terminal"
             poser_question(s, T("T'attend dans le terminal", "Waiting in the terminal"), message)
+            # Sans notification à elle (OpenCode…), notre « Voir » la remplace ; les autres ont déjà la leur (doublon)
+            if agent in IAS and agent not in NOTIF_PROPRE:
+                notifier(s, T(f"{NOMS.get(agent, agent)} t'attend", f"{NOMS.get(agent, agent)} is waiting for you"),
+                         s["projet"] + T(" : ", ": ") + (court(message, 120) if message
+                                                          else T("à toi de répondre", "your turn to answer")), voir=True)
         elif quoi == "fini" and s.get("etat") in ("travail", "terminal"):
             s["etat"] = "fini"
             s["fin"] = time.time()
@@ -867,6 +874,11 @@ EVENEMENTS = {
     "kiro": ("UserPromptSubmit", "PostToolUse", "Stop"),
 }
 DEMANDES_ILE = ("codex", "qwen")     # IA qui acceptent « autoriser / refuser » par leur hook, comme Claude
+# IA qui préviennent déjà elles-mêmes quand elles t'attendent (notification de bureau ou du terminal) : pas de seconde
+# notification « Voir » de notre part. Les autres IA suivies par l'île qui signalent une attente (OpenCode : son
+# extension transmet permission.asked, question.asked, form.created) reçoivent la nôtre. Antigravity, Cursor, Kiro et
+# Amp ne signalent aucune attente à leurs hooks : rien à notifier.
+NOTIF_PROPRE = ("gemini", "qwen", "copilot", "codex")
 DEBUT = ("userpromptsubmit", "beforeagent", "userpromptsubmitted", "beforesubmitprompt", "prompt")
 ETAPE = ("pretooluse", "posttooluse", "aftertool", "tool")
 ATTENTE = ("permissionrequest", "permission")
@@ -1158,6 +1170,7 @@ def hook_ia(ia, nom):
             s = d["sessions"].get(f"{ia}-{sid}")
             if s and s.get("etat") == "terminal":
                 s["etat"] = "travail"
+                s["maj"] = time.time()                 # notre notification « Voir » s'en va (notification())
     elif n in FINI:
         suivre_evenement("fini", message=ev.get("last_assistant_message") or ev.get("prompt_response") or "")
     elif n in ("sessionend", "fin"):

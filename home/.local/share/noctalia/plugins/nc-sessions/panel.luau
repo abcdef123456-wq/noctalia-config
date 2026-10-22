@@ -7,8 +7,10 @@
 -- exactement celle du carrousel des fonds : seules les images, et le titre de la carte choisie dessous. Sinon (pas
 -- d'ImageMagick, pas de grim…), toutes les cartes sont droites, en verre, le titre dedans.
 -- Entrée ou clic sur la carte du milieu : ouvrir la session (ou nommer la nouvelle) ; Maj + Suppr : la supprimer, après
--- confirmation sur la carte ; clic droit ou « Modifier » : l'éditeur, un volet à droite de la carte ; Échap : fermer.
--- Aucune lettre n'est capturée (plugin.toml) : elles vont toujours au champ qui a le focus.
+-- confirmation sur la carte ; « Modifier » : l'éditeur, un volet à droite de la carte ; Échap : fermer.
+-- Aucune lettre n'est capturée (plugin.toml) : elles vont toujours au champ qui a le focus, et onKey ne reçoit que les
+-- touches capturées (donc pas E). Pas de clic droit sur une carte : l'API 32 ne le prend que sur ui.button (ni
+-- ui.image, ni ui.box, ni ui.row, ni ui.column : « has no prop 'onRightClick', ignored »).
 -- Données : seulement nc-session (json, ouvrir, enregistrer, supprimer…), jamais ses fichiers.
 -- Même cadre que le carrousel des fonds : dessiné pour un écran de 1600 x 1000 points, réduit sur un plus petit, agrandi
 -- sur un plus grand ; fond flou du fond d'écran courant (miniature de nc-carousel-thumbs). Carte du milieu à la hauteur
@@ -639,7 +641,7 @@ end
 -- ── Cartes ──────────────────────────────────────────────────────────────────
 -- Contenu partagé entre la carte droite (dedans, sur le voile) et le titre sous une tranche (largeur L disponible)
 
--- « Modifier » (le clic droit aussi) : ouvre l'éditeur de la session
+-- « Modifier » : ouvre l'éditeur de la session
 local function boutonModifier(c)
   return ui.row({ key = "modifier", height = px(30), paddingH = px(14), radius = px(15), align = "center", gap = px(6),
     fill = "surface/0.70", border = "#ffffff29", borderWidth = 1, onClick = function() editer(c) end }, {
@@ -755,7 +757,7 @@ end
 
 -- Carte d'une session : la capture (ou le schéma) remplit la carte ; en bas, sur un voile, icône, couleur, nom, nombre
 -- de fenêtres, date et applis. Les voisines : capture, ou icône et nom.
-local function carteSession(c, idx, w, h, milieu, a, clic, droit)
+local function carteSession(c, idx, w, h, milieu, a, clic)
   local M = px(24)
   local col = couleur(c)
   local img = apercu(c)
@@ -773,7 +775,7 @@ local function carteSession(c, idx, w, h, milieu, a, clic, droit)
     end
     for _, v in ipairs(voile(w, h, vh)) do table.insert(couches, v) end
     table.insert(couches, couche(w, h, "end", "start", { titreSession(c, w - 2 * M, px(22)), ligneSession(c) }, M))
-    -- « Modifier » en haut à droite (le clic droit aussi)
+    -- « Modifier » en haut à droite
     if mode == "liste" then
       table.insert(couches, ui.column({ width = w, height = h, align = "end", justify = "start", paddingH = px(16), paddingV = px(16) }, {
         boutonModifier(c),
@@ -795,7 +797,7 @@ local function carteSession(c, idx, w, h, milieu, a, clic, droit)
       }, px(16)))
     end
   end
-  return verre({ key = "c" .. idx, opacity = a, onClick = clic, onRightClick = droit }, w, h, couches, milieu)
+  return verre({ key = "c" .. idx, opacity = a, onClick = clic }, w, h, couches, milieu)
 end
 
 -- Une carte de la bande, à la distance d (entière) du centre
@@ -808,7 +810,6 @@ local function carte(c, idx, w, h, d, a)
       aller(idx)
     end
   end
-  local droit = function() if not c.nouvelle then aller(idx); editer(c) end end
   -- Tranches : exactement un fond de nc/carousel (image découpée, plus large que sa place : SK x hauteur), et rien
   -- d'autre (ni verre ni boîte derrière) ; le titre de la carte choisie est sous la bande (legende)
   if enTranches then
@@ -816,13 +817,13 @@ local function carte(c, idx, w, h, d, a)
     if c.nouvelle then t = trancheNouvelle(milieu) else t = tranche(c, milieu) end
     if t then
       return ui.image({ key = "c" .. idx, path = t, width = w + SK * h, height = h, fit = "cover", opacity = a,
-        onClick = clic, onRightClick = droit })
+        onClick = clic })
     end
     -- « Nouvelle session » dont la tranche se prépare : une place vide (invisible) de la même taille
     return vide(w + SK * h, h)
   end
   if c.nouvelle then return carteNouvelle(idx, w, h, milieu, a, clic) end
-  return carteSession(c, idx, w, h, milieu, a, clic, droit)
+  return carteSession(c, idx, w, h, milieu, a, clic)
 end
 
 -- Bande de cartes : la carte du milieu grande, les voisines étroites, plus petites et à 70 %, les plus lointaines à
@@ -926,9 +927,10 @@ local function legende()
   elseif mode == "editeur" then
     table.insert(kids, ligneAide({ { "Tab", tr("champ suivant", "next field") }, { ECHAP, tr("fermer l'éditeur", "close the editor") } }))
   elseif mode ~= "attente" then
-    -- E n'est pas capturée (les lettres vont aux champs) : le clic droit ou « Modifier » ouvrent l'éditeur
+    -- E n'arrive pas au panneau (non capturée : les lettres vont aux champs) et le clic droit n'existe que sur un
+    -- ui.button : seul le bouton « Modifier » ouvre l'éditeur
     table.insert(kids, ligneAide({ { "↵", tr("ouvrir", "open") }, { tr("Maj", "Shift"), tr("Suppr", "Del"), tr("supprimer", "delete") },
-      { tr("Clic droit", "Right click"), tr("modifier", "edit") }, { ECHAP, tr("fermer", "close") } }))
+      { tr("Modifier", "Edit") }, { ECHAP, tr("fermer", "close") } }))
   end
   if message and not (c.nouvelle and (mode == "nom" or mode == "attente")) then table.insert(kids, phrase(message, messageErreur and "error" or "primary")) end
   return ui.column({ height = hauteurInfo(), width = BGW, align = "center", justify = "start", gap = px(10),
@@ -1110,7 +1112,7 @@ local function valider(ch)
   end
 end
 
--- Point d'entrée (clic droit, bouton « Modifier », E hors d'un champ)
+-- Point d'entrée (bouton « Modifier »)
 function editer(session)
   if not session or session.nouvelle or not texte(session.nom) then return end
   mode, edNom, message = "editeur", session.nom, nil
@@ -1447,8 +1449,6 @@ function onKey(chord, pressed)
   elseif entree(chord) then activer(c)
   elseif chord == "shift+Delete" or chord == "Shift+Delete" then
     if c and not c.nouvelle then mode, message = "confirmer", nil; render() end
-  elseif chord == "e" or chord == "E" then   -- seulement si Noctalia la transmet (non capturée) ; sinon clic droit
-    if c and not c.nouvelle then editer(c) end
   end
 end
 

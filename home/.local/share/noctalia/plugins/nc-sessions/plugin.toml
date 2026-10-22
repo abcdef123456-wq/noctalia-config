@@ -8,7 +8,8 @@ description = "Carrousel plein écran des sessions enregistrées (nc-session) : 
 
 # Même cadre que le carrousel des fonds (nc/carousel). Aucune lettre capturée : une capture ne dépend pas du focus, et
 # les lettres doivent toujours arriver au champ qui l'a (nom d'une nouvelle session, champs de l'éditeur). L'éditeur
-# s'ouvre par un clic droit ou le bouton « Modifier ».
+# s'ouvre par le bouton « Modifier » (onKey ne reçoit que les touches capturées, et le clic droit n'existe que sur
+# un ui.button).
 [[panel]]
 id = "main"
 entry = "panel.luau"

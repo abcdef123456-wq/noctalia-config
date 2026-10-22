@@ -285,9 +285,10 @@ verifier(not closed, "le panneau reste ouvert")
 -- la nouvelle carte ne se supprime pas
 touche("End"); touche("shift+Delete")
 verifier(not contient("Supprimer «"), "pas de confirmation sur + Nouvelle session")
--- E (si Noctalia la transmettait) : l'éditeur
-touche("Home"); touche("e")
-verifier(trouver("volet") and contient("Modifier « Dev »"), "E → editer()")
+-- E n'arrive pas au panneau (non capturée) : la ligne d'aide ne la promet pas, ni un clic droit ; « Modifier » seul
+touche("Home")
+verifier(contient("Modifier") and not contient("Clic droit") and not trouver("touche:E"), "aide : « Modifier » seulement")
+verifier(not trouver("c1").p.onRightClick, "pas de onRightClick sur la carte (ui.column le refuse)")
 ''')
 
     def test_nouvelle_session_enregistre_le_nom(self):
@@ -348,8 +349,8 @@ verifier(not ticks, "défilement immédiat, sans images suivantes")
         self.lancer([session("Dev"), session("Web")], r'''
 onOpen(nil); vider()
 verifier(not trouver("volet"), "pas de volet au départ")
-trouver("c1").p.onRightClick()
-verifier(trouver("volet"), "clic droit : le volet")
+trouver("modifier").p.onClick()
+verifier(trouver("volet"), "« Modifier » : le volet")
 verifier(contient("Modifier « Dev »"), "titre du volet")
 for _, k in ipairs({ "s:icone", "s:couleur", "s:fond", "s:profil", "s:npd", "s:demarrage", "s:fermer_autres", "s:raccourci",
                      "s:bureau.1", "s:bureau.2", "s:fenetre.0.inclure", "s:fenetre.1.inclure", "s:fenetre.1.dossier",
@@ -375,7 +376,7 @@ verifier(trouver("volet"), "bouton Modifier")
     def test_chaque_champ_envoie_modifier(self):
         self.lancer([session("Dev"), session("Web")], r'''
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 local function clic(k, cle, v)
   local n = trouver(k)
   verifier(n, "case " .. k)
@@ -424,7 +425,7 @@ saisir("raccourci", "raccourci", "", "")
     def test_erreur_sous_le_champ(self):
         self.lancer([session("Dev")], r'''
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 REPONSES.modifier = { exitCode = 1, stdout = "", stderr = "Touche inconnue : Z9.\n" }
 trouver("t:raccourci:", true).p.onChange("Super+Z9")
 touche("Return"); vider()
@@ -440,7 +441,7 @@ verifier(not trouver("err:raccourci"), "erreur effacée une fois acceptée")
     def test_tab_parcourt_les_champs(self):
         self.lancer([session("Dev")], r'''
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 local function focus() for _, n in ipairs(noeuds(tree)) do
   if type(n.p.key) == "string" and n.p.key:match("^s:") and n.p.border == "primary" then return n.p.key end end end
 local ordre = { "s:icone", "s:couleur", "s:fond", "s:profil", "s:npd", "s:demarrage", "s:fermer_autres", "s:raccourci",
@@ -474,7 +475,7 @@ verifier(ok, "Entrée bascule l'interrupteur : " .. vu)
     def test_echap_ferme_le_volet_puis_le_panneau(self):
         self.lancer([session("Dev"), session("Web")], r'''
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 verifier(trouver("volet"), "volet ouvert")
 touche("Escape")
 verifier(not trouver("volet") and not closed, "1er Échap : le volet")
@@ -487,7 +488,7 @@ verifier(closed, "2e Échap : le panneau")
 os.execute("mkdir -p '" .. DIR .. "/.config/noctalia'")
 local f = io.open(DIR .. "/.config/noctalia/zz-economie.toml", "w"); f:write(""); f:close()
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 verifier(not ticks, "pas d'animation à l'ouverture du volet")
 verifier(trouver("volet").p.opacity == 1, "volet affiché d'un coup")
 ''')
@@ -499,7 +500,7 @@ verifier(trouver("volet").p.opacity == 1, "volet affiché d'un coup")
                 self.lancer([session("Dev"), session("Web")], r'''
 ECRAN = { %d, %d }
 onOpen(nil); vider()
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 defiler()
 local v = trouver("volet")
 local z = math.min(1, ECRAN[1] / 1600, ECRAN[2] / 1000)
@@ -535,7 +536,7 @@ for _, n in ipairs(noeuds(tree)) do if n.t == "input" then champ = n end end
 verifier(champ.p.value == "essai", "le texte vaut essai : " .. tostring(champ.p.value))
 verifier(not trouver("volet"), "l'éditeur ne s'ouvre pas")
 touche("Escape"); touche("Home")
-trouver("c1").p.onRightClick()
+trouver("modifier").p.onClick()
 local avant = #calls
 touche("e"); touche("q")
 verifier(#calls == avant and trouver("volet"), "lettres ignorées par l'éditeur")
@@ -589,13 +590,14 @@ verifier(dans(titre, "modifier"), "« Modifier » à côté du nom")
 local lignes = 0
 for _, nd in ipairs(noeuds(tree)) do if nd.p.key == "aide" then lignes = lignes + 1 end end
 verifier(lignes == 1 and trouver("touche:↵"), "une seule ligne d'aide, en pastilles")
--- clic droit sur une tranche : l'éditeur
+-- « Modifier » sous une tranche : l'éditeur
 touche("Right"); for _ = 1, 30 do onFrameTick(16) end
 web = trouver("c2")
 verifier(web.p.path:match("Web%.W%.png$"), "Web au milieu : sa grande tranche")
 verifier(contient("Web") and not contient("Dev"), "le titre suit la carte choisie")
-web.p.onRightClick()
-verifier(trouver("volet"), "clic droit sur une tranche : l'éditeur")
+verifier(not web.p.onRightClick, "pas de onRightClick sur une tranche (ui.image le refuse)")
+trouver("modifier").p.onClick()
+verifier(trouver("volet") and contient("Modifier « Web »"), "« Modifier » sous une tranche : l'éditeur de Web")
 touche("Escape")
 -- « Nouvelle session » : une tranche aussi, le « + » et le texte dessous
 touche("End"); for _ = 1, 30 do onFrameTick(16) end

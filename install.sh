@@ -987,12 +987,27 @@ PERSO_EOF
   fi
   echo ".config/hypr/perso.lua" >> "$BK/.created"
 fi
-# Commandes nc-* (nc-maj…) trouvées aussi dans bash, sans attendre une reconnexion ni passer à zsh
+# Commandes nc-* (nc-maj…) trouvées aussi dans bash, sans attendre une reconnexion ni passer à zsh. ~/.local/bin passe
+# devant /usr/bin (une seule fois, remis devant s'il y était déjà plus loin) : le Neovim récent qu'on y installe
+# (étape 3b) l'emporte sur celui de la distribution. L'ancienne ligne (ajoutée seulement si absent, sans le remettre
+# devant) est remplacée.
 if [ -f "$HOME/.bashrc" ] || [ "$(basename "${SHELL:-}")" = bash ]; then
-  if ! grep -qF 'noctalia-config : commandes nc-' "$HOME/.bashrc" 2>/dev/null; then
+  nc_bash_ancien_titre='# noctalia-config : commandes nc-* (nc-maj…) dans ~/.local/bin'
+  nc_bash_ancien='case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac'
+  if ! grep -qF 'noctalia-config : ~/.local/bin en tête du PATH' "$HOME/.bashrc" 2>/dev/null; then
     [ -f "$HOME/.bashrc" ] && backup .bashrc
-    printf '\n# noctalia-config : commandes nc-* (nc-maj…) dans ~/.local/bin\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' >> "$HOME/.bashrc"
+    if grep -qxF "$nc_bash_ancien" "$HOME/.bashrc" 2>/dev/null; then
+      grep -vxF -e "$nc_bash_ancien" -e "$nc_bash_ancien_titre" "$HOME/.bashrc" > "$HOME/.bashrc.nc-tmp" &&
+        cat "$HOME/.bashrc.nc-tmp" > "$HOME/.bashrc"
+      rm -f "$HOME/.bashrc.nc-tmp"
+    fi
+    cat >> "$HOME/.bashrc" <<'BASHRC_EOF'
+
+# noctalia-config : ~/.local/bin en tête du PATH (commandes nc-*, Neovim récent), une seule fois
+_nc_p=":$PATH:"; while case "$_nc_p" in *":$HOME/.local/bin:"*) true ;; *) false ;; esac; do _nc_p="${_nc_p%%":$HOME/.local/bin:"*}:${_nc_p#*":$HOME/.local/bin:"}"; done; _nc_p="${_nc_p#:}"; _nc_p="${_nc_p%:}"; export PATH="$HOME/.local/bin${_nc_p:+:$_nc_p}"; unset _nc_p
+BASHRC_EOF
   fi
+  unset nc_bash_ancien nc_bash_ancien_titre
 fi
 
 # Emplacement de ce dépôt, pour nc-maj (mise à jour en une commande)

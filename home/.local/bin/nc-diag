@@ -362,6 +362,7 @@ def verifier(b):
     if "Nerd Font" not in polices:
         b.avert(T("aucune police « Nerd Font » : icônes du terminal en carrés", "no “Nerd Font” font: terminal icons show as squares"),
                 T("relance install.sh (étape du terminal)", "run install.sh again (terminal step)"))
+    neovim(b)
 
     # ── Intelligence artificielle (nc-ia) : sans réseau, sans clé affichée ──
     b.titre(T("Intelligence artificielle", "Artificial intelligence"))
@@ -429,6 +430,25 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+
+
+NVIM_MIN = (0, 11, 2)   # LazyVim (config Neovim du dépôt) ; Debian 13 n'a que la 0.10
+
+
+def neovim(b):
+    """Le Neovim du PATH (celui du terminal) trop ancien pour la config : avertissement. Absent : rien à dire."""
+    nvim = shutil.which("nvim")
+    if not nvim:
+        return
+    v, _ = sortie([nvim, "--version"])
+    m = re.search(r"NVIM v?(\d+)\.(\d+)\.(\d+)", v)
+    if not m:
+        return
+    ver = tuple(int(x) for x in m.groups())
+    if ver < NVIM_MIN:
+        a_, b_ = ".".join(map(str, ver)), ".".join(map(str, NVIM_MIN))
+        b.avert(T(f"Neovim trop ancien pour la config ({a_} < {b_})", f"Neovim too old for the config ({a_} < {b_})"),
+                T("relance install.sh, qui propose la version officielle", "run install.sh again; it offers the official release"))
 
 
 def energie_processeur(b, bats):
