@@ -1770,7 +1770,8 @@ def capturer(ecran, ui):
         return ui.saisir(T("Nouvelles touches", "New keys"), "",
                          T("Ex. Super+T, Super+Maj+B, Ctrl+Alt+F", "E.g. Super+T, Super+Shift+B, Ctrl+Alt+F"))
     subprocess.run(["hyprctl", "eval",
-                    "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if hl.get_current_submap() == 'nc-capture' "
+                    "nc.capture_jeton = (nc.capture_jeton or 0) + 1 local j = nc.capture_jeton "
+                    "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if nc.capture_jeton == j and hl.get_current_submap() == 'nc-capture' "
                     "then hl.dispatch(hl.dsp.submap('reset')) end end, { timeout = 20000, type = 'oneshot' })"],
                    capture_output=True)
     sys.stdout.write("\x1b[>5u")              # protocole clavier de kitty : modificateurs et touche d'origine
@@ -2672,7 +2673,8 @@ def cli(a):
             subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.submap('reset'))"], capture_output=True)
         else:
             subprocess.run(["hyprctl", "eval",
-                            "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if hl.get_current_submap() == 'nc-capture' "
+                            "nc.capture_jeton = (nc.capture_jeton or 0) + 1 local j = nc.capture_jeton "
+                            "hl.dispatch(hl.dsp.submap('nc-capture')) hl.timer(function() if nc.capture_jeton == j and hl.get_current_submap() == 'nc-capture' "
                             "then hl.dispatch(hl.dsp.submap('reset')) end end, { timeout = 20000, type = 'oneshot' })"],
                            capture_output=True)
         return
