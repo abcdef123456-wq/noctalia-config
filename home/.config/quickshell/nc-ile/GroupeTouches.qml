@@ -1,6 +1,5 @@
 // Un groupe de touches de la fiche des raccourcis (Fiche.qml) : « Super + Ctrl + molette », précédé de « ou » s'il
-// n'est pas le premier. Dans un fichier à part : Quickshell refuse un composant interne utilisé dans un autre composant
-// interne (« X is not a type ») quand la fiche est chargée comme type par shell.qml.
+// n'est pas le premier.
 import QtQuick
 
 Row {
