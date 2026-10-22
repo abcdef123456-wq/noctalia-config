@@ -329,7 +329,7 @@ class Export(unittest.TestCase):
 
 
 class Installation(unittest.TestCase):
-    def test_capture_failure_selects_fallback_even_with_recent_version(self):
+    def test_island_selection_needs_modules_not_capture(self):
         script = (REPO / 'install.sh').read_text()
         selection = script[script.index('if have qs && ver_ge "$(qs_ver || true)" 0.3 &&'):]
         selection = selection[:selection.index('if [ "$ILE" = quickshell ]; then ILE_CENTRE=')]
@@ -346,8 +346,11 @@ t() { printf %s "$1"; }
 ILE=noctalia
 MODE=files
 '''
-            for exit_code, expected in [(1, 'noctalia'), (0, 'quickshell')]:
-                checker.write_text(f'exit {exit_code}\n')
+            # Modules absents : l'île du plugin ; capture seule absente (Quickshell compilé sans elle, ancienne
+            # installation Debian) : l'île Quickshell reste, avec un avertissement
+            for corps, expected in [('exit 1', 'noctalia'), ('exit 0', 'quickshell'),
+                                    ('[ "${1:-}" = --modules ] && exit 0; exit 1', 'quickshell')]:
+                checker.write_text(corps + '\n')
                 r = subprocess.run(['bash', '-c', common + selection + '\nprintf "%s" "$ILE"'],
                                    env=dict(os.environ, HOME=d, REPO=d), capture_output=True, text=True, timeout=10)
                 self.assertEqual(r.returncode, 0, r.stderr)

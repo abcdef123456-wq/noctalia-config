@@ -198,9 +198,14 @@ def verifier(b):
         if not os.path.isfile(capture):
             b.avert(T("vérificateur des modules Quickshell absent", "Quickshell module checker missing"),
                     T("réinstalle les fichiers de la configuration", "reinstall the configuration files"))
+        elif sortie(["bash", capture, "--modules"], 15)[1] != 0:
+            b.avert(T("modules Quickshell incomplets : l'île Quickshell ne peut pas être sélectionnée",
+                      "Quickshell modules incomplete: the Quickshell island cannot be selected"),
+                    T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
+                      "run nc-update again; on Debian, accept rebuilding Quickshell"))
         elif sortie(["bash", capture], 15)[1] != 0:
-            b.avert(T("imports Quickshell ou type de capture indisponibles : l'île complète ne peut pas être sélectionnée",
-                      "Quickshell imports or capture type unavailable: the full island cannot be selected"),
+            b.avert(T("Quickshell sans capture : vue des fenêtres (Super + A) indisponible, le reste de l'île marche",
+                      "Quickshell without capture: window overview (Super + A) unavailable, the rest of the island works"),
                     T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
                       "run nc-update again; on Debian, accept rebuilding Quickshell"))
         _, active = sortie(["systemctl", "--user", "is-enabled", "nc-ile.service"])

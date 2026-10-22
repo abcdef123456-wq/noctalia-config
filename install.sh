@@ -758,8 +758,12 @@ if [ "$FAMILY" = debian ] && [ "$MODE" != files ]; then
     hash -r
   fi
 fi
-if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-qs-capture"; then
+# La capture ne sert qu'aux aperçus de la vue des fenêtres (Super + A) : sans elle, l'île Quickshell reste (avant, un
+# Quickshell compilé sans capture faisait perdre toute l'île et ses réglages à la mise à jour, sur Debian)
+if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-qs-capture" --modules; then
   ILE=quickshell
+  bash "$REPO/home/.local/bin/nc-qs-capture" ||
+    warn "$(t "Quickshell sans capture : la vue des fenêtres (Super + A) est indisponible ; relance nc-maj et accepte sa recompilation." "Quickshell without capture: the window overview (Super + A) is unavailable; run nc-update again and accept rebuilding it.")"
   POLICE_ICONES="$HOME/.local/share/fonts/MaterialSymbolsRounded.ttf"
   if [ ! -s "$POLICE_ICONES" ] && [ "$MODE" != files ] && have curl; then
     info "$(t "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons" "Island icons: Material Symbols Rounded font (Google), https://github.com/google/material-design-icons")"

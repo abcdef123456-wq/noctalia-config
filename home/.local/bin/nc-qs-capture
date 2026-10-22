@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Vérifie les imports de l'île et le type de capture. Ne teste pas le protocole du compositeur ni une capture réelle.
+#   nc-qs-capture            les modules de l'île et la capture (aperçus de la vue des fenêtres, Super + A)
+#   nc-qs-capture --modules  seulement les modules de l'île : sans capture, l'île marche (la vue des fenêtres non)
 set -euo pipefail
+capture='    property Component capture: Component { ScreencopyView {} }'
+[ "${1:-}" = --modules ] && capture=''
+
 command -v qs >/dev/null 2>&1 || exit 1
 dossier=$(mktemp -d)
 trap 'rm -rf "$dossier"' EXIT
 mkdir -p "$dossier/runtime" "$dossier/cache"
-cat > "$dossier/shell.qml" <<'QML'
+cat > "$dossier/shell.qml" <<QML
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -19,7 +24,7 @@ import Quickshell.Services.Notifications
 import QtQuick.Effects
 import QtQuick.Shapes
 ShellRoot {
-    property Component capture: Component { ScreencopyView {} }
+$capture
     Timer { interval: 1; running: true; onTriggered: Qt.quit() }
 }
 QML
