@@ -538,3 +538,12 @@ ShellRoot {
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class IsolationDesTests(unittest.TestCase):
+    """Aucun test n'écrit dans les vrais dossiers de la session : XDG_* pointent vers un dossier temporaire."""
+    def test_dossiers_xdg_temporaires(self):
+        for cle in ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR"):
+            self.assertTrue(os.environ.get(cle), cle)
+            self.assertFalse(os.environ[cle].startswith(str(Path.home())), cle + " : " + os.environ[cle])
+            self.assertNotEqual(os.environ[cle], os.environ.get("NC_TEST_VRAI_RUNTIME"), cle)
