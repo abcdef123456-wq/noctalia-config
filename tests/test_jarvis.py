@@ -96,7 +96,7 @@ class Deploiement(unittest.TestCase):
             p=Path(d)/'bootstrap.pyz';self.d.bundle(p)
             import zipfile
             with zipfile.ZipFile(p) as z:
-                self.assertEqual(set(z.namelist()),{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py','server/nc_telegram.py','server/nc_noctalia.py','server/nc_google.py'})
+                self.assertEqual(set(z.namelist()),{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py','server/nc_telegram.py','server/nc_noctalia.py','server/nc_google.py','server/nc_choix.py'})
             r=subprocess.run([sys.executable,str(p),'--help'],capture_output=True,text=True,timeout=5)
             self.assertEqual(r.returncode,0,r.stderr)
             self.assertIn('--mode',r.stdout)
@@ -168,11 +168,13 @@ class Management(unittest.TestCase):
                                    params=[types.SimpleNamespace(name='SHOPPING_SECRET',label='Jeton',secret=True,default='')])
         registry=types.SimpleNamespace(list_tools=lambda:[tool])
         base=types.ModuleType('core.tools.base');base.ToolRegistry=registry
+        telegram=types.ModuleType('nc_telegram');telegram.installer=lambda upstream:None   # file d'attente Telegram : hors sujet ici
         gateway=types.ModuleType('gateway');gateway.httpx=httpx
         self.m=module(SHARE/'server/nc_management.py','nc_management')
         # Ne restaurer que nos modules : retirer des imports paresseux d'anyio/httpcore
         # casserait l'identité de SocketAttribute lors des tests HTTP suivants.
-        replacements={'main':self.up,'gateway':gateway,'nc_management':self.m,'core.tools.base':base}
+        replacements={'main':self.up,'gateway':gateway,'nc_management':self.m,'core.tools.base':base,
+                      'nc_choix':module(SHARE/'server/nc_choix.py','nc_choix'),'nc_telegram':telegram}
         previous={key:sys.modules.get(key) for key in replacements}
         sys.modules.update(replacements)
         def restore():

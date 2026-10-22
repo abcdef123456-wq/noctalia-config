@@ -49,6 +49,7 @@ else: print(json.dumps(dict(type='text',part=dict(text='réponse OpenCode'))))
                 self.assertNotIn('question privée',repr(args))
                 self.assertIn('question privée',self.cli.with_suffix('.prompt').read_text())
                 self.assertIn('Mémoire durable',self.cli.with_suffix('.prompt').read_text())
+                self.assertIn('[[choix: Option A | Option B]]',self.cli.with_suffix('.prompt').read_text())  # issue #7
                 self.assertFalse(any('dangerously' in x or x=='--auto' for x in args))
                 self.assertIn(model+('#high' if engine=='opencode' else ''),args)
                 self.assertFalse(self.up._should_inject_memory('v'))

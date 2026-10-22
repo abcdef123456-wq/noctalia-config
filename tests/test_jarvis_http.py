@@ -117,7 +117,10 @@ class ConnexionsRunner(unittest.TestCase):
         gateway=types.ModuleType('gateway');gateway.httpx=httpx
         factory=httpx.AsyncClient
         source=SOURCE.with_name('nc_gateway.py')
-        with patch.dict(sys.modules,{'main':upstream,'gateway':gateway,'nc_management':self.m}):
+        choix=types.ModuleType('nc_choix');choix.__file__=str(SOURCE.with_name('nc_choix.py'))
+        exec(compile(SOURCE.with_name('nc_choix.py').read_text(),choix.__file__,'exec'),choix.__dict__)
+        telegram=types.ModuleType('nc_telegram');telegram.installer=lambda upstream:None   # file d'attente Telegram : hors sujet ici
+        with patch.dict(sys.modules,{'main':upstream,'gateway':gateway,'nc_management':self.m,'nc_choix':choix,'nc_telegram':telegram}):
             for _ in range(2):
                 module=types.ModuleType('gateway_pool_test');exec(compile(source.read_text(),str(source),'exec'),module.__dict__)
             async def scenario():

@@ -801,12 +801,21 @@ def appel_programme(ident, consigne, texte, image, usage):
         err.close()
 
 
+CHOIX = []      # choix proposés par JARVIS pour la dernière réponse (issue #7) : une ligne {"choices": …} en flux
+
+
 def appel_jarvis(consigne, texte, image, usage):
-    r = subprocess.run([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--", consigne + "\n\n" + texte],
-                       capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+    r = subprocess.run([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--flux", "--",
+                        consigne + "\n\n" + texte], capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
     if r.returncode != 0:
         raise ErreurIA((r.stderr.strip().splitlines() or ["JARVIS"])[-1][:200])
-    yield r.stdout.strip()
+    try:
+        d = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        yield r.stdout.strip()                                  # ancien nc-assistant : du texte
+        return
+    CHOIX[:] = [c for c in d.get("choices") or [] if isinstance(c, str)][:5]
+    yield str(d.get("t", "")).strip()
 
 
 def appeler(ident, consigne, texte, image=None, usage="question"):
@@ -1064,6 +1073,7 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
     RELAIS.clear()
     for ident in liste:
         morceaux = []
+        CHOIX.clear()
         try:
             if flux:
                 ecrire(json.dumps({"ia": nom(ident), "id": ident, "agent": FOURNISSEURS[ident]["agent"]}, ensure_ascii=False) + "\n")
@@ -1081,6 +1091,8 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
             if not morceaux:
                 raise ErreurIA(T("réponse vide", "empty answer"))
             rep = "".join(morceaux).strip()
+            if flux and CHOIX:
+                ecrire(json.dumps({"choices": CHOIX}, ensure_ascii=False) + "\n")
             garder(rep, ident)
             noter_echec(ident, ok=True)
             if not flux and not rep.endswith("\n"):

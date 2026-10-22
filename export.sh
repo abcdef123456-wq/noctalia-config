@@ -88,6 +88,7 @@ HOME_FILES=(
   .local/share/nc-jarvis/server/nc_telegram.py
   .local/share/nc-jarvis/server/nc_noctalia.py
   .local/share/nc-jarvis/server/nc_google.py
+  .local/share/nc-jarvis/server/nc_choix.py
   .local/bin/nc-demander
   .local/bin/nc-paquets
   .local/bin/nc-alertes

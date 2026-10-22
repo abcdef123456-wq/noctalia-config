@@ -412,6 +412,36 @@ def texte_sortie(resultat):
     return "".join(x for x in t if x in "\n\t" or (ord(x) >= 32 and not 127 <= ord(x) <= 159))
 
 
+_CHOIX = []
+
+
+def module_choix():
+    """nc_choix, la même extraction que le gateway (issue #7), installé à côté : ~/.local/share/nc-jarvis/server ;
+    None s'il manque."""
+    if not _CHOIX:
+        try:
+            import importlib.util
+            chemin = Path(__file__).resolve().parent.parent / "share/nc-jarvis/server/nc_choix.py"
+            spec = importlib.util.spec_from_file_location("nc_choix", chemin)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            _CHOIX.append(m)
+        except (OSError, SyntaxError, ImportError, AttributeError):
+            _CHOIX.append(None)
+    return _CHOIX[0]
+
+
+def choix_reponse(resultat, texte):
+    """(texte, choix) : les choix envoyés par le gateway, revérifiés ; sans eux (gateway pas encore à jour), extraits
+    ici de la réponse, marqueur [[choix: …]] retiré. Au plus 5 choix de 80 caractères, sinon aucun."""
+    m = module_choix()
+    if m is None:
+        return texte, []
+    if "choices" in resultat:
+        return texte, m.verifier_choix(resultat.get("choices")) if resultat.get("choices") else []
+    return m.extraire_choix(texte)
+
+
 def verifier(c, json_out=False):
     """Teste la connexion et explique précisément ce qui bloque."""
     prive = hote_prive(c["URL"])
@@ -973,7 +1003,8 @@ def chronometrer(mesures, cle):
         mesures[cle] = round(mesures.get(cle, 0) + (time.perf_counter() - debut) * 1000, 3)
 
 
-def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=None):
+def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=None, choix=None):
+    """choix : une liste, remplie avec les choix que propose la réponse (issue #7)."""
     if not briefing and not question.strip():
         raise Erreur(T("La question est vide.", "The question is empty."))
     q_propre = question.strip()
@@ -996,8 +1027,11 @@ def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=N
                     # Le serveur garde son délai à lui (180 s par défaut) si on ne lui donne pas le nôtre : une tâche longue
                     # y était coupée alors qu'on attendait jusqu'à TIMEOUT (issue #6). Il accepte de 5 à 600 s
                     delai = max(5, min(600, round(c["TIMEOUT"])))
-                    texte = texte_sortie(api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"],
-                                                                 continue_session=True, timeout=delai)))
+                    r = api(c, "/api/ask", dict(prompt=question, platform="desktop", user_id=c["USER_ID"],
+                                                continue_session=True, timeout=delai))
+                    texte, proposes = choix_reponse(r, texte_sortie(r))
+                    if choix is not None:
+                        choix[:] = proposes
         except BaseException:
             signaler("fin")
             raise
@@ -1098,6 +1132,7 @@ def chat(c, question=""):
     sid = uuid.uuid4().hex
     print(T("Assistant distant — exit ou Ctrl+C pour quitter.", "Remote assistant — exit or Ctrl+C to quit."))
     print(T("La connexion sera vérifiée à la première question.", "The connection will be checked on the first question."))
+    choix = []
     try:
         while True:
             q = question or input(T("Vous > ", "You > ")).strip()
@@ -1106,9 +1141,18 @@ def chat(c, question=""):
                 break
             if not q:
                 continue
+            # Le numéro d'un choix proposé envoie son libellé (issue #7)
+            if q.isdigit() and 1 <= int(q) <= len(choix):
+                q = choix[int(q) - 1]
+                print("→ " + q, flush=True)
             print(T("Réflexion en cours…", "Thinking…"), flush=True)
+            choix = []
             try:
-                print("\n" + formater_terminal(demander(c, sid, q, chat=True)) + "\n", flush=True)
+                print("\n" + formater_terminal(demander(c, sid, q, chat=True, choix=choix)) + "\n", flush=True)
+                if choix:
+                    print("\n".join(f"  {i}. {libelle}" for i, libelle in enumerate(choix, 1)))
+                    print(T("Tape le numéro d'un choix, ou écris ta réponse.", "Type a choice's number, or write your answer.") + "\n",
+                          flush=True)
             except Erreur as e:
                 print(str(e), file=sys.stderr)
     finally:
@@ -1181,15 +1225,19 @@ def requete_ile():
     # le contexte, plutôt que JARVIS qui ne l'a pas vue
     if ia and not commande and (not par_jarvis or r.get("ia_du_bureau") is True):
         return repondre_par_ia(ia, historique, question)
+    proposes = []
     try:
         # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
-        texte = demander(configuration_question(question), sid, question, suivi=False)
+        texte = demander(configuration_question(question), sid, question, suivi=False, choix=proposes)
     except Erreur as e:
         if ia and par_jarvis and not commande and ia.mode() == "auto" and [i for i in ia.candidats("question") if i != "jarvis"]:
             return repondre_par_ia(ia, historique, question, echec_jarvis=e)
         raise
-    # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète.
-    print(json.dumps(dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000), ensure_ascii=False), flush=True)
+    # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète. choices : boutons de l'île (issue #7)
+    ligne = dict(ok=True, text=texte[:16000], truncated=len(texte) > 16000)
+    if proposes:
+        ligne["choices"] = proposes
+    print(json.dumps(ligne, ensure_ascii=False), flush=True)
 
 
 def main():
@@ -1247,12 +1295,15 @@ def main():
                 chat(c, " ".join(getattr(a, "question", [])))
             else:
                 mesures = {} if getattr(a, "mesurer", False) else None
+                proposes = []                          # choix proposés par JARVIS (issue #7) : en flux, pour le Spotlight
                 try:
-                    t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing", mesures=mesures)
+                    t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing",
+                                 mesures=mesures, choix=proposes)
                 finally:
                     if mesures:
                         print(json.dumps({"timings_ms": mesures}), file=sys.stderr, flush=True)
-                print(json.dumps({"t": t}, ensure_ascii=False) if flux else t, flush=True)
+                ligne = {"t": t, "choices": proposes} if proposes else {"t": t}
+                print(json.dumps(ligne, ensure_ascii=False) if flux else t, flush=True)
                 if commande == "briefing":
                     notifier(t)
         return 0
