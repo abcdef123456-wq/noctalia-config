@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nc-maj : met ce bureau à jour depuis GitHub, en une commande.
-# Récupère la dernière version du dépôt noctalia-config (git pull), puis relance install.sh, qui ne refait que ce qui
+# Récupère la dernière version du dépôt noctalia-config (git fetch, puis avance), puis relance install.sh, qui ne refait que ce qui
 # a changé ou manque (tes fichiers personnels et tes couleurs ne sont pas touchés).
 #   nc-maj                 mise à jour complète (une question avant chaque étape système pas encore faite)
 #   nc-maj --no-system     seulement ta session
@@ -35,7 +35,13 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   # chacun ramené à son idée principale (avant « ; », sans les parenthèses), les 4 plus récents
   nouveau=""
   if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$branche" 2>/dev/null; then
-    nouveau="$(git log --format=%s HEAD..FETCH_HEAD 2>/dev/null | python3 -c '
+    # Les sujets absents de l'historique d'ici (après une réécriture en amont, les identifiants ont changé)
+    sujets="$(awk 'NR == FNR { vus[$0]; next } !($0 in vus)' <(git log --format=%s HEAD) <(git log --format=%s FETCH_HEAD) 2>/dev/null || true)"
+    # Rien de nouveau à voir (seulement l'historique réécrit en amont : mêmes fichiers, mêmes sujets) : pas d'annonce
+    if [ -z "$sujets" ] && git diff --quiet HEAD FETCH_HEAD 2>/dev/null; then
+      echo "$distant" > "$annonce"; echo "$distant" > "$telegram"; exit 0
+    fi
+    nouveau="$(printf '%s\n' "$sujets" | python3 -c '
 import os, re, sys
 l = [x.strip() for x in sys.stdin if x.strip()]
 def idee(s):
@@ -80,14 +86,38 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 avant="$(git rev-parse HEAD)"
-git pull --ff-only --quiet
-if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."; else
+branche="$(git rev-parse --abbrev-ref HEAD)"
+ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null || true)"   # l'amont avant ce fetch
+git fetch -q origin "$branche"
+amont="$(git rev-parse "refs/remotes/origin/$branche")"
+reecrit=""
+if git merge-base --is-ancestor HEAD "$amont"; then
+  git merge --ff-only -q "$amont"
+elif [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; then
+  # Historique du dépôt réécrit en amont (mêmes changements, nouveaux identifiants) et aucun commit à toi : la nouvelle
+  # version est reprise telle quelle ; l'ancienne reste dans une branche de sauvegarde (rien n'est supprimé)
+  reecrit="nc-sauvegarde-$(date +%Y%m%d)"
+  git rev-parse -q --verify "refs/heads/$reecrit" >/dev/null && reecrit="$reecrit-$(date +%H%M%S)"
+  git branch "$reecrit" HEAD
+  git reset -q --hard "$amont"
+else
+  echo "$(t "Le dépôt $depot a des commits à toi qui ne sont pas sur GitHub : mise à jour annulée pour ne pas les perdre." "The repository $depot has commits of yours that are not on GitHub: update cancelled so they are not lost.")" >&2
+  echo "$(t "(git log origin/$branche..HEAD pour les voir)" "(git log origin/$branche..HEAD to see them)")" >&2
+  exit 1
+fi
+if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."
+elif [ -n "$reecrit" ]; then
+  # Les identifiants ont changé : les nouveautés sont les sujets absents de l'ancien historique
+  echo "$(t "Nouveautés :" "What's new:")"
+  awk 'NR == FNR { vus[$0]; next } !($0 in vus) { print "  • " $0 }' <(git log --format=%s "$avant") <(git log --format=%s HEAD)
+  echo "$(t "(historique du dépôt réorganisé ; ancienne version gardée dans la branche $reecrit)" "(repository history reorganized; old version kept in branch $reecrit)")"
+else
   echo "$(t "Nouveautés :" "What's new:")"; git log --format='  • %s' "$avant..HEAD"
 fi
 ./install.sh "$@"
 code=$?
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
-if [ "$code" = 0 ] && [ "$avant" != "$(git rev-parse HEAD)" ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
+if [ "$code" = 0 ] && [ "$avant" != "$(git rev-parse HEAD)" ] && [ -z "$reecrit" ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
   setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$avant" "$(git rev-parse HEAD)" >/dev/null 2>&1 < /dev/null &
 fi
 # Bilan après la mise à jour : seulement ce qui cloche (rien de plus si tout va bien)
