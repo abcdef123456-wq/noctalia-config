@@ -321,16 +321,20 @@ Item {
                             width: liste.width
                             height: contenu.implicitHeight + 24
                             radius: 18
-                            color: zc.containsMouse || choisie ? Couleurs.gris2 : Couleurs.carte
+                            color: survolCarte.hovered || choisie ? Couleurs.gris2 : Couleurs.carte
                             border.width: choisie ? 1.5 : 0; border.color: Couleurs.accent
                             Behavior on color { ColorAnimation { duration: 120 } }
                             scale: zc.pressed ? 0.98 : 1
                             Behavior on scale { SpringAnimation { spring: 6; damping: 0.45 } }
 
+                            // Survol de la carte par un HoverHandler : il reste vrai sur les boutons d'action. Avec le
+                            // survol du MouseArea, passer sur un bouton faisait disparaître la rangée, qui revenait aussitôt
+                            // (clignotement à chaque image : issue #3)
+                            HoverHandler { id: survolCarte }
+
                             MouseArea {
                                 id: zc
                                 anchors.fill: parent
-                                hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onClicked: e => {
                                     if (e.button === Qt.RightButton) { Notifs.fermer(carte.modelData); return }
@@ -353,10 +357,10 @@ Item {
                                 y: 12; spacing: 1
                                 Item {
                                     width: parent.width; height: 16
-                                    Texte { text: (groupe.replie && groupe.modelData.notifs.length > 1 ? "+" + (groupe.modelData.notifs.length - 1) + "  " : "") + Notifs.quand(carte.modelData, Etat.minute.getTime()); secondaire: true; font.pixelSize: 12; visible: !zc.containsMouse && !carte.choisie }
+                                    Texte { text: (groupe.replie && groupe.modelData.notifs.length > 1 ? "+" + (groupe.modelData.notifs.length - 1) + "  " : "") + Notifs.quand(carte.modelData, Etat.minute.getTime()); secondaire: true; font.pixelSize: 12; visible: !survolCarte.hovered && !carte.choisie }
                                     // Actions au survol : lue, reporter, masquer l'appli, répondre
                                     Row {
-                                        anchors.right: parent.right; spacing: 2; visible: zc.containsMouse || carte.choisie || carte.menu !== ""
+                                        anchors.right: parent.right; spacing: 2; visible: survolCarte.hovered || carte.choisie || carte.menu !== ""
                                         Repeater {
                                             model: [
                                                 { id: "lue", icone: "done_all", aide: Reglages.t("Marquer lue", "Mark as read"), visible: !carte.lue },
