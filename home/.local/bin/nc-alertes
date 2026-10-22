@@ -169,8 +169,17 @@ def main():
             envoyer(m, texte)
         elif action == "envoyer" and len(sys.argv) > 2 and sys.argv[2].strip():
             envoyer(m, " ".join(sys.argv[2:]))
+        elif action == "version":
+            # Une nouvelle version de noctalia-config (nc-maj verifier) : dès qu'elle est publiée, par Telegram.
+            # Code 2 si elle n'est pas partie (JARVIS injoignable…) : nc-maj réessaie au passage suivant.
+            if reglages().get("ALERTES_VERSION", "oui") == "non":
+                return 0
+            resume = " ".join(sys.argv[2:]).strip() or T("Des améliorations sont disponibles.", "Improvements are available.")
+            texte = T(f"🆕 Nouvelle version de noctalia-config : {resume}\nSur le PC : la notification « Mettre à jour », ou nc-maj.",
+                      f"🆕 New version of noctalia-config: {resume}\nOn the PC: the “Update” notification, or nc-update.")
+            return 0 if envoyer(m, texte) else 2
         else:
-            print("nc-alertes verifier | maj N | envoyer TEXTE", file=sys.stderr)
+            print("nc-alertes verifier | maj N | version RÉSUMÉ | envoyer TEXTE", file=sys.stderr)
             return 1
     except Exception as exc:     # jamais d'échec d'unité pour une alerte manquée
         print("nc-alertes : " + str(exc)[:300], file=sys.stderr)

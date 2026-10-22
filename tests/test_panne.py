@@ -186,6 +186,49 @@ class MinuteursHorsLigne(unittest.TestCase):
             g("init", "-q"); g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
             g("remote", "add", "origin", "https://127.0.0.1:9/x.git")     # injoignable, sans réseau
             (home / ".config/nc/depot").write_text(str(depot))
-            r = subprocess.run(["bash", str(REPO / "home/.local/bin/nc-maj"), "verifier"], env=dict(os.environ, HOME=str(home)),
+            r = subprocess.run(["bash", str(REPO / "home/.local/bin/nc-maj"), "verifier"],
+                               env=dict(os.environ, HOME=str(home), XDG_CACHE_HOME=str(home / ".cache")),
                                capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class VersionParTelegram(unittest.TestCase):
+    """Une nouvelle version de noctalia-config est aussi annoncée par Telegram (nc-alertes version), avant la
+    notification du bureau (qui attend un clic) ; pas partie, elle est retentée au passage suivant."""
+    def test_annonce_retentee_jusqu_a_ce_qu_elle_parte(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            origine, depot, home, faux = d / "origine.git", d / "depot", d / "home", d / "faux"
+            for x in (home / ".config/nc", home / ".local/bin", faux):
+                x.mkdir(parents=True)
+            run = lambda *a, **k: subprocess.run(list(a), capture_output=True, check=True, **k)
+            run("git", "init", "-q", "--bare", "-b", "main", str(origine))
+            run("git", "clone", "-q", str(origine), str(depot))
+            g = lambda *a: run("git", "-C", str(depot), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+            g("checkout", "-q", "-b", "main"); g("commit", "-q", "--allow-empty", "-m", "départ"); g("push", "-q", "origin", "main")
+            g("commit", "-q", "--allow-empty", "-m", "Nouvelle pastille ; détails"); g("push", "-q", "origin", "main")
+            g("reset", "-q", "--hard", "HEAD~1")
+            (home / ".config/nc/depot").write_text(str(depot))
+            alertes = home / ".local/bin/nc-alertes"
+            alertes.write_text('#!/bin/sh\necho "$*" >> "$HOME/alertes"; exit "$(cat "$HOME/code" 2>/dev/null || echo 0)"\n')
+            alertes.chmod(0o755)
+            (faux / "notify-send").write_text('#!/bin/sh\necho "$*" >> "$HOME/notifs"\n'); (faux / "notify-send").chmod(0o755)
+            env = dict(os.environ, HOME=str(home), PATH=f"{faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                       XDG_CACHE_HOME=str(home / ".cache"), XDG_CONFIG_HOME=str(home / ".config"))   # jamais le vrai cache
+            verifier = lambda: subprocess.run(["bash", str(REPO / "home/.local/bin/nc-maj"), "verifier"], env=env,
+                                              capture_output=True, text=True, timeout=60)
+            lire = lambda n: (home / n).read_text() if (home / n).exists() else ""
+            (home / "code").write_text("2")                       # JARVIS injoignable
+            self.assertEqual(verifier().returncode, 0)
+            self.assertEqual(lire("alertes").count("version Nouvelle pastille"), 1, "le résumé des nouveautés")
+            self.assertEqual(lire("notifs").count("Nouvelle version de la config"), 1)
+            verifier()
+            self.assertEqual(lire("alertes").count("version"), 2, "pas partie : retentée au passage suivant")
+            self.assertEqual(lire("notifs").count("Nouvelle version de la config"), 1, "le bureau ne l'annonce qu'une fois")
+            (home / "code").write_text("0")                       # partie
+            verifier(); verifier()
+            self.assertEqual(lire("alertes").count("version"), 3, "partie : plus rappelée")
+            (home / ".config/nc/reglages.conf").write_text("MAJ_VERIFIER=non\n")
+            (home / ".cache/nc/maj-telegram").unlink()
+            verifier()
+            self.assertEqual(lire("alertes").count("version"), 3, "MAJ_VERIFIER=non : rien")

@@ -1031,6 +1031,10 @@ REGLAGES = [
       L("Un service de ta session qui s'arrête en erreur.", "A session service that stops with an error.")),
     R("ALERTES_MAJ", "Agents IA (coucou)", L("Alerte Telegram : fin de mise à jour", "Telegram alert: update finished"), "ouinon", "oui",
       L("Quand nc-paquets a fini de mettre le système à jour.", "When nc-packages has finished updating the system.")),
+    R("ALERTES_VERSION", "Agents IA (coucou)", L("Alerte Telegram : nouvelle version de la config", "Telegram alert: new config version"),
+      "ouinon", "oui",
+      L("Dès qu'une nouvelle version de noctalia-config est publiée (vérifié toutes les heures), avec ses nouveautés.",
+        "As soon as a new noctalia-config version is published (checked every hour), with what's new.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
     R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
       "ouinon", "oui",
@@ -1105,8 +1109,8 @@ REGLAGES = [
         "With paru or yay: updating then goes through them (repos and AUR together).")),
     R("MAJ_VERIFIER", "Mises à jour", L("Prévenir des nouvelles versions de la config", "Notify about new versions of the config"),
       "ouinon", "oui",
-      L("Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les 6 h).",
-        "A notification with “Update” when a new version is on GitHub (checked every 6 h).")),
+      L("Une notification avec « Mettre à jour » quand une nouvelle version est sur GitHub (vérifié toutes les heures).",
+        "A notification with “Update” when a new version is on GitHub (checked every hour).")),
     # Captures
     R("CAPTURES_DOSSIER", "Captures", L("Dossier des captures d'écran", "Screenshot folder"), "dossier", "auto",
       L("Automatique : Captures, dans ton dossier Images.", "Automatic: Captures, in your Pictures folder.")),

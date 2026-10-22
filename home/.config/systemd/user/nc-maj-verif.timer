@@ -1,9 +1,9 @@
 [Unit]
-Description=Cherche une nouvelle version de noctalia-config toutes les 6 heures
+Description=Cherche une nouvelle version de noctalia-config toutes les heures (une requête légère)
 
 [Timer]
-OnStartupSec=15min
-OnUnitActiveSec=6h
+OnStartupSec=3min
+OnUnitActiveSec=1h
 RandomizedDelaySec=10min
 
 [Install]

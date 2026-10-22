@@ -5,7 +5,8 @@
 #   nc-maj                 mise à jour complète (une question avant chaque étape système pas encore faite)
 #   nc-maj --no-system     seulement ta session
 #   nc-maj verifier        y a-t-il une nouvelle version ? Une notification avec « Mettre à jour » (une fois par
-#                          version ; lancé toutes les 6 h par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non)
+#                          version ; lancé toutes les heures par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non ;
+#                          et par Telegram si « Alertes Telegram » : nc-alertes version, réessayé tant qu'il n'est pas parti)
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
@@ -24,8 +25,12 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   # À jour : la version publiée est déjà ici (ou plus ancienne que la tienne)
   git merge-base --is-ancestor "$distant" HEAD 2>/dev/null && exit 0
   annonce="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
-  [ "$(cat "$annonce" 2>/dev/null)" = "$distant" ] && exit 0  # déjà annoncée
-  mkdir -p "$(dirname "$annonce")"; echo "$distant" > "$annonce"
+  telegram="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-telegram"   # annoncée par JARVIS (Telegram), seulement si partie
+  deja_bureau=0; [ "$(cat "$annonce" 2>/dev/null)" = "$distant" ] && deja_bureau=1
+  deja_tg=0; [ "$(cat "$telegram" 2>/dev/null)" = "$distant" ] && deja_tg=1
+  [ -x "$HOME/.local/bin/nc-alertes" ] || deja_tg=1
+  [ "$deja_bureau" = 1 ] && [ "$deja_tg" = 1 ] && exit 0      # déjà annoncée partout
+  mkdir -p "$(dirname "$annonce")"
   # Les grosses nouveautés : la nouvelle version est téléchargée (pas installée) pour lire ses messages de mise à jour ;
   # chacun ramené à son idée principale (avant « ; », sans les parenthèses), les 4 plus récents
   nouveau=""
@@ -45,6 +50,13 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
 ' 2>/dev/null || true)"
   fi
   [ -n "$nouveau" ] || nouveau="$(t "Des améliorations sont disponibles." "Improvements are available.")"
+  # Par Telegram d'abord (la notification du bureau attend un clic) ; pas partie (JARVIS injoignable) : au passage
+  # suivant, même si le bureau l'a déjà annoncée. Rien sans « Alertes Telegram » (nc-alertes sort tout de suite).
+  if [ "$deja_tg" = 0 ] && timeout 90 "$HOME/.local/bin/nc-alertes" version "$nouveau" >/dev/null 2>&1; then
+    echo "$distant" > "$telegram"
+  fi
+  [ "$deja_bureau" = 1 ] && exit 0
+  echo "$distant" > "$annonce"
   choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
     -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
     "$(t "Nouvelle version de la config" "New version of the config")" "$nouveau" 2>/dev/null || true)"
