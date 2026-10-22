@@ -66,6 +66,8 @@ class FicheEditable(unittest.TestCase):
             (root / "catalogue.json").write_text(json.dumps(catalogue(), ensure_ascii=False))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
+            (b / "nc-apps").write_text('#!/bin/sh\necho \'[{"id": "firefox", "name": "Firefox"}, {"id": "kitty", "name": "kitty"}]\'\n')
+            (b / "nc-apps").chmod(0o755)
             (q / "shell.qml").write_text('''import QtQuick
 import Quickshell
 ShellRoot {
@@ -110,6 +112,17 @@ ShellRoot {
         self.assertEqual((actions[2]["action"], actions[2]["mien"], actions[2]["nom"]), ("renommer", "SUPER + B", "Jeux vidéo"))
         captures = [a for a in appels if a[0] == "capture"]
         self.assertEqual(captures, [["capture"], ["capture", "fin"]], "Hyprland retrouve toujours ses raccourcis")
+
+    def test_suggestions_d_applis(self):
+        r, appels = self.executer('''
+  if (etape === 1) { fiche.edition = true; cliquer("nc-fiche-ajouter"); etape++; return }
+  if (etape === 2) { if (!fiche.applis.length) return; trouver(fiche.contentItem, "nc-fiche-cible").texte = "fire"; etape++; return }
+  if (etape === 3) { verifier(trouver(fiche.contentItem, "nc-fiche-appli-kitty") === null || !trouver(fiche.contentItem, "nc-fiche-appli-kitty").visible, "kitty ne correspond pas")
+                     cliquer("nc-fiche-appli-firefox"); verifier(trouver(fiche.contentItem, "nc-fiche-cible").texte === "firefox", "appli choisie")
+                     trouver(fiche.contentItem, "nc-fiche-cible").texte = "bureau 3"; verifier(fiche.suggestions("bureau 3").length === 0, "pas d'appli pour un bureau")
+                     etape++; return }
+  if (etape === 4) Qt.quit()''')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_ajouter_et_remplacer(self):
         r, appels = self.executer('''

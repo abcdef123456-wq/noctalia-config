@@ -26,6 +26,19 @@ PanelWindow {
     property var tentative: null                    // dernière capture envoyée : pour « Remplacer » si les touches sont prises
     property var conflit: null
     property bool ajout: false                      // la petite carte « + Ajouter » est ouverte
+    property var applis: []                         // pour les suggestions de « + Ajouter » (nc-apps list, lu à l'ouverture)
+    onAjoutChanged: if (ajout && !applis.length && !lectureApplis.running) lectureApplis.running = true
+    Process {
+        id: lectureApplis
+        command: [Raccourcis.bin + "nc-apps", "list"]
+        stdout: StdioCollector { onStreamFinished: { try { fiche.applis = JSON.parse(text) } catch (e) { fiche.applis = [] } } }
+    }
+    // Les applis dont le nom ou l'identifiant contient ce qui est tapé (6 au plus)
+    function suggestions(t) {
+        t = String(t || "").trim().toLowerCase()
+        if (t.length < 2 || /^(bureau|desktop|ile|île|island)\b/.test(t)) return []
+        return applis.filter(a => String(a.name || "").toLowerCase().indexOf(t) >= 0 || String(a.id || "").toLowerCase().indexOf(t) >= 0).slice(0, 6)
+    }
     readonly property bool verre: Reglages.val("FENETRES_FLOU", "oui") !== "non" && !Reglages.sobre
     readonly property real opaciteFond: verre ? 0.8 : 0.92
     readonly property real largeurEcran: fiche.screen ? fiche.screen.width : 1600
@@ -374,13 +387,32 @@ PanelWindow {
         id: carteAjout
         visible: fiche.ajout && !Raccourcis.capture
         anchors.centerIn: parent
-        width: 440; height: 196; radius: 22
+        width: 440; height: colonneAjout.height + 36; radius: 22
         color: Qt.alpha(Couleurs.fond, 0.94); border.width: 1; border.color: Qt.alpha(Couleurs.accent, 0.5)
         MouseArea { anchors.fill: parent }
         Column {
+            id: colonneAjout
             x: 22; y: 18; width: parent.width - 44; spacing: 10
             Texte { text: Reglages.t("Nouveau raccourci", "New shortcut"); font.pixelSize: 15; font.weight: Font.Bold }
             Champ { id: champCible; objectName: "nc-fiche-cible"; indice: Reglages.t("Une appli (firefox), « bureau 3 », « ile son » ou une commande", "An app (firefox), “bureau 3”, “ile son” or a command") }
+            // Tes applis qui correspondent : un clic les choisit (le raccourci ira à leur fenêtre, sinon les lancera)
+            Flow {
+                width: parent.width; spacing: 6
+                visible: fiche.suggestions(champCible.texte).length > 0
+                Repeater {
+                    model: fiche.suggestions(champCible.texte)
+                    Rectangle {
+                        required property var modelData
+                        height: 26; width: libAppli.implicitWidth + 20; radius: 13
+                        color: zAppli.containsMouse ? Couleurs.gris3 : Couleurs.gris2
+                        Texte { id: libAppli; anchors.centerIn: parent; text: modelData.name || modelData.id; font.pixelSize: 12 }
+                        MouseArea {
+                            id: zAppli; objectName: "nc-fiche-appli-" + modelData.id; anchors.fill: parent; hoverEnabled: true
+                            onClicked: { champCible.texte = modelData.id; if (!champNomAjout.texte) champNomAjout.texte = modelData.name || "" }
+                        }
+                    }
+                }
+            }
             Champ { id: champNomAjout; indice: Reglages.t("Son nom (facultatif)", "Its name (optional)") }
             Rectangle {
                 width: libChoisir.implicitWidth + 28; height: 32; radius: 16
