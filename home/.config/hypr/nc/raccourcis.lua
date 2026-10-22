@@ -182,8 +182,16 @@ end
 
 local pas = { [113] = { -40, 0 }, [114] = { 40, 0 }, [111] = { 0, -40 }, [116] = { 0, 40 } }
 for code, d in pairs(pas) do
-    touche(SUPER .. " + CTRL + code:" .. code, hl.dsp.window.resize({ x = d[1], y = d[2], relative = true }),
-        trad("Fenêtres|Agrandir / rétrécir la fenêtre", "Grow / shrink the window"), { repeating = true })
+    -- Sur un bureau rangé par l'IA (disposition nc-zones), la découpe bouge par un message de disposition
+    touche(SUPER .. " + CTRL + code:" .. code, function()
+        local w = hl.get_active_window()
+        local ws = w and w.workspace and w.workspace.id
+        if ws and nc.zones and nc.zones[ws] and not w.floating then
+            hl.dispatch(hl.dsp.layout("resize " .. d[1] .. " " .. d[2]))
+        else
+            hl.dispatch(hl.dsp.window.resize({ x = d[1], y = d[2], relative = true }))
+        end
+    end, trad("Fenêtres|Agrandir / rétrécir la fenêtre", "Grow / shrink the window"), { repeating = true })
 end
 
 -- Épingler : la fenêtre devient flottante et reste au même endroit sur tous les bureaux (même touche pour libérer)

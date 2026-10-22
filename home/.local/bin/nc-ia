@@ -1793,12 +1793,13 @@ def lua_fenetre(v):
              "bureau_nommer": f"hl.dsp.workspace.rename({{ workspace = {g.get('bureau')}, name = [[{g.get('nom', '')}]] }})"}[o]]
 
 
-def ensemble(lua):
+def ensemble(lua, apres=()):
     """Toutes les commandes dans le même appel : Hyprland les applique dans la même image, et chaque fenêtre glisse
-    d'un seul mouvement vers sa place (une par une, elle sautait : libre au centre, puis taille, puis place)."""
-    if not lua:
+    d'un seul mouvement vers sa place (une par une, elle sautait : libre au centre, puis taille, puis place).
+    apres : du Lua tel quel, à la fin (poser les zones d'un bureau)."""
+    if not lua and not apres:
         return True
-    code, t = sortie_cmd(["hyprctl", "eval", " ".join(f"hl.dispatch({l})" for l in lua)])
+    code, t = sortie_cmd(["hyprctl", "eval", " " + " ".join([f"hl.dispatch({l})" for l in lua] + list(apres))])
     return code == 0 and "error" not in t.lower()
 
 
@@ -2001,6 +2002,42 @@ def photo_fenetres():
                 bureaux={str(x["id"]): x.get("name") for x in b if x.get("id", 0) > 0})
 
 
+def arbre_zones(zones):
+    """{adresse: (x, y, largeur, hauteur)} en pourcentages → l'arbre de découpes de la disposition nc-zones
+    (hypr/nc/zones.lua) : une coupe verticale ou horizontale qu'aucune zone ne traverse, sa position relative r, puis
+    pareil de chaque côté. None si les zones ne se découpent pas ainsi (chevauchements, disposition en moulinet)."""
+    def couper(adrs, bx, by, bw, bh):
+        if len(adrs) == 1:
+            return {"f": adrs[0]}
+        for sens, debut, fin, b0, bt in (("v", 0, 2, bx, bw), ("h", 1, 3, by, bh)):
+            positions = sorted({zones[a][debut] + zones[a][fin] for a in adrs} | {zones[a][debut] for a in adrs})
+            for c in positions:
+                if not b0 < c < b0 + bt:
+                    continue
+                a_ = [a for a in adrs if zones[a][debut] + zones[a][fin] <= c]
+                b_ = [a for a in adrs if zones[a][debut] >= c]
+                if a_ and b_ and len(a_) + len(b_) == len(adrs):
+                    boite_a = (bx, by, c - bx, bh) if sens == "v" else (bx, by, bw, c - by)
+                    boite_b = (c, by, bx + bw - c, bh) if sens == "v" else (bx, c, bw, by + bh - c)
+                    ga, gb = couper(a_, *boite_a), couper(b_, *boite_b)
+                    if ga and gb:
+                        return {"sens": sens, "r": round((c - b0) / bt, 4), "a": ga, "b": gb}
+        return None
+    adrs = sorted(zones, key=lambda a: (zones[a][0], zones[a][1]))
+    return couper(adrs, 0, 0, 100, 100) if adrs else None
+
+
+def lua_arbre(n):
+    if "f" in n:
+        return '{ f = "%s" }' % n["f"]
+    return '{ sens = "%s", r = %s, a = %s, b = %s }' % (n["sens"], n["r"], lua_arbre(n["a"]), lua_arbre(n["b"]))
+
+
+def zones_dispo():
+    """La disposition nc-zones est-elle chargée dans Hyprland (hl.layout.register, Hyprland récent) ?"""
+    return sortie_cmd(["hyprctl", "eval", "if not (nc and nc.zones_dispo) then error('absent') end"], 5)[0] == 0
+
+
 def ranger(bureau_seul):
     sync = ["-h", "string:x-canonical-private-synchronous:nc-rangement"]
 
@@ -2062,13 +2099,36 @@ def ranger(bureau_seul):
         dire(titre, (str(d.get("reponse") or "") or T("Rien à changer : c'est déjà bien rangé.", "Nothing to change: already tidy."))[:300])
         return 0
     avant = photo_fenetres()
-    lua, faits = [], []
+    lua, faits, apres_lua = [], [], []
+    # Zones : les fenêtres restent en tuiles, dans la disposition nc-zones du bureau (raccourcis, ouverture, fermeture
+    # marchent comme ailleurs) ; sans elle (Hyprland plus ancien), elles deviennent libres et sont posées à leur place
+    zonees = [v for v in valides if v["outil"] == "fenetre_zone"]
+    if zonees and zones_dispo():
+        cible = {v["args"]["adresse"]: int(v["args"]["bureau"]) for v in valides if v["outil"] == "fenetre_bureau"}
+        par_bureau = {}
+        for v in zonees:
+            adr = v["args"]["adresse"]
+            b = cible.get(adr, (fenetres.get(adr, {}).get("workspace") or {}).get("id"))
+            par_bureau.setdefault(b, {})[adr] = tuple(int(v["args"][k]) for k in ("x", "y", "largeur", "hauteur"))
+        for b, zones in par_bureau.items():
+            arbre = arbre_zones(zones)
+            if not arbre or not isinstance(b, int):
+                continue                                 # zones qui ne se découpent pas : ce bureau reste comme il est
+            for adr in zones:
+                f = fenetres.get(adr, {})
+                if f.get("fullscreen"):
+                    lua.append(f"hl.dsp.window.fullscreen({{ action = 'unset', window = 'address:{adr}' }})")
+                if f.get("floating"):
+                    lua.append(f"hl.dsp.window.float({{ action = 'unset', window = 'address:{adr}' }})")
+            apres_lua.append(f"nc.zones_poser({b}, {lua_arbre(arbre)})")
+            faits.append(T(f"Bureau {b} : {len(zones)} fenêtre(s) en zones", f"Desktop {b}: {len(zones)} window(s) in zones"))
+        valides = [v for v in valides if v["outil"] != "fenetre_zone"]
     for v in valides:
         l = lua_fenetre(v)
         if l:
             lua += l
             faits.append(v["libelle"])
-    if not faits or not ensemble(lua):
+    if not faits or not ensemble(lua, apres_lua):
         dire(titre, T("Rien n'a pu être déplacé.", "Nothing could be moved."))
         return 1
     if bureau is not None:
@@ -2081,7 +2141,8 @@ def ranger(bureau_seul):
             ANNULER_RANGEMENT.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(ANNULER_RANGEMENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(dict(avant, portee=bureau, apres=photo_fenetres()), f)
+                json.dump(dict(avant, portee=bureau, apres=photo_fenetres(),
+                               zones=[int(l.split("(")[1].split(",")[0]) for l in apres_lua]), f)
         except OSError:
             pass
     corps = " · ".join(faits[:4]) + (T(f" (+ {len(faits) - 4} autres)", f" (+ {len(faits) - 4} more)") if len(faits) > 4 else "")
@@ -2103,9 +2164,9 @@ def inchange(apres, maintenant, bureau):
         y = m[adr]
         if (x["bureau"], x["libre"], bool(x["plein"])) != (y["bureau"], y["libre"], bool(y["plein"])):
             return False
-        if x["libre"] and any(abs(int(u) - int(w)) > 6 for u, w in zip((x.get("at") or []) + (x.get("taille") or []),
-                                                                       (y.get("at") or []) + (y.get("taille") or []))):
-            return False
+        if any(abs(int(u) - int(w)) > 6 for u, w in zip((x.get("at") or []) + (x.get("taille") or []),
+                                                        (y.get("at") or []) + (y.get("taille") or []))):
+            return False                                 # déplacée ou redimensionnée depuis (en tuiles aussi)
     return True
 
 
@@ -2134,7 +2195,9 @@ def annuler_rangement():
     for n, nom_ in avant.get("bureaux", {}).items():
         if n.isdigit() and maintenant["bureaux"].get(n) not in (None, nom_) and isinstance(nom_, str) and "]]" not in nom_:
             lua.append(f"hl.dsp.workspace.rename({{ workspace = {int(n)}, name = [[{nom_}]] }})")
-    ensemble(lua)                                        # d'un seul mouvement, comme le rangement
+    # Les bureaux mis en zones reprennent leur disposition habituelle (et leur ancien arbre)
+    zones = [f"nc.zones_retirer({int(b)})" for b in avant.get("zones", []) if str(b).lstrip("-").isdigit()]
+    ensemble(lua, zones)                                 # d'un seul mouvement, comme le rangement
     ANNULER_RANGEMENT.unlink(missing_ok=True)
     return 0
 

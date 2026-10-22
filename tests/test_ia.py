@@ -593,7 +593,7 @@ class IA(unittest.TestCase):
         self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", a)
         self.assertFalse((self.home / "cache/nc/rangement-avant.json").exists())
         # Tout d'un coup : un seul appel à Hyprland, dans la même image
-        self.assertEqual(a.count("hyprctl eval hl.dispatch(hl.dsp.window.move({ workspace = 1"), 1)
+        self.assertEqual(a.count("hyprctl eval  hl.dispatch(hl.dsp.window.move({ workspace = 1"), 1)
         # Rappuyer sans rien avoir changé : la disposition d'avant revient, sans IA
         self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
         self.journal.unlink()
@@ -617,12 +617,12 @@ class IA(unittest.TestCase):
         self.assertFalse(Faux.requetes, "IA coupée : rien ne part")
 
     def test_ranger_ce_bureau_en_zones_libres(self):
-        """Super + Ctrl + O : la meilleure disposition, sans suivre les tuiles de Hyprland : chaque fenêtre dans sa zone
-        (pourcentages de la place sous la barre, marges de Hyprland déduites), devenue libre."""
+        """Super + Ctrl + O sur un Hyprland sans dispositions en Lua : chaque fenêtre dans sa zone (pourcentages de la
+        place sous la barre, marges de Hyprland déduites), devenue libre."""
         clients = [{"address": "0xa1", "class": "code", "title": "projet", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [12, 54], "size": [780, 934]},
                    {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [800, 54], "size": [780, 934]}]
         ecran = [{"id": 0, "x": 0, "y": 0, "width": 2560, "height": 1600, "scale": 1.6, "transform": 0, "reserved": [0, 42, 0, 0], "focused": True}]
-        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$*" in *zones_dispo*) exit 7;; esac; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
                                   'monitors) echo \'' + json.dumps(ecran) + '\';; getoption) case "$2" in *gaps_out) echo \'{"css": "10 10 10 10"}\';; '
                                   '*) echo \'{"css": "4 4 4 4"}\';; esac;; workspaces) echo \'[{"id": 2, "name": "2", "windows": 2}]\';; '
                                   'activeworkspace) echo \'{"id": 2}\';; esac')
@@ -643,6 +643,45 @@ class IA(unittest.TestCase):
         self.assertIn("hl.dsp.window.resize({ x = 628, y = 938, window = 'address:0xb2' })", a)
         self.assertIn("hl.dsp.window.move({ x = 962, y = 52, window = 'address:0xb2' })", a)
         self.assertEqual(a.count("window.move({ x ="), 2, "une zone qui sort de l'écran est refusée")
+
+    def test_ranger_ce_bureau_en_zones_en_tuiles(self):
+        """Super + Ctrl + O : les zones de l'IA deviennent la disposition nc-zones du bureau (arbre de découpes) ; les
+        fenêtres restent en tuiles, les raccourcis habituels marchent (avant : libres, hors du tuilage)."""
+        clients = [{"address": "0xa1", "class": "code", "title": "projet", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": True, "fullscreen": 0, "at": [12, 54], "size": [780, 934]},
+                   {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [800, 54], "size": [780, 450]},
+                   {"address": "0xc3", "class": "discord", "title": "Discord", "mapped": True, "workspace": {"id": 2}, "monitor": 0, "floating": False, "fullscreen": 0, "at": [800, 510], "size": [780, 450]}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'monitors) echo \'[{"id": 0, "width": 2560, "height": 1600, "scale": 1.6, "focused": true}]\';; '
+                                  'workspaces) echo \'[{"id": 2, "name": "2", "windows": 3}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"; case "$*" in *annuler=*) echo annuler;; esac')
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [
+            {"outil": "fenetre_zone", "args": {"adresse": "0xa1", "x": 0, "y": 0, "largeur": 60, "hauteur": 100}},
+            {"outil": "fenetre_zone", "args": {"adresse": "0xb2", "x": 60, "y": 0, "largeur": 40, "hauteur": 50}},
+            {"outil": "fenetre_zone", "args": {"adresse": "0xc3", "x": 60, "y": 50, "largeur": 40, "hauteur": 50}}]})
+        r = self.lancer("organiser", "--bureau")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        tout = self.appels()
+        a = next(l for l in tout.splitlines() if "nc.zones_poser" in l)       # l'appel du rangement
+        self.assertIn('nc.zones_poser(2, { sens = "v", r = 0.6, a = { f = "0xa1" }, b = { sens = "h", r = 0.5, a = { f = "0xb2" }, '
+                      'b = { f = "0xc3" } } })', a)
+        self.assertIn("hl.dsp.window.float({ action = 'unset', window = 'address:0xa1' })", a, "remise en tuiles")
+        self.assertNotIn("action = 'set'", a, "plus jamais libre")
+        self.assertNotIn("window.move({ x =", a)
+        self.assertIn("Bureau 2 : 3 fenêtre(s) en zones", tout)
+        self.assertIn("nc.zones_retirer(2)", tout, "« Annuler » rend la disposition habituelle")
+
+    def test_zones_en_arbre_de_decoupes(self):
+        import importlib.machinery, importlib.util
+        l = importlib.machinery.SourceFileLoader("ncia_zones", str(BIN / "nc-ia"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncia_zones", l)); l.exec_module(m)
+        self.assertEqual(m.arbre_zones({"a": (0, 0, 100, 100)}), {"f": "a"})
+        self.assertEqual(m.arbre_zones({"a": (0, 0, 50, 100), "b": (50, 0, 50, 60), "c": (50, 60, 50, 40)}),
+                         {"sens": "v", "r": 0.5, "a": {"f": "a"}, "b": {"sens": "h", "r": 0.6, "a": {"f": "b"}, "b": {"f": "c"}}})
+        # Des zones avec des marges ou des trous se découpent quand même
+        self.assertEqual(m.arbre_zones({"a": (0, 0, 48, 100), "b": (52, 0, 48, 100)})["sens"], "v")
+        # Un moulinet (aucune coupe ne traverse sans couper une zone) : rien
+        self.assertIsNone(m.arbre_zones({"a": (0, 0, 60, 40), "b": (60, 0, 40, 60), "c": (40, 60, 60, 40), "d": (0, 40, 40, 60),
+                                         "e": (40, 40, 20, 20)}))
 
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()

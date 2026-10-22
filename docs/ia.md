@@ -119,9 +119,13 @@ Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit do
 
 - **fenêtres et bureaux** : **Super + Maj + O** range toutes les fenêtres (regroupées par activité sur des
   bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché (l'IA ne voit alors que lui, et rien
-  ne peut en sortir) : là, l'IA cherche la disposition la plus utile sans suivre les tuiles automatiques de Hyprland —
-  chaque fenêtre posée dans sa zone de l'écran (par exemple l'éditeur sur 60 % à gauche, le navigateur sur 40 % à
-  droite), sous la barre et avec les marges de Hyprland. Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
+  ne peut en sortir) : là, l'IA cherche la disposition la plus utile sans suivre le découpage automatique de Hyprland —
+  chaque fenêtre dans sa zone de l'écran (par exemple l'éditeur sur 60 % à gauche, le navigateur sur 40 % à droite).
+  Les fenêtres restent **en tuiles** : le bureau prend la disposition « zones » (hypr/nc/zones.lua), un arbre de
+  découpes aux proportions choisies par l'IA. Super + flèches, Super + Maj + flèches (échanger), Super + Ctrl +
+  flèches (agrandir, rétrécir), changer le sens de la division, ouvrir ou fermer une fenêtre marchent comme ailleurs ;
+  le redimensionnement à la souris ne fait rien sur ce bureau. Après `hyprctl reload`, le bureau reprend sa
+  disposition habituelle. Hyprland sans dispositions en Lua : les fenêtres deviennent libres, posées à leur place. Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
   si « L'IA peut agir » est coupé — seulement des fenêtres et des bureaux, chaque action revérifiée — puis une
   notification de l'île dit ce qui a bougé, avec **Annuler** (bureau, état libre ou plein écran, place et nom des
   bureaux remis comme avant). Toutes les fenêtres bougent en même temps, d'un seul glissement. **Rappuyer** sur le

@@ -77,6 +77,7 @@ require("nc.raccourcis")
 require("nc.regles")
 require("nc.energie")
 require("nc.automatismes")
+nc.charger("nc.zones")          -- la disposition des bureaux rangés par l'IA (hl.layout.register, si Hyprland l'a)
 
 -- Tes réglages personnels, s'il y en a
 local perso = os.getenv("HOME") .. "/.config/hypr/perso.lua"
