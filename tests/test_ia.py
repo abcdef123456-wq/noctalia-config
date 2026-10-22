@@ -613,6 +613,7 @@ class IA(unittest.TestCase):
         avant_f.write_text(json.dumps({"paquets": [{"nom": "linux", "avant": "6.1", "apres": "6.2", "important": True, "source": "depot"}]}))
         self.lancer("rapport-maj", "systeme", str(avant_f))
         self.assertEqual(json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())["details"], ["★ linux 6.1 → 6.2"])
+        self.assertIn("Nouveau noyau : oui", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False), "le fait, donné à l'IA")
         # En Économie sur batterie (automatique), sans connexion : rien de plus que d'habitude
         (self.home / "cache/nc/rapports/config.json").unlink()
         Faux.requetes.clear()
@@ -629,6 +630,13 @@ class IA(unittest.TestCase):
         self.lancer("rapport-maj", "systeme", str(avant_f), env_plus={"NC_IA_EN_LIGNE": "0"})
         d = json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())
         self.assertEqual(d["resume"], "1 paquet(s) mis à jour.\n- **linux 6.1 → 6.2**\nRedémarre pour utiliser le nouveau noyau.")
+        # Revue RPT-01 : linux-firmware (ou les en-têtes) n'est pas un noyau, sans IA comme avec
+        avant_f.write_text(json.dumps({"paquets": [{"nom": "linux-firmware", "avant": "1", "apres": "2", "important": True, "source": "depot"},
+                                                   {"nom": "linux-api-headers", "avant": "1", "apres": "2", "source": "depot"}]}))
+        self.lancer("rapport-maj", "systeme", str(avant_f), env_plus={"NC_IA_EN_LIGNE": "0"})
+        self.assertNotIn("noyau", json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())["resume"])
+        self.lancer("rapport-maj", "systeme", str(avant_f))
+        self.assertIn("Nouveau noyau : non", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
 
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):

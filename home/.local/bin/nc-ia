@@ -1845,6 +1845,14 @@ def details_systeme(fichier):
     return res
 
 
+NOYAU = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kernel(-core)?)$")    # comme nc-paquets
+
+
+def noyau_mis_a_jour(details):
+    """Un vrai noyau dans la liste (pas linux-firmware ni linux-api-headers : revue RPT-01)."""
+    return any(NOYAU.match(d.removeprefix("★ ").split(" ", 1)[0]) for d in details)
+
+
 def resume_sans_ia(genre, details):
     """Le rapport sans IA (coupée, en pause, injoignable) : les faits seulement, en quelques lignes."""
     if genre == "config":
@@ -1854,7 +1862,7 @@ def resume_sans_ia(genre, details):
     importants = [d[2:] for d in details if d.startswith("★ ")]
     l = [T(f"{len(details)} paquet(s) mis à jour.", f"{len(details)} package(s) updated.")]
     l += [f"- **{x}**" for x in importants[:5]]
-    if any(re.match(r"(linux|kernel)\S*\s", x) for x in importants):
+    if noyau_mis_a_jour(details):
         l.append(T("Redémarre pour utiliser le nouveau noyau.", "Restart to use the new kernel."))
     return "\n".join(l)
 
@@ -1897,7 +1905,11 @@ def rapport_maj(genre, args):
                        "plain English, what matters: kernel, graphics drivers, Hyprland and the desktop, browser, big "
                        "apps; say whether a restart is needed; ignore libraries of no interest to the user.")
     try:
-        rep, ident = demander("\n".join(details), "texte", consigne_=consigne_r, sortie=lambda m: None)
+        texte = "\n".join(details)
+        if genre != "config":             # le fait, plutôt que de laisser l'IA deviner d'après « linux-firmware »
+            texte += "\n\n" + (T("Nouveau noyau : oui (redémarrer pour l'utiliser).", "New kernel: yes (restart to use it).")
+                               if noyau_mis_a_jour(details) else T("Nouveau noyau : non.", "New kernel: no."))
+        rep, ident = demander(texte, "texte", consigne_=consigne_r, sortie=lambda m: None)
     except ErreurIA:
         ecrire_rapport(genre, details, resume_sans_ia(genre, details))
         return 0
