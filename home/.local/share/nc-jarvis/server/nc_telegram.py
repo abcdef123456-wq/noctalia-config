@@ -86,7 +86,7 @@ def _horodatage(date):
 def autorise(message, verifier=None):
     """L'avis de retard ne part qu'à un utilisateur de la liste blanche : un inconnu qui a écrit pendant l'arrêt
     n'apprend pas que le bot est tenu par quelqu'un (revue SRV-02). verifier : la fonction du bot (tb._is_allowed) ;
-    sans elle, TELEGRAM_ALLOWED_USER_IDS (liste vide : comme le bot, qui répond alors à tous)."""
+    sans elle, TELEGRAM_ALLOWED_USER_IDS, avec la même règle que le bot : liste vide = personne, sauf ALLOW_ALL_USERS."""
     auteur = getattr(getattr(message, "from_user", None), "id", None)
     if verifier is not None:
         try:
@@ -95,7 +95,7 @@ def autorise(message, verifier=None):
             return False
     liste = {x.strip() for x in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if x.strip()}
     if not liste:
-        return True
+        return os.environ.get("ALLOW_ALL_USERS", "").strip().lower() in ("1", "true", "yes", "oui", "on")
     return auteur is not None and str(auteur) in liste
 
 

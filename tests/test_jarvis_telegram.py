@@ -154,7 +154,8 @@ class Rattrapage(unittest.TestCase):
     def test_messages_en_attente_traites_dans_l_ordre_avec_prefixe(self):
         bot = Bot([Update(10, Message("déjà traité", self.avant)), Update(11, Message("bonjour jarvis", self.avant)),
                    Update(12, Message("/rappels", self.avant)), Update(13, None), Update(14, Message("tout neuf", self.pendant))])
-        with self.assertLogs("nc_telegram", level="INFO") as journal:
+        with self.assertLogs("nc_telegram", level="INFO") as journal, \
+                mock.patch.dict("os.environ", {"TELEGRAM_ALLOWED_USER_IDS": "", "ALLOW_ALL_USERS": "true"}):
             n, app = self.rattraper(bot, offset=11)
         self.assertEqual(n, 2, "deux messages arrivés pendant l'arrêt (la commande comprise, pas celui déjà traité ni le nouveau)")
         heure = self.m.quand(self.avant)
@@ -187,6 +188,12 @@ class Rattrapage(unittest.TestCase):
             n, app = self.rattraper(bot)
         self.assertEqual([c for c, _ in bot.envoyes], [7])
         self.assertEqual(len(app.traites), 2, "le message de l'inconnu passe quand même à upstream, qui décide")
+        # Liste vide : personne, comme le bot upstream (fail-closed), sauf ALLOW_ALL_USERS
+        bot = Bot([Update(1, Message("moi", self.avant, chat=7, auteur=7))])
+        with mock.patch.dict("os.environ", {"TELEGRAM_ALLOWED_USER_IDS": "", "ALLOW_ALL_USERS": ""}):
+            self.chemin.unlink(missing_ok=True)
+            self.rattraper(bot)
+        self.assertEqual(bot.envoyes, [])
 
     def test_ordres_du_pc_recus_pendant_l_arret_ignores(self):
         """Revue SRV-03 : « /nc ecran externe » puis « /nc oui » envoyés PC éteint étaient exécutés au démarrage."""
