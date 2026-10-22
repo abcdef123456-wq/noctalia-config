@@ -354,14 +354,22 @@ Singleton {
         command: [a.bin + "nc-ia", "quelle", "--chat", "--json"]
         stdout: StdioCollector { onStreamFinished: { try { var d = JSON.parse(text); a.nomChat = d.nom || ""; a.agentChat = d.agent || "" } catch (e) {} } }
     }
-    function ajouter(role, texte) {
-        var m = messages.concat([{role: role, texte: texte, num: ++dernierId}]).slice(-24)
+    // Choix proposés par JARVIS (champ choices de la réponse, issue #7) : gardés avec son message ; choixFait : le libellé
+    // cliqué (les pastilles de ce message ne servent plus)
+    function nettoyerChoix(c) {
+        return (Array.isArray(c) ? c : []).filter(x => typeof x === "string" && x.trim() !== "")
+            .map(x => x.trim().slice(0, 80)).filter((x, i, l) => l.indexOf(x) === i).slice(0, 5)
+    }
+    function ajouter(role, texte, choix) {
+        var m = messages.concat([{role: role, texte: texte, num: ++dernierId, choix: nettoyerChoix(choix), choixFait: ""}]).slice(-24)
         var total = m.reduce((n, x) => n + x.texte.length, 0)
         while (total > 48000 && m.length > 1) total -= m.shift().texte.length
         messages = m
     }
-    function envoyer() {
-        var q = brouillon.trim()
+    // texte : un choix cliqué sous une réponse (envoyé tel quel, le brouillon reste) ; sinon le brouillon
+    function envoyer(texte) {
+        var duBrouillon = typeof texte !== "string"
+        var q = (duBrouillon ? brouillon : texte).trim()
         if (enCours || ecritureReglagesEnCours || !q) return
         if (q.length > 8000) {
             erreur = Reglages.t("8 000 caractères maximum.", "8,000 characters maximum.")
@@ -375,7 +383,7 @@ Singleton {
         code = -1
         enCours = true
         ajouter("vous", q)
-        brouillon = ""
+        if (duBrouillon) brouillon = ""
         requete.stdinEnabled = true
         requete.running = true
         demarrage.restart()
@@ -388,7 +396,7 @@ Singleton {
         var estReset = question.startsWith("/reset") || question.startsWith("/clear") || question.startsWith("/nouveau")
         if (code === 0 && r && r.ok === true && typeof r.text === "string" && r.text.length) {
             if (estReset) messages = []
-            ajouter("assistant", r.text.slice(0, 16000) + (r.truncated ? Reglages.t("\n\n[Réponse abrégée dans l’île]", "\n\n[Answer shortened in the island]") : ""))
+            ajouter("assistant", r.text.slice(0, 16000) + (r.truncated ? Reglages.t("\n\n[Réponse abrégée dans l’île]", "\n\n[Answer shortened in the island]") : ""), r.choices)
             reponseRecente = true
             // Réponse de JARVIS, ou de l'IA du bureau (le champ engine) : la suite part vers la même
             a.suiteParIA = typeof r.engine === "string" && r.engine !== ""
@@ -404,6 +412,13 @@ Singleton {
         question = ""
         reponse = ""
         enCours = false
+    }
+    // Un clic sur un choix du message num : envoyé comme un message tapé, puis ce message ne propose plus rien
+    function choisir(num, libelle) {
+        var m = messages.find(x => x.num === num)
+        if (!m || m.choixFait || m.choix.indexOf(libelle) < 0 || enCours || ecritureReglagesEnCours) return
+        envoyer(libelle)
+        if (enCours) messages = messages.map(x => x.num === num ? Object.assign({}, x, {choixFait: libelle}) : x)
     }
     function effacer() { if (!enCours) { messages = []; erreur = "" } }
     function resetSession() {

@@ -103,6 +103,33 @@ Item {
     }
     onHistoriqueOuvertChanged: if (historiqueOuvert) bas()
 
+    // Pastille d'un choix de JARVIS, comme les réponses à une question de Claude Code (DemandeClaude) ; fait : le choix
+    // envoyé, en couleur d'accent
+    component Pastille: Rectangle {
+        id: pastille
+        property string texte: ""
+        property bool fait: false
+        signal clic()
+        width: Math.min(Math.max(86, lp.implicitWidth + 28), parent ? parent.width : 0); height: 32; radius: 16
+        color: fait ? Couleurs.accent : (enabled && (zp.containsMouse || activeFocus) ? Couleurs.gris4 : Couleurs.gris2)
+        scale: zp.pressed ? 0.94 : 1
+        Behavior on scale { enabled: !Reglages.sobre; SpringAnimation { spring: 6; damping: 0.4 } }
+        activeFocusOnTab: enabled
+        Accessible.role: Accessible.Button
+        Accessible.name: texte
+        Accessible.onPressAction: if (enabled) clic()
+        Keys.onReturnPressed: clic()
+        Keys.onEnterPressed: clic()
+        Keys.onSpacePressed: clic()
+        Texte {
+            id: lp
+            anchors.centerIn: parent; width: Math.min(implicitWidth, pastille.width - 28)
+            text: pastille.texte; font.pixelSize: 13; font.weight: Font.DemiBold
+            color: pastille.fait ? Couleurs.surAccent : (pastille.enabled ? Couleurs.texte : Couleurs.texteSec)
+        }
+        MouseArea { id: zp; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pastille.clic() }
+    }
+
     Item {
         id: contenu
         width: page.dansDashboard ? parent.width : Math.min(parent.width, 590)
@@ -271,6 +298,28 @@ Item {
                                     font.family: "Adwaita Sans"; font.pixelSize: 13
                                     onLinkActivated: lien => page.ouvrirLien(lien)
                                     HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                                }
+                                // Choix proposés par JARVIS (issue #7), sous sa dernière réponse seulement et pas pendant une
+                                // demande : un clic (ou Tab puis Entrée) l'envoie comme message ; ensuite, le choix fait reste
+                                // marqué et les autres se grisent
+                                Flow {
+                                    id: choixMessage
+                                    objectName: "nc-jarvis-choix"
+                                    readonly property var message: modelData
+                                    visible: message.role === "assistant" && (message.choix || []).length > 0 && !AssistantEtat.enCours
+                                        && !!page.derniereReponse && page.derniereReponse.num === message.num
+                                    width: parent.width; spacing: 8; topPadding: 4
+                                    Repeater {
+                                        model: choixMessage.visible ? choixMessage.message.choix : []
+                                        Pastille {
+                                            required property string modelData
+                                            objectName: "nc-jarvis-choix-pastille"
+                                            texte: modelData
+                                            fait: choixMessage.message.choixFait === modelData
+                                            enabled: !choixMessage.message.choixFait && !AssistantEtat.ecritureReglagesEnCours
+                                            onClic: { page.historiqueOuvert = true; AssistantEtat.choisir(choixMessage.message.num, modelData) }
+                                        }
+                                    }
                                 }
                             }
                         }

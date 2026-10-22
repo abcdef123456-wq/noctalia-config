@@ -5,7 +5,8 @@
 // On trouve : fenêtres ouvertes, applications (les plus utilisées d'abord), actions (verrouiller, mode jeu…), pages
 // de l'île (son, Wi-Fi…), calculs et conversions (« 1,5 h en min », « 100 € en $ »), fichiers du dossier personnel.
 // Préfixes : « g » Google, « yt » YouTube, « w » Wikipédia, « > » commande dans le terminal, « ? » question à une IA
-// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée : nc-demander), « ! » l'IA sur le texte
+// (réponse dans le Spotlight ; sa commande proposée se lance avec Entrée, un choix proposé par JARVIS part comme question
+// suivante : nc-demander), « ! » l'IA sur le texte
 // sélectionné ou copié (résumer, traduire, corriger… ou une consigne libre : nc-ia texte), « @ » l'IA qui agit (un plan
 // d'actions permises, chacune faite seulement avec Entrée : nc-ia agir, réglage IA_ACTIONS), « + » logiciel à installer
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
@@ -51,6 +52,10 @@ Item {
     property string questionPosee: ""
     property string reponse: ""
     property string commandeIA: ""
+    // Choix proposés par JARVIS (ligne {"choices": […]} du flux, issue #7) : des lignes de résultat ; Entrée en envoie un
+    // comme question suivante
+    property var choixIA: []
+    function repondreChoix(c) { champ.text = "? " + c; champ.cursorPosition = champ.text.length; demander(c) }
     // Connexion internet (NetworkManager, suivie sans rien lancer) : hors ligne, l'IA disparaît et revient toute seule.
     // Inconnue (pas de NetworkManager) : considérée comme là.
     readonly property bool enLigne: Connexion.enLigne
@@ -105,7 +110,7 @@ Item {
     }
     function demander(question) {
         if (question === "" || demandeur.running) return
-        questionPosee = question; reponse = ""; commandeIA = ""; modeTexte = false; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = question; reponse = ""; commandeIA = ""; choixIA = []; modeTexte = false; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-demander", "--flux", question]
         demandeur.running = true
         chercher()
@@ -113,7 +118,7 @@ Item {
     // « ! » : une action (ou une consigne libre) sur le texte sélectionné, sinon copié ; le résultat se copie avec Entrée
     function demanderTexte(action) {
         if (action === "" || demandeur.running) return
-        questionPosee = q; reponse = ""; commandeIA = ""; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = q; reponse = ""; commandeIA = ""; choixIA = []; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"].concat(texteSource !== "" ? ["--stdin"] : [])
         texteEnvoi = texteSource
         demandeur.stdinEnabled = texteSource !== ""
@@ -248,6 +253,9 @@ Item {
                 try {
                     var d = JSON.parse(ligne)
                     if (d.ia) { r.iaReponse = d.ia; r.agentReponse = d.agent || r.agentReponse }    // repli compris
+                    if (Array.isArray(d.choices))          // 5 au plus, de 80 caractères au plus, sans doublon
+                        r.choixIA = d.choices.filter(x => typeof x === "string" && x.trim() !== "").map(x => x.trim().slice(0, 80))
+                                             .filter((x, i, l) => l.indexOf(x) === i).slice(0, 5)
                     r.brut += d.t || ""
                 } catch (e) { return }
                 r.reponse = r.brut
@@ -512,7 +520,10 @@ Item {
             var deLaConfig = question.length >= 2 ? reponsesAide(question, nbResultats - 1).map(e => itemAide(e, 0)) : []
             if (r.reponse !== "" && question === r.questionPosee) {
                 let cmdIA = r.commandeIA
-                resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }]).concat(deLaConfig)
+                let choix = r.choixIA.map(c => ({ titre: c, sous: Reglages.t("Répondre à ", "Reply to ") + r.iaReponse, glyphe: "chevron_right",
+                                                   garder: true, f: () => r.repondreChoix(c) }))
+                resultats = (cmdIA === "" ? [] : [{ titre: cmdIA, sous: Reglages.t("Lancer dans le terminal", "Run in Terminal"), glyphe: "terminal", f: () => r.lancerCommande(cmdIA) }])
+                            .concat(choix, deLaConfig)
             } else {
                 var ia = r.reflechit ? []
                           : iaCoupee ? [{ titre: r.motifCoupee, sous: Reglages.t("Réglages · Intelligence artificielle", "Settings · Artificial intelligence"),

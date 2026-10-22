@@ -29,7 +29,7 @@ from pathlib import Path
 r=json.loads(sys.stdin.readline())
 with Path(os.environ['HOME'],'calls').open('a') as f:f.write(json.dumps(dict(argv=sys.argv[1:],data=r))+'\\n')
 time.sleep(.04)
-if Path(sys.argv[0]).name=='nc-assistant':print(json.dumps(dict(ok=True,text='Réponse native')),flush=True);sys.exit()
+if Path(sys.argv[0]).name=='nc-assistant':print(json.dumps(dict(ok=True,text='Réponse native',**(dict(choices=['Oui','Non','Plus tard']) if r.get('question')=='choix' else {}))),flush=True);sys.exit()
 op=r['op']
 if op=='overview':
  data=dict(online=True,deploy_mode='server',gateway=dict(telegram_configured=True,discord_configured=True),management=dict(protocol=1,modules=[dict(id='shopping',name='Courses',enabled=True,description='Tes courses')],fields=[dict(key='DISCORD_TOKEN',label='Discord',secret=True,configured=True,value='',group='bots'),dict(key='ENABLE_TOOL_SHOPPING',label='Activer',kind='bool',value='1',group='shopping')]),catalogue=dict(shopping=[dict(id='add',label='Ajouter',fields=[dict(key='text',label='Articles')])]))
@@ -150,6 +150,28 @@ if(etape===1){
  clavier.keyClick(Qt.Key_Escape);etape++
 }else if(etape===4){verifier(!dashboard.visible,"second Échap n'a pas fermé le cockpit");Qt.quit()}
 ''',evenements=True)
+
+    # Issue #7 : les choix de JARVIS en pastilles, dans la fenêtre de chat puis dans le cockpit (même conversation)
+    def test_choix_en_pastilles_dans_la_fenetre_de_chat_et_le_cockpit(self):
+        calls=self.executer('''
+var tous=function tous(item,acc){if(item.objectName==="nc-jarvis-choix-pastille"&&item.visible)acc.push(item);for(var i=0;i<item.children.length;i++)tous(item.children[i],acc);return acc}
+if(etape===0){
+ var c=Qt.createComponent("JarvisChat.qml");verifier(c.status===Component.Ready,c.errorString());dashboard=c.createObject(racine)
+ dashboard.afficher(Quickshell.screens[0].name);AssistantEtat.brouillon="choix";AssistantEtat.envoyer();etape++;return}
+if(AssistantEtat.enCours||JarvisEtat.enCours)return
+if(etape===1){
+ var p=tous(dashboard.contentItem,[])
+ verifier(p.length===3&&p.map(x=>x.texte).join("|")==="Oui|Non|Plus tard","pastilles de la fenêtre : "+p.map(x=>x.texte).join("|"))
+ clavier.mouseMove(p[0],20,16);clavier.mouseClick(p[0],20,16,Qt.LeftButton);verifier(AssistantEtat.enCours,"le clic n'envoie pas");etape++
+}else if(etape===2){
+ verifier(tous(dashboard.contentItem,[]).length===0,"pastilles sous une réponse sans choix")
+ dashboard.destroy();creer();dashboard.ouvrir("chat");AssistantEtat.envoyer("choix");etape++
+}else if(etape===3){
+ var p=tous(dashboard.contentItem,[]);verifier(p.length===3,"pastilles du cockpit : "+p.length)
+ p[2].forceActiveFocus();clavier.keyClick(Qt.Key_Return);verifier(AssistantEtat.enCours,"Entrée n'envoie pas");etape++
+}else if(etape===4){dashboard.close();Qt.quit()}
+''',evenements=True)
+        self.assertEqual([c['data']['question'] for c in calls if c['argv']==['requete-ile']],['choix','Oui','choix','Plus tard'])
 
     # Petite fenêtre de chat (Super + Maj + A) : vierge à l'ouverture, envoi par AssistantEtat, nouvelle conversation, Échap
     def test_compact_chat_window_is_blank_shares_the_session_and_closes_on_escape(self):

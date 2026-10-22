@@ -47,10 +47,11 @@ from pathlib import Path
 r=json.loads(sys.stdin.readline())
 with Path(os.environ["HOME"],"recus").open("a") as f:f.write(json.dumps(dict(argv=sys.argv[1:],payload=r))+"\\n")
 time.sleep(.2)
-if r["question"]=="erreur":
+if r["question"] in ("erreur","Option C"):
  print(json.dumps(dict(ok=False,error="Échec simulé")),flush=True);sys.exit(1)
 if r["question"]=="invalide":print("not json",flush=True);sys.exit(0)
-print(json.dumps(dict(ok=True,text="<b>Réponse</b>\\n"+r["question"])),flush=True)
+choix=dict(choices=["Option A","Option B","Option C"]) if r["question"]=="choix" else {}
+print(json.dumps(dict(ok=True,text="<b>Réponse</b>\\n"+r["question"],**choix)),flush=True)
 '''.replace('time.sleep(.2)',f'time.sleep({delai})'))
                 helper.chmod(0o755)
                 jarvis=bin/"nc-jarvis"
@@ -241,6 +242,51 @@ if(etape===0){
  Qt.quit()
 }
 ''',evenements=True)
+
+    def test_choix_de_jarvis_en_pastilles_clic_et_clavier(self):
+        """Issue #7 : les choix d'une réponse (champ choices) deviennent des pastilles sous la dernière réponse ; un clic
+        envoie le libellé par le chemin de l'envoi tapé (le brouillon reste), puis les pastilles se grisent ; une réponse
+        sans choix n'en montre aucune ; Entrée sur une pastille focalisée l'envoie aussi. NC_CAPTURE : PNG du rendu."""
+        recus = self.executer('''
+var tous=function tous(item,acc){if(item.objectName==="nc-jarvis-choix-pastille"&&item.visible)acc.push(item);for(var i=0;i<item.children.length;i++)tous(item.children[i],acc);return acc}
+var capture=function(nom){var c=Quickshell.env("NC_CAPTURE");if(!c){memo.capture=true;return}memo.capture=false
+ page.grabToImage(function(r){r.saveToFile(c+"-"+nom+".png");memo.capture=true})}
+if(etape===0){creer();AssistantEtat.brouillon="choix";AssistantEtat.envoyer();etape++}
+else if(etape===1&&!AssistantEtat.enCours){
+ var p=tous(page,[])
+ verifier(p.length===3,"3 pastilles attendues : "+p.length)
+ verifier(p.map(x=>x.texte).join("|")==="Option A|Option B|Option C","libellés : "+p.map(x=>x.texte).join("|"))
+ verifier(p.every(x=>x.enabled&&!x.fait&&x.height===32&&x.radius===16),"pastilles actives, arrondies")
+ var bulle=p[0].parent.parent.parent
+ verifier(bulle.modelData.num===AssistantEtat.messages[AssistantEtat.messages.length-1].num,"sous le dernier message")
+ capture("actives");etape++}
+else if(etape===2&&memo.capture){
+ var p=tous(page,[]);AssistantEtat.brouillon="brouillon gardé"
+ clavier.mouseMove(p[1],20,16);clavier.mouseClick(p[1],20,16,Qt.LeftButton)
+ verifier(AssistantEtat.enCours,"le clic n'envoie pas")
+ verifier(tous(page,[]).length===0,"pastilles pendant la demande")
+ verifier(AssistantEtat.messages[1].choixFait==="Option B","choix non marqué")
+ verifier(AssistantEtat.messages[2].role==="vous"&&AssistantEtat.messages[2].texte==="Option B","message envoyé : "+JSON.stringify(AssistantEtat.messages[2]))
+ verifier(AssistantEtat.brouillon==="brouillon gardé","brouillon écrasé par le choix")
+ AssistantEtat.choisir(AssistantEtat.messages[1].num,"Option A");etape++}
+else if(etape===3&&!AssistantEtat.enCours){
+ verifier(AssistantEtat.messages.length===4,"second choix envoyé sur le même message : "+AssistantEtat.messages.length)
+ verifier(tous(page,[]).length===0,"pastilles sous une réponse sans choix")
+ verifier(!trouver(page,"nc-jarvis-choix").visible,"rangée de choix visible")
+ AssistantEtat.brouillon="";AssistantEtat.envoyer("choix");etape++}
+else if(etape===4&&!AssistantEtat.enCours){
+ var p=tous(page,[]);verifier(p.length===3,"nouvelles pastilles : "+p.length)
+ p[2].forceActiveFocus();verifier(p[2].activeFocus,"pastille non focalisable au clavier")
+ clavier.keyClick(Qt.Key_Return);verifier(AssistantEtat.enCours,"Entrée n'envoie pas le choix");etape++}
+else if(etape===5&&!AssistantEtat.enCours){
+ // Échec de l'envoi : la réponse aux choix reste la dernière, ses pastilles restent grisées, le choix fait marqué
+ verifier(AssistantEtat.erreur==="Échec simulé","erreur : "+AssistantEtat.erreur)
+ var p=tous(page,[]);verifier(p.length===3&&p.every(x=>!x.enabled),"pastilles non grisées après le choix")
+ verifier(p[2].fait&&!p[0].fait,"choix fait non marqué")
+ capture("choisie");etape++}
+else if(etape===6&&memo.capture){Qt.quit()}
+''', evenements=True)
+        self.assertEqual([r["payload"]["question"] for r in recus], ["choix", "Option B", "choix", "Option C"])
 
     def test_thinking_dots_follow_the_real_request_and_stop_when_hidden(self):
         recus=self.executer('''

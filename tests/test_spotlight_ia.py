@@ -154,6 +154,78 @@ ShellRoot {
             self.assertEqual((root / "stdin-ia").read_text(), "texte du presse-papiers")
 
 
+    def test_choix_de_jarvis_en_resultats(self):
+        """Issue #7 : les choix d'une réponse de JARVIS (ligne {"choices": …} du flux) deviennent des résultats (chevron),
+        choisis au clavier comme les autres ; Entrée envoie le libellé comme question suivante ; sans choix, aucun."""
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-choix-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({}); readonly property bool iaCoupee: false\n'
+                                            ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                       "nc-demander": '''#!/bin/sh
+echo "nc-demander $*" >> "$HOME/appels"
+case "$1" in
+  --ia) echo '{"nom": "JARVIS", "agent": "assistant", "coupee": false}' ;;
+  --flux) echo '{"ia": "JARVIS", "id": "jarvis", "agent": "assistant"}'
+    if [ "$2" = "quelle couleur" ]; then echo '{"t": "Laquelle ?"}'; echo '{"choices": ["Rouge", "Vert", "Bleu"]}'
+    else echo '{"t": "Parfait."}'; fi ;;
+esac
+'''}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text('''import QtQuick
+import QtTest
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ function choix(){ return spot.resultats.filter(x => x.glyphe === "chevron_right").map(x => x.titre) }
+ TestCase { id: clavier; name: "SpotlightChoix"; when: false }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "") return; champ.text = "? quelle couleur"; spot.valider(spot.resultats.length - 1, false); etape++; return }
+  if (etape === 1) { if (spot.reflechit) return
+   verifier(spot.reponse === "Laquelle ?", "réponse : " + JSON.stringify(spot.reponse))
+   verifier(JSON.stringify(choix()) === JSON.stringify(["Rouge", "Vert", "Bleu"]), "choix en résultats : " + JSON.stringify(titres()))
+   var i = titres().indexOf("Vert"); verifier(spot.resultats[i].sous === "Répondre à JARVIS", "sous-titre : " + spot.resultats[i].sous)
+   champ.forceActiveFocus(); verifier(spot.sel === 0, "sélection : " + spot.sel)
+   for (var k = 0; k < i; k++) clavier.keyClick(Qt.Key_Down)
+   verifier(spot.sel === i, "flèches : " + spot.sel)
+   clavier.keyClick(Qt.Key_Return)
+   verifier(Etat.fermetures === 0, "le Spotlight reste ouvert pour la réponse")
+   verifier(champ.text === "? Vert" && spot.questionPosee === "Vert", "question suivante : " + champ.text)
+   etape++; return }
+  if (etape === 2) { if (spot.reflechit) return
+   verifier(spot.reponse === "Parfait.", "seconde réponse : " + JSON.stringify(spot.reponse))
+   verifier(choix().length === 0, "choix sous une réponse qui n'en a pas : " + JSON.stringify(titres()))
+   Qt.quit() }
+ } }
+ Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            for erreur in ("ReferenceError", "TypeError", "is not a type"):
+                self.assertNotIn(erreur, sortie)
+            appels = [l for l in (root / "appels").read_text().splitlines() if "--flux" in l]
+            self.assertEqual(appels, ["nc-demander --flux quelle couleur", "nc-demander --flux Vert"])
+
     def test_arobase_plan_puis_confirmation(self):
         with tempfile.TemporaryDirectory(prefix="nc-spotlight-agent-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
