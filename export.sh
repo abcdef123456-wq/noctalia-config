@@ -134,6 +134,7 @@ HOME_FILES=(
   .local/bin/nc-gpu-regle
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode
+  .local/bin/nc-rtx-veille
   .local/bin/cmatrix
   .local/bin/unimatrix
   .local/share/applications/nc-assistant.desktop

@@ -1,0 +1,504 @@
+#!/usr/bin/env python3
+"""nc-rtx-veille : la carte NVIDIA d'un PC hybride dort-elle (0 W) quand rien ne s'en sert ? Et sinon, pourquoi ?
+  nc-rtx-veille                    l'état, en quelques lignes
+  nc-rtx-veille etat [--conso]     l'état en JSON (lu par nc-diag) ; --conso : la consommation par nvidia-smi, seulement
+                                   si la carte est déjà allumée (nvidia-smi la réveillerait et fausserait la mesure)
+  nc-rtx-veille alerter            une notification par cause trouvée, une seule fois par cause (lancé par
+                                   nc-profile-sync quand la carte reste allumée plus de 30 s alors qu'elle devrait dormir)
+  nc-rtx-veille relancer PID [DÉBUT]  ferme l'appli PID (après confirmation) et la relance sur la carte intégrée
+Causes cherchées : le service nvidia-persistenced (il garde la carte initialisée, donc allumée), les processus qui
+tiennent /dev/nvidia* ou les nœuds DRM de la NVIDIA (/dev/dri/by-path/pci-<bus>-render et -card), la gestion
+d'énergie du noyau coupée (power/control différent de auto). Ne lit que /sys et /proc : la carte n'est pas réveillée.
+Ne ferme jamais rien sans un clic (ou un « oui » au terminal), et jamais de force.
+Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), NC_DEV (/dev), NC_EGL_DIR (pilotes EGL), comme nc-gpu-regle.
+"""
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en), comme nc-diag : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+SYS = os.environ.get("NC_SYSFS") or "/sys"
+PROC = os.environ.get("NC_PROC") or "/proc"
+DEV = os.environ.get("NC_DEV") or "/dev"
+EGL = os.environ.get("NC_EGL_DIR") or "/usr/share/glvnd/egl_vendor.d"
+ICI = os.path.dirname(os.path.realpath(__file__))
+RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+DEJA = os.path.join(RUNTIME, "nc-rtx-alertes")          # causes déjà signalées (une ligne par cause)
+# Le serveur graphique : il ne se relance pas comme une appli (rouvrir la session)
+SESSION = {"Hyprland", "hyprland", "Xwayland", "gamescope"}
+# Variables qui envoient une appli sur la NVIDIA (nvidia-run, nc-profile-sync) : retirées à la relance
+VARIABLES_NVIDIA = ("__NV_PRIME_RENDER_OFFLOAD", "__NV_PRIME_RENDER_OFFLOAD_PROVIDER", "__VK_LAYER_NV_optimus",
+                    "__GLX_VENDOR_LIBRARY_NAME", "__EGL_VENDOR_LIBRARY_FILENAMES", "VK_DRIVER_FILES",
+                    "VK_ICD_FILENAMES", "DRI_PRIME")
+
+
+def lire(chemin):
+    try:
+        with open(chemin, encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def script(nom):
+    """Un script voisin (dépôt ou ~/.local/bin)."""
+    p = os.path.join(ICI, nom)
+    return p if os.path.exists(p) else os.path.expanduser("~/.local/bin/" + nom)
+
+
+# ── La carte ──
+def bus_nvidia():
+    """Adresse PCI de la carte graphique NVIDIA (vendor 0x10de, classe 0x03…), ou None."""
+    base = os.path.join(SYS, "bus/pci/devices")
+    try:
+        noms = sorted(os.listdir(base))
+    except OSError:
+        return None
+    for n in noms:
+        if (lire(os.path.join(base, n, "class")) or "").startswith("0x03") and lire(os.path.join(base, n, "vendor")) == "0x10de":
+            return n
+    return None
+
+
+def regle():
+    """La règle de nc-gpu-regle, écrite une seule fois : PC hybride, profil, batterie, NVIDIA voulue."""
+    code = ('. "$1" || exit 1; nc_pc_hybride && echo hybride=1 || echo hybride=0; p=$(nc_profil_courant); '
+            'echo "profil=$p"; b=0; nc_sur_batterie && b=1; echo "batterie=$b"; '
+            'rtx_voulue "$p" "$b" && echo voulue=1 || echo voulue=0')
+    try:
+        r = subprocess.run(["sh", "-c", code, "sh", script("nc-gpu-regle")], capture_output=True, text=True, timeout=10)
+        v = dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
+    except (OSError, subprocess.TimeoutExpired):
+        v = {}
+    return {"hybride": v.get("hybride") == "1", "profil": v.get("profil") or None,
+            "batterie": v.get("batterie") == "1", "voulue": v.get("voulue") == "1"}
+
+
+def portable():
+    """Une batterie du PC (pas celle d'une souris : scope Device)."""
+    ps = os.environ.get("NC_POWER_SUPPLY") or os.path.join(SYS, "class/power_supply")
+    if ps in ("batterie", "secteur"):
+        return True
+    try:
+        noms = os.listdir(ps)
+    except OSError:
+        return False
+    return any(lire(os.path.join(ps, n, "type")) == "Battery" and lire(os.path.join(ps, n, "scope")) != "Device" for n in noms)
+
+
+def mode_graphique():
+    """hybride, dediee ou sans-objet (nc-gpu-mode actuel : où est branché l'écran interne)."""
+    try:
+        r = subprocess.run(["bash", script("nc-gpu-mode"), "actuel"], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def persistenced_actif():
+    try:
+        r = subprocess.run(["systemctl", "is-active", "nvidia-persistenced"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() == "active"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def dynamic_pm():
+    """DynamicPowerManagement du pilote NVIDIA (/proc/driver/nvidia/params) ; None sans ce fichier (nouveau, pas de pilote)."""
+    t = lire(os.path.join(PROC, "driver/nvidia/params"))
+    if t is None:
+        return None
+    m = re.search(r"^DynamicPowerManagement:\s*(\S+)", t, re.M)
+    return m[1] if m else ""
+
+
+# ── Les processus ──
+def noeuds_drm(bus):
+    """Nœuds DRM de la NVIDIA, trouvés par /dev/dri/by-path (jamais codés en dur) : {chemin: « render » ou « card »}."""
+    n = {}
+    for genre in ("render", "card"):
+        lien = os.path.join(DEV, "dri/by-path", f"pci-{bus}-{genre}")
+        if os.path.islink(lien) or os.path.exists(lien):
+            n[os.path.realpath(lien)] = genre
+    return n
+
+
+def stat(pid):
+    """(ppid, début) lus dans /proc/<pid>/stat (après la parenthèse fermante du nom)."""
+    t = lire(os.path.join(PROC, str(pid), "stat")) or ""
+    champs = t[t.rfind(")") + 2:].split()
+    try:
+        return int(champs[1]), champs[19]
+    except (IndexError, ValueError):
+        return 0, ""
+
+
+def exe(pid):
+    try:
+        return os.readlink(os.path.join(PROC, str(pid), "exe"))
+    except OSError:
+        return None
+
+
+def principal(pid):
+    """Le processus de l'appli : on remonte les parents qui ont le même programme (le « GPU Process » de Firefox → firefox)."""
+    e = exe(pid)
+    vus = {pid}
+    while e:
+        pp, _ = stat(pid)
+        if pp <= 1 or pp in vus or exe(pp) != e:
+            break
+        vus.add(pp)
+        pid = pp
+    return pid
+
+
+def nom_affiche(comm):
+    return comm[:1].upper() + comm[1:] if comm else "?"
+
+
+def processus(bus):
+    """Processus (lisibles : les tiens) qui tiennent /dev/nvidia* ou un nœud DRM de la NVIDIA, groupés par appli."""
+    drm = noeuds_drm(bus) if bus else {}
+    prefixe = os.path.join(DEV, "nvidia")
+    trouves = {}
+    try:
+        pids = [int(p) for p in os.listdir(PROC) if p.isdigit()]
+    except OSError:
+        pids = []
+    for pid in pids:
+        if pid == os.getpid():
+            continue
+        d = os.path.join(PROC, str(pid), "fd")
+        try:
+            fds = os.listdir(d)
+        except OSError:
+            continue
+        fichiers = set()
+        for fd in fds:
+            try:
+                cible = os.readlink(os.path.join(d, fd))
+            except OSError:
+                continue
+            if cible.startswith(prefixe) or cible in drm:
+                fichiers.add("/dev/" + os.path.relpath(cible, DEV))
+        if fichiers:
+            trouves[pid] = fichiers
+    apps = {}
+    for pid, fichiers in trouves.items():
+        p = principal(pid)
+        a = apps.setdefault(p, {"pids": set(), "fichiers": set()})
+        a["pids"].add(pid)
+        a["fichiers"] |= fichiers
+    sortie = []
+    for p, a in sorted(apps.items()):
+        comm = lire(os.path.join(PROC, str(p), "comm")) or ""
+        cmd = (lire(os.path.join(PROC, str(p), "cmdline")) or "").strip("\0")
+        sortie.append({"pid": p, "comm": comm, "nom": nom_affiche(comm), "pids": sorted(a["pids"]),
+                       "fichiers": sorted(a["fichiers"]), "debut": stat(p)[1],
+                       "relancable": bool(cmd) and comm not in SESSION})
+    return sortie
+
+
+def conso():
+    """Consommation lue par nvidia-smi (à n'appeler que sur une carte déjà allumée)."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=5)
+        v = r.stdout.strip().splitlines()[0].strip() if r.stdout.strip() else ""
+        return f"{float(v):.1f} W" if re.fullmatch(r"[0-9.]+", v) else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def causes(e):
+    """Pourquoi la carte reste allumée : une liste, la plus probable d'abord (vide si elle dort)."""
+    if e["runtime_status"] != "active":
+        return []
+    c = []
+    if e["persistenced"]:
+        c.append({"cle": "persistenced", "texte": T("nvidia-persistenced garde la carte NVIDIA allumée",
+                                                     "nvidia-persistenced keeps the NVIDIA GPU powered on")})
+    for p in e["processus"]:
+        if p["comm"] in SESSION:
+            texte = T(f"{p['nom']} (la session) utilise la carte NVIDIA", f"{p['nom']} (the session) uses the NVIDIA GPU")
+        else:
+            texte = T(f"{p['nom']} utilise la carte NVIDIA", f"{p['nom']} uses the NVIDIA GPU")
+        c.append({"cle": "processus:" + (p["comm"] or str(p["pid"])), "texte": texte, "pid": p["pid"], "nom": p["nom"],
+                  "debut": p["debut"], "relancable": p["relancable"]})
+    if e["control"] not in (None, "auto"):
+        c.append({"cle": "control", "texte": T(f"le noyau ne peut pas endormir la carte NVIDIA (power/control = {e['control']})",
+                                               f"the kernel can't put the NVIDIA GPU to sleep (power/control = {e['control']})")})
+    if not c:
+        c.append({"cle": "inconnue", "texte": T("la carte NVIDIA reste allumée sans cause trouvée",
+                                                "the NVIDIA GPU stays powered on with no cause found")})
+    return c
+
+
+def etat(avec_conso=False):
+    r = regle()
+    bus = bus_nvidia()
+    dev = os.path.join(SYS, "bus/pci/devices", bus) if bus else None
+    e = {"hybride": r["hybride"] and bus is not None, "mode": None, "portable": portable(), "profil": r["profil"],
+         "batterie": r["batterie"], "rtx_voulue": r["voulue"], "bus": bus, "pilote": None, "runtime_status": None,
+         "control": None, "persistenced": False, "dynamic_pm": None, "processus": [], "causes": [], "doit_dormir": False,
+         "conso": None}
+    if not e["hybride"]:
+        return e
+    e["mode"] = mode_graphique()
+    try:
+        e["pilote"] = os.path.basename(os.readlink(os.path.join(dev, "driver")))
+    except OSError:
+        pass
+    e["runtime_status"] = lire(os.path.join(dev, "power/runtime_status"))
+    e["control"] = lire(os.path.join(dev, "power/control"))
+    e["persistenced"] = persistenced_actif()
+    e["dynamic_pm"] = dynamic_pm()
+    e["processus"] = processus(bus)
+    # Doit dormir : écran interne sur la carte intégrée, et la règle ne veut pas la NVIDIA, en Économie ou sur batterie
+    e["doit_dormir"] = e["mode"] == "hybride" and not r["voulue"] and (r["batterie"] or r["profil"] == "power-saver")
+    e["causes"] = causes(e)
+    # nvidia-smi après la recherche des processus (il ouvre /dev/nvidia*), et seulement sur une carte déjà allumée
+    if avec_conso and e["runtime_status"] == "active":
+        e["conso"] = conso()
+    return e
+
+
+# ── Notifications ──
+def notifier(titre, texte, action=None):
+    """Notification (bouton facultatif : (clé, libellé)) ; renvoie la clé cliquée, ou ""."""
+    cmd = ["notify-send", "-a", T("Énergie", "Power"), "-i", "video-display"]
+    if action:
+        cmd += ["-t", "0", "-A", f"{action[0]}={action[1]}"]
+    cmd += ["--", titre, texte]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=None if action else 10)
+        return r.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def deja_signalees():
+    t = lire(DEJA)
+    return set(t.splitlines()) if t else set()
+
+
+def alerter():
+    e = etat()
+    if e["runtime_status"] != "active" or not e["doit_dormir"]:
+        return 0
+    deja = deja_signalees()
+    nouvelles = []
+    for c in e["causes"]:                         # deux fenêtres de la même appli : une seule alerte
+        if c["cle"] not in deja:
+            deja.add(c["cle"])
+            nouvelles.append(c)
+    if not nouvelles:
+        return 0
+    os.makedirs(RUNTIME, exist_ok=True)
+    with open(DEJA, "a", encoding="utf-8") as f:
+        for c in nouvelles:
+            f.write(c["cle"] + "\n")
+    fils = []
+    for c in nouvelles:
+        print("nc-rtx-veille: " + T("carte NVIDIA allumée : ", "NVIDIA GPU on: ") + c["texte"], flush=True)
+        action = None
+        if c["cle"] == "persistenced":
+            texte = T("Elle ne s'endort jamais (environ 5 W). Pour la laisser dormir : sudo systemctl disable --now "
+                      "nvidia-persistenced (install.sh le propose).",
+                      "It never sleeps (about 5 W). To let it sleep: sudo systemctl disable --now nvidia-persistenced "
+                      "(install.sh offers it).")
+        elif c["cle"] == "control":
+            texte = T("Elle ne s'endort jamais (environ 5 W). nc-diag en dit plus.",
+                      "It never sleeps (about 5 W). nc-diag tells you more.")
+        elif c["cle"] == "inconnue":
+            texte = T("Environ 5 W perdus. nc-diag (section RTX) en dit plus.", "About 5 W wasted. nc-diag (RTX section) tells you more.")
+        elif not c["relancable"]:
+            texte = T("La session a démarré avec la carte NVIDIA : rouvre la session pour qu'elle s'endorme.",
+                      "The session started on the NVIDIA GPU: log out and back in to let it sleep.")
+        else:
+            texte = T(f"Elle reste allumée pour lui (environ 5 W). Relancé sur la carte intégrée, {c['nom']} la laisse dormir.",
+                      f"It stays on for it (about 5 W). Restarted on the integrated GPU, {c['nom']} lets it sleep.")
+            action = ("relancer", T(f"Relancer {c['nom']} sur la carte intégrée", f"Restart {c['nom']} on the integrated GPU"))
+        if action:
+            # Le bouton attend le clic : un fil par notification, les autres partent tout de suite
+            def attendre(c=c, texte=texte, action=action):
+                if notifier(c["texte"], texte, action) == "relancer":
+                    relancer(c["pid"], c["debut"])
+            th = threading.Thread(target=attendre)
+            th.start()
+            fils.append(th)
+        else:
+            notifier(c["texte"], texte)
+    for th in fils:
+        th.join()
+    return 0
+
+
+# ── Relance sur la carte intégrée ──
+def environnement_integre(pid):
+    """L'environnement du processus, sans les variables NVIDIA, avec celles de la carte intégrée (comme nc-profile-sync)."""
+    brut = ""
+    try:
+        with open(os.path.join(PROC, str(pid), "environ"), "rb") as f:
+            brut = f.read().decode("utf-8", "replace")
+    except OSError:
+        pass
+    env = dict(x.split("=", 1) for x in brut.split("\0") if "=" in x) or dict(os.environ)
+    for v in VARIABLES_NVIDIA:
+        env.pop(v, None)
+    if os.path.exists(os.path.join(EGL, "50_mesa.json")):
+        env["__EGL_VENDOR_LIBRARY_FILENAMES"] = os.path.join(EGL, "50_mesa.json")
+    icd = "/usr/share/vulkan/icd.d"
+    try:
+        vk = [os.path.join(icd, f) for f in sorted(os.listdir(icd)) if f.endswith(".json") and not re.search("nvidia|nouveau", f)]
+    except OSError:
+        vk = []
+    if vk:
+        env["VK_DRIVER_FILES"] = ":".join(vk)
+    env["__NV_PRIME_RENDER_OFFLOAD"] = "0"
+    env["__VK_LAYER_NV_optimus"] = "non_NVIDIA_only"
+    env["__GLX_VENDOR_LIBRARY_NAME"] = "mesa"
+    return env
+
+
+def confirmer(nom):
+    titre = T(f"Relancer {nom} sur la carte intégrée ?", f"Restart {nom} on the integrated GPU?")
+    texte = T(f"{nom} va se fermer puis se rouvrir sans la carte NVIDIA. Ce qui n'est pas enregistré peut être perdu.",
+              f"{nom} will close and reopen without the NVIDIA GPU. Anything unsaved may be lost.")
+    if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+        return notifier(titre, texte, ("oui", T("Fermer et relancer", "Close and restart"))) == "oui"
+    try:
+        r = input(f"{titre}\n{texte}\n{T('[o/N]', '[y/N]')} ")
+    except EOFError:
+        return False
+    return r.strip().lower() in ("o", "oui", "y", "yes")
+
+
+def vivant(pid):
+    """Le vrai processus (le vrai /proc : c'est lui qui reçoit le signal) ; un zombie est déjà fermé."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    t = lire(f"/proc/{pid}/stat") or ""
+    return t[t.rfind(")") + 2:][:1] != "Z"
+
+
+def relancer(pid, debut=None):
+    pid = int(pid)
+    raw = b""
+    try:
+        with open(os.path.join(PROC, str(pid), "cmdline"), "rb") as f:
+            raw = f.read()
+    except OSError:
+        pass
+    cmd = [x.decode("utf-8", "replace") for x in raw.split(b"\0") if x]
+    comm = lire(os.path.join(PROC, str(pid), "comm")) or ""
+    nom = nom_affiche(comm)
+    if not cmd or comm in SESSION:
+        print(T(f"nc-rtx-veille : {pid} ne se relance pas ainsi.", f"nc-rtx-veille: {pid} can't be restarted this way."), file=sys.stderr)
+        return 1
+    if debut and stat(pid)[1] != debut:          # le processus a changé depuis l'alerte (PID réutilisé)
+        print(T(f"nc-rtx-veille : {nom} n'est plus le même processus.", f"nc-rtx-veille: {nom} is no longer the same process."), file=sys.stderr)
+        return 1
+    env = environnement_integre(pid)
+    try:
+        dossier = os.readlink(os.path.join(PROC, str(pid), "cwd"))
+    except OSError:
+        dossier = os.path.expanduser("~")
+    if not confirmer(nom):
+        return 0
+    if debut and stat(pid)[1] != debut:
+        return 1
+    # Fermeture polie (SIGTERM), comme en fermant la fenêtre ; jamais de force
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        return 1
+    fin = time.monotonic() + float(os.environ.get("NC_RTX_ATTENTE", "15"))
+    while vivant(pid) and time.monotonic() < fin:
+        time.sleep(0.3)
+    if vivant(pid):
+        notifier(T(f"{nom} ne s'est pas fermé", f"{nom} did not close"),
+                 T("Ferme-le toi-même, puis rouvre-le : il partira sur la carte intégrée.",
+                   "Close it yourself, then reopen it: it will start on the integrated GPU."))
+        return 1
+    # Hors du service qui a lancé l'alerte (sinon l'appli s'arrêterait avec lui) : une scope systemd à elle
+    sr = shutil.which("systemd-run")
+    lanceur = [sr, "--user", "--scope", "--quiet", "--collect", "--slice=app.slice", "--"] if sr else []
+    if not os.path.isdir(dossier):
+        dossier = os.path.expanduser("~")
+    subprocess.Popen(lanceur + cmd, env=env, cwd=dossier, start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(T(f"{nom} relancé sur la carte intégrée.", f"{nom} restarted on the integrated GPU."))
+    return 0
+
+
+# ── Texte ──
+def resume():
+    e = etat()
+    if not e["hybride"]:
+        print(T("Pas de PC hybride (carte intégrée + NVIDIA) : rien à surveiller.", "Not a hybrid PC (integrated + NVIDIA): nothing to watch."))
+        return 0
+    etats = {"suspended": T("endormie (0 W)", "asleep (0 W)"), "active": T("allumée", "on")}
+    print(T("Carte NVIDIA : ", "NVIDIA GPU: ") + etats.get(e["runtime_status"], e["runtime_status"] or "?")
+          + f" ({e['bus']}, {e['pilote'] or '?'})")
+    for c in e["causes"]:
+        print("  · " + c["texte"])
+    return 0
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        return resume()
+    if a[0] in ("etat", "state"):
+        print(json.dumps(etat(avec_conso="--conso" in a), ensure_ascii=False))
+        return 0
+    if a[0] in ("alerter", "alert"):
+        return alerter()
+    if a[0] in ("relancer", "restart") and len(a) >= 2 and a[1].isdigit():
+        return relancer(a[1], a[2] if len(a) > 2 else None)
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

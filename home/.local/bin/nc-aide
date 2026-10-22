@@ -81,6 +81,8 @@ A_TAPER = [
     ("nc-sysinfo", "nc-sysinfo sante", "Infos du PC : modele, ecrans, disques, sante (usure de la batterie)…"),
     ("nvidia-run", "nvidia-run steam", "Lance un programme sur la carte NVIDIA d'un PC hybride, quand la règle "
                                        "le veut (nc-reglages → Énergie → Carte NVIDIA pour les applis)."),
+    ("nc-rtx-veille", "nc-rtx-veille", "La carte NVIDIA d'un PC hybride dort-elle (0 W) ? Sinon, ce qui la garde "
+                                       "allumée (nvidia-persistenced, une appli ouverte dessus)."),
     ("cmatrix", "cmatrix", "Pluie façon Matrix dans le terminal, aux couleurs du thème."),
 ]
 RACCOURCIS = [
@@ -169,6 +171,8 @@ ANGLAIS = {
     "nc-sysinfo": ("nc-sysinfo health", "PC info: model, screens, disks, health (battery wear)…"),
     "nvidia-run": ("nvidia-run steam", "Runs a program on the NVIDIA card of a hybrid laptop, when the rule "
                                     "allows it (nc-settings → Power → NVIDIA graphics for apps)."),
+    "nc-rtx-veille": ("nc-rtx-veille", "Is the NVIDIA card of a hybrid laptop asleep (0 W)? If not, what keeps it on "
+                                       "(nvidia-persistenced, an app opened on it)."),
     "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
     "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
     "nc-ecrans": ("nc-displays mirror", "Project to a second display or a projector (Super + O), like Windows + P: "

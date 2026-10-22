@@ -4,7 +4,8 @@
 # la config Hyprland (nc/ecrans.lua, nc/energie.lua) en tire la fréquence, le flou, les ombres et les animations.
 # Fonctionne avec tout service de profils compatible (power-profiles-daemon, tlp-pd, tuned-ppd).
 # PC hybride (carte intégrée + NVIDIA) : choisit aussi la carte des applis lancées selon le profil et l'alimentation
-# (règle de nc-gpu-regle, réglage GPU_REGLE).
+# (règle de nc-gpu-regle, réglage GPU_REGLE), et dit pourquoi la NVIDIA reste allumée quand elle devrait dormir
+# (nc-rtx-veille).
 # Réglages facultatifs (commande nc-reglages, ~/.config/nc/reglages.conf ; ancien fichier ~/.config/nc-profile.conf
 # encore lu) :
 #   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=max  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
@@ -176,6 +177,43 @@ proposer_nvidia() {
   ) &
 }
 
+# La NVIDIA doit dormir (0 W) en Économie, et sur batterie quand la règle ne la veut pas. Si elle reste allumée plus
+# de RTX_DELAI secondes, nc-rtx-veille alerter le dit, une fois par cause (nvidia-persistenced, une appli ouverte
+# dessus : « Relancer X sur la carte intégrée »). Le guet tourne à part (sous-shell en fond) : la boucle D-Bus
+# n'attend jamais. Rien n'est lu en boucle : un fichier de /sys à chaque passage, sans réveiller la carte.
+# Seulement si la session a été ouverte par env-hyprland (écran interne sur la carte intégrée).
+RTX_DELAI="${NC_RTX_DELAI:-30}"
+RTX_GUET="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-rtx-guet"
+RTX_VEILLE="${BASH_SOURCE[0]%/*}/nc-rtx-veille"
+[ -x "$RTX_VEILLE" ] || RTX_VEILLE="$HOME/.local/bin/nc-rtx-veille"
+RTX_ETAT=""                                     # power/runtime_status de la NVIDIA : « suspended » = 0 W
+if [ "$HYBRID" = 1 ]; then
+  for d in "${NC_SYSFS:-/sys}"/bus/pci/devices/*; do
+    [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] || continue
+    case "$(cat "$d/class" 2>/dev/null)" in 0x03*) RTX_ETAT="$d/power/runtime_status"; break ;; esac
+  done
+fi
+
+rtx_doit_dormir() {
+  ! rtx_voulue "$1" "$2" && { [ "$1" = power-saver ] || [ "$2" = 1 ]; }
+}
+
+guetter_rtx() {
+  [ -n "$RTX_ETAT" ] && [ -n "${AQ_DRM_DEVICES:-}" ] && [ -x "$RTX_VEILLE" ] || return 0
+  rtx_doit_dormir "$1" "$2" || return 0
+  [ "$(cat "$RTX_ETAT" 2>/dev/null)" = active ] || return 0
+  [ -s "$RTX_GUET" ] && kill -0 "$(cat "$RTX_GUET" 2>/dev/null)" 2>/dev/null && return 0   # un seul guet à la fois
+  (
+    sleep "$RTX_DELAI"
+    [ "$(cat "$RTX_ETAT" 2>/dev/null)" = active ] || exit 0
+    p=$(get_profile); b=0; on_battery && b=1
+    rtx_doit_dormir "$p" "$b" || exit 0
+    # En fond, lui aussi : ses notifications à bouton attendent un clic, le guet suivant ne doit pas les attendre
+    "$RTX_VEILLE" alerter &
+  ) &
+  echo "$!" > "$RTX_GUET"
+}
+
 # Écrit (ou retire, si le contenu voulu est vide) un fichier de réglages de Noctalia ; réussit s'il a changé.
 fichier_noctalia() {
   local f=$1 want=$2
@@ -268,6 +306,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
 
   set_gpu_default "$profile" "$bat"
   proposer_nvidia "$profile" "$bat"
+  guetter_rtx "$profile" "$bat"
   noctalia_config "$profile" "$bat"
 
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
@@ -325,7 +364,8 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
 }
 
 # Nouvelle session : l'environnement de Hyprland repart de la valeur uwsm, on force la resynchronisation.
-rm -f "$GPU_STATE"
+# Le guet de la NVIDIA d'avant (s'il en reste un fichier) n'existe plus.
+rm -f "$GPU_STATE" "$RTX_GUET"
 apply
 
 # Événements : changement de profil (tlp-pd) et de source d'alimentation (UPower). Vérification de secours toutes les 60 s.

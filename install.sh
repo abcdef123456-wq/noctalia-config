@@ -280,6 +280,17 @@ for d in /sys/bus/pci/devices/*; do
 done
 HYBRID=$((NVIDIA && OTHER_GPU))
 dmi() { cat "/sys/class/dmi/id/$1" 2>/dev/null || true; }
+# Faut-il proposer de couper nvidia-persistenced (étape 5e) ? Ce service des paquets NVIDIA (Arch, Fedora, Debian)
+# garde la carte initialisée, donc allumée (environ 5 W) même quand rien ne s'en sert. Seulement sur un portable
+# hybride : batterie, NVIDIA et carte intégrée (nc_pc_hybride), écran interne sur la carte intégrée (nc-gpu-mode
+# actuel : hybride). Jamais sur un PC fixe, ni en mode Dédiée (écran interne sur la NVIDIA, interrupteur MUX).
+# NC_SYSFS, NC_EGL_DIR : pour les tests (tests/test_rtx_veille.py), comme nc-gpu-regle.
+persistenced_a_proposer() {
+  ls -d "${NC_SYSFS:-/sys}"/class/power_supply/BAT* >/dev/null 2>&1 || return 1
+  ( . "$REPO/home/.local/bin/nc-gpu-regle" && nc_pc_hybride ) || return 1
+  [ "$(bash "$REPO/home/.local/bin/nc-gpu-mode" actuel 2>/dev/null)" = hybride ] || return 1
+  [ "$(systemctl is-enabled nvidia-persistenced 2>/dev/null)" = enabled ]
+}
 info "$(t "Portable : $([ $LAPTOP = 1 ] && echo oui || echo non) · Carte NVIDIA : $([ $NVIDIA = 1 ] && { [ $HYBRID = 1 ] && echo "oui (hybride)" || echo oui; } || echo non)" "Laptop: $([ $LAPTOP = 1 ] && echo yes || echo no) · NVIDIA card: $([ $NVIDIA = 1 ] && { [ $HYBRID = 1 ] && echo "yes (hybrid)" || echo yes; } || echo no)")"
 
 hypr_bin() { command -v Hyprland 2>/dev/null || command -v hyprland 2>/dev/null || true; }
@@ -1671,6 +1682,16 @@ if [ "$MODE" = full ]; then
         suse) info "  https://en.opensuse.org/SDB:NVIDIA_drivers" ;;
         *) info "$(t "  documentation de ta distribution (pilote « nvidia-open » pour les cartes récentes)" "  your distribution's documentation (“nvidia-open” driver for recent cards)")" ;;
       esac
+    fi
+    # Portable hybride : sans nvidia-persistenced, la NVIDIA s'endort (0 W) quand rien ne s'en sert
+    if persistenced_a_proposer; then
+      if ask "$(t "La carte NVIDIA reste allumée même inutilisée (environ 5 W) : couper le service nvidia-persistenced ?" "The NVIDIA card stays on even when unused (about 5 W): turn off the nvidia-persistenced service?")" o; then
+        if sudo systemctl disable --now nvidia-persistenced >/dev/null 2>&1; then
+          ok "$(t "nvidia-persistenced coupé : la carte NVIDIA peut s'endormir." "nvidia-persistenced turned off: the NVIDIA card can sleep.")"
+        else
+          warn "$(t "nvidia-persistenced n'a pas pu être coupé." "Couldn't turn off nvidia-persistenced.")"
+        fi
+      fi
     fi
   fi
 

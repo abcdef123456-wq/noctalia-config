@@ -229,6 +229,10 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
   Réglage dans `~/.config/uwsm/gpu-mode` : `auto` (défaut), `igpu`, `both` ou `off` (détails dans `~/.config/uwsm/env-hyprland`).
 - Lancer une appli sur la NVIDIA : `nvidia-run <commande>` (Steam : `nvidia-run %command%`), quand la règle la veut ;
   les applis lancées depuis la barre y vont alors d'elles-mêmes. Pour un essai hors règle : `NC_FORCER_RTX=1 nvidia-run <commande>`.
+- La NVIDIA dort (0 W) quand rien ne s'en sert. Si elle reste allumée plus de 30 s en Économie ou sur batterie, une
+  notification dit pourquoi (une fois par cause) : `nvidia-persistenced` (le script propose de le couper sur un portable
+  hybride), ou une appli ouverte dessus, avec un bouton pour la relancer sur la carte intégrée (rien ne se ferme sans
+  ton clic). `nc-rtx-veille` et la section « RTX » de `nc-diag` donnent l'état.
 - Pilote : sur Arch, le script installe le pilote officiel s'il manque (`nvidia-open`, nécessaire aux RTX 50). Sur Debian 13,
   les RTX 50 demandent le pilote de NVIDIA (celui de Debian, 550, est trop ancien) : le script donne la marche à suivre.
 

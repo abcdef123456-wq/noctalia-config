@@ -289,6 +289,8 @@ def verifier(b):
                     T("écran externe seul, ou pilote graphique pas encore chargé",
                       "external screen only, or graphics driver not loaded yet"))
 
+    rtx(b)
+
     # ── Partage d'écran et applis Electron (Discord, VS Code…) : portails ──
     b.titre(T("Partage d'écran (Discord, navigateur…)", "Screen sharing (Discord, browser…)"))
     actif, _ = sortie(["systemctl", "--user", "is-active", "xdg-desktop-portal-hyprland"])
@@ -426,6 +428,87 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+
+
+def rtx(b):
+    """Section « RTX », sur un PC hybride seulement : la NVIDIA dort-elle (0 W) quand rien ne s'en sert ? L'état vient de
+    nc-rtx-veille (lu dans /sys et /proc, sans réveiller la carte ; nvidia-smi seulement si elle est déjà allumée)."""
+    voisin = os.path.join(os.path.dirname(os.path.realpath(__file__)), "nc-rtx-veille")
+    v, _ = sortie([voisin if os.path.exists(voisin) else os.path.join(BIN, "nc-rtx-veille"), "etat", "--conso"], 20)
+    try:
+        e = json.loads(v)
+    except ValueError:
+        return
+    if not e.get("hybride"):
+        return
+    b.titre("RTX")
+    if e["mode"] == "dediee":
+        b.ok(T("mode Dédiée : la carte NVIDIA porte l'écran interne, elle reste allumée",
+               "Discrete mode: the NVIDIA GPU drives the built-in display, it stays on"))
+        return
+    cles = {c["cle"] for c in e["causes"]}
+    dit = cles if e["runtime_status"] == "active" and e["doit_dormir"] else set()   # causes déjà dites en tête
+    quoi_control = T(f"pour essayer : echo auto | sudo tee /sys/bus/pci/devices/{e['bus']}/power/control ; pour de bon, la règle "
+                     "udev de la documentation NVIDIA (Dynamic Power Management)",
+                     f"to try: echo auto | sudo tee /sys/bus/pci/devices/{e['bus']}/power/control; for good, the udev rule from "
+                     "the NVIDIA documentation (Dynamic Power Management)")
+    apps = ", ".join(f"{p['nom']} ({p['pid']})" for p in e["processus"])
+    conso = f" · {e['conso']}" if e.get("conso") else ""
+    etat = e["runtime_status"]
+    if etat == "suspended":
+        b.ok(T("carte NVIDIA endormie (0 W)", "NVIDIA GPU asleep (0 W)")
+             + (T(f" ; ouverte par {apps}, sans la réveiller", f"; opened by {apps}, without waking it") if apps else ""))
+    elif etat == "active" and e["doit_dormir"]:
+        quoi = {"persistenced": T("sudo systemctl disable --now nvidia-persistenced (install.sh le propose)",
+                                  "sudo systemctl disable --now nvidia-persistenced (install.sh offers it)"),
+                "control": quoi_control,
+                "inconnue": T("attends 30 s : elle s'endort parfois un peu après la dernière appli ; si ça reste, nc-diag rapport",
+                              "wait 30 s: it sometimes sleeps a little after the last app; if it persists, nc-diag report")}
+        c = e["causes"][0] if e["causes"] else {"cle": "inconnue", "texte": ""}
+        b.avert(T("carte NVIDIA allumée alors qu'elle devrait dormir", "NVIDIA GPU on while it should be asleep") + conso
+                + " : " + T(" ; ", "; ").join(x["texte"] for x in e["causes"]),
+                quoi.get(c["cle"], T(f"relance {c.get('nom', '')} sur la carte intégrée (la notification le propose), ou ferme-le",
+                                     f"restart {c.get('nom', '')} on the integrated GPU (the notification offers it), or close it")))
+    elif etat == "active":
+        b.ok(T("carte NVIDIA allumée", "NVIDIA GPU on") + conso
+             + (T(f" (Performance ou secteur) ; utilisée par {apps}", f" (Performance or plugged in); used by {apps}") if apps
+                else T(" (Performance ou secteur)", " (Performance or plugged in)")))
+    elif etat in ("suspending", "resuming"):
+        b.ok(T(f"carte NVIDIA en train de changer d'état ({etat})", f"NVIDIA GPU changing state ({etat})"))
+    else:
+        b.avert(T(f"état de veille de la carte NVIDIA : {etat or 'illisible'}", f"NVIDIA GPU sleep state: {etat or 'unreadable'}"),
+                T("le pilote ne gère pas la mise en veille de la carte (voir DynamicPowerManagement ci-dessous)",
+                  "the driver doesn't handle putting the GPU to sleep (see DynamicPowerManagement below)"))
+    # nvidia-persistenced (paquets NVIDIA d'Arch, Fedora, Debian) : la carte reste initialisée, donc allumée
+    if not e["persistenced"]:
+        b.ok(T("nvidia-persistenced arrêté", "nvidia-persistenced stopped"))
+    elif "persistenced" in dit:
+        pass
+    elif e["portable"]:
+        b.avert(T("nvidia-persistenced actif : la carte NVIDIA ne s'endort jamais (environ 5 W)",
+                  "nvidia-persistenced running: the NVIDIA GPU never sleeps (about 5 W)"),
+                T("sudo systemctl disable --now nvidia-persistenced (install.sh le propose)",
+                  "sudo systemctl disable --now nvidia-persistenced (install.sh offers it)"))
+    else:
+        b.ok(T("nvidia-persistenced actif (PC fixe)", "nvidia-persistenced running (desktop PC)"))
+    # power/control : « auto » laisse le noyau endormir la carte
+    if e["control"] == "auto":
+        b.ok(T("mise en veille par le noyau permise (power/control = auto)", "kernel sleep allowed (power/control = auto)"))
+    elif e["control"] and "control" not in dit:
+        b.avert(T(f"le noyau ne peut pas endormir la carte NVIDIA (power/control = {e['control']})",
+                  f"the kernel can't put the NVIDIA GPU to sleep (power/control = {e['control']})"), quoi_control)
+    # DynamicPowerManagement du pilote NVIDIA : 2 ou 3 (défaut des cartes récentes) endorment la carte
+    dpm = e["dynamic_pm"]
+    if dpm is None:
+        b.ok(T(f"pilote {e['pilote'] or '?'} : pas de /proc/driver/nvidia (réglage DynamicPowerManagement sans objet)",
+               f"{e['pilote'] or '?'} driver: no /proc/driver/nvidia (DynamicPowerManagement setting not applicable)"))
+    elif dpm in ("2", "3", "0x02", "0x03"):
+        b.ok(f"DynamicPowerManagement = {dpm}")
+    else:
+        b.avert(T(f"DynamicPowerManagement = {dpm or '?'} : le pilote NVIDIA n'endort pas la carte",
+                  f"DynamicPowerManagement = {dpm or '?'}: the NVIDIA driver doesn't put the GPU to sleep"),
+                T("options nvidia NVreg_DynamicPowerManagement=0x02 dans /etc/modprobe.d/nvidia.conf, puis redémarrer",
+                  "options nvidia NVreg_DynamicPowerManagement=0x02 in /etc/modprobe.d/nvidia.conf, then restart"))
 
 
 def details():
