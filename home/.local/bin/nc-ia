@@ -1716,8 +1716,8 @@ def apercu_action(v, fenetres):
     return v
 
 
-def placer_zone(g):
-    """Pose la fenêtre dans sa zone : la place utile de son écran (sous la barre et ses réservations, marges de Hyprland
+def zone_lua(g):
+    """Les commandes qui posent la fenêtre dans sa zone, ou None : la place utile de son écran (sous la barre et ses réservations, marges de Hyprland
     déduites), découpée en pourcentages, avec l'écart entre fenêtres de Hyprland ; la fenêtre devient libre."""
     def lire(cmd):
         try:
@@ -1734,7 +1734,7 @@ def placer_zone(g):
     fenetre = next((c for c in (lire(["hyprctl", "clients", "-j"]) or []) if c.get("address") == adr), None)
     ecran = next((m for m in (lire(["hyprctl", "monitors", "-j"]) or []) if fenetre and m.get("id") == fenetre.get("monitor")), None)
     if not fenetre or not ecran:
-        return False, T("fenêtre ou écran introuvable", "window or screen not found")
+        return None
     k = float(ecran.get("scale") or 1)
     lw, lh = ecran["width"] / k, ecran["height"] / k
     if int(ecran.get("transform") or 0) % 2:
@@ -1756,11 +1756,30 @@ def placer_zone(g):
         lua.append(f"hl.dsp.window.float({{ action = 'set', window = '{sel}' }})")
     lua += [f"hl.dsp.window.resize({{ x = {round(pw)}, y = {round(ph)}, window = '{sel}' }})",
             f"hl.dsp.window.move({{ x = {round(px_)}, y = {round(py_)}, window = '{sel}' }})"]
-    for l in lua:
-        code, t = sortie_cmd(["hyprctl", "dispatch", l])
-        if code != 0 or "error" in t.lower():
-            return False, t
-    return True, ""
+    return lua
+
+
+def lua_fenetre(v):
+    """Les commandes Hyprland (Lua) d'une action sur les fenêtres ou les bureaux, ou None si elle ne se fait pas."""
+    o, g = v["outil"], v["args"]
+    if o == "fenetre_zone":
+        return zone_lua(g)
+    sel = f"address:{g.get('adresse', '')}"
+    return [{"fenetre_bureau": f"hl.dsp.window.move({{ workspace = {g.get('bureau')}, follow = false, window = '{sel}' }})",
+             "fenetre_direction": f"hl.dsp.window.move({{ direction = '{g.get('direction')}', window = '{sel}' }})",
+             "fenetre_echanger": f"hl.dsp.window.swap({{ window = '{sel}', target = 'address:{g.get('autre', '')}' }})",
+             "fenetre_libre": f"hl.dsp.window.float({{ action = '{'set' if g.get('etat') == 'on' else 'unset'}', window = '{sel}' }})",
+             "fenetre_plein_ecran": f"hl.dsp.window.fullscreen({{ action = '{'set' if g.get('etat') == 'on' else 'unset'}', window = '{sel}' }})",
+             "bureau_nommer": f"hl.dsp.workspace.rename({{ workspace = {g.get('bureau')}, name = [[{g.get('nom', '')}]] }})"}[o]]
+
+
+def ensemble(lua):
+    """Toutes les commandes dans le même appel : Hyprland les applique dans la même image, et chaque fenêtre glisse
+    d'un seul mouvement vers sa place (une par une, elle sautait : libre au centre, puis taille, puis place)."""
+    if not lua:
+        return True
+    code, t = sortie_cmd(["hyprctl", "eval", " ".join(f"hl.dispatch({l})" for l in lua)])
+    return code == 0 and "error" not in t.lower()
 
 
 def executer_action(a):
@@ -1799,18 +1818,15 @@ def executer_action(a):
     if o == "reglage":
         code, t = sortie_cmd([nb + "nc-reglages", "set", g["cle"], g["valeur"]], 60)
         return code == 0, t
-    if o == "fenetre_zone":
-        return placer_zone(g)
     if o.startswith("fenetre_") or o == "bureau_nommer":
-        sel = f"address:{g.get('adresse', '')}"
-        lua = {"fenetre_bureau": f"hl.dsp.window.move({{ workspace = {g.get('bureau')}, follow = false, window = '{sel}' }})",
-               "fenetre_direction": f"hl.dsp.window.move({{ direction = '{g.get('direction')}', window = '{sel}' }})",
-               "fenetre_echanger": f"hl.dsp.window.swap({{ window = '{sel}', target = 'address:{g.get('autre', '')}' }})",
-               "fenetre_libre": f"hl.dsp.window.float({{ action = '{'set' if g.get('etat') == 'on' else 'unset'}', window = '{sel}' }})",
-               "fenetre_plein_ecran": f"hl.dsp.window.fullscreen({{ action = '{'set' if g.get('etat') == 'on' else 'unset'}', window = '{sel}' }})",
-               "bureau_nommer": f"hl.dsp.workspace.rename({{ workspace = {g.get('bureau')}, name = [[{g.get('nom', '')}]] }})"}[o]
-        code, t = sortie_cmd(["hyprctl", "dispatch", lua])
-        return code == 0 and "error" not in t.lower(), t
+        lua = lua_fenetre(a)
+        if lua is None:
+            return False, T("fenêtre ou écran introuvable", "window or screen not found")
+        for l in lua:
+            code, t = sortie_cmd(["hyprctl", "dispatch", l])
+            if code != 0 or "error" in t.lower():
+                return False, t
+        return True, ""
     if o == "maj_verifier":
         code, t = sortie_cmd([nb + "nc-paquets", "verifier"], 300)
         return code == 0, t
@@ -1986,6 +2002,15 @@ def ranger(bureau_seul):
                       "Turned off in nc-settings → Artificial intelligence (windows and desktops)."))
         return 1
     bureau = bureau_affiche() if bureau_seul else None
+    # Rien n'a bougé depuis le dernier rangement (même raccourci, même bureau) : ce second appui remet comme avant
+    try:
+        dernier = json.loads(ANNULER_RANGEMENT.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        dernier = None
+    if isinstance(dernier, dict) and dernier.get("portee") == bureau and inchange(dernier.get("apres"), photo_fenetres(), bureau):
+        annuler_rangement()
+        dire(titre, T("Disposition d'avant remise.", "Previous layout restored."))
+        return 0
     fenetres = fenetres_bureau(bureau)
     if not fenetres:
         dire(titre, T("Aucune fenêtre à ranger.", "No window to tidy."))
@@ -2017,28 +2042,51 @@ def ranger(bureau_seul):
         dire(titre, (str(d.get("reponse") or "") or T("Rien à changer : c'est déjà bien rangé.", "Nothing to change: already tidy."))[:300])
         return 0
     avant = photo_fenetres()
+    lua, faits = [], []
+    for v in valides:
+        l = lua_fenetre(v)
+        if l:
+            lua += l
+            faits.append(v["libelle"])
+    if not faits or not ensemble(lua):
+        dire(titre, T("Rien n'a pu être déplacé.", "Nothing could be moved."))
+        return 1
+    if bureau is not None:
+        for v in valides:
+            if v["outil"] == "fenetre_direction":
+                garder_sur_bureau(v["args"]["adresse"], bureau)
     if avant:
+        time.sleep(0.3)                                  # l'état final (les animations ne changent pas la cible)
         try:
             ANNULER_RANGEMENT.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(ANNULER_RANGEMENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(avant, f)
+                json.dump(dict(avant, portee=bureau, apres=photo_fenetres()), f)
         except OSError:
             pass
-    faits = []
-    for v in valides:
-        ok, _ = executer_action(v)
-        if ok and bureau is not None and v["outil"] == "fenetre_direction":
-            garder_sur_bureau(v["args"]["adresse"], bureau)
-        if ok:
-            faits.append(v["libelle"])
-    if not faits:
-        dire(titre, T("Rien n'a pu être déplacé.", "Nothing could be moved."))
-        return 1
     corps = " · ".join(faits[:4]) + (T(f" (+ {len(faits) - 4} autres)", f" (+ {len(faits) - 4} more)") if len(faits) > 4 else "")
     if dire(T("Fenêtres rangées", "Windows tidied"), corps, annuler=bool(avant)) == "annuler":
         annuler_rangement()
     return 0
+
+
+def inchange(apres, maintenant, bureau):
+    """Vrai si les fenêtres sont restées comme le rangement les a laissées : mêmes fenêtres (sur ce bureau en mode
+    « ce bureau »), même bureau, libres ou non, plein écran ou non, et même place à quelques points près."""
+    if not apres or not maintenant:
+        return False
+    garde = lambda f: {a: x for a, x in f.get("fenetres", {}).items() if bureau is None or x.get("bureau") == bureau}
+    a, m = garde(apres), garde(maintenant)
+    if set(a) != set(m) or not a:
+        return False
+    for adr, x in a.items():
+        y = m[adr]
+        if (x["bureau"], x["libre"], bool(x["plein"])) != (y["bureau"], y["libre"], bool(y["plein"])):
+            return False
+        if x["libre"] and any(abs(int(u) - int(w)) > 6 for u, w in zip((x.get("at") or []) + (x.get("taille") or []),
+                                                                       (y.get("at") or []) + (y.get("taille") or []))):
+            return False
+    return True
 
 
 def annuler_rangement():
@@ -2066,8 +2114,7 @@ def annuler_rangement():
     for n, nom_ in avant.get("bureaux", {}).items():
         if n.isdigit() and maintenant["bureaux"].get(n) not in (None, nom_) and isinstance(nom_, str) and "]]" not in nom_:
             lua.append(f"hl.dsp.workspace.rename({{ workspace = {int(n)}, name = [[{nom_}]] }})")
-    for l in lua:
-        sortie_cmd(["hyprctl", "dispatch", l])
+    ensemble(lua)                                        # d'un seul mouvement, comme le rangement
     ANNULER_RANGEMENT.unlink(missing_ok=True)
     return 0
 

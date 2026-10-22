@@ -554,7 +554,7 @@ class IA(unittest.TestCase):
         clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [0, 0], "size": [800, 600]},
                    {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": True, "fullscreen": 0, "at": [100, 50], "size": [900, 700]}]
         apres = json.loads(json.dumps(clients)); apres[0]["workspace"]["id"] = 1
-        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in dispatch) case "$*" in *"workspace = 1"*) : > "$HOME/bouge";; esac;; '
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in dispatch|eval) case "$*" in *"workspace = 2"*) rm -f "$HOME/bouge";; *"workspace = 1"*) : > "$HOME/bouge";; esac;; '
                                   'clients) if [ -e "$HOME/bouge" ]; then echo \'' + json.dumps(apres) + '\'; else echo \'' + json.dumps(clients) + '\'; fi;; '
                                   'workspaces) echo \'[{"id": 1, "name": "1", "windows": 0}, {"id": 2, "name": "2", "windows": 2}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
         self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"; case "$*" in *annuler=*) echo annuler;; esac')
@@ -573,6 +573,22 @@ class IA(unittest.TestCase):
         # « Annuler » : kitty revient sur le bureau 2
         self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", a)
         self.assertFalse((self.home / "cache/nc/rangement-avant.json").exists())
+        # Tout d'un coup : un seul appel à Hyprland, dans la même image
+        self.assertEqual(a.count("hyprctl eval hl.dispatch(hl.dsp.window.move({ workspace = 1"), 1)
+        # Rappuyer sans rien avoir changé : la disposition d'avant revient, sans IA
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        self.journal.unlink()
+        self.lancer("organiser")                              # range (kitty → bureau 1)
+        self.assertTrue((self.home / "bouge").exists())
+        Faux.requetes.clear()
+        self.journal.unlink()
+        self.lancer("organiser")                              # rien n'a bougé depuis : remis comme avant
+        a = self.appels()
+        self.assertFalse(Faux.requetes, "pas d'IA pour remettre comme avant")
+        self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", a)
+        self.assertIn("Disposition d'avant remise", a)
+        self.lancer("organiser")                              # et le suivant range à nouveau
+        self.assertTrue(Faux.requetes)
         # Coupé : rien
         self.reglages("IA_ORGANISER=non\n")
         self.assertNotEqual(self.lancer("organiser").returncode, 0)

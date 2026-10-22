@@ -124,7 +124,9 @@ Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit do
   droite), sous la barre et avec les marges de Hyprland. Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
   si « L'IA peut agir » est coupé — seulement des fenêtres et des bureaux, chaque action revérifiée — puis une
   notification de l'île dit ce qui a bougé, avec **Annuler** (bureau, état libre ou plein écran, place et nom des
-  bureaux remis comme avant). Réglage « Ranger les fenêtres » : tout de suite (défaut), me montrer le plan d'abord,
+  bureaux remis comme avant). Toutes les fenêtres bougent en même temps, d'un seul glissement. **Rappuyer** sur le
+  même raccourci sans avoir rien changé depuis remet la disposition d'avant (sans IA) ; l'appui suivant range à
+  nouveau. Réglage « Ranger les fenêtres » : tout de suite (défaut), me montrer le plan d'abord,
   ou non. Dans le Spotlight (« @ »), l'IA peut aussi déplacer, échanger, rendre libre ou plein écran, nommer un
   bureau. L'IA voit l'appli, le titre (50 caractères) et la place de chaque fenêtre ;
 - **services de la session** : redémarrer, démarrer, arrêter (signalé ⚠), lire le journal pour comprendre un échec —
