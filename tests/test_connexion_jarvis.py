@@ -59,6 +59,10 @@ ShellRoot {
    verifier(fen.url.text === "https://ancien.example" && fen.ident.text === "moi" && fen.delai.text === "120", "pré-remplissage : " + fen.url.text)
    verifier(fen.cleEnregistree && fen.cle.text === "", "la clé n'est jamais relue")
    verifier(fen.avertissement === "", "pas d'avertissement pour une adresse HTTPS publique")
+   // Issue #5 : Tailscale (100.64.0.0/10, *.ts.net) en http:// : chiffré par Tailscale, aucun avertissement
+   fen.url.text = "http://100.101.2.3:8000"; verifier(fen.avertissement === "", "Tailscale (IP) : " + fen.avertissement)
+   fen.url.text = "http://pi.tail1234.ts.net:8000"; verifier(fen.avertissement === "", "Tailscale (MagicDNS) : " + fen.avertissement)
+   fen.url.text = "http://100.200.0.1:8000"; verifier(fen.avertissement.indexOf("HTTP") >= 0, "hors de 100.64.0.0/10 : HTTP en clair")
    fen.url.text = "http://192.168.1.28:8000"
    verifier(fen.avertissement.indexOf("privée") >= 0 && trouver(fen.contentItem, "nc-connexion-avertissement").visible, "avertissement d'adresse privée absent")
    fen.cle.text = "nouvelle-cle-secrete"; fen.tester(); etape++; return }

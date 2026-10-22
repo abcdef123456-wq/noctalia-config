@@ -376,6 +376,14 @@ class Assistant(unittest.TestCase):
                     "https://100.64.0.1", "https://mon-pi.tailnet.ts.net"):
             with self.subTest(url=url):
                 self.assertFalse(self.m.hote_prive(url))
+        # Issue #5 : Tailscale en http:// : ni « privée », ni « HTTP en clair »
+        for url in ("http://100.101.2.3:8000", "http://pi.tail1234.ts.net:8000", "http://100.127.255.254"):
+            with self.subTest(url=url):
+                self.assertTrue(self.m.hote_tailscale(url))
+                self.assertEqual(self.m.avertissement(url), "")
+        for url in ("http://100.128.0.1:8000", "http://100.63.0.1"):
+            self.assertFalse(self.m.hote_tailscale(url), url)
+            self.assertIn("HTTP", self.m.avertissement(url))
 
     def test_verifier_json_without_configuration_and_invalid_status(self):
         self.server.reponse = (200, b'{}')

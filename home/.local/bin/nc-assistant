@@ -141,10 +141,22 @@ def valider(c):
     return dict(URL=url, SECRET_KEY=c["SECRET_KEY"], USER_ID=ident, TIMEOUT=timeout)
 
 
-def hote_prive(url):
-    """Vrai si l'hôte n'est joignable que depuis le réseau local du serveur."""
+def hote_tailscale(url):
+    """Vrai pour une adresse Tailscale (100.64.0.0/10 ou un nom MagicDNS *.ts.net) : joignable de partout sur ton
+    réseau Tailscale et chiffrée de bout en bout (WireGuard), même en http:// (issue #5)."""
     h = (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
-    if not h:
+    if h.endswith(".ts.net"):
+        return True
+    try:
+        return ipaddress.ip_address(h) in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        return False
+
+
+def hote_prive(url):
+    """Vrai si l'hôte n'est joignable que depuis le réseau local du serveur (pas une adresse Tailscale)."""
+    h = (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
+    if not h or hote_tailscale(url):
         return False
     if h == "localhost" or h.endswith(".local") or h.endswith(".lan") or h.endswith(".home.arpa"):
         return True
@@ -253,7 +265,7 @@ def avertissement(url):
                  "HTTPS d'un tunnel (Cloudflare, Tailscale).",
                  "Local or private address: it only works on the server's network. From elsewhere, use a tunnel's HTTPS "
                  "address (Cloudflare, Tailscale).")
-    if url.startswith("http://"):
+    if url.startswith("http://") and not hote_tailscale(url):
         return T("HTTP en clair : hors du réseau local, utilise HTTPS.", "Plain HTTP: outside the local network, use HTTPS.")
     return ""
 
@@ -305,7 +317,7 @@ def configurer(terminal=False):
                 "(Cloudflare, Tailscale) exposée par le serveur.",
                 "Warning: this is a local/private URL. It only works on the same network as the server. "
                 "From another network, use the HTTPS URL of a tunnel (Cloudflare, Tailscale) exposed by the server."))
-    elif finale.startswith("http://"):
+    elif finale.startswith("http://") and not hote_tailscale(finale):
         print(T("Attention : HTTP en clair. Hors du réseau local, utilise impérativement HTTPS.",
                 "Warning: plain HTTP. Outside the local network, HTTPS is required."))
     print(T("Teste la connexion avec : nc-assistant verifier",
@@ -421,6 +433,10 @@ def verifier(c, json_out=False):
                         "Depuis un autre réseau, utilise l'URL HTTPS d'un tunnel (Cloudflare, Tailscale).",
                         "Hint: this is a local/private URL; it only works on the server's network. "
                         "From another network, use the HTTPS URL of a tunnel (Cloudflare, Tailscale)."),
+                      file=sys.stderr)
+            elif hote_tailscale(c["URL"]):
+                print(T("Indice : adresse Tailscale ; vérifie que ce PC est connecté à ton réseau Tailscale (tailscale status).",
+                        "Hint: Tailscale address; check this PC is connected to your Tailscale network (tailscale status)."),
                       file=sys.stderr)
             elif c["URL"].startswith("http://"):
                 print(T("Indice : utilise HTTPS hors du réseau local.",

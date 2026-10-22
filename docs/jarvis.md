@@ -195,7 +195,9 @@ Une installation de la config ou l’ouverture du cockpit ne démarre aucun back
 
 Pour l’accès distant du bureau, suivre le [guide réseau JARVIS-BIS](https://github.com/RaphaelBlanc/JARVIS-BIS/blob/8867dd093c43a5e5d3f0a13d3e14600e57edc96a/docs/ACCES_DISTANT.md)
 et son `scripts/expose-gateway.sh` : tunnel HTTPS vers le gateway, **jamais vers le runner**. Avec Tailscale et un
-bind local, on peut par exemple utiliser Tailscale Serve comme proxy local ; accéder directement à une IP LAN/VPN
+bind local, on peut par exemple utiliser Tailscale Serve comme proxy local (Tailscale est recommandé : un tunnel
+Cloudflare gratuit coupe les requêtes au bout de 100 secondes, HTTP 524 ; les adresses Tailscale `100.64.0.0/10`
+et `*.ts.net` ne déclenchent pas d'avertissement « HTTP en clair », la liaison étant chiffrée) ; accéder directement à une IP LAN/VPN
 exige un bind et un pare-feu adaptés sur le serveur. Les tokens des bots et leurs whitelists restent ceux du backend.
 
 **Un gateway exposé n'a qu'une protection : sa `SECRET_KEY`.** La confirmation des actions sensibles de l'interface

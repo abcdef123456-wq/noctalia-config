@@ -27,6 +27,9 @@ FloatingWindow {
     readonly property string avertissement: {
         var u = url.text.trim().toLowerCase(), h = (u.match(/^https?:\/\/([^/:]+)/) || [null, ""])[1]
         if (!h) return ""
+        // Tailscale (100.64.0.0/10, *.ts.net) : joignable de partout sur ton réseau Tailscale, chiffré (WireGuard)
+        var m = h.match(/^100\.(\d+)\./)
+        if (/\.ts\.net\.?$/.test(h) || (m && +m[1] >= 64 && +m[1] <= 127)) return ""
         if (h === "localhost" || /\.(local|lan|home\.arpa)$/.test(h) || /^(10|127)\./.test(h) || /^192\.168\./.test(h)
             || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^169\.254\./.test(h) || /^\[?(fd|fe80|::1)/.test(h))
             return Reglages.t("Adresse locale ou privée : elle ne marche que sur le réseau du serveur. Depuis ailleurs, utilise l'adresse HTTPS d'un tunnel (Cloudflare, Tailscale).",

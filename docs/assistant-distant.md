@@ -45,8 +45,13 @@ Une URL du type `http://192.168.1.28:8000` ou `http://mon-pi.local:8000` est
 une adresse **privée** : elle exige un accès au réseau du serveur, directement ou par VPN.
 Depuis un autre réseau sans ce routage, la bonne clé ne suffit pas. Il faut exposer le gateway (port `8000`) avec un tunnel côté serveur :
 
-- **Cloudflare Tunnel** : URL HTTPS publique, aucun port à ouvrir ;
-- **Tailscale** : URL HTTPS privée, visible seulement par tes appareils ;
+- **Tailscale** (recommandé) : une adresse `http://100.x.y.z:8000` ou `https://serveur.ton-tailnet.ts.net`, visible
+  seulement par tes appareils, chiffrée de bout en bout (WireGuard) même en `http://` — `nc-assistant` et la fenêtre
+  « Connexion JARVIS » ne t'avertissent donc pas « HTTP en clair » pour ces adresses. Aucune limite de durée :
+  le bon choix pour les longues tâches et les agents. Le PC doit être connecté à Tailscale (`tailscale status`) ;
+- **Cloudflare Tunnel** : URL HTTPS publique, aucun port à ouvrir ; mais un tunnel gratuit (`trycloudflare.com`)
+  coupe toute requête qui n'a pas répondu au bout de **100 secondes** (erreur HTTP 524) : une longue tâche échoue,
+  et en mode automatique une autre IA prend le relais (c'est annoncé en tête de la réponse) ;
 - **Render** : gateway hébergé, relié au runner par un tunnel.
 
 Le dépôt du serveur fournit `scripts/expose-gateway.sh` et le guide
