@@ -9,15 +9,17 @@ Une ligne :
   batterie  statut (Charging, Discharging…), pct, watts (puissance lissée sur 5 s), restant (secondes avant vide, ou
             avant pleine en charge) ; null sans batterie
   top       les 5 programmes qui ont pris le plus de processeur sur les 30 dernières secondes, regroupés par appli (même
-            programme), sans les fils du noyau : nom, pct (du processeur entier), watts (leur part estimée de la
-            consommation : part du temps processeur utilisé × puissance, seulement en décharge ; sinon null)
+            exécutable, ou même appli installée ; le script pour un interprète), sans les fils du noyau : nom (celui de
+            l'appli, tiré de son .desktop par nc-apps, sinon celui de l'exécutable), pct (du processeur entier), watts
+            (leur part estimée de la consommation : part du temps processeur utilisé × puissance, seulement en
+            décharge ; sinon null)
   rtx       carte NVIDIA d'un PC hybride (par nc-rtx-veille, qui ne la réveille pas) : etat (endormie ou allumee) et
             cause ; null sans NVIDIA ou sur un PC non hybride
   sante     garde (capacité gardée, en % de celle d'origine), cycles, limite (active, seuil) ; null si rien n'est connu
 Calcul de la batterie : le même que le widget de la barre (nc-batterie/calcul.luau) : µW, µWh, µA × µV, µAh × V,
 plusieurs batteries additionnées.
-Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), NC_RTX_VEILLE (commande à la place de nc-rtx-veille, vide : aucune),
-NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut).
+Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), XDG_DATA_HOME et XDG_DATA_DIRS (les .desktop), NC_RTX_VEILLE
+(commande à la place de nc-rtx-veille, vide : aucune), NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut).
 """
 import json
 import os
@@ -36,8 +38,14 @@ FENETRE_CPU = 30.0     # programmes : temps processeur des 30 dernières seconde
 TOP = 5
 RTX_TOUS = 5           # nc-rtx-veille une mesure sur 5 (toutes les 10 s) : il parcourt les fichiers ouverts de tous les processus
 PF_KTHREAD = 0x00200000
-# Programmes lancés par un interprète : le nom du script (comm) dit mieux de qui il s'agit que « python3 »
-INTERPRETES = re.compile(r"^(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|sh|bash|dash|zsh|fish|lua[0-9.]*|env)$")
+# Programmes lancés par un interprète : le nom du script dit mieux de qui il s'agit que « python3 »
+INTERPRETES = re.compile(r"^(python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|sh|bash|dash|zsh|fish|lua[0-9.]*|luajit|node|nodejs|"
+                         r"bun|deno|php[0-9.]*|env)$")
+# Options d'un interprète suivies de code, pas d'un script : le nom du processus (comm) reste le meilleur
+CODE_EN_LIGNE = {"-c", "-e", "-E", "--eval", "-p", "--print", "-r"}
+# Dossiers communs à tous les programmes : y être ne dit pas de quelle appli on vient
+DOSSIERS_COMMUNS = {"/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/usr/games", "/usr/lib", "/usr/lib64",
+                    "/usr/libexec", "/opt", "/app/bin", "/snap/bin"}
 
 
 def lire(chemin):
@@ -215,17 +223,107 @@ def sante(liste):
 
 
 # ── Programmes ──
+class Applis:
+    """Le nom des applis installées, d'après leurs .desktop, lus une seule fois (par nc-apps, importé : ses dossiers,
+    sa langue, sa lecture de la ligne Exec). Sans nc-apps : aucun nom, les exécutables gardent le leur."""
+    def __init__(self):
+        self.table = None
+
+    def charger(self):
+        self.table = {}
+        try:
+            from importlib.machinery import SourceFileLoader
+            from importlib.util import module_from_spec, spec_from_loader
+            chargeur = SourceFileLoader("nc_apps", os.path.join(ICI, "nc-apps"))
+            apps = module_from_spec(spec_from_loader("nc_apps", chargeur))
+            chargeur.exec_module(apps)
+            entrees = sorted(apps.entries().items())
+        except Exception:                           # nc-apps absent ou cassé : repli silencieux
+            return
+        for _, chemin in entrees:
+            try:
+                e = apps.parse(chemin)
+                if not e or not apps.visible(e):
+                    continue
+                argv = apps.exec_argv(e)
+                nom = apps.loc(e, "Name")
+            except Exception:
+                continue
+            if not argv or not nom:
+                continue
+            # flatpak run, env VAR=x prog… : le programme est plus loin ; sinon le premier mot
+            prog = argv[0]
+            if os.path.basename(prog) == "env":
+                prog = next((a for a in argv[1:] if "=" not in a and not a.startswith("-")), prog)
+            reel = os.path.realpath(prog if os.path.isabs(prog) else (shutil.which(prog) or prog))
+            cles = [reel, prog, os.path.basename(prog).lower(), os.path.basename(reel).lower()]
+            if os.path.isabs(reel) and os.path.dirname(reel) not in DOSSIERS_COMMUNS:
+                cles.append("dossier:" + os.path.dirname(reel))     # /opt/google/chrome/google-chrome → …/chrome
+            wm = (e.get("StartupWMClass") or "").lower()
+            if wm:
+                cles.append(wm)
+            for c in cles:
+                self.table.setdefault(c, nom)
+
+    def nom(self, chemin):
+        """Le nom de l'appli d'un exécutable ou d'un script (chemin complet, nom de base, puis son dossier), ou None."""
+        if self.table is None:
+            self.charger()
+        if not chemin:
+            return None
+        base = os.path.basename(chemin).lower()
+        for c in (chemin, base, base[:-4] if base.endswith(".exe") else None):
+            if c and c in self.table:
+                return self.table[c]
+        d = os.path.dirname(chemin)
+        if os.path.isabs(chemin) and d not in DOSSIERS_COMMUNS:
+            return self.table.get("dossier:" + d)
+        return None
+
+
+APPLIS = Applis()
+
+
 def nom_programme(pid, comm):
-    """Le programme d'un processus : celui de sa ligne de commande (les processus « Isolated Web Co » de Firefox sont
-    tous Firefox), le nom du script pour un interprète, sinon comm."""
-    cmd = lire(os.path.join(PROC, str(pid), "cmdline")) or ""
-    argv0 = cmd.split("\0")[0].split(" --")[0]          # Chrome réécrit sa ligne de commande en une seule chaîne
-    n = re.split(r"[/\\]", argv0)[-1].strip()
-    if not n or INTERPRETES.match(n):
-        n = comm
+    """(groupe, nom) d'un processus. L'exécutable (lien /proc/PID/exe) : les dizaines de processus de Firefox, Chrome
+    ou d'une appli Electron, quel que soit leur nom (« Isolated Web Co », « Browser 13 tab »…), sont une seule appli ;
+    illisible (processus d'un autre utilisateur), le premier mot de la ligne de commande. Pour un interprète, son
+    script (premier argument qui n'est pas une option). Le nom : celui de l'appli installée, sinon de l'exécutable."""
+    d = os.path.join(PROC, str(pid))
+    cmd = lire(os.path.join(d, "cmdline")) or ""
+    args = [a for a in cmd.split("\0") if a]
+    try:
+        exe = os.readlink(os.path.join(d, "exe"))
+        if exe.endswith(" (deleted)"):                  # mis à jour pendant qu'il tourne : le même programme
+            exe = exe[:-len(" (deleted)")]
+    except OSError:
+        exe = (args[0] if args else "").split(" --")[0]     # Chrome réécrit sa ligne de commande en une seule chaîne
+        if exe and not os.path.isabs(exe):                  # réécrite aussi : « sshd: /usr/bin/sshd -D », « x: attente »
+            exe = exe.split()[0].rstrip(":")
+    chemin = exe.strip()
+    n = re.split(r"[/\\]", chemin)[-1]
+    if INTERPRETES.match(n) or (not n and INTERPRETES.match(comm)):
+        chemin = None
+        for a in args[1:]:
+            if a in CODE_EN_LIGNE:
+                break
+            if not a.startswith("-"):
+                chemin = a
+                break
+        n = re.split(r"[/\\]", chemin)[-1] if chemin else comm
+        chemin = chemin or comm
+    elif not n:
+        n = chemin = comm
     if n.lower().endswith(".exe"):
         n = n[:-4]
-    return n or "?"
+    if not re.search(r"[^\W\d_]", n):
+        # Un exécutable nommé par sa version (~/.local/share/claude/versions/2.1.3) : le dossier qui dit son nom
+        n = next((x for x in reversed(re.split(r"[/\\]", chemin)[:-1])
+                  if re.search(r"[^\W\d_]", x) and x.lower() not in ("versions", "version", "bin", "lib", "current")), comm)
+    appli = APPLIS.nom(chemin)
+    if appli:
+        return "appli:" + appli.lower(), appli
+    return "exe:" + chemin, n or "?"
 
 
 def temps_processeur():
@@ -245,7 +343,7 @@ class Mesureur:
     def __init__(self):
         self.puissances = []      # (t, W)
         self.precedent = None     # {(pid, début): ticks}
-        self.noms = {}            # (pid, début) → nom du programme (lu une seule fois par processus)
+        self.noms = {}            # (pid, début) → (groupe, nom) du programme (lu une seule fois par processus)
         self.cpu_avant = None
         self.fenetre = []         # (t, {appli: ticks}, ticks occupés, ticks total)
         self.n = 0
@@ -288,8 +386,8 @@ class Mesureur:
             for cle, ticks in vus.items():
                 d = ticks - self.precedent.get(cle, 0)      # nouveau processus : tout son temps est récent
                 if d > 0:
-                    nom = self.noms[cle]
-                    a = par_appli.setdefault(nom.lower(), [nom, 0])
+                    groupe, nom = self.noms[cle]
+                    a = par_appli.setdefault(groupe, [nom, 0])
                     a[1] += d
             occupe = total = None
             if cpu and self.cpu_avant:

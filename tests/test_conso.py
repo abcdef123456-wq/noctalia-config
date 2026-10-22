@@ -1,7 +1,8 @@
 """Page Charge de l'île : « Qu'est-ce qui vide ma batterie ? » et santé de la batterie.
 
 nc-conso est testé avec un faux /sys (NC_SYSFS) et un faux /proc (NC_PROC) : lissage de la puissance sur 5 s, temps
-restant, programmes regroupés par appli sans le noyau, part estimée en watts, carte NVIDIA absente ou non, champs de
+restant, programmes regroupés par exécutable (lien exe, sinon ligne de commande ; le script d'un interprète) et
+nommés d'après le .desktop de l'appli (faux dossiers XDG), sans le noyau, part estimée en watts, carte NVIDIA absente ou non, champs de
 santé absents. La page Charge réelle est chargée hors écran avec un faux nc-conso : les lignes s'affichent, les champs
 absents sont masqués, et rien n'est lu tant que la page n'est pas affichée. HOME isolé, jamais le vrai.
 """
@@ -56,11 +57,25 @@ class FauxSysteme:
         d.mkdir()
         (d / "uevent").write_text("POWER_SUPPLY_TYPE=Mains\nPOWER_SUPPLY_ONLINE=0\n")
 
-    def processus(self, pid, comm, ticks, cmdline=None, ppid=1, drapeaux=0):
+    def processus(self, pid, comm, ticks, cmdline=None, ppid=1, drapeaux=0, exe=None):
+        """exe : la cible du lien /proc/PID/exe ; « illisible » : un lien qu'on ne peut pas lire (processus d'un autre
+        utilisateur : ici un fichier ordinaire, readlink échoue de même) ; None : pas de lien (fil du noyau)."""
         d = self.proc / str(pid)
         d.mkdir(exist_ok=True)
         (d / "stat").write_text(ligne_stat(pid, comm, ppid, ticks, drapeaux))
         (d / "cmdline").write_bytes((cmdline if cmdline is not None else "").encode())
+        lien = d / "exe"
+        if exe and not lien.is_symlink() and not lien.exists():
+            if exe == "illisible":
+                lien.write_text("")
+            else:
+                lien.symlink_to(exe)
+
+    def appli(self, ident, nom, exec_):
+        """Un .desktop dans le faux dossier des applis (XDG_DATA_HOME)."""
+        d = self.sys.parent / "share/applications"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{ident}.desktop").write_text(f"[Desktop Entry]\nType=Application\nName={nom}\nExec={exec_}\n")
 
     def processeur(self, occupe, total):
         """/proc/stat : ticks occupés et totaux (tous les cœurs) depuis le démarrage."""
@@ -79,7 +94,9 @@ class Conso(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.racine = Path(tmp.name)
         self.f = FauxSysteme(self.racine)
+        # Les .desktop : seulement ceux du test (jamais ceux du système)
         self.env = patch.dict(os.environ, HOME=str(self.racine), XDG_STATE_HOME=str(self.racine / "state"),
+                              XDG_DATA_HOME=str(self.racine / "share"), XDG_DATA_DIRS=str(self.racine / "vide"),
                               NC_SYSFS=str(self.f.sys), NC_PROC=str(self.f.proc), NC_RTX_VEILLE="")
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -155,6 +172,72 @@ class Conso(unittest.TestCase):
         # Les relevés de plus de 30 s sont oubliés : rien n'a bougé depuis, plus personne en tête
         top = self.m_mesure(40)["top"]
         self.assertEqual(top, [], "rien n'a tourné pendant les 30 dernières secondes")
+
+    def top_de(self, preparer):
+        """Le top après deux relevés (preparer(facteur) écrit les processus), en décharge à 10 W."""
+        self.f.batterie(STATUS="Discharging", CAPACITY=60, ENERGY_NOW=30_000_000, POWER_NOW=10_000_000)
+        preparer(1)
+        self.f.processeur(100, 1000)
+        self.m_mesure(0)
+        preparer(2)
+        self.f.processeur(200, 2000)
+        return self.m_mesure(2)["top"]
+
+    def test_firefox_en_trois_processus_une_ligne_au_nom_de_l_appli(self):
+        ff = "/usr/lib/firefox/firefox"
+        self.f.appli("firefox", "Firefox", f"{ff} %u")
+        def preparer(k):
+            self.f.processus(100, "firefox", 30 * k, f"{ff}\0", exe=ff)
+            self.f.processus(101, "Isolated Web Co", 15 * k, f"{ff}\0-contentproc\0", ppid=100, exe=ff)
+            self.f.processus(102, "Browser 13 tab", 5 * k, "", ppid=100, exe=ff)
+            self.f.processus(130, "kitty", 6 * k, "kitty\0", exe="/usr/bin/kitty")
+        top = self.top_de(preparer)
+        self.assertEqual([(p["nom"], p["pct"]) for p in top], [("Firefox", 5.0), ("Kitty", 0.6)])
+
+    def test_chrome_en_dix_processus_une_ligne(self):
+        # Le .desktop lance un script voisin (google-chrome-stable → /opt/google/chrome/google-chrome) : même dossier
+        dossier = self.racine / "opt/google/chrome"
+        dossier.mkdir(parents=True)
+        (dossier / "google-chrome").write_text("#!/bin/sh\n")
+        self.f.appli("google-chrome", "Google Chrome", f"{dossier / 'google-chrome'} %U")
+        chrome = str(dossier / "chrome")
+        comms = ["chrome", "ThreadPoolForeg", "Chrome_ChildIOT", "chrome", "CrRendererMain"]
+        def preparer(k):
+            for i in range(9):
+                self.f.processus(200 + i, comms[i % 5], (i + 1) * k, f"{chrome} --type=renderer --lang=fr", exe=chrome)
+            self.f.processus(209, "chrome_crashpad", 1 * k, f"{dossier / 'chrome_crashpad_handler'}\0",
+                             exe=str(dossier / "chrome_crashpad_handler"))
+        top = self.top_de(preparer)
+        self.assertEqual([(p["nom"], p["pct"]) for p in top], [("Google Chrome", 4.6)], "45 + 1 ticks sur 1000")
+
+    def test_sans_desktop_le_nom_de_l_executable(self):
+        def preparer(k):
+            for i in range(10):
+                self.f.processus(300 + i, "Browser 13 tab", 2 * k, "", exe="/opt/zen/zen-bin")
+            # Nommé par sa version : le dossier qui dit son nom
+            self.f.processus(310, "2.1.3", 1 * k, "outil\0", exe="/home/user/.local/share/outil/versions/2.1.3")
+        top = self.top_de(preparer)
+        self.assertEqual([p["nom"] for p in top], ["Zen-bin", "Outil"])
+
+    def test_script_python3_et_node_au_nom_du_script(self):
+        self.f.appli("nc-truc", "Le Truc", "nc-truc")
+        def preparer(k):
+            self.f.processus(120, "python3", 8 * k, "python3\0-u\0/home/user/.local/bin/nc-truc\0--suivre\0",
+                             exe="/usr/bin/python3.13")
+            self.f.processus(121, "python3", 4 * k, "/usr/bin/python3\0-I\0/srv/outil.py\0", exe="/usr/bin/python3.13")
+            self.f.processus(122, "node", 2 * k, "node\0/srv/app/serveur.js\0", exe="/usr/bin/node")
+            self.f.processus(123, "python3", 1 * k, "python3\0-c\0print(1)\0", exe="/usr/bin/python3.13")
+        top = self.top_de(preparer)
+        self.assertEqual([p["nom"] for p in top], ["Le Truc", "Outil.py", "Serveur.js", "Python3"])
+
+    def test_exe_illisible_la_ligne_de_commande(self):
+        self.f.appli("foot", "Terminal Foot", "foot")
+        def preparer(k):
+            self.f.processus(400, "Xwayland", 5 * k, "/usr/bin/Xwayland\0:1\0", exe="illisible")
+            self.f.processus(401, "foot", 3 * k, "/usr/bin/foot\0--server\0", exe="illisible")
+            self.f.processus(402, "foot", 1 * k, "foot\0", exe="illisible")
+        top = self.top_de(preparer)
+        self.assertEqual([p["nom"] for p in top], ["Xwayland", "Terminal Foot"])
 
     def test_en_charge_pas_de_watts_par_programme(self):
         self.f.batterie(STATUS="Charging", CAPACITY=60, ENERGY_NOW=30_000_000, ENERGY_FULL=60_000_000, POWER_NOW=40_000_000)

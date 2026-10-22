@@ -1,11 +1,14 @@
 """nc-session, version 2 (carrousel des sessions) : lecture d'une version 1 telle quelle, réécrite en version 2 à la
 première modification ; nc-session json (format figé) ; modifier (chaque clé, valide et refusée) ; renommer et
-dupliquer (aperçu compris) ; aperçu (grim, réglage SESSIONS_CAPTURE, sans grim : le schéma seul) ; ouvrir et ses
+dupliquer (aperçu compris) ; aperçu (grim, réglage SESSIONS_CAPTURE, sans grim : le schéma seul) ; tranches inclinées
+du carrousel (nc-carousel-thumbs tranche, avec le vrai ImageMagick s'il est installé) ; ouvrir et ses
 étapes (fond, profil, Ne pas déranger, noms des bureaux, zones, fermer les autres), chacune sautée sans son outil.
 Tout se passe dans un faux HOME ; chaque faux outil prend ce dossier à partir de son propre chemin et note ses appels."""
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +17,8 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "home/.local/bin/nc-session"
+THUMBS = REPO / "home/.local/bin/nc-carousel-thumbs"
+IM = shutil.which("magick") or shutil.which("convert")
 
 # Faux outils : <home>/.local/bin/<outil> ; <home> pris de leur propre chemin, jamais de HOME
 JOURNAL_SH = '''#!/bin/sh
@@ -56,6 +61,18 @@ H = Path(__file__).resolve().parents[2]
 with (H / "appels").open("a") as f: f.write("grim " + " ".join(sys.argv[1:]) + "\n")
 Path(sys.argv[-1]).write_bytes(b"\x89PNG\r\n\x1a\n faux")
 '''
+# Faux grim qui écrit une vraie image (PNG 640 x 400, uni), pour le vrai ImageMagick
+FAUX_GRIM_PNG = r'''#!/usr/bin/env python3
+import struct, sys, zlib
+from pathlib import Path
+H = Path(__file__).resolve().parents[2]
+with (H / "appels").open("a") as f: f.write("grim " + " ".join(sys.argv[1:]) + "\n")
+w, h = 640, 400
+def bloc(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+brut = b"".join(b"\0" + bytes([90, 120, 160]) * w for _ in range(h))
+Path(sys.argv[-1]).write_bytes(b"\x89PNG\r\n\x1a\n" + bloc(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                               + bloc(b"IDAT", zlib.compress(brut)) + bloc(b"IEND", b""))
+'''
 # Faux nc-reglages : « set SESSION_DEMARRAGE X » l'écrit dans reglages.conf (comme le vrai)
 FAUX_REGLAGES = JOURNAL_SH + '''[ "$1" = set ] && [ "$2" = SESSION_DEMARRAGE ] && printf 'SESSION_DEMARRAGE=%s\\n' "$3" > "$H/.config/nc/reglages.conf"
 exit 0
@@ -79,7 +96,7 @@ ECRANS = [{"id": 0, "name": "eDP-1", "x": 0, "y": 0, "width": 2560, "height": 16
           {"id": 1, "name": "DP-1", "x": 1600, "y": 0, "width": 1920, "height": 1080, "scale": 1.0, "transform": 0, "focused": True}]
 
 CLES_SESSION = ["nom", "date", "nb_fenetres", "applis", "icone", "couleur", "fond", "profil", "npd", "demarrage",
-                "fermer_autres", "raccourci", "bureaux_noms", "apercu", "schema", "fenetres"]
+                "fermer_autres", "raccourci", "bureaux_noms", "apercu", "tranche", "tranche_etroite", "schema", "fenetres"]
 CLES_FENETRE = ["classe", "titre", "bureau", "ecran", "flottant", "plein_ecran", "inclure", "terminal"]
 
 
@@ -170,6 +187,7 @@ class Format(Base):
         self.assertEqual({k: s[k] for k in CLES_SESSION[4:14]},
                          dict(icone=None, couleur=None, fond=None, profil="garder", npd=False, demarrage=False,
                               fermer_autres="non", raccourci=None, bureaux_noms={}, apercu=None))
+        self.assertEqual((s["tranche"], s["tranche_etroite"]), (None, None))
         for e in s["fenetres"]:
             self.assertEqual(list(e), CLES_FENETRE)
         k, ff, dc = s["fenetres"]
@@ -360,6 +378,30 @@ class RenommerDupliquer(Base):
         self.assertIn("nc-raccourci retire Super+Alt+1", self.appels())
 
 
+    def test_renommer_dupliquer_supprimer_suivent_les_tranches(self):
+        self.v1()
+        self.apercus.mkdir(parents=True)
+        for suffixe in (".png", ".tranche.png", ".tranche-etroite.png"):
+            (self.apercus / ("Dev" + suffixe)).write_bytes(suffixe.encode())
+            (self.apercus / ("Dev" + suffixe)).chmod(0o600)
+        self.assertEqual(self.lancer("renommer", "Dev", "Projet").returncode, 0)
+        self.assertEqual(sorted(f.name for f in self.apercus.iterdir()),
+                         ["Projet.png", "Projet.tranche-etroite.png", "Projet.tranche.png"])
+        self.assertEqual((self.apercus / "Projet.tranche.png").read_bytes(), b".tranche.png")
+        s = self.session("Projet")
+        self.assertEqual((s["tranche"], s["tranche_etroite"]),
+                         (str(self.apercus / "Projet.tranche.png"), str(self.apercus / "Projet.tranche-etroite.png")))
+        self.assertEqual(self.lancer("dupliquer", "Projet", "Copie").returncode, 0)
+        for suffixe in (".tranche.png", ".tranche-etroite.png"):
+            c = self.apercus / ("Copie" + suffixe)
+            self.assertEqual((c.read_bytes(), c.stat().st_mode & 0o777), (suffixe.encode(), 0o600))
+            self.assertTrue((self.apercus / ("Projet" + suffixe)).exists())
+        self.assertEqual(self.session("Copie")["tranche_etroite"], str(self.apercus / "Copie.tranche-etroite.png"))
+        self.assertEqual(self.lancer("supprimer", "Copie").returncode, 0)
+        self.assertEqual(sorted(f.name for f in self.apercus.iterdir()),
+                         ["Projet.png", "Projet.tranche-etroite.png", "Projet.tranche.png"])
+
+
 class Apercu(Base):
     def setUp(self):
         super().setUp()
@@ -369,7 +411,7 @@ class Apercu(Base):
     def test_grim_sur_l_ecran_actif(self):
         r = self.lancer("enregistrer", "Dev")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(self.appels(), r"grim -o DP-1 -s 0\.25 -t png \S+\n")
+        self.assertRegex(self.appels(), r"grim -o DP-1 -s 0\.5 -t png \S+\n")
         png = self.apercus / "Dev.png"
         self.assertEqual(png.read_bytes()[:4], b"\x89PNG")
         self.assertEqual(png.stat().st_mode & 0o777, 0o600)
@@ -406,6 +448,15 @@ class Apercu(Base):
         self.assertFalse((self.apercus / "Dev.png").exists(), "l'ancienne capture effacée")
         self.assertIsNone(self.session()["apercu"])
 
+    def test_sans_image_magick_pas_de_tranche(self):
+        (self.bin / "nc-carousel-thumbs").symlink_to(THUMBS)     # l'outil est là, ImageMagick non (hors du PATH)
+        self.assertEqual(self.lancer("enregistrer", "Dev").returncode, 0)
+        self.assertEqual(self.lancer("modifier", "Dev", "couleur", "#ff0000").returncode, 0)
+        self.assertEqual(self.lancer("apercu", "Dev").returncode, 0)
+        s = self.session()
+        self.assertEqual((s["tranche"], s["tranche_etroite"]), (None, None))
+        self.assertEqual(list(self.apercus.iterdir()), [self.apercus / "Dev.png"])
+
     def test_reenregistrer_garde_la_personnalisation(self):
         self.lancer("enregistrer", "Dev")
         self.lancer("modifier", "Dev", "icone", "code")
@@ -414,6 +465,87 @@ class Apercu(Base):
         self.assertEqual(self.lancer("enregistrer", "Dev").returncode, 0)
         d = json.loads((self.sessions / "Dev.json").read_text())
         self.assertEqual((d["icone"], d["zones"], len(d["fenetres"])), ("code", {}, 2))
+
+
+def tailles_carrousel():
+    """(largeur, hauteur) des deux miniatures du carrousel des fonds à l'échelle 1 (sans jq, l'échelle est 1),
+    calculées d'après les constantes de nc-carousel-thumbs (pas recopiées ici)."""
+    t = THUMBS.read_text()
+    v = {k: float(re.search(rf"\b{k}=([\d.]+)", t)[1]) for k in ("CW", "CH", "NW", "NH", "SK")}
+    def taille(w, h):
+        return int(w + 0.5) + int(int(h + 0.5) * v["SK"] + 0.5), int(h + 0.5)
+    return taille(v["CW"], v["CH"]), taille(v["NW"], v["NH"])
+
+
+@unittest.skipUnless(IM, "ImageMagick absent : tranches non testées")
+class Tranches(Base):
+    """Le vrai nc-carousel-thumbs et le vrai ImageMagick (seuls ajoutés au PATH, avec bash, awk, mv et rm)."""
+    def setUp(self):
+        super().setUp()
+        (self.bin / "grim").write_text(FAUX_GRIM_PNG)
+        (self.bin / "nc-carousel-thumbs").symlink_to(THUMBS)
+        for o in ("bash", "awk", "mv", "rm", Path(IM).name):
+            if shutil.which(o):
+                (self.home / "base" / o).symlink_to(shutil.which(o))
+        self.ecrans()
+        self.clients(client("0xa", "firefox", 1, ecran=0, taille=(1600, 1000)),
+                     client("0xb", "gimp", 2, ecran=1, at=(1700, 100), taille=(900, 900)))
+
+    def fichiers(self, nom="Dev"):
+        return self.apercus / f"{nom}.tranche.png", self.apercus / f"{nom}.tranche-etroite.png"
+
+    def taille(self, f):
+        r = subprocess.run([IM, str(f), "-format", "%w %h", "info:"], capture_output=True, text=True, timeout=30)
+        return tuple(map(int, r.stdout.split()))
+
+    def pixels(self, f):
+        """La signature des pixels (les dates du PNG changent à chaque écriture)."""
+        return subprocess.run([IM, str(f), "-format", "%#", "info:"], capture_output=True, text=True, timeout=30).stdout
+
+    def verifier(self, nom="Dev"):
+        large, etroite = self.fichiers(nom)
+        self.assertEqual((self.taille(large), self.taille(etroite)), tailles_carrousel())
+        for f in (large, etroite):
+            self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(f.read_bytes()[:4], b"\x89PNG")
+        s = self.session(nom)
+        self.assertEqual((s["tranche"], s["tranche_etroite"]), (str(large), str(etroite)))
+
+    def test_capture_en_tranches(self):
+        r = self.lancer("enregistrer", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.verifier()
+        self.assertEqual(sorted(f.name for f in self.apercus.iterdir()),
+                         ["Dev.png", "Dev.tranche-etroite.png", "Dev.tranche.png"], "aucun fichier temporaire laissé")
+        # La tranche d'une capture ne suit pas la couleur ; apercu la refait
+        avant = self.pixels(self.fichiers()[0])
+        self.assertEqual(self.lancer("modifier", "Dev", "couleur", "#ff0000").returncode, 0)
+        self.assertEqual(self.pixels(self.fichiers()[0]), avant)
+        self.fichiers()[0].unlink()
+        self.assertEqual(self.lancer("apercu", "Dev").returncode, 0)
+        self.verifier()
+
+    def test_schema_seul_en_tranches(self):
+        (self.home / ".config/nc/reglages.conf").write_text("SESSIONS_CAPTURE=non\n")
+        r = self.lancer("enregistrer", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIsNone(self.session()["apercu"])
+        self.verifier()
+        self.assertEqual(sorted(f.name for f in self.apercus.iterdir()), ["Dev.tranche-etroite.png", "Dev.tranche.png"])
+        # Couleur, puis fenêtre retirée : le dessin est refait
+        avant = self.pixels(self.fichiers()[0])
+        self.assertEqual(self.lancer("modifier", "Dev", "couleur", "#ff0000").returncode, 0)
+        rouge = self.pixels(self.fichiers()[0])
+        self.assertNotEqual(rouge, avant)
+        self.assertEqual(self.lancer("modifier", "Dev", "fenetre.1.inclure", "non").returncode, 0)
+        self.assertNotEqual(self.pixels(self.fichiers()[0]), rouge)
+        self.verifier()
+        # Un rôle du thème : sa couleur dans colors.json de Noctalia
+        (self.home / ".config/noctalia").mkdir(parents=True)
+        (self.home / ".config/noctalia/colors.json").write_text('{"mSurfaceVariant": "#ff0000"}')
+        self.assertEqual(self.lancer("modifier", "Dev", "fenetre.1.inclure", "oui").returncode, 0)
+        self.assertEqual(self.lancer("modifier", "Dev", "couleur", "surface_variant").returncode, 0)
+        self.assertEqual(self.pixels(self.fichiers()[0]), rouge)
 
 
 class Ouvrir(Base):

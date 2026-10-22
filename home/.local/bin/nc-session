@@ -16,8 +16,9 @@
   nc-session supprimer NOM
   nc-session menu                le Spotlight sur « session » (Super + Maj + W) ; sans l'île, un menu
   nc-session demarrage           ouvre la session choisie pour l'ouverture de session (réglage SESSION_DEMARRAGE)
-Rangées dans ~/.config/nc/sessions/NOM.json, leurs aperçus dans ~/.local/state/noctalia-config/sessions. Le
-navigateur rouvre lui-même ses onglets (sa session à lui).
+Rangées dans ~/.config/nc/sessions/NOM.json, leurs aperçus dans ~/.local/state/noctalia-config/sessions, avec leurs
+tranches inclinées pour le carrousel (nc-carousel-thumbs tranche ; sans capture, un dessin du schéma ; sans ImageMagick,
+aucune). Le navigateur rouvre lui-même ses onglets (sa session à lui).
 """
 import datetime
 import json
@@ -74,8 +75,9 @@ DOC_EN = """nc-session: your window layouts per project (“Dev”, “Classes�
   nc-session delete NAME
   nc-session menu            Spotlight on “session” (Super + Shift + W); without the island, a menu
   nc-session startup         opens the session chosen for login (setting SESSION_DEMARRAGE)
-Stored in ~/.config/nc/sessions/NAME.json, their previews in ~/.local/state/noctalia-config/sessions. The browser
-reopens its tabs itself (its own session).
+Stored in ~/.config/nc/sessions/NAME.json, their previews in ~/.local/state/noctalia-config/sessions, with their
+slanted slices for the carousel (nc-carousel-thumbs tranche; without a capture, a drawing of the outline; without
+ImageMagick, none). The browser reopens its tabs itself (its own session).
 """
 
 HOME = Path.home()
@@ -107,6 +109,8 @@ FERMER = ("non", "demander", "oui")
 # Rôles des couleurs du thème (ceux des plugins Noctalia)
 ROLES = {"primary", "secondary", "tertiary", "error", "surface", "surface_variant", "outline", "shadow", "hover",
          "on_primary", "on_secondary", "on_tertiary", "on_error", "on_surface", "on_surface_variant", "on_hover"}
+COULEURS = HOME / ".config/noctalia/colors.json"          # les rôles du thème en #rrggbb (mPrimary…)
+NEUTRE = "#8e8e93"                                        # schéma d'une session sans couleur : gris Apple
 IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".jxl", ".tif", ".tiff", ".svg"}
 OUI, NON = {"oui", "vrai", "true", "1", "on", "yes"}, {"non", "faux", "false", "0", "off", "no"}
 # Touches de nc-raccourci (mêmes noms, mêmes règles : un modificateur, sauf F1…F12 et Impr)
@@ -163,6 +167,7 @@ def ecrire(f, d):
     with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as sortie:
         sortie.write(json.dumps(s, ensure_ascii=False, indent=1))
     tmp.replace(f)
+    return s
 
 
 def ecrans():
@@ -232,6 +237,94 @@ def apercu_fichier(nom):
     return APERCUS / (nom_valide(nom) + ".png")
 
 
+def tranches_fichiers(nom):
+    """Les deux tranches inclinées du carrousel : la large (session au milieu) et l'étroite (ses voisines)."""
+    n = nom_valide(nom)
+    return APERCUS / (n + ".tranche.png"), APERCUS / (n + ".tranche-etroite.png")
+
+
+def fichiers_apercu(nom):
+    return (apercu_fichier(nom),) + tranches_fichiers(nom)
+
+
+def couleur_hex(c):
+    """#rrggbb de la couleur de la session ; un rôle du thème lu dans les couleurs de Noctalia ; sinon le gris neutre."""
+    if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c):
+        return c.lower()
+    if c in ROLES:
+        try:
+            v = json.loads(COULEURS.read_text(encoding="utf-8")).get("m" + "".join(x.capitalize() for x in c.split("_")))
+        except (OSError, ValueError, AttributeError):
+            v = None
+        if isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+            return v.lower()
+    return NEUTRE
+
+
+def dessiner_schema(s, sortie, im):
+    """Le schéma en image (ImageMagick) : un rectangle arrondi par écran et bureau, ses fenêtres dedans, aux couleurs
+    de la session, sur le noir Apple ; au plus trois par rangée, centrés. L'image a les proportions de la grande tranche,
+    et ses marges (plus larges sur les côtés) gardent le dessin dans le parallélogramme. False s'il n'y a rien à dessiner."""
+    groupes = schema(s)
+    if not groupes:
+        return False
+    c = couleur_hex(s.get("couleur"))
+    W, H, mx, my, ecart = 1470, 900, 250, 170, 40
+    cols = min(len(groupes), 3)
+    rangs = -(-len(groupes) // cols)
+    cw, ch = (W - 2 * mx - (cols - 1) * ecart) / cols, (H - 2 * my - (rangs - 1) * ecart) / rangs
+    ops = []
+    for i, g in enumerate(groupes):
+        rang, col = divmod(i, cols)
+        dans_rang = min(cols, len(groupes) - rang * cols)          # la dernière rangée, moins pleine, est centrée
+        r = g["largeur"] / g["hauteur"] if g["largeur"] > 0 and g["hauteur"] > 0 else 1.6
+        pw = min(cw, ch * r)
+        ph = pw / r
+        x0 = (W - dans_rang * cw - (dans_rang - 1) * ecart) / 2 + col * (cw + ecart) + (cw - pw) / 2
+        y0 = my + rang * (ch + ecart) + (ch - ph) / 2
+        ops += ["-fill", c + "2e", "-stroke", c + "99", "-strokewidth", "3",
+                "-draw", f"roundrectangle {x0:.0f},{y0:.0f} {x0 + pw:.0f},{y0 + ph:.0f} 22,22", "-stroke", "none"]
+        for f in g["rects"]:
+            fx, fy = x0 + 14 + f["x"] * (pw - 20), y0 + 14 + f["y"] * (ph - 20)
+            fw, fh = max(f["w"] * (pw - 20) - 8, 6), max(f["h"] * (ph - 20) - 8, 6)
+            ops += ["-fill", c + "cc", "-draw", f"roundrectangle {fx:.0f},{fy:.0f} {fx + fw:.0f},{fy + fh:.0f} 12,12"]
+    try:
+        return subprocess.run([im, "-size", f"{W}x{H}", "xc:#1c1c1e", *ops, str(sortie)], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=30).returncode == 0 and sortie.is_file()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def trancher(nom, s, png=None):
+    """Les tranches inclinées de la session (mêmes tailles et même forme que les miniatures du carrousel des fonds :
+    nc-carousel-thumbs tranche), privées (0600) : de la capture, sinon d'un dessin du schéma. Sans ImageMagick ou sur
+    un échec : pas de tranche (les anciennes sont effacées, elles ne montreraient plus la session), en silence."""
+    large, etroite = tranches_fichiers(nom)
+    im = shutil.which("magick") or shutil.which("convert")
+    outil = BIN / "nc-carousel-thumbs"
+    ok = False
+    if im and os.access(outil, os.X_OK):
+        APERCUS.mkdir(parents=True, exist_ok=True, mode=0o700)
+        APERCUS.chmod(0o700)
+        dessin = None if png and Path(png).is_file() else large.with_name("." + nom_valide(nom) + ".schema.png")
+        masque = os.umask(0o077)
+        try:
+            source = png if dessin is None else dessin if dessiner_schema(s, dessin, im) else None
+            ok = source is not None and subprocess.run(
+                [str(outil), "tranche", str(source), str(large), str(etroite)], stdin=subprocess.DEVNULL,
+                capture_output=True, timeout=60).returncode == 0 and large.is_file() and etroite.is_file()
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        finally:
+            os.umask(masque)
+            if dessin:
+                dessin.unlink(missing_ok=True)
+    if not ok:
+        large.unlink(missing_ok=True)
+        etroite.unlink(missing_ok=True)
+    return ok
+
+
 def capturer(nom):
     """L'aperçu : l'écran actif réduit au quart (grim), privé (0600). Pas de capture (SESSIONS_CAPTURE=non, pour la vie
     privée ; grim absent ; échec) : le schéma seul, et l'ancien aperçu est effacé (il ne montrerait plus la session)."""
@@ -246,7 +339,7 @@ def capturer(nom):
     tmp.unlink(missing_ok=True)
     masque = os.umask(0o077)                               # grim crée le fichier : 0600 dès sa création
     try:
-        ok = subprocess.run(["grim", "-o", ecran, "-s", "0.25", "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
+        ok = subprocess.run(["grim", "-o", ecran, "-s", "0.5", "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
                             capture_output=True, timeout=15).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         ok = False
@@ -380,8 +473,10 @@ def enregistrer(nom):
     utilises = {e["ecran"] for e in fenetres}
     d.update(nom=nom.strip(), fenetres=fenetres,
              ecrans={n: {k: m[k] for k in ("x", "y", "largeur", "hauteur")} for n, m in mon.items() if n in utilises})
-    ecrire(f, d)
-    return len(fenetres), capturer(nom)
+    s = ecrire(f, d)
+    png = capturer(nom)
+    trancher(nom, s, png)
+    return len(fenetres), png
 
 
 def lancer(e):
@@ -700,6 +795,7 @@ def sortie_json():
         s = completer(d)
         incluses = [e for e in s["fenetres"] if e["inclure"]]
         png = APERCUS / (f.stem + ".png")
+        large, etroite = tranches_fichiers(f.stem)
         fenetres = []
         for e in s["fenetres"]:
             t = e.get("terminal") if isinstance(e.get("terminal"), dict) else None
@@ -715,7 +811,9 @@ def sortie_json():
                         icone=s["icone"], couleur=s["couleur"], fond=s["fond"], profil=s["profil"], npd=s["npd"],
                         demarrage=demarrage == f.stem, fermer_autres=s["fermer_autres"], raccourci=s["raccourci"],
                         bureaux_noms={str(k): str(v) for k, v in s["bureaux_noms"].items()},
-                        apercu=str(png) if png.is_file() else None, schema=schema(s), fenetres=fenetres))
+                        apercu=str(png) if png.is_file() else None,
+                        tranche=str(large) if large.is_file() else None,
+                        tranche_etroite=str(etroite) if etroite.is_file() else None, schema=schema(s), fenetres=fenetres))
     return dict(version=2, sessions=res)
 
 
@@ -897,20 +995,24 @@ def modifier(nom, cle, v):
                        "bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID)."))
     if apres:
         apres()
-    ecrire(f, s)
+    s = ecrire(f, s)
+    # Le dessin du schéma suit sa couleur et ses fenêtres (une tranche faite d'une capture reste celle de la capture)
+    if (cle == "couleur" or (m and m[2] == "inclure")) and not apercu_fichier(f.stem).is_file():
+        trancher(f.stem, s)
     return T(f"Session « {f.stem} » : {cle} = {v or 'par défaut'}.", f"Session “{f.stem}”: {cle} = {v or 'default'}.")
 
 
 def copier_apercu(a, b, deplacer):
-    pa, pb = apercu_fichier(a), apercu_fichier(b)
-    pb.unlink(missing_ok=True)
-    if not pa.is_file():
-        return
-    if deplacer:
-        pa.replace(pb)
-        return
-    with open(pa, "rb") as src, os.fdopen(os.open(pb, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as dst:
-        shutil.copyfileobj(src, dst)
+    """L'aperçu et les tranches de A pour B (déplacés ou copiés, privés)."""
+    for pa, pb in zip(fichiers_apercu(a), fichiers_apercu(b)):
+        pb.unlink(missing_ok=True)
+        if not pa.is_file():
+            continue
+        if deplacer:
+            pa.replace(pb)
+            continue
+        with open(pa, "rb") as src, os.fdopen(os.open(pb, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as dst:
+            shutil.copyfileobj(src, dst)
 
 
 def renommer(a, b):
@@ -947,8 +1049,10 @@ def dupliquer(a, b):
 
 
 def apercu(nom):
-    f, _ = lire(nom)
-    if capturer(f.stem):
+    f, d = lire(nom)
+    png = capturer(f.stem)
+    trancher(f.stem, completer(d), png)
+    if png:
         return T(f"Aperçu de « {f.stem} » refait.", f"Preview of “{f.stem}” taken again.")
     return T(f"« {f.stem} » : schéma seulement (capture désactivée ou grim absent).",
              f"“{f.stem}”: outline only (capture disabled or grim missing).")
@@ -1040,7 +1144,8 @@ def main(a):
             except Erreur:
                 racc = None
             f.unlink()
-            apercu_fichier(reste).unlink(missing_ok=True)
+            for p in fichiers_apercu(reste):
+                p.unlink(missing_ok=True)
             if racc:
                 try:
                     lier_raccourci(racc, None, f.stem)          # son raccourci n'ouvrirait plus rien

@@ -8,19 +8,13 @@
 # le carrousel l'affiche pixel pour pixel, l'image d'origine reste celle appliquée comme fond.
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
+#
+#   nc-carousel-thumbs tranche IMAGE LARGE ETROITE   les deux mêmes découpes pour une seule image (aperçu d'une session,
+#                                                    nc-session) ; format selon l'extension, privées (0600) ; code 1 si
+#                                                    ImageMagick manque ou si l'image est illisible, sans message
 set -uo pipefail
-. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
 IM=$(command -v magick >/dev/null && echo magick || echo convert)
-
-CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
-OUT="$HOME/.cache/nc/carousel"
-
-# Dossier des fonds : clé « directory » de la section [wallpaper] de la config Noctalia v5
-src=$(awk '/^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{sub(/^[^=]*= *"/,""); sub(/".*$/,""); print; exit}' "$CONF" 2>/dev/null)
-[ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
-src="${src/#\~/$HOME}"
-[ -d "$src" ] || exit 0
 
 # Tailles logiques : MÊMES valeurs que dans le plugin (panel.luau) ; inclinaison SK (0,30 = 17°)
 CW=600; CH=450      # grande tranche du milieu
@@ -32,17 +26,9 @@ SK=0.30
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
    (if $w > 1600 or $h > 1000 then ([2, $w / 1600, $h / 1000] | min | if . < 1 then 1 else . end)
-    else ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) end) * .scale] | max // empty')
+    else ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) end) * .scale] | max // empty' 2>/dev/null)
 [ -n "$dpr" ] || dpr=1
 dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
-
-mkdir -p "$OUT"
-# Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
-sig="v5-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
-if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
-  rm -f "$OUT"/*.jpg "$OUT"/*.webp
-  echo "$sig" > "$OUT/.size"
-fi
 
 # bake IMAGE SORTIE LARGEUR HAUTEUR LISERE(0|1) : parallélogramme de largeur LARGEUR (sur la ligne centrale), hauteur HAUTEUR
 bake() {
@@ -57,8 +43,35 @@ bake() {
   [ "$edge" = 1 ] && stroke=(-fill none -stroke "rgba(255,255,255,0.88)" -strokewidth "$sw" -draw "polygon $poly")
   "$IM" "$img[0]" -filter Lanczos -resize "${b}x${h}^" -gravity center -extent "${b}x${h}" -unsharp 0x0.6+0.7+0.02 \
     \( -size "${b}x${h}" xc:black -fill white -draw "polygon $poly" \) -alpha off -compose copy_opacity -composite \
-    "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.webp" && mv "$out.tmp.webp" "$out"
+    "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.${out##*.}" && mv "$out.tmp.${out##*.}" "$out"
 }
+
+# Une seule image (sessions) : mêmes tailles, même forme, rien d'autre (ni dossier de fonds, ni cache)
+if [ "${1:-}" = tranche ]; then
+  [ $# -eq 4 ] && command -v "$IM" >/dev/null && [ -r "$2" ] || exit 1
+  umask 077
+  bake "$2" "$3" "$CW" "$CH" 1 2>/dev/null && bake "$2" "$4" "$NW" "$NH" 0 2>/dev/null && exit 0
+  rm -f "$3" "$4" "$3.tmp.${3##*.}" "$4.tmp.${4##*.}"
+  exit 1
+fi
+
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
+OUT="$HOME/.cache/nc/carousel"
+
+# Dossier des fonds : clé « directory » de la section [wallpaper] de la config Noctalia v5
+src=$(awk '/^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{sub(/^[^=]*= *"/,""); sub(/".*$/,""); print; exit}' "$CONF" 2>/dev/null)
+[ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
+src="${src/#\~/$HOME}"
+[ -d "$src" ] || exit 0
+
+mkdir -p "$OUT"
+# Si la forme ou la taille cible a changé (inclinaison, échelle de l'écran), tout est régénéré.
+sig="v5-${CW}x${CH}-${NW}x${NH}-${SK}-${dpr}"
+if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
+  rm -f "$OUT"/*.jpg "$OUT"/*.webp
+  echo "$sig" > "$OUT/.size"
+fi
 
 shopt -s nullglob nocaseglob
 made=0
