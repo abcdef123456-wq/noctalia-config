@@ -12,7 +12,6 @@ dependencies = ["jq", "python3"]
 [[widget]]
 id = "titre"
 entry = "titre.luau"
-hover_highlight = false        # Noctalia 5.3 : pas de teinte sur toute la zone, seulement sur la fenêtre survolée
 
   [widget.actions]
   middle = "none"
