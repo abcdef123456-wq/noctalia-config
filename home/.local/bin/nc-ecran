@@ -2,6 +2,7 @@
 # nc-ecran : allume ou éteint les écrans (DPMS de Hyprland), par un seul chemin pour tout le dépôt.
 #   nc-ecran on    allume
 #   nc-ecran off   éteint
+#   nc-ecran on reveil   allume au réveil de veille, même si Hyprland croit l'écran allumé (il reste parfois noir)
 # Appelé par hypridle (écran éteint à l'inactivité, au retour, au réveil), le couvercle (nc-couvercle) et le coin de
 # l'île. Au retour d'inactivité, hypridle lance tous ses « on-resume » dans la même milliseconde : deux allumages DPMS
 # simultanés ont déjà planté un PC (amdgpu, micrologiciel d'affichage fragile). Ici, un verrou (flock) fait passer les
@@ -12,8 +13,9 @@
 # Hors Hyprland, ou sans hyprctl : ne fait rien, sans erreur.
 case "${1:-}" in
   on|off) action=$1 ;;
-  *) sed -n '2,4p' "$0"; exit 1 ;;
+  *) sed -n '2,5p' "$0"; exit 1 ;;
 esac
+force=""; [ "$action" = on ] && [ "${2:-}" = reveil ] && force=1
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 command -v hyprctl >/dev/null 2>&1 || exit 0
 # Session Hyprland : la variable de la session, sinon la seule instance ouverte (service lancé sans elle)
@@ -44,10 +46,13 @@ case "$quand" in ''|*[!0-9]*) quand=0 ;; esac
 [ "$fait" = "$action" ] && [ $((maintenant - quand)) -lt 5 ] && exit 0
 
 # Déjà dans cet état d'après Hyprland : rien à faire (l'heure notée ne change pas : seul un vrai appel ouvre les 5 s
-# de garde). Sans réponse (aucun écran listé) : on agit.
-voulu=true; [ "$action" = off ] && voulu=false
-etats=$(h monitors -j 2>/dev/null | tr -d ' \t\n' | grep -o '"dpmsStatus":[a-z]*' | sed 's/.*://')
-[ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ] && exit 0
+# de garde). Sans réponse (aucun écran listé) : on agit. Au réveil (« reveil ») : on agit quand même, mais toujours
+# derrière le verrou et la garde de 5 s, donc jamais en même temps qu'un autre allumage.
+if [ -z "$force" ]; then
+  voulu=true; [ "$action" = off ] && voulu=false
+  etats=$(h monitors -j 2>/dev/null | tr -d ' \t\n' | grep -o '"dpmsStatus":[a-z]*' | sed 's/.*://')
+  [ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ] && exit 0
+fi
 
 h dispatch "hl.dsp.dpms({ action = \"$action\" })" >/dev/null 2>&1
 printf '%s %s\n' "$action" "$(date +%s)" > "$ETAT"

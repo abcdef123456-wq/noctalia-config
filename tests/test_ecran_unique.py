@@ -125,7 +125,7 @@ class ConfigHypridle(unittest.TestCase):
         for v, t in self.textes():
             with self.subTest(v=v):
                 self.assertEqual([l for l in self.commandes(t) if "dpms" in l], [])
-                self.assertIn("after_sleep_cmd = ~/.local/bin/nc-ecran on", t)
+                self.assertIn("after_sleep_cmd = ~/.local/bin/nc-ecran on reveil", t)
                 for x in listeners(t):
                     if "nc-ecran" in x.get("on-resume", ""):
                         self.assertIn("nc-ecran on", x["on-resume"])
@@ -211,6 +211,23 @@ class NcEcran(unittest.TestCase):
             (b.faux / "dpms").write_text("false\n")
             b.jouer("~/.local/bin/nc-ecran on")
             self.assertEqual(len(allumages(b.journal())), 1)
+        finally:
+            b.fermer()
+
+    def test_reveil_rallume_une_seule_fois(self):
+        # Au réveil, Hyprland peut croire l'écran allumé alors qu'il reste noir : « reveil » rallume quand même, mais
+        # derrière le verrou et la garde, donc un seul appel avec les on-resume lancés en même temps
+        b = Banc(reel=True)
+        try:
+            b.jouer("~/.local/bin/nc-ecran on reveil", "~/.local/bin/nc-ecran on", "~/.local/bin/nc-ecran on")
+            self.assertEqual(len(allumages(b.journal())), 1)
+            b.jouer("~/.local/bin/nc-ecran on reveil")
+            self.assertEqual(b.journal(), [])
+            # « reveil » ne force qu'un allumage : écran déjà éteint d'après Hyprland, « off reveil » ne fait rien
+            (b.run / "nc-ecran.etat").write_text("on 1\n")
+            (b.faux / "dpms").write_text("false\n")
+            b.jouer("~/.local/bin/nc-ecran off reveil")
+            self.assertEqual(b.journal(), [])
         finally:
             b.fermer()
 
