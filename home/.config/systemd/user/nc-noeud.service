@@ -1,0 +1,17 @@
+[Unit]
+Description=JARVIS pilote ce PC, avec ta confirmation dans l'île (nc-noeud, noctalia-config ; coupé par défaut)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/nc-noeud
+# Reconnexion par nc-noeud lui-même (3 à 30 s) ; systemd ne relance qu'un arrêt en erreur. Code 3 : configuration
+# absente ou connexion refusée (ws:// vers un hôte public) : relancer n'y changerait rien
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=3
+Slice=background.slice
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

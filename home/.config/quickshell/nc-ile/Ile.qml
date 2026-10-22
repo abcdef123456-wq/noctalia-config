@@ -91,13 +91,18 @@ PanelWindow {
     readonly property bool confirmGpu: !ouverte && ModeGraphique.demande
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurGpu: chargeurGpu.item ? Math.ceil(chargeurGpu.item.implicitHeight) : 176
+    // JARVIS qui veut agir sur ce PC (Noeud.qml, ConfirmationNoeud.qml, nc-noeud) : rien n'est fait sans ta réponse,
+    // elle passe avant les demandes des agents et les notifications
+    readonly property bool confirmNoeud: !ouverte && !confirmGpu && Noeud.demande !== null
+        && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
+    readonly property int hauteurNoeud: chargeurNoeud.item ? Math.ceil(chargeurNoeud.item.implicitHeight) : 190
     // Demande de Claude Code (autoriser, question) : l'île s'étire en bannière, avant les notifications
-    readonly property bool demandeClaude: !ouverte && !confirmGpu && Agents.demande !== null
+    readonly property bool demandeClaude: !ouverte && !confirmGpu && !confirmNoeud && Agents.demande !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurDemande: Agents.demande && Agents.demande.genre === "question"
                                           ? 78 + 40 * Math.ceil((Agents.demande.options || []).length / 2) : 146
-    // L'île fermée étirée en carte à boutons (demande de Claude Code ou confirmation du mode graphique)
-    readonly property bool enCarte: demandeClaude || confirmGpu
+    // L'île fermée étirée en carte à boutons (demande de Claude Code, de JARVIS ou confirmation du mode graphique)
+    readonly property bool enCarte: demandeClaude || confirmGpu || confirmNoeud
     readonly property bool banniere: !ouverte && !enCarte && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
@@ -185,8 +190,8 @@ PanelWindow {
         y: 9                                        // centrée dans la barre (barre à 6 du bord, 36 de haut)
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
-        readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.demandeClaude ? fen.hauteurDemande
-                                                                                   : (fen.banniere ? fen.hauteurBanniere : 30)))
+        readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
+                                                   : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))))
         width: cibleLargeur
         height: cibleHauteur
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
@@ -287,6 +292,19 @@ PanelWindow {
             }
         }
         Timer { id: garderGpu; interval: 400 }
+        // Confirmation d'une action de JARVIS sur ce PC (ConfirmationNoeud.qml), gardée le temps de la fermeture
+        Loader {
+            id: chargeurNoeud
+            anchors.fill: parent
+            active: fen.confirmNoeud || garderNoeud.running
+            sourceComponent: ConfirmationNoeud {
+                opacity: fen.confirmNoeud && ile.height > fen.hauteurNoeud * 0.7 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.confirmNoeud ? 180 : 90; easing.type: Easing.OutCubic } }
+            }
+        }
+        Timer { id: garderNoeud; interval: 400 }
+        Connections { target: fen; function onConfirmNoeudChanged() { if (!fen.confirmNoeud) garderNoeud.restart() } }
         Connections { target: fen; function onConfirmGpuChanged() { if (!fen.confirmGpu) garderGpu.restart() } }
         Connections { target: fen; function onDemandeClaudeChanged() { if (!fen.demandeClaude) garderDemande.restart() } }
         Connections { target: fen; function onBanniereChanged() { if (!fen.banniere) garderBanniere.restart() } }

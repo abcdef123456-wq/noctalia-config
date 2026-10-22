@@ -1085,6 +1085,19 @@ REGLAGES = [
         ("IA_GERER_MAJ", "Elle peut proposer : mises à jour", "It can propose: updates",
          "Les chercher ; les installer ouvre un terminal qui demande ton mot de passe.",
          "Check for them; installing opens a terminal that asks for your password."))],
+    # JARVIS qui pilote ce PC (nc-noeud, issue #12) : coupé par défaut ; « oui » active le service, « non » l'arrête
+    R("NOEUD_JARVIS", "Intelligence artificielle", L("Laisser JARVIS piloter ce PC", "Let JARVIS control this PC"),
+      "ouinon", "non",
+      L("Attention : JARVIS pourra lancer des commandes, lire ou écrire tes fichiers et voir ton écran.\n"
+        "Chaque action attend ton « Autoriser » dans l'île (25 s, sinon refus) ; clés et secrets restent interdits.",
+        "Warning: JARVIS will be able to run commands, read or write your files and see your screen.\n"
+        "Each action waits for your “Allow” in the island (25 s, otherwise denied); keys and secrets stay off-limits."),
+      groupe="noeud"),
+    R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
+      L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",
+        "Actions without confirmation (music, notification, clipboard read)"), "ouinon", "oui",
+      L("Aussi le verrouillage et la liste d'un dossier (sans son contenu). Non : JARVIS demande aussi pour celles-là.",
+        "Also locking and listing a folder (without its content). No: JARVIS asks for those too.")),
     R("ASSISTANT_ILE", "Agents IA (coucou)", L("Assistant distant dans l'île", "Remote assistant in the island"),
       "ouinon", "oui",
       L("Son activité pendant les requêtes et la fin des réponses. Connexion : la fenêtre « Connexion JARVIS » (ligne ci-dessus).",
@@ -1874,6 +1887,10 @@ def appliquer(groupes, vals=None):
             ia = g[3:]
             quoi = "retirer" if vals.get(ia.upper() + "_ILE") == "non" else "installer"
             subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
+        elif g == "noeud":
+            # JARVIS qui pilote ce PC : le service suit le réglage (activé et lancé, ou arrêté et désactivé)
+            quoi = ["enable", "--now"] if vals.get("NOEUD_JARVIS") == "oui" else ["disable", "--now"]
+            subprocess.run(["systemctl", "--user", *quoi, "nc-noeud.service"], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
         elif g == "firefox":

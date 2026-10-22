@@ -1195,6 +1195,8 @@ fi
 
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "$(t "4. Services de ta session" "4. Your session's services")"
+# nc-noeud.service (JARVIS pilote ce PC) n'est jamais activé ici : seulement par nc-reglages → Intelligence artificielle
+# → « Laisser JARVIS piloter ce PC » ; déjà actif, il est relancé plus bas pour prendre la nouvelle version
 UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service)
 [ "$ILE" = quickshell ] && UNITS+=(nc-ile.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
@@ -1261,6 +1263,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   "$HOME/.local/bin/nc-verrou-place" >/dev/null 2>&1 || true     # écran de verrouillage centré sur l'écran réel
   # Portails choisis pour Hyprland (~/.config/xdg-desktop-portal) : pris en compte tout de suite
   systemctl --user try-restart xdg-desktop-portal.service >/dev/null 2>&1 || true
+  systemctl --user try-restart nc-noeud.service >/dev/null 2>&1 || true   # seulement s'il tourne déjà
   # Claude Code dans l'île (comme l'appli coucou) : ses étapes, sa fin, ses demandes ; hooks dans ~/.claude/settings.json
   if [ "$ILE" = quickshell ] && { have claude || [ -d "$HOME/.claude" ]; } &&
      ! grep -q "nc-claude hook" "$HOME/.claude/settings.json" 2>/dev/null &&

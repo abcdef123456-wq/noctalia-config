@@ -1,0 +1,851 @@
+#!/usr/bin/env python3
+"""Ce PC comme « nœud » de JARVIS (issue #12), avec ta confirmation, sans dépendance Python externe.
+
+  nc-noeud            se connecte au serveur JARVIS (service nc-noeud.service, coupé par défaut) et attend ses demandes
+  nc-noeud aide       cette aide
+
+Le serveur JARVIS-BIS (/api/node/ws) peut demander des actions à ce PC. Leur client (clients/node_agent.py) exécute
+tout sans te demander ; celui-ci applique une politique par action :
+  - sans confirmation (sauf si « Actions sans confirmation » est sur non dans nc-reglages) : musique (playerctl),
+    notification, lecture du presse-papiers, verrouillage, liste d'un dossier (sans contenu) ;
+  - avec ta confirmation dans l'île (ou une notification à boutons sans l'île) : commande, lecture ou écriture d'un
+    fichier, capture d'écran, écriture du presse-papiers ; refus automatique au bout de 25 s ;
+  - toujours refusées : les chemins protégés (clés SSH et GPG, démarrage automatique, shells, secrets des
+    navigateurs, de gh, de Claude, de l'assistant…), tout pendant que l'IA est coupée (IA_MODE=non), toute autre action.
+Connexion wss://, ou ws:// seulement vers un hôte privé ou Tailscale. La clé secrète part dans l'en-tête X-Secret-Key,
+jamais dans l'URL. Chaque demande est notée dans ~/.local/state/noctalia-config/noeud.log (0600).
+Réglages : nc-reglages → Intelligence artificielle → « Laisser JARVIS piloter ce PC » (active ou arrête le service).
+"""
+import asyncio
+import base64
+import contextlib
+from datetime import datetime
+import hashlib
+import html
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import socket
+import ssl
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+import uuid
+
+HOME = Path.home()
+DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, no external Python dependency.
+
+  nc-noeud            connects to the JARVIS server (nc-noeud.service, off by default) and waits for its requests
+  nc-noeud aide       this help
+
+No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
+notification with buttons): command, file read or write, screenshot, clipboard write; denied after 25 s. Always
+denied: protected paths, everything while AI is off (IA_MODE=non), any other action. wss://, or ws:// only to a private
+or Tailscale host; the secret key goes in the X-Secret-Key header, never in the URL. Log:
+~/.local/state/noctalia-config/noeud.log (0600).
+"""
+
+DELAI_CONFIRMATION = 25            # secondes ; le serveur abandonne à 30 s (send_action)
+MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le client de l'upstream
+MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
+MAX_TEXTE = 64 * 1024              # ce que la carte peut montrer en entier : au-delà, pas de confirmation possible
+MAX_TRAME = 32 * 1024 * 1024       # message reçu du serveur
+COURT = 400                        # caractères montrés avant « Voir tout »
+SORTIE_DEFINITIVE = 3              # configuration absente ou refusée : systemd ne relance pas (RestartPreventExitStatus)
+
+# Actions du protocole (clients/node_agent.py, core/node_hub.py) : noms de l'upstream ramenés aux nôtres
+ALIAS = {"clipboard_get": "clipboard_read", "clipboard_set": "clipboard_write", "run_shell": "exec"}
+SANS_CONFIRMATION = {"media", "notify", "clipboard_read", "lock", "list_files"}
+AVEC_CONFIRMATION = {"exec", "read_file", "write_file", "screenshot", "clipboard_write"}
+CAPACITES = ["exec", "read_file", "write_file", "list_files", "screenshot", "lock", "clipboard_get", "clipboard_set",
+             "media", "notify"]
+MEDIA = {"play", "pause", "play-pause", "next", "previous", "stop", "status", "metadata", "volume"}
+
+# Chemins protégés (relatifs au dossier personnel), vérifiés après résolution des liens symboliques. Écriture : de quoi
+# s'installer au démarrage ou prendre la main (clés, services, shells), et les réglages de ce client lui-même
+PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".config/autostart", ".bashrc", ".zshrc", ".profile",
+            ".config/nc/assistant.conf", ".config/nc/ia.conf"]
+ECRITURE_SEULEMENT = [".config/nc/reglages.conf", ".local/bin/nc-noeud"]
+LECTURE_SEULEMENT = [".config/gh", ".git-credentials", ".netrc", ".mozilla", ".config/chromium",
+                     ".local/share/keyrings", ".claude"]
+
+
+# ── Outils communs (nc-assistant : configuration, langue, hôtes privés) ────────────────────────────────────────────
+def charger_assistant():
+    """nc-assistant (même dossier) comme module : configuration validée (0600), langue, hote_prive, hote_tailscale."""
+    chemin = Path(__file__).resolve().parent / "nc-assistant"
+    l = importlib.machinery.SourceFileLoader("nc_assistant", str(chemin))
+    m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_assistant", l))
+    l.exec_module(m)
+    return m
+
+
+A = None
+
+
+def T(fr, en):
+    return A.T(fr, en) if A else fr
+
+
+class Refus(Exception):
+    """Demande refusée : le message part au serveur et dans le journal."""
+    def __init__(self, message, decision="refusé"):
+        super().__init__(message)
+        self.decision = decision
+
+
+class Definitif(Exception):
+    """Impossible de se connecter tant que la configuration ne change pas (pas de relance)."""
+
+
+def reglage(cle, defaut):
+    """Valeur de nc-reglages (~/.config/nc/reglages.conf), relue à chaque demande ; absente : la valeur par défaut."""
+    try:
+        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"').strip("'")
+    except (OSError, UnicodeError):
+        pass
+    return defaut
+
+
+def ia_coupee():
+    return reglage("IA_MODE", "auto") == "non"
+
+
+def dossier_runtime():
+    """$XDG_RUNTIME_DIR/nc-noeud (0700, à toi seul) : la demande en cours et la réponse de l'île."""
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if not base or not os.path.isdir(base):
+        raise Refus(T("XDG_RUNTIME_DIR absent : confirmation impossible.", "XDG_RUNTIME_DIR missing: cannot confirm."))
+    d = Path(base) / "nc-noeud"
+    for x in (d, d / "reponses"):
+        x.mkdir(mode=0o700, exist_ok=True)
+        s = os.lstat(x)
+        if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.getuid():
+            raise Refus(T("Dossier de confirmation douteux : " + str(x), "Suspicious confirmation folder: " + str(x)))
+        os.chmod(x, 0o700)
+    return d
+
+
+def ecrire_atomique(chemin, texte, mode=0o600):
+    fd, tmp = tempfile.mkstemp(dir=str(chemin.parent), prefix=".nc-noeud-")
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+        os.replace(tmp, chemin)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+
+
+# ── Journal local ─────────────────────────────────────────────────────────────────────────────────────────────────
+def journal(action, resume, decision):
+    """Une ligne par demande : date, action, résumé, décision. 0600 ; ramené à sa seconde moitié au-delà de 1 Mo."""
+    d = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config"
+    f = d / "noeud.log"
+    propre = lambda s: " ".join(str(s).split())[:300]
+    ligne = "\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), propre(action), propre(resume),
+                       propre(decision))) + "\n"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        if f.is_symlink():
+            return
+        with contextlib.suppress(FileNotFoundError):
+            if f.stat().st_size > 1024 * 1024:
+                garde = f.read_bytes()[-512 * 1024:]
+                ecrire_atomique(f, garde[garde.find(b"\n") + 1:].decode("utf-8", "replace"))
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            os.write(fd, ligne.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+# ── Chemins ───────────────────────────────────────────────────────────────────────────────────────────────────────
+def resoudre(brut):
+    """Chemin absolu, liens symboliques suivis ; relatif : depuis le dossier personnel."""
+    s = str(brut or "").strip()
+    if not s or "\0" in s:
+        raise Refus(T("Chemin manquant ou invalide.", "Missing or invalid path."))
+    p = Path(s).expanduser()
+    if not p.is_absolute():
+        p = HOME / p
+    try:
+        return p.resolve()
+    except (OSError, RuntimeError) as e:
+        raise Refus(T(f"Chemin impossible à résoudre : {e}", f"Cannot resolve path: {e}")) from None
+
+
+def protege(cible, ecriture):
+    """Le chemin protégé qui contient cible (déjà résolue), ou None."""
+    liste = PROTEGES + (ECRITURE_SEULEMENT if ecriture else LECTURE_SEULEMENT)
+    for rel in liste:
+        base = HOME / rel
+        for b in {Path(os.path.abspath(base)), base.resolve()}:
+            if cible == b or b in cible.parents:
+                return "~/" + rel
+    return None
+
+
+def verifier_chemin(brut, ecriture):
+    cible = resoudre(brut)
+    p = protege(cible, ecriture)
+    if p:
+        raise Refus(T(f"Chemin protégé ({p}) : refusé, même avec ta confirmation.",
+                      f"Protected path ({p}): denied, even with your confirmation."), "refusé (chemin protégé)")
+    return cible
+
+
+def montrer_chemin(p):
+    s = str(p)
+    h = str(HOME)
+    return "~" + s[len(h):] if s == h or s.startswith(h + "/") else s
+
+
+def taille_lisible(n):
+    if n < 1024:
+        return T(f"{n} octets", f"{n} bytes")
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} Ko".replace(".", ",") if A is None or A.langue() == "fr" else f"{n / 1024:.1f} KB"
+    return f"{n / 1048576:.1f} Mo".replace(".", ",") if A is None or A.langue() == "fr" else f"{n / 1048576:.1f} MB"
+
+
+# ── WebSocket (RFC 6455), client minimal ──────────────────────────────────────────────────────────────────────────
+GUID_WS = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def masquer(donnees, cle):
+    n = len(donnees)
+    if not n:
+        return b""
+    m = (cle * (n // 4 + 1))[:n]
+    return (int.from_bytes(donnees, "big") ^ int.from_bytes(m, "big")).to_bytes(n, "big")
+
+
+class ErreurWS(Exception):
+    pass
+
+
+class WebSocket:
+    def __init__(self, lecteur, ecrivain):
+        self.r, self.w = lecteur, ecrivain
+        self.verrou = asyncio.Lock()
+        self.ferme = False
+        self.dernier = time.monotonic()        # dernière trame reçue (pings compris)
+
+    async def trame(self, opcode, donnees=b""):
+        cle = os.urandom(4)
+        n = len(donnees)
+        tete = bytearray([0x80 | opcode])
+        if n <= 125:
+            tete.append(0x80 | n)
+        elif n <= 0xFFFF:
+            tete += bytes([0x80 | 126]) + struct.pack("!H", n)
+        else:
+            tete += bytes([0x80 | 127]) + struct.pack("!Q", n)
+        async with self.verrou:
+            self.w.write(bytes(tete) + cle + masquer(donnees, cle))
+            await self.w.drain()
+
+    async def envoyer(self, objet):
+        await self.trame(0x1, json.dumps(objet, ensure_ascii=False).encode("utf-8"))
+
+    async def recevoir(self):
+        """Le prochain message texte ; None à la fermeture."""
+        morceaux, total = [], 0
+        while True:
+            tete = await self.r.readexactly(2)
+            fin, opcode, masque, n = tete[0] & 0x80, tete[0] & 0x0F, tete[1] & 0x80, tete[1] & 0x7F
+            if n == 126:
+                n = struct.unpack("!H", await self.r.readexactly(2))[0]
+            elif n == 127:
+                n = struct.unpack("!Q", await self.r.readexactly(8))[0]
+            if n > MAX_TRAME or total + n > MAX_TRAME:
+                raise ErreurWS(T("Message trop gros du serveur.", "Message from the server too big."))
+            cle = await self.r.readexactly(4) if masque else None
+            donnees = await self.r.readexactly(n) if n else b""
+            if cle:
+                donnees = masquer(donnees, cle)
+            self.dernier = time.monotonic()
+            if opcode == 0x8:                                   # fermeture : on répond, c'est fini
+                with contextlib.suppress(Exception):
+                    await self.trame(0x8, donnees[:2])
+                self.ferme = True
+                return None
+            if opcode == 0x9:                                   # ping → pong
+                await self.trame(0xA, donnees[:125])
+                continue
+            if opcode == 0xA:
+                continue
+            if opcode in (0x0, 0x1, 0x2):
+                morceaux.append(donnees)
+                total += n
+                if fin:
+                    return b"".join(morceaux).decode("utf-8", "replace")
+                continue
+            raise ErreurWS(T("Trame WebSocket inconnue.", "Unknown WebSocket frame."))
+
+    async def fermer(self):
+        if not self.ferme:
+            self.ferme = True
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self.trame(0x8, struct.pack("!H", 1000)), 2)
+        with contextlib.suppress(Exception):
+            self.w.close()
+
+
+def adresse_ws(c):
+    """(hôte, port, tls, chemin) du point /api/node/ws. https → wss ; http → ws seulement vers un hôte privé ou
+    Tailscale (réseau local ou chiffré par WireGuard) ; sinon refus : la clé et les commandes passeraient en clair."""
+    url = c["URL"]
+    u = urllib.parse.urlsplit(url)
+    if u.scheme == "https":
+        tls = True
+    elif u.scheme == "http" and (A.hote_prive(url) or A.hote_tailscale(url)):
+        tls = False
+    else:
+        raise Definitif(T("Connexion ws:// refusée vers un hôte public (" + (u.hostname or "?") + ") : la clé et les "
+                          "demandes passeraient en clair. Configure une URL https:// (nc-assistant configurer).",
+                          "ws:// connection refused to a public host (" + (u.hostname or "?") + "): the key and the "
+                          "requests would travel in clear text. Configure an https:// URL (nc-assistant configurer)."))
+    return u.hostname, u.port or (443 if tls else 80), tls, u.path.rstrip("/") + "/api/node/ws"
+
+
+async def connecter(c):
+    hote, port, tls, chemin = adresse_ws(c)
+    ctx = ssl.create_default_context() if tls else None
+    r, w = await asyncio.wait_for(asyncio.open_connection(hote, port, ssl=ctx, server_hostname=hote if tls else None,
+                                                          limit=2 ** 20), 15)
+    cle = base64.b64encode(os.urandom(16)).decode("ascii")
+    nom_hote = f"[{hote}]" if ":" in hote else hote
+    if port != (443 if tls else 80):
+        nom_hote += f":{port}"
+    # La clé secrète : dans l'en-tête seulement (le serveur le lit en premier), jamais dans l'URL ni les journaux
+    requete = (f"GET {chemin} HTTP/1.1\r\nHost: {nom_hote}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               f"Sec-WebSocket-Key: {cle}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: nc-noeud\r\n"
+               f"X-Secret-Key: {c['SECRET_KEY']}\r\n\r\n")
+    try:
+        w.write(requete.encode("utf-8"))
+        await w.drain()
+        reponse = await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 15)
+        lignes = reponse.decode("iso-8859-1").split("\r\n")
+        statut = lignes[0].split(" ")
+        if len(statut) < 2 or statut[1] != "101":
+            code = statut[1] if len(statut) > 1 else "?"
+            if code in ("401", "403"):
+                raise ErreurWS(T(f"Clé refusée par le serveur (HTTP {code}) : vérifie SECRET_KEY.",
+                                 f"Server rejected the key (HTTP {code}): check SECRET_KEY."))
+            raise ErreurWS(T(f"Le serveur refuse le WebSocket (HTTP {code}).", f"Server refused the WebSocket (HTTP {code})."))
+        entetes = {}
+        for l in lignes[1:]:
+            if ":" in l:
+                k, v = l.split(":", 1)
+                entetes[k.strip().lower()] = v.strip()
+        attendu = base64.b64encode(hashlib.sha1((cle + GUID_WS).encode("ascii")).digest()).decode("ascii")
+        if entetes.get("sec-websocket-accept") != attendu:
+            raise ErreurWS(T("Réponse WebSocket invalide.", "Invalid WebSocket answer."))
+    except BaseException:
+        w.close()
+        raise
+    return WebSocket(r, w)
+
+
+# ── Programmes du PC (détectés, jamais supposés) ──────────────────────────────────────────────────────────────────
+async def lancer(args, entree=None, delai=20, **kw):
+    """(code, sortie, erreurs) ; le programme est tué au-delà du délai."""
+    p = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE if entree is not None else asyncio.subprocess.DEVNULL,
+                                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                             start_new_session=True, **kw)
+    try:
+        out, err = await asyncio.wait_for(p.communicate(entree), delai)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)
+        await p.wait()
+        raise
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)
+        raise
+    return p.returncode, out, err
+
+
+def programme(*noms):
+    for n in noms:
+        c = shutil.which(n)
+        if c:
+            return c
+    return None
+
+
+# ── Les actions : (résumé, texte montré, exécution) ───────────────────────────────────────────────────────────────
+class Action:
+    def __init__(self, resume, texte="", executer=None):
+        self.resume, self.texte, self.executer = resume, texte, executer
+
+
+def preparer(action, p):
+    """Valide la demande et décrit exactement ce qui sera fait ; Refus si elle est impossible ou interdite."""
+    if action == "exec":
+        cmd = str(p.get("command") or "")
+        if not cmd.strip():
+            raise Refus(T("Commande vide.", "Empty command."))
+        if len(cmd) > MAX_TEXTE:
+            raise Refus(T("Commande trop longue pour être relue : refusée.", "Command too long to be reviewed: denied."))
+        if os.geteuid() == 0:
+            raise Refus(T("nc-noeud ne tourne jamais en root.", "nc-noeud never runs as root."))
+        try:
+            delai = min(max(float(p.get("timeout", 30)), 1.0), 120.0)
+        except (TypeError, ValueError):
+            delai = 30.0
+        dossier = HOME
+        if p.get("cwd"):
+            dossier = verifier_chemin(p.get("cwd"), False)
+            if not dossier.is_dir():
+                raise Refus(T("Dossier de travail introuvable.", "Working directory not found."))
+        resume = T("exécuter cette commande", "run this command")
+        if dossier != HOME:
+            resume += T(f" dans {montrer_chemin(dossier)}", f" in {montrer_chemin(dossier)}")
+
+        async def executer():
+            debut = time.monotonic()
+            try:
+                code, out, err = await lancer(["/bin/sh", "-c", cmd], delai=delai, cwd=str(dossier),
+                                              env={**os.environ, "TERM": "dumb"})
+            except asyncio.TimeoutError:
+                return {"success": False, "error": T(f"Délai de {delai:g} s dépassé.", f"{delai:g} s timeout exceeded.")}
+            duree = time.monotonic() - debut
+            o = out[:MAX_SORTIE].decode("utf-8", "replace").strip()
+            e = err[:MAX_SORTIE].decode("utf-8", "replace").strip()
+            return {"success": code == 0, "returncode": code, "stdout": o, "stderr": e, "duration": round(duree, 2),
+                    "message": f"Code {code} ({duree:.1f}s)\n{o}\n{e}".strip()}
+        return Action(resume, cmd, executer)
+
+    if action in ("read_file", "list_files"):
+        cible = verifier_chemin(p.get("path"), False)
+        if not cible.exists():
+            raise Refus(T(f"Introuvable : {montrer_chemin(cible)}", f"Not found: {montrer_chemin(cible)}"))
+        if cible.is_dir():
+            resume = T(f"lister le dossier {montrer_chemin(cible)}", f"list the folder {montrer_chemin(cible)}")
+
+            async def executer():
+                elements = []
+                for e in sorted(cible.iterdir(), key=lambda x: x.name)[:200]:
+                    with contextlib.suppress(OSError):
+                        dossier_ = e.is_dir()
+                        elements.append({"name": e.name, "is_dir": dossier_, "size": 0 if dossier_ else e.stat().st_size})
+                return {"success": True, "type": "directory", "items": elements}
+            return Action(resume, "", executer)
+        if action == "list_files":
+            raise Refus(T("Ce n'est pas un dossier.", "Not a folder."))
+        taille = cible.stat().st_size
+        if taille > MAX_FICHIER:
+            raise Refus(T("Fichier trop gros (plus de 5 Mo).", "File too big (over 5 MB)."))
+
+        async def executer():
+            # Relu au moment de lire : un lien posé pendant la confirmation ne mène pas ailleurs
+            verifier_chemin(str(cible), False)
+            fd = os.open(cible, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as f:
+                contenu = f.read(MAX_FICHIER + 1)[:MAX_FICHIER].decode("utf-8", "replace")
+            return {"success": True, "type": "file", "content": contenu, "size": len(contenu)}
+        return Action(T(f"lire le fichier {montrer_chemin(cible)} ({taille_lisible(taille)})",
+                        f"read the file {montrer_chemin(cible)} ({taille_lisible(taille)})"), montrer_chemin(cible), executer)
+
+    if action == "write_file":
+        cible = verifier_chemin(p.get("path"), True)
+        contenu = str(p.get("content") if p.get("content") is not None else "")
+        brut = contenu.encode("utf-8")
+        if len(brut) > MAX_FICHIER:
+            raise Refus(T("Contenu trop gros (plus de 5 Mo).", "Content too big (over 5 MB)."))
+        if cible.is_dir():
+            raise Refus(T("C'est un dossier.", "It is a folder."))
+        apercu = "\n".join(contenu.splitlines()[:20])
+        if len(contenu.splitlines()) > 20:
+            apercu += "\n…"
+        existe = cible.exists()
+        resume = (T(f"remplacer {montrer_chemin(cible)} par {taille_lisible(len(brut))}",
+                    f"replace {montrer_chemin(cible)} with {taille_lisible(len(brut))}") if existe else
+                  T(f"créer {montrer_chemin(cible)} ({taille_lisible(len(brut))})",
+                    f"create {montrer_chemin(cible)} ({taille_lisible(len(brut))})"))
+
+        async def executer():
+            cible.parent.mkdir(parents=True, exist_ok=True)
+            verifier_chemin(str(cible), True)              # relu après la confirmation et la création des dossiers
+            fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+            with os.fdopen(fd, "wb") as f:
+                f.write(brut)
+            return {"success": True, "path": str(cible), "bytes_written": len(brut)}
+        return Action(resume, apercu[:MAX_TEXTE], executer)
+
+    if action == "screenshot":
+        grim = programme("grim")
+        if not grim:
+            raise Refus(T("Capture impossible : grim n'est pas installé.", "Cannot take a screenshot: grim is not installed."))
+
+        async def executer():
+            base = os.environ.get("XDG_RUNTIME_DIR") or None
+            fd, chemin = tempfile.mkstemp(prefix="nc-noeud-capture-", suffix=".png", dir=base)
+            os.close(fd)
+            try:
+                code, _, err = await lancer([grim, chemin], delai=15)
+                donnees = Path(chemin).read_bytes()
+                if code != 0 or not donnees:
+                    return {"success": False, "error": err.decode("utf-8", "replace").strip()[:300] or T("Capture ratée.", "Screenshot failed.")}
+                return {"success": True, "image_base64": base64.b64encode(donnees).decode("ascii"), "format": "png"}
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(chemin)                       # effacée après l'envoi (rien ne reste sur le disque)
+        return Action(T("faire une capture de ton écran", "take a screenshot of your screen"), "", executer)
+
+    if action == "clipboard_write":
+        texte = str(p.get("text") if p.get("text") is not None else "")
+        if len(texte) > MAX_TEXTE:
+            raise Refus(T("Texte trop long pour être relu : refusé.", "Text too long to be reviewed: denied."))
+        copier = programme("wl-copy")
+        xclip = None if copier else programme("xclip")
+        if not copier and not xclip:
+            raise Refus(T("wl-copy (ou xclip) introuvable.", "wl-copy (or xclip) not found."))
+
+        async def executer():
+            args = [copier] if copier else [xclip, "-selection", "clipboard"]
+            code, _, _ = await lancer(args, entree=texte.encode("utf-8"), delai=10)
+            return {"success": code == 0, "message": T("Presse-papiers mis à jour.", "Clipboard updated.")}
+        return Action(T("remplacer ton presse-papiers par ce texte", "replace your clipboard with this text"), texte, executer)
+
+    if action == "clipboard_read":
+        coller = programme("wl-paste")
+        xclip = None if coller else programme("xclip")
+        if not coller and not xclip:
+            raise Refus(T("wl-paste (ou xclip) introuvable.", "wl-paste (or xclip) not found."))
+
+        async def executer():
+            args = [coller, "--no-newline"] if coller else [xclip, "-selection", "clipboard", "-o"]
+            code, out, _ = await lancer(args, delai=10)
+            return {"success": code == 0, "clipboard": out[:MAX_SORTIE].decode("utf-8", "replace")}
+        return Action(T("lire ton presse-papiers", "read your clipboard"), "", executer)
+
+    if action == "media":
+        sous = str(p.get("subaction") or "play-pause")
+        if sous not in MEDIA:
+            raise Refus(T(f"Commande de musique inconnue : {sous[:40]}", f"Unknown music command: {sous[:40]}"))
+        pc = programme("playerctl")
+        if not pc:
+            raise Refus(T("playerctl introuvable.", "playerctl not found."))
+        args = [pc, sous]
+        if sous == "volume":
+            try:
+                v = float(p.get("value"))
+            except (TypeError, ValueError):
+                raise Refus(T("Volume invalide.", "Invalid volume.")) from None
+            args.append(str(min(max(v if v <= 1 else v / 100, 0.0), 1.0)))
+
+        async def executer():
+            code, out, err = await lancer(args, delai=10)
+            return {"success": code == 0, "output": (out or err).decode("utf-8", "replace").strip()[:2000]}
+        return Action(T(f"contrôler la musique : {sous}", f"control the music: {sous}"), "", executer)
+
+    if action == "notify":
+        titre = " ".join(str(p.get("title") or "JARVIS").split())[:100]
+        corps = str(p.get("body") or "")[:1000]
+        ns = programme("notify-send")
+        if not ns:
+            raise Refus(T("notify-send introuvable.", "notify-send not found."))
+
+        async def executer():
+            code, _, _ = await lancer([ns, "-a", "JARVIS", "--", titre, html.escape(corps, quote=False)], delai=10)
+            return {"success": code == 0}
+        return Action(T(f"t'envoyer une notification : {titre}", f"send you a notification: {titre}"), corps, executer)
+
+    if action == "lock":
+        lc = programme("loginctl")
+        hl = None if lc else programme("hyprlock")
+        if not lc and not hl:
+            raise Refus(T("Aucun verrouillage trouvé (loginctl, hyprlock).", "No locker found (loginctl, hyprlock)."))
+
+        async def executer():
+            if lc:
+                code, _, _ = await lancer([lc, "lock-session"], delai=10)
+                return {"success": code == 0, "message": T("Session verrouillée.", "Session locked.")}
+            subprocess.Popen([hl], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return {"success": True, "message": T("Session verrouillée.", "Session locked.")}
+        return Action(T("verrouiller ta session", "lock your session"), "", executer)
+
+    raise Refus(T(f"Action non permise sur ce PC : {action[:40]}", f"Action not allowed on this PC: {action[:40]}"))
+
+
+# ── Confirmation : l'île, sinon une notification à boutons, sinon refus ───────────────────────────────────────────
+async def ile_prevenue():
+    """L'île relit la demande ; vrai si elle a répondu (qs -c nc-ile ipc call ile noeud → « oui »)."""
+    qs = programme("qs")
+    if not qs:
+        return False
+    try:
+        code, out, _ = await lancer([qs, "-c", "nc-ile", "ipc", "call", "ile", "noeud"], delai=4)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    return code == 0 and out.decode("utf-8", "replace").strip() == "oui"
+
+
+async def notification_a_boutons():
+    """notify-send qui sait attendre un bouton (--action, libnotify 0.7.9 ou plus) ; None sinon."""
+    ns = programme("notify-send")
+    if not ns:
+        return None
+    try:
+        _, out, err = await lancer([ns, "--help"], delai=4)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    return ns if b"--action" in out + err else None
+
+
+class Confirmation:
+    def __init__(self, serveur):
+        self.serveur = serveur
+        self.verrou = asyncio.Lock()           # une carte à la fois ; les autres attendent (et expirent à 25 s)
+
+    async def demander(self, action, decrite, limite):
+        """« autorise », « refuse », « expire » ou « indisponible »."""
+        async with self.verrou:
+            reste = limite - time.monotonic()
+            if reste < 1:
+                return "expire"
+            d = dossier_runtime()
+            ident = uuid.uuid4().hex
+            for vieux in (d / "reponses").iterdir():                   # réponses à d'anciennes cartes
+                with contextlib.suppress(OSError):
+                    vieux.unlink()
+            demande = {"id": ident, "serveur": self.serveur, "action": action, "resume": decrite.resume,
+                       "texte": decrite.texte, "court": COURT, "expire": time.time() + reste, "duree": round(reste)}
+            fichier = d / "demande.json"
+            ecrire_atomique(fichier, json.dumps(demande, ensure_ascii=False))
+            try:
+                if await ile_prevenue():
+                    return await self.attendre(d / "reponses" / ident, limite)
+                ns = await notification_a_boutons()
+                if ns and len(decrite.texte) <= COURT:
+                    return await self.par_notification(ns, decrite, limite)
+                return "indisponible"
+            finally:
+                with contextlib.suppress(OSError):
+                    fichier.unlink()
+                with contextlib.suppress(OSError):
+                    (d / "reponses" / ident).unlink()
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(ile_prevenue())           # la carte se ferme tout de suite
+
+    async def attendre(self, reponse, limite):
+        while time.monotonic() < limite:
+            try:
+                s = os.lstat(reponse)
+                if stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid():
+                    v = reponse.read_text(encoding="utf-8").strip()
+                    if v in ("autoriser", "refuser"):
+                        return "autorise" if v == "autoriser" else "refuse"
+            except (FileNotFoundError, UnicodeError):
+                pass
+            await asyncio.sleep(0.15)
+        return "expire"
+
+    async def par_notification(self, ns, decrite, limite):
+        """Sans l'île (openSUSE…) : une notification avec Autoriser et Refuser ; le texte entier doit y tenir."""
+        reste = limite - time.monotonic()
+        corps = decrite.resume + ("\n\n" + decrite.texte if decrite.texte else "")
+        args = [ns, "-a", "JARVIS", "-u", "critical", "-t", str(int(reste * 1000)),
+                "-A", "autoriser=" + T("Autoriser", "Allow"), "-A", "refuser=" + T("Refuser", "Deny"), "--",
+                T(f"JARVIS (depuis {self.serveur}) veut :", f"JARVIS (from {self.serveur}) wants to:"),
+                html.escape(corps, quote=False)]
+        try:
+            code, out, _ = await lancer(args, delai=reste)
+        except asyncio.TimeoutError:
+            return "expire"
+        v = out.decode("utf-8", "replace").strip()
+        return "autorise" if code == 0 and v == "autoriser" else ("refuse" if v == "refuser" else "expire")
+
+
+DECISIONS = {"refuse": ("refusé", "Refusé sur le PC.", "Denied on the PC."),
+             "expire": ("expiré (refusé)", "Pas de réponse sur le PC en 25 s : refusé.", "No answer on the PC within 25 s: denied."),
+             "indisponible": ("refusé (pas de confirmation possible)",
+                              "Confirmation impossible sur le PC (ni l'île ni notification à boutons) : refusé.",
+                              "Cannot confirm on the PC (neither the island nor a notification with buttons): denied.")}
+
+
+# ── Le nœud ───────────────────────────────────────────────────────────────────────────────────────────────────────
+class Noeud:
+    def __init__(self, c):
+        self.c = c
+        self.serveur = urllib.parse.urlsplit(c["URL"]).hostname or "?"
+        self.confirmation = Confirmation(self.serveur)
+        self.ws = None
+        self.taches = set()
+
+    def delai(self):
+        try:
+            return min(max(float(os.environ.get("NC_NOEUD_DELAI", DELAI_CONFIRMATION)), 1.0), DELAI_CONFIRMATION)
+        except ValueError:
+            return DELAI_CONFIRMATION
+
+    async def decider(self, action, params):
+        """Le résultat à renvoyer au serveur, selon la politique ; tout est noté dans le journal."""
+        limite = time.monotonic() + self.delai()
+        nom = ALIAS.get(action, action)
+        if ia_coupee():
+            journal(nom, "", "refusé (IA coupée)")
+            return {"success": False, "error": T("L'IA est coupée sur ce PC (IA_MODE=non) : refusé.",
+                                                 "AI is turned off on this PC (IA_MODE=non): denied.")}
+        if reglage("NOEUD_JARVIS", "non") != "oui":
+            journal(nom, "", "refusé (pilotage coupé)")
+            return {"success": False, "error": T("Le pilotage de ce PC par JARVIS est coupé.", "JARVIS control of this PC is off.")}
+        if nom not in SANS_CONFIRMATION and nom not in AVEC_CONFIRMATION:
+            journal(nom, "", "refusé (action non permise)")
+            return {"success": False, "error": T(f"Action non permise sur ce PC : {nom[:40]}", f"Action not allowed on this PC: {nom[:40]}")}
+        try:
+            decrite = preparer(nom, params if isinstance(params, dict) else {})
+        except Refus as e:
+            journal(nom, str(e), e.decision)
+            return {"success": False, "error": str(e)}
+        resume = decrite.resume + (" : " + decrite.texte if decrite.texte else "")
+        confirmer = nom in AVEC_CONFIRMATION or reglage("NOEUD_SANS_CONFIRMATION", "oui") == "non"
+        if confirmer:
+            try:
+                decision = await self.confirmation.demander(nom, decrite, limite)
+            except Refus as e:
+                decision = "indisponible"
+                print(f"nc-noeud : {e}", file=sys.stderr, flush=True)
+            if decision != "autorise":
+                d = DECISIONS[decision]
+                journal(nom, resume, d[0])
+                return {"success": False, "error": T(d[1], d[2]), "denied": True}
+        try:
+            res = await decrite.executer()
+        except Refus as e:
+            journal(nom, resume, e.decision)
+            return {"success": False, "error": str(e)}
+        except (OSError, asyncio.TimeoutError, UnicodeError) as e:
+            res = {"success": False, "error": str(e)[:300]}
+        journal(nom, resume, ("autorisé" if confirmer else "sans confirmation") + ("" if res.get("success") else " (échec)"))
+        return res
+
+    async def traiter(self, msg):
+        req_id = msg.get("req_id")
+        try:
+            res = await self.decider(str(msg.get("action") or ""), msg.get("params") or {})
+        except Exception as e:                                       # jamais de réponse manquante
+            res = {"success": False, "error": T("Erreur sur le PC : ", "Error on the PC: ") + str(e)[:200]}
+        with contextlib.suppress(Exception):
+            await self.ws.envoyer({**res, "type": "response", "req_id": req_id})
+
+    async def garder(self, ws):
+        """Ping WebSocket toutes les 25 s ; rien reçu depuis 75 s : la connexion est morte, on la referme."""
+        while not ws.ferme:
+            await asyncio.sleep(25)
+            if time.monotonic() - ws.dernier > 75:
+                await ws.fermer()
+                return
+            with contextlib.suppress(Exception):
+                await ws.trame(0x9, b"nc")
+
+    async def session(self, ws):
+        self.ws = ws
+        pc = A.nom_du_pc() or socket.gethostname() or "linux"
+        await ws.envoyer({"type": "register", "node_id": A.client_id(self.c) or pc, "hostname": pc, "os": "linux",
+                          "capabilities": CAPACITES, "metadata": {"client": "nc-noeud", "confirmation": True}})
+        print(T(f"nc-noeud : connecté à {self.serveur}.", f"nc-noeud: connected to {self.serveur}."), file=sys.stderr, flush=True)
+        garde = asyncio.ensure_future(self.garder(ws))
+        try:
+            while True:
+                brut = await ws.recevoir()
+                if brut is None:
+                    return
+                try:
+                    msg = json.loads(brut)
+                except ValueError:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("type") == "ping":
+                    await ws.envoyer({"type": "pong"})
+                elif msg.get("type") == "action" and msg.get("req_id"):
+                    t = asyncio.ensure_future(self.traiter(msg))
+                    self.taches.add(t)
+                    t.add_done_callback(self.taches.discard)
+        finally:
+            garde.cancel()
+            for t in list(self.taches):
+                t.cancel()
+            await ws.fermer()
+
+    async def boucle(self):
+        attente = 3
+        while True:
+            if reglage("NOEUD_JARVIS", "non") != "oui":
+                print(T("nc-noeud : « Laisser JARVIS piloter ce PC » est sur non (nc-reglages) : arrêt.",
+                        "nc-noeud: “Let JARVIS control this PC” is off (nc-settings): stopping."), file=sys.stderr)
+                return 0
+            try:
+                ws = await connecter(self.c)
+                attente = 3
+                await self.session(ws)
+                raison = T("connexion fermée", "connection closed")
+            except Definitif:
+                raise
+            except (OSError, EOFError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError,
+                    ssl.SSLError, ErreurWS, UnicodeError) as e:
+                raison = str(e) or type(e).__name__
+            print(T(f"nc-noeud : {raison} ; nouvel essai dans {attente} s.", f"nc-noeud: {raison}; retrying in {attente} s."),
+                  file=sys.stderr, flush=True)
+            await asyncio.sleep(attente)
+            attente = min(attente * 2, 30)
+
+
+def main():
+    global A
+    try:
+        A = charger_assistant()
+    except (OSError, SyntaxError, ImportError):
+        print("nc-noeud : nc-assistant introuvable (~/.local/bin).", file=sys.stderr)
+        return SORTIE_DEFINITIVE
+    args = sys.argv[1:]
+    if args and args[0] in ("aide", "help", "-h", "--help"):
+        print(T(__doc__, DOC_EN).strip())
+        return 0
+    if args:
+        print(T("nc-noeud : commande inconnue (nc-noeud aide).", "nc-noeud: unknown command (nc-noeud aide)."), file=sys.stderr)
+        return 2
+    try:
+        c = A.configuration()
+        adresse_ws(c)
+    except (A.Erreur, Definitif) as e:
+        print(f"nc-noeud : {e}", file=sys.stderr)
+        return SORTIE_DEFINITIVE
+    try:
+        return asyncio.run(Noeud(c).boucle())
+    except Definitif as e:
+        print(f"nc-noeud : {e}", file=sys.stderr)
+        return SORTIE_DEFINITIVE
+
+
+def interrompre(*_):
+    raise KeyboardInterrupt
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, interrompre)
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

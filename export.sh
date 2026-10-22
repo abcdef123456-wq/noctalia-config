@@ -76,6 +76,7 @@ HOME_FILES=(
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
   .local/bin/nc-assistant
+  .local/bin/nc-noeud
   .local/bin/nc-jarvis
   .local/bin/nc-dictee
   .local/bin/nc-ia
@@ -169,6 +170,7 @@ HOME_FILES=(
   .config/systemd/user/nc-paquets.timer
   .config/systemd/user/nc-alertes.service
   .config/systemd/user/nc-alertes.timer
+  .config/systemd/user/nc-noeud.service
   .config/systemd/user/nc-panne@.service
   .config/systemd/user/nc-panne@.service.d/sans-boucle.conf
   .config/systemd/user/service.d/nc-panne.conf

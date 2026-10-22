@@ -153,6 +153,9 @@ ShellRoot {
         // celui-ci (hybride, dediee) ; rien ne redémarre avant son bouton
         function gpuMode(): void { Etat.fermer(); ModeGraphique.demander("") }
         function gpuModeVers(cible: string): void { Etat.fermer(); ModeGraphique.demander(cible) }
+        // JARVIS veut agir sur ce PC (nc-noeud) : la demande est relue, la carte de confirmation s'ouvre (ou se ferme si
+        // la demande est partie) ; « oui » dit à nc-noeud que l'île est là pour répondre
+        function noeud(): string { Noeud.relire(); return "oui" }
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}
