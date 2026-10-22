@@ -95,7 +95,34 @@ Singleton {
     }
     // Une notification retirée (par toi ou par l'appli) : son état lu et son heure ne sont plus gardés
     Connections { target: serveur.trackedNotifications; function onValuesChanged() { n.garder() } }
+    // Bannières en pause (nc-session, le temps de capturer l'aperçu d'une session : ipc « bannieresPause ») : celle qui
+    // est affichée se cache aussitôt, sans animation (Ile.qml), et la plus récente attend la reprise. Reprise
+    // automatique au bout de 3 s au plus, si la reprise ne vient pas (nc-session arrêté en pleine capture).
+    property bool enPause: false
+    property var enAttente: null
+    function pauseBannieres(oui) {
+        if (oui) {
+            if (!enPause) enPause = true                  // d'abord : Ile.qml coupe ses animations avant que la bannière parte
+            if (banniere) { enAttente = banniere; banniere = null }
+            reprise.restart()
+            return
+        }
+        reprise.stop()
+        if (!enPause) return
+        enPause = false
+        var a = enAttente
+        enAttente = null
+        if (a && encoreLa(a)) montrer(a)
+    }
+    // Toujours là : ni fermée (par toi ou par l'appli), ni reportée, ni son appli masquée entre-temps
+    function encoreLa(notif) {
+        if (notif.synthetique) return revenues.indexOf(notif) >= 0
+        return serveur.trackedNotifications.values.indexOf(notif) >= 0 && !reports[notif.id] && !appliMasquee(notif)
+    }
+    Timer { id: reprise; interval: 3000; onTriggered: n.pauseBannieres(false) }
+
     function montrer(notif) {
+        if (enPause) { enAttente = notif; return }
         banniere = notif
         fin.prolonge = false
         fin.interval = Math.max(3000, Math.min(5000, Math.round((parseFloat(Reglages.val("ILE_BANNIERE_DUREE", "4")) || 4) * 1000)))

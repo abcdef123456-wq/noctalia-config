@@ -65,8 +65,15 @@ exit 0
 FAUX_RACCOURCI = JOURNAL_SH + '''[ "$1" = ajoute ] && [ "$2" = Super+Alt+9 ] && { echo "nc-raccourci : Super+Alt+9 est déjà pris" >&2; exit 1; }
 exit 0
 '''
-# Faux qs : l'île ne tourne que si <home>/ile existe
-FAUX_QS = JOURNAL_SH + '[ -e "$H/ile" ]\n'
+# Faux qs : l'île ne tourne que si <home>/ile existe ; bannieresPause répond « oui », sauf une île d'avant
+# (<home>/ile-ancienne : fonction inconnue, refusée)
+FAUX_QS = JOURNAL_SH + '''[ -e "$H/ile" ] || exit 1
+if [ "$6" = bannieresPause ]; then
+  [ -e "$H/ile-ancienne" ] && { echo "No function named bannieresPause" >&2; exit 1; }
+  echo oui
+fi
+exit 0
+'''
 # Faux notify-send : le bouton choisi est dans <home>/bouton
 FAUX_NOTIFY = JOURNAL_SH + '[ -e "$H/bouton" ] && { read -r l < "$H/bouton"; echo "$l"; }\nexit 0\n'
 
@@ -432,26 +439,83 @@ class Apercu(Base):
         self.assertIsNone(self.session()["apercu"])
 
     def test_sous_la_barre_a_la_taille_de_la_carte(self):
-        # 1600 x 1000 points (2560 x 1600 à l'échelle 1,6), barre de 42 en haut : la zone utile recadrée au ratio de
-        # l'écran (1533 x 958 à partir de 33,42), réduite par grim à 1178 pixels de large (la carte de 736 points)
+        # 1600 x 1000 points (2560 x 1600 à l'échelle 1,6), barre de 42 en haut : la zone utile ENTIÈRE (1600 x 958 à
+        # partir de 0,42, rien de coupé à gauche ni à droite), réduite par grim à 1178 pixels de large (la carte de
+        # 736 x 441 points, au ratio de la zone utile)
         self.ecrans([{"id": 0, "name": "eDP-1", "x": 0, "y": 0, "width": 2560, "height": 1600, "scale": 1.6, "transform": 0,
                       "reserved": [0, 42, 0, 0], "focused": True}])
         r = self.lancer("enregistrer", "Dev")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(self.appels(), r"(?m)^grim -g 33,42 1533x958 -s 0\.768428 -t png \S+$")
+        self.assertRegex(self.appels(), r"(?m)^grim -g 0,42 1600x958 -s 0\.736250 -t png \S+$")
         self.assertNotIn("-o ", self.appels())
+        self.assertEqual((int(1600 * 0.73625), int(958 * 0.73625)), (1178, 705), "1178 x 705 pixels, la carte à 1:1")
+
+    def attendre_notification(self):
+        for _ in range(50):
+            if "notify-send" in self.appels():
+                break
+            time.sleep(0.05)
+        return self.appels()
 
     def test_grim_avant_la_notification(self):
         # La bannière de l'île ne doit pas être dans l'aperçu : la notification « enregistrée » vient après grim
         r = self.lancer("enregistrer", "Dev")
         self.assertEqual(r.returncode, 0, r.stderr)
-        for _ in range(50):
-            if "notify-send" in self.appels():
-                break
-            time.sleep(0.05)
-        a = self.appels()
+        a = self.attendre_notification()
         self.assertIn("notify-send", a)
         self.assertLess(a.index("grim "), a.index("notify-send"), a)
+
+    def test_bannieres_en_pause_le_temps_de_grim(self):
+        # L'île tourne : pause des bannières → grim → reprise → notification de la session
+        (self.home / "ile").touch()
+        r = self.lancer("enregistrer", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.attendre_notification()
+        lignes = [l for l in a.splitlines() if l.startswith(("qs ", "grim ", "notify-send "))]
+        self.assertEqual([l.split(" -t ")[0] if l.startswith("grim") else l.split(" -- ")[0] for l in lignes], [
+            "qs -c nc-ile ipc call ile bannieresPause true",
+            "grim -g 1600,0 1920x1080 -s 0.459896",
+            "qs -c nc-ile ipc call ile bannieresPause false",
+            "notify-send -a Sessions -i view-grid"], a)
+        # apercu NOM : la même pause, sans notification
+        self.oublier()
+        self.assertEqual(self.lancer("apercu", "Dev").returncode, 0)
+        a = self.appels()
+        self.assertLess(a.index("bannieresPause true"), a.index("grim "), a)
+        self.assertLess(a.index("grim "), a.index("bannieresPause false"), a)
+
+    def test_reprise_meme_si_grim_echoue(self):
+        (self.home / "ile").touch()
+        (self.bin / "grim").write_text(JOURNAL_SH + "exit 1\n")
+        r = self.lancer("enregistrer", "Dev")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.attendre_notification()
+        self.assertIn("bannieresPause false", a)
+        self.assertLess(a.index("grim "), a.index("bannieresPause false"), a)
+        self.assertIsNone(self.session()["apercu"])
+
+    def test_sans_ile_capture_sans_pause(self):
+        # qs absent, île arrêtée, ou île d'avant qui ne connaît pas bannieresPause : capture tout de suite, sans reprise
+        for cas in ("sans qs", "île arrêtée", "île d'avant"):
+            with self.subTest(cas=cas):
+                self.oublier()
+                (self.home / "ile").unlink(missing_ok=True)
+                (self.home / "ile-ancienne").unlink(missing_ok=True)
+                if cas == "sans qs":
+                    (self.bin / "qs").unlink(missing_ok=True)
+                else:
+                    (self.bin / "qs").write_text(FAUX_QS)
+                    (self.bin / "qs").chmod(0o755)
+                if cas == "île d'avant":
+                    (self.home / "ile").touch()
+                    (self.home / "ile-ancienne").touch()
+                r = self.lancer("enregistrer", "Dev")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                a = self.attendre_notification()
+                self.assertIn("grim -g 1600,0 1920x1080", a)
+                self.assertNotIn("bannieresPause false", a, "pas de reprise sans pause")
+                self.assertEqual("qs " in a, cas != "sans qs", a)
+                self.assertLess(a.index("grim "), a.index("notify-send"), a)
 
     def test_aucun_appel_a_nc_carousel_thumbs(self):
         # Plus de tranches : nc-carousel-thumbs n'est jamais lancé pour une session, avec ou sans capture

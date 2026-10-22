@@ -245,12 +245,14 @@ def effacer_anciennes(nom):
         (APERCUS / (nom_valide(nom) + suffixe)).unlink(missing_ok=True)
 
 
-# Carte choisie du carrousel des sessions (plugin nc/sessions, panel.luau : largeurCarte, hauteurCarte, zoneCapture).
-# MÊME FORMULE aux deux endroits (un test vérifie qu'elles concordent), en points logiques de l'écran actif :
-#   largeur = plancher(0,46 x largeur de l'écran + 0,5), hauteur = plancher(largeur x hauteur / largeur de l'écran + 0,5)
-# (environ 46 % du cadre, au ratio de l'écran). L'aperçu est pris par grim dans la zone utile de l'écran (sans les
-# zones réservées : la barre), recadrée au centre au ratio de l'écran, et réduit par grim lui-même (-s) à la largeur
-# de la carte en pixels physiques (largeur x échelle, arrondie) : affiché à 1:1, sans ImageMagick.
+# Carte choisie du carrousel des sessions (plugin nc/sessions, panel.luau : largeurCarte, hauteurCarte, zoneUtile,
+# zoneCapture). MÊME FORMULE aux deux endroits (un test vérifie qu'elles concordent), en points logiques de l'écran actif :
+#   largeur = plancher(0,46 x largeur de l'écran + 0,5)
+#   hauteur = plancher(largeur x hauteur de la zone utile / largeur de la zone utile + 0,5)
+# La zone utile : l'écran sans ses zones réservées (la barre). La carte en prend le ratio, et l'aperçu est la zone utile
+# ENTIÈRE, sans rien couper (une fenêtre collée au bord gauche ou droit reste dans l'aperçu), réduite par grim lui-même
+# (-s) à la largeur de la carte en pixels physiques (largeur x échelle, arrondie) : affiché à 1:1, sans ImageMagick.
+# Chez l'utilisateur (1600 x 1000 à l'échelle 1,6, barre de 42) : zone 1600 x 958, carte 736 x 441, 1178 pixels de large.
 PART_CARTE = 0.46
 
 
@@ -262,13 +264,13 @@ def largeur_carte(w):
     return arrondi(PART_CARTE * w)
 
 
-def hauteur_carte(w, h):
-    return arrondi(largeur_carte(w) * h / w)
+def hauteur_carte(w, uw, uh):
+    return arrondi(largeur_carte(w) * uh / uw)
 
 
-def zone_capture(m):
-    """(région « X,Y LxH » de grim -g, facteur de grim -s) pour un écran de hyprctl -j monitors ; None s'il est illisible.
-    Sans « reserved » (ou mal formé), l'écran entier."""
+def zone_utile(m):
+    """Pour un écran de hyprctl -j monitors : (largeur de l'écran en points, échelle, (X, Y, L, H) de la zone utile) ;
+    None s'il est illisible. Sans « reserved » (ou mal formé, ou plus grand que l'écran), l'écran entier."""
     try:
         echelle = float(m.get("scale") or 1) or 1
         w, h = float(m["width"]), float(m["height"])
@@ -276,7 +278,7 @@ def zone_capture(m):
             w, h = h, w
         w, h = arrondi(w / echelle), arrondi(h / echelle)
         x, y = int(m.get("x") or 0), int(m.get("y") or 0)
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, AttributeError):
         return None
     if w <= 0 or h <= 0:
         return None
@@ -289,15 +291,19 @@ def zone_capture(m):
     if uw <= 0 or uh <= 0:
         g = haut = 0
         uw, uh = w, h
-    ratio = w / h
-    if uw / uh > ratio:
-        rw, rh = arrondi(uh * ratio), uh
-    else:
-        rw, rh = uw, arrondi(uw / ratio)
-    rx, ry = x + g + (uw - rw) // 2, y + haut + (uh - rh) // 2
+    return w, echelle, (x + g, y + haut, uw, uh)
+
+
+def zone_capture(m):
+    """(région « X,Y LxH » de grim -g, facteur de grim -s) : la zone utile entière, réduite à la largeur de la carte ;
+    None si l'écran est illisible."""
+    z = zone_utile(m)
+    if not z:
+        return None
+    w, echelle, (zx, zy, uw, uh) = z
     pixels = arrondi(largeur_carte(w) * echelle)
-    facteur = math.ceil(pixels / rw * 1e6) / 1e6        # grim tronque : arrondi au-dessus, jamais un pixel de moins
-    return f"{rx},{ry} {rw}x{rh}", f"{facteur:.6f}"
+    facteur = math.ceil(pixels / uw * 1e6) / 1e6        # grim tronque : arrondi au-dessus, jamais un pixel de moins
+    return f"{zx},{zy} {uw}x{uh}", f"{facteur:.6f}"
 
 
 def ecran_actif():
@@ -307,6 +313,20 @@ def ecran_actif():
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return next((m for m in l if isinstance(m, dict) and m.get("focused")), None) if isinstance(l, list) else None
+
+
+def bannieres_pause(oui):
+    """Met en pause (ou reprend) les bannières de l'île, pour qu'aucune ne soit dans l'aperçu (la notification de la
+    session d'avant). Vrai si l'île a répondu ; sans île (qs absent, île arrêtée, fonction inconnue) : faux, on capture
+    sans attendre. L'île reprend seule au bout de 3 s si la reprise ne vient pas."""
+    if not shutil.which("qs"):
+        return False
+    try:
+        r = subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "bannieresPause", "true" if oui else "false"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and r.stdout.strip() == "oui"
 
 
 def capturer(nom):
@@ -323,6 +343,9 @@ def capturer(nom):
     APERCUS.chmod(0o700)
     tmp = png.with_name("." + png.stem + ".part")
     tmp.unlink(missing_ok=True)
+    pause = bannieres_pause(True)                          # aucune bannière de l'île dans l'aperçu…
+    if pause:
+        time.sleep(0.05)                                   # … le temps d'une image, qu'elle soit vraiment partie
     masque = os.umask(0o077)                               # grim crée le fichier : 0600 dès sa création
     try:
         ok = subprocess.run(["grim", "-g", zone[0], "-s", zone[1], "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
@@ -331,6 +354,8 @@ def capturer(nom):
         ok = False
     finally:
         os.umask(masque)
+        if pause:
+            bannieres_pause(False)                         # reprise, avant la notification de la session
     if not ok or not tmp.is_file():
         tmp.unlink(missing_ok=True)
         png.unlink(missing_ok=True)

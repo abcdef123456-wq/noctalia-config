@@ -654,7 +654,7 @@ verifier(trouver("i1") and trouver("i1").p.radius == 10 and trouver("c1").p.radi
 onOpen(nil); vider()
 local bande
 for _, nd in ipairs(noeuds(tree)) do
-  if nd.t == "column" and #nd.c == 3 and nd.c[3].p.key == nil and nd.c[2].t == "row" and nd.c[2].p.height == 490 then bande = nd end
+  if nd.t == "column" and #nd.c == 3 and nd.c[3].p.key == nil and nd.c[2].t == "row" and nd.c[2].p.height == 471 then bande = nd end   -- carte de 441, plus 30
 end
 verifier(bande, "colonne de la bande")
 verifier(bande.c[1].p.height == bande.c[3].p.height, "place au-dessus = légende dessous : "
@@ -673,7 +673,7 @@ local c = trouver("c1")
 local cadre = ECRAN[1] - 16
 verifier(c.p.width == math.floor(0.46 * ECRAN[1] + 0.5), "largeur de la carte choisie : " .. c.p.width)
 verifier(math.abs(c.p.width / cadre - 0.46) < 0.01, "environ 46 %% du cadre : " .. c.p.width / cadre)
-verifier(math.abs(c.p.width / c.p.height - ECRAN[1] / ECRAN[2]) < 0.005, "ratio de l'écran : " .. c.p.width .. "x" .. c.p.height)
+verifier(math.abs(c.p.width / c.p.height - ECRAN[1] / (ECRAN[2] - 42)) < 0.005, "ratio de la zone utile (sans la barre de 42) : " .. c.p.width .. "x" .. c.p.height)
 verifier(c.p.opacity == 1, "choisie opaque")
 -- contour blanc de 1,5 sur la choisie seulement
 local contour = nil
@@ -732,7 +732,7 @@ table.remove(pending, 1)()     -- hyprctl -j monitors : grim et hyprctl -j clien
 local g
 for _, a in ipairs(calls) do if a[1] == "sh" and a[3]:find("grim", 1, true) then g = a end end
 verifier(g, "grim lancé à l'ouverture")
-verifier(g[5] == "33,42 1533x958" and g[6] == "0.768428", "sous la barre, au format des aperçus : " .. g[5] .. " -s " .. g[6])
+verifier(g[5] == "0,42 1600x958" and g[6] == "0.736250", "sous la barre, la zone utile entière : " .. g[5] .. " -s " .. g[6])
 verifier(g[3]:find('grim -g "$1" -s "$2" -t png "$0.tmp" && exec mv -f "$0.tmp" "$0"', 1, true), "vers un .tmp renommé une fois écrit")
 local f = g[4]
 verifier(f:sub(1, #DIR + 5) == DIR .. "/run/" and f:match("%.png$"), "fichier temporaire dans XDG_RUNTIME_DIR : " .. f)
@@ -814,6 +814,10 @@ ECRANS_ESSAI = [
     {"name": "eDP-1", "x": 0, "y": 0, "width": 1080, "height": 1920, "scale": 1, "transform": 1, "reserved": [0, 42, 0, 0]},
     {"name": "eDP-1", "x": 0, "y": 0, "width": 3840, "height": 2160, "scale": 1.5, "transform": 0, "reserved": [60, 0, 0, 0]},
     {"name": "eDP-1", "x": 0, "y": 0, "width": 2880, "height": 1800, "scale": 1.75, "transform": 0, "reserved": "abîmé"},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 2560, "height": 1440, "scale": 1.25, "transform": 0, "reserved": [0, 40, 52, 0]},
+    {"name": "eDP-1", "x": -1920, "y": 0, "width": 1920, "height": 1200, "scale": 1, "transform": 0, "reserved": [0, 0, 0, 0]},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 3440, "height": 1440, "scale": 1, "transform": 0, "reserved": [0, 36, 0, 30]},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 1366, "height": 768, "scale": 1, "transform": 0, "reserved": [0, 2000, 0, 0]},
 ]
 
 
@@ -825,10 +829,8 @@ class Concordance(unittest.TestCase):
         code = ("import importlib.machinery, importlib.util, json, sys\n"
                 "l = importlib.machinery.SourceFileLoader('ncs', sys.argv[1])\n"
                 "m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ncs', l)); l.exec_module(m)\n"
-                "e = json.loads(sys.argv[2]); s = e.get('scale') or 1\n"
-                "w, h = round(e['width'] / s), round(e['height'] / s)\n"
-                "w, h = (h, w) if e.get('transform', 0) % 2 else (w, h)\n"
-                "print(json.dumps([*m.zone_capture(e), m.largeur_carte(w), m.hauteur_carte(w, h)]))\n")
+                "e = json.loads(sys.argv[2]); w, _, (_, _, uw, uh) = m.zone_utile(e)\n"
+                "print(json.dumps([*m.zone_capture(e), m.largeur_carte(w), m.hauteur_carte(w, uw, uh)]))\n")
         with tempfile.TemporaryDirectory() as d:
             r = subprocess.run([sys.executable, "-I", "-c", code, str(REPO / "home/.local/bin/nc-session"), json.dumps(ecran)],
                                capture_output=True, text=True, timeout=10, env=dict(os.environ, HOME=d, NC_LANGUE="fr"))
@@ -858,11 +860,33 @@ io.write(g[5] .. "|" .. g[6] .. "|" .. trouver("c2").p.width .. "|" .. trouver("
                 self.assertEqual(self.lua(e), self.python(e))
 
     def test_valeurs_de_l_utilisateur(self):
-        # 1600 x 1000 points à l'échelle 1,6, barre de 42 : carte de 736 x 460 points, aperçu de 1178 pixels de large
+        # 1600 x 1000 points à l'échelle 1,6, barre de 42 : la zone utile entière (1600 x 958, rien de coupé à gauche ni
+        # à droite), carte de 736 x 441 points à son ratio, aperçu de 1178 x 705 pixels
         zone, facteur, cw, ch = self.python(ECRANS_ESSAI[0])
-        self.assertEqual((zone, facteur, cw, ch), ("33,42 1533x958", "0.768428", 736, 460))
-        self.assertEqual(int(1533 * float(facteur)), round(736 * 1.6), "grim donne 1178 pixels de large")
-        self.assertEqual(int(958 * float(facteur)), round(460 * 1.6), "et 736 de haut : affiché à 1:1")
+        self.assertEqual((zone, facteur, cw, ch), ("0,42 1600x958", "0.736250", 736, 441))
+        self.assertEqual(int(1600 * float(facteur)), round(736 * 1.6), "grim donne 1178 pixels de large")
+        self.assertEqual(int(958 * float(facteur)), 705, "et 705 de haut (441 x 1,6 = 705,6) : affiché à 1:1")
+        self.assertEqual(self.lua(ECRANS_ESSAI[0]), [zone, facteur, cw, ch])
+
+    def test_rien_n_est_coupe(self):
+        # La zone de grim est la zone utile entière, et la carte en a le ratio (à l'arrondi près), sur chaque écran
+        for e in ECRANS_ESSAI:
+            with self.subTest(ecran=e):
+                zone, facteur, cw, ch = self.python(e)
+                xy, taille = zone.split(" ")
+                uw, uh = (int(v) for v in taille.split("x"))
+                s = e.get("scale") or 1
+                w, h = round(e["width"] / s), round(e["height"] / s)
+                if e.get("transform", 0) % 2:
+                    w, h = h, w
+                r = e.get("reserved")
+                g, haut, d, bas = r if isinstance(r, list) and len(r) == 4 else (0, 0, 0, 0)
+                if w - g - d <= 0 or h - haut - bas <= 0:
+                    g = haut = d = bas = 0
+                self.assertEqual((uw, uh), (w - g - d, h - haut - bas))
+                self.assertEqual(xy, f"{e['x'] + g},{e['y'] + haut}")
+                self.assertLessEqual(abs(ch - cw * uh / uw), 0.5)
+                self.assertEqual(int(uw * float(facteur)), round(cw * s), "la largeur de la carte en pixels")
 
 
 class Integration(unittest.TestCase):

@@ -1,7 +1,8 @@
 -- nc/sessions (Noctalia v5) : les sessions enregistrées (nc-session) dans un carrousel, comme un sélecteur d'applis.
 -- Une carte par session (son aperçu, sinon le dessin de ses fenêtres, une rangée par bureau), puis « + Nouvelle
--- session ». Cartes plates, au ratio de l'écran actif, coins arrondis de 10 : la choisie grande au centre (environ
--- 46 % du cadre) avec un contour blanc de 1,5 point, ses voisines plus petites (0,72) et à 60 %. Sous la carte choisie :
+-- session ». Cartes plates, au ratio de la zone utile de l'écran actif (sans la barre), coins arrondis de 10 : la
+-- choisie grande au centre (environ 46 % du cadre) avec un contour blanc de 1,5 point, ses voisines plus petites (0,72)
+-- et à 60 %. Sous la carte choisie :
 -- pastille, icône, nom, « Modifier », « N fenêtres · date », icônes des applis, puis une ligne d'aide.
 -- Gauche/Droite ou molette (maintenir une flèche pour défiler), clic sur une voisine pour la centrer ; la bande boucle
 -- dès 3 cartes. Entrée ou clic sur la carte du milieu : ouvrir la session (ou nommer la nouvelle) ; Maj + Suppr : la
@@ -50,7 +51,7 @@ local PART_CARTE = 0.46        -- largeur de la carte choisie : part de la large
 local ECHELLE_VOISINE = 0.72   -- voisines : plus petites…
 local OPACITE_VOISINE = 0.6    -- … et à 60 %
 local VISIBLES = 2             -- cartes dessinées de chaque côté de la choisie
-local CW, CH = 736, 460        -- carte choisie (setZoom : largeurCarte, hauteurCarte)
+local CW, CH = 736, 441        -- carte choisie (setZoom : largeurCarte, hauteurCarte)
 local INFO_H = BASE.INFO
 local GAP = BASE.GAP           -- entre deux cartes
 local Z = 1
@@ -178,23 +179,25 @@ local function currentOutput()
 end
 
 -- ── Taille de la carte choisie et zone de l'aperçu ──────────────────────────
--- MÊME FORMULE que nc-session (largeur_carte, hauteur_carte, zone_capture ; un test vérifie qu'elles concordent), en
--- points logiques de l'écran actif :
---   largeur = plancher(0,46 x largeur de l'écran + 0,5), hauteur = plancher(largeur x hauteur / largeur de l'écran + 0,5)
--- (environ 46 % du cadre, au ratio de l'écran ; 1600 x 1000 : 736 x 460). L'aperçu : la zone utile de l'écran (sans
--- ses zones réservées, la barre), recadrée au centre au ratio de l'écran, réduite par grim (-s) à la largeur de la
--- carte en pixels physiques (largeur x échelle, arrondie : 736 x 1,6 = 1178) ; affichée à 1:1.
+-- MÊME FORMULE que nc-session (largeur_carte, hauteur_carte, zone_utile, zone_capture ; un test vérifie qu'elles
+-- concordent), en points logiques de l'écran actif :
+--   largeur = plancher(0,46 x largeur de l'écran + 0,5)
+--   hauteur = plancher(largeur x hauteur de la zone utile / largeur de la zone utile + 0,5)
+-- La zone utile : l'écran sans ses zones réservées (la barre). La carte en prend le ratio, et l'aperçu est la zone
+-- utile ENTIÈRE, sans rien couper (une fenêtre collée au bord gauche ou droit reste dans l'aperçu), réduite par grim
+-- (-s) à la largeur de la carte en pixels physiques (largeur x échelle, arrondie) ; affichée à 1:1.
+-- Chez l'utilisateur (1600 x 1000 à l'échelle 1,6, barre de 42) : zone 1600 x 958, carte 736 x 441, 1178 pixels.
 local function arrondi(v) return math.floor(v + 0.5) end
 local function entier(v)   -- int() de Python : vers zéro
   v = tonumber(v) or 0
   return v >= 0 and math.floor(v) or -math.floor(-v)
 end
 local function largeurCarte(w) return arrondi(PART_CARTE * w) end
-local function hauteurCarte(w, h) return arrondi(largeurCarte(w) * h / w) end
+local function hauteurCarte(w, uw, uh) return arrondi(largeurCarte(w) * uh / uw) end
 
--- Région « X,Y LxH » de grim -g et facteur de grim -s, pour un écran de hyprctl -j monitors ; nil s'il est illisible.
--- Sans « reserved » (ou mal formé), l'écran entier.
-local function zoneCapture(m)
+-- Zone utile d'un écran de hyprctl -j monitors : { w, h (l'écran en points), x, y (son coin), zx, zy, uw, uh (la zone
+-- utile) } ; nil s'il est illisible. Sans « reserved » (ou mal formé, ou plus grand que l'écran), l'écran entier.
+local function zoneUtile(m)
   if type(m) ~= "table" then return nil end
   local e = tonumber(m.scale) or 1
   if e == 0 then e = 1 end
@@ -211,14 +214,21 @@ local function zoneCapture(m)
   end
   local uw, uh = w - g - d, h - haut - bas
   if uw <= 0 or uh <= 0 then g, haut, uw, uh = 0, 0, w, h end
-  local ratio = w / h
-  local rw, rh
-  if uw / uh > ratio then rw, rh = arrondi(uh * ratio), uh else rw, rh = uw, arrondi(uw / ratio) end
-  local rx, ry = x + g + math.floor((uw - rw) / 2), y + haut + math.floor((uh - rh) / 2)
-  local pixels = arrondi(largeurCarte(w) * e)
-  local facteur = math.ceil(pixels / rw * 1e6) / 1e6   -- grim tronque : arrondi au-dessus, jamais un pixel de moins
-  return string.format("%d,%d %dx%d", rx, ry, rw, rh), string.format("%.6f", facteur)
+  return { w = w, h = h, x = x, y = y, e = e, zx = x + g, zy = y + haut, uw = uw, uh = uh }
 end
+
+-- Région « X,Y LxH » de grim -g et facteur de grim -s : la zone utile entière, réduite à la largeur de la carte
+local function zoneCapture(m)
+  local z = zoneUtile(m)
+  if not z then return nil end
+  local pixels = arrondi(largeurCarte(z.w) * z.e)
+  local facteur = math.ceil(pixels / z.uw * 1e6) / 1e6   -- grim tronque : arrondi au-dessus, jamais un pixel de moins
+  return string.format("%d,%d %dx%d", z.zx, z.zy, z.uw, z.uh), string.format("%.6f", facteur)
+end
+
+-- Zone utile connue de chaque écran (nom → { w, uw, uh }), lue par hyprctl à chaque ouverture et gardée pour la suivante ;
+-- avant la première lecture, l'écran sans la barre du haut (HAUT_BARRE)
+local zonesConnues = {}
 
 -- Tailles pour l'écran courant (zoom du texte comme nc/carousel ; cartes : largeurCarte, hauteurCarte)
 local function setZoom()
@@ -229,7 +239,10 @@ local function setZoom()
   INFO_H, GAP = px(BASE.INFO), px(BASE.GAP)
   local w, h = 1600, 1000
   if o and o.width > 0 and o.height > 0 then w, h = o.width, o.height end
-  CW, CH = largeurCarte(w), hauteurCarte(w, h)
+  local zu = o and zonesConnues[o.name]
+  local uw, uh = w, math.max(1, h - HAUT_BARRE)
+  if zu and zu.w == w then uw, uh = zu.uw, zu.uh end
+  CW, CH = largeurCarte(w), hauteurCarte(w, uw, uh)
   if o then BGW, BGH = o.width - 2 * BORD, o.height - HAUT_BARRE - 2 * BORD else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
 end
@@ -599,6 +612,13 @@ local function lireActuel()
     end
     if not m then
       for _, x in ipairs(moniteurs or {}) do if type(x) == "table" and x.focused then m = x end end
+    end
+    local zu = zoneUtile(m)
+    if zu and o and m.name == o.name then         -- l'écran du panneau lui-même (pas celui qui a le focus, à défaut)
+      zonesConnues[o.name] = { w = zu.w, uw = zu.uw, uh = zu.uh }
+      local cw, ch = CW, CH
+      setZoom()                                  -- la carte au ratio exact de la zone utile
+      if cw ~= CW or ch ~= CH then render() end
     end
     local zone, facteur = zoneCapture(m)
     if capture and zone then
@@ -1087,7 +1107,7 @@ local function clavierEditeur(chord)
 end
 
 -- Largeur du volet (fixe, réduite avec l'écran) et glissement de la carte du milieu vers la gauche, juste assez pour
--- qu'elle ne passe pas sous le volet : environ 30 points en 1600 x 1000 comme en 1280 x 800 (carte au ratio de l'écran)
+-- qu'elle ne passe pas sous le volet : environ 30 points en 1600 x 1000 comme en 1280 x 800 (carte au ratio de la zone utile)
 local function placeVolet()
   local VW = px(VOLET_W)
   local largeur = CW

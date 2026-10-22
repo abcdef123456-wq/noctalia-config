@@ -206,5 +206,56 @@ if (etape === 3) {
         self.assertEqual(memo["masques"], {"gamma": -1})
 
 
+    def test_bannieres_en_pause_le_temps_d_une_capture(self):
+        # nc-session capture l'aperçu d'une session (ipc bannieresPause) : la bannière affichée se cache aussitôt, une
+        # nouvelle attend la reprise puis s'affiche ; sans reprise, l'île reprend seule au bout de 3 s.
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!Notifs.pret) return
+if (etape === 1) { notifier("Alpha", "Session « Dev » enregistrée", "2 fenêtres"); etape++; return }
+if (etape === 2) {
+    if (!Notifs.banniere) return
+    verifier(Notifs.banniere.summary === "Session « Dev » enregistrée", "bannière affichée")
+    Notifs.pauseBannieres(true)
+    verifier(Notifs.enPause && Notifs.banniere === null, "pause : la bannière affichée est cachée aussitôt")
+    notifier("Beta", "Pendant la capture", "attend la reprise"); etape++; return
+}
+if (etape === 3) {
+    if (envoisFinis < 2 || Notifs.liste.length < 2) return
+    verifier(Notifs.banniere === null, "pendant la pause, aucune nouvelle bannière")
+    verifier(Notifs.liste.length === 2, "rangée dans l'historique quand même")
+    Notifs.pauseBannieres(false)
+    verifier(!Notifs.enPause && Notifs.banniere && Notifs.banniere.summary === "Pendant la capture", "reprise : la bannière en attente s'affiche")
+    Notifs.pauseBannieres(false)                     // une reprise de trop ne change rien
+    verifier(Notifs.banniere && Notifs.banniere.summary === "Pendant la capture", "reprise en double sans effet")
+    // Pause sans reprise (nc-session arrêté en pleine capture) : l'île reprend seule au bout de 3 s
+    Notifs.banniere = null
+    Notifs.pauseBannieres(true)
+    test.memo = { t: Date.now() }
+    notifier("Gamma", "Après la capture", "s'affiche à la reprise automatique"); etape++; return
+}
+if (etape === 4) {
+    if (Notifs.enPause) {
+        verifier(Notifs.banniere === null, "toujours en pause : rien d'affiché")
+        verifier(Date.now() - test.memo.t < 3600, "reprise automatique en retard")
+        return
+    }
+    var duree = Date.now() - test.memo.t
+    verifier(duree >= 2900, "reprise automatique trop tôt : " + duree + " ms")
+    verifier(Notifs.banniere && Notifs.banniere.summary === "Après la capture", "reprise automatique : la bannière en attente s'affiche")
+    // Une bannière en attente fermée entre-temps ne revient pas
+    Notifs.pauseBannieres(true)
+    var g = Notifs.liste.find(x => x.summary === "Après la capture")
+    Notifs.fermer(g)
+    etape++; return
+}
+if (etape === 5) {
+    if (Notifs.liste.some(x => x.summary === "Après la capture")) return
+    Notifs.pauseBannieres(false)
+    verifier(Notifs.banniere === null, "fermée pendant la pause : pas de bannière à la reprise")
+    Qt.quit()
+}
+''')
+
 if __name__ == "__main__":
     unittest.main()
