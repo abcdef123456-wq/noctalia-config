@@ -548,6 +548,39 @@ class IA(unittest.TestCase):
         self.assertIn("— bord de l'écran : remise sur le bureau 2", self.lancer("executer", plan["id"]).stdout)
         self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", self.appels())
 
+    def test_ranger_sans_rien_demander_puis_annuler(self):
+        """Super + Maj + O : l'IA range tout de suite (fenêtres et bureaux seulement), une notification de l'île le dit,
+        « Annuler » remet tout comme avant ; rien dans le Spotlight, même avec « L'IA peut agir » coupé."""
+        clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [0, 0], "size": [800, 600]},
+                   {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": True, "fullscreen": 0, "at": [100, 50], "size": [900, 700]}]
+        apres = json.loads(json.dumps(clients)); apres[0]["workspace"]["id"] = 1
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in dispatch) case "$*" in *"workspace = 1"*) : > "$HOME/bouge";; esac;; '
+                                  'clients) if [ -e "$HOME/bouge" ]; then echo \'' + json.dumps(apres) + '\'; else echo \'' + json.dumps(clients) + '\'; fi;; '
+                                  'workspaces) echo \'[{"id": 1, "name": "1", "windows": 0}, {"id": 2, "name": "2", "windows": 2}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"; case "$*" in *annuler=*) echo annuler;; esac')
+        self.programme("qs", 'echo "qs $*" >> "$JOURNAL"')
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [
+            {"outil": "fenetre_bureau", "args": {"adresse": "0xa1", "bureau": 1}},
+            {"outil": "service_redemarrer", "args": {"nom": "nc-ile.service"}}]})
+        r = self.lancer("organiser")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        a = self.appels()
+        self.assertNotIn("qs ", a, "pas de Spotlight")
+        self.assertIn("hl.dsp.window.move({ workspace = 1, follow = false, window = 'address:0xa1' })", a)
+        self.assertNotIn("systemctl", a, "seulement les fenêtres et les bureaux")
+        self.assertIn("Fenêtres rangées", a)
+        self.assertIn("annuler=Annuler", a)
+        # « Annuler » : kitty revient sur le bureau 2
+        self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", a)
+        self.assertFalse((self.home / "cache/nc/rangement-avant.json").exists())
+        # Coupé : rien
+        self.reglages("IA_ORGANISER=non\n")
+        self.assertNotEqual(self.lancer("organiser").returncode, 0)
+        self.reglages("IA_MODE=non\n")
+        Faux.requetes.clear()
+        self.lancer("organiser")
+        self.assertFalse(Faux.requetes, "IA coupée : rien ne part")
+
     def test_agir_permissions_reverifiees(self):
         self.preparer_agent()
         self.reglages("IA_ACTIONS=confirmer\nIA_GERER_RESEAU=non\n")

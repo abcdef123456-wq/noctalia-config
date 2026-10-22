@@ -974,6 +974,16 @@ REGLAGES = [
         "notification. Demande une IA qui lit les images.",
         "Super + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
         "Needs an AI that reads images.")),
+    # Ranger les fenêtres (Super + Maj + O, Super + Ctrl + O) : le raccourci est la demande, fait tout de suite
+    R("IA_ORGANISER", "Intelligence artificielle", L("Ranger les fenêtres (Super + Maj + O)", "Tidy windows (Super + Shift + O)"),
+      "choix", "auto",
+      L("Super + Maj + O range toutes les fenêtres sur des bureaux nommés, Super + Ctrl + O seulement le bureau affiché. "
+        "Tout de suite : seulement des fenêtres et des bureaux, puis une notification dit ce qui a bougé, avec « Annuler ».",
+        "Super + Shift + O tidies all windows onto named desktops, Super + Ctrl + O only the shown desktop. Right away: only "
+        "windows and desktops, then a notification says what moved, with “Undo”."),
+      [("auto", L("Tout de suite, avec Annuler", "Right away, with Undo")),
+       ("confirmer", L("Me montrer le plan d'abord (Spotlight)", "Show me the plan first (Spotlight)")),
+       ("non", L("Non", "No"))]),
     # L'IA qui agit (nc-ia agir, « @ » dans le Spotlight) : coupée par défaut ; ce qu'elle peut proposer, jamais fait sans toi
     R("IA_ACTIONS", "Intelligence artificielle", L("L'IA peut agir (avec ta confirmation)", "The AI can act (with your confirmation)"),
       "choix", "non",

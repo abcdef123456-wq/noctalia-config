@@ -117,9 +117,14 @@ d'énergie, luminosité, volume) et propose un plan ; chaque action apparaît co
 lu sans IA (« Luminosité : 70 % (maintenant : 40 %) », ou « (déjà le cas) »), faite seulement quand tu appuies sur
 Entrée dessus (ou sur « Tout faire »). Ce qu'elle peut proposer se choisit domaine par domaine :
 
-- **fenêtres et bureaux** : **Super + Maj + O** organise toutes les fenêtres (regroupées par activité sur des
-  bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché (l'IA ne voit alors que lui, et rien ne peut en sortir) ; déplacer, échanger, rendre libre ou
-  plein écran, nommer un bureau. L'IA voit l'appli, le titre (50 caractères) et la place de chaque fenêtre ;
+- **fenêtres et bureaux** : **Super + Maj + O** range toutes les fenêtres (regroupées par activité sur des
+  bureaux nommés, puis disposées), **Super + Ctrl + O** celles du bureau affiché (l'IA ne voit alors que lui, et rien
+  ne peut en sortir). Le raccourci est ta demande : c'est fait **tout de suite**, sans passer par le Spotlight, même
+  si « L'IA peut agir » est coupé — seulement des fenêtres et des bureaux, chaque action revérifiée — puis une
+  notification de l'île dit ce qui a bougé, avec **Annuler** (bureau, état libre ou plein écran, place et nom des
+  bureaux remis comme avant). Réglage « Ranger les fenêtres » : tout de suite (défaut), me montrer le plan d'abord,
+  ou non. Dans le Spotlight (« @ »), l'IA peut aussi déplacer, échanger, rendre libre ou plein écran, nommer un
+  bureau. L'IA voit l'appli, le titre (50 caractères) et la place de chaque fenêtre ;
 - **services de la session** : redémarrer, démarrer, arrêter (signalé ⚠), lire le journal pour comprendre un échec —
   jamais les services du système ;
 - **Wi-Fi et Bluetooth** : allumer, couper ;

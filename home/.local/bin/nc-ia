@@ -1131,17 +1131,32 @@ def copier(t):
             pass
 
 
+_BALISAGE = []
+
+
+def corps_sur(texte):
+    """Le corps d'une notification, échappé seulement pour un serveur qui lit le balisage (mako, dunst…) : l'île ne le
+    lit pas et affichait « l&#x27;appli » pour « l'appli »."""
+    if not _BALISAGE:
+        _BALISAGE.append(bool(shutil.which("gdbus")) and "body-markup" in sortie_cmd(
+            ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path",
+             "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.GetCapabilities"], 3)[1])
+    if not _BALISAGE[0]:
+        return texte
+    import html
+    return html.escape(texte, quote=False)
+
+
 def notifier(titre, corps, action=None):
     """Une notification ; action = (texte, commande) : un clic dessus lance la commande (attendue dans un processus
     détaché : celui qui a lancé nc-ia n'attend pas)."""
     if not shutil.which("notify-send"):
         return
-    import html
     cmd = ["notify-send", "-a", "IA", "-i", "dialog-information"]
     if action:
         cmd += ["-A", "default=" + action[0]]
     try:
-        p = subprocess.Popen(cmd + ["--", titre, html.escape(corps[:1500])], stdout=subprocess.PIPE,
+        p = subprocess.Popen(cmd + ["--", titre, corps_sur(corps[:1500])], stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True, start_new_session=True)
         if action and os.fork() == 0:
             # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
@@ -1853,6 +1868,130 @@ def garder_sur_bureau(adresse, bureau):
     return T(f"bord de l'écran : remise sur le bureau {bureau}", f"edge of the screen: put back on desktop {bureau}")
 
 
+# ── Ranger les fenêtres tout de suite (Super + Maj + O, Super + Ctrl + O) ────────────────────────────────────────
+# Le raccourci est ta demande : l'IA range sans rien demander (fenêtres et bureaux seulement, chaque action revérifiée),
+# puis une notification de l'île dit ce qui a bougé, avec « Annuler » qui remet tout comme avant.
+# Réglage IA_ORGANISER : auto (défaut), confirmer (plan à confirmer dans le Spotlight, comme avant), non.
+ANNULER_RANGEMENT = CACHE / "rangement-avant.json"
+
+
+def photo_fenetres():
+    """Bureau, état libre ou plein écran, place et taille de chaque fenêtre, et le nom des bureaux : de quoi annuler."""
+    try:
+        c = json.loads(subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
+        b = json.loads(subprocess.run(["hyprctl", "workspaces", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    return dict(t=time.time(),
+                fenetres={x["address"]: dict(bureau=(x.get("workspace") or {}).get("id"), libre=bool(x.get("floating")),
+                                             plein=int(x.get("fullscreen") or 0), at=x.get("at"), taille=x.get("size"))
+                          for x in c if x.get("mapped") and (x.get("workspace") or {}).get("id", 0) > 0},
+                bureaux={str(x["id"]): x.get("name") for x in b if x.get("id", 0) > 0})
+
+
+def ranger(bureau_seul):
+    sync = ["-h", "string:x-canonical-private-synchronous:nc-rangement"]
+
+    def dire(titre, corps, annuler=False):
+        if not shutil.which("notify-send"):
+            return ""
+        cmd = ["notify-send", "-a", "IA", "-i", "view-grid"] + sync + (["-A", "annuler=" + T("Annuler", "Undo")] if annuler else [])
+        try:
+            return subprocess.run(cmd + ["--", titre, corps_sur(corps)], capture_output=True, text=True,
+                                  timeout=600 if annuler else 10, stdin=subprocess.DEVNULL).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+    titre = T("Ranger ce bureau", "Tidy this desktop") if bureau_seul else T("Ranger les fenêtres", "Tidy windows")
+    if coupee():
+        dire(titre, message_coupee())
+        return 3
+    if reglage("IA_GERER_FENETRES", "oui") == "non":
+        dire(titre, T("Coupé dans nc-reglages → Intelligence artificielle (fenêtres et bureaux).",
+                      "Turned off in nc-settings → Artificial intelligence (windows and desktops)."))
+        return 1
+    bureau = bureau_affiche() if bureau_seul else None
+    fenetres = fenetres_bureau(bureau)
+    if not fenetres:
+        dire(titre, T("Aucune fenêtre à ranger.", "No window to tidy."))
+        return 0
+    dire(titre, T("L'IA range tes fenêtres…", "The AI is tidying your windows…"))
+    demande = T("Organise les fenêtres du bureau affiché : une meilleure disposition, sans les changer de bureau.",
+                "Organize the windows of the shown desktop: a better layout, without changing their desktop.") if bureau_seul else \
+        T("Organise toutes mes fenêtres : regroupe-les par activité sur des bureaux, nomme les bureaux, puis dispose-les "
+          "bien sur chacun.", "Organize all my windows: group them by activity on desktops, name the desktops, then lay "
+          "them out well on each one.")
+    texte = T("État du bureau :\n", "Desktop state:\n") + etat_bureau(["fenetres"], bureau) + T("\n\nDemande : ", "\n\nRequest: ") + demande
+    try:
+        rep, _ = demander(texte, "texte", consigne_=consigne_agent(["fenetres"]), sortie=lambda m: None)
+    except ErreurIA as e:
+        dire(titre, T("Rangement impossible : ", "Could not tidy: ") + str(e)[:200])
+        return 1
+    d = lire_json(rep)
+    valides = []
+    for a in (d.get("actions") or [])[:12]:
+        try:
+            valides.append(valider_action(a, ["fenetres"], {}, fenetres, bureau))
+        except ErreurIA:
+            continue                                     # hors des fenêtres, ou d'un autre bureau : ignoré
+    if not valides:
+        dire(titre, (str(d.get("reponse") or "") or T("Rien à changer : c'est déjà bien rangé.", "Nothing to change: already tidy."))[:300])
+        return 0
+    avant = photo_fenetres()
+    if avant:
+        try:
+            ANNULER_RANGEMENT.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(ANNULER_RANGEMENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(avant, f)
+        except OSError:
+            pass
+    faits = []
+    for v in valides:
+        ok, _ = executer_action(v)
+        if ok and bureau is not None and v["outil"] == "fenetre_direction":
+            garder_sur_bureau(v["args"]["adresse"], bureau)
+        if ok:
+            faits.append(v["libelle"])
+    if not faits:
+        dire(titre, T("Rien n'a pu être déplacé.", "Nothing could be moved."))
+        return 1
+    corps = " · ".join(faits[:4]) + (T(f" (+ {len(faits) - 4} autres)", f" (+ {len(faits) - 4} more)") if len(faits) > 4 else "")
+    if dire(T("Fenêtres rangées", "Windows tidied"), corps, annuler=bool(avant)) == "annuler":
+        annuler_rangement()
+    return 0
+
+
+def annuler_rangement():
+    """Remet chaque fenêtre encore ouverte sur son bureau, libre ou rangée, en plein écran ou non, et les noms des bureaux."""
+    try:
+        avant = json.loads(ANNULER_RANGEMENT.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 1
+    maintenant = photo_fenetres() or {"fenetres": {}, "bureaux": {}}
+    lua = []
+    for adr, a in avant.get("fenetres", {}).items():
+        m = maintenant["fenetres"].get(adr)
+        if not m or not re.fullmatch(r"0x[0-9a-f]+", adr):
+            continue
+        sel = f"address:{adr}"
+        if m["bureau"] != a["bureau"] and isinstance(a["bureau"], int):
+            lua.append(f"hl.dsp.window.move({{ workspace = {a['bureau']}, follow = false, window = '{sel}' }})")
+        if m["libre"] != a["libre"]:
+            lua.append(f"hl.dsp.window.float({{ action = '{'set' if a['libre'] else 'unset'}', window = '{sel}' }})")
+        if bool(m["plein"]) != bool(a["plein"]):
+            lua.append(f"hl.dsp.window.fullscreen({{ action = '{'set' if a['plein'] else 'unset'}', window = '{sel}' }})")
+        if a["libre"] and isinstance(a.get("at"), list) and isinstance(a.get("taille"), list):
+            lua.append(f"hl.dsp.window.resize({{ x = {int(a['taille'][0])}, y = {int(a['taille'][1])}, window = '{sel}' }})")
+            lua.append(f"hl.dsp.window.move({{ x = {int(a['at'][0])}, y = {int(a['at'][1])}, window = '{sel}' }})")
+    for n, nom_ in avant.get("bureaux", {}).items():
+        if n.isdigit() and maintenant["bureaux"].get(n) not in (None, nom_) and isinstance(nom_, str) and "]]" not in nom_:
+            lua.append(f"hl.dsp.workspace.rename({{ workspace = {int(n)}, name = [[{nom_}]] }})")
+    for l in lua:
+        sortie_cmd(["hyprctl", "dispatch", l])
+    ANNULER_RANGEMENT.unlink(missing_ok=True)
+    return 0
+
+
 def afficher_plan(plan):
     if plan["reponse"]:
         print(plan["reponse"])
@@ -2275,8 +2414,15 @@ def main(a):
             if not a or a[0] not in TITRES_RAPPORT:
                 raise ErreurIA("nc-ia rapport-maj config AVANT APRES | systeme FICHIER.json")
             return rapport_maj(a[0], a[1:])
+        if c in ("organiser", "organize") and reglage("IA_ORGANISER", "auto") == "non":
+            raise ErreurIA(T("Le rangement par l'IA est coupé (nc-reglages → Intelligence artificielle).",
+                             "AI tidying is turned off (nc-settings → Artificial intelligence)."))
+        if c in ("organiser", "organize") and reglage("IA_ORGANISER", "auto") != "confirmer":
+            return ranger("--bureau" in a)
+        if c in ("annuler-rangement", "undo-tidy"):
+            return annuler_rangement()
         if c in ("organiser", "organize"):
-            # Super + Maj + O : tous les bureaux ; Super + Ctrl + O (--bureau) : celui qui est affiché
+            # Mode « confirmer » : le plan dans le Spotlight. Super + Maj + O : tous les bureaux ; Super + Ctrl + O (--bureau) : celui qui est affiché
             demande = T("Organise les fenêtres du bureau affiché : une meilleure disposition, sans les changer de bureau.",
                         "Organize the windows of the shown desktop: a better layout, without changing their desktop.") \
                 if "--bureau" in a else \
