@@ -18,6 +18,9 @@ import shlex
 import shutil
 import sys
 
+# Réglage mémoire propre à l'île (MALLOC_CONF, nc-ile.service) : pas pour les applis qu'elle lance
+os.environ.pop("MALLOC_CONF", None)
+
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
 def _langue():
     l = os.environ.get("NC_LANGUE", "")

@@ -6,6 +6,8 @@
 # (en auto : Économie, ou Équilibré sur batterie), la commande est lancée telle quelle, sans les variables NVIDIA,
 # même si l'appli la demande. NC_FORCER_RTX=1 nvidia-run <commande> : la NVIDIA quand même (essai à la main).
 # Exemples : nvidia-run blender   ·   Steam, options de lancement : nvidia-run %command%
+# Réglage mémoire propre à l'île (MALLOC_CONF, nc-ile.service) : pas pour les applis qu'elle lance
+unset MALLOC_CONF
 set -euo pipefail
 langue() { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }; }
 [ $# -ge 1 ] || { langue

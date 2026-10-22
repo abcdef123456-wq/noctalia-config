@@ -37,10 +37,17 @@ Item {
         id: jarvis
         objectName: "nc-jarvis-pill"
         montre: c.mode === "jarvis" || c.mode === "jarvis-fini"
-        LogoAssistant {
+        // Créé seulement quand la pilule JARVIS se montre (comme dans Etincelle.qml) : l'atlas PNG décodé coûtait
+        // de 10 à 35 Mo de mémoire dès le démarrage (selon les arènes de jemalloc, voir nc-ile.service), même pilule
+        // cachée. À l'arrivée, l'image est lue en même temps
+        // que le fondu commence.
+        Loader {
             anchors.verticalCenter: parent.verticalCenter; width: 22; height: 22
-            anime: jarvis.montre && c.visible && c.opacity > 0.01 && AssistantEtat.enCours
-                && !Reglages.sobre
+            active: jarvis.montre || jarvis.opacity > 0.01
+            sourceComponent: LogoAssistant {
+                anime: jarvis.montre && c.visible && c.opacity > 0.01 && AssistantEtat.enCours
+                    && !Reglages.sobre
+            }
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold

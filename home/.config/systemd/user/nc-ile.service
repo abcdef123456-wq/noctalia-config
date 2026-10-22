@@ -4,6 +4,11 @@ PartOf=graphical-session.target
 After=graphical-session.target noctalia.service
 
 [Service]
+# Mémoire : qs alloue avec jemalloc, qui ouvre par défaut quatre réserves (arènes) par cœur, soit 64 sur 16 cœurs. Chaque
+# fil (rendu, pilote graphique, chargements) en entame une, et la plupart restent à moitié vides : mesuré au démarrage,
+# environ 50 Mo de mémoire anonyme de plus qu'avec deux. Sans effet sur l'affichage ni la réactivité ; ignoré si qs
+# est compilé sans jemalloc (glibc ne lit pas cette variable).
+Environment=MALLOC_CONF=narenas:2
 # qs : /usr/bin (paquet) ou /usr/local/bin (compilé par install.sh sur Debian)
 ExecStart=/usr/bin/env qs -c nc-ile
 Restart=on-failure

@@ -7,6 +7,8 @@
 # Jamais sur la NVIDIA, même quand la règle la permet : les applis de GPU_JAMAIS_RTX (nc-reglages → Énergie ; par
 # défaut les terminaux et les gestionnaires de fichiers). Elles n'en profitent pas et la garderaient éveillée des
 # heures (environ 5 W, même une fois passé sur batterie).
+# Réglage mémoire propre à l'île (MALLOC_CONF, nc-ile.service) : pas pour les applis qu'elle lance
+unset MALLOC_CONF
 [ $# -ge 1 ] || { . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
   t "Usage : nc-launch <commande> [arguments]" "Usage: nc-launch <command> [arguments]" >&2; echo >&2; exit 1; }
 state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
