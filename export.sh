@@ -129,6 +129,7 @@ HOME_FILES=(
   .local/bin/nc-term-logo
   .local/bin/nc-theme-sync
   .local/bin/nc-wallpaper-colors
+  .local/bin/nc-gpu-regle
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode
   .local/bin/cmatrix

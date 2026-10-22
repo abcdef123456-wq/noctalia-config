@@ -79,7 +79,8 @@ A_TAPER = [
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
     ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),
     ("nc-sysinfo", "nc-sysinfo sante", "Infos du PC : modele, ecrans, disques, sante (usure de la batterie)…"),
-    ("nvidia-run", "nvidia-run steam", "Lance un programme sur la carte NVIDIA d'un PC hybride."),
+    ("nvidia-run", "nvidia-run steam", "Lance un programme sur la carte NVIDIA d'un PC hybride, quand la règle "
+                                       "le veut (nc-reglages → Énergie → Carte NVIDIA pour les applis)."),
     ("cmatrix", "cmatrix", "Pluie façon Matrix dans le terminal, aux couleurs du thème."),
 ]
 RACCOURCIS = [
@@ -166,7 +167,8 @@ ANGLAIS = {
     "nc-memoire": ("nc-memory", "What is using memory: the config on one side, your apps on the other."),
     "nc-pouls": ("nc-pouls diag", "Music glow: “diag” tells why it is not pulsing."),
     "nc-sysinfo": ("nc-sysinfo health", "PC info: model, screens, disks, health (battery wear)…"),
-    "nvidia-run": ("nvidia-run steam", "Runs a program on the NVIDIA card of a hybrid laptop."),
+    "nvidia-run": ("nvidia-run steam", "Runs a program on the NVIDIA card of a hybrid laptop, when the rule "
+                                    "allows it (nc-settings → Power → NVIDIA graphics for apps)."),
     "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
     "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
     "nc-ecrans": ("nc-displays mirror", "Project to a second display or a projector (Super + O), like Windows + P: "

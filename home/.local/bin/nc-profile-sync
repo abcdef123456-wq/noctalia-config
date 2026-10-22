@@ -3,13 +3,15 @@
 # Écrit ~/.config/hypr/nc/profil.lua (profil, batterie, fréquence voulue de l'écran interne) puis recharge Hyprland :
 # la config Hyprland (nc/ecrans.lua, nc/energie.lua) en tire la fréquence, le flou, les ombres et les animations.
 # Fonctionne avec tout service de profils compatible (power-profiles-daemon, tlp-pd, tuned-ppd).
-# PC hybride (carte intégrée + NVIDIA) : choisit aussi la carte des applis lancées selon le profil.
+# PC hybride (carte intégrée + NVIDIA) : choisit aussi la carte des applis lancées selon le profil et l'alimentation
+# (règle de nc-gpu-regle, réglage GPU_REGLE).
 # Réglages facultatifs (commande nc-reglages, ~/.config/nc/reglages.conf ; ancien fichier ~/.config/nc-profile.conf
 # encore lu) :
 #   HZ_PERFORMANCE=max  HZ_BALANCED_AC=max  HZ_BALANCED_BAT=max  HZ_ECO=low  ECO_BRIGHTNESS_MAX=40 (0 = ne pas toucher)
 #   PROFIL_SECTEUR / PROFIL_BATTERIE=garder|performance|balanced|power-saver   profil choisi en branchant / débranchant
 #   ECO_AUTO=20 (0 = jamais)   Économie sur batterie sous ce niveau, profil d'avant rendu en branchant
-#   ECO_EFFETS / ECO_CLAVIER / ECO_BLUETOOTH=oui|non   ce que coupe l'Économie   GPU_PERFORMANCE=nvidia|integree
+#   ECO_EFFETS / ECO_CLAVIER / ECO_BLUETOOTH=oui|non   ce que coupe l'Économie
+#   GPU_REGLE=auto|toujours|jamais   carte NVIDIA pour les applis (lu par nc-gpu-regle, avec l'ancien GPU_PERFORMANCE)
 #   BAT_RELEVES=oui|non   sur batterie hors Performance, la barre Noctalia relève processeur, mémoire, réseau et disque
 #                         moins souvent (et plus la carte graphique)
 #   BAT_CLAVIER=oui|non   sur batterie hors Performance, clavier lumineux ramené au niveau 1 (s'il était plus haut),
@@ -21,6 +23,9 @@ set -uo pipefail
 NC_LANGUE_ENV="${NC_LANGUE:-}"
 langue() { NC_LANGUE="$NC_LANGUE_ENV"; . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }; }
 langue
+# Règle de la carte graphique (PC hybride), profil d'énergie et alimentation : écrits une seule fois, dans nc-gpu-regle
+. "${BASH_SOURCE[0]%/*}/nc-gpu-regle" 2>/dev/null || . "$HOME/.local/bin/nc-gpu-regle" ||
+  { echo "nc-profile-sync: $(t "nc-gpu-regle introuvable (relance install.sh)" "nc-gpu-regle not found (run install.sh again)")" >&2; exit 1; }
 
 OUT="$HOME/.config/hypr/nc/profil.lua"
 # Noctalia v5 lit tous les *.toml de son dossier, par ordre alphabétique (le dernier l'emporte)
@@ -46,7 +51,6 @@ ECO_CLAVIER=oui
 ECO_BLUETOOTH=oui
 BAT_RELEVES=oui
 BAT_CLAVIER=oui
-GPU_PERFORMANCE=nvidia
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
   [ -r "$f" ] || continue
@@ -59,7 +63,6 @@ for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
         [[ "$v" =~ ^(garder|performance|balanced|power-saver)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_AUTO) [[ "$v" =~ ^[0-9]{1,2}$ ]] && ECO_AUTO=$v || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;
       ECO_EFFETS|ECO_CLAVIER|ECO_BLUETOOTH|BAT_RELEVES|BAT_CLAVIER) [[ "$v" =~ ^(oui|non)$ ]] && printf -v "$k" '%s' "$v" ;;
-      GPU_PERFORMANCE) [[ "$v" =~ ^(nvidia|integree)$ ]] && GPU_PERFORMANCE=$v ;;
       *) ;;                                      # autres réglages : pour d'autres parties de la config
     esac
   done < "$f"
@@ -67,19 +70,10 @@ done
 
 log() { echo "nc-profile-sync: $*"; }
 
-get_profile() {
-  gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \
-    --method org.freedesktop.DBus.Properties.Get net.hadess.PowerProfiles ActiveProfile 2>/dev/null \
-    | sed -nE "s/^\(<'([a-z-]+)'>,\)$/\1/p"
-}
+get_profile() { nc_profil_courant; }
 
-on_battery() {
-  local s
-  for s in "$ALIM"/*; do
-    [ "$(cat "$s/type" 2>/dev/null)" = Mains ] && [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && return 1
-  done
-  return 0
-}
+# Sur batterie (nc-gpu-regle) : batterie présente et rien de branché ; PC sans batterie : secteur
+on_battery() { NC_POWER_SUPPLY="$ALIM" nc_sur_batterie; }
 
 last_profile=""
 last_bat=""
@@ -127,28 +121,26 @@ profil_auto() {
   fi
 }
 
-# PC hybride : une carte NVIDIA et une autre carte (Intel ou AMD), avec les pilotes EGL des deux
-EGL_DIR=/usr/share/glvnd/egl_vendor.d
+# PC hybride : une carte NVIDIA et une autre carte (Intel ou AMD), avec les pilotes EGL des deux (nc-gpu-regle)
+EGL_DIR="${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}"
 HYBRID=0
-nv=0; other=0
-for d in /sys/bus/pci/devices/*; do
-  [[ $(cat "$d/class" 2>/dev/null) == 0x03* ]] || continue
-  [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] && nv=1 || other=1
-done
-[ "$nv" = 1 ] && [ "$other" = 1 ] && [ -r "$EGL_DIR/10_nvidia.json" ] && [ -r "$EGL_DIR/50_mesa.json" ] && HYBRID=1
+nc_pc_hybride && HYBRID=1
 # Pilotes Vulkan de la carte intégrée (tous sauf NVIDIA)
 IGPU_VK=$(ls /usr/share/vulkan/icd.d/*.json 2>/dev/null | grep -vE 'nvidia|nouveau' | paste -sd:)
 GPU_STATE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
 
-# Carte des applis lancées (PC hybride) : NVIDIA en Performance, carte intégrée sinon.
-# Seulement si la session tourne sur la carte intégrée seule (sinon on ne touche à rien).
+# Carte des applis lancées (PC hybride), selon la règle de nc-gpu-regle (rtx_voulue PROFIL BAT) : NVIDIA sur secteur
+# en Performance et en Équilibré, sur batterie seulement en Performance ; carte intégrée sinon. Rejouée à chaque
+# passage (chaque événement D-Bus : profil ou alimentation), donc aussi en débranchant le chargeur.
+# Seulement si la session a été ouverte par env-hyprland sur la carte intégrée, seule ou avec la NVIDIA (sinon :
+# PC non hybride, écran interne sur la NVIDIA, mode « off » ; on ne touche à rien).
 #   - Noctalia lance via nc-launch, qui lit $GPU_STATE ;
 #   - les raccourcis Hyprland héritent de l'environnement de Hyprland, mis à jour par « hyprctl eval hl.env(…) ».
 set_gpu_default() {
   local want=integree
   [ "$HYBRID" = 1 ] || return 0
-  case "${AQ_DRM_DEVICES:-}" in ""|*:*) return 0 ;; esac
-  [ "$1" = performance ] && [ "$GPU_PERFORMANCE" = nvidia ] && want=nvidia
+  [ -n "${AQ_DRM_DEVICES:-}" ] || return 0
+  rtx_voulue "$1" "$2" && want=nvidia
   [ "$(cat "$GPU_STATE" 2>/dev/null)" = "$want" ] && return 0
   local egl vk off layer glx
   if [ "$want" = nvidia ]; then
@@ -171,7 +163,7 @@ set_gpu_default() {
 # session (prises HDMI / USB-C, rendu du bureau) qu'en la rouvrant ; la notification le propose, une fois par session.
 proposer_nvidia() {
   local deja="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-nvidia-propose"
-  [ "$HYBRID" = 1 ] && [ "$GPU_PERFORMANCE" = nvidia ] && [ "$1" = performance ] && [ -n "$last_profile" ] && [ "$last_profile" != performance ] || return 0
+  [ "$HYBRID" = 1 ] && [ "$1" = performance ] && rtx_voulue "$1" "$2" && [ -n "$last_profile" ] && [ "$last_profile" != performance ] || return 0
   case "${AQ_DRM_DEVICES:-}" in ""|*:*) return 0 ;; esac
   [ -e "$deja" ] && return 0
   : > "$deja"
@@ -274,8 +266,8 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
     log "$(t "appliqué : profil=${profile:-inconnu} batterie=$bat fréquence=$hz" "applied: profile=${profile:-unknown} battery=$bat refresh=$hz")"
   fi
 
-  set_gpu_default "$profile"
-  proposer_nvidia "$profile"
+  set_gpu_default "$profile" "$bat"
+  proposer_nvidia "$profile" "$bat"
   noctalia_config "$profile" "$bat"
 
   # Bluetooth (si aucun appareil connecté) : coupé en Économie, rallumé en sortant
@@ -332,7 +324,7 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
   last_profile=$profile
 }
 
-# Nouvelle session : l'environnement de Hyprland repart de la valeur uwsm (AMD), on force la resynchronisation.
+# Nouvelle session : l'environnement de Hyprland repart de la valeur uwsm, on force la resynchronisation.
 rm -f "$GPU_STATE"
 apply
 

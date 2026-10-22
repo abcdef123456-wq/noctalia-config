@@ -1,0 +1,109 @@
+#!/bin/sh
+# nc-gpu-regle : la règle de la carte graphique d'un PC hybride (carte intégrée + NVIDIA), écrite une seule fois.
+# Sourcé (sh POSIX) par nc-profile-sync (carte des applis, $XDG_RUNTIME_DIR/nc-gpu-default), ~/.config/uwsm/env-hyprland
+# (cartes de la session à l'ouverture) et nvidia-run.
+#   rtx_voulue PROFIL BAT   code 0 si la carte NVIDIA doit servir, 1 sinon
+#                           PROFIL : performance, balanced ou power-saver (vide ou inconnu : comme balanced)
+#                           BAT : 1 sur batterie, 0 sur secteur
+#   nc_gpu_reglage          affiche le réglage : auto, toujours ou jamais
+#   nc_profil_courant       affiche le profil d'énergie actif (rien sans service de profils)
+#   nc_sur_batterie         code 0 sur batterie, 1 sur secteur (PC sans batterie : secteur)
+#   nc_pc_hybride           code 0 si le PC a une carte NVIDIA, une autre carte et les pilotes EGL des deux
+# Lancé tel quel (nc-gpu-regle) : dit quelle carte servirait maintenant.
+#
+# Réglage GPU_REGLE (~/.config/nc/reglages.conf, nc-reglages → Énergie → Carte NVIDIA pour les applis) :
+#   auto (défaut) : la NVIDIA sur secteur en Performance et en Équilibré, sur batterie seulement en Performance ;
+#                   sinon tout passe par la carte intégrée, même si une appli la demande (nvidia-run aussi) ;
+#   toujours | jamais.
+# Ancien réglage GPU_PERFORMANCE=integree (sans GPU_REGLE) : jamais.
+#
+# Pour les tests : NC_PROFIL (profil), NC_POWER_SUPPLY (dossier power_supply, ou « batterie » / « secteur »),
+# NC_SYSFS (à la place de /sys), NC_EGL_DIR (à la place de /usr/share/glvnd/egl_vendor.d).
+# Variables internes : préfixe _ncg_ (POSIX n'a pas de « local »).
+
+nc_gpu_reglage() {
+  _ncg_regle=""; _ncg_ancien=""
+  # Ancien fichier de nc-profile-sync d'abord, puis celui de nc-reglages (le dernier l'emporte)
+  for _ncg_f in "$HOME/.config/nc-profile.conf" "$HOME/.config/nc/reglages.conf"; do
+    [ -r "$_ncg_f" ] || continue
+    while IFS='=' read -r _ncg_k _ncg_v || [ -n "$_ncg_k" ]; do
+      _ncg_v=${_ncg_v%%[[:space:]]*}; _ncg_v=${_ncg_v#\"}; _ncg_v=${_ncg_v%\"}
+      case $_ncg_k in
+        GPU_REGLE) _ncg_regle=$_ncg_v ;;
+        GPU_PERFORMANCE) _ncg_ancien=$_ncg_v ;;
+      esac
+    done < "$_ncg_f"
+  done
+  case $_ncg_regle in
+    auto|toujours|jamais) printf '%s\n' "$_ncg_regle" ;;
+    *) if [ "$_ncg_ancien" = integree ]; then echo jamais; else echo auto; fi ;;
+  esac
+  unset _ncg_regle _ncg_ancien _ncg_f _ncg_k _ncg_v
+}
+
+rtx_voulue() {
+  case $(nc_gpu_reglage) in
+    toujours) return 0 ;;
+    jamais) return 1 ;;
+  esac
+  case ${1:-} in
+    performance) return 0 ;;
+    power-saver) return 1 ;;
+    *) [ "${2:-0}" != 1 ] ;;                      # Équilibré : la NVIDIA sur secteur seulement
+  esac
+}
+
+# Même lecture que nc-profile-sync et env-hyprland avant (service de profils compatible power-profiles-daemon)
+nc_profil_courant() {
+  if [ -n "${NC_PROFIL:-}" ]; then printf '%s\n' "$NC_PROFIL"; return 0; fi
+  { gdbus call --system --dest net.hadess.PowerProfiles --object-path /net/hadess/PowerProfiles \
+      --method org.freedesktop.DBus.Properties.Get net.hadess.PowerProfiles ActiveProfile 2>/dev/null || :; } \
+    | sed -n "s/^(<'\([a-z-]*\)'>,)\$/\1/p"
+}
+
+# Sur batterie : une batterie du PC (pas celle d'une souris : scope Device) et aucune alimentation branchée
+# (Mains, ou USB / USB_C comme nc-ia)
+nc_sur_batterie() {
+  case ${NC_POWER_SUPPLY:-} in batterie) return 0 ;; secteur) return 1 ;; esac
+  _ncg_bat=1
+  for _ncg_s in "${NC_POWER_SUPPLY:-${NC_SYSFS:-/sys}/class/power_supply}"/*; do
+    _ncg_t=""; read -r _ncg_t 2>/dev/null < "$_ncg_s/type" || :
+    case $_ncg_t in
+      Mains|USB|USB_C)
+        _ncg_o=""; read -r _ncg_o 2>/dev/null < "$_ncg_s/online" || :
+        [ "$_ncg_o" = 1 ] && { unset _ncg_bat _ncg_s _ncg_t _ncg_o; return 1; } ;;
+      Battery)
+        _ncg_o=""; read -r _ncg_o 2>/dev/null < "$_ncg_s/scope" || :
+        [ "$_ncg_o" = Device ] || _ncg_bat=0 ;;
+    esac
+  done
+  _ncg_t=$_ncg_bat
+  unset _ncg_bat _ncg_s _ncg_o
+  return "$_ncg_t"
+}
+
+# PC hybride : une carte NVIDIA et une autre carte (Intel ou AMD), avec les pilotes EGL des deux
+nc_pc_hybride() {
+  _ncg_nv=0; _ncg_autre=0
+  for _ncg_d in "${NC_SYSFS:-/sys}"/bus/pci/devices/*; do
+    _ncg_c=""; read -r _ncg_c 2>/dev/null < "$_ncg_d/class" || :
+    case $_ncg_c in 0x03*) ;; *) continue ;; esac
+    _ncg_c=""; read -r _ncg_c 2>/dev/null < "$_ncg_d/vendor" || :
+    if [ "$_ncg_c" = 0x10de ]; then _ncg_nv=1; else _ncg_autre=1; fi
+  done
+  _ncg_c=1
+  [ "$_ncg_nv" = 1 ] && [ "$_ncg_autre" = 1 ] && [ -r "${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}/10_nvidia.json" ] &&
+    [ -r "${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}/50_mesa.json" ] && _ncg_c=0
+  _ncg_nv=$_ncg_c
+  unset _ncg_autre _ncg_d _ncg_c
+  return "$_ncg_nv"
+}
+
+# Lancé tel quel : la carte qui servirait maintenant
+case ${0##*/} in
+  nc-gpu-regle)
+    _ncg_p=$(nc_profil_courant); _ncg_b=0; nc_sur_batterie && _ncg_b=1
+    if rtx_voulue "$_ncg_p" "$_ncg_b"; then _ncg_r=nvidia; else _ncg_r=integree; fi
+    nc_pc_hybride || _ncg_r="$_ncg_r (PC non hybride : rien ne change)"
+    echo "$_ncg_r (profil=${_ncg_p:-inconnu} batterie=$_ncg_b GPU_REGLE=$(nc_gpu_reglage))" ;;
+esac

@@ -733,12 +733,14 @@ REGLAGES = [
         "In Performance when plugged in, if the screen is rendered by a dedicated graphics card (Dedicated mode in the BIOS, "
         "desktop PC): the active window's border rotates. On an integrated card it stays still (it would force the whole "
         "screen to be redrawn all the time)."), groupe="hypr"),
-    R("GPU_PERFORMANCE", "Énergie", L("Carte graphique des applis en Performance", "Graphics card for apps in Performance"),
-      "choix", "nvidia",
-      L("PC à deux cartes : les applis lancées en Performance utilisent la NVIDIA (plus puissante, consomme plus).",
-        "PCs with two graphics cards: apps launched in Performance use the NVIDIA one (more powerful, uses more power)."),
-      [("nvidia", "NVIDIA"), ("integree", L("Carte intégrée, comme dans les autres profils",
-                                             "Integrated graphics, as in the other profiles"))], groupe="energie"),
+    # Règle appliquée par nc-gpu-regle (nc-profile-sync, env-hyprland, nvidia-run) ; remplace GPU_PERFORMANCE (voir lire)
+    R("GPU_REGLE", "Énergie", L("Carte NVIDIA pour les applis", "NVIDIA graphics for apps"), "choix", "auto",
+      L("Auto : la carte NVIDIA sert sur secteur en Performance et en Équilibré, et sur batterie seulement en "
+        "Performance ; sinon tout passe par la carte intégrée, même si une appli la demande.",
+        "Auto: the NVIDIA card is used when plugged in, in Performance and Balanced, and on battery only in "
+        "Performance; otherwise everything goes through the integrated graphics, even if an app asks for it."),
+      [("auto", L("Auto", "Auto")), ("toujours", L("Toujours, même en Économie", "Always, even in Power Saver")),
+       ("jamais", L("Jamais : toujours la carte intégrée", "Never: always the integrated graphics"))], groupe="energie"),
     # Son et luminosité
     R("VOLUME_PAS", "Son et luminosité", L("Pas du volume", "Volume step"), "entier", "5",
       L("Touches de volume (et F2, F3).", "Volume keys (and F2, F3)."), mini=1, maxi=20, unite="%", groupe="hypr"),
@@ -1178,7 +1180,7 @@ MATERIEL = {
     **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
-    "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_PERFORMANCE": "hybride",
+    "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_REGLE": "hybride",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
@@ -1281,6 +1283,11 @@ def lire():
                     vals[m[1]] = re.sub(r'^"(.*)"$', r"\1", m[2])
     except FileNotFoundError:
         pass
+    # Ancien réglage GPU_PERFORMANCE (nvidia | integree) : remplacé par GPU_REGLE, « integree » devient « jamais »
+    # (même reprise que nc-gpu-regle) ; disparaît du fichier à la prochaine écriture
+    ancien = vals.pop("GPU_PERFORMANCE", None)
+    if ancien == "integree" and "GPU_REGLE" not in vals:
+        vals["GPU_REGLE"] = "jamais"
     return vals
 
 

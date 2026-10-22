@@ -219,13 +219,15 @@ sur un PC fixe, le service de la distribution est utilisé. La limite de charge 
 
 ### PC hybride (carte intégrée + NVIDIA)
 
-- Le bureau tourne sur la carte intégrée, qui porte l'écran interne : la NVIDIA peut s'endormir (batterie, chaleur, bruit).
-  Si un écran est branché sur une prise reliée à la NVIDIA à l'ouverture de session, les deux cartes sont utilisées.
+- Quelle carte sert ? Réglage « Carte NVIDIA pour les applis » (`nc-reglages` → Énergie). En auto, la NVIDIA sert sur
+  secteur en Performance et en Équilibré, et sur batterie seulement en Performance ; sinon tout passe par la carte
+  intégrée, qui porte l'écran interne, même si une appli la demande : la NVIDIA peut s'endormir (batterie, chaleur, bruit).
+  La session s'ouvre avec la NVIDIA quand cette règle la veut, ou si un écran est branché sur une de ses prises.
   Écran ou projecteur branché après coup sur une de ces prises (souvent le HDMI) : une notification propose de rouvrir
   la session (Hyprland ne peut pas ajouter une carte en cours de route) ou de toujours garder la NVIDIA.
   Réglage dans `~/.config/uwsm/gpu-mode` : `auto` (défaut), `igpu`, `both` ou `off` (détails dans `~/.config/uwsm/env-hyprland`).
-- Lancer une appli sur la NVIDIA : `nvidia-run <commande>` (Steam : `nvidia-run %command%`) ; en Performance, les applis
-  lancées depuis la barre y vont d'elles-mêmes.
+- Lancer une appli sur la NVIDIA : `nvidia-run <commande>` (Steam : `nvidia-run %command%`), quand la règle la veut ;
+  les applis lancées depuis la barre y vont alors d'elles-mêmes. Pour un essai hors règle : `NC_FORCER_RTX=1 nvidia-run <commande>`.
 - Pilote : sur Arch, le script installe le pilote officiel s'il manque (`nvidia-open`, nécessaire aux RTX 50). Sur Debian 13,
   les RTX 50 demandent le pilote de NVIDIA (celui de Debian, 550, est trop ancien) : le script donne la marche à suivre.
 
