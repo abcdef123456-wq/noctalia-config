@@ -65,6 +65,24 @@ function nc.charger(nom)
     return nil
 end
 
+-- Version de Hyprland (hl.version, dès 0.55.0) : nc.hypr_min(0, 56, 0) est vrai à partir de la 0.56.0
+nc.hypr = { 0, 0, 0 }
+pcall(function() nc.hypr = { tostring(hl.version()):match("(%d+)%.(%d+)%.(%d+)") } end)
+for i = 1, 3 do nc.hypr[i] = tonumber(nc.hypr[i]) or 0 end
+function nc.hypr_min(a, b, c)
+    local v, w = nc.hypr, { a, b or 0, c or 0 }
+    for i = 1, 3 do if v[i] ~= w[i] then return v[i] > w[i] end end
+    return true
+end
+
+-- Ce que Hyprland 0.55 ne donne pas aux écrans en Lua (modes, taille physique, place réservée à la barre ; arrivés en
+-- 0.56) : lu une fois par « hyprctl monitors -j », en arrière-plan, rangé ici par nc/ecrans.lua (nc.ecrans_infos)
+nc.ecrans_infos = {}
+function nc.reserve(m)
+    if m and type(m.reserved) == "table" and next(m.reserved) ~= nil then return m.reserved end
+    return (m and nc.ecrans_infos[m.name] or {}).reserved or {}
+end
+
 -- Profil énergétique courant : performance, balanced ou power-saver ; sur batterie ou non (écrit par nc-profile-sync)
 nc.profil = nc.charger("nc.profil") or { profil = "balanced", batterie = false }
 

@@ -237,7 +237,7 @@ hl.on("window.open", function(w)
     local m = w.monitor or hl.get_active_monitor()
     local mx, my, lw, lh = ecran(w)
     if not (m and lw) then return end
-    local r = type(m.reserved) == "table" and m.reserved or {}
+    local r = nc.reserve(m)          -- place de la barre (lue autrement sous Hyprland 0.55)
     local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
     local g = nc.reglage("FENETRES_MARGE", 10)
     local arrondi = function(v) return math.floor(v + 0.5) end     -- 2560 / 1,6 vaut 1599,999… en virgule flottante

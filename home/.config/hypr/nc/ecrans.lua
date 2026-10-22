@@ -11,11 +11,13 @@
 --   hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
 
 local MIN_W, MIN_H = 1600, 900
+nc.ecrans_infos = nc.ecrans_infos or {}         -- Hyprland 0.55 : modes, taille, réservé (lus par hyprctl, plus bas)
 
 -- Modes disponibles : { w, h, hz }, dans l'ordre de Hyprland (le mode préféré de l'écran, puis par définition décroissante)
 local function modes(m)
     local liste = {}
-    for _, v in ipairs(type(m.available_modes) == "table" and m.available_modes or {}) do
+    local source = type(m.available_modes) == "table" and m.available_modes or (nc.ecrans_infos[m.name] or {}).modes or {}
+    for _, v in ipairs(source) do
         local w, h, hz
         if type(v) == "string" then
             w, h, hz = v:match("^(%d+)x(%d+)@([%d.]+)")
@@ -59,7 +61,8 @@ function nc.echelle(m)
     local w, h = native(m, liste)
     if w <= 0 or h <= 0 then return 1 end
     local voulu = 1
-    local pw, ph = m.physical_width or 0, m.physical_height or 0
+    local infos = nc.ecrans_infos[m.name] or {}
+    local pw, ph = m.physical_width or infos.pw or 0, m.physical_height or infos.ph or 0
     if pw > 0 and ph > 0 then
         local ppp = math.sqrt(w * w + h * h) / (math.sqrt(pw * pw + ph * ph) / 25.4)
         if ppp > 200 then voulu = 2 elseif ppp > 140 then voulu = 1.5 end
@@ -177,11 +180,28 @@ local function tout()
     for _, m in ipairs(liste) do regle(m) end
 end
 
+-- Hyprland 0.55 : modes, taille physique et place réservée lus en arrière-plan par « hyprctl monitors -j » (jamais
+-- pendant le chargement de la config), puis tout réappliqué ; dès 0.56, Hyprland les donne directement
+function nc.ecrans_infos_poser(t)
+    nc.ecrans_infos = t or {}
+    tout()
+end
+local function demander_infos()
+    for _, m in ipairs(hl.get_monitors()) do
+        if m.available_modes == nil then
+            hl.exec_cmd([[sh -c 'command -v jq >/dev/null || exit 0; t=$(hyprctl monitors -j | jq -r '"'"'"nc.ecrans_infos_poser({" + (map("[\"" + .name + "\"] = { modes = {" + ((.availableModes // []) | map("\"" + . + "\"") | join(",")) + "}, pw = " + ((.physicalWidth // 0) | tostring) + ", ph = " + ((.physicalHeight // 0) | tostring) + ", reserved = {" + ((.reserved // []) | map(tostring) | join(",")) + "} }") | join(",")) + "})"'"'"') && hyprctl eval "$t" >/dev/null']])
+            return
+        end
+    end
+end
+
 -- Règle par défaut (avant que l'écran ne soit connu), puis une règle précise par écran
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
 tout()
+demander_infos()
 hl.on("monitor.added", function()
     tout()
+    demander_infos()
     -- Écran de verrouillage recentré sur l'écran (sa taille réelle, échelle comprise)
     hl.exec_cmd("sleep 2; ~/.local/bin/nc-verrou-place")
 end)

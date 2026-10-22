@@ -70,6 +70,32 @@ for _, r in ipairs(regles) do print(r.output, r.mode, r.scale, r.disabled and "o
                                                      m["height"], m["physical_width"], m["physical_height"], modes))
         return "{ " + ", ".join(table(m) for m in moniteurs) + " }"
 
+    def test_hyprland_055_sans_modes_en_lua(self):
+        """Hyprland 0.55 (Debian 13) : les écrans n'ont en Lua ni modes, ni taille physique, ni place réservée. Lus en
+        arrière-plan par hyprctl monitors -j (jamais pendant le chargement), puis tout est réappliqué : le Dell 4K de
+        27 pouces reçoit son mode 4K et son échelle 1,5, au lieu de « preferred » et 1."""
+        with tempfile.TemporaryDirectory() as home:
+            harness = r'''
+local regles, commandes = {}, {}
+local moniteurs = { { name = "DP-1", description = "Dell U2720Q", width = 3840, height = 2160 } }
+hl = {
+  get_monitors = function() return moniteurs end,
+  monitor = function(spec) if spec.output ~= "" then regles[spec.output] = spec end end,
+  on = function() end,
+  exec_cmd = function(c) commandes[#commandes + 1] = c end,
+}
+nc = { profil = { hz = "max" } }
+dofile(FICHIER)
+print("AVANT", regles["DP-1"].mode, regles["DP-1"].scale)
+assert(#commandes == 1 and commandes[1]:find("hyprctl monitors %-j"), "les infos demandées une fois, en arrière-plan")
+nc.ecrans_infos_poser({ ["DP-1"] = { modes = { "3840x2160@60.00Hz", "2560x1440@59.95Hz" }, pw = 600, ph = 340, reserved = { 0, 42, 0, 0 } } })
+print("APRES", regles["DP-1"].mode, regles["DP-1"].scale)
+'''.replace("FICHIER", json.dumps(str(LUA)))
+            r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5, env=dict(HOME=home, PATH="/usr/bin:/bin"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("AVANT\tpreferred\t1", r.stdout)
+        self.assertIn("APRES\t3840x2160@60.00\t1.5", r.stdout)
+
     def test_ecran_1440p_144hz_avec_faux_4k(self):
         r = self.regles([ASUS])["HDMI-A-1"]
         self.assertEqual(r["mode"], "2560x1440@143.97", "la dalle est en 1440p, pas le 4K de compatibilité HDMI")

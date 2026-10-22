@@ -294,7 +294,7 @@ if saisie == "souris" or saisie == "les-deux" then
         if not (w and p and m) or not w.floating then return end
         local px, py = xy(p)
         local lw, lh = taille_ecran(m)
-        local r = type(m.reserved) == "table" and m.reserved or {}
+        local r = nc.reserve(m)          -- place de la barre (lue autrement sous Hyprland 0.55)
         local rg, rh, rd, rb = r.left or r[1] or 0, r.top or r[2] or 0, r.right or r[3] or 0, r.bottom or r[4] or 0
         local g = 10
         local ax, ay, aw, ah = m.x + rg + g, m.y + rh + g, lw - rg - rd - 2 * g, lh - rh - rb - 2 * g
