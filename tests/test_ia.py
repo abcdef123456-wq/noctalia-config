@@ -519,7 +519,8 @@ class IA(unittest.TestCase):
         self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in dispatch) : > "$HOME/bouge";; clients) '
                                   'if [ -e "$HOME/bouge" ]; then echo \'' + json.dumps(apres) + '\'; else echo \'' + json.dumps(clients) + '\'; fi;; esac')
         d = json.loads(self.lancer("executer", plan["id"], "--json").stdout)
-        self.assertIn("remise sur le bureau 2", d["actions"][0]["resultat"])
+        self.assertEqual(d["actions"][0]["note"], "bord de l'écran : remise sur le bureau 2", "dit avec « Fait », pas caché")
+        self.assertIn("— bord de l'écran : remise sur le bureau 2", self.lancer("executer", plan["id"]).stdout)
         self.assertIn("hl.dsp.window.move({ workspace = 2, follow = false, window = 'address:0xa1' })", self.appels())
 
     def test_agir_permissions_reverifiees(self):

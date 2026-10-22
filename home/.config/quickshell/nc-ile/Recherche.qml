@@ -585,7 +585,7 @@ Item {
                                    garder: true, aide: Reglages.t("↵ confirmer", "↵ confirm"), f: () => r.executerPlan(null) })
                 r.plan.actions.forEach(a => {
                     let n = a.n
-                    lignesA.push(a.fait ? { titre: (a.ok ? "✓ " : "✗ ") + a.libelle, sous: a.ok ? Reglages.t("Fait", "Done") : (a.resultat || "").slice(0, 60), glyphe: a.ok ? "check_circle" : "error", garder: true, f: () => {} }
+                    lignesA.push(a.fait ? { titre: (a.ok ? "✓ " : "✗ ") + a.libelle, sous: a.ok ? Reglages.t("Fait", "Done") + (a.note ? " · " + a.note : "") : (a.resultat || "").slice(0, 60), glyphe: a.ok ? "check_circle" : "error", garder: true, f: () => {} }
                                         : { titre: a.libelle, sous: a.danger ? Reglages.t("⚠ à confirmer", "⚠ to confirm") : Reglages.t("À confirmer", "To confirm"), glyphe: "play_arrow",
                                             garder: true, aide: Reglages.t("↵ le faire", "↵ do it"), f: () => r.executerPlan(n) })
                 })
