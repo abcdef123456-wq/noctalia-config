@@ -56,7 +56,7 @@ class FicheEditable(unittest.TestCase):
     def executer(self, scenario):
         with tempfile.TemporaryDirectory(prefix="nc-fiche-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("Raccourcis.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "Gabarit.qml", "Defilement.qml"):
+            for nom in ("Raccourcis.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "Gabarit.qml", "Defilement.qml", "GroupeTouches.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Fiche.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -70,7 +70,7 @@ class FicheEditable(unittest.TestCase):
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: false;'
                                             ' function t(fr,en){return fr} function val(k,d){return d}}')
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit", "Fiche", "Texte", "Ico", "Defilement")))
+                                                for n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit", "Fiche", "Texte", "Ico", "Defilement", "GroupeTouches")))
             (root / "catalogue.json").write_text(json.dumps(catalogue(), ensure_ascii=False))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)

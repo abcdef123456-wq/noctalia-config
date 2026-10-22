@@ -315,6 +315,7 @@ PanelWindow {
         else Raccourcis.raccourci(c.r, "changer", c.touches)
     }
 
+
     // ── Une ligne : touches, puis description ; en édition : − (les tiens), touches à changer, nom à renommer, ↺,
     // interrupteur (ceux de la config) ──
     component Ligne: Item {
@@ -363,7 +364,14 @@ PanelWindow {
             width: 22; height: 22; radius: 11
             color: zMoins.containsMouse ? Qt.alpha(Couleurs.carteSurvol, 0.75) : Qt.alpha(Couleurs.carte, 0.55)
             border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.28)
-            Reflet {}
+            // Reflet du verre : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
+            Rectangle {
+                anchors.fill: parent; anchors.margins: 1; radius: height / 2
+                gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
+                    GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
+                }
+            }
             Texte { anchors.centerIn: parent; text: "−"; font.pixelSize: 16; font.weight: Font.Bold
                     color: zMoins.containsMouse ? Couleurs.rouge : Couleurs.texte }
             MouseArea {
@@ -384,7 +392,7 @@ PanelWindow {
             opacity: ligne.attenue
             Repeater {
                 model: fiche.groupes(ligne.r)
-                Groupe { required property var modelData; required property int index; touches: modelData; premier: index === 0
+                GroupeTouches { required property var modelData; required property int index; touches: modelData; premier: index === 0
                          edite: fiche.edition && ligne.r.modifiable }
             }
         }
@@ -395,7 +403,7 @@ PanelWindow {
             spacing: blocTouches.spacing
             Repeater {
                 model: fiche.groupes(ligne.r)
-                Groupe { required property var modelData; required property int index; touches: modelData; premier: index === 0 }
+                GroupeTouches { required property var modelData; required property int index; touches: modelData; premier: index === 0 }
             }
         }
         // Hors du Flow (dedans, sa taille dépendrait du Flow lui-même : boucle de mise en page)
@@ -458,7 +466,14 @@ PanelWindow {
                     color: interrupteur.allume ? Couleurs.accent : Qt.alpha(Couleurs.texte, fiche.voilePiste)
                     Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 160 } }
                 }
-                Reflet {}
+                // Reflet du verre : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
+                Rectangle {
+                    anchors.fill: parent; anchors.margins: 1; radius: height / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
+                        GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
+                    }
+                }
             }
             Rectangle {
                 width: 16; height: 16; radius: 8; y: 2
@@ -475,40 +490,6 @@ PanelWindow {
                     interrupteur.allume = !interrupteur.allume
                 }
             }
-        }
-    }
-    // Un groupe de touches : « Super + Ctrl + molette », précédé de « ou » s'il n'est pas le premier
-    component Groupe: Row {
-        id: groupe
-        property var touches: []
-        property bool premier: true
-        property bool edite: false                      // les touches se changent d'un toucher : bord de l'accent
-        spacing: 5
-        Texte { visible: !groupe.premier; text: Reglages.t("ou", "or"); secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-        Repeater {
-            model: groupe.touches
-            Row {
-                id: touche
-                required property string modelData
-                required property int index
-                spacing: 5
-                Texte { visible: touche.index > 0; text: "+"; secondaire: true; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-                Rectangle {
-                    height: 24; width: libTouche.implicitWidth + 16; radius: 7
-                    color: Qt.alpha(Couleurs.carte, 0.6)
-                    border.width: groupe.edite ? 1.5 : 1
-                    border.color: groupe.edite ? Couleurs.accent : Qt.alpha(Couleurs.texte, 0.25)
-                    Texte { id: libTouche; anchors.centerIn: parent; text: touche.modelData; font.pixelSize: 12; font.weight: Font.DemiBold }
-                }
-            }
-        }
-    }
-    // Reflet du verre d'un bouton rond : le haut s'éclaire à peine (blanc à 18 %, effacé à mi-hauteur), sans sortir du bord
-    component Reflet: Rectangle {
-        anchors.fill: parent; anchors.margins: 1; radius: height / 2
-        gradient: Gradient {
-            GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.18) }
-            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0) }
         }
     }
 
