@@ -150,6 +150,9 @@ def verifier(m):
 
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "verifier"
+    r = reglages()
+    if r.get("ALERTES_TELEGRAM", "non") != "oui" or r.get("IA_MODE", "auto") == "non":
+        return 0        # rien ne peut partir : sans charger nc-assistant (toutes les 5 min, sur batterie aussi : OPT-01)
     m = client()
     T = m.T
     try:

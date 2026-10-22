@@ -142,7 +142,14 @@ class Alertes(unittest.TestCase):
 
     def test_rien_sans_reglage_ni_connexion(self):
         self.batterie(5, "Discharging")
-        self.regler("non", "20"); self.lancer("verifier"); self.lancer("maj", "0")
+        self.regler("non", "20")
+        # Revue OPT-01 : sans le réglage, nc-assistant n'est même pas chargé (toutes les 5 min, sur batterie aussi)
+        client = self.home / "bin/nc-assistant"
+        vrai = client.read_text()
+        client.write_text("open(__file__ + '.charge', 'w').close()\n" + vrai)
+        self.lancer("verifier"); self.lancer("maj", "0")
+        self.assertFalse(Path(str(client) + ".charge").exists(), "nc-assistant pas chargé")
+        client.write_text(vrai)
         self.assertEqual(self.textes(), [])
         self.regler("oui", "0"); self.lancer("verifier")
         self.assertEqual(self.textes(), [], "seuil 0 : jamais")
