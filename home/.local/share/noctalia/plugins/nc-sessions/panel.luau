@@ -1,20 +1,22 @@
--- nc/sessions (Noctalia v5) : les sessions enregistrées (nc-session) dans un carrousel, sur le modèle de nc/carousel.
--- Une carte par session (sa capture, sinon le dessin de ses fenêtres, une rangée par bureau), puis « + Nouvelle session ».
+-- nc/sessions (Noctalia v5) : les sessions enregistrées (nc-session) dans un carrousel, comme un sélecteur d'applis.
+-- Une carte par session (son aperçu, sinon le dessin de ses fenêtres, une rangée par bureau), puis « + Nouvelle
+-- session ». Cartes plates, au ratio de l'écran actif, coins arrondis de 10 : la choisie grande au centre (environ
+-- 46 % du cadre) avec un contour blanc de 1,5 point, ses voisines plus petites (0,72) et à 60 %. Sous la carte choisie :
+-- pastille, icône, nom, « Modifier », « N fenêtres · date », icônes des applis, puis une ligne d'aide.
 -- Gauche/Droite ou molette (maintenir une flèche pour défiler), clic sur une voisine pour la centrer ; la bande boucle
--- comme celle des fonds dès 3 cartes. Tranches inclinées : toutes les cartes de la bande en sont, ou aucune. Quand
--- chaque session a les siennes (« tranche », « tranche_etroite » de nc-session json) et que « Nouvelle session » en a
--- une (l'écran en direct passé dans nc-carousel-thumbs tranche, sinon les tranches du fond courant), la bande est
--- exactement celle du carrousel des fonds : seules les images, et le titre de la carte choisie dessous. Sinon (pas
--- d'ImageMagick, pas de grim…), toutes les cartes sont droites, en verre, le titre dedans.
--- Entrée ou clic sur la carte du milieu : ouvrir la session (ou nommer la nouvelle) ; Maj + Suppr : la supprimer, après
--- confirmation sur la carte ; « Modifier » : l'éditeur, un volet à droite de la carte ; Échap : fermer.
+-- dès 3 cartes. Entrée ou clic sur la carte du milieu : ouvrir la session (ou nommer la nouvelle) ; Maj + Suppr : la
+-- supprimer, après confirmation ; « Modifier » : l'éditeur, un volet à droite de la carte ; Échap : fermer.
 -- Aucune lettre n'est capturée (plugin.toml) : elles vont toujours au champ qui a le focus, et onKey ne reçoit que les
 -- touches capturées (donc pas E). Pas de clic droit sur une carte : l'API 32 ne le prend que sur ui.button (ni
 -- ui.image, ni ui.box, ni ui.row, ni ui.column : « has no prop 'onRightClick', ignored »).
 -- Données : seulement nc-session (json, ouvrir, enregistrer, supprimer…), jamais ses fichiers.
+-- Aperçus : faits UNE fois par nc-session (enregistrer, apercu), à la taille exacte de la carte choisie en pixels
+-- physiques, sous la barre : rien n'est calculé ni converti à l'ouverture, l'image s'affiche à 1:1 ; les voisines
+-- reprennent la même image, réduite à l'affichage. Seule « Nouvelle session » prend l'écran en direct (grim, au même
+-- format), en attendant le dessin des fenêtres ouvertes. Avant chaque ui.image, noctalia.fileExists : un fichier absent
+-- donne le dessin, jamais une image cassée ; seules les cartes visibles (la choisie et 2 de chaque côté) sont dessinées.
 -- Même cadre que le carrousel des fonds : dessiné pour un écran de 1600 x 1000 points, réduit sur un plus petit, agrandi
--- sur un plus grand ; fond flou du fond d'écran courant (miniature de nc-carousel-thumbs). Carte du milieu à la hauteur
--- de la tranche du milieu des fonds, au ratio de l'écran actif (celui des captures), en verre (style de la DA).
+-- sur un plus grand ; fond flou du fond d'écran courant (miniature de nc-carousel-thumbs).
 -- Ouverture : nc-shell-msg sessions (Super + Maj + W), ou noctalia msg panel-toggle nc/sessions:main [NOM]
 
 -- Langue (nc-reglages → Apparence → Langue : auto, fr, en ; auto = celle du système) : tr("texte français", "English text")
@@ -42,18 +44,16 @@ local function tr(fr, en) return EN and en or fr end
 
 local NC = noctalia.expandPath("~/.local/bin/nc-session")
 local THUMBS = noctalia.expandPath("~/.cache/nc/carousel/")   -- fond flou du fond courant (<fond>.B.webp)
-local OUTIL = noctalia.expandPath("~/.local/bin/nc-carousel-thumbs")   -- « tranche IMAGE LARGE ETROITE »
--- Tailles du carrousel des fonds (nc/carousel/panel.luau) : mêmes cartes, mêmes voisines.
--- INFO : sous des cartes droites, la ligne d'aide ; INFO_T : sous des tranches, le titre de la carte choisie en plus
-local BASE = { CW = 600, CH = 450, NW = 192, NH = 420, BGW = 1560, BGH = 940, INFO = 90, INFO_T = 190 }
-local CW, CH = 720, BASE.CH       -- carte du milieu : hauteur de la tranche du milieu des fonds, ratio de l'écran actif
-local CWT = BASE.CW               -- tranche du milieu (session avec ses tranches inclinées) : celle des fonds
-local NW, NH = BASE.NW, BASE.NH   -- carte étroite (voisine immédiate)
-local INFO_H = BASE.INFO          -- sous la bande : une ligne d'aide (ou la confirmation, ou un message)
-local INFO_T = BASE.INFO_T        -- sous des tranches : nom, fenêtres, applis de la carte choisie, puis l'aide
+-- INFO : sous la carte choisie, son nom, ses fenêtres, ses applis, puis la ligne d'aide (écran de 1600 x 1000 points)
+local BASE = { BGW = 1560, BGH = 940, INFO = 150, GAP = 24 }
+local PART_CARTE = 0.46        -- largeur de la carte choisie : part de la largeur de l'écran (même valeur que nc-session)
+local ECHELLE_VOISINE = 0.72   -- voisines : plus petites…
+local OPACITE_VOISINE = 0.6    -- … et à 60 %
+local VISIBLES = 2             -- cartes dessinées de chaque côté de la choisie
+local CW, CH = 736, 460        -- carte choisie (setZoom : largeurCarte, hauteurCarte)
+local INFO_H = BASE.INFO
+local GAP = BASE.GAP           -- entre deux cartes
 local Z = 1
-local SPACE = 4
-local REACH = 3
 local ROW_H = CH + 30
 local SMOOTH_MS = 55
 local REPEAT_DELAY = 280
@@ -66,8 +66,11 @@ local HAUT_BARRE, BORD, HAUT_PANNEAU, RAYON = 42, 8, 65, 10
 local BGW, BGH = BASE.BGW, BASE.BGH
 local MAX_APPLIS = 8
 local MAX_BUREAUX = 4
-local SK = 0.30       -- inclinaison des tranches (celle de nc-carousel-thumbs)
 local BOUCLE_MIN = 3  -- la bande boucle à partir de 3 cartes
+-- Avant d'enregistrer depuis le carrousel : attendre que le calque du panneau ait disparu (2 s au plus, comme
+-- nc-shell-msg), pour que ni le panneau ni sa fermeture ne soient dans l'aperçu
+local ATTENTE_PANNEAU = 'i=0; while [ "$i" -lt 8 ] && hyprctl layers 2>/dev/null | grep -q "namespace: noctalia-panel"; '
+  .. 'do sleep 0.25; i=$((i + 1)); done; '
 
 local sessions = {}   -- sessions de nc-session json
 local cartes = {}     -- sessions, puis { nouvelle = true }
@@ -174,14 +177,59 @@ local function currentOutput()
   return out or noctalia.outputs()[1]
 end
 
--- Tailles pour l'écran courant (même calcul que nc/carousel)
+-- ── Taille de la carte choisie et zone de l'aperçu ──────────────────────────
+-- MÊME FORMULE que nc-session (largeur_carte, hauteur_carte, zone_capture ; un test vérifie qu'elles concordent), en
+-- points logiques de l'écran actif :
+--   largeur = plancher(0,46 x largeur de l'écran + 0,5), hauteur = plancher(largeur x hauteur / largeur de l'écran + 0,5)
+-- (environ 46 % du cadre, au ratio de l'écran ; 1600 x 1000 : 736 x 460). L'aperçu : la zone utile de l'écran (sans
+-- ses zones réservées, la barre), recadrée au centre au ratio de l'écran, réduite par grim (-s) à la largeur de la
+-- carte en pixels physiques (largeur x échelle, arrondie : 736 x 1,6 = 1178) ; affichée à 1:1.
+local function arrondi(v) return math.floor(v + 0.5) end
+local function entier(v)   -- int() de Python : vers zéro
+  v = tonumber(v) or 0
+  return v >= 0 and math.floor(v) or -math.floor(-v)
+end
+local function largeurCarte(w) return arrondi(PART_CARTE * w) end
+local function hauteurCarte(w, h) return arrondi(largeurCarte(w) * h / w) end
+
+-- Région « X,Y LxH » de grim -g et facteur de grim -s, pour un écran de hyprctl -j monitors ; nil s'il est illisible.
+-- Sans « reserved » (ou mal formé), l'écran entier.
+local function zoneCapture(m)
+  if type(m) ~= "table" then return nil end
+  local e = tonumber(m.scale) or 1
+  if e == 0 then e = 1 end
+  local w, h = tonumber(m.width), tonumber(m.height)
+  if not w or not h then return nil end
+  if entier(m.transform) % 2 == 1 then w, h = h, w end   -- écran tourné d'un quart
+  w, h = arrondi(w / e), arrondi(h / e)
+  if w <= 0 or h <= 0 then return nil end
+  local x, y = entier(m.x), entier(m.y)
+  local g, haut, d, bas = 0, 0, 0, 0
+  local r = m.reserved
+  if type(r) == "table" and #r == 4 and tonumber(r[1]) and tonumber(r[2]) and tonumber(r[3]) and tonumber(r[4]) then
+    g, haut, d, bas = math.max(0, entier(r[1])), math.max(0, entier(r[2])), math.max(0, entier(r[3])), math.max(0, entier(r[4]))
+  end
+  local uw, uh = w - g - d, h - haut - bas
+  if uw <= 0 or uh <= 0 then g, haut, uw, uh = 0, 0, w, h end
+  local ratio = w / h
+  local rw, rh
+  if uw / uh > ratio then rw, rh = arrondi(uh * ratio), uh else rw, rh = uw, arrondi(uw / ratio) end
+  local rx, ry = x + g + math.floor((uw - rw) / 2), y + haut + math.floor((uh - rh) / 2)
+  local pixels = arrondi(largeurCarte(w) * e)
+  local facteur = math.ceil(pixels / rw * 1e6) / 1e6   -- grim tronque : arrondi au-dessus, jamais un pixel de moins
+  return string.format("%d,%d %dx%d", rx, ry, rw, rh), string.format("%.6f", facteur)
+end
+
+-- Tailles pour l'écran courant (zoom du texte comme nc/carousel ; cartes : largeurCarte, hauteurCarte)
 local function setZoom()
   local o = currentOutput()
   local z = o and math.max(0.6, math.min(1, o.width / 1600, o.height / 1000)) or 1
   if o and (o.width > 1600 or o.height > 1000) then z = math.max(1, math.min(2, o.width / 1600, o.height / 1000)) end
   Z = z
-  CWT, CH, NW, NH, INFO_H, INFO_T = px(BASE.CW), px(BASE.CH), px(BASE.NW), px(BASE.NH), px(BASE.INFO), px(BASE.INFO_T)
-  CW = o and o.height > 0 and math.floor(CH * o.width / o.height + 0.5) or math.floor(CH * 1.6 + 0.5)
+  INFO_H, GAP = px(BASE.INFO), px(BASE.GAP)
+  local w, h = 1600, 1000
+  if o and o.width > 0 and o.height > 0 then w, h = o.width, o.height end
+  CW, CH = largeurCarte(w), hauteurCarte(w, h)
   if o then BGW, BGH = o.width - 2 * BORD, o.height - HAUT_BARRE - 2 * BORD else BGW, BGH = px(BASE.BGW), px(BASE.BGH) end
   ROW_H = CH + px(30)
 end
@@ -221,13 +269,16 @@ local function aller(i)
 end
 
 -- ── nc-session ──────────────────────────────────────────────────────────────
+-- Les cartes d'après la liste ; la carte centrée garde sa place (après une suppression, celle qui la suit)
 local function construire()
+  local avant = #cartes
+  local i = avant > 0 and (((target - 1) % avant) + 1) or 1
   cartes = {}
   for _, s in ipairs(sessions) do table.insert(cartes, s) end
   table.insert(cartes, { nouvelle = true })
-  local t = math.min(target, #cartes)
+  local t = math.max(1, math.min(i, #cartes))
   if voulu then
-    for i, c in ipairs(cartes) do if c.nom == voulu then t = i end end
+    for k, c in ipairs(cartes) do if c.nom == voulu then t = k end end
     voulu = nil
   end
   target, pos = t, t
@@ -265,18 +316,26 @@ local function ouvrir(s)
   noctalia.runAsync({ "sh", "-c", 'sleep 0.4; exec "$0" ouvrir "$1"', NC, s.nom })
 end
 
+-- Supprimer : pendant la suppression, la carte n'a plus d'image (son fichier s'efface) ; une fois faite, la session
+-- est retirée de la liste AVANT le rendu suivant (la carte supprimée n'est plus jamais dessinée), puis la liste relue
 local function supprimer(s)
   mode = "attente"
+  s.supprimee = true
   render()
   noctalia.runAsync({ NC, "supprimer", s.nom }, function(r)
     mode = "liste"
     if r and r.exitCode == 0 then
       message = nil
+      local reste = {}
+      for _, x in ipairs(sessions) do if x ~= s and x.nom ~= s.nom then table.insert(reste, x) end end
+      sessions = reste
+      construire()
       recharger()
     else
+      s.supprimee = nil
       erreur(r, "La session n'a pas pu être supprimée", "The session couldn't be deleted")
-      render()
     end
+    render()
   end, 10000)
 end
 
@@ -285,25 +344,33 @@ local function existe(nom)
   return false
 end
 
+-- La règle de nc-session ([\w][\w .\-]{0,39}), vérifiée avant de fermer le panneau : lettres et chiffres (accentués
+-- compris), espaces, - . _ ; pas d'espace, de point ni de tiret en tête ; 40 caractères au plus. nc-session la
+-- vérifie de nouveau (et notifie un refus).
+local function nomAccepte(nom)
+  if string.find(nom, "%c") then return false end
+  local n = 0
+  for car in string.gmatch(nom, "[\1-\127\194-\244][\128-\191]*") do
+    n = n + 1
+    if #car == 1 and not string.match(car, "[%w_]") and not (n > 1 and string.match(car, "[ .%-]")) then return false end
+  end
+  return n >= 1 and n <= 40
+end
+
+-- Enregistrer : le panneau se ferme d'abord, nc-session prend l'aperçu une fois son calque disparu (sinon le panneau
+-- serait dans l'image) ; sa notification arrive après la capture
 local function enregistrer()
   local nom = noctalia.string.trim(nomSaisi or "")
-  if nom == "" then return end   -- le nom lui-même est vérifié par nc-session (son message s'affiche s'il le refuse)
-  mode = "attente"
-  message = tr("Enregistrement de « " .. nom .. " »…", "Saving “" .. nom .. "”…")
-  messageErreur = false
-  render()
-  noctalia.runAsync({ NC, "enregistrer", nom }, function(r)
-    if r and r.exitCode == 0 then
-      mode, message, nomSaisi = "liste", nil, ""
-      voulu = nom
-      recharger()
-    else
-      mode = "nom"
-      inputKey = inputKey + 1
-      erreur(r, "La session n'a pas pu être enregistrée", "The session couldn't be saved")
-      render()
-    end
-  end, 30000)
+  if nom == "" then return end
+  if not nomAccepte(nom) then
+    message, messageErreur = tr("Nom de session : lettres, chiffres, espaces, - . _ (40 au plus).",
+      "Session name: letters, digits, spaces, - . _ (40 at most)."), true
+    render()
+    return
+  end
+  mode, message, nomSaisi = "liste", nil, ""
+  panel.close()
+  noctalia.runAsync({ "sh", "-c", ATTENTE_PANNEAU .. 'exec "$0" enregistrer "$1"', NC, nom })
 end
 
 local function entree(chord) return chord == "Return" or chord == "KP_Enter" end
@@ -321,22 +388,6 @@ end
 
 -- ── Dessin ──────────────────────────────────────────────────────────────────
 local function lerp(a, b, t) return a + (b - a) * t end
-
--- Taille de la carte à la distance (continue) delta du centre : comme nc/carousel ; large : largeur au milieu
-local function dims(delta, large)
-  local t = math.min(delta, 1)
-  local sc = delta <= 1 and 1 or math.max(0.58, 0.88 ^ (delta - 1))
-  return lerp(large or CW, NW * sc, t), lerp(CH, NH * sc, t)
-end
-
-local function portee()
-  local r, x = 0, CW / 2
-  while x < BGW / 2 and r < 12 do
-    r = r + 1
-    x = x + dims(r) + SPACE
-  end
-  return math.max(REACH, r)
-end
 
 local function vide(w, h) return ui.box({ width = math.max(1, w), height = math.max(1, h), opacity = 0 }) end
 
@@ -420,54 +471,35 @@ local function schema(s, w, h, col)
   return rangees
 end
 
+-- Une image seulement si son fichier est là (noctalia.fileExists) : sinon le dessin, jamais « image failed to load »
+local function fichierImage(p)
+  p = texte(p)
+  return p and noctalia.fileExists(p) and p or nil
+end
+
 local function apercu(s)
-  local p = texte(s.apercu)
-  return p and noctalia.fileExists(p) and p or nil
+  if not s or s.supprimee then return nil end   -- en cours de suppression : son fichier s'efface
+  return fichierImage(s.apercu)
 end
 
--- Tranche inclinée de la session (nc-session json : « tranche » au milieu, « tranche_etroite » pour les voisines)
-local function tranche(s, milieu)
-  if not s or s.nouvelle then return nil end
-  local p = texte(milieu and s.tranche or s.tranche_etroite)
-  return p and noctalia.fileExists(p) and p or nil
-end
-
--- Verre de la DA : couches superposées à la même taille (marge négative = hauteur), dans l'ordre du dessin :
--- fond translucide de la surface (55 %), contenu, reflet d'un point en haut (blanc 16 %), et pour la carte choisie
--- seulement un contour de 1,5 point à l'accent. L'API des plugins (32) n'a pas de dégradé : contour d'une couleur.
-local function verre(props, w, h, couches, choisie)
-  local R = px(RAYON)
-  local l = { ui.box({ width = w, height = h, radius = R, fill = "surface/0.55" }) }
+-- Carte plate : fond de verre (surface à 55 %, visible sous un dessin), le contenu par-dessus (couches de la taille
+-- de la carte, superposées par une marge négative), et pour la carte choisie seulement un contour blanc de 1,5 point
+-- (comme le liseré de la tranche choisie du carrousel des fonds). Coins arrondis de 10.
+local function cartePlate(props, w, h, couches, choisie)
+  local l = { ui.box({ width = w, height = h, radius = RAYON, fill = "surface/0.55" }) }
   for _, c in ipairs(couches) do table.insert(l, c) end
-  table.insert(l, ui.column({ width = w, height = h, align = "center", justify = "start" }, {
-    ui.box({ width = math.max(1, w - 2 * R), height = 1, fill = "#ffffff29" }),
-  }))
   if choisie then
-    table.insert(l, ui.box({ width = w, height = h, radius = R, fill = "#00000000", border = "primary", borderWidth = 1.5 }))
+    table.insert(l, ui.box({ width = w, height = h, radius = RAYON, fill = "#00000000", border = "#ffffff", borderWidth = 1.5 }))
   end
   props.width, props.height, props.gap = w, h, -h
   props.align, props.justify = "start", "start"
   return ui.column(props, l)
 end
 
--- Une couche : contenu calé en bas (ou en haut, au centre), aux marges de la carte
-local function couche(w, h, justify, align, kids, marge)
-  return ui.column({ width = w, height = h, justify = justify, align = align or "start", paddingH = marge or 0,
-    paddingV = marge or 0, gap = px(6) }, kids)
-end
-
--- Voile en bas de la carte : de transparent au fond à 70 %, en marches superposées (pas de dégradé dans l'API)
-local VOILE_MARCHES = 5
-local function voile(w, h, vh)
-  local l = {}
-  local a = 1 - 0.3 ^ (1 / VOILE_MARCHES)   -- les marches cumulées donnent 70 % tout en bas
-  for i = 1, VOILE_MARCHES do
-    local hi = math.floor(vh * (VOILE_MARCHES - i + 1) / VOILE_MARCHES)
-    table.insert(l, ui.column({ width = w, height = h, justify = "end" }, {
-      ui.box({ width = w, height = hi, radius = px(RAYON), fill = string.format("surface/%.3f", a) }),
-    }))
-  end
-  return l
+-- Une couche : contenu centré, aux marges de la carte
+local function couche(w, h, kids, marge, align)
+  return ui.column({ width = w, height = h, justify = "center", align = align or "center", paddingH = marge or 0,
+    gap = px(10) }, kids)
 end
 
 local function iconesApplis(classes, taille, max)
@@ -492,16 +524,13 @@ local function nbFenetres(n)
 end
 
 -- ── Écran actuel (carte « Nouvelle session ») ───────────────────────────────
--- Miniature en direct (grim -s 0.25, fichier temporaire dans $XDG_RUNTIME_DIR, effacé à la fermeture), ou le schéma
--- des fenêtres du bureau actif si SESSIONS_CAPTURE=non ; rien sans grim. Fenêtres : hyprctl -j clients, en asynchrone.
--- Ses tranches inclinées : la miniature passée dans nc-carousel-thumbs tranche (mêmes fichiers temporaires, effacés à
--- la fermeture) ; en attendant, ou sans capture, celles du fond courant (cache du carrousel des fonds).
-local direct = nil        -- miniature prête
-local directFichier = nil -- fichier demandé à grim (effacé à la fermeture)
-local directTranche = nil -- { large, etroite } prêtes
+-- À l'ouverture, en asynchrone : hyprctl -j monitors (l'écran du panneau, ses zones réservées), puis grim au format
+-- des aperçus des sessions (zoneCapture : sous la barre, à la taille exacte de la carte) vers un fichier .tmp de
+-- $XDG_RUNTIME_DIR, renommé d'un coup une fois écrit (jamais une image à moitié lue) ; et hyprctl -j clients (les
+-- fenêtres ouvertes, et le dessin de celles du bureau actif). En attendant l'image, ou sans capture
+-- (SESSIONS_CAPTURE=non, grim absent), le dessin ; l'image le remplace dans le rappel. Effacée à la fermeture.
+local direct = nil        -- image prête (renommée, vérifiée)
 local aEffacer = {}       -- fichiers temporaires de cette ouverture
-local trancheAttendue = false   -- grim puis nc-carousel-thumbs en cours
-local fondTranche = nil   -- { large, etroite } du fond courant (<fond>.W.webp, <fond>.N.webp), s'il y en a
 local ouverture = 0       -- rang de l'ouverture : une réponse arrivée après la fermeture est ignorée
 local ouvert = false
 local actuel = nil        -- { n, bureaux, classes, schema = { largeur, hauteur, rects } }
@@ -559,88 +588,54 @@ local function lireActuel()
   local rangO = ouverture
   local o = currentOutput()
   local capture = captureVoulue()
-  if capture then
-    local dir = env("XDG_RUNTIME_DIR") or "/tmp"
-    local f = dir .. "/nc-sessions-direct-" .. rangO .. "-" .. tostring(noctalia.nowMs and noctalia.nowMs() or 0) .. ".png"
-    local large, etroite = string.gsub(f, "%.png$", ".tranche.png"), string.gsub(f, "%.png$", ".tranche-etroite.png")
-    directFichier = f
-    aEffacer = { f }
-    trancheAttendue = noctalia.fileExists(OUTIL)
-    noctalia.runAsync({ "sh", "-c", 'command -v grim >/dev/null 2>&1 || exit 3; umask 077; exec grim -o "$1" -s 0.25 -t png "$0"',
-      f, o and o.name or "" }, function(r)
-      if rangO ~= ouverture or not ouvert then
-        noctalia.runAsync({ "rm", "-f", f })     -- fermé entre-temps
-        return
-      end
-      if r and r.exitCode == 0 then
-        direct = f
-        if trancheAttendue then
-          table.insert(aEffacer, large)
-          table.insert(aEffacer, etroite)
-          noctalia.runAsync({ OUTIL, "tranche", f, large, etroite }, function(r2)
-            if rangO ~= ouverture or not ouvert then
-              noctalia.runAsync({ "rm", "-f", large, etroite })
-              return
-            end
-            trancheAttendue = false
-            if r2 and r2.exitCode == 0 then directTranche = { large = large, etroite = etroite } end
-            render()
-          end, 20000)
+  noctalia.runAsync({ "hyprctl", "-j", "monitors" }, function(r)
+    if rangO ~= ouverture or not ouvert then return end
+    local moniteurs = r and r.exitCode == 0 and noctalia.json.decode(r.stdout or "") or nil
+    if type(moniteurs) ~= "table" then moniteurs = nil end
+    -- L'écran du panneau (sinon celui qui a le focus)
+    local m = nil
+    for _, x in ipairs(moniteurs or {}) do
+      if type(x) == "table" and o and x.name == o.name then m = x end
+    end
+    if not m then
+      for _, x in ipairs(moniteurs or {}) do if type(x) == "table" and x.focused then m = x end end
+    end
+    local zone, facteur = zoneCapture(m)
+    if capture and zone then
+      local dir = env("XDG_RUNTIME_DIR") or "/tmp"
+      local f = dir .. "/nc-sessions-direct-" .. rangO .. "-" .. tostring(noctalia.nowMs and noctalia.nowMs() or 0) .. ".png"
+      aEffacer = { f, f .. ".tmp" }
+      noctalia.runAsync({ "sh", "-c", 'command -v grim >/dev/null 2>&1 || exit 3; umask 077; '
+        .. 'grim -g "$1" -s "$2" -t png "$0.tmp" && exec mv -f "$0.tmp" "$0"', f, zone, facteur }, function(r2)
+        if rangO ~= ouverture or not ouvert then
+          noctalia.runAsync({ "rm", "-f", f, f .. ".tmp" })     -- fermé entre-temps
+          return
         end
-      else
-        trancheAttendue = false
-      end
-      render()
-    end, 5000)
-  end
-  local function clients(moniteurs)
-    noctalia.runAsync({ "hyprctl", "-j", "clients" }, function(r)
+        if r2 and r2.exitCode == 0 and noctalia.fileExists(f) then direct = f end
+        render()
+      end, 5000)
+    end
+    noctalia.runAsync({ "hyprctl", "-j", "clients" }, function(r3)
       if rangO ~= ouverture or not ouvert then return end
-      actuel = r and r.exitCode == 0 and lireClients(r.stdout, moniteurs) or nil
+      actuel = r3 and r3.exitCode == 0 and lireClients(r3.stdout, moniteurs) or nil
       render()
     end, 3000)
-  end
-  if capture then
-    clients(nil)
-  else
-    noctalia.runAsync({ "hyprctl", "-j", "monitors" }, function(r)
-      if rangO ~= ouverture or not ouvert then return end
-      clients(r and r.exitCode == 0 and noctalia.json.decode(r.stdout or "") or nil)
-    end, 3000)
-  end
+  end, 3000)
 end
 
 local function oublierActuel()
   ouvert = false
   ouverture = ouverture + 1
+  direct, actuel = nil, nil
   if #aEffacer > 0 then
     local argv = { "rm", "-f" }
     for _, f in ipairs(aEffacer) do table.insert(argv, f) end
     noctalia.runAsync(argv)
   end
-  direct, directFichier, actuel, directTranche, aEffacer, trancheAttendue = nil, nil, nil, nil, {}, false
+  aEffacer = {}
 end
 
--- Tranche de « Nouvelle session » : l'écran en direct, sinon le fond courant
-local function trancheNouvelle(milieu)
-  local t = directTranche or fondTranche
-  if not t then return nil end
-  return milieu and t.large or t.etroite
-end
-
--- Toutes les cartes en tranches, ou aucune : chaque session a les deux siennes, et « Nouvelle session » en a une (ou
--- l'attend : grim et nc-carousel-thumbs en cours, une place vide en attendant)
-local enTranches = false   -- calculé à chaque image (render)
-local function toutesTranches()
-  for _, s in ipairs(sessions) do
-    if not tranche(s, true) or not tranche(s, false) then return false end
-  end
-  return trancheNouvelle(true) ~= nil or trancheAttendue
-end
-
--- ── Cartes ──────────────────────────────────────────────────────────────────
--- Contenu partagé entre la carte droite (dedans, sur le voile) et le titre sous une tranche (largeur L disponible)
-
+-- ── Ligne d'info sous la carte ──────────────────────────────────────────────
 -- « Modifier » : ouvre l'éditeur de la session
 local function boutonModifier(c)
   return ui.row({ key = "modifier", height = px(30), paddingH = px(14), radius = px(15), align = "center", gap = px(6),
@@ -727,82 +722,39 @@ local function plus(d)
   })
 end
 
--- Carte « Nouvelle session » : l'écran actuel assombri, un « + » dans un rond de verre, le titre, les applis ouvertes ;
--- le champ du nom y vient aussi. Rien en dessous (l'aide seulement).
-local function carteNouvelle(idx, w, h, milieu, a, clic)
-  local M = px(24)
+-- Carte « Nouvelle session » : l'écran actuel (image en direct, sinon le dessin des fenêtres du bureau actif), et
+-- un « + » dans un rond de verre au milieu
+local function carteNouvelle(idx, w, h, choisie, a, clic)
   local couches = {}
-  if milieu then
-    if direct then
-      table.insert(couches, ui.image({ key = "direct", path = direct, width = w, height = h, fit = "cover", radius = px(RAYON) }))
-      table.insert(couches, ui.box({ width = w, height = h, radius = px(RAYON), fill = "#00000073" }))   -- assombrie à 45 %
-    elseif actuel and actuel.schema and #actuel.schema.rects > 0 then
-      local sh = h - 2 * M
-      local sw = math.min(w - 2 * M, math.floor(sh * actuel.schema.largeur / math.max(1, actuel.schema.hauteur)))
-      table.insert(couches, couche(w, h, "center", "center", { ecranSchema(actuel.schema, sw, sh, "on_surface") }))
-      table.insert(couches, ui.box({ width = w, height = h, radius = px(RAYON), fill = "#00000073" }))
-    end
-    local kids = {
-      plus(px(72)),
-      ui.label({ text = tr("Nouvelle session", "New session"), fontSize = px(22), fontWeight = "bold", color = "on_surface" }),
-    }
-    for _, k in ipairs(lignesNouvelle(w - 2 * M)) do table.insert(kids, k) end
-    table.insert(couches, ui.column({ width = w, height = h, align = "center", justify = "center", gap = px(12), paddingH = M },
-      kids))
-  else
-    table.insert(couches, couche(w, h, "center", "center", { ui.glyph({ name = "plus", size = px(40), color = "primary" }) }))
+  local img = fichierImage(direct)
+  if img then
+    table.insert(couches, ui.image({ key = "direct", path = img, width = w, height = h, fit = "cover", radius = RAYON }))
+  elseif actuel and actuel.schema and #actuel.schema.rects > 0 then
+    local M = math.floor(px(24) * w / CW)
+    local sh = h - 2 * M
+    local sw = math.min(w - 2 * M, math.floor(sh * actuel.schema.largeur / math.max(1, actuel.schema.hauteur)))
+    table.insert(couches, couche(w, h, { ecranSchema(actuel.schema, sw, sh, "primary") }))
   end
-  return verre({ key = "c" .. idx, opacity = a, onClick = clic }, w, h, couches, milieu)
+  table.insert(couches, couche(w, h, { plus(math.floor(px(72) * w / CW)) }))
+  return cartePlate({ key = "c" .. idx, opacity = a, onClick = clic }, w, h, couches, choisie)
 end
 
--- Carte d'une session : la capture (ou le schéma) remplit la carte ; en bas, sur un voile, icône, couleur, nom, nombre
--- de fenêtres, date et applis. Les voisines : capture, ou icône et nom.
-local function carteSession(c, idx, w, h, milieu, a, clic)
-  local M = px(24)
-  local col = couleur(c)
+-- Carte d'une session : son aperçu remplit la carte (le même fichier pour la choisie et ses voisines, réduit à
+-- l'affichage) ; sans aperçu, le dessin de ses fenêtres
+local function carteSession(c, idx, w, h, choisie, a, clic)
   local img = apercu(c)
   local couches = {}
-  if milieu then
-    local vh = math.floor(h * 0.42)
-    if img then
-      table.insert(couches, ui.image({ key = "i" .. idx, path = img, width = w, height = h, fit = "cover", radius = px(RAYON) }))
-    else
-      -- (chaque couche fait la hauteur de la carte : le schéma occupe le haut, au-dessus du voile)
-      table.insert(couches, ui.column({ width = w, height = h, align = "start", justify = "start" }, {
-        ui.column({ width = w, height = h - vh + px(24), paddingH = M, align = "start", justify = "center", gap = px(10) },
-          schema(c, w, h - vh + px(24), col)),
-      }))
-    end
-    for _, v in ipairs(voile(w, h, vh)) do table.insert(couches, v) end
-    table.insert(couches, couche(w, h, "end", "start", { titreSession(c, w - 2 * M, px(22)), ligneSession(c) }, M))
-    -- « Modifier » en haut à droite
-    if mode == "liste" then
-      table.insert(couches, ui.column({ width = w, height = h, align = "end", justify = "start", paddingH = px(16), paddingV = px(16) }, {
-        boutonModifier(c),
-      }))
-    end
+  if img then
+    table.insert(couches, ui.image({ key = "i" .. idx, path = img, width = w, height = h, fit = "cover", radius = RAYON }))
   else
-    if img then
-      table.insert(couches, ui.image({ key = "i" .. idx, path = img, width = w, height = h, fit = "cover", radius = px(RAYON) }))
-      for _, v in ipairs(voile(w, h, math.floor(h * 0.35))) do table.insert(couches, v) end
-      table.insert(couches, couche(w, h, "end", "center", {
-        ui.label({ text = c.nom, fontSize = px(13), fontWeight = "semibold", color = "on_surface", maxWidth = w - 2 * px(16),
-          maxLines = 2, textAlign = "center" }),
-      }, px(16)))
-    else
-      table.insert(couches, couche(w, h, "center", "center", {
-        ui.glyph({ name = glyphe(c.icone), size = px(40), color = col }),
-        ui.label({ text = c.nom, fontSize = px(15), fontWeight = "semibold", color = "on_surface", maxWidth = w - 2 * px(16),
-          maxLines = 3, textAlign = "center" }),
-      }, px(16)))
-    end
+    local M = math.floor(px(24) * w / CW)
+    table.insert(couches, couche(w, h, schema(c, w, h, couleur(c)), M, "start"))
   end
-  return verre({ key = "c" .. idx, opacity = a, onClick = clic }, w, h, couches, milieu)
+  return cartePlate({ key = "c" .. idx, opacity = a, onClick = clic }, w, h, couches, choisie)
 end
 
--- Une carte de la bande, à la distance d (entière) du centre
-local function carte(c, idx, w, h, d, a)
-  local milieu = d == 0
+-- Une carte de la bande ; choisie : celle du milieu
+local function carte(c, idx, w, h, choisie, a)
   local clic = function()
     if idx == target then
       if mode ~= "editeur" then activer(c) end   -- éditeur ouvert : un clic sur sa carte n'ouvre pas la session
@@ -810,57 +762,44 @@ local function carte(c, idx, w, h, d, a)
       aller(idx)
     end
   end
-  -- Tranches : exactement un fond de nc/carousel (image découpée, plus large que sa place : SK x hauteur), et rien
-  -- d'autre (ni verre ni boîte derrière) ; le titre de la carte choisie est sous la bande (legende)
-  if enTranches then
-    local t
-    if c.nouvelle then t = trancheNouvelle(milieu) else t = tranche(c, milieu) end
-    if t then
-      return ui.image({ key = "c" .. idx, path = t, width = w + SK * h, height = h, fit = "cover", opacity = a,
-        onClick = clic })
-    end
-    -- « Nouvelle session » dont la tranche se prépare : une place vide (invisible) de la même taille
-    return vide(w + SK * h, h)
-  end
-  if c.nouvelle then return carteNouvelle(idx, w, h, milieu, a, clic) end
-  return carteSession(c, idx, w, h, milieu, a, clic)
+  if c.nouvelle then return carteNouvelle(idx, w, h, choisie, a, clic) end
+  return carteSession(c, idx, w, h, choisie, a, clic)
 end
 
--- Bande de cartes : la carte du milieu grande, les voisines étroites, plus petites et à 70 %, les plus lointaines à
--- moitié moins (mêmes tailles, écarts et opacités que les tranches des fonds) ; en boucle dès 3 cartes. decal : la
--- carte du milieu glisse d'autant vers la gauche (éditeur ouvert).
+-- Bande de cartes, comme un sélecteur d'applis : la choisie au centre, ses voisines à ECHELLE_VOISINE et
+-- OPACITE_VOISINE ; la taille et l'opacité suivent la distance (continue) au centre, pour un glissement doux. Seules
+-- la choisie et VISIBLES cartes de chaque côté sont dessinées (en boucle, jamais deux fois la même). decal : la carte
+-- du milieu glisse d'autant vers la gauche (éditeur ouvert).
 local function bande(decal)
   local n = #cartes
   local enBoucle = boucle()
-  local reach = enBoucle and math.min(portee(), math.max(1, math.floor(n / 2))) or portee()
+  local reach = enBoucle and math.min(VISIBLES, math.max(1, math.floor((n - 1) / 2))) or VISIBLES
   local c = math.floor(pos + 0.5)
   local fl = math.floor(pos)
   local kids, centres, x = {}, {}, 0
-  local de, a_ = c - reach, c + reach + 1
+  local de, a_ = c - reach, c + reach
   if not enBoucle then de, a_ = math.max(1, de), math.min(n, a_) end
   for idx = de, a_ do
-    local d = math.abs(idx - c)
-    local cc = cartes[wrap(idx)]
-    local w, h = dims(d, enTranches and CWT or CW)
-    local a = 1 - 0.3 * math.min(d, 1)
-    if d >= REACH then a = a * 0.5 end
+    local t = math.min(math.abs(idx - pos), 1)
+    local k = lerp(1, ECHELLE_VOISINE, t)
+    local w, h = CW * k, CH * k
     centres[idx] = x + w / 2
     table.insert(kids, ui.row({ key = "r" .. idx, width = w, height = ROW_H, align = "center", justify = "center" }, {
-      carte(cc, idx, w, h, d, a),
+      carte(cartes[wrap(idx)], idx, w, h, idx == c, lerp(1, OPACITE_VOISINE, t)),
     }))
-    x = x + w + SPACE
+    x = x + w + GAP
   end
   -- Amène « pos » au centre (moins decal) : la bande est centrée, une boîte vide d'un côté la décale
-  local largeur = x - SPACE
+  local largeur = x - GAP
   local p0 = centres[fl] or centres[c] or largeur / 2
   local p = lerp(p0, centres[fl + 1] or p0, pos - fl)
   local s = largeur / 2 - p - (decal or 0)
   if s > 0 then
-    table.insert(kids, 1, vide(2 * s - SPACE, 1))
+    table.insert(kids, 1, vide(2 * s - GAP, 1))
   elseif s < 0 then
-    table.insert(kids, vide(-2 * s - SPACE, 1))
+    table.insert(kids, vide(-2 * s - GAP, 1))
   end
-  return ui.row({ height = ROW_H, width = largeur + 2 * math.abs(s) + 60, align = "center", justify = "center", gap = SPACE }, kids)
+  return ui.row({ height = ROW_H, width = largeur + 2 * math.abs(s) + 60, align = "center", justify = "center", gap = GAP }, kids)
 end
 
 -- ── Aide sous la carte : une ligne, en pastilles de touches comme la fiche des raccourcis (nc/keys) ─────────────
@@ -887,11 +826,10 @@ local function phrase(t, couleurTexte)
     maxWidth = mode == "editeur" and CW or CW + px(200), maxLines = 2, textAlign = "center" })
 end
 
--- Sous des tranches : le titre de la carte choisie, comme un titre sous une image (un voile droit dans la tranche
--- inclinée déborderait). Session : pastille, icône, nom, « Modifier » ; puis fenêtres, date, applis.
+-- Sous la carte choisie. Session : pastille, icône, nom, « Modifier » ; puis fenêtres, date, applis.
 -- « Nouvelle session » : le « + », le titre, puis le champ du nom ou les fenêtres ouvertes.
 local function titreSous(c)
-  local L = math.min(BGW - 2 * px(24), CWT + px(200))
+  local L = math.min(BGW - 2 * px(24), CW + px(200))
   if c.nouvelle then
     local kids = { ui.row({ gap = px(12), align = "center", justify = "center" }, {
       plus(px(40)),
@@ -906,14 +844,14 @@ local function titreSous(c)
   })
 end
 
-local function hauteurInfo() return enTranches and INFO_T or INFO_H end
+local function hauteurInfo() return INFO_H end
 
 local function legende()
   local c = courante()
   local kids = {}
   if not c then return ui.column({ height = hauteurInfo() }, {}) end
   local ECHAP = tr("Échap", "Esc")
-  if enTranches then table.insert(kids, titreSous(c)) end
+  table.insert(kids, titreSous(c))
   if c.nouvelle then
     if mode == "nom" or mode == "attente" then
       table.insert(kids, ligneAide({ { "↵", tr("enregistrer les fenêtres ouvertes", "save the open windows") },
@@ -928,14 +866,15 @@ local function legende()
     table.insert(kids, ligneAide({ { "Tab", tr("champ suivant", "next field") }, { ECHAP, tr("fermer l'éditeur", "close the editor") } }))
   elseif mode ~= "attente" then
     -- E n'arrive pas au panneau (non capturée : les lettres vont aux champs) et le clic droit n'existe que sur un
-    -- ui.button : seul le bouton « Modifier » ouvre l'éditeur
+    -- ui.button : seul le bouton « Modifier », à côté du nom, ouvre l'éditeur
     table.insert(kids, ligneAide({ { "↵", tr("ouvrir", "open") }, { tr("Maj", "Shift"), tr("Suppr", "Del"), tr("supprimer", "delete") },
-      { tr("Modifier", "Edit") }, { ECHAP, tr("fermer", "close") } }))
+      { ECHAP, tr("fermer", "close") } }))
   end
   if message and not (c.nouvelle and (mode == "nom" or mode == "attente")) then table.insert(kids, phrase(message, messageErreur and "error" or "primary")) end
   return ui.column({ height = hauteurInfo(), width = BGW, align = "center", justify = "start", gap = px(10),
-    paddingV = enTranches and px(8) or px(16) }, kids)
+    paddingV = px(10) }, kids)
 end
+
 
 -- ── Éditeur d'une session ───────────────────────────────────────────────────
 -- Un volet à droite, sur toute la hauteur du cadre du carrousel (à BORD de ses bords, rayon RAYON), par-dessus les
@@ -1151,7 +1090,7 @@ end
 -- qu'elle ne passe pas sous le volet : environ 30 points en 1600 x 1000 comme en 1280 x 800 (carte au ratio de l'écran)
 local function placeVolet()
   local VW = px(VOLET_W)
-  local largeur = enTranches and CWT + SK * CH or CW     -- une tranche déborde de SK x hauteur (moitié de chaque côté)
+  local largeur = CW
   local droite = BGW / 2 + largeur / 2 + px(ECART)      -- bord droit de la carte du milieu, plus l'écart
   local decal = math.max(0, math.floor(droite - (BGW - BORD - VW) + 0.5))
   decal = math.min(decal, math.max(0, math.floor(BGW / 2 - largeur / 2 - px(16))))   -- jamais à moins de 16 du bord gauche
@@ -1346,7 +1285,6 @@ end
 
 function render()
   local corps
-  enTranches = charge and toutesTranches()
   local edite = mode == "editeur" and charge and edSession() ~= nil
   local VW, decal = 0, 0
   if edite then
@@ -1464,16 +1402,12 @@ function onOpen(context)
   holdDir = 0
   mode, nomSaisi, message, edNom, vol = "liste", "", nil, nil, 1
   voulu = texte(context)   -- nom facultatif à centrer : panel-toggle nc/sessions:main "Dev"
-  bg, fondTranche = nil, nil
+  bg = nil
   local o = currentOutput()
   local fond = noctalia.wallpaperPath(o and o.name or "")
   if fond then
     local base = THUMBS .. (string.match(fond, "([^/]+)$") or "")
     if noctalia.fileExists(base .. ".B.webp") then bg = base .. ".B.webp" end
-    -- Tranches du fond courant (carrousel des fonds) : celles de « Nouvelle session » en attendant l'écran en direct
-    if noctalia.fileExists(base .. ".W.webp") and noctalia.fileExists(base .. ".N.webp") then
-      fondTranche = { large = base .. ".W.webp", etroite = base .. ".N.webp" }
-    end
   end
   if charge then construire() end   -- la liste d'avant tout de suite, relue juste après
   eco = noctalia.fileExists(ECO)
@@ -1482,7 +1416,7 @@ function onOpen(context)
   if not eco then setTicking(true) end
   ouvert = true
   recharger()
-  lireActuel()   -- avant la première image : la tranche de « Nouvelle session » est déjà attendue (pas de saut)
+  lireActuel()   -- « Nouvelle session » : le dessin des fenêtres, puis l'écran en direct dès qu'il est prêt
   render()
 end
 

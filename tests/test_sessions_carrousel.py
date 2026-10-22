@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -77,14 +78,19 @@ ECRAN = { 1600, 1000 }
 CLIENTS = [[ [{"class": "firefox", "workspace": {"id": 1}, "mapped": true, "at": [0, 0], "size": [800, 1000]},
   {"class": "kitty", "workspace": {"id": 1}, "mapped": true, "at": [800, 0], "size": [800, 1000]},
   {"class": "kitty", "workspace": {"id": 3}, "mapped": true, "at": [0, 0], "size": [1600, 1000]}] ]]
-MONITEURS = [[ [{"name": "eDP-1", "focused": true, "x": 0, "y": 0, "width": 1600, "height": 1000, "scale": 1,
-  "transform": 0, "activeWorkspace": {"id": 1}}] ]]
+-- L'écran de l'utilisateur : 1600 x 1000 points (2560 x 1600 pixels à l'échelle 1,6), la barre réservée en haut
+MONITEURS = [[ [{"name": "eDP-1", "focused": true, "x": 0, "y": 0, "width": 2560, "height": 1600, "scale": 1.6,
+  "transform": 0, "reserved": [0, 42, 0, 0], "activeWorkspace": {"id": 1}}] ]]
 REPONSES = {}   -- sous-commande → { exitCode, stdout, stderr }
 local function rep(argv)
   local sub = argv[2]
-  if argv[1] == "sh" then sub = argv[3]:find("grim", 1, true) and "grim" or "ouvrir" end
+  if argv[1] == "sh" then
+    sub = argv[3]:find("grim", 1, true) and "grim" or argv[3]:find("enregistrer", 1, true) and "enregistrer" or "ouvrir"
+  end
   if argv[1] == "hyprctl" then sub = "hyprctl " .. argv[3] end
   if argv[1] == "rm" then sub = "rm" end
+  -- grim réussi : l'image est écrite (le .tmp renommé)
+  if sub == "grim" and not REPONSES.grim then local f = io.open(argv[4], "w"); f:write("png"); f:close() end
   if REPONSES[sub] then return REPONSES[sub] end
   if sub == "hyprctl clients" then return { exitCode = 0, stdout = CLIENTS, stderr = "" } end
   if sub == "hyprctl monitors" then return { exitCode = 0, stdout = MONITEURS, stderr = "" } end
@@ -141,7 +147,7 @@ function contient(mot)
   return false
 end
 function images() local o = {} for _, n in ipairs(noeuds(tree)) do if n.t == "image" then o[n.p.path] = true end end return o end
-function cartes() local o = {} for _, n in ipairs(noeuds(tree)) do if n.p.key and n.p.key:match("^c%d+$") then table.insert(o, n) end end return o end
+function cartes() local o = {} for _, n in ipairs(noeuds(tree)) do if n.p.key and n.p.key:match("^c%-?%d+$") then table.insert(o, n) end end return o end
 function derniere() return calls[#calls] end
 function trouver(cle, prefixe)
   for _, n in ipairs(noeuds(tree)) do
@@ -191,32 +197,25 @@ def session(nom, **plus):
 
 @unittest.skipUnless(shutil.which("lua"), "lua requis")
 class Carrousel(unittest.TestCase):
-    def lancer(self, sessions, scenario, apercu=False, tranches=(), outil=False):
-        """tranches : noms des sessions qui ont leurs tranches inclinées (NOM.W.png, NOM.N.png) ; outil : un faux
-        ~/.local/bin/nc-carousel-thumbs (le harnais répond à « tranche » comme lui, code 0 par défaut)."""
+    def lancer(self, sessions, scenario, apercu=False, apercus=()):
+        """apercu : la session Web a son aperçu (Web.png) ; apercus : les noms des sessions qui ont le leur."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "fonds").mkdir()
+            (root / "run").mkdir()
             for f in ("aube.jpg", "nuit.png", "notes.txt"):
                 (root / "fonds" / f).write_bytes(b"img")
+            noms = set(apercus) | ({"Web"} if apercu else set())
             for s in sessions:
-                if s["nom"] in tranches:
-                    n = s["nom"]
-                    (root / f"{n}.W.png").write_bytes(b"png"); (root / f"{n}.N.png").write_bytes(b"png")
-                    s["tranche"], s["tranche_etroite"] = str(root / f"{n}.W.png"), str(root / f"{n}.N.png")
-            if outil:
-                (root / ".local/bin").mkdir(parents=True)
-                (root / ".local/bin/nc-carousel-thumbs").write_text("#!/bin/sh\nexit 1\n")
-            if apercu:
-                (root / "Web.png").write_bytes(b"png")
-                for s in sessions:
-                    if s["nom"] == "Web":
-                        s["apercu"] = str(root / "Web.png")
+                if s["nom"] in noms:
+                    (root / f"{s['nom']}.png").write_bytes(b"png")
+                    s["apercu"] = str(root / f"{s['nom']}.png")
             (root / "sessions.json").write_text(json.dumps({"version": 2, "sessions": sessions}))
             (root / "harnais.lua").write_text(HARNAIS + "\n" + scenario)
             r = subprocess.run(["lua", str(root / "harnais.lua"), str(root / "sessions.json"), str(PLUGIN / "panel.luau"), d],
                                capture_output=True, text=True, timeout=10, env=dict(os.environ, HOME=d))
             self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            return r.stdout
 
     def test_cartes_depuis_le_json(self):
         # Dev : schéma (deux bureaux), couleur du thème ; Web : capture, couleur #hex ; puis « + Nouvelle session »
@@ -224,8 +223,8 @@ class Carrousel(unittest.TestCase):
 onOpen(nil); vider()
 verifier(calls[1][2] == "json", "liste lue par nc-session json")
 local c = cartes()
-verifier(#c == 4, "trois cartes en boucle (la dernière revient à gauche de la première) : " .. #c)
-verifier(trouver("c0") and trouver("c3"), "voisines de part et d'autre : la bande boucle")
+verifier(#c == 3, "trois cartes en boucle, chacune une fois (la dernière revient à gauche de la première) : " .. #c)
+verifier(trouver("c0") and trouver("c2"), "voisines de part et d'autre : la bande boucle")
 verifier(contient("Dev") and contient("Code"), "nom et nom du bureau")
 verifier(contient("il y a"), "date relative")
 verifier(contient("2 fenêtres"), "nombre de fenêtres")
@@ -247,7 +246,7 @@ for _ = 1, 30 do onFrameTick(16) end
 local im2 = images()
 local trouve = false
 for p in pairs(im2) do if p:match("Web%.png$") then trouve = true end end
-verifier(trouver("i2") and trouver("i2").p.fit == "cover" and trouver("i2").p.width == 720, "la capture remplit la carte")
+verifier(trouver("i2") and trouver("i2").p.fit == "cover" and trouver("i2").p.width == 736, "la capture remplit la carte")
 verifier(trouve, "capture de Web affichée")
 fills = {}
 for _, n in ipairs(noeuds(tree)) do if n.p.fill then fills[n.p.fill] = true end end
@@ -285,11 +284,71 @@ verifier(not closed, "le panneau reste ouvert")
 -- la nouvelle carte ne se supprime pas
 touche("End"); touche("shift+Delete")
 verifier(not contient("Supprimer «"), "pas de confirmation sur + Nouvelle session")
--- E n'arrive pas au panneau (non capturée) : la ligne d'aide ne la promet pas, ni un clic droit ; « Modifier » seul
+-- E n'arrive pas au panneau (non capturée) : la ligne d'aide ne la promet pas, ni un clic droit ; le bouton
+-- « Modifier » à côté du nom, et l'aide sans « Modifier »
 touche("Home")
-verifier(contient("Modifier") and not contient("Clic droit") and not trouver("touche:E"), "aide : « Modifier » seulement")
+verifier(trouver("modifier") and not contient("Clic droit") and not trouver("touche:E"), "bouton « Modifier »")
+for _, n in ipairs(noeuds(trouver("aide"))) do verifier(not (n.t == "label" and n.p.text == "Modifier"), "aide sans « Modifier »") end
 verifier(not trouver("c1").p.onRightClick, "pas de onRightClick sur la carte (ui.column le refuse)")
 ''')
+
+    def test_apres_suppression_plus_rendue(self):
+        # nc-session supprimer a réussi : la session sort de la bande avant tout autre rendu (même avant la relecture
+        # de la liste), et pendant la suppression sa carte n'a plus d'image (son fichier s'efface)
+        self.lancer([session("Dev"), session("Web"), session("Cours")], r'''
+onOpen(nil); vider()
+verifier(images()[DIR .. "/Dev.png"], "aperçu de Dev affiché")
+touche("shift+Delete"); touche("Return")
+verifier(calls[#calls][2] == "supprimer", "nc-session supprimer Dev")
+verifier(not images()[DIR .. "/Dev.png"], "pendant la suppression : plus d'image pour Dev")
+os.remove(DIR .. "/Dev.png")
+table.remove(pending, 1)()   -- la réponse de nc-session supprimer, pas encore la relecture
+verifier(not contient("Dev") and not images()[DIR .. "/Dev.png"], "Dev n'est plus dessinée")
+for _ = 1, 10 do onFrameTick(16) end
+verifier(not contient("Dev"), "ni aux images suivantes")
+verifier(contient("Web"), "la suivante prend sa place")
+-- la relecture (Dev n'y est plus)
+local f = io.open(JSON_FILE, "w")
+f:write('{"version": 2, "sessions": []}'); f:close()
+vider()
+verifier(not contient("Dev") and #cartes() == 1, "liste relue")
+''', apercus=("Dev", "Web", "Cours"))
+
+    def test_fichier_absent_le_dessin(self):
+        # Aperçu annoncé mais absent (effacé entre-temps) : noctalia.fileExists faux → le dessin, aucune ui.image
+        self.lancer([session("Dev", apercu="/nexiste/pas/Dev.png"), session("Web")], r'''
+local vus = {}
+local fe = noctalia.fileExists
+noctalia.fileExists = function(p) vus[p] = true; return fe(p) end
+onOpen(nil); vider()
+verifier(vus["/nexiste/pas/Dev.png"], "fileExists demandé avant l'image")
+verifier(not images()["/nexiste/pas/Dev.png"], "aucune ui.image pour un fichier absent")
+verifier(contient("Code") and contient("Bureau 2"), "le dessin de ses fenêtres à la place")
+-- présent puis effacé : au rendu suivant, plus d'image
+touche("Right"); for _ = 1, 30 do onFrameTick(16) end
+verifier(images()[DIR .. "/Web.png"], "Web : son aperçu")
+os.remove(DIR .. "/Web.png")
+onFrameTick(16); render()
+verifier(not images()[DIR .. "/Web.png"], "effacé : plus d'image")
+''', apercu=True)
+
+    def test_au_plus_cinq_cartes_avec_image(self):
+        noms = [f"S{i}" for i in range(8)]
+        self.lancer([session(n) for n in noms], r'''
+onOpen(nil); vider()
+local function apercus()
+  local k = 0
+  for _, n in ipairs(noeuds(tree)) do if n.t == "image" and n.p.path:match("/S%d%.png$") then k = k + 1 end end
+  return k
+end
+verifier(apercus() == 4 and #cartes() == 5, "au départ, 4 aperçus et Nouvelle session : " .. apercus() .. " / " .. #cartes())
+touche("Right"); touche("Right")
+verifier(apercus() == 5 and #cartes() == 5, "la choisie et 2 de chaque côté : " .. apercus() .. " / " .. #cartes())
+onKey("Right", true)
+for _ = 1, 3 do onFrameTick(16); verifier(apercus() <= 5, "en glissant aussi : " .. apercus()) end
+onKey("Right", false); defiler()
+verifier(apercus() == 5, "après : " .. apercus())
+''', apercus=tuple(noms))
 
     def test_nouvelle_session_enregistre_le_nom(self):
         self.lancer([session("Dev")], r'''
@@ -301,22 +360,55 @@ verifier(champ and champ.p.focus, "champ du nom")
 champ.p.onChange("Jeux d")
 for _, n in ipairs(noeuds(tree)) do if n.t == "input" then champ = n end end
 verifier(champ.p.value == "Jeux d", "le texte tapé reste dans le champ : " .. tostring(champ.p.value))
-champ.p.onChange("Jeux")
-champ.p.onSubmit()
-local a = calls[#calls]
-verifier(a[2] == "enregistrer" and a[3] == "Jeux", "nc-session enregistrer Jeux")
-vider()
-verifier(calls[#calls][2] == "json", "liste relue après l'enregistrement")
--- nom refusé : la phrase de nc-session, le champ reste
-REPONSES.enregistrer = { exitCode = 1, stdout = "", stderr = "Nom de session : lettres, chiffres\n" }
-touche("End"); touche("Return")
-for _, n in ipairs(noeuds(tree)) do if n.t == "input" then champ = n end end
-champ.p.onChange("a/b"); touche("Return"); vider()
-verifier(contient("Nom de session : lettres, chiffres"), "erreur affichée")
+-- nom refusé (règle de nc-session) : la phrase, le champ reste, rien n'est lancé
+local avant = #calls
+for _, mauvais in ipairs({ "a/b", " .x", "-x", string.rep("x", 41), "a\tb" }) do
+  champ.p.onChange(mauvais); touche("Return")
+  verifier(#calls == avant and not closed, "refusé avant de fermer : " .. mauvais)
+end
+verifier(contient("Nom de session : lettres, chiffres, espaces"), "erreur affichée")
 local reste = false
 for _, n in ipairs(noeuds(tree)) do if n.t == "input" then reste = true end end
 verifier(reste, "le champ reste pour corriger")
+-- accepté (accents compris) : le panneau se ferme d'abord, nc-session enregistre une fois son calque disparu
+champ.p.onChange("Jeux é-2")
+champ.p.onSubmit()
+verifier(closed, "panneau fermé avant la capture")
+local a = calls[#calls]
+verifier(a[1] == "sh" and a[4] == DIR .. "/.local/bin/nc-session" and a[5] == "Jeux é-2", "nc-session enregistrer « Jeux é-2 »")
+verifier(a[3]:find('hyprctl layers', 1, true) and a[3]:find("namespace: noctalia-panel", 1, true)
+  and a[3]:find('-lt 8', 1, true) and a[3]:find('sleep 0.25', 1, true), "attend la disparition du calque, 2 s au plus")
+verifier(a[3]:find('exec "$0" enregistrer "$1"', 1, true) and a[3]:find("done", 1, true) < a[3]:find("enregistrer", 1, true),
+  "enregistre après l'attente")
 ''')
+
+    def test_attente_du_calque_en_vrai_shell(self):
+        # Le script d'attente, lancé par sh : calque présent puis parti, puis absent dès le début, puis jamais parti
+        script = self.lancer([session("Dev")], r'''
+onOpen(nil); vider()
+touche("End"); touche("Return")
+local champ
+for _, n in ipairs(noeuds(tree)) do if n.t == "input" then champ = n end end
+champ.p.onChange("Jeux"); champ.p.onSubmit()
+local a = calls[#calls]
+io.write(a[3])
+''')
+        for k, appels in ((3, 4), (0, 1), (99, 8)):
+            with self.subTest(calque=k), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                (root / "bin").mkdir()
+                (root / "bin/hyprctl").write_text('#!/bin/sh\nn=$(cat "$C" 2>/dev/null || echo 0); echo $((n + 1)) > "$C"\n'
+                                                  '[ "$n" -lt "$K" ] && echo "namespace: noctalia-panel"\nexit 0\n')
+                (root / "bin/sleep").write_text("#!/bin/sh\nexit 0\n")
+                (root / "nc").write_text('#!/bin/sh\necho "$*" > "$S"\n')
+                for f in ("bin/hyprctl", "bin/sleep", "nc"):
+                    (root / f).chmod(0o755)
+                env = dict(PATH=f"{root / 'bin'}:/usr/bin:/bin", C=str(root / "compte"), K=str(k), S=str(root / "sortie"))
+                r = subprocess.run(["sh", "-c", script, str(root / "nc"), "Jeux"], env=env, capture_output=True, text=True,
+                                   timeout=10)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual((root / "sortie").read_text().strip(), "enregistrer Jeux")
+                self.assertEqual(int((root / "compte").read_text()), appels, "nombre de vérifications du calque")
 
     def test_sans_session_une_seule_carte(self):
         self.lancer([], r'''
@@ -324,8 +416,8 @@ onOpen(nil); vider()
 verifier(#cartes() == 1, "seulement + Nouvelle session : " .. #cartes())
 verifier(contient("Aucune session pour l'instant"), "phrase simple")
 local dedans = false
-for _, n in ipairs(noeuds(trouver("c1"))) do if n.t == "label" and n.p.text:find("Aucune session", 1, true) then dedans = true end end
-verifier(dedans, "la phrase est dans la carte « nouvelle »")
+for _, n in ipairs(noeuds(trouver("titre"))) do if n.t == "label" and n.p.text:find("Aucune session", 1, true) then dedans = true end end
+verifier(dedans, "la phrase est sous la carte « nouvelle »")
 verifier(compte("Nouvelle session") == 1, "un seul « Nouvelle session » : " .. compte("Nouvelle session"))
 touche("shift+Delete"); touche("e")
 verifier(not contient("Supprimer «") and not trouver("volet"), "rien à supprimer ni à modifier")
@@ -514,7 +606,7 @@ for _, n in ipairs(noeuds(tree)) do if n.t == "row" and n.c[2] and n.c[2].p.key 
 local x = 0
 for _, k in ipairs(bande.c) do
   if k.p.key == "r1" then break end
-  x = x + k.p.width + 4
+  x = x + k.p.width + bande.p.gap
 end
 local gauche = (bgw - bande.p.width) / 2 + x + 30   -- bord gauche de la carte dans le cadre
 verifier(gauche + cw + math.floor(16 * z + 0.5) <= bgw - 8 - v.p.width + 1, "pas de recouvrement : " .. (gauche + cw) .. " / " .. (bgw - 8 - v.p.width))
@@ -542,243 +634,235 @@ touche("e"); touche("q")
 verifier(#calls == avant and trouver("volet"), "lettres ignorées par l'éditeur")
 ''')
 
-    def test_tranches_inclinees(self):
-        # Chaque session a ses tranches et nc-carousel-thumbs est là : la bande est celle des fonds, rien que des images
+    def test_cartes_plates(self):
+        # Plus de tranches inclinées : chaque carte est une carte droite (ui.column), ses images sont des aperçus
         self.lancer([session("Dev"), session("Web"), session("Cours")], r'''
 onOpen(nil); vider()
-local outil
-for _, a in ipairs(calls) do if a[1] == DIR .. "/.local/bin/nc-carousel-thumbs" then outil = a end end
-local g
-for _, a in ipairs(calls) do if a[1] == "sh" and a[3]:find("grim", 1, true) then g = a end end
-verifier(outil and outil[2] == "tranche" and outil[3] == g[4], "l'écran en direct passe dans nc-carousel-thumbs tranche")
-verifier(outil[4]:sub(1, #DIR + 5) == DIR .. "/run/" and outil[5]:sub(1, #DIR + 5) == DIR .. "/run/",
-  "tranches temporaires dans XDG_RUNTIME_DIR")
--- toutes les cartes de la bande sont des images, sans boîte ni verre derrière
-local n = 0
-for _, c in ipairs(cartes()) do
-  n = n + 1
-  verifier(c.t == "image", "carte " .. c.p.key .. " : une image seule, pas un " .. c.t)
+for _, c in ipairs(cartes()) do verifier(c.t == "column", "carte " .. c.p.key .. " droite, pas " .. c.t) end
+for p in pairs(images()) do
+  verifier(not p:match("%.[WN]%.webp$") and not p:match("%.[WN]%.png$") and not p:match("tranche"), "aucune tranche : " .. p)
 end
-verifier(n >= 4, "bande pleine : " .. n)
-for _, nd in ipairs(noeuds(tree)) do
-  verifier(nd.p.fill ~= "surface/0.55" or nd.p.radius == math.floor(40 / 2), "aucun verre de carte derrière une tranche")
-  verifier(nd.p.fill ~= "#00000073", "aucun voile de carte droite")
-  if nd.t == "row" and type(nd.p.key) == "string" and nd.p.key:match("^r%-?%d+$") then
-    verifier(#nd.c == 1 and nd.c[1].t == "image", "rangée " .. nd.p.key .. " : l'image seule")
-  end
+for _, a in ipairs(calls) do
+  verifier(not a[1]:find("nc-carousel-thumbs", 1, true), "aucun appel à nc-carousel-thumbs : " .. table.concat(a, " "))
 end
-local dev = trouver("c1")
-verifier(dev.p.path:match("Dev%.W%.png$") and math.abs(dev.p.width - (600 + 0.30 * 450)) < 0.01 and dev.p.height == 450,
-  "au milieu : la grande tranche, taille des fonds")
-local web = trouver("c2")
-verifier(web.p.path:match("Web%.N%.png$") and math.abs(web.p.width - (192 + 0.30 * 420)) < 0.01 and web.p.height == 420
-  and web.p.fit == "cover", "voisine : tranche étroite, taille des fonds : " .. web.p.width)
-verifier(web.p.opacity == 0.7, "voisine à 70 % (comme les fonds)")
--- les informations de la session choisie, sous la tranche
-local titre = trouver("titre")
-verifier(titre, "titre sous la tranche")
-local nom, info, pastille, glyphe, applis = false, false, false, false, 0
-for _, nd in ipairs(noeuds(titre)) do
-  if nd.t == "label" and nd.p.text == "Dev" and nd.p.fontWeight == "bold" and nd.p.fontSize == 22 then nom = true end
-  if nd.t == "label" and nd.p.text:match("^2 fenêtres · il y a %d+ jours$") then info = true end
-  if nd.t == "box" and nd.p.fill == "tertiary" and nd.p.width == 12 then pastille = true end
-  if nd.t == "glyph" and nd.p.name == "code" and nd.p.color == "tertiary" then glyphe = true end
-  if nd.t == "image" and nd.p.path:match("^/icones/") then applis = applis + 1 end
-end
-verifier(nom and info and pastille and glyphe and applis == 2, "nom en gras 22, pastille, icône, fenêtres et date, applis")
-verifier(dans(titre, "modifier"), "« Modifier » à côté du nom")
-local lignes = 0
-for _, nd in ipairs(noeuds(tree)) do if nd.p.key == "aide" then lignes = lignes + 1 end end
-verifier(lignes == 1 and trouver("touche:↵"), "une seule ligne d'aide, en pastilles")
--- « Modifier » sous une tranche : l'éditeur
-touche("Right"); for _ = 1, 30 do onFrameTick(16) end
-web = trouver("c2")
-verifier(web.p.path:match("Web%.W%.png$"), "Web au milieu : sa grande tranche")
-verifier(contient("Web") and not contient("Dev"), "le titre suit la carte choisie")
-verifier(not web.p.onRightClick, "pas de onRightClick sur une tranche (ui.image le refuse)")
-trouver("modifier").p.onClick()
-verifier(trouver("volet") and contient("Modifier « Web »"), "« Modifier » sous une tranche : l'éditeur de Web")
-touche("Escape")
--- « Nouvelle session » : une tranche aussi, le « + » et le texte dessous
-touche("End"); for _ = 1, 30 do onFrameTick(16) end
-local nv = trouver("c4")
-verifier(nv and nv.t == "image" and nv.p.path == outil[4], "Nouvelle session : la grande tranche de l'écran en direct")
-verifier(math.abs(nv.p.width - (600 + 0.30 * 450)) < 0.01, "même taille que les autres tranches")
-titre = trouver("titre")
-local plus, texte = false, false
-for _, nd in ipairs(noeuds(titre)) do
-  if nd.t == "glyph" and nd.p.name == "plus" then plus = true end
-  if nd.t == "label" and nd.p.text == "Nouvelle session" then texte = true end
-end
-verifier(plus and texte and compte("Nouvelle session") == 1, "le « + » et « Nouvelle session » sous la tranche")
-verifier(contient("3 fenêtres sur 2 bureaux"), "fenêtres de l'écran actuel sous la tranche")
--- voisine étroite de « Nouvelle session »
-touche("Left"); for _ = 1, 30 do onFrameTick(16) end
-verifier(trouver("c4").p.path == outil[5], "voisine : la tranche étroite de l'écran en direct")
--- nom de la nouvelle session : le champ sous la tranche
-touche("Right"); for _ = 1, 30 do onFrameTick(16) end
-touche("Return")
-local champ
-for _, nd in ipairs(noeuds(trouver("titre"))) do if nd.t == "input" then champ = nd end end
-verifier(champ and champ.p.focus, "le champ du nom, sous la tranche")
-touche("Escape")
--- tout est effacé à la fermeture
-onClose()
-local a = derniere()
-local vus = {}
-for i = 3, #a do vus[a[i]] = true end
-verifier(a[1] == "rm" and vus[g[4]] and vus[outil[4]] and vus[outil[5]], "capture et tranches effacées à la fermeture")
-''', tranches=("Dev", "Web", "Cours"), outil=True)
+verifier(trouver("i1") and trouver("i1").p.radius == 10 and trouver("c1").p.radius == nil, "image aux coins de 10")
+''', apercus=("Dev", "Web", "Cours"))
 
-    def test_tranches_bande_centree(self):
+    def test_bande_centree(self):
         # La bande au milieu du cadre (comme les fonds) : une place vide au-dessus, de la hauteur de la légende
-        for tr in ((), ("Dev", "Web")):
-            with self.subTest(tranches=bool(tr)):
-                self.lancer([session("Dev"), session("Web")], r'''
+        self.lancer([session("Dev"), session("Web")], r'''
 onOpen(nil); vider()
 local bande
 for _, nd in ipairs(noeuds(tree)) do
-  if nd.t == "column" and #nd.c == 3 and nd.c[3].p.key == nil and nd.c[2].t == "row" and nd.c[2].p.height == 480 then bande = nd end
+  if nd.t == "column" and #nd.c == 3 and nd.c[3].p.key == nil and nd.c[2].t == "row" and nd.c[2].p.height == 490 then bande = nd end
 end
 verifier(bande, "colonne de la bande")
 verifier(bande.c[1].p.height == bande.c[3].p.height, "place au-dessus = légende dessous : "
   .. bande.c[1].p.height .. " / " .. bande.c[3].p.height)
-''', tranches=tr, outil=True)
-
-    def test_tranches_attendues_puis_pretes(self):
-        # Pendant que l'écran en direct se découpe : une place vide pour « Nouvelle session », déjà en tranches
-        self.lancer([session("Dev")], r'''
-onOpen(nil)
-table.remove(pending, 1)()   -- nc-session json seulement
-verifier(trouver("c1").t == "image", "tranches tout de suite (la tranche de Nouvelle session est attendue)")
-verifier(not trouver("c2"), "Nouvelle session : une place vide en attendant")
-vider()
-verifier(trouver("c2") and trouver("c2").t == "image", "puis sa tranche")
-''', tranches=("Dev",), outil=True)
-
-    def test_sans_outil_toutes_droites(self):
-        cas = {
-            "sans nc-carousel-thumbs": ("", ("Dev", "Web"), False),
-            "tranches manquantes pour une session": ("", ("Web",), True),
-            "découpe impossible (ImageMagick absent)": ('REPONSES.tranche = { exitCode = 1, stdout = "", stderr = "" }',
-                                                         ("Dev", "Web"), True),
-            "sans grim": ('REPONSES.grim = { exitCode = 3, stdout = "", stderr = "" }', ("Dev", "Web"), True),
-        }
-        for nom, (avant, tranches, outil) in cas.items():
-            with self.subTest(cas=nom):
-                self.lancer([session("Dev"), session("Web")], avant + r'''
-onOpen(nil); vider()
-for _, c in ipairs(cartes()) do verifier(c.t == "column", "carte " .. c.p.key .. " droite, pas " .. c.t) end
-for p in pairs(images()) do verifier(not p:match("%.[WN]%.png$") and not p:match("tranche"), "aucune tranche : " .. p) end
-verifier(not trouver("titre"), "titre dans la carte, pas dessous")
-''', tranches=tranches, outil=outil)
-
-    def test_tranche_du_fond_sans_capture(self):
-        # SESSIONS_CAPTURE=non : « Nouvelle session » prend les tranches du fond courant (carrousel des fonds)
-        self.lancer([session("Dev")], r'''
-os.execute("mkdir -p '" .. DIR .. "/.config/nc' '" .. DIR .. "/.cache/nc/carousel'")
-local f = io.open(DIR .. "/.config/nc/reglages.conf", "w"); f:write('SESSIONS_CAPTURE="non"\n'); f:close()
-for _, x in ipairs({ "W", "N" }) do
-  f = io.open(DIR .. "/.cache/nc/carousel/aube.jpg." .. x .. ".webp", "w"); f:write("img"); f:close()
-end
-noctalia.wallpaperPath = function() return DIR .. "/fonds/aube.jpg" end
-onOpen(nil); vider()
-for _, a in ipairs(calls) do verifier(not (a[1] == "sh" and a[3]:find("grim", 1, true)), "pas de grim") end
-local nv = trouver("c2")
-verifier(nv and nv.t == "image" and nv.p.path:match("aube%.jpg%.N%.webp$"), "voisine : tranche étroite du fond")
-touche("Right"); for _ = 1, 30 do onFrameTick(16) end
-verifier(trouver("c2").p.path:match("aube%.jpg%.W%.webp$"), "au milieu : grande tranche du fond")
-''', tranches=("Dev",), outil=True)
+''')
 
     def test_style_des_cartes(self):
-        for w, h in ((1600, 1000), (1280, 800), (1920, 1080)):
+        for w, h in ((1600, 1000), (1280, 800), (1920, 1080), (2560, 1080)):
             with self.subTest(ecran=f"{w}x{h}"):
-                self.lancer([session("Dev"), session("Web")], r'''
+                self.lancer([session("Dev"), session("Web"), session("Cours")], r'''
 ECRAN = { %d, %d }
 onOpen(nil); vider()
 local z = math.min(1, ECRAN[1] / 1600, ECRAN[2] / 1000)
 if ECRAN[1] > 1600 or ECRAN[2] > 1000 then z = math.max(1, math.min(2, ECRAN[1] / 1600, ECRAN[2] / 1000)) end
 local c = trouver("c1")
-verifier(c.p.height == math.floor(450 * z + 0.5), "hauteur de la tranche du milieu des fonds : " .. c.p.height)
-verifier(math.abs(c.p.width / c.p.height - ECRAN[1] / ECRAN[2]) < 0.01, "ratio de l'écran : " .. c.p.width .. "x" .. c.p.height)
--- verre : fond de surface à 55 %%, reflet blanc 16 %%, contour d'accent de 1,5 sur la choisie seulement
-local fond, reflet, contour = false, false, nil
-for _, n in ipairs(noeuds(c)) do
-  if n.p.fill == "surface/0.55" and n.p.width == c.p.width then fond = true end
-  if n.p.fill == "#ffffff29" and n.p.height == 1 then reflet = true end
-  if n.p.borderWidth == 1.5 then contour = n.p.border end
-  verifier(not (n.p.borderWidth == 1 and n.p.border == "on_surface/0.18"), "plus de trait gris")
+local cadre = ECRAN[1] - 16
+verifier(c.p.width == math.floor(0.46 * ECRAN[1] + 0.5), "largeur de la carte choisie : " .. c.p.width)
+verifier(math.abs(c.p.width / cadre - 0.46) < 0.01, "environ 46 %% du cadre : " .. c.p.width / cadre)
+verifier(math.abs(c.p.width / c.p.height - ECRAN[1] / ECRAN[2]) < 0.005, "ratio de l'écran : " .. c.p.width .. "x" .. c.p.height)
+verifier(c.p.opacity == 1, "choisie opaque")
+-- contour blanc de 1,5 sur la choisie seulement
+local contour = nil
+for _, n in ipairs(noeuds(c)) do if n.p.borderWidth == 1.5 then contour = n.p.border end end
+verifier(contour == "#ffffff", "contour blanc sur la choisie : " .. tostring(contour))
+for _, k in ipairs({ "c0", "c2" }) do
+  local v = trouver(k)
+  verifier(math.abs(v.p.width - 0.72 * c.p.width) < 0.01 and math.abs(v.p.height - 0.72 * c.p.height) < 0.01,
+    k .. " à 0,72 : " .. v.p.width .. "x" .. v.p.height)
+  verifier(math.abs(v.p.opacity - 0.6) < 1e-9, k .. " à 60 %% : " .. v.p.opacity)
+  for _, n in ipairs(noeuds(v)) do verifier(not n.p.borderWidth or n.p.borderWidth < 1.5 or n.p.border ~= "#ffffff", "aucun contour sur " .. k) end
 end
-verifier(fond and reflet and contour == "primary", "verre et contour d'accent")
--- couches du verre superposées : chacune à la taille de la carte (sinon elles se décalent)
-for _, k in ipairs({ "c1", "c2", "c3" }) do
+-- couches superposées : chacune à la taille de la carte (sinon elles se décalent)
+for _, k in ipairs({ "c0", "c1", "c2" }) do
   local n = trouver(k)
-  if n and n.t == "column" then
-    for i, couche in ipairs(n.c) do verifier(couche.p.height == n.p.height, k .. " : couche " .. i .. " de " .. tostring(couche.p.height)) end
+  for i, couche in ipairs(n.c) do
+    verifier(couche.p.height == n.p.height and couche.p.width == n.p.width, k .. " : couche " .. i)
   end
 end
-local v = trouver("c2")
-verifier(v.p.opacity == 0.7, "voisine à 70 %% (comme les fonds)")
-for _, n in ipairs(noeuds(v)) do verifier(n.p.borderWidth ~= 1.5, "aucun contour sur une voisine") end
--- la carte d'une session porte nom, nombre de fenêtres et date, applis
-local nom, info = false, false
-for _, n in ipairs(noeuds(c)) do
-  if n.t == "label" and n.p.text == "Dev" and n.p.fontWeight == "bold" and n.p.fontSize == math.floor(22 * z + 0.5) then nom = true end
-  if n.t == "label" and n.p.text:match("^2 fenêtres · il y a") then info = true end
+-- sous la carte : pastille, icône, nom, Modifier, fenêtres et date, applis
+local titre = trouver("titre")
+local nom, info, pastille, glyphe, applis = false, false, false, false, 0
+for _, nd in ipairs(noeuds(titre)) do
+  if nd.t == "label" and nd.p.text == "Dev" and nd.p.fontWeight == "bold" and nd.p.fontSize == math.floor(22 * z + 0.5) then nom = true end
+  if nd.t == "label" and nd.p.text:match("^2 fenêtres · il y a %%d+ jours$") then info = true end
+  if nd.t == "box" and nd.p.fill == "tertiary" and nd.p.width == math.floor(12 * z + 0.5) then pastille = true end
+  if nd.t == "glyph" and nd.p.name == "code" and nd.p.color == "tertiary" then glyphe = true end
+  if nd.t == "image" and nd.p.path:match("^/icones/") then applis = applis + 1 end
 end
-verifier(nom and info, "nom en gras, « 2 fenêtres · il y a … » dans la carte")
--- une ligne d'aide en pastilles de touches
+verifier(nom and info and pastille and glyphe and applis == 2, "nom en gras, pastille, icône, fenêtres et date, applis")
+verifier(dans(titre, "modifier"), "« Modifier » à côté du nom")
+-- une ligne d'aide en pastilles : ↵ ouvrir · Maj Suppr supprimer · Échap fermer
 for _, k in ipairs({ "touche:↵", "touche:Maj", "touche:Suppr", "touche:Échap" }) do verifier(trouver(k), "pastille " .. k) end
+local mots = {}
+for _, n in ipairs(noeuds(trouver("aide"))) do if n.t == "label" and n.p.text ~= "·" then table.insert(mots, n.p.text) end end
+verifier(table.concat(mots, " ") == "↵ ouvrir Maj Suppr supprimer Échap fermer", "aide : " .. table.concat(mots, " "))
 local lignes = 0
 for _, n in ipairs(noeuds(tree)) do if n.p.key == "aide" then lignes = lignes + 1 end end
 verifier(lignes == 1, "une seule ligne d'aide")
+-- glissement doux : à mi-chemin, tailles et opacités entre les deux
+onKey("Right", true); onFrameTick(16); onKey("Right", false)
+local d1, d2 = trouver("c1"), trouver("c2")
+verifier(d1.p.width < c.p.width and d1.p.width > 0.72 * c.p.width and d2.p.width > 0.72 * c.p.width, "tailles intermédiaires")
+verifier(d2.p.opacity > 0.6 and d2.p.opacity < 1, "opacité intermédiaire")
+defiler()
+verifier(trouver("c2").p.width == c.p.width and trouver("c2").p.opacity == 1, "Web au milieu, en grand")
 ''' % (w, h))
 
     def test_nouvelle_session_ecran_en_direct(self):
         self.lancer([session("Dev")], r'''
 onOpen(nil)
+verifier(calls[2][1] == "hyprctl" and calls[2][3] == "monitors", "d'abord l'écran (zones réservées, échelle)")
+for _, a in ipairs(calls) do verifier(not (a[1] == "sh" and a[3]:find("grim", 1, true)), "pas de grim avant de connaître l'écran") end
+table.remove(pending, 1)()     -- nc-session json
+table.remove(pending, 1)()     -- hyprctl -j monitors : grim et hyprctl -j clients lancés
 local g
 for _, a in ipairs(calls) do if a[1] == "sh" and a[3]:find("grim", 1, true) then g = a end end
-verifier(g and g[3]:find("-s 0.25", 1, true), "grim -s 0.25 lancé à l'ouverture")
+verifier(g, "grim lancé à l'ouverture")
+verifier(g[5] == "33,42 1533x958" and g[6] == "0.768428", "sous la barre, au format des aperçus : " .. g[5] .. " -s " .. g[6])
+verifier(g[3]:find('grim -g "$1" -s "$2" -t png "$0.tmp" && exec mv -f "$0.tmp" "$0"', 1, true), "vers un .tmp renommé une fois écrit")
 local f = g[4]
 verifier(f:sub(1, #DIR + 5) == DIR .. "/run/" and f:match("%.png$"), "fichier temporaire dans XDG_RUNTIME_DIR : " .. f)
-local h = false
-for _, a in ipairs(calls) do if a[1] == "hyprctl" and a[2] == "-j" and a[3] == "clients" then h = true end end
-verifier(h, "fenêtres lues par hyprctl -j clients (asynchrone)")
-vider()
+table.remove(pending, 2)()     -- hyprctl -j clients, avant la fin de grim
 touche("End"); for _ = 1, 30 do onFrameTick(16) end
+verifier(not trouver("direct") and not images()[f], "en attendant : pas d'image")
+local rects = 0
+for _, n in ipairs(noeuds(trouver("c2"))) do if n.p.fill == "primary" and n.p.opacity == 0.55 then rects = rects + 1 end end
+verifier(rects == 2, "le dessin des deux fenêtres du bureau actif, aux couleurs du thème : " .. rects)
+vider()                        -- grim fini
 local d = trouver("direct")
-verifier(d and d.p.path == f and d.p.fit == "cover", "miniature en fond de la carte")
-local sombre = false
-for _, n in ipairs(noeuds(trouver("c2"))) do if n.p.fill == "#00000073" then sombre = true end end
-verifier(sombre, "assombrie à 45 %")
+verifier(d and d.p.path == f and d.p.fit == "cover" and d.p.width == 736, "l'image remplace le dessin")
+rects = 0
+for _, n in ipairs(noeuds(trouver("c2"))) do if n.p.fill == "primary" and n.p.opacity == 0.55 then rects = rects + 1 end end
+verifier(rects == 0, "plus de dessin")
 verifier(contient("3 fenêtres sur 2 bureaux"), "fenêtres et bureaux de l'écran actuel")
 local im = images()
 verifier(im["/icones/firefox.png"] and im["/icones/kitty.png"], "icônes des applis ouvertes")
 verifier(compte("Nouvelle session") == 1, "un seul « Nouvelle session »")
 onClose()
 local a = derniere()
-verifier(a[1] == "rm" and a[3] == f, "fichier effacé à la fermeture")
+verifier(a[1] == "rm" and a[3] == f and a[4] == f .. ".tmp", "image et .tmp effacés à la fermeture")
+''')
+
+    def test_nouvelle_session_fermee_avant_grim(self):
+        self.lancer([session("Dev")], r'''
+onOpen(nil)
+table.remove(pending, 1)(); table.remove(pending, 1)()
+local g
+for _, a in ipairs(calls) do if a[1] == "sh" and a[3]:find("grim", 1, true) then g = a end end
+onClose()
+vider()
+local a = derniere()
+verifier(a[1] == "rm" and a[3] == g[4] and a[4] == g[4] .. ".tmp", "réponse tardive : fichiers effacés")
+verifier(not trouver("direct"), "pas d'image")
 ''')
 
     def test_nouvelle_session_sans_capture_ni_grim(self):
         self.lancer([], r'''
--- grim absent : rien en fond
+-- grim absent : le dessin reste
 REPONSES.grim = { exitCode = 3, stdout = "", stderr = "" }
 onOpen(nil); vider()
 verifier(not trouver("direct"), "sans grim : pas de miniature")
 verifier(contient("Nouvelle session"), "la carte reste")
+local rects = 0
+for _, n in ipairs(noeuds(trouver("c1"))) do if n.p.fill == "primary" and n.p.opacity == 0.55 then rects = rects + 1 end end
+verifier(rects == 2, "le dessin : " .. rects)
 onClose()
+-- grim réussi mais fichier absent : pas d'image
+REPONSES.grim = { exitCode = 0, stdout = "", stderr = "" }
+onOpen(nil); vider()
+verifier(not trouver("direct"), "fichier absent : pas d'image")
+onClose()
+REPONSES.grim = nil
 -- SESSIONS_CAPTURE=non : pas de grim, le schéma des fenêtres du bureau actif
 os.execute("mkdir -p '" .. DIR .. "/.config/nc'")
 local f = io.open(DIR .. "/.config/nc/reglages.conf", "w"); f:write('SESSIONS_CAPTURE="non"\n'); f:close()
 calls = {}
 onOpen(nil); vider()
 for _, a in ipairs(calls) do verifier(not (a[1] == "sh" and a[3]:find("grim", 1, true)), "pas de grim") end
-local rects = 0
-for _, n in ipairs(noeuds(trouver("c1"))) do if n.p.fill == "on_surface" and n.p.opacity == 0.55 then rects = rects + 1 end end
+rects = 0
+for _, n in ipairs(noeuds(trouver("c1"))) do if n.p.fill == "primary" and n.p.opacity == 0.55 then rects = rects + 1 end end
 verifier(rects == 2, "schéma : les deux fenêtres du bureau actif : " .. rects)
+-- sans information sur l'écran : ni grim ni dessin, la carte reste
+f = io.open(DIR .. "/.config/nc/reglages.conf", "w"); f:write(''); f:close()
+REPONSES["hyprctl monitors"] = { exitCode = 1, stdout = "", stderr = "" }
+calls = {}
+onOpen(nil); vider()
+for _, a in ipairs(calls) do verifier(not (a[1] == "sh" and a[3]:find("grim", 1, true)), "pas de grim sans l'écran") end
+verifier(contient("Nouvelle session"), "la carte reste")
 ''')
+
+
+# Écrans d'essai (hyprctl -j monitors) : zone et facteur de grim calculés par le panneau et par nc-session
+ECRANS_ESSAI = [
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 2560, "height": 1600, "scale": 1.6, "transform": 0, "reserved": [0, 42, 0, 0]},
+    {"name": "eDP-1", "x": 1600, "y": 0, "width": 1920, "height": 1080, "scale": 1, "transform": 0},
+    {"name": "eDP-1", "x": 0, "y": -200, "width": 1280, "height": 800, "scale": 1, "transform": 0, "reserved": [0, 0, 0, 50]},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 1080, "height": 1920, "scale": 1, "transform": 1, "reserved": [0, 42, 0, 0]},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 3840, "height": 2160, "scale": 1.5, "transform": 0, "reserved": [60, 0, 0, 0]},
+    {"name": "eDP-1", "x": 0, "y": 0, "width": 2880, "height": 1800, "scale": 1.75, "transform": 0, "reserved": "abîmé"},
+]
+
+
+@unittest.skipUnless(shutil.which("lua"), "lua requis")
+class Concordance(unittest.TestCase):
+    """La largeur de la carte et la zone de l'aperçu : même formule dans panel.luau et dans nc-session."""
+
+    def python(self, ecran):
+        code = ("import importlib.machinery, importlib.util, json, sys\n"
+                "l = importlib.machinery.SourceFileLoader('ncs', sys.argv[1])\n"
+                "m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ncs', l)); l.exec_module(m)\n"
+                "e = json.loads(sys.argv[2]); s = e.get('scale') or 1\n"
+                "w, h = round(e['width'] / s), round(e['height'] / s)\n"
+                "w, h = (h, w) if e.get('transform', 0) % 2 else (w, h)\n"
+                "print(json.dumps([*m.zone_capture(e), m.largeur_carte(w), m.hauteur_carte(w, h)]))\n")
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run([sys.executable, "-I", "-c", code, str(REPO / "home/.local/bin/nc-session"), json.dumps(ecran)],
+                               capture_output=True, text=True, timeout=10, env=dict(os.environ, HOME=d, NC_LANGUE="fr"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def lua(self, ecran):
+        s = ecran.get("scale") or 1
+        w, h = round(ecran["width"] / s), round(ecran["height"] / s)
+        if ecran.get("transform", 0) % 2:
+            w, h = h, w
+        sortie = Carrousel.lancer(self, [session("Dev")], r'''
+ECRAN = { %d, %d }
+MONITEURS = [==[ [%s] ]==]
+onOpen(nil); vider()
+local g
+for _, a in ipairs(calls) do if a[1] == "sh" and a[3]:find("grim", 1, true) then g = a end end
+touche("End"); for _ = 1, 30 do onFrameTick(16) end
+io.write(g[5] .. "|" .. g[6] .. "|" .. trouver("c2").p.width .. "|" .. trouver("c2").p.height)
+''' % (w, h, json.dumps(dict(ecran, focused=True, activeWorkspace={"id": 1}))))
+        z, f, cw, ch = sortie.split("|")
+        return [z, f, int(float(cw)), int(float(ch))]
+
+    def test_meme_formule(self):
+        for e in ECRANS_ESSAI:
+            with self.subTest(ecran=e):
+                self.assertEqual(self.lua(e), self.python(e))
+
+    def test_valeurs_de_l_utilisateur(self):
+        # 1600 x 1000 points à l'échelle 1,6, barre de 42 : carte de 736 x 460 points, aperçu de 1178 pixels de large
+        zone, facteur, cw, ch = self.python(ECRANS_ESSAI[0])
+        self.assertEqual((zone, facteur, cw, ch), ("33,42 1533x958", "0.768428", 736, 460))
+        self.assertEqual(int(1533 * float(facteur)), round(736 * 1.6), "grim donne 1178 pixels de large")
+        self.assertEqual(int(958 * float(facteur)), round(460 * 1.6), "et 736 de haut : affiché à 1:1")
 
 
 class Integration(unittest.TestCase):

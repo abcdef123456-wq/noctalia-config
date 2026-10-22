@@ -8,10 +8,6 @@
 # le carrousel l'affiche pixel pour pixel, l'image d'origine reste celle appliquée comme fond.
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
-#
-#   nc-carousel-thumbs tranche IMAGE LARGE ETROITE   les deux mêmes découpes pour une seule image (aperçu d'une session,
-#                                                    nc-session) ; format selon l'extension, privées (0600) ; code 1 si
-#                                                    ImageMagick manque ou si l'image est illisible, sans message
 set -uo pipefail
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
 IM=$(command -v magick >/dev/null && echo magick || echo convert)
@@ -45,15 +41,6 @@ bake() {
     \( -size "${b}x${h}" xc:black -fill white -draw "polygon $poly" \) -alpha off -compose copy_opacity -composite \
     "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.${out##*.}" && mv "$out.tmp.${out##*.}" "$out"
 }
-
-# Une seule image (sessions) : mêmes tailles, même forme, rien d'autre (ni dossier de fonds, ni cache)
-if [ "${1:-}" = tranche ]; then
-  [ $# -eq 4 ] && command -v "$IM" >/dev/null && [ -r "$2" ] || exit 1
-  umask 077
-  bake "$2" "$3" "$CW" "$CH" 1 2>/dev/null && bake "$2" "$4" "$NW" "$NH" 0 2>/dev/null && exit 0
-  rm -f "$3" "$4" "$3.tmp.${3##*.}" "$4.tmp.${4##*.}"
-  exit 1
-fi
 
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"

@@ -16,12 +16,13 @@
   nc-session supprimer NOM
   nc-session menu                le Spotlight sur « session » (Super + Maj + W) ; sans l'île, un menu
   nc-session demarrage           ouvre la session choisie pour l'ouverture de session (réglage SESSION_DEMARRAGE)
-Rangées dans ~/.config/nc/sessions/NOM.json, leurs aperçus dans ~/.local/state/noctalia-config/sessions, avec leurs
-tranches inclinées pour le carrousel (nc-carousel-thumbs tranche ; sans capture, un dessin du schéma ; sans ImageMagick,
-aucune). Le navigateur rouvre lui-même ses onglets (sa session à lui).
+Rangées dans ~/.config/nc/sessions/NOM.json, leurs aperçus dans ~/.local/state/noctalia-config/sessions : l'écran
+actif sous la barre, pris par grim à la taille exacte de la carte du carrousel (sans ImageMagick). Le navigateur rouvre
+lui-même ses onglets (sa session à lui).
 """
 import datetime
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -75,9 +76,9 @@ DOC_EN = """nc-session: your window layouts per project (“Dev”, “Classes�
   nc-session delete NAME
   nc-session menu            Spotlight on “session” (Super + Shift + W); without the island, a menu
   nc-session startup         opens the session chosen for login (setting SESSION_DEMARRAGE)
-Stored in ~/.config/nc/sessions/NAME.json, their previews in ~/.local/state/noctalia-config/sessions, with their
-slanted slices for the carousel (nc-carousel-thumbs tranche; without a capture, a drawing of the outline; without
-ImageMagick, none). The browser reopens its tabs itself (its own session).
+Stored in ~/.config/nc/sessions/NAME.json, their previews in ~/.local/state/noctalia-config/sessions: the active
+screen below the bar, taken by grim at the exact size of the carousel card (no ImageMagick). The browser reopens its
+tabs itself (its own session).
 """
 
 HOME = Path.home()
@@ -109,8 +110,6 @@ FERMER = ("non", "demander", "oui")
 # Rôles des couleurs du thème (ceux des plugins Noctalia)
 ROLES = {"primary", "secondary", "tertiary", "error", "surface", "surface_variant", "outline", "shadow", "hover",
          "on_primary", "on_secondary", "on_tertiary", "on_error", "on_surface", "on_surface_variant", "on_hover"}
-COULEURS = HOME / ".config/noctalia/colors.json"          # les rôles du thème en #rrggbb (mPrimary…)
-NEUTRE = "#8e8e93"                                        # schéma d'une session sans couleur : gris Apple
 IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".jxl", ".tif", ".tiff", ".svg"}
 OUI, NON = {"oui", "vrai", "true", "1", "on", "yes"}, {"non", "faux", "false", "0", "off", "no"}
 # Touches de nc-raccourci (mêmes noms, mêmes règles : un modificateur, sauf F1…F12 et Impr)
@@ -237,100 +236,87 @@ def apercu_fichier(nom):
     return APERCUS / (nom_valide(nom) + ".png")
 
 
-def tranches_fichiers(nom):
-    """Les deux tranches inclinées du carrousel : la large (session au milieu) et l'étroite (ses voisines)."""
-    n = nom_valide(nom)
-    return APERCUS / (n + ".tranche.png"), APERCUS / (n + ".tranche-etroite.png")
+# Anciennes tranches inclinées (carrousel v2) : plus produites, effacées dès que la session est touchée
+ANCIENNES = (".tranche.png", ".tranche-etroite.png")
 
 
-def fichiers_apercu(nom):
-    return (apercu_fichier(nom),) + tranches_fichiers(nom)
+def effacer_anciennes(nom):
+    for suffixe in ANCIENNES:
+        (APERCUS / (nom_valide(nom) + suffixe)).unlink(missing_ok=True)
 
 
-def couleur_hex(c):
-    """#rrggbb de la couleur de la session ; un rôle du thème lu dans les couleurs de Noctalia ; sinon le gris neutre."""
-    if isinstance(c, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", c):
-        return c.lower()
-    if c in ROLES:
-        try:
-            v = json.loads(COULEURS.read_text(encoding="utf-8")).get("m" + "".join(x.capitalize() for x in c.split("_")))
-        except (OSError, ValueError, AttributeError):
-            v = None
-        if isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v):
-            return v.lower()
-    return NEUTRE
+# Carte choisie du carrousel des sessions (plugin nc/sessions, panel.luau : largeurCarte, hauteurCarte, zoneCapture).
+# MÊME FORMULE aux deux endroits (un test vérifie qu'elles concordent), en points logiques de l'écran actif :
+#   largeur = plancher(0,46 x largeur de l'écran + 0,5), hauteur = plancher(largeur x hauteur / largeur de l'écran + 0,5)
+# (environ 46 % du cadre, au ratio de l'écran). L'aperçu est pris par grim dans la zone utile de l'écran (sans les
+# zones réservées : la barre), recadrée au centre au ratio de l'écran, et réduit par grim lui-même (-s) à la largeur
+# de la carte en pixels physiques (largeur x échelle, arrondie) : affiché à 1:1, sans ImageMagick.
+PART_CARTE = 0.46
 
 
-def dessiner_schema(s, sortie, im):
-    """Le schéma en image (ImageMagick) : un rectangle arrondi par écran et bureau, ses fenêtres dedans, aux couleurs
-    de la session, sur le noir Apple ; au plus trois par rangée, centrés. L'image a les proportions de la grande tranche,
-    et ses marges (plus larges sur les côtés) gardent le dessin dans le parallélogramme. False s'il n'y a rien à dessiner."""
-    groupes = schema(s)
-    if not groupes:
-        return False
-    c = couleur_hex(s.get("couleur"))
-    W, H, mx, my, ecart = 1470, 900, 250, 170, 40
-    cols = min(len(groupes), 3)
-    rangs = -(-len(groupes) // cols)
-    cw, ch = (W - 2 * mx - (cols - 1) * ecart) / cols, (H - 2 * my - (rangs - 1) * ecart) / rangs
-    ops = []
-    for i, g in enumerate(groupes):
-        rang, col = divmod(i, cols)
-        dans_rang = min(cols, len(groupes) - rang * cols)          # la dernière rangée, moins pleine, est centrée
-        r = g["largeur"] / g["hauteur"] if g["largeur"] > 0 and g["hauteur"] > 0 else 1.6
-        pw = min(cw, ch * r)
-        ph = pw / r
-        x0 = (W - dans_rang * cw - (dans_rang - 1) * ecart) / 2 + col * (cw + ecart) + (cw - pw) / 2
-        y0 = my + rang * (ch + ecart) + (ch - ph) / 2
-        ops += ["-fill", c + "2e", "-stroke", c + "99", "-strokewidth", "3",
-                "-draw", f"roundrectangle {x0:.0f},{y0:.0f} {x0 + pw:.0f},{y0 + ph:.0f} 22,22", "-stroke", "none"]
-        for f in g["rects"]:
-            fx, fy = x0 + 14 + f["x"] * (pw - 20), y0 + 14 + f["y"] * (ph - 20)
-            fw, fh = max(f["w"] * (pw - 20) - 8, 6), max(f["h"] * (ph - 20) - 8, 6)
-            ops += ["-fill", c + "cc", "-draw", f"roundrectangle {fx:.0f},{fy:.0f} {fx + fw:.0f},{fy + fh:.0f} 12,12"]
+def arrondi(v):
+    return int(math.floor(v + 0.5))
+
+
+def largeur_carte(w):
+    return arrondi(PART_CARTE * w)
+
+
+def hauteur_carte(w, h):
+    return arrondi(largeur_carte(w) * h / w)
+
+
+def zone_capture(m):
+    """(région « X,Y LxH » de grim -g, facteur de grim -s) pour un écran de hyprctl -j monitors ; None s'il est illisible.
+    Sans « reserved » (ou mal formé), l'écran entier."""
     try:
-        return subprocess.run([im, "-size", f"{W}x{H}", "xc:#1c1c1e", *ops, str(sortie)], stdin=subprocess.DEVNULL,
-                              capture_output=True, timeout=30).returncode == 0 and sortie.is_file()
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        echelle = float(m.get("scale") or 1) or 1
+        w, h = float(m["width"]), float(m["height"])
+        if int(m.get("transform") or 0) % 2:                   # écran tourné d'un quart
+            w, h = h, w
+        w, h = arrondi(w / echelle), arrondi(h / echelle)
+        x, y = int(m.get("x") or 0), int(m.get("y") or 0)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    r = m.get("reserved")
+    try:
+        g, haut, d, bas = (max(0, int(v)) for v in r) if isinstance(r, list) and len(r) == 4 else (0, 0, 0, 0)
+    except (TypeError, ValueError):
+        g = haut = d = bas = 0
+    uw, uh = w - g - d, h - haut - bas
+    if uw <= 0 or uh <= 0:
+        g = haut = 0
+        uw, uh = w, h
+    ratio = w / h
+    if uw / uh > ratio:
+        rw, rh = arrondi(uh * ratio), uh
+    else:
+        rw, rh = uw, arrondi(uw / ratio)
+    rx, ry = x + g + (uw - rw) // 2, y + haut + (uh - rh) // 2
+    pixels = arrondi(largeur_carte(w) * echelle)
+    facteur = math.ceil(pixels / rw * 1e6) / 1e6        # grim tronque : arrondi au-dessus, jamais un pixel de moins
+    return f"{rx},{ry} {rw}x{rh}", f"{facteur:.6f}"
 
 
-def trancher(nom, s, png=None):
-    """Les tranches inclinées de la session (mêmes tailles et même forme que les miniatures du carrousel des fonds :
-    nc-carousel-thumbs tranche), privées (0600) : de la capture, sinon d'un dessin du schéma. Sans ImageMagick ou sur
-    un échec : pas de tranche (les anciennes sont effacées, elles ne montreraient plus la session), en silence."""
-    large, etroite = tranches_fichiers(nom)
-    im = shutil.which("magick") or shutil.which("convert")
-    outil = BIN / "nc-carousel-thumbs"
-    ok = False
-    if im and os.access(outil, os.X_OK):
-        APERCUS.mkdir(parents=True, exist_ok=True, mode=0o700)
-        APERCUS.chmod(0o700)
-        dessin = None if png and Path(png).is_file() else large.with_name("." + nom_valide(nom) + ".schema.png")
-        masque = os.umask(0o077)
-        try:
-            source = png if dessin is None else dessin if dessiner_schema(s, dessin, im) else None
-            ok = source is not None and subprocess.run(
-                [str(outil), "tranche", str(source), str(large), str(etroite)], stdin=subprocess.DEVNULL,
-                capture_output=True, timeout=60).returncode == 0 and large.is_file() and etroite.is_file()
-        except (OSError, subprocess.TimeoutExpired):
-            ok = False
-        finally:
-            os.umask(masque)
-            if dessin:
-                dessin.unlink(missing_ok=True)
-    if not ok:
-        large.unlink(missing_ok=True)
-        etroite.unlink(missing_ok=True)
-    return ok
+def ecran_actif():
+    """L'écran qui a le focus, tel que hyprctl -j monitors le donne (avec reserved, scale…), ou None."""
+    try:
+        l = json.loads(hypr("monitors", "-j") or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    return next((m for m in l if isinstance(m, dict) and m.get("focused")), None) if isinstance(l, list) else None
 
 
 def capturer(nom):
-    """L'aperçu : l'écran actif réduit au quart (grim), privé (0600). Pas de capture (SESSIONS_CAPTURE=non, pour la vie
-    privée ; grim absent ; échec) : le schéma seul, et l'ancien aperçu est effacé (il ne montrerait plus la session)."""
+    """L'aperçu : l'écran actif sous la barre, à la taille de la carte du carrousel (grim -g, -s), privé (0600). Pas de
+    capture (SESSIONS_CAPTURE=non, pour la vie privée ; grim absent ; échec) : le schéma seul, et l'ancien aperçu est
+    effacé (il ne montrerait plus la session)."""
     png = apercu_fichier(nom)
-    ecran = next((n for n, m in ecrans().items() if m["actif"]), None) if shutil.which("grim") else None
-    if reglage("SESSIONS_CAPTURE", "oui") == "non" or not ecran:
+    effacer_anciennes(nom)
+    zone = zone_capture(ecran_actif() or {}) if shutil.which("grim") else None
+    if reglage("SESSIONS_CAPTURE", "oui") == "non" or not zone:
         png.unlink(missing_ok=True)
         return None
     APERCUS.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -339,7 +325,7 @@ def capturer(nom):
     tmp.unlink(missing_ok=True)
     masque = os.umask(0o077)                               # grim crée le fichier : 0600 dès sa création
     try:
-        ok = subprocess.run(["grim", "-o", ecran, "-s", "0.5", "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
+        ok = subprocess.run(["grim", "-g", zone[0], "-s", zone[1], "-t", "png", str(tmp)], stdin=subprocess.DEVNULL,
                             capture_output=True, timeout=15).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         ok = False
@@ -350,7 +336,7 @@ def capturer(nom):
         png.unlink(missing_ok=True)
         return None
     tmp.chmod(0o600)
-    tmp.replace(png)
+    tmp.replace(png)                                       # d'un coup : le carrousel ne lit jamais une image à moitié
     return png
 
 
@@ -473,9 +459,8 @@ def enregistrer(nom):
     utilises = {e["ecran"] for e in fenetres}
     d.update(nom=nom.strip(), fenetres=fenetres,
              ecrans={n: {k: m[k] for k in ("x", "y", "largeur", "hauteur")} for n, m in mon.items() if n in utilises})
-    s = ecrire(f, d)
-    png = capturer(nom)
-    trancher(nom, s, png)
+    ecrire(f, d)
+    png = capturer(nom)                                 # avant toute notification : sa bannière serait dans l'aperçu
     return len(fenetres), png
 
 
@@ -795,7 +780,6 @@ def sortie_json():
         s = completer(d)
         incluses = [e for e in s["fenetres"] if e["inclure"]]
         png = APERCUS / (f.stem + ".png")
-        large, etroite = tranches_fichiers(f.stem)
         fenetres = []
         for e in s["fenetres"]:
             t = e.get("terminal") if isinstance(e.get("terminal"), dict) else None
@@ -812,8 +796,8 @@ def sortie_json():
                         demarrage=demarrage == f.stem, fermer_autres=s["fermer_autres"], raccourci=s["raccourci"],
                         bureaux_noms={str(k): str(v) for k, v in s["bureaux_noms"].items()},
                         apercu=str(png) if png.is_file() else None,
-                        tranche=str(large) if large.is_file() else None,
-                        tranche_etroite=str(etroite) if etroite.is_file() else None, schema=schema(s), fenetres=fenetres))
+                        # Anciennes tranches inclinées : toujours null, gardées une version pour la compatibilité
+                        tranche=None, tranche_etroite=None, schema=schema(s), fenetres=fenetres))
     return dict(version=2, sessions=res)
 
 
@@ -995,24 +979,23 @@ def modifier(nom, cle, v):
                        "bureau.ID.nom, fenetre.N.inclure, fenetre.N.dossier, fenetre.N.commande, zones.ID)."))
     if apres:
         apres()
-    s = ecrire(f, s)
-    # Le dessin du schéma suit sa couleur et ses fenêtres (une tranche faite d'une capture reste celle de la capture)
-    if (cle == "couleur" or (m and m[2] == "inclure")) and not apercu_fichier(f.stem).is_file():
-        trancher(f.stem, s)
+    ecrire(f, s)
     return T(f"Session « {f.stem} » : {cle} = {v or 'par défaut'}.", f"Session “{f.stem}”: {cle} = {v or 'default'}.")
 
 
 def copier_apercu(a, b, deplacer):
-    """L'aperçu et les tranches de A pour B (déplacés ou copiés, privés)."""
-    for pa, pb in zip(fichiers_apercu(a), fichiers_apercu(b)):
-        pb.unlink(missing_ok=True)
-        if not pa.is_file():
-            continue
-        if deplacer:
-            pa.replace(pb)
-            continue
-        with open(pa, "rb") as src, os.fdopen(os.open(pb, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as dst:
-            shutil.copyfileobj(src, dst)
+    """L'aperçu de A pour B (déplacé ou copié, privé) ; les anciennes tranches de A et B sont effacées."""
+    pa, pb = apercu_fichier(a), apercu_fichier(b)
+    effacer_anciennes(a)
+    effacer_anciennes(b)
+    pb.unlink(missing_ok=True)
+    if not pa.is_file():
+        return
+    if deplacer:
+        pa.replace(pb)
+        return
+    with open(pa, "rb") as src, os.fdopen(os.open(pb, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as dst:
+        shutil.copyfileobj(src, dst)
 
 
 def renommer(a, b):
@@ -1049,9 +1032,8 @@ def dupliquer(a, b):
 
 
 def apercu(nom):
-    f, d = lire(nom)
+    f, _ = lire(nom)
     png = capturer(f.stem)
-    trancher(f.stem, completer(d), png)
     if png:
         return T(f"Aperçu de « {f.stem} » refait.", f"Preview of “{f.stem}” taken again.")
     return T(f"« {f.stem} » : schéma seulement (capture désactivée ou grim absent).",
@@ -1144,8 +1126,8 @@ def main(a):
             except Erreur:
                 racc = None
             f.unlink()
-            for p in fichiers_apercu(reste):
-                p.unlink(missing_ok=True)
+            apercu_fichier(reste).unlink(missing_ok=True)
+            effacer_anciennes(reste)
             if racc:
                 try:
                     lier_raccourci(racc, None, f.stem)          # son raccourci n'ouvrirait plus rien
