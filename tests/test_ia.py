@@ -180,6 +180,26 @@ class IA(unittest.TestCase):
         r = self.lancer("quelle", "--json")
         self.assertEqual(json.loads(r.stdout)["id"], "openai")
 
+    def test_relais_apres_deux_echecs_et_aucun_avis_si_tout_echoue(self):
+        """Revue REL-01 : l'avis était écrit avant que l'IA suivante ait répondu ; si elle échouait aussi, il nommait la
+        mauvaise (« Gemini prend le relais » suivi d'une réponse d'une autre), et il restait même quand toutes échouaient."""
+        u = f"http://127.0.0.1:{self.port}"
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOPENAI_API_KEY={CLE_O}\nURL_OPENAI=http://127.0.0.1:1/oai\n"
+                  f"GEMINI_API_KEY=AIzaTest0123456789\nURL_GOOGLE={u}/gem\nOLLAMA_HOST=http://127.0.0.1:1\n")
+        Faux.anthropic_refuse = True
+        lignes, texte = self.flux(self.lancer("demander", "--flux", "question"))
+        avis = [l["relais"] for l in lignes if "relais" in l]
+        self.assertEqual(len(avis), 1, lignes)
+        self.assertRegex(avis[0], r"^⚠ Claude \(API Anthropic\), ChatGPT \(API OpenAI\) et .*Gemini.* n'ont pas répondu|"
+                                  r"^⚠ Claude \(API Anthropic\) et ChatGPT \(API OpenAI\) n'ont pas répondu")
+        self.assertIn("Gemini", avis[0].split(":")[-1], "nomme celle qui répond vraiment")
+        # Toutes en échec : aucun avis, seulement l'erreur
+        self.cles(f"ANTHROPIC_API_KEY={CLE_A}\nURL_ANTHROPIC={u}/ant\nOPENAI_API_KEY={CLE_O}\nURL_OPENAI=http://127.0.0.1:1/oai\n"
+                  f"OLLAMA_HOST=http://127.0.0.1:1\n")
+        r = self.lancer("demander", "--flux", "question")
+        self.assertNotIn("relais", r.stdout)
+        self.assertNotIn("prend le relais", r.stdout + r.stderr)
+
     def test_manuel_une_seule_ia(self):
         self.cles((self.home / ".config/nc/ia.conf").read_text() + f"OPENAI_API_KEY={CLE_O}\n")
         self.reglages("IA_MODE=manuel\nIA_CHOIX=openai\n")

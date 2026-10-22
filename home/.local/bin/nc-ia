@@ -1041,11 +1041,14 @@ RELAIS = []      # l'avis de relais de la dernière réponse (« JARVIS n'a pas 
 def avis_relais(rates, ident):
     """Une IA a échoué et la suivante répond (mode auto) : dit lesquelles et pourquoi, au lieu de passer en silence
     (issue #4 : on recevait la réponse de Gemini sans savoir que JARVIS avait échoué)."""
-    qui, raison = rates[0]
-    raison = re.sub(r"\s+", " ", str(raison)).strip()[:90]
-    autres = T(f" (puis {len(rates) - 1} autre(s))", f" (then {len(rates) - 1} more)") if len(rates) > 1 else ""
-    return T(f"⚠ {qui} n'a pas répondu{autres} — {raison} : {nom(ident)} prend le relais.",
-             f"⚠ {qui} did not answer{autres} — {raison}: {nom(ident)} takes over.")
+    qui = [q for q, _ in rates]
+    raison = re.sub(r"\s+", " ", str(rates[0][1])).strip()[:90]
+    if len(qui) == 1:
+        return T(f"⚠ {qui[0]} n'a pas répondu — {raison} : {nom(ident)} prend le relais.",
+                 f"⚠ {qui[0]} did not answer — {raison}: {nom(ident)} takes over.")
+    liste = ", ".join(qui[:-1]) + T(" et ", " and ") + qui[-1]
+    return T(f"⚠ {liste} n'ont pas répondu ({qui[0]} : {raison}) : {nom(ident)} prend le relais.",
+             f"⚠ {liste} did not answer ({qui[0]}: {raison}): {nom(ident)} takes over.")
 
 
 def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=()):
@@ -1064,14 +1067,15 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
         try:
             if flux:
                 ecrire(json.dumps({"ia": nom(ident), "id": ident, "agent": FOURNISSEURS[ident]["agent"]}, ensure_ascii=False) + "\n")
-            if rates and not RELAIS:
-                # Affiché avant la réponse, mais pas gardé avec elle (historique, rapports, plans : la réponse seule)
-                RELAIS.append(avis_relais(rates, ident))
-                ecrire(json.dumps({"t": RELAIS[0] + "\n\n", "relais": RELAIS[0]}, ensure_ascii=False) + "\n" if flux
-                       else RELAIS[0] + "\n\n")
             for m in appeler(ident, consigne_ or consigne(usage), texte, image, usage):
                 if not m:
                     continue
+                if rates and not morceaux:
+                    # Au premier morceau de celle qui répond vraiment (une suivante peut échouer à son tour) ; affiché
+                    # avant la réponse, mais pas gardé avec elle (historique, rapports, plans : la réponse seule)
+                    RELAIS[:] = [avis_relais(rates, ident)]
+                    ecrire(json.dumps({"t": RELAIS[0] + "\n\n", "relais": RELAIS[0]}, ensure_ascii=False) + "\n" if flux
+                           else RELAIS[0] + "\n\n")
                 morceaux.append(m)
                 ecrire(json.dumps({"t": m}, ensure_ascii=False) + "\n" if flux else m)
             if not morceaux:
