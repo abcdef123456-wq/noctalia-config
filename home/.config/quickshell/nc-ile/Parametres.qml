@@ -22,7 +22,7 @@ FloatingWindow {
     id: fen
     title: "Réglages du bureau"
     visible: false
-    implicitWidth: 1040; implicitHeight: 740; minimumSize: Qt.size(720, 480)
+    implicitWidth: Gabarit.largeur; implicitHeight: Gabarit.hauteur; minimumSize: Qt.size(Gabarit.largeurMini, Gabarit.hauteurMini)
     color: Couleurs.fond
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
     property var catalogue: []

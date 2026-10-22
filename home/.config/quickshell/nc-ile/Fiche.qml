@@ -1,5 +1,6 @@
-// Fiche des raccourcis (Super + /), éditable sur place : la même fiche que celle de Noctalia (sections de nc-keys, trois
-// ou quatre colonnes selon la place), en verre aux couleurs du bureau. « Modifier » passe en mode édition, comme le
+// Fiche des raccourcis (Super + /), éditable sur place : la même fiche que celle de Noctalia (sections de nc-keys, deux
+// colonnes, à la taille des autres menus : Gabarit.qml), en verre aux couleurs du bureau. Elle n'apparaît qu'une fois
+// ses raccourcis connus (gardés par Raccourcis.qml), en fondu et léger zoom ; elle repart de même. « Modifier » passe en mode édition, comme le
 // Centre de contrôle de l'iPhone : − désactive un raccourci de la config (ou retire l'un des tiens), un toucher sur
 // les touches attend la nouvelle combinaison, le nom de l'un des tiens se renomme, ↺ remet celui de la config,
 // « + Ajouter » crée un raccourci (une appli, « bureau N », « ile PAGE » ou une commande). Toute l'édition passe par
@@ -22,7 +23,9 @@ PanelWindow {
     color: "transparent"
 
     property bool edition: false
-    property var lignes: []                         // les raccourcis du catalogue de nc-reglages
+    readonly property var lignes: Raccourcis.lignes // les raccourcis du catalogue de nc-reglages (gardé par Raccourcis.qml)
+    property bool sortie: false                     // le mouvement de sortie, avant fermer()
+    Component.onCompleted: Raccourcis.relire()
     property var tentative: null                    // dernière capture envoyée : pour « Remplacer » si les touches sont prises
     property var conflit: null
     property bool ajout: false                      // la petite carte « + Ajouter » est ouverte
@@ -45,23 +48,11 @@ PanelWindow {
     readonly property real hauteurEcran: fiche.screen ? fiche.screen.height : 1000
 
     // ── Les raccourcis ──
-    Process {
-        id: lecture
-        command: [Raccourcis.bin + "nc-reglages", "catalogue"]
-        running: true
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try { fiche.lignes = JSON.parse(text).filter(r => r.genre === "raccourci") } catch (e) { fiche.lignes = [] }
-            }
-        }
-    }
-    function relire() { if (!lecture.running) lecture.running = true }
     Connections {
         target: Raccourcis
         function onEcrit() {
             if (Raccourcis.erreur && fiche.tentative && /déjà pris|already in use/i.test(Raccourcis.message)) fiche.conflit = fiche.tentative
             fiche.tentative = null
-            fiche.relire()
         }
         function onCaptureFinie() { zoneClavier.forceActiveFocus() }
     }
@@ -80,47 +71,50 @@ PanelWindow {
     function touches(r) { return String(r.valeur || "").split(/\s*\+\s*/).filter(t => t !== "") }
     function norm(t) { return String(t).replace(/\s+/g, "").toLowerCase() }
 
-    // ── Disposition : trois colonnes, ou quatre plus étroites si elles ne tiennent pas (écran d'au moins 1400 points),
-    // puis réduites s'il le faut (jamais sous 0,55), comme la fiche de Noctalia (revue de l'issue #1) ──
-    readonly property var colonnes3: [["Applis et barre", "Bureaux"], ["Fenêtres", "Souris"], ["Système", "IA", "Mes raccourcis"]]
-    readonly property var colonnes4: [["Applis et barre", "Bureaux"], ["Fenêtres"], ["Système", "Mes raccourcis"], ["IA", "Souris"]]
-    readonly property real dispo: hauteurEcran - 120
+    // ── Disposition : la taille des autres menus (Gabarit.qml), bornée à l'écran ; deux colonnes de même largeur, les
+    // sections réparties pour que les deux finissent à peu près à la même hauteur ; la liste défile ──
+    readonly property real largeurCarte: Math.min(Gabarit.largeur, largeurEcran - 2 * Gabarit.bordEcran)
+    readonly property real hauteurCarte: Math.min(Gabarit.hauteur, hauteurEcran - 2 * Gabarit.bordEcran)
+    readonly property real largeurColonne: Math.floor((largeurCarte - 2 * Gabarit.marge - 24) / 2)
+    readonly property var ordreSections: ["Applis et barre", "Fenêtres", "Bureaux", "Système", "IA", "Souris", "Mes raccourcis"]
     function largeurTouches(r) {
         var l = 0
         touches(r).forEach((k, i) => { l += (i > 0 ? 17 : 0) + k.length * 7.4 + 16 })
         return l
     }
-    function hauteurColonne(noms, largeur) {
-        var h = 0
-        noms.forEach(n => {
-            var rs = parSection[n]
-            if (!rs || (!rs.length && !(edition && n === "Mes raccourcis"))) return
-            if (h > 0) h += 22
-            h += 34
-            var kw = Math.min(largeur < 400 ? 150 : 220, Math.max(60, ...rs.map(largeurTouches)))
-            rs.forEach(r => { h += largeurTouches(r) > kw || r.nom.length * 7.3 > largeur - kw - 14 - (edition ? 30 : 0) ? 48 : 30 })
-            if (edition && n === "Mes raccourcis") h += 34
+    function hauteurSection(n) {
+        var rs = parSection[n] || []
+        if (!rs.length && !(edition && n === "Mes raccourcis")) return 0
+        var kw = Math.min(190, Math.max(60, ...rs.map(largeurTouches))), h = 56
+        rs.forEach(r => { h += largeurTouches(r) > kw || r.nom.length * 7.3 > largeurColonne - kw - 14 - (edition ? 30 : 0) ? 48 : 30 })
+        return h + (edition && n === "Mes raccourcis" ? 34 : 0)
+    }
+    readonly property var colonnes: {
+        var c = [[], []], h = [0, 0]
+        ordreSections.forEach(n => {
+            var hs = hauteurSection(n)
+            if (!hs) return
+            var i = h[0] <= h[1] ? 0 : 1
+            c[i].push(n); h[i] += hs
         })
-        return h
+        if (c[1].indexOf("Mes raccourcis") < 0 && c[0].indexOf("Mes raccourcis") < 0 && edition) c[1].push("Mes raccourcis")
+        return c
     }
-    readonly property bool quatre: {
-        var h3 = Math.max(...colonnes3.map(c => hauteurColonne(c, 490)))
-        return h3 > dispo && largeurEcran >= 1400
-    }
-    readonly property var colonnes: quatre ? colonnes4 : colonnes3
-    readonly property real largeurColonne: quatre ? Math.min(490, Math.floor((largeurEcran - 64 - 60) / 4)) : 490
-    readonly property real hauteurMax: Math.max(...colonnes.map(c => hauteurColonne(c, largeurColonne)))
-    readonly property real zoom: Math.max(0.55, Math.min(1, largeurEcran / 1600, dispo / Math.max(1, hauteurMax + 90)))
 
     // ── Fermer, quitter l'édition ; une capture interrompue rend TOUJOURS ses raccourcis à Hyprland ──
     function quitter() {
         if (Raccourcis.capture) Raccourcis.finCapture("")
-        fiche.fermer()
+        if (Reglages.sobre || sortie) { fiche.fermer(); return }
+        sortie = true                               // le mouvement d'entrée à l'envers, puis fermer
+        finSortie.start()
     }
+    Timer { id: finSortie; interval: Gabarit.sortie; onTriggered: fiche.fermer() }
     Component.onDestruction: if (Raccourcis.capture) Raccourcis.finCapture("")
     onVisibleChanged: if (!visible && Raccourcis.capture) Raccourcis.finCapture("")
 
     MouseArea { anchors.fill: parent; onClicked: fiche.quitter() }          // un clic à côté ferme
+    // Montrée seulement quand ses raccourcis sont là (jamais une carte vide qui clignote), cachée pendant la sortie
+    readonly property bool montree: lignes.length > 0 && !sortie
 
     FocusScope {
         id: zoneClavier
@@ -152,8 +146,15 @@ PanelWindow {
     Item {
         id: carte
         anchors.centerIn: parent
-        width: contenu.width + 64; height: contenu.height + 90
-        scale: fiche.zoom
+        width: fiche.largeurCarte; height: fiche.hauteurCarte
+        // Entrée : fondu et zoom de 0,96 à 1 (200 ms) ; sortie : à l'envers, plus vite (120 ms) ; directe en sobre
+        visible: opacity > 0
+        opacity: fiche.montree ? 1 : 0
+        scale: fiche.montree ? 1 : 0.96
+        Behavior on opacity { enabled: !Reglages.sobre
+            NumberAnimation { duration: fiche.sortie ? Gabarit.sortie : Gabarit.entree; easing.type: fiche.sortie ? Easing.InCubic : Easing.OutCubic } }
+        Behavior on scale { enabled: !Reglages.sobre
+            NumberAnimation { duration: fiche.sortie ? Gabarit.sortie : Gabarit.entree; easing.type: fiche.sortie ? Easing.InCubic : Easing.OutCubic } }
         // Contour aux couleurs de l'île (ILE_CONTOUR : dégradé de l'accent, discret, aucun)
         Rectangle {
             anchors.fill: fondVerre; anchors.margins: -1.5; radius: fondVerre.radius + 1.5
@@ -167,7 +168,7 @@ PanelWindow {
         }
         Rectangle {
             id: fondVerre
-            anchors.fill: parent; radius: 28
+            anchors.fill: parent; radius: Gabarit.rayon
             color: Qt.alpha(Couleurs.fond, fiche.opaciteFond)
             // Reflet du verre : un liseré clair en haut, qui s'efface vers les bords
             Rectangle {
@@ -183,7 +184,7 @@ PanelWindow {
         MouseArea { anchors.fill: parent }                                     // un clic dans la carte ne ferme pas
 
         Texte {
-            x: 32; y: 24; font.pixelSize: 18; font.weight: Font.Bold
+            x: Gabarit.marge; y: 24; font.pixelSize: 18; font.weight: Font.Bold
             text: fiche.edition ? Reglages.t("Modifier les raccourcis", "Edit shortcuts") : Reglages.t("Raccourcis", "Shortcuts")
         }
         // « Modifier » / « OK »
@@ -201,47 +202,64 @@ PanelWindow {
                         onClicked: { fiche.edition = !fiche.edition; fiche.ajout = false; fiche.conflit = null; zoneClavier.forceActiveFocus() } }
         }
 
-        Row {
-            id: contenu
-            x: 32; y: 66
-            spacing: fiche.quatre ? 20 : 24
-            Repeater {
-                model: fiche.colonnes
-                Column {
-                    id: colonne
-                    required property var modelData
-                    width: fiche.largeurColonne
-                    spacing: 0
-                    Repeater {
-                        model: colonne.modelData
-                        Column {
-                            id: bloc
-                            required property string modelData
-                            required property int index
-                            readonly property var rangees: fiche.parSection[modelData] || []
-                            readonly property real kw: Math.min(fiche.quatre ? 150 : 220, Math.max(60, ...rangees.map(fiche.largeurTouches)))
-                            visible: rangees.length > 0 || (fiche.edition && modelData === "Mes raccourcis")
-                            width: colonne.width
-                            Item { width: 1; height: bloc.index > 0 ? 22 : 0 }
-                            Texte {
-                                height: 34; color: Couleurs.accent; font.pixelSize: 14; font.weight: Font.Bold
-                                text: Reglages.en ? (fiche.titres[bloc.modelData] || bloc.modelData) : bloc.modelData
-                            }
-                            Repeater {
-                                model: bloc.rangees
-                                Ligne { required property var modelData; r: modelData; kw: bloc.kw; largeur: colonne.width }
-                            }
-                            // « + Ajouter », à la fin de « Mes raccourcis »
-                            Item {
-                                visible: fiche.edition && bloc.modelData === "Mes raccourcis"
-                                width: colonne.width; height: visible ? 34 : 0
-                                Row {
-                                    anchors.verticalCenter: parent.verticalCenter; spacing: 8
-                                    Rectangle { width: 22; height: 22; radius: 11; color: Couleurs.vert
-                                                Texte { anchors.centerIn: parent; text: "+"; font.pixelSize: 16; font.weight: Font.Bold; color: "#ffffff" } }
-                                    Texte { text: Reglages.t("Ajouter un raccourci", "Add a shortcut"); color: Couleurs.vert }
+        // La liste défile (molette, pavé tactile) ; l'en-tête et « Modifier » / « OK » restent en place
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            property real cumul: 0
+            onWheel: event => {
+                cumul += event.angleDelta.y
+                if (Math.abs(cumul) < 120) return               // un cran de molette, ou un geste assez long
+                defilement.defiler(cumul)
+                cumul = 0
+            }
+        }
+        Defilement {
+            id: defilement
+            objectName: "nc-fiche-liste"
+            x: Gabarit.marge; y: 66
+            width: parent.width - 2 * Gabarit.marge; height: parent.height - y - 56
+            contentWidth: width; contentHeight: contenu.height
+            Row {
+                id: contenu
+                spacing: 24
+                Repeater {
+                    model: fiche.colonnes
+                    Column {
+                        id: colonne
+                        required property var modelData
+                        width: fiche.largeurColonne
+                        spacing: 0
+                        Repeater {
+                            model: colonne.modelData
+                            Column {
+                                id: bloc
+                                required property string modelData
+                                required property int index
+                                readonly property var rangees: fiche.parSection[modelData] || []
+                                readonly property real kw: Math.min(190, Math.max(60, ...rangees.map(fiche.largeurTouches)))
+                                visible: rangees.length > 0 || (fiche.edition && modelData === "Mes raccourcis")
+                                width: colonne.width
+                                Item { width: 1; height: bloc.index > 0 ? 22 : 0 }
+                                Texte {
+                                    height: 34; color: Couleurs.accent; font.pixelSize: 14; font.weight: Font.Bold
+                                    text: Reglages.en ? (fiche.titres[bloc.modelData] || bloc.modelData) : bloc.modelData
                                 }
-                                MouseArea { objectName: "nc-fiche-ajouter"; anchors.fill: parent; onClicked: { fiche.ajout = true; champCible.forceActiveFocus() } }
+                                Repeater {
+                                    model: bloc.rangees
+                                    Ligne { required property var modelData; r: modelData; kw: bloc.kw; largeur: colonne.width }
+                                }
+                                // « + Ajouter », à la fin de « Mes raccourcis »
+                                Item {
+                                    visible: fiche.edition && bloc.modelData === "Mes raccourcis"
+                                    width: colonne.width; height: visible ? 34 : 0
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                                        Rectangle { width: 22; height: 22; radius: 11; color: Couleurs.vert
+                                                    Texte { anchors.centerIn: parent; text: "+"; font.pixelSize: 16; font.weight: Font.Bold; color: "#ffffff" } }
+                                        Texte { text: Reglages.t("Ajouter un raccourci", "Add a shortcut"); color: Couleurs.vert }
+                                    }
+                                    MouseArea { objectName: "nc-fiche-ajouter"; anchors.fill: parent; onClicked: { fiche.ajout = true; champCible.forceActiveFocus() } }
+                                }
                             }
                         }
                     }
@@ -285,6 +303,7 @@ PanelWindow {
     // ── Une ligne : touches, puis description ; en édition : −, touches à changer, nom à renommer, ↺ ──
     component Ligne: Item {
         id: ligne
+        objectName: "nc-fiche-ligne-" + r.cle
         property var r
         property real kw: 220
         property real largeur: 490
@@ -295,12 +314,19 @@ PanelWindow {
         height: longues || r.nom.length * 7.3 > placeTexte ? 48 : 30
         opacity: r.desactive ? 0.45 : 1
         transformOrigin: Item.Center
-        // Frétillement des lignes en édition, comme sur l'iPhone (pas en Économie ni sans effets)
+        // En édition, la ligne survolée frétille une fois, comme sur l'iPhone (deux allers-retours, 300 ms) ; à refaire en
+        // ressortant puis en revenant. Rien sans survol, rien en sobre (Économie, sans effets)
+        readonly property bool fretille: fretillement.running
+        function survoler() { if (fiche.edition && !Reglages.sobre) fretillement.restart() }
+        HoverHandler { onHoveredChanged: if (hovered) ligne.survoler() }
         SequentialAnimation {
-            running: fiche.edition && !Reglages.sobre && ligne.visible; loops: Animation.Infinite
-            onRunningChanged: if (!running) ligne.rotation = 0
-            RotationAnimator { target: ligne; from: -0.6; to: 0.6; duration: 140 }
-            RotationAnimator { target: ligne; from: 0.6; to: -0.6; duration: 140 }
+            id: fretillement
+            onStopped: ligne.rotation = 0
+            RotationAnimator { target: ligne; from: 0; to: 0.6; duration: 38 }
+            RotationAnimator { target: ligne; from: 0.6; to: -0.6; duration: 75 }
+            RotationAnimator { target: ligne; from: -0.6; to: 0.6; duration: 75 }
+            RotationAnimator { target: ligne; from: 0.6; to: -0.6; duration: 75 }
+            RotationAnimator { target: ligne; from: -0.6; to: 0; duration: 37 }
         }
         // − (ou ↺ pour un désactivé)
         Rectangle {
@@ -385,7 +411,7 @@ PanelWindow {
     // ── « + Ajouter » : que lance le raccourci, son nom, puis ses touches ──
     Rectangle {
         id: carteAjout
-        visible: fiche.ajout && !Raccourcis.capture
+        visible: fiche.ajout && !Raccourcis.capture && fiche.montree
         anchors.centerIn: parent
         width: 440; height: colonneAjout.height + 36; radius: 22
         color: Qt.alpha(Couleurs.fond, 0.94); border.width: 1; border.color: Qt.alpha(Couleurs.accent, 0.5)
@@ -452,7 +478,7 @@ PanelWindow {
     Rectangle {
         id: capture
         property string aide: ""
-        visible: !!Raccourcis.capture
+        visible: !!Raccourcis.capture && fiche.montree
         anchors.centerIn: parent
         width: 420; height: 132; radius: 22
         color: Qt.alpha(Couleurs.fond, 0.95); border.width: 1.5; border.color: Couleurs.accent

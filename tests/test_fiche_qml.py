@@ -1,5 +1,6 @@
-"""Fiche des raccourcis éditable (Fiche.qml, Super + /) hors écran, avec un faux nc-reglages : disposition en quatre
-colonnes sur 1600 x 1000, chaque action d'édition envoie le bon JSON (Raccourcis.qml), une capture interrompue rend
+"""Fiche des raccourcis éditable (Fiche.qml, Super + /) hors écran, avec un faux nc-reglages : rien de montré avant
+les raccourcis, la taille des autres menus (Gabarit.qml) en deux colonnes équilibrées, le frétillement seulement au
+survol, chaque action d'édition envoie le bon JSON (Raccourcis.qml), une capture interrompue rend
 toujours ses raccourcis à Hyprland, « Remplacer » quand les touches sont prises ; et les contrastes du verre."""
 import json
 import os
@@ -48,7 +49,7 @@ class FicheEditable(unittest.TestCase):
     def executer(self, scenario):
         with tempfile.TemporaryDirectory(prefix="nc-fiche-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("Raccourcis.qml", "Couleurs.qml", "Texte.qml", "Ico.qml"):
+            for nom in ("Raccourcis.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "Gabarit.qml", "Defilement.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Fiche.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -61,8 +62,8 @@ class FicheEditable(unittest.TestCase):
             (q / "Fiche.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: false;'
                                             ' function t(fr,en){return fr} function val(k,d){return d}}')
-            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Raccourcis", "Fiche", "Texte", "Ico")))
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit") else "") + n + " 1.0 " + n + ".qml"
+                                                for n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit", "Fiche", "Texte", "Ico", "Defilement")))
             (root / "catalogue.json").write_text(json.dumps(catalogue(), ensure_ascii=False))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
@@ -81,7 +82,8 @@ ShellRoot {
  function cliquer(nom) { var z = trouver(fiche.contentItem, nom); verifier(z !== null, "introuvable : " + nom); z.clicked(null) }
  Timer { interval: 150; running: true; repeat: true; onTriggered: {
   if (etape === 0) { var c = Qt.createComponent("Fiche.qml"); verifier(c.status === Component.Ready, c.errorString())
-                     fiche = c.createObject(racine); fiche.fermer.connect(function () { racine.fermee = true }); etape++; return }
+                     fiche = c.createObject(racine); fiche.fermer.connect(function () { racine.fermee = true })
+                     verifier(!fiche.montree || fiche.lignes.length > 0, "jamais de carte vide montrée"); etape++; return }
   if (fiche.lignes.length === 0 || Raccourcis.occupe) return
   SCENARIO
  } }
@@ -97,15 +99,26 @@ ShellRoot {
 
     def test_disposition_et_edition(self):
         r, appels = self.executer('''
-  if (etape === 1) { verifier(fiche.quatre, "4 colonnes sur 1600 x 1000"); verifier(fiche.zoom > 0.8, "pas réduite à 9 px : " + fiche.zoom)
+  if (etape === 1) { verifier(fiche.montree, "montrée une fois les raccourcis lus")
+                     var carte = trouver(fiche.contentItem, "nc-fiche-liste").parent
+                     verifier(carte.width === 1040 && carte.height === 740, "taille des autres menus : " + carte.width + " x " + carte.height)
+                     verifier(fiche.colonnes.length === 2 && fiche.colonnes[0].length && fiche.colonnes[1].length, "deux colonnes : " + JSON.stringify(fiche.colonnes))
+                     var h = fiche.colonnes.map(c => c.reduce((t, n) => t + fiche.hauteurSection(n), 0))
+                     verifier(Math.abs(h[0] - h[1]) < 400, "colonnes équilibrées : " + h)
                      verifier(!trouver(fiche.contentItem, "nc-fiche-moins-raccourci:64:q").visible, "hors édition : pas de −")
+                     var l = trouver(fiche.contentItem, "nc-fiche-ligne-raccourci:64:q")
+                     l.survoler(); verifier(!l.fretille, "hors édition : pas de frétillement")
                      fiche.edition = true; etape++; return }
-  if (etape === 2) { cliquer("nc-fiche-moins-raccourci:64:q"); etape++; return }             // − : désactiver
+  if (etape === 2) { var l = trouver(fiche.contentItem, "nc-fiche-ligne-raccourci:64:q")
+                     verifier(!l.fretille, "en édition : rien ne bouge sans survol")
+                     l.survoler(); verifier(l.fretille, "au survol : frétille une fois")
+                     cliquer("nc-fiche-moins-raccourci:64:q"); etape++; return }             // − : désactiver
   if (etape === 3) { cliquer("nc-fiche-origine-raccourci:64:t"); etape++; return }           // ↺ : comme dans la config
   if (etape === 4) { var n = trouver(fiche.contentItem, "nc-fiche-nom-raccourci:64:b"); n.text = "Jeux vidéo"; n.accepted(); etape++; return }
   if (etape === 5) { cliquer("nc-fiche-touches-raccourci:64:t"); verifier(Raccourcis.capture !== null, "capture lancée"); etape++; return }
-  if (etape === 6) { fiche.quitter(); verifier(Raccourcis.capture === null, "capture rendue à la fermeture"); verifier(racine.fermee, "fermée"); etape++; return }
-  if (etape === 7) Qt.quit()''')
+  if (etape === 6) { verifier(!trouver(fiche.contentItem, "nc-fiche-ligne-raccourci:64:q").fretille, "un seul frétillement")
+                     fiche.quitter(); verifier(Raccourcis.capture === null, "capture rendue à la fermeture"); etape++; return }
+  if (etape === 7) { verifier(racine.fermee, "fermée après le mouvement de sortie"); Qt.quit() }''')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         actions = [json.loads(a[1]) for a in appels if a[0] == "raccourci"]
         self.assertEqual([(a["action"], a["ids"]) for a in actions[:2]], [("desactiver", ["64:q"]), ("origine", ["64:t"])])

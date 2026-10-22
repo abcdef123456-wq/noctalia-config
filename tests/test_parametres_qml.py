@@ -35,8 +35,8 @@ class FenetreReglages(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
-            noms = ["Reglages", "Couleurs", "Raccourcis", "Parametres", "AssistantCommande", "Texte", "Ico"]
-            (root / "qml/qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            noms = ["Reglages", "Couleurs", "Raccourcis", "Gabarit", "Parametres", "AssistantCommande", "Texte", "Ico"]
+            (root / "qml/qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Raccourcis", "Gabarit") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
             if raccourcis:

@@ -16,6 +16,18 @@ Singleton {
     readonly property bool occupe: ecriture.running || file.length > 0
     property string message: ""
     property bool erreur: false
+    // Le catalogue des raccourcis, gardé en mémoire : la fiche a ses lignes dès sa première image (lu au démarrage de
+    // l'île, relu à chaque ouverture de la fiche et après chaque écriture)
+    property var lignes: []
+    function relire() { if (!lecture.running) lecture.running = true }
+    onEcrit: relire()
+    Process {
+        id: lecture
+        command: [rac.bin + "nc-reglages", "catalogue"]
+        stdout: StdioCollector {
+            onStreamFinished: { try { var l = JSON.parse(text).filter(r => r.genre === "raccourci"); if (l.length) rac.lignes = l } catch (e) {} }
+        }
+    }
     signal ecrit()                                  // une écriture finie : relire le catalogue
     signal captureFinie()                           // capture terminée ou abandonnée : rendre le focus
 

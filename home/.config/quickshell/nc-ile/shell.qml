@@ -86,7 +86,9 @@ ShellRoot {
     // Fiche des raccourcis (Super + /), éditable : créée à l'ouverture, sur l'écran actif ; sans l'île Quickshell,
     // Super + / ouvre la fiche de Noctalia
     property bool ficheOuverte: false
+    Component.onCompleted: Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
     LazyLoader {
+        id: chargeurFiche
         active: racine.ficheOuverte
         Fiche {
             screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
@@ -111,7 +113,11 @@ ShellRoot {
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }
-        function fiche(): void { Etat.fermer(); racine.ficheOuverte = !racine.ficheOuverte }   // Super + /
+        function fiche(): void {                                                            // Super + /
+            Etat.fermer()
+            if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // en douceur, comme Échap
+            else racine.ficheOuverte = !racine.ficheOuverte
+        }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
         function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
