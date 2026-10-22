@@ -384,6 +384,25 @@ def verifier(b):
                    "chmod 600 ~/.config/nc/ia.conf")
     except (ValueError, KeyError, TypeError):
         b.avert(T("nc-ia ne répond pas", "nc-ai does not respond"), T("nc-maj", "nc-update"))
+    # Dictée (Super + D) : un enregistreur, et de quoi écrire dans la fenêtre (revue DIST-01)
+    try:
+        dictee = "IA_DICTEE=non" not in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8").read().replace('"', "")
+    except OSError:
+        dictee = True
+    if dictee:
+        enr = next((x for x in ("parec", "pw-record", "arecord") if a(x)), "")
+        ecrit = "wtype" if a("wtype") else ("wl-copy" if a("wl-copy") else "")
+        if not enr:
+            b.avert(T("dictée impossible : aucun enregistreur audio (pw-record, parec ou arecord)",
+                      "dictation impossible: no audio recorder (pw-record, parec or arecord)"),
+                    T("relance install.sh (paquet pipewire-audio, pipewire-utils, pipewire-bin ou pipewire-tools selon ta distribution)",
+                      "run install.sh again (package pipewire-audio, pipewire-utils, pipewire-bin or pipewire-tools depending on your distribution)"))
+        elif not ecrit:
+            b.avert(T("dictée : rien pour écrire le texte (ni wtype, ni wl-copy)", "dictation: nothing to type the text (neither wtype nor wl-copy)"),
+                    T("relance install.sh (wtype, wl-clipboard)", "run install.sh again (wtype, wl-clipboard)"))
+        else:
+            b.ok(T(f"dictée : {enr}, texte {'tapé (wtype)' if ecrit == 'wtype' else 'collé (wl-copy)'}",
+                   f"dictation: {enr}, text {'typed (wtype)' if ecrit == 'wtype' else 'pasted (wl-copy)'}"))
 
     # ── Tes réglages ──
     b.titre(T("Tes réglages", "Your settings"))

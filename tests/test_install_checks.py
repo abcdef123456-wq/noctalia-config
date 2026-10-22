@@ -147,3 +147,19 @@ backup() { mkdir -p "$HOME/backup/$(dirname "$1")"; cp -a -- "$HOME/$1" "$HOME/b
                 self.assertEqual(r.returncode,0,r.stderr)
                 self.assertFalse(old.exists());self.assertEqual(current.read_text(),'cockpit actif')
                 self.assertEqual((home/'backup/.config/quickshell/nc-ile/JarvisDashboard.qml').read_text(),'ancien cockpit personnalisé')
+
+
+class EnregistreurDictee(unittest.TestCase):
+    """Revue DIST-01 : rien ne garantissait un enregistreur pour la dictée (pw-record, parec ou arecord). Noms vérifiés
+    dans chaque dépôt : pipewire-audio (Arch), pipewire-utils (Fedora), pipewire-bin (Debian), pipewire-tools (openSUSE)."""
+    def test_paquet_par_famille_et_seulement_s_il_manque(self):
+        texte = (REPO / "install.sh").read_text()
+        debut = texte.index("pname() {")
+        fonction = texte[debut:texte.index("\n}\n", debut) + 3]
+        attendu = {"arch": "pipewire-audio", "fedora": "pipewire-utils", "debian": "pipewire-bin", "suse": "pipewire-tools", "other": ""}
+        for famille, paquet in attendu.items():
+            r = subprocess.run(["bash", "-c", fonction + f'FAMILY={famille}; pname enregistreur'], capture_output=True, text=True)
+            self.assertEqual(r.stdout.strip(), paquet, famille)
+        generic = texte[texte.index("GENERIC=("):texte.index(")", texte.index("GENERIC=("))]
+        self.assertIn("enregistreur", generic)
+        self.assertIn('[ "$g" = enregistreur ] && { have pw-record || have parec || have arecord; } && continue', texte)

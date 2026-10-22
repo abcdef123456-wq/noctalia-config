@@ -217,6 +217,12 @@ pname() {
     quickshell:*) ;;   # pas dans les dépôts officiels : l'île du plugin Noctalia est utilisée
     breeze:fedora) echo plasma-breeze-qt6 ;;   # le style Qt 6 seul, sans les modules de réglage de KDE
     breeze:suse) echo breeze6-style ;;
+    # Dictée (nc-dictee) : pw-record, seulement s'il n'y a ni pw-record, ni parec, ni arecord (noms vérifiés dans chaque dépôt)
+    enregistreur:arch) echo pipewire-audio ;;
+    enregistreur:fedora) echo pipewire-utils ;;
+    enregistreur:debian) echo pipewire-bin ;;
+    enregistreur:suse) echo pipewire-tools ;;
+    enregistreur:*) ;;
     *) echo "$1" ;;
   esac
 }
@@ -605,7 +611,8 @@ if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)
 fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard wtype brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng checkupdates)
+         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder tesseract tesseract-fra tesseract-eng checkupdates
+         enregistreur)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
   missing=(); manual=()
@@ -613,6 +620,7 @@ if [ "$MODE" != files ]; then
     p="$(pname "$g")"
     if [ -z "$p" ]; then manual+=("$g"); continue; fi
     pkg_installed "$p" && continue
+    [ "$g" = enregistreur ] && { have pw-record || have parec || have arecord; } && continue
     [ "$g" = nerdfont ] && [ -n "$(fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font")" ] && continue
     missing+=("$p")
   done
