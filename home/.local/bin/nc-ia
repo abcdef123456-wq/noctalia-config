@@ -1299,7 +1299,9 @@ def diagnostic(flux=False):
 UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
 
 
-_NOM_SECRET = r"[\w.-]*(?:password|passwd|secret|token|api[_-]?key|apikey|credential|private[_-]?key|auth)[\w.-]*"
+# Début du nom ancré et préfixe paresseux : sinon, quadratique sur un long mot sans espace (base64, JSON minifié : ~10 s
+# pour 12 000 caractères, revue PRIV-02)
+_NOM_SECRET = r"(?<![\w.-])[\w.-]*?(?:password|passwd|secret|token|api[_-]?key|apikey|credential|private[_-]?key|auth)[\w.-]*"
 
 
 def caviarder(t):

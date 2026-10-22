@@ -456,6 +456,18 @@ class IA(unittest.TestCase):
         for x in ("zzz", "ZZZ", str(self.home)):
             self.assertNotIn(x, envoye)
 
+    def test_masquage_rapide_sur_un_long_mot(self):
+        """Revue PRIV-02 : 12 000 caractères sans espace (base64, JSON minifié) prenaient ~10 s (expression quadratique)."""
+        import importlib.machinery, importlib.util, time
+        l = importlib.machinery.SourceFileLoader("ncia_cav", str(BIN / "nc-ia"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncia_cav", l)); l.exec_module(m)
+        for t in ("a" * 20000, "a." * 10000, "Q" * 12000 + " secret=zzz"):
+            debut = time.monotonic()
+            r = m.caviarder(t)
+            self.assertLess(time.monotonic() - debut, 0.5, t[:20])
+            self.assertNotIn("zzz", r)
+        self.assertEqual(m.caviarder("client_secret=zz mon.app-token: zz"), "client_secret=[…] mon.app-token: […]")
+
     def test_agir_organise_les_fenetres(self):
         clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
                    {"address": "0xb2", "class": "firefox", "title": "Docs", "mapped": True, "workspace": {"id": 2}, "floating": False, "size": [800, 600]},
