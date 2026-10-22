@@ -119,3 +119,5 @@ hl.layer_rule({
 })
 -- Dock en verre dépoli : flouté même là où il est très transparent
 hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-dock$" }, ignore_alpha = 0.2 })
+-- Fiche des raccourcis de l'île (Super + /) : verre, le bureau flouté derrière la carte seulement (le reste est transparent)
+hl.layer_rule({ name = "nc-fiche-verre", match = { namespace = "^nc-fiche$" }, blur = true, ignore_alpha = 0.2 })

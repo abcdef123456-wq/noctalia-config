@@ -108,7 +108,9 @@ touche(SUPER .. " + SHIFT + code:25", cmd("~/.local/bin/nc-session menu"), trad(
 touche(SUPER .. " + code:54", cmd(barre .. "control-center"),      trad("Applis et barre|Centre de contrôle (île)", "Control Center (island)"))
 touche(SUPER .. " + code:59", cmd(barre .. "settings"),            trad("Applis et barre|Réglages de la barre", "Bar settings"))
 touche(SUPER .. " + ALT + code:59", cmd("~/.local/bin/nc-reglages fenetre"), trad("Applis et barre|Réglages du bureau (fenêtre, avec recherche)", "Desktop settings (window, with search)"))
-touche(SUPER .. " + code:61", cmd(barre .. "keys"),                trad("Applis et barre|Afficher cette fiche", "Show this cheat sheet"))
+-- La fiche éditable de l'île Quickshell ; sans elle (île de secours, Quickshell absent), celle de Noctalia
+touche(SUPER .. " + code:61", cmd([[sh -c 'qs -c nc-ile ipc call ile fiche >/dev/null 2>&1 || exec ~/.local/bin/nc-shell-msg keys']]),
+    trad("Applis et barre|Afficher cette fiche (Modifier : changer, ajouter)", "Show this cheat sheet (Edit: change, add)"))
 touche(SUPER .. " + code:33", cmd("~/.local/bin/nc-capture zone"), trad("Applis et barre|Capture d'une zone de l'écran", "Screenshot of an area"))
 touche(SUPER .. " + code:49", hl.dsp.workspace.toggle_special("term"), trad("Applis et barre|Terminal déroulant (sous Échap)", "Drop-down terminal (below Esc)"))
 -- Presse-papiers : la page de l'île (textes et images), sinon l'historique de Noctalia

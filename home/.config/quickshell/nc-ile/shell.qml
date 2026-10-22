@@ -8,6 +8,7 @@
 //   qs -c nc-ile ipc call ile page wifi  ouvrir une page : wifi, bluetooth, son, notifications
 //   qs -c nc-ile ipc call ile effacerNotifications | concentration | recherche (Spotlight, Super + R)
 //   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
+//   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -82,6 +83,16 @@ ShellRoot {
         active: Etat.projection
         Projection {}
     }
+    // Fiche des raccourcis (Super + /), éditable : créée à l'ouverture, sur l'écran actif ; sans l'île Quickshell,
+    // Super + / ouvre la fiche de Noctalia
+    property bool ficheOuverte: false
+    LazyLoader {
+        active: racine.ficheOuverte
+        Fiche {
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: racine.ficheOuverte = false
+        }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -100,6 +111,7 @@ ShellRoot {
         function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
         function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }
+        function fiche(): void { Etat.fermer(); racine.ficheOuverte = !racine.ficheOuverte }   // Super + /
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }
         function vueOuvrir(): void { Etat.fermer(); Etat.vueFenetres = true }
