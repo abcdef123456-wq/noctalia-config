@@ -290,6 +290,12 @@ nc-anim liste # les animations du bouton d'arrêt (nc-anim NOM pour en voir une)
 Tes fichiers personnels (`perso.lua`, `~/.zshrc.perso`, `perso.conf`), tes fonds d'écran, ta photo de profil et tes couleurs
 ne sont jamais remplacés.
 
+Si `nc-maj` s'arrête sur « Not possible to fast-forward » et que tu n'as rien modifié toi-même dans le dépôt :
+
+```bash
+git -C ~/noctalia-config branch sauvegarde && git -C ~/noctalia-config fetch && git -C ~/noctalia-config reset --hard origin/main && ~/noctalia-config/install.sh
+```
+
 **Sessions** (`nc-session`, **Super + Maj + W** ou `session ` dans le Spotlight) : enregistre la disposition du moment
 — applis ouvertes, leur bureau, leur place si elles sont libres, le dossier et le programme des terminaux (Neovim…) —
 sous un nom (« Dev », « Cours »…), et rouvre-la d'un coup : les applis déjà ouvertes vont sur leur bureau, les autres sont
