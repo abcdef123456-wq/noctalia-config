@@ -2003,6 +2003,7 @@ def photo_fenetres():
         return None
     return dict(t=time.time(),
                 fenetres={x["address"]: dict(bureau=(x.get("workspace") or {}).get("id"), libre=bool(x.get("floating")),
+                                             classe=x.get("class") or "",
                                              plein=int(x.get("fullscreen") or 0), at=x.get("at"), taille=x.get("size"))
                           for x in c if x.get("mapped") and (x.get("workspace") or {}).get("id", 0) > 0},
                 bureaux={str(x["id"]): x.get("name") for x in b if x.get("id", 0) > 0})
@@ -2121,7 +2122,7 @@ def ranger(bureau_seul):
         dire(titre, (str(d.get("reponse") or "") or T("Rien à changer : c'est déjà bien rangé.", "Nothing to change: already tidy."))[:300])
         return 0
     avant = photo_fenetres()
-    lua, faits, apres_lua = [], [], []
+    lua, faits, apres_lua, arbres = [], [], [], {}
     # Zones : les fenêtres restent en tuiles, dans la disposition nc-zones du bureau (raccourcis, ouverture, fermeture
     # marchent comme ailleurs) ; sans elle (Hyprland plus ancien), elles deviennent libres et sont posées à leur place
     zonees = [v for v in valides if v["outil"] == "fenetre_zone"]
@@ -2143,6 +2144,7 @@ def ranger(bureau_seul):
                 if f.get("floating"):
                     lua.append(f"hl.dsp.window.float({{ action = 'unset', window = 'address:{adr}' }})")
             apres_lua.append(f"nc.zones_poser({b}, {lua_arbre(arbre)})")
+            arbres[str(b)] = arbre
             faits.append(T(f"Bureau {b} : {len(zones)} fenêtre(s) en zones", f"Desktop {b}: {len(zones)} window(s) in zones"))
         valides = [v for v in valides if v["outil"] != "fenetre_zone"]
     for v in valides:
@@ -2163,13 +2165,132 @@ def ranger(bureau_seul):
             ANNULER_RANGEMENT.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(ANNULER_RANGEMENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(dict(avant, portee=bureau, apres=photo_fenetres(),
+                json.dump(dict(avant, portee=bureau, apres=photo_fenetres(), arbres=arbres,
                                zones=[int(l.split("(")[1].split(",")[0]) for l in apres_lua]), f)
         except OSError:
             pass
+        # Gardé deux minutes sans rien changer : mémorisé pour ces applis (« Tes dispositions »)
+        if arbres and reglage("DISPOSITIONS_PROPOSER", "oui") != "non":
+            subprocess.Popen(["sh", "-c", 'sleep "${NC_DISPOSITIONS_DELAI:-120}"; exec "$0" disposition-garder', sys.argv[0]],
+                             start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     corps = " · ".join(faits[:4]) + (T(f" (+ {len(faits) - 4} autres)", f" (+ {len(faits) - 4} more)") if len(faits) > 4 else "")
     if dire(T("Fenêtres rangées", "Windows tidied"), corps, annuler=bool(avant)) == "annuler":
         annuler_rangement()
+    return 0
+
+
+# ── Tes dispositions : un rangement en zones gardé est mémorisé pour l'ensemble des applis de son bureau ; quand ces
+# mêmes applis sont de nouveau réunies sur un bureau, l'île propose de la reprendre — sans IA (marche avec IA_MODE=non).
+# Réglage DISPOSITIONS_PROPOSER ; « Non » trois fois de suite pour un même ensemble : plus proposé.
+DISPOSITIONS = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config/dispositions.json"
+
+
+def lire_dispositions():
+    try:
+        d = json.loads(DISPOSITIONS.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def ecrire_dispositions(d):
+    DISPOSITIONS.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DISPOSITIONS.with_name(f".{DISPOSITIONS.name}.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    tmp.replace(DISPOSITIONS)
+
+
+def cle_disposition(classes):
+    return "+".join(sorted(c.lower() for c in classes if c))
+
+
+def zones_actives(bureau):
+    return sortie_cmd(["hyprctl", "eval", f"if not (nc and nc.zones and nc.zones[{int(bureau)}]) then error('non') end"], 5)[0] == 0
+
+
+def disposition_garder():
+    """Deux minutes après un rangement : si rien n'a bougé et que les zones sont toujours là, chaque bureau rangé est
+    mémorisé, ses feuilles portant la classe de l'appli au lieu de l'adresse de la fenêtre."""
+    try:
+        dernier = json.loads(ANNULER_RANGEMENT.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    maintenant = photo_fenetres()
+    if not maintenant or not inchange(dernier.get("apres"), maintenant, dernier.get("portee")):
+        return 0
+    d = lire_dispositions()
+    for b, arbre in (dernier.get("arbres") or {}).items():
+        if not zones_actives(b):
+            continue
+        classes = {a: (maintenant["fenetres"].get(a) or {}).get("classe", "") for a in feuilles(arbre)}
+        if not all(classes.values()):
+            continue
+
+        def en_classes(n):
+            return {"f": classes[n["f"]]} if "f" in n else dict(n, a=en_classes(n["a"]), b=en_classes(n["b"]))
+        d[cle_disposition(classes.values())] = {"arbre": en_classes(arbre), "refus": 0, "date": int(time.time())}
+    ecrire_dispositions(d)
+    return 0
+
+
+def feuilles(n):
+    return [n["f"]] if "f" in n else feuilles(n["a"]) + feuilles(n["b"])
+
+
+def disposition_proposer(bureau):
+    """Appelé par nc/automatismes.lua quand des fenêtres s'ouvrent ou qu'on change de bureau : si les applis de ce bureau
+    sont un ensemble mémorisé, l'île propose de reprendre sa disposition."""
+    if reglage("DISPOSITIONS_PROPOSER", "oui") == "non":
+        return 0
+    d = lire_dispositions()
+    try:
+        c = json.loads(subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=5).stdout or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0
+    ici = [x for x in c if x.get("mapped") and (x.get("workspace") or {}).get("id") == int(bureau) and not x.get("floating")]
+    cle = cle_disposition(x.get("class", "") for x in ici)
+    m = d.get(cle)
+    if not m or m.get("refus", 0) >= 3 or len(ici) < 2 or zones_actives(bureau):
+        return 0
+    deja = CACHE / "disposition-proposee"
+    if deja.exists() and deja.read_text() == f"{bureau}:{cle}" and time.time() - deja.stat().st_mtime < 600:
+        return 0                                     # déjà proposée ici il y a moins de 10 min
+    deja.parent.mkdir(parents=True, exist_ok=True)
+    deja.write_text(f"{bureau}:{cle}")
+    noms = ", ".join(sorted({x.get("class", "") for x in ici}))
+    try:
+        choix = subprocess.run(["notify-send", "-a", "IA", "-i", "view-grid", "-A", "oui=" + T("Oui", "Yes"), "-A", "non=" + T("Non", "No"),
+                                "--", T("Reprendre ta disposition ?", "Restore your layout?"), corps_sur(noms)],
+                               capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    d = lire_dispositions()
+    if cle not in d:
+        return 0
+    if choix != "oui":
+        if choix == "non":
+            d[cle]["refus"] = d[cle].get("refus", 0) + 1
+            ecrire_dispositions(d)
+        return 0
+    # Chaque feuille prend la première fenêtre de sa classe (ordre de Hyprland), une seule fois
+    libres = {}
+    for x in ici:
+        libres.setdefault((x.get("class") or "").lower(), []).append(x["address"])
+
+    def en_adresses(n):
+        if "f" in n:
+            l = libres.get(n["f"].lower()) or []
+            return {"f": l.pop(0)} if l else None
+        a, b = en_adresses(n["a"]), en_adresses(n["b"])
+        return dict(n, a=a, b=b) if a and b else (a or b)
+    arbre = en_adresses(m["arbre"])
+    if not arbre:
+        return 0
+    d[cle]["refus"] = 0
+    ecrire_dispositions(d)
+    ensemble([], [f"nc.zones_poser({int(bureau)}, {lua_arbre(arbre)})"])
     return 0
 
 
@@ -2653,6 +2774,10 @@ def main(a):
             return ranger("--bureau" in a)
         if c in ("annuler-rangement", "undo-tidy"):
             return annuler_rangement()
+        if c == "disposition-garder":
+            return disposition_garder()
+        if c == "disposition-proposer" and a and a[0].lstrip("-").isdigit():
+            return disposition_proposer(int(a[0]))
         if c in ("organiser", "organize"):
             # Mode « confirmer » : le plan dans le Spotlight. Super + Maj + O : tous les bureaux ; Super + Ctrl + O (--bureau) : celui qui est affiché
             demande = T("Organise les fenêtres du bureau affiché : une meilleure disposition, sans les changer de bureau.",

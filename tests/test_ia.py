@@ -690,6 +690,45 @@ class IA(unittest.TestCase):
         self.assertIn("Bureau 2 : 3 fenêtre(s) en zones", tout)
         self.assertIn("nc.zones_retirer(2)", tout, "« Annuler » rend la disposition habituelle")
 
+    def test_tes_dispositions(self):
+        """IDÉE-1 : un rangement en zones gardé est mémorisé pour ses applis (classes) ; ces applis de nouveau réunies sur
+        un bureau : « Reprendre ta disposition ? » ; Oui la pose sans IA ; Non trois fois : plus proposé."""
+        clients = [{"address": "0xa1", "class": "code", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [10, 52], "size": [940, 938]},
+                   {"address": "0xb2", "class": "firefox", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [958, 52], "size": [632, 938]}]
+        (self.home / "clients.json").write_text(json.dumps(clients))
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$*" in *"error(\'non\')"*) [ -e "$HOME/zones" ] || exit 7;; esac; '
+                                  'case "$1" in clients) cat "$HOME/clients.json";; workspaces) echo \'[{"id": 2, "name": "2"}]\';; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"; cat "$HOME/reponse" 2>/dev/null')
+        etat = self.home / "cache/nc/rangement-avant.json"; etat.parent.mkdir(parents=True, exist_ok=True)
+        photo = {a["address"]: dict(bureau=2, libre=False, classe=a["class"], plein=0, at=a["at"], taille=a["size"]) for a in clients}
+        arbre = {"sens": "v", "r": 0.6, "a": {"f": "0xa1"}, "b": {"f": "0xb2"}}
+        etat.write_text(json.dumps({"portee": 2, "apres": {"fenetres": photo, "bureaux": {"2": "2"}}, "arbres": {"2": arbre}, "fenetres": {}, "bureaux": {}}))
+        (self.home / "zones").write_text("")                  # les zones sont toujours posées
+        self.assertEqual(self.lancer("disposition-garder", env_plus={"XDG_STATE_HOME": str(self.home / "state")}).returncode, 0)
+        memo = json.loads((self.home / "state/noctalia-config/dispositions.json").read_text())
+        self.assertEqual(memo["code+firefox"]["arbre"], {"sens": "v", "r": 0.6, "a": {"f": "code"}, "b": {"f": "firefox"}})
+        # Plus tard, d'autres fenêtres de ces applis sur le bureau 3 : proposé, et Oui pose la disposition
+        (self.home / "zones").unlink()
+        clients = [dict(c, address=c["address"] + "9", workspace={"id": 3}) for c in clients][::-1]
+        (self.home / "clients.json").write_text(json.dumps(clients))
+        (self.home / "reponse").write_text("oui")
+        env = {"XDG_STATE_HOME": str(self.home / "state")}
+        self.assertEqual(self.lancer("disposition-proposer", "3", env_plus=env).returncode, 0)
+        a = self.appels()
+        self.assertIn("Reprendre ta disposition ?", a)
+        self.assertIn('nc.zones_poser(3, { sens = "v", r = 0.6, a = { f = "0xa19" }, b = { f = "0xb29" } })', a)
+        self.assertFalse(Faux.requetes, "sans IA")
+        # Non trois fois : plus proposé
+        (self.home / "reponse").write_text("non")
+        for _ in range(3):
+            (self.home / "cache/nc/disposition-proposee").unlink(missing_ok=True)
+            self.lancer("disposition-proposer", "3", env_plus=env)
+        (self.home / "cache/nc/disposition-proposee").unlink(missing_ok=True)
+        self.journal.unlink()
+        self.lancer("disposition-proposer", "3", env_plus=env)
+        self.assertNotIn("Reprendre", self.appels())
+        self.assertEqual(json.loads((self.home / "state/noctalia-config/dispositions.json").read_text())["code+firefox"]["refus"], 3)
+
     def test_zones_en_arbre_de_decoupes(self):
         import importlib.machinery, importlib.util
         l = importlib.machinery.SourceFileLoader("ncia_zones", str(BIN / "nc-ia"))

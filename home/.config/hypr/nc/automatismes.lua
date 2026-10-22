@@ -327,3 +327,29 @@ hl.on("window.active", function(w)
         hl.exec_cmd("~/.local/bin/nc-fenetre aller " .. w.address)
     end
 end)
+
+-- ── Tes dispositions ────────────────────────────────────────────────────────
+-- Un rangement en zones gardé est mémorisé pour l'ensemble des applis de son bureau (nc-ia) ; quand ces mêmes applis
+-- sont de nouveau réunies sur un bureau, l'île propose « Reprendre ta disposition ? ». Rien n'est lancé tant qu'aucune
+-- disposition n'est mémorisée ; une seule vérification 1,5 s après le dernier changement. Réglage DISPOSITIONS_PROPOSER.
+local DISPOSITIONS = STATE .. "dispositions.json"
+local tour_dispositions = 0
+local function verifier_dispositions(id)
+    if not id or id <= 0 or nc.reglage("DISPOSITIONS_PROPOSER", "oui") == "non" then return end
+    local f = io.open(DISPOSITIONS, "r")
+    if not f then return end
+    local plein = (f:read(3) or ""):len() > 2
+    f:close()
+    if not plein then return end
+    tour_dispositions = tour_dispositions + 1
+    local mien = tour_dispositions
+    hl.timer(function()
+        if mien == tour_dispositions then hl.exec_cmd("~/.local/bin/nc-ia disposition-proposer " .. math.floor(id)) end
+    end, { timeout = 1500, type = "oneshot" })
+end
+hl.on("window.open", function(w)
+    if w and w.workspace and (w.workspace.id or 0) > 0 then verifier_dispositions(w.workspace.id) end
+end)
+hl.on("workspace.active", function(ws)
+    if ws and ws.name and ws.name:sub(1, 8) ~= "special:" then verifier_dispositions(ws.id) end
+end)

@@ -991,6 +991,12 @@ REGLAGES = [
         "Super + Shift + I: pick an area (an error message, a chart…), the AI explains it in a notification. "
         "Needs an AI that reads images.")),
     # Ranger les fenêtres (Super + Maj + O, Super + Ctrl + O) : le raccourci est la demande, fait tout de suite
+    R("DISPOSITIONS_PROPOSER", "Intelligence artificielle", L("Proposer de reprendre tes dispositions", "Offer to restore your layouts"),
+      "ouinon", "oui",
+      L("Un rangement en zones gardé deux minutes est retenu pour ces applis ; quand elles sont de nouveau réunies sur un "
+        "bureau, l'île propose de le reprendre (sans IA). « Non » trois fois : plus proposé pour elles.",
+        "A zone layout kept for two minutes is remembered for those apps; when they are together again on a desktop, the "
+        "island offers to restore it (no AI). “No” three times: no longer offered for them.")),
     R("IA_ORGANISER", "Intelligence artificielle", L("Ranger les fenêtres (Super + Maj + O)", "Tidy windows (Super + Shift + O)"),
       "choix", "auto",
       L("Super + Maj + O range toutes les fenêtres sur des bureaux nommés, Super + Ctrl + O seulement le bureau affiché. "
