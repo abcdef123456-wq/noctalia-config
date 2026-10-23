@@ -133,6 +133,13 @@ class Alertes(unittest.TestCase):
         self.assertEqual(self.textes(), ["✅ Mise à jour du système terminée : système à jour.",
                                          "✅ Mise à jour du système terminée, 3 encore en attente.", "Bonjour le monde"])
 
+    def test_mise_a_jour_echouee_jamais_terminee(self):
+        """Revue B1 R3 : pacman -Su en échec, et Telegram disait « ✅ terminée »."""
+        self.lancer("maj", "2", "echec", "1")
+        self.lancer("maj", "0", "echec", "3")
+        self.assertEqual(self.textes(), ["❌ La mise à jour du système a échoué (code 1), 2 encore en attente.",
+                                         "❌ La mise à jour du système a échoué (code 3)."])
+
     def test_en_pause_en_economie_sur_batterie(self):
         """Une alerte part d'un automatisme (toutes les 5 min) : arrière-plan, en pause en Économie sur batterie."""
         self.lancer("maj", "0", eco=True)

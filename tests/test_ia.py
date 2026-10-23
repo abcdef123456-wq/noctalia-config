@@ -945,6 +945,27 @@ class IA(unittest.TestCase):
         self.lancer("rapport-maj", "systeme", str(avant_f))
         self.assertIn("Nouveau noyau : non", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
 
+    def test_rapport_systeme_vrai_nombre_et_faits(self):
+        """Revue B1 R2 : au-delà de 200 paquets, le rapport disait 200 ; R1 R3 : restés en attente et échec, dits tels quels."""
+        maj = self.home / "maj.json"
+        maj.write_text(json.dumps({"paquets": [{"nom": f"p{i}", "avant": "1", "apres": "2", "source": "depot"} for i in range(450)],
+                                   "total": 450, "en_attente": 2, "en_attente_noms": ["firefox-esr", "zsh"], "echec": 1}))
+        self.lancer("rapport-maj", "systeme", str(maj), env_plus={"NC_IA_EN_LIGNE": "0"})
+        d = json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())
+        self.assertEqual((d["nombre"], len(d["details"]), d["en_attente"], d["echec"]), (450, 200, 2, 1), "la coupe à l'affichage seulement")
+        self.assertTrue(d["resume"].startswith("450 paquet(s) mis à jour."), d["resume"])
+        self.assertIn("La mise à jour a échoué (code 1)", d["resume"])
+        self.assertIn("2 resté(s) en attente : firefox-esr, zsh.", d["resume"])
+        # Avec l'IA : 200 lignes et le vrai total, les faits donnés, et gardés dans le résumé quoi qu'elle réponde
+        Faux.requetes.clear()
+        self.lancer("rapport-maj", "systeme", str(maj))
+        corps = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("… et 250 autres (450 en tout).", corps)
+        self.assertNotIn("p449", corps)
+        d = json.loads((self.home / "cache/nc/rapports/systeme.json").read_text())
+        self.assertEqual(d["nombre"], 450)
+        self.assertIn("2 resté(s) en attente", d["resume"])
+
     # ── Clés ──
     def test_cles_privees_jamais_affichees(self):
         r = self.lancer("cle", "openai", entree=CLE_O + "\n")

@@ -2498,16 +2498,43 @@ def details_config(avant, apres):
     return [l.strip() for l in r.stdout.splitlines() if l.strip()][:60]
 
 
-def details_systeme(fichier):
+def lire_maj_systeme(fichier):
+    """~/.cache/nc/paquets-maj.json de nc-paquets : ce que la mise à jour a vraiment changé (versions installées avant
+    et après), et ce qui reste en attente d'après le recompte. {} s'il est illisible."""
     try:
         d = json.loads(Path(fichier).read_text())
     except (OSError, ValueError):
-        return []
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+MONTRES = 200          # paquets montrés dans le rapport et donnés à l'IA ; le nombre, lui, est toujours le vrai
+
+
+def details_systeme(fichier):
+    """Tous les paquets changés (aucune coupe ici : le nombre du rapport est le vrai, la coupe se fait à l'affichage)."""
     res = []
-    for x in d.get("paquets", [])[:200]:
+    for x in lire_maj_systeme(fichier).get("paquets", []):
+        if not isinstance(x, dict):
+            continue
         v = f"{x.get('avant', '')} → {x.get('apres', '')}".strip(" →")
         res.append(("★ " if x.get("important") else "") + f"{x.get('nom')} {v}".strip() + (f" ({x.get('source')})" if x.get("source") not in (None, "depot") else ""))
     return res
+
+
+def faits_systeme(fichier):
+    """Ce que nc-paquets a constaté en plus, dit tel quel dans le rapport (avec ou sans IA) : la mise à jour en échec
+    (en partie : pacman fait, Flatpak en échec), les paquets restés en attente (retenus par apt, ignorés…)."""
+    d, faits = lire_maj_systeme(fichier), []
+    echec, attente = d.get("echec", 0), d.get("en_attente", 0)
+    if isinstance(echec, int) and echec:
+        faits.append(T(f"La mise à jour a échoué (code {echec}) : une partie seulement est installée.",
+                       f"The update failed (code {echec}): only part of it is installed."))
+    if isinstance(attente, int) and attente > 0:
+        noms = [str(n) for n in d.get("en_attente_noms", []) if n][:5]
+        faits.append(T(f"{attente} resté(s) en attente", f"{attente} still pending") + (" : " + ", ".join(noms) if noms else "")
+                     + (T(" et d'autres", " and more") if attente > len(noms) and noms else "") + ".")
+    return faits
 
 
 NOYAU = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kernel(-core)?)$")    # comme nc-paquets
@@ -2518,7 +2545,7 @@ def noyau_mis_a_jour(details):
     return any(NOYAU.match(d.removeprefix("★ ").split(" ", 1)[0]) for d in details)
 
 
-def resume_sans_ia(genre, details):
+def resume_sans_ia(genre, details, faits=()):
     """Le rapport sans IA (coupée, en pause, injoignable) : les faits seulement, en quelques lignes."""
     if genre == "config":
         idees = [re.split(r" : | ; ", d, 1)[0].strip()[:90] for d in details[:4]]
@@ -2529,15 +2556,18 @@ def resume_sans_ia(genre, details):
     l += [f"- **{x}**" for x in importants[:5]]
     if noyau_mis_a_jour(details):
         l.append(T("Redémarre pour utiliser le nouveau noyau.", "Restart to use the new kernel."))
+    l += list(faits)
     return "\n".join(l)
 
 
-def ecrire_rapport(genre, details, resume, ia=""):
+def ecrire_rapport(genre, details, resume, ia="", **plus):
+    """nombre : tous les éléments ; details : les MONTRES premiers seulement (la fenêtre des réglages les affiche).
+    plus (système) : en_attente, echec, de paquets-maj.json."""
     RAPPORTS.mkdir(parents=True, exist_ok=True)
     f = RAPPORTS / f"{genre}.json"
     tmp = f.with_suffix(".tmp")
     tmp.write_text(json.dumps(dict(genre=genre, date=int(time.time()), titre=T(*TITRES_RAPPORT[genre]), resume=resume, ia=ia,
-                                   details=details, nombre=len(details)), ensure_ascii=False))
+                                   details=details[:MONTRES], nombre=len(details), **plus), ensure_ascii=False))
     tmp.replace(f)
 
 
@@ -2547,9 +2577,14 @@ def rapport_maj(genre, args):
     details = details_config(*(args + ["", ""])[:2]) if genre == "config" else details_systeme(args[0] if args else "")
     if not details:
         return 0
+    faits, plus = [], {}
+    if genre != "config":
+        faits = faits_systeme(args[0] if args else "")
+        d = lire_maj_systeme(args[0] if args else "")
+        plus = {k: d[k] for k in ("en_attente", "echec") if isinstance(d.get(k), int)}
     if coupee() or not candidats("texte"):
         # Sans IA (coupée, en pause, injoignable) : le rapport des faits, sans notification (rien de plus que d'habitude)
-        ecrire_rapport(genre, details, resume_sans_ia(genre, details))
+        ecrire_rapport(genre, details, resume_sans_ia(genre, details, faits), **plus)
         return 0
     if genre == "config":
         consigne_r = T("Voici les messages des mises à jour qui viennent d'être installées sur le bureau de l'utilisateur "
@@ -2570,16 +2605,21 @@ def rapport_maj(genre, args):
                        "plain English, what matters: kernel, graphics drivers, Hyprland and the desktop, browser, big "
                        "apps; say whether a restart is needed; ignore libraries of no interest to the user.")
     try:
-        texte = "\n".join(details)
+        texte = "\n".join(details[:MONTRES])
+        if len(details) > MONTRES:
+            texte += "\n" + T(f"… et {len(details) - MONTRES} autres ({len(details)} en tout).",
+                              f"… and {len(details) - MONTRES} more ({len(details)} in all).")
         if genre != "config":             # le fait, plutôt que de laisser l'IA deviner d'après « linux-firmware »
             texte += "\n\n" + (T("Nouveau noyau : oui (redémarrer pour l'utiliser).", "New kernel: yes (restart to use it).")
                                if noyau_mis_a_jour(details) else T("Nouveau noyau : non.", "New kernel: no."))
+            texte += "".join("\n" + f for f in faits)
         rep, ident = demander(texte, "texte", consigne_=consigne_r, sortie=lambda m: None)
     except ErreurIA:
-        ecrire_rapport(genre, details, resume_sans_ia(genre, details))
+        ecrire_rapport(genre, details, resume_sans_ia(genre, details, faits), **plus)
         return 0
     titre = T(*TITRES_RAPPORT[genre])
-    ecrire_rapport(genre, details, rep.strip(), nom(ident))
+    # Les faits (échec, restés en attente) toujours dits, que l'IA en parle ou non
+    ecrire_rapport(genre, details, rep.strip() + "".join("\n" + f for f in faits), nom(ident), **plus)
     premier = next((l.strip(" -•*") for l in rep.splitlines() if l.strip(" -•*")), "")
     notifier(titre, apercu(premier, 200), (T("Voir le rapport", "See the report"),
                                            ["qs", "-c", "nc-ile", "ipc", "call", "ile", "reglagesChercher", titre]))

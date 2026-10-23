@@ -4,6 +4,7 @@
   nc-alertes verifier       batterie sous le seuil de l'île (BATTERIE_ALERTE, une fois par passage sous le seuil) et
                             services utilisateur nc-* en échec (une fois par échec) ; toutes les 5 min (nc-alertes.timer)
   nc-alertes maj N          fin de la mise à jour du système (lancé par nc-paquets) : N mises à jour restantes
+  nc-alertes maj N echec C  la mise à jour du système a échoué (code de sortie C) : ❌, N restantes
   nc-alertes envoyer TEXTE  un message libre
 
 Rien n'est envoyé sans ALERTES_TELEGRAM=oui (nc-reglages → Agents IA) ni sans connexion configurée (nc-assistant
@@ -162,7 +163,12 @@ def main():
             if reglages().get("ALERTES_MAJ", "oui") == "non":
                 return
             n = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].isdigit() else "0"
-            if n == "0":
+            if len(sys.argv) > 3 and sys.argv[3] == "echec":
+                # La mise à jour a échoué (pacman, apt, Flatpak…) : jamais « ✅ terminée »
+                code = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4].isdigit() else ""
+                texte = T("❌ La mise à jour du système a échoué", "❌ The system update failed") + (f" (code {code})" if code else "")
+                texte += T(f", {n} encore en attente.", f", {n} still pending.") if n != "0" else "."
+            elif n == "0":
                 texte = T("✅ Mise à jour du système terminée : système à jour.", "✅ System update finished: system up to date.")
             else:
                 texte = T(f"✅ Mise à jour du système terminée, {n} encore en attente.", f"✅ System update finished, {n} still pending.")
@@ -179,7 +185,7 @@ def main():
                       f"🆕 New version of noctalia-config: {resume}\nOn the PC: the “Update” notification, or nc-update.")
             return 0 if envoyer(m, texte) else 2
         else:
-            print("nc-alertes verifier | maj N | version RÉSUMÉ | envoyer TEXTE", file=sys.stderr)
+            print("nc-alertes verifier | maj N [echec CODE] | version RÉSUMÉ | envoyer TEXTE", file=sys.stderr)
             return 1
     except Exception as exc:     # jamais d'échec d'unité pour une alerte manquée
         print("nc-alertes : " + str(exc)[:300], file=sys.stderr)

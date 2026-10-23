@@ -16,7 +16,10 @@
 # (MAJ_RAPPEL : jour, semaine, jamais). Un clic sur « Mettre à jour » ouvre le terminal de mise à jour.
 # Le recompte après la mise à jour se fait dans le terminal, avec les dépôts que la mise à jour vient de synchroniser
 # (pacman -Qu, dnf sans --refresh), en quelques secondes, et va au bout même si la fenêtre est fermée avant ; si la
-# mise à jour a échoué (mot de passe, réseau), c'est le compte complet qui est refait.
+# mise à jour a échoué (mot de passe, réseau), c'est le compte complet qui est refait, et c'est dit (terminal, Telegram).
+# Le rapport (nc-ia rapport-maj systeme) donne ce qui a vraiment changé : les versions installées relevées avant et
+# après (pacman -Q, rpm -qa, dpkg-query, flatpak list), pas la liste d'attente d'avant.
+# Un compte à la fois (verrou), une mise à jour à la fois ; après un échec du minuteur, nouvel essai 15 min plus tard.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
@@ -77,6 +80,116 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
   rm -f "$err"
 }
 
+# Jours depuis la dernière synchronisation des dépôts, quand elle est trop vieille (plus de 24 h) ; rien sinon. Seuls apt
+# et zypper sont concernés : sans root, nc-paquets lit leurs listes sans les rafraîchir, et une Debian minimale (sans
+# service qui le fait) les garde telles quelles : « à jour » serait faux. La date : le plus récent des fichiers que la
+# synchronisation réécrit (apt : listes InRelease, dossiers lists et partial, update-success-stamp ; zypper : son cache
+# brut). Arch (checkupdates) et Fedora (dnf --refresh) synchronisent eux-mêmes.
+age_depots() {
+  local recent="" maintenant a="${NC_APT_ETAT:-/var/lib/apt}"
+  command -v pacman >/dev/null && return 0
+  command -v dnf >/dev/null && return 0
+  if command -v apt >/dev/null; then
+    recent="$( { find "$a/lists" -maxdepth 1 \( -name '*InRelease' -o -name '*_Release' \) -printf '%T@\n'
+                 find "$a/lists" "$a/lists/partial" "$a/periodic/update-success-stamp" -maxdepth 0 -printf '%T@\n'; } 2>/dev/null |
+               sort -n | tail -1)"
+  elif command -v zypper >/dev/null; then
+    recent="$(find "${NC_ZYPP_RAW:-/var/cache/zypp/raw}" -mindepth 1 -maxdepth 3 -printf '%T@\n' 2>/dev/null | sort -n | tail -1)"
+  fi
+  recent="${recent%.*}"
+  case "$recent" in ''|*[!0-9]*) return 0 ;; esac
+  maintenant=$(date +%s)
+  [ $((maintenant - recent)) -gt 86400 ] && echo $(( (maintenant - recent) / 86400 ))
+  return 0
+}
+
+# Ce qui est installé (source<TAB>paquet<TAB>version<TAB>marque ; marque : le commit d'un Flatpak), relevé avant et après
+# la mise à jour : le rapport donne ce qui a vraiment changé, pas la liste d'attente d'avant (une version plus récente
+# sortie entre-temps, un paquet retenu par apt). Même ordre que details() : pacman, puis rpm (dnf, zypper), puis dpkg.
+installes() {
+  if command -v pacman >/dev/null; then
+    local etrangers; etrangers="$(pacman -Qmq 2>/dev/null)"     # hors dépôts : l'AUR
+    pacman -Q 2>/dev/null | awk -v e="$etrangers" 'BEGIN { n = split(e, l, "\n"); for (i = 1; i <= n; i++) m[l[i]] = 1 }
+      NF >= 2 { print (($1 in m) ? "aur" : "depot") "\t" $1 "\t" $2 }'
+  elif command -v rpm >/dev/null && { command -v dnf || command -v nobara-sync || command -v zypper; } >/dev/null; then
+    rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' 2>/dev/null | awk -F'\t' 'NF >= 2 && $1 != "gpg-pubkey" {print "depot\t" $1 "\t" $2}'
+  elif command -v dpkg-query >/dev/null; then
+    # Seulement les paquets installés (« ii », « hi » : retenu), pas ceux dont il ne reste que la configuration
+    dpkg-query -W -f='${Package}\t${Version}\t${db:Status-Abbrev}\n' 2>/dev/null |
+      awk -F'\t' 'substr($3, 2, 1) == "i" {print "depot\t" $1 "\t" $2}'
+  fi
+  if command -v flatpak >/dev/null; then
+    flatpak list --columns=application,branch,version,active 2>/dev/null |
+      awk -F'\t' '$1 != "" {print "flatpak\t" $1 "//" $2 "\t" $3 "\t" $4}'
+  fi
+  return 0
+}
+
+# La différence entre deux relevés d'installes() (avant, après la mise à jour) : ~/.cache/nc/paquets-maj.json, lu par
+# nc-ia rapport-maj systeme. Champs : date, paquets (source, nom, avant, apres, important), total (tous les paquets
+# changés, sans coupe), en_attente (le compte d'après la mise à jour) et en_attente_noms (les 20 premiers), echec (code
+# de sortie de la mise à jour, 0 : réussie), incomplet (le recompte n'a pas abouti). Code 0 s'il y a quelque chose à
+# rapporter ; sinon le fichier est retiré (jamais un vieux rapport repris).
+difference() {
+  python3 - "$1" "$2" "$cache" "$3" "$4" <<'PY'
+import json, os, re, sys, tempfile, time
+avant_f, apres_f, cache, code, incomplet = sys.argv[1:6]
+sortie = os.path.join(cache, "paquets-maj.json")
+
+def lire(f):
+    d = {}
+    try:
+        lignes = open(f, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return d
+    for l in lignes:
+        c = (l.split("\t") + [""] * 4)[:4]
+        if not c[1]:
+            continue
+        cle = ("flatpak" if c[0] == "flatpak" else "natif", c[1])
+        src, vs = d.get(cle, (c[0], set()))
+        vs.add((c[2], c[3]))
+        d[cle] = (c[0], vs)
+    return d
+
+avant, apres = lire(avant_f), lire(apres_f)
+paquets = []
+if avant and apres:               # un relevé vide (outil en échec) ne fait jamais « tout le système mis à jour »
+    v = lambda s: " ".join(sorted({x[0] for x in s if x[0]}))
+    for cle, (src, vs) in apres.items():
+        b = avant.get(cle, (src, set()))[1]
+        if not vs - b:
+            continue              # inchangé, ou seulement retiré (un ancien noyau)
+        av, ap = v(b - vs) or v(b), v(vs - b)
+        if av == ap:
+            av = ""               # Flatpak : même version, nouveau commit
+        paquets.append(dict(source=src, nom=cle[1].split("//")[0], avant=av, apres=ap))
+IMPORTANT = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kernel(-core)?|nvidia.*|mesa|vulkan-.*|systemd|glibc|"
+                       r"hyprland|quickshell|noctalia.*|pipewire|wireplumber|xdg-desktop-portal.*|firmware|linux-firmware)$")
+for p in paquets:
+    p["important"] = bool(IMPORTANT.match(p["nom"]))
+paquets.sort(key=lambda p: (not p["important"], p["source"] != "depot", p["nom"]))
+if not paquets:
+    try:
+        os.remove(sortie)
+    except OSError:
+        pass
+    sys.exit(1)
+try:
+    compte = json.load(open(os.path.join(cache, "paquets.json")))
+    compte = compte if isinstance(compte, dict) else {}
+except (OSError, ValueError):
+    compte = {}
+restes = [str(p.get("nom", "")) for p in compte.get("paquets", []) if isinstance(p, dict)]
+d = dict(date=int(time.time()), paquets=paquets, total=len(paquets), en_attente=int(compte.get("total", len(restes)) or 0),
+         en_attente_noms=restes[:20], echec=int(code) if code.isdigit() else 1, incomplet=incomplet == "1")
+f = tempfile.NamedTemporaryFile("w", dir=cache, prefix=".paquets-maj.", suffix=".json", delete=False, encoding="utf-8")
+with f:
+    json.dump(d, f, ensure_ascii=False)
+os.replace(f.name, sortie)
+PY
+}
+
 # Les paquets connus d'une source qui n'a pas pu être lue cette fois : ceux du dernier compte, gardés tels quels
 anciens() {
   python3 - "$cache/paquets.json" "$@" <<'PY' 2>/dev/null
@@ -107,7 +220,28 @@ il_est_temps() {
   esac
   [ "$min" -gt "$base" ] && base=$min
   dernier=$(stat -c %Y "$fichier" 2>/dev/null || echo 0); maintenant=$(date +%s)
+  # La dernière vérification n'a pas abouti (réseau, dépôt) : $fichier vient d'être redaté, la période entière (jusqu'à
+  # 12 h) passerait avant le nouvel essai. Nouvel essai 15 min après l'échec, puis 30, 60… jamais plus espacé que la
+  # période (le plafond)
+  delai_reessai "$base"
+  if [ -n "$err_delai" ] && [ $((maintenant - err_date)) -ge $((err_delai * 60 - 120)) ]; then return 0; fi
   [ $((maintenant - dernier)) -ge $((base * 60 - 300)) ]
+}
+
+# Après des échecs de suite (~/.cache/nc/paquets-erreur : date<TAB>sources<TAB>nombre d'échecs de suite) : err_delai, le
+# délai en minutes avant le nouvel essai (15, doublé à chaque échec, $1 au plus : la période normale), err_date (la
+# date du dernier échec) et err_nombre ; err_delai vide sans échec en cours.
+delai_reessai() {
+  local i=1 plafond="${1:-60}" sources
+  err_date=""; err_nombre=0; err_delai=""
+  [ -s "$cache/paquets-erreur" ] || return 0
+  IFS=$'\t' read -r err_date sources err_nombre < "$cache/paquets-erreur" || true
+  case "$err_date" in ''|*[!0-9]*) err_date=""; return 0 ;; esac
+  case "$err_nombre" in ''|*[!0-9]*) err_nombre=1 ;; esac
+  err_delai=15
+  while [ "$i" -lt "$err_nombre" ] && [ "$err_delai" -lt "$plafond" ]; do err_delai=$((err_delai * 2)); i=$((i + 1)); done
+  [ "$err_delai" -gt "$plafond" ] && err_delai=$plafond
+  return 0
 }
 
 # Détail (JSON), et ce qu'il faut notifier : « titre<TAB>texte » sur la sortie, ou rien
@@ -115,9 +249,10 @@ analyser() {
   # Le code passe par -c : l'entrée standard reste celle du tube (la liste des paquets)
   local code
   code="$(cat <<'PY'
-import json, os, re, sys, time
-mode, cache, choix, rappel, langue, manque = sys.argv[1:7]
+import json, os, re, sys, tempfile, time
+mode, cache, choix, rappel, langue, manque, vieux = sys.argv[1:8]
 manque = [m for m in manque.split(",") if m]
+vieux = int(vieux) if vieux.isdigit() else None       # jours sans synchronisation des dépôts (apt, zypper), ou None
 en = langue.startswith("en")
 T = lambda fr, e: e if en else fr
 lignes = [l.split("\t") for l in sys.stdin.read().splitlines() if l.strip()]
@@ -150,10 +285,24 @@ try:
 except (OSError, ValueError, AttributeError):
     date_ok = 0
 detail = dict(date=maintenant, date_ok=date_ok if manque else maintenant, total=len(paquets), sources=sources, noyau=noyau,
-              paquets=paquets[:300], derniere_notif=etat.get("date", 0), incomplet=manque)
-tmp = os.path.join(cache, "paquets.json.tmp")
-json.dump(detail, open(tmp, "w"), ensure_ascii=False)
-os.replace(tmp, os.path.join(cache, "paquets.json"))
+              paquets=paquets[:300], derniere_notif=etat.get("date", 0), incomplet=manque, non_synchro_jours=vieux)
+
+def ecrire(nom, valeur):
+    """Écriture atomique, par un temporaire unique : deux comptes en même temps ne se marchent jamais dessus, et
+    l'île ne lit jamais un JSON à moitié écrit."""
+    f = tempfile.NamedTemporaryFile("w", dir=cache, prefix="." + nom + ".", suffix=".json", delete=False, encoding="utf-8")
+    try:
+        with f:
+            json.dump(valeur, f, ensure_ascii=False)
+        os.replace(f.name, os.path.join(cache, nom))
+    except OSError:
+        try:
+            os.remove(f.name)
+        except OSError:
+            pass
+        raise
+
+ecrire("paquets.json", detail)
 
 def ligne(p):
     sans_epoque = lambda x: re.sub(r"^\d+:", "", x)           # « 1:26.2.4-1 » → « 26.2.4-1 »
@@ -171,6 +320,10 @@ def texte():
         return (T("Vérification impossible", "Could not check for updates"),
                 T(f"Pas de réponse : {pas_lu} (réseau ou dépôt indisponible). Réessaie plus tard.",
                   f"No answer from: {pas_lu} (network or repository unavailable). Try again later."))
+    retard = T(f"Dépôts non synchronisés depuis {vieux} j : des mises à jour peuvent manquer (« Mettre à jour » les synchronise).",
+               f"Repositories not synced for {vieux} d: updates may be missing (“Update” syncs them).") if vieux else ""
+    if n == 0 and vieux:              # une vieille liste vide n'est pas « à jour »
+        return T("Dépôts non synchronisés", "Repositories not synced"), retard
     if n == 0:
         return T("Système à jour", "System up to date"), T("Aucune mise à jour en attente.", "No pending update.")
     titre = T(f"{n} mise{'s' if n > 1 else ''} à jour", f"{n} update{'s' if n > 1 else ''}")
@@ -182,6 +335,8 @@ def texte():
         corps += "\n" + T("Nouveau noyau : redémarre après la mise à jour.", "New kernel: restart after updating.")
     if manque:
         corps += "\n" + T(f"Pas vérifié cette fois : {pas_lu} (dernier état gardé).", f"Not checked this time: {pas_lu} (last state kept).")
+    if retard:
+        corps += "\n" + retard
     return titre, corps
 
 noms = sorted(f"{p['source']}:{p['nom']}:{p['apres']}" for p in paquets)
@@ -194,7 +349,7 @@ elif choix != "ile" and choix != "non" and paquets:
     delai = {"semaine": 7 * 86400, "jamais": None}.get(rappel, 86400)
     envoyer = bool(nouveaux) or (delai is not None and maintenant - etat.get("date", 0) >= delai)
 if envoyer:
-    json.dump(dict(date=maintenant, noms=noms), open(etat_f, "w"))
+    ecrire("paquets-notif.json", dict(date=maintenant, noms=noms))
     titre, corps = texte()
     print(f"{titre}\t{corps}".replace("\n", "\\n"))
 elif not paquets and not manque:
@@ -204,7 +359,7 @@ elif not paquets and not manque:
         pass
 PY
 )"
-  python3 -c "$code" "$1" "$cache" "$(reglage MAJ_SYSTEME)" "$(reglage MAJ_RAPPEL)" "${NC_LANGUE:-}" "${2:-}"
+  python3 -c "$code" "$1" "$cache" "$(reglage MAJ_SYSTEME)" "$(reglage MAJ_RAPPEL)" "${NC_LANGUE:-}" "${2:-}" "${3:-}"
 }
 
 notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jour » ouvre le terminal
@@ -218,46 +373,111 @@ notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jo
         "$titre" "$corps" 2>/dev/null)"
       [ "$r" = maj ] && exec "$0" mettre-a-jour
     fi
-  ) >/dev/null 2>&1 &
+  ) 8>&- 9>&- >/dev/null 2>&1 &     # sans les verrous (jusqu'à 1 h d'attente du clic : ils bloqueraient tout le reste)
   disown 2>/dev/null || true
 }
 
-# Instantané de / avant la mise à jour (MAJ_INSTANTANE, « auto » : seulement sur Btrfs) : pour revenir en arrière si une
-# mise à jour casse quelque chose. Rien si un outil le fait déjà à chaque mise à jour (snap-pac sur Arch, snapper avec
-# zypper ou dnf) ; sinon snapper ou Timeshift s'ils sont configurés ; sinon un instantané Btrfs en lecture seule dans
-# /.snapshots, les 3 derniers de nc-paquets gardés. Démarrer dessus depuis GRUB demande grub-btrfs.
+# Après un échec du minuteur ($1 : le nombre d'échecs de suite) : un nouvel essai dans 15 min, puis 30, par un minuteur
+# systemd transitoire d'un seul coup ; au-delà, le passage de chaque heure suffit (il_est_temps suit le même délai).
+# Seulement sous systemd (INVOCATION_ID), jamais depuis un terminal ; un essai déjà prévu n'est pas doublé (même nom).
+reessai_plus_tard() {
+  local d=15 i=1
+  while [ "$i" -lt "${1:-1}" ]; do d=$((d * 2)); i=$((i + 1)); done
+  [ "$d" -lt 60 ] && [ -n "${INVOCATION_ID:-}" ] && command -v systemd-run >/dev/null || return 0
+  systemd-run --user --quiet --collect --unit=nc-paquets-reessai --on-active="${d}min" --nice=19 \
+    "$(readlink -f "$0" 2>/dev/null || echo "$0")" compter auto >/dev/null 2>&1 || true
+}
+
+# Instantané de / avant la mise à jour (MAJ_INSTANTANE, « auto » : seulement sur Btrfs ; « oui » : pareil, mais un
+# instantané impossible arrête la mise à jour si tu ne dis pas de continuer) : pour revenir en arrière si une mise à
+# jour casse quelque chose. Seulement quand il y a quelque chose à mettre à jour (l'appelant le sait). Rien si un
+# outil le fait déjà à chaque mise à jour (snap-pac ou timeshift-autosnap sur Arch, snapper avec zypper, dnf ou apt,
+# timeshift-autosnap-apt) ; sinon snapper ou Timeshift s'ils sont configurés ; sinon un instantané Btrfs en lecture seule
+# dans /.snapshots : les 3 derniers de nc-paquets gardés, plus celui d'avant la dernière mise à jour réussie (des essais
+# ratés de suite ne le font jamais disparaître). Démarrer dessus depuis GRUB demande grub-btrfs.
+# Code 1 : ne pas faire la mise à jour. instant_nom : l'instantané Btrfs pris (gardé si la mise à jour réussit).
+etat_nc="${XDG_STATE_HOME:-$HOME/.local/state}/nc"
+instant_nom=""
 instantane() {
-  [ "$(reglage MAJ_INSTANTANE)" = non ] && return 0
+  local choix_i; choix_i="$(reglage MAJ_INSTANTANE)"
+  instant_nom=""
+  [ "$choix_i" = non ] && return 0
   [ "$(findmnt -no FSTYPE / 2>/dev/null)" = btrfs ] || return 0
-  local quand; quand="$(date +%Y-%m-%d_%H-%M-%S)"
+  local quand snaps="${NC_SNAPSHOTS:-/.snapshots}" garde; quand="$(date +%Y-%m-%d_%H-%M-%S)"
   # N'importe lequel de ces crochets suffit (un seul existe selon la distribution ; « ls a b » échouait dès qu'un
   # manquait, revue Codex PKG-02), et snapper doit avoir une configuration de / pour qu'il serve vraiment
   local h crochet=0
   for h in ${NC_CROCHETS_SNAPPER:-/usr/share/libalpm/hooks/*snap-pac* /usr/lib/zypp/plugins/commit/snapper* \
-           /usr/lib/python3*/site-packages/dnf-plugins/snapper.py /etc/dnf/libdnf5-plugins/actions.d/snapper.actions}; do
+           /usr/lib/python3*/site-packages/dnf-plugins/snapper.py /etc/dnf/libdnf5-plugins/actions.d/snapper.actions \
+           /etc/apt/apt.conf.d/80snapper}; do
     [ -e "$h" ] && crochet=1 && break
   done
   if [ "$crochet" = 1 ] && [ -e "${NC_SNAPPER_ROOT:-/etc/snapper/configs/root}" ]; then
     t "Instantané : fait par snapper à la mise à jour." "Snapshot: taken by snapper during the update."; echo; return 0
+  fi
+  # timeshift-autosnap (Arch, AUR) et timeshift-autosnap-apt (Debian) : seulement si Timeshift est configuré
+  crochet=0
+  for h in ${NC_CROCHETS_TIMESHIFT:-/usr/share/libalpm/hooks/*timeshift-autosnap* /etc/apt/apt.conf.d/*timeshift-autosnap*}; do
+    [ -e "$h" ] && crochet=1 && break
+  done
+  if [ "$crochet" = 1 ] && [ -e "${NC_TIMESHIFT_CONF:-/etc/timeshift/timeshift.json}" ]; then
+    t "Instantané : fait par timeshift-autosnap à la mise à jour." "Snapshot: taken by timeshift-autosnap during the update."; echo; return 0
   fi
   t "Instantané du système avant la mise à jour…" "System snapshot before the update…"; echo
   if command -v snapper >/dev/null && sudo snapper -c root list >/dev/null 2>&1; then
     sudo snapper -c root create -t single -c number -d "nc-paquets : avant la mise à jour" && return 0
   elif command -v timeshift >/dev/null && sudo timeshift --list >/dev/null 2>&1; then
     sudo timeshift --create --scripted --tags O --comments "nc-paquets : avant la mise à jour" >/dev/null && return 0
-  else
-    [ -d /.snapshots ] || sudo btrfs subvolume create /.snapshots >/dev/null || return 0
-    if sudo btrfs subvolume snapshot -r / "/.snapshots/nc-avant-maj-$quand" >/dev/null; then
-      # Les 3 plus récents de nc-paquets gardés (les autres instantanés ne sont jamais touchés)
-      sudo find /.snapshots -mindepth 1 -maxdepth 1 -name 'nc-avant-maj-*' -printf '%f\n' | sort -r | tail -n +4 |
-        while read -r vieux; do sudo btrfs subvolume delete "/.snapshots/$vieux" >/dev/null; done
-      t "Instantané : /.snapshots/nc-avant-maj-$quand" "Snapshot: /.snapshots/nc-avant-maj-$quand"; echo
-      ls /etc/grub.d/*btrfs* >/dev/null 2>&1 ||
-        { t "(pour démarrer dessus depuis GRUB : installe grub-btrfs)" "(to boot it from GRUB: install grub-btrfs)"; echo; }
-      return 0
-    fi
+  elif { [ -d "$snaps" ] || sudo btrfs subvolume create "$snaps" >/dev/null; } &&
+       sudo btrfs subvolume snapshot -r / "$snaps/nc-avant-maj-$quand" >/dev/null; then
+    instant_nom="nc-avant-maj-$quand"
+    # Les 3 plus récents de nc-paquets gardés, et celui d'avant la dernière mise à jour réussie (les autres instantanés
+    # ne sont jamais touchés)
+    garde="$(head -1 "$etat_nc/instantane-reussi" 2>/dev/null)"
+    sudo find "$snaps" -mindepth 1 -maxdepth 1 -name 'nc-avant-maj-*' -printf '%f\n' | sort -r | tail -n +4 |
+      grep -vxF -- "${garde:-/}" | while read -r vieux; do sudo btrfs subvolume delete "$snaps/$vieux" >/dev/null; done
+    t "Instantané : $snaps/$instant_nom" "Snapshot: $snaps/$instant_nom"; echo
+    ls /etc/grub.d/*btrfs* >/dev/null 2>&1 ||
+      { t "(pour démarrer dessus depuis GRUB : installe grub-btrfs)" "(to boot it from GRUB: install grub-btrfs)"; echo; }
+    return 0
+  fi
+  # Jamais en silence (la création de /.snapshots qui échouait passait sans un mot)
+  if [ "$choix_i" = oui ]; then
+    t "Instantané impossible." "Snapshot failed."; echo
+    printf '%s' "$(t "Continuer la mise à jour sans instantané ? [o/N] " "Go on with the update without a snapshot? [y/N] ")"
+    local r=""; read -r r 2>/dev/null || r=""
+    case "$r" in o|O|oui|Oui|y|Y|yes|Yes) return 0 ;; esac
+    echo; t "Mise à jour annulée : rien n'a été changé." "Update cancelled: nothing was changed."; echo
+    return 1
   fi
   t "Instantané impossible : la mise à jour continue sans." "Snapshot failed: the update goes on without it."; echo
+  return 0
+}
+
+# Arch, juste après -Sy : ce qui attend dans les dépôts synchronisés et dans l'AUR ; code 1 : pas pu le savoir
+attente_arch() {
+  local s c a err=0 e="$cache/.attente-erreurs.$$"
+  s="$(pacman -Qu 2>/dev/null)"; c=$?; [ "$c" -le 1 ] || err=1
+  printf '%s\n' "$s" | grep -v '\[ignored\]' | grep .
+  if a="$(aur_outil)"; then
+    s="$("$a" -Qua --color never 2>"$e")"; c=$?
+    [ "$c" = 0 ] || ! grep -qi 'error' "$e" || err=1
+    printf '%s\n' "$s" | grep -v '\[ignored\]' | grep .
+  fi
+  rm -f "$e"
+  return "$err"
+}
+
+# Ailleurs (dnf, apt, zypper) : l'instantané seulement si le dernier compte attendait quelque chose des dépôts ou de
+# l'AUR (un compte illisible ou incomplet pour les dépôts : l'instantané, par prudence) ; code 1 : ne pas mettre à jour
+avant_maj() {
+  local n
+  n="$(python3 -c 'import json, sys
+d = json.load(open(sys.argv[1])); s = d.get("sources", {})
+print("?" if "depot" in d.get("incomplet", []) else int(s.get("depot", 0)) + int(s.get("aur", 0)))' "$cache/paquets.json" 2>/dev/null)"
+  [ "$n" = 0 ] && return 0
+  instantane && return 0
+  annule=1; return 1
 }
 
 action="${1:-}"
@@ -270,21 +490,44 @@ case "$action" in
     [ "$(reglage MAJ_SYSTEME)" = non ] && [ "$mode" != force ] && { rm -f "$fichier" "$cache/paquets.json"; exit 0; }
     [ "$mode" = auto ] && ! il_est_temps && exit 0
     mkdir -p "$cache"
+    # Un seul compte à la fois : le minuteur et un clic sur « Chercher » dans la même minute se gênaient (checkupdates
+    # verrouille sa copie des dépôts, le second échouait : faux « incomplet »). Le second attend le premier (10 min au
+    # plus) ; le minuteur qui a attendu un compte qui vient de finir n'a alors plus rien à faire
+    if command -v flock >/dev/null; then
+      exec 9>"$cache/.paquets.verrou"
+      if ! flock -w 600 9; then
+        [ "$mode" = auto ] && exit 0
+        t "Un autre compte des mises à jour ne finit pas : réessaie plus tard." "Another update count does not finish: try again later." >&2
+        echo >&2; exit 1
+      fi
+      [ "$mode" = auto ] && ! il_est_temps && exit 0
+    fi
     echecs="$cache/.paquets-echecs.$$"; : > "$echecs"
     d="$(details "$([ "$mode" = local ] && echo local)")"
     manque="$(sort -u "$echecs" | tr '\n' ',' | sed 's/,$//')"; rm -f "$echecs"
-    # Une source muette : ses paquets du dernier compte restent (jamais « à jour » faute de réponse), l'état est daté
+    # Une source muette : ses paquets du dernier compte restent (jamais « à jour » faute de réponse), l'état est daté,
+    # avec le nombre d'échecs de suite (le délai du nouvel essai : delai_reessai)
     if [ -n "$manque" ]; then
       d="$d"$'\n'"$(anciens ${manque//,/ })"
-      printf '%s\t%s\n' "$(date +%s)" "$manque" > "$cache/paquets-erreur"
+      delai_reessai 60
+      tmp="$(mktemp "$cache/.paquets-erreur.XXXXXX" 2>/dev/null)" || tmp="$cache/.paquets-erreur.$$"
+      printf '%s\t%s\t%s\n' "$(date +%s)" "$manque" "$((err_nombre + 1))" > "$tmp" && mv -f "$tmp" "$cache/paquets-erreur"
+      [ "$mode" = auto ] && reessai_plus_tard "$((err_nombre + 1))"
     else
       rm -f "$cache/paquets-erreur"
     fi
     l="$(printf '%s\n' "$d" | awk -F'\t' 'NF >= 2 {print ($1 == "depot" ? "" : $1 ":") $2}' | sort -u)"
     n=$(printf '%s' "$l" | grep -c . || true)
-    { echo "$n"; printf '%s\n' "$l"; } > "$fichier.tmp" && mv "$fichier.tmp" "$fichier"
-    a_dire="$(printf '%s\n' "$d" | analyser "$mode" "$manque" 2>/dev/null)"
+    # Un temporaire unique (deux comptes ne se partagent jamais le même), puis remplacé d'un coup (l'île le surveille)
+    tmp="$(mktemp "$cache/.paquets.XXXXXX" 2>/dev/null)" || tmp="$fichier.$$"
+    { echo "$n"; printf '%s\n' "$l"; } > "$tmp" && mv -f "$tmp" "$fichier"
+    vieux="$(age_depots)"
+    a_dire="$(printf '%s\n' "$d" | analyser "$mode" "$manque" "$vieux" 2>/dev/null)"
     if [ -n "$a_dire" ]; then notifier "${a_dire%%$'\t'*}" "${a_dire#*$'\t'}"; fi
+    if [ -n "$vieux" ] && [ "$mode" != auto ]; then
+      t "Dépôts non synchronisés depuis $vieux j : la liste peut être en retard (nc-paquets mettre-a-jour les synchronise)." \
+        "Repositories not synced for $vieux d: the list may be outdated (nc-packages update syncs them)." >&2; echo >&2
+    fi
     # Le minuteur se tait (il réessaiera) ; lancé à la main, un compte incomplet le dit et finit en échec
     if [ -n "$manque" ] && [ "$mode" != auto ]; then
       noms="$(sed -e "s/depot/$(t "dépôts" "repositories")/" -e 's/aur/AUR/' -e 's/flatpak/Flatpak/' -e 's/,/, /g' <<<"$manque")"
@@ -297,35 +540,81 @@ case "$action" in
     # Fenêtre fermée pendant le recompte : il va quand même au bout (sinon l'île garderait l'ancien nombre)
     trap '' HUP
     unset LC_ALL     # la mise à jour parle la langue du système
-    ok=0
-    # La liste d'avant la mise à jour (versions, paquets importants) : pour le rapport de l'IA à la fin
-    cp -f "$cache/paquets.json" "$cache/paquets-avant.json" 2>/dev/null || true
-    instantane
-    # Arch : paru ou yay mettent à jour les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
+    mkdir -p "$cache"
+    # Une seule mise à jour à la fois (deux clics sur « Mettre à jour ») : la seconde fenêtre le dit et s'arrête
+    if command -v flock >/dev/null; then
+      exec 8>"$cache/.paquets-maj.verrou"
+      if ! flock -n 8; then
+        t "Une mise à jour du système est déjà en cours dans une autre fenêtre." "A system update is already running in another window."
+        echo; printf '%s' "$(t "Entrée pour fermer." "Press Enter to close.")"; read -r r 2>/dev/null || true; exit 1
+      fi
+    fi
+    code=0; annule=0
+    noter() { [ "$code" = 0 ] && code="$1"; return 0; }      # le premier échec : son code de sortie
+    # Ce qui est installé avant : le rapport donnera ce qui a vraiment changé (pas la liste d'attente d'avant)
+    avant_f="$(mktemp "$cache/.installes.XXXXXX" 2>/dev/null)" || avant_f="$cache/.installes-avant.$$"
+    apres_f="$(mktemp "$cache/.installes.XXXXXX" 2>/dev/null)" || apres_f="$cache/.installes-apres.$$"
+    installes > "$avant_f"
+    rm -f "$cache/paquets-avant.json"          # l'ancien rapport (la liste d'attente d'avant) : plus utilisé
     if command -v pacman >/dev/null; then
-      if a="$(aur_outil)"; then "$a" -Syu || ok=1; else sudo pacman -Syu || ok=1; fi
+      # Arch : d'abord synchroniser (-Sy), puis, seulement s'il y a quelque chose, l'instantané et la mise à jour
+      # (-Su) : pas d'instantané pour rien (seuls 3 sont gardés). -Sy puis -Su sans rien entre les deux, c'est -Syu.
+      # paru ou yay font les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
+      if a="$(aur_outil)"; then outil=("$a"); else outil=(sudo pacman); fi
+      "${outil[@]}" -Sy || noter $?
+      if [ "$code" = 0 ]; then
+        attente="$(attente_arch)"; c=$?
+        if [ -z "$attente" ] && [ "$c" = 0 ]; then
+          t "Dépôts et AUR : rien à mettre à jour." "Repositories and AUR: nothing to update."; echo
+        elif instantane; then "${outil[@]}" -Su || noter $?
+        else annule=1; fi
+      fi
     # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
-    elif command -v nobara-sync >/dev/null; then nobara-sync cli || ok=1
-    elif command -v dnf >/dev/null; then sudo dnf upgrade --refresh || ok=1
-    elif command -v apt >/dev/null; then { sudo apt update && sudo apt full-upgrade; } || ok=1
+    elif command -v nobara-sync >/dev/null; then if avant_maj; then nobara-sync cli || noter $?; fi
+    elif command -v dnf >/dev/null; then if avant_maj; then sudo dnf upgrade --refresh || noter $?; fi
+    elif command -v apt >/dev/null; then
+      # apt : la synchronisation d'abord, puis l'instantané seulement s'il y a quelque chose à mettre à jour
+      sudo apt update || noter $?
+      if [ "$code" = 0 ]; then
+        if [ "$(LC_ALL=C apt list --upgradable 2>/dev/null | grep -c 'upgradable from')" = 0 ] || instantane; then
+          sudo apt full-upgrade || noter $?
+        else annule=1; fi
+      fi
     # Tumbleweed et Slowroll : mise à jour de la distribution (zypper dup), comme le recommande openSUSE
-    elif command -v zypper >/dev/null; then sudo zypper dup || ok=1
-    else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; ok=1; fi
-    if command -v flatpak >/dev/null; then flatpak update || ok=1; fi
+    elif command -v zypper >/dev/null; then if avant_maj; then sudo zypper dup || noter $?; fi
+    else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; noter 1; fi
+    if [ "$annule" = 1 ]; then noter 1
+    elif command -v flatpak >/dev/null; then flatpak update || noter $?; fi
+    installes > "$apres_f"
     echo; t "Recompte des mises à jour…" "Recounting updates…"; echo
     incomplet=0
-    if [ "$ok" = 0 ]; then "$0" compter local || incomplet=1; else "$0" compter || incomplet=1; fi
-    # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
-    if [ "$ok" = 0 ] && [ -x "$HOME/.local/bin/nc-ia" ] && [ -s "$cache/paquets-avant.json" ]; then
-      setsid "$HOME/.local/bin/nc-ia" rapport-maj systeme "$cache/paquets-avant.json" >/dev/null 2>&1 < /dev/null &
+    if [ "$code" = 0 ]; then "$0" compter local || incomplet=1; else "$0" compter || incomplet=1; fi
+    # Rapport (de l'IA si elle est permise et joignable) : ce qui a vraiment changé, en clair, dans les réglages → Mises
+    # à jour ; aussi quand une partie a échoué (pacman fait, Flatpak en échec), dès qu'il y a eu un changement
+    if difference "$avant_f" "$apres_f" "$code" "$incomplet" && [ -x "$HOME/.local/bin/nc-ia" ]; then
+      setsid "$HOME/.local/bin/nc-ia" rapport-maj systeme "$cache/paquets-maj.json" >/dev/null 2>&1 < /dev/null 8>&- &
+    fi
+    rm -f "$avant_f" "$apres_f"
+    # L'instantané d'avant une mise à jour réussie : jamais retiré par le tri des suivants
+    if [ "$code" = 0 ] && [ -n "$instant_nom" ]; then
+      mkdir -p "$etat_nc" && printf '%s\n' "$instant_nom" > "$etat_nc/instantane-reussi"
     fi
     n=$(head -1 "$fichier" 2>/dev/null || echo 0)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$code" != 0 ]; then t "La mise à jour a échoué (code $code)." "The update failed (code $code)."; echo; fi
     if [ "$incomplet" = 1 ]; then t "Recompte incomplet : relance « nc-paquets verifier » plus tard." "Incomplete recount: run “nc-packages check” later."
-    elif [ "${n:-0}" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
+    elif [ "$n" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi
-    # Alerte Telegram de fin de mise à jour (nc-alertes décide : réglage ALERTES_TELEGRAM, connexion configurée)
-    [ -x "$HOME/.local/bin/nc-alertes" ] && "$HOME/.local/bin/nc-alertes" maj "${n:-0}" >/dev/null 2>&1 || true
-    echo; printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"; read -r r 2>/dev/null || true ;;
+    # Alerte Telegram de fin de mise à jour (nc-alertes décide : réglage ALERTES_TELEGRAM, connexion configurée) ;
+    # un échec est dit comme tel (❌), jamais « terminée »
+    if [ -x "$HOME/.local/bin/nc-alertes" ]; then
+      if [ "$code" = 0 ]; then "$HOME/.local/bin/nc-alertes" maj "$n" >/dev/null 2>&1 8>&- || true
+      else "$HOME/.local/bin/nc-alertes" maj "$n" echec "$code" >/dev/null 2>&1 8>&- || true; fi
+    fi
+    echo
+    if [ "$code" = 0 ]; then printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"
+    else printf '%s' "$(t "Entrée pour fermer." "Press Enter to close.")"; fi
+    read -r r 2>/dev/null || true ;;
   *)
     if [ -s "$fichier" ]; then t "$(head -1 "$fichier") mise(s) à jour :" "$(head -1 "$fichier") update(s):"; echo; tail -n +2 "$fichier"
     else t "Pas encore compté : nc-paquets compter" "Not counted yet: nc-packages count"; echo; fi ;;

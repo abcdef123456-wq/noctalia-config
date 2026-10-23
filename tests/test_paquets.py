@@ -15,12 +15,19 @@ REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
 QML = REPO / "home/.config/quickshell/nc-ile"
 
-# Faux pacman : -Syu réussit (ou échoue si NC_TEST_MAJ_ECHEC) et note l'appel ; -Qu liste ce que dit NC_TEST_LOCAL
+# Faux pacman : -Sy, -Su (et -Syu) réussissent (ou échouent si NC_TEST_MAJ_ECHEC ; -Su seul si NC_TEST_SU_ECHEC, code
+# 3) et notent l'appel ; -Qu liste ~/qu s'il existe (-Su le remplace par ~/qu-apres), sinon NC_TEST_LOCAL. Paquets installés : ~/db (« nom version », pacman -Q),
+# ~/db-aur (pacman -Qmq) ; -Su installe ~/db-apres (s'il existe) à la place de ~/db, même s'il échoue ensuite
 FAUX_PACMAN = """#!/bin/sh
 echo "pacman $*" >> "$HOME/appels"
 case "$1" in
-  -Syu) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; exit 0 ;;
-  -Qu) printf '%s' "${NC_TEST_LOCAL:-}"; exit 0 ;;
+  -Sy) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; exit 0 ;;
+  -Su|-Syu) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; [ -e "$HOME/db-apres" ] && mv "$HOME/db-apres" "$HOME/db"
+    [ -e "$HOME/qu-apres" ] && mv "$HOME/qu-apres" "$HOME/qu"
+    [ -n "${NC_TEST_SU_ECHEC:-}" ] && exit 3; exit 0 ;;
+  -Qu) if [ -e "$HOME/qu" ]; then cat "$HOME/qu"; else printf '%s' "${NC_TEST_LOCAL:-}"; fi; exit 0 ;;
+  -Q) cat "$HOME/db" 2>/dev/null; exit 0 ;;
+  -Qmq) cat "$HOME/db-aur" 2>/dev/null; exit 0 ;;
 esac
 exit 1
 """
@@ -39,21 +46,27 @@ open(os.path.join(os.environ["HOME"], "notifs"), "a").write(json.dumps(libres[-2
 """
 FAUX_FLATPAK = """#!/bin/sh
 echo "flatpak $*" >> "$HOME/appels"
+[ "$1" = update ] && [ -n "${NC_TEST_FLATPAK_ECHEC:-}" ] && exit 1
 exit 0
 """
 FAUX_SUDO = '#!/bin/sh\nexec "$@"\n'
 # Faux findmnt (système de fichiers de /, NC_TEST_FS, ext4 par défaut) et faux btrfs : jamais le vrai disque
 FAUX_FINDMNT = '#!/bin/sh\necho "${NC_TEST_FS:-ext4}"\n'
-FAUX_BTRFS = '#!/bin/sh\necho "btrfs $*" >> "$HOME/appels"\n'
-# Faux paru : -Qua liste ce que dit NC_TEST_AUR ; -Syu réussit (ou échoue avec NC_TEST_MAJ_ECHEC) ; note l'appel
+FAUX_BTRFS = '#!/bin/sh\necho "btrfs $*" >> "$HOME/appels"\n[ -n "${NC_TEST_BTRFS_ECHEC:-}" ] && exit 1\nexit 0\n'
+# Faux paru : -Qua liste ce que dit NC_TEST_AUR ; -Sy et -Su comme le faux pacman ; note l'appel
 FAUX_PARU = """#!/bin/sh
 echo "paru $*" >> "$HOME/appels"
 case "$1" in
   -Qua) printf '%s' "${NC_TEST_AUR:-}"; exit 0 ;;
-  -Syu) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; exit 0 ;;
+  -Sy) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; exit 0 ;;
+  -Su|-Syu) [ -n "${NC_TEST_MAJ_ECHEC:-}" ] && exit 1; [ -e "$HOME/db-apres" ] && mv "$HOME/db-apres" "$HOME/db"
+    [ -e "$HOME/qu-apres" ] && mv "$HOME/qu-apres" "$HOME/qu"
+    [ -n "${NC_TEST_SU_ECHEC:-}" ] && exit 3; exit 0 ;;
 esac
 exit 1
 """
+# Faux systemd-run (le nouvel essai après un échec) : note l'appel, ne lance jamais rien
+FAUX_SYSTEMD_RUN = '#!/bin/sh\necho "systemd-run $*" >> "$HOME/appels"\n'
 
 
 class Paquets(unittest.TestCase):
@@ -63,18 +76,22 @@ class Paquets(unittest.TestCase):
         self.home = Path(self.tmp.name)
         (self.home / "bin").mkdir()
         for nom, code in [("pacman", FAUX_PACMAN), ("checkupdates", FAUX_CHECKUPDATES), ("flatpak", FAUX_FLATPAK), ("sudo", FAUX_SUDO), ("paru", FAUX_PARU), ("notify-send", FAUX_NOTIFY),
-                          ("findmnt", FAUX_FINDMNT), ("btrfs", FAUX_BTRFS)]:
+                          ("findmnt", FAUX_FINDMNT), ("btrfs", FAUX_BTRFS), ("systemd-run", FAUX_SYSTEMD_RUN)]:
             p = self.home / "bin" / nom
             p.write_text(code)
             p.chmod(0o755)
         (self.home / ".config/nc").mkdir(parents=True)
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n")
         self.cache = self.home / ".cache/nc/paquets"
+        self.snaps = self.home / "snapshots"           # jamais le vrai /.snapshots
+        self.snaps.mkdir()
 
-    def lancer(self, *args, **env_sup):
-        env = dict(HOME=str(self.home), PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin", NC_LANGUE="fr")
+    def lancer(self, *args, entree=None, **env_sup):
+        env = dict(HOME=str(self.home), PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin", NC_LANGUE="fr",
+                   NC_SNAPSHOTS=str(self.snaps))
         env.update(env_sup)
-        return subprocess.run([str(BIN / "nc-paquets"), *args], env=env, capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        return subprocess.run([str(BIN / "nc-paquets"), *args], env=env, capture_output=True, text=True, timeout=30,
+                              **(dict(input=entree) if entree is not None else dict(stdin=subprocess.DEVNULL)))
 
     def appels(self):
         p = self.home / "appels"
@@ -90,8 +107,12 @@ class Paquets(unittest.TestCase):
         r = self.lancer("terminal", NC_TEST_DEPOTS="avahi 1-1 -> 1-2\n", NC_TEST_LOCAL="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.cache.read_text(), "0\n\n", "le cache doit passer à 0 après la mise à jour")
-        self.assertEqual(self.appels(), ["paru -Syu", "flatpak update", "pacman -Qu", "paru -Qua --color never", "flatpak remote-ls --updates --columns=application,version"],
-                         "après une mise à jour réussie, pas de checkupdates (resynchronisation réseau, longue)")
+        releves = {"pacman -Qmq", "pacman -Q", "flatpak list --columns=application,branch,version,active"}     # installés avant, après
+        self.assertEqual([a for a in self.appels() if a not in releves],
+                         ["paru -Sy", "pacman -Qu", "paru -Qua --color never", "flatpak update",
+                          "pacman -Qu", "paru -Qua --color never", "flatpak remote-ls --updates --columns=application,version"],
+                         "-Sy, rien en attente : ni instantané ni -Su ; après une mise à jour réussie, pas de checkupdates "
+                         "(resynchronisation réseau, longue)")
         self.assertIn("Système à jour.", r.stdout)
         self.assertIn("Recompte des mises à jour", r.stdout)
 
@@ -183,7 +204,7 @@ class Paquets(unittest.TestCase):
         et nc-paquets prenait un instantané en double."""
         crochet = self.home / "snap-pac.hook"; crochet.write_text("")
         racine = self.home / "snapper-root"; racine.write_text("")
-        env = dict(NC_TEST_FS="btrfs", NC_TEST_LOCAL="", NC_CROCHETS_SNAPPER=f"{crochet} /nulle/part/snapper.py",
+        env = dict(NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n", NC_CROCHETS_SNAPPER=f"{crochet} /nulle/part/snapper.py",
                    NC_SNAPPER_ROOT=str(racine))
         r = self.lancer("terminal", **env)
         self.assertIn("fait par snapper", r.stdout)
@@ -194,19 +215,20 @@ class Paquets(unittest.TestCase):
         self.assertTrue([x for x in self.appels() if x.startswith("btrfs subvolume snapshot")])
 
     def test_instantane_btrfs_avant_la_mise_a_jour(self):
-        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
+        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n", NC_SNAPSHOTS=str(self.snaps))
         self.assertEqual(r.returncode, 0, r.stderr)
         a = self.appels()
-        prises = [x for x in a if x.startswith("btrfs subvolume snapshot -r / /.snapshots/nc-avant-maj-")]
+        prises = [x for x in a if x.startswith(f"btrfs subvolume snapshot -r / {self.snaps}/nc-avant-maj-")]
         self.assertEqual(len(prises), 1, a)
-        self.assertLess(a.index(prises[0]), a.index("paru -Syu"), "l'instantané avant la mise à jour")
-        self.assertIn("Instantané : /.snapshots/nc-avant-maj-", r.stdout)
+        self.assertLess(a.index("paru -Sy"), a.index(prises[0]), "synchronisé d'abord : on sait s'il y a quelque chose")
+        self.assertLess(a.index(prises[0]), a.index("paru -Su"), "l'instantané avant la mise à jour")
+        self.assertIn(f"Instantané : {self.snaps}/nc-avant-maj-", r.stdout)
 
     def test_pas_d_instantane_hors_btrfs_ou_si_coupe(self):
-        self.lancer("terminal", NC_TEST_LOCAL="")
+        self.lancer("terminal", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n")
         self.assertFalse([x for x in self.appels() if x.startswith("btrfs")], "ext4 : rien")
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_INSTANTANE=non\n")
-        self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
+        self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n")
         self.assertFalse([x for x in self.appels() if x.startswith("btrfs")], "réglage coupé : rien")
 
     def test_cadence_sobre(self):
@@ -310,6 +332,294 @@ esac
         r = subprocess.run([str(BIN / "nc-paquets"), "terminal"], env=env, capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.cache.read_text(), "0\n\n")
+
+    # ── Le rapport : ce qui a vraiment été installé (revue B1, R1 R2 R3) ──
+    def avec_rapport(self):
+        """nc-ia (sans IA : IA_MODE=non) et nc-langue dans le ~/.local/bin du HOME de test : le rapport des faits."""
+        lb = self.home / ".local/bin"
+        lb.mkdir(parents=True, exist_ok=True)
+        for nom in ("nc-ia", "nc-langue"):
+            (lb / nom).symlink_to(BIN / nom)
+        with open(self.home / ".config/nc/reglages.conf", "a") as f:
+            f.write("IA_MODE=non\n")
+
+    def rapport(self, delai=8.0):
+        """Le rapport écrit par nc-ia (lancé en arrière-plan par nc-paquets), ou None."""
+        import json, time
+        f = self.home / ".cache/nc/rapports/systeme.json"
+        fin = time.time() + delai
+        while time.time() < fin:
+            try:
+                return json.loads(f.read_text())
+            except (OSError, ValueError):
+                time.sleep(0.1)
+        return None
+
+    def test_rapport_des_versions_vraiment_installees(self):
+        """Revue B1 R1 : le rapport recopiait la liste d'attente d'avant (zsh 5-2) alors que pacman a installé 5-3,
+        et un paquet sorti entre-temps (mesa) n'y était pas."""
+        import json
+        self.avec_rapport()
+        self.lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        (self.home / "db").write_text("bash 5.2-1\nmesa 1:26.0-1\nzsh 5-1\nzen-browser-bin 1.0-1\n")
+        (self.home / "db-aur").write_text("zen-browser-bin\n")
+        (self.home / "db-apres").write_text("bash 5.2-1\nmesa 1:26.1-1\nzsh 5-3\nzen-browser-bin 1.1-1\n")
+        (self.home / "qu").write_text("zsh 5-1 -> 5-3\nmesa 1:26.0-1 -> 1:26.1-1\n")
+        (self.home / "qu-apres").write_text("")
+        r = self.lancer("terminal")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        maj = json.loads((self.home / ".cache/nc/paquets-maj.json").read_text())
+        self.assertEqual([(p["source"], p["nom"], p["avant"], p["apres"], p["important"]) for p in maj["paquets"]],
+                         [("depot", "mesa", "1:26.0-1", "1:26.1-1", True), ("depot", "zsh", "5-1", "5-3", False),
+                          ("aur", "zen-browser-bin", "1.0-1", "1.1-1", False)])
+        self.assertEqual((maj["total"], maj["en_attente"], maj["echec"]), (3, 0, 0))
+        d = self.rapport()
+        self.assertIsNotNone(d, "rapport écrit")
+        self.assertEqual(d["details"], ["★ mesa 1:26.0-1 → 1:26.1-1", "zsh 5-1 → 5-3", "zen-browser-bin 1.0-1 → 1.1-1 (aur)"])
+        self.assertEqual(d["nombre"], 3)
+        self.assertNotIn("5-2", json.dumps(d), "jamais la version de la liste d'attente d'avant")
+
+    def apt(self):
+        """Un PATH de Debian sans le pacman de la machine : apt, dpkg-query et sudo factices, les outils de base.
+        firefox-esr est retenu (« kept back ») : apt list le montre, full-upgrade le garde et finit en code 0."""
+        nu = self.home / "nu"; nu.mkdir()
+        for outil in ("sh", "bash", "env", "python3", "sed", "awk", "grep", "head", "tail", "tr", "mkdir", "rm", "mv", "cat",
+                      "wc", "sort", "date", "basename", "dirname", "sleep", "printf", "cp", "touch", "find", "mktemp", "flock",
+                      "stat", "cut", "setsid", "readlink", "timeout", "uniq", "ls"):
+            vrai = shutil.which(outil)
+            if vrai:
+                (nu / outil).symlink_to(vrai)
+        faux = {"apt": """#!/bin/sh
+echo "apt $*" >> "$HOME/appels"
+case "$1" in
+  list) echo "Listing..."; echo "firefox-esr/stable-security 128.4.0esr-1~deb13u1 amd64 [upgradable from: 128.3.1esr-1~deb13u1]"
+        [ -e "$HOME/fait" ] || echo "zsh/stable 5.9-8 amd64 [upgradable from: 5.9-7]"; exit 0 ;;
+  update) exit 0 ;;
+  full-upgrade) echo "The following packages have been kept back:"; echo "  firefox-esr"
+        echo "1 upgraded, 0 newly installed, 0 to remove and 1 not upgraded."
+        [ -e "$HOME/dpkg-apres" ] && mv "$HOME/dpkg-apres" "$HOME/dpkg"; touch "$HOME/fait"; exit 0 ;;
+esac
+exit 0
+""", "dpkg-query": '#!/bin/sh\ncat "$HOME/dpkg"\n', "sudo": FAUX_SUDO, "notify-send": FAUX_NOTIFY}
+        for nom, code in faux.items():
+            (nu / nom).write_text(code); (nu / nom).chmod(0o755)
+        (self.home / "dpkg").write_text("zsh\t5.9-7\tii \nfirefox-esr\t128.3.1esr-1~deb13u1\tii \nvieux\t1.0\trc \n")
+        (self.home / "dpkg-apres").write_text("zsh\t5.9-8\tii \nfirefox-esr\t128.3.1esr-1~deb13u1\tii \nvieux\t1.0\trc \n")
+        # Listes d'apt fraîches (N1 : sinon « dépôts non synchronisés »)
+        self.etat_apt = self.home / "apt"; (self.etat_apt / "lists/partial").mkdir(parents=True)
+        (self.etat_apt / "lists/deb.debian.org_debian_dists_trixie_InRelease").write_text("")
+        return str(nu)
+
+    def test_apt_paquet_retenu_jamais_compte_comme_installe(self):
+        """Revue B1 R1 : apt « kept back » (code 0) donnait « 2 mis à jour » ; c'est 1, et 1 resté en attente."""
+        import json
+        nu = self.apt()
+        self.avec_rapport()
+        env = dict(PATH=nu, NC_APT_ETAT=str(self.etat_apt))
+        self.assertEqual(self.lancer("compter", **env).returncode, 0)
+        self.assertEqual(self.cache.read_text().splitlines()[0], "2")
+        r = self.lancer("terminal", **env)
+        self.assertIn("apt full-upgrade", self.appels())
+        self.assertIn("1 mise(s) à jour encore en attente.", r.stdout)
+        d = self.rapport()
+        self.assertIsNotNone(d, "rapport écrit")
+        self.assertEqual((d["details"], d["nombre"], d["en_attente"]), (["zsh 5.9-7 → 5.9-8"], 1, 1))
+        self.assertTrue(d["resume"].startswith("1 paquet(s) mis à jour."), d["resume"])
+        self.assertIn("1 resté(s) en attente : firefox-esr.", d["resume"])
+        self.assertNotIn("vieux", json.dumps(d), "un paquet dont il ne reste que la configuration (rc) n'est pas installé")
+
+    def test_debian_depots_jamais_synchronises_pas_a_jour(self):
+        """Revue B1 N1 : apt list lit des listes que personne ne rafraîchit (Debian minimale) : faux « à jour »."""
+        import json, time
+        nu = self.apt()
+        (self.home / "fait").touch()          # seul firefox-esr attend…
+        (self.home / "nu/apt").write_text('#!/bin/sh\necho "Listing..."\nexit 0\n')     # … ou rien du tout
+        vieux = time.time() - 3 * 86400 - 600
+        for p in [*self.etat_apt.rglob("*"), self.etat_apt / "lists"]:
+            os.utime(p, (vieux, vieux))
+        r = self.lancer("verifier", PATH=nu, NC_APT_ETAT=str(self.etat_apt))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.home / ".cache/nc/paquets.json").read_text())["non_synchro_jours"], 3)
+        titre, corps = self.notifs(1)[-1]
+        self.assertEqual(titre, "Dépôts non synchronisés", "une vieille liste vide n'est pas « Système à jour »")
+        self.assertIn("depuis 3 j", corps)
+        self.assertIn("depuis 3 j", r.stderr)
+        # Synchronisées il y a une heure : à jour
+        frais = time.time() - 3600
+        os.utime(self.etat_apt / "lists/deb.debian.org_debian_dists_trixie_InRelease", (frais, frais))
+        self.lancer("verifier", PATH=nu, NC_APT_ETAT=str(self.etat_apt))
+        self.assertIsNone(json.loads((self.home / ".cache/nc/paquets.json").read_text())["non_synchro_jours"])
+        self.assertEqual(self.notifs(2)[-1][0], "Système à jour")
+
+    def test_echec_de_la_mise_a_jour_dit_et_rapporte(self):
+        """Revue B1 R3 : pacman -Su en échec, et l'on voyait « Terminé » et « ✅ » sur Telegram ; Flatpak en échec après
+        pacman : aucun rapport."""
+        import json
+        self.avec_rapport()
+        alertes = self.home / ".local/bin/nc-alertes"
+        alertes.write_text('#!/bin/sh\necho "nc-alertes $*" >> "$HOME/appels"\n'); alertes.chmod(0o755)
+        (self.home / "db").write_text("linux 6.1-1\n")
+        (self.home / "db-apres").write_text("linux 6.2-1\n")
+        r = self.lancer("terminal", NC_TEST_LOCAL="linux 6.1-1 -> 6.2-1\n", NC_TEST_SU_ECHEC="1", NC_TEST_DEPOTS="")
+        self.assertIn("La mise à jour a échoué (code 3).", r.stdout)
+        self.assertNotIn("Terminé", r.stdout)
+        self.assertIn("nc-alertes maj 0 echec 3", self.appels())
+        self.assertIn("checkupdates", self.appels(), "en échec : le compte complet")
+        d = self.rapport()
+        self.assertIsNotNone(d, "le noyau a changé : un rapport, même si la mise à jour a échoué ensuite")
+        self.assertEqual((d["details"], d["echec"]), (["★ linux 6.1-1 → 6.2-1"], 3))
+        self.assertIn("La mise à jour a échoué (code 3)", d["resume"])
+        # pacman réussit, Flatpak échoue : le rapport de ce que pacman a fait, et l'échec dit
+        (self.home / ".cache/nc/rapports/systeme.json").unlink()
+        (self.home / "appels").unlink()
+        (self.home / "db-apres").write_text("linux 6.3-1\n")
+        r = self.lancer("terminal", NC_TEST_LOCAL="linux 6.2-1 -> 6.3-1\n", NC_TEST_FLATPAK_ECHEC="1", NC_TEST_DEPOTS="")
+        self.assertIn("La mise à jour a échoué (code 1).", r.stdout)
+        self.assertIn("nc-alertes maj 0 echec 1", self.appels())
+        d = self.rapport()
+        self.assertIsNotNone(d, "Flatpak en échec après pacman : le rapport quand même")
+        self.assertEqual(d["details"], ["★ linux 6.2-1 → 6.3-1"])
+        # Réussie : « Terminé », et l'alerte de fin habituelle
+        (self.home / "appels").unlink()
+        r = self.lancer("terminal", NC_TEST_LOCAL="")
+        self.assertIn("Terminé.", r.stdout)
+        self.assertNotIn("échoué", r.stdout)
+        self.assertIn("nc-alertes maj 0", self.appels())
+
+    # ── Comptes simultanés, nouvel essai (C1, C2) ──
+    def alimentation(self):
+        alim = self.home / "alim"
+        (alim / "AC").mkdir(parents=True)
+        (alim / "AC/type").write_text("Mains\n"); (alim / "AC/online").write_text("1\n")
+        return dict(NC_POWER_SUPPLY=str(alim), NC_METERED="u 4")
+
+    def test_deux_comptes_en_meme_temps(self):
+        """Revue B1 C1 : le minuteur et un clic sur « Chercher » dans la même seconde : checkupdates verrouille sa copie
+        des dépôts, le second échouait (faux « incomplet »)."""
+        import json, os, time
+        (self.home / "bin/checkupdates").write_text("""#!/bin/sh
+L="$HOME/checkup.lck"
+if ! (set -o noclobber; : > "$L") 2>/dev/null; then echo "==> ERROR: Cannot fetch updates" >&2; exit 1; fi
+sleep 1; rm -f "$L"; printf 'zsh 5-1 -> 5-2\\nlinux 6.1-1 -> 6.2-1\\n'; exit 0
+""")
+        env = self.alimentation()
+        self.lancer("compter", **env)
+        vieux = time.time() - 2 * 3600
+        os.utime(self.cache, (vieux, vieux))
+        base = dict(HOME=str(self.home), PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin", NC_LANGUE="fr", **env)
+        minuteur = subprocess.Popen([str(BIN / "nc-paquets"), "compter", "auto"], env=base, stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.3)
+        r = self.lancer("verifier", **env)
+        minuteur.wait(timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.home / ".cache/nc/paquets.json").read_text())["incomplet"], [])
+        self.assertFalse((self.home / ".cache/nc/paquets-erreur").exists())
+        self.assertEqual(self.cache.read_text(), "2\nlinux\nzsh\n")
+        self.assertFalse([p.name for p in (self.home / ".cache/nc").iterdir() if (".tmp" in p.name or p.name.startswith(".paquets.")) and not p.name.endswith(".verrou")],
+                         "aucun temporaire laissé")
+
+    def test_une_seule_mise_a_jour_a_la_fois(self):
+        import fcntl
+        (self.home / ".cache/nc").mkdir(parents=True)
+        with open(self.home / ".cache/nc/.paquets-maj.verrou", "w") as v:
+            fcntl.flock(v, fcntl.LOCK_EX)
+            r = self.lancer("terminal", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n")
+        self.assertIn("déjà en cours", r.stdout)
+        self.assertFalse([a for a in self.appels() if a.startswith("paru -S")], "la seconde fenêtre ne met rien à jour")
+
+    def test_nouvel_essai_15_min_apres_un_echec(self):
+        """Revue B1 C2 : après un échec réseau, $fichier redaté : le nouvel essai attendait la période entière (12 h)."""
+        import time
+        env = self.alimentation()
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_FREQUENCE=jour\n")
+        self.lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", **env)
+        vieux = time.time() - 25 * 3600
+        os.utime(self.cache, (vieux, vieux))
+        ck = self.home / "bin/checkupdates"
+        ck.write_text('#!/bin/sh\necho "checkupdates" >> "$HOME/appels"\necho "==> ERROR: Cannot fetch updates" >&2\nexit 1\n')
+        # Lancé par systemd (INVOCATION_ID) : un minuteur d'un seul coup dans 15 min
+        self.lancer("compter", "auto", INVOCATION_ID="x", **env)
+        erreur = self.home / ".cache/nc/paquets-erreur"
+        self.assertEqual(erreur.read_text().split("\t")[1:], ["depot", "1\n"])
+        self.assertTrue([a for a in self.appels() if a.startswith("systemd-run --user") and "--on-active=15min" in a
+                         and a.endswith("compter auto")], self.appels())
+        ck.write_text(FAUX_CHECKUPDATES)
+        (self.home / "appels").unlink()
+        ecrire = lambda il_y_a, n: erreur.write_text(f"{int(time.time() - il_y_a)}\tdepot\t{n}\n")
+        self.lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", **env)
+        self.assertEqual(self.appels(), [], "juste après l'échec : pas encore")
+        ecrire(16 * 60, 1)
+        self.lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", **env)
+        self.assertIn("checkupdates", self.appels(), "15 min après l'échec : nouvel essai (et non 24 h)")
+        self.assertFalse(erreur.exists(), "réussi : l'échec est oublié")
+        # Plafond : le délai double à chaque échec de suite (3e : 60 min)
+        (self.home / "appels").unlink()
+        os.utime(self.cache, None)
+        ecrire(20 * 60, 3)
+        self.lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", **env)
+        self.assertEqual(self.appels(), [], "3e échec de suite : pas avant 60 min")
+        ecrire(61 * 60, 3)
+        self.lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", **env)
+        self.assertIn("checkupdates", self.appels())
+        # Au-delà de 30 min, le passage de chaque heure suffit : pas de minuteur en plus
+        (self.home / "appels").unlink()
+        ck.write_text('#!/bin/sh\necho "checkupdates" >> "$HOME/appels"\nexit 1\n')
+        ecrire(61 * 60, 2)
+        self.lancer("compter", "auto", INVOCATION_ID="x", **env)
+        self.assertEqual(erreur.read_text().split("\t")[2], "3\n")
+        self.assertFalse([a for a in self.appels() if a.startswith("systemd-run")])
+
+    # ── Instantané (S1, S2, S3) ──
+    def test_pas_d_instantane_sans_rien_a_mettre_a_jour(self):
+        """Revue B1 S1 : un instantané à chaque ouverture, même sans rien à mettre à jour (et seuls 3 sont gardés)."""
+        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse([a for a in self.appels() if a.startswith("btrfs")], self.appels())
+        self.assertNotIn("paru -Su", self.appels())
+        self.assertIn("rien à mettre à jour", r.stdout)
+
+    def test_instantane_d_avant_la_derniere_reussite_garde(self):
+        for j in range(1, 6):
+            (self.snaps / f"nc-avant-maj-2026-01-0{j}_00-00-00").mkdir()
+        etat = self.home / ".local/state/nc"
+        etat.mkdir(parents=True)
+        (etat / "instantane-reussi").write_text("nc-avant-maj-2026-01-01_00-00-00\n")
+        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n")
+        supprimes = [a.rsplit("/", 1)[-1] for a in self.appels() if a.startswith("btrfs subvolume delete")]
+        self.assertEqual(supprimes, ["nc-avant-maj-2026-01-02_00-00-00"], "les 3 plus récents, et celui d'avant la dernière réussite")
+        pris = next(a for a in self.appels() if a.startswith("btrfs subvolume snapshot")).rsplit("/", 1)[-1]
+        self.assertEqual((etat / "instantane-reussi").read_text().strip(), pris, "réussie : son instantané devient celui à garder")
+
+    def test_instantane_impossible_jamais_en_silence(self):
+        """Revue B1 S2 : la création de /.snapshots qui échouait passait sans un mot."""
+        env = dict(NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n", NC_SNAPSHOTS=str(self.home / "absent"), NC_TEST_BTRFS_ECHEC="1")
+        r = self.lancer("terminal", **env)
+        self.assertIn("Instantané impossible : la mise à jour continue sans.", r.stdout)
+        self.assertIn("paru -Su", self.appels())
+        # MAJ_INSTANTANE=oui : la question ; sans « o », rien n'est mis à jour
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_INSTANTANE=oui\n")
+        (self.home / "appels").unlink()
+        r = self.lancer("terminal", **env)
+        self.assertIn("Continuer la mise à jour sans instantané ?", r.stdout)
+        self.assertIn("Mise à jour annulée", r.stdout)
+        self.assertNotIn("paru -Su", self.appels())
+        self.assertNotIn("flatpak update", self.appels())
+        (self.home / "appels").unlink()
+        r = self.lancer("terminal", entree="o\n\n", **env)
+        self.assertIn("paru -Su", self.appels(), "« o » : la mise à jour continue")
+
+    def test_crochets_timeshift_autosnap_et_80snapper(self):
+        """Revue B1 S3 : timeshift-autosnap (Arch) et 80snapper (Debian) n'étaient pas reconnus : instantané en double."""
+        crochet = self.home / "00-timeshift-autosnap.hook"; crochet.write_text("")
+        conf = self.home / "timeshift.json"; conf.write_text("{}")
+        r = self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_LOCAL="zsh 5-1 -> 5-2\n", NC_CROCHETS_TIMESHIFT=str(crochet),
+                        NC_TIMESHIFT_CONF=str(conf))
+        self.assertIn("fait par timeshift-autosnap", r.stdout)
+        self.assertFalse([a for a in self.appels() if a.startswith("btrfs")])
+        source = (BIN / "nc-paquets").read_text()
+        for chemin in ("/etc/apt/apt.conf.d/80snapper", "/usr/share/libalpm/hooks/*timeshift-autosnap*"):
+            self.assertIn(chemin, source)
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
