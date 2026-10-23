@@ -2,14 +2,19 @@
 """Ce PC comme « nœud » de JARVIS (issue #12), avec ta confirmation, sans dépendance Python externe.
 
   nc-noeud            se connecte au serveur JARVIS (service nc-noeud.service, coupé par défaut) et attend ses demandes
+  nc-noeud totp creer        crée le code de confirmation à distance (QR code ou clé pour ton appli d'authentification)
+  nc-noeud totp verifier CODE  vérifie le code de l'appli et active la confirmation à distance
+  nc-noeud totp retirer      oublie ce code (la confirmation à distance redevient impossible)
+  nc-noeud totp              dit où en est le code
   nc-noeud aide       cette aide
 
 Le serveur JARVIS-BIS (/api/node/ws) peut demander des actions à ce PC. Leur client (clients/node_agent.py) exécute
 tout sans te demander ; celui-ci applique une politique par action :
   - sans confirmation (sauf si « Actions sans confirmation » est sur non dans nc-reglages) : musique (playerctl),
     notification, lecture du presse-papiers, verrouillage, liste d'un dossier (sans contenu) ;
-  - avec ta confirmation dans l'île (ou une notification à boutons sans l'île), ou à distance (« Où confirmer les
-    actions de JARVIS » : le serveur te relaie la demande, par exemple sur Telegram), ou les deux : commande, lecture
+  - avec ta confirmation dans l'île (ou une notification à boutons sans l'île), ou à distance (« Où autoriser les
+    actions de JARVIS » : le serveur te relaie la demande, par exemple sur Telegram, et tu tapes le code à 6 chiffres
+    de ton appli d'authentification : le serveur ne peut pas autoriser à ta place), ou les deux : commande, lecture
     ou écriture d'un fichier, capture d'écran, écriture du presse-papiers ; refus automatique avant que le serveur
     abandonne (son délai moins 3 s, 32 s au plus, quand il l'annonce dans la demande ; sinon 12 s pour un fichier,
     une capture ou le presse-papiers, 17 s pour une action relayée, jusqu'à 17 s pour une commande selon son délai) :
@@ -24,7 +29,9 @@ import asyncio
 import base64
 import contextlib
 from datetime import datetime
+import fnmatch
 import hashlib
+import hmac
 import html
 import importlib.machinery
 import importlib.util
@@ -43,6 +50,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 import uuid
 
@@ -50,10 +58,12 @@ HOME = Path.home()
 DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, no external Python dependency.
 
   nc-noeud            connects to the JARVIS server (nc-noeud.service, off by default) and waits for its requests
+  nc-noeud totp creer|verifier CODE|retirer   remote confirmation code (TOTP, for your authenticator app)
   nc-noeud aide       this help
 
 No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
-notification with buttons), remotely (relayed by the server, e.g. on Telegram), or both: command, file read or write,
+notification with buttons), remotely (relayed by the server, e.g. on Telegram, with the 6-digit code of your
+authenticator app: the server cannot allow on your behalf), or both: command, file read or write,
 screenshot, clipboard write; denied before the server gives up (its timeout minus 3 s, at most 32 s, when the request
 carries it; otherwise 12 s for a file, screenshot or clipboard, 17 s for a relayed action, up to 17 s for a command):
 never done late, and execution stops 3 s before the server gives up. Always
@@ -114,12 +124,15 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
             ".var/app/com.brave.Browser", ".claude", ".claude.json", ".codex", ".gemini", ".config/opencode",
             ".local/share/opencode", ".aws", ".azure", ".config/gcloud", ".kube", ".docker", ".pgpass", ".npmrc",
             ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".config/rclone",
-            ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis"]
+            ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis",
+            ".local/state/nc-jarvis/connection.conf", ".config/nc/assistant.conf.backup-*", ".config/nc/noeud-totp.json"]
 # Écriture seulement : ce qui lance des commandes à ta place (Hyprland, uwsm, l'île, la barre, raccourcis et scripts de
 # nc, ~/.local/bin en tête du PATH, lanceurs d'applis, git, le terminal) et le journal de ce client
 ECRITURE_SEULEMENT = [".config/nc", ".local/bin", ".config/hypr", ".config/uwsm", ".config/quickshell",
                       ".config/noctalia", ".local/share/applications", ".gitconfig", ".config/git", ".config/kitty",
-                      ".local/state/noctalia-config"]
+                      ".local/state/noctalia-config", ".local/lib/python3.*/site-packages", ".local/share/dbus-1/services",
+                      ".config/containers/systemd", ".local/share/nc-jarvis", ".local/share/claude", ".config/nvim",
+                      ".vimrc", ".config/tmux", ".tmux.conf"]
 # Lecture seulement : historiques des shells (des secrets y restent souvent)
 LECTURE_SEULEMENT = [".bash_history", ".zsh_history", ".local/share/fish/fish_history", ".python_history"]
 
@@ -162,7 +175,11 @@ def delai_trame(v):
     nul ou négatif, infini, plus d'une heure) : on revient alors aux délais connus."""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    v = float(v)
+    try:
+        v = float(v)
+    except OverflowError:
+        raise Refus(T("Délai du serveur illisible : refusé.", "Unreadable server timeout: denied."),
+                    "refusé (délai illisible)") from None
     if not math.isfinite(v) or v <= 0 or v > TRAME_ABSURDE:
         return None
     return v
@@ -222,13 +239,241 @@ def mode_confirmation():
     return m if m in ("ecran", "distance", "les-deux") else "ecran"
 
 
+# ── Code de confirmation à distance (TOTP, RFC 6238 : SHA1, 30 s, 6 chiffres) ───────────────────────────────────────
+# Le secret est créé et gardé sur ce PC seulement (0600), jamais envoyé au serveur ni noté au journal ; tu l'enregistres
+# dans ton appli d'authentification (Aegis, Google Authenticator…). Le serveur relaie le code que tu tapes : sans lui,
+# il ne peut pas autoriser à ta place.
+TOTP_PAS = 30
+TOTP_ECHECS_MAX = 5                # codes faux par heure, puis la confirmation à distance est bloquée
+
+
+def fichier_totp():
+    return HOME / ".config/nc/noeud-totp.json"
+
+
+def fichier_totp_etat():
+    return Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config/noeud-totp-etat.json"
+
+
+def heure():
+    """Heure murale des codes (remplacée dans les tests)."""
+    return time.time()
+
+
+def totp_code(secret, pas):
+    cle = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    h = hmac.new(cle, struct.pack(">Q", pas), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    return f"{(struct.unpack('>I', h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000:06d}"
+
+
+def lire_json_prive(chemin):
+    """Le contenu d'un fichier JSON à toi seul (0600, pas un lien) ; None sinon."""
+    try:
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            return None
+        with os.fdopen(fd, "r", encoding="utf-8") as f:
+            fd = None
+            v = json.load(f)
+        return v if isinstance(v, dict) else None
+    except (OSError, ValueError, UnicodeError):
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def ecrire_json_prive(chemin, v):
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    ecrire_atomique(chemin, json.dumps(v), 0o600)
+
+
+def totp_secret(verifie=True):
+    """Le secret enrôlé (vérifié si demandé), ou None."""
+    v = lire_json_prive(fichier_totp())
+    if not v or not isinstance(v.get("secret"), str) or len(v["secret"]) < 16:
+        return None
+    if verifie and v.get("verifie") is not True:
+        return None
+    try:
+        totp_code(v["secret"], 0)
+    except (ValueError, TypeError):
+        return None
+    return v["secret"]
+
+
+def totp_etat():
+    v = lire_json_prive(fichier_totp_etat()) or {}
+    dernier = v.get("dernier")
+    echecs = [t for t in v.get("echecs", []) if isinstance(t, (int, float)) and heure() - t < 3600]
+    return {"dernier": dernier if isinstance(dernier, int) else -1, "echecs": echecs, "bloque": v.get("bloque") is True}
+
+
+def totp_actif():
+    return totp_secret() is not None and not totp_etat()["bloque"]
+
+
+def code_trouve(secret, code, etat):
+    """Le pas (compteur) du code dans la fenêtre ±1 et jamais servi, sinon (None, raison). Comparaison à temps constant."""
+    if not isinstance(code, str) or not re.fullmatch(r"[0-9]{6}", code):
+        return None, "absent" if not code else "illisible"
+    p = int(heure() // TOTP_PAS)
+    trouve = None
+    for d in (-1, 0, 1):
+        if hmac.compare_digest(totp_code(secret, p + d), code):
+            trouve = p + d
+    if trouve is None:
+        return None, "faux"
+    if trouve <= etat["dernier"]:
+        return None, "déjà servi"
+    return trouve, ""
+
+
+def verifier_code_distant(code):
+    """(vrai, "") si le code autorise ; sinon (faux, raison), compté : 5 échecs en une heure bloquent la distance."""
+    secret = totp_secret()
+    etat = totp_etat()
+    if not secret:
+        return False, "aucun code enrôlé"
+    if etat["bloque"]:
+        return False, "bloqué"
+    pas, raison = code_trouve(secret, code, etat)
+    if pas is not None:
+        etat["dernier"] = pas
+        ecrire_json_prive(fichier_totp_etat(), etat)
+        return True, ""
+    etat["echecs"].append(heure())
+    if len(etat["echecs"]) >= TOTP_ECHECS_MAX:
+        etat["bloque"] = True
+        prevenir(T("Confirmation à distance bloquée", "Remote confirmation blocked"),
+                 T(f"{TOTP_ECHECS_MAX} codes faux en une heure : JARVIS ne peut plus faire autoriser à distance. Sur ce PC, "
+                   "« nc-noeud totp verifier CODE » la rétablit.",
+                   f"{TOTP_ECHECS_MAX} wrong codes within an hour: JARVIS can no longer get remote approval. On this PC, "
+                   "“nc-noeud totp verifier CODE” restores it."))
+        print(T("nc-noeud : trop de codes faux, confirmation à distance bloquée.",
+                "nc-noeud: too many wrong codes, remote confirmation blocked."), file=sys.stderr, flush=True)
+    ecrire_json_prive(fichier_totp_etat(), etat)
+    return False, raison
+
+
+def prevenir(titre, corps):
+    ns = programme("notify-send")
+    if ns:
+        with contextlib.suppress(OSError):
+            subprocess.Popen([ns, "-a", "JARVIS", "-u", "critical", "--", titre, corps], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def mode_effectif(dire=False):
+    """Le mode de confirmation vraiment appliqué : distance et les-deux exigent un code enrôlé et non bloqué."""
+    m = mode_confirmation()
+    if m != "ecran" and not totp_actif():
+        if dire:
+            print(T(f"nc-noeud : NOEUD_CONFIRMATION={m}, mais aucun code de confirmation n'est prêt (ou il est bloqué) : "
+                    "confirmation sur l'écran. Lance « nc-noeud totp creer » puis « nc-noeud totp verifier CODE ».",
+                    f"nc-noeud: NOEUD_CONFIRMATION={m}, but no confirmation code is ready (or it is blocked): confirming "
+                    "on the screen. Run “nc-noeud totp creer” then “nc-noeud totp verifier CODE”."),
+                  file=sys.stderr, flush=True)
+        return "ecran"
+    return m
+
+
+def relancer_service():
+    """Le register dit au serveur si ce PC sait confirmer à distance : on se reconnecte (si le service tourne)."""
+    sc = programme("systemctl")
+    if sc and reglage("NOEUD_JARVIS", "non") == "oui":
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run([sc, "--user", "try-restart", "nc-noeud.service"], capture_output=True, timeout=20)
+
+
+def commande_totp(args):
+    quoi = args[0] if args else "etat"
+    f = fichier_totp()
+    if quoi in ("creer", "créer", "create"):
+        if totp_secret() and "--remplacer" not in args:
+            print(T("Un code est déjà enrôlé. « nc-noeud totp retirer » d'abord (ou --remplacer).",
+                    "A code is already enrolled. “nc-noeud totp retirer” first (or --remplacer)."), file=sys.stderr)
+            return 1
+        secret = base64.b32encode(os.urandom(20)).decode("ascii").rstrip("=")
+        ecrire_json_prive(f, {"secret": secret, "verifie": False})
+        with contextlib.suppress(FileNotFoundError):
+            fichier_totp_etat().unlink()
+        pc = A.nom_du_pc() if A else None
+        pc = pc or socket.gethostname() or "linux"
+        uri = (f"otpauth://totp/noctalia-config:{urllib.parse.quote(pc, safe='')}?secret={secret}"
+               "&issuer=noctalia-config")
+        print(T("Code de confirmation à distance : ajoute-le dans ton appli d'authentification (Aegis, Google "
+                "Authenticator…). Ne le montre à personne, et jamais au serveur.",
+                "Remote confirmation code: add it to your authenticator app (Aegis, Google Authenticator…). Show it to "
+                "nobody, and never to the server."))
+        qr = programme("qrencode")
+        dessin = None
+        if qr:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                r = subprocess.run([qr, "-t", "ANSIUTF8"], input=uri.encode("utf-8"), capture_output=True, timeout=10)
+                dessin = r.stdout.decode("utf-8", "replace") if r.returncode == 0 and r.stdout else None
+        if dessin:
+            print(dessin)
+        else:
+            print(T("Clé à taper dans l'appli (type « basé sur l'heure », 6 chiffres, 30 s) :",
+                    "Key to type in the app (time-based, 6 digits, 30 s):"))
+            print("  " + " ".join(secret[i:i + 4] for i in range(0, len(secret), 4)))
+        print(uri)
+        print(T("Puis : nc-noeud totp verifier CODE (le code à 6 chiffres affiché par l'appli).",
+                "Then: nc-noeud totp verifier CODE (the 6-digit code shown by the app)."))
+        return 0
+    if quoi in ("verifier", "vérifier", "verify"):
+        secret = totp_secret(verifie=False)
+        if not secret:
+            print(T("Aucun code : « nc-noeud totp creer » d'abord.", "No code: “nc-noeud totp creer” first."), file=sys.stderr)
+            return 1
+        etat = totp_etat()
+        etat["bloque"] = False
+        pas, raison = code_trouve(secret, args[1].strip() if len(args) > 1 else "", etat)
+        if pas is None:
+            print(T(f"Code {raison} : rien n'est activé. Vérifie l'heure du PC et du téléphone.",
+                    f"Code {raison}: nothing enabled. Check the time on the PC and the phone."), file=sys.stderr)
+            return 1
+        ecrire_json_prive(f, {"secret": secret, "verifie": True})
+        ecrire_json_prive(fichier_totp_etat(), {"dernier": pas, "echecs": [], "bloque": False})
+        print(T("Code bon : la confirmation à distance est prête. nc-reglages → Intelligence artificielle → « Où autoriser "
+                "les actions de JARVIS » → À distance (ou Les deux).",
+                "Code accepted: remote confirmation is ready. nc-settings → Artificial intelligence → “Where to allow "
+                "JARVIS actions” → Remotely (or Both)."))
+        relancer_service()
+        return 0
+    if quoi in ("retirer", "remove"):
+        for x in (f, fichier_totp_etat()):
+            with contextlib.suppress(FileNotFoundError):
+                x.unlink()
+        print(T("Code oublié : la confirmation se fait sur l'écran.", "Code removed: confirmation happens on the screen."))
+        relancer_service()
+        return 0
+    if quoi in ("etat", "état", "status"):
+        if totp_secret():
+            print(T("Code prêt" + (" mais BLOQUÉ (trop de codes faux) : nc-noeud totp verifier CODE" if totp_etat()["bloque"] else "."),
+                    "Code ready" + (" but BLOCKED (too many wrong codes): nc-noeud totp verifier CODE" if totp_etat()["bloque"] else ".")))
+        elif totp_secret(verifie=False):
+            print(T("Code créé, pas encore vérifié : nc-noeud totp verifier CODE.", "Code created, not verified yet: nc-noeud totp verifier CODE."))
+        else:
+            print(T("Aucun code : nc-noeud totp creer.", "No code: nc-noeud totp creer."))
+        return 0
+    print(T("nc-noeud totp creer | verifier CODE | retirer", "nc-noeud totp creer | verifier CODE | retirer"), file=sys.stderr)
+    return 2
+
+
 # ── Secrets : jamais dans le journal ni dans ce qui part pour la confirmation à distance ─────────────────────────────
 SECRETS = set()                    # valeurs secrètes de la configuration (SECRET_KEY…), remplies au démarrage
 MOTIFS_SECRETS = [re.compile(m) for m in (
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
     r"\b(?:gh[pousr]_|github_pat_|glpat-|sk-ant-|sk-proj-|sk-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_\-]{16,}",
     r"(?i)\b(?:bearer|token|basic)\s+[A-Za-z0-9._~+/=\-]{16,}",
-    r"(?i)\b((?:api[_-]?key|secret[_-]?key|x-secret-key|password|passwd|token)\s*[=:]\s*)[\"']?[^\s\"']{6,}")]
+    r"(?i)\b((?:api[_-]?key|secret[_-]?key|x-secret-key|password|passwd|token)\s*[=:]\s*)[\"']?[A-Za-z0-9._~+/=\-]{6,}")]
 MASQUE = "•••"
 
 
@@ -239,13 +484,55 @@ def retenir_secrets(c):
             SECRETS.add(v)
 
 
-def sans_secrets(texte):
+def secrets_exacts(texte):
+    """Seulement les valeurs exactes de la configuration remplacées : ce qui reste montre la vraie commande."""
     s = str(texte)
     for v in sorted(SECRETS, key=len, reverse=True):
         s = s.replace(v, MASQUE)
+    return s
+
+
+def motifs_trouves(texte):
+    """Vrai si un motif générique de secret (jeton, clé privée…) figure dans le texte."""
+    return any(m.search(str(texte)) for m in MOTIFS_SECRETS)
+
+
+def sans_secrets(texte):
+    """Pour le journal : valeurs exactes et motifs génériques masqués (l'empreinte sha256 garde la commande entière)."""
+    s = secrets_exacts(texte)
     for m in MOTIFS_SECRETS:
         s = m.sub(lambda x: ((x.group(1) or "") if x.re.groups else "") + MASQUE, s)
     return s
+
+
+# Caractères qui se cachent ou trompent à l'affichage : contrôles C0 et C1 (sauf le saut de ligne), bidi, largeur nulle,
+# séparateurs de ligne Unicode. Rendus visibles (\x1b, \u202e…) dans la carte, le résumé à distance et le journal.
+CACHES = {0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2060, 0xFEFF, 0x061C, 0x180E, 0x2028, 0x2029,
+          *range(0x202A, 0x202F), *range(0x2066, 0x206A)}
+
+
+def rendre_visible(texte):
+    out = []
+    for ch in str(texte):
+        o = ord(ch)
+        if ch == "\n":
+            out.append(ch)
+        elif o < 0x20 or 0x7F <= o <= 0x9F:
+            out.append(f"\\x{o:02x}")
+        elif o in CACHES or unicodedata.category(ch) in ("Cf", "Zl", "Zp"):
+            out.append(f"\\u{o:04x}" if o <= 0xFFFF else f"\\U{o:08x}")
+        else:
+            out.append(ch)
+    return re.sub(r"\n{3,}", "\n\n", "".join(out))             # au plus 2 sauts de ligne de suite
+
+
+def longueur_utf16(texte):
+    """Longueur comptée comme Telegram (unités UTF-16)."""
+    return len(str(texte).encode("utf-16-le")) // 2
+
+
+def empreinte(donnees):
+    return hashlib.sha256(donnees if isinstance(donnees, bytes) else str(donnees).encode("utf-8")).hexdigest()
 
 
 def dossier_runtime():
@@ -276,13 +563,14 @@ def ecrire_atomique(chemin, texte, mode=0o600):
 
 
 # ── Journal local ─────────────────────────────────────────────────────────────────────────────────────────────────
-def journal(action, resume, decision):
-    """Une ligne par demande : date, action, résumé (secrets masqués), décision. 0600 ; ramené à sa seconde moitié au-delà de 1 Mo."""
+def journal(action, resume, decision, sha=None):
+    """Une ligne par demande : date, action, résumé (secrets masqués, caractères cachés rendus visibles, puis
+    « sha256=… » de la commande ou du contenu entier), décision. 0600 ; ramené à sa seconde moitié au-delà de 1 Mo."""
     d = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config"
     f = d / "noeud.log"
-    propre = lambda s: " ".join(sans_secrets(s).split())[:300]
-    ligne = "\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), propre(action), propre(resume),
-                       propre(decision))) + "\n"
+    propre = lambda s: " ".join(rendre_visible(sans_secrets(s)).split())[:300]
+    ligne = "\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), propre(action),
+                       propre(resume) + (f" sha256={sha}" if sha else ""), propre(decision))) + "\n"
     try:
         d.mkdir(parents=True, exist_ok=True)
         if f.is_symlink():
@@ -316,15 +604,52 @@ def resoudre(brut):
         raise Refus(T(f"Chemin impossible à résoudre : {e}", f"Cannot resolve path: {e}")) from None
 
 
+# Dossiers où un fichier à plusieurs liens physiques est normal (paquets du système) ; ailleurs, un lien physique
+# pourrait mener à un fichier protégé sans passer par son chemin : lecture refusée
+DOSSIERS_SURS = ("/usr", "/opt", "/nix/store")
+
+
 def protege(cible, ecriture):
-    """Le chemin protégé qui contient cible (déjà résolue), ou None."""
+    """Le chemin protégé qui contient cible (déjà résolue), ou None. Les « * » valent pour un seul niveau."""
     liste = PROTEGES + (ECRITURE_SEULEMENT if ecriture else LECTURE_SEULEMENT)
+    bases = {Path(os.path.abspath(HOME)), HOME.resolve()}
     for rel in liste:
+        if "*" in rel:
+            n = len(Path(rel).parts)
+            for h in bases:
+                with contextlib.suppress(ValueError):
+                    parts = cible.relative_to(h).parts
+                    if len(parts) >= n and fnmatch.fnmatchcase("/".join(parts[:n]), rel):
+                        return "~/" + rel
+            continue
         base = HOME / rel
         for b in {Path(os.path.abspath(base)), base.resolve()}:
             if cible == b or b in cible.parents:
                 return "~/" + rel
     return None
+
+
+def lien_physique_douteux(st, cible):
+    return stat.S_ISREG(st.st_mode) and st.st_nlink > 1 and not any(
+        str(cible) == d or str(cible).startswith(d + "/") for d in DOSSIERS_SURS)
+
+
+def verifier_fd(fd, cible, ecriture):
+    """Après l'ouverture : le fichier vraiment ouvert (/proc/self/fd) est bien la cible, et n'est pas protégé."""
+    try:
+        vrai = Path(os.path.realpath(f"/proc/self/fd/{fd}"))
+    except OSError:
+        vrai = None
+    if vrai is not None and str(vrai).startswith("/") and vrai != cible:
+        raise Refus(T("Le fichier a changé pendant l'ouverture : refusé.", "The file changed while opening: denied."),
+                    "refusé (chemin changé)")
+    p = protege(cible if vrai is None else vrai, ecriture)
+    if p:
+        raise Refus(T(f"Chemin protégé ({p}) : refusé, même avec ta confirmation.",
+                      f"Protected path ({p}): denied, even with your confirmation."), "refusé (chemin protégé)")
+    if not ecriture and lien_physique_douteux(os.fstat(fd), cible):
+        raise Refus(T("Fichier à plusieurs liens physiques : refusé.", "File with several hard links: denied."),
+                    "refusé (lien physique)")
 
 
 def verifier_chemin(brut, ecriture):
@@ -520,8 +845,9 @@ def programme(*noms):
 
 # ── Les actions : (résumé, texte montré, exécution) ───────────────────────────────────────────────────────────────
 class Action:
-    def __init__(self, resume, texte="", executer=None):
+    def __init__(self, resume, texte="", executer=None, sha=None):
         self.resume, self.texte, self.executer = resume, texte, executer
+        self.sha = sha                  # sha256 de la commande ou du contenu entier (journal, résumé à distance)
 
 
 def preparer(action, p):
@@ -535,9 +861,10 @@ def preparer(action, p):
         if os.geteuid() == 0:
             raise Refus(T("nc-noeud ne tourne jamais en root.", "nc-noeud never runs as root."))
         try:
-            delai = min(max(float(p.get("timeout", 30)), 1.0), 120.0)
-        except (TypeError, ValueError):
+            delai = float(p.get("timeout", 30))
+        except (TypeError, ValueError, OverflowError):
             delai = 30.0
+        delai = min(max(delai, 1.0), 120.0) if math.isfinite(delai) else 30.0
         dossier = HOME
         if p.get("cwd"):
             dossier = verifier_chemin(p.get("cwd"), False)
@@ -549,7 +876,7 @@ def preparer(action, p):
 
         async def executer(budget=None):
             # Durée : son délai demandé, mais jamais au-delà de l'échéance du serveur (moins 3 s) : B2-11
-            d = delai if budget is None else min(delai, budget)
+            d = delai if budget is None or not math.isfinite(budget) else min(budget, delai)
             debut = time.monotonic()
             try:
                 code, out, err = await lancer(["/bin/sh", "-c", cmd], delai=d, cwd=str(dossier),
@@ -562,7 +889,7 @@ def preparer(action, p):
             e = err[:MAX_SORTIE].decode("utf-8", "replace").strip()
             return {"success": code == 0, "returncode": code, "stdout": o, "stderr": e, "duration": round(duree, 2),
                     "message": f"Code {code} ({duree:.1f}s)\n{o}\n{e}".strip()}
-        return Action(resume, cmd, executer)
+        return Action(resume, cmd, executer, empreinte(cmd))
 
     if action in ("read_file", "list_files"):
         cible = verifier_chemin(p.get("path"), False)
@@ -581,14 +908,23 @@ def preparer(action, p):
             return Action(resume, "", executer)
         if action == "list_files":
             raise Refus(T("Ce n'est pas un dossier.", "Not a folder."))
-        taille = cible.stat().st_size
+        st = cible.stat()
+        taille = st.st_size
         if taille > MAX_FICHIER:
             raise Refus(T("Fichier trop gros (plus de 5 Mo).", "File too big (over 5 MB)."))
+        if lien_physique_douteux(st, cible):
+            raise Refus(T("Fichier à plusieurs liens physiques : refusé.", "File with several hard links: denied."),
+                        "refusé (lien physique)")
 
         async def executer(budget=None):
             # Relu au moment de lire : un lien posé pendant la confirmation ne mène pas ailleurs
             verifier_chemin(str(cible), False)
             fd = os.open(cible, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                verifier_fd(fd, cible, False)
+            except BaseException:
+                os.close(fd)
+                raise
             with os.fdopen(fd, "rb") as f:
                 contenu = f.read(MAX_FICHIER + 1)[:MAX_FICHIER].decode("utf-8", "replace")
             return {"success": True, "type": "file", "content": contenu, "size": len(contenu)}
@@ -615,11 +951,17 @@ def preparer(action, p):
         async def executer(budget=None):
             cible.parent.mkdir(parents=True, exist_ok=True)
             verifier_chemin(str(cible), True)              # relu après la confirmation et la création des dossiers
-            fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+            fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+            try:
+                verifier_fd(fd, cible, True)                # vidé seulement après cette vérification
+                os.ftruncate(fd, 0)
+            except BaseException:
+                os.close(fd)
+                raise
             with os.fdopen(fd, "wb") as f:
                 f.write(brut)
             return {"success": True, "path": str(cible), "bytes_written": len(brut)}
-        return Action(resume, apercu[:MAX_TEXTE], executer)
+        return Action(resume, apercu[:MAX_TEXTE], executer, empreinte(brut))
 
     if action == "screenshot":
         grim = programme("grim")
@@ -761,15 +1103,16 @@ class Confirmation:
                     vieux.unlink()
             # « expire » : l'échéance de CETTE action (heure murale), d'où part le compte à rebours de la carte ;
             # au-delà, la carte n'envoie plus « autoriser » (« Trop tard ») et nc-noeud n'exécute plus rien
-            demande = {"id": ident, "serveur": self.serveur, "action": action, "resume": decrite.resume,
-                       "texte": decrite.texte, "court": COURT, "expire": time.time() + reste, "duree": round(reste)}
+            demande = {"id": ident, "serveur": self.serveur, "action": action, "resume": rendre_visible(decrite.resume),
+                       "texte": rendre_visible(decrite.texte), "court": COURT, "expire": time.time() + reste,
+                       "duree": round(reste)}
             fichier = d / "demande.json"
             ecrire_atomique(fichier, json.dumps(demande, ensure_ascii=False))
             try:
                 if await ile_prevenue():
                     return await self.attendre(d / "reponses" / ident, limite)
                 ns = await notification_a_boutons()
-                if ns and len(decrite.texte) <= COURT:
+                if ns and len(rendre_visible(decrite.texte)) <= COURT:
                     return await self.par_notification(ns, decrite, limite)
                 return "indisponible"
             finally:
@@ -798,7 +1141,7 @@ class Confirmation:
     async def par_notification(self, ns, decrite, limite):
         """Sans l'île (openSUSE…) : une notification avec Autoriser et Refuser ; le texte entier doit y tenir."""
         reste = limite - horloge()
-        corps = decrite.resume + ("\n\n" + decrite.texte if decrite.texte else "")
+        corps = rendre_visible(decrite.resume + ("\n\n" + decrite.texte if decrite.texte else ""))
         args = [ns, "-a", "JARVIS", "-u", "critical", "-t", str(int(reste * 1000)),
                 "-A", "autoriser=" + T("Autoriser", "Allow"), "-A", "refuser=" + T("Refuser", "Deny"), "--",
                 T(f"JARVIS (depuis {self.serveur}) veut :", f"JARVIS (from {self.serveur}) wants to:"),
@@ -814,11 +1157,13 @@ class Confirmation:
 class ConfirmationDistance:
     """Confirmation relayée par le serveur (NOEUD_CONFIRMATION=distance ou les-deux, capacité « remote_confirm ») :
       → {"type": "confirm_request", "req_id": <celui de l'action>, "action": …, "summary": <ce qui sera fait, en entier,
-         secrets masqués>, "expires_in": <secondes entières>}
-      ← {"type": "confirm_response", "req_id": …, "decision": "allow" | "deny"}
+         caractères cachés rendus visibles>, "expires_in": <secondes entières>, "code_required": true}
+      ← {"type": "confirm_response", "req_id": …, "decision": "allow", "code": "123456"} ou "decision": "deny"
       → {"type": "confirm_cancel", "req_id": …} quand la demande se termine sans décision venue de là (décidée sur
          l'écran, expirée, annulée).
-    Seul un « allow » reçu avant l'échéance, pour ce req_id exact, autorise ; toute autre réponse est ignorée et notée."""
+    Seul un « allow » reçu avant l'échéance, pour ce req_id exact, avec le bon code TOTP (jamais déjà servi), autorise.
+    Un « allow » sans code ou avec un code faux refuse la demande ; toute réponse hors demande en cours est ignorée et
+    notée. Le serveur ne connaît pas le secret : il ne peut pas autoriser sans toi."""
     GARDEES = 256                       # demandes terminées dont on se souvient (réponse en double ou tardive)
 
     def __init__(self):
@@ -831,20 +1176,20 @@ class ConfirmationDistance:
         if reste < 1:
             return "expire"
         if ws is None or ws.ferme or not isinstance(req_id, str) or not req_id or req_id in self.attentes \
-                or req_id in self.finies or len(resume) > MAX_RESUME_DISTANCE:
+                or req_id in self.finies or resume is None or longueur_utf16(resume) > MAX_RESUME_DISTANCE:
             return "indisponible"
         futur = asyncio.get_running_loop().create_future()
         self.attentes[req_id] = (futur, limite)
         fin = "close"
         try:
             await ws.envoyer({"type": "confirm_request", "req_id": req_id, "action": nom, "summary": resume,
-                              "expires_in": max(1, math.floor(reste))})
+                              "expires_in": max(1, math.floor(reste)), "code_required": True})
             try:
                 v = await asyncio.wait_for(asyncio.shield(futur), max(limite - horloge(), 0))
             except asyncio.TimeoutError:
                 return "expire"
             fin = "décidée"
-            return "autorise" if v == "allow" else "refuse"
+            return {"allow": "autorise", "deny": "refuse"}.get(v, "code")
         except (OSError, ErreurWS):
             return "indisponible"
         finally:
@@ -872,17 +1217,30 @@ class ConfirmationDistance:
             journal("confirm_response", montre, "ignorée (en double)")
         elif horloge() >= limite:
             journal("confirm_response", montre, "ignorée (tardive)")
+        elif dec == "allow":
+            ok, raison = verifier_code_distant(msg.get("code"))
+            if not ok:
+                journal("confirm_response", montre, f"code refusé ({raison})")
+            futur.set_result("allow" if ok else "code")
         else:
             futur.set_result(dec)
 
 
 def resume_distance(nom, decrite):
-    """Ce qui part au serveur pour la confirmation à distance : exactement ce qui sera fait (commande entière, chemin
-    et taille, texte copié, notification), jamais le contenu d'un fichier, secrets masqués."""
+    """Ce qui part au serveur pour la confirmation à distance : exactement ce qui sera fait (commande entière, chemin,
+    taille, sha256 et premières lignes d'un fichier écrit, texte copié, notification), caractères cachés rendus
+    visibles, seules les valeurs secrètes exactes de la configuration masquées. None si ce résumé ne peut pas être
+    honnête : un motif générique de secret le changerait (on ne montre pas une commande tronquée), ou il est trop
+    long pour un message (compté en UTF-16)."""
     s = decrite.resume
-    if decrite.texte and nom in ("exec", "clipboard_write", "notify"):
+    if nom == "write_file" and decrite.sha:
+        s += f"\nsha256 {decrite.sha}"
+    if decrite.texte and nom in ("exec", "clipboard_write", "notify", "write_file"):
         s += " :\n" + decrite.texte
-    return sans_secrets(s)
+    s = rendre_visible(secrets_exacts(s))
+    if motifs_trouves(s) or longueur_utf16(s) > MAX_RESUME_DISTANCE:
+        return None
+    return s
 
 
 SOURCES = {"ecran": ("écran", "sur le PC", "on the PC"), "distance": ("distance", "à distance", "remotely")}
@@ -890,6 +1248,8 @@ DECISIONS = {"refuse": ("refusé", "Refusé {o}.", "Denied {o}."),
              "expire": ("expiré (refusé)", "Pas de réponse en {s} s : refusé.", "No answer within {s} s: denied."),
              "tard": ("autorisé trop tard (rien fait)", "Autorisé {o} après {s} s, trop tard : rien n'a été fait.",
                       "Allowed {o} after {s} s, too late: nothing was done."),
+             "code": ("refusé (code absent ou faux)", "Code de confirmation absent, faux ou déjà servi : refusé.",
+                      "Confirmation code missing, wrong or already used: denied."),
              "indisponible": ("refusé (pas de confirmation possible)",
                               "Confirmation impossible (ni l'île, ni notification à boutons, ni demande à distance) : refusé.",
                               "Cannot confirm (neither the island, nor a notification with buttons, nor a remote request): denied.")}
@@ -919,7 +1279,7 @@ class Noeud:
     async def confirmer(self, nom, decrite, limite, req_id):
         """(décision, source) : sur l'écran, à distance, ou les deux à la fois (la première décision l'emporte, l'autre
         côté est fermé : la carte disparaît, le serveur reçoit confirm_cancel)."""
-        mode = mode_confirmation()
+        mode = mode_effectif()
         if mode != "ecran" and not self.distance_annoncee:
             # Réglage changé depuis la connexion (nc-reglages relance le service) : le serveur ne sait pas encore
             # relayer ; une personne valide quand même, sur l'écran
@@ -942,9 +1302,11 @@ class Noeud:
                         except Refus as e:
                             print(f"nc-noeud : {e}", file=sys.stderr, flush=True)
                             resultats[source] = "indisponible"
-                for source in ("ecran", "distance"):                 # une vraie décision : on n'attend plus l'autre
-                    if resultats.get(source) in ("autorise", "refuse", "tard"):
-                        return resultats[source], source
+                # Une vraie décision : on n'attend plus l'autre ; un refus arrivé dans le même tour l'emporte
+                for d in ("refuse", "code", "autorise", "tard"):
+                    for source in ("ecran", "distance"):
+                        if resultats.get(source) == d:
+                            return d, source
             for d in ("tard", "expire"):
                 for source, r in resultats.items():
                     if r == d:
@@ -961,8 +1323,12 @@ class Noeud:
         """Le résultat à renvoyer au serveur, selon la politique ; tout est noté dans le journal.
         trame : le « timeout » de la trame d'action (secondes, aae5b9b), s'il y en a un."""
         recu = horloge()                                             # l'échéance part de la réception
-        trame = delai_trame(trame)
         nom = ALIAS.get(action, action)
+        try:
+            trame = delai_trame(trame)
+        except Refus as e:
+            journal(nom, "", e.decision)
+            return {"success": False, "error": str(e), "denied": True}
         if ia_coupee():
             journal(nom, "", "refusé (IA coupée)")
             return {"success": False, "error": T("L'IA est coupée sur ce PC (IA_MODE=non) : refusé.",
@@ -980,6 +1346,7 @@ class Noeud:
             journal(nom, str(e), e.decision)
             return {"success": False, "error": str(e)}
         resume = decrite.resume + (" : " + decrite.texte if decrite.texte else "")
+        sha = decrite.sha
         # Commande, fichier, capture, écriture du presse-papiers : toujours une personne qui autorise (écran ou distance)
         confirmer = nom in AVEC_CONFIRMATION or reglage("NOEUD_SANS_CONFIRMATION", "oui") == "non"
         try:
@@ -987,7 +1354,7 @@ class Noeud:
             # Échéance du serveur : annoncée dans la trame, sinon la plus courte connue pour cette action
             echeance = recu + (trame if trame is not None else delai_confirmation(nom, p) + MARGE_SERVEUR)
         except Refus as e:
-            journal(nom, resume, e.decision + " (délai trop court)")
+            journal(nom, resume, sha=sha, decision=e.decision + " (délai trop court)")
             return {"success": False, "error": str(e), "denied": True}
         source = None
         if confirmer:
@@ -998,35 +1365,36 @@ class Noeud:
             o = T(SOURCES[source][1], SOURCES[source][2])
             if decision != "autorise":
                 d = DECISIONS[decision]
-                journal(nom, resume, d[0] + ("" if decision in ("expire", "indisponible") else f" ({SOURCES[source][0]})"))
+                journal(nom, resume, sha=sha, decision=d[0] + ("" if decision in ("expire", "indisponible") else f" ({SOURCES[source][0]})"))
                 return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}", o=o), "denied": True}
         # Relu juste avant d'exécuter (B2-09) : couper l'IA ou le pilotage pendant la confirmation l'emporte sur « allow »
         if ia_coupee():
-            journal(nom, resume, "refusé (IA coupée)")
+            journal(nom, resume, sha=sha, decision="refusé (IA coupée)")
             return {"success": False, "error": T("L'IA est coupée sur ce PC (IA_MODE=non) : refusé.",
                                                  "AI is turned off on this PC (IA_MODE=non): denied."), "denied": True}
         if reglage("NOEUD_JARVIS", "non") != "oui":
-            journal(nom, resume, "refusé (pilotage coupé)")
+            journal(nom, resume, sha=sha, decision="refusé (pilotage coupé)")
             return {"success": False, "error": T("Le pilotage de ce PC par JARVIS est coupé.", "JARVIS control of this PC is off."),
                     "denied": True}
         # Temps qui reste pour exécuter : échéance du serveur, moins la marge, moins ce qui est passé (B2-11)
         budget = echeance - MARGE_SERVEUR - horloge()
         if budget < BUDGET_MIN:
-            journal(nom, resume, "autorisé trop tard (rien fait)" + (f" ({SOURCES[source][0]})" if source else ""))
+            journal(nom, resume, sha=sha, decision=(f"autorisé trop tard (rien fait) ({SOURCES[source][0]})" if source
+                                                    else "trop tard (rien fait)"))
             return {"success": False, "denied": True,
                     "error": T("Trop tard : plus le temps d'exécuter avant que le serveur abandonne, rien n'a été fait.",
                                "Too late: no time left to run before the server gives up, nothing was done.")}
         try:
             res = await asyncio.wait_for(decrite.executer(budget), budget + (0.5 if nom == "exec" else 0))
         except Refus as e:
-            journal(nom, resume, e.decision)
+            journal(nom, resume, sha=sha, decision=e.decision)
             return {"success": False, "error": str(e)}
         except asyncio.TimeoutError:
             b = round(budget, 1)
             res = {"success": False, "error": T(f"Délai de {b:g} s dépassé.", f"{b:g} s timeout exceeded.")}
         except (OSError, UnicodeError) as e:
             res = {"success": False, "error": str(e)[:300]}
-        journal(nom, resume, (f"autorisé ({SOURCES[source][0]})" if confirmer else "sans confirmation")
+        journal(nom, resume, sha=sha, decision=(f"autorisé ({SOURCES[source][0]})" if confirmer else "sans confirmation")
                 + ("" if res.get("success") else " (échec)"))
         return res
 
@@ -1052,7 +1420,7 @@ class Noeud:
     async def session(self, ws):
         self.ws = ws
         pc = A.nom_du_pc() or socket.gethostname() or "linux"
-        mode = mode_confirmation()
+        mode = mode_effectif(dire=True)
         self.distance_annoncee = mode in ("distance", "les-deux")
         await ws.envoyer({"type": "register", "node_id": A.client_id(self.c) or pc, "hostname": pc, "os": "linux",
                           "capabilities": CAPACITES + (["remote_confirm"] if self.distance_annoncee else []),
@@ -1118,6 +1486,8 @@ def main():
     if args and args[0] in ("aide", "help", "-h", "--help"):
         print(T(__doc__, DOC_EN).strip())
         return 0
+    if args and args[0] == "totp":
+        return commande_totp(args[1:])
     if args:
         print(T("nc-noeud : commande inconnue (nc-noeud aide).", "nc-noeud: unknown command (nc-noeud aide)."), file=sys.stderr)
         return 2

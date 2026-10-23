@@ -276,7 +276,8 @@ demander.
   d’applis, git, kitty) se lisent mais ne s’écrivent pas. Couper l’IA (`IA_MODE=non`) ou le pilotage pendant
   l’attente l’emporte : les deux sont relus juste avant d’exécuter. Chaque demande est notée dans
   `~/.local/state/noctalia-config/noeud.log` (0600), avec sa décision et d’où elle vient (`autorisé (écran)`,
-  `refusé (distance)`…), jamais un secret.
+  `refusé (distance)`…), l’empreinte sha256 de la commande ou du contenu entier, les caractères cachés écrits en
+  clair, jamais un secret.
 - **Délais : 32 s avec `aae5b9b`, 12 s ou 17 s avec un serveur plus ancien.** Le serveur abandonne de son côté et
   répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. Depuis `aae5b9b`, chaque trame
   d’action porte son délai :
@@ -287,6 +288,7 @@ demander.
   court des révisions anciennes, qui n’annoncent rien). Un délai annoncé sous 6 s ne laisse pas le temps de te
   demander : refus direct. L’exécution elle-même s’arrête aussi 3 s avant l’abandon du serveur : une commande
   autorisée au bout de 30 s sur 35 a 2 s pour tourner, puis elle est tuée ; s’il reste moins d’1 s, rien n’est fait.
+  Avec un serveur qui n’annonce pas de délai dans la trame, une commande a donc au plus 17 s, confirmation comprise.
   Un « Autoriser » tardif affiche « Trop tard » et le serveur reçoit un seul refus.
 - **La clé secrète part seulement dans l’en-tête** `X-Secret-Key`, jamais dans l’adresse. La connexion est en
   `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
@@ -304,48 +306,81 @@ demander.
 ### Confirmer à distance
 
 Quand tu n’es pas devant ce PC (une tour allumée chez toi, toi sur ton portable ou ton téléphone), la carte de l’île
-expire sans personne pour la voir. nc-reglages → Intelligence artificielle → « Où autoriser les actions de JARVIS » :
+expire sans personne pour la voir. La confirmation peut alors venir d’ailleurs, mais **à distance, tu tapes le code
+de ton appli d’authentification : le serveur ne peut pas autoriser à ta place**. Le PC ne peut pas savoir si une
+personne a cliqué sur un bouton du serveur ; il peut vérifier un code que seul ton téléphone sait calculer.
+
+**1. Créer le code (une fois, sur ce PC, dans un terminal) :**
+
+```sh
+nc-noeud totp creer            # affiche un QR code (si qrencode est installé), sinon la clé à taper
+nc-noeud totp verifier 123456  # le code à 6 chiffres que montre l’appli : active la confirmation à distance
+nc-noeud totp                  # où en est le code
+nc-noeud totp retirer          # l’oublier
+```
+
+C’est un code TOTP standard (RFC 6238 : SHA1, 30 s, 6 chiffres), pour Aegis, Google Authenticator, 2FAS…
+L’adresse affichée est `otpauth://totp/noctalia-config:<nom du PC>?secret=…&issuer=noctalia-config`. Le secret est
+créé et gardé sur ce PC seulement (`~/.config/nc/noeud-totp.json`, 0600) : il n’est jamais envoyé au serveur, jamais
+noté au journal, et JARVIS ne peut ni le lire ni l’écrire (chemin protégé).
+
+**2. Choisir où autoriser :** nc-reglages → Intelligence artificielle → « Où autoriser les actions de JARVIS ».
 
 | Valeur | Ce qui se passe |
 | --- | --- |
 | `ecran` (par défaut) | Comme avant : la carte de l’île (ou la notification à boutons). Rien ne part au serveur. |
-| `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui doit te la relayer (bouton sur Telegram). |
-| `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
+| `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui te la relaie ; tu réponds avec le code de l’appli. |
+| `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte (un refus si les deux arrivent ensemble) ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
 
-Changer ce réglage relance `nc-noeud` (s’il tourne) : le serveur apprend à la connexion que ce PC sait confirmer à
-distance. Les chemins protégés, `IA_MODE=non` et les délais s’appliquent pareil, même après un « allow ».
+Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
+`nc-noeud totp creer`). Changer ce réglage, ou vérifier ou retirer le code, relance `nc-noeud` s’il tourne : le
+serveur apprend à la connexion que ce PC sait confirmer à distance. Chaque code ne sert qu’une fois. Après 5 codes
+faux (ou absents) en une heure, la confirmation à distance est bloquée, avec une notification, jusqu’à
+`nc-noeud totp verifier CODE` sur ce PC. Les chemins protégés, `IA_MODE=non` et les délais s’appliquent pareil, même
+avec un bon code.
 
-Le protocole, sur le même WebSocket `/api/node/ws` :
+**Le protocole**, sur le même WebSocket `/api/node/ws` :
 
-1. Au `register`, `capabilities` contient `"remote_confirm"` seulement en `distance` ou `les-deux`
-   (`metadata.confirmation_mode` dit lequel). Sans elle, le serveur ne doit rien relayer.
+1. Au `register`, `capabilities` contient `"remote_confirm"` seulement en `distance` ou `les-deux` avec un code prêt
+   (`metadata.confirmation_mode` dit le mode vraiment appliqué). Sans elle, le serveur ne doit rien relayer.
 2. Pour une action sensible, `nc-noeud` envoie :
    ```json
    {"type": "confirm_request", "req_id": "7f0c…", "action": "exec",
-    "summary": "exécuter cette commande :\nrm -rf ~/Téléchargements/vieux", "expires_in": 32}
+    "summary": "exécuter cette commande :\nrm -rf ~/Téléchargements/vieux", "expires_in": 32, "code_required": true}
    ```
    `req_id` est celui de la trame d’action. `summary` dit exactement ce qui sera fait, dans la langue du PC : la
-   commande entière, le chemin et la taille d’un fichier (jamais son contenu), le texte à copier ; les secrets
-   reconnus (clé du serveur, jetons) y sont remplacés par `•••`, et un résumé de plus de 3 500 caractères n’est pas
-   envoyé (refus, ou la carte seule en `les-deux`). `expires_in` est en secondes entières, arrondi vers le bas.
+   commande entière ; pour un fichier écrit, le chemin, la taille, le sha256 du contenu et ses premières lignes ; le
+   texte à copier. Les caractères qui se cachent (contrôles, séquences du terminal, bidi, largeur nulle) y sont
+   écrits en clair (`\x1b`, `‮`), avec au plus deux sauts de ligne de suite. Seules les valeurs secrètes exactes
+   de la configuration (la clé du serveur) sont remplacées par `•••`. Si un motif de secret générique (jeton, clé
+   privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
+   n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
 3. Le serveur répond, une fois :
    ```json
-   {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow"}
+   {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow", "code": "123456"}
    ```
-   `decision` vaut `"allow"` ou `"deny"`. Seul un `"allow"` reçu avant l’échéance, pour ce `req_id` exact, autorise
-   l’action ; une réponse inconnue, en double, tardive ou illisible est ignorée et notée au journal local.
+   ou `{"type": "confirm_response", "req_id": "7f0c…", "decision": "deny"}` (pas besoin de code pour refuser). Seul un
+   `"allow"` reçu avant l’échéance, pour ce `req_id` exact, avec un bon code (fenêtre d’un pas de 30 s avant ou
+   après, jamais déjà servi) autorise l’action. Un `"allow"` sans code ou avec un code faux refuse cette demande et
+   compte comme un échec. Une réponse inconnue, en double, tardive ou illisible est ignorée et notée au journal local.
 4. Si la demande se termine sans réponse venue de là (décidée sur l’écran, expirée), `nc-noeud` envoie
-   `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ou désactive les boutons.
+   `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ses boutons.
 5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
 
 Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe encore upstream**) :
 
-- envoyer `summary` avec deux boutons **Autoriser** / **Refuser** (Telegram), seulement à l’utilisateur autorisé du bot
-  (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans un groupe ; ignorer un clic venu de quelqu’un d’autre ;
-- une seule réponse par `req_id`, et seulement pour un nœud qui a annoncé `remote_confirm` ;
-- faire expirer les boutons au bout de `expires_in` secondes, ou dès `confirm_cancel` : passé ce délai, ne rien
-  envoyer (refus par défaut, `nc-noeud` refuse de toute façon) ;
-- ne jamais répondre `allow` tout seul (ni règle automatique, ni modèle) : c’est une personne qui décide.
+- envoyer `summary` tel quel, seulement à l’utilisateur autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans
+  un groupe, avec un bouton **Refuser** et une invite « réponds avec le code de ton appli » quand
+  `code_required` est vrai ; ignorer les messages de quelqu’un d’autre ;
+- renvoyer le code tapé sans le garder (ni journal, ni historique de conversation, ni modèle), une seule réponse par
+  `req_id`, et seulement pour un nœud qui a annoncé `remote_confirm` ;
+- faire expirer la demande au bout de `expires_in` secondes, ou dès `confirm_cancel` : ensuite, ne plus rien
+  envoyer (refus par défaut ; `nc-noeud` refuse de toute façon) ;
+- ne jamais répondre `allow` tout seul : sans le code, ce serait refusé, et compté comme un échec.
+
+**Limites.** Une commande est tuée avec son groupe de processus à l’échéance ; un programme qu’elle détache dans
+une nouvelle session (`setsid`, `nohup … &` puis `disown`) peut survivre jusqu’à l’arrêt du service. Le résumé ne
+masque que les secrets connus de ce PC : relis la commande avant de taper le code.
 
 ## Attente avant une réponse
 
