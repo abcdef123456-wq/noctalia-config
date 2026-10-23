@@ -2,14 +2,19 @@
 import ast
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import importlib.machinery
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "home/.local/bin/nc-dictee"
@@ -42,7 +47,10 @@ class Serveur(BaseHTTPRequestHandler):
             Serveur.reprendre.wait(10)
         data = json.dumps(Serveur.reponse).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass                            # client arrêté pendant le test de nettoyage
 
     def log_message(self, *a):
         pass
@@ -57,6 +65,7 @@ class Dictee(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.serveur.shutdown()
+        cls.serveur.server_close()
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -171,6 +180,9 @@ class Dictee(unittest.TestCase):
             premiere = pool.submit(self.lancer, "stop")
             try:
                 self.assertTrue(Serveur.entree.wait(5), "la première transcription a reçu son audio")
+                captures = list((self.home / "run").glob("nc-dictee-transcription-*.wav"))
+                self.assertEqual(len(captures), 1)
+                self.assertEqual(captures[0].stat().st_mode & 0o777, 0o600)
                 self.assertEqual(self.lancer("start", octets=8000)[0], 0)
             finally:
                 Serveur.reprendre.set()
@@ -180,6 +192,13 @@ class Dictee(unittest.TestCase):
         self.assertEqual(audio.stat().st_size, 8000)
 
     def test_deux_demarrages_simultanes_un_seul_micro(self):
+        self.noter_micros()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            appels = [pool.submit(self.lancer, "start") for _ in range(2)]
+            self.assertEqual([f.result(timeout=10)[0] for f in appels], [0, 0])
+        self.assertEqual(len((self.home / "micros").read_text().splitlines()), 1)
+
+    def noter_micros(self):
         p = self.home / "bin/parec"
         p.write_text(FAUX_PAREC.replace("fichier=sys.argv[-1]", 'fichier=sys.argv[-1]\nwith open(os.path.join(os.environ["HOME"], "micros"), "a") as f:f.write(str(os.getpid())+"\\n")'))
         def nettoyer_micros():
@@ -188,14 +207,70 @@ class Dictee(unittest.TestCase):
                 for pid in map(int, f.read_text().splitlines()):
                     try:
                         if str(p).encode() in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0"):
-                            os.kill(pid, __import__("signal").SIGTERM)
+                            os.kill(pid, signal.SIGTERM)
                     except (OSError, ProcessLookupError):
                         pass
         self.addCleanup(nettoyer_micros)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            appels = [pool.submit(self.lancer, "start") for _ in range(2)]
-            self.assertEqual([f.result(timeout=10)[0] for f in appels], [0, 0])
-        self.assertEqual(len((self.home / "micros").read_text().splitlines()), 1)
+
+    def test_stop_ia_coupee_supprime_aussi_l_audio(self):
+        self.assertEqual(self.lancer("start")[0], 0)
+        (self.home / ".config/nc/reglages.conf").write_text("IA_MODE=non\n")
+        self.assertEqual(self.lancer("stop")[0], 1)
+        self.assertEqual(Serveur.recus, [])
+        self.assertFalse((self.home / "run/nc-dictee.wav").exists())
+        self.assertFalse(list((self.home / "run").glob("nc-dictee-transcription-*.wav")))
+
+    def test_signal_pendant_transcription_nettoie_la_capture(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=sig):
+                self.assertEqual(self.lancer("start")[0], 0)
+                Serveur.entree, Serveur.reprendre = threading.Event(), threading.Event()
+                p = self.ptt_fond("stop")
+                try:
+                    self.assertTrue(Serveur.entree.wait(5))
+                    self.assertTrue(list((self.home / "run").glob("nc-dictee-transcription-*.wav")))
+                    p.send_signal(sig)
+                    self.assertEqual(p.wait(timeout=5), 128 + sig)
+                    self.assertFalse(list((self.home / "run").glob("nc-dictee-transcription-*.wav")))
+                finally:
+                    Serveur.reprendre.set()
+                    if p.poll() is None:
+                        p.kill()
+                        p.wait(timeout=5)
+
+    def test_signal_pendant_demarrage_ne_laisse_pas_le_micro(self):
+        self.noter_micros()
+        p = self.ptt_fond("start")
+        try:
+            fin = time.monotonic() + 5
+            registre = self.home / "micros"
+            while not registre.exists() and time.monotonic() < fin:
+                time.sleep(0.005)
+            self.assertTrue(registre.exists())
+            p.terminate()
+            self.assertEqual(p.wait(timeout=5), 128 + signal.SIGTERM)
+            self.assertFalse((self.home / "run/nc-dictee.json").exists())
+            self.assertFalse((self.home / "run/nc-dictee.wav").exists())
+            self.assertFalse(self.lancer("status")[1]["recording"])
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.wait(timeout=5)
+
+    def test_anciennes_captures_orphelines_nettoyees(self):
+        run = self.home / "run"
+        ancien = run / "nc-dictee-transcription-99999999-ancien.wav"
+        vivant = run / f"nc-dictee-transcription-{os.getpid()}-vivant.wav"
+        recent = run / "nc-dictee-transcription-99999999-recent.wav"
+        for f in (ancien, vivant, recent):
+            f.write_bytes(b"RIFF")
+        vieux = time.time() - 601
+        for f in (ancien, vivant):
+            os.utime(f, (vieux, vieux))
+        self.assertEqual(self.lancer("start")[0], 0)
+        self.assertFalse(ancien.exists())
+        self.assertTrue(vivant.exists(), "ne pas toucher à une transcription encore active")
+        self.assertTrue(recent.exists())
 
 
     # ── Dictée partout (Super + D) ──
@@ -328,6 +403,19 @@ class Dictee(unittest.TestCase):
         time.sleep(0.6)
         self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
         self.assertIn("wl-copy --clear", self.appels(), "un presse-papiers initialement vide est vidé après le collage")
+
+    def test_restauration_refusee_apres_collage_ne_recopie_pas(self):
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        c = self.home / "bin/wl-copy"
+        c.write_text(c.read_text() + '\n[ "$1" = --type ] && exit 1\nexit 0\n')
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
+        a = self.appels()
+        self.assertEqual(a.count("wl-copy -- bonjour jarvis"), 1)
+        self.assertNotIn("Dictée (pas écrite dans la fenêtre)", a)
+        self.assertIn("presse-papiers d'avant non remis", a)
 
     def test_collage_bloque_le_texte_n_est_pas_perdu(self):
         """Revue DICT-04 : un presse-papiers qui ne répond pas (wl-paste bloqué) faisait perdre la dictée (exception)."""
@@ -474,6 +562,32 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.appels().count("wtype -- bonjour jarvis"), 1)
 
 
+
+
+class ArretAtomique(unittest.TestCase):
+    def test_annulation_ne_supprime_pas_la_capture_suivante(self):
+        with tempfile.TemporaryDirectory(prefix="nc-dictee-annulation-") as d:
+            home = Path(d)
+            with mock.patch.dict(os.environ, HOME=d, XDG_RUNTIME_DIR=d), mock.patch.object(Path, "home", return_value=home):
+                l = importlib.machinery.SourceFileLoader("nc_dictee_annulation", str(SCRIPT))
+                m = importlib.util.module_from_spec(importlib.util.spec_from_loader(l.name, l))
+                l.exec_module(m)
+            m.AUDIO.write_bytes(b"capture precedente")
+            m.ETAT.write_text(json.dumps({"pid": 99999999}))
+
+            class RepriseMicro(m.Verrou):
+                def __exit__(self, *a):
+                    super().__exit__(*a)
+                    if self.chemin.name == "nc-dictee-micro.lock":
+                        # La requête suivante commence dès que le micro lui est rendu, avant que cancel ne termine.
+                        m.AUDIO.write_bytes(b"nouvelle capture")
+
+            with mock.patch.object(m, "Verrou", RepriseMicro), mock.patch.object(m, "client"), \
+                    mock.patch.object(__import__("sys"), "argv", [str(SCRIPT), "cancel"]), \
+                    mock.patch("signal.signal"), mock.patch("os.umask"), \
+                    mock.patch.object(__import__("sys"), "stdout", io.StringIO()):
+                self.assertEqual(m.main(), 0)
+            self.assertEqual(m.AUDIO.read_bytes(), b"nouvelle capture")
 
 
 @unittest.skipUnless(__import__("shutil").which("lua"), "Lua requis")
