@@ -1,5 +1,6 @@
 """nc-dictee : enregistrement, transcription par le serveur, erreurs. Faux enregistreur et faux serveur, HOME isolé."""
 import ast
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -28,12 +29,17 @@ while True:time.sleep(.05)
 class Serveur(BaseHTTPRequestHandler):
     recus = []
     reponse = {"success": True, "text": "  bonjour jarvis ", "engine": "test-whisper"}
+    entree = None
+    reprendre = None
 
     def do_POST(self):
         corps = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         Serveur.recus.append(dict(chemin=self.path, cle=self.headers.get("X-Secret-Key"), type=self.headers.get("Content-Type"), taille=len(corps)))
         if self.headers.get("X-Secret-Key") != CLE:
             self.send_response(401); self.end_headers(); return
+        if Serveur.entree is not None:
+            Serveur.entree.set()
+            Serveur.reprendre.wait(10)
         data = json.dumps(Serveur.reponse).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers()
         self.wfile.write(data)
@@ -63,6 +69,7 @@ class Dictee(unittest.TestCase):
         self.configurer(CLE)
         Serveur.recus = []
         Serveur.reponse = {"success": True, "text": "  bonjour jarvis ", "engine": "test-whisper"}
+        Serveur.entree = Serveur.reprendre = None
         self.addCleanup(lambda: self.lancer("cancel"))
 
     def configurer(self, cle, url=None):
@@ -157,6 +164,39 @@ class Dictee(unittest.TestCase):
         self.lancer("start")
         self.assertEqual(self.lancer("stop"), (1, {"ok": False, "error": "Audio trop court"}))
 
+    def test_nouvel_audio_preserve_pendant_une_transcription(self):
+        self.lancer("start")
+        Serveur.entree, Serveur.reprendre = threading.Event(), threading.Event()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            premiere = pool.submit(self.lancer, "stop")
+            try:
+                self.assertTrue(Serveur.entree.wait(5), "la première transcription a reçu son audio")
+                self.assertEqual(self.lancer("start", octets=8000)[0], 0)
+            finally:
+                Serveur.reprendre.set()
+            self.assertEqual(premiere.result(timeout=10)[0], 0)
+        audio = self.home / "run/nc-dictee.wav"
+        self.assertTrue(audio.exists(), "la fin de la première transcription ne supprime pas le nouvel enregistrement")
+        self.assertEqual(audio.stat().st_size, 8000)
+
+    def test_deux_demarrages_simultanes_un_seul_micro(self):
+        p = self.home / "bin/parec"
+        p.write_text(FAUX_PAREC.replace("fichier=sys.argv[-1]", 'fichier=sys.argv[-1]\nwith open(os.path.join(os.environ["HOME"], "micros"), "a") as f:f.write(str(os.getpid())+"\\n")'))
+        def nettoyer_micros():
+            f = self.home / "micros"
+            if f.exists():
+                for pid in map(int, f.read_text().splitlines()):
+                    try:
+                        if str(p).encode() in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0"):
+                            os.kill(pid, __import__("signal").SIGTERM)
+                    except (OSError, ProcessLookupError):
+                        pass
+        self.addCleanup(nettoyer_micros)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            appels = [pool.submit(self.lancer, "start") for _ in range(2)]
+            self.assertEqual([f.result(timeout=10)[0] for f in appels], [0, 0])
+        self.assertEqual(len((self.home / "micros").read_text().splitlines()), 1)
+
 
     # ── Dictée partout (Super + D) ──
     def ptt(self, action, reglages="", wtype=True):
@@ -225,7 +265,7 @@ class Dictee(unittest.TestCase):
         corps = {"wl-paste": ('case "$*" in *list-types*) ' + ("sleep 6; " if lent else "") + f"printf '{liste_types}';; "
                               f"*) printf '{sortie_paste}';; esac\necho \"wl-paste $*\" >> \"$HOME/appels\""),
                  "wl-copy": 'echo "wl-copy $* [$(cat | wc -c)]" >> "$HOME/appels"',
-                 "hyprctl": 'echo "hyprctl $*" >> "$HOME/appels"; [ "$1" = activewindow ] && echo \'{"class": "firefox"}\''}
+                 "hyprctl": 'echo "hyprctl $*" >> "$HOME/appels"; [ "$1" = activewindow ] && echo \'{"class": "firefox"}\'; exit 0'}
         for nom, c in corps.items():
             (b / nom).write_text("#!/bin/sh\n" + c + "\n"); (b / nom).chmod(0o755)
 
@@ -242,6 +282,52 @@ class Dictee(unittest.TestCase):
         self.assertIn("send_shortcut({ mods = 'CTRL', key = 'V' })", a)
         self.assertIn("wl-copy --type image/png -- [7]", a, "l'image d'avant remise")
         self.assertLess(a.index("wl-copy -- bonjour"), a.index("--type image/png"))
+
+    def test_collage_refuse_restaure_et_ne_dit_pas_ecrit(self):
+        self.ptt("ptt-fin")
+        self.collage("image/png\\n", "PNGDATA")
+        h = self.home / "bin/hyprctl"
+        h.write_text(h.read_text().replace("exit 0", "[ \"$1\" = dispatch ] && exit 1; exit 0"))
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
+        a = self.appels()
+        self.assertIn("wl-copy --type image/png -- [7]", a, "le collage refusé ne doit pas perdre l'image précédente")
+        self.assertIn("Dictée (pas écrite dans la fenêtre)", a)
+        self.assertNotIn("✓ Écrit", a)
+        self.assertEqual((self.home / "run/nc-dictee-derniere.txt").read_text(), "bonjour jarvis")
+
+    def test_copie_refusee_ne_declenche_pas_de_collage(self):
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        c = self.home / "bin/wl-copy"
+        c.write_text(c.read_text() + '\nexit 1\n')
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
+        a = self.appels()
+        self.assertNotIn("send_shortcut", a)
+        self.assertNotIn("✓ Écrit", a)
+        self.assertIn("Gardé dans", a, "ne pas annoncer Copié si wl-copy refuse aussi le repli")
+
+    def test_collage_avertissement_code_zero_pas_ecrit(self):
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        h = self.home / "bin/hyprctl"
+        h.write_text(h.read_text().replace("exit 0", 'if [ "$1" = dispatch ]; then echo "warning: send_shortcut: window not found"; fi; exit 0'))
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
+        self.assertNotIn("✓ Écrit", self.appels())
+        self.assertIn("Dictée (pas écrite dans la fenêtre)", self.appels())
+
+    def test_presse_papiers_vide_remis_apres_collage(self):
+        self.ptt("ptt-fin")
+        self.collage("")
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
+        self.assertIn("wl-copy --clear", self.appels(), "un presse-papiers initialement vide est vidé après le collage")
 
     def test_collage_bloque_le_texte_n_est_pas_perdu(self):
         """Revue DICT-04 : un presse-papiers qui ne répond pas (wl-paste bloqué) faisait perdre la dictée (exception)."""
@@ -343,6 +429,49 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut", "IA_DICTEE=non\n"), 1)
         self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
         self.assertEqual(Serveur.recus, [])
+
+    def test_annuler_une_dictee_longue_permet_de_recommencer(self):
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        f = self.home / "run/nc-dictee-ptt.json"
+        etat = json.loads(f.read_text())
+        f.write_text(json.dumps(dict(etat, bascule=True)))
+        self.assertEqual(self.lancer("cancel")[0], 0)
+        self.assertFalse(f.exists(), "cancel remet aussi l'état du raccourci à zéro")
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        self.assertTrue(self.lancer("status")[1]["recording"])
+
+    def test_annulation_pendant_le_demarrage_ne_ressuscite_pas(self):
+        self.ptt("ptt-fin")
+        f = self.home / "run/nc-dictee-ptt.json"
+        demarrage = self.ptt_fond("ptt-debut")
+        try:
+            fin = time.monotonic() + 5
+            while not f.exists() and time.monotonic() < fin:
+                time.sleep(0.005)
+            self.assertTrue(f.exists())
+            self.assertEqual(self.lancer("cancel")[0], 0)
+            demarrage.wait(timeout=5)
+            self.assertFalse(f.exists())
+            self.assertFalse(self.lancer("status")[1]["recording"])
+            self.assertFalse((self.home / "run/nc-dictee.wav").exists())
+        finally:
+            if demarrage.poll() is None:
+                demarrage.kill()
+                demarrage.wait(timeout=5)
+
+    def test_deux_relachements_une_seule_transcription(self):
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        time.sleep(0.6)
+        fils = [self.ptt_fond("ptt-fin") for _ in range(2)]
+        try:
+            self.assertEqual([p.wait(timeout=10) for p in fils], [0, 0])
+        finally:
+            for p in fils:
+                if p.poll() is None:
+                    p.kill()
+                    p.wait(timeout=5)
+        self.assertEqual(len(Serveur.recus), 1)
+        self.assertEqual(self.appels().count("wtype -- bonjour jarvis"), 1)
 
 
 

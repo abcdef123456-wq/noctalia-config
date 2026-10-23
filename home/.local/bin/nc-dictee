@@ -88,6 +88,11 @@ def enregistreur(T):
 
 def arreter():
     """Arrête l'enregistreur en cours ; renvoie son état, ou None s'il n'y en avait pas."""
+    with Verrou(RUNTIME / "nc-dictee-micro.lock"):
+        return _arreter()
+
+
+def _arreter():
     etat = lire_etat()
     if not etat:
         return None
@@ -113,7 +118,17 @@ def arreter():
     return etat
 
 
-def demarrer(T):
+def demarrer(T, intention=None):
+    with Verrou(RUNTIME / "nc-dictee-micro.lock"):
+        if intention is not None:
+            etat = lire_ptt()
+            if not etat or etat.get("t") != intention:
+                sortie(ok=False, error=T("Dictée annulée.", "Dictation cancelled."))
+                return 1
+        return _demarrer(T)
+
+
+def _demarrer(T):
     etat = lire_etat()
     if etat and actif(etat.get("pid")):
         sortie(ok=True, recording=True, message=T("Enregistrement déjà en cours.", "Already recording."))
@@ -183,10 +198,10 @@ def secours():
         return False
 
 
-def par_ia(T):
+def par_ia(T, fichier=AUDIO):
     try:
         i = ia()
-        texte, ident = i.transcrire(str(AUDIO))
+        texte, ident = i.transcrire(str(fichier))
     except Exception as e:
         sortie(ok=False, error=str(e)[:300])
         return 1
@@ -196,24 +211,37 @@ def par_ia(T):
 
 def transcrire(m):
     T = m.T
-    if not arreter():
-        sortie(ok=False, error=T("Aucun enregistrement en cours.", "No recording in progress."))
-        return 1
+    # La capture terminée appartient à cette requête. Le micro peut être rouvert pendant l'attente réseau, sans que
+    # le nettoyage de cette transcription efface le nouvel audio ou que deux clients envoient la même capture.
+    with Verrou(RUNTIME / "nc-dictee-micro.lock"):
+        if not _arreter():
+            sortie(ok=False, error=T("Aucun enregistrement en cours.", "No recording in progress."))
+            return 1
+        fd, nom = tempfile.mkstemp(prefix="nc-dictee-transcription-", suffix=".wav", dir=RUNTIME)
+        os.close(fd)
+        fichier = Path(nom)
+        try:
+            AUDIO.replace(fichier)
+        except FileNotFoundError:
+            pass                        # fichier vide : même message qu'un micro coupé ci-dessous
+        except OSError:
+            fichier.unlink(missing_ok=True)
+            raise
     try:
         # IA coupée pendant l'enregistrement : rien ne part, l'audio est supprimé (revue Codex DICT-02)
         if m.ia_coupee():
             sortie(ok=False, error=m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else T(*m.MESSAGE_COUPEE))
             return 1
-        if not AUDIO.is_file() or AUDIO.stat().st_size < 1000:
+        if fichier.stat().st_size < 1000:
             sortie(ok=False, error=T("Enregistrement vide ou micro coupé.", "Empty recording or muted microphone."))
             return 1
         # Sans JARVIS (ou une autre IA choisie à la main) : la transcription des API de nc-ia (Groq, OpenAI, Gemini)
         if not par_jarvis(m):
-            return par_ia(T)
+            return par_ia(T, fichier)
         try:
             c = m.configuration()
             adresse = c["URL"].rstrip("/") + "/api/transcribe?" + urllib.parse.urlencode({"language": langue_dictee(m)})
-            req = urllib.request.Request(adresse, data=AUDIO.read_bytes(),
+            req = urllib.request.Request(adresse, data=fichier.read_bytes(),
                                          headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
             with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
                 resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))
@@ -224,7 +252,7 @@ def transcrire(m):
             return 1
         except urllib.error.HTTPError as e:
             if e.code >= 500 and secours():
-                return par_ia(T)
+                return par_ia(T, fichier)
             if e.code in (401, 403):
                 sortie(ok=False, error=T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
                                          f"Server rejected the key (HTTP {e.code}): check SECRET_KEY."))
@@ -236,12 +264,12 @@ def transcrire(m):
             return 1
         except Exception as e:   # réseau, délai, JSON : le détail sans la clé
             if secours():                                     # serveur injoignable : une API de transcription
-                return par_ia(T)
+                return par_ia(T, fichier)
             sortie(ok=False, error=T("Transcription impossible : ", "Transcription failed: ") + str(e)[:200])
             return 1
     finally:
         try:
-            AUDIO.unlink()
+            fichier.unlink()
         except OSError:
             pass
     texte = resultat.get("text")
@@ -288,9 +316,12 @@ VERROU = RUNTIME / "nc-dictee-ptt.lock"  # appui et relâchements (D, Super) arr
 
 
 class Verrou:
+    def __init__(self, chemin=VERROU):
+        self.chemin = chemin
+
     def __enter__(self):
         import fcntl
-        self.f = open(VERROU, "a")
+        self.f = open(self.chemin, "a")
         fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
@@ -309,6 +340,21 @@ def lire_ptt():
         PTT.unlink(missing_ok=True)
         return None
     return etat
+
+
+def ecrire_ptt(etat):
+    # Un démarrage vérifie encore son intention sous le verrou du micro : il doit lire un état entier, même si le
+    # processus du relâchement vient d'y ajouter son heure sous le verrou PTT.
+    fd, nom = tempfile.mkstemp(prefix="nc-dictee-ptt-", suffix=".tmp", dir=RUNTIME)
+    f = Path(nom)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as sortie:
+            json.dump(etat, sortie)
+        f.replace(PTT)
+    finally:
+        f.unlink(missing_ok=True)
+
+
 TERMINAUX = ("kitty", "foot", "alacritty", "org.wezfurlong.wezterm", "com.mitchellh.ghostty", "org.kde.konsole",
              "org.gnome.terminal", "org.gnome.ptyxis", "xterm", "dropterm")
 
@@ -352,27 +398,34 @@ def ecrire_dans_la_fenetre(texte):
     if shutil.which("wtype"):
         if subprocess.run(["wtype", "--", texte], stdin=subprocess.DEVNULL, capture_output=True).returncode == 0:
             return True
-    if not shutil.which("wl-copy"):
+    if not (shutil.which("wl-copy") and shutil.which("wl-paste")):
         return False
-    avant = None
-    if shutil.which("wl-paste"):
-        try:
-            avant = presse_papiers()
-        except (OSError, subprocess.TimeoutExpired):
-            return False            # pas de collage par-dessus ce qu'on ne saurait pas remettre (revue DICT-04/05)
-    subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL, timeout=5)
-    classe = ""
     try:
-        classe = json.loads(subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout or "{}").get("class", "")
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        pass
-    mods = "CTRL SHIFT" if classe.lower() in TERMINAUX else "CTRL"
-    time.sleep(0.08)
-    subprocess.run(["hyprctl", "dispatch", f"hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V' }})"], capture_output=True, timeout=5)
-    if avant is not None:
+        avant = presse_papiers()
+    except (OSError, subprocess.TimeoutExpired):
+        return False                # pas de collage par-dessus ce qu'on ne saurait pas remettre (revue DICT-04/05)
+    try:
+        copie = subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+        if copie.returncode != 0:
+            return False
+        classe = ""
+        try:
+            classe = json.loads(subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, timeout=2).stdout or "{}").get("class", "")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+        mods = "CTRL SHIFT" if classe.lower() in TERMINAUX else "CTRL"
+        time.sleep(0.08)
+        collage = subprocess.run(["hyprctl", "dispatch", f"hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V' }})"], capture_output=True, text=True, timeout=5)
+        # Hyprland peut annoncer « window not found » avec un code 0 : aucune fenêtre n'a reçu le collage.
+        return collage.returncode == 0 and not re.search(r"(?im)^\s*(?:warning|error):", collage.stdout + "\n" + collage.stderr)
+    finally:
+        # Aussi après une erreur ou un délai dépassé : un collage refusé ne doit pas laisser le texte à la place de
+        # l'image précédente. Un presse-papiers initialement vide est remis à vide.
         time.sleep(0.4)
-        subprocess.run(["wl-copy", "--type", avant[0], "--"], input=avant[1], capture_output=True, timeout=5)
-    return True
+        if avant is None:
+            subprocess.run(["wl-copy", "--clear"], capture_output=True, timeout=5, check=True)
+        else:
+            subprocess.run(["wl-copy", "--type", avant[0], "--"], input=avant[1], capture_output=True, timeout=5, check=True)
 
 
 SECOURS = RUNTIME / "nc-dictee-derniere.txt"   # la dernière dictée, jamais perdue (effacée à la fin de la session)
@@ -426,22 +479,26 @@ def ptt_debut(m):
             if not m.ia_coupee():
                 # L'intention d'abord, datée de l'appui : un relâchement pendant le démarrage du micro est gardé
                 # (revue Codex DICT-01)
-                PTT.write_text(json.dumps({"t": DEBUT, "pret": False}))
+                ecrire_ptt({"t": DEBUT, "pret": False})
     if finir:
         return ptt_finir(m)
     if m.ia_coupee():
         notifier(T, T("Dictée impossible", "Dictation unavailable"), m.message_ia_coupee() if hasattr(m, "message_ia_coupee") else "", True)
         return 1
     CAPTURE = []
-    code = demarrer(T)
+    code = demarrer(T, intention=DEBUT)
     CAPTURE, res = None, CAPTURE
     if code != 0 or not res or not res[-1].get("ok"):
         with Verrou():
-            PTT.unlink(missing_ok=True)
+            etat = lire_ptt()
+            if etat and etat.get("t") == DEBUT:
+                PTT.unlink(missing_ok=True)
         notifier(T, T("Dictée impossible", "Dictation unavailable"), (res[-1].get("error") if res else "") or "")
         return 1
     with Verrou():
-        etat = lire_ptt() or {"t": DEBUT}
+        etat = lire_ptt()
+        if not etat or etat.get("t") != DEBUT:
+            return 1                    # annulée pendant le démarrage : ne pas recréer son état
         relache = etat.get("relache")
         try:                                               # relâché avant même que l'intention soit écrite
             if relache is None and RELACHE.stat().st_mtime >= DEBUT:
@@ -449,7 +506,7 @@ def ptt_debut(m):
         except OSError:
             pass
         # Relâché avant que le micro soit prêt : rien d'enregistré, c'est un appui bref → dictée longue
-        PTT.write_text(json.dumps(dict(etat, pret=time.time(), bascule=relache is not None)))
+        ecrire_ptt(dict(etat, pret=time.time(), bascule=relache is not None))
     if relache is None:
         notifier(T, T("🎙 Je t'écoute…", "🎙 Listening…"), T("Relâche pour écrire", "Release to write"))
     else:
@@ -463,12 +520,12 @@ def ptt_fin(m):
         if not etat or etat.get("bascule") or etat.get("relache"):
             return 0                                      # rien en cours, dictée longue qui continue, ou déjà relâché
         if not etat.get("pret"):                          # micro pas encore lancé : ptt-debut décidera
-            PTT.write_text(json.dumps(dict(etat, relache=instant_relache(etat.get("t") or DEBUT))))
+            ecrire_ptt(dict(etat, relache=instant_relache(etat.get("t") or DEBUT)))
             return 0
         # Appui bref (moins de 0,45 s entre l'appui et le relâchement, quelle que soit la lenteur de Python) : dictée longue
         appui = float(etat.get("t") or DEBUT)
         if instant_relache(appui) - appui < BREF:
-            PTT.write_text(json.dumps(dict(etat, bascule=True)))
+            ecrire_ptt(dict(etat, bascule=True))
             longue = True
         else:
             PTT.unlink(missing_ok=True)                   # un seul relâchement finit (D et Super arrivent ensemble)
@@ -500,7 +557,7 @@ def ptt_finir(m):
         # La dictée prime : elle est copiée même si le presse-papiers d'avant n'a pas pu être sauvé (il est remplacé, et
         # c'est dit), pour être collée à la main (revue DICT-06)
         try:
-            subprocess.run(["wl-copy", "--", r["text"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+            subprocess.run(["wl-copy", "--", r["text"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=True)
             copie = T("Copié (ton presse-papiers a été remplacé) : colle-le avec Ctrl + V.",
                       "Copied (your clipboard was replaced): paste it with Ctrl + V.")
         except (OSError, subprocess.SubprocessError):
@@ -530,11 +587,13 @@ def main():
         if action == "stop":
             return transcrire(m)
         if action == "cancel":
-            arreter()
-            try:
-                AUDIO.unlink()
-            except OSError:
-                pass
+            with Verrou():
+                PTT.unlink(missing_ok=True)
+                arreter()
+                try:
+                    AUDIO.unlink()
+                except OSError:
+                    pass
             sortie(ok=True, recording=False)
             return 0
         if action == "status":
