@@ -550,11 +550,40 @@ def retirer_orphelines():
     """Règles d'une ouverture tuée net (SIGKILL, coupure) : sans cela, l'appli s'ouvrirait en silence sur son ancien
     bureau jusqu'au rechargement de Hyprland (revue SESSION-02)."""
     try:
-        for n, classe, bureau in json.loads(POSEES.read_text()):
-            regle(n, classe, bureau, active=False)
-    except (OSError, ValueError, TypeError):
-        pass
-    POSEES.unlink(missing_ok=True)
+        posees = json.loads(POSEES.read_text())
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError):
+        raise Erreur(T("Journal des règles temporaires illisible : conserve-le pour le diagnostic.",
+                       "Temporary rule journal is unreadable: keep it for diagnosis.")) from None
+    if not isinstance(posees, list) or any(not isinstance(r, list) or len(r) != 3
+            or not isinstance(r[0], int) or not isinstance(r[1], str) or not isinstance(r[2], int) for r in posees):
+        raise Erreur(T("Journal des règles temporaires invalide : conserve-le pour le diagnostic.",
+                       "Temporary rule journal is invalid: keep it for diagnosis."))
+    restantes = []
+    for n, classe, bureau in posees:
+        if not regle(n, classe, bureau, active=False):
+            restantes.append((n, classe, bureau))
+    noter_regles(restantes)
+    if restantes:
+        raise Erreur(T("Hyprland n'a pas retiré toutes les règles temporaires : réessaie quand il répond.",
+                       "Hyprland did not remove all temporary rules: retry when it responds."))
+
+
+def noter_regles(regles):
+    """Conserve la trace jusqu'au retrait confirmé : un échec de nettoyage doit pouvoir être repris."""
+    if not regles:
+        POSEES.unlink(missing_ok=True)
+        return
+    import tempfile
+    fd, nom = tempfile.mkstemp(prefix="nc-session-regles-", suffix=".tmp", dir=RUNTIME)
+    tmp = Path(nom)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(regles, f)
+        tmp.replace(POSEES)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def ouvrir(nom, delai=None):
@@ -728,16 +757,14 @@ def _ouvrir(nom, delai):
         for n, e in enumerate(lances):
             if "terminal" not in e and classes.count(e["classe"]) == 1:
                 regles.append((n, e))                           # notée avant d'être posée : retirée même si on est tué
-                POSEES.write_text(json.dumps([(m, f["classe"], f["bureau"]) for m, f in regles]))
+                noter_regles([(m, f["classe"], f["bureau"]) for m, f in regles])
                 regle(n, e["classe"], e["bureau"])
         res = attendre(fenetres, lances, avant, delai, adresses)
         etapes_apres(s, adresses)
         return res
     finally:
         # Même après une erreur (lancement, Hyprland qui ne répond plus, arrêt) : chaque règle posée est retirée
-        for n, e in regles:
-            regle(n, e["classe"], e["bureau"], active=False)
-        POSEES.unlink(missing_ok=True)
+        retirer_orphelines()
 
 
 def attendre(fenetres, lances, avant, delai, adresses=None):

@@ -210,6 +210,64 @@ class Sessions(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
+class ReglesPersistantes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="nc-session-regles-")
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        with mock.patch.dict(os.environ, HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home), NC_LANGUE="fr"), \
+                mock.patch.object(Path, "home", return_value=self.home):
+            l = importlib.machinery.SourceFileLoader("nc_session_regles", str(SCRIPT))
+            self.m = importlib.util.module_from_spec(importlib.util.spec_from_loader(l.name, l))
+            l.exec_module(self.m)
+
+    def test_nettoyage_refuse_garde_seulement_les_regles_restantes(self):
+        restantes = [[0, "discord", 3]]
+        self.m.POSEES.write_text(json.dumps(restantes + [[1, "firefox", 4]]))
+        with mock.patch.object(self.m, "regle", side_effect=lambda n, *a, **k: n != 0):
+            with self.assertRaises(self.m.Erreur):
+                self.m.retirer_orphelines()
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), restantes)
+        with mock.patch.object(self.m, "regle", return_value=True) as regle:
+            self.m.retirer_orphelines()
+        regle.assert_called_once_with(0, "discord", 3, active=False)
+        self.assertFalse(self.m.POSEES.exists())
+
+    def test_pas_d_ouverture_tant_que_les_regles_ne_sont_pas_retirees(self):
+        self.m.POSEES.write_text(json.dumps([[0, "discord", 3]]))
+        with mock.patch.object(self.m, "regle", return_value=False), \
+                mock.patch.object(self.m, "_ouvrir") as ouvrir, mock.patch("signal.signal"):
+            with self.assertRaises(self.m.Erreur):
+                self.m.ouvrir("Dev")
+        ouvrir.assert_not_called()
+        self.assertTrue(self.m.POSEES.exists())
+
+    def test_echec_du_nettoyage_final_est_repris_ensuite(self):
+        dossier = self.home / ".config/nc/sessions"
+        dossier.mkdir(parents=True)
+        (dossier / "Dev.json").write_text(json.dumps({"nom": "Dev", "fenetres": [
+            {"classe": "discord", "bureau": 3, "appli": "discord"}]}))
+        with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "etapes_apres"), \
+                mock.patch.object(self.m, "clients", return_value=[]), \
+                mock.patch.object(self.m, "attendre", return_value=(1, 0)), \
+                mock.patch.object(self.m, "regle", side_effect=lambda *a, active=True: active):
+            with self.assertRaises(self.m.Erreur):
+                self.m._ouvrir("Dev", 0)
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        with mock.patch.object(self.m, "regle", return_value=True):
+            self.m.retirer_orphelines()
+        self.assertFalse(self.m.POSEES.exists())
+
+
+    def test_journal_illisible_conserve_pour_diagnostic(self):
+        self.m.POSEES.write_text("{")
+        with mock.patch.object(self.m, "regle") as regle:
+            with self.assertRaises(self.m.Erreur):
+                self.m.retirer_orphelines()
+        regle.assert_not_called()
+        self.assertEqual(self.m.POSEES.read_text(), "{")
+
+
 class SpotlightSessions(unittest.TestCase):
     def test_session_nom(self):
         with tempfile.TemporaryDirectory(prefix="nc-spotlight-sessions-") as d:
