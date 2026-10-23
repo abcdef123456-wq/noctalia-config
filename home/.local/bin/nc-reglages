@@ -1381,6 +1381,52 @@ def lignes_sessions():
     return res
 
 
+# ── Applis épinglées au dock (nc-dock, issue #16) : une ligne par appli et son retrait, puis l'ajout ────────────────
+# Pas des réglages non plus : la liste du dock de Noctalia, lue par « nc-dock liste --json » à l'affichage de la section
+# Barre et dock (terminal) ou du catalogue (fenêtre graphique). Dans le terminal, Entrée sur une appli : monter,
+# descendre ou retirer ; dans la fenêtre graphique : « Retirer » (sans confirmation : ça se remet d'un geste, clic droit
+# dans le Spotlight ou dans le dock, ou « Ajouter une appli… » ici).
+def dock_epinglees():
+    """[{id, nom}] des applis épinglées au dock ; [] sans nc-dock ou s'il ne répond pas."""
+    try:
+        d = json.loads(sortie([os.path.join(BIN, "nc-dock"), "liste", "--json"]) or "[]")
+    except ValueError:
+        return []
+    return [x for x in d if isinstance(x, dict) and isinstance(x.get("id"), str) and x["id"]] if isinstance(d, list) else []
+
+
+def lignes_dock():
+    res = []
+    epinglees = dock_epinglees()
+    for k, x in enumerate(epinglees):
+        res.append({"genre": "assistant", "action": "dock-appli", "app": x["id"], "cle": "dock:" + x["id"],
+                    "nom": x.get("nom") or x["id"], "affiche": T("Monter, descendre, retirer…", "Move up, down, remove…"),
+                    "place": k, "nombre": len(epinglees),
+                    "aide": T(f"Épinglée au dock, {k + 1}ᵉ place ({x['id']}).", f"Pinned to the dock, place {k + 1} ({x['id']}).")
+                    + ("" if x.get("nom") else T(" Elle n'est plus installée.", " It is no longer installed."))})
+    if not res:
+        res.append({"genre": "info", "cle": "info:dock-vide", "nom": T("Aucune appli épinglée", "No pinned app"),
+                    "valeur": "", "aide": T("Le dock ne montre que les applis ouvertes.", "The dock only shows open apps.")})
+    res.append({"genre": "assistant", "action": "dock-ajouter", "cle": "dock:ajouter",
+                "nom": T("Ajouter une appli…", "Add an app…"), "affiche": T("Choisir…", "Choose…"),
+                "aide": T("Tape une partie de son nom. Aussi dans le Spotlight (Super + R) : clic droit sur l'appli, ou Alt + P.",
+                          "Type part of its name. Also in Spotlight (Super + R): right-click the app, or Alt + P.")})
+    return res
+
+
+def applis_a_epingler(applis, texte, deja):
+    """Les applis installées (nc-apps list) dont le nom ou l'identifiant contient texte (sans accent ni majuscule), pas
+    déjà épinglées : celles dont le nom commence par texte d'abord, puis par ordre alphabétique."""
+    def simple(t):
+        return "".join(c for c in unicodedata.normalize("NFD", str(t).strip().lower()) if not unicodedata.combining(c))
+    t = simple(texte)
+    if not t:
+        return []
+    res = [a for a in applis if a.get("id") and a["id"] not in deja
+           and (t in simple(a.get("name", "")) or t in simple(a["id"]))]
+    return sorted(res, key=lambda a: (not simple(a.get("name", "")).startswith(t), simple(a.get("name", ""))))
+
+
 VISIBLES =[r for r in REGLAGES if _DISPO.get(MATERIEL.get(r.cle, ""), True)]
 SECTIONS = []
 for _r in VISIBLES:
@@ -2134,7 +2180,7 @@ class Ecran:
     # Lignes de la section courante
     def items(self):
         if getattr(self, "sec_vue", None) != self.sec:     # une section affichée (à nouveau) : ses sessions relues
-            self.sec_vue, self.lignes_s = self.sec, None
+            self.sec_vue, self.lignes_s, self.lignes_d = self.sec, None, None
         if SECTIONS[self.sec] == "Raccourcis":
             if self.lignes_r is None:
                 self.lignes_r = raccourcis()
@@ -2155,6 +2201,10 @@ class Ecran:
             if getattr(self, "lignes_s", None) is None:
                 self.lignes_s = lignes_sessions()          # lue une fois par affichage de la section, pas à chaque dessin
             lignes = lignes + [{"genre": "titre", "nom": T("Sessions enregistrées", "Saved sessions")}] + self.lignes_s
+        if SECTIONS[self.sec] == "Barre et dock":
+            if getattr(self, "lignes_d", None) is None:
+                self.lignes_d = lignes_dock()              # lue une fois par affichage de la section
+            lignes = lignes + [{"genre": "titre", "nom": T("Applis épinglées au dock", "Apps pinned to the dock")}] + self.lignes_d
         if SECTIONS[self.sec] == "Intelligence artificielle":
             lignes += [{"genre": "assistant", "action": "ia-cles", "nom": T("Clés d'API des IA", "AI API keys"),
                         "aide": T("Saisie masquée, chaque clé essayée tout de suite (nc-ia configurer).",
@@ -2328,6 +2378,12 @@ class Ecran:
             if cur.get("action") == "session-supprimer":
                 bas = T("↑↓ choisir    Entrée : supprimer (une confirmation d'abord)    Échap : sections    q : quitter",
                         "↑↓ choose    Enter: delete (confirmation first)    Esc: sections    q: quit")
+            elif cur.get("action") == "dock-appli":
+                bas = T("↑↓ choisir    Entrée : monter, descendre ou retirer du dock    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: move up, down or remove from the dock    Esc: sections    q: quit")
+            elif cur.get("action") == "dock-ajouter":
+                bas = T("↑↓ choisir    Entrée : ajouter une appli au dock    Échap : sections    q : quitter",
+                        "↑↓ choose    Enter: add an app to the dock    Esc: sections    q: quit")
             elif cur.get("action") == "mode-graphique":
                 bas = T("↑↓ choisir    Entrée : changer de mode (une confirmation d'abord)    Échap : sections    q : quitter",
                         "↑↓ choose    Enter: change mode (confirmation first)    Esc: sections    q: quit")
@@ -2561,12 +2617,67 @@ class Ecran:
         else:
             self.statut(message or T("Suppression impossible", "Could not delete"), erreur=True)
 
+    def dock(self, action, app):
+        """nc-dock epingler|retirer APP, son message en bas, puis la liste relue."""
+        try:
+            r = subprocess.run([os.path.join(BIN, "nc-dock"), action, app], capture_output=True, text=True, timeout=10)
+            code, message = r.returncode, (r.stdout.strip() or r.stderr.strip()).split("\n")[-1]
+        except (OSError, subprocess.TimeoutExpired):
+            code, message = 1, ""
+        self.lignes_d = None
+        self.statut(message or (T("Dock mis à jour", "Dock updated") if code == 0 else T("Dock inchangé", "Dock unchanged")),
+                    erreur=code != 0)
+
+    def changer_dock(self, it):
+        """Une appli épinglée : monter, descendre (seulement si elle peut bouger) ou retirer ; le curseur la suit."""
+        actions = ([("monter", T("Monter (vers le début du dock)", "Move up (towards the start of the dock)"))] if it["place"] > 0 else []) \
+            + ([("descendre", T("Descendre (vers la fin du dock)", "Move down (towards the end of the dock)"))]
+               if it["place"] < it["nombre"] - 1 else []) \
+            + [("retirer", T("Retirer du dock", "Remove from the dock")), (None, T("Annuler", "Cancel"))]
+        i = self.choisir(it["nom"], [a[1] for a in actions])
+        if i is None or actions[i][0] is None:
+            self.statut(T("Rien n'a changé", "Nothing changed"))
+            return
+        action = actions[i][0]
+        self.dock(action, it["app"])
+        if action in ("monter", "descendre") and self.sec in self.pos:
+            self.pos[self.sec] += -1 if action == "monter" else 1
+
+    def epingler_au_dock(self):
+        """Une partie du nom, puis l'appli parmi celles qui correspondent (8 au plus) ; Échap : rien."""
+        texte = self.saisir(T("Ajouter une appli au dock", "Add an app to the dock"), "",
+                            T("Une partie de son nom (ex. fire, fichiers)", "Part of its name (e.g. fire, files)"))
+        if not texte or not texte.strip():
+            return
+        try:
+            applis = json.loads(sortie([os.path.join(BIN, "nc-apps"), "list"]) or "[]")
+        except ValueError:
+            applis = []
+        deja = [x["id"] for x in dock_epinglees()]
+        choix = applis_a_epingler([a for a in applis if isinstance(a, dict)], texte, deja)[:8]
+        if not choix:
+            self.statut(T(f"Aucune appli installée ne correspond à « {texte.strip()} »",
+                          f"No installed app matches “{texte.strip()}”"), erreur=True)
+            return
+        i = self.choisir(T("Épingler au dock", "Pin to the dock"), [a.get("name") or a["id"] for a in choix],
+                         aide=T("Entrée : épingler · Échap : rien", "Enter: pin · Esc: nothing"))
+        if i is None:
+            self.statut(T("Rien n'a changé", "Nothing changed"))
+            return
+        self.dock("epingler", choix[i]["id"])
+
     def assistant(self, it=None):
         if isinstance(it, dict) and it.get("action") == "mode-graphique":
             self.mode_graphique()
             return
         if isinstance(it, dict) and it.get("action") == "session-supprimer":
             self.supprimer_session(it)
+            return
+        if isinstance(it, dict) and it.get("action") == "dock-appli":
+            self.changer_dock(it)
+            return
+        if isinstance(it, dict) and it.get("action") == "dock-ajouter":
+            self.epingler_au_dock()
             return
         if isinstance(it, dict) and it.get("action") == "verifier":
             self.statut(T("Test de la connexion…", "Testing connection…"))
@@ -3013,6 +3124,27 @@ def catalogue(vals):
         if s["genre"] == "assistant":
             ligne.update(genre="action", commande=["nc-session", "supprimer", s["session"]], confirmer=s["confirmer"],
                          bouton=T("Supprimer", "Delete"), relire=True)
+        lignes.append(ligne)
+    res[fin:fin] = lignes
+    # Applis épinglées au dock : à la fin de Barre et dock, « Retirer » sans confirmation (puis relecture) ; l'ajout,
+    # qui demande de choisir parmi toutes les applis, et l'ordre se font dans le Spotlight, le dock ou le terminal :
+    # ici une ligne qui le dit (une ligne de la fenêtre n'a qu'un bouton)
+    fin = max((k + 1 for k, x in enumerate(res) if x["section"] == "Barre et dock"), default=len(res))
+    lignes = []
+    for s in lignes_dock():
+        ligne = dict(cle=s["cle"], section="Barre et dock", sectionNom=nom_section("Barre et dock"), nom=s["nom"],
+                     genre=s["genre"], defaut="", aide=s["aide"], choix=[], mini=0, maxi=0, pas=1, unite="", zero="",
+                     valeur=s.get("valeur", ""), affiche=s.get("affiche", s.get("valeur", "")), modifie=False, groupe="")
+        if s.get("action") == "dock-appli":
+            ligne.update(genre="action", commande=["nc-dock", "retirer", s["app"]], relire=True, affiche=T("Retirer", "Remove"))
+        elif s.get("action") == "dock-ajouter":
+            ligne.update(genre="info", valeur="", affiche="",
+                         aide=T("Dans le Spotlight (Super + R) : clic droit sur l'appli, ou Alt + P ; ou clic droit sur son "
+                                "icône dans le dock → Épingler. Pour changer l'ordre : nc-reglages dans le terminal "
+                                "(Barre et dock), ou nc-dock monter|descendre ID.",
+                                "In Spotlight (Super + R): right-click the app, or Alt + P; or right-click its icon in the "
+                                "dock → Pin. To change the order: nc-settings in the terminal (Bar and Dock), or "
+                                "nc-dock up|down ID."))
         lignes.append(ligne)
     res[fin:fin] = lignes
     return res + catalogue_raccourcis() + catalogue_nouveautes()

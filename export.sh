@@ -81,6 +81,7 @@ HOME_FILES=(
   .local/bin/nc-dictee
   .local/bin/nc-ia
   .local/bin/nc-session
+  .local/bin/nc-dock
   .local/bin/nc-panne
   .local/share/nc-jarvis/actions.json
   .local/share/nc-jarvis/deployer.py

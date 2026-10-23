@@ -76,6 +76,10 @@ A_TAPER = [
                                                "(applis, bureaux, places, dossier des terminaux), la rouvrir d'un coup "
                                                "(nc-session ouvrir Dev) ; Super + Maj + W ou « session » dans le Spotlight ; "
                                                "à l'ouverture de session : nc-reglages → Fenêtres."),
+    ("nc-dock", "nc-dock epingler firefox", "Les applis épinglées au dock : liste, epingler ID, retirer ID, monter ID, "
+                                          "descendre ID (ID : le nom du fichier .desktop) ; aussi clic droit ou Alt + P "
+                                          "sur une appli dans le Spotlight, clic droit dans le dock, et nc-reglages → "
+                                          "Barre et dock. Gardées à chaque mise à jour."),
     ("nc-meteo", "nc-meteo texte", "La météo (Open-Meteo, sans compte), comme dans l'île ; ville : nc-reglages → Île."),
     ("nc-memoire", "nc-memoire", "Qui utilise la mémoire : la config d'un côté, tes applis de l'autre."),
     ("nc-pouls", "nc-pouls diag", "Halo musical : « diag » dit pourquoi il ne pulse pas."),
@@ -167,6 +171,9 @@ ANGLAIS = {
     "nc-session": ("nc-session save Dev", "Your window layouts per project: save today's one (apps, desktops, places, "
                                           "terminals' folders), reopen it at once (nc-session open Dev); Super + Shift + W or "
                                           "“session” in Spotlight; at login: nc-settings → Windows."),
+    "nc-dock": ("nc-dock pin firefox", "The apps pinned to the dock: list, pin ID, unpin ID, up ID, down ID (ID: the "
+                                       "name of the .desktop file); also right-click or Alt + P on an app in Spotlight, "
+                                       "right-click in the dock, and nc-settings → Bar and Dock. Kept across updates."),
     "nc-meteo": ("nc-weather text", "The weather (Open-Meteo, no account), as in the island; city: nc-settings → Island."),
     "nc-memoire": ("nc-memory", "What is using memory: the config on one side, your apps on the other."),
     "nc-pouls": ("nc-pouls diag", "Music glow: “diag” tells why it is not pulsing."),

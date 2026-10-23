@@ -55,7 +55,7 @@ HOME = os.path.expanduser("~")
 A_GARDER = [
     ".config/nc/reglages.conf", ".config/nc/raccourcis.conf", ".config/nc/style.conf", ".config/nc/style-avant",
     ".config/nc/animations", ".config/hypr/perso.lua", ".config/kitty/perso.conf", ".zshrc.perso", ".face",
-    ".config/noctalia/palettes", ".local/state/noctalia/settings.toml",
+    ".config/noctalia/palettes", ".local/state/noctalia/settings.toml", ".config/noctalia/zz-dock.toml",
 ]
 
 

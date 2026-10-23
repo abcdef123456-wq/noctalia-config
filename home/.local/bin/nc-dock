@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""nc-dock : les applis épinglées au dock de Noctalia, sans éditer de fichier.
+
+  nc-dock liste [--json]   les applis épinglées, dans l'ordre du dock (JSON : [{id, nom}, ...])
+  nc-dock epingler ID      épingle l'appli ID à la fin du dock (nom de son fichier .desktop, avec ou sans .desktop)
+  nc-dock retirer ID       la retire du dock
+  nc-dock monter ID        la déplace d'une place vers le début du dock (descendre : vers la fin)
+
+Aussi dans le Spotlight de l'île (clic droit sur une appli, ou Alt + P), dans nc-reglages → Barre et dock, et dans le
+dock lui-même (clic droit sur une icône → Épingler, menu de Noctalia).
+Noctalia lit tous les .toml de ~/.config/noctalia par ordre alphabétique, puis ses réglages faits dans l'interface
+(~/.local/state/noctalia/settings.toml), qui passent avant tout : c'est là que son propre menu « Épingler » du dock écrit
+la liste, et nc-dock aussi (seulement la clé pinned de la table [dock], le reste du fichier à l'octet près, une copie de
+l'ancien dans ~/.cache/nc/dock/). config.toml n'est jamais touché : les mises à jour (nc-maj) le remplacent.
+Sans settings.toml (Noctalia ne l'a pas encore créé, il y met son numéro de version), la liste va dans
+~/.config/noctalia/zz-dock.toml, lu après config.toml.
+Écritures atomiques (fichier temporaire puis renommage), une à la fois (verrou), puis Noctalia relit sa config
+(noctalia msg config-reload ; il relit aussi seul un fichier changé).
+Codes de sortie : 0 fait (ou déjà fait), 1 usage, 2 appli inconnue ou cachée, 3 écriture impossible.
+"""
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-dock: the apps pinned to the Noctalia dock, without editing any file.
+
+  nc-dock liste [--json]   the pinned apps, in dock order (JSON: [{id, nom}, ...])
+  nc-dock epingler ID      pins app ID at the end of the dock (name of its .desktop file, with or without .desktop)
+  nc-dock retirer ID       removes it from the dock
+  nc-dock monter ID        moves it one place towards the start of the dock (descendre: towards the end)
+  (English names: list, pin, unpin, up, down)
+
+Also in the island's Spotlight (right-click an app, or Alt + P), in nc-settings → Bar and Dock, and in the dock itself
+(right-click an icon → Pin, Noctalia's menu).
+Written where Noctalia's own dock menu writes it: ~/.local/state/noctalia/settings.toml (only [dock] pinned, the rest
+of the file untouched, a copy of the old one in ~/.cache/nc/dock/), which wins over ~/.config/noctalia/*.toml.
+config.toml is never touched: updates (nc-update) replace it. Without settings.toml, the list goes to
+~/.config/noctalia/zz-dock.toml, read after config.toml.
+Exit codes: 0 done (or already done), 1 usage, 2 unknown or hidden app, 3 could not write."""
+
+HOME = os.path.expanduser("~")
+CONFIG = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.path.join(HOME, ".config"), "noctalia")
+ETAT = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.path.join(HOME, ".local/state"), "noctalia",
+                    "settings.toml")
+FICHIER = os.path.join(CONFIG, "zz-dock.toml")
+ENTETE = ("# Écrit par nc-dock : tes applis épinglées au dock. Ne pas éditer : nc-dock, le Spotlight (clic droit sur "
+          "une appli)\n# ou nc-reglages → Barre et dock. Passe devant la liste « pinned » de config.toml.\n")
+SAUVEGARDE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "nc/dock")
+
+
+# ── Lecture et écriture de la seule clé [dock] pinned, sans toucher au reste du fichier ─────────────────────────────
+def _tableau(texte, i):
+    """Le tableau TOML de chaînes qui commence à texte[i] (« [ ») : (liste, indice après « ] »), ou None si ce n'est
+    pas un tableau de chaînes simple. Chaînes "…" (échappements JSON) et '…', commentaires # et retours à la ligne."""
+    assert texte[i] == "["
+    i += 1
+    res, n = [], len(texte)
+    while i < n:
+        c = texte[i]
+        if c in " \t\r\n,":
+            i += 1
+        elif c == "#":
+            while i < n and texte[i] != "\n":
+                i += 1
+        elif c == "]":
+            return res, i + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and texte[j] != '"':
+                j += 2 if texte[j] == "\\" else 1
+            if j >= n:
+                return None
+            try:
+                res.append(json.loads(texte[i:j + 1]))
+            except ValueError:
+                return None
+            i = j + 1
+        elif c == "'":
+            j = texte.find("'", i + 1)
+            if j < 0:
+                return None
+            res.append(texte[i + 1:j])
+            i = j + 1
+        else:
+            return None
+    return None
+
+
+def analyser(texte):
+    """(fin de l'en-tête [dock] ou None, (début, fin, liste) de la valeur de pinned dans cette table ou None).
+    début : le « [ » du tableau. Seule la table [dock] elle-même compte (pas [dock.xxx], ni le pinned du lanceur).
+    Une valeur de pinned qui n'est pas un simple tableau de chaînes : (…, False), rien n'y est écrit."""
+    dans, entete, pos = False, None, 0
+    for ligne in texte.splitlines(keepends=True):
+        tete = re.match(r"\s*\[([^\]]*)\]\s*(#.*)?$", ligne.rstrip("\r\n"))
+        if ligne.lstrip().startswith("[["):
+            dans = False
+        elif tete:
+            dans = tete.group(1).strip() == "dock"
+            if dans and entete is None:
+                entete = pos + len(ligne)
+        elif dans:
+            m = re.match(r"\s*(pinned|\"pinned\"|'pinned')\s*=\s*", ligne)
+            if m:
+                debut = pos + m.end()
+                t = _tableau(texte, debut) if texte[debut:debut + 1] == "[" else None
+                return entete, (False if t is None else (debut, t[1], t[0]))
+        pos += len(ligne)
+    return entete, None
+
+
+def chercher(texte):
+    """(début, fin, liste) de pinned dans [dock], ou None."""
+    t = analyser(texte)[1]
+    return t or None
+
+
+def lire(chemin):
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def en_toml(ids):
+    return "[" + ", ".join(json.dumps(x, ensure_ascii=False) for x in ids) + "]"
+
+
+def ecrire(chemin, texte):
+    """Remplacement atomique : un fichier temporaire du même dossier, puis renommage (jamais à moitié écrit)."""
+    dossier = os.path.dirname(chemin)
+    os.makedirs(dossier, exist_ok=True)
+    mode = os.stat(chemin).st_mode & 0o777 if os.path.exists(chemin) else 0o644
+    fd, tmp = tempfile.mkstemp(prefix=".nc-dock-", suffix=".tmp", dir=dossier)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, chemin)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def fichiers_config():
+    """Les .toml lus par Noctalia, dans son ordre : ceux du dossier de config (alphabétique), puis son état."""
+    try:
+        noms = sorted(n for n in os.listdir(CONFIG) if n.endswith(".toml"))
+    except OSError:
+        noms = []
+    return [os.path.join(CONFIG, n) for n in noms] + [ETAT]
+
+
+def epinglees():
+    """La liste du dock telle que Noctalia la voit : le dernier fichier qui la définit l'emporte."""
+    res = []
+    for chemin in fichiers_config():
+        texte = lire(chemin)
+        t = chercher(texte) if texte else None
+        if t:
+            res = t[2]
+    return res
+
+
+def enregistrer(ids):
+    """Écrit la nouvelle liste là où Noctalia la lit en dernier : settings.toml (comme le menu « Épingler » de son
+    dock), seulement la valeur de [dock] pinned, ajoutée dans [dock] (ou une table [dock] ajoutée à la fin) si elle n'y
+    est pas ; une copie de l'ancien fichier d'abord. Sans settings.toml valide (pas de config_version : Noctalia ne l'a
+    pas encore créé), zz-dock.toml, qui passe devant config.toml."""
+    texte = lire(ETAT)
+    entete, t = analyser(texte) if texte is not None else (None, None)
+    if texte is not None and (t is not None or re.search(r"(?m)^\s*config_version\s*=", texte)):
+        if t is False:
+            raise OSError(T("valeur de [dock] pinned illisible dans " + ETAT, "unreadable [dock] pinned value in " + ETAT))
+        if t:
+            nouveau = texte[:t[0]] + en_toml(ids) + texte[t[1]:]
+        elif entete is not None:
+            nouveau = texte[:entete] + "pinned = " + en_toml(ids) + "\n" + texte[entete:]
+        else:
+            nouveau = texte + ("" if texte.endswith("\n") else "\n") + "\n[dock]\npinned = " + en_toml(ids) + "\n"
+        ecrire(os.path.join(SAUVEGARDE, "settings.toml.avant"), texte)
+        ecrire(ETAT, nouveau)
+        return
+    ecrire(FICHIER, ENTETE + "[dock]\npinned = " + en_toml(ids) + "\n")
+
+
+def recharger():
+    """Noctalia relit sa config (il relit aussi seul un fichier changé) ; sans Noctalia lancé : rien, sans erreur."""
+    try:
+        subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+# ── Applis installées (même règle que nc-apps : premier dossier XDG qui a l'identifiant) ─────────────────────────────
+def dossiers_applis():
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share")
+    res = []
+    for d in [data] + (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        p = os.path.join(d, "applications")
+        if d and p not in res and os.path.isdir(p):
+            res.append(p)
+    return res
+
+
+def applis():
+    """identifiant → chemin du .desktop."""
+    trouvees = {}
+    for d in dossiers_applis():
+        for racine, _, noms in os.walk(d):
+            for n in noms:
+                if n.endswith(".desktop"):
+                    chemin = os.path.join(racine, n)
+                    ident = os.path.relpath(chemin, d)[:-len(".desktop")].replace("/", "-")
+                    trouvees.setdefault(ident, chemin)
+    return trouvees
+
+
+def cachee(chemin):
+    """Entrée NoDisplay ou Hidden : le dock de Noctalia ne la montre pas (une icône vide à sa place)."""
+    vals = entree(chemin)
+    return vals.get("NoDisplay") == "true" or vals.get("Hidden") == "true" or vals.get("Type", "Application") != "Application"
+
+
+def nom_appli(chemin):
+    """Name de l'entrée (dans la langue choisie si elle l'a), sinon vide."""
+    vals = entree(chemin)
+    for l in ["en"] if EN else ["fr_FR", "fr"]:
+        if vals.get(f"Name[{l}]"):
+            return vals[f"Name[{l}]"]
+    return vals.get("Name", "")
+
+
+def entree(chemin):
+    """Les clés de [Desktop Entry] d'un fichier .desktop ({} s'il est illisible)."""
+    vals, section = {}, None
+    try:
+        with open(chemin, encoding="utf-8", errors="replace") as f:
+            for ligne in f:
+                ligne = ligne.strip()
+                if ligne.startswith("["):
+                    section = ligne
+                elif section == "[Desktop Entry]" and "=" in ligne:
+                    k, v = ligne.split("=", 1)
+                    vals.setdefault(k.strip(), v.strip())
+    except OSError:
+        return {}
+    return vals
+
+
+def normaliser(ident):
+    ident = ident.strip()
+    return ident[:-len(".desktop")] if ident.endswith(".desktop") else ident
+
+
+def cmd_liste(en_json):
+    connues = applis()
+    res = [{"id": x, "nom": nom_appli(connues[x]) if x in connues else ""} for x in epinglees()]
+    if en_json:
+        json.dump(res, sys.stdout, ensure_ascii=False)
+        print()
+        return 0
+    if not res:
+        print(T("Aucune appli épinglée au dock.", "No app pinned to the dock."))
+    for x in res:
+        print(x["id"] + ("  (" + x["nom"] + ")" if x["nom"] else T("  (pas installée)", "  (not installed)")))
+    return 0
+
+
+def verrou():
+    """Un seul nc-dock à la fois (deux clics rapides dans le Spotlight) : sinon l'un effacerait l'autre."""
+    dossier = os.environ.get("XDG_RUNTIME_DIR") or CONFIG
+    try:
+        os.makedirs(dossier, exist_ok=True)
+        f = open(os.path.join(dossier, "nc-dock.verrou"), "w")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return f
+    except OSError:
+        return None
+
+
+def cmd_changer(action, ident):
+    ident = normaliser(ident)
+    if not ident or "/" in ident or "\n" in ident:
+        print(T(f"Identifiant invalide : {ident!r}", f"Invalid identifier: {ident!r}"), file=sys.stderr)
+        return 1
+    garde = verrou()
+    try:
+        liste = epinglees()
+        if action == "epingler":
+            connues = applis()
+            if ident not in connues:
+                print(T(f"Appli inconnue : {ident} (aucun fichier {ident}.desktop installé)",
+                        f"Unknown app: {ident} (no {ident}.desktop file installed)"), file=sys.stderr)
+                return 2
+            if cachee(connues[ident]):
+                print(T(f"Appli cachée : {ident} (NoDisplay ou Hidden dans son .desktop, le dock ne la montrerait pas)",
+                        f"Hidden app: {ident} (NoDisplay or Hidden in its .desktop, the dock would not show it)"),
+                      file=sys.stderr)
+                return 2
+            nom = nom_appli(connues[ident]) or ident
+            if ident in liste:
+                print(T(f"« {nom} » est déjà dans le dock.", f"“{nom}” is already in the dock."))
+                return 0
+            nouvelle = liste + [ident]
+            message = T(f"« {nom} » épinglé au dock.", f"“{nom}” pinned to the dock.")
+        else:
+            if ident not in liste:
+                print(T(f"« {ident} » n'est pas dans le dock.", f"“{ident}” is not in the dock."))
+                return 0
+            chemin = applis().get(ident)
+            nom = (nom_appli(chemin) if chemin else "") or ident
+            if action == "retirer":
+                nouvelle = [x for x in liste if x != ident]
+                message = T(f"« {nom} » retiré du dock.", f"“{nom}” removed from the dock.")
+            else:
+                i = liste.index(ident)
+                j = i - 1 if action == "monter" else i + 1
+                if j < 0 or j >= len(liste):
+                    premier = action == "monter"
+                    print(T(f"« {nom} » est déjà {'en tête' if premier else 'en bout'} de dock.",
+                            f"“{nom}” is already {'first' if premier else 'last'} in the dock."))
+                    return 0
+                nouvelle = list(liste)
+                nouvelle[i], nouvelle[j] = nouvelle[j], nouvelle[i]
+                message = T(f"« {nom} » déplacé ({j + 1}ᵉ place sur {len(liste)}).",
+                            f"“{nom}” moved (place {j + 1} of {len(liste)}).")
+        try:
+            enregistrer(nouvelle)
+        except OSError as e:
+            print(T(f"Écriture impossible : {e}", f"Could not write: {e}"), file=sys.stderr)
+            return 3
+    finally:
+        if garde:
+            garde.close()
+    recharger()
+    print(message)
+    return 0
+
+
+def main(args):
+    if args[:1] in (["liste"], ["list"]) and len(args) <= 2 and args[1:] in ([], ["--json"]):
+        return cmd_liste(args[1:] == ["--json"])
+    if len(args) == 2 and args[0] in ("epingler", "épingler", "pin"):
+        return cmd_changer("epingler", args[1])
+    if len(args) == 2 and args[0] in ("retirer", "unpin", "remove"):
+        return cmd_changer("retirer", args[1])
+    if len(args) == 2 and args[0] in ("monter", "up"):
+        return cmd_changer("monter", args[1])
+    if len(args) == 2 and args[0] in ("descendre", "down"):
+        return cmd_changer("descendre", args[1])
+    print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

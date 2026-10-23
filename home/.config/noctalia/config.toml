@@ -191,6 +191,8 @@ inactive_opacity = 1.0                    # toutes les icônes nettes et de la m
 inactive_scale = 1.0
 show_dots = true                          # un point sous les applis ouvertes, sans pastille de nombre
 show_instance_count = false
+# Applis épinglées au départ (noms des fichiers .desktop, sans l'extension). Les tiennes : clic droit dans le Spotlight
+# ou dans le dock, nc-reglages → Barre et dock ou nc-dock ; gardées dans settings.toml, qui passe devant cette liste.
 pinned = ["@BROWSER@", "kitty", "org.gnome.Nautilus"]
 
 # ---------------------------------------------------------------- Notifications, OSD

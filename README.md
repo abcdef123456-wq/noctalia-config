@@ -325,6 +325,12 @@ git -C ~/noctalia-config branch sauvegarde && git -C ~/noctalia-config fetch && 
 sous un nom (« Dev », « Cours »…), et rouvre-la d'un coup : les applis déjà ouvertes vont sur leur bureau, les autres sont
 lancées puis placées. Une session peut se rouvrir à chaque ouverture de session (nc-reglages → Fenêtres).
 
+**Dock** : pour épingler une appli, clic droit sur elle dans le Spotlight (ou **Alt + P** sur la ligne choisie), ou
+clic droit sur son icône dans le dock → Épingler ; le même geste la retire. La liste est aussi dans nc-reglages →
+Barre et dock (monter, descendre, retirer, ajouter une appli) et en commande : `nc-dock liste`,
+`nc-dock epingler firefox`, `nc-dock retirer firefox`, `nc-dock monter firefox`. Elle est gardée avec les réglages de
+Noctalia (`~/.local/state/noctalia/settings.toml`), que les mises à jour ne touchent pas.
+
 **Mises à jour du système** (île, page Notifications → « Mettre à jour », ou `nc-paquets mettre-a-jour`) : sur un disque
 en **Btrfs**, un instantané du système est pris juste avant (snapper ou Timeshift s'ils sont là, sinon
 `/.snapshots/nc-avant-maj-…`, les 3 derniers gardés) pour revenir en arrière si une mise à jour casse quelque chose ;

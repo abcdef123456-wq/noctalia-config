@@ -18,6 +18,8 @@
 // Questions sur la config (« ? question », ou une phrase comme « comment changer le fond d'écran ») : réponses
 // instantanées de l'index de nc-aide-config (réglages, raccourcis, commandes, documentation), sans IA ; « Demander à
 // l'IA » reste en dernier. Réglage SPOTLIGHT_AIDE.
+// Dock (issue #16) : sur une appli, clic droit ou Alt + P l'épingle au dock de Noctalia, ou l'en retire (nc-dock) ; un
+// bref retour en tête des résultats, le Spotlight reste ouvert.
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -213,7 +215,9 @@ Item {
         var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
         porteeAgent = agirTout ? Etat.agirPortee : ""; Etat.agirPortee = ""
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
+        retourDock = null
         lireApplis.running = true
+        lireDock.running = true
         lireFenetres.running = true
         lireSessions.running = true
         if (Object.keys(execs).length === 0) lireExecs.running = true
@@ -377,6 +381,71 @@ Item {
             lireSessions.running = true
         }
     }
+    // ── Dock de Noctalia : les applis épinglées (nc-dock), épingler ou retirer celle de la ligne ──
+    property var dock: []                    // identifiants épinglés, dans l'ordre du dock
+    property bool dockLu: false
+    // Retour d'un épinglage, en tête des résultats quelques secondes (ou jusqu'à la prochaine saisie) : { titre, ok }
+    property var retourDock: null
+    readonly property bool dockOccupe: modifDock.running || (retourDock !== null && retourDock.ok === undefined)
+    Process {
+        id: lireDock
+        command: [Etat.bin + "nc-dock", "liste", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { r.dock = JSON.parse(text).map(x => x.id) } catch (e) {}
+                r.dockLu = true
+                r.chercher()
+                // Après un épinglage : la ligne de l'appli reste choisie (sous le retour), Alt + P la rebascule
+                if (modifDock.ident !== "") {
+                    let i = r.resultats.findIndex(x => x.dock === modifDock.ident)
+                    if (i >= 0) r.sel = i
+                    modifDock.ident = ""
+                }
+            }
+        }
+    }
+    // Clic droit ou Alt + P sur la ligne i : épingler son appli au dock, ou l'en retirer. Faux : pas une appli (ou un
+    // épinglage déjà en cours), la touche revient à la saisie
+    function actionDock(i) {
+        let x = resultats[i]
+        if (!x || !x.dock || dockOccupe) return false
+        sel = i
+        modifDock.ident = x.dock
+        modifDock.nom = x.titre
+        modifDock.command = [Etat.bin + "nc-dock", x.epingle ? "retirer" : "epingler", x.dock]
+        retourDock = { titre: (x.epingle ? Reglages.t("Retrait du dock : ", "Removing from the dock: ")
+                                         : Reglages.t("Épinglage au dock : ", "Pinning to the dock: ")) + x.titre + "…" }
+        modifDock.running = true
+        chercher()
+        return true
+    }
+    function toucheDock(e) {
+        if (e.key === Qt.Key_P && (e.modifiers & Qt.AltModifier) && !(e.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.MetaModifier)))
+            e.accepted = actionDock(sel)
+    }
+    function ligneRetourDock() {
+        let x = retourDock
+        return { titre: x.titre, sous: x.sous || "Dock", glyphe: x.ok === undefined ? "hourglass_top" : (x.ok ? "push_pin" : "error"),
+                 garder: true, f: () => { r.retourDock = null; r.chercher() } }
+    }
+    Process {
+        id: modifDock
+        property string ident: ""
+        property string nom: ""
+        stdout: StdioCollector { id: sortieDock }
+        stderr: StdioCollector { id: erreurDock }
+        onExited: code => {
+            r.retourDock = code === 0
+                ? { ok: true, titre: sortieDock.text.trim().split("\n").pop() || Reglages.t("Dock mis à jour", "Dock updated") }
+                : { ok: false, titre: Reglages.t("Dock inchangé : ", "Dock unchanged: ") + modifDock.nom,
+                    sous: erreurDock.text.trim().split("\n").pop() || Reglages.t("nc-dock introuvable", "nc-dock not found") }
+            effacerRetourDock.restart()
+            lireDock.running = true                     // la liste relue : la ligne dit ce qu'Alt + P fera ensuite
+        }
+    }
+    // Le retour reste 3 s, puis s'efface de lui-même
+    Timer { id: effacerRetourDock; interval: 3000; onTriggered: { if (r.retourDock && r.retourDock.ok !== undefined) { r.retourDock = null; r.chercher() } } }
+
     Process {
         id: lireFenetres
         command: ["hyprctl", "clients", "-j"]
@@ -585,7 +654,7 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; annulerSuppr(); retourSession = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+    onQChanged: { sel = 0; annulerSuppr(); retourSession = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
@@ -771,6 +840,11 @@ Item {
                     item.sous = ap.generic || "Application"
                     item.f = () => r.lancer(id)
                 }
+                // Dock : clic droit ou Alt + P (actionDock)
+                item.dock = id
+                item.epingle = dock.indexOf(id) >= 0
+                item.aide = (item.aide || "↵") + "  ·  " + (item.epingle ? Reglages.t("Alt P retirer du dock", "Alt P unpin from dock")
+                                                                       : Reglages.t("Alt P épingler au dock", "Alt P pin to dock"))
                 out.push(item)
             }
         }
@@ -832,6 +906,7 @@ Item {
             if (q.indexOf(" ") >= 0 || !out.length || out[0].s < 90) out.unshift(lancerItem); else out.push(lancerItem)
         }
         if (retourSession) out.unshift(ligneRetour())     // une session supprimée depuis la recherche ordinaire
+        if (retourDock) out.unshift(ligneRetourDock())    // une appli épinglée (ou retirée) à l'instant
         resultats = out
         if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
     }
@@ -884,7 +959,8 @@ Item {
     // Encore du travail après la fermeture (suivre la fenêtre d'une appli lancée, Entrée en attente) : reste chargée
     // Un enregistrement ou une suppression de session en cours aussi : décharger le Spotlight arrêterait nc-session
     // (running seul : un nc-session introuvable, jamais lancé, ne garderait pas le Spotlight chargé pour rien)
-    readonly property bool occupe: suivi.running || entreeEnAttente || enregistreur.running || supprimeur.running
+    // Un épinglage au dock aussi (nc-dock arrêté en route : rien d'écrit, mais rien de fait non plus)
+    readonly property bool occupe: suivi.running || entreeEnAttente || enregistreur.running || supprimeur.running || modifDock.running
     function valider(i, nouveau) {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
@@ -914,6 +990,7 @@ Item {
             font.family: "Adwaita Sans"; font.pixelSize: 19
             clip: true
             cursorVisible: activeFocus
+            Keys.onPressed: e => r.toucheDock(e)       // Alt + P : épingler au dock (ou retirer)
             Keys.onEscapePressed: r.echap()
             Keys.onDeletePressed: e => { e.accepted = r.toucheSuppr((e.modifiers & Qt.ShiftModifier) !== 0) }
             Keys.onDownPressed: r.sel = Math.min(r.resultats.length - 1, r.sel + 1)
@@ -1045,11 +1122,16 @@ Item {
                     text: ligne.confirme ? ligne.modelData.suppr.libelle + "  " + Reglages.t("↵ oui · Échap non", "↵ yes · Esc no") : ""
                     color: Couleurs.rouge; font.pixelSize: 15; font.weight: Font.DemiBold
                 }
+                // Clic droit sur une appli : l'épingler au dock, ou l'en retirer
                 MouseArea {
                     id: zoneLigne
                     anchors.fill: parent; hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onEntered: r.sel = ligne.index
-                    onClicked: e => r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
+                    onClicked: e => {
+                        if (e.button === Qt.RightButton) r.actionDock(ligne.index)
+                        else r.valider(ligne.index, (e.modifiers & Qt.ControlModifier) !== 0)
+                    }
                 }
                 // − : la même suppression, à la souris (au survol ou sur la ligne choisie). En verre, comme celui de la
                 // fiche des raccourcis ; rouge seulement au survol
