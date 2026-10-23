@@ -76,6 +76,7 @@ class FauxServeur:
         self.port = self.ecoute.getsockname()[1]
         self.c = None
         self.tampon = b""
+        self.autres = []                   # messages reçus en attendant une réponse (confirm_request…)
 
     def fermer(self):
         for s in (self.c, self.ecoute):
@@ -138,13 +139,17 @@ class FauxServeur:
     def envoyer(self, objet):
         self._trame(0x1, json.dumps(objet).encode())
 
-    def demander(self, action, params=None):
+    def demander(self, action, params=None, timeout=None):
         rid = str(uuid.uuid4())
-        self.envoyer({"type": "action", "req_id": rid, "action": action, "params": params or {}})
+        trame = {"type": "action", "req_id": rid, "action": action, "params": params or {}}
+        if timeout is not None:
+            trame["timeout"] = timeout
+        self.envoyer(trame)
         while True:
             m = self.recevoir()
             if m.get("type") == "response" and m.get("req_id") == rid:
                 return m
+            self.autres.append(m)
 
 
 class Base(unittest.TestCase):
@@ -474,7 +479,7 @@ class Politique(Base):
         self.assertRegex(date, r"^\d{4}-\d\d-\d\dT")
         self.assertEqual(action, "exec")
         self.assertEqual(resume, "exécuter cette commande : echo un")
-        self.assertEqual(decision, "autorisé")
+        self.assertEqual(decision, "autorisé (écran)", "la décision et sa source")
         self.assertEqual(lignes[0].split("\t")[3], "sans confirmation")
         self.assertNotIn(SECRET, f.read_text())
 
@@ -657,6 +662,310 @@ class Echeances(Base):
         self.assertEqual(asyncio.run(conf.attendre(reponse, self.t + 12)), "tard")
 
 
+class FauxWS:
+    """La connexion vue par Noeud.traiter : ce qui part au serveur."""
+    def __init__(self):
+        self.envoyes = []
+        self.ferme = False
+
+    async def envoyer(self, objet):
+        self.envoyes.append(objet)
+
+
+class DelaiParTrame(Echeances):
+    """« timeout » de la trame d'action (JARVIS-BIS aae5b9b, issue #17) et budget d'exécution (B2-11)."""
+    def test_delai_de_la_trame(self):
+        m = self.charger()
+        d = m.delai_confirmation
+        self.assertEqual(d("read_file", {}, 35.0), 32, "timeout 35 → confirmation 32 s")
+        self.assertEqual(d("write_file", {}, 20), 17)
+        self.assertEqual(d("exec", {"command": "x", "timeout": 60.0}, 65.0), 32, "plafond de 32 s")
+        self.assertEqual(d("exec", {"command": "x", "timeout": 5}, 10.0), 7, "la trame l'emporte sur params.timeout")
+        self.assertEqual(d("read_file", {}, None), 12, "champ absent → 12 s")
+        self.assertEqual(d("media", {}, None), 17)
+        for v in (35.0, 35, 6):
+            self.assertEqual(m.delai_trame(v), float(v))
+        for v in (None, "35", True, False, 0, -1, float("nan"), float("inf"), 1e9, [35], {"t": 35}):
+            self.assertIsNone(m.delai_trame(v), v)
+        for v in (5.9, 1, 0.5):
+            with self.assertRaises(m.Refus):
+                d("read_file", {}, v)
+
+    def decider_autorise_a(self, m, secondes, action, params, trame, attendu=None):
+        noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+        debut = self.t
+        vu = []
+
+        async def demander(nom, decrite, limite):
+            vu.append(limite - debut)
+            self.t = debut + secondes
+            return "autorise"
+        noeud.confirmation.demander = demander
+        r = asyncio.run(noeud.decider(action, params, "rid", trame))
+        if attendu is not None:
+            self.assertEqual(vu, [attendu])
+        return r
+
+    def test_trame_35_confirmation_32_et_champ_absent_12(self):
+        m = self.charger()
+        (self.home / "a.txt").write_text("contenu")
+        r = self.decider_autorise_a(m, 31, "read_file", {"path": "~/a.txt"}, 35.0, attendu=32)
+        self.assertTrue(r["success"], r)
+        self.t = 2000.0
+        r = self.decider_autorise_a(m, 13, "read_file", {"path": "~/a.txt"}, None, attendu=12)
+        self.assertFalse(r["success"], "sans timeout dans la trame : 12 s, comme avant")
+        self.t = 3000.0
+        r = self.decider_autorise_a(m, 13, "read_file", {"path": "~/a.txt"}, "35", attendu=12)
+        self.assertFalse(r["success"], "valeur non numérique : délais connus")
+
+    def test_confirme_a_30_s_execution_bornee_a_2_s(self):
+        m = self.charger()
+        marque = self.home / "fini"
+        debut = time.monotonic()
+        r = self.decider_autorise_a(m, 30, "exec", {"command": f"sleep 6; touch {marque}", "timeout": 60.0}, 35.0,
+                                    attendu=32)
+        duree = time.monotonic() - debut
+        self.assertFalse(r["success"], r)
+        self.assertIn("Délai de 2 s dépassé", r["error"], "35 - 3 - 30 = 2 s")
+        self.assertGreater(duree, 1.5)
+        self.assertLess(duree, 4.5)
+        time.sleep(0.3)
+        self.assertFalse(marque.exists(), "la commande est tuée")
+
+    def test_confirme_trop_tard_rien_et_un_seul_refus(self):
+        m = self.charger()
+        marque = self.home / "fait"
+        # 0,5 s de budget (avec et sans timeout dans la trame : 17 + 3 - 3 - 16,5), pile à l'échéance, après
+        for apres, trame in ((31.5, 35.0), (16.5, None), (32, 35.0), (40, 35.0)):
+            noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
+            noeud.ws = FauxWS()
+            debut = self.t
+
+            async def demander(nom, decrite, limite, apres=apres, debut=debut):
+                self.t = debut + apres
+                return "autorise"
+            noeud.confirmation.demander = demander
+            asyncio.run(noeud.traiter({"type": "action", "req_id": "r1", "action": "exec",
+                                       "params": {"command": f"touch {marque}"}, "timeout": trame}))
+            self.assertEqual(len(noeud.ws.envoyes), 1, apres)
+            r = noeud.ws.envoyes[0]
+            self.assertEqual((r["type"], r["req_id"], r["success"], r.get("denied")), ("response", "r1", False, True))
+            self.assertIn("trop tard", r["error"].lower())
+            self.assertFalse(marque.exists(), apres)
+            self.t += 100
+        self.assertEqual(self.journal().count("trop tard"), 4)
+
+    def test_chemins_proteges_complets(self):
+        """B2-10 : démarrage automatique, shells, identifiants et ce qui lance des commandes à ta place."""
+        m = self.charger()
+        h = self.home
+        for rel in (".bash_profile", ".zshenv", ".zprofile", ".config/fish/config.fish", ".config/environment.d/x.conf",
+                    ".local/share/systemd/user/x.service", ".xprofile", ".codex/auth.json", ".gemini/oauth_creds.json",
+                    ".local/share/opencode/auth.json", ".aws/credentials", ".docker/config.json", ".npmrc",
+                    ".config/google-chrome/Default/Login Data", ".local/share/jarvis-bis/.env",
+                    ".local/share/TelegramDesktop/tdata/x", ".password-store/x.gpg", ".claude.json"):
+            for ecriture in (False, True):
+                self.assertIsNotNone(m.protege((h / rel).resolve(), ecriture), (rel, ecriture))
+        for rel in (".config/hypr/hyprland.conf", ".config/uwsm/env", ".config/quickshell/nc-ile/shell.qml",
+                    ".config/nc/greeting.zsh", ".config/nc/raccourcis.conf", ".local/bin/ls", ".gitconfig",
+                    ".local/share/applications/firefox.desktop", ".local/state/noctalia-config/noeud.log"):
+            self.assertIsNotNone(m.protege((h / rel).resolve(), True), rel)
+            self.assertIsNone(m.protege((h / rel).resolve(), False), rel + " reste lisible")
+        for rel in (".zsh_history", ".bash_history"):
+            self.assertIsNotNone(m.protege((h / rel).resolve(), False), rel)
+        for rel in ("Documents/a.txt", ".config/hyprpaper.conf", "Notes/x"):
+            self.assertIsNone(m.protege((h / rel).resolve(), True), rel)
+
+    def test_secrets_masques(self):
+        m = self.charger()
+        m.retenir_secrets({"URL": "http://x", "SECRET_KEY": SECRET, "USER_ID": "test"})
+        jeton = "ghp_" + "A1b2C3d4" * 4
+        s = m.sans_secrets(f"curl -H 'X-Secret-Key: {SECRET}' -H 'Authorization: Bearer {jeton}' x; echo {jeton}")
+        self.assertNotIn(SECRET, s)
+        self.assertNotIn(jeton, s)
+        self.assertIn("curl", s)
+        self.assertEqual(m.sans_secrets("echo bonjour"), "echo bonjour")
+
+
+class Distance(Base):
+    """Confirmation à distance (NOEUD_CONFIRMATION) : le faux serveur reçoit confirm_request et répond."""
+    def setUp(self):
+        super().setUp()
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="distance")
+        self.ile("absente")
+        self.recus = []
+
+    def action(self, action, params, timeout=35.0):
+        rid = str(uuid.uuid4())
+        self.serveur.envoyer({"type": "action", "req_id": rid, "action": action, "params": params, "timeout": timeout})
+        return rid
+
+    def attendre(self, genre, rid):
+        while True:
+            m = self.serveur.recevoir()
+            self.recus.append(m)
+            if m.get("type") == genre and m.get("req_id") == rid:
+                return m
+
+    def repondre(self, rid, decision):
+        self.serveur.envoyer({"type": "confirm_response", "req_id": rid, "decision": decision})
+
+    def rien_de_plus(self, delai=1.5):
+        self.serveur.c.settimeout(delai)
+        with self.assertRaises(OSError):
+            self.serveur.recevoir()
+        self.serveur.c.settimeout(15)
+
+    def qs(self):
+        return [l for l in self.appels() if l.startswith("qs ")]
+
+    def test_allow_execute(self):
+        r = self.demarrer()
+        self.assertIn("remote_confirm", r["capabilities"])
+        self.assertEqual(r["metadata"]["confirmation_mode"], "distance")
+        marque = self.home / "fait"
+        cmd = f"touch {marque} # {SECRET}"
+        rid = self.action("exec", {"command": cmd})
+        q = self.attendre("confirm_request", rid)
+        self.assertEqual(set(q), {"type", "req_id", "action", "summary", "expires_in"})
+        self.assertEqual(q["action"], "exec")
+        self.assertIn(f"touch {marque} # ", q["summary"], "la commande entière")
+        self.assertNotIn(SECRET, q["summary"], "jamais de secret")
+        self.assertTrue(30 <= q["expires_in"] <= 32, q)
+        self.assertFalse(marque.exists(), "rien avant « allow »")
+        self.repondre(rid, "allow")
+        rep = self.attendre("response", rid)
+        self.assertTrue(rep["success"], rep)
+        self.assertTrue(marque.exists())
+        self.assertEqual(self.qs(), [], "pas de carte dans l'île")
+        self.assertNotIn("confirm_cancel", [m["type"] for m in self.recus])
+        # Une seconde réponse, puis une réponse inconnue : ignorées, notées
+        self.repondre(rid, "allow")
+        self.repondre("inconnu-" + uuid.uuid4().hex, "allow")
+        self.rien_de_plus()
+        j = self.journal()
+        self.assertIn("autorisé (distance)", j)
+        self.assertIn("ignorée (en double)", j)
+        self.assertIn("ignorée (inconnue)", j)
+        self.assertNotIn(SECRET, j)
+
+    def test_deny_rien(self):
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("write_file", {"path": "~/notes.txt", "content": "x" * 10})
+        q = self.attendre("confirm_request", rid)
+        self.assertIn("~/notes.txt", q["summary"])
+        self.assertIn("10 octets", q["summary"], "chemin et taille")
+        self.repondre(rid, "deny")
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertTrue(rep["denied"])
+        self.assertIn("à distance", rep["error"])
+        self.assertFalse((self.home / "notes.txt").exists())
+        self.assertFalse(marque.exists())
+        self.assertIn("refusé (distance)", self.journal())
+
+    def test_expiration_rien_un_seul_refus(self):
+        self.demarrer(NC_NOEUD_DELAI="2")
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        q = self.attendre("confirm_request", rid)
+        self.assertLessEqual(q["expires_in"], 2)
+        self.assertEqual(self.attendre("confirm_cancel", rid)["req_id"], rid)
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertIn("en 2 s", rep["error"])
+        self.repondre(rid, "allow")                           # trop tard : ignoré
+        self.rien_de_plus()
+        self.assertFalse(marque.exists())
+        self.assertEqual(len([m for m in self.recus if m.get("type") == "response"]), 1)
+        self.assertIn("ignorée (tardive)", self.journal())
+
+    def test_allow_chemin_protege_refuse(self):
+        (self.home / ".ssh").mkdir(mode=0o700)
+        (self.home / "boite").mkdir()
+        self.demarrer()
+        rid = self.action("write_file", {"path": "~/boite/authorized_keys", "content": "ssh-ed25519 AAAA pirate"})
+        self.attendre("confirm_request", rid)
+        # Pendant l'attente, le dossier devient un lien vers ~/.ssh : « allow » n'y change rien
+        (self.home / "boite").rmdir()
+        (self.home / "boite").symlink_to(self.home / ".ssh")
+        self.repondre(rid, "allow")
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertIn("protégé", rep["error"])
+        self.assertFalse((self.home / ".ssh/authorized_keys").exists())
+        # Chemin protégé dès la demande : refus, sans même demander
+        rid = self.action("read_file", {"path": "~/.ssh/id_ed25519"})
+        rep = self.attendre("response", rid)
+        self.assertIn("protégé", rep["error"])
+        self.assertNotIn("confirm_request", [m["type"] for m in self.recus if m.get("req_id") == rid])
+
+    def test_allow_avec_ia_coupee_au_moment_d_executer(self):
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="distance", IA_MODE="non")
+        self.repondre(rid, "allow")
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertIn("IA_MODE=non", rep["error"])
+        self.assertFalse(marque.exists())
+        self.assertIn("refusé (IA coupée)", self.journal())
+
+    def test_ecran_aucune_demande_a_distance(self):
+        self.regler(NOEUD_JARVIS="oui")
+        self.ile("autoriser")
+        r = self.demarrer()
+        self.assertNotIn("remote_confirm", r["capabilities"])
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        rep = self.attendre("response", rid)
+        self.assertTrue(rep["success"], rep)
+        self.assertEqual([m["type"] for m in self.recus], ["response"], "aucune confirm_request")
+        self.assertTrue(self.qs())
+        self.assertIn("autorisé (écran)", self.journal())
+
+    def test_les_deux_l_ecran_d_abord(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="les-deux")
+        self.ile("autoriser")
+        r = self.demarrer()
+        self.assertIn("remote_confirm", r["capabilities"])
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        self.attendre("confirm_cancel", rid)                  # décidé sur l'écran : la demande à distance est close
+        rep = self.attendre("response", rid)
+        self.assertTrue(rep["success"], rep)
+        self.assertTrue(marque.exists())
+        self.repondre(rid, "deny")                            # arrive après : ignoré
+        self.rien_de_plus()
+        j = self.journal()
+        self.assertIn("autorisé (écran)", j)
+        self.assertIn("ignorée (tardive)", j)
+
+    def test_les_deux_la_distance_d_abord(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="les-deux")
+        self.ile("silence")
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        fin = time.monotonic() + 5
+        while not (self.run_dir / "nc-noeud/demande.json").exists() and time.monotonic() < fin:
+            time.sleep(0.05)
+        self.assertTrue((self.run_dir / "nc-noeud/demande.json").exists(), "la carte est ouverte aussi")
+        self.repondre(rid, "deny")
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertIn("à distance", rep["error"])
+        self.assertFalse(marque.exists())
+        self.assertFalse((self.run_dir / "nc-noeud/demande.json").exists(), "la carte se ferme")
+        self.assertNotIn("confirm_cancel", [m["type"] for m in self.recus])
+        self.assertIn("refusé (distance)", self.journal())
+
+
 class Cablage(unittest.TestCase):
     """Île, réglages, service, installation : branchés, sans activer le service."""
     def test_ile(self):
@@ -690,12 +999,21 @@ class Cablage(unittest.TestCase):
             self.assertEqual(pilote.nom, "Laisser JARVIS piloter ce PC")
             self.assertEqual(len(pilote.aide.splitlines()), 2, "avertissement en deux lignes")
             self.assertEqual((sans.section, sans.defaut), ("Intelligence artificielle", "oui"))
+            conf = m.PAR_CLE["NOEUD_CONFIRMATION"]
+            self.assertEqual((conf.section, conf.genre, conf.defaut, conf.groupe),
+                             ("Intelligence artificielle", "choix", "ecran", "noeud-confirmation"))
+            self.assertEqual([c for c, _ in conf.choix()], ["ecran", "distance", "les-deux"])
+            cles = [r.cle for r in m.REGLAGES]
+            self.assertEqual(cles.index("NOEUD_CONFIRMATION"), cles.index("NOEUD_JARVIS") + 1, "juste à côté")
             appels = []
             with unittest.mock.patch.object(m.subprocess, "run", lambda a, **k: appels.append(a)):
                 m.appliquer(["noeud"], {"NOEUD_JARVIS": "oui"})
                 m.appliquer(["noeud"], {})
+                m.appliquer(["noeud-confirmation"], {"NOEUD_JARVIS": "oui", "NOEUD_CONFIRMATION": "distance"})
+                m.appliquer(["noeud-confirmation"], {"NOEUD_CONFIRMATION": "distance"})     # pilotage coupé : rien
             self.assertEqual(appels, [["systemctl", "--user", "enable", "--now", "nc-noeud.service"],
-                                      ["systemctl", "--user", "disable", "--now", "nc-noeud.service"]])
+                                      ["systemctl", "--user", "disable", "--now", "nc-noeud.service"],
+                                      ["systemctl", "--user", "try-restart", "nc-noeud.service"]])
 
 
 if __name__ == "__main__":

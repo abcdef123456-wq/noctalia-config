@@ -8,10 +8,12 @@ Le serveur JARVIS-BIS (/api/node/ws) peut demander des actions à ce PC. Leur cl
 tout sans te demander ; celui-ci applique une politique par action :
   - sans confirmation (sauf si « Actions sans confirmation » est sur non dans nc-reglages) : musique (playerctl),
     notification, lecture du presse-papiers, verrouillage, liste d'un dossier (sans contenu) ;
-  - avec ta confirmation dans l'île (ou une notification à boutons sans l'île) : commande, lecture ou écriture d'un
-    fichier, capture d'écran, écriture du presse-papiers ; refus automatique avant que le serveur abandonne (12 s
-    pour un fichier, une capture ou le presse-papiers, 17 s pour une action relayée, jusqu'à 17 s pour une commande
-    selon son délai) : jamais rien n'est fait après coup ;
+  - avec ta confirmation dans l'île (ou une notification à boutons sans l'île), ou à distance (« Où confirmer les
+    actions de JARVIS » : le serveur te relaie la demande, par exemple sur Telegram), ou les deux : commande, lecture
+    ou écriture d'un fichier, capture d'écran, écriture du presse-papiers ; refus automatique avant que le serveur
+    abandonne (son délai moins 3 s, 32 s au plus, quand il l'annonce dans la demande ; sinon 12 s pour un fichier,
+    une capture ou le presse-papiers, 17 s pour une action relayée, jusqu'à 17 s pour une commande selon son délai) :
+    jamais rien n'est fait après coup, et l'exécution s'arrête 3 s avant que le serveur abandonne ;
   - toujours refusées : les chemins protégés (clés SSH et GPG, démarrage automatique, shells, secrets des
     navigateurs, de gh, de Claude, de l'assistant…), tout pendant que l'IA est coupée (IA_MODE=non), toute autre action.
 Connexion wss://, ou ws:// seulement vers un hôte privé ou Tailscale. La clé secrète part dans l'en-tête X-Secret-Key,
@@ -30,6 +32,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import socket
@@ -50,8 +53,10 @@ DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, 
   nc-noeud aide       this help
 
 No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
-notification with buttons): command, file read or write, screenshot, clipboard write; denied before the server gives
-up (12 s for a file, screenshot or clipboard, 17 s for a relayed action, up to 17 s for a command): never done late. Always
+notification with buttons), remotely (relayed by the server, e.g. on Telegram), or both: command, file read or write,
+screenshot, clipboard write; denied before the server gives up (its timeout minus 3 s, at most 32 s, when the request
+carries it; otherwise 12 s for a file, screenshot or clipboard, 17 s for a relayed action, up to 17 s for a command):
+never done late, and execution stops 3 s before the server gives up. Always
 denied: protected paths, everything while AI is off (IA_MODE=non), any other action. wss://, or ws:// only to a private
 or Tailscale host; the secret key goes in the X-Secret-Key header, never in the URL. Log:
 ~/.local/state/noctalia-config/noeud.log (0600).
@@ -66,13 +71,19 @@ or Tailscale host; the secret key goes in the X-Secret-Key header, never in the 
 #     notify et run_shell (envoyé en « exec », avec les paramètres de l'outil : node_id ou node, pas toujours timeout),
 #     et pour toute action quand un nœud est désigné ;
 #   - send_action par défaut, /api/node/{id}/action : 30 s.
-# 64523e5 attend 35 s partout, mais le serveur n'annonce ni son délai ni sa révision : on garde le plus court connu.
+# 64523e5 attend 35 s partout, mais n'annonce ni son délai ni sa révision : sans annonce, on garde le plus court connu.
+# Depuis aae5b9b (issue #17), chaque trame d'action porte « timeout » (secondes) : confirmation = min(timeout - 3, 32).
+# Dans les deux cas, l'exécution elle-même s'arrête 3 s avant que le serveur abandonne (B2-11).
 MARGE_SERVEUR = 3
+DELAI_MAX_TRAME = 32               # confirmation la plus longue, même si le serveur annonce plus
+TRAME_ABSURDE = 3600               # au-delà, la valeur annoncée est ignorée (délais connus ci-dessous)
 DELAI_CONFIRMATION = 25            # le plus long possible (une commande au long délai)
 DELAI_RELAIS = 20 - MARGE_SERVEUR  # 17 s : action peut-être relayée par HardwareRelay (20 s)
 DELAIS_FIXES = {"read_file": 15 - MARGE_SERVEUR, "write_file": 15 - MARGE_SERVEUR,
                 "screenshot": 12, "clipboard_write": 12}
-EXEC_MIN = 2 * MARGE_SERVEUR       # commande au délai plus court : pas le temps de te demander, refus direct
+EXEC_MIN = 2 * MARGE_SERVEUR       # commande (ou trame) au délai plus court : pas le temps de te demander, refus direct
+BUDGET_MIN = 1                     # moins d'1 s pour exécuter avant l'abandon du serveur : rien n'est fait
+MAX_RESUME_DISTANCE = 3500         # résumé envoyé pour la confirmation à distance (un message Telegram : 4096)
 MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le client de l'upstream
 MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
 MAX_TEXTE = 64 * 1024              # ce que la carte peut montrer en entier : au-delà, pas de confirmation possible
@@ -88,13 +99,29 @@ CAPACITES = ["exec", "read_file", "write_file", "list_files", "screenshot", "loc
              "media", "notify"]
 MEDIA = {"play", "pause", "play-pause", "next", "previous", "stop", "status", "metadata", "volume"}
 
-# Chemins protégés (relatifs au dossier personnel), vérifiés après résolution des liens symboliques. Écriture : de quoi
-# s'installer au démarrage ou prendre la main (clés, services, shells), et les réglages de ce client lui-même
-PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".config/autostart", ".bashrc", ".zshrc", ".profile",
-            ".config/nc/assistant.conf", ".config/nc/ia.conf"]
-ECRITURE_SEULEMENT = [".config/nc/reglages.conf", ".local/bin/nc-noeud"]
-LECTURE_SEULEMENT = [".config/gh", ".git-credentials", ".netrc", ".mozilla", ".config/chromium",
-                     ".local/share/keyrings", ".claude"]
+# Chemins protégés (relatifs au dossier personnel), vérifiés après résolution des liens symboliques, appliqués même
+# après un « Autoriser » (sur l'écran ou à distance).
+# Lecture et écriture : clés, identifiants et secrets (navigateurs, trousseaux, CLI d'IA et de cloud, messageries, le
+# serveur JARVIS local et son .env), et ce qui s'exécute au démarrage (services, démarrage automatique, shells).
+PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".config/autostart", ".config/environment.d",
+            ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".zshrc", ".zshenv", ".zprofile", ".zlogin",
+            ".zlogout", ".profile", ".config/fish", ".xprofile", ".xinitrc", ".xsession", ".xsessionrc",
+            ".pam_environment", ".config/nc/assistant.conf", ".config/nc/ia.conf",
+            ".config/gh", ".config/hub", ".git-credentials", ".netrc", ".password-store", ".local/share/keyrings",
+            ".local/share/kwalletd", ".mozilla", ".librewolf", ".zen", ".floorp", ".thunderbird", ".config/chromium",
+            ".config/google-chrome", ".config/BraveSoftware", ".config/vivaldi", ".config/microsoft-edge",
+            ".var/app/org.mozilla.firefox", ".var/app/org.chromium.Chromium", ".var/app/com.google.Chrome",
+            ".var/app/com.brave.Browser", ".claude", ".claude.json", ".codex", ".gemini", ".config/opencode",
+            ".local/share/opencode", ".aws", ".azure", ".config/gcloud", ".kube", ".docker", ".pgpass", ".npmrc",
+            ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".config/rclone",
+            ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis"]
+# Écriture seulement : ce qui lance des commandes à ta place (Hyprland, uwsm, l'île, la barre, raccourcis et scripts de
+# nc, ~/.local/bin en tête du PATH, lanceurs d'applis, git, le terminal) et le journal de ce client
+ECRITURE_SEULEMENT = [".config/nc", ".local/bin", ".config/hypr", ".config/uwsm", ".config/quickshell",
+                      ".config/noctalia", ".local/share/applications", ".gitconfig", ".config/git", ".config/kitty",
+                      ".local/state/noctalia-config"]
+# Lecture seulement : historiques des shells (des secrets y restent souvent)
+LECTURE_SEULEMENT = [".bash_history", ".zsh_history", ".local/share/fish/fish_history", ".python_history"]
 
 
 # ── Outils communs (nc-assistant : configuration, langue, hôtes privés) ────────────────────────────────────────────
@@ -130,8 +157,26 @@ def horloge():
     return time.monotonic()
 
 
-def delai_confirmation(nom, p):
-    """Secondes laissées pour confirmer cette action, sous le délai du serveur ; Refus si c'est impossible."""
+def delai_trame(v):
+    """Le « timeout » de la trame d'action (aae5b9b), en secondes ; None s'il manque ou n'a pas de sens (non numérique,
+    nul ou négatif, infini, plus d'une heure) : on revient alors aux délais connus."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    if not math.isfinite(v) or v <= 0 or v > TRAME_ABSURDE:
+        return None
+    return v
+
+
+def delai_confirmation(nom, p, trame=None):
+    """Secondes laissées pour confirmer cette action, sous le délai du serveur ; Refus si c'est impossible.
+    trame : le délai annoncé par le serveur dans la trame (delai_trame), qui l'emporte sur les délais connus."""
+    if trame is not None:
+        if trame < EXEC_MIN:
+            raise Refus(T(f"Délai du serveur trop court ({trame:g} s) pour te demander confirmation "
+                          f"({EXEC_MIN} s au moins) : refusé.",
+                          f"Server timeout too short ({trame:g} s) to ask for your confirmation (at least {EXEC_MIN} s): denied."))
+        return min(trame - MARGE_SERVEUR, DELAI_MAX_TRAME)
     if nom in DELAIS_FIXES:
         return DELAIS_FIXES[nom]
     if nom != "exec":
@@ -171,6 +216,38 @@ def ia_coupee():
     return reglage("IA_MODE", "auto") == "non"
 
 
+def mode_confirmation():
+    """NOEUD_CONFIRMATION : « ecran » (par défaut), « distance » ou « les-deux » ; toute autre valeur : « ecran »."""
+    m = reglage("NOEUD_CONFIRMATION", "ecran")
+    return m if m in ("ecran", "distance", "les-deux") else "ecran"
+
+
+# ── Secrets : jamais dans le journal ni dans ce qui part pour la confirmation à distance ─────────────────────────────
+SECRETS = set()                    # valeurs secrètes de la configuration (SECRET_KEY…), remplies au démarrage
+MOTIFS_SECRETS = [re.compile(m) for m in (
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
+    r"\b(?:gh[pousr]_|github_pat_|glpat-|sk-ant-|sk-proj-|sk-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_\-]{16,}",
+    r"(?i)\b(?:bearer|token|basic)\s+[A-Za-z0-9._~+/=\-]{16,}",
+    r"(?i)\b((?:api[_-]?key|secret[_-]?key|x-secret-key|password|passwd|token)\s*[=:]\s*)[\"']?[^\s\"']{6,}")]
+MASQUE = "•••"
+
+
+def retenir_secrets(c):
+    """Les valeurs de la configuration dont le nom dit qu'elles sont secrètes."""
+    for k, v in (c or {}).items():
+        if isinstance(v, str) and len(v) >= 6 and any(x in k.upper() for x in ("SECRET", "TOKEN", "KEY", "PASS")):
+            SECRETS.add(v)
+
+
+def sans_secrets(texte):
+    s = str(texte)
+    for v in sorted(SECRETS, key=len, reverse=True):
+        s = s.replace(v, MASQUE)
+    for m in MOTIFS_SECRETS:
+        s = m.sub(lambda x: ((x.group(1) or "") if x.re.groups else "") + MASQUE, s)
+    return s
+
+
 def dossier_runtime():
     """$XDG_RUNTIME_DIR/nc-noeud (0700, à toi seul) : la demande en cours et la réponse de l'île."""
     base = os.environ.get("XDG_RUNTIME_DIR")
@@ -200,10 +277,10 @@ def ecrire_atomique(chemin, texte, mode=0o600):
 
 # ── Journal local ─────────────────────────────────────────────────────────────────────────────────────────────────
 def journal(action, resume, decision):
-    """Une ligne par demande : date, action, résumé, décision. 0600 ; ramené à sa seconde moitié au-delà de 1 Mo."""
+    """Une ligne par demande : date, action, résumé (secrets masqués), décision. 0600 ; ramené à sa seconde moitié au-delà de 1 Mo."""
     d = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "noctalia-config"
     f = d / "noeud.log"
-    propre = lambda s: " ".join(str(s).split())[:300]
+    propre = lambda s: " ".join(sans_secrets(s).split())[:300]
     ligne = "\t".join((datetime.now().astimezone().isoformat(timespec="seconds"), propre(action), propre(resume),
                        propre(decision))) + "\n"
     try:
@@ -470,13 +547,16 @@ def preparer(action, p):
         if dossier != HOME:
             resume += T(f" dans {montrer_chemin(dossier)}", f" in {montrer_chemin(dossier)}")
 
-        async def executer():
+        async def executer(budget=None):
+            # Durée : son délai demandé, mais jamais au-delà de l'échéance du serveur (moins 3 s) : B2-11
+            d = delai if budget is None else min(delai, budget)
             debut = time.monotonic()
             try:
-                code, out, err = await lancer(["/bin/sh", "-c", cmd], delai=delai, cwd=str(dossier),
+                code, out, err = await lancer(["/bin/sh", "-c", cmd], delai=d, cwd=str(dossier),
                                               env={**os.environ, "TERM": "dumb"})
             except asyncio.TimeoutError:
-                return {"success": False, "error": T(f"Délai de {delai:g} s dépassé.", f"{delai:g} s timeout exceeded.")}
+                d = round(d, 1)
+                return {"success": False, "error": T(f"Délai de {d:g} s dépassé.", f"{d:g} s timeout exceeded.")}
             duree = time.monotonic() - debut
             o = out[:MAX_SORTIE].decode("utf-8", "replace").strip()
             e = err[:MAX_SORTIE].decode("utf-8", "replace").strip()
@@ -491,7 +571,7 @@ def preparer(action, p):
         if cible.is_dir():
             resume = T(f"lister le dossier {montrer_chemin(cible)}", f"list the folder {montrer_chemin(cible)}")
 
-            async def executer():
+            async def executer(budget=None):
                 elements = []
                 for e in sorted(cible.iterdir(), key=lambda x: x.name)[:200]:
                     with contextlib.suppress(OSError):
@@ -505,7 +585,7 @@ def preparer(action, p):
         if taille > MAX_FICHIER:
             raise Refus(T("Fichier trop gros (plus de 5 Mo).", "File too big (over 5 MB)."))
 
-        async def executer():
+        async def executer(budget=None):
             # Relu au moment de lire : un lien posé pendant la confirmation ne mène pas ailleurs
             verifier_chemin(str(cible), False)
             fd = os.open(cible, os.O_RDONLY | os.O_NOFOLLOW)
@@ -532,7 +612,7 @@ def preparer(action, p):
                   T(f"créer {montrer_chemin(cible)} ({taille_lisible(len(brut))})",
                     f"create {montrer_chemin(cible)} ({taille_lisible(len(brut))})"))
 
-        async def executer():
+        async def executer(budget=None):
             cible.parent.mkdir(parents=True, exist_ok=True)
             verifier_chemin(str(cible), True)              # relu après la confirmation et la création des dossiers
             fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
@@ -546,7 +626,7 @@ def preparer(action, p):
         if not grim:
             raise Refus(T("Capture impossible : grim n'est pas installé.", "Cannot take a screenshot: grim is not installed."))
 
-        async def executer():
+        async def executer(budget=None):
             base = os.environ.get("XDG_RUNTIME_DIR") or None
             fd, chemin = tempfile.mkstemp(prefix="nc-noeud-capture-", suffix=".png", dir=base)
             os.close(fd)
@@ -570,7 +650,7 @@ def preparer(action, p):
         if not copier and not xclip:
             raise Refus(T("wl-copy (ou xclip) introuvable.", "wl-copy (or xclip) not found."))
 
-        async def executer():
+        async def executer(budget=None):
             args = [copier] if copier else [xclip, "-selection", "clipboard"]
             code, _, _ = await lancer(args, entree=texte.encode("utf-8"), delai=10)
             return {"success": code == 0, "message": T("Presse-papiers mis à jour.", "Clipboard updated.")}
@@ -582,7 +662,7 @@ def preparer(action, p):
         if not coller and not xclip:
             raise Refus(T("wl-paste (ou xclip) introuvable.", "wl-paste (or xclip) not found."))
 
-        async def executer():
+        async def executer(budget=None):
             args = [coller, "--no-newline"] if coller else [xclip, "-selection", "clipboard", "-o"]
             code, out, _ = await lancer(args, delai=10)
             return {"success": code == 0, "clipboard": out[:MAX_SORTIE].decode("utf-8", "replace")}
@@ -603,7 +683,7 @@ def preparer(action, p):
                 raise Refus(T("Volume invalide.", "Invalid volume.")) from None
             args.append(str(min(max(v if v <= 1 else v / 100, 0.0), 1.0)))
 
-        async def executer():
+        async def executer(budget=None):
             code, out, err = await lancer(args, delai=10)
             return {"success": code == 0, "output": (out or err).decode("utf-8", "replace").strip()[:2000]}
         return Action(T(f"contrôler la musique : {sous}", f"control the music: {sous}"), "", executer)
@@ -615,7 +695,7 @@ def preparer(action, p):
         if not ns:
             raise Refus(T("notify-send introuvable.", "notify-send not found."))
 
-        async def executer():
+        async def executer(budget=None):
             code, _, _ = await lancer([ns, "-a", "JARVIS", "--", titre, html.escape(corps, quote=False)], delai=10)
             return {"success": code == 0}
         return Action(T(f"t'envoyer une notification : {titre}", f"send you a notification: {titre}"), corps, executer)
@@ -626,7 +706,7 @@ def preparer(action, p):
         if not lc and not hl:
             raise Refus(T("Aucun verrouillage trouvé (loginctl, hyprlock).", "No locker found (loginctl, hyprlock)."))
 
-        async def executer():
+        async def executer(budget=None):
             if lc:
                 code, _, _ = await lancer([lc, "lock-session"], delai=10)
                 return {"success": code == 0, "message": T("Session verrouillée.", "Session locked.")}
@@ -731,13 +811,88 @@ class Confirmation:
         return "autorise" if code == 0 and v == "autoriser" else ("refuse" if v == "refuser" else "expire")
 
 
-DECISIONS = {"refuse": ("refusé", "Refusé sur le PC.", "Denied on the PC."),
-             "expire": ("expiré (refusé)", "Pas de réponse sur le PC en {s} s : refusé.", "No answer on the PC within {s} s: denied."),
-             "tard": ("autorisé trop tard (rien fait)", "Autorisé sur le PC après {s} s, trop tard : rien n'a été fait.",
-                      "Allowed on the PC after {s} s, too late: nothing was done."),
+class ConfirmationDistance:
+    """Confirmation relayée par le serveur (NOEUD_CONFIRMATION=distance ou les-deux, capacité « remote_confirm ») :
+      → {"type": "confirm_request", "req_id": <celui de l'action>, "action": …, "summary": <ce qui sera fait, en entier,
+         secrets masqués>, "expires_in": <secondes entières>}
+      ← {"type": "confirm_response", "req_id": …, "decision": "allow" | "deny"}
+      → {"type": "confirm_cancel", "req_id": …} quand la demande se termine sans décision venue de là (décidée sur
+         l'écran, expirée, annulée).
+    Seul un « allow » reçu avant l'échéance, pour ce req_id exact, autorise ; toute autre réponse est ignorée et notée."""
+    GARDEES = 256                       # demandes terminées dont on se souvient (réponse en double ou tardive)
+
+    def __init__(self):
+        self.attentes = {}              # req_id → (futur, échéance)
+        self.finies = {}                # req_id → « décidée » ou « close » (ordre d'insertion : les plus anciennes d'abord)
+
+    async def demander(self, ws, req_id, nom, resume, limite):
+        """« autorise », « refuse », « expire » ou « indisponible »."""
+        reste = limite - horloge()
+        if reste < 1:
+            return "expire"
+        if ws is None or ws.ferme or not isinstance(req_id, str) or not req_id or req_id in self.attentes \
+                or req_id in self.finies or len(resume) > MAX_RESUME_DISTANCE:
+            return "indisponible"
+        futur = asyncio.get_running_loop().create_future()
+        self.attentes[req_id] = (futur, limite)
+        fin = "close"
+        try:
+            await ws.envoyer({"type": "confirm_request", "req_id": req_id, "action": nom, "summary": resume,
+                              "expires_in": max(1, math.floor(reste))})
+            try:
+                v = await asyncio.wait_for(asyncio.shield(futur), max(limite - horloge(), 0))
+            except asyncio.TimeoutError:
+                return "expire"
+            fin = "décidée"
+            return "autorise" if v == "allow" else "refuse"
+        except (OSError, ErreurWS):
+            return "indisponible"
+        finally:
+            self.attentes.pop(req_id, None)
+            self.finies[req_id] = fin
+            while len(self.finies) > self.GARDEES:
+                self.finies.pop(next(iter(self.finies)))
+            if fin != "décidée":                                   # l'autre côté a décidé, ou plus personne n'attend
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(ws.envoyer({"type": "confirm_cancel", "req_id": req_id}))
+
+    def recue(self, msg):
+        """Une confirm_response du serveur ; ignorée (et notée) si elle ne répond à aucune demande en cours."""
+        rid, dec = msg.get("req_id"), msg.get("decision")
+        montre = str(rid)[:80]
+        if not isinstance(rid, str) or rid not in self.attentes:
+            raison = {"décidée": "en double", "close": "tardive"}.get(self.finies.get(rid) if isinstance(rid, str) else None,
+                                                                     "inconnue")
+            journal("confirm_response", montre, f"ignorée ({raison})")
+            return
+        futur, limite = self.attentes[rid]
+        if dec not in ("allow", "deny"):
+            journal("confirm_response", montre, "ignorée (décision illisible)")
+        elif futur.done():
+            journal("confirm_response", montre, "ignorée (en double)")
+        elif horloge() >= limite:
+            journal("confirm_response", montre, "ignorée (tardive)")
+        else:
+            futur.set_result(dec)
+
+
+def resume_distance(nom, decrite):
+    """Ce qui part au serveur pour la confirmation à distance : exactement ce qui sera fait (commande entière, chemin
+    et taille, texte copié, notification), jamais le contenu d'un fichier, secrets masqués."""
+    s = decrite.resume
+    if decrite.texte and nom in ("exec", "clipboard_write", "notify"):
+        s += " :\n" + decrite.texte
+    return sans_secrets(s)
+
+
+SOURCES = {"ecran": ("écran", "sur le PC", "on the PC"), "distance": ("distance", "à distance", "remotely")}
+DECISIONS = {"refuse": ("refusé", "Refusé {o}.", "Denied {o}."),
+             "expire": ("expiré (refusé)", "Pas de réponse en {s} s : refusé.", "No answer within {s} s: denied."),
+             "tard": ("autorisé trop tard (rien fait)", "Autorisé {o} après {s} s, trop tard : rien n'a été fait.",
+                      "Allowed {o} after {s} s, too late: nothing was done."),
              "indisponible": ("refusé (pas de confirmation possible)",
-                              "Confirmation impossible sur le PC (ni l'île ni notification à boutons) : refusé.",
-                              "Cannot confirm on the PC (neither the island nor a notification with buttons): denied.")}
+                              "Confirmation impossible (ni l'île, ni notification à boutons, ni demande à distance) : refusé.",
+                              "Cannot confirm (neither the island, nor a notification with buttons, nor a remote request): denied.")}
 
 
 # ── Le nœud ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -746,21 +901,67 @@ class Noeud:
         self.c = c
         self.serveur = urllib.parse.urlsplit(c["URL"]).hostname or "?"
         self.confirmation = Confirmation(self.serveur)
+        self.distance = ConfirmationDistance()
+        self.distance_annoncee = False         # « remote_confirm » envoyé dans le register de cette connexion
         self.ws = None
         self.taches = set()
+        retenir_secrets(c)
 
     @staticmethod
-    def delai(nom, p):
+    def delai(nom, p, trame=None):
         """Le délai de confirmation de cette action ; NC_NOEUD_DELAI (tests) ne peut que le raccourcir."""
-        d = delai_confirmation(nom, p)
+        d = delai_confirmation(nom, p, trame)
         try:
             return min(max(float(os.environ.get("NC_NOEUD_DELAI", d)), 0.5), d)
         except ValueError:
             return d
 
-    async def decider(self, action, params):
-        """Le résultat à renvoyer au serveur, selon la politique ; tout est noté dans le journal."""
+    async def confirmer(self, nom, decrite, limite, req_id):
+        """(décision, source) : sur l'écran, à distance, ou les deux à la fois (la première décision l'emporte, l'autre
+        côté est fermé : la carte disparaît, le serveur reçoit confirm_cancel)."""
+        mode = mode_confirmation()
+        if mode != "ecran" and not self.distance_annoncee:
+            # Réglage changé depuis la connexion (nc-reglages relance le service) : le serveur ne sait pas encore
+            # relayer ; une personne valide quand même, sur l'écran
+            mode = "ecran"
+        cotes = {}
+        if mode in ("ecran", "les-deux"):
+            cotes["ecran"] = asyncio.ensure_future(self.confirmation.demander(nom, decrite, limite))
+        if mode in ("distance", "les-deux"):
+            cotes["distance"] = asyncio.ensure_future(
+                self.distance.demander(self.ws, req_id, nom, resume_distance(nom, decrite), limite))
+        resultats = {}
+        try:
+            en_cours = set(cotes.values())
+            while en_cours:
+                faits, en_cours = await asyncio.wait(en_cours, return_when=asyncio.FIRST_COMPLETED)
+                for source, t in cotes.items():
+                    if t in faits:
+                        try:
+                            resultats[source] = t.result()
+                        except Refus as e:
+                            print(f"nc-noeud : {e}", file=sys.stderr, flush=True)
+                            resultats[source] = "indisponible"
+                for source in ("ecran", "distance"):                 # une vraie décision : on n'attend plus l'autre
+                    if resultats.get(source) in ("autorise", "refuse", "tard"):
+                        return resultats[source], source
+            for d in ("tard", "expire"):
+                for source, r in resultats.items():
+                    if r == d:
+                        return d, source
+            return "indisponible", next(iter(resultats), "ecran")
+        finally:
+            restants = [t for t in cotes.values() if not t.done()]
+            for t in restants:
+                t.cancel()
+            if restants:
+                await asyncio.gather(*restants, return_exceptions=True)
+
+    async def decider(self, action, params, req_id=None, trame=None):
+        """Le résultat à renvoyer au serveur, selon la politique ; tout est noté dans le journal.
+        trame : le « timeout » de la trame d'action (secondes, aae5b9b), s'il y en a un."""
         recu = horloge()                                             # l'échéance part de la réception
+        trame = delai_trame(trame)
         nom = ALIAS.get(action, action)
         if ia_coupee():
             journal(nom, "", "refusé (IA coupée)")
@@ -779,39 +980,60 @@ class Noeud:
             journal(nom, str(e), e.decision)
             return {"success": False, "error": str(e)}
         resume = decrite.resume + (" : " + decrite.texte if decrite.texte else "")
+        # Commande, fichier, capture, écriture du presse-papiers : toujours une personne qui autorise (écran ou distance)
         confirmer = nom in AVEC_CONFIRMATION or reglage("NOEUD_SANS_CONFIRMATION", "oui") == "non"
+        try:
+            delai = self.delai(nom, p, trame) if confirmer else None
+            # Échéance du serveur : annoncée dans la trame, sinon la plus courte connue pour cette action
+            echeance = recu + (trame if trame is not None else delai_confirmation(nom, p) + MARGE_SERVEUR)
+        except Refus as e:
+            journal(nom, resume, e.decision + " (délai trop court)")
+            return {"success": False, "error": str(e), "denied": True}
+        source = None
         if confirmer:
-            try:
-                delai = self.delai(nom, p)
-            except Refus as e:
-                journal(nom, resume, e.decision + " (délai trop court)")
-                return {"success": False, "error": str(e), "denied": True}
             limite = recu + delai                                    # échéance absolue, horloge monotone
-            try:
-                decision = await self.confirmation.demander(nom, decrite, limite)
-            except Refus as e:
-                decision = "indisponible"
-                print(f"nc-noeud : {e}", file=sys.stderr, flush=True)
+            decision, source = await self.confirmer(nom, decrite, limite, req_id)
             if decision == "autorise" and horloge() >= limite:      # le serveur a déjà abandonné : rien n'est fait
                 decision = "tard"
+            o = T(SOURCES[source][1], SOURCES[source][2])
             if decision != "autorise":
                 d = DECISIONS[decision]
-                journal(nom, resume, d[0])
-                return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}"), "denied": True}
+                journal(nom, resume, d[0] + ("" if decision in ("expire", "indisponible") else f" ({SOURCES[source][0]})"))
+                return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}", o=o), "denied": True}
+        # Relu juste avant d'exécuter (B2-09) : couper l'IA ou le pilotage pendant la confirmation l'emporte sur « allow »
+        if ia_coupee():
+            journal(nom, resume, "refusé (IA coupée)")
+            return {"success": False, "error": T("L'IA est coupée sur ce PC (IA_MODE=non) : refusé.",
+                                                 "AI is turned off on this PC (IA_MODE=non): denied."), "denied": True}
+        if reglage("NOEUD_JARVIS", "non") != "oui":
+            journal(nom, resume, "refusé (pilotage coupé)")
+            return {"success": False, "error": T("Le pilotage de ce PC par JARVIS est coupé.", "JARVIS control of this PC is off."),
+                    "denied": True}
+        # Temps qui reste pour exécuter : échéance du serveur, moins la marge, moins ce qui est passé (B2-11)
+        budget = echeance - MARGE_SERVEUR - horloge()
+        if budget < BUDGET_MIN:
+            journal(nom, resume, "autorisé trop tard (rien fait)" + (f" ({SOURCES[source][0]})" if source else ""))
+            return {"success": False, "denied": True,
+                    "error": T("Trop tard : plus le temps d'exécuter avant que le serveur abandonne, rien n'a été fait.",
+                               "Too late: no time left to run before the server gives up, nothing was done.")}
         try:
-            res = await decrite.executer()
+            res = await asyncio.wait_for(decrite.executer(budget), budget + (0.5 if nom == "exec" else 0))
         except Refus as e:
             journal(nom, resume, e.decision)
             return {"success": False, "error": str(e)}
-        except (OSError, asyncio.TimeoutError, UnicodeError) as e:
+        except asyncio.TimeoutError:
+            b = round(budget, 1)
+            res = {"success": False, "error": T(f"Délai de {b:g} s dépassé.", f"{b:g} s timeout exceeded.")}
+        except (OSError, UnicodeError) as e:
             res = {"success": False, "error": str(e)[:300]}
-        journal(nom, resume, ("autorisé" if confirmer else "sans confirmation") + ("" if res.get("success") else " (échec)"))
+        journal(nom, resume, (f"autorisé ({SOURCES[source][0]})" if confirmer else "sans confirmation")
+                + ("" if res.get("success") else " (échec)"))
         return res
 
     async def traiter(self, msg):
         req_id = msg.get("req_id")
         try:
-            res = await self.decider(str(msg.get("action") or ""), msg.get("params") or {})
+            res = await self.decider(str(msg.get("action") or ""), msg.get("params") or {}, req_id, msg.get("timeout"))
         except Exception as e:                                       # jamais de réponse manquante
             res = {"success": False, "error": T("Erreur sur le PC : ", "Error on the PC: ") + str(e)[:200]}
         with contextlib.suppress(Exception):
@@ -830,8 +1052,11 @@ class Noeud:
     async def session(self, ws):
         self.ws = ws
         pc = A.nom_du_pc() or socket.gethostname() or "linux"
+        mode = mode_confirmation()
+        self.distance_annoncee = mode in ("distance", "les-deux")
         await ws.envoyer({"type": "register", "node_id": A.client_id(self.c) or pc, "hostname": pc, "os": "linux",
-                          "capabilities": CAPACITES, "metadata": {"client": "nc-noeud", "confirmation": True}})
+                          "capabilities": CAPACITES + (["remote_confirm"] if self.distance_annoncee else []),
+                          "metadata": {"client": "nc-noeud", "confirmation": True, "confirmation_mode": mode}})
         print(T(f"nc-noeud : connecté à {self.serveur}.", f"nc-noeud: connected to {self.serveur}."), file=sys.stderr, flush=True)
         garde = asyncio.ensure_future(self.garder(ws))
         try:
@@ -847,6 +1072,8 @@ class Noeud:
                     continue
                 if msg.get("type") == "ping":
                     await ws.envoyer({"type": "pong"})
+                elif msg.get("type") == "confirm_response":
+                    self.distance.recue(msg)
                 elif msg.get("type") == "action" and msg.get("req_id"):
                     t = asyncio.ensure_future(self.traiter(msg))
                     self.taches.add(t)

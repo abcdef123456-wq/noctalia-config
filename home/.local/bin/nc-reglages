@@ -1099,10 +1099,21 @@ REGLAGES = [
     R("NOEUD_JARVIS", "Intelligence artificielle", L("Laisser JARVIS piloter ce PC", "Let JARVIS control this PC"),
       "ouinon", "non",
       L("Attention : JARVIS pourra lancer des commandes, lire ou écrire tes fichiers et voir ton écran.\n"
-        "Chaque action attend ton « Autoriser » dans l'île (3 à 17 s, sinon refus) ; clés et secrets restent interdits.",
+        "Chaque action attend ton « Autoriser » (3 à 32 s, sinon refus) ; clés et secrets restent interdits.",
         "Warning: JARVIS will be able to run commands, read or write your files and see your screen.\n"
-        "Each action waits for your “Allow” in the island (3 to 17 s, otherwise denied); keys and secrets stay off-limits."),
+        "Each action waits for your “Allow” (3 to 32 s, otherwise denied); keys and secrets stay off-limits."),
       groupe="noeud"),
+    # Où dire « Autoriser » : toujours une personne, sur l'écran de ce PC ou à distance (relayé par le serveur)
+    R("NOEUD_CONFIRMATION", "Intelligence artificielle", L("Où autoriser les actions de JARVIS", "Where to allow JARVIS actions"),
+      "choix", "ecran",
+      L("À distance : JARVIS t'envoie la demande ailleurs (par exemple un bouton sur Telegram), pratique quand tu n'es "
+        "pas devant ce PC. Il faut un serveur qui sait le faire. Toujours toi qui décides ; clés et secrets restent interdits.",
+        "Remotely: JARVIS sends you the request elsewhere (for example a button on Telegram), handy when you are not in "
+        "front of this PC. Needs a server that can do it. You always decide; keys and secrets stay off-limits."),
+      [("ecran", L("Sur l'écran de ce PC", "On this PC's screen")),
+       ("distance", L("À distance (téléphone)", "Remotely (phone)")),
+       ("les-deux", L("Les deux : la première réponse compte", "Both: the first answer wins"))],
+      groupe="noeud-confirmation"),
     R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
       L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",
         "Actions without confirmation (music, notification, clipboard read)"), "ouinon", "oui",
@@ -1960,6 +1971,10 @@ def appliquer(groupes, vals=None):
             # JARVIS qui pilote ce PC : le service suit le réglage (activé et lancé, ou arrêté et désactivé)
             quoi = ["enable", "--now"] if vals.get("NOEUD_JARVIS") == "oui" else ["disable", "--now"]
             subprocess.run(["systemctl", "--user", *quoi, "nc-noeud.service"], capture_output=True)
+        elif g == "noeud-confirmation":
+            # Le serveur apprend à la connexion si ce PC accepte la confirmation à distance : on se reconnecte
+            if vals.get("NOEUD_JARVIS") == "oui":
+                subprocess.run(["systemctl", "--user", "try-restart", "nc-noeud.service"], capture_output=True)
         elif g == "curseur":
             appliquer_curseur(vals)
         elif g == "firefox":

@@ -266,23 +266,86 @@ demander.
 - **Coupé par défaut.** Pour l’activer : nc-reglages → Intelligence artificielle → « Laisser JARVIS piloter ce PC »
   (cela démarre ou arrête le service `nc-noeud.service`). Si l’IA du bureau est coupée (`IA_MODE=non`), tout est
   refusé.
-- **Ta confirmation dans l’île** pour ce qui compte : une commande, lire ou écrire un fichier, une capture d’écran,
-  écrire le presse-papiers. Une carte s’affiche avec « Autoriser » ; sans l’île, une notification à boutons. Musique,
+- **Ta confirmation** pour ce qui compte : une commande, lire ou écrire un fichier, une capture d’écran, écrire le
+  presse-papiers. Une personne dit toujours « Autoriser » : il n’existe pas de mode sans confirmation pour ces
+  actions. Par défaut, une carte s’affiche dans l’île ; sans l’île, une notification à boutons. Musique,
   notification, lecture du presse-papiers, verrouillage et liste d’un dossier passent seuls (réglable). Les clés SSH
-  et GPG, les mots de passe des navigateurs, les identifiants, le démarrage automatique et les réglages restent
-  interdits, même confirmés. Chaque demande est notée dans `~/.local/state/noctalia-config/noeud.log`.
-- **Délais : 12 s ou 17 s.** Passé ce délai, la demande est refusée : 12 s pour un fichier, une capture ou le
-  presse-papiers, 17 s pour une action relayée ou une commande. Pourquoi si court ? Le serveur abandonne de son côté
-  et répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. `64523e5` attend 35 s, mais des
-  révisions plus anciennes attendaient 15 à 20 s, et le serveur n’annonce ni son délai ni sa révision. `nc-noeud`
-  garde donc 3 s de marge sous le délai le plus court connu : rien n’est jamais fait trop tard. Un « Autoriser » tardif
-  affiche « Trop tard » et le serveur reçoit un seul refus.
+  et GPG, les mots de passe et données des navigateurs, les identifiants (gh, Claude, Codex, Gemini, OpenCode, cloud,
+  messageries), le serveur JARVIS local, le démarrage automatique et les shells restent interdits, même confirmés ;
+  les fichiers qui lancent des commandes à ta place (Hyprland, uwsm, l’île, `~/.config/nc`, `~/.local/bin`, lanceurs
+  d’applis, git, kitty) se lisent mais ne s’écrivent pas. Couper l’IA (`IA_MODE=non`) ou le pilotage pendant
+  l’attente l’emporte : les deux sont relus juste avant d’exécuter. Chaque demande est notée dans
+  `~/.local/state/noctalia-config/noeud.log` (0600), avec sa décision et d’où elle vient (`autorisé (écran)`,
+  `refusé (distance)`…), jamais un secret.
+- **Délais : 32 s avec `aae5b9b`, 12 s ou 17 s avec un serveur plus ancien.** Le serveur abandonne de son côté et
+  répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. Depuis `aae5b9b`, chaque trame
+  d’action porte son délai :
+  `{"type":"action","req_id":"…","action":"exec","params":{"command":"uname -a","timeout":60.0},"timeout":65.0}`.
+  `nc-noeud` laisse alors `min(timeout − 3, 32)` secondes pour confirmer. Le champ n’est pris que s’il est un nombre
+  fini (pas un booléen), positif et d’au plus une heure ; sinon, ou s’il manque, les délais connus : 12 s pour un
+  fichier, une capture ou le presse-papiers, 17 s pour une action relayée ou une commande (3 s sous le délai le plus
+  court des révisions anciennes, qui n’annoncent rien). Un délai annoncé sous 6 s ne laisse pas le temps de te
+  demander : refus direct. L’exécution elle-même s’arrête aussi 3 s avant l’abandon du serveur : une commande
+  autorisée au bout de 30 s sur 35 a 2 s pour tourner, puis elle est tuée ; s’il reste moins d’1 s, rien n’est fait.
+  Un « Autoriser » tardif affiche « Trop tard » et le serveur reçoit un seul refus.
 - **La clé secrète part seulement dans l’en-tête** `X-Secret-Key`, jamais dans l’adresse. La connexion est en
   `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
   vers un hôte public).
 - **Côté serveur**, dans son `.env` : `ENABLE_TOOL_NODES=1` active le module des nœuds, et `ENABLE_NODE_EXEC=1`
-  autorise en plus les commandes (coupées par défaut depuis `64523e5`). Sans ce second réglage, JARVIS ne peut pas
-  lancer de commande sur ce PC, même si tu l’accepterais.
+  autorise les commandes de l’outil des nœuds (coupées par défaut depuis `64523e5`). D’autres chemins du serveur
+  peuvent encore en envoyer avec la clé secrète : la vraie protection est sur ce PC, où `nc-noeud` demande toujours
+  ton accord et refuse sans réponse.
+- **Le MCP `jarvis-nodes`** (`aae5b9b`) donne à agy des outils pour les nœuds (liste, fichiers, commande,
+  capture). Il sert seulement à agy, le déployeur ne l’installe pas, il utilise la clé principale du serveur, et
+  `nodes_list` envoie la liste des machines Tailscale au modèle. Les actions passent quand même par ta confirmation.
+- **En attente côté serveur** : la capture d’écran reçue n’y est jamais supprimée, le prompt de Whisper (notre
+  `?language=` reste nécessaire pour la dictée) et les filtres de `sudo`.
+
+### Confirmer à distance
+
+Quand tu n’es pas devant ce PC (une tour allumée chez toi, toi sur ton portable ou ton téléphone), la carte de l’île
+expire sans personne pour la voir. nc-reglages → Intelligence artificielle → « Où autoriser les actions de JARVIS » :
+
+| Valeur | Ce qui se passe |
+| --- | --- |
+| `ecran` (par défaut) | Comme avant : la carte de l’île (ou la notification à boutons). Rien ne part au serveur. |
+| `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui doit te la relayer (bouton sur Telegram). |
+| `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
+
+Changer ce réglage relance `nc-noeud` (s’il tourne) : le serveur apprend à la connexion que ce PC sait confirmer à
+distance. Les chemins protégés, `IA_MODE=non` et les délais s’appliquent pareil, même après un « allow ».
+
+Le protocole, sur le même WebSocket `/api/node/ws` :
+
+1. Au `register`, `capabilities` contient `"remote_confirm"` seulement en `distance` ou `les-deux`
+   (`metadata.confirmation_mode` dit lequel). Sans elle, le serveur ne doit rien relayer.
+2. Pour une action sensible, `nc-noeud` envoie :
+   ```json
+   {"type": "confirm_request", "req_id": "7f0c…", "action": "exec",
+    "summary": "exécuter cette commande :\nrm -rf ~/Téléchargements/vieux", "expires_in": 32}
+   ```
+   `req_id` est celui de la trame d’action. `summary` dit exactement ce qui sera fait, dans la langue du PC : la
+   commande entière, le chemin et la taille d’un fichier (jamais son contenu), le texte à copier ; les secrets
+   reconnus (clé du serveur, jetons) y sont remplacés par `•••`, et un résumé de plus de 3 500 caractères n’est pas
+   envoyé (refus, ou la carte seule en `les-deux`). `expires_in` est en secondes entières, arrondi vers le bas.
+3. Le serveur répond, une fois :
+   ```json
+   {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow"}
+   ```
+   `decision` vaut `"allow"` ou `"deny"`. Seul un `"allow"` reçu avant l’échéance, pour ce `req_id` exact, autorise
+   l’action ; une réponse inconnue, en double, tardive ou illisible est ignorée et notée au journal local.
+4. Si la demande se termine sans réponse venue de là (décidée sur l’écran, expirée), `nc-noeud` envoie
+   `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ou désactive les boutons.
+5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
+
+Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe encore upstream**) :
+
+- envoyer `summary` avec deux boutons **Autoriser** / **Refuser** (Telegram), seulement à l’utilisateur autorisé du bot
+  (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans un groupe ; ignorer un clic venu de quelqu’un d’autre ;
+- une seule réponse par `req_id`, et seulement pour un nœud qui a annoncé `remote_confirm` ;
+- faire expirer les boutons au bout de `expires_in` secondes, ou dès `confirm_cancel` : passé ce délai, ne rien
+  envoyer (refus par défaut, `nc-noeud` refuse de toute façon) ;
+- ne jamais répondre `allow` tout seul (ni règle automatique, ni modèle) : c’est une personne qui décide.
 
 ## Attente avant une réponse
 
