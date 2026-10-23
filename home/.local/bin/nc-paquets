@@ -24,6 +24,7 @@ set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/nc"
 fichier="$cache/paquets"
+etat_nc="${XDG_STATE_HOME:-$HOME/.local/state}/nc"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 export LC_ALL=C          # sorties des gestionnaires de paquets en anglais (analysables) ; nos messages passent par t()
 
@@ -84,17 +85,21 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
 # et zypper sont concernés : sans root, nc-paquets lit leurs listes sans les rafraîchir, et une Debian minimale (sans
 # service qui le fait) les garde telles quelles : « à jour » serait faux. La date : le plus récent des fichiers que la
 # synchronisation réécrit (apt : listes InRelease, dossiers lists et partial, update-success-stamp ; zypper : son cache
-# brut). Arch (checkupdates) et Fedora (dnf --refresh) synchronisent eux-mêmes.
+# brut), et le repère que nc-paquets écrit après chaque « apt update » ou « zypper refresh » réussi
+# (~/.local/state/nc/depots-synchro) : apt garde aux listes la date Last-Modified du serveur, et une liste inchangée
+# (« Hit ») n'est pas réécrite ; sans le repère, une stable à jour paraîtrait non synchronisée. Non vérifié sur une
+# vraie Debian ni une vraie openSUSE. Arch (checkupdates) et Fedora (dnf --refresh) synchronisent eux-mêmes.
 age_depots() {
   local recent="" maintenant a="${NC_APT_ETAT:-/var/lib/apt}"
   command -v pacman >/dev/null && return 0
   command -v dnf >/dev/null && return 0
   if command -v apt >/dev/null; then
     recent="$( { find "$a/lists" -maxdepth 1 \( -name '*InRelease' -o -name '*_Release' \) -printf '%T@\n'
-                 find "$a/lists" "$a/lists/partial" "$a/periodic/update-success-stamp" -maxdepth 0 -printf '%T@\n'; } 2>/dev/null |
-               sort -n | tail -1)"
+                 find "$a/lists" "$a/lists/partial" "$a/periodic/update-success-stamp" "$etat_nc/depots-synchro" -maxdepth 0 \
+                   -printf '%T@\n'; } 2>/dev/null | sort -n | tail -1)"
   elif command -v zypper >/dev/null; then
-    recent="$(find "${NC_ZYPP_RAW:-/var/cache/zypp/raw}" -mindepth 1 -maxdepth 3 -printf '%T@\n' 2>/dev/null | sort -n | tail -1)"
+    recent="$( { find "${NC_ZYPP_RAW:-/var/cache/zypp/raw}" -mindepth 1 -maxdepth 3 -printf '%T@\n'
+                 find "$etat_nc/depots-synchro" -maxdepth 0 -printf '%T@\n'; } 2>/dev/null | sort -n | tail -1)"
   fi
   recent="${recent%.*}"
   case "$recent" in ''|*[!0-9]*) return 0 ;; esac
@@ -155,12 +160,15 @@ def lire(f):
 avant, apres = lire(avant_f), lire(apres_f)
 paquets = []
 if avant and apres:               # un relevé vide (outil en échec) ne fait jamais « tout le système mis à jour »
-    v = lambda s: " ".join(sorted({x[0] for x in s if x[0]}))
+    # Plusieurs versions à la fois (les noyaux de rpm) : « avant », la plus récente d'avant ; « après », la plus
+    # récente des nouvelles (ordre naturel : 6.10 après 6.9)
+    naturel = lambda x: [(0, int(m), "") if m.isdigit() else (1, 0, m) for m in re.findall(r"\d+|[^\d]+", x)]
+    v = lambda s: max((x[0] for x in s if x[0]), key=naturel, default="")
     for cle, (src, vs) in apres.items():
         b = avant.get(cle, (src, set()))[1]
         if not vs - b:
             continue              # inchangé, ou seulement retiré (un ancien noyau)
-        av, ap = v(b - vs) or v(b), v(vs - b)
+        av, ap = v(b), v(vs - b)
         if av == ap:
             av = ""               # Flatpak : même version, nouveau commit
         paquets.append(dict(source=src, nom=cle[1].split("//")[0], avant=av, apres=ap))
@@ -204,9 +212,10 @@ for p in d.get("paquets", []):
 PY
 }
 
-# Le minuteur passe chaque heure ; compter seulement s'il est temps (secteur, batterie, Économie, connexion limitée)
-il_est_temps() {
-  local base min=0 dernier maintenant secteur=0 bat=0 s
+# La cadence (minutes) : cad_min, le plus court permis (batterie 3 h, Économie 6 h, connexion limitée 12 h, 0 sinon), et
+# cad_base, la période (MAJ_FREQUENCE, jamais sous cad_min)
+cadence() {
+  local base min=0 secteur=0 bat=0 s
   case "$(reglage MAJ_FREQUENCE)" in 3h) base=180 ;; 6h) base=360 ;; jour) base=1440 ;; *) base=60 ;; esac
   for s in "${NC_POWER_SUPPLY:-/sys/class/power_supply}"/*; do
     [ -r "$s/type" ] || continue
@@ -219,28 +228,42 @@ il_est_temps() {
     "u 1"|"u 3") [ "$min" -lt 720 ] && min=720 ;;
   esac
   [ "$min" -gt "$base" ] && base=$min
+  cad_base=$base; cad_min=$min
+}
+
+# Le minuteur passe chaque heure ; compter seulement s'il est temps (secteur, batterie, Économie, connexion limitée)
+il_est_temps() {
+  local dernier maintenant
+  cadence
   dernier=$(stat -c %Y "$fichier" 2>/dev/null || echo 0); maintenant=$(date +%s)
   # La dernière vérification n'a pas abouti (réseau, dépôt) : $fichier vient d'être redaté, la période entière (jusqu'à
   # 12 h) passerait avant le nouvel essai. Nouvel essai 15 min après l'échec, puis 30, 60… jamais plus espacé que la
-  # période (le plafond)
-  delai_reessai "$base"
+  # période (le plafond), jamais plus serré que la cadence permise (batterie, Économie, connexion limitée)
+  delai_reessai
   if [ -n "$err_delai" ] && [ $((maintenant - err_date)) -ge $((err_delai * 60 - 120)) ]; then return 0; fi
-  [ $((maintenant - dernier)) -ge $((base * 60 - 300)) ]
+  [ $((maintenant - dernier)) -ge $((cad_base * 60 - 300)) ]
+}
+
+# Le délai (minutes) du k-ième nouvel essai de suite ($1) : 15, doublé à chaque échec, entre cad_min et cad_base
+delai_essai() {
+  local d=15 i=1
+  while [ "$i" -lt "${1:-1}" ] && [ "$d" -lt "$cad_base" ]; do d=$((d * 2)); i=$((i + 1)); done
+  [ "$d" -gt "$cad_base" ] && d=$cad_base
+  [ "$d" -lt "$cad_min" ] && d=$cad_min
+  echo "$d"
 }
 
 # Après des échecs de suite (~/.cache/nc/paquets-erreur : date<TAB>sources<TAB>nombre d'échecs de suite) : err_delai, le
-# délai en minutes avant le nouvel essai (15, doublé à chaque échec, $1 au plus : la période normale), err_date (la
-# date du dernier échec) et err_nombre ; err_delai vide sans échec en cours.
+# délai du nouvel essai (delai_essai ; cadence() d'abord), err_date (la date du dernier échec) et err_nombre ; err_delai
+# vide sans échec en cours.
 delai_reessai() {
-  local i=1 plafond="${1:-60}" sources
+  local sources
   err_date=""; err_nombre=0; err_delai=""
   [ -s "$cache/paquets-erreur" ] || return 0
   IFS=$'\t' read -r err_date sources err_nombre < "$cache/paquets-erreur" || true
   case "$err_date" in ''|*[!0-9]*) err_date=""; return 0 ;; esac
   case "$err_nombre" in ''|*[!0-9]*) err_nombre=1 ;; esac
-  err_delai=15
-  while [ "$i" -lt "$err_nombre" ] && [ "$err_delai" -lt "$plafond" ]; do err_delai=$((err_delai * 2)); i=$((i + 1)); done
-  [ "$err_delai" -gt "$plafond" ] && err_delai=$plafond
+  err_delai="$(delai_essai "$err_nombre")"
   return 0
 }
 
@@ -363,29 +386,30 @@ PY
 }
 
 notifier() {  # titre, texte (\n pour les retours à la ligne) ; « Mettre à jour » ouvre le terminal
-  local titre="$1" corps
-  corps="$(printf '%b' "$2")"
-  (
-    if [ "$titre" = "$(t "Système à jour" "System up to date")" ]; then
-      notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update "$titre" "$corps" 2>/dev/null
-    else
-      r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
-        "$titre" "$corps" 2>/dev/null)"
-      [ "$r" = maj ] && exec "$0" mettre-a-jour
-    fi
-  ) 8>&- 9>&- >/dev/null 2>&1 &     # sans les verrous (jusqu'à 1 h d'attente du clic : ils bloqueraient tout le reste)
+  local soi; soi="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  # Sous systemd (le minuteur : nc-paquets.service, Type=oneshot), tout ce qui reste dans le groupe du service est tué
+  # quand le compte finit : la notification qui attend le clic (jusqu'à 1 h) part dans son propre scope. Sans les
+  # verrous (8, 9 : ils bloqueraient tout le reste pendant l'attente)
+  if [ -n "${INVOCATION_ID:-}" ] && command -v systemd-run >/dev/null; then
+    { systemd-run --user --scope --quiet --collect "$soi" notifier-attendre "$1" "$2" ||
+        "$soi" notifier-attendre "$1" "$2"; } 8>&- 9>&- >/dev/null 2>&1 &
+  else
+    "$soi" notifier-attendre "$1" "$2" 8>&- 9>&- >/dev/null 2>&1 &
+  fi
   disown 2>/dev/null || true
 }
 
-# Après un échec du minuteur ($1 : le nombre d'échecs de suite) : un nouvel essai dans 15 min, puis 30, par un minuteur
-# systemd transitoire d'un seul coup ; au-delà, le passage de chaque heure suffit (il_est_temps suit le même délai).
-# Seulement sous systemd (INVOCATION_ID), jamais depuis un terminal ; un essai déjà prévu n'est pas doublé (même nom).
+# Après un échec du minuteur ($1 : le nombre d'échecs de suite) : un nouvel essai après delai_essai (15 min, puis 30…,
+# jamais plus serré que la cadence permise), par un minuteur systemd transitoire d'un seul coup, sur secteur seulement
+# (comme nc-paquets.service) ; à partir d'une heure, le passage de chaque heure suffit (il_est_temps suit le même délai).
+# Seulement sous systemd (INVOCATION_ID), jamais depuis un terminal. Un nom par essai : depuis nc-paquets-reessai-1,
+# systemd refuserait de recréer la même unité
 reessai_plus_tard() {
-  local d=15 i=1
-  while [ "$i" -lt "${1:-1}" ]; do d=$((d * 2)); i=$((i + 1)); done
+  local d
+  cadence; d="$(delai_essai "${1:-1}")"
   [ "$d" -lt 60 ] && [ -n "${INVOCATION_ID:-}" ] && command -v systemd-run >/dev/null || return 0
-  systemd-run --user --quiet --collect --unit=nc-paquets-reessai --on-active="${d}min" --nice=19 \
-    "$(readlink -f "$0" 2>/dev/null || echo "$0")" compter auto >/dev/null 2>&1 || true
+  systemd-run --user --quiet --collect --unit="nc-paquets-reessai-${1:-1}" --on-active="${d}min" --nice=19 \
+    -p ConditionACPower=true "$(readlink -f "$0" 2>/dev/null || echo "$0")" compter auto >/dev/null 2>&1 || true
 }
 
 # Instantané de / avant la mise à jour (MAJ_INSTANTANE, « auto » : seulement sur Btrfs ; « oui » : pareil, mais un
@@ -396,7 +420,6 @@ reessai_plus_tard() {
 # dans /.snapshots : les 3 derniers de nc-paquets gardés, plus celui d'avant la dernière mise à jour réussie (des essais
 # ratés de suite ne le font jamais disparaître). Démarrer dessus depuis GRUB demande grub-btrfs.
 # Code 1 : ne pas faire la mise à jour. instant_nom : l'instantané Btrfs pris (gardé si la mise à jour réussit).
-etat_nc="${XDG_STATE_HOME:-$HOME/.local/state}/nc"
 instant_nom=""
 instantane() {
   local choix_i; choix_i="$(reglage MAJ_INSTANTANE)"
@@ -447,18 +470,23 @@ instantane() {
     printf '%s' "$(t "Continuer la mise à jour sans instantané ? [o/N] " "Go on with the update without a snapshot? [y/N] ")"
     local r=""; read -r r 2>/dev/null || r=""
     case "$r" in o|O|oui|Oui|y|Y|yes|Yes) return 0 ;; esac
-    echo; t "Mise à jour annulée : rien n'a été changé." "Update cancelled: nothing was changed."; echo
-    return 1
+    echo; return 1                 # « Mise à jour annulée » : dit à la fin, avec le recompte
   fi
   t "Instantané impossible : la mise à jour continue sans." "Snapshot failed: the update goes on without it."; echo
   return 0
 }
 
-# Arch, juste après -Sy : ce qui attend dans les dépôts synchronisés et dans l'AUR ; code 1 : pas pu le savoir
+# Arch, AVANT de toucher la vraie base : ce qui attend dans les dépôts (checkupdates synchronise une copie : un « non »
+# à l'instantané ne laisse jamais une base synchronisée sans mise à jour, la mise à jour partielle qu'Arch interdit) et
+# dans l'AUR. Code 1 : pas pu le savoir (sans pacman-contrib, ou checkupdates en échec) : l'instantané, par prudence
 attente_arch() {
   local s c a err=0 e="$cache/.attente-erreurs.$$"
-  s="$(pacman -Qu 2>/dev/null)"; c=$?; [ "$c" -le 1 ] || err=1
-  printf '%s\n' "$s" | grep -v '\[ignored\]' | grep .
+  if command -v checkupdates >/dev/null; then
+    s="$(checkupdates 2>/dev/null)"; c=$?; [ "$c" = 0 ] || [ "$c" = 2 ] || err=1
+    printf '%s\n' "$s" | grep -v '\[ignored\]' | grep .
+  else
+    err=1
+  fi
   if a="$(aur_outil)"; then
     s="$("$a" -Qua --color never 2>"$e")"; c=$?
     [ "$c" = 0 ] || ! grep -qi 'error' "$e" || err=1
@@ -468,17 +496,26 @@ attente_arch() {
   return "$err"
 }
 
-# Ailleurs (dnf, apt, zypper) : l'instantané seulement si le dernier compte attendait quelque chose des dépôts ou de
-# l'AUR (un compte illisible ou incomplet pour les dépôts : l'instantané, par prudence) ; code 1 : ne pas mettre à jour
-avant_maj() {
-  local n
-  n="$(python3 -c 'import json, sys
-d = json.load(open(sys.argv[1])); s = d.get("sources", {})
-print("?" if "depot" in d.get("incomplet", []) else int(s.get("depot", 0)) + int(s.get("aur", 0)))' "$cache/paquets.json" 2>/dev/null)"
-  [ "$n" = 0 ] && return 0
-  instantane && return 0
-  annule=1; return 1
+# dnf (et Nobara), zypper, après la synchronisation : le nombre de paquets à mettre à jour, ou « ? » si on n'a pas pu
+# le savoir (l'instantané, par prudence)
+attente_rpm() {
+  local s c
+  if command -v dnf >/dev/null; then
+    s="$(dnf -q check-update -C 2>/dev/null)"; c=$?
+    case "$c" in 0) echo 0 ;; 100) printf '%s\n' "$s" | awk 'NF == 3 && $1 ~ /\./' | grep -c . ;; *) echo "?" ;; esac
+  else
+    s="$(zypper --non-interactive --no-refresh --xmlout list-updates 2>/dev/null)"; c=$?
+    if [ "$c" = 0 ] || [ "$c" -ge 100 ]; then printf '%s\n' "$s" | grep '<update ' | grep -c 'kind="package"'; else echo "?"; fi
+  fi
 }
+
+# Une étape de la mise à jour : sa sortie d'erreur passe aussi dans $erreurs_f, et l'écran la montre toujours (pacman y
+# écrit ses questions). Un code d'échec sans aucune erreur écrite, et rien d'installé : la réponse « n » à la question
+# du gestionnaire de paquets, une annulation et non un échec
+etape() { { "$@" 2>&1 1>&3 3>&- | tee -a "$erreurs_f" >&2; } 3>&1; }
+
+# La synchronisation des dépôts a réussi (apt update, zypper refresh) : le repère daté que lit age_depots
+synchro_faite() { mkdir -p "$etat_nc" 2>/dev/null && touch "$etat_nc/depots-synchro" 2>/dev/null; return 0; }
 
 action="${1:-}"
 # Noms anglais (nc-packages count | update | check)
@@ -509,7 +546,7 @@ case "$action" in
     # avec le nombre d'échecs de suite (le délai du nouvel essai : delai_reessai)
     if [ -n "$manque" ]; then
       d="$d"$'\n'"$(anciens ${manque//,/ })"
-      delai_reessai 60
+      cadence; delai_reessai
       tmp="$(mktemp "$cache/.paquets-erreur.XXXXXX" 2>/dev/null)" || tmp="$cache/.paquets-erreur.$$"
       printf '%s\t%s\t%s\n' "$(date +%s)" "$manque" "$((err_nombre + 1))" > "$tmp" && mv -f "$tmp" "$cache/paquets-erreur"
       [ "$mode" = auto ] && reessai_plus_tard "$((err_nombre + 1))"
@@ -534,6 +571,16 @@ case "$action" in
       t "Vérification incomplète, pas de réponse : $noms (dernier état gardé)" "Incomplete check, no answer from: $noms (last state kept)" >&2
       echo >&2; exit 1
     fi ;;
+  notifier-attendre)   # interne (notifier) : la notification, et le clic sur « Mettre à jour »
+    titre="${2:-}"; corps="$(printf '%b' "${3:-}")"
+    if [ "$titre" = "$(t "Système à jour" "System up to date")" ]; then
+      notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update "$titre" "$corps" 2>/dev/null
+    else
+      r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
+        "$titre" "$corps" 2>/dev/null)"
+      [ "$r" = maj ] && exec "$0" mettre-a-jour
+    fi
+    exit 0 ;;
   mettre-a-jour)
     exec kitty --class nc-paquets --title "$(t "Mises à jour du système" "System Updates")" "$0" terminal ;;
   terminal)   # dans le terminal ouvert par mettre-a-jour : la mise à jour, puis le recompte
@@ -556,39 +603,62 @@ case "$action" in
     apres_f="$(mktemp "$cache/.installes.XXXXXX" 2>/dev/null)" || apres_f="$cache/.installes-apres.$$"
     installes > "$avant_f"
     rm -f "$cache/paquets-avant.json"          # l'ancien rapport (la liste d'attente d'avant) : plus utilisé
+    erreurs_f="$(mktemp "$cache/.maj-erreurs.XXXXXX" 2>/dev/null)" || erreurs_f="$cache/.maj-erreurs.$$"
+    rien="$(t "Dépôts : rien à mettre à jour." "Repositories: nothing to update.")"
     if command -v pacman >/dev/null; then
-      # Arch : d'abord synchroniser (-Sy), puis, seulement s'il y a quelque chose, l'instantané et la mise à jour
-      # (-Su) : pas d'instantané pour rien (seuls 3 sont gardés). -Sy puis -Su sans rien entre les deux, c'est -Syu.
-      # paru ou yay font les dépôts et l'AUR (ils demandent eux-mêmes le mot de passe)
+      # Arch : ce qui attend, sans toucher la vraie base (attente_arch) ; puis, seulement s'il y a quelque chose,
+      # l'instantané (seuls 3 sont gardés : jamais pour rien) et -Syu d'un seul coup. paru ou yay font les dépôts et
+      # l'AUR (ils demandent eux-mêmes le mot de passe)
       if a="$(aur_outil)"; then outil=("$a"); else outil=(sudo pacman); fi
-      "${outil[@]}" -Sy || noter $?
-      if [ "$code" = 0 ]; then
-        attente="$(attente_arch)"; c=$?
-        if [ -z "$attente" ] && [ "$c" = 0 ]; then
-          t "Dépôts et AUR : rien à mettre à jour." "Repositories and AUR: nothing to update."; echo
-        elif instantane; then "${outil[@]}" -Su || noter $?
+      attente="$(attente_arch)"; c=$?
+      if [ -z "$attente" ] && [ "$c" = 0 ]; then
+        t "Dépôts et AUR : rien à mettre à jour." "Repositories and AUR: nothing to update."; echo
+      elif instantane; then etape "${outil[@]}" -Syu || noter $?
+      else annule=1; fi
+    elif command -v dnf >/dev/null; then
+      # dnf et Nobara : la synchronisation d'abord, pour décider de l'instantané sur un compte à jour
+      if etape sudo dnf makecache --refresh; then
+        attente="$(attente_rpm)"
+        if command -v nobara-sync >/dev/null; then
+          # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
+          if [ "$attente" = 0 ] || instantane; then etape nobara-sync cli || noter $?; else annule=1; fi
+        elif [ "$attente" = 0 ]; then echo "$rien"
+        elif instantane; then etape sudo dnf upgrade || noter $?
         else annule=1; fi
-      fi
-    # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
-    elif command -v nobara-sync >/dev/null; then if avant_maj; then nobara-sync cli || noter $?; fi
-    elif command -v dnf >/dev/null; then if avant_maj; then sudo dnf upgrade --refresh || noter $?; fi
+      else noter $?; fi
     elif command -v apt >/dev/null; then
       # apt : la synchronisation d'abord, puis l'instantané seulement s'il y a quelque chose à mettre à jour
-      sudo apt update || noter $?
-      if [ "$code" = 0 ]; then
+      if etape sudo apt update; then
+        synchro_faite
         if [ "$(LC_ALL=C apt list --upgradable 2>/dev/null | grep -c 'upgradable from')" = 0 ] || instantane; then
-          sudo apt full-upgrade || noter $?
+          etape sudo apt full-upgrade || noter $?
         else annule=1; fi
-      fi
-    # Tumbleweed et Slowroll : mise à jour de la distribution (zypper dup), comme le recommande openSUSE
-    elif command -v zypper >/dev/null; then if avant_maj; then sudo zypper dup || noter $?; fi
+      else noter $?; fi
+    elif command -v zypper >/dev/null; then
+      # Tumbleweed et Slowroll : mise à jour de la distribution (zypper dup), comme le recommande openSUSE ; la
+      # synchronisation d'abord. Sans paquet à mettre à jour, zypper dup passe quand même (il peut changer un
+      # fournisseur), sans instantané
+      if etape sudo zypper refresh; then
+        synchro_faite
+        if [ "$(attente_rpm)" = 0 ] || instantane; then etape sudo zypper dup || noter $?; else annule=1; fi
+      else noter $?; fi
+    elif command -v flatpak >/dev/null; then
+      # Flatpak seul (Silverblue, une distribution que nc-paquets ne connaît pas) : pas un échec
+      t "Paquets du système : gestionnaire non reconnu, seul Flatpak est mis à jour." \
+        "System packages: unrecognized package manager, only Flatpak is updated."; echo
     else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; noter 1; fi
-    if [ "$annule" = 1 ]; then noter 1
-    elif command -v flatpak >/dev/null; then flatpak update || noter $?; fi
+    if [ "$annule" = 0 ] && command -v flatpak >/dev/null; then etape flatpak update || noter $?; fi
     installes > "$apres_f"
+    # Un échec sans aucune erreur écrite et sans rien d'installé : « n » à la question de pacman, apt, dnf ou Flatpak
+    if [ "$code" != 0 ] && cmp -s <(sort "$avant_f") <(sort "$apres_f") &&
+       ! grep -qiE 'error|erreur|fehler|failed|échec|impossible|^E:' "$erreurs_f" 2>/dev/null; then
+      code=0; annule=1
+    fi
+    rm -f "$erreurs_f"
     echo; t "Recompte des mises à jour…" "Recounting updates…"; echo
     incomplet=0
-    if [ "$code" = 0 ]; then "$0" compter local || incomplet=1; else "$0" compter || incomplet=1; fi
+    # Après une mise à jour faite : les dépôts qu'elle vient de synchroniser ; annulée ou en échec : le compte complet
+    if [ "$code" = 0 ] && [ "$annule" = 0 ]; then "$0" compter local || incomplet=1; else "$0" compter || incomplet=1; fi
     # Rapport (de l'IA si elle est permise et joignable) : ce qui a vraiment changé, en clair, dans les réglages → Mises
     # à jour ; aussi quand une partie a échoué (pacman fait, Flatpak en échec), dès qu'il y a eu un changement
     if difference "$avant_f" "$apres_f" "$code" "$incomplet" && [ -x "$HOME/.local/bin/nc-ia" ]; then
@@ -596,23 +666,24 @@ case "$action" in
     fi
     rm -f "$avant_f" "$apres_f"
     # L'instantané d'avant une mise à jour réussie : jamais retiré par le tri des suivants
-    if [ "$code" = 0 ] && [ -n "$instant_nom" ]; then
+    if [ "$code" = 0 ] && [ "$annule" = 0 ] && [ -n "$instant_nom" ]; then
       mkdir -p "$etat_nc" && printf '%s\n' "$instant_nom" > "$etat_nc/instantane-reussi"
     fi
     n=$(head -1 "$fichier" 2>/dev/null || echo 0)
     case "$n" in ''|*[!0-9]*) n=0 ;; esac
-    if [ "$code" != 0 ]; then t "La mise à jour a échoué (code $code)." "The update failed (code $code)."; echo; fi
+    if [ "$code" != 0 ]; then t "La mise à jour a échoué (code $code)." "The update failed (code $code)."; echo
+    elif [ "$annule" = 1 ]; then t "Mise à jour annulée : rien n'a été installé." "Update cancelled: nothing was installed."; echo; fi
     if [ "$incomplet" = 1 ]; then t "Recompte incomplet : relance « nc-paquets verifier » plus tard." "Incomplete recount: run “nc-packages check” later."
     elif [ "$n" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi
     # Alerte Telegram de fin de mise à jour (nc-alertes décide : réglage ALERTES_TELEGRAM, connexion configurée) ;
-    # un échec est dit comme tel (❌), jamais « terminée »
-    if [ -x "$HOME/.local/bin/nc-alertes" ]; then
+    # un échec est dit comme tel (❌), jamais « terminée » ; annulée devant l'écran : rien à envoyer
+    if [ -x "$HOME/.local/bin/nc-alertes" ] && [ "$annule" = 0 ]; then
       if [ "$code" = 0 ]; then "$HOME/.local/bin/nc-alertes" maj "$n" >/dev/null 2>&1 8>&- || true
       else "$HOME/.local/bin/nc-alertes" maj "$n" echec "$code" >/dev/null 2>&1 8>&- || true; fi
     fi
     echo
-    if [ "$code" = 0 ]; then printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"
+    if [ "$code" = 0 ] && [ "$annule" = 0 ]; then printf '%s' "$(t "Terminé. Entrée pour fermer." "Done. Press Enter to close.")"
     else printf '%s' "$(t "Entrée pour fermer." "Press Enter to close.")"; fi
     read -r r 2>/dev/null || true ;;
   *)
