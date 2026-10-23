@@ -804,6 +804,106 @@ else printf 'kernel-core\\t6.1-1\\nkernel-core\\t6.9-1\\nbash\\t5.2-1\\n'; fi
                           "« apt update » réussi par nc-paquets : synchronisé, même si les listes gardent leur vieille date")
 
 
+    # ── Contre-relecture 3 de B1 ──
+    def test_vrais_echecs_jamais_pris_pour_une_annulation(self):
+        """B1R3-P1 : « Mise à jour annulée » cachait de vrais échecs, faute d'un mot d'erreur connu : mot de passe sudo
+        refusé 3 fois (anglais, français), pacman en portugais ou en russe, pacman tué (137). « Annulée » seulement si
+        la sortie d'erreur n'a que des questions et des messages d'abandon connus."""
+        alertes = self.home / ".local/bin/nc-alertes"; alertes.parent.mkdir(parents=True)
+        alertes.write_text('#!/bin/sh\necho "nc-alertes $*" >> "$HOME/appels"\n'); alertes.chmod(0o755)
+        (self.home / "db").write_text("linux 6.1-1\n")
+        # Faux paru : -Syu écrit NC_TEST_ERR sur la sortie d'erreur et sort en 1 (ou se tue : NC_TEST_TUE)
+        (self.home / "bin/paru").write_text('''#!/bin/sh
+echo "paru $*" >> "$HOME/appels"
+case "$1" in
+  -Qua) exit 0 ;;
+  -Syu) printf "%b" "${NC_TEST_ERR:-}" >&2; [ -n "${NC_TEST_TUE:-}" ] && kill -9 $$; exit 1 ;;
+esac
+exit 1
+''')
+        echecs = {
+            "sudo (anglais)": "Sorry, try again.\\nSorry, try again.\\nsudo: 3 incorrect password attempts\\n",
+            "sudo (français)": "Désolé, essayez de nouveau.\\nsudo: 3 saisies de mots de passe incorrectes\\n",
+            "pacman en portugais": "erro: falha ao sincronizar todas as bases de dados\\n",
+            "pacman en russe": "ошибка: не удалось синхронизировать все базы данных\\n",
+            "après la question": ":: Procéder à l'installation ? [O/n] erreur : échec de la transaction\\n",
+        }
+        for nom, err in echecs.items():
+            with self.subTest(nom):
+                (self.home / "appels").unlink(missing_ok=True)
+                r = self.lancer("terminal", NC_TEST_DEPOTS="linux 6.1-1 -> 6.2-1\n", NC_TEST_ERR=err)
+                self.assertIn("La mise à jour a échoué (code 1).", r.stdout)
+                self.assertNotIn("annulée", r.stdout)
+                self.assertIn("nc-alertes maj 1 echec 1", self.appels())
+        (self.home / "appels").unlink()
+        r = self.lancer("terminal", NC_TEST_DEPOTS="linux 6.1-1 -> 6.2-1\n", NC_TEST_TUE="1")
+        self.assertIn("La mise à jour a échoué (code 137).", r.stdout, "tué sans un mot : jamais « annulée »")
+        # Le mot de passe refusé par le sudo de « sudo pacman » (sans AUR) : un échec aussi
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nMAJ_AUR=non\n")
+        sudo = self.home / "bin/sudo"
+        sudo.write_text('#!/bin/sh\necho "Sorry, try again." >&2\necho "sudo: 3 incorrect password attempts" >&2\nexit 1\n')
+        r = self.lancer("terminal", NC_TEST_DEPOTS="linux 6.1-1 -> 6.2-1\n")
+        self.assertIn("La mise à jour a échoué (code 1).", r.stdout)
+        sudo.write_text(FAUX_SUDO)
+        # Les vrais « n » : la question seule (anglais, français), un message d'abandon connu (apt, dnf, Flatpak)
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n")
+        for err in (":: Proceed with installation? [Y/n] ", ":: Procéder à l'installation ? [O/n] \\n",
+                    "Do you want to continue? [Y/n] \\nAbort.\\n", "Is this ok [y/N]: \\nOperation aborted.\\n",
+                    "\\r\\nerror: Aborted by user\\n", "Opération abandonnée par l'utilisateur.\\n", ""):
+            with self.subTest(err):
+                (self.home / "appels").unlink(missing_ok=True)
+                r = self.lancer("terminal", NC_TEST_DEPOTS="linux 6.1-1 -> 6.2-1\n", NC_TEST_ERR=err)
+                self.assertIn("Mise à jour annulée", r.stdout)
+                self.assertNotIn("échoué", r.stdout)
+                self.assertFalse([a for a in self.appels() if a.startswith("nc-alertes")])
+        source = (BIN / "nc-paquets").read_text()
+        self.assertNotIn("error|erreur|fehler|failed", source, "plus de liste de mots d'erreur")
+
+    def test_avertissement_d_une_etape_reussie_n_empeche_pas_l_annulation(self):
+        """B1R3-P1 : seule la sortie d'erreur de l'étape en échec compte (dnf makecache, les « W: » d'apt update
+        écrivent sur la sortie d'erreur et réussissent) : le « n » qui suit reste « annulée »."""
+        d = self.home / "aptbin"; d.mkdir()
+        (d / "apt").write_text('''#!/bin/sh
+echo "apt $*" >> "$HOME/appels"
+case "$1" in
+  update) echo "W: Some index files failed to download. They have been ignored." >&2; exit 0 ;;
+  full-upgrade) printf "Do you want to continue? [Y/n] " >&2; exit 1 ;;
+  list) echo "zsh/stable 5.9-5 amd64 [upgradable from: 5.9-4]" ;;
+esac
+exit 0
+''')
+        (d / "dpkg-query").write_text('#!/bin/sh\nprintf "zsh\\t5.9-4\\n"\n')
+        for nom in ("apt", "dpkg-query"):
+            (d / nom).chmod(0o755)
+        self.seul("aptbin", "sudo", "findmnt", "notify-send")
+        r = self.lancer("terminal", PATH=f"{d}:{self.home / 'sys'}")
+        self.assertIn("apt full-upgrade", self.appels())
+        self.assertIn("Mise à jour annulée", r.stdout, r.stdout + r.stderr)
+        self.assertNotIn("échoué", r.stdout)
+
+    def test_notification_une_seule_fois_si_le_terminal_echoue(self):
+        """B1R3-P2 : sous systemd, un clic sur « Mettre à jour » avec un kitty en échec : le scope rendait ce code, et le
+        repli « || notifier-attendre » remontrait la notification (et rouvrait le terminal)."""
+        import time
+        (self.home / "bin/systemd-run").write_text('''#!/bin/sh
+echo "systemd-run $*" >> "$HOME/appels"
+while [ "${1#-}" != "$1" ]; do shift; done
+"$@"
+''')
+        (self.home / "bin/notify-send").write_text('#!/bin/sh\necho "notif" >> "$HOME/notifs-clic"\necho maj\n')
+        (self.home / "bin/kitty").write_text('#!/bin/sh\necho "kitty $*" >> "$HOME/appels"\nexit "${NC_TEST_KITTY:-0}"\n')
+        for nom in ("systemd-run", "notify-send", "kitty"):
+            (self.home / "bin" / nom).chmod(0o755)
+        for code in ("0", "1"):
+            with self.subTest(kitty=code):
+                for f in ("appels", "notifs-clic", ".cache/nc/paquets-notif.json"):
+                    (self.home / f).unlink(missing_ok=True)
+                self.lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n", INVOCATION_ID="x", NC_TEST_KITTY=code)
+                time.sleep(1.5)                       # la notification part en arrière-plan
+                self.assertEqual((self.home / "notifs-clic").read_text().count("notif"), 1, self.appels())
+                self.assertEqual(len([a for a in self.appels() if a.startswith("kitty")]), 1, self.appels())
+
+
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class LigneMisesAJour(unittest.TestCase):
     def test_page_systeme_passe_de_3_a_0(self):

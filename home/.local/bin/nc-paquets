@@ -17,6 +17,9 @@
 # Le recompte après la mise à jour se fait dans le terminal, avec les dépôts que la mise à jour vient de synchroniser
 # (pacman -Qu, dnf sans --refresh), en quelques secondes, et va au bout même si la fenêtre est fermée avant ; si la
 # mise à jour a échoué (mot de passe, réseau), c'est le compte complet qui est refait, et c'est dit (terminal, Telegram).
+# « Annulée » (la réponse « n ») seulement si rien n'a été installé, le code est sous 128 (pas un processus tué) et
+# l'étape en échec n'a rien écrit d'autre que ses questions et un message d'abandon connu : tout le reste, dans
+# n'importe quelle langue (mot de passe refusé, réseau, pacman en portugais), est un échec.
 # Le rapport (nc-ia rapport-maj systeme) donne ce qui a vraiment changé : les versions installées relevées avant et
 # après (pacman -Q, rpm -qa, dpkg-query, flatpak list), pas la liste d'attente d'avant.
 # Un compte à la fois (verrou), une mise à jour à la fois ; après un échec du minuteur, nouvel essai 15 min plus tard.
@@ -509,10 +512,37 @@ attente_rpm() {
   fi
 }
 
-# Une étape de la mise à jour : sa sortie d'erreur passe aussi dans $erreurs_f, et l'écran la montre toujours (pacman y
-# écrit ses questions). Un code d'échec sans aucune erreur écrite, et rien d'installé : la réponse « n » à la question
-# du gestionnaire de paquets, une annulation et non un échec
-etape() { { "$@" 2>&1 1>&3 3>&- | tee -a "$erreurs_f" >&2; } 3>&1; }
+# Une étape de la mise à jour : l'écran montre toujours sa sortie d'erreur (pacman y écrit ses questions) ; celle d'une
+# étape en échec est gardée dans $erreurs_f (pas celle d'une étape réussie : dnf makecache, les « W: » d'apt update
+# n'empêchent pas de reconnaître le « n » qui suit). Voir seulement_annulee
+etape() {
+  local c=0
+  { "$@" 2>&1 1>&3 3>&- | tee "$erreurs_f.etape" >&2; } 3>&1 || c=$?
+  [ "$c" = 0 ] || cat "$erreurs_f.etape" >> "$erreurs_f" 2>/dev/null || true
+  rm -f "$erreurs_f.etape"
+  return "$c"
+}
+# Les messages d'abandon connus, après un « n » (une ligne entière, majuscules ou non, « error: » devant ou non) :
+# pacman n'écrit rien ; apt « Abort. » ; dnf « Operation aborted. » ; dnf5 « Operation aborted by the user. » ;
+# zypper et Flatpak « Aborted by user » ; et leurs traductions courantes (français, allemand, espagnol, italien,
+# portugais). Une traduction absente d'ici compte comme un échec : du côté sûr
+abandons='abort\.?|aborted\.?|abandon\.?|abbruch\.?|abortado\.?|abortar\.?|interrotto\.?|annulé\.?'
+abandons="$abandons"'|operation (was )?aborted( by (the )?user)?\.?|opération (annulée|abandonnée)( par l.utilisateur)?\.?'
+abandons="$abandons"'|vorgang (abgebrochen|durch (den )?benutzer abgebrochen)\.?|operación (abortada|cancelada)( por el usuario)?\.?'
+abandons="$abandons"'|operazione (annullata|interrotta)( dall.utente)?\.?|operação (abortada|cancelada)( pelo usuário)?\.?'
+abandons="$abandons"'|aborted by (the )?user\.?|annulé par l.utilisateur\.?|vom benutzer abgebrochen\.?'
+# La sortie d'erreur de l'étape en échec ($1) n'a rien d'autre que des lignes vides, des questions (« … [O/n] », la
+# réponse tapée va au terminal, pas ici) et des messages d'abandon connus. Lue en entier, sans grep -q (il
+# s'arrêterait au premier résultat, et pipefail verrait l'échec de celui d'avant). Seul le code 1 du dernier grep
+# (« plus aucune ligne ») vaut « annulée » : une ligne restante (0), un fichier illisible ou un outil absent, un échec
+seulement_annulee() {
+  local contenu reste c=0
+  [ -r "$1" ] || return 1
+  contenu="$(tr '\r' '\n' < "$1")" || return 1
+  reste="$(printf '%s\n' "$contenu" | grep -vE '^[[:space:]]*$' | grep -vE '\[[[:alpha:]]/[[:alpha:]]\]:? *$' |
+    grep -viE "^[[:space:]]*((error|erreur|fehler|errore|erro):[[:space:]]*)?($abandons)[[:space:]]*\$")" || c=$?
+  [ "$c" = 1 ] && [ -z "$reste" ]
+}
 
 # La synchronisation des dépôts a réussi (apt update, zypper refresh) : le repère daté que lit age_depots
 synchro_faite() { mkdir -p "$etat_nc" 2>/dev/null && touch "$etat_nc/depots-synchro" 2>/dev/null; return 0; }
@@ -578,7 +608,9 @@ case "$action" in
     else
       r="$(timeout 3600 notify-send -a "$(t "Mises à jour" "Updates")" -i system-software-update -A maj="$(t "Mettre à jour" "Update")" \
         "$titre" "$corps" 2>/dev/null)"
-      [ "$r" = maj ] && exec "$0" mettre-a-jour
+      # Sans exec, et toujours 0 : un terminal qui n'a pas pu s'ouvrir (kitty en échec) ne fait pas croire à notifier
+      # que le scope n'a pas démarré (il relancerait la notification : affichée deux fois)
+      [ "$r" = maj ] && { "$0" mettre-a-jour || true; }
     fi
     exit 0 ;;
   mettre-a-jour)
@@ -649,9 +681,11 @@ case "$action" in
     else echo "$(t "Gestionnaire de paquets non reconnu." "Unrecognized package manager.")"; noter 1; fi
     if [ "$annule" = 0 ] && command -v flatpak >/dev/null; then etape flatpak update || noter $?; fi
     installes > "$apres_f"
-    # Un échec sans aucune erreur écrite et sans rien d'installé : « n » à la question de pacman, apt, dnf ou Flatpak
-    if [ "$code" != 0 ] && cmp -s <(sort "$avant_f") <(sort "$apres_f") &&
-       ! grep -qiE 'error|erreur|fehler|failed|échec|impossible|^E:' "$erreurs_f" 2>/dev/null; then
+    # « n » à la question de pacman, apt, dnf, zypper ou Flatpak : un code sous 128 (au-delà, un processus tué : 137
+    # pour SIGKILL), rien d'installé (sans cmp : un échec), et rien d'autre que questions et abandon sur la sortie
+    # d'erreur. Plus de liste de mots d'erreur : « Sorry, try again. », un pacman en russe passaient pour un « n »
+    if [ "$code" != 0 ] && [ "$code" -lt 128 ] && cmp -s <(sort "$avant_f") <(sort "$apres_f") &&
+       seulement_annulee "$erreurs_f"; then
       code=0; annule=1
     fi
     rm -f "$erreurs_f"

@@ -7,6 +7,7 @@
 #   nc-maj verifier        y a-t-il une nouvelle version ? Une notification avec « Mettre à jour » (une fois par
 #                          version ; lancé toutes les heures par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non ;
 #                          et par Telegram si « Alertes Telegram » : nc-alertes version, réessayé tant qu'il n'est pas parti)
+#   nc-maj --help          cette aide (rien n'est récupéré ni installé) ; les autres options vont à install.sh
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
@@ -89,6 +90,16 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
   wait || true                                                 # l'envoi Telegram finit avant le service
   exit 0
 fi
+# L'aide : tout de suite, sans rien récupérer (avant, la mise à jour était faite, puis install.sh affichait son aide
+# et sortait en 0 : nc-maj lançait le rapport de l'IA et le bilan d'une installation qui n'avait pas eu lieu)
+for a in "$@"; do
+  case "$a" in
+    -h|--help)
+      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+      echo "$(t "Options d'install.sh (passées telles quelles) : --no-system, --files-only, --restore, --en, --fr" "install.sh options (passed as is): --no-system, --files-only, --restore, --en, --fr")"
+      exit 0 ;;
+  esac
+done
 if [ ! -d "$depot/.git" ]; then
   echo "$(t "Dépôt noctalia-config introuvable (${depot:-chemin inconnu})." "noctalia-config repository not found (${depot:-unknown path}).")" >&2
   echo "$(t "Clone-le puis lance l'installation une fois :" "Clone it, then run the installer once:") git clone https://github.com/abcdef123456-wq/noctalia-config.git ~/noctalia-config && ~/noctalia-config/install.sh" >&2
@@ -153,8 +164,37 @@ sans_commit_a_toi() {
 }
 reecrit=""
 if git merge-base --is-ancestor HEAD "$amont"; then
-  [ "${#identiques[@]}" = 0 ] || rm -f -- "${identiques[@]}"   # remis tels quels par l'avance
-  git merge --ff-only -q "$amont"
+  # Les fichiers identiques sont mis de côté (dans .git, même disque : mv garde droits et dates) juste avant l'avance,
+  # qui les remet tels quels. Si l'avance échoue (verrou index.lock, un dossier de l'amont là où tu as un fichier…),
+  # ils sont remis à leur place, puis une phrase en français et le code 1 : rien n'est perdu
+  cote=""
+  remettre() {   # chaque fichier mis de côté retourne à sa place, si l'avance ne l'y a pas déjà remis
+    local f
+    [ -n "$cote" ] || return 0
+    for f in "${identiques[@]}"; do
+      [ -e "$cote/$f" ] && [ ! -e "$f" ] && mkdir -p -- "$(dirname -- "$f")" && mv -f -- "$cote/$f" "$f"
+    done
+    rm -rf -- "$cote"
+    return 0
+  }
+  trap 'remettre; exit 130' INT TERM HUP                      # interrompu entre les deux : remis aussi
+  erreur=""
+  if [ "${#identiques[@]}" != 0 ]; then
+    cote="$(mktemp -d "$(git rev-parse --absolute-git-dir)/nc-maj-identiques.XXXXXX")" || erreur="mktemp"
+    for f in "${identiques[@]}"; do
+      [ -z "$erreur" ] || break
+      { mkdir -p -- "$cote/$(dirname -- "$f")" && mv -f -- "$f" "$cote/$f"; } || erreur="mv $f"
+    done
+  fi
+  if [ -n "$erreur" ] || ! erreur="$(git merge --ff-only -q "$amont" 2>&1)"; then
+    remettre; trap - INT TERM HUP
+    echo "$(t "La mise à jour n'a pas pu s'appliquer dans $depot : rien n'a changé (tes fichiers sont à leur place)." "The update could not be applied in $depot: nothing changed (your files are where they were).")" >&2
+    erreur="$(printf '%s\n' "$erreur" | sed '/^[[:space:]]*$/d' | head -n 2)"
+    [ -z "$erreur" ] || printf '%s\n' "$erreur" | sed 's/^/  (git : /; s/$/)/' >&2
+    echo "$(t "(un autre git en cours ? Sinon, git merge --ff-only origin/$branche dans $depot pour le détail)" "(another git running? Otherwise, git merge --ff-only origin/$branche in $depot for details)")" >&2
+    exit 1
+  fi
+  remettre; trap - INT TERM HUP
 elif { [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; } || sans_commit_a_toi; then
   # Historique du dépôt réécrit en amont (mêmes changements, nouveaux identifiants) et aucun commit à toi : la nouvelle
   # version est reprise telle quelle ; l'ancienne reste dans une branche de sauvegarde (rien n'est supprimé).
@@ -172,13 +212,14 @@ else
 fi
 apres="$(git rev-parse HEAD)"
 lineaire=0; git merge-base --is-ancestor "$base" "$apres" && lineaire=1
-if [ "$base" = "$apres" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."
+# git --no-pager partout : dans un terminal, git log ouvrait less, et la mise à jour attendait un « q » avant install.sh
+if [ "$base" = "$apres" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git --no-pager log -1 --format=%cd --date=short))."
 elif [ "$lineaire" = 0 ]; then
   # Les identifiants ont changé : les nouveautés sont les sujets absents de l'ancien historique
   echo "$(t "Nouveautés :" "What's new:")"
-  awk 'NR == FNR { vus[$0]; next } !($0 in vus) { print "  • " $0 }' <(git log --format=%s "$base") <(git log --format=%s HEAD)
+  awk 'NR == FNR { vus[$0]; next } !($0 in vus) { print "  • " $0 }' <(git --no-pager log --format=%s "$base") <(git --no-pager log --format=%s HEAD)
 else
-  echo "$(t "Nouveautés :" "What's new:")"; git log --format='  • %s' "$base..HEAD"
+  echo "$(t "Nouveautés :" "What's new:")"; git --no-pager log --format='  • %s' "$base..HEAD"
 fi
 [ -z "$reecrit" ] || echo "$(t "(historique du dépôt réorganisé ; ancienne version gardée dans la branche $reecrit)" "(repository history reorganized; old version kept in branch $reecrit)")"
 # L'annonce de cette version est consommée : si install.sh échoue, nc-maj verifier pourra la refaire
@@ -187,16 +228,19 @@ rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
 # nc-maj verifier repartent de version-installee
 mkdir -p "$(dirname "$en_cours")"; echo "$apres" > "$en_cours"
 code=0; ./install.sh "$@" || code=$?
+# --restore : install.sh remet les anciens fichiers et sort en 0 sans installer la nouvelle version (le marqueur
+# reste) : pas une installation réussie, ni rapport ni bilan
+restaurer=0; for a in "$@"; do [ "$a" = --restore ] && restaurer=1; done
 # 10 : « non » à « On y va ? », rien n'a été installé : ni rapport ni bilan (ce n'est pas une réussite)
 if [ "$code" = 10 ]; then
   echo "$(t "Installation annulée : la nouvelle version est téléchargée, pas installée. Relance nc-maj quand tu veux." "Install cancelled: the new version is downloaded, not installed. Run nc-update again whenever you like.")"
 fi
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
-if [ "$code" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
+if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
   setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$base" "$apres" >/dev/null 2>&1 < /dev/null &
 fi
 # Bilan après la mise à jour : seulement ce qui cloche (rien de plus si tout va bien)
-if [ "$code" = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -x "$HOME/.local/bin/nc-diag" ]; then
+if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -x "$HOME/.local/bin/nc-diag" ]; then
   echo; "$HOME/.local/bin/nc-diag" court
 fi
 exit "$code"

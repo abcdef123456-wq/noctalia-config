@@ -18,6 +18,23 @@ BIN = REPO / "home/.local/bin"
 CLE_A, CLE_O = "sk-ant-test-0123456789abcdef", "sk-oai-test-abcdef0123456789"
 
 
+def charger_nc_ia(nom):
+    """nc-ia chargé dans ce processus, pour ses fonctions. À son chargement, nc-ia met les dossiers d'IA du HOME
+    (~/.local/bin…) en tête de os.environ["PATH"] (pour l'île, voulu chez l'utilisateur) : devant les faux du
+    garde-fou (tests/_isolation.py), pour tous les tests suivants du même processus. Le PATH d'avant est remis."""
+    import importlib.machinery, importlib.util
+    avant = os.environ.get("PATH")
+    try:
+        l = importlib.machinery.SourceFileLoader(nom, str(BIN / "nc-ia"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader(nom, l)); l.exec_module(m)
+    finally:
+        if avant is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = avant
+    return m
+
+
 class Faux(http.server.BaseHTTPRequestHandler):
     """Répond comme les vraies API ; garde chaque requête (chemin, en-têtes, corps) pour les vérifications."""
     requetes = []
@@ -510,9 +527,8 @@ class IA(unittest.TestCase):
 
     def test_masquage_rapide_sur_un_long_mot(self):
         """Revue PRIV-02 : 12 000 caractères sans espace (base64, JSON minifié) prenaient ~10 s (expression quadratique)."""
-        import importlib.machinery, importlib.util, time
-        l = importlib.machinery.SourceFileLoader("ncia_cav", str(BIN / "nc-ia"))
-        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncia_cav", l)); l.exec_module(m)
+        import time
+        m = charger_nc_ia("ncia_cav")
         for t in ("a" * 20000, "a." * 10000, "Q" * 12000 + " secret=zzz"):
             debut = time.monotonic()
             r = m.caviarder(t)
@@ -729,10 +745,16 @@ class IA(unittest.TestCase):
         self.assertNotIn("Reprendre", self.appels())
         self.assertEqual(json.loads((self.home / "state/noctalia-config/dispositions.json").read_text())["code+firefox"]["refus"], 3)
 
+    def test_chargement_garde_le_path_des_tests(self):
+        """B1R3-6 : nc-ia chargé ici mettait ~/.local/bin… devant les faux du garde-fou, pour tous les tests suivants
+        (python3 -m unittest tests.test_ia tests.test_garde_fou échouait)."""
+        avant = os.environ["PATH"]
+        charger_nc_ia("ncia_path")
+        self.assertEqual(os.environ["PATH"], avant)
+        self.assertIn('os.environ["PATH"] = os.pathsep.join(', (BIN / "nc-ia").read_text(), "nc-ia inchangé pour l'utilisateur")
+
     def test_zones_en_arbre_de_decoupes(self):
-        import importlib.machinery, importlib.util
-        l = importlib.machinery.SourceFileLoader("ncia_zones", str(BIN / "nc-ia"))
-        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncia_zones", l)); l.exec_module(m)
+        m = charger_nc_ia("ncia_zones")
         self.assertEqual(m.arbre_zones({"a": (0, 0, 100, 100)}), {"f": "a"})
         self.assertEqual(m.arbre_zones({"a": (0, 0, 50, 100), "b": (50, 0, 50, 60), "c": (50, 60, 50, 40)}),
                          {"sens": "v", "r": 0.5, "a": {"f": "a"}, "b": {"sens": "h", "r": 0.6, "a": {"f": "b"}, "b": {"f": "c"}}})

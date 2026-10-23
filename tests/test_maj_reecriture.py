@@ -3,7 +3,8 @@ version, garde l'ancienne dans une branche de sauvegarde et ne montre que les vr
 toi, rien n'est touché ; un fichier non suivi à toi n'est jamais écrasé ; après un install.sh resté à moitié, la
 relance reprend depuis la dernière version installée ; GitHub injoignable : une phrase, code 2, sans délai fixe (ssh
 peut poser sa question) ; git cherry lu sans tube (SIGPIPE) ; un fichier non suivi identique ne bloque pas ; marqueur
-d'installation en cours ; un « non » à « On y va ? » n'est pas une réussite. Vrais dépôts git dans un dossier
+d'installation en cours ; un « non » à « On y va ? » n'est pas une réussite ; un fichier identique mis de côté est
+remis si l'avance échoue ; jamais de pager ; --help et --restore ne sont pas des installations réussies. Vrais dépôts git dans un dossier
 temporaire (HOME et XDG_* compris), jamais le vrai ~/.config/nc/depot."""
 import os
 from pathlib import Path
@@ -472,6 +473,96 @@ class Reecriture(unittest.TestCase):
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 10, r.stdout + r.stderr)
         self.assertIn("Installation annulée", r.stdout)
+        time.sleep(0.3)
+        self.assertFalse((self.home / "appels").exists(), "ni rapport ni bilan")
+        self.assertTrue((self.home / ".config/nc/installation-en-cours").exists(), "pas installée : marqueur gardé")
+
+
+    # ── Contre-relecture 3 de B1 ──
+    def fichier_identique_et_publie(self):
+        (self.ami / "docs").mkdir()
+        (self.ami / "docs/perso.md").write_text("perso\n")
+        (self.ami / "docs/perso.md").chmod(0o640)
+        (self.auteur / "docs").mkdir()
+        self.ajouter(self.auteur, "docs/perso.md", "perso\n", "Le même fichier, publié")
+
+    def test_fichier_identique_remis_si_l_avance_echoue_verrou(self):
+        """B1R3-M3 : le fichier identique était retiré avant git merge --ff-only, puis perdu si l'avance échouait
+        (ici un verrou index.lock laissé par un autre git)."""
+        self.fichier_identique_et_publie()
+        self.git("-C", str(self.auteur), "push", "-q", "origin", "main")
+        avant = self.git("-C", str(self.ami), "rev-parse", "HEAD")
+        (self.ami / ".git/index.lock").write_text("")
+        r = self.nc_maj("--no-system")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual((self.ami / "docs/perso.md").read_text(), "perso\n", "remis à sa place")
+        self.assertEqual((self.ami / "docs/perso.md").stat().st_mode & 0o777, 0o640, "tel quel (droits gardés)")
+        self.assertIn("La mise à jour n'a pas pu s'appliquer", r.stderr)
+        self.assertIn("rien n'a changé", r.stderr)
+        self.assertEqual(self.git("-C", str(self.ami), "rev-parse", "HEAD"), avant)
+        self.assertNotIn("installé", r.stdout)
+        self.assertEqual(list((self.ami / ".git").glob("nc-maj-identiques.*")), [], "rien ne reste de côté")
+
+    def test_fichier_identique_remis_si_l_avance_echoue_conflit(self):
+        """B1R3-M3 : avance refusée par git (un fichier à toi là où l'amont apporte un dossier) : le fichier identique
+        retiré juste avant est remis, et la phrase est en français (plus l'erreur brute de git seule)."""
+        self.fichier_identique_et_publie()
+        (self.ami / "notes").write_text("mes notes\n")
+        (self.auteur / "notes").mkdir()
+        self.ajouter(self.auteur, "notes/lisez-moi", "x\n", "Dossier notes")
+        self.git("-C", str(self.auteur), "push", "-q", "origin", "main")
+        r = self.nc_maj("--no-system")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual((self.ami / "docs/perso.md").read_text(), "perso\n")
+        self.assertEqual((self.ami / "notes").read_text(), "mes notes\n")
+        self.assertIn("La mise à jour n'a pas pu s'appliquer", r.stderr)
+        self.assertNotIn("installé", r.stdout)
+
+    def test_nouveautes_sans_pager(self):
+        """B1R3-M4 : dans un terminal, git log ouvrait le pager (less) avant install.sh : la mise à jour attendait « q »."""
+        self.commit(self.auteur, "Nouveauté A")
+        self.commit(self.auteur, "Nouveauté B")
+        self.git("-C", str(self.auteur), "push", "-q", "origin", "main")
+        faux = self.d / "pager"; faux.mkdir()
+        journal = self.d / "pager.log"
+        for nom in ("less", "more"):
+            (faux / nom).write_text(f'#!/bin/sh\necho "{nom} $*" >> "{journal}"\ncat\n'); (faux / nom).chmod(0o755)
+        env = dict(self.env, PATH=f"{faux}:{self.env['PATH']}", SHELL="/bin/sh")
+        for v in ("PAGER", "GIT_PAGER", "LESS"):
+            env.pop(v, None)
+        r = subprocess.run(["script", "-qec", f"bash {NC_MAJ} --no-system", "/dev/null"], stdin=subprocess.DEVNULL,
+                           env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("• Nouveauté B", r.stdout)
+        self.assertFalse(journal.exists(), "aucun pager")
+        texte = NC_MAJ.read_text()
+        bloc = texte[texte.index('apres="$(git rev-parse HEAD)"'):texte.index("./install.sh")]
+        sans = [l for l in bloc.splitlines() if ("git log" in l or "git diff" in l) and not l.lstrip().startswith("#")]
+        self.assertEqual(sans, [], "chaque git log ou git diff de la mise à jour : git --no-pager")
+
+    def test_aide_et_restauration_ni_rapport_ni_bilan(self):
+        """B1R3-M5 : nc-maj --help faisait la mise à jour, puis install.sh affichait son aide et sortait en 0 (sans
+        noter la version) : nc-maj lançait le rapport de l'IA et nc-diag. --restore : même chose."""
+        self.commit(self.auteur, "Nouveauté")
+        self.git("-C", str(self.auteur), "push", "-q", "origin", "main")
+        avant = self.git("-C", str(self.ami), "rev-parse", "HEAD")
+        bin_ = self.home / ".local/bin"; bin_.mkdir(parents=True)
+        for nom in ("nc-ia", "nc-diag"):
+            (bin_ / nom).write_text(f'#!/bin/sh\necho {nom} >> "$HOME/appels"\n'); (bin_ / nom).chmod(0o755)
+        env = dict(self.env, HYPRLAND_INSTANCE_SIGNATURE="x")
+        for opt in ("--help", "-h"):
+            r = subprocess.run(["bash", str(NC_MAJ), opt], env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("nc-maj verifier", r.stdout)
+            self.assertNotIn("installé\n", r.stdout, "install.sh pas lancé")
+            self.assertEqual(self.git("-C", str(self.ami), "rev-parse", "HEAD"), avant, "l'aide ne met rien à jour")
+        # --restore : install.sh restaure et sort en 0 sans noter la version
+        (self.auteur / "install.sh").write_text('#!/bin/sh\necho "restauré $*"\nexit 0\n')
+        self.commit(self.auteur, "Encore")
+        self.git("-C", str(self.auteur), "push", "-q", "origin", "main")
+        r = subprocess.run(["bash", str(NC_MAJ), "--restore"], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("restauré --restore", r.stdout)
         time.sleep(0.3)
         self.assertFalse((self.home / "appels").exists(), "ni rapport ni bilan")
         self.assertTrue((self.home / ".config/nc/installation-en-cours").exists(), "pas installée : marqueur gardé")
