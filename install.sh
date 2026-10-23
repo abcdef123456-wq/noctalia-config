@@ -1012,6 +1012,9 @@ fi
 
 # Emplacement de ce dépôt, pour nc-maj (mise à jour en une commande)
 if [ -d "$REPO/.git" ]; then mkdir -p "$HOME/.config/nc"; printf '%s\n' "$REPO" > "$HOME/.config/nc/depot"; fi
+# La version installée, notée seulement une fois l'installation menée à bout (juste avant « Terminé ») : après un
+# échec à moitié, nc-maj repart d'elle (nouveautés, rapport, annonce) au lieu de dire « Déjà à jour »
+noter_version() { [ -d "$REPO/.git" ] && git -C "$REPO" rev-parse HEAD > "$HOME/.config/nc/version-installee" 2>/dev/null || true; }
 
 # Clé de chiffrement de l'historique du presse-papiers : Noctalia ne la crée pas elle-même (64 caractères hexadécimaux
 # aléatoires, lisible par toi seul). Générée une fois sur ce PC, jamais versionnée ni écrasée.
@@ -1025,7 +1028,7 @@ if [ ! -s "$KEY" ]; then
   fi
 fi
 
-[ "$MODE" = files ] && { say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; info "$(t "Assistant distant facultatif : nc-assistant configurer (URL et clé du serveur)." "Optional remote assistant: nc-assistant configurer (server URL and key).")"; exit 0; }
+[ "$MODE" = files ] && { noter_version; say "$(t "Terminé (fichiers seulement)." "Done (files only).")"; info "$(t "Les configs du terminal (zsh) et de Neovim n'ont pas été touchées : relance sans --files-only pour les installer." "The terminal (zsh) and Neovim configs weren't touched: run again without --files-only to install them.")"; info "$(t "Assistant distant facultatif : nc-assistant configurer (URL et clé du serveur)." "Optional remote assistant: nc-assistant configurer (server URL and key).")"; exit 0; }
 
 # ── 3. Terminal : zsh + oh-my-zsh + powerlevel10k ─────────────────────────────
 say "$(t "3. Terminal : zsh, oh-my-zsh, powerlevel10k (invite sur deux lignes, suggestions, couleurs)" "3. Terminal: zsh, oh-my-zsh, powerlevel10k (two-line prompt, suggestions, colors)")"
@@ -1795,6 +1798,7 @@ if [ "$MODE" = full ]; then
   fi
 fi
 
+noter_version
 say "$(t "Terminé" "Done")"
 info "$(t "Ferme puis rouvre ta session pour que tout s'applique (choisis « Hyprland (uwsm-managed) » sur l'écran de connexion)." "Log out and back in for everything to apply (pick “Hyprland (uwsm-managed)” on the login screen).")"
 info "$(t "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fonds d'écran · Super+Entrée terminal (liste complète : RACCOURCIS.md)." "Shortcuts: Super+/ shows the cheat sheet · Super+R search · Super+W wallpapers · Super+Enter terminal (full list: RACCOURCIS.md).")"

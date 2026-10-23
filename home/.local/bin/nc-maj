@@ -10,6 +10,13 @@
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
+# La dernière version qu'install.sh a menée à bout (il la note seulement s'il va jusqu'au bout), sinon HEAD. Après un
+# install.sh qui échoue à moitié, HEAD a déjà avancé : c'est cette version-là qui sert de base aux nouveautés, au
+# rapport et à l'annonce, pour que la relance ne dise pas « Déjà à jour » en perdant ce qui n'a pas été installé
+base_installee() {
+  local v; v="$(cat "$HOME/.config/nc/version-installee" 2>/dev/null || true)"
+  [ -n "$v" ] && git rev-parse -q --verify "$v^{commit}" 2>/dev/null || git rev-parse HEAD
+}
 
 if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   grep -qx 'MAJ_VERIFIER=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
@@ -22,8 +29,9 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   branche="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
   distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$branche" 2>/dev/null | cut -f1)" || distant=""
   [ -n "$distant" ] || exit 0                                  # hors ligne
-  # À jour : la version publiée est déjà ici (ou plus ancienne que la tienne)
-  git merge-base --is-ancestor "$distant" HEAD 2>/dev/null && exit 0
+  base="$(base_installee)"
+  # À jour : la version publiée est déjà installée ici (ou plus ancienne que la tienne)
+  git merge-base --is-ancestor "$distant" "$base" 2>/dev/null && exit 0
   annonce="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
   telegram="${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-telegram"   # annoncée par JARVIS (Telegram), seulement si partie
   deja_bureau=0; [ "$(cat "$annonce" 2>/dev/null)" = "$distant" ] && deja_bureau=1
@@ -36,9 +44,9 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   nouveau=""
   if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$branche" 2>/dev/null; then
     # Les sujets absents de l'historique d'ici (après une réécriture en amont, les identifiants ont changé)
-    sujets="$(awk 'NR == FNR { vus[$0]; next } !($0 in vus)' <(git log --format=%s HEAD) <(git log --format=%s FETCH_HEAD) 2>/dev/null || true)"
+    sujets="$(awk 'NR == FNR { vus[$0]; next } !($0 in vus)' <(git log --format=%s "$base") <(git log --format=%s FETCH_HEAD) 2>/dev/null || true)"
     # Rien de nouveau à voir (seulement l'historique réécrit en amont : mêmes fichiers, mêmes sujets) : pas d'annonce
-    if [ -z "$sujets" ] && git diff --quiet HEAD FETCH_HEAD 2>/dev/null; then
+    if [ -z "$sujets" ] && git diff --quiet "$base" FETCH_HEAD 2>/dev/null; then
       echo "$distant" > "$annonce"; echo "$distant" > "$telegram"; exit 0
     fi
     nouveau="$(printf '%s\n' "$sujets" | python3 -c '
@@ -87,16 +95,34 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 avant="$(git rev-parse HEAD)"
+base="$(base_installee)"                                       # = avant, sauf après un install.sh resté à moitié
 branche="$(git rev-parse --abbrev-ref HEAD)"
 ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null || true)"   # l'amont avant ce fetch
-git fetch -q origin "$branche"
+# Un délai : un réseau qui pend ne bloque pas le terminal sans fin ; en cas d'échec, une phrase plutôt que l'erreur brute
+if ! timeout 120 git fetch -q origin "$branche" >/dev/null 2>&1; then
+  echo "$(t "GitHub injoignable (réseau coupé ou trop lent ?) : mise à jour annulée, rien n'a changé. Réessaie plus tard." "GitHub unreachable (network down or too slow?): update cancelled, nothing changed. Try again later.")" >&2
+  echo "$(t "(git fetch origin dans $depot pour le détail)" "(git fetch origin in $depot for details)")" >&2
+  exit 2
+fi
 amont="$(git rev-parse "refs/remotes/origin/$branche")"
+# Un fichier non suivi à toi au même chemin qu'un fichier que la mise à jour apporte ou change : refus en le nommant
+# (git reset --hard l'écraserait sans un mot, git merge s'arrêterait sur une erreur brute)
+caches="$(git ls-files -o | grep -Fx -f <(git diff --name-only HEAD "$amont") || true)"
+if [ -n "$caches" ]; then
+  echo "$(t "Le dépôt $depot contient des fichiers à toi que la mise à jour écraserait : mise à jour annulée pour ne pas les perdre." "The repository $depot has files of yours the update would overwrite: update cancelled so they are not lost.")" >&2
+  printf '%s\n' "$caches" | sed 's/^/  /' >&2
+  echo "$(t "(déplace-les hors du dépôt, puis relance nc-maj)" "(move them out of the repository, then run nc-maj again)")" >&2
+  exit 1
+fi
 reecrit=""
 if git merge-base --is-ancestor HEAD "$amont"; then
   git merge --ff-only -q "$amont"
-elif [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; then
+elif { [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; } || ! git cherry "$amont" HEAD | grep -q '^+'; then
   # Historique du dépôt réécrit en amont (mêmes changements, nouveaux identifiants) et aucun commit à toi : la nouvelle
-  # version est reprise telle quelle ; l'ancienne reste dans une branche de sauvegarde (rien n'est supprimé)
+  # version est reprise telle quelle ; l'ancienne reste dans une branche de sauvegarde (rien n'est supprimé).
+  # « Aucun commit à toi » : HEAD était dans l'amont d'avant ce fetch, ou chacun de ses commits a son équivalent dans
+  # le nouvel amont (git cherry, aucun « + ») : l'amont d'avant ne suffit pas, un git pull ou un éditeur a pu
+  # récupérer la réécriture plus tôt
   reecrit="nc-sauvegarde-$(date +%Y%m%d)"
   git rev-parse -q --verify "refs/heads/$reecrit" >/dev/null && reecrit="$reecrit-$(date +%H%M%S)"
   git branch "$reecrit" HEAD
@@ -106,20 +132,24 @@ else
   echo "$(t "(git log origin/$branche..HEAD pour les voir)" "(git log origin/$branche..HEAD to see them)")" >&2
   exit 1
 fi
-if [ "$avant" = "$(git rev-parse HEAD)" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."
-elif [ -n "$reecrit" ]; then
+apres="$(git rev-parse HEAD)"
+lineaire=0; git merge-base --is-ancestor "$base" "$apres" && lineaire=1
+if [ "$base" = "$apres" ]; then echo "$(t "Déjà à jour" "Already up to date") ($(git log -1 --format=%cd --date=short))."
+elif [ "$lineaire" = 0 ]; then
   # Les identifiants ont changé : les nouveautés sont les sujets absents de l'ancien historique
   echo "$(t "Nouveautés :" "What's new:")"
-  awk 'NR == FNR { vus[$0]; next } !($0 in vus) { print "  • " $0 }' <(git log --format=%s "$avant") <(git log --format=%s HEAD)
-  echo "$(t "(historique du dépôt réorganisé ; ancienne version gardée dans la branche $reecrit)" "(repository history reorganized; old version kept in branch $reecrit)")"
+  awk 'NR == FNR { vus[$0]; next } !($0 in vus) { print "  • " $0 }' <(git log --format=%s "$base") <(git log --format=%s HEAD)
 else
-  echo "$(t "Nouveautés :" "What's new:")"; git log --format='  • %s' "$avant..HEAD"
+  echo "$(t "Nouveautés :" "What's new:")"; git log --format='  • %s' "$base..HEAD"
 fi
+[ -z "$reecrit" ] || echo "$(t "(historique du dépôt réorganisé ; ancienne version gardée dans la branche $reecrit)" "(repository history reorganized; old version kept in branch $reecrit)")"
+# L'annonce de cette version est consommée : si install.sh échoue, nc-maj verifier pourra la refaire
+rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
 ./install.sh "$@"
 code=$?
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
-if [ "$code" = 0 ] && [ "$avant" != "$(git rev-parse HEAD)" ] && [ -z "$reecrit" ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
-  setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$avant" "$(git rev-parse HEAD)" >/dev/null 2>&1 < /dev/null &
+if [ "$code" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
+  setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$base" "$apres" >/dev/null 2>&1 < /dev/null &
 fi
 # Bilan après la mise à jour : seulement ce qui cloche (rien de plus si tout va bien)
 if [ "$code" = 0 ] && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -x "$HOME/.local/bin/nc-diag" ]; then
