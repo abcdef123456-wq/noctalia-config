@@ -14,8 +14,8 @@ Le serveur doit déjà être déployé séparément. Ce dépôt ne lance pas le 
 
 La connexion se configure dans une **fenêtre « Connexion JARVIS »** : bouton « Configurer la connexion » du cockpit ou
 de l'île, ligne « Connexion à l'assistant JARVIS » de la fenêtre des réglages (Super + Alt + ,), ou `nc-assistant
-configurer` (aussi depuis `nc-settings assistant`). Elle demande l'adresse du gateway (éventuellement avec un préfixe de
-chemin), sa clé `X-Secret-Key` (masquée ; laissée vide, celle qui est enregistrée est gardée), le `USER_ID` et le délai
+configurer` (`nc-settings assistant` ouvre la fenêtre des réglages sur cette ligne ; par SSH ou sans île, il pose les
+questions dans le terminal). Elle demande l'adresse du gateway (éventuellement avec un préfixe de chemin), sa clé `X-Secret-Key` (masquée ; laissée vide, celle qui est enregistrée est gardée), le `USER_ID` et le délai
 d'attente, prévient en direct d'une adresse locale ou d'un HTTP en clair, et **teste la connexion** avec les valeurs
 saisies avant de les enregistrer (en ligne, latence, version, adresse publique annoncée). La clé passe à `nc-assistant`
 par son entrée standard, jamais en argument, et n'est jamais relue ni affichée.

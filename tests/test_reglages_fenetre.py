@@ -127,6 +127,7 @@ class Fenetre(unittest.TestCase):
         a = self.appels(attendre="kitty")
         self.assertFalse(any(l.startswith(("systemctl", "qs")) for l in a), a)
         self.assertEqual([l.split(" ", 1)[0] for l in a], ["notify-send", "kitty"])
+        self.assertTrue(a[-1].endswith("/nc-reglages terminal"), a)       # l'écran texte exprès, pas la fenêtre
 
     def test_e_section(self):
         # Nom français ou anglais, sans accent : l'île reçoit le nom affiché de la section
@@ -149,10 +150,11 @@ class Fenetre(unittest.TestCase):
 
     def test_f_repli_sur_la_meme_section(self):
         # Sans l'île : l'écran du terminal, sur les raccourcis ou les nouveautés (comme avant « Tout voir »)
+        # (« terminal » : sinon nc-reglages, lancé dans kitty, retenterait la fenêtre)
         (self.faux / "qs").unlink()
         self.lancer(None, "Raccourcis")
         a = self.appels(attendre="kitty")
-        self.assertTrue(a[-1].startswith("kitty --class nc-reglages -e ") and a[-1].endswith("/nc-reglages raccourcis"), a)
+        self.assertTrue(a[-1].startswith("kitty --class nc-reglages -e ") and a[-1].endswith("/nc-reglages terminal Raccourcis"), a)
         (self.home / "appels").unlink()
         self.lancer(None, "Nouveautés")
         a = self.appels(attendre="kitty")

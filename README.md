@@ -165,8 +165,8 @@ service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même
 
 ### Tes raccourcis
 
-Le plus simple : `nc-raccourci` (ou `nc-reglages`, section Raccourcis). Tous les raccourcis y sont listés ; Entrée sur
-l'un d'eux pour changer ses touches (tu appuies sur la nouvelle combinaison) ou le désactiver, « Ajouter un raccourci »
+Le plus simple : `nc-reglages raccourcis` (ou `nc-raccourci`) : la section Raccourcis de la fenêtre des réglages (de
+l'écran texte par SSH ou sans île). Tous les raccourcis y sont listés ; Entrée sur l'un d'eux pour changer ses touches (tu appuies sur la nouvelle combinaison) ou le désactiver, « Ajouter un raccourci »
 pour en créer un. En ligne de commande :
 
 ```bash
@@ -303,9 +303,10 @@ nc-sauvegarde # tes réglages dans un fichier (restaurer FICHIER pour les remett
 nc-claude     # les IA dans l'île (étapes, fin, demandes, lui écrire) : Claude Code, opencode, Codex, Gemini CLI, Cursor, Copilot, Qwen, Kiro, Amp, Antigravity ; installer IA / retirer IA / diag
 nc-diag       # vérifie toute l'installation ; nc-diag rapport : le bilan copié, à envoyer pour avoir de l'aide
 nc-maj        # récupère la dernière version depuis GitHub, puis ne refait que ce qui a changé
-nc-reglages   # tes réglages, aux flèches : île et Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres,
-              # fonds d'écran, énergie, son et luminosité, clavier et souris, veille et couvercle, terminal,
-              # captures, raccourcis — gardés à chaque mise à jour
+nc-reglages   # tes réglages, dans la fenêtre (aux flèches par SSH, sans île, ou nc-reglages terminal) : île et
+              # Spotlight, apparence, animations, lumière nocturne, barre et dock, fenêtres, fonds d'écran, énergie,
+              # son et luminosité, clavier et souris, veille et couvercle, terminal, captures, raccourcis — gardés à
+              # chaque mise à jour
 nc-anim liste # les animations du bouton d'arrêt (nc-anim NOM pour en voir une) ;
               # nc-anim nouvelle NOM crée la tienne dans ~/.config/nc/animations
 ```

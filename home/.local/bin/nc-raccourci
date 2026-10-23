@@ -538,7 +538,7 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     try:
         if not a:
-            # Le menu des raccourcis est dans l'écran de réglages (section Raccourcis)
+            # Le menu des raccourcis est dans les réglages (section Raccourcis) : la fenêtre, sinon l'écran texte
             if sys.stdin.isatty():
                 os.execv(os.path.join(BIN, "nc-reglages"), ["nc-reglages", "raccourcis"])
             cmd_list()

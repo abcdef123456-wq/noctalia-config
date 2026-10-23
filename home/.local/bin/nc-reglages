@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""nc-reglages : les réglages de noctalia-config, dans le terminal, aux flèches.
+"""nc-reglages (aussi nc-settings) : les réglages de noctalia-config, dans la fenêtre de l'île ou dans le terminal.
 
-  nc-reglages                     écran des réglages
-  nc-reglages raccourcis          directement les raccourcis clavier
-  nc-reglages assistant           configurer la connexion de l'assistant distant (URL et clé)
+  nc-reglages                     la fenêtre des réglages ; l'écran texte (aux flèches) par SSH, en console sans
+                                  bureau graphique, sans île ou si l'île ne répond pas
+  nc-reglages raccourcis          pareil, directement sur les raccourcis clavier
+  nc-reglages assistant           pareil, sur la connexion à l'assistant JARVIS (section Agents IA) ; sans la fenêtre,
+                                  l'URL et la clé se saisissent dans le terminal
   nc-reglages assistant verifier  tester la connexion distante (réseau, clé, TLS, runner)
+  nc-reglages terminal [SECTION]  l'écran texte, exprès, même devant le bureau graphique (aussi : tui)
   nc-reglages fenetre [SECTION]   la fenêtre graphique des réglages (île ; aussi Super + Alt + , et l'appli Réglages),
-                                  ouverte sur SECTION si donnée (ex. Raccourcis, Nouveautés) ; sans île, cet écran-ci
+                                  ouverte sur SECTION si donnée (ex. Raccourcis, Nouveautés) ; sans île, l'écran
+                                  texte dans un terminal
   nc-reglages liste               tous les réglages et leur valeur
   nc-reglages catalogue           les réglages et les raccourcis en JSON (ce que lit la fenêtre graphique)
   nc-reglages raccourci JSON      un changement de raccourci de la fenêtre graphique (changer, desactiver, reactiver,
@@ -18,7 +22,7 @@
   nc-reglages reset [CLE]         revenir à la valeur de la config (tous les réglages sans CLE)
   nc-reglages appliquer           réécrire ce qui en dépend (lancé par les mises à jour)
 
-Dans l'écran : ↑ ↓ pour choisir, ← → pour changer la valeur (appliquée tout de suite), Entrée pour saisir ou
+Dans l'écran texte : ↑ ↓ pour choisir, ← → pour changer la valeur (appliquée tout de suite), Entrée pour saisir ou
 ouvrir, r pour remettre la valeur de la config, Tab pour passer des sections aux réglages, q pour quitter.
 Tes réglages sont gardés dans ~/.config/nc/reglages.conf (seulement ce que tu changes), tes raccourcis dans
 ~/.config/nc/raccourcis.conf : les mises à jour (nc-maj) ne les touchent jamais. Chaque partie de la config lit
@@ -75,12 +79,18 @@ def T(fr, en):
     return en if EN else fr
 
 
-USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the arrow keys.
+USAGE_EN = """nc-settings (also nc-reglages): noctalia-config settings, in the island's window or in the terminal.
 
-  nc-settings                     settings screen
-  nc-settings shortcuts           straight to keyboard shortcuts
-  nc-settings assistant           configure the remote assistant connection (URL and key)
+  nc-settings                     the settings window; the text screen (arrow keys) over SSH, on a console without
+                                  a graphical desktop, without the island or when the island does not respond
+  nc-settings shortcuts           the same, straight to keyboard shortcuts
+  nc-settings assistant           the same, on the JARVIS assistant connection (AI Agents section); without the
+                                  window, the URL and key are typed in the terminal
   nc-settings assistant verify    test the remote connection (network, key, TLS, runner)
+  nc-settings terminal [SECTION]  the text screen, on purpose, even at the graphical desktop (also: tui)
+  nc-settings window [SECTION]    the graphical settings window (island; also Super + Alt + , and the Settings app),
+                                  opened on SECTION if given (e.g. Shortcuts, What's New); without the island, the
+                                  text screen in a terminal
   nc-settings list                all settings and their values
   nc-settings graphics-mode       change graphics mode (Hybrid ↔ Discrete): confirmation in the island, otherwise here
   nc-settings get KEY             a setting's value
@@ -89,7 +99,7 @@ USAGE_EN = """nc-settings: noctalia-config settings, in the terminal, with the a
   nc-settings apply               rewrite what depends on them (run by updates)
   nc-settings news                what's new in the latest updates of the config
 
-On the screen: ↑ ↓ to choose, ← → to change the value (applied right away), Enter to type or open,
+On the text screen: ↑ ↓ to choose, ← → to change the value (applied right away), Enter to type or open,
 r to restore the config's value, Tab to switch between sections and settings, q to quit.
 Your settings are kept in ~/.config/nc/reglages.conf (only what you change), your shortcuts in
 ~/.config/nc/raccourcis.conf: updates (nc-update) never touch them. Every part of the config reads
@@ -2072,10 +2082,12 @@ def couper(t, w):
     return t if len(t) <= w else t[:max(0, w - 1)] + "…"
 
 
-def configurer_assistant():
-    """Saisie privée par le client : URL et clé ne passent jamais dans reglages.conf ni dans les arguments."""
+def configurer_assistant(terminal=False):
+    """Saisie privée par le client : URL et clé ne passent jamais dans reglages.conf ni dans les arguments. `terminal` :
+    les questions dans le terminal, sans essayer la fenêtre « Connexion JARVIS » de l'île."""
     try:
-        return subprocess.run([sys.executable, os.path.join(BIN, "nc-assistant"), "configurer"]).returncode
+        return subprocess.run([sys.executable, os.path.join(BIN, "nc-assistant"), "configurer",
+                               *(["--terminal"] if terminal else [])]).returncode
     except OSError:
         return 1
 
@@ -3119,20 +3131,32 @@ def section_demandee(nom):
     return None
 
 
+def fenetre_ouverte(section=None):
+    """Demande à l'île sa fenêtre des réglages (sur `section`, nom français de SECTIONS) ; si elle ne répond pas, un
+    redémarrage (ile_reparer) et un second essai. Rend True si la fenêtre est ouverte ; aucun repli ici."""
+    nom = nom_section(section) if section else ""
+    etat = ile_appel_reglages(5, nom)                    # premier essai : l'île peut être occupée au démarrage
+    if etat == "ok":
+        return True
+    return etat != "absente" and ile_reparer() and ile_appel_reglages(2, nom) == "ok"
+
+
+def bureau_graphique():
+    """Une session graphique sur ce PC (WAYLAND_DISPLAY ou HYPRLAND_INSTANCE_SIGNATURE), et pas par SSH : la fenêtre
+    s'ouvrirait sur l'écran du PC, loin de celui qui tape."""
+    e = os.environ
+    return bool(e.get("WAYLAND_DISPLAY") or e.get("HYPRLAND_INSTANCE_SIGNATURE")) \
+        and not (e.get("SSH_CONNECTION") or e.get("SSH_TTY"))
+
+
 def fenetre_graphique(section=None):
     """nc-reglages fenetre [SECTION] : la fenêtre graphique vit dans l'île Quickshell. Si l'île ne répond pas (arrêtée,
     ou tournant encore avec l'ancienne config après une mise à jour), un redémarrage, puis un second essai ; sinon une
     notification et l'écran des réglages dans un terminal (aussi sans Quickshell : openSUSE, Debian sans qs compilé).
     C'est le seul endroit qui ouvre encore l'écran du terminal tout seul : les touches, menus et boutons du bureau
     passent tous par ici (tests/test_portes_reglages.py)."""
-    nom = nom_section(section) if section else ""
-    etat = ile_appel_reglages(5, nom)                    # premier essai : l'île peut être occupée au démarrage
-    if etat == "ok":
+    if fenetre_ouverte(section):
         return 0
-    if etat != "absente" and ile_reparer():
-        etat = ile_appel_reglages(2, nom)
-        if etat == "ok":
-            return 0
     try:                                                 # avant le terminal, plus de silence
         subprocess.run(["notify-send", "-a", "noctalia-config", "-i", "preferences-system",
                         T("L'île ne répond pas : réglages ouverts dans le terminal. Diagnostic : nc-diag",
@@ -3143,12 +3167,12 @@ def fenetre_graphique(section=None):
     terminal = shutil.which("kitty")
     if not terminal:
         return 1
-    # Repli : l'écran du terminal, sur la même section quand il sait l'ouvrir
+    # Repli : l'écran du terminal (« terminal », sinon nc-reglages retenterait la fenêtre), sur la même section
     cmd = [os.path.join(BIN, "nc-reglages")]
-    if section == "Raccourcis":
-        cmd.append("raccourcis")
-    elif section == "Nouveautés":
+    if section == "Nouveautés":
         cmd = ["sh", "-c", '"$0" nouveautes | less -R', cmd[0]]
+    else:
+        cmd += ["terminal"] + ([section] if section else [])
     subprocess.Popen([terminal, "--class", "nc-reglages", "-e", *cmd],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return 0
@@ -3160,8 +3184,6 @@ def cli(a):
         code, message = verifier_assistant()
         print(message, file=sys.stdout if code == 0 else sys.stderr)
         sys.exit(code)
-    if a[0] == "assistant" and len(a) == 1:
-        sys.exit(configurer_assistant())
     if a[0] in ("nouveautes", "nouveautés", "news"):
         if maj_disponible():
             print(T("Une nouvelle version est disponible : nc-maj pour l'installer.\n",
@@ -3247,13 +3269,44 @@ def cli(a):
                    "nc-settings: unknown command or setting (nc-settings help, nc-settings list)"))
 
 
+# Commandes qui ouvrent la fenêtre en session graphique (sur cette section), l'écran texte sinon
+PORTES_FENETRE = {(): None, ("raccourcis",): "Raccourcis", ("shortcuts",): "Raccourcis",
+                  ("assistant",): "Agents IA (coucou)"}
+
+
+def main(args):
+    """nc-reglages, nc-reglages raccourcis, nc-reglages assistant : la fenêtre des réglages (sur sa section) quand on
+    est devant le bureau graphique et que l'île répond ; sinon l'écran texte comme avant (SSH, console, sans île :
+    openSUSE). nc-reglages terminal (ou tui) : l'écran texte, exprès."""
+    porte = tuple(args) in PORTES_FENETRE
+    if porte and bureau_graphique():
+        if fenetre_ouverte(PORTES_FENETRE[tuple(args)]):
+            print(T("Réglages ouverts dans la fenêtre", "Settings opened in the window"))
+            return 0
+        print(T("L'île ne répond pas : réglages dans le terminal. Diagnostic : nc-diag",
+                "The island is not responding: settings in the terminal. Diagnosis: nc-diag"), file=sys.stderr)
+    if args[:1] == ["assistant"] and len(args) == 1:
+        return configurer_assistant(terminal=True)       # saisie de l'URL et de la clé, dans le terminal
+    if porte or args[:1] in (["terminal"], ["tui"]):
+        section = 0
+        if args[:1] in (["terminal"], ["tui"]) and len(args) > 1:
+            nom = section_demandee(" ".join(args[1:]))
+            if not nom:
+                sys.exit(T(f"nc-reglages : section inconnue : {' '.join(args[1:])} (sections : {', '.join(SECTIONS)})",
+                           f"nc-settings: unknown section: {' '.join(args[1:])} (sections: "
+                           f"{', '.join(SECTIONS_EN.get(s, s) for s in SECTIONS)})"))
+            section = SECTIONS.index(nom)
+        elif porte and args:                             # nc-reglages raccourcis
+            section = SECTIONS.index("Raccourcis")
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            cli(["liste"])                               # pas d'écran (tube, script) : la liste
+        else:
+            tui(section)
+        return 0
+    cli(args)
+    return 0
+
+
 if __name__ == "__main__":
     locale.setlocale(locale.LC_ALL, "")
-    args = sys.argv[1:]
-    if not args or args[0] in ("raccourcis", "shortcuts"):
-        if not sys.stdin.isatty() or not sys.stdout.isatty():
-            cli(["liste"])
-        else:
-            tui(SECTIONS.index("Raccourcis") if args else 0)
-    else:
-        cli(args)
+    sys.exit(main(sys.argv[1:]))

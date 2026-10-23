@@ -47,8 +47,9 @@ BIN = os.path.expanduser("~/.local/bin")
 
 # (commande, exemple, explication) — rangées par usage
 A_TAPER = [
-    ("nc-reglages", "nc-reglages fenetre", "Tous les réglages : en fenêtre graphique avec recherche (fenetre, Super + Alt + ,), ou aux flèches dans le terminal : île, apparence, animations, énergie, clavier, veille, "
-                                   "terminal, raccourcis… Gardés à chaque mise à jour."),
+    ("nc-reglages", "nc-reglages", "Tous les réglages, dans la fenêtre avec recherche (aussi Super + Alt + ,) ; aux flèches dans le terminal par SSH, sans île "
+                                   "ou avec nc-reglages terminal : île, apparence, animations, énergie, clavier, veille, terminal, raccourcis… "
+                                   "Gardés à chaque mise à jour."),
     ("nc-raccourci", "nc-raccourci", "Tes raccourcis clavier : changer les touches, en désactiver, en ajouter."),
     ("nc-maj", "nc-maj", "Met la config à jour depuis GitHub (ne refait que ce qui a changé)."),
     ("nc-diag", "nc-diag rapport", "Vérifie toute l'installation et dit quoi faire si quelque chose cloche ; "
@@ -137,8 +138,9 @@ ANGLAIS = {
     "nc-assistant": ("nc-assistant configurer", "Remote personal assistant: server URL and key, kitty chat "
                      "(Super + Shift + A), questions, daily briefing; nc-assistant verifier tests the connection "
                      "(network, key, TLS, runner); no local model."),
-    "nc-reglages": ("nc-settings", "Every setting, with the arrow keys: island, appearance, animations, power, keyboard, "
-                                   "sleep, terminal, shortcuts… Kept across updates."),
+    "nc-reglages": ("nc-settings", "Every setting, in the window with search (also Super + Alt + ,); with the arrow keys in "
+                                   "the terminal over SSH, without the island or with nc-settings terminal: island, appearance, "
+                                   "animations, power, keyboard, sleep, terminal, shortcuts… Kept across updates."),
     "nc-raccourci": ("nc-shortcut", "Your keyboard shortcuts: change keys, disable some, add new ones."),
     "nc-maj": ("nc-update", "Updates the config from GitHub (only redoes what changed)."),
     "nc-diag": ("nc-diag report", "Checks the whole installation and tells you what to do if something is wrong; "
