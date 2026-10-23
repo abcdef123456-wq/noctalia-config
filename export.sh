@@ -185,11 +185,35 @@ HOME_FILES=(
 )
 
 copy_list() { # copy_list DEST_PREFIX fichier...
-  local dest="$1"; shift
+  local dest="$1" rel base installe; shift
   for rel in "$@"; do
-    [ -e "$HOME/$rel" ] || { echo "$(t "absent, ignoré : ~/$rel" "missing, skipped: ~/$rel")"; continue; }
+    base="$REPO/home/$rel"
+    installe="$HOME/$rel"
+    # Le dépôt peut avoir reçu des composants pas encore installés sur ce PC. Conserver cette base avant de
+    # superposer l'installation : une absence dans ~ n'est pas une demande de supprimer un fichier du dépôt.
+    if [ -e "$base" ] || [ -L "$base" ]; then
+      mkdir -p "$dest/$(dirname "$rel")"
+      cp -a "$base" "$dest/$rel"
+    fi
+    if [ ! -e "$installe" ] && [ ! -L "$installe" ]; then
+      if [ -e "$base" ] || [ -L "$base" ]; then
+        echo "$(t "gardé depuis le dépôt (absent de ~) : $rel" "kept from the repository (missing from ~): $rel")"
+      else
+        echo "$(t "absent, ignoré : ~/$rel" "missing, skipped: ~/$rel")"
+      fi
+      continue
+    fi
     mkdir -p "$dest/$(dirname "$rel")"
-    cp -a "$HOME/$rel" "$dest/$rel"
+    if [ -d "$installe" ] && [ ! -L "$installe" ] && [ -d "$dest/$rel" ] && [ ! -L "$dest/$rel" ]; then
+      # Aussi les ajouts à l'intérieur d'un répertoire déjà installé (nouvelle page de l'île, par exemple).
+      cp -a --remove-destination "$installe/." "$dest/$rel/"
+    else
+      if [ -d "$dest/$rel" ] && [ ! -L "$dest/$rel" ]; then
+        echo "$(t "Export refusé : type incompatible pour $rel (dossier dans le dépôt)." "Export refused: incompatible type for $rel (repository directory).")" >&2
+        return 1
+      fi
+      cp -a --remove-destination "$installe" "$dest/$rel"
+    fi
   done
 }
 
