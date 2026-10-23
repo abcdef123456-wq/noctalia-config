@@ -1193,6 +1193,66 @@ if "$HOME/.local/bin/nc-firefox" profil >/dev/null 2>&1; then
   fi
 fi
 
+# ── 3d. npm : paquets globaux dans ~/.local ──────────────────────────────────
+# Codex, Gemini CLI, Claude Code et OpenCode se mettent à jour seuls par « npm install -g » : installés avec sudo dans
+# le préfixe du système (/usr, /usr/local), ils échouent alors en EACCES. Avec prefix=~/.local, npm installe sans sudo
+# et les commandes vont dans ~/.local/bin, déjà en tête du PATH (zsh, bash, session uwsm). Rien n'est fait sans « oui »
+# (sans terminal : réponse par défaut, non), sudo n'est jamais appelé : la copie du système, tu la retires toi-même.
+npm_ecrivable() { # npm_ecrivable PRÉFIXE -> vrai si npm peut y installer sans sudo (PRÉFIXE/lib/node_modules et PRÉFIXE/bin)
+  local d c
+  for d in "$1/lib/node_modules" "$1/bin"; do
+    c="$d"; while [ ! -e "$c" ] && [ "$c" != / ]; do c="$(dirname "$c")"; done
+    [ -w "$c" ] || return 1
+  done
+}
+npm_proprietaire() { # npm_proprietaire DOSSIER -> paquet de la distribution qui le possède (rien s'il vient de « sudo npm »)
+  local p=""
+  have pacman && p="$(pacman -Qqo "$1" 2>/dev/null | head -1)"
+  [ -z "$p" ] && have dpkg-query && p="$(dpkg-query -S "$1" 2>/dev/null | head -1 | cut -d: -f1)"
+  [ -z "$p" ] && have rpm && p="$(rpm -qf --qf '%{NAME}\n' "$1" 2>/dev/null | head -1)" || true
+  printf '%s' "$p"
+}
+if have npm; then
+  npm_pref="$(sonder 20s "npm config get prefix" npm config get prefix | tail -1 || true)"
+  if [ "${npm_pref#/}" = "$npm_pref" ]; then
+    warn "$(t "npm ne répond pas (Node trop ancien pour cette version de npm ?) : nc-diag le vérifie." "npm doesn't respond (Node too old for this npm version?): nc-diag checks it.")"
+  elif ! npm_ecrivable "$npm_pref"; then
+    say "$(t "3d. npm : paquets globaux dans ~/.local, sans sudo" "3d. npm: global packages in ~/.local, without sudo")"
+    # Les IA installées par « sudo npm » dans ce préfixe (pas celles d'un paquet de la distribution, mises à jour avec le système)
+    npm_ias=()
+    for p in @openai/codex @google/gemini-cli @anthropic-ai/claude-code opencode-ai; do
+      [ -f "$npm_pref/lib/node_modules/$p/package.json" ] || continue
+      proprio="$(npm_proprietaire "$npm_pref/lib/node_modules/$p")"
+      if [ -n "$proprio" ]; then
+        info "$(t "$p : paquet $proprio de ta distribution, mis à jour avec le système." "$p: $proprio package from your distribution, updated with the system.")"
+      else
+        npm_ias+=("$p")
+      fi
+    done
+    info "$(t "npm installe ses paquets globaux dans $npm_pref, où tu ne peux pas écrire : Codex, Gemini CLI, Claude Code ou OpenCode ne peuvent pas s'y mettre à jour seuls (erreur EACCES)." "npm installs its global packages in $npm_pref, where you can't write: Codex, Gemini CLI, Claude Code or OpenCode can't update themselves there (EACCES error).")"
+    if ask "$(t "Installer désormais les paquets globaux de npm dans ~/.local (npm config set prefix ~/.local, sans sudo) ?" "Install npm's global packages in ~/.local from now on (npm config set prefix ~/.local, without sudo)?")" n; then
+      if npm config set prefix "$HOME/.local" && npm_ecrivable "$HOME/.local"; then
+        hash -r
+        ok "$(t "npm installe maintenant dans ~/.local (commandes dans ~/.local/bin)." "npm now installs in ~/.local (commands in ~/.local/bin).")"
+        for p in ${npm_ias[@]+"${npm_ias[@]}"}; do
+          if ask "$(t "$p est dans $npm_pref : le réinstaller dans ~/.local, sans sudo (npm install -g $p) ?" "$p is in $npm_pref: reinstall it in ~/.local, without sudo (npm install -g $p)?")" n; then
+            if npm install -g --prefix "$HOME/.local" "$p"; then
+              ok "$(t "$p installé dans ~/.local : il pourra se mettre à jour seul." "$p installed in ~/.local: it can update itself.")"
+              info "$(t "Ancienne copie du système, à retirer toi-même :" "Old system copy, to remove yourself:") sudo npm uninstall -g --prefix $npm_pref $p"
+            else
+              warn "$(t "$p non réinstallé ; la copie de $npm_pref reste en place." "$p not reinstalled; the copy in $npm_pref stays in place.")"
+            fi
+          fi
+        done
+      else
+        warn "$(t "Préfixe de npm non changé." "npm prefix not changed.")"
+      fi
+    else
+      info "$(t "Rien n'est changé. Pour le faire plus tard : npm config set prefix ~/.local" "Nothing changed. To do it later: npm config set prefix ~/.local")$([ ${#npm_ias[@]} -gt 0 ] && printf ' ; npm install -g %s' "${npm_ias[*]}")"
+    fi
+  fi
+fi
+
 # ── 4. Services de la session ────────────────────────────────────────────────
 say "$(t "4. Services de ta session" "4. Your session's services")"
 # nc-noeud.service (JARVIS pilote ce PC) n'est jamais activé ici : seulement par nc-reglages → Intelligence artificielle

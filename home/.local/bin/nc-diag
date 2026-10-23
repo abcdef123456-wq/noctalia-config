@@ -363,6 +363,7 @@ def verifier(b):
         b.avert(T("aucune police « Nerd Font » : icônes du terminal en carrés", "no “Nerd Font” font: terminal icons show as squares"),
                 T("relance install.sh (étape du terminal)", "run install.sh again (terminal step)"))
     neovim(b)
+    npm_node(b)
 
     # ── Intelligence artificielle (nc-ia) : sans réseau, sans clé affichée ──
     b.titre(T("Intelligence artificielle", "Artificial intelligence"))
@@ -449,6 +450,123 @@ def neovim(b):
         a_, b_ = ".".join(map(str, ver)), ".".join(map(str, NVIM_MIN))
         b.avert(T(f"Neovim trop ancien pour la config ({a_} < {b_})", f"Neovim too old for the config ({a_} < {b_})"),
                 T("relance install.sh, qui propose la version officielle", "run install.sh again; it offers the official release"))
+
+
+# Versions de Node que demande npm 12 (champ « engines » de npm 12.2.1) : sert si celui du npm installé est illisible
+NPM12_NODE = "^22.22.2 || ^24.15.0 || >=26.0.0"
+# CLI d'IA installées par npm : elles se mettent à jour seules par « npm install -g »
+NPM_IAS = ("@openai/codex", "@google/gemini-cli", "@anthropic-ai/claude-code", "opencode-ai")
+NPM_IAS_PROGS = ("codex", "gemini", "claude", "opencode")
+
+
+def _version(texte):
+    m = re.search(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", texte or "")
+    return tuple(int(x or 0) for x in m.groups()) if m else None
+
+
+def _satisfait(version, plage):
+    """Plage semver simple (« ^22.22.2 || >=26 », ~, >, <, =) : vrai, faux, ou None si elle n'est pas lisible."""
+    for alt in plage.split("||"):
+        tous = True
+        for c in alt.split():
+            m = re.fullmatch(r"(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?(?:-[0-9A-Za-z.]+)?", c)
+            if not m:
+                return None
+            op, maj = m[1] or "", int(m[2])
+            mi = int(m[3]) if m[3] and m[3].isdigit() else None
+            pa = int(m[4]) if m[4] and m[4].isdigit() else None
+            base = (maj, mi or 0, pa or 0)
+            if op == "^":
+                haut = (maj + 1, 0, 0) if maj or mi is None else (0, mi + 1, 0)
+                ok = base <= version < haut
+            elif op == "~":
+                ok = base <= version < ((maj, mi + 1, 0) if mi is not None else (maj + 1, 0, 0))
+            elif op in (">=", ">", "<=", "<"):
+                ok = {">=": version >= base, ">": version > base, "<=": version <= base, "<": version < base}[op]
+            else:
+                n = 1 if mi is None else (2 if pa is None else 3)
+                ok = version[:n] == base[:n]
+            tous = tous and ok
+        if tous:
+            return True
+    return False
+
+
+def _ecrivable(chemin):
+    while not os.path.exists(chemin) and os.path.dirname(chemin) != chemin:
+        chemin = os.path.dirname(chemin)
+    return os.access(chemin, os.W_OK)
+
+
+def _paquet_proprio(chemin):
+    """Le paquet de la distribution qui possède ce dossier ; vide s'il vient de « sudo npm install -g »."""
+    for cmd in (["pacman", "-Qqo", chemin], ["dpkg-query", "-S", chemin], ["rpm", "-qf", "--qf", "%{NAME}\n", chemin]):
+        if a(cmd[0]):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip().splitlines()[0].split(":")[0]
+    return ""
+
+
+def npm_node(b):
+    """npm 12 sur un Node trop ancien, et les CLI d'IA de npm qui ne peuvent pas se mettre à jour seules (installées avec
+    sudo dans /usr ou /usr/local). Sans npm, ou quand tout va bien : rien à dire."""
+    npm = shutil.which("npm")
+    if not npm:
+        return
+    # Version de npm et Node qu'il demande : dans son package.json (sans lancer npm), sinon « npm --version »
+    npmv, plage = None, ""
+    d = os.path.dirname(os.path.realpath(npm))
+    for _ in range(4):
+        try:
+            with open(os.path.join(d, "package.json"), encoding="utf-8") as f:
+                p = json.load(f)
+            if p.get("name") == "npm":
+                npmv, plage = _version(p.get("version")), str((p.get("engines") or {}).get("node") or "")
+                break
+        except (OSError, ValueError, AttributeError):
+            pass
+        d = os.path.dirname(d)
+    if not npmv:
+        v, _ = sortie([npm, "--version"], 10)   # la ligne de la version seule : un npm mal assorti avertit en plus
+        m = re.search(r"^v?\d+\.\d+\.\d+\s*$", v, re.M)
+        npmv = _version(m[0]) if m else None
+    nodev = _version(sortie(["node", "--version"])[0]) if a("node") else None
+    if npmv and nodev and npmv[0] >= 12:
+        ok = _satisfait(nodev, plage) if plage else None
+        if ok is None:
+            plage, ok = NPM12_NODE, _satisfait(nodev, NPM12_NODE)
+        if not ok:
+            nv, pv = ".".join(map(str, nodev)), ".".join(map(str, npmv))
+            b.avert(T(f"npm récent, mais Node trop ancien : mets Node à jour (npm {pv} demande Node {plage}, Node {nv} installé)",
+                      f"recent npm, but Node too old: update Node (npm {pv} needs Node {plage}, Node {nv} installed)"),
+                    T("paquet nodejs de ta distribution (Fedora : nodejs24) ou nodejs.org ; sinon, un npm fait pour ce Node",
+                      "your distribution's nodejs package (Fedora: nodejs24) or nodejs.org; otherwise, an npm made for this Node"))
+    # CLI d'IA du PATH dans un préfixe de npm où l'on ne peut pas écrire (hors paquet de la distribution)
+    vues = set()
+    for prog in NPM_IAS_PROGS:
+        chemin = shutil.which(prog)
+        if not chemin:
+            continue
+        reel = os.path.realpath(chemin)
+        m = re.match(r"(.+)/lib/node_modules/((?:@[^/]+/)?[^/]+)/", reel)
+        if not m or m[2] not in NPM_IAS or m[2] in vues:
+            continue
+        pref, paquet = m[1], m[2]
+        vues.add(paquet)
+        if _ecrivable(os.path.join(pref, "lib/node_modules")) and _ecrivable(os.path.join(pref, "bin")):
+            continue
+        if _paquet_proprio(os.path.join(pref, "lib/node_modules", paquet)):
+            continue   # paquet de la distribution : mis à jour avec le système
+        b.avert(T(f"la CLI {prog} ({paquet}) est dans {pref}, où tu ne peux pas écrire : elle ne pourra pas se mettre à jour seule",
+                  f"the {prog} CLI ({paquet}) is in {pref}, where you can't write: it won't be able to update itself"),
+                T(f"npm config set prefix ~/.local ; npm install -g {paquet} ; puis, quand tu veux : "
+                  f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh le propose)",
+                  f"npm config set prefix ~/.local; npm install -g {paquet}; then, whenever you like: "
+                  f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh offers it)"))
 
 
 def energie_processeur(b, bats):
