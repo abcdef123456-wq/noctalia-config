@@ -171,6 +171,46 @@ class NcDock(unittest.TestCase):
         self.assertEqual(r.returncode, 3)
         self.assertEqual(b.etat.read_text(encoding="utf-8"), etat)
 
+    def test_dock_ecrit_dans_une_chaine_multiligne(self):
+        # Une ligne « [dock] » dans le texte multiligne d'un autre réglage n'est pas la table [dock] : nc-dock lit et
+        # change le vrai dock, et ce texte reste tel quel (contre-relecture de Codex, DOCK-R1)
+        b = self.b
+        for guillemets in ('"""', "'''"):
+            with self.subTest(guillemets=guillemets):
+                etat = (f'config_version = 15\n\n[autre]\ntexte = {guillemets}\n[dock]\npinned = ["leurre"]\n{guillemets}\n\n'
+                        '[dock]\npinned = ["firefox"]\n')
+                b.etat.write_text(etat, encoding="utf-8")
+                self.assertEqual(b.liste(), ["firefox"])
+                self.assertEqual(b.dock("epingler", "gimp").returncode, 0)
+                self.assertEqual(b.etat.read_text(encoding="utf-8"),
+                                 etat.replace('pinned = ["firefox"]', 'pinned = ["firefox", "gimp"]'))
+
+    def test_format_mal_compris_jamais_ecrit(self):
+        # pinned donné en clé pointée (dock.pinned = …) : nc-dock ne le voit pas ; ajouter une table [dock] ferait un
+        # fichier que Noctalia refuserait. Vérifié par tomllib (Python 3.11 et plus) : rien n'est écrit
+        try:
+            import tomllib  # noqa: F401
+        except ImportError:
+            self.skipTest("tomllib (Python 3.11 et plus)")
+        b = self.b
+        etat = 'config_version = 15\ndock.pinned = ["kitty"]\n'
+        b.etat.write_text(etat, encoding="utf-8")
+        r = b.dock("epingler", "gimp")
+        self.assertEqual(r.returncode, 3, r.stdout)
+        self.assertEqual(b.etat.read_text(encoding="utf-8"), etat)
+
+    def test_sans_verrou_rien_n_est_ecrit(self):
+        # Verrou impossible à prendre : deux nc-dock pourraient s'effacer l'un l'autre, donc rien n'est écrit (DOCK-R2)
+        b = self.b
+        bloque = b.r / "pas-un-dossier"
+        bloque.write_text("")
+        b.env["XDG_RUNTIME_DIR"] = str(bloque)
+        r = b.dock("epingler", "gimp")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("verrou", r.stderr)
+        self.assertFalse((b.config / "zz-dock.toml").exists())
+        self.assertEqual(b.appels(), [])
+
     def test_monter_descendre(self):
         b = self.b
         r = b.dock("descendre", "firefox")

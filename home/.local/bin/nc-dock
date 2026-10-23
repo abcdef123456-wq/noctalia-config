@@ -119,12 +119,53 @@ def _tableau(texte, i):
     return None
 
 
+def _dans_chaines(texte):
+    """Débuts de ligne qui tombent DANS une chaîne TOML multiligne (entre trois guillemets ou trois apostrophes) : une
+    ligne « [dock] » écrite dans le texte d'un autre réglage n'est pas une table (sinon nc-dock lirait et réécrirait ce
+    texte, pas le dock)."""
+    res, i, n = set(), 0, len(texte)
+    while i < n:
+        c = texte[i]
+        if texte.startswith(('"""', "'''"), i):
+            fin_delim = texte[i:i + 3]
+            j = i + 3
+            while j < n and not texte.startswith(fin_delim, j):
+                j += 2 if fin_delim == '"""' and texte[j] == "\\" else 1
+            k = texte.find("\n", i, j)
+            while k >= 0:
+                res.add(k + 1)
+                k = texte.find("\n", k + 1, j)
+            i = j + 3
+            while i < n and texte[i] == fin_delim[0]:      # quatre ou cinq guillemets : les premiers sont dans la chaîne
+                i += 1
+        elif c == '"':
+            j = i + 1
+            while j < n and texte[j] not in '"\n':
+                j += 2 if texte[j] == "\\" else 1
+            i = j + 1
+        elif c == "'":
+            j = texte.find("'", i + 1)
+            k = texte.find("\n", i + 1)
+            i = (j if j >= 0 and (k < 0 or j < k) else (k if k >= 0 else n)) + 1
+        elif c == "#":
+            k = texte.find("\n", i)
+            i = n if k < 0 else k
+        else:
+            i += 1
+    return res
+
+
 def analyser(texte):
     """(fin de l'en-tête [dock] ou None, (début, fin, liste) de la valeur de pinned dans cette table ou None).
-    début : le « [ » du tableau. Seule la table [dock] elle-même compte (pas [dock.xxx], ni le pinned du lanceur).
-    Une valeur de pinned qui n'est pas un simple tableau de chaînes : (…, False), rien n'y est écrit."""
+    début : le « [ » du tableau. Seule la table [dock] elle-même compte (pas [dock.xxx], ni le pinned du lanceur, ni
+    une ligne écrite dans une chaîne multiligne). Une valeur de pinned qui n'est pas un simple tableau de chaînes :
+    (…, False), rien n'y est écrit."""
     dans, entete, pos = False, None, 0
+    dedans = _dans_chaines(texte)
     for ligne in texte.splitlines(keepends=True):
+        if pos in dedans:
+            pos += len(ligne)
+            continue
         tete = re.match(r"\s*\[([^\]]*)\]\s*(#.*)?$", ligne.rstrip("\r\n"))
         if ligne.lstrip().startswith("[["):
             dans = False
@@ -201,6 +242,29 @@ def epinglees():
     return res
 
 
+def verifier(avant, apres, ids):
+    """Avec tomllib (Python 3.11 et plus) : le nouveau fichier doit donner exactement cette liste dans [dock] pinned, et
+    rien d'autre ne doit changer ; sinon rien n'est écrit (un format que nc-dock lirait mal ne s'abîme jamais)."""
+    try:
+        import tomllib
+    except ImportError:
+        return
+    try:
+        a, b = tomllib.loads(avant), tomllib.loads(apres)
+    except tomllib.TOMLDecodeError as e:
+        raise OSError(T(f"{ETAT} : TOML illisible ({e})", f"{ETAT}: unreadable TOML ({e})"))
+    dock = b.get("dock") if isinstance(b.get("dock"), dict) else {}
+    if dock.get("pinned") != ids:
+        raise OSError(T(f"[dock] pinned introuvable sans risque dans {ETAT}", f"[dock] pinned not safely found in {ETAT}"))
+    for x in (a, b):
+        if isinstance(x.get("dock"), dict):
+            x["dock"].pop("pinned", None)
+            if not x["dock"]:
+                x.pop("dock")
+    if a != b:
+        raise OSError(T(f"l'écriture changerait d'autres réglages de {ETAT}", f"writing would change other settings in {ETAT}"))
+
+
 def enregistrer(ids):
     """Écrit la nouvelle liste là où Noctalia la lit en dernier : settings.toml (comme le menu « Épingler » de son
     dock), seulement la valeur de [dock] pinned, ajoutée dans [dock] (ou une table [dock] ajoutée à la fin) si elle n'y
@@ -217,6 +281,7 @@ def enregistrer(ids):
             nouveau = texte[:entete] + "pinned = " + en_toml(ids) + "\n" + texte[entete:]
         else:
             nouveau = texte + ("" if texte.endswith("\n") else "\n") + "\n[dock]\npinned = " + en_toml(ids) + "\n"
+        verifier(texte, nouveau, ids)
         ecrire(os.path.join(SAUVEGARDE, "settings.toml.avant"), texte)
         ecrire(ETAT, nouveau)
         return
@@ -324,6 +389,10 @@ def cmd_changer(action, ident):
         print(T(f"Identifiant invalide : {ident!r}", f"Invalid identifier: {ident!r}"), file=sys.stderr)
         return 1
     garde = verrou()
+    if garde is None:          # sans verrou, deux nc-dock à la fois s'effaceraient l'un l'autre : rien n'est écrit
+        print(T("Écriture impossible : verrou de nc-dock indisponible", "Could not write: nc-dock lock unavailable"),
+              file=sys.stderr)
+        return 3
     try:
         liste = epinglees()
         if action == "epingler":
