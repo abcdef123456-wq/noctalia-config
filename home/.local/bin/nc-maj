@@ -10,11 +10,17 @@
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 depot="$(cat "$HOME/.config/nc/depot" 2>/dev/null || true)"
-# La dernière version qu'install.sh a menée à bout (il la note seulement s'il va jusqu'au bout), sinon HEAD. Après un
-# install.sh qui échoue à moitié, HEAD a déjà avancé : c'est cette version-là qui sert de base aux nouveautés, au
-# rapport et à l'annonce, pour que la relance ne dise pas « Déjà à jour » en perdant ce qui n'a pas été installé
+# La dernière version qu'install.sh a menée à bout (il la note seulement s'il va jusqu'au bout), mais seulement si
+# une installation lancée par nc-maj n'est pas allée au bout (marqueur installation-en-cours, écrit par nc-maj juste
+# avant ./install.sh, effacé par install.sh à son « Terminé ») ; sinon HEAD. Après un install.sh qui échoue à moitié
+# (ou un « non » à « On y va ? »), HEAD a déjà avancé : c'est cette version-là qui sert de base aux nouveautés, au
+# rapport et à l'annonce, pour que la relance ne dise pas « Déjà à jour » en perdant ce qui n'a pas été installé.
+# Sans marqueur, HEAD : qui pousse ses commits et copie les fichiers à la main, sans install.sh, n'est pas prévenu de
+# ses propres versions (version-installee, restée ancienne, ne compte pas). Même base dans nc-reglages (maj_disponible)
+en_cours="$HOME/.config/nc/installation-en-cours"
 base_installee() {
-  local v; v="$(cat "$HOME/.config/nc/version-installee" 2>/dev/null || true)"
+  local v=""
+  [ -e "$en_cours" ] && v="$(cat "$HOME/.config/nc/version-installee" 2>/dev/null || true)"
   [ -n "$v" ] && git rev-parse -q --verify "$v^{commit}" 2>/dev/null || git rev-parse HEAD
 }
 
@@ -98,26 +104,58 @@ avant="$(git rev-parse HEAD)"
 base="$(base_installee)"                                       # = avant, sauf après un install.sh resté à moitié
 branche="$(git rev-parse --abbrev-ref HEAD)"
 ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null || true)"   # l'amont avant ce fetch
-# Un délai : un réseau qui pend ne bloque pas le terminal sans fin ; en cas d'échec, une phrase plutôt que l'erreur brute
-if ! timeout 120 git fetch -q origin "$branche" >/dev/null 2>&1; then
+# Pas de délai fixe : timeout couperait un fetch lent qui avance, et le sortirait du premier plan du terminal (ssh ou
+# HTTPS ne pourraient plus demander une phrase de passe, un mot de passe ou l'empreinte de l'hôte). Seul un réseau
+# bloqué est coupé : ssh abandonne une connexion qui ne s'établit pas en 20 s ou un serveur muet depuis une minute
+# (sauf si tu as ta propre commande ssh : GIT_SSH_COMMAND, GIT_SSH, core.sshCommand), HTTPS un débit sous 1 ko/s
+# pendant 60 s. En cas d'échec, une phrase, puis la dernière ligne de l'erreur de git
+if [ -z "${GIT_SSH_COMMAND:-}${GIT_SSH:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/null || true)" ]; then
+  export GIT_SSH_COMMAND="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+fi
+if ! erreur="$(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch -q origin "$branche" 2>&1 >/dev/null)"; then
   echo "$(t "GitHub injoignable (réseau coupé ou trop lent ?) : mise à jour annulée, rien n'a changé. Réessaie plus tard." "GitHub unreachable (network down or too slow?): update cancelled, nothing changed. Try again later.")" >&2
+  erreur="$(printf '%s\n' "$erreur" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+  [ -z "$erreur" ] || echo "  (git : $erreur)" >&2
   echo "$(t "(git fetch origin dans $depot pour le détail)" "(git fetch origin in $depot for details)")" >&2
   exit 2
 fi
 amont="$(git rev-parse "refs/remotes/origin/$branche")"
 # Un fichier non suivi à toi au même chemin qu'un fichier que la mise à jour apporte ou change : refus en le nommant
-# (git reset --hard l'écraserait sans un mot, git merge s'arrêterait sur une erreur brute)
-caches="$(git ls-files -o | grep -Fx -f <(git diff --name-only HEAD "$amont") || true)"
+# (git reset --hard l'écraserait sans un mot, git merge s'arrêterait sur une erreur brute). Identique à celui de
+# l'amont (git hash-object = l'objet de l'amont à ce chemin), rien ne serait perdu : il ne bloque pas, et il est retiré
+# juste avant la mise à jour (git merge refuserait de le remplacer), qui le remet tel quel
+caches=""; identiques=()
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [ -f "$f" ] && [ ! -L "$f" ] &&
+     [ "$(git hash-object -- "$f" 2>/dev/null || echo illisible)" = "$(git rev-parse -q --verify "$amont:$f" 2>/dev/null || echo absent)" ]; then
+    identiques+=("$f"); continue
+  fi
+  # Ignoré ici (.gitignore, .git/info/exclude) : git status ne le montre pas, d'où l'explication
+  if git check-ignore -q -- "$f" 2>/dev/null; then
+    f="$f   $(t "(ignoré par git ici, mais la mise à jour se met à le suivre)" "(ignored by git here, but the update starts tracking it)")"
+  fi
+  caches="$caches$f"$'\n'
+done < <(git -c core.quotePath=false ls-files -o | grep -Fx -f <(git -c core.quotePath=false diff --name-only HEAD "$amont") || true)
 if [ -n "$caches" ]; then
   echo "$(t "Le dépôt $depot contient des fichiers à toi que la mise à jour écraserait : mise à jour annulée pour ne pas les perdre." "The repository $depot has files of yours the update would overwrite: update cancelled so they are not lost.")" >&2
-  printf '%s\n' "$caches" | sed 's/^/  /' >&2
+  printf '%s' "$caches" | sed 's/^/  /' >&2
   echo "$(t "(déplace-les hors du dépôt, puis relance nc-maj)" "(move them out of the repository, then run nc-maj again)")" >&2
   exit 1
 fi
+# Chaque commit de HEAD a son équivalent dans l'amont (git cherry : aucun « + »). Sa sortie est lue en entier avant
+# d'être cherchée : dans un tube, grep -q s'arrêtait au premier « + », git cherry mourait de SIGPIPE (141 avec
+# pipefail) et le « ! » y voyait « aucun commit à toi ». Un git cherry en échec compte comme « des commits à toi »
+sans_commit_a_toi() {
+  local plus
+  plus="$(git cherry "$amont" HEAD)" || plus="+"
+  ! grep -q '^+' <<<"$plus"
+}
 reecrit=""
 if git merge-base --is-ancestor HEAD "$amont"; then
+  [ "${#identiques[@]}" = 0 ] || rm -f -- "${identiques[@]}"   # remis tels quels par l'avance
   git merge --ff-only -q "$amont"
-elif { [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; } || ! git cherry "$amont" HEAD | grep -q '^+'; then
+elif { [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; } || sans_commit_a_toi; then
   # Historique du dépôt réécrit en amont (mêmes changements, nouveaux identifiants) et aucun commit à toi : la nouvelle
   # version est reprise telle quelle ; l'ancienne reste dans une branche de sauvegarde (rien n'est supprimé).
   # « Aucun commit à toi » : HEAD était dans l'amont d'avant ce fetch, ou chacun de ses commits a son équivalent dans
@@ -145,8 +183,14 @@ fi
 [ -z "$reecrit" ] || echo "$(t "(historique du dépôt réorganisé ; ancienne version gardée dans la branche $reecrit)" "(repository history reorganized; old version kept in branch $reecrit)")"
 # L'annonce de cette version est consommée : si install.sh échoue, nc-maj verifier pourra la refaire
 rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/nc/maj-annoncee"
-./install.sh "$@"
-code=$?
+# Installation en cours : install.sh efface ce marqueur à son « Terminé » ; resté là (échec, « non »), la relance et
+# nc-maj verifier repartent de version-installee
+mkdir -p "$(dirname "$en_cours")"; echo "$apres" > "$en_cours"
+code=0; ./install.sh "$@" || code=$?
+# 10 : « non » à « On y va ? », rien n'a été installé : ni rapport ni bilan (ce n'est pas une réussite)
+if [ "$code" = 10 ]; then
+  echo "$(t "Installation annulée : la nouvelle version est téléchargée, pas installée. Relance nc-maj quand tu veux." "Install cancelled: the new version is downloaded, not installed. Run nc-update again whenever you like.")"
+fi
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
 if [ "$code" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
   setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$base" "$apres" >/dev/null 2>&1 < /dev/null &

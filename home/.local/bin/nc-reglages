@@ -1474,7 +1474,18 @@ def maj_disponible():
         depot = open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8").read().strip()
     except OSError:
         return False
-    return subprocess.run(["git", "-C", depot, "merge-base", "--is-ancestor", annonce, "HEAD"],
+    # Même base que nc-maj verifier : la version installée si une installation lancée par nc-maj n'est pas allée au
+    # bout (marqueur installation-en-cours, effacé par install.sh à son « Terminé »), sinon HEAD
+    base = "HEAD"
+    if os.path.exists(os.path.join(HOME, ".config/nc/installation-en-cours")):
+        try:
+            v = open(os.path.join(HOME, ".config/nc/version-installee"), encoding="utf-8").read().strip()
+        except OSError:
+            v = ""
+        if v and subprocess.run(["git", "-C", depot, "rev-parse", "-q", "--verify", v + "^{commit}"],
+                                capture_output=True).returncode == 0:
+            base = v
+    return subprocess.run(["git", "-C", depot, "merge-base", "--is-ancestor", annonce, base],
                           capture_output=True).returncode != 0
 
 

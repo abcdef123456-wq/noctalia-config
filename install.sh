@@ -42,6 +42,9 @@ ask() { # ask "question" [o|n]  -> vrai si oui (o, oui, y, yes ; en anglais, [Y/
   r="${r:-$d}"
   [[ "$r" =~ ^[oOyY] ]]
 }
+# Code de sortie d'un « non » qui arrête tout (« On y va ? », la restauration) : annulé par toi, rien n'est fait ;
+# distinct de 0, pour que nc-maj ne le prenne pas pour une installation réussie (ni rapport ni bilan)
+ANNULE=10
 have() { command -v "$1" >/dev/null 2>&1; }
 # Une sonde en lecture seule ne doit pas bloquer toute l'installation. Les installations
 # de paquets gardent leurs propres délais et une sortie visible.
@@ -240,7 +243,7 @@ if [ "$MODE" = restore ]; then
   last="$(ls -1d "$STATE"/backup-* "$OLD_STATE"/backup-* 2>/dev/null | awk -F/ '{ print $NF "\t" $0 }' | sort | tail -1 | cut -f2- || true)"
   [ -n "$last" ] || die "$(t "aucune sauvegarde trouvée dans $STATE" "no backup found in $STATE")"
   say "$(t "Restauration de $last" "Restoring $last")"
-  ask "$(t "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" "Put your old files back and delete the ones added by the install?")" n || exit 0
+  ask "$(t "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" "Put your old files back and delete the ones added by the install?")" n || exit "$ANNULE"
   have systemctl && systemctl --user stop noctalia.service 2>/dev/null || true
   if [ -f "$last/.created" ]; then
     while IFS= read -r rel; do [ -n "$rel" ] && rm -rf "${HOME:?}/$rel"; done < "$last/.created"
@@ -599,7 +602,7 @@ info "$(t "  2. sauvegarder puis remplacer ta config Hyprland, Noctalia, kitty, 
 info "$(t "  3. te proposer la config du terminal (zsh, oh-my-zsh, powerlevel10k) et de Neovim (LazyVim) ;" "  3. offer you the terminal config (zsh, oh-my-zsh, powerlevel10k) and the Neovim config (LazyVim);")"
 info "$(t "  4. activer les services de ta session (barre, couleurs, miniatures, profils d'énergie, veille) ;" "  4. enable your session's services (bar, colors, thumbnails, power profiles, sleep);")"
 [ "$MODE" = full ] && info "$(t "  5. te proposer, une par une, les étapes système pas encore faites (énergie, Wi-Fi, démarrage, écran de connexion, pilote NVIDIA)." "  5. offer you, one by one, the system steps not done yet (power, Wi-Fi, boot, login screen, NVIDIA driver).")"
-ask "$(t "On y va ?" "Ready to go?")" o || exit 0
+ask "$(t "On y va ?" "Ready to go?")" o || exit "$ANNULE"
 
 mkdir -p "$BK"
 tmp="$(mktemp)"
@@ -1013,8 +1016,12 @@ fi
 # Emplacement de ce dépôt, pour nc-maj (mise à jour en une commande)
 if [ -d "$REPO/.git" ]; then mkdir -p "$HOME/.config/nc"; printf '%s\n' "$REPO" > "$HOME/.config/nc/depot"; fi
 # La version installée, notée seulement une fois l'installation menée à bout (juste avant « Terminé ») : après un
-# échec à moitié, nc-maj repart d'elle (nouveautés, rapport, annonce) au lieu de dire « Déjà à jour »
-noter_version() { [ -d "$REPO/.git" ] && git -C "$REPO" rev-parse HEAD > "$HOME/.config/nc/version-installee" 2>/dev/null || true; }
+# échec à moitié, nc-maj repart d'elle (nouveautés, rapport, annonce) au lieu de dire « Déjà à jour ». Le marqueur
+# installation-en-cours (écrit par nc-maj juste avant de lancer install.sh) est effacé ici : l'installation est au bout
+noter_version() {
+  [ -d "$REPO/.git" ] && git -C "$REPO" rev-parse HEAD > "$HOME/.config/nc/version-installee" 2>/dev/null || true
+  rm -f "$HOME/.config/nc/installation-en-cours"
+}
 
 # Clé de chiffrement de l'historique du presse-papiers : Noctalia ne la crée pas elle-même (64 caractères hexadécimaux
 # aléatoires, lisible par toi seul). Générée une fois sur ce PC, jamais versionnée ni écrasée.
