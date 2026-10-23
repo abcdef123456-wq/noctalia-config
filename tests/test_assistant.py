@@ -882,7 +882,8 @@ class ReglagesAssistant(unittest.TestCase):
             original = settings.read_bytes()
             env = dict(os.environ, HOME=d, NC_LANGUE="en", USER="test-user", TERM="xterm")
             # Sans session graphique (serveur, SSH) : les questions dans le terminal ; avec, c'est la fenêtre de l'île
-            env.pop("WAYLAND_DISPLAY", None); env.pop("DISPLAY", None)
+            for cle in ("WAYLAND_DISPLAY", "DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
+                env.pop(cle, None)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ResourceWarning)
                 m = charger("nc-reglages")

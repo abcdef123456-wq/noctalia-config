@@ -10,12 +10,14 @@ import tempfile
 import textwrap
 import unittest
 
+from tests import _isolation
+
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
 BIN = REPO / "home/.local/bin"
 
 
-@unittest.skipUnless(shutil.which("qs") and shutil.which("dbus-run-session") and shutil.which("notify-send"), "Quickshell, dbus-run-session et notify-send requis")
+@unittest.skipUnless(shutil.which("qs") and shutil.which("dbus-run-session") and _isolation.vrai("notify-send"), "Quickshell, dbus-run-session et notify-send requis")
 class Notifications(unittest.TestCase):
     def executer(self, scenario, memo=None, preparer=None, apres=None):
         with tempfile.TemporaryDirectory(prefix="nc-notifs-") as d:
@@ -73,6 +75,10 @@ class Notifications(unittest.TestCase):
                        XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / ".local/state"),
                        XDG_CONFIG_HOME=str(root / ".config"))
             env.pop("WAYLAND_DISPLAY", None)
+            # Le vrai notify-send, devant le faux du garde-fou : il ne parle qu'au bus privé de dbus-run-session
+            (root / "vrai-bin").mkdir()
+            (root / "vrai-bin/notify-send").symlink_to(_isolation.vrai("notify-send"))
+            env["PATH"] = str(root / "vrai-bin") + os.pathsep + env["PATH"]
             r = subprocess.run(["dbus-run-session", "--", "qs", "--no-color", "-p", str(root / "shell.qml")], env=env, capture_output=True, text=True, timeout=20)
             sortie = r.stdout + r.stderr
             self.assertEqual(r.returncode, 0, sortie)
