@@ -73,7 +73,7 @@ class Extraction(unittest.TestCase):
             with self.subTest(mauvais=mauvais):
                 self.assertEqual(C.verifier_choix(mauvais), [])
         self.assertEqual(C.verifier_choix(["x" * 80]), ["x" * 80])
-        self.assertEqual(C.verifier_choix(["Oui\x1b[31m‮", "Non\nvraiment"]), ["Oui [31m", "Non vraiment"])
+        self.assertEqual(C.verifier_choix(["Oui\x1b[31m\u202e", "Non\nvraiment"]), ["Oui [31m", "Non vraiment"])
 
     def test_le_client_charge_le_fichier_du_serveur(self):
         """Une seule source : nc-assistant charge nc_choix.py de l'overlay installé à côté, pas une copie."""

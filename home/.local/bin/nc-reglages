@@ -38,6 +38,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import textwrap
@@ -1106,10 +1107,12 @@ REGLAGES = [
     # Où dire « Autoriser » : toujours une personne, sur l'écran de ce PC ou à distance (relayé par le serveur)
     R("NOEUD_CONFIRMATION", "Intelligence artificielle", L("Où autoriser les actions de JARVIS", "Where to allow JARVIS actions"),
       "choix", "ecran",
-      L("À distance, tu tapes le code de ton appli d'authentification (Telegram…) : le serveur ne peut pas autoriser à ta "
-        "place. Avant : « nc-noeud totp creer » puis « nc-noeud totp verifier CODE » dans un terminal.",
-        "Remotely, you type the code of your authenticator app (Telegram…): the server cannot allow on your behalf. "
-        "First: “nc-noeud totp creer” then “nc-noeud totp verifier CODE” in a terminal."),
+      L("À distance, tu tapes dans Telegram (ou ce que ton serveur utilise) le code de ton appli d'authentification : "
+        "sans ton code, le serveur ne peut rien autoriser. Avant : « nc-noeud totp creer » puis « nc-noeud totp verifier "
+        "CODE » dans un terminal.",
+        "Remotely, you type in Telegram (or whatever your server uses) the code of your authenticator app: without your "
+        "code, the server cannot allow anything. First: “nc-noeud totp creer” then “nc-noeud totp verifier CODE” in a "
+        "terminal."),
       [("ecran", L("Sur l'écran de ce PC", "On this PC's screen")),
        ("distance", L("À distance (téléphone)", "Remotely (phone)")),
        ("les-deux", L("Les deux : la première réponse compte", "Both: the first answer wins"))],
@@ -1933,10 +1936,25 @@ def appliquer_style(vals):
 
 
 def code_noeud_pret():
-    """Le code de confirmation à distance de nc-noeud est créé et vérifié (seul « verifie » est regardé)."""
+    """Le code de confirmation à distance de nc-noeud est créé, vérifié, à toi seul (0600) et pas bloqué (seuls
+    « verifie » et « bloque » sont regardés), comme nc-noeud le demande."""
+    chemin = os.path.join(HOME, ".config/nc/noeud-totp.json")
+    etat = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"),
+                        "noctalia-config/noeud-totp-etat.json")
     try:
-        with open(os.path.join(HOME, ".config/nc/noeud-totp.json"), encoding="utf-8") as f:
-            return json.load(f).get("verifie") is True
+        st = os.lstat(chemin)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            return False
+        with open(chemin, encoding="utf-8") as f:
+            if json.load(f).get("verifie") is not True:
+                return False
+    except (OSError, ValueError, AttributeError):
+        return False
+    try:
+        with open(etat, encoding="utf-8") as f:
+            return json.load(f).get("bloque") is not True
+    except FileNotFoundError:
+        return True
     except (OSError, ValueError, AttributeError):
         return False
 

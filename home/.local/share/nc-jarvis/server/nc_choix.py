@@ -22,7 +22,7 @@ MAX_LIGNE_LISTE = 60
 _MARQUEUR = re.compile(r"(?:^|\n)[ \t]*\[\[?[ \t]*(?:choix|choices)[ \t]*:([^\n\]]*)\]\]?[ \t]*\Z", re.I)
 _NUMERO = re.compile(r"^[ \t]*\d{1,2}[.)][ \t]+(\S.*?)[ \t]*$")
 _TIRET = re.compile(r"^[ \t]*[-*•][ \t]+(\S.*?)[ \t]*$")
-_CONTROLE = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏ -‮⁦-⁩]")
+_CONTROLE = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069]")
 
 
 def _libelle(texte):

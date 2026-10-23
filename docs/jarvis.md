@@ -306,9 +306,14 @@ demander.
 ### Confirmer à distance
 
 Quand tu n’es pas devant ce PC (une tour allumée chez toi, toi sur ton portable ou ton téléphone), la carte de l’île
-expire sans personne pour la voir. La confirmation peut alors venir d’ailleurs, mais **à distance, tu tapes le code
-de ton appli d’authentification : le serveur ne peut pas autoriser à ta place**. Le PC ne peut pas savoir si une
+expire sans personne pour la voir. La confirmation peut alors venir d’ailleurs, mais **à distance, tu tapes dans Telegram le code
+de ton appli d’authentification : sans ton code, le serveur ne peut rien autoriser**. Le PC ne peut pas savoir si une
 personne a cliqué sur un bouton du serveur ; il peut vérifier un code que seul ton téléphone sait calculer.
+
+Sois honnête avec toi-même sur ce que ça prouve : **le code prouve que tu es là, pas ce que tu as lu**. Rien ne lie
+le code à une action précise : un serveur malveillant pourrait te montrer une demande anodine et utiliser ton code
+pour une autre en attente. C’est pourquoi chaque autorisation à distance s’annonce aussi par une notification sur ce
+PC (l’action et son résumé), et chaque code faux aussi. **Si tu as le moindre doute sur le serveur, garde `ecran`.**
 
 **1. Créer le code (une fois, sur ce PC, dans un terminal) :**
 
@@ -334,10 +339,14 @@ noté au journal, et JARVIS ne peut ni le lire ni l’écrire (chemin protégé)
 
 Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
 `nc-noeud totp creer`). Changer ce réglage, ou vérifier ou retirer le code, relance `nc-noeud` s’il tourne : le
-serveur apprend à la connexion que ce PC sait confirmer à distance. Chaque code ne sert qu’une fois. Après 5 codes
-faux (ou absents) en une heure, la confirmation à distance est bloquée, avec une notification, jusqu’à
-`nc-noeud totp verifier CODE` sur ce PC. Les chemins protégés, `IA_MODE=non` et les délais s’appliquent pareil, même
-avec un bon code.
+serveur apprend à la connexion que ce PC sait confirmer à distance. Chaque code ne sert qu’une fois : un code déjà
+servi est refusé sans compter comme un échec (attends le code suivant). Chaque code faux (ou absent) est annoncé par
+une notification sur ce PC ; après 5 en une heure, ou 10 depuis le dernier `nc-noeud totp verifier`, la confirmation
+à distance est bloquée jusqu’à `nc-noeud totp verifier CODE` sur ce PC. Les chemins protégés, `IA_MODE=non` et les
+délais s’appliquent pareil, même avec un bon code. Avec un code enrôlé et `distance` ou `les-deux`, lire le
+presse-papiers demande aussi une confirmation (l’appli ou KDE Connect peuvent y avoir copié un code) ; et dans tous
+les modes, un presse-papiers qui ressemble à un code à 6 chiffres, à une adresse `otpauth://` ou à une clé de cette
+taille n’est jamais envoyé.
 
 **Le protocole**, sur le même WebSocket `/api/node/ws` :
 
@@ -351,7 +360,8 @@ avec un bon code.
    `req_id` est celui de la trame d’action. `summary` dit exactement ce qui sera fait, dans la langue du PC : la
    commande entière ; pour un fichier écrit, le chemin, la taille, le sha256 du contenu et ses premières lignes ; le
    texte à copier. Les caractères qui se cachent (contrôles, séquences du terminal, bidi, largeur nulle) y sont
-   écrits en clair (`\x1b`, `‮`), avec au plus deux sauts de ligne de suite. Seules les valeurs secrètes exactes
+   écrits en clair (`\x1b`, `\u202e`, et `\\` pour une barre oblique inverse),
+   avec au plus deux sauts de ligne de suite. Seules les valeurs secrètes exactes
    de la configuration (la clé du serveur) sont remplacées par `•••`. Si un motif de secret générique (jeton, clé
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
    n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
@@ -361,19 +371,23 @@ avec un bon code.
    ```
    ou `{"type": "confirm_response", "req_id": "7f0c…", "decision": "deny"}` (pas besoin de code pour refuser). Seul un
    `"allow"` reçu avant l’échéance, pour ce `req_id` exact, avec un bon code (fenêtre d’un pas de 30 s avant ou
-   après, jamais déjà servi) autorise l’action. Un `"allow"` sans code ou avec un code faux refuse cette demande et
-   compte comme un échec. Une réponse inconnue, en double, tardive ou illisible est ignorée et notée au journal local.
+   après, jamais déjà servi) autorise l’action. `code` est une chaîne de 6 chiffres ASCII, sans espace. Un `"allow"`
+   sans code ou avec un code faux refuse cette demande (la `response` porte `"error_code": "bad_code"`) et compte
+   comme un échec ; un code déjà servi la refuse avec `"error_code": "replay"`, sans compter : le serveur peut
+   redemander le code suivant pour une nouvelle demande. Une réponse inconnue, en double, tardive ou illisible est
+   ignorée et notée au journal local.
 4. Si la demande se termine sans réponse venue de là (décidée sur l’écran, expirée), `nc-noeud` envoie
    `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ses boutons.
 5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
 
 Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe encore upstream**) :
 
-- envoyer `summary` tel quel, seulement à l’utilisateur autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans
-  un groupe, avec un bouton **Refuser** et une invite « réponds avec le code de ton appli » quand
-  `code_required` est vrai ; ignorer les messages de quelqu’un d’autre ;
-- renvoyer le code tapé sans le garder (ni journal, ni historique de conversation, ni modèle), une seule réponse par
-  `req_id`, et seulement pour un nœud qui a annoncé `remote_confirm` ;
+- envoyer `summary` tel quel, **en texte brut** (sans `parse_mode` Markdown ou HTML), seulement à l’utilisateur
+  autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans un groupe, avec un bouton **Refuser** et une invite
+  « réponds avec le code de ton appli » quand `code_required` est vrai ; ignorer les messages de quelqu’un d’autre ;
+- renvoyer le code tapé en chaîne de 6 chiffres sans espace, sans le garder (ni journal, ni historique de
+  conversation, ni modèle), une seule réponse par `req_id`, et seulement pour un nœud qui a annoncé
+  `remote_confirm` ; une demande à la fois par conversation, pour que le code tapé réponde à celle qui est montrée ;
 - faire expirer la demande au bout de `expires_in` secondes, ou dès `confirm_cancel` : ensuite, ne plus rien
   envoyer (refus par défaut ; `nc-noeud` refuse de toute façon) ;
 - ne jamais répondre `allow` tout seul : sans le code, ce serait refusé, et compté comme un échec.
