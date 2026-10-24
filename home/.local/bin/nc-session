@@ -511,17 +511,32 @@ def lancer(e):
                          stderr=subprocess.DEVNULL, cwd=str(HOME))
 
 
+def entier(x):
+    """x en entier, ou None (fichier de session écrit à la main : « 3 », null, « trois ») : rien n'est placé plutôt
+    qu'une trace Python au milieu de l'ouverture."""
+    if isinstance(x, bool):
+        return None
+    try:
+        return int(x)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def placer(adresse, e):
     sel = f"address:{adresse}"
-    dispatch(f"hl.dsp.window.move({{ workspace = {int(e['bureau'])}, follow = false, window = '{sel}' }})")
+    bureau = entier(e.get("bureau"))
+    if bureau is not None:
+        dispatch(f"hl.dsp.window.move({{ workspace = {bureau}, follow = false, window = '{sel}' }})")
     if e.get("flottant"):
         dispatch(f"hl.dsp.window.float({{ action = 'set', window = '{sel}' }})")
-        if e.get("taille"):
-            dispatch(f"hl.dsp.window.resize({{ x = {int(e['taille'][0])}, y = {int(e['taille'][1])}, window = '{sel}' }})")
-        if e.get("position"):
-            dispatch(f"hl.dsp.window.move({{ x = {int(e['position'][0])}, y = {int(e['position'][1])}, window = '{sel}' }})")
+        taille = [entier(x) for x in (e.get("taille") or [])[:2]] if isinstance(e.get("taille"), list) else []
+        if len(taille) == 2 and None not in taille:
+            dispatch(f"hl.dsp.window.resize({{ x = {taille[0]}, y = {taille[1]}, window = '{sel}' }})")
+        position = [entier(x) for x in (e.get("position") or [])[:2]] if isinstance(e.get("position"), list) else []
+        if len(position) == 2 and None not in position:
+            dispatch(f"hl.dsp.window.move({{ x = {position[0]}, y = {position[1]}, window = '{sel}' }})")
     # Plein écran ou agrandie comme à l'enregistrement (true des anciennes sessions : plein écran)
-    pe = 2 if e.get("plein_ecran") is True else int(e.get("plein_ecran") or 0)
+    pe = 2 if e.get("plein_ecran") is True else (entier(e.get("plein_ecran") or 0) or 0)
     if pe:
         dispatch(f"hl.dsp.window.fullscreen({{ action = 'set', mode = '{'maximized' if pe == 1 else 'fullscreen'}', window = '{sel}' }})")
 
@@ -536,12 +551,8 @@ def regle_possible(e):
     """(classe, bureau) de la règle d'une fenêtre, tels qu'ils seront notés ET posés : bureau converti en entier
     (« 3 » dans un fichier écrit à la main), classe en texte. None si l'un des deux ne convient pas : pas de règle,
     la fenêtre est seulement placée quand elle s'ouvre."""
-    classe = e.get("classe")
-    try:
-        bureau = int(e.get("bureau"))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if not isinstance(classe, str) or not classe or isinstance(e.get("bureau"), bool) or motif_lua(classe) is None:
+    classe, bureau = e.get("classe"), entier(e.get("bureau"))
+    if bureau is None or not isinstance(classe, str) or not classe or motif_lua(classe) is None:
         return None
     return classe, bureau
 

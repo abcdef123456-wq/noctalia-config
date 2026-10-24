@@ -404,6 +404,19 @@ class ReglesPersistantes(unittest.TestCase):
                 self.assertFalse(self.m.POSEES.exists())
                 self.assertEqual(self.avertis, [])
 
+    def test_placer_ignore_les_valeurs_illisibles(self):
+        # Sans règle (bureau illisible), la fenêtre arrive quand même dans placer : rien à déplacer, pas de trace Python
+        for fenetre, attendu in (({"bureau": None}, []), ({"bureau": "trois"}, []), ({"bureau": True}, []),
+                                 ({"bureau": "3"}, ["workspace = 3"]),
+                                 ({"bureau": 2, "flottant": True, "taille": ["x", 3], "position": [10, "20"],
+                                   "plein_ecran": "?"}, ["workspace = 2", "float", "x = 10, y = 20"])):
+            with self.subTest(fenetre=fenetre), mock.patch.object(self.m, "dispatch") as dispatch:
+                self.m.placer("0xabc", fenetre)
+                faits = [c.args[0] for c in dispatch.call_args_list]
+                self.assertEqual(len(faits), len(attendu), faits)
+                for fait, morceau in zip(faits, attendu):
+                    self.assertIn(morceau, fait)
+
     def test_classe_impossible_en_lua_ni_notee_ni_posee(self):
         # « ]] » fermerait la chaîne Lua : rien à poser, donc rien à noter (sinon un retrait « raté » à chaque fois)
         with mock.patch.object(self.m, "motif_lua", return_value=None), \
