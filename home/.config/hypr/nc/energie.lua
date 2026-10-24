@@ -64,22 +64,25 @@ end
 -- Bordure en rotation continue : seulement en Performance sur secteur, et quand la session est rendue par une carte
 -- dédiée. Elle fait redessiner tout l'écran à chaque image : sur une carte intégrée (Radeon 610M à 165 Hz), environ la
 -- moitié du GPU et des images perdues au changement de bureau. Coupable dans nc-reglages → Énergie
-local fichier_ecran_eteint = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-ecran-eteint"
 local boucle_permise = nc.profil.profil == "performance" and not nc.profil.batterie and not coupe
     and nc.reglage("BORDURE_PERFORMANCE", true) and nc.session_sur_carte_dediee()
 -- Écran éteint : la bordure ne tourne plus (Hyprland continuait à l'animer et à consommer environ 3 % d'un cœur).
 -- nc-ecran l'appelle (hyprctl eval) à l'extinction (true) et au rallumage (false). Sans argument (chargement ou
 -- rechargement de la config) : l'état noté par nc-ecran dans $XDG_RUNTIME_DIR/nc-ecran-eteint, pour qu'un rechargement
 -- écran éteint ne relance pas la boucle.
+local function marque(nom)
+    local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/" .. nom)
+    if f then f:close() end
+    return f ~= nil
+end
 function nc.bordure(ecran_eteint)
-    if ecran_eteint == nil then
-        local f = io.open(fichier_ecran_eteint)
-        ecran_eteint = f ~= nil
-        if f then f:close() end
-    end
+    -- Mode jeu : bordure coupée par la section du mode jeu, on n'y touche pas (lu sur la marque, pas sur nc.jeu, que le
+    -- chargement de la config ne connaît pas encore ici)
+    if marque("nc-mode-jeu") then return end
+    if ecran_eteint == nil then ecran_eteint = marque("nc-ecran-eteint") end
     if boucle_permise and not ecran_eteint then
         hl.animation({ leaf = "borderangle", enabled = true, speed = 100, bezier = "linear", style = "loop" })
-    elseif not nc.jeu then
+    else
         hl.animation({ leaf = "borderangle", enabled = true, speed = 8, bezier = "standard" })
     end
 end

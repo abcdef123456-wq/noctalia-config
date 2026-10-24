@@ -23,14 +23,14 @@ print(bordure.style == "loop" and "tourne" or "figee")
 if arg[4] then
     nc.bordure(arg[4] == "eteint")
     local apres = bordure
-    print((apres.style == "loop" and "tourne" or "figee") .. " " .. apres.speed)
+    print((apres.style == "loop" and "tourne" or "figee") .. " " .. tostring(apres.speed))
 end
 '''
 
 
 @unittest.skipUnless(LUA, "lua requis")
 class BordureSurCarteDediee(unittest.TestCase):
-    def bordure(self, cartes, profil="performance", batterie=False, aq=None, ecran=None, marque=False):
+    def bordure(self, cartes, profil="performance", batterie=False, aq=None, ecran=None, marque=False, jeu=False):
         """cartes : {"card1": {"vendor": "0x1002", "vram": 512 Mio, "prises": {"eDP-1": "connected"}}}"""
         with tempfile.TemporaryDirectory(prefix="nc-bordure-") as d:
             sysfs = Path(d) / "sys"
@@ -51,6 +51,8 @@ class BordureSurCarteDediee(unittest.TestCase):
                 env["AQ_DRM_DEVICES"] = aq
             if marque:
                 (Path(d) / "nc-ecran-eteint").write_text("")
+            if jeu:
+                (Path(d) / "nc-mode-jeu").write_text("")
             args = [ecran] if ecran else []
             r = subprocess.run([LUA, str(Path(d) / "harnais.lua"), str(ENERGIE), profil, "1" if batterie else "0", *args],
                                env=env, capture_output=True, text=True, timeout=10)
@@ -86,6 +88,11 @@ class BordureSurCarteDediee(unittest.TestCase):
         # Boucle jamais permise : rien ne la lance au rallumage
         self.assertEqual(self.bordure(self.DEDIEE, batterie=True, ecran="allume"), ["figee", "figee 8"])
         self.assertEqual(self.bordure(self.HYBRIDE, ecran="allume"), ["figee", "figee 8"])
+
+    def test_mode_jeu_rallumage_ne_relance_pas_la_boucle(self):
+        # Mode jeu : bordure coupée au chargement, et le rallumage de l'écran (nc-ecran on) n'y touche pas
+        self.assertEqual(self.bordure(self.DEDIEE, jeu=True, ecran="allume"), ["figee", "figee nil"])
+        self.assertEqual(self.bordure(self.DEDIEE, jeu=True, ecran="eteint"), ["figee", "figee nil"])
 
     def test_rechargement_ecran_eteint_ne_relance_pas_la_boucle(self):
         # La marque de nc-ecran existe : le chargement de la config donne tout de suite la version calme
