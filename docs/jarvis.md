@@ -145,6 +145,25 @@ L’ancien backend reste utilisable pour le chat ; le cockpit indique que l’ad
 La route upstream `/api/stream` attend la réponse complète avant de la découper. Le client garde donc une attente
 réelle puis la réponse complète ; il ne présente pas cette découpe comme une génération de tokens en direct.
 
+## Vérifier avant de déployer
+
+```sh
+nc-jarvis verifier                 # tous les moteurs d'IA
+nc-jarvis verifier --moteur claude # un seul : agy, codex, claude ou opencode
+```
+
+Une liste de contrôle, en ✓ (bon), ✗ (bloque) et ! (avertissement, ne bloque pas). Elle n'installe rien et ne
+modifie rien : pour chaque ✗ elle donne la commande exacte de ta distribution (`apt`, `dnf`, `pacman` ou `zypper`,
+d'après `/etc/os-release`). Code de sortie 0 si rien ne bloque, 1 sinon. Elle contrôle : Git ; Python 3.11 ou plus ;
+un vrai `python3 -m venv` (dans un dossier temporaire supprimé ensuite) avec pip ; le moteur d'IA, installé **et**
+connecté (`claude auth status`, `codex login status`, fichier d'identifiants d'OpenCode ; pour agy, la connexion ne se
+vérifie pas sans requête : avertissement) ; `systemd --user` ; le maintien de session (`loginctl enable-linger $USER`,
+sans quoi JARVIS s'arrête à la fermeture de la session) ; les ports 8000 et 8080 libres sur 127.0.0.1 ; au moins 2 Go
+libres ; et la présence d'un JARVIS déjà déployé (alors : `nc-jarvis deployer` pour le mettre à jour).
+
+Sur un Debian tout neuf, `python3` manque : il faut d'abord taper `sudo apt install python3 python3-venv git`,
+puis `nc-jarvis verifier` dit le reste.
+
 ## Déployer sur ce PC
 
 Ouvrir **Déploiement → Déployer sur ce PC**, ou :

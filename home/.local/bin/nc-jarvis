@@ -124,7 +124,7 @@ def langue_en():
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('commande',nargs='?',default='tableau',choices=['tableau','ile','chat','requete','deployer','serveur','agent','console'])
+    parser.add_argument('commande',nargs='?',default='tableau',choices=['tableau','ile','chat','requete','deployer','serveur','agent','verifier','console'])
     args,rest=parser.parse_known_args()
     # IA du bureau coupée : ni cockpit, ni chat, ni requêtes (le déploiement reste possible)
     if args.commande in ('tableau','ile','chat','requete','console') and ia_coupee():
@@ -150,6 +150,10 @@ def main():
             if args.commande=='serveur' and not rest:rest=['--serveur',input('Adresse SSH (utilisateur@serveur) : ').strip()]
             if args.commande=='agent':rest=['--agent']
             deployer.main(rest)
+        elif args.commande=='verifier':
+            sys.path.insert(0,str(SHARE))
+            import verifier
+            return verifier.main(rest)
         elif args.commande=='requete':
             raw=sys.stdin.buffer.readline(65537)
             if len(raw)>65536:raise ValueError('Requête trop volumineuse')

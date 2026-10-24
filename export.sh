@@ -86,6 +86,7 @@ HOME_FILES=(
   .local/bin/nc-panne
   .local/share/nc-jarvis/actions.json
   .local/share/nc-jarvis/deployer.py
+  .local/share/nc-jarvis/verifier.py
   .local/share/nc-jarvis/server/nc_gateway.py
   .local/share/nc-jarvis/server/nc_management.py
   .local/share/nc-jarvis/server/nc_runner.py
