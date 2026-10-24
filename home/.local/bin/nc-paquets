@@ -31,6 +31,26 @@ etat_nc="${XDG_STATE_HOME:-$HOME/.local/state}/nc"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 export LC_ALL=C          # sorties des gestionnaires de paquets en anglais (analysables) ; nos messages passent par t()
 
+# Le gestionnaire de paquets (pacman, dnf, apt, zypper ; vide : aucun) : celui de la distribution d'après os-release
+# (ID, puis ID_LIKE) s'il est installé, avant la simple présence des commandes (un openSUSE avec dnf, qui est dans ses
+# dépôts, passait par dnf) ; sinon, le premier présent, dans cet ordre. NC_OS_RELEASE : un autre fichier (tests)
+os_release="${NC_OS_RELEASE:-/etc/os-release}"
+osr() { sed -n "s/^$1=//p" "$os_release" 2>/dev/null | tail -1 | tr -d "\"'"; }   # lu, jamais exécuté
+os_id="$(osr ID)"
+gestionnaire() {
+  local x g
+  for x in $os_id $(osr ID_LIKE); do
+    case "$x" in
+      arch) g=pacman ;; fedora|rhel|centos|nobara) g=dnf ;; debian|ubuntu) g=apt ;; suse|opensuse*|sles|sled) g=zypper ;;
+      *) continue ;;
+    esac
+    command -v "$g" >/dev/null && { echo "$g"; return 0; }
+  done
+  for g in pacman dnf apt zypper; do command -v "$g" >/dev/null && { echo "$g"; return 0; }; done
+  return 0
+}
+pm="$(gestionnaire)"
+
 aur_outil() { [ "$(reglage MAJ_AUR)" = non ] && return 1; command -v paru 2>/dev/null || command -v yay 2>/dev/null; }
 
 # Une source qui n'a pas pu être lue (réseau, dépôt indisponible, verrou) est notée dans $echecs : « rien à mettre à
@@ -42,7 +62,7 @@ echec() { [ -n "$echecs" ] && printf '%s\n' "$1" >> "$echecs"; }
 details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local » : dépôts déjà synchronisés
   local a sortie c err
   err="$cache/.paquets-erreurs.$$"
-  if command -v pacman >/dev/null; then
+  if [ "$pm" = pacman ]; then
     # checkupdates synchronise une copie des dépôts (long) ; juste après pacman -Syu, les vrais dépôts sont à jour
     sortie=""
     if [ "${1:-}" = local ]; then sortie="$(pacman -Qu 2>/dev/null)"; c=$?; [ "$c" -le 1 ] || echec depot
@@ -56,7 +76,7 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
       [ "$c" = 0 ] || ! grep -qi 'error' "$err" || echec aur
       printf '%s\n' "$sortie" | grep -v '\[ignored\]' | awk 'NF >= 4 {print "aur\t" $1 "\t" $2 "\t" $4}'
     fi
-  elif command -v dnf >/dev/null; then
+  elif [ "$pm" = dnf ]; then
     # Sans root, dnf5 lit le cache de l'utilisateur (~/.cache/libdnf5), pas celui de root. Le compte complet (le
     # minuteur) le rafraîchit lui-même (--refresh), sans root. Juste après la mise à jour (local) : le cache de root
     # qu'elle vient de rafraîchir (sudo -n : le mot de passe encore en mémoire, rien n'est redemandé), sinon dnf sans
@@ -69,11 +89,11 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
     fi
     [ "$c" = 0 ] || [ "$c" = 100 ] || echec depot
     printf '%s\n' "$sortie" | awk 'NF == 3 && $1 ~ /\./ {n = $1; sub(/\.[^.]*$/, "", n); print "depot\t" n "\t\t" $2}'
-  elif command -v apt >/dev/null; then
+  elif [ "$pm" = apt ]; then
     sortie="$(apt list --upgradable 2>/dev/null)" || echec depot
     printf '%s\n' "$sortie" |
       sed -n 's#^\([^/]*\)/[^ ]* \([^ ]*\) [^ ]* \[upgradable from: \([^]]*\)\].*#depot\t\1\t\3\t\2#p'
-  elif command -v zypper >/dev/null; then
+  elif [ "$pm" = zypper ]; then
     # openSUSE : sans root, zypper ne rafraîchit pas les dépôts ; la liste vient de leur cache (rafraîchi par la mise à
     # jour elle-même, ou par le service de rafraîchissement de la distribution). Sortie XML : indépendante de la langue.
     # Codes 100 et plus : des informations (mises à jour, redémarrage), pas des échecs
@@ -103,13 +123,11 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
 # vraie Debian ni une vraie openSUSE. Arch (checkupdates) et Fedora (dnf --refresh) synchronisent eux-mêmes.
 age_depots() {
   local recent="" maintenant a="${NC_APT_ETAT:-/var/lib/apt}"
-  command -v pacman >/dev/null && return 0
-  command -v dnf >/dev/null && return 0
-  if command -v apt >/dev/null; then
+  if [ "$pm" = apt ]; then
     recent="$( { find "$a/lists" -maxdepth 1 \( -name '*InRelease' -o -name '*_Release' \) -printf '%T@\n'
                  find "$a/lists" "$a/lists/partial" "$a/periodic/update-success-stamp" "$etat_nc/depots-synchro" -maxdepth 0 \
                    -printf '%T@\n'; } 2>/dev/null | sort -n | tail -1)"
-  elif command -v zypper >/dev/null; then
+  elif [ "$pm" = zypper ]; then
     recent="$( { find "${NC_ZYPP_RAW:-/var/cache/zypp/raw}" -mindepth 1 -maxdepth 3 -printf '%T@\n'
                  find "$etat_nc/depots-synchro" -maxdepth 0 -printf '%T@\n'; } 2>/dev/null | sort -n | tail -1)"
   fi
@@ -124,11 +142,11 @@ age_depots() {
 # la mise à jour : le rapport donne ce qui a vraiment changé, pas la liste d'attente d'avant (une version plus récente
 # sortie entre-temps, un paquet retenu par apt). Même ordre que details() : pacman, puis rpm (dnf, zypper), puis dpkg.
 installes() {
-  if command -v pacman >/dev/null; then
+  if [ "$pm" = pacman ]; then
     local etrangers; etrangers="$(pacman -Qmq 2>/dev/null)"     # hors dépôts : l'AUR
     pacman -Q 2>/dev/null | awk -v e="$etrangers" 'BEGIN { n = split(e, l, "\n"); for (i = 1; i <= n; i++) m[l[i]] = 1 }
       NF >= 2 { print (($1 in m) ? "aur" : "depot") "\t" $1 "\t" $2 }'
-  elif command -v rpm >/dev/null && { command -v dnf || command -v nobara-sync || command -v zypper; } >/dev/null; then
+  elif { [ "$pm" = dnf ] || [ "$pm" = zypper ]; } && command -v rpm >/dev/null; then
     rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' 2>/dev/null | awk -F'\t' 'NF >= 2 && $1 != "gpg-pubkey" {print "depot\t" $1 "\t" $2}'
   elif command -v dpkg-query >/dev/null; then
     # Seulement les paquets installés (« ii », « hi » : retenu), pas ceux dont il ne reste que la configuration
@@ -514,7 +532,7 @@ attente_arch() {
 # sautait l'instantané. sudo -n refusé : compte inconnu
 attente_rpm() {
   local s c
-  if command -v dnf >/dev/null; then
+  if [ "$pm" = dnf ]; then
     s="$(sudo -n dnf -q check-update -C 2>/dev/null)"; c=$?
     case "$c" in 0) echo 0 ;; 100) printf '%s\n' "$s" | awk 'NF == 3 && $1 ~ /\./' | grep -c . ;; *) echo "?" ;; esac
   else
@@ -652,7 +670,7 @@ case "$action" in
     rm -f "$cache/paquets-avant.json"          # l'ancien rapport (la liste d'attente d'avant) : plus utilisé
     erreurs_f="$(mktemp "$cache/.maj-erreurs.XXXXXX" 2>/dev/null)" || erreurs_f="$cache/.maj-erreurs.$$"
     rien="$(t "Dépôts : rien à mettre à jour." "Repositories: nothing to update.")"
-    if command -v pacman >/dev/null; then
+    if [ "$pm" = pacman ]; then
       # Arch : ce qui attend, sans toucher la vraie base (attente_arch) ; puis, seulement s'il y a quelque chose,
       # l'instantané (seuls 3 sont gardés : jamais pour rien) et -Syu d'un seul coup. paru ou yay font les dépôts et
       # l'AUR (ils demandent eux-mêmes le mot de passe)
@@ -662,7 +680,7 @@ case "$action" in
         t "Dépôts et AUR : rien à mettre à jour." "Repositories and AUR: nothing to update."; echo
       elif instantane; then etape "${outil[@]}" -Syu || noter $?
       else annule=1; fi
-    elif command -v dnf >/dev/null; then
+    elif [ "$pm" = dnf ]; then
       # dnf et Nobara : la synchronisation d'abord, pour décider de l'instantané sur un compte à jour
       if etape sudo dnf makecache --refresh; then
         attente="$(attente_rpm)"
@@ -676,7 +694,7 @@ case "$action" in
           else noter $?; fi
         else annule=1; fi
       else noter $?; fi
-    elif command -v apt >/dev/null; then
+    elif [ "$pm" = apt ]; then
       # apt : la synchronisation d'abord, puis l'instantané seulement s'il y a quelque chose à mettre à jour
       if etape sudo apt update; then
         synchro_faite
@@ -684,13 +702,14 @@ case "$action" in
           etape sudo apt full-upgrade || noter $?
         else annule=1; fi
       else noter $?; fi
-    elif command -v zypper >/dev/null; then
-      # Tumbleweed et Slowroll : mise à jour de la distribution (zypper dup), comme le recommande openSUSE ; la
-      # synchronisation d'abord. Sans paquet à mettre à jour, zypper dup passe quand même (il peut changer un
-      # fournisseur), sans instantané
+    elif [ "$pm" = zypper ]; then
+      # Tumbleweed et Slowroll : mise à jour de la distribution (zypper dup), comme le recommande openSUSE ; Leap (et
+      # SLE), version fixe : zypper up (dup y sert au passage à la version suivante). La synchronisation d'abord. Sans
+      # paquet à mettre à jour, zypper passe quand même (dup peut changer un fournisseur), sans instantané
+      case "$os_id" in opensuse-leap|sles|sled) zyp=up ;; *) zyp=dup ;; esac
       if etape sudo zypper refresh; then
         synchro_faite
-        if [ "$(attente_rpm)" = 0 ] || instantane; then etape sudo zypper dup || noter $?; else annule=1; fi
+        if [ "$(attente_rpm)" = 0 ] || instantane; then etape sudo zypper "$zyp" || noter $?; else annule=1; fi
       else noter $?; fi
     elif command -v flatpak >/dev/null; then
       # Flatpak seul (Silverblue, une distribution que nc-paquets ne connaît pas) : pas un échec

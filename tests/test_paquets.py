@@ -335,6 +335,36 @@ esac
                            input="\n", capture_output=True, text=True, timeout=20)
         self.assertIn("zypper dup", self.appels(), "la mise à jour passe par zypper dup")
 
+    def test_distribution_lue_dans_os_release(self):
+        """Le gestionnaire vient de /etc/os-release (ID, puis ID_LIKE) avant la présence des commandes : un openSUSE
+        avec dnf installé passait par dnf. Leap : zypper up (dup y sert au passage à la version suivante)."""
+        nu = self.home / "nu"; nu.mkdir()
+        for p in (self.home / "sys").iterdir():
+            (nu / p.name).symlink_to(os.readlink(p))
+        for nom in ("zypper", "dnf", "rpm"):
+            (nu / nom).write_text(f'#!/bin/sh\necho "{nom} $*" >> "$HOME/appels"\nexit 0\n'); (nu / nom).chmod(0o755)
+        (nu / "sudo").symlink_to(self.home / "bin/sudo")
+        os_release = self.home / "os-release"
+        for ident, attendu in (('ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"\n', "zypper dup"),
+                               ('ID="opensuse-leap"\nID_LIKE="suse opensuse"\n', "zypper up"),
+                               ('ID=sles\nID_LIKE=suse\n', "zypper up")):
+            with self.subTest(ident=ident):
+                os_release.write_text(ident)
+                (self.home / "appels").unlink(missing_ok=True)
+                self.lancer("compter", PATH=str(nu), NC_OS_RELEASE=str(os_release))
+                self.assertIn("zypper --non-interactive --no-refresh --xmlout list-updates", self.appels())
+                self.assertFalse([a for a in self.appels() if a.startswith("dnf")], self.appels())
+                (self.home / "appels").unlink()
+                self.lancer("terminal", PATH=str(nu), NC_OS_RELEASE=str(os_release))
+                zyp = [a for a in self.appels() if a.startswith("zypper") and "list-updates" not in a]
+                self.assertEqual(zyp, ["zypper refresh", attendu], self.appels())
+                self.assertFalse([a for a in self.appels() if a.startswith("dnf")], self.appels())
+        # Une distribution inconnue (ou sans os-release) : le premier présent, comme avant (dnf avant zypper)
+        os_release.write_text('ID=inconnue\n')
+        (self.home / "appels").unlink()
+        self.lancer("compter", PATH=str(nu), NC_OS_RELEASE=str(os_release))
+        self.assertIn("dnf -q check-update --refresh", self.appels())
+
     def test_paquets_restants_et_ignores(self):
         r = self.lancer("terminal", NC_TEST_LOCAL="linux 6.1-1 -> 6.2-1\nnvidia 1-1 -> 1-2 [ignored]\n")
         self.assertEqual(r.returncode, 0, r.stderr)
