@@ -4,14 +4,21 @@
   nc-diag ia         le bilan expliqué par l'IA du bureau, avec quoi faire (s'il y a quelque chose à corriger)
   nc-diag rapport    le même bilan en texte simple, copié dans le presse-papiers : à envoyer pour avoir de l'aide
   nc-diag court      seulement ce qui cloche (lancé par nc-maj après chaque mise à jour)
-Ne change rien sur le PC.
+  nc-diag --json [--rapide]    ce qui cloche et les réparations proposées, en JSON (île, nc-ia) ; --rapide saute le plus long
+  nc-diag reparer ID [--json]  une réparation proposée par --json (redémarrer un service en échec…), et rien d'autre
+Ne change rien sur le PC, sauf « nc-diag reparer ».
 """
+import contextlib
+import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
@@ -48,14 +55,22 @@ DOC_EN = """nc-diag: checks the whole noctalia-config installation and tells you
   nc-diag ai         the summary explained by the desktop AI, with what to do (if something needs fixing)
   nc-diag report     the same summary as plain text, copied to the clipboard: send it when asking for help
   nc-diag short      only what is wrong (run by nc-update after each update)
-Changes nothing on the PC.
+  nc-diag --json [--rapide]    what is wrong and the proposed repairs, as JSON (island, nc-ai); --rapide skips the slowest
+  nc-diag repair ID [--json]   one repair proposed by --json (restart a failed service…), and nothing else
+Changes nothing on the PC, except “nc-diag repair”.
 """
 
 HOME = os.path.expanduser("~")
 BIN = os.path.join(HOME, ".local/bin")
 
 
-def sortie(cmd, delai=5):
+# « nc-diag --json --rapide » (Spotlight, nc-ia) : les vérifications longues sautées, chaque délai borné à 3 s
+RAPIDE = False
+
+
+def sortie(cmd, delai=5, plafond=3):
+    if RAPIDE:
+        delai = min(delai, plafond)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=delai)
         return (r.stdout + r.stderr).strip(), r.returncode
@@ -67,24 +82,106 @@ def a(cmd):
     return shutil.which(cmd) is not None
 
 
+# ── Réparations : une table FIXE, « nc-diag reparer ID » ne lance rien d'autre ──
+# Unités de la session qu'on a le droit de (re)démarrer : (nom français, nom anglais), avec l'article
+UNITES = {
+    "noctalia.service": ("la barre de Noctalia", "the Noctalia bar"),
+    "nc-ile.service": ("l'île dynamique", "the dynamic island"),
+    "nc-profile-sync.service": ("les profils d'énergie", "the power profiles"),
+    "nc-pouls.service": ("le halo musical", "the music glow"),
+    "nc-ecran-externe.service": ("les écrans externes", "the external screens"),
+    "hypridle.service": ("la veille automatique", "automatic sleep"),
+    "nc-theme-sync.path": ("les couleurs du fond d'écran", "the wallpaper colors"),
+    "nc-couvercle.service": ("le couvercle", "the lid"),
+    "xdg-desktop-portal-hyprland.service": ("le portail de Hyprland (partage d'écran)", "the Hyprland portal (screen sharing)"),
+    "plasma-polkit-agent.service": ("l'agent des mots de passe (polkit)", "the password prompt agent (polkit)"),
+}
+# Pas de « demarrer » pour nc-pouls (coupé exprès par Super + Alt + M : arrêté n'est pas une panne) ni pour nc-couvercle
+# (inactif quand on n'a pas choisi « l'écran s'éteint, le PC continue ») : seulement les redémarrer s'ils sont en échec.
+# Noctalia : « redemarrer » dès qu'elle ne répond pas ; la démarrer à côté d'une barre lancée hors de systemd en ferait deux
+SANS_DEMARRER = ("nc-pouls.service", "nc-couvercle.service", "noctalia.service")
+ID_UNITE = re.compile(r"(redemarrer|demarrer):[a-z0-9-]+\.(service|path)")
+NOMS_FIXES = ("ia_conf_prive",)
+
+
+def _table():
+    t = {}
+    for u, (fr, en) in UNITES.items():
+        ile = u == "nc-ile.service"
+        t["redemarrer:" + u] = {
+            "libelle": T(f"Redémarrer {fr}", f"Restart {en}"),
+            "detail": T("L'île se ferme et revient ; une notification le dit." if ile else
+                        f"{u} est en échec : son compteur est remis à zéro, puis il est redémarré.",
+                        "The island closes and comes back; a notification says so." if ile else
+                        f"{u} failed: its counter is reset, then it is restarted."),
+            "danger": ile, "ferme_ile": ile}
+        if u not in SANS_DEMARRER:
+            t["demarrer:" + u] = {
+                "libelle": T(f"Démarrer {fr} (pour cette session)", f"Start {en} (for this session)"),
+                "detail": T(f"{u} est arrêté, peut-être coupé exprès : démarré pour cette session seulement, rien n'est "
+                            "activé au démarrage du PC.",
+                            f"{u} is stopped, maybe on purpose: started for this session only, nothing is enabled at boot."),
+                "danger": False, "ferme_ile": False}
+    t["ia_conf_prive"] = {
+        "libelle": T("Protéger le fichier des clés d'IA", "Protect the AI keys file"),
+        "detail": T("chmod 600 ~/.config/nc/ia.conf : lisible par toi seul.", "chmod 600 ~/.config/nc/ia.conf: readable by you only."),
+        "danger": False, "ferme_ile": False}
+    return t
+
+
+REPARATIONS = _table()
+
+
+def id_valide(ident):
+    """Un id de réparation connu : la grammaire (unités) ou un nom fixe, ET présent dans la table. Rien d'autre."""
+    return (isinstance(ident, str) and (ID_UNITE.fullmatch(ident) is not None or ident in NOMS_FIXES)
+            and ident in REPARATIONS)
+
+
+def unite_chargee(u):
+    """Vrai si systemd connaît l'unité (LoadState=loaded) : une unité absente ne se démarre pas."""
+    v, code = sortie(["systemctl", "--user", "show", "-p", "LoadState", "--value", u])
+    return code == 0 and v.strip() == "loaded"
+
+
+def proposer(u, etat):
+    """Les réparations d'une unité selon son état : la redémarrer si elle est en échec, la démarrer (pour la session)
+    si elle est seulement arrêtée et existe ; rien sinon (hors session, état illisible, unité absente)."""
+    if etat == "failed":
+        return ["redemarrer:" + u]
+    if etat == "inactive" and "demarrer:" + u in REPARATIONS and unite_chargee(u):
+        return ["demarrer:" + u]
+    return []
+
+
 class Bilan:
+    """lignes : (genre, texte, quoi) pour le texte ; constats : les ! et ✗ avec leur clé stable (cle) et les réparations
+    proposées (ids de REPARATIONS), pour « nc-diag --json »."""
     def __init__(self, couleurs):
-        self.lignes, self.ko, self.attention = [], 0, 0
+        self.lignes, self.ko, self.attention, self.nb_ok = [], 0, 0, 0
+        self.constats, self.section = [], ""
         self.c = couleurs
 
     def titre(self, t):
+        self.section = t
         self.lignes.append(("titre", t, ""))
 
     def ok(self, t):
+        self.nb_ok += 1
         self.lignes.append(("ok", t, ""))
 
-    def avert(self, t, quoi=""):
-        self.attention += 1
-        self.lignes.append(("avert", t, quoi))
+    def _constat(self, niveau, t, quoi, cle, reparations):
+        self.lignes.append((niveau, t, quoi))
+        self.constats.append({"cle": cle or "autre", "niveau": niveau, "section": self.section, "texte": t, "quoi": quoi,
+                              "reparations": [x for x in reparations if x in REPARATIONS]})
 
-    def faux(self, t, quoi=""):
+    def avert(self, t, quoi="", cle="", reparations=()):
+        self.attention += 1
+        self._constat("avert", t, quoi, cle, reparations)
+
+    def faux(self, t, quoi="", cle="", reparations=()):
         self.ko += 1
-        self.lignes.append(("faux", t, quoi))
+        self._constat("faux", t, quoi, cle, reparations)
 
     def texte(self, court=False):
         if self.c:
@@ -128,14 +225,15 @@ def verifier(b):
     else:
         b.avert(T("dépôt noctalia-config introuvable", "noctalia-config repository not found"),
                 T("relance install.sh depuis le dépôt cloné (nc-maj en a besoin)",
-                  "run install.sh again from the cloned repository (nc-update needs it)"))
+                  "run install.sh again from the cloned repository (nc-update needs it)"), cle="depot_introuvable")
     dossiers_xdg(b)
 
     # ── Hyprland ──
     b.titre("Hyprland")
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         b.faux(T("pas dans une session Hyprland", "not in a Hyprland session"),
-               T("lance nc-diag depuis un terminal de ta session Hyprland", "run nc-diag from a terminal in your Hyprland session"))
+               T("lance nc-diag depuis un terminal de ta session Hyprland", "run nc-diag from a terminal in your Hyprland session"),
+               cle="hors_session")
     else:
         v, _ = sortie(["hyprctl", "version", "-j"])
         try:
@@ -148,7 +246,8 @@ def verifier(b):
         if err:
             premiere = err.splitlines()[0][:160]
             b.faux(T(f"erreur dans la config Hyprland : {premiere}", f"error in the Hyprland config: {premiere}"),
-                   T("nc-maj ; si ça reste, envoie « nc-diag rapport »", "nc-update; if it persists, send “nc-diag report”"))
+                   T("nc-maj ; si ça reste, envoie « nc-diag rapport »", "nc-update; if it persists, send “nc-diag report”"),
+                   cle="hyprland_config")
         else:
             b.ok(T("config Hyprland sans erreur", "Hyprland config has no errors"))
     # Marqueurs @…@ jamais remplis (fichier copié à la main depuis le dépôt) : casse la config
@@ -170,7 +269,7 @@ def verifier(b):
     if restes:
         b.faux(T("fichiers jamais complétés par l'installation : ", "files never completed by the installer: ") + ", ".join(restes[:3]),
                T("relance install.sh (ne copie pas les fichiers du dépôt à la main)",
-                 "run install.sh again (do not copy the repository files by hand)"))
+                 "run install.sh again (do not copy the repository files by hand)"), cle="marqueurs_restes")
 
     # ── Noctalia et l'île ──
     b.titre(T("Barre et île", "Bar and island"))
@@ -179,52 +278,60 @@ def verifier(b):
         b.ok(v.splitlines()[0] if v else T("Noctalia installée", "Noctalia installed"))
         _, code = sortie(["noctalia", "msg", "status"])
         if code != 0:
-            b.faux(T("Noctalia ne tourne pas", "Noctalia is not running"), "systemctl --user restart noctalia.service")
+            b.faux(T("Noctalia ne tourne pas", "Noctalia is not running"), "systemctl --user restart noctalia.service",
+                   cle="noctalia_arretee",
+                   reparations=["redemarrer:noctalia.service"] if unite_chargee("noctalia.service") else [])
         val, code = sortie(["noctalia", "config", "validate"], 15)
         if code != 0:
             ligne = next((l for l in val.splitlines() if "ERR" in l or "error" in l.lower()), val.splitlines()[-1] if val else "")
-            b.faux(T(f"config de Noctalia : {ligne[:160]}", f"Noctalia config: {ligne[:160]}"), T("nc-maj", "nc-update"))
+            b.faux(T(f"config de Noctalia : {ligne[:160]}", f"Noctalia config: {ligne[:160]}"), T("nc-maj", "nc-update"),
+                   cle="noctalia_config")
     else:
-        b.faux(T("Noctalia n'est pas installée", "Noctalia is not installed"), T("relance install.sh", "run install.sh again"))
+        b.faux(T("Noctalia n'est pas installée", "Noctalia is not installed"), T("relance install.sh", "run install.sh again"),
+               cle="noctalia_absente")
     if a("qs"):
         v, _ = sortie(["qs", "--version"])
         qv = (re.findall(r"\d+\.\d+(?:\.\d+)?", v) or ["?"])[0]
         if qv != "?" and tuple(int(x) for x in qv.split(".")[:2]) < (0, 3):
             b.avert(T(f"Quickshell {qv} : l'île demande la 0.3", f"Quickshell {qv}: the island needs 0.3"),
                     T("mets Quickshell à jour (Fedora : COPR errornointernet/quickshell)",
-                      "update Quickshell (Fedora: COPR errornointernet/quickshell)"))
+                      "update Quickshell (Fedora: COPR errornointernet/quickshell)"), cle="quickshell_ancien")
         else:
             b.ok(T(f"Quickshell {qv} (île dynamique)", f"Quickshell {qv} (dynamic island)"))
         capture = os.path.join(HOME, ".local/bin/nc-qs-capture")
-        if not os.path.isfile(capture):
+        if RAPIDE:
+            pass                                    # nc-qs-capture lance deux fois « qs -p » : trop long pour le Spotlight
+        elif not os.path.isfile(capture):
             b.avert(T("vérificateur des modules Quickshell absent", "Quickshell module checker missing"),
-                    T("réinstalle les fichiers de la configuration", "reinstall the configuration files"))
+                    T("réinstalle les fichiers de la configuration", "reinstall the configuration files"), cle="qs_verificateur_absent")
         elif sortie(["bash", capture, "--modules"], 15)[1] != 0:
             b.avert(T("modules Quickshell incomplets : l'île Quickshell ne peut pas être sélectionnée",
                       "Quickshell modules incomplete: the Quickshell island cannot be selected"),
                     T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
-                      "run nc-update again; on Debian, accept rebuilding Quickshell"))
+                      "run nc-update again; on Debian, accept rebuilding Quickshell"), cle="qs_modules")
         elif sortie(["bash", capture], 15)[1] != 0:
             b.avert(T("Quickshell sans capture ou sans réseau : vue des fenêtres (Super + A) ou suivi de la connexion indisponible, le reste de l'île marche",
                       "Quickshell without capture or networking: window overview (Super + A) or connection tracking unavailable, the rest of the island works"),
                     T("relance nc-maj ; sur Debian, accepte la recompilation de Quickshell",
-                      "run nc-update again; on Debian, accept rebuilding Quickshell"))
+                      "run nc-update again; on Debian, accept rebuilding Quickshell"), cle="qs_capture")
         _, active = sortie(["systemctl", "--user", "is-enabled", "nc-ile.service"])
         if active != 0:
             b.avert(T("île simplifiée du plugin Noctalia (l'île Quickshell n'est pas activée)",
                       "simplified island of the Noctalia plugin (the Quickshell island is not enabled)"),
-                    T("relance install.sh", "run install.sh again"))
-        elif sortie(["systemctl", "--user", "is-active", "nc-ile.service"])[1] != 0:
+                    T("relance install.sh", "run install.sh again"), cle="ile_desactivee")
+        elif (ile := sortie(["systemctl", "--user", "is-active", "nc-ile.service"]))[1] != 0:
             b.faux(T("l'île dynamique ne tourne pas", "the dynamic island is not running"),
                    T("systemctl --user restart nc-ile.service ; journal : qs -c nc-ile log",
-                     "systemctl --user restart nc-ile.service; log: qs -c nc-ile log"))
+                     "systemctl --user restart nc-ile.service; log: qs -c nc-ile log"),
+                   cle="ile_arretee", reparations=proposer("nc-ile.service", ile[0].strip()))
         elif not os.path.exists(os.path.join(HOME, ".local/share/fonts/MaterialSymbolsRounded.ttf")):
             b.avert(T("police des icônes de l'île absente (carrés à la place des icônes)",
                       "island icon font missing (squares instead of icons)"),
-                    T("relance install.sh, qui la télécharge", "run install.sh again, it downloads it"))
+                    T("relance install.sh, qui la télécharge", "run install.sh again, it downloads it"), cle="ile_police")
     else:
         b.avert(T("Quickshell absent : île simplifiée du plugin Noctalia", "Quickshell missing: simplified island of the Noctalia plugin"),
-                T("relance install.sh (il propose de l'installer)", "run install.sh again (it offers to install it)"))
+                T("relance install.sh (il propose de l'installer)", "run install.sh again (it offers to install it)"),
+                cle="quickshell_absent")
 
     # ── Services ──
     b.titre(T("Services de la session", "Session services"))
@@ -244,9 +351,10 @@ def verifier(b):
         elif etat == "failed":
             journal, _ = sortie(["journalctl", "--user", "-u", s, "-n", "3", "--no-pager", "-o", "cat"])
             b.faux(T(f"{nom} ({s}) en échec : ", f"{nom} ({s}) failed: ") + (journal.splitlines()[-1][:140] if journal else ""),
-                   f"systemctl --user restart {s}")
+                   f"systemctl --user restart {s}", cle="service:" + s, reparations=proposer(s, etat))
         else:
-            b.avert(T(f"{nom} ({s}) : {etat or 'inconnu'}", f"{nom} ({s}): {etat or 'unknown'}"), f"systemctl --user enable --now {s}")
+            b.avert(T(f"{nom} ({s}) : {etat or 'inconnu'}", f"{nom} ({s}): {etat or 'unknown'}"), f"systemctl --user enable --now {s}",
+                    cle="service:" + s, reparations=proposer(s, etat))
 
     # Demandes de mot de passe (polkit) : l'agent de Noctalia (polkit_agent = true), sinon un agent qui tourne
     try:
@@ -261,7 +369,9 @@ def verifier(b):
         else:
             b.faux(T("aucun agent polkit : les fenêtres de mot de passe des applis ne s'affichent pas",
                      "no polkit agent: apps' password windows don't show"),
-                   "systemctl --user reset-failed plasma-polkit-agent.service; systemctl --user start plasma-polkit-agent.service")
+                   "systemctl --user reset-failed plasma-polkit-agent.service; systemctl --user start plasma-polkit-agent.service",
+                   cle="polkit_absent", reparations=proposer("plasma-polkit-agent.service", sortie(
+                       ["systemctl", "--user", "is-active", "plasma-polkit-agent.service"])[0].strip()))
 
     # ── Énergie ──
     b.titre(T("Énergie", "Power"))
@@ -276,7 +386,7 @@ def verifier(b):
         b.avert(T("pas de service de profils d'énergie (Performance / Équilibré / Économie)",
                   "no power profile service (Performance / Balanced / Power Saver)"),
                 T("relance install.sh (TLP + tlp-pd, ou power-profiles-daemon / tuned-ppd)",
-                  "run install.sh again (TLP + tlp-pd, or power-profiles-daemon / tuned-ppd)"))
+                  "run install.sh again (TLP + tlp-pd, or power-profiles-daemon / tuned-ppd)"), cle="profils_energie")
     bats = [d for d in os.listdir("/sys/class/power_supply") if d.startswith("BAT")] if os.path.isdir("/sys/class/power_supply") else []
     if bats:
         v, _ = sortie([os.path.join(BIN, "nc-sysinfo"), "sante"])
@@ -288,10 +398,11 @@ def verifier(b):
             b.avert(T("aucun rétroéclairage : les touches de luminosité ne feront rien",
                       "no backlight: the brightness keys will do nothing"),
                     T("écran externe seul, ou pilote graphique pas encore chargé",
-                      "external screen only, or graphics driver not loaded yet"))
+                      "external screen only, or graphics driver not loaded yet"), cle="retroeclairage")
         energie_processeur(b, bats)
 
-    rtx(b)
+    if not RAPIDE:
+        rtx(b)
 
     # ── Partage d'écran et applis Electron (Discord, VS Code…) : portails ──
     b.titre(T("Partage d'écran (Discord, navigateur…)", "Screen sharing (Discord, browser…)"))
@@ -302,7 +413,8 @@ def verifier(b):
         b.faux(T("portail de Hyprland arrêté : le partage d'écran sera noir",
                  "Hyprland portal stopped: screen sharing will be black"),
                T("installe xdg-desktop-portal-hyprland (nc-maj), puis déconnecte-toi et reconnecte-toi",
-                 "install xdg-desktop-portal-hyprland (nc-update), then log out and back in"))
+                 "install xdg-desktop-portal-hyprland (nc-update), then log out and back in"),
+               cle="portail_arrete", reparations=proposer("xdg-desktop-portal-hyprland.service", actif.strip()))
     conf = os.path.join(HOME, ".config/xdg-desktop-portal/hyprland-portals.conf")
     autres = [n for n, f in (("GNOME", "gnome-portals.conf"), ("KDE", "kde-portals.conf"))
               if os.path.exists("/usr/share/xdg-desktop-portal/" + f)]
@@ -313,21 +425,24 @@ def verifier(b):
         b.faux(T(f"le portail de {', '.join(autres)} peut être pris : applis Electron lentes à démarrer, partage d'écran noir",
                  f"the {', '.join(autres)} portal may be used: Electron apps slow to start, black screen sharing"),
                T("nc-maj (installe ~/.config/xdg-desktop-portal/hyprland-portals.conf), puis déconnecte-toi",
-                 "nc-update (installs ~/.config/xdg-desktop-portal/hyprland-portals.conf), then log out"))
+                 "nc-update (installs ~/.config/xdg-desktop-portal/hyprland-portals.conf), then log out"),
+               cle="portail_concurrent")
     else:
-        b.avert(T("portails non choisis explicitement", "portals not set explicitly"), T("nc-maj", "nc-update"))
+        b.avert(T("portails non choisis explicitement", "portals not set explicitly"), T("nc-maj", "nc-update"),
+                cle="portails_non_choisis")
     if not a("hyprland-share-picker"):
         b.avert(T("hyprland-share-picker absent : pas de choix de l'écran ou de la fenêtre à partager",
                   "hyprland-share-picker missing: no way to choose the screen or window to share"),
                 T("il vient avec xdg-desktop-portal-hyprland (ou hyprland-qtutils selon la distribution)",
-                  "it comes with xdg-desktop-portal-hyprland (or hyprland-qtutils depending on the distribution)"))
+                  "it comes with xdg-desktop-portal-hyprland (or hyprland-qtutils depending on the distribution)"),
+                cle="share_picker_absent")
     attente, _ = sortie(["sh", "-c", "s=$(date +%s%N); busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop "
                         "org.freedesktop.portal.Settings ReadOne ss org.freedesktop.appearance color-scheme >/dev/null 2>&1; "
-                        "echo $(( ($(date +%s%N) - s) / 1000000 ))"], 30)
+                        "echo $(( ($(date +%s%N) - s) / 1000000 ))"], 30, plafond=5)
     if attente.strip().isdigit() and int(attente) > 2000:
         b.faux(T(f"le portail répond en {int(attente) / 1000:.0f} s : les applis Electron (Discord…) démarrent lentement",
                  f"the portal answers in {int(attente) / 1000:.0f} s: Electron apps (Discord…) start slowly"),
-               T("nc-maj, puis déconnecte-toi et reconnecte-toi", "nc-update, then log out and back in"))
+               T("nc-maj, puis déconnecte-toi et reconnecte-toi", "nc-update, then log out and back in"), cle="portail_lent")
 
     # ── Wi-Fi : veille entre deux paquets (messages en retard, voix des autres coupée en appel) ──
     b.titre("Wi-Fi")
@@ -337,7 +452,8 @@ def verifier(b):
             b.avert(T(f"Wi-Fi ({carte}) en veille entre deux paquets : messages en retard, voix des autres coupée en appel",
                       f"Wi-Fi ({carte}) sleeps between packets: late messages, other people's voices cut out in calls"),
                     T("nc-maj (désactive cette veille), ou tout de suite : sudo iw dev ",
-                      "nc-update (turns this power saving off), or right now: sudo iw dev ") + carte + " set power_save off")
+                      "nc-update (turns this power saving off), or right now: sudo iw dev ") + carte + " set power_save off",
+                    cle="wifi_veille:" + carte)
         elif "Power save: off" in ps_:
             b.ok(T(f"Wi-Fi ({carte}) réactif (pas de veille entre deux paquets)",
                    f"Wi-Fi ({carte}) responsive (no sleep between packets)"))
@@ -352,19 +468,8 @@ def verifier(b):
         "wf-recorder": T("vidéos de l'écran", "screen recordings"), "tesseract": T("copier le texte d'une capture", "copy text from a screenshot"),
         "fastfetch": T("accueil du terminal", "terminal greeting"), "magick": T("fonds d'écran", "wallpapers"),
     }
-    manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c) and not (c == "magick" and a("convert"))]   # ImageMagick 6 : convert
-    if manquants:
-        b.avert(T("absents : ", "missing: ") + ", ".join(manquants),
-                T("relance install.sh, ou installe-les avec ton gestionnaire de paquets",
-                  "run install.sh again, or install them with your package manager"))
-    else:
-        b.ok(T("tous présents", "all present"))
-    polices, _ = sortie(["fc-list", ":", "family"])
-    if "Nerd Font" not in polices:
-        b.avert(T("aucune police « Nerd Font » : icônes du terminal en carrés", "no “Nerd Font” font: terminal icons show as squares"),
-                T("relance install.sh (étape du terminal)", "run install.sh again (terminal step)"))
-    neovim(b)
-    npm_node(b)
+    if not RAPIDE:
+        outils_polices(b, outils)
 
     # ── Intelligence artificielle (nc-ia) : sans réseau, sans clé affichée ──
     b.titre(T("Intelligence artificielle", "Artificial intelligence"))
@@ -378,23 +483,24 @@ def verifier(b):
             b.avert(T("aucune IA disponible : Spotlight « ? », texte, terminal et captures sans réponse",
                       "no AI available: Spotlight “?”, text, terminal and screenshots get no answer"),
                     T("nc-ia configurer (une clé d'API), ou installe Claude Code, Codex, Gemini CLI, OpenCode ou Ollama",
-                      "nc-ai configure (an API key), or install Claude Code, Codex, Gemini CLI, OpenCode or Ollama"))
+                      "nc-ai configure (an API key), or install Claude Code, Codex, Gemini CLI, OpenCode or Ollama"), cle="ia_aucune")
         else:
             q = e["usages"]["question"]["nom"]
             b.ok(T(f"{q} répond ({len(dispo)} disponible(s) : {', '.join(dispo[:5])})",
                    f"{q} answers ({len(dispo)} available: {', '.join(dispo[:5])})"))
             if e["mode"] == "manuel" and not q:
                 b.avert(T("l'IA choisie à la main n'est pas disponible", "the AI chosen manually is not available"),
-                        T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"))
+                        T("nc-reglages → Intelligence artificielle", "nc-settings → Artificial intelligence"), cle="ia_manuelle_absente")
             if not e["usages"]["image"]["nom"]:
                 b.avert(T("aucune IA disponible ne lit les images (Super + Maj + I)", "no available AI reads images (Super + Shift + I)"),
-                        T("une clé Anthropic, OpenAI ou Gemini, Claude Code, Codex ou Ollama", "an Anthropic, OpenAI or Gemini key, Claude Code, Codex or Ollama"))
+                        T("une clé Anthropic, OpenAI ou Gemini, Claude Code, Codex ou Ollama", "an Anthropic, OpenAI or Gemini key, Claude Code, Codex or Ollama"),
+                        cle="ia_images")
         conf = os.path.join(HOME, ".config/nc/ia.conf")
         if os.path.exists(conf) and os.stat(conf).st_mode & 0o077:
             b.faux(T("~/.config/nc/ia.conf lisible par d'autres comptes (clés d'API)", "~/.config/nc/ia.conf readable by other accounts (API keys)"),
-                   "chmod 600 ~/.config/nc/ia.conf")
+                   "chmod 600 ~/.config/nc/ia.conf", cle="ia_conf_lisible", reparations=["ia_conf_prive"])
     except (ValueError, KeyError, TypeError):
-        b.avert(T("nc-ia ne répond pas", "nc-ai does not respond"), T("nc-maj", "nc-update"))
+        b.avert(T("nc-ia ne répond pas", "nc-ai does not respond"), T("nc-maj", "nc-update"), cle="ia_muette")
     # Dictée (Super + D) : un enregistreur, et de quoi écrire dans la fenêtre (revue DIST-01)
     try:
         dictee = "IA_DICTEE=non" not in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8").read().replace('"', "")
@@ -407,10 +513,11 @@ def verifier(b):
             b.avert(T("dictée impossible : aucun enregistreur audio (pw-record, parec ou arecord)",
                       "dictation impossible: no audio recorder (pw-record, parec or arecord)"),
                     T("relance install.sh (paquet pipewire-audio, pipewire-utils, pipewire-bin ou pipewire-tools selon ta distribution)",
-                      "run install.sh again (package pipewire-audio, pipewire-utils, pipewire-bin or pipewire-tools depending on your distribution)"))
+                      "run install.sh again (package pipewire-audio, pipewire-utils, pipewire-bin or pipewire-tools depending on your distribution)"),
+                    cle="dictee_enregistreur")
         elif not ecrit:
             b.avert(T("dictée : rien pour écrire le texte (ni wtype, ni wl-copy)", "dictation: nothing to type the text (neither wtype nor wl-copy)"),
-                    T("relance install.sh (wtype, wl-clipboard)", "run install.sh again (wtype, wl-clipboard)"))
+                    T("relance install.sh (wtype, wl-clipboard)", "run install.sh again (wtype, wl-clipboard)"), cle="dictee_ecriture")
         else:
             b.ok(T(f"dictée : {enr}, texte {'tapé (wtype)' if ecrit == 'wtype' else 'collé (wl-copy)'}",
                    f"dictation: {enr}, text {'typed (wtype)' if ecrit == 'wtype' else 'pasted (wl-copy)'}"))
@@ -434,6 +541,23 @@ def verifier(b):
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
 
 
+def outils_polices(b, outils):
+    """Outils absents, police Nerd Font, Neovim et npm : sautés par « --rapide » (rien d'urgent, et fc-list est lent)."""
+    manquants = [f"{c} ({r})" for c, r in outils.items() if not a(c) and not (c == "magick" and a("convert"))]   # ImageMagick 6 : convert
+    if manquants:
+        b.avert(T("absents : ", "missing: ") + ", ".join(manquants),
+                T("relance install.sh, ou installe-les avec ton gestionnaire de paquets",
+                  "run install.sh again, or install them with your package manager"), cle="outils_absents")
+    else:
+        b.ok(T("tous présents", "all present"))
+    polices, _ = sortie(["fc-list", ":", "family"])
+    if "Nerd Font" not in polices:
+        b.avert(T("aucune police « Nerd Font » : icônes du terminal en carrés", "no “Nerd Font” font: terminal icons show as squares"),
+                T("relance install.sh (étape du terminal)", "run install.sh again (terminal step)"), cle="nerd_font_absente")
+    neovim(b)
+    npm_node(b)
+
+
 def dossiers_xdg(b):
     """XDG_CONFIG_HOME ou XDG_STATE_HOME (et NOCTALIA_CONFIG_HOME, NOCTALIA_STATE_HOME, lues avant) ailleurs que ~/.config
     et ~/.local/state : Noctalia (src/util/file_utils.h), Hyprland et l'île lisent leurs réglages là, mais install.sh
@@ -452,7 +576,8 @@ def dossiers_xdg(b):
                       f"{cle} points elsewhere ({v}): noctalia-config installs into ~/{defaut}, which {lecteurs_en}; "
                       "this setup is not supported"),
                     T(f"retire {cle} de ton environnement (ou mets-le à ~/{defaut}), puis ouvre une nouvelle session",
-                      f"remove {cle} from your environment (or set it to ~/{defaut}), then log in again"))
+                      f"remove {cle} from your environment (or set it to ~/{defaut}), then log in again"),
+                    cle=cle.lower() + "_ailleurs")
 
 
 NVIM_MIN = (0, 11, 2)   # LazyVim (config Neovim du dépôt) ; Debian 13 n'a que la 0.10
@@ -471,7 +596,8 @@ def neovim(b):
     if ver < NVIM_MIN:
         a_, b_ = ".".join(map(str, ver)), ".".join(map(str, NVIM_MIN))
         b.avert(T(f"Neovim trop ancien pour la config ({a_} < {b_})", f"Neovim too old for the config ({a_} < {b_})"),
-                T("relance install.sh, qui propose la version officielle", "run install.sh again; it offers the official release"))
+                T("relance install.sh, qui propose la version officielle", "run install.sh again; it offers the official release"),
+                cle="neovim_ancien")
 
 
 # Versions de Node que demande npm 12 (champ « engines » de npm 12.2.1) : sert si celui du npm installé est illisible
@@ -566,7 +692,8 @@ def npm_node(b):
             b.avert(T(f"npm récent, mais Node trop ancien : mets Node à jour (npm {pv} demande Node {plage}, Node {nv} installé)",
                       f"recent npm, but Node too old: update Node (npm {pv} needs Node {plage}, Node {nv} installed)"),
                     T("paquet nodejs de ta distribution (Fedora : nodejs24) ou nodejs.org ; sinon, un npm fait pour ce Node",
-                      "your distribution's nodejs package (Fedora: nodejs24) or nodejs.org; otherwise, an npm made for this Node"))
+                      "your distribution's nodejs package (Fedora: nodejs24) or nodejs.org; otherwise, an npm made for this Node"),
+                    cle="npm_node_ancien")
     # CLI d'IA du PATH dans un préfixe de npm où l'on ne peut pas écrire (hors paquet de la distribution)
     vues = set()
     for prog in NPM_IAS_PROGS:
@@ -588,7 +715,7 @@ def npm_node(b):
                 T(f"npm config set prefix ~/.local ; npm install -g {paquet} ; puis, quand tu veux : "
                   f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh le propose)",
                   f"npm config set prefix ~/.local; npm install -g {paquet}; then, whenever you like: "
-                  f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh offers it)"))
+                  f"sudo npm uninstall -g --prefix {pref} {paquet} (install.sh offers it)"), cle="npm_bloque:" + paquet)
 
 
 def energie_processeur(b, bats):
@@ -608,7 +735,7 @@ def energie_processeur(b, bats):
     texte = T(f"processeur : EPP {epp or '?'}, PCIe (ASPM) : {aspm or '?'}", f"processor: EPP {epp or '?'}, PCIe (ASPM): {aspm or '?'}")
     if bats and not secteur and epp == "balance_performance":
         b.avert(texte, T("sur batterie, CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power dans /etc/tlp.d économise 2 à 3 W",
-                         "on battery, CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power in /etc/tlp.d saves 2 to 3 W"))
+                         "on battery, CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power in /etc/tlp.d saves 2 to 3 W"), cle="epp_batterie")
     else:
         b.ok(texte)
 
@@ -651,7 +778,8 @@ def rtx(b):
         b.avert(T("carte NVIDIA allumée alors qu'elle devrait dormir", "NVIDIA GPU on while it should be asleep") + conso
                 + " : " + T(" ; ", "; ").join(x["texte"] for x in e["causes"]),
                 quoi.get(c["cle"], T(f"relance {c.get('nom', '')} sur la carte intégrée (la notification le propose), ou ferme-le",
-                                     f"restart {c.get('nom', '')} on the integrated GPU (the notification offers it), or close it")))
+                                     f"restart {c.get('nom', '')} on the integrated GPU (the notification offers it), or close it")),
+                cle="rtx_allumee")
     elif etat == "active":
         b.ok(T("carte NVIDIA allumée", "NVIDIA GPU on") + conso
              + (T(f" (Performance ou secteur) ; utilisée par {apps}", f" (Performance or plugged in); used by {apps}") if apps
@@ -661,7 +789,7 @@ def rtx(b):
     else:
         b.avert(T(f"état de veille de la carte NVIDIA : {etat or 'illisible'}", f"NVIDIA GPU sleep state: {etat or 'unreadable'}"),
                 T("le pilote ne gère pas la mise en veille de la carte (voir DynamicPowerManagement ci-dessous)",
-                  "the driver doesn't handle putting the GPU to sleep (see DynamicPowerManagement below)"))
+                  "the driver doesn't handle putting the GPU to sleep (see DynamicPowerManagement below)"), cle="rtx_etat")
     # nvidia-persistenced (paquets NVIDIA d'Arch, Fedora, Debian) : la carte reste initialisée, donc allumée
     if not e["persistenced"]:
         b.ok(T("nvidia-persistenced arrêté", "nvidia-persistenced stopped"))
@@ -671,7 +799,7 @@ def rtx(b):
         b.avert(T("nvidia-persistenced actif : la carte NVIDIA ne s'endort jamais (environ 5 W)",
                   "nvidia-persistenced running: the NVIDIA GPU never sleeps (about 5 W)"),
                 T("sudo systemctl disable --now nvidia-persistenced (install.sh le propose)",
-                  "sudo systemctl disable --now nvidia-persistenced (install.sh offers it)"))
+                  "sudo systemctl disable --now nvidia-persistenced (install.sh offers it)"), cle="rtx_persistenced")
     else:
         b.ok(T("nvidia-persistenced actif (PC fixe)", "nvidia-persistenced running (desktop PC)"))
     # power/control : « auto » laisse le noyau endormir la carte
@@ -679,7 +807,7 @@ def rtx(b):
         b.ok(T("mise en veille par le noyau permise (power/control = auto)", "kernel sleep allowed (power/control = auto)"))
     elif e["control"] and "control" not in dit:
         b.avert(T(f"le noyau ne peut pas endormir la carte NVIDIA (power/control = {e['control']})",
-                  f"the kernel can't put the NVIDIA GPU to sleep (power/control = {e['control']})"), quoi_control)
+                  f"the kernel can't put the NVIDIA GPU to sleep (power/control = {e['control']})"), quoi_control, cle="rtx_control")
     # DynamicPowerManagement du pilote NVIDIA : 2 ou 3 (défaut des cartes récentes) endorment la carte
     dpm = e["dynamic_pm"]
     if dpm is None:
@@ -691,7 +819,7 @@ def rtx(b):
         b.avert(T(f"DynamicPowerManagement = {dpm or '?'} : le pilote NVIDIA n'endort pas la carte",
                   f"DynamicPowerManagement = {dpm or '?'}: the NVIDIA driver doesn't put the GPU to sleep"),
                 T("options nvidia NVreg_DynamicPowerManagement=0x02 dans /etc/modprobe.d/nvidia.conf, puis redémarrer",
-                  "options nvidia NVreg_DynamicPowerManagement=0x02 in /etc/modprobe.d/nvidia.conf, then restart"))
+                  "options nvidia NVreg_DynamicPowerManagement=0x02 in /etc/modprobe.d/nvidia.conf, then restart"), cle="rtx_dpm")
 
 
 def details():
@@ -769,7 +897,178 @@ def details():
     return "\n".join(l)
 
 
+def resume(b):
+    """Le résumé du bilan, sans IA : les trois premiers ✗ et le nombre de !, ou « Tout est en ordre. »."""
+    if not b.ko and not b.attention:
+        return T("Tout est en ordre.", "Everything is in order.")
+    if not b.ko:
+        return T(f"Tout marche ; {b.attention} point(s) à améliorer.", f"Everything works; {b.attention} thing(s) to improve.")
+    faux = [c["texte"] for c in b.constats if c["niveau"] == "faux"]
+    t = T(f"{b.ko} problème(s) : ", f"{b.ko} problem(s): ") + T(" ; ", "; ").join(faux[:3])
+    if b.ko > 3:
+        t += T(f" ; et {b.ko - 3} autre(s)", f"; and {b.ko - 3} more")
+    t += "."
+    if b.attention:
+        t += T(f" Et {b.attention} point(s) à améliorer.", f" And {b.attention} thing(s) to improve.")
+    return t
+
+
+def bilan_json(rapide=False):
+    """« nc-diag --json [--rapide] » : un seul objet, lu par l'île (Spotlight, « Que se passe-t-il ? ») et nc-ia.
+    Seulement les constats ! et ✗ ; la table des réparations qu'ils proposent (celle qui ferme l'île en dernier)."""
+    global RAPIDE
+    RAPIDE = rapide
+    debut = time.monotonic()
+    b = Bilan(couleurs=False)
+    verifier(b)
+    ids = sorted(dict.fromkeys(i for c in b.constats for i in c["reparations"]), key=lambda i: REPARATIONS[i]["ferme_ile"])
+    return {"version": 1, "langue": "en" if EN else "fr", "duree_ms": int((time.monotonic() - debut) * 1000),
+            "ko": b.ko, "attention": b.attention, "ok": b.nb_ok, "resume": resume(b), "constats": b.constats,
+            "reparations": {i: REPARATIONS[i] for i in ids}}
+
+
+@contextlib.contextmanager
+def verrou(attente=120):
+    """Une réparation à la fois (deux clics, ou le Spotlight et un terminal) : la seconde attend, puis revoit l'état."""
+    d = os.environ.get("XDG_RUNTIME_DIR", "")
+    chemin = (os.path.join(d, "nc-diag-reparer.lock") if d and os.path.isdir(d)
+              else os.path.join(tempfile.gettempdir(), f"nc-diag-reparer-{os.getuid()}.lock"))
+    fd = os.open(chemin, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fin = time.monotonic() + attente
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > fin:
+                    raise
+                time.sleep(0.1)
+        yield
+    finally:
+        os.close(fd)
+
+
+ETATS = ("active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance", "refreshing")
+
+
+def _ile_systemd_run(verbe):
+    """nc-ile.service (re)démarré HORS de son propre groupe : lancé depuis le Spotlight, nc-diag est dans le groupe de
+    l'île, et « systemctl restart » l'arrêterait en même temps qu'elle, avant le start. Une unité de nom fixe (une seule
+    à la fois) qui prévient d'une notification quand l'île est revenue (ou pas)."""
+    if not a("systemd-run"):
+        return "echec", T("systemd-run absent : rien n'est fait", "systemd-run missing: nothing done")
+    subprocess.run(["systemctl", "--user", "reset-failed", "nc-ile.service"], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
+    q = shlex.quote
+    script = ("n() { command -v notify-send >/dev/null 2>&1 && notify-send -a " + q(T("Système", "System"))
+              + ' -i dialog-information -- "$1" "$2"; }; '
+              + f"systemctl --user {verbe} nc-ile.service; sleep 2; "
+              + "if systemctl --user is-active --quiet nc-ile.service; then n "
+              + q(T("L'île est revenue", "The island is back")) + " " + q("nc-diag reparer") + "; exit 0; else n "
+              + q(T("L'île n'est pas revenue", "The island did not come back")) + " "
+              + q(T("Bilan : nc-diag ; journal : qs -c nc-ile log", "Summary: nc-diag; log: qs -c nc-ile log")) + "; exit 1; fi")
+    try:
+        r = subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "--wait", "--unit=nc-diag-reparer-ile",
+                            "--", "sh", "-c", script], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "echec", T("délai dépassé", "timed out")
+    except OSError as e:
+        return "echec", str(e)[-300:]
+    if r.returncode and re.search(r"already (exists|loaded|active)|existe déjà", r.stderr, re.I):
+        return "deja", T("l'île est déjà en train de redémarrer", "the island is already restarting")
+    actif = sortie(["systemctl", "--user", "is-active", "nc-ile.service"])[0].strip()
+    if actif == "active":
+        return "fait", T("l'île est revenue", "the island is back")
+    return "echec", (r.stderr.strip() or actif)[-300:]
+
+
+def _reparer(ident):
+    """Revoit l'état (« deja » s'il n'y a plus rien à faire), puis la réparation, sur le modèle de relancer() de
+    nc-panne : compteur remis à zéro, (re)démarrage, deux secondes pour voir s'il tient. Jamais d'IA."""
+    if ident == "ia_conf_prive":
+        conf = os.path.join(HOME, ".config/nc/ia.conf")
+        try:
+            if not os.stat(conf).st_mode & 0o077:
+                return "deja", T("~/.config/nc/ia.conf est déjà lisible par toi seul", "~/.config/nc/ia.conf is already readable by you only")
+            os.chmod(conf, 0o600)
+            ok = not os.stat(conf).st_mode & 0o077
+        except FileNotFoundError:
+            return "deja", T("pas de fichier ~/.config/nc/ia.conf : rien à protéger", "no ~/.config/nc/ia.conf file: nothing to protect")
+        except OSError as e:
+            return "echec", str(e)[-300:]
+        return ("fait", T("lisible par toi seul", "readable by you only")) if ok else ("echec", "chmod 600")
+    action, u = ident.split(":", 1)
+    etat = sortie(["systemctl", "--user", "is-active", u])[0].strip()
+    if etat not in ETATS:
+        return "echec", T("systemd de la session ne répond pas (hors session ?) : rien n'est fait",
+                          "the session's systemd does not answer (outside the session?): nothing done")
+    if action == "redemarrer":
+        besoin = etat == "failed" or (u == "noctalia.service" and sortie(["noctalia", "msg", "status"])[1] != 0)
+    else:
+        besoin = etat not in ("active", "activating", "reloading", "refreshing")
+    if not besoin:
+        return "deja", (T(f"{u} tourne déjà", f"{u} is already running") if etat == "active" else
+                        T(f"{u} n'est plus en échec ({etat}) : rien à faire", f"{u} is no longer failed ({etat}): nothing to do"))
+    if etat == "inactive" and not unite_chargee(u):
+        return "echec", T(f"{u} n'est pas installé sur ce PC : rien n'est fait", f"{u} is not installed on this PC: nothing done")
+    verbe = "restart" if action == "redemarrer" else "start"
+    if u == "nc-ile.service":
+        return _ile_systemd_run(verbe)
+    subprocess.run(["systemctl", "--user", "reset-failed", u], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
+    try:
+        r = subprocess.run(["systemctl", "--user", verbe, u], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=90)
+        erreur = r.stderr.strip() if r.returncode else ""
+    except subprocess.TimeoutExpired:
+        erreur = T("délai dépassé", "timed out")
+    except OSError as e:
+        erreur = str(e)
+    time.sleep(2)
+    actif = sortie(["systemctl", "--user", "is-active", u])[0].strip()
+    if not erreur and actif == "active":
+        return "fait", T(f"{u} tourne", f"{u} is running")
+    return "echec", (erreur or actif)[-300:]
+
+
+def reparer(args):
+    """« nc-diag reparer ID [--json] » : une réparation de la table REPARATIONS, et rien d'autre. Un id inconnu : code 2,
+    sans rien lancer. 0 : faite ou plus nécessaire (deja) ; 1 : échec."""
+    en_json = "--json" in args
+    reste = [x for x in args if x != "--json"]
+    ident = reste[0] if len(reste) == 1 else ""
+    if not id_valide(ident):
+        res = {"id": ident[:80], "libelle": "", "resultat": "refuse", "ferme_ile": False,
+               "texte": T("réparation inconnue : rien n'est fait", "unknown repair: nothing done")}
+    else:
+        try:
+            with verrou():
+                resultat, texte = _reparer(ident)
+        except BlockingIOError:
+            resultat, texte = "echec", T("une autre réparation ne finit pas", "another repair does not finish")
+        except (OSError, subprocess.SubprocessError) as e:
+            resultat, texte = "echec", str(e)[-300:]
+        r = REPARATIONS[ident]
+        res = {"id": ident, "libelle": r["libelle"], "resultat": resultat, "ferme_ile": r["ferme_ile"], "texte": texte}
+    if en_json:
+        print(json.dumps(res, ensure_ascii=False))
+    elif res["resultat"] == "refuse":
+        print(T("nc-diag reparer : ", "nc-diag repair: ") + res["texte"] + T(" (les réparations : nc-diag --json)",
+                                                                             " (the repairs: nc-diag --json)"), file=sys.stderr)
+    else:
+        signe = "✗" if res["resultat"] == "echec" else "✓"
+        print(f"{signe} {res['libelle']} : {res['texte']}" if not EN else f"{signe} {res['libelle']}: {res['texte']}")
+    return {"fait": 0, "deja": 0, "echec": 1}.get(res["resultat"], 2)
+
+
 def main():
+    # L'île tourne avec le PATH du système : les outils installés pour l'utilisateur sont souvent ailleurs (comme nc-ia)
+    os.environ["PATH"] = os.pathsep.join([os.path.join(HOME, d) for d in (".local/bin", "bin", ".npm-global/bin", ".bun/bin",
+                                          ".opencode/bin", ".cargo/bin", ".deno/bin")] + [os.environ.get("PATH", "/usr/bin")])
+    args = sys.argv[1:]
+    if args and args[0] in ("reparer", "réparer", "repair"):
+        sys.exit(reparer(args[1:]))
+    if args and "--json" in args and set(args) <= {"--json", "--rapide", "--fast"}:
+        print(json.dumps(bilan_json(rapide="--rapide" in args or "--fast" in args), ensure_ascii=False))
+        return
     if len(sys.argv) > 1 and sys.argv[1] in ("ia", "ai", "expliquer", "explain"):
         # Le bilan expliqué par l'IA du bureau (nc-ia diagnostic) : seulement s'il y a quelque chose à corriger
         os.execv(os.path.join(HOME, ".local/bin/nc-ia"), ["nc-ia", "diagnostic"])
