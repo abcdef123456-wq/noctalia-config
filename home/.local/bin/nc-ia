@@ -2070,6 +2070,13 @@ def _executer_plan(ident, numeros):
     if time.time() - plan.get("t", 0) > 600:
         f.unlink(missing_ok=True)
         raise ErreurIA(T("Plan expiré (plus de 10 min) : redemande.", "Plan expired (over 10 min): ask again."))
+    # Une action commencée puis interrompue (nc-ia arrêté pendant qu'elle se faisait : Spotlight fermé, déconnexion) a
+    # peut-être eu lieu : montrée comme interrompue, jamais refaite toute seule (revue B2-01 : deux fois le volume)
+    for a in plan["actions"]:
+        if a.get("en_cours"):
+            a.update(en_cours=False, fait=True, ok=False,
+                     resultat=T("interrompue : peut-être faite, vérifie avant de redemander",
+                                "interrupted: maybe done, check before asking again"))
     domaines = domaines_permis()
     bureau = (plan.get("portee") or {}).get("bureau")
     services = services_session() if "services" in domaines else {}
@@ -2079,12 +2086,20 @@ def _executer_plan(ident, numeros):
             continue
         try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
             v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres, bureau)
+        except ErreurIA as e:
+            a.update(fait=True, ok=False, resultat=str(e))
+            continue
+        # Notée « en cours » avant d'être lancée, et le plan gardé : arrêtée au milieu, elle n'est jamais rejouée
+        a.update(fait=True, en_cours=True, ok=None, resultat=T("en cours", "in progress"))
+        garder_plan(plan)
+        try:
             a["ok"], a["resultat"] = executer_action(v)
             if bureau is not None and a["outil"] == "fenetre_direction":
                 a["note"] = garder_sur_bureau(v["args"]["adresse"], bureau)
         except ErreurIA as e:
             a["ok"], a["resultat"] = False, str(e)
-        a["fait"] = True
+        a["en_cours"] = False
+        garder_plan(plan)
     garder_plan(plan)
     return plan
 

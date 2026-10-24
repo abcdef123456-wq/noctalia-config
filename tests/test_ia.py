@@ -816,6 +816,44 @@ class IA(unittest.TestCase):
         self.assertEqual(self.appels().count("bluetoothctl power off"), 1, self.appels())
         self.assertEqual(sorted(r.returncode for r in resultats), [0, 0])
 
+    def env_test(self):
+        return dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
+                    XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
+                    JOURNAL=str(self.journal), NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
+
+    def attendre_journal(self, texte, delai=10):
+        import time
+        fin = time.time() + delai
+        while texte not in self.appels():
+            self.assertLess(time.time(), fin, f"« {texte} » jamais vu : " + self.appels())
+            time.sleep(0.05)
+
+    def test_plan_interrompu_jamais_rejoue(self):
+        """Revue B2-01 : le Spotlight fermé pendant une action arrêtait l'exécution (SIGTERM) avant que le plan soit
+        écrit ; la confirmation suivante refaisait l'action déjà faite. Une action commencée est notée avant d'être
+        lancée : interrompue, elle est montrée comme telle, jamais refaite toute seule."""
+        import signal
+        self.preparer_agent()
+        self.reglages("IA_ACTIONS=confirmer\n")
+        plan = json.loads(self.lancer("agir", "--json", "x").stdout)
+        self.programme("bluetoothctl", 'case "$*" in *power*) echo "bluetoothctl $*" >> "$JOURNAL"; exec sleep 30;; esac')
+        p = subprocess.Popen([str(self.home / ".local/bin/nc-ia"), "executer", plan["id"], "1", "--json"], env=self.env_test(),
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        self.attendre_journal("bluetoothctl power off")
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=10)
+        self.programme("bluetoothctl", 'echo "bluetoothctl $*" >> "$JOURNAL"')
+        r = self.lancer("executer", plan["id"], "--json")
+        self.assertEqual(self.appels().count("bluetoothctl power off"), 1, "une action commencée ne se refait pas")
+        d = json.loads(r.stdout)
+        bt = d["actions"][1]
+        self.assertTrue(bt["fait"])
+        self.assertFalse(bt["ok"])
+        self.assertIn("interrompue", bt["resultat"])
+        self.assertTrue(d["actions"][0]["ok"], "les autres actions, elles, se font")
+        self.assertIn("interrompue", self.lancer("executer", plan["id"]).stdout)
+
     def test_ia_coupee_pendant_l_attente_du_verrou(self):
         # Revue IA-05 : une confirmation qui attend le verrou relit les réglages ; l'IA coupée entre-temps, rien ne se fait
         import fcntl, time

@@ -960,7 +960,9 @@ Item {
     // Un enregistrement ou une suppression de session en cours aussi : décharger le Spotlight arrêterait nc-session
     // (running seul : un nc-session introuvable, jamais lancé, ne garderait pas le Spotlight chargé pour rien)
     // Un épinglage au dock aussi (nc-dock arrêté en route : rien d'écrit, mais rien de fait non plus)
+    // Des actions confirmées en cours aussi : arrêtées au milieu, elles seraient notées « interrompues » (revue B2-01)
     readonly property bool occupe: suivi.running || entreeEnAttente || enregistreur.running || supprimeur.running || modifDock.running
+                                   || executeur.running
     function valider(i, nouveau) {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir

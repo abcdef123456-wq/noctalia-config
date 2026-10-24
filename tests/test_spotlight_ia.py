@@ -246,13 +246,14 @@ ShellRoot {
             fait = dict(plan, actions=[dict(plan["actions"][0], fait=True, ok=True), plan["actions"][1]])
             scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                        "nc-demander": '#!/bin/sh\necho \'{"nom": "Claude Code", "agent": "claude", "coupee": false}\'\n',
-                       "nc-ia": "#!/bin/sh\necho \"nc-ia $*\" >> \"$HOME/appels\"\ncase \"$1\" in agir) echo '" + json.dumps(plan) + "' ;; executer) echo '" + json.dumps(fait) + "' ;; esac\n"}
+                       "nc-ia": "#!/bin/sh\necho \"nc-ia $*\" >> \"$HOME/appels\"\ncase \"$1\" in agir) echo '" + json.dumps(plan) + "' ;; executer) sleep 0.5; echo '" + json.dumps(fait) + "' ;; esac\n"}
             for nom, code in scripts.items():
                 (b / nom).write_text(code); (b / nom).chmod(0o755)
             (q / "shell.qml").write_text('''import QtQuick
 import Quickshell
 ShellRoot {
  property int etape: 0
+ property bool vuOccupe: false
  function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
  function titres(){ return spot.resultats.map(x => x.titre) }
@@ -267,7 +268,10 @@ ShellRoot {
    verifier(JSON.stringify(titres()) === JSON.stringify(["Tout faire", "Bluetooth : off", "Arrêter nc-pouls.service"]), "plan : " + JSON.stringify(titres()))
    verifier(spot.resultats[2].sous.indexOf("⚠") === 0, "action risquée signalée")
    spot.valider(1, false); verifier(Etat.fermetures === 0, "le Spotlight reste ouvert"); etape++; return }
-  if (etape === 3) { if (spot.plan.actions[0].fait !== true) return
+  if (etape === 3) { if (spot.occupe) vuOccupe = true
+   if (spot.plan.actions[0].fait !== true) return
+   verifier(vuOccupe, "actions en cours : le Spotlight reste chargé même fermé (revue B2-01)")
+   verifier(!spot.occupe, "plus rien en cours")
    verifier(JSON.stringify(titres()) === JSON.stringify(["✓ Bluetooth : off", "Arrêter nc-pouls.service"]), "après : " + JSON.stringify(titres()))
    Qt.quit() }
  } }
