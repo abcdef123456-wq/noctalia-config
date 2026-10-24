@@ -81,6 +81,7 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
             # Dossiers XDG : ceux par défaut du HOME temporaire (pas ceux du garde-fou, qui pointent ailleurs), sauf
             # ceux que le test donne ; None = variable retirée, « {HOME} » = le HOME temporaire
             env.update(XDG_CONFIG_HOME=d+'/.config', XDG_STATE_HOME=d+'/.local/state')
+            env.pop('NOCTALIA_CONFIG_HOME',None); env.pop('NOCTALIA_STATE_HOME',None)
             for cle,valeur in (xdg or {}).items():
                 if valeur is None:env.pop(cle,None)
                 else:env[cle]=valeur.replace('{HOME}',d)
@@ -154,7 +155,8 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
 
     def test_xdg_ailleurs_averti_sans_bloquer(self):
         # Lot C-3 : l'installateur copie tout sous ~/.config et ~/.local/state ; un XDG_*_HOME ailleurs n'est pas lu
-        for cle,defaut in (('XDG_CONFIG_HOME','~/.config'),('XDG_STATE_HOME','~/.local/state')):
+        for cle,defaut in (('XDG_CONFIG_HOME','~/.config'),('XDG_STATE_HOME','~/.local/state'),
+                           ('NOCTALIA_CONFIG_HOME','~/.config'),('NOCTALIA_STATE_HOME','~/.local/state')):
             for valeur in ('{HOME}/ailleurs','/srv/ailleurs/','~/autre'):
                 with self.subTest(cle=cle,valeur=valeur):
                     code,texte,_=self.executer(xdg={cle:valeur})
@@ -170,7 +172,9 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
         for cas in ({'XDG_CONFIG_HOME':None,'XDG_STATE_HOME':None},{'XDG_CONFIG_HOME':'','XDG_STATE_HOME':''},
                     {'XDG_CONFIG_HOME':'{HOME}/.config/','XDG_STATE_HOME':'{HOME}/.local/state//'},
                     {'XDG_CONFIG_HOME':'~/.config','XDG_STATE_HOME':'~/.local/state/'},
-                    {'XDG_CONFIG_HOME':'{HOME}/./.config','XDG_STATE_HOME':'{HOME}/.local/../.local/state'}):
+                    {'XDG_CONFIG_HOME':'{HOME}/./.config','XDG_STATE_HOME':'{HOME}/.local/../.local/state'},
+                    {'NOCTALIA_CONFIG_HOME':'','NOCTALIA_STATE_HOME':''},
+                    {'NOCTALIA_CONFIG_HOME':'~/.config/','NOCTALIA_STATE_HOME':'{HOME}/.local/state'}):
             with self.subTest(cas=cas):
                 code,texte,_=self.executer(xdg=cas)
                 self.assertEqual(code,0,texte)

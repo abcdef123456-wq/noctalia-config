@@ -435,13 +435,16 @@ def verifier(b):
 
 
 def dossiers_xdg(b):
-    """XDG_CONFIG_HOME ou XDG_STATE_HOME ailleurs que ~/.config et ~/.local/state : Noctalia (src/util/file_utils.h),
-    Hyprland et l'île lisent leurs réglages là, mais install.sh copie tout sous ~/.config et ~/.local/state. Pas pris en
-    charge : avertissement. Vide ou absent : rien à dire (comme Noctalia) ; ~ développé, barre finale ignorée."""
+    """XDG_CONFIG_HOME ou XDG_STATE_HOME (et NOCTALIA_CONFIG_HOME, NOCTALIA_STATE_HOME, lues avant) ailleurs que ~/.config
+    et ~/.local/state : Noctalia (src/util/file_utils.h), Hyprland et l'île lisent leurs réglages là, mais install.sh
+    copie tout sous ~/.config et ~/.local/state. Pas pris en charge : avertissement. Vide ou absent : rien à dire (comme Noctalia) ; ~ développé, barre finale ignorée."""
     home = os.path.expanduser("~")
     for cle, defaut, lecteurs, lecteurs_en in (
             ("XDG_CONFIG_HOME", ".config", "Noctalia, Hyprland et l'île ne liront pas", "Noctalia, Hyprland and the island won't read"),
-            ("XDG_STATE_HOME", ".local/state", "Noctalia ne lira pas", "Noctalia won't read")):
+            ("XDG_STATE_HOME", ".local/state", "Noctalia ne lira pas", "Noctalia won't read"),
+            # Lues par Noctalia avant XDG_* : le même cas
+            ("NOCTALIA_CONFIG_HOME", ".config", "Noctalia ne lira pas", "Noctalia won't read"),
+            ("NOCTALIA_STATE_HOME", ".local/state", "Noctalia ne lira pas", "Noctalia won't read")):
         v = os.environ.get(cle, "")
         if v and os.path.realpath(os.path.expanduser(v)) != os.path.realpath(os.path.join(home, defaut)):
             b.avert(T(f"{cle} pointe ailleurs ({v}) : noctalia-config s'installe dans ~/{defaut}, que {lecteurs} ; "

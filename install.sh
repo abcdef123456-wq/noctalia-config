@@ -281,8 +281,9 @@ elif [ "$MODE" = files ]; then
   die "$(t "commande manquante : python3 (3.8 ou plus ; installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: python3 (3.8 or later; install it with your distribution's package manager)")"
 fi
 # XDG_CONFIG_HOME ou XDG_STATE_HOME ailleurs que ~/.config et ~/.local/state : Noctalia (src/util/file_utils.h),
-# Hyprland et l'île lisent leurs réglages là, mais l'installateur copie tout sous ~/.config et ~/.local/state. Pas pris
-# en charge : averti sans bloquer. Vide ou absent : rien (comme Noctalia) ; ~ développé, barre finale ignorée.
+# Hyprland et l'île lisent leurs réglages là, mais l'installateur copie tout sous ~/.config et ~/.local/state. Pareil
+# pour NOCTALIA_CONFIG_HOME et NOCTALIA_STATE_HOME, que Noctalia lit avant XDG_*. Pas pris en charge : averti sans
+# bloquer. Vide ou absent : rien (comme Noctalia) ; ~ développé, barre finale ignorée.
 xdg_net() {   # le dossier $1 résolu : ~ développé, liens suivis, barres finales retirées
   local v="$1"
   case "$v" in \~) v="$HOME" ;; \~/*) v="$HOME/${v#\~/}" ;; esac
@@ -296,6 +297,12 @@ if xdg_ailleurs "${XDG_CONFIG_HOME:-}" "$HOME/.config"; then
 fi
 if xdg_ailleurs "${XDG_STATE_HOME:-}" "$HOME/.local/state"; then
   warn "$(t "Ton XDG_STATE_HOME pointe ailleurs ($XDG_STATE_HOME) : noctalia-config s'installe dans ~/.local/state, que Noctalia ne lira pas ; ce cas n'est pas pris en charge." "Your XDG_STATE_HOME points elsewhere ($XDG_STATE_HOME): noctalia-config installs into ~/.local/state, which Noctalia won't read; this setup is not supported.")"
+fi
+if xdg_ailleurs "${NOCTALIA_CONFIG_HOME:-}" "$HOME/.config"; then
+  warn "$(t "Ton NOCTALIA_CONFIG_HOME pointe ailleurs ($NOCTALIA_CONFIG_HOME) : noctalia-config s'installe dans ~/.config, que Noctalia ne lira pas ; ce cas n'est pas pris en charge." "Your NOCTALIA_CONFIG_HOME points elsewhere ($NOCTALIA_CONFIG_HOME): noctalia-config installs into ~/.config, which Noctalia won't read; this setup is not supported.")"
+fi
+if xdg_ailleurs "${NOCTALIA_STATE_HOME:-}" "$HOME/.local/state"; then
+  warn "$(t "Ton NOCTALIA_STATE_HOME pointe ailleurs ($NOCTALIA_STATE_HOME) : noctalia-config s'installe dans ~/.local/state, que Noctalia ne lira pas ; ce cas n'est pas pris en charge." "Your NOCTALIA_STATE_HOME points elsewhere ($NOCTALIA_STATE_HOME): noctalia-config installs into ~/.local/state, which Noctalia won't read; this setup is not supported.")"
 fi
 info "$(t "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)" "Distribution: ${OSNAME:-unknown} (family: $FAMILY)")"
 

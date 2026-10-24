@@ -200,11 +200,18 @@ class DiagXdg(unittest.TestCase):
         self.assertIn("XDG_STATE_HOME pointe ailleurs (~/etat) : noctalia-config s'installe dans ~/.local/state, "
                       "que Noctalia ne lira pas ; ce cas n'est pas pris en charge", texte)
         self.assertIn("retire XDG_CONFIG_HOME de ton environnement", texte)
+        # Lues par Noctalia avant XDG_* : le même avertissement
+        b = self.bilan(NOCTALIA_CONFIG_HOME="/srv/noctalia", NOCTALIA_STATE_HOME="{HOME}/etat-noctalia")
+        self.assertEqual(b.attention, 2)
+        self.assertIn("NOCTALIA_CONFIG_HOME pointe ailleurs (/srv/noctalia) : noctalia-config s'installe dans "
+                      "~/.config, que Noctalia ne lira pas", b.texte())
+        self.assertIn("NOCTALIA_STATE_HOME pointe ailleurs", b.texte())
 
     def test_absent_vide_ou_par_defaut_rien(self):
         for valeurs in ({}, {"XDG_CONFIG_HOME": "", "XDG_STATE_HOME": ""},
                         {"XDG_CONFIG_HOME": "{HOME}/.config/", "XDG_STATE_HOME": "{HOME}/.local/state//"},
-                        {"XDG_CONFIG_HOME": "~/.config", "XDG_STATE_HOME": "~/.local/state/"}):
+                        {"XDG_CONFIG_HOME": "~/.config", "XDG_STATE_HOME": "~/.local/state/"},
+                        {"NOCTALIA_CONFIG_HOME": "", "NOCTALIA_STATE_HOME": "{HOME}/.local/state"}):
             with self.subTest(valeurs=valeurs):
                 self.assertEqual(self.bilan(**valeurs).lignes, [])
 
