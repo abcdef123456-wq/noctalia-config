@@ -27,7 +27,7 @@ FloatingWindow {
     readonly property bool materielDisponible: !(moduleCourant.hardware || moduleCourant.requires_local_hardware) || JarvisEtat.etat.deploy_mode !== "server"
     readonly property var navigation: [
         {id:"accueil",nom:Reglages.t("Accueil", "Home"),icone:"space_dashboard"},
-        {id:"chat",nom:"Chat",icone:"chat"}, {id:"modules",nom:Reglages.t("Modules", "Tools"),icone:"extension"},
+        {id:"chat",nom:"Chat",icone:"chat"}, {id:"modules",nom:Reglages.t("Modules", "Modules"),icone:"extension"},
         {id:"session",nom:Reglages.t("Modèle", "Model"),icone:"neurology"},
         {id:"memoire",nom:Reglages.t("Mémoire", "Memory"),icone:"psychology"},
         {id:"conversations",nom:Reglages.t("Conversations", "Conversations"),icone:"history"},
@@ -212,7 +212,7 @@ FloatingWindow {
             Column {
                 id:col; width:parent.width; spacing:20
                 Section { text:Reglages.t("À ton service.", "At your service."); font.pixelSize:36 }
-                Note { text:Reglages.t("Continue ici la conversation de l’île, retrouve tes outils et garde Telegram et Discord à portée de main.", "Continue your island conversation here, find your tools and keep Telegram and Discord available.") }
+                Note { text:Reglages.t("Continue ici la conversation de l’île, retrouve tes outils et garde Telegram et Discord à portée de main.", "Continue your island conversation here, find your modules and keep Telegram and Discord available.") }
                 Row {
                     spacing:10
                     JarvisBouton { texte:Reglages.t("Parler à JARVIS", "Talk to JARVIS"); primaire:true; onClic:fen.ouvrir("chat") }
@@ -246,7 +246,7 @@ FloatingWindow {
             contentHeight:col.implicitHeight
             Column {
                 id:col; width:parent.width; spacing:16
-                Section { text:Reglages.t("Tes modules", "Your tools") }
+                Section { text:Reglages.t("Tes modules", "Your modules") }
                 Flow {
                     width:parent.width; spacing:8
                     Repeater {
@@ -260,9 +260,9 @@ FloatingWindow {
                     }
                 }
                 Note { text:(JarvisEtat.modules.find(m=>m.id===fen.moduleId)||{}).description||"" }
-                Note { visible:fen.moduleId!=="" && fen.moduleCourant.enabled!==true; text:Reglages.t("Module désactivé : active-le dans ses réglages, puis redémarre le gateway pour appliquer le changement.", "Tool disabled: enable it in settings, then restart the gateway to apply the change.") }
+                Note { visible:fen.moduleId!=="" && fen.moduleCourant.enabled!==true; text:Reglages.t("Module désactivé : active-le dans ses réglages, puis redémarre le gateway pour appliquer le changement.", "Module disabled: enable it in settings, then restart the gateway to apply the change.") }
                 Note { visible:fen.moduleId!=="" && !fen.materielDisponible; text:Reglages.t("Le dépôt actuel n’a plus de relais PC : les commandes matérielles concernent uniquement la machine hébergeant JARVIS. Utilise le déploiement local pour piloter ce bureau.", "The current repository no longer has a PC relay: hardware commands target the JARVIS host. Use local deployment to control this desktop.") }
-                JarvisBouton { visible:fen.moduleId!==""; texte:Reglages.t("Configurer ce module", "Configure this tool"); enabled:JarvisEtat.administration; onClic:fen.configurerGroupe(fen.moduleId) }
+                JarvisBouton { visible:fen.moduleId!==""; texte:Reglages.t("Configurer ce module", "Configure this module"); enabled:JarvisEtat.administration; onClic:fen.configurerGroupe(fen.moduleId) }
                 Flow {
                     width:parent.width; spacing:8
                     Repeater {
@@ -276,7 +276,7 @@ FloatingWindow {
                         }
                     }
                 }
-                Note { visible:fen.moduleId!=="" && !(JarvisEtat.catalogue[fen.moduleId]||[]).length; text:Reglages.t("Ce module fournit ses réglages mais n’annonce pas d’action bureau dans le catalogue. Ses commandes de chat restent disponibles si le serveur les prend en charge.", "This tool provides settings but no desktop action catalogue. Its chat commands remain available when supported by the server.") }
+                Note { visible:fen.moduleId!=="" && !(JarvisEtat.catalogue[fen.moduleId]||[]).length; text:Reglages.t("Ce module fournit ses réglages mais n’annonce pas d’action bureau dans le catalogue. Ses commandes de chat restent disponibles si le serveur les prend en charge.", "This module provides settings but no desktop action catalogue. Its chat commands remain available when supported by the server.") }
                 Loader { width:parent.width; active:!!fen.selection.op; sourceComponent:pFormulaire }
                 Resultat { visible:!!JarvisEtat.resultats[fen.resultatOp] }
             }

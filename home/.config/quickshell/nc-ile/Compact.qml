@@ -162,7 +162,7 @@ Item {
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: Etat.branche ? "bolt" : "battery_full"; taille: 18; color: Etat.branche ? Couleurs.vert : Couleurs.texte }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: (Etat.branche ? Reglages.t("En charge · ", "Charging · ") : Reglages.t("Sur batterie · ", "On Battery · ")) + Etat.pourcent + Reglages.t(" %", "%")
+            text: (Etat.branche ? Reglages.t("En charge · ", "Charging · ") : Reglages.t("Sur batterie · ", "On battery · ")) + Etat.pourcent + Reglages.t(" %", "%")
             font.weight: Font.DemiBold; color: Etat.branche ? Couleurs.vert : Couleurs.texte
         }
     }
@@ -179,7 +179,7 @@ Item {
         }
         Texte {
             anchors.verticalCenter: parent.verticalCenter
-            text: Etat.profil === PowerProfile.PowerSaver ? Reglages.t("Économie", "Power Saver") : (Etat.profil === PowerProfile.Performance ? "Performance" : Reglages.t("Équilibré", "Balanced"))
+            text: Etat.profil === PowerProfile.PowerSaver ? Reglages.t("Économie", "Power saver") : (Etat.profil === PowerProfile.Performance ? "Performance" : Reglages.t("Équilibré", "Balanced"))
             font.weight: Font.DemiBold
         }
     }

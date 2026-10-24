@@ -2291,8 +2291,11 @@ def verifier_assistant():
     try:
         r = subprocess.run([sys.executable, os.path.join(BIN, "nc-assistant"), "verifier"],
                            capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return 1, T("Test impossible.", "Test impossible.")
+    except OSError:
+        return 1, T("Test impossible : nc-assistant introuvable.", "Test failed: nc-assistant not found.")
+    except subprocess.TimeoutExpired:
+        return 1, T("Test impossible : pas de réponse en 30 s, vérifie le réseau et l'adresse.",
+                    "Test failed: no answer within 30 s, check the network and the address.")
     lignes = (r.stdout if r.returncode == 0 else (r.stderr or r.stdout)).strip().splitlines()
     if r.returncode == 0:
         return 0, (lignes[0] if lignes else T("Connexion OK.", "Connection OK."))

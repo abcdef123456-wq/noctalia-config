@@ -474,7 +474,7 @@ Item {
         Module {
             id: energie
             readonly property var modes: [
-                { nom: Reglages.t("Économie", "Power Saver"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                { nom: Reglages.t("Économie", "Power saver"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
                 { nom: Reglages.t("Équilibré", "Balanced"), icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
                 { nom: "Performance", icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
             ]

@@ -165,7 +165,7 @@ Item {
                         id: badge; x: 22; anchors.verticalCenter: parent.verticalCenter
                         text: AssistantEtat.enCours ? Reglages.t("Traitement", "Thinking")
                             : (page.ecouteVocale ? Reglages.t("Écoute vocale", "Listening")
-                            : (AssistantEtat.erreur ? Reglages.t("Erreur", "Error") : Reglages.t("Prêt", "Ready")))
+                            : (AssistantEtat.erreur ? Reglages.t("Erreur, réessaie", "Error, try again") : Reglages.t("Prêt", "Ready")))
                         font.family: "Adwaita Sans"; font.pixelSize: 12; font.weight: Font.DemiBold; color: page.teinteEtat
                     }
                 }
@@ -378,7 +378,7 @@ Item {
                 : (AssistantEtat.erreur ? Reglages.t("Une erreur est survenue — ouvrir la conversation", "An error occurred — open conversation")
                     : (page.information || (page.derniereReponse
                         ? Reglages.t("Réponse reçue — ouvrir la conversation", "Reply received — open conversation")
-                        : Reglages.t("Comment puis-je vous aider ?", "How can I help you?"))))
+                        : Reglages.t("Comment puis-je t'aider ?", "How can I help you?"))))
             Row {
                 anchors.centerIn: parent; spacing: 8
                 width: Math.min(parent.width, iconeStatut.width + 8 + texteStatut.implicitWidth)

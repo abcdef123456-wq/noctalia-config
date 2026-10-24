@@ -182,7 +182,7 @@ Item {
             else if (diag.file.indexOf(id) >= 0)
                 l.push({ titre: libelle, sous: Reglages.t("En attente", "Waiting"), glyphe: "schedule", garder: true, f: () => {} })
             else if (fait)
-                l.push({ titre: "✗ " + libelle, sous: (fait.texte || Reglages.t("Échec", "Failed")).slice(0, 60), glyphe: "error", garder: true,
+                l.push({ titre: "✗ " + libelle, sous: (fait.texte || Reglages.t("Échec, réessaie", "Failed, try again")).slice(0, 60), glyphe: "error", garder: true,
                          aide: Reglages.t("↵ réessayer", "↵ try again"), f: () => diag.reparer(id) })
             else
                 l.push({ titre: libelle, glyphe: "build", garder: true,
@@ -649,7 +649,7 @@ Item {
         { t: Reglages.t("Mettre en veille", "Sleep"), k: "veille suspend dormir sleep", g: "bedtime", f: () => Etat.faire(["systemctl", "suspend"]) },
         { t: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), k: "éteindre redémarrer arrêt shutdown reboot quitter session shut power off restart log out logout", g: "power_settings_new", f: () => Etat.faire(["noctalia", "msg", "panel-toggle", "session"]) },
         { t: Reglages.t("Mode jeu", "Game Mode"), k: "mode jeu game gaming", g: "sports_esports", f: () => Etat.faire(["hyprctl", "eval", "nc.mode_jeu()"]) },
-        { t: Reglages.t("Économie d'énergie", "Power Saver"), k: "économie batterie eco énergie power saver low battery energy", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
+        { t: Reglages.t("Économie d'énergie", "Power saver"), k: "économie batterie eco énergie power saver low battery energy", g: "battery_saver", f: () => Etat.choisirProfil(PowerProfile.PowerSaver) },
         { t: Reglages.t("Équilibré", "Balanced"), k: "équilibré énergie normal balanced power energy", g: "battery_full", f: () => Etat.choisirProfil(PowerProfile.Balanced) },
         { t: "Performance", k: "performance énergie puissance nvidia power energy", g: "bolt", f: () => Etat.choisirProfil(PowerProfile.Performance) },
         { t: Reglages.t("Activer ou couper le Wi-Fi", "Turn Wi-Fi On or Off"), k: "wifi wi-fi réseau internet network", g: "wifi", f: () => Etat.faire(["noctalia", "msg", "wifi-toggle"]) },
@@ -847,7 +847,7 @@ Item {
                 if (agent.running || !r.plan) { resultats = []; return }
                 let lignesA = [], restantes = r.plan.actions.filter(a => !a.fait)
                 if (restantes.length > 1)
-                    lignesA.push({ titre: Reglages.t("Tout faire", "Do Everything"), sous: restantes.length + Reglages.t(" actions", " actions"), glyphe: "done_all",
+                    lignesA.push({ titre: Reglages.t("Tout faire", "Do everything"), sous: restantes.length + Reglages.t(" actions", " actions"), glyphe: "done_all",
                                    garder: true, aide: Reglages.t("↵ confirmer", "↵ confirm"), f: () => r.executerPlan(null) })
                 r.plan.actions.forEach(a => {
                     let n = a.n

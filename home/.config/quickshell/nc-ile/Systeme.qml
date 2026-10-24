@@ -107,7 +107,7 @@ Item {
                             text: (Etat.branche ? (Etat.batterie && Etat.batterie.timeToFull > 0 ? Reglages.t("Pleine dans ", "Full in ") + sy.heures(Etat.batterie.timeToFull)
                                                                                                    : Reglages.t("Sur secteur", "Power Adapter"))
                                                 : (Etat.batterie && Etat.batterie.timeToEmpty > 0 ? Reglages.t("Encore ", "") + sy.heures(Etat.batterie.timeToEmpty) + Reglages.t("", " left")
-                                                                                                   : Reglages.t("Sur batterie", "On Battery")))
+                                                                                                   : Reglages.t("Sur batterie", "On battery")))
                                   + (sy.val("sante") !== "" ? Reglages.t("  ·  santé ", "  ·  health ") + sy.val("sante") + sy.pc : "")
                                   + (sy.val("cycles") !== "" ? " (" + sy.val("cycles") + " cycles)" : "")
                         }
@@ -153,7 +153,7 @@ Item {
             // Modes d'énergie
             Repeater {
                 model: [
-                    { nom: Reglages.t("Économie", "Power Saver"), detail: Reglages.t("Autonomie maximale, sans effets", "Longest battery life, no effects"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
+                    { nom: Reglages.t("Économie", "Power saver"), detail: Reglages.t("Autonomie maximale, sans effets", "Longest battery life, no effects"), icone: "battery_saver", couleur: Couleurs.jaune, texte: Couleurs.surCouleur, p: PowerProfile.PowerSaver },
                     { nom: Reglages.t("Équilibré", "Balanced"), detail: Reglages.t("Le bon compromis au quotidien", "The right balance for every day"), icone: "battery_full", couleur: Couleurs.gris3, texte: Couleurs.texte, p: PowerProfile.Balanced },
                     { nom: "Performance", detail: Reglages.t("Puissance maximale, carte NVIDIA", "Maximum power, NVIDIA graphics"), icone: "bolt", couleur: Couleurs.orange, texte: Couleurs.surCouleur, p: PowerProfile.Performance }
                 ]
