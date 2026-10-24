@@ -215,7 +215,7 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 ## Passer un serveur déjà installé à la révision validée
 
 La révision validée est `aae5b9b`. Par rapport à `64523e5`, elle annonce son délai dans chaque demande d’action
-(`nc-noeud` laisse alors jusqu’à 32 s pour « Autoriser »), vérifie `ENABLE_NODE_EXEC` aussi pour les commandes
+(`nc-noeud` laisse alors jusqu’à 60 s pour « Autoriser »), vérifie `ENABLE_NODE_EXEC` aussi pour les commandes
 relayées, et ajoute le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce PC »). `64523e5` reste acceptée.
 `64523e5` avait ajouté à `3d1c6b6` (choix en boutons, délais de 600 s, dictée côté serveur, accès Tailscale) :
 
@@ -280,16 +280,19 @@ demander.
   `~/.local/state/noctalia-config/noeud.log` (0600), avec sa décision et d’où elle vient (`autorisé (écran)`,
   `refusé (distance)`…), l’empreinte sha256 de la commande ou du contenu entier, les caractères cachés écrits en
   clair, jamais un secret.
-- **Délais : 32 s avec `aae5b9b`, 12 s ou 17 s avec un serveur plus ancien.** Le serveur abandonne de son côté et
-  répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. Depuis `aae5b9b`, chaque trame
+- **Délais : jusqu’à 60 s avec `aae5b9b`, 12 s ou 17 s avec un serveur plus ancien.** Le serveur abandonne de son
+  côté et répond « échec » à JARVIS ; un « Autoriser » arrivé après ne doit rien faire. Depuis `aae5b9b`, chaque trame
   d’action porte son délai :
   `{"type":"action","req_id":"…","action":"exec","params":{"command":"uname -a","timeout":60.0},"timeout":65.0}`.
-  `nc-noeud` laisse alors `min(timeout − 3, 32)` secondes pour confirmer. Le champ n’est pris que s’il est un nombre
+  Sur ce délai moins 3 s, `nc-noeud` laisse les trois quarts pour confirmer, 60 s au plus, et garde le reste pour
+  exécuter, 15 s au plus : `min(timeout − 3 − min(15, (timeout − 3) / 4), 60)`, arrondi à la seconde inférieure.
+  Une trame de 65 s laisse 47 s pour confirmer (taper le code sur le téléphone prend 25 à 40 s) et 15 s pour
+  exécuter ; 80 s en laisse 60 et 17 ; 35 s en laisse 24 et 8. Le champ n’est pris que s’il est un nombre
   fini (pas un booléen), positif et d’au plus une heure ; sinon, ou s’il manque, les délais connus : 12 s pour un
   fichier, une capture ou le presse-papiers, 17 s pour une action relayée ou une commande (3 s sous le délai le plus
   court des révisions anciennes, qui n’annoncent rien). Un délai annoncé sous 6 s ne laisse pas le temps de te
   demander : refus direct. L’exécution elle-même s’arrête aussi 3 s avant l’abandon du serveur : une commande
-  autorisée au bout de 30 s sur 35 a 2 s pour tourner, puis elle est tuée ; s’il reste moins d’1 s, rien n’est fait.
+  autorisée au bout de 23 s sur 35 a 9 s pour tourner, puis elle est tuée ; s’il reste moins d’1 s, rien n’est fait.
   Avec un serveur qui n’annonce pas de délai dans la trame, une commande a donc au plus 17 s, confirmation comprise.
   Un « Autoriser » tardif affiche « Trop tard » et le serveur reçoit un seul refus.
 - **La clé secrète part seulement dans l’en-tête** `X-Secret-Key`, jamais dans l’adresse. La connexion est en
@@ -357,7 +360,7 @@ taille n’est jamais envoyé.
 2. Pour une action sensible, `nc-noeud` envoie :
    ```json
    {"type": "confirm_request", "req_id": "7f0c…", "action": "exec",
-    "summary": "exécuter cette commande :\nrm -rf ~/Téléchargements/vieux", "expires_in": 32, "code_required": true}
+    "summary": "exécuter cette commande :\nrm -rf ~/Téléchargements/vieux", "expires_in": 47, "code_required": true}
    ```
    `req_id` est celui de la trame d’action. `summary` dit exactement ce qui sera fait, dans la langue du PC : la
    commande entière ; pour un fichier écrit, le chemin, la taille, le sha256 du contenu et ses premières lignes ; le

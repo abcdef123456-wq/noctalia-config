@@ -1100,9 +1100,9 @@ REGLAGES = [
     R("NOEUD_JARVIS", "Intelligence artificielle", L("Laisser JARVIS piloter ce PC", "Let JARVIS control this PC"),
       "ouinon", "non",
       L("Attention : JARVIS pourra lancer des commandes, lire ou écrire tes fichiers et voir ton écran.\n"
-        "Chaque action attend ton « Autoriser » (3 à 32 s, sinon refus) ; clés et secrets restent interdits.",
+        "Chaque action attend ton « Autoriser » (2 à 60 s, sinon refus) ; clés et secrets restent interdits.",
         "Warning: JARVIS will be able to run commands, read or write your files and see your screen.\n"
-        "Each action waits for your “Allow” (3 to 32 s, otherwise denied); keys and secrets stay off-limits."),
+        "Each action waits for your “Allow” (2 to 60 s, otherwise denied); keys and secrets stay off-limits."),
       groupe="noeud"),
     # Où dire « Autoriser » : toujours une personne, sur l'écran de ce PC ou à distance (relayé par le serveur)
     R("NOEUD_CONFIRMATION", "Intelligence artificielle", L("Où autoriser les actions de JARVIS", "Where to allow JARVIS actions"),

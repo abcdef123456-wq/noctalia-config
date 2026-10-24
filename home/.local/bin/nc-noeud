@@ -16,9 +16,10 @@ tout sans te demander ; celui-ci applique une politique par action :
     actions de JARVIS » : le serveur te relaie la demande, par exemple sur Telegram, et tu tapes le code à 6 chiffres
     de ton appli d'authentification : sans ton code, le serveur ne peut rien autoriser), ou les deux : commande, lecture
     ou écriture d'un fichier, capture d'écran, écriture du presse-papiers ; refus automatique avant que le serveur
-    abandonne (son délai moins 3 s, 32 s au plus, quand il l'annonce dans la demande ; sinon 12 s pour un fichier,
-    une capture ou le presse-papiers, 17 s pour une action relayée, jusqu'à 17 s pour une commande selon son délai) :
-    jamais rien n'est fait après coup, et l'exécution s'arrête 3 s avant que le serveur abandonne ;
+    abandonne (quand il annonce son délai dans la demande : ce délai moins 3 s, dont un quart, 15 s au plus, reste
+    pour exécuter, et 60 s au plus ; sinon 12 s pour un fichier, une capture ou le presse-papiers, 17 s pour une
+    action relayée, jusqu'à 17 s pour une commande selon son délai) : jamais rien n'est fait après coup, et
+    l'exécution s'arrête 3 s avant que le serveur abandonne ;
   - toujours refusées : les chemins protégés (clés SSH et GPG, démarrage automatique, shells, secrets des
     navigateurs, de gh, de Claude, de l'assistant…), tout pendant que l'IA est coupée (IA_MODE=non), toute autre action.
 Connexion wss://, ou ws:// seulement vers un hôte privé ou Tailscale. La clé secrète part dans l'en-tête X-Secret-Key,
@@ -64,12 +65,12 @@ DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, 
 No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
 notification with buttons), remotely (relayed by the server, e.g. on Telegram, with the 6-digit code of your
 authenticator app: without your code, the server cannot allow anything), or both: command, file read or write,
-screenshot, clipboard write; denied before the server gives up (its timeout minus 3 s, at most 32 s, when the request
-carries it; otherwise 12 s for a file, screenshot or clipboard, 17 s for a relayed action, up to 17 s for a command):
-never done late, and execution stops 3 s before the server gives up. Always
-denied: protected paths, everything while AI is off (IA_MODE=non), any other action. wss://, or ws:// only to a private
-or Tailscale host; the secret key goes in the X-Secret-Key header, never in the URL. Log:
-~/.local/state/noctalia-config/noeud.log (0600).
+screenshot, clipboard write; denied before the server gives up (when the request carries its timeout: that timeout
+minus 3 s, a quarter of which, at most 15 s, is kept to run, and at most 60 s; otherwise 12 s for a file, screenshot
+or clipboard, 17 s for a relayed action, up to 17 s for a command): never done late, and execution stops 3 s before
+the server gives up. Always denied: protected paths, everything while AI is off (IA_MODE=non), any other action.
+wss://, or ws:// only to a private or Tailscale host; the secret key goes in the X-Secret-Key header, never in the URL.
+Log: ~/.local/state/noctalia-config/noeud.log (0600).
 """
 
 # Délai de confirmation par action, toujours 3 s sous celui du serveur JARVIS-BIS (révision 8ff25c3) : passé ce délai,
@@ -82,10 +83,15 @@ or Tailscale host; the secret key goes in the X-Secret-Key header, never in the 
 #     et pour toute action quand un nœud est désigné ;
 #   - send_action par défaut, /api/node/{id}/action : 30 s.
 # 64523e5 attend 35 s partout, mais n'annonce ni son délai ni sa révision : sans annonce, on garde le plus court connu.
-# Depuis aae5b9b (issue #17), chaque trame d'action porte « timeout » (secondes) : confirmation = min(timeout - 3, 32).
+# Depuis aae5b9b (issue #17), chaque trame d'action porte « timeout » (secondes). Sur ce temps utile (timeout - 3),
+# la confirmation prend les trois quarts, 60 s au plus, et laisse le reste pour exécuter : un quart, 15 s au plus
+# (issue #20 : taper un code sur le téléphone prend 25 à 40 s, le serveur envoie 65 s pour les actions sensibles).
+# 35 → 24 s (8 s pour exécuter), 65 → 47 s (15 s), 80 → 60 s (17 s), 6 → 2 s (1 s) ; sous 6 s, refus direct.
 # Dans les deux cas, l'exécution elle-même s'arrête 3 s avant que le serveur abandonne (B2-11).
 MARGE_SERVEUR = 3
-DELAI_MAX_TRAME = 32               # confirmation la plus longue, même si le serveur annonce plus
+DELAI_MAX_TRAME = 60               # confirmation la plus longue, même si le serveur annonce plus
+RESERVE_EXEC = 15                  # laissées pour exécuter après une confirmation au dernier moment (au plus)
+PART_EXEC = 4                      # … ou un quart du temps utile, pour une trame courte
 TRAME_ABSURDE = 3600               # au-delà, la valeur annoncée est ignorée (délais connus ci-dessous)
 DELAI_CONFIRMATION = 25            # le plus long possible (une commande au long délai)
 DELAI_RELAIS = 20 - MARGE_SERVEUR  # 17 s : action peut-être relayée par HardwareRelay (20 s)
@@ -196,7 +202,8 @@ def delai_confirmation(nom, p, trame=None):
             raise Refus(T(f"Délai du serveur trop court ({trame:g} s) pour te demander confirmation "
                           f"({EXEC_MIN} s au moins) : refusé.",
                           f"Server timeout too short ({trame:g} s) to ask for your confirmation (at least {EXEC_MIN} s): denied."))
-        return min(trame - MARGE_SERVEUR, DELAI_MAX_TRAME)
+        utile = trame - MARGE_SERVEUR
+        return math.floor(min(utile - min(RESERVE_EXEC, utile / PART_EXEC), DELAI_MAX_TRAME))
     if nom in DELAIS_FIXES:
         return DELAIS_FIXES[nom]
     if nom != "exec":

@@ -708,10 +708,21 @@ class DelaiParTrame(ModuleCharge):
     def test_delai_de_la_trame(self):
         m = self.charger()
         d = m.delai_confirmation
-        self.assertEqual(d("read_file", {}, 35.0), 32, "timeout 35 → confirmation 32 s")
-        self.assertEqual(d("write_file", {}, 20), 17)
-        self.assertEqual(d("exec", {"command": "x", "timeout": 60.0}, 65.0), 32, "plafond de 32 s")
-        self.assertEqual(d("exec", {"command": "x", "timeout": 5}, 10.0), 7, "la trame l'emporte sur params.timeout")
+        # Issue #20 : sur le temps utile (trame - 3), les trois quarts pour confirmer, 60 s au plus ; le reste pour
+        # exécuter, 15 s au plus
+        self.assertEqual(d("read_file", {}, 35.0), 24, "timeout 35 → confirmation 24 s, 8 s pour exécuter")
+        self.assertEqual(d("exec", {"command": "x", "timeout": 60.0}, 65.0), 47, "65 → 47 s, 15 s pour exécuter")
+        self.assertEqual(d("exec", {"command": "x", "timeout": 75.0}, 80.0), 60, "80 → plafond de 60 s")
+        self.assertEqual(d("exec", {"command": "x"}, 600.0), 60)
+        self.assertEqual(d("write_file", {}, 20), 12)
+        self.assertEqual(d("exec", {"command": "x", "timeout": 5}, 10.0), 5, "la trame l'emporte sur params.timeout")
+        self.assertEqual(d("read_file", {}, 6), 2, "la trame la plus courte : 2 s pour confirmer, 1 s pour exécuter")
+        for t in [6, 6.5, 7, 9.9] + list(range(10, 200)):
+            c = d("exec", {"command": "x"}, float(t))
+            self.assertIsInstance(c, int)
+            self.assertTrue(2 <= c <= m.DELAI_MAX_TRAME, t)
+            self.assertGreaterEqual(t - m.MARGE_SERVEUR - c, min(m.RESERVE_EXEC, (t - m.MARGE_SERVEUR) / 4), t)
+            self.assertGreaterEqual(t - m.MARGE_SERVEUR - c, m.BUDGET_MIN, t)
         self.assertEqual(d("read_file", {}, None), 12, "champ absent → 12 s")
         self.assertEqual(d("media", {}, None), 17)
         for v in (35.0, 35, 6):
@@ -737,11 +748,14 @@ class DelaiParTrame(ModuleCharge):
             self.assertEqual(vu, [attendu])
         return r
 
-    def test_trame_35_confirmation_32_et_champ_absent_12(self):
+    def test_trame_65_confirmation_47_et_champ_absent_12(self):
         m = self.charger()
         (self.home / "a.txt").write_text("contenu")
-        r = self.decider_autorise_a(m, 31, "read_file", {"path": "~/a.txt"}, 35.0, attendu=32)
+        r = self.decider_autorise_a(m, 46, "read_file", {"path": "~/a.txt"}, 65.0, attendu=47)
         self.assertTrue(r["success"], r)
+        self.t = 1500.0
+        r = self.decider_autorise_a(m, 47, "read_file", {"path": "~/a.txt"}, 65.0, attendu=47)
+        self.assertFalse(r["success"], "pile à l'échéance de la confirmation : trop tard")
         self.t = 2000.0
         r = self.decider_autorise_a(m, 13, "read_file", {"path": "~/a.txt"}, None, attendu=12)
         self.assertFalse(r["success"], "sans timeout dans la trame : 12 s, comme avant")
@@ -749,25 +763,25 @@ class DelaiParTrame(ModuleCharge):
         r = self.decider_autorise_a(m, 13, "read_file", {"path": "~/a.txt"}, "35", attendu=12)
         self.assertFalse(r["success"], "valeur non numérique : délais connus")
 
-    def test_confirme_a_30_s_execution_bornee_a_2_s(self):
+    def test_confirme_a_4_s_sur_10_execution_bornee_a_3_s(self):
         m = self.charger()
         marque = self.home / "fini"
         debut = time.monotonic()
-        r = self.decider_autorise_a(m, 30, "exec", {"command": f"sleep 6; touch {marque}", "timeout": 60.0}, 35.0,
-                                    attendu=32)
+        r = self.decider_autorise_a(m, 4, "exec", {"command": f"sleep 6; touch {marque}", "timeout": 60.0}, 10.0,
+                                    attendu=5)
         duree = time.monotonic() - debut
         self.assertFalse(r["success"], r)
-        self.assertIn("Délai de 2 s dépassé", r["error"], "35 - 3 - 30 = 2 s")
-        self.assertGreater(duree, 1.5)
-        self.assertLess(duree, 4.5)
+        self.assertIn("Délai de 3 s dépassé", r["error"], "10 - 3 - 4 = 3 s")
+        self.assertGreater(duree, 2.5)
+        self.assertLess(duree, 5.5)
         time.sleep(0.3)
         self.assertFalse(marque.exists(), "la commande est tuée")
 
     def test_confirme_trop_tard_rien_et_un_seul_refus(self):
         m = self.charger()
         marque = self.home / "fait"
-        # 0,5 s de budget (avec et sans timeout dans la trame : 17 + 3 - 3 - 16,5), pile à l'échéance, après
-        for apres, trame in ((31.5, 35.0), (16.5, None), (32, 35.0), (40, 35.0)):
+        # 0,5 s de budget (sans timeout dans la trame : 17 + 3 - 3 - 16,5), pile à l'échéance (24 s sur 35), après
+        for apres, trame in ((16.5, None), (24, 35.0), (31.5, 35.0), (40, 35.0)):
             noeud = m.Noeud({"URL": "http://127.0.0.1:1"})
             noeud.ws = FauxWS()
             debut = self.t
@@ -890,7 +904,7 @@ class Distance(ServeurDistant):
         self.assertEqual(q["action"], "exec")
         self.assertIn(f"touch {marque} # ", q["summary"], "la commande entière")
         self.assertNotIn(SECRET, q["summary"], "jamais de secret")
-        self.assertTrue(30 <= q["expires_in"] <= 32, q)
+        self.assertTrue(22 <= q["expires_in"] <= 24, q)
         self.assertFalse(marque.exists(), "rien avant « allow »")
         self.repondre(rid, "allow")
         rep = self.attendre("response", rid)
