@@ -11,6 +11,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,6 +42,8 @@ class Faux(http.server.BaseHTTPRequestHandler):
     anthropic_refuse = False
     texte_ant = "Bonjour"                    # ce que « Claude » répond (un plan JSON pour nc-ia agir)
     pendant = None                           # appelé pendant que « Claude » réfléchit (un réglage changé entre-temps)
+    goutte = None                            # « ant » ou « ollama » : répond un octet de temps en temps, sans jamais finir
+    ollama_long = False                      # Ollama envoie bien plus que MAX_REPONSE
 
     def log_message(self, *a):
         pass
@@ -52,6 +55,23 @@ class Faux(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def goutte_a_goutte(self, debut):
+        """Un serveur qui ne finit jamais : un octet toutes les 0,2 s (chaque lecture aboutit, la ligne jamais), 20 s
+        au plus. Le vrai cas : un octet toutes les 25 s, sous l'échéance de lecture de 120 s."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        try:
+            self.wfile.write(debut)
+            self.wfile.flush()
+            fin = time.monotonic() + 20
+            while time.monotonic() < fin:
+                time.sleep(0.2)
+                self.wfile.write(b":")
+                self.wfile.flush()
+        except OSError:
+            pass
 
     def do_GET(self):
         Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=None))
@@ -74,6 +94,14 @@ class Faux(http.server.BaseHTTPRequestHandler):
             corps = brut
         Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=corps))
         sse = lambda evs: "".join(f"data: {json.dumps(e)}\n\n" for e in evs)
+        if self.path == "/ant/messages" and Faux.goutte == "ant":
+            return self.goutte_a_goutte(b'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", '
+                                        b'"text": "Bon"}}\n\n')
+        if self.path == "/ollama/api/chat" and Faux.goutte == "ollama":
+            return self.goutte_a_goutte(b"")
+        if self.path == "/ollama/api/chat" and Faux.ollama_long:
+            ligne = (json.dumps({"message": {"content": "x" * 65536}, "done": False}) + "\n").encode()
+            return self.envoyer(200, ligne * 96 + b'{"message": {"content": "FIN"}, "done": true}\n', "application/x-ndjson")
         if self.path == "/ant/messages":
             if Faux.pendant:
                 Faux.pendant()
@@ -116,6 +144,8 @@ class IA(unittest.TestCase):
         Faux.anthropic_refuse = False
         Faux.texte_ant = "Bonjour"
         Faux.pendant = None
+        Faux.goutte = None
+        Faux.ollama_long = False
         d = tempfile.TemporaryDirectory(prefix="nc-ia-")
         self.addCleanup(d.cleanup)
         self.home = Path(d.name)
@@ -1021,6 +1051,79 @@ class IA(unittest.TestCase):
         self.assertLess(time.time() - debut, 15)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("délai dépassé", r.stderr)
+
+    def test_api_goutte_a_goutte_arretee_a_l_echeance_totale(self):
+        """Revue B2-06 : seule chaque lecture était bornée (120 s) ; un serveur qui envoie un octet toutes les 25 s
+        tenait l'appel sans fin. Une échéance pour tout l'appel (NC_IA_DELAI_TOTAL), sur une horloge monotone."""
+        Faux.goutte = "ant"
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=anthropic\n")
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_TOTAL": "2"})
+        self.assertLess(time.monotonic() - debut, 10)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("Bon", r.stdout, "le début était affiché")
+        self.assertIn("réponse incomplète", r.stderr)
+        self.assertIn("délai dépassé", r.stderr)
+        self.assertIn("anthropic", (self.home / "run/nc-ia/echecs.json").read_text(), "trop lente : notée en échec")
+
+    def test_ollama_goutte_a_goutte_puis_relais(self):
+        """Revue B2-06 : de même pour Ollama (300 s par lecture, rien pour tout l'appel). Rien n'était affiché : en
+        mode auto, l'IA suivante prend le relais."""
+        Faux.goutte = "ollama"
+        u = f"http://127.0.0.1:{self.port}"
+        self.cles(f"OLLAMA_HOST={u}/ollama\nOPENAI_API_KEY={CLE_O}\nURL_OPENAI={u}/oai\n")
+        self.reglages("IA_PREFERENCE=local\n")
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_TOTAL": "2"})
+        self.assertLess(time.monotonic() - debut, 10)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ollama (sur ce PC) n'a pas répondu — délai dépassé", r.stdout)
+        self.assertTrue(r.stdout.strip().endswith("Salut toi"), r.stdout)
+
+    def test_ollama_borne_a_max_reponse(self):
+        """Revue B2-06 : MAX_REPONSE (4 Mio) bornait les API en flux, pas Ollama, sans limite de longueur de réponse."""
+        Faux.ollama_long = True
+        self.cles(f"OLLAMA_HOST=http://127.0.0.1:{self.port}/ollama\n")
+        r = self.lancer("demander", "--ia", "ollama", "q")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertLessEqual(len(r.stdout.encode()), 4 * 1024 * 1024 + 2)
+        self.assertNotIn("FIN", r.stdout)
+
+    def preparer_muets(self):
+        """Mode auto, seulement des programmes : Claude Code échoue tout de suite, Codex, Gemini CLI et OpenCode
+        restent muets (chacun note qu'il a été lancé), Qwen Code échoue."""
+        self.cles("OLLAMA_HOST=http://127.0.0.1:1\n")
+        for nom in ("codex", "gemini", "opencode"):
+            self.programme(nom, f'echo x >> "$HOME/lance-{nom}"; exec sleep 60')
+        return lambda nom: (self.home / f"lance-{nom}").exists()
+
+    def test_mode_auto_en_arriere_plan_borne_en_tout(self):
+        """Revue B2-07 : en mode auto, 5 programmes muets donnaient 5 délais à la suite. En arrière-plan (--fond), une
+        échéance pour tout le relais (NC_IA_DELAI_FOND) ; celle qui est coupée par elle n'est pas notée en échec (elle
+        a eu moins que son propre délai), et la suivante n'est pas lancée."""
+        lance = self.preparer_muets()
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", "--fond", env_plus={"NC_IA_DELAI_CLI": "2", "NC_IA_DELAI_FOND": "3"})
+        duree = time.monotonic() - debut
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertLess(duree, 5.5, "le relais s'arrête à l'échéance globale")
+        self.assertTrue(lance("codex") and lance("gemini"))
+        self.assertFalse(lance("opencode"), "plus de temps : pas lancée")
+        self.assertIn("arrière-plan", r.stderr)
+        echecs = json.loads((self.home / "run/nc-ia/echecs.json").read_text())
+        self.assertIn("codex", echecs, "son propre délai dépassé : un échec")
+        self.assertNotIn("gemini-cli", echecs, "coupée par l'échéance globale : pas sa faute")
+
+    def test_mode_auto_devant_toi_garde_chaque_delai(self):
+        """Les appels que tu lances toi-même gardent le relais complet : chaque IA a son propre délai."""
+        lance = self.preparer_muets()
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "1.5", "NC_IA_DELAI_FOND": "1"})
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertGreater(time.monotonic() - debut, 4)
+        self.assertTrue(lance("codex") and lance("gemini") and lance("opencode"))
+        echecs = json.loads((self.home / "run/nc-ia/echecs.json").read_text())
+        self.assertTrue({"codex", "gemini-cli", "opencode"} <= set(echecs), echecs)
 
     def test_programme_fini_avec_un_descendant_sur_sa_sortie(self):
         """Revue B2-05 : un programme d'IA qui a répondu et fini (code 0) mais laisse un sous-processus sur sa sortie :

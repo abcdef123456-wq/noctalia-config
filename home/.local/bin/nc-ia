@@ -44,6 +44,7 @@ URL_<FOURNISSEUR> (une passerelle ou un serveur compatible, en HTTPS), OLLAMA_HO
 Rien ne tourne en arrière-plan : une IA n'est appelée que sur demande.
 """
 import base64
+import http.client
 import json
 import os
 from pathlib import Path
@@ -55,6 +56,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -158,6 +160,14 @@ Keys: ~/.config/nc/ia.conf (0600, never in arguments or logs), otherwise the usu
 
 class ErreurIA(Exception):
     pass
+
+
+class ErreurDelai(ErreurIA):
+    """Une IA arrêtée à l'échéance. globale : c'est le temps de tout le relais en arrière-plan qui a coupé, pas le sien
+    (elle a eu moins que son propre délai) : pas une panne de l'IA, rien n'est noté contre elle (revue B2-07)."""
+    def __init__(self, message, globale=False):
+        super().__init__(message)
+        self.globale = globale
 
 
 class ErreurOutils(ErreurIA):
@@ -506,13 +516,114 @@ def requete(ident, url, corps=None, entetes=None, delai=120):
         raise ErreurIA(T("connexion impossible", "cannot connect") + f" ({str(raison)[:120]})")
 
 
-def lignes_sse(r):
-    """Les données d'un flux d'événements (data: …), décodées en JSON."""
+# ── Échéances ──────────────────────────────────────────────────────────────────────────────────────────────────
+# Pour tout un appel, en plus de chaque lecture (120 s, 300 s pour Ollama) : un serveur qui envoie un octet toutes les
+# 25 s tenait l'appel sans fin (revue B2-06). Une API : 10 min ; sa réponse la plus longue (16 000 jetons chez
+# Anthropic, 8 000 ailleurs) arrive bien avant, même à 30 jetons/s (9 min) : une longue réponse qui avance n'est pas
+# coupée. Ollama : 15 min ; il peut charger son modèle (jusqu'à 5 min) puis écrire lentement sur le processeur, sans
+# limite de longueur. NC_IA_DELAI_TOTAL : la même valeur pour les deux, en secondes.
+def delai_total(ident):
+    if os.environ.get("NC_IA_DELAI_TOTAL"):
+        return float(os.environ["NC_IA_DELAI_TOTAL"])
+    return 900.0 if FOURNISSEURS[ident]["genre"] == "local" else 600.0
+
+
+# En arrière-plan (--fond, NC_IA_FOND=1 : rapports, automatismes), le relais du mode auto a 10 min en tout : le temps
+# d'une IA lente, pas d'une cascade (5 programmes muets : 5 × 3 min ; avec les API, JARVIS et Ollama, plus d'une heure).
+# Ce que tu lances toi-même garde le relais complet, chaque IA avec son délai : personne n'attend un automatisme, toi
+# si, et tu peux l'arrêter (Échap). NC_IA_DELAI_FOND, en secondes.
+DELAI_FOND = float(os.environ.get("NC_IA_DELAI_FOND", 600))
+ECHEANCE = None              # fin du relais en arrière-plan (horloge monotone), posée par demander()
+
+
+def en_fond():
+    return FOND or os.environ.get("NC_IA_FOND") == "1"
+
+
+def borne(delai):
+    """Le délai d'un appel, raccourci à ce qui reste du relais en arrière-plan ; vrai si c'est ce reste qui borne."""
+    if ECHEANCE is None:
+        return delai, False
+    reste = max(0.0, ECHEANCE - time.monotonic())
+    return (reste, True) if reste < delai else (delai, False)
+
+
+def duree(s):
+    return f"{s / 60:g} min" if s >= 60 and s % 60 == 0 else f"{s:g} s"
+
+
+def erreur_delai(propre, globale):
+    if globale:
+        return ErreurDelai(T("délai dépassé : le temps de l'IA d'arrière-plan est écoulé", "timed out: background AI time is up"),
+                           True)
+    return ErreurDelai(T(f"délai dépassé : pas de réponse complète en {duree(propre)}",
+                         f"timed out: no complete answer within {duree(propre)}"))
+
+
+class GardeFlux:
+    """Ferme la connexion à l'échéance de tout l'appel : une lecture en cours (une ligne qui arrive octet par octet)
+    s'arrête aussitôt. La connexion est tenue par une copie de son descripteur, fermée à la fin : jamais celle d'un
+    autre. threading.Timer attend sur une horloge monotone (une heure changée ne l'avance ni ne la recule)."""
+    def __init__(self, r, delai):
+        self.depasse = False
+        self.verrou = threading.Lock()
+        try:
+            self.s = socket.socket(fileno=os.dup(r.fileno()))
+        except (OSError, ValueError, AttributeError):
+            self.s = None                        # sans elle, l'échéance est vue entre deux lignes
+        self.t = threading.Timer(max(0.0, delai), self._couper)
+        self.t.daemon = True
+        self.t.start()
+
+    def _couper(self):
+        with self.verrou:
+            self.depasse = True
+            if self.s:
+                try:
+                    self.s.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def fin(self):
+        self.t.cancel()
+        with self.verrou:
+            if self.s:
+                self.s.close()
+                self.s = None
+
+
+def flux_borne(ident, url, corps, entetes=None, delai=120):
+    """Les lignes brutes d'une réponse en flux (API, Ollama) : MAX_REPONSE octets au plus, et une échéance pour tout
+    l'appel (delai_total, raccourcie au reste du relais en arrière-plan) ; ErreurDelai quand elle coupe."""
+    propre = delai_total(ident)
+    total, globale = borne(propre)
+    if total <= 0:
+        raise erreur_delai(propre, globale)
+    fin = time.monotonic() + total
+    r = requete(ident, url, corps, entetes, min(delai, total))
+    garde = GardeFlux(r, fin - time.monotonic())
     lu = 0
-    for brut in r:
-        lu += len(brut)
-        if lu > MAX_REPONSE:
-            break
+    try:
+        for brut in r:
+            lu += len(brut)
+            if garde.depasse or lu > MAX_REPONSE:
+                break
+            yield brut
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        if not garde.depasse:                    # connexion fermée à l'échéance : dit plus bas
+            if isinstance(e, http.client.HTTPException):
+                raise ErreurIA(T("connexion coupée", "connection lost") + f" ({type(e).__name__})") from None
+            raise
+    finally:
+        garde.fin()
+        r.close()
+    if garde.depasse:                            # fermée à l'échéance, la fin ressemble à une réponse finie
+        raise erreur_delai(propre, globale)
+
+
+def lignes_sse(lignes):
+    """Les données d'un flux d'événements (data: …), décodées en JSON."""
+    for brut in lignes:
         l = brut.decode("utf-8", "replace").strip()
         if not l.startswith("data:"):
             continue
@@ -617,8 +728,7 @@ def appel_anthropic(consigne, texte, image, usage):
     if m in ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5", "claude-sonnet-5-5"):
         corps["fallbacks"] = "default"
         entetes["anthropic-beta"] = "server-side-fallback-2026-07-01"
-    r = requete("anthropic", base("anthropic") + "/messages", corps, entetes)
-    for e in lignes_sse(r):
+    for e in lignes_sse(flux_borne("anthropic", base("anthropic") + "/messages", corps, entetes)):
         if e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
             yield e["delta"].get("text", "")
         elif e.get("type") == "message_delta" and (e.get("delta") or {}).get("stop_reason") == "refusal":
@@ -642,8 +752,7 @@ def appel_compatible(ident, consigne, texte, image, usage):
     entetes = {"Authorization": "Bearer " + c}
     if ident == "openrouter":
         entetes.update({"HTTP-Referer": "https://github.com/noctalia-config", "X-Title": "noctalia-config"})
-    r = requete(ident, base(ident) + "/chat/completions", corps, entetes)
-    for e in lignes_sse(r):
+    for e in lignes_sse(flux_borne(ident, base(ident) + "/chat/completions", corps, entetes)):
         for ch in e.get("choices") or []:
             t = (ch.get("delta") or {}).get("content")
             if t:
@@ -662,8 +771,7 @@ def appel_gemini(consigne, texte, image, usage, audio=None):
         parts.insert(0, {"inline_data": {"mime_type": mime, "data": b64}})
     corps = {"system_instruction": {"parts": [{"text": consigne}]}, "contents": [{"role": "user", "parts": parts}]}
     url = f"{base('google')}/models/{urllib.parse.quote(modele('google'))}:streamGenerateContent?alt=sse"
-    r = requete("google", url, corps, {"x-goog-api-key": c})
-    for e in lignes_sse(r):
+    for e in lignes_sse(flux_borne("google", url, corps, {"x-goog-api-key": c})):
         for cand in e.get("candidates") or []:
             for p in (cand.get("content") or {}).get("parts") or []:
                 if p.get("text") and not p.get("thought"):
@@ -675,8 +783,7 @@ def appel_ollama(consigne, texte, image, usage):
     if image:
         msg["images"] = [image_b64(image)[1]]
     corps = {"model": modele_ollama(), "stream": True, "messages": [{"role": "system", "content": consigne}, msg]}
-    r = requete("ollama", ollama_url() + "/api/chat", corps, delai=300)
-    for brut in r:
+    for brut in flux_borne("ollama", ollama_url() + "/api/chat", corps, delai=300):
         try:
             e = json.loads(brut)
         except ValueError:
@@ -709,10 +816,12 @@ class GardeTemps:
     """Arrête le programme à l'échéance, même s'il garde sa sortie ouverte sans rien écrire (revue Codex IA-04) : son
     propre groupe de processus seulement (lancé avec start_new_session), jamais une autre session."""
     def __init__(self, p, delai=None):
-        import threading
         self.depasse = False
         self.p = p
-        self.t = threading.Timer(DELAI_CLI if delai is None else delai, self._arreter)
+        # Son délai, ou ce qui reste du relais en arrière-plan (globale : ce reste a coupé, pas le sien)
+        self.propre = DELAI_CLI if delai is None else delai
+        delai, self.globale = borne(self.propre)
+        self.t = threading.Timer(delai, self._arreter)
         self.t.daemon = True
         self.t.start()
         # Le programme fini, un sous-processus peut garder sa sortie ouverte : la lecture attendrait l'échéance, dite
@@ -777,7 +886,7 @@ def appel_claude(consigne, texte, image, usage):
                     yield e["result"]
         p.wait(timeout=10)
         if garde.depasse:
-            raise ErreurIA(T("délai dépassé", "timed out"))
+            raise erreur_delai(garde.propre, garde.globale)
         if p.returncode != 0:
             raise ErreurIA(derniere_ligne(err) or T(f"Claude Code a échoué (code {p.returncode})", f"Claude Code failed (code {p.returncode})"))
         if rien:
@@ -816,7 +925,7 @@ def appel_programme(ident, consigne, texte, image, usage):
             yield l
         p.wait(timeout=10)
         if garde.depasse:
-            raise ErreurIA(T("délai dépassé", "timed out"))
+            raise erreur_delai(garde.propre, garde.globale)
         # Code d'erreur : un échec, même après un début de réponse (revue Codex IA-03)
         if p.returncode != 0:
             raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} a échoué (code {p.returncode})", f"{nom(ident)} failed (code {p.returncode})"))
@@ -840,10 +949,13 @@ def appel_jarvis(consigne, texte, image, usage):
     with subprocess.Popen([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--flux", "--",
                            consigne + "\n\n" + texte], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                           stdin=subprocess.DEVNULL) as p:
+        delai, globale = borne(DELAI_JARVIS)
         try:
-            sortie, erreur = p.communicate(timeout=DELAI_JARVIS)
+            sortie, erreur = p.communicate(timeout=delai)
         except subprocess.TimeoutExpired:
-            raise ErreurIA(T("JARVIS n'a pas répondu à temps", "JARVIS did not answer in time")) from None
+            if globale:
+                raise erreur_delai(DELAI_JARVIS, True) from None
+            raise ErreurDelai(T("JARVIS n'a pas répondu à temps", "JARVIS did not answer in time")) from None
         finally:
             if p.poll() is None:
                 p.terminate()
@@ -1196,14 +1308,26 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
     liste = [i for i in candidats(usage, force) if i not in exclure]
     if not liste:
         raise ErreurIA(message_aucune(usage))
-    rates = []
     RELAIS.clear()
+    global ECHEANCE
+    # En arrière-plan, le relais a DELAI_FOND en tout (une seule IA : son propre délai suffit)
+    ECHEANCE = time.monotonic() + DELAI_FOND if en_fond() and len(liste) > 1 else None
+    try:
+        return _demander(liste, texte, usage, image, consigne_, flux, ecrire)
+    finally:
+        ECHEANCE = None
+
+
+def _demander(liste, texte, usage, image, consigne_, flux, ecrire):
     global _reglages
+    rates = []
     for ident in liste:
         if rates:                                # coupée pendant que la précédente échouait : pas de relais
             _reglages = None
             if coupee():
                 raise ErreurIA(message_coupee())
+        if ECHEANCE is not None and time.monotonic() >= ECHEANCE:
+            break                                # arrière-plan : plus de temps pour la suivante
         morceaux = []
         CHOIX.clear()
         filtre = FiltreOutils()
@@ -1237,13 +1361,21 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
                 ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
             raise
         except (ErreurIA, OSError, subprocess.SubprocessError, ValueError) as e:
+            # Coupée par le temps du relais en arrière-plan, pas par le sien : pas sa faute, rien de noté contre elle
+            globale = getattr(e, "globale", False)
             if morceaux:                                        # déjà en partie affichée : pas de mélange de deux IA
-                noter_echec(ident)                              # incomplète : un échec, l'IA passe en dernier
+                if not globale:
+                    noter_echec(ident)                          # incomplète : un échec, l'IA passe en dernier
                 ecrire((json.dumps({"t": "\n…"}) + "\n") if flux else "\n…\n")
                 raise ErreurIA(T(f"{nom(ident)} : réponse incomplète ({e})", f"{nom(ident)}: incomplete answer ({e})"))
-            noter_echec(ident)
+            if not globale:
+                noter_echec(ident)
             rates.append((nom(ident), str(e)))
-    raise ErreurIA(T("Aucune IA n'a pu répondre", "No AI could answer") + " — " + " ; ".join(f"{q} : {r}" for q, r in rates))
+    debut = T("Aucune IA n'a pu répondre", "No AI could answer")
+    if ECHEANCE is not None and time.monotonic() >= ECHEANCE:
+        debut = T(f"L'IA d'arrière-plan s'arrête : pas de réponse en {duree(DELAI_FOND)}",
+                  f"Background AI stops: no answer within {duree(DELAI_FOND)}")
+    raise ErreurIA(debut + " — " + " ; ".join(f"{q} : {r}" for q, r in rates))
 
 
 def garder(rep, ident):
