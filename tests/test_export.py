@@ -97,3 +97,84 @@ class ExportIsole(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertEqual((self.depot / "home/.local/bin/nc-dictee").read_bytes(), avant)
         self.assertFalse(list(self.depot.glob(".nc-export.*")))
+
+    def test_dossier_installe_en_lien_symbolique(self):
+        """A3-R2 : ~/.config/nvim lien vers un dossier faisait « type incompatible » et arrêtait tout l'export. Son
+        contenu est publié, jamais le lien (sa cible contient le chemin du dossier personnel)."""
+        (self.depot / "home/.config/nvim").mkdir(parents=True)
+        (self.depot / "home/.config/nvim/depot.lua").write_text("-- seulement dans le dépôt\n")
+        subprocess.run(["git", "-C", str(self.depot), "add", "home"], env=self.env, capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(self.depot), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "nvim"], env=self.env, capture_output=True, check=True)
+        ailleurs = self.home / "ailleurs/nvim"
+        (ailleurs / "lua").mkdir(parents=True)
+        (ailleurs / "init.lua").write_text("vim.o.number = true\n")
+        (ailleurs / "lua/reglages.lua").write_text("return {}\n")
+        (self.home / ".config/nvim").symlink_to(ailleurs)
+        (self.home / "ailleurs/p10k.zsh").write_text("# p10k\n")
+        (self.home / ".p10k.zsh").symlink_to(self.home / "ailleurs/p10k.zsh")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        nvim = self.depot / "home/.config/nvim"
+        self.assertFalse(nvim.is_symlink(), "le lien lui-même n'est jamais publié")
+        self.assertTrue(nvim.is_dir())
+        self.assertEqual((nvim / "init.lua").read_text(), "vim.o.number = true\n")
+        self.assertTrue((nvim / "lua/reglages.lua").exists())
+        self.assertTrue((nvim / "depot.lua").exists(), "les fichiers du dépôt pas encore installés restent")
+        p10k = self.depot / "home/.p10k.zsh"
+        self.assertFalse(p10k.is_symlink(), "un lien vers un fichier : le fichier est publié")
+        self.assertEqual(p10k.read_text(), "# p10k\n")
+
+    def test_fichier_contre_dossier_refuse(self):
+        (self.home / ".config/quickshell/nc-ile").parent.mkdir(parents=True)
+        (self.home / ".config/quickshell/nc-ile").write_text("pas un dossier\n")
+        r = self.exporter("--preview")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("type incompatible", r.stderr)
+        self.assertFalse(list(self.depot.glob(".nc-export.*")))
+
+
+class ExportDepotReel(unittest.TestCase):
+    """A3-R1 : les substitutions d'export.sh s'appliquent aussi aux fichiers du dépôt (gardés quand ~ ne les a pas).
+    Elles doivent être sans effet sur un fichier qui a déjà ses repères : sinon « @PLUGIN_ILE@@PLUGIN_ILE@] »."""
+
+    def test_home_vide_aucune_difference(self):
+        r = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--", "home", "export.sh"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            self.skipTest("pas un dépôt git")
+        tmp = tempfile.TemporaryDirectory(prefix="nc-export-reel-")
+        self.addCleanup(tmp.cleanup)
+        racine = Path(tmp.name)
+        depot, home, binaires = racine / "depot", racine / "utilisateur", racine / "bin"
+        for p in (depot, home, binaires):
+            p.mkdir()
+        for rel in filter(None, r.stdout.split("\0")):
+            src = REPO / rel
+            if not src.exists() and not src.is_symlink():
+                continue                                   # supprimé mais pas encore commité
+            (depot / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, depot / rel, follow_symlinks=False)
+        for nom in ("bash", "dirname", "mkdir", "mktemp", "find", "rm", "grep", "sed", "cp", "mv", "id", "git", "jq", "python3"):
+            outil = shutil.which(nom)
+            if not outil:
+                self.skipTest(nom + " requis")
+            (binaires / nom).symlink_to(outil)
+        h = binaires / "hyprctl"
+        h.write_text('#!/bin/sh\nprintf "[]\\n"\n')
+        h.chmod(0o755)
+        env = dict(HOME=str(home), PATH=str(binaires), NC_LANGUE="fr", LC_ALL="C",
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        for a in (("init", "-q"), ("add", "home"),
+                  ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")):
+            subprocess.run(["git", "-C", str(depot), *a], env=env, capture_output=True, check=True)
+        e = subprocess.run([str(depot / "export.sh"), "--preview"], env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(e.returncode, 0, e.stderr[-2000:])
+        self.assertNotIn("diff --git", e.stdout, e.stdout[e.stdout.find("diff --git"):][:4000])
+        self.assertNotIn("Only in", e.stdout)
+        # Puis un vrai export : le dépôt ne change pas (substitutions appliquées deux fois = même résultat)
+        e = subprocess.run([str(depot / "export.sh")], env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(e.returncode, 0, e.stderr[-2000:])
+        etat = subprocess.run(["git", "-C", str(depot), "status", "--porcelain", "--", "home"], env=env,
+                              capture_output=True, text=True, check=True).stdout
+        self.assertEqual(etat, "")

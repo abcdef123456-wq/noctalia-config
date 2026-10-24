@@ -5,6 +5,7 @@
 #   @BROWSER@  navigateur par défaut      @LCX@ @LCY1@..@LCY4@  position des éléments de l'écran de verrouillage
 #   @DISTRO_LOGO@  logo de la barre       @POLKIT@  agent des demandes de mot de passe
 # Aucun secret n'est copié (liste blanche de fichiers). Contrôle final : rien qui ressemble à un secret.
+# Rien n'est supprimé du dépôt : un fichier absent de ~ y reste. Pour le retirer : git rm home/<chemin>.
 # Usage : ./export.sh [--preview]   puis vérifier le diff avant de publier
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
@@ -195,7 +196,7 @@ copy_list() { # copy_list DEST_PREFIX fichier...
       mkdir -p "$dest/$(dirname "$rel")"
       cp -a "$base" "$dest/$rel"
     fi
-    if [ ! -e "$installe" ] && [ ! -L "$installe" ]; then
+    if [ ! -e "$installe" ]; then          # absent, ou lien cassé
       if [ -e "$base" ] || [ -L "$base" ]; then
         echo "$(t "gardé depuis le dépôt (absent de ~) : $rel" "kept from the repository (missing from ~): $rel")"
       else
@@ -204,15 +205,22 @@ copy_list() { # copy_list DEST_PREFIX fichier...
       continue
     fi
     mkdir -p "$dest/$(dirname "$rel")"
-    if [ -d "$installe" ] && [ ! -L "$installe" ] && [ -d "$dest/$rel" ] && [ ! -L "$dest/$rel" ]; then
-      # Aussi les ajouts à l'intérieur d'un répertoire déjà installé (nouvelle page de l'île, par exemple).
-      cp -a --remove-destination "$installe/." "$dest/$rel/"
-    else
-      if [ -d "$dest/$rel" ] && [ ! -L "$dest/$rel" ]; then
-        echo "$(t "Export refusé : type incompatible pour $rel (dossier dans le dépôt)." "Export refused: incompatible type for $rel (repository directory).")" >&2
+    [ -L "$dest/$rel" ] && rm -f -- "$dest/$rel"   # un lien du dépôt est remplacé par ce qu'il y a dans ~
+    if [ -d "$installe" ]; then
+      # Un dossier, ou un lien vers un dossier (~/.config/nvim → ailleurs) : son contenu, jamais le lien lui-même
+      # (sa cible contiendrait /home/<nom>). Superposé au dossier du dépôt : les fichiers ajoutés au dépôt et pas
+      # encore installés (nouvelle page de l'île, par exemple) restent.
+      if [ -e "$dest/$rel" ] && [ ! -d "$dest/$rel" ]; then
+        echo "$(t "Export refusé : type incompatible pour $rel (fichier dans le dépôt, dossier dans ~)." "Export refused: incompatible type for $rel (file in the repository, directory in ~).")" >&2
         return 1
       fi
-      cp -a --remove-destination "$installe" "$dest/$rel"
+      cp -a --remove-destination "$installe/." "$dest/$rel"
+    else
+      if [ -d "$dest/$rel" ]; then
+        echo "$(t "Export refusé : type incompatible pour $rel (dossier dans le dépôt, fichier dans ~)." "Export refused: incompatible type for $rel (directory in the repository, file in ~).")" >&2
+        return 1
+      fi
+      cp -aL --remove-destination "$installe" "$dest/$rel"   # un lien vers un fichier : le fichier, pas le lien
     fi
   done
 }
@@ -248,7 +256,7 @@ sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_th
 
 # Centre de la barre : île Quickshell (vide) ou plugin nc/ile, choisi par install.sh
 sed -i -E 's/^center = \[("nc\/ile:pilule")?\]/center = [@ILE_CENTRE@]/' home/.config/noctalia/config.toml
-sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?\]/"group:status"@NOTIF_WIDGET@]/; /^enabled = \[/s/(, "nc\/ile")?\]/@PLUGIN_ILE@]/' home/.config/noctalia/config.toml
+sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?\]/"group:status"@NOTIF_WIDGET@]/; /^enabled = \[/s/(, "nc\/ile"|@PLUGIN_ILE@)?\]/@PLUGIN_ILE@]/' home/.config/noctalia/config.toml
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml
