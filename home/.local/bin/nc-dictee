@@ -142,9 +142,11 @@ def _demarrer(T):
     except OSError:
         pass
     commande = enregistreur(T)
-    with open(JOURNAL, "ab") as journal:
-        proc = subprocess.Popen(commande, stdin=subprocess.DEVNULL, stdout=journal, stderr=journal, start_new_session=True)
+    proc = None
     try:
+        # Le Popen dans le try : un SIGTERM juste après le lancement arrête aussi l'enregistreur (pas d'orphelin).
+        with open(JOURNAL, "ab") as journal:
+            proc = subprocess.Popen(commande, stdin=subprocess.DEVNULL, stdout=journal, stderr=journal, start_new_session=True)
         # Immédiatement : même un SIGKILL pendant les 250 ms ne rend pas le micro introuvable pour cancel.
         ETAT.write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
         time.sleep(0.25)
@@ -155,7 +157,7 @@ def _demarrer(T):
                                      "Recording did not start: check the microphone."))
             return 1
     except BaseException:
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.terminate()
             try:
                 proc.wait(timeout=1)
@@ -436,11 +438,18 @@ def presse_papiers():
     return mime, r.stdout
 
 
+# wl-copy lit le texte sur son entrée standard (jamais en argument : /proc/*/cmdline est lisible par tous). Le type est
+# donné : sans lui, wl-copy le devinerait avec xdg-mime (une dictée « <b> » deviendrait du HTML).
+COPIER_TEXTE = ["wl-copy", "--type", "text/plain;charset=utf-8"]
+
+
 def ecrire_dans_la_fenetre(texte, avertissements=None):
     """Le texte tapé dans la fenêtre active : wtype s'il est là, sinon collé (Ctrl + V, Ctrl + Maj + V dans un
     terminal), le presse-papiers d'avant (texte, image ou fichiers) remis ensuite. Faux si rien n'a pu être écrit."""
     if shutil.which("wtype"):
-        if subprocess.run(["wtype", "--", texte], stdin=subprocess.DEVNULL, capture_output=True).returncode == 0:
+        # Le texte par l'entrée standard (« wtype - », dès wtype 0.3, un seul « - » par appel) : jamais en argument,
+        # lisible par tous dans /proc/*/cmdline.
+        if subprocess.run(["wtype", "-"], input=texte.encode(), capture_output=True).returncode == 0:
             return True
     if not (shutil.which("wl-copy") and shutil.which("wl-paste")):
         return False
@@ -450,7 +459,7 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
     except (OSError, subprocess.TimeoutExpired):
         return False                # pas de collage par-dessus ce qu'on ne saurait pas remettre (revue DICT-04/05)
     try:
-        copie = subprocess.run(["wl-copy", "--", texte], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+        copie = subprocess.run(COPIER_TEXTE, input=texte.encode(), capture_output=True, timeout=5)
         if copie.returncode != 0:
             return False
         classe = ""
@@ -469,7 +478,7 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
         time.sleep(0.4)
         try:
             if avant is None:
-                subprocess.run(["wl-copy", "--clear"], capture_output=True, timeout=5, check=True)
+                subprocess.run(["wl-copy", "--clear"], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=True)
             else:
                 subprocess.run(["wl-copy", "--type", avant[0], "--"], input=avant[1], capture_output=True, timeout=5, check=True)
         except (OSError, subprocess.SubprocessError):
@@ -610,7 +619,7 @@ def ptt_finir(m):
         # La dictée prime : elle est copiée même si le presse-papiers d'avant n'a pas pu être sauvé (il est remplacé, et
         # c'est dit), pour être collée à la main (revue DICT-06)
         try:
-            subprocess.run(["wl-copy", "--", r["text"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=True)
+            subprocess.run(COPIER_TEXTE, input=r["text"].encode(), capture_output=True, timeout=5, check=True)
             copie = T("Copié (ton presse-papiers a été remplacé) : colle-le avec Ctrl + V.",
                       "Copied (your clipboard was replaced): paste it with Ctrl + V.")
         except (OSError, subprocess.SubprocessError):

@@ -276,8 +276,10 @@ class Dictee(unittest.TestCase):
     # ── Dictée partout (Super + D) ──
     def ptt(self, action, reglages="", wtype=True):
         b = self.home / "bin"
+        # Le faux wtype note ses arguments, puis entre crochets ce qu'il lit sur son entrée standard (A1-R7)
+        (b / "wtype").write_text('#!/bin/sh\necho "wtype $* [$(cat)]" >> "$HOME/appels"\n' + ("" if wtype else "exit 1\n"))
+        (b / "notify-send").write_text('#!/bin/sh\necho "notify-send $*" >> "$HOME/appels"\n')
         for nom in ("wtype", "notify-send"):
-            (b / nom).write_text('#!/bin/sh\necho "' + nom + ' $*" >> "$HOME/appels"\n' + ("" if wtype or nom != "wtype" else "exit 1\n"))
             (b / nom).chmod(0o755)
         (self.home / ".config/nc/reglages.conf").write_text(reglages)
         env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
@@ -292,7 +294,7 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut"), 0)
         time.sleep(0.6)
         self.assertEqual(self.ptt("ptt-fin"), 0)
-        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertIn("wtype - [bonjour jarvis]", self.appels())
         self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
         self.assertFalse((self.home / "run/nc-dictee.wav").exists(), "l'audio est supprimé")
 
@@ -311,7 +313,7 @@ class Dictee(unittest.TestCase):
         self.ptt("ptt-fin")                                   # Super relâché : rien ne change
         self.assertNotIn("wtype", self.appels())
         self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
-        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertIn("wtype - [bonjour jarvis]", self.appels())
 
     def test_duree_de_l_appui_mesuree_par_le_raccourci(self):
         """Revue DICT-03 : l'appui bref se mesurait depuis le micro prêt (~0,4 s après l'appui) : un maintien de 0,6 s
@@ -332,14 +334,14 @@ class Dictee(unittest.TestCase):
                 self.assertNotIn("wtype", self.appels(), "appui bref : dictée longue")
                 self.assertTrue(json.loads((run / "nc-dictee-ptt.json").read_text()).get("bascule"))
                 self.assertEqual(self.ptt("ptt-debut"), 0)    # second appui : écrit
-            self.assertIn("wtype -- bonjour jarvis", self.appels(), f"tenue {tenue} s")
+            self.assertIn("wtype - [bonjour jarvis]", self.appels(), f"tenue {tenue} s")
 
     def collage(self, liste_types, sortie_paste="", lent=False):
         """Faux wl-paste, wl-copy et hyprctl (jamais le vrai presse-papiers) : sans wtype, le texte est collé."""
         b = self.home / "bin"
         corps = {"wl-paste": ('case "$*" in *list-types*) ' + ("sleep 6; " if lent else "") + f"printf '{liste_types}';; "
                               f"*) printf '{sortie_paste}';; esac\necho \"wl-paste $*\" >> \"$HOME/appels\""),
-                 "wl-copy": 'echo "wl-copy $* [$(cat | wc -c)]" >> "$HOME/appels"',
+                 "wl-copy": 'echo "wl-copy $* [$(cat)]" >> "$HOME/appels"',
                  "hyprctl": 'echo "hyprctl $*" >> "$HOME/appels"; [ "$1" = activewindow ] && echo \'{"class": "firefox"}\'; exit 0'}
         for nom, c in corps.items():
             (b / nom).write_text("#!/bin/sh\n" + c + "\n"); (b / nom).chmod(0o755)
@@ -353,10 +355,10 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
         a = self.appels()
         self.assertIn("wl-paste -n -t image/png", a)
-        self.assertIn("wl-copy -- bonjour jarvis", a)
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a)
         self.assertIn("send_shortcut({ mods = 'CTRL', key = 'V' })", a)
-        self.assertIn("wl-copy --type image/png -- [7]", a, "l'image d'avant remise")
-        self.assertLess(a.index("wl-copy -- bonjour"), a.index("--type image/png"))
+        self.assertIn("wl-copy --type image/png -- [PNGDATA]", a, "l'image d'avant remise")
+        self.assertLess(a.index("[bonjour jarvis]"), a.index("--type image/png"))
 
     def test_collage_refuse_restaure_et_ne_dit_pas_ecrit(self):
         self.ptt("ptt-fin")
@@ -367,7 +369,7 @@ class Dictee(unittest.TestCase):
         time.sleep(0.6)
         self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
         a = self.appels()
-        self.assertIn("wl-copy --type image/png -- [7]", a, "le collage refusé ne doit pas perdre l'image précédente")
+        self.assertIn("wl-copy --type image/png -- [PNGDATA]", a, "le collage refusé ne doit pas perdre l'image précédente")
         self.assertIn("Dictée (pas écrite dans la fenêtre)", a)
         self.assertNotIn("✓ Écrit", a)
         self.assertEqual((self.home / "run/nc-dictee-derniere.txt").read_text(), "bonjour jarvis")
@@ -396,6 +398,45 @@ class Dictee(unittest.TestCase):
         self.assertNotIn("✓ Écrit", self.appels())
         self.assertIn("Dictée (pas écrite dans la fenêtre)", self.appels())
 
+    def test_texte_dicte_jamais_en_argument(self):
+        """A1-R7 : le texte dicté passait en argument de wtype et wl-copy, donc lisible par tous dans /proc/*/cmdline.
+        Il passe par l'entrée standard : par wtype, par le collage (wtype refusé), puis par le repli (collage refusé)."""
+        b = self.home / "bin"
+        espion = ('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> "$HOME/arguments"; done\n'
+                  'echo "{nom} $* [$(cat)]" >> "$HOME/appels"\n{fin}\n')
+
+        def essai(wtype_ok, collage_ok):
+            for f in ("appels", "arguments"):
+                (self.home / f).unlink(missing_ok=True)
+            self.ptt("ptt-fin")
+            self.collage("text/plain\\n", "avant")
+            if not collage_ok:
+                h = b / "hyprctl"
+                h.write_text(h.read_text().replace("exit 0", "[ \"$1\" = dispatch ] && exit 1; exit 0"))
+            self.ptt("ptt-debut", wtype=wtype_ok)
+            for nom, fin in (("wtype", "" if wtype_ok else "exit 1"), ("wl-copy", "")):
+                (b / nom).write_text(espion.format(nom=nom, fin=fin)); (b / nom).chmod(0o755)
+            time.sleep(0.6)
+            # Pas self.ptt ici : il réécrirait le faux wtype par-dessus l'espion
+            env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
+                       PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced",
+                       NC_IA_EN_LIGNE="1")
+            subprocess.run([str(SCRIPT), "ptt-fin"], env=env, capture_output=True, text=True, timeout=20)
+            args = (self.home / "arguments").read_text() if (self.home / "arguments").exists() else ""
+            return args, self.appels()
+
+        args, a = essai(True, True)
+        self.assertIn("wtype - [bonjour jarvis]", a)
+        self.assertNotIn("bonjour", args)
+        args, a = essai(False, True)
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a, "collé par l'entrée standard")
+        self.assertIn("✓ Écrit", a)
+        self.assertNotIn("bonjour", args)
+        args, a = essai(False, False)
+        self.assertIn("Dictée (pas écrite dans la fenêtre)", a)
+        self.assertEqual(a.count("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]"), 2, "collage puis repli")
+        self.assertNotIn("bonjour", args)
+
     def test_presse_papiers_vide_remis_apres_collage(self):
         self.ptt("ptt-fin")
         self.collage("")
@@ -408,12 +449,13 @@ class Dictee(unittest.TestCase):
         self.ptt("ptt-fin")
         self.collage("text/plain\\n", "avant")
         c = self.home / "bin/wl-copy"
-        c.write_text(c.read_text() + '\n[ "$1" = --type ] && exit 1\nexit 0\n')
+        # Seule la remise du presse-papiers d'avant a « -- » en troisième argument (wl-copy --type <type> --)
+        c.write_text(c.read_text() + '\n[ "$3" = -- ] && exit 1\nexit 0\n')
         self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
         time.sleep(0.6)
         self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
         a = self.appels()
-        self.assertEqual(a.count("wl-copy -- bonjour jarvis"), 1)
+        self.assertEqual(a.count("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]"), 1)
         self.assertNotIn("Dictée (pas écrite dans la fenêtre)", a)
         self.assertIn("presse-papiers d'avant non remis", a)
 
@@ -426,7 +468,7 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
         a = self.appels()
         self.assertNotIn("send_shortcut", a, "rien collé par-dessus un presse-papiers qu'on ne saurait pas remettre")
-        self.assertIn("wl-copy -- bonjour jarvis", a, "le texte est copié")
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a, "le texte est copié")
         self.assertIn("Dictée (pas écrite dans la fenêtre)", a)
         f = self.home / "run/nc-dictee-derniere.txt"
         self.assertEqual(f.read_text(), "bonjour jarvis")
@@ -452,7 +494,7 @@ class Dictee(unittest.TestCase):
         e = json.loads(etat.read_text())
         self.assertTrue(e.get("bascule"), "appui bref (relâché pendant le démarrage) : dictée longue")
         self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
-        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertIn("wtype - [bonjour jarvis]", self.appels())
 
     def test_relache_avant_meme_le_lancement(self):
         """Le raccourci note chaque relâchement sans dictée : un appui plus bref que le lancement de nc-dictee compte."""
@@ -479,7 +521,7 @@ class Dictee(unittest.TestCase):
         self.assertEqual(self.ptt("ptt-debut"), 0)
         time.sleep(0.6)
         self.assertEqual(self.ptt("ptt-debut"), 0)               # le relâchement n'est jamais arrivé
-        self.assertIn("wtype -- bonjour jarvis", self.appels())
+        self.assertIn("wtype - [bonjour jarvis]", self.appels())
         self.assertFalse((self.home / "run/nc-dictee-ptt.json").exists())
 
     def test_message_avec_le_raccourci_choisi(self):
@@ -559,7 +601,7 @@ class Dictee(unittest.TestCase):
                     p.kill()
                     p.wait(timeout=5)
         self.assertEqual(len(Serveur.recus), 1)
-        self.assertEqual(self.appels().count("wtype -- bonjour jarvis"), 1)
+        self.assertEqual(self.appels().count("wtype - [bonjour jarvis]"), 1)
 
 
 
