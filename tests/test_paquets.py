@@ -54,7 +54,12 @@ echo "flatpak $*" >> "$HOME/appels"
 [ "$1" = update ] && [ -n "${NC_TEST_FLATPAK_ECHEC:-}" ] && exit 1
 exit 0
 """
-FAUX_SUDO = '#!/bin/sh\nexec "$@"\n'
+# Faux sudo : lance la commande « en root » (NC_TEST_ROOT=1) ; -n (sans demander de mot de passe) refusé si
+# NC_TEST_SUDO_N_ECHEC (le mot de passe n'est plus en mémoire)
+FAUX_SUDO = """#!/bin/sh
+if [ "$1" = -n ]; then [ -n "${NC_TEST_SUDO_N_ECHEC:-}" ] && { echo "sudo: a password is required" >&2; exit 1; }; shift; fi
+NC_TEST_ROOT=1 exec "$@"
+"""
 # Faux findmnt (système de fichiers de /, NC_TEST_FS, ext4 par défaut) et faux btrfs : jamais le vrai disque
 FAUX_FINDMNT = '#!/bin/sh\necho "${NC_TEST_FS:-ext4}"\n'
 FAUX_BTRFS = '#!/bin/sh\necho "btrfs $*" >> "$HOME/appels"\n[ -n "${NC_TEST_BTRFS_ECHEC:-}" ] && exit 1\nexit 0\n'
@@ -784,6 +789,79 @@ else printf 'kernel-core\\t6.1-1\\nkernel-core\\t6.9-1\\nbash\\t5.2-1\\n'; fi
         self.assertLess(a.index(prise), a.index("dnf upgrade"))
         maj = json.loads((self.home / ".cache/nc/paquets-maj.json").read_text())
         self.assertEqual([(p["nom"], p["avant"], p["apres"]) for p in maj["paquets"]], [("kernel-core", "6.9-1", "6.10-1")])
+
+    def dnf_cache_utilisateur(self, attente_root=True):
+        """dnf5 sans root lit le cache de l'utilisateur (~/.cache/libdnf5), même expiré, pas celui que « sudo dnf
+        makecache --refresh » vient de rafraîchir : sans root, check-update dit 0 ; en root, 100 et un noyau (si
+        attente_root). upgrade installe ~/rpm-apres s'il existe. Rend le PATH."""
+        d = self.home / "dnf5bin"; d.mkdir()
+        faux = {"dnf": """#!/bin/sh
+echo "dnf $* (root=${NC_TEST_ROOT:-0})" >> "$HOME/appels"
+case "$*" in
+  *makecache*) exit 0 ;;
+  *check-update*) [ "${NC_TEST_ROOT:-}" = 1 ] && [ -n "${NC_TEST_ATTENTE_ROOT:-}" ] && [ ! -e "$HOME/fait" ] &&
+      { echo "kernel-core.x86_64  6.10-1  updates"; exit 100; }
+    exit 0 ;;
+  upgrade*) touch "$HOME/fait"; [ -e "$HOME/rpm-apres" ] && mv "$HOME/rpm-apres" "$HOME/rpm"; exit 0 ;;
+esac
+exit 0
+""", "rpm": '#!/bin/sh\ncat "$HOME/rpm"\n'}
+        for nom, code in faux.items():
+            (d / nom).write_text(code); (d / nom).chmod(0o755)
+        (self.home / "rpm").write_text("kernel-core\t6.9-1\nbash\t5.2-1\n")
+        if attente_root:
+            (self.home / "rpm-apres").write_text("kernel-core\t6.9-1\nkernel-core\t6.10-1\nbash\t5.2-1\n")
+        self.seul("dnf5bin", "sudo", "btrfs", "findmnt", "notify-send")
+        return f"{d}:{self.home / 'sys'}"
+
+    def test_dnf5_compte_avec_le_cache_de_root(self):
+        """C-1 : un vieux cache utilisateur qui dit 0 faisait « rien à mettre à jour » : dnf upgrade et l'instantané sautés."""
+        chemin = self.dnf_cache_utilisateur()
+        r = self.lancer("terminal", PATH=chemin, NC_TEST_FS="btrfs", NC_TEST_ATTENTE_ROOT="1")
+        a = self.appels()
+        self.assertIn("dnf -q check-update -C (root=1)", a, "compté en root, juste après makecache")
+        self.assertIn("dnf upgrade (root=1)", a)
+        prise = next((x for x in a if x.startswith("btrfs subvolume snapshot")), None)
+        self.assertIsNotNone(prise, a)
+        self.assertLess(a.index(prise), a.index("dnf upgrade (root=1)"))
+        self.assertNotIn("rien à mettre à jour", r.stdout)
+
+    def test_dnf5_sans_sudo_n_compte_inconnu(self):
+        """sudo -n refusé (mot de passe plus en mémoire) : compte inconnu, l'instantané par prudence, upgrade lancé."""
+        chemin = self.dnf_cache_utilisateur()
+        self.lancer("terminal", PATH=chemin, NC_TEST_FS="btrfs", NC_TEST_ATTENTE_ROOT="1", NC_TEST_SUDO_N_ECHEC="1")
+        a = self.appels()
+        self.assertNotIn("dnf -q check-update -C (root=0)", a, "jamais le cache de l'utilisateur pour décider")
+        self.assertTrue([x for x in a if x.startswith("btrfs subvolume snapshot")], a)
+        self.assertIn("dnf upgrade (root=1)", a)
+
+    def test_dnf_compte_a_zero_saute_seulement_l_instantane(self):
+        """Un compte à 0 saute l'instantané, jamais dnf upgrade ; « rien à mettre à jour » seulement si rien n'a changé."""
+        chemin = self.dnf_cache_utilisateur(attente_root=False)
+        r = self.lancer("terminal", PATH=chemin, NC_TEST_FS="btrfs")
+        a = self.appels()
+        self.assertIn("dnf upgrade (root=1)", a)
+        self.assertFalse([x for x in a if x.startswith("btrfs")], a)
+        self.assertIn("rien à mettre à jour", r.stdout)
+        # Compte à 0 (cache en retard) mais upgrade installe quelque chose : pas de « rien à mettre à jour »
+        (self.home / "appels").unlink(); (self.home / "fait").unlink()
+        (self.home / "rpm-apres").write_text("kernel-core\t6.10-1\nbash\t5.2-1\n")
+        r = self.lancer("terminal", PATH=chemin, NC_TEST_FS="btrfs")
+        self.assertIn("dnf upgrade (root=1)", self.appels())
+        self.assertNotIn("rien à mettre à jour", r.stdout)
+
+    def test_dnf_recompte_local_avec_le_cache_de_root(self):
+        """Le recompte juste après la mise à jour (compter local) : le cache de root si sudo -n passe, sinon dnf
+        sans root et sans -C (il rafraîchit lui-même un cache expiré) ; le minuteur, lui, garde --refresh sans root."""
+        chemin = self.dnf_cache_utilisateur()
+        self.lancer("compter", "local", PATH=chemin)
+        self.assertIn("dnf -q check-update -C (root=1)", self.appels())
+        (self.home / "appels").unlink()
+        self.lancer("compter", "local", PATH=chemin, NC_TEST_SUDO_N_ECHEC="1")
+        self.assertIn("dnf -q check-update (root=0)", self.appels())
+        (self.home / "appels").unlink()
+        self.lancer("compter", PATH=chemin)
+        self.assertEqual([x for x in self.appels() if x.startswith("dnf")], ["dnf -q check-update --refresh (root=0)"])
 
     def test_apt_update_ecrit_un_repere(self):
         """P2-P3 : apt garde la date Last-Modified du serveur ; une stable à jour (« Hit ») paraissait non synchronisée."""

@@ -57,7 +57,16 @@ details() {   # source<TAB>paquet<TAB>version actuelle<TAB>nouvelle ; « local �
       printf '%s\n' "$sortie" | grep -v '\[ignored\]' | awk 'NF >= 4 {print "aur\t" $1 "\t" $2 "\t" $4}'
     fi
   elif command -v dnf >/dev/null; then
-    sortie="$(dnf -q check-update $([ "${1:-}" = local ] || echo --refresh) 2>/dev/null)"; c=$?
+    # Sans root, dnf5 lit le cache de l'utilisateur (~/.cache/libdnf5), pas celui de root. Le compte complet (le
+    # minuteur) le rafraîchit lui-même (--refresh), sans root. Juste après la mise à jour (local) : le cache de root
+    # qu'elle vient de rafraîchir (sudo -n : le mot de passe encore en mémoire, rien n'est redemandé), sinon dnf sans
+    # root et sans -C (il rafraîchit lui-même un cache expiré)
+    c=1
+    [ "${1:-}" = local ] && { sortie="$(sudo -n dnf -q check-update -C 2>/dev/null)"; c=$?; }
+    if [ "$c" != 0 ] && [ "$c" != 100 ]; then
+      if [ "${1:-}" = local ]; then sortie="$(dnf -q check-update 2>/dev/null)"; else sortie="$(dnf -q check-update --refresh 2>/dev/null)"; fi
+      c=$?
+    fi
     [ "$c" = 0 ] || [ "$c" = 100 ] || echec depot
     printf '%s\n' "$sortie" | awk 'NF == 3 && $1 ~ /\./ {n = $1; sub(/\.[^.]*$/, "", n); print "depot\t" n "\t\t" $2}'
   elif command -v apt >/dev/null; then
@@ -260,10 +269,9 @@ delai_essai() {
 # délai du nouvel essai (delai_essai ; cadence() d'abord), err_date (la date du dernier échec) et err_nombre ; err_delai
 # vide sans échec en cours.
 delai_reessai() {
-  local sources
   err_date=""; err_nombre=0; err_delai=""
   [ -s "$cache/paquets-erreur" ] || return 0
-  IFS=$'\t' read -r err_date sources err_nombre < "$cache/paquets-erreur" || true
+  IFS=$'\t' read -r err_date _ err_nombre < "$cache/paquets-erreur" || true
   case "$err_date" in ''|*[!0-9]*) err_date=""; return 0 ;; esac
   case "$err_nombre" in ''|*[!0-9]*) err_nombre=1 ;; esac
   err_delai="$(delai_essai "$err_nombre")"
@@ -500,11 +508,14 @@ attente_arch() {
 }
 
 # dnf (et Nobara), zypper, après la synchronisation : le nombre de paquets à mettre à jour, ou « ? » si on n'a pas pu
-# le savoir (l'instantané, par prudence)
+# le savoir (l'instantané, par prudence). dnf en root (sudo -n, juste après « sudo dnf makecache --refresh » : le mot
+# de passe est encore en mémoire, rien n'est redemandé) : sans root, dnf5 lit le cache de l'utilisateur
+# (~/.cache/libdnf5), même expiré, pas celui de root que makecache vient de rafraîchir, et un vieux cache qui dit 0
+# sautait l'instantané. sudo -n refusé : compte inconnu
 attente_rpm() {
   local s c
   if command -v dnf >/dev/null; then
-    s="$(dnf -q check-update -C 2>/dev/null)"; c=$?
+    s="$(sudo -n dnf -q check-update -C 2>/dev/null)"; c=$?
     case "$c" in 0) echo 0 ;; 100) printf '%s\n' "$s" | awk 'NF == 3 && $1 ~ /\./' | grep -c . ;; *) echo "?" ;; esac
   else
     s="$(zypper --non-interactive --no-refresh --xmlout list-updates 2>/dev/null)"; c=$?
@@ -543,6 +554,10 @@ seulement_annulee() {
     grep -viE "^[[:space:]]*((error|erreur|fehler|errore|erro):[[:space:]]*)?($abandons)[[:space:]]*\$")" || c=$?
   [ "$c" = 1 ] && [ -z "$reste" ]
 }
+
+# Deux relevés (installes) identiques, à l'ordre près ; en shell seul (cmp vient de diffutils, absent de la base
+# d'Arch). Un relevé illisible : différents
+meme_liste() { [ -r "$1" ] && [ -r "$2" ] && [ "$(sort "$1")" = "$(sort "$2")" ]; }
 
 # La synchronisation des dépôts a réussi (apt update, zypper refresh) : le repère daté que lit age_depots
 synchro_faite() { mkdir -p "$etat_nc" 2>/dev/null && touch "$etat_nc/depots-synchro" 2>/dev/null; return 0; }
@@ -654,8 +669,11 @@ case "$action" in
         if command -v nobara-sync >/dev/null; then
           # Nobara : son outil fait la mise à jour et ses corrections (dnf seul est déconseillé par Nobara)
           if [ "$attente" = 0 ] || instantane; then etape nobara-sync cli || noter $?; else annule=1; fi
-        elif [ "$attente" = 0 ]; then echo "$rien"
-        elif instantane; then etape sudo dnf upgrade || noter $?
+        # Comme apt et zypper : un compte à 0 saute seulement l'instantané, jamais dnf upgrade (un compte peut être en
+        # retard) ; « rien à mettre à jour » seulement si dnf n'a rien changé
+        elif [ "$attente" = 0 ] || instantane; then
+          if etape sudo dnf upgrade; then installes > "$apres_f"; meme_liste "$avant_f" "$apres_f" && echo "$rien"
+          else noter $?; fi
         else annule=1; fi
       else noter $?; fi
     elif command -v apt >/dev/null; then
@@ -707,6 +725,7 @@ case "$action" in
     case "$n" in ''|*[!0-9]*) n=0 ;; esac
     if [ "$code" != 0 ]; then t "La mise à jour a échoué (code $code)." "The update failed (code $code)."; echo
     elif [ "$annule" = 1 ]; then t "Mise à jour annulée : rien n'a été installé." "Update cancelled: nothing was installed."; echo; fi
+    # shellcheck disable=SC1111   # les guillemets anglais sont voulus
     if [ "$incomplet" = 1 ]; then t "Recompte incomplet : relance « nc-paquets verifier » plus tard." "Incomplete recount: run “nc-packages check” later."
     elif [ "$n" -gt 0 ]; then t "$n mise(s) à jour encore en attente." "$n update(s) still pending."
     else t "Système à jour." "System up to date."; fi
