@@ -90,16 +90,132 @@ class ConnexionsRunner(unittest.TestCase):
         self.assertEqual(len(requests),5)
 
     def test_outside_lifespan_and_custom_options_use_a_dedicated_client(self):
-        pool=self.m.RunnerConnections()
+        pool=self.m.RunnerConnections();created=[];timeouts=[]
+        def handle(request):
+            timeouts.append(request.extensions['timeout']['read']);return httpx.Response(200,json={'ok':True})
+        original=httpx.AsyncClient
+        def factory(**kwargs):
+            client=original(transport=httpx.MockTransport(handle),**kwargs);created.append(client);return client
         async def scenario():
-            async with pool.lease(timeout=1) as standalone:self.assertFalse(standalone.is_closed)
-            self.assertTrue(standalone.is_closed)
+            # Hors du lifespan, un client d'une seule requête, fermé aussitôt ; la sortie du bloc ne ferme rien
+            async with pool.lease(timeout=1) as standalone:
+                self.assertTrue((await standalone.get('http://runner.test/a')).json()['ok'])
+                self.assertTrue((await standalone.get('http://runner.test/b',timeout=4)).json()['ok'])
+                self.assertFalse(standalone.is_closed)
+            self.assertFalse(standalone.is_closed)
+            self.assertEqual(len(created),2);self.assertTrue(all(c.is_closed for c in created))
+            self.assertEqual(timeouts,[1,4])
             async with pool.lifespan():
                 shared=pool.client
                 async with pool.lease(headers={'X-Custom':'value'}) as dedicated:
                     self.assertIsNot(shared,dedicated);self.assertEqual(dedicated.headers['X-Custom'],'value')
                 self.assertTrue(dedicated.is_closed);self.assertFalse(shared.is_closed)
-        asyncio.run(scenario())
+        with patch.object(httpx,'AsyncClient',side_effect=factory):asyncio.run(scenario())
+
+    def shared_client_like_f522291(self,pool,made):
+        """gateway._get_http_client et close_http_client de JARVIS-BIS f522291, sur notre façade httpx."""
+        g=types.SimpleNamespace(httpx=self.m.RunnerHttpx(httpx,pool),client=None,loop=None)
+        def get_client():
+            loop=asyncio.get_running_loop()
+            if g.client is None or g.client.is_closed or g.loop is not loop:
+                g.client=g.httpx.AsyncClient(timeout=10.0,limits=g.httpx.Limits(max_keepalive_connections=10,
+                                             max_connections=25,keepalive_expiry=60.0))
+                g.loop=loop;made.append(g.client)
+            return g.client
+        async def close():
+            if g.client is not None and not g.client.is_closed:await g.client.aclose()
+            g.client=g.loop=None
+        return get_client,close
+
+    def test_shared_client_kept_directly_like_f522291_goes_through_the_pool(self):
+        """f522291 garde un seul client et appelle .post, .is_closed, .aclose en direct : tout passe par le pool,
+        le même objet revient tant qu'il est ouvert, les connexions restent bornées et aucun cookie n'est gardé."""
+        seen=[];connections=[];active=[0,0];lock=threading.Lock()
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def setup(self):
+                super().setup();connections.append(self.client_address)
+                with lock:active[0]+=1;active[1]=max(active)
+            def finish(self):
+                super().finish()
+                with lock:active[0]-=1
+            def log_message(self,*args):pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                if self.path=='/lent':threading.Event().wait(.05)
+                seen.append(self.headers.get('Cookie'))
+                body=b'{"ok": true}'
+                self.send_response(200);self.send_header('Content-Length',str(len(body)))
+                self.send_header('Set-Cookie','unwanted=1; Path=/');self.end_headers()
+                self.wfile.write(body);self.wfile.flush()
+        class Server(ThreadingHTTPServer):request_queue_size=64
+        server=Server(('127.0.0.1',0),Handler);server.daemon_threads=True
+        thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
+        url=f'http://127.0.0.1:{server.server_port}'
+        pool=self.m.RunnerConnections();made=[];pools=[]
+        get_client,close=self.shared_client_like_f522291(pool,made)
+        async def scenario():
+            async with pool.lifespan():
+                pools.append(pool.client)
+                first=get_client()
+                for _ in range(6):
+                    self.assertIs(get_client(),first);self.assertFalse(first.is_closed)
+                    self.assertTrue((await get_client().post(url+'/run',json={})).json()['ok'])
+                self.assertEqual(len(connections),1)
+                # Un « async with » autour du client partagé ne ferme ni le pool ni ce client
+                async with get_client() as client:
+                    self.assertTrue((await client.post(url+'/run',json={})).json()['ok'])
+                self.assertFalse(first.is_closed);self.assertFalse(pool.client.is_closed);self.assertIs(get_client(),first)
+                with self.assertRaises(AttributeError):get_client().headers
+                # close_http_client ferme l'emprunt, jamais le pool ; un nouvel emprunt reprend le même pool
+                await close()
+                self.assertTrue(first.is_closed);self.assertFalse(pool.client.is_closed)
+                with self.assertRaises(RuntimeError):await first.post(url+'/run',json={})
+                second=get_client();self.assertIsNot(second,first)
+                self.assertTrue((await second.post(url+'/run',json={})).json()['ok'])
+                self.assertEqual(len(connections),1)
+            self.assertTrue(pools[0].is_closed);self.assertIsNone(pool.client)
+            # Pool rouvert (rechargement du gateway) : le même emprunt suit le nouveau pool, une seule connexion de plus
+            async with pool.lifespan():
+                pools.append(pool.client)
+                self.assertIs(get_client(),second)
+                self.assertTrue((await get_client().post(url+'/run',json={})).json()['ok'])
+                self.assertEqual(len(connections),2)
+                # Rafale : jamais plus de connexions ouvertes à la fois que le pool n'en permet (16). Au-delà de 8 en
+                # attente, httpx en ferme et en rouvre : le total grimpe, pas le nombre simultané.
+                answers=await asyncio.gather(*(get_client().post(url+'/lent',json={}) for _ in range(40)))
+                self.assertTrue(all(a.json()['ok'] for a in answers))
+                self.assertLessEqual(active[1],16);self.assertGreater(active[1],1)
+            self.assertTrue(pools[1].is_closed)
+        try:
+            with patch.dict('os.environ',NO_PROXY='*',no_proxy='*'):asyncio.run(scenario())
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
+        self.assertEqual(len(made),2)
+        self.assertEqual(len(seen),49);self.assertTrue(all(cookie is None for cookie in seen))
+
+    def test_shared_client_keeps_each_call_timeout_and_never_leaks_outside_the_pool(self):
+        requests=[];created=[]
+        def handle(request):
+            requests.append((request.url.path,request.extensions['timeout']['read']));return httpx.Response(200,json={})
+        original=httpx.AsyncClient
+        def factory(**kwargs):
+            client=original(transport=httpx.MockTransport(handle),**kwargs);created.append(client);return client
+        pool=self.m.RunnerConnections();made=[]
+        get_client,close=self.shared_client_like_f522291(pool,made)
+        async def scenario():
+            # Avant le lifespan : un client par requête, fermé aussitôt
+            await get_client().get('http://runner.test/avant')
+            self.assertEqual(len(created),1);self.assertTrue(created[0].is_closed)
+            async with pool.lifespan():
+                await asyncio.gather(get_client().get('http://runner.test/defaut'),
+                                     get_client().post('http://runner.test/explicite',timeout=615.0),
+                                     get_client().request('DELETE','http://runner.test/supprime',timeout=5.0))
+                self.assertEqual(len(created),2)
+            await close()
+            self.assertTrue(all(c.is_closed for c in created));self.assertEqual(len(made),1)
+        with patch.object(httpx,'AsyncClient',side_effect=factory):asyncio.run(scenario())
+        self.assertEqual(sorted(requests),sorted([('/avant',10.0),('/defaut',10.0),('/explicite',615.0),('/supprime',5.0)]))
 
     def test_gateway_keeps_native_lifespan_and_closes_pool_even_on_failure_or_reload(self):
         try:

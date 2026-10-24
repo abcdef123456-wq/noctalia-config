@@ -28,14 +28,20 @@ DEFAULTS = dict(BRIEFING_ENABLED='1', BRIEFING_TIME='08:00', BRIEFING_DAYS='mon,
                 BRIEFING_TIMEZONE='Europe/Paris', BRIEFING_SECTIONS='agenda,news,email,weather,tasks')
 
 
+REQUEST_METHODS = frozenset({'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request', 'stream'})
+
+
 class RequestOptions:
     """Délais propres à chaque appel, sans modifier le client partagé concurrent."""
     def __init__(self, client, timeout):
         self.client, self.timeout = client, timeout
 
+    async def aclose(self):
+        """Le pool n'appartient pas à l'emprunteur : seul le lifespan du gateway le ferme."""
+
     def __getattr__(self, name):
         method = getattr(self.client, name)
-        if name not in {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request', 'stream'}:
+        if name not in REQUEST_METHODS:
             return method
         def request(*args, **kwargs):
             kwargs.setdefault('timeout', self.timeout)
@@ -67,15 +73,78 @@ class RunnerConnections:
             finally:
                 self.client = None
 
-    @contextlib.asynccontextmanager
-    async def lease(self, **options):
-        # Une future option upstream non prise en charge garde exactement son client dédié.
-        if self.client is not None and set(options) <= {'timeout', 'follow_redirects'} and not options.get('follow_redirects', False):
-            yield RequestOptions(self.client, options.get('timeout', 5.0))
-        else:
-            import httpx
-            async with httpx.AsyncClient(**options) as client:
-                yield client
+    def lease(self, **options):
+        """Ce que reçoit le module gateway upstream à la place de httpx.AsyncClient(**options).
+
+        Une future option upstream non prise en charge garde exactement son client dédié : un vrai httpx.AsyncClient,
+        en « async with » comme en direct, avec son propre cycle de vie (celui qu'il aurait sans l'overlay).
+        « limits » est accepté et ignoré : il ne règle que la taille du pool, et le nôtre a ses propres bornes."""
+        if set(options) <= {'timeout', 'follow_redirects', 'limits'} and not options.get('follow_redirects', False):
+            return RunnerLease(self, options.get('timeout', 5.0))
+        import httpx
+        return httpx.AsyncClient(**options)
+
+
+class RunnerLease:
+    """Un emprunt du pool, utilisable des deux façons dont l'upstream crée ses clients.
+
+    - « async with httpx.AsyncClient(...) as client » (jusqu'à aae5b9b) et client partagé gardé en direct (f522291,
+      gateway._get_http_client) : dans les deux cas, chaque requête passe par le pool ouvert à ce moment-là, sinon
+      (avant le démarrage, après l'arrêt) par un client d'une seule requête, fermé aussitôt. L'emprunt ne possède
+      aucune connexion et n'est lié à aucun pool précis : après un rechargement du gateway, il suit le nouveau pool.
+    - La sortie d'un « async with » ne ferme rien. is_closed ne devient vrai qu'après aclose() (close_http_client de
+      l'upstream), qui ne ferme que l'emprunt, jamais le pool : tant qu'il est faux, l'upstream garde le même objet.
+    Les garanties du pool tiennent dans les deux cas : connexions bornées (16), aucun cookie gardé, pas de redirection
+    suivie, délai de l'emprunt par défaut et délai de chaque appel respecté, pool fermé avec le gateway. Aucune
+    restriction d'adresse, ni avant ni maintenant : la météo directe de f522291 (open-meteo) passe aussi par le pool.
+    Les autres attributs d'un client httpx (headers, cookies…) ne sont pas prêtés : les modifier changerait le pool
+    commun, alors une utilisation inconnue échoue franchement."""
+    def __init__(self, connections, timeout):
+        self.connections, self.timeout = connections, timeout
+        self.closed = False
+
+    @property
+    def is_closed(self):
+        return self.closed
+
+    async def aclose(self):
+        self.closed = True
+
+    def _check(self):
+        if self.closed: raise RuntimeError('Cannot send a request, as the client has been closed.')
+
+    async def __aenter__(self):
+        self._check()
+        return self
+
+    async def __aexit__(self, *exc):
+        """Rien à rendre : l'emprunt ne possède aucune connexion. Ni le pool ni l'emprunt ne sont fermés, même si
+        l'upstream entourait un jour son client partagé d'un « async with »."""
+
+    def __getattr__(self, name):
+        if name not in REQUEST_METHODS: raise AttributeError(name)
+        def request(*args, **kwargs):
+            self._check()
+            if self.connections.client is not None:
+                return getattr(RequestOptions(self.connections.client, self.timeout), name)(*args, **kwargs)
+            return self._single(name, args, kwargs)
+        return request
+
+    def _single(self, name, args, kwargs):
+        """Hors du lifespan (avant le démarrage, après l'arrêt) : un client pour cette seule requête."""
+        import httpx
+        kwargs.setdefault('timeout', self.timeout)
+        if name == 'stream':
+            @contextlib.asynccontextmanager
+            async def stream():
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(*args, **kwargs) as response:
+                        yield response
+            return stream()
+        async def single():
+            async with httpx.AsyncClient() as client:
+                return await getattr(client, name)(*args, **kwargs)
+        return single()
 
 
 class RunnerHttpx:

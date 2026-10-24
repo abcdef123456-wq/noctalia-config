@@ -78,6 +78,16 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
                                     gateway.httpx=management.RunnerHttpx(httpx,management.runner_connections)
                                     mobile=await gateway.forward_to_runner('depuis Telegram ou Discord')
                                     remote_session=await gateway.fetch_session()
+                                    if hasattr(gateway,'_get_http_client'):
+                                        # f522291 garde un client partagé en direct : un emprunt de notre pool, le
+                                        # même à chaque appel ; son close_http_client ne ferme pas le pool.
+                                        shared=gateway._get_http_client()
+                                        self.assertIsInstance(shared,management.RunnerLease)
+                                        self.assertIs(gateway._get_http_client(),shared)
+                                        await gateway.close_http_client()
+                                        self.assertFalse(management.runner_connections.client.is_closed)
+                                        self.assertEqual((await gateway.fetch_session())['engine'],'codex')
+                                    # Un seul vrai client httpx : celui du pool, pour toutes les requêtes du gateway
                                     factory.assert_called_once()
                             gateway.httpx=httpx
                             self.assertTrue(mobile['success'],mobile)
