@@ -141,7 +141,7 @@ préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajo
 installer dans le Spotlight »).
 
 **L'IA du bureau** ([détails](docs/ia.md)) : une clé d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek,
-OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Ollama ou JARVIS — **automatique** (la meilleure disponible, la
+OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi (`omp`), Ollama ou JARVIS — **automatique** (la meilleure disponible, la
 suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur toutes les distributions) dans
 **nc-reglages → Intelligence artificielle**. Elle répond au `? ` du Spotlight, travaille sur le texte sélectionné
 (**Super + I**, ou `! ` dans le Spotlight : résumer, traduire, corriger…), explique une zone de l'écran

@@ -463,7 +463,7 @@ class AvecFauxSystemdRun(Base):
                  ".cache/huggingface", ".config/Cursor/User/globalStorage",
                  # P2-3 : états et caches des moteurs, et l'état de nc-ia
                  ".local/state/opencode", ".cache/opencode", ".cache/claude-cli-nodejs", ".local/state/claude",
-                 ".local/state/nc-ia"]
+                 ".local/state/nc-ia", ".omp", ".local/share/omp", ".local/state/omp", ".cache/omp"]
         for r in crees:
             f = self.home / r
             f.parent.mkdir(parents=True, exist_ok=True)
@@ -1359,6 +1359,303 @@ class BacReelIA(Base):
         self.assertNotIn("ECRIT", sortie, sortie)
         self.assertEqual(sortie.count("BLOQUE"), 3, sortie)
         self.assertFalse(os.path.exists("/dev/shm/nc-evasion"))
+
+
+
+# ── Oh My Pi (omp) : ses connexions sont dans une base SQLite (~/.omp/agent/agent.db), filtrée à l'entrée du bac ──
+FAUX_OMP = r"""#!/usr/bin/env python3
+import json, os, sqlite3, sys, time
+REEL = "@REEL@"
+entree = sys.stdin.read()
+try:
+    cfg = json.load(open(REEL + "/nc-omp.json"))
+except (OSError, ValueError):
+    cfg = {}
+ev = lambda o: print(json.dumps(o), flush=True)
+delta = lambda t: ev({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": t + "\n"}})
+try:
+    open(REEL + "/omp.log", "a").write("ARGS " + " ".join(sys.argv[1:]) + "\n")
+except OSError:
+    pass
+ev({"type": "session", "id": "x"})
+delta("debut")
+delta("ARGS " + " ".join(sys.argv[1:]))
+delta("ENTREE " + entree)
+delta("HOME " + os.environ["HOME"])
+delta("CWD " + os.getcwd())
+base = os.environ["HOME"] + "/.omp/agent/agent.db"
+if os.path.exists(base):
+    c = sqlite3.connect(base)
+    for (t,) in c.execute("select name from sqlite_master where type = 'table' order by name"):
+        delta("TABLE " + t)
+    for l in c.execute("select version from auth_schema_version"):
+        delta("VERSION %s" % l)
+    for l in c.execute("select id, provider, credential_type, data, disabled_cause from auth_credentials order by id"):
+        delta("LIGNE " + json.dumps(l))
+    c.close()
+else:
+    delta("PASDEBASE")
+for chemin in cfg.get("lire", []):
+    try:
+        delta("LU %s %s" % (chemin, open(chemin, "rb").read()[:200]))
+    except OSError:
+        delta("REFUSE " + chemin)
+for chemin in cfg.get("ecrire", []):
+    try:
+        open(chemin, "w").write("x")
+        delta("ECRIT " + chemin)
+    except OSError:
+        delta("NONECRIT " + chemin)
+if cfg.get("exporter"):
+    os.system("cp -r %s %s" % (os.environ["HOME"], cfg["exporter"]))
+if cfg.get("outil"):
+    ev({"type": "tool_execution_start", "toolCallId": "c", "toolName": "bash", "args": {}})
+    time.sleep(30)
+ev({"type": "message_end", "message": {"role": "assistant", "content": [], "stopReason": "stop"}})
+"""
+BASE_OMP = ".omp/agent/agent.db"
+
+
+def faire_base_omp(home, lignes=None, version=8, chemin=BASE_OMP):
+    """Un agent.db FACTICE de la forme du vrai (auth_credentials et auth_schema_version de omp 18.12), avec ce qui ne doit
+    jamais entrer dans le bac : jeton de rafraîchissement, clé d'API, ligne désactivée, réglages, cache."""
+    import sqlite3
+    f = home / chemin
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.unlink(missing_ok=True)
+    fin = int((time.time() + 10 * 86400) * 1000)
+    if lignes is None:
+        lignes = [("anthropic", "oauth", {"access": "JETON-omp", "refresh": "SECRET-REFRESH", "expires": fin,
+                                          "email": "u@example.org", "accountId": "compte-1", "inconnu": "SECRET-INCONNU"}, None),
+                  ("openai", "api_key", {"key": "SECRET-CLE-OMP"}, None),
+                  ("google", "oauth", {"access": "SECRET-DESACTIVE", "refresh": "SECRET-REFRESH", "expires": fin}, "revoked"),
+                  ("copilot", "oauth", {"access": "SECRET-EXPIRE", "refresh": "SECRET-REFRESH",
+                                        "expires": int((time.time() - 3600) * 1000)}, None)]
+    c = sqlite3.connect(f)
+    c.executescript("""
+        CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
+        CREATE TABLE auth_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL,
+            credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL, identity_key TEXT DEFAULT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')));
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL);
+        INSERT INTO settings VALUES ('k', 'SECRET-REGLAGE');
+        INSERT INTO cache VALUES ('k', 'SECRET-CACHE', 9999999999);""")
+    c.execute("INSERT INTO auth_schema_version VALUES (1, ?)", (version,))
+    for prov, type_, data, off in lignes:
+        c.execute("INSERT INTO auth_credentials (provider, credential_type, data, disabled_cause, identity_key) VALUES (?,?,?,?,?)",
+                  (prov, type_, json.dumps(data), off, f"email:{prov}"))
+    c.commit()
+    c.close()
+    return f
+
+
+class OmpTests:
+    """Les essais d'Oh My Pi, communs au faux systemd-run et au vrai bac (voir les deux classes ci-dessous)."""
+    exporte = True
+
+    def installer_faux_omp(self):
+        f = self.home / ".local/bin/omp"
+        f.write_text(FAUX_OMP.replace("@REEL@", str(self.home)))
+        f.chmod(0o755)
+        faire_base_omp(self.home)
+
+    def lancer_omp(self, **cfg):
+        """Le chemin de nc-ia (appel_omp) : le texte de la réponse. cfg : ce que le faux omp fait en plus (nc-omp.json)."""
+        (self.home / "nc-omp.json").write_text(json.dumps(cfg))
+        with unittest.mock.patch.dict(os.environ):
+            return "".join(self.m.appel_omp("c", "t", None, "question"))
+
+    def base_source(self):
+        f = self.home / BASE_OMP
+        st = f.stat()
+        return f.read_bytes(), st.st_mtime_ns, st.st_ino, sorted(os.listdir(f.parent))
+
+    def test_omp_connexion_filtree_sans_jeton_de_rafraichissement(self):
+        export = self.home / "export-omp"
+        sortie = self.lancer_omp(**({"exporter": str(export)} if self.exporte else {}))
+        self.assertIn("JETON-omp", sortie, "le jeton d'accès, lui, est copié")
+        self.assertIn("u@example.org", sortie)
+        self.assertIn("TABLE auth_credentials", sortie)
+        self.assertIn("VERSION 8", sortie, "la version du schéma est gardée : omp recrée seul le reste")
+        self.assertEqual(sortie.count("LIGNE"), 1, "une seule connexion oauth valable")
+        for secret in ("SECRET-", "refresh", "openai", "api_key", "revoked", "inconnu"):
+            self.assertNotIn(secret, sortie)
+        self.assertNotIn("TABLE settings", sortie)
+        self.assertNotIn("TABLE cache", sortie)
+        if not self.exporte:                          # le vrai bac n'écrit pas dans ~ : pas de copie du faux dossier
+            return
+        # et dans les fichiers du faux dossier personnel, octet par octet (pages libres comprises)
+        octets = b"".join(f.read_bytes() for f in export.rglob("*") if f.is_file())
+        self.assertIn(b"JETON-omp", octets)
+        self.assertNotIn(b"SECRET", octets)
+        self.assertNotIn(b"refresh", octets.lower())
+        bases = [f for f in export.rglob("*") if f.is_file()]
+        self.assertEqual([f.name for f in bases], ["agent.db"], "ni -wal, ni -shm, ni autre fichier")
+        self.assertEqual(oct(bases[0].stat().st_mode & 0o777), "0o600")
+
+    def test_omp_vraie_base_intacte(self):
+        avant = self.base_source()
+        self.lancer_omp()
+        self.lancer_omp()
+        self.assertEqual(self.base_source(), avant)
+        self.assertEqual(os.listdir(self.base()), [], "faux dossiers personnels jetés")
+
+    def test_omp_jeton_expire_ou_trop_court_refuse(self):
+        duree = self.m.duree_bac(self.m.DELAI_CLI)
+        marge = self.m.MARGE_JETON
+        for delta, lance in ((-10, False), (duree + marge - 60, False), (duree + marge + 60, True)):
+            with self.subTest(delta=delta):
+                (self.home / "omp.log").unlink(missing_ok=True)
+                faire_base_omp(self.home, [("anthropic", "oauth", {"access": "JETON-omp", "refresh": "SECRET-REFRESH",
+                                                                   "expires": int((time.time() + delta) * 1000)}, None)])
+                if lance:
+                    self.assertIn("JETON-omp", self.lancer_omp())
+                    continue
+                with self.assertRaises(self.m.ErreurIA) as e:
+                    self.lancer_omp()
+                self.assertIn("doit renouveler sa connexion" if delta < 0 else "expire dans", str(e.exception))
+                self.assertIn("(omp)", str(e.exception))
+                self.assertFalse((self.home / "omp.log").exists(), "omp n'a pas été lancé")
+                self.assertEqual(os.listdir(self.base()), [], "rien ne reste dans la base")
+
+    def test_omp_base_illisible_refusee_sauf_cle_d_api(self):
+        (self.home / BASE_OMP).write_bytes(b"pas une base sqlite du tout, mais assez long pour ressembler a un fichier" * 3)
+        (self.home / "omp.log").unlink(missing_ok=True)
+        with self.assertRaises(self.m.ErreurIA) as e:
+            self.lancer_omp()
+        self.assertIn("doit renouveler sa connexion", str(e.exception))
+        self.assertFalse((self.home / "omp.log").exists())
+        with unittest.mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
+            self.assertIn("PASDEBASE", self.lancer_omp(), "avec une clé d'API de l'environnement, la base n'est pas copiée")
+        self.assertIn("la clé d'API de l'environnement sert", self.journal_ia())
+
+    def test_omp_cle_d_api_seule_ou_pas_de_base(self):
+        # Clés d'API enregistrées seulement (aucune connexion oauth) : rien n'est copié, omp est lancé (il vivra de l'environnement)
+        faire_base_omp(self.home, [("openai", "api_key", {"key": "SECRET-CLE-OMP"}, None)])
+        sortie = self.lancer_omp()
+        self.assertIn("PASDEBASE", sortie)
+        self.assertNotIn("SECRET", sortie)
+        (self.home / BASE_OMP).unlink()
+        self.assertIn("PASDEBASE", self.lancer_omp())
+        # La clé d'API de l'environnement est transmise (liste blanche d'omp), pas celle d'un autre moteur
+        (self.home / ".local/bin/omp").write_text((self.home / ".local/bin/omp").read_text().replace(
+            'delta("CWD "', 'delta("CLES " + json.dumps(sorted(k for k, v in os.environ.items() if v and k.endswith(("_KEY", "_TOKEN")))))\ndelta("CWD "'))
+        with unittest.mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a", "DASHSCOPE_API_KEY": "sk-d", "GITHUB_TOKEN": "gh"}):
+            self.assertIn('CLES ["ANTHROPIC_API_KEY"]', self.lancer_omp())
+
+    def test_omp_base_en_mode_wal_lue_sans_rien_ecrire_a_cote(self):
+        """omp ferme : base en mode WAL sans journal, omp ouvert : un journal -wal avec les dernières écritures. Dans les
+        deux cas, rien n'apparaît près de la vraie base (-shm, -wal) et le journal en cours est pris en compte."""
+        import sqlite3
+        f = self.home / BASE_OMP
+        c = sqlite3.connect(f)
+        c.execute("PRAGMA journal_mode=WAL")
+        c.close()
+        avant = self.base_source()
+        self.assertIn("JETON-omp", self.lancer_omp())
+        self.assertEqual(self.base_source(), avant, "ni -shm ni -wal laissés près de la vraie base")
+        # omp ouvert : une connexion tient le journal avec une écriture non encore reportée dans la base
+        w = sqlite3.connect(f)
+        w.execute("PRAGMA wal_autocheckpoint=0")
+        w.execute("UPDATE auth_credentials SET data = replace(data, 'JETON-omp', 'JETON-RECENT') WHERE provider = 'anthropic'")
+        w.commit()
+        try:
+            self.assertGreater(os.path.getsize(str(f) + "-wal"), 0)
+            sortie = self.lancer_omp()
+        finally:
+            w.close()
+        self.assertIn("JETON-RECENT", sortie)
+        self.assertEqual([n for n in os.listdir(self.base().parent) if n.startswith("omp-lecture-")], [], "copie temporaire effacée")
+
+    def test_omp_base_deplacee_par_xdg(self):
+        """Une fois « omp config migrate » fait, omp vit sous $XDG_DATA_HOME/omp : c'est cette base-là qu'on filtre."""
+        faire_base_omp(self.home, chemin=".local/share/omp/agent.db", lignes=[
+            ("anthropic", "oauth", {"access": "JETON-XDG", "refresh": "SECRET-REFRESH", "expires": int((time.time() + 86400) * 1000)}, None)])
+        sortie = self.lancer_omp()
+        self.assertIn("JETON-XDG", sortie)
+        self.assertNotIn("JETON-omp", sortie, "pas l'ancienne base")
+
+    def test_omp_arguments_et_entree_standard(self):
+        sortie = self.lancer_omp()
+        ligne = re.search(r"^ARGS (.*)$", sortie, re.M)[1]
+        args = ligne.split()
+        self.assertEqual(args[:2], ["launch", "-p"])
+        for o in ("--no-tools", "--no-extensions", "--no-session", "--no-title"):
+            self.assertIn(o, args)
+        self.assertEqual(args[args.index("--approval-mode") + 1], "always-ask")
+        cwd = re.search(r"^CWD (.*)$", sortie, re.M)[1]
+        self.assertEqual(args[args.index("--cwd") + 1], cwd)
+        self.assertTrue(cwd.startswith(str(self.base())), "le dossier de travail vide de la demande")
+        for interdit in ("--yolo", "--auto-approve", "--allow-home"):
+            self.assertNotIn(interdit, args)
+        self.assertIn("ENTREE c\n\nt", sortie, "l'invite arrive par l'entrée standard")
+        self.assertTrue(re.search(r"^HOME " + re.escape(str(self.base())), sortie, re.M), "HOME : le faux dossier personnel")
+
+    def test_omp_appel_d_outil_arrete_le_bac(self):
+        debut = time.monotonic()
+        with self.assertRaises(self.m.ErreurOutils):
+            self.lancer_omp(outil=True)
+        self.assertLess(time.monotonic() - debut, 15, "arrêté à l'appel d'outil, pas à la fin du programme (30 s)")
+        time.sleep(0.5)
+        self.assertEqual(os.listdir(self.base()), [])
+
+
+class OmpFauxSystemdRun(OmpTests, Base):
+    def setUp(self):
+        AvecFauxSystemdRun.setUp(self)
+        self.installer_faux_omp()
+
+    lancements = AvecFauxSystemdRun.lancements
+
+    def test_omp_options_du_bac_et_invite_hors_de_la_ligne_de_commande(self):
+        self.oublier_sonde()
+        self.lancer_omp()
+        for bloc in self.lancements():
+            self.assertIn("--expand-environment=no", bloc)
+            self.assertIn("--description=nc-ia", bloc)
+        reel = self.lancements()[-1]
+        self.assertIn("--no-tools", reel)
+        self.assertIn("always-ask", reel)
+        for interdit in ("--yolo", "--auto-approve", "--allow-home", "c\n\nt"):
+            self.assertNotIn(interdit, reel)
+        self.assertFalse([l for l in reel if "question" in l or l == "t"])
+        self.assertIn(str(self.home / ".local/bin/omp"), " ".join(reel) + shutil.which("omp", path=f"{self.home}/.local/bin"))
+
+
+class OmpBacReel(OmpTests, Base):
+    racine = RACINE_BAC
+    exporte = False
+
+    def setUp(self):
+        BacReelIA.setUp(self)
+        self.installer_faux_omp()
+
+    nettoyer_unites = BacReelIA.nettoyer_unites
+
+    def test_omp_ne_lit_que_sa_copie(self):
+        """Dans le vrai bac : sa base filtrée (faux dossier personnel), jamais le vrai ~/.omp, ni ~/.ssh, ni la clé de nc-ia ;
+        rien n'est écrit dans ~."""
+        vrais = [str(self.home / BASE_OMP), str(self.home / ".ssh/id_ed25519"), str(self.home / ".config/nc/ia.conf")]
+        sortie = self.lancer_omp(lire=vrais, ecrire=[str(self.home / "ecrit-par-le-bac"), str(self.home / ".omp/agent/x")])
+        for v in vrais:
+            self.assertIn(f"REFUSE {v}", sortie)
+        self.assertIn("NONECRIT " + str(self.home / "ecrit-par-le-bac"), sortie)
+        self.assertIn("NONECRIT " + str(self.home / ".omp/agent/x"), sortie)
+        self.assertIn("JETON-omp", sortie)
+        self.assertNotIn("SECRET", sortie)
+        self.assertNotIn("FAUSSE-CLE", sortie)
+        self.assertFalse((self.home / "ecrit-par-le-bac").exists())
+
+    def test_omp_dossiers_d_etat_et_de_cache_interdits(self):
+        crees = [".omp", ".local/share/omp", ".local/state/omp", ".cache/omp"]
+        for r in crees:
+            (self.home / r).mkdir(parents=True, exist_ok=True)
+            (self.home / r / "secret").write_text("SECRET-OMP")
+        sortie = self.lancer_omp(lire=[str(self.home / r / "secret") for r in crees])
+        self.assertNotIn("SECRET-OMP", sortie)
+        for r in crees:
+            self.assertIn(f"REFUSE {self.home / r / 'secret'}", sortie)
 
 
 if __name__ == "__main__":

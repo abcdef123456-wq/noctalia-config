@@ -79,6 +79,12 @@ Item {
                 chemin([[0.5, 0.08], [0.88, 0.29], [0.88, 0.71], [0.5, 0.92], [0.12, 0.71], [0.12, 0.29]], true); c.stroke()
                 c.beginPath(); c.arc(r, r, w * 0.13, 0, Math.PI * 2); c.fill()
                 break
+            case "omp":                                        // Oh My Pi : un pi (π)
+                c.lineWidth = Math.max(1.6, w * 0.12)
+                chemin([[0.12, 0.26], [0.88, 0.26]]); c.stroke()
+                chemin([[0.34, 0.26], [0.32, 0.86]]); c.stroke()
+                chemin([[0.64, 0.26], [0.64, 0.7], [0.72, 0.86]]); c.stroke()
+                break
             case "kiro":
                 c.beginPath(); c.moveTo(w * 0.18, h * 0.9); c.lineTo(w * 0.18, h * 0.45)
                 c.arc(r, h * 0.45, w * 0.32, Math.PI, 0); c.lineTo(w * 0.82, h * 0.9)

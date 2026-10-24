@@ -998,25 +998,25 @@ REGLAGES = [
       L("« -> », « != », « >= » dessinés en un seul signe.", "“->”, “!=”, “>=” drawn as one symbol."), groupe="terminal"),
     # Intelligence artificielle (nc-ia) : une seule IA pour tout le bureau, ou aucune
     R("IA_MODE", "Intelligence artificielle", L("IA du bureau", "Desktop AI"), "choix", "auto",
-      L("Automatique : la meilleure disponible (clés d'API, Claude Code, Codex, Gemini CLI, OpenCode, Ollama, JARVIS), "
+      L("Automatique : la meilleure disponible (clés d'API, Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi, Ollama, JARVIS), "
         "et la suivante si elle échoue. Aucune : plus d'IA nulle part (Spotlight, texte, terminal, captures, JARVIS, "
         "dictée, agents dans l'île), sur toutes les distributions ; rien n'est désinstallé. "
-        "Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code répondent tous dans le même bac à sable : dossier personnel "
+        "Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code et Oh My Pi répondent tous dans le même bac à sable : dossier personnel "
         "en lecture seule, secrets illisibles, un faux dossier personnel jeté après la demande. Le réseau reste ouvert, 127.0.0.1 "
         "joignable, rien ne s'écrit hors du faux dossier (nc-ia etat dit si le bac est actif).",
-        "Automatic: the best available one (API keys, Claude Code, Codex, Gemini CLI, OpenCode, Ollama, JARVIS), and the "
+        "Automatic: the best available one (API keys, Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi, Ollama, JARVIS), and the "
         "next one if it fails. None: no AI anywhere any more (Spotlight, text, terminal, screenshots, JARVIS, dictation, "
         "agents in the island), on every distribution; nothing is uninstalled. "
-        "Claude Code, Codex, Gemini CLI, OpenCode and Qwen Code all answer in the same sandbox: home folder read-only, "
+        "Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code and Oh My Pi all answer in the same sandbox: home folder read-only, "
         "secrets unreadable, a throwaway fake home folder. The network stays open, 127.0.0.1 reachable, nothing written outside the fake home "
         "(nc-ia etat says whether the sandbox is active)."),
       [("auto", L("Automatique", "Automatic")), ("manuel", L("Celle que je choisis", "The one I choose")),
        ("non", L("Aucune (tout couper)", "None (turn everything off)"))]),
     R("IA_BAC_REPLI", "Intelligence artificielle", L("Sans bac à sable : lancer quand même les programmes d'IA", "No sandbox: still run the AI programs"), "ouinon", "non",
-      L("Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code ne se lancent que dans le bac à sable (systemd). S'il ne tient pas "
+      L("Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code et Oh My Pi ne se lancent que dans le bac à sable (systemd). S'il ne tient pas "
         "sur ce PC, ils sont refusés et une IA par API prend le relais. « Oui » les laisse tourner sans bac, avec leurs seules "
         "limites propres : sans bac, Codex peut lire tes fichiers, et ces programmes peuvent lire tes clés et jetons.",
-        "Claude Code, Codex, Gemini CLI, OpenCode and Qwen Code only run inside the sandbox (systemd). If it does not work on "
+        "Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code and Oh My Pi only run inside the sandbox (systemd). If it does not work on "
         "this PC, they are refused and an API AI takes over. “Yes” lets them run without a sandbox, with only their own limits: "
         "without a sandbox, Codex can read your files, and these programs can read your keys and tokens.")),
     R("IA_ECONOMIE", "Intelligence artificielle", L("Arrière-plan en pause en Économie sur batterie", "Background paused in Power Saver on battery"), "ouinon", "oui",

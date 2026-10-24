@@ -206,7 +206,7 @@ class IA(unittest.TestCase):
             conf.parent.mkdir(parents=True, exist_ok=True)
             conf.write_text((conf.read_text() if conf.exists() else "") + "\nIA_BAC_REPLI=oui\n")
         # Les programmes d'IA installés sur la machine de test ne doivent pas répondre à la place des faux serveurs
-        for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
+        for nom in ("claude", "codex", "opencode", "gemini", "qwen", "omp"):
             self.programme(nom, "exit 1") if not (self.faux / nom).exists() else None
         if not (self.faux / "systemd-run").exists():       # pas de bac ici (les tests du bac ont les leurs)
             self.programme("systemd-run", "exit 1")
@@ -2011,6 +2011,179 @@ echo "Unknown option: standalone"; exit 1''')
         # Sans connexion, aucun programme agentique n'est prêt
         e = json.loads(self.lancer("etat", "--json", env_plus={"NC_IA_EN_LIGNE": "0"}).stdout)
         self.assertFalse(e["choisie"]["cli_disponible"])
+
+    # ── Oh My Pi (omp) : lancé comme les autres programmes (faux dossier personnel, dossier de travail vide), jamais en yolo ──
+    @staticmethod
+    def ev_texte(t):
+        return {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": t}}
+
+    @staticmethod
+    def ev_fin(texte="", stop="stop", erreur=None, contenu=None):
+        m = {"role": "assistant", "content": contenu if contenu is not None else ([{"type": "text", "text": texte}] if texte else []),
+             "stopReason": stop}
+        if erreur:
+            m["errorMessage"] = erreur
+        return {"type": "message_end", "message": m}
+
+    def faux_omp(self, lignes, code=0, apres="", stderr=""):
+        """Un faux omp : note ses arguments, son entrée standard, son dossier et son environnement dans omp.log (chemin
+        écrit en dur : la liste blanche ne transmet pas JOURNAL), puis envoie ces lignes JSONL (str : telle quelle)."""
+        (self.faux / "omp.jsonl").write_text("".join((l if isinstance(l, str) else json.dumps(l)) + "\n" for l in lignes))
+        self.programme("omp", f"""{{ printf 'ARGS %s\\n' "$*"; echo "ENTREE $(cat)"; echo "CWD $(pwd -P)"; echo "HOME $HOME"; \\
+env | grep -E '^(PI_|OMP_)'; }} >> "{self.home}/omp.log"
+cat "{self.faux / 'omp.jsonl'}"
+{f"echo '{stderr}' >&2" if stderr else ""}
+{apres}
+exit {code}""")
+        return self.home / "omp.log"
+
+    def omp_manuel(self):
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=omp\n")
+
+    def test_omp_en_flux(self):
+        self.faux_omp([{"type": "session", "id": "x"}, "pas du json", self.ev_texte("Bon"), self.ev_texte("jour"),
+                       {"type": "turn_end"}, self.ev_fin("Bonjour")])
+        self.omp_manuel()
+        r = self.lancer("demander", "--flux", "dis bonjour")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lignes, texte = self.flux(r)
+        self.assertEqual((lignes[0]["id"], lignes[0]["agent"]), ("omp", "omp"))
+        self.assertEqual(texte, "Bonjour", "les morceaux, puis le message fini n'est pas répété")
+
+    def test_omp_texte_du_message_fini_sans_morceaux(self):
+        self.faux_omp([self.ev_fin("Réponse entière")])
+        self.omp_manuel()
+        r = self.lancer("demander", "question")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "Réponse entière"), r.stderr)
+
+    def test_omp_options_de_securite(self):
+        j = self.faux_omp([self.ev_texte("ok"), self.ev_fin("ok")])
+        self.omp_manuel()
+        r = self.lancer("demander", "une question secrète")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = j.read_text()
+        args = re.search(r"^ARGS (.*)$", t, re.M)[1].split()
+        cwd = re.search(r"^CWD (.*)$", t, re.M)[1]
+        self.assertEqual(args, ["launch", "-p", "--mode", "json", "--no-tools", "--approval-mode", "always-ask",
+                                "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-session",
+                                "--no-title", "--thinking", "low", "--max-time", "180", "--cwd", cwd])
+        for interdit in ("--yolo", "--auto-approve", "--allow-home", "--tools", "--model"):
+            self.assertNotIn(interdit, args)
+        self.assertNotIn("une question secrète", " ".join(args), "l'invite n'est jamais dans la ligne de commande")
+        self.assertIn("ENTREE Réponds en français", t)
+        self.assertIn("une question secrète", t, "l'invite passe par l'entrée standard")
+        self.assertNotIn(cwd, (str(self.home), str(self.home.resolve())))
+        self.assertTrue(os.path.basename(cwd).startswith("nc-ia-"), cwd)
+        self.assertFalse(os.path.exists(cwd), "dossier de travail supprimé")
+        faux_home = re.search(r"^HOME (.*)$", t, re.M)[1]
+        self.assertNotEqual(faux_home, str(self.home))
+        self.assertFalse(os.path.exists(faux_home), "faux dossier personnel supprimé")
+        for v in ("PI_NO_TITLE=1", "OMP_SKIP_SETUP=1", "PI_NO_PTY=1", "OMP_MCP_TIMEOUT_MS=5000"):
+            self.assertIn(v, t.splitlines())
+
+    def test_omp_delai_et_modele_dans_les_arguments(self):
+        j = self.faux_omp([self.ev_fin("ok")])
+        self.omp_manuel()
+        self.assertEqual(self.lancer("modele", "omp", "openai/gpt-5.1").returncode, 0)
+        self.assertEqual(self.lancer("demander", "q", env_plus={"NC_IA_DELAI_CLI": "42"}).returncode, 0)
+        args = re.search(r"^ARGS (.*)$", j.read_text(), re.M)[1].split()
+        self.assertEqual(args[args.index("--max-time") + 1], "42")
+        self.assertEqual(args[-2:], ["--model", "openai/gpt-5.1"], "le modèle choisi, sans rien après")
+
+    def test_omp_modele_commencant_par_un_tiret_refuse(self):
+        for ident in ("omp", "claude"):
+            for valeur in ("-x", "--yolo", "-"):
+                with self.subTest(ident=ident, valeur=valeur):
+                    r = self.lancer("modele", ident, valeur)
+                    self.assertEqual(r.returncode, 1, r.stdout)
+                    self.assertIn("invalide", r.stderr)
+                    self.assertNotIn("MODELE_", (self.home / ".config/nc/ia.conf").read_text())
+        self.assertEqual(self.lancer("modele", "omp", "a-b_c.1").returncode, 0)
+        # Écrit à la main dans ia.conf : jamais passé au programme
+        j = self.faux_omp([self.ev_fin("ok")])
+        self.cles((self.home / ".config/nc/ia.conf").read_text().replace("MODELE_OMP=a-b_c.1\n", "") + "MODELE_OMP=--yolo\n")
+        self.omp_manuel()
+        self.assertEqual(self.lancer("demander", "q").returncode, 0)
+        args = re.search(r"^ARGS (.*)$", j.read_text(), re.M)[1].split()
+        self.assertNotIn("--model", args)
+        self.assertNotIn("--yolo", args)
+
+    def test_omp_appel_d_outil_coupe_tout_de_suite(self):
+        """toolcall_start, tool_execution_start ou un appel d'outil dans le message fini : refus au premier, sans attendre
+        la fin du programme (qui dort 30 s), ni relais ni échec noté ; le texte d'avant passe en flux."""
+        cas = {"toolcall_start": {"type": "message_update", "assistantMessageEvent": {"type": "toolcall_start", "contentIndex": 1}},
+               "tool_execution_start": {"type": "tool_execution_start", "toolCallId": "c1", "toolName": "bash", "args": {}},
+               "message fini": self.ev_fin(stop="toolUse", contenu=[{"type": "toolCall", "id": "c1", "name": "bash", "arguments": {}}])}
+        for nom, ev in cas.items():
+            for flux in (False, True):
+                with self.subTest(cas=nom, flux=flux):
+                    Faux.requetes.clear()
+                    self.faux_omp([self.ev_texte("Je regarde le projet. "), ev, self.ev_texte("jamais lu")], apres="sleep 30")
+                    self.omp_manuel()
+                    debut = time.monotonic()
+                    r = self.lancer("demander", *(["--flux"] if flux else []), "question")
+                    self.assertLess(time.monotonic() - debut, 15, "pas d'attente de la fin du programme")
+                    self.verifier_refus_outils(r, flux=flux)
+                    self.assertNotIn("jamais lu", r.stdout)
+                    if flux:
+                        self.assertIn("Je regarde le projet. \n…", self.flux(r)[1])
+
+    def test_omp_erreur_du_modele_et_relais_automatique(self):
+        self.faux_omp([self.ev_texte("Dé"), self.ev_fin(stop="error", erreur="401 invalid x-api-key")], code=1)
+        self.omp_manuel()
+        r = self.lancer("demander", "question")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("401 invalid x-api-key", r.stderr)
+        (self.home / "run/nc-ia/echecs.json").unlink()                # sinon omp, noté en échec, passerait en dernier
+        self.faux_omp([self.ev_fin(stop="error", erreur="401 invalid x-api-key")], code=1)
+        # Mode auto : les programmes avant échouent (faux « exit 1 »), omp aussi ; l'API Anthropic prend le relais
+        self.reglages("IA_MODE=auto\nIA_PREFERENCE=abonnements\n")
+        r = self.lancer("demander", "--flux", "question")
+        lignes, texte = self.flux(r)
+        avis = [l["relais"] for l in lignes if "relais" in l]
+        self.assertEqual(len(avis), 1, lignes)
+        self.assertIn("Oh My Pi (omp)", avis[0])
+        self.assertIn("n'ont pas répondu", avis[0])
+        self.assertTrue(avis[0].endswith("Claude (API Anthropic) prend le relais."), avis[0])
+        self.assertTrue(texte.endswith("Bonjour"), texte)
+
+    def test_omp_code_de_sortie_rien_et_delai(self):
+        self.omp_manuel()
+        self.faux_omp([self.ev_texte("x"), self.ev_fin("x")], code=3, stderr="plantage de omp")
+        r = self.lancer("demander", "question")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("plantage de omp", r.stderr)
+        self.faux_omp([{"type": "session"}])
+        r = self.lancer("demander", "question")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("n'a rien répondu", r.stderr)
+        self.faux_omp([{"type": "session"}], apres="sleep 30")
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "2"})
+        self.assertLess(time.monotonic() - debut, 10)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("délai dépassé", r.stderr)
+
+    def test_omp_disponibilite_et_etat(self):
+        # Absent du PATH : indisponible (le PATH de nc-ia ajoute seulement des dossiers du HOME de test)
+        if shutil.which("omp", path="/usr/bin:/bin"):
+            self.skipTest("un vrai omp est installé dans /usr/bin")
+        (self.faux / "omp").unlink(missing_ok=True)
+        e = json.loads(subprocess.run([str(self.home / ".local/bin/nc-ia"), "etat", "--json"], capture_output=True, text=True,
+                                      env=dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
+                                               XDG_RUNTIME_DIR=str(self.home / "run"), PATH="/usr/bin:/bin", NC_LANGUE="fr",
+                                               NC_IA_EN_LIGNE="1")).stdout)
+        omp = {i["id"]: i for i in e["ias"]}["omp"]
+        self.assertEqual((omp["nom"], omp["genre"], omp["disponible"], omp["agent"], omp["cli"], omp["cli_disponible"]),
+                         ("Oh My Pi (omp)", "cli", False, "omp", "omp", False))
+        self.faux_omp([self.ev_fin("ok")])
+        self.omp_manuel()
+        e = json.loads(self.lancer("etat", "--json").stdout)
+        omp = {i["id"]: i for i in e["ias"]}["omp"]
+        self.assertEqual((omp["disponible"], omp["agent"], omp["cli"], omp["cli_disponible"], omp["vision"]),
+                         (True, "omp", "omp", True, False))
+        self.assertEqual(e["choisie"]["cli"], "omp")
+        self.assertEqual(json.loads(self.lancer("quelle", "--json").stdout)["agent"], "omp")
 
     # ── Terminal ──
     @unittest.skipUnless(shutil.which("zsh"), "zsh requis")

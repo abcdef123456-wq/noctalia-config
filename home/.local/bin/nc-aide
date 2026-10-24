@@ -60,7 +60,7 @@ A_TAPER = [
     ("nc-anim", "nc-anim neige", "Les animations (bouton d'arrêt) : nc-anim liste, en jouer une, "
                                  "nc-anim nouvelle NOM pour créer la tienne."),
     ("nc-ia", "nc-ia etat", "L'IA du bureau, une seule pour tout : clés d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, "
-                            "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Ollama ou JARVIS ; "
+                            "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Oh My Pi, Ollama ou JARVIS ; "
                             "automatique, choisie ou aucune (nc-reglages → Intelligence artificielle). nc-ia configurer : "
                             "les clés ; nc-ia tester ; Super + I : le texte sélectionné ; Super + Maj + I : "
                             "une zone de l'écran ; Alt + I dans le terminal : une commande ; « ia question »."),
@@ -160,7 +160,7 @@ ANGLAIS = {
     "nc-demander": ("nc-ask \"how do I see free disk space\"", "Quick question to the desktop AI (nc-ai); in Spotlight: "
                                                                "“? your question”."),
     "nc-ia": ("nc-ai status", "The desktop AI, one for everything: API keys (Anthropic, OpenAI, Gemini, Mistral, Groq, "
-                              "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Ollama or JARVIS; "
+                              "DeepSeek, OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Qwen, Oh My Pi, Ollama or JARVIS; "
                               "automatic, chosen or none (nc-settings → Artificial intelligence). nc-ai configure: the "
                               "keys; nc-ai test; Super + I: the selected text; Super + Shift + I: an area of "
                               "the screen; Alt + I in the terminal: a command; “ia question”."),

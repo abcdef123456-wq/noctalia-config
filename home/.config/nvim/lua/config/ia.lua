@@ -417,12 +417,13 @@ local AGENTS = {
   qwen = function(d) return { "-i", d } end,             -- Qwen Code, dérivé de Gemini CLI
   copilot = function(d) return { "-i", d } end,          -- GitHub Copilot CLI : --interactive
   opencode = function(d) return { "--prompt", d } end,
+  omp = function(d) return { "launch", d } end,          -- Oh My Pi : « launch » pour qu'une demande ne soit jamais prise pour une sous-commande (commit, config…)
   ["kiro-cli"] = function(d) return { "chat", d } end,
   amp = false, crush = false, goose = false, aider = false,
 }
 local SANS_DEMANDE = { ["kiro-cli"] = { "chat" } }
 -- Repli, si nc-ia etat --json ne donne pas la CLI agentique d'une IA : les IA qui sont elles-mêmes une CLI
-local PROG_PAR_ID = { claude = "claude", codex = "codex", ["gemini-cli"] = "gemini", opencode = "opencode", qwen = "qwen" }
+local PROG_PAR_ID = { claude = "claude", codex = "codex", ["gemini-cli"] = "gemini", opencode = "opencode", qwen = "qwen", omp = "omp" }
 
 -- La CLI agentique d'une IA de nc-ia etat --json : { prog, argv de base, nom } ou nil
 local function cli_de(ia)

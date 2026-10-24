@@ -68,7 +68,7 @@ class Assistant(unittest.TestCase):
         for nom in ("nc-assistant", "nc-claude", "nc-demander", "nc-ia"):
             shutil.copy2(BIN / nom, self.bin / nom)
         # Les IA installées sur la machine de test ne répondent pas à la place du faux serveur
-        for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
+        for nom in ("claude", "codex", "opencode", "gemini", "qwen", "omp"):
             (self.bin / nom).write_text("#!/bin/sh\nexit 1\n")
             (self.bin / nom).chmod(0o755)
         hypr = self.bin / "hyprctl"

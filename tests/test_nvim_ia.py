@@ -84,7 +84,7 @@ class NvimIA(unittest.TestCase):
         nc = self.home / ".local/bin/nc-ia"
         nc.write_text(FAUX_NC_IA)
         nc.chmod(0o755)
-        for nom in ("codex", "gemini"):
+        for nom in ("codex", "gemini", "omp"):
             p = self.bin / nom
             p.write_text(FAUSSE_CLI.format(nom=nom))
             p.chmod(0o755)
@@ -284,6 +284,21 @@ R.hauteur = vim.api.nvim_win_get_height(0)
         self.assertIn("src/main.c, lignes 2 à 2", args)
         self.assertNotIn("dangerously", args)
         self.assertEqual((self.faux / "codex-pwd").read_text().strip(), str(self.projet))
+
+    def test_agent_omp(self):
+        """Oh My Pi : « omp launch <demande> » (jamais la demande seule : « commit … » serait une sous-commande d'omp)."""
+        self.etat("omp", [{"id": "omp", "nom": "Oh My Pi (omp)", "genre": "cli", "disponible": True, "agent": "omp"}])
+        r = self.nvim("""
+touches("2GV<Esc>")
+ia.agent(true)
+attendre(function() return vim.uv.fs_stat(vim.env.FAUX_DIR .. "/omp-args") end)
+vim.wait(100)
+R.terminal = vim.bo.buftype == "terminal"
+""", self.fichier_c())
+        self.assertTrue(r["terminal"])
+        args = (self.faux / "omp-args").read_text()
+        self.assertTrue(args.startswith("launch\n---\n// écrire une boucle de 1 à 3\n"), args)
+        self.assertNotIn("yolo", args)
 
     def test_agent_choisir(self):
         self.etat("anthropic", [

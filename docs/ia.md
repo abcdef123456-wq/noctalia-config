@@ -35,11 +35,12 @@ batterie**, l'IA qui tourne toute seule (alertes Telegram, automatismes) se met 
 | Mistral, Groq, DeepSeek, OpenRouter | une clé | OpenRouter |
 | JARVIS | la connexion à ton serveur (`nc-assistant configurer`) | non |
 | Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code | le programme installé et connecté (ton abonnement) | Claude Code, Codex, Gemini CLI |
+| Oh My Pi (`omp`) | `omp` installé par toi (omp.sh : le binaire, ou bun 1.3.14 ou plus) et connecté (`omp login`), ou une clé d'API dans l'environnement ; il répond sans outils | non |
 | Ollama | Ollama qui tourne sur ce PC (ou ailleurs : `OLLAMA_HOST`) et un modèle (`ollama pull llama3.2`) | selon le modèle |
 
 ### Les programmes en ligne de commande : les mêmes droits pour tous
 
-Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) répondent à une simple question dans le **même bac
+Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code et Oh My Pi (et les suivants) répondent à une simple question dans le **même bac
 à sable** que la session de confiance de JARVIS (`nc-bac`, une unité `systemd-run --user`). Pour tous :
 
 - aucun outil d'écriture ni de commande (chaque programme est bridé), dans un dossier de travail vide ;
@@ -52,9 +53,10 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
   dossier de travail de **cette** demande sont remontés : une autre demande, ou une session de confiance de JARVIS, ne les
   voit pas. Sans `XDG_RUNTIME_DIR`, rien n'est lancé. On y copie seulement les **champs** utiles de ses identifiants
   (`~/.claude/.credentials.json` sans `mcpOAuth`, `~/.codex/auth.json`, `~/.gemini/oauth_creds.json`, les entrées `oauth`
-  de `~/.local/share/opencode/auth.json`…) et de sa config (de `~/.claude.json`, ni `mcpServers`, ni `projects`, ni
+  de `~/.local/share/opencode/auth.json`, les connexions `oauth` de `~/.omp/agent/agent.db`, une base SQLite d'où
+  ne sort qu'une base neuve avec ces lignes-là, sans leur jeton de rafraîchissement ni les clés d'API enregistrées…) et de sa config (de `~/.claude.json`, ni `mcpServers`, ni `projects`, ni
   `env`). Ses **vrais** dossiers (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.qwen`, `~/.config/opencode`,
-  `~/.local/share/opencode`, ou là où `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` les mettent ;
+  `~/.local/share/opencode`, `~/.omp` (et `omp` sous `~/.local/share`, `~/.local/state`, `~/.cache`), ou là où `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` les mettent ;
   une de ces variables qui pointe hors de ton dossier personnel refuse le lancement) sont **illisibles et non
   inscriptibles** : un hook, une commande, un agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire
   ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. **Rien ne
@@ -73,11 +75,11 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
 - l'environnement est **effacé puis reconstruit** : un petit lanceur `python3 -I` ne garde de l'environnement que la
   liste blanche avant d'exécuter le moteur. Il reçoit le `PATH`, la langue, le proxy, et **les clés des fournisseurs que
   ce moteur sait utiliser** : une seule pour la plupart (`ANTHROPIC_API_KEY` pour Claude Code, `OPENAI_API_KEY` pour
-  Codex), mais OpenCode (multi-fournisseurs) et Qwen Code (protocole OpenAI) en reçoivent plusieurs — jamais la clé d'un
+  Codex), mais OpenCode et Oh My Pi (multi-fournisseurs) et Qwen Code (protocole OpenAI) en reçoivent plusieurs — jamais la clé d'un
   moteur qu'on ne lance pas, jamais `GITHUB_TOKEN` ni les variables qui fuient du gestionnaire systemd
   (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, les vrais `XDG_*_HOME`). Les valeurs
   secrètes passent par l'unité (jamais par la ligne de commande, donc jamais dans `/proc/<pid>/cmdline` ni `ps`) ;
-- l'invite passe par l'entrée standard (Claude Code, Codex, OpenCode) et non dans la ligne de commande ; le journal du
+- l'invite passe par l'entrée standard (Claude Code, Codex, OpenCode, Oh My Pi) et non dans la ligne de commande ; le journal du
   gestionnaire systemd n'écrit que « nc-ia » ; `$VAR` et `${VAR}` dans une question ne sont jamais remplacés ;
 - tout le système est en **lecture seule** (`ProtectSystem=strict`, plus `/dev/shm`), seuls les dossiers de la demande
   s'écrivent : rien ne fuit par `/dev/shm`, `/var/spool/mail`, `/run/media/<user>`… ;
@@ -86,6 +88,18 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
   joignable** (les services locaux de ta machine) et **`/dev/shm` est partagé** avec le reste du système : ce qu'ils peuvent
   lire peut donc partir vers leur fournisseur. Ce qu'ils peuvent lire, c'est ce qui n'est pas dans la liste des secrets :
   `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers.
+
+**Oh My Pi (`omp`)** est lancé comme les autres, avec une garde de plus : son option `--no-tools` ne retire que ses
+outils intégrés (restent les outils MCP de `~/.omp/agent/mcp.json` et ceux du dossier de travail, les outils perso). nc-ia
+lui impose donc `--approval-mode always-ask` (sans écran pour répondre, tout outil d'écriture ou de commande est refusé),
+`--no-extensions --no-skills --no-rules --no-lsp --no-pty --no-session --no-title`, un dossier de travail vide, et il
+coupe tout (le programme et ce qu'il a lancé) dès que `omp` annonce un appel d'outil : « L'IA a voulu utiliser des outils
+qui ne sont pas disponibles ici », sans relais ni échec noté. Jamais `--yolo`, `--auto-approve` ni `--allow-home`. Le
+faux dossier personnel n'a ni `mcp.json` ni réglages. Ses connexions (`omp login`) sont dans une base SQLite
+(`~/.omp/agent/agent.db`, ou `$XDG_DATA_HOME/omp/agent.db` après `omp config migrate`) : nc-ia en tire une base neuve
+qui ne garde que les connexions `oauth` encore valables, sans jeton de rafraîchissement ni clé d'API enregistrée ; les
+clés d'API viennent de l'environnement (liste blanche d'`omp`). Pas d'images. Installé par toi (`omp.sh`, le binaire ou
+bun 1.3.14 ou plus) : rien dans `install.sh`. Un profil `omp` ou `PI_CODING_AGENT_DIR` ne sont pas suivis.
 
 **Sans bac** (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), les programmes en ligne de commande ne sont
 **pas lancés** : une IA par API prend le relais. Le réglage `IA_BAC_REPLI` (nc-reglages, « non » par défaut) les laisse
@@ -142,7 +156,7 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   envoie, `q` annule, `Ctrl + P` / `Ctrl + N` rappellent les 20 dernières. La réponse : `y` copie, `i` insère, `q` ferme.
   `Espace i f` fait la tâche décrite (la sélection, ou ce qu'on tape) avec le fichier en contexte : le code s'ouvre dans
   un aperçu, `a` l'ajoute dessous, `r` remplace la sélection, `y` le copie ; rien n'est remplacé d'office.
-  `Espace i a` ouvre l'agent de l'IA choisie (Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code…) dans un terminal
+  `Espace i a` ouvre l'agent de l'IA choisie (Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, Oh My Pi…) dans un terminal
   en bas, à la racine du projet, la sélection pour demande ; `Espace i A` pour en choisir un autre parmi les IA
   disponibles. L'agent garde ses propres demandes de permission. `Espace a` reste Claude Code.
 - **Mises à jour expliquées** : après une mise à jour de la config (`nc-maj`) ou du système, l'IA écrit un rapport

@@ -221,6 +221,7 @@ FOURNISSEURS = {
     "gemini-cli": dict(nom="Gemini CLI", genre="cli", prog="gemini", vision=True, agent="gemini"),
     "opencode": dict(nom="OpenCode", genre="cli", prog="opencode", vision=False, agent="opencode"),
     "qwen": dict(nom="Qwen Code", genre="cli", prog="qwen", vision=False, agent="qwen"),
+    "omp": dict(nom="Oh My Pi (omp)", genre="cli", prog="omp", vision=False, agent="omp"),
     "ollama": dict(nom="Ollama (sur ce PC)", genre="local", vision=True, agent="qwen", modele=None),
 }
 NOMS_EN = {"ollama": "Ollama (on this PC)"}
@@ -311,7 +312,10 @@ def base(ident):
 
 
 def modele_choisi(ident):
-    return lire_cles().get("MODELE_" + ident.upper().replace("-", "_"), "")
+    m = lire_cles().get("MODELE_" + ident.upper().replace("-", "_"), "")
+    # Une valeur qui commence par « - » serait prise pour une option par le programme (--model -x) : jamais utilisée,
+    # même écrite à la main dans ia.conf (« nc-ia modele » la refuse aussi)
+    return "" if m.startswith("-") else m
 
 
 # ── Disponibilité (instantanée : aucune requête réseau sauf Ollama, en local et gardé 30 s) ───────────────────────
@@ -886,6 +890,10 @@ ENV_MOTEUR = {
     # OpenCode sait parler à plusieurs fournisseurs : les clés des principaux, la sienne éventuelle
     "opencode": {"OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
                  "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY"},
+    # Oh My Pi (omp) sait parler à plusieurs fournisseurs : les clés des principaux (noms lus dans son code, v18.12) ;
+    # ses identifiants de connexion (omp login) sont dans ~/.omp/agent/agent.db, voir COPIES
+    "omp": {"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+            "GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY"},
 }
 
 
@@ -900,7 +908,7 @@ def env_cli(ident=None):
 
 
 # ── Le bac des IA en ligne de commande ────────────────────────────────────────────────────────────────────────────
-# Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code tournent tous dans le MÊME bac à sable que la session de
+# Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code et Oh My Pi tournent tous dans le MÊME bac à sable que la session de
 # confiance de nc-noeud (module nc-bac : unité systemd --user, ~ en lecture seule, secrets illisibles, /tmp privé,
 # aucun autre processus visible, ni ptrace ni trousseau, rien de $XDG_RUNTIME_DIR). Différences voulues :
 #  - le réseau reste ouvert (AF_INET et AF_INET6 : ils joignent leur API) ; pas d'AF_UNIX : la résolution des noms
@@ -937,6 +945,8 @@ ETAT_MOTEURS = {
     "qwen": dict(copie={".qwen/settings.json": None}, jeton=[".qwen/oauth_creds.json"]),
     "opencode": dict(copie={".config/opencode/opencode.json": None, ".config/opencode/opencode.jsonc": None},
                      jeton=[".local/share/opencode/auth.json"]),
+    # Oh My Pi : ses identifiants sont dans une base SQLite (~/.omp/agent/agent.db), pas un JSON : _preparer_omp
+    "omp": dict(copie={}, jeton=[]),
 }
 # Ce qu'on copie des identifiants dans le faux dossier personnel : le jeton d'ACCÈS et les seuls champs dont le moteur
 # a besoin pour s'en servir (date, scopes, compte…). JAMAIS de jeton de rafraîchissement, pour aucun moteur, et RIEN ne
@@ -956,13 +966,18 @@ COPIES = {
     "gemini-cli": {"access_token": True, "expiry_date": True, "token_type": True, "scope": True},
     "qwen": {"access_token": True, "expiry_date": True, "token_type": True, "resource_url": True},
     "opencode": {"*": lambda v: _OPENCODE_OAUTH if isinstance(v, dict) and v.get("type") == "oauth" else None},
+    # Oh My Pi (v18.12) : la colonne « data » d'une ligne oauth de auth_credentials (champs d'OAuthCredentials) ; ni
+    # « refresh » (jeton de rafraîchissement) ni rien d'autre. Les lignes de type api_key n'entrent jamais dans le bac.
+    "omp": {"access": True, "expires": True, "enterpriseUrl": True, "projectId": True, "email": True, "accountId": True,
+            "apiEndpoint": True, "orgId": True, "orgName": True, "region": True, "inferenceRegion": True,
+            "activeOrganizationId": True, "authorizedAt": True},
 }
 # Où est le jeton d'accès, et sa date d'échéance (ms epoch) ; Codex : claim « exp » (secondes) de son JWT access_token.
 JETON_ACCES = {"claude": ("claudeAiOauth", "accessToken"), "codex": ("tokens", "access_token"),
                "gemini-cli": ("access_token",), "qwen": ("access_token",)}
 JETON_DATE = {"claude": ("claudeAiOauth", "expiresAt"), "gemini-cli": ("expiry_date",), "qwen": ("expiry_date",)}
 # Le programme que tu ouvres dans un terminal pour qu'il renouvelle sa connexion (hors du bac, sans argument)
-BINAIRES = {"claude": "claude", "codex": "codex", "gemini-cli": "gemini", "qwen": "qwen", "opencode": "opencode"}
+BINAIRES = {"claude": "claude", "codex": "codex", "gemini-cli": "gemini", "qwen": "qwen", "opencode": "opencode", "omp": "omp"}
 # Secondes en plus de la durée maximale réelle de la demande : Claude Code 2.1 tient un jeton pour expiré 5 min avant
 # son échéance (n+300000>=e), google-auth aussi (DEFAULT_EAGER_REFRESH_THRESHOLD_MILLIS=300000) ; sans jeton de
 # rafraîchissement ils échoueraient dans cette fenêtre : 5 min + 1 min de marge.
@@ -1570,6 +1585,93 @@ class _JetonInutilisable(Exception):
         self.exp = exp
 
 
+OMP_BASE = ".omp/agent/agent.db"
+
+
+def source_base_omp(demande):
+    """Où Oh My Pi garde ses identifiants : ~/.omp/agent/agent.db (SQLite), ou $XDG_DATA_HOME/omp/agent.db une fois
+    « omp config migrate » fait (il ne suit XDG_DATA_HOME que si ce dossier omp existe, vérifié dans son code)."""
+    xdg = os.environ.get("XDG_DATA_HOME") or ""
+    if os.path.isabs(xdg) and os.path.isdir(os.path.join(xdg, "omp")):
+        return Path(xdg) / "omp/agent.db"
+    return demande.emplacement(OMP_BASE)
+
+
+def projeter_base_omp(src, dst, limite_ms, temp=None):
+    """Du agent.db d'Oh My Pi (src, lu sans rien y écrire) vers une base NEUVE (dst) qui ne contient que les connexions
+    (type oauth, non désactivées) encore valables jusqu'à limite_ms, réduites aux champs de COPIES["omp"] : ni jeton de
+    rafraîchissement, ni clé d'API, ni réglages, ni historique, ni cache. Le reste du schéma (blocs, baux, index,
+    déclencheurs) est recréé par omp lui-même quand auth_credentials existe (vérifié dans son code). Renvoie (nombre de
+    lignes copiées, échéances trop courtes ou illisibles : liste de ms ou None). sqlite3.Error si la base est illisible.
+    Rien n'est écrit près de la vraie base : ouvrir en lecture seule une base en mode WAL y laisserait des fichiers -shm et
+    -wal. Sans journal -wal en cours (omp fermé), elle s'ouvre « immutable » ; avec (omp est ouvert dans un terminal), la
+    base et son journal sont copiés dans un dossier temporaire à toi seul (temp), supprimé aussitôt."""
+    import sqlite3
+    import stat as st
+    import urllib.parse
+    if not st.S_ISREG(os.stat(src).st_mode):
+        raise ValueError("pas un fichier ordinaire")
+    copie = None
+    wal = str(src) + "-wal"
+    if os.path.isfile(wal) and os.path.getsize(wal) > 0:
+        copie = Path(tempfile.mkdtemp(prefix="omp-lecture-", dir=temp))
+        shutil.copyfile(src, copie / "agent.db")
+        shutil.copyfile(wal, copie / "agent.db-wal")
+        a = sqlite3.connect(str(copie / "agent.db"), timeout=5)
+    else:
+        a = sqlite3.connect("file:" + urllib.parse.quote(str(src)) + "?immutable=1", uri=True, timeout=5)
+    try:
+        t = a.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'").fetchone()
+        if not t or not t[0]:
+            return 0, []
+        colonnes = [r[1] for r in a.execute("PRAGMA table_info(auth_credentials)")]
+        if "credential_type" not in colonnes or "data" not in colonnes:
+            raise ValueError("schéma inconnu")
+        lignes = a.execute("SELECT * FROM auth_credentials WHERE credential_type = 'oauth' ORDER BY id").fetchall()
+        try:
+            v = a.execute("SELECT version FROM auth_schema_version WHERE id = 1").fetchone()
+            version = v[0] if v and isinstance(v[0], int) and not isinstance(v[0], bool) else None
+        except sqlite3.Error:
+            version = None
+    finally:
+        a.close()
+        if copie is not None:
+            shutil.rmtree(copie, ignore_errors=True)
+    gardees, courtes = [], []
+    for l in lignes:
+        r = dict(zip(colonnes, l))
+        if r.get("disabled_cause") is not None:
+            continue
+        try:
+            o = charger_json(r["data"])
+        except (ValueError, TypeError, RecursionError):
+            courtes.append(None)
+            continue
+        exp = ms_plausible(o.get("expires")) if isinstance(o, dict) else None
+        if exp is None or exp < limite_ms:
+            courtes.append(exp)
+            continue
+        r["data"] = vider_json(projeter(o, COPIES["omp"]))
+        gardees.append(r)
+    if not gardees:
+        return 0, courtes
+    fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.close(fd)
+    b = sqlite3.connect(str(dst))
+    try:
+        b.execute(t[0])
+        if version is not None:
+            b.execute("CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)")
+            b.execute("INSERT INTO auth_schema_version (id, version) VALUES (1, ?)", (version,))
+        noms = ", ".join('"' + c.replace('"', '""') + '"' for c in colonnes)
+        b.executemany(f"INSERT INTO auth_credentials ({noms}) VALUES ({', '.join('?' * len(colonnes))})",
+                      [[r[c] for c in colonnes] for r in gardees])
+        b.commit()
+    finally:
+        b.close()
+    return len(gardees), courtes
+
+
 class Demande:
     """Les dossiers d'une demande à un moteur en ligne de commande, tous dans base_bac() et nommés d'après son unité
     (nc-ia-<id>) : le faux dossier personnel (nc-ia-home-<id>, tenu par un verrou tant que la demande vit), le dossier de
@@ -1662,6 +1764,34 @@ class Demande:
                 ecrire_copie(self.home, rel, vider_json(donne).encode())
             except (OSError, ValueError):
                 continue
+        if self.ident == "omp":
+            self._preparer_omp()
+
+    def _preparer_omp(self):
+        """Oh My Pi : ses connexions (SQLite) filtrées dans une base neuve du faux dossier personnel (projeter_base_omp).
+        Même règle que les autres : une connexion expirée, trop courte pour la demande ou illisible = refus clair, sauf si
+        une clé d'API de l'environnement sert. Pas de base, ou aucune connexion oauth (clés d'API seules) : rien à copier."""
+        import sqlite3
+        src = source_base_omp(self)
+        if not os.path.lexists(src):
+            return
+        dst = self.home / OMP_BASE
+        limite = time.time() * 1000 + (self.duree_max + MARGE_JETON) * 1000
+        courtes, n = [], 0
+        try:
+            dst.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            n, courtes = projeter_base_omp(src, dst, limite, temp=self.base.parent)
+        except (sqlite3.Error, OSError, ValueError, RecursionError):
+            courtes = [None]
+        if n == 0:
+            with contextlib.suppress(OSError):
+                dst.unlink()
+        if n == 0 and courtes:
+            if self.cle_api:
+                journal_ia("omp : connexion inutilisable, non copiée (la clé d'API de l'environnement sert)")
+                return
+            valides = [c for c in courtes if c is not None]
+            raise self._refus_jeton(min(valides) if valides else None)
 
     def _verifier_echeance(self, donne, origine=None):
         """Le jeton d'accès à copier, s'il vaut au moins la durée maximale réelle de la demande + MARGE_JETON. Échéance
@@ -2002,6 +2132,101 @@ def _appel_claude(cmd, demande, invite):
         err.close()
 
 
+def commande_omp(demande, delai, modele):
+    """La ligne de commande d'Oh My Pi pour une question (options lues dans son code, v18.12.6, 0b5c27a). --no-tools ne
+    retire que les outils intégrés : les outils MCP et les outils perso restent, donc --approval-mode always-ask (sans
+    interface, tout outil d'écriture ou de commande est refusé), pas d'extensions, de compétences, de règles, de LSP ni de
+    PTY, pas de session sauvegardée ni de titre, et un dossier de travail vide. JAMAIS --yolo, --auto-approve ni
+    --allow-home. L'invite n'est PAS un argument : omp la lit sur son entrée standard quand ce n'est pas un terminal (elle
+    n'est ni dans « ps », ni prise pour une option, ni pour une commande « / » : celle de l'entrée standard n'en est
+    jamais une)."""
+    cmd = ["omp", "launch", "-p", "--mode", "json", "--no-tools", "--approval-mode", "always-ask", "--no-extensions",
+           "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-session", "--no-title", "--thinking", "low",
+           "--max-time", str(max(1, int(delai))), "--cwd", str(demande.travail)]
+    if modele:
+        cmd += ["--model", modele]
+    return cmd
+
+
+def appel_omp(consigne, texte, image, usage):
+    if image:
+        raise ErreurIA(T("Oh My Pi ne regarde pas les images ici.", "Oh My Pi does not look at images here."))
+    delai, _ = avant_lancement(DELAI_CLI)
+    demande = Demande("omp", duree_max=duree_bac(delai))
+    try:
+        modele = modele_choisi("omp")
+        if modele and not re.fullmatch(r"[\w.:/@+\-]{1,120}", modele):
+            raise ErreurIA(T("Nom de modèle invalide.", "Invalid model name."))
+        cmd = commande_omp(demande, delai, modele)
+        yield from _appel_omp(cmd, demande, consigne + "\n\n" + texte)
+    finally:
+        demande.finir()                                 # tout est supprimé (même si le retour échoue)
+
+
+def _appel_omp(cmd, demande, invite):
+    delai, globale = avant_lancement(DELAI_CLI)
+    err = tempfile.TemporaryFile(mode="w+")
+    # PI_NO_TITLE, PI_NO_PTY : pas de titre ni de terminal ; OMP_SKIP_SETUP : pas d'assistant de première utilisation ;
+    # OMP_MCP_TIMEOUT_MS : un serveur MCP qui ne répond pas ne retient pas la demande (il n'est de toute façon pas
+    # joignable : le faux dossier personnel n'a pas de mcp.json)
+    env = dict(env_cli("omp"), HOME=str(demande.home), PI_NO_TITLE="1", OMP_SKIP_SETUP="1", PI_NO_PTY="1",
+               OMP_MCP_TIMEOUT_MS="5000")
+    debut = time.monotonic()
+    p = lancer_programme("omp", cmd, env, demande, err, delai, entree=invite)      # l'invite par stdin
+    garde = GardeTemps(p, delai, globale)
+    rien, erreur = True, ""
+    try:
+        for l in p.stdout:
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            t = e.get("type")
+            if t == "message_update":
+                ev = e.get("assistantMessageEvent")
+                ev = ev if isinstance(ev, dict) else {}
+                if ev.get("type") == "toolcall_start":      # aucun outil n'est donné ici : on coupe tout de suite
+                    raise ErreurOutils()
+                if ev.get("type") == "text_delta" and isinstance(ev.get("delta"), str):
+                    rien = rien and not ev["delta"]
+                    yield ev["delta"]
+            elif t == "tool_execution_start":
+                raise ErreurOutils()
+            elif t == "message_end":
+                m = e.get("message")
+                if not isinstance(m, dict) or m.get("role") != "assistant":
+                    continue
+                contenu = m.get("content") if isinstance(m.get("content"), list) else []
+                if any(isinstance(x, dict) and x.get("type") in ("toolCall", "tool_use") for x in contenu) \
+                        or m.get("stopReason") == "toolUse":
+                    raise ErreurOutils()
+                if m.get("stopReason") == "error" or m.get("errorMessage"):
+                    erreur = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", str(m.get("errorMessage") or f"{nom('omp')} : {m.get('stopReason')}"))[:200]
+                    raise ErreurIA(erreur)
+                if rien:                                    # pas de morceaux en flux : le texte de la réponse finie
+                    for x in contenu:
+                        if isinstance(x, dict) and x.get("type") == "text" and isinstance(x.get("text"), str) and x["text"]:
+                            rien = False
+                            yield x["text"]
+        p.wait(timeout=10)
+        if garde.depasse:
+            raise erreur_delai(garde.propre, garde.globale)
+        if p.returncode != 0:
+            # --max-time d'omp et notre garde ont le même délai : si omp s'arrête le premier, c'est quand même le délai
+            if time.monotonic() - debut >= delai - 2:
+                raise erreur_delai(garde.propre, garde.globale)
+            raise ErreurIA(derniere_ligne(err) or T(f"{nom('omp')} a échoué (code {p.returncode})",
+                                                    f"{nom('omp')} failed (code {p.returncode})"))
+        if rien:
+            raise ErreurIA(derniere_ligne(err) or T(f"{nom('omp')} n'a rien répondu", f"{nom('omp')} gave no answer"))
+    finally:
+        garde.fin()
+        garde._arreter() if p.poll() is None else arreter_groupe(p)   # et ses sous-processus (serveurs MCP, scripts)
+        err.close()
+
+
 # Outils qu'une simple question n'a jamais à utiliser, par programme (noms vérifiés dans le code de Gemini CLI 0.65 et
 # de Qwen Code 0.26). Gemini : tools.exclude seulement ; invoke_agent (sous-agent) aussi, par prudence. Qwen : tools.exclude
 # ET permissions.deny (fusionnés en union) ; monitor exécute des commandes, agent/task/create_sub_session/cron_create
@@ -2206,6 +2431,8 @@ def appeler(ident, consigne, texte, image=None, usage="question"):
         return appel_jarvis(consigne, texte, image, usage)
     if ident == "claude":
         return appel_claude(consigne, texte, image, usage)
+    if ident == "omp":
+        return appel_omp(consigne, texte, image, usage)
     return appel_programme(ident, consigne, texte, image, usage)
 
 
@@ -2435,9 +2662,9 @@ def message_aucune(usage):
                  "Codex ou Ollama).", "No available AI can read images (an Anthropic, OpenAI or Gemini API key, Claude "
                  "Code, Codex or Ollama).")
     return T("Aucune IA disponible : ajoute une clé d'API (nc-ia cle anthropic), installe Claude Code, Codex, Gemini "
-             "CLI, OpenCode ou Ollama, ou relie JARVIS (nc-assistant configurer).",
-             "No AI available: add an API key (nc-ai key anthropic), install Claude Code, Codex, Gemini CLI, OpenCode "
-             "or Ollama, or connect JARVIS (nc-assistant configurer).")
+             "CLI, OpenCode, Oh My Pi ou Ollama, ou relie JARVIS (nc-assistant configurer).",
+             "No AI available: add an API key (nc-ai key anthropic), install Claude Code, Codex, Gemini CLI, OpenCode, "
+             "Oh My Pi or Ollama, or connect JARVIS (nc-assistant configurer).")
 
 
 RELAIS = []      # l'avis de relais de la dernière réponse (« JARVIS n'a pas répondu : Gemini prend le relais »)
@@ -4623,7 +4850,7 @@ def raccourci_ia(description):
 # Le programme agentique (qui sait lire et modifier un projet) de chaque IA, pour Neovim (Espace i a) : le sien pour
 # un programme installé, celui du même éditeur pour une API ; aucun pour les autres (JARVIS, Mistral, Ollama…)
 CLI_AGENT = {"anthropic": "claude", "openai": "codex", "google": "gemini", "claude": "claude", "codex": "codex",
-             "gemini-cli": "gemini", "opencode": "opencode", "qwen": "qwen"}
+             "gemini-cli": "gemini", "opencode": "opencode", "qwen": "qwen", "omp": "omp"}
 
 
 def cli_agent(ident):
@@ -4657,12 +4884,12 @@ def afficher_etat(e):
     if not e["coupee"]:
         for u, x in e["usages"].items():
             print(f"  {u:<9} → {x['nom'] or T('aucune', 'none')}")
-    print(T("bac des IA : actif (mêmes droits pour Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code : ~ en lecture seule, un faux dossier personnel jeté après la demande, rien de secret lisible ; réseau ouvert, 127.0.0.1 joignable, rien d'écrit hors du faux dossier)",
-            "AI sandbox: active (same rights for Claude Code, Codex, OpenCode, Gemini CLI and Qwen Code: ~ read-only, a throwaway fake home folder, no secret readable; network open, 127.0.0.1 reachable, nothing written outside the fake home)")
+    print(T("bac des IA : actif (mêmes droits pour Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code et Oh My Pi : ~ en lecture seule, un faux dossier personnel jeté après la demande, rien de secret lisible ; réseau ouvert, 127.0.0.1 joignable, rien d'écrit hors du faux dossier)",
+            "AI sandbox: active (same rights for Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Oh My Pi: ~ read-only, a throwaway fake home folder, no secret readable; network open, 127.0.0.1 reachable, nothing written outside the fake home)")
           if e.get("bac") else
-          T("bac des IA : indisponible ici : Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code sont refusés"
+          T("bac des IA : indisponible ici : Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code et Oh My Pi sont refusés"
             + (" (repli autorisé par IA_BAC_REPLI : sans bac, Codex peut lire tes fichiers)" if e.get("repli") else ""),
-            "AI sandbox: unavailable here: Claude Code, Codex, OpenCode, Gemini CLI and Qwen Code are refused"
+            "AI sandbox: unavailable here: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Oh My Pi are refused"
             + (" (fallback allowed by IA_BAC_REPLI: without a sandbox, Codex can read your files)" if e.get("repli") else "")))
     print(T("IA :", "AIs:"))
     for i in e["ias"]:
@@ -4923,7 +5150,7 @@ def main(a):
         if c == "modele":
             if not a or a[0] not in FOURNISSEURS:
                 raise ErreurIA(T("Fournisseur : ", "Provider: ") + ", ".join(FOURNISSEURS))
-            if len(a) > 1 and not re.fullmatch(r"[\w.:/@+\-]{1,120}", a[1]):
+            if len(a) > 1 and (a[1].startswith("-") or not re.fullmatch(r"[\w.:/@+\-]{1,120}", a[1])):
                 raise ErreurIA(T("Nom de modèle invalide.", "Invalid model name."))
             d = lire_cles()
             d["MODELE_" + a[0].upper().replace("-", "_")] = a[1] if len(a) > 1 else ""

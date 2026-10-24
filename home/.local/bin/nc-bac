@@ -76,8 +76,11 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
                  ".config/github-copilot", ".config/JetBrains", ".config/sops", ".vault-token", ".continue",
                  ".config/io.datasette.llm", ".cache/huggingface", ".config/aichat", ".config/filezilla",
                  ".cache/cliphist", ".config/VSCodium/User/globalStorage", ".config/Cursor/User/globalStorage",
-                 # états et caches des moteurs d'IA (sessions, journaux, jetons de serveurs MCP, OpenCode v2 : opencode.db)
+                 # états et caches des moteurs d'IA (sessions, journaux, jetons de serveurs MCP, OpenCode v2 : opencode.db, Oh My Pi)
                  ".local/state/opencode", ".cache/opencode", ".cache/claude-cli-nodejs", ".local/state/claude",
+                 # Oh My Pi : ~/.omp (agent.db = ses connexions, sessions, mcp.json, journaux) et, une fois « omp config
+                 # migrate » fait, ses dossiers XDG
+                 ".omp", ".local/share/omp", ".local/state/omp", ".cache/omp",
                  # l'état de nc-ia (son journal, les dossiers laissés par une version précédente)
                  ".local/state/nc-ia"]
 
