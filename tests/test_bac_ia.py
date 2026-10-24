@@ -463,21 +463,119 @@ class AvecFauxSystemdRun(Base):
         for r in crees:
             self.assertIn(str(self.home / r), inacc, r)
 
-    def test_env_i_noms_et_valeurs_litterales(self):
-        """nc-bac : « NOM » passe par --setenv (valeur hors de la ligne de commande : clés d'API), « NOM=valeur » est
-        écrit tel quel après env -i (valeurs non secrètes de nc-noeud : TERM=dumb) ; sans programme env, pas de bac."""
+    def test_lanceur_python_noms_et_valeurs_litterales(self):
+        """nc-bac : « NOM » passe par --setenv (valeur HORS de la ligne de commande : clés d'API), « NOM=valeur » est un
+        argument littéral (valeur non secrète : TERM=dumb) ; le lanceur est python3 -I ; sans python, pas de bac."""
         bac = self.m.module_bac()
         commun = dict(home=self.home, reglage=lambda k, d="": d, env=["OPENAI_API_KEY", "TERM=dumb"])
         argv = bac.argv(["true"], str(self.home), 10, programme=shutil.which, **commun)
-        self.assertIn("--setenv=OPENAI_API_KEY", argv)
+        self.assertIn("--setenv=OPENAI_API_KEY", argv)                   # valeur transmise par l'unité
         self.assertNotIn("--setenv=TERM=dumb", argv)
-        script = argv[argv.index("--") + 3]
-        self.assertIn(' -i OPENAI_API_KEY="$OPENAI_API_KEY" TERM=dumb "$@"', script)
-        self.assertTrue(script.split("exec ", 1)[1].startswith(shutil.which("env")))
-        self.assertIsNone(bac.argv(["true"], str(self.home), 10, programme=lambda n: None if n == "env" else shutil.which(n),
-                                   **commun))
+        tail = argv[argv.index("--") + 1:]
+        self.assertEqual(Path(tail[0]).name.startswith("python"), True, tail[0])
+        self.assertIn("-I", tail[:2])
+        self.assertIn("os.execvpe", tail[3])                             # le code du lanceur
+        self.assertEqual(tail[4], "OPENAI_API_KEY")                      # noms à garder de os.environ (pas de valeur)
+        self.assertIn("TERM=dumb", tail)                                 # littéral non secret
+        self.assertNotIn("OPENAI_API_KEY=", " ".join(a for a in tail if a != "OPENAI_API_KEY"))  # jamais la valeur
+        self.assertEqual(tail[-1], "true")                              # la commande
+        self.assertIsNone(bac.argv(["true"], str(self.home), 10,
+                                   programme=lambda n: None if n.startswith("python") else shutil.which(n), **commun))
         self.assertIsNone(bac.argv(["true"], str(self.home), 10, programme=shutil.which,
                                    **dict(commun, env=["MAUVAIS NOM"])))
+
+    # ── P2-1 : Codex (date dans le JWT, access_token forcément JWT) et Gemini (refresh non copié si valide) ──────────
+    def _codex(self, exp_delta, marque="A"):
+        claims = dict(_CODEX_CLAIMS, exp=int(time.time()) + exp_delta)
+        return {"tokens": {"access_token": jwt(claims, marque), "refresh_token": "RT", "id_token": jwt(_CODEX_CLAIMS),
+                           "account_id": "compte-1"}, "last_refresh": "2026-01-01T00:00:00Z"}
+
+    def test_codex_date_dans_le_jwt_refresh_et_opaque(self):
+        m = self.m
+        proj = lambda o: m.projeter(o, m.SCHEMAS["codex"])
+        # jeton valide longtemps : son refresh n'est PAS copié dans le bac, et un retour est refusé (rien à rafraîchir)
+        donne_valide = proj(self._codex(3600))
+        self.assertNotIn("refresh_token", m.sans_refresh_si_valide("codex", donne_valide).get("tokens", {}))
+        with self.assertRaises(ValueError):
+            m.verifier_retour("codex", donne_valide, proj(self._codex(3600, "B")))
+        # jeton expiré : refresh copié, et un rafraîchissement normal est accepté
+        donne_exp = proj(self._codex(-10))
+        self.assertIn("refresh_token", m.sans_refresh_si_valide("codex", donne_exp).get("tokens", {}))
+        m.verifier_retour("codex", donne_exp, proj(self._codex(-10, "B")))        # ne lève pas
+        # access_token opaque (pas un JWT) : refusé au retour
+        opaque = proj(self._codex(-10, "B"))
+        opaque["tokens"]["access_token"] = "opaque-ATTAQUANT"
+        with self.assertRaises(ValueError):
+            m.verifier_retour("codex", donne_exp, opaque)
+
+    def test_gemini_refresh_non_copie_si_valide(self):
+        m = self.m
+        futur = {"access_token": "a", "refresh_token": "RT", "expiry_date": int((time.time() + 3600) * 1000)}
+        self.assertNotIn("refresh_token", m.sans_refresh_si_valide("gemini-cli", futur))
+        passe = {"access_token": "a", "refresh_token": "RT", "expiry_date": int((time.time() - 10) * 1000)}
+        self.assertIn("refresh_token", m.sans_refresh_si_valide("gemini-cli", passe))
+
+    def test_codex_access_opaque_pas_copie(self):
+        """Un access_token opaque dans le vrai fichier : le jeton n'est pas copié dans le bac (ni refresh), journalisé."""
+        reel = self.home / JETONS["codex"]
+        o = self._codex(-10)
+        o["tokens"]["access_token"] = "opaque"
+        reel.write_text(json.dumps(o))
+        sortie = "".join(self.lancer_moteur(self.m, "codex", NC_TEST_RELATIFS=JETONS["codex"]))
+        self.assertIn("REFUSE", sortie)                         # le faux dossier personnel n'a pas le fichier
+        self.assertNotIn("opaque", sortie)
+        self.assertIn("access_token du vrai fichier n'est pas un JWT", self.journal_ia())
+
+    # ── P3-4 : le dossier de travail de nc-noeud est illisible pour le bac des IA ─────────────────────────────────
+    def test_dossier_travail_noeud_interdit(self):
+        (self.home / ".local/state/nc-noeud/travail").mkdir(parents=True)
+        self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
+        inacc = {p[len('InaccessiblePaths="'):-1] for p in self.props(self.lancements()[-1]) if p.startswith("InaccessiblePaths=")}
+        self.assertIn(str(self.home / ".local/state/nc-noeud/travail"), inacc)
+
+    # ── P2-2 : effacer un arbre très profond, sans récursion ni fds qui s'accumulent ──────────────────────────────
+    def _creuser(self, racine, niveaux):
+        """Crée racine puis `niveaux` sous-dossiers « n » imbriqués, par descripteurs (os.makedirs récurse en Python
+        et planterait à ~1000)."""
+        os.mkdir(racine)
+        fd = os.open(racine, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for _ in range(niveaux):
+                os.mkdir("n", dir_fd=fd)
+                nfd = os.open("n", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+                os.close(fd)
+                fd = nfd
+            ffd = os.open("secret", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd)
+            os.close(ffd)
+        finally:
+            os.close(fd)
+
+    def test_effacer_arbre_tres_profond(self):
+        racine = self.home / "profond"
+        self._creuser(racine, 1500)                             # 1500 niveaux : une récursion planterait (RecursionError)
+        (racine / "n" / "fichier").write_text("y")             # un fichier en cours de route
+        self.m.effacer(str(racine))
+        self.assertFalse(racine.exists(), "tout l'arbre est supprimé")
+
+    def test_effacer_sous_peu_de_descripteurs(self):
+        """Avec RLIMIT_NOFILE bas, effacer ne boucle pas sans fin (fds bornés) : il finit, et vide l'arbre."""
+        racine = Path(tempfile.mkdtemp(prefix="nc-bac-ia-fds-", dir=self.racine))
+        self.addCleanup(lambda: _rmtree_force(str(racine)))
+        self._creuser(racine / "a", 200)
+        code = ("import os,sys,resource,importlib.machinery as M,importlib.util as U\n"
+                "resource.setrlimit(resource.RLIMIT_NOFILE,(24,24))\n"
+                "l=M.SourceFileLoader('x', sys.argv[1]); m=U.module_from_spec(U.spec_from_loader('x',l))\n"
+                "# n'exécute que ce qu'il faut : on recharge le module entier (effet de bord lu env), HOME temporaire\n"
+                "l.exec_module(m)\n"
+                "m.effacer(sys.argv[2])\n"
+                "sys.exit(0 if not os.path.lexists(sys.argv[2]) else 2)\n")
+        env = dict(os.environ, HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"),
+                   XDG_STATE_HOME=str(self.home / ".local/state"), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   XDG_DATA_HOME=str(self.home / ".local/share"), XDG_CACHE_HOME=str(self.home / ".cache"))
+        r = subprocess.run(["python3", "-I", "-c", code, str(BIN / "nc-ia"), str(racine / "a")],
+                           capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr[-800:])
+        self.assertFalse((racine / "a").exists())
 
     def test_on_failure_vide(self):
         """Un greffon global OnFailure= (notification de panne) ne doit pas se déclencher pour une unité du bac."""
@@ -745,6 +843,31 @@ class AvecFauxSystemdRun(Base):
         self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
         self.assertTrue(d.exists(), "on ne sait pas si son unité tourne : gardé")
 
+    def test_purge_home_a_000_et_mtime_futur(self):
+        """La purge ne cale ni sur un faux dossier personnel à 000 (verrou pris par /proc), ni sur un mtime dans le
+        futur (traité comme ancien)."""
+        self.fb.joinpath("systemctl").write_text('#!/bin/sh\ncase "$*" in *is-active*) for u in "$@"; do '
+                                                 'case "$u" in *.service) echo inactive;; esac; done;; esac\n')
+        base = self.base()
+        base.mkdir(parents=True)
+        futur = time.time() + 10000
+        for sorte in ("home", "travail"):                       # mtime dans le futur
+            d = base / f"nc-ia-{sorte}-aaaaaaaaaaaa"
+            d.mkdir()
+            os.utime(d, (futur, futur))
+        zero = base / "nc-ia-home-bbbbbbbbbbbb"                  # faux dossier personnel à 000
+        (base / "nc-ia-travail-bbbbbbbbbbbb").mkdir()
+        zero.mkdir()
+        (zero / "jeton").write_text("x")
+        os.utime(base / "nc-ia-travail-bbbbbbbbbbbb", (time.time() - 120,) * 2)
+        os.chmod(zero, 0)
+        self.addCleanup(lambda: os.chmod(zero, 0o700) if zero.exists() else None)
+        os.utime(zero, (time.time() - 120,) * 2)
+        self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
+        for n in ("nc-ia-home-aaaaaaaaaaaa", "nc-ia-travail-aaaaaaaaaaaa", "nc-ia-home-bbbbbbbbbbbb",
+                  "nc-ia-travail-bbbbbbbbbbbb"):
+            self.assertFalse((base / n).exists(), f"{n} aurait dû être purgé")
+
     # ── P2-2 : CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_CONFIG_HOME, XDG_DATA_HOME ──────────────────────────────────────
     def test_dossiers_deplaces_dans_le_home(self):
         h = self.home
@@ -829,7 +952,7 @@ class AvecFauxSystemdRun(Base):
         self.assertEqual(len(version), 1, blocs)
         v = version[0]
         self.assertTrue(any(p.startswith("TemporaryFileSystem=") for p in self.props(v)))
-        cd = v[v.index("--") + 5]                                     # /bin/sh -c 'cd "$1"…' sh <dossier>
+        cd = v[-3]                                                    # lanceur python … <cwd> opencode --version
         self.assertIn("/run/nc-ia/bac/nc-ia-travail-", cd, "dans le dossier de travail vide, jamais dans ~")
         self.journal.unlink()
         self.lancer_moteur(self.m, "opencode", NC_TEST_FICHIERS="")      # la sonde est gardée, la version aussi

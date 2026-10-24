@@ -64,12 +64,19 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
   si le compte, le serveur ou le type change (`account_id`, `resource_url`, `type`…), si le jeton d'accès d'origine était
   encore valide (aucun rafraîchissement n'était nécessaire), ou, pour Codex, si le `chatgpt_account_id` des JWT ou le
   `sub`/`email` ne concordent plus. Le jeton de rafraîchissement n'est même pas copié dans le bac tant que le jeton
-  d'accès reste valide bien plus longtemps qu'une demande. Chaque refus est écrit au journal de nc-ia
-  (`~/.local/state/nc-ia/journal`, sans le jeton) et **notifié** ; un rafraîchissement normal ne notifie pas ;
-- l'environnement est **effacé puis reconstruit** (`env -i`) : l'unité ne reçoit que la liste blanche — le `PATH`, la
-  langue, le proxy, et **sa propre clé** (par exemple `ANTHROPIC_API_KEY` pour Claude Code) —, jamais ce qui fuit du
-  gestionnaire systemd (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, les vrais
-  `XDG_*_HOME`, `GITHUB_TOKEN` ou une clé exportée). Les valeurs ne passent pas par la ligne de commande ;
+  d'accès reste valide bien plus longtemps qu'une demande. Pour Codex, l'échéance vient du claim `exp` du JWT de
+  l'access_token (un access_token qui n'est pas un JWT est refusé, à la copie comme au retour). Chaque refus est écrit au
+  journal de nc-ia (`~/.local/state/nc-ia/journal`, sans le jeton) et **notifié** ; un rafraîchissement normal ne
+  notifie pas. **Limite connue** : quand le jeton d'accès d'origine était déjà expiré, un changement de compte reste
+  possible pour les jetons **opaques** (Claude, Qwen, OpenCode : pas de compte vérifiable dedans, à la différence des
+  JWT de Codex). La vraie parade serait que nc-ia rafraîchisse lui-même le jeton, hors du bac ; ce n'est pas fait ;
+- l'environnement est **effacé puis reconstruit** : un petit lanceur `python3 -I` ne garde de l'environnement que la
+  liste blanche avant d'exécuter le moteur. Il reçoit le `PATH`, la langue, le proxy, et **les clés des fournisseurs que
+  ce moteur sait utiliser** : une seule pour la plupart (`ANTHROPIC_API_KEY` pour Claude Code, `OPENAI_API_KEY` pour
+  Codex), mais OpenCode (multi-fournisseurs) et Qwen Code (protocole OpenAI) en reçoivent plusieurs — jamais la clé d'un
+  moteur qu'on ne lance pas, jamais `GITHUB_TOKEN` ni les variables qui fuient du gestionnaire systemd
+  (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, les vrais `XDG_*_HOME`). Les valeurs
+  secrètes passent par l'unité (jamais par la ligne de commande, donc jamais dans `/proc/<pid>/cmdline` ni `ps`) ;
 - l'invite passe par l'entrée standard (Claude Code, Codex, OpenCode) et non dans la ligne de commande ; le journal du
   gestionnaire systemd n'écrit que « nc-ia » ; `$VAR` et `${VAR}` dans une question ne sont jamais remplacés ;
 - tout le système est en **lecture seule** (`ProtectSystem=strict`, plus `/dev/shm`), seuls les dossiers de la demande

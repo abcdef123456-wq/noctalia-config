@@ -6,7 +6,6 @@ fait rien tout seul. Aucune dépendance : tout ce qui change d'un appelant à l'
 recherche d'un programme) est passé en paramètre."""
 import os
 import re
-import shlex
 from pathlib import Path
 
 # Chemins protégés (relatifs au dossier personnel), vérifiés après résolution des liens symboliques, appliqués même
@@ -142,12 +141,13 @@ def perso(reglage):
     return rels
 
 
-def inaccessibles(home, reglage, libres=(), environ=None):
+def inaccessibles(home, reglage, libres=(), environ=None, interdits_plus=()):
     """Les chemins rendus illisibles dans le bac : BAC_INTERDITS, PROTEGES et NOEUD_BAC_INTERDITS qui existent (jamais
     sous /tmp, que PrivateTmp masque déjà), à leur place par défaut ET là où une variable de DEPLACEMENTS les met, plus
     tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd refuse l'unité). libres : chemins relatifs à ~
     laissés lisibles (les identifiants du moteur d'IA lancé, et les siens seulement). None si NOEUD_BAC_INTERDITS ne
-    convient pas, ou si une variable de DEPLACEMENTS pointe ailleurs de façon non gérée."""
+    convient pas, ou si une variable de DEPLACEMENTS pointe ailleurs de façon non gérée. interdits_plus : chemins
+    relatifs à ~ ajoutés par l'appelant (nc-ia y met le dossier de travail de nc-noeud, à lui et pas au bac des IA)."""
     vus = []
     perso_ = perso(reglage)
     if perso_ is None:
@@ -158,7 +158,7 @@ def inaccessibles(home, reglage, libres=(), environ=None):
     except ValueError:
         return None
     home = Path(home)
-    for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES + perso_):
+    for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES + perso_ + list(interdits_plus)):
         if rel in libres:
             continue
         motif = any(c in rel for c in "*?[")                  # motif (ex. assistant.conf.backup-*) : on étend
@@ -193,6 +193,7 @@ def _prop(nom, chemin):
 
 
 def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seule=(), libres=(), env=(), unite=None,
+        interdits_plus=(),
          reseau_prive=False, description="nc-bac", remonter=(), remonter_lecture=()):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent (ou un chemin inadmissible).
     cmd : une chaîne (passée à /bin/sh -c) ou une liste (exécutée telle quelle, sans shell).
@@ -205,8 +206,8 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     Alors $XDG_RUNTIME_DIR devient un tmpfs vide en lecture seule (TemporaryFileSystem=…:ro, aussi sûr qu'inaccessible :
     aucun socket, rien des autres demandes) où seuls ces dossiers sont remontés (BindPaths, BindReadOnlyPaths). None si
     $XDG_RUNTIME_DIR manque, est sous /tmp, ou si un de ces dossiers n'est pas dedans."""
-    sr, env_prog = programme("systemd-run"), programme("env")
-    if not sr or not env_prog:
+    sr, py = programme("systemd-run"), (programme("python3") or programme("python"))
+    if not sr or not py:
         return None
     # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
     # sans lui, la sonde échoue et il n'y a pas de bac. SystemCallFilter retire ptrace, process_vm_* et le
@@ -241,7 +242,7 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
         out += ["-p", p]
     if reseau_prive:
         out += ["-p", "PrivateNetwork=yes"]                     # aucun réseau, 127.0.0.1 compris (services locaux)
-    interdits = inaccessibles(home, reglage, libres)
+    interdits = inaccessibles(home, reglage, libres, interdits_plus=interdits_plus)
     if interdits is None:
         return None
     if remonter or remonter_lecture:
@@ -268,31 +269,38 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
         out += ["-p", 'InaccessiblePaths="' + x + '"']
     # --setenv n'ENLÈVE rien : l'unité hérite sinon de TOUT l'environnement du gestionnaire systemd (vrais XDG_*_HOME,
     # DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HYPRLAND_INSTANCE_SIGNATURE, et avec uwsm toute clé exportée
-    # comme OPENAI_API_KEY ou GITHUB_TOKEN). Plutôt qu'une liste noire (UnsetEnvironment, qui dépend de ce qu'on sait
-    # du gestionnaire), on efface TOUT avec « env -i » puis on ne garde que la liste blanche (env), par son NOM :
-    # « env -i PATH="$PATH" HOME="$HOME" … » — la valeur vient de l'environnement de l'unité (posée par --setenv, jamais
-    # dans la ligne de commande, donc jamais visible dans « ps » ni le journal), le shell de l'unité la développe. Un
-    # nom non transmis (ni --setenv ni hérité du gestionnaire) devient une variable vide, sans fuite. Les XDG_*_HOME ne
-    # sont pas dans la liste : absents, chaque outil les déduit de HOME (le faux dossier personnel).
-    # Une entrée « NOM » : transmise par son nom (--setenv, valeur hors de la ligne de commande : les clés d'API de nc-ia).
-    # Une entrée « NOM=valeur » : valeur NON secrète écrite telle quelle (PATH, HOME, langue, TERM=dumb de nc-noeud).
-    garder = ""
+    # comme OPENAI_API_KEY ou GITHUB_TOKEN). Plutôt qu'une liste noire (UnsetEnvironment, qui dépend de ce qu'on sait du
+    # gestionnaire), un lanceur « python3 -I » efface TOUT et ne remet que la liste blanche avant d'exécuter la commande.
+    # Une entrée « NOM » : sa valeur passe par --setenv (donc dans l'environnement de l'unité, JAMAIS dans la ligne de
+    #   commande) ; le lanceur la relit dans os.environ. Les clés d'API de nc-ia n'apparaissent donc nulle part dans
+    #   /proc/<pid>/cmdline (« env -i NOM="$NOM" » les y laissait, le temps de l'exec du processus env).
+    # Une entrée « NOM=valeur » : valeur NON secrète (PATH, HOME, langue, TERM=dumb de nc-noeud), posée telle quelle.
+    # Les XDG_*_HOME ne sont pas dans la liste : absents, chaque outil les déduit de HOME (le faux dossier personnel).
+    noms, litteraux = [], []
     for e in env:
         nom, egal, valeur = e.partition("=")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nom) or "\0" in valeur or "\n" in valeur:
             return None
         if egal:
-            garder += " " + shlex.quote(nom + "=" + valeur)
+            litteraux.append(nom + "=" + valeur)
         else:
             out.append("--setenv=" + nom)
-            garder += " " + nom + '="$' + nom + '"'
-    env_i = shlex.quote(env_prog) + " -i"
-    # Le dossier de travail passe par un « cd » dans la commande, pas par WorkingDirectory : systemd refuse l'unité
-    # quand WorkingDirectory tombe sur un tmpfs (ex. /dev/shm des tests), alors qu'un cd marche partout.
-    if isinstance(cmd, str):
-        out += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && exec " + env_i + garder
-                + " /bin/sh -c " + shlex.quote(cmd)]
-    else:
-        out += ["--", "/bin/sh", "-c", 'cd "$1" && shift && exec ' + env_i + garder + ' "$@"', "sh", str(cwd)] \
-            + [str(x) for x in cmd]
+            noms.append(nom)
+    # Le lanceur : garde de os.environ (rempli par --setenv) les seuls noms voulus, y ajoute les littéraux, fait un
+    # chdir puis execvpe. os.environ n'est jamais dans argv : les valeurs secrètes restent hors de la ligne de commande.
+    # -I : isolé (ni variables PYTHON*, ni site, ni cwd dans sys.path). Le dossier de travail passe par chdir (pas par
+    # WorkingDirectory : systemd refuse l'unité quand il tombe sur un tmpfs, ex. /dev/shm des tests).
+    code = ("import os,sys\n"
+            "a=sys.argv\n"
+            "keep=set(a[1].split(',')) if a[1] else set()\n"
+            "n=int(a[2])\n"
+            "lit=dict(x.split('=',1) for x in a[3:3+n])\n"
+            "cwd=a[3+n]; argv=a[4+n:]\n"
+            "env={k:os.environ[k] for k in keep if k in os.environ}\n"
+            "env.update(lit)\n"
+            "os.chdir(cwd)\n"
+            "os.execvpe(argv[0],argv,env)\n")
+    lanceur = [str(py), "-I", "-c", code, ",".join(noms), str(len(litteraux)), *litteraux, str(cwd)]
+    reste = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else [str(x) for x in cmd]
+    out += ["--", *lanceur, *reste]
     return out
