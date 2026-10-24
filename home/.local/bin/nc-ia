@@ -481,7 +481,36 @@ class _SansRedirection(urllib.request.HTTPRedirectHandler):
         return None
 
 
-OUVREUR = urllib.request.build_opener(_SansRedirection(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+CONTEXTE = ssl.create_default_context()
+OUVREUR = urllib.request.build_opener(_SansRedirection(), urllib.request.HTTPSHandler(context=CONTEXTE))
+
+
+class _Tenue(http.client.HTTPConnection):
+    """Une connexion qui confie sa socket à une GardeFlux dès qu'elle est ouverte : avant le TLS et les en-têtes, que
+    l'échéance de tout l'appel borne donc aussi. Placée sous HTTPSConnection (son super().connect() est celui-ci)."""
+    garde = None
+
+    def connect(self):
+        super().connect()
+        self.garde.tenir(self.sock)
+
+
+class _Ouverture:
+    def __init__(self, garde, **k):
+        super().__init__(**k)
+        self.garde = garde
+
+    def do_open(self, classe, req, **k):
+        bases = (_Tenue,) if classe is http.client.HTTPConnection else (classe, _Tenue)
+        return super().do_open(type("Connexion", bases, {"garde": self.garde}), req, **k)
+
+
+class _HTTPTenu(_Ouverture, urllib.request.HTTPHandler):
+    pass
+
+
+class _HTTPSTenu(_Ouverture, urllib.request.HTTPSHandler):
+    pass
 
 
 def message_http(e, ident):
@@ -502,18 +531,21 @@ def message_http(e, ident):
     return f"HTTP {e.code}" + (f" : {detail}" if detail else "")
 
 
-def requete(ident, url, corps=None, entetes=None, delai=120):
+def requete(ident, url, corps=None, entetes=None, delai=120, garde=None):
+    """garde : une GardeFlux, qui tient la connexion dès son ouverture (échéance de tout l'appel)."""
+    ouvreur = OUVREUR if garde is None else \
+        urllib.request.build_opener(_SansRedirection(), _HTTPTenu(garde), _HTTPSTenu(garde, context=CONTEXTE))
     data = json.dumps(corps).encode() if corps is not None else None
     req = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET",
                                  headers={"Content-Type": "application/json", "User-Agent": "noctalia-config nc-ia",
                                           **(entetes or {})})
     try:
-        return OUVREUR.open(req, timeout=delai)
+        return ouvreur.open(req, timeout=delai)
     except urllib.error.HTTPError as e:
         raise ErreurIA(message_http(e, ident))
-    except (urllib.error.URLError, OSError) as e:
-        raison = getattr(e, "reason", e)
-        raise ErreurIA(T("connexion impossible", "cannot connect") + f" ({str(raison)[:120]})")
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as e:     # BadStatusLine : pas de HTTP
+        raison = " ".join(str(getattr(e, "reason", e)).split()) or type(e).__name__
+        raise ErreurIA(T("connexion impossible", "cannot connect") + f" ({raison[:120]})")
 
 
 # ── Échéances ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -552,6 +584,14 @@ def duree(s):
     return f"{s / 60:g} min" if s >= 60 and s % 60 == 0 else f"{s:g} s"
 
 
+def avant_lancement(propre):
+    """borne(), avant de lancer quoi que ce soit (programme, requête) : plus de temps, rien n'est lancé."""
+    delai, globale = borne(propre)
+    if delai <= 0:
+        raise erreur_delai(propre, globale)
+    return delai, globale
+
+
 def erreur_delai(propre, globale):
     if globale:
         return ErreurDelai(T("délai dépassé : le temps de l'IA d'arrière-plan est écoulé", "timed out: background AI time is up"),
@@ -561,19 +601,32 @@ def erreur_delai(propre, globale):
 
 
 class GardeFlux:
-    """Ferme la connexion à l'échéance de tout l'appel : une lecture en cours (une ligne qui arrive octet par octet)
-    s'arrête aussitôt. La connexion est tenue par une copie de son descripteur, fermée à la fin : jamais celle d'un
-    autre. threading.Timer attend sur une horloge monotone (une heure changée ne l'avance ni ne la recule)."""
-    def __init__(self, r, delai):
+    """Ferme la connexion à l'échéance de tout l'appel, armée avant la requête : une lecture en cours (TLS, en-têtes,
+    une ligne qui arrive octet par octet) s'arrête aussitôt. La connexion est tenue par une copie de son descripteur,
+    fermée à la fin : jamais celle d'un autre. threading.Timer attend sur une horloge monotone (une heure changée ne
+    l'avance ni ne la recule). Seule l'ouverture TCP n'est bornée que par la limite de la socket (min(lecture, total))."""
+    def __init__(self, delai):
         self.depasse = False
         self.verrou = threading.Lock()
-        try:
-            self.s = socket.socket(fileno=os.dup(r.fileno()))
-        except (OSError, ValueError, AttributeError):
-            self.s = None                        # sans elle, l'échéance est vue entre deux lignes
+        self.s = None
         self.t = threading.Timer(max(0.0, delai), self._couper)
         self.t.daemon = True
         self.t.start()
+
+    def tenir(self, sock):
+        with self.verrou:
+            try:
+                s = socket.socket(fileno=os.dup(sock.fileno()))
+            except (OSError, ValueError, AttributeError):
+                return                           # sans elle, l'échéance est vue entre deux lignes
+            if self.s:
+                self.s.close()
+            self.s = s
+            if self.depasse:                     # ouverte après l'échéance
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
 
     def _couper(self):
         with self.verrou:
@@ -596,12 +649,15 @@ def flux_borne(ident, url, corps, entetes=None, delai=120):
     """Les lignes brutes d'une réponse en flux (API, Ollama) : MAX_REPONSE octets au plus, et une échéance pour tout
     l'appel (delai_total, raccourcie au reste du relais en arrière-plan) ; ErreurDelai quand elle coupe."""
     propre = delai_total(ident)
-    total, globale = borne(propre)
-    if total <= 0:
-        raise erreur_delai(propre, globale)
-    fin = time.monotonic() + total
-    r = requete(ident, url, corps, entetes, min(delai, total))
-    garde = GardeFlux(r, fin - time.monotonic())
+    total, globale = avant_lancement(propre)
+    garde = GardeFlux(total)
+    try:
+        r = requete(ident, url, corps, entetes, min(delai, total), garde)
+    except BaseException as e:
+        garde.fin()
+        if garde.depasse and isinstance(e, ErreurIA):    # coupée à l'échéance avant la fin des en-têtes
+            raise erreur_delai(propre, globale) from None
+        raise
     lu = 0
     try:
         for brut in r:
@@ -815,12 +871,12 @@ DELAI_CLI = float(os.environ.get("NC_IA_DELAI_CLI", 180))   # au plus, pour tout
 class GardeTemps:
     """Arrête le programme à l'échéance, même s'il garde sa sortie ouverte sans rien écrire (revue Codex IA-04) : son
     propre groupe de processus seulement (lancé avec start_new_session), jamais une autre session."""
-    def __init__(self, p, delai=None):
+    def __init__(self, p, delai, globale=False):
         self.depasse = False
         self.p = p
-        # Son délai, ou ce qui reste du relais en arrière-plan (globale : ce reste a coupé, pas le sien)
-        self.propre = DELAI_CLI if delai is None else delai
-        delai, self.globale = borne(self.propre)
+        # Son délai, ou ce qui reste du relais en arrière-plan (globale : ce reste a coupé, pas le sien), lu par
+        # avant_lancement() avant de lancer le programme
+        self.propre, self.globale = DELAI_CLI, globale
         self.t = threading.Timer(delai, self._arreter)
         self.t.daemon = True
         self.t.start()
@@ -863,10 +919,11 @@ def appel_claude(consigne, texte, image, usage):
     invite = consigne + "\n\n" + texte + (f"\n\n{T('Image à analyser', 'Image to analyze')} : {image}" if image else "")
     cmd = ["claude", "-p", "--model", modele_choisi("claude") or FOURNISSEURS["claude"]["modele"]] + vide + outils + \
           ["--output-format", "stream-json", "--include-partial-messages", "--verbose", invite]
+    delai, globale = avant_lancement(DELAI_CLI)
     err = tempfile.TemporaryFile(mode="w+")             # pas de tube : un programme bavard ne bloque jamais
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
                          env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME), start_new_session=True)
-    garde = GardeTemps(p)
+    garde = GardeTemps(p, delai, globale)
     rien = True
     try:
         for l in p.stdout:
@@ -908,10 +965,11 @@ def appel_programme(ident, consigne, texte, image, usage):
         cmd = ["opencode", "run", invite]
     else:
         cmd = ["qwen", "-p", invite]
+    delai, globale = avant_lancement(DELAI_CLI)
     err = tempfile.TemporaryFile(mode="w+")
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
                          env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME), start_new_session=True)
-    garde = GardeTemps(p)
+    garde = GardeTemps(p, delai, globale)
     rien = True
     try:
         for l in p.stdout:
@@ -946,10 +1004,10 @@ DELAI_JARVIS = float(os.environ.get("NC_IA_DELAI_JARVIS", 630))   # TIMEOUT de n
 def appel_jarvis(consigne, texte, image, usage):
     # Arrêté (échéance, ou nc-ia arrêté par Échap) : SIGTERM d'abord, nc-assistant dit « fin » à l'île ; un SIGKILL
     # direct la laissait sur « JARVIS réfléchit », et l'échéance de 300 s coupait un TIMEOUT réglé plus long (revue B2-13)
+    delai, globale = avant_lancement(DELAI_JARVIS)
     with subprocess.Popen([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--flux", "--",
                            consigne + "\n\n" + texte], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                           stdin=subprocess.DEVNULL) as p:
-        delai, globale = borne(DELAI_JARVIS)
         try:
             sortie, erreur = p.communicate(timeout=delai)
         except subprocess.TimeoutExpired:
@@ -1375,7 +1433,7 @@ def _demander(liste, texte, usage, image, consigne_, flux, ecrire):
     if ECHEANCE is not None and time.monotonic() >= ECHEANCE:
         debut = T(f"L'IA d'arrière-plan s'arrête : pas de réponse en {duree(DELAI_FOND)}",
                   f"Background AI stops: no answer within {duree(DELAI_FOND)}")
-    raise ErreurIA(debut + " — " + " ; ".join(f"{q} : {r}" for q, r in rates))
+    raise ErreurIA(debut + (" — " + " ; ".join(f"{q} : {r}" for q, r in rates) if rates else ""))
 
 
 def garder(rep, ident):

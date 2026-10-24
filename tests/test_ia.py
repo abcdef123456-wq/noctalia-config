@@ -42,7 +42,8 @@ class Faux(http.server.BaseHTTPRequestHandler):
     anthropic_refuse = False
     texte_ant = "Bonjour"                    # ce que « Claude » répond (un plan JSON pour nc-ia agir)
     pendant = None                           # appelé pendant que « Claude » réfléchit (un réglage changé entre-temps)
-    goutte = None                            # « ant » ou « ollama » : répond un octet de temps en temps, sans jamais finir
+    goutte = None                            # « ant » ou « ollama » : répond un octet de temps en temps, sans jamais finir ;
+                                             # « entetes » : ses en-têtes de même ; « statut » : une ligne d'état invalide
     ollama_long = False                      # Ollama envoie bien plus que MAX_REPONSE
 
     def log_message(self, *a):
@@ -94,6 +95,20 @@ class Faux(http.server.BaseHTTPRequestHandler):
             corps = brut
         Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=corps))
         sse = lambda evs: "".join(f"data: {json.dumps(e)}\n\n" for e in evs)
+        if self.path == "/ant/messages" and Faux.goutte == "entetes":
+            try:
+                self.wfile.write(b"HTTP/1.0 200 OK\r\nX-Goutte: ")
+                fin = time.monotonic() + 20
+                while time.monotonic() < fin:
+                    self.wfile.write(b"a")
+                    self.wfile.flush()
+                    time.sleep(0.2)
+            except OSError:
+                pass
+            return
+        if self.path == "/ant/messages" and Faux.goutte == "statut":
+            self.wfile.write(b"BONJOUR\r\n\r\n")
+            return
         if self.path == "/ant/messages" and Faux.goutte == "ant":
             return self.goutte_a_goutte(b'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", '
                                         b'"text": "Bon"}}\n\n')
@@ -1113,6 +1128,51 @@ class IA(unittest.TestCase):
         echecs = json.loads((self.home / "run/nc-ia/echecs.json").read_text())
         self.assertIn("codex", echecs, "son propre délai dépassé : un échec")
         self.assertNotIn("gemini-cli", echecs, "coupée par l'échéance globale : pas sa faute")
+
+    def test_en_tetes_goutte_a_goutte_bornes_aussi(self):
+        """Contre-relecture de B2-06 : l'échéance de tout l'appel ne s'armait qu'une fois les en-têtes reçus ; des
+        en-têtes envoyés octet par octet n'étaient bornés que lecture par lecture."""
+        Faux.goutte = "entetes"
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=anthropic\n")
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_TOTAL": "2"})
+        self.assertLess(time.monotonic() - debut, 10)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("délai dépassé", r.stderr)
+
+    def test_ligne_d_etat_invalide(self):
+        """Contre-relecture de B2-06 : une réponse sans ligne d'état HTTP (BadStatusLine) donnait une trace Python."""
+        Faux.goutte = "statut"
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=anthropic\n")
+        r = self.lancer("demander", "question")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("connexion impossible", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_plus_de_temps_rien_n_est_lance(self):
+        """Contre-relecture de B2-07 : le temps restant du relais en arrière-plan était lu après le lancement du
+        programme (Claude Code, Codex…, JARVIS) ; à 0, il était lancé puis arrêté aussitôt. Rien n'est lancé."""
+        from unittest import mock
+        m = charger_nc_ia("nc_ia_sans_temps")
+        m.HOME = self.home                       # jamais le vrai HOME (cwd des programmes, chemin de nc-assistant)
+        m.ECHEANCE = time.monotonic() - 1
+        # Popen remplacé : rien ne peut partir, même si le test échoue
+        with mock.patch.object(m.subprocess, "Popen", side_effect=AssertionError("programme lancé")) as lancer:
+            for appel in (lambda: m.appel_claude("c", "t", None, "question"),
+                          lambda: m.appel_programme("opencode", "c", "t", None, "question"),
+                          lambda: m.appel_jarvis("c", "t", None, "question")):
+                with self.assertRaises(m.ErreurDelai) as e:
+                    list(appel())
+                self.assertTrue(e.exception.globale)
+        self.assertFalse(lancer.called)
+
+    def test_arriere_plan_sans_temps_message_sans_tiret_vide(self):
+        """Contre-relecture de B2-07 : sans aucune IA essayée, le message finissait par un tiret sans rien après."""
+        self.preparer_muets()
+        r = self.lancer("demander", "question", "--fond", env_plus={"NC_IA_DELAI_FOND": "0"})
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("L'IA d'arrière-plan s'arrête", r.stderr)
+        self.assertFalse(r.stderr.strip().endswith("—"), r.stderr)
 
     def test_mode_auto_devant_toi_garde_chaque_delai(self):
         """Les appels que tu lances toi-même gardent le relais complet : chaque IA a son propre délai."""
