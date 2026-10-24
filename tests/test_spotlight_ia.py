@@ -43,7 +43,7 @@ QtObject {
 }''')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
@@ -167,7 +167,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {
@@ -246,7 +246,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
@@ -316,7 +316,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             plan = {"id": "0123456789abcdef", "reponse": "Je coupe le Bluetooth.", "ia": "Claude Code", "agent": "claude", "refus": [],
@@ -370,6 +370,128 @@ ShellRoot {
             appels = (root / "appels").read_text().splitlines()
             self.assertEqual(appels, ["nc-ia agir --json coupe le bluetooth", "nc-ia executer 0123456789abcdef 0 --json",
                                       "nc-ia executer 0123456789abcdef 1 --json"])
+
+
+    # « Que se passe-t-il ? » : le bilan de nc-diag, l'explication de nc-ia, les réparations (fausses commandes, rien du vrai bureau)
+    BILAN = {"version": 1, "langue": "fr", "duree_ms": 900, "ko": 2, "attention": 1, "ok": 40, "resume": "2 problèmes : noctalia arrêtée.",
+             "constats": [
+                 {"cle": "ile", "niveau": "avert", "section": "Bureau", "texte": "L'île est bloquée", "quoi": "", "reparations": ["redemarrer:nc-ile.service"]},
+                 {"cle": "noctalia", "niveau": "faux", "section": "Bureau", "texte": "Noctalia est arrêtée", "quoi": "", "reparations": ["redemarrer:noctalia.service"]},
+                 {"cle": "ia_conf", "niveau": "avert", "section": "IA", "texte": "ia.conf lisible par tous", "quoi": "", "reparations": ["ia_conf_prive"]},
+                 {"cle": "hypr", "niveau": "faux", "section": "Hyprland", "texte": "Erreur dans hyprland.lua", "quoi": "ligne 12", "reparations": []}],
+             "reparations": {"redemarrer:nc-ile.service": {"libelle": "Redémarrer l'île", "detail": "", "danger": True, "ferme_ile": True},
+                             "redemarrer:noctalia.service": {"libelle": "Relancer Noctalia", "detail": "", "danger": False, "ferme_ile": False},
+                             "ia_conf_prive": {"libelle": "Protéger ia.conf", "detail": "", "danger": False, "ferme_ile": False}}}
+
+    def _diag(self, scenario, ia_mode="oui"):
+        """Lance le Spotlight hors écran avec un faux nc-diag et un faux nc-ia ; renvoie (journal des appels, dossier)."""
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-diag-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({IA_MODE: "' + ia_mode + '"}); readonly property bool iaCoupee: v.IA_MODE === "non"\n'
+                                            ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            (root / "bilan.json").write_text(json.dumps(self.BILAN))
+            ia = {"source": "ia", "raison": "", "ia": "Claude Code", "agent": "claude", "resume": "Noctalia est arrêtée.", "conseil": "Relance-la d'abord.",
+                  "reparations": ["redemarrer:nc-ile.service", "redemarrer:noctalia.service", "ia_conf_prive", "rm -rf /"], "refus": []}
+            scripts = {
+                "nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                "nc-demander": '#!/bin/sh\necho \'{"nom": "Claude Code", "agent": "claude", "coupee": ' + ("true" if ia_mode == "non" else "false") + '}\'\n',
+                "nc-diag": '#!/bin/sh\necho "nc-diag $*" >> "$HOME/appels"\ncase "$1" in\n reparer) sleep 0.4; printf \'{"id": "%s", "libelle": "x", "resultat": "fait", "ferme_ile": false, "texte": "ok"}\\n\' "$2" ;;\n'
+                           ' *) sleep 0.3; cat "$HOME/bilan.json" ;;\nesac\n',
+                "nc-ia": '#!/bin/sh\necho "nc-ia $*" >> "$HOME/appels"\ncat > "$HOME/stdin-ia"\nsleep 0.3\necho \'' + json.dumps(ia) + '\'\n'}
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text("""import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ property bool vuOccupe: false
+ property bool vuVerif: false
+ property int cycles: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "") return; champ.text = "que se passe-t-il ?"; etape++; return }
+""" + scenario + """
+ } }
+ Timer { interval: 14000; running: true; onTriggered: { console.error("délai : étape " + etape + " " + JSON.stringify(titres())); Qt.exit(9) } }
+}""")
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=25)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            fichier = root / "appels"
+            appels = fichier.read_text().splitlines() if fichier.exists() else []
+            ia_stdin = root / "stdin-ia"
+            return appels, (ia_stdin.read_text() if ia_stdin.exists() else "")
+
+    def test_diag_mots_cles_sans_entree_aucun_appel(self):
+        # Les mots-clés montrent la ligne en tête ; sans Entrée ni clic, ni nc-diag ni nc-ia ne sont lancés
+        scenario = r"""
+  if (etape === 1) { verifier(spot.resultats.length > 0 && spot.resultats[0].titre === "Que se passe-t-il ?", "ligne : " + JSON.stringify(titres()))
+   verifier(spot.resultats[0].glyphe === "monitor_heart", "glyphe"); champ.text = "ça marche plus"; etape++; return }
+  if (etape === 2) { verifier(spot.resultats[0].titre === "Que se passe-t-il ?", "ça marche plus : " + JSON.stringify(titres())); champ.text = "?"; etape++; return }
+  if (etape === 3) { verifier(spot.resultats[0].titre === "Que se passe-t-il ?", "? seul : " + JSON.stringify(titres())); champ.text = "what's wrong"; etape++; return }
+  if (etape === 4) { verifier(spot.resultats[0].titre === "Que se passe-t-il ?", "what's wrong : " + JSON.stringify(titres())); cycles = 0; etape++; return }
+  if (etape === 5) { if (++cycles < 15) return
+   verifier(!spot.occupe, "rien en cours"); Qt.quit() }
+"""
+        appels, _ = self._diag(scenario)
+        self.assertEqual(appels, [])
+
+    def test_diag_bilan_ia_reparations_confirmees(self):
+        # Entrée : nc-diag vérifie ; le bilan s'affiche, nc-ia l'explique (bilan sur l'entrée standard) ; une réparation seulement
+        # sur Entrée, « Tout réparer » fait le reste, l'île (ferme_ile) en dernier ; occupe pendant une réparation
+        scenario = r"""
+  if (etape === 1) { spot.valider(0, false); etape++; return }
+  if (etape === 2) { if (spot.resultats[0].titre === "Vérification du bureau…") vuVerif = true
+   if (spot.resultats[0].titre === "Vérification du bureau…" || titres().indexOf("Voir le bilan complet") < 0) return
+   if (trouver(spot, "nc-spotlight-reponse").visible !== true) return
+   cycles++; if (cycles < 8) return
+   verifier(vuVerif, "la vérification a été vue")
+   verifier(JSON.stringify(titres()) === JSON.stringify(["Tout réparer", "Relancer Noctalia", "Protéger ia.conf", "Redémarrer l'île", "Erreur dans hyprland.lua", "Voir le bilan complet", "Copier le rapport"]), "bilan : " + JSON.stringify(titres()))
+   verifier(spot.resultats[3].sous.indexOf("⚠ L'île se ferme") === 0, "l'île signalée")
+   verifier(spot.resultats[1].sous === "À confirmer", "à confirmer : " + spot.resultats[1].sous)
+   spot.valider(2, false); etape++; return }
+  if (etape === 3) { if (spot.occupe) vuOccupe = true
+   if (titres()[2] !== "✓ Protéger ia.conf" || spot.occupe) return
+   verifier(spot.resultats[0].sous.indexOf("En cours") < 0, "lignes à jour : " + JSON.stringify(spot.resultats[0]))
+   verifier(vuOccupe, "occupe pendant la réparation"); verifier(Etat.fermetures === 0, "le Spotlight reste ouvert")
+   spot.valider(0, false); etape++; return }
+  if (etape === 4) {
+   if (titres()[0] !== "✓ Tout est réparé") return
+   verifier(JSON.stringify(titres().slice(1, 4)) === JSON.stringify(["✓ Relancer Noctalia", "✓ Protéger ia.conf", "✓ Redémarrer l'île"]), "fin : " + JSON.stringify(titres()))
+   Qt.quit() }
+"""
+        appels, ia_stdin = self._diag(scenario)
+        self.assertEqual(appels, ["nc-diag --json --rapide", "nc-ia diagnostic --json -",
+                                  "nc-diag reparer ia_conf_prive --json",
+                                  "nc-diag reparer redemarrer:noctalia.service --json", "nc-diag reparer redemarrer:nc-ile.service --json"])
+        self.assertEqual(json.loads(ia_stdin)["constats"][1]["cle"], "noctalia")
+
+    def test_diag_ia_coupee_les_reparations_marchent(self):
+        # IA_MODE=non : nc-ia n'est jamais lancé, le bilan de nc-diag et les réparations marchent quand même
+        scenario = r"""
+  if (etape === 1) { verifier(spot.resultats[0].titre === "Que se passe-t-il ?", "ligne : " + JSON.stringify(titres())); spot.valider(0, false); etape++; return }
+  if (etape === 2) { if (titres().indexOf("Voir le bilan complet") < 0 || spot.occupe) return
+   verifier(titres()[1] === "Relancer Noctalia", "bilan : " + JSON.stringify(titres())); spot.valider(1, false); etape++; return }
+  if (etape === 3) { if (titres()[1] !== "✓ Relancer Noctalia") return; Qt.quit() }
+"""
+        appels, _ = self._diag(scenario, ia_mode="non")
+        self.assertEqual(appels, ["nc-diag --json --rapide", "nc-diag reparer redemarrer:noctalia.service --json"])
 
 
 if __name__ == "__main__":

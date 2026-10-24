@@ -485,7 +485,7 @@ class SpotlightSessions(unittest.TestCase):
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             # Faux nc-session : son dossier vient de son propre chemin (jamais le vrai HOME) ; il journalise chaque argument
@@ -574,7 +574,7 @@ ShellRoot {
                                         ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {}}')
             (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
             (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
-            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Diagnostic", "Etincelle", "Texte", "Ico"]
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
             b = root / ".local/bin"; b.mkdir(parents=True)
             # Faux nc-session : journalise ses appels ; « supprimer Dev » la retire de la liste

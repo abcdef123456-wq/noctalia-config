@@ -20,6 +20,9 @@
 // l'IA » reste en dernier. Réglage SPOTLIGHT_AIDE.
 // Dock (issue #16) : sur une appli, clic droit ou Alt + P l'épingle au dock de Noctalia, ou l'en retire (nc-dock) ; un
 // bref retour en tête des résultats, le Spotlight reste ouvert.
+// « Que se passe-t-il ? » (ou « ça marche pas », « diagnostic », « what's wrong »…, et sous « ? » vide) : le bilan du
+// bureau (nc-diag --json --rapide), expliqué par l'IA si elle est permise (nc-ia diagnostic --json), et des réparations
+// tirées de la table de nc-diag, chacune faite seulement avec Entrée ou un clic (nc-diag reparer ID) : Diagnostic.qml.
 // Applications et fichiers : ~/.local/bin/nc-apps ; historique partagé avec le lanceur Noctalia (usage.json).
 import QtQuick
 import Quickshell
@@ -137,6 +140,71 @@ Item {
         demandeur.running = true
         chercher()
     }
+    // « Que se passe-t-il ? » : le bilan affiché tant que la saisie ne change pas (diagPour)
+    property bool modeDiag: false
+    property string diagPour: ""
+    Diagnostic {
+        id: diag
+        iaPermise: !Reglages.iaCoupee && !r.iaCoupee && r.nomIA !== "-"
+        onChange: r.chercher()
+    }
+    function lancerDiagnostic() { diagPour = q; modeDiag = true; sel = 0; diag.lancer(); chercher() }
+    // Une saisie qui demande ce qui cloche (sans accents ni majuscules ; « diag » et le début de « diagnostic » aussi)
+    function estDiag(t) {
+        let s = sansAccents(t).replace(/[’‘`]/g, "'").replace(/[?!.,;:«»"]+/g, " ").replace(/\s+/g, " ").trim()
+        if (/(^| )que se passe|qu'?est[- ]ce qui (cloche|va pas|ne va pas|se passe)|(^| )ca (ne )?marche (pas|plus)|rien ne marche|reparer le bureau|what'?s (wrong|going on)|what is (wrong|going on)|troubleshoot/.test(s)) return true
+        return s.split(" ").some(m => m.length >= 4 && ("diagnostic".startsWith(m) || "diagnostique".startsWith(m)))
+    }
+    readonly property var ligneDiag: ({ titre: Reglages.t("Que se passe-t-il ?", "What's going on?"),
+                                        sous: Reglages.t("Vérifier le bureau, proposer des réparations", "Check the desktop, suggest fixes"),
+                                        glyphe: "monitor_heart", garder: true, f: () => r.lancerDiagnostic() })
+    // Les lignes du bilan : les réparations (Entrée pour chacune), ce qui n'a pas de réparation, puis le bilan complet
+    function lignesDiag() {
+        if (diag.etape === "verif")
+            return [{ titre: Reglages.t("Vérification du bureau…", "Checking the desktop…"), sous: "nc-diag", glyphe: "hourglass_top", garder: true, f: () => {} }]
+        let l = [], tab = diag.table(), restantes = diag.restantes()
+        if (diag.ordre.length >= 2)
+            l.push(restantes.length === 0
+                   ? { titre: Reglages.t("✓ Tout est réparé", "✓ Everything is fixed"), sous: diag.ordre.length + Reglages.t(" réparations", " fixes"), glyphe: "check_circle", garder: true, f: () => {} }
+                   : diag.reparationEnCours
+                   ? { titre: Reglages.t("Tout réparer", "Fix Everything"), sous: Reglages.t("En cours…", "In progress…"), glyphe: "hourglass_top", garder: true, f: () => {} }
+                   : { titre: Reglages.t("Tout réparer", "Fix Everything"), glyphe: "done_all", garder: true, aide: Reglages.t("↵ confirmer", "↵ confirm"),
+                       sous: restantes.length + Reglages.t(" réparations", " fixes") + (restantes.some(id => diag.fermeIle(id)) ? Reglages.t(" · l'île en dernier", " · the island last") : ""),
+                       f: () => diag.toutReparer() })
+        diag.ordre.forEach(id => {
+            let x = tab[id], fait = diag.faits[id]
+            let libelle = String(x.libelle || id)
+            if (fait && fait.ok)
+                l.push({ titre: "✓ " + libelle, sous: fait.deja ? Reglages.t("Déjà en ordre", "Already fine") : (fait.texte || Reglages.t("Fait", "Done")).slice(0, 60),
+                         glyphe: "check_circle", garder: true, f: () => {} })
+            else if (diag.enCours === id)
+                l.push({ titre: libelle, sous: Reglages.t("En cours…", "In progress…"), glyphe: "hourglass_top", garder: true, f: () => {} })
+            else if (diag.file.indexOf(id) >= 0)
+                l.push({ titre: libelle, sous: Reglages.t("En attente", "Waiting"), glyphe: "schedule", garder: true, f: () => {} })
+            else if (fait)
+                l.push({ titre: "✗ " + libelle, sous: (fait.texte || Reglages.t("Échec", "Failed")).slice(0, 60), glyphe: "error", garder: true,
+                         aide: Reglages.t("↵ réessayer", "↵ try again"), f: () => diag.reparer(id) })
+            else
+                l.push({ titre: libelle, glyphe: "build", garder: true,
+                         sous: x.ferme_ile ? Reglages.t("⚠ L'île se ferme et revient", "⚠ The island closes and comes back")
+                                           : x.danger ? Reglages.t("⚠ À confirmer", "⚠ To confirm") : Reglages.t("À confirmer", "To confirm"),
+                         f: () => diag.reparer(id) })
+        })
+        // Ce que nc-diag ne sait pas réparer (une erreur de config…) : dit tel quel, 4 au plus
+        let sans = diag.constats().filter(c => !(Array.isArray(c.reparations) && c.reparations.some(id => diag.permis(id))))
+        sans.slice(0, 4).forEach(c => {
+            let quoi = String(c.quoi || "")
+            l.push({ titre: String(c.texte || ""), glyphe: c.niveau === "faux" ? "error" : "warning", garder: true, f: () => {},
+                     sous: quoi !== "" ? (quoi.length > 60 ? quoi.slice(0, 58) + "…" : quoi)
+                                       : c.niveau === "faux" ? Reglages.t("À corriger", "To fix") : Reglages.t("À améliorer", "To improve") })
+        })
+        l.push({ titre: Reglages.t("Voir le bilan complet", "See the Full Check"), glyphe: "list_alt",
+                 sous: Reglages.t("Dans le terminal", "In the terminal") + (sans.length > 4 ? " · " + (sans.length - 4) + Reglages.t(" autre(s)", " more") : ""),
+                 f: () => r.lancerCommande("nc-diag") })
+        l.push({ titre: Reglages.t("Copier le rapport", "Copy the Report"), glyphe: "content_copy",
+                 sous: Reglages.t("Pour demander de l'aide", "To ask for help"), f: () => Quickshell.execDetached([Etat.bin + "nc-diag", "rapport"]) })
+        return l
+    }
     // Dans le terminal, avec le PATH de l'utilisateur (l'île n'a que celui du système)
     function lancerCommande(c) { Quickshell.execDetached(["kitty", "--hold", "sh", "-c", "PATH=\"$HOME/.local/bin:$HOME/bin:$PATH\"; " + c]) }
 
@@ -210,7 +278,8 @@ Item {
         return true
     }
     // Échap : annule d'abord une suppression demandée, sinon referme
-    function echap() { if (confirmer >= 0) annulerSuppr(); else Etat.fermer() }
+    // (ou, pendant que l'IA explique le bilan, coupe l'IA : le bilan reste)
+    function echap() { if (confirmer >= 0) annulerSuppr(); else if (modeDiag && diag.iaEnCours) diag.couperIA(); else Etat.fermer() }
 
     // Chargée à la demande : déjà active à sa création (une seule initialisation, une fois tout créé) ; rouverte avant
     // d'être déchargée : réinitialisée au changement de « actif »
@@ -221,6 +290,7 @@ Item {
         texteSource = Etat.texteIA || ""; if (texteSource !== "") Etat.texteIA = ""
         var agirTout = !!Etat.agirAuto; if (agirTout) Etat.agirAuto = false
         porteeAgent = agirTout ? Etat.agirPortee : ""; Etat.agirPortee = ""
+        modeDiag = false; diag.annuler()
         champ.text = Etat.saisie; Etat.saisie = ""; sel = 0; fichiers = []; calcul = ""; entreeEnAttente = false; retourSession = null
         retourDock = null
         lireApplis.running = true
@@ -669,11 +739,17 @@ Item {
         return 1 + Math.min(1.2, (u.n || 0) / 15) * (h < 24 ? 1.4 : (h < 168 ? 1.1 : 0.8))
     }
 
-    onQChanged: { sel = 0; annulerSuppr(); retourSession = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
+    onQChanged: { if (modeDiag && q !== diagPour) { modeDiag = false; diag.annuler() }
+                  sel = 0; annulerSuppr(); retourSession = null; if (!dockOccupe) retourDock = null; fichiers = []; calcul = ""; reponseAide = ""; attente.restart(); attentePaquets.restart(); chercher() }
 
     function chercher() {
         var q = r.q, qa = sansAccents(q), out = []
         if (q === "") { resultats = []; return }
+        if (modeDiag && q === diagPour) {
+            resultats = lignesDiag()
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+            return
+        }
 
         // Préfixes : web et commande
         // « g … » : le moteur choisi (SPOTLIGHT_MOTEUR)
@@ -712,7 +788,8 @@ Item {
                           : [{ titre: question || Reglages.t("Pose ta question", "Ask your question"),
                                sous: r.reflechit ? (nomIA + Reglages.t(" réfléchit…", " is thinking…")) : Reglages.t("Demander à ", "Ask ") + (nomIA || Reglages.t("l'IA", "the AI")),
                                glyphe: "auto_awesome", garder: true, f: () => r.demander(question) }]
-                resultats = deLaConfig.concat(ia)
+                // « ? » seul, ou « ? ça marche pas » : « Que se passe-t-il ? » en tête
+                resultats = (question === "" || estDiag(question) ? [ligneDiag] : []).concat(deLaConfig, ia)
             }
             if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
             return
@@ -905,6 +982,8 @@ Item {
         }
         // Une question en langage naturel (« comment changer le fond d'écran ») : les réponses de la config en tête
         if (Aide.estQuestion(q)) reponsesAide(q, 3).forEach(e => out.push(itemAide(e, 500 + e.score)))
+        // « Que se passe-t-il ? », « ça marche pas »… : le bilan du bureau en tête (même l'IA coupée : nc-diag suffit)
+        if (estDiag(q)) out.push(Object.assign({ s: 1000 }, ligneDiag))
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
@@ -978,13 +1057,15 @@ Item {
     // (running seul : un nc-session introuvable, jamais lancé, ne garderait pas le Spotlight chargé pour rien)
     // Un épinglage au dock aussi (nc-dock arrêté en route : rien d'écrit, mais rien de fait non plus)
     // Des actions confirmées en cours aussi : arrêtées au milieu, elles seraient notées « interrompues » (revue B2-01)
+    // Une réparation du bilan aussi (nc-diag reparer), et celles de « Tout réparer » qui attendent leur tour
     readonly property bool occupe: suivi.running || entreeEnAttente || enregistreur.running || supprimeur.running || modifDock.running
-                                   || executeur.running
+                                   || executeur.running || diag.reparationEnCours
     function valider(i, nouveau) {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@]|sessions? )/i.test(q) && !Aide.estQuestion(q)) { entreeEnAttente = true; return }
+        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+            && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
         if (x.page) { Etat.recherche = false; Etat.aller(x.page); return }
@@ -1025,13 +1106,15 @@ Item {
         }
     }
 
-    // Réponse de l'IA (« ? … »)
+    // Réponse de l'IA (« ? … »), ou le résumé du bilan (« Que se passe-t-il ? » : celui de nc-diag, puis celui de l'IA)
     Rectangle {
         id: zoneReponse
-        visible: r.reponseAide !== "" || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
-        readonly property bool attend: r.reflechit && r.reponse === ""
+        objectName: "nc-spotlight-reponse"
+        readonly property bool enDiag: r.modeDiag && r.q === r.diagPour && r.reponseAide === ""
+        visible: r.reponseAide !== "" || (enDiag && diag.resume !== "") || ((r.q.startsWith("?") || ((r.q.startsWith("!") && r.modeTexte || r.q.startsWith("@") && r.modeAgent) && r.q === r.questionPosee)) && (r.reflechit || r.reponse !== ""))
+        readonly property bool attend: !enDiag && r.reflechit && r.reponse === ""
         // Plan de rangement en zones (« me montrer le plan d'abord ») : une mini-carte de l'écran plutôt qu'une liste
-        readonly property var zones: r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []
+        readonly property var zones: !enDiag && r.plan && r.plan.actions ? r.plan.actions.filter(a => a.outil === "fenetre_zone" && a.args) : []
         anchors.top: barre.bottom; anchors.topMargin: 4
         x: 14; width: parent.width - 28; radius: 16; color: Couleurs.gris2
         height: Math.min(12 + enTete.height + (texteReponse.visible ? 6 + texteReponse.implicitHeight : 0)
@@ -1040,22 +1123,31 @@ Item {
         Row {
             id: enTete
             x: 14; y: 12; spacing: 8
+            // Le bilan : l'Etincelle de l'IA pendant qu'elle l'explique, sinon le cœur du bilan
             Etincelle {
-                anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: r.reflechit
-                agent: r.agentReponse
+                visible: !zoneReponse.enDiag || diag.iaEnCours
+                anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: zoneReponse.enDiag || r.reflechit
+                agent: zoneReponse.enDiag ? r.agentIA : r.agentReponse
+            }
+            Ico {
+                objectName: "nc-spotlight-bilan"
+                visible: zoneReponse.enDiag && !diag.iaEnCours
+                anchors.verticalCenter: parent.verticalCenter; nom: "monitor_heart"; taille: 16; color: Couleurs.accent
             }
             Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
                     text: r.reponseAide !== "" ? Reglages.t("Aide de la config · ", "Config help · ") + r.titreAide
+                        : zoneReponse.enDiag ? (diag.iaEnCours ? (r.nomIA || Reglages.t("L'IA", "The AI")) + Reglages.t(" regarde le bilan…  ·  Échap l'arrête", " is reading the check…  ·  Esc stops it")
+                                                : diag.source === "ia" ? Reglages.t("Bilan · expliqué par ", "Check · explained by ") + diag.ia : Reglages.t("Bilan", "Check"))
                         : zoneReponse.attend ? r.iaReponse + Reglages.t(" réfléchit…", " is thinking…") : r.iaReponse }
         }
         Text {
             id: texteReponse
             anchors.top: enTete.bottom; anchors.topMargin: 6
             x: 14; width: parent.width - 28
-            text: r.reponseAide !== "" ? r.reponseAide : AssistantEtat.formater(r.reponse)
+            text: r.reponseAide !== "" ? r.reponseAide : zoneReponse.enDiag ? diag.resume : AssistantEtat.formater(r.reponse)
             visible: !zoneReponse.attend || r.reponseAide !== ""
             color: Couleurs.texte; font.family: "Adwaita Sans"; font.pixelSize: 14; wrapMode: Text.Wrap
-            textFormat: r.reponseAide !== "" ? Text.PlainText : Text.MarkdownText
+            textFormat: r.reponseAide !== "" || zoneReponse.enDiag ? Text.PlainText : Text.MarkdownText
         }
         // Mini-carte : l'écran aux proportions 16:10, chaque zone en carte arrondie avec le nom de son appli
         Rectangle {
