@@ -349,6 +349,11 @@ L'export refuse de remplacer `home/` s'il contient des modifications locales, y 
 Utilise `./export.sh --preview` pour comparer la configuration installée au dépôt sans remplacer ton travail.
 Les fichiers sont préparés et contrôlés avant le remplacement.
 
+L'export ne supprime rien du dépôt. Un fichier qui n'est pas sur ton PC (un composant pas encore installé, une page
+ou un fond d'écran que tu as retiré de `~`) reste dans `home/`. Pour l'enlever du dépôt, fais-le toi-même :
+`git rm home/<chemin>`, puis commit. Un dossier qui est un lien (par exemple `~/.config/nvim` vers un autre dossier)
+est exporté avec son contenu, jamais le lien lui-même.
+
 Les corrections de la vue des fenêtres, de Coucou et des contrôles Quickshell sont détaillées dans la
 [note de validation](docs/corrections-2026-10-19.md), avec les essais graphiques restant à effectuer sur Debian,
 Fedora/Nobara et les configurations à plusieurs écrans.
