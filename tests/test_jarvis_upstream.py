@@ -122,3 +122,44 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
                 for name,old in previous.items():
                     if old is None:sys.modules.pop(name,None)
                     else:sys.modules[name]=old
+
+
+@unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')
+class PoolParBoucleUpstream(unittest.TestCase):
+    def test_per_loop_clients_of_the_gateway_are_leases_of_our_single_pool(self):
+        """4ecc57a garde un client par boucle (4 au plus) : ce sont des emprunts de notre pool, jamais un second pool,
+        jamais un vrai client httpx, et close_http_client ne ferme pas le pool."""
+        import threading
+        def load(path,mod):
+            spec=importlib.util.spec_from_file_location(mod,path);module=importlib.util.module_from_spec(spec)
+            sys.modules[mod]=module;spec.loader.exec_module(module);return module
+        gateway=load(UPSTREAM/'gateway/gateway.py','gateway_pool_loops');self.addCleanup(sys.modules.pop,'gateway_pool_loops',None)
+        if not hasattr(gateway,'_CLIENTS_BY_LOOP'):self.skipTest('Client partagé par boucle absent (avant 4ecc57a)')
+        management=load(REPO/'home/.local/share/nc-jarvis/server/nc_management.py','nc_management_pool_loops')
+        self.addCleanup(sys.modules.pop,'nc_management_pool_loops',None)
+        pool=management.runner_connections;gateway.httpx=management.RunnerHttpx(httpx,pool)
+        mine=[];errors=[]
+        def other_loop():
+            async def go():
+                try:
+                    c=gateway._get_http_client();mine.append(c);self.assertIsInstance(c,management.RunnerLease)
+                    self.assertIsNone(pool.pool())  # autre boucle : jamais le pool
+                except BaseException as e:errors.append(e)
+            asyncio.run(go())
+        async def scenario():
+            with patch.object(httpx,'AsyncClient',wraps=httpx.AsyncClient) as factory:
+                async with pool.lifespan():
+                    opened=pool.client
+                    first=gateway._get_http_client();self.assertIsInstance(first,management.RunnerLease)
+                    self.assertIs(pool.pool(),opened)
+                    for _ in range(6):
+                        t=threading.Thread(target=other_loop);t.start();t.join()
+                    self.assertFalse(errors,errors)
+                    self.assertLessEqual(len(gateway._CLIENTS_BY_LOOP),4)
+                    await gateway.close_http_client()
+                    self.assertFalse(opened.is_closed);self.assertIs(pool.client,opened)
+                    self.assertIsInstance(gateway._get_http_client(),management.RunnerLease)
+                factory.assert_called_once()  # le pool, et rien d'autre : pas de second pool
+            self.assertIsNone(pool.client)
+        asyncio.run(scenario())
+        self.assertEqual(len(mine),6)

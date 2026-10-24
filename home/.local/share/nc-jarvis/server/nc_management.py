@@ -303,17 +303,49 @@ def identifier(value):
 
 def cle_session(value):
     """Clé de session du PC qui demande (« desktop:nom-du-pc ») : avec AGY depuis 64523e5, chaque PC a sa session.
-    Absente (ancien client) : la session « default » du runner, comme avant."""
+    Absente (ancien client) : la session « default » du runner, comme avant. Depuis 4ecc57a, le serveur impose
+    « desktop:<pc> » ou « default » sur cette route : nous aussi (nos clients envoient toujours « desktop: »)."""
     if value is None: return None
-    if not isinstance(value,str) or not re.fullmatch(r'[\w:.@-]{1,200}',value,flags=re.ASCII): raise ValueError
+    if not isinstance(value,str) or not re.fullmatch(r'default|desktop:[\w.@-]{1,180}',value,flags=re.ASCII): raise ValueError
     return value
+
+
+# Listes blanches de 4ecc57a pour les réglages de session (permission_mode est aussi refusé par agy_bridge)
+PERMISSION_MODES=frozenset({'always-proceed','request-review','default','auto_edit','yolo','ask','bypass','plan','auto'})
+MODES=frozenset({'agent','auto','plan','accept-edits','ask'})
+
+
+async def fin_session_noeuds(session_key, node_id=None):
+    """Ferme la session de confiance des machines reliées et change l'identifiant de conversation (4ecc57a). Sans
+    effet, sans erreur, sur une révision qui n'a pas ces méthodes ou sans nœud (best effort, comme le serveur)."""
+    try:
+        from core.node_hub import NODE_HUB
+        if node_id is None:
+            NODE_HUB.rotate_conversation_token(session_key or 'default')
+            await NODE_HUB.send_session_end()
+        else:
+            return await NODE_HUB.send_session_end(node_id=node_id)
+    except Exception:
+        pass
+    return []
+
+
+def jeton_conversation(session_key, resultat):
+    """Retient le jeton de session rendu par le runner pour les nœuds (4ecc57a) ; sans effet avant."""
+    try:
+        session=resultat.get('session') if isinstance(resultat,dict) else None
+        if isinstance(session,dict) and session.get('session_token'):
+            from core.node_hub import NODE_HUB
+            NODE_HUB.set_conversation_token(session_key or 'default',str(session['session_token']))
+    except Exception:
+        pass
 
 
 async def dispatch(op, p, confirmed=False, session_key=None):
     session_key=cle_session(session_key)
     cle='?'+urlencode(dict(session_key=session_key)) if session_key else ''
     read = {'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','quick-settings','google.status','google.calendar'}
-    write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','notify','noctalia'}
+    write = {'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','notify','noctalia','node.session_end'}
     if op not in read|write: raise ValueError
     if op in ('google.status','google.calendar'):
         # Google Agenda pour l'île, par le jeton Google de JARVIS (nc_google) ; jamais le jeton lui-même
@@ -339,10 +371,22 @@ async def dispatch(op, p, confirmed=False, session_key=None):
     if op=='quick-settings': return await runner('GET','/nc/engines'+cle)
     if op=='session.update':
         if not p or set(p)-{'engine','model','effort','mode','permission_mode'} or any(not isinstance(v,str) or len(v)>200 for v in p.values()): raise ValueError
+        if (p.get('permission_mode') or 'default') not in PERMISSION_MODES or (p.get('mode') or 'agent') not in MODES: raise ValueError
         return await runner('POST','/nc/engine' if 'engine' in p else '/session',dict(p,session_key=session_key) if session_key else p)
-    if op=='session.reset': return await runner('POST','/session/reset'+cle)
+    if op=='session.reset':
+        await fin_session_noeuds(session_key)
+        resultat=await runner('POST','/session/reset'+cle)
+        jeton_conversation(session_key,resultat)
+        return resultat
     if op=='conversation.resume':
-        return await runner('POST','/conversation/resume',dict(conversation_id=identifier(p['id']),**({'session_key':session_key} if session_key else {})))
+        identifiant=identifier(p['id'])
+        await fin_session_noeuds(session_key)
+        resultat=await runner('POST','/conversation/resume',dict(conversation_id=identifiant,**({'session_key':session_key} if session_key else {})))
+        jeton_conversation(session_key,resultat)
+        return resultat
+    if op=='node.session_end':
+        noeud=str(p.get('node_id') or 'all').strip()[:64]
+        return dict(success=True,closed_nodes=await fin_session_noeuds(session_key,noeud))
     if op=='conversation.delete': return await runner('DELETE','/conversation/'+identifier(p['id']))
     if op=='memory.add':
         text=p['text']

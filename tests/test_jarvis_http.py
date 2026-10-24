@@ -323,4 +323,52 @@ class ConnexionsRunner(unittest.TestCase):
         self.assertIs(httpx.AsyncClient,factory)
 
 
+class GestionDepuis4ecc57a(unittest.TestCase):
+    """Ce que 4ecc57a impose sur /api/nc/manage, repris dans notre dispatch (qui remplace celui du serveur)."""
+    def setUp(self):
+        self.m=types.ModuleType('manage_test');self.m.__file__=str(SOURCE)
+        exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        self.appels=[];self.noeuds=[]
+        async def runner(method,path,body=None):
+            self.appels.append((method,path,body));return {'session':{'session_token':'jeton1'}}
+        self.m.runner=runner
+        hub=types.SimpleNamespace(
+            rotate_conversation_token=lambda k=None:self.noeuds.append(('rotation',k)),
+            set_conversation_token=lambda k,t:self.noeuds.append(('jeton',k,t)))
+        async def fin(node_id=None):
+            self.noeuds.append(('fin',node_id));return ['pc']
+        hub.send_session_end=fin
+        core=types.ModuleType('core');mod=types.ModuleType('core.node_hub');mod.NODE_HUB=hub
+        patcher=patch.dict(sys.modules,{'core':core,'core.node_hub':mod});patcher.start();self.addCleanup(patcher.stop)
+
+    def run_(self,*a,**k):return asyncio.run(self.m.dispatch(*a,**k))
+
+    def test_session_key_must_be_desktop_or_default(self):
+        for bad in ('telegram:1','client:bureau','desktop:','desktop:a b','x'):
+            with self.assertRaises(ValueError):self.run_('session',{},session_key=bad)
+        for good in (None,'default','desktop:mon-pc.local'):self.run_('session',{},session_key=good)
+
+    def test_session_update_whitelists(self):
+        for bad in ({'permission_mode':'rm -rf'},{'mode':'--evil'}):
+            with self.assertRaises(ValueError):self.run_('session.update',bad,True,session_key='desktop:a')
+        self.run_('session.update',{'mode':'plan','permission_mode':'request-review'},True,session_key='desktop:a')
+        self.assertEqual(self.appels[-1][2]['mode'],'plan')
+
+    def test_reset_and_resume_end_node_sessions_and_keep_the_token(self):
+        self.run_('session.reset',{},True,session_key='desktop:a')
+        self.assertEqual(self.noeuds,[('rotation','desktop:a'),('fin',None),('jeton','desktop:a','jeton1')])
+        self.noeuds.clear()
+        self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:a')
+        self.assertEqual(self.noeuds[:2],[('rotation','desktop:a'),('fin',None)])
+
+    def test_node_session_end_needs_confirmation_and_reaches_the_hub(self):
+        self.assertIn('error',self.run_('node.session_end',{}))
+        self.assertEqual(self.run_('node.session_end',{'node_id':'pc'},True),{'success':True,'closed_nodes':['pc']})
+        self.assertEqual(self.noeuds[-1],('fin','pc'))
+
+    def test_without_node_hub_everything_still_works(self):
+        with patch.dict(sys.modules,{'core.node_hub':None}):
+            self.assertIn('session',self.run_('session.reset',{},True,session_key='desktop:a'))
+
+
 if __name__=='__main__':unittest.main()

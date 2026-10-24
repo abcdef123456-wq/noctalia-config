@@ -214,11 +214,17 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-La révision validée est `f522291`. Par rapport à `aae5b9b`, elle relaie dans Telegram la confirmation à distance de
+La révision validée est `4ecc57a`. Par rapport à `f522291`, elle envoie `confirm_unavailable` quand elle ne peut pas
+relayer la demande à distance (au lieu d'un refus automatique), contrôle `run_shell` et le nom exact du PC pour les
+commandes et les écritures de fichiers, impose `desktop:…` et des listes blanches de modes sur la route de gestion
+(l'overlay reprend ces contrôles et la fin de session des nœuds au reset), borne ses sessions AGY à 64 et garde un
+client HTTP par boucle d'événements, quatre au plus (l'overlay en fait des emprunts de son pool, jamais un second
+pool). `f522291`, `aae5b9b` et `64523e5` restent acceptées.
+
+`f522291`, par rapport à `aae5b9b`, relaie dans Telegram la confirmation à distance de
 `nc-noeud` (voir « Confirmer à distance ») : le code se tape en réponse au message même de la demande, et un chat qui
 attend déjà un code ne reçoit pas la suivante. Elle laisse 80 s aux actions des nœuds (`nc-noeud` en garde 60 pour
 « Autoriser ») et garde un seul client HTTP dans son gateway (l’overlay le fait passer par son pool de connexions).
-`aae5b9b` et `64523e5` restent acceptées.
 `aae5b9b` avait ajouté à `64523e5` le délai dans chaque demande d’action, `ENABLE_NODE_EXEC` vérifié aussi pour les
 commandes relayées, et le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce PC »).
 `64523e5` avait ajouté à `3d1c6b6` (choix en boutons, délais de 600 s, dictée côté serveur, accès Tailscale) :
@@ -230,12 +236,12 @@ commandes relayées, et le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce
 - **des nœuds plus sûrs** pour `nc-noeud` : la clé seulement dans l’en-tête, `ws://` refusé vers un hôte public,
   les commandes coupées par défaut (voir « Laisser JARVIS piloter ce PC »).
 
-Le déployeur installe la révision validée (`f522291`) sur un nouveau serveur, et accepte un serveur resté sur une
-révision validée plus ancienne (`aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà installé. Pour le
-faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
+Le déployeur installe la révision validée (`4ecc57a`) sur un nouveau serveur, et accepte un serveur resté sur une
+révision validée plus ancienne (`f522291`, `aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà
+installé. Pour le faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin f522291ca02af08903cbebd32203e14013dc80a6
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 4ecc57a8351fee610185b699b12c4b15092fe5ff
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 
@@ -247,7 +253,7 @@ interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env
 
 N’installe pas à la main les révisions intermédiaires `1ae55f3`, `8ff25c3` ou `4d279b6` : elles passent une clé de
 session à des fonctions que l’overlay d’avant `64523e5` ne connaissait pas, et chaque question finit en erreur 500.
-Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `f522291`. Il refuse aussi
+Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `4ecc57a`. Il refuse aussi
 les révisions entre `aae5b9b` et `f522291` (`d1b0280` à `9f4cdeb`) : la première version du relais à distance y
 remplaçait la demande en attente.
 
@@ -308,11 +314,10 @@ demander.
   `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
   vers un hôte public).
 - **Côté serveur**, dans son `.env` : `ENABLE_TOOL_NODES=1` active le module des nœuds, et `ENABLE_NODE_EXEC=1`
-  autorise les commandes de l’outil des nœuds (coupées par défaut depuis `64523e5`). **`ENABLE_NODE_EXEC=0` ne coupe
-  pas tout** : à `f522291`, `POST /api/node/{id}/action` avec `"action": "run_shell"` passe quand même (le serveur ne
-  vérifie que le nom `exec`, et `nc-noeud` lit `run_shell` comme `exec`), et `{id}` accepte un bout du nom du PC.
-  Il faut la clé secrète, mais la vraie protection est sur ce PC : `nc-noeud` demande toujours ton accord et refuse
-  sans réponse.
+  autorise les commandes de l’outil des nœuds (coupées par défaut depuis `64523e5`). Avant `4ecc57a`,
+  `ENABLE_NODE_EXEC=0` ne coupait pas tout (`run_shell` passait par `/api/node/{id}/action`, et `{id}` acceptait un
+  bout du nom du PC) : corrigé à `4ecc57a`. Sur une révision plus ancienne, la vraie protection reste sur ce PC : `nc-noeud` demande
+  toujours ton accord et refuse sans réponse.
 - **`TELEGRAM_ALLOWED_USER_IDS` est obligatoire** (ton identifiant Telegram ; jamais `ALLOW_ALL_USERS=1`) : le relais
   à distance n’envoie la demande qu’à ces personnes, et sans elles il la refuse.
 - **Le MCP `jarvis-nodes`** (`aae5b9b`) donne à agy des outils pour les nœuds (liste, fichiers, commande,
@@ -359,12 +364,12 @@ noté au journal, et JARVIS ne peut ni le lire ni l’écrire (chemin protégé)
 | `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui te la relaie ; tu réponds avec le code de l’appli, 6 chiffres sans espace. |
 | `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte (un refus si les deux arrivent ensemble) ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
 
-**Avec JARVIS-BIS `f522291`, choisis `ecran` ou `distance`, pas `les-deux`.** Quand il ne peut pas relayer la demande
-(`TELEGRAM_ALLOWED_USER_IDS` vide, ou une autre demande attend déjà un code dans le chat), ce serveur répond tout
-seul par un refus (`confirm_response` `deny`). `nc-noeud` ne peut pas le distinguer de ton « Refuser » : en
-`les-deux`, la carte se ferme alors que tu pouvais autoriser sur l’écran, et le journal note « refusé (distance) ».
-`nc-noeud` ne devine rien d’après le délai de la réponse. `les-deux` redevient sûr avec un serveur qui envoie
-`confirm_unavailable` (voir le protocole, point 3).
+**À partir de JARVIS-BIS `4ecc57a`, `les-deux` convient** : quand il ne peut pas relayer la demande
+(`TELEGRAM_ALLOWED_USER_IDS` vide, ou une autre demande attend déjà un code dans le chat), il envoie
+`confirm_unavailable` et la carte de l’écran reste ouverte (voir le protocole, point 3). **Avec `f522291` ou avant,
+choisis `ecran` ou `distance`, pas `les-deux`** : ces serveurs répondent tout seuls par un refus (`confirm_response`
+`deny`), que `nc-noeud` ne peut pas distinguer de ton « Refuser » : la carte se ferme alors que tu pouvais autoriser
+sur l’écran, et le journal note « refusé (distance) ». `nc-noeud` ne devine rien d’après le délai de la réponse.
 
 Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
 `nc-noeud totp creer`). Changer ce réglage, ou vérifier ou retirer le code, relance `nc-noeud` s’il tourne : le
@@ -395,8 +400,8 @@ taille n’est jamais envoyé.
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
    n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
    **Une seule `confirm_request` à la fois pour ce PC** : un serveur peut remplacer la demande montrée par la
-   nouvelle (JARVIS-BIS le faisait jusqu’à `9f4cdeb` ; corrigé à `f522291`, mais un autre serveur, ou plusieurs PC
-   sur le même chat, peuvent encore se croiser). Une autre action sensible attend donc
+   nouvelle (JARVIS-BIS le faisait jusqu’à `9f4cdeb` ; corrigé à `f522291`, et toujours à `4ecc57a`, mais un autre
+   serveur, ou plusieurs PC sur le même chat, peuvent encore se croiser). Une autre action sensible attend donc
    que la première soit décidée ou close (son `confirm_cancel` part avant) ; si son échéance passe avant, elle est
    refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file. De plus, quand
    une demande finit **sans** `allow` ni `deny` venus du téléphone (elle expire, elle est décidée sur l’écran en
@@ -432,13 +437,14 @@ taille n’est jamais envoyé.
    `"error_code": "remote_unavailable"`. Pas de période calme ensuite (la demande n’a été montrée à personne), pas
    compté comme un code faux, pas de `confirm_cancel`. Une seule réponse compte par `req_id`, `confirm_response` ou
    `confirm_unavailable` : la première ; une trame pour un `req_id` inconnu ou déjà décidé est ignorée et notée.
-   JARVIS-BIS `f522291` ne l’envoie pas encore (il répond `deny` tout seul) : d’où le conseil d’éviter `les-deux`.
+   JARVIS-BIS l’envoie depuis `4ecc57a` ; `f522291` répondait `deny` tout seul :
+   d’où le conseil d’éviter `les-deux` avec lui.
 4. Si la demande se termine sans réponse venue de là (décidée sur l’écran, expirée), `nc-noeud` envoie
    `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ses boutons.
 5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
 
-Ce que le serveur doit faire pour la relayer (JARVIS-BIS le fait dans Telegram depuis `f522291`, sauf
-`confirm_unavailable`) :
+Ce que le serveur doit faire pour la relayer (JARVIS-BIS le fait dans Telegram depuis `f522291`, avec
+`confirm_unavailable` depuis `4ecc57a`) :
 
 - envoyer `summary` tel quel, **en texte brut** (sans `parse_mode` Markdown ou HTML), seulement à l’utilisateur
   autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans un groupe, avec un bouton **Refuser** et une invite
@@ -483,7 +489,7 @@ n’y a pas encore de session.
   confirmée normalement. **Sois honnête sur ce que ça protège : ce PC ne vérifie que la connexion.** L’origine ne
   protège des autres entrées du serveur (API HTTP, MCP, un autre chat) **que si le serveur est honnête** et la renvoie
   fidèlement ; un serveur compromis peut mentir sur l’origine.
-- **Attention, avec JARVIS-BIS jusqu’à `062d1a1` compris, la session couvre en pratique TOUTE entrée du serveur.** Côté
+- **Attention, avec JARVIS-BIS jusqu’à `4ecc57a` compris, la session couvre en pratique TOUTE entrée du serveur.** Côté
   serveur, l’origine ne lie rien : les routes `/api/node/{id}/action`, `/exec`, `/read_file`, `/write_file` et
   `/api/action` acceptent `origin` ou `session_key` dans le **corps** de la requête, le serveur fabrique lui-même le
   jeton de la conversation à partir d’un `session_key`, et ce jeton est lisible par d’autres routes. Donc, pendant une
