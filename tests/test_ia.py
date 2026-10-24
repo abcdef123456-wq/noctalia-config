@@ -40,6 +40,7 @@ class Faux(http.server.BaseHTTPRequestHandler):
     requetes = []
     anthropic_refuse = False
     texte_ant = "Bonjour"                    # ce que « Claude » répond (un plan JSON pour nc-ia agir)
+    pendant = None                           # appelé pendant que « Claude » réfléchit (un réglage changé entre-temps)
 
     def log_message(self, *a):
         pass
@@ -74,6 +75,8 @@ class Faux(http.server.BaseHTTPRequestHandler):
         Faux.requetes.append(dict(chemin=self.path, entetes={k.lower(): v for k, v in self.headers.items()}, corps=corps))
         sse = lambda evs: "".join(f"data: {json.dumps(e)}\n\n" for e in evs)
         if self.path == "/ant/messages":
+            if Faux.pendant:
+                Faux.pendant()
             if Faux.anthropic_refuse:
                 return self.envoyer(401, json.dumps({"error": {"message": "invalid x-api-key"}}))
             return self.envoyer(200, "event: message_start\n" + sse([
@@ -112,6 +115,7 @@ class IA(unittest.TestCase):
         Faux.requetes.clear()
         Faux.anthropic_refuse = False
         Faux.texte_ant = "Bonjour"
+        Faux.pendant = None
         d = tempfile.TemporaryDirectory(prefix="nc-ia-")
         self.addCleanup(d.cleanup)
         self.home = Path(d.name)
@@ -651,6 +655,29 @@ class IA(unittest.TestCase):
         Faux.requetes.clear()
         self.lancer("organiser")
         self.assertFalse(Faux.requetes, "IA coupée : rien ne part")
+
+    def test_ranger_coupe_pendant_la_reponse(self):
+        """Revue B2-03 : les réglages étaient lus avant de demander à l'IA, le rangement fait après : l'IA coupée (ou le
+        rangement, ou les fenêtres) pendant qu'elle réfléchissait, les fenêtres bougeaient quand même."""
+        clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [0, 0], "size": [800, 600]}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'workspaces) echo \'[{"id": 1, "name": "1", "windows": 0}, {"id": 2, "name": "2", "windows": 1}]\';; activeworkspace) echo \'{"id": 2}\';; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [{"outil": "fenetre_bureau", "args": {"adresse": "0xa1", "bureau": 1}}]})
+        for coupure in ("IA_MODE=non", "IA_ORGANISER=non", "IA_GERER_FENETRES=non"):
+            with self.subTest(coupure=coupure):
+                if self.journal.exists():
+                    self.journal.unlink()
+                self.reglages("IA_PREFERENCE=rapide\n")
+                Faux.pendant = lambda c=coupure: self.reglages(f"IA_PREFERENCE=rapide\n{c}\n")
+                r = self.lancer("organiser")
+                self.assertEqual(r.returncode, 3, r.stderr)
+                a = self.appels()
+                self.assertTrue(Faux.requetes, "l'IA a bien été appelée avant la coupure")
+                self.assertNotIn("dispatch", a)
+                self.assertNotIn("hyprctl eval  hl.dispatch", a)
+                self.assertNotIn("Fenêtres rangées", a)
+                self.assertIn("notify", a.splitlines()[-1], "la coupure est dite")
 
     def test_ranger_ce_bureau_en_zones_libres(self):
         """Super + Ctrl + O sur un Hyprland sans dispositions en Lua : chaque fenêtre dans sa zone (pourcentages de la

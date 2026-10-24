@@ -2242,6 +2242,13 @@ def ranger(bureau_seul):
     except ErreurIA as e:
         dire(titre, T("Rangement impossible : ", "Could not tidy: ") + str(e)[:200])
         return 1
+    # Coupé pendant que l'IA réfléchissait (IA, rangement, ou fenêtres et bureaux) : rien ne bouge (revue B2-03)
+    global _reglages
+    _reglages = None
+    if coupee() or reglage("IA_ORGANISER", "auto") == "non" or reglage("IA_GERER_FENETRES", "oui") == "non":
+        dire(titre, message_coupee() if coupee() else T("Coupé pendant la réponse de l'IA : rien n'a bougé.",
+                                                         "Turned off during the AI's answer: nothing moved."))
+        return 3
     d = lire_json(rep)
     valides = []
     for a in (d.get("actions") or [])[:12]:
