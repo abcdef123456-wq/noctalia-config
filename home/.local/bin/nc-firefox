@@ -8,13 +8,15 @@
   nc-firefox desinstaller  retire ce que nc-firefox a posé (rien d'autre), remet user.js.avant-nc s'il existe
   nc-firefox couleurs      écrit chrome/nc-couleurs.css depuis la palette de l'île (~/.config/nc/palette-ile.json) ;
                            appelé par nc-theme-sync à chaque fond d'écran, sans effet tant que rien n'est installé
-  nc-firefox etat          0 si la config est en place dans le profil, 1 sinon
+  nc-firefox etat          0 si la config est en place dans le profil, 1 sinon ; dit « hôte natif introuvable »
+                           si l'extension est posée mais que Firefox ne peut pas lancer son hôte
 
   nc-firefox extension installer | desinstaller | etat
       L'extension « Couleurs de l'île » : le thème de Firefox suit en direct les couleurs du fond d'écran, sans
       relancer (réglage FIREFOX_COULEURS de nc-reglages → Apparence). Elle est posée dans extensions/ du profil
       (chargée au prochain démarrage de Firefox, activée d'elle-même) avec son hôte natif (ce script, déclaré dans
-      native-messaging-hosts). Non signée : Firefox Developer Edition, Nightly et ESR l'acceptent
+      ~/.mozilla/native-messaging-hosts, où Firefox le cherche même quand les profils sont rangés dans
+      ~/.config/mozilla ; Flatpak et Snap : le dossier de leur .mozilla). Non signée : Firefox Developer Edition, Nightly et ESR l'acceptent
       (xpinstall.signatures.required à faux) ; avec la version grand public (Fedora, Snap d'Ubuntu, Flatpak),
       l'installation est refusée (code 4) au lieu de poser une extension que Firefox rejetterait.
 
@@ -227,6 +229,7 @@ def desinstaller(p):
 
 
 def etat(p):
+    extension_etat(p, dire=True)
     return 0 if all(pose_par_nc(p / rel) for rel in FICHIERS) else 1
 
 
@@ -249,26 +252,28 @@ def couleurs(p):
     if not pose_par_nc(p / "chrome/userChrome.css"):
         return 0
     f = p / "chrome/nc-couleurs.css"
-    if extension_etat(p) == 0:
-        # L'extension « Couleurs de l'île » donne déjà les couleurs à Firefox, en direct : des variables figées ici (lues
-        # seulement au démarrage) masqueraient les nouvelles après un changement de fond. Le style suit alors le thème.
-        css = (f"/* {MARQUE} : l'extension « Couleurs de l'île » donne les couleurs en direct ; rien de figé ici. */\n")
-        if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
-            f.write_text(css, encoding="utf-8")
-        return 0
     pal = lire_palette()
-    if not pal:
-        return 0
     paires = [("fond", "fond"), ("carte", "carte"), ("carte-survol", "carteSurvol"), ("accent", "accent"),
               ("texte", "texte"), ("texte-sec", "texteSec")]
-    lignes = [f"  --nc-couleur-{nom}: {pal[cle]};" for nom, cle in paires if cle in pal]
+    lignes = [f"  --nc-couleur-{nom}: {pal[cle]};" for nom, cle in paires if pal and cle in pal]
     if not lignes:
         return 0
     # Seulement si le thème de Firefox (sombre, clair ou système) est du même côté que le fond d'écran : avec un thème
     # clair sur un fond sombre, les barres gardent les couleurs du thème de Firefox et seulement la forme de l'île
-    css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
-           "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
-           f"@media (prefers-color-scheme: {'dark' if pal['sombre'] else 'light'}) {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
+    media = f"@media (prefers-color-scheme: {'dark' if pal['sombre'] else 'light'})"
+    if extension_etat(p) == 0:
+        # Filet de sécurité : l'extension « Couleurs de l'île » donne les couleurs en direct, mais si son hôte ne
+        # répond pas (Flatpak, Snap, dossier d'hôtes changé), il ne resterait aucune couleur. Les variables restent
+        # donc, sous :root:not([lwtheme]) : dès que l'extension pose son thème, Firefox met l'attribut lwtheme sur la
+        # fenêtre et ces variables figées s'effacent devant le thème en direct.
+        css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs). Filet de sécurité : l'extension « Couleurs de l'île »\n"
+               "   donne les couleurs en direct (thème dynamique, attribut lwtheme) et ces variables ne servent alors plus ;\n"
+               "   sans elle (hôte natif absent), elles donnent les couleurs du fond d'écran au démarrage. */\n"
+               f"{media} {{\n  :root:not([lwtheme]) {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
+    else:
+        css = (f"/* {MARQUE} : écrit par nc-theme-sync (nc-firefox couleurs), les couleurs du fond d'écran. Ne pas modifier :\n"
+               "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
+               f"{media} {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
     if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
         f.write_text(css, encoding="utf-8")
     return 0
@@ -277,10 +282,55 @@ def couleurs(p):
 # ── Extension « Couleurs de l'île » ───────────────────────────────────────────
 
 def dossiers_hotes(p):
-    """Où Firefox cherche les hôtes natifs de l'utilisateur : à côté de profiles.ini (jamais ~/.mozilla créé de
-    toutes pièces : Firefox y chercherait alors ses profils)."""
-    base = p.parent.parent          # …/mozilla/firefox/<profil> → …/mozilla
-    return [base / "native-messaging-hosts"]
+    """Où Firefox cherche les hôtes natifs de l'utilisateur : ~/.mozilla/native-messaging-hosts, MÊME quand les profils
+    sont rangés à la façon XDG (~/.config/mozilla/firefox) ; il ne lit ni $XDG_CONFIG_HOME/mozilla/native-messaging-hosts
+    ni celui de XDG_DATA_HOME (mesuré avec Firefox 159). Un ~/.mozilla qui ne contient que ce dossier ne fait pas
+    chercher les profils là. Flatpak et Snap (profil dans …/.mozilla/firefox) : le .mozilla voisin du profil."""
+    base = p.parent.parent          # …/.mozilla/firefox/<profil> → …/.mozilla
+    if base.name == ".mozilla":
+        return [base / "native-messaging-hosts"]
+    return [HOME / ".mozilla/native-messaging-hosts"]
+
+
+def hote_pose_par_nc(f):
+    try:
+        m = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(m, dict) and m.get("name") == HOTE and str(m.get("description", "")).startswith("Couleurs de l'île")
+
+
+def retirer_anciens_hotes(p):
+    """Avant, le manifeste était posé à côté de profiles.ini (…/mozilla/native-messaging-hosts), où Firefox ne le lit
+    pas : retiré s'il est de nc-firefox, avec le dossier s'il est resté vide."""
+    nouveaux = set(dossiers_hotes(p))
+    ancien = p.parent.parent / "native-messaging-hosts"
+    if ancien in nouveaux:
+        return
+    f = ancien / (HOTE + ".json")
+    if f.is_file() and hote_pose_par_nc(f):
+        f.unlink()
+        try:
+            ancien.rmdir()
+        except OSError:
+            pass
+
+
+def hote_manquant(p):
+    """Un texte si l'extension est posée mais que Firefox ne peut pas lancer son hôte natif, sinon None."""
+    if extension_etat(p) != 0:
+        return None
+    for d in dossiers_hotes(p):
+        f = d / (HOTE + ".json")
+        try:
+            chemin = Path(json.loads(f.read_text(encoding="utf-8"))["path"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if chemin.is_file() and os.access(chemin, os.X_OK):
+            return None
+        return f"hôte natif cassé : {f} vise {chemin}, qui n'existe pas ou n'est pas exécutable (relance : nc-firefox extension installer)"
+    return (f"hôte natif introuvable : pas de {HOTE}.json dans {dossiers_hotes(p)[0]}, l'extension « Couleurs de l'île » "
+            "ne reçoit aucune couleur (relance : nc-firefox extension installer)")
 
 
 def accepte_non_signee(p):
@@ -319,6 +369,7 @@ def extension_installer(p):
     for d in dossiers_hotes(p):
         d.mkdir(parents=True, exist_ok=True)
         (d / (HOTE + ".json")).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    retirer_anciens_hotes(p)
     if pose_par_nc(p / "user.js") or not (p / "user.js").exists():
         if not pose_par_nc(p / "user.js"):
             installer(p)
@@ -338,6 +389,7 @@ def extension_desinstaller(p, silencieux=False, complet=False):
         f = d / (HOTE + ".json")
         if f.is_file():
             f.unlink()
+    retirer_anciens_hotes(p)
     if complet:
         return 0
     if pose_par_nc(p / "user.js"):
@@ -348,8 +400,12 @@ def extension_desinstaller(p, silencieux=False, complet=False):
     return 0
 
 
-def extension_etat(p):
-    return 0 if (p / "extensions" / (EXTENSION_ID + ".xpi")).is_file() else 1
+def extension_etat(p, dire=False):
+    if not (p / "extensions" / (EXTENSION_ID + ".xpi")).is_file():
+        return 1
+    if dire and (m := hote_manquant(p)):
+        print(f"nc-firefox : {m}", file=sys.stderr)
+    return 0
 
 
 def hote():
@@ -408,6 +464,8 @@ def main(argv):
             print(__doc__.strip(), file=sys.stderr)
             return 2
         p = profil()
+        if sous == "etat" and p:
+            return extension_etat(p, dire=True)
         return fn(p) if p else 1
     action = ACTIONS.get(argv[0], argv[0]) if argv else "profil"
     if action not in ("profil", "installer", "desinstaller", "couleurs", "etat"):

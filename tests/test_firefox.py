@@ -120,11 +120,12 @@ class Firefox(unittest.TestCase):
         with zipfile.ZipFile(xpi) as z:
             self.assertEqual(sorted(z.namelist()), ["fond.js", "manifest.json"])
             self.assertEqual(json.loads(z.read("manifest.json"))["browser_specific_settings"]["gecko"]["id"], "nc-couleurs@noctalia-config")
-        hote = self.base.parent / "native-messaging-hosts/nc_firefox.json"
+        hote = self.home / ".mozilla/native-messaging-hosts/nc_firefox.json"
         m = json.loads(hote.read_text())
         self.assertEqual((m["name"], m["type"], m["allowed_extensions"]), ("nc_firefox", "stdio", ["nc-couleurs@noctalia-config"]))
         self.assertTrue(m["path"].endswith("/.local/bin/nc-firefox"))
-        self.assertFalse((self.home / ".mozilla").exists(), "jamais de ~/.mozilla créé de toutes pièces")
+        self.assertFalse((self.base.parent / "native-messaging-hosts").exists(), "pas à côté de profiles.ini : Firefox ne l'y lit pas")
+        self.assertFalse((self.home / ".mozilla/firefox").exists(), "~/.mozilla ne contient que l'hôte : Firefox garde ses profils XDG")
         user = (p / "user.js").read_text()
         self.assertTrue(user.startswith((SOURCE / "user.js").read_text()), "user.js = celui du dépôt…")
         self.assertIn('user_pref("xpinstall.signatures.required", false);', user, "… plus le bloc de l'extension")
@@ -221,7 +222,11 @@ class Firefox(unittest.TestCase):
         (p / "extensions").mkdir(exist_ok=True)
         (p / "extensions/nc-couleurs@noctalia-config.xpi").write_bytes(b"PK")   # extension posée
         self.assertEqual(self.lancer("couleurs").returncode, 0)
-        self.assertNotIn("--nc-couleur", (p / "chrome/nc-couleurs.css").read_text())
+        # Filet de sécurité : la palette reste, mais seulement tant qu'aucun thème dynamique n'est posé (lwtheme)
+        figees = (p / "chrome/nc-couleurs.css").read_text()
+        self.assertIn(":root:not([lwtheme])", figees)
+        self.assertIn("--nc-couleur-fond: #101010;", figees)
+        self.assertIn("--nc-couleur-texte: #eeeeee;", figees)
         css = (REPO / "home/.local/share/nc/firefox/chrome/userChrome.css").read_text()
         self.assertIn("var(--toolbar-field-border-color-focus, var(--toolbar-field-focus-border-color, AccentColor))", css,
                       "l'accent suit le thème en direct")
@@ -229,6 +234,51 @@ class Firefox(unittest.TestCase):
         self.assertIn("#urlbar > .urlbar-background", css)
         self.assertIn("#urlbar[focused]:not([popover-open]) > .urlbar-background", css)
         self.assertIn("var(--toolbar-background-color, var(--toolbox-background-color, var(--toolbar-bgcolor, Canvas)))", css)
+
+    def test_hote_dans_mozilla_ancien_retire(self):
+        """Firefox lit les hôtes dans ~/.mozilla/native-messaging-hosts même avec des profils XDG ; l'ancien manifeste
+        posé à côté de profiles.ini est retiré s'il est de nc-firefox (et seulement lui)."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        ancien = self.base.parent / "native-messaging-hosts"
+        ancien.mkdir()
+        autre = ancien / "autre_hote.json"
+        autre.write_text(json.dumps({"name": "autre_hote"}))
+        (ancien / "nc_firefox.json").write_text(json.dumps({"name": "nc_firefox", "description": "Couleurs de l'île (noctalia-config) : x"}))
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        self.assertTrue((self.home / ".mozilla/native-messaging-hosts/nc_firefox.json").is_file())
+        self.assertFalse((ancien / "nc_firefox.json").exists(), "l'ancien manifeste de nc-firefox est retiré")
+        self.assertTrue(autre.is_file(), "celui d'un autre n'est pas touché")
+        # Un nc_firefox.json qui n'est pas le nôtre reste
+        (ancien / "nc_firefox.json").write_text(json.dumps({"name": "nc_firefox", "description": "à quelqu'un d'autre"}))
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        self.assertTrue((ancien / "nc_firefox.json").is_file())
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertFalse((self.home / ".mozilla/native-messaging-hosts/nc_firefox.json").exists(), "desinstaller retire tout")
+
+    def test_hote_introuvable_signale(self):
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        (self.home / ".local/bin").mkdir(parents=True)
+        (self.home / ".local/bin/nc-firefox").symlink_to(SCRIPT)       # le chemin que vise le manifeste
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        r = self.lancer("extension", "etat")
+        self.assertEqual((r.returncode, r.stderr), (0, ""), "tout est en place : rien à dire")
+        (self.home / ".mozilla/native-messaging-hosts/nc_firefox.json").unlink()
+        for args in (("extension", "etat"), ("etat",)):
+            self.assertIn("hôte natif introuvable", self.lancer(*args).stderr)
+        self.assertEqual(self.lancer("extension", "etat").returncode, 0, "l'extension est bien posée : le code ne change pas")
+        # Sans l'extension : rien à signaler
+        (p / "extensions/nc-couleurs@noctalia-config.xpi").unlink()
+        self.assertNotIn("hôte", self.lancer("etat").stderr)
+
+    def test_hote_profil_dans_mozilla(self):
+        """Profils à l'ancienne (~/.mozilla/firefox) : même dossier d'hôtes."""
+        base = self.home / ".mozilla/firefox"
+        (base / "x.p").mkdir(parents=True)
+        (base / "x.p/prefs.js").write_text("")
+        (base / "profiles.ini").write_text("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n")
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        self.assertTrue((self.home / ".mozilla/native-messaging-hosts/nc_firefox.json").is_file())
 
     def test_suggestions_lisibles(self):
         """La liste de la barre d'adresse (la recherche) : couleurs de la palette, jamais celles du thème GTK (lien à
@@ -552,3 +602,33 @@ const done = arguments[arguments.length - 1];
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+
+    def test_hote_introuvable_avertit_une_fois(self):
+        code = r'''
+const fs = require("fs"), vm = require("vm"), assert = require("node:assert/strict");
+const ecouteurs = {}, avert = [], minuteurs = [];
+const ev = (nom) => ({ addListener: (f) => { ecouteurs[nom] = f; } });
+const port = { onMessage: ev("message"), onDisconnect: ev("deconnexion"), postMessage: () => {} };
+const browser = {
+  runtime: { connectNative: () => port },
+  management: { getAll: async () => [], onEnabled: ev("on"), onDisabled: ev("off") },
+  theme: { update: () => {}, reset: () => {}, onUpdated: ev("maj") },
+};
+const ctx = { browser, setTimeout: (f) => minuteurs.push(f), Date, console: { warn: (m) => avert.push(m) } };
+vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), ctx);
+const etat = () => ctx.ncEtat;
+// Firefox coupe aussitôt la liaison quand l'hôte est absent
+ecouteurs.deconnexion({ error: { message: "No such native application nc_firefox" } });
+assert.equal(etat().hote, "introuvable");
+assert.match(etat().erreur, /No such native application/);
+assert.equal(avert.length, 1);
+assert.match(avert[0], /\.mozilla\/native-messaging-hosts/);
+minuteurs.shift()();                       // nouvel essai
+ecouteurs.deconnexion({ error: { message: "No such native application nc_firefox" } });
+assert.equal(avert.length, 1, "pas de répétition à chaque essai");
+assert.equal(etat().tentatives, 2);
+ecouteurs.message({ palette: { fond: "#101010" } });
+assert.equal(etat().hote, "palette reçue");
+'''
+        r = subprocess.run(["node", "-e", code, str(SOURCE / "extension/fond.js")], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0, r.stderr)

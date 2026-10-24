@@ -286,8 +286,9 @@ rouverte, sans contenu sponsorisé ni télémétrie) avec le style de l’île (
 d’adresse en pastilles, aux couleurs du fond d’écran quand le thème de Firefox est du même côté, sombre ou clair).
 Relance Firefox ensuite ; `nc-firefox desinstaller` remet tout comme avant. Pour que le thème de Firefox suive le fond
 d’écran **en direct**, le réglage « Firefox aux couleurs du fond d’écran » (nc-reglages → Apparence) pose une petite
-extension non signée (Developer Edition, Nightly ou ESR) reliée à `nc-firefox` par la messagerie native ; un thème
-choisi dans Firefox reste prioritaire. Les fichiers : `home/.local/share/nc/firefox/`.
+extension non signée (Developer Edition, Nightly ou ESR) reliée à `nc-firefox` par la messagerie native (son manifeste va dans
+`~/.mozilla/native-messaging-hosts`, où Firefox le cherche même avec des profils dans `~/.config/mozilla` ; `nc-firefox etat`
+dit « hôte natif introuvable » s'il manque) ; un thème choisi dans Firefox reste prioritaire. Les fichiers : `home/.local/share/nc/firefox/`.
 
 Ces fichiers sont à toi : `install.sh` ne les remplace jamais.
 

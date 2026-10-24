@@ -109,20 +109,46 @@ function theme(p) {
   };
 }
 
+// État consultable (console de l'extension : about:debugging → Cette version de Firefox → Inspecter) :
+// ncEtat.hote vaut « attente », « connecté », « palette reçue » ou « introuvable » (avec ncEtat.erreur).
+const ncEtat = { hote: "attente", erreur: null, tentatives: 0 };
+globalThis.ncEtat = ncEtat;
+let dernierAvertissement = null;
+
+function signaler(erreur) {
+  ncEtat.hote = "introuvable";
+  ncEtat.erreur = erreur;
+  // Un seul avertissement par erreur : le nouvel essai toutes les 15 s ne remplit pas la console
+  if (dernierAvertissement !== erreur) {
+    dernierAvertissement = erreur;
+    console.warn("Couleurs de l'île : hôte natif " + HOTE + " introuvable ou arrêté (" + erreur + "). " +
+      "Le manifeste doit être dans ~/.mozilla/native-messaging-hosts/" + HOTE + ".json (nc-firefox extension installer).");
+  }
+}
+
 function connecter() {
+  ncEtat.tentatives++;
   try {
     port = browser.runtime.connectNative(HOTE);
   } catch (e) {
+    signaler(String((e && e.message) || e));
     setTimeout(connecter, 15000);
     return;
   }
+  ncEtat.hote = "connecté";
   port.onMessage.addListener((m) => {
     if (m && typeof m === "object" && m.palette) {
       palette = m.palette;
+      ncEtat.hote = "palette reçue";
+      ncEtat.erreur = null;
+      dernierAvertissement = null;
       appliquer();
     }
   });
-  port.onDisconnect.addListener(() => {
+  port.onDisconnect.addListener((p) => {
+    // Hôte absent : Firefox ne lève rien, il coupe aussitôt la liaison avec une erreur (« No such native application »)
+    const err = (p && p.error && p.error.message) || (browser.runtime.lastError && browser.runtime.lastError.message);
+    if (ncEtat.hote !== "palette reçue" || err) signaler(err || "liaison coupée avant toute palette");
     port = null;
     setTimeout(connecter, 15000);
   });
