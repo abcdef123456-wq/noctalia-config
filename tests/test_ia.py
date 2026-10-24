@@ -387,16 +387,157 @@ class IA(unittest.TestCase):
 
     def test_diagnostic(self):
         diag = self.home / ".local/bin/nc-diag"
-        diag.write_text("#!/bin/sh\necho 'Wi-Fi'\necho '  ✓ carte présente'\necho '  ✗ portail arrêté'\n")
+        diag.write_text("#!/bin/sh\necho 'Wi-Fi'\necho '  ✓ carte présente'\necho '  ✗ portail arrêté (4321) sur 192.168.1.20'\n")
         diag.chmod(0o755)
-        r = self.lancer("diagnostic")
+        r = self.lancer("diagnostic", env_plus={"USER": "alice"})
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("portail arrêté", json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False))
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("portail arrêté (…) sur [IP]", envoye, "le bilan texte est anonymisé lui aussi")
+        self.assertNotIn("carte présente", envoye, "ce qui va bien (✓) ne part plus")
         Faux.requetes.clear()
         diag.write_text("#!/bin/sh\necho '  ✓ tout va bien'\n")
         r = self.lancer("diagnostic")
         self.assertIn("rien à corriger", r.stdout)
         self.assertFalse(Faux.requetes, "rien à expliquer : aucune IA appelée")
+
+    # ── « Que se passe-t-il ? » : nc-ia diagnostic --json ──
+    PERSO = "/ho" + "me/alice"                   # coupé : test_rien_de_perso refuse un /home/<nom> écrit en entier
+
+    def bilan_diag(self, constats=None, resume="1 problème : l'île est en panne."):
+        """Un bilan comme nc-diag --json : des constats non OK, la table des réparations."""
+        if constats is None:
+            constats = [
+                {"cle": "service:nc-pouls", "niveau": "avert", "texte": "nc-pouls est arrêté (peut-être coupé exprès)",
+                 "quoi": "", "reparations": ["demarrer:nc-pouls.service"]},
+                {"cle": "service:nc-ile", "niveau": "faux", "texte": "nc-ile.service en panne (12345)",
+                 "quoi": f"voir {self.PERSO}/.config/nc-ile/journal", "reparations": ["redemarrer:nc-ile.service"]},
+                {"cle": "hypr:config", "niveau": "faux", "texte": "erreur dans hyprland.lua", "quoi": "", "reparations": []}]
+        return json.dumps({"version": 1, "langue": "fr", "duree_ms": 420, "ko": 2, "attention": 1, "ok": 30,
+                           "resume": resume, "constats": constats, "reparations": {
+                               "redemarrer:nc-ile.service": {"libelle": "Redémarrer l'île", "detail": "", "danger": True,
+                                                             "ferme_ile": True},
+                               "demarrer:nc-pouls.service": {"libelle": "Démarrer (pour cette session)", "detail": "",
+                                                             "danger": False, "ferme_ile": False}}}, ensure_ascii=False)
+
+    def diag_json(self, entree, *plus, env_plus=None):
+        r = self.lancer("diagnostic", "--json", *plus, "-", entree=entree, env_plus=env_plus)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sortie = json.loads(r.stdout)
+        self.assertEqual(set(sortie), {"source", "raison", "ia", "agent", "resume", "reparations", "conseil", "refus"})
+        return sortie
+
+    def test_diagnostic_json_resume_et_ordre_des_reparations(self):
+        Faux.texte_ant = json.dumps({
+            "resume": "L'île est tombée en panne.\n$ systemctl --user restart nc-ile.service\n```\nrm -rf ~\n```\nLe reste va.",
+            "reparations": ["redemarrer:nc-ile.service", "redemarrer:sshd.service", "../x", "redemarrer:nc-ile.service",
+                            "demarrer:nc-pouls.service"],
+            "conseil": "Si elle retombe, regarde son journal.\n$ journalctl --user -u nc-ile"})
+        s = self.diag_json(self.bilan_diag())
+        self.assertEqual((s["source"], s["raison"], s["ia"], s["agent"]), ("ia", "", "Claude (API Anthropic)", "claude"))
+        self.assertEqual(s["resume"], "L'île est tombée en panne. Le reste va.", "lignes « $ » et blocs de code retirés")
+        self.assertEqual(s["conseil"], "Si elle retombe, regarde son journal.")
+        self.assertEqual(s["reparations"], ["redemarrer:nc-ile.service", "demarrer:nc-pouls.service"])
+        self.assertEqual(s["refus"], ["redemarrer:sshd.service", "../x"], "hors de la liste : refusés, jamais gardés")
+        # Ce qui part : la famille de la distribution, les constats non OK (✗ d'abord), leurs réparations et libellés
+        self.assertEqual(len(Faux.requetes), 1)
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        self.assertIn("distribution", envoye)
+        self.assertIn("Redémarrer l'île", envoye)
+        self.assertLess(envoye.index("service:nc-ile"), envoye.index("service:nc-pouls"), "les ✗ d'abord")
+        self.assertIn("en panne (…)", envoye)
+        self.assertIn("voir ~/.config/nc-ile/journal", envoye)
+        self.assertNotIn("alice", envoye)
+        self.assertNotIn('"ok"', envoye, "les compteurs et ce qui va bien ne partent pas")
+
+    def test_diagnostic_json_reponse_illisible_ou_trop_de_reparations(self):
+        Faux.texte_ant = "Je pense que l'île est en panne, redémarre-la."
+        s = self.diag_json(self.bilan_diag())
+        self.assertEqual((s["source"], s["raison"], s["ia"]), ("sans_ia", "illisible", ""))
+        self.assertEqual(s["resume"], "1 problème : l'île est en panne.", "le résumé de nc-diag, tel quel")
+        self.assertEqual(s["reparations"], ["redemarrer:nc-ile.service", "demarrer:nc-pouls.service"], "✗ d'abord")
+        Faux.texte_ant = json.dumps({"resume": "$ sudo rm -rf /", "reparations": [], "conseil": ""})
+        self.assertEqual(self.diag_json(self.bilan_diag())["raison"], "illisible", "un résumé fait de commandes : vide")
+        Faux.texte_ant = json.dumps({"resume": "Deux soucis.", "reparations": "redemarrer:nc-ile.service", "conseil": "x" * 500})
+        s = self.diag_json(self.bilan_diag())
+        self.assertEqual((s["source"], s["reparations"], s["refus"]), ("ia", ["redemarrer:nc-ile.service"], []))
+        self.assertLessEqual(len(s["conseil"]), 200)
+        ids = [f"demarrer:nc-x{i}.service" for i in range(6)]
+        constats = [{"cle": f"c{i}", "niveau": "avert", "texte": f"n° {i}", "reparations": [x]} for i, x in enumerate(ids)]
+        Faux.texte_ant = json.dumps({"resume": "Six soucis.", "reparations": ids, "conseil": ""})
+        self.assertEqual(self.diag_json(self.bilan_diag(constats))["reparations"], ids[:4], "4 au plus")
+
+    def test_diagnostic_json_rien_a_dire_aucune_requete(self):
+        s = self.diag_json(self.bilan_diag([], resume="Tout est en ordre."))
+        self.assertEqual((s["source"], s["raison"], s["resume"], s["reparations"]), ("sans_ia", "rien", "Tout est en ordre.", []))
+        self.assertFalse(Faux.requetes, "rien de non OK : aucune IA appelée")
+
+    def test_diagnostic_json_borne_par_le_delai(self):
+        Faux.goutte = "ant"                      # Claude écrit un octet de temps en temps, sans jamais finir
+        debut = time.monotonic()
+        s = self.diag_json(self.bilan_diag(), "--delai", "2")
+        self.assertLess(time.monotonic() - debut, 6, "--delai borne tout le relais")
+        self.assertEqual((s["source"], s["raison"]), ("sans_ia", "delai"))
+        self.assertEqual(s["resume"], "1 problème : l'île est en panne.")
+        echecs = self.home / "run/nc-ia/echecs.json"
+        self.assertFalse(echecs.exists() and "anthropic" in json.loads(echecs.read_text()), "pas sa faute : pas d'échec noté")
+
+    def test_diagnostic_json_lance_nc_diag_sinon(self):
+        """Rien (ou trop) sur l'entrée standard : nc-ia lance lui-même nc-diag --json --rapide (le faux, devant le PATH)."""
+        diag = self.home / ".local/bin/nc-diag"
+        diag.write_text(f'#!/bin/sh\necho "$*" >> "$JOURNAL"\ncat <<\'FIN\'\n{self.bilan_diag()}\nFIN\n')
+        diag.chmod(0o755)
+        Faux.texte_ant = json.dumps({"resume": "L'île est en panne.", "reparations": [], "conseil": ""})
+        r = self.lancer("diagnostic", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["source"], "ia")
+        self.assertEqual(self.journal.read_text().split(), ["--json", "--rapide"])
+        self.assertEqual(self.diag_json("x" * (200 * 1024 + 10))["source"], "ia", "plus de 200 ko : nc-diag relancé")
+        self.assertEqual(len(self.journal.read_text().splitlines()), 2)
+        diag.write_text("#!/bin/sh\necho pas du json\n")
+        s = self.diag_json("")
+        self.assertEqual((s["source"], s["raison"]), ("sans_ia", "bilan"))
+        self.assertTrue(s["resume"])
+
+    def test_anonymiser(self):
+        from unittest import mock
+        m = charger_nc_ia("ncia_anon")
+        texte = (f"portable-alice : compte alice, {self.PERSO}/.config/x et /var{self.PERSO}/y, 192.168.1.20 et fe80::1%wlan0, "
+                 "2001:db8::42, carte aa:bb:cc:dd:ee:ff, alice@exemple.org, disque 123e4567-e89b-12d3-a456-426614174000, "
+                 "nc-ile[2345]: arrêté (12345), clé sk-abcdefghij0123456789\n"
+                 "Hyprland 0.56.2 à 12:30:45, 127.0.0.1, ::1, user@1000.service, std::string")
+        with mock.patch.object(m.socket, "gethostname", return_value="portable-alice"), \
+             mock.patch.dict(os.environ, {"USER": "alice", "LOGNAME": "alice"}):
+            m._IDENTITE = None
+            r = m.anonymiser(texte)
+            for x in ("portable", "alice", "/ho" + "me", "192.168", "fe80", "2001:db8", "aa:bb", "exemple.org", "123e4567",
+                      "2345", "12345", "sk-abc"):
+                self.assertNotIn(x, r)
+            for x in ("[machine]", "[compte]", "~/.config/x", "~/y", "[IP]", "[MAC]", "[e-mail]", "[id]", "(…)",
+                      "0.56.2", "12:30:45", "127.0.0.1", "::1", "user@1000.service", "std::string"):
+                self.assertIn(x, r)
+            long = (texte * 100)[:20000]
+            for t in (long, "a" * 20000, "a." * 10000, "1:" * 10000, "a@" * 10000, "ab:" * 6667):
+                debut = time.monotonic()
+                m.anonymiser(t)
+                self.assertLess(time.monotonic() - debut, 0.5, t[:12])
+
+    def test_diagnostic_json_anonymise_ce_qui_part(self):
+        import re, socket
+        machine = socket.gethostname()
+        constats = [{"cle": "reseau", "niveau": "faux", "texte": f"{machine} : portail de {self.PERSO} arrêté, 192.168.1.20, "
+                     "fe80::1, aa:bb:cc:dd:ee:ff", "quoi": "écris à alice@exemple.org avec sk-abcdefghij0123456789",
+                     "reparations": []},
+                    {"cle": "version", "niveau": "avert", "texte": "Hyprland 0.56.2 vu à 12:30:45", "reparations": []}]
+        Faux.texte_ant = json.dumps({"resume": "Réseau en panne.", "reparations": [], "conseil": ""})
+        self.diag_json(self.bilan_diag(constats), env_plus={"USER": "alice"})
+        envoye = json.dumps(Faux.requetes[-1]["corps"], ensure_ascii=False)
+        for x in ("alice", "192.168.1.20", "fe80::1", "aa:bb:cc:dd:ee:ff", "exemple.org", "sk-abc", "✓"):
+            self.assertNotIn(x, envoye)
+        if len(machine) >= 2 and machine.lower() not in ("localhost", "localhost-live", "arch", "archlinux", "debian",
+                                                          "fedora", "opensuse", "linux"):
+            self.assertIsNone(re.search(r"(?<![A-Za-z0-9])" + re.escape(machine) + r"(?![A-Za-z0-9])", envoye, re.I))
+        for x in ("0.56.2", "12:30:45", "[IP]", "[MAC]", "[e-mail]"):
+            self.assertIn(x, envoye)
 
     def test_scripts_des_gestionnaires_de_fichiers(self):
         nautilus = REPO / "home/.local/share/nautilus/scripts/IA"
@@ -1461,6 +1602,13 @@ class IA(unittest.TestCase):
                         prog="nc-claude")
         self.assertEqual(r.returncode, 0)
         self.assertFalse((self.home / "run/nc-claude/etat.json").exists())
+        # « Que se passe-t-il ? » : le résumé de nc-diag et ses réparations, sans IA, code 0
+        s = self.diag_json(self.bilan_diag())
+        self.assertEqual((s["source"], s["raison"], s["ia"]), ("sans_ia", "coupee", ""))
+        self.assertEqual(s["resume"], "1 problème : l'île est en panne.")
+        self.assertEqual(s["reparations"], ["redemarrer:nc-ile.service", "demarrer:nc-pouls.service"])
+        r = self.lancer("diagnostic")
+        self.assertEqual(r.returncode, 3)
         self.assertFalse(Faux.requetes, "rien n'est envoyé quand l'IA est coupée")
 
     def test_spotlight_peut_imposer_ou_couper(self):

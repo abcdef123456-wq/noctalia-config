@@ -15,6 +15,13 @@
                                        un texte, du code, un PDF ou une image : résumé par défaut (clic droit dans
                                        Fichiers → Scripts → IA)
   nc-ia diagnostic                     ce que nc-diag a trouvé, expliqué, avec quoi faire (nc-diag ia)
+  nc-ia diagnostic --json [--delai S] [-]
+                                       « Que se passe-t-il ? » (Spotlight) : le bilan de nc-diag --json (« - » : lu
+                                       sur l'entrée standard, sinon nc-diag --json --rapide) résumé, et ses réparations
+                                       mises dans l'ordre ; un JSON {source, raison, ia, agent, resume, reparations,
+                                       conseil, refus}, toujours le code 0 (sans IA : le résumé de nc-diag). Ne part
+                                       vers l'IA que ce qui ne va pas, anonymisé (machine, compte, adresses, e-mails) ;
+                                       nc-ia ne répare jamais rien (nc-diag reparer ID) ; S : 40 s par défaut
   nc-ia panne SERVICE.service [--livrer]  pourquoi ce service de ta session est tombé en panne (nc-panne)
   nc-ia agir DEMANDE [--json]          l'IA gère le bureau (services de la session, Wi-Fi, Bluetooth, énergie, son,
                                        réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
@@ -132,6 +139,13 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        a text, code, a PDF or an image: summarized by default (right click in Files →
                                        Scripts → AI)
   nc-ai diagnostic                     what nc-diag found, explained, with what to do (nc-diag ia)
+  nc-ai diagnostic --json [--delai S] [-]
+                                       “What's going on?” (Spotlight): the nc-diag --json report (“-”: read from
+                                       standard input, otherwise nc-diag --json --rapide) summarized, and its repairs
+                                       put in order; a JSON {source, raison, ia, agent, resume, reparations, conseil,
+                                       refus}, always exit code 0 (without AI: nc-diag's own summary). Only what is
+                                       wrong goes to the AI, anonymized (machine, account, addresses, e-mails); nc-ai
+                                       never repairs anything (nc-diag reparer ID); S: 40 s by default
   nc-ai failure SERVICE.service [--livrer]  why this session service failed (nc-failure)
   nc-ai act REQUEST [--json]           the AI manages the desktop (session services, Wi-Fi, Bluetooth, power, sound,
                                        settings, updates): a plan of allowed actions, confirmed before acting (“@” in
@@ -1357,9 +1371,11 @@ class FiltreOutils:
         yield self.finir()
 
 
-def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=()):
+def demander(texte, usage="question", force="", image=None, consigne_=None, flux=False, sortie=None, exclure=(),
+             echeance=None):
     """Écrit la réponse (texte brut, ou lignes JSON en flux) ; renvoie (réponse, ia) ; ErreurIA si aucune n'a pu.
-    exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre)."""
+    exclure : des IA à ne pas essayer (le chat de JARVIS qui se rabat sur une autre). echeance : la fin de tout le
+    relais (horloge monotone), comme en arrière-plan (nc-ia diagnostic --json --delai)."""
     ecrire = sortie or (lambda m: (sys.stdout.write(m), sys.stdout.flush()))
     if coupee():
         raise ErreurIA(message_coupee())
@@ -1370,6 +1386,8 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
     global ECHEANCE
     # En arrière-plan, le relais a DELAI_FOND en tout (une seule IA : son propre délai suffit)
     ECHEANCE = time.monotonic() + DELAI_FOND if en_fond() and len(liste) > 1 else None
+    if echeance is not None:
+        ECHEANCE = echeance if ECHEANCE is None else min(ECHEANCE, echeance)
     try:
         return _demander(liste, texte, usage, image, consigne_, flux, ecrire)
     finally:
@@ -1670,14 +1688,206 @@ def diagnostic(flux=False):
         m = T("✓ nc-diag ne trouve rien à corriger.", "✓ nc-diag finds nothing to fix.")
         print(json.dumps({"t": m}, ensure_ascii=False) if flux else m)
         return
+    # Ce qui va bien (✓) ne part pas : rien à expliquer, et autant de détails de la machine en moins
+    bilan = re.sub(r"\n{3,}", "\n\n", "\n".join(l for l in bilan.splitlines() if not l.lstrip().startswith("✓")))
     question = T("Voici le bilan de vérification de mon bureau (noctalia-config, Hyprland). Explique simplement chaque "
                  "problème (✗) et chaque point d'attention (!), dans l'ordre d'importance, et dis exactement quoi faire "
                  "pour chacun (commandes sur des lignes « $ … »).\n\n",
                  "Here is my desktop's check report (noctalia-config, Hyprland). Simply explain each problem (✗) and each "
                  "warning (!), most important first, and say exactly what to do for each (commands on “$ …” lines).\n\n")
-    demander(question + caviarder(bilan), "texte", flux=flux,
+    demander(question + anonymiser(bilan), "texte", flux=flux,
              consigne_=T("Tu aides à réparer un bureau Linux. Réponds en français, concret et bref.",
                          "You help fix a Linux desktop. Answer in English, concrete and brief."))
+
+
+# ── « Que se passe-t-il ? » (Spotlight) : le bilan de nc-diag --json résumé, les réparations mises dans l'ordre ───
+# nc-ia ne répare jamais rien : il résume, et ordonne des identifiants pris dans la liste de nc-diag (c'est nc-diag
+# reparer ID qui agit, sans IA). L'IA reçoit la famille de la distribution et les constats qui ne vont pas,
+# anonymisés ; jamais les ✓. Toujours un JSON et le code 0 : sans IA (coupée, aucune, en retard, réponse
+# illisible), le résumé de nc-diag lui-même.
+DIAG_MAX_ENTREE = 200 * 1024
+DIAG_MAX_CONSTATS = 20
+DIAG_MAX_CHARGE = 6000
+DIAG_MAX_REPARATIONS = 4
+DIAG_DELAI = 40.0
+ID_REPARATION = re.compile(r"[a-z0-9_][a-z0-9_:.@-]{0,79}")
+CLE_CONSTAT = re.compile(r"[\w:.@/-]{1,80}")
+
+
+def famille_distrib():
+    """arch, debian, fedora, opensuse (la famille, pas le nom exact ni la version) ; « linux » sinon."""
+    ids = ""
+    try:
+        for l in open(os.environ.get("NC_OS_RELEASE") or "/etc/os-release", encoding="utf-8"):
+            k, _, v = l.strip().partition("=")
+            if k in ("ID", "ID_LIKE"):
+                ids += " " + v.strip('"\'').lower()
+    except OSError:
+        pass
+    for famille, mots in (("arch", ("arch", "archlinux", "manjaro", "endeavouros", "cachyos")),
+                          ("opensuse", ("suse", "opensuse", "opensuse-tumbleweed", "sles")),
+                          ("fedora", ("fedora", "rhel", "centos")), ("debian", ("debian", "ubuntu"))):
+        if any(m in ids.split() for m in mots):
+            return famille
+    return "linux"
+
+
+def lire_bilan(texte):
+    """Le JSON de nc-diag --json, ou None s'il est illisible."""
+    try:
+        d = json.loads(texte)
+    except (ValueError, TypeError):
+        return None
+    return d if isinstance(d, dict) and isinstance(d.get("constats", []), list) else None
+
+
+def bilan_nc_diag(delai):
+    """nc-diag --json --rapide, lancé par nc-ia (rien sur l'entrée standard) ; None s'il échoue."""
+    diag = HOME / ".local/bin/nc-diag"
+    prog = str(diag) if diag.exists() else shutil.which("nc-diag")
+    if not prog or delai <= 0:
+        return None
+    try:
+        r = subprocess.run([prog, "--json", "--rapide"], capture_output=True, text=True, timeout=delai,
+                           env=dict(os.environ, NO_COLOR="1"), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return lire_bilan(r.stdout[:DIAG_MAX_ENTREE])
+
+
+def niveau_constat(c):
+    n = str(c.get("niveau") or c.get("genre") or "")
+    return n if n in ("faux", "avert") else ""
+
+
+def libelle_reparation(table, ident):
+    """Le libellé d'une réparation de la table de nc-diag (un objet {id: {libelle…}}, ou une liste de {id, libelle…})."""
+    if isinstance(table, dict):
+        r = table.get(ident)
+    elif isinstance(table, list):
+        r = next((x for x in table if isinstance(x, dict) and x.get("id") == ident), None)
+    else:
+        r = None
+    return str(r.get("libelle") or "") if isinstance(r, dict) else ""
+
+
+def charge_diagnostic(d):
+    """Ce qui part vers l'IA : la famille de la distribution et les constats non OK (les ✗ d'abord), anonymisés,
+    chacun avec ses réparations possibles ; DIAG_MAX_CONSTATS et DIAG_MAX_CHARGE caractères au plus. Renvoie
+    (charge, ids permis), dans l'ordre des constats."""
+    constats = [c for c in d.get("constats") or [] if isinstance(c, dict) and niveau_constat(c)]
+    constats.sort(key=lambda c: niveau_constat(c) != "faux")             # tri stable : l'ordre de nc-diag sinon
+    table = d.get("reparations") or {}
+    charge = {"distribution": famille_distrib(), "constats": []}
+    permis = []
+    for c in constats[:DIAG_MAX_CONSTATS]:
+        x = {"niveau": niveau_constat(c), "texte": anonymiser(str(c.get("texte") or ""))[:400]}
+        cle_ = str(c.get("cle") or "")
+        if CLE_CONSTAT.fullmatch(cle_):
+            x = {"cle": cle_, **x}
+        quoi = anonymiser(str(c.get("quoi") or ""))[:400]
+        if quoi:
+            x["quoi"] = quoi
+        reps = [str(r) for r in (c.get("reparations") or []) if isinstance(r, str) and ID_REPARATION.fullmatch(r)]
+        if reps:
+            x["reparations"] = [{"id": r, "libelle": anonymiser(libelle_reparation(table, r))[:120]} for r in reps[:6]]
+        essai = dict(charge, constats=charge["constats"] + [x])
+        if len(json.dumps(essai, ensure_ascii=False)) > DIAG_MAX_CHARGE:
+            break
+        charge = essai
+        permis += [r["id"] for r in x.get("reparations", []) if r["id"] not in permis]
+    return charge, permis
+
+
+def consigne_diagnostic():
+    return T("Tu aides à comprendre ce qui ne va pas sur un bureau Linux (noctalia-config, Hyprland). On te donne en "
+             "JSON les constats d'une vérification et, pour certains, des réparations prêtes, chacune avec son "
+             "identifiant. Réponds UNIQUEMENT par un objet JSON, sans balises de code ni texte autour : {\"resume\": "
+             "\"…\", \"reparations\": [\"identifiant\", …], \"conseil\": \"…\"}. resume : 2 à 4 phrases simples en "
+             "français, ce qui ne va pas et pourquoi, le plus important d'abord, sans aucune commande. reparations : "
+             f"au plus {DIAG_MAX_REPARATIONS} identifiants, pris SEULEMENT parmi les réparations fournies, dans l'ordre "
+             "où les faire ; [] si aucune ne convient. conseil : une phrase de 200 caractères au plus, ce que "
+             "l'utilisateur peut faire lui-même, sans commande, ou \"\". " + SANS_OUTILS[0],
+             "You help understand what is wrong on a Linux desktop (noctalia-config, Hyprland). You are given, in JSON, "
+             "the findings of a check and, for some of them, ready repairs, each with its id. Answer ONLY with a JSON "
+             "object, no code fences or text around it: {\"resume\": \"…\", \"reparations\": [\"id\", …], \"conseil\": "
+             "\"…\"}. resume: 2 to 4 simple sentences in English, what is wrong and why, most important first, without "
+             f"any command. reparations: at most {DIAG_MAX_REPARATIONS} ids, taken ONLY from the given repairs, in the "
+             "order to do them; [] if none fits. conseil: one sentence of 200 characters at most, what the user can do "
+             "themselves, without a command, or \"\". " + SANS_OUTILS[1])
+
+
+def sans_commande(t, n):
+    """Un texte de l'IA pour l'île : sans blocs de code ni lignes « $ … » (les réparations passent par nc-diag,
+    jamais par une commande à copier), espaces resserrés, n caractères au plus."""
+    t = re.sub(r"```.*?(?:```|\Z)", " ", str(t), flags=re.S)
+    t = "\n".join(l for l in t.splitlines() if not l.lstrip().startswith("$"))
+    t = re.sub(r"\s+", " ", t).strip()
+    return t if len(t) <= n else t[:n - 1].rstrip() + "…"
+
+
+def lire_reponse_diagnostic(rep, permis):
+    """{resume, reparations, conseil, refus} d'après la réponse de l'IA ; ErreurIA si elle est illisible. Un
+    identifiant hors de la liste fournie est refusé (dans refus), jamais gardé."""
+    d = lire_json(rep)
+    resume = sans_commande(d.get("resume") if isinstance(d.get("resume"), str) else "", 700)
+    if not resume:
+        raise ErreurIA(T("L'IA n'a pas donné de résumé.", "The AI gave no summary."))
+    ordre, refus = [], []
+    brut = d.get("reparations")
+    for r in (brut if isinstance(brut, list) else [] if brut is None else [brut]):
+        if isinstance(r, str) and r in permis:
+            if r not in ordre and len(ordre) < DIAG_MAX_REPARATIONS:
+                ordre.append(r)
+        else:
+            refus.append(re.sub(r"\s+", " ", str(r))[:80])
+    conseil = sans_commande(d.get("conseil") if isinstance(d.get("conseil"), str) else "", 200)
+    return {"resume": resume, "reparations": ordre, "conseil": conseil, "refus": refus[:10]}
+
+
+def diagnostic_json(entree=None, delai=DIAG_DELAI):
+    """nc-ia diagnostic --json [--delai S] [-] : le JSON {source, raison, ia, agent, resume, reparations, conseil,
+    refus} lu par l'île. source « ia » ou « sans_ia » ; raison (sans IA) : rien, coupee, aucune, delai, illisible,
+    erreur, bilan. Le délai borne tout (nc-diag compris) : c'est l'ÉCHÉANCE du relais."""
+    global _reglages
+    fin = time.monotonic() + delai
+    sortie = {"source": "sans_ia", "raison": "", "ia": "", "agent": "", "resume": "", "reparations": [], "conseil": "",
+              "refus": []}
+    d = lire_bilan(entree) if entree and len(entree) <= DIAG_MAX_ENTREE else None
+    if d is None:
+        d = bilan_nc_diag(fin - time.monotonic())
+    if d is None:
+        return dict(sortie, raison="bilan", resume=T("La vérification du bureau n'a pas pu se faire (nc-diag).",
+                                                     "The desktop check could not run (nc-diag)."))
+    constats = [c for c in d.get("constats") or [] if isinstance(c, dict) and niveau_constat(c)]
+    constats.sort(key=lambda c: niveau_constat(c) != "faux")
+    repli = []                                   # sans IA : les réparations dans l'ordre des constats, ✗ d'abord
+    for c in constats:
+        repli += [r for r in c.get("reparations") or [] if isinstance(r, str) and ID_REPARATION.fullmatch(r)
+                  and r not in repli]
+    resume = d.get("resume") if isinstance(d.get("resume"), str) and d.get("resume").strip() else ""
+    sortie.update(resume=resume.strip() or (T("Tout est en ordre.", "Everything is fine.") if not constats else
+                  T(f"{len(constats)} point(s) à voir.", f"{len(constats)} item(s) to check.")), reparations=repli)
+    if not constats:
+        return dict(sortie, raison="rien")
+    if coupee():
+        return dict(sortie, raison="coupee")
+    charge, permis = charge_diagnostic(d)
+    question = T("Voici les constats de la vérification de mon bureau (JSON) :\n\n",
+                 "Here are the findings of my desktop check (JSON):\n\n") + json.dumps(charge, ensure_ascii=False)
+    if not candidats("texte"):
+        return dict(sortie, raison="aucune")
+    try:
+        rep, ident = demander(question, "texte", consigne_=consigne_diagnostic(), sortie=lambda m: None, echeance=fin)
+    except ErreurIA as e:
+        _reglages = None                         # coupée pendant l'attente ?
+        return dict(sortie, raison="delai" if time.monotonic() >= fin or isinstance(e, ErreurDelai) else
+                    "coupee" if coupee() else "erreur")
+    try:
+        lu = lire_reponse_diagnostic(rep, permis)
+    except ErreurIA:
+        return dict(sortie, raison="illisible")
+    return dict(sortie, source="ia", ia=nom(ident), agent=FOURNISSEURS[ident]["agent"], **lu)
 
 
 # ── Un service en panne (nc-panne : notification « Expliquer ») ─────────────────────────────────────────────────
@@ -1703,6 +1913,85 @@ def caviarder(t):
     t = re.sub(r"(?i)(" + _NOM_SECRET + r")([\"']?\s*[=:]\s*[\"']?)(?!\[…\])[^\s,;\"'&]+", r"\1\2[…]", t)
     t = re.sub(r"(?i)\b(password|passwd|mot de passe|token|secret)(\s+)(?![=:\[])[^\s,;]+", r"\1\2[…]", t)
     return t.replace(str(HOME), "~")
+
+
+# Les noms qu'une installation donne d'elle-même ne disent rien de toi : gardés, le texte reste lisible
+NOMS_BANALS = {"localhost", "localhost-live", "root", "arch", "archlinux", "debian", "fedora", "opensuse", "linux",
+               "user", "utilisateur"}
+_PERSO = re.compile(r"(?<![\w.-])/(?:var/)?home/[^/\s\"'`:;,()\[\]]+")
+_EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:service|socket|target|timer|path|"
+                    r"mount|automount|scope|slice|device|swap)\b)[A-Za-z]{2,24}\b")
+_UUID = re.compile(r"(?<![0-9A-Fa-f-])(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|"
+                   r"[0-9a-f]{32})(?![0-9A-Fa-f-])")
+_MAC = re.compile(r"(?<![0-9A-Fa-f:-])[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f:-])")
+_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+_IPV4 = re.compile(r"(?<![\w.])" + _OCTET + r"(?:\." + _OCTET + r"){3}(?!\w|\.\d)")
+_IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:%[\w.-]+)?(?![\w:])")
+_PID = re.compile(r"\(\d{3,7}\)|(?<=[\w)])\[\d{2,7}\]|(?i:\bpid)([ =:]+)\d+\b")
+
+
+def _ipv4(m):
+    t = m[0]
+    return t if t.startswith("127.") or t == "0.0.0.0" else "[IP]"
+
+
+def _ipv6(m):
+    """Une adresse IPv6 : « :: » ou au moins 3 « : » entre des groupes hexadécimaux. Pas une heure (12:30:45, des
+    nombres de 1 ou 2 chiffres sans « :: »), ni la boucle locale (::1)."""
+    t = m[0].split("%")[0]
+    groupes = t.split(":")
+    if t in ("::", "::1") or t.count("::") > 1 or not any(groupes):
+        return m[0]
+    if "::" not in t and (t.count(":") < 3 or all(re.fullmatch(r"\d{1,2}", g) for g in groupes)):
+        return m[0]
+    return "[IP]"
+
+
+_IDENTITE = None
+
+
+def _identite():
+    """Le motif des noms de la machine et du compte (None s'il n'y en a pas à masquer), calculé une fois."""
+    global _IDENTITE
+    if _IDENTITE is None:
+        machines, comptes = set(), {os.environ.get("USER") or "", os.environ.get("LOGNAME") or ""}
+        try:
+            h = socket.gethostname()
+            machines |= {h, h.split(".")[0]}
+        except OSError:
+            pass
+        try:
+            import pwd
+            comptes.add(pwd.getpwuid(os.getuid()).pw_name)
+        except (ImportError, KeyError, OSError):
+            pass
+        garder = lambda n: len(n) >= 2 and n.lower() not in NOMS_BANALS and re.fullmatch(r"[\w.-]+", n)
+        motif = lambda noms: re.compile(r"(?<![A-Za-z0-9\[])(?:" + "|".join(re.escape(n) for n in sorted(
+            noms, key=len, reverse=True)) + r")(?![A-Za-z0-9\]])", re.I) if noms else None
+        _IDENTITE = (motif({n for n in machines if garder(n)}), motif({n for n in comptes if garder(n)}))
+    return _IDENTITE
+
+
+def anonymiser(t):
+    """caviarder(), puis ce qui dit qui tu es ou où est ta machine, avant de partir vers une IA (le bilan de nc-diag) :
+    le nom de la machine → [machine], celui du compte → [compte], /home/<nom> et /var/home/<nom> → ~, les adresses
+    IPv4 (sauf 127.x et 0.0.0.0) et IPv6 → [IP], les adresses MAC → [MAC], les e-mails → [e-mail], les UUID → [id],
+    les numéros de processus « (1234) » → (…). Les versions (0.56.2) et les heures (12:30:45) restent ; linéaire
+    (chaque motif ne commence qu'en début de mot)."""
+    t = _PERSO.sub("~", caviarder(t))
+    t = _EMAIL.sub("[e-mail]", t)
+    t = _UUID.sub("[id]", t)
+    t = _MAC.sub("[MAC]", t)
+    t = _IPV4.sub(_ipv4, t)
+    t = _IPV6.sub(_ipv6, t)
+    t = _PID.sub(lambda m: "(…)" if m[0].startswith("(") else "[…]" if m[0].startswith("[") else
+                 m[0][:3] + m[1] + "…", t)
+    machine, compte = _identite()
+    if machine:
+        t = machine.sub("[machine]", t)
+    if compte:
+        t = compte.sub("[compte]", t)
+    return t
 
 
 def panne(unites, flux=False, livraison=False):
@@ -3311,6 +3600,23 @@ def main(a):
                 raise
             print(json.dumps(plan, ensure_ascii=False)) if json_out else afficher_plan(dict(plan, reponse=""))
             return 0 if all(x["ok"] for x in plan["actions"] if x["fait"]) else 1
+        if c in ("diagnostic", "diag") and json_out:
+            # Toujours un JSON et le code 0 (l'île le lit) ; « - » : le bilan de nc-diag --json sur l'entrée standard
+            delai = DIAG_DELAI
+            if "--delai" in a:
+                try:
+                    delai = min(600.0, max(1.0, float(a[a.index("--delai") + 1])))
+                except (IndexError, ValueError):
+                    pass
+            entree = sys.stdin.read(DIAG_MAX_ENTREE + 1) if "-" in a else None
+            try:
+                r = diagnostic_json(entree, delai)
+            except Exception:                    # jamais sans réponse : le repli le plus simple
+                r = {"source": "sans_ia", "raison": "erreur", "ia": "", "agent": "", "reparations": [], "conseil": "",
+                     "refus": [], "resume": T("La vérification du bureau n'a pas pu se faire.",
+                                              "The desktop check could not run.")}
+            print(json.dumps(r, ensure_ascii=False), flush=True)
+            return 0
         if c in ("diagnostic", "diag"):
             diagnostic(flux="--flux" in a)
             return 0
