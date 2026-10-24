@@ -396,6 +396,11 @@ choisis `ecran` ou `distance`, pas `les-deux`** : ces serveurs répondent tout s
 `deny`), que `nc-noeud` ne peut pas distinguer de ton « Refuser » : la carte se ferme alors que tu pouvais autoriser
 sur l’écran, et le journal note « refusé (distance) ». `nc-noeud` ne devine rien d’après le délai de la réponse.
 
+Depuis JARVIS-BIS `be109d5`, le serveur peut envoyer `totp_prompt` (et `totp_prompt_cancel`) : l'invite d'un code pour
+une action sur **un autre PC**. `nc-noeud` l'ignore toujours : il n'ouvre aucune fenêtre (taper ses codes dans une fenêtre
+surgie d'un serveur est une mauvaise habitude) et ne répond rien, car le serveur n'attend pas cette réponse et un refus
+renvoyé refuserait l'action de l'autre PC ; l'invite disparaît quand la demande se termine. Le journal en garde une ligne.
+
 Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
 `nc-noeud totp creer`). Changer ce réglage, ou vérifier ou retirer le code, relance `nc-noeud` s’il tourne : le
 serveur apprend à la connexion que ce PC sait confirmer à distance. Chaque code ne sert qu’une fois : un code déjà

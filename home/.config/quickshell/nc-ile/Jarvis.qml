@@ -296,7 +296,7 @@ FloatingWindow {
                     Action { texte:Reglages.t("Voir les modèles", "Available models"); onClic:{fen.resultatOp="models";JarvisEtat.executer("models",{},false)} }
                     Action { texte:Reglages.t("Session active", "Active session"); onClic:{fen.resultatOp="session";JarvisEtat.executer("session",{},false)} }
                     Action { texte:Reglages.t("Consommation", "Usage"); onClic:{fen.resultatOp="usage";JarvisEtat.executer("usage",{},false)} }
-                    Action { texte:Reglages.t("Modes et permissions AGY", "AGY modes and permissions"); visible:AssistantEtat.moteur==="agy"; onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session", "Apply to session"),[fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, always-proceed)")]) }
+                    Action { texte:Reglages.t("Modes et permissions AGY", "AGY modes and permissions"); visible:AssistantEtat.moteur==="agy"; onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session", "Apply to session"),[fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, default, plan, auto_edit)")]) }
                     Action { texte:Reglages.t("Nouvelle conversation", "New conversation"); onClic:{fen.resultatOp="session.reset";fen.attente={op:"session.reset",params:{},titre:Reglages.t("Réinitialiser la session", "Reset session")}} }
                 }
                 Loader { width:parent.width; active:!!fen.selection.op; sourceComponent:pFormulaire }

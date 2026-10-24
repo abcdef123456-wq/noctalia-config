@@ -28,9 +28,11 @@ import contextlib
 import contextvars
 import inspect
 import json
+import re
 import gateway as runner_gateway
 import httpx
 from fastapi import Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from nc_management import dispatch, runner_connections, RunnerHttpx
 from nc_choix import extraire_choix, verifier_choix
 import nc_telegram
@@ -88,12 +90,54 @@ def _avec_choix(corps):
     return json.dumps(donnees, ensure_ascii=False).encode()
 
 
+CLE_BUREAU = re.compile(r'default|desktop:[\w.@-]{1,180}', re.ASCII)
+
+
+def cle_ask_refusee(corps):
+    """Vrai si le corps de /api/ask veut écrire au nom d'une autre conversation que celles du bureau. Le serveur
+    prend session_key du corps tel quel (« telegram:<id> » donne au runner le jeton de cette conversation, relecture
+    de be109d5, P1 b) : seules « desktop:<pc> » et « default » passent, comme sur /api/nc/manage. Sans session_key, le
+    serveur la compose avec « platform » : telegram et discord y sont refusés aussi. Un corps illisible reste à la
+    route d'origine (elle répond 422)."""
+    try:
+        donnees = json.loads(corps)
+    except ValueError:
+        return False
+    if not isinstance(donnees, dict):
+        return False
+    cle = donnees.get('session_key')
+    if cle is not None and not (isinstance(cle, str) and CLE_BUREAU.fullmatch(cle)):
+        return True
+    plateforme = donnees.get('platform')
+    return isinstance(plateforme, str) and plateforme.strip().lower() in ('telegram', 'discord')
+
+
 def _choix_du_bureau(route_app):
     """La route /api/ask d'origine, dont seule une réponse 200 en JSON est relue ; statut, erreurs et autres champs
-    passent tels quels."""
+    passent tels quels. Avant elle, une session_key qui n'est pas du bureau est refusée (400)."""
     async def asgi(scope, receive, send):
         if scope.get('type') != 'http':
             return await route_app(scope, receive, send)
+        morceaux_requete, plus = [], True
+        while plus:
+            message = await receive()
+            if message['type'] == 'http.disconnect':
+                return
+            morceaux_requete.append(message.get('body', b''))
+            plus = message.get('more_body', False)
+            if sum(map(len, morceaux_requete)) > 8 * 1024 * 1024:
+                return await JSONResponse({'detail': 'Requête trop volumineuse'}, status_code=413)(scope, receive, send)
+        corps_requete = b''.join(morceaux_requete)
+        if cle_ask_refusee(corps_requete):
+            return await JSONResponse({'detail': 'Clé de session refusée'}, status_code=400)(scope, receive, send)
+        rendu = False
+
+        async def receive_rendu():
+            nonlocal rendu
+            if not rendu:
+                rendu = True
+                return {'type': 'http.request', 'body': corps_requete, 'more_body': False}
+            return await receive()
         debut, morceaux = None, []
 
         async def envoyer(message):
@@ -116,7 +160,7 @@ def _choix_du_bureau(route_app):
 
         jeton = _pour_le_bureau.set(True)
         try:
-            await route_app(scope, receive, envoyer)
+            await route_app(scope, receive_rendu, envoyer)
         finally:
             _pour_le_bureau.reset(jeton)
     asgi.nc_choix = True

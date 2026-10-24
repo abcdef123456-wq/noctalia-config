@@ -1977,6 +1977,13 @@ class Noeud:
                     await ws.envoyer({"type": "pong"})
                 elif msg.get("type") in ("confirm_response", "confirm_unavailable"):
                     self.distance.recue(msg)
+                elif msg.get("type") in ("totp_prompt", "totp_prompt_cancel"):
+                    # JARVIS-BIS be109d5 : invite TOTP pour une action sur UN AUTRE PC. Jamais affichée ici : une fenêtre
+                    # qui demande un code d'authentification surgie d'un serveur habituerait à le taper n'importe où.
+                    # Pas de réponse non plus : le serveur n'attend rien (l'action se confirme sur l'autre PC ou par
+                    # Telegram) et un totp_prompt_response « deny » refuserait l'action de l'autre PC et fermerait sa
+                    # session de confiance (node_hub.py, send_confirm_response). Ni fenêtre, ni envoi : une ligne au journal.
+                    journal(str(msg.get("type")), str(msg.get("req_id") or "")[:80], "ignorée (invite d'un autre PC)")
                 elif msg.get("type") == "session_end":
                     self.fermer_session(T("demande du serveur", "server request"))
                 elif msg.get("type") == "action" and msg.get("req_id"):

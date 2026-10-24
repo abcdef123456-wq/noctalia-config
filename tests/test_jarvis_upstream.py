@@ -124,6 +124,32 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
                     else:sys.modules[name]=old
 
 
+@unittest.skipUnless(fastapi and httpx and (UPSTREAM/'core/node_hub.py').is_file(),'Checkout upstream et dépendances API requis')
+class FinDeSessionUpstream(unittest.TestCase):
+    def test_our_session_end_works_with_the_real_node_hub_of_every_revision(self):
+        """Signatures de NodeHub (send_session_end(node_id, origin) et build_origin depuis be109d5) : la fin de session
+        d'un reset ou d'une reprise ne lève rien et ferme bien la session du nœud relié, quelle que soit la révision."""
+        avant=dict(sys.modules);ancien=list(sys.path)
+        self.addCleanup(lambda:(sys.modules.clear(),sys.modules.update(avant),sys.path.__setitem__(slice(None),ancien)))
+        for nom in [n for n in sys.modules if n=='core' or n.startswith('core.')]:sys.modules.pop(nom)
+        sys.path.insert(0,str(UPSTREAM))
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'HOME':d,'SECRET_KEY':'isolated-test-secret'}):
+            from core.node_hub import NODE_HUB
+            if not hasattr(NODE_HUB,'send_session_end'):self.skipTest('Pas de fin de session des nœuds (avant 4ecc57a)')
+            spec=importlib.util.spec_from_file_location('nc_management_fin',REPO/'home/.local/share/nc-jarvis/server/nc_management.py')
+            management=importlib.util.module_from_spec(spec);sys.modules['nc_management_fin']=management;spec.loader.exec_module(management)
+            envoyes=[]
+            class WS:
+                async def send_json(self,payload):envoyes.append(payload)
+            async def scenario():
+                noeud=await NODE_HUB.register_node('pc-test',WS(),{'hostname':'pc-test'})
+                self.assertEqual(await management.fin_session_noeuds('desktop:pc-test'),[])
+                self.assertEqual(await management.fin_session_noeuds('desktop:pc-test','pc-test'),['pc-test'])
+                return noeud
+            asyncio.run(scenario())
+            self.assertIn({'type':'session_end'},envoyes)
+
+
 @unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')
 class PoolParBoucleUpstream(unittest.TestCase):
     def test_per_loop_clients_of_the_gateway_are_leases_of_our_single_pool(self):

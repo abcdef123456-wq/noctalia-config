@@ -172,6 +172,22 @@ class Passerelle(unittest.TestCase):
         # Les autres réponses (erreurs comprises) passent telles quelles
         self.assertEqual(self.appeler("/api/refus", {})[0], 401)
 
+    def test_api_ask_refuse_les_cles_de_session_qui_ne_sont_pas_du_bureau(self):
+        """Relecture de be109d5 (P1 b) : session_key vient du corps ; telegram:/discord: donneraient au runner le
+        jeton d'une conversation de bot."""
+        for cle in ("telegram:123", "discord:9", "Telegram:1", "client:bureau", "desktop:", "desktop:a b", "x", 5, ""):
+            statut, _ = self.appeler("/api/ask", dict(prompt="q", session_key=cle))
+            self.assertEqual(statut, 400, cle)
+        for plateforme in ("telegram", " Discord "):
+            self.assertEqual(self.appeler("/api/ask", dict(prompt="q", platform=plateforme))[0], 400, plateforme)
+        self.reponses = ["a", "b", "c", "d", "e"]
+        for corps in (dict(prompt="q", session_key="desktop:mon-pc.local"), dict(prompt="q", session_key="default"),
+                      dict(prompt="q"), dict(prompt="q", platform="desktop", user_id="x", client_id="pc"),
+                      dict(prompt="q", session_key=None)):
+            statut, retour = self.appeler("/api/ask", corps)
+            self.assertEqual(statut, 200, corps)
+        self.assertEqual(self.reponses, [])
+
     def test_choix_deja_extraits_par_le_serveur(self):
         # JARVIS-BIS 3d1c6b6 renvoie lui-même « choices » : gardés s'ils respectent nos limites, retirés sinon
         f = self.api._avec_choix

@@ -310,8 +310,9 @@ def cle_session(value):
     return value
 
 
-# Listes blanches de 4ecc57a pour les réglages de session (permission_mode est aussi refusé par agy_bridge)
-PERMISSION_MODES=frozenset({'always-proceed','request-review','default','auto_edit','yolo','ask','bypass','plan','auto'})
+# Listes blanches pour les réglages de session ; PERMISSION_MODES resserrée comme be109d5 : plus de yolo, bypass ni
+# always-proceed (le runner les accepte encore, mais ils ne passent pas par ici)
+PERMISSION_MODES=frozenset({'default','request-review','plan','ask','auto_edit','auto'})
 MODES=frozenset({'agent','auto','plan','accept-edits','ask'})
 
 
@@ -332,22 +333,21 @@ async def fin_session_noeuds(session_key, node_id=None):
         NODE_HUB.rotate_conversation_token(session_key or 'default')
     except Exception:
         pass
+    # be109d5 : « origin » limite la fin aux sessions ouvertes depuis cette conversation, comme le gateway upstream ;
+    # sans build_origin (avant be109d5) ou s'il échoue, fin pour tous les nœuds, comme avant
+    origine = None
     try:
-        await NODE_HUB.send_session_end()
+        origine = NODE_HUB.build_origin(session_key=session_key or 'default')
+    except Exception:
+        origine = None
+    try:
+        if origine is not None:
+            await NODE_HUB.send_session_end(origin=origine)
+        else:
+            await NODE_HUB.send_session_end()
     except Exception:
         pass
     return []
-
-
-def jeton_conversation(session_key, resultat):
-    """Retient le jeton de session rendu par le runner pour les nœuds (4ecc57a) ; sans effet avant."""
-    try:
-        session=resultat.get('session') if isinstance(resultat,dict) else None
-        if isinstance(session,dict) and session.get('session_token'):
-            from core.node_hub import NODE_HUB
-            NODE_HUB.set_conversation_token(session_key or 'default',str(session['session_token']))
-    except Exception:
-        pass
 
 
 async def dispatch(op, p, confirmed=False, session_key=None):
@@ -385,13 +385,11 @@ async def dispatch(op, p, confirmed=False, session_key=None):
     if op=='session.reset':
         await fin_session_noeuds(session_key)
         resultat=await runner('POST','/session/reset'+cle)
-        jeton_conversation(session_key,resultat)
         return resultat
     if op=='conversation.resume':
         identifiant=identifier(p['id'])
         await fin_session_noeuds(session_key)
         resultat=await runner('POST','/conversation/resume',dict(conversation_id=identifiant,**({'session_key':session_key} if session_key else {})))
-        jeton_conversation(session_key,resultat)
         return resultat
     if op=='node.session_end':
         noeud=str(p.get('node_id') or 'all').strip()[:64]

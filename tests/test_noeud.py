@@ -263,6 +263,19 @@ class Connexion(Base):
         self.serveur.envoyer({"type": "ping"})
         self.assertEqual(self.serveur.recevoir(), {"type": "pong"})
 
+    def test_invite_totp_d_un_autre_pc_ignoree_sans_reponse_ni_fenetre(self):
+        """JARVIS-BIS be109d5 : totp_prompt / totp_prompt_cancel (code d'un AUTRE PC). Rien n'est affiché et rien n'est
+        envoyé (un totp_prompt_response « deny » refuserait l'action de l'autre PC) : la trame suivante, un ping, reçoit
+        le premier pong, et le journal note l'invite ignorée."""
+        self.demarrer()
+        self.serveur.envoyer({"type": "totp_prompt", "req_id": "r-1", "target_node": "tour", "action": "exec",
+                              "summary": "rm -rf ~", "expires_in": 30})
+        self.serveur.envoyer({"type": "totp_prompt_cancel", "req_id": "r-1"})
+        self.serveur.envoyer({"type": "ping"})
+        self.assertEqual(self.serveur.recevoir(), {"type": "pong"})
+        self.assertIn("ignorée (invite d'un autre PC)", self.journal())
+        self.assertNotIn("rm -rf", self.journal())
+
     def test_ws_vers_un_hote_public_refuse(self):
         self.configurer("http://jarvis.example.com:8000")
         r = subprocess.run([sys.executable, str(self.bin / "nc-noeud")], env=self.env, capture_output=True, text=True, timeout=20)

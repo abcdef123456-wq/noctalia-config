@@ -112,6 +112,32 @@ class ConnexionsRunner(unittest.TestCase):
                 self.assertTrue(dedicated.is_closed);self.assertFalse(shared.is_closed)
         with patch.object(httpx,'AsyncClient',side_effect=factory):asyncio.run(scenario())
 
+    def test_origin_token_header_reaches_the_runner_in_the_pool_and_outside_it(self):
+        """be109d5 : forward_to_runner passe headers={X-Secret-Key, X-Jarvis-Origin-Token} ; les deux doivent arriver,
+        dans le pool comme hors du pool (client d'une seule requête)."""
+        vus=[]
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def log_message(self,*args):pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                vus.append((self.headers.get('X-Secret-Key'),self.headers.get('X-Jarvis-Origin-Token')))
+                body=b'{}';self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(body)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);server.daemon_threads=True
+        threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True).start()
+        try:
+            pool=self.m.RunnerConnections();url=f'http://127.0.0.1:{server.server_port}/run'
+            entetes=lambda n:{'X-Secret-Key':'s','X-Jarvis-Origin-Token':'jeton'+n}
+            async def scenario():
+                await pool.lease(timeout=2).post(url,json={},headers=entetes('0'))   # hors pool (pas ouvert)
+                async with pool.lifespan():
+                    await pool.lease(timeout=2).post(url,json={},headers=entetes('1'))
+            with patch.dict('os.environ',NO_PROXY='*',no_proxy='*'):
+                asyncio.run(scenario())
+            self.assertEqual(vus,[('s','jeton0'),('s','jeton1')])
+        finally:
+            server.shutdown();server.server_close()
+
     def shared_client_like_f522291(self,pool,made):
         """gateway._get_http_client et close_http_client de JARVIS-BIS f522291, sur notre façade httpx."""
         g=types.SimpleNamespace(httpx=self.m.RunnerHttpx(httpx,pool),client=None,loop=None)
@@ -335,7 +361,7 @@ class GestionDepuis4ecc57a(unittest.TestCase):
         hub=types.SimpleNamespace(
             rotate_conversation_token=lambda k=None:self.noeuds.append(('rotation',k)),
             set_conversation_token=lambda k,t:self.noeuds.append(('jeton',k,t)))
-        async def fin(node_id=None):
+        async def fin(node_id=None,origin=None):
             self.noeuds.append(('fin',node_id));return ['pc']
         hub.send_session_end=fin
         core=types.ModuleType('core');mod=types.ModuleType('core.node_hub');mod.NODE_HUB=hub
@@ -354,9 +380,31 @@ class GestionDepuis4ecc57a(unittest.TestCase):
         self.run_('session.update',{'mode':'plan','permission_mode':'request-review'},True,session_key='desktop:a')
         self.assertEqual(self.appels[-1][2]['mode'],'plan')
 
-    def test_reset_and_resume_end_node_sessions_and_keep_the_token(self):
+    def test_session_update_refuses_the_modes_removed_like_be109d5(self):
+        for mode in ('yolo','bypass','always-proceed'):
+            with self.assertRaises(ValueError):self.run_('session.update',{'permission_mode':mode},True,session_key='desktop:a')
+        for mode in ('default','request-review','plan','ask','auto_edit','auto'):
+            self.run_('session.update',{'permission_mode':mode},True,session_key='desktop:a')
+
+    def test_the_hub_never_receives_a_conversation_token_from_us(self):
         self.run_('session.reset',{},True,session_key='desktop:a')
-        self.assertEqual(self.noeuds,[('rotation','desktop:a'),('fin',None),('jeton','desktop:a','jeton1')])
+        self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:a')
+        self.assertFalse([n for n in self.noeuds if n[0]=='jeton'])
+
+    def test_reset_scopes_the_session_end_with_the_origin_when_the_hub_builds_one(self):
+        vus=[]
+        hub=sys.modules['core.node_hub'].NODE_HUB
+        hub.build_origin=lambda session_key=None,**_:{'via':'desktop','chat':session_key}
+        async def fin(node_id=None,origin=None):
+            vus.append(origin);return []
+        hub.send_session_end=fin
+        self.run_('session.reset',{},True,session_key='desktop:a')
+        self.assertEqual(vus,[{'via':'desktop','chat':'desktop:a'}])
+
+    def test_reset_and_resume_end_node_sessions_without_setting_the_token(self):
+        self.run_('session.reset',{},True,session_key='desktop:a')
+        # Le jeton de conversation n'est plus retenu côté serveur (inerte à be109d5, dangereux si réactivé)
+        self.assertEqual(self.noeuds,[('rotation','desktop:a'),('fin',None)])
         self.noeuds.clear()
         self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:a')
         self.assertEqual(self.noeuds[:2],[('rotation','desktop:a'),('fin',None)])
