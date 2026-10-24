@@ -133,6 +133,25 @@ class Notifications(unittest.TestCase):
                     Qt.quit() }
         ''', preparer=preparer)
 
+    def test_carte_des_mises_a_jour_depots_non_synchronises(self):
+        """I1 : une liste vide de dépôts vieux de plusieurs jours (non_synchro_jours, apt et zypper) n'est pas « À jour »,
+        et « Mettre à jour » (qui synchronise) est proposé."""
+        import time
+        def preparer(root):
+            (root / "cache/nc").mkdir(parents=True)
+            (root / "cache/nc/paquets.json").write_text(json.dumps({
+                "date": int(time.time()), "date_ok": int(time.time()), "total": 0, "incomplet": [], "non_synchro_jours": 4,
+                "noyau": False, "sources": {"depot": 0, "aur": 0, "flatpak": 0}, "paquets": []}))
+        self.executer('''
+                if (etape === 0) { creer(); page.visible = true; etape++; return }
+                if (etape === 1) {
+                    var r = trouver(page, "nc-notifs-maj-resume"); verifier(r !== null, "carte des mises à jour absente")
+                    if (r.text.indexOf("not synced") < 0) return
+                    verifier(r.text.indexOf("Up to date") < 0 && r.text.indexOf("Repositories not synced for 4 d") === 0, "résumé : " + r.text)
+                    verifier(trouver(page, "nc-notifs-maj-maj") !== null, "« Mettre à jour » absent")
+                    Qt.quit() }
+        ''', preparer=preparer)
+
     def test_groupes_filtres_lecture_report_masquage_clavier(self):
         memo = self.executer('''
 if (etape === 0) { creer(); etape++; return }

@@ -204,43 +204,67 @@ Item {
                 sous: Etat.sys.halo === "1" ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
             }
-            // Mises à jour du système (nc-paquets, comptées chaque heure au plus, moins sur batterie ou en Économie) : un clic, tout mettre à jour dans un terminal.
-            // Le nombre est la première ligne de ~/.cache/nc/paquets, relu à chaque réécriture (le recompte après la mise
-            // à jour) et quand la page revient à l'écran
+            // Mises à jour du système (nc-paquets, comptées chaque heure au plus, sur secteur seulement : nc-paquets.service a
+            // ConditionACPower) : un clic, tout mettre à jour dans un terminal. Le nombre est la première ligne de
+            // $XDG_CACHE_HOME/nc/paquets, relu à chaque réécriture (le recompte après la mise à jour) et quand la page revient à l'écran
             Ligne {
                 id: maj
                 objectName: "nc-paquets"
                 property int n: 0
+                readonly property string cache: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/nc/"
                 visible: Reglages.val("MAJ_SYSTEME", "ile") !== "non" && paquets.loaded
-                width: sy.width; icone: "system_update"; actif: n > 0
-                // ~/.cache/nc/paquets-erreur (la dernière vérification n'a pas abouti) : jamais « Système à jour » faute de réponse
+                width: sy.width; icone: "system_update"; actif: n > 0 || vieux > 0
+                // paquets-erreur (la dernière vérification n'a pas abouti) : jamais « Système à jour » faute de réponse
                 property bool echec: false
-                titre: n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
-                             : echec ? Reglages.t("Vérification impossible", "Could not check for updates")
-                             : Reglages.t("Système à jour", "System up to date")
-                sous: n > 0 ? Reglages.t("Clic : tout mettre à jour (ton mot de passe sera demandé)", "Click to update everything (you'll be asked for your password)")
-                            : echec ? Reglages.t("Pas de réponse (réseau ou dépôt) : nouvel essai plus tard", "No answer (network or repository): retrying later")
-                            : ({ "3h": Reglages.t("Vérifié toutes les 3 heures", "Checked every 3 hours"),
-                                 "6h": Reglages.t("Vérifié toutes les 6 heures", "Checked every 6 hours"),
-                                 "jour": Reglages.t("Vérifié une fois par jour", "Checked once a day") })[Reglages.val("MAJ_FREQUENCE", "1h")]
-                              || Reglages.t("Vérifié chaque heure", "Checked every hour")
-                onClic: if (n > 0) { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-paquets", "mettre-a-jour"]) }
+                // non_synchro_jours de paquets.json (apt, zypper : la liste des dépôts date de plusieurs jours) : une vieille
+                // liste vide n'est pas « à jour », et « Mettre à jour » la synchronise
+                property int vieux: 0
+                readonly property string cadence: (({ "3h": Reglages.t("Vérifié toutes les 3 heures", "Checked every 3 hours"),
+                                                      "6h": Reglages.t("Vérifié toutes les 6 heures", "Checked every 6 hours"),
+                                                      "jour": Reglages.t("Vérifié une fois par jour", "Checked once a day") })[Reglages.val("MAJ_FREQUENCE", "1h")]
+                                                   || Reglages.t("Vérifié chaque heure", "Checked every hour"))
+                                                  + (Etat.aBatterie ? Reglages.t(", sur secteur", ", when plugged in") : "")
+                titre: verif.running ? Reglages.t("Recherche des mises à jour…", "Checking for updates…")
+                     : n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
+                     : echec ? Reglages.t("Vérification impossible", "Could not check for updates")
+                     : vieux > 0 ? Reglages.t("Dépôts non synchronisés", "Repositories not synced")
+                     : Reglages.t("Système à jour", "System up to date")
+                sous: verif.running ? cadence
+                    : n > 0 ? (echec ? Reglages.t("Dernier état connu (pas de réponse) · clic : tout mettre à jour", "Last known state (no answer) · click to update everything")
+                                     : Reglages.t("Clic : tout mettre à jour (ton mot de passe sera demandé)", "Click to update everything (you'll be asked for your password)"))
+                    : echec ? Reglages.t("Pas de réponse (réseau ou dépôt) · clic : réessayer", "No answer (network or repository) · click to retry")
+                    : vieux > 0 ? Reglages.t("Depuis " + vieux + " j, des mises à jour peuvent manquer · clic : synchroniser", "For " + vieux + " d, updates may be missing · click to sync")
+                    : cadence
+                onClic: {
+                    if (verif.running) return
+                    if (n > 0 || (vieux > 0 && !echec)) { Etat.fermer(); Quickshell.execDetached([Etat.bin + "nc-paquets", "mettre-a-jour"]) }
+                    else if (echec) verif.running = true
+                }
+                Process { id: verif; command: [Etat.bin + "nc-paquets", "verifier"] }
                 FileView {
                     id: paquets
-                    path: Quickshell.env("HOME") + "/.cache/nc/paquets"
+                    path: maj.cache + "paquets"
                     watchChanges: true; printErrors: false
                     onFileChanged: reload()
                     onLoaded: maj.n = parseInt(text().split("\n")[0]) || 0
                 }
                 FileView {
                     id: paquetsErreur
-                    path: Quickshell.env("HOME") + "/.cache/nc/paquets-erreur"
+                    path: maj.cache + "paquets-erreur"
                     watchChanges: true; printErrors: false
                     onFileChanged: reload()
                     onLoaded: maj.echec = text().trim() !== ""
                     onLoadFailed: maj.echec = false
                 }
-                Connections { target: sy; function onVisibleChanged() { if (sy.visible) { paquets.reload(); paquetsErreur.reload() } } }
+                FileView {
+                    id: paquetsDetail
+                    path: maj.cache + "paquets.json"
+                    watchChanges: true; printErrors: false
+                    onFileChanged: reload()
+                    onLoaded: { try { maj.vieux = JSON.parse(text()).non_synchro_jours || 0 } catch (e) { maj.vieux = 0 } }
+                    onLoadFailed: maj.vieux = 0
+                }
+                Connections { target: sy; function onVisibleChanged() { if (sy.visible) { paquets.reload(); paquetsErreur.reload(); paquetsDetail.reload() } } }
             }
             // Éclairage du clavier (s'il est réglable) : un clic, palier suivant puis éteint
             Ligne {

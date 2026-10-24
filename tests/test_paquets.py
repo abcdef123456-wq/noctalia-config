@@ -927,13 +927,16 @@ class LigneMisesAJour(unittest.TestCase):
                     property bool aBatterie: false
                     property string profil: ""
                     property int pourcent: 0
-                    readonly property string bin: ""
+                    readonly property string bin: "%s/bin/"
                     property var faits: []
                     function faire(c) { faits.push(c) }
                     function fermer() {}
                     function choisirProfil(p) {}
                     function basculerCafe() {}
-                }'''))
+                }''' % d))
+            (root / "bin").mkdir()
+            (root / "bin/nc-paquets").write_text('#!/bin/sh\necho "$1" >> "$HOME/appels-maj"\nsleep 0.6\n')
+            (root / "bin/nc-paquets").chmod(0o755)
             (root / "qmldir").write_text("\n".join(
                 ("singleton " if n in ("Couleurs", "Reglages", "Etat", "ModeGraphique") else "") + n + " 1.0 " + n + ".qml"
                 for n in ("Systeme", "Ligne", "Module", "Texte", "Ico", "Defilement", "Couleurs", "Reglages", "Etat", "ModeGraphique")))
@@ -947,11 +950,14 @@ class LigneMisesAJour(unittest.TestCase):
                     property int etape: 0
                     property var page: null
                     property var ligne: null
+                    readonly property string racine: Quickshell.env("HOME")
                     function verifier(ok, message) { if (!ok) { console.error(message); Qt.exit(2) } }
                     function trouver(item, nom) { if (item.objectName === nom) return item; for (var i = 0; i < item.children.length; i++) { var r = trouver(item.children[i], nom); if (r) return r } return null }
                     Window { id: w; visible: true; width: 420; height: 600; color: "#151f2b" }
                     Process { id: recompte; command: ["sh", "-c", "printf '0\\\\n\\\\n' > \\"$HOME/.cache/nc/paquets.tmp\\" && mv \\"$HOME/.cache/nc/paquets.tmp\\" \\"$HOME/.cache/nc/paquets\\""] }
                     Process { id: erreur; command: ["sh", "-c", "echo '1 depot' > \\"$HOME/.cache/nc/paquets-erreur\\""] }
+                    Process { id: vieux; command: ["sh", "-c", "rm -f \\"$HOME/.cache/nc/paquets-erreur\\"; echo '{\\"total\\": 0, \\"non_synchro_jours\\": 4}' > \\"$HOME/.cache/nc/paquets.json\\""] }
+                    Process { id: synchro; command: ["rm", "-f", test.racine + "/.cache/nc/paquets.json"] }
                     Timer { interval: 100; running: true; repeat: true; onTriggered: {
                         if (etape === 0) { var c = Qt.createComponent("Systeme.qml"); verifier(c.status === Component.Ready, c.errorString()); page = c.createObject(w.contentItem, { width: 400, height: 580 }); verifier(page !== null, "page absente"); etape++ }
                         else if (etape === 1) { ligne = trouver(page, "nc-paquets"); verifier(ligne !== null, "ligne absente"); if (!ligne.visible) return
@@ -961,17 +967,29 @@ class LigneMisesAJour(unittest.TestCase):
                             page.visible = false; page.visible = true; etape++ }
                         else if (etape === 3) { verifier(ligne.titre === "System up to date", "titre après réaffichage : " + ligne.titre); erreur.running = true; etape++ }
                         // PKG-03 : la vérification n'aboutit pas (cache à 0 gardé) : jamais « à jour »
-                        else if (etape === 4) { if (ligne.titre !== "Could not check for updates") return; Qt.quit() } } }
-                    Timer { interval: 6000; running: true; onTriggered: Qt.exit(9) }
+                        else if (etape === 4) { if (ligne.titre !== "Could not check for updates") return
+                            verifier(ligne.sous.indexOf("click to retry") > 0, "sous-titre (échec, 0) : " + ligne.sous); ligne.clic(); etape++ }
+                        // I1 : « Réessayer » relance la vérification, le temps qu'elle dure
+                        else if (etape === 5) { if (ligne.titre !== "Checking for updates…") return; etape++ }
+                        else if (etape === 6) { if (ligne.titre !== "Could not check for updates") return; vieux.running = true; etape++ }
+                        // I1 : une liste vide mais vieille de 4 jours (apt, zypper) n'est pas « à jour »
+                        else if (etape === 7) { if (ligne.titre !== "Repositories not synced") return
+                            verifier(ligne.actif && ligne.sous.indexOf("For 4 d") === 0, "sous-titre (non synchronisé) : " + ligne.sous)
+                            Etat.aBatterie = true; synchro.running = true; etape++ }
+                        // I1 : nc-paquets.service ne compte que sur secteur (ConditionACPower), le texte le dit sur un portable
+                        else if (etape === 8) { if (ligne.titre !== "System up to date") return
+                            verifier(ligne.sous === "Checked every hour, when plugged in", "sous-titre (portable) : " + ligne.sous); Qt.quit() } } }
+                    Timer { interval: 8000; running: true; onTriggered: Qt.exit(9) }
                 }'''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                        XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / ".cache"))
             env.pop("WAYLAND_DISPLAY", None)
-            r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env, capture_output=True, text=True, timeout=10)
+            r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env, capture_output=True, text=True, timeout=12)
             sortie = r.stdout + r.stderr
             self.assertEqual(r.returncode, 0, sortie)
             for erreur in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
                 self.assertNotIn(erreur, sortie)
+            self.assertEqual((root / "appels-maj").read_text().split(), ["verifier"])
 
 
 if __name__ == "__main__":

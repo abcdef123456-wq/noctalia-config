@@ -211,6 +211,9 @@ Item {
                 }
                 // Vérification incomplète (réseau, dépôt indisponible) : jamais « À jour », et l'heure du dernier compte complet
                 readonly property var incomplet: detail ? (detail.incomplet || []) : []
+                // non_synchro_jours (apt, zypper) : la liste des dépôts date de plusieurs jours ; vide, elle n'est pas « à jour »
+                readonly property int vieux: detail ? (detail.non_synchro_jours || 0) : 0
+                readonly property bool aFaire: total > 0 || vieux > 0
                 readonly property string resume: {
                     if (verif.running) return Reglages.t("Recherche en cours…", "Checking…")
                     if (!detail) return Reglages.t("Pas encore vérifié", "Not checked yet")
@@ -221,10 +224,11 @@ Item {
                         return (total ? total + Reglages.t(" en attente (dernier état)", " pending (last state)") : Reglages.t("Vérification impossible", "Could not check"))
                                + " · " + Reglages.t("pas de réponse : ", "no answer: ") + noms.join(", ") + " · " + quand
                     }
-                    if (!total) return Reglages.t("À jour", "Up to date") + " · " + quand
+                    var retard = vieux ? Reglages.t("dépôts non synchronisés depuis " + vieux + " j", "repositories not synced for " + vieux + " d") : ""
+                    if (!total) return (retard ? retard.charAt(0).toUpperCase() + retard.slice(1) : Reglages.t("À jour", "Up to date")) + " · " + quand
                     var imp = (detail.paquets || []).filter(x => x.important).map(x => x.nom).slice(0, 2)
                     return total + Reglages.t(" en attente", " pending") + (imp.length ? " · " + imp.join(", ") : "")
-                           + (detail.noyau ? Reglages.t(" · noyau", " · kernel") : "") + " · " + quand
+                           + (detail.noyau ? Reglages.t(" · noyau", " · kernel") : "") + (retard ? " · " + retard : "") + " · " + quand
                 }
                 FileView {
                     path: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/nc/paquets.json"
@@ -233,8 +237,8 @@ Item {
                     onLoaded: { try { maj.detail = JSON.parse(text()) } catch (e) { maj.detail = null } }
                 }
                 Process { id: verif; command: [maj.bin + "nc-paquets", "verifier"] }
-                Ico { id: icMaj; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: maj.total ? "system_update" : "verified"; taille: 22
-                      color: maj.total ? Couleurs.accent : Couleurs.texteSec }
+                Ico { id: icMaj; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: maj.aFaire ? "system_update" : "verified"; taille: 22
+                      color: maj.aFaire ? Couleurs.accent : Couleurs.texteSec }
                 Column {
                     anchors.left: icMaj.right; anchors.leftMargin: 12; anchors.right: boutonsMaj.left; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; spacing: 2
                     Texte { width: parent.width; text: Reglages.t("Mises à jour du système", "System updates"); font.weight: Font.DemiBold; font.pixelSize: 13; elide: Text.ElideRight }
@@ -244,7 +248,7 @@ Item {
                     id: boutonsMaj
                     anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 6
                     Repeater {
-                        model: maj.total ? [{ id: "chercher", nom: Reglages.t("Chercher", "Check") }, { id: "maj", nom: Reglages.t("Mettre à jour", "Update") }]
+                        model: maj.aFaire ? [{ id: "chercher", nom: Reglages.t("Chercher", "Check") }, { id: "maj", nom: Reglages.t("Mettre à jour", "Update") }]
                                          : [{ id: "chercher", nom: Reglages.t("Chercher des mises à jour", "Check for updates") }]
                         Rectangle {
                             id: bm
