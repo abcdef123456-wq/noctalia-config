@@ -368,13 +368,21 @@ def cle_session(c):
     """La clé de session de ce PC, celle que le gateway (JARVIS-BIS 64523e5) donne à nos /api/ask :
     « platform:client_id », sinon « platform:USER_ID ». Envoyée avec la gestion (modèle, nouvelle conversation, reprise)
     pour que, avec AGY, ces réglages touchent la session de ce PC et pas une session « default » que personne n'utilise.
-    3d1c6b6 et un ancien adaptateur l'ignorent."""
-    return "desktop:" + (client_id(c) or str(c.get("USER_ID") or ""))
+    3d1c6b6 et un ancien adaptateur l'ignorent. Le repli sur USER_ID est ramené à ce que 4ecc57a accepte
+    (desktop: lettres, chiffres, « . », « @ », « - », 180 au plus) : un USER_ID avec espaces ou « : » ferait refuser toute la gestion. Rien d'utilisable :
+    pas de clé (None)."""
+    cid = client_id(c)
+    if cid:
+        return "desktop:" + cid
+    repli = re.sub(r"[^\w.@-]+", "-", str(c.get("USER_ID") or ""))[:100].strip("-")
+    return "desktop:" + repli if repli else None
 
 
 def api(c, endpoint, payload=None):
     if endpoint == "/api/nc/manage" and isinstance(payload, dict) and "session_key" not in payload:
-        payload = dict(payload, session_key=cle_session(c))
+        cle = cle_session(c)
+        if cle:
+            payload = dict(payload, session_key=cle)
     corps = None if payload is None else json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(c["URL"] + endpoint, data=corps,
                                  headers={"Content-Type": "application/json", "X-Secret-Key": c["SECRET_KEY"]},

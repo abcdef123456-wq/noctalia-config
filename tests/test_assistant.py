@@ -110,6 +110,19 @@ class Assistant(unittest.TestCase):
     def settings(self, texte):
         (self.m.CONF.parent / "reglages.conf").write_text(texte)
 
+    def test_cle_de_session_acceptee_par_4ecc57a(self):
+        # Le repli sur USER_ID (espaces, « : », accents, trop long) est ramené à desktop:[\w.@-]{1,180} ; rien : pas de clé
+        import re as _re
+        motif = _re.compile(r"desktop:[\w.@-]{1,180}")
+        with patch.object(self.m, "client_id", return_value=""):
+            for uid in ("jean dupont", "a:b", "x" * 300, "élève"):
+                with self.subTest(uid=uid):
+                    cle = self.m.cle_session({"USER_ID": uid})
+                    self.assertIsNotNone(cle)
+                    self.assertTrue(motif.fullmatch(cle), cle)
+            self.assertIsNone(self.m.cle_session({"USER_ID": ":::"}))
+            self.assertIsNone(self.m.cle_session({}))
+
     def test_configuration_private_atomic_and_roundtrip(self):
         self.assertEqual(self.m.CONF.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.m.configuration()["SECRET_KEY"], self.c["SECRET_KEY"])

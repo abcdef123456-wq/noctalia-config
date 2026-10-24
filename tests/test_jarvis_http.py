@@ -366,6 +366,23 @@ class GestionDepuis4ecc57a(unittest.TestCase):
         self.assertEqual(self.run_('node.session_end',{'node_id':'pc'},True),{'success':True,'closed_nodes':['pc']})
         self.assertEqual(self.noeuds[-1],('fin','pc'))
 
+    def test_node_session_end_failure_is_reported(self):
+        # Un échec du hub (ou une révision sans fin de session) n'est pas un succès vide
+        async def casse(node_id=None):
+            raise RuntimeError('hub absent')
+        sys.modules['core.node_hub'].NODE_HUB.send_session_end=casse
+        r=self.run_('node.session_end',{'node_id':'pc'},True)
+        self.assertFalse(r.get('success'))
+        self.assertIn('error',r)
+
+    def test_reset_rotation_failure_still_ends_node_sessions(self):
+        hub=sys.modules['core.node_hub'].NODE_HUB
+        def casse(k=None):
+            raise RuntimeError('rotation impossible')
+        hub.rotate_conversation_token=casse
+        self.run_('session.reset',{},True)
+        self.assertIn(('fin',None),self.noeuds,'la fin de session des nœuds n\'est pas sautée')
+
     def test_without_node_hub_everything_still_works(self):
         with patch.dict(sys.modules,{'core.node_hub':None}):
             self.assertIn('session',self.run_('session.reset',{},True,session_key='desktop:a'))

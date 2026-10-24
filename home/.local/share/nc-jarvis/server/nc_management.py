@@ -320,11 +320,20 @@ async def fin_session_noeuds(session_key, node_id=None):
     effet, sans erreur, sur une révision qui n'a pas ces méthodes ou sans nœud (best effort, comme le serveur)."""
     try:
         from core.node_hub import NODE_HUB
-        if node_id is None:
-            NODE_HUB.rotate_conversation_token(session_key or 'default')
-            await NODE_HUB.send_session_end()
-        else:
+    except Exception:
+        return None
+    if node_id is not None:                      # node.session_end : l'appelant doit savoir si ça a échoué
+        try:
             return await NODE_HUB.send_session_end(node_id=node_id)
+        except Exception:
+            return None
+    # Reset ou reprise : deux essais séparés, une rotation ratée ne saute pas la fin de session des nœuds
+    try:
+        NODE_HUB.rotate_conversation_token(session_key or 'default')
+    except Exception:
+        pass
+    try:
+        await NODE_HUB.send_session_end()
     except Exception:
         pass
     return []
@@ -386,7 +395,9 @@ async def dispatch(op, p, confirmed=False, session_key=None):
         return resultat
     if op=='node.session_end':
         noeud=str(p.get('node_id') or 'all').strip()[:64]
-        return dict(success=True,closed_nodes=await fin_session_noeuds(session_key,noeud))
+        fermes=await fin_session_noeuds(session_key,noeud)
+        if fermes is None: return dict(success=False,error='Fin de session impossible sur ce serveur.')
+        return dict(success=True,closed_nodes=fermes)
     if op=='conversation.delete': return await runner('DELETE','/conversation/'+identifier(p['id']))
     if op=='memory.add':
         text=p['text']
