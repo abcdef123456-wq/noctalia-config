@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""nc-bac : le bac à sable systemd --user partagé par nc-noeud (session de confiance) et nc-ia (IA en ligne de commande).
+Un seul endroit pour les listes de chemins secrets et la construction de la commande systemd-run : les deux tournent
+dans le MÊME bac, avec les mêmes droits. Module chargé par ses appelants (SourceFileLoader, comme nc-assistant) ; ne
+fait rien tout seul. Aucune dépendance : tout ce qui change d'un appelant à l'autre (HOME, lecture des réglages,
+recherche d'un programme) est passé en paramètre."""
+import os
+import shlex
+from pathlib import Path
+
+# Chemins protégés (relatifs au dossier personnel), vérifiés après résolution des liens symboliques, appliqués même
+# après un « Autoriser » (sur l'écran ou à distance).
+# Lecture et écriture : clés, identifiants et secrets (navigateurs, trousseaux, CLI d'IA et de cloud, messageries, le
+# serveur JARVIS local et son .env), et ce qui s'exécute au démarrage (services, démarrage automatique, shells).
+PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".config/autostart", ".config/environment.d",
+            ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".zshrc", ".zshenv", ".zprofile", ".zlogin",
+            ".zlogout", ".profile", ".config/fish", ".xprofile", ".xinitrc", ".xsession", ".xsessionrc",
+            ".pam_environment", ".config/nc/assistant.conf", ".config/nc/ia.conf",
+            ".config/gh", ".config/hub", ".git-credentials", ".netrc", ".password-store", ".local/share/keyrings",
+            ".local/share/kwalletd", ".mozilla", ".librewolf", ".zen", ".floorp", ".thunderbird", ".config/chromium",
+            ".config/google-chrome", ".config/BraveSoftware", ".config/vivaldi", ".config/microsoft-edge",
+            ".var/app/org.mozilla.firefox", ".var/app/org.chromium.Chromium", ".var/app/com.google.Chrome",
+            ".var/app/com.brave.Browser", ".claude", ".claude.json", ".codex", ".gemini", ".config/opencode",
+            ".local/share/opencode", ".aws", ".azure", ".config/gcloud", ".kube", ".docker", ".pgpass", ".npmrc",
+            ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".config/rclone",
+            ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis",
+            ".local/state/nc-jarvis/connection.conf", ".config/nc/assistant.conf.backup-*", ".config/nc/noeud-totp.json"]
+
+# ── Bac à sable (exec en session de confiance) ────────────────────────────────────────────────────────────────────
+# Une session de confiance fait sauter la confirmation de chaque commande ; un contrôle sur le texte de la commande se
+# contourne toujours (une commande peut lire ~/.ssh, lancer sudo, ou simuler des frappes). On enferme donc tout exec de
+# session dans une unité systemd --user transitoire (sans root) :
+#   - PrivateUsers + NoNewPrivileges : pas d'élévation (sudo setuid refusé) ;
+#   - ProtectHome=read-only + ReadOnlyPaths=~ : rien ne s'écrit dans ~ (sauf le dossier de travail en ReadWritePaths ;
+#     ReadOnlyPaths couvre aussi un ~ sur tmpfs, que ProtectHome seul laisserait inscriptible) ;
+#   - InaccessiblePaths : les secrets et la config deviennent illisibles (le réseau reste ouvert : tout ce qui se lit
+#     peut partir), plus large que PROTEGES ;
+#   - tout $XDG_RUNTIME_DIR inaccessible : bus systemd/D-Bus (sinon systemd-run --user relance une unité HORS du bac),
+#     hypr (l'ipc de Hyprland lancerait une commande hors du bac), wayland (frappe simulée), agent ssh/gpg, trousseau,
+#     quickshell, pipewire, tmux ;
+#   - PrivateTmp : /tmp privé (X11 @/tmp/.X11-unix, sockets tmux sous /tmp) ;
+#   - RestrictAddressFamilies=AF_INET AF_INET6 : plus aucun socket unix, donc plus de socket abstrait (X11, bus) → un
+#     exec de session ne peut lancer aucune appli graphique (lancer une appli reste confirmé une par une) ;
+#   - RuntimeMaxSec : tué à l'échéance, --collect nettoie l'unité.
+# Vérifié dans le manager UTILISATEUR, sans root, sur systemd 262 (Arch) ; les propriétés existent depuis bien avant
+# systemd 254 (openSUSE Leap 15.6, la plus ancienne visée). Toute erreur de mise en place (systemd-run absent, pas de
+# bus utilisateur, namespaces refusés comme sur Ubuntu avec apparmor restrict_unprivileged_userns) → pas de session,
+# confirmation normale : jamais une exécution hors du bac. Approche choisie : liste noire (InaccessiblePaths) plutôt que
+# liste blanche (ProtectHome=tmpfs + BindReadOnlyPaths), car une rafale d'outils veut lire des chemins variés du dépôt
+# et du système ; on bloque ce qui est secret et on garde le reste lisible, le bac empêchant la fuite par les sockets.
+# Le réseau reste ouvert dans le bac : tout ce qui s'y lit peut partir. D'où une liste plus large que PROTEGES
+# (historiques, jetons d'outils, navigateurs, messageries, gestionnaires de mots de passe) ; ce qui n'y est pas reste
+# lisible, tes dossiers à toi s'ajoutent par NOEUD_BAC_INTERDITS.
+BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-config",
+                 ".ssh", ".gnupg", ".local/share/keyrings", ".password-store",
+                 ".mozilla", ".config/chromium", ".config/google-chrome", ".config/BraveSoftware",
+                 ".config/discord", ".config/gh", ".config/git", ".git-credentials", ".netrc", ".docker", ".kube",
+                 ".aws", ".claude", ".claude.json", ".codex", ".gemini", ".qwen", ".config/rclone",
+                 # historiques (des jetons y sont souvent tapés à la main)
+                 ".zsh_history", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
+                 ".psql_history", ".mysql_history", ".lesshst", ".local/share/nvim/shada",
+                 # jetons d'outils
+                 ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".gradle/gradle.properties",
+                 ".m2/settings.xml", ".ollama", ".config/hub", ".config/glab-cli", ".config/gcloud", ".azure",
+                 ".config/doctl", ".terraform.d", ".wakatime.cfg", ".config/Code/User/globalStorage", ".vscode-server",
+                 # applis Flatpak (navigateurs, messageries…), autres navigateurs
+                 ".var/app", ".librewolf", ".zen", ".floorp", ".waterfox", ".config/vivaldi", ".config/microsoft-edge",
+                 ".config/opera", ".config/chromium-browser",
+                 # messageries (une session copiée vaut le compte)
+                 ".local/share/TelegramDesktop", ".config/Signal", ".thunderbird", ".config/Slack", ".config/vesktop",
+                 ".config/legcord", ".config/WebCord", ".config/Element",
+                 # mots de passe, accès distants, synchronisation
+                 ".config/Bitwarden", ".config/op", ".config/keepassxc", ".local/share/remmina", ".config/remmina",
+                 ".config/syncthing"]
+
+
+
+
+def perso(reglage):
+    """NOEUD_BAC_INTERDITS : tes dossiers en plus (relatifs à ~, séparés par « : », « ~/ » permis). None si une entrée
+    ne convient pas (chemin absolu, « .. », guillemet, barre oblique inverse) : alors pas de bac, donc pas de session,
+    plutôt qu'un dossier que tu crois protégé et qui ne l'est pas."""
+    rels = []
+    for x in (reglage("NOEUD_BAC_INTERDITS", "") or "").split(":"):
+        x = x.strip()
+        if x.startswith("~/"):
+            x = x[2:]
+        if not x:
+            continue
+        if x.startswith("/") or ".." in Path(x).parts or any(c in x for c in '"\\\n'):
+            return None
+        rels.append(x)
+    return rels
+
+
+def inaccessibles(home, reglage, libres=()):
+    """Les chemins rendus illisibles dans le bac : BAC_INTERDITS, PROTEGES et NOEUD_BAC_INTERDITS qui existent (jamais
+    sous /tmp, que PrivateTmp masque déjà), plus tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd
+    refuse l'unité). libres : chemins relatifs à ~ laissés lisibles (les identifiants du moteur d'IA lancé, et les siens
+    seulement). None si NOEUD_BAC_INTERDITS ne convient pas."""
+    vus = []
+    perso_ = perso(reglage)
+    if perso_ is None:
+        return None
+    home = Path(home)
+    for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES + perso_):
+        if rel in libres:
+            continue
+        if any(c in rel for c in "*?["):                       # motif (ex. assistant.conf.backup-*) : on étend
+            for q in home.glob(rel):
+                if q.exists():
+                    vus.append(str(q))
+            continue
+        p = home / rel
+        if p.exists():
+            vus.append(str(p))
+    run = os.environ.get("XDG_RUNTIME_DIR")
+    if run and os.path.isdir(run):
+        vus.append(run)
+    return list(dict.fromkeys(vus))
+
+
+def _prop(nom, chemin):
+    """nom=chemin ; entre guillemets si le chemin a une espace (systemd sépare sinon). None si guillemet ou barre
+    oblique inverse : pas de bac plutôt qu'un chemin mal lu."""
+    if '"' in chemin or "\\" in chemin or "\n" in chemin:
+        return None
+    return f'{nom}="{chemin}"' if " " in chemin else f"{nom}={chemin}"
+
+
+def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seule=(), libres=(), env=(), unite=None,
+         reseau_prive=False):
+    """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent (ou un chemin inadmissible).
+    cmd : une chaîne (passée à /bin/sh -c) ou une liste (exécutée telle quelle, sans shell).
+    ecriture : les seuls chemins inscriptibles (ReadWritePaths) ; lecture_seule : des chemins gardés en lecture seule même
+    dans un dossier inscriptible ; libres : voir inaccessibles() ; env : noms de variables transmises (valeur prise dans
+    l'environnement de systemd-run) ; unite : nom de l'unité (pour l'arrêter proprement) ; reseau_prive : aucun réseau."""
+    sr = programme("systemd-run")
+    if not sr:
+        return None
+    # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
+    # sans lui, la sonde échoue et il n'y a pas de bac. SystemCallFilter retire ptrace, process_vm_* et le
+    # trousseau du noyau (partagé entre espaces de noms). ProtectProc/ProcSubset ne valent pas pour --user : pas mis.
+    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
+             "ProtectHome=read-only", "PrivateTmp=yes",
+             "RestrictAddressFamilies=AF_INET AF_INET6", "ReadOnlyPaths=" + str(home)]
+    for c in ecriture:
+        props.append(_prop("ReadWritePaths", str(c)))
+    for c in lecture_seule:
+        props.append(_prop("ReadOnlyPaths", str(c)))
+    props.append("RuntimeMaxSec=" + str(max(1, int(budget))))
+    if None in props:
+        return None
+    out = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect"]
+    if unite:
+        out.append("--unit=" + unite)
+    for p in props:
+        out += ["-p", p]
+    if reseau_prive:
+        out += ["-p", "PrivateNetwork=yes"]                     # aucun réseau, 127.0.0.1 compris (services locaux)
+    interdits = inaccessibles(home, reglage, libres)
+    if interdits is None:
+        return None
+    for x in interdits:
+        # Un -p par chemin, entre guillemets (systemd sépare sinon aux espaces) ; un guillemet ou une barre oblique
+        # inverse dans le chemin : pas de bac plutôt qu'un chemin mal lu
+        if '"' in x or "\\" in x:
+            return None
+        out += ["-p", 'InaccessiblePaths="' + x + '"']
+    for nom in env:
+        out.append("--setenv=" + nom)
+    # Le dossier de travail passe par un « cd » dans la commande, pas par WorkingDirectory : systemd refuse l'unité
+    # quand WorkingDirectory tombe sur un tmpfs (ex. /dev/shm des tests), alors qu'un cd marche partout.
+    if isinstance(cmd, str):
+        out += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && " + cmd]
+    else:
+        out += ["--", "/bin/sh", "-c", 'cd "$1" && shift && exec "$@"', "sh", str(cwd)] + [str(x) for x in cmd]
+    return out

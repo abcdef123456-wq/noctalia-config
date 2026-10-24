@@ -78,6 +78,7 @@ HOME_FILES=(
   .local/bin/nc-claude
   .local/bin/nc-assistant
   .local/bin/nc-noeud
+  .local/bin/nc-bac
   .local/bin/nc-jarvis
   .local/bin/nc-dictee
   .local/bin/nc-ia

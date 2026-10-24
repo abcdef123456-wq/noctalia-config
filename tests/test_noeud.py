@@ -172,7 +172,7 @@ class Base(unittest.TestCase):
         self.home = Path(d.name)
         self.bin = self.home / ".local/bin"
         self.bin.mkdir(parents=True)
-        for nom in ("nc-noeud", "nc-assistant"):
+        for nom in ("nc-noeud", "nc-assistant", "nc-bac"):
             shutil.copy2(BIN / nom, self.bin / nom)
         for nom, texte in FAUX.items():
             (self.bin / nom).write_text(texte)
@@ -2126,7 +2126,7 @@ class BacReel(ModuleCharge):
         self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
         home = Path(d)
         (home / ".local/bin").mkdir(parents=True)
-        for nom in ("nc-noeud", "nc-assistant"):
+        for nom in ("nc-noeud", "nc-assistant", "nc-bac"):
             shutil.copy2(BIN / nom, home / ".local/bin" / nom)
         (home / ".ssh").mkdir(mode=0o700)
         (home / ".ssh/id_ed25519").write_text("FAUSSE-CLE-PRIVEE-DE-TEST")
