@@ -1587,11 +1587,16 @@ def bac_argv(cmd, cwd, budget):
     # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
     # sans lui, la sonde échoue et il n'y a pas de session. SystemCallFilter retire ptrace, process_vm_* et le
     # trousseau du noyau (partagé entre espaces de noms). ProtectProc/ProcSubset ne valent pas pour --user : pas mis.
-    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
+    # OnFailure= vide : une commande de session qui échoue n'est pas une panne du bureau (sinon le drop-in global
+    # service.d/nc-panne.conf afficherait « nc-panne » pour chaque échec, et chaque test du vrai bac aussi)
+    props = ["OnFailure=", "PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
              "ProtectHome=read-only", "PrivateTmp=yes",
              "RestrictAddressFamilies=AF_INET AF_INET6", "ReadOnlyPaths=" + str(HOME),
              "ReadWritePaths=" + str(travail), "RuntimeMaxSec=" + str(max(1, int(budget)))]
-    argv = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect"]
+    # --expand-environment=no (systemd 254 ; le bac en exige 257) : sinon le gestionnaire remplace « ${VAR} » dans la
+    # commande par SON environnement, même entre apostrophes (une commande « echo '${OPENAI_API_KEY}' » sortait la clé,
+    # « "${f}" » d'une boucle devenait vide). --description : la commande n'est plus recopiée dans le journal.
+    argv = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect", "--expand-environment=no", "--description=nc-noeud"]
     for p in props:
         argv += ["-p", p]
     if reglage("NOEUD_BAC_RESEAU", "oui") == "non":

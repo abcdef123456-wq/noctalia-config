@@ -2231,6 +2231,18 @@ class BacReel(ModuleCharge):
             self.assertIn("PrivateNetwork=yes", m.bac_argv(":", "/", 10))
             self.assertTrue(asyncio.run(m.bac_tient()), "le bac sans réseau tient aussi")
 
+    def test_dollars_arrivent_tels_quels(self):
+        # systemd ne développe plus « ${VAR} » : entre apostrophes, la commande les reçoit littéralement
+        m, _ = self.charger_bac()
+        r = self.lancer_bac(m, "echo '${HOME}' '${OPENAI_API_KEY}' '$$'")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r.get("stdout", "").strip(), "${HOME} ${OPENAI_API_KEY} $$")
+        argv = m.bac_argv(":", "/", 10)
+        self.assertIn("--expand-environment=no", argv)
+        self.assertIn("--description=nc-noeud", argv)
+        i = argv.index("OnFailure=")
+        self.assertEqual(argv[i - 1], "-p", "OnFailure vide : pas de notification nc-panne pour un échec de commande")
+
     def test_proprietes_du_bac(self):
         m, _ = self.charger_bac()
         argv = m.bac_argv(":", "/", 10)
