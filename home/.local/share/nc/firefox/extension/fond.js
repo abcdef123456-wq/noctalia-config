@@ -102,7 +102,9 @@ function theme(p) {
       toolbar_bottom_separator: fond, toolbar_top_separator: fond, toolbar_vertical_separator: fond,
     },
     // Pages internes (réglages, modules…) du même côté que la palette : avec "auto", elles suivaient le système et
-    // une palette sombre sur un système clair donnait des réglages clairs
+    // une palette sombre sur un système clair donnait des réglages clairs. Les sites web aussi, avec « Apparence des
+    // sites : automatique » (le réglage par défaut) : ils suivent alors le fond d'écran, comme les thèmes Sombre et
+    // Clair de Firefox
     properties: { color_scheme: sombre ? "dark" : "light", content_color_scheme: sombre ? "dark" : "light" },
   };
 }

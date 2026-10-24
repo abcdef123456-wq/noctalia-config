@@ -38,7 +38,8 @@ os_release="${NC_OS_RELEASE:-/etc/os-release}"
 osr() { sed -n "s/^$1=//p" "$os_release" 2>/dev/null | tail -1 | tr -d "\"'"; }   # lu, jamais exécuté
 os_id="$(osr ID)"
 gestionnaire() {
-  local x g
+  local - x g
+  set -f                                     # ID_LIKE découpé en mots, jamais développé en noms de fichiers (« * »)
   for x in $os_id $(osr ID_LIKE); do
     case "$x" in
       arch) g=pacman ;; fedora|rhel|centos|nobara) g=dnf ;; debian|ubuntu) g=apt ;; suse|opensuse*|sles|sled) g=zypper ;;
