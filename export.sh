@@ -200,6 +200,12 @@ comparer_shell() { # comparer_shell REL BASE INSTALLE
            | sed -n '/^@@/,$ { /^@@/d; /^\\/d; p }' || true)"
   rm -f -- "$norm"
   [ -n "$ecart" ] || return 0
+  # Jamais un secret à l'écran (export.sh est aussi lancé par des assistants, qui gardent tout) : la valeur de chaque
+  # affectation (NOM=…) est masquée, et tout ce qui ressemble à un jeton sur le reste de la ligne.
+  ecart="$(printf '%s\n' "$ecart" | sed -E \
+    -e 's/([A-Za-z_][A-Za-z0-9_]*=)("[^"]*"?|\x27[^\x27]*\x27?|[^[:space:];|&]*)/\1…/g' \
+    -e 's/(sk-|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|AIza)[A-Za-z0-9_-]+/\1…/g' \
+    -e 's/[0-9]{8,10}:[A-Za-z0-9_-]{30,}/…/g; s/[A-Za-z0-9_+=-]{32,}/…/g')"
   mapfile -t lignes <<< "$ecart"
   n=${#lignes[@]}
   # shellcheck disable=SC2088  # « ~/ » est du texte affiché, pas un chemin à développer
@@ -221,7 +227,7 @@ refuser() { echo "$(t "Export refusé : $1" "Export refused: $2")" >&2; }
 cible_sure() { # cible_sure REL INSTALLE
   local cible c h r
   cible="$(realpath -e -- "$2")" || { refuser "$2 introuvable." "$2 not found."; return 1; }
-  h="$(realpath -e -- "$HOME")"; r="$(realpath -e -- "$REPO")"
+  h="$(realpath -e -- "$HOME")" && r="$(realpath -e -- "$REPO")" || { refuser "dossier introuvable." "folder not found."; return 1; }
   c="${cible%/}"                                         # « / » devient « » : tout est dessous
   case "$h/" in "$c"/*) refuser "~/$1 mène à ton dossier personnel ou au-dessus ($cible)." "~/$1 leads to your home folder or above ($cible)."; return 1 ;; esac
   case "$r/" in "$c"/*) refuser "~/$1 mène au dépôt ou au-dessus ($cible)." "~/$1 leads to the repository or above ($cible)."; return 1 ;; esac
@@ -233,13 +239,19 @@ cible_sure() { # cible_sure REL INSTALLE
 # shellcheck disable=SC2088
 liens_internes() { # liens_internes REL INSTALLE DESTINATION
   local rel="$1" installe="$2" dest="$3" racine l src cible
-  racine="$(realpath -e -- "$installe")"
+  # Appelée avec « || return 1 » : set -e ne joue plus ici, chaque échec est donc traité à la main.
+  racine="$(realpath -e -- "$installe")" || { refuser "~/$rel introuvable." "~/$rel not found."; return 1; }
   while IFS= read -r -d '' l; do
     src="$installe/${l#"$dest"/}"
     [ -L "$src" ] || continue                       # un lien venu du dépôt : vu par le contrôle final
     cible="$(realpath -e -- "$src" 2>/dev/null)" || { refuser "lien cassé ~/$rel/${l#"$dest"/}." "broken link ~/$rel/${l#"$dest"/}."; return 1; }
+    if [ -d "$cible" ]; then                         # même sans boucle, il dupliquerait tout un dossier
+      refuser "~/$rel/${l#"$dest"/} est un lien vers un dossier ($cible). Remplace-le par les fichiers eux-mêmes." "~/$rel/${l#"$dest"/} links to a folder ($cible). Replace it with the files themselves."
+      return 1
+    fi
     case "$cible/" in
-      "$racine"/*) rm -f -- "$l"; cp -aL -- "$src" "$l" ;;
+      "$racine"/*)
+        { rm -f -- "$l" && cp -aL -- "$src" "$l"; } || { refuser "copie impossible de ~/$rel/${l#"$dest"/}." "cannot copy ~/$rel/${l#"$dest"/}."; return 1; } ;;
       *) refuser "~/$rel/${l#"$dest"/} est un lien vers l'extérieur du dossier ($cible). Remplace-le par le fichier." "~/$rel/${l#"$dest"/} links outside the folder ($cible). Replace it with the file."; return 1 ;;
     esac
   done < <(find "$dest" -type l -print0)
@@ -298,13 +310,79 @@ printf '%s\n' "-- Généré par nc-profile-sync à chaque changement de profil �
 
 mon=""
 have() { command -v "$1" >/dev/null 2>&1; }
-have hyprctl && { mon=$(hyprctl monitors -j 2>/dev/null | jq -r '([.[] | select(.name | startswith("eDP"))][0] // .[0]).name // empty') || mon=""; }   # hors session Hyprland : pas d'écran
+# Écrans : seulement dans une session Hyprland. Ailleurs hyprctl répond par un message, pas du JSON : ni lui ni jq
+# ne sont utilisés (les repères des écrans sont reposés par alignement avec le dépôt, plus bas).
+mons=""
+if have hyprctl && have jq; then
+  mons="$(hyprctl monitors -j 2>/dev/null)" || mons=""
+  case "${mons#"${mons%%[![:space:]]*}"}" in "["*) ;; *) mons="" ;; esac
+fi
+if [ -n "$mons" ]; then
+  mon="$(jq -r '([.[] | select(.name | startswith("eDP"))][0] // .[0]).name // empty' <<<"$mons" 2>/dev/null)" || mon=""
+fi
 
 while IFS= read -r -d '' f; do
   grep -Iq . "$f" || continue
   sed -i "s|$HOME|@HOME@|g" "$f"
-  [ -n "$mon" ] && sed -i "s|\"$mon\"|\"@MONITOR@\"|g; s|@$mon\"|@@MONITOR@\"|g" "$f"
 done < <(find home -type f -print0)
+
+# Repères par alignement avec le dépôt, sans rien demander à ce PC (écran, échelle, navigateur peuvent avoir changé
+# depuis l'installation) : chaque ligne du dépôt à repères devient un motif (un repère vaut n'importe quel texte,
+# le reste à l'identique). Une ligne installée qui correspond au motif de la ligne du dépôt, à la même place,
+# redevient la ligne du dépôt. Les autres lignes passent par les sed ci-dessous, comme avant.
+# Le nom de l'écran de ce PC devient @MONITOR@ seulement dans les lignes qui ne sont pas déjà celles du dépôt : un
+# exemple du dépôt (« HDMI-A-1 » dans un commentaire) reste tel quel quand c'est justement l'écran branché.
+python3 -I - "$REPO/home" home "$mon" <<'EOF'
+import difflib, re, sys
+from pathlib import Path
+REPERES = re.compile(r"@(?:MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
+                     r"|ILE_CENTRE|NOTIF_NOCTALIA|NOTIF_WIDGET|PLUGIN_ILE)@")
+depot, export, mon = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+
+
+def texte(f):
+    if f.is_symlink() or not f.is_file():
+        return None
+    try:
+        b = f.read_bytes()
+    except OSError:
+        return None
+    if b"\0" in b[:8192]:
+        return None
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+for cible in sorted(export.rglob("*")):
+    t = texte(cible)
+    if t is None:
+        continue
+    x = t.splitlines(keepends=True)
+    r = texte(depot / cible.relative_to(export))
+    a = r.splitlines(keepends=True) if r is not None else []
+    sortie = list(x)
+    if r is not None and REPERES.search(r):
+        motifs = [re.compile("(.*?)".join(re.escape(p) for p in REPERES.split(l.rstrip("\n"))))
+                  if REPERES.search(l) else None for l in a]
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, x, autojunk=False).get_opcodes():
+            if op != "replace":
+                continue
+            i = i1
+            for j in range(j1, j2):
+                for k in range(i, i2):
+                    if motifs[k] and motifs[k].fullmatch(x[j].rstrip("\n")):
+                        sortie[j] = a[k].rstrip("\n") + ("\n" if x[j].endswith("\n") else "")
+                        i = k + 1
+                        break
+    if mon:
+        du_depot = {l.rstrip("\n") for l in a}
+        sortie = [l if l.rstrip("\n") in du_depot
+                  else l.replace(f'"{mon}"', '"@MONITOR@"').replace(f'@{mon}"', '@@MONITOR@"') for l in sortie]
+    if sortie != x:
+        cible.write_text("".join(sortie), encoding="utf-8")
+EOF
 
 # Clavier
 sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/
@@ -312,15 +390,9 @@ sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s
   s/^(\s*if disposition == "systeme" then disposition = )"[^"]*"/\1"@KB_LAYOUT@"/
   s/^(\s*local options = )"[^"]*"/\1"@KB_OPTIONS@"/' home/.config/hypr/nc/clavier.lua
 
-# Navigateur : le navigateur par défaut de ce PC (celui qu'install.sh a mis à la place de @BROWSER@) devient celui
-# de la machine cible ; applis personnelles retirées des favoris
-nav=""
-if have xdg-settings; then
-  IFS= read -r nav < <(timeout 5 xdg-settings get default-web-browser 2>/dev/null || true) || true
-  nav="${nav%.desktop}"
-fi
-case "$nav" in *[!A-Za-z0-9._-]*) nav="" ;; esac       # un identifiant d'appli, rien d'autre dans le sed
-sed -i -E "s/\"firefox-developer-edition\"/\"@BROWSER@\"/g; s/, \"discord\"//g${nav:+; s/\"${nav//./\\.}\"/\"@BROWSER@\"/g}" \
+# Navigateur : le navigateur de ce PC devient celui de la machine cible (les favoris du dépôt sont reposés par
+# l'alignement ci-dessus) ; applis personnelles retirées des favoris
+sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
   home/.config/noctalia/config.toml home/.local/share/noctalia/plugins/nc-launcher/panel.luau
 
 # Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
@@ -334,7 +406,11 @@ sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml
 
 # Écran de verrouillage : positions de cet écran (en points) -> proportions de l'écran de la machine cible
-python3 -I - "$(hyprctl monitors -j 2>/dev/null | jq -r --arg m "$mon" '.[] | select(.name == $m) | "\(.width / .scale) \(.height / .scale)"')" <<'EOF'
+taille=""
+if [ -n "$mons" ]; then
+  taille="$(jq -r --arg m "$mon" '.[] | select(.name == $m) | "\(.width / .scale) \(.height / .scale)"' <<<"$mons" 2>/dev/null)" || taille=""
+fi
+python3 -I - "$taille" <<'EOF'
 import os, re, sys
 p = "home/.config/noctalia/config.toml"
 s = open(p).read()
@@ -378,11 +454,28 @@ for f in sorted(depot.rglob("*")):
         continue
     rel = f.relative_to(depot)
     apres = reperes(export / rel)
-    manque += [f"  {rel} : {m} ({apres[m]}/{n})" for m, n in sorted(avant.items()) if apres[m] < n]
+    perdus = {m for m, n in avant.items() if apres[m] < n}
+    if not perdus:
+        continue
+    try:
+        exportees = set((export / rel).read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        exportees = set()
+    lignes = [(i, l) for i, l in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+              if perdus & set(REPERES.findall(l)) and l not in exportees]
+    manque.append((rel, sorted(perdus), lignes))
 if manque:
-    print(("Export refused: these markers would be replaced by the values of this PC (a sed no longer matches):"
-           if en else "Export refusé : ces repères seraient remplacés par les valeurs de ce PC (un sed ne correspond plus) :"),
-          *manque, sep="\n", file=sys.stderr)
+    for rel, perdus, lignes in manque:
+        print((f"Export refused: home/{rel} would lose {', '.join(perdus)}: on this PC these lines changed beyond "
+               f"their value, so the repository line can no longer be found:" if en else
+               f"Export refusé : home/{rel} perdrait {', '.join(perdus)}. Sur ce PC, ces lignes ont changé au-delà de "
+               f"leur valeur : l'export ne retrouve plus la ligne du dépôt :"), file=sys.stderr)
+        for i, l in lignes:
+            print(f"  {'line' if en else 'ligne'} {i} : {l.strip()}", file=sys.stderr)
+        print((f"  What to do: in ~/{rel}, write these lines again as in the repository (with your value), or first "
+               f"change them in the repository, then export again." if en else
+               f"  Que faire : dans ~/{rel}, remets ces lignes comme dans le dépôt (avec ta valeur), ou modifie-les "
+               f"d'abord dans le dépôt, puis relance l'export."), file=sys.stderr)
     sys.exit(1)
 EOF
 
@@ -400,7 +493,13 @@ fi
 # Contrôle final : rien qui ressemble à un secret, au nom du compte ou à l'écran de cette machine
 user=$(id -un)
 bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{30,}|BEGIN [A-Z ]*PRIVATE KEY" home "$REPO/system" 2>/dev/null || true)
-[ -n "$mon" ] && bad="$bad$(grep -rIl "\"$mon\"" home 2>/dev/null || true)"
+# Le nom de l'écran de ce PC, hors des lignes déjà dans le dépôt (un exemple « HDMI-A-1 » du dépôt n'est pas un écran)
+if [ -n "$mon" ]; then
+  while IFS= read -r f; do
+    nouvelles="$(grep -F "\"$mon\"" "$f" | grep -vxFf <(grep -F "\"$mon\"" "$REPO/$f" 2>/dev/null || true) || true)"
+    [ -z "$nouvelles" ] || bad="$bad"$'\n'"$f"
+  done < <(grep -rIlF "\"$mon\"" home 2>/dev/null || true)
+fi
 # Un lien sous home/ ne mène jamais hors du dépôt : ni chemin absolu, ni « .. », ni nom du compte
 while IFS= read -r -d '' l; do
   c="$(readlink -- "$l")"

@@ -40,7 +40,7 @@ class ExportIsole(unittest.TestCase):
             (self.bin / nom).symlink_to(outil)
         # Le vrai Hyprland n'est jamais joint, même si la session de l'utilisateur est disponible.
         h = self.bin / "hyprctl"
-        h.write_text('#!/bin/sh\nprintf "[]\\n"\n')
+        h.write_text('#!/bin/sh\necho "HYPRLAND_INSTANCE_SIGNATURE not set! (is hyprland running?)"\nexit 1\n')
         h.chmod(0o755)
         shutil.copy2(REPO / "export.sh", self.depot / "export.sh")
         (self.depot / "system").mkdir()
@@ -157,6 +157,25 @@ class ExportIsole(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("perso.jpg est un lien vers l'extérieur du dossier", r.stderr)
 
+    def test_lien_interne_vers_un_dossier_refuse(self):
+        """Un lien interne vers un dossier (ici son propre dossier : une boucle) : cp échouait sur le lien cyclique,
+        l'erreur était ignorée (set -e coupé par « || return 1 ») et le dépôt recevait une copie entière du dossier."""
+        fonds = self.home / "Pictures/Wallpapers"
+        (fonds / "sous").mkdir(parents=True)
+        (fonds / "a.jpg").write_bytes(b"\xff\xd8image")
+        for i in range(10):
+            (fonds / f"copie{i}.jpg").symlink_to("a.jpg")
+        for nom, cible in (("boucle", fonds), ("vers-sous", fonds / "sous")):
+            with self.subTest(nom=nom):
+                lien = fonds / nom
+                lien.symlink_to(cible)
+                for a in (("--preview",), ()):
+                    r = self.exporter(*a)
+                    self.assertEqual(r.returncode, 1, r.stderr)
+                    self.assertIn(f"{nom} est un lien vers un dossier", r.stderr)
+                self.assertFalse((self.depot / "home/Pictures/Wallpapers").exists(), "rien de copié dans le dépôt")
+                lien.unlink()
+
     def test_dossier_lien_vers_le_dossier_personnel_refuse(self):
         """P3 : ~/.config/nvim -> ~ copiait tout le dossier personnel (clé .ssh, jetons) dans home/."""
         (self.home / ".ssh").mkdir()
@@ -224,12 +243,31 @@ class ExportIsole(unittest.TestCase):
             self.assertEqual((self.depot / "home/.zshrc").read_text(), self.ZSHRC, f"export {a}")
             self.assertEqual((self.home / ".zshrc").read_text(), installe, "~/.zshrc n'est jamais modifié")
             self.assertIn("~/.zshrc diffère du dépôt", r.stderr)
-            self.assertIn('+export PATH="@HOME@/.tiers/bin:$PATH"', r.stderr, "l'écart, après normalisation")
+            self.assertIn("+export PATH=…", r.stderr, "l'écart, valeur masquée")
             self.assertIn("~/.zshrc.perso", r.stderr)
             self.assertNotIn(".zshrc", r.stdout.replace("gardé depuis le dépôt", ""), "pas de diff du .zshrc")
         etat = subprocess.run(["git", "-C", str(self.depot), "status", "--porcelain", "--", "home/.zshrc"],
                               env=self.env, capture_output=True, text=True, check=True).stdout
         self.assertEqual(etat, "")
+
+    def test_zshrc_secret_jamais_affiche(self):
+        """L'écart du .zshrc s'affiche, et export.sh est aussi lancé par des assistants qui gardent tout : la valeur
+        des affectations et tout ce qui ressemble à un jeton sont masqués."""
+        self.zshrc_ajoute()
+        secrets = ("sk-proj-" + "Faux" * 10, "ghp_" + "Z" * 36, "abc" * 14, "Pa55-mot-de-passe")
+        with open(self.home / ".zshrc", "a") as f:
+            f.write(f'export OPENAI_API_KEY="{secrets[0]}"\n')
+            f.write(f"GH_TOKEN={secrets[1]} gh auth status\n")
+            f.write(f'curl -H "Authorization: Bearer {secrets[2]}" https://exemple.invalid\n')
+            f.write(f"alias moi='mot={secrets[3]}'\n")
+        for a in (("--preview",), ()):
+            r = self.exporter(*a)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("~/.zshrc diffère du dépôt", r.stderr)
+            self.assertIn("+export OPENAI_API_KEY=…", r.stderr)
+            for s in secrets:
+                self.assertNotIn(s, r.stderr + r.stdout)
+            self.assertNotIn("Faux" * 3, r.stderr)
 
     def test_zshrc_identique_apres_normalisation_sans_avertissement(self):
         (self.depot / "home/.zshrc").write_text(self.ZSHRC + 'export PATH="@HOME@/.local/bin:$PATH"\n')
@@ -268,7 +306,7 @@ class ExportDepotReel(unittest.TestCase):
             if not outil:
                 self.skipTest(nom + " requis")
             (self.bin / nom).symlink_to(outil)
-        self.hyprctl("[]")
+        self.hyprctl(None)                                 # un faux qui échoue, jamais le vrai
         self.env = dict(HOME=str(self.home), PATH=str(self.bin), NC_LANGUE="fr", LC_ALL="C",
                         GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         for a in (("init", "-q"), ("add", "home"),
@@ -276,8 +314,12 @@ class ExportDepotReel(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.depot), *a], env=self.env, capture_output=True, check=True)
 
     def hyprctl(self, moniteurs):
+        """Faux hyprctl : les écrans donnés, ou None pour échouer comme hors session Hyprland."""
         h = self.bin / "hyprctl"
-        h.write_text("#!/bin/sh\ncat <<'FIN'\n" + moniteurs + "\nFIN\n")
+        if moniteurs is None:
+            h.write_text('#!/bin/sh\necho "HYPRLAND_INSTANCE_SIGNATURE not set! (is hyprland running?)"\nexit 1\n')
+        else:
+            h.write_text("#!/bin/sh\ncat <<'FIN'\n" + moniteurs + "\nFIN\n")
         h.chmod(0o755)
 
     def exporter(self, *a):
@@ -320,37 +362,50 @@ class ExportDepotReel(unittest.TestCase):
 
     def test_home_rempli_rend_exactement_les_reperes(self):
         """P2-3 : un sed qui ne correspond plus à son fichier (clavier.lua réécrit avec nc.reglage) publiait la
-        disposition de ce PC à la place de @KB_LAYOUT@. Un HOME aux repères remplis doit redonner le dépôt exact."""
-        self.hyprctl('[{"name": "eDP-1", "width": 1600, "height": 1000, "scale": 1}]')
-        x = self.bin / "xdg-settings"
-        x.write_text('#!/bin/sh\n[ "$*" = "get default-web-browser" ] && echo firefox.desktop\n')
-        x.chmod(0o755)
+        disposition de ce PC à la place de @KB_LAYOUT@. Un HOME aux repères remplis doit redonner le dépôt exact,
+        y compris quand ce PC n'est plus comme à l'installation : les repères sont reposés par alignement."""
         h = str(self.home)
-        commun = {"HOME": h, "MONITOR": "eDP-1", "BROWSER": "firefox", "LCX": "800.0", "LCY1": "300.0",
+        commun = {"HOME": h, "MONITOR": "eDP-1", "LCX": "800.0", "LCY1": "300.0",
                   "LCY2": "405.0", "LCY3": "640.0", "LCY4": "860.0", "LCY5": "930.0", "ICON_THEME": "NC",
                   "DISTRO_LOGO": h + "/.config/noctalia/arch-logo.png"}
         variantes = (
             {"KB_LAYOUT": "fr", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion", "ILE_CENTRE": "",
-             "NOTIF_NOCTALIA": "false", "NOTIF_WIDGET": "", "PLUGIN_ILE": ""},
+             "NOTIF_NOCTALIA": "false", "NOTIF_WIDGET": "", "PLUGIN_ILE": "", "BROWSER": "firefox"},
             {"KB_LAYOUT": "us,fr", "KB_OPTIONS": "grp:win_space_toggle", "POLKIT": "false", "QT_STYLE": "Breeze",
              "ILE_CENTRE": '"nc/ile:pilule"', "NOTIF_NOCTALIA": "true", "NOTIF_WIDGET": ', "notifications"',
-             "PLUGIN_ILE": ', "nc/ile"'},
+             "PLUGIN_ILE": ', "nc/ile"', "BROWSER": "org.chromium.Chromium"},
         )
+        # Ce que hyprctl répond au moment de l'export (l'installation, elle, a vu eDP-1 en 1600 × 1000, échelle 1)
+        ecrans = {
+            "comme à l'installation": '[{"name": "eDP-1", "width": 1600, "height": 1000, "scale": 1}]',
+            "hors session": None,
+            "couvercle fermé, écran externe seul": '[{"name": "HDMI-A-1", "width": 2560, "height": 1440, "scale": 1}]',
+            "autre échelle": '[{"name": "eDP-1", "width": 1600, "height": 1000, "scale": 1.25}]',
+        }
+        # Navigateur changé depuis l'installation : l'export ne le demande plus, il est ignoré
+        x = self.bin / "xdg-settings"
+        x.write_text('#!/bin/sh\necho brave-browser.desktop\n')
+        x.chmod(0o755)
         for v in variantes:
-            with self.subTest(KB_LAYOUT=v["KB_LAYOUT"], PLUGIN_ILE=v["PLUGIN_ILE"]):
-                shutil.rmtree(self.home)
-                self.home.mkdir()
-                self.installer({**commun, **v})
-                cl = (self.home / ".config/hypr/nc/clavier.lua").read_text()
-                self.assertNotIn("@KB_LAYOUT@", cl, "le HOME a bien ses valeurs")
-                e = self.exporter()
-                self.assertEqual(e.returncode, 0, e.stderr[-3000:])
-                diff = subprocess.run(["git", "-C", str(self.depot), "diff", "--", "home"], env=self.env,
-                                      capture_output=True, text=True).stdout
-                self.assertEqual(self.etat(), "", diff[:4000])
+            for cas, moniteurs in ecrans.items():
+                with self.subTest(KB_LAYOUT=v["KB_LAYOUT"], cas=cas):
+                    self.hyprctl(moniteurs)
+                    shutil.rmtree(self.home)
+                    self.home.mkdir()
+                    self.installer({**commun, **v})
+                    cl = (self.home / ".config/hypr/nc/clavier.lua").read_text()
+                    self.assertNotIn("@KB_LAYOUT@", cl, "le HOME a bien ses valeurs")
+                    e = self.exporter()
+                    self.assertEqual(e.returncode, 0, e.stderr[-3000:])
+                    self.assertNotIn("parse error", e.stdout + e.stderr)
+                    self.assertNotIn("jq:", e.stdout + e.stderr)
+                    diff = subprocess.run(["git", "-C", str(self.depot), "diff", "--", "home"], env=self.env,
+                                          capture_output=True, text=True).stdout
+                    self.assertEqual(self.etat(), "", diff[:4000])
 
     def test_repere_perdu_refuse(self):
-        """Un repère que plus aucun sed ne remet (ici la disposition du clavier écrite autrement) : export refusé."""
+        """Un repère que plus rien ne remet (ici la ligne du clavier réécrite autrement) : export refusé, avec le
+        fichier, la ligne et quoi faire."""
         self.installer({"HOME": str(self.home)})
         cl = self.home / ".config/hypr/nc/clavier.lua"
         cl.write_text(cl.read_text().replace('"@KB_LAYOUT@"', "'fr'"))
@@ -358,5 +413,7 @@ class ExportDepotReel(unittest.TestCase):
         for a in (("--preview",), ()):
             e = self.exporter(*a)
             self.assertEqual(e.returncode, 1, e.stdout[-2000:])
-            self.assertIn("clavier.lua : @KB_LAYOUT@ (0/2)", e.stderr)
+            self.assertIn("home/.config/hypr/nc/clavier.lua perdrait @KB_LAYOUT@", e.stderr)
+            self.assertIn('ligne 4 : local disposition = nc.reglage("CLAVIER_DISPOSITION", "@KB_LAYOUT@")', e.stderr)
+            self.assertIn("Que faire : dans ~/.config/hypr/nc/clavier.lua", e.stderr)
         self.assertEqual((self.depot / "home/.config/hypr/nc/clavier.lua").read_text(), avant)
