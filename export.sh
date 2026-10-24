@@ -29,23 +29,6 @@ verifier_propre() {
 }
 if [ "$preview" = 0 ]; then verifier_propre || exit 1; fi
 
-# La version installée (notée par install.sh, donc par nc-maj, à la fin d'une installation réussie) plus ancienne que
-# le dépôt : les fichiers de ~ n'ont pas encore les ajouts récents du dépôt, et l'export les effacerait. En aperçu, un
-# avertissement ; sinon l'export s'arrête (NC_EXPORT_MALGRE_TOUT=1 si tu as copié ces fichiers à la main).
-installee=""
-[ -r "$HOME/.config/nc/version-installee" ] && { IFS= read -r installee < "$HOME/.config/nc/version-installee" || true; }
-if [ -n "$installee" ] && git -C "$REPO" rev-parse -q --verify "$installee^{commit}" >/dev/null 2>&1 \
-   && [ "$(git -C "$REPO" rev-parse "$installee^{commit}")" != "$(git -C "$REPO" rev-parse HEAD)" ] \
-   && git -C "$REPO" merge-base --is-ancestor "$installee" HEAD 2>/dev/null \
-   && ! git -C "$REPO" diff --quiet "$installee" HEAD -- home 2>/dev/null; then
-  retard="$(git -C "$REPO" rev-list --count "$installee..HEAD" -- home 2>/dev/null || echo "?")"
-  echo "$(t "Attention : ce PC a une installation plus ancienne que le dépôt ($retard commit(s) touchent home/ depuis). L'export effacerait leurs ajouts. Lance d'abord nc-maj (ou ./install.sh)." "Warning: this PC runs an older installation than the repository ($retard commit(s) touch home/ since). Exporting would erase their additions. Run nc-update (or ./install.sh) first.")" >&2
-  if [ "$preview" = 0 ] && [ "${NC_EXPORT_MALGRE_TOUT:-}" != 1 ]; then
-    echo "$(t "Export annulé. Si tu as copié ces fichiers à la main dans ~, relance avec NC_EXPORT_MALGRE_TOUT=1." "Export cancelled. If you copied these files into ~ by hand, run again with NC_EXPORT_MALGRE_TOUT=1.")" >&2
-    exit 1
-  fi
-fi
-
 # Toutes les substitutions et vérifications se font à côté du dépôt existant.
 stage="$(mktemp -d "$REPO/.nc-export.XXXXXX")"
 nettoyer() {
@@ -221,7 +204,13 @@ comparer_shell() { # comparer_shell REL BASE INSTALLE
   # un jeton se cache n'importe où dans une ligne) : seulement le premier mot de chaque ligne, et le nom affecté.
   ecart="$(printf '%s\n' "$ecart" | python3 -I -c '
 import re, sys
-MOT = re.compile(r"[A-Za-z0-9_.-]{1,24}|\[\[|#|\{|\}|\(|\)")
+import shutil
+MOT = re.compile(r"[A-Za-z0-9_.-]{1,40}")
+CLES = {"export", "alias", "unalias", "source", ".", "if", "then", "else", "elif", "fi", "for", "while", "until",
+        "do", "done", "case", "esac", "function", "local", "typeset", "declare", "readonly", "integer", "unset",
+        "setopt", "unsetopt", "autoload", "bindkey", "zstyle", "zmodload", "compdef", "eval", "exec", "test", "[",
+        "[[", "]]", "{", "}", "(", ")", "#", "echo", "print", "printf", "cd", "return", "path", "fpath", "PATH",
+        "zle", "emulate", "builtin", "command", "hash", "trap", "umask", "ulimit", "set", "shift", "read"}
 NOM = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)\+?=")
 for l in sys.stdin.read().splitlines():
     signe, reste = l[:1], l[1:].strip()
@@ -234,8 +223,8 @@ for l in sys.stdin.read().splitlines():
     if nom and nom.start(1) == reste.index(premier):
         print(f"{signe}{nom[1]}=…")
         continue
-    jeton = re.match(r"sk-|gh[pousr]_|github_pat_|glpat-|xox|AIza|[0-9]{6,}", premier)
-    affiche = premier if MOT.fullmatch(premier) and not jeton else "…"
+    connu = premier in CLES or (MOT.fullmatch(premier) and shutil.which(premier))
+    affiche = premier if connu else "…"
     print(f"{signe}{affiche} {nom[1]}=…" if nom else f"{signe}{affiche}" + (" …" if len(mots) > 1 else ""))
 ')"
   mapfile -t lignes <<< "$ecart"
@@ -465,7 +454,7 @@ sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s
 
 # Navigateur : le navigateur de ce PC devient celui de la machine cible (les favoris du dépôt sont reposés par
 # l'alignement ci-dessus) ; applis personnelles retirées des favoris
-sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
+sed -i -E 's/^(pinned = \[|local PINNED = \{ )"firefox-developer-edition"/\1"@BROWSER@"/; s/, "discord"//g' \
   home/.config/noctalia/config.toml home/.local/share/noctalia/plugins/nc-launcher/panel.luau
 
 # Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
@@ -473,7 +462,7 @@ sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_th
 
 # Centre de la barre : île Quickshell (vide) ou plugin nc/ile, choisi par install.sh
 sed -i -E 's/^center = \[("nc\/ile:pilule")?\]/center = [@ILE_CENTRE@]/' home/.config/noctalia/config.toml
-sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?([],])/"group:status"@NOTIF_WIDGET@\2/; /^enabled = \[/{s/, "nc\/ile"//; s/(@PLUGIN_ILE@)?\]/@PLUGIN_ILE@]/}' home/.config/noctalia/config.toml
+sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?([],])/"group:status"@NOTIF_WIDGET@\2/; /^enabled = \[/{s/"nc\/ile", //; s/, "nc\/ile"//; s/(@PLUGIN_ILE@)?\]/@PLUGIN_ILE@]/}' home/.config/noctalia/config.toml
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml
@@ -500,6 +489,61 @@ def y(m):
 sec = re.sub(r"^cx = ([0-9.]+)$", lambda m: "cx = @LCX@" if abs(float(m.group(1)) - lw / 2) < 2 else m.group(0), sec, flags=re.M)
 sec = re.sub(r"^cy = ([0-9.]+)$", y, sec, flags=re.M)
 open(p, "w").write(head + sep + sec + sep2 + rest)
+EOF
+
+# Anciennes versions : un fichier de ~ qui n'a pas reçu les derniers changements du dépôt (installation en retard)
+# effacerait ces changements. Fichier par fichier, après toutes les normalisations (le dépôt garde les repères) : un
+# contenu qui diffère de HEAD mais qui a déjà existé à ce chemin dans l'historique est une ancienne version du
+# dépôt. Il n'est pas publié (le fichier du dépôt reste), aperçu compris ; NC_EXPORT_MALGRE_TOUT=1 le publie quand
+# même (retour en arrière voulu). Juste après ton propre export, ~ et HEAD sont pareils : rien n'est bloqué.
+python3 -I - "$REPO" home "${NC_EXPORT_MALGRE_TOUT:-}" <<'EOF'
+import hashlib, os, shutil, subprocess, sys
+from pathlib import Path
+depot, export, malgre = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] == "1"
+en = os.environ.get("NC_LANGUE") == "en"
+
+
+def git(*a):
+    return subprocess.run(["git", "-C", str(depot), *a], capture_output=True, text=True)
+
+
+r = git("ls-tree", "-r", "-z", "HEAD", "--", "home")
+if r.returncode != 0:
+    sys.exit(0)                                         # pas un dépôt git : rien à comparer
+tete = {}
+for e in filter(None, r.stdout.split("\0")):
+    meta, chemin = e.split("\t", 1)
+    if meta.split()[1] == "blob":
+        tete[chemin] = meta.split()[2]
+anciens = 0
+for f in sorted(export.rglob("*")):
+    if f.is_symlink() or not f.is_file():
+        continue
+    rel = "home/" + f.relative_to(export).as_posix()
+    b = f.read_bytes()
+    blob = hashlib.sha1(b"blob %d\0" % len(b) + b).hexdigest()
+    if tete.get(rel) == blob:
+        continue
+    commits = git("log", "--format=%h", f"--find-object={blob}", "HEAD", "--", rel).stdout.split()
+    if not commits:
+        continue                                        # contenu nouveau : publié
+    anciens += 1
+    c, nom = commits[-1], rel[5:]
+    if malgre:
+        print(f"~/{nom} is an old repository version (commit {c}): published anyway (NC_EXPORT_MALGRE_TOUT=1)" if en
+              else f"~/{nom} est une ancienne version du dépôt (commit {c}) : publié quand même (NC_EXPORT_MALGRE_TOUT=1)",
+              file=sys.stderr)
+        continue
+    if (depot / rel).is_file():
+        shutil.copy2(depot / rel, f)                    # le fichier du dépôt reste
+    else:
+        f.unlink()                                      # retiré du dépôt depuis : pas republié
+    print(f"~/{nom} is an old repository version (commit {c}): not published; run nc-update to update" if en
+          else f"~/{nom} est une ancienne version du dépôt (commit {c}) : pas publié ; nc-maj pour te mettre à jour",
+          file=sys.stderr)
+if anciens and not malgre:
+    print("If going back is intended, run again with NC_EXPORT_MALGRE_TOUT=1." if en
+          else "Si ce retour en arrière est voulu, relance avec NC_EXPORT_MALGRE_TOUT=1.", file=sys.stderr)
 EOF
 
 # Repères : chaque repère d'install.sh d'un fichier du dépôt y reste, autant de fois. Sinon un sed ne correspond plus

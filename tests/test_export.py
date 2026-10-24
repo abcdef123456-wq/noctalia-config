@@ -221,49 +221,61 @@ class ExportIsole(unittest.TestCase):
                 self.assertIn("à vérifier avant de publier", r.stderr)
                 self.assertIn("nc-dictee", r.stderr)
 
-    def tete(self):
-        return subprocess.run(["git", "-C", str(self.depot), "rev-parse", "HEAD"], env=self.env, capture_output=True,
-                              text=True, check=True).stdout.strip()
-
-    def test_installation_en_retard_sur_le_depot(self):
-        """Installée plus ancienne que le dépôt : l'export effacerait les ajouts récents du dépôt (par exemple les
-        commentaires ajoutés au-dessus de pinned). Avertissement en aperçu, arrêt sinon, sauf demande explicite."""
-        ancienne = self.tete()
-        (self.home / ".config/nc").mkdir(parents=True)
-        (self.home / ".config/nc/version-installee").write_text(ancienne + "\n")
+    def test_ancienne_version_du_depot_pas_publiee(self):
+        """Un fichier de ~ égal à une version plus ancienne du dépôt (installation en retard) effacerait les derniers
+        changements : il n'est pas publié, fichier par fichier ; les autres le sont. NC_EXPORT_MALGRE_TOUT=1 le publie."""
+        dictee = self.depot / "home/.local/bin/nc-dictee"
+        dictee.write_text("#!/bin/sh\necho version-2\n")       # ~ garde la version d'avant (celle de « base »)
+        self.commit("version 2")
+        (self.home / ".local/bin/nc-ia").parent.mkdir(parents=True, exist_ok=True)
+        (self.home / ".local/bin/nc-ia").write_text("#!/bin/sh\necho retouche-dans-home\n")
         r = self.exporter("--preview")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("installation plus ancienne", r.stderr, "à jour : rien à dire")
-        p = self.depot / "home/.config/noctalia/config.toml"
-        p.write_text("# ajout récent du dépôt\n" + p.read_text())
-        self.commit("ajout")
-        r = self.exporter("--preview")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("installation plus ancienne que le dépôt (1 commit(s)", r.stderr)
-        self.assertIn("nc-maj", r.stderr)
+        self.assertIn("~/.local/bin/nc-dictee est une ancienne version du dépôt (commit ", r.stderr)
+        self.assertIn("pas publié ; nc-maj pour te mettre à jour", r.stderr)
+        self.assertNotIn("echo version-depot", r.stdout, "l'aperçu montre ce que fera l'export")
+        self.assertIn("retouche-dans-home", r.stdout)
         r = self.exporter()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("NC_EXPORT_MALGRE_TOUT=1", r.stderr)
-        self.assertTrue(p.read_text().startswith("# ajout récent du dépôt\n"), "rien d'effacé")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(dictee.read_text(), "#!/bin/sh\necho version-2\n", "le dépôt garde sa version récente")
+        self.assertIn("retouche-dans-home", (self.depot / "home/.local/bin/nc-ia").read_text(), "les autres, publiés")
+        self.commit("export")
         self.env["NC_EXPORT_MALGRE_TOUT"] = "1"
         r = self.exporter()
         self.assertEqual(r.returncode, 0, r.stderr)
-        del self.env["NC_EXPORT_MALGRE_TOUT"]
-        (self.home / ".config/nc/version-installee").write_text(self.tete() + "\n")
-        r = self.exporter("--preview")
-        self.assertNotIn("installation plus ancienne", r.stderr)
+        self.assertIn("publié quand même", r.stderr)
+        self.assertIn("version-depot", dictee.read_text())
+
+    def test_juste_apres_son_propre_export_rien_de_bloque(self):
+        """Un export, son commit, puis une retouche dans ~ et un nouvel export : rien n'est pris pour une ancienne
+        version (le commit vient justement de ~)."""
+        (self.home / ".local/bin/nc-dictee").write_text("#!/bin/sh\necho retouche-1\n")
+        self.assertEqual(self.exporter().returncode, 0)
+        self.commit("export 1")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ancienne version", r.stderr)
+        (self.home / ".local/bin/nc-dictee").write_text("#!/bin/sh\necho retouche-2\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ancienne version", r.stderr)
+        self.assertIn("retouche-2", (self.depot / "home/.local/bin/nc-dictee").read_text())
 
     def test_zshrc_aucune_valeur_affichee(self):
-        """L'écart du .zshrc ne montre que le premier mot de chaque ligne et le nom affecté : aucune valeur, car un
-        mot de passe ou un jeton peut se cacher n'importe où dans une ligne."""
+        """L'écart du .zshrc ne montre que le premier mot de chaque ligne (s'il s'agit d'un mot-clé du shell ou d'une
+        commande) et le nom affecté : aucune valeur, car un mot de passe ou un jeton peut se cacher n'importe où."""
+        for nom in ("curl", "mysql"):                                      # de fausses commandes, jamais lancées
+            (self.bin / nom).write_text("#!/bin/sh\nexit 0\n")
+            (self.bin / nom).chmod(0o755)
         self.zshrc_ajoute()
-        s = ["Sec" + str(i).zfill(2) + "x" for i in range(17)]            # 17 valeurs secrètes repérables
+        s = ["Sec" + str(i).zfill(2) + "x" for i in range(18)]            # 18 valeurs secrètes repérables
         lignes = [
             f'export OPENAI_API_KEY="sk-proj-{s[0]}"',
             f"GH_TOKEN=ghp_{s[1]} gh auth status",
             f'curl -H "Authorization: Bearer {s[2]}" https://exemple.invalid',
             f"curl -u nom:{s[3]} https://exemple.invalid",
             f"git clone https://nom:{s[4]}@exemple.invalid/depot",
+            f"Motdepasse{s[17]}",                                          # un mot de passe collé seul
             f"https://nom:{s[5]}@exemple.invalid",
             f"mysql -p{s[6]} base",
             f"K+={s[7]}",
@@ -284,8 +296,9 @@ class ExportIsole(unittest.TestCase):
         sortie = r.stderr + r.stdout
         for v in s:
             self.assertNotIn(v, sortie)
+        self.assertNotIn("Motdepasse", sortie)
         for attendu in ("+export OPENAI_API_KEY=…", "+GH_TOKEN=…", "+curl …", "+mysql …", "+K=…", "+typeset …",
-                        "+export …", "+alias moi=…", "+git …", "+export PATH=…", "(18 lignes)"):
+                        "+export …", "+git …", "+export PATH=…", "\n  +…\n", "(19 lignes)"):
             self.assertIn(attendu, r.stderr)
 
     ZSHRC = '# géré par le dépôt\nexport EDITOR=nvim\n[[ -r ~/.zshrc.perso ]] && source ~/.zshrc.perso\n'
@@ -509,15 +522,20 @@ class ExportDepotReel(unittest.TestCase):
                 t = t.replace('"nc/batterie"' + v["PLUGIN_ILE"] + "]",
                               '"nc/batterie", "nc/horloge"' + v["PLUGIN_ILE"] + "]")
                 t = t.replace('pinned = ["firefox"', 'pinned = ["vlc", "firefox"', 1)
+                # Un 2e navigateur épinglé exprès (celui que l'ancien sed figé changeait aussi en @BROWSER@)
+                t = t.replace('pinned = ["firefox", "kitty"', 'pinned = ["firefox", "firefox-developer-edition", "kitty"')
                 t = t.replace('"group:status"' + v["NOTIF_WIDGET"] + "]",
                               '"group:status"' + v["NOTIF_WIDGET"] + ', "clock"]')
-                self.assertEqual(t.count("nc/horloge") + t.count('"vlc"') + t.count('"clock"'), 3)
+                self.assertEqual(t.count("nc/horloge") + t.count('"vlc"') + t.count('"clock"')
+                                 + t.count("firefox-developer-edition"), 4)
                 cfg.write_text(t)
                 e = self.exporter()
                 self.assertEqual(e.returncode, 0, e.stderr[-3000:])
                 publie = (self.depot / "home/.config/noctalia/config.toml").read_text()
                 self.assertIn('"nc/batterie", "nc/horloge"@PLUGIN_ILE@]', publie)
                 self.assertIn('pinned = ["vlc", "@BROWSER@", "kitty", "org.gnome.Nautilus"]', publie)
+                self.assertIn('pinned = ["@BROWSER@", "firefox-developer-edition", "kitty", "org.gnome.Nautilus"]',
+                              publie)
                 self.assertIn('"group:status"@NOTIF_WIDGET@, "clock"]', publie)
                 reinstalle = publie
                 for cle, val in valeurs.items():
@@ -526,3 +544,24 @@ class ExportDepotReel(unittest.TestCase):
                 self.assertEqual(self.etat(), " M home/.config/noctalia/config.toml\n")
                 subprocess.run(["git", "-C", str(self.depot), "checkout", "-q", "--", "home"], env=self.env,
                                check=True)
+
+    def test_ile_en_tete_des_plugins_sans_doublon(self):
+        """« "nc/ile" » en PREMIER dans la liste des plugins n'était pas retiré : doublon après installation."""
+        h = str(self.home)
+        self.installer({"HOME": h, "MONITOR": "eDP-1", "LCX": "800.0", "LCY1": "300.0", "LCY2": "405.0",
+                        "LCY3": "640.0", "LCY4": "860.0", "LCY5": "930.0", "ICON_THEME": "NC", "DISTRO_LOGO": "",
+                        "KB_LAYOUT": "fr", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion",
+                        "BROWSER": "firefox", "ILE_CENTRE": '"nc/ile:pilule"', "NOTIF_NOCTALIA": "true",
+                        "NOTIF_WIDGET": ', "notifications"', "PLUGIN_ILE": ', "nc/ile"'})
+        cfg = self.home / ".config/noctalia/config.toml"
+        t = cfg.read_text()
+        avant = '"nc/batterie", "nc/ile"]'
+        self.assertIn(avant, t)
+        t = t.replace('enabled = ["nc/launcher"', 'enabled = ["nc/ile", "nc/launcher"').replace(avant, '"nc/batterie", "nc/horloge"]')
+        cfg.write_text(t)
+        e = self.exporter()
+        self.assertEqual(e.returncode, 0, e.stderr[-3000:])
+        ligne = next(l for l in (self.depot / "home/.config/noctalia/config.toml").read_text().splitlines()
+                     if l.startswith("enabled = ["))
+        self.assertEqual(ligne, 'enabled = ["nc/launcher", "nc/carousel", "nc/sessions", "nc/keys", "nc/verrou", '
+                                '"nc/fenetres", "nc/batterie", "nc/horloge"@PLUGIN_ILE@]')

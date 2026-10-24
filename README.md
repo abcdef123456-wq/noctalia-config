@@ -354,8 +354,9 @@ ou un fond d'écran que tu as retiré de `~`) reste dans `home/`. Pour l'enlever
 `git rm home/<chemin>`, puis commit. Un dossier qui est un lien (par exemple `~/.config/nvim` vers un autre dossier)
 est exporté avec son contenu, jamais le lien lui-même. L'export s'arrête, en disant pourquoi, si ce lien mène à
 ton dossier personnel ou au-dessus, si un lien à l'intérieur mène hors de son dossier, ou si un repère (`@KB_LAYOUT@`,
-`@MONITOR@`…) allait être remplacé par une valeur de ce PC. Il s'arrête aussi si ton installation est plus ancienne
-que le dépôt (lance `nc-maj` d'abord ; `NC_EXPORT_MALGRE_TOUT=1` si tu as copié les fichiers à la main).
+`@MONITOR@`…) allait être remplacé par une valeur de ce PC. Un fichier de `~` qui est une ancienne version du
+dépôt (installation en retard) n'est pas publié : l'export le dit et garde celui du dépôt (lance `nc-maj` ; pour un
+retour en arrière voulu, `NC_EXPORT_MALGRE_TOUT=1`).
 Pour `~/.zshrc`, l'export garde toujours la version du dépôt et te montre les lignes en plus (celles qu'ajoute un
 installateur, par exemple) sans toucher à ton fichier : mets tes ajouts dans `~/.zshrc.perso`, qu'il charge à la fin.
 
