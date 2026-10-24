@@ -6,6 +6,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
+# Sécurité : écriture de quelques fichiers de thème
+TimeoutStartSec=5min
 # Laisse Noctalia finir d'écrire tous ses fichiers de thème.
 ExecStartPre=/usr/bin/sleep 0.5
 ExecStart=%h/.local/bin/nc-theme-sync

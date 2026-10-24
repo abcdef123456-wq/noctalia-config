@@ -3,6 +3,8 @@ Description=Alertes de la machine vers Telegram (batterie faible, service en éc
 
 [Service]
 Type=oneshot
+# Sécurité : envoi Telegram et JARVIS : jamais « activating » des heures
+TimeoutStartSec=10min
 ExecStart=%h/.local/bin/nc-alertes verifier
 Slice=background.slice
 Nice=10

@@ -304,7 +304,7 @@ def notifier(titre, texte, action=None):
         cmd += ["-t", "0", "-A", f"{action[0]}={action[1]}"]
     cmd += ["--", titre, texte]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=None if action else 10)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600 if action else 10)
         return r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return ""

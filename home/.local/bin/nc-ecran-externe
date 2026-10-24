@@ -13,7 +13,7 @@ dernier=0
 
 prevenir() {
   local choix
-  choix="$(notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
+  choix="$(timeout 3600 notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
     --action=session="$(t "Rouvrir la session" "Log Out and Back In")" --action=toujours="$(t "Toujours garder la NVIDIA" "Always Keep NVIDIA On")" \
     "$(t "Écran branché sur la carte NVIDIA" "Display connected to the NVIDIA GPU")" \
     "$(t "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." "This port only works after you log out and back in (the desktop runs on the integrated GPU to save battery).")" 2>/dev/null)"

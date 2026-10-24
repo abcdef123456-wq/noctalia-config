@@ -162,7 +162,7 @@ def ia_permise():
 # Unités transitoires lancées par systemd-run (le bac de nc-noeud et des IA, les tests, « run-p… ») : le drop-in
 # global OnFailure= s'applique aussi à elles, et un « OnFailure= » vide posé à leur création ne l'efface pas. Leur
 # échec (une commande refusée, une IA trop lente) n'est pas une panne du bureau : jamais signalé.
-TRANSITOIRE = re.compile(r"(run-[pu][0-9]+(-i[0-9]+)?|(nc-ia|nc-bac|nc-noeud)-(test-)?[0-9a-f]{8,})\.service$")
+TRANSITOIRE = re.compile(r"(run-[pu][0-9]+(-i[0-9]+)?|(nc-ia|nc-bac|nc-noeud|nc-maj-annonce)-(test-)?[0-9a-f]{8,})\.service$")
 
 
 def transitoire(unite):

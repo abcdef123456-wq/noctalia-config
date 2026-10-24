@@ -7,6 +7,7 @@
 #   nc-maj verifier        y a-t-il une nouvelle version ? Une notification avec « Mettre à jour » (une fois par
 #                          version ; lancé toutes les heures par nc-maj-verif.timer ; coupé par nc-reglages, MAJ_VERIFIER=non ;
 #                          et par Telegram si « Alertes Telegram » : nc-alertes version, réessayé tant qu'il n'est pas parti)
+#   nc-maj annoncer <texte>  interne : la notification à boutons, lancée à part par verifier
 #   nc-maj --help          cette aide (rien n'est récupéré ni installé) ; les autres options vont à install.sh
 set -euo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -24,6 +25,17 @@ base_installee() {
   [ -e "$en_cours" ] && v="$(cat "$HOME/.config/nc/version-installee" 2>/dev/null || true)"
   [ -n "$v" ] && git rev-parse -q --verify "$v^{commit}" 2>/dev/null || git rev-parse HEAD
 }
+
+# nc-maj annoncer <texte> : interne (lancé à part par « verifier »). La notification et le traitement du choix
+if [ "${1:-}" = annoncer ]; then
+  choix="$(timeout 6h notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
+    -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
+    "$(t "Nouvelle version de la config" "New version of the config")" "${2:-}" 2>/dev/null || true)"
+  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf '$(t "Entrée pour fermer" "Press Enter to close")'; read r"
+  # « Tout voir » : la section Nouveautés de la fenêtre des réglages ; sans l'île, nc-reglages les montre dans un terminal
+  [ "$choix" = tout ] && exec "$HOME/.local/bin/nc-reglages" fenetre Nouveautés
+  exit 0
+fi
 
 if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   grep -qx 'MAJ_VERIFIER=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
@@ -81,12 +93,17 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
   fi
   [ "$deja_bureau" = 1 ] && exit 0
   echo "$distant" > "$annonce"
-  choix="$(notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
-    -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
-    "$(t "Nouvelle version de la config" "New version of the config")" "$nouveau" 2>/dev/null || true)"
-  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf '$(t "Entrée pour fermer" "Press Enter to close")'; read r"
-  # « Tout voir » : la section Nouveautés de la fenêtre des réglages ; sans l'île, nc-reglages les montre dans un terminal
-  [ "$choix" = tout ] && exec "$HOME/.local/bin/nc-reglages" fenetre Nouveautés
+  # La notification attend un clic sans limite (-t 0) : jamais dans ce service (Type=oneshot, il resterait « activating »
+  # des heures et le minuteur ne repartirait plus). Elle part dans sa propre unité transitoire : un simple « & » ne
+  # suffit pas, systemd tue tout ce qui reste dans le groupe du service quand ExecStart finit. « OnFailure= » vide :
+  # sans lui, le drop-in global service.d/nc-panne.conf signalerait une fausse panne. Si systemd-run échoue : au premier
+  # plan, mais avec un délai (et TimeoutStartSec= du service en dernier recours).
+  soi="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  if ! { command -v systemd-run >/dev/null 2>&1 &&
+         systemd-run --user --collect --quiet --unit="nc-maj-annonce-$(printf '%08x%x' "$(date +%s)" "$$")" \
+           -p OnFailure= -p RuntimeMaxSec=12h -- "$soi" annoncer "$nouveau" >/dev/null 2>&1; }; then
+    timeout 6h "$soi" annoncer "$nouveau" || true
+  fi
   wait || true                                                 # l'envoi Telegram finit avant le service
   exit 0
 fi

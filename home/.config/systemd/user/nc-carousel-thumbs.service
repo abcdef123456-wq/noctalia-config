@@ -3,6 +3,8 @@ Description=Miniatures haute qualité du carrousel de fonds d'écran
 
 [Service]
 Type=oneshot
+# Sécurité : beaucoup de fonds d'écran à convertir, en priorité minimale
+TimeoutStartSec=1h
 ExecStart=%h/.local/bin/nc-carousel-thumbs
 # Priorité minimale : ne gêne jamais le reste du système
 Nice=19

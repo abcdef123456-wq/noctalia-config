@@ -6,6 +6,8 @@ ConditionACPower=true
 
 [Service]
 Type=oneshot
+# Sécurité : comptage (dépôts, AUR, Flatpak) ; la notification à clic part dans son propre scope
+TimeoutStartSec=30min
 ExecStart=%h/.local/bin/nc-paquets compter auto
 Slice=background.slice
 Nice=19

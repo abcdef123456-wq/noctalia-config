@@ -4,4 +4,6 @@ Description=Nouvelle version de noctalia-config ? (notification avec « Mettre �
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/nc-maj verifier
+# Sécurité : une vérification dure quelques secondes (réseau coupé après 30 s, 60 s, 90 s) ; jamais « activating » des heures
+TimeoutStartSec=15min
 Slice=background.slice
