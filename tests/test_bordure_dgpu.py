@@ -18,6 +18,14 @@ nc = { profil = { profil = profil, batterie = batterie }, reglage = function(_, 
 local bordure
 hl = { config = function() end, exec_cmd = function() end,
        animation = function(a) if a.leaf == "borderangle" then bordure = a end end }
+local dpms = os.getenv("NC_TEST_DPMS")      -- « true,false » : un écran par valeur ; absent : pas d'API
+if dpms then
+    hl.get_monitors = function()
+        local l = {}
+        for v in dpms:gmatch("[a-z]+") do l[#l + 1] = { name = "X", dpms_status = v == "true" } end
+        return l
+    end
+end
 dofile(arg[1])
 print(bordure.style == "loop" and "tourne" or "figee")
 if arg[4] then
@@ -30,7 +38,7 @@ end
 
 @unittest.skipUnless(LUA, "lua requis")
 class BordureSurCarteDediee(unittest.TestCase):
-    def bordure(self, cartes, profil="performance", batterie=False, aq=None, ecran=None, marque=False, jeu=False):
+    def bordure(self, cartes, profil="performance", batterie=False, aq=None, ecran=None, marque=False, jeu=False, dpms=None):
         """cartes : {"card1": {"vendor": "0x1002", "vram": 512 Mio, "prises": {"eDP-1": "connected"}}}"""
         with tempfile.TemporaryDirectory(prefix="nc-bordure-") as d:
             sysfs = Path(d) / "sys"
@@ -53,6 +61,8 @@ class BordureSurCarteDediee(unittest.TestCase):
                 (Path(d) / "nc-ecran-eteint").write_text("")
             if jeu:
                 (Path(d) / "nc-mode-jeu").write_text("")
+            if dpms is not None:
+                env["NC_TEST_DPMS"] = dpms
             args = [ecran] if ecran else []
             r = subprocess.run([LUA, str(Path(d) / "harnais.lua"), str(ENERGIE), profil, "1" if batterie else "0", *args],
                                env=env, capture_output=True, text=True, timeout=10)
@@ -93,6 +103,15 @@ class BordureSurCarteDediee(unittest.TestCase):
         # Mode jeu : bordure coupée au chargement, et le rallumage de l'écran (nc-ecran on) n'y touche pas
         self.assertEqual(self.bordure(self.DEDIEE, jeu=True, ecran="allume"), ["figee", "figee nil"])
         self.assertEqual(self.bordure(self.DEDIEE, jeu=True, ecran="eteint"), ["figee", "figee nil"])
+
+    def test_rechargement_ecran_eteint_sans_marque(self):
+        # Écran éteint par un autre chemin que nc-ecran (pas de marque) : le chargement lit dpms_status de Hyprland
+        self.assertEqual(self.bordure(self.DEDIEE, dpms="false"), "figee")
+        self.assertEqual(self.bordure(self.DEDIEE, dpms="false,false"), "figee")
+        # Un écran encore allumé, aucun écran connu (démarrage) : la boucle reste
+        self.assertEqual(self.bordure(self.DEDIEE, dpms="false,true"), "tourne")
+        self.assertEqual(self.bordure(self.DEDIEE, dpms=""), "tourne")
+        self.assertEqual(self.bordure(self.DEDIEE, dpms="true"), "tourne")
 
     def test_rechargement_ecran_eteint_ne_relance_pas_la_boucle(self):
         # La marque de nc-ecran existe : le chargement de la config donne tout de suite la version calme

@@ -75,11 +75,22 @@ local function marque(nom)
     if f then f:close() end
     return f ~= nil
 end
+-- Tous les écrans en veille d'après Hyprland : couvre une extinction qui n'est pas passée par nc-ecran (avant son
+-- installation, DPMS natif). Aucun écran connu (démarrage) ou API absente : allumé. hl.get_monitors et dpms_status
+-- existent dès Hyprland 0.55.0 ; un champ absent ou renommé vaudrait nil, donc « allumé » : sans danger.
+local function tous_eteints()
+    local ok, ecrans = pcall(function() return hl.get_monitors and hl.get_monitors() end)
+    if not ok or type(ecrans) ~= "table" or #ecrans == 0 then return false end
+    for _, m in ipairs(ecrans) do
+        if m.dpms_status ~= false then return false end
+    end
+    return true
+end
 function nc.bordure(ecran_eteint)
     -- Mode jeu : bordure coupée par la section du mode jeu, on n'y touche pas (lu sur la marque, pas sur nc.jeu, que le
     -- chargement de la config ne connaît pas encore ici)
     if marque("nc-mode-jeu") then return end
-    if ecran_eteint == nil then ecran_eteint = marque("nc-ecran-eteint") end
+    if ecran_eteint == nil then ecran_eteint = marque("nc-ecran-eteint") or tous_eteints() end
     if boucle_permise and not ecran_eteint then
         hl.animation({ leaf = "borderangle", enabled = true, speed = 100, bezier = "linear", style = "loop" })
     else
