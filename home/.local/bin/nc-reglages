@@ -1128,11 +1128,13 @@ REGLAGES = [
         "(20 actions au plus), pour la même conversation (selon le serveur). Elles tournent dans un bac à sable (ni "
         "tes clés, ni mots de passe, ni sudo, ni appli graphique ; ~ en lecture seule ; le réseau reste ouvert). Les "
         "écritures de fichiers, read_file et le presse-papiers restent toujours confirmés un par un. 0 : désactivée "
-        "(conseillé).",
+        "(conseillé). Attention : avec JARVIS-BIS jusqu'à 062d1a1, l'origine ne lie rien côté serveur : pendant la "
+        "session, toute entrée du serveur (tout détenteur de SECRET_KEY) passe sans confirmation. Laisse 0.",
         "Risk: after ONE approval, JARVIS runs commands without asking again, for this long (at most 20 actions), for "
         "the same conversation (as the server tells it). They run in a sandbox (no keys, passwords, sudo or GUI app; "
         "~ read-only; the network stays open). File writes, read_file and the clipboard stay confirmed one by one. "
-        "0: off (recommended)."),
+        "0: off (recommended). Warning: with JARVIS-BIS up to 062d1a1 the origin binds nothing server-side: during "
+        "the session, any server entry point (anyone holding SECRET_KEY) goes through unconfirmed. Keep 0."),
       mini=0, maxi=15, pas=1, unite="min", zero=L("Désactivée", "Off"), groupe="noeud-confirmation"),
     R("NOEUD_BAC_INTERDITS", "Intelligence artificielle",
       L("Session : tes dossiers à cacher en plus", "Session: extra folders of yours to hide"), "texte", "",

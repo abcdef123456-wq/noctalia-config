@@ -483,6 +483,15 @@ n’y a pas encore de session.
   confirmée normalement. **Sois honnête sur ce que ça protège : ce PC ne vérifie que la connexion.** L’origine ne
   protège des autres entrées du serveur (API HTTP, MCP, un autre chat) **que si le serveur est honnête** et la renvoie
   fidèlement ; un serveur compromis peut mentir sur l’origine.
+- **Attention, avec JARVIS-BIS jusqu’à `062d1a1` compris, la session couvre en pratique TOUTE entrée du serveur.** Côté
+  serveur, l’origine ne lie rien : les routes `/api/node/{id}/action`, `/exec`, `/read_file`, `/write_file` et
+  `/api/action` acceptent `origin` ou `session_key` dans le **corps** de la requête, le serveur fabrique lui-même le
+  jeton de la conversation à partir d’un `session_key`, et ce jeton est lisible par d’autres routes. Donc, pendant une
+  session ouverte, tout détenteur de la clé du serveur (`SECRET_KEY` : un autre PC client, un script, un agent qui a un
+  shell) peut faire exécuter des `exec` sans confirmation sur ce PC, toujours dans le bac à sable, dans la limite de la
+  durée et des 20 actions. **On conseille de la laisser à 0 tant que le serveur prend l’origine dans le corps des
+  requêtes.** À l’ouverture, la notification le rappelle : « toute demande du serveur pendant N min passe sans
+  confirmation (dans le bac) ».
 - **Visible et arrêtable.** Chaque action couverte envoie une notification sur ce PC (« JARVIS, session : … ») et une
   ligne au journal ; la `response` porte `"session": {"reste_s": …, "reste_actions": …}`. L’île affiche un bandeau
   « Session JARVIS » avec un bouton **Arrêter la session**. La session se ferme sur : un refus, la trame

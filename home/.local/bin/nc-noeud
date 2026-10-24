@@ -1873,6 +1873,10 @@ class Noeud:
             if self.session is None:
                 self.session = Session(self.jeton_connexion, oc, minutes)
                 self.ecrire_etat_session(resume_court)
+                prevenir(T("JARVIS : session ouverte", "JARVIS: session opened"),
+                         T(f"Toute demande du serveur pendant {minutes} min passe sans confirmation (dans le bac).",
+                           f"Any request from the server for {minutes} min goes through without confirmation "
+                           "(in the sandbox)."))
             else:
                 ouvre = False          # une autre autorisation, arrivée en même temps, l'a déjà ouverte : pas de remise à zéro
         # Temps qui reste pour exécuter : échéance du serveur, moins la marge, moins ce qui est passé (B2-11)

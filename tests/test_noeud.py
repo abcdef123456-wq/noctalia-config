@@ -1916,6 +1916,15 @@ class SessionConfiance(ModuleCharge):
         log = (self.home / ".local/state/noctalia-config/noeud.log").read_text()
         self.assertIn("session (interrompue)", log)
 
+    def test_ouverture_de_session_previent_que_tout_passe(self):
+        m = self.charger()
+        n = self.noeud(m)
+        notifs = []
+        m.prevenir = lambda titre, texte="": notifs.append((titre, texte))
+        self.dec(n, "exec", {"command": "true"})                 # ouverture (confirmée)
+        self.assertTrue(any("session ouverte" in t and "passe sans confirmation (dans le bac)" in x
+                            for t, x in notifs), notifs)
+
     def test_delai_trop_court_en_session_se_voit(self):
         m = self.charger()
         n = self.noeud(m)
