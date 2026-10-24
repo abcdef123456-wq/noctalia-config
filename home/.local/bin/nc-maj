@@ -97,10 +97,11 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
   # des heures et le minuteur ne repartirait plus). Elle part dans sa propre unité transitoire : un simple « & » ne
   # suffit pas, systemd tue tout ce qui reste dans le groupe du service quand ExecStart finit. « OnFailure= » vide :
   # sans lui, le drop-in global service.d/nc-panne.conf signalerait une fausse panne. Si systemd-run échoue : au premier
-  # plan, mais avec un délai (et TimeoutStartSec= du service en dernier recours).
+  # plan, mais avec un délai (et TimeoutStartSec= du service en dernier recours). --expand-environment=no : le texte vient
+  # des titres de commits, systemd n'y remplace aucun « ${…} » par son environnement.
   soi="$(readlink -f "$0" 2>/dev/null || echo "$0")"
   if ! { command -v systemd-run >/dev/null 2>&1 &&
-         systemd-run --user --collect --quiet --unit="nc-maj-annonce-$(printf '%08x%x' "$(date +%s)" "$$")" \
+         systemd-run --user --collect --quiet --expand-environment=no --unit="nc-maj-annonce-$(printf '%08x%x' "$(date +%s)" "$$")" \
            -p OnFailure= -p RuntimeMaxSec=12h -- "$soi" annoncer "$nouveau" >/dev/null 2>&1; }; then
     timeout 6h "$soi" annoncer "$nouveau" || true
   fi

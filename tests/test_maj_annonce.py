@@ -83,6 +83,7 @@ class Annonce(unittest.TestCase):
         self.assertIn("--collect", sr[0])
         self.assertIn("OnFailure=", sr[0])
         self.assertIn("RuntimeMaxSec=", sr[0])
+        self.assertIn("--expand-environment=no", sr[0], "le texte des commits ne passe pas par les variables de systemd")
         self.assertRegex(sr[0], r"--unit=nc-maj-annonce-[0-9a-f]{8,}\b")
         self.assertRegex(sr[0], r" -- /\S*nc-maj annoncer ")
         self.assertFalse([l for l in self.lignes() if l.startswith("notify-send ")], "la notification part à part")
