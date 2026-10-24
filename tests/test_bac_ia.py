@@ -1117,6 +1117,46 @@ class AvecFauxSystemdRun(Base):
         with unittest.mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
             self.assertIn("fin\n", self.lancer_moteur(self.m, "claude", NC_TEST_FICHIERS=""))
 
+    def test_fichier_jeton_present_mais_illisible_refuse(self):
+        """Droits 000, plus gros que JETON_MAX, un dossier à la place : refus, pas un lancement sans identifiants."""
+        f = self.home / JETONS["claude"]
+        def droits_000():
+            f.write_text(json.dumps(contenu_jeton("claude"))); f.chmod(0o000)
+        def trop_gros():
+            f.write_text(" " * (self.m.JETON_MAX + 1) + "{}")
+        def dossier():
+            f.mkdir()
+        for nom, preparer in (("000", droits_000), ("gros", trop_gros), ("dossier", dossier)):
+            with self.subTest(nom):
+                (self.home / "moteur.log").unlink(missing_ok=True)
+                if f.is_dir():
+                    f.rmdir()
+                elif f.exists():
+                    f.chmod(0o600); f.unlink()
+                preparer()
+                try:
+                    with self.assertRaises(self.m.ErreurIA) as e:
+                        self.lancer_moteur(self.m, "claude", NC_TEST_FICHIERS="")
+                    self.assertIn("doit renouveler sa connexion", str(e.exception))
+                    self.assertFalse((self.home / "moteur.log").exists(), "pas de lancement sans identifiants")
+                finally:
+                    if f.is_file():
+                        f.chmod(0o600)
+        if f.is_dir():
+            f.rmdir()
+
+    def test_opencode_echeance_illisible_refusee(self):
+        """projeter retire une échéance qui n'est pas une valeur simple : elle se lit dans le fichier d'origine."""
+        for brut in ("1e400", "[1, 2]", '{"a": 1}'):
+            with self.subTest(brut):
+                (self.home / "moteur.log").unlink(missing_ok=True)
+                o = contenu_jeton("opencode")
+                o["anthropic"]["expires"] = "@ECHEANCE@"
+                (self.home / JETONS["opencode"]).write_text(json.dumps(o).replace('"@ECHEANCE@"', brut))
+                with self.assertRaises(self.m.ErreurIA):
+                    self.lancer_moteur(self.m, "opencode", NC_TEST_FICHIERS="")
+                self.assertFalse((self.home / "moteur.log").exists(), "le moteur n'a pas été lancé")
+
     def test_deux_messages_expire_ou_bientot(self):
         m = self.m
         self.assertIn("doit renouveler sa connexion", m.message_jeton_expire("gemini-cli", None))

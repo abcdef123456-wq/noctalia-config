@@ -1637,13 +1637,15 @@ class Demande:
                 continue
         for rel in c["jeton"]:
             octets = lire_source(self.emplacement(rel), JETON_MAX)
-            if octets is None:
-                continue
+            if octets is None and not os.path.lexists(self.emplacement(rel)):
+                continue                                # pas de fichier : rien à copier
             try:
+                if octets is None:                      # présent mais illisible (droits, trop gros, dossier…)
+                    raise ValueError("fichier illisible")
                 o = charger_json(octets)
                 if not isinstance(o, dict):
                     raise ValueError("pas un objet JSON")
-                donne = self._verifier_echeance(projeter(o, COPIES[self.ident]))
+                donne = self._verifier_echeance(projeter(o, COPIES[self.ident]), o)
             except (_JetonInutilisable, ValueError, RecursionError) as e:
                 # Fichier présent mais illisible (JSON cassé, NaN…), jeton expiré, trop court ou d'échéance illisible :
                 # refus clair, plutôt qu'un lancement sans identifiants. Sauf si le moteur a sa clé d'API.
@@ -1661,7 +1663,7 @@ class Demande:
             except (OSError, ValueError):
                 continue
 
-    def _verifier_echeance(self, donne):
+    def _verifier_echeance(self, donne, origine=None):
         """Le jeton d'accès à copier, s'il vaut au moins la durée maximale réelle de la demande + MARGE_JETON. Échéance
         illisible pour un moteur qui en donne une (Claude, Codex, Gemini, Qwen) : refus. OpenCode : chaque entrée
         oauth à échéance trop courte ou illisible est retirée ; une entrée sans échéance (jeton opaque) est copiée seule ;
@@ -1671,8 +1673,12 @@ class Demande:
         if self.ident == "opencode":
             gardees, retirees = {}, []
             for k, v in donne.items():
-                if "expires" in v:
-                    exp = ms_plausible(v.get("expires"))
+                # L'échéance se lit dans le fichier d'origine : projeter retire une valeur qui n'est pas simple
+                # (1e400, liste…), et l'entrée passerait alors pour un jeton opaque sans échéance
+                o = (origine or {}).get(k)
+                o = o if isinstance(o, dict) else v
+                if "expires" in o:
+                    exp = ms_plausible(o.get("expires"))
                     if exp is None or exp < limite:
                         if exp is not None:
                             retirees.append(exp)
