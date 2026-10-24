@@ -2081,9 +2081,17 @@ def _executer_plan(ident, numeros):
     bureau = (plan.get("portee") or {}).get("bureau")
     services = services_session() if "services" in domaines else {}
     fenetres = fenetres_bureau(bureau) if "fenetres" in domaines else {}
+    global _reglages
     for a in plan["actions"]:
         if a.get("fait") or (numeros is not None and a["n"] not in numeros):
             continue
+        # Réglages relus avant chaque action : l'IA (ou ses actions, ou ce domaine) coupée pendant la précédente, la
+        # suivante ne se fait pas (revue B2-02) ; ce qui est déjà fait reste noté
+        _reglages = None
+        if coupee() or actions_mode() == "non":
+            garder_plan(plan)
+            raise ErreurIA(message_coupee() if coupee() else T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
+        domaines = domaines_permis()
         try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
             v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres, bureau)
         except ErreurIA as e:

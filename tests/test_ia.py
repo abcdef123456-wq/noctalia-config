@@ -811,6 +811,29 @@ class IA(unittest.TestCase):
         self.reglages("IA_MODE=non\nIA_ACTIONS=confirmer\n")
         self.assertEqual(self.lancer("executer", plan["id"]).returncode, 3)
 
+    def test_reglages_relus_avant_chaque_action(self):
+        """Revue B2-02 : les réglages étaient lus une fois pour tout le plan : l'IA coupée pendant la première action
+        n'empêchait pas la deuxième."""
+        conf = self.home / ".config/nc/reglages.conf"
+        for coupure, code in (("IA_MODE=non", 3), ("IA_ACTIONS=non", 1), ("IA_GERER_RESEAU=non", 1)):
+            with self.subTest(coupure=coupure):
+                if self.journal.exists():
+                    self.journal.unlink()
+                self.preparer_agent()
+                self.reglages("IA_ACTIONS=confirmer\n")
+                plan = json.loads(self.lancer("agir", "--json", "x").stdout)
+                self.assertEqual([a["outil"] for a in plan["actions"]], ["service_redemarrer", "bluetooth"])
+                # La première action (redémarrer l'île) coupe ce réglage pendant qu'elle se fait
+                self.programme("systemctl", 'echo "systemctl $*" >> "$JOURNAL"; case "$*" in *restart*) '
+                                            f'printf "%s\\n" "{coupure}" >> "{conf}";; *is-active*) echo active;; '
+                                            '*list-units*) echo "nc-ile.service loaded active running Ile";; esac')
+                r = self.lancer("executer", plan["id"], "--json")
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertIn("systemctl --user restart nc-ile.service", self.appels())
+                self.assertNotIn("bluetoothctl power", self.appels(), "la deuxième action ne se fait pas")
+                d = json.loads((self.home / "run/nc-ia/plans" / f"{plan['id']}.json").read_text())
+                self.assertTrue(d["actions"][0]["fait"] and d["actions"][0]["ok"], "la première est gardée comme faite")
+
     def test_agir_lance_les_outils_du_bureau(self):
         # Revue Codex IA-01 : les programmes de ~/.local/bin (nc-brightness, nc-paquets) sont bien trouvés
         b = self.home / ".local/bin"
