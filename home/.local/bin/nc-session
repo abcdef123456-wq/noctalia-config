@@ -537,7 +537,8 @@ def regle(n, classe, bureau, active=True):
     lua = (f"hl.window_rule({{ name = 'nc-session-{n}', enabled = {'true' if active else 'false'}, "
            f"match = {{ class = [[{motif}]] }}, workspace = '{int(bureau)} silent' }})")
     try:
-        return subprocess.run(["hyprctl", "eval", lua], capture_output=True, timeout=5).returncode == 0
+        r = subprocess.run(["hyprctl", "eval", lua], capture_output=True, text=True, timeout=5)
+        return r.returncode == 0 and not re.search(r"(?im)^\s*(?:warning|error):", r.stdout + "\n" + r.stderr)
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -546,44 +547,81 @@ RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
 POSEES = RUNTIME / "nc-session-regles.json"           # règles actives de l'ouverture en cours (n, classe, bureau)
 
 
+def avertir(texte):
+    """Un avertissement qui n'arrête pas l'ouverture : sur stderr, et en notification hors terminal (comme main)."""
+    print(texte, file=sys.stderr)
+    if not sys.stderr.isatty():
+        notifier(T("Sessions", "Sessions"), texte)
+
+
+def mettre_de_cote():
+    """Journal illisible ou invalide : ses règles sont inconnues, donc impossibles à retirer. Il est gardé tel quel à
+    côté (0600) pour qu'on puisse le lire, et l'ouverture continue (sinon plus aucune ne passerait jusqu'au
+    redémarrage). Renvoie le chemin de la copie."""
+    copie = POSEES.with_name(f"{POSEES.name}.illisible-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}")
+    try:
+        if os.path.lexists(copie):
+            raise FileExistsError(copie)
+        os.rename(POSEES, copie)                            # jamais par-dessus une copie déjà gardée
+        if not copie.is_symlink():
+            os.chmod(copie, 0o600)
+    except OSError:
+        raise Erreur(T(f"Journal des règles temporaires illisible et impossible à mettre de côté : {POSEES}. "
+                       f"Garde-le de côté avec : mv -n -- {shlex.quote(str(POSEES))} {shlex.quote(str(copie))}",
+                       f"Temporary rule journal is unreadable and could not be set aside: {POSEES}. "
+                       f"Set it aside with: mv -n -- {shlex.quote(str(POSEES))} {shlex.quote(str(copie))}")) from None
+    return copie
+
+
 def retirer_orphelines():
     """Règles d'une ouverture tuée net (SIGKILL, coupure) : sans cela, l'appli s'ouvrirait en silence sur son ancien
-    bureau jusqu'au rechargement de Hyprland (revue SESSION-02)."""
+    bureau jusqu'au rechargement de Hyprland (revue SESSION-02). Renvoie celles que Hyprland n'a pas retirées : elles
+    restent dans le journal, et la prochaine ouverture (ou la fin de celle-ci) réessaie."""
     try:
         posees = json.loads(POSEES.read_text())
     except FileNotFoundError:
-        return
+        return []
     except (OSError, ValueError):
-        raise Erreur(T("Journal des règles temporaires illisible : conserve-le pour le diagnostic.",
-                       "Temporary rule journal is unreadable: keep it for diagnosis.")) from None
+        posees = None
     if not isinstance(posees, list) or any(not isinstance(r, list) or len(r) != 3
             or not isinstance(r[0], int) or not isinstance(r[1], str) or not isinstance(r[2], int) for r in posees):
-        raise Erreur(T("Journal des règles temporaires invalide : conserve-le pour le diagnostic.",
-                       "Temporary rule journal is invalid: keep it for diagnosis."))
-    restantes = []
-    for n, classe, bureau in posees:
-        if not regle(n, classe, bureau, active=False):
-            restantes.append((n, classe, bureau))
+        copie = mettre_de_cote()
+        avertir(T(f"Journal des règles temporaires illisible : gardé dans {copie}. Les règles qu'il notait n'ont pas "
+                  "pu être retirées : si une appli s'ouvre toujours sur un autre bureau, recharge Hyprland.",
+                  f"Temporary rule journal is unreadable: kept in {copie}. The rules it listed could not be removed: "
+                  "if an app still opens on another workspace, reload Hyprland."))
+        return []
+    restantes = [(n, classe, bureau) for n, classe, bureau in posees if not regle(n, classe, bureau, active=False)]
     noter_regles(restantes)
-    if restantes:
-        raise Erreur(T("Hyprland n'a pas retiré toutes les règles temporaires : réessaie quand il répond.",
-                       "Hyprland did not remove all temporary rules: retry when it responds."))
+    return restantes
 
 
 def noter_regles(regles):
-    """Conserve la trace jusqu'au retrait confirmé : un échec de nettoyage doit pouvoir être repris."""
-    if not regles:
-        POSEES.unlink(missing_ok=True)
-        return
-    import tempfile
-    fd, nom = tempfile.mkstemp(prefix="nc-session-regles-", suffix=".tmp", dir=RUNTIME)
-    tmp = Path(nom)
+    """Conserve la trace jusqu'au retrait confirmé : un échec de nettoyage doit pouvoir être repris. Écriture atomique
+    (fichier unique dans RUNTIME, 0600 par mkstemp, puis replace)."""
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(regles, f)
-        tmp.replace(POSEES)
-    finally:
-        tmp.unlink(missing_ok=True)
+        if not regles:
+            POSEES.unlink(missing_ok=True)
+            return
+        import tempfile
+        fd, nom = tempfile.mkstemp(prefix="nc-session-regles-", suffix=".tmp", dir=RUNTIME)
+        tmp = Path(nom)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(regles, f)
+            tmp.replace(POSEES)
+        finally:
+            tmp.unlink(missing_ok=True)
+    except OSError as e:
+        raise Erreur(T(f"Impossible d'écrire le journal des règles temporaires {POSEES} : {e.strerror or e}",
+                       f"Could not write the temporary rule journal {POSEES}: {e.strerror or e}")) from None
+
+
+def pas_retirees(restantes):
+    return T(f"Hyprland n'a pas retiré {len(restantes)} règle(s) temporaire(s) (journal : {POSEES}) : nouvel essai "
+             "à la prochaine ouverture ; recharger Hyprland les retire aussi.",
+             f"Hyprland did not remove {len(restantes)} temporary rule(s) (journal: {POSEES}): retried at the next "
+             "opening; reloading Hyprland removes them too.")
 
 
 def ouvrir(nom, delai=None):
@@ -600,8 +638,11 @@ def ouvrir(nom, delai=None):
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: sys.exit(128 + s))
     try:
-        retirer_orphelines()
-        return _ouvrir(nom, delai)
+        anciennes = retirer_orphelines()
+        if anciennes:
+            # Pas de blocage : les noms resservent (une règle reposée remplace l'ancienne) et la fin réessaie le reste
+            avertir(pas_retirees(anciennes))
+        return _ouvrir(nom, delai, anciennes)
     finally:
         verrou.close()
 
@@ -716,7 +757,7 @@ def etapes_apres(s, adresses):
                 executer(["hyprctl", "eval", f"nc.zones_poser({int(b)}, {lua})"], 5)
 
 
-def _ouvrir(nom, delai):
+def _ouvrir(nom, delai, anciennes=()):
     delai = float(os.environ.get("NC_SESSION_DELAI", 30)) if delai is None else delai     # attente des fenêtres (s)
     s = completer(lire(nom)[1])
     etapes_avant(s)
@@ -752,19 +793,30 @@ def _ouvrir(nom, delai):
     # Une règle par appli lancée (sauf les terminaux, et une appli lancée deux fois sur des bureaux différents) : ses
     # fenêtres, écran de chargement compris, apparaissent directement sur leur bureau
     classes = [e["classe"] for e in lances]
-    regles = []
+    regles = {n: (n, c, b) for n, c, b in anciennes}           # celles d'avant, pas encore retirées, restent notées
+    fini = False
     try:
         for n, e in enumerate(lances):
             if "terminal" not in e and classes.count(e["classe"]) == 1:
-                regles.append((n, e))                           # notée avant d'être posée : retirée même si on est tué
-                noter_regles([(m, f["classe"], f["bureau"]) for m, f in regles])
+                regles[n] = (n, e["classe"], e["bureau"])       # notée avant d'être posée : retirée même si on est tué
+                noter_regles(list(regles.values()))
                 regle(n, e["classe"], e["bureau"])
         res = attendre(fenetres, lances, avant, delai, adresses)
         etapes_apres(s, adresses)
-        return res
+        fini = True
     finally:
-        # Même après une erreur (lancement, Hyprland qui ne répond plus, arrêt) : chaque règle posée est retirée
-        retirer_orphelines()
+        # Même après une erreur (lancement, Hyprland qui ne répond plus, arrêt) : chaque règle posée est retirée. Un
+        # échec de ce nettoyage ne remplace ni le signal (SystemExit 143), ni l'erreur en cours, ni le résultat : le
+        # journal reste, et la prochaine ouverture reprend.
+        try:
+            restantes = retirer_orphelines()
+        except Erreur as e:
+            restantes = None
+            if fini:
+                avertir(str(e))
+        if fini and restantes:
+            avertir(pas_retirees(restantes))
+    return res
 
 
 def attendre(fenetres, lances, avant, delai, adresses=None):

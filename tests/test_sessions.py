@@ -209,7 +209,6 @@ class Sessions(unittest.TestCase):
         self.assertFalse((self.home / ".config/nc/sessions").exists() and list((self.home / ".config/nc/sessions").glob("*.json")))
 
 
-@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class ReglesPersistantes(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="nc-session-regles-")
@@ -220,54 +219,170 @@ class ReglesPersistantes(unittest.TestCase):
             l = importlib.machinery.SourceFileLoader("nc_session_regles", str(SCRIPT))
             self.m = importlib.util.module_from_spec(importlib.util.spec_from_loader(l.name, l))
             l.exec_module(self.m)
+        # Les avertissements (stderr + notification) sont notés ici, jamais affichés
+        self.avertis = []
+        p = mock.patch.object(self.m, "avertir", side_effect=self.avertis.append)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def session_dev(self):
+        dossier = self.home / ".config/nc/sessions"
+        dossier.mkdir(parents=True)
+        (dossier / "Dev.json").write_text(json.dumps({"nom": "Dev", "fenetres": [
+            {"classe": "discord", "bureau": 3, "appli": "discord"}]}))
 
     def test_nettoyage_refuse_garde_seulement_les_regles_restantes(self):
         restantes = [[0, "discord", 3]]
         self.m.POSEES.write_text(json.dumps(restantes + [[1, "firefox", 4]]))
         with mock.patch.object(self.m, "regle", side_effect=lambda n, *a, **k: n != 0):
-            with self.assertRaises(self.m.Erreur):
-                self.m.retirer_orphelines()
+            self.assertEqual(self.m.retirer_orphelines(), [(0, "discord", 3)])
         self.assertEqual(json.loads(self.m.POSEES.read_text()), restantes)
+        self.assertEqual(self.m.POSEES.stat().st_mode & 0o777, 0o600)
         with mock.patch.object(self.m, "regle", return_value=True) as regle:
-            self.m.retirer_orphelines()
+            self.assertEqual(self.m.retirer_orphelines(), [])
         regle.assert_called_once_with(0, "discord", 3, active=False)
         self.assertFalse(self.m.POSEES.exists())
+        self.assertEqual([p.name for p in self.home.iterdir() if p.suffix == ".tmp"], [])
 
-    def test_pas_d_ouverture_tant_que_les_regles_ne_sont_pas_retirees(self):
+    def test_regles_non_retirees_n_empechent_pas_l_ouverture(self):
+        # Avant : plus aucune ouverture tant que Hyprland refusait (un refus durable bloquait les sessions)
         self.m.POSEES.write_text(json.dumps([[0, "discord", 3]]))
         with mock.patch.object(self.m, "regle", return_value=False), \
-                mock.patch.object(self.m, "_ouvrir") as ouvrir, mock.patch("signal.signal"):
-            with self.assertRaises(self.m.Erreur):
-                self.m.ouvrir("Dev")
-        ouvrir.assert_not_called()
-        self.assertTrue(self.m.POSEES.exists())
+                mock.patch.object(self.m, "_ouvrir", return_value=(1, 0)) as ouvrir, mock.patch("signal.signal"):
+            self.assertEqual(self.m.ouvrir("Dev"), (1, 0))
+        ouvrir.assert_called_once_with("Dev", None, [(0, "discord", 3)])
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        self.assertEqual(len(self.avertis), 1)
+        self.assertIn(str(self.m.POSEES), self.avertis[0])
 
-    def test_echec_du_nettoyage_final_est_repris_ensuite(self):
-        dossier = self.home / ".config/nc/sessions"
-        dossier.mkdir(parents=True)
-        (dossier / "Dev.json").write_text(json.dumps({"nom": "Dev", "fenetres": [
-            {"classe": "discord", "bureau": 3, "appli": "discord"}]}))
+    def test_anciennes_regles_restent_notees_pendant_l_ouverture(self):
+        self.session_dev()
+        notes = []
+        reel = self.m.noter_regles
         with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "etapes_apres"), \
                 mock.patch.object(self.m, "clients", return_value=[]), \
                 mock.patch.object(self.m, "attendre", return_value=(1, 0)), \
+                mock.patch.object(self.m, "noter_regles", side_effect=lambda r: (notes.append(list(r)), reel(r))), \
+                mock.patch.object(self.m, "regle", return_value=True):
+            self.assertEqual(self.m._ouvrir("Dev", 0, [(0, "slack", 2), (5, "steam", 4)]), (1, 0))
+        # Même nom (nc-session-0) : la nouvelle règle remplace l'ancienne ; l'autre reste notée jusqu'à son retrait
+        self.assertEqual(notes[0], [(0, "discord", 3), (5, "steam", 4)])
+        self.assertFalse(self.m.POSEES.exists())
+
+    def test_echec_du_nettoyage_final_est_repris_ensuite(self):
+        self.session_dev()
+        with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "etapes_apres"), \
+                mock.patch.object(self.m, "clients", return_value=[]), \
+                mock.patch.object(self.m, "attendre", return_value=(1, 2)), \
                 mock.patch.object(self.m, "regle", side_effect=lambda *a, active=True: active):
-            with self.assertRaises(self.m.Erreur):
-                self.m._ouvrir("Dev", 0)
+            # Le résultat n'est pas remplacé par l'échec du nettoyage (main notifie encore les applis manquantes)
+            self.assertEqual(self.m._ouvrir("Dev", 0), (1, 2))
         self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        self.assertEqual(len(self.avertis), 1)
         with mock.patch.object(self.m, "regle", return_value=True):
             self.m.retirer_orphelines()
         self.assertFalse(self.m.POSEES.exists())
 
+    def test_journal_illisible_mis_de_cote_et_ouverture_continue(self):
+        for contenu in ("{", json.dumps({"n": 0}), json.dumps([[0, "discord"]]), "\udcff"):
+            with self.subTest(contenu=contenu):
+                for p in self.home.glob("nc-session-regles.json.illisible-*"):
+                    p.unlink()
+                self.m.POSEES.write_bytes(contenu.encode("utf-8", "surrogateescape"))
+                self.m.POSEES.chmod(0o644)
+                self.avertis.clear()
+                with mock.patch.object(self.m, "regle") as regle, \
+                        mock.patch.object(self.m, "_ouvrir", return_value=(1, 0)) as ouvrir, mock.patch("signal.signal"):
+                    self.assertEqual(self.m.ouvrir("Dev"), (1, 0))
+                regle.assert_not_called()
+                ouvrir.assert_called_once_with("Dev", None, [])
+                self.assertFalse(self.m.POSEES.exists())
+                copies = list(self.home.glob("nc-session-regles.json.illisible-*"))
+                self.assertEqual(len(copies), 1)
+                self.assertRegex(copies[0].name, r"\.illisible-\d{8}-\d{6}-\d+$")
+                self.assertEqual(copies[0].read_bytes(), contenu.encode("utf-8", "surrogateescape"))
+                self.assertEqual(copies[0].stat().st_mode & 0o777, 0o600)
+                self.assertEqual(len(self.avertis), 1)
+                self.assertIn(str(copies[0]), self.avertis[0])
 
-    def test_journal_illisible_conserve_pour_diagnostic(self):
+    def test_journal_impossible_a_mettre_de_cote_donne_son_chemin(self):
         self.m.POSEES.write_text("{")
-        with mock.patch.object(self.m, "regle") as regle:
-            with self.assertRaises(self.m.Erreur):
+        with mock.patch.object(self.m.os, "rename", side_effect=PermissionError), \
+                mock.patch.object(self.m, "regle") as regle:
+            with self.assertRaises(self.m.Erreur) as erreur:
                 self.m.retirer_orphelines()
         regle.assert_not_called()
         self.assertEqual(self.m.POSEES.read_text(), "{")
+        self.assertIn(str(self.m.POSEES), str(erreur.exception))
+        self.assertIn("mv -n --", str(erreur.exception))
+
+    def test_avertissement_hyprland_code_zero_garde_le_journal(self):
+        for sortie, erreur in (("error: rule rejected", ""), ("", "warning: rule rejected"), ("ok\nerror: x", "")):
+            with self.subTest(sortie=sortie, erreur=erreur):
+                self.m.POSEES.write_text(json.dumps([[0, "discord", 3]]))
+                r = subprocess.CompletedProcess(["hyprctl"], 0, stdout=sortie, stderr=erreur)
+                with mock.patch.object(self.m.subprocess, "run", return_value=r):
+                    self.assertEqual(self.m.retirer_orphelines(), [(0, "discord", 3)])
+                self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        r = subprocess.CompletedProcess(["hyprctl"], 0, stdout="ok", stderr="")
+        with mock.patch.object(self.m.subprocess, "run", return_value=r):
+            self.assertEqual(self.m.retirer_orphelines(), [])
+        self.assertFalse(self.m.POSEES.exists())
+
+    def test_faux_hyprctl_refus_avec_code_zero(self):
+        # Le vrai chemin : un faux hyprctl DEVANT dans le PATH répond « error: rule rejected » avec le code 0
+        b = self.home / "bin"
+        b.mkdir()
+        (b / "hyprctl").write_text('#!/bin/sh\necho "$*" >> "$HOME/appels"\necho "error: rule rejected"\nexit 0\n')
+        (b / "hyprctl").chmod(0o755)
+        self.m.POSEES.write_text(json.dumps([[0, "discord", 3]]))
+        with mock.patch.dict(os.environ, PATH=f"{b}:{os.environ['PATH']}", HOME=str(self.home)):
+            self.assertEqual(self.m.retirer_orphelines(), [(0, "discord", 3)])
+        self.assertIn("enabled = false", (self.home / "appels").read_text())
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+
+    def test_signal_conserve_son_code_meme_si_nettoyage_refuse(self):
+        self.session_dev()
+        with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "clients", return_value=[]), \
+                mock.patch.object(self.m, "attendre", side_effect=SystemExit(143)), \
+                mock.patch.object(self.m, "regle", side_effect=lambda *a, active=True: active):
+            with self.assertRaises(SystemExit) as erreur:
+                self.m._ouvrir("Dev", 0)
+        self.assertEqual(erreur.exception.code, 143)
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        self.assertEqual(self.avertis, [])                  # arrêt : en silence, la prochaine ouverture reprend
+
+    def test_erreur_de_lancement_gardee_meme_si_journal_inecrivable(self):
+        self.session_dev()
+        reel, appels = tempfile.mkstemp, []
+
+        def mkstemp(*a, **k):                           # le journal s'écrit avant la pose, puis le disque est plein
+            appels.append(a)
+            if len(appels) > 1:
+                raise OSError(28, "No space left on device")
+            return reel(*a, **k)
+        with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "clients", return_value=[]), \
+                mock.patch.object(self.m, "attendre", side_effect=self.m.Erreur("lancement")), \
+                mock.patch.object(self.m, "regle", side_effect=lambda *a, active=True: active), \
+                mock.patch("tempfile.mkstemp", side_effect=mkstemp):
+            with self.assertRaises(self.m.Erreur) as erreur:
+                self.m._ouvrir("Dev", 0)
+        self.assertEqual(str(erreur.exception), "lancement")
+        self.assertEqual(len(appels), 2)
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        self.assertEqual(self.avertis, [])
+
+    def test_gardes_quickshell_seulement_sur_les_tests_graphiques(self):
+        which = shutil.which
+        with mock.patch.object(shutil, "which", side_effect=lambda nom, *a, **k: None if nom == "qs" else which(nom, *a, **k)):
+            l = importlib.machinery.SourceFileLoader("sessions_sans_qs", __file__)
+            m = importlib.util.module_from_spec(importlib.util.spec_from_loader(l.name, l))
+            l.exec_module(m)
+        self.assertFalse(getattr(m.ReglesPersistantes, "__unittest_skip__", False))
+        self.assertTrue(getattr(m.SpotlightSessions, "__unittest_skip__", False))
 
 
+@unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class SpotlightSessions(unittest.TestCase):
     def test_session_nom(self):
         with tempfile.TemporaryDirectory(prefix="nc-spotlight-sessions-") as d:
