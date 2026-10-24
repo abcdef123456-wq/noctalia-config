@@ -115,7 +115,7 @@ def inaccessibles(home, reglage, libres=()):
         if p.exists():
             vus.append(str(p))
     run = os.environ.get("XDG_RUNTIME_DIR")
-    if run and os.path.isdir(run):
+    if run and os.path.isdir(run) and not run.startswith(("/tmp/", "/var/tmp/")):      # PrivateTmp le masque déjà
         vus.append(run)
     return list(dict.fromkeys(vus))
 

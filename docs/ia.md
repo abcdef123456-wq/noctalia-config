@@ -37,6 +37,27 @@ batterie**, l'IA qui tourne toute seule (alertes Telegram, automatismes) se met 
 | Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code | le programme installé et connecté (ton abonnement) | Claude Code, Codex, Gemini CLI |
 | Ollama | Ollama qui tourne sur ce PC (ou ailleurs : `OLLAMA_HOST`) et un modèle (`ollama pull llama3.2`) | selon le modèle |
 
+### Les programmes en ligne de commande : les mêmes droits pour tous
+
+Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) répondent à une simple question dans le **même bac
+à sable** que la session de confiance de JARVIS (`nc-bac`, une unité `systemd-run --user`). Pour tous :
+
+- aucun outil d'écriture ni de commande (chaque programme est bridé), dans un dossier de travail vide ;
+- ton dossier personnel est en **lecture seule**, et rien de secret n'est lisible : `~/.ssh`, `~/.gnupg`, les navigateurs,
+  les messageries, les clés d'API de nc-ia (`~/.config/nc`), `$XDG_RUNTIME_DIR` (bus, Hyprland, agents ssh et gpg…),
+  et surtout les identifiants **des autres** programmes d'IA ; chacun ne lit que les siens (`~/.claude`, `~/.codex`,
+  `~/.gemini`, `~/.qwen`, `~/.config/opencode` et `~/.local/share/opencode`) ;
+- il peut écrire dans son seul dossier d'état (sessions, journaux, jetons rafraîchis), mais pas dans ses fichiers de
+  config qui lancent des commandes (hooks, extensions, plugins, règles) ;
+- aucun autre processus visible, pas de `ptrace` ni de trousseau du noyau, pas de `sudo`, `/tmp` privé ;
+- **le réseau reste ouvert** (HTTP/HTTPS vers leur API, mais rien ne l'empêche de joindre autre chose) : ce qu'ils peuvent
+  lire peut donc partir vers leur fournisseur. Ce qu'ils peuvent lire, c'est ce qui n'est pas dans la liste des secrets :
+  `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers.
+
+Sans bac (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), chaque programme garde ses limites propres
+(lecture seule, outils retirés, pas de config utilisateur…) mais Codex, par exemple, peut alors lire tes fichiers :
+`nc-ia etat` affiche « bac des IA : actif » ou « indisponible ici ».
+
 `nc-ia etat` dit laquelle répond pour chaque usage et lesquelles sont disponibles ; `nc-ia tester` pose une question
 d'un mot à chacune (réglages → « Tester les IA disponibles »).
 

@@ -872,6 +872,162 @@ def env_cli():
     return dict(os.environ, NC_ILE_SANS="1", NO_COLOR="1", MAX_THINKING_TOKENS="0", TERM="dumb")
 
 
+# ── Le bac des IA en ligne de commande ────────────────────────────────────────────────────────────────────────────
+# Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code tournent tous dans le MÊME bac à sable que la session de
+# confiance de nc-noeud (module nc-bac : unité systemd --user, ~ en lecture seule, secrets illisibles, /tmp privé,
+# aucun autre processus visible, ni ptrace ni trousseau, tout $XDG_RUNTIME_DIR inaccessible). Différences voulues :
+#  - le réseau reste ouvert (AF_INET et AF_INET6 : ils joignent leur API) ; pas d'AF_UNIX : la résolution des noms
+#    passe par /etc/resolv.conf (UDP) quand nss-resolve, qui parle par un socket unix, est refusé ;
+#  - chaque moteur lit SES identifiants et sa config (retirés de la liste des chemins interdits pour lui seul) ; les
+#    autres moteurs, ~/.ssh, ~/.config/nc (clés d'API de nc-ia)… restent illisibles ;
+#  - écriture : son dossier d'état seulement (sessions, journaux, jetons rafraîchis), sauf ses fichiers de config qui
+#    peuvent lancer des commandes plus tard hors du bac (hooks, extensions, plugins, règles), gardés en lecture seule ;
+#    le reste de ~ est en lecture seule ; un dossier de travail vide, créé pour la demande, est le seul autre endroit.
+# Sans bac (systemd-run absent, systemd < 257, namespaces refusés) : les restrictions de chaque moteur (lecture seule,
+# outils retirés…) et « nc-ia etat » le dit.
+BAC_MOTEURS = {
+    # libres : chemins (relatifs à ~) laissés lisibles ; ecriture : ceux où il écrit ; fige : fichiers ou dossiers de
+    # config gardés en lecture seule dans ses dossiers inscriptibles (on ne peut figer que ce qui existe)
+    "claude": dict(libres=[".claude", ".claude.json"], ecriture=[".claude", ".claude.json", ".cache/claude", ".local/state/claude"],
+                   fige=[".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", ".claude/hooks",
+                         ".claude/commands", ".claude/agents", ".claude/skills", ".claude/plugins", ".claude/keybindings.json"]),
+    "codex": dict(libres=[".codex"], ecriture=[".codex"],
+                  fige=[".codex/config.toml", ".codex/hooks.json", ".codex/AGENTS.md", ".codex/skills", ".codex/plugins",
+                        ".codex/prompts", ".codex/rules"]),
+    "gemini-cli": dict(libres=[".gemini"], ecriture=[".gemini"],
+                       fige=[".gemini/settings.json", ".gemini/GEMINI.md", ".gemini/extensions", ".gemini/commands",
+                             ".gemini/policies", ".gemini/skills"]),
+    "qwen": dict(libres=[".qwen"], ecriture=[".qwen"],
+                 fige=[".qwen/settings.json", ".qwen/QWEN.md", ".qwen/extensions", ".qwen/commands", ".qwen/skills"]),
+    "opencode": dict(libres=[".config/opencode", ".local/share/opencode"],
+                     ecriture=[".local/share/opencode", ".local/state/opencode", ".cache/opencode"], fige=[]),
+}
+# Variables d'environnement qui ne sont pas transmises à l'unité (propres à la session de nc-ia ou à systemd)
+ENV_BAC_SANS = {"_", "PWD", "OLDPWD", "SHLVL", "INVOCATION_ID", "JOURNAL_STREAM", "MAINPID", "MANAGERPID", "NOTIFY_SOCKET",
+                "SYSTEMD_EXEC_PID", "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC"}
+_BAC = {"module": None, "tient": None}
+
+
+def module_bac():
+    import importlib.machinery
+    import importlib.util
+    if _BAC["module"] is None:
+        chemin = Path(__file__).resolve().parent / "nc-bac"
+        l = importlib.machinery.SourceFileLoader("nc_bac", str(chemin))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_bac", l))
+        l.exec_module(m)
+        _BAC["module"] = m
+    return _BAC["module"]
+
+
+def dossier_etat_ia():
+    return Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "nc-ia"
+
+
+def env_bac(env):
+    return [k for k, v in env.items() if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) and k not in ENV_BAC_SANS
+            and "\n" not in v and "\0" not in v]
+
+
+def argv_bac(ident, cmd, cwd, delai, env=(), unite=None, sonde=False):
+    """La commande systemd-run qui lance cmd (liste) dans le bac pour ce moteur, ou None si c'est impossible."""
+    try:
+        bac = module_bac()
+    except (OSError, SyntaxError, ImportError):
+        return None
+    c = BAC_MOTEURS.get(ident, dict(libres=[], ecriture=[], fige=[]))
+    existe = lambda rels: [str(HOME / r) for r in rels if (HOME / r).exists()]
+    ecriture = existe(c["ecriture"])
+    if not sonde:
+        ecriture.insert(0, str(cwd))
+    return bac.argv(cmd, cwd, delai + 10, home=HOME, reglage=reglage, programme=shutil.which, ecriture=ecriture,
+                    lecture_seule=existe(c["fige"]), libres=c["libres"], env=env, unite=unite)
+
+
+def bac_disponible():
+    """Le bac se met-il en place ici ? Une sonde avec les mêmes propriétés et une commande inoffensive, faite une fois
+    par lancement (et gardée 5 minutes dans XDG_RUNTIME_DIR). NC_IA_BAC=non : pas de bac (essais)."""
+    if _BAC["tient"] is not None:
+        return _BAC["tient"]
+    ok = False
+    argv = argv_bac("", ["true"], str(HOME), 10, sonde=True) if os.environ.get("NC_IA_BAC") != "non" else None
+    if argv:
+        run = os.environ.get("XDG_RUNTIME_DIR")
+        memo = Path(run) / "nc-ia-bac" if run else None
+        try:
+            if memo and time.time() - memo.stat().st_mtime < 300:
+                _BAC["tient"] = memo.read_text() == "1"
+                return _BAC["tient"]
+        except OSError:
+            pass
+        try:
+            ok = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=12).returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            ok = False
+        try:
+            if memo:
+                memo.write_text("1" if ok else "0")
+        except OSError:
+            pass
+    _BAC["tient"] = ok
+    return ok
+
+
+def dossier_temporaire(prefixe="nc-ia-", sous="travail"):
+    """Un dossier vide pour cette demande. Avec le bac, /tmp est privé : il va dans l'état de nc-ia (~/.local/state)."""
+    if bac_disponible():
+        base = dossier_etat_ia() / sous
+        base.mkdir(parents=True, exist_ok=True)
+        return tempfile.mkdtemp(prefix=prefixe, dir=str(base))
+    return tempfile.mkdtemp(prefix=prefixe)
+
+
+IMAGE_MAX = 20 * 1024 * 1024
+
+
+def copier_image(image, travail):
+    """L'image jointe copiée dans le dossier de travail : un fichier ordinaire seulement, de taille raisonnable."""
+    import stat as st
+    try:
+        s = os.stat(image)
+    except OSError as e:
+        raise ErreurIA(T(f"Image illisible : {e.strerror}", f"Unreadable image: {e.strerror}")) from None
+    if not st.S_ISREG(s.st_mode) or s.st_size > IMAGE_MAX:
+        raise ErreurIA(T("L'image doit être un fichier ordinaire de 20 Mo au plus.", "The image must be a regular file of 20 MB or less."))
+    dest = str(Path(travail) / ("image" + Path(image).suffix))
+    shutil.copyfile(image, dest)
+    return dest
+
+
+def lancer_programme(ident, cmd, env, travail, err, delai):
+    """Popen du moteur d'IA : dans le bac s'il tient, sinon avec les seules restrictions du moteur (lancé dans le dossier
+    vide). La sortie arrive ligne par ligne dans les deux cas (systemd-run --pipe passe les descripteurs tels quels)."""
+    p = None
+    if bac_disponible():
+        unite = "nc-ia-" + os.urandom(6).hex()
+        argv = argv_bac(ident, cmd, travail, delai, env=env_bac(env), unite=unite)
+        if argv:
+            p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True, env=env,
+                                 cwd=travail, start_new_session=True)
+            p.nc_unite = unite + ".service"
+    if p is None:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True, env=env,
+                             cwd=travail, start_new_session=True)
+    return p
+
+
+def arreter_unite(p):
+    """systemd-run tué, l'unité continuerait jusqu'à RuntimeMaxSec : on l'arrête aussi."""
+    u = getattr(p, "nc_unite", None)
+    if u:
+        try:
+            subprocess.run(["systemctl", "--user", "stop", u], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+
 def derniere_ligne(f):
     f.seek(0)
     l = [re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", x).strip() for x in f.read()[-20000:].splitlines()]
@@ -912,6 +1068,7 @@ class GardeTemps:
             os.killpg(self.p.pid, 9)
         except OSError:
             pass
+        arreter_unite(self.p)
 
     def fin(self):
         self.t.cancel()
@@ -924,19 +1081,28 @@ def arreter_groupe(p):
         os.killpg(p.pid, 9)
     except OSError:
         pass
+    arreter_unite(p)
 
 
 def appel_claude(consigne, texte, image, usage):
     # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
     vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
     outils = ["--tools", "Read", "--allowedTools", "Read"] if image else ["--tools", ""]
-    invite = consigne + "\n\n" + texte + (f"\n\n{T('Image à analyser', 'Image to analyze')} : {image}" if image else "")
-    cmd = ["claude", "-p", "--model", modele_choisi("claude") or FOURNISSEURS["claude"]["modele"]] + vide + outils + \
-          ["--output-format", "stream-json", "--include-partial-messages", "--verbose", invite]
+    travail = dossier_temporaire()
+    try:
+        img = copier_image(image, travail) if image else None
+        invite = consigne + "\n\n" + texte + (f"\n\n{T('Image à analyser', 'Image to analyze')} : {img}" if img else "")
+        cmd = ["claude", "-p", "--model", modele_choisi("claude") or FOURNISSEURS["claude"]["modele"]] + vide + outils + \
+              ["--output-format", "stream-json", "--include-partial-messages", "--verbose", invite]
+        yield from _appel_claude(cmd, travail)
+    finally:
+        shutil.rmtree(travail, ignore_errors=True)
+
+
+def _appel_claude(cmd, travail):
     delai, globale = avant_lancement(DELAI_CLI)
     err = tempfile.TemporaryFile(mode="w+")             # pas de tube : un programme bavard ne bloque jamais
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
-                         env=env_cli(), cwd=str(Path(image).parent) if image else str(HOME), start_new_session=True)
+    p = lancer_programme("claude", cmd, env_cli(), travail, err, delai)
     garde = GardeTemps(p, delai, globale)
     rien = True
     try:
@@ -978,72 +1144,90 @@ OUTILS_EXCLUS_QWEN = ["run_shell_command", "monitor", "write_file", "edit", "not
                       "web_fetch", "web_search", "agent", "task", "create_sub_session", "cron_create"]
 
 
-class ErreurOption(ErreurIA):
-    """Le programme ne connaît pas l'option demandée (version plus ancienne) : relancé sans elle."""
-
-
-def refus_option(texte, option):
-    return bool(re.search(r"(unrecogni[sz]ed|unknown|unexpected|invalid)[^\n]*" + re.escape(option), texte, re.I))
+def version_opencode(env):
+    """Le numéro majeur d'OpenCode (opencode --version), ou None s'il n'est pas lisible. Jamais déduit de la sortie d'une
+    demande : un texte venu d'ailleurs ne doit pas pouvoir changer la façon de lancer le programme."""
+    try:
+        r = subprocess.run(["opencode", "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+                           env=env, cwd=str(HOME))
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    m = re.search(r"(\d+)\.\d+", r.stdout) if r.returncode == 0 else None
+    return int(m[1]) if m else None
 
 
 def appel_programme(ident, consigne, texte, image, usage):
     """Codex, Gemini CLI, OpenCode, Qwen Code : la sortie du programme, ligne par ligne. Une question ne donne aucun
     droit d'agir : chacun est bridé (lecture seule, sans commande ni écriture ni web quand l'outil le permet) et lancé
-    dans un dossier temporaire vide (l'image jointe y est copiée), jamais dans le dossier personnel."""
+    dans un dossier temporaire vide (l'image jointe y est copiée), jamais dans le dossier personnel, puis dans le bac
+    commun quand il tient (voir BAC_MOTEURS)."""
     invite = consigne + "\n\n" + texte
-    travail = tempfile.mkdtemp(prefix="nc-ia-")
+    avant_lancement(DELAI_CLI)                  # plus de temps : rien n'est lancé, pas même « opencode --version »
+    travail = dossier_temporaire()
+    conf = None
     env = env_cli()
     try:
-        img = None
-        if image:
-            img = str(Path(travail) / ("image" + Path(image).suffix))
-            shutil.copyfile(image, img)
+        img = copier_image(image, travail) if image else None
         if ident == "codex":
-            # Bac à sable en lecture seule et jamais de demande d'accord (une commande qui voudrait sortir du bac échoue),
-            # quoi que dise ~/.codex/config.toml ; pas de recherche web
+            # Bac à sable en lecture seule et jamais de demande d'accord (une commande qui voudrait sortir du bac échoue) ;
+            # ni config de l'utilisateur (--ignore-user-config garde l'authentification : ses MCP, hooks, modèle et
+            # règles ne comptent pas), ni règles, ni historique ; pas de recherche web, d'applis, de plugins, de
+            # navigateur, d'ordinateur, de sous-agents ni de hooks (noms vérifiés avec « codex features list »)
+            modele = modele_choisi("codex")
             cmd = ["codex", "exec", "-s", "read-only", "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
-                   "--skip-git-repo-check", "--color", "never"] + (["-i", img] if img else []) + [invite]
+                   "--ignore-user-config", "--ignore-rules", "--ephemeral"]
+            for f in ("apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks"):
+                cmd += ["--disable", f]
+            cmd += ["--skip-git-repo-check", "--color", "never"] + (["-m", modele] if modele else []) + \
+                   (["-i", img] if img else []) + [invite]
         elif ident in ("gemini-cli", "qwen"):
             # Mode « default » imposé par le réglage système ET par l'option (jamais --yolo : sans cela un auto_edit ou un
             # yolo de ~/.gemini ou ~/.qwen, ou le mode « auto » de Qwen, s'appliquerait) ; outils d'écriture, de commande
-            # et de web retirés par un fichier de réglages système, qui l'emporte
-            reglages = Path(travail) / "reglages.json"
+            # et de web retirés par un fichier de réglages système, qui l'emporte. Ce fichier est dans un dossier voisin
+            # du dossier de travail (que le programme peut écrire), jamais dedans
+            conf = dossier_temporaire("nc-ia-conf-", "conf")
+            reglages = Path(conf) / "reglages.json"
             if ident == "gemini-cli":
-                conf = {"tools": {"exclude": OUTILS_EXCLUS_GEMINI}, "general": {"defaultApprovalMode": "default"}}
+                conf_json = {"tools": {"exclude": OUTILS_EXCLUS_GEMINI}, "general": {"defaultApprovalMode": "default"}}
             else:
-                # mcp.excluded "*" (glob documenté de Qwen) : aucun serveur MCP de l'utilisateur. Pour Gemini le format
-                # (glob ou non) n'est pas confirmé dans son code : rien n'est mis
-                conf = {"tools": {"exclude": OUTILS_EXCLUS_QWEN, "approvalMode": "default"},
-                        "permissions": {"deny": OUTILS_EXCLUS_QWEN}, "mcp": {"excluded": ["*"]}}
-            reglages.write_text(json.dumps(conf))
+                # mcp.excluded "*" (glob documenté de Qwen) : aucun serveur MCP de l'utilisateur
+                conf_json = {"tools": {"exclude": OUTILS_EXCLUS_QWEN, "approvalMode": "default"},
+                             "permissions": {"deny": OUTILS_EXCLUS_QWEN}, "mcp": {"excluded": ["*"]}}
+            reglages.write_text(json.dumps(conf_json))
             env["GEMINI_CLI_SYSTEM_SETTINGS_PATH" if ident == "gemini-cli" else "QWEN_CODE_SYSTEM_SETTINGS_PATH"] = str(reglages)
             if ident == "gemini-cli":
-                cmd = ["gemini", "--approval-mode", "default", "-p", invite + (f"\n\n@{Path(img).name}" if img else "")]
+                # -e none : aucune extension ; --allowed-mcp-server-names avec un nom qui n'existe pas : aucun serveur MCP
+                cmd = ["gemini", "--approval-mode", "default", "-e", "none", "--allowed-mcp-server-names", "nc-aucun",
+                       "-p", invite + (f"\n\n@{Path(img).name}" if img else "")]
             else:
                 cmd = ["qwen", "--approval-mode", "default", "-p", invite]
         else:
-            # Agent « plan » (n'écrit pas) et toute permission refusée : ni commande, ni écriture, ni web, ni MCP
-            # (l'agent plan seul laisse la commande permise)
-            env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": {"*": "deny"}})
-            env["OPENCODE_CONFIG_PROJECT_DISABLE"] = "1"
-            # OpenCode 2 passe par un service en arrière-plan qui ne lit pas l'environnement de nc-ia : sans
-            # --standalone (serveur privé dans ce processus) la configuration ci-dessus ne s'y appliquerait pas.
-            # Les versions 1.x lancent déjà tout dans le processus et ne connaissent pas l'option : relancé sans elle
-            cmd = ["opencode", "run", "--agent", "plan", "--standalone", invite]
-        try:
-            yield from _lance_programme(ident, cmd, env, travail)
-        except ErreurOption:
-            cmd.remove("--standalone")
-            yield from _lance_programme(ident, cmd, env, travail)
+            # Un agent à nous dans la configuration en ligne (elle passe en dernier : une règle « allow » de
+            # ~/.config/opencode ne peut pas la contredire), toute permission refusée : ni commande, ni écriture, ni web,
+            # ni MCP. OpenCode 2 passe par un service en arrière-plan qui ne lit pas l'environnement de nc-ia : sans
+            # --standalone (serveur privé dans ce processus) la configuration ne s'y appliquerait pas. La version est
+            # lue UNE fois (opencode --version), jamais devinée depuis la sortie ; illisible : on ne lance pas
+            v = version_opencode(env)
+            if v is None:
+                raise ErreurIA(T("OpenCode : version illisible (opencode --version), rien n'est lancé.",
+                                 "OpenCode: unreadable version (opencode --version), nothing was run."))
+            env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": {"*": "deny"},
+                                                         "agent": {"nc-question": {"mode": "primary", "permission": {"*": "deny"}}}})
+            env["OPENCODE_CONFIG_PROJECT_DISABLE"] = "1"                # nom de la version 2
+            env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"                # nom de la version 1 (la 2 accepte les deux)
+            env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"                   # sinon il charge ~/.claude dans l'invite
+            cmd = ["opencode", "run", "--agent", "nc-question"] + (["--standalone"] if v >= 2 else []) + [invite]
+        yield from _lance_programme(ident, cmd, env, travail)
     finally:
         shutil.rmtree(travail, ignore_errors=True)
+        if conf:
+            shutil.rmtree(conf, ignore_errors=True)
 
 
 def _lance_programme(ident, cmd, env, travail):
     delai, globale = avant_lancement(DELAI_CLI)
     err = tempfile.TemporaryFile(mode="w+")
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL, text=True,
-                         env=env, cwd=travail, start_new_session=True)
+    p = lancer_programme(ident, cmd, env, travail, err, delai)
     garde = GardeTemps(p, delai, globale)
     rien = True
     try:
@@ -1054,8 +1238,6 @@ def _lance_programme(ident, cmd, env, travail):
                 continue
             if rien and not l.strip():
                 continue
-            if rien and "--standalone" in cmd and refus_option(l, "standalone"):
-                raise ErreurOption(l.strip()[:200])
             rien = False
             yield l
         p.wait(timeout=10)
@@ -1063,8 +1245,6 @@ def _lance_programme(ident, cmd, env, travail):
             raise erreur_delai(garde.propre, garde.globale)
         # Code d'erreur : un échec, même après un début de réponse (revue Codex IA-03)
         if p.returncode != 0:
-            if rien and "--standalone" in cmd and refus_option(derniere_ligne(err), "standalone"):
-                raise ErreurOption(derniere_ligne(err))
             raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} a échoué (code {p.returncode})", f"{nom(ident)} failed (code {p.returncode})"))
         if rien:
             raise ErreurIA(derniere_ligne(err) or T(f"{nom(ident)} n'a rien répondu", f"{nom(ident)} gave no answer"))
@@ -3510,7 +3690,7 @@ def etat():
     choix = {u: (candidats(u) or [""])[0] for u in usages}
     c = ANCIENS.get(reglage("IA_CHOIX", "claude"), reglage("IA_CHOIX", "claude"))
     return {
-        "mode": mode(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", "claude"), "preference": reglage("IA_PREFERENCE", "rapide"),
+        "mode": mode(), "bac": bac_disponible(), "coupee": coupee(), "en_ligne": en_ligne(), "choix": reglage("IA_CHOIX", "claude"), "preference": reglage("IA_PREFERENCE", "rapide"),
         # l'IA choisie (IA_CHOIX) et son programme agentique
         "choisie": dict(id=c, nom=nom(c), disponible=disponible(c), cli=cli_agent(c)[0], cli_disponible=cli_agent(c)[1])
                    if c in FOURNISSEURS else {},
@@ -3529,6 +3709,11 @@ def afficher_etat(e):
     if not e["coupee"]:
         for u, x in e["usages"].items():
             print(f"  {u:<9} → {x['nom'] or T('aucune', 'none')}")
+    print(T("bac des IA : actif (mêmes droits pour Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code : rien d'écrit hors de leur dossier, rien de secret lisible)",
+            "AI sandbox: active (same rights for Claude Code, Codex, OpenCode, Gemini CLI and Qwen Code: nothing written outside their folder, no secret readable)")
+          if e.get("bac") else
+          T("bac des IA : indisponible ici : Codex peut lire tes fichiers (seules les limites propres à chaque programme s'appliquent)",
+            "AI sandbox: unavailable here: Codex can read your files (only each program's own limits apply)"))
     print(T("IA :", "AIs:"))
     for i in e["ias"]:
         etiquette = T("disponible", "available") if i["disponible"] else "—"

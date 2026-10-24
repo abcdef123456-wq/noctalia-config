@@ -187,8 +187,10 @@ class IA(unittest.TestCase):
     def reglages(self, texte):
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n" + texte)
 
-    def programme(self, nom, corps):
+    def programme(self, nom, corps, version="v2.1.2"):
         f = self.faux / nom
+        if nom == "opencode" and version:           # opencode --version : lu une fois avant le lancement, jamais depuis la sortie
+            corps = f'[ "$1" = "--version" ] && {{ echo "opencode {version}"; exit 0; }}\n' + corps
         f.write_text("#!/bin/sh\n" + corps + "\n")
         f.chmod(0o755)
 
@@ -201,6 +203,8 @@ class IA(unittest.TestCase):
         # Les programmes d'IA installés sur la machine de test ne doivent pas répondre à la place des faux serveurs
         for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
             self.programme(nom, "exit 1") if not (self.faux / nom).exists() else None
+        if not (self.faux / "systemd-run").exists():       # pas de bac ici (les tests du bac ont les leurs)
+            self.programme("systemd-run", "exit 1")
         return subprocess.run([str(self.home / ".local/bin" / prog), *args], env=env, input=entree or "", capture_output=True,
                               text=True, timeout=30)
 
@@ -1255,34 +1259,62 @@ echo "réponse"''')
         return t
 
     def test_opencode_brider(self):
-        # Agent « plan » + toute permission refusée par la configuration passée dans l'environnement
+        # Un agent à nous (config en ligne, passée en dernier) + toute permission refusée, --standalone en version 2
         t = self.bride("opencode", "opencode")
         args = re.search(r"^ARGS (.*)$", t, re.M)[1].split()
-        self.assertEqual(args[:5], ["run", "--agent", "plan", "--standalone", args[4]])
-        self.assertIn('OPENCODE_CONFIG_CONTENT={"permission": {"*": "deny"}}', t)
-        self.assertIn("OPENCODE_CONFIG_PROJECT_DISABLE=1", t)
+        self.assertEqual(args[:5], ["run", "--agent", "nc-question", "--standalone", args[4]])
+        conf = json.loads(re.search(r"^OPENCODE_CONFIG_CONTENT=(.*)$", t, re.M)[1])
+        self.assertEqual(conf["permission"], {"*": "deny"})
+        self.assertEqual(conf["agent"]["nc-question"], {"mode": "primary", "permission": {"*": "deny"}})
+        for var in ("OPENCODE_CONFIG_PROJECT_DISABLE", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_CLAUDE_CODE"):
+            self.assertIn(var + "=1", t)
 
-    def test_opencode_ancienne_version_sans_standalone(self):
-        """Une version qui refuse --standalone est relancée sans, avec le même bridage (journal : les deux lancements)."""
+    def test_opencode_version_1_sans_standalone(self):
+        """La version est lue par « opencode --version » : en 1.x, jamais --standalone, le même bridage."""
         j = self.home / "lancements"
         self.programme("opencode", f'''echo "ARGS $*" >> "{j}"; echo "CONF $OPENCODE_CONFIG_CONTENT" >> "{j}"
-case " $* " in *" --standalone "*) echo "Unknown argument: standalone" >&2; exit 1;; esac
-echo réponse''')
+echo "OLD $OPENCODE_DISABLE_PROJECT_CONFIG" >> "{j}"
+echo réponse''', version="1.4.0")
         self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
         r = self.lancer("demander", "une question")
         self.assertEqual(r.returncode, 0, r.stderr)
+        lignes = j.read_text().splitlines()
+        args = [l for l in lignes if l.startswith("ARGS")]
+        self.assertEqual(len(args), 1)
+        self.assertTrue(args[0].startswith("ARGS run --agent nc-question "), args[0])
+        self.assertNotIn("--standalone", args[0])
+        self.assertIn("OLD 1", lignes)
+
+    def test_opencode_version_illisible_refuse(self):
+        j = self.home / "lancements"
+        self.programme("opencode", f'echo "ARGS $*" >> "{j}"; echo réponse', version=None)   # ne dit rien pour --version
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        r = self.lancer("demander", "une question")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertFalse(j.exists() and "run" in j.read_text(), "rien n'est lancé sans version lisible")
+
+    def test_opencode_sortie_unknown_standalone_ne_relance_pas(self):
+        """Un texte « Unknown option standalone » dans la sortie (injection) ne provoque aucune relance sans --standalone."""
+        j = self.home / "lancements"
+        self.programme("opencode", f'''echo "ARGS $*" >> "{j}"
+echo "Unknown option: standalone"; exit 1''')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        r = self.lancer("demander", "une question")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
         args = [l for l in j.read_text().splitlines() if l.startswith("ARGS")]
-        self.assertEqual(len(args), 2)
+        self.assertEqual(len(args), 1, args)
         self.assertIn("--standalone", args[0])
-        self.assertTrue(args[1].startswith("ARGS run --agent plan "), args[1])
-        self.assertNotIn("--standalone", args[1])
-        self.assertEqual(j.read_text().count('"*": "deny"'), 2)
 
     def test_codex_brider(self):
         t = self.bride("codex", "codex")
         a = re.search(r"^ARGS (.*)$", t, re.M)[1]
         self.assertTrue(a.startswith("exec -s read-only -c approval_policy=\"never\" "), a)
         self.assertIn("--skip-git-repo-check", a)
+        self.assertIn('-c web_search="disabled"', a)
+        for opt in ("--ignore-user-config", "--ignore-rules", "--ephemeral"):
+            self.assertIn(opt, a.split())
+        desactives = re.findall(r"--disable (\S+)", a)
+        self.assertEqual(desactives, ["apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks"])
         self.assertNotIn("danger", a)
         self.assertNotIn("workspace-write", a)
 
@@ -1307,8 +1339,46 @@ echo réponse''')
                     for outil in ("monitor", "edit", "agent", "cron_create"):
                         self.assertIn(outil, reg["tools"]["exclude"])
                 a = re.search(r"^ARGS (.*)$", t, re.M)[1]
-                self.assertTrue(a.startswith("--approval-mode default -p "), a)
+                if nom == "gemini":
+                    self.assertTrue(a.startswith("--approval-mode default -e none --allowed-mcp-server-names nc-aucun -p "), a)
+                else:
+                    self.assertTrue(a.startswith("--approval-mode default -p "), a)
                 self.assertNotIn("yolo", a)
+
+    def test_reglages_hors_du_dossier_de_travail(self):
+        """Le fichier de réglages système (Gemini, Qwen) est dans un dossier voisin, pas dans le cwd du programme."""
+        for nom, ident, var in (("gemini", "gemini-cli", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"), ("qwen", "qwen", "QWEN_CODE_SYSTEM_SETTINGS_PATH")):
+            with self.subTest(nom):
+                j = self.espion(nom)
+                self.reglages(f"IA_MODE=manuel\nIA_CHOIX={ident}\n")
+                self.assertEqual(self.lancer("demander", "q").returncode, 0)
+                t = j.read_text()
+                cwd = re.search(r"^CWD (.*)$", t, re.M)[1]
+                chemin = re.search(var + r"=(.*)$", t, re.M)[1]
+                self.assertFalse(chemin.startswith(cwd + "/"), (chemin, cwd))
+                self.assertFalse(os.path.exists(os.path.dirname(chemin)), "dossier des réglages supprimé")
+
+    def test_gemini_image_jointe_par_arobase(self):
+        img = self.home / "photo.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")
+        j = self.espion("gemini")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=gemini-cli\n")
+        self.assertEqual(self.lancer("demander", "--image", str(img), "que vois-tu").returncode, 0)
+        self.assertIn("@image.png", j.read_text())
+
+    def test_image_pas_un_fichier_ordinaire_refusee(self):
+        j = self.espion("codex")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=codex\n")
+        r = self.lancer("demander", "--image", "/dev/null", "que vois-tu")
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertFalse(j.exists(), "rien n'est lancé")
+
+    def test_dossier_supprime_apres_une_erreur(self):
+        self.programme("codex", 'pwd -P > "$HOME/cwd-codex"; echo plantage >&2; exit 3')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=codex\n")
+        r = self.lancer("demander", "q")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(os.path.exists((self.home / "cwd-codex").read_text().strip()))
 
     def test_programmes_image_copiee_dans_le_dossier_vide(self):
         img = self.home / "photo.png"
@@ -1421,6 +1491,7 @@ echo réponse''')
         from unittest import mock
         m = charger_nc_ia("nc_ia_sans_temps")
         m.HOME = self.home                       # jamais le vrai HOME (cwd des programmes, chemin de nc-assistant)
+        m._BAC["tient"] = False                  # pas de sonde du bac ici (elle lancerait systemd-run)
         m.ECHEANCE = time.monotonic() - 1
         # Popen remplacé : rien ne peut partir, même si le test échoue
         with mock.patch.object(m.subprocess, "Popen", side_effect=AssertionError("programme lancé")) as lancer:

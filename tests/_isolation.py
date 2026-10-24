@@ -64,6 +64,10 @@ def _poser_faux(dossier, journal, vrai_qs):
         return f'printf "%s\\n" "{nom} $*" >> {shlex.quote(str(journal))}\n'
     for nom in FAUX:
         _ecrire(dossier / nom, "#!/bin/sh\n" + note(nom) + (_HYPRCTL if nom == "hyprctl" else "") + "exit 0\n")
+    # Faux systemd-run : toujours en échec, donc « pas de bac » pour nc-ia (sinon les moteurs d'IA factices des tests,
+    # dans un faux HOME sous /tmp, seraient lancés dans un vrai bac où /tmp est privé). Les tests du vrai bac
+    # (BacReel, tests/test_bac_ia.py) prennent le vrai programme avec leur propre PATH.
+    _ecrire(dossier / "systemd-run", "#!/bin/sh\n" + note("systemd-run") + "exit 1\n")
     if vrai_qs:
         note_qs = note("qs")
         _ecrire(dossier / "qs", f"""#!/bin/sh
