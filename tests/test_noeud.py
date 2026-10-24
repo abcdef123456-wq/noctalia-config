@@ -2080,6 +2080,26 @@ class SessionConfiance(ModuleCharge):
         self.assertEqual(len(self.confs), 1, "confirmé")
         self.assertEqual(self.appels_systemd(), [], "lu par nc-noeud, pas par le bac")
 
+    def test_read_file_sur_un_dossier_en_session_et_hors_session(self):
+        # Régression de la session-24 : executer(budget, bac) appelé aussi pour la branche « lister le dossier »
+        m = self.charger()
+        (self.home / "d").mkdir()
+        (self.home / "d/a.txt").write_text("x")
+        for n in (self.noeud(m, minutes=0), self.ouvrir(m)):
+            with self.subTest(session=n.session is not None):
+                self.confs.clear()
+                r = self.dec(n, "read_file", {"path": "~/d"})
+                self.assertTrue(r["success"], r)
+                self.assertEqual(r["type"], "directory")
+                self.assertEqual([e["name"] for e in r["items"]], ["a.txt"])
+
+    def test_une_ligne_pour_les_notifications(self):
+        m = self.charger()
+        t = m.une_ligne("telegram\nannulée, rien envoyé\u202e<b>x</b>")
+        self.assertNotIn("\n", t)
+        self.assertNotIn("\u202e", t)
+        self.assertTrue(t.startswith("telegram annulée"), t)
+
     def test_read_file_origine_differente_reconfirme(self):
         m = self.charger()
         n = self.ouvrir(m)

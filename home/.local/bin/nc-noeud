@@ -649,6 +649,12 @@ def rendre_visible(texte):
     return re.sub(r"\n{3,}", "\n\n", "".join(out))             # au plus 2 sauts de ligne de suite
 
 
+def une_ligne(texte):
+    """Un texte venu du serveur (origine, chemin lu), sur une seule ligne et sans caractère caché : pour les titres et
+    corps de notification, où un saut de ligne ou un U+202E ferait lire autre chose."""
+    return rendre_visible(" ".join(str(texte).split()))
+
+
 def longueur_utf16(texte):
     """Longueur comptée comme Telegram (unités UTF-16)."""
     return len(str(texte).encode("utf-16-le")) // 2
@@ -1048,7 +1054,8 @@ def preparer(action, p):
         if cible.is_dir():
             resume = T(f"lister le dossier {montrer_chemin(cible)}", f"list the folder {montrer_chemin(cible)}")
 
-            async def executer(budget=None):
+            async def executer(budget=None, bac=False):
+                # Lister reste hors du bac, même en session : list_files liste la même chose sans confirmation
                 elements = []
                 for e in sorted(cible.iterdir(), key=lambda x: x.name)[:200]:
                     with contextlib.suppress(OSError):
@@ -1672,7 +1679,8 @@ class Noeud:
         en_cours = self.session is sess
         if en_cours:
             self.ecrire_etat_session(resume_court)
-        prevenir(T("JARVIS, session : " + resume_court, "JARVIS, session: " + resume_court),
+        ligne = une_ligne(resume_court)
+        prevenir(T("JARVIS, session : " + ligne, "JARVIS, session: " + ligne),
                  (souci.capitalize() + " · " if souci else "")
                  + T(f"{max(0, sess.reste)} action(s) restantes, {sess.reste_s()} s",
                      f"{max(0, sess.reste)} action(s) left, {sess.reste_s()} s"))
@@ -1936,6 +1944,7 @@ class Noeud:
             raise
         if reutilise and nom == "screenshot" and res.get("success"):
             o = origin.get("via") if isinstance(origin, dict) and isinstance(origin.get("via"), str) else self.serveur
+            o = une_ligne(o)
             prevenir(T("JARVIS : capture", "JARVIS: screenshot"),
                      T(f"Capture envoyée à {o[:60]}", f"Screenshot sent to {o[:60]}"))
         if reutilise:
