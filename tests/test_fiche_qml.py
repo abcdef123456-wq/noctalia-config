@@ -186,11 +186,13 @@ ShellRoot {
                      var it = trouver(fiche.contentItem, "nc-fiche-interrupteur-raccourci:64:t").parent
                      verifier(o.visible && d.x + d.width <= o.x && o.x + o.width <= it.x, "texte, ↺ puis interrupteur : " + [d.x + d.width, o.x, o.x + o.width, it.x])
                      DEBORDEMENT
-                     cliquer("nc-fiche-interrupteur-raccourci:64:q")                     // allumé : éteindre
-                     cliquer("nc-fiche-interrupteur-raccourci:64:d")                     // éteint : rallumer
-                     cliquer("nc-fiche-moins-raccourci:64:q")                            // caché : ne fait rien
+                     cliquer("nc-fiche-interrupteur-raccourci:64:q"); etape++; return }  // allumé : éteindre
+  // Un clic par pas : le pas suivant attend que l'écriture d'avant soit finie (Raccourcis.occupe), sinon l'ordre de fin
+  // des processus rendait le test instable (Qt.quit avant les dernières écritures)
+  if (etape === 3) { cliquer("nc-fiche-interrupteur-raccourci:64:d"); etape++; return }  // éteint : rallumer
+  if (etape === 4) { cliquer("nc-fiche-moins-raccourci:64:q")                            // caché : ne fait rien
                      cliquer("nc-fiche-moins-raccourci:64:b"); etape++; return }         // l'un des tiens : supprimer
-  if (etape === 3) Qt.quit()'''.replace("DEBORDEMENT", DEBORDEMENT),
+  if (etape === 5) Qt.quit()'''.replace("DEBORDEMENT", DEBORDEMENT),
                                   attendus=lambda a: len([x for x in a if x[0] == "raccourci"]) >= 3)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         actions = [json.loads(a[1]) for a in appels if a[0] == "raccourci"]
