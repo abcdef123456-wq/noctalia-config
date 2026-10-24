@@ -143,6 +143,25 @@ def tone(L, C, H, bg_rgb, min_ratio, dark_bg):
     return rgb
 
 
+def accent_lisible(primary, sur, bg_hex, fg_hex, dark):
+    """Accent de l'île (et de Firefox) lisible sur le fond : 3:1 au moins (éléments d'interface), en ne bougeant que sa
+    luminosité OKLCH ; tel quel s'il y est déjà (le cas des palettes tirées d'un fond d'écran). Les schémas clairs de
+    Noctalia descendent sinon à 2,55:1, voire 1,3:1. Le texte posé sur l'accent : celui de Noctalia s'il reste à 4,5:1,
+    sinon le fond ou le texte de la palette, sinon blanc ou noir (l'un des deux y arrive toujours)."""
+    bg, p = hex_to_rgb(bg_hex), hex_to_rgb(primary)
+    if contrast(p, bg) < 3.0:
+        # Visé un peu au-dessus si l'arrondi à l'octet retombe juste sous 3:1
+        for cible in (3.0, 3.02, 3.05):
+            primary = rgb_to_hex(tone(*rgb_to_oklch(p), bg, cible, dark))
+            if contrast(hex_to_rgb(primary), bg) >= 3.0:
+                break
+    a = hex_to_rgb(primary)
+    if contrast(hex_to_rgb(sur), a) < 4.5:
+        sur = next((x for x in (bg_hex, fg_hex) if contrast(hex_to_rgb(x), a) >= 4.5),
+                   max(("#ffffff", "#000000"), key=lambda x: contrast(hex_to_rgb(x), a)))
+    return primary, sur
+
+
 def main():
     try:
         c = json.loads(COLORS.read_text())
@@ -324,13 +343,14 @@ hl.config({{
     bord_g = rgb_to_hex(oklch_to_rgb(aL, aC, (aH - 14) % 360))
     bord_d = rgb_to_hex(oklch_to_rgb(aL + 0.02, aC, (aH + 14) % 360))
     bord_m = teinte_fond(hex_to_rgb(rgb_to_hex(oklch_to_rgb(aL, aC, aH))), 0.5)
+    accent_ile, sur_accent = accent_lisible(primary, c.get("mOnPrimary", bg_hex), bg_hex, fg_hex, dark)
     ile = {
         "sombre": dark,
         "fond": bg_hex, "texte": fg_hex,
         "texteSec": c.get("mOnSurfaceVariant", fg_hex), "texteDoux": rgb_to_hex(normal["white"]),
         "carte": palier(0.035), "carteSurvol": palier(0.05), "gris2": palier(0.065), "gris3": palier(0.11),
         "gris4": palier(0.15), "gris5": palier(0.22),
-        "accent": primary, "surAccent": c.get("mOnPrimary", bg_hex),
+        "accent": accent_ile, "surAccent": sur_accent,
         "surCouleur": bg_hex if dark else "#ffffff",
         "rouge": rgb_to_hex(normal["red"]), "vert": rgb_to_hex(normal["green"]), "jaune": rgb_to_hex(normal["yellow"]),
         "orange": rgb_to_hex(orange), "bleu": rgb_to_hex(normal["blue"]), "violet": rgb_to_hex(normal["magenta"]),
