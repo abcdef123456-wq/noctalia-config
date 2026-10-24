@@ -50,15 +50,23 @@ import stat as stat_module
 
 
 def _rmtree_force(d):
+    """Supprime le faux HOME d'un test, même après un chmod 000, et même si le faux notify-send (lancé détaché par nc-ia)
+    écrit notifs.log APRÈS le début du nettoyage : on recommence jusqu'à ce que le dossier ait vraiment disparu."""
     def _ch(f, p, _):
         with __import__("contextlib").suppress(OSError):
             os.chmod(os.path.dirname(p), 0o700)
             os.chmod(p, 0o700)
             f(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(d, onexc=_ch)
-    else:
-        shutil.rmtree(d, onerror=_ch)
+    import time as _t
+    for _ in range(50):                                     # au plus ~5 s
+        with __import__("contextlib").suppress(OSError):
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(d, onexc=_ch)
+            else:
+                shutil.rmtree(d, onerror=_ch)
+        if not os.path.lexists(d):
+            return
+        _t.sleep(0.1)
 
 
 import sys
