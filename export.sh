@@ -29,6 +29,23 @@ verifier_propre() {
 }
 if [ "$preview" = 0 ]; then verifier_propre || exit 1; fi
 
+# La version installée (notée par install.sh, donc par nc-maj, à la fin d'une installation réussie) plus ancienne que
+# le dépôt : les fichiers de ~ n'ont pas encore les ajouts récents du dépôt, et l'export les effacerait. En aperçu, un
+# avertissement ; sinon l'export s'arrête (NC_EXPORT_MALGRE_TOUT=1 si tu as copié ces fichiers à la main).
+installee=""
+[ -r "$HOME/.config/nc/version-installee" ] && { IFS= read -r installee < "$HOME/.config/nc/version-installee" || true; }
+if [ -n "$installee" ] && git -C "$REPO" rev-parse -q --verify "$installee^{commit}" >/dev/null 2>&1 \
+   && [ "$(git -C "$REPO" rev-parse "$installee^{commit}")" != "$(git -C "$REPO" rev-parse HEAD)" ] \
+   && git -C "$REPO" merge-base --is-ancestor "$installee" HEAD 2>/dev/null \
+   && ! git -C "$REPO" diff --quiet "$installee" HEAD -- home 2>/dev/null; then
+  retard="$(git -C "$REPO" rev-list --count "$installee..HEAD" -- home 2>/dev/null || echo "?")"
+  echo "$(t "Attention : ce PC a une installation plus ancienne que le dépôt ($retard commit(s) touchent home/ depuis). L'export effacerait leurs ajouts. Lance d'abord nc-maj (ou ./install.sh)." "Warning: this PC runs an older installation than the repository ($retard commit(s) touch home/ since). Exporting would erase their additions. Run nc-update (or ./install.sh) first.")" >&2
+  if [ "$preview" = 0 ] && [ "${NC_EXPORT_MALGRE_TOUT:-}" != 1 ]; then
+    echo "$(t "Export annulé. Si tu as copié ces fichiers à la main dans ~, relance avec NC_EXPORT_MALGRE_TOUT=1." "Export cancelled. If you copied these files into ~ by hand, run again with NC_EXPORT_MALGRE_TOUT=1.")" >&2
+    exit 1
+  fi
+fi
+
 # Toutes les substitutions et vérifications se font à côté du dépôt existant.
 stage="$(mktemp -d "$REPO/.nc-export.XXXXXX")"
 nettoyer() {
@@ -200,16 +217,31 @@ comparer_shell() { # comparer_shell REL BASE INSTALLE
            | sed -n '/^@@/,$ { /^@@/d; /^\\/d; p }' || true)"
   rm -f -- "$norm"
   [ -n "$ecart" ] || return 0
-  # Jamais un secret à l'écran (export.sh est aussi lancé par des assistants, qui gardent tout) : la valeur de chaque
-  # affectation (NOM=…) est masquée, et tout ce qui ressemble à un jeton sur le reste de la ligne.
-  ecart="$(printf '%s\n' "$ecart" | sed -E \
-    -e 's/([A-Za-z_][A-Za-z0-9_]*=)("[^"]*"?|\x27[^\x27]*\x27?|[^[:space:];|&]*)/\1…/g' \
-    -e 's/(sk-|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|AIza)[A-Za-z0-9_-]+/\1…/g' \
-    -e 's/[0-9]{8,10}:[A-Za-z0-9_-]{30,}/…/g; s/[A-Za-z0-9_+=-]{32,}/…/g')"
+  # Jamais une valeur à l'écran (export.sh est aussi lancé par des assistants, qui gardent tout : un mot de passe ou
+  # un jeton se cache n'importe où dans une ligne) : seulement le premier mot de chaque ligne, et le nom affecté.
+  ecart="$(printf '%s\n' "$ecart" | python3 -I -c '
+import re, sys
+MOT = re.compile(r"[A-Za-z0-9_.-]{1,24}|\[\[|#|\{|\}|\(|\)")
+NOM = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)\+?=")
+for l in sys.stdin.read().splitlines():
+    signe, reste = l[:1], l[1:].strip()
+    mots = reste.split()
+    if not mots:
+        print(signe)
+        continue
+    nom = NOM.search(reste)
+    premier = mots[0]
+    if nom and nom.start(1) == reste.index(premier):
+        print(f"{signe}{nom[1]}=…")
+        continue
+    jeton = re.match(r"sk-|gh[pousr]_|github_pat_|glpat-|xox|AIza|[0-9]{6,}", premier)
+    affiche = premier if MOT.fullmatch(premier) and not jeton else "…"
+    print(f"{signe}{affiche} {nom[1]}=…" if nom else f"{signe}{affiche}" + (" …" if len(mots) > 1 else ""))
+')"
   mapfile -t lignes <<< "$ecart"
   n=${#lignes[@]}
   # shellcheck disable=SC2088  # « ~/ » est du texte affiché, pas un chemin à développer
-  echo "$(t "~/$rel diffère du dépôt : la version du dépôt est gardée, ces lignes ne sont pas publiées (~/$rel n'est pas modifié) :" "~/$rel differs from the repository: the repository version is kept, these lines are not published (~/$rel is not changed):")" >&2
+  echo "$(t "~/$rel diffère du dépôt ($n lignes) : la version du dépôt est gardée, ces lignes ne sont pas publiées (~/$rel n'est pas modifié ; valeurs cachées) :" "~/$rel differs from the repository ($n lines): the repository version is kept, these lines are not published (~/$rel is not changed; values hidden):")" >&2
   printf '  %s\n' "${lignes[@]:0:12}" >&2
   [ "$n" -le 12 ] || echo "  … ($n $(t "lignes en tout" "lines in total"))" >&2
   if [ "$rel" = .zshrc ]; then
@@ -327,16 +359,36 @@ while IFS= read -r -d '' f; do
 done < <(find home -type f -print0)
 
 # Repères par alignement avec le dépôt, sans rien demander à ce PC (écran, échelle, navigateur peuvent avoir changé
-# depuis l'installation) : chaque ligne du dépôt à repères devient un motif (un repère vaut n'importe quel texte,
-# le reste à l'identique). Une ligne installée qui correspond au motif de la ligne du dépôt, à la même place,
-# redevient la ligne du dépôt. Les autres lignes passent par les sed ci-dessous, comme avant.
-# Le nom de l'écran de ce PC devient @MONITOR@ seulement dans les lignes qui ne sont pas déjà celles du dépôt : un
-# exemple du dépôt (« HDMI-A-1 » dans un commentaire) reste tel quel quand c'est justement l'écran branché.
+# depuis l'installation) : chaque ligne du dépôt à repères devient un motif où chaque repère ne vaut que les valeurs
+# qu'install.sh peut lui donner (JOKERS, ci-dessous). Une ligne installée qui y correspond, à la même place,
+# redevient la ligne du dépôt. Une ligne que tu as changée (plugin ajouté, appli épinglée, widget en plus) ne
+# correspond plus : elle est gardée, et les sed ci-dessous y reposent les repères, comme avant.
+# Le nom de l'écran (de hyprctl, ou lu dans les lignes alignées) devient @MONITOR@, et le navigateur lu de la même
+# façon @BROWSER@, seulement dans les lignes qui ne sont pas déjà celles du dépôt : un exemple du dépôt (« HDMI-A-1 »
+# dans un commentaire) reste tel quel quand c'est justement l'écran branché.
 python3 -I - "$REPO/home" home "$mon" <<'EOF'
 import difflib, re, sys
 from pathlib import Path
-REPERES = re.compile(r"@(?:MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
+REPERES = re.compile(r"@(MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
                      r"|ILE_CENTRE|NOTIF_NOCTALIA|NOTIF_WIDGET|PLUGIN_ILE)@")
+NOMBRE = r"[0-9]+(?:\.[0-9]+)?"                         # awk « %.1f » dans install.sh
+DISPOSITION = r"[A-Za-z0-9_()-]+"
+# Les valeurs exactes qu'install.sh donne à chaque repère (voir le sed de son étape de copie)
+JOKERS = {
+    "MONITOR": r"[A-Za-z0-9._-]+",                     # eDP-1, HDMI-A-1, DP-2…
+    "KB_LAYOUT": DISPOSITION + r"(?:," + DISPOSITION + r")*",   # fr, us,fr
+    "KB_OPTIONS": r"(?:|grp:win_space_toggle)",
+    "BROWSER": r"[A-Za-z0-9._-]+",                     # identifiant d'appli, sans « .desktop »
+    "LCX": NOMBRE, "LCY1": NOMBRE, "LCY2": NOMBRE, "LCY3": NOMBRE, "LCY4": NOMBRE, "LCY5": NOMBRE,
+    "DISTRO_LOGO": r"[^\",\[\]]*",                     # un chemin, ou rien
+    "POLKIT": r"(?:true|false)",
+    "QT_STYLE": r"(?:Breeze|Fusion)",
+    "ICON_THEME": r"[A-Za-z0-9._+-]+",                 # NC
+    "ILE_CENTRE": r'(?:|"nc/ile:pilule")',
+    "NOTIF_NOCTALIA": r"(?:true|false)",
+    "NOTIF_WIDGET": r'(?:|, "notifications")',
+    "PLUGIN_ILE": r'(?:|, "nc/ile")',
+}
 depot, export, mon = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 
 
@@ -355,6 +407,13 @@ def texte(f):
         return None
 
 
+def motif(ligne):
+    morceaux = REPERES.split(ligne)                    # texte, repère, texte, repère…
+    return re.compile("".join(re.escape(m) if i % 2 == 0 else f"({JOKERS[m]})" for i, m in enumerate(morceaux)))
+
+
+appris = {"MONITOR": {mon} - {""}, "BROWSER": set()}  # valeurs de ce PC lues dans les lignes alignées
+fichiers = []
 for cible in sorted(export.rglob("*")):
     t = texte(cible)
     if t is None:
@@ -364,24 +423,38 @@ for cible in sorted(export.rglob("*")):
     a = r.splitlines(keepends=True) if r is not None else []
     sortie = list(x)
     if r is not None and REPERES.search(r):
-        motifs = [re.compile("(.*?)".join(re.escape(p) for p in REPERES.split(l.rstrip("\n"))))
-                  if REPERES.search(l) else None for l in a]
+        motifs = [motif(l.rstrip("\n")) if REPERES.search(l) else None for l in a]
         for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, x, autojunk=False).get_opcodes():
             if op != "replace":
                 continue
             i = i1
             for j in range(j1, j2):
                 for k in range(i, i2):
-                    if motifs[k] and motifs[k].fullmatch(x[j].rstrip("\n")):
+                    m = motifs[k] and motifs[k].fullmatch(x[j].rstrip("\n"))
+                    if m:
+                        for nom, valeur in zip(REPERES.findall(a[k]), m.groups()):
+                            if nom in appris and valeur:
+                                appris[nom].add(valeur)
                         sortie[j] = a[k].rstrip("\n") + ("\n" if x[j].endswith("\n") else "")
                         i = k + 1
                         break
-    if mon:
-        du_depot = {l.rstrip("\n") for l in a}
-        sortie = [l if l.rstrip("\n") in du_depot
-                  else l.replace(f'"{mon}"', '"@MONITOR@"').replace(f'@{mon}"', '@@MONITOR@"') for l in sortie]
-    if sortie != x:
-        cible.write_text("".join(sortie), encoding="utf-8")
+    fichiers.append((cible, x, a, sortie))
+
+for cible, x, a, sortie in fichiers:
+    du_depot = {l.rstrip("\n") for l in a}
+    # Le navigateur, seulement dans une ligne qui commence comme une ligne du dépôt qui l'a (« pinned = [ »…)
+    debuts = {l.split("@BROWSER@")[0].split('"')[0] for l in a if "@BROWSER@" in l}
+    resultat = []
+    for l in sortie:
+        if l.rstrip("\n") not in du_depot:
+            for e in sorted(appris["MONITOR"]):
+                l = l.replace(f'"{e}"', '"@MONITOR@"').replace(f'@{e}"', '@@MONITOR@"')
+            if any(d and l.startswith(d) for d in debuts):
+                for n in sorted(appris["BROWSER"]):
+                    l = l.replace(f'"{n}"', '"@BROWSER@"')
+        resultat.append(l)
+    if resultat != x:
+        cible.write_text("".join(resultat), encoding="utf-8")
 EOF
 
 # Clavier
@@ -400,7 +473,7 @@ sed -i -E 's/^style=(Breeze|Fusion)$/style=@QT_STYLE@/; s/^icon_theme=.*/icon_th
 
 # Centre de la barre : île Quickshell (vide) ou plugin nc/ile, choisi par install.sh
 sed -i -E 's/^center = \[("nc\/ile:pilule")?\]/center = [@ILE_CENTRE@]/' home/.config/noctalia/config.toml
-sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?\]/"group:status"@NOTIF_WIDGET@]/; /^enabled = \[/s/(, "nc\/ile"|@PLUGIN_ILE@)?\]/@PLUGIN_ILE@]/' home/.config/noctalia/config.toml
+sed -i -E 's/^enable_daemon = (true|false)/enable_daemon = @NOTIF_NOCTALIA@/; s/"group:status"(, "notifications")?([],])/"group:status"@NOTIF_WIDGET@\2/; /^enabled = \[/{s/, "nc\/ile"//; s/(@PLUGIN_ILE@)?\]/@PLUGIN_ILE@]/}' home/.config/noctalia/config.toml
 
 # Barre : logo de la distribution et agent polkit, choisis par install.sh
 sed -i -E 's|^custom_image = "[^"]*"|custom_image = "@DISTRO_LOGO@"|; s|^polkit_agent = [a-z]+|polkit_agent = @POLKIT@|' home/.config/noctalia/config.toml
