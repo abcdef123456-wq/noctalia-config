@@ -60,7 +60,10 @@ local SMOOTH_MS = 55
 local REPEAT_DELAY = 280
 local REPEAT_EVERY = 115
 local FADE_MS = 260
-local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
+-- Présent en mode Économie : pas d'animation. Le dossier de Noctalia, comme lui et comme nc-profile-sync qui l'écrit :
+-- NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+local ECO = (env("NOCTALIA_CONFIG_HOME") or env("XDG_CONFIG_HOME") or noctalia.expandPath("~/.config"))
+  .. "/noctalia/zz-economie.toml"
 local eco = false
 -- Cadre du carrousel des fonds (mesuré) : sous la barre (36 + 6), à 8 points des bords, coins arrondis de 10
 local HAUT_BARRE, BORD, HAUT_PANNEAU, RAYON = 42, 8, 65, 10

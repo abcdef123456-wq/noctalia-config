@@ -54,7 +54,10 @@ local function tailles()
   -- (et une colonne de touches plus étroite : une combinaison plus longue met sa description en dessous)
   if LARGE then COL_W, KEY_W = math.min(px(490), math.floor((ECRAN_W - 2 * px(32) - 3 * px(20)) / 4)), px(150) end
 end
-local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
+-- Présent en mode Économie : pas d'animation. Le dossier de Noctalia, comme lui et comme nc-profile-sync qui l'écrit :
+-- NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+local ECO = (env("NOCTALIA_CONFIG_HOME") or env("XDG_CONFIG_HOME") or noctalia.expandPath("~/.config"))
+  .. "/noctalia/zz-economie.toml"
 -- Sections par colonne (titres produits par nc-keys)
 local COLUMNS = {
   { "Applis et barre", "Bureaux" },

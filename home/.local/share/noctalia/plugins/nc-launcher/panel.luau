@@ -44,7 +44,10 @@ local function setZoom()
   Z = out and math.max(0.6, math.min(1, out.width / 1600, out.height / 1000)) or 1
 end
 local CARD_W, TILE_H, CALC_H = 1200, 190, 56
-local ECO = noctalia.expandPath("~/.config/noctalia/zz-economie.toml")   -- présent en mode Économie : pas d'animation
+-- Présent en mode Économie : pas d'animation. Le dossier de Noctalia, comme lui et comme nc-profile-sync qui l'écrit :
+-- NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+local ECO = (env("NOCTALIA_CONFIG_HOME") or env("XDG_CONFIG_HOME") or noctalia.expandPath("~/.config"))
+  .. "/noctalia/zz-economie.toml"
 
 local apps = {}
 local byId = {}
