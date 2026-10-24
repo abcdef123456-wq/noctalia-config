@@ -151,8 +151,12 @@ def accent_lisible(primary, sur, bg_hex, fg_hex, dark):
     bg, p = hex_to_rgb(bg_hex), hex_to_rgb(primary)
     if contrast(p, bg) < 3.0:
         # Visé un peu au-dessus si l'arrondi à l'octet retombe juste sous 3:1
+        # tone() s'arrête aux bornes de luminosité : un accent qui part déjà d'un extrême (presque blanc sur fond
+        # clair, presque noir sur fond sombre) est d'abord ramené entre elles, sinon il resterait tel quel
+        L, C, H = rgb_to_oklch(p)
+        L = min(0.97, max(0.06, L))
         for cible in (3.0, 3.02, 3.05):
-            primary = rgb_to_hex(tone(*rgb_to_oklch(p), bg, cible, dark))
+            primary = rgb_to_hex(tone(L, C, H, bg, cible, dark))
             if contrast(hex_to_rgb(primary), bg) >= 3.0:
                 break
     a = hex_to_rgb(primary)

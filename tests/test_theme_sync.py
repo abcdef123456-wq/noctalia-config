@@ -23,7 +23,11 @@ CLAIRS = {
     "Gruvbox-light": ("#98971a", "#fbf1c7", "#fbf1c7", "#3c3836"),
     "Rosepine-light": ("#d7827e", "#faf4ed", "#fffaf3", "#575279"),
     "material-clair": ("#33618d", "#ffffff", "#f8f9ff", "#191c20"),
+    # Accents aux extrêmes : tone() partait déjà d'une borne de luminosité et rendait la couleur telle quelle
+    "blanc-sur-clair": ("#ffffff", "#000000", "#f5f5f5", "#101010"),
+    "presque-blanc": ("#f5f9fd", "#000000", "#1fd00d", "#000000"),
 }
+EXTREMES_SOMBRES = {"noir-sur-sombre": ("#000000", "#ffffff", "#101010", "#f0f0f0")}
 SOMBRES = {
     "Noctalia-default-dark": ("#fff59b", "#0e0e43", "#070722", "#f3edf7"),
     "Catppuccin-dark": ("#cba6f7", "#11111b", "#1e1e2e", "#cdd6f4"),
@@ -63,6 +67,10 @@ class AccentLisible(unittest.TestCase):
         h_avant = self.m.rgb_to_oklch(self.m.hex_to_rgb("#37f499"))[2]
         h_apres = self.m.rgb_to_oklch(self.m.hex_to_rgb(accent))[2]
         self.assertLess(abs((h_apres - h_avant + 180) % 360 - 180), 8)
+
+    def test_accent_aux_extremes(self):
+        for nom, (primary, sur, bg, fg) in EXTREMES_SOMBRES.items():
+            self.verifier(nom, primary, sur, bg, fg)
 
     def test_accent_deja_lisible_garde_tel_quel(self):
         # Palette tirée d'un fond d'écran (7:1) et schémas sombres : accent et texte sur l'accent identiques à l'octet
