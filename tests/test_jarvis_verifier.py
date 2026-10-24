@@ -123,8 +123,10 @@ class Controles(Base):
         self.assertIn('sudo apt install python3-venv python3-pip',t)
 
     def test_le_venv_temporaire_est_supprime(self):
-        avant=set(Path(tempfile.gettempdir()).glob('nc-verifier-*'));self.moteur_connecte();self.lancer('claude')
-        self.assertEqual(set(Path(tempfile.gettempdir()).glob('nc-verifier-*')),avant)
+        # Un dossier temporaire à ce test : d'autres suites lancées en même temps créent aussi des nc-verifier-* dans /tmp
+        with tempfile.TemporaryDirectory(prefix='nc-test-verifier-') as d, patch.object(tempfile,'tempdir',d):
+            self.moteur_connecte();self.lancer('claude')
+            self.assertEqual(list(Path(d).glob('nc-verifier-*')),[])
 
     def test_port_occupe(self):
         s=socket.socket();self.addCleanup(s.close);s.bind(('127.0.0.1',self.ports[0]));s.listen()
