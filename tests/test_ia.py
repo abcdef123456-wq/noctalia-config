@@ -200,6 +200,11 @@ class IA(unittest.TestCase):
                    XDG_RUNTIME_DIR=str(self.home / "run"), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr",
                    JOURNAL=str(self.journal), NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
         env.update(env_plus or {})
+        # Pas de bac ici (les tests du bac ont les leurs) : le repli est autorisé, sinon les programmes seraient refusés
+        conf = self.home / ".config/nc/reglages.conf"
+        if "IA_BAC_REPLI" not in (conf.read_text() if conf.exists() else ""):
+            conf.parent.mkdir(parents=True, exist_ok=True)
+            conf.write_text((conf.read_text() if conf.exists() else "") + "\nIA_BAC_REPLI=oui\n")
         # Les programmes d'IA installés sur la machine de test ne doivent pas répondre à la place des faux serveurs
         for nom in ("claude", "codex", "opencode", "gemini", "qwen"):
             self.programme(nom, "exit 1") if not (self.faux / nom).exists() else None
@@ -1314,7 +1319,8 @@ echo "Unknown option: standalone"; exit 1''')
         for opt in ("--ignore-user-config", "--ignore-rules", "--ephemeral"):
             self.assertIn(opt, a.split())
         desactives = re.findall(r"--disable (\S+)", a)
-        self.assertEqual(desactives, ["apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks"])
+        self.assertEqual(desactives, ["apps", "plugins", "browser_use", "computer_use", "multi_agent", "hooks", "image_generation",
+                                      "skill_mcp_dependency_install", "tool_suggest", "remote_plugin", "shell_snapshot"])
         self.assertNotIn("danger", a)
         self.assertNotIn("workspace-write", a)
 
@@ -1374,7 +1380,7 @@ echo "Unknown option: standalone"; exit 1''')
         self.assertFalse(j.exists(), "rien n'est lancé")
 
     def test_dossier_supprime_apres_une_erreur(self):
-        self.programme("codex", 'pwd -P > "$HOME/cwd-codex"; echo plantage >&2; exit 3')
+        self.programme("codex", f'pwd -P > "{self.home}/cwd-codex"; echo plantage >&2; exit 3')   # HOME du programme = faux dossier jeté
         self.reglages("IA_MODE=manuel\nIA_CHOIX=codex\n")
         r = self.lancer("demander", "q")
         self.assertNotEqual(r.returncode, 0)
@@ -1445,7 +1451,7 @@ echo "Unknown option: standalone"; exit 1''')
         restent muets (chacun note qu'il a été lancé), Qwen Code échoue."""
         self.cles("OLLAMA_HOST=http://127.0.0.1:1\n")
         for nom in ("codex", "gemini", "opencode"):
-            self.programme(nom, f'echo x >> "$HOME/lance-{nom}"; exec sleep 60')
+            self.programme(nom, f'echo x >> "{self.home}/lance-{nom}"; exec sleep 60')
         return lambda nom: (self.home / f"lance-{nom}").exists()
 
     def test_mode_auto_en_arriere_plan_borne_en_tout(self):
@@ -1908,7 +1914,8 @@ echo "Unknown option: standalone"; exit 1''')
         lignes = [json.dumps({"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": m}}}) for m in morceaux]
         lignes.append(json.dumps({"type": "result", "is_error": False, "result": "".join(morceaux)}))
         (self.faux / "claude.jsonl").write_text("\n".join(lignes) + "\n")
-        self.programme("claude", f'printf "%s\\n" "$@" >> "$JOURNAL"; cat "{self.faux / "claude.jsonl"}"')
+        # l'invite arrive par l'entrée standard, et JOURNAL n'est pas transmis au programme (liste blanche) : chemin écrit en dur
+        self.programme("claude", f'printf "%s\\n" "$@" >> "{self.journal}"; cat >> "{self.journal}"; cat "{self.faux / "claude.jsonl"}"')
 
     def verifier_refus_outils(self, r, flux=False):
         self.assertNotEqual(r.returncode, 0, r.stdout)

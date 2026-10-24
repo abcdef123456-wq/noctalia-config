@@ -44,19 +44,31 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
 
 - aucun outil d'écriture ni de commande (chaque programme est bridé), dans un dossier de travail vide ;
 - ton dossier personnel est en **lecture seule**, et rien de secret n'est lisible : `~/.ssh`, `~/.gnupg`, les navigateurs,
-  les messageries, les clés d'API de nc-ia (`~/.config/nc`), `$XDG_RUNTIME_DIR` (bus, Hyprland, agents ssh et gpg…),
-  et surtout les identifiants **des autres** programmes d'IA ; chacun ne lit que les siens (`~/.claude`, `~/.codex`,
-  `~/.gemini`, `~/.qwen`, `~/.config/opencode` et `~/.local/share/opencode`) ;
-- il peut écrire dans son seul dossier d'état (sessions, journaux, jetons rafraîchis), mais pas dans ses fichiers de
-  config qui lancent des commandes (hooks, extensions, plugins, règles) ;
+  les messageries, les clés d'API de nc-ia (`~/.config/nc`), les assistants de code et leurs jetons, `$XDG_RUNTIME_DIR`
+  (bus, Hyprland, agents ssh et gpg…) ;
+- **chaque programme travaille dans un faux dossier personnel**, créé pour la demande et jeté après (`HOME` y pointe) :
+  on y copie seulement ses identifiants et sa config (`~/.claude/.credentials.json`, `~/.claude.json`, `~/.codex/auth.json`,
+  `~/.gemini/oauth_creds.json`…). Ses **vrais** dossiers (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.qwen`,
+  `~/.config/opencode`, `~/.local/share/opencode`) sont **illisibles et non inscriptibles** : un hook, une commande, un
+  agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire ou un serveur MCP créé par le programme
+  disparaît avec la demande et ne sera jamais exécuté hors du bac. Seul un **jeton rafraîchi** revient dans le vrai
+  fichier, après la demande, s'il est resté un JSON valide (256 Ko au plus) et si ton fichier n'a pas changé entre-temps ;
+- l'environnement est une liste blanche : le `PATH`, la langue, le proxy, et **sa propre clé** seulement (par exemple
+  `ANTHROPIC_API_KEY` pour Claude Code) ; ni `GITHUB_TOKEN`, ni les clés des autres fournisseurs ;
+- l'invite passe par l'entrée standard (Claude Code, Codex) et non dans la ligne de commande ; le journal du gestionnaire
+  systemd n'écrit que « nc-ia » ; `$VAR` et `${VAR}` dans une question ne sont jamais remplacés ;
 - aucun autre processus visible, pas de `ptrace` ni de trousseau du noyau, pas de `sudo`, `/tmp` privé ;
-- **le réseau reste ouvert** (HTTP/HTTPS vers leur API, mais rien ne l'empêche de joindre autre chose) : ce qu'ils peuvent
+- **le réseau reste ouvert** (HTTP/HTTPS vers leur API, mais rien ne l'empêche de joindre autre chose), **127.0.0.1 reste
+  joignable** (les services locaux de ta machine) et **`/dev/shm` est partagé** avec le reste du système : ce qu'ils peuvent
   lire peut donc partir vers leur fournisseur. Ce qu'ils peuvent lire, c'est ce qui n'est pas dans la liste des secrets :
-  `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers.
+  `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers. Pendant qu'un autre programme d'IA tourne en même temps, sa
+  copie de jeton (dans `~/.local/state/nc-ia/etat`) est lisible par le premier le temps de la demande.
 
-Sans bac (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), chaque programme garde ses limites propres
-(lecture seule, outils retirés, pas de config utilisateur…) mais Codex, par exemple, peut alors lire tes fichiers :
-`nc-ia etat` affiche « bac des IA : actif » ou « indisponible ici ».
+**Sans bac** (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), les programmes en ligne de commande ne sont
+**pas lancés** : une IA par API prend le relais. Le réglage `IA_BAC_REPLI` (nc-reglages, « non » par défaut) les laisse
+tourner quand même, avec leurs seules limites propres (lecture seule, outils retirés, pas de config utilisateur) : sans bac,
+Codex peut lire tes fichiers et ces programmes peuvent lire tes clés. Un `NOEUD_BAC_INTERDITS` invalide refuse toujours le
+lancement. `nc-ia etat` affiche « bac des IA : actif » ou « indisponible ici » (et si le repli est autorisé).
 
 `nc-ia etat` dit laquelle répond pour chaque usage et lesquelles sont disponibles ; `nc-ia tester` pose une question
 d'un mot à chacune (réglages → « Tester les IA disponibles »).
