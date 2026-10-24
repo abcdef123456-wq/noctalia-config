@@ -174,7 +174,14 @@ def transitoire(unite):
     return props.get("Transient") == "yes" or props.get("LoadState") == "not-found"
 
 
+BAC = re.compile(r"nc-(ia|bac)-(test-)?[0-9a-f]{12}\.service")
+
+
 def concerne(unite):
+    # Les unités du bac à sable (une question à une IA, une commande de session de confiance) : un échec ou un délai
+    # dépassé y est une réponse, pas un service du bureau en panne
+    if BAC.fullmatch(unite):
+        return False
     portee = reglage("PANNES", "nc")
     if portee == "non":
         return False

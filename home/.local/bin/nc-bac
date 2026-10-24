@@ -5,6 +5,7 @@ dans le MÊME bac, avec les mêmes droits. Module chargé par ses appelants (Sou
 fait rien tout seul. Aucune dépendance : tout ce qui change d'un appelant à l'autre (HOME, lecture des réglages,
 recherche d'un programme) est passé en paramètre."""
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -71,7 +72,11 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
                  ".config/legcord", ".config/WebCord", ".config/Element",
                  # mots de passe, accès distants, synchronisation
                  ".config/Bitwarden", ".config/op", ".config/keepassxc", ".local/share/remmina", ".config/remmina",
-                 ".config/syncthing"]
+                 ".config/syncthing",
+                 # assistants de code et outils qui gardent des jetons ou des historiques
+                 ".config/github-copilot", ".config/JetBrains", ".config/sops", ".vault-token", ".continue",
+                 ".config/io.datasette.llm", ".cache/huggingface", ".config/aichat", ".config/filezilla",
+                 ".cache/cliphist", ".config/VSCodium/User/globalStorage", ".config/Cursor/User/globalStorage"]
 
 
 
@@ -129,12 +134,14 @@ def _prop(nom, chemin):
 
 
 def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seule=(), libres=(), env=(), unite=None,
-         reseau_prive=False):
+         reseau_prive=False, description="nc-bac"):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent (ou un chemin inadmissible).
     cmd : une chaîne (passée à /bin/sh -c) ou une liste (exécutée telle quelle, sans shell).
     ecriture : les seuls chemins inscriptibles (ReadWritePaths) ; lecture_seule : des chemins gardés en lecture seule même
     dans un dossier inscriptible ; libres : voir inaccessibles() ; env : noms de variables transmises (valeur prise dans
-    l'environnement de systemd-run) ; unite : nom de l'unité (pour l'arrêter proprement) ; reseau_prive : aucun réseau."""
+    l'environnement de systemd-run) ; unite : nom de l'unité (pour l'arrêter proprement) ; reseau_prive : aucun réseau ;
+    description : le texte que le journal du gestionnaire écrit pour l'unité (sinon il y met la commande ENTIÈRE, donc la
+    question posée à une IA ou la commande d'une session)."""
     sr = programme("systemd-run")
     if not sr:
         return None
@@ -143,6 +150,9 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     # trousseau du noyau (partagé entre espaces de noms). ProtectProc/ProcSubset ne valent pas pour --user : pas mis.
     props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
              "ProtectHome=read-only", "PrivateTmp=yes",
+             # OnFailure= vide : un greffon global (OnFailure=nc-panne@%n sur chaque service) ferait sinon une notification
+             # « en panne » pour chaque commande ou question qui échoue ou dépasse son délai dans le bac
+             "OnFailure=",
              "RestrictAddressFamilies=AF_INET AF_INET6", "ReadOnlyPaths=" + str(home)]
     for c in ecriture:
         props.append(_prop("ReadWritePaths", str(c)))
@@ -151,9 +161,13 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     props.append("RuntimeMaxSec=" + str(max(1, int(budget))))
     if None in props:
         return None
-    out = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect"]
-    if unite:
-        out.append("--unit=" + unite)
+    # --expand-environment=no (systemd 254) : sans lui, systemd-run remplace ${VAR} et $VAR dans la ligne de commande par
+    # l'environnement de l'unité (une question contenant ${OPENAI_API_KEY} y mettrait la clé, un "${f}" deviendrait vide).
+    # --description : sinon le journal écrit « Started … /bin/sh -c <la commande entière> »
+    out = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect", "--expand-environment=no",
+           "--description=" + (re.sub(r"[^A-Za-z0-9_.-]", "-", description or "") or "nc-bac")]
+    # Une unité nommée « nc-bac-… » même sans nom donné : nc-panne ne la signale pas comme un service en panne
+    out.append("--unit=" + (unite or "nc-bac-" + os.urandom(6).hex()))
     for p in props:
         out += ["-p", p]
     if reseau_prive:

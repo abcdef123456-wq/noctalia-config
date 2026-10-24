@@ -126,6 +126,13 @@ class Panne(unittest.TestCase):
         self.assertNotIn("nc-ia panne", j)
         self.assertIn("Île dynamique est reparti", json.dumps(self.notifs()[-1], ensure_ascii=False))
 
+    def test_unites_du_bac_jamais_signalees(self):
+        """Une question à une IA ou une commande de session de confiance qui échoue n'est pas un service en panne."""
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nPANNES=tous\n")
+        for u in ("nc-ia-84b7af66c16f.service", "nc-bac-0123456789ab.service", "nc-ia-test-84b7af66c16f.service"):
+            self.lancer("signaler", u)
+        self.assertFalse(self.notifs())
+
     def test_portee_et_fermeture_de_session(self):
         # Par défaut, seulement les services du bureau
         self.lancer("signaler", "gvfs-daemon.service")

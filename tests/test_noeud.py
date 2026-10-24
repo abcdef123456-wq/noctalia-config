@@ -2155,14 +2155,15 @@ class BacReel(ModuleCharge):
 
     def test_secret_illisible(self):
         m, home = self.charger_bac()
-        r = self.lancer_bac(m, f"cat {home}/.ssh/id_ed25519")
-        self.assertFalse(r["success"], r)
+        # la commande finit en succès (« ; true ») : une unité en échec déclencherait une vraie notification de panne
+        r = self.lancer_bac(m, f"cat {home}/.ssh/id_ed25519 2>&1; true")
+        self.assertTrue(r["success"], r)
         self.assertNotIn("FAUSSE-CLE-PRIVEE", r.get("stdout", "") + r.get("message", ""))
 
     def test_home_en_lecture_seule(self):
         m, home = self.charger_bac()
-        r = self.lancer_bac(m, f"touch {home}/ecrit-par-le-bac")
-        self.assertFalse(r["success"], r)
+        r = self.lancer_bac(m, f"touch {home}/ecrit-par-le-bac 2>&1; true")
+        self.assertTrue(r["success"], r)
         self.assertFalse((home / "ecrit-par-le-bac").exists())
 
     def test_dossier_de_travail_ecrit(self):
@@ -2176,8 +2177,8 @@ class BacReel(ModuleCharge):
         m, _ = self.charger_bac()
         if not __import__("shutil").which("sudo"):
             self.skipTest("sudo absent")
-        r = self.lancer_bac(m, "sudo -n true")
-        self.assertFalse(r["success"], "NoNewPrivileges : setuid refusé")
+        r = self.lancer_bac(m, "sudo -n true 2>&1 && echo SUDO-OK; true")
+        self.assertNotIn("SUDO-OK", r["stdout"], "NoNewPrivileges : setuid refusé")
 
     def test_systemd_run_user_depuis_le_bac_echoue(self):
         m, _ = self.charger_bac()
