@@ -1637,6 +1637,11 @@ def bureau_affiche():
         return None
 
 
+def message_bureau_inconnu():
+    return T("Rien de rangé : Hyprland ne dit pas quel bureau est affiché.",
+             "Nothing tidied: Hyprland doesn't say which desktop is shown.")
+
+
 def etat_fenetres(bureau=None):
     f = fenetres_bureau(bureau)
     try:
@@ -2233,6 +2238,9 @@ def ranger(bureau_seul):
                       "Turned off in nc-settings → Artificial intelligence (windows and desktops)."))
         return 1
     bureau = bureau_affiche() if bureau_seul else None
+    if bureau_seul and bureau is None:           # inconnu : « ce bureau seulement » deviendrait « tous » (revue B2-12)
+        dire(titre, message_bureau_inconnu())
+        return 1
     # Rien n'a bougé depuis le dernier rangement (même raccourci, même bureau) : ce second appui remet comme avant
     try:
         dernier = json.loads(ANNULER_RANGEMENT.read_text(encoding="utf-8"))
@@ -3102,7 +3110,12 @@ def main(a):
                 T("Organise toutes mes fenêtres : regroupe-les par activité sur des bureaux, nomme les bureaux, puis "
                   "dispose-les bien sur chacun.", "Organize all my windows: group them by activity on desktops, name the "
                   "desktops, then lay them out well on each one.")
-            portee = str(bureau_affiche() or "") if "--bureau" in a else ""
+            portee = ""
+            if "--bureau" in a:
+                b = bureau_affiche()
+                if b is None:                    # inconnu : le plan toucherait tous les bureaux (revue B2-12)
+                    raise ErreurIA(message_bureau_inconnu())
+                portee = str(b)
             if shutil.which("qs") and subprocess.run(["qs", "-c", "nc-ile", "ipc", "call", "ile", "agirIA", demande, portee],
                                                      capture_output=True, timeout=5).returncode == 0:
                 return 0

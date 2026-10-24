@@ -679,6 +679,32 @@ class IA(unittest.TestCase):
                 self.assertNotIn("Fenêtres rangées", a)
                 self.assertIn("notify", a.splitlines()[-1], "la coupure est dite")
 
+    def test_ce_bureau_inconnu_rien_n_est_range(self):
+        """Revue B2-12 : « ce bureau seulement » (Super + Ctrl + O) : si Hyprland ne dit pas quel bureau est affiché, la
+        portée était perdue et le rangement touchait tous les bureaux. Refusé à la place."""
+        clients = [{"address": "0xa1", "class": "kitty", "title": "nvim", "mapped": True, "workspace": {"id": 2}, "floating": False, "fullscreen": 0, "at": [0, 0], "size": [800, 600]},
+                   {"address": "0xd4", "class": "discord", "title": "Discord", "mapped": True, "workspace": {"id": 3}, "floating": False, "fullscreen": 0, "at": [0, 0], "size": [800, 600]}]
+        self.programme("hyprctl", 'echo "hyprctl $*" >> "$JOURNAL"; case "$1" in clients) echo \'' + json.dumps(clients) + '\';; '
+                                  'workspaces) echo \'[{"id": 2, "name": "2", "windows": 1}, {"id": 3, "name": "3", "windows": 1}]\';; '
+                                  'activeworkspace) echo "erreur de socket" >&2; exit 1;; esac')
+        self.programme("notify-send", 'echo "notify $*" >> "$JOURNAL"')
+        self.programme("qs", 'echo "qs $*" >> "$JOURNAL"')
+        Faux.texte_ant = json.dumps({"reponse": "ok", "actions": [{"outil": "fenetre_bureau", "args": {"adresse": "0xd4", "bureau": 2}}]})
+        for mode in ("auto", "confirmer"):
+            with self.subTest(mode=mode):
+                if self.journal.exists():
+                    self.journal.unlink()
+                Faux.requetes.clear()
+                self.reglages(f"IA_PREFERENCE=rapide\nIA_ORGANISER={mode}\n")
+                r = self.lancer("organiser", "--bureau")
+                self.assertNotEqual(r.returncode, 0)
+                a = self.appels()
+                self.assertFalse(Faux.requetes, "rien demandé à l'IA")
+                self.assertNotIn("dispatch", a)
+                self.assertNotIn("eval", a)
+                self.assertNotIn("qs ", a, "pas de plan sur tous les bureaux dans le Spotlight")
+                self.assertIn("quel bureau est affiché", a)
+
     def test_ranger_ce_bureau_en_zones_libres(self):
         """Super + Ctrl + O sur un Hyprland sans dispositions en Lua : chaque fenêtre dans sa zone (pourcentages de la
         place sous la barre, marges de Hyprland déduites), devenue libre."""
