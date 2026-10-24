@@ -944,6 +944,39 @@ class IA(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("délai dépassé", r.stderr)
 
+    def test_programme_fini_avec_un_descendant_sur_sa_sortie(self):
+        """Revue B2-05 : un programme d'IA qui a répondu et fini (code 0) mais laisse un sous-processus sur sa sortie :
+        la lecture attendait l'échéance, « délai dépassé », et l'IA était notée en échec. Sa fin compte : réponse
+        rendue, son groupe arrêté peu après, rien de noté."""
+        import signal, time
+        self.programme("opencode", 'sleep 7654325 & echo "réponse complète"; exit 0')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+
+        def vivants():
+            r = []
+            for d in Path("/proc").iterdir():
+                try:
+                    argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
+                except OSError:
+                    continue
+                if d.name.isdigit() and argv == [b"sleep", b"7654325"]:
+                    r.append(int(d.name))
+            return r
+
+        def nettoyer():
+            for pid in vivants():
+                os.kill(pid, signal.SIGKILL)
+        self.addCleanup(nettoyer)
+        debut = time.time()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "8"})
+        self.assertLess(time.time() - debut, 6, "pas d'attente jusqu'à l'échéance")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("réponse complète", r.stdout)
+        self.assertNotIn("délai dépassé", r.stderr)
+        echecs = self.home / "run/nc-ia/echecs.json"
+        self.assertNotIn("opencode", echecs.read_text() if echecs.exists() else "", "pas noté en échec")
+        self.assertEqual(vivants(), [], "le sous-processus resté est arrêté")
+
     def test_demande_abandonnee_arrete_le_programme_et_ses_enfants(self):
         """Revue IA-07 : Échap (nc-ia arrêté par SIGTERM) laissait le programme d'IA et ses sous-processus aller au bout."""
         import signal, time

@@ -715,6 +715,17 @@ class GardeTemps:
         self.t = threading.Timer(DELAI_CLI if delai is None else delai, self._arreter)
         self.t.daemon = True
         self.t.start()
+        # Le programme fini, un sous-processus peut garder sa sortie ouverte : la lecture attendrait l'échéance, dite
+        # « délai dépassé » et notée en échec alors qu'il a répondu (revue B2-05). Sa fin attendue à part ; 2 s après
+        # (le temps de lire ce qu'il a écrit), son groupe est arrêté, ce qui ferme la sortie
+        self.fini = threading.Event()
+        threading.Thread(target=self._apres_sa_fin, daemon=True).start()
+
+    def _apres_sa_fin(self):
+        self.p.wait()
+        self.t.cancel()                          # fini à temps : plus d'échéance
+        if not self.fini.wait(2):
+            arreter_groupe(self.p)
 
     def _arreter(self):
         self.depasse = True
@@ -725,6 +736,7 @@ class GardeTemps:
 
     def fin(self):
         self.t.cancel()
+        self.fini.set()
 
 
 def arreter_groupe(p):
