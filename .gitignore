@@ -6,3 +6,6 @@ home/.config/nc/assistant.conf
 
 # Dossiers et notes de travail de la machine, jamais publiés
 .claude/
+
+# Dossier de travail d'export.sh (supprimé à la fin, gardé seulement après une coupure)
+/.nc-export.*/

@@ -352,7 +352,9 @@ Les fichiers sont préparés et contrôlés avant le remplacement.
 L'export ne supprime rien du dépôt. Un fichier qui n'est pas sur ton PC (un composant pas encore installé, une page
 ou un fond d'écran que tu as retiré de `~`) reste dans `home/`. Pour l'enlever du dépôt, fais-le toi-même :
 `git rm home/<chemin>`, puis commit. Un dossier qui est un lien (par exemple `~/.config/nvim` vers un autre dossier)
-est exporté avec son contenu, jamais le lien lui-même.
+est exporté avec son contenu, jamais le lien lui-même. L'export s'arrête, en disant pourquoi, si ce lien mène à
+ton dossier personnel ou au-dessus, si un lien à l'intérieur mène hors de son dossier, ou si un repère (`@KB_LAYOUT@`,
+`@MONITOR@`…) allait être remplacé par une valeur de ce PC.
 Pour `~/.zshrc`, l'export garde toujours la version du dépôt et te montre les lignes en plus (celles qu'ajoute un
 installateur, par exemple) sans toucher à ton fichier : mets tes ajouts dans `~/.zshrc.perso`, qu'il charge à la fin.
 

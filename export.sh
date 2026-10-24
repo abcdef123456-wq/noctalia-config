@@ -213,17 +213,45 @@ comparer_shell() { # comparer_shell REL BASE INSTALLE
   fi
 }
 
+refuser() { echo "$(t "Export refusé : $1" "Export refused: $2")" >&2; }
+
+# Un dossier installé qui est un lien vers ~, / ou un parent ferait entrer tout le dossier personnel (clés .ssh,
+# jetons) dans le dépôt.
+# shellcheck disable=SC2088  # « ~/ » est du texte affiché
+cible_sure() { # cible_sure REL INSTALLE
+  local cible c h r
+  cible="$(realpath -e -- "$2")" || { refuser "$2 introuvable." "$2 not found."; return 1; }
+  h="$(realpath -e -- "$HOME")"; r="$(realpath -e -- "$REPO")"
+  c="${cible%/}"                                         # « / » devient « » : tout est dessous
+  case "$h/" in "$c"/*) refuser "~/$1 mène à ton dossier personnel ou au-dessus ($cible)." "~/$1 leads to your home folder or above ($cible)."; return 1 ;; esac
+  case "$r/" in "$c"/*) refuser "~/$1 mène au dépôt ou au-dessus ($cible)." "~/$1 leads to the repository or above ($cible)."; return 1 ;; esac
+  return 0
+}
+
+# Les liens à l'intérieur d'un dossier exporté : copiés comme fichiers s'ils mènent dans ce même dossier, sinon
+# refusés (Pictures/Wallpapers/perso.jpg -> /home/<nom>/… publierait le chemin, et un lien n'a rien à faire ici).
+# shellcheck disable=SC2088
+liens_internes() { # liens_internes REL INSTALLE DESTINATION
+  local rel="$1" installe="$2" dest="$3" racine l src cible
+  racine="$(realpath -e -- "$installe")"
+  while IFS= read -r -d '' l; do
+    src="$installe/${l#"$dest"/}"
+    [ -L "$src" ] || continue                       # un lien venu du dépôt : vu par le contrôle final
+    cible="$(realpath -e -- "$src" 2>/dev/null)" || { refuser "lien cassé ~/$rel/${l#"$dest"/}." "broken link ~/$rel/${l#"$dest"/}."; return 1; }
+    case "$cible/" in
+      "$racine"/*) rm -f -- "$l"; cp -aL -- "$src" "$l" ;;
+      *) refuser "~/$rel/${l#"$dest"/} est un lien vers l'extérieur du dossier ($cible). Remplace-le par le fichier." "~/$rel/${l#"$dest"/} links outside the folder ($cible). Replace it with the file."; return 1 ;;
+    esac
+  done < <(find "$dest" -type l -print0)
+}
+
 copy_list() { # copy_list DEST_PREFIX fichier...
   local dest="$1" rel base installe; shift
   for rel in "$@"; do
     base="$REPO/home/$rel"
     installe="$HOME/$rel"
-    # Le dépôt peut avoir reçu des composants pas encore installés sur ce PC. Conserver cette base avant de
-    # superposer l'installation : une absence dans ~ n'est pas une demande de supprimer un fichier du dépôt.
-    if [ -e "$base" ] || [ -L "$base" ]; then
-      mkdir -p "$dest/$(dirname "$rel")"
-      cp -a "$base" "$dest/$rel"
-    fi
+    # La base est le home/ du dépôt entier, déjà copié (composants pas encore installés sur ce PC, fichiers hors
+    # de la liste) : une absence dans ~ n'est pas une demande de supprimer un fichier du dépôt.
     if [ ! -e "$installe" ]; then          # absent, ou lien cassé
       if [ -e "$base" ] || [ -L "$base" ]; then
         echo "$(t "gardé depuis le dépôt (absent de ~) : $rel" "kept from the repository (missing from ~): $rel")"
@@ -242,13 +270,15 @@ copy_list() { # copy_list DEST_PREFIX fichier...
       # (sa cible contiendrait /home/<nom>). Superposé au dossier du dépôt : les fichiers ajoutés au dépôt et pas
       # encore installés (nouvelle page de l'île, par exemple) restent.
       if [ -e "$dest/$rel" ] && [ ! -d "$dest/$rel" ]; then
-        echo "$(t "Export refusé : type incompatible pour $rel (fichier dans le dépôt, dossier dans ~)." "Export refused: incompatible type for $rel (file in the repository, directory in ~).")" >&2
+        refuser "type incompatible pour $rel (fichier dans le dépôt, dossier dans ~)." "incompatible type for $rel (file in the repository, directory in ~)."
         return 1
       fi
+      cible_sure "$rel" "$installe" || return 1
       cp -a --remove-destination "$installe/." "$dest/$rel"
+      liens_internes "$rel" "$installe" "$dest/$rel" || return 1
     else
       if [ -d "$dest/$rel" ]; then
-        echo "$(t "Export refusé : type incompatible pour $rel (dossier dans le dépôt, fichier dans ~)." "Export refused: incompatible type for $rel (directory in the repository, file in ~).")" >&2
+        refuser "type incompatible pour $rel (dossier dans le dépôt, fichier dans ~)." "incompatible type for $rel (directory in the repository, file in ~)."
         return 1
       fi
       cp -aL --remove-destination "$installe" "$dest/$rel"   # un lien vers un fichier : le fichier, pas le lien
@@ -256,6 +286,7 @@ copy_list() { # copy_list DEST_PREFIX fichier...
   done
 }
 
+cp -a "$REPO/home" home
 copy_list home "${HOME_FILES[@]}"
 
 # Nettoyage : sauvegardes temporaires, caches Python, réglages personnels (jamais publiés)
@@ -267,7 +298,7 @@ printf '%s\n' "-- Généré par nc-profile-sync à chaque changement de profil �
 
 mon=""
 have() { command -v "$1" >/dev/null 2>&1; }
-have hyprctl && mon=$(hyprctl monitors -j 2>/dev/null | jq -r '([.[] | select(.name | startswith("eDP"))][0] // .[0]).name // empty')
+have hyprctl && { mon=$(hyprctl monitors -j 2>/dev/null | jq -r '([.[] | select(.name | startswith("eDP"))][0] // .[0]).name // empty') || mon=""; }   # hors session Hyprland : pas d'écran
 
 while IFS= read -r -d '' f; do
   grep -Iq . "$f" || continue
@@ -276,10 +307,20 @@ while IFS= read -r -d '' f; do
 done < <(find home -type f -print0)
 
 # Clavier
-sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/' home/.config/hypr/nc/clavier.lua
+sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/
+  s/^(\s*local disposition = nc\.reglage\("CLAVIER_DISPOSITION", )"[^"]*"\)/\1"@KB_LAYOUT@")/
+  s/^(\s*if disposition == "systeme" then disposition = )"[^"]*"/\1"@KB_LAYOUT@"/
+  s/^(\s*local options = )"[^"]*"/\1"@KB_OPTIONS@"/' home/.config/hypr/nc/clavier.lua
 
-# Navigateur : le navigateur de ce PC devient celui de la machine cible ; applis personnelles retirées des favoris
-sed -i -E 's/"firefox-developer-edition"/"@BROWSER@"/g; s/, "discord"//g' \
+# Navigateur : le navigateur par défaut de ce PC (celui qu'install.sh a mis à la place de @BROWSER@) devient celui
+# de la machine cible ; applis personnelles retirées des favoris
+nav=""
+if have xdg-settings; then
+  IFS= read -r nav < <(timeout 5 xdg-settings get default-web-browser 2>/dev/null || true) || true
+  nav="${nav%.desktop}"
+fi
+case "$nav" in *[!A-Za-z0-9._-]*) nav="" ;; esac       # un identifiant d'appli, rien d'autre dans le sed
+sed -i -E "s/\"firefox-developer-edition\"/\"@BROWSER@\"/g; s/, \"discord\"//g${nav:+; s/\"${nav//./\\.}\"/\"@BROWSER@\"/g}" \
   home/.config/noctalia/config.toml home/.local/share/noctalia/plugins/nc-launcher/panel.luau
 
 # Style Qt (Breeze s'il est installé, sinon Fusion) : choisi par install.sh
@@ -312,10 +353,59 @@ sec = re.sub(r"^cy = ([0-9.]+)$", y, sec, flags=re.M)
 open(p, "w").write(head + sep + sec + sep2 + rest)
 EOF
 
+# Repères : chaque repère d'install.sh d'un fichier du dépôt y reste, autant de fois. Sinon un sed ne correspond plus
+# au fichier (clavier.lua, réécrit avec nc.reglage) et l'export publierait la valeur de ce PC à la place du repère.
+python3 -I - "$REPO/home" home <<'EOF'
+import os, re, sys
+from collections import Counter
+from pathlib import Path
+en = os.environ.get("NC_LANGUE") == "en"
+REPERES = re.compile(r"@(?:MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
+                     r"|ILE_CENTRE|NOTIF_NOCTALIA|NOTIF_WIDGET|PLUGIN_ILE)@")
+depot, export = Path(sys.argv[1]), Path(sys.argv[2])
+def reperes(f):
+    try:
+        b = f.read_bytes()
+    except OSError:
+        return Counter()
+    return Counter() if b"\0" in b[:8192] else Counter(REPERES.findall(b.decode("utf-8", "replace")))
+manque = []
+for f in sorted(depot.rglob("*")):
+    if f.is_symlink() or not f.is_file():
+        continue
+    avant = reperes(f)
+    if not avant:
+        continue
+    rel = f.relative_to(depot)
+    apres = reperes(export / rel)
+    manque += [f"  {rel} : {m} ({apres[m]}/{n})" for m, n in sorted(avant.items()) if apres[m] < n]
+if manque:
+    print(("Export refused: these markers would be replaced by the values of this PC (a sed no longer matches):"
+           if en else "Export refusé : ces repères seraient remplacés par les valeurs de ce PC (un sed ne correspond plus) :"),
+          *manque, sep="\n", file=sys.stderr)
+    sys.exit(1)
+EOF
+
+# Rien de perdu : chaque fichier suivi sous home/ est encore là (la liste HOME_FILES ne couvre pas tout)
+perdus=""
+while IFS= read -r -d '' f; do
+  [ -e "$f" ] || [ -L "$f" ] || perdus="$perdus  $f"$'\n'
+done < <(git -C "$REPO" ls-files -z -- home 2>/dev/null || true)
+if [ -n "$perdus" ]; then
+  echo "$(t "Export refusé : ces fichiers du dépôt disparaîtraient :" "Export refused: these repository files would disappear:")" >&2
+  printf '%s' "$perdus" >&2
+  exit 1
+fi
+
 # Contrôle final : rien qui ressemble à un secret, au nom du compte ou à l'écran de cette machine
 user=$(id -un)
-bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|ghp_[A-Za-z0-9]{20,}|BEGIN [A-Z ]*PRIVATE KEY" home "$REPO/system" 2>/dev/null || true)
+bad=$(grep -rIlE "/home/$user\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{30,}|BEGIN [A-Z ]*PRIVATE KEY" home "$REPO/system" 2>/dev/null || true)
 [ -n "$mon" ] && bad="$bad$(grep -rIl "\"$mon\"" home 2>/dev/null || true)"
+# Un lien sous home/ ne mène jamais hors du dépôt : ni chemin absolu, ni « .. », ni nom du compte
+while IFS= read -r -d '' l; do
+  c="$(readlink -- "$l")"
+  case "$c" in /*|*..*|*"$user"*) bad="$bad"$'\n'"$l -> $c" ;; esac
+done < <(find home -type l -print0)
 if [ -n "$bad" ]; then echo "$(t "ATTENTION : à vérifier avant de publier :" "WARNING: check before publishing:")" >&2; echo "$bad" >&2; exit 1; fi
 if [ "$preview" = 1 ]; then
   git --no-pager diff --no-index -- "$REPO/home" home && exit 0
