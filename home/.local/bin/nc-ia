@@ -1608,6 +1608,7 @@ def _vrai_dossier(chemin):
         return False
 
 
+OMP_VERSION = 8                           # version du schéma de OMP_TABLE (omp 18.12) ; omp migre lui-même vers une suivante
 OMP_COPIE_MAX = 64 * 1024 * 1024          # base + journal -wal copiés pour lecture : au-delà, refus
 # Les colonnes de auth_credentials copiées (schéma 8 d'omp 18.12, ai/src/auth/sqlite-credential-store.ts) ; disabled_cause
 # reste NULL (seules les lignes actives sont copiées). Une colonne inconnue n'est jamais copiée.
@@ -1663,11 +1664,6 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
         sel = ", ".join(f"CASE WHEN length(data) <= {int(JETON_MAX)} THEN data ELSE NULL END" if c == "data" else c
                         for c in colonnes)
         lignes = a.execute(f"SELECT {sel} FROM auth_credentials WHERE credential_type = 'oauth'{actif} ORDER BY id").fetchall()
-        try:
-            v = a.execute("SELECT version FROM auth_schema_version WHERE id = 1").fetchone()
-            version = v[0] if v and isinstance(v[0], int) and not isinstance(v[0], bool) else None
-        except sqlite3.Error:
-            version = None
     finally:
         a.close()
         if copie is not None:
@@ -1695,9 +1691,10 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
     b = sqlite3.connect(str(dst))
     try:
         b.execute(OMP_TABLE)
-        if version is not None:
-            b.execute("CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)")
-            b.execute("INSERT INTO auth_schema_version (id, version) VALUES (1, ?)", (version,))
+        # Toujours la version du schéma fixe (OMP_TABLE), jamais celle de la vraie base : marquée 9 avec une table de
+        # version 8, omp croirait la copie à jour et ne la migrerait pas
+        b.execute("CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)")
+        b.execute("INSERT INTO auth_schema_version (id, version) VALUES (1, ?)", (OMP_VERSION,))
         noms = ", ".join('"' + c.replace('"', '""') + '"' for c in colonnes)
         b.executemany(f"INSERT INTO auth_credentials ({noms}) VALUES ({', '.join('?' * len(colonnes))})",
                       [[r[c] for c in colonnes] for r in gardees])

@@ -1592,6 +1592,17 @@ class OmpTests:
         self.assertNotIn("secret_en_plus", sortie)
         self.assertNotIn("SECRET", sortie)
 
+    def test_omp_version_du_schema_toujours_8(self):
+        """La table copiée est celle du schéma 8 : une vraie base en version 9 ne doit pas la marquer 9 (omp ne la
+        migrerait pas)."""
+        for version in (7, 9):
+            with self.subTest(version=version):
+                (self.home / BASE_OMP).unlink(missing_ok=True)
+                faire_base_omp(self.home, version=version)
+                sortie = self.lancer_omp()
+                self.assertIn("JETON-omp", sortie)
+                self.assertIn("VERSION 8\n", sortie)
+
     def test_omp_liens_symboliques_refuses(self):
         autre = self.home / "base-ailleurs.db"
         faire_base_omp(self.home, chemin="base-ailleurs.db")
