@@ -66,13 +66,12 @@ Item {
                 }
                 Process { id: villeEcrire }
             }
-            // Ville estimée d'après l'IP (METEO_VILLE vide ou « auto ») : peut être fausse, un clic ouvre les réglages de l'île
+            // Ville estimée d'après l'IP (METEO_VILLE vide ou « auto ») : peut être fausse, un clic ouvre la saisie de la ville
             Texte {
                 visible: !!p.m.estimee && !saisie.visible
                 text: Reglages.t("Choisir ma ville", "Choose my city"); font.pixelSize: 12; font.underline: true; color: Couleurs.jaune
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: { reglagesOuvrir.running = false; reglagesOuvrir.running = true } }
-                Process { id: reglagesOuvrir; command: ["sh", "-c", "exec \"$HOME/.local/bin/nc-reglages\" fenetre 'Île'"] }
+                            onClicked: { saisie.visible = true; saisie.text = ""; saisie.forceActiveFocus() } }
             }
             Row {
                 spacing: 10

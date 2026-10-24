@@ -200,7 +200,7 @@ def main():
         print("  " + "   ".join(f"{heure(x['h'])} {x['t']}°" for x in m["heures"]))
         print("  " + "   ".join(f"{jour(x['jour'])} {x['min']}/{x['max']}°" for x in m["jours"]))
         if m.get("estimee"):
-            print("  " + "Choose my city: nc-settings window Island (Weather city)")
+            print("  " + "Choose my city: nc-reglages fenetre Island (Weather city)")
         return
     print(json.dumps(m, ensure_ascii=False))
 
