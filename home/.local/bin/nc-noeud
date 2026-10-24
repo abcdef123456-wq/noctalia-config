@@ -108,7 +108,8 @@ DELAI_ENVOI = 20                   # une écriture WebSocket qui ne passe pas en
 #   - la fin de la demande + DISTANCE_CALME (un code encore en route) ;
 #   - le moment où elle t'a été présentée + FRAPPE_MAX : taper un code prend 25 à 40 s (mesuré dans l'issue #20), donc
 #     une demande qui expire à 12 s laisse un code arriver jusqu'à 40 s après sa présentation.
-# Toujours borné par l'échéance de celle qui attend : passé elle, elle expire sans partir.
+# Toujours borné par l'échéance de celle qui attend : passé elle, elle expire sans partir. Une confirm_unavailable du
+# serveur (personne pour la relayer : la demande n'a été montrée à personne, aucun code n'est en route) n'en ouvre pas.
 DISTANCE_CALME = 15
 FRAPPE_MAX = 40
 MAX_RESUME_DISTANCE = 3500         # résumé envoyé pour la confirmation à distance (un message Telegram : 4096)
@@ -1326,12 +1327,17 @@ class ConfirmationDistance:
       → {"type": "confirm_request", "req_id": <celui de l'action>, "action": …, "summary": <ce qui sera fait, en entier,
          caractères cachés rendus visibles>, "expires_in": <secondes entières>, "code_required": true}
       ← {"type": "confirm_response", "req_id": …, "decision": "allow", "code": "123456"} ou "decision": "deny"
+      ← {"type": "confirm_unavailable", "req_id": …} : le serveur ne peut pas la relayer (personne d'autorisé, chat
+         occupé). Ce n'est pas un refus humain : la voie à distance seule est close. En « les-deux », la carte reste
+         ouverte et l'écran peut encore autoriser ; en « distance » seule, refus (error_code « remote_unavailable »).
+         Pas de période calme (la demande n'a été montrée à personne), pas compté comme un code faux.
       → {"type": "confirm_cancel", "req_id": …} quand la demande se termine sans décision venue de là (décidée sur
          l'écran, expirée, annulée).
     Seul un « allow » reçu avant l'échéance, pour ce req_id exact, avec le bon code TOTP (jamais déjà servi), autorise.
     Un « allow » sans code ou avec un code faux refuse la demande ; toute réponse hors demande en cours est ignorée et
     notée. Le serveur ne connaît pas le secret : sans ton code, il ne peut rien autoriser. Un code déjà servi ne compte
     pas comme un échec ; le serveur reçoit alors error_code « replay » (attendre le code suivant).
+    Une seule réponse par req_id, quel qu'en soit le type : la première compte, les suivantes sont ignorées et notées.
     Une seule demande à distance à la fois : le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace
     la demande montrée par la nouvelle, et le code tapé après avoir lu A autoriserait B. Les suivantes attendent leur
     tour et, si leur échéance passe avant, expirent sans qu'aucune confirm_request ne parte."""
@@ -1388,8 +1394,9 @@ class ConfirmationDistance:
             except asyncio.TimeoutError:
                 return "expire"
             fin = "décidée"
-            calme = v not in ("allow", "deny")                     # code faux ou rejoué : un autre code peut arriver
-            return {"allow": "autorise", "deny": "refuse", "replay": "rejoue"}.get(v, "code")
+            # Code faux ou rejoué : un autre code peut arriver. Indisponible : montrée à personne, aucun code en route
+            calme = v not in ("allow", "deny", "unavailable")
+            return {"allow": "autorise", "deny": "refuse", "replay": "rejoue", "unavailable": "injoignable"}.get(v, "code")
         except (OSError, ErreurWS):
             return "indisponible"
         finally:
@@ -1409,27 +1416,33 @@ class ConfirmationDistance:
                     await asyncio.shield(ws.envoyer({"type": "confirm_cancel", "req_id": req_id}))
 
     def recue(self, msg):
-        """Une confirm_response du serveur ; ignorée (et notée) si elle ne répond à aucune demande en cours."""
-        rid, dec = msg.get("req_id"), msg.get("decision")
+        """Une confirm_response ou une confirm_unavailable du serveur ; ignorée (et notée) si elle ne répond à aucune
+        demande en cours. La première réponse pour un req_id compte, de l'un ou l'autre type ; les suivantes sont
+        ignorées."""
+        genre = "confirm_unavailable" if msg.get("type") == "confirm_unavailable" else "confirm_response"
+        rid = msg.get("req_id")
+        dec = "unavailable" if genre == "confirm_unavailable" else msg.get("decision")
         montre = str(rid)[:80]
         if not isinstance(rid, str) or rid not in self.attentes:
             raison = {"décidée": "en double", "close": "tardive"}.get(self.finies.get(rid) if isinstance(rid, str) else None,
                                                                      "inconnue")
-            journal("confirm_response", montre, f"ignorée ({raison})")
+            journal(genre, montre, f"ignorée ({raison})")
             return
         futur, limite = self.attentes[rid]
-        if dec not in ("allow", "deny"):
-            journal("confirm_response", montre, "ignorée (décision illisible)")
+        if dec not in ("allow", "deny", "unavailable"):
+            journal(genre, montre, "ignorée (décision illisible)")
         elif futur.done():
-            journal("confirm_response", montre, "ignorée (en double)")
+            journal(genre, montre, "ignorée (en double)")
         elif horloge() >= limite:
-            journal("confirm_response", montre, "ignorée (tardive)")
+            journal(genre, montre, "ignorée (tardive)")
         elif dec == "allow":
             ok, raison = verifier_code_distant(msg.get("code"))
             if not ok:
-                journal("confirm_response", montre, f"code refusé ({raison})")
+                journal(genre, montre, f"code refusé ({raison})")
             futur.set_result("allow" if ok else ("replay" if raison == "déjà servi" else "code"))
         else:
+            if dec == "unavailable":
+                journal(genre, montre, "le serveur ne peut pas relayer (pas un refus)")
             futur.set_result(dec)
 
 
@@ -1459,6 +1472,9 @@ DECISIONS = {"refuse": ("refusé", "Refusé {o}.", "Denied {o}."),
                       "Confirmation code missing or wrong: denied."),
              "rejoue": ("refusé (code déjà servi)", "Code déjà servi : attends le code suivant de l'appli.",
                         "Code already used: wait for the next code of the app."),
+             "injoignable": ("refusé (à distance indisponible)",
+                             "Le serveur ne peut pas relayer la demande à distance (personne pour la recevoir) : refusé.",
+                             "The server cannot relay the remote request (nobody to receive it): denied."),
              "indisponible": ("refusé (pas de confirmation possible)",
                               "Confirmation impossible (ni l'île, ni notification à boutons, ni demande à distance) : refusé.",
                               "Cannot confirm (neither the island, nor a notification with buttons, nor a remote request): denied.")}
@@ -1730,6 +1746,10 @@ class Noeud:
                 for source, r in resultats.items():
                     if r == d:
                         return d, source
+            # « confirm_unavailable » n'est pas une décision : en « les-deux », on a attendu l'écran ci-dessus ; seule la
+            # distance seule finit sur ce refus-là (error_code « remote_unavailable »)
+            if resultats and all(r == "injoignable" for r in resultats.values()):
+                return "injoignable", "distance"
             return "indisponible", next(iter(resultats), "ecran")
         finally:
             restants = [t for t in cotes.values() if not t.done()]
@@ -1827,10 +1847,11 @@ class Noeud:
                 if self.session is not None and decision in ("refuse", "code"):
                     self.fermer_session(T("refusé", "denied"))      # un refus (ou un code faux) ferme la session en cours
                 d = DECISIONS[decision]
-                journal(nom, resume, sha=sha, decision=d[0] + ("" if decision in ("expire", "indisponible") else f" ({SOURCES[source][0]})"))
+                journal(nom, resume, sha=sha, decision=d[0] + ("" if decision in ("expire", "indisponible", "injoignable")
+                                                                 else f" ({SOURCES[source][0]})"))
+                codes = {"code": "bad_code", "rejoue": "replay", "injoignable": "remote_unavailable"}
                 return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}", o=o), "denied": True,
-                        **({"error_code": {"code": "bad_code", "rejoue": "replay"}[decision]}
-                           if decision in ("code", "rejoue") else {})}
+                        **({"error_code": codes[decision]} if decision in codes else {})}
         # Relu juste avant d'exécuter (B2-09) : couper l'IA ou le pilotage pendant la confirmation l'emporte sur « allow »
         if ia_coupee():
             self.fermer_session(T("IA coupée", "AI off"))
@@ -1943,7 +1964,7 @@ class Noeud:
                     continue
                 if msg.get("type") == "ping":
                     await ws.envoyer({"type": "pong"})
-                elif msg.get("type") == "confirm_response":
+                elif msg.get("type") in ("confirm_response", "confirm_unavailable"):
                     self.distance.recue(msg)
                 elif msg.get("type") == "session_end":
                     self.fermer_session(T("demande du serveur", "server request"))

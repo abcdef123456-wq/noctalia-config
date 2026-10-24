@@ -355,6 +355,13 @@ noté au journal, et JARVIS ne peut ni le lire ni l’écrire (chemin protégé)
 | `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui te la relaie ; tu réponds avec le code de l’appli, 6 chiffres sans espace. |
 | `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte (un refus si les deux arrivent ensemble) ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
 
+**Avec JARVIS-BIS `f522291`, choisis `ecran` ou `distance`, pas `les-deux`.** Quand il ne peut pas relayer la demande
+(`TELEGRAM_ALLOWED_USER_IDS` vide, ou une autre demande attend déjà un code dans le chat), ce serveur répond tout
+seul par un refus (`confirm_response` `deny`). `nc-noeud` ne peut pas le distinguer de ton « Refuser » : en
+`les-deux`, la carte se ferme alors que tu pouvais autoriser sur l’écran, et le journal note « refusé (distance) ».
+`nc-noeud` ne devine rien d’après le délai de la réponse. `les-deux` redevient sûr avec un serveur qui envoie
+`confirm_unavailable` (voir le protocole, point 3).
+
 Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
 `nc-noeud totp creer`). Changer ce réglage, ou vérifier ou retirer le code, relance `nc-noeud` s’il tourne : le
 serveur apprend à la connexion que ce PC sait confirmer à distance. Chaque code ne sert qu’une fois : un code déjà
@@ -409,6 +416,18 @@ taille n’est jamais envoyé.
    comme un échec ; un code déjà servi la refuse avec `"error_code": "replay"`, sans compter : le serveur peut
    redemander le code suivant pour une nouvelle demande. Une réponse inconnue, en double, tardive ou illisible est
    ignorée et notée au journal local.
+
+   Si le serveur **ne peut pas** relayer la demande (personne d’autorisé à qui l’envoyer, chat occupé par une autre),
+   il ne doit pas répondre `deny` à ta place mais :
+   ```json
+   {"type": "confirm_unavailable", "req_id": "7f0c…"}
+   ```
+   Ce n’est pas un refus : seule la voie à distance se ferme. En `les-deux`, la carte reste ouverte et tu peux encore
+   autoriser sur l’écran ; en `distance` seule, la demande est refusée et la `response` porte
+   `"error_code": "remote_unavailable"`. Pas de période calme ensuite (la demande n’a été montrée à personne), pas
+   compté comme un code faux, pas de `confirm_cancel`. Une seule réponse compte par `req_id`, `confirm_response` ou
+   `confirm_unavailable` : la première ; une trame pour un `req_id` inconnu ou déjà décidé est ignorée et notée.
+   JARVIS-BIS `f522291` ne l’envoie pas encore (il répond `deny` tout seul) : d’où le conseil d’éviter `les-deux`.
 4. Si la demande se termine sans réponse venue de là (décidée sur l’écran, expirée), `nc-noeud` envoie
    `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ses boutons.
 5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
@@ -423,6 +442,7 @@ Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe enco
   `remote_confirm` ; une demande à la fois par conversation, pour que le code tapé réponde à celle qui est montrée ;
 - faire expirer la demande au bout de `expires_in` secondes, ou dès `confirm_cancel` : ensuite, ne plus rien
   envoyer (refus par défaut ; `nc-noeud` refuse de toute façon) ;
+- s’il ne peut pas la relayer, envoyer `confirm_unavailable`, jamais un `deny` à ta place ;
 - ne jamais répondre `allow` tout seul : sans le code, ce serait refusé, et compté comme un échec.
 
 **Limites.** Une commande est tuée avec son groupe de processus à l’échéance ; un programme qu’elle détache dans

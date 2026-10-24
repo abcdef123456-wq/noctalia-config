@@ -1062,6 +1062,105 @@ class Distance(ServeurDistant):
         self.assertIn("refusé (distance)", self.journal())
 
 
+class DistanceIndisponible(ServeurDistant):
+    """confirm_unavailable : le serveur ne peut pas relayer (TELEGRAM_ALLOWED_USER_IDS vide, chat occupé). Ce n'est pas
+    un refus humain : en « les-deux », l'écran peut encore autoriser ; en « distance » seule, refus remote_unavailable."""
+
+    def indisponible(self, rid):
+        self.serveur.envoyer({"type": "confirm_unavailable", "req_id": rid})
+
+    def test_les_deux_la_carte_reste_et_l_ecran_autorise(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="les-deux")
+        self.ile("silence")
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        carte = self.run_dir / "nc-noeud/demande.json"
+        fin = time.monotonic() + 5
+        while not carte.exists() and time.monotonic() < fin:
+            time.sleep(0.05)
+        self.indisponible(rid)
+        self.rien_de_plus(1.5)                                 # ni response, ni confirm_cancel : on attend l'écran
+        self.assertTrue(carte.exists(), "la carte reste ouverte")
+        ident = json.loads(carte.read_text())["id"]
+        (self.run_dir / "nc-noeud/reponses" / ident).write_text("autoriser")
+        rep = self.attendre("response", rid)
+        self.assertTrue(rep["success"], rep)
+        self.assertTrue(marque.exists())
+        self.assertNotIn("confirm_cancel", [m["type"] for m in self.recus], "le serveur a déjà fermé de son côté")
+        self.repondre(rid, "deny", code=None)                  # une seule réponse par req_id : ignorée
+        self.rien_de_plus()
+        j = self.journal()
+        self.assertIn("autorisé (écran)", j)
+        self.assertIn("le serveur ne peut pas relayer", j)
+        self.assertNotIn("refusé (distance)", j)
+        self.assertNotIn("code refusé", j)
+
+    def test_distance_seule_refus_remote_unavailable(self):
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        self.indisponible(rid)
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"])
+        self.assertTrue(rep["denied"])
+        self.assertEqual(rep["error_code"], "remote_unavailable")
+        self.assertIn("ne peut pas relayer", rep["error"])
+        self.repondre(rid, "allow")                            # arrivé après : la première réponse a compté
+        self.indisponible(rid)
+        self.rien_de_plus()
+        self.assertFalse(marque.exists())
+        self.assertNotIn("confirm_cancel", [m["type"] for m in self.recus])
+        j = self.journal()
+        self.assertIn("refusé (à distance indisponible)", j)
+        self.assertNotIn("refusé (distance)", j)
+        self.assertNotIn("code refusé", j, "pas compté comme un code faux")
+        self.assertEqual(j.count("ignorée (en double)"), 2, j)
+        self.assertFalse(self.notifie("code", delai=0.5), "aucune alerte de code faux")
+
+    def test_req_id_inconnu_ignore(self):
+        self.demarrer()
+        marque = self.home / "fait"
+        rid = self.action("exec", {"command": f"touch {marque}"})
+        self.attendre("confirm_request", rid)
+        self.indisponible("inconnu-" + uuid.uuid4().hex)
+        self.serveur.envoyer({"type": "confirm_unavailable"})  # sans req_id
+        self.rien_de_plus(1.0)                                 # la vraie demande attend toujours
+        self.repondre(rid, "allow")
+        rep = self.attendre("response", rid)
+        self.assertTrue(rep["success"], rep)
+        self.assertTrue(marque.exists())
+        self.assertEqual(self.journal().count("\tconfirm_unavailable\t"), 2)
+        self.assertIn("ignorée (inconnue)", self.journal())
+
+    def test_pas_de_periode_calme(self):
+        """Après un code faux, B attendrait la période calme (8 s ici) ; après confirm_unavailable, B part tout de suite :
+        la demande A n'a été montrée à personne, aucun code n'est en route."""
+        self.demarrer(NC_NOEUD_CALME="8", NC_NOEUD_FRAPPE="8")
+        ma, mb = self.home / "fait-a", self.home / "fait-b"
+        a = self.action("exec", {"command": f"touch {ma}"}, timeout=30.0)
+        time.sleep(0.2)
+        b = self.action("exec", {"command": f"touch {mb}"}, timeout=60.0)
+        q = self.serveur.recevoir()
+        self.recus.append(q)
+        self.assertEqual((q["type"], q["req_id"]), ("confirm_request", a))
+        debut = time.monotonic()
+        self.indisponible(a)
+        self.assertEqual(self.attendre("response", a)["error_code"], "remote_unavailable")
+        for m in self.recus:
+            if m.get("type") == "confirm_request" and m.get("req_id") == b:
+                break
+        else:
+            self.attendre("confirm_request", b)
+        self.assertLess(time.monotonic() - debut, 4, "pas de période calme après confirm_unavailable")
+        self.repondre(b, "allow")
+        self.assertTrue(self.attendre("response", b)["success"])
+        self.assertTrue(mb.exists())
+        self.assertFalse(ma.exists())
+
+
 class UneDemandeALaFois(ServeurDistant):
     """Le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace la demande montrée par la nouvelle : une
     seule confirm_request en vol par nœud, sinon le code tapé après avoir lu A autoriserait B."""
