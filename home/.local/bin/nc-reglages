@@ -1111,10 +1111,13 @@ REGLAGES = [
       "choix", "ecran",
       L("À distance, tu tapes dans Telegram (ou ce que ton serveur utilise) le code de ton appli d'authentification, "
         "6 chiffres sans espace : sans ton code, le serveur ne peut rien autoriser. Avant : « nc-noeud totp creer » puis "
-        "« nc-noeud totp verifier CODE » dans un terminal.",
+        "« nc-noeud totp verifier CODE » dans un terminal. « Les deux » : seulement avec un serveur qui envoie "
+        "confirm_unavailable (pas encore JARVIS-BIS f522291, dont le refus automatique d'un chat occupé fermerait aussi la "
+        "carte de l'écran).",
         "Remotely, you type in Telegram (or whatever your server uses) the code of your authenticator app, 6 digits with "
         "no space: without your code, the server cannot allow anything. First: “nc-noeud totp creer” then “nc-noeud totp "
-        "verifier CODE” in a terminal."),
+        "verifier CODE” in a terminal. “Both”: only with a server that sends confirm_unavailable (not yet JARVIS-BIS "
+        "f522291, whose automatic denial when a chat is busy would also close the on-screen card)."),
       [("ecran", L("Sur l'écran de ce PC", "On this PC's screen")),
        ("distance", L("À distance (téléphone)", "Remotely (phone)")),
        ("les-deux", L("Les deux : la première réponse compte", "Both: the first answer wins"))],
