@@ -50,7 +50,7 @@ elif nom=='sudo':sys.exit(99)
 
 @unittest.skipUnless(shutil.which('timeout') and shutil.which('jq'), 'timeout et jq requis')
 class InstallChecks(unittest.TestCase):
-    def executer(self, scenario='', famille='fedora', mode='nosystem', manque=False):
+    def executer(self, scenario='', famille='fedora', mode='nosystem', manque=False, xdg=None):
         with tempfile.TemporaryDirectory(prefix='nc-install-checks-') as d:
             root=Path(d); b=root/'bin'; b.mkdir(); log=root/'calls'
             for nom in ('Hyprland','noctalia','rpm','pacman','dpkg-query','dnf','hyprctl','localectl','xdg-settings','systemctl','sudo'):
@@ -78,6 +78,12 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
             script=root/'test.sh'; script.write_text(prelude+SONDE+CHECKS+'\necho CHECKS_FINISHED\n')
             env=dict(os.environ, HOME=d, PATH=str(b)+':'+os.environ['PATH'], NC_TEST_CALLS=str(log),
                      NC_TEST_CASE=scenario, NC_TEST_FAMILY=famille, NC_TEST_MODE=mode, NC_TEST_MISSING='1' if manque else '')
+            # Dossiers XDG : ceux par défaut du HOME temporaire (pas ceux du garde-fou, qui pointent ailleurs), sauf
+            # ceux que le test donne ; None = variable retirée, « {HOME} » = le HOME temporaire
+            env.update(XDG_CONFIG_HOME=d+'/.config', XDG_STATE_HOME=d+'/.local/state')
+            for cle,valeur in (xdg or {}).items():
+                if valeur is None:env.pop(cle,None)
+                else:env[cle]=valeur.replace('{HOME}',d)
             process=subprocess.Popen(['bash',str(script)],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
             try:
                 out,err=process.communicate(timeout=8)
@@ -145,6 +151,37 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
                 self.assertNotIn('CHECKS_FINISHED',texte)
                 self.assertNotIn('PACKAGE_INSTALL',texte)
                 self.assertNotIn('["sudo"',appels)
+
+    def test_xdg_ailleurs_averti_sans_bloquer(self):
+        # Lot C-3 : l'installateur copie tout sous ~/.config et ~/.local/state ; un XDG_*_HOME ailleurs n'est pas lu
+        for cle,defaut in (('XDG_CONFIG_HOME','~/.config'),('XDG_STATE_HOME','~/.local/state')):
+            for valeur in ('{HOME}/ailleurs','/srv/ailleurs/','~/autre'):
+                with self.subTest(cle=cle,valeur=valeur):
+                    code,texte,_=self.executer(xdg={cle:valeur})
+                    self.assertEqual(code,0,texte)
+                    self.assertIn('CHECKS_FINISHED',texte)
+                    self.assertEqual(texte.count('points elsewhere'),1,texte)
+                    self.assertIn(f'Your {cle} points elsewhere (',texte)
+                    if '{HOME}' not in valeur:self.assertIn(f'points elsewhere ({valeur}):',texte)
+                    self.assertIn(f'installs into {defaut}, which Noctalia',texte)
+                    self.assertIn('this setup is not supported.',texte)
+
+    def test_xdg_absent_vide_ou_par_defaut_rien(self):
+        for cas in ({'XDG_CONFIG_HOME':None,'XDG_STATE_HOME':None},{'XDG_CONFIG_HOME':'','XDG_STATE_HOME':''},
+                    {'XDG_CONFIG_HOME':'{HOME}/.config/','XDG_STATE_HOME':'{HOME}/.local/state//'},
+                    {'XDG_CONFIG_HOME':'~/.config','XDG_STATE_HOME':'~/.local/state/'},
+                    {'XDG_CONFIG_HOME':'{HOME}/./.config','XDG_STATE_HOME':'{HOME}/.local/../.local/state'}):
+            with self.subTest(cas=cas):
+                code,texte,_=self.executer(xdg=cas)
+                self.assertEqual(code,0,texte)
+                self.assertIn('CHECKS_FINISHED',texte)
+                self.assertNotIn('points elsewhere',texte)
+
+    def test_xdg_message_francais(self):
+        source=SOURCE[SOURCE.index('xdg_net() {'):SOURCE.index('info "$(t "Distribution')]
+        self.assertIn("Ton XDG_CONFIG_HOME pointe ailleurs ($XDG_CONFIG_HOME) : noctalia-config s'installe dans ~/.config",source)
+        self.assertIn("Ton XDG_STATE_HOME pointe ailleurs ($XDG_STATE_HOME) : noctalia-config s'installe dans ~/.local/state",source)
+        self.assertIn('ce cas n\'est pas pris en charge.',source)
 
 
 class NettoyageCockpit(unittest.TestCase):

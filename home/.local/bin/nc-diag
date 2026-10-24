@@ -129,6 +129,7 @@ def verifier(b):
         b.avert(T("dépôt noctalia-config introuvable", "noctalia-config repository not found"),
                 T("relance install.sh depuis le dépôt cloné (nc-maj en a besoin)",
                   "run install.sh again from the cloned repository (nc-update needs it)"))
+    dossiers_xdg(b)
 
     # ── Hyprland ──
     b.titre("Hyprland")
@@ -431,6 +432,24 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+
+
+def dossiers_xdg(b):
+    """XDG_CONFIG_HOME ou XDG_STATE_HOME ailleurs que ~/.config et ~/.local/state : Noctalia (src/util/file_utils.h),
+    Hyprland et l'île lisent leurs réglages là, mais install.sh copie tout sous ~/.config et ~/.local/state. Pas pris en
+    charge : avertissement. Vide ou absent : rien à dire (comme Noctalia) ; ~ développé, barre finale ignorée."""
+    home = os.path.expanduser("~")
+    for cle, defaut, lecteurs, lecteurs_en in (
+            ("XDG_CONFIG_HOME", ".config", "Noctalia, Hyprland et l'île ne liront pas", "Noctalia, Hyprland and the island won't read"),
+            ("XDG_STATE_HOME", ".local/state", "Noctalia ne lira pas", "Noctalia won't read")):
+        v = os.environ.get(cle, "")
+        if v and os.path.realpath(os.path.expanduser(v)) != os.path.realpath(os.path.join(home, defaut)):
+            b.avert(T(f"{cle} pointe ailleurs ({v}) : noctalia-config s'installe dans ~/{defaut}, que {lecteurs} ; "
+                      "ce cas n'est pas pris en charge",
+                      f"{cle} points elsewhere ({v}): noctalia-config installs into ~/{defaut}, which {lecteurs_en}; "
+                      "this setup is not supported"),
+                    T(f"retire {cle} de ton environnement (ou mets-le à ~/{defaut}), puis ouvre une nouvelle session",
+                      f"remove {cle} from your environment (or set it to ~/{defaut}), then log in again"))
 
 
 NVIM_MIN = (0, 11, 2)   # LazyVim (config Neovim du dépôt) ; Debian 13 n'a que la 0.10

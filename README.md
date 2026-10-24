@@ -80,6 +80,9 @@ Hyprland doit être en version **0.55 ou plus** (le script vérifie). Les paquet
 essayés un par un : ce qui manque est signalé à la fin sans tout arrêter. Hors Arch, la police du terminal
 (« CaskaydiaCove Nerd Font ») est proposée en téléchargement depuis la page officielle de Nerd Fonts.
 
+Un `XDG_CONFIG_HOME` ou un `XDG_STATE_HOME` personnalisé (ailleurs que `~/.config` et `~/.local/state`) n'est **pas pris
+en charge** par l'installateur : il copie tout dans `~/.config` et `~/.local/state`, et le signale sans s'arrêter.
+
 | Commande | Effet |
 |---|---|
 | `./install.sh` | tout : paquets, fichiers, terminal, Neovim, services, puis une question avant chaque étape système |
