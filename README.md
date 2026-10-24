@@ -202,6 +202,27 @@ Pour forcer une échelle, dans `~/.config/hypr/perso.lua` :
 hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
 ```
 
+## Casque Bluetooth : le micro en appel
+
+Dans un appel (Discord, Teams…), le casque passe en mode « appel » (profil `headset-head-unit`). Avec `bluez5.enable-msbc = true`
+dans la config de WirePlumber, ce mode est en mSBC (16 kHz, bien meilleur que le CVSD à 8 kHz). mSBC ne marche que sur une
+connexion Bluetooth fraîche : sur une connexion abîmée le micro reste muet (« corrupted SCO packet » dans le noyau) et
+WirePlumber se rabat sur `headset-head-unit-cvsd`, le son réduit.
+
+- **`nc-bt-appel`** (service de ta session, sans boucle active) refait la connexion du casque quand il voit ce repli, ou une
+  rafale de « corrupted SCO packet » (si ton compte peut lire le journal du noyau), puis remet le mode appel si une appli utilise
+  encore son micro. 2 fois au plus en 2 minutes par casque ; ensuite le son réduit reste (il marche toujours) et une notification
+  le dit. Il ne fait rien sans adaptateur Bluetooth, sans `bluez5.enable-msbc = true` (dans `~/.config/wireplumber/wireplumber.conf.d/`),
+  ni si tu le coupes : nc-reglages → Son et luminosité → « Réparer le micro du casque Bluetooth ».
+- **nc-reglages** → « Casque Bluetooth : passer en mode appel tout seul » : non = la musique garde sa qualité et les applis
+  prennent le micro du PC.
+- **`nc-diag`** signale « micro du casque en mode appel : son réduit » avec deux réparations (refaire la connexion, ou passer en
+  qualité musique si aucune appli n'utilise le micro du casque).
+- Adaptateur MediaTek : l'économie d'énergie du pilote `btusb` coupe souvent le son des appels. `nc-diag` le conseille, sans
+  jamais l'appliquer : `echo 'options btusb enable_autosuspend=n' | sudo tee /etc/modprobe.d/nc-btusb.conf`, puis redémarrer.
+- Sur certaines puces, mSBC reste muet même sur une connexion fraîche : mets `bluez5.enable-msbc = false` (le service s'arrête
+  alors tout seul).
+
 ## Énergie
 
 Trois profils, à choisir dans la barre (icône d'énergie) ou avec **Super + Alt + P** :

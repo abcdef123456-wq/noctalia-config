@@ -790,6 +790,19 @@ REGLAGES = [
     R("VOLUME_MAX", "Son et luminosité", L("Volume maximal", "Maximum volume"), "choix", "100",
       L("150 % : pour des haut-parleurs faibles (le son peut saturer).", "150%: for weak speakers (the sound may distort)."),
       [("100", L("100 %", "100%")), ("150", L("150 %", "150%"))], groupe="hypr"),
+    R("BT_APPEL_REPARE", "Son et luminosité", L("Réparer le micro du casque Bluetooth", "Repair the Bluetooth headset microphone"), "ouinon", "oui",
+      L("Si le micro du casque se coupe ou devient muet pendant un appel, la connexion Bluetooth est refaite toute seule "
+        "(2 fois au plus en 2 minutes). Agit seulement si bluez5.enable-msbc = true dans la config de WirePlumber.",
+        "If the headset microphone cuts out or goes silent during a call, the Bluetooth connection is redone by itself "
+        "(2 times at most in 2 minutes). Only acts if bluez5.enable-msbc = true in the WirePlumber config."),
+      groupe="bt-appel"),
+    R("BT_QUALITE_MUSIQUE", "Son et luminosité", L("Casque Bluetooth : passer en mode appel tout seul", "Bluetooth headset: switch to call mode by itself"),
+      "ouinon", "oui",
+      L("Oui : dès qu'une appli veut le micro du casque, il passe en mode appel (son réduit). Non : la musique garde sa "
+        "qualité et l'appli utilise le micro du PC.",
+        "Yes: as soon as an app wants the headset microphone, it switches to call mode (reduced sound). No: the music keeps "
+        "its quality and the app uses the PC microphone."),
+      groupe="bt-musique"),
     R("LUMINOSITE_PAS", "Son et luminosité", L("Pas de la luminosité", "Brightness step"), "entier", "5",
       L("Touches de luminosité (et F5, F6).", "Brightness keys (and F5, F6)."), mini=1, maxi=25, unite="%"),
     # Clavier et souris
@@ -1280,7 +1293,7 @@ MATERIEL = {
     **{f"{x.upper()}_ILE": "ia:" + x for x in ("antigravity", "opencode", "codex", "gemini", "cursor", "copilot", "qwen", "kiro", "amp")}, "ECO_BRIGHTNESS_MAX": "ecran",
     "HZ_PERFORMANCE": "ecran", "HZ_BALANCED_AC": "ecran", "HZ_ECO": "ecran",
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
-    "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
+    "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
@@ -1751,6 +1764,36 @@ def relancer_hypridle():
     subprocess.run(["systemctl", "--user", "restart", "hypridle.service"], capture_output=True)
 
 
+def appliquer_bt_musique(vals):
+    """Bascule automatique du casque Bluetooth en mode appel (WirePlumber 0.5) : « wpctl settings --save » ; sans
+    « wpctl settings » (WirePlumber plus ancien), un fichier de wireplumber.conf.d, pris au prochain démarrage de
+    WirePlumber (jamais redémarré ici : un appel en cours serait coupé)."""
+    valeur = "false" if vals.get("BT_QUALITE_MUSIQUE") == "non" else "true"
+    r = subprocess.run(["wpctl", "settings", "--save", "bluetooth.autoswitch-to-headset-profile", valeur],
+                       capture_output=True) if shutil.which("wpctl") else None
+    conf = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
+                        "wireplumber/wireplumber.conf.d/52-nc-bt-autoswitch.conf")
+    if r is not None and r.returncode == 0:
+        try:
+            os.remove(conf)               # l'ancien repli n'a plus de raison d'être
+        except OSError:
+            pass
+        return
+    if valeur == "true":                   # le défaut de WirePlumber : rien à écrire
+        try:
+            os.remove(conf)
+        except OSError:
+            pass
+        return
+    try:
+        os.makedirs(os.path.dirname(conf), exist_ok=True)
+        with open(conf, "w", encoding="utf-8") as f:
+            f.write("# noctalia-config (nc-reglages) : pas de bascule automatique du casque Bluetooth en mode appel\n"
+                    "wireplumber.settings = {\n  bluetooth.autoswitch-to-headset-profile = false\n}\n")
+    except OSError:
+        pass
+
+
 def appliquer_veille(vals):
     if all(vals.get(c) is None for c in VEILLE_CLES if c != "VEILLE_ECRAN") and not int(vals.get("VEILLE_ECRAN") or 0):
         # Délais de la config : hypridle lit ~/.config/hypr/hypridle.conf tel quel
@@ -2017,6 +2060,11 @@ def appliquer(groupes, vals=None):
         elif g == "couvercle":
             subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
             subprocess.run(["systemctl", "--user", "restart", "nc-couvercle.service"], capture_output=True)
+        elif g == "bt-appel":
+            subprocess.run(["systemctl", "--user", "enable", "nc-bt-appel.service"], capture_output=True)
+            subprocess.run(["systemctl", "--user", "restart", "nc-bt-appel.service"], capture_output=True)
+        elif g == "bt-musique":
+            appliquer_bt_musique(vals)
         elif g == "claude":
             # Hooks de Claude Code ajoutés ou retirés (seulement si Claude Code est là)
             if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):

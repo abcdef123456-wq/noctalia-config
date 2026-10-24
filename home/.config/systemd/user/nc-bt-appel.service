@@ -1,0 +1,14 @@
+[Unit]
+Description=Refait la connexion Bluetooth du casque quand son micro d'appel se coupe ou passe en son réduit (noctalia-config)
+PartOf=graphical-session.target
+After=graphical-session.target pipewire-pulse.service
+ConditionPathExistsGlob=/sys/class/bluetooth/hci*
+
+[Service]
+ExecStart=%h/.local/bin/nc-bt-appel
+Restart=on-failure
+RestartSec=5
+Slice=background.slice
+
+[Install]
+WantedBy=graphical-session.target

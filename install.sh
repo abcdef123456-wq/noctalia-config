@@ -1300,7 +1300,7 @@ fi
 say "$(t "4. Services de ta session" "4. Your session's services")"
 # nc-noeud.service (JARVIS pilote ce PC) n'est jamais activé ici : seulement par nc-reglages → Intelligence artificielle
 # → « Laisser JARVIS piloter ce PC » ; déjà actif, il est relancé plus bas pour prendre la nouvelle version
-UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service)
+UNITS=(noctalia.service nc-carousel-thumbs.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service nc-bt-appel.service)
 [ "$ILE" = quickshell ] && UNITS+=(nc-ile.service)
 [ "$KDE_POLKIT" = 1 ] && UNITS+=(plasma-polkit-agent.service)
 if systemctl --user daemon-reload >/dev/null 2>&1; then
@@ -1394,7 +1394,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
       # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
-      systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service hypridle.service 2>/dev/null || true
+      systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service nc-bt-appel.service hypridle.service 2>/dev/null || true
       [ "$ILE" = quickshell ] && { systemctl --user restart nc-ile.service 2>/dev/null || true; }
     else
       systemctl --user start noctalia.service nc-pouls.service 2>/dev/null || true   # rien n'a changé : simplement relancés
@@ -1408,7 +1408,7 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   fi
 else
   warn "$(t "Pas de session utilisateur active (installation depuis un terminal de connexion ou SSH ?) : services non activés." "No active user session (installing from a login console or over SSH?): services not enabled.")"
-  info "$(t "Dans ta session Hyprland, lance :" "In your Hyprland session, run:") systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
+  info "$(t "Dans ta session Hyprland, lance :" "In your Hyprland session, run:") systemctl --user enable --now noctalia.service nc-theme-sync.path nc-carousel-thumbs.path nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service nc-bt-appel.service hypridle.service$([ "$ILE" = quickshell ] && echo " nc-ile.service")"
 fi
 
 # Assistant distant : mêmes fichiers et dépendances sur toutes les distributions, même sans Quickshell/systemd.

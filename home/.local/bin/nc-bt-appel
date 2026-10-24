@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""nc-bt-appel : le micro d'un casque Bluetooth qui reste muet ou en son réduit pendant un appel (service nc-bt-appel).
+
+Contexte : en appel, le casque passe en profil « headset-head-unit » (mSBC, 16 kHz). mSBC marche, mais seulement sur une
+connexion Bluetooth fraîche : sur une connexion abîmée le son est muet (« corrupted SCO packet » dans le noyau) et
+WirePlumber se rabat sur « headset-head-unit-cvsd » (8 kHz, son réduit). Refaire la connexion répare.
+
+  nc-bt-appel                   le service : attend les événements du son (pactl subscribe) et du noyau, sans boucle active
+      déclencheur (a) : une carte bluez passe en headset-head-unit-cvsd alors que headset-head-unit est proposé
+      déclencheur (b) : en headset-head-unit, au moins 5 « corrupted SCO packet » en 5 s (journal du noyau, seulement
+                        s'il est lisible par l'utilisateur)
+      action : bluetoothctl disconnect, courte pause, bluetoothctl connect, attente de la carte (10 s au plus), puis
+               headset-head-unit SEULEMENT si une appli enregistre encore sur le micro du casque (appel en cours)
+      limites : 2 tentatives au plus en 2 minutes par appareil ; ensuite le son réduit reste (il marche toujours) et une
+                notification le dit une fois
+  nc-bt-appel reparer CARTE     une reconnexion tout de suite (nc-diag reparer bt_reconnecter:CARTE), sans la limite
+  nc-bt-appel appel CARTE       code 0 si une appli enregistre sur le micro de ce casque, 1 sinon (nc-diag)
+
+Actif seulement si bluez5.enable-msbc vaut true dans ~/.config/wireplumber/wireplumber.conf.d, qu'un adaptateur
+Bluetooth existe et que BT_APPEL_REPARE n'est pas « non » (nc-reglages → Son et luminosité).
+Aucune commande par un shell : les adresses et les cartes suivent une grammaire stricte.
+"""
+import glob
+import json
+import os
+import queue
+import re
+import subprocess
+import sys
+import threading
+import time
+
+MAC = re.compile(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}")
+CARTE = re.compile(r"bluez_card\.[0-9A-F_]{17}")
+APPEL, CVSD = "headset-head-unit", "headset-head-unit-cvsd"
+
+HOME = os.path.expanduser("~")
+SYS = os.environ.get("NC_BT_SYS", "/sys")                              # les tests y mettent un faux /sys
+PAUSE = float(os.environ.get("NC_BT_PAUSE", "2"))                      # entre disconnect et connect
+GARDE = float(os.environ.get("NC_BT_GARDE", "10"))                     # attente de la carte, au plus
+CALME = float(os.environ.get("NC_BT_CALME", "0.4"))                    # les événements d'une rafale sont regroupés
+FENETRE = float(os.environ.get("NC_BT_FENETRE", "120"))                # 2 tentatives par fenêtre de 2 minutes
+MAX_TENTATIVES = 2
+SCO_RAFALE, SCO_SECONDES = 5, 5.0
+
+
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+def T(fr, en):
+    return en if _langue() == "en" else fr
+
+
+def config_dir():
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"))
+
+
+def reglage(cle, defaut=""):
+    try:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
+            v = defaut
+            for l in f:
+                m = re.match(r"\s*" + re.escape(cle) + r"\s*=\s*(.*?)\s*$", l)
+                if m:
+                    v = m[1].strip('"')
+            return v
+    except OSError:
+        return defaut
+
+
+def msbc_actif():
+    """bluez5.enable-msbc dans la config WirePlumber de l'utilisateur (le dernier fichier, par ordre de nom, qui le dit) ;
+    introuvable : faux."""
+    val = False
+    for f in sorted(glob.glob(os.path.join(config_dir(), "wireplumber/wireplumber.conf.d/*.conf"))):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                for l in fh:
+                    m = re.match(r"\s*\"?bluez5\.enable-msbc\"?\s*[=:]\s*(true|false)\b", l.split("#", 1)[0])
+                    if m:
+                        val = m[1] == "true"
+        except OSError:
+            pass
+    return val
+
+
+def adaptateur():
+    return bool(glob.glob(os.path.join(SYS, "class/bluetooth/hci*")))
+
+
+def autorise():
+    return reglage("BT_APPEL_REPARE", "oui") != "non" and msbc_actif() and adaptateur()
+
+
+def lancer(cmd, delai=15):
+    """Liste d'arguments, jamais de shell. (code, sortie)"""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=delai, stdin=subprocess.DEVNULL)
+        return r.returncode, r.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+
+
+def json_pactl(*args):
+    code, out = lancer(["pactl", "-f", "json", *args])
+    if code:
+        return []
+    try:
+        v = json.loads(out)
+    except ValueError:
+        return []
+    return v if isinstance(v, list) else []
+
+
+def mac_de(carte):
+    """bluez_card.00_11_22_33_44_55 -> 00:11:22:33:44:55 ; None si la grammaire n'est pas respectée."""
+    if not CARTE.fullmatch(carte or ""):
+        return None
+    m = carte.split(".", 1)[1].replace("_", ":")
+    return m if MAC.fullmatch(m) else None
+
+
+def cartes():
+    """{nom: {"profil": actif, "profils": [noms]}} pour les cartes bluez de nom valide."""
+    res = {}
+    for c in json_pactl("list", "cards"):
+        if not isinstance(c, dict):
+            continue
+        nom = c.get("name")
+        if isinstance(nom, str) and mac_de(nom):
+            profils = c.get("profiles")
+            res[nom] = {"profil": c.get("active_profile") if isinstance(c.get("active_profile"), str) else "",
+                        "profils": sorted(p for p in profils if isinstance(p, str)) if isinstance(profils, dict) else []}
+    return res
+
+
+IGNORES = ("peak detect", "volume meter", "pavucontrol", "pulseaudio volume control")
+
+
+def appel_en_cours(carte):
+    """Vrai si une appli enregistre sur le micro de ce casque (jamais sur un « .monitor », ni un vumètre)."""
+    suffixe = carte.split(".", 1)[1]
+    sources = {}
+    for s in json_pactl("list", "sources"):
+        nom = s.get("name") if isinstance(s, dict) else None
+        if isinstance(nom, str) and nom.startswith("bluez_input." + suffixe) and not nom.endswith(".monitor"):
+            sources[s.get("index")] = nom
+    if not sources:
+        return False
+    for o in json_pactl("list", "source-outputs"):
+        if not isinstance(o, dict) or o.get("source") not in sources:
+            continue
+        p = o.get("properties") if isinstance(o.get("properties"), dict) else {}
+        nom = " ".join(str(p.get(k, "")) for k in ("application.name", "media.name", "application.id")).lower()
+        if not any(i in nom for i in IGNORES):
+            return True
+    return False
+
+
+def meilleur_a2dp(profils):
+    for p in ("a2dp-sink-aac", "a2dp-sink-sbc_xq", "a2dp-sink"):
+        if p in profils:
+            return p
+    return None
+
+
+class Evenements:
+    """pactl subscribe (et, si possible, journalctl -k) dans une file, lus par un seul consommateur."""
+
+    def __init__(self):
+        self.file = queue.Queue()
+        self.procs = []
+
+    def _lire(self, cmd, etiquette):
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
+        except OSError:
+            self.file.put((etiquette, None))
+            return None
+        self.procs.append(p)
+
+        def boucle():
+            for ligne in p.stdout:
+                self.file.put((etiquette, ligne))
+            self.file.put((etiquette, None))
+        threading.Thread(target=boucle, daemon=True).start()
+        return p
+
+    def pactl(self):
+        return self._lire(["pactl", "subscribe"], "pactl")
+
+    def noyau(self):
+        self._lire(["journalctl", "-k", "-f", "-n", "0", "-o", "cat", "--no-pager"], "noyau")
+
+    def fermer(self):
+        for p in self.procs:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+
+
+def journal_lisible():
+    """Le journal du noyau est lisible par l'utilisateur (groupe systemd-journal, adm ou wheel) : sans bruit sinon."""
+    code, out = lancer(["journalctl", "-k", "-n", "1", "-o", "cat", "--no-pager"], 10)
+    return code == 0 and bool(out.strip())
+
+
+def reconnecter(carte, ev, appel_connu=None):
+    """disconnect, pause, connect, attente de la carte, puis headset-head-unit si un appel est en cours. Renvoie un mot :
+    « fait », « sans-appel » (reconnecté, WirePlumber décide) ou « echec »."""
+    mac = mac_de(carte)
+    if not mac:
+        return "echec"
+    appel = appel_en_cours(carte) if appel_connu is None else appel_connu
+    lancer(["bluetoothctl", "disconnect", mac], 20)
+    time.sleep(PAUSE)
+    lancer(["bluetoothctl", "connect", mac], 20)
+    fin = time.monotonic() + GARDE
+    revenue = False
+    while time.monotonic() < fin:
+        try:
+            etiquette, ligne = ev.file.get(timeout=max(0.05, min(1.0, fin - time.monotonic())))
+        except queue.Empty:
+            etiquette, ligne = "", ""
+        if etiquette == "pactl" and ligne is None:
+            return "echec"
+        if etiquette == "pactl" and " on card " not in (ligne or ""):
+            continue
+        if carte in cartes():
+            revenue = True
+            break
+    if not revenue:
+        return "echec"
+    if not appel:
+        return "sans-appel"
+    time.sleep(CALME)
+    c = cartes().get(carte)
+    if c and APPEL in c["profils"]:
+        lancer(["pactl", "set-card-profile", carte, APPEL])
+    return "fait"
+
+
+def notifier(mac):
+    lancer(["notify-send", "-a", "nc-bt-appel", T("Casque Bluetooth", "Bluetooth headset"),
+            T("Micro du casque en qualité réduite (Bluetooth instable).", "Headset microphone in reduced quality (unstable Bluetooth).")], 10)
+
+
+class Limites:
+    """2 tentatives au plus par fenêtre de 2 minutes et par appareil ; la notification part une fois par épuisement."""
+
+    def __init__(self):
+        self.essais, self.prevenus = {}, set()
+
+    def permet(self, mac, maintenant=None):
+        t = time.monotonic() if maintenant is None else maintenant
+        l = [x for x in self.essais.get(mac, []) if t - x < FENETRE]
+        self.essais[mac] = l
+        if len(l) >= MAX_TENTATIVES:
+            if mac not in self.prevenus:
+                self.prevenus.add(mac)
+                notifier(mac)
+            return False
+        if not l:
+            self.prevenus.discard(mac)
+        l.append(t)
+        return True
+
+
+def servir():
+    if not autorise():
+        return 0
+    ev = Evenements()
+    if ev.pactl() is None:
+        return 1
+    if journal_lisible():
+        ev.noyau()
+    limites, sco = Limites(), []
+    while True:
+        etiquette, ligne = ev.file.get()
+        if ligne is None:
+            if etiquette == "pactl":
+                ev.fermer()
+                return 1                     # le serveur de son est parti : systemd nous relance
+            continue                          # le journal s'arrête : seul le déclencheur (a) reste
+        cible = None
+        if etiquette == "pactl":
+            if " on card " not in ligne:
+                continue
+            fin = time.monotonic() + CALME      # une rafale d'événements = un seul coup d'oeil
+            while time.monotonic() < fin:
+                try:
+                    e2, l2 = ev.file.get(timeout=max(0.01, fin - time.monotonic()))
+                except queue.Empty:
+                    break
+                if l2 is None and e2 == "pactl":
+                    ev.fermer()
+                    return 1
+            if not autorise():
+                continue
+            cible = next((n for n, c in sorted(cartes().items()) if c["profil"] == CVSD and APPEL in c["profils"]), None)
+        elif "corrupted SCO packet" in ligne:
+            t = time.monotonic()
+            sco = [x for x in sco if t - x < SCO_SECONDES] + [t]
+            if len(sco) < SCO_RAFALE:
+                continue
+            sco = []
+            if not autorise():
+                continue
+            cible = next((n for n, c in sorted(cartes().items()) if c["profil"] == APPEL), None)
+        if not cible:
+            continue
+        mac = mac_de(cible)
+        if mac and limites.permet(mac):
+            reconnecter(cible, ev)
+            sco = []
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        return servir()
+    if len(args) == 2 and args[0] == "reparer":
+        if not mac_de(args[1]):
+            print(T("carte Bluetooth invalide", "invalid Bluetooth card"), file=sys.stderr)
+            return 2
+        ev = Evenements()
+        if ev.pactl() is None:
+            return 1
+        try:
+            r = reconnecter(args[1], ev)
+        finally:
+            ev.fermer()
+        print(r)
+        return 0 if r in ("fait", "sans-appel") else 1
+    if len(args) == 2 and args[0] == "appel":
+        return 2 if not mac_de(args[1]) else (0 if appel_en_cours(args[1]) else 1)
+    print(__doc__.strip())
+    return 0 if args[0] in ("-h", "--help", "aide") else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -129,6 +129,7 @@ HOME_FILES=(
   .local/bin/nc-ecran-externe
   .local/bin/nc-ecrans
   .local/bin/nc-couvercle
+  .local/bin/nc-bt-appel
   .local/bin/nc-verrou-place
   .local/bin/nc-raccourci
   .local/bin/nc-shell
@@ -168,6 +169,7 @@ HOME_FILES=(
   .config/systemd/user/nc-ile.service
   .config/systemd/user/nc-ecran-externe.service
   .config/systemd/user/nc-couvercle.service
+  .config/systemd/user/nc-bt-appel.service
   .config/systemd/user/nc-maj-verif.service
   .config/systemd/user/nc-maj-verif.timer
   .config/systemd/user/nc-paquets.service

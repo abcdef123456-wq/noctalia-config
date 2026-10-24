@@ -10,6 +10,7 @@ Ne change rien sur le PC, sauf « nc-diag reparer ».
 """
 import contextlib
 import fcntl
+import glob
 import json
 import os
 import re
@@ -102,6 +103,12 @@ UNITES = {
 SANS_DEMARRER = ("nc-pouls.service", "nc-couvercle.service", "noctalia.service")
 ID_UNITE = re.compile(r"(redemarrer|demarrer):[a-z0-9-]+\.(service|path)")
 NOMS_FIXES = ("ia_conf_prive",)
+# Casque Bluetooth : l'id porte la carte (bt_reconnecter:bluez_card.00_11_22_33_44_55), grammaire stricte ; l'entrée de la
+# table est faite à la demande pour une carte de cette forme (rien d'autre n'entre dans la table)
+ID_BT = re.compile(r"(bt_reconnecter|bt_musique):(bluez_card\.[0-9A-F_]{17})")
+BT_PROFIL_APPEL, BT_PROFIL_CVSD = "headset-head-unit", "headset-head-unit-cvsd"
+BT_A2DP = ("a2dp-sink-aac", "a2dp-sink-sbc_xq", "a2dp-sink")      # du meilleur au moins bon
+SYS = os.environ.get("NC_DIAG_SYS", "/sys")                      # les tests y mettent un faux /sys
 
 
 def _table():
@@ -129,13 +136,45 @@ def _table():
     return t
 
 
-REPARATIONS = _table()
+def _entree_bt(ident):
+    m = ID_BT.fullmatch(ident) if isinstance(ident, str) else None
+    if not m:
+        return None
+    if m[1] == "bt_reconnecter":
+        return {"libelle": T("Refaire la connexion Bluetooth du casque", "Redo the headset's Bluetooth connection"),
+                "detail": T("Déconnecte puis reconnecte le casque (quelques secondes sans son), et remet le mode appel si une "
+                            "appli utilise son micro. Le micro retrouve la bonne qualité.",
+                            "Disconnects then reconnects the headset (a few seconds of silence), and puts the call mode back if "
+                            "an app is using its microphone. The microphone gets its full quality back."),
+                "danger": False, "ferme_ile": False}
+    return {"libelle": T("Qualité musique (micro du PC pour les appels)", "Music quality (PC microphone for calls)"),
+            "detail": T("Le casque repasse en lecture haute qualité (A2DP). Les applis utilisent le micro du PC tant que le "
+                        "casque n'est pas remis en mode appel.",
+                        "The headset goes back to high quality playback (A2DP). Apps use the PC microphone until the headset "
+                        "is put back in call mode."),
+            "danger": False, "ferme_ile": False}
+
+
+class Table(dict):
+    """La table des réparations : les entrées fixes, plus celles d'un casque Bluetooth dont l'id respecte la grammaire."""
+    def __contains__(self, k):
+        return dict.__contains__(self, k) or _entree_bt(k) is not None
+
+    def __missing__(self, k):
+        e = _entree_bt(k)
+        if e is None:
+            raise KeyError(k)
+        return e
+
+
+REPARATIONS = Table(_table())
 
 
 def id_valide(ident):
-    """Un id de réparation connu : la grammaire (unités) ou un nom fixe, ET présent dans la table. Rien d'autre."""
-    return (isinstance(ident, str) and (ID_UNITE.fullmatch(ident) is not None or ident in NOMS_FIXES)
-            and ident in REPARATIONS)
+    """Un id de réparation connu : la grammaire (unités, casque Bluetooth) ou un nom fixe, ET présent dans la table.
+    Rien d'autre."""
+    return (isinstance(ident, str) and (ID_UNITE.fullmatch(ident) is not None or ID_BT.fullmatch(ident) is not None
+                                        or ident in NOMS_FIXES) and ident in REPARATIONS)
 
 
 def unite_chargee(u):
@@ -491,6 +530,8 @@ def verifier(b):
             b.ok(T(f"Wi-Fi ({carte}) réactif (pas de veille entre deux paquets)",
                    f"Wi-Fi ({carte}) responsive (no sleep between packets)"))
 
+    bluetooth_appel(b)
+
     # ── Outils ──
     b.titre(T("Outils utilisés par la config", "Tools used by the config"))
     outils = {
@@ -572,6 +613,73 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+
+
+def bt_cartes():
+    """{carte: (profil actif, [profils])} des cartes bluez (nom valide) vues par pactl ; vide si pactl -f json manque."""
+    out, code = sortie(["pactl", "-f", "json", "list", "cards"])
+    if code:
+        return {}
+    try:
+        liste = json.loads(out)
+    except ValueError:
+        return {}
+    res = {}
+    for c in liste if isinstance(liste, list) else []:
+        nom = c.get("name") if isinstance(c, dict) else None
+        if isinstance(nom, str) and re.fullmatch(r"bluez_card\.[0-9A-F_]{17}", nom):
+            profils = c.get("profiles")
+            res[nom] = (c.get("active_profile") if isinstance(c.get("active_profile"), str) else "",
+                        sorted(p for p in profils if isinstance(p, str)) if isinstance(profils, dict) else [])
+    return res
+
+
+def bt_meilleur_a2dp(profils):
+    return next((p for p in BT_A2DP if p in profils), None)
+
+
+def bt_appel_en_cours(carte):
+    """True/False selon nc-bt-appel (une appli enregistre sur le micro du casque) ; None si on ne sait pas."""
+    code = sortie([os.path.join(BIN, "nc-bt-appel"), "appel", carte])[1]
+    return {0: True, 1: False}.get(code)
+
+
+def bluetooth_appel(b):
+    """Micro du casque Bluetooth en mode appel : son réduit (CVSD) alors que mSBC est proposé ; conseil MediaTek."""
+    if not glob.glob(os.path.join(SYS, "class/bluetooth/hci*")):
+        return
+    b.titre("Bluetooth")
+    for carte, (actif, profils) in sorted(bt_cartes().items()):
+        if actif != BT_PROFIL_CVSD or BT_PROFIL_APPEL not in profils:
+            continue
+        reps = ["bt_reconnecter:" + carte]
+        if bt_meilleur_a2dp(profils) and bt_appel_en_cours(carte) is False:
+            reps.append("bt_musique:" + carte)
+        b.avert(T("micro du casque en mode appel : son réduit", "headset microphone in call mode: reduced sound"),
+                T("Deux choix. 1) Refaire la connexion Bluetooth (réparation proposée) : le micro retrouve sa qualité, "
+                  "l'appel est coupé quelques secondes. 2) Passer le casque en qualité musique et utiliser le micro du PC pour les "
+                  "appels (réparation proposée ; nc-reglages → Son, « passer en mode appel tout seul » = non, pour que ça dure). "
+                  "Sinon, tu peux rester ainsi : le son réduit marche toujours.",
+                  "Two choices. 1) Redo the Bluetooth connection (repair offered): the microphone gets its quality back, the call "
+                  "drops for a few seconds. 2) Put the headset in music quality and use the PC microphone for calls (repair "
+                  "offered; nc-settings → Sound, “switch to call mode by itself” = no, to make it last). Or stay as is: the "
+                  "reduced sound always works."),
+                cle="bt_cvsd:" + carte, reparations=reps)
+    # Adaptateur MediaTek (USB 0e8d) avec l'économie d'énergie de btusb : coupe souvent le son des appels. Conseil seulement.
+    try:
+        mediatek = any(open(f).read().strip().lower() == "0e8d"
+                       for f in glob.glob(os.path.join(SYS, "bus/usb/devices/*/idVendor")))
+        auto = open(os.path.join(SYS, "module/btusb/parameters/enable_autosuspend")).read().strip()
+    except OSError:
+        return
+    if mediatek and auto == "Y":
+        b.avert(T("adaptateur Bluetooth MediaTek : l'économie d'énergie de l'adaptateur coupe souvent le son des appels",
+                  "MediaTek Bluetooth adapter: the adapter's power saving often cuts the sound of calls"),
+                T("pour l'éviter : echo 'options btusb enable_autosuspend=n' | sudo tee /etc/modprobe.d/nc-btusb.conf "
+                  "puis redémarrer (jamais appliqué tout seul)",
+                  "to avoid it: echo 'options btusb enable_autosuspend=n' | sudo tee /etc/modprobe.d/nc-btusb.conf "
+                  "then reboot (never applied automatically)"),
+                cle="bt_mediatek_autosuspend")
 
 
 def outils_polices(b, outils):
@@ -1015,6 +1123,38 @@ def _ile_systemd_run(verbe):
     return "echec", (r.stderr.strip() or actif)[-300:]
 
 
+def _reparer_bt(action, carte):
+    """Casque Bluetooth : revoit l'état de la carte (« deja » s'il n'y a plus rien à faire), puis la réparation."""
+    etat = bt_cartes().get(carte)
+    if etat is None:
+        return "echec", T("ce casque n'est pas connecté : rien n'est fait", "this headset is not connected: nothing done")
+    actif, profils = etat
+    if action == "bt_reconnecter":
+        if actif != BT_PROFIL_CVSD:
+            return "deja", T(f"le casque n'est plus en son réduit ({actif or 'inconnu'}) : rien à faire",
+                             f"the headset is no longer in reduced sound ({actif or 'unknown'}): nothing to do")
+        r = subprocess.run([os.path.join(BIN, "nc-bt-appel"), "reparer", carte], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=60)
+        if r.returncode == 0:
+            return "fait", T("connexion Bluetooth refaite", "Bluetooth connection redone")
+        return "echec", T("la reconnexion n'a pas abouti", "the reconnection did not succeed")
+    # bt_musique : seulement si aucune appli n'utilise le micro du casque
+    if actif not in (BT_PROFIL_CVSD, BT_PROFIL_APPEL):
+        return "deja", T(f"le casque est déjà en {actif or 'inconnu'} : rien à faire",
+                         f"the headset is already in {actif or 'unknown'}: nothing to do")
+    meilleur = bt_meilleur_a2dp(profils)
+    if not meilleur:
+        return "echec", T("aucun profil de qualité musique pour ce casque", "no music-quality profile for this headset")
+    if bt_appel_en_cours(carte) is not False:
+        return "echec", T("une appli utilise le micro du casque (ou l'état est inconnu) : rien n'est changé",
+                          "an app is using the headset microphone (or the state is unknown): nothing changed")
+    r = subprocess.run(["pactl", "set-card-profile", carte, meilleur], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=20)
+    if r.returncode:
+        return "echec", (r.stderr.strip() or "pactl")[-300:]
+    return "fait", T(f"casque en {meilleur}", f"headset in {meilleur}")
+
+
 def _reparer(ident):
     """Revoit l'état (« deja » s'il n'y a plus rien à faire), puis la réparation, sur le modèle de relancer() de
     nc-panne : compteur remis à zéro, (re)démarrage, deux secondes pour voir s'il tient. Jamais d'IA."""
@@ -1030,6 +1170,8 @@ def _reparer(ident):
         except OSError as e:
             return "echec", str(e)[-300:]
         return ("fait", T("lisible par toi seul", "readable by you only")) if ok else ("echec", "chmod 600")
+    if ID_BT.fullmatch(ident):
+        return _reparer_bt(*ident.split(":", 1))
     action, u = ident.split(":", 1)
     etat = sortie(["systemctl", "--user", "is-active", u])[0].strip()
     if etat not in ETATS:
