@@ -320,6 +320,10 @@ le code à une action précise : un serveur malveillant pourrait te montrer une 
 pour une autre en attente. C’est pourquoi chaque autorisation à distance s’annonce aussi par une notification sur ce
 PC (l’action et son résumé), et chaque code faux aussi. **Si tu as le moindre doute sur le serveur, garde `ecran`.**
 
+**Tape les 6 chiffres collés, sans espace** : `123456`, pas `123 456` ni `123456.`. Le serveur ne reconnaît un code
+que s’il est fait de 6 chiffres seuls ; sinon, ton message part au modèle comme une question ordinaire (et reste
+dans la conversation), et la demande attend toujours.
+
 **1. Créer le code (une fois, sur ce PC, dans un terminal) :**
 
 ```sh
@@ -338,8 +342,8 @@ noté au journal, et JARVIS ne peut ni le lire ni l’écrire (chemin protégé)
 
 | Valeur | Ce qui se passe |
 | --- | --- |
-| `ecran` (par défaut) | Comme avant : la carte de l’île (ou la notification à boutons). Rien ne part au serveur. |
-| `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui te la relaie ; tu réponds avec le code de l’appli. |
+| `ecran` (par défaut, conseillé) | Comme avant : la carte de l’île (ou la notification à boutons). Rien ne part au serveur. |
+| `distance` | Pas de carte : `nc-noeud` envoie la demande au serveur, qui te la relaie ; tu réponds avec le code de l’appli, 6 chiffres sans espace. |
 | `les-deux` | La carte et la demande à distance à la fois. La première décision l’emporte (un refus si les deux arrivent ensemble) ; l’autre côté est fermé (la carte disparaît, le serveur reçoit `confirm_cancel`). |
 
 Sans code créé et vérifié, `distance` et `les-deux` se comportent comme `ecran` (nc-reglages le dit et renvoie vers
