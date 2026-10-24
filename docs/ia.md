@@ -57,19 +57,15 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
   `~/.local/share/opencode`, ou là où `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` les mettent ;
   une de ces variables qui pointe hors de ton dossier personnel refuse le lancement) sont **illisibles et non
   inscriptibles** : un hook, une commande, un agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire
-  ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. Seul un **jeton
-  rafraîchi** revient dans le vrai fichier, après la demande, **champ par champ** et par type (jeton d'accès en texte,
-  dates en nombre, jamais `NaN`) : lu sans suivre aucun lien (symbolique ou physique), écrit sous verrou dans un
-  temporaire renommé, jamais si le fichier a changé entre-temps. Tout le retour est refusé si une clé nouvelle apparaît,
-  si le compte, le serveur ou le type change (`account_id`, `resource_url`, `type`…), si le jeton d'accès d'origine était
-  encore valide (aucun rafraîchissement n'était nécessaire), ou, pour Codex, si le `chatgpt_account_id` des JWT ou le
-  `sub`/`email` ne concordent plus. Le jeton de rafraîchissement n'est même pas copié dans le bac tant que le jeton
-  d'accès reste valide bien plus longtemps qu'une demande. Pour Codex, l'échéance vient du claim `exp` du JWT de
-  l'access_token (un access_token qui n'est pas un JWT est refusé, à la copie comme au retour). Chaque refus est écrit au
-  journal de nc-ia (`~/.local/state/nc-ia/journal`, sans le jeton) et **notifié** ; un rafraîchissement normal ne
-  notifie pas. **Limite connue** : quand le jeton d'accès d'origine était déjà expiré, un changement de compte reste
-  possible pour les jetons **opaques** (Claude, Qwen, OpenCode : pas de compte vérifiable dedans, à la différence des
-  JWT de Codex). La vraie parade serait que nc-ia rafraîchisse lui-même le jeton, hors du bac ; ce n'est pas fait ;
+  ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. **Rien ne
+  revient du bac** vers tes vrais fichiers, pas même un jeton rafraîchi : sans réseau, nc-ia ne pourrait vérifier ni la
+  signature ni le compte d'un jeton qui en reviendrait. On ne copie donc que le **jeton d'accès** (et ce qu'il faut pour
+  s'en servir : date, scopes, compte), **jamais le jeton de rafraîchissement**. Si le jeton d'accès est expiré, ou
+  expire avant la fin de la demande (sa durée maximale, plus une minute), ou si sa date est illisible, le moteur n'est
+  pas lancé : nc-ia dit « Codex doit renouveler sa connexion : ouvre-le une fois dans un terminal (codex), puis
+  réessaie. » (au plus une notification par heure et par moteur, avec un bouton « Ouvrir » qui ouvre le moteur dans un
+  terminal, hors du bac, seulement si tu cliques). Tu le renouvelles donc en ouvrant le moteur normalement. Un jeton sans
+  date connue (une entrée OpenCode sans échéance) est copié seul : s'il est expiré, le moteur échoue tout seul ;
 - l'environnement est **effacé puis reconstruit** : un petit lanceur `python3 -I` ne garde de l'environnement que la
   liste blanche avant d'exécuter le moteur. Il reçoit le `PATH`, la langue, le proxy, et **les clés des fournisseurs que
   ce moteur sait utiliser** : une seule pour la plupart (`ANTHROPIC_API_KEY` pour Claude Code, `OPENAI_API_KEY` pour

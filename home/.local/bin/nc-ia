@@ -55,6 +55,7 @@ import contextlib
 import errno
 import http.client
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -919,12 +920,12 @@ def env_cli(ident=None):
 # ~/.gemini, ~/.qwen, ~/.config/opencode, ~/.local/share/opencode, ou là où CLAUDE_CONFIG_DIR, CODEX_HOME,
 # XDG_CONFIG_HOME, XDG_DATA_HOME les mettent) restent illisibles ET en lecture seule dans le bac : rien de ce qu'il crée
 # (hooks, commandes, agents, règles, AGENTS.md, scripts de shell, mémoire, serveurs MCP de ~/.claude.json…) ne peut
-# survivre à la demande ni être exécuté plus tard hors du bac. Seul un jeton rafraîchi revient dans le vrai fichier,
-# champ par champ (voir SCHEMAS), si le vrai fichier n'a pas changé entre-temps (Demande.retour).
+# survivre à la demande ni être exécuté plus tard hors du bac. RIEN ne revient du bac vers tes vrais fichiers (pas
+# même un jeton rafraîchi : voir COPIES).
 #
 # copie : fichier copié tel quel (None) ou, pour un JSON, seulement les clés de premier niveau données (pour Claude Code :
 # ce qu'il faut à une question non interactive, jamais mcpServers, projects, env, hooks, apiKeyHelper…).
-# jeton : fichier d'identifiants (JSON) et son schéma (SCHEMAS).
+# jeton : fichier d'identifiants (JSON), copié champ par champ (COPIES), sans jeton de rafraîchissement.
 CLAUDE_JSON_CLES = {"hasCompletedOnboarding", "oauthAccount", "userID", "primaryApiKey", "customApiKeyResponses"}
 CLAUDE_REGLAGES_CLES = {"forceLoginMethod", "forceLoginOrgUUID", "language"}
 ETAT_MOTEURS = {
@@ -937,64 +938,33 @@ ETAT_MOTEURS = {
     "opencode": dict(copie={".config/opencode/opencode.json": None, ".config/opencode/opencode.jsonc": None},
                      jeton=[".local/share/opencode/auth.json"]),
 }
-# Le schéma de chaque fichier d'identifiants, champ par champ (noms vérifiés dans Claude Code 2.1, Codex et OpenCode
-# 2.1 installés ; Gemini CLI et Qwen Code : google-auth-library et leur code). Seuls ces champs entrent dans le faux
-# dossier personnel (ni mcpOAuth de Claude, ni les entrées api ou wellknown d'OpenCode) :
-#   "jeton" : copié, et seul à revenir dans le vrai fichier quand le moteur l'a rafraîchi ;
-#   "fixe"  : copié ; s'il change (compte, serveur, type), TOUT le retour est refusé ;
-#   "copie" : copié (le moteur en a besoin : scopes…) ; un changement est ignoré, jamais rapporté ;
-#   "nul"   : jamais copié ; le moteur peut l'écrire vide (null), sinon tout le retour est refusé ;
-#   un dict : un objet, même règle pour ses champs ; "*" : le schéma d'une entrée d'après sa valeur (OpenCode : une
-#   entrée par fournisseur, seules celles de type oauth, et seulement celles qui existaient déjà).
-# Une clé hors du schéma qui apparaît (mcpOAuth, une nouvelle entrée d'OpenCode…) : tout le retour est refusé, et le
-# journal de nc-ia le dit (jamais la valeur).
-# Type de chaque champ de jeton, vérifié au retour (une valeur venue du bac) : « txt » un jeton en texte ASCII de 16 Kio
-# au plus, « ms » une date epoch en millisecondes (int, de 1970 à 2100), « iso » un horodatage RFC 3339 court (Codex
-# last_refresh). Les autres marqueurs : « fixe » (changement = tout refusé), « copie » (le moteur en a besoin, un
-# changement est ignoré, jamais rapporté), « nul » (jamais copié, doit rester null).
-JETONS_TYPES = ("txt", "ms", "iso")
-_OPENCODE_OAUTH = {"type": "fixe", "access": "txt", "refresh": "txt", "expires": "ms", "accountId": "fixe",
-                   "enterpriseUrl": "fixe"}
-SCHEMAS = {
-    "claude": {"claudeAiOauth": {"accessToken": "txt", "refreshToken": "txt", "expiresAt": "ms",
-                                 "refreshTokenExpiresAt": "ms", "scopes": "copie", "subscriptionType": "copie",
-                                 "subscriptionTypeSource": "copie", "subscriptionTypeVerifiedAt": "copie",
-                                 "rateLimitTier": "copie", "clientId": "fixe"}},
-    "codex": {"tokens": {"access_token": "txt", "refresh_token": "txt", "id_token": "txt", "account_id": "fixe"},
-              "last_refresh": "iso", "auth_mode": "fixe", "OPENAI_API_KEY": "nul", "agent_identity": "nul",
-              "personal_access_token": "nul", "bedrock_api_key": "nul", "bedrock_access_keys": "nul"},
-    # Gemini : refresh_token en « fixe » (Google ne le fait pas tourner à chaque rafraîchissement) : s'il change, tout le
-    # retour est refusé plutôt que d'accepter un nouveau jeton de rafraîchissement venu du bac.
-    "gemini-cli": {"access_token": "txt", "refresh_token": "fixe", "expiry_date": "ms", "token_type": "copie",
-                   "scope": "copie", "id_token": "copie"},
-    "qwen": {"access_token": "txt", "refresh_token": "txt", "expiry_date": "ms", "token_type": "copie",
-             "resource_url": "fixe"},
+# Ce qu'on copie des identifiants dans le faux dossier personnel : le jeton d'ACCÈS et les seuls champs dont le moteur
+# a besoin pour s'en servir (date, scopes, compte…). JAMAIS de jeton de rafraîchissement, pour aucun moteur, et RIEN ne
+# revient du bac vers tes vrais fichiers : sans réseau, nc-ia ne peut vérifier ni la signature ni le compte d'un jeton
+# qui en reviendrait (un JWT Codex forgé, non signé, passait). Un jeton expiré, ou qui expire avant la fin de la
+# demande, n'est pas lancé : tu ouvres le moteur une fois dans un terminal, il renouvelle lui-même sa connexion. Noms
+# vérifiés dans Claude Code 2.1, Codex et OpenCode 2.1 installés ; Gemini CLI et Qwen Code : google-auth-library et
+# leur code. True : champ copié tel quel ; dict : objet, même règle ; "*" : le schéma d'une entrée d'après sa valeur
+# (OpenCode : une entrée par fournisseur, seules celles de type oauth). Le reste (mcpOAuth, entrées api/wellknown
+# d'OpenCode, clé d'API de Codex…) n'entre jamais dans le bac.
+_OPENCODE_OAUTH = {"type": True, "access": True, "expires": True, "accountId": True, "enterpriseUrl": True}
+COPIES = {
+    "claude": {"claudeAiOauth": {"accessToken": True, "expiresAt": True, "scopes": True, "subscriptionType": True,
+                                 "rateLimitTier": True}},
+    "codex": {"tokens": {"access_token": True, "id_token": True, "account_id": True}, "auth_mode": True,
+              "last_refresh": True},
+    "gemini-cli": {"access_token": True, "expiry_date": True, "token_type": True, "scope": True},
+    "qwen": {"access_token": True, "expiry_date": True, "token_type": True, "resource_url": True},
     "opencode": {"*": lambda v: _OPENCODE_OAUTH if isinstance(v, dict) and v.get("type") == "oauth" else None},
 }
-# La durée de validité restante du jeton d'accès d'origine (chemin de la date, en ms), par moteur à jeton unique : on
-# n'accepte un retour que si ce jeton était expiré ou sur le point de l'être, et on ne copie même pas le jeton de
-# rafraîchissement dans le bac quand il reste valide bien plus longtemps qu'une demande. OpenCode (plusieurs comptes
-# dans un même fichier) n'est pas couvert : garde-fou de schéma seulement.
+# Où est le jeton d'accès, et sa date d'échéance (ms epoch) ; Codex : claim « exp » (secondes) de son JWT access_token.
+JETON_ACCES = {"claude": ("claudeAiOauth", "accessToken"), "codex": ("tokens", "access_token"),
+               "gemini-cli": ("access_token",), "qwen": ("access_token",)}
 JETON_DATE = {"claude": ("claudeAiOauth", "expiresAt"), "gemini-cli": ("expiry_date",), "qwen": ("expiry_date",)}
-JETON_REFRESH = {"claude": ("claudeAiOauth", "refreshToken"), "qwen": ("refresh_token",),
-                 "gemini-cli": ("refresh_token",), "codex": ("tokens", "refresh_token")}
-
-
-def expiry_ms(ident, objet):
-    """L'échéance du jeton d'accès (ms epoch) ou None si illisible. Codex : le claim « exp » du JWT access_token (pas
-    de champ de date dans auth.json) ; les autres : le champ de JETON_DATE."""
-    if ident == "codex":
-        charge = jwt_charge(_dedans(objet, ("tokens", "access_token")))
-        exp = charge.get("exp") if isinstance(charge, dict) else None
-        return int(exp * 1000) if isinstance(exp, (int, float)) and not isinstance(exp, bool) else None
-    date = JETON_DATE.get(ident)
-    v = _dedans(objet, date) if date else None
-    return v if isinstance(v, int) and not isinstance(v, bool) else None
-
-
-def codex_access_jwt(objet):
-    """True si l'access_token de Codex est un JWT (il doit l'être : il porte chatgpt_account_id et exp)."""
-    return jwt_charge(_dedans(objet, ("tokens", "access_token"))) is not None
+# Le programme que tu ouvres dans un terminal pour qu'il renouvelle sa connexion (hors du bac, sans argument)
+BINAIRES = {"claude": "claude", "codex": "codex", "gemini-cli": "gemini", "qwen": "qwen", "opencode": "opencode"}
+MARGE_JETON = 60                             # secondes en plus de la durée maximale réelle de la demande
+_ECHEANCE_MAX_MS = 4102444800000             # 2100-01-01
 
 
 def _refus_constante(_x):
@@ -1002,8 +972,7 @@ def _refus_constante(_x):
 
 
 def charger_json(octets):
-    """json.loads qui refuse NaN/Infinity (sinon json.dumps réécrirait NaN dans le vrai fichier, que Node et serde
-    rejettent ensuite)."""
+    """json.loads qui refuse NaN/Infinity."""
     return json.loads(octets, parse_constant=_refus_constante)
 
 
@@ -1020,21 +989,9 @@ def _dedans(objet, chemin):
     return o
 
 
-def _retirer(objet, chemin):
-    """Enlève objet[chemin] s'il existe (copie peu profonde le long du chemin, l'original n'est pas touché)."""
-    if _dedans(objet, chemin) is None:
-        return objet
-    out = dict(objet)
-    o = out
-    for k in chemin[:-1]:
-        o[k] = dict(o[k])
-        o = o[k]
-    o.pop(chemin[-1], None)
-    return out
-
-
 def jwt_charge(jeton):
-    """La charge (2e segment) d'un JWT, SANS vérifier la signature, ou None. Pour comparer compte/sub/email de Codex."""
+    """La charge (2e segment) d'un JWT, SANS vérifier la signature, ou None. Sert seulement à lire son échéance « exp »
+    (aller : on ne lance pas un jeton expiré) ; jamais à faire confiance à un jeton."""
     if not isinstance(jeton, str) or jeton.count(".") < 2:
         return None
     seg = jeton.split(".")[1]
@@ -1046,16 +1003,94 @@ def jwt_charge(jeton):
         return None
 
 
-def _chercher_cle(obj, cle):
-    """La première valeur trouvée pour cette clé, à n'importe quelle profondeur (claims JWT imbriqués d'OpenAI)."""
-    if isinstance(obj, dict):
-        if cle in obj:
-            return obj[cle]
-        for v in obj.values():
-            r = _chercher_cle(v, cle)
-            if r is not None:
-                return r
-    return None
+def ms_plausible(v, facteur=1):
+    """v (int ou float FINI) × facteur en ms epoch, si c'est une date plausible (après 1970, avant 2100), sinon None.
+    Jamais d'exception : 1e400 (inf), NaN, une chaîne, un booléen, None donnent None."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    try:
+        if not math.isfinite(v):
+            return None
+        ms = int(v * facteur)
+    except (OverflowError, ValueError):
+        return None
+    return ms if 0 < ms < _ECHEANCE_MAX_MS else None
+
+
+def echeance_ms(ident, objet):
+    """L'échéance du jeton d'accès (ms epoch), ou None si elle manque ou n'est pas plausible. Codex : claim « exp » du
+    JWT access_token (un access_token qui n'est pas un JWT : None) ; les autres : le champ de JETON_DATE."""
+    try:
+        if ident == "codex":
+            charge = jwt_charge(_dedans(objet, ("tokens", "access_token")))
+            return ms_plausible(charge.get("exp"), 1000) if charge else None
+        date = JETON_DATE.get(ident)
+        return ms_plausible(_dedans(objet, date)) if date else None
+    except Exception:
+        return None
+
+
+def _schema_de(schema, k, v):
+    if k in schema:
+        return schema[k]
+    f = schema.get("*")
+    return f(v) if f else None
+
+
+def projeter(objet, schema):
+    """Ce qui entre dans le faux dossier personnel : les seuls champs de COPIES."""
+    out = {}
+    for k, v in objet.items():
+        s = _schema_de(schema, k, v)
+        if isinstance(s, dict):
+            if isinstance(v, dict):
+                out[k] = projeter(v, s)
+        elif s is True:
+            out[k] = v
+    return out
+
+
+def message_jeton_expire(ident):
+    n, b = nom(ident), BINAIRES.get(ident, ident)
+    return T(f"{n} doit renouveler sa connexion : ouvre-le une fois dans un terminal ({b}), puis réessaie.",
+             f"{n} needs to renew its sign-in: open it once in a terminal ({b}), then try again.")
+
+
+_NOTIFY_ACTIONS = []
+
+
+def notify_send_actions():
+    """notify-send sait-il proposer une action (-A/--action) ? Sinon : texte seul."""
+    if not _NOTIFY_ACTIONS:
+        _NOTIFY_ACTIONS.append("--action" in sortie_cmd(["notify-send", "--help"], 3)[1])
+    return _NOTIFY_ACTIONS[0]
+
+
+def signaler_jeton_expire(ident):
+    """Une notification, au plus une par heure et par moteur : le moteur doit renouveler sa connexion. Action « Ouvrir »
+    (si notify-send sait faire et qu'un terminal est là) : SEULEMENT si tu cliques, le moteur s'ouvre dans un terminal,
+    HORS du bac et sans argument. Sinon le texte seul. Jamais d'erreur ; rien ne s'ouvre tout seul."""
+    if not shutil.which("notify-send"):
+        return
+    marque = RUN / f"jeton-expire-{re.sub(r'[^a-z0-9-]', '', ident)}"
+    try:
+        if abs(time.time() - marque.stat().st_mtime) < 3600:
+            return
+    except OSError:
+        pass
+    try:
+        RUN.mkdir(mode=0o700, parents=True, exist_ok=True)
+        marque.write_text("")
+        os.utime(marque)
+    except OSError:
+        pass
+    action = None
+    with contextlib.suppress(Exception):
+        cmd = commande_terminal([BINAIRES.get(ident, ident)], nom(ident))
+        if cmd and notify_send_actions():
+            action = (T("Ouvrir", "Open"), cmd)
+    with contextlib.suppress(Exception):
+        notifier("nc-ia", message_jeton_expire(ident), action=action, cle="ouvrir", brut=True)
 
 
 # Clés gardées des fichiers de réglages copiés (en plus de ~/.claude.json/settings.json filtrés par ETAT_MOTEURS) :
@@ -1082,29 +1117,12 @@ def cles_config(ident, rel):
 
 
 def filtrer_config(cles, objet):
-    """Ne garde d'un fichier de réglages que des clés connues et inoffensives (jamais mcpServers, options.apiKey ni
-    en-têtes, hooks, projects, env, extensions)."""
+    """Ne garde d'un fichier de réglages que des clés connues et inoffensives."""
     return {k: v for k, v in objet.items() if k in cles}
-
-
-def sans_refresh_si_valide(ident, donne):
-    """Le jeton copié dans le bac, mais SANS le jeton de rafraîchissement quand le jeton d'accès reste valide bien plus
-    longtemps qu'une demande : un moteur compromis ne peut pas exfiltrer le jeton de rafraîchissement, et il n'en a pas
-    besoin (le jeton d'accès suffit). Les moteurs sans date lisible, ou OpenCode (plusieurs comptes), gardent tout."""
-    refresh = JETON_REFRESH.get(ident)
-    if refresh is None:
-        return donne
-    exp = expiry_ms(ident, donne)
-    if exp is None:
-        return donne                                                # date illisible : prudence, on garde tout
-    if exp <= time.time() * 1000 + int((DELAI_CLI + 300) * 1000):   # va expirer : le moteur peut avoir besoin du refresh
-        return donne
-    return _retirer(donne, refresh)
 
 
 COPIE_MAX = 16 * 1024 * 1024
 JETON_MAX = 256 * 1024
-VERROU_ATTENTE = 5                           # secondes : le vrai fichier d'identifiants verrouillé plus longtemps, pas de retour
 # Variables d'environnement qui ne sont pas transmises à l'unité (propres à la session de nc-ia ou à systemd)
 ENV_BAC_SANS = {"_", "PWD", "OLDPWD", "SHLVL", "INVOCATION_ID", "JOURNAL_STREAM", "MAINPID", "MANAGERPID", "NOTIFY_SOCKET",
                 "SYSTEMD_EXEC_PID", "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC"}
@@ -1145,17 +1163,6 @@ def journal_ia(texte):
             h.write(time.strftime("%Y-%m-%d %H:%M:%S ") + texte.replace("\n", " ") + "\n")
     except OSError:
         pass
-
-
-def notifier_bac(message):
-    """Une notification du bac (notify-send s'il est là, rien sinon), pour qu'un retour de jeton inattendu — refusé ou
-    abandonné — se voie. Un rafraîchissement normal ne notifie pas (seulement le journal)."""
-    if not shutil.which("notify-send"):
-        return
-    with contextlib.suppress(OSError):
-        subprocess.Popen(["notify-send", "-a", "IA", "-i", "dialog-information", "--", "nc-ia", message],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
 
 
 def env_bac(env):
@@ -1207,109 +1214,137 @@ def base_bac():
 
 
 def _ouvrir_dossier_sans_lien(dirfd, nom):
-    """Un descripteur O_DIRECTORY sur dirfd/nom, sans suivre AUCUN lien. Un dossier à 000 (le moteur a retiré ses
-    droits) est d'abord remis à 0700 par /proc (jamais par son chemin, donc jamais à travers un lien). None si ce n'est
-    pas un dossier réel (lien substitué par une course, fichier, course perdue)."""
+    """Un descripteur O_DIRECTORY sur dirfd/nom, sans suivre AUCUN lien, et remis à 0700 (fchmod) dès l'ouverture : un
+    dossier en 0500 ou 0400 s'ouvre mais on n'y pourrait ni effacer ni renommer. Un dossier à 000 est d'abord remis à
+    0700 par /proc (jamais par son chemin, donc jamais à travers un lien). None si ce n'est pas un dossier réel."""
     import stat as st
+    fd = None
     try:
-        return os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+        fd = os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
     except (FileNotFoundError, NotADirectoryError):
         return None
     except OSError:
         pass                                            # peut-être EACCES (dossier à 000) ou ELOOP (lien) : on tranche
-    try:
-        pf = os.open(nom, os.O_PATH | os.O_NOFOLLOW, dir_fd=dirfd)   # O_PATH : n'exige ni r ni x, ne suit pas le lien final
-    except OSError:
-        return None
-    try:
-        if not st.S_ISDIR(os.stat(pf).st_mode):
-            return None                                 # un lien (ou autre) : on ne le suit pas
-        os.chmod("/proc/self/fd/%d" % pf, 0o700)        # par le descripteur, aucun composant de chemin contrôlable
-    except OSError:
-        return None
-    finally:
-        os.close(pf)
-    try:
-        return os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
-    except OSError:
-        return None
+    if fd is None:
+        try:
+            pf = os.open(nom, os.O_PATH | os.O_NOFOLLOW, dir_fd=dirfd)   # O_PATH : n'exige ni r ni x, ne suit pas le lien
+        except OSError:
+            return None
+        try:
+            if not st.S_ISDIR(os.stat(pf).st_mode):
+                return None                             # un lien (ou autre) : on ne le suit pas
+            os.chmod("/proc/self/fd/%d" % pf, 0o700)    # par le descripteur, aucun composant de chemin contrôlable
+        except OSError:
+            return None
+        finally:
+            os.close(pf)
+        try:
+            fd = os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+        except OSError:
+            return None
+    with contextlib.suppress(OSError):
+        os.fchmod(fd, 0o700)
+    return fd
 
 
 _FDS_EPUISES = (errno.EMFILE, errno.ENFILE)
-EFFACER_MAX = 4_000_000                          # garde-fou : jamais de boucle sans fin, même sous attaque
+EFFACER_MAX = 500_000                            # éléments traités au plus, par effacement
+EFFACER_DELAI = 20                               # secondes au plus, par effacement
 
 
-def _vider_dossier(racine):
-    """Vide le dossier ouvert `racine` (sans toucher à `racine` lui-même), SANS récursion ni pile de descripteurs : on
-    remonte chaque sous-dossier (profondeur ≥ 2) directement sous `racine` par os.rename(src_dir_fd/dst_dir_fd), qui ne
-    suit aucun lien, jusqu'à ce que `racine` n'ait plus que des fichiers et des dossiers plats, puis on les vide et les
-    retire. Fds bornés à O(1) ; on s'arrête sur EMFILE/ENFILE (la purge réessaiera) et sur le garde-fou EFFACER_MAX."""
-    pas = 0
-    bouge = True
-    while bouge:                                 # aplatissement
-        bouge = False
+class _Borne(Exception):
+    pass
+
+
+def _vider_dossier(racine, fin):
+    """Vide le dossier ouvert `racine` par une file de travail LINÉAIRE, sans récursion ni pile de descripteurs : pour
+    chaque dossier de la file, fchmod 0700 (à l'ouverture), unlink de ses fichiers d'abord (le jeton part en premier),
+    puis rename de TOUS ses sous-dossiers directement sous `racine` (os.rename avec src_dir_fd/dst_dir_fd, aucun lien
+    suivi) en les ajoutant à la file, puis rmdir. Bornes : EFFACER_MAX éléments et l'échéance `fin` ; EMFILE/ENFILE
+    arrête aussi. True si `racine` est vide, False si une borne est atteinte."""
+    compte = [0]
+
+    def un_de_plus():
+        compte[0] += 1
+        if compte[0] > EFFACER_MAX or time.monotonic() > fin:
+            raise _Borne
+
+    def traiter(fd, est_racine, file):
+        retires = 0
         try:
-            enfants = os.listdir(racine)
-        except OSError:
-            return
-        for enfant in enfants:
-            cfd = _ouvrir_dossier_sans_lien(racine, enfant)
-            if cfd is None:
-                continue
+            noms = os.listdir(fd)
+        except OSError as e:
+            if e.errno in _FDS_EPUISES:
+                raise _Borne from None
+            return 0
+        sous = []
+        for n in noms:                           # les fichiers d'abord
+            un_de_plus()
             try:
-                for pe in os.listdir(cfd):
-                    gfd = _ouvrir_dossier_sans_lien(cfd, pe)      # pe est-il un (vrai) sous-dossier ?
-                    if gfd is None:
-                        continue
-                    os.close(gfd)
-                    os.rename(pe, "x-" + os.urandom(8).hex(), src_dir_fd=cfd, dst_dir_fd=racine)
-                    bouge = True
-                    break
-            except OSError as e:
-                if e.errno in _FDS_EPUISES:
-                    return
-            finally:
-                os.close(cfd)
-            pas += 1
-            if pas > EFFACER_MAX:
-                return
-            if bouge:
-                break
-    for _ in range(EFFACER_MAX):                 # racine ne contient plus que des fichiers et des dossiers plats (vides de sous-dossiers)
-        try:
-            restes = os.listdir(racine)
-        except OSError:
-            return
-        if not restes:
-            return
-        for n in restes:
-            try:
-                os.unlink(n, dir_fd=racine)
+                os.unlink(n, dir_fd=fd)          # fichier ou lien (jamais suivi : un lien vers ~ disparaît, ~ reste)
+                retires += 1
             except FileNotFoundError:
                 continue
-            except OSError:                       # un dossier (EISDIR/EPERM) : le vider puis le retirer
-                dfd = _ouvrir_dossier_sans_lien(racine, n)
-                if dfd is not None:
-                    try:
-                        for f in os.listdir(dfd):
-                            with contextlib.suppress(OSError):
-                                os.unlink(f, dir_fd=dfd)
-                    except OSError:
-                        pass
-                    finally:
-                        os.close(dfd)
+            except OSError as e:
+                if e.errno in _FDS_EPUISES:
+                    raise _Borne from None
+                sous.append(n)                   # un dossier (EISDIR/EPERM)
+        for n in sous:                           # puis les sous-dossiers, sous la racine et dans la file
+            un_de_plus()
+            if est_racine:
+                file.append(n)
+                continue
+            nouveau = "x-" + os.urandom(8).hex()
+            try:
+                os.rename(n, nouveau, src_dir_fd=fd, dst_dir_fd=racine)
+                file.append(nouveau)
+            except OSError as e:
+                if e.errno in _FDS_EPUISES:
+                    raise _Borne from None
+        return retires
+
+    try:
+        for _ in range(8):                       # quelques passages, tant qu'un passage retire quelque chose
+            file, i, retires = [], 0, 0
+            retires += traiter(racine, True, file)
+            while i < len(file):
+                n = file[i]
+                i += 1
+                un_de_plus()
+                fd = _ouvrir_dossier_sans_lien(racine, n)
+                if fd is None:                   # plus un dossier (course) : on l'efface comme un fichier
+                    with contextlib.suppress(OSError):
+                        os.unlink(n, dir_fd=racine)
+                        retires += 1
+                    continue
+                try:
+                    retires += traiter(fd, False, file)
+                finally:
+                    os.close(fd)
                 with contextlib.suppress(OSError):
                     os.rmdir(n, dir_fd=racine)
+                    retires += 1
+            try:
+                if not os.listdir(racine):
+                    return True
+            except OSError:
+                return False
+            if not retires:
+                return False                     # ce passage n'a rien retiré : inutile d'insister
+    except _Borne:
+        return False
+    return False
 
 
 def effacer(chemin):
     """Supprime un dossier (ou fichier) d'une demande par DESCRIPTEURS seulement, aucune opération par chemin : un
-    moteur encore vivant qui remplace un dossier par un lien vers une victime hors du bac pendant l'effacement ne peut
-    pas faire supprimer la victime (chaque ouverture est en O_NOFOLLOW depuis le dossier parent déjà ouvert). Sans
-    récursion (un arbre très profond ne fait pas de RecursionError) et avec des fds bornés."""
+    moteur encore vivant qui remplace un dossier par un lien vers une victime hors du bac ne peut pas la faire
+    supprimer (chaque ouverture est en O_NOFOLLOW depuis le dossier parent déjà ouvert, chaque rename passe par des
+    dir_fd). Sans récursion, fds bornés, borne en temps et en nombre. Si la borne est atteinte, le dossier passe en 000
+    (jamais lisible avec un jeton dedans) et c'est écrit au journal : la purge suivante le reprend."""
     chemin = os.fspath(chemin).rstrip("/")
-    parent, nom = os.path.split(chemin)
-    if not nom:
+    parent, nom_ = os.path.split(chemin)
+    if not nom_:
         return
     try:
         pfd = os.open(parent or "/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -1317,21 +1352,25 @@ def effacer(chemin):
         return
     try:
         try:
-            os.unlink(nom, dir_fd=pfd)           # fichier ou lien : unlink ne suit jamais le dernier élément
+            os.unlink(nom_, dir_fd=pfd)          # fichier ou lien : unlink ne suit jamais le dernier élément
             return
         except FileNotFoundError:
             return
         except OSError:
             pass                                 # EISDIR (dossier) ou droits : on traite en dossier
-        racine = _ouvrir_dossier_sans_lien(pfd, nom)
+        racine = _ouvrir_dossier_sans_lien(pfd, nom_)
         if racine is None:
             return
         try:
-            _vider_dossier(racine)
+            if not _vider_dossier(racine, time.monotonic() + EFFACER_DELAI):
+                with contextlib.suppress(OSError):
+                    os.fchmod(racine, 0)
+                journal_ia(f"effacement de {nom_} borné : dossier mis en 000, repris par la purge suivante")
+                return
         finally:
             os.close(racine)
         with contextlib.suppress(OSError):
-            os.rmdir(nom, dir_fd=pfd)
+            os.rmdir(nom_, dir_fd=pfd)
     finally:
         os.close(pfd)
 
@@ -1472,186 +1511,6 @@ def lire_sans_lien(racine, rel, maximum):
         os.close(fd)
 
 
-def _schema_de(schema, k, v):
-    if k in schema:
-        return schema[k]
-    f = schema.get("*")
-    return f(v) if f else None
-
-
-def est_jeton(s):
-    return isinstance(s, str) and s in JETONS_TYPES
-
-
-def valide_jeton(typ, v):
-    """La valeur d'un champ de jeton venue du bac convient-elle à son type ? (txt : texte ASCII ≤ 16 Kio ; ms : date
-    epoch en ms, int de 1970 à 2100 ; iso : horodatage RFC 3339 court). Refuse bool, float (NaN/Infinity y compris) et
-    les objets."""
-    if typ == "txt":
-        return isinstance(v, str) and v.isascii() and len(v) <= 16 * 1024
-    if typ == "ms":
-        return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 4102444800000
-    if typ == "iso":
-        return isinstance(v, str) and v.isascii() and len(v) <= 64 and \
-            re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:?\d\d)?", v) is not None
-    return False
-
-
-def projeter(objet, schema):
-    """Ce qui entre dans le faux dossier personnel : les seuls champs du schéma (jeton, fixe, copie)."""
-    out = {}
-    for k, v in objet.items():
-        s = _schema_de(schema, k, v)
-        if isinstance(s, dict):
-            if isinstance(v, dict):
-                out[k] = projeter(v, s)
-        elif est_jeton(s) or s in ("fixe", "copie"):
-            out[k] = v
-    return out
-
-
-def changements_jeton(avant, neuf, schema, chemin=()):
-    """Les champs de jeton que le moteur a changés, [(chemin, valeur)], entre ce qui lui a été donné (avant) et ce qu'il
-    a laissé (neuf). ValueError(raison, sans valeur) si le retour doit être refusé en entier : nouvelle clé ou entrée,
-    champ fixe changé (type, resource_url, account_id, accountId, serveur…), valeur de jeton du mauvais type."""
-    def nom_(c):                                        # des noms venus du moteur : courts, sans caractère de contrôle
-        return ".".join(re.sub(r"[^\w@:/+-]", "?", str(x))[:60] for x in c) or "racine"
-    if not isinstance(neuf, dict):
-        raise ValueError(nom_(chemin) + " n'est plus un objet")
-    for k in neuf:
-        if k not in avant and (k not in schema or k == "*"):
-            raise ValueError(("nouvelle entrée " if "*" in schema else "nouvelle clé ") + nom_(chemin + (k,)))
-    out = []
-    for k in list(dict.fromkeys(list(avant) + list(neuf) + [x for x in schema if x != "*"])):
-        s = _schema_de(schema, k, avant[k]) if k in avant else schema.get(k)
-        a, n, c = avant.get(k), neuf.get(k), chemin + (k,)
-        if isinstance(s, dict):
-            if k in neuf:
-                out += changements_jeton(a if isinstance(a, dict) else {}, n, s, c)
-        elif s == "fixe":
-            if a != n:
-                raise ValueError(nom_(c) + " a changé")
-        elif s == "nul":
-            if n is not None:
-                raise ValueError(nom_(c) + " est apparu")
-        elif est_jeton(s):
-            if k in neuf and n != a:
-                if not valide_jeton(s, n):
-                    raise ValueError(nom_(c) + " : valeur de jeton invalide")
-                out.append((c, n))
-    return out
-
-
-def verifier_retour(ident, avant, neuf):
-    """Dernier contrôle avant d'accepter un jeton revenu du bac, par moteur. ValueError(raison) refuse tout le retour :
-      - le jeton d'accès d'origine était encore valide bien au-delà d'une demande (aucun rafraîchissement n'était
-        nécessaire : retour suspect) — pour les moteurs qui donnent une date ;
-      - Codex : chatgpt_account_id des JWT (id_token, access_token) doit égaler tokens.account_id, et sub/email ne
-        doivent pas changer (un autre compte serait glissé)."""
-    exp = expiry_ms(ident, avant)                           # Codex : « exp » du JWT access_token d'origine
-    if exp is not None and exp > time.time() * 1000 + int((DELAI_CLI + 1800) * 1000):   # 30 min de marge
-        raise ValueError("jeton d'accès d'origine encore valide, retour inattendu")
-    if ident == "codex":
-        compte = _dedans(neuf, ("tokens", "account_id"))
-        ap = jwt_charge(_dedans(neuf, ("tokens", "id_token")))
-        if ap is None:                                      # l'id_token OpenAI est toujours un JWT : illisible = suspect
-            raise ValueError("id_token illisible")
-        if not codex_access_jwt(neuf):                      # un access_token opaque masquerait exp et chatgpt_account_id
-            raise ValueError("access_token n'est pas un JWT")
-        # chatgpt_account_id de l'id_token ET de l'access_token (tous deux des JWT) doit être le compte
-        for champ in ("id_token", "access_token"):
-            cai = _chercher_cle(jwt_charge(_dedans(neuf, ("tokens", champ))) or {}, "chatgpt_account_id")
-            if compte is not None and cai is not None and cai != compte:
-                raise ValueError("chatgpt_account_id ne correspond pas au compte")
-        av = jwt_charge(_dedans(avant, ("tokens", "id_token")))
-        if av:
-            for champ in ("sub", "email"):
-                if av.get(champ) is not None and av.get(champ) != ap.get(champ):
-                    raise ValueError(f"{champ} du jeton a changé")
-
-
-def appliquer_jeton(objet, changements, schema):
-    """Les champs de jeton recopiés dans le vrai fichier (objet), à des endroits qui y existent déjà et que le schéma
-    désigne (OpenCode : une entrée de type oauth qui existait)."""
-    for chemin, v in changements:
-        o, s = objet, schema
-        for k in chemin[:-1]:
-            s = _schema_de(s, k, o.get(k))
-            if not isinstance(s, dict) or not isinstance(o.get(k), dict):
-                raise ValueError(".".join(chemin) + " n'existe pas dans le vrai fichier")
-            o = o[k]
-        if not est_jeton(_schema_de(s, chemin[-1], o.get(chemin[-1]))):
-            raise ValueError(".".join(chemin) + " n'est pas un champ de jeton")
-        o[chemin[-1]] = v
-
-
-def ecrire_retour(src, octets, schema, changements):
-    """Recopie les champs de jeton dans le vrai fichier : verrou (flock) pendant comparer + remplacer ; fichier temporaire
-    à nom aléatoire (O_EXCL, O_NOFOLLOW) dans le même dossier, puis renommé. False si le vrai fichier a changé depuis la
-    copie (une session de ton côté l'a rafraîchi) : on n'écrase pas.
-    LIMITE CONNUE : notre flock et le remplacement atomique protègent contre une autre instance de nc-ia, mais Claude
-    Code écrit .credentials.json par son propre chemin (écriture CAS « mutate », pas de flock partagé documenté) : une
-    course reste possible si une vraie session Claude Code rafraîchit son jeton exactement pendant comparer+remplacer.
-    Au pire on perd un jeton (la prochaine demande en redemande un), jamais de fuite. Rien à prendre côté Claude Code."""
-    import fcntl
-    reel = os.path.realpath(src)
-    fd = os.open(reel, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        fin = time.monotonic() + VERROU_ATTENTE
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() > fin:
-                    raise ValueError("vrai fichier verrouillé") from None
-                time.sleep(0.1)
-        # Après le verrou, vérifier qu'on tient bien le fichier du chemin (pas un autre inode substitué entre l'ouverture
-        # et le flock : une session de ton côté a pu le remplacer). Sinon on n'écrase pas (comme un fichier changé).
-        try:
-            if os.fstat(fd).st_ino != os.stat(reel).st_ino:
-                return False
-        except FileNotFoundError:
-            return False
-        actuel = b""
-        while len(actuel) <= JETON_MAX:
-            b = os.read(fd, JETON_MAX + 1 - len(actuel))
-            if not b:
-                break
-            actuel += b
-        if actuel != octets:
-            return False
-        objet = charger_json(actuel)
-        appliquer_jeton(objet, changements, schema)
-        donnees = (vider_json(objet) + "\n").encode()
-        dossier = os.path.dirname(reel)
-        tmp = os.path.join(dossier, "." + os.path.basename(reel) + ".nc-ia-" + os.urandom(8).hex())
-        tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, stat_mode(reel))
-        try:
-            try:
-                vue = memoryview(donnees)
-                while vue:
-                    vue = vue[os.write(tfd, vue):]
-                os.fsync(tfd)
-            finally:
-                os.close(tfd)
-            os.replace(tmp, reel)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
-            raise
-        # fsync du dossier : le renommage (le jeton rafraîchi) survit à une coupure de courant
-        with contextlib.suppress(OSError):
-            dfd = os.open(dossier, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        return True
-    finally:
-        os.close(fd)                                            # libère aussi le verrou
-
-
 def lire_source(src, maximum):
     """Un vrai fichier à copier dans le faux dossier personnel (un lien de tes dotfiles est suivi : c'est le tien),
     None s'il manque, n'est pas un fichier ordinaire ou est trop gros."""
@@ -1675,12 +1534,15 @@ def ecrire_copie(h, rel, octets):
 class Demande:
     """Les dossiers d'une demande à un moteur en ligne de commande, tous dans base_bac() et nommés d'après son unité
     (nc-ia-<id>) : le faux dossier personnel (nc-ia-home-<id>, tenu par un verrou tant que la demande vit), le dossier de
-    travail vide (nc-ia-travail-<id>) et, pour Gemini et Qwen, les réglages imposés (nc-ia-conf-<id>). finir() rapporte
-    le jeton rafraîchi puis supprime tout, même si le retour échoue."""
+    travail vide (nc-ia-travail-<id>) et, pour Gemini et Qwen, les réglages imposés (nc-ia-conf-<id>). On y copie à
+    l'aller (liste blanche), RIEN ne revient vers tes vrais fichiers ; finir() supprime tout. duree_max : la durée
+    maximale réelle de la demande (le délai du bac, RuntimeMaxSec) : un jeton qui expire avant (+ MARGE_JETON) n'est
+    pas lancé."""
 
-    def __init__(self, ident):
+    def __init__(self, ident, duree_max=None):
         import fcntl
-        self.ident, self.conf, self.verrou, self._avant = ident, None, None, {}
+        self.ident, self.conf, self.verrou = ident, None, None
+        self.duree_max = float(DELAI_CLI + 10 if duree_max is None else duree_max)
         try:
             self.depl = module_bac().deplacements(HOME, os.environ)
         except ValueError as e:
@@ -1713,7 +1575,8 @@ class Demande:
         return self.conf
 
     def _preparer(self):
-        """Le faux dossier personnel : sa config (copie), et ses identifiants champ par champ (SCHEMAS)."""
+        """Le faux dossier personnel : sa config (liste blanche de clés) et ses identifiants (COPIES : le jeton d'accès,
+        jamais de jeton de rafraîchissement). Un jeton expiré ou trop court pour la demande : ErreurIA, rien n'est lancé."""
         c = ETAT_MOTEURS.get(self.ident, dict(copie={}, jeton=[]))
         for rel in c["copie"]:
             octets = lire_source(self.emplacement(rel), COPIE_MAX)
@@ -1730,52 +1593,55 @@ class Demande:
             except (OSError, ValueError, RecursionError):
                 continue
         for rel in c["jeton"]:
-            src = self.emplacement(rel)
-            octets = lire_source(src, JETON_MAX)
+            octets = lire_source(self.emplacement(rel), JETON_MAX)
             if octets is None:
                 continue
             try:
                 o = charger_json(octets)
-                if not isinstance(o, dict):
-                    continue
-                if self.ident == "codex" and not codex_access_jwt(o):
-                    # access_token opaque : ni exp, ni chatgpt_account_id lisibles → on ne copie pas (donc pas de jeton
-                    # de rafraîchissement dans le bac) et il n'y a pas de retour possible
-                    journal_ia(f"{self.ident} : access_token du vrai fichier n'est pas un JWT, jeton non copié dans le bac")
-                    continue
-                donne = projeter(o, SCHEMAS[self.ident])
-                copie = sans_refresh_si_valide(self.ident, donne)   # pas le jeton de rafraîchissement si l'accès vaut longtemps
-                ecrire_copie(self.home, rel, vider_json(copie).encode())
-            except (OSError, ValueError, RecursionError):
+            except (ValueError, RecursionError):
                 continue
-            self._avant[rel] = (src, octets, copie)
-
-    def retour(self):
-        """Le jeton rafraîchi dans le bac revient dans le vrai fichier, champ par champ ; un fichier qui ne convient pas
-        (lien, plus du JSON, nouvelle clé, compte ou serveur changé…) est laissé, et le journal de nc-ia le dit."""
-        for rel, (src, octets, donne) in self._avant.items():
+            if not isinstance(o, dict):
+                continue
+            donne = self._verifier_echeance(projeter(o, COPIES[self.ident]))
+            if self.ident == "codex" and isinstance(donne.get("last_refresh"), str):
+                # Sans jeton de rafraîchissement, Codex ne doit pas tenter un rafraîchissement « de routine » (selon l'âge
+                # de last_refresh) : la date d'échéance du jeton d'accès vient d'être vérifiée, on la dit fraîche.
+                donne["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             try:
-                neuf = lire_sans_lien(self.home, rel, JETON_MAX)
-                if neuf is None:
-                    continue
-                objet = charger_json(neuf)
-                if objet == donne:
-                    continue
-                ch = changements_jeton(donne, objet, SCHEMAS[self.ident])
-                if not ch:
-                    continue
-                verifier_retour(self.ident, donne, objet)
-                if not ecrire_retour(src, octets, SCHEMAS[self.ident], ch):
-                    journal_ia(f"{self.ident} : {rel} a changé de ton côté pendant la demande, jeton du bac pas rapporté")
-                    continue
-                journal_ia(f"{self.ident} : jeton de {rel} mis à jour par le bac ({', '.join('.'.join(c) for c, _ in ch)})")
-            except ValueError as e:                             # (json.JSONDecodeError en est une)
-                raison = "plus du JSON" if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError)) else str(e)
-                journal_ia(f"{self.ident} : retour de {rel} refusé ({raison})")
-                notifier_bac(T(f"retour de jeton de {nom(self.ident)} refusé", f"{nom(self.ident)} token return refused"))
-            except Exception as e:                              # RecursionError ([[[[…), OSError…
-                journal_ia(f"{self.ident} : retour de {rel} abandonné ({type(e).__name__})")
-                notifier_bac(T(f"retour de jeton de {nom(self.ident)} abandonné", f"{nom(self.ident)} token return aborted"))
+                ecrire_copie(self.home, rel, vider_json(donne).encode())
+            except (OSError, ValueError):
+                continue
+
+    def _verifier_echeance(self, donne):
+        """Le jeton d'accès à copier, s'il vaut au moins la durée maximale réelle de la demande + MARGE_JETON. Échéance
+        illisible pour un moteur qui en donne une (Claude, Codex, Gemini, Qwen) : refus. OpenCode : chaque entrée
+        oauth à échéance trop courte ou illisible est retirée ; une entrée sans échéance (jeton opaque) est copiée seule ;
+        si plus aucune ne reste, refus."""
+        duree = getattr(self, "duree_max", DELAI_CLI + 10)
+        limite = time.time() * 1000 + (duree + MARGE_JETON) * 1000
+        if self.ident == "opencode":
+            gardees = {}
+            for k, v in donne.items():
+                if "expires" in v:
+                    exp = ms_plausible(v.get("expires"))
+                    if exp is None or exp < limite:
+                        continue
+                gardees[k] = v
+            if donne and not gardees:
+                raise self._refus_jeton()
+            return gardees
+        chemin = JETON_ACCES.get(self.ident)
+        if chemin is None or _dedans(donne, chemin) is None:
+            return donne                                # pas de jeton d'accès ici (clé d'API par l'environnement…)
+        exp = echeance_ms(self.ident, donne)
+        if exp is None or exp < limite:
+            raise self._refus_jeton()
+        return donne
+
+    def _refus_jeton(self):
+        journal_ia(f"{self.ident} : jeton d'accès expiré, trop court pour la demande ou d'échéance illisible : pas lancé")
+        signaler_jeton_expire(self.ident)
+        return ErreurIA(message_jeton_expire(self.ident))
 
     def _fermer_verrou(self):
         if self.verrou is not None:
@@ -1795,18 +1661,15 @@ class Demande:
         self._fermer_verrou()
 
     def finir(self):
-        """Fin de la demande : d'abord s'assurer que l'unité est vraiment arrêtée. Tant qu'un moteur y vit, il pourrait,
-        pendant retour() ou l'effacement, remplacer un fichier par un lien : on ne touche alors à RIEN (le verrou est
-        libéré pour que la purge, qui revérifie l'unité, s'en charge plus tard)."""
+        """Fin de la demande : d'abord s'assurer que l'unité est vraiment arrêtée (tant qu'un moteur y vit, il pourrait,
+        pendant l'effacement, remplacer un dossier par un lien : on ne touche alors à RIEN, le verrou est libéré pour
+        que la purge, qui revérifie l'unité, s'en charge plus tard), puis tout supprimer. Rien ne revient du bac."""
         # Sans bac (repli autorisé) il n'y a pas d'unité : on nettoie directement. Avec bac, on attend qu'elle soit morte.
         if bac_disponible() and not attendre_unite_inactive(self.unite):
             journal_ia(f"{self.ident} : l'unité {self.unite} tourne encore, rien n'est touché (purge plus tard)")
             self._fermer_verrou()
             return
-        try:
-            self.retour()
-        finally:
-            self._effacer()
+        self._effacer()
 
 
 def bac_disponible():
@@ -1873,13 +1736,6 @@ def refus_bac(invalide=False):
                           "NOEUD_BAC_INTERDITS is not valid (absolute path, \"..\", quote…): the AI sandbox is not set up, nothing was run. Fix it in nc-settings."))
     return ErreurIA(T("le bac des IA n'est pas disponible ici ; choisis une IA par API ou autorise le repli dans nc-reglages (IA_BAC_REPLI)",
                       "the AI sandbox is not available here; pick an API AI or allow the fallback in nc-settings (IA_BAC_REPLI)"))
-
-
-def stat_mode(p):
-    try:
-        return os.stat(p).st_mode & 0o777 or 0o600
-    except OSError:
-        return 0o600
 
 
 IMAGE_MAX = 20 * 1024 * 1024
@@ -2037,7 +1893,8 @@ def arreter_groupe(p):
 def appel_claude(consigne, texte, image, usage):
     # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
     vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
-    demande = Demande("claude")
+    delai, _ = avant_lancement(DELAI_CLI)
+    demande = Demande("claude", duree_max=delai + 10)   # + 10 : la marge de RuntimeMaxSec (argv_bac)
     try:
         travail = str(demande.travail)
         # Read limité au dossier de travail (où l'image est copiée) : « //chemin » = chemin absolu dans les règles de
@@ -2141,8 +1998,8 @@ def appel_programme(ident, consigne, texte, image, usage):
     dans un dossier temporaire vide (l'image jointe y est copiée), jamais dans le dossier personnel, puis dans le bac
     commun quand il tient (voir ETAT_MOTEURS)."""
     invite = consigne + "\n\n" + texte
-    avant_lancement(DELAI_CLI)                  # plus de temps : rien n'est lancé, pas même « opencode --version »
-    demande = Demande(ident)
+    delai, _ = avant_lancement(DELAI_CLI)       # plus de temps : rien n'est lancé, pas même « opencode --version »
+    demande = Demande(ident, duree_max=delai + 10)   # + 10 : la marge de RuntimeMaxSec (argv_bac)
     travail = str(demande.travail)
     env = dict(env_cli(ident), HOME=str(demande.home))
     entree = None
@@ -2760,16 +2617,17 @@ def corps_sur(texte):
     return html.escape(texte, quote=False)
 
 
-def notifier(titre, corps, action=None):
-    """Une notification ; action = (texte, commande) : un clic dessus lance la commande (attendue dans un processus
-    détaché : celui qui a lancé nc-ia n'attend pas)."""
+def notifier(titre, corps, action=None, cle="default", brut=False):
+    """Une notification ; action = (texte, commande) : un clic dessus (action « cle ») lance la commande (attendue dans un
+    processus détaché : celui qui a lancé nc-ia n'attend pas). brut : texte sans balises, pas besoin de demander au
+    démon de notifications s'il les comprend."""
     if not shutil.which("notify-send"):
         return
     cmd = ["notify-send", "-a", "IA", "-i", "dialog-information"]
     if action:
-        cmd += ["-A", "default=" + action[0]]
+        cmd += ["-A", cle + "=" + action[0]]
     try:
-        p = subprocess.Popen(cmd + ["--", titre, corps_sur(corps[:1500])], stdout=subprocess.PIPE,
+        p = subprocess.Popen(cmd + ["--", titre, corps[:1500] if brut else corps_sur(corps[:1500])], stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True, start_new_session=True)
         if action and os.fork() == 0:
             # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
@@ -2777,7 +2635,7 @@ def notifier(titre, corps, action=None):
             for fd in (0, 1, 2):
                 os.dup2(nul, fd)
             try:
-                if (p.communicate(timeout=3600)[0] or "").strip() == "default":
+                if (p.communicate(timeout=3600)[0] or "").strip() == cle:
                     subprocess.Popen(action[1], start_new_session=True)
             except Exception:
                 pass
@@ -4475,17 +4333,26 @@ INSCRIPTION = {
 }
 
 
+def commande_terminal(cmd, titre):
+    """La commande qui ouvre cmd dans le premier terminal installé (kitty, foot, alacritty, wezterm, gnome-terminal,
+    konsole, xterm), ou None s'il n'y en a aucun."""
+    for t in ("kitty", "foot", "alacritty", "wezterm", "gnome-terminal", "konsole", "xterm"):
+        if shutil.which(t):
+            arg = {"gnome-terminal": ["--"], "wezterm": ["start", "--"]}.get(t, ["-e"])
+            extra = ["--class", "nc-ia", "--title", titre] if t == "kitty" else []
+            return [t] + extra + arg + list(cmd)
+    return None
+
+
 def dans_terminal(args, titre, attendre=False):
     """Depuis la fenêtre des réglages ou un raccourci (pas de terminal) : la commande dans un terminal."""
     moi = str(Path(__file__).resolve())
     cmd = ["sh", "-c", '"$0" "$@"; printf "\\n%s" "$NC_FIN"; read -r _', moi] + args if attendre else [moi] + args
     env = dict(os.environ, NC_FIN=T("Entrée pour fermer", "Enter to close"))
-    for t in ("kitty", "foot", "alacritty", "wezterm", "gnome-terminal", "konsole", "xterm"):
-        if shutil.which(t):
-            arg = {"gnome-terminal": ["--"], "wezterm": ["start", "--"]}.get(t, ["-e"])
-            extra = ["--class", "nc-ia", "--title", titre] if t == "kitty" else []
-            subprocess.Popen([t] + extra + arg + cmd, start_new_session=True, env=env)
-            return 0
+    argv = commande_terminal(cmd, titre)
+    if argv:
+        subprocess.Popen(argv, start_new_session=True, env=env)
+        return 0
     raise ErreurIA(T("Aucun terminal trouvé : lance « nc-ia " + args[0] + " » dans un terminal.",
                      "No terminal found: run “nc-ai " + args[0] + "” in a terminal."))
 

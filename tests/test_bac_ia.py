@@ -5,6 +5,8 @@ des autres. Deux étages :
   - le VRAI bac (systemd-run --user, faux HOME sous /dev/shm comme BacReel de test_noeud) : un faux moteur lit son faux
     jeton, ne lit ni ~/.ssh factice ni le jeton d'un autre, n'écrit pas dans ~, et sa sortie arrive ligne par ligne.
 Aucune vraie IA n'est lancée : les « moteurs » sont des scripts shell."""
+import base64
+import contextlib
 import fcntl
 import importlib.machinery
 import importlib.util
@@ -15,7 +17,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 import unittest
 import unittest.mock
@@ -93,6 +94,7 @@ def jwt(payload, marque=None):
     return b({"alg": "none"}) + "." + b(corps) + ".sig"
 
 
+EXP_CODEX = int(time.time()) + 10 * 86400                    # échéance fixe (pour retrouver le JWT exact en sortie)
 _CODEX_CLAIMS = {"sub": "user-1", "email": "u@example.org", "https://api.openai.com/auth": {"chatgpt_account_id": "compte-1"}}
 
 
@@ -101,17 +103,19 @@ def contenu_jeton(ident, marque=None):
     dans le jeton d'accès, et des champs qui ne doivent JAMAIS entrer dans le bac (SECRET-…). Codex : jetons en JWT
     valides (chatgpt_account_id == account_id, sub/email stables)."""
     m = marque or f"JETON-{ident}"
+    fin_ms = EXP_CODEX * 1000                                 # valide dix jours : la demande peut partir
+    acces_codex = dict(_CODEX_CLAIMS, exp=EXP_CODEX)
     return {
-        "claude": {"claudeAiOauth": {"accessToken": m, "refreshToken": "r0", "expiresAt": 1, "scopes": ["user:inference"],
+        "claude": {"claudeAiOauth": {"accessToken": m, "refreshToken": "SECRET-REFRESH", "expiresAt": fin_ms, "scopes": ["user:inference"],
                                      "subscriptionType": "pro"},
                    "mcpOAuth": {"serveur": {"accessToken": "SECRET-MCP"}}},
-        "codex": {"tokens": {"access_token": jwt(_CODEX_CLAIMS, m), "refresh_token": "r0",
+        "codex": {"tokens": {"access_token": jwt(acces_codex, m), "refresh_token": "SECRET-REFRESH",
                              "id_token": jwt(_CODEX_CLAIMS), "account_id": "compte-1"},
                   "last_refresh": "2026-01-01T00:00:00Z", "OPENAI_API_KEY": "SECRET-CLE-CODEX"},
-        "gemini-cli": {"access_token": m, "refresh_token": "r0", "expiry_date": 1, "token_type": "Bearer"},
-        "qwen": {"access_token": m, "refresh_token": "r0", "expiry_date": 1, "token_type": "Bearer",
+        "gemini-cli": {"access_token": m, "refresh_token": "SECRET-REFRESH", "expiry_date": fin_ms, "token_type": "Bearer"},
+        "qwen": {"access_token": m, "refresh_token": "SECRET-REFRESH", "expiry_date": fin_ms, "token_type": "Bearer",
                  "resource_url": "portal.qwen.ai"},
-        "opencode": {"anthropic": {"type": "oauth", "access": m, "refresh": "r0", "expires": 1},
+        "opencode": {"anthropic": {"type": "oauth", "access": m, "refresh": "SECRET-REFRESH", "expires": fin_ms},
                      "openai": {"type": "api", "key": "SECRET-CLE-OPENCODE"},
                      "distant": {"type": "wellknown", "key": "k", "token": "SECRET-WELLKNOWN"}},
     }[ident]
@@ -128,7 +132,7 @@ def rafraichi(ident, marque="RAFRAICHI"):
 def marqueur(ident, marque):
     """La chaîne EXACTE qui doit apparaître dans la sortie d'un faux moteur qui lit sa copie du jeton (Codex : le JWT
     complet, puisque la marque y est encodée en base64 ; les autres : la marque telle quelle)."""
-    return jwt(_CODEX_CLAIMS, marque) if ident == "codex" else marque
+    return jwt(dict(_CODEX_CLAIMS, exp=EXP_CODEX), marque) if ident == "codex" else marque
 
 
 def jeton_acces(ident, objet):
@@ -162,6 +166,7 @@ for f in $NC_TEST_RELATIFS; do lire "$HOME/$f"; done
 for f in $NC_TEST_RAFRAICHIR; do printf '%s\n' "$NC_TEST_CONTENU" > "$HOME/$f"; done
 for f in $NC_TEST_RENOMMER; do printf '%s\n' "$NC_TEST_CONTENU" > "$HOME/$f.tmp" && mv "$HOME/$f.tmp" "$HOME/$f"; done
 for f in $NC_TEST_CASSER; do echo 'pas du json' > "$HOME/$f"; done
+[ -n "$NC_TEST_EXPORTER" ] && cp -r "$HOME" "$NC_TEST_EXPORTER"
 for f in $NC_TEST_IMBRIQUER; do yes '[' | head -n 200000 | tr -d '\n' > "$HOME/$f"; done
 for f in $NC_TEST_LIEN; do rm -rf "$HOME/$f" && ln -s "$NC_TEST_CIBLE" "$HOME/$f" && out "LIEN $f"; done
 for f in $NC_TEST_LIEN_DUR; do rm -f "$HOME/$f" && ln "$NC_TEST_CIBLE" "$HOME/$f" && out "LIEN-DUR $f"; done
@@ -484,47 +489,11 @@ class AvecFauxSystemdRun(Base):
         self.assertIsNone(bac.argv(["true"], str(self.home), 10, programme=shutil.which,
                                    **dict(commun, env=["MAUVAIS NOM"])))
 
-    # ── P2-1 : Codex (date dans le JWT, access_token forcément JWT) et Gemini (refresh non copié si valide) ──────────
+    # ── P2-1 : le jeton revenu du bac ne revient plus : voir les tests « rien ne revient » plus bas ──────────
     def _codex(self, exp_delta, marque="A"):
         claims = dict(_CODEX_CLAIMS, exp=int(time.time()) + exp_delta)
         return {"tokens": {"access_token": jwt(claims, marque), "refresh_token": "RT", "id_token": jwt(_CODEX_CLAIMS),
                            "account_id": "compte-1"}, "last_refresh": "2026-01-01T00:00:00Z"}
-
-    def test_codex_date_dans_le_jwt_refresh_et_opaque(self):
-        m = self.m
-        proj = lambda o: m.projeter(o, m.SCHEMAS["codex"])
-        # jeton valide longtemps : son refresh n'est PAS copié dans le bac, et un retour est refusé (rien à rafraîchir)
-        donne_valide = proj(self._codex(3600))
-        self.assertNotIn("refresh_token", m.sans_refresh_si_valide("codex", donne_valide).get("tokens", {}))
-        with self.assertRaises(ValueError):
-            m.verifier_retour("codex", donne_valide, proj(self._codex(3600, "B")))
-        # jeton expiré : refresh copié, et un rafraîchissement normal est accepté
-        donne_exp = proj(self._codex(-10))
-        self.assertIn("refresh_token", m.sans_refresh_si_valide("codex", donne_exp).get("tokens", {}))
-        m.verifier_retour("codex", donne_exp, proj(self._codex(-10, "B")))        # ne lève pas
-        # access_token opaque (pas un JWT) : refusé au retour
-        opaque = proj(self._codex(-10, "B"))
-        opaque["tokens"]["access_token"] = "opaque-ATTAQUANT"
-        with self.assertRaises(ValueError):
-            m.verifier_retour("codex", donne_exp, opaque)
-
-    def test_gemini_refresh_non_copie_si_valide(self):
-        m = self.m
-        futur = {"access_token": "a", "refresh_token": "RT", "expiry_date": int((time.time() + 3600) * 1000)}
-        self.assertNotIn("refresh_token", m.sans_refresh_si_valide("gemini-cli", futur))
-        passe = {"access_token": "a", "refresh_token": "RT", "expiry_date": int((time.time() - 10) * 1000)}
-        self.assertIn("refresh_token", m.sans_refresh_si_valide("gemini-cli", passe))
-
-    def test_codex_access_opaque_pas_copie(self):
-        """Un access_token opaque dans le vrai fichier : le jeton n'est pas copié dans le bac (ni refresh), journalisé."""
-        reel = self.home / JETONS["codex"]
-        o = self._codex(-10)
-        o["tokens"]["access_token"] = "opaque"
-        reel.write_text(json.dumps(o))
-        sortie = "".join(self.lancer_moteur(self.m, "codex", NC_TEST_RELATIFS=JETONS["codex"]))
-        self.assertIn("REFUSE", sortie)                         # le faux dossier personnel n'a pas le fichier
-        self.assertNotIn("opaque", sortie)
-        self.assertIn("access_token du vrai fichier n'est pas un JWT", self.journal_ia())
 
     # ── P3-4 : le dossier de travail de nc-noeud est illisible pour le bac des IA ─────────────────────────────────
     def test_dossier_travail_noeud_interdit(self):
@@ -666,124 +635,6 @@ class AvecFauxSystemdRun(Base):
                 self.m.afficher_etat(e)
             self.assertIn(attendu, buf.getvalue())
 
-    # ── P1-2 : retour champ par champ ─────────────────────────────────────────────────────────────────────────────
-    def retour_refuse(self, ident, neuf, raison):
-        """Le moteur laisse neuf (un objet) à la place de son jeton : le vrai fichier ne bouge pas, le journal dit
-        pourquoi, sans jamais écrire le jeton."""
-        reel = self.home / JETONS[ident]
-        avant = reel.read_text()
-        (self.home / "notifs.log").unlink(missing_ok=True)
-        self.lancer_moteur(self.m, ident, NC_TEST_RAFRAICHIR=JETONS[ident], NC_TEST_CONTENU=json.dumps(neuf))
-        self.assertEqual(reel.read_text(), avant, f"{ident} : {raison}")
-        j = self.journal_ia()
-        self.assertIn(f"{ident} : retour de {JETONS[ident]} refusé", j)
-        self.assertIn(raison, j)
-        self.assertNotIn("JETON-", j)
-        self.assertNotIn("VOLE", j)
-        # P3-2a : un retour refusé (inattendu) se voit par une notification — mais jamais la valeur du jeton
-        notifs = self.notifs()
-        self.assertIn(f"retour de jeton de {self.m.nom(ident)} refusé", notifs)
-        self.assertNotIn("VOLE", notifs)
-
-    def test_retour_refuse_changement_de_serveur_ou_de_compte(self):
-        cas = []
-        n = rafraichi("qwen", "VOLE")
-        n["resource_url"] = "attaquant.example"
-        cas.append(("qwen", n, "resource_url a changé"))
-        n = rafraichi("codex", "VOLE")
-        n["tokens"]["account_id"] = "autre-compte"
-        cas.append(("codex", n, "tokens.account_id a changé"))
-        n = rafraichi("claude", "VOLE")
-        n["mcpOAuth"] = {"x": {"accessToken": "VOLE"}}
-        cas.append(("claude", n, "nouvelle clé mcpOAuth"))
-        n = rafraichi("claude", "VOLE")
-        n["claudeAiOauth"]["baseUrl"] = "https://attaquant.example"
-        cas.append(("claude", n, "nouvelle clé claudeAiOauth.baseUrl"))
-        n = rafraichi("opencode", "VOLE")
-        n["distant2"] = {"type": "wellknown", "key": "https://attaquant.example", "token": "t"}
-        cas.append(("opencode", n, "nouvelle entrée distant2"))
-        n = rafraichi("opencode", "VOLE")
-        n["anthropic"]["type"] = "wellknown"
-        cas.append(("opencode", n, "anthropic.type a changé"))
-        n = rafraichi("opencode", "VOLE")
-        n["anthropic"]["accountId"] = "autre"
-        cas.append(("opencode", n, "anthropic.accountId a changé"))
-        n = rafraichi("gemini-cli", "VOLE")
-        n["access_token"] = {"objet": "VOLE"}
-        cas.append(("gemini-cli", n, "access_token : valeur de jeton invalide"))
-        n = rafraichi("gemini-cli", "VOLE")
-        n["refresh_token"] = "autre-refresh"               # refresh_token « fixe » pour Gemini : tout refusé
-        cas.append(("gemini-cli", n, "refresh_token a changé"))
-        n = rafraichi("codex", "VOLE")
-        n["OPENAI_API_KEY"] = "VOLE"
-        cas.append(("codex", n, "OPENAI_API_KEY est apparu"))
-        for ident, neuf, raison in cas:
-            with self.subTest(raison):
-                (self.home / ".local/state/nc-ia/journal").unlink(missing_ok=True)
-                self.retour_refuse(ident, neuf, raison)
-
-    def test_retour_seulement_les_champs_de_jeton(self):
-        """Un rafraîchissement normal revient, champ par champ : le reste du vrai fichier (mcpOAuth, entrées api et
-        wellknown d'OpenCode, clé de Codex) est gardé tel quel, un champ « copie » changé n'est pas rapporté."""
-        for ident in IDENTS:
-            with self.subTest(ident):
-                reel = self.home / JETONS[ident]
-                (self.home / "notifs.log").unlink(missing_ok=True)
-                neuf = rafraichi(ident)
-                if ident == "claude":
-                    neuf["claudeAiOauth"]["scopes"] = ["autre"]               # « copie » : ignoré
-                    neuf["claudeAiOauth"]["refreshTokenExpiresAt"] = 99       # écrit par Claude Code au rafraîchissement
-                self.lancer_moteur(self.m, ident, NC_TEST_RAFRAICHIR=JETONS[ident], NC_TEST_CONTENU=json.dumps(neuf))
-                o = json.loads(reel.read_text())
-                self.assertEqual(jeton_acces(ident, o), "RAFRAICHI")
-                attendu = contenu_jeton(ident)
-                if ident == "claude":
-                    self.assertEqual(o["mcpOAuth"], attendu["mcpOAuth"])
-                    self.assertEqual(o["claudeAiOauth"]["scopes"], ["user:inference"])
-                    self.assertEqual(o["claudeAiOauth"]["refreshTokenExpiresAt"], 99)
-                if ident == "codex":
-                    self.assertEqual(o["OPENAI_API_KEY"], "SECRET-CLE-CODEX")
-                if ident == "opencode":
-                    self.assertEqual((o["openai"], o["distant"]), (attendu["openai"], attendu["distant"]))
-                self.assertIn(f"{ident} : jeton de {JETONS[ident]} mis à jour par le bac", self.journal_ia())
-                self.assertNotIn("RAFRAICHI", self.journal_ia())
-                # P3-2b : un rafraîchissement normal ne notifie pas (seulement le journal) ; la notification est réservée
-                # aux retours inattendus (refusés/abandonnés)
-                self.assertEqual(self.notifs(0.3), "", "pas de notification pour un rafraîchissement normal")
-                # (P3-a) aucun fichier temporaire laissé à côté du vrai fichier
-                self.assertEqual([x for x in os.listdir(reel.parent) if ".nc-ia-" in x], [])
-
-    def test_lien_physique_jamais_rapporte(self):
-        """Sans bac (même système de fichiers) : un lien physique vers un secret n'est pas lu (st_nlink != 1)."""
-        (self.fb / "systemd-run").write_text("#!/bin/sh\nexit 1\n")
-        self.regler("IA_BAC_REPLI=oui\n")
-        self.oublier_sonde()
-        secret = self.base().parent.parent / "secret.json"            # même système de fichiers que le faux dossier
-        secret.write_text(json.dumps(rafraichi("codex", "SECRET-DUR")))
-        reel = self.home / JETONS["codex"]
-        avant = reel.read_text()
-        sortie = "".join(self.lancer_moteur(self.m, "codex", NC_TEST_LIEN_DUR=JETONS["codex"], NC_TEST_CIBLE=str(secret)))
-        self.assertIn("LIEN-DUR", sortie)
-        self.assertEqual(reel.read_text(), avant)
-        self.assertIn("lien physique", self.journal_ia())
-
-    def test_json_trop_imbrique_et_dossiers_supprimes(self):
-        """json.loads lève RecursionError sur [[[[… : la demande se termine, rien n'est rapporté, tout est supprimé."""
-        reel = self.home / JETONS["gemini-cli"]
-        avant = reel.read_text()
-        sortie = self.lancer_moteur(self.m, "gemini-cli", NC_TEST_IMBRIQUER=JETONS["gemini-cli"])
-        self.assertIn("fin\n", sortie)
-        self.assertEqual(reel.read_text(), avant)
-        self.assertEqual(os.listdir(self.base()), [])
-        self.assertIn("gemini-cli : retour de", self.journal_ia())
-
-    def test_retour_qui_plante_supprime_quand_meme(self):
-        with unittest.mock.patch.object(self.m, "lire_sans_lien", side_effect=RuntimeError("panne")):
-            self.lancer_moteur(self.m, "codex", NC_TEST_RAFRAICHIR=JETONS["codex"],
-                               NC_TEST_CONTENU=json.dumps(rafraichi("codex")))
-        self.assertEqual(os.listdir(self.base()), [])
-        self.assertIn("codex : retour de .codex/auth.json abandonné (RuntimeError)", self.journal_ia())
-
     def test_claude_json_et_reglages_filtres(self):
         """P3-c : de ~/.claude.json et ~/.claude/settings.json, seules les clés utiles à une question non interactive."""
         (self.home / ".claude.json").write_text(json.dumps({
@@ -892,7 +743,8 @@ class AvecFauxSystemdRun(Base):
                                                         NC_TEST_CONTENU=json.dumps(rafraichi(ident, f"RETOUR-{ident}"))))
                     self.assertIn(marqueur(ident, f"DEPLACE-{ident}"), sortie, "copié depuis le dossier déplacé")
                     self.assertNotIn(marqueur(ident, f"JETON-{ident}"), sortie, "pas depuis l'emplacement par défaut")
-                    self.assertEqual(jeton_acces(ident, json.loads(f.read_text())), f"RETOUR-{ident}", "rapporté au bon endroit")
+                    # rien ne revient du bac : le vrai fichier (au dossier déplacé) garde son jeton d'origine
+                    self.assertEqual(jeton_acces(ident, json.loads(f.read_text())), f"DEPLACE-{ident}", "rien ne revient")
                     self.assertEqual(json.loads((self.home / JETONS[ident]).read_text()), contenu_jeton(ident))
                     if ident == "claude":
                         self.assertIn("hasCompletedOnboarding", sortie)
@@ -923,27 +775,6 @@ class AvecFauxSystemdRun(Base):
         with unittest.mock.patch.dict(os.environ, {"XDG_CACHE_HOME": "/tmp/nc-essai-cache"}):
             self.assertIsNotNone(bac.inaccessibles(self.home, lambda k, d: d))
 
-    # ── P3-a : verrou du vrai fichier ──────────────────────────────────────────────────────────────────────────────
-    def test_vrai_fichier_verrouille_pas_de_retour(self):
-        reel = self.home / JETONS["qwen"]
-        avant = reel.read_text()
-        fd = os.open(reel, os.O_RDONLY)
-        self.addCleanup(os.close, fd)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        self.m.VERROU_ATTENTE = 0.3
-        self.lancer_moteur(self.m, "qwen", NC_TEST_RAFRAICHIR=JETONS["qwen"], NC_TEST_CONTENU=json.dumps(rafraichi("qwen")))
-        self.assertEqual(reel.read_text(), avant)
-        self.assertIn("vrai fichier verrouillé", self.journal_ia())
-
-    def test_vrai_fichier_verrouille_un_instant_attend(self):
-        reel = self.home / JETONS["qwen"]
-        fd = os.open(reel, os.O_RDONLY)
-        self.addCleanup(os.close, fd)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        threading.Timer(0.5, fcntl.flock, (fd, fcntl.LOCK_UN)).start()
-        self.lancer_moteur(self.m, "qwen", NC_TEST_RAFRAICHIR=JETONS["qwen"], NC_TEST_CONTENU=json.dumps(rafraichi("qwen")))
-        self.assertEqual(jeton_acces("qwen", json.loads(reel.read_text())), "RAFRAICHI")
-
     # ── P3-b : « opencode --version » dans le bac, gardé en mémoire ──────────────────────────────────────────────
     def test_version_opencode_dans_le_bac_et_gardee(self):
         self.lancer_moteur(self.m, "opencode", NC_TEST_FICHIERS="")
@@ -961,6 +792,239 @@ class AvecFauxSystemdRun(Base):
         self.lancer_moteur(self.m, "opencode", NC_TEST_FICHIERS="")      # le programme a changé : relue
         self.assertEqual(len([b for b in self.lancements() if b[-2:] == ["opencode", "--version"]]), 1)
 
+    # ── Rien ne revient du bac (4e relecture) ───────────────────────────────────────────────────────────────────────
+    def _cles_json(self, dossier):
+        """Tous les noms de clé de tous les JSON sous dossier, récursivement (objets imbriqués et listes). Une clé dont
+        la valeur est une simple date RFC 3339 (last_refresh de Codex : un horodatage, pas un jeton) n'est pas un jeton."""
+        noms = set()
+
+        def parcourir(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if not (isinstance(v, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", v)):
+                        noms.add(k)
+                    parcourir(v)
+            elif isinstance(o, list):
+                for v in o:
+                    parcourir(v)
+        for f in Path(dossier).rglob("*"):
+            if f.is_file():
+                with contextlib.suppress(ValueError, OSError, UnicodeDecodeError):
+                    parcourir(json.loads(f.read_text()))
+        return noms
+
+    def test_aucun_jeton_de_rafraichissement_dans_le_home_jetable(self):
+        for ident in IDENTS:
+            with self.subTest(ident):
+                export = self.home / f"export-{ident}"
+                sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_EXPORTER=str(export),
+                                                    NC_TEST_RELATIFS=JETONS[ident]))
+                self.assertIn(marqueur(ident, f"JETON-{ident}"), sortie, "le jeton d'accès, lui, est copié")
+                cles = self._cles_json(export)
+                self.assertTrue(cles, "des JSON ont bien été copiés")
+                suspects = {k for k in cles if re.search(r"refresh|^rt$|_rt$|^rt_", k, re.I)}
+                self.assertEqual(suspects, set(), f"{ident} : clé de rafraîchissement dans le HOME jetable")
+                self.assertNotIn("SECRET-REFRESH", "".join(f.read_text() for f in export.rglob("*.json")))
+
+    def _empreintes(self):
+        """Contenu, mtime et inode de chaque vrai fichier d'identifiants et de config."""
+        out = {}
+        for rel in list(JETONS.values()) + list(CONFIGS.values()) + [".claude.json"]:
+            f = self.home / rel
+            if f.exists():
+                st = f.stat()
+                out[rel] = (f.read_bytes(), st.st_mtime_ns, st.st_ino)
+        return out
+
+    def test_vrais_fichiers_intacts_apres_une_demande(self):
+        (self.home / ".claude.json").write_text('{"hasCompletedOnboarding": true}')
+        avant = self._empreintes()
+        for ident in IDENTS:
+            with self.subTest(ident):
+                self.lancer_moteur(self.m, ident, NC_TEST_FICHIERS="")              # demande réussie
+                self.assertEqual(self._empreintes(), avant)
+                self.lancer_moteur(self.m, ident, NC_TEST_RAFRAICHIR=f"{JETONS[ident]} {CONFIGS[ident]}",
+                                   NC_TEST_CONTENU=json.dumps(rafraichi(ident, "MODIFIE")))   # le moteur modifie ses copies
+                self.assertEqual(self._empreintes(), avant)
+                self.lancer_moteur(self.m, ident, NC_TEST_RENOMMER=JETONS[ident],
+                                   NC_TEST_CONTENU=json.dumps(rafraichi(ident, "RENOMME")))
+                self.lancer_moteur(self.m, ident, NC_TEST_CASSER=JETONS[ident])
+                self.assertEqual(self._empreintes(), avant)
+
+    def test_jeton_codex_forge_ne_change_rien(self):
+        """Le cas de la 4e relecture : un JWT forgé (non signé) au compte de la victime, exp à +10 jours, et
+        refresh_token="RT-ATTAQUANT", écrit par le moteur dans sa copie. Le vrai auth.json ne bouge pas, ni quand le vrai
+        jeton est valide, ni quand il est presque expiré (alors la demande n'est même pas lancée)."""
+        reel = self.home / JETONS["codex"]
+        forge = {"tokens": {"access_token": jwt(dict(_CODEX_CLAIMS, exp=int(time.time()) + 864000), "FORGE"),
+                            "refresh_token": "RT-ATTAQUANT", "id_token": jwt(_CODEX_CLAIMS), "account_id": "compte-1"},
+                 "last_refresh": "2026-01-01T00:00:00Z"}
+        avant = reel.read_bytes(), reel.stat().st_mtime_ns, reel.stat().st_ino
+        self.lancer_moteur(self.m, "codex", NC_TEST_RAFRAICHIR=JETONS["codex"], NC_TEST_CONTENU=json.dumps(forge))
+        self.assertEqual((reel.read_bytes(), reel.stat().st_mtime_ns, reel.stat().st_ino), avant)
+        presque = contenu_jeton("codex")
+        presque["tokens"]["access_token"] = jwt(dict(_CODEX_CLAIMS, exp=int(time.time()) + 30), "PRESQUE")
+        reel.write_text(json.dumps(presque))
+        avant = reel.read_bytes(), reel.stat().st_mtime_ns, reel.stat().st_ino
+        with self.assertRaises(self.m.ErreurIA):
+            self.lancer_moteur(self.m, "codex", NC_TEST_RAFRAICHIR=JETONS["codex"], NC_TEST_CONTENU=json.dumps(forge))
+        self.assertEqual((reel.read_bytes(), reel.stat().st_mtime_ns, reel.stat().st_ino), avant)
+        self.assertNotIn("RT-ATTAQUANT", reel.read_text())
+
+    # ── Jeton expiré ou trop court : pas lancé, message clair, notification limitée ─────────────────────────────────
+    def _avec_echeance(self, ident, ms):
+        o = contenu_jeton(ident)
+        if ident == "claude":
+            o["claudeAiOauth"]["expiresAt"] = ms
+        elif ident == "codex":
+            o["tokens"]["access_token"] = jwt(dict(_CODEX_CLAIMS, exp=ms / 1000 if isinstance(ms, (int, float)) else ms))
+        elif ident == "opencode":
+            o["anthropic"]["expires"] = ms
+        else:
+            o["expiry_date"] = ms
+        (self.home / JETONS[ident]).write_text(json.dumps(o))
+
+    def test_jeton_expire_pas_lance(self):
+        duree = self.m.DELAI_CLI + 10                           # durée maximale réelle (RuntimeMaxSec)
+        for ident in IDENTS:
+            for delta, lance in ((-10, False), (duree + 30, False), (duree + 120, True)):
+                with self.subTest(ident=ident, delta=delta):
+                    (self.home / "moteur.log").unlink(missing_ok=True)
+                    self._avec_echeance(ident, int((time.time() + delta) * 1000))
+                    if lance:
+                        self.assertIn("fin\n", self.lancer_moteur(self.m, ident, NC_TEST_FICHIERS=""))
+                        continue
+                    with self.assertRaises(self.m.ErreurIA) as e:
+                        self.lancer_moteur(self.m, ident, NC_TEST_FICHIERS="")
+                    self.assertIn("doit renouveler sa connexion", str(e.exception))
+                    self.assertIn(f"({self.m.BINAIRES[ident]})", str(e.exception))
+                    self.assertFalse((self.home / "moteur.log").exists(), "le moteur n'a pas été lancé")
+                    self.assertEqual(os.listdir(self.base()), [], "rien ne reste dans la base")
+
+    def test_echeance_illisible_refus_propre(self):
+        """1e400 (inf), NaN, une chaîne, exp absent : échéance inconnue → refus propre (ErreurIA), jamais d'exception."""
+        m = self.m
+        for brut in ('{"exp": 1e400}', '{"exp": NaN}', '{"exp": "demain"}', '{}', '{"exp": true}'):
+            with self.subTest(brut):
+                charge = base64.urlsafe_b64encode(brut.encode()).rstrip(b"=").decode()
+                o = contenu_jeton("codex")
+                o["tokens"]["access_token"] = "eyJhbGciOiJub25lIn0." + charge + ".sig"
+                self.assertIsNone(m.echeance_ms("codex", o))
+                (self.home / JETONS["codex"]).write_text(json.dumps(o))
+                with self.assertRaises(m.ErreurIA):
+                    self.lancer_moteur(m, "codex", NC_TEST_FICHIERS="")
+        for v in (float("inf"), float("nan"), "x", None, True, 10 ** 40, -5):
+            with self.subTest(v=v):
+                self.assertIsNone(m.ms_plausible(v))
+                self.assertIsNone(m.echeance_ms("claude", {"claudeAiOauth": {"accessToken": "a", "expiresAt": v}}))
+
+    def test_opencode_sans_echeance_copie_seul(self):
+        o = contenu_jeton("opencode")
+        del o["anthropic"]["expires"]                           # jeton opaque sans date : copié seul
+        o["vieux"] = {"type": "oauth", "access": "PERIME", "refresh": "r", "expires": 5}
+        (self.home / JETONS["opencode"]).write_text(json.dumps(o))
+        sortie = "".join(self.lancer_moteur(self.m, "opencode", NC_TEST_RELATIFS=JETONS["opencode"]))
+        self.assertIn("JETON-opencode", sortie)
+        self.assertNotIn("PERIME", sortie, "une entrée expirée n'est pas copiée")
+        self.assertNotIn("SECRET-", sortie)
+
+    def _faux_programme(self, nom, corps):
+        f = self.fb / nom
+        f.write_text("#!/bin/sh\n" + corps + "\n")
+        f.chmod(0o755)
+
+    def test_notification_une_par_heure_avec_action_ouvrir(self):
+        self._faux_programme("notify-send", f'[ "$1" = "--help" ] && {{ echo "  -A, --action=[NAME=]Text"; exit 0; }}\n'
+                                            f'printf "%s\\n" "$*" >> "{self.home}/notifs.log"')
+        self._faux_programme("kitty", f'echo kitty "$@" >> "{self.home}/terminal.log"')
+        self._avec_echeance("codex", int((time.time() - 10) * 1000))
+        for _ in range(2):
+            with self.assertRaises(self.m.ErreurIA):
+                self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
+        notifs = [l for l in self.notifs().splitlines() if "renouveler" in l]
+        self.assertEqual(len(notifs), 1, "au plus une notification par heure et par moteur")
+        self.assertIn("-A ouvrir=Ouvrir", notifs[0])
+        time.sleep(0.3)
+        self.assertFalse((self.home / "terminal.log").exists(), "rien ne s'ouvre tout seul")
+
+    def test_notification_texte_seul_sans_terminal_ni_action(self):
+        self._faux_programme("notify-send", f'[ "$1" = "--help" ] && exit 0\nprintf "%s\\n" "$*" >> "{self.home}/notifs.log"')   # pas d'--action
+        self._avec_echeance("qwen", int((time.time() - 10) * 1000))
+        with self.assertRaises(self.m.ErreurIA):
+            self.lancer_moteur(self.m, "qwen", NC_TEST_FICHIERS="")
+        notifs = [l for l in self.notifs().splitlines() if "renouveler" in l]
+        self.assertEqual(len(notifs), 1)
+        self.assertNotIn("-A", notifs[0])
+
+    def test_inaccessibles_sans_xdg_runtime_dir(self):
+        """nc-bac : sans XDG_RUNTIME_DIR, plus de ValueError (realpath("/\\0")) ; /run/user/<uid> est alors masqué."""
+        env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+        r = self.m.module_bac().inaccessibles(self.home, lambda k, d="": d, environ=env)
+        self.assertIsNotNone(r)
+        if os.path.isdir(f"/run/user/{os.getuid()}"):
+            self.assertIn(f"/run/user/{os.getuid()}", r)
+
+    def test_lire_sans_lien_refuse_les_liens(self):
+        d = self.home / "lecture"
+        (d / "a").mkdir(parents=True)
+        (d / "a/f").write_text("ok")
+        cible = self.home / ".ssh/id_ed25519"
+        (d / "lien").symlink_to(cible)
+        self.assertEqual(self.m.lire_sans_lien(str(d), "a/f", 100), b"ok")
+        with self.assertRaises(ValueError):
+            self.m.lire_sans_lien(str(d), "lien", 100)
+
+    # ── Effacement : droits retirés, arbre large, lien, borne ───────────────────────────────────────────────────────
+    def _arbre(self, nom):
+        r = self.home / nom
+        (r / "a/b").mkdir(parents=True)
+        (r / "a/b/auth.json").write_text("{}")
+        (r / "jeton.json").write_text("{}")
+        return r
+
+    def test_effacer_dossiers_en_0500_et_0400(self):
+        for mode, ou in ((0o500, "a"), (0o500, ""), (0o400, ""), (0o400, "a")):
+            with self.subTest(mode=oct(mode), ou=ou or "racine"):
+                r = self._arbre(f"droits-{mode:o}-{ou or 'r'}")
+                os.chmod(r / ou if ou else r, mode)
+                self.addCleanup(lambda r=r: _rmtree_force(str(r)) if r.exists() else None)
+                debut = time.monotonic()
+                self.m.effacer(str(r))
+                self.assertLess(time.monotonic() - debut, 5)
+                self.assertFalse(r.exists())
+
+    def test_effacer_arbre_large(self):
+        r = self.home / "large"
+        r.mkdir()
+        for i in range(4000):                                   # 4000 × 2 niveaux
+            (r / f"d{i}" / "s").mkdir(parents=True)
+        (r / "d3999/s/auth.json").write_text("{}")
+        debut = time.monotonic()
+        self.m.effacer(str(r))
+        self.assertLess(time.monotonic() - debut, 10)
+        self.assertFalse(r.exists())
+
+    def test_effacer_ne_suit_pas_un_lien_vers_home(self):
+        r = self._arbre("avec-lien")
+        (r / "a/vers-home").symlink_to(self.home)
+        (r / "vers-ssh").symlink_to(self.home / ".ssh")
+        self.m.effacer(str(r))
+        self.assertFalse(r.exists())
+        self.assertEqual((self.home / ".ssh/id_ed25519").read_text(), "FAUSSE-CLE-SSH", "~ intact")
+        self.assertTrue((self.home / JETONS["codex"]).exists())
+
+    def test_effacer_borne_atteinte_met_en_000(self):
+        r = self._arbre("borne")
+        for i in range(50):
+            (r / f"x{i}").mkdir()
+        self.addCleanup(lambda: (os.chmod(r, 0o700), _rmtree_force(str(r))) if r.exists() else None)
+        with unittest.mock.patch.object(self.m, "EFFACER_MAX", 5):
+            self.m.effacer(str(r))
+        self.assertTrue(r.exists())
+        self.assertEqual(r.stat().st_mode & 0o777, 0, "jamais lisible avec un jeton dedans")
+        self.assertIn("effacement de borne borné", self.journal_ia())
+        self.m.effacer(str(r))                                  # la purge suivante le reprend (000 rouvert par /proc)
+        self.assertFalse(r.exists())
 
 @unittest.skipUnless(_bus_utilisateur() and os.path.isdir(RACINE_BAC),
                      "systemd-run, un bus utilisateur joignable et /dev/shm requis")
@@ -1036,60 +1100,6 @@ class BacReelIA(Base):
         self.assertEqual(os.listdir(self.base()), [], "faux dossiers personnels jetés")
         self.assertFalse((self.home / ".claude/hooks").exists())
         self.assertFalse((self.home / ".codex/rules").exists())
-
-    def test_jeton_rafraichi_garde_le_reste_jete(self):
-        for ident, rel in JETONS.items():
-            with self.subTest(ident):
-                reel = self.home / rel
-                config = (self.home / CONFIGS[ident]).read_text()
-                self.lancer_moteur(self.m, ident, NC_TEST_RAFRAICHIR=f"{rel} {CONFIGS[ident]}",
-                                   NC_TEST_CONTENU=json.dumps(rafraichi(ident)))
-                self.assertEqual(jeton_acces(ident, json.loads(reel.read_text())), "RAFRAICHI", "le jeton rafraîchi est gardé")
-                self.assertEqual((self.home / CONFIGS[ident]).read_text(), config, "la config n'est jamais rapportée")
-                # un moteur qui REMPLACE le fichier (écriture dans un temporaire puis mv) marche aussi
-                self.lancer_moteur(self.m, ident, NC_TEST_RENOMMER=rel, NC_TEST_CONTENU=json.dumps(rafraichi(ident, "RENOMME")))
-                self.assertEqual(jeton_acces(ident, json.loads(reel.read_text())), "RENOMME")
-                # un jeton cassé (plus du JSON) n'est pas rapporté, et ce retour inattendu notifie (refusé)
-                (self.home / "notifs.log").unlink(missing_ok=True)
-                self.lancer_moteur(self.m, ident, NC_TEST_CASSER=rel)
-                self.assertEqual(jeton_acces(ident, json.loads(reel.read_text())), "RENOMME")
-                self.assertIn(f"{ident} : retour de {rel} refusé (plus du JSON)", self.journal_ia())
-                self.assertIn(f"retour de jeton de {self.m.nom(ident)} refusé", self.notifs())
-
-    def test_jeton_change_entre_temps_pas_ecrase(self):
-        """Une session à toi a rafraîchi le jeton pendant la demande : on ne l'écrase pas."""
-        reel = self.home / JETONS["codex"]
-        d = self.m.Demande("codex")
-        try:
-            (d.home / JETONS["codex"]).write_text(json.dumps(rafraichi("codex", "DU-MOTEUR")))
-            reel.write_text(json.dumps(rafraichi("codex", "DE-TA-SESSION")))
-        finally:
-            d.finir()
-        self.assertEqual(jeton_acces("codex", json.loads(reel.read_text())), "DE-TA-SESSION")
-        self.assertIn("a changé de ton côté", self.journal_ia())
-        self.assertEqual(os.listdir(self.base()), [])
-
-    def test_lien_vers_un_secret_jamais_rapporte(self):
-        """P1-1 : le moteur remplace son jeton (ou son dossier) par un lien vers un secret lisible HORS du bac (docker,
-        gcloud…) : nc-ia ne suit aucun lien, le vrai fichier ne change pas, le secret ne revient jamais au bac."""
-        secret = self.home / ".docker/config.json"
-        secret.parent.mkdir()
-        secret.write_text(json.dumps(rafraichi("claude", "SECRET-DOCKER")))
-        dossier = self.home / ".config/gcloud"
-        dossier.mkdir(parents=True)
-        (dossier / "auth.json").write_text(json.dumps(rafraichi("codex", "SECRET-GCLOUD")))
-        for ident, lien, cible in (("claude", JETONS["claude"], secret), ("codex", ".codex", dossier)):
-            with self.subTest(ident):
-                reel = self.home / JETONS[ident]
-                avant = reel.read_text()
-                sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_LIEN=lien, NC_TEST_CIBLE=str(cible)))
-                self.assertIn(f"LIEN {lien}", sortie)
-                self.assertEqual(reel.read_text(), avant, "le vrai jeton n'a pas bougé")
-                self.assertIn(f"{ident} : retour de {JETONS[ident]} refusé (lien symbolique", self.journal_ia())
-                # et la demande suivante ne voit pas le secret
-                sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_RELATIFS=JETONS[ident]))
-                self.assertNotIn("SECRET-", sortie)
-                self.assertIn(marqueur(ident, f"JETON-{ident}"), sortie)
 
     def test_les_autres_demandes_sont_invisibles(self):
         """P2-1 : dans l'unité, la base des faux dossiers personnels est un tmpfs vide où seuls les SIENS sont remontés ;

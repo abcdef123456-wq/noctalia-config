@@ -176,10 +176,10 @@ def inaccessibles(home, reglage, libres=(), environ=None, interdits_plus=()):
     # ailleurs (ProtectSystem=strict ne le masque pas, il reste lisible), on le rend aussi illisible — sauf s'il
     # contient XDG_RUNTIME_DIR ou l'inverse (le masquer couperait alors le tmpfs remonté de la demande).
     standard = f"/run/user/{os.getuid()}"
-    rr = os.path.realpath(run or "/\0")
+    rr = os.path.realpath(run) if run else None           # (realpath("/\0") lèverait ValueError)
     if os.path.isdir(standard):
         sr = os.path.realpath(standard)
-        if sr != rr and not rr.startswith(sr + "/") and not sr.startswith(rr + "/"):
+        if rr is None or (sr != rr and not rr.startswith(sr + "/") and not sr.startswith(rr + "/")):
             vus.append(standard)
     return list(dict.fromkeys(vus))
 
