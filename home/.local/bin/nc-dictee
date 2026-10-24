@@ -440,7 +440,23 @@ def presse_papiers():
 
 # wl-copy lit le texte sur son entrée standard (jamais en argument : /proc/*/cmdline est lisible par tous). Le type est
 # donné : sans lui, wl-copy le devinerait avec xdg-mime (une dictée « <b> » deviendrait du HTML).
-COPIER_TEXTE = ["wl-copy", "--type", "text/plain;charset=utf-8"]
+COPIER_TEXTE = ["--type", "text/plain;charset=utf-8"]
+
+
+def wl_copy(options, donnees=None, check=False):
+    """wl-copy pose le contenu puis se dédouble pour le servir. Son enfant garde la sortie d'erreur héritée : avec un
+    tube (capture_output), run attendrait la fin de cet enfant et finirait en TimeoutExpired, sans collage. Ni tube ni
+    lecture : seul le code de retour compte."""
+    r = subprocess.run(["wl-copy", *options], input=donnees, stdin=None if donnees is not None else subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    if check and r.returncode != 0:
+        raise subprocess.CalledProcessError(r.returncode, r.args)
+    return r
+
+
+# wtype lit son entrée selon la locale (setlocale) : en C ou POSIX, il s'arrête au premier accent et sort avec 0
+# (texte tronqué annoncé « Écrit »). C.UTF-8 est fournie par glibc ≥ 2.35, sur les quatre distributions.
+ENV_WTYPE = {**os.environ, "LC_ALL": "C.UTF-8"}
 
 
 def ecrire_dans_la_fenetre(texte, avertissements=None):
@@ -449,7 +465,8 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
     if shutil.which("wtype"):
         # Le texte par l'entrée standard (« wtype - », dès wtype 0.3, un seul « - » par appel) : jamais en argument,
         # lisible par tous dans /proc/*/cmdline.
-        if subprocess.run(["wtype", "-"], input=texte.encode(), capture_output=True).returncode == 0:
+        if subprocess.run(["wtype", "-"], input=texte.encode(), capture_output=True, env=ENV_WTYPE,
+                          timeout=30).returncode == 0:
             return True
     if not (shutil.which("wl-copy") and shutil.which("wl-paste")):
         return False
@@ -459,7 +476,7 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
     except (OSError, subprocess.TimeoutExpired):
         return False                # pas de collage par-dessus ce qu'on ne saurait pas remettre (revue DICT-04/05)
     try:
-        copie = subprocess.run(COPIER_TEXTE, input=texte.encode(), capture_output=True, timeout=5)
+        copie = wl_copy(COPIER_TEXTE, texte.encode())
         if copie.returncode != 0:
             return False
         classe = ""
@@ -478,9 +495,9 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
         time.sleep(0.4)
         try:
             if avant is None:
-                subprocess.run(["wl-copy", "--clear"], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=True)
+                wl_copy(["--clear"], check=True)
             else:
-                subprocess.run(["wl-copy", "--type", avant[0], "--"], input=avant[1], capture_output=True, timeout=5, check=True)
+                wl_copy(["--type", avant[0], "--"], avant[1], check=True)
         except (OSError, subprocess.SubprocessError):
             if not ecrit:
                 raise
@@ -619,7 +636,7 @@ def ptt_finir(m):
         # La dictée prime : elle est copiée même si le presse-papiers d'avant n'a pas pu être sauvé (il est remplacé, et
         # c'est dit), pour être collée à la main (revue DICT-06)
         try:
-            subprocess.run(COPIER_TEXTE, input=r["text"].encode(), capture_output=True, timeout=5, check=True)
+            wl_copy(COPIER_TEXTE, r["text"].encode(), check=True)
             copie = T("Copié (ton presse-papiers a été remplacé) : colle-le avec Ctrl + V.",
                       "Copied (your clipboard was replaced): paste it with Ctrl + V.")
         except (OSError, subprocess.SubprocessError):

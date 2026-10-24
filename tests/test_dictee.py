@@ -437,6 +437,36 @@ class Dictee(unittest.TestCase):
         self.assertEqual(a.count("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]"), 2, "collage puis repli")
         self.assertNotIn("bonjour", args)
 
+    def test_wl_copy_qui_reste_en_fond_ne_bloque_pas(self):
+        """Le vrai wl-copy se dédouble pour servir le presse-papiers et son enfant garde la sortie d'erreur héritée :
+        avec un tube, nc-dictee attendait 5 s par appel, puis TimeoutExpired, aucun collage et « Gardé dans… »."""
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        c = self.home / "bin/wl-copy"
+        c.write_text('#!/bin/sh\necho "wl-copy $* [$(cat)]" >> "$HOME/appels"\n'
+                     'exec 0</dev/null 1>/dev/null\nsleep 5 &\nexit 0\n')
+        self.assertEqual(self.ptt("ptt-debut", wtype=False), 0)
+        time.sleep(0.6)
+        debut = time.monotonic()
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 0)
+        self.assertLess(time.monotonic() - debut, 2)
+        a = self.appels()
+        self.assertIn("send_shortcut", a, "le collage a eu lieu")
+        self.assertIn("✓ Écrit", a)
+        self.assertNotIn("Gardé dans", a)
+
+    def test_wtype_en_locale_utf8(self):
+        """wtype lit son entrée selon la locale : en C, il s'arrête au premier accent et sort avec 0."""
+        b = self.home / "bin"
+        self.ptt("ptt-debut")
+        (b / "wtype").write_text('#!/bin/sh\necho "wtype LC_ALL=$LC_ALL [$(cat)]" >> "$HOME/appels"\n')
+        time.sleep(0.6)
+        env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
+                   PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced",
+                   NC_IA_EN_LIGNE="1", LC_ALL="C", LANG="C")
+        subprocess.run([str(SCRIPT), "ptt-fin"], env=env, capture_output=True, text=True, timeout=20)
+        self.assertIn("wtype LC_ALL=C.UTF-8 [bonjour jarvis]", self.appels())
+
     def test_presse_papiers_vide_remis_apres_collage(self):
         self.ptt("ptt-fin")
         self.collage("")
