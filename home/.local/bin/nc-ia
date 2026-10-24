@@ -3173,10 +3173,15 @@ def main(a):
     return 2
 
 
-if __name__ == "__main__":
-    # Échap dans le Spotlight, île fermée : arrêté par SIGTERM ; sortir proprement pour que le programme d'IA lancé
-    # s'arrête avec (les finally), au lieu d'aller au bout sans personne pour lire (revue IA-07)
+def installer_signaux():
+    """Échap dans le Spotlight, île fermée : arrêté par SIGTERM ; sortir proprement pour que le programme d'IA lancé
+    s'arrête avec (les finally), au lieu d'aller au bout sans personne pour lire (revue IA-07). Appelé aussi par
+    nc-demander, qui charge nc-ia comme un module (revue B2-04)."""
     import signal
-    for _sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(_sig, lambda s, _f: sys.exit(128 + s))
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda s, _f: sys.exit(128 + s))
+
+
+if __name__ == "__main__":
+    installer_signaux()
     sys.exit(main(sys.argv[1:]))

@@ -930,6 +930,43 @@ class IA(unittest.TestCase):
         self.assertEqual(vivants(), [], "ni le programme, ni son sous-processus")
         p.stdout.close()
 
+    def test_question_du_spotlight_abandonnee_arrete_le_programme(self):
+        """Revue B2-04 : nc-demander (« ? » du Spotlight) charge nc-ia comme un module : le gestionnaire de SIGTERM de
+        nc-ia n'était pas posé, Échap laissait le programme d'IA et son sous-processus aller au bout."""
+        import signal, time
+        self.programme("opencode", 'sleep 7654323 & echo "début"; sleep 7654324')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        self.lancer("etat")                                    # prépare les faux programmes
+
+        def vivants():
+            r = []
+            for d in Path("/proc").iterdir():
+                try:
+                    argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
+                except OSError:
+                    continue
+                if d.name.isdigit() and argv in ([b"sleep", b"7654323"], [b"sleep", b"7654324"]):
+                    r.append(int(d.name))
+            return r
+
+        def nettoyer():
+            for pid in vivants():
+                os.kill(pid, signal.SIGKILL)
+        self.addCleanup(nettoyer)
+        p = subprocess.Popen([str(self.home / ".local/bin/nc-demander"), "--flux", "question"], env=self.env_test(),
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        while "début" not in p.stdout.readline():
+            self.assertIsNone(p.poll())
+        self.assertEqual(len(vivants()), 2)
+        p.send_signal(signal.SIGTERM)
+        self.assertEqual(p.wait(10), 143)
+        fin = time.time() + 3
+        while vivants() and time.time() < fin:
+            time.sleep(0.05)
+        self.assertEqual(vivants(), [], "ni le programme, ni son sous-processus")
+        p.stdout.close()
+
     def test_expliquer_une_panne(self):
         """nc-panne → « Expliquer » : l'état et la fin du journal du service, secrets masqués, jamais un service inconnu."""
         self.programme("systemctl", 'case "$*" in *nc-ile.service*) printf "Description=Île\\nLoadState=loaded\\nResult=core-dump\\n";; '

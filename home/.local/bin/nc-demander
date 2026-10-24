@@ -32,8 +32,8 @@ def charger_ia():
     return m
 
 
-def main():
-    ia = charger_ia()
+def main(ia=None):
+    ia = ia or charger_ia()
     a = sys.argv[1:]
     # « IA du Spotlight » : auto (celle de nc-ia), une IA précise, ou aucune pour le Spotlight seulement
     choix = ia.reglage("SPOTLIGHT_IA", "auto")
@@ -66,4 +66,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Échap sur « ? » : arrêté par SIGTERM, le programme d'IA et ses sous-processus s'arrêtent avec (revue B2-04 : chargé
+    # comme un module, nc-ia ne posait pas ses signaux)
+    _ia = charger_ia()
+    _ia.installer_signaux()
+    sys.exit(main(_ia))
