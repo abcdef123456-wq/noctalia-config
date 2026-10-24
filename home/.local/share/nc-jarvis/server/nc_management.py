@@ -311,7 +311,7 @@ def cle_session(value):
 
 
 # Listes blanches pour les réglages de session ; PERMISSION_MODES resserrée comme be109d5 : plus de yolo, bypass ni
-# always-proceed (le runner les accepte encore, mais ils ne passent pas par ici)
+# always-proceed : exactement la liste de 94a3a93 (_ALLOWED_PERMISSION_MODES)
 PERMISSION_MODES=frozenset({'default','request-review','plan','ask','auto_edit','auto'})
 MODES=frozenset({'agent','auto','plan','accept-edits','ask'})
 
@@ -328,16 +328,27 @@ async def fin_session_noeuds(session_key, node_id=None):
             return await NODE_HUB.send_session_end(node_id=node_id)
         except Exception:
             return None
-    # Reset ou reprise : deux essais séparés, une rotation ratée ne saute pas la fin de session des nœuds
+    # L'origine se construit AVANT la rotation du jeton (après, elle porterait le nouveau jeton) ; la fin de session ne
+    # ferme que les sessions de cette conversation (94a3a93). Deux essais séparés : une rotation ratée ne saute pas la fin.
+    origine = None
+    if session_key and session_key != 'default':
+        try:
+            origine = NODE_HUB.build_origin(session_key=session_key)
+        except Exception:
+            origine = None
     try:
         NODE_HUB.rotate_conversation_token(session_key or 'default')
     except Exception:
         pass
-    # Fin de session pour TOUS les nœuds, sans « origin » : un reset du bureau ferme aussi une session ouverte depuis
-    # Telegram. Sans origin, send_session_end() cible tous les nœuds sur 4ecc57a comme sur be109d5 (où « origin »
-    # restreindrait aux sessions de cette conversation ; 4ecc57a n'accepte d'ailleurs pas ce paramètre)
     try:
-        await NODE_HUB.send_session_end()
+        if origine is None:
+            # Pas d'origine (clé « default », ou hub sans build_origin) : comme avant, tous les nœuds
+            await NODE_HUB.send_session_end()
+        else:
+            try:
+                await NODE_HUB.send_session_end(origin=origine)
+            except TypeError:
+                await NODE_HUB.send_session_end()   # 4ecc57a : pas de paramètre « origin », tous les nœuds
     except Exception:
         pass
     return []

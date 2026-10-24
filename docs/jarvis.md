@@ -239,7 +239,14 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-La révision validée est `4ecc57a`. Par rapport à `f522291`, elle envoie `confirm_unavailable` quand elle ne peut pas
+La révision validée est `94a3a93`. Par rapport à `4ecc57a` (qui reste acceptée), elle limite `/api/ask` à
+`desktop:<pc>` ou `default`, garde un jeton d'origine par session, resserre les modes de permission (plus de
+`always-proceed`, `yolo` ni `bypass`) et ferme, au reset, la seule session de la conversation visée. L'overlay
+n'en garde que le bon : aucun jeton d'origine n'est gardé ni écrit pour l'agent (le runner le donnait à tout appel
+`/run` de la conversation), et un réglage `always-proceed` enregistré par une ancienne révision est ignoré au
+démarrage (une ligne de journal, mode par défaut) au lieu d'empêcher le runner de démarrer.
+
+`4ecc57a`, par rapport à `f522291`, envoie `confirm_unavailable` quand elle ne peut pas
 relayer la demande à distance (au lieu d'un refus automatique), contrôle `run_shell` et le nom exact du PC pour les
 commandes et les écritures de fichiers, impose `desktop:…` et des listes blanches de modes sur la route de gestion
 (l'overlay reprend ces contrôles et la fin de session des nœuds au reset), borne ses sessions AGY à 64 et garde un
@@ -261,12 +268,12 @@ commandes relayées, et le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce
 - **des nœuds plus sûrs** pour `nc-noeud` : la clé seulement dans l’en-tête, `ws://` refusé vers un hôte public,
   les commandes coupées par défaut (voir « Laisser JARVIS piloter ce PC »).
 
-Le déployeur installe la révision validée (`4ecc57a`) sur un nouveau serveur, et accepte un serveur resté sur une
-révision validée plus ancienne (`f522291`, `aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà
+Le déployeur installe la révision validée (`94a3a93`) sur un nouveau serveur, et accepte un serveur resté sur une
+révision validée plus ancienne (`4ecc57a`, `f522291`, `aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà
 installé. Pour le faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 4ecc57a8351fee610185b699b12c4b15092fe5ff
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 94a3a930efae59dbfd7758be5af6f883ab34b9df
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 
@@ -278,7 +285,7 @@ interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env
 
 N’installe pas à la main les révisions intermédiaires `1ae55f3`, `8ff25c3` ou `4d279b6` : elles passent une clé de
 session à des fonctions que l’overlay d’avant `64523e5` ne connaissait pas, et chaque question finit en erreur 500.
-Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `4ecc57a`. Il refuse aussi
+Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `94a3a93`. Il refuse aussi
 les révisions entre `aae5b9b` et `f522291` (`d1b0280` à `9f4cdeb`) : la première version du relais à distance y
 remplaçait la demande en attente.
 
@@ -397,8 +404,9 @@ choisis `ecran` ou `distance`, pas `les-deux`** : ces serveurs répondent tout s
 sur l’écran, et le journal note « refusé (distance) ». `nc-noeud` ne devine rien d’après le délai de la réponse.
 
 Un « nouvelle conversation » ou une reprise depuis le bureau ferme les sessions de confiance de **tous** les PC reliés
-(`send_session_end()` sans `origin`, sur `4ecc57a` comme sur `be109d5`), y compris une session ouverte depuis Telegram ;
-c'est voulu. La route `/api/ask` vérifie la clé du serveur avant de lire le corps, n'accepte que `platform` absent ou
+(`send_session_end()` sans `origin` pour la clé `default`, ou sur `4ecc57a`, qui n'a pas ce paramètre), y compris une session
+ouverte depuis Telegram ; avec une clé `desktop:<pc>` sur `94a3a93`, seule la session de cette conversation est fermée
+(l'origine est construite avant la rotation du jeton). La route `/api/ask` vérifie la clé du serveur avant de lire le corps, n'accepte que `platform` absent ou
 `desktop`, et une `session_key` `desktop:<pc>` ou `default` (400 sinon) ; corps limité à 1 Mo.
 
 Depuis JARVIS-BIS `be109d5`, le serveur peut envoyer `totp_prompt` (et `totp_prompt_cancel`) : l'invite d'un code pour

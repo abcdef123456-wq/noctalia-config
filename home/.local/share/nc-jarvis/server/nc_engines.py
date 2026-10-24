@@ -7,6 +7,7 @@ import contextlib
 import functools
 import inspect
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -160,7 +161,20 @@ class Engines:
             if not isinstance(data,dict) or data.get('engine') not in ENGINES: raise ValueError('État moteur invalide.')
             self.state.update(data)
         if self.state['engine']=='agy' and self.state['settings'].get('agy'):
-            self.original['update_session'](**{k:v for k,v in self.state['settings']['agy'].items() if k in ('model','effort','mode','permission_mode')})
+            self.restaure_agy()
+
+    def restaure_agy(self):
+        """Réapplique les réglages AGY enregistrés, un par un. Un réglage que le serveur n'accepte plus (« always-proceed »
+        écrit par 4ecc57a) est ignoré avec une ligne de journal, sans valeur : jamais d'exception au démarrage."""
+        agy = self.state['settings']['agy']
+        if not isinstance(agy, dict): return
+        for cle in ('model','effort','mode','permission_mode'):
+            if not isinstance(agy.get(cle), str) or not agy[cle]: continue
+            try:
+                self.original['update_session'](**{cle:agy[cle]})
+            except (ValueError, TypeError):
+                logging.getLogger('nc_engines').warning('Réglage AGY enregistré refusé (%s) : ignoré, valeur par défaut.', cle)
+                agy.pop(cle, None)
 
     def occupe(self):
         return self.lock.locked() or self.agy_en_cours > 0
@@ -220,7 +234,12 @@ class Engines:
         if engine not in ENGINES: raise ValueError('Moteur inconnu.')
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
         if engine == 'agy':
-            result = self.appel('update_session', session_key=session_key, **{k:v for k,v in values.items() if k!='engine'})
+            donnes = {k:v for k,v in values.items() if k!='engine'}
+            self.appel('update_session', session_key=session_key, **donnes)
+            # Seulement ce que l'utilisateur a donné, fusionné aux anciens réglages : jamais le dict de session du serveur
+            # (permission_mode par défaut, session_token), que 94a3a93 refuserait ou qui n'a rien à faire dans ce fichier
+            result = {k:v for k,v in self.state['settings'].get('agy',{}).items() if k in ('model','effort','mode','permission_mode')}
+            result.update({k:v for k,v in donnes.items() if v})
         else:
             if any(values.get(k) not in (None,'',v) for k,v in (('mode','plan'),('permission_mode','request-review'))):
                 raise ValueError('Ce moteur utilise le mode plan avec ses protections habituelles.')

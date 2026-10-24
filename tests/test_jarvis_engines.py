@@ -132,6 +132,59 @@ else: print(json.dumps(dict(type='text',part=dict(text='réponse OpenCode'))))
         self.assertLess(self.e.path.stat().st_size,2*1024*1024)
 
 
+class ReglagesEnregistres(unittest.TestCase):
+    """94a3a93 refuse « always-proceed » (valeur que 4ecc57a faisait enregistrer par défaut) : le runner doit démarrer."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
+        self.m=types.ModuleType('engines_reglages');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        self.recus=[]
+        def update_session(model=None,effort=None,mode=None,permission_mode=None,session_key='default'):
+            if permission_mode and permission_mode not in ('default','request-review','plan','ask','auto_edit','auto'):
+                raise ValueError('permission_mode non autorisé : '+permission_mode)
+            self.recus.append(dict(model=model,effort=effort,mode=mode,permission_mode=permission_mode))
+            return dict(model=model or 'm',effort=effort or 'high',mode=mode or 'agent',permission_mode=permission_mode or 'request-review',
+                        session_token='x'*32)
+        self.up=types.SimpleNamespace(__file__=str(self.root/'main.py'),KNOWN_MODELS=[dict(id='agy-test')],
+            run_agy=AsyncMock(return_value={}),get_session_info=lambda session_key='default':dict(model='m',effort='high'),
+            update_session=update_session,reset_session_async=AsyncMock(return_value={}),
+            list_recent_conversations=lambda **kw:[],get_conversation_history=lambda *a,**kw:[],resume_conversation=lambda *a:{},
+            delete_conversation=lambda *a:{},delete_all_conversations=lambda:{},get_token_usage=lambda:dict(tokens_available=False),
+            _reset_memory_injection=lambda session_key=None:None,_should_inject_memory=lambda version:True,render_memory_prompt=lambda:'')
+        self.env=patch.dict(os.environ,HOME=str(self.root));self.env.start();self.addCleanup(self.env.stop)
+
+    def ecrit(self,settings):
+        chemin=self.root/'.nc-jarvis-engines.json'
+        chemin.write_text(json.dumps(dict(engine='agy',settings=dict(agy=settings),conversations=[],active={})));chemin.chmod(0o600)
+
+    def test_a_saved_always_proceed_does_not_stop_the_runner(self):
+        self.ecrit(dict(model='gemini-x',effort='low',mode='agent',permission_mode='always-proceed',session_token='y'*32))
+        with self.assertLogs('nc_engines',level='WARNING') as journal:
+            e=self.m.Engines(self.up)
+        self.assertEqual(e.state['engine'],'agy')
+        # les autres réglages sont gardés, le mode refusé est abandonné (donc le mode par défaut du serveur)
+        self.assertEqual([r['model'] for r in self.recus if r['model']],['gemini-x'])
+        self.assertFalse([r for r in self.recus if r['permission_mode']])
+        self.assertNotIn('always-proceed',e.state['settings']['agy'].values())
+        self.assertNotIn('y'*32,'\n'.join(journal.output))   # aucun secret dans le journal
+
+    def test_allowed_saved_settings_are_still_restored(self):
+        self.ecrit(dict(model='gemini-x',permission_mode='plan'))
+        self.m.Engines(self.up)
+        self.assertIn('plan',[r['permission_mode'] for r in self.recus])
+
+    def test_choose_saves_only_what_the_user_gave(self):
+        e=self.m.Engines(self.up)
+        with patch.object(self.m,'executable',return_value='/bin/true'):
+            e.choose(engine='agy',model='gemini-x')
+        enregistre=json.loads(e.path.read_text())['settings']['agy']
+        self.assertEqual(enregistre,dict(model='gemini-x'))
+        self.assertNotIn('permission_mode',enregistre);self.assertNotIn('session_token',enregistre)
+        with patch.object(self.m,'executable',return_value='/bin/true'):
+            e.choose(engine='agy',effort='low')
+            e.choose(engine='agy',permission_mode='plan')
+        self.assertEqual(json.loads(e.path.read_text())['settings']['agy'],dict(model='gemini-x',effort='low',permission_mode='plan'))
+
+
 class UpstreamParPC(unittest.TestCase):
     """JARVIS-BIS 64523e5 (session_key partout) et 3d1c6b6 (aucune) : mêmes appels, aucun TypeError."""
     def charge(self,nouvelle):

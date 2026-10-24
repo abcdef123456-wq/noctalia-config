@@ -391,15 +391,47 @@ class GestionDepuis4ecc57a(unittest.TestCase):
         self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:a')
         self.assertFalse([n for n in self.noeuds if n[0]=='jeton'])
 
-    def test_reset_ends_every_session_without_origin_even_when_the_hub_builds_one(self):
+    def test_reset_builds_the_origin_before_the_rotation_and_closes_only_that_session(self):
+        # 94a3a93 : l'origine se construit AVANT la rotation du jeton, puis seule la session de cette origine se ferme
+        vus=[];ordre=[]
+        hub=sys.modules['core.node_hub'].NODE_HUB
+        def construit(session_key=None,**_):
+            ordre.append('origine');return {'via':'desktop','chat':session_key}
+        hub.build_origin=construit
+        hub.rotate_conversation_token=lambda k=None:ordre.append('rotation')
+        async def fin(node_id=None,origin=None):
+            ordre.append('fin');vus.append((node_id,origin));return []
+        hub.send_session_end=fin
+        self.run_('session.reset',{},True,session_key='desktop:a')
+        self.assertEqual(vus,[(None,{'via':'desktop','chat':'desktop:a'})])
+        self.assertEqual(ordre,['origine','rotation','fin'])
+        vus.clear()
+        self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:b')
+        self.assertEqual(vus,[(None,{'via':'desktop','chat':'desktop:b'})])
+
+    def test_reset_of_the_default_session_still_ends_every_node(self):
         vus=[]
         hub=sys.modules['core.node_hub'].NODE_HUB
-        hub.build_origin=lambda session_key=None,**_:{'via':'desktop','chat':session_key}
+        hub.build_origin=lambda session_key=None,**_:{'via':'default','chat':'default'}
         async def fin(node_id=None,origin=None):
             vus.append((node_id,origin));return []
         hub.send_session_end=fin
+        self.run_('session.reset',{},True)
+        self.run_('session.reset',{},True,session_key='default')
+        self.assertEqual(vus,[(None,None),(None,None)])
+
+    def test_a_hub_without_the_origin_parameter_ends_every_node_like_4ecc57a(self):
+        vus=[]
+        hub=sys.modules['core.node_hub'].NODE_HUB
+        hub.build_origin=lambda session_key=None,**_:{'via':'desktop','chat':session_key}
+        async def fin(node_id=None):
+            vus.append(node_id);return []
+        hub.send_session_end=fin
         self.run_('session.reset',{},True,session_key='desktop:a')
-        self.assertEqual(vus,[(None,None)])
+        self.assertEqual(vus,[None])
+
+    def test_no_conversation_token_helper_is_left(self):
+        self.assertFalse(hasattr(self.m,'jeton_conversation'))
 
     def test_reset_and_resume_end_node_sessions_without_setting_the_token(self):
         self.run_('session.reset',{},True,session_key='desktop:a')

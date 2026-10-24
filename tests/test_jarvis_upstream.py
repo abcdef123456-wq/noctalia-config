@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -151,6 +152,88 @@ class FinDeSessionUpstream(unittest.TestCase):
                 return noeud
             asyncio.run(scenario())
             self.assertEqual(envoyes,[{'type':'session_end'}])
+
+    def test_reset_closes_only_the_session_of_the_origin_built_before_the_rotation(self):
+        avant=dict(sys.modules);ancien=list(sys.path)
+        self.addCleanup(lambda:(sys.modules.clear(),sys.modules.update(avant),sys.path.__setitem__(slice(None),ancien)))
+        for nom in [n for n in sys.modules if n=='core' or n.startswith('core.')]:sys.modules.pop(nom)
+        sys.path.insert(0,str(UPSTREAM))
+        with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'HOME':d,'SECRET_KEY':'isolated-test-secret'}):
+            from core.node_hub import NODE_HUB
+            import inspect
+            if 'origin' not in inspect.signature(NODE_HUB.send_session_end).parameters:self.skipTest('Fin de session ciblée absente (avant 94a3a93)')
+            spec=importlib.util.spec_from_file_location('nc_management_cible',REPO/'home/.local/share/nc-jarvis/server/nc_management.py')
+            management=importlib.util.module_from_spec(spec);sys.modules['nc_management_cible']=management;spec.loader.exec_module(management)
+            recus={'pc-a':[],'pc-b':[]}
+            class WS:
+                def __init__(self,nom):self.nom=nom
+                async def send_json(self,payload):recus[self.nom].append(payload)
+            async def scenario():
+                for nom in recus:await NODE_HUB.register_node(nom,WS(nom),{'hostname':nom})
+                futur=time.time()+600
+                NODE_HUB._active_sessions['pc-a']=dict(origin=NODE_HUB.build_origin(session_key='desktop:a'),expires_at=futur,reste_actions=5)
+                NODE_HUB._active_sessions['pc-b']=dict(origin=NODE_HUB.build_origin(session_key='telegram:42'),expires_at=futur,reste_actions=5)
+                await management.fin_session_noeuds('desktop:a')
+            asyncio.run(scenario())
+            self.assertEqual(recus,{'pc-a':[{'type':'session_end'}],'pc-b':[]})
+            self.assertNotIn('pc-a',NODE_HUB._active_sessions);self.assertIn('pc-b',NODE_HUB._active_sessions)
+
+
+@unittest.skipUnless(fastapi and httpx and (UPSTREAM/'home-runner/main.py').is_file(),'Checkout upstream et dépendances API requis')
+class JetonDOrigineUpstream(unittest.TestCase):
+    def test_a_direct_run_never_hands_an_origin_token_to_the_agent(self):
+        """Preuve P1-1 / P2-1 (94a3a93) : le runner donnait le jeton gardé d'une conversation Telegram à tout /run de
+        cette session_key, et écrivait l'ancien fichier commun « active_token ». Avec l'overlay : aucun jeton, aucun fichier."""
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);runtime=root/'runner';runtime.mkdir();bin=root/'bin';bin.mkdir()
+            run=root/'run';run.mkdir(mode=0o700)
+            for name in ('main.py','agy_bridge.py','memory.py'):shutil.copy2(UPSTREAM/'home-runner'/name,runtime/name)
+            agy=bin/'agy'
+            # Faux agy : montre ce qui est lisible par l'agent pendant son tour (fichiers de jeton, variables)
+            agy.write_text('#!/bin/sh\necho "FICHIERS=$(ls -A "$XDG_RUNTIME_DIR"/jarvis-origin 2>/dev/null | tr \'\\n\' \' \')"\n'
+                           'cat "$XDG_RUNTIME_DIR"/jarvis-origin/* 2>/dev/null\necho "FIN"\n');agy.chmod(0o755)
+            jeton='a1b2c3d4'*4
+            # État hérité de 4ecc57a : permission_mode « always-proceed » (94a3a93 le refuse) ; le runner doit démarrer quand même
+            etat=runtime/'.nc-jarvis-engines.json'
+            etat.write_text(json.dumps(dict(engine='agy',settings=dict(agy=dict(model='gemini-3.8-flash-low',permission_mode='always-proceed',
+                            session_token='z'*32)),conversations=[],active={})));etat.chmod(0o600)
+            env=dict(HOME=d,XDG_RUNTIME_DIR=str(run),SECRET_KEY='isolated-test-secret',AGY_PERSISTENT='0',MEMORY_FILE=str(root/'memory.json'),
+                     PATH=str(bin)+os.pathsep+os.environ['PATH'])
+            names=('main','agy_bridge','memory','nc_runner','nc_engines','uvicorn')
+            previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
+            try:
+                with patch.dict(os.environ,env):
+                    for name in names:sys.modules.pop(name,None)
+                    sys.modules['uvicorn']=types.ModuleType('uvicorn')
+                    sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
+                    def load(path,name):
+                        spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec)
+                        sys.modules[name]=module;spec.loader.exec_module(module);return module
+                    main=load(runtime/'main.py','main');load(REPO/'home/.local/share/nc-jarvis/server/nc_runner.py','nc_runner')
+                    async def scenario():
+                        corps=dict(prompt='x',session_key='telegram:42',continue_session=False)
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='http://runner.test') as c:
+                            # 1) le gateway relaie un tour de la conversation Telegram, jeton dans l'en-tête
+                            r1=await c.post('/run',json=corps,headers={'X-Secret-Key':'isolated-test-secret','X-Jarvis-Origin-Token':jeton})
+                            # 2) un appel direct, sans en-tête, avec la même session_key
+                            r2=await c.post('/run',json=corps,headers={'X-Secret-Key':'isolated-test-secret'})
+                            return r1,r2
+                    for reponse in asyncio.run(scenario()):
+                        self.assertEqual(reponse.status_code,200,reponse.text)
+                        sortie=json.dumps(reponse.json())
+                        self.assertNotIn(jeton,sortie)
+                        self.assertNotIn('active_token',sortie)
+                        self.assertEqual(reponse.json()['output'],'FICHIERS=\nFIN')   # dossier des jetons vide pendant le tour
+                    self.assertFalse(list(run.rglob('active_token*')))
+                    if 'always-proceed' not in getattr(sys.modules['agy_bridge'],'_ALLOWED_PERMISSION_MODES',('always-proceed',)):
+                        self.assertNotEqual(main.get_session_info().get('permission_mode'),'always-proceed')
+                    pont=sys.modules['agy_bridge']
+                    if hasattr(pont,'get_or_set_origin_token'):self.assertEqual(pont.get_or_set_origin_token('telegram:42',jeton),'')   # rien n'est gardé
+            finally:
+                sys.path[:]=oldpath
+                for name,old in previous.items():
+                    if old is None:sys.modules.pop(name,None)
+                    else:sys.modules[name]=old
 
 
 @unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')

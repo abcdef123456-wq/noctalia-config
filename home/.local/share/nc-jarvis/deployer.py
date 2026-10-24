@@ -35,11 +35,14 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # nœud contrôlés pour exec/write_file, desktop:* imposé et listes blanches sur /api/nc/manage (repris dans notre
 # nc_management, qui remplace cette route), fin de session des nœuds au reset, sessions AGY bornées à 64, un client HTTP
 # par boucle (4 au plus : des emprunts de notre pool). L'origine reste prise dans le corps des requêtes (session de confiance).
-REVISION='4ecc57a8351fee610185b699b12c4b15092fe5ff'
+# 94a3a93 : /api/ask limité à desktop:<pc> ou default, jeton d'origine par session (neutralisé chez nous par nc_runner :
+# aucun jeton gardé ni écrit, nodes_mcp n'est pas installé), modes de permission resserrés (nc_engines ignore un ancien
+# always-proceed enregistré), fin de session ciblée sur l'origine, GATEWAY_ORIGIN_KEY facultative (non générée)
+REVISION='94a3a930efae59dbfd7758be5af6f883ab34b9df'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
                      '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
                      '64523e57c958f23af459c8069d1a6985bf349640','aae5b9b3e6da13cfb78c2da33b5584c854f5139a',
-                     'f522291ca02af08903cbebd32203e14013dc80a6',REVISION)
+                     'f522291ca02af08903cbebd32203e14013dc80a6','4ecc57a8351fee610185b699b12c4b15092fe5ff',REVISION)
 
 
 def ask(message, default=False):

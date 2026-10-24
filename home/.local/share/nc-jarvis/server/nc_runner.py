@@ -28,6 +28,24 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from nc_engines import install, executable
 
+
+def _sans_jeton_d_origine():
+    """Depuis 94a3a93, le runner garde en mémoire le jeton d'origine reçu du gateway et l'écrit pour l'agent (fichier
+    par session, plus l'ancien « active_token » commun). Un /run direct avec une session_key de Telegram recevait ainsi
+    le jeton de cette conversation. Ici nodes_mcp n'est pas installé : plus aucun jeton n'est gardé ni écrit.
+    Sans effet sur une révision qui n'a pas ces fonctions (4ecc57a et avant)."""
+    import contextlib
+    import sys
+    bridge = sys.modules.get('agy_bridge')
+    if bridge is None: return
+    if hasattr(bridge, 'active_origin_token_scope'):
+        bridge.active_origin_token_scope = lambda token=None, session_key='default': contextlib.nullcontext()
+    if hasattr(bridge, 'get_or_set_origin_token'):
+        bridge.get_or_set_origin_token = lambda session_key='default', token=None: ''
+
+
+_sans_jeton_d_origine()
+
 # Le backend récent installe déjà le gestionnaire : garder le même état et verrou,
 # plutôt que d'envelopper ses quatre moteurs dans un second gestionnaire.
 engines=getattr(upstream.run_agy,'__self__',None)
