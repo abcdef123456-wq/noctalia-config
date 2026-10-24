@@ -308,9 +308,13 @@ demander.
   `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
   vers un hôte public).
 - **Côté serveur**, dans son `.env` : `ENABLE_TOOL_NODES=1` active le module des nœuds, et `ENABLE_NODE_EXEC=1`
-  autorise les commandes de l’outil des nœuds (coupées par défaut depuis `64523e5`). D’autres chemins du serveur
-  peuvent encore en envoyer avec la clé secrète : la vraie protection est sur ce PC, où `nc-noeud` demande toujours
-  ton accord et refuse sans réponse.
+  autorise les commandes de l’outil des nœuds (coupées par défaut depuis `64523e5`). **`ENABLE_NODE_EXEC=0` ne coupe
+  pas tout** : à `f522291`, `POST /api/node/{id}/action` avec `"action": "run_shell"` passe quand même (le serveur ne
+  vérifie que le nom `exec`, et `nc-noeud` lit `run_shell` comme `exec`), et `{id}` accepte un bout du nom du PC.
+  Il faut la clé secrète, mais la vraie protection est sur ce PC : `nc-noeud` demande toujours ton accord et refuse
+  sans réponse.
+- **`TELEGRAM_ALLOWED_USER_IDS` est obligatoire** (ton identifiant Telegram ; jamais `ALLOW_ALL_USERS=1`) : le relais
+  à distance n’envoie la demande qu’à ces personnes, et sans elles il la refuse.
 - **Le MCP `jarvis-nodes`** (`aae5b9b`) donne à agy des outils pour les nœuds (liste, fichiers, commande,
   capture). Il sert seulement à agy, le déployeur ne l’installe pas, il utilise la clé principale du serveur, et
   `nodes_list` envoie la liste des machines Tailscale au modèle. Les actions passent quand même par ta confirmation.
@@ -391,7 +395,8 @@ taille n’est jamais envoyé.
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
    n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
    **Une seule `confirm_request` à la fois pour ce PC** : un serveur peut remplacer la demande montrée par la
-   nouvelle (c’est le cas de JARVIS-BIS `9f4cdeb`). Une autre action sensible attend donc
+   nouvelle (JARVIS-BIS le faisait jusqu’à `9f4cdeb` ; corrigé à `f522291`, mais un autre serveur, ou plusieurs PC
+   sur le même chat, peuvent encore se croiser). Une autre action sensible attend donc
    que la première soit décidée ou close (son `confirm_cancel` part avant) ; si son échéance passe avant, elle est
    refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file. De plus, quand
    une demande finit **sans** `allow` ni `deny` venus du téléphone (elle expire, elle est décidée sur l’écran en
@@ -404,7 +409,7 @@ taille n’est jamais envoyé.
    consommé, pas compté comme faux. **Ce délai réduit la fenêtre, il ne la ferme pas** : un code tapé bien plus tard,
    juste quand la demande suivante apparaît, l’autoriserait encore. La vraie parade est côté serveur : exiger que le
    code soit envoyé **en réponse au message même de la demande** (`reply_to_message`), pour le lier à ce qui est montré.
-   C’est une recommandation au serveur ; `nc-noeud` ne peut pas la vérifier.
+   JARVIS-BIS le fait depuis `f522291` ; `nc-noeud` ne peut pas le vérifier.
 3. Le serveur répond, une fois :
    ```json
    {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow", "code": "123456"}
@@ -432,7 +437,8 @@ taille n’est jamais envoyé.
    `{"type": "confirm_cancel", "req_id": "7f0c…"}` : le serveur retire ses boutons.
 5. Le résultat part ensuite comme avant, une seule `response` pour ce `req_id`.
 
-Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe encore upstream**) :
+Ce que le serveur doit faire pour la relayer (JARVIS-BIS le fait dans Telegram depuis `f522291`, sauf
+`confirm_unavailable`) :
 
 - envoyer `summary` tel quel, **en texte brut** (sans `parse_mode` Markdown ou HTML), seulement à l’utilisateur
   autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`), jamais dans un groupe, avec un bouton **Refuser** et une invite
@@ -454,6 +460,10 @@ masque que les secrets connus de ce PC : relis la commande avant de taper le cod
 Avec 2 ou 3 commandes à la suite, il faut un code (ou un « Autoriser ») à chaque fois, et l’anti-rejeu refuse le même
 code dans sa fenêtre de 30 s. La **session de confiance** (issue #21) laisse JARVIS enchaîner, **après une seule
 autorisation**, une rafale d’actions sans redemander — mais encadrée, et **désactivée par défaut**.
+
+**Avec JARVIS-BIS `f522291`, elle reste inactive, même réglée** : ce serveur n’envoie ni `origin` dans la trame
+d’action ni `session_end`, et sans origine chaque action est confirmée une par une. Rien de risqué : simplement, il
+n’y a pas encore de session.
 
 - **Réglage :** nc-reglages → Intelligence artificielle → « Session de confiance pour JARVIS » : 0 (désactivée,
   conseillé) à 15 minutes. `NOEUD_SESSION_MINUTES` ; au-delà de 15 → 15 ; valeur illisible → 0. La capacité

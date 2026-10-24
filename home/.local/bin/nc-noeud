@@ -1338,9 +1338,11 @@ class ConfirmationDistance:
     notée. Le serveur ne connaît pas le secret : sans ton code, il ne peut rien autoriser. Un code déjà servi ne compte
     pas comme un échec ; le serveur reçoit alors error_code « replay » (attendre le code suivant).
     Une seule réponse par req_id, quel qu'en soit le type : la première compte, les suivantes sont ignorées et notées.
-    Une seule demande à distance à la fois : le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace
-    la demande montrée par la nouvelle, et le code tapé après avoir lu A autoriserait B. Les suivantes attendent leur
-    tour et, si leur échéance passe avant, expirent sans qu'aucune confirm_request ne parte."""
+    Une seule demande à distance à la fois : JARVIS-BIS remplaçait la demande en attente jusqu'à 9f4cdeb
+    (telegram_bot.py:1535-1544), et le code tapé après avoir lu A autorisait B. C'est corrigé à f522291 (un chat occupé
+    ne reçoit pas la nouvelle, telegram_bot.py:1570-1574), mais un autre serveur, ou plusieurs nœuds sur le même chat,
+    peuvent encore se croiser : on garde ce verrou et la période calme. Les suivantes attendent leur tour et, si leur
+    échéance passe avant, expirent sans qu'aucune confirm_request ne parte."""
     GARDEES = 256                       # demandes terminées dont on se souvient (réponse en double ou tardive)
 
     def __init__(self):

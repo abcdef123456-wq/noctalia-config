@@ -1162,8 +1162,9 @@ class DistanceIndisponible(ServeurDistant):
 
 
 class UneDemandeALaFois(ServeurDistant):
-    """Le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace la demande montrée par la nouvelle : une
-    seule confirm_request en vol par nœud, sinon le code tapé après avoir lu A autoriserait B."""
+    """JARVIS-BIS remplaçait la demande en attente jusqu'à 9f4cdeb (telegram_bot.py:1535-1544) : une seule
+    confirm_request en vol par nœud, sinon le code tapé après avoir lu A autoriserait B. Corrigé à f522291, mais gardé :
+    un autre serveur, ou plusieurs nœuds sur le même chat, peuvent encore se croiser."""
 
     def deux_commandes(self, trame_b=20.0):
         marques = {}
