@@ -57,6 +57,9 @@ class InstallChecks(unittest.TestCase):
                 p=b/nom; p.write_text(OUTIL); p.chmod(0o755)
             # Même vraie limite et mêmes signaux que la production, avec une durée raccourcie.
             p=b/'timeout'; p.write_text('#!/bin/sh\nshift 2\nexec /usr/bin/timeout --kill-after=0.1s 0.15s "$@"\n'); p.chmod(0o755)
+            if scenario=='python36':   # python3 en 3.6 (openSUSE Leap 15.6) ; les faux outils gardent le vrai
+                p=b/'python3'; p.write_text('#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; -V|--version) echo "Python 3.6.15"; exit 0 ;; esac\n'
+                                           f'exec {shutil.which("python3")} "$@"\n'); p.chmod(0o755)
             prelude=r'''
 set -euo pipefail
 say(){ printf '%s\n' "$*"; }
@@ -130,6 +133,18 @@ NOCT_DOCS=https://example.invalid; APT_OPT=''; BPO=''
         self.assertIn('missing command: jq',texte)
         self.assertNotIn('PACKAGE_INSTALL',texte)
         self.assertNotIn('["sudo"',appels)
+
+
+    def test_python_trop_ancien_arrete_meme_en_files_only(self):
+        # C-4 : capture_output (3.7) et := (3.8) dans les outils ; openSUSE Leap 15.6 n'a que Python 3.6
+        for mode in ('files','nosystem'):
+            with self.subTest(mode=mode):
+                code,texte,appels=self.executer('python36',famille='suse',mode=mode)
+                self.assertEqual(code,1,texte)
+                self.assertIn('Python 3.8 or later is required (python3 is 3.6.15)',texte)
+                self.assertNotIn('CHECKS_FINISHED',texte)
+                self.assertNotIn('PACKAGE_INSTALL',texte)
+                self.assertNotIn('["sudo"',appels)
 
 
 class NettoyageCockpit(unittest.TestCase):

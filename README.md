@@ -73,6 +73,7 @@ faites) : seul ce qui manque ou a changé est fait.
 | Fedora (44 ou plus) | Noctalia depuis les dépôts officiels ; Quickshell récent via le COPR `errornointernet/quickshell` si nécessaire ; Hyprland via le COPR `sdegler/hyprland` (le script propose les dépôts avant de les activer) |
 | Debian 13, Debian Sid, Ubuntu 26.04 | Noctalia via le dépôt officiel de Noctalia (le script te montre les adresses et demande avant). Debian 13 : Hyprland 0.55, Noctalia et TLP viennent de « trixie-backports », la source officielle de Debian pour les versions récentes, que le script propose d'activer ; Neovim récent (0.11+) proposé depuis neovim.io |
 | openSUSE Tumbleweed et Slowroll | Noctalia via le dépôt indiqué par la documentation (idem) |
+| openSUSE Leap 15.6 | pas géré par l'installateur : seulement `./install.sh --files-only`, avec Hyprland 0.55+, Noctalia v5 et `python3` en 3.8 ou plus installés par toi-même (le Python 3.6 de Leap ne suffit pas : le script s'arrête) |
 | Autres (NixOS, Gentoo…) | installe-les toi-même ([guide](https://docs.noctalia.dev/noctalia/getting-started/installation/)), puis relance le script |
 
 Hyprland doit être en version **0.55 ou plus** (le script vérifie). Les paquets dont le nom diffère selon la distribution sont

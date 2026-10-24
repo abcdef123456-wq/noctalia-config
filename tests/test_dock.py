@@ -181,6 +181,22 @@ class NcDock(unittest.TestCase):
         self.assertTrue((b.r / "xdg-config/noctalia/zz-dock.toml").exists())
         self.assertFalse((b.config / "zz-dock.toml").exists())
 
+    def test_sans_tomllib_un_avertissement(self):
+        # C-4 : Python sous 3.11 (sans tomllib) : la vérification après écriture est sautée, et c'est dit sur stderr
+        b = self.b
+        b.etat.write_text('config_version = 15\n\n[dock]\npinned = ["kitty"]\n', encoding="utf-8")
+        sans = b.r / "sans-tomllib"; sans.mkdir()
+        (sans / "tomllib.py").write_text('raise ImportError("tomllib absent (test)")\n')
+        b.env["PYTHONPATH"] = str(sans)
+        r = b.dock("epingler", "gimp")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("sans tomllib", r.stderr)
+        self.assertEqual(b.liste(), ["kitty", "gimp"])
+        del b.env["PYTHONPATH"]
+        r = b.dock("epingler", "firefox")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("tomllib", r.stderr)
+
     def test_settings_toml_sans_liste(self):
         # settings.toml de Noctalia (config_version) sans pinned : la liste y est ajoutée, comme le fait le menu
         # « Épingler » du dock (setOverride) ; dans [dock] s'il existe, sinon une table [dock] à la fin

@@ -271,6 +271,15 @@ if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ] && [ "$MODE" != files ]; th
   pkg_install "${paquets[@]}" || die "$(t "installation des outils de vérification impossible." "could not install the checking tools.")"
 fi
 for t in jq sed find cmp awk timeout; do have "$t" || die "$(t "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: $t (install it with your distribution's package manager)")"; done
+# Python 3.8 ou plus, même en --files-only : les outils de la config s'en servent (capture_output, :=), et openSUSE
+# Leap 15.6 n'a que Python 3.6. Absent : installé avec les paquets, sauf en --files-only (qui n'installe rien)
+if have python3; then
+  python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null || {
+    pv="$(python3 -V 2>&1 | awk '{print $2}')"
+    die "$(t "Python 3.8 ou plus est nécessaire (python3 est en $pv) : les outils de la config (nc-reglages, l'île, les mises à jour…) ne marcheraient pas. openSUSE Leap 15.6 n'a que Python 3.6 : il n'est pris en charge qu'en --files-only, avec un python3 plus récent." "Python 3.8 or later is required (python3 is $pv): the config's tools (nc-reglages, the island, updates…) wouldn't work. openSUSE Leap 15.6 only has Python 3.6: it is only supported with --files-only and a newer python3.")"; }
+elif [ "$MODE" = files ]; then
+  die "$(t "commande manquante : python3 (3.8 ou plus ; installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: python3 (3.8 or later; install it with your distribution's package manager)")"
+fi
 info "$(t "Distribution : ${OSNAME:-inconnue} (famille : $FAMILY)" "Distribution: ${OSNAME:-unknown} (family: $FAMILY)")"
 
 LAPTOP=0; ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1 && LAPTOP=1

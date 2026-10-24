@@ -247,10 +247,13 @@ def epinglees():
 
 def verifier(avant, apres, ids):
     """Avec tomllib (Python 3.11 et plus) : le nouveau fichier doit donner exactement cette liste dans [dock] pinned, et
-    rien d'autre ne doit changer ; sinon rien n'est écrit (un format que nc-dock lirait mal ne s'abîme jamais)."""
+    rien d'autre ne doit changer ; sinon rien n'est écrit (un format que nc-dock lirait mal ne s'abîme jamais). Sans
+    tomllib, l'écriture se fait sans cette vérification, et c'est dit (une ligne sur la sortie d'erreur)."""
     try:
         import tomllib
     except ImportError:
+        print(T("nc-dock : Python sans tomllib (il faut 3.11 ou plus) : l'écriture n'est pas revérifiée.",
+                "nc-dock: Python without tomllib (3.11 or later needed): the write is not double-checked."), file=sys.stderr)
         return
     try:
         a, b = tomllib.loads(avant), tomllib.loads(apres)
