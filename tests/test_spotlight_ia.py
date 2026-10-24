@@ -323,9 +323,11 @@ ShellRoot {
                     "actions": [{"n": 0, "libelle": "Bluetooth : off", "danger": False, "fait": False, "ok": None, "resultat": ""},
                                 {"n": 1, "libelle": "Arrêter nc-pouls.service", "danger": True, "fait": False, "ok": None, "resultat": ""}]}
             fait = dict(plan, actions=[dict(plan["actions"][0], fait=True, ok=True), plan["actions"][1]])
+            # Coupé en route : le plan gardé sur la sortie, l'erreur à part, code 3 (contre-relecture de B2)
+            coupe = dict(plan, actions=[dict(a, fait=True, ok=True) for a in plan["actions"]])
             scripts = {"nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
                        "nc-demander": '#!/bin/sh\necho \'{"nom": "Claude Code", "agent": "claude", "coupee": false}\'\n',
-                       "nc-ia": "#!/bin/sh\necho \"nc-ia $*\" >> \"$HOME/appels\"\ncase \"$1\" in agir) echo '" + json.dumps(plan) + "' ;; executer) sleep 0.5; echo '" + json.dumps(fait) + "' ;; esac\n"}
+                       "nc-ia": "#!/bin/sh\necho \"nc-ia $*\" >> \"$HOME/appels\"\ncase \"$1\" in agir) echo '" + json.dumps(plan) + "' ;; executer) sleep 0.5; case \"$3\" in 1) echo '" + json.dumps(coupe) + "'; echo \"L'IA est désactivée.\" >&2; exit 3 ;; esac; echo '" + json.dumps(fait) + "' ;; esac\n"}
             for nom, code in scripts.items():
                 (b / nom).write_text(code); (b / nom).chmod(0o755)
             (q / "shell.qml").write_text('''import QtQuick
@@ -352,6 +354,10 @@ ShellRoot {
    verifier(vuOccupe, "actions en cours : le Spotlight reste chargé même fermé (revue B2-01)")
    verifier(!spot.occupe, "plus rien en cours")
    verifier(JSON.stringify(titres()) === JSON.stringify(["✓ Bluetooth : off", "Arrêter nc-pouls.service"]), "après : " + JSON.stringify(titres()))
+   spot.valider(1, false); etape++; return }
+  if (etape === 4) { if (spot.occupe || spot.plan.actions[1].fait !== true) return
+   verifier(JSON.stringify(titres()) === JSON.stringify(["✓ Bluetooth : off", "✓ Arrêter nc-pouls.service"]), "coupé en route : " + JSON.stringify(titres()))
+   verifier(spot.reponse === "L'IA est désactivée.", "l'erreur est dite : " + spot.reponse)
    Qt.quit() }
  } }
  Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
@@ -362,7 +368,8 @@ ShellRoot {
             r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             appels = (root / "appels").read_text().splitlines()
-            self.assertEqual(appels, ["nc-ia agir --json coupe le bluetooth", "nc-ia executer 0123456789abcdef 0 --json"])
+            self.assertEqual(appels, ["nc-ia agir --json coupe le bluetooth", "nc-ia executer 0123456789abcdef 0 --json",
+                                      "nc-ia executer 0123456789abcdef 1 --json"])
 
 
 if __name__ == "__main__":

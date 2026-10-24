@@ -855,10 +855,62 @@ class IA(unittest.TestCase):
                                             '*list-units*) echo "nc-ile.service loaded active running Ile";; esac')
                 r = self.lancer("executer", plan["id"], "--json")
                 self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                # Même coupé en route, le plan gardé est écrit : le Spotlight montre la première comme faite
+                montre = json.loads(r.stdout)
+                self.assertTrue(montre["actions"][0]["ok"])
+                self.assertFalse(montre["actions"][1].get("ok"))
                 self.assertIn("systemctl --user restart nc-ile.service", self.appels())
                 self.assertNotIn("bluetoothctl power", self.appels(), "la deuxième action ne se fait pas")
                 d = json.loads((self.home / "run/nc-ia/plans" / f"{plan['id']}.json").read_text())
                 self.assertTrue(d["actions"][0]["fait"] and d["actions"][0]["ok"], "la première est gardée comme faite")
+
+    def test_agir_coupe_pendant_la_reponse(self):
+        """Contre-relecture de B2 : IA ou actions coupées pendant que l'IA proposait son plan, ses lectures de journaux
+        étaient quand même faites et renvoyées à l'IA dans une deuxième requête, et le plan gardé."""
+        plans = self.home / "run/nc-ia/plans"
+        for coupure, tour, code in (("IA_MODE=non", 1, 3), ("IA_ACTIONS=non", 1, 1), ("IA_GERER_SERVICES=non", 1, 1),
+                                    ("IA_MODE=non", 2, 3)):
+            with self.subTest(coupure=coupure, tour=tour):
+                if self.journal.exists():
+                    self.journal.unlink()
+                shutil.rmtree(plans, ignore_errors=True)
+                self.preparer_agent()
+                Faux.texte_ant = json.dumps({"reponse": "je lis", "actions": [{"outil": "service_journal", "args": {"nom": "nc-ile.service"}}]})
+                self.reglages("IA_ACTIONS=confirmer\n")
+                Faux.requetes.clear()
+                vus = []
+
+                def pendant(c=coupure, t=tour):
+                    vus.append(1)
+                    if len(vus) == t:
+                        self.reglages(f"IA_ACTIONS=confirmer\n{c}\n")
+                Faux.pendant = pendant
+                r = self.lancer("agir", "--json", "pourquoi l'île plante")
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertEqual(len([q for q in Faux.requetes if q["chemin"] == "/ant/messages"]), tour,
+                                 "aucune requête de plus une fois coupé")
+                if tour == 1:
+                    self.assertNotIn("journalctl", self.appels(), "aucun journal lu une fois coupé")
+                self.assertFalse(list(plans.glob("*.json")) if plans.exists() else [], "aucun plan gardé")
+
+    def test_relais_coupe_pendant_la_premiere_ia(self):
+        """Contre-relecture de B2 : en automatique, l'IA coupée pendant que la première échouait, la question partait
+        quand même vers la suivante."""
+        self.cles((self.home / ".config/nc/ia.conf").read_text() + f"OPENAI_API_KEY={CLE_O}\n")
+        Faux.anthropic_refuse = True
+        Faux.pendant = lambda: self.reglages("IA_PREFERENCE=rapide\nIA_MODE=non\n")
+        r = self.lancer("demander", "question")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertFalse([q for q in Faux.requetes if q["chemin"] == "/oai/chat/completions"], "pas de relais une fois coupée")
+
+    def test_plan_jamais_a_moitie_ecrit(self):
+        """Contre-relecture de B2 : interrompu entre l'écriture et le renommage, garder_plan laissait son fichier
+        temporaire dans le dossier des plans."""
+        m = charger_nc_ia("nc_ia_garder_plan")
+        m.PLANS = self.home / "plans"
+        with self.assertRaises(TypeError):
+            m.garder_plan({"id": "0123456789abcdef", "actions": [object()]})     # échoue au milieu de l'écriture
+        self.assertEqual([f.name for f in m.PLANS.iterdir()], [], "aucun fichier temporaire laissé")
 
     def test_agir_lance_les_outils_du_bureau(self):
         # Revue Codex IA-01 : les programmes de ~/.local/bin (nc-brightness, nc-paquets) sont bien trouvés

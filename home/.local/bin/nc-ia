@@ -1198,7 +1198,12 @@ def demander(texte, usage="question", force="", image=None, consigne_=None, flux
         raise ErreurIA(message_aucune(usage))
     rates = []
     RELAIS.clear()
+    global _reglages
     for ident in liste:
+        if rates:                                # coupée pendant que la précédente échouait : pas de relais
+            _reglages = None
+            if coupee():
+                raise ErreurIA(message_coupee())
         morceaux = []
         CHOIX.clear()
         filtre = FiltreOutils()
@@ -2013,6 +2018,18 @@ def executer_action(a):
     return False, T("outil inconnu", "unknown tool")
 
 
+def droit_d_agir():
+    """Les réglages relus (pas le cache) : l'IA ou ses actions coupées pendant qu'elle répondait ou qu'une action se
+    faisait, ErreurIA (code 3 si l'IA est coupée, 1 sinon) ; sinon, les domaines permis maintenant."""
+    global _reglages
+    _reglages = None
+    if coupee():
+        raise ErreurIA(message_coupee())
+    if actions_mode() == "non":
+        raise ErreurIA(T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
+    return domaines_permis()
+
+
 def agir(demande, bureau=None):
     """Le plan de l'IA pour cette demande : {id, reponse, ia, actions: [{n, libelle, danger, fait, ok, resultat}], refus}.
     bureau : portée « ce bureau seulement », gardée dans le plan et revérifiée à l'exécution."""
@@ -2036,6 +2053,13 @@ def agir(demande, bureau=None):
         lectures = [a for a in (d.get("actions") or []) if isinstance(a, dict) and OUTILS.get(a.get("outil"), {}).get("lecture")]
         if not lectures or tour == 1:
             break
+        # Coupé pendant que l'IA répondait (IA, ses actions, ou le domaine d'un journal à lire) : rien n'est lu, et
+        # aucune deuxième requête ne part (contre-relecture de B2, comme B2-03)
+        domaines = droit_d_agir()
+        coupes = {OUTILS[a["outil"]]["domaine"] for a in lectures[:4]} - set(domaines)
+        if coupes:
+            raise ErreurIA(T("Coupé pendant la réponse de l'IA : rien n'a été lu (", "Turned off during the AI's answer: "
+                             "nothing was read (") + ", ".join(sorted(coupes)) + ").")
         resultats = []
         for a in lectures[:4]:
             try:
@@ -2045,6 +2069,7 @@ def agir(demande, bureau=None):
                 resultats.append(f"=== {a.get('outil')} === {e}")
         texte += T("\n\nRésultats de tes lectures :\n", "\n\nResults of your reads:\n") + "\n".join(resultats) + \
             T("\n\nPropose maintenant le plan final (sans nouvelle lecture).", "\n\nNow propose the final plan (no more reads).")
+    domaines = droit_d_agir()                   # pareil pour le plan : coupé entre-temps, aucun plan gardé
     plan = dict(id=os.urandom(8).hex(), t=time.time(), reponse=str(d.get("reponse") or "")[:2000], ia=nom(ident),
                 agent=FOURNISSEURS.get(ident, {}).get("agent", "claude"), actions=[], refus=[],
                 portee={"bureau": bureau} if bureau is not None else {})
@@ -2066,10 +2091,14 @@ def garder_plan(plan):
     PLANS.mkdir(mode=0o700, parents=True, exist_ok=True)
     f = PLANS / f"{plan['id']}.json"
     tmp = f.with_name(f".{f.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as o:
-        o.write(json.dumps(plan, ensure_ascii=False))
-    tmp.replace(f)                                       # atomique : jamais un plan à moitié écrit
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as o:
+            o.write(json.dumps(plan, ensure_ascii=False))
+        tmp.replace(f)                                   # atomique : jamais un plan à moitié écrit
+    except BaseException:                                # interrompu (SIGTERM, erreur) : pas de fichier temporaire laissé
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def executer_plan(ident, numeros=None):
@@ -2115,17 +2144,18 @@ def _executer_plan(ident, numeros):
     bureau = (plan.get("portee") or {}).get("bureau")
     services = services_session() if "services" in domaines else {}
     fenetres = fenetres_bureau(bureau) if "fenetres" in domaines else {}
-    global _reglages
     for a in plan["actions"]:
         if a.get("fait") or (numeros is not None and a["n"] not in numeros):
             continue
         # Réglages relus avant chaque action : l'IA (ou ses actions, ou ce domaine) coupée pendant la précédente, la
-        # suivante ne se fait pas (revue B2-02) ; ce qui est déjà fait reste noté
-        _reglages = None
-        if coupee() or actions_mode() == "non":
+        # suivante ne se fait pas (revue B2-02) ; ce qui est déjà fait reste noté, et joint à l'erreur : le Spotlight
+        # montre la première comme faite, pas encore « à faire »
+        try:
+            domaines = droit_d_agir()
+        except ErreurIA as e:
             garder_plan(plan)
-            raise ErreurIA(message_coupee() if coupee() else T("L'IA n'a pas le droit d'agir.", "The AI is not allowed to act."))
-        domaines = domaines_permis()
+            e.plan = plan
+            raise
         try:                                     # revérifiée : les permissions ont pu changer depuis la proposition
             v = valider_action({"outil": a["outil"], "args": a["args"]}, domaines, services, fenetres, bureau)
         except ErreurIA as e:
@@ -3083,7 +3113,12 @@ def main(a):
             if not a:
                 raise ErreurIA("nc-ia executer PLAN [N…]")
             nums = [int(x) for x in a[1:] if x.isdigit()] or None
-            plan = executer_plan(a[0], nums)
+            try:
+                plan = executer_plan(a[0], nums)
+            except ErreurIA as e:                # coupé en route : ce qui est fait est dit, puis l'erreur
+                if getattr(e, "plan", None):
+                    print(json.dumps(e.plan, ensure_ascii=False)) if json_out else afficher_plan(dict(e.plan, reponse=""))
+                raise
             print(json.dumps(plan, ensure_ascii=False)) if json_out else afficher_plan(dict(plan, reponse=""))
             return 0 if all(x["ok"] for x in plan["actions"] if x["fait"]) else 1
         if c in ("diagnostic", "diag"):

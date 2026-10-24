@@ -112,7 +112,11 @@ Item {
         stdout: StdioCollector { id: sortieExec }
         stderr: StdioCollector { id: erreurExec }
         onExited: code => {
-            try { r.plan = JSON.parse(sortieExec.text) } catch (e) { r.reponse = erreurExec.text.trim() || r.reponse }
+            // Coupé en route (IA ou ses actions) : le plan gardé arrive quand même (ce qui est fait est montré fait),
+            // et l'erreur dit pourquoi le reste ne s'est pas fait
+            var lu = true
+            try { r.plan = JSON.parse(sortieExec.text) } catch (e) { lu = false }
+            if (!lu || code !== 0) r.reponse = erreurExec.text.trim() || r.reponse
             r.chercher()
         }
     }
