@@ -1138,6 +1138,58 @@ class UneDemandeALaFois(ServeurDistant):
         self.assertIn("refusé (distance)", j)
         self.assertIn("autorisé (distance)", j)
 
+    def test_code_pendant_le_calme_n_autorise_pas_b(self):
+        """P2-1 : A expire pendant que tu tapes ; B attend au calme, sans confirm_request. Un code qui arrive alors
+        (le serveur l'attribuerait à B en remplaçant A) tombe sur une demande inconnue : B n'est pas autorisé, le code
+        n'est pas consommé ni compté comme faux."""
+        self.demarrer(NC_NOEUD_DELAI="8", NC_NOEUD_CALME="8")
+        ma, mb = self.home / "fait-a", self.home / "fait-b"
+        a = self.action("exec", {"command": f"touch {ma}"}, timeout=10.0)    # A : court, il expire vite
+        time.sleep(0.2)
+        b = self.action("exec", {"command": f"touch {mb}"}, timeout=60.0)     # B : long, il attend son tour
+        q = self.serveur.recevoir()
+        self.recus.append(q)
+        self.assertEqual((q["type"], q["req_id"]), ("confirm_request", a), "A d'abord")
+        self.attendre("confirm_cancel", a)                                   # A a expiré chez nous
+        self.repondre(b, "allow")                                            # le code tapé en lisant A, attribué à B
+        rep = self.attendre("response", b)
+        self.assertFalse(rep["success"], rep)
+        self.assertTrue(rep.get("denied"))
+        self.assertFalse(mb.exists(), "B n'est jamais autorisé")
+        self.assertFalse(ma.exists())
+        demandes = [m["req_id"] for m in self.recus if m.get("type") == "confirm_request"]
+        self.assertEqual(demandes, [a], "aucune confirm_request pour B pendant le calme")
+        j = self.journal()
+        self.assertNotIn("autorisé (distance)", j)
+        self.assertIn("ignorée (inconnue)", j)
+        self.assertNotIn("code refusé", j, "le code n'est pas compté comme faux")
+
+    def test_bad_code_la_response_de_a_part_avant_la_demande_de_b(self):
+        """P2-1 variante : un code faux pour A ne doit pas faire partir B avant la response (bad_code) de A, sinon on te
+        redemande un code alors que la demande montrée est déjà B."""
+        self.demarrer(NC_NOEUD_CALME="3")
+        ma, mb = self.home / "fait-a", self.home / "fait-b"
+        a = self.action("exec", {"command": f"touch {ma}"}, timeout=30.0)
+        time.sleep(0.2)
+        b = self.action("exec", {"command": f"touch {mb}"}, timeout=60.0)
+        q = self.serveur.recevoir()
+        self.recus.append(q)
+        self.assertEqual(q["req_id"], a)
+        self.repondre(a, "allow", code="000000")                             # code faux pour A
+        ordre = []
+        while len(ordre) < 2:
+            m = self.serveur.recevoir()
+            self.recus.append(m)
+            if m.get("type") == "response" and m.get("req_id") == a:
+                ordre.append("response-A")
+            elif m.get("type") == "confirm_request" and m.get("req_id") == b:
+                ordre.append("confirm_request-B")
+        self.assertEqual(ordre, ["response-A", "confirm_request-B"], ordre)
+        repA = next(m for m in self.recus if m.get("type") == "response" and m.get("req_id") == a)
+        self.assertEqual(repA.get("error_code"), "bad_code")
+        self.assertFalse(ma.exists())
+
+
 class CodeDistance(ServeurDistant):
     """Confirmation à distance avec le code TOTP de ton appli : le serveur seul ne peut pas autoriser."""
     def executee(self, rid, marque, decision="allow", code=True):

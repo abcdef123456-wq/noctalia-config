@@ -99,6 +99,12 @@ DELAIS_FIXES = {"read_file": 15 - MARGE_SERVEUR, "write_file": 15 - MARGE_SERVEU
                 "screenshot": 12, "clipboard_write": 12}
 EXEC_MIN = 2 * MARGE_SERVEUR       # commande (ou trame) au délai plus court : pas le temps de te demander, refus direct
 BUDGET_MIN = 1                     # moins d'1 s pour exécuter avant l'abandon du serveur : rien n'est fait
+DELAI_ENVOI = 20                   # une écriture WebSocket qui ne passe pas en 20 s : le serveur ne lit plus, on ferme
+# Après qu'une demande à distance finit SANS décision venue du téléphone (expiration, décision prise sur l'écran en
+# « les-deux », code faux ou rejoué), on garde le verrou distance au calme ce temps avant de relayer la suivante : une
+# frappe du code prend 25 à 40 s, bien plus que l'échéance d'une demande courte ; la demande suivante ne doit pas partir
+# et remplacer, chez le serveur, celle que tu es en train de lire, sinon le code tapé pour l'une autoriserait l'autre.
+DISTANCE_CALME = 15
 MAX_RESUME_DISTANCE = 3500         # résumé envoyé pour la confirmation à distance (un message Telegram : 4096)
 MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le client de l'upstream
 MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
@@ -177,6 +183,14 @@ class Definitif(Exception):
 def horloge():
     """Horloge monotone des échéances (remplacée dans les tests)."""
     return time.monotonic()
+
+
+def distance_calme():
+    """Durée de la période calme ; NC_NOEUD_CALME (tests) ne peut que la raccourcir."""
+    try:
+        return max(0.0, min(float(os.environ.get("NC_NOEUD_CALME", DISTANCE_CALME)), DISTANCE_CALME))
+    except ValueError:
+        return DISTANCE_CALME
 
 
 def delai_trame(v):
@@ -757,7 +771,16 @@ class WebSocket:
             tete += bytes([0x80 | 127]) + struct.pack("!Q", n)
         async with self.verrou:
             self.w.write(bytes(tete) + cle + masquer(donnees, cle))
-            await self.w.drain()
+            # Un serveur qui ne lit plus laisse drain() bloqué pour toujours, verrou d'écriture tenu : plus de pong, plus
+            # rien ne part (y compris confirm_cancel). On borne l'écriture et on ferme la connexion si elle ne passe pas.
+            try:
+                await asyncio.wait_for(self.w.drain(), DELAI_ENVOI)
+            except (asyncio.TimeoutError, OSError):
+                self.ferme = True
+                with contextlib.suppress(Exception):
+                    self.w.close()
+                raise ErreurWS(T("Écriture bloquée vers le serveur : connexion fermée.",
+                                 "Write to the server stalled: connection closed.")) from None
 
     async def envoyer(self, objet):
         await self.trame(0x1, json.dumps(objet, ensure_ascii=False).encode("utf-8"))
@@ -1255,6 +1278,7 @@ class ConfirmationDistance:
         self.attentes = {}              # req_id → (futur, échéance)
         self.finies = {}                # req_id → « décidée » ou « close » (ordre d'insertion : les plus anciennes d'abord)
         self.verrou = asyncio.Lock()    # une confirm_request en vol par nœud
+        self.calme_jusqu = 0.0          # horloge monotone : rien ne part avant (période calme après une fin sans code)
 
     def impossible(self, ws, req_id, resume):
         return ws is None or ws.ferme or not isinstance(req_id, str) or not req_id or req_id in self.attentes \
@@ -1269,8 +1293,16 @@ class ConfirmationDistance:
         # Ce verrou n'est jamais tenu en attendant un autre (la carte a le sien, pris dans sa propre tâche) : en
         # « les-deux », pas d'interblocage possible
         async with tour(self.verrou, limite) as pris:
+            if not pris or limite - horloge() < 1:
+                return "expire"
+            # Période calme : tant qu'elle dure, on tient le verrou sans rien envoyer, pour ne pas remplacer chez le
+            # serveur la demande précédente qu'une personne est peut-être en train de lire. On n'attend jamais au-delà
+            # de notre propre échéance : passé elle, cette demande expire sans jamais partir.
+            fin_calme = min(self.calme_jusqu, limite)
+            while horloge() < fin_calme:
+                await asyncio.sleep(min(0.15, max(0.0, fin_calme - horloge())))
             reste = limite - horloge()
-            if not pris or reste < 1:
+            if reste < 1:
                 return "expire"
             if self.impossible(ws, req_id, resume):            # connexion fermée, ou même req_id servi entre-temps
                 return "indisponible"
@@ -1280,14 +1312,22 @@ class ConfirmationDistance:
         futur = asyncio.get_running_loop().create_future()
         self.attentes[req_id] = (futur, limite)
         fin = "close"
+        calme = False                                              # garder le verrou au calme ensuite ?
         try:
             await ws.envoyer({"type": "confirm_request", "req_id": req_id, "action": nom, "summary": resume,
                               "expires_in": max(1, math.floor(reste)), "code_required": True})
             try:
                 v = await asyncio.wait_for(asyncio.shield(futur), max(limite - horloge(), 0))
             except asyncio.TimeoutError:
+                calme = True                                       # expirée pendant que tu tapes peut-être encore
                 return "expire"
+            except asyncio.CancelledError:
+                calme = True                                       # décidée sur l'écran (les-deux) : A se ferme ici
+                raise
             fin = "décidée"
+            # Un code faux ou rejoué n'est PAS une décision du téléphone : un autre code peut arriver, il ne doit pas
+            # retomber sur la demande suivante
+            calme = v in ("code", "replay")
             return {"allow": "autorise", "deny": "refuse", "replay": "rejoue"}.get(v, "code")
         except (OSError, ErreurWS):
             return "indisponible"
@@ -1296,6 +1336,11 @@ class ConfirmationDistance:
             self.finies[req_id] = fin
             while len(self.finies) > self.GARDEES:
                 self.finies.pop(next(iter(self.finies)))
+            # Ouvrir la période calme AVANT d'envoyer confirm_cancel et de rendre le verrou : la demande suivante,
+            # déjà en attente du verrou, la verra et patientera. La response de CETTE demande, elle, part tout de suite
+            # (elle ne passe pas par le verrou), donc avant que la suivante ne relaye.
+            if calme:
+                self.calme_jusqu = horloge() + distance_calme()
             if fin != "décidée":                                   # l'autre côté a décidé, ou plus personne n'attend
                 with contextlib.suppress(Exception):
                     await asyncio.shield(ws.envoyer({"type": "confirm_cancel", "req_id": req_id}))

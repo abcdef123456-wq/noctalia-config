@@ -294,7 +294,9 @@ demander.
   demander : refus direct. L’exécution elle-même s’arrête aussi 3 s avant l’abandon du serveur : une commande
   autorisée au bout de 23 s sur 35 a 9 s pour tourner, puis elle est tuée ; s’il reste moins d’1 s, rien n’est fait.
   Avec un serveur qui n’annonce pas de délai dans la trame, une commande a donc au plus 17 s, confirmation comprise.
-  Un « Autoriser » tardif affiche « Trop tard » et le serveur reçoit un seul refus.
+  Un « Autoriser » tardif affiche « Trop tard » et le serveur reçoit un seul refus. Le délai annoncé est accepté
+  jusqu’à une heure ; une trame très longue (par exemple 3 600 s) laisse donc une exécution d’autant, mais une commande
+  reste de toute façon bornée à 120 s (son propre `timeout`, plafonné), et lire ou écrire un fichier est quasi instantané.
 - **La clé secrète part seulement dans l’en-tête** `X-Secret-Key`, jamais dans l’adresse. La connexion est en
   `wss://`, ou en `ws://` seulement vers un réseau privé ou Tailscale (le serveur `64523e5` refuse lui aussi `ws://`
   vers un hôte public).
@@ -375,9 +377,19 @@ taille n’est jamais envoyé.
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
    n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
    **Une seule `confirm_request` à la fois pour ce PC** : un serveur peut remplacer la demande montrée par la
-   nouvelle (c’est le cas de JARVIS-BIS `9f4cdeb`), et le code tapé après avoir lu la première autoriserait la seconde. Une autre action sensible attend donc
+   nouvelle (c’est le cas de JARVIS-BIS `9f4cdeb`). Une autre action sensible attend donc
    que la première soit décidée ou close (son `confirm_cancel` part avant) ; si son échéance passe avant, elle est
-   refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file.
+   refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file. De plus, quand
+   une demande finit **sans** décision venue du téléphone (elle expire, elle est décidée sur l’écran en `les-deux`, ou
+   le code est faux ou rejoué), `nc-noeud` garde la voie à distance **au calme une quinzaine de secondes** avant de
+   relayer la suivante (jamais au-delà de l’échéance de celle qui attend : elle expire alors sans partir). Une frappe
+   du code prend 25 à 40 s, bien plus que l’échéance d’une demande courte : sans ce délai, la demande suivante
+   remplacerait tout de suite, chez le serveur, celle que tu lisais, et le code tapé pour l’une autoriserait l’autre.
+   Pendant ce calme, un code encore en route tombe sur une demande déjà close : il est ignoré comme tardif, pas
+   consommé, pas compté comme faux. **Ce délai réduit la fenêtre, il ne la ferme pas** : un code tapé bien plus tard,
+   juste quand la demande suivante apparaît, l’autoriserait encore. La vraie parade est côté serveur : exiger que le
+   code soit envoyé **en réponse au message même de la demande** (`reply_to_message`), pour le lier à ce qui est montré.
+   C’est une recommandation au serveur ; `nc-noeud` ne peut pas la vérifier.
 3. Le serveur répond, une fois :
    ```json
    {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow", "code": "123456"}
