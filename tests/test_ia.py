@@ -1330,8 +1330,10 @@ class IA(unittest.TestCase):
         """Revue B2-05 : un programme d'IA qui a répondu et fini (code 0) mais laisse un sous-processus sur sa sortie :
         la lecture attendait l'échéance, « délai dépassé », et l'IA était notée en échec. Sa fin compte : réponse
         rendue, son groupe arrêté peu après, rien de noté."""
-        import signal, time
-        self.programme("opencode", 'sleep 7654325 & echo "réponse complète"; exit 0')
+        import random, signal, time
+        # Un nombre propre à ce lancement : deux suites en même temps ne voient (ni ne tuent) pas le sleep de l'autre
+        marque = str(random.randint(10**8, 10**9 - 1))
+        self.programme("opencode", f'sleep {marque} & echo "réponse complète"; exit 0')
         self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
 
         def vivants():
@@ -1341,7 +1343,7 @@ class IA(unittest.TestCase):
                     argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
                 except OSError:
                     continue
-                if d.name.isdigit() and argv == [b"sleep", b"7654325"]:
+                if d.name.isdigit() and argv == [b"sleep", marque.encode()]:
                     r.append(int(d.name))
             return r
 
@@ -1349,14 +1351,19 @@ class IA(unittest.TestCase):
             for pid in vivants():
                 os.kill(pid, signal.SIGKILL)
         self.addCleanup(nettoyer)
-        debut = time.time()
-        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "8"})
-        self.assertLess(time.time() - debut, 6, "pas d'attente jusqu'à l'échéance")
+        # Échéance large (30 s) : la réponse doit venir bien avant, même sur une machine chargée
+        debut = time.monotonic()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_CLI": "30"})
+        self.assertLess(time.monotonic() - debut, 20, "pas d'attente jusqu'à l'échéance")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("réponse complète", r.stdout)
         self.assertNotIn("délai dépassé", r.stderr)
         echecs = self.home / "run/nc-ia/echecs.json"
         self.assertNotIn("opencode", echecs.read_text() if echecs.exists() else "", "pas noté en échec")
+        # Le groupe est arrêté peu après la fin du programme : on attend que ce soit fait (10 s au plus, garde-fou)
+        limite = time.monotonic() + 10
+        while vivants() and time.monotonic() < limite:
+            time.sleep(0.1)
         self.assertEqual(vivants(), [], "le sous-processus resté est arrêté")
 
     def test_jarvis_arrete_proprement(self):
@@ -1393,8 +1400,10 @@ class IA(unittest.TestCase):
 
     def test_demande_abandonnee_arrete_le_programme_et_ses_enfants(self):
         """Revue IA-07 : Échap (nc-ia arrêté par SIGTERM) laissait le programme d'IA et ses sous-processus aller au bout."""
-        import signal, time
-        self.programme("opencode", 'sleep 7654321 & echo "début"; sleep 7654322')
+        import random, signal, time
+        # Des nombres propres à ce lancement : deux suites en même temps ne voient (ni ne tuent) pas les sleep de l'autre
+        m1, m2 = (str(random.randint(10**8, 10**9 - 1)) for _ in range(2))
+        self.programme("opencode", f'sleep {m1} & echo "début"; sleep {m2}')
         self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
         self.lancer("etat")                                    # prépare les faux programmes
         env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
@@ -1408,7 +1417,7 @@ class IA(unittest.TestCase):
                     argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
                 except OSError:
                     continue
-                if d.name.isdigit() and argv in ([b"sleep", b"7654321"], [b"sleep", b"7654322"]):
+                if d.name.isdigit() and argv in ([b"sleep", m1.encode()], [b"sleep", m2.encode()]):
                     r.append(int(d.name))
             return r
 
@@ -1420,18 +1429,25 @@ class IA(unittest.TestCase):
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         while "début" not in p.stdout.readline():                # (la première ligne dit quelle IA répond)
             pass
+        limite = time.monotonic() + 10                          # le second sleep démarre juste après « début »
+        while len(vivants()) < 2 and time.monotonic() < limite:
+            time.sleep(0.05)
         self.assertEqual(len(vivants()), 2)
         p.send_signal(signal.SIGTERM)
         self.assertEqual(p.wait(10), 143)
-        time.sleep(0.3)
+        limite = time.monotonic() + 10                          # garde-fou : la fin du groupe suit de près
+        while vivants() and time.monotonic() < limite:
+            time.sleep(0.05)
         self.assertEqual(vivants(), [], "ni le programme, ni son sous-processus")
         p.stdout.close()
 
     def test_question_du_spotlight_abandonnee_arrete_le_programme(self):
         """Revue B2-04 : nc-demander (« ? » du Spotlight) charge nc-ia comme un module : le gestionnaire de SIGTERM de
         nc-ia n'était pas posé, Échap laissait le programme d'IA et son sous-processus aller au bout."""
-        import signal, time
-        self.programme("opencode", 'sleep 7654323 & echo "début"; sleep 7654324')
+        import random, signal, time
+        # Des nombres propres à ce lancement : deux suites en même temps ne voient (ni ne tuent) pas les sleep de l'autre
+        m1, m2 = (str(random.randint(10**8, 10**9 - 1)) for _ in range(2))
+        self.programme("opencode", f'sleep {m1} & echo "début"; sleep {m2}')
         self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
         self.lancer("etat")                                    # prépare les faux programmes
 
@@ -1442,7 +1458,7 @@ class IA(unittest.TestCase):
                     argv = (d / "cmdline").read_bytes().split(b"\0")[:2]
                 except OSError:
                     continue
-                if d.name.isdigit() and argv in ([b"sleep", b"7654323"], [b"sleep", b"7654324"]):
+                if d.name.isdigit() and argv in ([b"sleep", m1.encode()], [b"sleep", m2.encode()]):
                     r.append(int(d.name))
             return r
 
@@ -1455,11 +1471,14 @@ class IA(unittest.TestCase):
         self.addCleanup(lambda: p.poll() is None and p.kill())
         while "début" not in p.stdout.readline():
             self.assertIsNone(p.poll())
+        limite = time.monotonic() + 10                          # le second sleep démarre juste après « début »
+        while len(vivants()) < 2 and time.monotonic() < limite:
+            time.sleep(0.05)
         self.assertEqual(len(vivants()), 2)
         p.send_signal(signal.SIGTERM)
         self.assertEqual(p.wait(10), 143)
-        fin = time.time() + 3
-        while vivants() and time.time() < fin:
+        fin = time.monotonic() + 10                             # garde-fou : la fin du groupe suit de près
+        while vivants() and time.monotonic() < fin:
             time.sleep(0.05)
         self.assertEqual(vivants(), [], "ni le programme, ni son sous-processus")
         p.stdout.close()
