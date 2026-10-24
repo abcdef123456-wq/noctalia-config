@@ -101,7 +101,9 @@ function theme(p) {
       button_background_hover: carte, button_background_active: carteSurvol,
       toolbar_bottom_separator: fond, toolbar_top_separator: fond, toolbar_vertical_separator: fond,
     },
-    properties: { color_scheme: sombre ? "dark" : "light", content_color_scheme: "auto" },
+    // Pages internes (réglages, modules…) du même côté que la palette : avec "auto", elles suivaient le système et
+    // une palette sombre sur un système clair donnait des réglages clairs
+    properties: { color_scheme: sombre ? "dark" : "light", content_color_scheme: sombre ? "dark" : "light" },
   };
 }
 

@@ -17,9 +17,10 @@
   --nc-carte-survol: var(--nc-couleur-carte-survol, var(--nc-theme-survol));
   --nc-accent: var(--nc-couleur-accent, var(--toolbar-field-border-color-focus, var(--toolbar-field-focus-border-color, AccentColor)));
   --nc-texte: var(--nc-couleur-texte, var(--nc-theme-texte));
-  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-theme-texte) 70%, transparent));
-  /* Contour d'un champ au repos : 3:1 sur la barre (35 % en sombre, 50 % en clair, mesuré dans Firefox 159) */
-  --nc-contour-champ: light-dark(color-mix(in srgb, var(--nc-texte) 50%, var(--nc-fond)), color-mix(in srgb, var(--nc-texte) 35%, var(--nc-fond)));
+  /* Texte secondaire avec l'extension (sans couleur de palette) : 80 % du texte, 4,5:1 même sur la ligne choisie */
+  --nc-texte-sec: var(--nc-couleur-texte-sec, color-mix(in srgb, var(--nc-theme-texte) 80%, transparent));
+  /* Contour d'un champ au repos : 3:1 sur la barre (40 % en sombre, 50 % en clair ; 35 % ne donnait que 2,97:1) */
+  --nc-contour-champ: light-dark(color-mix(in srgb, var(--nc-texte) 50%, var(--nc-fond)), color-mix(in srgb, var(--nc-texte) 40%, var(--nc-fond)));
   --nc-arrondi: 11px;
   --tab-min-height: 34px !important;
   --toolbarbutton-border-radius: 9px !important;
@@ -36,7 +37,6 @@
   border: none !important;
   box-shadow: none !important;
 }
-#navigator-toolbox::after { display: none !important; }
 
 /* Onglets en pastilles : l'onglet ouvert nettement plus clair que la barre, un liseré d'accent en haut ; les autres
    sans fond, texte atténué, fond léger au survol */
@@ -58,51 +58,79 @@
 .tabbrowser-tab[selected] .tab-content { color: var(--nc-texte) !important; }
 .tabbrowser-tab:not([selected]) .tab-content { color: var(--nc-texte-sec) !important; }
 .tabbrowser-tab:hover:not([selected]) .tab-content { color: var(--nc-texte) !important; }
-.tabbrowser-tab::before, .tabbrowser-tab::after,
-.tabbrowser-tab .tab-line { display: none !important; }
 
 /* Barre d'adresse et recherche : une pastille, un liseré accent quand elle a le focus */
 /* Hors focus, un contour visible (3:1 sur la barre) : le champ ne se distinguait du fond qu'à 1,10:1 */
 /* Le texte du champ suit la même palette que son fond (sinon celui du thème Firefox, d'un autre côté possible) */
+/* (#searchbar : l'ancienne barre de recherche, encore là en ESR 140 ; #searchbar-new : la nouvelle, Firefox 159) */
 #urlbar,
-#searchbar {
+#searchbar,
+#searchbar-new {
   --toolbar-field-text-color: var(--nc-texte) !important;
   --toolbar-field-text-color-focus: var(--nc-texte) !important;
 }
+/* Firefox 159 (Nova) : le fond du champ (.urlbar-background) et celui de la liste ouverte (.urlbarView-background)
+   sont peints à partir de ces deux jetons ; la carte pour les deux, même sans l'extension (Firefox grand public) */
+:root,
+#urlbar,
+#searchbar-new {
+  --urlbar-background-color: var(--nc-carte) !important;
+  --urlbar-background-color-focus: var(--nc-carte) !important;
+}
+/* Forme et contour seulement champ fermé : liste ouverte, Firefox joint lui-même le champ et la liste (un seul
+   contour, une seule ombre) ; les forcer coupait la jonction (encoche, ombre à moitié) */
 #urlbar-background,
-#urlbar > .urlbar-background,
-#searchbar {
+#searchbar,
+#urlbar:not([popover-open]) > .urlbar-background,
+#searchbar-new:not([popover-open]) > .urlbar-background {
   border-radius: var(--nc-arrondi) !important;
-  background-color: var(--nc-carte) !important;
   border: 1px solid var(--nc-contour-champ) !important;
   box-shadow: none !important;
+}
+#urlbar-background,
+#urlbar > .urlbar-background,
+#searchbar,
+#searchbar-new > .urlbar-background {
+  background-color: var(--nc-carte) !important;
 }
 /* Au focus, Firefox garde son propre liseré (la couleur d'accent du système) : il se dessine hors de ces éléments */
 #urlbar[focused] > #urlbar-background,
 #urlbar[focused="true"] > #urlbar-background,
-#urlbar[focused] > .urlbar-background {
+#urlbar[focused]:not([popover-open]) > .urlbar-background,
+#searchbar-new[focused]:not([popover-open]) > .urlbar-background {
   border-color: var(--nc-accent) !important;
 }
 /* Liste des suggestions (la recherche) : lisible quelle que soit la palette. Mesuré : la ligne choisie au fond
    « carte-survol » ne se distinguait du fond qu'à 1,16:1, et « — Rechercher avec… » prenait la couleur de lien du
    thème GTK (jusqu'à 1,8:1 sur un fond sombre). Ligne choisie nettement plus claire, avec le liseré d'accent des
-   onglets ; textes secondaires et actions aux couleurs de la palette (accent : 6:1 et plus sur le fond). */
+   onglets ; textes secondaires et actions aux couleurs de la palette (accent : 6:1 et plus sur le fond).
+   Pas de fond ici : la liste est sur la carte (le fond du champ, jetons ci-dessus) ; un fond sur .urlbarView se
+   dessinait sous celui de Firefox 159, en cadre à coins carrés autour de la liste arrondie.
+   Jetons en deux générations : --urlbarview-* (Firefox 159), --urlbarView-* (ESR 140, Debian 13) ; --link-color :
+   l'adresse des suggestions, sinon le violet du thème Firefox. */
 #urlbar[open] > .urlbarView,
 .urlbarView {
-  background-color: var(--nc-fond) !important;
   color: var(--nc-texte) !important;
-  --nc-ligne-choisie: color-mix(in srgb, var(--nc-texte) 18%, var(--nc-fond));
+  --nc-ligne-choisie: color-mix(in srgb, var(--nc-texte) 18%, var(--nc-carte));
+  --nc-ligne-survol: color-mix(in srgb, var(--nc-texte) 9%, var(--nc-carte));
+  /* Texte secondaire sur la ligne choisie : un peu de texte en plus (la ligne, sur la carte, est plus claire
+     qu'avant ; sinon 4,05:1 avec la palette réelle) */
+  --nc-texte-sec-choisie: color-mix(in srgb, var(--nc-texte-sec) 60%, var(--nc-texte));
   --urlbarview-text-color-action: var(--nc-accent) !important;
   --urlbarview-text-color-secondary: var(--nc-texte-sec) !important;
   --urlbarview-text-color-selected: var(--nc-texte) !important;
   --urlbarview-text-color-hover: var(--nc-texte) !important;
   --urlbarview-background-color-selected: var(--nc-ligne-choisie) !important;
-  --urlbarview-background-color-hover: color-mix(in srgb, var(--nc-texte) 9%, var(--nc-fond)) !important;
+  --urlbarview-background-color-hover: var(--nc-ligne-survol) !important;
   --urlbarView-highlight-background: var(--nc-ligne-choisie) !important;
   --urlbarView-highlight-color: var(--nc-texte) !important;
+  --urlbarView-action-color: var(--nc-accent) !important;
+  --urlbarView-secondary-text-color: var(--nc-texte-sec) !important;
+  --urlbarView-hover-background: var(--nc-ligne-survol) !important;
+  --link-color: color-mix(in srgb, var(--nc-accent) 75%, var(--nc-texte)) !important;
 }
 .urlbarView-row:hover > .urlbarView-row-inner {
-  background-color: color-mix(in srgb, var(--nc-texte) 9%, var(--nc-fond)) !important;
+  background-color: var(--nc-ligne-survol) !important;
   border-radius: 8px !important;
 }
 .urlbarView-row[selected] > .urlbarView-row-inner {
@@ -113,19 +141,24 @@
 }
 .urlbarView-row[selected] .urlbarView-action,
 .urlbarView-row[selected] .urlbarView-url,
-.urlbarView-row[selected] .urlbarView-title-separator::before { color: var(--nc-texte-sec) !important; }
+.urlbarView-row[selected] .urlbarView-title-separator::before { color: var(--nc-texte-sec-choisie) !important; }
 
 /* Boutons des barres, menus et panneaux : coins arrondis, mêmes couleurs */
 .toolbarbutton-1 > .toolbarbutton-icon,
 .toolbarbutton-1 > .toolbarbutton-badge-stack {
   border-radius: var(--toolbarbutton-border-radius) !important;
 }
+/* Barre latérale : jetons pour Firefox 159 (sidebar-main y est un élément, sans id) ; #sidebar-main pour ESR 140 */
+:root {
+  --sidebar-background-color: var(--nc-fond) !important;
+  --sidebar-text-color: var(--nc-texte) !important;
+}
 #sidebar-box, #sidebar-header, #sidebar-main {
   background-color: var(--nc-fond) !important;
   color: var(--nc-texte) !important;
   border: none !important;
 }
-.panel-arrowcontent, #appMenu-popup, #PanelUI-menu-button + .panel-arrowcontent {
+.panel-arrowcontent, #appMenu-popup {
   border-radius: 12px !important;
 }
 
@@ -137,5 +170,7 @@
   border: 1px solid var(--nc-contour-champ) !important;
   border-radius: 8px !important;
 }
+/* Au focus, le liseré à l'accent de la palette (sinon celui du thème Firefox) */
+.browserContainer > findbar .findbar-textbox:focus { outline-color: var(--nc-accent) !important; }
 /* Introuvable : un rouge lisible des deux côtés (#e66a6a n'avait que 2,4:1 sur un champ clair) */
 .browserContainer > findbar .findbar-textbox[status="notfound"] { border-color: light-dark(#c83c3c, #e66a6a) !important; }

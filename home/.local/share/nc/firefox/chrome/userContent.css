@@ -12,5 +12,8 @@
 
 /* Pages du navigateur (réglages, modules…) : coins arrondis sur les cartes, dans l'esprit de l'île */
 @-moz-document url-prefix("about:preferences"), url-prefix("about:addons") {
-  :root { --in-content-border-radius: 10px; }
+  /* --border-radius-medium : le jeton des cartes en ESR 140 comme en 159 (--in-content-border-radius n'existe plus).
+     12 px, la valeur de Firefox 159 « Nova » (8 px sans Nova et en ESR 140) ; !important, sinon la feuille de la
+     page l'emporte sur celle de l'utilisateur */
+  :root { --border-radius-medium: 12px !important; }
 }
