@@ -1003,6 +1003,38 @@ class IA(unittest.TestCase):
         self.assertNotIn("opencode", echecs.read_text() if echecs.exists() else "", "pas noté en échec")
         self.assertEqual(vivants(), [], "le sous-processus resté est arrêté")
 
+    def test_jarvis_arrete_proprement(self):
+        """Revue B2-13 : JARVIS était coupé à 300 s alors que son délai (TIMEOUT) va jusqu'à 600, et d'un SIGKILL :
+        nc-assistant ne pouvait pas dire « fin » à l'île, restée sur « JARVIS réfléchit ». Arrêté par SIGTERM d'abord,
+        à l'échéance comme quand la demande est abandonnée (Échap)."""
+        import signal, time
+        self.assertGreaterEqual(charger_nc_ia("nc_ia_b213").DELAI_JARVIS, 600, "au moins le plus long délai de JARVIS")
+        faux = self.home / ".local/bin/nc-assistant"
+        faux.unlink()
+        faux.write_text("import os, signal, sys, time\n"
+                        "def fin(*_):\n"
+                        "    open(os.environ['JOURNAL'], 'a').write('jarvis fin\\n'); sys.exit(1)\n"
+                        "signal.signal(signal.SIGTERM, fin)\n"
+                        "open(os.environ['JOURNAL'], 'a').write('jarvis debut\\n')\n"
+                        "time.sleep(60)\n")
+        (self.home / ".config/nc/assistant.conf").write_text("URL=https://exemple.invalid\n")
+        (self.home / ".config/nc/assistant.conf").chmod(0o600)
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=jarvis\n")
+        debut = time.time()
+        r = self.lancer("demander", "question", env_plus={"NC_IA_DELAI_JARVIS": "1"})
+        self.assertLess(time.time() - debut, 10)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("jarvis fin", self.appels(), "l'échéance : arrêté par SIGTERM, l'île est prévenue")
+        # Échap (nc-ia arrêté) pendant que JARVIS réfléchit : pareil
+        self.journal.unlink()
+        p = subprocess.Popen([str(self.home / ".local/bin/nc-ia"), "demander", "--flux", "question"], env=self.env_test(),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        self.attendre_journal("jarvis debut")
+        p.send_signal(signal.SIGTERM)
+        self.assertEqual(p.wait(10), 143)
+        self.attendre_journal("jarvis fin", 5)
+
     def test_demande_abandonnee_arrete_le_programme_et_ses_enfants(self):
         """Revue IA-07 : Échap (nc-ia arrêté par SIGTERM) laissait le programme d'IA et ses sous-processus aller au bout."""
         import signal, time

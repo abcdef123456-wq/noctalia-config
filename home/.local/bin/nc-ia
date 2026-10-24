@@ -831,15 +831,32 @@ def appel_programme(ident, consigne, texte, image, usage):
 CHOIX = []      # choix proposés par JARVIS pour la dernière réponse (issue #7) : une ligne {"choices": …} en flux
 
 
+DELAI_JARVIS = float(os.environ.get("NC_IA_DELAI_JARVIS", 630))   # TIMEOUT de nc-assistant : jusqu'à 600 s, + la marge
+
+
 def appel_jarvis(consigne, texte, image, usage):
-    r = subprocess.run([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--flux", "--",
-                        consigne + "\n\n" + texte], capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
-    if r.returncode != 0:
-        raise ErreurIA((r.stderr.strip().splitlines() or ["JARVIS"])[-1][:200])
+    # Arrêté (échéance, ou nc-ia arrêté par Échap) : SIGTERM d'abord, nc-assistant dit « fin » à l'île ; un SIGKILL
+    # direct la laissait sur « JARVIS réfléchit », et l'échéance de 300 s coupait un TIMEOUT réglé plus long (revue B2-13)
+    with subprocess.Popen([sys.executable, str(HOME / ".local/bin/nc-assistant"), "demander", "--flux", "--",
+                           consigne + "\n\n" + texte], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          stdin=subprocess.DEVNULL) as p:
+        try:
+            sortie, erreur = p.communicate(timeout=DELAI_JARVIS)
+        except subprocess.TimeoutExpired:
+            raise ErreurIA(T("JARVIS n'a pas répondu à temps", "JARVIS did not answer in time")) from None
+        finally:
+            if p.poll() is None:
+                p.terminate()
+                try:
+                    p.wait(5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+    if p.returncode != 0:
+        raise ErreurIA((erreur.strip().splitlines() or ["JARVIS"])[-1][:200])
     try:
-        d = json.loads(r.stdout.strip().splitlines()[-1])
+        d = json.loads(sortie.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        yield r.stdout.strip()                                  # ancien nc-assistant : du texte
+        yield sortie.strip()                                    # ancien nc-assistant : du texte
         return
     CHOIX[:] = [c for c in d.get("choices") or [] if isinstance(c, str)][:5]
     yield str(d.get("t", "")).strip()
