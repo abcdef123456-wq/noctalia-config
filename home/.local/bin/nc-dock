@@ -72,9 +72,12 @@ config.toml is never touched: updates (nc-update) replace it. Without settings.t
 Exit codes: 0 done (or already done), 1 usage, 2 unknown or hidden app, 3 could not write."""
 
 HOME = os.path.expanduser("~")
-CONFIG = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.path.join(HOME, ".config"), "noctalia")
-ETAT = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.path.join(HOME, ".local/state"), "noctalia",
-                    "settings.toml")
+# Les dossiers de Noctalia, comme lui (configDir, stateDir de src/util/file_utils.h) : NOCTALIA_*_HOME, puis
+# XDG_*_HOME, puis ~/.config et ~/.local/state ; sinon nc-dock écrirait un fichier que Noctalia ne lit pas
+CONFIG = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+                      or os.path.join(HOME, ".config"), "noctalia")
+ETAT = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.environ.get("XDG_STATE_HOME")
+                    or os.path.join(HOME, ".local/state"), "noctalia", "settings.toml")
 FICHIER = os.path.join(CONFIG, "zz-dock.toml")
 ENTETE = ("# Écrit par nc-dock : tes applis épinglées au dock. Ne pas éditer : nc-dock, le Spotlight (clic droit sur "
           "une appli)\n# ou nc-reglages → Barre et dock. Passe devant la liste « pinned » de config.toml.\n")

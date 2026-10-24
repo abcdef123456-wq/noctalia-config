@@ -51,7 +51,9 @@ class Banc:
         (self.bin / "noctalia").chmod(0o755)
         (r / "run").mkdir(mode=0o700)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("NOCTALIA_")}
-        self.env.update(HOME=str(r), XDG_DATA_HOME=str(r / ".local/share"), XDG_DATA_DIRS=str(r / "rien"),
+        # Les dossiers de Noctalia (NOCTALIA_*_HOME, puis XDG_*_HOME) : ceux du faux HOME, jamais ceux du garde-fou
+        self.env.update(HOME=str(r), XDG_CONFIG_HOME=str(r / ".config"), XDG_STATE_HOME=str(r / ".local/state"),
+                        XDG_DATA_HOME=str(r / ".local/share"), XDG_DATA_DIRS=str(r / "rien"),
                         XDG_RUNTIME_DIR=str(r / "run"), XDG_CACHE_HOME=str(r / "cache"), NC_LANGUE="fr", PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
 
     def dock(self, *args):
@@ -147,6 +149,37 @@ class NcDock(unittest.TestCase):
         self.assertFalse((b.config / "zz-dock.toml").exists())
         # L'ancien fichier, copié avant l'écriture
         self.assertEqual((b.r / "cache/nc/dock/settings.toml.avant").read_text(encoding="utf-8"), etat)
+
+    def test_dossiers_de_noctalia_xdg(self):
+        # C-2 : Noctalia lit NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config (et pareil pour l'état :
+        # NOCTALIA_STATE_HOME, XDG_STATE_HOME, ~/.local/state) ; nc-dock écrivait un fichier que Noctalia ne lisait pas
+        b = self.b
+        etat = 'config_version = 15\n\n[dock]\npinned = ["kitty"]\n'
+        for nom in ("xdg-etat", "noctalia-etat"):
+            (b.r / nom / "noctalia").mkdir(parents=True)
+            (b.r / nom / "noctalia/settings.toml").write_text(etat, encoding="utf-8")
+        b.env.pop("XDG_CONFIG_HOME")
+        b.env["XDG_STATE_HOME"] = str(b.r / "xdg-etat")
+        self.assertEqual(b.liste(), ["kitty"])
+        self.assertEqual(b.dock("epingler", "gimp").returncode, 0)
+        self.assertEqual((b.r / "xdg-etat/noctalia/settings.toml").read_text(encoding="utf-8"),
+                         'config_version = 15\n\n[dock]\npinned = ["kitty", "gimp"]\n')
+        self.assertFalse(b.etat.exists(), "rien dans ~/.local/state quand XDG_STATE_HOME est ailleurs")
+        # NOCTALIA_STATE_HOME passe avant XDG_STATE_HOME
+        b.env["NOCTALIA_STATE_HOME"] = str(b.r / "noctalia-etat")
+        self.assertEqual(b.dock("retirer", "kitty").returncode, 0)
+        self.assertEqual((b.r / "noctalia-etat/noctalia/settings.toml").read_text(encoding="utf-8"),
+                         'config_version = 15\n\n[dock]\npinned = []\n')
+        self.assertIn("gimp", (b.r / "xdg-etat/noctalia/settings.toml").read_text(encoding="utf-8"))
+        # Sans settings.toml : zz-dock.toml dans XDG_CONFIG_HOME/noctalia (config.toml relu au même endroit)
+        b.env.pop("NOCTALIA_STATE_HOME"); b.env["XDG_STATE_HOME"] = str(b.r / "vide")
+        b.env["XDG_CONFIG_HOME"] = str(b.r / "xdg-config")
+        (b.r / "xdg-config/noctalia").mkdir(parents=True)
+        shutil.copy2(b.config / "config.toml", b.r / "xdg-config/noctalia/config.toml")
+        self.assertEqual(b.liste(), ["firefox", "kitty", "org.gnome.Nautilus"])
+        self.assertEqual(b.dock("retirer", "kitty").returncode, 0)
+        self.assertTrue((b.r / "xdg-config/noctalia/zz-dock.toml").exists())
+        self.assertFalse((b.config / "zz-dock.toml").exists())
 
     def test_settings_toml_sans_liste(self):
         # settings.toml de Noctalia (config_version) sans pinned : la liste y est ajoutée, comme le fait le menu

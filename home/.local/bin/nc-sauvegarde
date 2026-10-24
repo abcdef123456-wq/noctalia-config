@@ -6,6 +6,7 @@
   nc-sauvegarde voir FICHIER        ce que contient une sauvegarde
 Les fichiers générés (couleurs, thème du terminal…) ne sont pas sauvegardés : ils se refont tout seuls.
 """
+import copy
 import datetime
 import os
 import re
@@ -57,6 +58,24 @@ A_GARDER = [
     ".config/nc/animations", ".config/hypr/perso.lua", ".config/kitty/perso.conf", ".zshrc.perso", ".face",
     ".config/noctalia/palettes", ".local/state/noctalia/settings.toml", ".config/noctalia/zz-dock.toml",
 ]
+# Les dossiers de Noctalia, comme lui (configDir, stateDir de src/util/file_utils.h) : NOCTALIA_*_HOME, puis
+# XDG_*_HOME, puis ~/.config et ~/.local/state. Dans l'archive, toujours sous ~/.config/noctalia et
+# ~/.local/state/noctalia : une sauvegarde passe d'un PC à l'autre, et chacun les remet là où son Noctalia les lit
+NOCTALIA = {
+    ".config/noctalia": os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+                                     or os.path.join(HOME, ".config"), "noctalia"),
+    ".local/state/noctalia": os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.environ.get("XDG_STATE_HOME")
+                                          or os.path.join(HOME, ".local/state"), "noctalia"),
+}
+
+
+def reel(p):
+    """(dossier, chemin dans ce dossier) d'un chemin de la sauvegarde (relatif au dossier personnel) : ceux de
+    Noctalia dans ses dossiers, le reste dans le dossier personnel."""
+    for cle, dossier in NOCTALIA.items():
+        if p.startswith(cle + "/"):
+            return dossier, p[len(cle) + 1:]
+    return HOME, p
 
 
 def dossier_fonds():
@@ -76,7 +95,7 @@ def taille(o):
 
 def creer(avec_fonds):
     nom = os.path.join(HOME, f"nc-sauvegarde-{datetime.date.today().isoformat()}.tar.gz")
-    chemins = [p for p in A_GARDER if os.path.exists(os.path.join(HOME, p))]
+    chemins = [p for p in A_GARDER if os.path.exists(os.path.join(*reel(p)))]
     fonds = dossier_fonds()
     if avec_fonds and os.path.isdir(fonds):
         chemins.append(os.path.relpath(fonds, HOME))
@@ -84,7 +103,7 @@ def creer(avec_fonds):
         sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
     with tarfile.open(nom, "w:gz") as t:
         for p in chemins:
-            t.add(os.path.join(HOME, p), arcname=p)
+            t.add(os.path.join(*reel(p)), arcname=p)
     print(T(f"Sauvegarde créée : {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})",
             f"Backup created: {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})"))
     for p in chemins:
@@ -127,14 +146,23 @@ def restaurer(fichier):
         membres = membres_surs(t)
         # Ce qui sera remplacé est mis de côté d'abord
         for m in membres:
-            cible = os.path.join(HOME, m.name)
+            cible = os.path.join(*reel(os.path.normpath(m.name)))
             if m.isfile() and os.path.isfile(cible):
                 os.makedirs(os.path.dirname(os.path.join(avant, m.name)), exist_ok=True)
                 shutil.copy2(cible, os.path.join(avant, m.name))
-        try:
-            t.extractall(HOME, members=membres, filter="data")
-        except TypeError:                                     # Python < 3.12 : sans filtre (chemins déjà vérifiés)
-            t.extractall(HOME, members=membres)
+        # Chacun dans son dossier : ceux de Noctalia là où il les lit (renommés pour l'extraction), le reste chez toi
+        par_dossier = {}
+        for m in membres:
+            dossier, nom = reel(os.path.normpath(m.name))
+            if nom != os.path.normpath(m.name):
+                m = copy.copy(m)
+                m.name = nom
+            par_dossier.setdefault(dossier, []).append(m)
+        for dossier, liste in par_dossier.items():
+            try:
+                t.extractall(dossier, members=liste, filter="data")
+            except TypeError:                                 # Python < 3.12 : sans filtre (chemins déjà vérifiés)
+                t.extractall(dossier, members=liste)
     print(T(f"Sauvegarde remise ({len(membres)} fichiers). Avant : {avant.replace(HOME, '~')}",
             f"Backup restored ({len(membres)} files). Before: {avant.replace(HOME, '~')}"))
     # Tout ce qui découle des réglages est refait, et appliqué tout de suite
