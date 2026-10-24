@@ -143,6 +143,25 @@ class Panne(unittest.TestCase):
         self.lancer("signaler", "wireplumber.service")
         self.assertEqual(len(self.notifs()), 1)
 
+    def test_unites_transitoires_jamais_signalees(self):
+        # systemd-run (bac de nc-noeud et des IA, tests) : le drop-in global s'applique aussi, leur échec n'est pas une panne
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nPANNES=tous\n")
+        self.systemctl()
+        for unite in ("run-p1791870-i1789937.service", "nc-ia-test-a1bf71b52bc3.service", "nc-bac-be50fdd76986.service",
+                      "nc-ia-84b7af66c16f.service"):
+            self.lancer("signaler", unite)
+        self.assertFalse(self.notifs())
+        # Une unité transitoire au nom quelconque (Transient=yes), ou déjà retirée par --collect (not-found)
+        for props in ("Transient=yes\nLoadState=loaded", "Transient=no\nLoadState=not-found"):
+            self.programme("systemctl", 'echo "systemctl $*" >> "$JOURNAL"; case "$*" in *Transient*) printf "' + props.replace("\n", "\\n")
+                           + '\\n";; *is-system-running*) echo running;; *is-active*) echo active;; esac')
+            self.lancer("signaler", "quelconque.service")
+        self.assertFalse(self.notifs())
+        # Un vrai service du bureau l'est toujours
+        self.systemctl()
+        self.lancer("signaler", "nc-ile.service")
+        self.assertEqual(len(self.notifs()), 1)
+
     def test_expliquer_impossible_le_dit(self):
         self.programme("nc-ia", 'echo "nc-ia $*" >> "$JOURNAL"; [ "$1" = actif ] && exit 0; echo "Aucune IA n\'a pu répondre" >&2; exit 1',
                        self.home / ".local/bin")
