@@ -431,12 +431,15 @@ autorisation**, une rafale d’actions sans redemander — mais encadrée, et **
 - **Réglage :** nc-reglages → Intelligence artificielle → « Session de confiance pour JARVIS » : 0 (désactivée,
   conseillé) à 15 minutes. `NOEUD_SESSION_MINUTES` ; au-delà de 15 → 15 ; valeur illisible → 0. La capacité
   `trust_session` n’est annoncée au `register` (et `metadata.trust_session_minutes`) que si le réglage est > 0.
-- **Ce qu’elle couvre :** `exec` (dans un bac à sable, voir plus bas) et `write_file` hors chemins protégés. **Jamais**
-  couverts, donc toujours confirmés un par un : `read_file`, le presse-papiers, tout chemin protégé, et tout ce qui est
-  déjà interdit. L’ouverture elle-même est **confirmée** (carte de l’île ou code à distance) ; le résumé dit « … et
+- **Ce qu’elle couvre :** `exec` seulement, toujours dans un bac à sable (voir plus bas). **Jamais** couverts, donc
+  toujours confirmés un par un : `write_file` (il est fait par nc-noeud lui-même, hors du bac : seuls les chemins
+  protégés le borneraient, et ils sont pensés pour une écriture que tu vois avant d’autoriser), `read_file`, le
+  presse-papiers, et tout ce qui est déjà interdit. L’ouverture elle-même est **confirmée** (carte de l’île ou code à distance) ; le résumé dit « … et
   ouvre une session de N min (20 actions au plus) pour cette conversation ».
-- **Bornée :** durée **fixe** depuis l’ouverture, jamais prolongée par une action ; **20 actions** au plus. Puis elle
-  se ferme et la suivante est reconfirmée.
+- **Bornée :** durée **fixe** depuis l’ouverture, jamais prolongée par une action ; **20 actions** au plus, chacune
+  comptée dès qu’elle est acceptée (des actions arrivées ensemble ne dépassent pas la limite). Puis elle se ferme et la
+  suivante est reconfirmée. « Arrêter » vaut pour les actions suivantes : une commande déjà lancée finit dans son bac
+  (son délai, 120 s au plus).
 - **Liée à la connexion ET à l’origine.** Un jeton est tiré à chaque connexion WebSocket : une reconnexion ferme la
   session. Elle est aussi liée à l’**origine exacte** annoncée par la trame d’action, proposée au serveur :
   `"origin": {"via":"telegram","chat":…,"conversation":…}`. Une action d’une origine différente, ou sans origine, est

@@ -123,7 +123,10 @@ SORTIE_DEFINITIVE = 3              # configuration absente ou refusée : systemd
 # autorisation. Désactivée par défaut, courte, et bornée en nombre. Voir la classe Session et le bac à sable plus bas.
 SESSION_MINUTES_MAX = 15           # durée demandée au plus (NOEUD_SESSION_MINUTES) ; au-delà ramenée à 15
 SESSION_ACTIONS_MAX = 20           # actions couvertes au plus par session (l'action d'ouverture, confirmée, non comprise)
-COUVERTES_SESSION = frozenset({"exec", "write_file"})   # ce qu'une session couvre ; jamais read_file, presse-papiers…
+# Ce qu'une session couvre : exec seulement, toujours dans le bac (~ en lecture seule). write_file non : il est fait par
+# nc-noeud lui-même, hors du bac, et seuls les chemins protégés le bornent (pensés pour une écriture confirmée, aperçu
+# sous les yeux). Jamais read_file, presse-papiers…
+COUVERTES_SESSION = frozenset({"exec"})
 
 # Actions du protocole (clients/node_agent.py, core/node_hub.py) : noms de l'upstream ramenés aux nôtres
 ALIAS = {"clipboard_get": "clipboard_read", "clipboard_set": "clipboard_write", "run_shell": "exec"}
@@ -296,14 +299,18 @@ def session_minutes():
 def origine_cle(origin):
     """L'origine annoncée par la trame d'action (proposée : {"via","chat","conversation"}), ramenée à une clé stable
     pour lier une session « au même endroit ». None si l'origine est absente ou vide : pas de session alors."""
+    # Le type en tête (une chaîne qui vaudrait le JSON d'un dict reste une autre origine) et une empreinte de l'origine
+    # ENTIÈRE (une coupe à 1000 caractères confondait deux origines au même début)
     if isinstance(origin, (dict, list)) and origin:
         try:
-            return json.dumps(origin, sort_keys=True, ensure_ascii=False)[:1000]
+            texte = "json:" + json.dumps(origin, sort_keys=True, ensure_ascii=False)
         except (TypeError, ValueError):
             return None
-    if isinstance(origin, str) and origin.strip():
-        return origin.strip()[:1000]
-    return None
+    elif isinstance(origin, str) and origin.strip():
+        texte = "texte:" + origin.strip()
+    else:
+        return None
+    return hashlib.sha256(texte.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def mode_confirmation():
@@ -1584,6 +1591,19 @@ class Noeud:
         self.jeton_connexion = None            # tiré à chaque connexion : une reconnexion ferme la session
         retenir_secrets(c)
 
+    def fin_action_session(self, sess, resume_court, souci):
+        """Une action couverte par la session sess s'est terminée (faite, en échec, trop tard ou refusée) : état relu par
+        l'île, notification sur ce PC, et fermeture quand la dernière place est prise."""
+        en_cours = self.session is sess
+        if en_cours:
+            self.ecrire_etat_session(resume_court)
+        prevenir(T("JARVIS, session : " + resume_court, "JARVIS, session: " + resume_court),
+                 (souci.capitalize() + " · " if souci else "")
+                 + T(f"{max(0, sess.reste)} action(s) restantes, {sess.reste_s()} s",
+                     f"{max(0, sess.reste)} action(s) left, {sess.reste_s()} s"))
+        if en_cours and sess.reste <= 0:
+            self.fermer_session(T(f"{SESSION_ACTIONS_MAX} actions atteintes", f"{SESSION_ACTIONS_MAX} actions reached"))
+
     def fermer_session(self, raison):
         """Ferme la session de confiance (deny, session_end, IA/pilotage coupé, code faux, expiration, « Arrêter »
         depuis l'île) : notifie, note au journal, retire le fichier d'état que l'île lit."""
@@ -1710,14 +1730,22 @@ class Noeud:
         minutes = session_minutes()
         oc = origine_cle(origin)
         peut_session = minutes > 0 and nom in COUVERTES_SESSION and oc is not None
-        reutilise = peut_session and self.session is not None and self.session.valide(self.jeton_connexion, oc)
+        sess = None
+        if peut_session and self.session is not None and self.session.valide(self.jeton_connexion, oc):
+            # Réservée tout de suite, avant le moindre await : des actions arrivées ensemble (traitées en parallèle) ne
+            # passent pas toutes sur la dernière place, la limite de SESSION_ACTIONS_MAX tient
+            sess = self.session
+            sess.reste -= 1
+        reutilise = sess is not None
         ouvre = peut_session and self.session is None                # une seule session à la fois (origine différente → non)
         if (reutilise or ouvre) and nom == "exec" and not await bac_tient():
             # Le bac ne tient pas (systemd-run absent, pas de bus utilisateur, namespaces refusés) : pas de session,
             # confirmation normale, jamais d'exécution hors du bac
-            if reutilise:
+            if reutilise and self.session is sess:
                 self.fermer_session(T("bac à sable indisponible", "sandbox unavailable"))
             reutilise = ouvre = False
+        if reutilise and self.session is not sess:
+            reutilise = False                                        # fermée pendant la sonde (île, refus…) : on confirme
         bac = nom == "exec" and (reutilise or ouvre)                 # un exec de session passe toujours par le bac
         # Commande, fichier, capture, écriture du presse-papiers : toujours une personne qui autorise — sauf une action
         # couverte par une session de confiance en cours
@@ -1768,13 +1796,19 @@ class Noeud:
             prevenir(T("JARVIS : autorisé à distance", "JARVIS: allowed remotely"),
                      rendre_visible(sans_secrets(resume))[:400])
         if ouvre and confirmer:                                     # ouverture SEULEMENT après une autorisation réussie
-            self.session = Session(self.jeton_connexion, oc, minutes)
-            self.ecrire_etat_session(resume_court)
+            if self.session is None:
+                self.session = Session(self.jeton_connexion, oc, minutes)
+                self.ecrire_etat_session(resume_court)
+            else:
+                ouvre = False          # une autre autorisation, arrivée en même temps, l'a déjà ouverte : pas de remise à zéro
         # Temps qui reste pour exécuter : échéance du serveur, moins la marge, moins ce qui est passé (B2-11)
         budget = echeance - MARGE_SERVEUR - horloge()
         if budget < BUDGET_MIN:
+            if reutilise:
+                self.fin_action_session(sess, resume_court, T("trop tard, rien fait", "too late, nothing done"))
             journal(nom, resume, sha=sha, decision=(f"autorisé trop tard (rien fait) ({SOURCES[source][0]})" if source
-                                                    else "trop tard (rien fait)"))
+                                                    else ("session, trop tard (rien fait)" if reutilise
+                                                          else "trop tard (rien fait)")))
             return {"success": False, "denied": True,
                     "error": T("Trop tard : plus le temps d'exécuter avant que le serveur abandonne, rien n'a été fait.",
                                "Too late: no time left to run before the server gives up, nothing was done.")}
@@ -1782,25 +1816,21 @@ class Noeud:
             appel = decrite.executer(budget, bac) if nom == "exec" else decrite.executer(budget)
             res = await asyncio.wait_for(appel, budget + (0.5 if nom == "exec" else 0))
         except Refus as e:
-            journal(nom, resume, sha=sha, decision=e.decision)
+            if reutilise:
+                self.fin_action_session(sess, resume_court, T("refusé", "denied"))
+            journal(nom, resume, sha=sha, decision=("session, " if reutilise else "") + e.decision)
             return {"success": False, "error": str(e)}
         except asyncio.TimeoutError:
             b = round(budget, 1)
             res = {"success": False, "error": T(f"Délai de {b:g} s dépassé.", f"{b:g} s timeout exceeded.")}
         except (OSError, UnicodeError) as e:
             res = {"success": False, "error": str(e)[:300]}
-        if reutilise and self.session is not None:
-            # Action couverte par la session : décompte, état relu par l'île, notification sur ce PC, ligne au journal
-            self.session.reste -= 1
-            self.ecrire_etat_session(resume_court)
-            prevenir(T("JARVIS, session : " + resume_court, "JARVIS, session: " + resume_court),
-                     T(f"{self.session.reste} action(s) restantes, {self.session.reste_s()} s",
-                       f"{self.session.reste} action(s) left, {self.session.reste_s()} s"))
+        if reutilise:
+            # Action couverte par la session (déjà décomptée à la décision) : notifiée et journalisée même si la
+            # session a été fermée pendant qu'elle tournait
+            self.fin_action_session(sess, resume_court, None if res.get("success") else T("échec", "failed"))
             journal(nom, resume, sha=sha, decision="session" + ("" if res.get("success") else " (échec)"))
-            res = {**res, "session": {"reste_s": self.session.reste_s(), "reste_actions": self.session.reste}}
-            if self.session.reste <= 0:
-                self.fermer_session(T(f"{SESSION_ACTIONS_MAX} actions atteintes", f"{SESSION_ACTIONS_MAX} actions reached"))
-            return res
+            return {**res, "session": {"reste_s": sess.reste_s(), "reste_actions": max(0, sess.reste)}}
         journal(nom, resume, sha=sha, decision=(f"autorisé ({SOURCES[source][0]})" if confirmer else "sans confirmation")
                 + ("" if res.get("success") else " (échec)"))
         if self.session is not None and ouvre and confirmer:        # l'action qui a ouvert la session : état joint

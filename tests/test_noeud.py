@@ -1766,16 +1766,45 @@ class SessionConfiance(ModuleCharge):
         self.assertIn("20 actions au plus", self.confs[0])
         self.assertTrue((self.home / "m1").exists())
         self.assertEqual(r1["session"]["reste_actions"], 20)
-        # Rafale : exec puis write_file, même origine, sans nouvelle confirmation
+        # Rafale : un autre exec, même origine, sans nouvelle confirmation
         r2 = self.dec(n, "exec", {"command": f"touch {self.home}/m2"})
         self.assertTrue(r2["success"], r2)
         self.assertEqual(len(self.confs), 1, "pas de nouvelle confirmation")
         self.assertEqual(r2["session"]["reste_actions"], 19)
+        # write_file n'est pas couvert (fait hors du bac) : confirmé, et la session n'est pas décomptée
         r3 = self.dec(n, "write_file", {"path": "~/notes.txt", "content": "bonjour"})
         self.assertTrue(r3["success"], r3)
-        self.assertEqual(len(self.confs), 1)
-        self.assertEqual(r3["session"]["reste_actions"], 18)
+        self.assertEqual(len(self.confs), 2, "write_file toujours confirmé")
+        self.assertNotIn("session", r3)
+        self.assertEqual(n.session.reste, 19)
         self.assertEqual((self.home / "notes.txt").read_text(), "bonjour")
+
+    def test_actions_simultanees_ne_depassent_pas_20(self):
+        # Les actions sont traitées en parallèle : la place est prise dès la décision, pas après l'exécution
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})                 # ouverture (confirmée), reste 20
+        notifs = []
+        m.prevenir = lambda titre, texte="": notifs.append(titre)  # 25 notifications d'un coup : relevées, pas lancées
+
+        async def rafale():
+            return await asyncio.gather(*(n.decider("exec", {"command": "true"}, "r" + uuid.uuid4().hex, None, self.O)
+                                          for _ in range(25)))
+        res = asyncio.run(rafale())
+        couvertes = [r for r in res if "session" in r]
+        self.assertEqual(len(couvertes), 20, "20 actions au plus, même arrivées ensemble")
+        self.assertEqual(len(self.confs), 1 + 5, "les 5 autres sont confirmées")
+        self.assertEqual(sum(t.startswith("JARVIS, session") for t in notifs), 20, "chaque action couverte se voit")
+
+    def test_origine_cle_type_et_empreinte(self):
+        m = self.charger()
+        d = {"via": "telegram", "chat": 1}
+        self.assertNotEqual(m.origine_cle(d), m.origine_cle(json.dumps(d, sort_keys=True)), "chaîne ≠ dict")
+        long_a, long_b = "x" * 1000 + "a", "x" * 1000 + "b"
+        self.assertNotEqual(m.origine_cle(long_a), m.origine_cle(long_b), "pas de coupe à 1000 caractères")
+        self.assertEqual(m.origine_cle({"chat": 1, "via": "telegram"}), m.origine_cle(d), "ordre des clés sans effet")
+        self.assertIsNone(m.origine_cle(None))
+        self.assertIsNone(m.origine_cle("  "))
 
     def test_plafond_de_20_actions(self):
         m = self.charger()
