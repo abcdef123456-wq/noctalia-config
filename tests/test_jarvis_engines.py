@@ -18,6 +18,7 @@ class Moteurs(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         self.m=types.ModuleType('engines_test');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        self.opt=patch.object(self.m,'agy_accepte_permission_mode',return_value=True);self.opt.start();self.addCleanup(self.opt.stop)
         self.up=types.SimpleNamespace(__file__=str(self.root/'main.py'),KNOWN_MODELS=[dict(id='agy-test')],
             run_agy=AsyncMock(return_value=dict(success=True,output='AGY')),get_session_info=lambda:dict(model='agy-test',effort='low'),
             update_session=lambda **kw:kw,reset_session_async=AsyncMock(return_value={}),
@@ -137,6 +138,8 @@ class ReglagesEnregistres(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         self.m=types.ModuleType('engines_reglages');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        # ces tests décrivent un agy qui a --permission-mode (le cas sans l'option est dans PermissionModeAgy)
+        self.opt=patch.object(self.m,'agy_accepte_permission_mode',return_value=True);self.opt.start();self.addCleanup(self.opt.stop)
         self.recus=[]
         def update_session(model=None,effort=None,mode=None,permission_mode=None,session_key='default'):
             if permission_mode and permission_mode not in ('default','request-review','plan','ask','auto_edit','auto'):
@@ -227,6 +230,85 @@ class ReglagesEnregistres(unittest.TestCase):
         texte=(SOURCE.parent/'nc_management.py').read_text()
         ligne=next(l for l in texte.splitlines() if l.startswith('PERMISSION_MODES='))
         self.assertEqual(eval(ligne.split('=',1)[1]),self.m.MODES_PERMIS)
+
+
+def faux_agy(dossier,aide,code=0):
+    """Petit exécutable qui répond à --help (jamais de modèle) et note chaque appel."""
+    chemin=Path(dossier)/'agy'
+    chemin.write_text('#!'+sys.executable+'\nimport sys\nfrom pathlib import Path\n'
+        'Path(__file__).with_suffix(".appels").open("a").write(" ".join(sys.argv[1:])+"\\n")\n'
+        'print('+repr(aide)+')\nsys.exit('+str(code)+')\n');chemin.chmod(0o755)
+    return chemin
+
+
+class PermissionModeAgy(unittest.TestCase):
+    """agy 1.4.7 n'a pas --permission-mode : sans l'option, seul default est envoyé et permis."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
+        self.m=types.ModuleType('engines_perm');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        self.up=types.SimpleNamespace(__file__=str(self.root/'main.py'),KNOWN_MODELS=[dict(id='agy-test')],
+            run_agy=AsyncMock(return_value=dict(success=True,output='AGY')),get_session_info=lambda session_key='default':dict(model='m'),
+            update_session=lambda **kw:kw,reset_session_async=AsyncMock(return_value={}),
+            list_recent_conversations=lambda **kw:[],get_conversation_history=lambda *a,**kw:[],resume_conversation=lambda *a:{},
+            delete_conversation=lambda *a:{},delete_all_conversations=lambda:{},get_token_usage=lambda:dict(tokens_available=False),
+            _reset_memory_injection=lambda session_key=None:None,_should_inject_memory=lambda version:True,render_memory_prompt=lambda:'')
+        self.env=patch.dict(os.environ,HOME=str(self.root));self.env.start();self.addCleanup(self.env.stop)
+
+    def avec(self,chemin):
+        p=patch.object(self.m,'executable',return_value=None if chemin is None else str(chemin));p.start();self.addCleanup(p.stop)
+
+    def test_sans_l_option_run_envoie_default_et_choose_refuse_plan(self):
+        self.avec(faux_agy(self.root,'Usage of agy:\n  --mode  Set the agent execution mode (accept-edits, auto, plan)'))
+        e=self.m.Engines(self.up)
+        for donne in ('plan','request-review',None,'default'):
+            with self.subTest(mode=donne):
+                self.up.run_agy.reset_mock()
+                asyncio.run(e.run('bonjour',permission_mode=donne))
+                self.assertEqual(self.up.run_agy.call_args.kwargs['permission_mode'],'default')
+        with self.assertRaises(ValueError) as r: e.choose(engine='agy',permission_mode='plan')
+        self.assertIn('qu\'un mode de permission',str(r.exception))
+        e.choose(engine='agy',permission_mode='default')   # default reste permis
+        self.assertEqual(e.snapshot()['engines'][0]['permission_modes'],['default'])
+
+    def test_sans_l_option_la_restauration_abandonne_le_mode(self):
+        self.avec(faux_agy(self.root,'Usage of agy:'))
+        chemin=self.root/'.nc-jarvis-engines.json'
+        chemin.write_text(json.dumps(dict(engine='agy',settings=dict(agy=dict(model='gemini-x',permission_mode='plan')),conversations=[],active={})));chemin.chmod(0o600)
+        recus=[];self.up.update_session=lambda **kw:recus.append(kw)
+        with self.assertLogs('nc_engines',level='WARNING'):
+            e=self.m.Engines(self.up)
+        self.assertEqual(recus,[dict(model='gemini-x')]);self.assertNotIn('permission_mode',e.state['settings']['agy'])
+
+    def test_avec_l_option_le_comportement_reste_le_meme(self):
+        self.avec(faux_agy(self.root,'Usage of agy:\n  --permission-mode  Mode de permission'))
+        e=self.m.Engines(self.up)
+        asyncio.run(e.run('bonjour',permission_mode='plan'))
+        self.assertEqual(self.up.run_agy.call_args.kwargs['permission_mode'],'plan')
+        asyncio.run(e.run('bonjour',permission_mode='yolo'))
+        self.assertIsNone(self.up.run_agy.call_args.kwargs['permission_mode'])
+        e.choose(engine='agy',permission_mode='plan')
+        self.assertEqual(e.snapshot()['engines'][0]['permission_modes'],sorted(self.m.MODES_PERMIS))
+
+    def test_agy_absent_ou_help_en_echec_option_absente(self):
+        self.avec(None)
+        self.assertFalse(self.m.agy_accepte_permission_mode())
+        m2=types.ModuleType('engines_perm2');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),m2.__dict__)
+        with patch.object(m2,'executable',return_value=str(faux_agy(self.root,'--permission-mode',code=2))):
+            self.assertFalse(m2.agy_accepte_permission_mode())   # --help en échec, même si le texte cite l'option
+        m3=types.ModuleType('engines_perm3');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),m3.__dict__)
+        with patch.object(m3,'executable',return_value=str(self.root/'inexistant')):
+            self.assertFalse(m3.agy_accepte_permission_mode())   # OSError
+
+    def test_la_verification_est_faite_une_seule_fois_avec_un_delai(self):
+        agy=faux_agy(self.root,'--permission-mode');self.avec(agy)
+        for _ in range(3): self.assertTrue(self.m.agy_accepte_permission_mode())
+        e=self.m.Engines(self.up);e.snapshot();asyncio.run(e.run('x'))
+        self.assertEqual(agy.with_suffix('.appels').read_text(),'--help\n')
+        m=types.ModuleType('engines_perm4');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),m.__dict__)
+        with patch.object(m,'executable',return_value='/x/agy'),patch.object(m.subprocess,'run',side_effect=subprocess.TimeoutExpired('agy',5)) as run:
+            self.assertFalse(m.agy_accepte_permission_mode());self.assertFalse(m.agy_accepte_permission_mode())
+        self.assertEqual(run.call_count,1)
+        self.assertEqual(run.call_args.kwargs['timeout'],5);self.assertIs(run.call_args.kwargs.get('shell',False),False)
 
 
 class UpstreamParPC(unittest.TestCase):

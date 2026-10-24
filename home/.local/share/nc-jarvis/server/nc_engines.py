@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import subprocess
 import tempfile
 import uuid
 
@@ -19,6 +20,34 @@ ENGINES = {'agy': 'Antigravity', 'codex': 'Codex', 'claude': 'Claude Code', 'ope
 # Modes de permission permis partout (choose, restauration, /run) : la liste de 94a3a93, comme PERMISSION_MODES de
 # nc_management (un test vérifie qu'elles sont égales) ; 4ecc57a accepte encore yolo, bypass et always-proceed
 MODES_PERMIS = frozenset({'default', 'request-review', 'plan', 'ask', 'auto_edit', 'auto'})
+_PERMISSION_MODE_AGY = None
+
+
+def agy_accepte_permission_mode():
+    """Vrai si `agy --help` cite --permission-mode. Regardé une seule fois par processus (5 s au plus, sans shell) ;
+    agy introuvable ou --help en échec : l'option est considérée absente. L'agy 1.4.7 ne l'a pas : il sort avec le code 2
+    (« flags provided but not defined »), donc tout mode autre que default ferait échouer chaque tour."""
+    global _PERMISSION_MODE_AGY
+    if _PERMISSION_MODE_AGY is None:
+        trouve = False
+        chemin = executable('agy')
+        if chemin:
+            try:
+                r = subprocess.run([chemin, '--help'], stdin=subprocess.DEVNULL, capture_output=True, timeout=5,
+                                   text=True, errors='replace')
+                trouve = r.returncode == 0 and '--permission-mode' in (r.stdout or '') + (r.stderr or '')
+            except (OSError, subprocess.SubprocessError, ValueError):
+                trouve = False
+        _PERMISSION_MODE_AGY = trouve
+    return _PERMISSION_MODE_AGY
+
+
+def modes_permis(engine):
+    """Modes de permission proposés pour un moteur (annoncés à l'île dans le snapshot)."""
+    if engine == 'agy' and not agy_accepte_permission_mode(): return ['default']
+    return sorted(MODES_PERMIS) if engine == 'agy' else []
+
+
 EFFORTS = {'', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'}
 
 
@@ -186,6 +215,11 @@ class Engines:
                 logging.getLogger('nc_engines').warning('Réglage AGY enregistré refusé (%s) : ignoré, valeur par défaut.', cle)
                 agy.pop(cle, None)
                 continue
+            if cle == 'permission_mode' and agy[cle] != 'default' and not agy_accepte_permission_mode():
+                # cet agy n'a pas --permission-mode : tout autre mode ferait échouer chaque tour
+                logging.getLogger('nc_engines').warning('Réglage AGY enregistré refusé (%s) : cet agy n\'a qu\'un mode, ignoré.', cle)
+                agy.pop(cle, None)
+                continue
             try:
                 self.original['update_session'](**{cle:agy[cle]})
             except (ValueError, TypeError):
@@ -240,6 +274,7 @@ class Engines:
 
     def snapshot(self, session_key=None):
         return dict(session=self.session(session_key), engines=[dict(id=k,name=v,installed=bool(executable(k)),models=self.models(k),
+            permission_modes=modes_permis(k),
             efforts=(['low','medium','high'] if k=='agy' else ['low','medium','high','xhigh','max'] if k=='claude' else ['low','medium','high','xhigh','max','ultra'] if k=='codex' else [])) for k,v in ENGINES.items()],
             shared_session=self.state['engine'] != 'agy' or not self.par_pc(), context_limit=32000)
 
@@ -251,6 +286,8 @@ class Engines:
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
         if values.get('permission_mode') not in (None,'') and values['permission_mode'] not in MODES_PERMIS:
             raise ValueError('Mode de permission refusé.')
+        if engine == 'agy' and values.get('permission_mode') not in (None,'','default') and not agy_accepte_permission_mode():
+            raise ValueError('Cette version d\'agy n\'a qu\'un mode de permission (par défaut).')
         if engine == 'agy':
             donnes = {k:v for k,v in values.items() if k!='engine'}
             self.appel('update_session', session_key=session_key, **donnes)
@@ -321,6 +358,7 @@ class Engines:
             # Pas de verrou commun : chaque PC a sa session et l'upstream refuse lui-même deux requêtes sur la même.
             # Le compteur empêche seulement de changer de moteur ou de réinitialiser pendant ce temps.
             fn=self.original['run_agy']
+            if not agy_accepte_permission_mode(): permission_mode = 'default'
             self.agy_en_cours+=1
             try:
                 return await fn(prompt=prompt,timeout=timeout,model=model,effort=effort,mode=mode,

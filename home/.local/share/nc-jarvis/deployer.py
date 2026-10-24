@@ -38,11 +38,16 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # 94a3a93 : /api/ask limité à desktop:<pc> ou default, jeton d'origine par session (neutralisé chez nous par nc_runner :
 # aucun jeton gardé ni écrit, nodes_mcp n'est pas installé), modes de permission resserrés (nc_engines ignore un ancien
 # always-proceed enregistré), fin de session ciblée sur l'origine, GATEWAY_ORIGIN_KEY facultative (non générée)
-REVISION='94a3a930efae59dbfd7758be5af6f883ab34b9df'
+# ffb19b9 : plus aucun jeton d'origine gardé par le runner (en-tête de la requête en cours seulement), permission_mode validé
+# dans run_agy (repli default), un ancien always-proceed ne bloque plus le démarrage, clé HMAC sans SECRET_KEY, /api/stream
+# sans clé en query. Chez nous : nc_runner et nc_engines restent en place (94a3a93 et 4ecc57a en ont besoin) ; agy n'a pas
+# --permission-mode : nc_engines force default pour agy quand `agy --help` ne le cite pas
+REVISION='ffb19b94f9c98ed98723500efbaa5c2c7f832821'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
                      '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
                      '64523e57c958f23af459c8069d1a6985bf349640','aae5b9b3e6da13cfb78c2da33b5584c854f5139a',
-                     'f522291ca02af08903cbebd32203e14013dc80a6','4ecc57a8351fee610185b699b12c4b15092fe5ff',REVISION)
+                     'f522291ca02af08903cbebd32203e14013dc80a6','4ecc57a8351fee610185b699b12c4b15092fe5ff',
+                     '94a3a930efae59dbfd7758be5af6f883ab34b9df',REVISION)
 
 
 def ask(message, default=False):

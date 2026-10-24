@@ -79,6 +79,9 @@ Singleton {
     property bool processusReglagesFini: false
     property int codeReglages: -1
     readonly property var moteurCourant: moteurs.find(m => m.id === moteur) || ({})
+    // Modes de permission que le serveur permet pour le moteur (agy sans --permission-mode : seulement « default »).
+    readonly property var modesPermis: Array.isArray(moteurCourant.permission_modes) ? moteurCourant.permission_modes : []
+    readonly property bool permissionUnique: moteur === "agy" && modesPermis.length === 1
     readonly property var modeles: moteurCourant.models || []
     readonly property var modeleCourant: modeles.find(m => m.id === modele) || ({})
     // Niveaux de réflexion proposés : ceux du modèle s'il en annonce (un tableau, même vide), sinon ceux du moteur ; aucun

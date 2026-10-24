@@ -291,12 +291,13 @@ FloatingWindow {
                 Section { text:Reglages.t("Modèle et conversation active", "Model and active conversation") }
                 Note { text:Reglages.t("Ces réglages concernent aussi les bots mobiles. Choisis le moteur, le modèle et la réflexion dans les réglages rapides ci-dessous.", "These settings also affect mobile bots. Choose the engine, model and reasoning in quick settings below.") }
                 AssistantReglages { width:parent.width; height:420; Component.onCompleted:AssistantEtat.lireReglages() }
+                Note { visible:AssistantEtat.permissionUnique; text:Reglages.t("Permissions : par défaut (cette version d'agy n'a qu'un mode).", "Permissions: default (this agy version has only one mode).") }
                 Flow {
                     width:parent.width; spacing:8
                     Action { texte:Reglages.t("Voir les modèles", "Available models"); onClic:{fen.resultatOp="models";JarvisEtat.executer("models",{},false)} }
                     Action { texte:Reglages.t("Session active", "Active session"); onClic:{fen.resultatOp="session";JarvisEtat.executer("session",{},false)} }
                     Action { texte:Reglages.t("Consommation", "Usage"); onClic:{fen.resultatOp="usage";JarvisEtat.executer("usage",{},false)} }
-                    Action { texte:Reglages.t("Modes et permissions AGY", "AGY modes and permissions"); visible:AssistantEtat.moteur==="agy"; onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session", "Apply to session"),[fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, default, plan, auto_edit)")]) }
+                    Action { texte:Reglages.t("Modes et permissions AGY", "AGY modes and permissions"); visible:AssistantEtat.moteur==="agy"; onClic:fen.formulaire("session.update",Reglages.t("Appliquer à la session", "Apply to session"),AssistantEtat.permissionUnique ? [fen.champ("mode","Mode (auto, plan, accept-edits)")] : [fen.champ("mode","Mode (auto, plan, accept-edits)"),fen.champ("permission_mode","Permissions (request-review, default, plan, auto_edit)")]) }
                     Action { texte:Reglages.t("Nouvelle conversation", "New conversation"); onClic:{fen.resultatOp="session.reset";fen.attente={op:"session.reset",params:{},titre:Reglages.t("Réinitialiser la session", "Reset session")}} }
                 }
                 Loader { width:parent.width; active:!!fen.selection.op; sourceComponent:pFormulaire }

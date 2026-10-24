@@ -236,6 +236,54 @@ class JetonDOrigineUpstream(unittest.TestCase):
                     else:sys.modules[name]=old
 
 
+@unittest.skipUnless(fastapi and httpx and (UPSTREAM/'home-runner/main.py').is_file(),'Checkout upstream et dépendances API requis')
+class ModePermissionAgyUpstream(unittest.TestCase):
+    """agy 1.4.7 n'a pas --permission-mode (code 2 « flags provided but not defined »). Le vrai runner de chaque révision,
+    avec un faux agy : sans l'option citée par --help, le mode plan demandé à /run n'arrive jamais à agy ; avec, il arrive."""
+    def tour(self,option):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);runtime=root/'runner';runtime.mkdir();bin=root/'bin';bin.mkdir()
+            run=root/'run';run.mkdir(mode=0o700)
+            for name in ('main.py','agy_bridge.py','memory.py'):shutil.copy2(UPSTREAM/'home-runner'/name,runtime/name)
+            agy=bin/'agy'
+            agy.write_text('#!/bin/sh\nif [ "$1" = "--help" ]; then echo "Usage of agy:"; '+('echo "  --permission-mode  mode"; ' if option else '')+'exit 0; fi\n'
+                           'echo "$@" >> "'+str(root/'args')+'"\necho OK\n');agy.chmod(0o755)
+            env=dict(HOME=d,XDG_RUNTIME_DIR=str(run),SECRET_KEY='isolated-test-secret',AGY_PERSISTENT='0',MEMORY_FILE=str(root/'memory.json'),
+                     PATH=str(bin)+os.pathsep+os.environ['PATH'])
+            names=('main','agy_bridge','memory','nc_runner','nc_engines','uvicorn')
+            previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
+            try:
+                with patch.dict(os.environ,env):
+                    for name in names:sys.modules.pop(name,None)
+                    sys.modules['uvicorn']=types.ModuleType('uvicorn')
+                    sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
+                    def load(path,name):
+                        spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec)
+                        sys.modules[name]=module;spec.loader.exec_module(module);return module
+                    main=load(runtime/'main.py','main');load(REPO/'home/.local/share/nc-jarvis/server/nc_runner.py','nc_runner')
+                    async def scenario():
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='http://runner.test') as c:
+                            return await c.post('/run',json=dict(prompt='x',session_key='desktop:test',continue_session=False,permission_mode='plan'),
+                                                headers={'X-Secret-Key':'isolated-test-secret'})
+                    reponse=asyncio.run(scenario())
+                    self.assertEqual(reponse.status_code,200,reponse.text)
+                    self.assertIn('OK',reponse.json()['output'])
+                    return (root/'args').read_text()
+            finally:
+                sys.path[:]=oldpath
+                for name,old in previous.items():
+                    if old is None:sys.modules.pop(name,None)
+                    else:sys.modules[name]=old
+
+    def test_sans_l_option_agy_ne_recoit_pas_permission_mode(self):
+        self.assertNotIn('--permission-mode',self.tour(option=False))
+
+    def test_avec_l_option_le_mode_demande_arrive(self):
+        # 94a3a93 et ffb19b9 passent --permission-mode à agy ; 4ecc57a ne le fait jamais (il n'a que --dangerously-skip-permissions)
+        if '"--permission-mode"' not in (UPSTREAM/'home-runner/agy_bridge.py').read_text(): self.skipTest('Ce runner ne passe pas --permission-mode.')
+        self.assertIn('--permission-mode plan',self.tour(option=True))
+
+
 @unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')
 class PoolParBoucleUpstream(unittest.TestCase):
     def test_per_loop_clients_of_the_gateway_are_leases_of_our_single_pool(self):
