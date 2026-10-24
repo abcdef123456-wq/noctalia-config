@@ -80,7 +80,7 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
                  ".local/state/opencode", ".cache/opencode", ".cache/claude-cli-nodejs", ".local/state/claude",
                  # Oh My Pi : ~/.omp (agent.db = ses connexions, sessions, mcp.json, journaux) et, une fois « omp config
                  # migrate » fait, ses dossiers XDG
-                 ".omp", ".local/share/omp", ".local/state/omp", ".cache/omp",
+                 ".omp", ".omp/agent", ".local/share/omp", ".local/state/omp", ".cache/omp",
                  # l'état de nc-ia (son journal, les dossiers laissés par une version précédente)
                  ".local/state/nc-ia"]
 
@@ -88,7 +88,8 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
 # liste est alors interdit aux DEUX endroits (le défaut et le dossier déplacé : tous les programmes ne lisent pas la
 # variable). CLAUDE_CONFIG_DIR déplace aussi ~/.claude.json (dans ce dossier, vérifié dans Claude Code 2.1).
 DEPLACEMENTS = [("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"),
-                ("XDG_CACHE_HOME", ".cache"), ("CLAUDE_CONFIG_DIR", ".claude"), ("CODEX_HOME", ".codex")]
+                ("XDG_CACHE_HOME", ".cache"), ("CLAUDE_CONFIG_DIR", ".claude"), ("CODEX_HOME", ".codex"),
+               ("PI_CODING_AGENT_DIR", ".omp/agent")]
 # Hors de ~, seuls /tmp et /var/tmp conviennent : PrivateTmp les masque en entier dans le bac
 TEMPORAIRES = ("/tmp/", "/var/tmp/")
 
@@ -112,6 +113,18 @@ def deplacements(home, environ=None):
         if not (r == home_reel or r.startswith(home_reel + "/") or r.startswith(TEMPORAIRES)):
             raise ValueError(f"{var}={v} pointe hors de ton dossier personnel : le bac ne sait pas le protéger")
         out[pref] = Path(r)
+    # PI_CONFIG_DIR (Oh My Pi) : un nom relatif à ~ (« .pi » donne ~/.pi), pas un chemin absolu ; sa valeur remplace « .omp ».
+    # Un « .. » ou une sortie de ~ (lien compris) : le bac ne sait pas le protéger.
+    cfg = environ.get("PI_CONFIG_DIR") or ""
+    if cfg and cfg != ".omp":
+        rel = cfg.lstrip("/")
+        if any(c in cfg for c in '"\\\n:') or not rel or ".." in rel.split("/"):
+            raise ValueError(f"PI_CONFIG_DIR={cfg} : nom refusé (« .. », caractère interdit), le bac ne sait pas le protéger")
+        r = os.path.realpath(os.path.join(home_reel, rel))
+        if not r.startswith(home_reel + "/"):
+            raise ValueError(f"PI_CONFIG_DIR={cfg} sort de ton dossier personnel : le bac ne sait pas le protéger")
+        if r != os.path.realpath(os.path.join(home_reel, ".omp")):
+            out[".omp"] = Path(r)
     return out
 
 
@@ -119,7 +132,8 @@ def emplacement(home, rel, depl):
     """Là où un programme garde vraiment rel (relatif à ~), d'après les variables de DEPLACEMENTS (depl)."""
     if rel == ".claude.json" and ".claude" in depl:
         return depl[".claude"] / ".claude.json"
-    for pref, d in depl.items():
+    # le préfixe le plus précis d'abord (PI_CODING_AGENT_DIR = « .omp/agent » avant PI_CONFIG_DIR = « .omp »)
+    for pref, d in sorted(depl.items(), key=lambda x: -len(x[0])):
         if rel == pref:
             return d
         if rel.startswith(pref + "/"):

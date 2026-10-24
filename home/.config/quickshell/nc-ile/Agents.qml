@@ -22,6 +22,7 @@ Singleton {
         cursor: { nom: "Cursor", titre: "Cursor", couleur: "#dfe3ea", reglage: "CURSOR_ILE" },
         copilot: { nom: "Copilot", titre: "Copilot", couleur: "#a371f7", reglage: "COPILOT_ILE" },
         qwen: { nom: "Qwen", titre: "Qwen Code", couleur: "#7a6cf2", reglage: "QWEN_ILE" },
+        omp: { nom: "Oh My Pi", titre: "Oh My Pi", couleur: "#e8b04b", reglage: "OMP_ILE" },
         kiro: { nom: "Kiro", titre: "Kiro", couleur: "#9b5cff", reglage: "KIRO_ILE" },
         amp: { nom: "Amp", titre: "Amp", couleur: "#f2624f", reglage: "AMP_ILE" }
     })

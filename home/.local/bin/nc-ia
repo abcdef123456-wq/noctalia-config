@@ -1592,9 +1592,30 @@ def source_base_omp(demande):
     """Où Oh My Pi garde ses identifiants : ~/.omp/agent/agent.db (SQLite), ou $XDG_DATA_HOME/omp/agent.db une fois
     « omp config migrate » fait (il ne suit XDG_DATA_HOME que si ce dossier omp existe, vérifié dans son code)."""
     xdg = os.environ.get("XDG_DATA_HOME") or ""
-    if os.path.isabs(xdg) and os.path.isdir(os.path.join(xdg, "omp")):
+    # omp ne suit XDG que si son dossier d'agent est celui par défaut (pas de PI_CODING_AGENT_DIR) ; PI_CONFIG_DIR et
+    # PI_CODING_AGENT_DIR déplacent ~/.omp : demande.emplacement() les suit comme nc-bac (DEPLACEMENTS)
+    if os.path.isabs(xdg) and not os.environ.get("PI_CODING_AGENT_DIR") and _vrai_dossier(os.path.join(xdg, "omp")):
         return Path(xdg) / "omp/agent.db"
     return demande.emplacement(OMP_BASE)
+
+
+def _vrai_dossier(chemin):
+    """Un dossier, et pas un lien (os.lstat)."""
+    import stat as st
+    try:
+        return st.S_ISDIR(os.lstat(chemin).st_mode)
+    except OSError:
+        return False
+
+
+OMP_COPIE_MAX = 64 * 1024 * 1024          # base + journal -wal copiés pour lecture : au-delà, refus
+# Les colonnes de auth_credentials copiées (schéma 8 d'omp 18.12, ai/src/auth/sqlite-credential-store.ts) ; disabled_cause
+# reste NULL (seules les lignes actives sont copiées). Une colonne inconnue n'est jamais copiée.
+OMP_COLONNES = ("id", "provider", "credential_type", "data", "identity_key", "created_at", "updated_at")
+OMP_TABLE = ("CREATE TABLE auth_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, "
+             "credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL, "
+             "identity_key TEXT DEFAULT NULL, created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), "
+             "updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')))")
 
 
 def projeter_base_omp(src, dst, limite_ms, temp=None):
@@ -1609,25 +1630,39 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
     import sqlite3
     import stat as st
     import urllib.parse
-    if not st.S_ISREG(os.stat(src).st_mode):
+    # Jamais un lien (os.lstat), ni pour la base ni pour son journal
+    if not st.S_ISREG(os.lstat(src).st_mode):
         raise ValueError("pas un fichier ordinaire")
     copie = None
     wal = str(src) + "-wal"
-    if os.path.isfile(wal) and os.path.getsize(wal) > 0:
+    try:
+        sw = os.lstat(wal)
+    except OSError:
+        sw = None
+    if sw is not None and not st.S_ISREG(sw.st_mode):
+        raise ValueError("journal : pas un fichier ordinaire")
+    if sw is not None and sw.st_size > 0:
+        if sw.st_size + os.lstat(src).st_size > OMP_COPIE_MAX:
+            raise ValueError("base et journal trop gros pour être copiés")
         copie = Path(tempfile.mkdtemp(prefix="omp-lecture-", dir=temp))
-        shutil.copyfile(src, copie / "agent.db")
-        shutil.copyfile(wal, copie / "agent.db-wal")
+        shutil.copyfile(src, copie / "agent.db", follow_symlinks=False)
+        shutil.copyfile(wal, copie / "agent.db-wal", follow_symlinks=False)
         a = sqlite3.connect(str(copie / "agent.db"), timeout=5)
     else:
         a = sqlite3.connect("file:" + urllib.parse.quote(str(src)) + "?immutable=1", uri=True, timeout=5)
     try:
-        t = a.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'").fetchone()
-        if not t or not t[0]:
+        t = a.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'").fetchone()
+        if not t:
             return 0, []
-        colonnes = [r[1] for r in a.execute("PRAGMA table_info(auth_credentials)")]
-        if "credential_type" not in colonnes or "data" not in colonnes:
+        presentes = [r[1] for r in a.execute("PRAGMA table_info(auth_credentials)")]
+        if not {"id", "provider", "credential_type", "data"} <= set(presentes):
             raise ValueError("schéma inconnu")
-        lignes = a.execute("SELECT * FROM auth_credentials WHERE credential_type = 'oauth' ORDER BY id").fetchall()
+        colonnes = [c for c in OMP_COLONNES if c in presentes]
+        actif = " AND disabled_cause IS NULL" if "disabled_cause" in presentes else ""
+        # une donnée trop grosse n'est pas lue (NULL : comptée comme illisible)
+        sel = ", ".join(f"CASE WHEN length(data) <= {int(JETON_MAX)} THEN data ELSE NULL END" if c == "data" else c
+                        for c in colonnes)
+        lignes = a.execute(f"SELECT {sel} FROM auth_credentials WHERE credential_type = 'oauth'{actif} ORDER BY id").fetchall()
         try:
             v = a.execute("SELECT version FROM auth_schema_version WHERE id = 1").fetchone()
             version = v[0] if v and isinstance(v[0], int) and not isinstance(v[0], bool) else None
@@ -1640,8 +1675,6 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
     gardees, courtes = [], []
     for l in lignes:
         r = dict(zip(colonnes, l))
-        if r.get("disabled_cause") is not None:
-            continue
         try:
             o = charger_json(r["data"])
         except (ValueError, TypeError, RecursionError):
@@ -1651,7 +1684,9 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
         if exp is None or exp < limite_ms:
             courtes.append(exp)
             continue
-        r["data"] = vider_json(projeter(o, COPIES["omp"]))
+        # « refresh » existe mais vide : omp lit session.refresh.trim() sans test d'absence (ai/src/auth/select.ts:590) ; vide,
+        # il le tient pour « pas de rafraîchissement possible » et ne cherche pas à en faire
+        r["data"] = vider_json(dict(projeter(o, COPIES["omp"]), refresh=""))
         gardees.append(r)
     if not gardees:
         return 0, courtes
@@ -1659,7 +1694,7 @@ def projeter_base_omp(src, dst, limite_ms, temp=None):
     os.close(fd)
     b = sqlite3.connect(str(dst))
     try:
-        b.execute(t[0])
+        b.execute(OMP_TABLE)
         if version is not None:
             b.execute("CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)")
             b.execute("INSERT INTO auth_schema_version (id, version) VALUES (1, ?)", (version,))
@@ -2138,14 +2173,24 @@ def commande_omp(demande, delai, modele):
     interface, tout outil d'écriture ou de commande est refusé), pas d'extensions, de compétences, de règles, de LSP ni de
     PTY, pas de session sauvegardée ni de titre, et un dossier de travail vide. JAMAIS --yolo, --auto-approve ni
     --allow-home. L'invite n'est PAS un argument : omp la lit sur son entrée standard quand ce n'est pas un terminal (elle
-    n'est ni dans « ps », ni prise pour une option, ni pour une commande « / » : celle de l'entrée standard n'en est
-    jamais une)."""
+    n'est ni dans « ps », ni prise pour une option ou un fichier « @… »). Attention : AgentSession.prompt exécute les
+    commandes d'extension, les commandes perso et les fichiers de commandes quand le texte commence par « / », même venu de
+    l'entrée standard. C'est sans danger seulement parce que l'invite ne commence jamais par « / » (invite_omp)."""
     cmd = ["omp", "launch", "-p", "--mode", "json", "--no-tools", "--approval-mode", "always-ask", "--no-extensions",
            "--no-skills", "--no-rules", "--no-lsp", "--no-pty", "--no-session", "--no-title", "--thinking", "low",
            "--max-time", str(max(1, int(delai))), "--cwd", str(demande.travail)]
     if modele:
         cmd += ["--model", modele]
     return cmd
+
+
+def invite_omp(consigne, texte):
+    """L'invite d'omp : la consigne devant, et jamais un texte qui commence par « / » (une commande pour omp), même si la
+    consigne est vide et la demande de l'utilisateur commence par « / »."""
+    invite = consigne + "\n\n" + texte
+    if invite.lstrip().startswith("/"):
+        invite = T("Demande :", "Request:") + "\n" + invite
+    return invite
 
 
 def appel_omp(consigne, texte, image, usage):
@@ -2158,7 +2203,7 @@ def appel_omp(consigne, texte, image, usage):
         if modele and not re.fullmatch(r"[\w.:/@+\-]{1,120}", modele):
             raise ErreurIA(T("Nom de modèle invalide.", "Invalid model name."))
         cmd = commande_omp(demande, delai, modele)
-        yield from _appel_omp(cmd, demande, consigne + "\n\n" + texte)
+        yield from _appel_omp(cmd, demande, invite_omp(consigne, texte))
     finally:
         demande.finir()                                 # tout est supprimé (même si le retour échoue)
 
@@ -2166,10 +2211,10 @@ def appel_omp(consigne, texte, image, usage):
 def _appel_omp(cmd, demande, invite):
     delai, globale = avant_lancement(DELAI_CLI)
     err = tempfile.TemporaryFile(mode="w+")
-    # PI_NO_TITLE, PI_NO_PTY : pas de titre ni de terminal ; OMP_SKIP_SETUP : pas d'assistant de première utilisation ;
+    # PI_NO_TITLE, PI_NO_PTY : pas de titre ni de terminal ;
     # OMP_MCP_TIMEOUT_MS : un serveur MCP qui ne répond pas ne retient pas la demande (il n'est de toute façon pas
     # joignable : le faux dossier personnel n'a pas de mcp.json)
-    env = dict(env_cli("omp"), HOME=str(demande.home), PI_NO_TITLE="1", OMP_SKIP_SETUP="1", PI_NO_PTY="1",
+    env = dict(env_cli("omp"), HOME=str(demande.home), PI_NO_TITLE="1", PI_NO_PTY="1",
                OMP_MCP_TIMEOUT_MS="5000")
     debut = time.monotonic()
     p = lancer_programme("omp", cmd, env, demande, err, delai, entree=invite)      # l'invite par stdin

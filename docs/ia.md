@@ -99,7 +99,11 @@ faux dossier personnel n'a ni `mcp.json` ni réglages. Ses connexions (`omp logi
 (`~/.omp/agent/agent.db`, ou `$XDG_DATA_HOME/omp/agent.db` après `omp config migrate`) : nc-ia en tire une base neuve
 qui ne garde que les connexions `oauth` encore valables, sans jeton de rafraîchissement ni clé d'API enregistrée ; les
 clés d'API viennent de l'environnement (liste blanche d'`omp`). Pas d'images. Installé par toi (`omp.sh`, le binaire ou
-bun 1.3.14 ou plus) : rien dans `install.sh`. Un profil `omp` ou `PI_CODING_AGENT_DIR` ne sont pas suivis.
+bun 1.3.14 ou plus) : rien dans `install.sh`. `PI_CODING_AGENT_DIR` (un chemin absolu, comme `CODEX_HOME`) et `PI_CONFIG_DIR` (un nom relatif à `~`, comme `.pi`) sont
+suivis : nc-ia lit la base là où omp la met, et cet endroit est illisible dans le bac ; une valeur relative, hors de `~`
+(sauf `/tmp`) ou avec `..` refuse le bac. Un profil nommé d'omp n'est pas suivi. Les liens symboliques ne sont jamais suivis
+pour la base ni son journal ; base et journal au-delà de 64 Mio, ou une donnée de plus de 256 Kio, sont refusés. Dans la
+copie, `refresh` existe mais vaut toujours une chaîne vide (omp l'exige) : jamais un jeton.
 
 **Sans bac** (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), les programmes en ligne de commande ne sont
 **pas lancés** : une IA par API prend le relais. Le réglage `IA_BAC_REPLI` (nc-reglages, « non » par défaut) les laisse

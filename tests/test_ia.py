@@ -2078,7 +2078,7 @@ exit {code}""")
         faux_home = re.search(r"^HOME (.*)$", t, re.M)[1]
         self.assertNotEqual(faux_home, str(self.home))
         self.assertFalse(os.path.exists(faux_home), "faux dossier personnel supprimé")
-        for v in ("PI_NO_TITLE=1", "OMP_SKIP_SETUP=1", "PI_NO_PTY=1", "OMP_MCP_TIMEOUT_MS=5000"):
+        for v in ("PI_NO_TITLE=1", "PI_NO_PTY=1", "OMP_MCP_TIMEOUT_MS=5000"):
             self.assertIn(v, t.splitlines())
 
     def test_omp_delai_et_modele_dans_les_arguments(self):

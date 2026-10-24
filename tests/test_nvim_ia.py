@@ -297,8 +297,25 @@ R.terminal = vim.bo.buftype == "terminal"
 """, self.fichier_c())
         self.assertTrue(r["terminal"])
         args = (self.faux / "omp-args").read_text()
-        self.assertTrue(args.startswith("launch\n---\n// écrire une boucle de 1 à 3\n"), args)
+        self.assertTrue(args.startswith("launch\n---\n--\n---\n// écrire une boucle de 1 à 3\n"), args)
         self.assertNotIn("yolo", args)
+
+    def test_agent_omp_demande_en_arobase_ou_tiret(self):
+        """Une sélection qui commence par « @ » (un décorateur) ou « - » reste du texte pour omp : après « -- »."""
+        self.etat("omp", [{"id": "omp", "nom": "Oh My Pi (omp)", "genre": "cli", "disponible": True, "agent": "omp"}])
+        for sel in ("@app.route('/x')", "-- commentaire"):
+            (self.faux / "omp-args").unlink(missing_ok=True)
+            f = self.projet / "src/x.py"
+            f.write_text(sel + "\n")
+            self.nvim("""
+touches("ggV<Esc>")
+ia.agent(true)
+attendre(function() return vim.uv.fs_stat(vim.env.FAUX_DIR .. "/omp-args") end)
+vim.wait(100)
+""", f)
+            lignes = (self.faux / "omp-args").read_text().splitlines()
+            self.assertEqual(lignes[:4], ["launch", "---", "--", "---"], lignes)
+            self.assertTrue(any(l.strip() == sel for l in lignes[4:]), lignes)
 
     def test_agent_choisir(self):
         self.etat("anthropic", [

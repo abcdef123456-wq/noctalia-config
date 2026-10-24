@@ -417,7 +417,9 @@ local AGENTS = {
   qwen = function(d) return { "-i", d } end,             -- Qwen Code, dérivé de Gemini CLI
   copilot = function(d) return { "-i", d } end,          -- GitHub Copilot CLI : --interactive
   opencode = function(d) return { "--prompt", d } end,
-  omp = function(d) return { "launch", d } end,          -- Oh My Pi : « launch » pour qu'une demande ne soit jamais prise pour une sous-commande (commit, config…)
+  -- Oh My Pi : « launch » (une demande n'est jamais une sous-commande : commit, config…) puis « -- » : tout ce qui suit est du
+  -- texte (sinon « @app.route(…) » serait un fichier à lire, et omp s'arrête s'il manque ; vérifié dans cli/args.ts)
+  omp = function(d) return { "launch", "--", d } end,
   ["kiro-cli"] = function(d) return { "chat", d } end,
   amp = false, crush = false, goose = false, aider = false,
 }
