@@ -742,6 +742,18 @@ sleep 1; rm -f "$L"; printf 'zsh 5-1 -> 5-2\\nlinux 6.1-1 -> 6.2-1\\n'; exit 0
         self.assertIn("La mise à jour a échoué (code 1).", r.stdout)
         self.assertIn("nc-alertes maj 1 echec 1", self.appels())
 
+    def test_reponse_non_reconnue_sans_cmp(self):
+        """C-3 : cmp vient de diffutils, absent de la base d'Arch ; sans lui, un « n » passait pour un échec."""
+        sans = self.home / "sans-cmp"; sans.mkdir()
+        for p in (self.home / "sys").iterdir():
+            if p.name != "cmp":
+                (sans / p.name).symlink_to(os.readlink(p))
+        (self.home / "db").write_text("linux 6.1-1\n"); (self.home / "db-apres").write_text("linux 6.2-1\n")
+        r = self.lancer("terminal", PATH=f"{self.home / 'bin'}:{sans}", NC_TEST_DEPOTS="linux 6.1-1 -> 6.2-1\n", NC_TEST_NON="1")
+        self.assertIn("paru -Syu", self.appels())
+        self.assertIn("Mise à jour annulée", r.stdout)
+        self.assertNotIn("échoué", r.stdout)
+
     def test_flatpak_seul_pas_un_echec(self):
         """P3-P6 : sans gestionnaire reconnu (Silverblue), chaque mise à jour Flatpak finissait en « échec (code 1) »."""
         r = self.lancer("terminal", PATH=f"{self.home / 'fp'}:{self.home / 'sys'}", **self.seul("fp", "flatpak", "notify-send"))

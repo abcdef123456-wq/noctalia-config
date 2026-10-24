@@ -700,9 +700,9 @@ case "$action" in
     if [ "$annule" = 0 ] && command -v flatpak >/dev/null; then etape flatpak update || noter $?; fi
     installes > "$apres_f"
     # « n » à la question de pacman, apt, dnf, zypper ou Flatpak : un code sous 128 (au-delà, un processus tué : 137
-    # pour SIGKILL), rien d'installé (sans cmp : un échec), et rien d'autre que questions et abandon sur la sortie
+    # pour SIGKILL), rien d'installé (meme_liste, sans cmp), et rien d'autre que questions et abandon sur la sortie
     # d'erreur. Plus de liste de mots d'erreur : « Sorry, try again. », un pacman en russe passaient pour un « n »
-    if [ "$code" != 0 ] && [ "$code" -lt 128 ] && cmp -s <(sort "$avant_f") <(sort "$apres_f") &&
+    if [ "$code" != 0 ] && [ "$code" -lt 128 ] && meme_liste "$avant_f" "$apres_f" &&
        seulement_annulee "$erreurs_f"; then
       code=0; annule=1
     fi
