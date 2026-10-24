@@ -11,6 +11,9 @@ REPO = Path(__file__).resolve().parents[1]
 ICI = Path(__file__).resolve()
 CHEMINS_PERMIS = {"user", "pi", "nom", "toi", "moi", "utilisateur"}
 MESSAGERIES = r"(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|proton|protonmail|laposte|orange|free|sfr|wanadoo|gmx)\.[a-z.]{2,6}"
+# Un dossier personnel, suivi ou non d'une barre : « /home/<nom>/… », mais aussi « PATH=$PATH:/home/<nom> » ou
+# « "/home/<nom>" », comme les écrivent des installateurs tiers dans ~/.zshrc.
+CHEMIN = re.compile(r"/home/([a-z_][a-z0-9_-]*(?:\.[a-z0-9_-]+)*)")
 CLES = re.compile(r"sk-ant-[A-Za-z0-9_-]{30,}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36}|\b\d{8,10}:[A-Za-z0-9_-]{35}\b")
 
 
@@ -41,7 +44,6 @@ class RienDePerso(unittest.TestCase):
     def test_aucune_information_personnelle(self):
         perso = {v for v in (git_config("user.name"), git_config("user.email"), str(Path.home())) if len(v) >= 4}
         compte = Path.home().name
-        chemin = re.compile(r"/home/([a-z_][a-z0-9_.-]*)/")
         adresse = re.compile(r"[A-Za-z0-9._%+-]+@" + MESSAGERIES + r"\b", re.I)
         for f in suivis():
             if f == ICI:
@@ -52,16 +54,24 @@ class RienDePerso(unittest.TestCase):
             rel = f.relative_to(REPO).as_posix()
             for v in perso:
                 self.assertNotIn(v, t, f"{rel} : information de cette machine (nom, adresse ou dossier personnels)")
-            for m in chemin.finditer(t):
+            for m in CHEMIN.finditer(t):
                 self.assertTrue(m[1] in CHEMINS_PERMIS and m[1] != compte, f"{rel} : chemin personnel {m[0]}")
             self.assertIsNone(adresse.search(t), f"{rel} : adresse de messagerie")
             if not rel.startswith("tests/"):
                 self.assertIsNone(CLES.search(t), f"{rel} : ressemble à une vraie clé ou un jeton")
 
     def test_le_test_voit_un_chemin_personnel(self):
-        """Le garde-fou marche : un chemin /home/<quelqu'un>/ serait refusé."""
-        m = re.search(r"/home/([a-z_][a-z0-9_.-]*)/", "voir " + "/ho" + "me/marcel/x")
-        self.assertTrue(m and m[1] not in CHEMINS_PERMIS)
+        """Le garde-fou marche : un chemin /home/<quelqu'un> serait refusé, avec ou sans barre après le nom, par
+        exemple dans les lignes qu'un installateur tiers ajoute à home/.zshrc."""
+        racine = "/ho" + "me/"
+        for ligne in ("voir " + racine + "marcel/x",
+                      'export PATH="' + racine + 'marcel/.local/bin:$PATH"',
+                      "export PATH=$PATH:" + racine + "marcel",
+                      'export BUN_INSTALL="' + racine + 'jean.dupont"'):
+            m = CHEMIN.search(ligne)
+            self.assertTrue(m and m[1] not in CHEMINS_PERMIS, ligne)
+        self.assertEqual(CHEMIN.search(racine + "marcel.")[1], "marcel", "le point final d'une phrase n'en fait pas partie")
+        self.assertIsNone(CHEMIN.search(racine + "<nom>/"), "un repère de la doc n'est pas un nom")
 
 
 if __name__ == "__main__":

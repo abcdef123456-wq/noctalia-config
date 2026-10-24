@@ -185,6 +185,34 @@ HOME_FILES=(
   Pictures/Wallpapers
 )
 
+# Fichiers de démarrage du shell : des installateurs tiers y ajoutent leurs lignes (export PATH="/home/<nom>/…").
+# L'export publie toujours la version du dépôt, montre l'écart et ne touche jamais au fichier de ~.
+SHELL_GARDES=" .zshrc .zshenv .zprofile .zlogin .bashrc .bash_profile .profile "
+comparer_shell() { # comparer_shell REL BASE INSTALLE
+  local rel="$1" base="$2" installe="$3" norm="$stage/shell-normalise.tmp" ecart lignes n
+  if [ ! -f "$base" ]; then
+    echo "$(t "non publié : ~/$rel (le dépôt n'en a pas de version gérée)" "not published: ~/$rel (no managed version in the repository)")" >&2
+    return 0
+  fi
+  [ -f "$installe" ] || return 0
+  sed "s|$HOME|@HOME@|g" "$installe" > "$norm"            # la normalisation habituelle des repères
+  ecart="$(git --no-pager diff --no-index --no-color -U0 -- "$base" "$norm" \
+           | sed -n '/^@@/,$ { /^@@/d; /^\\/d; p }' || true)"
+  rm -f -- "$norm"
+  [ -n "$ecart" ] || return 0
+  mapfile -t lignes <<< "$ecart"
+  n=${#lignes[@]}
+  # shellcheck disable=SC2088  # « ~/ » est du texte affiché, pas un chemin à développer
+  echo "$(t "~/$rel diffère du dépôt : la version du dépôt est gardée, ces lignes ne sont pas publiées (~/$rel n'est pas modifié) :" "~/$rel differs from the repository: the repository version is kept, these lines are not published (~/$rel is not changed):")" >&2
+  printf '  %s\n' "${lignes[@]:0:12}" >&2
+  [ "$n" -le 12 ] || echo "  … ($n $(t "lignes en tout" "lines in total"))" >&2
+  if [ "$rel" = .zshrc ]; then
+    echo "$(t "Tes ajouts vont dans ~/.zshrc.perso : le .zshrc du dépôt le charge à la fin." "Put your additions in ~/.zshrc.perso: the repository .zshrc loads it at the end.")" >&2
+  else
+    echo "$(t "Garde tes ajouts dans un fichier à toi, hors du dépôt." "Keep your additions in a file of your own, outside the repository.")" >&2
+  fi
+}
+
 copy_list() { # copy_list DEST_PREFIX fichier...
   local dest="$1" rel base installe; shift
   for rel in "$@"; do
@@ -204,6 +232,9 @@ copy_list() { # copy_list DEST_PREFIX fichier...
       fi
       continue
     fi
+    case "$SHELL_GARDES" in
+      *" $rel "*) comparer_shell "$rel" "$base" "$installe"; continue ;;
+    esac
     mkdir -p "$dest/$(dirname "$rel")"
     [ -L "$dest/$rel" ] && rm -f -- "$dest/$rel"   # un lien du dépôt est remplacé par ce qu'il y a dans ~
     if [ -d "$installe" ]; then

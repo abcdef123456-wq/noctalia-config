@@ -133,6 +133,42 @@ class ExportIsole(unittest.TestCase):
         self.assertIn("type incompatible", r.stderr)
         self.assertFalse(list(self.depot.glob(".nc-export.*")))
 
+    ZSHRC = '# géré par le dépôt\nexport EDITOR=nvim\n[[ -r ~/.zshrc.perso ]] && source ~/.zshrc.perso\n'
+
+    def zshrc_ajoute(self):
+        """Le .zshrc du dépôt, et dans ~ le même avec une ligne d'un installateur tiers (chemin du dossier perso)."""
+        (self.depot / "home/.zshrc").write_text(self.ZSHRC)
+        for a in (("add", "home"), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                    "commit", "-qm", "zshrc")):
+            subprocess.run(["git", "-C", str(self.depot), *a], env=self.env, capture_output=True, check=True)
+        installe = self.ZSHRC + f'export PATH="{self.home}/.tiers/bin:$PATH"\n'
+        (self.home / ".zshrc").write_text(installe)
+        return installe
+
+    def test_zshrc_ajouts_tiers_pas_publies(self):
+        """~/.zshrc reçoit des lignes d'installateurs tiers : l'export garde le .zshrc du dépôt, montre l'écart et ne
+        modifie pas ~/.zshrc."""
+        installe = self.zshrc_ajoute()
+        for a in (("--preview",), ()):
+            r = self.exporter(*a)
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            self.assertEqual((self.depot / "home/.zshrc").read_text(), self.ZSHRC, f"export {a}")
+            self.assertEqual((self.home / ".zshrc").read_text(), installe, "~/.zshrc n'est jamais modifié")
+            self.assertIn("~/.zshrc diffère du dépôt", r.stderr)
+            self.assertIn('+export PATH="@HOME@/.tiers/bin:$PATH"', r.stderr, "l'écart, après normalisation")
+            self.assertIn("~/.zshrc.perso", r.stderr)
+            self.assertNotIn(".zshrc", r.stdout.replace("gardé depuis le dépôt", ""), "pas de diff du .zshrc")
+        etat = subprocess.run(["git", "-C", str(self.depot), "status", "--porcelain", "--", "home/.zshrc"],
+                              env=self.env, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(etat, "")
+
+    def test_zshrc_identique_apres_normalisation_sans_avertissement(self):
+        (self.depot / "home/.zshrc").write_text(self.ZSHRC + 'export PATH="@HOME@/.local/bin:$PATH"\n')
+        (self.home / ".zshrc").write_text(self.ZSHRC + f'export PATH="{self.home}/.local/bin:$PATH"\n')
+        r = self.exporter("--preview")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertNotIn("diffère", r.stderr)
+
 
 class ExportDepotReel(unittest.TestCase):
     """A3-R1 : les substitutions d'export.sh s'appliquent aussi aux fichiers du dépôt (gardés quand ~ ne les a pas).

@@ -353,6 +353,8 @@ L'export ne supprime rien du dépôt. Un fichier qui n'est pas sur ton PC (un co
 ou un fond d'écran que tu as retiré de `~`) reste dans `home/`. Pour l'enlever du dépôt, fais-le toi-même :
 `git rm home/<chemin>`, puis commit. Un dossier qui est un lien (par exemple `~/.config/nvim` vers un autre dossier)
 est exporté avec son contenu, jamais le lien lui-même.
+Pour `~/.zshrc`, l'export garde toujours la version du dépôt et te montre les lignes en plus (celles qu'ajoute un
+installateur, par exemple) sans toucher à ton fichier : mets tes ajouts dans `~/.zshrc.perso`, qu'il charge à la fin.
 
 Les corrections de la vue des fenêtres, de Coucou et des contrôles Quickshell sont détaillées dans la
 [note de validation](docs/corrections-2026-10-19.md), avec les essais graphiques restant à effectuer sur Debian,
