@@ -372,6 +372,84 @@ class ReglesPersistantes(unittest.TestCase):
         self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
         self.assertEqual(self.avertis, [])
 
+    def ouvrir_dev(self, fenetre, regle=None, **attendre):
+        dossier = self.home / ".config/nc/sessions"
+        dossier.mkdir(parents=True, exist_ok=True)
+        (dossier / "Dev.json").write_text(json.dumps({"nom": "Dev", "fenetres": [fenetre]}))
+        regle = regle or mock.Mock(side_effect=lambda *a, active=True: True)
+        with mock.patch.object(self.m, "etapes_avant"), mock.patch.object(self.m, "etapes_apres"), \
+                mock.patch.object(self.m, "clients", return_value=[]), \
+                mock.patch.object(self.m, "attendre", **(attendre or {"return_value": (1, 0)})), \
+                mock.patch.object(self.m, "regle", regle), mock.patch("signal.signal"):
+            return self.m.ouvrir("Dev", 0), regle
+
+    def test_bureau_en_texte_note_et_pose_le_meme_entier(self):
+        # « "bureau": "3" » (fichier écrit à la main) : notée "3" mais posée 3, la règle restait active pour toujours
+        res, regle = self.ouvrir_dev({"classe": "discord", "bureau": "3", "appli": "discord"})
+        self.assertEqual(res, (1, 0))
+        self.assertEqual(regle.call_args_list, [mock.call(0, "discord", 3), mock.call(0, "discord", 3, active=False)])
+        self.assertFalse(self.m.POSEES.exists())
+        self.assertEqual(list(self.home.glob("nc-session-regles.json.illisible-*")), [])
+        self.assertEqual(self.avertis, [])
+
+    def test_bureau_ou_classe_inutilisable_pas_de_regle(self):
+        for fenetre in ({"classe": "discord", "bureau": None, "appli": "discord"},
+                        {"classe": "discord", "bureau": "trois", "appli": "discord"},
+                        {"classe": 42, "bureau": 3, "appli": "discord"},
+                        {"classe": ["discord"], "bureau": 3, "appli": "discord"}):
+            with self.subTest(fenetre=fenetre):
+                res, regle = self.ouvrir_dev(fenetre)
+                self.assertEqual(res, (1, 0))
+                regle.assert_not_called()                   # ni notée ni posée, et pas de TypeError
+                self.assertFalse(self.m.POSEES.exists())
+                self.assertEqual(self.avertis, [])
+
+    def test_classe_impossible_en_lua_ni_notee_ni_posee(self):
+        # « ]] » fermerait la chaîne Lua : rien à poser, donc rien à noter (sinon un retrait « raté » à chaque fois)
+        with mock.patch.object(self.m, "motif_lua", return_value=None), \
+                mock.patch.object(self.m, "noter_regles", wraps=self.m.noter_regles) as noter:
+            res, regle = self.ouvrir_dev({"classe": "discord", "bureau": 3, "appli": "discord"})
+        self.assertEqual(res, (1, 0))
+        regle.assert_not_called()
+        noter.assert_not_called()
+        self.assertFalse(self.m.POSEES.exists())
+
+    def test_refus_durable_un_seul_avertissement_par_ouverture(self):
+        self.m.POSEES.write_text(json.dumps([[0, "discord", 3]]))
+        res, _ = self.ouvrir_dev({"classe": "discord", "bureau": 3, "appli": "discord"},
+                                 regle=mock.Mock(return_value=False))
+        self.assertEqual(res, (1, 0))
+        self.assertEqual(len(self.avertis), 1)
+        self.assertEqual(json.loads(self.m.POSEES.read_text()), [[0, "discord", 3]])
+        # Une règle nouvelle, elle, est signalée à la fin (et seulement elle)
+        self.avertis.clear()
+        self.m.POSEES.write_text(json.dumps([[5, "steam", 4]]))
+        self.ouvrir_dev({"classe": "discord", "bureau": 3, "appli": "discord"}, regle=mock.Mock(return_value=False))
+        self.assertEqual(len(self.avertis), 2)
+        self.assertIn("1 règle(s)", self.avertis[1])
+        self.assertEqual(sorted(json.loads(self.m.POSEES.read_text())), [[0, "discord", 3], [5, "steam", 4]])
+
+    def test_signal_journal_illisible_reste_en_place_sans_avertir(self):
+        def tue(*_a, **_k):
+            self.m.POSEES.write_text("{")                   # journal abîmé pendant l'ouverture, puis SIGTERM
+            raise SystemExit(143)
+        with self.assertRaises(SystemExit) as erreur:
+            self.ouvrir_dev({"classe": "discord", "bureau": 3, "appli": "discord"}, side_effect=tue)
+        self.assertEqual(erreur.exception.code, 143)
+        self.assertEqual(self.m.POSEES.read_text(), "{")    # la prochaine ouverture le met de côté et le dit
+        self.assertEqual(list(self.home.glob("nc-session-regles.json.illisible-*")), [])
+        self.assertEqual(self.avertis, [])
+
+    def test_mis_de_cote_deux_fois_dans_la_meme_seconde(self):
+        with mock.patch.object(self.m.time, "strftime", return_value="20261024-010203"):
+            for _ in range(3):
+                self.m.POSEES.write_text("{")
+                self.assertEqual(self.m.retirer_orphelines(), [])
+        noms = sorted(p.name for p in self.home.glob("nc-session-regles.json.illisible-*"))
+        base = f"nc-session-regles.json.illisible-20261024-010203-{os.getpid()}"
+        self.assertEqual(noms, [base, base + "-1", base + "-2"])
+        self.assertEqual(len(self.avertis), 3)
+
     def test_gardes_quickshell_seulement_sur_les_tests_graphiques(self):
         which = shutil.which
         with mock.patch.object(shutil, "which", side_effect=lambda nom, *a, **k: None if nom == "qs" else which(nom, *a, **k)):

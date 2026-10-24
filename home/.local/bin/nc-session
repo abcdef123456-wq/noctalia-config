@@ -526,13 +526,33 @@ def placer(adresse, e):
         dispatch(f"hl.dsp.window.fullscreen({{ action = 'set', mode = '{'maximized' if pe == 1 else 'fullscreen'}', window = '{sel}' }})")
 
 
+def motif_lua(classe):
+    """Le motif de la classe, entre [[ ]] dans le Lua ; None s'il ne peut pas y être écrit (rien à poser)."""
+    motif = "^(" + re.escape(classe) + ")$"
+    return None if "]]" in motif else motif
+
+
+def regle_possible(e):
+    """(classe, bureau) de la règle d'une fenêtre, tels qu'ils seront notés ET posés : bureau converti en entier
+    (« 3 » dans un fichier écrit à la main), classe en texte. None si l'un des deux ne convient pas : pas de règle,
+    la fenêtre est seulement placée quand elle s'ouvre."""
+    classe = e.get("classe")
+    try:
+        bureau = int(e.get("bureau"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not isinstance(classe, str) or not classe or isinstance(e.get("bureau"), bool) or motif_lua(classe) is None:
+        return None
+    return classe, bureau
+
+
 def regle(n, classe, bureau, active=True):
     """Règle Hyprland nommée, le temps de la réouverture : toute fenêtre de cette appli (écran de chargement, fenêtre de
     mise à jour, puis la vraie) s'ouvre directement sur son bureau, sans passer par le bureau affiché. Désactivée à la
     fin (même nom, enabled = false), sans recharger Hyprland. Une seule ouverture à la fois (verrou) : les noms
     nc-session-0, -1… resservent, et une règle laissée par une ouverture tuée net est retirée par la suivante."""
-    motif = "^(" + re.escape(classe) + ")$"
-    if "]]" in motif:
+    motif = motif_lua(classe)
+    if motif is None:
         return False
     lua = (f"hl.window_rule({{ name = 'nc-session-{n}', enabled = {'true' if active else 'false'}, "
            f"match = {{ class = [[{motif}]] }}, workspace = '{int(bureau)} silent' }})")
@@ -558,11 +578,12 @@ def mettre_de_cote():
     """Journal illisible ou invalide : ses règles sont inconnues, donc impossibles à retirer. Il est gardé tel quel à
     côté (0600) pour qu'on puisse le lire, et l'ouverture continue (sinon plus aucune ne passerait jusqu'au
     redémarrage). Renvoie le chemin de la copie."""
-    copie = POSEES.with_name(f"{POSEES.name}.illisible-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}")
+    base = f"{POSEES.name}.illisible-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    copie, i = POSEES.with_name(base), 1
+    while os.path.lexists(copie):                           # jamais par-dessus une copie déjà gardée
+        copie, i = POSEES.with_name(f"{base}-{i}"), i + 1
     try:
-        if os.path.lexists(copie):
-            raise FileExistsError(copie)
-        os.rename(POSEES, copie)                            # jamais par-dessus une copie déjà gardée
+        os.rename(POSEES, copie)
         if not copie.is_symlink():
             os.chmod(copie, 0o600)
     except OSError:
@@ -573,10 +594,11 @@ def mettre_de_cote():
     return copie
 
 
-def retirer_orphelines():
+def retirer_orphelines(discret=False):
     """Règles d'une ouverture tuée net (SIGKILL, coupure) : sans cela, l'appli s'ouvrirait en silence sur son ancien
     bureau jusqu'au rechargement de Hyprland (revue SESSION-02). Renvoie celles que Hyprland n'a pas retirées : elles
-    restent dans le journal, et la prochaine ouverture (ou la fin de celle-ci) réessaie."""
+    restent dans le journal, et la prochaine ouverture (ou la fin de celle-ci) réessaie. discret (arrêt ou erreur en
+    cours) : un journal illisible reste en place, sans avertissement, pour la prochaine ouverture."""
     try:
         posees = json.loads(POSEES.read_text())
     except FileNotFoundError:
@@ -585,6 +607,9 @@ def retirer_orphelines():
         posees = None
     if not isinstance(posees, list) or any(not isinstance(r, list) or len(r) != 3
             or not isinstance(r[0], int) or not isinstance(r[1], str) or not isinstance(r[2], int) for r in posees):
+        if discret:
+            raise Erreur(T(f"Journal des règles temporaires illisible : {POSEES}",
+                           f"Temporary rule journal is unreadable: {POSEES}"))
         copie = mettre_de_cote()
         avertir(T(f"Journal des règles temporaires illisible : gardé dans {copie}. Les règles qu'il notait n'ont pas "
                   "pu être retirées : si une appli s'ouvre toujours sur un autre bureau, recharge Hyprland.",
@@ -797,10 +822,10 @@ def _ouvrir(nom, delai, anciennes=()):
     fini = False
     try:
         for n, e in enumerate(lances):
-            if "terminal" not in e and classes.count(e["classe"]) == 1:
-                regles[n] = (n, e["classe"], e["bureau"])       # notée avant d'être posée : retirée même si on est tué
+            if "terminal" not in e and classes.count(e["classe"]) == 1 and (cb := regle_possible(e)):
+                regles[n] = (n, *cb)                            # notée avant d'être posée : retirée même si on est tué
                 noter_regles(list(regles.values()))
-                regle(n, e["classe"], e["bureau"])
+                regle(n, *cb)
         res = attendre(fenetres, lances, avant, delai, adresses)
         etapes_apres(s, adresses)
         fini = True
@@ -809,13 +834,15 @@ def _ouvrir(nom, delai, anciennes=()):
         # échec de ce nettoyage ne remplace ni le signal (SystemExit 143), ni l'erreur en cours, ni le résultat : le
         # journal reste, et la prochaine ouverture reprend.
         try:
-            restantes = retirer_orphelines()
+            restantes = retirer_orphelines(discret=not fini)
         except Erreur as e:
             restantes = None
             if fini:
                 avertir(str(e))
-        if fini and restantes:
-            avertir(pas_retirees(restantes))
+        # Celles déjà signalées au début (refus durable) ne le sont pas une deuxième fois
+        nouvelles = [r for r in restantes or () if tuple(r) not in {tuple(a) for a in anciennes}]
+        if fini and nouvelles:
+            avertir(pas_retirees(nouvelles))
     return res
 
 
