@@ -237,6 +237,12 @@ class Base(unittest.TestCase):
                "XDG_CACHE_HOME": str(self.home / ".cache"), "PATH": path, "NC_IA_BAC": ""}
         for k in ("CLAUDE_CONFIG_DIR", "CODEX_HOME"):
             env[k] = ""
+        # Aucune vraie clé d'API de la session ne doit changer le comportement (une clé fait passer un jeton expiré)
+        for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY",
+                  "GEMINI_API_KEY", "GOOGLE_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY", "OPENCODE_API_KEY",
+                  "GOOGLE_GENERATIVE_AI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY",
+                  "DEEPSEEK_API_KEY", "XAI_API_KEY"):
+            env[k] = ""
         env.update(plus)
         p = unittest.mock.patch.dict(os.environ, env)
         p.start()
@@ -885,9 +891,10 @@ class AvecFauxSystemdRun(Base):
         (self.home / JETONS[ident]).write_text(json.dumps(o))
 
     def test_jeton_expire_pas_lance(self):
-        duree = self.m.DELAI_CLI + 10                           # durée maximale réelle (RuntimeMaxSec)
+        duree = self.m.duree_bac(self.m.DELAI_CLI)              # durée maximale réelle (RuntimeMaxSec)
+        marge = self.m.MARGE_JETON
         for ident in IDENTS:
-            for delta, lance in ((-10, False), (duree + 30, False), (duree + 120, True)):
+            for delta, lance in ((-10, False), (duree + marge - 60, False), (duree + marge + 60, True)):
                 with self.subTest(ident=ident, delta=delta):
                     (self.home / "moteur.log").unlink(missing_ok=True)
                     self._avec_echeance(ident, int((time.time() + delta) * 1000))
@@ -896,7 +903,8 @@ class AvecFauxSystemdRun(Base):
                         continue
                     with self.assertRaises(self.m.ErreurIA) as e:
                         self.lancer_moteur(self.m, ident, NC_TEST_FICHIERS="")
-                    self.assertIn("doit renouveler sa connexion", str(e.exception))
+                    attendu = "doit renouveler sa connexion" if delta < 0 else "expire dans"
+                    self.assertIn(attendu, str(e.exception))
                     self.assertIn(f"({self.m.BINAIRES[ident]})", str(e.exception))
                     self.assertFalse((self.home / "moteur.log").exists(), "le moteur n'a pas été lancé")
                     self.assertEqual(os.listdir(self.base()), [], "rien ne reste dans la base")
@@ -1025,6 +1033,118 @@ class AvecFauxSystemdRun(Base):
         self.assertIn("effacement de borne borné", self.journal_ia())
         self.m.effacer(str(r))                                  # la purge suivante le reprend (000 rouvert par /proc)
         self.assertFalse(r.exists())
+    # ── 5e relecture ────────────────────────────────────────────────────────────────────────────────────────────────
+    def _arbre_droits(self, nom, modes):
+        """r/a/b/c avec auth.json au fond ; modes : {chemin relatif: mode} appliqués du plus profond au moins profond."""
+        r = self.home / nom
+        (r / "a/b/c").mkdir(parents=True)
+        (r / "a/b/c/auth.json").write_text("{}")
+        (r / "a/b/f").write_text("x")
+        for rel in sorted(modes, key=len, reverse=True):
+            os.chmod(r / rel, modes[rel])
+        return r
+
+    def test_effacer_sous_dossiers_sans_droit_d_ecriture(self):
+        """Déplacer un dossier exige w sur lui : a/b en 0500, a/b/c en 0500, a/b en 000 s'effacent quand même."""
+        for nom, modes in (("b500", {"a/b": 0o500}), ("c500", {"a/b": 0o500, "a/b/c": 0o500}), ("b000", {"a/b": 0}),
+                           ("c400", {"a/b/c": 0o400})):
+            with self.subTest(nom):
+                r = self._arbre_droits(nom, modes)
+                self.addCleanup(lambda r=r: _rmtree_force(str(r)) if r.exists() else None)
+                debut = time.monotonic()
+                self.m.effacer(str(r))
+                self.assertLess(time.monotonic() - debut, 5)
+                self.assertFalse(r.exists(), f"{nom} : il reste {sorted(str(x) for x in r.rglob('*')) if r.exists() else ''}")
+                self.assertNotIn("borné", self.journal_ia())
+
+    def test_purge_reprend_un_reste_sans_droits(self):
+        """Un faux dossier personnel laissé par une version précédente, en 000, avec a/b et a/b/c en 0500 : repris."""
+        self.fb.joinpath("systemctl").write_text('#!/bin/sh\ncase "$*" in *is-active*) for u in "$@"; do '
+                                                 'case "$u" in *.service) echo inactive;; esac; done;; esac\n')
+        base = self.base()
+        base.mkdir(parents=True)
+        reste = base / "nc-ia-home-aaaaaaaaaaaa"
+        (reste / "a/b/c").mkdir(parents=True)
+        (reste / "a/b/c/auth.json").write_text('{"access_token": "VIEUX"}')
+        for rel, mode in (("a/b/c", 0o500), ("a/b", 0o500)):
+            os.chmod(reste / rel, mode)
+        os.chmod(reste, 0)
+        os.utime(reste, (time.time() - 120,) * 2)
+        self.addCleanup(lambda: _rmtree_force(str(reste)) if reste.exists() else None)
+        self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
+        self.assertFalse(reste.exists(), "le reste est repris par la purge")
+        self.assertEqual(os.listdir(base), [])
+
+    def test_attente_du_clic_bornee_et_notify_send_tue(self):
+        """L'assistant détaché tue notify-send à l'échéance (pas de processus qui reste) ; un clic lance la commande."""
+        temoin = self.home / "lance"
+        for clic, attendu in (("", False), ("ouvrir", True)):
+            with self.subTest(clic=clic or "aucun"):
+                temoin.unlink(missing_ok=True)
+                pid = self.home / "pid"
+                faux = self.fb / "notify-attente"
+                faux.write_text(f'#!/bin/sh\necho $$ > "{pid}"\n' + (f'echo {clic}\n' if clic else 'exec sleep 30\n'))
+                faux.chmod(0o755)
+                notif = subprocess.Popen([str(faux)], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+                fd = notif.stdout.fileno()
+                r = subprocess.run([sys.executable, "-I", "-c", self.m._ATTENDRE_CLIC, "ouvrir", str(notif.pid), str(fd),
+                                    json.dumps(["touch", str(temoin)]), "1"], pass_fds=(fd,), timeout=20)
+                notif.stdout.close()
+                self.assertEqual(r.returncode, 0)
+                self.assertIsNotNone(notif.wait(timeout=5), "notify-send est terminé (tué à l'échéance s'il attendait)")
+                time.sleep(0.3)
+                self.assertEqual(temoin.exists(), attendu)
+
+    def test_cle_d_api_jeton_expire_non_copie_sans_refus(self):
+        """Une clé d'API du moteur dans l'environnement : le jeton OAuth expiré n'est pas copié, la demande part."""
+        self._avec_echeance("codex", int((time.time() - 10) * 1000))
+        with unittest.mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            sortie = "".join(self.lancer_moteur(self.m, "codex", NC_TEST_RELATIFS=JETONS["codex"]))
+        self.assertIn("fin\n", sortie)
+        self.assertRegex(sortie, rf"REFUSE {re.escape(str(self.base()))}/nc-ia-home-[0-9a-f]{{12}}/\.codex/auth\.json")
+        self.assertNotIn("JETON-codex", sortie)
+        self.assertIn("la clé d'API de l'environnement sert", self.journal_ia())
+
+    def test_fichier_jeton_illisible_refuse(self):
+        for brut in ('{"claudeAiOauth": {"accessToken": "a", "expiresAt": NaN}}', "{cassé", "[1, 2]"):
+            with self.subTest(brut):
+                (self.home / "moteur.log").unlink(missing_ok=True)
+                (self.home / JETONS["claude"]).write_text(brut)
+                with self.assertRaises(self.m.ErreurIA) as e:
+                    self.lancer_moteur(self.m, "claude", NC_TEST_FICHIERS="")
+                self.assertIn("doit renouveler sa connexion", str(e.exception))
+                self.assertFalse((self.home / "moteur.log").exists(), "pas de lancement sans identifiants")
+        with unittest.mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
+            self.assertIn("fin\n", self.lancer_moteur(self.m, "claude", NC_TEST_FICHIERS=""))
+
+    def test_deux_messages_expire_ou_bientot(self):
+        m = self.m
+        self.assertIn("doit renouveler sa connexion", m.message_jeton_expire("gemini-cli", None))
+        self.assertIn("doit renouveler sa connexion", m.message_jeton_expire("gemini-cli", int((time.time() - 5) * 1000)))
+        bientot = m.message_jeton_expire("gemini-cli", int((time.time() + 150) * 1000))
+        self.assertIn("expire dans 3 min", bientot)
+        self.assertIn("une fois qu'il aura expiré", bientot)
+        self._avec_echeance("qwen", int((time.time() + 120) * 1000))
+        with self.assertRaises(m.ErreurIA) as e:
+            self.lancer_moteur(m, "qwen", NC_TEST_FICHIERS="")
+        self.assertIn("expire dans 2 min", str(e.exception))
+
+    def test_duree_bac_et_marge(self):
+        self.assertEqual(self.m.duree_bac(180), 190)
+        self.assertGreaterEqual(self.m.MARGE_JETON, 300, "au moins les 5 min d'avance de Claude Code et google-auth")
+        self.lancer_moteur(self.m, "codex", NC_TEST_FICHIERS="")
+        props = self.props(self.lancements()[-1])
+        delais = [int(p.split("=")[1]) for p in props if p.startswith("RuntimeMaxSec=")]
+        self.assertEqual(delais, [self.m.duree_bac(self.m.DELAI_CLI)])
+
+    def test_champs_copies_valeurs_simples(self):
+        m = self.m
+        o = {"claudeAiOauth": {"accessToken": "a", "expiresAt": 5, "scopes": {"x": {"objet": 1}},
+                               "subscriptionType": ["ok"], "rateLimitTier": float("nan")}}
+        copie = m.projeter(o, m.COPIES["claude"])["claudeAiOauth"]
+        self.assertNotIn("scopes", copie)
+        self.assertNotIn("rateLimitTier", copie)
+        self.assertEqual(copie["subscriptionType"], ["ok"])
 
 @unittest.skipUnless(_bus_utilisateur() and os.path.isdir(RACINE_BAC),
                      "systemd-run, un bus utilisateur joignable et /dev/shm requis")

@@ -963,7 +963,10 @@ JETON_ACCES = {"claude": ("claudeAiOauth", "accessToken"), "codex": ("tokens", "
 JETON_DATE = {"claude": ("claudeAiOauth", "expiresAt"), "gemini-cli": ("expiry_date",), "qwen": ("expiry_date",)}
 # Le programme que tu ouvres dans un terminal pour qu'il renouvelle sa connexion (hors du bac, sans argument)
 BINAIRES = {"claude": "claude", "codex": "codex", "gemini-cli": "gemini", "qwen": "qwen", "opencode": "opencode"}
-MARGE_JETON = 60                             # secondes en plus de la durée maximale réelle de la demande
+# Secondes en plus de la durée maximale réelle de la demande : Claude Code 2.1 tient un jeton pour expiré 5 min avant
+# son échéance (n+300000>=e), google-auth aussi (DEFAULT_EAGER_REFRESH_THRESHOLD_MILLIS=300000) ; sans jeton de
+# rafraîchissement ils échoueraient dans cette fenêtre : 5 min + 1 min de marge.
+MARGE_JETON = 360
 _ECHEANCE_MAX_MS = 4102444800000             # 2100-01-01
 
 
@@ -1045,13 +1048,30 @@ def projeter(objet, schema):
         if isinstance(s, dict):
             if isinstance(v, dict):
                 out[k] = projeter(v, s)
-        elif s is True:
+        elif s is True and valeur_simple(v):
             out[k] = v
     return out
 
 
-def message_jeton_expire(ident):
+def valeur_simple(v):
+    """Une valeur copiée telle quelle : chaîne, nombre, booléen, null, ou liste de chaînes — jamais un objet imbriqué."""
+    if v is None or isinstance(v, (str, bool, int)):
+        return True
+    if isinstance(v, float):
+        return math.isfinite(v)
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def message_jeton_expire(ident, exp=None):
+    """Le message du refus. exp (ms epoch) encore dans le futur : le jeton n'est pas expiré mais trop court pour la
+    demande, et ouvrir le moteur ne le renouvellerait PAS encore (il ne rafraîchit qu'à l'échéance) : on dit d'attendre."""
     n, b = nom(ident), BINAIRES.get(ident, ident)
+    if exp is not None and exp > time.time() * 1000:
+        mins = max(1, math.ceil((exp - time.time() * 1000) / 60000))
+        return T(f"Le jeton de {n} expire dans {mins} min : ouvre-le dans un terminal ({b}) une fois qu'il aura expiré, "
+                 f"ou réessaie dans quelques minutes.",
+                 f"The {n} token expires in {mins} min: open it in a terminal ({b}) once it has expired, or try again "
+                 f"in a few minutes.")
     return T(f"{n} doit renouveler sa connexion : ouvre-le une fois dans un terminal ({b}), puis réessaie.",
              f"{n} needs to renew its sign-in: open it once in a terminal ({b}), then try again.")
 
@@ -1066,7 +1086,7 @@ def notify_send_actions():
     return _NOTIFY_ACTIONS[0]
 
 
-def signaler_jeton_expire(ident):
+def signaler_jeton_expire(ident, exp=None):
     """Une notification, au plus une par heure et par moteur : le moteur doit renouveler sa connexion. Action « Ouvrir »
     (si notify-send sait faire et qu'un terminal est là) : SEULEMENT si tu cliques, le moteur s'ouvre dans un terminal,
     HORS du bac et sans argument. Sinon le texte seul. Jamais d'erreur ; rien ne s'ouvre tout seul."""
@@ -1085,12 +1105,13 @@ def signaler_jeton_expire(ident):
     except OSError:
         pass
     action = None
+    pas_encore = exp is not None and exp > time.time() * 1000      # pas encore expiré : l'ouvrir n'y ferait rien
     with contextlib.suppress(Exception):
         cmd = commande_terminal([BINAIRES.get(ident, ident)], nom(ident))
-        if cmd and notify_send_actions():
+        if cmd and not pas_encore and notify_send_actions():
             action = (T("Ouvrir", "Open"), cmd)
     with contextlib.suppress(Exception):
-        notifier("nc-ia", message_jeton_expire(ident), action=action, cle="ouvrir", brut=True)
+        notifier("nc-ia", message_jeton_expire(ident, exp), action=action, cle="ouvrir", brut=True)
 
 
 # Clés gardées des fichiers de réglages copiés (en plus de ~/.claude.json/settings.json filtrés par ETAT_MOTEURS) :
@@ -1170,6 +1191,11 @@ def env_bac(env):
             and "\n" not in v and "\0" not in v]
 
 
+def duree_bac(delai):
+    """La durée maximale réelle d'une demande dans le bac (RuntimeMaxSec) pour un délai donné : le délai + 10 s."""
+    return delai + 10
+
+
 def argv_bac(ident, cmd, cwd, delai, env=(), unite=None, sonde=False, remonter=(), remonter_lecture=()):
     """La commande systemd-run qui lance cmd (liste) dans le bac pour ce moteur, ou None si c'est impossible. Seuls
     visibles de $XDG_RUNTIME_DIR, et seuls inscriptibles : remonter (le dossier de travail et le faux dossier personnel
@@ -1181,7 +1207,7 @@ def argv_bac(ident, cmd, cwd, delai, env=(), unite=None, sonde=False, remonter=(
         return None
     # ~/.local/state/nc-noeud/travail : le dossier de travail des sessions de confiance de nc-noeud ; illisible pour le
     # bac des IA (mais pas pour nc-noeud, à qui il appartient).
-    return bac.argv(cmd, cwd, delai + 10, home=HOME, reglage=reglage, programme=shutil.which, ecriture=(),
+    return bac.argv(cmd, cwd, duree_bac(delai), home=HOME, reglage=reglage, programme=shutil.which, ecriture=(),
                     lecture_seule=(), libres=(), env=env, unite=unite, description="nc-ia",
                     interdits_plus=[".local/state/nc-noeud/travail"],
                     remonter=[str(x) for x in remonter], remonter_lecture=[str(x) for x in remonter_lecture])
@@ -1294,6 +1320,12 @@ def _vider_dossier(racine, fin):
             if est_racine:
                 file.append(n)
                 continue
+            # Déplacer un dossier vers un autre parent exige le droit d'écriture SUR lui (son entrée « .. ») : on l'ouvre
+            # d'abord sans suivre de lien, ce qui le remet à 0700 (un 0500/0400/000 ferait échouer le rename en EACCES)
+            sfd = _ouvrir_dossier_sans_lien(fd, n)
+            if sfd is None:
+                continue
+            os.close(sfd)
             nouveau = "x-" + os.urandom(8).hex()
             try:
                 os.rename(n, nouveau, src_dir_fd=fd, dst_dir_fd=racine)
@@ -1531,6 +1563,13 @@ def ecrire_copie(h, rel, octets):
         f.write(octets)
 
 
+class _JetonInutilisable(Exception):
+    """Jeton d'accès expiré, trop court pour la demande ou d'échéance illisible (exp : son échéance en ms, ou None)."""
+    def __init__(self, exp=None):
+        super().__init__("jeton inutilisable")
+        self.exp = exp
+
+
 class Demande:
     """Les dossiers d'une demande à un moteur en ligne de commande, tous dans base_bac() et nommés d'après son unité
     (nc-ia-<id>) : le faux dossier personnel (nc-ia-home-<id>, tenu par un verrou tant que la demande vit), le dossier de
@@ -1542,7 +1581,11 @@ class Demande:
     def __init__(self, ident, duree_max=None):
         import fcntl
         self.ident, self.conf, self.verrou = ident, None, None
-        self.duree_max = float(DELAI_CLI + 10 if duree_max is None else duree_max)
+        # Une clé d'API du moteur dans l'environnement transmis (env_cli) : il marche avec elle, un jeton OAuth expiré ou
+        # illisible n'est alors pas copié, sans refuser la demande.
+        self.cle_api = any(os.environ.get(k) for k in ENV_MOTEUR.get(ident, ())
+                           if re.search(r"API_KEY|AUTH_TOKEN|OAUTH_TOKEN", k))
+        self.duree_max = float(duree_bac(DELAI_CLI) if duree_max is None else duree_max)
         try:
             self.depl = module_bac().deplacements(HOME, os.environ)
         except ValueError as e:
@@ -1598,11 +1641,17 @@ class Demande:
                 continue
             try:
                 o = charger_json(octets)
-            except (ValueError, RecursionError):
-                continue
-            if not isinstance(o, dict):
-                continue
-            donne = self._verifier_echeance(projeter(o, COPIES[self.ident]))
+                if not isinstance(o, dict):
+                    raise ValueError("pas un objet JSON")
+                donne = self._verifier_echeance(projeter(o, COPIES[self.ident]))
+            except (_JetonInutilisable, ValueError, RecursionError) as e:
+                # Fichier présent mais illisible (JSON cassé, NaN…), jeton expiré, trop court ou d'échéance illisible :
+                # refus clair, plutôt qu'un lancement sans identifiants. Sauf si le moteur a sa clé d'API.
+                exp = e.exp if isinstance(e, _JetonInutilisable) else None
+                if self.cle_api:
+                    journal_ia(f"{self.ident} : jeton OAuth inutilisable, non copié (la clé d'API de l'environnement sert)")
+                    continue
+                raise self._refus_jeton(exp) from None
             if self.ident == "codex" and isinstance(donne.get("last_refresh"), str):
                 # Sans jeton de rafraîchissement, Codex ne doit pas tenter un rafraîchissement « de routine » (selon l'âge
                 # de last_refresh) : la date d'échéance du jeton d'accès vient d'être vérifiée, on la dit fraîche.
@@ -1617,31 +1666,33 @@ class Demande:
         illisible pour un moteur qui en donne une (Claude, Codex, Gemini, Qwen) : refus. OpenCode : chaque entrée
         oauth à échéance trop courte ou illisible est retirée ; une entrée sans échéance (jeton opaque) est copiée seule ;
         si plus aucune ne reste, refus."""
-        duree = getattr(self, "duree_max", DELAI_CLI + 10)
+        duree = getattr(self, "duree_max", duree_bac(DELAI_CLI))
         limite = time.time() * 1000 + (duree + MARGE_JETON) * 1000
         if self.ident == "opencode":
-            gardees = {}
+            gardees, retirees = {}, []
             for k, v in donne.items():
                 if "expires" in v:
                     exp = ms_plausible(v.get("expires"))
                     if exp is None or exp < limite:
+                        if exp is not None:
+                            retirees.append(exp)
                         continue
                 gardees[k] = v
             if donne and not gardees:
-                raise self._refus_jeton()
+                raise _JetonInutilisable(min(retirees) if retirees else None)
             return gardees
         chemin = JETON_ACCES.get(self.ident)
         if chemin is None or _dedans(donne, chemin) is None:
             return donne                                # pas de jeton d'accès ici (clé d'API par l'environnement…)
         exp = echeance_ms(self.ident, donne)
         if exp is None or exp < limite:
-            raise self._refus_jeton()
+            raise _JetonInutilisable(exp)
         return donne
 
-    def _refus_jeton(self):
-        journal_ia(f"{self.ident} : jeton d'accès expiré, trop court pour la demande ou d'échéance illisible : pas lancé")
-        signaler_jeton_expire(self.ident)
-        return ErreurIA(message_jeton_expire(self.ident))
+    def _refus_jeton(self, exp=None):
+        journal_ia(f"{self.ident} : jeton d'accès expiré, trop court pour la demande ou illisible : pas lancé")
+        signaler_jeton_expire(self.ident, exp)
+        return ErreurIA(message_jeton_expire(self.ident, exp))
 
     def _fermer_verrou(self):
         if self.verrou is not None:
@@ -1894,7 +1945,7 @@ def appel_claude(consigne, texte, image, usage):
     # Démarré à vide (ni extensions MCP, ni outils, ni historique) : presque deux fois plus rapide ; effort bas
     vide = ["--effort", "low", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
     delai, _ = avant_lancement(DELAI_CLI)
-    demande = Demande("claude", duree_max=delai + 10)   # + 10 : la marge de RuntimeMaxSec (argv_bac)
+    demande = Demande("claude", duree_max=duree_bac(delai))
     try:
         travail = str(demande.travail)
         # Read limité au dossier de travail (où l'image est copiée) : « //chemin » = chemin absolu dans les règles de
@@ -1999,7 +2050,7 @@ def appel_programme(ident, consigne, texte, image, usage):
     commun quand il tient (voir ETAT_MOTEURS)."""
     invite = consigne + "\n\n" + texte
     delai, _ = avant_lancement(DELAI_CLI)       # plus de temps : rien n'est lancé, pas même « opencode --version »
-    demande = Demande(ident, duree_max=delai + 10)   # + 10 : la marge de RuntimeMaxSec (argv_bac)
+    demande = Demande(ident, duree_max=duree_bac(delai))
     travail = str(demande.travail)
     env = dict(env_cli(ident), HOME=str(demande.home))
     entree = None
@@ -2626,22 +2677,59 @@ def notifier(titre, corps, action=None, cle="default", brut=False):
     cmd = ["notify-send", "-a", "IA", "-i", "dialog-information"]
     if action:
         cmd += ["-A", cle + "=" + action[0]]
+    argv = cmd + ["--", titre, corps[:1500] if brut else corps_sur(corps[:1500])]
     try:
-        p = subprocess.Popen(cmd + ["--", titre, corps[:1500] if brut else corps_sur(corps[:1500])], stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True, start_new_session=True)
-        if action and os.fork() == 0:
-            # Plus rien d'hérité : celui qui lit la sortie de nc-ia n'attend pas la fermeture de la notification
-            nul = os.open(os.devnull, os.O_RDWR)
-            for fd in (0, 1, 2):
-                os.dup2(nul, fd)
-            try:
-                if (p.communicate(timeout=3600)[0] or "").strip() == cle:
-                    subprocess.Popen(action[1], start_new_session=True)
-            except Exception:
-                pass
-            os._exit(0)
+        if not action:
+            subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            return
+        # Avec une action : notify-send part tout de suite (comme sans action), et un petit processus détaché
+        # (python3 -I) attend le clic sur sa sortie, au plus ATTENTE_CLIC secondes, puis le tue s'il n'a rien dit (sinon
+        # il resterait vivant sans fin avec un démon sans expiration). Seulement sur un clic, il lance la commande. Rien
+        # d'hérité : celui qui lit la sortie de nc-ia n'attend pas la notification.
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        try:
+            fd = p.stdout.fileno()
+            subprocess.Popen([sys.executable, "-I", "-c", _ATTENDRE_CLIC, cle, str(p.pid), str(fd),
+                              json.dumps(list(action[1])), str(ATTENTE_CLIC)], pass_fds=(fd,),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        finally:
+            p.stdout.close()
     except OSError:
         pass
+
+
+ATTENTE_CLIC = 3600                          # secondes : au-delà, notify-send est tué, plus de clic possible
+_ATTENDRE_CLIC = """import json, os, select, signal, subprocess, sys, time
+cle, pid, fd, commande, attente = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), json.loads(sys.argv[4]), float(sys.argv[5])
+sortie, fin, fini = b"", time.monotonic() + attente, False
+while True:
+    reste = fin - time.monotonic()
+    if reste <= 0:
+        break
+    try:
+        prets = select.select([fd], [], [], reste)[0]
+    except (OSError, ValueError):
+        fini = True
+        break
+    if not prets:
+        break
+    morceau = os.read(fd, 4096)
+    if not morceau:
+        fini = True
+        break
+    sortie += morceau
+if not fini:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+if sortie.decode("utf-8", "replace").strip() == cle:
+    subprocess.Popen(commande, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+"""
 
 
 def apercu(t, n=280):
