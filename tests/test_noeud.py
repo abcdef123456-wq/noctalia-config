@@ -786,6 +786,24 @@ class DelaiParTrame(ModuleCharge):
             self.t += 100
         self.assertEqual(self.journal().count("trop tard"), 4)
 
+    def test_son_tour_jamais_au_dela_de_l_echeance(self):
+        """La carte et la demande à distance attendent leur tour, mais expirent à leur échéance, sans rien envoyer."""
+        m = self.charger()
+        m.horloge = time.monotonic
+
+        async def essai():
+            carte, distance, ws = m.Confirmation("test"), m.ConfirmationDistance(), FauxWS()
+            async with carte.verrou, distance.verrou:              # une autre action tient les deux
+                t = time.monotonic()
+                r = await asyncio.gather(carte.demander("exec", m.Action("x"), t + 1.3),
+                                         distance.demander(ws, "r1", "exec", "x", t + 1.3))
+                return r, time.monotonic() - t, ws.envoyes
+        r, duree, envoyes = asyncio.run(essai())
+        self.assertEqual(r, ["expire", "expire"])
+        self.assertLess(duree, 2.5)
+        self.assertEqual(envoyes, [], "ni confirm_request ni confirm_cancel")
+        self.assertFalse((self.run_dir / "nc-noeud/demande.json").exists(), "aucune carte")
+
     def test_chemins_proteges_complets(self):
         """B2-10 : démarrage automatique, shells, identifiants et ce qui lance des commandes à ta place."""
         m = self.charger()
@@ -1011,6 +1029,100 @@ class Distance(ServeurDistant):
         self.assertNotIn("confirm_cancel", [m["type"] for m in self.recus])
         self.assertIn("refusé (distance)", self.journal())
 
+
+class UneDemandeALaFois(ServeurDistant):
+    """Le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace la demande montrée par la nouvelle : une
+    seule confirm_request en vol par nœud, sinon le code tapé après avoir lu A autoriserait B."""
+
+    def deux_commandes(self, trame_b=20.0):
+        marques = {}
+        for nom, trame in (("a", 20.0), ("b", trame_b)):
+            m = self.home / ("fait-" + nom)
+            marques[self.action("exec", {"command": f"touch {m}"}, timeout=trame)] = m
+        return marques
+
+    def deja_ou_attendre(self, genre, rid):
+        """Comme attendre, mais un message déjà reçu (en attendant autre chose) compte."""
+        for m in self.recus:
+            if m.get("type") == genre and m.get("req_id") == rid:
+                return m
+        return self.attendre(genre, rid)
+
+    def carte(self, mot, delai=5):
+        """Le texte de la carte ouverte dans l'île, quand il contient mot (sinon None)."""
+        f = self.run_dir / "nc-noeud/demande.json"
+        fin = time.monotonic() + delai
+        while time.monotonic() < fin:
+            with contextlib.suppress(OSError, ValueError):
+                t = json.loads(f.read_text())["texte"]
+                if mot in t:
+                    return t
+            time.sleep(0.05)
+        return None
+
+    def test_la_seconde_part_apres_la_decision_de_la_premiere(self):
+        self.demarrer()
+        marques = self.deux_commandes()
+        q = self.serveur.recevoir()
+        self.assertEqual(q["type"], "confirm_request", q)
+        premier = q["req_id"]
+        second = next(r for r in marques if r != premier)
+        self.rien_de_plus(1.5)                                  # pas de seconde demande tant que la première attend
+        self.repondre(premier, "allow")
+        self.assertTrue(self.attendre("response", premier)["success"])
+        q2 = self.deja_ou_attendre("confirm_request", second)
+        self.assertIn(str(marques[second]), q2["summary"], "la seconde demande montre bien la seconde commande")
+        self.repondre(second, "deny", code=None)
+        rep = self.deja_ou_attendre("response", second)
+        self.assertFalse(rep["success"])
+        self.assertTrue(marques[premier].exists())
+        self.assertFalse(marques[second].exists())
+        demandes = [m["req_id"] for m in self.recus if m.get("type") == "confirm_request"]
+        self.assertEqual(demandes, [second], "une seule demande pour la seconde, après la décision de la première")
+
+    def test_celle_qui_attend_expire_sans_demande(self):
+        self.demarrer()
+        marques = self.deux_commandes(trame_b=7.0)              # la seconde expire bien avant la première
+        q = self.serveur.recevoir()
+        self.assertEqual(q["type"], "confirm_request", q)
+        premier = q["req_id"]
+        second = next(r for r in marques if r != premier)
+        debut = time.monotonic()
+        rep = self.attendre("response", second)
+        self.assertLess(time.monotonic() - debut, 6)
+        self.assertFalse(rep["success"])
+        self.assertIn("Pas de réponse", rep["error"])
+        self.repondre(second, "allow")                          # le code tapé pour la première ne sert pas à la seconde
+        self.repondre(premier, "deny", code=None)
+        self.assertFalse(self.attendre("response", premier)["success"])
+        self.rien_de_plus()
+        self.assertEqual([m for m in self.recus if m.get("req_id") == second], [rep],
+                         "jamais de confirm_request (ni de confirm_cancel) après son échéance")
+        self.assertFalse(any(m.exists() for m in marques.values()))
+        self.assertIn("ignorée (inconnue)", self.journal(), "jamais demandée à distance")
+
+    def test_les_deux_sans_interblocage(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_CONFIRMATION="les-deux")
+        self.ile("silence")
+        self.demarrer()
+        marques = self.deux_commandes()
+        q = self.serveur.recevoir()
+        self.assertEqual(q["type"], "confirm_request", q)
+        premier = q["req_id"]
+        second = next(r for r in marques if r != premier)
+        self.assertTrue(self.carte(str(marques[premier])), "la carte montre la même action")
+        self.rien_de_plus(1.5)
+        self.repondre(premier, "deny", code=None)
+        self.assertFalse(self.attendre("response", premier)["success"])
+        self.deja_ou_attendre("confirm_request", second)
+        self.assertTrue(self.carte(str(marques[second])), "puis la carte de la seconde")
+        self.repondre(second, "allow")
+        self.assertTrue(self.attendre("response", second)["success"])
+        self.assertTrue(marques[second].exists())
+        self.assertFalse(marques[premier].exists())
+        j = self.journal()
+        self.assertIn("refusé (distance)", j)
+        self.assertIn("autorisé (distance)", j)
 
 class CodeDistance(ServeurDistant):
     """Confirmation à distance avec le code TOTP de ton appli : le serveur seul ne peut pas autoriser."""

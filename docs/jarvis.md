@@ -367,6 +367,10 @@ taille n’est jamais envoyé.
    de la configuration (la clé du serveur) sont remplacées par `•••`. Si un motif de secret générique (jeton, clé
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
    n’est envoyé : refus, ou la carte seule en `les-deux`. `expires_in` est en secondes entières, arrondi vers le bas.
+   **Une seule `confirm_request` à la fois pour ce PC** : un serveur peut remplacer la demande montrée par la
+   nouvelle (c’est le cas de JARVIS-BIS `9f4cdeb`), et le code tapé après avoir lu la première autoriserait la seconde. Une autre action sensible attend donc
+   que la première soit décidée ou close (son `confirm_cancel` part avant) ; si son échéance passe avant, elle est
+   refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file.
 3. Le serveur répond, une fois :
    ```json
    {"type": "confirm_response", "req_id": "7f0c…", "decision": "allow", "code": "123456"}

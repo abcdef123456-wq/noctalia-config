@@ -1142,6 +1142,23 @@ async def notification_a_boutons():
     return ns if b"--action" in out + err else None
 
 
+@contextlib.asynccontextmanager
+async def tour(verrou, limite):
+    """Attend son tour (verrou), mais jamais au-delà de limite (horloge monotone) : True si le verrou est pris, False si
+    l'échéance passe avant (la demande expire alors à son échéance, sans rien montrer ni envoyer)."""
+    reste = limite - horloge()
+    pris = False
+    if reste >= 1:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(verrou.acquire(), reste)
+            pris = True
+    try:
+        yield pris
+    finally:
+        if pris:
+            verrou.release()
+
+
 class Confirmation:
     def __init__(self, serveur):
         self.serveur = serveur
@@ -1149,9 +1166,9 @@ class Confirmation:
 
     async def demander(self, action, decrite, limite):
         """« autorise », « refuse », « expire » ou « indisponible »."""
-        async with self.verrou:
+        async with tour(self.verrou, limite) as pris:
             reste = limite - horloge()
-            if reste < 1:
+            if not pris or reste < 1:
                 return "expire"
             d = dossier_runtime()
             ident = uuid.uuid4().hex
@@ -1221,21 +1238,38 @@ class ConfirmationDistance:
     Seul un « allow » reçu avant l'échéance, pour ce req_id exact, avec le bon code TOTP (jamais déjà servi), autorise.
     Un « allow » sans code ou avec un code faux refuse la demande ; toute réponse hors demande en cours est ignorée et
     notée. Le serveur ne connaît pas le secret : sans ton code, il ne peut rien autoriser. Un code déjà servi ne compte
-    pas comme un échec ; le serveur reçoit alors error_code « replay » (attendre le code suivant)."""
+    pas comme un échec ; le serveur reçoit alors error_code « replay » (attendre le code suivant).
+    Une seule demande à distance à la fois : le serveur (telegram_bot.py:1535-1544 de JARVIS-BIS à 9f4cdeb) remplace
+    la demande montrée par la nouvelle, et le code tapé après avoir lu A autoriserait B. Les suivantes attendent leur
+    tour et, si leur échéance passe avant, expirent sans qu'aucune confirm_request ne parte."""
     GARDEES = 256                       # demandes terminées dont on se souvient (réponse en double ou tardive)
 
     def __init__(self):
         self.attentes = {}              # req_id → (futur, échéance)
         self.finies = {}                # req_id → « décidée » ou « close » (ordre d'insertion : les plus anciennes d'abord)
+        self.verrou = asyncio.Lock()    # une confirm_request en vol par nœud
+
+    def impossible(self, ws, req_id, resume):
+        return ws is None or ws.ferme or not isinstance(req_id, str) or not req_id or req_id in self.attentes \
+            or req_id in self.finies or resume is None or longueur_utf16(resume) > MAX_RESUME_DISTANCE
 
     async def demander(self, ws, req_id, nom, resume, limite):
         """« autorise », « refuse », « expire » ou « indisponible »."""
-        reste = limite - horloge()
-        if reste < 1:
+        if limite - horloge() < 1:
             return "expire"
-        if ws is None or ws.ferme or not isinstance(req_id, str) or not req_id or req_id in self.attentes \
-                or req_id in self.finies or resume is None or longueur_utf16(resume) > MAX_RESUME_DISTANCE:
+        if self.impossible(ws, req_id, resume):
             return "indisponible"
+        # Ce verrou n'est jamais tenu en attendant un autre (la carte a le sien, pris dans sa propre tâche) : en
+        # « les-deux », pas d'interblocage possible
+        async with tour(self.verrou, limite) as pris:
+            reste = limite - horloge()
+            if not pris or reste < 1:
+                return "expire"
+            if self.impossible(ws, req_id, resume):            # connexion fermée, ou même req_id servi entre-temps
+                return "indisponible"
+            return await self.relayer(ws, req_id, nom, resume, limite, reste)
+
+    async def relayer(self, ws, req_id, nom, resume, limite, reste):
         futur = asyncio.get_running_loop().create_future()
         self.attentes[req_id] = (futur, limite)
         fin = "close"
