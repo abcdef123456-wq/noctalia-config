@@ -38,9 +38,11 @@ langue
   { echo "nc-profile-sync: $(t "nc-gpu-regle introuvable (relance install.sh)" "nc-gpu-regle not found (run install.sh again)")" >&2; exit 1; }
 
 OUT="$HOME/.config/hypr/nc/profil.lua"
-# Noctalia v5 lit tous les *.toml de son dossier, par ordre alphabétique (le dernier l'emporte)
-NOCTALIA_ECO="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/zz-economie.toml"
-NOCTALIA_BAT="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/zz-batterie.toml"   # avant zz-economie : l'Économie gagne
+# Noctalia v5 lit tous les *.toml de son dossier, par ordre alphabétique (le dernier l'emporte) ; ce dossier, comme
+# lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config (sinon un fichier qu'il ne lit pas)
+NOCTALIA_CONF="${NOCTALIA_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}/noctalia"
+NOCTALIA_ECO="$NOCTALIA_CONF/zz-economie.toml"
+NOCTALIA_BAT="$NOCTALIA_CONF/zz-batterie.toml"   # avant zz-economie : l'Économie gagne
 # Dossiers du noyau (remplaçables pour les tests)
 ALIM="${NC_POWER_SUPPLY:-/sys/class/power_supply}"
 LEDS="${NC_LEDS:-/sys/class/leds}"

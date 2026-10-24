@@ -43,7 +43,8 @@ bake() {
 }
 
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
-CONF="${NOCTALIA_CONFIG_HOME:-$HOME/.config}/noctalia/config.toml"
+# Le dossier de Noctalia, comme lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+CONF="${NOCTALIA_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}/noctalia/config.toml"
 OUT="$HOME/.cache/nc/carousel"
 
 # Dossier des fonds : clé « directory » de la section [wallpaper] de la config Noctalia v5

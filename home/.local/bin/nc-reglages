@@ -116,7 +116,9 @@ VEILLE_SRC = os.path.join(HOME, ".config/hypr/hypridle.conf")
 VEILLE_OUT = os.path.join(HOME, ".config/nc/hypridle.conf")
 VEILLE_UNITE = os.path.join(HOME, ".config/systemd/user/hypridle.service.d/nc-reglages.conf")
 KITTY_OUT = os.path.join(HOME, ".config/kitty/nc-reglages.conf")
-NOCTALIA_DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME", os.path.join(HOME, ".config")), "noctalia")
+# Le dossier de Noctalia, comme lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+NOCTALIA_DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+                            or os.path.join(HOME, ".config"), "noctalia")
 # Noctalia lit tous les .toml de son dossier par ordre alphabétique, le dernier l'emporte : ce fichier passe avant
 # zz-economie.toml (profil Économie, qui doit gagner). Les réglages faits dans l'interface de Noctalia
 # (~/.local/state/noctalia/settings.toml) passent devant tout : la palette se change donc avec color-scheme-set.

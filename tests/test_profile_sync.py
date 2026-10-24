@@ -71,10 +71,10 @@ class ProfileSync(unittest.TestCase):
             f.write_text(f"{niveau}\n")
         return int(f.read_text())
 
-    def lancer(self, profil):
+    def lancer(self, profil, config=None):
         self.journal.write_text("")
         env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
-                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(config or self.home / ".config"),
                    NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.leds), NC_TEST_PROFIL=profil)
         r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=30,
                            stdin=subprocess.DEVNULL)
@@ -132,6 +132,16 @@ class ProfileSync(unittest.TestCase):
         self.assertTrue(self.batt.exists())
         self.assertLess("zz-batterie.toml", "zz-economie.toml")
         self.assertEqual(self.rechargements(), 1)
+
+    def test_dossier_de_noctalia_suit_xdg_config_home(self):
+        # Noctalia lit $XDG_CONFIG_HOME/noctalia (sans NOCTALIA_CONFIG_HOME) : zz-economie.toml doit y être, sinon
+        # le profil Économie ne fait rien
+        ailleurs = self.home / "config-ailleurs"
+        (ailleurs / "noctalia").mkdir(parents=True)
+        self.secteur(False)
+        self.lancer("power-saver", config=ailleurs)
+        self.assertTrue((ailleurs / "noctalia/zz-economie.toml").exists())
+        self.assertFalse(self.eco.exists())
 
     def test_releves_non(self):
         self.reglages("BAT_RELEVES=non\n")
