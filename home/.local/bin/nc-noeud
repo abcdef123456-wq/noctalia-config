@@ -127,13 +127,15 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
             ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis",
             ".local/state/nc-jarvis/connection.conf", ".config/nc/assistant.conf.backup-*", ".config/nc/noeud-totp.json"]
 # Écriture seulement : ce qui lance des commandes à ta place (Hyprland, uwsm, l'île, la barre, raccourcis et scripts de
-# nc, ~/.local/bin en tête du PATH, lanceurs d'applis, git, le terminal) et le journal de ce client
+# nc, ~/.local/bin en tête du PATH, lanceurs d'applis, git, le terminal, ce que zsh charge à chaque ouverture : complétion,
+# invite de powerlevel10k et son gitstatusd) et le journal de ce client
 ECRITURE_SEULEMENT = [".config/nc", ".local/bin", ".config/hypr", ".config/uwsm", ".config/quickshell",
                       ".config/noctalia", ".local/share/applications", ".gitconfig", ".config/git", ".config/kitty",
                       ".local/state/noctalia-config", ".local/lib/python3.*/site-packages", ".local/share/dbus-1/services",
                       ".config/containers/systemd", ".local/share/nc-jarvis", ".local/share/claude", ".config/nvim",
                       ".vimrc", ".config/tmux", ".tmux.conf", ".zshrc.perso", ".p10k.zsh", ".oh-my-zsh",
-                      ".local/share/nvim", ".cargo/config*", ".config/starship.toml", ".config/mpv/scripts"]
+                      ".local/share/nvim", ".cargo/config*", ".config/starship.toml", ".config/mpv/scripts",
+                      ".zcompdump*", ".zshrc.zwc", ".cache/gitstatus", ".cache/p10k-*"]
 # Lecture seulement : historiques des shells (des secrets y restent souvent)
 LECTURE_SEULEMENT = [".bash_history", ".zsh_history", ".local/share/fish/fish_history", ".python_history"]
 
@@ -503,11 +505,12 @@ def retenir_secrets(c):
 
 
 def ressemble_a_un_code(texte):
-    """Un code à 6 chiffres seul, une adresse otpauth:// ou une clé base32 de la taille d'un secret TOTP."""
+    """Un code à 6 chiffres seul, une adresse otpauth:// ou une clé base32 de la taille d'un secret TOTP (d'un bloc, ou
+    en groupes de 4 comme nc-noeud totp creer l'affiche ; une phrase de 32 lettres n'en est pas une)."""
     s = str(texte)
     compact = re.sub(r"[\s-]", "", s)
     return bool(re.fullmatch(r"[0-9]{6}", compact) or "otpauth:" in s.lower()
-                or re.fullmatch(r"[A-Za-z2-7]{32}=*", compact))
+                or re.fullmatch(r"(?:[A-Za-z2-7]{4}[ -]?){7}[A-Za-z2-7]{4}=*", s.strip()))
 
 
 def secrets_exacts(texte):
@@ -532,7 +535,8 @@ def sans_secrets(texte):
 
 
 # Caractères qui se cachent ou trompent à l'affichage : contrôles C0 et C1 (sauf le saut de ligne), bidi, largeur nulle,
-# séparateurs de ligne Unicode. Rendus visibles (\x1b, \u202e…) dans la carte, le résumé à distance et le journal.
+# séparateurs de ligne Unicode. Rendus visibles entre chevrons (⟨\x1b⟩, ⟨\u202e⟩…) dans la carte, le résumé à distance et
+# le journal ; une barre oblique inverse de la commande reste telle quelle (« \n » se lit comme il s'exécute).
 CACHES = {0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2060, 0xFEFF, 0x061C, 0x180E, 0x2028, 0x2029,
           *range(0x202A, 0x202F), *range(0x2066, 0x206A),
           0x3164, 0x115F, 0x1160, 0xFFA0, 0x2800, 0x034F, 0x17B4, 0x17B5, *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
@@ -544,12 +548,10 @@ def rendre_visible(texte):
         o = ord(ch)
         if ch == "\n":
             out.append(ch)
-        elif ch == "\\":
-            out.append("\\\\")                     # « \x1b » écrit dans la commande ne se confond pas avec un vrai
         elif o < 0x20 or 0x7F <= o <= 0x9F:
-            out.append(f"\\x{o:02x}")
+            out.append(f"⟨\\x{o:02x}⟩")
         elif o in CACHES or unicodedata.category(ch) in ("Cf", "Zl", "Zp"):
-            out.append(f"\\u{o:04x}" if o <= 0xFFFF else f"\\U{o:08x}")
+            out.append(f"⟨\\u{o:04x}⟩" if o <= 0xFFFF else f"⟨\\U{o:08x}⟩")
         else:
             out.append(ch)
     return re.sub(r"\n{3,}", "\n\n", "".join(out))             # au plus 2 sauts de ligne de suite
@@ -1429,10 +1431,6 @@ class Noeud:
                 return {"success": False, "error": T(d[1], d[2]).format(s=f"{delai:g}", o=o), "denied": True,
                         **({"error_code": {"code": "bad_code", "rejoue": "replay"}[decision]}
                            if decision in ("code", "rejoue") else {})}
-        if source == "distance":
-            # Le code prouve que tu es là, pas ce que tu as lu : ce PC dit ce qui a été autorisé
-            prevenir(T("JARVIS : autorisé à distance", "JARVIS: allowed remotely"),
-                     rendre_visible(sans_secrets(resume))[:400])
         # Relu juste avant d'exécuter (B2-09) : couper l'IA ou le pilotage pendant la confirmation l'emporte sur « allow »
         if ia_coupee():
             journal(nom, resume, sha=sha, decision="refusé (IA coupée)")
@@ -1442,6 +1440,10 @@ class Noeud:
             journal(nom, resume, sha=sha, decision="refusé (pilotage coupé)")
             return {"success": False, "error": T("Le pilotage de ce PC par JARVIS est coupé.", "JARVIS control of this PC is off."),
                     "denied": True}
+        if source == "distance":
+            # Le code prouve que tu es là, pas ce que tu as lu : ce PC dit ce qui a été autorisé
+            prevenir(T("JARVIS : autorisé à distance", "JARVIS: allowed remotely"),
+                     rendre_visible(sans_secrets(resume))[:400])
         # Temps qui reste pour exécuter : échéance du serveur, moins la marge, moins ce qui est passé (B2-11)
         budget = echeance - MARGE_SERVEUR - horloge()
         if budget < BUDGET_MIN:

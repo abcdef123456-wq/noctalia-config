@@ -23,9 +23,12 @@ REPO='https://github.com/RaphaelBlanc/JARVIS-BIS.git'
 # par défaut (WHISPER_LANGUAGE ; nc-dictee envoie la langue de l'utilisateur), nœuds durcis (secret dans l'en-tête
 # seulement, ws:// refusé sur un hôte public, exec coupé par défaut). 1ae55f3, 8ff25c3 et 4d279b6 restent exclues :
 # elles passent session_key à des fonctions que notre overlay remplaçait sans ce paramètre (HTTP 500 à chaque /run).
-REVISION='64523e57c958f23af459c8069d1a6985bf349640'
+# aae5b9b (issue #17) : timeout en tête de chaque trame action (nc-noeud en tire son délai de confirmation) ;
+# ENABLE_NODE_EXEC dans exec_cmd et pour run_shell relayé ; MCP jarvis-nodes (stdio, pour agy, non installé ici)
+REVISION='aae5b9b3e6da13cfb78c2da33b5584c854f5139a'
 VALIDATED_REVISIONS=('8867dd093c43a5e5d3f0a13d3e14600e57edc96a','9c12e00ffc6f11732013b575f0652e920331756a',
-                     '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',REVISION)
+                     '9cd91bbb6235116e3cadd433eb68fcd9b17203bf','3d1c6b6df5d6bc1352a4b66fcdde74fd56d59175',
+                     '64523e57c958f23af459c8069d1a6985bf349640',REVISION)
 
 
 def ask(message, default=False):

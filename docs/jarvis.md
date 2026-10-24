@@ -214,8 +214,10 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-La révision validée est `64523e5`. Elle ajoute à `3d1c6b6` (choix en boutons, délais de 600 s, dictée côté serveur,
-accès Tailscale) :
+La révision validée est `aae5b9b`. Par rapport à `64523e5`, elle annonce son délai dans chaque demande d’action
+(`nc-noeud` laisse alors jusqu’à 32 s pour « Autoriser »), vérifie `ENABLE_NODE_EXEC` aussi pour les commandes
+relayées, et ajoute le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce PC »). `64523e5` reste acceptée.
+`64523e5` avait ajouté à `3d1c6b6` (choix en boutons, délais de 600 s, dictée côté serveur, accès Tailscale) :
 
 - **une session par PC avec AGY** : le serveur range chaque conversation sous une clé, `desktop:` suivi du nom du PC
   (le `client_id` que `nc-assistant` envoie déjà), `telegram:…` ou `discord:…` pour les bots. Avec nos autres moteurs
@@ -224,12 +226,12 @@ accès Tailscale) :
 - **des nœuds plus sûrs** pour `nc-noeud` : la clé seulement dans l’en-tête, `ws://` refusé vers un hôte public,
   les commandes coupées par défaut (voir « Laisser JARVIS piloter ce PC »).
 
-Le déployeur installe la révision validée (`64523e5`) sur un nouveau serveur, et accepte un serveur resté sur une
-révision validée plus ancienne (`3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà installé. Pour le
+Le déployeur installe la révision validée (`aae5b9b`) sur un nouveau serveur, et accepte un serveur resté sur une
+révision validée plus ancienne (`64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà installé. Pour le
 faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 64523e57c958f23af459c8069d1a6985bf349640
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin aae5b9b3e6da13cfb78c2da33b5584c854f5139a
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 
@@ -241,7 +243,7 @@ interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env
 
 N’installe pas à la main les révisions intermédiaires `1ae55f3`, `8ff25c3` ou `4d279b6` : elles passent une clé de
 session à des fonctions que l’overlay d’avant `64523e5` ne connaissait pas, et chaque question finit en erreur 500.
-Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `64523e5`.
+Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `aae5b9b`.
 
 ## Matériel local et changement du dépôt upstream
 
@@ -360,7 +362,7 @@ taille n’est jamais envoyé.
    `req_id` est celui de la trame d’action. `summary` dit exactement ce qui sera fait, dans la langue du PC : la
    commande entière ; pour un fichier écrit, le chemin, la taille, le sha256 du contenu et ses premières lignes ; le
    texte à copier. Les caractères qui se cachent (contrôles, séquences du terminal, bidi, largeur nulle) y sont
-   écrits en clair (`\x1b`, `\u202e`, et `\\` pour une barre oblique inverse),
+   écrits en clair entre chevrons (`⟨\x1b⟩`, `⟨\u202e⟩`) ; une barre oblique inverse de la commande reste telle quelle,
    avec au plus deux sauts de ligne de suite. Seules les valeurs secrètes exactes
    de la configuration (la clé du serveur) sont remplacées par `•••`. Si un motif de secret générique (jeton, clé
    privée) changerait le texte, ou si le résumé dépasse 3 500 caractères (comptés en UTF-16, comme Telegram), rien
