@@ -100,7 +100,11 @@ class Passerelle(unittest.TestCase):
         up = types.ModuleType("main")
         up.__file__ = str(racine / "gateway/main.py")
         up.app = fastapi.FastAPI()
-        up.require_secret = lambda: None
+
+        def require_secret(x_secret_key=None):                       # même signature que celle du serveur
+            if x_secret_key != "bon":
+                raise fastapi.HTTPException(401, "Clé API invalide")
+        up.require_secret = require_secret
 
         async def forward_to_runner(prompt, *args, **kwargs):
             return dict(success=True, output=self.reponses.pop(0), session={})
@@ -144,8 +148,8 @@ class Passerelle(unittest.TestCase):
         with self.assertLogs("nc_telegram", "WARNING"):              # aucun bot Telegram dans ce faux upstream
             self.api = module(SERVEUR / "nc_gateway.py", "nc_gateway")
 
-    def appeler(self, chemin, corps):
-        messages, entree = [], [dict(type="http.request", body=json.dumps(corps).encode(), more_body=False)]
+    def appeler(self, chemin, corps, cle="bon", brut=None):
+        messages, entree = [], [dict(type="http.request", body=json.dumps(corps).encode() if brut is None else brut, more_body=False)]
 
         async def recevoir():
             return entree.pop(0) if entree else dict(type="http.disconnect")
@@ -153,7 +157,7 @@ class Passerelle(unittest.TestCase):
         async def envoyer(m):
             messages.append(m)
         scope = dict(type="http", asgi=dict(version="3.0"), http_version="1.1", method="POST", scheme="http", path=chemin,
-                     raw_path=chemin.encode(), root_path="", query_string=b"", headers=[(b"content-type", b"application/json")],
+                     raw_path=chemin.encode(), root_path="", query_string=b"", headers=[(b"content-type", b"application/json")] + ([(b"x-secret-key", cle.encode())] if cle else []),
                      client=("127.0.0.1", 1), server=("127.0.0.1", 80))
         asyncio.run(self.up.app(scope, recevoir, envoyer))
         debut = next(m for m in messages if m["type"] == "http.response.start")
@@ -178,7 +182,7 @@ class Passerelle(unittest.TestCase):
         for cle in ("telegram:123", "discord:9", "Telegram:1", "client:bureau", "desktop:", "desktop:a b", "x", 5, ""):
             statut, _ = self.appeler("/api/ask", dict(prompt="q", session_key=cle))
             self.assertEqual(statut, 400, cle)
-        for plateforme in ("telegram", " Discord "):
+        for plateforme in ("telegram", " Discord ", "telegram:1", "whatsapp", "Desktop", 5, ""):
             self.assertEqual(self.appeler("/api/ask", dict(prompt="q", platform=plateforme))[0], 400, plateforme)
         self.reponses = ["a", "b", "c", "d", "e"]
         for corps in (dict(prompt="q", session_key="desktop:mon-pc.local"), dict(prompt="q", session_key="default"),
@@ -187,6 +191,20 @@ class Passerelle(unittest.TestCase):
             statut, retour = self.appeler("/api/ask", corps)
             self.assertEqual(statut, 200, corps)
         self.assertEqual(self.reponses, [])
+
+    def test_api_ask_authentifie_avant_de_lire_le_corps(self):
+        for cle in (None, "faux"):
+            statut, _ = self.appeler("/api/ask", dict(prompt="q", session_key="telegram:1"), cle=cle)
+            self.assertEqual(statut, 401, cle)
+
+    def test_api_ask_json_tres_imbrique_donne_400(self):
+        self.assertEqual(self.appeler("/api/ask", None, brut=b"[" * 200000 + b"]" * 200000)[0], 400)
+
+    def test_api_ask_corps_trop_gros_donne_413_sans_tout_lire(self):
+        statut, _ = self.appeler("/api/ask", None, brut=b'{"prompt":"' + b"a" * (1024 * 1024) + b'"}')
+        self.assertEqual(statut, 413)
+        self.reponses = ["ok"]
+        self.assertEqual(self.appeler("/api/ask", dict(prompt="a" * 8000))[0], 200)
 
     def test_choix_deja_extraits_par_le_serveur(self):
         # JARVIS-BIS 3d1c6b6 renvoie lui-même « choices » : gardés s'ils respectent nos limites, retirés sinon

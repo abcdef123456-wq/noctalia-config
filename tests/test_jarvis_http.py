@@ -391,15 +391,15 @@ class GestionDepuis4ecc57a(unittest.TestCase):
         self.run_('conversation.resume',{'id':'abc'},True,session_key='desktop:a')
         self.assertFalse([n for n in self.noeuds if n[0]=='jeton'])
 
-    def test_reset_scopes_the_session_end_with_the_origin_when_the_hub_builds_one(self):
+    def test_reset_ends_every_session_without_origin_even_when_the_hub_builds_one(self):
         vus=[]
         hub=sys.modules['core.node_hub'].NODE_HUB
         hub.build_origin=lambda session_key=None,**_:{'via':'desktop','chat':session_key}
         async def fin(node_id=None,origin=None):
-            vus.append(origin);return []
+            vus.append((node_id,origin));return []
         hub.send_session_end=fin
         self.run_('session.reset',{},True,session_key='desktop:a')
-        self.assertEqual(vus,[{'via':'desktop','chat':'desktop:a'}])
+        self.assertEqual(vus,[(None,None)])
 
     def test_reset_and_resume_end_node_sessions_without_setting_the_token(self):
         self.run_('session.reset',{},True,session_key='desktop:a')

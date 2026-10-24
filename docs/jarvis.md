@@ -396,6 +396,11 @@ choisis `ecran` ou `distance`, pas `les-deux`** : ces serveurs répondent tout s
 `deny`), que `nc-noeud` ne peut pas distinguer de ton « Refuser » : la carte se ferme alors que tu pouvais autoriser
 sur l’écran, et le journal note « refusé (distance) ». `nc-noeud` ne devine rien d’après le délai de la réponse.
 
+Un « nouvelle conversation » ou une reprise depuis le bureau ferme les sessions de confiance de **tous** les PC reliés
+(`send_session_end()` sans `origin`, sur `4ecc57a` comme sur `be109d5`), y compris une session ouverte depuis Telegram ;
+c'est voulu. La route `/api/ask` vérifie la clé du serveur avant de lire le corps, n'accepte que `platform` absent ou
+`desktop`, et une `session_key` `desktop:<pc>` ou `default` (400 sinon) ; corps limité à 1 Mo.
+
 Depuis JARVIS-BIS `be109d5`, le serveur peut envoyer `totp_prompt` (et `totp_prompt_cancel`) : l'invite d'un code pour
 une action sur **un autre PC**. `nc-noeud` l'ignore toujours : il n'ouvre aucune fenêtre (taper ses codes dans une fenêtre
 surgie d'un serveur est une mauvaise habitude) et ne répond rien, car le serveur n'attend pas cette réponse et un refus

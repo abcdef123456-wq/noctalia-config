@@ -144,10 +144,13 @@ class FinDeSessionUpstream(unittest.TestCase):
             async def scenario():
                 noeud=await NODE_HUB.register_node('pc-test',WS(),{'hostname':'pc-test'})
                 self.assertEqual(await management.fin_session_noeuds('desktop:pc-test'),[])
+                # Un reset du bureau (sans node_id) ferme TOUTES les sessions : la trame part tout de suite
+                self.assertEqual(envoyes,[{'type':'session_end'}])
+                envoyes.clear()
                 self.assertEqual(await management.fin_session_noeuds('desktop:pc-test','pc-test'),['pc-test'])
                 return noeud
             asyncio.run(scenario())
-            self.assertIn({'type':'session_end'},envoyes)
+            self.assertEqual(envoyes,[{'type':'session_end'}])
 
 
 @unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')

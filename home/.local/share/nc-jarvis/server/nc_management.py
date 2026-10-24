@@ -333,18 +333,11 @@ async def fin_session_noeuds(session_key, node_id=None):
         NODE_HUB.rotate_conversation_token(session_key or 'default')
     except Exception:
         pass
-    # be109d5 : « origin » limite la fin aux sessions ouvertes depuis cette conversation, comme le gateway upstream ;
-    # sans build_origin (avant be109d5) ou s'il échoue, fin pour tous les nœuds, comme avant
-    origine = None
+    # Fin de session pour TOUS les nœuds, sans « origin » : un reset du bureau ferme aussi une session ouverte depuis
+    # Telegram. Sans origin, send_session_end() cible tous les nœuds sur 4ecc57a comme sur be109d5 (où « origin »
+    # restreindrait aux sessions de cette conversation ; 4ecc57a n'accepte d'ailleurs pas ce paramètre)
     try:
-        origine = NODE_HUB.build_origin(session_key=session_key or 'default')
-    except Exception:
-        origine = None
-    try:
-        if origine is not None:
-            await NODE_HUB.send_session_end(origin=origine)
-        else:
-            await NODE_HUB.send_session_end()
+        await NODE_HUB.send_session_end()
     except Exception:
         pass
     return []

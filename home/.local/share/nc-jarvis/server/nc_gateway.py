@@ -90,6 +90,8 @@ def _avec_choix(corps):
     return json.dumps(donnees, ensure_ascii=False).encode()
 
 
+# AskRequest n'a aucun champ volumineux (ni image ni fichier) ; nos questions font 8000 caractères au plus
+LIMITE_ASK = 1024 * 1024
 CLE_BUREAU = re.compile(r'default|desktop:[\w.@-]{1,180}', re.ASCII)
 
 
@@ -97,10 +99,12 @@ def cle_ask_refusee(corps):
     """Vrai si le corps de /api/ask veut écrire au nom d'une autre conversation que celles du bureau. Le serveur
     prend session_key du corps tel quel (« telegram:<id> » donne au runner le jeton de cette conversation, relecture
     de be109d5, P1 b) : seules « desktop:<pc> » et « default » passent, comme sur /api/nc/manage. Sans session_key, le
-    serveur la compose avec « platform » : telegram et discord y sont refusés aussi. Un corps illisible reste à la
-    route d'origine (elle répond 422)."""
+    serveur la compose avec « platform » : liste blanche, absente, null ou exactement « desktop ». Un corps illisible
+    reste à la route d'origine (elle répond 422), sauf un JSON trop imbriqué (RecursionError), refusé ici."""
     try:
         donnees = json.loads(corps)
+    except RecursionError:
+        return True
     except ValueError:
         return False
     if not isinstance(donnees, dict):
@@ -108,8 +112,24 @@ def cle_ask_refusee(corps):
     cle = donnees.get('session_key')
     if cle is not None and not (isinstance(cle, str) and CLE_BUREAU.fullmatch(cle)):
         return True
-    plateforme = donnees.get('platform')
-    return isinstance(plateforme, str) and plateforme.strip().lower() in ('telegram', 'discord')
+    return donnees.get('platform') not in (None, 'desktop')
+
+
+def _secret_refuse(scope):
+    """Vrai si l'en-tête X-Secret-Key est refusé par require_secret du serveur (appelé tel quel). Une signature que
+    nous ne savons pas appeler n'authentifie rien ici : la route d'origine le fait de toute façon, après la lecture."""
+    valeur = None
+    for k, v in scope.get('headers', []):
+        if bytes(k).lower() == b'x-secret-key':
+            valeur = bytes(v).decode('latin-1')
+            break
+    try:
+        upstream.require_secret(x_secret_key=valeur)
+    except HTTPException:
+        return True
+    except TypeError:
+        return False
+    return False
 
 
 def _choix_du_bureau(route_app):
@@ -118,15 +138,19 @@ def _choix_du_bureau(route_app):
     async def asgi(scope, receive, send):
         if scope.get('type') != 'http':
             return await route_app(scope, receive, send)
-        morceaux_requete, plus = [], True
+        if _secret_refuse(scope):                            # authentifier AVANT de lire le corps
+            return await JSONResponse({'detail': 'Clé API invalide'}, status_code=401)(scope, receive, send)
+        morceaux_requete, plus, total = [], True, 0
         while plus:
             message = await receive()
             if message['type'] == 'http.disconnect':
                 return
-            morceaux_requete.append(message.get('body', b''))
-            plus = message.get('more_body', False)
-            if sum(map(len, morceaux_requete)) > 8 * 1024 * 1024:
+            morceau = message.get('body', b'')
+            total += len(morceau)
+            if total > LIMITE_ASK:
                 return await JSONResponse({'detail': 'Requête trop volumineuse'}, status_code=413)(scope, receive, send)
+            morceaux_requete.append(morceau)
+            plus = message.get('more_body', False)
         corps_requete = b''.join(morceaux_requete)
         if cle_ask_refusee(corps_requete):
             return await JSONResponse({'detail': 'Clé de session refusée'}, status_code=400)(scope, receive, send)
