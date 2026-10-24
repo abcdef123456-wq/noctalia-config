@@ -1796,6 +1796,36 @@ class SessionConfiance(ModuleCharge):
         self.assertEqual(len(self.confs), 1 + 5, "les 5 autres sont confirmées")
         self.assertEqual(sum(t.startswith("JARVIS, session") for t in notifs), 20, "chaque action couverte se voit")
 
+    def test_commande_interrompue_se_voit_et_se_note(self):
+        # La connexion se ferme pendant qu'une commande de session tourne (tâches annulées) : elle a démarré sans
+        # confirmation, elle doit quand même être notifiée et notée au journal
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})                 # ouverture (confirmée)
+        notifs = []
+        m.prevenir = lambda titre, texte="": notifs.append((titre, texte))
+
+        async def coupe():
+            t = asyncio.ensure_future(n.decider("exec", {"command": "sleep 5"}, "r" + uuid.uuid4().hex, None, self.O))
+            await asyncio.sleep(0.5)
+            t.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
+        asyncio.run(coupe())
+        self.assertTrue(any(t.startswith("JARVIS, session") and "nterrompue" in x for t, x in notifs), notifs)
+        log = (self.home / ".local/state/noctalia-config/noeud.log").read_text()
+        self.assertIn("session (interrompue)", log)
+
+    def test_delai_trop_court_en_session_se_voit(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})
+        notifs = []
+        m.prevenir = lambda titre, texte="": notifs.append(titre)
+        r = self.dec(n, "exec", {"command": "true", "timeout": 3})
+        self.assertFalse(r["success"])
+        self.assertEqual(sum(t.startswith("JARVIS, session") for t in notifs), 1, "la place prise se voit")
+
     def test_origine_cle_type_et_empreinte(self):
         m = self.charger()
         d = {"via": "telegram", "chat": 1}

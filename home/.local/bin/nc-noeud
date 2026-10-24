@@ -1758,7 +1758,9 @@ class Noeud:
             # Échéance du serveur : annoncée dans la trame, sinon la plus courte connue pour cette action
             echeance = recu + (trame if trame is not None else delai_confirmation(nom, p) + MARGE_SERVEUR)
         except Refus as e:
-            journal(nom, resume, sha=sha, decision=e.decision + " (délai trop court)")
+            if reutilise:            # la place prise se voit, et la session se ferme si c'était la dernière
+                self.fin_action_session(sess, resume_court, T("refusé", "denied"))
+            journal(nom, resume, sha=sha, decision=("session, " if reutilise else "") + e.decision + " (délai trop court)")
             return {"success": False, "error": str(e), "denied": True}
         source = None
         if confirmer:
@@ -1825,6 +1827,13 @@ class Noeud:
             res = {"success": False, "error": T(f"Délai de {b:g} s dépassé.", f"{b:g} s timeout exceeded.")}
         except (OSError, UnicodeError) as e:
             res = {"success": False, "error": str(e)[:300]}
+        except BaseException:
+            # Connexion fermée pendant qu'une commande de session tourne (tâches annulées), ou toute autre erreur : la
+            # commande a démarré sans confirmation, elle se voit et se note quand même, puis l'erreur suit son cours
+            if reutilise:
+                self.fin_action_session(sess, resume_court, T("interrompue", "interrupted"))
+                journal(nom, resume, sha=sha, decision="session (interrompue)")
+            raise
         if reutilise:
             # Action couverte par la session (déjà décomptée à la décision) : notifiée et journalisée même si la
             # session a été fermée pendant qu'elle tournait

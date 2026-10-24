@@ -1120,12 +1120,14 @@ REGLAGES = [
     R("NOEUD_SESSION_MINUTES", "Intelligence artificielle",
       L("Session de confiance pour JARVIS", "Trust session for JARVIS"), "entier", "0",
       L("Risque : après UNE autorisation, JARVIS enchaîne des commandes sans te redemander, pendant cette durée "
-        "(20 actions au plus), pour la même conversation. Elles tournent dans un bac à sable (ni tes clés, ni mots de "
-        "passe, ni sudo, ni appli graphique ; ~ en lecture seule ; le réseau reste ouvert). Les écritures de fichiers, "
-        "read_file et le presse-papiers restent toujours confirmés un par un. 0 : désactivée (conseillé).",
+        "(20 actions au plus), pour la même conversation (selon le serveur). Elles tournent dans un bac à sable (ni "
+        "tes clés, ni mots de passe, ni sudo, ni appli graphique ; ~ en lecture seule ; le réseau reste ouvert). Les "
+        "écritures de fichiers, read_file et le presse-papiers restent toujours confirmés un par un. 0 : désactivée "
+        "(conseillé).",
         "Risk: after ONE approval, JARVIS runs commands without asking again, for this long (at most 20 actions), for "
-        "the same conversation. They run in a sandbox (no keys, passwords, sudo or GUI app; ~ read-only; the network "
-        "stays open). File writes, read_file and the clipboard stay confirmed one by one. 0: off (recommended)."),
+        "the same conversation (as the server tells it). They run in a sandbox (no keys, passwords, sudo or GUI app; "
+        "~ read-only; the network stays open). File writes, read_file and the clipboard stay confirmed one by one. "
+        "0: off (recommended)."),
       mini=0, maxi=15, pas=1, unite="min", zero=L("Désactivée", "Off"), groupe="noeud-confirmation"),
     R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
       L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",
