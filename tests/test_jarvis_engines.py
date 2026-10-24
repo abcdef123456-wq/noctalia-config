@@ -184,6 +184,50 @@ class ReglagesEnregistres(unittest.TestCase):
             e.choose(engine='agy',permission_mode='plan')
         self.assertEqual(json.loads(e.path.read_text())['settings']['agy'],dict(model='gemini-x',effort='low',permission_mode='plan'))
 
+    def permissif(self):
+        # comme 4ecc57a : le serveur accepte encore yolo, bypass et always-proceed
+        def update_session(model=None,effort=None,mode=None,permission_mode=None,session_key='default'):
+            self.recus.append(dict(model=model,effort=effort,mode=mode,permission_mode=permission_mode))
+            return dict(model=model or 'm',permission_mode=permission_mode or 'always-proceed')
+        self.up.update_session=update_session
+
+    def test_dangerous_modes_refused_even_if_the_server_accepts_them(self):
+        self.permissif()
+        for mode in ('yolo','bypass','always-proceed','bypassPermissions'):
+            with self.subTest(mode=mode):
+                self.recus.clear()
+                self.ecrit(dict(model='gemini-x',permission_mode=mode))
+                with self.assertLogs('nc_engines',level='WARNING'):
+                    e=self.m.Engines(self.up)
+                self.assertFalse([r for r in self.recus if r['permission_mode']])
+                with patch.object(self.m,'executable',return_value='/bin/true'), self.assertRaises(ValueError):
+                    e.choose(engine='agy',permission_mode=mode)
+
+    def test_run_drops_a_permission_mode_outside_the_list(self):
+        # /run n'est pas contrôlé par l'upstream (P2-2 de 94a3a93) : bypassPermissions ne doit jamais arriver à agy
+        e=self.m.Engines(self.up)
+        for donne,attendu in (('bypassPermissions',None),('yolo',None),('plan','plan'),(None,None)):
+            with self.subTest(mode=donne):
+                self.up.run_agy.reset_mock()
+                asyncio.run(e.run('bonjour',permission_mode=donne))
+                self.assertEqual(self.up.run_agy.call_args.kwargs['permission_mode'],attendu)
+
+    def test_broken_state_file_does_not_stop_the_runner(self):
+        chemin=self.root/'.nc-jarvis-engines.json'
+        for contenu in ('{pas du json','[]','null',json.dumps(dict(engine='agy',settings=[])),
+                        json.dumps(dict(engine='agy',settings=None)),json.dumps(dict(engine='agy',settings=dict(agy='x')))):
+            with self.subTest(contenu=contenu):
+                chemin.write_text(contenu);chemin.chmod(0o600)
+                e=self.m.Engines(self.up)
+                self.assertEqual(e.state['engine'],'agy')
+                self.assertIsInstance(e.state['settings'],dict)
+                self.assertEqual(chemin.read_text(),contenu,'le fichier illisible n\'est pas réécrit')
+
+    def test_same_list_as_nc_management(self):
+        texte=(SOURCE.parent/'nc_management.py').read_text()
+        ligne=next(l for l in texte.splitlines() if l.startswith('PERMISSION_MODES='))
+        self.assertEqual(eval(ligne.split('=',1)[1]),self.m.MODES_PERMIS)
+
 
 class UpstreamParPC(unittest.TestCase):
     """JARVIS-BIS 64523e5 (session_key partout) et 3d1c6b6 (aucune) : mêmes appels, aucun TypeError."""

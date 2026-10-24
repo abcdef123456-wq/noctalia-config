@@ -16,6 +16,9 @@ import tempfile
 import uuid
 
 ENGINES = {'agy': 'Antigravity', 'codex': 'Codex', 'claude': 'Claude Code', 'opencode': 'OpenCode'}
+# Modes de permission permis partout (choose, restauration, /run) : la liste de 94a3a93, comme PERMISSION_MODES de
+# nc_management (un test vérifie qu'elles sont égales) ; 4ecc57a accepte encore yolo, bypass et always-proceed
+MODES_PERMIS = frozenset({'default', 'request-review', 'plan', 'ask', 'auto_edit', 'auto'})
 EFFORTS = {'', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'}
 
 
@@ -157,9 +160,17 @@ class Engines:
             st = self.path.lstat()
             if self.path.is_symlink() or st.st_mode & 0o077 or st.st_size > 8*1024*1024:
                 raise ValueError('État privé des moteurs à vérifier.')
-            data = json.loads(self.path.read_text())
-            if not isinstance(data,dict) or data.get('engine') not in ENGINES: raise ValueError('État moteur invalide.')
-            self.state.update(data)
+            # Fichier illisible ou de forme inattendue (édition à la main, disque) : état par défaut, sans le réécrire,
+            # plutôt qu'un runner qui ne démarre plus et redémarre en boucle
+            try:
+                data = json.loads(self.path.read_text())
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                data = None
+            if isinstance(data,dict) and data.get('engine') in ENGINES:
+                self.state.update(data)
+                if not isinstance(self.state.get('settings'), dict): self.state['settings'] = {}
+            else:
+                logging.getLogger('nc_engines').warning('État des moteurs illisible : ignoré, état par défaut.')
         if self.state['engine']=='agy' and self.state['settings'].get('agy'):
             self.restaure_agy()
 
@@ -170,6 +181,11 @@ class Engines:
         if not isinstance(agy, dict): return
         for cle in ('model','effort','mode','permission_mode'):
             if not isinstance(agy.get(cle), str) or not agy[cle]: continue
+            if cle == 'permission_mode' and agy[cle] not in MODES_PERMIS:
+                # 4ecc57a accepte encore yolo, bypass et always-proceed : notre liste les refuse quand même
+                logging.getLogger('nc_engines').warning('Réglage AGY enregistré refusé (%s) : ignoré, valeur par défaut.', cle)
+                agy.pop(cle, None)
+                continue
             try:
                 self.original['update_session'](**{cle:agy[cle]})
             except (ValueError, TypeError):
@@ -233,6 +249,8 @@ class Engines:
         engine = values.get('engine',self.state['engine'])
         if engine not in ENGINES: raise ValueError('Moteur inconnu.')
         if engine != self.state['engine'] and not executable(engine): raise ValueError('Installe et authentifie ce CLI sur la machine du runner.')
+        if values.get('permission_mode') not in (None,'') and values['permission_mode'] not in MODES_PERMIS:
+            raise ValueError('Mode de permission refusé.')
         if engine == 'agy':
             donnes = {k:v for k,v in values.items() if k!='engine'}
             self.appel('update_session', session_key=session_key, **donnes)
@@ -296,6 +314,9 @@ class Engines:
                   continue_session=True, reset_session_flag=False, permission_mode=None, session_key=None, **futurs):
         def failure(message): return dict(success=False,output='',error=message,session=self.session(session_key))
         if self.lock.locked(): return failure('Une autre requête JARVIS est déjà en cours.')
+        # /run n'est jamais contrôlé par l'upstream (P2-2 de 94a3a93) : un agent qui a SECRET_KEY y demandait
+        # bypassPermissions. Hors de notre liste : le mode de la session (aucun de nos clients n'envoie ce champ).
+        if permission_mode not in MODES_PERMIS: permission_mode = None
         if self.state['engine']=='agy':
             # Pas de verrou commun : chaque PC a sa session et l'upstream refuse lui-même deux requêtes sur la même.
             # Le compteur empêche seulement de changer de moteur ou de réinitialiser pendant ce temps.
