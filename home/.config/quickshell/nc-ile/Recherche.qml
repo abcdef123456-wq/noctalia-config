@@ -472,7 +472,8 @@ Item {
     }
     FileView {
         id: fichierUsage
-        path: Quickshell.env("HOME") + "/.local/state/noctalia/plugins/data/nc/launcher/usage.json"
+        // Données des plugins dans l'état de Noctalia, comme lui : NOCTALIA_STATE_HOME, puis XDG_STATE_HOME, puis ~/.local/state
+        path: (Quickshell.env("NOCTALIA_STATE_HOME") || Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/noctalia/plugins/data/nc/launcher/usage.json"
         printErrors: false
         onLoaded: { try { r.usage = JSON.parse(text()) } catch (e) { r.usage = ({}) } }
     }

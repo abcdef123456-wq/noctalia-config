@@ -9,7 +9,10 @@ la config. Le reste de settings.toml (thème, fond d'écran…) n'est pas touch�
 import os
 import re
 
-p = os.path.expanduser("~/.local/state/noctalia/settings.toml")
+# L'état de Noctalia, comme lui (stateDir de src/util/file_utils.h) : NOCTALIA_STATE_HOME, puis XDG_STATE_HOME, puis
+# ~/.local/state (une valeur vide compte comme absente)
+p = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.environ.get("XDG_STATE_HOME")
+                 or os.path.expanduser("~/.local/state"), "noctalia", "settings.toml")
 try:
     lignes = open(p).read().splitlines()
 except OSError:

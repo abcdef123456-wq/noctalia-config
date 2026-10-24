@@ -20,10 +20,14 @@ try:
 except ImportError:           # Python < 3.11 : rien à faire sans lecteur TOML (les positions de l'installation restent)
     sys.exit(0)
 
-DIR = os.path.expanduser("~/.config/noctalia")
+# Les dossiers de Noctalia, comme lui (configDir, stateDir de src/util/file_utils.h) : NOCTALIA_*_HOME, puis
+# XDG_*_HOME, puis ~/.config et ~/.local/state ; sinon les positions iraient dans un fichier que Noctalia ne lit pas
+DIR = os.path.join(os.environ.get("NOCTALIA_CONFIG_HOME") or os.environ.get("XDG_CONFIG_HOME")
+                   or os.path.expanduser("~/.config"), "noctalia")
 OUT = os.path.join(DIR, "zx-verrou.toml")
+ETAT = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.environ.get("XDG_STATE_HOME")
+                    or os.path.expanduser("~/.local/state"), "noctalia", "settings.toml")
 # Hauteur de chaque élément, en proportion de l'écran (mêmes valeurs que install.sh)
-ETAT = os.path.expanduser("~/.local/state/noctalia/settings.toml")
 HAUTEUR = {"nc/verrou:heure": 0.30, "nc/verrou:musique": 0.64, "login_box": 0.86, "nc/verrou:batterie": 0.93}
 
 
