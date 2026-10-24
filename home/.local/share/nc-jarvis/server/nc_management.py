@@ -32,7 +32,8 @@ REQUEST_METHODS = frozenset({'get', 'post', 'put', 'patch', 'delete', 'head', 'o
 
 
 class RequestOptions:
-    """Délais propres à chaque appel, sans modifier le client partagé concurrent."""
+    """Délais propres à chaque appel, sans modifier le client partagé concurrent. Jamais de redirection suivie, même si
+    un appel en demande une (follow_redirects=True) : la clé secrète du runner ne doit pas partir ailleurs."""
     def __init__(self, client, timeout):
         self.client, self.timeout = client, timeout
 
@@ -45,6 +46,7 @@ class RequestOptions:
             return method
         def request(*args, **kwargs):
             kwargs.setdefault('timeout', self.timeout)
+            kwargs['follow_redirects'] = False
             return method(*args, **kwargs)
         return request
 
@@ -55,9 +57,23 @@ class NoRunnerCookies(DefaultCookiePolicy):
 
 
 class RunnerConnections:
-    """Connexions bornées, ouvertes/fermées avec le gateway ; aucun cache de réponses."""
+    """Connexions bornées, ouvertes/fermées avec le gateway ; aucun cache de réponses.
+
+    Le pool appartient à la boucle asyncio qui l'a ouvert (celle d'uvicorn) : ses connexions et ses verrous y sont liés.
+    Le polling Telegram tourne dans un autre fil, avec sa propre boucle (nc_telegram, comme l'upstream) ; y prendre le
+    pool finissait en « RuntimeError: … is bound to a different event loop » à chaque message. Depuis une autre boucle,
+    chaque requête a donc son propre client, fermé aussitôt (voir RunnerLease._single)."""
     def __init__(self):
         self.client = None
+        self.loop = None
+
+    def pool(self):
+        """Le client du pool, seulement dans la boucle qui l'a ouvert ; sinon None."""
+        try:
+            courante = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        return self.client if self.client is not None and courante is self.loop else None
 
     @contextlib.asynccontextmanager
     async def lifespan(self):
@@ -67,11 +83,11 @@ class RunnerConnections:
         async with httpx.AsyncClient(timeout=30, follow_redirects=False,
                 cookies=CookieJar(policy=NoRunnerCookies()),
                 limits=httpx.Limits(max_connections=16, max_keepalive_connections=8, keepalive_expiry=60)) as client:
-            self.client = client
+            self.client, self.loop = client, asyncio.get_running_loop()
             try:
                 yield
             finally:
-                self.client = None
+                self.client = self.loop = None
 
     def lease(self, **options):
         """Ce que reçoit le module gateway upstream à la place de httpx.AsyncClient(**options).
@@ -89,8 +105,9 @@ class RunnerLease:
     """Un emprunt du pool, utilisable des deux façons dont l'upstream crée ses clients.
 
     - « async with httpx.AsyncClient(...) as client » (jusqu'à aae5b9b) et client partagé gardé en direct (f522291,
-      gateway._get_http_client) : dans les deux cas, chaque requête passe par le pool ouvert à ce moment-là, sinon
-      (avant le démarrage, après l'arrêt) par un client d'une seule requête, fermé aussitôt. L'emprunt ne possède
+      gateway._get_http_client) : dans les deux cas, chaque requête passe par le pool ouvert à ce moment-là, s'il l'a
+      été dans la boucle qui appelle ; sinon (avant le démarrage, après l'arrêt, ou depuis la boucle du polling
+      Telegram) par un client d'une seule requête, fermé aussitôt, sans cookie ni redirection, avec le même délai. L'emprunt ne possède
       aucune connexion et n'est lié à aucun pool précis : après un rechargement du gateway, il suit le nouveau pool.
     - La sortie d'un « async with » ne ferme rien. is_closed ne devient vrai qu'après aclose() (close_http_client de
       l'upstream), qui ne ferme que l'emprunt, jamais le pool : tant qu'il est faux, l'upstream garde le même objet.
@@ -125,24 +142,29 @@ class RunnerLease:
         if name not in REQUEST_METHODS: raise AttributeError(name)
         def request(*args, **kwargs):
             self._check()
-            if self.connections.client is not None:
-                return getattr(RequestOptions(self.connections.client, self.timeout), name)(*args, **kwargs)
+            client = self.connections.pool()
+            if client is not None:
+                return getattr(RequestOptions(client, self.timeout), name)(*args, **kwargs)
             return self._single(name, args, kwargs)
         return request
 
     def _single(self, name, args, kwargs):
-        """Hors du lifespan (avant le démarrage, après l'arrêt) : un client pour cette seule requête."""
+        """Hors du pool (avant le démarrage, après l'arrêt, autre boucle) : un client pour cette seule requête, avec
+        les mêmes règles que le pool (aucun cookie, aucune redirection, le délai de l'emprunt par défaut). Il est créé
+        et fermé dans la boucle qui appelle : rien n'est partagé entre les boucles."""
         import httpx
         kwargs.setdefault('timeout', self.timeout)
+        kwargs['follow_redirects'] = False
+        options = dict(follow_redirects=False, cookies=CookieJar(policy=NoRunnerCookies()))
         if name == 'stream':
             @contextlib.asynccontextmanager
             async def stream():
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(**options) as client:
                     async with client.stream(*args, **kwargs) as response:
                         yield response
             return stream()
         async def single():
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(**options) as client:
                 return await getattr(client, name)(*args, **kwargs)
         return single()
 

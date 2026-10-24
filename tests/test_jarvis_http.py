@@ -217,6 +217,74 @@ class ConnexionsRunner(unittest.TestCase):
         with patch.object(httpx,'AsyncClient',side_effect=factory):asyncio.run(scenario())
         self.assertEqual(sorted(requests),sorted([('/avant',10.0),('/defaut',10.0),('/explicite',615.0),('/supprime',5.0)]))
 
+    def test_another_event_loop_never_takes_the_pool(self):
+        """Le polling Telegram tourne dans un fil avec sa propre boucle : pendant le lifespan, ses requêtes (emprunt
+        en direct comme f522291, « async with » comme aae5b9b, et runner() pour /nc) réussissent sans toucher au pool
+        de la boucle principale, qui continue de servir. Avant : « … is bound to a different event loop »."""
+        connections=[]
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def setup(self):
+                super().setup();connections.append(threading.current_thread().name)
+            def log_message(self,*args):pass
+            def do_GET(self):
+                body=b'{"ok": true}'
+                self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers()
+                self.wfile.write(body);self.wfile.flush()
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);server.daemon_threads=True
+        thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
+        url=f'http://127.0.0.1:{server.server_port}'
+        pool=self.m.RunnerConnections();made=[]
+        get_client,close=self.shared_client_like_f522291(pool,made)
+        main_module=types.ModuleType('main');main_module.HOME_SERVER_URL=url;main_module.SECRET_KEY='test'
+        results={}
+        def other_thread():
+            async def scenario():
+                codes=[]
+                for _ in range(3):codes.append((await asyncio.wait_for(get_client().get(url+'/direct'),5)).status_code)
+                async with pool.lease(timeout=5) as client:codes.append((await client.get(url+'/bloc')).status_code)
+                with patch.object(self.m,'runner_connections',pool),patch.dict(sys.modules,{'main':main_module}):
+                    codes.append((await self.m.runner('GET','/nc'))['ok'])
+                await close()
+                return codes
+            try:results['codes']=asyncio.run(scenario())
+            except Exception as e:results['error']=f'{type(e).__name__}: {e}'
+        async def main():
+            async with pool.lifespan():
+                shared=pool.client
+                async with pool.lease(timeout=5) as client:self.assertEqual((await client.get(url+'/avant')).status_code,200)
+                worker=threading.Thread(target=other_thread);worker.start()
+                while worker.is_alive():await asyncio.sleep(.02)
+                self.assertIs(pool.client,shared);self.assertFalse(shared.is_closed)
+                async with pool.lease(timeout=5) as client:self.assertEqual((await client.get(url+'/apres')).status_code,200)
+        try:
+            with patch.dict('os.environ',NO_PROXY='*',no_proxy='*'):asyncio.run(main())
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
+        self.assertEqual(results,{'codes':[200,200,200,200,True]})
+        # Pool de la boucle principale : une connexion gardée ; l'autre boucle : une par requête, la sienne
+        self.assertEqual(len(connections),1+5)
+
+    def test_a_call_asking_to_follow_redirects_is_not_followed(self):
+        seen=[]
+        def handle(request):
+            seen.append(request.url.path)
+            if request.url.path=='/redirige':return httpx.Response(302,headers={'Location':'http://ailleurs.test/vole'})
+            return httpx.Response(200)
+        original=httpx.AsyncClient
+        def factory(**kwargs):return original(transport=httpx.MockTransport(handle),**kwargs)
+        pool=self.m.RunnerConnections()
+        async def scenario():
+            lease=pool.lease(timeout=5)
+            # Hors du pool (client d'une requête), puis dans le pool
+            self.assertEqual((await lease.get('http://runner.test/redirige',follow_redirects=True)).status_code,302)
+            async with pool.lifespan():
+                self.assertEqual((await lease.get('http://runner.test/redirige',follow_redirects=True)).status_code,302)
+                async with lease.stream('GET','http://runner.test/redirige',follow_redirects=True) as r:
+                    self.assertEqual(r.status_code,302)
+        with patch.object(httpx,'AsyncClient',side_effect=factory):asyncio.run(scenario())
+        self.assertEqual(seen,['/redirige']*3)
+
     def test_gateway_keeps_native_lifespan_and_closes_pool_even_on_failure_or_reload(self):
         try:
             from fastapi import FastAPI

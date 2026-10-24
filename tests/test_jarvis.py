@@ -276,8 +276,12 @@ class Management(unittest.TestCase):
             return httpx.Response(200,json={'models':['one-model']})
         transport_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
         self.addCleanup(lambda:asyncio.run(transport_client.aclose()))
-        with patch.object(self.m.runner_connections,'client',transport_client):
-            result=asyncio.run(self.m.runner('GET','/models'))
+        async def appel():
+            # Le pool ne sert que dans la boucle qui l'a ouvert : celle de cet appel
+            with patch.object(self.m.runner_connections,'client',transport_client), \
+                 patch.object(self.m.runner_connections,'loop',asyncio.get_running_loop()):
+                return await self.m.runner('GET','/models')
+        result=asyncio.run(appel())
         self.assertEqual(result,dict(models=['one-model']))
         self.assertEqual(str(seen[0].url),'http://private-runner:8080/models')
         self.assertEqual(seen[0].headers['X-Secret-Key'],self.up.SECRET_KEY)
