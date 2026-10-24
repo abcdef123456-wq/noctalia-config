@@ -454,6 +454,9 @@ texte d’une commande se contourne toujours (lire `~/.ssh`, lancer `sudo`, simu
 session tourne donc dans une unité `systemd --user` transitoire, sans root :
 
 - `PrivateUsers` + `NoNewPrivileges` : pas d’élévation (`sudo` setuid refusé) ;
+- `PrivatePIDs` : un `/proc` à lui, aucun de tes autres processus n’y est visible ni joignable par un signal ;
+  `SystemCallFilter=~@debug @keyring` : ni `ptrace`, ni lecture de la mémoire d’un autre processus, ni trousseau du
+  noyau ;
 - `ProtectHome=read-only` + `ReadOnlyPaths=~` : `~` en lecture seule, sauf un seul dossier de travail
   (`~/.local/state/nc-noeud/travail`, en `ReadWritePaths`) ;
 - `InaccessiblePaths` : clés, mots de passe, config (navigateurs, trousseaux, CLI d’IA et de cloud, gh, git,
@@ -467,8 +470,8 @@ session tourne donc dans une unité `systemd --user` transitoire, sans root :
   lancer aucune appli graphique** (lancer une appli reste confirmé une par une) ;
 - la durée restante borne l’exécution (`RuntimeMaxSec`, `--collect`).
 
-Vérifié dans le manager **utilisateur**, sans root. Les propriétés existent depuis bien avant systemd 254 (la plus
-ancienne distribution visée, openSUSE Leap 15.6). **Toute erreur de mise en place** (systemd-run absent, pas de bus
+Vérifié dans le manager **utilisateur**, sans root. `PrivatePIDs` demande **systemd 257** (Debian 13 : 257, Fedora 44 :
+259, Tumbleweed et Arch : plus récent) ; plus ancien, la sonde échoue et il n’y a pas de session. **Toute erreur de mise en place** (systemd-run absent, pas de bus
 utilisateur, namespaces refusés — par ex. Ubuntu avec `apparmor restrict_unprivileged_userns`) : **pas de session,
 confirmation normale**, jamais une exécution hors du bac. Une sonde vérifie que le bac tient avant chaque `exec` de
 session.
@@ -476,7 +479,8 @@ session.
 **Limite à connaître, noir sur blanc.** La session ne protège pas d’une IA piégée **dans la même conversation**, ni
 d’un serveur compromis : pendant la session, l’un ou l’autre peut agir (le réseau reste ouvert). Mais il **ne peut
 pas** lire les chemins interdits, écrire dans `~`, utiliser `sudo`, ni lancer d’appli ; **chaque action se voit et
-s’arrête**. C’est pourquoi la session est désactivée par défaut et courte. En cas de doute, laisse-la à 0.
+s’arrête**. Le réseau reste ouvert, **y compris `127.0.0.1`** : une commande de session peut joindre les services de ce
+PC qui font confiance aux connexions locales (Ollama, CUPS, un serveur de développement sans mot de passe). C’est pourquoi la session est désactivée par défaut et courte. En cas de doute, laisse-la à 0.
 
 ## Attente avant une réponse
 

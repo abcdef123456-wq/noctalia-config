@@ -1519,7 +1519,11 @@ def bac_argv(cmd, cwd, budget):
     if not sr:
         return None
     travail = dossier_travail_bac()
-    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "ProtectHome=read-only", "PrivateTmp=yes",
+    # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
+    # sans lui, la sonde échoue et il n'y a pas de session. SystemCallFilter retire ptrace, process_vm_* et le
+    # trousseau du noyau (partagé entre espaces de noms). ProtectProc/ProcSubset ne valent pas pour --user : pas mis.
+    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
+             "ProtectHome=read-only", "PrivateTmp=yes",
              "RestrictAddressFamilies=AF_INET AF_INET6", "ReadOnlyPaths=" + str(HOME),
              "ReadWritePaths=" + str(travail), "RuntimeMaxSec=" + str(max(1, int(budget)))]
     argv = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect"]

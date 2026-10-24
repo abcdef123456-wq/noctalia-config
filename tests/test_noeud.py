@@ -2020,6 +2020,26 @@ class BacReel(ModuleCharge):
         r = self.lancer_bac(m, 'python3 -c "import socket; socket.socket(socket.AF_UNIX)" 2>&1 || echo ECHEC-ATTENDU')
         self.assertIn("ECHEC-ATTENDU", r.get("stdout", ""), "RestrictAddressFamilies : plus de socket unix (ni abstrait)")
 
+    def test_autres_processus_invisibles(self):
+        # PrivatePIDs : un processus lancé hors du bac (par le test lui-même) n'y existe pas, ni pour /proc ni pour kill
+        temoin = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        self.addCleanup(temoin.wait)
+        self.addCleanup(temoin.kill)
+        m, _ = self.charger_bac()
+        r = self.lancer_bac(m, f"test -e /proc/{temoin.pid} && echo VISIBLE; kill -0 {temoin.pid} 2>/dev/null && echo JOIGNABLE; "
+                               "ls /proc | grep -c '^[0-9]'")
+        sortie = r.get("stdout", "")
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("VISIBLE", sortie)
+        self.assertNotIn("JOIGNABLE", sortie)
+        self.assertLess(int(sortie.split()[-1]), 10, "seuls les processus du bac sont visibles")
+
+    def test_proprietes_du_bac(self):
+        m, _ = self.charger_bac()
+        argv = m.bac_argv(":", "/", 10)
+        for prop in ("PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring", "PrivateUsers=yes", "NoNewPrivileges=yes"):
+            self.assertIn(prop, argv)
+
 
 if __name__ == "__main__":
     unittest.main()
