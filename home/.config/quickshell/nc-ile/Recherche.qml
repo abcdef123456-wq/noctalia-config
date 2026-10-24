@@ -57,6 +57,9 @@ Item {
     property string questionPosee: ""
     property string reponse: ""
     property string commandeIA: ""
+    // Réponse en échec (ligne {"erreur": true} du flux, ou code de sortie ≠ 0) : l'erreur à part, jamais proposée à la
+    // copie ni comme commande à lancer (revue B2-08)
+    property string erreurIA: ""
     // Choix proposés par JARVIS (ligne {"choices": […]} du flux, issue #7) : des lignes de résultat ; Entrée en envoie un
     // comme question suivante
     property var choixIA: []
@@ -115,7 +118,7 @@ Item {
     }
     function demander(question) {
         if (question === "" || demandeur.running) return
-        questionPosee = question; reponse = ""; commandeIA = ""; choixIA = []; modeTexte = false; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = question; reponse = ""; commandeIA = ""; erreurIA = ""; choixIA = []; modeTexte = false; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-demander", "--flux", question]
         demandeur.running = true
         chercher()
@@ -123,7 +126,7 @@ Item {
     // « ! » : une action (ou une consigne libre) sur le texte sélectionné, sinon copié ; le résultat se copie avec Entrée
     function demanderTexte(action) {
         if (action === "" || demandeur.running) return
-        questionPosee = q; reponse = ""; commandeIA = ""; choixIA = []; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
+        questionPosee = q; reponse = ""; commandeIA = ""; erreurIA = ""; choixIA = []; modeTexte = true; modeAgent = false; iaReponse = nomIA; agentReponse = agentIA
         demandeur.command = [Etat.bin + "nc-ia", "texte", action, "--flux"].concat(texteSource !== "" ? ["--stdin"] : [])
         texteEnvoi = texteSource
         demandeur.stdinEnabled = texteSource !== ""
@@ -267,8 +270,14 @@ Item {
     Process {
         id: demandeur
         onStarted: if (demandeur.stdinEnabled) { write(r.texteEnvoi); r.texteEnvoi = ""; stdinEnabled = false }
+        // Le code de sortie arrive avant la fin de running : l'échec est connu quand la réponse est mise en forme
+        onExited: code => { if (code !== 0 && r.erreurIA === "") r.erreurIA = Reglages.t("L'IA a échoué (code ", "The AI failed (code ") + code + ")" }
         onRunningChanged: {
             if (running) { r.brut = "" }
+            else if (r.erreurIA !== "") {
+                r.reponse = (r.brut.trim() ? r.brut.trim() + "\n\n" : "") + r.erreurIA
+                r.commandeIA = ""
+            }
             else if (r.modeTexte) {
                 r.reponse = r.brut.trim() || Reglages.t("Pas de réponse.", "No answer.")
             }
@@ -289,7 +298,8 @@ Item {
                     if (Array.isArray(d.choices))          // 5 au plus, de 80 caractères au plus, sans doublon
                         r.choixIA = d.choices.filter(x => typeof x === "string" && x.trim() !== "").map(x => x.trim().slice(0, 80))
                                              .filter((x, i, l) => l.indexOf(x) === i).slice(0, 5)
-                    r.brut += d.t || ""
+                    if (d.erreur === true) r.erreurIA = String(d.t || "").trim() || Reglages.t("L'IA a échoué", "The AI failed")
+                    else r.brut += d.t || ""
                 } catch (e) { return }
                 r.reponse = r.brut
             }
@@ -713,8 +723,10 @@ Item {
             // demandeur.running plutôt que reflechit : à la fin de la réponse, sa liaison n'est pas encore à jour
             if (r.modeTexte && q === r.questionPosee && (demandeur.running || r.reponse !== "")) {
                 let resultat = r.reponse
-                resultats = demandeur.running ? [] : [{ titre: Reglages.t("Copier le résultat", "Copy the Result"), sous: r.iaReponse, glyphe: "content_copy",
-                                                  f: () => Quickshell.execDetached(["wl-copy", "--", resultat]) }]
+                resultats = demandeur.running ? []
+                          : r.erreurIA !== "" ? [{ titre: r.erreurIA, sous: Reglages.t("Échec · rien à copier", "Failed · nothing to copy"), glyphe: "error", garder: true, f: () => {} }]
+                          : [{ titre: Reglages.t("Copier le résultat", "Copy the Result"), sous: r.iaReponse, glyphe: "content_copy",
+                               f: () => Quickshell.execDetached(["wl-copy", "--", resultat]) }]
                 sel = 0
                 return
             }

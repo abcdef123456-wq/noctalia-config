@@ -154,6 +154,85 @@ ShellRoot {
             self.assertEqual((root / "stdin-ia").read_text(), "texte du presse-papiers")
 
 
+    def test_reponse_en_echec_jamais_copiee(self):
+        """Revue B2-08 : une réponse en échec (ligne {"erreur": true}, ou code de sortie ≠ 0) était ajoutée au texte et
+        proposée à « Copier le résultat » (ou comme commande à lancer) : l'erreur est dite à part, rien à copier."""
+        with tempfile.TemporaryDirectory(prefix="nc-spotlight-echec-") as d:
+            root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
+            q = root / "qml"
+            (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var v: ({}); readonly property bool iaCoupee: false\n'
+                                            ' function t(fr,en){return fr} function val(k,d){return v[k] !== undefined ? v[k] : d} function pageActive(n){return true}}')
+            (q / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nimport Quickshell\nQtObject {property string saisie: ""; property string texteIA: ""; property bool recherche: true\n'
+                                        ' property bool nuit: false; readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"; property int fermetures: 0; signal validerRecherche()\n'
+                                        ' function faire(c) {} function fermer() { fermetures++ } function aller(p) {} function basculer(e, c) {}}')
+            (q / "AssistantEtat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function formater(t){return t}}')
+            (q / "Etincelle.qml").write_text('import QtQuick\nItem {property real taille: 10; property bool tourne: false; property string agent: ""}')
+            noms = ["Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion", "Recherche", "Etincelle", "Texte", "Ico"]
+            (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Etat", "AssistantEtat", "Couleurs", "Connexion") else "") + n + " 1.0 " + n + ".qml" for n in noms))
+            b = root / ".local/bin"; b.mkdir(parents=True)
+            scripts = {
+                "nc-apps": '#!/bin/sh\necho "[]"\n', "hyprctl": "#!/bin/sh\necho '[]'\n", "nc-aide-config": "#!/bin/sh\nexit 0\n",
+                "nc-demander": '''#!/bin/sh
+case "$1" in
+  --ia) echo '{"nom": "Codex", "agent": "codex", "coupee": false}' ;;
+  --flux) echo '{"t": "Début de réponse"}'; echo '{"t": "\\n$ rm -rf ~/projet"}'; exit 1 ;;
+esac
+''',
+                # traduire : un début puis une ligne d'erreur ; résumer : un début puis un code d'erreur, sans ligne d'erreur
+                "nc-ia": '''#!/bin/sh
+echo "nc-ia $*" >> "$HOME/appels"
+echo '{"ia": "Codex", "id": "codex", "agent": "codex"}'
+echo '{"t": "Texte à moitié"}'
+case "$2" in
+  traduire) echo '{"t": "Codex a échoué (code 2)", "erreur": true}'; exit 1 ;;
+  *) exit 9 ;;
+esac
+''',
+                "wl-copy": '#!/bin/sh\necho "wl-copy $*" >> "$HOME/appels"\n',
+            }
+            for nom, code in scripts.items():
+                (b / nom).write_text(code); (b / nom).chmod(0o755)
+            (q / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+ property int etape: 0
+ function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
+ function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
+ function titres(){ return spot.resultats.map(x => x.titre) }
+ FloatingWindow { visible: true; implicitWidth: 700; implicitHeight: 500
+  Recherche { id: spot; width: 700; actif: true } }
+ Timer { interval: 100; running: true; repeat: true; onTriggered: {
+  var champ = trouver(spot, "nc-spotlight-champ")
+  if (etape === 0) { if (spot.nomIA === "") return; champ.text = "! traduire"; etape++; return }
+  if (etape === 1) { verifier(titres()[0] === "Traduire", JSON.stringify(titres())); spot.valider(0, false); etape++; return }
+  if (etape === 2) { if (spot.reflechit) return
+   verifier(titres().indexOf("Copier le résultat") < 0, "ligne d'erreur : rien à copier : " + JSON.stringify(titres()))
+   verifier(titres()[0] === "Codex a échoué (code 2)", "l'erreur est dite : " + JSON.stringify(titres()))
+   verifier(spot.reponse.indexOf("Texte à moitié") === 0 && spot.reponse.indexOf("Codex a échoué") > 0, "réponse : " + spot.reponse)
+   spot.valider(0, false); verifier(Etat.fermetures === 0, "Entrée sur l'erreur ne ferme rien")
+   champ.text = "! résumer"; etape++; return }
+  if (etape === 3) { verifier(titres()[0] === "Résumer", JSON.stringify(titres())); spot.valider(0, false); etape++; return }
+  if (etape === 4) { if (spot.reflechit) return
+   verifier(titres().indexOf("Copier le résultat") < 0, "code ≠ 0 : rien à copier : " + JSON.stringify(titres()))
+   verifier(titres()[0].indexOf("code 9") >= 0, "le code est dit : " + JSON.stringify(titres()))
+   champ.text = "? supprimer le projet"; spot.valider(spot.resultats.length - 1, false); etape++; return }
+  if (etape === 5) { if (spot.reflechit || spot.reponse === "") return
+   verifier(spot.commandeIA === "" && titres().indexOf("rm -rf ~/projet") < 0, "réponse en échec : aucune commande proposée : " + JSON.stringify(titres()))
+   verifier(spot.reponse.indexOf("échoué (code 1)") > 0, "l'échec est dit : " + spot.reponse)
+   Qt.quit() }
+ } }
+ Timer { interval: 12000; running: true; onTriggered: Qt.exit(9) }
+}''')
+            env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", XDG_RUNTIME_DIR=str(root / "runtime"),
+                       XDG_CACHE_HOME=str(root / "cache"), PATH=str(b) + os.pathsep + os.environ["PATH"])
+            env.pop("WAYLAND_DISPLAY", None)
+            r = subprocess.run(["qs", "--no-color", "-p", str(q / "shell.qml")], env=env, text=True, capture_output=True, timeout=20)
+            sortie = r.stdout + r.stderr
+            self.assertEqual(r.returncode, 0, sortie)
+            for erreur in ("ReferenceError", "TypeError"):
+                self.assertNotIn(erreur, sortie)
+            self.assertNotIn("wl-copy", (root / "appels").read_text())
+
     def test_choix_de_jarvis_en_resultats(self):
         """Issue #7 : les choix d'une réponse de JARVIS (ligne {"choices": …} du flux) deviennent des résultats (chevron),
         choisis au clavier comme les autres ; Entrée envoie le libellé comme question suivante ; sans choix, aucun."""
