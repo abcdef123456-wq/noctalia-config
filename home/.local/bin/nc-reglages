@@ -1769,8 +1769,14 @@ def appliquer_bt_musique(vals):
     « wpctl settings » (WirePlumber plus ancien), un fichier de wireplumber.conf.d, pris au prochain démarrage de
     WirePlumber (jamais redémarré ici : un appel en cours serait coupé)."""
     valeur = "false" if vals.get("BT_QUALITE_MUSIQUE") == "non" else "true"
-    r = subprocess.run(["wpctl", "settings", "--save", "bluetooth.autoswitch-to-headset-profile", valeur],
-                       capture_output=True) if shutil.which("wpctl") else None
+    cle = "bluetooth.autoswitch-to-headset-profile"
+    r = None
+    if shutil.which("wpctl"):
+        if valeur == "true":
+            # La valeur de la config = le défaut de WirePlumber : on retire la valeur enregistrée au lieu de figer « true »
+            r = subprocess.run(["wpctl", "settings", "--delete", cle], capture_output=True)
+        if r is None or r.returncode != 0:
+            r = subprocess.run(["wpctl", "settings", "--save", cle, valeur], capture_output=True)
     conf = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
                         "wireplumber/wireplumber.conf.d/52-nc-bt-autoswitch.conf")
     if r is not None and r.returncode == 0:

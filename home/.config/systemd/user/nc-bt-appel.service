@@ -3,11 +3,15 @@ Description=Refait la connexion Bluetooth du casque quand son micro d'appel se c
 PartOf=graphical-session.target
 After=graphical-session.target pipewire-pulse.service
 ConditionPathExistsGlob=/sys/class/bluetooth/hci*
+# Le flux du son qui s'arrête (PipeWire redémarré) n'est pas une panne pour l'utilisateur : pas d'alerte nc-panne
+OnFailure=
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 ExecStart=%h/.local/bin/nc-bt-appel
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 Slice=background.slice
 
 [Install]

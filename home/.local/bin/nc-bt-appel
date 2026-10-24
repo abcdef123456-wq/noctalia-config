@@ -118,7 +118,7 @@ def json_pactl(*args):
 
 
 def mac_de(carte):
-    """bluez_card.00_11_22_33_44_55 -> 00:11:22:33:44:55 ; None si la grammaire n'est pas respectée."""
+    """bluez_card.00_11_22_33_44_55 -> adresse avec des deux-points ; None si la grammaire n'est pas respectée."""
     if not CARTE.fullmatch(carte or ""):
         return None
     m = carte.split(".", 1)[1].replace("_", ":")
@@ -277,7 +277,7 @@ def servir():
         return 0
     ev = Evenements()
     if ev.pactl() is None:
-        return 1
+        return 0                             # pas de pactl sur ce PC : rien à surveiller, ni bruit ni relance
     if journal_lisible():
         ev.noyau()
     limites, sco = Limites(), []
@@ -312,6 +312,7 @@ def servir():
             sco = []
             if not autorise():
                 continue
+            # Avec deux casques en mode appel, le premier (par nom) est réparé : accepté, les SCO n'ont pas d'adresse
             cible = next((n for n, c in sorted(cartes().items()) if c["profil"] == APPEL), None)
         if not cible:
             continue

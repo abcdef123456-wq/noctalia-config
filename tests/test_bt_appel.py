@@ -235,6 +235,22 @@ class Service(Base):
         self.service()
         self.assertEqual(self.n("bluetoothctl disconnect"), 1)
 
+    def test_pactl_absent_sortie_0_sans_bruit(self):
+        (self.bin / "pactl").unlink()
+        self.evenements(1)
+        r = subprocess.run([sys.executable, str(BT)], env=self.env(PATH=str(self.bin)), capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(self.n("bluetoothctl"), 0)
+
+    def test_unite_sans_relance_sans_fin_ni_fausse_alerte(self):
+        u = (REPO / "home/.config/systemd/user/nc-bt-appel.service").read_text()
+        self.assertRegex(u, r"(?m)^OnFailure=$")                   # le drop-in global nc-panne n'alerte pas
+        self.assertRegex(u, r"(?m)^StartLimitIntervalSec=300$")
+        self.assertRegex(u, r"(?m)^StartLimitBurst=5$")
+        self.assertRegex(u, r"(?m)^RestartSec=10$")
+        self.assertIn("ConditionPathExistsGlob=/sys/class/bluetooth/hci*", u)
+
     def test_reparer_carte_invalide_code_2(self):
         r = subprocess.run([sys.executable, str(BT), "reparer", "bluez_card.zz"], env=self.env(), capture_output=True, text=True, timeout=20)
         self.assertEqual(r.returncode, 2)
@@ -401,7 +417,8 @@ class Reglages(unittest.TestCase):
         self.assertIn("wpctl settings --save bluetooth.autoswitch-to-headset-profile false", self.appels())
         self.assertFalse(self.conf().exists())
         self.lancer("reset", "BT_QUALITE_MUSIQUE")
-        self.assertIn("wpctl settings --save bluetooth.autoswitch-to-headset-profile true", self.appels())
+        self.assertIn("wpctl settings --delete bluetooth.autoswitch-to-headset-profile", self.appels())
+        self.assertNotIn("wpctl settings --save bluetooth.autoswitch-to-headset-profile true", self.appels())
 
     def test_qualite_musique_repli_conf_d_sans_wpctl_settings(self):
         (self.fake / "wpctl_sans_settings").touch()
