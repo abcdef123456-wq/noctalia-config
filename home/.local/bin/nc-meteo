@@ -98,16 +98,16 @@ def lire(url):
 
 
 def lieu(ville):
-    """(latitude, longitude, nom) de la ville choisie, sinon d'après la connexion."""
+    """(latitude, longitude, nom, estimée) de la ville choisie, sinon d'après la connexion (estimée : peut être fausse)."""
     if ville:
         r = lire(f"https://geocoding-api.open-meteo.com/v1/search?count=1&language={T('fr', 'en')}&name=" + urllib.parse.quote(ville))
         if r.get("results"):
             x = r["results"][0]
-            return x["latitude"], x["longitude"], x.get("name", ville)
+            return x["latitude"], x["longitude"], x.get("name", ville), False
     r = lire("https://ipwho.is/?fields=latitude,longitude,city,success")
     if r.get("success") is False:
         raise OSError("position introuvable")
-    return r["latitude"], r["longitude"], r.get("city", "")
+    return r["latitude"], r["longitude"], r.get("city", ""), True
 
 
 def icone(code, jour=True):
@@ -122,11 +122,12 @@ def meteo():
         with open(CACHE, encoding="utf-8") as f:
             c = json.load(f)
         if time.time() - c.get("t", 0) < DUREE and c.get("demande") == ville:
+            c.setdefault("estimee", ville == "")
             return c
     except (OSError, ValueError):
         c = None
     try:
-        lat, lon, nom = lieu(ville)
+        lat, lon, nom, estimee = lieu(ville)
         q = urllib.parse.urlencode({
             "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 5,
             "current": "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m",
@@ -150,7 +151,7 @@ def meteo():
         jours.append({"jour": nom_jour, "min": round(d["temperature_2m_min"][i]), "max": round(d["temperature_2m_max"][i]),
                       "icone": icone(d["weather_code"][i])})
     res = {
-        "t": time.time(), "demande": ville, "ville": nom, "temp": round(cur["temperature_2m"]),
+        "t": time.time(), "demande": ville, "ville": nom, "estimee": estimee, "temp": round(cur["temperature_2m"]),
         "ressenti": round(cur["apparent_temperature"]), "vent": round(cur["wind_speed_10m"]),
         "humidite": round(cur.get("relative_humidity_2m", 0)), "code": cur["weather_code"],
         "icone": icone(cur["weather_code"], jour), "texte": CODES.get(cur["weather_code"], ("", "", "—"))[2],
@@ -164,6 +165,12 @@ def meteo():
     return res
 
 
+def nom_ville(m):
+    """Le nom de la ville ; « (estimée) » / « (estimated) » quand elle vient de la connexion et non d'un réglage."""
+    v = m.get("ville", "")
+    return v + T(" (estimée)", " (estimated)") if m.get("estimee") and v else v
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
         return print(T(__doc__.strip(), USAGE_EN))
@@ -173,9 +180,11 @@ def main():
             print(T("Météo indisponible (hors ligne ?)", "Weather unavailable (offline?)"))
             return
         if not EN:
-            print(f"{m['ville']} : {m['temp']} °C, {m['texte'].lower()} (ressenti {m['ressenti']} °C, min {m['min']}, max {m['max']})")
+            print(f"{nom_ville(m)} : {m['temp']} °C, {m['texte'].lower()} (ressenti {m['ressenti']} °C, min {m['min']}, max {m['max']})")
             print("  " + "   ".join(f"{x['h']} {x['t']}°" for x in m["heures"]))
             print("  " + "   ".join(f"{x['jour']} {x['min']}/{x['max']}°" for x in m["jours"]))
+            if m.get("estimee"):
+                print("  " + "Choisir ma ville : nc-reglages fenetre Île (Ville de la météo)")
             return
 
         def heure(h):
@@ -187,9 +196,11 @@ def main():
         def jour(j):
             return "Today" if j == "Aujourd'hui" else JOURS_EN.get(j, j)
         ciel = CIEL_EN.get(m.get("code"), m["texte"]).lower()
-        print(f"{m['ville']}: {m['temp']}°C, {ciel} (feels like {m['ressenti']}°C, low {m['min']}, high {m['max']})")
+        print(f"{nom_ville(m)}: {m['temp']}°C, {ciel} (feels like {m['ressenti']}°C, low {m['min']}, high {m['max']})")
         print("  " + "   ".join(f"{heure(x['h'])} {x['t']}°" for x in m["heures"]))
         print("  " + "   ".join(f"{jour(x['jour'])} {x['min']}/{x['max']}°" for x in m["jours"]))
+        if m.get("estimee"):
+            print("  " + "Choose my city: nc-settings window Island (Weather city)")
         return
     print(json.dumps(m, ensure_ascii=False))
 

@@ -42,7 +42,7 @@ Item {
                     id: ville
                     visible: !saisie.visible; spacing: 4
                     Ico { anchors.verticalCenter: parent.verticalCenter; nom: "location_on"; taille: 14; color: Couleurs.texteSec }
-                    Texte { text: p.m.ville || Reglages.t("Météo", "Weather"); secondaire: true; font.pixelSize: 14 }
+                    Texte { text: p.m.ville ? p.m.ville + (p.m.estimee ? Reglages.t(" (estimée)", " (estimated)") : "") : Reglages.t("Météo", "Weather"); secondaire: true; font.pixelSize: 14 }
                     Ico { anchors.verticalCenter: parent.verticalCenter; nom: "edit"; taille: 12; color: Couleurs.texteSec; opacity: zone.containsMouse ? 1 : 0.5 }
                 }
                 MouseArea { id: zone; anchors.fill: ville; visible: ville.visible; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
@@ -65,6 +65,14 @@ Item {
                             text: Reglages.t("Ville… (vide : automatique)", "City… (empty: automatic)") }
                 }
                 Process { id: villeEcrire }
+            }
+            // Ville estimée d'après l'IP (METEO_VILLE vide ou « auto ») : peut être fausse, un clic ouvre les réglages de l'île
+            Texte {
+                visible: !!p.m.estimee && !saisie.visible
+                text: Reglages.t("Choisir ma ville", "Choose my city"); font.pixelSize: 12; font.underline: true; color: Couleurs.jaune
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: { reglagesOuvrir.running = false; reglagesOuvrir.running = true } }
+                Process { id: reglagesOuvrir; command: ["sh", "-c", "exec \"$HOME/.local/bin/nc-reglages\" fenetre 'Île'"] }
             }
             Row {
                 spacing: 10

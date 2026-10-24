@@ -1204,7 +1204,7 @@ Item {
                     Image {
                         id: img
                         anchors.fill: parent
-                        source: ligne.modelData.icone || ""
+                        source: (ligne.modelData.icone || "").toLowerCase().endsWith(".jxl") ? "" : (ligne.modelData.icone || "")
                         sourceSize: Qt.size(56, 56)
                         visible: status === Image.Ready
                     }

@@ -320,8 +320,8 @@ Singleton {
     readonly property string dateCourte: Reglages.en ? maintenant.toLocaleDateString(Reglages.locale, "ddd, MMM d")
                                                      : jours[maintenant.getDay()].slice(0, 3) + ". " + maintenant.getDate() + " " + moisCourts[maintenant.getMonth()]
 
-    // ── Musique : le lecteur qui joue, sinon le dernier qui a joué, sinon le premier qui a un titre ──
-    readonly property var lecteurs: Mpris.players.values.filter(p => (p.trackTitle || "") !== "")
+    // ── Musique (playerctld est un miroir du vrai lecteur : écarté) : le lecteur qui joue, sinon le dernier qui a joué, sinon le premier qui a un titre ──
+    readonly property var lecteurs: Mpris.players.values.filter(p => (p.trackTitle || "") !== "" && !(p.dbusName || "").endsWith(".playerctld"))
     property var dernierLecteur: null
     property real finLecture: 0          // heure de la dernière pause (ms)
     readonly property var lecteur: {

@@ -127,6 +127,28 @@ class Logiciels(unittest.TestCase):
         z = [x for x in json.loads(self.lancer("chercher", "zen-browser-bin").stdout)]
         self.assertTrue(all(isinstance(x["noms_icone"], list) for x in z))
 
+    def test_icones_jxl_ignorees(self):
+        """Un .jxl du catalogue n'est pas lisible sans kimageformats : PNG/SVG de même nom, sinon pas d'icône (repli du thème)."""
+        sw = self.home / "sw"; (sw / "xml").mkdir(parents=True)
+        comp = ('<component type="desktop-application"><id>%s</id><pkgname>%s</pkgname>'
+                '<icon type="cached" width="64" height="64">%s</icon></component>')
+        with gzip.open(sw / "xml/extra.xml.gz", "wt") as f:
+            f.write('<?xml version="1.0"?><components origin="exemple-extra">' + comp % ("a.A", "obs-studio", "a.jxl")
+                    + comp % ("b.B", "obsidian", "b.jxl") + comp % ("c.C", "obs-studio-plugin-browser", "c.svg") + "</components>")
+        d = sw / "icons/exemple-extra/64x64"; d.mkdir(parents=True)
+        for nom in ("a.jxl", "b.jxl", "b.png", "c.svg"):
+            (d / nom).write_bytes(b"x")
+        self.env.update(NC_SWCATALOG_DIRS=str(sw), NC_FLATPAK_APPSTREAM=str(self.home / "fp"), XDG_CACHE_HOME=str(self.home / "cache"))
+        res = {x["nom"]: x for x in json.loads(self.lancer("chercher", "obs").stdout) if x["source"] == "depot"}
+        self.assertEqual(res["obs-studio"]["icone"], "", "seul un .jxl : pas d'icône")
+        self.assertTrue(res["obsidian"]["icone"].endswith("b.png"), "le PNG de même nom est préféré")
+        self.assertTrue(res["obs-studio-plugin-browser"]["icone"].endswith("c.svg"))
+        # Ancien cache qui contient déjà un chemin .jxl : écarté à la sortie
+        cache = self.home / "cache/nc/logiciels-icones.json"
+        c = json.loads(cache.read_text()); c["index"]["obs-studio-plugin-browser"] = str(d / "a.jxl"); cache.write_text(json.dumps(c))
+        res = {x["nom"]: x for x in json.loads(self.lancer("chercher", "obs").stdout) if x["source"] == "depot"}
+        self.assertEqual(res["obs-studio-plugin-browser"]["icone"], "")
+
     def test_installation_sure(self):
         # Le terminal d'installation lance la bonne commande, avec le nom en argument (jamais dans un shell)
         r = subprocess.run([str(BIN / "nc-logiciels"), "terminal", "aur", "obs-studio-browser"], env=self.env, input="\n",

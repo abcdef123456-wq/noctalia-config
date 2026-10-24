@@ -101,10 +101,14 @@ def lire_texte(f):
 
 def chemin_icone(racine, origine, nom):
     """Icône « en cache » d'un catalogue : icons/<origine>/<taille>/<nom>, la plus proche de 64 px."""
-    for taille in ("64x64", "128x128", "48x48", "64x64@2"):
-        f = racine / "icons" / origine / taille / nom
-        if f.is_file():
-            return str(f)
+    # PNG puis SVG ; un .jxl (JPEG XL) n'est pas lisible sans kimageformats : on cherche le même nom en PNG/SVG, sinon rien
+    base, ext = os.path.splitext(nom)
+    noms = [nom] if ext.lower() in (".png", ".svg", ".svgz", ".xpm") else [base + ".png", base + ".svg"] if ext.lower() == ".jxl" else [nom]
+    for n in noms:
+        for taille in ("64x64", "128x128", "48x48", "64x64@2"):
+            f = racine / "icons" / origine / taille / n
+            if f.is_file() and f.suffix.lower() != ".jxl":
+                return str(f)
     return ""
 
 
@@ -203,6 +207,8 @@ def ajouter_icones(res):
     index = index_icones() if any(x["source"] == "depot" for x in res) else {}
     for x in res:
         x["icone"] = index.get(x["nom"], "") if x["source"] == "depot" else icone_flatpak(x["nom"]) if x["source"] == "flatpak" else ""
+        if x["icone"].lower().endswith(".jxl"):      # ancien cache : JPEG XL illisible, on laisse le repli du thème
+            x["icone"] = ""
         x["noms_icone"] = noms_icone(x)
     return res
 
