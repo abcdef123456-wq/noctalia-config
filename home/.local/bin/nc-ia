@@ -968,9 +968,14 @@ def appel_claude(consigne, texte, image, usage):
         err.close()
 
 
-# Outils qu'une simple question n'a jamais à utiliser (Gemini CLI, Qwen Code : noms de leurs outils, ancienne et nouvelle clé)
-OUTILS_EXCLUS = ["run_shell_command", "write_file", "replace", "edit", "web_fetch", "google_web_search", "web_search",
-                 "save_memory"]
+# Outils qu'une simple question n'a jamais à utiliser, par programme (noms vérifiés dans le code de Gemini CLI 0.65 et
+# de Qwen Code 0.26). Gemini : tools.exclude seulement ; invoke_agent (sous-agent) aussi, par prudence. Qwen : tools.exclude
+# ET permissions.deny (fusionnés en union) ; monitor exécute des commandes, agent/task/create_sub_session/cron_create
+# lancent d'autres agents ou des tâches. En -p, un outil à confirmer est refusé : le mode « default » suffit.
+OUTILS_EXCLUS_GEMINI = ["run_shell_command", "write_file", "replace", "web_fetch", "google_web_search",
+                        "tracker_create_task", "tracker_update_task", "tracker_add_dependency", "invoke_agent"]
+OUTILS_EXCLUS_QWEN = ["run_shell_command", "monitor", "write_file", "edit", "notebook_edit", "save_memory", "manage_memory",
+                      "web_fetch", "web_search", "agent", "task", "create_sub_session", "cron_create"]
 
 
 class ErreurOption(ErreurIA):
@@ -999,15 +1004,23 @@ def appel_programme(ident, consigne, texte, image, usage):
             cmd = ["codex", "exec", "-s", "read-only", "-c", 'approval_policy="never"', "-c", 'web_search="disabled"',
                    "--skip-git-repo-check", "--color", "never"] + (["-i", img] if img else []) + [invite]
         elif ident in ("gemini-cli", "qwen"):
-            # Mode par défaut (jamais --yolo : en mode non interactif un outil à confirmer est refusé) et, en plus,
-            # outils d'écriture, de commande et de web retirés par un fichier de réglages système, qui l'emporte
+            # Mode « default » imposé par le réglage système ET par l'option (jamais --yolo : sans cela un auto_edit ou un
+            # yolo de ~/.gemini ou ~/.qwen, ou le mode « auto » de Qwen, s'appliquerait) ; outils d'écriture, de commande
+            # et de web retirés par un fichier de réglages système, qui l'emporte
             reglages = Path(travail) / "reglages.json"
-            reglages.write_text(json.dumps({"tools": {"exclude": OUTILS_EXCLUS}, "excludeTools": OUTILS_EXCLUS}))
+            if ident == "gemini-cli":
+                conf = {"tools": {"exclude": OUTILS_EXCLUS_GEMINI}, "general": {"defaultApprovalMode": "default"}}
+            else:
+                # mcp.excluded "*" (glob documenté de Qwen) : aucun serveur MCP de l'utilisateur. Pour Gemini le format
+                # (glob ou non) n'est pas confirmé dans son code : rien n'est mis
+                conf = {"tools": {"exclude": OUTILS_EXCLUS_QWEN, "approvalMode": "default"},
+                        "permissions": {"deny": OUTILS_EXCLUS_QWEN}, "mcp": {"excluded": ["*"]}}
+            reglages.write_text(json.dumps(conf))
             env["GEMINI_CLI_SYSTEM_SETTINGS_PATH" if ident == "gemini-cli" else "QWEN_CODE_SYSTEM_SETTINGS_PATH"] = str(reglages)
             if ident == "gemini-cli":
-                cmd = ["gemini", "-p", invite + (f"\n\n@{Path(img).name}" if img else "")]
+                cmd = ["gemini", "--approval-mode", "default", "-p", invite + (f"\n\n@{Path(img).name}" if img else "")]
             else:
-                cmd = ["qwen", "-p", invite]
+                cmd = ["qwen", "--approval-mode", "default", "-p", invite]
         else:
             # Agent « plan » (n'écrit pas) et toute permission refusée : ni commande, ni écriture, ni web, ni MCP
             # (l'agent plan seul laisse la commande permise)

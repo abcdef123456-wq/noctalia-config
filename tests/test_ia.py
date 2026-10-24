@@ -1292,10 +1292,23 @@ echo réponse''')
                 t = self.bride(nom, ident)
                 self.assertIn(var + "=", t)
                 reg = json.loads(re.search(r"^REGLAGES (.*)$", t, re.M)[1])
-                for outil in ("run_shell_command", "write_file", "replace", "web_fetch"):
+                self.assertNotIn("excludeTools", reg)
+                for outil in ("run_shell_command", "write_file", "web_fetch"):
                     self.assertIn(outil, reg["tools"]["exclude"])
-                    self.assertIn(outil, reg["excludeTools"])
-                self.assertNotIn("--approval-mode", t)
+                self.assertNotIn("save_memory" if nom == "gemini" else "tracker_create_task", reg["tools"]["exclude"])
+                if nom == "gemini":
+                    self.assertEqual(reg["general"], {"defaultApprovalMode": "default"})
+                    self.assertNotIn("mcp", reg)
+                    self.assertIn("invoke_agent", reg["tools"]["exclude"])
+                else:
+                    self.assertEqual(reg["tools"]["approvalMode"], "default")
+                    self.assertEqual(reg["permissions"]["deny"], reg["tools"]["exclude"])
+                    self.assertEqual(reg["mcp"], {"excluded": ["*"]})
+                    for outil in ("monitor", "edit", "agent", "cron_create"):
+                        self.assertIn(outil, reg["tools"]["exclude"])
+                a = re.search(r"^ARGS (.*)$", t, re.M)[1]
+                self.assertTrue(a.startswith("--approval-mode default -p "), a)
+                self.assertNotIn("yolo", a)
 
     def test_programmes_image_copiee_dans_le_dossier_vide(self):
         img = self.home / "photo.png"
