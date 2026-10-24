@@ -172,7 +172,11 @@ Ouvrir **Déploiement → Déployer sur ce PC**, ou :
 nc-jarvis deployer
 ```
 
-Le terminal propose, séparément :
+Le terminal guide en quatre étapes, chacune expliquée en quelques lignes (où obtenir le jeton Telegram avec
+@BotFather, l’identifiant avec @userinfobot, ce qui est facultatif) et finit par un résumé (statut, journaux, arrêt,
+relance). Il commence par une vérification préalable (`verifier.py`) : s’il manque quelque chose, il s’arrête
+sans rien modifier (code 1) ; sans `verifier.py` (ancienne installation), il continue avec un avertissement.
+Il propose, séparément :
 
 1. Le téléchargement de la révision examinée dans `~/.local/share/jarvis-bis` et deux venv Python, avec les
    fichiers de dépendances du dépôt d’origine. Python 3.11+, Git et le support `venv` sont nécessaires.

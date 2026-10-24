@@ -47,6 +47,18 @@ def ask(message, default=False):
     return value in ('o','oui','y','yes') if value else default
 
 
+def verification():
+    """Vérification préalable (verifier.py, voisin de ce fichier). True : on peut déployer ; False : il manque quelque chose.
+    Sans verifier.py (ancienne installation) : on continue, avec un avertissement. Rien n'est modifié ici."""
+    here=str(Path(__file__).resolve().parent)
+    if here not in sys.path:sys.path.insert(0,here)
+    try:import verifier
+    except ImportError:
+        print('Attention : la vérification préalable n’est pas installée (ancienne version) ; on continue sans elle.')
+        return True
+    return bool(verifier.verifier(None,print))
+
+
 def run(args, **kwargs):
     return subprocess.run([str(a) for a in args],check=True,**kwargs)
 
@@ -123,11 +135,19 @@ def configure(backend, mode):
     for config in reversed(configs):current.update(config)
     changes={'SECRET_KEY':next(iter(keys),secrets.token_hex(32)), 'DEPLOY_MODE':mode,
              'HOME_SERVER_URL':current.get('HOME_SERVER_URL','http://127.0.0.1:8080')}
+    print('\nÉtape 2 sur 4 : les réglages.\n'
+          'D’abord le moteur : c’est l’IA qui répondra à tes messages (agy, codex, claude ou opencode).\n'
+          'Tu peux appuyer sur Entrée pour garder le choix proposé entre crochets ; tu pourras le changer plus tard.')
     initial=current.get('NC_JARVIS_ENGINE','agy')
     engine=input('Moteur initial : agy, codex, claude, opencode ['+initial+'] : ').strip() or initial
     if engine not in ('agy','codex','claude','opencode'):raise ValueError('Moteur inconnu.')
     changes['NC_JARVIS_ENGINE']=engine
-    print('Les clés existantes sont conservées. Une saisie secrète vide conserve sa valeur.')
+    print('\nMaintenant ton bot Telegram (facultatif : Entrée pour passer, tu pourras le faire plus tard).\n'
+          ' - Le jeton du bot, c’est son mot de passe : écris à @BotFather sur Telegram, tape /newbot, choisis un nom,\n'
+          '   puis copie la ligne qui ressemble à 123456789:ABCdef… Ce que tu tapes ne s’affiche pas, c’est normal : colle et valide.\n'
+          ' - Ton identifiant Telegram dit au bot de n’obéir qu’à toi : écris à @userinfobot, il te répond un nombre.\n'
+          'Discord fonctionne pareil ; si tu ne l’utilises pas, appuie sur Entrée.\n'
+          'Les réglages déjà présents sont conservés : une saisie vide ne change rien.')
     for key,label,secret in [('TELEGRAM_TOKEN','Token Telegram',True),('TELEGRAM_ALLOWED_USER_IDS','IDs Telegram autorisés',False),
                               ('DISCORD_TOKEN','Token Discord',True),('DISCORD_ALLOWED_USER_IDS','IDs Discord autorisés',False)]:
         value=(getpass.getpass(label+' (vide : conserver) : ') if secret else input(label+' ['+current.get(key,'')+'] : ')).strip()
@@ -136,6 +156,7 @@ def configure(backend, mode):
     sys.path.insert(0,str(backend))
     from core.tools.base import ToolRegistry
     import core.tools.definitions  # noqa
+    print('\nLes modules sont des options en plus (calendrier, domotique…). Tu peux répondre non : tout reste désactivé.')
     if ask('Configurer les modules maintenant ?'):
         for tool in ToolRegistry.list_tools():
             key='ENABLE_TOOL_'+tool.id.upper()
@@ -188,7 +209,14 @@ def deploy(mode, target):
             if Path(working).resolve()!=backend/folder:
                 raise ValueError('Instance existante dans '+str(Path(working).parent)+'. Réutilise son dossier avec --path après vérification du dépôt ; aucune instance remplacée.')
     if backend.exists() and not (backend/'.git').is_dir():raise ValueError('Le dossier existe sans dépôt Git : aucune copie.')
+    print('Étape 0 : on vérifie que ta machine est prête (rien n’est modifié).')
+    if not verification():
+        print('Il manque quelque chose (voir ci-dessus). Corrige, puis relance nc-jarvis deployer.',file=sys.stderr)
+        raise SystemExit(1)
     print('JARVIS-BIS : '+mode+'\nDossier : '+str(backend)+'\nRévision validée : '+REVISION)
+    print('\nÉtape 1 sur 4 : télécharger JARVIS et ses dépendances.\n'
+          'Ça copie le programme JARVIS dans le dossier ci-dessus et installe ce dont il a besoin, chez toi seulement.\n'
+          'Il faut une connexion Internet ; compte quelques minutes. Rien d’autre sur ta machine n’est changé.')
     if not ask('Préparer ce backend (Git, venv et dépendances Python) ?'):return
     checkout(backend)
     # Le guide utilise deux venv ; aucune installation pip globale.
@@ -205,9 +233,13 @@ def deploy(mode, target):
     for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_google.py','nc_choix.py'):
         data=resource('server/'+name)
         (overlay/name).write_bytes(data)
+    print('\nÉtape 3 sur 4 : faire tourner JARVIS en arrière-plan.\n'
+          'On crée deux petits services : le « runner » (il fait le travail) et le « gateway » (il reçoit tes messages Telegram).\n'
+          'Ils ne sont joignables que depuis cette machine. Les anciens fichiers éventuels sont sauvegardés.')
     service_dir=Path.home()/'.config/systemd/user';service_dir.mkdir(parents=True,exist_ok=True)
     generated=units(backend,overlay)
     print('Services proposés : '+', '.join(generated)+'\nGateway et runner écouteront seulement sur 127.0.0.1. Les bots restent dans le gateway.')
+    started=False
     if ask('Installer/mettre à jour ces services (les anciens seront sauvegardés) ?'):
         for name,content in generated.items():
             path=service_dir/name
@@ -216,8 +248,10 @@ def deploy(mode, target):
             path.write_text(content)
         run(['systemctl','--user','daemon-reload'])
         if ask('Activer et démarrer/redémarrer ces deux services maintenant ?'):
-            run(['systemctl','--user','enable',*generated]);run(['systemctl','--user','restart',*generated])
+            run(['systemctl','--user','enable',*generated]);run(['systemctl','--user','restart',*generated]);started=True
     print('Choisis ensuite un moteur dans l’île : agy, Codex, Claude Code ou OpenCode. Le CLI choisi doit être installé et authentifié sur la machine du runner.')
+    print('\nÉtape 4 sur 4 : relier le bureau à JARVIS.\n'
+          'On écrit l’adresse locale et une clé secrète dans ta configuration, pour que le bureau parle à JARVIS. Rien à saisir.')
     client=Path.home()/'.config/nc/assistant.conf'
     if not client.exists() or ask('Remplacer la connexion client existante par ce backend local ?'):
         if client.exists():shutil.copy2(client,client.with_name('assistant.conf.backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')))
@@ -225,12 +259,26 @@ def deploy(mode, target):
     print('Préparation terminée. Teste nc-assistant verifier. Pour un PC distant, configure son URL HTTPS ou VPN vers le gateway uniquement.')
     print('Sur serveur 24/7 : le maintien des services après déconnexion peut nécessiter loginctl enable-linger (administrateur).')
     print('Accès distant : '+str(backend/'scripts/expose-gateway.sh')+' ; le runner 8080 reste privé.')
+    summary(started)
+
+
+def summary(started):
+    if started:print('\nC’est prêt : écris /start à ton bot sur Telegram.')
+    else:print('\nC’est presque prêt : les services ne sont pas démarrés. Lance-les avec : systemctl --user enable --now assistant-runner assistant-gateway\nPuis écris /start à ton bot sur Telegram.')
+    print('Vérifier que ça tourne : nc-assistant verifier   (ou : systemctl --user status assistant-runner assistant-gateway)\n'
+          'Si ça ne marche pas, regarde les messages d’erreur :\n'
+          '  journalctl --user -u assistant-gateway -n 50\n'
+          '  journalctl --user -u assistant-runner -n 50\n'
+          'Arrêter : systemctl --user stop assistant-gateway assistant-runner\n'
+          'Relancer : systemctl --user restart assistant-runner assistant-gateway')
 
 
 def bundle(path):
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr('__main__.py','from deployer import main\nmain()\n')
         z.writestr('deployer.py',resource('deployer.py'))
+        try:z.writestr('verifier.py',resource('verifier.py'))  # la vérification tourne sur le serveur ; absent : ancien dépôt
+        except (OSError,KeyError):pass
         for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_google.py','nc_choix.py'):z.writestr('server/'+name,resource('server/'+name))
 
 
@@ -242,7 +290,9 @@ def remote(host):
     if not re.fullmatch(r'(?:[a-zA-Z_][\w.-]*@)?[a-zA-Z0-9][\w.-]*',host):raise ValueError('Adresse SSH attendue : utilisateur@serveur (sans options).')
     with tempfile.TemporaryDirectory(prefix='nc-jarvis-ssh-') as d:
         archive=Path(d)/'bootstrap.pyz';bundle(archive)
-        print('Installation sur '+host+' ; aucun token local ne sera transmis.')
+        print('Installation sur '+host+' ; aucun token local ne sera transmis.\n'
+              'Je me connecte au serveur : il peut te demander ton mot de passe SSH. La vérification préalable et les questions '
+              'se passent sur le serveur lui-même (et non sur ce PC).')
         run(['ssh',host,'umask 077; mkdir -p .local/share/nc-jarvis'])
         run(['scp',archive,host+':.local/share/nc-jarvis/bootstrap.pyz'])
         run(['ssh','-t',host,'python3 .local/share/nc-jarvis/bootstrap.pyz --mode server'])

@@ -96,13 +96,72 @@ class Deploiement(unittest.TestCase):
             p=Path(d)/'bootstrap.pyz';self.d.bundle(p)
             import zipfile
             with zipfile.ZipFile(p) as z:
-                self.assertEqual(set(z.namelist()),{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py','server/nc_telegram.py','server/nc_noctalia.py','server/nc_google.py','server/nc_choix.py'})
+                self.assertEqual(set(z.namelist())-{'verifier.py'},{'__main__.py','deployer.py','server/nc_gateway.py','server/nc_management.py','server/nc_runner.py','server/nc_engines.py','server/nc_telegram.py','server/nc_noctalia.py','server/nc_google.py','server/nc_choix.py'})
             r=subprocess.run([sys.executable,str(p),'--help'],capture_output=True,text=True,timeout=5)
             self.assertEqual(r.returncode,0,r.stderr)
             self.assertIn('--mode',r.stdout)
 
+    def _deploy_avec(self, verifier):
+        """deploy() jusqu'à la première question, avec un verifier factice (ou absent si None) ; renvoie (sortie, erreur, code)."""
+        out,err=io.StringIO(),io.StringIO();code=None
+        with tempfile.TemporaryDirectory() as d, patch.dict(sys.modules,{'verifier':verifier}), \
+             patch.object(self.d.sys.stdin,'isatty',return_value=True), patch.object(self.d,'ask',return_value=False), \
+             patch.object(self.d,'run') as run, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            dest=Path(d)/'not-created'
+            try:self.d.deploy('local',str(dest))
+            except SystemExit as e:code=e.code
+            self.assertFalse(dest.exists());run.assert_not_called()
+        return out.getvalue(),err.getvalue(),code
+
+    def test_verification_refusee_arrete_proprement_sans_rien_modifier(self):
+        faux=types.ModuleType('verifier')
+        faux.verifier=lambda moteur=None,ecrire=print:(ecrire('Outil manquant'),False)[1]
+        out,err,code=self._deploy_avec(faux)
+        self.assertEqual(code,1);self.assertIn('Outil manquant',out)
+        self.assertIn('Il manque quelque chose (voir ci-dessus). Corrige, puis relance nc-jarvis deployer.',err)
+        self.assertNotIn('Étape 1',out);self.assertEqual(list(self.home.rglob('*')),[])
+
+    def test_verification_reussie_puis_etape_1_expliquee(self):
+        faux=types.ModuleType('verifier');faux.verifier=lambda moteur=None,ecrire=print:True
+        out,err,code=self._deploy_avec(faux)
+        self.assertIsNone(code);self.assertIn('Étape 1 sur 4',out);self.assertIn('Il faut une connexion Internet',out)
+
+    def test_sans_verifier_on_continue_avec_un_avertissement(self):
+        out,err,code=self._deploy_avec(None)
+        self.assertIsNone(code);self.assertIn('vérification préalable n’est pas installée',out);self.assertIn('Étape 1 sur 4',out)
+
+    def test_textes_guides_jeton_identifiant_et_resume(self):
+        sortie=io.StringIO()
+        with patch('builtins.input',return_value=''),patch.object(self.d.getpass,'getpass',return_value='123456789:SECRET-fictif') as secret, \
+             patch.object(self.d,'ask',return_value=False),contextlib.redirect_stdout(sortie):
+            backend=self.home/'b'
+            for dossier in ('','home-runner','gateway'):(backend/dossier).mkdir(parents=True,exist_ok=True)
+            # core.tools n'existe pas dans ce faux backend : seule la partie texte avant l'import nous intéresse
+            with self.assertRaises(ImportError):self.d.configure(backend,'local')
+        t=sortie.getvalue()
+        for morceau in ('@BotFather','/newbot','123456789:ABCdef','@userinfobot','Entrée pour passer','ne s’affiche pas'):self.assertIn(morceau,t)
+        self.assertNotIn('SECRET-fictif',t);self.assertTrue(secret.called)
+        resume=io.StringIO()
+        with contextlib.redirect_stdout(resume):self.d.summary(True);self.d.summary(False)
+        r=resume.getvalue()
+        for morceau in ('C’est prêt : écris /start','nc-assistant verifier','journalctl --user -u assistant-gateway -n 50',
+                        'journalctl --user -u assistant-runner -n 50','systemctl --user stop','systemctl --user restart','pas démarrés'):
+            self.assertIn(morceau,r)
+
+    def test_mode_serveur_emporte_verifier_et_le_dit(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'b.pyz'
+            with patch.object(self.d,'resource',return_value=b'x'):self.d.bundle(p)
+            import zipfile
+            with zipfile.ZipFile(p) as z:self.assertIn('verifier.py',z.namelist())
+        sortie=io.StringIO()
+        with patch.object(self.d,'run'),patch.object(self.d,'ask',return_value=False),contextlib.redirect_stdout(sortie), \
+             patch.object(self.d,'bundle'):
+            self.d.remote('user@server')
+        self.assertIn('sur le serveur lui-même',sortie.getvalue())
+
     def test_preparing_does_not_start_or_download_without_interactive_choice(self):
-        with tempfile.TemporaryDirectory() as d, patch.object(self.d.sys.stdin,'isatty',return_value=True), patch.object(self.d,'ask',return_value=False), patch.object(self.d,'run') as run:
+        with tempfile.TemporaryDirectory() as d, patch.object(self.d.sys.stdin,'isatty',return_value=True), patch.object(self.d,'ask',return_value=False), patch.object(self.d,'run') as run, patch.object(self.d,'verification',return_value=True), contextlib.redirect_stdout(io.StringIO()):
             dest=Path(d)/'not-created';self.d.deploy('server',str(dest))
             self.assertFalse(dest.exists());run.assert_not_called()
         for host in ('-oProxyCommand=bad','host;touch bad','user@host/other','user@$(bad)'):
