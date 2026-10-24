@@ -517,10 +517,20 @@ n’y a pas encore de session.
 - **Réglage :** nc-reglages → Intelligence artificielle → « Session de confiance pour JARVIS » : 0 (désactivée,
   conseillé) à 15 minutes. `NOEUD_SESSION_MINUTES` ; au-delà de 15 → 15 ; valeur illisible → 0. La capacité
   `trust_session` n’est annoncée au `register` (et `metadata.trust_session_minutes`) que si le réglage est > 0.
-- **Ce qu’elle couvre :** `exec` seulement, toujours dans un bac à sable (voir plus bas). **Jamais** couverts, donc
-  toujours confirmés un par un : `write_file` (il est fait par nc-noeud lui-même, hors du bac : seuls les chemins
-  protégés le borneraient, et ils sont pensés pour une écriture que tu vois avant d’autoriser), `read_file`, le
-  presse-papiers, et tout ce qui est déjà interdit. L’ouverture elle-même est **confirmée** (carte de l’île ou code à distance) ; le résumé dit « … et
+- **Ce qu’elle couvre (issue #24) :** `exec`, toujours dans un bac à sable (voir plus bas), et `read_file`, lu **dans le
+  même bac** : `head -c 5 Mo+1 -- <chemin>` lancé par `systemd-run --user`, chemin passé en argument (jamais par un
+  shell), sans réseau (`PrivateNetwork=yes`) quand l’unité l’accepte, sinon avec exactement les réglages d’un `exec`.
+  Les dossiers cachés du bac (plus larges que les chemins protégés) restent illisibles, et les chemins protégés
+  s’appliquent **en plus**, après résolution des liens ; au-delà de 5 Mo, refus. Cela n’ajoute aucun pouvoir : un `exec`
+  de session peut déjà faire `cat` sur les mêmes fichiers. Si le bac ne tient pas, il n’y a pas de session pour
+  `read_file`, il est confirmé comme d’habitude (jamais lu hors du bac). `screenshot` n’est **pas** couvert, sauf si tu
+  mets `NOEUD_SESSION_CAPTURES=oui` (nc-reglages : « Session : captures d’écran sans reconfirmer »), parce qu’une
+  capture montre tout l’écran : codes, messages, mots de passe affichés. Dans ce cas elle est refusée écran verrouillé
+  ou éteint, compte dans les 20 actions, clignote dans l’île avec « capture n/20 », et une notification dit « Capture
+  envoyée à … ». **Jamais** couverts, quel que soit le réglage, donc toujours confirmés un par un : `write_file` (il est
+  fait par nc-noeud lui-même, hors du bac : seuls les chemins protégés le borneraient, et ils sont pensés pour une
+  écriture que tu vois avant d’autoriser), le presse-papiers en écriture (il permet de coller une commande piégée dans
+  un terminal), et tout ce qui est déjà interdit. L’ouverture elle-même est **confirmée** (carte de l’île ou code à distance) ; le résumé dit « … et
   ouvre une session de N min (20 actions au plus) pour cette conversation ».
 - **Bornée :** durée **fixe** depuis l’ouverture, jamais prolongée par une action ; **20 actions** au plus, chacune
   comptée dès qu’elle est acceptée (des actions arrivées ensemble ne dépassent pas la limite). Puis elle se ferme et la
@@ -537,7 +547,7 @@ n’y a pas encore de session.
   `/api/action` acceptent `origin` ou `session_key` dans le **corps** de la requête, le serveur fabrique lui-même le
   jeton de la conversation à partir d’un `session_key`, et ce jeton est lisible par d’autres routes. Donc, pendant une
   session ouverte, tout détenteur de la clé du serveur (`SECRET_KEY` : un autre PC client, un script, un agent qui a un
-  shell) peut faire exécuter des `exec` sans confirmation sur ce PC, toujours dans le bac à sable, dans la limite de la
+  shell) peut faire exécuter des `exec` et lire des fichiers (`read_file`) sans confirmation sur ce PC, toujours dans le bac à sable, dans la limite de la
   durée et des 20 actions. **On conseille de la laisser à 0 tant que le serveur prend l’origine dans le corps des
   requêtes.** À l’ouverture, la notification le rappelle : « toute demande du serveur pendant N min passe sans
   confirmation (dans le bac) ».

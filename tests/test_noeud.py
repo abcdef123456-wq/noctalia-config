@@ -1958,6 +1958,217 @@ class SessionConfiance(ModuleCharge):
         self.assertIsNone(m.origine_cle(None))
         self.assertIsNone(m.origine_cle("  "))
 
+    # ── Périmètre de la session (issue #24) ─────────────────────────────────────────────────────────────────────
+    def ouvrir(self, m, **plus):
+        """Session ouverte par un exec confirmé ; plus : réglages en plus (NOEUD_SESSION_CAPTURES…)."""
+        n = self.noeud(m)
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES="5", **plus)
+        self.assertTrue(self.dec(n, "exec", {"command": "true"})["success"])
+        self.confs.clear()
+        return n
+
+    def appels_systemd(self):
+        """Un élément par appel de systemd-run (le lanceur de nc-bac s'étend sur plusieurs lignes)."""
+        f = self.home / "appels"
+        return re.split(r"(?m)^systemd-run ", f.read_text())[1:] if f.exists() else []
+
+    def lectures_bac(self, depuis=0):
+        return [l for l in self.appels_systemd()[depuis:] if "/head -c " in l]
+
+    def test_couverte_session_selon_le_reglage(self):
+        m = self.charger()
+        self.regler(NOEUD_JARVIS="oui")
+        for nom in ("exec", "read_file"):
+            self.assertTrue(m.couverte_session(nom), nom)
+        self.assertFalse(m.couverte_session("screenshot"), "défaut : non")
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_CAPTURES="oui")
+        self.assertTrue(m.couverte_session("screenshot"))
+        for nom in ("write_file", "clipboard_write", "clipboard_read", "lock", "media"):
+            self.assertFalse(m.couverte_session(nom), nom + " : jamais, même avec les captures")
+
+    def test_read_file_de_session_se_lit_dans_le_bac(self):
+        m = self.charger()
+        n = self.ouvrir(m)
+        (self.home / "note.txt").write_text("bonjour du bac")
+        avant = len(self.appels_systemd())
+        r = self.dec(n, "read_file", {"path": "~/note.txt"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "bonjour du bac")
+        self.assertEqual(self.confs, [], "couvert : pas de confirmation")
+        self.assertEqual(r["session"]["reste_actions"], 19, "il compte dans les 20 actions")
+        lecture = self.lectures_bac(avant)
+        self.assertTrue(any(f"/head -c {m.MAX_FICHIER + 1} -- {self.home}/note.txt" in l for l in lecture), lecture)
+        self.assertTrue(any("PrivateNetwork=yes" in l for l in self.appels_systemd()[avant:]),
+                        "sans réseau quand l'unité le permet")
+
+    def test_read_file_sans_privatenetwork_garde_les_reglages_d_exec(self):
+        m = self.charger()
+        n = self.ouvrir(m)
+        (self.bin / "systemd-run").write_text(ENTETE + 'echo "systemd-run $*" >> "$H/appels"\n'
+                                              'case "$*" in *PrivateNetwork=yes*) echo inconnue >&2; exit 1 ;; esac\n'
+                                              'while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\n'
+                                              '[ "$1" = "--" ] && shift\nexec "$@"\n')
+        (self.home / "note.txt").write_text("sans réseau privé")
+        avant = len(self.appels_systemd())
+        r = self.dec(n, "read_file", {"path": "~/note.txt"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "sans réseau privé")
+        vraie = self.lectures_bac(avant)
+        self.assertTrue(vraie)
+        self.assertFalse(any("PrivateNetwork" in l for l in vraie), "exactement les réglages d'exec")
+
+    def test_read_file_de_session_refuse_les_secrets(self):
+        m = self.charger()
+        n = self.ouvrir(m)
+        (self.home / ".ssh").mkdir(mode=0o700)
+        (self.home / ".ssh/id_ed25519").write_text("FAUSSE-CLE-PRIVEE-DE-TEST")
+        (self.home / "x").symlink_to(self.home / ".ssh/id_ed25519")
+        avant = len(self.appels_systemd())
+        for chemin in ("~/.ssh/id_ed25519", "~/x"):
+            with self.subTest(chemin=chemin):
+                r = self.dec(n, "read_file", {"path": chemin})
+                self.assertFalse(r["success"], r)
+                self.assertNotIn("FAUSSE-CLE", json.dumps(r))
+                self.assertIn("protégé", r["error"])
+        self.assertEqual(self.confs, [], "refusé, pas redemandé")
+        self.assertEqual(self.lectures_bac(avant), [], "rien n'est même lancé")
+        self.assertEqual(n.session.reste, 20, "un refus avant la session ne coûte pas de place")
+
+    def test_read_file_trop_gros_refuse(self):
+        m = self.charger()
+        n = self.ouvrir(m)
+        m.prevenir = lambda titre, texte="": None             # pas de notify-send en arrière-plan pendant le nettoyage
+        with open(self.home / "gros.bin", "wb") as f:
+            f.truncate(m.MAX_FICHIER + 1)
+        r = self.dec(n, "read_file", {"path": "~/gros.bin"})
+        self.assertFalse(r["success"], r)
+        self.assertIn("trop gros", r["error"])
+        # un fichier qui grossit après la préparation : head en rend MAX+1 octets, refusé aussi
+        petit = self.home / "grandit.bin"
+        petit.write_bytes(b"a" * 10)
+        act = m.preparer("read_file", {"path": "~/grandit.bin"})
+        petit.write_bytes(b"a" * (m.MAX_FICHIER + 50))
+        with self.assertRaises(m.Refus):
+            asyncio.run(act.executer(20, True))
+        (self.home / "exact.bin").write_bytes(b"b" * m.MAX_FICHIER)
+        self.assertTrue(self.dec(n, "read_file", {"path": "~/exact.bin"})["success"], "5 Mo pile : permis")
+
+    def test_bac_indisponible_read_file_retombe_sur_la_confirmation(self):
+        m = self.charger()
+        vraie_sonde = m.bac_tient
+        n = self.noeud(m)
+        self.assertTrue(self.dec(n, "exec", {"command": "true"})["success"])
+        self.confs.clear()
+        (self.home / "note.txt").write_text("lu après confirmation")
+        # systemd-run refuse (propriété inconnue, pas de bus, namespaces refusés…) : la VRAIE sonde dit faux
+        (self.bin / "systemd-run").write_text(ENTETE + 'echo "systemd-run $*" >> "$H/appels"; exit 1\n')
+        m.bac_tient = vraie_sonde
+        avant = len(self.appels_systemd())
+        r = self.dec(n, "read_file", {"path": "~/note.txt"})
+        self.assertEqual(len(self.confs), 1, "confirmation normale")
+        self.assertNotIn("ouvre une session", self.confs[0])
+        self.assertNotIn("session", r, "ce n'est plus une action de session")
+        self.assertIsNone(n.session, "la session se ferme : le bac ne tient plus")
+        self.assertEqual(self.lectures_bac(avant), [], "jamais une lecture de session hors du bac")
+
+    def test_read_file_hors_session_inchange(self):
+        m = self.charger()
+        n = self.noeud(m, minutes=0)
+        (self.home / "note.txt").write_text("hors session")
+        r = self.dec(n, "read_file", {"path": "~/note.txt"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(self.confs), 1, "confirmé")
+        self.assertEqual(self.appels_systemd(), [], "lu par nc-noeud, pas par le bac")
+
+    def test_read_file_origine_differente_reconfirme(self):
+        m = self.charger()
+        n = self.ouvrir(m)
+        (self.home / "note.txt").write_text("autre")
+        r = self.dec(n, "read_file", {"path": "~/note.txt"}, origin={"via": "api", "chat": 1, "conversation": 1})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(self.confs), 1, "origine différente : confirmée")
+        self.assertNotIn("session", r)
+        self.assertEqual(n.session.reste, 20)
+
+    def test_screenshot_sans_reglage_toujours_confirme(self):
+        m = self.charger()
+        n = self.ouvrir(m)                                        # NOEUD_SESSION_CAPTURES absent
+        for _ in range(2):
+            r = self.dec(n, "screenshot", {})
+            self.assertTrue(r["success"], r)
+            self.assertNotIn("session", r)
+        self.assertEqual(len(self.confs), 2, "chaque capture est confirmée")
+        self.assertEqual(n.session.reste, 20, "et ne compte pas dans la session")
+        self.assertEqual(len([l for l in self.appels() if l.startswith("grim")]), 2)
+
+    def test_screenshot_oui_compte_flash_et_notifie(self):
+        m = self.charger()
+        n = self.ouvrir(m, NOEUD_SESSION_CAPTURES="oui")
+        notifs = []
+        m.prevenir = lambda titre, texte="": notifs.append((titre, texte))
+        r1 = self.dec(n, "screenshot", {})
+        self.assertTrue(r1["success"], r1)
+        self.assertEqual(self.confs, [], "couverte")
+        self.assertEqual(r1["session"]["reste_actions"], 19)
+        etat = json.loads((self.run_dir / "nc-noeud/session.json").read_text())
+        self.assertEqual((etat["capture_n"], etat["capture_max"]), (1, 20), "le compteur « capture 1/20 » de l'île")
+        self.assertGreater(etat["capture_ts"], 0, "le flash se déclenche sur ce changement")
+        r2 = self.dec(n, "screenshot", {})
+        self.assertEqual(r2["session"]["reste_actions"], 18)
+        etat2 = json.loads((self.run_dir / "nc-noeud/session.json").read_text())
+        self.assertEqual(etat2["capture_n"], 2)
+        self.assertGreaterEqual(etat2["capture_ts"], etat["capture_ts"])
+        envoyees = [x for t, x in notifs if t == "JARVIS : capture"]
+        self.assertEqual(envoyees, ["Capture envoyée à telegram"] * 2, notifs)
+
+    def test_screenshot_oui_ecran_verrouille_refuse(self):
+        m = self.charger()
+        n = self.ouvrir(m, NOEUD_SESSION_CAPTURES="oui")
+        (self.run_dir / "nc-verrouille").write_text("")
+        grim_avant = len([l for l in self.appels() if l.startswith("grim")])
+        r = self.dec(n, "screenshot", {})
+        self.assertFalse(r["success"], r)
+        self.assertIn("verrouillé", r["error"])
+        self.assertEqual(len([l for l in self.appels() if l.startswith("grim")]), grim_avant, "grim n'est pas lancé")
+        self.assertEqual(self.confs, [], "refusé, pas proposé à la confirmation")
+        (self.run_dir / "nc-verrouille").unlink()
+        self.assertTrue(self.dec(n, "screenshot", {})["success"], "déverrouillé : permis")
+
+    def test_screenshot_oui_ecran_eteint_refuse(self):
+        m = self.charger()
+        n = self.ouvrir(m, NOEUD_SESSION_CAPTURES="oui")
+        (self.bin / "hyprctl").write_text(ENTETE + 'echo "hyprctl $*" >> "$H/appels"\n'
+                                          'printf \'[{"name":"eDP-1","dpmsStatus":%s}]\' "$(cat "$H/dpms")"\n')
+        (self.bin / "hyprctl").chmod(0o755)
+        (self.run_dir / "hypr/faux").mkdir(parents=True)
+        (self.run_dir / "hypr/faux/.socket.sock").write_text("")
+        (self.home / "dpms").write_text("false")
+        r = self.dec(n, "screenshot", {})
+        self.assertFalse(r["success"], r)
+        self.assertIn("éteint", r["error"])
+        (self.home / "dpms").write_text("true")
+        self.assertTrue(self.dec(n, "screenshot", {})["success"], "écran allumé : permis")
+
+    def test_screenshot_oui_origine_differente_reconfirme(self):
+        m = self.charger()
+        n = self.ouvrir(m, NOEUD_SESSION_CAPTURES="oui")
+        r = self.dec(n, "screenshot", {}, origin={"via": "api", "chat": 9, "conversation": 9})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(len(self.confs), 1, "origine différente : confirmée")
+        self.assertNotIn("session", r)
+        self.assertEqual(n.session.reste, 20)
+
+    def test_ecriture_et_presse_papiers_jamais_couverts(self):
+        m = self.charger()
+        n = self.ouvrir(m, NOEUD_SESSION_CAPTURES="oui")
+        r1 = self.dec(n, "write_file", {"path": "~/w.txt", "content": "x"})
+        r2 = self.dec(n, "clipboard_write", {"text": "rm -rf ~"})
+        self.assertTrue(r1["success"] and r2["success"], (r1, r2))
+        self.assertEqual(len(self.confs), 2, "toujours confirmés")
+        self.assertNotIn("session", r1)
+        self.assertNotIn("session", r2)
+        self.assertEqual(n.session.reste, 20)
+
     def test_plafond_de_20_actions(self):
         m = self.charger()
         n = self.noeud(m)
@@ -2012,15 +2223,13 @@ class SessionConfiance(ModuleCharge):
         self.assertEqual(len(self.confs), 3, "origine absente : confirmation")
         self.assertNotIn("session", sans)
 
-    def test_read_file_et_chemin_protege_toujours_confirmes(self):
+    def test_ecriture_et_chemin_protege_toujours_confirmes(self):
         m = self.charger()
         n = self.noeud(m)
-        (self.home / "a.txt").write_text("coucou")
         self.dec(n, "exec", {"command": "true"})                 # session ouverte
-        r = self.dec(n, "read_file", {"path": "~/a.txt"})
-        self.assertEqual(len(self.confs), 2, "read_file n'est jamais couvert")
+        r = self.dec(n, "clipboard_write", {"text": "coucou"})
+        self.assertEqual(len(self.confs), 2, "clipboard_write n'est jamais couvert")
         self.assertNotIn("session", r)
-        self.assertEqual(r.get("content"), "coucou")
         # write_file vers un chemin protégé : refusé, même en session
         (self.home / ".ssh").mkdir(exist_ok=True)
         prot = self.dec(n, "write_file", {"path": "~/.ssh/authorized_keys", "content": "x"})
@@ -2034,7 +2243,7 @@ class SessionConfiance(ModuleCharge):
         self.dec(n, "exec", {"command": "true"})
         self.assertIsNotNone(n.session)
         self.decision = "refuse"                                 # un refus sur une action non couverte
-        self.dec(n, "read_file", {"path": "~/a.txt"})
+        self.dec(n, "write_file", {"path": "~/a.txt", "content": "y"})
         self.assertIsNone(n.session, "un refus ferme la session")
 
     def test_ia_coupee_ferme_la_session(self):
@@ -2179,6 +2388,42 @@ class BacReel(ModuleCharge):
             self.skipTest("sudo absent")
         r = self.lancer_bac(m, "sudo -n true 2>&1 && echo SUDO-OK; true")
         self.assertNotIn("SUDO-OK", r["stdout"], "NoNewPrivileges : setuid refusé")
+
+    def lire_bac(self, m, chemin):
+        act = m.preparer("read_file", {"path": str(chemin)})
+        return asyncio.run(asyncio.wait_for(act.executer(20, True), 30))
+
+    def test_read_file_dans_le_vrai_bac(self):
+        m, home = self.charger_bac()
+        (home / "note.txt").write_text("fichier factice lu par le bac")
+        self.assertTrue(asyncio.run(m.lecture_sans_reseau()), "PrivateNetwork=yes tient avec ce systemd")
+        r = self.lire_bac(m, home / "note.txt")
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "fichier factice lu par le bac")
+        self.assertIn("PrivateNetwork=yes", m.bac_argv(["head", "-c", "5", "--", "x"], "/", 10, sans_reseau=True))
+
+    def test_read_file_de_session_secret_refuse_par_le_bac(self):
+        m, home = self.charger_bac()
+        # ~/.cache/cliphist : dans BAC_INTERDITS mais pas dans PROTEGES, donc seul le bac l'arrête
+        (home / ".cache/cliphist").mkdir(parents=True)
+        (home / ".cache/cliphist/db").write_text("export JETON=FAUX-JETON-DE-TEST\n")
+        r = self.lire_bac(m, home / ".cache/cliphist/db")
+        self.assertFalse(r["success"], r)
+        self.assertNotIn("FAUX-JETON", json.dumps(r))
+        with self.assertRaises(m.Refus):                      # et PROTEGES, en plus, avant même le bac
+            self.lire_bac(m, home / ".ssh/id_ed25519")
+        (home / "lien").symlink_to(home / ".ssh/id_ed25519")
+        with self.assertRaises(m.Refus):
+            self.lire_bac(m, home / "lien")
+
+    def test_read_file_de_session_chemin_jamais_par_un_shell(self):
+        m, home = self.charger_bac()
+        piege = home / "a;touch ecrit-par-le-chemin"
+        piege.write_text("contenu piégé")
+        r = self.lire_bac(m, piege)
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "contenu piégé")
+        self.assertFalse((home / "ecrit-par-le-chemin").exists())
 
     def test_systemd_run_user_depuis_le_bac_echoue(self):
         m, _ = self.charger_bac()

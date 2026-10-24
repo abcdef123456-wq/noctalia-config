@@ -15,6 +15,22 @@ Item {
         return mn + ":" + (sec < 10 ? "0" + sec : sec)
     }
 
+    // Capture d'écran de session (NOEUD_SESSION_CAPTURES=oui) : nc-noeud écrit capture_n et capture_ts dans session.json
+    // AVANT la capture ; un flash blanc court et le compteur « capture n/20 » la montrent
+    readonly property int captureN: s.vue ? Number(s.vue.capture_n) || 0 : 0
+    readonly property real captureTs: s.vue ? Number(s.vue.capture_ts) || 0 : 0
+    onCaptureTsChanged: if (captureN > 0 && captureTs > 0) flash.restart()
+    Rectangle {
+        id: voile
+        anchors.fill: parent; radius: 28; color: "white"; opacity: 0; z: 5
+        enabled: false
+        SequentialAnimation on opacity {
+            id: flash
+            running: false
+            NumberAnimation { to: Reglages.sobre ? 0.15 : 0.55; duration: 60 }
+            NumberAnimation { to: 0; duration: Reglages.sobre ? 200 : 450 }
+        }
+    }
     Row {
         x: 18; y: 14; spacing: 8
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "smart_toy"; taille: 16; color: Couleurs.texteSec }
@@ -35,7 +51,9 @@ Item {
         Texte {
             anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.pixelSize: 12
             width: Math.min(implicitWidth, s.width - 160); elide: Text.ElideRight
-            text: Reglages.t("Commandes en bac à sable, sans reconfirmer", "Commands sandboxed, no reconfirming")
+            text: s.captureN > 0
+                  ? Reglages.t("capture " + s.captureN + "/" + Number(s.vue.capture_max), "capture " + s.captureN + "/" + Number(s.vue.capture_max))
+                  : Reglages.t("Commandes en bac à sable, sans reconfirmer", "Commands sandboxed, no reconfirming")
         }
     }
     // Bouton « Arrêter la session » (à droite, comme le bouton principal des cartes)

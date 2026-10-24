@@ -1153,12 +1153,14 @@ REGLAGES = [
       L("Risque : après UNE autorisation, JARVIS enchaîne des commandes sans te redemander, pendant cette durée "
         "(20 actions au plus), pour la même conversation (selon le serveur). Elles tournent dans un bac à sable (ni "
         "tes clés, ni mots de passe, ni sudo, ni appli graphique ; ~ en lecture seule ; le réseau reste ouvert). Les "
-        "écritures de fichiers, read_file et le presse-papiers restent toujours confirmés un par un. 0 : désactivée "
+        "écritures de fichiers et le presse-papiers restent toujours confirmés un par un ; la lecture d'un fichier se fait "
+        "dans le bac (mêmes dossiers cachés) et les captures d'écran restent confirmées (voir plus bas). 0 : désactivée "
         "(conseillé). Attention : avec JARVIS-BIS jusqu'à 4ecc57a compris, l'origine ne lie rien côté serveur : "
         "pendant la session, toute entrée du serveur (tout détenteur de SECRET_KEY) passe sans confirmation. Laisse 0.",
         "Risk: after ONE approval, JARVIS runs commands without asking again, for this long (at most 20 actions), for "
         "the same conversation (as the server tells it). They run in a sandbox (no keys, passwords, sudo or GUI app; "
-        "~ read-only; the network stays open). File writes, read_file and the clipboard stay confirmed one by one. "
+        "~ read-only; the network stays open). File writes and the clipboard stay confirmed one by one; reading a file "
+        "happens inside the sandbox (same hidden folders) and screenshots stay confirmed (see below). "
         "0: off (recommended). Warning: with JARVIS-BIS up to 4ecc57a included the origin binds nothing server-side: "
         "during the session, any server entry point (anyone holding SECRET_KEY) goes through unconfirmed. Keep 0."),
       mini=0, maxi=15, pas=1, unite="min", zero=L("Désactivée", "Off"), groupe="noeud-confirmation"),
@@ -1170,6 +1172,16 @@ REGLAGES = [
         "In a session, any file that isn't hidden can be read and sent over the network. Keys, passwords, browsers, "
         "messaging apps and histories already are; add your own folders here, relative to ~ and separated by \":\" "
         "(example: Documents/personal:projects/clients)."), groupe="noeud-confirmation"),
+    R("NOEUD_SESSION_CAPTURES", "Intelligence artificielle",
+      L("Session : captures d'écran sans reconfirmer", "Session: screenshots without reconfirming"), "ouinon", "non",
+      L("Une capture montre tout l'écran : codes, messages, mots de passe affichés. Non (conseillé) : chaque capture "
+        "reste confirmée. Oui : pendant une session, JARVIS peut en faire sans te redemander (jamais écran verrouillé "
+        "ou éteint) ; chacune compte dans les 20 actions, clignote dans l'île (« capture n/20 ») et est notifiée "
+        "(« Capture envoyée à … »).",
+        "A screenshot shows the whole screen: codes, messages, passwords on display. No (recommended): every "
+        "screenshot stays confirmed. Yes: during a session, JARVIS can take some without asking again (never with "
+        "the screen locked or off); each one counts in the 20 actions, flashes in the island (“capture n/20”) and is "
+        "notified (“Screenshot sent to …”)."), groupe="noeud-confirmation"),
     R("NOEUD_BAC_RESEAU", "Intelligence artificielle",
       L("Session : réseau pour les commandes", "Session: network for commands"), "ouinon", "oui",
       L("Non : les commandes de session n'ont plus aucun réseau, pas même les services de ce PC (127.0.0.1 : Ollama, "

@@ -123,10 +123,18 @@ SORTIE_DEFINITIVE = 3              # configuration absente ou refusée : systemd
 # autorisation. Désactivée par défaut, courte, et bornée en nombre. Voir la classe Session et le bac à sable plus bas.
 SESSION_MINUTES_MAX = 15           # durée demandée au plus (NOEUD_SESSION_MINUTES) ; au-delà ramenée à 15
 SESSION_ACTIONS_MAX = 20           # actions couvertes au plus par session (l'action d'ouverture, confirmée, non comprise)
-# Ce qu'une session couvre : exec seulement, toujours dans le bac (~ en lecture seule). write_file non : il est fait par
-# nc-noeud lui-même, hors du bac, et seuls les chemins protégés le bornent (pensés pour une écriture confirmée, aperçu
-# sous les yeux). Jamais read_file, presse-papiers…
-COUVERTES_SESSION = frozenset({"exec"})
+# Ce qu'une session couvre (issue #24) :
+#   - exec : dans le bac (~ en lecture seule, secrets illisibles, pas de Wayland ni de socket unix) ;
+#   - read_file : lu DANS le bac aussi (`head -c` par systemd-run, sans réseau si l'unité le permet), jamais par
+#     nc-noeud lui-même : un fichier que le bac ne peut pas lire (BAC_INTERDITS, plus large que PROTEGES) reste illisible,
+#     et PROTEGES s'applique EN PLUS (après résolution des liens). Cela n'ajoute aucun pouvoir à un exec de session, qui
+#     peut déjà faire `cat` sur les mêmes fichiers ;
+#   - screenshot : SEULEMENT si NOEUD_SESSION_CAPTURES=oui (voir couverte_session) : une capture montre tout l'écran, et
+#     elle est faite par grim, hors du bac.
+# JAMAIS couverts, quel que soit le réglage : write_file (fait par nc-noeud lui-même, hors du bac, et seuls les chemins
+# protégés le borneraient) et clipboard_write (il permet de coller une commande piégée dans un terminal).
+COUVERTES_SESSION = frozenset({"exec", "read_file"})
+JAMAIS_COUVERTES = frozenset({"write_file", "clipboard_write"})
 
 # Actions du protocole (clients/node_agent.py, core/node_hub.py) : noms de l'upstream ramenés aux nôtres
 ALIAS = {"clipboard_get": "clipboard_read", "clipboard_set": "clipboard_write", "run_shell": "exec"}
@@ -279,6 +287,18 @@ def reglage(cle, defaut):
 
 def ia_coupee():
     return reglage("IA_MODE", "auto") == "non"
+
+
+def captures_session():
+    """NOEUD_SESSION_CAPTURES : vrai si une session de confiance peut aussi couvrir screenshot (« oui »). Défaut : non."""
+    return reglage("NOEUD_SESSION_CAPTURES", "non") == "oui"
+
+
+def couverte_session(nom):
+    """Cette action peut-elle passer par une session de confiance ? (write_file et clipboard_write : jamais.)"""
+    if nom in JAMAIS_COUVERTES:
+        return False
+    return nom in COUVERTES_SESSION or (nom == "screenshot" and captures_session())
 
 
 def session_minutes():
@@ -1048,7 +1068,7 @@ def preparer(action, p):
             raise Refus(T("Fichier à plusieurs liens physiques : refusé.", "File with several hard links: denied."),
                         "refusé (lien physique)")
 
-        async def executer(budget=None):
+        async def executer(budget=None, bac=False):
             # Relu au moment de lire : un lien posé pendant la confirmation ne mène pas ailleurs
             verifier_chemin(str(cible), False)
             fd = os.open(cible, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -1057,6 +1077,9 @@ def preparer(action, p):
             except BaseException:
                 os.close(fd)
                 raise
+            if bac:                                   # lecture de session : par le bac, jamais par nc-noeud (PROTEGES en plus)
+                os.close(fd)
+                return await lire_dans_le_bac(cible, budget)
             with os.fdopen(fd, "rb") as f:
                 contenu = f.read(MAX_FICHIER + 1)[:MAX_FICHIER].decode("utf-8", "replace")
             return {"success": True, "type": "file", "content": contenu, "size": len(contenu)}
@@ -1499,12 +1522,13 @@ def bac_inaccessibles():
     return BAC.inaccessibles(HOME, reglage)
 
 
-def bac_argv(cmd, cwd, budget):
+def bac_argv(cmd, cwd, budget, sans_reseau=False):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run (ou env) est absent. nc-bac y
     met ProtectSystem=strict, /dev/shm en lecture seule, KillSignal=SIGKILL, et un lanceur qui vide
-    l'environnement (python3 -I) puis ne remet que environnement_bac()."""
+    l'environnement (python3 -I) puis ne remet que environnement_bac(). sans_reseau : PrivateNetwork=yes quel que soit
+    NOEUD_BAC_RESEAU (lecture d'un fichier de session)."""
     return BAC.argv(cmd, cwd, budget, home=HOME, reglage=reglage, programme=programme, ecriture=[dossier_travail_bac()],
-                    env=environnement_bac(), reseau_prive=reglage("NOEUD_BAC_RESEAU", "oui") == "non",
+                    env=environnement_bac(), reseau_prive=sans_reseau or reglage("NOEUD_BAC_RESEAU", "oui") == "non",
                     description="nc-noeud")
 
 
@@ -1532,6 +1556,80 @@ async def bac_tient():
     return code == 0
 
 
+_LECTURE_SANS_RESEAU = None        # PrivateNetwork=yes tient-il ici ? (sondé une fois par processus)
+
+
+async def lecture_sans_reseau():
+    """Vrai si l'unité du bac accepte PrivateNetwork=yes en plus (manager utilisateur avec PrivateUsers, systemd ≥ 254).
+    Sinon la lecture garde exactement les réglages d'un exec de session."""
+    global _LECTURE_SANS_RESEAU
+    if _LECTURE_SANS_RESEAU is None:
+        argv = bac_argv(":", str(HOME), 10, sans_reseau=True)
+        ok = False
+        if argv is not None:
+            try:
+                code, _, _ = await lancer(argv, delai=10)
+                ok = code == 0
+            except (asyncio.TimeoutError, OSError):
+                ok = False
+        _LECTURE_SANS_RESEAU = ok
+    return _LECTURE_SANS_RESEAU
+
+
+async def lire_dans_le_bac(cible, budget):
+    """Lit cible (déjà résolue et vérifiée contre PROTEGES) DANS le bac : `head -c MAX_FICHIER+1 -- chemin`, chemin en
+    argv, jamais par un shell. Au-delà de MAX_FICHIER : refus. Jamais de lecture hors du bac."""
+    d = 20.0 if budget is None or not math.isfinite(budget) else min(max(budget, 1.0), 30.0)
+    argv = bac_argv([programme("head") or "head", "-c", str(MAX_FICHIER + 1), "--", str(cible)], "/", d,
+                    sans_reseau=await lecture_sans_reseau())
+    if argv is None:
+        return {"success": False, "error": T("Bac à sable indisponible : fichier non lu.", "Sandbox unavailable: file not read.")}
+    try:
+        code, out, err = await lancer(argv, delai=d + 2)
+    except asyncio.TimeoutError:
+        return {"success": False, "error": T(f"Délai de {d:g} s dépassé.", f"{d:g} s timeout exceeded.")}
+    if code != 0:
+        e = err.decode("utf-8", "replace").strip()[:300]
+        return {"success": False, "error": T("Lecture impossible dans le bac à sable", "Cannot read inside the sandbox")
+                + (" : " + e if e else ".")}
+    if len(out) > MAX_FICHIER:
+        raise Refus(T("Fichier trop gros (plus de 5 Mo).", "File too big (over 5 MB)."))
+    contenu = out.decode("utf-8", "replace")
+    return {"success": True, "type": "file", "content": contenu, "size": len(contenu)}
+
+
+def hypr_signature():
+    """HYPRLAND_INSTANCE_SIGNATURE : la variable, sinon le plus récent dossier de $XDG_RUNTIME_DIR/hypr avec un socket."""
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if sig:
+        return sig
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if not base:
+        return None
+    socks = sorted(Path(base, "hypr").glob("*/.socket.sock"), key=lambda x: x.stat().st_mtime, reverse=True)
+    return socks[0].parent.name if socks else None
+
+
+async def ecran_indisponible():
+    """Pourquoi une capture est refusée, ou None : écran verrouillé (marque nc-verrouille de hypridle) ou tous les écrans
+    éteints (dpmsStatus de « hyprctl monitors -j »). Pas de Hyprland joignable : on ne sait pas, donc pas d'obstacle."""
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if base and (Path(base) / "nc-verrouille").exists():
+        return T("écran verrouillé", "screen locked")
+    hc = programme("hyprctl")
+    sig = hypr_signature()
+    if not hc or not sig:
+        return None
+    try:
+        code, out, _ = await lancer([hc, "monitors", "-j"], delai=5, env={**os.environ, "HYPRLAND_INSTANCE_SIGNATURE": sig})
+        ecrans = json.loads(out.decode("utf-8", "replace")) if code == 0 else []
+    except (OSError, asyncio.TimeoutError, ValueError):
+        return None
+    if isinstance(ecrans, list) and ecrans and all(isinstance(e, dict) and e.get("dpmsStatus") is False for e in ecrans):
+        return T("écran éteint", "screen off")
+    return None
+
+
 class Session:
     """Session de confiance (issue #21) : une rafale d'actions couvertes sans redemander. Liée à la connexion (jeton
     tiré à chaque connexion : une reconnexion ferme la session) ET à l'origine EXACTE de l'action qui l'a ouverte.
@@ -1543,6 +1641,8 @@ class Session:
         self.ouverte = horloge()
         self.limite = self.ouverte + minutes * 60
         self.reste = SESSION_ACTIONS_MAX
+        self.captures = 0                      # captures d'écran faites sous cette session (compteur montré par l'île)
+        self.capture_ts = 0.0
 
     def valide(self, jeton, origin):
         return (self.jeton == jeton and origin is not None and self.origin == origin
@@ -1601,7 +1701,8 @@ class Noeud:
             ecrire_atomique(dossier_runtime() / "session.json", json.dumps(
                 {"ouverte": time.time(), "expire": time.time() + s.reste_s(), "reste_s": s.reste_s(),
                  "reste_actions": s.reste, "minutes": s.minutes, "origine": resume_origine[:200],
-                 "serveur": self.serveur}, ensure_ascii=False))
+                 "serveur": self.serveur, "capture_n": s.captures, "capture_max": SESSION_ACTIONS_MAX,
+                 "capture_ts": s.capture_ts}, ensure_ascii=False))
 
     def session_arretee_depuis_ile(self):
         """Vrai si l'île a demandé d'arrêter la session (fichier session-stop) ; le fichier est retiré."""
@@ -1708,7 +1809,7 @@ class Noeud:
             self.fermer_session(T("expirée", "expired"))
         minutes = session_minutes()
         oc = origine_cle(origin)
-        peut_session = minutes > 0 and nom in COUVERTES_SESSION and oc is not None
+        peut_session = minutes > 0 and couverte_session(nom) and oc is not None
         sess = None
         if peut_session and self.session is not None and self.session.valide(self.jeton_connexion, oc):
             # Réservée tout de suite, avant le moindre await : des actions arrivées ensemble (traitées en parallèle) ne
@@ -1717,15 +1818,30 @@ class Noeud:
             sess.reste -= 1
         reutilise = sess is not None
         ouvre = peut_session and self.session is None                # une seule session à la fois (origine différente → non)
-        if (reutilise or ouvre) and nom == "exec" and not await bac_tient():
-            # Le bac ne tient pas (systemd-run absent, pas de bus utilisateur, namespaces refusés) : pas de session,
-            # confirmation normale, jamais d'exécution hors du bac
+        if (reutilise or ouvre) and nom in ("exec", "read_file") and not await bac_tient():
+            # Le bac ne tient pas (systemd-run absent, pas de bus utilisateur, namespaces refusés, propriété inconnue) :
+            # pas de session, confirmation normale, jamais d'exécution ni de lecture hors du bac
             if reutilise and self.session is sess:
                 self.fermer_session(T("bac à sable indisponible", "sandbox unavailable"))
             reutilise = ouvre = False
         if reutilise and self.session is not sess:
             reutilise = False                                        # fermée pendant la sonde (île, refus…) : on confirme
-        bac = nom == "exec" and (reutilise or ouvre)                 # un exec de session passe toujours par le bac
+        if (reutilise or ouvre) and nom == "screenshot":
+            # Une capture de session ne se fait pas écran verrouillé ou éteint (rien d'utile, et pas pendant l'absence)
+            motif = await ecran_indisponible()
+            if motif:
+                if reutilise:
+                    self.fin_action_session(sess, resume_court, motif)
+                journal(nom, resume, sha=sha, decision=("session, " if reutilise else "") + f"refusé ({motif})")
+                return {"success": False, "denied": True,
+                        "error": T(f"Capture refusée : {motif}.", f"Screenshot denied: {motif}.")}
+            if reutilise and self.session is not sess:
+                reutilise = False
+        if reutilise and nom == "screenshot":
+            sess.captures += 1                                       # montré dans l'île AVANT la capture : flash et compteur
+            sess.capture_ts = time.time()
+            self.ecrire_etat_session(resume_court)
+        bac = nom in ("exec", "read_file") and (reutilise or ouvre)  # exec et lecture de session passent toujours par le bac
         # Commande, fichier, capture, écriture du presse-papiers : toujours une personne qui autorise — sauf une action
         # couverte par une session de confiance en cours
         confirmer = (not reutilise) and (
@@ -1799,7 +1915,7 @@ class Noeud:
                     "error": T("Trop tard : plus le temps d'exécuter avant que le serveur abandonne, rien n'a été fait.",
                                "Too late: no time left to run before the server gives up, nothing was done.")}
         try:
-            appel = decrite.executer(budget, bac) if nom == "exec" else decrite.executer(budget)
+            appel = decrite.executer(budget, bac) if nom in ("exec", "read_file") else decrite.executer(budget)
             res = await asyncio.wait_for(appel, budget + (0.5 if nom == "exec" else 0))
         except Refus as e:
             if reutilise:
@@ -1818,6 +1934,10 @@ class Noeud:
                 self.fin_action_session(sess, resume_court, T("interrompue", "interrupted"))
                 journal(nom, resume, sha=sha, decision="session (interrompue)")
             raise
+        if reutilise and nom == "screenshot" and res.get("success"):
+            o = origin.get("via") if isinstance(origin, dict) and isinstance(origin.get("via"), str) else self.serveur
+            prevenir(T("JARVIS : capture", "JARVIS: screenshot"),
+                     T(f"Capture envoyée à {o[:60]}", f"Screenshot sent to {o[:60]}"))
         if reutilise:
             # Action couverte par la session (déjà décomptée à la décision) : notifiée et journalisée même si la
             # session a été fermée pendant qu'elle tournait
