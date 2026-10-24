@@ -56,13 +56,13 @@ La commande `nc-jarvis` vient avec le bureau noctalia-config. Si tu l’as déj�
    - Une ligne avec **✓** est prête.
    - Une ligne avec **✗** manque. La commande à taper est écrite à côté.
 
-Garde cette liste sous les yeux. Les étapes 4 à 6 installent ce qui manque le plus souvent.
+Garde cette liste sous les yeux. Les étapes 4 et 5 installent ce qui manque le plus souvent.
 
-### Étape 4 : Installer les outils (git, Python, Node)
+### Étape 4 : Installer les outils (git, Python)
 
 1. Tape : `sudo apt update`
    Tu dois voir : des lignes qui défilent, puis le curseur revient.
-2. Tape : `sudo apt install git python3 python3-venv python3-pip nodejs npm curl`
+2. Tape : `sudo apt install git python3 python3-venv python3-pip curl`
    Tape ton mot de passe, puis Entrée. Si on te demande « Voulez-vous continuer ? », tape `o` puis Entrée.
    Tu dois voir : des lignes qui défilent, puis le curseur revient.
 3. Vérifie Python. Tape : `python3 --version`
@@ -73,9 +73,10 @@ Garde cette liste sous les yeux. Les étapes 4 à 6 installent ce qui manque le 
 JARVIS a besoin d’un « moteur » : un programme d’IA installé et connecté sur ton PC. Ce guide prend Claude Code,
 que le déployeur appelle `claude`. Le déployeur connaît aussi `codex`, `opencode` et `agy`, mais ce guide ne les couvre pas.
 
-1. Tape : `npm install -g @anthropic-ai/claude-code`
-   Tu dois voir : des lignes, puis le curseur revient.
-   Si tu vois « EACCES » ou « permission denied », ne mets pas `sudo` devant. Envoie tout le message à la personne qui t’aide.
+1. Tape : `curl -fsSL https://claude.ai/install.sh | bash`
+   C’est l’installeur officiel de Claude Code : il s’installe dans ton dossier (`~/.local/bin`), sans `sudo`.
+   Tu dois voir : des lignes, puis un message qui dit que Claude Code est installé.
+   Ferme ce terminal et ouvre-en un nouveau (Super + Entrée), pour que la commande `claude` soit trouvée.
 2. Vérifie. Tape : `claude --version`
    Tu dois voir : un numéro de version.
 3. Tape : `claude`, puis suis les indications pour te connecter avec ton compte Claude.
@@ -102,16 +103,19 @@ que le déployeur appelle `claude`. Le déployeur connaît aussi `codex`, `openc
 ### Étape 8 : Lancer le déployeur
 
 1. Tape : `nc-jarvis deployer`
-2. Tu dois voir : le titre « JARVIS-BIS : local », le dossier d’installation, puis une première question.
-   Réponds aux questions comme dans ce tableau. Elles arrivent une par une.
+2. Tu dois voir d’abord : « Étape 0 : on vérifie que ta machine est prête », puis la même liste qu’à l’étape 3.
+   S’il reste un **✗**, le déployeur s’arrête avec « Il manque quelque chose » : corrige la ligne en ✗ (la
+   commande est écrite à côté), puis relance `nc-jarvis deployer`. Rien n’a été modifié.
+   Si tout est bon, tu vois le titre « JARVIS-BIS : local », le dossier d’installation, puis une première question.
+   Réponds aux questions comme dans ce tableau. Elles arrivent une par une, **dans cet ordre**.
 
 | Question | Ce que tu réponds |
 | --- | --- |
 | Préparer ce backend (Git, venv et dépendances Python) ? | `o`, puis Entrée. Cette étape peut prendre plusieurs minutes. |
-| Moteur initial : agy, codex, claude, opencode | `claude`, puis Entrée. |
+| Moteur initial : agy, codex, claude, opencode [agy] | Tape `claude`, puis Entrée. N’appuie pas seulement sur Entrée : le choix proposé entre crochets est `agy`. |
 | Token Telegram (vide : conserver) | Colle le jeton de l’étape 6. Rien ne s’affiche : c’est normal. Entrée. |
-| Token Discord (vide : conserver) | Entrée (rien). On ne se sert pas de Discord ici. |
 | IDs Telegram autorisés | Ton identifiant de l’étape 7, puis Entrée. |
+| Token Discord (vide : conserver) | Entrée (rien). On ne se sert pas de Discord ici. |
 | IDs Discord autorisés | Entrée (rien). |
 | Configurer les modules maintenant ? | `n`, puis Entrée. Tu pourras le faire plus tard. |
 | Installer/mettre à jour ces services ? | `o`, puis Entrée. |
@@ -119,7 +123,7 @@ que le déployeur appelle `claude`. Le déployeur connaît aussi `codex`, `openc
 | Remplacer la connexion client existante par ce backend local ? | `o`, puis Entrée. Cette question n’apparaît que si une connexion existe déjà. |
 
 3. Tu dois voir à la fin : `Préparation terminée.`
-   Si tu vois « Déploiement arrêté : … », passe à « Les erreurs courantes ».
+   Si tu vois « Déploiement arrêté : … » ou « Il manque quelque chose », passe à « Les erreurs courantes ».
 4. Vérifie que les deux services tournent. Tape :
    `systemctl --user status assistant-gateway assistant-runner`
    Tu dois voir : `Active: active (running)` pour les deux services.
@@ -136,12 +140,12 @@ Le bot ne répond qu’à ton identifiant Telegram. Si quelqu’un d’autre lui
 
 Les étapes sont les mêmes. Change seulement les commandes d’installation de l’étape 4 (et l’étape 2.2 si `curl` manque) :
 
-- **Fedora** : `sudo dnf install git python3 python3-pip nodejs npm curl`
+- **Fedora** : `sudo dnf install git python3 python3-pip curl`
   Le module venv est déjà inclus avec `python3`.
-- **Arch** : `sudo pacman -Syu` puis `sudo pacman -S --needed git python python-pip nodejs npm curl`
-- **openSUSE Tumbleweed ou Slowroll** : `sudo zypper install git python3 python3-pip nodejs npm curl`
-  Si `python3 -m venv --help` affiche une erreur, installe le paquet venv de ta version de Python
-  (`python3-venv`, ou `python311-venv` selon `python3 --version`).
+- **Arch** : `sudo pacman -Syu` puis `sudo pacman -S --needed git python python-pip curl`
+- **openSUSE Tumbleweed ou Slowroll** : `sudo zypper install git python3 python3-pip curl`
+  Si `python3 -m venv --help` affiche une erreur, cherche le paquet venv de ta version de Python avec
+  `zypper search venv`, puis installe celui qui correspond à `python3 --version`.
 
 Sur openSUSE Leap 15.6, l’installeur ne met pas en place le bureau. Demande de l’aide avant de continuer.
 
@@ -190,12 +194,17 @@ Fais ces vérifications dans l’ordre.
 
 Les services ne restent actifs après la fermeture de ta session que si l’option « linger » est activée.
 
-1. Tape : `sudo loginctl enable-linger "$USER"`
-   Tape ton mot de passe, puis Entrée.
+1. Tape : `loginctl enable-linger "$USER"`
+   Si on te le refuse, tape : `sudo loginctl enable-linger "$USER"`, puis ton mot de passe et Entrée.
 2. Vérifie. Tape : `loginctl show-user "$USER" -p Linger`
    Tu dois voir : `Linger=yes`.
 
 Sur un serveur allumé en permanence, c’est la personne qui administre le serveur qui fait cette étape.
+
+### Le déployeur s’arrête avec « Il manque quelque chose »
+
+Il a lancé la même vérification qu’à l’étape 3 et une ligne est en **✗**. Tape la commande écrite à côté de cette
+ligne, puis relance `nc-jarvis deployer`. Rien n’a été modifié avant l’arrêt.
 
 ### Le déployeur affiche une autre erreur
 
