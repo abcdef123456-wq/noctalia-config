@@ -5,6 +5,7 @@ import base64
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -1228,6 +1229,85 @@ class IA(unittest.TestCase):
         r = self.lancer("demander", "question")
         self.assertNotEqual(r.returncode, 0, r.stdout)
         self.assertIn("incomplète", r.stderr)
+
+    def espion(self, nom, aide=""):
+        """Faux programme qui note ses arguments, son dossier de travail et son environnement ; --help : « aide »."""
+        j = self.home / f"espion-{nom}"
+        self.programme(nom, f'''if [ "$2" = "--help" ]; then echo "{aide}"; exit 0; fi
+{{ echo "ARGS $*"; echo "CWD $(pwd -P)"; env | grep -E '^(OPENCODE_|GEMINI_CLI_|QWEN_CODE_)'; \
+  for f in "$GEMINI_CLI_SYSTEM_SETTINGS_PATH" "$QWEN_CODE_SYSTEM_SETTINGS_PATH"; do [ -n "$f" ] && echo "REGLAGES $(cat "$f")"; done; }} > "{j}"
+echo "réponse"''')
+        return j
+
+    def bride(self, nom, ident, aide=""):
+        j = self.espion(nom, aide)
+        self.reglages(f"IA_MODE=manuel\nIA_CHOIX={ident}\n")
+        r = self.lancer("demander", "une question")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = j.read_text()
+        self.assertNotIn("--yolo", t)
+        self.assertNotIn("--auto", t.split("ARGS", 1)[1].splitlines()[0].split())
+        self.assertNotIn("dangerously", t)
+        cwd = re.search(r"^CWD (.*)$", t, re.M)[1]
+        self.assertNotEqual(cwd, str(self.home.resolve()))
+        self.assertEqual(os.path.basename(cwd).startswith("nc-ia-"), True, cwd)
+        self.assertFalse(os.path.exists(cwd), "dossier temporaire à supprimer")
+        return t
+
+    def test_opencode_brider(self):
+        # Agent « plan » + toute permission refusée par la configuration passée dans l'environnement
+        t = self.bride("opencode", "opencode")
+        args = re.search(r"^ARGS (.*)$", t, re.M)[1].split()
+        self.assertEqual(args[:5], ["run", "--agent", "plan", "--standalone", args[4]])
+        self.assertIn('OPENCODE_CONFIG_CONTENT={"permission": {"*": "deny"}}', t)
+        self.assertIn("OPENCODE_CONFIG_PROJECT_DISABLE=1", t)
+
+    def test_opencode_ancienne_version_sans_standalone(self):
+        """Une version qui refuse --standalone est relancée sans, avec le même bridage (journal : les deux lancements)."""
+        j = self.home / "lancements"
+        self.programme("opencode", f'''echo "ARGS $*" >> "{j}"; echo "CONF $OPENCODE_CONFIG_CONTENT" >> "{j}"
+case " $* " in *" --standalone "*) echo "Unknown argument: standalone" >&2; exit 1;; esac
+echo réponse''')
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=opencode\n")
+        r = self.lancer("demander", "une question")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        args = [l for l in j.read_text().splitlines() if l.startswith("ARGS")]
+        self.assertEqual(len(args), 2)
+        self.assertIn("--standalone", args[0])
+        self.assertTrue(args[1].startswith("ARGS run --agent plan "), args[1])
+        self.assertNotIn("--standalone", args[1])
+        self.assertEqual(j.read_text().count('"*": "deny"'), 2)
+
+    def test_codex_brider(self):
+        t = self.bride("codex", "codex")
+        a = re.search(r"^ARGS (.*)$", t, re.M)[1]
+        self.assertTrue(a.startswith("exec -s read-only -c approval_policy=\"never\" "), a)
+        self.assertIn("--skip-git-repo-check", a)
+        self.assertNotIn("danger", a)
+        self.assertNotIn("workspace-write", a)
+
+    def test_gemini_et_qwen_brider(self):
+        for nom, ident, var in (("gemini", "gemini-cli", "GEMINI_CLI_SYSTEM_SETTINGS_PATH"), ("qwen", "qwen", "QWEN_CODE_SYSTEM_SETTINGS_PATH")):
+            with self.subTest(nom):
+                t = self.bride(nom, ident)
+                self.assertIn(var + "=", t)
+                reg = json.loads(re.search(r"^REGLAGES (.*)$", t, re.M)[1])
+                for outil in ("run_shell_command", "write_file", "replace", "web_fetch"):
+                    self.assertIn(outil, reg["tools"]["exclude"])
+                    self.assertIn(outil, reg["excludeTools"])
+                self.assertNotIn("--approval-mode", t)
+
+    def test_programmes_image_copiee_dans_le_dossier_vide(self):
+        img = self.home / "photo.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfaux")
+        j = self.espion("codex")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=codex\n")
+        r = self.lancer("demander", "--image", str(img), "que vois-tu")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = j.read_text()
+        cwd = re.search(r"^CWD (.*)$", t, re.M)[1]
+        self.assertNotEqual(cwd, str(self.home.resolve()))
+        self.assertIn(f"-i {cwd}/image.png", t)
 
     def test_programme_muet_arrete_a_l_echeance(self):
         # Revue Codex IA-04 : un programme qui n'écrit jamais de fin de ligne est arrêté à l'échéance
