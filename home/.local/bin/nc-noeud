@@ -1497,7 +1497,10 @@ DECISIONS = {"refuse": ("refusé", "Refusé {o}.", "Denied {o}."),
 #   - PrivateTmp : /tmp privé (X11 @/tmp/.X11-unix, sockets tmux sous /tmp) ;
 #   - RestrictAddressFamilies=AF_INET AF_INET6 : plus aucun socket unix, donc plus de socket abstrait (X11, bus) → un
 #     exec de session ne peut lancer aucune appli graphique (lancer une appli reste confirmé une par une) ;
-#   - RuntimeMaxSec : tué à l'échéance, --collect nettoie l'unité.
+#   - RuntimeMaxSec : tué à l'échéance, --collect nettoie l'unité ;
+#   - ProtectSystem=strict + /dev/shm en lecture seule : rien ne s'écrit hors du dossier de travail (ni /dev/shm, ni
+#     une clé USB, ni un autre disque) ;
+#   - env -i : la commande ne reçoit que PATH, HOME, la langue et TERM, pas l'environnement du gestionnaire.
 # Vérifié dans le manager UTILISATEUR, sans root, sur systemd 262 (Arch) ; les propriétés existent depuis bien avant
 # systemd 254 (openSUSE Leap 15.6, la plus ancienne visée). Toute erreur de mise en place (systemd-run absent, pas de
 # bus utilisateur, namespaces refusés comme sur Ubuntu avec apparmor restrict_unprivileged_userns) → pas de session,
@@ -1580,8 +1583,8 @@ def bac_inaccessibles():
 
 def bac_argv(cmd, cwd, budget):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent."""
-    sr = programme("systemd-run")
-    if not sr:
+    sr, env = programme("systemd-run"), programme("env")
+    if not sr or not env:
         return None
     travail = dossier_travail_bac()
     # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
@@ -1590,7 +1593,7 @@ def bac_argv(cmd, cwd, budget):
     # OnFailure= vide : une commande de session qui échoue n'est pas une panne du bureau (sinon le drop-in global
     # service.d/nc-panne.conf afficherait « nc-panne » pour chaque échec, et chaque test du vrai bac aussi)
     props = ["OnFailure=", "PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
-             "ProtectHome=read-only", "PrivateTmp=yes",
+             "ProtectHome=read-only", "PrivateTmp=yes", "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm",
              "RestrictAddressFamilies=AF_INET AF_INET6", "ReadOnlyPaths=" + str(HOME),
              "ReadWritePaths=" + str(travail), "RuntimeMaxSec=" + str(max(1, int(budget)))]
     # --expand-environment=no (systemd 254 ; le bac en exige 257) : sinon le gestionnaire remplace « ${VAR} » dans la
@@ -1612,8 +1615,19 @@ def bac_argv(cmd, cwd, budget):
         argv += ["-p", 'InaccessiblePaths="' + x + '"']
     # Le dossier de travail passe par un « cd » dans la commande, pas par WorkingDirectory : systemd refuse l'unité
     # quand WorkingDirectory tombe sur un tmpfs (ex. /dev/shm des tests), alors qu'un cd marche partout.
-    argv += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && " + cmd]
+    # env -i : l'unité hérite de TOUT l'environnement du gestionnaire systemd (environment.d, import-environment :
+    # clés d'API du profil, SSH_AUTH_SOCK…), --setenv n'en retire rien ; la commande ne reçoit que cette liste blanche.
+    argv += ["--", env, "-i", *environnement_bac(), "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && " + cmd]
     return argv
+
+
+def environnement_bac():
+    """Les seules variables d'une commande du bac : PATH, HOME, la langue et TERM=dumb, rien de secret."""
+    garder = {"PATH": os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin", "HOME": str(HOME), "TERM": "dumb"}
+    for k, v in os.environ.items():
+        if k == "LANG" or k == "LANGUAGE" or k.startswith("LC_"):
+            garder[k] = v
+    return [k + "=" + v for k, v in sorted(garder.items()) if "=" not in k and "\0" not in v]
 
 
 async def bac_tient():

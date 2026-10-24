@@ -2259,8 +2259,36 @@ class BacReel(ModuleCharge):
     def test_proprietes_du_bac(self):
         m, _ = self.charger_bac()
         argv = m.bac_argv(":", "/", 10)
-        for prop in ("PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring", "PrivateUsers=yes", "NoNewPrivileges=yes"):
+        for prop in ("PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring", "PrivateUsers=yes", "NoNewPrivileges=yes",
+                     "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm"):
             self.assertIn(prop, argv)
+
+    def test_environnement_du_gestionnaire_invisible(self):
+        # L'unité hérite de l'environnement du gestionnaire systemd (environment.d, import-environment) : simulé ici par
+        # un Environment= de l'unité, sans toucher au vrai gestionnaire. env -i : la commande ne le voit pas.
+        m, home = self.charger_bac()
+        argv = m.bac_argv("env", "/", 20)
+        i = argv.index("--")
+        argv[i:i] = ["-p", "Environment=NC_TEST_CLE_GESTIONNAIRE=FAUSSE-CLE-DE-TEST SSH_AUTH_SOCK=/faux/agent"]
+        code, sortie, _ = asyncio.run(m.lancer(argv, delai=20))
+        self.assertEqual(code, 0, sortie)
+        texte = sortie.decode() if isinstance(sortie, bytes) else sortie
+        self.assertNotIn("FAUSSE-CLE-DE-TEST", texte)
+        self.assertNotIn("SSH_AUTH_SOCK", texte)
+        noms = {l.split("=", 1)[0] for l in texte.splitlines() if "=" in l}
+        permis = {"PATH", "HOME", "TERM", "LANG", "LANGUAGE", "PWD", "OLDPWD", "SHLVL", "_"}   # PWD… : posées par sh
+        self.assertEqual({n for n in noms if n not in permis and not n.startswith("LC_")}, set(), noms)
+        self.assertIn(f"HOME={home}", texte)
+        self.assertIn("TERM=dumb", texte)
+
+    def test_rien_ne_s_ecrit_hors_du_dossier_de_travail(self):
+        # ProtectSystem=strict + /dev/shm en lecture seule : ni /dev/shm, ni /var, ni un autre disque (/var/tmp est privé)
+        m, home = self.charger_bac()
+        r = self.lancer_bac(m, "for d in /dev/shm /var/spool/mail /var/lib /opt; do touch $d/nc-bac-ecrit 2>/dev/null "
+                               "&& echo ECRIT:$d; done; echo FIN")
+        self.assertIn("FIN", r.get("stdout", ""), r)
+        self.assertNotIn("ECRIT:", r.get("stdout", ""))
+        self.assertFalse(Path("/dev/shm/nc-bac-ecrit").exists())
 
 
 if __name__ == "__main__":
