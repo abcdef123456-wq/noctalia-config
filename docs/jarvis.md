@@ -422,6 +422,62 @@ Ce que le serveur doit faire pour la relayer (**rien de tout ça n’existe enco
 une nouvelle session (`setsid`, `nohup … &` puis `disown`) peut survivre jusqu’à l’arrêt du service. Le résumé ne
 masque que les secrets connus de ce PC : relis la commande avant de taper le code.
 
+### Session de confiance
+
+Avec 2 ou 3 commandes à la suite, il faut un code (ou un « Autoriser ») à chaque fois, et l’anti-rejeu refuse le même
+code dans sa fenêtre de 30 s. La **session de confiance** (issue #21) laisse JARVIS enchaîner, **après une seule
+autorisation**, une rafale d’actions sans redemander — mais encadrée, et **désactivée par défaut**.
+
+- **Réglage :** nc-reglages → Intelligence artificielle → « Session de confiance pour JARVIS » : 0 (désactivée,
+  conseillé) à 15 minutes. `NOEUD_SESSION_MINUTES` ; au-delà de 15 → 15 ; valeur illisible → 0. La capacité
+  `trust_session` n’est annoncée au `register` (et `metadata.trust_session_minutes`) que si le réglage est > 0.
+- **Ce qu’elle couvre :** `exec` (dans un bac à sable, voir plus bas) et `write_file` hors chemins protégés. **Jamais**
+  couverts, donc toujours confirmés un par un : `read_file`, le presse-papiers, tout chemin protégé, et tout ce qui est
+  déjà interdit. L’ouverture elle-même est **confirmée** (carte de l’île ou code à distance) ; le résumé dit « … et
+  ouvre une session de N min (20 actions au plus) pour cette conversation ».
+- **Bornée :** durée **fixe** depuis l’ouverture, jamais prolongée par une action ; **20 actions** au plus. Puis elle
+  se ferme et la suivante est reconfirmée.
+- **Liée à la connexion ET à l’origine.** Un jeton est tiré à chaque connexion WebSocket : une reconnexion ferme la
+  session. Elle est aussi liée à l’**origine exacte** annoncée par la trame d’action, proposée au serveur :
+  `"origin": {"via":"telegram","chat":…,"conversation":…}`. Une action d’une origine différente, ou sans origine, est
+  confirmée normalement. **Sois honnête sur ce que ça protège : ce PC ne vérifie que la connexion.** L’origine ne
+  protège des autres entrées du serveur (API HTTP, MCP, un autre chat) **que si le serveur est honnête** et la renvoie
+  fidèlement ; un serveur compromis peut mentir sur l’origine.
+- **Visible et arrêtable.** Chaque action couverte envoie une notification sur ce PC (« JARVIS, session : … ») et une
+  ligne au journal ; la `response` porte `"session": {"reste_s": …, "reste_actions": …}`. L’île affiche un bandeau
+  « Session JARVIS » avec un bouton **Arrêter la session**. La session se ferme sur : un refus, la trame
+  `{"type":"session_end"}` du serveur, `IA_MODE=non` ou le pilotage coupé (relus à **chaque** action), un code faux,
+  l’expiration, ou « Arrêter ».
+
+**Bac à sable des commandes.** Une session fait sauter la confirmation de chaque commande ; or un contrôle sur le
+texte d’une commande se contourne toujours (lire `~/.ssh`, lancer `sudo`, simuler des frappes…). Chaque `exec` de
+session tourne donc dans une unité `systemd --user` transitoire, sans root :
+
+- `PrivateUsers` + `NoNewPrivileges` : pas d’élévation (`sudo` setuid refusé) ;
+- `ProtectHome=read-only` + `ReadOnlyPaths=~` : `~` en lecture seule, sauf un seul dossier de travail
+  (`~/.local/state/nc-noeud/travail`, en `ReadWritePaths`) ;
+- `InaccessiblePaths` : clés, mots de passe, config (navigateurs, trousseaux, CLI d’IA et de cloud, gh, git,
+  `~/.config/nc`, le serveur local…) **illisibles** — plus large que les chemins protégés, car le réseau reste ouvert
+  et tout ce qui se lit peut partir ;
+- tout `$XDG_RUNTIME_DIR` inaccessible : bus systemd/D-Bus (sinon `systemd-run --user` relancerait une unité **hors**
+  du bac), `hypr` (`hyprctl dispatch exec`), `wayland` (frappe simulée), agent ssh/gpg, trousseau, quickshell,
+  pipewire, tmux ;
+- `PrivateTmp` : `/tmp` privé (socket X11 `@/tmp/.X11-unix`, sockets tmux) ;
+- `RestrictAddressFamilies=AF_INET AF_INET6` : plus aucun socket Unix (ni abstrait) → **un `exec` de session ne peut
+  lancer aucune appli graphique** (lancer une appli reste confirmé une par une) ;
+- la durée restante borne l’exécution (`RuntimeMaxSec`, `--collect`).
+
+Vérifié dans le manager **utilisateur**, sans root. Les propriétés existent depuis bien avant systemd 254 (la plus
+ancienne distribution visée, openSUSE Leap 15.6). **Toute erreur de mise en place** (systemd-run absent, pas de bus
+utilisateur, namespaces refusés — par ex. Ubuntu avec `apparmor restrict_unprivileged_userns`) : **pas de session,
+confirmation normale**, jamais une exécution hors du bac. Une sonde vérifie que le bac tient avant chaque `exec` de
+session.
+
+**Limite à connaître, noir sur blanc.** La session ne protège pas d’une IA piégée **dans la même conversation**, ni
+d’un serveur compromis : pendant la session, l’un ou l’autre peut agir (le réseau reste ouvert). Mais il **ne peut
+pas** lire les chemins interdits, écrire dans `~`, utiliser `sudo`, ni lancer d’appli ; **chaque action se voit et
+s’arrête**. C’est pourquoi la session est désactivée par défaut et courte. En cas de doute, laisse-la à 0.
+
 ## Attente avant une réponse
 
 Le chat de l’île et du cockpit est suivi par `AssistantEtat` : il ne lance plus les hooks Coucou

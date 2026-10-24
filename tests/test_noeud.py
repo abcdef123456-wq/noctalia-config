@@ -1645,8 +1645,11 @@ class Cablage(unittest.TestCase):
         ile = (QML / "Ile.qml").read_text()
         self.assertIn("sourceComponent: ConfirmationNoeud {", ile)
         self.assertIn("Noeud.demande !== null", ile)
+        self.assertIn("sourceComponent: SessionNoeud {", ile)
+        self.assertIn("Noeud.sessionActive", ile)
         self.assertIn('function noeud(): string { Noeud.relire(); return "oui" }', (QML / "shell.qml").read_text())
-        for f in ("Noeud.qml", "ConfirmationNoeud.qml"):
+        self.assertIn("Noeud.arreterSession()", (QML / "SessionNoeud.qml").read_text())
+        for f in ("Noeud.qml", "ConfirmationNoeud.qml", "SessionNoeud.qml"):
             self.assertNotIn("component ", (QML / f).read_text(), f)
 
     def test_service_desactive_par_defaut(self):
@@ -1713,6 +1716,309 @@ class Cablage(unittest.TestCase):
             with unittest.mock.patch.object(m.subprocess, "run", lambda a, **k: appels.append(a)):
                 m.appliquer(["noeud-confirmation"], {"NOEUD_CONFIRMATION": "distance"})
             self.assertEqual(appels, [], "code prêt : rien à dire")
+
+
+# Faux systemd-run : exécute tel quel ce qui suit « -- » (pas de vrai bac), pour éprouver la LOGIQUE de session sans
+# dépendre d'un vrai manager systemd. Le vrai bac est éprouvé à part (BacReel, skipUnless).
+FAUX_SYSTEMD_RUN = ENTETE + '''echo "systemd-run $*" >> "$H/appels"
+while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+[ "$1" = "--" ] && shift
+exec "$@"
+'''
+
+
+class SessionConfiance(ModuleCharge):
+    """Session de confiance (issue #21) : logique éprouvée au niveau module, horloge injectée. systemd-run est un faux
+    qui exécute la commande sans vrai bac (le vrai bac est dans BacReel)."""
+    def noeud(self, m, minutes=5):
+        (self.bin / "systemd-run").write_text(FAUX_SYSTEMD_RUN)
+        (self.bin / "systemd-run").chmod(0o755)
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES=str(minutes))
+        n = m.Noeud({"URL": "http://127.0.0.1:1"})
+        n.jeton_connexion = "J1"
+        n.ws = FauxWS()
+        self.confs = []
+        self.decision = "autorise"
+
+        async def demander(nom, decrite, limite):
+            self.confs.append(decrite.resume)
+            return self.decision
+        n.confirmation.demander = demander
+
+        async def bac_ok():
+            return True
+        m.bac_tient = bac_ok
+        self.m = m
+        return n
+
+    O = {"via": "telegram", "chat": 7, "conversation": 3}
+
+    def dec(self, n, action, params, origin=O, trame=None):
+        return asyncio.run(n.decider(action, params, "r" + uuid.uuid4().hex, trame, origin))
+
+    def test_ouverture_puis_rafale_sans_reconfirmation(self):
+        m = self.charger()
+        n = self.noeud(m)
+        r1 = self.dec(n, "exec", {"command": f"touch {self.home}/m1"})
+        self.assertTrue(r1["success"], r1)
+        self.assertEqual(len(self.confs), 1, "l'ouverture est confirmée une fois")
+        self.assertIn("ouvre une session de 5 min", self.confs[0])
+        self.assertIn("20 actions au plus", self.confs[0])
+        self.assertTrue((self.home / "m1").exists())
+        self.assertEqual(r1["session"]["reste_actions"], 20)
+        # Rafale : exec puis write_file, même origine, sans nouvelle confirmation
+        r2 = self.dec(n, "exec", {"command": f"touch {self.home}/m2"})
+        self.assertTrue(r2["success"], r2)
+        self.assertEqual(len(self.confs), 1, "pas de nouvelle confirmation")
+        self.assertEqual(r2["session"]["reste_actions"], 19)
+        r3 = self.dec(n, "write_file", {"path": "~/notes.txt", "content": "bonjour"})
+        self.assertTrue(r3["success"], r3)
+        self.assertEqual(len(self.confs), 1)
+        self.assertEqual(r3["session"]["reste_actions"], 18)
+        self.assertEqual((self.home / "notes.txt").read_text(), "bonjour")
+
+    def test_plafond_de_20_actions(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})                 # ouverture (confirmée), reste 20
+        for i in range(20):
+            r = self.dec(n, "exec", {"command": "true"})
+            self.assertIn("session", r, i)
+        self.assertEqual(len(self.confs), 1, "20 actions couvertes sans reconfirmer")
+        self.assertIsNone(n.session, "la session se ferme à 20 actions")
+        r = self.dec(n, "exec", {"command": "true"})             # la 21e rouvre : nouvelle confirmation
+        self.assertEqual(len(self.confs), 2)
+        self.assertIsNotNone(n.session)
+
+    def test_duree_fixe_jamais_prolongee(self):
+        m = self.charger()
+        n = self.noeud(m, minutes=5)
+        self.dec(n, "exec", {"command": "true"})                 # ouverte à t=1000 → limite 1300
+        limite = n.session.limite
+        self.assertEqual(limite, 1300.0)
+        self.t = 1200.0
+        self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(n.session.limite, limite, "une action ne prolonge pas la session")
+        self.t = 1299.0
+        r = self.dec(n, "exec", {"command": "true"})
+        self.assertIn("session", r)
+        self.t = 1300.0                                          # échéance atteinte
+        self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(len(self.confs), 2, "après l'échéance, on reconfirme")
+
+    def test_liee_a_la_connexion(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})
+        self.assertIsNotNone(n.session)
+        n.fermer_session("reconnexion")                          # une reconnexion ferme la session...
+        n.jeton_connexion = "J2"                                 # ...et tire un nouveau jeton
+        self.assertIsNone(n.session)
+        r = self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(len(self.confs), 2, "après reconnexion, une nouvelle session se rouvre (confirmée)")
+        self.assertIn("ouvre une session", self.confs[1])
+
+    def test_origine_differente_ou_absente_reconfirme(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})                 # ouverte pour O
+        reste = n.session.reste
+        autre = self.dec(n, "exec", {"command": "true"}, origin={"via": "telegram", "chat": 999})
+        self.assertEqual(len(self.confs), 2, "origine différente : confirmation")
+        self.assertNotIn("session", autre, "pas couverte par la session de O")
+        self.assertEqual(n.session.reste, reste, "la session de O n'est pas touchée")
+        sans = self.dec(n, "exec", {"command": "true"}, origin=None)
+        self.assertEqual(len(self.confs), 3, "origine absente : confirmation")
+        self.assertNotIn("session", sans)
+
+    def test_read_file_et_chemin_protege_toujours_confirmes(self):
+        m = self.charger()
+        n = self.noeud(m)
+        (self.home / "a.txt").write_text("coucou")
+        self.dec(n, "exec", {"command": "true"})                 # session ouverte
+        r = self.dec(n, "read_file", {"path": "~/a.txt"})
+        self.assertEqual(len(self.confs), 2, "read_file n'est jamais couvert")
+        self.assertNotIn("session", r)
+        self.assertEqual(r.get("content"), "coucou")
+        # write_file vers un chemin protégé : refusé, même en session
+        (self.home / ".ssh").mkdir(exist_ok=True)
+        prot = self.dec(n, "write_file", {"path": "~/.ssh/authorized_keys", "content": "x"})
+        self.assertFalse(prot["success"])
+        self.assertIn("protégé", prot["error"])
+
+    def test_deny_ferme_la_session(self):
+        m = self.charger()
+        n = self.noeud(m)
+        (self.home / "a.txt").write_text("x")
+        self.dec(n, "exec", {"command": "true"})
+        self.assertIsNotNone(n.session)
+        self.decision = "refuse"                                 # un refus sur une action non couverte
+        self.dec(n, "read_file", {"path": "~/a.txt"})
+        self.assertIsNone(n.session, "un refus ferme la session")
+
+    def test_ia_coupee_ferme_la_session(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES="5", IA_MODE="non")
+        r = self.dec(n, "exec", {"command": "true"})
+        self.assertFalse(r["success"])
+        self.assertIsNone(n.session)
+
+    def test_session_end_du_serveur_ferme(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})
+        self.assertIsNotNone(n.session)
+        n.fermer_session("demande du serveur")                   # ce que fait la trame session_end
+        self.assertIsNone(n.session)
+        self.assertFalse((self.run_dir / "nc-noeud/session.json").exists())
+
+    def test_arret_depuis_l_ile(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.dec(n, "exec", {"command": "true"})
+        self.assertTrue((self.run_dir / "nc-noeud/session.json").exists())
+        (self.run_dir / "nc-noeud/session-stop").write_text("")   # le bouton « Arrêter » de l'île
+        r = self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(len(self.confs), 2, "la session arrêtée : on reconfirme")
+        self.assertFalse((self.run_dir / "nc-noeud/session-stop").exists(), "le marqueur est consommé")
+
+    def test_repli_si_le_bac_ne_tient_pas(self):
+        m = self.charger()
+        n = self.noeud(m)
+
+        async def bac_ko():
+            return False
+        m.bac_tient = bac_ko
+        r = self.dec(n, "exec", {"command": f"touch {self.home}/m"})
+        self.assertTrue(r["success"], r)                          # confirmé normalement, exécuté hors session
+        self.assertEqual(len(self.confs), 1)
+        self.assertNotIn("session", r, "pas de session sans bac")
+        self.assertIsNone(n.session)
+        self.assertTrue((self.home / "m").exists())
+
+    def test_reglage_minutes(self):
+        m = self.charger()
+        for val, attendu in (("0", 0), ("1", 1), ("15", 15), ("16", 15), ("200", 15), ("abc", 0), ("", 0), ("-3", 0),
+                             ("5.9", 5)):
+            self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES=val)
+            self.assertEqual(m.session_minutes(), attendu, val)
+
+
+class CapaciteTrustSession(Base):
+    """trust_session annoncé au register seulement si NOEUD_SESSION_MINUTES > 0."""
+    def test_annonce_selon_le_reglage(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES="5")
+        r = self.demarrer()
+        self.assertIn("trust_session", r["capabilities"])
+        self.assertEqual(r["metadata"]["trust_session_minutes"], 5)
+
+    def test_pas_annonce_si_zero(self):
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES="0")
+        r = self.demarrer()
+        self.assertNotIn("trust_session", r["capabilities"])
+
+
+HOME_BAC = os.environ.get("NC_BAC_HOME", "/dev/shm")             # jamais /tmp (PrivateTmp le masque), jamais le vrai ~
+
+
+def _bus_utilisateur():
+    """Un bus systemd --user joignable pour le VRAI bac (le garde-fou a dérouté XDG_RUNTIME_DIR vers un dossier sans
+    bus ; on regarde le runtime d'avant le garde-fou et DBUS_SESSION_BUS_ADDRESS)."""
+    import shutil as _sh
+    if not _sh.which("systemd-run"):
+        return False
+    vrai = os.environ.get("NC_TEST_VRAI_RUNTIME") or ""
+    if vrai and os.path.exists(os.path.join(vrai, "bus")):
+        return True
+    return bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
+
+
+@unittest.skipUnless(_bus_utilisateur() and os.path.isdir(HOME_BAC),
+                     "systemd-run, un bus utilisateur joignable et /dev/shm requis")
+class BacReel(ModuleCharge):
+    """Non-régression du VRAI bac à sable (systemd --user) : les 3 évasions trouvées par le coordinateur sont fermées.
+    Faux HOME sous /dev/shm (jamais /tmp que PrivateTmp masque, jamais le vrai ~) ; secrets et sockets sont FACTICES."""
+    def charger_bac(self):
+        d = tempfile.mkdtemp(prefix="nc-bac-", dir=HOME_BAC)
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        home = Path(d)
+        (home / ".local/bin").mkdir(parents=True)
+        for nom in ("nc-noeud", "nc-assistant"):
+            shutil.copy2(BIN / nom, home / ".local/bin" / nom)
+        (home / ".ssh").mkdir(mode=0o700)
+        (home / ".ssh/id_ed25519").write_text("FAUSSE-CLE-PRIVEE-DE-TEST")
+        run = home / "run"
+        run.mkdir(mode=0o700)
+        env = {"HOME": str(home), "XDG_RUNTIME_DIR": str(run), "XDG_STATE_HOME": str(home / ".local/state"),
+               "PATH": "/usr/bin:/bin", "NC_LANGUE": "fr"}
+        p = unittest.mock.patch.dict(os.environ, env)
+        p.start()
+        self.addCleanup(p.stop)
+        os.environ.pop("NC_NOEUD_DELAI", None)
+        chargeur = importlib.machinery.SourceFileLoader("nc_noeud_bac", str(home / ".local/bin/nc-noeud"))
+        mm = importlib.util.module_from_spec(importlib.util.spec_from_loader(chargeur.name, chargeur))
+        chargeur.exec_module(mm)
+        mm.A = mm.charger_assistant()
+        mm.horloge = time.monotonic
+        return mm, home
+
+    def lancer_bac(self, m, cmd):
+        act = m.preparer("exec", {"command": cmd, "timeout": 20})
+        return asyncio.run(asyncio.wait_for(act.executer(20, True), 25))
+
+    def test_le_bac_tient(self):
+        m, _ = self.charger_bac()
+        self.assertTrue(asyncio.run(m.bac_tient()), "la sonde doit réussir ici")
+
+    def test_secret_illisible(self):
+        m, home = self.charger_bac()
+        r = self.lancer_bac(m, f"cat {home}/.ssh/id_ed25519")
+        self.assertFalse(r["success"], r)
+        self.assertNotIn("FAUSSE-CLE-PRIVEE", r.get("stdout", "") + r.get("message", ""))
+
+    def test_home_en_lecture_seule(self):
+        m, home = self.charger_bac()
+        r = self.lancer_bac(m, f"touch {home}/ecrit-par-le-bac")
+        self.assertFalse(r["success"], r)
+        self.assertFalse((home / "ecrit-par-le-bac").exists())
+
+    def test_dossier_de_travail_ecrit(self):
+        m, home = self.charger_bac()
+        travail = m.dossier_travail_bac()
+        r = self.lancer_bac(m, f"touch {travail}/ok && echo ecrit")
+        self.assertTrue(r["success"], r)
+        self.assertTrue((travail / "ok").exists())
+
+    def test_sudo_refuse(self):
+        m, _ = self.charger_bac()
+        if not __import__("shutil").which("sudo"):
+            self.skipTest("sudo absent")
+        r = self.lancer_bac(m, "sudo -n true")
+        self.assertFalse(r["success"], "NoNewPrivileges : setuid refusé")
+
+    def test_systemd_run_user_depuis_le_bac_echoue(self):
+        m, _ = self.charger_bac()
+        r = self.lancer_bac(m, "systemd-run --user --wait --pipe true 2>&1 || echo ECHEC-ATTENDU")
+        self.assertIn("ECHEC-ATTENDU", r.get("stdout", ""), "le bus utilisateur est inaccessible dans le bac")
+
+    def test_runtime_dir_inaccessible(self):
+        m, _ = self.charger_bac()
+        run = os.environ["XDG_RUNTIME_DIR"]
+        r = self.lancer_bac(m, f"ls {run} 2>&1 || echo ECHEC-ATTENDU")
+        self.assertIn("ECHEC-ATTENDU", r.get("stdout", ""), "$XDG_RUNTIME_DIR (bus, hypr, wayland…) inaccessible")
+
+    def test_aucun_socket_unix(self):
+        m, home = self.charger_bac()
+        # un socket unix factice sous XDG_RUNTIME_DIR ET sous /tmp : aucun ne doit être joignable
+        sock = home / "run/faux.sock"
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(str(sock))
+        srv.listen(1)
+        self.addCleanup(srv.close)
+        r = self.lancer_bac(m, 'python3 -c "import socket; socket.socket(socket.AF_UNIX)" 2>&1 || echo ECHEC-ATTENDU')
+        self.assertIn("ECHEC-ATTENDU", r.get("stdout", ""), "RestrictAddressFamilies : plus de socket unix (ni abstrait)")
 
 
 if __name__ == "__main__":

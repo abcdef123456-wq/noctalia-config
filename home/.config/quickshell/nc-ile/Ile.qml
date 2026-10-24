@@ -101,8 +101,13 @@ PanelWindow {
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurDemande: Agents.demande && Agents.demande.genre === "question"
                                           ? 78 + 40 * Math.ceil((Agents.demande.options || []).length / 2) : 146
+    // Session de confiance de JARVIS en cours (Noeud.qml, SessionNoeud.qml) : un bandeau avec « Arrêter la session »,
+    // sous les cartes de confirmation et les demandes (il est persistant, pas urgent)
+    readonly property bool sessionNoeud: !ouverte && !confirmGpu && !confirmNoeud && !demandeClaude && Noeud.sessionActive
+        && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
+    readonly property int hauteurSession: chargeurSession.item ? Math.ceil(chargeurSession.item.implicitHeight) : 72
     // L'île fermée étirée en carte à boutons (demande de Claude Code, de JARVIS ou confirmation du mode graphique)
-    readonly property bool enCarte: demandeClaude || confirmGpu || confirmNoeud
+    readonly property bool enCarte: demandeClaude || confirmGpu || confirmNoeud || sessionNoeud
     readonly property bool banniere: !ouverte && !enCarte && Notifs.banniere !== null
         && (!Hyprland.focusedMonitor || Hyprland.focusedMonitor.name === modelData.name)
     readonly property int hauteurBanniere: (Notifs.banniere && Notifs.banniere.body !== "" ? 92 : 74)
@@ -191,7 +196,8 @@ PanelWindow {
         // Tailles voulues (le ressort y mène width et height) : lues par fen.revenue()
         readonly property real cibleLargeur: fen.ouverte ? fen.taille.width : (fen.enCarte ? 460 : (fen.banniere ? 440 : compact.largeur))
         readonly property real cibleHauteur: fen.ouverte ? fen.taille.height : (fen.confirmGpu ? fen.hauteurGpu : (fen.confirmNoeud ? fen.hauteurNoeud
-                                                   : (fen.demandeClaude ? fen.hauteurDemande : (fen.banniere ? fen.hauteurBanniere : 30))))
+                                                   : (fen.demandeClaude ? fen.hauteurDemande : (fen.sessionNoeud ? fen.hauteurSession
+                                                   : (fen.banniere ? fen.hauteurBanniere : 30)))))
         width: cibleLargeur
         height: cibleHauteur
         radius: fen.ouverte ? (fen.recherche ? 28 : 42) : (fen.banniere || fen.enCarte ? 32 : 15)
@@ -305,6 +311,19 @@ PanelWindow {
             }
         }
         Timer { id: garderNoeud; interval: 400 }
+        // Bandeau de la session de confiance de JARVIS (SessionNoeud.qml), gardé le temps de la fermeture
+        Loader {
+            id: chargeurSession
+            anchors.fill: parent
+            active: fen.sessionNoeud || garderSession.running
+            sourceComponent: SessionNoeud {
+                opacity: fen.sessionNoeud && ile.height > fen.hauteurSession * 0.7 ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { enabled: !Reglages.sobre; NumberAnimation { duration: fen.sessionNoeud ? 180 : 90; easing.type: Easing.OutCubic } }
+            }
+        }
+        Timer { id: garderSession; interval: 400 }
+        Connections { target: fen; function onSessionNoeudChanged() { if (!fen.sessionNoeud) garderSession.restart() } }
         Connections { target: fen; function onConfirmNoeudChanged() { if (!fen.confirmNoeud) garderNoeud.restart() } }
         Connections { target: fen; function onConfirmGpuChanged() { if (!fen.confirmGpu) garderGpu.restart() } }
         Connections { target: fen; function onDemandeClaudeChanged() { if (!fen.demandeClaude) garderDemande.restart() } }

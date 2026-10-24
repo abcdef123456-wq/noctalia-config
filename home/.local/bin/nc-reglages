@@ -1117,6 +1117,16 @@ REGLAGES = [
        ("distance", L("À distance (téléphone)", "Remotely (phone)")),
        ("les-deux", L("Les deux : la première réponse compte", "Both: the first answer wins"))],
       groupe="noeud-confirmation"),
+    R("NOEUD_SESSION_MINUTES", "Intelligence artificielle",
+      L("Session de confiance pour JARVIS", "Trust session for JARVIS"), "entier", "0",
+      L("Risque : après UNE autorisation, JARVIS enchaîne commandes et écritures de fichiers sans te redemander, "
+        "pendant cette durée (20 actions au plus), pour la même conversation. Les commandes tournent dans un bac à "
+        "sable (ni tes clés, ni mots de passe, ni sudo, ni appli graphique ; ~ en lecture seule). read_file, le "
+        "presse-papiers et les chemins protégés restent toujours confirmés un par un. 0 : désactivée (conseillé).",
+        "Risk: after ONE approval, JARVIS runs commands and file writes without asking again, for this long (at most "
+        "20 actions), for the same conversation. Commands run in a sandbox (no keys, passwords, sudo or GUI app; ~ "
+        "read-only). read_file, the clipboard and protected paths stay confirmed one by one. 0: off (recommended)."),
+      mini=0, maxi=15, pas=1, unite="min", zero=L("Désactivée", "Off"), groupe="noeud-confirmation"),
     R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
       L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",
         "Actions without confirmation (music, notification, clipboard read)"), "ouinon", "oui",

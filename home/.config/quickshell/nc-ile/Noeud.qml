@@ -22,6 +22,24 @@ Singleton {
     readonly property real marge: 0.5                 // nc-noeud relit la réponse toutes les 0,15 s : un clic au ras de
                                                       // l'échéance compte déjà comme trop tard
 
+    // Session de confiance (issue #21) : nc-noeud écrit son état dans …/nc-noeud/session.json (ouverte, expire,
+    // reste_s, reste_actions, origine). L'île l'affiche et propose « Arrêter la session », qui écrit …/nc-noeud/
+    // session-stop ; nc-noeud le relit avant chaque action et ferme la session. Rien n'est relu en boucle.
+    property var session: null                        // { expire, reste_s, reste_actions, minutes, origine, serveur }
+    readonly property bool sessionActive: session !== null
+                && Number(session.expire) > Date.now() / 1000 && Number(session.reste_actions) > 0
+    readonly property int sessionReste: session ? Math.max(0, Math.ceil(Number(session.expire) - maintenant)) : 0
+    function arreterSession() {
+        session = null
+        Quickshell.execDetached(["sh", "-c",
+            "mkdir -p \"$1\" && : > \"$1/session-stop\"", "sh", dossier])
+    }
+    function lireSession(t) {
+        var d = null
+        try { d = JSON.parse(t) } catch (e) { d = null }
+        session = (d && Number(d.expire) > Date.now() / 1000 && Number(d.reste_actions) > 0) ? d : null
+    }
+
     function relire() { fichier.reload() }
     function lire(t) {
         if (tropTard) return                          // le message reste affiché ; relu à la fin (finTropTard)
@@ -63,6 +81,21 @@ Singleton {
         onFileChanged: reload()
         onLoaded: n.lire(text())
         onLoadFailed: n.lire("")
+    }
+    // L'état de la session de confiance, suivi en continu (créé et effacé par nc-noeud)
+    FileView {
+        id: fichierSession
+        path: n.dossier + "/session.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: n.lireSession(text())
+        onLoadFailed: n.lireSession("")
+    }
+    // Compte à rebours de la session (seulement quand elle est affichée)
+    Timer {
+        interval: 1000; repeat: true; running: n.sessionActive
+        onTriggered: { n.maintenant = Date.now() / 1000; if (n.sessionReste <= 0) n.session = null }
     }
     // Compte à rebours de la carte, seulement pendant une demande
     Timer {
