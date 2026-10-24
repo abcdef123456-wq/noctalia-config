@@ -910,8 +910,9 @@ class LigneMisesAJour(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-paquets-qml-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
-            (root / ".cache/nc").mkdir(parents=True)
-            (root / ".cache/nc/paquets").write_text("3\navahi\nbaloo\nzsh\n")
+            # Un XDG_CACHE_HOME qui n'est pas ~/.cache : la page doit lire là où nc-paquets écrit
+            (root / "cache-xdg/nc").mkdir(parents=True)
+            (root / "cache-xdg/nc/paquets").write_text("3\navahi\nbaloo\nzsh\n")
             for nom in ("Systeme.qml", "Ligne.qml", "Module.qml", "Texte.qml", "Ico.qml", "Defilement.qml", "Couleurs.qml", "ModeGraphique.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; function t(fr,en){return en} function val(k,d){return d}}')
@@ -950,14 +951,13 @@ class LigneMisesAJour(unittest.TestCase):
                     property int etape: 0
                     property var page: null
                     property var ligne: null
-                    readonly property string racine: Quickshell.env("HOME")
                     function verifier(ok, message) { if (!ok) { console.error(message); Qt.exit(2) } }
                     function trouver(item, nom) { if (item.objectName === nom) return item; for (var i = 0; i < item.children.length; i++) { var r = trouver(item.children[i], nom); if (r) return r } return null }
                     Window { id: w; visible: true; width: 420; height: 600; color: "#151f2b" }
-                    Process { id: recompte; command: ["sh", "-c", "printf '0\\\\n\\\\n' > \\"$HOME/.cache/nc/paquets.tmp\\" && mv \\"$HOME/.cache/nc/paquets.tmp\\" \\"$HOME/.cache/nc/paquets\\""] }
-                    Process { id: erreur; command: ["sh", "-c", "echo '1 depot' > \\"$HOME/.cache/nc/paquets-erreur\\""] }
-                    Process { id: vieux; command: ["sh", "-c", "rm -f \\"$HOME/.cache/nc/paquets-erreur\\"; echo '{\\"total\\": 0, \\"non_synchro_jours\\": 4}' > \\"$HOME/.cache/nc/paquets.json\\""] }
-                    Process { id: synchro; command: ["rm", "-f", test.racine + "/.cache/nc/paquets.json"] }
+                    Process { id: recompte; command: ["sh", "-c", "printf '0\\\\n\\\\n' > \\"$XDG_CACHE_HOME/nc/paquets.tmp\\" && mv \\"$XDG_CACHE_HOME/nc/paquets.tmp\\" \\"$XDG_CACHE_HOME/nc/paquets\\""] }
+                    Process { id: erreur; command: ["sh", "-c", "echo '1 depot' > \\"$XDG_CACHE_HOME/nc/paquets-erreur\\""] }
+                    Process { id: vieux; command: ["sh", "-c", "rm -f \\"$XDG_CACHE_HOME/nc/paquets-erreur\\"; echo '{\\"total\\": 0, \\"non_synchro_jours\\": 4}' > \\"$XDG_CACHE_HOME/nc/paquets.json\\""] }
+                    Process { id: synchro; command: ["rm", "-f", Quickshell.env("XDG_CACHE_HOME") + "/nc/paquets.json"] }
                     Timer { interval: 100; running: true; repeat: true; onTriggered: {
                         if (etape === 0) { var c = Qt.createComponent("Systeme.qml"); verifier(c.status === Component.Ready, c.errorString()); page = c.createObject(w.contentItem, { width: 400, height: 580 }); verifier(page !== null, "page absente"); etape++ }
                         else if (etape === 1) { ligne = trouver(page, "nc-paquets"); verifier(ligne !== null, "ligne absente"); if (!ligne.visible) return
@@ -975,21 +975,27 @@ class LigneMisesAJour(unittest.TestCase):
                         // I1 : une liste vide mais vieille de 4 jours (apt, zypper) n'est pas « à jour »
                         else if (etape === 7) { if (ligne.titre !== "Repositories not synced") return
                             verifier(ligne.actif && ligne.sous.indexOf("For 4 d") === 0, "sous-titre (non synchronisé) : " + ligne.sous)
-                            Etat.aBatterie = true; synchro.running = true; etape++ }
+                            ligne.clic(); Etat.aBatterie = true; synchro.running = true; etape++ }
                         // I1 : nc-paquets.service ne compte que sur secteur (ConditionACPower), le texte le dit sur un portable
                         else if (etape === 8) { if (ligne.titre !== "System up to date") return
                             verifier(ligne.sous === "Checked every hour, when plugged in", "sous-titre (portable) : " + ligne.sous); Qt.quit() } } }
                     Timer { interval: 8000; running: true; onTriggered: Qt.exit(9) }
                 }'''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
-                       XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / ".cache"))
+                       XDG_RUNTIME_DIR=str(root / "run"), XDG_CACHE_HOME=str(root / "cache-xdg"))
             env.pop("WAYLAND_DISPLAY", None)
             r = subprocess.run(["qs", "--no-color", "-p", str(root / "shell.qml")], env=env, capture_output=True, text=True, timeout=12)
             sortie = r.stdout + r.stderr
             self.assertEqual(r.returncode, 0, sortie)
             for erreur in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
                 self.assertNotIn(erreur, sortie)
-            self.assertEqual((root / "appels-maj").read_text().split(), ["verifier"])
+            import time
+            # « Dépôts non synchronisés » : le clic lance la mise à jour, qui les synchronise (lancée détachée)
+            for _ in range(40):
+                if "mettre-a-jour" in (root / "appels-maj").read_text():
+                    break
+                time.sleep(0.05)
+            self.assertEqual((root / "appels-maj").read_text().split(), ["verifier", "mettre-a-jour"])
 
 
 if __name__ == "__main__":
