@@ -166,6 +166,8 @@ puis `nc-jarvis verifier` dit le reste.
 
 ## Déployer sur ce PC
 
+Pas à pas, pour un débutant sous Debian 13 : [docs/jarvis-pas-a-pas.md](jarvis-pas-a-pas.md).
+
 Ouvrir **Déploiement → Déployer sur ce PC**, ou :
 
 ```sh

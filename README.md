@@ -272,6 +272,7 @@ par le serveur), sans envoi automatique. Rappels récurrents (`/rappel telegram 
 sur ce PC ou sur un serveur SSH. Le client n’exécute pas lui-même de modèle ; le backend JARVIS-BIS reste séparé.
 Le même client est fourni sur Arch, Fedora/Nobara, Debian/Ubuntu et openSUSE. Sans Quickshell, les commandes
 et le [chat terminal](docs/assistant-distant.md) restent accessibles. Aucun backend n’est installé ni démarré par `nc-maj`.
+Pour déployer JARVIS pas à pas sous Debian 13 (sans rien connaître au terminal), suis le [guide pas à pas](docs/jarvis-pas-a-pas.md).
 
 Depuis un autre réseau que celui du serveur, une URL `192.168.x.x` ou `*.local` ne suffit pas : expose le gateway
 avec un tunnel HTTPS côté serveur (Cloudflare Tunnel, Tailscale ou Render), puis configure cette URL publique.
