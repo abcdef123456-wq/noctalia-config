@@ -254,6 +254,22 @@ class Firefox(unittest.TestCase):
         self.assertTrue((ancien / "nc_firefox.json").is_file())
         self.assertEqual(self.lancer("desinstaller").returncode, 0)
         self.assertFalse((self.home / ".mozilla/native-messaging-hosts/nc_firefox.json").exists(), "desinstaller retire tout")
+        self.assertFalse((self.home / ".mozilla").exists(), "~/.mozilla créé pour l'hôte seul, retiré une fois vide")
+
+    def test_desinstaller_garde_l_hote_d_un_autre(self):
+        # ~/.mozilla/native-messaging-hosts est partagé : un nc_firefox.json qui n'est pas le nôtre, ou un autre hôte,
+        # restent, et le dossier aussi
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        hotes = self.home / ".mozilla/native-messaging-hosts"
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        (hotes / "autre_hote.json").write_text(json.dumps({"name": "autre_hote"}))
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertFalse((hotes / "nc_firefox.json").exists())
+        self.assertTrue((hotes / "autre_hote.json").is_file())
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        (hotes / "nc_firefox.json").write_text(json.dumps({"name": "nc_firefox", "description": "à quelqu'un d'autre"}))
+        self.assertEqual(self.lancer("desinstaller").returncode, 0)
+        self.assertTrue((hotes / "nc_firefox.json").is_file(), "pas le nôtre : gardé")
 
     def test_hote_introuvable_signale(self):
         self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")

@@ -387,8 +387,13 @@ def extension_desinstaller(p, silencieux=False, complet=False):
         xpi.unlink()
     for d in dossiers_hotes(p):
         f = d / (HOTE + ".json")
-        if f.is_file():
+        if f.is_file() and hote_pose_par_nc(f):              # dossier partagé : jamais le manifeste d'un autre
             f.unlink()
+        for vide in (d, d.parent):                            # native-messaging-hosts, puis .mozilla, s'ils sont vides
+            try:
+                vide.rmdir()
+            except OSError:
+                break
     retirer_anciens_hotes(p)
     if complet:
         return 0
