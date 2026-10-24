@@ -76,9 +76,53 @@ BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-
                  # assistants de code et outils qui gardent des jetons ou des historiques
                  ".config/github-copilot", ".config/JetBrains", ".config/sops", ".vault-token", ".continue",
                  ".config/io.datasette.llm", ".cache/huggingface", ".config/aichat", ".config/filezilla",
-                 ".cache/cliphist", ".config/VSCodium/User/globalStorage", ".config/Cursor/User/globalStorage"]
+                 ".cache/cliphist", ".config/VSCodium/User/globalStorage", ".config/Cursor/User/globalStorage",
+                 # états et caches des moteurs d'IA (sessions, journaux, jetons de serveurs MCP, OpenCode v2 : opencode.db)
+                 ".local/state/opencode", ".cache/opencode", ".cache/claude-cli-nodejs", ".local/state/claude",
+                 # l'état de nc-ia (son journal, les dossiers laissés par une version précédente)
+                 ".local/state/nc-ia"]
+
+# Variables qui déplacent des dossiers de ces listes : (variable, préfixe relatif à ~ qu'elle remplace). Un chemin de la
+# liste est alors interdit aux DEUX endroits (le défaut et le dossier déplacé : tous les programmes ne lisent pas la
+# variable). CLAUDE_CONFIG_DIR déplace aussi ~/.claude.json (dans ce dossier, vérifié dans Claude Code 2.1).
+DEPLACEMENTS = [("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"),
+                ("XDG_CACHE_HOME", ".cache"), ("CLAUDE_CONFIG_DIR", ".claude"), ("CODEX_HOME", ".codex")]
+# Hors de ~, seuls /tmp et /var/tmp conviennent : PrivateTmp les masque en entier dans le bac
+TEMPORAIRES = ("/tmp/", "/var/tmp/")
 
 
+def deplacements(home, environ=None):
+    """{préfixe relatif à ~: dossier réel} pour chaque variable de DEPLACEMENTS posée. ValueError (message clair) si l'une
+    pointe ailleurs de façon non gérée : chemin relatif, ou dossier hors de ~ (ni /tmp ni /var/tmp), que le bac ne mettrait
+    ni en lecture seule ni hors de vue. Alors pas de bac plutôt qu'un vrai dossier de secrets lisible."""
+    environ = os.environ if environ is None else environ
+    home_reel = os.path.realpath(str(home))
+    out = {}
+    for var, pref in DEPLACEMENTS:
+        v = environ.get(var) or ""
+        if not v:
+            continue
+        if not os.path.isabs(v) or any(c in v for c in '"\\\n:'):
+            raise ValueError(f"{var}={v} : chemin relatif ou avec un caractère refusé, le bac ne sait pas le protéger")
+        r = os.path.realpath(v)
+        if r == os.path.realpath(os.path.join(home_reel, pref)):
+            continue                                            # l'emplacement par défaut : rien à faire
+        if not (r == home_reel or r.startswith(home_reel + "/") or r.startswith(TEMPORAIRES)):
+            raise ValueError(f"{var}={v} pointe hors de ton dossier personnel : le bac ne sait pas le protéger")
+        out[pref] = Path(r)
+    return out
+
+
+def emplacement(home, rel, depl):
+    """Là où un programme garde vraiment rel (relatif à ~), d'après les variables de DEPLACEMENTS (depl)."""
+    if rel == ".claude.json" and ".claude" in depl:
+        return depl[".claude"] / ".claude.json"
+    for pref, d in depl.items():
+        if rel == pref:
+            return d
+        if rel.startswith(pref + "/"):
+            return d / rel[len(pref) + 1:]
+    return Path(home) / rel
 
 
 def perso(reglage):
@@ -98,29 +142,35 @@ def perso(reglage):
     return rels
 
 
-def inaccessibles(home, reglage, libres=()):
+def inaccessibles(home, reglage, libres=(), environ=None):
     """Les chemins rendus illisibles dans le bac : BAC_INTERDITS, PROTEGES et NOEUD_BAC_INTERDITS qui existent (jamais
-    sous /tmp, que PrivateTmp masque déjà), plus tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd
-    refuse l'unité). libres : chemins relatifs à ~ laissés lisibles (les identifiants du moteur d'IA lancé, et les siens
-    seulement). None si NOEUD_BAC_INTERDITS ne convient pas."""
+    sous /tmp, que PrivateTmp masque déjà), à leur place par défaut ET là où une variable de DEPLACEMENTS les met, plus
+    tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd refuse l'unité). libres : chemins relatifs à ~
+    laissés lisibles (les identifiants du moteur d'IA lancé, et les siens seulement). None si NOEUD_BAC_INTERDITS ne
+    convient pas, ou si une variable de DEPLACEMENTS pointe ailleurs de façon non gérée."""
     vus = []
     perso_ = perso(reglage)
     if perso_ is None:
+        return None
+    environ = os.environ if environ is None else environ
+    try:
+        depl = deplacements(home, environ)
+    except ValueError:
         return None
     home = Path(home)
     for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES + perso_):
         if rel in libres:
             continue
-        if any(c in rel for c in "*?["):                       # motif (ex. assistant.conf.backup-*) : on étend
-            for q in home.glob(rel):
-                if q.exists():
-                    vus.append(str(q))
-            continue
-        p = home / rel
-        if p.exists():
-            vus.append(str(p))
-    run = os.environ.get("XDG_RUNTIME_DIR")
-    if run and os.path.isdir(run) and not run.startswith(("/tmp/", "/var/tmp/")):      # PrivateTmp le masque déjà
+        motif = any(c in rel for c in "*?[")                  # motif (ex. assistant.conf.backup-*) : on étend
+        ailleurs = emplacement(home, rel, depl)
+        # le dossier déplacé sous /tmp : PrivateTmp le masque déjà
+        for p in [home / rel] + ([ailleurs] if ailleurs != home / rel and not str(ailleurs).startswith(TEMPORAIRES) else []):
+            if motif:
+                vus += [str(q) for q in p.parent.glob(p.name) if q.exists()]
+            elif p.exists():
+                vus.append(str(p))
+    run = environ.get("XDG_RUNTIME_DIR")
+    if run and os.path.isdir(run) and not run.startswith(TEMPORAIRES):                  # PrivateTmp le masque déjà
         vus.append(run)
     return list(dict.fromkeys(vus))
 
@@ -134,14 +184,18 @@ def _prop(nom, chemin):
 
 
 def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seule=(), libres=(), env=(), unite=None,
-         reseau_prive=False, description="nc-bac"):
+         reseau_prive=False, description="nc-bac", remonter=(), remonter_lecture=()):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent (ou un chemin inadmissible).
     cmd : une chaîne (passée à /bin/sh -c) ou une liste (exécutée telle quelle, sans shell).
     ecriture : les seuls chemins inscriptibles (ReadWritePaths) ; lecture_seule : des chemins gardés en lecture seule même
     dans un dossier inscriptible ; libres : voir inaccessibles() ; env : noms de variables transmises (valeur prise dans
     l'environnement de systemd-run) ; unite : nom de l'unité (pour l'arrêter proprement) ; reseau_prive : aucun réseau ;
     description : le texte que le journal du gestionnaire écrit pour l'unité (sinon il y met la commande ENTIÈRE, donc la
-    question posée à une IA ou la commande d'une session)."""
+    question posée à une IA ou la commande d'une session).
+    remonter, remonter_lecture : des dossiers SOUS $XDG_RUNTIME_DIR que l'unité voit (inscriptibles, ou en lecture seule).
+    Alors $XDG_RUNTIME_DIR devient un tmpfs vide en lecture seule (TemporaryFileSystem=…:ro, aussi sûr qu'inaccessible :
+    aucun socket, rien des autres demandes) où seuls ces dossiers sont remontés (BindPaths, BindReadOnlyPaths). None si
+    $XDG_RUNTIME_DIR manque, est sous /tmp, ou si un de ces dossiers n'est pas dedans."""
     sr = programme("systemd-run")
     if not sr:
         return None
@@ -175,6 +229,22 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     interdits = inaccessibles(home, reglage, libres)
     if interdits is None:
         return None
+    if remonter or remonter_lecture:
+        run = os.environ.get("XDG_RUNTIME_DIR") or ""
+        if not run or not os.path.isabs(run) or run.startswith(TEMPORAIRES) or not os.path.isdir(run):
+            return None
+        run = os.path.realpath(run)
+        interdits = [x for x in interdits if os.path.realpath(x) != run]
+        # « :ro » est une option de TemporaryFileSystem et « : » sépare source et cible de BindPaths : refusé dans le chemin
+        if ":" in run or _prop("TemporaryFileSystem", run + ":ro") is None:
+            return None
+        out += ["-p", _prop("TemporaryFileSystem", run + ":ro")]
+        for nom, liste in (("BindPaths", remonter), ("BindReadOnlyPaths", remonter_lecture)):
+            for d in liste:
+                d = os.path.realpath(str(d))
+                if not d.startswith(run + "/") or ":" in d or not os.path.isdir(d) or _prop(nom, d) is None:
+                    return None
+                out += ["-p", _prop(nom, d)]
     for x in interdits:
         # Un -p par chemin, entre guillemets (systemd sépare sinon aux espaces) ; un guillemet ou une barre oblique
         # inverse dans le chemin : pas de bac plutôt qu'un chemin mal lu

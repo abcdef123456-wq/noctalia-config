@@ -46,13 +46,23 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
 - ton dossier personnel est en **lecture seule**, et rien de secret n'est lisible : `~/.ssh`, `~/.gnupg`, les navigateurs,
   les messageries, les clés d'API de nc-ia (`~/.config/nc`), les assistants de code et leurs jetons, `$XDG_RUNTIME_DIR`
   (bus, Hyprland, agents ssh et gpg…) ;
-- **chaque programme travaille dans un faux dossier personnel**, créé pour la demande et jeté après (`HOME` y pointe) :
-  on y copie seulement ses identifiants et sa config (`~/.claude/.credentials.json`, `~/.claude.json`, `~/.codex/auth.json`,
-  `~/.gemini/oauth_creds.json`…). Ses **vrais** dossiers (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.qwen`,
-  `~/.config/opencode`, `~/.local/share/opencode`) sont **illisibles et non inscriptibles** : un hook, une commande, un
-  agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire ou un serveur MCP créé par le programme
-  disparaît avec la demande et ne sera jamais exécuté hors du bac. Seul un **jeton rafraîchi** revient dans le vrai
-  fichier, après la demande, s'il est resté un JSON valide (256 Ko au plus) et si ton fichier n'a pas changé entre-temps ;
+- **chaque programme travaille dans un faux dossier personnel**, créé pour la demande et jeté après (`HOME` y pointe),
+  dans un tmpfs à toi seul (`$XDG_RUNTIME_DIR/nc-ia/bac`, vidé au redémarrage ; ce qu'un plantage laisse est purgé au
+  lancement suivant). Dans l'unité, `$XDG_RUNTIME_DIR` est un tmpfs vide en lecture seule où seuls ce faux dossier et le
+  dossier de travail de **cette** demande sont remontés : une autre demande, ou une session de confiance de JARVIS, ne les
+  voit pas. Sans `XDG_RUNTIME_DIR`, rien n'est lancé. On y copie seulement les **champs** utiles de ses identifiants
+  (`~/.claude/.credentials.json` sans `mcpOAuth`, `~/.codex/auth.json`, `~/.gemini/oauth_creds.json`, les entrées `oauth`
+  de `~/.local/share/opencode/auth.json`…) et de sa config (de `~/.claude.json`, ni `mcpServers`, ni `projects`, ni
+  `env`). Ses **vrais** dossiers (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.qwen`, `~/.config/opencode`,
+  `~/.local/share/opencode`, ou là où `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` les mettent ;
+  une de ces variables qui pointe hors de ton dossier personnel refuse le lancement) sont **illisibles et non
+  inscriptibles** : un hook, une commande, un agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire
+  ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. Seul un **jeton
+  rafraîchi** revient dans le vrai fichier, après la demande, **champ par champ** (le jeton d'accès, celui de
+  rafraîchissement, leur date) : jamais par un lien symbolique ou physique, et tout le retour est refusé si une clé
+  nouvelle apparaît ou si le compte, le serveur ou le type change (`account_id`, `resource_url`, `type`…), ce que dit le
+  journal de nc-ia (`~/.local/state/nc-ia/journal`, sans le jeton). Un jeton rapporté fait une notification « nc-ia :
+  jeton de … mis à jour par le bac ». Ton fichier qui a changé entre-temps n'est pas écrasé ;
 - l'environnement est une liste blanche : le `PATH`, la langue, le proxy, et **sa propre clé** seulement (par exemple
   `ANTHROPIC_API_KEY` pour Claude Code) ; ni `GITHUB_TOKEN`, ni les clés des autres fournisseurs ;
 - l'invite passe par l'entrée standard (Claude Code, Codex) et non dans la ligne de commande ; le journal du gestionnaire
@@ -61,8 +71,7 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
 - **le réseau reste ouvert** (HTTP/HTTPS vers leur API, mais rien ne l'empêche de joindre autre chose), **127.0.0.1 reste
   joignable** (les services locaux de ta machine) et **`/dev/shm` est partagé** avec le reste du système : ce qu'ils peuvent
   lire peut donc partir vers leur fournisseur. Ce qu'ils peuvent lire, c'est ce qui n'est pas dans la liste des secrets :
-  `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers. Pendant qu'un autre programme d'IA tourne en même temps, sa
-  copie de jeton (dans `~/.local/state/nc-ia/etat`) est lisible par le premier le temps de la demande.
+  `NOEUD_BAC_INTERDITS` (nc-reglages) y ajoute tes dossiers.
 
 **Sans bac** (pas de `systemd-run`, systemd avant 257, espaces de noms refusés), les programmes en ligne de commande ne sont
 **pas lancés** : une IA par API prend le relais. Le réglage `IA_BAC_REPLI` (nc-reglages, « non » par défaut) les laisse
