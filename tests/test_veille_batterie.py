@@ -211,8 +211,9 @@ class CommandesListeners(unittest.TestCase):
         verrou = re.search(r"on_lock_cmd\s*=\s*(.*)", general).group(1)
         deverrou = re.search(r"on_unlock_cmd\s*=\s*(.*)", general).group(1)
         ecran = batterie(self.l, "nc-ecran off")[0]
-        eteint = ['hyprctl dispatch hl.dsp.dpms({ action = "off" })']
-        allume = ['hyprctl dispatch hl.dsp.dpms({ action = "on" })']
+        # nc-ecran arrête (ou relance) aussi la bordure tournante, par hyprctl eval
+        eteint = ['hyprctl dispatch hl.dsp.dpms({ action = "off" })', 'hyprctl eval nc.bordure(true)']
+        allume = ['hyprctl dispatch hl.dsp.dpms({ action = "on" })', 'hyprctl eval nc.bordure(false)']
         # Batterie, pas verrouillé : rien
         self.materiel(secteur=False)
         self.assertEqual(self.jouer(ecran["on-timeout"]), [])

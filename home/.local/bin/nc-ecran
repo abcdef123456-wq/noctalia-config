@@ -10,6 +10,9 @@
 #   - même action faite il y a moins de 5 s (état dans $XDG_RUNTIME_DIR/nc-ecran.etat) : rien ;
 #   - écrans déjà dans cet état d'après Hyprland (dpmsStatus de « hyprctl monitors ») : rien (une touche ou la souris
 #     ont déjà rallumé l'écran, par exemple).
+# La bordure tournante (nc/energie.lua) s'arrête écran éteint (Hyprland l'animait pour rien, environ 3 % d'un cœur) :
+# nc.bordure(true) à l'extinction, nc.bordure(false) au rallumage, y compris quand l'écran était déjà rallumé par une
+# touche ou la souris. L'état est noté dans $XDG_RUNTIME_DIR/nc-ecran-eteint, que lit la config à son rechargement.
 # Hors Hyprland, ou sans hyprctl : ne fait rien, sans erreur.
 case "${1:-}" in
   on|off) action=$1 ;;
@@ -28,6 +31,7 @@ if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
   export HYPRLAND_INSTANCE_SIGNATURE
 fi
 ETAT="$RUN/nc-ecran.etat"
+ETEINT="$RUN/nc-ecran-eteint"
 # Délai de garde : un hyprctl bloqué ne retient pas le verrou indéfiniment
 h() { if command -v timeout >/dev/null 2>&1; then timeout 5 hyprctl "$@"; else hyprctl "$@"; fi; }
 
@@ -37,6 +41,12 @@ if command -v flock >/dev/null 2>&1; then
   exec 9>"$RUN/nc-ecran.verrou" || exit 0
   flock -w 10 9 || exit 0
 fi
+
+# Bordure selon l'écran (la marque d'abord : la config la lit si elle se recharge entre-temps)
+bordure() {
+  if [ "$action" = off ]; then : > "$ETEINT"; arret=true; else rm -f "$ETEINT"; arret=false; fi
+  h eval "nc.bordure($arret)" >/dev/null 2>&1
+}
 
 maintenant=$(date +%s)
 fait=""; quand=0
@@ -51,9 +61,10 @@ case "$quand" in ''|*[!0-9]*) quand=0 ;; esac
 if [ -z "$force" ]; then
   voulu=true; [ "$action" = off ] && voulu=false
   etats=$(h monitors -j 2>/dev/null | tr -d ' \t\n' | grep -o '"dpmsStatus":[a-z]*' | sed 's/.*://')
-  [ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ] && exit 0
+  if [ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ]; then bordure; exit 0; fi
 fi
 
 h dispatch "hl.dsp.dpms({ action = \"$action\" })" >/dev/null 2>&1
+bordure
 printf '%s %s\n' "$action" "$(date +%s)" > "$ETAT"
 exit 0

@@ -34,6 +34,7 @@ D='{d}'
 case "$1" in
   monitors) [ -f "$D/reel" ] && [ -f "$D/dpms" ] && printf '[{{"name": "eDP-1", "dpmsStatus": %s}}]\\n' "$(cat "$D/dpms")"
             exit 0 ;;
+  eval) printf '%s\\n' "$2" >> "$D/journal_eval" ;;
   dispatch) printf '%s\\n' "$2" >> "$D/journal"
             sleep 0.3      # un allumage prend du temps : les appels simultanés se chevaucheraient
             case "$2" in *'"on"'*) echo true > "$D/dpms" ;; *'"off"'*) echo false > "$D/dpms" ;; esac ;;
@@ -74,6 +75,12 @@ class Banc:
         a = f.read_text().splitlines() if f.exists() else []
         if vider:
             f.unlink(missing_ok=True)
+        return a
+
+    def evals(self):
+        f = self.faux / "journal_eval"
+        a = f.read_text().splitlines() if f.exists() else []
+        f.unlink(missing_ok=True)
         return a
 
     def batterie(self):
@@ -196,6 +203,30 @@ class NcEcran(unittest.TestCase):
         self.ecran("off")
         self.ecran("on")
         self.assertEqual(self.b.journal(), ['hl.dsp.dpms({ action = "off" })', 'hl.dsp.dpms({ action = "on" })'])
+
+    def test_bordure_suit_l_ecran(self):
+        # Extinction : nc.bordure(true) et marque ; rallumage : nc.bordure(false) et marque retirée
+        self.ecran("off")
+        self.assertEqual(self.b.evals(), ["nc.bordure(true)"])
+        self.assertTrue((self.b.run / "nc-ecran-eteint").exists())
+        self.ecran("on")
+        self.assertEqual(self.b.evals(), ["nc.bordure(false)"])
+        self.assertFalse((self.b.run / "nc-ecran-eteint").exists())
+        # Appels simultanés : un seul eval
+        self.ecran("off", "off", "off")
+        self.assertEqual(self.b.evals(), ["nc.bordure(true)"])
+
+    def test_bordure_rendue_meme_si_ecran_deja_rallume(self):
+        # Une touche a rallumé l'écran avant le on-resume : pas de dpms, mais la bordure doit repartir
+        b = Banc(reel=True)
+        try:
+            (b.run / "nc-ecran-eteint").write_text("")
+            b.jouer("~/.local/bin/nc-ecran on")
+            self.assertEqual(b.journal(), [])
+            self.assertEqual(b.evals(), ["nc.bordure(false)"])
+            self.assertFalse((b.run / "nc-ecran-eteint").exists())
+        finally:
+            b.fermer()
 
     def test_etat_reel_de_hyprland(self):
         b = Banc(reel=True)

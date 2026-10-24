@@ -20,12 +20,17 @@ hl = { config = function() end, exec_cmd = function() end,
        animation = function(a) if a.leaf == "borderangle" then bordure = a end end }
 dofile(arg[1])
 print(bordure.style == "loop" and "tourne" or "figee")
+if arg[4] then
+    nc.bordure(arg[4] == "eteint")
+    local apres = bordure
+    print((apres.style == "loop" and "tourne" or "figee") .. " " .. apres.speed)
+end
 '''
 
 
 @unittest.skipUnless(LUA, "lua requis")
 class BordureSurCarteDediee(unittest.TestCase):
-    def bordure(self, cartes, profil="performance", batterie=False, aq=None):
+    def bordure(self, cartes, profil="performance", batterie=False, aq=None, ecran=None, marque=False):
         """cartes : {"card1": {"vendor": "0x1002", "vram": 512 Mio, "prises": {"eDP-1": "connected"}}}"""
         with tempfile.TemporaryDirectory(prefix="nc-bordure-") as d:
             sysfs = Path(d) / "sys"
@@ -44,10 +49,13 @@ class BordureSurCarteDediee(unittest.TestCase):
             env.pop("AQ_DRM_DEVICES", None)
             if aq:
                 env["AQ_DRM_DEVICES"] = aq
-            r = subprocess.run([LUA, str(Path(d) / "harnais.lua"), str(ENERGIE), profil, "1" if batterie else "0"],
+            if marque:
+                (Path(d) / "nc-ecran-eteint").write_text("")
+            args = [ecran] if ecran else []
+            r = subprocess.run([LUA, str(Path(d) / "harnais.lua"), str(ENERGIE), profil, "1" if batterie else "0", *args],
                                env=env, capture_output=True, text=True, timeout=10)
             self.assertEqual(r.returncode, 0, r.stderr)
-            return r.stdout.strip()
+            return r.stdout.strip() if ecran is None else r.stdout.strip().splitlines()
 
     # Le portable de l'utilisateur : Radeon 610M (512 Mio) et RTX
     HYBRIDE = {"card1": {"vendor": "0x1002", "vram": 512 * 2 ** 20, "prises": {"eDP-1": "connected"}},
@@ -70,6 +78,19 @@ class BordureSurCarteDediee(unittest.TestCase):
         self.assertEqual(self.bordure(self.DEDIEE, batterie=True), "figee")
         self.assertEqual(self.bordure(self.DEDIEE, profil="power-saver"), "figee")
         self.assertEqual(self.bordure(self.DEDIEE, profil="balanced"), "figee")
+
+    def test_ecran_eteint_pas_de_boucle(self):
+        # Écran éteint : calme (vitesse 8), puis la boucle repart au rallumage
+        self.assertEqual(self.bordure(self.DEDIEE, ecran="eteint"), ["tourne", "figee 8"])
+        self.assertEqual(self.bordure(self.DEDIEE, ecran="allume"), ["tourne", "tourne 100"])
+        # Boucle jamais permise : rien ne la lance au rallumage
+        self.assertEqual(self.bordure(self.DEDIEE, batterie=True, ecran="allume"), ["figee", "figee 8"])
+        self.assertEqual(self.bordure(self.HYBRIDE, ecran="allume"), ["figee", "figee 8"])
+
+    def test_rechargement_ecran_eteint_ne_relance_pas_la_boucle(self):
+        # La marque de nc-ecran existe : le chargement de la config donne tout de suite la version calme
+        self.assertEqual(self.bordure(self.DEDIEE, marque=True), "figee")
+        self.assertEqual(self.bordure(self.DEDIEE, marque=False), "tourne")
 
     def test_doute_figee(self):
         self.assertEqual(self.bordure({}), "figee")
