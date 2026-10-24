@@ -465,8 +465,9 @@ def ecrire_dans_la_fenetre(texte, avertissements=None):
     if shutil.which("wtype"):
         # Le texte par l'entrée standard (« wtype - », dès wtype 0.3, un seul « - » par appel) : jamais en argument,
         # lisible par tous dans /proc/*/cmdline.
+        # Délai selon la longueur : wtype tape touche par touche, une longue dictée prend du temps
         if subprocess.run(["wtype", "-"], input=texte.encode(), capture_output=True, env=ENV_WTYPE,
-                          timeout=30).returncode == 0:
+                          timeout=10 + len(texte) / 200).returncode == 0:
             return True
     if not (shutil.which("wl-copy") and shutil.which("wl-paste")):
         return False
