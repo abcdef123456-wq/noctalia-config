@@ -172,6 +172,15 @@ def inaccessibles(home, reglage, libres=(), environ=None):
     run = environ.get("XDG_RUNTIME_DIR")
     if run and os.path.isdir(run) and not run.startswith(TEMPORAIRES):                  # PrivateTmp le masque déjà
         vus.append(run)
+    # /run/user/<uid> peut contenir le bus, les sockets et des secrets : s'il existe et que XDG_RUNTIME_DIR pointe
+    # ailleurs (ProtectSystem=strict ne le masque pas, il reste lisible), on le rend aussi illisible — sauf s'il
+    # contient XDG_RUNTIME_DIR ou l'inverse (le masquer couperait alors le tmpfs remonté de la demande).
+    standard = f"/run/user/{os.getuid()}"
+    rr = os.path.realpath(run or "/\0")
+    if os.path.isdir(standard):
+        sr = os.path.realpath(standard)
+        if sr != rr and not rr.startswith(sr + "/") and not sr.startswith(rr + "/"):
+            vus.append(standard)
     return list(dict.fromkeys(vus))
 
 
@@ -202,8 +211,14 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     # PrivatePIDs (systemd 257) : un /proc à lui, aucun autre de tes processus visible ni joignable par un signal ;
     # sans lui, la sonde échoue et il n'y a pas de bac. SystemCallFilter retire ptrace, process_vm_* et le
     # trousseau du noyau (partagé entre espaces de noms). ProtectProc/ProcSubset ne valent pas pour --user : pas mis.
+    # ProtectSystem=strict : tout le système en lecture seule (sauf /dev, /proc, /sys, et les ReadWritePaths/BindPaths),
+    #   sinon le bac pouvait écrire hors de ~ (/dev/shm, /dev/mqueue, /var/spool/mail, /run/media/<user>, /mnt…).
+    #   ReadOnlyPaths=/dev/shm : /dev reste accessible malgré strict, et /dev/shm est partagé entre tous les comptes.
+    # KillSignal=SIGKILL + TimeoutStopSec=1s : un moteur qui ignore SIGTERM et garde sa sortie ouverte est tué tout de
+    #   suite et l'unité ne traîne pas (sinon « systemctl stop » attendait jusqu'à 90 s pendant que nc-ia veut nettoyer).
     props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
-             "ProtectHome=read-only", "PrivateTmp=yes",
+             "ProtectHome=read-only", "PrivateTmp=yes", "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm",
+             "KillSignal=SIGKILL", "TimeoutStopSec=1s",
              # OnFailure= vide : un greffon global (OnFailure=nc-panne@%n sur chaque service) ferait sinon une notification
              # « en panne » pour chaque commande ou question qui échoue ou dépasse son délai dans le bac
              "OnFailure=",
@@ -251,12 +266,25 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
         if '"' in x or "\\" in x:
             return None
         out += ["-p", 'InaccessiblePaths="' + x + '"']
+    # --setenv n'ENLÈVE rien : l'unité hérite sinon de TOUT l'environnement du gestionnaire systemd (vrais XDG_*_HOME,
+    # DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HYPRLAND_INSTANCE_SIGNATURE, et avec uwsm toute clé exportée
+    # comme OPENAI_API_KEY ou GITHUB_TOKEN). Plutôt qu'une liste noire (UnsetEnvironment, qui dépend de ce qu'on sait
+    # du gestionnaire), on efface TOUT avec « env -i » puis on ne garde que la liste blanche (env), par son NOM :
+    # « env -i PATH="$PATH" HOME="$HOME" … » — la valeur vient de l'environnement de l'unité (posée par --setenv, jamais
+    # dans la ligne de commande, donc jamais visible dans « ps » ni le journal), le shell de l'unité la développe. Un
+    # nom non transmis (ni --setenv ni hérité du gestionnaire) devient une variable vide, sans fuite. Les XDG_*_HOME ne
+    # sont pas dans la liste : absents, chaque outil les déduit de HOME (le faux dossier personnel).
     for nom in env:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nom):
+            return None
         out.append("--setenv=" + nom)
+    garder = "".join(' ' + n + '="$' + n + '"' for n in env)    # noms seulement ; les valeurs restent hors de la ligne de commande
     # Le dossier de travail passe par un « cd » dans la commande, pas par WorkingDirectory : systemd refuse l'unité
     # quand WorkingDirectory tombe sur un tmpfs (ex. /dev/shm des tests), alors qu'un cd marche partout.
     if isinstance(cmd, str):
-        out += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && " + cmd]
+        out += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && exec env -i" + garder
+                + " /bin/sh -c " + shlex.quote(cmd)]
     else:
-        out += ["--", "/bin/sh", "-c", 'cd "$1" && shift && exec "$@"', "sh", str(cwd)] + [str(x) for x in cmd]
+        out += ["--", "/bin/sh", "-c", 'cd "$1" && shift && exec env -i' + garder + ' "$@"', "sh", str(cwd)] \
+            + [str(x) for x in cmd]
     return out

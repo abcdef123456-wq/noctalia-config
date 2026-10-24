@@ -58,15 +58,22 @@ Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code (et les suivants) réponde
   une de ces variables qui pointe hors de ton dossier personnel refuse le lancement) sont **illisibles et non
   inscriptibles** : un hook, une commande, un agent, une règle, un `AGENTS.md`, un script de shell, un fichier de mémoire
   ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. Seul un **jeton
-  rafraîchi** revient dans le vrai fichier, après la demande, **champ par champ** (le jeton d'accès, celui de
-  rafraîchissement, leur date) : jamais par un lien symbolique ou physique, et tout le retour est refusé si une clé
-  nouvelle apparaît ou si le compte, le serveur ou le type change (`account_id`, `resource_url`, `type`…), ce que dit le
-  journal de nc-ia (`~/.local/state/nc-ia/journal`, sans le jeton). Un jeton rapporté fait une notification « nc-ia :
-  jeton de … mis à jour par le bac ». Ton fichier qui a changé entre-temps n'est pas écrasé ;
-- l'environnement est une liste blanche : le `PATH`, la langue, le proxy, et **sa propre clé** seulement (par exemple
-  `ANTHROPIC_API_KEY` pour Claude Code) ; ni `GITHUB_TOKEN`, ni les clés des autres fournisseurs ;
-- l'invite passe par l'entrée standard (Claude Code, Codex) et non dans la ligne de commande ; le journal du gestionnaire
-  systemd n'écrit que « nc-ia » ; `$VAR` et `${VAR}` dans une question ne sont jamais remplacés ;
+  rafraîchi** revient dans le vrai fichier, après la demande, **champ par champ** et par type (jeton d'accès en texte,
+  dates en nombre, jamais `NaN`) : lu sans suivre aucun lien (symbolique ou physique), écrit sous verrou dans un
+  temporaire renommé, jamais si le fichier a changé entre-temps. Tout le retour est refusé si une clé nouvelle apparaît,
+  si le compte, le serveur ou le type change (`account_id`, `resource_url`, `type`…), si le jeton d'accès d'origine était
+  encore valide (aucun rafraîchissement n'était nécessaire), ou, pour Codex, si le `chatgpt_account_id` des JWT ou le
+  `sub`/`email` ne concordent plus. Le jeton de rafraîchissement n'est même pas copié dans le bac tant que le jeton
+  d'accès reste valide bien plus longtemps qu'une demande. Chaque refus est écrit au journal de nc-ia
+  (`~/.local/state/nc-ia/journal`, sans le jeton) et **notifié** ; un rafraîchissement normal ne notifie pas ;
+- l'environnement est **effacé puis reconstruit** (`env -i`) : l'unité ne reçoit que la liste blanche — le `PATH`, la
+  langue, le proxy, et **sa propre clé** (par exemple `ANTHROPIC_API_KEY` pour Claude Code) —, jamais ce qui fuit du
+  gestionnaire systemd (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, les vrais
+  `XDG_*_HOME`, `GITHUB_TOKEN` ou une clé exportée). Les valeurs ne passent pas par la ligne de commande ;
+- l'invite passe par l'entrée standard (Claude Code, Codex, OpenCode) et non dans la ligne de commande ; le journal du
+  gestionnaire systemd n'écrit que « nc-ia » ; `$VAR` et `${VAR}` dans une question ne sont jamais remplacés ;
+- tout le système est en **lecture seule** (`ProtectSystem=strict`, plus `/dev/shm`), seuls les dossiers de la demande
+  s'écrivent : rien ne fuit par `/dev/shm`, `/var/spool/mail`, `/run/media/<user>`… ;
 - aucun autre processus visible, pas de `ptrace` ni de trousseau du noyau, pas de `sudo`, `/tmp` privé ;
 - **le réseau reste ouvert** (HTTP/HTTPS vers leur API, mais rien ne l'empêche de joindre autre chose), **127.0.0.1 reste
   joignable** (les services locaux de ta machine) et **`/dev/shm` est partagé** avec le reste du système : ce qu'ils peuvent

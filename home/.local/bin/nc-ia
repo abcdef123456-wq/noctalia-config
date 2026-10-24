@@ -945,22 +945,143 @@ ETAT_MOTEURS = {
 #   entrée par fournisseur, seules celles de type oauth, et seulement celles qui existaient déjà).
 # Une clé hors du schéma qui apparaît (mcpOAuth, une nouvelle entrée d'OpenCode…) : tout le retour est refusé, et le
 # journal de nc-ia le dit (jamais la valeur).
-_OPENCODE_OAUTH = {"type": "fixe", "access": "jeton", "refresh": "jeton", "expires": "jeton", "accountId": "fixe",
+# Type de chaque champ de jeton, vérifié au retour (une valeur venue du bac) : « txt » un jeton en texte ASCII de 16 Kio
+# au plus, « ms » une date epoch en millisecondes (int, de 1970 à 2100), « iso » un horodatage RFC 3339 court (Codex
+# last_refresh). Les autres marqueurs : « fixe » (changement = tout refusé), « copie » (le moteur en a besoin, un
+# changement est ignoré, jamais rapporté), « nul » (jamais copié, doit rester null).
+JETONS_TYPES = ("txt", "ms", "iso")
+_OPENCODE_OAUTH = {"type": "fixe", "access": "txt", "refresh": "txt", "expires": "ms", "accountId": "fixe",
                    "enterpriseUrl": "fixe"}
 SCHEMAS = {
-    "claude": {"claudeAiOauth": {"accessToken": "jeton", "refreshToken": "jeton", "expiresAt": "jeton",
-                                 "refreshTokenExpiresAt": "jeton", "scopes": "copie", "subscriptionType": "copie",
+    "claude": {"claudeAiOauth": {"accessToken": "txt", "refreshToken": "txt", "expiresAt": "ms",
+                                 "refreshTokenExpiresAt": "ms", "scopes": "copie", "subscriptionType": "copie",
                                  "subscriptionTypeSource": "copie", "subscriptionTypeVerifiedAt": "copie",
                                  "rateLimitTier": "copie", "clientId": "fixe"}},
-    "codex": {"tokens": {"access_token": "jeton", "refresh_token": "jeton", "id_token": "jeton", "account_id": "fixe"},
-              "last_refresh": "jeton", "auth_mode": "fixe", "OPENAI_API_KEY": "nul", "agent_identity": "nul",
+    "codex": {"tokens": {"access_token": "txt", "refresh_token": "txt", "id_token": "txt", "account_id": "fixe"},
+              "last_refresh": "iso", "auth_mode": "fixe", "OPENAI_API_KEY": "nul", "agent_identity": "nul",
               "personal_access_token": "nul", "bedrock_api_key": "nul", "bedrock_access_keys": "nul"},
-    "gemini-cli": {"access_token": "jeton", "refresh_token": "jeton", "expiry_date": "jeton", "token_type": "copie",
+    # Gemini : refresh_token en « fixe » (Google ne le fait pas tourner à chaque rafraîchissement) : s'il change, tout le
+    # retour est refusé plutôt que d'accepter un nouveau jeton de rafraîchissement venu du bac.
+    "gemini-cli": {"access_token": "txt", "refresh_token": "fixe", "expiry_date": "ms", "token_type": "copie",
                    "scope": "copie", "id_token": "copie"},
-    "qwen": {"access_token": "jeton", "refresh_token": "jeton", "expiry_date": "jeton", "token_type": "copie",
+    "qwen": {"access_token": "txt", "refresh_token": "txt", "expiry_date": "ms", "token_type": "copie",
              "resource_url": "fixe"},
     "opencode": {"*": lambda v: _OPENCODE_OAUTH if isinstance(v, dict) and v.get("type") == "oauth" else None},
 }
+# La durée de validité restante du jeton d'accès d'origine (chemin de la date, en ms), par moteur à jeton unique : on
+# n'accepte un retour que si ce jeton était expiré ou sur le point de l'être, et on ne copie même pas le jeton de
+# rafraîchissement dans le bac quand il reste valide bien plus longtemps qu'une demande. OpenCode (plusieurs comptes
+# dans un même fichier) n'est pas couvert : garde-fou de schéma seulement.
+JETON_DATE = {"claude": ("claudeAiOauth", "expiresAt"), "gemini-cli": ("expiry_date",), "qwen": ("expiry_date",)}
+JETON_REFRESH = {"claude": ("claudeAiOauth", "refreshToken"), "qwen": ("refresh_token",),
+                 "codex": ("tokens", "refresh_token")}
+
+
+def _refus_constante(_x):
+    raise ValueError("constante JSON non numérique (NaN, Infinity) refusée")
+
+
+def charger_json(octets):
+    """json.loads qui refuse NaN/Infinity (sinon json.dumps réécrirait NaN dans le vrai fichier, que Node et serde
+    rejettent ensuite)."""
+    return json.loads(octets, parse_constant=_refus_constante)
+
+
+def vider_json(objet):
+    return json.dumps(objet, allow_nan=False)
+
+
+def _dedans(objet, chemin):
+    o = objet
+    for k in chemin:
+        if not isinstance(o, dict) or k not in o:
+            return None
+        o = o[k]
+    return o
+
+
+def _retirer(objet, chemin):
+    """Enlève objet[chemin] s'il existe (copie peu profonde le long du chemin, l'original n'est pas touché)."""
+    if _dedans(objet, chemin) is None:
+        return objet
+    out = dict(objet)
+    o = out
+    for k in chemin[:-1]:
+        o[k] = dict(o[k])
+        o = o[k]
+    o.pop(chemin[-1], None)
+    return out
+
+
+def jwt_charge(jeton):
+    """La charge (2e segment) d'un JWT, SANS vérifier la signature, ou None. Pour comparer compte/sub/email de Codex."""
+    if not isinstance(jeton, str) or jeton.count(".") < 2:
+        return None
+    seg = jeton.split(".")[1]
+    seg += "=" * (-len(seg) % 4)
+    try:
+        charge = charger_json(base64.urlsafe_b64decode(seg))
+        return charge if isinstance(charge, dict) else None
+    except Exception:
+        return None
+
+
+def _chercher_cle(obj, cle):
+    """La première valeur trouvée pour cette clé, à n'importe quelle profondeur (claims JWT imbriqués d'OpenAI)."""
+    if isinstance(obj, dict):
+        if cle in obj:
+            return obj[cle]
+        for v in obj.values():
+            r = _chercher_cle(v, cle)
+            if r is not None:
+                return r
+    return None
+
+
+# Clés gardées des fichiers de réglages copiés (en plus de ~/.claude.json/settings.json filtrés par ETAT_MOTEURS) :
+# juste ce qu'il faut à une question non interactive. Jamais mcpServers (serveurs MCP), ni les options qui portent une
+# clé d'API ou des en-têtes (apiKey, headers, authentication…), ni ce qui lance du code (hooks, scripts, extensions).
+CONFIG_CLES = {
+    ".gemini/settings.json": {"theme", "selectedAuthType", "preferredEditor", "usageStatisticsEnabled", "model",
+                              "general", "ui", "privacy"},
+    ".gemini/google_accounts.json": {"active", "accounts", "default"},
+    ".qwen/settings.json": {"theme", "selectedAuthType", "preferredEditor", "usageStatisticsEnabled", "model",
+                            "general", "ui", "privacy"},
+    ".config/opencode/opencode.json": {"$schema", "theme", "model", "small_model", "autoupdate", "username"},
+    ".config/opencode/opencode.jsonc": {"$schema", "theme", "model", "small_model", "autoupdate", "username"},
+}
+
+
+def cles_config(ident, rel):
+    """La liste blanche de clés pour ce fichier de réglages (ETAT_MOTEURS pour Claude, CONFIG_CLES pour les autres),
+    ou None s'il n'est pas du JSON à filtrer (ex. CLAUDE.md : copié tel quel)."""
+    cles = ETAT_MOTEURS.get(ident, {}).get("copie", {}).get(rel)
+    if isinstance(cles, set):
+        return cles
+    return CONFIG_CLES.get(rel)
+
+
+def filtrer_config(cles, objet):
+    """Ne garde d'un fichier de réglages que des clés connues et inoffensives (jamais mcpServers, options.apiKey ni
+    en-têtes, hooks, projects, env, extensions)."""
+    return {k: v for k, v in objet.items() if k in cles}
+
+
+def sans_refresh_si_valide(ident, donne):
+    """Le jeton copié dans le bac, mais SANS le jeton de rafraîchissement quand le jeton d'accès reste valide bien plus
+    longtemps qu'une demande : un moteur compromis ne peut pas exfiltrer le jeton de rafraîchissement, et il n'en a pas
+    besoin (le jeton d'accès suffit). Les moteurs sans date lisible, ou OpenCode (plusieurs comptes), gardent tout."""
+    date, refresh = JETON_DATE.get(ident), JETON_REFRESH.get(ident)
+    if date is None or refresh is None:
+        return donne
+    exp = _dedans(donne, date)
+    if not isinstance(exp, int) or isinstance(exp, bool):
+        return donne
+    if exp <= time.time() * 1000 + int((DELAI_CLI + 300) * 1000):   # va expirer : le moteur peut avoir besoin du refresh
+        return donne
+    return _retirer(donne, refresh)
+
+
 COPIE_MAX = 16 * 1024 * 1024
 JETON_MAX = 256 * 1024
 VERROU_ATTENTE = 5                           # secondes : le vrai fichier d'identifiants verrouillé plus longtemps, pas de retour
@@ -1006,14 +1127,13 @@ def journal_ia(texte):
         pass
 
 
-def notifier_jeton(ident):
-    """Un jeton revenu du bac : une notification (notify-send s'il est là, rien sinon), pour qu'un changement inattendu
-    se voie."""
+def notifier_bac(message):
+    """Une notification du bac (notify-send s'il est là, rien sinon), pour qu'un retour de jeton inattendu — refusé ou
+    abandonné — se voie. Un rafraîchissement normal ne notifie pas (seulement le journal)."""
     if not shutil.which("notify-send"):
         return
     with contextlib.suppress(OSError):
-        subprocess.Popen(["notify-send", "-a", "IA", "-i", "dialog-information", "--", "nc-ia",
-                          T(f"jeton de {nom(ident)} mis à jour par le bac", f"{nom(ident)} token updated by the sandbox")],
+        subprocess.Popen(["notify-send", "-a", "IA", "-i", "dialog-information", "--", "nc-ia", message],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
 
@@ -1063,22 +1183,90 @@ def base_bac():
     return base
 
 
+def _ouvrir_dossier_sans_lien(dirfd, nom):
+    """Un descripteur O_DIRECTORY sur dirfd/nom, sans suivre AUCUN lien. Un dossier à 000 (le moteur a retiré ses
+    droits) est d'abord remis à 0700 par /proc (jamais par son chemin, donc jamais à travers un lien). None si ce n'est
+    pas un dossier réel (lien substitué par une course, fichier, course perdue)."""
+    import stat as st
+    try:
+        return os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError:
+        pass                                            # peut-être EACCES (dossier à 000) ou ELOOP (lien) : on tranche
+    try:
+        pf = os.open(nom, os.O_PATH | os.O_NOFOLLOW, dir_fd=dirfd)   # O_PATH : n'exige ni r ni x, ne suit pas le lien final
+    except OSError:
+        return None
+    try:
+        if not st.S_ISDIR(os.stat(pf).st_mode):
+            return None                                 # un lien (ou autre) : on ne le suit pas
+        os.chmod("/proc/self/fd/%d" % pf, 0o700)        # par le descripteur, aucun composant de chemin contrôlable
+    except OSError:
+        return None
+    finally:
+        os.close(pf)
+    try:
+        return os.open(nom, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+    except OSError:
+        return None
+
+
+def _effacer_entree(dirfd, nom):
+    """Supprime dirfd/nom (fichier, lien ou sous-arbre) par descripteurs seulement."""
+    try:
+        os.unlink(nom, dir_fd=dirfd)                    # fichier ou lien : unlink ne suit jamais le dernier élément
+        return
+    except FileNotFoundError:
+        return
+    except OSError:
+        pass                                            # EISDIR (dossier) ou droits : on traite en dossier
+    sub = _ouvrir_dossier_sans_lien(dirfd, nom)
+    if sub is None:
+        return
+    try:
+        os.fchmod(sub, 0o700)
+        for _ in range(100000):
+            noms = os.listdir(sub)
+            if not noms:
+                break
+            for n in noms:
+                _effacer_entree(sub, n)
+    except OSError:
+        pass
+    finally:
+        os.close(sub)
+    with contextlib.suppress(OSError):
+        os.rmdir(nom, dir_fd=dirfd)
+
+
 def effacer(chemin):
-    """Supprime un dossier d'une demande, même si le moteur y a retiré des droits (chmod 000)."""
-    def reessayer(f, p, _):
-        with contextlib.suppress(OSError):
-            os.chmod(os.path.dirname(p), 0o700)
-            if os.path.isdir(p) and not os.path.islink(p):
-                os.chmod(p, 0o700)
-            f(p)
-    for _ in range(4):
-        if not os.path.lexists(chemin):
-            return
-        with contextlib.suppress(OSError):
-            if sys.version_info >= (3, 12):
-                shutil.rmtree(chemin, onexc=reessayer)
-            else:
-                shutil.rmtree(chemin, onerror=reessayer)
+    """Supprime un dossier (ou fichier) d'une demande par DESCRIPTEURS seulement, aucune opération par chemin : un
+    moteur encore vivant qui remplace un dossier par un lien vers une victime hors du bac pendant l'effacement ne peut
+    pas faire supprimer la victime (chaque ouverture est en O_NOFOLLOW depuis le dossier parent déjà ouvert)."""
+    chemin = os.fspath(chemin).rstrip("/")
+    parent, nom = os.path.split(chemin)
+    if not nom:
+        return
+    try:
+        pfd = os.open(parent or "/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return
+    try:
+        _effacer_entree(pfd, nom)
+    finally:
+        os.close(pfd)
+
+
+def env_systemctl():
+    """L'environnement pour « systemctl --user » : il joint le gestionnaire par le transport local $XDG_RUNTIME_DIR/bus
+    et NE se rabat PAS sur DBUS_SESSION_BUS_ADDRESS. Quand ce dernier est posé (session normale), on retire
+    XDG_RUNTIME_DIR pour que systemctl passe par le bus D-Bus — c'est ainsi que systemd-run joint déjà le gestionnaire,
+    et ça rend les tests (XDG_RUNTIME_DIR dérouté, sans bus) cohérents avec la vraie session."""
+    e = dict(os.environ)
+    if e.get("DBUS_SESSION_BUS_ADDRESS"):
+        e.pop("XDG_RUNTIME_DIR", None)
+    return e
 
 
 def unites_actives(noms):
@@ -1087,7 +1275,7 @@ def unites_actives(noms):
         return set()
     try:
         r = subprocess.run(["systemctl", "--user", "is-active", "--", *noms], stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=5, env=env_systemctl())
     except (subprocess.TimeoutExpired, OSError):
         return None
     etats = r.stdout.split()
@@ -1110,33 +1298,34 @@ def purger_demandes(base):
     tenus, candidats = [], []
     try:
         for i, noms in groupes.items():
-            try:
-                if any(time.time() - os.lstat(base / n).st_mtime < 30 for n in noms):
+            try:                                                    # P2-A : une erreur sur un groupe (un dossier à 000,
+                if any(time.time() - os.lstat(base / n).st_mtime < 30 for n in noms):   # un lien…) n'arrête pas la purge
                     continue
-            except OSError:
-                continue
-            home = base / f"nc-ia-home-{i}"
-            if home.is_dir() and not home.is_symlink():
-                try:
+                home = base / f"nc-ia-home-{i}"
+                if home.is_dir() and not home.is_symlink():
                     fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                except OSError:
-                    continue
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError:
-                    os.close(fd)                                    # une demande en cours le tient
-                    continue
-                tenus.append(fd)
-            candidats.append(i)
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except OSError:
+                        os.close(fd)                                # une demande en cours le tient
+                        continue
+                    tenus.append(fd)
+                candidats.append(i)
+            except Exception:
+                continue
         actives = unites_actives([UNITE_PREFIXE + i + ".service" for i in candidats])
         if actives is not None:
             for i in candidats:
                 if UNITE_PREFIXE + i + ".service" not in actives:
                     for n in groupes[i]:
-                        effacer(base / n)
+                        try:
+                            effacer(base / n)
+                        except Exception:
+                            continue
     finally:
         for fd in tenus:
-            os.close(fd)
+            with contextlib.suppress(OSError):
+                os.close(fd)
     # Version précédente : faux dossiers personnels et dossiers de travail sous ~/.local/state/nc-ia
     for sous in ("etat", "travail", "conf"):
         d = dossier_etat_ia() / sous
@@ -1201,6 +1390,24 @@ def _schema_de(schema, k, v):
     return f(v) if f else None
 
 
+def est_jeton(s):
+    return isinstance(s, str) and s in JETONS_TYPES
+
+
+def valide_jeton(typ, v):
+    """La valeur d'un champ de jeton venue du bac convient-elle à son type ? (txt : texte ASCII ≤ 16 Kio ; ms : date
+    epoch en ms, int de 1970 à 2100 ; iso : horodatage RFC 3339 court). Refuse bool, float (NaN/Infinity y compris) et
+    les objets."""
+    if typ == "txt":
+        return isinstance(v, str) and v.isascii() and len(v) <= 16 * 1024
+    if typ == "ms":
+        return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 4102444800000
+    if typ == "iso":
+        return isinstance(v, str) and v.isascii() and len(v) <= 64 and \
+            re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:?\d\d)?", v) is not None
+    return False
+
+
 def projeter(objet, schema):
     """Ce qui entre dans le faux dossier personnel : les seuls champs du schéma (jeton, fixe, copie)."""
     out = {}
@@ -1209,7 +1416,7 @@ def projeter(objet, schema):
         if isinstance(s, dict):
             if isinstance(v, dict):
                 out[k] = projeter(v, s)
-        elif s in ("jeton", "fixe", "copie"):
+        elif est_jeton(s) or s in ("fixe", "copie"):
             out[k] = v
     return out
 
@@ -1217,7 +1424,7 @@ def projeter(objet, schema):
 def changements_jeton(avant, neuf, schema, chemin=()):
     """Les champs de jeton que le moteur a changés, [(chemin, valeur)], entre ce qui lui a été donné (avant) et ce qu'il
     a laissé (neuf). ValueError(raison, sans valeur) si le retour doit être refusé en entier : nouvelle clé ou entrée,
-    champ fixe changé (type, resource_url, account_id, accountId, serveur…), valeur de jeton qui n'est pas simple."""
+    champ fixe changé (type, resource_url, account_id, accountId, serveur…), valeur de jeton du mauvais type."""
     def nom_(c):                                        # des noms venus du moteur : courts, sans caractère de contrôle
         return ".".join(re.sub(r"[^\w@:/+-]", "?", str(x))[:60] for x in c) or "racine"
     if not isinstance(neuf, dict):
@@ -1238,12 +1445,44 @@ def changements_jeton(avant, neuf, schema, chemin=()):
         elif s == "nul":
             if n is not None:
                 raise ValueError(nom_(c) + " est apparu")
-        elif s == "jeton":
+        elif est_jeton(s):
             if k in neuf and n != a:
-                if isinstance(n, bool) or not isinstance(n, (str, int, float)):
-                    raise ValueError(nom_(c) + " n'est pas une valeur simple")
+                if not valide_jeton(s, n):
+                    raise ValueError(nom_(c) + " : valeur de jeton invalide")
                 out.append((c, n))
     return out
+
+
+def verifier_retour(ident, avant, neuf):
+    """Dernier contrôle avant d'accepter un jeton revenu du bac, par moteur. ValueError(raison) refuse tout le retour :
+      - le jeton d'accès d'origine était encore valide bien au-delà d'une demande (aucun rafraîchissement n'était
+        nécessaire : retour suspect) — pour les moteurs qui donnent une date ;
+      - Codex : chatgpt_account_id des JWT (id_token, access_token) doit égaler tokens.account_id, et sub/email ne
+        doivent pas changer (un autre compte serait glissé)."""
+    date = JETON_DATE.get(ident)
+    if date is not None:
+        exp = _dedans(avant, date)
+        if isinstance(exp, int) and not isinstance(exp, bool):
+            marge_ms = int((DELAI_CLI + 1800) * 1000)       # 30 min : couvre un moteur qui rafraîchit tôt
+            if exp > time.time() * 1000 + marge_ms:
+                raise ValueError("jeton d'accès d'origine encore valide, retour inattendu")
+    if ident == "codex":
+        compte = _dedans(neuf, ("tokens", "account_id"))
+        ap = jwt_charge(_dedans(neuf, ("tokens", "id_token")))
+        if ap is None:                                      # l'id_token OpenAI est toujours un JWT : illisible = suspect
+            raise ValueError("id_token illisible")
+        # chatgpt_account_id de l'id_token ET de l'access_token (s'il est un JWT) doit être le compte
+        for champ in ("id_token", "access_token"):
+            charge = jwt_charge(_dedans(neuf, ("tokens", champ)))
+            if charge is not None:
+                cai = _chercher_cle(charge, "chatgpt_account_id")
+                if compte is not None and cai is not None and cai != compte:
+                    raise ValueError("chatgpt_account_id ne correspond pas au compte")
+        av = jwt_charge(_dedans(avant, ("tokens", "id_token")))
+        if av:
+            for champ in ("sub", "email"):
+                if av.get(champ) is not None and av.get(champ) != ap.get(champ):
+                    raise ValueError(f"{champ} du jeton a changé")
 
 
 def appliquer_jeton(objet, changements, schema):
@@ -1256,7 +1495,7 @@ def appliquer_jeton(objet, changements, schema):
             if not isinstance(s, dict) or not isinstance(o.get(k), dict):
                 raise ValueError(".".join(chemin) + " n'existe pas dans le vrai fichier")
             o = o[k]
-        if _schema_de(s, chemin[-1], o.get(chemin[-1])) != "jeton":
+        if not est_jeton(_schema_de(s, chemin[-1], o.get(chemin[-1]))):
             raise ValueError(".".join(chemin) + " n'est pas un champ de jeton")
         o[chemin[-1]] = v
 
@@ -1278,6 +1517,13 @@ def ecrire_retour(src, octets, schema, changements):
                 if time.monotonic() > fin:
                     raise ValueError("vrai fichier verrouillé") from None
                 time.sleep(0.1)
+        # Après le verrou, vérifier qu'on tient bien le fichier du chemin (pas un autre inode substitué entre l'ouverture
+        # et le flock : une session de ton côté a pu le remplacer). Sinon on n'écrase pas (comme un fichier changé).
+        try:
+            if os.fstat(fd).st_ino != os.stat(reel).st_ino:
+                return False
+        except FileNotFoundError:
+            return False
         actuel = b""
         while len(actuel) <= JETON_MAX:
             b = os.read(fd, JETON_MAX + 1 - len(actuel))
@@ -1286,10 +1532,11 @@ def ecrire_retour(src, octets, schema, changements):
             actuel += b
         if actuel != octets:
             return False
-        objet = json.loads(actuel)
+        objet = charger_json(actuel)
         appliquer_jeton(objet, changements, schema)
-        donnees = (json.dumps(objet, indent=2) + "\n").encode()
-        tmp = os.path.join(os.path.dirname(reel), "." + os.path.basename(reel) + ".nc-ia-" + os.urandom(8).hex())
+        donnees = (vider_json(objet) + "\n").encode()
+        dossier = os.path.dirname(reel)
+        tmp = os.path.join(dossier, "." + os.path.basename(reel) + ".nc-ia-" + os.urandom(8).hex())
         tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, stat_mode(reel))
         try:
             try:
@@ -1304,6 +1551,13 @@ def ecrire_retour(src, octets, schema, changements):
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
             raise
+        # fsync du dossier : le renommage (le jeton rafraîchi) survit à une coupure de courant
+        with contextlib.suppress(OSError):
+            dfd = os.open(dossier, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
         return True
     finally:
         os.close(fd)                                            # libère aussi le verrou
@@ -1372,17 +1626,18 @@ class Demande:
     def _preparer(self):
         """Le faux dossier personnel : sa config (copie), et ses identifiants champ par champ (SCHEMAS)."""
         c = ETAT_MOTEURS.get(self.ident, dict(copie={}, jeton=[]))
-        for rel, cles in c["copie"].items():
+        for rel in c["copie"]:
             octets = lire_source(self.emplacement(rel), COPIE_MAX)
             if octets is None:
                 continue
             try:
-                if cles is not None:
-                    o = json.loads(octets)
+                cles = cles_config(self.ident, rel)
+                if cles is not None:                    # du JSON de réglages : filtré par liste blanche
+                    o = charger_json(octets)
                     if not isinstance(o, dict):
                         continue
-                    octets = json.dumps({k: v for k, v in o.items() if k in cles}).encode()
-                ecrire_copie(self.home, rel, octets)
+                    octets = vider_json(filtrer_config(cles, o)).encode()
+                ecrire_copie(self.home, rel, octets)    # sinon (CLAUDE.md…) : copié tel quel
             except (OSError, ValueError, RecursionError):
                 continue
         for rel in c["jeton"]:
@@ -1391,14 +1646,15 @@ class Demande:
             if octets is None:
                 continue
             try:
-                o = json.loads(octets)
+                o = charger_json(octets)
                 if not isinstance(o, dict):
                     continue
                 donne = projeter(o, SCHEMAS[self.ident])
-                ecrire_copie(self.home, rel, json.dumps(donne).encode())
+                copie = sans_refresh_si_valide(self.ident, donne)   # pas le jeton de rafraîchissement si l'accès vaut longtemps
+                ecrire_copie(self.home, rel, vider_json(copie).encode())
             except (OSError, ValueError, RecursionError):
                 continue
-            self._avant[rel] = (src, octets, donne)
+            self._avant[rel] = (src, octets, copie)
 
     def retour(self):
         """Le jeton rafraîchi dans le bac revient dans le vrai fichier, champ par champ ; un fichier qui ne convient pas
@@ -1408,22 +1664,30 @@ class Demande:
                 neuf = lire_sans_lien(self.home, rel, JETON_MAX)
                 if neuf is None:
                     continue
-                objet = json.loads(neuf)
+                objet = charger_json(neuf)
                 if objet == donne:
                     continue
                 ch = changements_jeton(donne, objet, SCHEMAS[self.ident])
                 if not ch:
                     continue
+                verifier_retour(self.ident, donne, objet)
                 if not ecrire_retour(src, octets, SCHEMAS[self.ident], ch):
                     journal_ia(f"{self.ident} : {rel} a changé de ton côté pendant la demande, jeton du bac pas rapporté")
                     continue
                 journal_ia(f"{self.ident} : jeton de {rel} mis à jour par le bac ({', '.join('.'.join(c) for c, _ in ch)})")
-                notifier_jeton(self.ident)
             except ValueError as e:                             # (json.JSONDecodeError en est une)
                 raison = "plus du JSON" if isinstance(e, (json.JSONDecodeError, UnicodeDecodeError)) else str(e)
                 journal_ia(f"{self.ident} : retour de {rel} refusé ({raison})")
+                notifier_bac(T(f"retour de jeton de {nom(self.ident)} refusé", f"{nom(self.ident)} token return refused"))
             except Exception as e:                              # RecursionError ([[[[…), OSError…
                 journal_ia(f"{self.ident} : retour de {rel} abandonné ({type(e).__name__})")
+                notifier_bac(T(f"retour de jeton de {nom(self.ident)} abandonné", f"{nom(self.ident)} token return aborted"))
+
+    def _fermer_verrou(self):
+        if self.verrou is not None:
+            with contextlib.suppress(OSError):
+                os.close(self.verrou)
+            self.verrou = None
 
     def _effacer(self):
         try:
@@ -1432,12 +1696,17 @@ class Demande:
                 effacer(self.conf)
         finally:
             effacer(self.home)
-            if self.verrou is not None:
-                with contextlib.suppress(OSError):
-                    os.close(self.verrou)
-                self.verrou = None
+            self._fermer_verrou()
 
     def finir(self):
+        """Fin de la demande : d'abord s'assurer que l'unité est vraiment arrêtée. Tant qu'un moteur y vit, il pourrait,
+        pendant retour() ou l'effacement, remplacer un fichier par un lien : on ne touche alors à RIEN (le verrou est
+        libéré pour que la purge, qui revérifie l'unité, s'en charge plus tard)."""
+        # Sans bac (repli autorisé) il n'y a pas d'unité : on nettoie directement. Avec bac, on attend qu'elle soit morte.
+        if bac_disponible() and not attendre_unite_inactive(self.unite):
+            journal_ia(f"{self.ident} : l'unité {self.unite} tourne encore, rien n'est touché (purge plus tard)")
+            self._fermer_verrou()
+            return
         try:
             self.retour()
         finally:
@@ -1585,14 +1854,32 @@ def lancer_programme(ident, cmd, env, demande, err, delai, entree=None):
 
 
 def arreter_unite(p):
-    """systemd-run tué, l'unité continuerait jusqu'à RuntimeMaxSec : on l'arrête aussi (p : le processus, ou le nom)."""
+    """systemd-run tué, l'unité continuerait jusqu'à RuntimeMaxSec : on l'arrête aussi (p : le processus, ou le nom).
+    « kill --signal=SIGKILL » : pas « stop », qui attendrait jusqu'à TimeoutStopSec pendant qu'un moteur ignore SIGTERM
+    et garde sa sortie ouverte (l'unité a déjà KillSignal=SIGKILL, mais un vieux noyau ou une course peut traîner)."""
     u = p if isinstance(p, str) else getattr(p, "nc_unite", None)
     if u:
         try:
-            subprocess.run(["systemctl", "--user", "stop", u], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=5)
+            subprocess.run(["systemctl", "--user", "kill", "--signal=SIGKILL", "--", u], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, env=env_systemctl())
         except (subprocess.TimeoutExpired, OSError):
             pass
+
+
+def attendre_unite_inactive(unite, delai=4):
+    """Arrête l'unité (SIGKILL) puis attend qu'elle soit vraiment inactive. True si elle l'est, False si elle tourne
+    encore (on ne touchera alors à rien : la purge s'en chargera). None de unites_actives (impossible de savoir) =
+    prudence : on la considère active."""
+    nom_u = unite + ".service"
+    fin = time.monotonic() + delai
+    arreter_unite(nom_u)
+    while True:
+        a = unites_actives([nom_u])
+        if a is not None and nom_u not in a:
+            return True
+        if time.monotonic() > fin:
+            return False
+        time.sleep(0.1)
 
 
 def derniere_ligne(f):
@@ -1794,6 +2081,10 @@ def appel_programme(ident, consigne, texte, image, usage):
                              "permissions": {"deny": OUTILS_EXCLUS_QWEN}, "mcp": {"excluded": ["*"]}}
             reglages.write_text(json.dumps(conf_json))
             env["GEMINI_CLI_SYSTEM_SETTINGS_PATH" if ident == "gemini-cli" else "QWEN_CODE_SYSTEM_SETTINGS_PATH"] = str(reglages)
+            # AVERTISSEMENT (P3-5) : Gemini CLI et Qwen Code ne sont pas installés ici ; leur lecture de l'invite sur
+            # l'entrée standard n'a pas pu être vérifiée. L'invite reste donc dans « -p … », donc dans la ligne de
+            # commande de l'unité, visible d'un « ps » du MÊME utilisateur (pas une évasion du bac ; le journal du
+            # gestionnaire est masqué par --description). À passer sur stdin dès qu'un de ces binaires peut être vérifié.
             if ident == "gemini-cli":
                 # -e none : aucune extension ; --allowed-mcp-server-names avec un nom qui n'existe pas : aucun serveur MCP
                 cmd = ["gemini", "--approval-mode", "default", "-e", "none", "--allowed-mcp-server-names", "nc-aucun",
@@ -1815,7 +2106,10 @@ def appel_programme(ident, consigne, texte, image, usage):
             env["OPENCODE_CONFIG_PROJECT_DISABLE"] = "1"                # nom de la version 2
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"                # nom de la version 1 (la 2 accepte les deux)
             env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"                   # sinon il charge ~/.claude dans l'invite
-            cmd = ["opencode", "run", "--agent", "nc-question"] + (["--standalone"] if v >= 2 else []) + [invite]
+            # L'invite par l'entrée standard (sans argument de message, opencode la lit sur stdin quand ce n'est pas un
+            # terminal : vérifié dans le binaire) : elle n'est donc pas dans la ligne de commande de l'unité (« ps »).
+            cmd = ["opencode", "run", "--agent", "nc-question"] + (["--standalone"] if v >= 2 else [])
+            entree = invite
         yield from _lance_programme(ident, cmd, env, demande, entree)
     finally:
         demande.finir()                                 # le jeton rafraîchi, puis tout est supprimé (même si le retour échoue)

@@ -1500,10 +1500,22 @@ def bac_inaccessibles():
     return BAC.inaccessibles(HOME, reglage)
 
 
+# L'environnement laissé à un exec de session (le reste est RETIRÉ de l'unité, sinon elle hérite de tout
+# l'environnement du gestionnaire : DBUS, Wayland, Hyprland, XDG_*, et avec uwsm des clés exportées). Une session de
+# confiance lance tes commandes : elle garde le PATH, le dossier personnel et la locale, pas les secrets ni les sockets.
+NOEUD_BAC_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "TZ"]
+
+
+def bac_env():
+    noms = list(NOEUD_BAC_ENV)
+    noms += [k for k in os.environ if k.startswith("LC_") and k not in noms]
+    return noms
+
+
 def bac_argv(cmd, cwd, budget):
     """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent."""
     return BAC.argv(cmd, cwd, budget, home=HOME, reglage=reglage, programme=programme, ecriture=[dossier_travail_bac()],
-                    reseau_prive=reglage("NOEUD_BAC_RESEAU", "oui") == "non", description="nc-noeud")
+                    env=bac_env(), reseau_prive=reglage("NOEUD_BAC_RESEAU", "oui") == "non", description="nc-noeud")
 
 
 def environnement_bac():

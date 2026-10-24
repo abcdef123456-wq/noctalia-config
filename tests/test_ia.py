@@ -1243,7 +1243,8 @@ class IA(unittest.TestCase):
         """Faux programme qui note ses arguments, son dossier de travail et son environnement ; --help : « aide »."""
         j = self.home / f"espion-{nom}"
         self.programme(nom, f'''if [ "$2" = "--help" ]; then echo "{aide}"; exit 0; fi
-{{ echo "ARGS $*"; echo "CWD $(pwd -P)"; env | grep -E '^(OPENCODE_|GEMINI_CLI_|QWEN_CODE_)'; \
+entree=$(cat)
+{{ echo "ARGS $*"; echo "ENTREE $entree"; echo "CWD $(pwd -P)"; env | grep -E '^(OPENCODE_|GEMINI_CLI_|QWEN_CODE_)'; \
   for f in "$GEMINI_CLI_SYSTEM_SETTINGS_PATH" "$QWEN_CODE_SYSTEM_SETTINGS_PATH"; do [ -n "$f" ] && echo "REGLAGES $(cat "$f")"; done; }} > "{j}"
 echo "réponse"''')
         return j
@@ -1267,7 +1268,8 @@ echo "réponse"''')
         # Un agent à nous (config en ligne, passée en dernier) + toute permission refusée, --standalone en version 2
         t = self.bride("opencode", "opencode")
         args = re.search(r"^ARGS (.*)$", t, re.M)[1].split()
-        self.assertEqual(args[:5], ["run", "--agent", "nc-question", "--standalone", args[4]])
+        self.assertEqual(args, ["run", "--agent", "nc-question", "--standalone"])   # l'invite n'est PAS un argument
+        self.assertIn("une question", t)                                           # elle passe par l'entrée standard
         conf = json.loads(re.search(r"^OPENCODE_CONFIG_CONTENT=(.*)$", t, re.M)[1])
         self.assertEqual(conf["permission"], {"*": "deny"})
         self.assertEqual(conf["agent"]["nc-question"], {"mode": "primary", "permission": {"*": "deny"}})
@@ -1286,8 +1288,7 @@ echo réponse''', version="1.4.0")
         lignes = j.read_text().splitlines()
         args = [l for l in lignes if l.startswith("ARGS")]
         self.assertEqual(len(args), 1)
-        self.assertTrue(args[0].startswith("ARGS run --agent nc-question "), args[0])
-        self.assertNotIn("--standalone", args[0])
+        self.assertEqual(args[0], "ARGS run --agent nc-question")   # pas --standalone en 1.x, et l'invite sur stdin
         self.assertIn("OLD 1", lignes)
 
     def test_opencode_version_illisible_refuse(self):

@@ -22,6 +22,47 @@ import unittest.mock
 
 from tests.test_noeud import _bus_utilisateur, HOME_BAC
 
+# Le bac met /dev/shm en lecture seule (ProtectSystem=strict + ReadOnlyPaths) : les faux HOME des tests vont donc sous
+# $XDG_RUNTIME_DIR réel (/run/user/<uid>, un tmpfs à soi), jamais /dev/shm ni /tmp (que PrivateTmp masque). Repli sur
+# HOME_BAC seulement si /run/user/<uid> n'existe pas.
+_RUNDIR = os.environ.get("NC_TEST_VRAI_RUNTIME") or f"/run/user/{os.getuid()}"
+RACINE_BAC = _RUNDIR if os.path.isdir(_RUNDIR) and os.access(_RUNDIR, os.W_OK) else HOME_BAC
+
+
+def _purge_restes(prefixe):
+    """P3-6 : efface les dossiers de tests laissés par un run précédent interrompu (même préfixe, à nous, vieux de plus
+    de 10 min), sous /dev/shm comme sous /run/user/<uid>. Jamais rien d'autre."""
+    import time as _t
+    for base in ("/dev/shm", f"/run/user/{os.getuid()}", RACINE_BAC):
+        with __import__("contextlib").suppress(OSError):
+            for n in os.listdir(base):
+                p = os.path.join(base, n)
+                try:
+                    st = os.lstat(p)
+                    if (n.startswith(prefixe) and stat_module.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+                            and _t.time() - st.st_mtime > 600):
+                        shutil.rmtree(p, ignore_errors=True)
+                except OSError:
+                    continue
+
+
+import stat as stat_module
+
+
+def _rmtree_force(d):
+    def _ch(f, p, _):
+        with __import__("contextlib").suppress(OSError):
+            os.chmod(os.path.dirname(p), 0o700)
+            os.chmod(p, 0o700)
+            f(p)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(d, onexc=_ch)
+    else:
+        shutil.rmtree(d, onerror=_ch)
+
+
+import sys
+
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
 IDENTS = {"claude": "claude", "codex": "codex", "gemini-cli": "gemini", "qwen": "qwen", "opencode": "opencode"}
@@ -32,15 +73,32 @@ CONFIGS = {"claude": ".claude/settings.json", "codex": ".codex/config.toml", "ge
            "qwen": ".qwen/settings.json", "opencode": ".config/opencode/opencode.json"}
 
 
+def jwt(payload, marque=None):
+    """Un JWT FACTICE (signature bidon, jamais vérifiée) : header.payload.sig en base64url. Codex range chatgpt_account_id
+    dans un claim imbriqué ; on y glisse aussi la marque, pour la relire côté test."""
+    import base64
+    corps = dict(payload)
+    if marque is not None:
+        corps["marque"] = marque
+    def b(o):
+        return base64.urlsafe_b64encode(json.dumps(o).encode()).rstrip(b"=").decode()
+    return b({"alg": "none"}) + "." + b(corps) + ".sig"
+
+
+_CODEX_CLAIMS = {"sub": "user-1", "email": "u@example.org", "https://api.openai.com/auth": {"chatgpt_account_id": "compte-1"}}
+
+
 def contenu_jeton(ident, marque=None):
     """Un fichier d'identifiants FACTICE de la forme du vrai (noms de champs des moteurs), avec la marque JETON-<ident>
-    dans le jeton d'accès, et des champs qui ne doivent JAMAIS entrer dans le bac (SECRET-…)."""
+    dans le jeton d'accès, et des champs qui ne doivent JAMAIS entrer dans le bac (SECRET-…). Codex : jetons en JWT
+    valides (chatgpt_account_id == account_id, sub/email stables)."""
     m = marque or f"JETON-{ident}"
     return {
         "claude": {"claudeAiOauth": {"accessToken": m, "refreshToken": "r0", "expiresAt": 1, "scopes": ["user:inference"],
                                      "subscriptionType": "pro"},
                    "mcpOAuth": {"serveur": {"accessToken": "SECRET-MCP"}}},
-        "codex": {"tokens": {"access_token": m, "refresh_token": "r0", "id_token": "i0", "account_id": "compte-1"},
+        "codex": {"tokens": {"access_token": jwt(_CODEX_CLAIMS, m), "refresh_token": "r0",
+                             "id_token": jwt(_CODEX_CLAIMS), "account_id": "compte-1"},
                   "last_refresh": "2026-01-01T00:00:00Z", "OPENAI_API_KEY": "SECRET-CLE-CODEX"},
         "gemini-cli": {"access_token": m, "refresh_token": "r0", "expiry_date": 1, "token_type": "Bearer"},
         "qwen": {"access_token": m, "refresh_token": "r0", "expiry_date": 1, "token_type": "Bearer",
@@ -59,8 +117,19 @@ def rafraichi(ident, marque="RAFRAICHI"):
     return j
 
 
+def marqueur(ident, marque):
+    """La chaîne EXACTE qui doit apparaître dans la sortie d'un faux moteur qui lit sa copie du jeton (Codex : le JWT
+    complet, puisque la marque y est encodée en base64 ; les autres : la marque telle quelle)."""
+    return jwt(_CODEX_CLAIMS, marque) if ident == "codex" else marque
+
+
 def jeton_acces(ident, objet):
-    return {"claude": lambda o: o["claudeAiOauth"]["accessToken"], "codex": lambda o: o["tokens"]["access_token"],
+    def codex(o):                                           # la marque est un claim du JWT access_token
+        import base64
+        seg = o["tokens"]["access_token"].split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        return json.loads(base64.urlsafe_b64decode(seg)).get("marque")
+    return {"claude": lambda o: o["claudeAiOauth"]["accessToken"], "codex": codex,
             "gemini-cli": lambda o: o["access_token"], "qwen": lambda o: o["access_token"],
             "opencode": lambda o: o["anthropic"]["access"]}[ident](objet)
 
@@ -114,11 +183,13 @@ def charger_ia(home, path):
 
 
 class Base(unittest.TestCase):
-    racine = HOME_BAC if os.path.isdir(HOME_BAC) else None      # /dev/shm : jamais /tmp (PrivateTmp le masque)
+    racine = RACINE_BAC
 
     def faux_home(self):
+        _purge_restes("nc-bac-ia-")                              # P3-6 : restes d'un run interrompu (vieux, à nous)
         d = tempfile.mkdtemp(prefix="nc-bac-ia-", dir=self.racine)
-        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        # Nettoyage même si le moteur a retiré des droits (chmod 000) sur un sous-dossier
+        self.addCleanup(lambda: _rmtree_force(d))
         home = Path(d)
         (home / ".local/bin").mkdir(parents=True)
         (home / "run").mkdir(mode=0o700)
@@ -165,12 +236,15 @@ class Base(unittest.TestCase):
     def base(self):
         return self.home / "run/nc-ia/bac"
 
-    def notifs(self):
-        """Les notifications (le faux notify-send est lancé sans attendre : on lui laisse 3 s)."""
+    def notifs(self, attente=3):
+        """Les notifications (le faux notify-send est lancé sans attendre : on lui laisse le temps). attente courte pour
+        vérifier l'ABSENCE de notification."""
         f = self.home / "notifs.log"
-        fin = time.monotonic() + 3
+        fin = time.monotonic() + attente
         while not f.exists() and time.monotonic() < fin:
             time.sleep(0.05)
+        if attente <= 0.5:                                       # on veut voir si une notification apparaît : on patiente
+            time.sleep(attente)
         return f.read_text() if f.exists() else ""
 
     def journal_ia(self):
@@ -198,7 +272,10 @@ class AvecFauxSystemdRun(Base):
         sr.write_text(FAUX_SYSTEMD_RUN.replace("@REEL@", str(self.home)))
         sr.chmod(0o755)
         sc = fb / "systemctl"
-        sc.write_text("#!/bin/sh\nexit 0\n")
+        # Le faux systemd-run exécute le moteur directement (pas de vraie unité) : is-active répond « inactive » pour
+        # que finir() nettoie et rapporte. kill/reset-failed : sans effet.
+        sc.write_text('#!/bin/sh\ncase "$*" in *is-active*) for u in "$@"; do case "$u" in *.service) echo inactive;; '
+                      'esac; done;; esac\nexit 0\n')
         sc.chmod(0o755)
         self.journal = self.home / "sr.journal"
         self.fb = fb
@@ -278,17 +355,19 @@ class AvecFauxSystemdRun(Base):
                 self.assertIn("/run/nc-ia/bac/nc-ia-travail-", rw[1])  # le dossier de travail vide
                 for rel in tous:
                     self.assertFalse(any(r.startswith(str(self.home / rel)) for r in rw), f"{ident} n'écrit pas dans {rel}")
-                self.assertFalse(any(p.startswith("ReadOnlyPaths=") and p != f"ReadOnlyPaths={self.home}" for p in props))
+                # seul ReadOnlyPaths attendu : le faux home et /dev/shm (ProtectSystem=strict + ReadOnlyPaths=-/dev/shm)
+                autorises = {f"ReadOnlyPaths={self.home}", "ReadOnlyPaths=-/dev/shm"}
+                self.assertFalse([p for p in props if p.startswith("ReadOnlyPaths=") and p not in autorises])
 
     def test_home_du_moteur_et_copie_de_ses_fichiers(self):
         (self.home / ".claude.json").write_text('{"c": 1}')
         for ident, rel in JETONS.items():
             with self.subTest(ident):
                 sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_RELATIFS=f"{rel} {CONFIGS[ident]}"))
-                self.assertIn(f"JETON-{ident}", sortie)                  # sa copie du jeton
+                self.assertIn(marqueur(ident, f"JETON-{ident}"), sortie)  # sa copie du jeton
                 for autre in JETONS:
                     if autre != ident:
-                        self.assertNotIn(f"JETON-{autre}", sortie)
+                        self.assertNotIn(marqueur(autre, f"JETON-{autre}"), sortie)
                 self.assertNotIn("SECRET-", sortie)                      # ni mcpOAuth, ni entrées api/wellknown, ni hooks
                 self.assertIn("/run/nc-ia/bac/nc-ia-home-", sortie)      # le chemin lu est celui du faux dossier personnel
 
@@ -434,7 +513,7 @@ class AvecFauxSystemdRun(Base):
         reel = self.lancements()[-1]
         regle = [a for a in reel if a.startswith("Read(")]
         self.assertEqual(len(regle), 1, reel)
-        self.assertRegex(regle[0], r"^Read\(//dev/shm/nc-bac-ia-[^/]+/run/nc-ia/bac/nc-ia-travail-[0-9a-f]{12}/\*\*\)$")
+        self.assertRegex(regle[0], r"^Read\(//.+/nc-bac-ia-[^/]+/run/nc-ia/bac/nc-ia-travail-[0-9a-f]{12}/\*\*\)$")
         self.assertNotIn("Read", [a for a in reel if a == "Read"][1:], "pas de « Read » seul dans --allowedTools")
         i = reel.index("--allowedTools")
         self.assertTrue(reel[i + 1].startswith("Read("))
@@ -471,6 +550,7 @@ class AvecFauxSystemdRun(Base):
         pourquoi, sans jamais écrire le jeton."""
         reel = self.home / JETONS[ident]
         avant = reel.read_text()
+        (self.home / "notifs.log").unlink(missing_ok=True)
         self.lancer_moteur(self.m, ident, NC_TEST_RAFRAICHIR=JETONS[ident], NC_TEST_CONTENU=json.dumps(neuf))
         self.assertEqual(reel.read_text(), avant, f"{ident} : {raison}")
         j = self.journal_ia()
@@ -478,7 +558,10 @@ class AvecFauxSystemdRun(Base):
         self.assertIn(raison, j)
         self.assertNotIn("JETON-", j)
         self.assertNotIn("VOLE", j)
-        self.assertFalse((self.home / "notifs.log").exists(), "pas de notification pour un retour refusé")
+        # P3-2a : un retour refusé (inattendu) se voit par une notification — mais jamais la valeur du jeton
+        notifs = self.notifs()
+        self.assertIn(f"retour de jeton de {self.m.nom(ident)} refusé", notifs)
+        self.assertNotIn("VOLE", notifs)
 
     def test_retour_refuse_changement_de_serveur_ou_de_compte(self):
         cas = []
@@ -505,7 +588,10 @@ class AvecFauxSystemdRun(Base):
         cas.append(("opencode", n, "anthropic.accountId a changé"))
         n = rafraichi("gemini-cli", "VOLE")
         n["access_token"] = {"objet": "VOLE"}
-        cas.append(("gemini-cli", n, "access_token n'est pas une valeur simple"))
+        cas.append(("gemini-cli", n, "access_token : valeur de jeton invalide"))
+        n = rafraichi("gemini-cli", "VOLE")
+        n["refresh_token"] = "autre-refresh"               # refresh_token « fixe » pour Gemini : tout refusé
+        cas.append(("gemini-cli", n, "refresh_token a changé"))
         n = rafraichi("codex", "VOLE")
         n["OPENAI_API_KEY"] = "VOLE"
         cas.append(("codex", n, "OPENAI_API_KEY est apparu"))
@@ -537,9 +623,11 @@ class AvecFauxSystemdRun(Base):
                     self.assertEqual(o["OPENAI_API_KEY"], "SECRET-CLE-CODEX")
                 if ident == "opencode":
                     self.assertEqual((o["openai"], o["distant"]), (attendu["openai"], attendu["distant"]))
-                self.assertIn(f"nc-ia jeton de {self.m.nom(ident)} mis à jour par le bac", self.notifs())
                 self.assertIn(f"{ident} : jeton de {JETONS[ident]} mis à jour par le bac", self.journal_ia())
                 self.assertNotIn("RAFRAICHI", self.journal_ia())
+                # P3-2b : un rafraîchissement normal ne notifie pas (seulement le journal) ; la notification est réservée
+                # aux retours inattendus (refusés/abandonnés)
+                self.assertEqual(self.notifs(0.3), "", "pas de notification pour un rafraîchissement normal")
                 # (P3-a) aucun fichier temporaire laissé à côté du vrai fichier
                 self.assertEqual([x for x in os.listdir(reel.parent) if ".nc-ia-" in x], [])
 
@@ -655,8 +743,8 @@ class AvecFauxSystemdRun(Base):
                     sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_RELATIFS=JETONS[ident] + " .claude.json",
                                                         NC_TEST_RAFRAICHIR=JETONS[ident],
                                                         NC_TEST_CONTENU=json.dumps(rafraichi(ident, f"RETOUR-{ident}"))))
-                    self.assertIn(f"DEPLACE-{ident}", sortie, "copié depuis le dossier déplacé")
-                    self.assertNotIn(f"JETON-{ident}", sortie, "pas depuis l'emplacement par défaut")
+                    self.assertIn(marqueur(ident, f"DEPLACE-{ident}"), sortie, "copié depuis le dossier déplacé")
+                    self.assertNotIn(marqueur(ident, f"JETON-{ident}"), sortie, "pas depuis l'emplacement par défaut")
                     self.assertEqual(jeton_acces(ident, json.loads(f.read_text())), f"RETOUR-{ident}", "rapporté au bon endroit")
                     self.assertEqual(json.loads((self.home / JETONS[ident]).read_text()), contenu_jeton(ident))
                     if ident == "claude":
@@ -690,24 +778,24 @@ class AvecFauxSystemdRun(Base):
 
     # ── P3-a : verrou du vrai fichier ──────────────────────────────────────────────────────────────────────────────
     def test_vrai_fichier_verrouille_pas_de_retour(self):
-        reel = self.home / JETONS["codex"]
+        reel = self.home / JETONS["qwen"]
         avant = reel.read_text()
         fd = os.open(reel, os.O_RDONLY)
         self.addCleanup(os.close, fd)
         fcntl.flock(fd, fcntl.LOCK_EX)
         self.m.VERROU_ATTENTE = 0.3
-        self.lancer_moteur(self.m, "codex", NC_TEST_RAFRAICHIR=JETONS["codex"], NC_TEST_CONTENU=json.dumps(rafraichi("codex")))
+        self.lancer_moteur(self.m, "qwen", NC_TEST_RAFRAICHIR=JETONS["qwen"], NC_TEST_CONTENU=json.dumps(rafraichi("qwen")))
         self.assertEqual(reel.read_text(), avant)
         self.assertIn("vrai fichier verrouillé", self.journal_ia())
 
     def test_vrai_fichier_verrouille_un_instant_attend(self):
-        reel = self.home / JETONS["codex"]
+        reel = self.home / JETONS["qwen"]
         fd = os.open(reel, os.O_RDONLY)
         self.addCleanup(os.close, fd)
         fcntl.flock(fd, fcntl.LOCK_EX)
         threading.Timer(0.5, fcntl.flock, (fd, fcntl.LOCK_UN)).start()
-        self.lancer_moteur(self.m, "codex", NC_TEST_RAFRAICHIR=JETONS["codex"], NC_TEST_CONTENU=json.dumps(rafraichi("codex")))
-        self.assertEqual(jeton_acces("codex", json.loads(reel.read_text())), "RAFRAICHI")
+        self.lancer_moteur(self.m, "qwen", NC_TEST_RAFRAICHIR=JETONS["qwen"], NC_TEST_CONTENU=json.dumps(rafraichi("qwen")))
+        self.assertEqual(jeton_acces("qwen", json.loads(reel.read_text())), "RAFRAICHI")
 
     # ── P3-b : « opencode --version » dans le bac, gardé en mémoire ──────────────────────────────────────────────
     def test_version_opencode_dans_le_bac_et_gardee(self):
@@ -727,11 +815,11 @@ class AvecFauxSystemdRun(Base):
         self.assertEqual(len([b for b in self.lancements() if b[-2:] == ["opencode", "--version"]]), 1)
 
 
-@unittest.skipUnless(_bus_utilisateur() and os.path.isdir(HOME_BAC),
+@unittest.skipUnless(_bus_utilisateur() and os.path.isdir(RACINE_BAC),
                      "systemd-run, un bus utilisateur joignable et /dev/shm requis")
 class BacReelIA(Base):
     """Le VRAI bac : faux HOME sous /dev/shm (jamais /tmp, que PrivateTmp masque), faux jetons, faux moteurs."""
-    racine = HOME_BAC
+    racine = RACINE_BAC
 
     def setUp(self):
         self.home = self.faux_home()
@@ -765,7 +853,7 @@ class BacReelIA(Base):
                                             NC_TEST_ECRIRE=f"{self.home}/ecrit-par-le-bac")
                 texte = "".join(sortie).replace('"', "'")
                 self.assertRegex(texte, rf"LU {re.escape(str(self.base()))}/nc-ia-home-[0-9a-f]{{12}}/{re.escape(JETONS[ident])} "
-                                        rf"[^\n]*JETON-{re.escape(ident)}")
+                                        rf"[^\n]*{re.escape(marqueur(ident, f'JETON-{ident}'))}")
                 self.assertNotIn("SECRET-", texte)                    # ni mcpOAuth, ni entrées api/wellknown, ni hooks…
                 for autre in JETONS:
                     if autre != ident:
@@ -814,11 +902,12 @@ class BacReelIA(Base):
                 # un moteur qui REMPLACE le fichier (écriture dans un temporaire puis mv) marche aussi
                 self.lancer_moteur(self.m, ident, NC_TEST_RENOMMER=rel, NC_TEST_CONTENU=json.dumps(rafraichi(ident, "RENOMME")))
                 self.assertEqual(jeton_acces(ident, json.loads(reel.read_text())), "RENOMME")
-                # un jeton cassé (plus du JSON) n'est pas rapporté
+                # un jeton cassé (plus du JSON) n'est pas rapporté, et ce retour inattendu notifie (refusé)
+                (self.home / "notifs.log").unlink(missing_ok=True)
                 self.lancer_moteur(self.m, ident, NC_TEST_CASSER=rel)
                 self.assertEqual(jeton_acces(ident, json.loads(reel.read_text())), "RENOMME")
                 self.assertIn(f"{ident} : retour de {rel} refusé (plus du JSON)", self.journal_ia())
-                self.assertIn(f"jeton de {self.m.nom(ident)} mis à jour par le bac", self.notifs())
+                self.assertIn(f"retour de jeton de {self.m.nom(ident)} refusé", self.notifs())
 
     def test_jeton_change_entre_temps_pas_ecrase(self):
         """Une session à toi a rafraîchi le jeton pendant la demande : on ne l'écrase pas."""
@@ -853,7 +942,7 @@ class BacReelIA(Base):
                 # et la demande suivante ne voit pas le secret
                 sortie = "".join(self.lancer_moteur(self.m, ident, NC_TEST_RELATIFS=JETONS[ident]))
                 self.assertNotIn("SECRET-", sortie)
-                self.assertIn(f"JETON-{ident}", sortie)
+                self.assertIn(marqueur(ident, f"JETON-{ident}"), sortie)
 
     def test_les_autres_demandes_sont_invisibles(self):
         """P2-1 : dans l'unité, la base des faux dossiers personnels est un tmpfs vide où seuls les SIENS sont remontés ;
@@ -913,7 +1002,6 @@ class BacReelIA(Base):
 
     def test_les_dollars_arrivent_tels_quels(self):
         """systemd-run ne remplace plus ${VAR} ni $VAR dans la commande (une question pouvait y mettre une clé)."""
-        bac = self.m.module_bac()
         argv = self.m.argv_bac("codex", "echo '${HOME}' '$$' '$HOME'", str(self.home), 10, env=["PATH"])
         self.assertIn("--expand-environment=no", argv)
         r = subprocess.run(argv, capture_output=True, text=True, timeout=20, env=dict(os.environ))
@@ -925,6 +1013,35 @@ class BacReelIA(Base):
         f.write_text("#!/bin/sh\ngetent hosts localhost | head -1\n")
         sortie = "".join(self.lancer_moteur(self.m, "codex"))
         self.assertIn("localhost", sortie)
+
+    def test_environnement_du_gestionnaire_invisible(self):
+        """P2-C : « env -i » efface tout ; l'unité ne garde que la liste blanche. Les variables du gestionnaire systemd
+        (bus, Wayland, Hyprland, vrais XDG_*_HOME, clés exportées) n'arrivent PAS au moteur, même si --setenv ne les
+        retire pas."""
+        f = self.home / ".local/bin/codex"
+        f.write_text("#!/bin/sh\nenv | sort\n")
+        sortie = "".join(self.lancer_moteur(self.m, "codex"))
+        noms = {l.split("=", 1)[0] for l in sortie.splitlines() if "=" in l}
+        for fuite in ("DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_CONFIG_HOME",
+                      "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "DISPLAY"):
+            self.assertNotIn(fuite, noms, f"{fuite} ne doit pas fuir dans le bac")
+        self.assertIn("HOME", noms)
+        self.assertIn("PATH", noms)
+        self.assertIn(str(self.base()), sortie)                 # HOME pointe bien dans le faux dossier personnel du bac
+
+    def test_ecriture_hors_du_bac_impossible(self):
+        """P2-D : ProtectSystem=strict + /dev/shm en lecture seule : le bac n'écrit que dans ses dossiers, nulle part
+        ailleurs (ni /dev/shm, partagé entre comptes, ni /var/spool/mail)."""
+        f = self.home / ".local/bin/codex"
+        f.write_text("#!/bin/sh\n"
+                     'for p in /dev/shm/nc-evasion /var/spool/mail/nc-evasion /run/user/'
+                     + str(os.getuid()) + '/nc-evasion; do\n'
+                     '  if echo x > "$p" 2>/dev/null; then echo "ECRIT $p"; rm -f "$p"; else echo "BLOQUE $p"; fi\n'
+                     'done\n')
+        sortie = "".join(self.lancer_moteur(self.m, "codex"))
+        self.assertNotIn("ECRIT", sortie, sortie)
+        self.assertEqual(sortie.count("BLOQUE"), 3, sortie)
+        self.assertFalse(os.path.exists("/dev/shm/nc-evasion"))
 
 
 if __name__ == "__main__":
