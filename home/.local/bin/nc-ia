@@ -4657,8 +4657,8 @@ def afficher_etat(e):
     if not e["coupee"]:
         for u, x in e["usages"].items():
             print(f"  {u:<9} → {x['nom'] or T('aucune', 'none')}")
-    print(T("bac des IA : actif (mêmes droits pour Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code : ~ en lecture seule, un faux dossier personnel jeté après la demande, rien de secret lisible ; réseau ouvert, 127.0.0.1 joignable, /dev/shm partagé)",
-            "AI sandbox: active (same rights for Claude Code, Codex, OpenCode, Gemini CLI and Qwen Code: ~ read-only, a throwaway fake home folder, no secret readable; network open, 127.0.0.1 reachable, /dev/shm shared)")
+    print(T("bac des IA : actif (mêmes droits pour Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code : ~ en lecture seule, un faux dossier personnel jeté après la demande, rien de secret lisible ; réseau ouvert, 127.0.0.1 joignable, rien d'écrit hors du faux dossier)",
+            "AI sandbox: active (same rights for Claude Code, Codex, OpenCode, Gemini CLI and Qwen Code: ~ read-only, a throwaway fake home folder, no secret readable; network open, 127.0.0.1 reachable, nothing written outside the fake home)")
           if e.get("bac") else
           T("bac des IA : indisponible ici : Claude Code, Codex, OpenCode, Gemini CLI et Qwen Code sont refusés"
             + (" (repli autorisé par IA_BAC_REPLI : sans bac, Codex peut lire tes fichiers)" if e.get("repli") else ""),

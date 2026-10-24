@@ -1003,12 +1003,12 @@ REGLAGES = [
         "dictée, agents dans l'île), sur toutes les distributions ; rien n'est désinstallé. "
         "Claude Code, Codex, Gemini CLI, OpenCode et Qwen Code répondent tous dans le même bac à sable : dossier personnel "
         "en lecture seule, secrets illisibles, un faux dossier personnel jeté après la demande. Le réseau reste ouvert, 127.0.0.1 "
-        "joignable, /dev/shm partagé (nc-ia etat dit si le bac est actif).",
+        "joignable, rien ne s'écrit hors du faux dossier (nc-ia etat dit si le bac est actif).",
         "Automatic: the best available one (API keys, Claude Code, Codex, Gemini CLI, OpenCode, Ollama, JARVIS), and the "
         "next one if it fails. None: no AI anywhere any more (Spotlight, text, terminal, screenshots, JARVIS, dictation, "
         "agents in the island), on every distribution; nothing is uninstalled. "
         "Claude Code, Codex, Gemini CLI, OpenCode and Qwen Code all answer in the same sandbox: home folder read-only, "
-        "secrets unreadable, a throwaway fake home folder. The network stays open, 127.0.0.1 reachable, /dev/shm shared "
+        "secrets unreadable, a throwaway fake home folder. The network stays open, 127.0.0.1 reachable, nothing written outside the fake home "
         "(nc-ia etat says whether the sandbox is active)."),
       [("auto", L("Automatique", "Automatic")), ("manuel", L("Celle que je choisis", "The one I choose")),
        ("non", L("Aucune (tout couper)", "None (turn everything off)"))]),
