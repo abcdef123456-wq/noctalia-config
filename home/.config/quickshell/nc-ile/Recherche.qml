@@ -1127,7 +1127,7 @@ Item {
             Etincelle {
                 visible: !zoneReponse.enDiag || diag.iaEnCours
                 anchors.verticalCenter: parent.verticalCenter; taille: 15; tourne: zoneReponse.enDiag || r.reflechit
-                agent: zoneReponse.enDiag ? r.agentIA : r.agentReponse
+                agent: zoneReponse.enDiag ? diag.agent : r.agentReponse
             }
             Ico {
                 objectName: "nc-spotlight-bilan"
@@ -1214,6 +1214,7 @@ Item {
                     visible: !ligne.confirme
                     anchors.left: ic.right; anchors.leftMargin: 12; anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - 12 - 28 - 12 - sous.width - 40 - (moins.visible ? 32 : 0)
+                    textFormat: Text.PlainText      // titres et sous-titres viennent du bilan, de systemctl, des fenêtres : jamais du HTML
                     text: ligne.modelData.titre; font.pixelSize: 15; font.weight: ligne.choisi ? Font.DemiBold : Font.Normal
                 }
                 Texte {
@@ -1221,6 +1222,7 @@ Item {
                     visible: !ligne.confirme
                     anchors.right: parent.right; anchors.rightMargin: moins.visible ? 14 + 22 + 10 : 14; anchors.verticalCenter: parent.verticalCenter
                     width: Math.min(implicitWidth, 320)
+                    textFormat: Text.PlainText
                     text: ligne.modelData.sous + (ligne.choisi ? "  ·  " + (ligne.modelData.aide || "↵") : ""); secondaire: true; font.pixelSize: 13
                     horizontalAlignment: Text.AlignRight
                 }

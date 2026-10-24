@@ -494,5 +494,22 @@ ShellRoot {
         self.assertEqual(appels, ["nc-diag --json --rapide", "nc-diag reparer redemarrer:noctalia.service --json"])
 
 
+class SpotlightSource(unittest.TestCase):
+    """Lecture du source (pas besoin de Quickshell) : ce que le bilan (constats, sortie de systemctl) met à l'écran n'est
+    jamais interprété comme du HTML, et l'icône de l'en-tête est celle de l'IA du bilan."""
+    def test_lignes_en_texte_brut(self):
+        src = (QML / "Recherche.qml").read_text()
+        for champ in ("text: ligne.modelData.titre", "text: ligne.modelData.sous"):
+            i = src.index(champ)
+            bloc = src[src.rindex("Texte {", 0, i):i + len(champ)]
+            self.assertIn("textFormat: Text.PlainText", bloc, champ)
+        self.assertIn("textFormat: r.reponseAide !== \"\" || zoneReponse.enDiag ? Text.PlainText", src)
+
+    def test_icone_du_bilan_est_celle_du_bilan(self):
+        src = (QML / "Recherche.qml").read_text()
+        self.assertIn("agent: zoneReponse.enDiag ? diag.agent : r.agentReponse", src)
+        self.assertNotIn("zoneReponse.enDiag ? r.agentIA", src)
+
+
 if __name__ == "__main__":
     unittest.main()

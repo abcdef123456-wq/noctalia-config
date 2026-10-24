@@ -1781,7 +1781,9 @@ def charge_diagnostic(d):
     charge = {"distribution": famille_distrib(), "constats": []}
     permis = []
     for c in constats[:DIAG_MAX_CONSTATS]:
-        x = {"niveau": niveau_constat(c), "texte": anonymiser(str(c.get("texte") or ""))[:400]}
+        # texte_ia : sans la ligne du journal (nom de réseau, titre de fenêtre, texte de notification…) ; repli sur texte
+        brut = c.get("texte_ia") if isinstance(c.get("texte_ia"), str) else c.get("texte")
+        x = {"niveau": niveau_constat(c), "texte": anonymiser(str(brut or ""))[:400]}
         cle_ = str(c.get("cle") or "")
         if CLE_CONSTAT.fullmatch(cle_):
             x = {"cle": cle_, **x}
@@ -1819,9 +1821,11 @@ def consigne_diagnostic():
 
 def sans_commande(t, n):
     """Un texte de l'IA pour l'île : sans blocs de code ni lignes « $ … » (les réparations passent par nc-diag,
-    jamais par une commande à copier), espaces resserrés, n caractères au plus."""
+    jamais par une commande à copier), accents graves et « $ … » en milieu de ligne aussi, espaces resserrés, n caractères au plus."""
     t = re.sub(r"```.*?(?:```|\Z)", " ", str(t), flags=re.S)
+    t = re.sub(r"`+[^`]*(?:`+|\Z)", " ", t).replace("`", " ")   # segments entre accents graves (1, 2 ou 3), puis les restes
     t = "\n".join(l for l in t.splitlines() if not l.lstrip().startswith("$"))
+    t = re.sub(r"(?:(?<=\s)|^)\$ .*", " ", t, flags=re.M)     # « $ commande » au milieu d'une ligne : jusqu'à la fin
     t = re.sub(r"\s+", " ", t).strip()
     return t if len(t) <= n else t[:n - 1].rstrip() + "…"
 
@@ -1919,6 +1923,9 @@ def caviarder(t):
 NOMS_BANALS = {"localhost", "localhost-live", "root", "arch", "archlinux", "debian", "fedora", "opensuse", "linux",
                "user", "utilisateur"}
 _PERSO = re.compile(r"(?<![\w.-])/(?:var/)?home/[^/\s\"'`:;,()\[\]]+")
+_MEDIA = re.compile(r"(?<![\w.-])(/run/media/)[^/\s\"'`:;,()\[\]]+")
+# MAC sans séparateurs : 12 hexa isolés, dont au moins une lettre (12 chiffres = un nombre, un identifiant)
+_MAC_NU = re.compile(r"(?<![\w.-])(?=[0-9]*[A-Fa-f])[0-9A-Fa-f]{12}(?![\w-])")
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:service|socket|target|timer|path|"
                     r"mount|automount|scope|slice|device|swap)\b)[A-Za-z]{2,24}\b")
 _UUID = re.compile(r"(?<![0-9A-Fa-f-])(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|"
@@ -1979,9 +1986,11 @@ def anonymiser(t):
     les numéros de processus « (1234) » → (…). Les versions (0.56.2) et les heures (12:30:45) restent ; linéaire
     (chaque motif ne commence qu'en début de mot)."""
     t = _PERSO.sub("~", caviarder(t))
+    t = _MEDIA.sub(r"\1[compte]", t)
     t = _EMAIL.sub("[e-mail]", t)
     t = _UUID.sub("[id]", t)
     t = _MAC.sub("[MAC]", t)
+    t = _MAC_NU.sub("[MAC]", t)
     t = _IPV4.sub(_ipv4, t)
     t = _IPV6.sub(_ipv6, t)
     t = _PID.sub(lambda m: "(…)" if m[0].startswith("(") else "[…]" if m[0].startswith("[") else

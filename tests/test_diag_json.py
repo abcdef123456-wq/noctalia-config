@@ -55,6 +55,8 @@ class Base(unittest.TestCase):
         self.bin.mkdir()
         self.run_dir = self.racine / "run"
         self.run_dir.mkdir(mode=0o700)
+        self.proc = self.racine / "proc"             # faux /proc : la vraie île de la machine ne compte pas
+        self.proc.mkdir()
         self.appels = self.fake / "appels"
         self.appels.touch()
         faux = {"systemctl": SYSTEMCTL, "systemd-run": SYSTEMD_RUN}
@@ -70,7 +72,8 @@ class Base(unittest.TestCase):
 
     def env(self, **plus):
         env = dict(os.environ, HOME=str(self.home), FAKE=str(self.fake), NC_LANGUE="fr", XDG_RUNTIME_DIR=str(self.run_dir),
-                   PATH=f"{self.bin}:{os.environ['PATH']}", HYPRLAND_INSTANCE_SIGNATURE="test")
+                   PATH=f"{self.bin}:{os.environ['PATH']}", HYPRLAND_INSTANCE_SIGNATURE="test",
+                   NC_DIAG_PROC=str(self.proc))
         for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "IA_MODE", "IA_ACTIONS"):
             env.pop(k, None)
         env.update(plus)
@@ -106,7 +109,7 @@ class Bilan(Base):
         self.assertEqual(d["attention"], sum(c["niveau"] == "avert" for c in d["constats"]))
         self.assertGreater(d["ok"], 0)
         for c in d["constats"]:
-            self.assertEqual(sorted(c), ["cle", "niveau", "quoi", "reparations", "section", "texte"])
+            self.assertEqual(sorted(c), ["cle", "niveau", "quoi", "reparations", "section", "texte", "texte_ia"])
             self.assertIn(c["niveau"], ("avert", "faux"))      # jamais les ✓
             self.assertTrue(c["cle"])
             for i in c["reparations"]:
@@ -131,6 +134,57 @@ class Bilan(Base):
         self.assertNotIn("demarrer:nc-pouls.service", d["reparations"])
         self.assertIn("pour cette session", d["reparations"]["demarrer:nc-ecran-externe.service"]["libelle"])
         self.assertIn("peut-être coupé exprès", d["reparations"]["demarrer:nc-ecran-externe.service"]["detail"])
+
+    def faux_bin(self, nom, corps):
+        f = self.bin / nom
+        f.write_text("#!/bin/sh\n" + corps + "\n")
+        f.chmod(0o755)
+
+    def test_texte_ia_sans_la_ligne_du_journal(self):
+        # La dernière ligne du journal (ici un nom de réseau Wi-Fi fictif) reste à l'écran, jamais dans texte_ia
+        self.faux_bin("journalctl", 'echo "début"; echo "connecté au réseau Wifi-Fictif-42 (titre : Chanson Secrète)"')
+        self.etat("hypridle.service", "failed")
+        d = self.json("--rapide")
+        c = {c["cle"]: c for c in d["constats"]}["service:hypridle.service"]
+        self.assertIn("Wifi-Fictif-42", c["texte"])
+        self.assertNotIn("Wifi-Fictif-42", c["texte_ia"])
+        self.assertNotIn("Chanson", c["texte_ia"])
+        self.assertIn("hypridle.service", c["texte_ia"])
+        self.assertIn("2 ligne(s)", c["texte_ia"])
+        # le texte affiché de nc-diag garde la ligne
+        self.assertIn("Wifi-Fictif-42", self.diag().stdout)
+
+    def test_texte_ia_pareil_sans_journal_et_validate(self):
+        self.etat("nc-pouls.service", "inactive")
+        c = {c["cle"]: c for c in self.json("--rapide")["constats"]}["service:nc-pouls.service"]
+        self.assertEqual(c["texte_ia"], c["texte"])
+        self.faux_bin("noctalia", '[ "$1" = --version ] && { echo "noctalia 4.0"; exit 0; }\n'
+                      '[ "$2" = validate ] && { echo "ERROR fond d\'écran Photo-Perso.png introuvable"; exit 1; }\nexit 0')
+        c = {c["cle"]: c for c in self.json("--rapide")["constats"]}["noctalia_config"]
+        self.assertIn("Photo-Perso", c["texte"])
+        self.assertNotIn("Photo-Perso", c["texte_ia"])
+
+    def faux_proc(self, pid, *argv):
+        d = self.proc / str(pid)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cmdline").write_bytes(b"\0".join(a.encode() for a in argv) + b"\0")
+
+    def lancer_ile_a_la_main(self):
+        # des clients et une autre config ne comptent pas
+        self.faux_proc(4240, "qs", "-c", "nc-ile", "ipc", "call", "x", "y")
+        self.faux_proc(4241, "/usr/bin/qs", "-c", "autre")
+        self.faux_proc(4242, "/usr/bin/qs", "-c", "nc-ile")
+
+    def test_ile_a_la_main_pas_de_seconde_ile(self):
+        self.etat("nc-ile.service", "inactive")
+        c = {c["cle"]: c for c in self.json("--rapide")["constats"]}
+        self.assertEqual(c["ile_arretee"]["reparations"], ["demarrer:nc-ile.service"])      # témoin : rien ne tourne
+        self.lancer_ile_a_la_main()
+        c = {c["cle"]: c for c in self.json("--rapide")["constats"]}
+        self.assertEqual(c["ile_arretee"]["reparations"], [])
+        r = self.diag("reparer", "demarrer:nc-ile.service", "--json")
+        self.assertEqual(json.loads(r.stdout)["resultat"], "deja")
+        self.assertFalse([x for x in self.journal() if x.startswith("systemd-run")])
 
     def test_unite_absente_pas_de_demarrage(self):
         (self.fake / "absente").mkdir()

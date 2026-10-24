@@ -539,6 +539,38 @@ class IA(unittest.TestCase):
         for x in ("0.56.2", "12:30:45", "[IP]", "[MAC]", "[e-mail]"):
             self.assertIn(x, envoye)
 
+    def test_charge_diagnostic_utilise_texte_ia(self):
+        # P3-1 : la ligne du journal (nom de réseau, titre de musique…) reste à l'écran ; l'IA reçoit texte_ia, sinon texte
+        m = charger_nc_ia("ncia_texte_ia")
+        d = {"constats": [
+            {"cle": "service:x", "niveau": "faux", "texte": "le service x en échec : connecté à Wifi-Fictif-42",
+             "texte_ia": "le service x en échec ; journal : 3 ligne(s)", "reparations": []},
+            {"cle": "autre", "niveau": "avert", "texte": "ancien nc-diag sans texte_ia", "reparations": []}]}
+        charge, _ = m.charge_diagnostic(d)
+        envoye = json.dumps(charge, ensure_ascii=False)
+        self.assertNotIn("Wifi-Fictif-42", envoye)
+        self.assertIn("journal : 3 ligne(s)", envoye)
+        self.assertIn("ancien nc-diag sans texte_ia", envoye)
+
+    def test_anonymiser_mac_nue_et_media(self):
+        m = charger_nc_ia("ncia_anon2")
+        r = m.anonymiser("carte aabbccddeeff, AA11BB22CC33 et /run/media/alice/CLE_USB/film.mkv")
+        self.assertEqual(r, "carte [MAC], [MAC] et /run/media/[compte]/CLE_USB/film.mkv")
+        # pas de faux positif : nombres décimaux, ids, sha courts, hexa plus longs ou plus courts
+        for t in ("123456789012", "commit 5242fa2e1c, id 1234567890123", "sha " + "a" * 40, "0x1a2b3c4d5e6f",
+                  "abcdef12345", "v0.56.2", "1700000000000", "aabbccddeeff00"):
+            self.assertNotIn("[MAC]", m.anonymiser(t), t)
+
+    def test_sans_commande_aucune_commande(self):
+        # P3-2 : « $ … » en milieu de ligne et segments entre accents graves, simples ou triples
+        m = charger_nc_ia("ncia_sans_cmd")
+        for t in ("ok ```rm -rf ~``` $ rm -rf ~\n$ x", "ok `rm -rf ~` fin", "tape $ rm -rf ~ puis", "``rm -rf ~``", "`rm -rf ~",
+                  "a ```\nrm -rf ~\n```"):
+            self.assertNotIn("rm -rf", m.sans_commande(t, 700), t)
+        self.assertEqual(m.sans_commande("Le réseau est coupé. Redémarre la barre.", 700), "Le réseau est coupé. Redémarre la barre.")
+        s = m.lire_reponse_diagnostic(json.dumps({"resume": "ok ```rm -rf ~``` $ rm -rf ~\n$ x"}), [])
+        self.assertNotIn("rm -rf", s["resume"])
+
     def test_scripts_des_gestionnaires_de_fichiers(self):
         nautilus = REPO / "home/.local/share/nautilus/scripts/IA"
         for f in nautilus.iterdir():

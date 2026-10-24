@@ -144,12 +144,40 @@ def unite_chargee(u):
     return code == 0 and v.strip() == "loaded"
 
 
+PROC = os.environ.get("NC_DIAG_PROC", "/proc")      # les tests y mettent un faux /proc
+
+
+def ile_hors_systemd():
+    """Vrai si une île « qs -c nc-ile » tourne déjà à toi (lancée à la main, hors de nc-ile.service) : en démarrer une
+    seconde par systemd en ferait deux. Lu dans /proc (les clients « qs -c nc-ile ipc|log … » ne comptent pas)."""
+    try:
+        pids = [p for p in os.listdir(PROC) if p.isdigit()]
+    except OSError:
+        return False
+    for p in pids:
+        try:
+            if os.stat(os.path.join(PROC, p)).st_uid != os.getuid():
+                continue
+            with open(os.path.join(PROC, p, "cmdline"), "rb") as f:
+                argv = f.read(8192).decode("utf-8", "replace").split("\0")
+        except OSError:
+            continue
+        for i in (0, 1):                         # « qs … » ou « interpréteur qs … »
+            if i < len(argv) and os.path.basename(argv[i]) == "qs":
+                reste = argv[i + 1:]
+                if "-c" in reste and reste[reste.index("-c") + 1:][:1] == ["nc-ile"] and \
+                        not {"ipc", "log"} & set(reste):
+                    return True
+    return False
+
+
 def proposer(u, etat):
     """Les réparations d'une unité selon son état : la redémarrer si elle est en échec, la démarrer (pour la session)
     si elle est seulement arrêtée et existe ; rien sinon (hors session, état illisible, unité absente)."""
     if etat == "failed":
         return ["redemarrer:" + u]
-    if etat == "inactive" and "demarrer:" + u in REPARATIONS and unite_chargee(u):
+    if etat == "inactive" and "demarrer:" + u in REPARATIONS and unite_chargee(u) \
+            and not (u == "nc-ile.service" and ile_hors_systemd()):
         return ["demarrer:" + u]
     return []
 
@@ -170,18 +198,21 @@ class Bilan:
         self.nb_ok += 1
         self.lignes.append(("ok", t, ""))
 
-    def _constat(self, niveau, t, quoi, cle, reparations):
+    def _constat(self, niveau, t, quoi, cle, reparations, texte_ia):
         self.lignes.append((niveau, t, quoi))
+        # texte_ia : ce qui peut partir vers une IA, SANS la ligne du journal (nom de réseau, titre de fenêtre ou de
+        # musique, texte de notification…) ; par défaut, le texte affiché
         self.constats.append({"cle": cle or "autre", "niveau": niveau, "section": self.section, "texte": t, "quoi": quoi,
+                              "texte_ia": t if texte_ia is None else texte_ia,
                               "reparations": [x for x in reparations if x in REPARATIONS]})
 
-    def avert(self, t, quoi="", cle="", reparations=()):
+    def avert(self, t, quoi="", cle="", reparations=(), texte_ia=None):
         self.attention += 1
-        self._constat("avert", t, quoi, cle, reparations)
+        self._constat("avert", t, quoi, cle, reparations, texte_ia)
 
-    def faux(self, t, quoi="", cle="", reparations=()):
+    def faux(self, t, quoi="", cle="", reparations=(), texte_ia=None):
         self.ko += 1
-        self._constat("faux", t, quoi, cle, reparations)
+        self._constat("faux", t, quoi, cle, reparations, texte_ia)
 
     def texte(self, court=False):
         if self.c:
@@ -285,7 +316,7 @@ def verifier(b):
         if code != 0:
             ligne = next((l for l in val.splitlines() if "ERR" in l or "error" in l.lower()), val.splitlines()[-1] if val else "")
             b.faux(T(f"config de Noctalia : {ligne[:160]}", f"Noctalia config: {ligne[:160]}"), T("nc-maj", "nc-update"),
-                   cle="noctalia_config")
+                   cle="noctalia_config", texte_ia=T("config de Noctalia invalide", "Noctalia config invalid"))
     else:
         b.faux(T("Noctalia n'est pas installée", "Noctalia is not installed"), T("relance install.sh", "run install.sh again"),
                cle="noctalia_absente")
@@ -350,8 +381,10 @@ def verifier(b):
             b.ok(T(f"{nom} : mise en veille normale", f"{nom}: normal sleep"))
         elif etat == "failed":
             journal, _ = sortie(["journalctl", "--user", "-u", s, "-n", "3", "--no-pager", "-o", "cat"])
+            n = len(journal.splitlines())
             b.faux(T(f"{nom} ({s}) en échec : ", f"{nom} ({s}) failed: ") + (journal.splitlines()[-1][:140] if journal else ""),
-                   f"systemctl --user restart {s}", cle="service:" + s, reparations=proposer(s, etat))
+                   f"systemctl --user restart {s}", cle="service:" + s, reparations=proposer(s, etat),
+                   texte_ia=T(f"{nom} ({s}) en échec", f"{nom} ({s}) failed") + (T(f" ; journal : {n} ligne(s)", f"; log: {n} line(s)") if n else ""))
         else:
             b.avert(T(f"{nom} ({s}) : {etat or 'inconnu'}", f"{nom} ({s}): {etat or 'unknown'}"), f"systemctl --user enable --now {s}",
                     cle="service:" + s, reparations=proposer(s, etat))
@@ -1012,6 +1045,9 @@ def _reparer(ident):
     if etat == "inactive" and not unite_chargee(u):
         return "echec", T(f"{u} n'est pas installé sur ce PC : rien n'est fait", f"{u} is not installed on this PC: nothing done")
     verbe = "restart" if action == "redemarrer" else "start"
+    if u == "nc-ile.service" and verbe == "start" and ile_hors_systemd():
+        return "deja", T("l'île tourne déjà (lancée à la main) : une seconde ne sera pas démarrée",
+                         "the island is already running (started by hand): a second one will not be started")
     if u == "nc-ile.service":
         return _ile_systemd_run(verbe)
     subprocess.run(["systemctl", "--user", "reset-failed", u], capture_output=True, stdin=subprocess.DEVNULL, timeout=10)
