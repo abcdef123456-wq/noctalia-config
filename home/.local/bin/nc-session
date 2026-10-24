@@ -158,7 +158,7 @@ def ecrire(f, d):
     s.update(version=2, nom=f.stem, date=int(time.time()), demarrage=reglage("SESSION_DEMARRAGE", "aucune") == f.stem)
     s["schema"] = schema(s)
     ordre = ["version", "nom", "date"] + list(defauts()) + ["ecrans", "schema", "fenetres"]
-    s = {k: s[k] for k in ordre if k in s} | {k: v for k, v in s.items() if k not in ordre}
+    s = {**{k: s[k] for k in ordre if k in s}, **{k: v for k, v in s.items() if k not in ordre}}
     DOSSIER.mkdir(parents=True, exist_ok=True, mode=0o700)
     DOSSIER.chmod(0o700)
     tmp = f.with_suffix(".tmp")

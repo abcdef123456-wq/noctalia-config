@@ -4580,7 +4580,7 @@ NOYAU = re.compile(r"^(linux(-lts|-zen|-hardened|-cachyos)?|linux-image-.*|kerne
 
 def noyau_mis_a_jour(details):
     """Un vrai noyau dans la liste (pas linux-firmware ni linux-api-headers : revue RPT-01)."""
-    return any(NOYAU.match(d.removeprefix("★ ").split(" ", 1)[0]) for d in details)
+    return any(NOYAU.match((d[2:] if d.startswith("★ ") else d).split(" ", 1)[0]) for d in details)
 
 
 def resume_sans_ia(genre, details, faits=()):

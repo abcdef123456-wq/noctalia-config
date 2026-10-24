@@ -98,7 +98,10 @@ B, D, N = ("\033[1m", "\033[2m", "\033[0m") if TTY else ("", "", "")
 ACC, MOD, OK, ERR = ("\033[34m", "\033[33m", "\033[32m", "\033[31m") if TTY else ("", "", "", "")
 
 # Noms des touches et sections de la fiche Super + / : ceux de nc-keys
-_chargeur = importlib.machinery.SourceFileLoader("nckeys", os.path.join(BIN, "nc-keys"))
+# (depuis le dossier du script, pour marcher depuis le dépôt ou avant l'installation ; ~/.local/bin en repli)
+_ICI = os.path.dirname(os.path.realpath(__file__))
+_NCKEYS = os.path.join(_ICI, "nc-keys") if os.path.exists(os.path.join(_ICI, "nc-keys")) else os.path.join(BIN, "nc-keys")
+_chargeur = importlib.machinery.SourceFileLoader("nckeys", _NCKEYS)
 nckeys = importlib.util.module_from_spec(importlib.util.spec_from_loader("nckeys", _chargeur))
 _chargeur.exec_module(nckeys)
 

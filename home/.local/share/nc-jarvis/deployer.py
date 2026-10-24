@@ -188,6 +188,9 @@ def configure(backend, mode):
     return changes['SECRET_KEY']
 
 
+def sans_git(t):
+    return t[:-4] if t.endswith('.git') else t
+
 def checkout(backend):
     if not backend.exists():
         run(['git','init',backend]);run(['git','-C',backend,'remote','add','origin',REPO])
@@ -195,7 +198,7 @@ def checkout(backend):
     else:
         remote=subprocess.check_output(['git','-C',backend,'remote','get-url','origin'],text=True).strip()
         remote=remote.replace('git@github.com:','https://github.com/')
-        if remote.rstrip('/').removesuffix('.git')!=REPO.removesuffix('.git'):raise ValueError('Le dépôt existant ne pointe pas vers JARVIS-BIS.')
+        if sans_git(remote.rstrip('/'))!=sans_git(REPO):raise ValueError('Le dépôt existant ne pointe pas vers JARVIS-BIS.')
         if subprocess.check_output(['git','-C',backend,'status','--porcelain','--untracked-files=no'],text=True).strip():raise ValueError('Modifications locales du backend : préservées, déploiement arrêté.')
         revision=subprocess.check_output(['git','-C',backend,'rev-parse','HEAD'],text=True).strip()
         if revision not in VALIDATED_REVISIONS:raise ValueError('Backend existant sur une autre révision. Vérifie sa compatibilité avant de changer de version ; aucun reset effectué.')

@@ -183,10 +183,11 @@ def collect():
 
 
 if __name__ == "__main__":
-    data = collect()
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
         print(T(__doc__.strip(), USAGE_EN))
-    elif len(sys.argv) > 1 and sys.argv[1] == "json":
+        sys.exit(0)             # l'aide ne demande pas Hyprland
+    data = collect()
+    if len(sys.argv) > 1 and sys.argv[1] == "json":
         json.dump(data, sys.stdout, ensure_ascii=False)
     else:
         for sec in data:

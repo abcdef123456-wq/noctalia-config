@@ -667,7 +667,10 @@ def premiere_occurrence(recurrence, heure, minute, maintenant):
 def fuseau_local():
     """Le fuseau de ce PC avec ses changements d'heure (Europe/Paris…), ou None. datetime.now().astimezone() donne un
     décalage figé : une échéance après le changement d'heure tombait une heure à côté (revue REM-01)."""
-    from zoneinfo import ZoneInfo
+    try:
+        from zoneinfo import ZoneInfo     # absent en Python 3.8
+    except ImportError:
+        return None
     nom = os.environ.get("TZ", "").lstrip(":")
     if not nom:
         chemin = os.path.realpath("/etc/localtime")
