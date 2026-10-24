@@ -462,9 +462,13 @@ session tourne donc dans une unité `systemd --user` transitoire, sans root :
   noyau ;
 - `ProtectHome=read-only` + `ReadOnlyPaths=~` : `~` en lecture seule, sauf un seul dossier de travail
   (`~/.local/state/nc-noeud/travail`, en `ReadWritePaths`) ;
-- `InaccessiblePaths` : clés, mots de passe, config (navigateurs, trousseaux, CLI d’IA et de cloud, gh, git,
-  `~/.config/nc`, le serveur local…) **illisibles** — plus large que les chemins protégés, car le réseau reste ouvert
-  et tout ce qui se lit peut partir ;
+- `InaccessiblePaths` : clés, mots de passe, config (navigateurs, y compris Flatpak, trousseaux, gestionnaires de
+  mots de passe, messageries, CLI d’IA et de cloud, gh, git, npm, cargo…, historiques du shell, `~/.config/nc`, le
+  serveur local…) **illisibles** — plus large que les chemins protégés, car le réseau reste ouvert et tout ce qui se
+  lit peut partir. **Tout fichier qui n’est pas dans cette liste peut être lu, puis envoyé sur le réseau** : ajoute tes
+  dossiers à toi dans `NOEUD_BAC_INTERDITS` (nc-reglages → Intelligence artificielle → « Session : tes dossiers à
+  cacher en plus » ; relatifs à `~`, séparés par « : », par ex. `Documents/perso:projets/clients`). Une entrée qui ne
+  convient pas (chemin absolu, `..`) empêche le bac, donc la session ;
 - tout `$XDG_RUNTIME_DIR` inaccessible : bus systemd/D-Bus (sinon `systemd-run --user` relancerait une unité **hors**
   du bac), `hypr` (`hyprctl dispatch exec`), `wayland` (frappe simulée), agent ssh/gpg, trousseau, quickshell,
   pipewire, tmux ;
@@ -483,7 +487,11 @@ session.
 d’un serveur compromis : pendant la session, l’un ou l’autre peut agir (le réseau reste ouvert). Mais il **ne peut
 pas** lire les chemins interdits, écrire dans `~`, utiliser `sudo`, ni lancer d’appli ; **chaque action se voit et
 s’arrête**. Le réseau reste ouvert, **y compris `127.0.0.1`** : une commande de session peut joindre les services de ce
-PC qui font confiance aux connexions locales (Ollama, CUPS, un serveur de développement sans mot de passe). C’est pourquoi la session est désactivée par défaut et courte. En cas de doute, laisse-la à 0.
+PC qui font confiance aux connexions locales (Ollama, CUPS, un serveur de développement, Jupyter ou code-server sans
+mot de passe, qui exécutent du code : une sortie du bac). Le manager utilisateur ignore `IPAddressDeny` (il faut être
+root) ; `NOEUD_BAC_RESEAU=non` (« Session : réseau pour les commandes ») met `PrivateNetwork=yes` : plus aucun réseau,
+mais beaucoup de commandes ne marchent plus. `/dev/shm` reste partagé et inscriptible (des outils en ont besoin) : une
+commande peut y laisser un fichier qu’un autre programme lira. C’est pourquoi la session est désactivée par défaut et courte. En cas de doute, laisse-la à 0.
 
 ## Attente avant une réponse
 

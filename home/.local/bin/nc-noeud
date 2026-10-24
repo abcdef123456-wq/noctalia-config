@@ -1486,11 +1486,47 @@ DECISIONS = {"refuse": ("refusé", "Refusé {o}.", "Denied {o}."),
 # confirmation normale : jamais une exécution hors du bac. Approche choisie : liste noire (InaccessiblePaths) plutôt que
 # liste blanche (ProtectHome=tmpfs + BindReadOnlyPaths), car une rafale d'outils veut lire des chemins variés du dépôt
 # et du système ; on bloque ce qui est secret et on garde le reste lisible, le bac empêchant la fuite par les sockets.
+# Le réseau reste ouvert dans le bac : tout ce qui s'y lit peut partir. D'où une liste plus large que PROTEGES
+# (historiques, jetons d'outils, navigateurs, messageries, gestionnaires de mots de passe) ; ce qui n'y est pas reste
+# lisible, tes dossiers à toi s'ajoutent par NOEUD_BAC_INTERDITS.
 BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-config",
                  ".ssh", ".gnupg", ".local/share/keyrings", ".password-store",
                  ".mozilla", ".config/chromium", ".config/google-chrome", ".config/BraveSoftware",
                  ".config/discord", ".config/gh", ".config/git", ".git-credentials", ".netrc", ".docker", ".kube",
-                 ".aws", ".claude", ".claude.json", ".codex", ".gemini", ".config/rclone"]
+                 ".aws", ".claude", ".claude.json", ".codex", ".gemini", ".config/rclone",
+                 # historiques (des jetons y sont souvent tapés à la main)
+                 ".zsh_history", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
+                 ".psql_history", ".mysql_history", ".lesshst", ".local/share/nvim/shada",
+                 # jetons d'outils
+                 ".npmrc", ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".gradle/gradle.properties",
+                 ".m2/settings.xml", ".ollama", ".config/hub", ".config/glab-cli", ".config/gcloud", ".azure",
+                 ".config/doctl", ".terraform.d", ".wakatime.cfg", ".config/Code/User/globalStorage", ".vscode-server",
+                 # applis Flatpak (navigateurs, messageries…), autres navigateurs
+                 ".var/app", ".librewolf", ".zen", ".floorp", ".waterfox", ".config/vivaldi", ".config/microsoft-edge",
+                 ".config/opera", ".config/chromium-browser",
+                 # messageries (une session copiée vaut le compte)
+                 ".local/share/TelegramDesktop", ".config/Signal", ".thunderbird", ".config/Slack", ".config/vesktop",
+                 ".config/legcord", ".config/WebCord", ".config/Element",
+                 # mots de passe, accès distants, synchronisation
+                 ".config/Bitwarden", ".config/op", ".config/keepassxc", ".local/share/remmina", ".config/remmina",
+                 ".config/syncthing"]
+
+
+def bac_perso():
+    """NOEUD_BAC_INTERDITS : tes dossiers en plus (relatifs à ~, séparés par « : », « ~/ » permis). None si une entrée
+    ne convient pas (chemin absolu, « .. », guillemet, barre oblique inverse) : alors pas de bac, donc pas de session,
+    plutôt qu'un dossier que tu crois protégé et qui ne l'est pas."""
+    rels = []
+    for x in (reglage("NOEUD_BAC_INTERDITS", "") or "").split(":"):
+        x = x.strip()
+        if x.startswith("~/"):
+            x = x[2:]
+        if not x:
+            continue
+        if x.startswith("/") or ".." in Path(x).parts or any(c in x for c in '"\\\n'):
+            return None
+        rels.append(x)
+    return rels
 
 
 def dossier_travail_bac():
@@ -1502,10 +1538,14 @@ def dossier_travail_bac():
 
 
 def bac_inaccessibles():
-    """Les chemins rendus illisibles dans le bac : BAC_INTERDITS et PROTEGES qui existent (jamais sous /tmp, que
-    PrivateTmp masque déjà), plus tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd refuse l'unité)."""
+    """Les chemins rendus illisibles dans le bac : BAC_INTERDITS, PROTEGES et NOEUD_BAC_INTERDITS qui existent (jamais
+    sous /tmp, que PrivateTmp masque déjà), plus tout $XDG_RUNTIME_DIR. Seuls les chemins existants (sinon systemd
+    refuse l'unité). None si NOEUD_BAC_INTERDITS ne convient pas."""
     vus = []
-    for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES):
+    perso = bac_perso()
+    if perso is None:
+        return None
+    for rel in dict.fromkeys(BAC_INTERDITS + PROTEGES + perso):
         if any(c in rel for c in "*?["):                       # motif (ex. assistant.conf.backup-*) : on étend
             for q in HOME.glob(rel):
                 if q.exists():
@@ -1536,8 +1576,17 @@ def bac_argv(cmd, cwd, budget):
     argv = [sr, "--user", "--wait", "--pipe", "--quiet", "--collect"]
     for p in props:
         argv += ["-p", p]
-    for x in bac_inaccessibles():                              # un -p par chemin : pas d'ennui de guillemets ni d'espace
-        argv += ["-p", "InaccessiblePaths=" + x]
+    if reglage("NOEUD_BAC_RESEAU", "oui") == "non":
+        argv += ["-p", "PrivateNetwork=yes"]                    # aucun réseau, 127.0.0.1 compris (services locaux)
+    interdits = bac_inaccessibles()
+    if interdits is None:
+        return None
+    for x in interdits:
+        # Un -p par chemin, entre guillemets (systemd sépare sinon aux espaces) ; un guillemet ou une barre oblique
+        # inverse dans le chemin : pas de bac plutôt qu'un chemin mal lu
+        if '"' in x or "\\" in x:
+            return None
+        argv += ["-p", 'InaccessiblePaths="' + x + '"']
     # Le dossier de travail passe par un « cd » dans la commande, pas par WorkingDirectory : systemd refuse l'unité
     # quand WorkingDirectory tombe sur un tmpfs (ex. /dev/shm des tests), alors qu'un cd marche partout.
     argv += ["--", "/bin/sh", "-c", "cd " + shlex.quote(str(cwd)) + " && " + cmd]

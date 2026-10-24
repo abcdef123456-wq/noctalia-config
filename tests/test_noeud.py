@@ -2093,6 +2093,35 @@ class BacReel(ModuleCharge):
         self.assertNotIn("JOIGNABLE", sortie)
         self.assertLess(int(sortie.split()[-1]), 10, "seuls les processus du bac sont visibles")
 
+    def test_historique_et_dossier_perso_caches(self):
+        m, home = self.charger_bac()
+        (home / ".zsh_history").write_text("export JETON=FAUX-JETON-DE-TEST\n")
+        (home / "dossier perso").mkdir()                              # une espace : le chemin passe entre guillemets
+        (home / "dossier perso/notes.txt").write_text("FAUX-PERSO-DE-TEST")
+        with unittest.mock.patch.object(m, "reglage", lambda cle, d: "~/dossier perso" if cle == "NOEUD_BAC_INTERDITS" else d):
+            argv = m.bac_argv(":", "/", 10)
+            self.assertIn(f'InaccessiblePaths="{home}/.zsh_history"', argv)
+            self.assertIn(f'InaccessiblePaths="{home}/dossier perso"', argv)
+            r = self.lancer_bac(m, f'cat {home}/.zsh_history "{home}/dossier perso/notes.txt" 2>&1; echo FIN')
+        self.assertIn("FIN", r.get("stdout", ""), r)
+        self.assertNotIn("FAUX-JETON", r.get("stdout", ""))
+        self.assertNotIn("FAUX-PERSO", r.get("stdout", ""))
+
+    def test_dossier_perso_invalide_pas_de_bac(self):
+        m, _ = self.charger_bac()
+        for valeur in ("/etc", "../voisin", 'a"b'):
+            with self.subTest(valeur=valeur), \
+                    unittest.mock.patch.object(m, "reglage", lambda cle, d, v=valeur: v if cle == "NOEUD_BAC_INTERDITS" else d):
+                self.assertIsNone(m.bac_argv(":", "/", 10), "pas de bac, donc pas de session")
+                self.assertFalse(asyncio.run(m.bac_tient()))
+
+    def test_reseau_coupe_sur_demande(self):
+        m, _ = self.charger_bac()
+        self.assertNotIn("PrivateNetwork=yes", m.bac_argv(":", "/", 10))
+        with unittest.mock.patch.object(m, "reglage", lambda cle, d: "non" if cle == "NOEUD_BAC_RESEAU" else d):
+            self.assertIn("PrivateNetwork=yes", m.bac_argv(":", "/", 10))
+            self.assertTrue(asyncio.run(m.bac_tient()), "le bac sans réseau tient aussi")
+
     def test_proprietes_du_bac(self):
         m, _ = self.charger_bac()
         argv = m.bac_argv(":", "/", 10)

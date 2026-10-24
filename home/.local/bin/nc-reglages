@@ -1129,6 +1129,20 @@ REGLAGES = [
         "~ read-only; the network stays open). File writes, read_file and the clipboard stay confirmed one by one. "
         "0: off (recommended)."),
       mini=0, maxi=15, pas=1, unite="min", zero=L("Désactivée", "Off"), groupe="noeud-confirmation"),
+    R("NOEUD_BAC_INTERDITS", "Intelligence artificielle",
+      L("Session : tes dossiers à cacher en plus", "Session: extra folders of yours to hide"), "texte", "",
+      L("En session, tout fichier qui n'est pas caché peut être lu et envoyé sur le réseau. Clés, mots de passe, "
+        "navigateurs, messageries et historiques le sont déjà ; ajoute ici tes dossiers à toi, relatifs à ~ et "
+        "séparés par « : » (exemple : Documents/perso:projets/clients).",
+        "In a session, any file that isn't hidden can be read and sent over the network. Keys, passwords, browsers, "
+        "messaging apps and histories already are; add your own folders here, relative to ~ and separated by \":\" "
+        "(example: Documents/personal:projects/clients)."), groupe="noeud-confirmation"),
+    R("NOEUD_BAC_RESEAU", "Intelligence artificielle",
+      L("Session : réseau pour les commandes", "Session: network for commands"), "ouinon", "oui",
+      L("Non : les commandes de session n'ont plus aucun réseau, pas même les services de ce PC (127.0.0.1 : Ollama, "
+        "serveur de développement…). Plus sûr, mais beaucoup de commandes ne marchent plus.",
+        "No: session commands get no network at all, not even this PC's services (127.0.0.1: Ollama, dev server…). "
+        "Safer, but many commands stop working."), groupe="noeud-confirmation"),
     R("NOEUD_SANS_CONFIRMATION", "Intelligence artificielle",
       L("Actions sans confirmation (musique, notification, presse-papiers en lecture)",
         "Actions without confirmation (music, notification, clipboard read)"), "ouinon", "oui",
