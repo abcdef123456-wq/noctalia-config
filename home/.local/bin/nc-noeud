@@ -41,7 +41,6 @@ import math
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import signal
 import socket
@@ -1500,31 +1499,23 @@ def bac_inaccessibles():
     return BAC.inaccessibles(HOME, reglage)
 
 
-# L'environnement laissé à un exec de session (le reste est RETIRÉ de l'unité, sinon elle hérite de tout
-# l'environnement du gestionnaire : DBUS, Wayland, Hyprland, XDG_*, et avec uwsm des clés exportées). Une session de
-# confiance lance tes commandes : elle garde le PATH, le dossier personnel et la locale, pas les secrets ni les sockets.
-NOEUD_BAC_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "TZ"]
-
-
-def bac_env():
-    noms = list(NOEUD_BAC_ENV)
-    noms += [k for k in os.environ if k.startswith("LC_") and k not in noms]
-    return noms
-
-
 def bac_argv(cmd, cwd, budget):
-    """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run est absent."""
+    """La commande de systemd-run qui exécute cmd dans le bac, ou None si systemd-run (ou env) est absent. nc-bac y
+    met ProtectSystem=strict, /dev/shm en lecture seule, KillSignal=SIGKILL, et « env -i » avec environnement_bac()."""
     return BAC.argv(cmd, cwd, budget, home=HOME, reglage=reglage, programme=programme, ecriture=[dossier_travail_bac()],
-                    env=bac_env(), reseau_prive=reglage("NOEUD_BAC_RESEAU", "oui") == "non", description="nc-noeud")
+                    env=environnement_bac(), reseau_prive=reglage("NOEUD_BAC_RESEAU", "oui") == "non",
+                    description="nc-noeud")
 
 
 def environnement_bac():
-    """Les seules variables d'une commande du bac : PATH, HOME, la langue et TERM=dumb, rien de secret."""
+    """Les seules variables d'une commande du bac : PATH, HOME, la langue, TZ et TERM=dumb, rien de secret. L'unité
+    hérite sinon de tout l'environnement du gestionnaire systemd (environment.d, import-environment : clés d'API du
+    profil, SSH_AUTH_SOCK…) ; nc-bac l'efface (env -i) et ne remet que cette liste (valeurs non secrètes)."""
     garder = {"PATH": os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin", "HOME": str(HOME), "TERM": "dumb"}
     for k, v in os.environ.items():
-        if k == "LANG" or k == "LANGUAGE" or k.startswith("LC_"):
+        if k in ("LANG", "LANGUAGE", "TZ") or k.startswith("LC_"):
             garder[k] = v
-    return [k + "=" + v for k, v in sorted(garder.items()) if "=" not in k and "\0" not in v]
+    return [k + "=" + v for k, v in sorted(garder.items()) if "=" not in k and "\0" not in v and "\n" not in v]
 
 
 async def bac_tient():

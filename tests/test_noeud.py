@@ -2277,7 +2277,7 @@ class BacReel(ModuleCharge):
         self.assertNotIn("FAUSSE-CLE-DE-TEST", texte)
         self.assertNotIn("SSH_AUTH_SOCK", texte)
         noms = {l.split("=", 1)[0] for l in texte.splitlines() if "=" in l}
-        permis = {"PATH", "HOME", "TERM", "LANG", "LANGUAGE", "PWD", "OLDPWD", "SHLVL", "_"}   # PWD… : posées par sh
+        permis = {"PATH", "HOME", "TERM", "LANG", "LANGUAGE", "TZ", "PWD", "OLDPWD", "SHLVL", "_"}   # PWD… : posées par sh
         self.assertEqual({n for n in noms if n not in permis and not n.startswith("LC_")}, set(), noms)
         self.assertIn(f"HOME={home}", texte)
         self.assertIn("TERM=dumb", texte)

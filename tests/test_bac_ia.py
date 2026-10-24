@@ -463,6 +463,22 @@ class AvecFauxSystemdRun(Base):
         for r in crees:
             self.assertIn(str(self.home / r), inacc, r)
 
+    def test_env_i_noms_et_valeurs_litterales(self):
+        """nc-bac : « NOM » passe par --setenv (valeur hors de la ligne de commande : clés d'API), « NOM=valeur » est
+        écrit tel quel après env -i (valeurs non secrètes de nc-noeud : TERM=dumb) ; sans programme env, pas de bac."""
+        bac = self.m.module_bac()
+        commun = dict(home=self.home, reglage=lambda k, d="": d, env=["OPENAI_API_KEY", "TERM=dumb"])
+        argv = bac.argv(["true"], str(self.home), 10, programme=shutil.which, **commun)
+        self.assertIn("--setenv=OPENAI_API_KEY", argv)
+        self.assertNotIn("--setenv=TERM=dumb", argv)
+        script = argv[argv.index("--") + 3]
+        self.assertIn(' -i OPENAI_API_KEY="$OPENAI_API_KEY" TERM=dumb "$@"', script)
+        self.assertTrue(script.split("exec ", 1)[1].startswith(shutil.which("env")))
+        self.assertIsNone(bac.argv(["true"], str(self.home), 10, programme=lambda n: None if n == "env" else shutil.which(n),
+                                   **commun))
+        self.assertIsNone(bac.argv(["true"], str(self.home), 10, programme=shutil.which,
+                                   **dict(commun, env=["MAUVAIS NOM"])))
+
     def test_on_failure_vide(self):
         """Un greffon global OnFailure= (notification de panne) ne doit pas se déclencher pour une unité du bac."""
         self.oublier_sonde()
