@@ -380,9 +380,10 @@ taille n’est jamais envoyé.
    nouvelle (c’est le cas de JARVIS-BIS `9f4cdeb`). Une autre action sensible attend donc
    que la première soit décidée ou close (son `confirm_cancel` part avant) ; si son échéance passe avant, elle est
    refusée sans qu’aucune demande ne parte. La carte de l’île suit la même règle, avec sa propre file. De plus, quand
-   une demande finit **sans** décision venue du téléphone (elle expire, elle est décidée sur l’écran en `les-deux`, ou
-   le code est faux ou rejoué), `nc-noeud` garde la voie à distance **au calme une quinzaine de secondes** avant de
-   relayer la suivante (jamais au-delà de l’échéance de celle qui attend : elle expire alors sans partir). Une frappe
+   une demande finit **sans** `allow` ni `deny` venus du téléphone (elle expire, elle est décidée sur l’écran en
+   `les-deux`, le code est faux ou rejoué, ou l’envoi a été interrompu), `nc-noeud` garde la voie à distance **au
+   calme** avant de relayer la suivante : jusqu’au plus tard de **15 s après sa fin** et de **40 s après qu’elle t’a
+   été présentée**, mais jamais au-delà de l’échéance de celle qui attend (elle expire alors sans partir). Une frappe
    du code prend 25 à 40 s, bien plus que l’échéance d’une demande courte : sans ce délai, la demande suivante
    remplacerait tout de suite, chez le serveur, celle que tu lisais, et le code tapé pour l’une autoriserait l’autre.
    Pendant ce calme, un code encore en route tombe sur une demande déjà close : il est ignoré comme tardif, pas

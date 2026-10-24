@@ -186,9 +186,10 @@ class Base(unittest.TestCase):
         self.configurer(f"http://127.0.0.1:{self.serveur.port}")
         self.regler(NOEUD_JARVIS="oui")
         self.ile("autoriser")
+        # NC_NOEUD_TESTS=1 : seul cas où NC_NOEUD_DELAI, NC_NOEUD_CALME et NC_NOEUD_FRAPPE sont lus (jamais en production)
         self.env = dict(os.environ, HOME=str(self.home), XDG_RUNTIME_DIR=str(self.run_dir), XDG_STATE_HOME=str(self.etat),
-                        PATH=str(self.bin) + ":/usr/bin:/bin", NC_LANGUE="fr")
-        for cle in ("XDG_CONFIG_HOME", "NC_NOEUD_DELAI"):
+                        PATH=str(self.bin) + ":/usr/bin:/bin", NC_LANGUE="fr", NC_NOEUD_TESTS="1")
+        for cle in ("XDG_CONFIG_HOME", "NC_NOEUD_DELAI", "NC_NOEUD_CALME", "NC_NOEUD_FRAPPE"):
             self.env.pop(cle, None)
         self.proc = None
 
@@ -800,6 +801,23 @@ class DelaiParTrame(ModuleCharge):
             self.t += 100
         self.assertEqual(self.journal().count("trop tard"), 4)
 
+    def test_raccourcis_lus_en_tests_seulement(self):
+        """NC_NOEUD_DELAI, NC_NOEUD_CALME et NC_NOEUD_FRAPPE ne sont lus que sous NC_NOEUD_TESTS=1 : en production,
+        rien ne peut couper le calme ni raccourcir un délai sans le dire."""
+        m = self.charger()
+        os.environ.update(NC_NOEUD_DELAI="1", NC_NOEUD_CALME="0", NC_NOEUD_FRAPPE="0")
+        os.environ.pop("NC_NOEUD_TESTS", None)
+        self.assertEqual(m.distance_calme(), m.DISTANCE_CALME)
+        self.assertEqual(m.frappe_max(), m.FRAPPE_MAX)
+        self.assertEqual(m.Noeud.delai("read_file", {}, 35.0), 24)
+        os.environ["NC_NOEUD_TESTS"] = "1"
+        self.assertEqual(m.distance_calme(), 0)
+        self.assertEqual(m.frappe_max(), 0)
+        self.assertEqual(m.Noeud.delai("read_file", {}, 35.0), 1)
+        os.environ.update(NC_NOEUD_CALME="999", NC_NOEUD_DELAI="0.1")
+        self.assertEqual(m.distance_calme(), m.DISTANCE_CALME, "jamais allongé")
+        self.assertEqual(m.Noeud.delai("read_file", {}, 35.0), 0.5, "jamais sous 0,5 s")
+
     def test_son_tour_jamais_au_dela_de_l_echeance(self):
         """La carte et la demande à distance attendent leur tour, mais expirent à leur échéance, sans rien envoyer."""
         m = self.charger()
@@ -1167,7 +1185,7 @@ class UneDemandeALaFois(ServeurDistant):
     def test_bad_code_la_response_de_a_part_avant_la_demande_de_b(self):
         """P2-1 variante : un code faux pour A ne doit pas faire partir B avant la response (bad_code) de A, sinon on te
         redemande un code alors que la demande montrée est déjà B."""
-        self.demarrer(NC_NOEUD_CALME="3")
+        self.demarrer(NC_NOEUD_CALME="3", NC_NOEUD_FRAPPE="3")
         ma, mb = self.home / "fait-a", self.home / "fait-b"
         a = self.action("exec", {"command": f"touch {ma}"}, timeout=30.0)
         time.sleep(0.2)
@@ -1188,6 +1206,28 @@ class UneDemandeALaFois(ServeurDistant):
         repA = next(m for m in self.recus if m.get("type") == "response" and m.get("req_id") == a)
         self.assertEqual(repA.get("error_code"), "bad_code")
         self.assertFalse(ma.exists())
+
+    def test_calme_compte_aussi_depuis_la_presentation(self):
+        """Le calme dure jusqu'au plus tard de fin + DISTANCE_CALME et présentation + FRAPPE_MAX : A expire vite (5 s),
+        mais un code tapé lentement en la lisant peut encore arriver ; B ne part pas avant présentation + FRAPPE_MAX."""
+        self.demarrer(NC_NOEUD_CALME="1", NC_NOEUD_FRAPPE="8")
+        ma, mb = self.home / "fait-a", self.home / "fait-b"
+        a = self.action("exec", {"command": f"touch {ma}"}, timeout=10.0)      # A : 5 s pour confirmer
+        time.sleep(0.2)
+        b = self.action("exec", {"command": f"touch {mb}"}, timeout=60.0)
+        q = self.serveur.recevoir()
+        self.recus.append(q)
+        presentee = time.monotonic()
+        self.assertEqual((q["type"], q["req_id"]), ("confirm_request", a))
+        self.attendre("confirm_cancel", a)                                     # A a expiré (vers 5 s)
+        self.deja_ou_attendre("confirm_request", b)
+        ecart = time.monotonic() - presentee
+        # Ancienne règle (fin + calme) : environ 5 + 1 = 6 s ; nouvelle : présentation + 8 s
+        self.assertGreaterEqual(ecart, 7.3, f"B partie {ecart:.1f} s après la présentation de A")
+        self.assertLess(ecart, 12)
+        self.repondre(b, "deny", code=None)
+        self.assertFalse(self.attendre("response", b)["success"])
+        self.assertFalse(mb.exists())
 
 
 class CodeDistance(ServeurDistant):
@@ -1220,7 +1260,7 @@ class CodeDistance(ServeurDistant):
         self.assertTrue(self.notifie("Code faux"), "le PC le dit")
 
     def test_code_rejoue_refuse(self):
-        self.demarrer()
+        self.demarrer(NC_NOEUD_CALME="1", NC_NOEUD_FRAPPE="1")         # un code rejoué ouvre une période calme
         marque = self.home / "fait"
         code = code_totp(TOTP)
         rep, fait = self.executee(self.action("exec", {"command": f"touch {marque}"}), marque, code=code)

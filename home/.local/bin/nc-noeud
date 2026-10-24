@@ -100,11 +100,16 @@ DELAIS_FIXES = {"read_file": 15 - MARGE_SERVEUR, "write_file": 15 - MARGE_SERVEU
 EXEC_MIN = 2 * MARGE_SERVEUR       # commande (ou trame) au délai plus court : pas le temps de te demander, refus direct
 BUDGET_MIN = 1                     # moins d'1 s pour exécuter avant l'abandon du serveur : rien n'est fait
 DELAI_ENVOI = 20                   # une écriture WebSocket qui ne passe pas en 20 s : le serveur ne lit plus, on ferme
-# Après qu'une demande à distance finit SANS décision venue du téléphone (expiration, décision prise sur l'écran en
-# « les-deux », code faux ou rejoué), on garde le verrou distance au calme ce temps avant de relayer la suivante : une
-# frappe du code prend 25 à 40 s, bien plus que l'échéance d'une demande courte ; la demande suivante ne doit pas partir
-# et remplacer, chez le serveur, celle que tu es en train de lire, sinon le code tapé pour l'une autoriserait l'autre.
+# Après qu'une demande à distance finit SANS « allow » ni « deny » venus du téléphone (expiration, décision prise sur
+# l'écran en « les-deux », code faux ou rejoué, envoi interrompu), on garde le verrou distance au calme avant de relayer
+# la suivante : la demande suivante ne doit pas remplacer, chez le serveur, celle que tu es en train de lire, sinon le
+# code tapé pour l'une autoriserait l'autre. Le calme dure jusqu'au plus tard de :
+#   - la fin de la demande + DISTANCE_CALME (un code encore en route) ;
+#   - le moment où elle t'a été présentée + FRAPPE_MAX : taper un code prend 25 à 40 s (mesuré dans l'issue #20), donc
+#     une demande qui expire à 12 s laisse un code arriver jusqu'à 40 s après sa présentation.
+# Toujours borné par l'échéance de celle qui attend : passé elle, elle expire sans partir.
 DISTANCE_CALME = 15
+FRAPPE_MAX = 40
 MAX_RESUME_DISTANCE = 3500         # résumé envoyé pour la confirmation à distance (un message Telegram : 4096)
 MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le client de l'upstream
 MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
@@ -185,12 +190,26 @@ def horloge():
     return time.monotonic()
 
 
-def distance_calme():
-    """Durée de la période calme ; NC_NOEUD_CALME (tests) ne peut que la raccourcir."""
+def raccourci_tests(nom, defaut, plancher=0.0):
+    """Une durée que les tests peuvent RACCOURCIR (jamais allonger) par la variable nom, mais seulement sous
+    NC_NOEUD_TESTS=1 : en production, ces variables ne sont pas lues, et rien ne peut couper le calme ni les délais
+    sans le dire."""
+    if os.environ.get("NC_NOEUD_TESTS") != "1":
+        return defaut
     try:
-        return max(0.0, min(float(os.environ.get("NC_NOEUD_CALME", DISTANCE_CALME)), DISTANCE_CALME))
+        return max(plancher, min(float(os.environ.get(nom, defaut)), defaut))
     except ValueError:
-        return DISTANCE_CALME
+        return defaut
+
+
+def distance_calme():
+    """Durée de la période calme après la fin d'une demande (NC_NOEUD_CALME en tests seulement)."""
+    return raccourci_tests("NC_NOEUD_CALME", DISTANCE_CALME)
+
+
+def frappe_max():
+    """Temps de frappe d'un code compté depuis la présentation d'une demande (NC_NOEUD_FRAPPE en tests seulement)."""
+    return raccourci_tests("NC_NOEUD_FRAPPE", FRAPPE_MAX)
 
 
 def delai_trame(v):
@@ -1312,22 +1331,20 @@ class ConfirmationDistance:
         futur = asyncio.get_running_loop().create_future()
         self.attentes[req_id] = (futur, limite)
         fin = "close"
-        calme = False                                              # garder le verrou au calme ensuite ?
+        # Calme par défaut : toute fin autre qu'un « allow » ou un « deny » venus du téléphone (expiration, décision sur
+        # l'écran, code faux ou rejoué, annulation ou erreur PENDANT l'envoi, qui a peut-être atteint le serveur) garde
+        # la voie au calme
+        calme = True
+        presentee = horloge()                                      # la demande t'est présentée à partir d'ici
         try:
             await ws.envoyer({"type": "confirm_request", "req_id": req_id, "action": nom, "summary": resume,
                               "expires_in": max(1, math.floor(reste)), "code_required": True})
             try:
                 v = await asyncio.wait_for(asyncio.shield(futur), max(limite - horloge(), 0))
             except asyncio.TimeoutError:
-                calme = True                                       # expirée pendant que tu tapes peut-être encore
                 return "expire"
-            except asyncio.CancelledError:
-                calme = True                                       # décidée sur l'écran (les-deux) : A se ferme ici
-                raise
             fin = "décidée"
-            # Un code faux ou rejoué n'est PAS une décision du téléphone : un autre code peut arriver, il ne doit pas
-            # retomber sur la demande suivante
-            calme = v in ("code", "replay")
+            calme = v not in ("allow", "deny")                     # code faux ou rejoué : un autre code peut arriver
             return {"allow": "autorise", "deny": "refuse", "replay": "rejoue"}.get(v, "code")
         except (OSError, ErreurWS):
             return "indisponible"
@@ -1340,7 +1357,9 @@ class ConfirmationDistance:
             # déjà en attente du verrou, la verra et patientera. La response de CETTE demande, elle, part tout de suite
             # (elle ne passe pas par le verrou), donc avant que la suivante ne relaye.
             if calme:
-                self.calme_jusqu = horloge() + distance_calme()
+                # Jusqu'au plus tard de : fin + DISTANCE_CALME, et présentation + FRAPPE_MAX (un code tapé lentement en
+                # lisant cette demande). La demande suivante reste bornée par sa propre échéance (voir demander).
+                self.calme_jusqu = max(self.calme_jusqu, horloge() + distance_calme(), presentee + frappe_max())
             if fin != "décidée":                                   # l'autre côté a décidé, ou plus personne n'attend
                 with contextlib.suppress(Exception):
                     await asyncio.shield(ws.envoyer({"type": "confirm_cancel", "req_id": req_id}))
@@ -1415,12 +1434,9 @@ class Noeud:
 
     @staticmethod
     def delai(nom, p, trame=None):
-        """Le délai de confirmation de cette action ; NC_NOEUD_DELAI (tests) ne peut que le raccourcir."""
-        d = delai_confirmation(nom, p, trame)
-        try:
-            return min(max(float(os.environ.get("NC_NOEUD_DELAI", d)), 0.5), d)
-        except ValueError:
-            return d
+        """Le délai de confirmation de cette action ; NC_NOEUD_DELAI le raccourcit, en tests seulement
+        (NC_NOEUD_TESTS=1), jamais en dessous de 0,5 s."""
+        return raccourci_tests("NC_NOEUD_DELAI", delai_confirmation(nom, p, trame), 0.5)
 
     async def confirmer(self, nom, decrite, limite, req_id):
         """(décision, source) : sur l'écran, à distance, ou les deux à la fois (la première décision l'emporte, l'autre
