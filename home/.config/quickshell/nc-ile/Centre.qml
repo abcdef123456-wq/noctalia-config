@@ -310,7 +310,7 @@ Item {
                     Item {
                         id: lc
                         required property var modelData
-                        readonly property bool actif: modelData.cle === "dnd" ? Notifs.concentration : centre.s[modelData.cle] === "on"
+                        readonly property bool actif: modelData.cle === "dnd" ? Notifs.concentration : Etat.valeur(modelData.cle, centre.s[modelData.cle]) === "on"
                         readonly property string etat: modelData.cle === "wifi" ? (actif ? (centre.s.reseau || Reglages.t("Activé", "On")) : Reglages.t("Désactivé", "Off"))
                                                     : modelData.cle === "dnd" ? (actif ? Reglages.t("Ne pas déranger", "Do Not Disturb") : Reglages.t("Désactivée", "Off"))
                                                     : (actif ? Reglages.t("Activé", "On") : Reglages.t("Désactivé", "Off"))
@@ -325,7 +325,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             taille: 36; icone: lc.modelData.icone; actif: lc.actif
                             couleur: lc.modelData.cle === "dnd" ? centre.indigo : centre.bleu
-                            onClic: lc.modelData.cle === "dnd" ? Notifs.basculerConcentration() : Etat.faire(["noctalia", "msg", lc.modelData.cle + "-toggle"])
+                            onClic: lc.modelData.cle === "dnd" ? Notifs.basculerConcentration() : Etat.inverser(lc.modelData.cle, ["noctalia", "msg", lc.modelData.cle + "-toggle"])
                         }
                         Column {
                             anchors.left: rl.right; anchors.leftMargin: 9; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter

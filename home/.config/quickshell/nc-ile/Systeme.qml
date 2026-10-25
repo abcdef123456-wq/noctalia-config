@@ -118,12 +118,8 @@ Item {
             Module {
                 id: protection
                 readonly property string v: sy.val("protection")
-                property bool attente: false
                 visible: v === "0" || v === "1"
                 width: sy.width; height: 56; radius: 18
-                onVChanged: attente = false
-                onAttenteChanged: if (attente) finAttenteProtection.restart()
-                Timer { id: finAttenteProtection; interval: 3000; onTriggered: protection.attente = false }
                 Column {
                     anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 16
                     anchors.right: inter.left; anchors.rightMargin: 10
@@ -132,10 +128,9 @@ Item {
                 }
                 Rectangle {
                     id: inter
-                    readonly property bool allume: protection.v === "1"
+                    readonly property bool allume: Etat.valeur("protection", protection.v) === "1"
                     anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
                     width: 46; height: 28; radius: 14; color: allume ? Couleurs.vert : Couleurs.gris3
-                    opacity: protection.attente ? 0.5 : 1
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Rectangle {
                         width: 24; height: 24; radius: 12; color: Couleurs.texte; y: 2; x: inter.allume ? 20 : 2
@@ -143,10 +138,7 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent; anchors.margins: -6
-                        onClicked: {
-                            protection.attente = true
-                            Etat.faire(["sudo", "-n", "/usr/local/bin/nc-limite-charge", inter.allume ? "off" : "on"])
-                        }
+                        onClicked: Etat.inverser("protection", ["sudo", "-n", "/usr/local/bin/nc-limite-charge", inter.allume ? "off" : "on"])
                     }
                 }
             }
@@ -200,9 +192,10 @@ Item {
                 onClic: Etat.basculerCafe()
             }
             Ligne {
-                width: sy.width; icone: "graphic_eq"; titre: Reglages.t("Halo sonore", "Sound Halo"); actif: Etat.sys.halo === "1"
-                sous: Etat.sys.halo === "1" ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
-                onClic: Etat.faire(["systemctl", "--user", Etat.sys.halo === "1" ? "stop" : "start", "nc-pouls"])
+                readonly property bool allumee: Etat.valeur("halo", Etat.sys.halo) === "1"
+                width: sy.width; icone: "graphic_eq"; titre: Reglages.t("Halo sonore", "Sound Halo"); actif: allumee
+                sous: allumee ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
+                onClic: Etat.inverser("halo", ["systemctl", "--user", allumee ? "stop" : "start", "nc-pouls"])
             }
             // Mises à jour du système (nc-paquets, comptées chaque heure au plus, sur secteur seulement : nc-paquets.service a
             // ConditionACPower) : un clic, tout mettre à jour dans un terminal. Le nombre est la première ligne de

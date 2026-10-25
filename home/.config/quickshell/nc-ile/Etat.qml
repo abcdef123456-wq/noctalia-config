@@ -548,56 +548,78 @@ Singleton {
     // ── État du système (centre de contrôle ouvert) ──
     property var sys: ({})
     property bool nuit: false
-    Process {
+    LectureFile {
         id: lecteurEtat
-        command: [etat.bin + "nc-ile-etat"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var t = {}
-                var lignes = this.text.split("\n")
-                for (let i = 0; i < lignes.length; i++) {
-                    let p = lignes[i].indexOf("=")
-                    if (p > 0) t[lignes[i].slice(0, p)] = lignes[i].slice(p + 1)
-                }
-                etat.sys = t
+        commande: [etat.bin + "nc-ile-etat"]
+        actif: etat.pageSys
+        onLu: texte => {
+            var t = {}
+            var lignes = texte.split("\n")
+            for (let i = 0; i < lignes.length; i++) {
+                let p = lignes[i].indexOf("=")
+                if (p > 0) t[lignes[i].slice(0, p)] = lignes[i].slice(p + 1)
             }
+            etat.sys = t
+            reac.confirmer()
         }
     }
-    // nc-ile-etat (une centaine de ms de calcul) : seulement pour les pages qui lisent Etat.sys
+    // nc-ile-etat (une centaine de ms de calcul) : seulement pour les pages qui lisent Etat.sys. Une lecture demandée
+    // pendant une autre est mise en file (une seule en attente), pas ignorée
     readonly property bool pageSys: ["centre", "systeme", "reseau", "bluetooth"].indexOf(vueActive) >= 0
-    function lire() { if (pageSys && !lecteurEtat.running) lecteurEtat.running = true }
+    function lire() { if (pageSys) lecteurEtat.demander() }
     Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== "" && etat.pageSys; onTriggered: { etat.lire(); etat.lirePage() } }
     onPageSysChanged: if (pageSys && ecranOuvert !== "") lire()
 
     // Listes des pages Wi-Fi, Bluetooth, et mesures de la page Système
     property var liste: []
-    Process {
+    LectureFile {
         id: lecteurPage
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var l = []
-                var lignes = this.text.split("\n")
-                for (let i = 0; i < lignes.length; i++) {
-                    let p = lignes[i].indexOf("=")
-                    if (p > 0) l.push({ genre: lignes[i].slice(0, p), champs: lignes[i].slice(p + 1).split("\t") })
-                }
-                etat.liste = l
+        onLu: texte => {
+            var l = []
+            var lignes = texte.split("\n")
+            for (let i = 0; i < lignes.length; i++) {
+                let p = lignes[i].indexOf("=")
+                if (p > 0) l.push({ genre: lignes[i].slice(0, p), champs: lignes[i].slice(p + 1).split("\t") })
             }
+            etat.liste = l
+            reac.confirmer()
         }
     }
     function lirePage() {
         var quoi = ({ reseau: "wifi", bluetooth: "bt", systeme: "systeme" })[vueActive]
-        if (!quoi || lecteurPage.running) return
-        lecteurPage.command = [bin + "nc-ile-etat", quoi]
-        lecteurPage.running = true
+        lecteurPage.commande = quoi ? [bin + "nc-ile-etat", quoi] : []
+        lecteurPage.demander()
     }
 
-    // Lance une commande puis relit l'état
-    function faire(cmd) {
-        Quickshell.execDetached(cmd)
-        relecture.restart()
+    // ── Interrupteurs réactifs (Voulu.qml) : le bouton bascule au clic, sans attendre la mesure ──
+    // Mesure d'une clé : Etat.sys (wifi, bluetooth, halo…) ou une ligne de la page Système (protection…)
+    function mesureDe(cle) {
+        if (sys[cle] !== undefined) return sys[cle]
+        for (let i = 0; i < liste.length; i++) if (liste[i].genre === cle) return liste[i].champs[0]
+        return undefined
     }
-    Timer { id: relecture; interval: 700; onTriggered: { etat.lire(); etat.lirePage() } }
+    // À lier à l'état d'un bouton : Etat.valeur("wifi", Etat.sys.wifi) === "on"
+    function valeur(cle, mesure) { return reac.valeur(cle, mesure) }
+    function voulu(cle, valeur) { reac.voulu(cle, valeur) }
+    readonly property var contraire: ({ on: "off", off: "on", "1": "0", "0": "1" })
+    // Inverse l'interrupteur `cle` et lance la commande qui le fait vraiment ; si elle échoue, retour immédiat à la mesure
+    function inverser(cle, cmd) {
+        var cible = contraire[String(reac.valeur(cle, mesureDe(cle)))]
+        if (cible !== undefined) reac.voulu(cle, cible)
+        faire(cmd, cle)
+    }
+    Voulu {
+        id: reac
+        mesure: cle => etat.mesureDe(cle)
+        onEchec: cle => Quickshell.execDetached(["notify-send", "-a", Reglages.t("Île", "Island"), "-i", "dialog-warning",
+                                                 Reglages.t("La commande a échoué", "The command failed")])
+        // Relecture dès la fin de la commande, puis une seconde fois pour les transitions lentes (BlueZ, NetworkManager)
+        onFini: { etat.lire(); etat.lirePage(); relecture.restart() }
+    }
+
+    // Lance une commande (suivie : on connaît sa fin) puis relit l'état
+    function faire(cmd, cle) { reac.lancer(cmd, cle) }
+    Timer { id: relecture; interval: 1500; onTriggered: { etat.lire(); etat.lirePage() } }
 
     // ── Activités (réactions de la pilule) ──
     property string activiteType: ""

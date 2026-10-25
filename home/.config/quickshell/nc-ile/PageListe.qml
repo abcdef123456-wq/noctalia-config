@@ -16,7 +16,8 @@ Item {
     function defiler(dy) { return defil.defiler(dy) }
 
     readonly property bool wifi: mode === "wifi"
-    readonly property bool allume: wifi ? Etat.sys.wifi === "on" : Etat.sys.bluetooth === "on"
+    readonly property string cle: wifi ? "wifi" : "bluetooth"
+    readonly property bool allume: Etat.valeur(cle, Etat.sys[cle]) === "on"
     readonly property var elements: Etat.liste.filter(e => e.genre === (wifi ? "net" : "bt"))
     onVisibleChanged: { saisie = ""; attente = ({}) }
 
@@ -83,7 +84,7 @@ Item {
                 x: p.allume ? 20 : 2
                 Behavior on x { SpringAnimation { spring: 5; damping: 0.5 } }
             }
-            MouseArea { anchors.fill: parent; onClicked: Etat.faire(["noctalia", "msg", p.wifi ? "wifi-toggle" : "bluetooth-toggle"]) }
+            MouseArea { anchors.fill: parent; onClicked: Etat.inverser(p.cle, ["noctalia", "msg", p.wifi ? "wifi-toggle" : "bluetooth-toggle"]) }
         }
     }
 

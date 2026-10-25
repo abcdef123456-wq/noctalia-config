@@ -68,9 +68,35 @@ local function analyserListe(texte)
   return l
 end
 
+-- ── Interrupteurs réactifs ──────────────────────────────────────────────────
+-- Même règle que Voulu.qml dans l'île : l'état « voulu » prend le pas sur la mesure dès le clic, jusqu'à ce que la mesure
+-- le confirme ou au plus GRACE secondes ; une mesure contraire pendant la grâce est ignorée ; si la commande échoue, retour
+-- immédiat à l'état réel. (Le bloc entre DEBUT et FIN est celui que tests/test_reactivite.py exécute.)
+-- DEBUT voulu
+local GRACE = 3                             -- secondes
+local voulus = {}                           -- clé -> { valeur, fin }
+local CONTRAIRE = { on = "off", off = "on", ["1"] = "0", ["0"] = "1" }
+local function horloge() return os.clock() end
+local function valeur(cle, mesure)
+  local w = voulus[cle]
+  if w then return w.valeur end
+  return mesure
+end
+local function voulu(cle, v) voulus[cle] = { valeur = tostring(v), fin = horloge() + GRACE } end
+local function annuler(cle) voulus[cle] = nil end
+local function confirmer()
+  for cle, w in pairs(voulus) do if e[cle] == w.valeur then voulus[cle] = nil end end
+end
+local function expirer()
+  local t = horloge()
+  for cle, w in pairs(voulus) do if t >= w.fin then voulus[cle] = nil end end
+end
+-- FIN voulu
+
 local function lire()
   noctalia.runAsync({ ETAT }, function(r)
     e = analyser(r.stdout)
+    confirmer()
     volume = tonumber(e.volume) or volume or 0
     luminosite = tonumber(e.luminosite) or luminosite
     if ouvert then dessiner() end
@@ -89,14 +115,31 @@ local function lirePage()
   end, 8000)
 end
 
-local function faire(argv, apres)
+local relire = nil                           -- seconde relecture (transitions lentes : BlueZ, NetworkManager)
+
+-- Lance une commande ; relit l'état dès sa fin. cle : l'interrupteur qu'elle bascule (retour immédiat à la mesure si elle échoue)
+local function faire(argv, apres, cle)
   noctalia.runAsync(argv, function(r)
+    if cle and r.exitCode ~= 0 then
+      annuler(cle)
+      noctalia.notifyError(tr("Île", "Island"), tr("La commande a échoué.", "The command failed."))
+      if ouvert then dessiner() end
+    end
     if apres then apres(r) end
     lire(); lirePage()
+    relire = horloge() + 1.5
   end, 15000)
 end
 
 local function msg(...) faire({ "noctalia", "msg", ... }) end
+
+-- Inverse l'interrupteur `cle` (on/off ou 1/0) tout de suite, puis lance la commande
+local function basculer(cle, argv)
+  local cible = CONTRAIRE[tostring(valeur(cle, e[cle]))]
+  if cible then voulu(cle, cible); dessiner() end
+  faire(argv, nil, cle)
+end
+local function basculerMsg(cle, ...) basculer(cle, { "noctalia", "msg", ... }) end
 
 local function aller(p)
   page = p
@@ -195,9 +238,9 @@ local function curseur(icone, valeur, bouton, change, fin, detail)
 end
 
 local function curseurVolume(detail)
-  local muet = e.muet == "1"
+  local muet = valeur("muet", e.muet) == "1"
   return curseur(muet and "volume-off" or "volume", volume, function()
-    faire({ "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" })
+    basculer("muet", { "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle" })
   end, function(v)
     volume = tonumber(v) or volume
     noctalia.runAsync({ "wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", string.format("%.2f", (volume or 0) / 100) })
@@ -268,19 +311,19 @@ local function carteMedia()
 end
 
 local function reglages()
-  local wifi, bt, dnd = e.wifi == "on", e.bluetooth == "on", e.dnd == "on"
+  local wifi, bt, dnd = valeur("wifi", e.wifi) == "on", valeur("bluetooth", e.bluetooth) == "on", valeur("dnd", e.dnd) == "on"
   local nuit = noctalia.state.get("nuit") == true
-  local jeu, halo = e.jeu == "1", e.halo == "1"
+  local jeu, halo = valeur("jeu", e.jeu) == "1", valeur("halo", e.halo) == "1"
   -- Module de connexions : quatre boutons ronds (clic : activer ; clic droit impossible ici, d'où les pastilles › )
   local connexions = ui.column({ width = 150, height = 150, padding = 14, gap = 14, radius = 26, fill = MODULE, justify = "center", align = "center" }, {
     ui.row({ gap = 14, height = 54 }, {
       rond(wifi and "wifi" or "wifi-off", wifi, BLEU, wifi and ("Wi-Fi : " .. ((e.reseau ~= "" and e.reseau) or "activé")) or "Wi-Fi coupé",
-        function() msg("wifi-toggle") end),
-      rond(bt and "bluetooth" or "bluetooth-off", bt, BLEU, bt and "Bluetooth activé" or "Bluetooth coupé", function() msg("bluetooth-toggle") end),
+        function() basculerMsg("wifi", "wifi-toggle") end),
+      rond(bt and "bluetooth" or "bluetooth-off", bt, BLEU, bt and "Bluetooth activé" or "Bluetooth coupé", function() basculerMsg("bluetooth", "bluetooth-toggle") end),
     }),
     ui.row({ gap = 14, height = 54 }, {
-      rond(dnd and "moon" or "bell", dnd, INDIGO, dnd and "Ne pas déranger : activé" or "Ne pas déranger", function() msg("notification-dnd-toggle") end),
-      rond("device-gamepad-2", jeu, ORANGE, jeu and "Mode jeu : activé" or "Mode jeu", function() faire({ "hyprctl", "eval", "nc.mode_jeu()" }) end),
+      rond(dnd and "moon" or "bell", dnd, INDIGO, dnd and "Ne pas déranger : activé" or "Ne pas déranger", function() basculerMsg("dnd", "notification-dnd-toggle") end),
+      rond("device-gamepad-2", jeu, ORANGE, jeu and "Mode jeu : activé" or "Mode jeu", function() basculer("jeu", { "hyprctl", "eval", "nc.mode_jeu()" }) end),
     }),
   })
   local reseau = (wifi and ((e.reseau ~= "" and e.reseau) or tr("Activé", "On"))) or tr("Coupé", "Off")
@@ -294,7 +337,7 @@ local function reglages()
         pastille(nuit and "moon-stars" or "sun", tr("Nuit", "Night"), nuit and tr("Tons chauds", "Warm tones") or tr("Désactivée", "Off"), nuit, ORANGE,
           function() noctalia.state.set("nuit", not nuit); msg("nightlight-force-toggle") end),
         pastille("wave-sine", tr("Halo", "Glow"), halo and tr("Musique", "Music") or tr("Coupé", "Off"), halo, ROSE,
-          function() faire({ "systemctl", "--user", halo and "stop" or "start", "nc-pouls" }) end),
+          function() basculer("halo", { "systemctl", "--user", halo and "stop" or "start", "nc-pouls" }) end),
       }),
     }),
   })
@@ -314,12 +357,12 @@ end
 
 -- Sélecteur segmenté façon iOS
 local function profils()
-  local actuel = e.profil or ""
+  local actuel = valeur("profil", e.profil) or ""
   if actuel == "" then return nil end
   local function choix(id, icone, nom, couleur)
     local actif = actuel == id
     return ui.row({ flexGrow = 1, height = 34, radius = 12, gap = 6, align = "center", justify = "center",
-      fill = actif and "#636366" or NOIR .. "00", onClick = function() msg("power-set", id) end }, {
+      fill = actif and "#636366" or NOIR .. "00", onClick = function() voulu("profil", id); dessiner(); faire({ "noctalia", "msg", "power-set", id }, nil, "profil") end }, {
       ico(icone, actif and couleur or GRIS, 16),
       ui.label({ text = nom, fontSize = 13, fontWeight = "semibold", color = actif and BLANC or GRIS }),
     })
@@ -369,7 +412,7 @@ local function connecter(n)
 end
 
 local function pageWifi()
-  local wifi = e.wifi == "on"
+  local wifi = valeur("wifi", e.wifi) == "on"
   local lignes = {}
   if not wifi then
     table.insert(lignes, ui.label({ text = tr("Le Wi-Fi est coupé.", "Wi-Fi is off."), fontSize = 13, color = GRIS }))
@@ -401,7 +444,7 @@ local function pageWifi()
     end
   end
   return {
-    titrePage("Wi-Fi", ui.toggle({ checked = wifi, onChange = function() msg("wifi-toggle") end })),
+    titrePage("Wi-Fi", ui.toggle({ checked = wifi, onChange = function() basculerMsg("wifi", "wifi-toggle") end })),
     ui.scroll({ flexGrow = 1, gap = 6 }, lignes),
     ui.row({ height = 40, gap = 8 }, {
       ui.button({ text = tr("Actualiser", "Refresh"), glyph = "refresh", variant = "ghost", controlSize = "sm", flexGrow = 1,
@@ -418,7 +461,7 @@ local ICONES_BT = { ["audio-headphones"] = "headphones", ["audio-headset"] = "he
   ["input-mouse"] = "mouse", ["input-keyboard"] = "keyboard", ["input-gaming"] = "device-gamepad", phone = "device-mobile" }
 
 local function pageBluetooth()
-  local bt = e.bluetooth == "on"
+  local bt = valeur("bluetooth", e.bluetooth) == "on"
   local lignes = {}
   if not bt then
     table.insert(lignes, ui.label({ text = tr("Le Bluetooth est coupé.", "Bluetooth is off."), fontSize = 13, color = GRIS }))
@@ -441,7 +484,7 @@ local function pageBluetooth()
     }))
   end
   return {
-    titrePage("Bluetooth", ui.toggle({ checked = bt, onChange = function() msg("bluetooth-toggle") end })),
+    titrePage("Bluetooth", ui.toggle({ checked = bt, onChange = function() basculerMsg("bluetooth", "bluetooth-toggle") end })),
     ui.scroll({ flexGrow = 1, gap = 6 }, lignes),
     ui.row({ height = 40 }, {
       ui.button({ text = tr("Associer un nouvel appareil", "Pair a New Device"), glyph = "bluetooth", variant = "ghost", controlSize = "sm", flexGrow = 1,
@@ -466,11 +509,11 @@ local function pageSon()
   table.insert(lignes, ui.label({ text = "MICROPHONE", fontSize = 11, fontWeight = "bold", color = GRIS, height = 26 }))
   for _, s in ipairs(listes.entree) do
     local id, nom, defaut = s[1], s[2], s[3] == "1"
-    local muet = e.micro_muet == "1"
+    local muet = valeur("micro_muet", e.micro_muet) == "1"
     local droite = nil
     if defaut then
       droite = rond(muet and "microphone-off" or "microphone", muet, "#ff453a", muet and "Remettre le micro" or "Couper le micro",
-        function() faire({ "wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle" }) end, 34)
+        function() basculer("micro_muet", { "wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle" }) end, 34)
     end
     table.insert(lignes, ui.row({ key = "en-" .. id, height = 54 }, {
       ligne("microphone", nom, defaut and (muet and tr("Utilisé · coupé", "In use · muted") or tr("Utilisé", "In use")) or tr("Choisir", "Select"), defaut,
@@ -581,6 +624,8 @@ end
 function update()
   tic += 1
   if not ouvert or fermeture then return end
+  expirer()
+  if relire and horloge() >= relire then relire = nil; lire() end
   if tic % 2 == 0 then lire() end
   if page ~= "accueil" and tic % 4 == 0 then lirePage() end
   if tic % 2 == 1 then dessiner() end

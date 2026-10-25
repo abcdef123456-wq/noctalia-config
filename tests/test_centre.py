@@ -56,6 +56,8 @@ class Centre(unittest.TestCase):
                     property var faits: []
                     property var allees: []
                     function faire(c) { faits.push(c) }
+                    function valeur(c, m) { return m }
+                    function inverser(c, cmd) { faits.push(cmd) }
                     function aller(n) { allees.push(n) }
                     function lecturePause() {}
                     function reglerLuminosite(v) {}

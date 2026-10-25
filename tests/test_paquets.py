@@ -1051,6 +1051,8 @@ class LigneMisesAJour(unittest.TestCase):
                     readonly property string bin: "%s/bin/"
                     property var faits: []
                     function faire(c) { faits.push(c) }
+                    function valeur(c, m) { return m }
+                    function inverser(c, cmd) { faits.push(cmd) }
                     function fermer() {}
                     function choisirProfil(p) {}
                     function basculerCafe() {}
