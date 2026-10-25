@@ -302,10 +302,36 @@ Singleton {
     // ── Heure ──
     property date maintenant: new Date()
     property date minute: new Date()        // ne change qu'au changement de minute : moins de recalculs (calendrier, notifications)
-    Timer { interval: 1000; running: true; repeat: true; onTriggered: {
-        var d = new Date(); etat.maintenant = d
-        if (d.getMinutes() !== etat.minute.getMinutes() || d.getHours() !== etat.minute.getHours() || d.getDate() !== etat.minute.getDate()) etat.minute = d
-    } }
+    // Écran éteint ou session verrouillée : personne ne voit la pilule. nc-ecran note l'extinction dans
+    // XDG_RUNTIME_DIR/nc-ecran-eteint et hypridle le verrouillage dans nc-verrouille ; les deux fichiers sont surveillés
+    // (comme nc-mode-jeu plus bas), sans processus ni sondage. Relus aussi toutes les 30 s tant que l'un est posé, au
+    // cas où la surveillance de Quickshell perdrait le fichier remplacé : l'île ne reste jamais figée.
+    property bool ecranEteint: false
+    property bool verrouille: false
+    readonly property bool ecranVu: !ecranEteint && !verrouille
+    FileView {
+        id: marqueEteint
+        path: etat.dossierSession + "/nc-ecran-eteint"; watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: etat.ecranEteint = true
+        onLoadFailed: etat.ecranEteint = false
+    }
+    FileView {
+        id: marqueVerrou
+        path: etat.dossierSession + "/nc-verrouille"; watchChanges: true; printErrors: false
+        onFileChanged: reload()
+        onLoaded: etat.verrouille = true
+        onLoadFailed: etat.verrouille = false
+    }
+    Timer { interval: 30000; repeat: true; running: !etat.ecranVu; onTriggered: { marqueEteint.reload(); marqueVerrou.reload() } }
+    function majHeure() {
+        var d = new Date(); maintenant = d
+        if (d.getMinutes() !== minute.getMinutes() || d.getHours() !== minute.getHours() || d.getDate() !== minute.getDate()) minute = d
+    }
+    // La pendule s'arrête quand personne ne voit l'île, et redonne l'heure juste tout de suite au réveil. Le minuteur
+    // (et le Pomodoro) garde sa fin en heure absolue (Date.now) mais sa fin est détectée par cette pendule : elle
+    // continue tant qu'un minuteur court, pour que la sonnerie et la notification partent à l'heure.
+    Timer { interval: 1000; running: etat.ecranVu || etat.minuteurFin > 0; repeat: true; triggeredOnStart: true; onTriggered: etat.majHeure() }
     // En anglais : noms de Reglages.locale (0 = dimanche, comme getDay())
     readonly property var jours: Reglages.en ? [0, 1, 2, 3, 4, 5, 6].map(i => Reglages.locale.dayName(i, Locale.LongFormat))
                                              : ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
@@ -436,7 +462,7 @@ Singleton {
         delegate: FileView { required property string modelData; path: modelData; blockLoading: true; printErrors: false }
     }
     Timer {
-        interval: 5000; repeat: true; running: true
+        interval: 5000; repeat: true; running: etat.ecranVu; triggeredOnStart: true     // écran éteint : suspendu, et un contrôle dès le réveil
         property int tours: 0
         onTriggered: {
             if (++tours % 12 === 0 && !trouverCameras.running) trouverCameras.running = true
@@ -638,11 +664,16 @@ Singleton {
     property var bandes: [0, 0, 0, 0, 0]
     // Économie ou sans effets : l'onde se pose sur une forme calme au lieu de rester figée au milieu d'un mouvement
     Connections { target: Reglages; function onSobreChanged() { if (Reglages.sobre) etat.bandes = [0.3, 0.45, 0.55, 0.45, 0.3] } }
+    // Barres réellement affichées : pilule fermée en mode musique (même règle que « mode » de Compact.qml), ou île
+    // ouverte sur la page Musique. Écran éteint ou session verrouillée : jamais.
+    readonly property bool barresAffichees: joue && ecranVu && (ecranOuvert === "" ? (aMusique && activiteType === "" && !enregistre
+                                                                                          && AssistantEtat.activitePilule === "" && !Agents.attendTerminal)
+                                                                                    : vueActive === "musique")
     property real dernierSon: 0
     // 30 images/s, sans animation entre deux pas (une animation de 70 ms à chaque pas faisait redessiner l'île à 165 Hz)
     Timer {
         interval: 33; repeat: true
-        running: etat.joue && etat.maintenant.getTime() - etat.dernierSon > 1500 && !Reglages.sobre
+        running: etat.barresAffichees && etat.maintenant.getTime() - etat.dernierSon > 1500 && !Reglages.sobre
         property real t: 0
         onTriggered: {
             t += 0.165
@@ -653,7 +684,7 @@ Singleton {
     }
     // cava (analyse du son, 30 fois par seconde) : pas en Économie ni sans effets ; l'onde reste alors immobile
     Process {
-        running: etat.joue && !Reglages.sobre
+        running: etat.joue && etat.ecranVu && !Reglages.sobre
         command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-ile-cava.conf\"; printf '[general]\\nbars = 10\\nframerate = 30\\n[input]\\nmethod = pipewire\\nsource = auto\\n[output]\\nmethod = raw\\nraw_target = /dev/stdout\\ndata_format = ascii\\nascii_max_range = 100\\nbar_delimiter = 59\\nframe_delimiter = 10\\n' > \"$f\"; exec cava -p \"$f\""]
         stdout: SplitParser {
             onRead: data => {

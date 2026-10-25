@@ -88,7 +88,8 @@ Singleton {
     property string brut: ""
     // Le fichier est remplacé d'un coup à chaque étape, et la surveillance de Quickshell finit par le perdre (l'île ne
     // voyait plus du tout Claude) : relu aussi régulièrement, vite pendant le travail
-    Timer { interval: a.travaille || a.demande !== null ? 1200 : 3000; repeat: true; running: true; onTriggered: lecture.reload() }
+    // Écran éteint ou verrouillé : suspendu (relu dès le réveil) ; au repos, un filet lent suffit (la surveillance voit les changements)
+    Timer { interval: a.travaille || a.demande !== null ? 1200 : 10000; repeat: true; running: Etat.ecranVu; triggeredOnStart: true; onTriggered: lecture.reload() }
 
     // Fin d'une session (« Claude a terminé ») et demande dans le terminal : réaction de la pilule
     property var avant: ({})
