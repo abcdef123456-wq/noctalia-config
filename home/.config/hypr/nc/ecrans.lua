@@ -151,6 +151,14 @@ local function externe_seul(p)
 end
 
 local function regle(m)
+    -- Écran réglé à la main dans perso.lua (hl.monitor avec son nom, ou « desc:… ») : on n'y touche plus
+    -- Comme Hyprland, « desc:… » désigne un écran dont la description COMMENCE par ce texte
+    local desc = m.description or ""
+    for cle in pairs(nc.ecrans_perso or {}) do
+        if cle == m.name then return end
+        local d = cle:match("^desc:%s*(.-)%s*$")
+        if d and d ~= "" and desc:sub(1, #d) == d then return end
+    end
     local interne = m.name:match("^eDP") ~= nil
     local p = principal()
     local spec = {

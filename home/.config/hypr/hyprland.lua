@@ -6,6 +6,7 @@
 
 -- État partagé entre les modules
 nc = {}
+nc.ecrans_perso = {}            -- sorties réglées par perso.lua (refait à chaque chargement)
 
 -- Tes réglages (commande nc-reglages) : ~/.config/nc/reglages.conf, lignes CLE=valeur, jamais remplacé par les
 -- mises à jour. nc.reglage(CLE, défaut) : la valeur choisie, du type du défaut (nombre, oui/non, texte), sinon le défaut.
@@ -58,11 +59,39 @@ function nc.guillemets(texte)
 end
 
 -- Charge un module sans arrêter la config s'il manque ou contient une erreur (renvoie sa valeur, ou nil)
+-- Les échecs sont notés (nc.echecs) et montrés d'un coup par nc.signaler_echecs() quand tout est chargé
+nc.echecs = {}
 function nc.charger(nom)
     local ok, res = pcall(require, nom)
     if ok then return res end
     print("noctalia-config : " .. nom .. " ignoré (" .. tostring(res) .. ")")
+    nc.echecs[#nc.echecs + 1] = { nom = nom, message = tostring(res) }
     return nil
+end
+
+-- Une seule notification à l'écran par chargement, seulement s'il y a eu des échecs (hl.notification.create existe
+-- en 0.55.2 et 0.56.2 ; sinon notify-send). Le détail complet reste dans le journal de Hyprland.
+function nc.signaler_echecs()
+    if #nc.echecs == 0 then return end
+    local noms, premiere = {}, nil
+    for _, e in ipairs(nc.echecs) do
+        noms[#noms + 1] = e.nom
+        if not premiere then
+            premiere = e.message:match("[^\n]+") or ""
+            if #premiere > 160 then
+                local fin = 160                  -- coupe avant un caractère entier (pas au milieu d'un accent)
+                while fin > 0 and premiere:byte(fin + 1) and premiere:byte(fin + 1) >= 0x80 and premiere:byte(fin + 1) < 0xC0 do
+                    fin = fin - 1
+                end
+                premiere = premiere:sub(1, fin)
+            end
+        end
+    end
+    local texte = nc.t("noctalia-config : module(s) ignoré(s) : ", "noctalia-config: module(s) skipped: ")
+        .. table.concat(noms, ", ") .. "\n" .. premiere
+    local ok = pcall(function() hl.notification.create({ text = texte, duration = 10000, icon = "warning" }) end)
+    if not ok then pcall(hl.exec_cmd, "notify-send -u critical noctalia-config " .. nc.guillemets(texte)) end
+    nc.echecs = {}
 end
 
 -- Version de Hyprland (hl.version, dès 0.55.0) : nc.hypr_min(0, 56, 0) est vrai à partir de la 0.56.0
@@ -86,21 +115,31 @@ end
 -- Profil énergétique courant : performance, balanced ou power-saver ; sur batterie ou non (écrit par nc-profile-sync)
 nc.profil = nc.charger("nc.profil") or { profil = "balanced", batterie = false }
 
-require("nc.ecrans")
-require("nc.session")
-require("nc.apparence")
-require("nc.couleurs")
-require("nc.clavier")
-require("nc.raccourcis")
-require("nc.regles")
-require("nc.energie")
-require("nc.automatismes")
+-- Ordre de chargement : chacun passe par nc.charger, un module qui lève n'empêche pas les suivants
+for _, nom in ipairs({
+    "nc.ecrans", "nc.session", "nc.apparence", "nc.couleurs", "nc.clavier", "nc.raccourcis",
+    "nc.regles", "nc.energie", "nc.automatismes",
+}) do
+    nc.charger(nom)
+end
 nc.charger("nc.zones")          -- la disposition des bureaux rangés par l'IA (hl.layout.register, si Hyprland l'a)
 
--- Tes réglages personnels, s'il y en a
+-- Tes réglages personnels, s'il y en a. Les écrans que tu y règles (hl.monitor) ne sont plus réappliqués par nc/ecrans.lua.
 local perso = os.getenv("HOME") .. "/.config/hypr/perso.lua"
 local f = io.open(perso, "r")
 if f then
     f:close()
-    require("perso")
+    local monitor = hl.monitor
+    -- Limite : seuls les hl.monitor posés directement dans perso.lua sont notés, pas ceux d'un hl.on ou d'un timer
+    -- (l'enveloppe est retirée après le chargement, sinon les appels de nc/ecrans.lua seraient notés aussi).
+    hl.monitor = function(spec, ...)
+        local ok, res = pcall(monitor, spec, ...)
+        if not ok then error(res, 0) end        -- spec invalide : rien de noté, l'écran garde la règle normale
+        if type(spec) == "table" and spec.output and spec.output ~= "" then nc.ecrans_perso[spec.output] = true end
+        return res
+    end
+    nc.charger("perso")
+    hl.monitor = monitor
 end
+
+nc.signaler_echecs()

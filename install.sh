@@ -1039,6 +1039,7 @@ if [ ! -e "$PERSO" ]; then
 --
 -- hl.bind("SUPER + B", hl.dsp.exec_cmd("firefox"), { description = "My shortcuts|Browser" })
 -- hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
+-- (Screens: put your hl.monitor lines directly in this file, not inside hl.on or a timer, or the config may re-apply its own.)
 -- hl.config({ general = { gaps_out = 6 }, decoration = { rounding = 10 } })
 -- hl.on("hyprland.start", function() hl.exec_cmd("discord --start-minimized") end)
 PERSO_EN
@@ -1052,6 +1053,7 @@ PERSO_EN
 --
 -- hl.bind("SUPER + B", hl.dsp.exec_cmd("firefox"), { description = "Mes raccourcis|Navigateur" })
 -- hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1 })
+-- (Écrans : mets tes hl.monitor directement dans ce fichier, pas dans un hl.on ni un timer ; sinon la config les réapplique.)
 -- hl.config({ general = { gaps_out = 6 }, decoration = { rounding = 10 } })
 -- hl.on("hyprland.start", function() hl.exec_cmd("discord --start-minimized") end)
 PERSO_EOF

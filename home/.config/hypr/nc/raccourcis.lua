@@ -54,7 +54,13 @@ local function touche(touches, action, description, options)
     if remplace == false then return end          -- désactivé avec nc-raccourci
     options = options or {}
     options.description = description
-    return hl.bind(remplace or touches, action, options)
+    if remplace then
+        -- entrée « change » écrite à la main dans raccourcis.conf : une touche invalide ne doit pas arrêter le module
+        local ok, b = pcall(hl.bind, remplace, action, options)
+        if not ok then print("noctalia-config : raccourci " .. tostring(remplace) .. " ignoré (" .. tostring(b) .. ")") end
+        return ok and b or nil
+    end
+    return hl.bind(touches, action, options)
 end
 
 -- Description dans la langue choisie : la section (avant « | ») reste en français, nc-keys s'en sert pour classer
