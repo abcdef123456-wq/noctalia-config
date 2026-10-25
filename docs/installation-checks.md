@@ -36,6 +36,9 @@ commandes qui ne répondent plus, DNF en erreur, écran verrouillé et outils ma
 mode fichiers seuls. Les durées sont raccourcies dans le banc de test. Aucun paquet n'est
 installé et aucun service n'est modifié. Ces tests ne remplacent pas un essai sur Fedora réel.
 
+La CI GitHub (`.github/workflows/tests.yml`) lance toute la suite à chaque push et chaque PR sur main, sur Arch,
+Debian 13, Fedora et openSUSE : les tests passent sur ces 4 distributions, sans session graphique, ni systemd, ni Hyprland.
+
 ```sh
 python3 -B -m unittest discover -s tests -p test_install_checks.py -v
 bash -n install.sh

@@ -1,0 +1,66 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: archlinux:latest
+            install: pacman -Syu --noconfirm --needed python git bash jq lua procps-ng diffutils findutils gzip tar
+          - image: debian:trixie
+            install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-venv git bash lua5.4 jq procps diffutils findutils
+            jq17: "1"
+          - image: fedora:44
+            install: dnf install -y -q python3 git bash lua jq procps-ng findutils diffutils gzip tar
+          - image: opensuse/tumbleweed
+            install: zypper -q --non-interactive install python3 python3-curses git bash lua54 jq procps findutils diffutils gzip tar
+    steps:
+      # git doit exister avant le checkout (conteneurs minimaux)
+      - name: Installer les paquets
+        run: ${{ matrix.install }}
+
+      - name: Récupérer le dépôt
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # nc-noeud refuse de tourner en root : les tests tournent sous un utilisateur ordinaire
+      - name: Préparer un utilisateur ordinaire
+        run: |
+          useradd -m ci
+          chown -R ci "$GITHUB_WORKSPACE"
+
+      - name: Lancer les tests
+        env:
+          JQ17: ${{ matrix.jq17 }}
+        run: |
+          # shellcheck disable=SC2016
+          # (les variables sont développées par le shell de ci, pas ici)
+          su ci -c '
+            set -e
+            cd "$GITHUB_WORKSPACE"
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            if [ -n "$JQ17" ]; then
+              NC_TEST_JQ17="$(command -v jq)"
+              export NC_TEST_JQ17
+            fi
+            python3 -m unittest discover -s tests -t .
+          '

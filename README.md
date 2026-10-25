@@ -1,5 +1,10 @@
 # noctalia-config
 
+[![Tests](https://github.com/abcdef123456-wq/noctalia-config/actions/workflows/tests.yml/badge.svg)](https://github.com/abcdef123456-wq/noctalia-config/actions/workflows/tests.yml)
+
+À chaque push et à chaque PR sur main, la CI lance toute la suite de tests sur Arch, Debian 13, Fedora et openSUSE :
+elle garantit que les tests passent sur ces 4 distributions, sans session graphique, ni systemd, ni Hyprland.
+
 Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n'importe quel PC compatible avec Noctalia
 (portable ou fixe, Intel, AMD ou NVIDIA). La config Hyprland est au **format Lua** (Hyprland 0.55 ou plus).
 
