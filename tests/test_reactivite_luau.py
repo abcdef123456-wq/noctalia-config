@@ -77,7 +77,7 @@ class Reactivite(unittest.TestCase):
         self.assertRegex(self.bloc(), r"local GRACE = 3\b")
 
     def test_commande_en_echec_revient_a_l_etat_reel(self):
-        self.assertRegex(self.source, r"if cle and r\.exitCode ~= 0 then\s+annuler\(cle\)")
+        self.assertRegex(self.source, r"if cle and r\.exitCode and r\.exitCode ~= 0 then[^\n]*\n\s+annuler\(cle\)")
 
     def test_relecture_a_la_fin_puis_a_1_5_s(self):
         self.assertRegex(self.source, r"lire\(\); lirePage\(\)\s+relire = horloge\(\) \+ 1\.5")

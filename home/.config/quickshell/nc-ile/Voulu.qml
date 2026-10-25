@@ -52,7 +52,9 @@ Scope {
     property int compteur: 0
     function lancer(cmd, cle) {
         compteur++
-        rangees.append({ ident: compteur, cmdJson: JSON.stringify(cmd), cle: cle || "" })
+        // Une commande d'interrupteur qui ne finit jamais est arrêtée au bout de 30 s (code 124 : échec, retour à la mesure)
+        const argv = cle ? ["timeout", "30"].concat(cmd) : cmd
+        rangees.append({ ident: compteur, cmdJson: JSON.stringify(argv), cle: cle || "" })
     }
     function finCommande(ident, code) {
         var cle = ""

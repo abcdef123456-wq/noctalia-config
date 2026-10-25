@@ -76,7 +76,8 @@ end
 local GRACE = 3                             -- secondes
 local voulus = {}                           -- clé -> { valeur, fin }
 local CONTRAIRE = { on = "off", off = "on", ["1"] = "0", ["0"] = "1" }
-local function horloge() return os.clock() end
+-- os.clock de Luau : horloge monotone haute précision ; os.time (à la seconde) si le bac à sable ne le donne pas
+local function horloge() if os.clock then return os.clock() end return os.time() end
 local function valeur(cle, mesure)
   local w = voulus[cle]
   if w then return w.valeur end
@@ -120,7 +121,7 @@ local relire = nil                           -- seconde relecture (transitions l
 -- Lance une commande ; relit l'état dès sa fin. cle : l'interrupteur qu'elle bascule (retour immédiat à la mesure si elle échoue)
 local function faire(argv, apres, cle)
   noctalia.runAsync(argv, function(r)
-    if cle and r.exitCode ~= 0 then
+    if cle and r.exitCode and r.exitCode ~= 0 then         -- sans code de retour : pas un échec
       annuler(cle)
       noctalia.notifyError(tr("Île", "Island"), tr("La commande a échoué.", "The command failed."))
       if ouvert then dessiner() end
