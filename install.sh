@@ -156,7 +156,7 @@ bpo_install() { local r=0; BPO="-t trixie-backports"; pkg_install "$@" || r=$?; 
 
 pkg_installed() {
   case "$FAMILY" in
-    arch) pacman -Q "$1" ;; fedora|suse) rpm -q "$1" ;; debian) dpkg -s "$1" ;; *) false ;;
+    arch) pacman -Q "$1" ;; fedora) rpm -q "$1" ;; suse) rpm -q --whatprovides "$1" ;; debian) dpkg -s "$1" ;; *) false ;;
   esac >/dev/null 2>&1
 }
 pkg_install() {
@@ -190,6 +190,9 @@ pname() {
     libnotify:suse) echo libnotify-tools ;;
     python:arch) echo python ;;
     python:*) echo python3 ;;
+    # openSUSE sépare le module curses de python3 (écran texte de nc-reglages) ; python3-curses est fourni par
+    # python313-curses (ou celui de la version de python3) : zypper le trouve comme capacité
+    python-curses:suse) echo python3-curses ;;
     qalc:arch) echo libqalculate ;;
     qalc:fedora) echo qalculate ;;       # /usr/bin/qalc (libqalculate n'a que la bibliothèque)
     qalc:debian) echo qalc ;;
@@ -668,6 +671,7 @@ GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty 
          jq grim slurp swappy wl-clipboard wtype brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
          enregistreur)
+[ "$FAMILY" = suse ] && GENERIC+=(python-curses)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
   missing=(); manual=()

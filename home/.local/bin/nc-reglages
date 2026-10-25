@@ -28,7 +28,10 @@ Tes réglages sont gardés dans ~/.config/nc/reglages.conf (seulement ce que tu 
 ~/.config/nc/raccourcis.conf : les mises à jour (nc-maj) ne les touchent jamais. Chaque partie de la config lit
 ces fichiers : Hyprland, l'île, Noctalia (barre, dock, fonds d'écran…), les profils d'énergie, la veille, le terminal.
 """
-import curses
+try:
+    import curses
+except ImportError:             # openSUSE : le module est dans un paquet à part ; seul l'écran texte en a besoin
+    curses = None
 import importlib.machinery
 import importlib.util
 import json
@@ -3193,6 +3196,12 @@ class Ecran:
 
 
 def tui(section=0):
+    if curses is None:
+        print(T("L'écran texte a besoin du module Python « curses », absent ici. Installe-le (openSUSE : python3-curses ; "
+                "autres systèmes : le paquet python3 complet), ou utilise la fenêtre, ou « nc-reglages get / set / list ».",
+                "The text screen needs the Python \"curses\" module, which is missing here. Install it (openSUSE: python3-curses; "
+                "other systems: the full python3 package), or use the window, or \"nc-reglages get / set / list\"."), file=sys.stderr)
+        sys.exit(1)
     os.environ.setdefault("ESCDELAY", "25")
     # Fenêtre fermée ou programme arrêté : sortie propre (le mode « capture » de Hyprland est quitté plus bas)
     for sig in (signal.SIGHUP, signal.SIGTERM):
