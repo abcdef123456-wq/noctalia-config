@@ -199,6 +199,23 @@ ShellRoot {
         self.assertEqual([(a["action"], a["ids"]) for a in actions], [("desactiver", ["64:q"]), ("reactiver", ["64:d"]), ("retirer", ["64:b"])])
         self.assertEqual(actions[2]["mien"], "SUPER + B")
 
+    def test_clics_serres_aucune_action_perdue(self):
+        """Non-régression : quatre clics dans le même pas (file de Raccourcis.qml), Qt.quit seulement ~3 s plus tard,
+        donc sans quit prématuré : les trois écritures partent, une fois chacune, dans l'ordre. Mesuré hors écran : 0
+        perte sur 180 essais (écart de 0, 10 et 50 ms entre clics, faux nc-reglages à 0, 50 et 300 ms). L'ancien test
+        échouait par intermittence parce que le pas suivant ne s'appuyait que sur Raccourcis.occupe, qui peut
+        passer à faux entre deux écritures ; le Qt.quit arrivait alors avant les dernières. Ce n'était pas
+        une perte de la file, mais un quit trop tôt."""
+        r, appels = self.executer('''
+  if (etape === 1) { fiche.edition = true; etape++; return }
+  if (etape === 2) { cliquer("nc-fiche-interrupteur-raccourci:64:q"); cliquer("nc-fiche-interrupteur-raccourci:64:d")
+                     cliquer("nc-fiche-moins-raccourci:64:q"); cliquer("nc-fiche-moins-raccourci:64:b"); etape++; return }
+  if (etape < 24) { etape++; return }
+  if (etape === 24) Qt.quit()''', attendus=lambda a: len([x for x in a if x[0] == "raccourci"]) >= 3)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        actions = [json.loads(a[1]) for a in appels if a[0] == "raccourci"]
+        self.assertEqual([(a["action"], a["ids"]) for a in actions], [("desactiver", ["64:q"]), ("reactiver", ["64:d"]), ("retirer", ["64:b"])])
+
     def test_suggestions_d_applis(self):
         r, appels = self.executer('''
   if (etape === 1) { cliquer("nc-fiche-ajouter"); verifier(fiche.edition && fiche.ajout, "+ ouvre la carte, en édition"); etape++; return }
