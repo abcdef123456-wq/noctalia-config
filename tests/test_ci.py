@@ -96,6 +96,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(self.texte.index("matrix.install"), self.texte.index("actions/checkout@"))
         self.assertRegex(self.texte, r"install:.*\bgit\b")
 
+    def test_jeton_pas_garde_par_checkout(self):
+        # persist-credentials: false : le jeton du checkout ne reste pas dans .git/config, que les tests pourraient lire
+        self.assertRegex(self.texte, r"uses: actions/checkout@[0-9a-f]{40}[^\n]*\n\s+with:\n\s+persist-credentials: false")
+
     def test_nom_lisible(self):
         self.assertIn("name: Tests (${{ matrix.image }})", self.texte)
 

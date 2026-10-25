@@ -41,6 +41,8 @@ jobs:
 
       - name: Récupérer le dépôt
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # le jeton ne reste pas dans .git/config, lisible par les tests
 
       # nc-noeud refuse de tourner en root : les tests tournent sous un utilisateur ordinaire
       - name: Préparer un utilisateur ordinaire
