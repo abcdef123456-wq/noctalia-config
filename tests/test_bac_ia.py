@@ -30,6 +30,18 @@ _RUNDIR = os.environ.get("NC_TEST_VRAI_RUNTIME") or f"/run/user/{os.getuid()}"
 RACINE_BAC = _RUNDIR if os.path.isdir(_RUNDIR) and os.access(_RUNDIR, os.W_OK) else HOME_BAC
 
 
+def _racine_executable():
+    """Les faux moteurs sont des scripts écrits sous RACINE_BAC : le dossier doit exister et permettre l'exécution
+    (conteneur : /dev/shm est monté noexec)."""
+    try:
+        return os.path.isdir(RACINE_BAC) and not os.statvfs(RACINE_BAC).f_flag & os.ST_NOEXEC
+    except OSError:
+        return False
+
+
+SANS_RACINE = unittest.skipUnless(_racine_executable(), "dossier des faux HOME absent ou monté sans exécution (noexec)")
+
+
 def _purge_restes(prefixe):
     """P3-6 : efface les dossiers de tests laissés par un run précédent interrompu (même préfixe, à nous, vieux de plus
     de 10 min), sous /dev/shm comme sous /run/user/<uid>. Jamais rien d'autre."""
@@ -282,6 +294,7 @@ class Base(unittest.TestCase):
             return list(gen)
 
 
+@SANS_RACINE
 class AvecFauxSystemdRun(Base):
     def setUp(self):
         self.home = self.faux_home()
@@ -1713,6 +1726,7 @@ class OmpTests:
         self.assertEqual(os.listdir(self.base()), [])
 
 
+@SANS_RACINE
 class OmpFauxSystemdRun(OmpTests, Base):
     def setUp(self):
         AvecFauxSystemdRun.setUp(self)
@@ -1735,6 +1749,8 @@ class OmpFauxSystemdRun(OmpTests, Base):
         self.assertIn(str(self.home / ".local/bin/omp"), " ".join(reel) + shutil.which("omp", path=f"{self.home}/.local/bin"))
 
 
+@unittest.skipUnless(_bus_utilisateur() and _racine_executable(),
+                     "systemd-run, un bus utilisateur joignable et un dossier exécutable requis")
 class OmpBacReel(OmpTests, Base):
     racine = RACINE_BAC
     exporte = False

@@ -101,6 +101,11 @@ class Conso(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.m = charger()
+        # Le mesureur ignore son propre pid : dans un conteneur il est petit et pouvait tomber sur un faux processus
+        # (pid 200 à 310), ce qui faisait varier les totaux d'un lancement à l'autre
+        pid = patch.object(self.m.os, "getpid", return_value=4_000_000)
+        pid.start()
+        self.addCleanup(pid.stop)
 
     def test_lissage_sur_5_s_et_temps_restant(self):
         self.f.secteur()

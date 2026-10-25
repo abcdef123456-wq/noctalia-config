@@ -518,6 +518,7 @@ class Reecriture(unittest.TestCase):
         self.assertIn("La mise à jour n'a pas pu s'appliquer", r.stderr)
         self.assertNotIn("installé", r.stdout)
 
+    @unittest.skipUnless(shutil.which("script"), "script (util-linux) absent")
     def test_nouveautes_sans_pager(self):
         """B1R3-M4 : dans un terminal, git log ouvrait le pager (less) avant install.sh : la mise à jour attendait « q »."""
         self.commit(self.auteur, "Nouveauté A")

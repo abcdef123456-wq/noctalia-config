@@ -889,6 +889,17 @@ io.write(g[5] .. "|" .. g[6] .. "|" .. trouver("c2").p.width .. "|" .. trouver("
                 self.assertEqual(int(uw * float(facteur)), round(cw * s), "la largeur de la carte en pixels")
 
 
+def nettoyer(d):
+    """Efface le dossier temporaire avec reprise : un processus fils peut encore y écrire un instant."""
+    import time as _t
+    for _ in range(50):
+        shutil.rmtree(d.name, ignore_errors=True)
+        if not os.path.exists(d.name):
+            return
+        _t.sleep(0.1)
+    d.cleanup()
+
+
 class Integration(unittest.TestCase):
     def test_plugin_active_exporte_et_raccourci(self):
         manifeste = tomllib.loads((PLUGIN / "plugin.toml").read_text())
@@ -902,7 +913,7 @@ class Integration(unittest.TestCase):
         self.assertIn('SUPER .. " + SHIFT + code:25", cmd(barre .. "sessions")', rac)
 
     def faux(self, plugin, vivant=True):
-        d = tempfile.TemporaryDirectory(prefix="nc-sessions-"); self.addCleanup(d.cleanup)
+        d = tempfile.TemporaryDirectory(prefix="nc-sessions-"); self.addCleanup(nettoyer, d)
         root = Path(d.name); b = root / "bin"; b.mkdir()
         j = root / "journal"
         for nom, corps in {"pgrep": "exit " + ("0" if vivant else "1"), "noctalia": 'echo "noctalia $*" >> "$J"; exit ' + ("0" if vivant else "1"),

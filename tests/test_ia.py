@@ -311,7 +311,7 @@ class IA(unittest.TestCase):
         self.assertEqual(base64.b64decode(bloc["source"]["data"]), img.read_bytes())
 
     def test_commande_seule(self):
-        self.programme("claude", 'echo \'{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"```bash\\n$ du -sh *\\n```"}}}\'')
+        self.programme("claude", 'printf "%s\\n" \'{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"```bash\\n$ du -sh *\\n```"}}}\'')
         self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
         r = self.lancer("commande", "taille des dossiers")
         self.assertEqual(r.stdout.strip(), "du -sh *", r.stderr)

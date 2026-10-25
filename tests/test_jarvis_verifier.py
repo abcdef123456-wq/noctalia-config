@@ -37,7 +37,19 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         self.home=self.root/'home';self.home.mkdir();self.bin=self.root/'bin';self.bin.mkdir()
-        (self.bin/'python3').symlink_to(sys.executable)
+        # Hermétique : « python3 -m venv DOSSIER » crée un faux venv (son python répond à pip), sans dépendre de
+        # python3-venv de la machine ; tout le reste va au vrai Python
+        fp=self.bin/'python3'
+        fp.write_text('#!'+sys.executable+'''
+import os, stat, sys
+a = sys.argv[1:]
+if a[:2] == ["-m", "venv"] and len(a) == 3:
+    os.makedirs(a[2] + "/bin")
+    open(a[2] + "/bin/python", "w").write("#!/bin/sh\\nexit 0\\n")
+    os.chmod(a[2] + "/bin/python", 0o755)
+    sys.exit(0)
+os.execv(%r, [%r] + a)
+''' % (sys.executable, sys.executable));fp.chmod(0o755)
         script(self.bin,'git','exit 0')
         script(self.bin,'systemctl','echo running')
         script(self.bin,'loginctl','echo Linger=yes')

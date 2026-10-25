@@ -592,7 +592,7 @@ class Assistant(unittest.TestCase):
         chemin,methode,cle,corps=self.server.recus[-1]
         self.assertEqual((chemin,methode),('/gateway/api/reminders','POST'))
         self.assertEqual((corps['platform'],corps['recurrence'],corps['message']),('telegram','weekly:5','Courses'))
-        self.assertTrue(corps['remind_at'].endswith('T10:00:00+02:00') or corps['remind_at'].endswith('T10:00:00+01:00'),corps['remind_at'])
+        self.assertRegex(corps['remind_at'],r'T10:00:00[+-]\d\d:\d\d$')            # 10 h à l'heure locale, quel que soit le fuseau
         self.assertNotIn('delay',corps);self.assertIn('every Saturday',r.stdout)
         r=self.cli('demander','/rappel bureau tous les jours 8h pain')
         self.assertEqual(r.returncode,1);self.assertIn('Recurring reminder: telegram or discord',r.stderr)

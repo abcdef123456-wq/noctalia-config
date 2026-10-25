@@ -165,10 +165,21 @@ class FauxServeur:
             self.autres.append(m)
 
 
+def nettoyer(d):
+    """Efface le dossier temporaire avec reprise : un processus fils peut encore y écrire un instant."""
+    import time as _t
+    for _ in range(50):
+        shutil.rmtree(d.name, ignore_errors=True)
+        if not os.path.exists(d.name):
+            return
+        _t.sleep(0.1)
+    d.cleanup()
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         d = tempfile.TemporaryDirectory(prefix="nc-noeud-")
-        self.addCleanup(d.cleanup)
+        self.addCleanup(nettoyer, d)
         self.home = Path(d.name)
         self.bin = self.home / ".local/bin"
         self.bin.mkdir(parents=True)
