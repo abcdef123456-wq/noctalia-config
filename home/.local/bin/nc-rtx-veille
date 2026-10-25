@@ -36,6 +36,11 @@ def _langue():
             pass
     if l not in ("fr", "en"):
         loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:                    # service sans environnement : la langue du système
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
         l = "fr" if loc.startswith("fr") else "en"
     return l
 
@@ -407,6 +412,15 @@ def confirmer(nom):
     return r.strip().lower() in ("o", "oui", "y", "yes")
 
 
+def relancable(cmd, dossier, env):
+    """Le programme de l'appli existe-t-il encore (mise à jour en cours, chemin interne d'un bac à sable) ?"""
+    prog = cmd[0]
+    if os.sep in prog:
+        prog = os.path.join(dossier, prog)
+        return os.path.isfile(prog) and os.access(prog, os.X_OK)
+    return shutil.which(prog, path=env.get("PATH")) is not None
+
+
 def vivant(pid):
     """Le vrai processus (le vrai /proc : c'est lui qui reçoit le signal) ; un zombie est déjà fermé."""
     try:
@@ -441,6 +455,15 @@ def relancer(pid, debut=None):
         dossier = os.readlink(os.path.join(PROC, str(pid), "cwd"))
     except OSError:
         dossier = os.path.expanduser("~")
+    if not os.path.isdir(dossier):
+        dossier = os.path.expanduser("~")
+    if not relancable(cmd, dossier, env):         # avant de rien fermer : sinon l'appli ne reviendrait pas
+        notifier(T(f"{nom} ne peut pas être relancé", f"{nom} can't be restarted"),
+                 T(f"{cmd[0]} est introuvable (mise à jour en cours ?). Rien n'a été fermé.",
+                   f"{cmd[0]} was not found (update in progress?). Nothing was closed."))
+        print(T(f"nc-rtx-veille : {cmd[0]} est introuvable, {nom} n'est pas fermé.",
+                f"nc-rtx-veille: {cmd[0]} not found, {nom} was not closed."), file=sys.stderr)
+        return 1
     if not confirmer(nom):
         return 0
     if debut and stat(pid)[1] != debut:
@@ -463,10 +486,23 @@ def relancer(pid, debut=None):
     # Hors du service qui a lancé l'alerte (sinon l'appli s'arrêterait avec lui) : une scope systemd à elle
     sr = shutil.which("systemd-run")
     lanceur = [sr, "--user", "--scope", "--quiet", "--collect", "--slice=app.slice", "--"] if sr else []
-    if not os.path.isdir(dossier):
-        dossier = os.path.expanduser("~")
-    subprocess.Popen(lanceur + cmd, env=env, cwd=dossier, start_new_session=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    echec = None
+    try:
+        p = subprocess.Popen(lanceur + cmd, env=env, cwd=dossier, start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # systemd-run reste là tant que l'appli tourne : s'il s'arrête vite avec une erreur, l'appli n'est pas partie
+        try:
+            if p.wait(timeout=float(os.environ.get("NC_RTX_VERIF", "2"))) != 0:
+                echec = T(f"{cmd[0]} s'est arrêté tout de suite (code {p.returncode}).",
+                          f"{cmd[0]} stopped right away (code {p.returncode}).")
+        except subprocess.TimeoutExpired:
+            pass                                  # elle tourne
+    except OSError as e:
+        echec = str(e)
+    if echec:
+        notifier(T(f"{nom} ne s'est pas rouvert", f"{nom} did not reopen"), echec)
+        print(T(f"nc-rtx-veille : {nom} n'a pas pu être relancé : {echec}", f"nc-rtx-veille: {nom} could not be restarted: {echec}"), file=sys.stderr)
+        return 1
     print(T(f"{nom} relancé sur la carte intégrée.", f"{nom} restarted on the integrated GPU."))
     return 0
 

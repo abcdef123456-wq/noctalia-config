@@ -38,8 +38,24 @@ ENV_C = dict(os.environ, LC_ALL="C", LANG="C")          # sorties des gestionnai
 ANNEXES = re.compile(r"^(lib|python-|python3-|perl-|ruby-|rubygem-|haskell-|ghc-|r-|node-|nodejs-|golang-|rust-|texlive-|php-|lua-|ocaml-)|-(debug|debuginfo|debugsource|dev|devel|doc|docs|headers|static)$")
 
 
+def _langue():
+    """fr ou en : NC_LANGUE, puis LANGUE des réglages, puis la langue du système (LC_ALL, LC_MESSAGES, LANG, /etc/locale.conf)."""
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        l = reglage("LANGUE", "")
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', Path(os.environ.get("NC_LOCALE_CONF") or "/etc/locale.conf").read_text())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
 def T(fr, en):
-    return en if os.environ.get("NC_LANGUE", "").startswith("en") or reglage("LANGUE", "") == "en" else fr
+    return en if _langue() == "en" else fr
 
 
 def reglage(cle, defaut):
@@ -236,12 +252,7 @@ def depot_fedora(m):
     for l in sortie.splitlines():
         r = re.match(r"\s*([A-Za-z0-9@._+-]+)\.(?:x86_64|aarch64|noarch|i686)\s*:?\s*(.*)", l)
         if r:
-            res.append(dict(source="depot", depot="fedora", nom=r[1], version="", description=r[2].strip(" :"), installe=False))
-    if res:
-        sortie = lancer(["rpm", "-q", "--qf", "%{NAME}\\n"] + [x["nom"] for x in res[:60]])
-        installes = {l.strip() for l in sortie.splitlines() if l.strip() and " " not in l}
-        for x in res:
-            x["installe"] = x["nom"] in installes
+            res.append(dict(source="depot", depot="fedora", nom=r[1], version="", description=r[2].strip(" :"), installe=None))
     return res
 
 
@@ -251,13 +262,24 @@ def depot_debian(m):
     for l in sortie.splitlines():
         nom, _, desc = l.partition(" - ")
         if NOM.fullmatch(nom.strip()):
-            res.append(dict(source="depot", depot="debian", nom=nom.strip(), version="", description=desc.strip(), installe=False))
-    if res:
-        sortie = lancer(["dpkg-query", "-W", "-f=${Package} ${db:Status-Abbrev}\n"] + [x["nom"] for x in res[:80]])
-        installes = {l.split()[0] for l in sortie.splitlines() if len(l.split()) > 1 and l.split()[1].startswith("ii")}
-        for x in res:
-            x["installe"] = x["nom"] in installes
+            res.append(dict(source="depot", depot="debian", nom=nom.strip(), version="", description=desc.strip(), installe=None))
     return res
+
+
+def marquer_installes(res):
+    """Fedora et Debian : l'état « installé » n'est demandé qu'aux paquets gardés (après tri et coupe), en un seul appel."""
+    inconnus = [x for x in res if x["installe"] is None]
+    if not inconnus:
+        return
+    noms = [x["nom"] for x in inconnus]
+    if famille() == "fedora":
+        sortie = lancer(["rpm", "-q", "--qf", "%{NAME}\\n"] + noms)
+        installes = {l.strip() for l in sortie.splitlines() if l.strip() and " " not in l}
+    else:
+        sortie = lancer(["dpkg-query", "-W", "-f=${Package} ${db:Status-Abbrev}\n"] + noms)
+        installes = {l.split()[0] for l in sortie.splitlines() if len(l.split()) > 1 and l.split()[1].startswith("ii")}
+    for x in inconnus:
+        x["installe"] = x["nom"] in installes
 
 
 def depot_suse(m):
@@ -298,7 +320,8 @@ def flatpak(m):
     res = []
     for l in sortie.splitlines():
         c = l.split("\t")
-        if len(c) >= 5 and NOM.fullmatch(c[0]) and "." in c[0]:
+        # flatpak search ne tient compte que du premier mot : on filtre sur tous (nom + titre + description)
+        if len(c) >= 5 and NOM.fullmatch(c[0]) and "." in c[0] and all(x in (c[0] + " " + c[1] + " " + c[2]).lower() for x in m[1:]):
             res.append(dict(source="flatpak", depot=c[4].split(",")[0].strip() or "flathub", nom=c[0], titre=c[1],
                             version=c[3], description=c[2], installe=c[0] in installes))
     return res
@@ -336,13 +359,15 @@ def chercher(terme, rapide=False, maximum=30):
             res += flatpak(m)
     for x in res:
         x["score"] = round(score(x, m), 2)
+    res.sort(key=lambda x: -x["score"])
+    res = res[:maximum]                                         # coupe d'abord : l'état « installé » ne se demande qu'à ceux-là
+    marquer_installes(res)
     if rapide:
         # Suggestions pendant la frappe : pas les modules d'une appli déjà installée (« firefox-adblock-plus » quand
         # on tape « fire » pour lancer Firefox)
         installes = [x["nom"] + "-" for x in res if x["installe"]]
         res = [x for x in res if x["installe"] or not any(x["nom"].startswith(i) for i in installes)]
-    res.sort(key=lambda x: -x["score"])
-    return ajouter_icones(res[:maximum])
+    return ajouter_icones(res)
 
 
 # ── Installation ───────────────────────────────────────────────────────────────────────────────────────────────

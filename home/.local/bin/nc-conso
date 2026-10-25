@@ -22,6 +22,7 @@ Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), XDG_DATA_HOME et XDG_DATA_DIR
 (commande à la place de nc-rtx-veille, vide : aucune), NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut).
 """
 import json
+import math
 import os
 import re
 import shutil
@@ -215,7 +216,7 @@ def sante(liste):
         garde = sum(ratios) / len(ratios) * 100
     if garde is not None:
         h = historique_sante()
-        garde = round(min(100.0, h if h is not None else garde))
+        garde = math.floor(min(100.0, h if h is not None else garde) + 0.5)    # arrondi d'affichage (12,5 donne 13)
     lim = limite(liste)
     if garde is None and not cycles and lim is None:
         return None
@@ -465,7 +466,7 @@ class Mesureur:
         self.releve_cpu(t)
         bat = None
         if r:
-            bat = {"statut": r["statut"], "pct": round(r["pct"]), "watts": round(w, 1) if w is not None else None,
+            bat = {"statut": r["statut"], "pct": math.floor(r["pct"] + 0.5), "watts": round(w, 1) if w is not None else None,
                    "restant": restant(r, w)}
         # La part de chaque programme en watts n'a de sens qu'en décharge : en charge, la batterie mesure ce qui entre
         w_programmes = w if r and r["statut"] == "Discharging" else None
@@ -495,7 +496,13 @@ def main():
             print(json.dumps(m.mesurer(time.monotonic()), ensure_ascii=False))
             return 0
         if a[0] in ("suivre", "follow"):
-            fois = int(a[a.index("--fois") + 1]) if "--fois" in a and a.index("--fois") + 1 < len(a) else 0
+            try:
+                fois = int(a[a.index("--fois") + 1]) if "--fois" in a and a.index("--fois") + 1 < len(a) else 0
+            except ValueError:
+                fois = -1
+            if fois < 0:
+                print(__doc__.strip(), file=sys.stderr)
+                return 1
             pas = nombre(os.environ.get("NC_CONSO_PAS")) or 2.0
             # Un premier relevé muet, une demi-pause : la première ligne a déjà les programmes (pas de saut de taille)
             m.mesurer(time.monotonic())

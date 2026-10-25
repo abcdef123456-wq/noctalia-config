@@ -178,14 +178,13 @@ class GpuMode(unittest.TestCase):
         self.programme("supergfxctl", 'echo "supergfxctl $*" >> "$JOURNAL"\n'
                        '[ "$1" = --supported ] && echo "[Integrated, Hybrid, AsusMuxDgpu]"; exit 0')
         self.assertEqual(self.lancer("methode").stdout.strip(), "supergfxctl")
+        self.clic("oui")
         self.lancer("basculer", "dediee")
         lignes = self.appels().splitlines()
         self.assertIn("supergfxctl --supported", lignes, "les noms de modes sont vérifiés avant")
         self.assertIn("supergfxctl --mode AsusMuxDgpu", lignes)
-        self.assertNotIn("systemctl", self.appels(), "le redémarrage est seulement proposé")
-        self.assertIn("oui=Redémarrer", self.notifs()[-1])
-        self.clic("oui")
-        self.lancer("basculer", "dediee")
+        self.assertEqual(len(self.notifs()), 1, "une seule question, posée avant")
+        self.assertIn("oui=Changer et redémarrer", self.notifs()[0])
         self.assertIn("systemctl reboot\n", self.appels())
         self.assertNotIn("--firmware-setup", self.appels())
 
@@ -204,6 +203,7 @@ class GpuMode(unittest.TestCase):
         self.carte(0, NVIDIA, "connected")
         self.carte(1, "0x8086", "disconnected")
         self.assertEqual(self.lancer("methode").stdout.strip(), "system76-power")
+        self.clic("oui")
         self.lancer("basculer", "hybride")
         self.assertIn("system76-power graphics hybrid", self.appels())
 
@@ -229,6 +229,7 @@ class GpuMode(unittest.TestCase):
         self.machine()
         self.carte(1, AMD, "connected")
         self.ecrire("bus/pci/devices/0000:01:00.0/class", "0x030000")
+        self.ecrire("bus/pci/devices/0000:01:00.0/vendor", NVIDIA)
         self.ecrire("bus/pci/devices/0000:06:00.0/class", "0x030000")
         self.ecrire("bus/pci/devices/0000:06:00.1/class", "0x040300")    # le son HDMI ne compte pas
         self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
@@ -239,11 +240,11 @@ class GpuMode(unittest.TestCase):
         (self.sys / "module/legion_laptop").mkdir(parents=True)
         gsync = self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")
         self.assertEqual(self.lancer("methode").stdout.strip(), "gsync")
+        self.clic("oui")
         self.lancer("basculer", "dediee")
         self.assertEqual(gsync.read_text().strip(), "1")
         self.assertNotIn("pkexec", self.appels(), "fichier modifiable : écrit sans root")
         self.assertNotIn("sudo", self.appels())
-        self.assertNotIn("systemctl", self.appels())
         # Retour en hybride, une fois l'écran passé sur la NVIDIA
         (self.sys / "class/drm/card0-eDP-1/status").write_text("connected\n")
         (self.sys / "class/drm/card1-eDP-2/status").write_text("disconnected\n")
@@ -325,6 +326,30 @@ class GpuMode(unittest.TestCase):
         r = self.lancer("basculer", "--sans-question", "dediee")
         self.assertIn("F2", r.stdout)
         self.assertEqual(self.appels(), "")
+
+    def test_par_logiciel_la_question_vient_avant_le_changement(self):
+        # Refusée (notification fermée) ou sans réponse (stdin vide, hors session graphique) : rien ne bouge
+        self.machine("ASUSTeK COMPUTER INC.", "ROG Strix G614JV", "ROG Strix")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("supergfxctl", 'echo "supergfxctl $*" >> "$JOURNAL"\n'
+                       '[ "$1" = --supported ] && echo "[Integrated, Hybrid, AsusMuxDgpu]"; exit 0')
+        for graphique in (True, False):
+            r = self.lancer("basculer", "dediee", graphique=graphique)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--mode", self.appels())
+        self.assertNotIn("systemctl", self.appels())
+
+    def test_deux_cartes_sans_nvidia_sans_objet(self):
+        # Intel (écran interne) + AMD (eGPU ou autre) : pas de MUX, donc pas de mode à choisir
+        self.machine("LENOVO", "21XX", "ThinkPad")
+        self.carte(0, AMD, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "sans-objet")
+        self.assertIn('"mode": "sans-objet"', self.lancer("json").stdout)
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("systemctl", self.appels())
 
     def test_sans_question_par_logiciel_puis_redemarrage(self):
         self.machine("System76", "Oryx Pro", "Oryx Pro")

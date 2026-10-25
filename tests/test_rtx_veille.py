@@ -10,6 +10,7 @@ XDG_RUNTIME_DIR temporaires. Le seul vrai processus touché est un « sleep » l
 """
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -166,6 +167,32 @@ class Base(unittest.TestCase):
 
     def appels(self, nom):
         return [l for l in self.journal.read_text().splitlines() if l.startswith(nom + " ")]
+
+
+class Langue(unittest.TestCase):
+    def test_locale_conf_quand_l_environnement_est_vide(self):
+        # Comme nc-meteo : un service sans LANG lit /etc/locale.conf
+        def langue(contenu):
+            vrai_open = open
+
+            def faux_open(f, *a, **k):
+                if f == "/etc/locale.conf":
+                    if contenu is None:
+                        raise FileNotFoundError(f)
+                    return io.StringIO(contenu)
+                return vrai_open(f, *a, **k)
+            with tempfile.TemporaryDirectory() as home, \
+                    mock.patch.dict(os.environ, {"HOME": home}), mock.patch("builtins.open", faux_open):
+                for v in ("NC_LANGUE", "LC_ALL", "LC_MESSAGES", "LANG"):
+                    os.environ.pop(v, None)
+                chargeur = importlib.machinery.SourceFileLoader("nc_rtx_langue", str(VEILLE))
+                m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_rtx_langue", chargeur))
+                chargeur.exec_module(m)
+                return m._langue()
+        self.assertEqual(langue('LANG=fr_FR.UTF-8\n'), "fr")
+        self.assertEqual(langue('LANG="fr_FR.UTF-8"\n'), "fr")
+        self.assertEqual(langue('LANG=en_US.UTF-8\n'), "en")
+        self.assertEqual(langue(None), "en")
 
 
 class Etat(Base):
@@ -356,6 +383,29 @@ class Relance(Base):
         self.assertEqual(env["__EGL_VENDOR_LIBRARY_FILENAMES"], f"{self.egl}/50_mesa.json")
         self.assertEqual(env["SORTIE"], str(sortie))                             # le reste de son environnement
         self.assertEqual(len(self.appels("systemd-run")), 1)
+
+    def test_programme_introuvable_rien_ne_ferme(self):
+        # Binaire disparu (mise à jour) ou chemin interne d'un bac à sable : l'appli ne reviendrait pas, donc aucun SIGTERM
+        for cmd in (["/app/bin/disparu", "--x"], ["programme-qui-n-existe-pas"]):
+            pid = self.vrai_sleep()
+            self.processus(pid, "firefox", [str(self.dev / "nvidia0")], debut="999", cmdline=cmd)
+            r = self.veille("relancer", str(pid), "999", NC_TEST_CLIC="oui", NC_RTX_ATTENTE="2")
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertTrue(self.vivant(pid), "fermé alors qu'il ne pouvait pas être relancé")
+            self.assertNotIn("relancé", r.stdout)
+            n = json.dumps(self.notifications(), ensure_ascii=False)
+            self.assertIn("ne peut pas être relancé", n)
+            self.assertNotIn("Relancer Firefox", n, "pas de question pour une relance impossible")
+            self.assertEqual(self.appels("systemd-run"), [])
+
+    def test_lancement_en_echec_pas_de_relance_annoncee(self):
+        # Le programme existe, mais la nouvelle instance s'arrête tout de suite en erreur : on le dit
+        pid = self.vrai_sleep()
+        self.processus(pid, "firefox", [str(self.dev / "nvidia0")], debut="999", cmdline=["sh", "-c", "exit 3"])
+        r = self.veille("relancer", str(pid), "999", NC_TEST_CLIC="oui", NC_RTX_ATTENTE="10")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertNotIn("relancé", r.stdout)
+        self.assertIn("ne s'est pas rouvert", json.dumps(self.notifications(), ensure_ascii=False))
 
 
 class Diag(Base):

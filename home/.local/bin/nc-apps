@@ -158,6 +158,9 @@ def visible(e):
     return bool(e.get("Exec"))
 
 
+CODE_CHAMP = re.compile(r"%[%fFuUdDnNkvmic]")
+
+
 def exec_argv(e):
     try:
         args = shlex.split(e.get("Exec", ""))
@@ -174,7 +177,10 @@ def exec_argv(e):
         if a == "%c":
             out.append(loc(e, "Name"))
             continue
-        out.append(a.replace("%%", "%"))
+        # Un code dans un argument (« --url=%u », « sh -c "… %U" ») est remplacé par rien ; %c par le nom ; %% devient %
+        n = CODE_CHAMP.sub(lambda m: m.group(0)[1] if m.group(0) == "%%" else loc(e, "Name") if m.group(0) == "%c" else "", a)
+        if n or not CODE_CHAMP.search(a):
+            out.append(n)
     return out
 
 

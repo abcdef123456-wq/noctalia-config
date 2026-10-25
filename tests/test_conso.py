@@ -503,6 +503,27 @@ class ClicBatterie(unittest.TestCase):
         self.assertIn('nc-shell-msg ile charge systeme"', bloc)
 
 
+class Arguments(unittest.TestCase):
+    def test_fois_pas_un_nombre(self):
+        with tempfile.TemporaryDirectory(prefix="nc-conso-args-") as d:
+            env = dict(os.environ, HOME=d, NC_SYSFS=str(FauxSysteme(Path(d)).sys))
+            for mauvais in ("abc", "-3"):
+                r = subprocess.run([str(SCRIPT), "suivre", "--fois", mauvais], env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(r.returncode, 1, mauvais)
+                self.assertIn("nc-conso", r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+
+    def test_arrondi_d_affichage(self):
+        # 12,5 donne 13 (round() donnerait 12) : le pourcentage de la page Charge
+        with tempfile.TemporaryDirectory(prefix="nc-conso-arrondi-") as d:
+            f = FauxSysteme(Path(d))
+            f.batterie("BAT0", CAPACITY=12.5, STATUS="Discharging")
+            env = dict(os.environ, HOME=d, NC_SYSFS=str(f.sys), NC_PROC=str(f.proc))
+            r = subprocess.run([str(SCRIPT)], env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout)["batterie"]["pct"], 13)
+
+
 class PageBatterieSysfs(unittest.TestCase):
     def test_a_batterie(self):
         with tempfile.TemporaryDirectory(prefix="nc-a-batterie-") as d:

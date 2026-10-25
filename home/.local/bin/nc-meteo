@@ -5,8 +5,10 @@
 Ville : nc-reglages → Île → « Ville de la météo » (METEO_VILLE) ; vide : estimée d'après ta connexion internet.
 """
 import json
+import math
 import os
 import re
+import tempfile
 import sys
 import time
 import urllib.parse
@@ -110,6 +112,12 @@ def lieu(ville):
     return r["latitude"], r["longitude"], r.get("city", ""), True
 
 
+def arrondi(x):
+    """Arrondi d'affichage : 12,5 donne 13 (round() de Python arrondit au pair : 12,5 donne 12).
+    Pour un négatif, -2,5 donne -2 (arrondi vers le haut)."""
+    return math.floor(x + 0.5)
+
+
 def icone(code, jour=True):
     c = CODES.get(code, ("cloud", "cloud", "—"))
     return c[0] if jour else c[1]
@@ -136,32 +144,45 @@ def meteo():
         r = lire("https://api.open-meteo.com/v1/forecast?" + q)
     except (OSError, ValueError, KeyError):
         return c or {"erreur": "hors ligne"}                 # pas de réseau : la dernière météo connue
-    cur = r["current"]
-    jour = bool(cur.get("is_day", 1))
-    h = r["hourly"]
-    maintenant = cur["time"][:13]
-    debut = next((i for i, t in enumerate(h["time"]) if t[:13] >= maintenant), 0)
-    heures = [{"h": h["time"][i][11:13] + " h", "t": round(h["temperature_2m"][i]),
-               "icone": icone(h["weather_code"][i], bool(h["is_day"][i]))} for i in range(debut + 1, min(debut + 7, len(h["time"])))]
-    d = r["daily"]
-    jours = []
-    for i, t in enumerate(d["time"]):
-        a, m, j = (int(x) for x in t.split("-"))
-        nom_jour = "Aujourd'hui" if i == 0 else JOURS[__import__("datetime").date(a, m, j).weekday()]
-        jours.append({"jour": nom_jour, "min": round(d["temperature_2m_min"][i]), "max": round(d["temperature_2m_max"][i]),
-                      "icone": icone(d["weather_code"][i])})
-    res = {
-        "t": time.time(), "demande": ville, "ville": nom, "estimee": estimee, "temp": round(cur["temperature_2m"]),
-        "ressenti": round(cur["apparent_temperature"]), "vent": round(cur["wind_speed_10m"]),
-        "humidite": round(cur.get("relative_humidity_2m", 0)), "code": cur["weather_code"],
-        "icone": icone(cur["weather_code"], jour), "texte": CODES.get(cur["weather_code"], ("", "", "—"))[2],
-        "min": jours[0]["min"] if jours else None, "max": jours[0]["max"] if jours else None,
-        "heures": heures, "jours": jours,
-    }
-    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    with open(CACHE + ".tmp", "w", encoding="utf-8") as f:
-        json.dump(res, f, ensure_ascii=False)
-    os.replace(CACHE + ".tmp", CACHE)
+    try:
+        cur = r["current"]
+        jour = bool(cur.get("is_day", 1))
+        h = r["hourly"]
+        maintenant = cur["time"][:13]
+        debut = next((i for i, t in enumerate(h["time"]) if t[:13] >= maintenant), 0)
+        heures = [{"h": h["time"][i][11:13] + " h", "t": arrondi(h["temperature_2m"][i]),
+                   "icone": icone(h["weather_code"][i], bool(h["is_day"][i]))} for i in range(debut + 1, min(debut + 7, len(h["time"])))]
+        d = r["daily"]
+        jours = []
+        for i, t in enumerate(d["time"]):
+            a, m, j = (int(x) for x in t.split("-"))
+            nom_jour = "Aujourd'hui" if i == 0 else JOURS[__import__("datetime").date(a, m, j).weekday()]
+            jours.append({"jour": nom_jour, "min": arrondi(d["temperature_2m_min"][i]), "max": arrondi(d["temperature_2m_max"][i]),
+                          "icone": icone(d["weather_code"][i])})
+        res = {
+            "t": time.time(), "demande": ville, "ville": nom, "estimee": estimee, "temp": arrondi(cur["temperature_2m"]),
+            "ressenti": arrondi(cur["apparent_temperature"]), "vent": arrondi(cur["wind_speed_10m"]),
+            "humidite": arrondi(cur.get("relative_humidity_2m", 0)), "code": cur["weather_code"],
+            "icone": icone(cur["weather_code"], jour), "texte": CODES.get(cur["weather_code"], ("", "", "—"))[2],
+            "min": jours[0]["min"] if jours else None, "max": jours[0]["max"] if jours else None,
+            "heures": heures, "jours": jours,
+        }
+    except (TypeError, IndexError, KeyError, ValueError, AttributeError, OverflowError):
+        return c or {"erreur": "réponse illisible"}          # un null ou un champ manquant : la dernière météo connue
+    # L'écriture du cache ne doit jamais empêcher d'afficher la météo (nom unique : deux instances en même temps)
+    tmp = None
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CACHE), prefix="meteo.", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False)
+        os.replace(tmp, CACHE)
+    except OSError:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     return res
 
 

@@ -16,6 +16,8 @@
 #   ASUS avec supergfxctl         supergfxctl --mode AsusMuxDgpu | Hybrid (si ce PC le propose), puis redémarrage
 #   System76 avec system76-power  system76-power graphics nvidia | hybrid, puis redémarrage
 #   Lenovo Legion, module legion_laptop chargé et attribut gsync présent : 1 (dédiée) ou 0 (hybride), puis redémarrage
+#   Par logiciel, la question est posée AVANT le changement (refusée : rien ne bouge) ; acceptée : changement puis
+#   redémarrage tout de suite.
 #   sinon (la plupart des Lenovo)  le mode se change dans le BIOS : une notification propose d'y redémarrer, et ne
 #                                  redémarre que sur un clic (hors session graphique : la même question au terminal).
 #                                  L'île et nc-reglages posent leur propre question, puis passent --sans-question : un
@@ -44,6 +46,19 @@ nb_cartes() {
   echo "$n"
 }
 
+# Y a-t-il une carte NVIDIA (carte DRM ou contrôleur PCI, même sans pilote) ?
+a_nvidia() {
+  local c
+  for c in "$SYS"/class/drm/card*; do
+    case "${c##*/}" in *-*) continue ;; esac
+    [ "$(lire "$c/device/vendor")" = "$NVIDIA" ] && return 0
+  done
+  for c in "$SYS"/bus/pci/devices/*; do
+    case "$(lire "$c/class")" in 0x03*) [ "$(lire "$c/vendor")" = "$NVIDIA" ] && return 0 ;; esac
+  done
+  return 1
+}
+
 # Carte de l'écran interne (connecteur eDP branché), par exemple « card1 » ; vide si aucun
 carte_ecran_interne() {
   local s c
@@ -61,6 +76,9 @@ actuel() {
   if [ -n "$carte" ] && [ "$(lire "$SYS/class/drm/$carte/device/vendor")" = "$NVIDIA" ]; then echo dediee; return; fi
   [ "$(nb_cartes)" -ge 2 ] || { echo sans-objet; return; }
   ls -d "$SYS"/class/drm/card*-eDP-* >/dev/null 2>&1 || { echo sans-objet; return; }   # pas d'écran interne
+  # Sans supergfxctl, system76-power ni gsync, le mode se change dans le BIOS (GPU Working Mode) : ce MUX n'existe
+  # que pour une NVIDIA. Intel + AMD, ou un eGPU : pas de mode à choisir
+  if [ "$(methode)" = bios ] && ! a_nvidia; then echo sans-objet; return; fi
   carte="$(carte_ecran_interne)"
   if [ -n "$carte" ] && [ "$(lire "$SYS/class/drm/$carte/device/vendor")" = "$NVIDIA" ]; then echo dediee; else echo hybride; fi
 }
@@ -182,6 +200,19 @@ basculer() {
     return 0
   fi
   m="$(methode)"
+  # Par logiciel : la question d'abord, avant tout changement. Acceptée, le redémarrage suit tout de suite (une seule
+  # question) ; refusée ou fermée, rien n'a bougé
+  case "$m" in
+    supergfxctl|system76-power|gsync)
+      if [ "$SANS_QUESTION" != 1 ]; then
+        demander "$(t "Passer en mode graphique $(nom_mode "$cible") ?" "Switch to $(nom_mode "$cible") graphics mode?")" \
+            "$(t "Le PC redémarre ensuite pour appliquer le changement. Les applis ouvertes seront fermées." \
+                 "The PC then restarts to apply the change. Open apps will be closed.")" \
+            "$(t "Changer et redémarrer" "Switch and restart")" \
+          || { t "Rien n'a changé." "Nothing was changed."; echo; return 0; }
+        SANS_QUESTION=1      # déjà confirmé : proposer_redemarrage redémarre sans reposer la question
+      fi ;;
+  esac
   case "$m" in
     supergfxctl)
       if [ "$cible" = dediee ]; then supergfxctl --mode AsusMuxDgpu || return 1
