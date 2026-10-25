@@ -1179,8 +1179,9 @@ elif ask "$nv_q" o; then
             # Fedora 44 : nodejs24 / nodejs24-npm (plus de paquet « nodejs ») ; demandés par la commande fournie
             have node || sudo dnf install -y /usr/bin/node /usr/bin/npm >/dev/null 2>&1 || true ;;
     # python3-venv : Mason installe ruff et le serveur Python (extra Python) dans un environnement virtuel, que Debian
-    # et Ubuntu séparent de python3
-    debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli gitui python3-venv ;;
+    # et Ubuntu séparent de python3. Pas de gitui : absent de trixie et des backports, et l'extra LazyVim util.gitui
+    # le fait installer par Mason
+    debian) pkg_try neovim git ripgrep fd-find gcc make nodejs npm tree-sitter-cli python3-venv ;;
     suse)   pkg_try neovim git ripgrep fd gcc make nodejs-default npm-default tree-sitter gitui ;;
   esac
   nv="$(nv_ver)"
@@ -1754,7 +1755,8 @@ if [ "$MODE" = full ]; then
           arch) pkg_try qt6-svg qt6-virtualkeyboard qt6-multimedia-ffmpeg ;;
           fedora) pkg_try qt6-qtsvg qt6-qtvirtualkeyboard qt6-qtmultimedia ;;
           debian) pkg_try qml6-module-qtquick-virtualkeyboard qml6-module-qtmultimedia libqt6svg6 ;;
-          suse) pkg_try qt6-svg-imports qt6-virtualkeyboard-imports qt6-multimedia-imports ;;
+          # Tumbleweed : le module SVG (imageformats/libqsvg.so) est dans libQt6Svg6 ; qt6-svg-imports n'existe pas
+          suse) pkg_try libQt6Svg6 qt6-virtualkeyboard-imports qt6-multimedia-imports ;;
         esac
         sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "$(t "Téléchargement impossible." "Download failed.")"
       fi
