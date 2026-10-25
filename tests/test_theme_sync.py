@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -90,6 +91,53 @@ class AccentLisible(unittest.TestCase):
                                   c["mSurface"], c["mOnSurface"])
                     vus += 1
         self.assertGreater(vus, 0)
+
+
+class TextesDeCarte(unittest.TestCase):
+    """texteSec et texteDoux de palette-ile.json restent lisibles (4,5:1) sur la carte, palette claire comme sombre."""
+    PALETTES = {
+        # mOnSurfaceVariant volontairement pâle sur fond clair, et sombre sur fond sombre : le pire cas
+        "claire": {"mSurface": "#f8f9ff", "mOnSurface": "#191c20", "mPrimary": "#33618d", "mOnPrimary": "#ffffff",
+                   "mOnSurfaceVariant": "#b8bcc4"},
+        "sombre": {"mSurface": "#1e1e2e", "mOnSurface": "#cdd6f4", "mPrimary": "#cba6f7", "mOnPrimary": "#11111b",
+                   "mOnSurfaceVariant": "#4a4d60"},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = charger()
+
+    def palette(self, couleurs):
+        with tempfile.TemporaryDirectory(prefix="nc-theme-sync-") as d:
+            home = Path(d)
+            (home / ".config/noctalia").mkdir(parents=True)
+            (home / ".config/noctalia/colors.json").write_text(json.dumps(couleurs))
+            (home / ".local/bin").mkdir(parents=True)
+            for nom in ("nc-icones", "nc-firefox"):
+                (home / ".local/bin" / nom).write_text("#!/bin/sh\nexit 0\n")
+                (home / ".local/bin" / nom).chmod(0o755)
+            env = dict(os.environ, HOME=d, XDG_CONFIG_HOME=d + "/.config", LANG="fr_FR.UTF-8", LC_ALL="fr_FR.UTF-8")
+            r = subprocess.run([str(BIN / "nc-theme-sync")], env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads((home / ".config/nc/palette-ile.json").read_text())
+
+    def test_textes_lisibles_sur_la_carte(self):
+        m = self.m
+        for nom, couleurs in self.PALETTES.items():
+            p = self.palette(couleurs)
+            carte = m.hex_to_rgb(p["carte"])
+            for cle in ("texteSec", "texteDoux"):
+                with self.subTest(palette=nom, cle=cle):
+                    self.assertGreaterEqual(m.contrast(m.hex_to_rgb(p[cle]), carte), 4.5, (p[cle], p["carte"]))
+
+    def test_rose_tire_de_la_palette(self):
+        m = self.m
+        for nom, couleurs in self.PALETTES.items():
+            p = self.palette(couleurs)
+            with self.subTest(palette=nom):
+                self.assertIn("rose", p)
+                self.assertNotEqual(p["rose"], p["violet"])
+                self.assertGreaterEqual(m.contrast(m.hex_to_rgb(p["rose"]), m.hex_to_rgb(couleurs["mSurface"])), 4.5, p["rose"])
 
 
 if __name__ == "__main__":

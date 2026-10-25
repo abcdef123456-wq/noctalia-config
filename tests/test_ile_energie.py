@@ -52,6 +52,11 @@ class Source(unittest.TestCase):
         self.assertRegex(self.etat, r"interval: 5000; repeat: true; running: etat\.ecranVu;")
         self.assertIn("a.demande !== null ? 1200 : 10000; repeat: true; running: Etat.ecranVu;", self.agents)
 
+    def test_releve_des_telechargements_suspendu(self):
+        # find du dossier Téléchargements : suspendu écran éteint ou verrouillé, relevé dès le réveil
+        self.assertRegex(self.etat, r'running: etat\.ecranVu && Reglages\.val\("ILE_TELECHARGEMENTS", "oui"\) !== "non"; '
+                                    r'triggeredOnStart: true; onTriggered: if \(!lecteurTel\.running\)')
+
     def test_pas_de_composant_neuf(self):
         # Règle de l'île : jamais de « component » inline neuf dans un .qml existant
         self.assertEqual(len(re.findall(r"(?m)^\s*component ", self.etat)), 0)

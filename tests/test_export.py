@@ -449,9 +449,9 @@ class ExportDepotReel(unittest.TestCase):
                   "LCY2": "405.0", "LCY3": "640.0", "LCY4": "860.0", "LCY5": "930.0", "ICON_THEME": "NC",
                   "DISTRO_LOGO": h + "/.config/noctalia/arch-logo.png"}
         variantes = (
-            {"KB_LAYOUT": "fr", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion", "ILE_CENTRE": "",
+            {"KB_LAYOUT": "fr", "KB_VARIANT": "", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion", "ILE_CENTRE": "",
              "NOTIF_NOCTALIA": "false", "NOTIF_WIDGET": "", "PLUGIN_ILE": "", "BROWSER": "firefox"},
-            {"KB_LAYOUT": "us,fr", "KB_OPTIONS": "grp:win_space_toggle", "POLKIT": "false", "QT_STYLE": "Breeze",
+            {"KB_LAYOUT": "us,fr", "KB_VARIANT": ",bepo", "KB_OPTIONS": "ctrl:nocaps,grp:win_space_toggle", "POLKIT": "false", "QT_STYLE": "Breeze",
              "ILE_CENTRE": '"nc/ile:pilule"', "NOTIF_NOCTALIA": "true", "NOTIF_WIDGET": ', "notifications"',
              "PLUGIN_ILE": ', "nc/ile"', "BROWSER": "org.chromium.Chromium"},
         )
@@ -505,7 +505,7 @@ class ExportDepotReel(unittest.TestCase):
         h = str(self.home)
         commun = {"HOME": h, "MONITOR": "eDP-1", "LCX": "800.0", "LCY1": "300.0", "LCY2": "405.0", "LCY3": "640.0",
                   "LCY4": "860.0", "LCY5": "930.0", "ICON_THEME": "NC", "DISTRO_LOGO": h + "/logo.png",
-                  "KB_LAYOUT": "fr", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion", "BROWSER": "firefox"}
+                  "KB_LAYOUT": "fr", "KB_VARIANT": "bepo", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion", "BROWSER": "firefox"}
         variantes = (
             {"ILE_CENTRE": "", "NOTIF_NOCTALIA": "false", "NOTIF_WIDGET": "", "PLUGIN_ILE": ""},
             {"ILE_CENTRE": '"nc/ile:pilule"', "NOTIF_NOCTALIA": "true", "NOTIF_WIDGET": ', "notifications"',
@@ -550,7 +550,7 @@ class ExportDepotReel(unittest.TestCase):
         h = str(self.home)
         self.installer({"HOME": h, "MONITOR": "eDP-1", "LCX": "800.0", "LCY1": "300.0", "LCY2": "405.0",
                         "LCY3": "640.0", "LCY4": "860.0", "LCY5": "930.0", "ICON_THEME": "NC", "DISTRO_LOGO": "",
-                        "KB_LAYOUT": "fr", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion",
+                        "KB_LAYOUT": "fr", "KB_VARIANT": "bepo", "KB_OPTIONS": "", "POLKIT": "true", "QT_STYLE": "Fusion",
                         "BROWSER": "firefox", "ILE_CENTRE": '"nc/ile:pilule"', "NOTIF_NOCTALIA": "true",
                         "NOTIF_WIDGET": ', "notifications"', "PLUGIN_ILE": ', "nc/ile"'})
         cfg = self.home / ".config/noctalia/config.toml"

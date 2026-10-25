@@ -1,4 +1,7 @@
 """Vérifications réelles de l'installateur avec de faux outils ; aucun paquet/service modifié."""
+import importlib.machinery
+import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -6,6 +9,8 @@ import signal
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = (REPO / 'install.sh').read_text()
@@ -219,3 +224,128 @@ class EnregistreurDictee(unittest.TestCase):
         generic = texte[texte.index("GENERIC=("):texte.index(")", texte.index("GENERIC=("))]
         self.assertIn("enregistreur", generic)
         self.assertIn('[ "$g" = enregistreur ] && { have pw-record || have parec || have arecord; } && continue', texte)
+
+
+class ClavierVariante(unittest.TestCase):
+    """Point 3 de l'audit : install.sh relevait la disposition mais perdait la variante (bépo, intl…) et les options.
+    Le bloc « Clavier » d'install.sh est joué avec de faux fichiers (/etc/default/keyboard, /etc/vconsole.conf), une
+    fausse liste xkb et un faux localectl ; jamais les vrais fichiers du PC."""
+    LST = ('! layout\n  fr  French\n  us  English (US)\n  de  German\n\n'
+           '! variant\n  bepo  fr: French (Bepo, ergonomic)\n  intl  us: English (US, intl., with dead keys)\n'
+           '  nodeadkeys  de: German (no dead keys)\n\n! option\n  grp  Switching to another layout\n'
+           '  ctrl:nocaps  Caps Lock as Ctrl\n  grp:win_space_toggle  Super+Space\n  compose:rctrl  Right Ctrl\n')
+
+    def relever(self, localectl='', debian='', vconsole='', lang='C'):
+        bloc = SOURCE[SOURCE.index('XKB_LST=/usr/share'):SOURCE.index('# Navigateur par défaut')]
+        with tempfile.TemporaryDirectory(prefix='nc-clavier-') as d:
+            r = Path(d); (r / 'bin').mkdir()
+            (r / 'evdev.lst').write_text(self.LST)
+            (r / 'keyboard').write_text(debian); (r / 'vconsole.conf').write_text(vconsole)
+            lc = r / 'bin/localectl'; lc.write_text('#!/bin/sh\ncat <<\'FIN\'\n' + localectl + '\nFIN\n'); lc.chmod(0o755)
+            bloc = bloc.replace('XKB_LST=/usr/share/X11/xkb/rules/evdev.lst', f'XKB_LST={r}/evdev.lst') \
+                       .replace('/etc/default/keyboard', f'{r}/keyboard').replace('/etc/vconsole.conf', f'{r}/vconsole.conf')
+            script = ('set -euo pipefail\ninfo(){ :; }\nok(){ :; }\nt(){ printf %s "$1"; }\n'
+                      'sonder(){ shift 2; "$@"; }\n' + bloc + 'printf "%s|%s|%s" "$KBL" "$KBV" "$KBO"\n')
+            p = subprocess.run(['bash', '-c', script], env=dict(os.environ, PATH=f'{r}/bin:' + os.environ['PATH'], LANG=lang),
+                               text=True, capture_output=True, timeout=10)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            return p.stdout.split('|')
+
+    def test_localectl_variante_et_options(self):
+        self.assertEqual(self.relever('X11 Layout: fr\nX11 Variant: bepo\nX11 Options: ctrl:nocaps'), ['fr', 'bepo', 'ctrl:nocaps'])
+
+    def test_debian_xkbvariant_xkboptions(self):
+        d = 'XKBMODEL="pc105"\nXKBLAYOUT="us"\nXKBVARIANT="intl"\nXKBOPTIONS="compose:rctrl"\n'
+        self.assertEqual(self.relever('X11 Layout: n/a', debian=d), ['us', 'intl', 'compose:rctrl'])
+        self.assertEqual(self.relever('', debian='XKBLAYOUT=de\nXKBVARIANT=nodeadkeys\n'), ['de', 'nodeadkeys', ''])
+
+    def test_vconsole_conf(self):
+        self.assertEqual(self.relever('', vconsole='KEYMAP=fr\nXKBLAYOUT=fr\nXKBVARIANT=bepo\nXKBOPTIONS=ctrl:nocaps\n'),
+                         ['fr', 'bepo', 'ctrl:nocaps'])
+
+    def test_rien_trouve_est_vide(self):
+        self.assertEqual(self.relever('X11 Layout: us\nX11 Variant: n/a\nX11 Options: n/a'), ['us', '', ''])
+        self.assertEqual(self.relever('', lang='fr_FR.UTF-8'), ['fr', '', ''])
+
+    def test_variante_ou_option_inconnue_laissee_de_cote(self):
+        # Une variante d'une autre disposition, ou une option qui n'existe pas, ferait une erreur dans Hyprland
+        self.assertEqual(self.relever('X11 Layout: fr\nX11 Variant: intl\nX11 Options: truc:machin'), ['fr', '', ''])
+        self.assertEqual(self.relever('X11 Layout: fr\nX11 Variant: bepo;rm\nX11 Options: ctrl:nocaps'), ['fr', '', 'ctrl:nocaps'])
+
+    def test_plusieurs_dispositions(self):
+        self.assertEqual(self.relever('X11 Layout: us,fr\nX11 Variant: ,bepo\nX11 Options: ctrl:nocaps'),
+                         ['us,fr', ',bepo', 'ctrl:nocaps,grp:win_space_toggle'])
+        self.assertEqual(self.relever('X11 Layout: us,fr\nX11 Variant: bepo,\nX11 Options: n/a'), ['us,fr', '', 'grp:win_space_toggle'])
+
+    def test_marqueur_rempli_dans_le_sed_de_copie(self):
+        self.assertIn('-e "s|@KB_VARIANT@|$KBV|g"', SOURCE)
+
+
+@unittest.skipUnless(shutil.which('lua'), 'lua requis')
+class ClavierLuaVariante(unittest.TestCase):
+    """clavier.lua : CLAVIER_VARIANTE gagne sur la variante relevée par install.sh, est validée, et ne s'applique
+    pas à une autre disposition que celle du système. Faux hl et faux nc.reglage ; marqueurs remplis comme install.sh."""
+    LUA = REPO / 'home/.config/hypr/nc/clavier.lua'
+
+    def lancer(self, reglages, layout='fr', variante='bepo', options=''):
+        texte = self.LUA.read_text().replace('@KB_LAYOUT@', layout).replace('@KB_VARIANT@', variante).replace('@KB_OPTIONS@', options)
+        self.assertNotIn('@KB_', texte)
+        harnais = '''
+local R = {%s}
+nc = { reglage = function(c, d) if R[c] ~= nil and R[c] ~= "" then if type(d) == "number" then return tonumber(R[c]) or d end return R[c] end return d end }
+local cfg
+hl = { config = function(t) cfg = t end, gesture = function() end, device = function() end, exec_cmd = function() end }
+local src = io.open(arg[1]):read("a")
+assert(load(src))()
+print(cfg.input.kb_layout .. "|" .. cfg.input.kb_variant .. "|" .. cfg.input.kb_options)
+''' % ', '.join('%s = %s' % (k, json.dumps(v, ensure_ascii=False)) for k, v in reglages.items())
+        with tempfile.TemporaryDirectory(prefix='nc-clavier-lua-') as d:
+            f = Path(d) / 'clavier.lua'; f.write_text(texte)
+            p = subprocess.run(['lua', '-', str(f)], input=harnais, text=True, capture_output=True, timeout=10)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return p.stdout.strip()
+
+    def test_variante_du_systeme_par_defaut(self):
+        self.assertEqual(self.lancer({}), 'fr|bepo|')
+
+    def test_reglage_gagne(self):
+        self.assertEqual(self.lancer({'CLAVIER_VARIANTE': 'oss'}), 'fr|oss|')
+        self.assertEqual(self.lancer({'CLAVIER_VARIANTE': 'aucune'}), 'fr||')
+        self.assertEqual(self.lancer({'CLAVIER_VARIANTE': 'systeme'}, variante='intl', layout='us'), 'us|intl|')
+
+    def test_valeur_invalide_refusee(self):
+        for mauvaise in ('bepo;rm -rf', 'a b', 'x"y', 'é'):
+            self.assertEqual(self.lancer({'CLAVIER_VARIANTE': mauvaise}), 'fr||', mauvaise)
+
+    def test_autre_disposition_pas_de_variante_du_systeme(self):
+        self.assertEqual(self.lancer({'CLAVIER_DISPOSITION': 'us'}), 'us||')
+        self.assertEqual(self.lancer({'CLAVIER_DISPOSITION': 'us', 'CLAVIER_VARIANTE': 'intl'}), 'us|intl|')
+        self.assertEqual(self.lancer({'CLAVIER_DISPOSITION': 'fr'}), 'fr|bepo|')
+
+    def test_plusieurs_dispositions_variante_alignee(self):
+        self.assertEqual(self.lancer({}, layout='us,fr', variante=',bepo', options='ctrl:nocaps'),
+                         'us,fr|,bepo|ctrl:nocaps,grp:win_space_toggle')
+
+
+class ReglageClavierVariante(unittest.TestCase):
+    """nc-reglages : CLAVIER_VARIANTE, à côté de CLAVIER_DISPOSITION."""
+    def test_validation(self):
+        with tempfile.TemporaryDirectory(prefix='nc-reglage-variante-') as d:
+            with patch.dict(os.environ, HOME=d, NC_LANGUE='fr'), warnings.catch_warnings():
+                warnings.simplefilter('ignore', ResourceWarning)
+                ch = importlib.machinery.SourceFileLoader('nc_reglages_variante', str(REPO / 'home/.local/bin/nc-reglages'))
+                m = importlib.util.module_from_spec(importlib.util.spec_from_loader(ch.name, ch)); ch.exec_module(m)
+            r = next(x for x in m.REGLAGES if x.cle == 'CLAVIER_VARIANTE')
+            self.assertEqual(r.defaut, 'systeme'); self.assertEqual(r.genre, 'texte')
+            self.assertEqual(r.valider('System'), 'systeme'); self.assertEqual(r.valider('none'), 'aucune')
+            self.assertEqual(r.valider('aucune'), 'aucune')
+            # Sans la liste xkb (conteneur minimal, CI), seul le format est vérifié : une variante inconnue mais bien
+            # écrite passe alors
+            mauvaises = ['bepo;rm', 'a b']
+            if Path('/usr/share/X11/xkb/rules/evdev.lst').exists():
+                self.assertEqual(r.valider('bepo'), 'bepo'); self.assertEqual(r.valider(',bepo'), ',bepo')
+                mauvaises.append('pas-une-variante-xkb')
+            for mauvaise in mauvaises:
+                with self.assertRaises(ValueError):
+                    r.valider(mauvaise)
+            self.assertIn('CLAVIER_VARIANTE', (REPO / 'home/.local/bin/nc-sauvegarde').read_text())

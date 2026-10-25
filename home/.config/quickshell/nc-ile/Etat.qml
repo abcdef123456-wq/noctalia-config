@@ -280,9 +280,9 @@ Singleton {
         onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
     }
     // Toutes les 2 s pendant un téléchargement (vitesse) ; sinon un find du dossier Téléchargements toutes les 6 s, toutes
-    // les 30 s sur batterie (moins de réveils). Pas de FolderListModel : un paquet de plus sous Debian, absent des
+    // les 30 s sur batterie (moins de réveils) ; suspendu écran éteint ou session verrouillée, relevé dès le réveil. Pas de FolderListModel : un paquet de plus sous Debian, absent des
     // installations déjà faites, et l'île entière ne se chargerait plus
-    Timer { interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000); repeat: true; running: Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    Timer { interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000); repeat: true; running: etat.ecranVu && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; triggeredOnStart: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
         if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")

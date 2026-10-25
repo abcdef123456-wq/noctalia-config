@@ -116,8 +116,8 @@ ShellRoot {
 
     IpcHandler {
         target: "ile"
-        function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true) }
-        function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, false) }
+        function basculer(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true) }
+        function ouvrir(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), false) }
         function fermer(): void { Etat.fermer(); Etat.projection = false }
         function fiche(): void {                                                            // Super + /
             Etat.fermer()
@@ -148,7 +148,7 @@ ShellRoot {
             Etat.saisie = "@ " + demande; Etat.agirAuto = true; Etat.agirPortee = portee
             if (!Etat.recherche) recherche()
         }
-        function recherche(): void { Etat.chercher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name) }
+        function recherche(): void { Etat.chercher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : "")) }
         function suivante(): void { Etat.changerVue(1) }
         function precedente(): void { Etat.changerVue(-1) }
         // Mode graphique (nc-reglages → Énergie, nc-gpu-mode) : la carte de confirmation, vers l'autre mode ou vers
@@ -161,7 +161,7 @@ ShellRoot {
         function luminosite(): void { Etat.lireLuminosite(true) }
         function volume(): void { Etat.activite("volume") }
         function media(): void {}
-        function notifications(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : Quickshell.screens[0].name, true); Etat.aller("notifications") }
+        function notifications(): void { Etat.basculer(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : ""), true); Etat.aller("notifications") }
         function effacerNotifications(): void { Notifs.toutEffacer() }
         function concentration(): void { Notifs.basculerConcentration() }
         function concentrationRegler(actif: bool): void { Notifs.concentration = actif }   // mode jeu
@@ -233,7 +233,7 @@ ShellRoot {
         function jarvisChatFermer(): void { if (racine.jarvisChatFenetre) racine.jarvisChatFenetre.close() }
         // Réglages en fenêtre : déjà ouverte, le même appel la ramène ici, la met devant ou la range (basculerOutil)
         function reglages(): void {
-            if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.basculerOutil(racine.reglagesFenetre, "Réglages du bureau"); return }
+            if (racine.reglagesFenetre && racine.reglagesFenetre.visible) { racine.basculerOutil(racine.reglagesFenetre, Reglages.t("Réglages du bureau", "Desktop settings")); return }
             if (!racine.reglagesFenetre) {
                 if (!racine.composantReglages) racine.composantReglages = Qt.createComponent("Parametres.qml")
                 if (racine.composantReglages.status !== Component.Ready) {
@@ -272,7 +272,7 @@ ShellRoot {
             if (racine.clesFenetre) racine.clesFenetre.afficher(Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "")
         }
         function connexionJarvis(): void {
-            if (racine.connexionFenetre && racine.connexionFenetre.visible) { racine.basculerOutil(racine.connexionFenetre, "Connexion JARVIS"); return }
+            if (racine.connexionFenetre && racine.connexionFenetre.visible) { racine.basculerOutil(racine.connexionFenetre, Reglages.t("Connexion JARVIS", "JARVIS connection")); return }
             if (!racine.connexionFenetre) {
                 if (!racine.composantConnexion) racine.composantConnexion = Qt.createComponent("ConnexionJarvis.qml")
                 if (racine.composantConnexion.status !== Component.Ready) {

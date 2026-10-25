@@ -3,6 +3,7 @@
 Le fichier est chargé entier dans Lua avec un faux `hl` : les règles d'écran qu'il pose (hl.monitor) sont relues.
 """
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -53,7 +54,7 @@ dofile(FICHIER)
 for _, r in ipairs(regles) do print(r.output, r.mode, r.scale, r.disabled and "off" or "on") end
 '''.replace("MONITEURS", self.lua(moniteurs)).replace("HZ", json.dumps(hz)).replace("FICHIER", json.dumps(str(LUA)))
             r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5,
-                               env=dict(HOME=home, PATH="/usr/bin:/bin"))
+                               env=dict(HOME=home, PATH="/usr/bin:/bin", XDG_RUNTIME_DIR=home))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         regles = {}
         for ligne in r.stdout.splitlines():
@@ -91,10 +92,70 @@ assert(#commandes == 1 and commandes[1]:find("hyprctl monitors %-j"), "les infos
 nc.ecrans_infos_poser({ ["DP-1"] = { modes = { "3840x2160@60.00Hz", "2560x1440@59.95Hz" }, pw = 600, ph = 340, reserved = { 0, 42, 0, 0 } } })
 print("APRES", regles["DP-1"].mode, regles["DP-1"].scale)
 '''.replace("FICHIER", json.dumps(str(LUA)))
-            r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5, env=dict(HOME=home, PATH="/usr/bin:/bin"))
+            r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5, env=dict(HOME=home, PATH="/usr/bin:/bin", XDG_RUNTIME_DIR=home))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("AVANT\tpreferred\t1", r.stdout)
         self.assertIn("APRES\t3840x2160@60.00\t1.5", r.stdout)
+
+    def test_hyprland_055_echelle_gardee_au_rechargement(self):
+        """Hyprland 0.55 : après un rechargement de la config, l'écran reprend sa dernière échelle connue au lieu de
+        passer par 1 (clignotement) ; le fichier n'est réécrit que si l'échelle change ; un autre écran sur la même prise
+        ne reprend pas l'échelle de l'ancien."""
+        harness = r'''
+local regles, commandes = {}, {}
+local moniteurs = { { name = "DP-1", description = DESC, width = 3840, height = 2160 } }
+hl = {
+  get_monitors = function() return moniteurs end,
+  monitor = function(spec) if spec.output ~= "" then regles[spec.output] = spec end end,
+  on = function() end,
+  exec_cmd = function(c) commandes[#commandes + 1] = c end,
+}
+nc = { profil = { hz = "max" } }
+dofile(FICHIER)
+print("AVANT", regles["DP-1"].scale)
+if INFOS then
+  nc.ecrans_infos_poser({ ["DP-1"] = { modes = { "3840x2160@60.00Hz" }, pw = PW, ph = PH, reserved = { 0, 0, 0, 0 } } })
+  print("APRES", regles["DP-1"].scale)
+end
+'''
+        with tempfile.TemporaryDirectory() as home:
+            def lancer(desc, infos, pw=600, ph=340):
+                code = (harness.replace("FICHIER", json.dumps(str(LUA))).replace("DESC", json.dumps(desc, ensure_ascii=False))
+                        .replace("INFOS", "true" if infos else "false").replace("PW", str(pw)).replace("PH", str(ph)))
+                r = subprocess.run(["lua", "-"], input=code, text=True, capture_output=True, timeout=5,
+                                   env=dict(HOME=home, PATH="/usr/bin:/bin", XDG_RUNTIME_DIR=home))
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                return r.stdout
+            def avant(sortie):
+                return float(sortie.split("AVANT\t")[1].split()[0])
+            fichier = Path(home) / "nc-ecrans-echelles"
+            # 1er chargement : rien de gardé, 1 puis 1,5 quand hyprctl a répondu
+            out = lancer("Dell U2720Q", True)
+            self.assertIn("AVANT\t1", out)
+            self.assertIn("APRES\t1.5", out)
+            self.assertTrue(fichier.exists())
+            # Rechargement : 1,5 tout de suite (hyprctl pas encore revenu)
+            self.assertIn("AVANT\t1.5", lancer("Dell U2720Q", False))
+            # Pas réécrit tant que l'échelle ne change pas
+            fichier.write_text(fichier.read_text())
+            os.utime(fichier, (1, 1))
+            lancer("Dell U2720Q", True)
+            self.assertEqual(int(fichier.stat().st_mtime), 1, "écrit seulement quand l'échelle change")
+            # Un autre écran sur la même prise : pas l'échelle de l'ancien
+            self.assertEqual(avant(lancer("Autre écran", False)), 1)
+            # L'échelle change (écran de 32" en 4K : 1,5 -> 1 avec un écran géant) : le fichier suit
+            lancer("Dell U2720Q", True, pw=1210, ph=680)
+            self.assertEqual(avant(lancer("Dell U2720Q", False)), 1)
+
+    def test_ecran_interne_eDP_LVDS_DSI(self):
+        """L'écran interne (fréquence du profil, premier écran principal) : eDP, LVDS ou DSI, la même règle partout."""
+        for nom in ("eDP-1", "LVDS-1", "DSI-1"):
+            interne = dict(PORTABLE, name=nom)
+            r = self.regles([ASUS, interne], hz="low")
+            self.assertEqual(r[nom]["mode"], "2560x1600@60.00", nom + " : fréquence du profil énergétique")
+            self.assertTrue(r[nom]["actif"], nom)
+        r = self.regles([ASUS, dict(PORTABLE, name="HDMI-A-9")], hz="low")
+        self.assertEqual(r["HDMI-A-9"]["mode"], "2560x1600@165.00", "un écran externe garde sa fréquence la plus haute")
 
     def test_ecran_1440p_144hz_avec_faux_4k(self):
         r = self.regles([ASUS])["HDMI-A-1"]

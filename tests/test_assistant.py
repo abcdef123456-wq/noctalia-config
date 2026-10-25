@@ -704,7 +704,7 @@ assert(launched[3] == "a 'quote' and $(false)")
                     bk.mkdir()
                     prelude = 'tmp="$HOME/tmp"\nbackup() { return 42; }\n'
                     env = dict(os.environ, HOME=str(home), REPO=str(root / "repo"), BK=str(bk), FAMILY=famille)
-                    for cle in ("MON", "KBL", "KBO", "BROWSER", "LCX", "LCY1", "LCY2", "LCY3", "LCY4", "LCY5", "LCY6",
+                    for cle in ("MON", "KBL", "KBV", "KBO", "BROWSER", "LCX", "LCY1", "LCY2", "LCY3", "LCY4", "LCY5", "LCY6",
                                 "DISTRO_LOGO", "POLKIT", "QT_STYLE", "ICON_THEME", "ILE_CENTRE", "NOTIF_NOCTALIA",
                                 "NOTIF_WIDGET", "PLUGIN_ILE"):
                         env[cle] = "test"

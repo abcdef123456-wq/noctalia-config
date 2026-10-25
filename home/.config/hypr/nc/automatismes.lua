@@ -73,8 +73,11 @@ end
 
 -- ── Mode jeu automatique ────────────────────────────────────────────────────
 -- Jeux reconnus : Steam / Proton (steam_app_…), gamescope, jeux Windows (….exe). Le profil d'avant est noté dans
--- un fichier : il est remis à la fermeture du dernier jeu, avec la sortie du mode jeu (s'il a été mis par ici).
+-- un fichier (1re ligne) : il est remis à la fermeture du dernier jeu. La 2e ligne « jeu » dit que le mode jeu a été mis
+-- par ici : lui seul est coupé à la fin, et seulement s'il est toujours en place (un mode jeu mis ou changé à la main,
+-- Super + Alt + G, n'est jamais défait par un automatisme).
 local JEU_AUTO = RUN .. "nc-jeu-auto"
+local MARQUE_JEU = RUN .. "nc-mode-jeu"
 
 local function est_jeu(w)
     local c = w and w.class or ""
@@ -83,21 +86,24 @@ end
 
 hl.on("window.open", function(w)
     if not est_jeu(w) or lire(JEU_AUTO) then return end
-    ecrire(JEU_AUTO, nc.profil.profil or "balanced")
+    local par_ici = not nc.jeu and not lire(MARQUE_JEU)   -- pas de mode jeu en place : c'est nous qui le mettons
+    ecrire(JEU_AUTO, (nc.profil.profil or "balanced") .. (par_ici and "\njeu" or ""))
     hl.exec_cmd("noctalia msg power-set performance")
-    if not nc.jeu then nc.mode_jeu() end
+    if par_ici then nc.mode_jeu() end
 end)
 
 hl.on("window.close", function(w)
     if not est_jeu(w) then return end
-    local avant = lire(JEU_AUTO)
-    if not avant then return end
+    local note = lire(JEU_AUTO)
+    if not note then return end
     for _, autre in ipairs(hl.get_windows()) do
         if autre.address ~= w.address and est_jeu(autre) then return end   -- un autre jeu tourne encore
     end
     os.remove(JEU_AUTO)
-    hl.exec_cmd("noctalia msg power-set " .. avant)
-    if nc.jeu then nc.mode_jeu() end
+    local avant, par_ici = note:match("^([^\n]*)(.*)")
+    hl.exec_cmd("noctalia msg power-set " .. (avant ~= "" and avant or "balanced"))
+    -- Coupé seulement si on l'a mis et qu'il est toujours là (l'utilisateur l'a peut-être déjà coupé)
+    if par_ici:find("jeu", 1, true) and nc.jeu and lire(MARQUE_JEU) then nc.mode_jeu() end
 end)
 
 -- ── Marque-pages de fenêtres ────────────────────────────────────────────────
@@ -164,7 +170,7 @@ end
 
 -- Fenêtres de l'île qui prennent toute la place d'une fenêtre rangée seule (voir « Cockpit JARVIS » plus bas) :
 -- ni mémorisées ici, ni centrées par la règle souris-libres
-local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true }
+local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true, ["Desktop settings"] = true }
 
 -- ── Mémoire des fenêtres flottantes ─────────────────────────────────────────
 -- À la fermeture d'une fenêtre flottante, sa taille et sa place (en proportion de l'écran) sont notées par appli ;
@@ -184,12 +190,17 @@ local function exclue(w)
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
 end
 
+-- Les 200 dernières seulement (un titre qui change à chaque fois en créerait sans fin) : le fichier est dans l'ordre
+-- d'usage, la plus ancienne en haut
+local MEMOIRE_MAX = 200
+
 local function memoire()
-    local m = {}
+    local m, ordre = {}, {}
     for k, x, y, l, h in (lire(MEMOIRE) or ""):gmatch("([^\n]-)=([%d.]+),([%d.]+),([%d.]+),([%d.]+)") do
+        if not m[k] then ordre[#ordre + 1] = k end
         m[k] = { tonumber(x), tonumber(y), tonumber(l), tonumber(h) }
     end
-    return m
+    return m, ordre
 end
 
 local function ecran(w)
@@ -210,10 +221,21 @@ hl.on("window.close", function(w)
     local x, y = xy(w.at)
     local l, h = xy(w.size)
     if not (lw and x and l) then return end
-    local m = memoire()
-    m[cle(w)] = { (x - mx) / lw, (y - my) / lh, l / lw, h / lh }
+    local m, ordre = memoire()
+    local k = cle(w)
+    if m[k] then   -- la plus récemment utilisée passe en bas
+        for i, autre in ipairs(ordre) do
+            if autre == k then table.remove(ordre, i) break end
+        end
+    end
+    m[k] = { (x - mx) / lw, (y - my) / lh, l / lw, h / lh }
+    ordre[#ordre + 1] = k
+    while #ordre > MEMOIRE_MAX do m[table.remove(ordre, 1)] = nil end
     local t = {}
-    for k, v in pairs(m) do t[#t + 1] = string.format("%s=%.4f,%.4f,%.4f,%.4f", k, v[1], v[2], v[3], v[4]) end
+    for _, nom in ipairs(ordre) do
+        local v = m[nom]
+        t[#t + 1] = string.format("%s=%.4f,%.4f,%.4f,%.4f", nom, v[1], v[2], v[3], v[4])
+    end
     ecrire(MEMOIRE, table.concat(t, "\n"))
 end)
 

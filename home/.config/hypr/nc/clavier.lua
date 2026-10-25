@@ -3,6 +3,11 @@
 -- ex. « us » ou « us,fr »). S'il y en a plusieurs, Super + Espace passe de l'une à l'autre.
 local disposition = nc.reglage("CLAVIER_DISPOSITION", "@KB_LAYOUT@")
 if disposition == "systeme" then disposition = "@KB_LAYOUT@" end
+-- Variante (bepo, intl…) : celle du système, ou CLAVIER_VARIANTE (« aucune » pour n'en mettre aucune). La variante du
+-- système va avec la disposition du système : avec une autre disposition choisie, elle ne s'applique pas.
+local variante = nc.reglage("CLAVIER_VARIANTE", disposition == "@KB_LAYOUT@" and "@KB_VARIANT@" or "")
+if variante == "systeme" then variante = "@KB_VARIANT@" end
+if variante == "aucune" or not variante:match("^[%w_,-]*$") then variante = "" end
 local options = "@KB_OPTIONS@"
 if disposition:find(",") then
     if not options:find("grp:") then options = (options ~= "" and options .. "," or "") .. "grp:win_space_toggle" end
@@ -22,7 +27,7 @@ end
 hl.config({
     input = {
         kb_layout  = disposition,
-        kb_variant = "",
+        kb_variant = variante,
         kb_model   = "",
         kb_options = options,
         kb_rules   = "",

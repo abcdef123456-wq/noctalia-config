@@ -348,16 +348,29 @@ hl.config({{
     bord_d = rgb_to_hex(oklch_to_rgb(aL + 0.02, aC, (aH + 14) % 360))
     bord_m = teinte_fond(hex_to_rgb(rgb_to_hex(oklch_to_rgb(aL, aC, aH))), 0.5)
     accent_ile, sur_accent = accent_lisible(primary, c.get("mOnPrimary", bg_hex), bg_hex, fg_hex, dark)
+    # Textes secondaires lisibles sur les cartes (4,5:1), comme l'accent et l'orange : tels quels s'ils y sont déjà.
+    # carte et gris* restent des paliers du fond (ce sont des fonds, pas des textes)
+    carte_rgb = hex_to_rgb(palier(0.035))
+
+    def texte_sur_carte(hexa):
+        rgb = hex_to_rgb(hexa)
+        if contrast(rgb, carte_rgb) >= 4.5:
+            return hexa
+        tL, tC, tH = rgb_to_oklch(rgb)
+        return rgb_to_hex(tone(tL, tC, tH, carte_rgb, 4.5, dark))
+
     ile = {
         "sombre": dark,
         "fond": bg_hex, "texte": fg_hex,
-        "texteSec": c.get("mOnSurfaceVariant", fg_hex), "texteDoux": rgb_to_hex(normal["white"]),
+        "texteSec": texte_sur_carte(c.get("mOnSurfaceVariant", fg_hex)),
+        "texteDoux": texte_sur_carte(rgb_to_hex(normal["white"])),
         "carte": palier(0.035), "carteSurvol": palier(0.05), "gris2": palier(0.065), "gris3": palier(0.11),
         "gris4": palier(0.15), "gris5": palier(0.22),
         "accent": accent_ile, "surAccent": sur_accent,
         "surCouleur": bg_hex if dark else "#ffffff",
         "rouge": rgb_to_hex(normal["red"]), "vert": rgb_to_hex(normal["green"]), "jaune": rgb_to_hex(normal["yellow"]),
         "orange": rgb_to_hex(orange), "bleu": rgb_to_hex(normal["blue"]), "violet": rgb_to_hex(normal["magenta"]),
+        "rose": rgb_to_hex(bright["magenta"]),     # le magenta vif du terminal (color13), déjà à 6:1 sur le fond
         "cyan": rgb_to_hex(normal["cyan"]),
         "fondVert": teinte_fond(normal["green"], 0.22), "fondOrange": teinte_fond(orange, 0.22),
         "bordure": [bord_g, bord_m, bord_d],

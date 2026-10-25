@@ -11,7 +11,7 @@ import Quickshell.Io
 
 FloatingWindow {
     id: fen
-    title: "Connexion JARVIS"
+    title: Reglages.t("Connexion JARVIS", "JARVIS connection")
     visible: false
     implicitWidth: 600; implicitHeight: 740; minimumSize: Qt.size(460, 560)
     color: Couleurs.fond

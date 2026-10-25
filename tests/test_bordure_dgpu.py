@@ -48,6 +48,8 @@ class BordureSurCarteDediee(unittest.TestCase):
                 (dev / "vendor").write_text(c["vendor"] + "\n")
                 if "vram" in c:
                     (dev / "mem_info_vram_total").write_text(str(c["vram"]) + "\n")
+                if "pcie" in c:   # lien PCIe propre (pp_dpm_pcie) : une vraie carte AMD, pas un APU
+                    (dev / "pp_dpm_pcie").write_text(c["pcie"])
                 for prise, etat in c.get("prises", {}).items():
                     p = sysfs / "class/drm" / f"{carte}-{prise}"
                     p.mkdir(parents=True)
@@ -83,7 +85,8 @@ class BordureSurCarteDediee(unittest.TestCase):
         self.assertEqual(self.bordure(self.DEDIEE), "tourne")
         self.assertEqual(self.bordure(self.HYBRIDE, aq="/dev/dri/card0"), "tourne")
         # PC fixe, carte AMD de 8 Gio, écran sur la prise DisplayPort
-        fixe = {"card0": {"vendor": "0x1002", "vram": 8 * 2 ** 30, "prises": {"DP-1": "connected"}}}
+        fixe = {"card0": {"vendor": "0x1002", "vram": 8 * 2 ** 30, "pcie": "0: 2.5GT/s, x8\n1: 16.0GT/s, x16 *\n",
+                          "prises": {"DP-1": "connected"}}}
         self.assertEqual(self.bordure(fixe), "tourne")
 
     def test_batterie_et_economie_figee(self):
@@ -117,6 +120,17 @@ class BordureSurCarteDediee(unittest.TestCase):
         # La marque de nc-ecran existe : le chargement de la config donne tout de suite la version calme
         self.assertEqual(self.bordure(self.DEDIEE, marque=True), "figee")
         self.assertEqual(self.bordure(self.DEDIEE, marque=False), "tourne")
+
+    def test_apu_amd_avec_vram_reservee_figee(self):
+        # APU AMD qui réserve 2 Gio ou plus : pas de lien PCIe propre (fichier absent, ou vide), donc pas une carte dédiée
+        for pcie in ({}, {"pcie": ""}):
+            apu = {"card0": {"vendor": "0x1002", "vram": 4 * 2 ** 30, "prises": {"eDP-1": "connected"}, **pcie}}
+            self.assertEqual(self.bordure(apu), "figee", pcie)
+            self.assertEqual(self.bordure(apu, aq="/dev/dri/card0"), "figee", pcie)
+        # La même quantité de mémoire sur une vraie carte AMD (portable à MUX, écran interne sur la dGPU) : la boucle tourne
+        dgpu = {"card0": {"vendor": "0x1002", "vram": 4 * 2 ** 30, "pcie": "1: 16.0GT/s, x16 *\n",
+                          "prises": {"eDP-1": "connected"}}}
+        self.assertEqual(self.bordure(dgpu), "tourne")
 
     def test_doute_figee(self):
         self.assertEqual(self.bordure({}), "figee")

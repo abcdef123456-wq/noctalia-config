@@ -10,7 +10,7 @@ import Quickshell
 
 FloatingWindow {
     id: fen
-    title: "JARVIS Chat"
+    title: Reglages.t("JARVIS Chat", "JARVIS Chat")
     visible: false
     implicitWidth: 420; implicitHeight: 560; minimumSize: Qt.size(340, 400)
     color: Couleurs.fond

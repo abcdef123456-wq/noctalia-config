@@ -21,7 +21,7 @@ import "AideConfig.js" as Aide
 
 FloatingWindow {
     id: fen
-    title: "Réglages du bureau"
+    title: Reglages.t("Réglages du bureau", "Desktop settings")
     visible: false
     implicitWidth: Gabarit.largeur; implicitHeight: Gabarit.hauteur; minimumSize: Qt.size(Gabarit.largeurMini, Gabarit.hauteurMini)
     color: Couleurs.fond

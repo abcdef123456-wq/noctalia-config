@@ -131,12 +131,17 @@ local function retenu(m)
     return proj.ecrans[cle] or { mode = "etendre", cote = "droite" }
 end
 
+-- Écran interne d'un portable : eDP, ou LVDS / DSI (anciens portables, tablettes)
+local function est_interne(m)
+    return m.name:match("^eDP") ~= nil or m.name:match("^LVDS") ~= nil or m.name:match("^DSI") ~= nil
+end
+
 -- Écran principal : celui du portable, sinon celui retenu par nc-ecrans, sinon le premier
 local function principal()
     if proj.principal then return proj.principal end
     local premier
     for _, m in ipairs(hl.get_monitors()) do
-        if m.name:match("^eDP") or m.name:match("^LVDS") or m.name:match("^DSI") then return m.name end
+        if est_interne(m) then return m.name end
         if not premier and not virtuel(m) then premier = m.name end
     end
     return premier
@@ -150,6 +155,46 @@ local function externe_seul(p)
     return false
 end
 
+-- Hyprland 0.55 : tant que « hyprctl monitors -j » n'a pas répondu, l'échelle ne peut pas être calculée (taille
+-- physique inconnue : 1), d'où un clignotement à chaque rechargement de la config. La dernière échelle calculée avec
+-- les vraies infos est donc gardée par écran dans $XDG_RUNTIME_DIR/nc-ecrans-echelles (« prise<tab>modèle<tab>échelle »,
+-- écrit seulement quand elle change) et reprise au rechargement, si c'est le même écran. Dès 0.56 : inutile.
+local ECHELLES = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-ecrans-echelles"
+local function echelles_gardees()
+    local t = {}
+    local f = io.open(ECHELLES, "r")
+    if not f then return t end
+    for ligne in f:lines() do
+        local nom, desc, e = ligne:match("^([^\t]*)\t([^\t]*)\t([%d.]+)$")
+        if nom and tonumber(e) then t[nom] = { desc = desc, echelle = tonumber(e) } end
+    end
+    f:close()
+    return t
+end
+local function echelle_retenue(m)
+    if m.available_modes ~= nil then return nc.echelle(m) end            -- Hyprland 0.56 : tout est connu
+    local desc = (m.description or ""):gsub("[\t\n]", " ")
+    if not nc.ecrans_infos[m.name] then                                  -- 0.55, infos pas encore arrivées
+        local g = echelles_gardees()[m.name]
+        if g and g.desc == desc and g.echelle >= 1 then return g.echelle end
+        return nc.echelle(m)
+    end
+    local e = nc.echelle(m)
+    local gardees = echelles_gardees()
+    if not (gardees[m.name] and gardees[m.name].desc == desc and gardees[m.name].echelle == e) then
+        gardees[m.name] = { desc = desc, echelle = e }
+        local lignes = {}
+        for nom, g in pairs(gardees) do lignes[#lignes + 1] = nom .. "\t" .. g.desc .. "\t" .. g.echelle end
+        local f = io.open(ECHELLES .. ".tmp", "w")
+        if f then
+            f:write(table.concat(lignes, "\n"), "\n")
+            f:close()
+            os.rename(ECHELLES .. ".tmp", ECHELLES)
+        end
+    end
+    return e
+end
+
 local function regle(m)
     -- Écran réglé à la main dans perso.lua (hl.monitor avec son nom, ou « desc:… ») : on n'y touche plus
     -- Comme Hyprland, « desc:… » désigne un écran dont la description COMMENCE par ce texte
@@ -159,13 +204,13 @@ local function regle(m)
         local d = cle:match("^desc:%s*(.-)%s*$")
         if d and d ~= "" and desc:sub(1, #d) == d then return end
     end
-    local interne = m.name:match("^eDP") ~= nil
+    local interne = est_interne(m)
     local p = principal()
     local spec = {
         output   = m.name,
         mode     = mode_hz(m, interne and nc.profil.hz or "max"),
         position = "auto",
-        scale    = nc.echelle(m),
+        scale    = echelle_retenue(m),
     }
     if virtuel(m) or not p then
         -- écran virtuel (partage de bureau…) : placé automatiquement

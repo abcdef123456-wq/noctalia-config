@@ -58,7 +58,9 @@ function nc.session_sur_carte_dediee()
     local vendeur = (lire("/class/drm/" .. carte .. "/device/vendor") or ""):match("0x%x+")
     if vendeur == "0x10de" then return true end
     local vram = tonumber((lire("/class/drm/" .. carte .. "/device/mem_info_vram_total") or ""):match("%d+"))
-    return (vendeur == "0x1002" or vendeur == "0x8086") and vram ~= nil and vram >= 2 * 1024 ^ 3
+    if not (vram ~= nil and vram >= 2 * 1024 ^ 3) then return false end
+    if vendeur == "0x1002" then return (lire("/class/drm/" .. carte .. "/device/pp_dpm_pcie") or "") ~= "" end
+    return vendeur == "0x8086"
 end
 
 -- Bordure en rotation continue : seulement en Performance sur secteur, et quand la session est rendue par une carte

@@ -182,7 +182,7 @@ MAX_FACE = 10 * 1024 ** 2                          # la photo de profil : 10 Mo 
 # (nc-reglages : VEILLE_*, VERROU, IA_*, NOEUD_*, ALERTES_*, et les textes libres qui vont dans une commande ou une config)
 CLES_LOCALES = re.compile(r"(VEILLE_.*|.*VERROU.*|COUVERCLE.*|IA_.*|NOEUD_.*|ALERTES_.*|CLAUDE_.*|ANTIGRAVITY_.*|"
                           r"GOOGLE_.*|ASSISTANT_.*|CAPTURES_DOSSIER|FONDS_DOSSIER|APPLI_TERMINAL|APPLI_FICHIERS|"
-                          r"SESSION_DEMARRAGE|GPU_REGLE|CLAVIER_DISPOSITION|CURSEUR_THEME|POLICE|TERMINAL_POLICE|"
+                          r"SESSION_DEMARRAGE|GPU_REGLE|CLAVIER_DISPOSITION|CLAVIER_VARIANTE|CURSEUR_THEME|POLICE|TERMINAL_POLICE|"
                           r"METEO_VILLE|MAJ_.*)")
 REGLAGES = ".config/nc/reglages.conf"
 MARGE_LIBRE = 100 * 1024 ** 2

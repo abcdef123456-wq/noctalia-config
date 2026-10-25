@@ -142,7 +142,7 @@ Item {
                         Image { anchors.fill: parent; source: el.image ? "file://" + el.modelData.chemin : ""; fillMode: Image.PreserveAspectCrop
                                 asynchronous: true; sourceSize: Qt.size(220, 140) }
                     }
-                    Texte { visible: el.image; x: 132; anchors.verticalCenter: parent.verticalCenter; text: "Image" + (el.modelData.octets ? " · " + Math.round(el.modelData.octets / 1024) + " Ko" : ""); secondaire: true }
+                    Texte { visible: el.image; x: 132; anchors.verticalCenter: parent.verticalCenter; text: "Image" + (el.modelData.octets ? " · " + Math.round(el.modelData.octets / 1024) + Reglages.t(" Ko", " KB") : ""); secondaire: true }
                     // Actions à droite : déplier (texte long), épingler, coller en brut, supprimer, puis l'état copié
                     Row {
                         anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; spacing: 2

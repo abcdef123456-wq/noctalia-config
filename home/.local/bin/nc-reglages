@@ -307,8 +307,10 @@ class R:
             return v.replace(HOME, "~", 1)
         if self.genre == "texte":
             # Mots anglais acceptés pour les valeurs gardées en français
-            if self.cle == "CLAVIER_DISPOSITION" and v.lower() == "system":
+            if self.cle in ("CLAVIER_DISPOSITION", "CLAVIER_VARIANTE") and v.lower() == "system":
                 v = "systeme"
+            if self.cle == "CLAVIER_VARIANTE" and v.lower() == "none":
+                v = "aucune"
             if self.cle == "VERROU_MESSAGE" and v.lower() == "none":
                 v = "aucun"
             if self.cle == "CLAVIER_DISPOSITION" and v != "systeme":
@@ -316,10 +318,31 @@ class R:
                         any(not os.path.exists(f"/usr/share/X11/xkb/symbols/{x}") for x in v.split(",")):
                     raise ValueError(T("codes de disposition séparés par des virgules (ex. us, fr, us,fr), ou systeme",
                                        "comma-separated layout codes (e.g. us, fr, us,fr), or system"))
+            if self.cle == "CLAVIER_VARIANTE" and v not in ("systeme", "aucune"):
+                if not re.fullmatch(r"[A-Za-z0-9_-]*(,[A-Za-z0-9_-]*)*", v) or not variantes_xkb_connues(v):
+                    raise ValueError(T("codes de variante séparés par des virgules, dans l'ordre des dispositions (ex. bepo, intl, ,bepo), "
+                                       "systeme ou aucune",
+                                       "comma-separated variant codes, in layout order (e.g. bepo, intl, ,bepo), system or none"))
             if not v:
                 raise ValueError(T("une valeur", "a value"))
             return v
         return v
+
+
+def variantes_xkb_connues(v):
+    """Chaque variante existe dans la liste officielle xkb (si elle est lisible) ; sinon on se fie au format."""
+    try:
+        with open("/usr/share/X11/xkb/rules/evdev.lst", encoding="utf-8", errors="replace") as f:
+            lignes = f.read().splitlines()
+    except OSError:
+        return True
+    connues, dedans = set(), False
+    for l in lignes:
+        if l.startswith("!"):
+            dedans = l.startswith("! variant")
+        elif dedans and l.split():
+            connues.add(l.split()[0])
+    return all(x in connues for x in v.split(",") if x)
 
 
 def animations_bouton():
@@ -834,6 +857,9 @@ REGLAGES = [
     R("CLAVIER_DISPOSITION", "Clavier et souris", L("Disposition du clavier", "Keyboard layout"), "texte", "systeme",
       L("Codes XKB : us, fr, us,fr… Avec plusieurs, Super + Espace passe de l'une à l'autre.",
         "XKB codes: us, fr, us,fr… With several, Super + Space switches between them."), groupe="hypr"),
+    R("CLAVIER_VARIANTE", "Clavier et souris", L("Variante du clavier", "Keyboard variant"), "texte", "systeme",
+      L("Codes XKB : bepo, intl… dans l'ordre des dispositions (ex. ,bepo pour us,fr). systeme : celle du PC ; aucune : sans variante.",
+        "XKB codes: bepo, intl… in layout order (e.g. ,bepo for us,fr). system: the PC's own; none: no variant."), groupe="hypr"),
     R("CLAVIER_REPETITION", "Clavier et souris", L("Vitesse de répétition des touches", "Key repeat rate"), "entier", "35",
       mini=10, maxi=80, unite="/s", groupe="hypr"),
     R("CLAVIER_DELAI", "Clavier et souris", L("Délai avant répétition", "Delay before repeat"), "entier", "300",

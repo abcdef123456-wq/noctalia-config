@@ -586,20 +586,59 @@ kb_valide() { # kb_valide "fr,us" : vrai si chaque disposition existe
     awk -v l="$l" '/^! layout/{f=1;next} /^!/{f=0} f && $1==l {t=1} END{exit !t}' "$XKB_LST" || return 1
   done
 }
-KBL=""
+kb_variante_valide() { # kb_variante_valide "fr,us" ",intl" : vrai si chaque variante existe pour sa disposition (vide = rien)
+  local -a la va; local i
+  IFS=, read -r -a la <<<"$1"; IFS=, read -r -a va <<<"$2"
+  [[ "$2" =~ ^[A-Za-z0-9_-]*(,[A-Za-z0-9_-]*)*$ ]] || return 1
+  [ "${#va[@]}" -le "${#la[@]}" ] || return 1
+  [ -r "$XKB_LST" ] || return 0
+  for i in "${!va[@]}"; do
+    [ -n "${va[$i]}" ] || continue
+    awk -v l="${la[$i]}" -v v="${va[$i]}" '/^! variant/{f=1;next} /^!/{f=0} f && $1==v && $2==l":" {t=1} END{exit !t}' "$XKB_LST" || return 1
+  done
+}
+kb_options_valides() { # kb_options_valides "ctrl:nocaps,compose:rctrl" : vrai si chaque option existe
+  local o
+  [[ "$1" =~ ^[A-Za-z0-9_:-]+(,[A-Za-z0-9_:-]+)*$ ]] || return 1
+  [ -r "$XKB_LST" ] || return 0
+  for o in ${1//,/ }; do
+    awk -v o="$o" '/^! option/{f=1;next} /^!/{f=0} f && $1==o {t=1} END{exit !t}' "$XKB_LST" || return 1
+  done
+}
+# Variante (bépo, intl…) et options (ctrl:nocaps…) : de la même source que la disposition retenue, sinon perdues
+kb_cle() { # kb_cle FICHIER CLE : valeur de CLE=… dans un fichier (guillemets retirés)
+  sed -n "s/^$2=\"\{0,1\}\([^\"]*\)\"\{0,1\}.*/\1/p" "$1" 2>/dev/null | head -1 || true
+}
+KBL=""; KBV=""; KBO=""
 info "$(t "Détection du clavier…" "Detecting keyboard…")"
 lc_etat="$(sonder 5s 'localectl status' localectl status || true)"
-for kb in \
-  "$(sed -n 's/.*X11 Layout: *//p' <<<"$lc_etat" | head -1)" \
-  "$(sed -n 's/^XKBLAYOUT="\{0,1\}\([^"]*\)"\{0,1\}/\1/p' /etc/default/keyboard 2>/dev/null | head -1 || true)" \
-  "$(sed -n 's/.*VC Keymap: *//p' <<<"$lc_etat" | head -1 | sed -E 's/[-_].*//')" \
-  "$(echo "${LANG:-}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p' | tr '[:upper:]' '[:lower:]')"; do
-  kb="$(echo "$kb" | tr -d ' ')"
-  if kb_valide "$kb"; then KBL="$kb"; break; fi
+# Chaque source : disposition, variante, options (les deux dernières vides pour la console et la langue)
+kb_src_lc="$(sed -n 's/.*X11 Layout: *//p' <<<"$lc_etat" | head -1)"
+kb_src_deb="$(kb_cle /etc/default/keyboard XKBLAYOUT)"
+kb_src_vc="$(kb_cle /etc/vconsole.conf XKBLAYOUT)"
+for kbi in 1 2 3 4 5; do
+  kv=""; ko=""
+  case $kbi in
+    1) kb="$kb_src_lc"
+       kv="$(sed -n 's/.*X11 Variant: *//p' <<<"$lc_etat" | head -1)"; ko="$(sed -n 's/.*X11 Options: *//p' <<<"$lc_etat" | head -1)" ;;
+    2) kb="$kb_src_deb"; kv="$(kb_cle /etc/default/keyboard XKBVARIANT)"; ko="$(kb_cle /etc/default/keyboard XKBOPTIONS)" ;;
+    3) kb="$kb_src_vc"; kv="$(kb_cle /etc/vconsole.conf XKBVARIANT)"; ko="$(kb_cle /etc/vconsole.conf XKBOPTIONS)" ;;
+    4) kb="$(sed -n 's/.*VC Keymap: *//p' <<<"$lc_etat" | head -1 | sed -E 's/[-_].*//')" ;;
+    5) kb="$(echo "${LANG:-}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p' | tr '[:upper:]' '[:lower:]')" ;;
+  esac
+  kb="$(echo "$kb" | tr -d ' ')"; kv="$(echo "$kv" | tr -d ' ')"; ko="$(echo "$ko" | tr -d ' ')"
+  [ "$kv" = "n/a" ] && kv=""; [ "$ko" = "n/a" ] && ko=""
+  if kb_valide "$kb"; then
+    KBL="$kb"
+    # Une variante ou une option inconnue donnerait une erreur dans Hyprland : on les laisse de côté
+    if [ -n "$kv" ] && kb_variante_valide "$kb" "$kv"; then KBV="$kv"; fi
+    if [ -n "$ko" ] && kb_options_valides "$ko"; then KBO="$ko"; fi
+    break
+  fi
 done
 KBL="${KBL:-us}"
-KBO=""; case "$KBL" in *,*) KBO="grp:win_space_toggle" ;; esac
-ok "$(t "Clavier : $KBL" "Keyboard: $KBL")"
+case "$KBL" in *,*) case "$KBO" in *grp:*) ;; *) KBO="${KBO:+$KBO,}grp:win_space_toggle" ;; esac ;; esac
+ok "$(t "Clavier : $KBL${KBV:+ ($KBV)}" "Keyboard: $KBL${KBV:+ ($KBV)}")"
 # Navigateur par défaut (épinglé dans la recherche et le dock)
 info "$(t "Détection du navigateur par défaut…" "Detecting default browser…")"
 BROWSER="$(sonder 5s 'xdg-settings' xdg-settings get default-web-browser | sed 's/\.desktop$//' | head -1 || true)"
@@ -895,7 +934,7 @@ while IFS= read -r -d '' src; do
   # assistant.conf contient la clé privée : aucun modèle du dépôt ne doit remplacer ce fichier personnel.
   case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*|.config/nc/assistant.conf) continue ;; esac   # étapes 3 et 3b
   if grep -Iq . "$src" 2>/dev/null; then
-    sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_OPTIONS@|$KBO|g" \
+    sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_VARIANT@|$KBV|g" -e "s|@KB_OPTIONS@|$KBO|g" \
         -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
         -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@LCY5@|$LCY5|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" -e "s|@NOTIF_NOCTALIA@|$NOTIF_NOCTALIA|g" -e "s|@NOTIF_WIDGET@|$NOTIF_WIDGET|g" -e "s|@PLUGIN_ILE@|$PLUGIN_ILE|g" "$src" > "$tmp"
   else

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # export.sh : met à jour le dépôt avec la config actuelle de ce PC (à lancer sur la machine de référence).
 # Ce qui est propre à la machine devient un repère que install.sh remplit sur chaque PC :
-#   @HOME@  dossier personnel      @MONITOR@  écran principal      @KB_LAYOUT@ / @KB_OPTIONS@  clavier
+#   @HOME@  dossier personnel      @MONITOR@  écran principal      @KB_LAYOUT@ / @KB_VARIANT@ / @KB_OPTIONS@  clavier
 #   @BROWSER@  navigateur par défaut      @LCX@ @LCY1@..@LCY4@  position des éléments de l'écran de verrouillage
 #   @DISTRO_LOGO@  logo de la barre       @POLKIT@  agent des demandes de mot de passe
 # Aucun secret n'est copié (liste blanche de fichiers). Contrôle final : rien qui ressemble à un secret.
@@ -365,7 +365,7 @@ done < <(find home -type f -print0)
 python3 -I - "$REPO/home" home "$mon" <<'EOF'
 import difflib, re, sys
 from pathlib import Path
-REPERES = re.compile(r"@(MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
+REPERES = re.compile(r"@(MONITOR|KB_LAYOUT|KB_VARIANT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
                      r"|ILE_CENTRE|NOTIF_NOCTALIA|NOTIF_WIDGET|PLUGIN_ILE)@")
 NOMBRE = r"[0-9]+(?:\.[0-9]+)?"                         # awk « %.1f » dans install.sh
 DISPOSITION = r"[A-Za-z0-9_()-]+"
@@ -373,7 +373,8 @@ DISPOSITION = r"[A-Za-z0-9_()-]+"
 JOKERS = {
     "MONITOR": r"[A-Za-z0-9._-]+",                     # eDP-1, HDMI-A-1, DP-2…
     "KB_LAYOUT": DISPOSITION + r"(?:," + DISPOSITION + r")*",   # fr, us,fr
-    "KB_OPTIONS": r"(?:|grp:win_space_toggle)",
+    "KB_VARIANT": r"[A-Za-z0-9_,-]*",                  # bepo, intl, ,bepo, ou rien
+    "KB_OPTIONS": r"[A-Za-z0-9_:,-]*",                 # ctrl:nocaps,grp:win_space_toggle, ou rien
     "BROWSER": r"[A-Za-z0-9._-]+",                     # identifiant d'appli, sans « .desktop »
     "LCX": NOMBRE, "LCY1": NOMBRE, "LCY2": NOMBRE, "LCY3": NOMBRE, "LCY4": NOMBRE, "LCY5": NOMBRE,
     "DISTRO_LOGO": r"[^\",\[\]]*",                     # un chemin, ou rien
@@ -457,7 +458,8 @@ EOF
 sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/
   s/^(\s*local disposition = nc\.reglage\("CLAVIER_DISPOSITION", )"[^"]*"\)/\1"@KB_LAYOUT@")/
   s/^(\s*if disposition == "systeme" then disposition = )"[^"]*"/\1"@KB_LAYOUT@"/
-  s/^(\s*local options = )"[^"]*"/\1"@KB_OPTIONS@"/' home/.config/hypr/nc/clavier.lua
+  s/^(\s*local options = )"[^"]*"/\1"@KB_OPTIONS@"/
+  s/^(\s*if variante == "systeme" then variante = )"[^"]*"/\1"@KB_VARIANT@"/' home/.config/hypr/nc/clavier.lua
 
 # Navigateur : le navigateur de ce PC devient celui de la machine cible (les favoris du dépôt sont reposés par
 # l'alignement ci-dessus) ; applis personnelles retirées des favoris
@@ -560,7 +562,7 @@ import os, re, sys
 from collections import Counter
 from pathlib import Path
 en = os.environ.get("NC_LANGUE") == "en"
-REPERES = re.compile(r"@(?:MONITOR|KB_LAYOUT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
+REPERES = re.compile(r"@(?:MONITOR|KB_LAYOUT|KB_VARIANT|KB_OPTIONS|BROWSER|LCX|LCY[1-5]|DISTRO_LOGO|POLKIT|QT_STYLE|ICON_THEME"
                      r"|ILE_CENTRE|NOTIF_NOCTALIA|NOTIF_WIDGET|PLUGIN_ILE)@")
 depot, export = Path(sys.argv[1]), Path(sys.argv[2])
 def reperes(f):
