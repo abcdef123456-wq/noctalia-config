@@ -991,6 +991,10 @@ PYEOF
 # Icônes sobres du terminal et des fichiers, aux couleurs du thème (remplacent le chat de kitty et le dauphin de Dolphin)
 "$HOME/.local/bin/nc-icones" >/dev/null 2>&1 || true
 
+# Navigateurs Chromium par XWayland (glisser un onglet entre fenêtres) : seulement si le réglage NAVIGATEURS_XWAYLAND vaut oui
+# (nc-reglages → Fenêtres, non par défaut) ; sinon retire les copies de lanceurs que nc-navigateurs avait posées
+"$HOME/.local/bin/nc-navigateurs" appliquer >/dev/null 2>&1 || true
+
 # Tes réglages Hyprland personnels : fichier créé une seule fois avec des exemples, jamais remplacé ensuite
 PERSO="$HOME/.config/hypr/perso.lua"
 if [ ! -e "$PERSO" ]; then

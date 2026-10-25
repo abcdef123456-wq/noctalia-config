@@ -101,6 +101,8 @@ HOME_FILES=(
   .local/bin/nc-alertes
   .local/bin/nc-fenetre
   .local/bin/nc-firefox
+  .local/bin/nc-chromium
+  .local/bin/nc-navigateurs
   .local/bin/nc-logiciels
   .local/bin/nc-aide-config
   .local/bin/nc-qs-capture

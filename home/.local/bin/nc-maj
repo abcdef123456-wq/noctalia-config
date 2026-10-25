@@ -253,6 +253,10 @@ restaurer=0; for a in "$@"; do [ "$a" = --restore ] && restaurer=1; done
 if [ "$code" = 10 ]; then
   echo "$(t "Installation annulée : la nouvelle version est téléchargée, pas installée. Relance nc-maj quand tu veux." "Install cancelled: the new version is downloaded, not installed. Run nc-update again whenever you like.")"
 fi
+# Copies des lanceurs Chromium (réglage NAVIGATEURS_XWAYLAND, non par défaut) : refaites après la mise à jour, ou retirées
+if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ -x "$HOME/.local/bin/nc-navigateurs" ]; then
+  "$HOME/.local/bin/nc-navigateurs" appliquer >/dev/null 2>&1 || true
+fi
 # Rapport de l'IA (si elle est permise et joignable) : ce qui a changé, en clair, dans les réglages → Mises à jour
 if [ "$code" = 0 ] && [ "$restaurer" = 0 ] && [ "$base" != "$apres" ] && [ "$lineaire" = 1 ] && [ -x "$HOME/.local/bin/nc-ia" ]; then
   setsid "$HOME/.local/bin/nc-ia" rapport-maj config "$base" "$apres" >/dev/null 2>&1 < /dev/null &

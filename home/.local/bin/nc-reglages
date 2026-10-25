@@ -612,6 +612,20 @@ REGLAGES = [
     R("DOCK_POSITION", "Barre et dock", L("Position du dock", "Dock position"), "choix", "bottom", "",
       [("bottom", L("En bas", "Bottom")), ("left", L("À gauche", "Left")), ("right", L("À droite", "Right"))], groupe="noctalia"),
     # Fenêtres
+    R("NAVIGATEURS_XWAYLAND", "Fenêtres", L("Glisser les onglets entre fenêtres (Chrome, Brave…)", "Drag tabs between windows (Chrome, Brave…)"),
+      "ouinon", "non",
+      L("Oui : Chrome, Brave, Chromium, Vivaldi, Edge et Opera se lancent par XWayland, ce qui permet de glisser un onglet "
+        "dans une autre fenêtre (Hyprland n'a pas encore le protocole dont ils ont besoin en Wayland natif). Des copies de leurs "
+        "lanceurs sont posées dans ~/.local/share/applications. Inconvénients : une seule échelle pour tous les écrans (flou ou "
+        "minuscule sur un 2e écran d'une autre échelle), plus de gestes du pavé tactile, des lanceurs copiés qui peuvent vieillir "
+        "(refaits à chaque mise à jour), un comportement différent du reste du système. Non : tout est retiré. "
+        "Ferme tout le navigateur et relance-le après un changement.",
+        "Yes: Chrome, Brave, Chromium, Vivaldi, Edge and Opera start through XWayland, which lets you drag a tab into another "
+        "window (Hyprland does not have the protocol they need in native Wayland yet). Copies of their launchers are put in "
+        "~/.local/share/applications. Drawbacks: a single scale for all screens (blurry or tiny on a 2nd screen with another "
+        "scale), no touchpad gestures, copied launchers that can get old (redone at every update), behavior different from the "
+        "rest of the system. No: everything is removed. Close the whole browser and start it again after a change."),
+      groupe="navigateurs"),
     R("FENETRES_ESPACE", "Fenêtres", L("Espace entre les fenêtres", "Gap between windows"), "entier", "4",
       mini=0, maxi=40, unite="px", groupe="hypr"),
     R("SESSION_DEMARRAGE", "Fenêtres", L("Session à l'ouverture", "Session at login"), "choix", "aucune",
@@ -2132,6 +2146,9 @@ def appliquer(groupes, vals=None):
                 subprocess.run([ff, "extension", quoi], capture_output=True)
             else:
                 subprocess.run([ff, "desinstaller"], capture_output=True)      # retire aussi l'extension
+        elif g == "navigateurs":
+            # Copies des lanceurs Chromium (XWayland) posées ou retirées selon le réglage ; le navigateur est à relancer
+            subprocess.run([os.path.join(HOME, ".local/bin/nc-navigateurs"), "appliquer"], capture_output=True)
         elif g == "langue":
             # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
             subprocess.run(["hyprctl", "reload"], capture_output=True)

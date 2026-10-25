@@ -301,6 +301,12 @@ La connexion se règle dans une fenêtre (**Connexion JARVIS** : « Configurer l
 réglages, ou `nc-assistant configurer`), avec un bouton « Tester la connexion ». `nc-assistant verifier` (ou
 **nc-reglages → Agents IA → Tester l'assistant distant**) diagnostique réseau, clé, certificat TLS et état du runner.
 
+**Glisser un onglet entre fenêtres (Chrome, Brave, Chromium, Vivaldi, Edge, Opera)** : Hyprland n'a pas encore le protocole
+`xdg_toplevel_drag_v1` dont ces navigateurs ont besoin en Wayland natif. Le réglage « Glisser les onglets entre fenêtres »
+(nc-reglages → Fenêtres, **désactivé par défaut**) les lance par XWayland (`nc-chromium`) avec des copies de leurs lanceurs
+(`nc-navigateurs`, marquées `X-NC-Chromium=true` ; les tiens ne sont jamais touchés). Inconvénients : une seule échelle pour tous les
+écrans, plus de gestes du pavé tactile. Ferme tout le navigateur et relance-le après un changement.
+
 **Firefox** (étape facultative de `install.sh`, réglage « Firefox au style de l’île » dans nc-reglages → Apparence,
 ou `nc-firefox installer`) : les préférences du dépôt vont dans ton
 profil (`user.js` : barres compactes, sélecteur de fichiers du bureau, vidéo décodée par la carte graphique, session

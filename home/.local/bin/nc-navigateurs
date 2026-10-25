@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""nc-navigateurs : glisser un onglet d'une fenêtre à l'autre dans Chrome, Brave, Chromium, Vivaldi, Edge, Opera.
+
+  nc-navigateurs installer   (aussi : appliquer) suit le réglage NAVIGATEURS_XWAYLAND (nc-reglages → Fenêtres) :
+                             « oui » : pose dans ~/.local/share/applications une copie du .desktop de chaque navigateur
+                             Chromium installé, dont chaque Exec= passe par nc-chromium (XWayland) ; « non » (défaut) :
+                             retire ces copies, sans en créer.
+  nc-navigateurs retirer     retire les copies posées par nc-navigateurs, quel que soit le réglage.
+
+Chaque copie porte la marque X-NC-Chromium=true : un .desktop à toi, sans la marque, n'est jamais écrasé ni retiré.
+Les copies sont refaites à chaque nc-maj. Relance le navigateur (ferme toutes ses fenêtres) pour que ça change.
+"""
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+
+HOME = Path.home()
+MARQUE = "X-NC-Chromium=true"
+NOM = re.compile(r"^(google-chrome|chromium|brave|vivaldi|microsoft-edge|opera|ungoogled-chromium)[a-z0-9_-]*\.desktop$"
+                 r"|^(com\.google\.Chrome|org\.chromium\.Chromium|com\.brave\.Browser|com\.vivaldi\.Vivaldi"
+                 r"|com\.microsoft\.Edge|com\.opera\.Opera|io\.github\.ungoogled_software\.ungoogled_chromium)\.desktop$")
+
+
+def reglage(cle, defaut):
+    base = os.environ.get("XDG_CONFIG_HOME") or str(HOME / ".config")
+    try:
+        for l in (Path(base) / "nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+            if l.startswith(cle + "="):
+                return l.split("=", 1)[1].strip().strip('"') or defaut
+    except OSError:
+        pass
+    return defaut
+
+
+def donnees():
+    return Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share")
+
+
+def dossier_perso():
+    return donnees() / "applications"
+
+
+def sources():
+    """Dossiers d'applications du système et de flatpak, dans l'ordre de priorité (jamais celui de l'utilisateur)."""
+    dirs = [Path(d) / "applications" for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if d]
+    dirs += [Path("/var/lib/flatpak/exports/share/applications"), donnees() / "flatpak/exports/share/applications"]
+    perso = dossier_perso().resolve()
+    vus, res = set(), []
+    for d in dirs:
+        try:
+            r = d.resolve()
+        except OSError:
+            continue
+        if r != perso and r not in vus and d.is_dir():
+            vus.add(r)
+            res.append(d)
+    return res
+
+
+def marque(f):
+    try:
+        return re.search(r"(?m)^" + re.escape(MARQUE) + r"\s*$", f.read_text(encoding="utf-8", errors="replace")) is not None
+    except OSError:
+        return False
+
+
+def enveloppe(texte, nc):
+    """Le .desktop avec chaque Exec= (principal et [Desktop Action …]) passé par nc-chromium, et la marque."""
+    sortie, posee = [], False
+    for l in texte.splitlines(keepends=True):
+        m = re.match(r"^Exec=(.*?)(\r?\n?)$", l)
+        if m:
+            l = "Exec=%s %s%s" % (nc, m.group(1), m.group(2))
+        sortie.append(l)
+        if not posee and l.strip() == "[Desktop Entry]":
+            sortie.append(MARQUE + "\n")
+            posee = True
+    return "".join(sortie) if posee else None
+
+
+def retirer():
+    n = 0
+    d = dossier_perso()
+    if d.is_dir():
+        for f in sorted(d.glob("*.desktop")):
+            if f.is_file() and marque(f):
+                f.unlink()
+                n += 1
+    return n
+
+
+def installer():
+    perso = dossier_perso()
+    if reglage("NAVIGATEURS_XWAYLAND", "non") != "oui":
+        return retirer()
+    nc = str(HOME / ".local/bin/nc-chromium")
+    if " " in nc:
+        nc = '"%s"' % nc
+    voulus = {}
+    for d in sources():
+        for f in sorted(d.glob("*.desktop")):
+            if f.name not in voulus and NOM.match(f.name):
+                try:
+                    t = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if MARQUE in t or not re.search(r"(?m)^Exec=", t):
+                    continue
+                e = enveloppe(t, nc)
+                if e:
+                    voulus[f.name] = e
+    perso.mkdir(parents=True, exist_ok=True)
+    for f in sorted(perso.glob("*.desktop")):          # copies dont le navigateur n'est plus là
+        if f.name not in voulus and f.is_file() and marque(f):
+            f.unlink()
+    n = 0
+    for nom, e in sorted(voulus.items()):
+        cible = perso / nom
+        if cible.exists() and not marque(cible):
+            continue                                    # un .desktop à l'utilisateur : jamais touché
+        if not cible.exists() or cible.read_text(encoding="utf-8", errors="replace") != e:
+            cible.write_text(e, encoding="utf-8")
+        n += 1
+    return n
+
+
+def main(args):
+    quoi = args[0] if args else ""
+    if quoi in ("installer", "appliquer", "install", "apply"):
+        n = installer()
+    elif quoi in ("retirer", "remove"):
+        n = retirer()
+    else:
+        print(__doc__.strip())
+        return 0 if quoi in ("-h", "--help", "aide", "help") else 1
+    if shutil.which("update-desktop-database") and dossier_perso().is_dir():
+        subprocess.run(["update-desktop-database", str(dossier_perso())], capture_output=True)
+    print("%d fichier(s)" % n)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
