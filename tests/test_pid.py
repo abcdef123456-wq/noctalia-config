@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -190,6 +191,14 @@ class TestShell(unittest.TestCase):
             self.assertEqual(lire(f"{pid}\n1234\nv.mp4\n"), "0", "ancien format : sleep n'est pas wf-recorder")
             self.assertEqual(lire(f"{zombie(self)}\n1234\nv.mp4\n"), "0", "zombie")
             self.assertEqual(lire(""), "0")
+            # nc-pid absent (installation partielle) : le repli kill -0 sert, même pour un sh POSIX (dash), où un « . »
+            # sur un fichier absent quitterait le shell
+            (Path(d) / "nc-video").write_text(f"{pid}\n1234\nv.mp4\n{debut}\n")
+            for sh in [["sh"], ["bash", "--posix"]] + ([["dash"]] if shutil.which("dash") else []):
+                with self.subTest(shell=sh[0]):
+                    r = subprocess.run(sh + ["-c", script, "sh", str(Path(d) / "absent")], capture_output=True, text=True,
+                                       env=dict(os.environ, XDG_RUNTIME_DIR=d), timeout=20)
+                    self.assertEqual(r.stdout.strip(), "1234", r.stderr)
 
 
 if __name__ == "__main__":
