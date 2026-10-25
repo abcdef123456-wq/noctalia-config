@@ -54,6 +54,25 @@ class Capture(unittest.TestCase):
         self.assertEqual(Path(chemin).stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.capturer("application/x-autre"), "", "type inconnu ignoré")
 
+    def test_coupe_en_caracteres_jamais_au_milieu_d_un_accent(self):
+        # 3999 « a » puis des « é » (2 octets) : la limite de 4 000 octets tomberait au milieu d'un « é »
+        texte = "a" * 3999 + "é" * 50
+        sortie = self.capturer("text/plain", texte)
+        sortie.encode("utf-8")                                   # UTF-8 valide (le test échoue sinon)
+        self.assertEqual(sortie, "T:" + "a" * 3999 + "é" + "\n")  # 4 000 caractères exactement
+        sortie = self.capturer("text/plain", "é" * 5000)
+        self.assertEqual(sortie, "T:" + "é" * 4000 + "\n")
+
+    def test_coupe_en_caracteres_sous_dash(self):
+        dash = shutil.which("dash")
+        if not dash:
+            self.skipTest("dash absent")
+        env = dict(HOME=str(self.home), XDG_STATE_HOME=str(self.home / "state"), NC_ILE_MEMO=str(BIN / "nc-ile-memo"),
+                   NC_TEST_TYPES="text/plain", NC_TEST_TEXTE="a" * 3999 + "éé", NC_TEST_PNG=str(self.home / "image.png"),
+                   PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin")
+        r = subprocess.run([dash, str(BIN / "nc-presse-capture")], env=env, capture_output=True, timeout=10)
+        self.assertEqual(r.stdout.decode("utf-8"), "T:" + "a" * 3999 + "é\n")
+
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Page(unittest.TestCase):

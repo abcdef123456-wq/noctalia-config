@@ -43,6 +43,10 @@ arreter() {
 }
 
 case "${1:-}" in arreter|stop) arreter; exit 0 ;; esac
+# Un seul démarrage à la fois : verrou tenu pendant le choix de la zone et le lancement. Sans lui, deux appuis rapides
+# (le 2e pendant que slurp attend) lançaient deux enregistrements, le 1er ne pouvant plus être arrêté (l'état n'est
+# écrit qu'à la fin). Le 2e appui ne fait rien ; wf-recorder, lui, ne garde pas le verrou (9>&-). flock : util-linux.
+command -v flock >/dev/null 2>&1 && { exec 9>"$etat.lock"; } 2>/dev/null && { flock -n 9 || exit 0; }
 # Déjà en cours : le même raccourci arrête
 if en_cours; then arreter; exit 0; fi
 rm -f "$etat"
@@ -128,7 +132,7 @@ choisir_encodeur() {
 }
 
 lancer() {
-  setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" "$@" >/dev/null 2>"$etat.log" < /dev/null &
+  setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" "$@" >/dev/null 2>"$etat.log" < /dev/null 9>&- &
   pid=$!
   sleep 0.5
   nc_pid_notre "$pid"
@@ -144,3 +148,14 @@ if ! nc_pid_notre "$pid"; then
   exit 1
 fi
 printf '%s\n%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" "$(nc_pid_debut "$pid" 2>/dev/null)" > "$etat"
+# Un encodeur qui meurt un peu plus tard (carte qui refuse après l'ouverture, pilote) : revérifié vers 2 s, en arrière-plan
+# pour ne pas retenir le raccourci. S'il est mort : l'état (pid mort) est effacé et une notification le dit.
+demarre="$(nc_pid_debut "$pid" 2>/dev/null)"
+(
+  sleep 1.5
+  nc_pid_notre "$pid" "$demarre" && exit 0
+  [ "$(sed -n 1p "$etat" 2>/dev/null)" = "$pid" ] || exit 0   # déjà arrêté par l'utilisateur (état effacé) : rien à dire
+  rm -f "$etat"
+  dire "$(t "L'enregistrement s'est arrêté" "Recording stopped")" "$(tail -1 "$etat.log" 2>/dev/null)"
+) >/dev/null 2>&1 9>&- &
+disown 2>/dev/null || true

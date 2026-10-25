@@ -14,11 +14,23 @@ unset MALLOC_CONF
 state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-gpu-default"
 jamais="kitty foot alacritty wezterm ghostty konsole gnome-terminal ptyxis xterm nautilus thunar dolphin nemo pcmanfm nc-reglages"
 v="$(sed -n 's/^GPU_JAMAIS_RTX=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1)"; v="${v#\"}"; v="${v%\"}"
-[ -n "$v" ] && jamais="${v//,/ }"
-# Le programme lancé : le premier mot qui n'est ni « env » ni une affectation VAR=valeur, sans son dossier
-prog=""
+# La ligne existe : sa valeur remplace la liste par défaut, même vide (aucune exception)
+grep -q '^GPU_JAMAIS_RTX=' "$HOME/.config/nc/reglages.conf" 2>/dev/null && jamais="${v//,/ }"
+# Le programme lancé : le premier mot qui n'est ni « env » (et ses options) ni une affectation VAR=valeur,
+# sans son dossier
+prog=""; apres_env=0; saute=0
 for a in "$@"; do
-  case "$a" in env|*=*) continue ;; esac
+  if [ "$saute" = 1 ]; then saute=0; continue; fi      # l'argument d'une option d'env (-u VAR, -C DIR)
+  if [ "$apres_env" = 1 ]; then
+    case "$a" in
+      -u|--unset|-C|--chdir|-S|--split-string) saute=1; continue ;;
+      -*|*=*) continue ;;                               # -i, -, --, --unset=VAR, -uVAR, VAR=valeur…
+    esac
+  fi
+  case "$a" in
+    env|*/env) apres_env=1; continue ;;
+    *=*) continue ;;
+  esac
   prog="${a##*/}"; break
 done
 for j in $jamais; do [ "$prog" = "$j" ] && exec "$@"; done

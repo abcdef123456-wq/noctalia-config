@@ -57,6 +57,10 @@ case "$action" in
     n=0
     while IFS= read -r nom; do
       [ -n "$nom" ] || continue
+      # Le nom est mis entre '…' dans du Lua : un nom venu d'un périphérique (USB) avec une apostrophe, une barre
+      # oblique inverse ou un caractère de contrôle est laissé de côté (pas de Lua injecté, pas de commande cassée).
+      # « / » reste permis : « synps/2-synaptics-touchpad », le pavé PS/2 courant
+      case "$nom" in *"'"*|*\\*|*[[:cntrl:]]*) continue ;; esac
       hyprctl eval "hl.device({ name = '$nom', enabled = $([ "$coupe" = 1 ] && echo false || echo true) })" >/dev/null
       n=$((n + 1))
     done <<< "$paves"

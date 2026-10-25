@@ -22,7 +22,7 @@ SEP = "\x1f"
 
 # Outils de base dont nc-video a besoin (liens vers les vrais), et rien d'autre
 OUTILS = ("bash", "sh", "sed", "tail", "tr", "mkdir", "date", "setsid", "sleep", "cat", "readlink", "timeout", "grep",
-          "head", "seq", "rm", "env")
+          "head", "seq", "rm", "env", "flock", "cut")
 
 PROFILS_OK = """vainfo: VA-API version: 1.22 (libva 2.22.0)
 vainfo: Driver version: Mesa Gallium driver for AMD Radeon 610M
@@ -286,6 +286,56 @@ class VideoEncodeur(unittest.TestCase):
         self.assertIn("--audio", appels[0])
         self.assertEqual(self.encodeur(appels[0]), ["-c", "h264_vaapi", "-d", "/dev/dri/renderD128"])
 
+    # ── Audit E4 : deux appuis pendant slurp, encodeur qui meurt un peu après le départ ──
+    def commande(self, **env_plus):
+        env = dict(HOME=str(self.home), PATH=str(self.faux), NC_LANGUE="fr", JOURNAL=str(self.journal),
+                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   NC_SYSFS=str(self.sysfs), NC_TEST_WF=str(self.wf))
+        env.update(env_plus)
+        return subprocess.Popen([shutil.which("bash"), str(SCRIPT)], env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True)
+
+    def test_deux_appuis_pendant_slurp_un_seul_enregistrement(self):
+        self.ecrire_faux("slurp", 'sleep 1; echo "0,0 2560x1600"')
+        premier = self.commande()
+        time.sleep(0.3)                      # le 1er attend toujours la zone
+        second = self.commande()
+        for p in (premier, second):
+            sortie = p.communicate(timeout=20)
+            self.assertEqual(p.returncode, 0, sortie)
+        appels = [l for l in self.wf.read_text().splitlines() if l]
+        self.assertEqual(len(appels), 1, appels)
+        pid = int((self.run_dir / "nc-video").read_text().split()[0])
+        os.kill(pid, 0)                      # l'état désigne bien le seul enregistrement, vivant
+        # Le verrou n'est pas gardé par wf-recorder : l'appui suivant arrête, puis un autre redémarre
+        arret = self.commande()
+        arret.communicate(timeout=20)
+        self.assertFalse((self.run_dir / "nc-video").exists())
+        redemarre = self.commande()
+        redemarre.communicate(timeout=20)
+        self.assertEqual(len([l for l in self.wf.read_text().splitlines() if l]), 2)
+
+    def test_encodeur_qui_meurt_apres_une_seconde(self):
+        self.reglages("VIDEO_ENCODEUR=processeur\n")
+        self.ecrire_faux("wf-recorder", f'''printf '%s{SEP}' "$@" >> "$NC_TEST_WF"; echo >> "$NC_TEST_WF"
+sleep 1; echo "encodeur perdu" >&2; exit 1''')
+        p = self.commande()
+        sortie = p.communicate(timeout=20)
+        self.assertEqual(p.returncode, 0, sortie)
+        etat = self.run_dir / "nc-video"
+        self.assertTrue(etat.read_text().strip(), "à 0,5 s il tourne encore : l'état est écrit")
+        for _ in range(60):                  # revérifié vers 2 s, en arrière-plan
+            if not etat.exists():
+                break
+            time.sleep(0.1)
+        self.assertFalse(etat.exists(), "pid mort : l'état doit être effacé")
+        for _ in range(20):
+            if "notify-send" in self.journal.read_text():
+                break
+            time.sleep(0.1)
+        self.assertIn("encodeur perdu", self.journal.read_text())
+
+
 
 class PaquetsVA(unittest.TestCase):
     """install.sh : pilotes VA seulement depuis les dépôts de base (rien pour Fedora, qui exigerait RPM Fusion), et
@@ -303,6 +353,7 @@ class PaquetsVA(unittest.TestCase):
                 self.assertEqual(r.stdout.strip(), paquet, (nom, famille))
         generic = texte[texte.index("GENERIC=("):texte.index(")", texte.index("GENERIC=("))]
         self.assertIn("wf-recorder pilotes-va vainfo", generic)
+
 
 
 if __name__ == "__main__":

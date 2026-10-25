@@ -26,9 +26,19 @@ case "${art:-}" in
     mkdir -p "$cache/pochettes"
     f="$cache/pochettes/$(printf '%s' "$art" | md5sum | cut -c1-16)"
     if [ ! -s "$f" ]; then
-      curl -fsSL -m 4 -o "$f.tmp" "$art" 2>/dev/null && mv "$f.tmp" "$f" || rm -f "$f.tmp"
-      # Garde les 50 dernières pochettes
-      ls -1t "$cache/pochettes" 2>/dev/null | tail -n +51 | sed "s|^|$cache/pochettes/|" | xargs -r rm -f
+      # Appelé chaque seconde : le téléchargement se fait en arrière-plan (cet appel-ci sans pochette, le suivant la
+      # trouve), un seul à la fois par pochette (flock), et un échec est retenu 5 minutes (hors ligne, 404, lien expiré)
+      if [ -z "$(find "$f.echec" -mmin -5 2>/dev/null)" ]; then
+        (
+          flock -n 9 || exit 0
+          if curl -fsSL -m 4 -o "$f.tmp" "$art" >/dev/null 2>&1 && [ -s "$f.tmp" ]; then mv "$f.tmp" "$f"; rm -f "$f.echec"
+          else rm -f "$f.tmp"; : > "$f.echec"; fi
+          # Garde les 50 dernières pochettes (et les marqueurs d'échec de plus de 5 minutes s'en vont avec)
+          find "$cache/pochettes" -name '*.echec' -mmin +5 -delete 2>/dev/null
+          find "$cache/pochettes" -name '*.lock' -mmin +1440 -delete 2>/dev/null
+          ls -1t "$cache/pochettes" 2>/dev/null | grep -v '\.lock$' | tail -n +51 | sed "s|^|$cache/pochettes/|" | xargs -r rm -f
+        ) 9>"$f.lock" >/dev/null 2>&1 &
+      fi
     fi
     [ -s "$f" ] && pochette="$f" ;;
 esac
@@ -45,6 +55,9 @@ if [ -z "$icone" ] || [ ! -f "$icone" ]; then
     { grep -v "^$nom	" "$icones" 2>/dev/null; printf '%s\t%s\n' "$nom" "$icone"; } > "$icones.tmp" && mv "$icones.tmp" "$icones"
   fi
 fi
+
+# Pas de tabulation dans les champs (le séparateur de la sortie)
+titre="${titre//$'\t'/ }"; artiste="${artiste//$'\t'/ }"
 
 age=""
 if [ -s "$cache/derniere-lecture" ]; then age=$(( $(date +%s) - $(cat "$cache/derniere-lecture") )); fi

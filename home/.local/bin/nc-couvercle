@@ -12,6 +12,9 @@ set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 PID="$RUN/nc-couvercle-inactivite.pid"
+# nc_pid_notre : un pid lu dans un fichier peut être mort, zombie, ou repris par un autre processus (session redémarrée) :
+# on ne tue que notre systemd-inhibit
+. "${BASH_SOURCE[0]%/*}/nc-pid" 2>/dev/null || . "$HOME/.local/bin/nc-pid" 2>/dev/null || nc_pid_notre() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 mode="$(reglage COUVERCLE)"; [ "$mode" = ecran ] || mode=veille
 
@@ -21,9 +24,10 @@ externe=0; [ -n "$internes" ] && [ "$internes" != "$tous" ] && externe=1
 couvercle_ferme() { grep -qs closed /proc/acpi/button/lid/*/state; }
 
 arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep »)
-  local p
-  p="$(cat "$PID" 2>/dev/null)"
-  [ -n "$p" ] && { pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; }
+  # Fichier : « pid heure-de-démarrage » ; ancien fichier (pid seul) : le nom systemd-inhibit doit être dans sa ligne de commande
+  local p d
+  read -r p d < "$PID" 2>/dev/null || true
+  if nc_pid_notre "$p" "$d" systemd-inhibit; then pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; fi
   rm -f "$PID"
 }
 
@@ -49,7 +53,7 @@ case "$action" in
     arreter
     setsid systemd-inhibit --what=idle --who=noctalia-config --why="$(t "Couvercle fermé, le PC continue de tourner" "Lid closed, the PC keeps running")" \
       sleep infinity >/dev/null 2>&1 &
-    echo $! > "$PID"
+    echo "$! $(nc_pid_debut "$!" 2>/dev/null)" > "$PID"
     sleep 1                                   # le verrouillage s'affiche avant que l'écran s'éteigne
     couvercle_ferme || { arreter; exit 0; }   # rouvert entre-temps
     "$HOME/.local/bin/nc-ecran" off ;;        # par nc-ecran : jamais en même temps qu'un autre allumage

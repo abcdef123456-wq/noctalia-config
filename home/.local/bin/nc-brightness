@@ -10,9 +10,25 @@
 # Rétroéclairage choisi comme le recommande le noyau : d'abord celui du micrologiciel (dont nvidia_wmi_ec_backlight,
 # qui pilote l'écran de portables gaming à NVIDIA Advanced Optimus), puis celui de la plateforme, puis le direct
 # (amdgpu_bl…, intel_backlight). Celui du pilote NVIDIA lui-même (nvidia_0) est ignoré : il ne pilote pas l'écran.
+aide() {
+  if [ "${NC_LANGUE:-}" = en ] || { [ -z "${NC_LANGUE:-}" ] && . "$HOME/.local/bin/nc-langue" 2>/dev/null && [ "$NC_LANGUE" = en ]; }; then
+    cat <<'FIN'
+# nc-brightness: built-in screen brightness (finds the right backlight, no hard-coded name).
+#   nc-brightness up|down   +/- 5% (step adjustable: nc-settings, LUMINOSITE_PAS)
+#   nc-brightness dim       dims to 20% (only if brighter), previous level remembered
+#   nc-brightness restore   restores the remembered level
+#   nc-brightness get       current level (0 to 100, same scale as up/down)
+#   nc-brightness set N     sets the level to N (0 to 100)
+FIN
+  else
+    sed -n '2,${/^#/!q;p}' "$0"
+  fi
+}
+# L'aide ne dépend pas du matériel : avant la recherche du rétroéclairage
+case "${1:-}" in -h|--help|aide|help) aide; exit 0 ;; esac
 dev=""
 for type in firmware platform raw; do
-  for d in /sys/class/backlight/*; do
+  for d in "${NC_SYSFS:-/sys}"/class/backlight/*; do
     n=${d##*/}
     case "$n" in nvidia_[0-9]*|'*') continue ;; esac
     [ "$(cat "$d/type" 2>/dev/null)" = "$type" ] && { dev=$n; break 2; }
@@ -30,18 +46,5 @@ case "${1:-}" in
   restore) exec brightnessctl -r -q -d "$dev" ;;
   get)     brightnessctl -d "$dev" -e2 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
   set)     exec brightnessctl -q -d "$dev" -e2 -n2 set "${2:-50}%" ;;
-  *)
-    if [ "${NC_LANGUE:-}" = en ] || { [ -z "${NC_LANGUE:-}" ] && . "$HOME/.local/bin/nc-langue" 2>/dev/null && [ "$NC_LANGUE" = en ]; }; then
-      cat <<'FIN'
-# nc-brightness: built-in screen brightness (finds the right backlight, no hard-coded name).
-#   nc-brightness up|down   +/- 5% (step adjustable: nc-settings, LUMINOSITE_PAS)
-#   nc-brightness dim       dims to 20% (only if brighter), previous level remembered
-#   nc-brightness restore   restores the remembered level
-#   nc-brightness get       current level (0 to 100, same scale as up/down)
-#   nc-brightness set N     sets the level to N (0 to 100)
-FIN
-    else
-      sed -n '2,8p' "$0"
-    fi
-    exit 1 ;;
+  *) aide; exit 1 ;;
 esac

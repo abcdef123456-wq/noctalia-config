@@ -13,7 +13,16 @@ if printf '%s' "$t" | grep -q '^image/png'; then
   [ -n "$p" ] && [ -f "$p" ] && printf 'I:%s:%s:%s\n' "$(wc -c < "$p")" "$id" "$p"
 elif printf '%s' "$t" | grep -qE '^(text/plain|UTF8_STRING|STRING|TEXT)'; then
   printf 'T:'
-  wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | tr '\n\r' '\037\037'
+  # 4 000 caractères (pas octets) : head -c coupait un caractère accentué en deux. python3 compte en caractères et
+  # marche pareil sous dash ; ${x:0:n} n'existe pas en sh. Sans python3 : head -c puis iconv -c, qui retire le
+  # morceau de caractère resté au bout.
+  if command -v python3 >/dev/null 2>&1; then
+    wl-paste --no-newline -t text 2>/dev/null | python3 -c 'import sys
+d = sys.stdin.buffer.read(20000).decode("utf-8", "ignore")[:4000]
+sys.stdout.buffer.write(d.encode("utf-8"))' | tr '\n\r' '\037\037'
+  else
+    wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | { iconv -c -f UTF-8 -t UTF-8 2>/dev/null || cat; } | tr '\n\r' '\037\037'
+  fi
   printf '\n'
 fi
 exit 0

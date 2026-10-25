@@ -4,19 +4,33 @@
 # reliées à la carte NVIDIA (souvent le HDMI) ne marchent qu'avec une session ouverte en la comptant. Hyprland ne
 # peut pas ajouter une carte en cours de route : la notification propose de rouvrir la session, ou de toujours
 # garder la NVIDIA (mode « both », la NVIDIA reste alors éveillée).
+# Session sur la NVIDIA seule (mode carte dédiée) : c'est l'inverse, la prise concernée est celle de la carte intégrée ;
+# seul « Rouvrir la session » est proposé (le mode « both » n'y change rien : la session démarre déjà sur la NVIDIA).
+# NC_SYSFS : racine de /sys, NC_ECRAN_FLUX : fichier d'événements « udevadm monitor » à lire à la place (tests).
 # Écoute les événements du noyau (udev) : rien n'est lu en boucle, la NVIDIA n'est pas réveillée pour rien.
 set -u
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 case "${AQ_DRM_DEVICES:-}" in ""|*:*) exit 0 ;; esac   # session sur toutes les cartes : rien à surveiller
 utilisee="$(basename "$AQ_DRM_DEVICES")"
+SYS="${NC_SYSFS:-/sys}"
 dernier=0
+# Constructeur d'une carte DRM (0x10de = NVIDIA). Session sur la NVIDIA seule = mode carte dédiée.
+fabricant() { cat "$SYS/class/drm/$1/device/vendor" 2>/dev/null; }
+dediee=0; [ "$(fabricant "$utilisee")" = 0x10de ] && dediee=1
 
 prevenir() {
   local choix
-  choix="$(timeout 3600 notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
-    --action=session="$(t "Rouvrir la session" "Log Out and Back In")" --action=toujours="$(t "Toujours garder la NVIDIA" "Always Keep NVIDIA On")" \
-    "$(t "Écran branché sur la carte NVIDIA" "Display connected to the NVIDIA GPU")" \
-    "$(t "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." "This port only works after you log out and back in (the desktop runs on the integrated GPU to save battery).")" 2>/dev/null)"
+  if [ "$dediee" = 1 ]; then
+    choix="$(timeout 3600 notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
+      --action=session="$(t "Rouvrir la session" "Log Out and Back In")" \
+      "$(t "Écran branché sur la carte intégrée" "Display connected to the integrated GPU")" \
+      "$(t "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte NVIDIA)." "This port only works after you log out and back in (the desktop runs on the NVIDIA GPU).")" 2>/dev/null)"
+  else
+    choix="$(timeout 3600 notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 0 \
+      --action=session="$(t "Rouvrir la session" "Log Out and Back In")" --action=toujours="$(t "Toujours garder la NVIDIA" "Always Keep NVIDIA On")" \
+      "$(t "Écran branché sur la carte NVIDIA" "Display connected to the NVIDIA GPU")" \
+      "$(t "Cette prise n'est utilisable qu'après avoir rouvert la session (le bureau tourne sur la carte intégrée pour économiser la batterie)." "This port only works after you log out and back in (the desktop runs on the integrated GPU to save battery).")" 2>/dev/null)"
+  fi
   case "$choix" in
     session) uwsm stop 2>/dev/null || hyprctl dispatch 'hl.dsp.exit()' ;;
     toujours)
@@ -25,13 +39,14 @@ prevenir() {
   esac
 }
 
-udevadm monitor --udev --subsystem-match=drm 2>/dev/null | while read -r _ _ action chemin _; do
+flux() { if [ -n "${NC_ECRAN_FLUX:-}" ]; then cat "$NC_ECRAN_FLUX"; else udevadm monitor --udev --subsystem-match=drm 2>/dev/null; fi; }
+flux | while read -r _ _ action chemin _; do
   [ "$action" = change ] || continue
   carte="$(basename "$chemin")"
   case "$carte" in card[0-9]*) ;; *) continue ;; esac
   [ "$carte" = "$utilisee" ] && continue
   branche=0
-  for s in /sys/class/drm/"$carte"-*/status; do
+  for s in "$SYS"/class/drm/"$carte"-*/status; do
     case "$s" in *eDP*) continue ;; esac
     [ "$(cat "$s" 2>/dev/null)" = connected ] && branche=1
   done
@@ -41,3 +56,4 @@ udevadm monitor --udev --subsystem-match=drm 2>/dev/null | while read -r _ _ act
     prevenir &
   fi
 done
+wait

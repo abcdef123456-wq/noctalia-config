@@ -97,19 +97,42 @@ def boot_size():
 def main():
     args = [a for a in sys.argv[1:] if a != "--dry-run"]
     src = args[0] if args else os.environ.get("NOCTALIA_WALLPAPER_PATH", "")
-    if not src or src in ("-h", "--help"):
+    if any(a in ("-h", "--help") for a in args):
+        print(T(__doc__, USAGE_EN))
+        return
+    if not src:
         sys.exit(T(__doc__, USAGE_EN))
     img = Path(src).expanduser()
     if not img.is_file():
         sys.exit(T(f"nc-wallpaper-colors : image introuvable : {img}", f"nc-wallpaper-colors: image not found: {img}"))
-    # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (nc-boot-wallpaper).
+    # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (nc-boot-wallpaper). Écrite dans un
+    # temporaire du même dossier puis posée d'un coup : une image illisible ou une coupure ne laisse jamais un JPEG cassé.
+    boot = tmp = None
     if "--dry-run" not in sys.argv:
-        cache = Path.home() / ".cache/nc/wallpaper-boot.jpg"
-        cache.parent.mkdir(parents=True, exist_ok=True)
+        boot = Path.home() / ".cache/nc/wallpaper-boot.jpg"
+        boot.parent.mkdir(parents=True, exist_ok=True)
+        tmp = boot.with_name(f".wallpaper-boot.{os.getpid()}.tmp")
         size = boot_size()
-        subprocess.Popen([MAGICK, str(img) + "[0]", "-resize", size + "^", "-gravity", "center",
-                          "-extent", size, "-quality", "90", str(cache)])
-    c = colorfulness(img)
+        try:
+            copie = subprocess.Popen([MAGICK, str(img) + "[0]", "-resize", size + "^", "-gravity", "center",
+                                      "-extent", size, "-quality", "90", "jpg:" + str(tmp)])
+        except OSError:
+            copie = None
+    try:
+        c = colorfulness(img)
+    except (subprocess.CalledProcessError, OSError):
+        sys.exit(T(f"nc-wallpaper-colors : image illisible : {img}", f"nc-wallpaper-colors: unreadable image: {img}"))
+    finally:
+        if tmp is not None:
+            if copie is not None and copie.wait() == 0:
+                try:
+                    os.replace(tmp, boot)
+                except OSError:
+                    pass
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     method = "vibrant" if c >= THRESHOLD else "muted"
     print(f"{img.name}: chroma={c:.3f} -> {method}")
     if "--dry-run" in sys.argv:
