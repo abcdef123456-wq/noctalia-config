@@ -2,7 +2,9 @@
 // programmes qui prennent le plus de processeur, carte NVIDIA) et santé de la batterie, lus par nc-conso. Page normale
 // juste après le centre sur un PC à batterie ; pendant une recharge, en tête comme activité (Etat.vues).
 // nc-conso ne tourne que pendant que la page est affichée (une ligne JSON toutes les 2 s) ; une valeur absente
-// (pas de batterie, pas de NVIDIA, champ inconnu du pilote) : sa ligne est masquée.
+// (pas de batterie, pas de NVIDIA, champ inconnu du pilote) : sa ligne est masquée. Sur batterie en décharge, le bouton
+// « Pourquoi ça se vide ? » (Pourquoi.qml) explique et propose, sur clic, au plus 3 actions confirmées ; ouvert, il
+// prend la place de la liste des programmes, de la carte NVIDIA et de la santé (l'île ne dépasse pas 580 px).
 import QtQuick
 import Quickshell.Io
 import Quickshell.Services.UPower
@@ -112,12 +114,12 @@ Item {
                     }
                 }
                 Texte {
-                    visible: charge.programmes.length > 0
+                    visible: charge.programmes.length > 0 && !pourquoi.ouvert
                     text: Reglages.t("Programmes les plus gourmands (30 s)", "Busiest apps (last 30 s)")
                     secondaire: true; font.pixelSize: 12
                 }
                 Repeater {
-                    model: charge.programmes
+                    model: pourquoi.ouvert ? [] : charge.programmes      // la réponse de « Pourquoi ça se vide ? » prend leur place
                     Item {
                         id: prog
                         required property var modelData
@@ -146,7 +148,7 @@ Item {
             readonly property string texte: charge.rtx === null ? ""
                 : dort ? Reglages.t("Carte NVIDIA : endormie (0 W)", "NVIDIA GPU: asleep (0 W)")
                 : Reglages.t("Carte NVIDIA : allumée", "NVIDIA GPU: on") + (charge.rtx.cause ? " — " + charge.rtx.cause : "")
-            visible: texte !== ""
+            visible: texte !== "" && !pourquoi.ouvert
             width: contenu.width; height: 44; radius: 18
             Ico {
                 id: icoRtx
@@ -160,13 +162,20 @@ Item {
             }
         }
 
+        // « Pourquoi ça se vide ? » : seulement sur batterie en décharge (sans batterie ou sur secteur, ni bouton ni place)
+        Pourquoi {
+            id: pourquoi
+            width: contenu.width
+            actif: charge.decharge && charge.affichee
+        }
+
         // Santé de la batterie : capacité gardée, cycles, limite de charge
         Module {
             id: blocSante
             objectName: "blocSante"
             readonly property var s: charge.sante || {}
             readonly property var lim: s.limite || null
-            visible: typeof s.garde === "number" || typeof s.cycles === "number" || lim !== null
+            visible: (typeof s.garde === "number" || typeof s.cycles === "number" || lim !== null) && !pourquoi.ouvert
             width: contenu.width; radius: 18
             height: colSante.implicitHeight + 24
             Column {

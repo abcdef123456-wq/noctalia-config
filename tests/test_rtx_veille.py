@@ -384,6 +384,99 @@ class Relance(Base):
         self.assertEqual(env["SORTIE"], str(sortie))                             # le reste de son environnement
         self.assertEqual(len(self.appels("systemd-run")), 1)
 
+    def test_relancable_lecture_seule(self):
+        """« relancable » dit si la relance est possible, sans fermer ni demander quoi que ce soit."""
+        pid, sortie = self.preparer()
+        r = self.veille("relancable", str(pid), "999", NC_TEST_CLIC="oui")
+        self.assertEqual((r.returncode, json.loads(r.stdout)), (0, {"relancable": True, "nom": "Firefox", "raison": None}))
+        self.assertTrue(self.vivant(pid), "fermé par une simple lecture")
+        self.assertEqual((self.notifications(), self.appels("systemd-run")), ([], []))
+        # PID réutilisé, programme disparu, session : la raison, le code 1, toujours rien de fermé ni de notifié
+        r = self.veille("relancable", str(pid), "123")
+        self.assertEqual((r.returncode, json.loads(r.stdout)["raison"]), (1, "change"))
+        pid2 = self.vrai_sleep()
+        self.processus(pid2, "firefox", [str(self.dev / "nvidia0")], debut="999", cmdline=["programme-qui-n-existe-pas"])
+        r = self.veille("relancable", str(pid2), "999")
+        self.assertEqual((r.returncode, json.loads(r.stdout)["raison"]), (1, "introuvable"))
+        pid3 = self.vrai_sleep()
+        self.processus(pid3, "Hyprland", [str(self.dev / "nvidia0")], debut="999", cmdline=["Hyprland"])
+        r = self.veille("relancable", str(pid3), "999")
+        self.assertEqual((r.returncode, json.loads(r.stdout)["raison"]), (1, "session"))
+        self.assertTrue(self.vivant(pid) and self.vivant(pid2) and self.vivant(pid3))
+        self.assertEqual(self.notifications(), [])
+
+    def test_oui_pas_de_seconde_question(self):
+        """Avec --oui (le clic est déjà fait dans l'île) : pas de notification de confirmation, la relance a lieu."""
+        pid, sortie = self.preparer()
+        r = self.veille("relancer", str(pid), "999", "--oui", NC_TEST_CLIC="", NC_RTX_ATTENTE="10")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Relancer Firefox sur la carte intégrée ?", json.dumps(self.notifications(), ensure_ascii=False))
+        self.assertFalse(self.vivant(pid))
+        self.assertEqual(len(self.appels("systemd-run")), 1)
+        # --oui ne change rien aux contrôles d'avant : un autre début, rien n'est fermé
+        pid2, _ = self.preparer()
+        self.assertEqual(self.veille("relancer", str(pid2), "123", "--oui").returncode, 1)
+        self.assertTrue(self.vivant(pid2))
+
+    def test_l_appli_relancee_n_ignore_ni_sigterm_ni_sighup(self):
+        """Le parent ignore ces signaux pour attendre son fils ; un signal ignoré passe aux programmes lancés : l'appli
+        relancée doit les avoir de nouveau par défaut (lu dans /proc/PID/status, SigIgn)."""
+        pid = self.vrai_sleep()
+        sortie = self.home / "relance.sig"
+        env = {"PATH": f"{self.faux}:/usr/bin:/bin", "JOURNAL": str(self.journal), "SORTIE": str(sortie)}
+        self.processus(pid, "firefox", [str(self.dev / "nvidia0")], debut="999", environ=env,
+                       cmdline=["sh", "-c", 'grep SigIgn /proc/$$/status > "$SORTIE.tmp" && mv "$SORTIE.tmp" "$SORTIE"'])
+        r = self.veille("relancer", str(pid), "999", "--oui", NC_RTX_ATTENTE="10")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        fin = time.monotonic() + 10
+        while not sortie.exists() and time.monotonic() < fin:
+            time.sleep(0.1)
+        masque = int(sortie.read_text().split()[1], 16)
+        for nom, numero in (("SIGHUP", 1), ("SIGTERM", 15)):
+            self.assertEqual(masque & (1 << (numero - 1)), 0, f"{nom} ignoré par l'appli relancée (SigIgn {masque:#x})")
+
+    def test_oui_sans_debut_refuse(self):
+        pid, sortie = self.preparer()
+        for args in (("relancer", str(pid), "--oui"), ("relancer", str(pid), "x1", "--oui"), ("relancer", str(pid), "²", "--oui")):
+            r = self.veille(*args, NC_TEST_CLIC="oui")
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn("DÉBUT", r.stderr)
+        self.assertTrue(self.vivant(pid), "fermé malgré le refus")
+        self.assertEqual(self.appels("systemd-run"), [])
+
+    def test_appelant_tue_la_relance_va_au_bout(self):
+        """L'île arrêtée ou tuée entre la fermeture et la réouverture : l'appli n'est jamais fermée sans être rouverte
+        (fermer et rouvrir se font dans un fils détaché que le parent attend)."""
+        # Une appli qui ignore SIGTERM pendant qu'on la ferme : on a le temps de tuer le parent avant qu'elle ne parte
+        r = subprocess.run(["sh", "-c", "(trap '' TERM; exec sleep 300) >/dev/null 2>&1 & echo $!"], capture_output=True, text=True)
+        pid = int(r.stdout)
+        def tuer():
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(tuer)
+        sortie = self.home / "relance.env"
+        env = {"PATH": f"{self.faux}:/usr/bin:/bin", "JOURNAL": str(self.journal), "SORTIE": str(sortie)}
+        self.processus(pid, "firefox", [str(self.dev / "nvidia0")], debut="999", environ=env,
+                       cmdline=["sh", "-c", 'env > "$SORTIE.tmp" && mv "$SORTIE.tmp" "$SORTIE"'])
+        parent = subprocess.Popen([str(VEILLE), "relancer", str(pid), "999", "--oui"], env=self.env(NC_RTX_ATTENTE="20"),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        self.addCleanup(lambda: parent.poll() is None and parent.kill())
+        time.sleep(1.0)                                          # le SIGTERM est parti, l'appli ne s'est pas fermée
+        self.assertTrue(self.vivant(pid))
+        parent.kill()                                            # SIGKILL du parent : rien ne peut s'y accrocher
+        parent.wait(timeout=10)
+        tuer()                                                   # l'appli finit par se fermer
+        fin = time.monotonic() + 15
+        while not self.appels("systemd-run") and time.monotonic() < fin:
+            time.sleep(0.1)
+        self.assertEqual(len(self.appels("systemd-run")), 1, "l'appli a été fermée mais pas rouverte")
+        fin = time.monotonic() + 10
+        while not sortie.exists() and time.monotonic() < fin:
+            time.sleep(0.1)
+        self.assertTrue(sortie.exists())
+
     def test_programme_introuvable_rien_ne_ferme(self):
         # Binaire disparu (mise à jour) ou chemin interne d'un bac à sable : l'appli ne reviendrait pas, donc aucun SIGTERM
         for cmd in (["/app/bin/disparu", "--x"], ["programme-qui-n-existe-pas"]):

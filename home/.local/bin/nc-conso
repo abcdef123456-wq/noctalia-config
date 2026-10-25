@@ -5,6 +5,13 @@
                             Charge est affichée et l'arrête dès qu'elle ne l'est plus : rien en arrière-plan)
   nc-conso suivre --fois N  N lignes puis s'arrête
   nc-conso a-batterie       code 0 si le PC a une batterie (pas celle d'une souris), 1 sinon (l'île : page Batterie)
+  nc-conso pourquoi [--json]  « Pourquoi ça se vide ? » : les faits, sans IA, en un seul JSON (une mesure de 1 s)
+  nc-conso pourquoi --ia      la même chose, avec 2 ou 3 phrases plus naturelles de nc-ia et les actions remises dans
+                            l'ordre, si l'IA est permise (voir plus bas) ; sinon, ou si elle échoue, les phrases fixes
+  nc-conso pourquoi --ia --faits -
+                            l'île donne sur l'entrée standard (jamais dans l'argv, lisible par les autres comptes) les faits
+                            qu'elle affiche (la sortie de --json) : RIEN n'est remesuré, la
+                            réponse est {"ia": bool, "phrases": …, "ordre": [ids]} ; l'île garde ses propres actions
 Une ligne :
   batterie  statut (Charging, Discharging…), pct, watts (puissance lissée sur 5 s), restant (secondes avant vide, ou
             avant pleine en charge) ; null sans batterie
@@ -18,17 +25,64 @@ Une ligne :
   sante     garde (capacité gardée, en % de celle d'origine), cycles, limite (active, seuil) ; null si rien n'est connu
 Calcul de la batterie : le même que le widget de la barre (nc-batterie/calcul.luau) : µW, µWh, µA × µV, µAh × V,
 plusieurs batteries additionnées.
+« pourquoi » : lecture seule aussi, il ne change rien ; il PROPOSE des actions que l'île lance après un clic.
+  {"sur_batterie": bool, "langue": "fr"|"en", "causes": [...], "phrases": "2 ou 3 phrases", "actions": [...], "ia": bool, "batterie": {pct, watts}|null}
+  Sans batterie, ou hors décharge (secteur) : sur_batterie faux, aucune cause, aucune action (l'île n'affiche pas le bouton).
+  cause   id fixe (programmes, rtx, profil, luminosite, rafraichissement, bluetooth), poids + unite (« W » : part
+          mesurée des programmes ; « score » : de 0 à 10, une estimation grossière pour trier, pas des watts), phrase
+          fixe (français ou anglais, comme nc-rtx-veille), action (id de l'action liée, ou null), noms (programmes
+          et rtx : des noms d'appli seulement, jamais une ligne de commande)
+  action  id, libelle, detail (ce qui va changer), commande (argv fixe : jamais construit depuis un texte extérieur,
+          sauf, pour rtx_relancer, le pid et l'heure de début lus par nc-rtx-veille, chiffres vérifiés) ; au plus 3
+  Les causes : programmes du top ; carte NVIDIA allumée (action « relancer l'appli sur la carte intégrée » seulement si
+  nc-rtx-veille relancable la juge relançable) ; luminosité de 80 % ou plus (action vers 60 % seulement si
+  nc-brightness et brightnessctl sont là) ; profil Performance (action « Économie » selon ce que le dépôt sait piloter :
+  service de profils par D-Bus, powerprofilesctl ou noctalia) ; écran à 120 Hz ou plus (mentionné, JAMAIS d'action : le
+  rafraîchissement élevé est gardé exprès) ; Bluetooth allumé sans appareil connecté (action « couper »).
+  --ia : nc-ia ne reçoit que les faits (noms d'applis, chiffres, ids de causes et d'actions), jamais de liste de
+  processus ni d'argument. Il rend du JSON {phrases, ordre} : les phrases (nettoyées, 250 caractères au plus) remplacent
+  les fixes, « ordre » ne fait que remettre dans l'ordre les actions de la liste (un id inconnu est ignoré, aucune action
+  n'est ajoutée). IA_MODE=non : nc-ia n'est pas appelé. La pause « Économie sur batterie » de nc-ia (IA_ECONOMIE) ne
+  s'applique pas : elle vise l'IA d'arrière-plan (nc-ia --fond), et ici c'est un clic de l'utilisateur. Délai : 15 s.
 Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), XDG_DATA_HOME et XDG_DATA_DIRS (les .desktop), NC_RTX_VEILLE
-(commande à la place de nc-rtx-veille, vide : aucune), NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut).
+(commande à la place de nc-rtx-veille, vide : aucune), NC_CONSO_PAS (secondes entre deux lignes, 2 par défaut ;
+entre les deux relevés de « pourquoi », 1 par défaut), NC_IA (commande à la place de nc-ia), NC_LANGUE (fr ou en).
 """
 import json
 import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
+
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en), comme nc-rtx-veille : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
 
 SYS = os.environ.get("NC_SYSFS") or "/sys"
 PROC = os.environ.get("NC_PROC") or "/proc"
@@ -283,6 +337,7 @@ class Applis:
 
 
 APPLIS = Applis()
+SCRIPTS = set()      # les groupes dont le nom vient d'un argument d'interprète (un fichier), pas d'une appli ni d'un exécutable
 
 
 def nom_programme(pid, comm):
@@ -303,7 +358,9 @@ def nom_programme(pid, comm):
             exe = exe.split()[0].rstrip(":")
     chemin = exe.strip()
     n = re.split(r"[/\\]", chemin)[-1]
+    script = False
     if INTERPRETES.match(n) or (not n and INTERPRETES.match(comm)):
+        script = True
         chemin = None
         for a in args[1:]:
             if a in CODE_EN_LIGNE:
@@ -324,6 +381,8 @@ def nom_programme(pid, comm):
     appli = APPLIS.nom(chemin)
     if appli:
         return "appli:" + appli.lower(), appli
+    if script:
+        SCRIPTS.add("exe:" + chemin)
     return "exe:" + chemin, n or "?"
 
 
@@ -349,6 +408,8 @@ class Mesureur:
         self.fenetre = []         # (t, {appli: ticks}, ticks occupés, ticks total)
         self.n = 0
         self.rtx = None
+        self.rtx_causes = []      # les causes brutes de nc-rtx-veille (carte allumée), pour « pourquoi »
+        self.marquer_scripts = False   # « pourquoi » : marque les programmes dont le nom vient d'un script
 
     def processus(self):
         moi = os.getpid()
@@ -413,14 +474,17 @@ class Mesureur:
             # Sans /proc/stat : les programmes seuls (le noyau n'est pas compté)
             occupe = sum(d for _, d in somme.values())
             total = None
-        liste = sorted(somme.values(), key=lambda a: -a[1])[:TOP]
+        liste = sorted(somme.items(), key=lambda a: -a[1][1])[:TOP]
         sortie = []
-        for nom, d in liste:
+        for cle, (nom, d) in liste:
             if d <= 0 or not occupe:
                 continue
             part = min(1.0, d / occupe)
-            sortie.append({"nom": nom[:1].upper() + nom[1:], "pct": round(d / total * 100, 1) if total else None,
-                           "watts": round(part * w, 1) if w is not None else None})
+            ligne = {"nom": nom[:1].upper() + nom[1:], "pct": round(d / total * 100, 1) if total else None,
+                     "watts": round(part * w, 1) if w is not None else None}
+            if self.marquer_scripts and cle in SCRIPTS:
+                ligne["script"] = True
+            sortie.append(ligne)
         return sortie
 
     def lire_rtx(self):
@@ -428,13 +492,10 @@ class Mesureur:
         if self.n % RTX_TOUS:
             return self.rtx
         self.rtx = None
+        self.rtx_causes = []
         if not nvidia_presente():
             return None
-        cmd = os.environ.get("NC_RTX_VEILLE")
-        if cmd is None:
-            cmd = os.path.join(ICI, "nc-rtx-veille")
-            if not os.access(cmd, os.X_OK):
-                cmd = shutil.which("nc-rtx-veille") or ""
+        cmd = commande_rtx()
         if not cmd:
             return None
         try:
@@ -447,6 +508,7 @@ class Mesureur:
         if e.get("runtime_status") == "suspended":
             self.rtx = {"etat": "endormie", "cause": None}
         elif e.get("runtime_status") == "active":
+            self.rtx_causes = [c for c in (e.get("causes") or []) if isinstance(c, dict)]      # pour « pourquoi »
             # La cause la plus probable, en court : le nom de l'appli, ou le texte de nc-rtx-veille ; aucune si inconnue
             c = (e.get("causes") or [{}])[0]
             cause = c.get("nom") or ("nvidia-persistenced" if c.get("cle") == "persistenced" else None)
@@ -475,6 +537,16 @@ class Mesureur:
         return sortie
 
 
+def commande_rtx():
+    """La commande nc-rtx-veille (NC_RTX_VEILLE à la place, pour les tests ; vide : aucune), ou ''."""
+    cmd = os.environ.get("NC_RTX_VEILLE")
+    if cmd is None:
+        cmd = os.path.join(ICI, "nc-rtx-veille")
+        if not os.access(cmd, os.X_OK):
+            cmd = shutil.which("nc-rtx-veille") or ""
+    return cmd
+
+
 def nvidia_presente():
     d = os.path.join(SYS, "bus/pci/devices")
     try:
@@ -483,10 +555,498 @@ def nvidia_presente():
         return False
 
 
+# ── Pourquoi ça se vide ? ──
+LUMINOSITE_HAUTE = 80      # % à partir duquel la luminosité compte comme une cause
+LUMINOSITE_CIBLE = 60      # % proposé
+HZ_ELEVE = 120             # Hz à partir desquels l'écran est dit gourmand (mentionné, jamais d'action)
+MAX_ACTIONS = 3
+MAX_PHRASES = 250          # caractères gardés d'un texte venu de l'IA
+DELAI_IA = 15              # secondes : au-delà, on garde les phrases fixes
+_ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_])")
+_CONTROLES = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")   # en \u : pas de caractère bidi dans le fichier
+
+
+def nettoyer(t, max_=MAX_PHRASES):
+    """Un texte venu de l'extérieur (IA, nom d'appli) en texte simple : séquences d'échappement et caractères de
+    contrôle retirés, blancs réunis, coupé à max_ caractères (au dernier mot, avec « … »)."""
+    if not isinstance(t, str):
+        return ""
+    t = _CONTROLES.sub(" ", _ANSI.sub("", t[:20000]))
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) <= max_:
+        return t
+    coupe = t[:max_ - 1]
+    if " " in coupe[max_ // 2:]:
+        coupe = coupe[:coupe.rfind(" ")]
+    return coupe.rstrip(" ,;:.") + "…"
+
+
+def chiffres(x):
+    """Que des chiffres ASCII (isdigit accepte aussi « ² » ou les chiffres arabes)."""
+    return isinstance(x, str) and x.isascii() and x.isdigit()
+
+
+def dec(x):
+    """« 12,3 » en français, « 12.3 » en anglais (une décimale)."""
+    s = f"{x:.1f}"
+    return s if EN else s.replace(".", ",")
+
+
+def retroeclairage():
+    """Le rétroéclairage de l'écran interne : celui que choisit nc-brightness (« nc-brightness appareil » : nvidia_0 quand
+    l'écran interne est sur la NVIDIA), sinon, avec un nc-brightness plus ancien (il affiche son aide et sort en 1), le même
+    choix refait ici (micrologiciel, plateforme, direct ; jamais celui du pilote NVIDIA). Son dossier, ou None."""
+    d = os.path.join(SYS, "class/backlight")
+    nb = outil("nc-brightness")
+    if nb:
+        try:
+            r = subprocess.run([nb, "appareil"], capture_output=True, text=True, timeout=3)
+            nom = os.path.basename(r.stdout.strip())
+            if r.returncode == 0 and re.fullmatch(r"[\w.:@-]+", nom) and os.path.isdir(os.path.join(d, nom)):
+                return os.path.join(d, nom)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        noms = sorted(os.listdir(d))
+    except OSError:
+        return None
+    for type_ in ("firmware", "platform", "raw"):
+        for n in noms:
+            if re.match(r"nvidia_[0-9]", n):
+                continue
+            if lire(os.path.join(d, n, "type")) == type_:
+                return os.path.join(d, n)
+    return None
+
+
+def luminosite():
+    """Le niveau de 0 à 100 sur l'échelle de nc-brightness (courbe au carré : « get » donne la racine du rapport), ou None."""
+    d = retroeclairage()
+    if not d:
+        return None
+    actuel, maxi = nombre(lire(os.path.join(d, "brightness"))), nombre(lire(os.path.join(d, "max_brightness")))
+    if actuel is None or not maxi:
+        return None
+    return int(math.sqrt(min(1.0, actuel / maxi)) * 100 + 0.5)
+
+
+def outil(nom):
+    """Chemin d'un outil du dépôt (à côté de nc-conso, sinon dans le PATH), ou None."""
+    c = os.path.join(ICI, nom)
+    return c if os.access(c, os.X_OK) else shutil.which(nom)
+
+
+def profil_energie():
+    """Le profil d'énergie (performance, balanced, power-saver ou ''), lu comme nc-sysinfo : le profil de la plateforme
+    (noyau), sinon le service de profils (power-profiles-daemon, tuned-ppd, tlp-pd) par D-Bus."""
+    prof = lire(os.path.join(SYS, "firmware/acpi/platform_profile")) or ""
+    prof = {"low-power": "power-saver", "quiet": "power-saver", "cool": "power-saver",
+            "max-power": "performance", "balanced-performance": "performance"}.get(prof, prof)
+    if prof in ("performance", "balanced", "power-saver"):
+        return prof
+    if shutil.which("busctl"):
+        try:
+            r = subprocess.run(["busctl", "get-property", "net.hadess.PowerProfiles", "/net/hadess/PowerProfiles",
+                                "net.hadess.PowerProfiles", "ActiveProfile"], capture_output=True, text=True, timeout=3)
+            m = re.search(r'"([a-z-]+)"', r.stdout)
+            return m[1] if r.returncode == 0 and m else ""
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return ""
+
+
+def service_profils_repond():
+    """Le service de profils (power-profiles-daemon, tuned-ppd, tlp-pd) répond-il vraiment ? Une lecture de ActiveProfile
+    avec un court délai (gdbus ou busctl sont presque partout, le service, non)."""
+    essais = []
+    if shutil.which("busctl"):
+        essais.append(["busctl", "get-property", "net.hadess.PowerProfiles", "/net/hadess/PowerProfiles",
+                       "net.hadess.PowerProfiles", "ActiveProfile"])
+    if shutil.which("gdbus"):
+        essais.append(["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
+                       "/net/hadess/PowerProfiles", "--method", "org.freedesktop.DBus.Properties.Get",
+                       "net.hadess.PowerProfiles", "ActiveProfile"])
+    if shutil.which("powerprofilesctl"):
+        essais.append(["powerprofilesctl", "get"])
+    for cmd in essais:
+        try:
+            if subprocess.run(cmd, capture_output=True, text=True, timeout=2).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def commande_profil_economie():
+    """L'argv qui passe en Économie, avec ce que le dépôt sait déjà piloter (comme nc-profile-sync et nc-session) :
+    le service de profils par D-Bus (le même pour power-profiles-daemon, tuned-ppd et tlp-pd), sinon powerprofilesctl,
+    sinon Noctalia ; None si rien n'est là, ou si le service de profils ne répond pas."""
+    if not service_profils_repond():
+        return None
+    if shutil.which("gdbus"):
+        return ["gdbus", "call", "--system", "--dest", "net.hadess.PowerProfiles", "--object-path",
+                "/net/hadess/PowerProfiles", "--method", "org.freedesktop.DBus.Properties.Set",
+                "net.hadess.PowerProfiles", "ActiveProfile", "<'power-saver'>"]
+    if shutil.which("powerprofilesctl"):
+        return ["powerprofilesctl", "set", "power-saver"]
+    if shutil.which("noctalia"):
+        return ["noctalia", "msg", "power-set", "power-saver"]
+    return None
+
+
+def bluetooth_inutile():
+    """Vrai si le Bluetooth est allumé et qu'aucun appareil n'est connecté. Faux au moindre doute (outil absent, version
+    de bluetoothctl sans « devices Connected » : elle listerait aussi les appareils non connectés)."""
+    bt = shutil.which("bluetoothctl")
+    if not bt:
+        return False
+    try:
+        show = subprocess.run([bt, "show"], capture_output=True, text=True, timeout=3)
+        if show.returncode != 0 or not re.search(r"^\s*Powered:\s*yes\s*$", show.stdout, re.M):
+            return False
+        devs = subprocess.run([bt, "devices", "Connected"], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return devs.returncode == 0 and not re.search(r"^Device\s", devs.stdout, re.M)
+
+
+def rafraichissement():
+    """Les Hz de l'écran interne d'après Hyprland (lecture), ou None."""
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        r = subprocess.run(["hyprctl", "-j", "monitors"], capture_output=True, text=True, timeout=3)
+        liste = json.loads(r.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    for mon in liste if isinstance(liste, list) else []:
+        if isinstance(mon, dict) and re.match(r"(eDP|LVDS|DSI)", str(mon.get("name", ""))) \
+                and isinstance(mon.get("refreshRate"), (int, float)):
+            return round(mon["refreshRate"])
+    return None
+
+
+def action_rtx(m):
+    """(nom, action) pour relancer sur la carte intégrée la première appli que nc-rtx-veille juge relançable
+    (nc-rtx-veille relancable : lecture seule, rien n'est fermé) ; None sinon. pid et début sont des chiffres vérifiés."""
+    cmd = commande_rtx()
+    if not cmd:
+        return None
+    for c in m.rtx_causes:
+        pid, debut, nom = str(c.get("pid", "")), str(c.get("debut", "")), nettoyer(c.get("nom"), 24)
+        if not (chiffres(pid) and chiffres(debut) and nom and c.get("relancable") is True):
+            continue
+        try:
+            r = subprocess.run([cmd, "relancable", pid, debut], capture_output=True, text=True, timeout=5)
+            ok = r.returncode == 0 and json.loads(r.stdout).get("relancable") is True
+        except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+            ok = False
+        if ok:
+            return nom, {"id": "rtx_relancer",
+                         "libelle": T(f"Relancer {nom} sur la carte intégrée", f"Restart {nom} on the integrated GPU"),
+                         "detail": T(f"{nom} sera fermé puis rouvert (enregistre ton travail)",
+                                     f"{nom} will be closed then reopened (save your work)"),
+                         "commande": [cmd, "relancer", pid, debut, "--oui"]}
+    return None
+
+
+def faits_pourquoi():
+    """Les faits, sans IA : le dictionnaire décrit plus haut. Une mesure de 1 s, seulement sur batterie en décharge."""
+    sortie = {"sur_batterie": False, "langue": "en" if EN else "fr", "causes": [], "phrases": "", "actions": [], "ia": False,
+              "batterie": None}
+    r = resumer(batteries())
+    if not r or r["statut"] != "Discharging":
+        return sortie
+    sortie["sur_batterie"] = True
+    m = Mesureur()
+    m.marquer_scripts = True
+    m.mesurer(time.monotonic())
+    time.sleep(nombre(os.environ.get("NC_CONSO_PAS")) or 1.0)
+    m.n = 0                                              # l'état de la carte NVIDIA sur la mesure utilisée
+    mesure = m.mesurer(time.monotonic())
+    bat = mesure["batterie"] or {}
+    causes, actions = [], {}
+
+    def ajouter(ident, tri, poids, unite, phrase, action=None, noms=None):
+        c = {"id": ident, "poids": poids, "unite": unite, "phrase": phrase, "action": action["id"] if action else None,
+             "_tri": tri}
+        if noms:
+            c["noms"] = noms
+        if action:
+            actions[action["id"]] = action
+        causes.append(c)
+
+    # 1. Les programmes du top : seulement des noms d'appli
+    apps = [(nettoyer(p.get("nom"), 24) or "?", p.get("watts"), p.get("pct"), p.get("script") is True) for p in mesure["top"]]
+    gros = [a for a in apps if (a[1] if a[1] is not None else (a[2] or 0) / 10) >= 0.5][:3]
+    if gros:
+        noms = [a[0] for a in gros]
+        sans_script = [T("un script", "a script") if a[3] else a[0] for a in gros]    # ce qui peut partir vers l'IA
+        if all(a[1] is not None for a in gros):
+            somme, unite = round(sum(a[1] for a in gros), 1), "W"
+            tri, quoi = min(10.0, somme), T(f" (environ {dec(somme)} W)", f" (about {dec(somme)} W)")
+        else:
+            somme, unite = round(min(10.0, sum((a[2] or 0) for a in gros) / 10), 1), "score"
+            tri, quoi = somme, ""
+        liste = (", ".join(noms[:-1]) + T(" et ", " and ") + noms[-1]) if len(noms) > 1 else noms[0]
+        phrase = (T(f"{liste} prennent le plus de processeur{quoi}.", f"{liste} use the most CPU{quoi}.") if len(noms) > 1
+                  else T(f"{liste} prend le plus de processeur{quoi}.", f"{liste} uses the most CPU{quoi}."))
+        if somme >= 1.0 or unite == "score":
+            ajouter("programmes", tri, somme, unite, phrase, noms=sans_script)
+    # 2. La carte NVIDIA allumée et sa cause
+    if mesure["rtx"] and mesure["rtx"]["etat"] == "allumee":
+        rel = action_rtx(m)
+        cause = rel[0] if rel else nettoyer(mesure["rtx"].get("cause"), 24)     # la phrase cite l'appli que l'action relance
+        ajouter("rtx", 8, 8, "score",
+                T(f"La carte NVIDIA est allumée ({cause}) : elle consomme beaucoup plus que la carte intégrée.",
+                  f"The NVIDIA GPU is on ({cause}): it uses far more power than the integrated one.") if cause else
+                T("La carte NVIDIA est allumée : elle consomme beaucoup plus que la carte intégrée.",
+                  "The NVIDIA GPU is on: it uses far more power than the integrated one."),
+                rel[1] if rel else None, noms=[rel[0]] if rel else ([cause] if cause else None))
+    # 3. Le profil d'énergie
+    if profil_energie() == "performance":
+        eco = commande_profil_economie()
+        ajouter("profil", 6, 6, "score",
+                T("Le profil d'énergie est sur Performance : le processeur est poussé même quand tu n'en as pas besoin.",
+                  "The power profile is on Performance: the CPU is pushed even when you don't need it."),
+                {"id": "profil_economie", "libelle": T("Passer en Économie", "Switch to Power Saver"),
+                 "detail": T("Profil d'énergie : Performance → Économie", "Power profile: Performance → Power Saver"),
+                 "commande": eco} if eco else None)
+    # 4. La luminosité
+    niveau = luminosite()
+    if niveau is not None and niveau >= LUMINOSITE_HAUTE:
+        outil_lum = outil("nc-brightness")
+        peut_ecrire = bool(outil_lum and shutil.which("brightnessctl"))
+        ajouter("luminosite", round((niveau - 50) / 10, 1), round((niveau - 50) / 10, 1), "score",
+                T(f"L'écran est à {niveau} % de luminosité.", f"The screen is at {niveau}% brightness."),
+                {"id": "luminosite_baisser",
+                 "libelle": T(f"Luminosité {niveau} % → {LUMINOSITE_CIBLE} %", f"Brightness {niveau}% → {LUMINOSITE_CIBLE}%"),
+                 "detail": T(f"La luminosité de l'écran passe de {niveau} % à {LUMINOSITE_CIBLE} %",
+                             f"Screen brightness goes from {niveau}% to {LUMINOSITE_CIBLE}%"),
+                 "commande": [outil_lum, "set", str(LUMINOSITE_CIBLE)]} if peut_ecrire else None)
+    # 5. Le rafraîchissement : mentionné, jamais d'action (le 165 Hz est gardé exprès)
+    hz = rafraichissement()
+    if hz is not None and hz >= HZ_ELEVE:
+        ajouter("rafraichissement", 2, 2, "score",
+                T(f"L'écran tourne à {hz} Hz : c'est un peu plus gourmand, mais je n'y touche pas.",
+                  f"The screen runs at {hz} Hz: it uses a bit more power, but I leave it alone."))
+    # 6. Le Bluetooth allumé pour rien
+    if bluetooth_inutile():
+        ajouter("bluetooth", 1, 1, "score",
+                T("Le Bluetooth est allumé, mais aucun appareil n'est connecté.", "Bluetooth is on, but no device is connected."),
+                {"id": "bluetooth_couper", "libelle": T("Couper le Bluetooth", "Turn off Bluetooth"),
+                 "detail": T("Le Bluetooth est coupé (tu peux le rallumer quand tu veux)", "Bluetooth is turned off (turn it back on any time)"),
+                 "commande": ["bluetoothctl", "power", "off"]})
+    causes.sort(key=lambda c: -c["_tri"])
+    gardees = []                                          # au plus MAX_ACTIONS actions, les plus lourdes d'abord
+    for c in causes:
+        if c["action"] and len(gardees) < MAX_ACTIONS:
+            gardees.append(c["action"])
+        else:
+            c["action"] = None
+        del c["_tri"]
+    sortie["causes"] = causes
+    sortie["actions"] = [actions[i] for i in gardees]
+    sortie["phrases"] = " ".join(c["phrase"] for c in causes[:3]) or \
+        T("Rien d'anormal : ta batterie se vide au rythme de ce que tu fais.", "Nothing unusual: your battery drains at the pace of what you're doing.")
+    sortie["batterie"] = {"pct": bat.get("pct"), "watts": bat.get("watts")}
+    return sortie
+
+
+def ia_permise():
+    """Vrai sauf IA_MODE=non (nc-reglages → Intelligence artificielle). Lu comme nc-ia : même fichier, la dernière valeur
+    gagne, espaces et guillemets retirés."""
+    mode = "auto"
+    try:
+        with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            for ligne in f:
+                k, sep, v = ligne.partition("=")
+                if sep and k.strip() == "IA_MODE":
+                    mode = v.strip().strip('"')
+    except OSError:
+        pass
+    return mode != "non"
+
+
+ID_RE = re.compile(r"[a-z][a-z0-9_]{0,40}")
+
+
+def faits_recus(texte):
+    """Les faits donnés par l'île (--faits) : seulement ce qui sert à l'IA, tout revérifié (ids, nombres, noms courts).
+    Renvoie {causes, actions: [ids], batterie}, ou None si ce n'est pas du JSON qu'on a rendu nous-mêmes."""
+    try:
+        d = json.loads(texte) if isinstance(texte, str) and len(texte) <= 20000 else None
+    except ValueError:
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("causes"), list) or not isinstance(d.get("actions"), list):
+        return None
+    causes = []
+    for c in d["causes"][:8]:
+        if not isinstance(c, dict) or not isinstance(c.get("id"), str) or not ID_RE.fullmatch(c["id"]):
+            return None
+        poids = c.get("poids") if isinstance(c.get("poids"), (int, float)) and not isinstance(c.get("poids"), bool) else None
+        e = {"id": c["id"], "poids": poids, "unite": c.get("unite") if c.get("unite") in ("W", "score") else None,
+             "action": c["action"] if isinstance(c.get("action"), str) and ID_RE.fullmatch(c["action"]) else None}
+        if isinstance(c.get("noms"), list):
+            e["noms"] = [nettoyer(x, 24) for x in c["noms"][:3] if isinstance(x, str)]
+        causes.append(e)
+    ids = [a.get("id") for a in d["actions"][:MAX_ACTIONS] if isinstance(a, dict)]
+    if not all(isinstance(i, str) and ID_RE.fullmatch(i) for i in ids):
+        return None
+    bat = d.get("batterie") if isinstance(d.get("batterie"), dict) else {}
+    nombres = {k: bat[k] for k in ("pct", "watts") if isinstance(bat.get(k), (int, float)) and not isinstance(bat.get(k), bool)}
+    return {"causes": causes, "actions": ids, "batterie": nombres}
+
+
+def appeler_ia(faits):
+    """Les faits envoyés à nc-ia puis sa réponse (JSON {phrases, ordre}) : (phrases nettoyées, ids dans l'ordre voulu),
+    ou None au moindre souci (délai, échec, réponse illisible). nc-ia ne reçoit que des noms d'applis, des chiffres et
+    des ids ; il ne lance rien, il n'ajoute rien. faits : {causes, actions (ids), batterie} (voir faits_recus)."""
+    cmd = os.environ.get("NC_IA")
+    if cmd is None:
+        cmd = outil("nc-ia") or ""
+    if not cmd:
+        return None
+    m = faits.get("batterie") or {}
+    envoi = {"batterie_pct": m.get("pct"), "batterie_watts": m.get("watts"),
+             "causes": [{k: c[k] for k in ("id", "poids", "unite", "action", "noms") if k in c} for c in faits["causes"]],
+             "actions": list(faits["actions"])}
+    question = T(
+        "Tu aides un utilisateur dont la batterie du portable se vide vite. Voici les faits mesurés (JSON). Réponds "
+        "UNIQUEMENT par un objet JSON {\"phrases\": \"2 ou 3 phrases simples en français, tutoiement, sans liste ni "
+        "mise en forme\", \"ordre\": [\"id d'action\", ...]}. « ordre » ne reprend que des ids de la liste « actions », "
+        "du plus utile au moins utile. N'invente ni action, ni chiffre, ni commande.\n\n",
+        "You help a user whose laptop battery drains fast. Here are the measured facts (JSON). Answer ONLY with a JSON "
+        "object {\"phrases\": \"2 or 3 simple sentences in English, no list, no formatting\", \"ordre\": "
+        "[\"action id\", ...]}. \"ordre\" only uses ids from the \"actions\" list, most useful first. Do not invent any "
+        "action, figure or command.\n\n") + json.dumps(envoi, ensure_ascii=False)
+    proc = []                                            # le Popen de nc-ia, une fois lancé
+
+    def fini(p):
+        """nc-ia a fini (sorti, ou zombie pas encore ramassé) ?"""
+        if p.returncode is not None:
+            return True
+        try:
+            with open(f"/proc/{p.pid}/stat") as f:
+                return f.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+        except (OSError, IndexError):
+            return True
+
+    def arreter(signum=None, frame=None):
+        """Fermeture polie du groupe de nc-ia (son nettoyage tourne), puis SIGKILL seulement s'il traîne."""
+        if not proc:
+            return
+        p = proc[0]
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except OSError:
+            return
+        # Pas de communicate() ici : appelé depuis un gestionnaire de signal pendant le communicate() du fil principal,
+        # il lèverait ValueError tout de suite, et le SIGKILL partirait avant le nettoyage de nc-ia. On regarde l'état
+        # du processus sans bloquer (/proc : un zombie a fini)
+        fin = time.monotonic() + 2
+        while time.monotonic() < fin and not fini(p):
+            time.sleep(0.05)
+        if not fini(p):
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def sortir(signum, frame):
+        arreter()
+        sys.exit(128 + signum)
+
+    # Les gestionnaires AVANT le lancement de nc-ia (nc-conso arrêté pendant l'appel : nc-ia ne reste pas orphelin) ; les
+    # deux signaux sont bloqués le temps du Popen, pour qu'un signal n'arrive pas entre le lancement et proc.append
+    anciens = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            anciens[sig] = signal.signal(sig, sortir)
+        except ValueError:                               # pas le fil principal
+            pass
+    bloques = bool(anciens) and hasattr(signal, "pthread_sigmask")
+    try:
+        if bloques:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGHUP})
+        try:
+            proc.append(subprocess.Popen([cmd, "demander", "--usage", "question", "-"], stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace",
+                                         start_new_session=True,
+                                         preexec_fn=(lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGHUP}))
+                                         if bloques else None))      # le masque est hérité : nc-ia doit recevoir SIGTERM
+        except OSError:
+            return None
+        finally:
+            if bloques:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGHUP})
+        p = proc[0]
+        try:
+            sortie, _ = p.communicate(question, timeout=DELAI_IA)
+        except subprocess.TimeoutExpired:
+            arreter()
+            try:
+                p.wait(timeout=2)                         # ramassé ici (hors gestionnaire de signal) : pas de zombie
+            except subprocess.TimeoutExpired:
+                pass
+            return None
+    finally:
+        for sig, ancien in anciens.items():
+            signal.signal(sig, ancien)
+    if p.returncode != 0 or not isinstance(sortie, str):
+        return None
+    debut = sortie.find("{")
+    try:
+        rep = json.JSONDecoder().raw_decode(sortie[debut:])[0] if debut >= 0 else None
+    except ValueError:
+        return None
+    if not isinstance(rep, dict):
+        return None
+    phrases = nettoyer(rep.get("phrases"))
+    if not phrases:
+        return None
+    ordre = rep.get("ordre")
+    return phrases, ([i for i in ordre if isinstance(i, str)] if isinstance(ordre, list) else [])
+
+
+def pourquoi(avec_ia, recus=None):
+    """Sans --faits : les faits (et, avec --ia, leur récit par l'IA) en un JSON. Avec --faits TEXTE (--ia seulement) : rien
+    n'est remesuré ; la réponse est {ia, phrases, ordre}, que l'île applique à ses propres actions (pas de course entre
+    deux mesures, la commande confirmée est toujours celle qui était affichée)."""
+    if recus is not None:
+        f = faits_recus(recus)
+        r = appeler_ia(f) if f and f["causes"] and ia_permise() else None
+        ids = set(f["actions"]) if f else set()
+        rep = {"ia": r is not None}
+        if r:
+            rep.update(phrases=r[0], ordre=[i for i in dict.fromkeys(r[1]) if i in ids])
+        print(json.dumps(rep, ensure_ascii=False))
+        return 0
+    faits = faits_pourquoi()
+    if avec_ia and faits["causes"] and ia_permise():
+        r = appeler_ia(dict(faits, actions=[a["id"] for a in faits["actions"]]))
+        if r:
+            phrases, ordre = r
+            faits["phrases"], faits["ia"] = phrases, True
+            par_id = {a["id"]: a for a in faits["actions"]}
+            vus = []
+            for i in ordre:                               # un id inconnu de la liste est ignoré, un doublon aussi
+                if i in par_id and i not in vus:
+                    vus.append(i)
+            faits["actions"] = [par_id[i] for i in vus] + [a for a in faits["actions"] if a["id"] not in vus]
+    print(json.dumps(faits, ensure_ascii=False))
+    return 0
+
+
 def main():
     a = sys.argv[1:]
     if a[:1] in (["a-batterie"], ["has-battery"]):
         return 0 if batteries() else 1
+    if a[:1] in (["pourquoi"], ["why"]):
+        recus = None
+        if "--faits" in a:
+            recus = sys.stdin.read(20001)
+        return pourquoi("--ia" in a, recus if "--ia" in a else None)
     m = Mesureur()
     try:
         if not a:

@@ -372,7 +372,7 @@ class PageCharge(unittest.TestCase):
             (root / "bin/nc-conso").chmod(0o755)
             (root / "mesure.json").write_text(json.dumps(COMPLETE, ensure_ascii=False))
             (root / "mesure2.json").write_text(json.dumps(VIDE))
-            noms = ("Charge", "Texte", "Ico", "Module", "Couleurs")
+            noms = ("Charge", "Pourquoi", "Texte", "Ico", "Module", "Couleurs")
             for nom in noms:
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: false; readonly property bool sobre: false; function t(fr,en){return fr} function val(k,d){return d}}')
