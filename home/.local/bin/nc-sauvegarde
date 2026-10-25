@@ -2,18 +2,25 @@
 """nc-sauvegarde : tes réglages de noctalia-config dans un seul fichier, pour réinstaller ton PC ou les donner à un ami.
   nc-sauvegarde                     crée ~/nc-sauvegarde-DATE.tar.gz (réglages, raccourcis, style, animations, ajouts
                                     perso, photo de profil, palettes) ; --fonds : avec tes fonds d'écran
-  nc-sauvegarde restaurer FICHIER   remet une sauvegarde (ce qui est là avant est gardé dans ~/.cache/nc/avant-restauration)
-  nc-sauvegarde voir FICHIER        ce que contient une sauvegarde
+  nc-sauvegarde restaurer FICHIER   remet une sauvegarde (ce qui est là avant est gardé dans ~/.cache/nc/avant-restauration).
+                                    Les fichiers qui lancent du code (perso.lua, .zshrc.perso, perso.conf de kitty,
+                                    animations, hooks de Noctalia) ne sont PAS remis, les raccourcis sont filtrés (seulement
+                                    Super + applis) et les réglages de sécurité (veille, verrou, IA, alertes…) restent ceux
+                                    de ce PC ; si c'est TA sauvegarde : --avec-code
+  nc-sauvegarde voir FICHIER        ce que contient une sauvegarde (« contient du code » : remis seulement avec --avec-code)
 Les fichiers générés (couleurs, thème du terminal…) ne sont pas sauvegardés : ils se refont tout seuls.
 """
-import copy
 import datetime
+import errno
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
+import zlib
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
 def _langue():
@@ -47,8 +54,11 @@ def T(fr, en):
 USAGE_EN = """nc-backup: your noctalia-config settings in a single file, to reinstall your PC or give them to a friend.
   nc-backup                         creates ~/nc-sauvegarde-DATE.tar.gz (settings, shortcuts, style, animations, personal
                                     additions, profile picture, palettes); --wallpapers: with your wallpapers
-  nc-backup restore FILE            brings a backup back (what was there before is kept in ~/.cache/nc/avant-restauration)
-  nc-backup show FILE               what a backup contains
+  nc-backup restore FILE            brings a backup back (what was there before is kept in ~/.cache/nc/avant-restauration).
+                                    Files that run code (perso.lua, .zshrc.perso, kitty perso.conf, animations, Noctalia
+                                    hooks) are NOT restored, shortcuts are filtered (only Super + apps) and security settings
+                                    (sleep, lock, AI, alerts…) stay those of this PC; if it is YOUR backup: --with-code
+  nc-backup show FILE               what a backup contains ("contains code": restored only with --with-code)
 Generated files (colors, terminal theme…) are not backed up: they are rebuilt on their own."""
 
 HOME = os.path.expanduser("~")
@@ -93,93 +103,480 @@ def taille(o):
     return f"{o / 1048576:.1f} {T('Mo', 'MB')}" if o >= 1048576 else f"{max(1, o // 1024)} {T('Ko', 'KB')}"
 
 
+# Les fonds d'écran sont toujours rangés sous ce préfixe (leur chemin d'origine, hors HOME ou changé d'un PC à
+# l'autre, ne vaut rien ailleurs) et remis dans le dossier des fonds du PC qui restaure. Les anciennes archives, où le
+# fonds a son chemin relatif à HOME, ne sont acceptées que si c'est le même chemin que le fonds de ce PC
+FONDS_EXTERNES = ".nc-fonds-externes"
+
+
+def sous_home(chemin):
+    """Chemin relatif à HOME si `chemin` est strictement dedans, sinon None."""
+    rel = os.path.relpath(os.path.abspath(chemin), HOME)
+    return None if rel == "." or rel == ".." or rel.startswith("../") else rel
+
+
+def echec(fr, en):
+    sys.exit("nc-sauvegarde : " + propre(T(fr, en)))
+
+
 def creer(avec_fonds):
     nom = os.path.join(HOME, f"nc-sauvegarde-{datetime.date.today().isoformat()}.tar.gz")
-    chemins = [p for p in A_GARDER if os.path.exists(os.path.join(*reel(p)))]
-    fonds = dossier_fonds()
-    if avec_fonds and os.path.isdir(fonds):
-        chemins.append(os.path.relpath(fonds, HOME))
-    if not chemins:
+    # (nom dans l'archive, chemin sur le disque)
+    elements = [(p, os.path.join(*reel(p))) for p in A_GARDER if os.path.exists(os.path.join(*reel(p)))]
+    fonds = os.path.abspath(dossier_fonds())
+    if avec_fonds and os.path.isdir(fonds) and fonds != HOME:
+        elements.append((FONDS_EXTERNES, fonds))     # toujours sous le préfixe, dans HOME ou dehors
+    if not elements:
         sys.exit(T("nc-sauvegarde : rien à sauvegarder (aucun réglage changé).", "nc-backup: nothing to back up (no setting changed)."))
-    with tarfile.open(nom, "w:gz") as t:
-        for p in chemins:
-            t.add(os.path.join(*reel(p)), arcname=p)
+    # Écrite dans un fichier temporaire du même dossier, puis posée d'un coup (os.replace) : une sauvegarde qui échoue
+    # ne remplace jamais, ni ne tronque, celle du jour qui existe déjà
+    fd, tmp = tempfile.mkstemp(prefix=".nc-sauvegarde-", suffix=".tmp", dir=HOME)
+    fini = False
+    try:
+        with os.fdopen(fd, "wb") as f, tarfile.open(fileobj=f, mode="w:gz") as t:
+            for arc, src in elements:
+                t.add(src, arcname=arc)
+        os.replace(tmp, nom)                      # après la fermeture : la fin du gzip est écrite
+        fini = True
+    except (OSError, tarfile.TarError) as e:
+        echec(f"la sauvegarde a échoué ({e}) ; celle qui existait déjà n'a pas été touchée.",
+              f"the backup failed ({e}); the existing one was not touched.")
+    finally:
+        if not fini:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     print(T(f"Sauvegarde créée : {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})",
             f"Backup created: {nom.replace(HOME, '~')} ({taille(os.path.getsize(nom))})"))
-    for p in chemins:
-        print(f"  • ~/{p}")
+    for arc, src in elements:
+        print(f"  • ~/{arc}" if arc != FONDS_EXTERNES else T(f"  • fonds d'écran : {propre(src)}", f"  • wallpapers: {propre(src)}"))
     if not avec_fonds:
         print(T("Tes fonds d'écran n'y sont pas (nc-sauvegarde --fonds pour les ajouter).",
                 "Your wallpapers are not included (nc-backup --wallpapers to add them)."))
     print(T("Pour la remettre : nc-sauvegarde restaurer ", "To restore it: nc-backup restore ") + nom.replace(HOME, "~"))
 
 
-def membres_surs(t):
-    """Seulement des chemins sous le dossier personnel (pas de ../, pas de chemin absolu, pas de lien)."""
-    ok = []
-    for m in t.getmembers():
-        chemin = os.path.normpath(m.name)
-        if chemin.startswith(("/", "..")) or m.issym() or m.islnk() or m.isdev():
+class Refus(Exception):
+    """Un membre de l'archive qu'on ne veut pas écrire."""
+
+
+class Abimee(Exception):
+    """Lecture de l'archive impossible (coupée, corrompue) : on arrête tout."""
+
+
+# Ce qui TOURNE après la restauration (Lua de Hyprland, shell, terminal, hooks de Noctalia, animations lancées dans
+# un terminal) : une archive reçue d'un autre ne doit pas pouvoir y mettre du code. Remis seulement avec --avec-code
+CODE = [".config/hypr/perso.lua", ".zshrc.perso", ".config/kitty/perso.conf", ".local/state/noctalia/settings.toml",
+        ".config/noctalia/zz-dock.toml", ".config/nc/animations"]
+# Éléments de A_GARDER qui sont des dossiers (seuls à accepter des enfants) ; les autres sont des fichiers
+DOSSIERS = [".config/nc/animations", ".config/noctalia/palettes"]
+RACCOURCIS = ".config/nc/raccourcis.conf"          # sans --avec-code : remis sans ses lignes « commande »
+TYPES_SURS = ("appli", "bureau", "ile")            # types de raccourci « ajout » qui ne lancent pas de commande
+EXT_IMAGES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".jxl")
+MAX_OCTETS = 2 * 1024 ** 3                         # taille totale écrite au plus (un membre « creux » peut mentir)
+MAX_MEMBRES = 20000
+MAX_REGLAGE = 1024 ** 2                            # un fichier de réglages, de script ou de config : 1 Mo au plus
+MAX_FACE = 10 * 1024 ** 2                          # la photo de profil : 10 Mo au plus
+# Réglages qui finissent dans une commande, un script ou la sécurité : sans --avec-code, on garde ceux DE CE PC
+# (nc-reglages : VEILLE_*, VERROU, IA_*, NOEUD_*, ALERTES_*, et les textes libres qui vont dans une commande ou une config)
+CLES_LOCALES = re.compile(r"(VEILLE_.*|.*VERROU.*|COUVERCLE.*|IA_.*|NOEUD_.*|ALERTES_.*|CLAUDE_.*|ANTIGRAVITY_.*|"
+                          r"GOOGLE_.*|ASSISTANT_.*|CAPTURES_DOSSIER|FONDS_DOSSIER|APPLI_TERMINAL|APPLI_FICHIERS|"
+                          r"SESSION_DEMARRAGE|GPU_REGLE|CLAVIER_DISPOSITION|CURSEUR_THEME|POLICE|TERMINAL_POLICE|"
+                          r"METEO_VILLE|MAJ_.*)")
+REGLAGES = ".config/nc/reglages.conf"
+MARGE_LIBRE = 100 * 1024 ** 2
+
+
+def propre(s):
+    """Texte sans caractère de contrôle (ESC, OSC 52…) : les non imprimables deviennent \\xNN (ou \\uNNNN)."""
+    return "".join(c if c.isprintable() else (f"\\x{ord(c):02x}" if ord(c) < 256 else f"\\u{ord(c):04x}") for c in str(s))
+
+
+def est_dans(chemin, element):
+    return chemin == element or chemin.startswith(element + "/")
+
+
+def est_fonds(chemin, fonds_rel):
+    return est_dans(chemin, FONDS_EXTERNES) or (fonds_rel is not None and est_dans(chemin, fonds_rel))
+
+
+def est_code(chemin):
+    return any(est_dans(chemin, c) for c in CODE)
+
+
+def nom_sur(m, fonds_rel):
+    """Nom normalisé d'un membre si on l'accepte, sinon None. Liste blanche :
+    - un élément de A_GARDER (entier : « .config/nc » n'accepte pas « .config/nc-autre »), avec des enfants seulement
+      si l'élément est un dossier (« perso.lua/y » est refusé) ;
+    - le préfixe des fonds d'écran, ou, pour les anciennes archives, le dossier des fonds de CE PC (fonds_rel, donné
+      par son réglage lu avant la restauration, jamais par l'archive) : seulement des images ;
+    - pas de chemin absolu, de « .. », de composant de plus de 255 octets, de NUL ;
+    - rien d'autre que des fichiers et des dossiers (ni lien, ni fifo, ni périphérique)."""
+    if not (m.isfile() or m.isdir()) or "\0" in m.name or m.name.startswith("/"):
+        return None
+    parties = m.name.split("/")
+    if ".." in parties or any(len(os.fsencode(p)) > 255 for p in parties):
+        return None
+    chemin = os.path.normpath(m.name)
+    if chemin == ".":
+        return None
+    if est_fonds(chemin, fonds_rel):
+        if m.isfile():          # (les octets du début sont vérifiés à l'écriture : image_valide)
+            return chemin if chemin.lower().endswith(EXT_IMAGES) else None
+        return chemin
+    for a in A_GARDER:
+        if chemin == a:
+            ok = m.isdir() == (a in DOSSIERS)
+        elif a in DOSSIERS and chemin.startswith(a + "/"):
+            ok = True
+        else:
             continue
-        ok.append(m)
-    return ok
+        # Taille limite avant toute lecture (un raccourcis.conf de 100 Mo de \n prendrait Go de mémoire à filtrer)
+        if ok and m.isfile() and m.size > (MAX_FACE if chemin == ".face" else MAX_REGLAGE):
+            ok = False
+        return chemin if ok else None
+    return None
+
+
+def membres_surs(tous, fonds_rel, avec_code):
+    """([(membre, nom normalisé)], [noms ignorés], [fichiers de code non remis])."""
+    ok, ignores, non_remis = [], [], []
+    for m in tous:
+        n = nom_sur(m, fonds_rel)
+        if n is None:
+            ignores.append(m.name)
+        elif est_code(n) and not avec_code:
+            if m.isfile():
+                non_remis.append(n)
+        else:
+            ok.append((m, n))
+    return ok, ignores, non_remis
+
+
+def destination(nom, fonds_dest):
+    """(racine de confiance, chemin relatif, chemin complet) où écrire un membre."""
+    if nom == FONDS_EXTERNES or nom.startswith(FONDS_EXTERNES + "/"):
+        if fonds_dest is None:                    # aucun dossier des fonds sûr sur ce PC : pas de fonds remis
+            raise Refus(T("pas de dossier des fonds sûr", "no safe wallpaper folder"))
+        base, rel = fonds_dest, nom[len(FONDS_EXTERNES) + 1:]
+    else:
+        base, rel = reel(nom)
+    complet = os.path.join(base, rel) if rel else base
+    # Sous HOME, on vérifie depuis HOME : ~/.config/nc remplacé par un lien ne doit pas rediriger l'écriture
+    if sous_home(complet) is not None:
+        base, rel = HOME, os.path.relpath(complet, HOME)
+    return base, rel, complet
+
+
+def dossier_sans_lien(base, rel):
+    """Crée les dossiers de `rel` sous `base` ; refuse si un composant du chemin (de `base` jusqu'au bout) est un lien
+    symbolique, ou n'est pas un dossier. lstat ne suit jamais les liens. (La racine elle-même est de confiance.)"""
+    os.makedirs(base, exist_ok=True)         # la racine est de confiance (HOME, dossier XDG, réglage de ce PC)
+    cur = base
+    for part in [p for p in rel.split(os.sep) if p]:
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            os.mkdir(cur, 0o755)
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            raise Refus(T("lien symbolique sur le chemin", "symbolic link on the path"))
+        if not stat.S_ISDIR(st.st_mode):
+            raise Refus(T("un fichier à la place d'un dossier", "a file where a directory should be"))
+
+
+def morceaux(src):
+    """Lit un membre par morceaux ; une archive abîmée arrête tout (Abimee), à la différence d'une erreur d'écriture."""
+    try:
+        while True:
+            b = src.read(1 << 20)
+            if not b:
+                return
+            yield b
+    except (OSError, EOFError, tarfile.TarError, zlib.error) as e:
+        raise Abimee(e)
+
+
+def lire_local(chemin):
+    """Fichier de ce PC (1 Mo au plus), sinon vide."""
+    try:
+        with open(os.path.join(HOME, chemin), encoding="utf-8", errors="replace") as f:
+            return f.read(MAX_REGLAGE)
+    except OSError:
+        return ""
+
+
+def sans_raccourcis_risques(donnees):
+    """raccourcis.conf d'une archive reçue, sans --avec-code : seulement les lignes « ajout » d'un type sûr (appli,
+    bureau, ile : pas de commande) dont les touches ont SUPER, et les lignes déjà à l'identique dans le fichier de ce
+    PC. « change » et « aucun » sont retirés aussi (Entrée qui éteint le PC, Verrouiller coupé…). Ligne TAB-séparée,
+    « ajout TOUCHES TYPE VALEUR NOM » (TOUCHES en clair : « SUPER + B »). (octets filtrés, nombre de lignes retirées)"""
+    locales = set(lire_local(RACCOURCIS).splitlines())
+    gardees, retirees = [], 0
+    for l in donnees.decode("utf-8", "replace").splitlines():
+        c = l.split("\t")
+        if not l.strip() or l.startswith("#") or l in locales:
+            gardees.append(l)
+            continue
+        # Les touches d'un « ajout » s'écrivent en clair (« SUPER + B ») : il faut un morceau exactement SUPER
+        # (ni SUPER_L, ni « SUPERSCRIPT », ni un masque en nombre)
+        super_ = len(c) > 1 and any(x.strip().upper() == "SUPER" for x in c[1].split("+"))
+        if c[0] == "ajout" and len(c) >= 5 and c[2] in TYPES_SURS and super_:
+            gardees.append(l)
+        else:
+            retirees += 1
+    return ("\n".join(gardees) + "\n").encode("utf-8"), retirees
+
+
+def fusion_reglages(donnees):
+    """reglages.conf d'une archive reçue, sans --avec-code : les lignes CLE=valeur (CLE en [A-Z0-9_]+) de l'archive,
+    sauf les clés de CLES_LOCALES, dont on garde la valeur de ce PC (ou rien). Le reste (commentaires, lignes
+    bizarres) est retiré. (octets, clés gardées)"""
+    ligne = re.compile(r"([A-Z0-9_]+)=.*")
+    # Ce PC : lu aussi souple que ses lecteurs (nc-ia, nc-reglages, le Lua acceptent « IA_MODE = aucune »), réécrit CLE=valeur
+    souple = re.compile(r"\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*")
+    locales, gardees = [], []
+    for l in lire_local(REGLAGES).splitlines():
+        mm = souple.fullmatch(l)
+        if mm and CLES_LOCALES.fullmatch(mm[1]):
+            locales.append(f"{mm[1]}={mm[2]}")
+    sortie = []
+    for l in donnees.decode("utf-8", "replace").splitlines():
+        mm = ligne.fullmatch(l)
+        if not mm:
+            continue
+        if CLES_LOCALES.fullmatch(mm[1]):
+            gardees.append(mm[1])
+        else:
+            sortie.append(l)
+    return ("\n".join(sortie + locales) + "\n").encode("utf-8"), sorted(set(gardees))
+
+
+def image_valide(tete):
+    """Les premiers octets sont ceux d'une image (un SVG ou un script renommé en .png est refusé)."""
+    return (tete.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM", b"\xff\x0a", b"\x00\x00\x00\x0cJXL "))
+            or (tete[:4] == b"RIFF" and tete[8:12] == b"WEBP")
+            or (tete[4:8] == b"ftyp" and tete[8:12] in (b"avif", b"avis")))
+
+
+def ecrire_membre(t, m, nom, dest, fonds_rel, avec_code, retirees, gardees):
+    """Écrit un membre accepté, nous-mêmes (pas tar.extract : pareil sur toutes les versions de Python). Le fichier est
+    écrit dans un temporaire du même dossier (créé en O_EXCL, donc jamais sur un lien existant) puis posé avec
+    os.replace : un lien ou un lien dur déjà là n'est jamais suivi ni modifié, et un échec ne laisse pas de demi-fichier."""
+    base, rel, complet = dest
+    if m.isdir():
+        dossier_sans_lien(base, rel)
+        return
+    dossier_sans_lien(base, os.path.dirname(rel))
+    if os.path.islink(complet):
+        raise Refus(T("lien à la place du fichier", "link where the file should be"))
+    # Un fond d'écran n'est jamais exécutable ; le reste : droits du membre sans setuid/setgid/sticky ni écriture
+    # pour les autres, toujours lisible et modifiable par toi
+    mode = 0o644 if est_fonds(nom, fonds_rel) else (m.mode & 0o755) | 0o600
+    src = t.extractfile(m)
+    fd, tmp = tempfile.mkstemp(prefix=".nc-restauration-", dir=os.path.dirname(complet))
+    try:
+        with os.fdopen(fd, "wb") as out:
+            os.fchmod(out.fileno(), mode)
+            if nom == RACCOURCIS and not avec_code:
+                donnees, n = sans_raccourcis_risques(b"".join(morceaux(src)))
+                retirees.append(n)
+                out.write(donnees)
+            elif nom == REGLAGES and not avec_code:
+                donnees, cles = fusion_reglages(b"".join(morceaux(src)))
+                gardees.extend(cles)
+                out.write(donnees)
+            else:
+                premier = True
+                for b in morceaux(src):
+                    if premier and est_fonds(nom, fonds_rel) and not image_valide(b[:16]):
+                        raise Refus(T("ce n'est pas une image", "not an image"))
+                    premier = False
+                    out.write(b)
+        os.replace(tmp, complet)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def montrer_ignores(ignores):
+    if ignores:
+        print(T(f"{len(ignores)} élément(s) de l'archive ignoré(s) (hors de ce que nc-sauvegarde garde, ou pas sûrs) : ",
+                f"{len(ignores)} archive item(s) ignored (not something nc-backup keeps, or unsafe): ")
+              + ", ".join(propre(i) for i in ignores[:5]) + (" …" if len(ignores) > 5 else ""))
+
+
+def ouvrir(fichier):
+    """Ouvre une archive, ou quitte avec un message clair (fichier absent, pas une archive, abîmée)."""
+    if not os.path.isfile(fichier):
+        echec(f"fichier introuvable : {fichier}", f"file not found: {fichier}")
+    try:
+        return tarfile.open(fichier, "r:gz")
+    except (OSError, EOFError, tarfile.TarError, zlib.error) as e:
+        echec(f"{fichier} n'est pas une sauvegarde lisible ({e}).", f"{fichier} is not a readable backup ({e}).")
+
+
+def fonds_sur():
+    """Dossier des fonds de ce PC où une restauration peut écrire, ou None. Le réglage FONDS_DOSSIER vient lui-même
+    d'une sauvegarde restaurée avant : il ne doit jamais mener vers du code. On compare des chemins RÉELS (realpath :
+    /proc/self/cwd/…, liens, « ~ »), et on prend le dossier par défaut si le réglage est HOME lui-même, hors de HOME,
+    sous un composant caché (« . »), sous /proc /sys /dev, ou un dossier du PATH (~/bin…). Les fonds écrits sont des
+    images en 0644 de toute façon (jamais exécutables)."""
+    home = os.path.realpath(HOME)
+    chemin = [os.path.realpath(p) for p in os.environ.get("PATH", "").split(":") if p.startswith("/")]
+    for d in (os.path.realpath(dossier_fonds()), os.path.realpath(os.path.join(HOME, "Pictures/Wallpapers"))):
+        rel = os.path.relpath(d, home)
+        if (rel == "." or rel == ".." or rel.startswith("../") or any(p.startswith(".") for p in rel.split("/"))
+                or d.startswith(("/proc", "/sys", "/dev")) or d in chemin):
+            continue
+        return d
+    return None
+
+
+def fonds_rel_de(dest):
+    """Chemin du dossier des fonds relatif à HOME (anciennes archives), ou None."""
+    return os.path.relpath(dest, os.path.realpath(HOME)) if dest else None
+
+
+def lire_membres(t, fonds_dest, avec_code):
+    tous = []
+    for m in t:                  # lu un par un : on s'arrête au premier membre de trop (getmembers() lirait tout)
+        tous.append(m)
+        if len(tous) > MAX_MEMBRES:
+            echec(f"cette archive a trop d'éléments (plus de {MAX_MEMBRES}) : refusée, rien n'est écrit.",
+                  f"this archive has too many items (over {MAX_MEMBRES}): refused, nothing is written.")
+    return membres_surs(tous, fonds_rel_de(fonds_dest), avec_code)
+
+
+def verifier_taille(membres, fonds_dest):
+    """Avant toute écriture : la taille annoncée (un membre « creux » de 148 octets peut en écrire des Go) et la place."""
+    total = sum(m.size for m, _ in membres if m.isfile())
+    if total > MAX_OCTETS:
+        echec(f"cette archive ferait {taille(total)} (plus de {taille(MAX_OCTETS)}) : refusée, rien n'est écrit.",
+              f"this archive would be {taille(total)} (over {taille(MAX_OCTETS)}): refused, nothing is written.")
+    for d in {HOME, fonds_dest} - {None}:
+        while not os.path.exists(d) and d != os.path.dirname(d):
+            d = os.path.dirname(d)
+        st = os.statvfs(d)
+        if total + MARGE_LIBRE > st.f_bavail * st.f_frsize:
+            echec(f"pas assez de place libre pour {taille(total)} : rien n'est écrit.",
+                  f"not enough free space for {taille(total)}: nothing is written.")
 
 
 def voir(fichier):
-    with tarfile.open(fichier, "r:gz") as t:
-        fichiers = [m for m in membres_surs(t) if m.isfile()]
-    print(T(f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} fichiers) :",
-            f"{fichier} ({taille(sum(m.size for m in fichiers))}, {len(fichiers)} files):"))
+    try:
+        with ouvrir(fichier) as t:
+            membres, ignores, _ = lire_membres(t, fonds_sur(), True)
+    except (OSError, EOFError, tarfile.TarError, zlib.error) as e:
+        echec(f"{fichier} est abîmée ({e}).", f"{fichier} is damaged ({e}).")
+    fichiers = [(m, n) for m, n in membres if m.isfile()]
+    print(T(f"{propre(fichier)} ({taille(sum(m.size for m, _ in fichiers))}, {len(fichiers)} fichiers) :",
+            f"{propre(fichier)} ({taille(sum(m.size for m, _ in fichiers))}, {len(fichiers)} files):"))
     groupes = {}
-    for m in fichiers:                       # beaucoup de fichiers (fonds d'écran) : regroupés par dossier
-        cle = (os.path.dirname(m.name) or m.name) if len(fichiers) > 20 else m.name
+    for _, n in fichiers:                    # beaucoup de fichiers (fonds d'écran) : regroupés par dossier
+        cle = (os.path.dirname(n) or n) if len(fichiers) > 20 else n
         groupes[cle] = groupes.get(cle, 0) + 1
     for g, n in sorted(groupes.items()):
-        print(f"  • ~/{g}" + (T(f"  ({n} fichiers)", f"  ({n} files)") if n > 1 else ""))
+        code, cmd = est_code(g), g == RACCOURCIS
+        g = T("fonds d'écran", "wallpapers") + g[len(FONDS_EXTERNES):] if g.startswith(FONDS_EXTERNES) else "~/" + g
+        print(f"  • {propre(g)}" + (T(f"  ({n} fichiers)", f"  ({n} files)") if n > 1 else "")
+              + (T("  [contient du code]", "  [contains code]") if code else "")
+              + (T("  [peut contenir des commandes]", "  [may contain commands]") if cmd else ""))
+    montrer_ignores(ignores)
 
 
-def restaurer(fichier):
-    if not os.path.isfile(fichier):
-        sys.exit(T(f"nc-sauvegarde : fichier introuvable : {fichier}", f"nc-backup: file not found: {fichier}"))
-    avant = os.path.join(HOME, ".cache/nc/avant-restauration", datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S"))
-    with tarfile.open(fichier, "r:gz") as t:
-        membres = membres_surs(t)
-        # Ce qui sera remplacé est mis de côté d'abord
-        for m in membres:
-            cible = os.path.join(*reel(os.path.normpath(m.name)))
-            if m.isfile() and os.path.isfile(cible):
-                os.makedirs(os.path.dirname(os.path.join(avant, m.name)), exist_ok=True)
-                shutil.copy2(cible, os.path.join(avant, m.name))
-        # Chacun dans son dossier : ceux de Noctalia là où il les lit (renommés pour l'extraction), le reste chez toi
-        par_dossier = {}
-        for m in membres:
-            dossier, nom = reel(os.path.normpath(m.name))
-            if nom != os.path.normpath(m.name):
-                m = copy.copy(m)
-                m.name = nom
-            par_dossier.setdefault(dossier, []).append(m)
-        for dossier, liste in par_dossier.items():
-            try:
-                t.extractall(dossier, members=liste, filter="data")
-            except TypeError:                                 # Python < 3.12 : sans filtre (chemins déjà vérifiés)
-                t.extractall(dossier, members=liste)
-    print(T(f"Sauvegarde remise ({len(membres)} fichiers). Avant : {avant.replace(HOME, '~')}",
-            f"Backup restored ({len(membres)} files). Before: {avant.replace(HOME, '~')}"))
-    # Tout ce qui découle des réglages est refait, et appliqué tout de suite
-    bin_ = os.path.join(HOME, ".local/bin")
-    subprocess.run([os.path.join(bin_, "nc-reglages"), "appliquer"], capture_output=True)
-    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        subprocess.run(["hyprctl", "reload"], capture_output=True)
-    subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
-    print(T("Réglages appliqués.", "Settings applied."))
+def lancer_si_present(cmd):
+    """Lance une commande ; False si elle manque (la restauration, elle, est déjà faite)."""
+    try:
+        return subprocess.run(cmd, capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+def nouveau_avant():
+    """Dossier tout neuf (nom unique) où mettre ce qui va être remplacé."""
+    parent = os.path.join(HOME, ".cache/nc/avant-restauration")
+    os.makedirs(parent, exist_ok=True)
+    return tempfile.mkdtemp(prefix=datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S") + "-", dir=parent)
+
+
+def restaurer(fichier, avec_code):
+    # Lu AVANT la restauration, sur ce PC : l'archive ne choisit jamais où vont les fonds d'écran
+    fonds_dest = fonds_sur()
+    fonds_rel = fonds_rel_de(fonds_dest)
+    ecrits, ignores, non_remis, retirees, gardees, avant, copies = set(), [], [], [], [], None, set()
+    try:
+        with ouvrir(fichier) as t:
+            membres, ignores, non_remis = lire_membres(t, fonds_dest, avec_code)
+            verifier_taille(membres, fonds_dest)
+            for m, n in membres:
+                try:
+                    dest = destination(n, fonds_dest)
+                    base, rel, complet = dest
+                    # Ce qui sera remplacé est mis de côté d'abord, une seule fois par nom (c'est l'original qu'on
+                    # garde), et seulement si le chemin est sans lien
+                    if m.isfile() and n not in copies and os.path.isfile(complet) and not os.path.islink(complet):
+                        dossier_sans_lien(base, os.path.dirname(rel))
+                        if avant is None:
+                            avant = nouveau_avant()
+                        os.makedirs(os.path.dirname(os.path.join(avant, n)), exist_ok=True)
+                        shutil.copy2(complet, os.path.join(avant, n))
+                        copies.add(n)
+                    ecrire_membre(t, m, n, dest, fonds_rel, avec_code, retirees, gardees)
+                    if m.isfile():
+                        ecrits.add(n)
+                except (Refus, OSError):             # un membre qui ne passe pas (nom trop long, droits…) : ignoré
+                    ignores.append(m.name)
+    except (OSError, EOFError, tarfile.TarError, zlib.error, Abimee) as e:
+        echec(f"restauration interrompue ({e}) ; une partie des fichiers a pu être remise.",
+              f"restore interrupted ({e}); some files may have been restored.")
+    print(T(f"Sauvegarde remise ({len(ecrits)} fichiers).", f"Backup restored ({len(ecrits)} files).")
+          + (T(f" Avant : {avant.replace(HOME, '~')}", f" Before: {avant.replace(HOME, '~')}") if avant else ""))
+    montrer_ignores(ignores)
+    if sum(retirees):
+        print(T(f"{sum(retirees)} ligne(s) de raccourcis non remise(s), --avec-code pour les garder.",
+                f"{sum(retirees)} shortcut line(s) not restored, --with-code to keep them."))
+    if gardees:
+        print(T("Réglages de sécurité gardés tels qu'ils sont sur ce PC (ceux de l'archive ne sont pas pris) : ",
+                "Security settings kept as they are on this PC (the archive's are not used): ") + ", ".join(sorted(set(gardees))))
+    if fonds_dest is None and any(est_dans(n, FONDS_EXTERNES) for _, n in membres):
+        print(T("Fonds d'écran non remis : aucun dossier sûr ; règle FONDS_DOSSIER sous ton dossier personnel.",
+                "Wallpapers not restored: no safe folder; set FONDS_DOSSIER inside your home folder."))
+    if non_remis:
+        print(T("Fichiers qui lancent du code, NON remis : ", "Files that run code, NOT restored: ")
+              + ", ".join(propre(n) for n in sorted(set(non_remis))))
+    # Sans --avec-code, ce qui a été filtré, en une phrase, et comment tout remettre (le cas courant : TA sauvegarde)
+    filtres = len(set(non_remis)) + len(set(gardees)) + sum(retirees)
+    if filtres:
+        print(T(f"{filtres} réglage(s) et fichier(s) gardés tels quels chez toi (sûreté). Si c'est ta propre sauvegarde : "
+                f"nc-sauvegarde restaurer --avec-code {propre(fichier)}",
+                f"{filtres} setting(s) and file(s) kept as they are on your PC (safety). If it is your own backup: "
+                f"nc-backup restore --with-code {propre(fichier)}"))
+    # Tout ce qui découle des réglages est refait, et appliqué tout de suite (rien d'écrit : rien à recharger)
+    ok = lancer_si_present([os.path.join(HOME, ".local/bin/nc-reglages"), "appliquer"])
+    if ecrits and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        lancer_si_present(["hyprctl", "reload"])
+    lancer_si_present(["noctalia", "msg", "config-reload"])
+    if ok:
+        print(T("Réglages appliqués.", "Settings applied."))
+    else:                                    # la restauration est faite : pas une erreur, mais on le dit
+        print(T("Fichiers remis, mais nc-reglages n'a pas pu appliquer les réglages (absent ?) : lance « nc-reglages appliquer ».",
+                "Files restored, but nc-reglages could not apply the settings (missing?): run \"nc-reglages appliquer\"."),
+              file=sys.stderr)
 
 
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("--fonds", "creer", "créer", "--wallpapers", "create"):
         creer("--fonds" in a or "--wallpapers" in a)
-    elif a[0] in ("restaurer", "remettre", "restore") and len(a) > 1:
-        restaurer(os.path.expanduser(a[1]))
+    elif a[0] in ("restaurer", "remettre", "restore") and len([x for x in a[1:] if not x.startswith("--")]) == 1:
+        restaurer(os.path.expanduser([x for x in a[1:] if not x.startswith("--")][0]),
+                  "--avec-code" in a or "--with-code" in a)
     elif a[0] in ("voir", "show") and len(a) > 1:
         voir(os.path.expanduser(a[1]))
     else:

@@ -371,6 +371,19 @@ class Diag(BaseDiag):
         self.assertIsNone(self.constat("bt_mediatek_autosuspend"))
 
 
+class Langue(Base):
+    def test_langue_de_reglages_conf(self):
+        """LANGUE de reglages.conf compte quand NC_LANGUE est absent (la locale du service n'est pas celle de l'utilisateur)."""
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=en\n")
+        env = self.env(LANG="fr_FR.UTF-8")
+        env.pop("NC_LANGUE")
+        r = subprocess.run([sys.executable, str(BT), "reparer", "mauvaise carte"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertIn("invalid Bluetooth card", r.stderr)
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\n")
+        r = subprocess.run([sys.executable, str(BT), "reparer", "mauvaise carte"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertIn("carte Bluetooth invalide", r.stderr)
+
+
 class Reglages(unittest.TestCase):
     def setUp(self):
         d = tempfile.TemporaryDirectory(prefix="nc-bt-reglages-")

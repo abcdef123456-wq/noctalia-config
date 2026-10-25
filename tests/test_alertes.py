@@ -147,6 +147,22 @@ class Alertes(unittest.TestCase):
         self.lancer("maj", "0")
         self.assertEqual(len(self.textes()), 1, "sur secteur, elle part")
 
+    def test_batterie_et_services_partent_en_economie(self):
+        """nc-profile-sync passe seul en Économie (ECO_AUTO) : l'alerte de batterie faible ne doit pas être retenue."""
+        self.batterie(15, "Discharging")
+        self.lancer("verifier", eco=True)
+        self.assertEqual(self.textes(), ["🔋 Batterie à 15 % (seuil 20 %) : branche le PC."])
+        self.lancer("verifier", echecs="nc-pouls.service loaded failed failed Halo\n", eco=True)
+        self.assertEqual(len(self.textes()), 2, "service en échec : part aussi en Économie")
+        self.lancer("maj", "0", eco=True)
+        self.assertEqual(len(self.textes()), 2, "la mise à jour reste en pause en Économie")
+
+    def test_ia_mode_non_coupe_aussi_les_alertes_urgentes(self):
+        self.batterie(15, "Discharging")
+        (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nALERTES_TELEGRAM=oui\nIA_MODE=non\n")
+        self.lancer("verifier", eco=True)
+        self.assertEqual(self.textes(), [])
+
     def test_rien_sans_reglage_ni_connexion(self):
         self.batterie(5, "Discharging")
         self.regler("non", "20")

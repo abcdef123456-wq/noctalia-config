@@ -99,7 +99,9 @@ case "$action" in
     a="${2:-}"; [ -n "$a" ] || exit 0
     if [ "$(bureau_de "$a")" = "$CACHE" ]; then exec "$0" aller "$a"; else exec "$0" reduire "$a"; fi ;;
   fermer)
-    [ -n "${2:-}" ] && eval_lua "hl.dsp.window.close({ window = 'address:$2' })" ;;
+    [ -n "${2:-}" ] || exit 1
+    [[ "$2" =~ ^0x[0-9a-fA-F]+$ ]] || exit 2
+    eval_lua "hl.dsp.window.close({ window = 'address:$2' })" ;;
   tout-masquer)
     ws="$(bureau_actif)"
     instantane="$(geometries)" || exit 1
@@ -253,6 +255,9 @@ they go to a hidden workspace, "special:reduites", and come back to the visible 
 A minimized window activated another way (dock, Alt + Tab) also comes back on its own (nc/automatismes.lua).
 FIN
     else
-      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
-    fi ;;
+      # L'en-tête : les lignes de commentaire après le « #! », jusqu'à la première ligne qui n'en est pas une
+      sed -n '2,${/^#/!q;p}' "$0" | sed 's/^# \{0,1\}//'
+    fi
+    # Une action inconnue n'est pas un succès ; sans action (ou aide), code 0
+    case "$action" in ""|-h|--help|aide|help) ;; *) exit 2 ;; esac ;;
 esac

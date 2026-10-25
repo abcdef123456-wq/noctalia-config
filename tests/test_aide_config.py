@@ -175,5 +175,28 @@ ShellRoot {
             self.assertIn("reglagesChercher", (root / "qs-appels").read_text(), "un réglage ouvre la fenêtre des réglages sur lui")
 
 
+class AideAnglais(unittest.TestCase):
+    setUp = Index.setUp                     # le même faux HOME, sans relancer les tests d'Index
+
+    def aide(self, *a):
+        env = dict(self.env, NC_LANGUE="en")
+        for n in ("nc-alertes", "nc-bt-appel", "nc-fenetre"):
+            shutil.copy2(BIN / n, self.home / ".local/bin" / n)
+        return subprocess.run([str(self.home / ".local/bin/nc-aide"), *a], env=env, capture_output=True, text=True, timeout=30)
+
+    def test_detail_anglais_des_trois_commandes(self):
+        for nom, mot in (("nc-alertes", "Telegram"), ("nc-bt-appel", "headset"), ("nc-fenetre", "Minimize a window")):
+            r = self.aide(nom)
+            self.assertNotIn("Traceback", r.stderr)
+            self.assertIn(mot, r.stdout, nom)
+            self.assertGreater(len([l for l in r.stdout.splitlines() if l.strip()]), 1, nom)
+
+    def test_vue_d_ensemble_les_cite(self):
+        r = self.aide()
+        self.assertNotIn("Traceback", r.stderr)
+        for nom in ("nc-alertes", "nc-bt-appel", "nc-window"):
+            self.assertIn(nom, r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,18 @@ import sys
 import threading
 import time
 
+DOC_EN = """nc-bt-appel: the microphone of a Bluetooth headset that stays silent or in reduced sound during a call (nc-bt-appel service).
+
+  nc-bt-appel                   the service: waits for sound events (pactl subscribe) and kernel events, no busy loop;
+                                when a headset falls back to the reduced-quality call profile (or the kernel reports
+                                corrupted SCO packets), it reconnects the headset, at most 2 tries in 2 minutes per device
+  nc-bt-appel reparer CARD      a reconnection right now (nc-diag), without the limit
+  nc-bt-appel appel CARD        exit code 0 if an app is recording on this headset's microphone, 1 otherwise
+
+Only active if bluez5.enable-msbc is true in ~/.config/wireplumber/wireplumber.conf.d, a Bluetooth adapter exists and
+BT_APPEL_REPARE is not "non" (nc-settings → Sound and brightness).
+"""
+
 MAC = re.compile(r"(?:[0-9A-F]{2}:){5}[0-9A-F]{2}")
 CARTE = re.compile(r"bluez_card\.[0-9A-F_]{17}")
 APPEL, CVSD = "headset-head-unit", "headset-head-unit-cvsd"
@@ -47,7 +59,14 @@ SCO_RAFALE, SCO_SECONDES = 5, 5.0
 def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
+        l = reglage("LANGUE")                      # nc-reglages → Apparence → Langue (auto, fr, en)
+    if l not in ("fr", "en"):
         loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
         l = "fr" if loc.startswith("fr") else "en"
     return l
 

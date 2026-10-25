@@ -19,6 +19,20 @@ import subprocess
 import sys
 import types
 
+DOC_EN = """nc-alertes: machine alerts to Telegram, through the JARVIS bot (notify op of the gateway's /api/nc/manage).
+
+  nc-alertes verifier       battery under the island's threshold (BATTERIE_ALERTE, once per drop under it) and failed
+                            nc-* user services (once per failure); every 5 min (nc-alertes.timer)
+  nc-alertes maj N          end of the system update (run by nc-packages): N updates left
+  nc-alertes maj N echec C  the system update failed (exit code C): ❌, N left
+  nc-alertes envoyer TEXT   a free message
+
+Nothing is sent without ALERTES_TELEGRAM=oui (nc-settings → AI agents) or without a configured connection (nc-assistant
+configurer); the message goes to the Telegram chats that already wrote to the bot. State: ~/.local/state/nc/alertes.json.
+Battery and failed-service alerts are sent even in Economy on battery; update and version messages are skipped there. IA_MODE=non
+stops everything. Errors go to stderr; the exit code stays 0 (timer).
+"""
+
 BIN = Path(__file__).resolve().parent
 ETAT = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "nc/alertes.json"
 SYSFS = Path(os.environ.get("NC_ALERTES_SYSFS") or "/sys/class/power_supply")
@@ -109,9 +123,13 @@ def en_pause():
         return False
 
 
-def envoyer(m, texte):
-    """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion."""
-    if reglages().get("ALERTES_TELEGRAM", "non") != "oui" or reglages().get("IA_MODE", "auto") == "non" or en_pause():
+def envoyer(m, texte, urgent=False):
+    """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion. La pause Économie sur batterie ne retient
+    que les envois d'arrière-plan sans urgence (mise à jour, version, message libre) : la batterie faible et les
+    services en échec sont un petit message sans IA, et nc-profile-sync passe seul en Économie sous ECO_AUTO,
+    précisément quand la batterie est faible."""
+    if reglages().get("ALERTES_TELEGRAM", "non") != "oui" or reglages().get("IA_MODE", "auto") == "non" or \
+            (not urgent and en_pause()):
         return False
     try:
         c = m.configuration()
@@ -134,7 +152,7 @@ def verifier(m):
     if b and seuil > 0 and reglages().get("ALERTES_BATTERIE", "oui") != "non":
         pct, decharge = b
         if decharge and pct <= seuil and not etat.get("batterie_sous"):
-            if envoyer(m, T(f"🔋 Batterie à {pct} % (seuil {seuil} %) : branche le PC.", f"🔋 Battery at {pct}% (threshold {seuil}%): plug in the PC.")):
+            if envoyer(m, T(f"🔋 Batterie à {pct} % (seuil {seuil} %) : branche le PC.", f"🔋 Battery at {pct}% (threshold {seuil}%): plug in the PC."), urgent=True):
                 etat["batterie_sous"] = True
         elif not decharge or pct > seuil + 5:
             etat["batterie_sous"] = False      # rebranché ou remonté : le prochain passage sous le seuil alerte de nouveau
@@ -143,7 +161,7 @@ def verifier(m):
     if nouveaux:
         texte = T("⚠️ Service en échec sur le PC : ", "⚠️ Failed service on the PC: ") + ", ".join(nouveaux) + \
             T(" (journalctl --user -u …).", " (journalctl --user -u …).")
-        if not envoyer(m, texte):
+        if not envoyer(m, texte, urgent=True):
             echecs = [u for u in echecs if u not in nouveaux]     # non prévenu : on réessaiera
     etat["echecs"] = echecs
     ecrire_etat(etat)

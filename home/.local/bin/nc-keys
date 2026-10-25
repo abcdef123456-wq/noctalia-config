@@ -55,6 +55,8 @@ KEYCODES = {
     65: T("Espace", "Space"), 61: "/",
     59: ",", 60: ".", 20: "-", 21: "=", 34: "[", 35: "]", 47: ";", 48: "'", 51: "\\",
     111: "↑", 113: "←", 114: "→", 116: "↓",
+    110: T("Début", "Home"), 115: T("Fin", "End"), 112: T("Page préc.", "Page Up"), 117: T("Page suiv.", "Page Down"),
+    118: T("Inser.", "Insert"), 119: T("Suppr", "Delete"),
 }
 for i, k in enumerate("1234567890"):
     KEYCODES[10 + i] = k
@@ -132,7 +134,12 @@ def key_label(raw):
 
 
 def collect():
-    out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True, check=True).stdout
+    try:
+        out = subprocess.run(["hyprctl", "binds"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        print(T("nc-keys : Hyprland ne répond pas (hyprctl absent ou en échec) : lance-le depuis une session Hyprland",
+                "nc-keys: Hyprland is not answering (hyprctl missing or failing): run it from a Hyprland session"), file=sys.stderr)
+        sys.exit(1)
     rows = {}   # (section, texte, mods) -> {keys, order}
     for n, b in enumerate(parse_binds(out)):
         desc = b.get("description", "").strip()

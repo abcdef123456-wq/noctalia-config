@@ -157,13 +157,21 @@ QWERTZ = {"Z": 29, "Y": 52}
 
 
 def letter_codes(letter):
-    codes = {QWERTY.get(letter)}
-    layouts = subprocess.run(["hyprctl", "getoption", "input:kb_layout"], capture_output=True, text=True).stdout
-    for l in re.findall(r"[a-z]+", layouts.split("str:")[-1]):
+    """Codes possibles de la lettre selon la disposition active : QWERTY seulement si une disposition QWERTY est
+    active (us, gb, es… ou « fr,us »), ou si la disposition est inconnue."""
+    res = subprocess.run(["hyprctl", "getoption", "input:kb_layout"], capture_output=True, text=True).stdout
+    # « str: fr,us » puis « set: true » : seulement la ligne de str (sinon « set » et « true » passent pour des dispositions)
+    layouts = re.findall(r"[a-z]+", res.split("str:")[-1].partition("\n")[0]) if "str:" in res else []
+    codes = set()
+    for l in layouts:
         if l in ("fr", "be"):
             codes.add(AZERTY.get(letter, QWERTY.get(letter)))
         elif l in ("de", "ch", "at", "cz", "sk", "hu", "si", "hr", "rs"):
             codes.add(QWERTZ.get(letter, QWERTY.get(letter)))
+        else:
+            codes.add(QWERTY.get(letter))
+    if not codes:
+        codes.add(QWERTY.get(letter))
     return {c for c in codes if c}
 
 
@@ -232,10 +240,15 @@ def desc_text(desc):
 
 
 # ── Fichier des changements ─────────────────────────────────────────────────────────────────────────────────────
+CHAMPS = {"ajout": 5, "change": 3, "aucun": 2}      # nombre de champs d'une ligne, par type
+
+
 def read_conf():
     try:
         with open(CONF, encoding="utf-8") as f:
-            return [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith("#")]
+            lignes = [l.rstrip("\n").split("\t") for l in f if l.strip() and not l.startswith("#")]
+        # Une ligne abîmée (trop peu de champs) est ignorée : sinon e[4] fait planter la liste
+        return [e for e in lignes if len(e) >= CHAMPS.get(e[0], 2)]
     except FileNotFoundError:
         return []
 
@@ -247,7 +260,7 @@ def write_conf(entries):
         f.write("# Tes raccourcis (commande nc-raccourci). Gardé tel quel par les mises à jour.\n"
                 "# change MASQUE:TOUCHE NOUVELLES_TOUCHES (nom) · aucun MASQUE:TOUCHE (nom) · ajout TOUCHES TYPE VALEUR NOM\n")
         for e in entries:
-            f.write("\t".join(x.replace("\t", " ") for x in e) + "\n")
+            f.write("\t".join(re.sub(r"[\t\r\n]", " ", x) for x in e) + "\n")
     os.replace(tmp, CONF)
 
 
