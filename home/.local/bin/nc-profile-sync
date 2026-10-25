@@ -47,8 +47,10 @@ NOCTALIA_BAT="$NOCTALIA_CONF/zz-batterie.toml"   # avant zz-economie : l'Économ
 ALIM="${NC_POWER_SUPPLY:-/sys/class/power_supply}"
 LEDS="${NC_LEDS:-/sys/class/leds}"
 CFG="$HOME/.config/nc-profile.conf"
-# Rétroéclairage de l'écran : le premier qui n'est pas celui de la carte NVIDIA
-BACKLIGHT=$(for d in /sys/class/backlight/*; do n=${d##*/}; case $n in nvidia*|\*) ;; *) echo "$n"; break ;; esac; done)
+# Rétroéclairage de l'écran : le même que les touches et l'île (nc-brightness : nvidia_0 en mode carte dédiée) ;
+# sans nc-brightness, le premier qui n'est pas celui de la carte NVIDIA
+BACKLIGHT=$("$HOME/.local/bin/nc-brightness" appareil 2>/dev/null) ||
+  BACKLIGHT=$(for d in /sys/class/backlight/*; do n=${d##*/}; case $n in nvidia*|\*) ;; *) echo "$n"; break ;; esac; done)
 
 HZ_PERFORMANCE=max
 HZ_BALANCED_AC=max

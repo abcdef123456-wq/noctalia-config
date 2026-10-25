@@ -9,7 +9,9 @@
 #   nc-brightness set N     règle le niveau à N (0 à 100)
 # Rétroéclairage choisi comme le recommande le noyau : d'abord celui du micrologiciel (dont nvidia_wmi_ec_backlight,
 # qui pilote l'écran de portables gaming à NVIDIA Advanced Optimus), puis celui de la plateforme, puis le direct
-# (amdgpu_bl…, intel_backlight). Celui du pilote NVIDIA lui-même (nvidia_0) est ignoré : il ne pilote pas l'écran.
+# (amdgpu_bl…, intel_backlight). Celui du pilote NVIDIA lui-même (nvidia_0) n'est pris qu'en dernier recours, si
+# l'écran interne est sur la NVIDIA (mode carte dédiée) ; en hybride, il ne pilote pas l'écran.
+#   nc-brightness appareil  le rétroéclairage choisi (rien s'il n'y en a pas)
 aide() {
   if [ "${NC_LANGUE:-}" = en ] || { [ -z "${NC_LANGUE:-}" ] && . "$HOME/.local/bin/nc-langue" 2>/dev/null && [ "$NC_LANGUE" = en ]; }; then
     cat <<'FIN'
@@ -19,6 +21,7 @@ aide() {
 #   nc-brightness restore   restores the remembered level
 #   nc-brightness get       current level (0 to 100, same scale as up/down)
 #   nc-brightness set N     sets the level to N (0 to 100)
+#   nc-brightness device    the chosen backlight (nothing if there is none)
 FIN
   else
     sed -n '2,${/^#/!q;p}' "$0"
@@ -26,25 +29,50 @@ FIN
 }
 # L'aide ne dépend pas du matériel : avant la recherche du rétroéclairage
 case "${1:-}" in -h|--help|aide|help) aide; exit 0 ;; esac
+SYS="${NC_SYSFS:-/sys}"
 dev=""
 for type in firmware platform raw; do
-  for d in "${NC_SYSFS:-/sys}"/class/backlight/*; do
+  for d in "$SYS"/class/backlight/*; do
     n=${d##*/}
     case "$n" in nvidia_[0-9]*|'*') continue ;; esac
     [ "$(cat "$d/type" 2>/dev/null)" = "$type" ] && { dev=$n; break 2; }
   done
 done
+# En dernier recours, celui du pilote NVIDIA, seulement si l'écran interne branché est sur cette même carte (mode
+# carte dédiée, MUX : c'est alors le seul qui pilote l'écran). En hybride, l'eDP est sur la carte intégrée : ignoré.
+if [ -z "$dev" ]; then
+  for d in "$SYS"/class/backlight/nvidia_[0-9]*; do
+    [ -e "$d/device" ] || continue
+    carte="$(readlink -f "$d/device")"
+    for s in "$SYS"/class/drm/card*-eDP-*/status; do
+      [ "$(cat "$s" 2>/dev/null)" = connected ] || continue
+      c="${s%/status}"; c="${c##*/}"; c="${c%%-*}"
+      [ "$(readlink -f "$SYS/class/drm/$c/device")" = "$carte" ] && { dev=${d##*/}; break 2; }
+    done
+  done
+fi
 [ -n "$dev" ] || exit 0
+# Le rétroéclairage choisi (nc-profile-sync s'en sert : le même que les touches et l'île)
+[ "${1:-}" = appareil ] || [ "${1:-}" = device ] && { echo "$dev"; exit 0; }
 pas="$(sed -n 's/^LUMINOSITE_PAS=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -dc 0-9)"
 [ -n "$pas" ] && [ "$pas" -ge 1 ] && [ "$pas" -le 25 ] || pas=5
+# Le rétroéclairage du pilote NVIDIA écrit la valeur puis répond « Protocol error » (vu sur une Legion en mode carte
+# dédiée : le niveau change bien) : ce faux échec n'est ni affiché ni compté. Toute autre erreur reste visible.
+ecrire() {
+  local err code
+  { err="$(brightnessctl "$@" 2>&1 1>&3)"; code=$?; } 3>&1        # la sortie normale passe, l'erreur est lue
+  case "$dev:$code:$err" in nvidia_[0-9]*:1:*"Protocol error"*) return 0 ;; esac
+  [ -n "$err" ] && printf '%s\n' "$err" >&2
+  return "$code"
+}
 case "${1:-}" in
-  up)      exec brightnessctl -d "$dev" -e2 -n2 set "$pas%+" ;;
-  down)    exec brightnessctl -d "$dev" -e2 -n2 set "$pas%-" ;;
+  up)      ecrire -d "$dev" -e2 -n2 set "$pas%+"; exit ;;
+  down)    ecrire -d "$dev" -e2 -n2 set "$pas%-"; exit ;;
   dim)     brightnessctl -s -q -d "$dev"
            b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
-           [ "$b" -gt 20 ] && brightnessctl -q -d "$dev" set 20% ; exit 0 ;;
-  restore) exec brightnessctl -r -q -d "$dev" ;;
+           [ "$b" -gt 20 ] && ecrire -q -d "$dev" set 20% ; exit 0 ;;
+  restore) ecrire -r -q -d "$dev"; exit ;;
   get)     brightnessctl -d "$dev" -e2 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
-  set)     exec brightnessctl -q -d "$dev" -e2 -n2 set "${2:-50}%" ;;
+  set)     ecrire -q -d "$dev" -e2 -n2 set "${2:-50}%"; exit ;;
   *) aide; exit 1 ;;
 esac
