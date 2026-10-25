@@ -11,6 +11,7 @@ Item {
     id: c
     readonly property string mode: Etat.activiteType !== "" ? Etat.activiteType
                                    : Etat.enregistre ? "video"
+                                   : Partage.indicateur ? "partage"
                                    : AssistantEtat.activitePilule !== "" ? AssistantEtat.activitePilule
                                    : Etat.telecharge && !Etat.aMusique && !Agents.travaille ? "telechargement"
                                    : (Agents.attendTerminal ? "claude"
@@ -21,7 +22,7 @@ Item {
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
-                                      claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video,
+                                      claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video, partage: partage,
                                       telechargement: telechargement, "telechargement-fini": telechargementFini })[mode] || repos
 
     component Fondu: Row {
@@ -312,6 +313,16 @@ Item {
             text: Etat.duree(Math.max(0, Math.floor(Etat.maintenant.getTime() / 1000 - Etat.debutVideo)))
         }
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "stop_circle"; taille: 17; color: Couleurs.texteSec }
+    }
+
+    // ── Écran partagé (Partage.qml, après 1,5 s de partage continu) : pastille et « Partage », comme les points du micro et de la caméra ──
+    // Après l'enregistrement d'écran (nc-video, qui montre déjà qu'on capture et s'arrête d'un clic), avant tout le reste
+    Fondu {
+        id: partage
+        objectName: "nc-partage-pill"
+        montre: c.mode === "partage"
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Partage", "Sharing"); font.weight: Font.DemiBold }
     }
 
     // ── Mode jeu ──

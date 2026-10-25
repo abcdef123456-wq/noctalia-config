@@ -33,10 +33,11 @@ class PageAssistant(unittest.TestCase):
                 champs.update({k:'false' for k in ('aMusique','enregistre','telecharge','pomodoro','pomoPause','muet','joue','branche','cameraActive','meteoPilule','jeu')})
                 champs.update({k:'0' for k in ('minuteurFin','minuteurReste','volume','luminosite','pourcent','profil','debutVideo')})
                 champs.update(meteo='({})',bandes='[0,0,0,0,0]',telechargements='[]',maintenant='new Date()')
+                (root/'Partage.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool indicateur: false}')
                 (root/'Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {\n'+ '\n'.join('property var '+k+':'+v for k,v in champs.items())+'\nfunction duree(n){return "0:00"} function nomJoli(s){return s} function octets(n){return "0"}\n}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml") else "")
-                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml"] if compact else [])))
+                ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml") else "")
+                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml"] if compact else [])))
             if not absent:
                 bin = root / ".local/bin"
                 bin.mkdir(parents=True)

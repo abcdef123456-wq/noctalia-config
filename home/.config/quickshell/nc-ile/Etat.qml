@@ -667,7 +667,7 @@ Singleton {
     // Barres réellement affichées : pilule fermée en mode musique (même règle que « mode » de Compact.qml), ou île
     // ouverte sur la page Musique. Écran éteint ou session verrouillée : jamais.
     readonly property bool barresAffichees: joue && ecranVu && (ecranOuvert === "" ? (aMusique && activiteType === "" && !enregistre
-                                                                                          && AssistantEtat.activitePilule === "" && !Agents.attendTerminal)
+                                                                                          && !Partage.indicateur && AssistantEtat.activitePilule === "" && !Agents.attendTerminal)
                                                                                     : vueActive === "musique")
     property real dernierSon: 0
     // 30 images/s, sans animation entre deux pas (une animation de 70 ms à chaque pas faisait redessiner l'île à 165 Hz)

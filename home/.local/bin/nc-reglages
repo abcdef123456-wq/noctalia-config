@@ -413,6 +413,13 @@ REGLAGES = [
     R("ILE_BANNIERE_DUREE", "Notifications", L("Durée d'une bannière", "Banner duration"), "entier", "4",
       L("De 3 à 5 s. Le pointeur posé dessus la garde ouverte.", "3 to 5 s. Hovering the pointer over it keeps it open."),
       mini=3, maxi=5, unite="s"),
+    R("PARTAGE_DISCRET", "Notifications", L("Partage d'écran discret", "Discreet screen sharing"), "ouinon", "oui",
+      L("Pendant un partage d'écran (Discord, Meet, Teams…), les notifications n'apparaissent pas en bannière, même les urgentes : "
+        "elles restent dans la page Notifications. La pilule montre « Partage ». À la fin, une notification dit combien sont arrivées. "
+        "Ton réglage Concentration n'est pas touché. Non : rien ne change.",
+        "While your screen is shared (Discord, Meet, Teams…), notifications don't pop up as banners, urgent ones included: "
+        "they stay in the Notifications page. The pill shows \"Sharing\". When it ends, a notification says how many arrived. "
+        "Your Focus setting is not touched. No: nothing changes.")),
     R("ILE_METEO", "Île", L("Météo à côté de l'heure", "Weather next to the time"), "ouinon", "oui",
       L("Et une page Météo dans l'île (Open-Meteo, sans compte).", "And a Weather page in the island (Open-Meteo, no account).")),
     R("METEO_VILLE", "Île", L("Ville de la météo", "Weather city"), "texte", "auto",
@@ -1339,7 +1346,7 @@ MATERIEL = {
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
-    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 
 
@@ -1375,6 +1382,9 @@ def materiel():
             "clavier": existe(sys_ + "/class/leds/*kbd_backlight*"), "bluetooth": existe(sys_ + "/class/bluetooth/*"),
             "clavier-batterie": existe(sys_ + "/class/leds/*kbd_backlight*") and existe(sys_ + "/class/power_supply/BAT*"),
             "hybride": cartes == {True, False},
+            # L'île en Quickshell (nc-ile) : sans elle, ce sont les bulles de Noctalia, que le partage discret ne cache pas ;
+            # le réglage n'apparaît pas, pour ne jamais faire croire que c'est protégé
+            "ile": os.path.isfile(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "quickshell/nc-ile/shell.qml")),
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode
             "mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*"),

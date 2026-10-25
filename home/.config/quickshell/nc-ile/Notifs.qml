@@ -2,11 +2,13 @@ pragma Singleton
 // Notifications reçues par l'île (à la place de dunst et de celles de Noctalia) : chaque nouvelle notification sort de
 // la pilule en bannière quelques secondes (comme sur iPhone), puis reste dans l'historique (page « Notifications »).
 // Concentration : plus de bannières (sauf urgentes), l'historique se remplit quand même.
+// Écran partagé (Partage.qml) : plus de bannières du tout, urgentes comprises, sans toucher à la Concentration.
 // Lu / non lu (ouverte, répondue ou marquée), report (15 min, 1 h, demain : la notification revient en bannière à
 // l'heure dite, même après un redémarrage de l'île), applis masquées (1 h ou toujours : ni bannière ni carte), réponse
 // rapide quand l'appli le permet (sendInlineReply). Tout ça est gardé par Memo « notifs ».
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Services.Notifications
 
 Singleton {
@@ -114,6 +116,31 @@ Singleton {
         enAttente = null
         if (a && encoreLa(a)) montrer(a)
     }
+    // Partage d'écran (Partage.qml) : au début, la bulle affichée et celle qui attendait la reprise disparaissent aussitôt ; à la
+    // fin d'une capture courte, la bulle retenue est montrée (si elle est encore là et que la Concentration ne la cache pas).
+    // Le réglage Concentration n'est jamais touché.
+    Connections {
+        target: Partage
+        function onSilenceChanged() {
+            if (!Partage.silence) return
+            if (n.enAttente) { Partage.retenir(n.enAttente); n.enAttente = null }
+            n.banniere = null
+        }
+        // Vrai partage fini : une bulle courte avec le nombre seulement ; un clic ouvre la page Notifications
+        function onTermine(nombre) {
+            if (!n.concentration) n.annonce(Partage.texteFin(nombre))
+        }
+        function onCourteFinie(notif) {
+            if (n.encoreLa(notif) && (!n.concentration || notif.urgency === NotificationUrgency.Critical)) n.montrer(notif)
+        }
+    }
+    function annonce(texte) {
+        var id = "p" + Date.now()
+        var h = Object.assign({}, heures); h[id] = Date.now(); heures = h
+        montrer({ id: id, synthetique: true, page: "notifications", appName: Reglages.t("Île", "Island"), summary: texte, body: "",
+                  image: "", appIcon: "", desktopEntry: "", urgency: NotificationUrgency.Normal, actions: [], resident: true,
+                  hasInlineReply: false, hints: {} })
+    }
     // Toujours là : ni fermée (par toi ou par l'appli), ni reportée, ni son appli masquée entre-temps
     function encoreLa(notif) {
         if (notif.synthetique) return revenues.indexOf(notif) >= 0
@@ -122,6 +149,7 @@ Singleton {
     Timer { id: reprise; interval: 3000; onTriggered: n.pauseBannieres(false) }
 
     function montrer(notif) {
+        if (Partage.silence) { Partage.retenir(notif); return }     // écran partagé : gardée dans l'historique, pas de bulle
         if (enPause) { enAttente = notif; return }
         banniere = notif
         fin.prolonge = false
@@ -179,6 +207,13 @@ Singleton {
     // Clic : action par défaut de l'appli (ouvrir le message…), sinon rien ; la notification est ensuite rangée
     function ouvrir(notif) {
         if (!notif) return
+        if (notif.page) {                                // bulle de l'île (fin de partage) : ouvre la page, rien d'autre
+            banniere = null
+            var ecran = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : (Quickshell.screens.length ? Quickshell.screens[0].name : "")
+            if (ecran === "" || Etat.ecranOuvert !== ecran) Etat.basculer(ecran, true)   // déjà ouverte sur cet écran : basculer la fermerait
+            Etat.aller(notif.page)
+            return
+        }
         lire(notif)
         var a = notif.actions.find(x => x.identifier === "default") || (notif.actions.length === 1 ? notif.actions[0] : null)
         if (a) a.invoke()

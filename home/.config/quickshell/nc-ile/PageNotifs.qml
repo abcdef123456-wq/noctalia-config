@@ -173,6 +173,20 @@ Item {
             onVoulueChanged: Etat.annoncerHauteur("notifications", voulue)
             Component.onCompleted: Etat.annoncerHauteur("notifications", voulue)
 
+            // ── Écran partagé (Partage.qml) : les bulles sont retenues, rien d'autre à faire ici ──
+            Rectangle {
+                objectName: "nc-notifs-partage"
+                visible: Partage.silence
+                width: parent.width; height: visible ? 56 : 0; radius: 16; color: Couleurs.carte
+                Rectangle { id: pointPartage; x: 18; anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
+                Column {
+                    anchors.left: pointPartage.right; anchors.leftMargin: 14; anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                    Texte { width: parent.width; text: Reglages.t("Ton écran est partagé", "Your screen is being shared"); font.weight: Font.DemiBold; font.pixelSize: 13; elide: Text.ElideRight }
+                    Texte { width: parent.width; secondaire: true; font.pixelSize: 11; elide: Text.ElideRight
+                            text: Reglages.t("Les notifications restent ici, sans bulle, jusqu'à la fin du partage.", "Notifications stay here, without a banner, until sharing ends.") }
+                }
+            }
+
             // ── Résumé par l'IA ──
             Rectangle {
                 objectName: "nc-notifs-resume"

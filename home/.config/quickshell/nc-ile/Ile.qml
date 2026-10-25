@@ -228,9 +228,9 @@ PanelWindow {
 
         // Ressort façon iOS : rapide, avec un léger rebond ; le rayon suit sans à-coup. Bannières en pause (nc-session
         // capture l'aperçu d'une session, Notifs.enPause) : l'île revient en pilule d'un coup, sans animation
-        Behavior on width { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
-        Behavior on height { enabled: !Notifs.enPause; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
-        Behavior on radius { enabled: !Notifs.enPause; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: !Notifs.enPause && !Partage.silence; SpringAnimation { spring: 3.4; damping: 0.34; epsilon: 0.25 } }
+        Behavior on height { enabled: !Notifs.enPause && !Partage.silence; SpringAnimation { spring: 3.4; damping: 0.36; epsilon: 0.25 } }
+        Behavior on radius { enabled: !Notifs.enPause && !Partage.silence; NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
         onWidthChanged: fen.revenue()
         onHeightChanged: fen.revenue()
 
@@ -239,7 +239,7 @@ PanelWindow {
             anchors.centerIn: parent
             width: parent.width
             opacity: fen.ouverte || fen.banniere || fen.enCarte ? 0 : 1
-            Behavior on opacity { enabled: !Notifs.enPause; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
+            Behavior on opacity { enabled: !Notifs.enPause && !Partage.silence; NumberAnimation { duration: fen.ouverte || fen.banniere || fen.enCarte ? 90 : 220; easing.type: Easing.OutCubic } }
         }
 
         // Spotlight : longue capsule de recherche
@@ -269,7 +269,7 @@ PanelWindow {
 
         Loader {
             anchors.fill: parent
-            active: fen.banniere || (garderBanniere.running && !Notifs.enPause)    // en pause : retirée tout de suite
+            active: fen.banniere || (garderBanniere.running && !Notifs.enPause && !Partage.silence)    // en pause ou écran partagé : retirée tout de suite
             sourceComponent: Banniere {
                 opacity: fen.banniere && ile.height > fen.hauteurBanniere * 0.7 ? 1 : 0
                 visible: opacity > 0.01
