@@ -1,0 +1,125 @@
+name: Installation réelle
+
+# Lance install.sh de bout en bout, sans terminal, sur une distribution neuve (conteneur), puis vérifie le résultat
+# (tests/verifier_installation.sh). Les tests de tests.yml regardent les scripts un par un ; ici on regarde que
+# l'installation entière marche encore, quand Hyprland, Quickshell ou les dépôts tiers (COPR, OBS, backports) bougent.
+# Long (téléchargements, compilation de Quickshell sur Debian) : donc une fois par semaine, pas à chaque poussée.
+on:
+  schedule:
+    - cron: "17 3 * * 4"   # jeudi 03 h 17 UTC : creux de la semaine
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - .github/workflows/install.yml
+      - tests/verifier_installation.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installation:
+    name: Installation (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: ${{ matrix.image }}
+    # bash partout : dans l'image Debian, sh est dash (pas de <<<)
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: archlinux:latest
+            install: pacman -Syu --noconfirm --needed git sudo lua
+          - image: debian:trixie
+            install: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git sudo lua5.4 ca-certificates
+          - image: fedora:44
+            install: dnf install -y -q git sudo lua
+          - image: opensuse/tumbleweed
+            install: zypper -q --non-interactive install git sudo lua54 tar gzip util-linux
+    steps:
+      # git doit exister avant le checkout (conteneurs minimaux)
+      - name: Installer les paquets minimaux
+        run: ${{ matrix.install }}
+
+      - name: Récupérer le dépôt
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # le jeton ne reste pas dans .git/config, copié ensuite chez l'utilisateur
+
+      # install.sh refuse de tourner en root et utilise sudo : utilisateur ordinaire « ci », sudo sans mot de passe.
+      # Contournement propre à l'image openSUSE (pas à install.sh) : son sudoers a « Defaults targetpw » (mot de passe de
+      # root demandé) et « sudo -v » exige un mot de passe tant qu'une règle n'est pas NOPASSWD : on retire targetpw et on
+      # met verifypw=any pour « ci ». Sur les autres images ces deux lignes ne changent rien.
+      - name: Préparer l'utilisateur ci, sudo sans mot de passe, copie du dépôt
+        run: |
+          useradd -m ci
+          printf 'Defaults:ci !targetpw\nDefaults:ci verifypw=any\nci ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/ci
+          chmod 440 /etc/sudoers.d/ci
+          cp -a "$GITHUB_WORKSPACE" ~ci/noctalia-config
+          chown -R ci ~ci
+          mkdir -p "$RUNNER_TEMP/journaux"
+
+      # Sans terminal : stdin vide et setsid (pas de terminal de contrôle), donc ask() prend ses réponses par défaut ;
+      # --oui accepte aussi les étapes sensibles (démarrage, connexion, pilotes), non par défaut sans terminal, pour tout tester.
+      # Le code de sortie est gardé pour la fin : le journal doit être contrôlé et téléversé même en cas d'échec.
+      - name: Lancer install.sh sans terminal
+        run: |
+          code=0
+          su ci -c 'cd ~/noctalia-config && setsid --wait timeout 30m ./install.sh --oui </dev/null >~/install.log 2>&1' || code=$?
+          cp ~ci/install.log "$RUNNER_TEMP/journaux/install.log"
+          echo "install.sh : code $code"
+          tail -n 25 ~ci/install.log
+          exit "$code"
+
+      - name: Vérifier l'installation
+        run: |
+          code=0
+          su ci -c 'cd ~/noctalia-config && NC_INSTALL_ARGS=--oui setsid --wait bash tests/verifier_installation.sh ~/noctalia-config </dev/null >~/verification.log 2>&1' || code=$?
+          cp ~ci/verification.log "$RUNNER_TEMP/journaux/verification.log"
+          cat ~ci/verification.log
+          exit "$code"
+
+      # Les journaux ne partent en artefact (visible par tous sur un dépôt public) que s'ils ne contiennent rien de secret.
+      # Les adresses des clés de paquets des dépôts tiers (COPR, OBS) sont écartées : ce sont celles des projets.
+      - name: Chercher un secret dans les journaux
+        if: always()
+        id: scan
+        run: |
+          motifs='BEGIN [A-Z ]*PRIVATE KEY
+          (gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})
+          (jeton|token|secret|password|passwd|mot de passe|mdp)[A-Za-z_ -]{0,12}[:=] *[^ ]{8,}
+          (^|[^A-Za-z])(api_?key|secret_?key|access_?key|private_?key|cl[eé])[A-Za-z_]{0,8} *[:=] *[^ ]{8,}
+          (^|[^A-Za-z])key=[^ ]{8,}
+          [A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.(com|org|net|fr|io|dev|eu|info|me|de|uk)\b'
+          autorise='copr\.fedorahosted\.org|build\.opensuse\.org'
+          trouve=0
+          for j in "$RUNNER_TEMP"/journaux/*.log; do
+            [ -f "$j" ] || continue
+            while IFS= read -r m; do
+              m="${m#"${m%%[![:space:]]*}"}"
+              [ -n "$m" ] || continue
+              if grep -aiE -- "$m" "$j" | grep -aviE -- "$autorise" | head -n 3 | grep -aq .; then
+                echo "::error::un motif secret sort dans $(basename "$j") : $m"
+                trouve=1
+              fi
+            done <<<"$motifs"
+          done
+          [ "$trouve" = 0 ] || { echo "Journaux non téléversés : à relire à la main dans les logs de l'étape."; exit 1; }
+
+      - name: Garder les journaux
+        if: always() && steps.scan.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: journaux-installation-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/journaux/
+          retention-days: 14
+          if-no-files-found: ignore
