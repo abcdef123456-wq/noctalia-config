@@ -92,14 +92,31 @@ def nom(pid):
         comm = open(f"/proc/{pid}/comm").read().strip()
     except OSError:
         return None
+    return nom_cmdline(cmd, comm), comm
+
+
+def nom_cmdline(cmd, comm):
+    """Nom lisible d'une ligne de commande (liste d'octets) : pour « python3 -u script.py », c'est script.py."""
     prog = os.path.basename(cmd[0].decode(errors="replace")) if cmd and cmd[0] else comm
-    if prog in ("python3", "python", "bash", "sh") and len(cmd) > 1 and cmd[1]:
-        prog = os.path.basename(cmd[1].decode(errors="replace"))
-    return prog or comm, comm
+    if re.match(r"^(python[0-9.]*|bash|sh)$", prog) and len(cmd) > 1:
+        args = [a.decode(errors="replace") for a in cmd[1:] if a]
+        for i, a in enumerate(args):
+            if a in ("-m", "-c") and i + 1 < len(args):
+                # python3 -m module : le module ; -c : le code ne se lit pas, on garde le nom du programme
+                if a == "-m":
+                    prog = args[i + 1].split(".")[0]
+                break
+            if not a.startswith("-"):
+                prog = os.path.basename(a)
+                break
+    return prog or comm
 
 
 def mo(o):
-    return f"{o / 1048576:7.0f} {T('Mo', 'MB')}" if o < 10 * 1073741824 else f"{o / 1073741824:7.1f} {T('Go', 'GB')}"
+    if o < 10 * 1073741824:
+        return f"{o / 1048576:7.0f} {T('Mo', 'MB')}"
+    t = f"{o / 1073741824:7.1f}"
+    return f"{t.replace('.', ',') if not EN else t} {T('Go', 'GB')}"
 
 
 def main():

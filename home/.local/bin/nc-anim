@@ -129,6 +129,9 @@ def jouer(anim, duree_max=30, ips=30):
     il se termine, après duree_max secondes, ou à la première touche (ou clic)."""
     import termios
     import tty
+    if not (sys.stdout.isatty() and sys.stdin.isatty()):
+        sys.exit(T("nc-anim : il faut un terminal (la sortie ne doit pas être redirigée)",
+                   "nc-anim: a terminal is needed (the output must not be redirected)"))
     fd = sys.stdin.fileno()
     try:
         ancien = termios.tcgetattr(fd)
@@ -157,6 +160,10 @@ def jouer(anim, duree_max=30, ips=30):
         sys.stdout.flush()
         if ancien:
             termios.tcsetattr(fd, termios.TCSADRAIN, ancien)
+        try:
+            termios.tcflush(fd, termios.TCIFLUSH)        # la touche qui ferme l'animation ne reste pas dans l'entrée
+        except (termios.error, OSError):
+            pass
 
 
 # ── Les animations ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -397,6 +404,9 @@ RESERVES = {"aleatoire", "menu", "verrouiller", "veille", "eteindre", "rien", "b
             "button", "list", "new"} | set(ANGLAIS)
 
 
+SAUVEGARDES = (".bak", ".swp", ".swo", ".orig", ".tmp", ".rej", ".old")
+
+
 def perso():
     """Tes animations : {nom: chemin}"""
     res = {}
@@ -404,7 +414,12 @@ def perso():
         for f in sorted(os.listdir(PERSO)):
             chemin = os.path.join(PERSO, f)
             nom = os.path.splitext(f)[0]
-            if os.path.isfile(chemin) and not f.startswith(".") and nom not in NOMS and nom not in RESERVES:
+            if not os.path.isfile(chemin) or f.startswith(".") or nom in NOMS or nom in RESERVES:
+                continue
+            # Sauvegardes d'éditeur (demo.py~, .bak, .swp, .orig…) : pas des animations. On garde *.py, ou un exécutable
+            if f.endswith("~") or os.path.splitext(f)[1] in SAUVEGARDES:
+                continue
+            if f.endswith(".py") or os.access(chemin, os.X_OK):
                 res[nom] = chemin
     except OSError:
         pass

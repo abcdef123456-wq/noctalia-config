@@ -17,6 +17,7 @@ import os
 import re
 import select
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -83,6 +84,7 @@ frame_delimiter = 10
 [smoothing]
 noise_reduction = 55
 """
+PAUSE_CAVA = 60          # secondes d'attente après un échec de cava avec les deux entrées son
 
 
 def socket_path():
@@ -172,12 +174,15 @@ def service():
     # Entrée son de cava : PipeWire, sinon PulseAudio (cava sans PipeWire, comme sur certaines distributions)
     methodes, m = ["pipewire", "pulse"], 0
     cava, niveau, envoye, prochain_test, depart = None, 0.0, -1.0, 0.0, 0.0
+    echecs, pause_jusqua = 0, 0.0        # cava qui ne démarre avec aucune entrée : on attend avant de réessayer
     while True:
         now = time.time()
         if now >= prochain_test:
             prochain_test = now + 2
             actif = musique() and autorise()
-            if actif and cava is None and shutil.which("cava"):
+            if not actif:
+                echecs, pause_jusqua = 0, 0.0      # la musique s'arrête : on réessaiera à la prochaine lecture
+            if actif and cava is None and shutil.which("cava") and now >= pause_jusqua:
                 cava, depart = lancer_cava(methodes[m]), now
             elif not actif and cava is not None:
                 cava.terminate()
@@ -197,9 +202,13 @@ def service():
                 log(T(f"cava ne démarre pas avec {methodes[m]} ({err[:160] or 'sans message'})",
                       f"cava does not start with {methodes[m]} ({err[:160] or 'no message'})"))
                 m = (m + 1) % len(methodes)
+                echecs += 1
+                if echecs >= len(methodes):        # les deux entrées ont échoué : pas de relance toutes les 2 s
+                    echecs, pause_jusqua = 0, time.time() + PAUSE_CAVA
             cava = None
             halo(0)
             continue
+        echecs = 0
         barres = [int(x) for x in ligne.strip().strip(";").split(";") if x.isdigit()]
         if len(barres) < 2:
             continue
@@ -287,6 +296,8 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         print(T(__doc__.strip(), USAGE_EN))
     else:
+        # SIGTERM (systemctl stop, Super + Alt + M) passe par le finally : le halo revient à zéro
+        signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
         try:
             service()
         finally:

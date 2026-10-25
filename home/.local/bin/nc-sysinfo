@@ -20,10 +20,15 @@ gpu_name() { # $1 = dossier PCI
   if [ "$ven" = 1002 ] && [ -r /usr/share/libdrm/amdgpu.ids ]; then
     name=$(awk -F',[ \t]*' -v d="${dev^^}" -v r="${rev^^}" '$1 == d && $2 == r { print $3; exit }' /usr/share/libdrm/amdgpu.ids)
   fi
-  if [ -z "$name" ] && [ -r /usr/share/hwdata/pci.ids ]; then
+  local ids="" f
+  # pci.ids : hwdata (Arch, Fedora, openSUSE) ou pciutils (Debian) ; NC_PCI_IDS : un autre fichier, pour les tests
+  for f in "${NC_PCI_IDS:-}" /usr/share/hwdata/pci.ids /usr/share/misc/pci.ids /usr/share/pci.ids; do
+    [ -n "$f" ] && [ -r "$f" ] && { ids=$f; break; }
+  done
+  if [ -z "$name" ] && [ -n "$ids" ]; then
     name=$(awk -v v="$ven" -v d="$dev" '
       /^[0-9a-f]{4} / { inv = ($1 == v); next }
-      inv && /^\t[0-9a-f]{4} / { if ($1 == d) { sub(/^\t[0-9a-f]{4}  /, ""); print; exit } }' /usr/share/hwdata/pci.ids)
+      inv && /^\t[0-9a-f]{4} / { if ($1 == d) { sub(/^\t[0-9a-f]{4}  /, ""); print; exit } }' "$ids")
     [[ "$name" =~ \[(.*)\] ]] && name=${BASH_REMATCH[1]}
   fi
   name=${name#AMD }; name=${name#NVIDIA }; name=${name#GeForce }; name=${name#Intel }
@@ -121,7 +126,7 @@ case "$action" in
     ;;
   gpu)
     out=()
-    for d in /sys/bus/pci/devices/*; do
+    for d in "${NC_SYSFS:-/sys}"/bus/pci/devices/*; do
       [[ $(<"$d/class") == 0x03* ]] || continue
       n=$(gpu_name "$d")
       if [ "$(cat "$d/boot_vga" 2>/dev/null)" != 1 ] && [ "$(cat "$d/power/runtime_status" 2>/dev/null)" = suspended ]; then
@@ -152,13 +157,20 @@ case "$action" in
       [ "$ac" = 1 ] && parts+=("$(t "sur secteur" "plugged in")") || parts+=("$(t "sur batterie" "on battery")")
     fi
     # Profil de la plateforme (instantané, suit TLP / power-profiles-daemon), sinon D-Bus
-    prof=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null)
-    case "$prof" in low-power|quiet|cool) prof=power-saver ;; esac
+    prof=$(cat "${NC_SYSFS:-/sys}/firmware/acpi/platform_profile" 2>/dev/null)
+    perso=0
+    case "$prof" in
+      low-power|quiet|cool) prof=power-saver ;;
+      max-power|balanced-performance) prof=performance ;;   # choix réels d'une Legion
+      performance|balanced|power-saver) ;;
+      *) [ "$prof" = custom ] && perso=1; prof="" ;;         # custom ou inconnu : on demande à power-profiles-daemon
+    esac
     [ -n "$prof" ] || prof=$(busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile 2>/dev/null | awk -F'"' '{print $2}')
     case "$prof" in
       performance) parts+=("Performance") ;;
       balanced) parts+=("$(t "Équilibré" "Balanced")") ;;
       power-saver) parts+=("$(t "Économie" "Power Saver")") ;;
+      *) [ "$perso" = 1 ] && parts+=("$(t "Perso" "Custom")") ;;
     esac
     [ ${#parts[@]} -gt 0 ] && (IFS='|'; echo "${parts[*]}") | sed 's/|/ · /g'
     ;;
