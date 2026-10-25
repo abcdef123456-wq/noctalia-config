@@ -57,10 +57,10 @@ class WorkflowTests(unittest.TestCase):
 
     def test_images(self):
         if self.doc is not None:
-            images = {m["image"] for job in self.doc["jobs"].values() for m in job["strategy"]["matrix"]["include"]}
-            self.assertEqual(images, IMAGES)
+            job = self.doc["jobs"]["tests"]
+            self.assertEqual({m["image"] for m in job["strategy"]["matrix"]["include"]}, IMAGES)
+            self.assertEqual(job["container"]["image"], "${{ matrix.image }}")
             for job in self.doc["jobs"].values():
-                self.assertEqual(job["container"]["image"], "${{ matrix.image }}")
                 self.assertEqual(job["runs-on"], "ubuntu-latest")
         else:
             for i in IMAGES:
@@ -68,9 +68,11 @@ class WorkflowTests(unittest.TestCase):
 
     def test_delais_et_matrice(self):
         if self.doc is not None:
+            job = self.doc["jobs"]["tests"]
+            self.assertEqual(job["timeout-minutes"], 60)
+            self.assertIs(job["strategy"]["fail-fast"], False)
             for job in self.doc["jobs"].values():
-                self.assertEqual(job["timeout-minutes"], 60)
-                self.assertIs(job["strategy"]["fail-fast"], False)
+                self.assertLessEqual(job["timeout-minutes"], 60)
         else:
             self.assertIn("timeout-minutes: 60", self.texte)
             self.assertIn("fail-fast: false", self.texte)
@@ -97,8 +99,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(self.texte, r"install:.*\bgit\b")
 
     def test_jeton_pas_garde_par_checkout(self):
-        # persist-credentials: false : le jeton du checkout ne reste pas dans .git/config, que les tests pourraient lire
-        self.assertRegex(self.texte, r"uses: actions/checkout@[0-9a-f]{40}[^\n]*\n\s+with:\n\s+persist-credentials: false")
+        # persist-credentials: false : le jeton du checkout ne reste pas dans .git/config, que les tests pourraient lire.
+        # Pour CHAQUE checkout (un par job)
+        checkouts = re.findall(r"uses: actions/checkout@[0-9a-f]{40}[^\n]*(\n\s+with:\n\s+persist-credentials: false)?", self.texte)
+        self.assertGreaterEqual(len(checkouts), 2)
+        self.assertTrue(all(checkouts), "un checkout garde son jeton")
+
+    def test_job_verifications(self):
+        # Analyse statique sur Arch : shellcheck, ruff, luac, luau-compile, qmllint ; fichiers trouvés par shebang
+        for mot in ("verifications:", "image: archlinux:latest", "shellcheck -S warning",
+                    "ruff check --no-cache --select E9,F63,F7,F82", "luac -p", "luau-compile --null",
+                    "python3 -m unittest -v tests.test_qmllint", "core.quotepath=off", "head -n1"):
+            self.assertIn(mot, self.texte)
+        if self.doc is not None:
+            job = self.doc["jobs"]["verifications"]
+            installe = job["steps"][0]["run"]
+            for paquet in ("shellcheck", "ruff", "lua", "luau", "qt6-declarative", "git", "python"):
+                self.assertRegex(installe, rf"\b{re.escape(paquet)}\b")
+        # Les choix écartés de shellcheck sont écrits et justifiés, pas cachés
+        rc = (RACINE / ".shellcheckrc").read_text(encoding="utf-8")
+        self.assertEqual(sorted(re.findall(r"(?m)^disable=(\S+)", rc)), ["SC1111", "SC2010"])
 
     def test_nom_lisible(self):
         self.assertIn("name: Tests (${{ matrix.image }})", self.texte)

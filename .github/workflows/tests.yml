@@ -66,3 +66,48 @@ jobs:
             fi
             python3 -m unittest discover -s tests -t .
           '
+
+  # Analyse statique, une seule fois (Arch : les outils les plus récents) : fige la propreté d'aujourd'hui. Les fichiers
+  # sont trouvés par leur shebang ou leur extension : un nouveau script est couvert sans y penser.
+  verifications:
+    name: Vérifications (shellcheck, ruff, luac, luau, qmllint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Installer les outils
+        run: pacman -Syu --noconfirm --needed git python shellcheck ruff lua luau qt6-declarative
+
+      - name: Récupérer le dépôt
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # le jeton ne reste pas dans .git/config
+
+      - name: shellcheck (avertissements et erreurs)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # Scripts sh/bash/dash par leur shebang ; .shellcheckrc dit ce qui est écarté, et pourquoi
+          # core.quotepath=off : les noms non ASCII (« Résumer ») sont donnés tels quels, pas entre guillemets
+          for f in $(git -c core.quotepath=off ls-files 'home/.local/bin/*' 'home/.local/share/*' install.sh export.sh); do
+            head -n1 "$f" 2>/dev/null | grep -qE '^#!.*[/ ](ba|da)?sh([[:space:]]|$)' && printf '%s\0' "$f"
+          done | xargs -0 shellcheck -S warning
+
+      - name: ruff (erreurs de syntaxe et noms indéfinis)
+        run: |
+          { git -c core.quotepath=off ls-files '*.py'
+            for f in $(git -c core.quotepath=off ls-files 'home/.local/bin/*' 'home/.local/share/*'); do
+              head -n1 "$f" 2>/dev/null | grep -qE '^#!.*python' && echo "$f"
+            done
+          } | sort -u | tr '\n' '\0' | xargs -0 ruff check --no-cache --select E9,F63,F7,F82
+
+      - name: luac -p (syntaxe des .lua)
+        run: git -c core.quotepath=off ls-files -z '*.lua' | xargs -0 -n1 luac -p
+
+      # Les .luau de Noctalia : syntaxe seulement (luau-compile). luau-analyze ne connaît pas l'API de Noctalia et
+      # signalerait des centaines de noms inconnus
+      - name: luau-compile (syntaxe des .luau)
+        run: git -c core.quotepath=off ls-files -z '*.luau' | xargs -0 -n1 luau-compile --null
+
+      - name: qmllint (l'île)
+        run: python3 -m unittest -v tests.test_qmllint

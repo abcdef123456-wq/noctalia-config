@@ -129,8 +129,7 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "$(t "(git status pour les voir ; git stash pour les mettre de côté)" "(git status to see them; git stash to set them aside)")" >&2
   exit 1
 fi
-avant="$(git rev-parse HEAD)"
-base="$(base_installee)"                                       # = avant, sauf après un install.sh resté à moitié
+base="$(base_installee)"                                       # = HEAD, sauf après un install.sh resté à moitié
 branche="$(git rev-parse --abbrev-ref HEAD)"
 ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null || true)"   # l'amont avant ce fetch
 # Pas de délai fixe : timeout couperait un fetch lent qui avance, et le sortirait du premier plan du terminal (ssh ou

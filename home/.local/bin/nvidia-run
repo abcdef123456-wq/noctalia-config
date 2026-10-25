@@ -19,6 +19,7 @@ EGL_DIR="${NC_EGL_DIR:-/usr/share/glvnd/egl_vendor.d}"
 # Règle de la carte graphique (profil d'énergie et alimentation du moment), sur un PC hybride seulement
 regle="${BASH_SOURCE[0]%/*}/nc-gpu-regle"
 [ -r "$regle" ] || regle="$HOME/.local/bin/nc-gpu-regle"
+# shellcheck source=nc-gpu-regle
 if [ "${NC_FORCER_RTX:-}" != 1 ] && [ -r "$regle" ] && . "$regle" && nc_pc_hybride; then
   profil=$(nc_profil_courant)
   bat=0; nc_sur_batterie && bat=1

@@ -1,0 +1,6 @@
+# shellcheck (CI, job « Vérifications ») : deux avertissements écartés pour tout le dépôt, et pourquoi.
+# SC1111 : « » et ’ dans les textes : la typographie française des messages, voulue.
+disable=SC1111
+# SC2010 : ls | grep sur des dossiers aux noms maîtrisés (/usr/share/vulkan/icd.d, /etc/tlp.d, cache des pochettes),
+# jamais sur des noms choisis par quelqu'un d'autre.
+disable=SC2010

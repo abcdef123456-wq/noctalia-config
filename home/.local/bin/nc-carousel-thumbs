@@ -37,7 +37,7 @@ bake() {
   local stroke=() sw
   sw=$(awk -v d="$dpr" 'BEGIN{printf "%d", 2.5*d+0.5}')
   [ "$edge" = 1 ] && stroke=(-fill none -stroke "rgba(255,255,255,0.88)" -strokewidth "$sw" -draw "polygon $poly")
-  "$IM" "$img[0]" -filter Lanczos -resize "${b}x${h}^" -gravity center -extent "${b}x${h}" -unsharp 0x0.6+0.7+0.02 \
+  "$IM" "${img}[0]" -filter Lanczos -resize "${b}x${h}^" -gravity center -extent "${b}x${h}" -unsharp 0x0.6+0.7+0.02 \
     \( -size "${b}x${h}" xc:black -fill white -draw "polygon $poly" \) -alpha off -compose copy_opacity -composite \
     "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.${out##*.}" && mv "$out.tmp.${out##*.}" "$out"
 }
@@ -68,7 +68,7 @@ for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
   tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"; tb="$OUT/$n.B.webp"
   [ "$tw" -nt "$f" ] && [ "$tn" -nt "$f" ] && [ "$tb" -nt "$f" ] && continue
   # fond flouté (petit, agrandi à l'affichage : le flou masque l'agrandissement) : remplace le flou en direct, trop coûteux
-  "$IM" "$f[0]" -resize 800x500^ -gravity center -extent 800x500 -blur 0x12 -modulate 75,110 -quality 88 "$tb.tmp.webp" && mv "$tb.tmp.webp" "$tb"
+  "$IM" "${f}[0]" -resize 800x500^ -gravity center -extent 800x500 -blur 0x12 -modulate 75,110 -quality 88 "$tb.tmp.webp" && mv "$tb.tmp.webp" "$tb"
   bake "$f" "$tw" "$CW" "$CH" 1 && bake "$f" "$tn" "$NW" "$NH" 0 && made=$((made + 1))
 done
 for t in "$OUT"/*.W.webp; do
