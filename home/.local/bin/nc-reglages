@@ -36,6 +36,7 @@ import importlib.machinery
 import importlib.util
 import json
 import locale
+import math
 import os
 from pathlib import Path
 import re
@@ -1746,6 +1747,49 @@ def regler(vals, cle, v):
 
 
 # ── Application ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Nombres lus dans reglages.conf : le texte peut venir d'une édition à la main, d'une vieille sauvegarde ou d'une valeur
+# partielle. Jamais d'exception : valeur par défaut du catalogue (ou du style) si ce n'est pas un nombre, bornée à
+# mini/maxi pour les réglages « entier ». « 12.5 » pour un entier : arrondi (12), c'est ce que la personne voulait dire ;
+# le défaut serait plus surprenant. Un avertissement court sur stderr, une fois par clé et par valeur.
+_nombres_signales = set()
+
+
+def nombre(vals, cle, decimal=False):
+    """Valeur numérique du réglage cle (float si decimal, sinon int), toujours utilisable."""
+    r = PAR_CLE[cle]
+    brut = vals.get(cle)
+    if brut is None or str(brut).strip() == "":
+        brut = valeur({}, cle)          # absent ou vide : valeur du style, sinon de la config
+        explicite = False
+    else:
+        explicite = True
+    n = None
+    try:
+        x = float(str(brut).strip())
+        if math.isfinite(x):
+            n = x if decimal else math.floor(x + 0.5)      # 12,5 donne 13 (round() de Python donne 12)
+    except ValueError:
+        pass
+    if n is None:
+        defaut = float(valeur({}, cle)) if decimal else int(float(valeur({}, cle)))
+        if explicite:
+            _signaler(cle, brut, T(f"n'est pas un nombre, valeur par défaut {defaut:g} utilisée",
+                                   f"is not a number, default {defaut:g} used"))
+        return defaut
+    if r.genre == "entier" and not r.mini <= n <= r.maxi:
+        borne = max(r.mini, min(r.maxi, n))
+        _signaler(cle, brut, T(f"est hors de {r.mini} à {r.maxi}, {borne:g} utilisé",
+                               f"is outside {r.mini} to {r.maxi}, {borne:g} used"))
+        n = float(borne) if decimal else int(borne)
+    return n
+
+
+def _signaler(cle, brut, texte):
+    if (cle, brut) not in _nombres_signales:
+        _nombres_signales.add((cle, brut))
+        print(f"nc-reglages : {cle}={brut} {texte}", file=sys.stderr)
+
+
 VEILLE_CLES = ("VEILLE_VERROU", "VEILLE_SUSPENSION", "VEILLE_SECTEUR", "VEILLE_ECRAN", "VEILLE_BAISSE_BATTERIE",
                "VEILLE_ECRAN_BATTERIE")
 
@@ -1755,8 +1799,7 @@ def texte_veille(vals, src):
     reconnu à sa commande, son délai remplacé, ou il est retiré (délai 0). Les deux listeners « sur batterie »
     (assombrir plus tôt, écran verrouillé éteint) testent le secteur eux-mêmes et ne font rien sur secteur."""
     def entier(cle):
-        v = vals.get(cle)
-        return int(v if v not in (None, "") else PAR_CLE[cle].defaut)
+        return nombre(vals, cle)
     verrou, susp, secteur = entier("VEILLE_VERROU"), entier("VEILLE_SUSPENSION"), entier("VEILLE_SECTEUR")
     ecran, baisse_bat, ecran_bat = entier("VEILLE_ECRAN"), entier("VEILLE_BAISSE_BATTERIE"), entier("VEILLE_ECRAN_BATTERIE")
     t_baisse = max(30, verrou * 60 - 150) if verrou else 0
@@ -1845,7 +1888,7 @@ def appliquer_bt_musique(vals):
 
 
 def appliquer_veille(vals):
-    if all(vals.get(c) is None for c in VEILLE_CLES if c != "VEILLE_ECRAN") and not int(vals.get("VEILLE_ECRAN") or 0):
+    if all(vals.get(c) is None for c in VEILLE_CLES if c != "VEILLE_ECRAN") and not (vals.get("VEILLE_ECRAN") and nombre(vals, "VEILLE_ECRAN")):
         # Délais de la config : hypridle lit ~/.config/hypr/hypridle.conf tel quel
         if os.path.exists(VEILLE_UNITE):
             for f in (VEILLE_UNITE, VEILLE_OUT):
@@ -1873,7 +1916,7 @@ def appliquer_veille(vals):
 def appliquer_terminal(vals):
     c = []
     if "TERMINAL_OPACITE" in vals:
-        c.append(f"background_opacity {int(vals['TERMINAL_OPACITE']) / 100:.2f}")
+        c.append(f"background_opacity {nombre(vals, 'TERMINAL_OPACITE') / 100:.2f}")
     if "TERMINAL_TAILLE" in vals:
         c.append(f"font_size {vals['TERMINAL_TAILLE']}")
     if "TERMINAL_POLICE" in vals:
@@ -1899,6 +1942,7 @@ def appliquer_terminal(vals):
     if texte == ancien:
         return
     if texte:
+        os.makedirs(os.path.dirname(KITTY_OUT), exist_ok=True)      # ~/.config/kitty peut manquer
         with open(KITTY_OUT, "w", encoding="utf-8") as f:
             f.write(texte)
     elif os.path.exists(KITTY_OUT):
@@ -1928,18 +1972,18 @@ def appliquer_noctalia(vals):
     if "POLICE" in vals:
         mettre("shell", "font_family", vals["POLICE"])
     if "ANIMATIONS_VITESSE" in vals:
-        mettre("shell.animation", "speed", float(vals["ANIMATIONS_VITESSE"]))
+        mettre("shell.animation", "speed", nombre(vals, "ANIMATIONS_VITESSE", True))
     if "COINS_ECRAN" in vals:
         mettre("shell.screen_corners", "enabled", oui("COINS_ECRAN"))
     if "VERROU_FLOU" in vals:
-        mettre("lockscreen", "blur_intensity", int(vals["VERROU_FLOU"]) / 100)
+        mettre("lockscreen", "blur_intensity", nombre(vals, "VERROU_FLOU") / 100)
     if "DOCK_POSITION" in vals:
         mettre("dock", "position", vals["DOCK_POSITION"])
     if any(k in vals for k in ("NUIT", "NUIT_TEMPERATURE", "NUIT_DEBUT", "NUIT_FIN")):
         nuit = valeur(vals, "NUIT")
         mettre("nightlight", "enabled", nuit != "non")
         mettre("nightlight", "force", nuit == "toujours")
-        mettre("nightlight", "temperature_night", int(valeur(vals, "NUIT_TEMPERATURE")))
+        mettre("nightlight", "temperature_night", nombre(vals, "NUIT_TEMPERATURE"))
         if nuit == "soir":
             mettre("location", "custom_schedule", True)
             mettre("location", "sunset", valeur(vals, "NUIT_DEBUT"))
@@ -1957,9 +2001,9 @@ def appliquer_noctalia(vals):
             v = vals[cle]
             mettre(table, "transition", TOUTES if v == "aleatoire" else [] if v == "aucune" else [v])
         if cle + "_DUREE" in vals:
-            mettre(table, "transition_duration", float(vals[cle + "_DUREE"]))
+            mettre(table, "transition_duration", nombre(vals, cle + "_DUREE", True))
     if "BARRE_OPACITE" in vals:
-        mettre("bar.default", "capsule_opacity", int(vals["BARRE_OPACITE"]) / 100)
+        mettre("bar.default", "capsule_opacity", nombre(vals, "BARRE_OPACITE") / 100)
     if "BARRE_SYSTEME" in vals and tomllib:
         # La liste de droite de la barre, telle qu'installée, avec ou sans la pastille d'infos système
         try:
@@ -1974,11 +2018,11 @@ def appliquer_noctalia(vals):
         if cle in vals:
             mettre("dock", nom, oui(cle))
     if "DOCK_TAILLE" in vals:
-        mettre("dock", "icon_size", int(vals["DOCK_TAILLE"]))
+        mettre("dock", "icon_size", nombre(vals, "DOCK_TAILLE"))
     if "FONDS_ROTATION" in vals:
         mettre("wallpaper.automation", "enabled", oui("FONDS_ROTATION"))
     if "FONDS_INTERVALLE" in vals:
-        mettre("wallpaper.automation", "interval_seconds", int(vals["FONDS_INTERVALLE"]) * 60)
+        mettre("wallpaper.automation", "interval_seconds", nombre(vals, "FONDS_INTERVALLE") * 60)
     if "FONDS_DOSSIER" in vals:
         mettre("wallpaper", "directory", os.path.expanduser(vals["FONDS_DOSSIER"]))
 
@@ -2088,76 +2132,90 @@ def code_noeud_pret():
 def appliquer(groupes, vals=None):
     vals = lire() if vals is None else vals
     groupes = list(groupes)
+    echecs = []
     if "style" in groupes:
         groupes.remove("style")
-        groupes += [g for g in appliquer_style(vals) if g not in groupes]
+        try:
+            groupes += [g for g in appliquer_style(vals) if g not in groupes]
+        except Exception as e:                      # le style a échoué : les autres groupes sont appliqués quand même
+            echecs.append("style")
+            print(T(f"nc-reglages : groupe « style » en échec : {e}", f"nc-reglages: group \"style\" failed: {e}"), file=sys.stderr)
     vals = effectifs(vals)
     for g in groupes:
-        if g == "hypr":
-            subprocess.run(["hyprctl", "reload"], capture_output=True)
-        elif g == "energie":
-            subprocess.run(["systemctl", "--user", "restart", "nc-profile-sync.service"], capture_output=True)
-            subprocess.run(["hyprctl", "reload"], capture_output=True)      # effets de l'Économie (nc/energie.lua)
-        elif g == "veille":
-            appliquer_veille(vals)
-        elif g == "terminal":
-            appliquer_terminal(vals)
-        elif g == "noctalia":
-            appliquer_noctalia(vals)
-        elif g == "effets":
-            subprocess.run(["hyprctl", "reload"], capture_output=True)
-            appliquer_noctalia(vals)
-        elif g == "couvercle":
-            subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
-            subprocess.run(["systemctl", "--user", "restart", "nc-couvercle.service"], capture_output=True)
-        elif g == "bt-appel":
-            subprocess.run(["systemctl", "--user", "enable", "nc-bt-appel.service"], capture_output=True)
-            subprocess.run(["systemctl", "--user", "restart", "nc-bt-appel.service"], capture_output=True)
-        elif g == "bt-musique":
-            appliquer_bt_musique(vals)
-        elif g == "claude":
-            # Hooks de Claude Code ajoutés ou retirés (seulement si Claude Code est là)
-            if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):
-                quoi = "retirer" if vals.get("CLAUDE_ILE") == "non" else "installer"
-                subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi], capture_output=True)
-        elif g.startswith("ia:"):
-            # Autres IA (Antigravity, opencode, Codex…) : branchées ou retirées par nc-claude
-            ia = g[3:]
-            quoi = "retirer" if vals.get(ia.upper() + "_ILE") == "non" else "installer"
-            subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
-        elif g == "noeud":
-            # JARVIS qui pilote ce PC : le service suit le réglage (activé et lancé, ou arrêté et désactivé)
-            quoi = ["enable", "--now"] if vals.get("NOEUD_JARVIS") == "oui" else ["disable", "--now"]
-            subprocess.run(["systemctl", "--user", *quoi, "nc-noeud.service"], capture_output=True)
-        elif g == "noeud-confirmation":
-            # Le serveur apprend à la connexion si ce PC accepte la confirmation à distance : on se reconnecte
-            if vals.get("NOEUD_JARVIS") == "oui":
-                subprocess.run(["systemctl", "--user", "try-restart", "nc-noeud.service"], capture_output=True)
-            if vals.get("NOEUD_CONFIRMATION") in ("distance", "les-deux") and not code_noeud_pret():
-                # Sans code enrôlé, nc-noeud reste sur l'écran : on dit quoi faire
-                subprocess.run(["notify-send", "-a", "nc-reglages", T("Code de confirmation à créer", "Confirmation code needed"),
-                                T("À distance, il faut le code de ton appli : dans un terminal, « nc-noeud totp creer » puis "
-                                  "« nc-noeud totp verifier CODE ». En attendant, JARVIS demande sur l'écran.",
-                                  "Remotely, the code of your app is needed: in a terminal, “nc-noeud totp creer” then "
-                                  "“nc-noeud totp verifier CODE”. Until then, JARVIS asks on the screen.")],
-                               capture_output=True)
-        elif g == "curseur":
-            appliquer_curseur(vals)
-        elif g == "firefox":
-            ff = os.path.join(HOME, ".local/bin/nc-firefox")
-            if vals.get("FIREFOX_STYLE") == "oui":
-                subprocess.run([ff, "installer"], capture_output=True)
-                quoi = "installer" if vals.get("FIREFOX_COULEURS") == "oui" else "desinstaller"
-                subprocess.run([ff, "extension", quoi], capture_output=True)
-            else:
-                subprocess.run([ff, "desinstaller"], capture_output=True)      # retire aussi l'extension
-        elif g == "navigateurs":
-            # Copies des lanceurs Chromium (XWayland) posées ou retirées selon le réglage ; le navigateur est à relancer
-            subprocess.run([os.path.join(HOME, ".local/bin/nc-navigateurs"), "appliquer"], capture_output=True)
-        elif g == "langue":
-            # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
-            subprocess.run(["hyprctl", "reload"], capture_output=True)
-        # île, captures, halo : relu tout seul
+        try:
+            appliquer_groupe(g, vals)
+        except Exception as e:                      # un groupe en échec n'empêche pas les suivants
+            echecs.append(g)
+            print(T(f"nc-reglages : groupe « {g} » en échec : {e}", f"nc-reglages: group \"{g}\" failed: {e}"), file=sys.stderr)
+    return echecs
+
+
+def appliquer_groupe(g, vals):
+    if g == "hypr":
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+    elif g == "energie":
+        subprocess.run(["systemctl", "--user", "restart", "nc-profile-sync.service"], capture_output=True)
+        subprocess.run(["hyprctl", "reload"], capture_output=True)      # effets de l'Économie (nc/energie.lua)
+    elif g == "veille":
+        appliquer_veille(vals)
+    elif g == "terminal":
+        appliquer_terminal(vals)
+    elif g == "noctalia":
+        appliquer_noctalia(vals)
+    elif g == "effets":
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+        appliquer_noctalia(vals)
+    elif g == "couvercle":
+        subprocess.run(["systemctl", "--user", "enable", "nc-couvercle.service"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "restart", "nc-couvercle.service"], capture_output=True)
+    elif g == "bt-appel":
+        subprocess.run(["systemctl", "--user", "enable", "nc-bt-appel.service"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "restart", "nc-bt-appel.service"], capture_output=True)
+    elif g == "bt-musique":
+        appliquer_bt_musique(vals)
+    elif g == "claude":
+        # Hooks de Claude Code ajoutés ou retirés (seulement si Claude Code est là)
+        if os.path.isdir(os.path.join(HOME, ".claude")) or shutil.which("claude"):
+            quoi = "retirer" if vals.get("CLAUDE_ILE") == "non" else "installer"
+            subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi], capture_output=True)
+    elif g.startswith("ia:"):
+        # Autres IA (Antigravity, opencode, Codex…) : branchées ou retirées par nc-claude
+        ia = g[3:]
+        quoi = "retirer" if vals.get(ia.upper() + "_ILE") == "non" else "installer"
+        subprocess.run([os.path.join(HOME, ".local/bin/nc-claude"), quoi, ia], capture_output=True)
+    elif g == "noeud":
+        # JARVIS qui pilote ce PC : le service suit le réglage (activé et lancé, ou arrêté et désactivé)
+        quoi = ["enable", "--now"] if vals.get("NOEUD_JARVIS") == "oui" else ["disable", "--now"]
+        subprocess.run(["systemctl", "--user", *quoi, "nc-noeud.service"], capture_output=True)
+    elif g == "noeud-confirmation":
+        # Le serveur apprend à la connexion si ce PC accepte la confirmation à distance : on se reconnecte
+        if vals.get("NOEUD_JARVIS") == "oui":
+            subprocess.run(["systemctl", "--user", "try-restart", "nc-noeud.service"], capture_output=True)
+        if vals.get("NOEUD_CONFIRMATION") in ("distance", "les-deux") and not code_noeud_pret():
+            # Sans code enrôlé, nc-noeud reste sur l'écran : on dit quoi faire
+            subprocess.run(["notify-send", "-a", "nc-reglages", T("Code de confirmation à créer", "Confirmation code needed"),
+                            T("À distance, il faut le code de ton appli : dans un terminal, « nc-noeud totp creer » puis "
+                              "« nc-noeud totp verifier CODE ». En attendant, JARVIS demande sur l'écran.",
+                              "Remotely, the code of your app is needed: in a terminal, “nc-noeud totp creer” then "
+                              "“nc-noeud totp verifier CODE”. Until then, JARVIS asks on the screen.")],
+                           capture_output=True)
+    elif g == "curseur":
+        appliquer_curseur(vals)
+    elif g == "firefox":
+        ff = os.path.join(HOME, ".local/bin/nc-firefox")
+        if vals.get("FIREFOX_STYLE") == "oui":
+            subprocess.run([ff, "installer"], capture_output=True)
+            quoi = "installer" if vals.get("FIREFOX_COULEURS") == "oui" else "desinstaller"
+            subprocess.run([ff, "extension", quoi], capture_output=True)
+        else:
+            subprocess.run([ff, "desinstaller"], capture_output=True)      # retire aussi l'extension
+    elif g == "navigateurs":
+        # Copies des lanceurs Chromium (XWayland) posées ou retirées selon le réglage ; le navigateur est à relancer
+        subprocess.run([os.path.join(HOME, ".local/bin/nc-navigateurs"), "appliquer"], capture_output=True)
+    elif g == "langue":
+        # Hyprland (raccourcis, notifications) relit sa config ; l'île et les commandes relisent le réglage seules
+        subprocess.run(["hyprctl", "reload"], capture_output=True)
+    # île, captures, halo : relu tout seul
 
 
 # ── Raccourcis (moteur : nc-raccourci) ─────────────────────────────────────────────────────────────────────────
@@ -3597,7 +3655,9 @@ def cli(a):
         appliquer([g for g in groupes if g], vals)
         print(T("Valeur de la config remise.", "Config value restored."))
     elif a[0] in ("appliquer", "apply"):
-        appliquer(["style", "veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
+        echecs = appliquer(["style", "veille", "terminal", "noctalia"] + (["curseur"] if "CURSEUR_TAILLE" in vals else []), vals)
+        if echecs:
+            sys.exit(1)
     elif a[0] in ("-h", "--help", "aide", "help"):
         print(T(__doc__.strip(), USAGE_EN))
     else:
