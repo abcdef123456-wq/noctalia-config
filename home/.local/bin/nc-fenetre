@@ -53,8 +53,8 @@ geometries() {
     ($ms | map(select(.id == $c.monitor)) | .[0] // {}) as $m |
     {address, x: .at[0], y: .at[1], w: .size[0], h: .size[1], ws: .workspace.id, fl: .floating,
      mx: ($m.x // 0), my: ($m.y // 0),
-     mw: ((if (($m.transform // 0) % 2) == 1 then $m.height else $m.width end) // 0) / ($m.scale // 1),
-     mh: ((if (($m.transform // 0) % 2) == 1 then $m.width else $m.height end) // 0) / ($m.scale // 1)}]' <<< "$fenetres"
+     mw: (((if (($m.transform // 0) % 2) == 1 then $m.height else $m.width end) // 0) / ($m.scale // 1)),
+     mh: (((if (($m.transform // 0) % 2) == 1 then $m.width else $m.height end) // 0) / ($m.scale // 1))}]' <<< "$fenetres"
 }
 
 reduire_lot() {
