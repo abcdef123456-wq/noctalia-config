@@ -1,10 +1,13 @@
 """nc-navigateurs et nc-chromium : copies de .desktop Chromium passant par XWayland, jamais le .desktop de l'utilisateur ;
 lancement avec les bons drapeaux. HOME, XDG_* et PATH isolés."""
+import importlib.machinery
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "home/.local/bin"
@@ -192,6 +195,102 @@ class Chromium(Base):
         j = self.lancer("flatpak", "run", "--branch=stable", "--command=/app/bin/chromium", "org.chromium.Chromium", "@@u", "%U", "@@")
         self.assertIn("flatpak run --branch=stable --command=/app/bin/chromium org.chromium.Chromium "
                       "--ozone-platform=x11 --force-device-scale-factor=1.6 @@u %U @@\n", j)
+
+
+def charger(env):
+    """nc-navigateurs chargé comme module, avec cet environnement."""
+    with mock.patch.dict(os.environ, env):
+        l = importlib.machinery.SourceFileLoader("ncnav", str(BIN / "nc-navigateurs"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("ncnav", l))
+        l.exec_module(m)
+    return m
+
+
+class Corrections(Navigateurs):
+    def test_liens_symboliques_jamais_suivis(self):
+        self.reglage("oui")
+        self.apps.mkdir(parents=True)
+        dehors = Path(self.tmp.name) / "dehors"
+        (self.apps / "brave-browser.desktop").symlink_to(dehors / "absent.desktop")      # lien pendant
+        dehors.mkdir()
+        cible = dehors / "marque.desktop"
+        cible.write_text("[Desktop Entry]\nX-NC-Chromium=true\nExec=x\n")
+        (self.apps / "google-chrome.desktop").symlink_to(cible)                          # lien vers un fichier marqué
+        self.run_nc("nc-navigateurs", "installer")
+        self.assertFalse((dehors / "absent.desktop").exists())
+        self.assertEqual(cible.read_text(), "[Desktop Entry]\nX-NC-Chromium=true\nExec=x\n")
+        self.assertTrue((self.apps / "brave-browser.desktop").is_symlink())
+        self.assertTrue((self.apps / "google-chrome.desktop").is_symlink())
+        self.run_nc("nc-navigateurs", "retirer")
+        self.reglage("non")
+        self.run_nc("nc-navigateurs", "installer")
+        self.assertTrue((self.apps / "brave-browser.desktop").is_symlink())
+        self.assertTrue((self.apps / "google-chrome.desktop").is_symlink())
+        self.assertTrue(cible.exists())
+
+    def test_jeu_chromium_bsu_pas_touche(self):
+        self.reglage("oui")
+        (self.sys / "chromium-bsu.desktop").write_text("[Desktop Entry]\nName=Chromium B.S.U.\nExec=chromium-bsu\n")
+        self.run_nc("nc-navigateurs", "installer")
+        self.assertFalse((self.apps / "chromium-bsu.desktop").exists())
+        self.assertTrue((self.apps / "google-chrome.desktop").exists())
+
+    def test_erreur_sur_un_fichier_ne_bloque_pas_les_autres(self):
+        self.reglage("oui")
+        env = dict(self.env, HOME=str(self.home))
+        m = charger(env)
+        vrai = m.ecrire
+        def ecrire(cible, texte):
+            if cible.name == "brave-browser.desktop":
+                raise OSError("disque plein")
+            vrai(cible, texte)
+        with mock.patch.dict(os.environ, env), mock.patch.object(m, "ecrire", ecrire):
+            n = m.installer()
+        self.assertEqual(n, 2)
+        self.assertTrue((self.apps / "google-chrome.desktop").exists())
+        self.assertFalse((self.apps / "brave-browser.desktop").exists())
+
+    def test_dbus_activatable_coupe(self):
+        self.reglage("oui")
+        (self.sys / "google-chrome.desktop").write_text(CHROME.replace("Type=Application", "Type=Application\nDBusActivatable=true")
+                                                       + "DBusActivatable=true\n")
+        self.run_nc("nc-navigateurs", "installer")
+        t = (self.apps / "google-chrome.desktop").read_text()
+        self.assertNotIn("DBusActivatable=true", t)
+        self.assertEqual(t.count("DBusActivatable=false"), 2)
+
+    @unittest.skipUnless(Path("/usr/share/applications").is_dir(), "pas de /usr/share/applications")
+    def test_xdg_data_dirs_partiel_garde_les_dossiers_standard(self):
+        m = charger(dict(self.env, XDG_DATA_DIRS="/inexistant"))
+        with mock.patch.dict(os.environ, dict(self.env, XDG_DATA_DIRS="/inexistant")):
+            self.assertIn(Path("/usr/share/applications"), m.sources())
+
+    def test_pas_de_double_enveloppe(self):
+        self.reglage("oui")
+        (self.sys / "google-chrome.desktop").write_text(f"[Desktop Entry]\nName=C\nExec={self.nc} /usr/bin/chrome %U\n")
+        self.run_nc("nc-navigateurs", "installer")
+        self.assertEqual((self.apps / "google-chrome.desktop").read_text().count("nc-chromium"), 1)
+
+    def test_exec_echappe_selon_la_specification(self):
+        m = charger(self.env)
+        self.assertEqual(m.exec_nc("/h/nc-chromium"), "/h/nc-chromium")
+        self.assertEqual(m.exec_nc("/h/a b/nc"), '"/h/a b/nc"')
+        self.assertEqual(m.exec_nc("/h/a$b c"), r'"/h/a\\$b c"')
+        self.assertEqual(m.exec_nc('/h/q"x'), r'"/h/q\\"x"')
+        self.assertEqual(m.exec_nc("/h/50%/n"), "/h/50%%/n")
+
+
+class ChromiumCorrections(Chromium):
+    def test_pas_de_double_appel(self):
+        self.reglage("oui")
+        j = self.lancer(str(BIN / "nc-chromium"), "navigo", "x")
+        self.assertIn("navigo --ozone-platform=x11 --force-device-scale-factor=1.6 x\n", j)
+
+    def test_ozone_platform_hint_ne_compte_pas(self):
+        self.reglage("oui")
+        self.assertIn("--ozone-platform=x11", self.lancer("navigo", "--ozone-platform-hint=auto"))
+        self.assertEqual(self.lancer("navigo", "--ozone-platform=wayland"), "navigo --ozone-platform=wayland\n")
+        self.assertEqual(self.lancer("navigo", "--ozone-platform", "wayland"), "navigo --ozone-platform wayland\n")
 
 
 class Maj(unittest.TestCase):

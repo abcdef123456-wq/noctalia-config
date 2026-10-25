@@ -70,9 +70,13 @@ def position_drapeaux(cmd):
 def main(args):
     if not args:
         sys.exit("Usage : nc-chromium <navigateur> [arguments]")
+    if os.path.basename(args[0]) == "nc-chromium":      # déjà enveloppé : on saute le doublon
+        args = args[1:]
+        if not args:
+            sys.exit("Usage : nc-chromium <navigateur> [arguments]")
     drapeaux = []
     if (reglage("NAVIGATEURS_XWAYLAND", "non") == "oui" and os.environ.get("NC_CHROMIUM_WAYLAND") != "1"
-            and os.environ.get("DISPLAY") and not any(a.startswith("--ozone-platform") for a in args)):
+            and os.environ.get("DISPLAY") and not any(a == "--ozone-platform" or a.startswith("--ozone-platform=") for a in args)):
         drapeaux = ["--ozone-platform=x11", "--force-device-scale-factor=%g" % echelle()]
     p = position_drapeaux(args)
     cmd = args[:p] + drapeaux + args[p:]

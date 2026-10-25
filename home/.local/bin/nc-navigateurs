@@ -19,7 +19,9 @@ import sys
 
 HOME = Path.home()
 MARQUE = "X-NC-Chromium=true"
-NOM = re.compile(r"^(google-chrome|chromium|brave|vivaldi|microsoft-edge|opera|ungoogled-chromium)[a-z0-9_-]*\.desktop$"
+NOM = re.compile(r"^(chromium(-browser)?|ungoogled-chromium|google-chrome(-stable|-beta|-unstable)?"
+                 r"|brave-browser(-beta|-nightly)?|vivaldi(-stable|-beta|-snapshot)?|microsoft-edge(-stable|-beta|-dev)?"
+                 r"|opera(-beta|-developer)?)\.desktop$"
                  r"|^(com\.google\.Chrome|org\.chromium\.Chromium|com\.brave\.Browser|com\.vivaldi\.Vivaldi"
                  r"|com\.microsoft\.Edge|com\.opera\.Opera|io\.github\.ungoogled_software\.ungoogled_chromium)\.desktop$")
 
@@ -45,7 +47,8 @@ def dossier_perso():
 
 def sources():
     """Dossiers d'applications du système et de flatpak, dans l'ordre de priorité (jamais celui de l'utilisateur)."""
-    dirs = [Path(d) / "applications" for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if d]
+    dirs = [Path(d) / "applications" for d in (os.environ.get("XDG_DATA_DIRS") or "").split(":") if d]
+    dirs += [Path("/usr/local/share/applications"), Path("/usr/share/applications")]
     dirs += [Path("/var/lib/flatpak/exports/share/applications"), donnees() / "flatpak/exports/share/applications"]
     perso = dossier_perso().resolve()
     vus, res = set(), []
@@ -62,6 +65,8 @@ def sources():
 
 def marque(f):
     try:
+        if f.is_symlink():
+            return False
         return re.search(r"(?m)^" + re.escape(MARQUE) + r"\s*$", f.read_text(encoding="utf-8", errors="replace")) is not None
     except OSError:
         return False
@@ -72,8 +77,10 @@ def enveloppe(texte, nc):
     sortie, posee = [], False
     for l in texte.splitlines(keepends=True):
         m = re.match(r"^Exec=(.*?)(\r?\n?)$", l)
-        if m:
+        if m and "nc-chromium" not in m.group(1):
             l = "Exec=%s %s%s" % (nc, m.group(1), m.group(2))
+        elif re.match(r"^DBusActivatable\s*=", l):          # sinon le bureau passe par D-Bus et ignore Exec=
+            l = "DBusActivatable=false" + ("\r\n" if l.endswith("\r\n") else "\n")
         sortie.append(l)
         if not posee and l.strip() == "[Desktop Entry]":
             sortie.append(MARQUE + "\n")
@@ -81,14 +88,41 @@ def enveloppe(texte, nc):
     return "".join(sortie) if posee else None
 
 
+def exec_nc(chemin):
+    """Le chemin de nc-chromium écrit pour un Exec= : entre guillemets s'il a un caractère réservé, % doublé."""
+    if re.search(r"[ \t\n\"'\\><~|&;$*?#()`]", chemin):
+        chemin = '"' + re.sub(r'(["`$\\])', r"\\\1", chemin) + '"'
+        chemin = chemin.replace("\\", "\\\\")             # \ du fichier .desktop : chaque \ est doublé
+    return chemin.replace("%", "%%")
+
+
+def ecrire(cible, texte):
+    """Écriture atomique : fichier temporaire dans le même dossier (O_EXCL), puis os.replace."""
+    tmp = cible.with_name(".%s.nc-%d.tmp" % (cible.name, os.getpid()))
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+        os.replace(str(tmp), str(cible))
+    except BaseException:
+        try:
+            os.unlink(str(tmp))
+        except OSError:
+            pass
+        raise
+
+
 def retirer():
     n = 0
     d = dossier_perso()
     if d.is_dir():
         for f in sorted(d.glob("*.desktop")):
-            if f.is_file() and marque(f):
-                f.unlink()
-                n += 1
+            if not f.is_symlink() and f.is_file() and marque(f):
+                try:
+                    f.unlink()
+                    n += 1
+                except OSError:
+                    pass
     return n
 
 
@@ -96,9 +130,7 @@ def installer():
     perso = dossier_perso()
     if reglage("NAVIGATEURS_XWAYLAND", "non") != "oui":
         return retirer()
-    nc = str(HOME / ".local/bin/nc-chromium")
-    if " " in nc:
-        nc = '"%s"' % nc
+    nc = exec_nc(str(HOME / ".local/bin/nc-chromium"))
     voulus = {}
     for d in sources():
         for f in sorted(d.glob("*.desktop")):
@@ -112,18 +144,27 @@ def installer():
                 e = enveloppe(t, nc)
                 if e:
                     voulus[f.name] = e
-    perso.mkdir(parents=True, exist_ok=True)
+    try:
+        perso.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return 0
     for f in sorted(perso.glob("*.desktop")):          # copies dont le navigateur n'est plus là
-        if f.name not in voulus and f.is_file() and marque(f):
-            f.unlink()
+        if f.name not in voulus and not f.is_symlink() and f.is_file() and marque(f):
+            try:
+                f.unlink()
+            except OSError:
+                pass
     n = 0
     for nom, e in sorted(voulus.items()):
         cible = perso / nom
-        if cible.exists() and not marque(cible):
-            continue                                    # un .desktop à l'utilisateur : jamais touché
-        if not cible.exists() or cible.read_text(encoding="utf-8", errors="replace") != e:
-            cible.write_text(e, encoding="utf-8")
-        n += 1
+        try:
+            if cible.is_symlink() or (cible.exists() and not marque(cible)):
+                continue                                # un lien ou un .desktop à l'utilisateur : jamais touché
+            if not cible.exists() or cible.read_text(encoding="utf-8", errors="replace") != e:
+                ecrire(cible, e)
+            n += 1
+        except OSError:
+            pass
     return n
 
 
