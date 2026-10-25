@@ -99,6 +99,21 @@ class Dictee(unittest.TestCase):
         self.assertEqual(len(lignes), 1, r.stdout)
         return r.returncode, json.loads(lignes[0])
 
+    def test_un_zombie_n_est_pas_actif(self):
+        """Dans un conteneur sans init qui recueille les orphelins (CI), l'enregistreur arrêté restait zombie : _arreter
+        l'attendait 3 s puis le tuait pour rien. Un zombie est terminé."""
+        l = importlib.machinery.SourceFileLoader("nc_dictee_actif", str(SCRIPT))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_dictee_actif", l))
+        l.exec_module(m)
+        p = subprocess.Popen(["true"])
+        self.addCleanup(p.wait)
+        fin = time.monotonic() + 5
+        while time.monotonic() < fin and Path(f"/proc/{p.pid}/stat").read_text().rpartition(")")[2].split()[0] != "Z":
+            time.sleep(0.01)
+        self.assertTrue(os.path.exists(f"/proc/{p.pid}"), "zombie encore là")
+        self.assertFalse(m.actif(p.pid))
+        self.assertTrue(m.actif(os.getpid()))
+
     def test_syntaxe(self):
         ast.parse(SCRIPT.read_text())
         self.assertTrue(os.access(SCRIPT, os.X_OK))

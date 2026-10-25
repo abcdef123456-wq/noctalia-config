@@ -131,7 +131,7 @@ class ReglagesSansCurses(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"),
                         XDG_STATE_HOME=str(home / ".state"), XDG_CACHE_HOME=str(home / ".cache"),
                         PYTHONPATH=str(stub), NC_LANGUE="fr")
-        for k in ("SSH_CONNECTION", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
+        for k in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"):
             self.env.pop(k, None)
 
     def lancer(self, *args, **env):

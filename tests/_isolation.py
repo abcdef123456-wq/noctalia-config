@@ -24,6 +24,11 @@
    Un test qui veut la branche « sans session graphique » retire WAYLAND_DISPLAY et HYPRLAND_INSTANCE_SIGNATURE :
    avec le faux qs, l'île répond toujours.
 
+5. NC_SYSFS pointe vers un faux /sys de portable (écran rétroéclairé, batterie BAT0, secteur) : les scripts qui le
+   lisent (nc-reglages, nc-conso, nc-gpu-mode, nc-video…) ne dépendent plus de la machine des tests (un runner de CI
+   n'a ni batterie ni rétroéclairage, et « Écran en Économie » n'y apparaît pas). Un test qui veut un autre /sys
+   met le sien dans son environnement.
+
 Le dossier temporaire est effacé à la fin des tests."""
 import atexit
 import os
@@ -103,4 +108,12 @@ if not os.environ.get("NC_TEST_ISOLE"):
     os.environ["NC_TEST_FAUX"] = str(_faux)
     os.environ["NC_TEST_JOURNAL"] = str(_journal)
     os.environ["NC_TEST_VRAI_QS"] = _vrai_qs
+    _sys = _racine / "sys"
+    for _d, _fichiers in (("class/backlight/intel_backlight", {"brightness": "50", "max_brightness": "100"}),
+                          ("class/power_supply/BAT0", {"type": "Battery", "status": "Discharging", "capacity": "80"}),
+                          ("class/power_supply/AC", {"type": "Mains", "online": "0"})):
+        (_sys / _d).mkdir(parents=True)
+        for _f, _v in _fichiers.items():
+            (_sys / _d / _f).write_text(_v + "\n")
+    os.environ.setdefault("NC_SYSFS", str(_sys))
     os.environ["NC_TEST_ISOLE"] = str(_racine)

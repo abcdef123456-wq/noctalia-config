@@ -13,6 +13,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -234,6 +235,19 @@ class VideoEncodeur(unittest.TestCase):
         self.reglages("VIDEO_ENCODEUR=carte\n")
         appels = self.lancer(AQ_DRM_DEVICES="/dev/dri/card1")
         self.assertEqual(self.encodeur(appels[0]), ["-c", "h264_vaapi", "-d", "/dev/dri/renderD128"])
+
+    def test_ancien_enregistreur_zombie_n_empeche_pas_le_suivant(self):
+        """Dans un conteneur sans init qui recueille les orphelins (CI), un enregistreur tué restait zombie : kill -0
+        réussissait, nc-video croyait l'enregistrement en cours et « l'arrêtait » au lieu d'en lancer un."""
+        mort = subprocess.Popen(["true"])
+        self.addCleanup(mort.wait)
+        fin = time.monotonic() + 5
+        while time.monotonic() < fin and Path(f"/proc/{mort.pid}/stat").read_text().rpartition(")")[2].split()[0] != "Z":
+            time.sleep(0.01)
+        (self.run_dir / "nc-video").write_text(f"{mort.pid}\n0\n{self.home}/ancien.mp4\n")
+        self.ffmpeg()
+        appels = self.lancer(AQ_DRM_DEVICES="/dev/dri/card1")
+        self.assertEqual(self.encodeur(appels[0])[:2], ["-c", "libx264"])
 
     def test_reglage_processeur_libx264(self):
         self.reglages('VIDEO_ENCODEUR="processeur"\n')

@@ -73,9 +73,13 @@ def actif(pid):
         return False
     try:
         os.kill(pid, 0)
-        return True
     except (OSError, TypeError, ValueError):
         return False
+    try:        # un zombie (fini, pas encore recueilli par son parent) est terminé : sans init qui les recueille
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:   # (conteneur), l'attente irait à 3 s
+            return f.read().rpartition(")")[2].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True
 
 
 def enregistreur(T):

@@ -1344,11 +1344,13 @@ MATERIEL = {
 
 def materiel():
     import glob
+    sys_ = os.environ.get("NC_SYSFS") or "/sys"        # NC_SYSFS : un faux /sys, pour les tests
+    proc = os.environ.get("NC_PROC") or "/proc"
 
     def existe(motif):
         return bool(glob.glob(motif))
     try:
-        entrees = open("/proc/bus/input/devices", encoding="utf-8", errors="ignore").read().lower()
+        entrees = open(proc + "/bus/input/devices", encoding="utf-8", errors="ignore").read().lower()
     except OSError:
         entrees = ""
     # IA installées (même détection que nc-claude) : leur réglage n'apparaît que si elles sont là
@@ -1361,20 +1363,20 @@ def materiel():
              for k, v in ias.items()}
     # PC hybride : une carte NVIDIA et une autre (même détection que nc-profile-sync)
     cartes = set()
-    for d in glob.glob("/sys/bus/pci/devices/*"):
+    for d in glob.glob(sys_ + "/bus/pci/devices/*"):
         try:
             if open(d + "/class").read().startswith("0x03"):
                 cartes.add(open(d + "/vendor").read().strip() == "0x10de")
         except OSError:
             pass
-    return {**dispo, "batterie": existe("/sys/class/power_supply/BAT*"), "couvercle": existe("/proc/acpi/button/lid/*"),
-            "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe("/sys/class/backlight/*"),
-            "clavier": existe("/sys/class/leds/*kbd_backlight*"), "bluetooth": existe("/sys/class/bluetooth/*"),
-            "clavier-batterie": existe("/sys/class/leds/*kbd_backlight*") and existe("/sys/class/power_supply/BAT*"),
+    return {**dispo, "batterie": existe(sys_ + "/class/power_supply/BAT*"), "couvercle": existe(proc + "/acpi/button/lid/*"),
+            "pave": "touchpad" in entrees or "trackpad" in entrees, "ecran": existe(sys_ + "/class/backlight/*"),
+            "clavier": existe(sys_ + "/class/leds/*kbd_backlight*"), "bluetooth": existe(sys_ + "/class/bluetooth/*"),
+            "clavier-batterie": existe(sys_ + "/class/leds/*kbd_backlight*") and existe(sys_ + "/class/power_supply/BAT*"),
             "hybride": cartes == {True, False},
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode
-            "mux": True in cartes and existe("/sys/class/drm/card*-eDP-*"),
+            "mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*"),
             "aur": bool(shutil.which("pacman") and (shutil.which("paru") or shutil.which("yay"))), "flatpak": bool(shutil.which("flatpak")),
             "btrfs": sortie(["findmnt", "-no", "FSTYPE", "/"]).strip() == "btrfs"}
 

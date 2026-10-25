@@ -319,7 +319,7 @@ class Dediee(unittest.TestCase):
         self.assertIn('"GPU_MUX_PROPOSER": "mux"', texte)
         self.assertIn('R("GPU_MUX_AVERTIR", "Énergie"', texte)
         self.assertIn('"GPU_MUX_AVERTIR": "mux"', texte)
-        self.assertIn('"mux": True in cartes and existe("/sys/class/drm/card*-eDP-*")', texte)
+        self.assertIn('"mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*")', texte)
 
 
 if __name__ == "__main__":
