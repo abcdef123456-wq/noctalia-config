@@ -107,6 +107,7 @@ HOME_FILES=(
   .local/bin/nc-aide-config
   .local/bin/nc-qs-capture
   .local/bin/nc-langue
+  .local/bin/nc-pid
   .local/bin/nc-meteo
   .local/bin/nc-video
   .local/bin/nc-fermer

@@ -289,7 +289,7 @@ Singleton {
     }
     Process {
         id: lireVideo
-        command: ["sh", "-c", "f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-video\"; [ -s \"$f\" ] && kill -0 \"$(head -1 \"$f\")\" 2>/dev/null && sed -n 2p \"$f\" || echo 0"]
+        command: ["sh", "-c", ". \"$1\" 2>/dev/null || nc_pid_notre() { kill -0 \"${1:-0}\" 2>/dev/null; }; f=\"${XDG_RUNTIME_DIR:-/tmp}/nc-video\"; [ -s \"$f\" ] || { echo 0; exit; }; { read -r p; read -r d; read -r _; read -r s; } < \"$f\"; if nc_pid_notre \"$p\" \"$s\" wf-recorder; then echo \"$d\"; else echo 0; fi", "sh", bin + "nc-pid"]
         stdout: StdioCollector { onStreamFinished: etat.debutVideo = parseInt(text) || 0 }
     }
     Timer { interval: 15000; repeat: true; running: etat.enregistre; onTriggered: if (!lireVideo.running) lireVideo.running = true }

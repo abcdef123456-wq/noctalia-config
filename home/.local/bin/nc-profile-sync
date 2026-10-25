@@ -201,6 +201,7 @@ RTX_DELAI="${NC_RTX_DELAI:-30}"
 RTX_GUET="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nc-rtx-guet"
 RTX_VEILLE="${BASH_SOURCE[0]%/*}/nc-rtx-veille"
 [ -x "$RTX_VEILLE" ] || RTX_VEILLE="$HOME/.local/bin/nc-rtx-veille"
+. "${BASH_SOURCE[0]%/*}/nc-pid" 2>/dev/null || . "$HOME/.local/bin/nc-pid" 2>/dev/null || nc_pid_notre() { kill -0 "${1:-0}" 2>/dev/null; }
 RTX_ETAT=""                                     # power/runtime_status de la NVIDIA : « suspended » = 0 W
 if [ "$HYBRID" = 1 ]; then
   for d in "${NC_SYSFS:-/sys}"/bus/pci/devices/*; do
@@ -213,12 +214,21 @@ rtx_doit_dormir() {
   ! rtx_voulue "$1" "$2" && { [ "$1" = power-saver ] || [ "$2" = 1 ]; }
 }
 
+# Le guet est-il encore à nous ? Un zombie ou un autre processus au même pid (session redémarrée) ne compte pas.
+# Fichier : « pid heure-de-démarrage » ; ancien fichier (pid seul) : le nom nc-profile-sync doit être dans sa ligne de commande
+guet_en_cours() {
+  local p d
+  [ -s "$RTX_GUET" ] || return 1
+  read -r p d < "$RTX_GUET" 2>/dev/null || true
+  nc_pid_notre "$p" "$d" nc-profile-sync
+}
+
 guetter_rtx() {
   [ -n "$RTX_ETAT" ] && [ -n "${AQ_DRM_DEVICES:-}" ] && [ -x "$RTX_VEILLE" ] || return 0
   rtx_doit_dormir "$1" "$2" || return 0
   [ "$(cat "$RTX_ETAT" 2>/dev/null)" = active ] || return 0
   en_dediee && return 0                         # en Dédiée, l'écran la tient allumée : rien à guetter
-  [ -s "$RTX_GUET" ] && kill -0 "$(cat "$RTX_GUET" 2>/dev/null)" 2>/dev/null && return 0   # un seul guet à la fois
+  guet_en_cours && return 0                     # un seul guet à la fois
   (
     sleep "$RTX_DELAI"
     [ "$(cat "$RTX_ETAT" 2>/dev/null)" = active ] || exit 0
@@ -227,7 +237,7 @@ guetter_rtx() {
     # En fond, lui aussi : ses notifications à bouton attendent un clic, le guet suivant ne doit pas les attendre
     "$RTX_VEILLE" alerter &
   ) &
-  echo "$!" > "$RTX_GUET"
+  echo "$! $(nc_pid_debut "$!" 2>/dev/null)" > "$RTX_GUET"
 }
 
 # Portable à MUX (nc-gpu-mode) : le mode graphique, Hybride (écran sur la carte intégrée) ou Dédiée (écran sur la

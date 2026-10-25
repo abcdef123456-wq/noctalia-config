@@ -504,18 +504,61 @@ def hook():
         oublier_question(s)
 
 
+# ── pid_notre : même texte dans nc-dictee, nc-panne et nc-claude (tests/test_pid.py vérifie qu'il est identique) ──────────
+def debut_pid(pid):
+    """Heure de démarrage du processus (champ 22 de /proc/PID/stat), ou None sans /proc."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            return f.read().rpartition(")")[2].split()[19]
+    except (OSError, IndexError, TypeError, ValueError):
+        return None
+
+
+def pid_notre(pid, debut=None, nom=None):
+    """Ce pid est-il vivant, pas un zombie (fini mais non recueilli : kill -0 réussit quand même), et bien le nôtre ?
+    debut : l'heure de démarrage notée avec le pid dans un fichier (un autre processus au même pid, après un
+    redémarrage de session, en a une autre). nom (ou un tuple de noms) : pour un ancien fichier sans heure, doit
+    se trouver dans /proc/PID/cmdline. Sans /proc : kill -0 seul."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except (OSError, ValueError, OverflowError):
+        return False
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            champs = f.read().rpartition(")")[2].split()
+    except OSError:
+        return not os.path.isdir("/proc/self") or os.path.exists("/proc/%d" % pid)
+    if not champs or champs[0] == "Z":
+        return False
+    if debut:
+        return len(champs) > 19 and champs[19] == str(debut)
+    if nom:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                ligne = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return False
+        return any(n in ligne for n in ((nom,) if isinstance(nom, str) else nom))
+    return True
+# ── fin de pid_notre ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+
 # ── Notifications : les nôtres à la place de celles de Claude ─────────────────────────────────────────────────────────
 # Claude envoie les siennes par son terminal (kitty) : elles restaient dans la liste, et un clic ramenait sur une autre
 # fenêtre que la sienne. « nc-claude installer » les coupe (preferredNotifChannel) ; celles-ci ramènent sur le bon
 # terminal (et le bon onglet de kitty) et s'en vont seules dès que tu y retournes, que Claude repart ou se ferme.
 def notif_ouverte(d, sid):
+    """Le processus de la notification tourne-t-il encore ? Noté « pid:démarrage » (un autre processus au même pid,
+    après un redémarrage de session, n'est pas elle) ; ancienne note, pid seul : le nom nc-claude doit être dans
+    sa ligne de commande. pid_notre refuse -1 (os.kill(-1, 0) viserait tous nos processus)."""
     try:
-        pid = int(d.get("notifs", {}).get(sid) or 0)
-        if pid <= 0:
-            return False                               # os.kill(-1, 0) viserait tous nos processus : toujours « ouverte »
-        os.kill(pid, 0)
-        return True
-    except (OSError, ValueError):
+        pid, _, debut = str(d.get("notifs", {}).get(sid) or 0).partition(":")
+        return pid_notre(int(pid), debut or None, "nc-claude")
+    except ValueError:
         return False
 
 
@@ -543,7 +586,7 @@ def montrer_dans_ile(sid):
 
 
 def notification(sid, titre, texte, voir=False):
-    moi = str(os.getpid())
+    moi = "%d:%s" % (os.getpid(), debut_pid(os.getpid()) or "")
     with Etat() as d:
         s = d["sessions"].get(sid)
         if not s:

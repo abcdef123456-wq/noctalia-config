@@ -249,6 +249,19 @@ class VideoEncodeur(unittest.TestCase):
         appels = self.lancer(AQ_DRM_DEVICES="/dev/dri/card1")
         self.assertEqual(self.encodeur(appels[0])[:2], ["-c", "libx264"])
 
+    def test_pid_reutilise_n_est_pas_notre_enregistreur(self):
+        """Après un redémarrage de session, le pid du fichier d'état peut être celui d'un autre processus : il ne doit
+        ni passer pour l'enregistrement en cours, ni recevoir le signal d'arrêt (ancien fichier, trois lignes, et
+        nouveau, avec l'heure de démarrage d'un autre)."""
+        for contenu in ("{pid}\n0\n{home}/ancien.mp4\n", "{pid}\n0\n{home}/ancien.mp4\n1\n"):
+            autre = subprocess.Popen(["sleep", "30"])
+            self.addCleanup(lambda p=autre: (p.kill(), p.wait()))
+            (self.run_dir / "nc-video").write_text(contenu.format(pid=autre.pid, home=self.home))
+            self.ffmpeg()
+            appels = self.lancer(AQ_DRM_DEVICES="/dev/dri/card1")
+            self.assertEqual(self.encodeur(appels[0])[:2], ["-c", "libx264"])
+            self.assertIsNone(autre.poll(), "l'autre processus n'a pas à recevoir SIGINT")
+
     def test_reglage_processeur_libx264(self):
         self.reglages('VIDEO_ENCODEUR="processeur"\n')
         self.carte_des_applis("nvidia")

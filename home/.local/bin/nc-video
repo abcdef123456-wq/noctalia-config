@@ -11,19 +11,21 @@ set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 etat="${XDG_RUNTIME_DIR:-/tmp}/nc-video"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
-# Vivant : pas de processus, ou un zombie (fini, mais non recueilli par son parent : conteneur sans init) = terminé
-vivant() {
-  kill -0 "$1" 2>/dev/null || return 1
-  [ "$(sed 's/^.*) //; s/ .*$//' "/proc/$1/stat" 2>/dev/null)" != Z ]
-}
+# nc_pid_notre : pas de processus, un zombie (fini, mais non recueilli par son parent : conteneur sans init), ou un autre
+# processus qui a repris le même pid (après un redémarrage de session) = ce n'est plus notre enregistreur
+. "${BASH_SOURCE[0]%/*}/nc-pid" 2>/dev/null || . "$HOME/.local/bin/nc-pid" 2>/dev/null || nc_pid_notre() { kill -0 "${1:-0}" 2>/dev/null; }
+# Le fichier d'état : pid de wf-recorder, début (secondes), fichier vidéo, heure de démarrage du processus
+# (anciens fichiers : trois lignes, le nom wf-recorder fait alors foi)
+lire_etat() { pid=; debut=; fichier=; demarre=; { read -r pid; read -r debut; read -r fichier; read -r demarre; } < "$etat" 2>/dev/null || true; }
+en_cours() { [ -s "$etat" ] || return 1; local pid debut fichier demarre; lire_etat; nc_pid_notre "$pid" "$demarre" wf-recorder; }
 dire() { notify-send -a "$(t "Enregistrement d'écran" "Screen Recording")" -i media-record "$@" 2>/dev/null || true; }
 
 arreter() {
   [ -s "$etat" ] || return 1
-  local pid debut fichier duree
-  { read -r pid; read -r debut; read -r fichier; } < "$etat"
-  kill -INT "$pid" 2>/dev/null
-  for _ in $(seq 50); do vivant "$pid" || break; sleep 0.1; done   # la vidéo est finalisée
+  local pid debut fichier demarre duree
+  lire_etat
+  if nc_pid_notre "$pid" "$demarre" wf-recorder; then kill -INT "$pid" 2>/dev/null; fi   # jamais un autre processus au même pid
+  for _ in $(seq 50); do nc_pid_notre "$pid" "$demarre" wf-recorder || break; sleep 0.1; done   # la vidéo est finalisée
   rm -f "$etat"
   [ -s "$fichier" ] || { dire "$(t "Enregistrement vide" "Empty recording")" "$(t "Rien n'a été enregistré." "Nothing was recorded.")"; return 0; }
   duree=$(( $(date +%s) - debut ))
@@ -42,7 +44,7 @@ arreter() {
 
 case "${1:-}" in arreter|stop) arreter; exit 0 ;; esac
 # Déjà en cours : le même raccourci arrête
-if [ -s "$etat" ] && vivant "$(head -1 "$etat")"; then arreter; exit 0; fi
+if en_cours; then arreter; exit 0; fi
 rm -f "$etat"
 command -v wf-recorder >/dev/null || { dire "$(t "wf-recorder n'est pas installé" "wf-recorder is not installed")" "$(t "nc-maj l'installe (ou ton gestionnaire de paquets : wf-recorder)." "nc-update installs it (or your package manager: wf-recorder).")"; exit 1; }
 
@@ -129,7 +131,7 @@ lancer() {
   setsid wf-recorder -g "$zone" -f "$fichier" "${son[@]}" "$@" >/dev/null 2>"$etat.log" < /dev/null &
   pid=$!
   sleep 0.5
-  vivant "$pid"
+  nc_pid_notre "$pid"
 }
 
 choisir_encodeur
@@ -137,8 +139,8 @@ if ! lancer "${enc[@]}" && [ "${enc[1]}" != libx264 ]; then
   rm -f "$fichier"   # sinon wf-recorder demanderait s'il faut l'écraser
   lancer "${PROCESSEUR[@]}"
 fi
-if ! vivant "$pid"; then
+if ! nc_pid_notre "$pid"; then
   dire "$(t "L'enregistrement n'a pas démarré" "Recording didn't start")" "$(tail -1 "$etat.log" 2>/dev/null)"
   exit 1
 fi
-printf '%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" > "$etat"
+printf '%s\n%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" "$(nc_pid_debut "$pid" 2>/dev/null)" > "$etat"

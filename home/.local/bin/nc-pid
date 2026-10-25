@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# nc-pid : « ce processus est-il bien le nôtre, et encore en vie ? » (à sourcer : . nc-pid)
+#   nc_pid_debut PID               affiche l'heure de démarrage du processus (champ 22 de /proc/PID/stat)
+#   nc_pid_notre PID [DEBUT] [NOM] réussit si PID est vivant et n'est pas un zombie (fini, mais pas recueilli par son
+#                                  parent : kill -0 réussit quand même) ; en plus :
+#     DEBUT  l'heure de démarrage notée avec le pid quand on l'a écrit dans un fichier : un autre processus qui a
+#            repris le même pid (après un redémarrage de session) a une autre heure, ce n'est pas le nôtre ;
+#     NOM    sans DEBUT (fichier d'avant cette vérification, pid seul) : le nom doit se trouver dans /proc/PID/cmdline.
+# Sans /proc : kill -0 seul. Écrit en sh simple (le fichier est aussi sourcé par sh -c, depuis l'île).
+nc_pid_debut() {
+  sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f20
+}
+nc_pid_notre() {
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -gt 1 ] 2>/dev/null || return 1
+  kill -0 "$1" 2>/dev/null || return 1
+  [ -d /proc/self ] || return 0                 # pas de /proc : le comportement d'avant
+  _np_e=$(sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null)
+  [ -n "$_np_e" ] || return 1                   # disparu entre-temps
+  [ "${_np_e%% *}" != Z ] || return 1           # zombie = terminé
+  if [ -n "${2:-}" ]; then
+    [ "$(printf '%s' "$_np_e" | cut -d' ' -f20)" = "$2" ]
+  elif [ -n "${3:-}" ]; then
+    tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -qF -- "$3"
+  else
+    return 0
+  fi
+}

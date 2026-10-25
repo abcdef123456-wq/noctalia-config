@@ -36,7 +36,7 @@ import urllib.request
 
 BIN = Path(__file__).resolve().parent
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
-ETAT = RUNTIME / "nc-dictee.json"       # { pid } de l'enregistreur en cours
+ETAT = RUNTIME / "nc-dictee.json"       # { pid, demarre } de l'enregistreur en cours
 AUDIO = RUNTIME / "nc-dictee.wav"
 JOURNAL = RUNTIME / "nc-dictee.log"     # sortie de l'enregistreur (jamais la clé)
 MAX_REPONSE = 1024 * 1024
@@ -68,18 +68,59 @@ def lire_etat():
         return None
 
 
-def actif(pid):
+# ── pid_notre : même texte dans nc-dictee, nc-panne et nc-claude (tests/test_pid.py vérifie qu'il est identique) ──────────
+def debut_pid(pid):
+    """Heure de démarrage du processus (champ 22 de /proc/PID/stat), ou None sans /proc."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            return f.read().rpartition(")")[2].split()[19]
+    except (OSError, IndexError, TypeError, ValueError):
+        return None
+
+
+def pid_notre(pid, debut=None, nom=None):
+    """Ce pid est-il vivant, pas un zombie (fini mais non recueilli : kill -0 réussit quand même), et bien le nôtre ?
+    debut : l'heure de démarrage notée avec le pid dans un fichier (un autre processus au même pid, après un
+    redémarrage de session, en a une autre). nom (ou un tuple de noms) : pour un ancien fichier sans heure, doit
+    se trouver dans /proc/PID/cmdline. Sans /proc : kill -0 seul."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
         return False
     try:
         os.kill(pid, 0)
-    except (OSError, TypeError, ValueError):
+    except PermissionError:
+        pass
+    except (OSError, ValueError, OverflowError):
         return False
-    try:        # un zombie (fini, pas encore recueilli par son parent) est terminé : sans init qui les recueille
-        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:   # (conteneur), l'attente irait à 3 s
-            return f.read().rpartition(")")[2].split()[0] != "Z"
-    except (OSError, IndexError):
-        return True
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            champs = f.read().rpartition(")")[2].split()
+    except OSError:
+        return not os.path.isdir("/proc/self") or os.path.exists("/proc/%d" % pid)
+    if not champs or champs[0] == "Z":
+        return False
+    if debut:
+        return len(champs) > 19 and champs[19] == str(debut)
+    if nom:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                ligne = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return False
+        return any(n in ligne for n in ((nom,) if isinstance(nom, str) else nom))
+    return True
+# ── fin de pid_notre ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+REC = ("parec", "pw-record", "arecord")   # le nom de l'enregistreur, pour un ancien fichier d'état (pid seul)
+
+
+def actif(pid, debut=None, nom=None):
+    return pid_notre(pid, debut, nom)
+
+
+def enregistre(etat):
+    """L'enregistreur noté dans le fichier d'état tourne-t-il encore (et c'est bien lui, pas un autre au même pid) ?"""
+    return bool(etat) and actif(etat.get("pid"), etat.get("demarre"), REC)
 
 
 def enregistreur(T):
@@ -103,17 +144,17 @@ def _arreter():
     etat = lire_etat()
     if not etat:
         return None
-    pid = etat.get("pid")
-    if actif(pid):
+    pid, debut = etat.get("pid"), etat.get("demarre")
+    if actif(pid, debut, REC):                 # jamais un signal à un autre processus qui aurait repris ce pid
         try:
             os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
         for _ in range(30):
-            if not actif(pid):
+            if not actif(pid, debut, REC):
                 break
             time.sleep(0.1)
-        if actif(pid):
+        if actif(pid, debut, REC):
             try:
                 os.kill(pid, signal.SIGKILL)
             except OSError:
@@ -138,7 +179,7 @@ def demarrer(T, intention=None):
 def _demarrer(T):
     nettoyer_captures()
     etat = lire_etat()
-    if etat and actif(etat.get("pid")):
+    if enregistre(etat):
         sortie(ok=True, recording=True, message=T("Enregistrement déjà en cours.", "Already recording."))
         return 0
     try:
@@ -152,7 +193,7 @@ def _demarrer(T):
         with open(JOURNAL, "ab") as journal:
             proc = subprocess.Popen(commande, stdin=subprocess.DEVNULL, stdout=journal, stderr=journal, start_new_session=True)
         # Immédiatement : même un SIGKILL pendant les 250 ms ne rend pas le micro introuvable pour cancel.
-        ETAT.write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
+        ETAT.write_text(json.dumps({"pid": proc.pid, "demarre": debut_pid(proc.pid)}), encoding="utf-8")
         time.sleep(0.25)
         if proc.poll() is not None:
             ETAT.unlink(missing_ok=True)
@@ -550,7 +591,7 @@ def ptt_debut(m):
             finir = True
         elif etat and not etat.get("pret"):
             return 0                                       # un démarrage déjà en cours (répétition de la touche)
-        elif etat and actif((lire_etat() or {}).get("pid")):
+        elif enregistre(lire_etat()):
             # Micro ouvert sans relâchement reçu (relâchement perdu) : ce nouvel appui écrit la dictée au lieu d'être
             # ignoré sans rien dire, ce qui bloquait tous les appuis suivants (issue #2)
             PTT.unlink(missing_ok=True)
@@ -680,7 +721,7 @@ def main():
             return 0
         if action == "status":
             etat = lire_etat()
-            sortie(ok=True, recording=bool(etat and actif(etat.get("pid"))))
+            sortie(ok=True, recording=enregistre(etat))
             return 0
         sortie(ok=False, error="nc-dictee start | stop | cancel | status")
         return 1

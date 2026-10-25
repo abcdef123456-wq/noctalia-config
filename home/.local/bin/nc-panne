@@ -32,7 +32,7 @@ NB = HOME / ".local/bin"
 UNITE_RE = re.compile(r"[A-Za-z0-9:_.\\@-]{1,200}\.service")
 DELAI = 1800                         # un même service : une notification par demi-heure au plus
 ATTENTE = float(os.environ.get("NC_PANNES_ATTENTE") or 3)   # les pannes de ces secondes-là sont regroupées
-LOT = CACHE / "pannes-lot.json"      # { debut, pid : celui qui notifiera, unites : les pannes regroupées }
+LOT = CACHE / "pannes-lot.json"      # { debut, pid : celui qui notifiera, demarre : son heure de démarrage, unites : les pannes regroupées }
 # PANNES=nc : les services du bureau seulement (ceux des applis, de GNOME ou KDE installés à côté restent muets)
 DU_BUREAU = re.compile(r"(nc-|noctalia|pipewire|wireplumber|xdg-desktop-portal|plasma-polkit-agent|hyprpolkitagent|"
                        r"polkit-gnome|hypridle|hyprpaper|hyprsunset|uwsm)")
@@ -118,12 +118,52 @@ def deja_signale(unite):
     return False
 
 
-def vivant(pid):
+# ── pid_notre : même texte dans nc-dictee, nc-panne et nc-claude (tests/test_pid.py vérifie qu'il est identique) ──────────
+def debut_pid(pid):
+    """Heure de démarrage du processus (champ 22 de /proc/PID/stat), ou None sans /proc."""
     try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError, TypeError):
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            return f.read().rpartition(")")[2].split()[19]
+    except (OSError, IndexError, TypeError, ValueError):
+        return None
+
+
+def pid_notre(pid, debut=None, nom=None):
+    """Ce pid est-il vivant, pas un zombie (fini mais non recueilli : kill -0 réussit quand même), et bien le nôtre ?
+    debut : l'heure de démarrage notée avec le pid dans un fichier (un autre processus au même pid, après un
+    redémarrage de session, en a une autre). nom (ou un tuple de noms) : pour un ancien fichier sans heure, doit
+    se trouver dans /proc/PID/cmdline. Sans /proc : kill -0 seul."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
         return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except (OSError, ValueError, OverflowError):
+        return False
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8", errors="replace") as f:
+            champs = f.read().rpartition(")")[2].split()
+    except OSError:
+        return not os.path.isdir("/proc/self") or os.path.exists("/proc/%d" % pid)
+    if not champs or champs[0] == "Z":
+        return False
+    if debut:
+        return len(champs) > 19 and champs[19] == str(debut)
+    if nom:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                ligne = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return False
+        return any(n in ligne for n in ((nom,) if isinstance(nom, str) else nom))
+    return True
+# ── fin de pid_notre ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def vivant(pid, debut=None):
+    """Le processus noté dans le lot est-il encore le nôtre (ni zombie, ni un autre au même pid) ?"""
+    return pid_notre(pid, debut, "nc-panne")
 
 
 def rejoindre_lot(unite):
@@ -131,11 +171,11 @@ def rejoindre_lot(unite):
     celle-ci) ; sinon, ouvre un lot dont ce processus notifiera."""
     lot = lire_json(LOT, {})
     if lot.get("pid") != os.getpid() and 0 <= time.time() - float(lot.get("debut") or 0) < ATTENTE + 5 \
-            and vivant(lot.get("pid")) and isinstance(lot.get("unites"), list):
+            and vivant(lot.get("pid"), lot.get("demarre")) and isinstance(lot.get("unites"), list):
         lot["unites"].append(unite)
         ecrire_json(LOT, lot)
         return True
-    ecrire_json(LOT, {"debut": time.time(), "pid": os.getpid(), "unites": [unite]})
+    ecrire_json(LOT, {"debut": time.time(), "pid": os.getpid(), "demarre": debut_pid(os.getpid()), "unites": [unite]})
     return False
 
 

@@ -112,7 +112,9 @@ class Claude(Module):
     def test_notif_ouverte_sans_notification(self):
         # os.kill(-1, 0) réussissait toujours : idle_prompt ne notifiait jamais
         self.assertFalse(self.m.notif_ouverte({}, "X"))
-        self.assertTrue(self.m.notif_ouverte({"notifs": {"X": str(os.getpid())}}, "X"))
+        moi = "%d:%s" % (os.getpid(), self.m.debut_pid(os.getpid()))      # « pid:démarrage », comme notification()
+        self.assertTrue(self.m.notif_ouverte({"notifs": {"X": moi}}, "X"))
+        self.assertFalse(self.m.notif_ouverte({"notifs": {"X": "%d:1" % os.getpid()}}, "X"))   # pid repris par un autre
 
 
 class AutresAgents(Module):
