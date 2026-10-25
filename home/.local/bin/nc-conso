@@ -810,7 +810,7 @@ def faits_pourquoi():
                 T("Le profil d'énergie est sur Performance : le processeur est poussé même quand tu n'en as pas besoin.",
                   "The power profile is on Performance: the CPU is pushed even when you don't need it."),
                 {"id": "profil_economie", "libelle": T("Passer en Économie", "Switch to Power Saver"),
-                 "detail": T("Profil d'énergie : Performance → Économie", "Power profile: Performance → Power Saver"),
+                 "detail": "",                       # le titre dit déjà tout, et aucun gain en watts n'est mesurable : pas de sous-titre
                  "commande": eco} if eco else None)
     # 4. La luminosité
     niveau = luminosite()
@@ -821,8 +821,7 @@ def faits_pourquoi():
                 T(f"L'écran est à {niveau} % de luminosité.", f"The screen is at {niveau}% brightness."),
                 {"id": "luminosite_baisser",
                  "libelle": T(f"Luminosité {niveau} % → {LUMINOSITE_CIBLE} %", f"Brightness {niveau}% → {LUMINOSITE_CIBLE}%"),
-                 "detail": T(f"La luminosité de l'écran passe de {niveau} % à {LUMINOSITE_CIBLE} %",
-                             f"Screen brightness goes from {niveau}% to {LUMINOSITE_CIBLE}%"),
+                 "detail": "",                       # le titre dit déjà « 100 % → 60 % » ; le gain en watts n'est pas mesurable
                  "commande": [outil_lum, "set", str(LUMINOSITE_CIBLE)]} if peut_ecrire else None)
     # 5. Le rafraîchissement : mentionné, jamais d'action (le 165 Hz est gardé exprès)
     hz = rafraichissement()
@@ -835,7 +834,7 @@ def faits_pourquoi():
         ajouter("bluetooth", 1, 1, "score",
                 T("Le Bluetooth est allumé, mais aucun appareil n'est connecté.", "Bluetooth is on, but no device is connected."),
                 {"id": "bluetooth_couper", "libelle": T("Couper le Bluetooth", "Turn off Bluetooth"),
-                 "detail": T("Le Bluetooth est coupé (tu peux le rallumer quand tu veux)", "Bluetooth is turned off (turn it back on any time)"),
+                 "detail": T("Tu peux le rallumer quand tu veux", "You can turn it back on any time"),
                  "commande": ["bluetoothctl", "power", "off"]})
     causes.sort(key=lambda c: -c["_tri"])
     gardees = []                                          # au plus MAX_ACTIONS actions, les plus lourdes d'abord

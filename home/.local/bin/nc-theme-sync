@@ -387,7 +387,13 @@ def sync_kdeglobals():
             cp.read(path, encoding="utf-8")
         return cp
 
-    src, dst = load(KCS), load(KDEGLOBALS)
+    try:
+        src, dst = load(KCS), load(KDEGLOBALS)
+    except (configparser.Error, UnicodeDecodeError) as e:
+        # kdeglobals (ou le schéma) mal formé : on n'y touche pas, et le reste de la synchro continue
+        print(T(f"nc-theme-sync : kdeglobals illisible, laissé intact ({type(e).__name__})",
+                f"nc-theme-sync: unreadable kdeglobals, left untouched ({type(e).__name__})"), file=sys.stderr)
+        return
     for sec in list(dst.sections()):
         if sec.startswith(("Colors:", "ColorEffects:")) or sec == "WM":
             dst.remove_section(sec)

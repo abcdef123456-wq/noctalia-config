@@ -42,8 +42,35 @@ if [ -n "$PA" ]; then
 fi
 [ -n "$OA" ] && barres_ok && COL+=(--bar-color-total "$OA")
 
-# Coupe chaque ligne à la largeur donnée sans compter les codes couleur (aucun retour à la ligne disgracieux)
+# Coupe chaque ligne à la largeur donnée sans compter les codes couleur (aucun retour à la ligne disgracieux).
+# En Python : mawk (awk de Debian) compte en octets et couperait au milieu d'un caractère (icônes, barres ▰).
+# Les caractères larges (CJK, emoji) comptent pour 2 colonnes, les accents combinés pour 0.
 cut_to() {
+  if command -v python3 >/dev/null; then
+    python3 -c '
+import re, sys, unicodedata
+w = int(sys.argv[1])
+seq = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
+def larg(c):
+    if unicodedata.combining(c):
+        return 0
+    return 2 if unicodedata.east_asian_width(c) in "WF" else 1
+lignes = sys.stdin.buffer.read().decode("utf-8", "replace").split("\n")
+if lignes and lignes[-1] == "":
+    lignes.pop()
+for ligne in lignes:
+    out, n, i = "", 0, 0
+    while i < len(ligne):
+        m = seq.match(ligne, i)
+        if m:
+            out += m.group(); i = m.end(); continue
+        c = ligne[i]; i += 1
+        if n + larg(c) <= w:
+            out += c; n += larg(c)
+    sys.stdout.write(out + "\033[0m\n")
+' "$1"
+    return
+  fi
   awk -v w="$1" '{
     out = ""; n = 0; s = $0
     while (length(s) > 0) {

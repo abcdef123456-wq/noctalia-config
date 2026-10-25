@@ -103,6 +103,17 @@ class ProfileSync(unittest.TestCase):
         self.assertFalse(self.batt.exists())
         self.assertEqual(self.rechargements(), 1)
 
+    def test_config_derniere_ligne_sans_retour_et_blancs(self):
+        """« HZ_ECO=60  \\r » en dernière ligne, sans \\n final (fichier édité sous Windows) : la valeur 60 est prise."""
+        (self.home / ".config/nc-profile.conf").write_bytes(b"HZ_PERFORMANCE=  max \t\r\nHZ_ECO=60  \r")
+        r = self.lancer("power-saver")
+        sortie = (self.home / ".config/hypr/nc/profil.lua").read_text()
+        self.assertIn('hz = "60"', sortie, r.stderr)
+        (self.home / ".config/hypr/nc/profil.lua").unlink()
+        self.lancer("performance")
+        self.assertIn('hz = "max"', (self.home / ".config/hypr/nc/profil.lua").read_text())
+        self.assertNotIn("valeur ignorée", r.stderr)
+
     def test_secteur_rien(self):
         self.lancer("balanced")
         self.assertFalse(self.batt.exists())

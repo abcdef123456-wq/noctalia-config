@@ -209,7 +209,7 @@ Module {
                         font.weight: Font.DemiBold; font.pixelSize: 13; textFormat: Text.PlainText
                     }
                     Texte {
-                        width: parent.width; text: a.modelData.detail
+                        width: parent.width; text: a.modelData.detail; visible: text !== ""
                         secondaire: true; font.pixelSize: 12; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                     }
@@ -232,7 +232,7 @@ Module {
                         wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                     }
                     Texte {
-                        width: parent.width; text: a.modelData.detail
+                        width: parent.width; text: a.modelData.detail; visible: text !== ""
                         color: Couleurs.texteDoux; font.pixelSize: 12; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
                     }

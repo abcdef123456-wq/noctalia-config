@@ -70,8 +70,9 @@ GPU_MUX_AVERTIR=oui
 
 for f in "$CFG" "$HOME/.config/nc/reglages.conf"; do
   [ -r "$f" ] || continue
-  while IFS='=' read -r k v; do
-    v="${v//\"/}"; v="${v%%[[:space:]]}"
+  while IFS='=' read -r k v || [ -n "$k" ]; do          # la dernière ligne compte même sans \n final
+    v="${v//\"/}"; v="${v//$'\r'/}"
+    v="${v%"${v##*[![:space:]]}"}"; v="${v#"${v%%[![:space:]]*}"}"     # blancs de fin puis de début, tous
     case "$k" in
       HZ_PERFORMANCE|HZ_BALANCED_AC|HZ_BALANCED_BAT|HZ_ECO|ECO_BRIGHTNESS_MAX)
         [[ "$v" =~ ^([0-9]{1,3}|max|low)$ ]] && printf -v "$k" '%s' "$v" || echo "$(t "valeur ignorée : $k=$v" "ignored value: $k=$v")" >&2 ;;

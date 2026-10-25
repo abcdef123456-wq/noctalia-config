@@ -13,13 +13,54 @@ sleep "${1:-6}"
 
 barres=" waybar hyprpanel ags eww polybar nwg-panel ironbar yambar sfwbar "
 arretes=()
+proc="${NC_PROC:-/proc}"      # pour les tests (comme NC_AUTOSTART_SYS)
+# dossiers d'autostart du système (/usr/etc : openSUSE)
+read -ra autostart_sys <<< "${NC_AUTOSTART_SYS:-/etc/xdg/autostart /usr/etc/xdg/autostart}"
+# dossiers d'unités du système (NC_UNITES_SYS : pour les tests) ; ~/.config/systemd/user en plus
+read -ra unites_sys <<< "${NC_UNITES_SYS:-/usr/lib/systemd/user /usr/local/lib/systemd/user /etc/systemd/user}"
+
+# unite_dediee UNITE PID PROGRAMME : réussit seulement si l'unité n'existe que pour cette barre, donc qu'on peut
+# l'arrêter et la bloquer sans toucher à autre chose. Sous uwsm, ce qu'Hyprland lance par un ancien exec-once vit dans
+# wayland-wm@hyprland.desktop.service : arrêter ou bloquer cette unité-là, c'est arrêter le bureau lui-même.
+unite_dediee() {
+  local unite="$1" pid="$2" prog="$3"
+  case "$unite" in
+    app-*|wayland-wm@*|wayland-session*|*compositor*|graphical-session*|uwsm*|hyprland*|*Hyprland*) return 1 ;;
+  esac
+  # le nom de l'unité (sans .service ni @instance) est la barre, ou se termine / commence par « -barre » : waybar.service,
+  # waybar@x.service, hyprpanel-bar.service ; pas « sddm-tags.service » pour ags
+  local b="${unite%.service}"
+  b="${b%%@*}"
+  case "$b" in "$prog"|"$prog"-*|*-"$prog") ;; *) return 1 ;; esac
+  [ "$(systemctl --user show -p MainPID --value "$unite" 2>/dev/null)" = "$pid" ]      # et c'est elle, le processus principal
+}
+
+# fichier_unite_reel UNITE : réussit si l'unité vient d'un vrai fichier d'unité (pas d'un lien vers /dev/null, ni d'une
+# unité transitoire) rangé dans un dossier d'unités connu : seulement dans ce cas on la bloque avec mask.
+fichier_unite_reel() {
+  local f
+  f="$(systemctl --user show -p FragmentPath --value "$1" 2>/dev/null)"
+  [ -f "$f" ] || return 1
+  local d
+  for d in "${unites_sys[@]}" "$HOME/.config/systemd/user"; do
+    case "$f" in "$d"/*) return 0 ;; esac
+  done
+  return 1
+}
+
 for pid in $(pgrep -u "$(id -u)" .); do
   # Nom du programme lui-même (pas ses arguments : un éditeur ouvert sur « waybar/config » n'est pas une barre) ;
-  # programmes lancés par un interpréteur (gjs, python, node) : le nom du script
-  mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || continue
+  # programmes lancés par un interpréteur (gjs, python, node) : le nom du script, premier argument qui ne commence pas
+  # par « - » (python3 -sP /usr/bin/nwg-panel, gjs -m fichier)
+  mapfile -d '' -t argv < "$proc/$pid/cmdline" 2>/dev/null || continue
   [ ${#argv[@]} -gt 0 ] || continue
   prog="${argv[0]##*/}"
-  case "$prog" in gjs|python3|python|node) [ ${#argv[@]} -gt 1 ] && prog="${argv[1]##*/}" ;; esac
+  case "$prog" in
+    gjs|python3|python|node)
+      for ((k = 1; k < ${#argv[@]}; k++)); do
+        case "${argv[k]}" in -*) ;; *) prog="${argv[k]##*/}"; break ;; esac
+      done ;;
+  esac
   nom=""
   if [[ "$barres" == *" $prog "* ]]; then
     nom="$prog"
@@ -30,29 +71,61 @@ for pid in $(pgrep -u "$(id -u)" .); do
     done
     [ -n "$conf" ] || continue
     [[ "$conf" == *nc-ile* ]] && continue                 # l'île de noctalia-config
-    [[ " ${argv[*]} " == *" ipc "* ]] && continue         # simple commande envoyée à un shell, pas un shell
+    [[ "$conf" == "${TMPDIR:-/tmp}"/* ]] && continue      # shell.qml d'essai (nc-qs-capture), pas un shell de la session
+    # simple commande envoyée à un shell (ipc, kill, log, list), pas un shell
+    for mot in "${argv[@]:1}"; do
+      case "$mot" in ipc|kill|log|list) continue 2 ;; esac
+    done
     nom="quickshell ($conf)"
   else
     continue
   fi
-  unite="$(sed -n 's|.*/||p' "/proc/$pid/cgroup" 2>/dev/null | tail -1)"
+  unite="$(sed -n 's|.*/||p' "$proc/$pid/cgroup" 2>/dev/null | tail -1)"
+  fait=0      # 1 quand la barre a vraiment été arrêtée (la notification ne le dit que dans ce cas)
   case "$unite" in
     app-*@autostart.service|app-*-autostart@*.service)
       # Démarrage automatique : le fichier .desktop d'origine porte le nom de l'unité
-      d="${unite#app-}"; d="${d%%@*}"; d="$(printf %b "$d")"      # \x2d -> -
-      for f in "$HOME/.config/autostart/$d.desktop" "/etc/xdg/autostart/$d.desktop"; do
+      d="${unite#app-}"; d="${d%%@*}"
+      case "$unite" in app-*-autostart@*.service) d="${d%-autostart}" ;; esac
+      d="$(printf %b "$d")"      # \x2d -> -
+      # Le fichier de l'utilisateur, lu en premier, l'emporte : on s'arrête au premier trouvé (sinon la copie du paquet
+      # écraserait sa version)
+      for f in "$HOME/.config/autostart/$d.desktop" "${autostart_sys[@]/%//$d.desktop}"; do
         [ -f "$f" ] || continue
         mkdir -p "$HOME/.config/autostart"
         n="$HOME/.config/autostart/$d.desktop"
-        [ "$f" = "$n" ] || cp "$f" "$n"
-        grep -q '^Hidden=true' "$n" || printf '\nHidden=true\n' >> "$n"
+        # --remove-destination : un lien cassé dans ~/.config/autostart est remplacé (sa cible n'est jamais touchée)
+        [ "$f" = "$n" ] || cp --remove-destination "$f" "$n" || break
+        # Hidden=true doit être dans le groupe [Desktop Entry] (pas dans le dernier groupe, [Desktop Action …]) :
+        # juste après son en-tête, en retirant un éventuel Hidden= déjà là
+        if awk '/^\[/ { dans = ($0 ~ /^\[Desktop Entry\][ \t\r]*$/); print; if (dans) print "Hidden=true"; next }
+                dans && /^Hidden[ \t]*=/ { next }
+                { print }' "$n" > "$n.nc-tmp"; then
+          chmod --reference="$n" "$n.nc-tmp" 2>/dev/null      # garde les droits (600 reste 600)
+          mv "$n.nc-tmp" "$n" || rm -f "$n.nc-tmp"
+        else
+          rm -f "$n.nc-tmp"
+        fi
+        break
       done
-      kill "$pid" 2>/dev/null ;;
+      kill "$pid" 2>/dev/null && fait=1 ;;
     *.service)
-      case "$unite" in app-*) kill "$pid" 2>/dev/null ;; *) systemctl --user stop "$unite" >/dev/null 2>&1; systemctl --user mask "$unite" >/dev/null 2>&1 || kill "$pid" 2>/dev/null ;; esac ;;
-    *) kill "$pid" 2>/dev/null ;;
+      # Unité dédiée à la barre : on l'arrête et on la bloque. Toute autre unité (le compositeur sous uwsm, une unité
+      # partagée…) n'est jamais touchée : on n'arrête que le processus de la barre.
+      if unite_dediee "$unite" "$pid" "$prog"; then
+        reel=0; fichier_unite_reel "$unite" && reel=1
+        systemctl --user stop "$unite" >/dev/null 2>&1 && fait=1
+        if [ "$reel" = 1 ]; then
+          # mask refuse un fichier du même nom dans ~/.config/systemd/user : disable, puis à défaut on tue le processus
+          systemctl --user mask "$unite" >/dev/null 2>&1 || systemctl --user disable "$unite" >/dev/null 2>&1 \
+            || { kill "$pid" 2>/dev/null && fait=1; }
+        fi
+      else
+        kill "$pid" 2>/dev/null && fait=1
+      fi ;;
+    *) kill "$pid" 2>/dev/null && fait=1 ;;
   esac
-  arretes+=("$nom")
+  [ "$fait" = 1 ] && arretes+=("$nom")
 done
 
 if [ ${#arretes[@]} -gt 0 ]; then

@@ -148,6 +148,8 @@ class Faits(Base):
         self.assertEqual(a["rtx_relancer"]["libelle"], "Relancer Firefox sur la carte intégrée")
         self.assertEqual(a["rtx_relancer"]["detail"], "Firefox sera fermé puis rouvert (enregistre ton travail)")
         self.assertEqual(a["luminosite_baisser"]["libelle"], "Luminosité 100 % → 60 %")
+        # Pas de sous-titre qui répète le titre (aucun gain en watts mesurable)
+        self.assertEqual((a["luminosite_baisser"]["detail"], a["profil_economie"]["detail"]), ("", ""))
         self.assertEqual(a["luminosite_baisser"]["commande"][1:], ["set", "60"])
         self.assertEqual(os.path.basename(a["luminosite_baisser"]["commande"][0]), "nc-brightness")
         self.assertEqual(a["profil_economie"]["commande"][0], "gdbus")
@@ -824,9 +826,9 @@ class Carte(unittest.TestCase):
             faits = {"sur_batterie": True, "langue": "fr", "ia": False, "phrases": "Fixe <b>gras</b> https://x.fr tourne.",
                      "batterie": {"pct": 70, "watts": 10.0},
                      "causes": [{"id": "luminosite", "poids": 5, "unite": "score", "phrase": "x", "action": "luminosite_baisser"}],
-                     "actions": [{"id": "luminosite_baisser", "libelle": "Luminosité 100 % → 60 %", "detail": "La luminosité passe de 100 % à 60 %",
+                     "actions": [{"id": "luminosite_baisser", "libelle": "Luminosité 100 % → 60 %", "detail": "",
                                   "commande": [str(root / "bin/action"), "un", "deux"]},
-                                 {"id": "bluetooth_couper", "libelle": "Couper le Bluetooth", "detail": "Le Bluetooth est coupé",
+                                 {"id": "bluetooth_couper", "libelle": "Couper le Bluetooth", "detail": "Tu peux le rallumer quand tu veux",
                                   "commande": [str(root / "bin/action"), "bt"]}]}
             # L'IA ne rend que le texte et l'ordre ; une commande « inventée » dans sa réponse n'est jamais utilisée
             ia = {"ia": True, "phrases": "Récit de l'IA <i>brut</i>.", "ordre": ["bluetooth_couper", "inconnue", "luminosite_baisser"],
@@ -1004,8 +1006,8 @@ class Carte(unittest.TestCase):
                      "causes": [{"id": "rtx", "poids": 8, "unite": "score", "phrase": "x", "action": "rtx_relancer"}],
                      "actions": [{"id": "rtx_relancer", "libelle": "Relancer %s sur la carte intégrée" % long_,
                                   "detail": "%s sera fermé puis rouvert (enregistre ton travail)" % long_, "commande": ["/bin/true"]},
-                                 {"id": "profil_economie", "libelle": "Passer en Économie", "detail": "Profil d'énergie : Performance → Économie", "commande": ["/bin/true"]},
-                                 {"id": "luminosite_baisser", "libelle": "Luminosité 100 % → 60 %", "detail": "La luminosité de l'écran passe de 100 % à 60 %", "commande": ["/bin/true"]}]}
+                                 {"id": "profil_economie", "libelle": "Passer en Économie", "detail": "", "commande": ["/bin/true"]},
+                                 {"id": "luminosite_baisser", "libelle": "Luminosité 100 % → 60 %", "detail": "", "commande": ["/bin/true"]}]}
             mesure = {"batterie": {"statut": "Discharging", "pct": 63, "watts": 12.3, "restant": 4680},
                       "top": [{"nom": "Firefox", "pct": 8.2, "watts": 4.1}, {"nom": "Code", "pct": 4.0, "watts": 2.0},
                              {"nom": "Discord", "pct": 2.1, "watts": 1.0}, {"nom": "Kitty", "pct": 0.4, "watts": 0.2},
