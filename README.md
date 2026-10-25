@@ -94,6 +94,7 @@ en charge** par l'installateur : il copie tout dans `~/.config` et `~/.local/sta
 | `./install.sh --no-system` | seulement ta session (aucune modification système, à part l'installation de paquets) |
 | `./install.sh --files-only` | seulement la copie des fichiers |
 | `./install.sh --restore` | remet tes fichiers comme avant la dernière installation |
+| `./install.sh --oui` | sans terminal (CI, ssh), répond aussi oui aux étapes de démarrage, de connexion et de pilotes, que le script saute sinon |
 
 Le script :
 - ne lance **jamais** de mise à jour système. S'il manque un paquet dans ta base, il te demande de la faire toi-même ;

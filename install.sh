@@ -5,6 +5,7 @@
 #   ./install.sh --no-system   seulement ta session (paquets, fichiers, terminal, services utilisateur), rien d'autre en root
 #   ./install.sh --files-only  seulement la copie des fichiers (aucun paquet, service ni sudo)
 #   ./install.sh --restore     remet les fichiers tels qu'avant la dernière installation
+#   ./install.sh --oui         sans terminal, répond aussi oui au démarrage, à la connexion et aux pilotes (sinon : non)
 #   ./install.sh --en | --fr   force la langue : anglais ou français (sinon le réglage LANGUE, puis celle du système)
 #
 # Distributions : Arch (et dérivées), Fedora, Debian/Ubuntu, openSUSE : Hyprland et Noctalia v5 sont installés
@@ -25,6 +26,7 @@ STATE="$HOME/.local/state/noctalia-config"
 OLD_STATE="$HOME/.local/state/legion-dotfiles"   # sauvegardes des versions « legion » de ce dépôt
 BK="$STATE/backup-$(date +%Y%m%d-%H%M%S)"
 MODE=full
+OUI=0   # --oui : sans terminal, accepte aussi les étapes sensibles (démarrage, connexion, pilotes)
 HYPR_MIN=0.55.0
 NOCT_DOCS=https://docs.noctalia.dev/noctalia/getting-started/installation/
 
@@ -33,12 +35,20 @@ info() { printf '   %s\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '   \033[33m! %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m%s%s\033[0m\n' "$(t 'Erreur : ' 'Error: ')" "$*" >&2; exit 1; }
-ask() { # ask "question" [o|n]  -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
+# Pas de terminal utilisable (CI, ssh sans tty, tâche de fond) : le même test pour ask(), choisir() et les options de
+# pacman. Les réponses viennent alors des valeurs par défaut.
+sans_tty() { ! { true </dev/tty; } 2>/dev/null; }
+ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en anglais, [Y/n] au lieu de [O/n])
+  # « sensible » : démarrage, connexion, pilotes. Sans terminal, la réponse par défaut y est NON, sauf avec --oui.
   local d="${2:-n}" r hint
   hint="$(t "[o/N]" "[y/N]")"
   [ "$d" = o ] && hint="$(t "[O/n]" "[Y/n]")"
   r=""
-  if { true </dev/tty; } 2>/dev/null; then read -r -p "   $1 $hint " r </dev/tty || r=""; else info "$1 -> $(t "réponse par défaut ($d)" "default answer ($([ "$d" = o ] && echo y || echo n))")"; fi
+  if ! sans_tty; then read -r -p "   $1 $hint " r </dev/tty || r=""
+  else
+    [ "${3:-}" = sensible ] && [ "$OUI" != 1 ] && d=n
+    info "$1 -> $(t "réponse par défaut ($d)" "default answer ($([ "$d" = o ] && echo y || echo n))")$([ "${3:-}" = sensible ] && [ "$d" = n ] && t " : étape sensible sans terminal (--oui pour l'accepter)" " : sensitive step without a terminal (--oui to accept it)")"
+  fi
   r="${r:-$d}"
   [[ "$r" =~ ^[oOyY] ]]
 }
@@ -62,7 +72,7 @@ choisir() { # choisir "question" "choix 1" "choix 2"…  -> numéro choisi dans 
   shift
   info "$q"
   for o in "$@"; do info "  $i) $o"; i=$((i + 1)); done
-  if { true </dev/tty; } 2>/dev/null; then read -r -p "   $(t "Ton choix [1] : " "Your choice [1]: ")" r </dev/tty || r=""; else info "$(t "-> réponse par défaut (1)" "-> default answer (1)")"; fi
+  if ! sans_tty; then read -r -p "   $(t "Ton choix [1] : " "Your choice [1]: ")" r </dev/tty || r=""; else info "$(t "-> réponse par défaut (1)" "-> default answer (1)")"; fi
   [[ "$r" =~ ^[0-9]+$ ]] && [ "$r" -ge 1 ] && [ "$r" -le $# ] || r=1
   CHOIX=$r
 }
@@ -88,6 +98,7 @@ for a in "$@"; do
     --no-system) MODE=nosystem ;;
     --files-only) MODE=files ;;
     --restore) MODE=restore ;;
+    --oui|--yes) OUI=1 ;;
     --en|--fr) ;;   # langue : prise en compte plus haut
     --legion|--no-legion) info "$(t "Option $a ignorée : les profils d'énergie sont maintenant proposés sur tous les PC." "Option $a ignored: power profiles are now offered on every PC.")" ;;
     -h|--help)
@@ -99,6 +110,7 @@ install.sh: installs the noctalia-config desktop (Hyprland + Noctalia v5) on you
   ./install.sh --no-system   only your session (packages, files, terminal, user services), nothing else as root
   ./install.sh --files-only  only copy the files (no packages, services or sudo)
   ./install.sh --restore     put the files back as they were before the last install
+  ./install.sh --oui | --yes without a terminal, also answer yes to boot, login and driver steps (otherwise: no)
   ./install.sh --en | --fr   force the language: English or French (otherwise the LANGUE setting, then the system's)
 
 Distributions: Arch (and derivatives), Fedora, Debian/Ubuntu, openSUSE: Hyprland and Noctalia v5 are installed
@@ -109,7 +121,7 @@ The script never runs a system update, and only touches the boot (Plymouth, GRUB
 if you answer yes to the matching question.
 AIDE_EN
       else
-        sed -n '2,15p' "$0"
+        sed -n '2,16p' "$0"
       fi
       exit 0 ;;
     *) die "$(t "option inconnue : $a (voir ./install.sh --help)" "unknown option: $a (see ./install.sh --help)")" ;;
@@ -154,6 +166,10 @@ bpo_on() {
 bpo_actif() { [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] && apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; }
 bpo_install() { local r=0; BPO="-t trixie-backports"; pkg_install "$@" || r=$?; BPO=""; return $r; }
 
+# Sans terminal (CI, ssh sans tty, nc-maj en tâche de fond) la confirmation de pacman lirait une entrée vide et annulerait
+# tout : --noconfirm seulement dans ce cas (même test que ask()). Avec un terminal, pacman demande comme d'habitude.
+pacman_s() { if sans_tty; then sudo pacman -S --needed --noconfirm "$@"; else sudo pacman -S --needed "$@"; fi; }
+
 pkg_installed() {
   case "$FAMILY" in
     arch) pacman -Q "$1" ;; fedora) rpm -q "$1" ;; suse) rpm -q --whatprovides "$1" ;; debian) dpkg -s "$1" ;; *) false ;;
@@ -161,7 +177,7 @@ pkg_installed() {
 }
 pkg_install() {
   case "$FAMILY" in
-    arch) sudo pacman -S --needed "$@" ;;
+    arch) pacman_s "$@" ;;
     fedora) sudo dnf install -y "$@" ;;
     # Debian 13 avec backports (Hyprland) : leurs bibliothèques (libxkbcommon…) sont plus récentes que celles de
     # trixie ; si un paquet ne s'installe pas pour cette raison, nouvel essai en acceptant les backports
@@ -465,7 +481,7 @@ if [ "$MODE" != files ]; then
   if ! have noctalia; then
     say "$(t "Installation de Noctalia v5" "Installing Noctalia v5")"
     case "$FAMILY" in
-      arch) sudo pacman -S --needed noctalia ;;
+      arch) pacman_s noctalia ;;
       fedora) sudo dnf install -y noctalia ;;
       suse)
         case "$OSID" in
@@ -478,7 +494,7 @@ if [ "$MODE" != files ]; then
         info "$(t "Noctalia n'est pas dans les dépôts d'openSUSE : dépôt tiers indiqué par la documentation officielle :" "Noctalia isn't in openSUSE's repositories: third-party repository given by the official documentation:")"
         info "$url"
         ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
-        sudo zypper addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --gpg-auto-import-keys refresh && sudo zypper install noctalia ;;
+        sudo zypper --non-interactive addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --non-interactive --gpg-auto-import-keys refresh && sudo zypper --non-interactive install noctalia ;;
       debian)
         case "$OSCODE" in
           trixie) src=noctalia-trixie.sources ;;
@@ -492,8 +508,8 @@ if [ "$MODE" != files ]; then
         info "$(t "  dépôt : https://pkg.noctalia.dev/deb/$src" "  repository: https://pkg.noctalia.dev/deb/$src")"
         ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         have wget || sudo apt-get $APT_OPT install -y wget
-        kd="$(mktemp -d)"; wget -q -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
-        sudo wget -q -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
+        kd="$(mktemp -d)"; wget -q --tries=3 --timeout=30 -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
+        sudo wget -q --tries=3 --timeout=30 -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
         sudo apt-get $APT_OPT update -q || true
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
@@ -591,23 +607,12 @@ BROWSER="${BROWSER:-firefox}"
 ok "$(t "Navigateur : $BROWSER" "Browser: $BROWSER")"
 # Langue (écran de connexion)
 LOCALE="$(echo "${LANG:-en_US.UTF-8}" | sed -E 's/[.@].*$//')"; [ -n "$LOCALE" ] || LOCALE=en_US
-# Logo de la distribution dans la barre (coloré aux couleurs du thème) ; vide = icône de Noctalia
-DISTRO_LOGO=""
-if [ "$OSID" = arch ]; then
-  DISTRO_LOGO="$HOME/.config/noctalia/arch-logo.png"
-else
-  for n in ${OSLOGO:+"$OSLOGO"} "${OSID}-logo" "${OSID}-logo-icon" "distributor-logo-${OSID}" "${OSID}"; do
-    for f in "/usr/share/pixmaps/$n.svg" "/usr/share/pixmaps/$n.png" "/usr/share/icons/hicolor/scalable/apps/$n.svg" \
-             "/usr/share/icons/hicolor/256x256/apps/$n.png" "/usr/share/icons/hicolor/128x128/apps/$n.png"; do
-      [ -r "$f" ] && { DISTRO_LOGO="$f"; break 2; }
-    done
-  done
-fi
-ok "$(t "Logo de la barre : ${DISTRO_LOGO:-icône de Noctalia}" "Bar logo: ${DISTRO_LOGO:-Noctalia icon}")"
 # Demandes de mot de passe (polkit) : l'agent de KDE s'il est installé, sinon celui de Noctalia
 POLKIT=true; KDE_POLKIT=0
 info "$(t "Vérification de l’agent polkit…" "Checking the polkit agent…")"
-if sonder 5s 'systemctl polkit' systemctl --user cat plasma-polkit-agent.service >/dev/null; then POLKIT=false; KDE_POLKIT=1; fi
+# list-unit-files, pas « cat » : « cat » réussit aussi avec le seul dossier .service.d du dépôt (nc-apres-session.conf), et
+# l'agent de Noctalia serait coupé dès le 2e passage alors qu'aucun agent KDE n'est installé
+if [ -n "$(sonder 5s 'systemctl polkit' systemctl --user list-unit-files plasma-polkit-agent.service --no-legend)" ]; then POLKIT=false; KDE_POLKIT=1; fi
 # Nom affiché au démarrage (GRUB) : modèle du PC s'il est lisible, sinon nom de la distribution
 BOOT_TITLE="$( { [ "$(dmi sys_vendor)" = LENOVO ] && dmi product_version || dmi product_name; } | tr -cd 'A-Za-z0-9 ._-' | sed -E 's/ +/ /g; s/^ //; s/ $//')"
 w_last="${BOOT_TITLE##* }"
@@ -669,7 +674,7 @@ if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)
 fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard wtype brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
-         zsh git curl unzip nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
+         zsh git curl unzip xdg-utils nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
          enregistreur)
 [ "$FAMILY" = suse ] && GENERIC+=(python-curses)
 if [ "$MODE" != files ]; then
@@ -706,6 +711,21 @@ if [ "$MODE" != files ]; then
                       info "$(t "La police du terminal (CaskaydiaCove Nerd Font) t'est proposée en téléchargement à l'étape 3." "The terminal font (CaskaydiaCove Nerd Font) will be offered for download in step 3.")" ;;
   esac
 fi
+
+# Logo de la distribution dans la barre (coloré aux couleurs du thème) ; vide = icône de Noctalia.
+# Cherché APRÈS l'installation des paquets : le logo (Fedora…) peut venir d'un paquet installé à l'étape 1
+DISTRO_LOGO=""
+if [ "$OSID" = arch ]; then
+  DISTRO_LOGO="$HOME/.config/noctalia/arch-logo.png"
+else
+  for n in ${OSLOGO:+"$OSLOGO"} "${OSID}-logo" "${OSID}-logo-icon" "distributor-logo-${OSID}" "${OSID}"; do
+    for f in "/usr/share/pixmaps/$n.svg" "/usr/share/pixmaps/$n.png" "/usr/share/icons/hicolor/scalable/apps/$n.svg" \
+             "/usr/share/icons/hicolor/256x256/apps/$n.png" "/usr/share/icons/hicolor/128x128/apps/$n.png"; do
+      [ -r "$f" ] && { DISTRO_LOGO="$f"; break 2; }
+    done
+  done
+fi
+ok "$(t "Logo de la barre : ${DISTRO_LOGO:-icône de Noctalia}" "Bar logo: ${DISTRO_LOGO:-Noctalia icon}")"
 
 # ── 2. Fichiers ──────────────────────────────────────────────────────────────
 say "$(t "2. Fichiers de configuration" "2. Configuration files")"
@@ -789,7 +809,7 @@ compiler_quickshell() {
   ask "$(t "Le compiler et l'installer (dans $prefixe) ?" "Build and install it (in $prefixe)?")" o || return 1
   pkg_try build-essential cmake ninja-build pkg-config git ca-certificates qt6-base-dev qt6-base-private-dev \
     qt6-declarative-dev qt6-declarative-private-dev qt6-wayland-dev qt6-wayland-private-dev qt6-shadertools-dev qt6-svg-dev \
-    libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols \
+    libwayland-dev libpipewire-0.3-dev libdrm-dev libgbm-dev libegl-dev libcli11-dev spirv-tools libvulkan-dev wayland-protocols \
     $QS_QML_DEBIAN
   # Debian 13 : protocoles Wayland trop anciens dans trixie (il faut 1.45 ou plus) : version des backports
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
@@ -809,7 +829,14 @@ compiler_quickshell() {
     rm -rf "$wd"
     return 0
   fi
-  warn "$(t "Compilation de Quickshell impossible (journal : $wd) : l'île du plugin Noctalia est utilisée." "Couldn't build Quickshell (log: $wd): the Noctalia plugin island is used.")"
+  warn "$(t "Quickshell n'a pas pu être compilé (journal : $wd) : l'île du plugin Noctalia sert à la place." "Quickshell could not be built (log: $wd): the Noctalia plugin island is used instead.")"
+  # La cause en clair : le paquet que cmake n'a pas trouvé (« Package 'egl' … not found », « Could NOT find X »)
+  cmake_manque="$(grep -aoE "Package '[^']+'|Could NOT find [A-Za-z0-9_+-]+|Could not find [A-Za-z0-9_+-]+" "$wd/cmake.log" 2>/dev/null | sed -E "s/^Package '([^']+)'/\1/; s/^Could (NOT|not) find //" | LC_ALL=C sort -u | paste -sd' ' || true)"
+  [ -z "$cmake_manque" ] || warn "$(t "Quickshell : cmake n'a pas trouvé : $cmake_manque (paquet de développement manquant ?)" "Quickshell: cmake could not find: $cmake_manque (missing development package?)")"
+  # Les dernières lignes du journal qui a échoué (le plus récent), pour que la cause se voie sans aller le chercher
+  for j in "$wd/build.log" "$wd/cmake.log" "$wd/clone.log"; do
+    [ -s "$j" ] && { tail -n 8 "$j" | sed 's/^/     /' >&2; break; }
+  done
   return 1
 }
 # L'île Quickshell pour tout le monde : paquet sur Arch et Fedora, compilée sur Debian / Ubuntu
@@ -836,7 +863,7 @@ if have qs && ver_ge "$(qs_ver || true)" 0.3 && bash "$REPO/home/.local/bin/nc-q
     info "$(t "Icônes de l'île : police Material Symbols Rounded (Google), https://github.com/google/material-design-icons" "Island icons: Material Symbols Rounded font (Google), https://github.com/google/material-design-icons")"
     if ask "$(t "La télécharger (15 Mo) ?" "Download it (15 MB)?")" o; then
       mkdir -p "$(dirname "$POLICE_ICONES")"
-      if curl -fsSL -o "$POLICE_ICONES.tmp" 'https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL,GRAD,opsz,wght%5D.ttf'; then
+      if curl -fsSL --retry 3 --connect-timeout 30 --max-time 900 -o "$POLICE_ICONES.tmp" 'https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsRounded%5BFILL,GRAD,opsz,wght%5D.ttf'; then
         mv "$POLICE_ICONES.tmp" "$POLICE_ICONES"; fc-cache -f "$(dirname "$POLICE_ICONES")" >/dev/null 2>&1 || true; ok "$(t "Police d'icônes installée." "Icon font installed.")"
       else
         rm -f "$POLICE_ICONES.tmp"; warn "$(t "Téléchargement impossible : l'île du plugin Noctalia est utilisée." "Download failed: the Noctalia plugin island is used.")"; ILE=noctalia
@@ -1125,7 +1152,10 @@ elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Ins
     done
     ok "$(t "Config du terminal installée. Tes alias et réglages personnels : ~/.zshrc.perso" "Terminal config installed. Your own aliases and settings: ~/.zshrc.perso")"
     if [ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" != zsh ]; then
-      ask "$(t "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" "Make zsh your default shell (it will ask for your password)?")" o && chsh -s "$(command -v zsh)" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
+      if sans_tty; then info "$(t "Shell par défaut inchangé : chsh demande ton mot de passe, il faut un terminal (chsh -s $(command -v zsh))." "Default shell unchanged: chsh asks for your password, which needs a terminal (chsh -s $(command -v zsh)).")"
+      else
+        ask "$(t "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" "Make zsh your default shell (it will ask for your password)?")" o && chsh -s "$(command -v zsh)" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
+      fi
     fi
   fi
   # Police du terminal (icônes de l'invite) : paquet sur Arch, sinon téléchargement depuis la page officielle de Nerd Fonts
@@ -1134,7 +1164,7 @@ elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Ins
     info "$(t "Police du terminal (CaskaydiaCove Nerd Font) absente : $url" "Terminal font (CaskaydiaCove Nerd Font) missing: $url")"
     if have curl && have unzip && ask "$(t "La télécharger dans ~/.local/share/fonts ?" "Download it to ~/.local/share/fonts?")" o; then
       fd="$HOME/.local/share/fonts/CaskaydiaCove"; zd="$(mktemp -d)"
-      if curl -fsSL -o "$zd/f.zip" "$url" && mkdir -p "$fd" && unzip -qo "$zd/f.zip" '*.ttf' -d "$fd"; then
+      if curl -fsSL --retry 3 --connect-timeout 30 --max-time 900 -o "$zd/f.zip" "$url" && mkdir -p "$fd" && unzip -qo "$zd/f.zip" '*.ttf' -d "$fd"; then
         fc-cache -f "$fd" >/dev/null 2>&1 || true; ok "$(t "Police installée." "Font installed.")"
       else
         warn "$(t "Téléchargement de la police impossible." "Couldn't download the font.")"
@@ -1192,7 +1222,7 @@ elif ask "$nv_q" o; then
     info "$(t "Neovim ${nv:-absent}$([ -n "$nv" ] && echo " (trop ancien)") : LazyVim demande la 0.11.2 ou plus." "Neovim ${nv:-missing}$([ -n "$nv" ] && echo " (too old)"): LazyVim needs 0.11.2 or later.")"
     if [ -n "$na" ] && have curl && ask "$(t "Installer la version officielle de Neovim dans ~/.local (depuis $url) ?" "Install the official Neovim release in ~/.local (from $url)?")" o; then
       zd="$(mktemp -d)"
-      if curl -fsSL -o "$zd/nvim.tar.gz" "$url" && mkdir -p "$HOME/.local/opt" "$HOME/.local/bin" &&
+      if curl -fsSL --retry 3 --connect-timeout 30 --max-time 900 -o "$zd/nvim.tar.gz" "$url" && mkdir -p "$HOME/.local/opt" "$HOME/.local/bin" &&
          rm -rf "$HOME/.local/opt/$na" && tar -xzf "$zd/nvim.tar.gz" -C "$HOME/.local/opt"; then
         ln -sfn "$HOME/.local/opt/$na/bin/nvim" "$HOME/.local/bin/nvim"
         nv="$(nv_ver)"; ok "$(t "Neovim $nv installé (~/.local/bin/nvim)." "Neovim $nv installed (~/.local/bin/nvim).")"
@@ -1520,7 +1550,7 @@ if [ "$MODE" = full ]; then
       case "$FAMILY" in
         arch)
           pkg_installed power-profiles-daemon && info "$(t "pacman va proposer de remplacer power-profiles-daemon : réponds oui." "pacman will offer to replace power-profiles-daemon: answer yes.")"
-          sudo pacman -S --needed tlp tlp-pd || inst=0 ;;
+          pacman_s tlp tlp-pd || inst=0 ;;
         fedora) sudo dnf install -y --allowerasing tlp tlp-pd || inst=0 ;;
         debian) if [ "$OSCODE" = trixie ]; then bpo_install tlp tlp-pd || inst=0; else pkg_install tlp tlp-pd || inst=0; fi ;;
         suse) sudo zypper --non-interactive install --force-resolution tlp tlp-pd || inst=0 ;;
@@ -1607,7 +1637,7 @@ if [ "$MODE" = full ]; then
       cc="$(echo "${cc:-$dflt}" | tr '[:lower:]' '[:upper:]')"
       if [[ "$cc" =~ ^[A-Z]{2}$ ]]; then
         sbackup /etc/conf.d/wireless-regdom
-        sudo pacman -S --needed wireless-regdb
+        pacman_s wireless-regdb
         sudo sed -i -E 's/^WIRELESS_REGDOM=/#&/' /etc/conf.d/wireless-regdom
         echo "WIRELESS_REGDOM=\"$cc\"" | sudo tee -a /etc/conf.d/wireless-regdom >/dev/null
         have iw && sudo iw reg set "$cc" || true
@@ -1688,7 +1718,7 @@ if [ "$MODE" = full ]; then
   elif [ "$plym_done" = 1 ]; then
     say "$(t "5c. Démarrage : thème GRUB « nc » (« $BOOT_TITLE »)" "5c. Boot: “nc” GRUB theme (“$BOOT_TITLE”)")"
     info "$(t "Le logo animé est déjà en place ; seul le thème GRUB est à installer ou à mettre à jour." "The animated logo is already set up; only the GRUB theme needs installing or updating.")"
-    if ask "$(t "Mettre à jour le thème GRUB ?" "Update the GRUB theme?")" o; then
+    if ask "$(t "Mettre à jour le thème GRUB ?" "Update the GRUB theme?")" o sensible; then
       sbackup /etc/default/grub
       grub_nc
     fi
@@ -1696,7 +1726,7 @@ if [ "$MODE" = full ]; then
     say "$(t "5c. Démarrage : logo animé (Plymouth)$([ -n "$GRUBDIR" ] && echo " + thème GRUB « nc » (« $BOOT_TITLE »)")" "5c. Boot: animated logo (Plymouth)$([ -n "$GRUBDIR" ] && echo " + “nc” GRUB theme (“$BOOT_TITLE”)")")"
     warn "$(t "Cette étape modifie le démarrage (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Tout est sauvegardé avant." "This step changes the boot (initramfs$([ -n "$GRUBDIR" ] && echo ", GRUB")). Everything is backed up first.")"
     info "$(t "Secours si l'écran reste noir au démarrage : dans GRUB, touche « e », retirer « splash », Ctrl+X." "If the screen stays black at boot: in GRUB, press “e”, remove “splash”, then Ctrl+X.")"
-    if ask "$(t "Installer l'écran de démarrage ?" "Install the boot screen?")" n; then
+    if ask "$(t "Installer l'écran de démarrage ?" "Install the boot screen?")" n sensible; then
       sbackup /etc/default/grub /etc/mkinitcpio.conf /etc/plymouth /etc/kernel/cmdline
       pkg_installed plymouth || pkg_install plymouth || warn "$(t "Plymouth n'a pas pu être installé." "Plymouth couldn't be installed.")"
       if have plymouth || [ -x /usr/sbin/plymouthd ]; then
@@ -1750,7 +1780,7 @@ if [ "$MODE" = full ]; then
       ok "$(t "Déjà en place." "Already set up.")"
     elif [ ! -d "$T" ]; then
       info "$(t "Il s'appuie sur le thème libre sddm-astronaut-theme, absent : https://github.com/Keyitdev/sddm-astronaut-theme" "It builds on the free sddm-astronaut-theme, which is missing: https://github.com/Keyitdev/sddm-astronaut-theme")"
-      if ask "$(t "Le télécharger (et ses modules Qt) ?" "Download it (and its Qt modules)?")" o; then
+      if ask "$(t "Le télécharger (et ses modules Qt) ?" "Download it (and its Qt modules)?")" o sensible; then
         case "$FAMILY" in
           arch) pkg_try qt6-svg qt6-virtualkeyboard qt6-multimedia-ffmpeg ;;
           fedora) pkg_try qt6-qtsvg qt6-qtvirtualkeyboard qt6-qtmultimedia ;;
@@ -1761,7 +1791,7 @@ if [ "$MODE" = full ]; then
         sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "$(t "Téléchargement impossible." "Download failed.")"
       fi
     fi
-    if [ -d "$T" ] && ! sddm_done && ask "$(t "Installer l'écran de connexion ?" "Install the login screen?")" o; then
+    if [ -d "$T" ] && ! sddm_done && ask "$(t "Installer l'écran de connexion ?" "Install the login screen?")" o sensible; then
       sbackup "$T/metadata.desktop" /etc/sddm.conf.d/theme.conf
       sudo install -Dm0644 "$tmp" "$T/Themes/nc.conf"
       sudo install -Dm0644 "$REPO/system/sddm/nc.jpg" "$T/Backgrounds/nc.jpg"
@@ -1807,8 +1837,8 @@ if [ "$MODE" = full ]; then
       pk=(nvidia-utils)
       if [ "${kernels[*]}" = linux ]; then pk+=(nvidia-open); else pk+=(nvidia-open-dkms); for k in "${kernels[@]}"; do pk+=("$k-headers"); done; fi
       pacman -Sl multilib >/dev/null 2>&1 && pk+=(lib32-nvidia-utils)   # jeux 32 bits (Steam)
-      if ask "$(t "Installer le pilote officiel de NVIDIA (${pk[*]}) ?" "Install NVIDIA's official driver (${pk[*]})?")" o; then
-        if sudo pacman -S --needed "${pk[@]}"; then ok "$(t "Pilote NVIDIA installé : redémarre le PC pour l'utiliser." "NVIDIA driver installed: restart the PC to use it.")"; else warn "$(t "Installation du pilote NVIDIA impossible." "Couldn't install the NVIDIA driver.")"; fi
+      if ask "$(t "Installer le pilote officiel de NVIDIA (${pk[*]}) ?" "Install NVIDIA's official driver (${pk[*]})?")" o sensible; then
+        if pacman_s "${pk[@]}"; then ok "$(t "Pilote NVIDIA installé : redémarre le PC pour l'utiliser." "NVIDIA driver installed: restart the PC to use it.")"; else warn "$(t "Installation du pilote NVIDIA impossible." "Couldn't install the NVIDIA driver.")"; fi
       fi
     elif [ "$FAMILY" = debian ] && [ "$BLACKWELL" = 1 ]; then
       warn "$(t "Ta carte NVIDIA (série RTX 50) demande le pilote 570.169 ou plus ; Debian ne fournit que le 550, qui ne la gère pas." "Your NVIDIA card (RTX 50 series) needs driver 570.169 or later; Debian only provides 550, which doesn't support it.")"
@@ -1827,7 +1857,7 @@ if [ "$MODE" = full ]; then
     fi
     # Portable hybride : sans nvidia-persistenced, la NVIDIA s'endort (0 W) quand rien ne s'en sert
     if persistenced_a_proposer; then
-      if ask "$(t "La carte NVIDIA reste allumée même inutilisée (environ 5 W) : couper le service nvidia-persistenced ?" "The NVIDIA card stays on even when unused (about 5 W): turn off the nvidia-persistenced service?")" o; then
+      if ask "$(t "La carte NVIDIA reste allumée même inutilisée (environ 5 W) : couper le service nvidia-persistenced ?" "The NVIDIA card stays on even when unused (about 5 W): turn off the nvidia-persistenced service?")" o sensible; then
         if sudo systemctl disable --now nvidia-persistenced >/dev/null 2>&1; then
           ok "$(t "nvidia-persistenced coupé : la carte NVIDIA peut s'endormir." "nvidia-persistenced turned off: the NVIDIA card can sleep.")"
         else
@@ -1842,7 +1872,7 @@ if [ "$MODE" = full ]; then
     if systemctl is-enabled --quiet paccache.timer 2>/dev/null; then
       ok "$(t "Déjà en place (paccache.timer)." "Already set up (paccache.timer).")"
     elif ask "$(t "Garder seulement les 2 dernières versions de chaque paquet en cache (chaque semaine) ?" "Keep only the last 2 versions of each package in the cache (weekly)?")" o; then
-      pkg_installed pacman-contrib || sudo pacman -S --needed pacman-contrib
+      pkg_installed pacman-contrib || pacman_s pacman-contrib
       sudo systemctl enable --now paccache.timer >/dev/null && ok "$(t "paccache.timer actif." "paccache.timer active.")"
     fi
   fi
