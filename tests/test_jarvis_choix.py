@@ -221,6 +221,92 @@ class Passerelle(unittest.TestCase):
         self.assertEqual(self.appeler("/api/ask", dict(prompt="petit"))[0], 200)
         self.assertEqual(self.api._SEM_GROS._value, 2)
 
+    def scope_ask(self, cle="bon", longueur=None):
+        entetes = [(b"content-type", b"application/json")] + ([(b"x-secret-key", cle.encode())] if cle else [])
+        if longueur is not None:
+            entetes.append((b"content-length", str(longueur).encode()))
+        return dict(type="http", asgi=dict(version="3.0"), http_version="1.1", method="POST", scheme="http", path="/api/ask",
+                    raw_path=b"/api/ask", root_path="", query_string=b"", headers=entetes, client=("127.0.0.1", 1),
+                    server=("127.0.0.1", 80))
+
+    def test_sans_authentification_le_corps_n_est_jamais_lu(self):
+        """Condition de la limite de 64 Mo : un Content-Length de 60 Mo sans clé (ou avec une mauvaise) donne 401 sans
+        un seul receive()."""
+        for cle in (None, "faux"):
+            lus, messages = [], []
+
+            async def recevoir():
+                lus.append(1)
+                return dict(type="http.request", body=b"x" * (8 * 1024 * 1024), more_body=True)
+
+            async def envoyer(m):
+                messages.append(m)
+            asyncio.run(self.up.app(self.scope_ask(cle, 60 * 1024 * 1024), recevoir, envoyer))
+            self.assertEqual(next(m for m in messages if m["type"] == "http.response.start")["status"], 401, cle)
+            self.assertEqual(lus, [], cle)
+
+    def test_content_length_mensonger_coupe_a_la_lecture(self):
+        """L'en-tête n'est jamais cru : 10 octets annoncés, des morceaux de 8 Mo envoyés sans fin → 413 dès que le total
+        lu dépasse 64 Mo, sans lire la suite."""
+        for annonce in (10, None):
+            lus, messages = [], []
+
+            async def recevoir():
+                lus.append(1)
+                return dict(type="http.request", body=b" " * (8 * 1024 * 1024), more_body=True)
+
+            async def envoyer(m):
+                messages.append(m)
+            asyncio.run(self.up.app(self.scope_ask("bon", annonce), recevoir, envoyer))
+            self.assertEqual(next(m for m in messages if m["type"] == "http.response.start")["status"], 413, annonce)
+            self.assertEqual(len(lus), 64 // 8 + 1, annonce)                            # 72 Mo lus, pas un morceau de plus
+            self.assertEqual(self.api._SEM_GROS._value, 2)
+
+    def test_trois_gros_corps_le_troisieme_attend(self):
+        """Deux gros corps à la fois au plus : le 3e attend le semaphore sans lire plus d'un morceau au-delà de 1 Mo."""
+        morceau = b" " * (2 * 1024 * 1024)
+        self.reponses = ["a", "b", "c"]
+
+        async def scenario():
+            feux = [asyncio.Event() for _ in range(3)]
+            lus = [0, 0, 0]
+            statuts = [None, None, None]
+
+            def requete(i):
+                envoye = []
+
+                async def recevoir():
+                    lus[i] += 1
+                    if lus[i] == 1:
+                        return dict(type="http.request", body=b'{"prompt":"', more_body=True)
+                    if lus[i] == 2:
+                        return dict(type="http.request", body=morceau, more_body=True)
+                    await feux[i].wait()                                             # le client envoie la fin plus tard
+                    return dict(type="http.request", body=b'"}', more_body=False)
+
+                async def envoyer(m):
+                    if m["type"] == "http.response.start":
+                        statuts[i] = m["status"]
+                    envoye.append(m)
+                return self.up.app(self.scope_ask(), recevoir, envoyer)
+            taches = [asyncio.create_task(requete(i)) for i in range(3)]
+            for _ in range(50):
+                await asyncio.sleep(0)
+            self.assertEqual(self.api._SEM_GROS._value, 0)                          # deux gros corps en cours
+            self.assertEqual(lus, [3, 3, 2])                                         # le 3e attend, sans lire plus loin
+            feux[0].set()
+            await taches[0]
+            for _ in range(50):
+                await asyncio.sleep(0)
+            self.assertEqual(lus[2], 3)                                              # place libre : le 3e reprend
+            feux[1].set()
+            feux[2].set()
+            await asyncio.gather(*taches)
+            self.assertEqual(statuts, [200, 200, 200])
+        self.api._SEM_GROS = asyncio.Semaphore(2)                                    # lié à la boucle de ce test
+        asyncio.run(scenario())
+        self.assertEqual(self.api._SEM_GROS._value, 2)
+
     def test_choix_deja_extraits_par_le_serveur(self):
         # JARVIS-BIS 3d1c6b6 renvoie lui-même « choices » : gardés s'ils respectent nos limites, retirés sinon
         f = self.api._avec_choix

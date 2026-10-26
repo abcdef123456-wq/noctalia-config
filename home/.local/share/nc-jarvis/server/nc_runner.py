@@ -46,12 +46,56 @@ def _sans_jeton_d_origine():
 
 _sans_jeton_d_origine()
 
+# Pièces jointes (a25e540) : le runner d'origine les écrit dans /tmp/assistant_uploads et ne les efface qu'au bout de
+# 7 jours, au démarrage. Ici : celles de plus d'une heure, au démarrage puis après chaque /run (l'agent a fini avec
+# elles ; une question suivante de la même conversation a encore l'heure pour y revenir).
+DOSSIER_PIECES = __import__('os').environ.get('NC_PIECES_JOINTES') or '/tmp/assistant_uploads'   # (les tests en mettent un à eux)
+AGE_PIECES = 3600
+
+
+def _purger_pieces_jointes():
+    import os
+    import stat
+    import time
+    try:
+        entrees = list(os.scandir(DOSSIER_PIECES))
+    except OSError:
+        return 0
+    n, maintenant = 0, time.time()
+    for e in entrees:
+        try:
+            st = e.stat(follow_symlinks=False)                # un lien est effacé lui-même, jamais sa cible
+            if (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)) and maintenant - st.st_mtime > AGE_PIECES:
+                os.unlink(e.path)
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
+class _MenagePieces:
+    """Middleware ASGI pur (pas BaseHTTPMiddleware : il casserait le streaming et les contextvars) : le ménage après la
+    réponse d'un /run, même en erreur."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if scope.get('type') == 'http' and str(scope.get('path', '')).startswith('/run'):
+                _purger_pieces_jointes()
+
+
+_purger_pieces_jointes()
+
 # Le backend récent installe déjà le gestionnaire : garder le même état et verrou,
 # plutôt que d'envelopper ses quatre moteurs dans un second gestionnaire.
 engines=getattr(upstream.run_agy,'__self__',None)
 if not all(callable(getattr(engines,name,None)) for name in ('snapshot','choose','session')):
     engines=install(upstream)
 app=upstream.app
+app.add_middleware(_MenagePieces)
 native_health=upstream.health
 for _route in list(app.routes):
     if getattr(_route,'path',None) in ('/nc/engines','/nc/engine'):

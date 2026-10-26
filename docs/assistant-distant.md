@@ -48,7 +48,20 @@ et à lui seul : jamais à l'IA du bureau ni à un autre service. Les clés, cer
 jetons sk-, ghp_, AWS, Slack, Telegram…) mais ne voit pas tous les secrets. Les liens symboliques sont refusés, et les
 fichiers ne partent pas en HTTP clair sur Internet (HTTPS, Tailscale, réseau local ou cet ordinateur seulement) ; pour cet
 envoi, les variables `http_proxy` et `https_proxy` sont ignorées. Le sélecteur
-demande `zenity` (ou `kdialog`, `yad`). Le gateway du dépôt accepte des corps de 64 Mo pour ce champ `files`.
+demande `zenity` (ou `kdialog`, `yad`).
+
+Limites, de bout en bout :
+- **Côté bureau**, l'île et `nc-assistant` vérifient les limites *avant* l'envoi et disent laquelle est dépassée : 5 fichiers, 20 Mo
+  chacun, 40 Mo en tout.
+- **Côté gateway**, le corps de `/api/ask` peut faire 64 Mo : le base64 grossit les fichiers d'un tiers, donc 40 Mo de fichiers
+  font environ 54 Mo. Au-delà de 64 Mo (environ 47 Mo de fichiers), la réponse est 413.
+  - Le corps n'est lu qu'après la vérification de la clé, et la taille est comptée pendant la lecture : l'en-tête
+    `Content-Length` n'est pas cru.
+  - Deux gros envois au plus sont traités en même temps ; le suivant attend.
+- **Côté runner**, les fichiers reçus sont écrits dans `/tmp/assistant_uploads`, un `/tmp` privé au service. Ceux de plus d'une
+  heure sont effacés au démarrage et après chaque question.
+- Les pièces jointes demandent un serveur JARVIS-BIS à jour (révision a25e540 ou plus récente).
+  Un serveur plus ancien ignore les fichiers.
 
 ## Depuis un autre réseau (Wi-Fi différent, Internet)
 
