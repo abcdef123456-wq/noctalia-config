@@ -693,25 +693,43 @@ l’indique. Il ne s’agit pas de sessions natives CLI à contexte illimité.
 Les sous-processus sont sérialisés sur le runner, avec timeout et sorties bornées ; leur groupe est arrêté sur
 échec ou dépassement. Aucune demande n’est rejouée automatiquement après erreur.
 
-**Isolation des moteurs.** Un moteur « en lecture seule » pourrait lire tout le disque, donc le `.env` du serveur (jeton
-du bot, `SECRET_KEY`) ou les secrets du bureau (`~/.config/nc/noeud-totp.json`, `assistant.conf`, `~/.ssh`…), et les
-recopier dans sa réponse. Chaque moteur tourne donc dans une unité `systemd-run --user` transitoire : le backend, ses
-`.env*` et tout ce que `nc-bac` protège sont inaccessibles (seuls les dossiers de session du moteur restent lisibles :
-`~/.claude`, `~/.codex`, `~/.config/opencode`), avec `/tmp` privé, sans socket Unix ni bus, et un `/proc` à part. Ce qui s'exécute ou se relit plus tard hors de l'unité y est en **lecture seule** (`~/.local/bin`,
-`~/.local/share/nc-jarvis`, hypr, autostart, applications, shells, pipewire, `~/.config/nc`, la copie du dépôt : les listes de
-`nc-bac` et `nc-noeud`, lues sur place) ainsi que les réglages et consignes des CLI (`settings*.json`, `CLAUDE.md`, hooks,
-commands, agents, skills, plugins de Claude ; `config.toml`, `AGENTS.md`, prompts, rules de Codex ; `opencode.json` et plugins
-d'OpenCode). Les transcriptions, la mémoire et les scripts de shell de tes sessions (`~/.claude/projects`, `shell-snapshots`,
-`~/.codex/memories`, `shell_snapshots`) sont remplacés par un dossier vide jeté avec l'unité. **Limite connue** : le reste du
-dossier personnel reste inscriptible, donc le moteur peut écrire la config de son CLI (`~/.claude.json` et ses serveurs MCP, un
-fichier de consignes **absent** qu'il créerait, par exemple `~/.claude/CLAUDE.md`, ou le reste des dossiers d'état), qui
-s'exécutera plus tard hors de l'unité ; systemd ne peut pas verrouiller un fichier absent sans en laisser un vide dans ton
-dossier personnel. Un prochain lot donnera aux moteurs un faux dossier personnel. Si un moteur échoue sur une écriture
-refusée, JARVIS répond « isolation de JARVIS : écriture refusée dans … ». Il faut
-**systemd 257 ou plus** (comme le bac des sessions de confiance) : sans cela, ou si la protection ne tient pas, aucun
-moteur n'est lancé (« l'IA de JARVIS n'est pas isolée ici »). Sur un serveur d'hébergeur sans systemd, le refus est
-aussi la règle ; pour l'accepter, en sachant que **le moteur pourra lire les jetons du bot**, écris
+**Isolation des moteurs (Claude Code, Codex, OpenCode).** Un moteur « en lecture seule » pourrait lire tout le disque, donc
+le `.env` du serveur (jeton du bot, `SECRET_KEY`) ou les secrets du bureau (`~/.config/nc/noeud-totp.json`, `assistant.conf`,
+`~/.ssh`…), et les recopier dans sa réponse ; ou écrire dans ton dossier personnel du code qui s'exécuterait plus tard
+(`~/.zshenv`, `~/.config/git/config`, un `.git/hooks`, `~/.claude.json`…). Chaque moteur tourne donc comme dans `nc-ia`,
+qui lance déjà les mêmes CLI : dans une unité `systemd-run --user` transitoire (les propriétés de `nc-bac`) avec un
+**faux dossier personnel** (le code de `nc-ia`, chargé sur place, pas recopié) :
+
+- le moteur n'écrit que dans son faux dossier personnel et son dossier de travail, deux dossiers neufs de
+  `$XDG_RUNTIME_DIR/nc-ia/bac` jetés après la demande. `HOME` y pointe ; ni les `XDG_*` ni `CLAUDE_CONFIG_DIR` ou
+  `CODEX_HOME` ne lui sont transmis ;
+- il y reçoit une copie de ses identifiants, champ par champ (`COPIES` de `nc-ia`) : le jeton d'accès et ce qu'il faut pour
+  s'en servir, jamais le jeton de rafraîchissement, et ses réglages utiles (pour Claude : `language`, `forceLoginMethod`,
+  `oauthAccount`… jamais les serveurs MCP, hooks ou `apiKeyHelper`). Ses clés d'API (celles du `.env` du runner) passent par
+  l'environnement, comme avant ;
+- **rien ne revient** vers ton vrai dossier personnel, pas même un jeton rafraîchi (JARVIS lance déjà `claude
+  --no-session-persistence` et `codex --ephemeral` : il n'y a pas de session à garder). Comme `nc-ia`, un jeton expiré (ou
+  qui expire avant la fin de la demande) n'est pas lancé : JARVIS répond « … doit renouveler sa connexion : ouvre-le une
+  fois dans un terminal », le CLI renouvelle alors lui-même sa connexion ;
+- ton vrai dossier personnel est en **lecture seule** (les CLI y sont installés) et tout le reste du système aussi, `/dev/shm`
+  compris : rien de ce que le moteur écrit ne peut s'exécuter plus tard hors de l'unité, sans qu'une liste de chemins à
+  protéger soit nécessaire ;
+- sont **illisibles** : le backend JARVIS, ses `.env*`, tout ce que `nc-bac` protège (`~/.ssh`, navigateurs,
+  `assistant.conf`, `noeud-totp.json`, `~/.local/state/nc-jarvis`…) **y compris les vrais `~/.claude`, `~/.codex` et
+  `~/.config/opencode`** (le moteur n'a que sa copie), et quelques profils d'autres programmes ;
+- `/tmp` et `/var/tmp` privés, sans socket Unix ni bus, un `/proc` à part, ni caméra ni micro, ni `ptrace` ni trousseau du
+  noyau, les cgroups de ta session en lecture seule, et un `$XDG_RUNTIME_DIR` vide en lecture seule.
+
+Le lanceur de l'unité vérifie à chaque demande que ces protections tiennent (chemins cachés refusent l'accès, vrai
+dossier personnel refuse l'écriture) ; sinon aucun moteur n'est lancé. Si un moteur échoue sur une écriture refusée, JARVIS
+répond « isolation de JARVIS : écriture refusée dans … ». Il faut **systemd 257 ou plus** (comme le bac des sessions de
+confiance) et `nc-ia` / `nc-bac` installés (`~/.local/bin`) : sans cela, ou si la protection ne tient pas, aucun moteur
+n'est lancé (« l'IA de JARVIS n'est pas isolée ici »). Sur un serveur d'hébergeur (`DEPLOY_MODE=server`, sans `nc-ia`), la même
+unité est prise si systemd est là, sans faux dossier personnel : seuls le backend et ses `.env` sont cachés, le moteur **lit et écrit le reste du dossier
+personnel du serveur** (jetons de ses CLI, `~/.ssh`, fichiers de démarrage du shell ou de systemd) ; sans systemd,
+le refus est aussi la règle ; pour l'accepter, en sachant que **le moteur pourra lire les jetons du bot**, écris
 `NC_MOTEURS_SANS_ISOLATION=oui` dans le `.env` du serveur (jamais modifiable à distance, jamais écrit par le déployeur).
+AGY n'est pas lancé par cette unité : c'est le programme d'origine, avec ses propres limites.
 
 Le visuel de `pfp.mp4` apparaît sur fond noir au-dessus de la saisie : atlas QtQuick, sans dépendance codec.
 Son animation s’arrête quand la page est cachée ou quand les effets sont désactivés. Les réglages sont chargés
@@ -747,12 +765,17 @@ Le suivi d’activité réutilise les verrous de `nc-claude` ; les requêtes mut
 
 ## Limites à connaître
 
-- **Les moteurs locaux et ton dossier personnel.** Tout le HOME hors de ces listes reste inscriptible pour un moteur, y
-  compris des chemins exécutés plus tard (par exemple des fichiers de démarrage du shell ou des modules Python) : seul le
-  prochain lot, qui donnera un faux HOME aux moteurs, le ferme. En attendant, un utilisateur prudent peut ne pas activer les
-  moteurs locaux : mets `IA_MODE=non` (nc-reglages → Intelligence artificielle → IA du bureau : non). Sur le PC, le serveur
-  JARVIS refuse alors toute demande avant de lancer un moteur (claude, codex, opencode et agy), sans toucher au reste de JARVIS
-  (Telegram, rappels, notifications, pilotage). Cela coupe aussi l'IA du bureau (`nc-ia`).
+- **Ce que garde un moteur local.** Claude Code, Codex et OpenCode n'écrivent plus nulle part dans ton dossier personnel
+  (faux dossier personnel jeté après chaque demande, le vrai en lecture seule), mais ils gardent : leurs identifiants copiés
+  (jeton d'accès, valable jusqu'à son échéance, et les clés d'API du runner), **le réseau** (tout ce qui se lit peut partir : le
+  vrai dossier personnel reste LISIBLE hors des chemins cachés, c'est une liste noire, tes dossiers à toi s'ajoutent par
+  `NOEUD_BAC_INTERDITS` ; `127.0.0.1` est joignable : un service local sans mot de passe, comme Jupyter ou code-server,
+  est une sortie de l'isolation), et leur propre bac à sable interne. Le jeton de rafraîchissement ne leur est jamais donné : un
+  jeton expiré demande d'ouvrir le CLI une fois dans un terminal. **AGY** (programme d'origine, hors unité) n'a pas cette
+  protection : un utilisateur prudent peut ne pas activer les moteurs locaux : mets `IA_MODE=non` (nc-reglages →
+  Intelligence artificielle → IA du bureau : non). Sur le PC, le serveur JARVIS refuse alors toute demande avant de lancer
+  un moteur (claude, codex, opencode et agy), sans toucher au reste de JARVIS (Telegram, rappels, notifications, pilotage).
+  Cela coupe aussi l'IA du bureau (`nc-ia`).
 - **Si le jeton du gateway est volé** : il permet encore de parler aux moteurs, d’écrire la mémoire et le profil (qui
   entrent dans leurs consignes) et d’envoyer une notification Telegram. Il ne permet plus de changer un réglage sensible
   du PC (seule une liste blanche de réglages d’apparence et de confort s’écrit à distance, vérifiée sur le PC), ni de

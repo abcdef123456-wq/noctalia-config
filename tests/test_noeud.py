@@ -2774,7 +2774,7 @@ class BacReel(ModuleCharge):
         m, _ = self.charger_bac()
         argv = m.bac_argv(":", "/", 10)
         for prop in ("PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring", "PrivateUsers=yes", "NoNewPrivileges=yes",
-                     "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm", "PrivateDevices=yes", "PrivateIPC=yes"):
+                     "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm", "PrivateDevices=yes", "PrivateIPC=yes", "ProtectControlGroups=yes"):
             self.assertIn(prop, argv)             # la sonde bac_tient() utilise ce même argv : si une propriété ne tient pas, pas de bac
 
     def test_ni_camera_ni_micro_dans_le_bac(self):

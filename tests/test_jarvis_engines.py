@@ -6,6 +6,7 @@ from pathlib import Path
 import importlib.machinery as importlib_machinery
 import importlib.util as importlib_util
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -478,38 +479,34 @@ def _bus_utilisateur():
                 ((vrai and os.path.exists(os.path.join(vrai,'bus'))) or os.environ.get('DBUS_SESSION_BUS_ADDRESS')))
 
 
-class IsolationMoteur(unittest.TestCase):
-    """Local : le moteur tourne dans une unité systemd --user où le backend (son .env) est inaccessible ; sans cela, il
-    n'est pas lancé. Le faux systemd-run n'isole rien ; le vrai est dans IsolationMoteurReelle."""
+class _BaseIsolation(unittest.TestCase):
+    """Un faux HOME (le « vrai » de ces tests), un faux backend JARVIS avec ses .env, nc-bac et nc-ia copiés comme en vrai dans
+    ~/.local/bin, des identifiants de moteurs, et un moteur factice. Rien de personnel n'est lu ni écrit."""
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='nc-iso-',dir=self.base_tmp());self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
         self.home=self.root/'home';(self.home/'.claude').mkdir(parents=True)
-        (self.home/'.claude/session').write_text('SESSION-DU-MOTEUR')
         self.backend=self.root/'backend';(self.backend/'home-runner').mkdir(parents=True);(self.backend/'gateway').mkdir()
         (self.backend/'.env').write_text('TELEGRAM_TOKEN=123456:ABCdef-jeton-secret\nSECRET_KEY=cle-serveur-0123456789\n')
         (self.backend/'home-runner/.env').write_text('SECRET_KEY=cle-serveur-0123456789\n')
-        # nc-bac (la liste des chemins secrets) est lu dans ~/.local/bin, comme en vrai
+        # nc-bac (la liste des chemins secrets) et nc-ia (le faux HOME) sont lus dans ~/.local/bin, comme en vrai
         (self.home/'.local/bin').mkdir(parents=True)
-        for nom in ('nc-bac','nc-noeud'):shutil.copy2(REPO/'home/.local/bin'/nom,self.home/'.local/bin'/nom)   # leurs listes de chemins
+        for nom in ('nc-bac','nc-ia'):shutil.copy2(REPO/'home/.local/bin'/nom,self.home/'.local/bin'/nom)
         self.secrets={'totp':'.config/nc/noeud-totp.json','conn':'.local/state/nc-jarvis/connection.conf','assist':'.config/nc/assistant.conf',
             'backup':'.config/nc/assistant.conf.backup-20260101','ia':'.config/nc/ia.conf','ssh':'.ssh/id_ed25519','codex':'.codex/auth.json',
             'noct':'.local/state/noctalia/storage.key','homeenv':'.env.backup-1','pki':'.pki/nssdb/key4.db',
-            'tor':'.config/torbrowser/profile/x','mullvad':'.config/Mullvad VPN/settings.json','proton':'.config/Proton/a','chromet':'.config/google-chrome-for-testing/a'}
+            'tor':'.config/torbrowser/profile/x','mullvad':'.config/Mullvad VPN/settings.json','proton':'.config/Proton/a','chromet':'.config/google-chrome-for-testing/a',
+            'session':'.claude/projects/p1/memory/MEMORY.md','mcp':'.claude/hooks/h.sh'}
         for rel in self.secrets.values():
             f=self.home/rel;f.parent.mkdir(parents=True,exist_ok=True);f.write_text('SECRET_KEY=faux-secret-0123456789\n')
-        # Ce que le moteur ne doit pas pouvoir écrire (du code qui s'exécuterait plus tard hors de l'unité)
-        self.ecrits={'runner':'.local/share/nc-jarvis/server/nc_runner.py','bac':'.local/bin/nc-bac','zshrc':'.zshrc.perso',
-            'hypr':'.config/hypr/x.lua','desktop':'.local/share/applications/x.desktop','claudeset':'.claude/settings.json',
-            'claudemd':'.claude/CLAUDE.md','opencode':'.config/opencode/opencode.json',
-            'pth':'.local/lib/python3.99/site-packages/x.pth','node':'.local/lib/node_modules/codex/bin','fastfetch':'.config/fastfetch/config.jsonc',
-            'noctshare':'.local/share/noctalia/x','dbus':'.local/share/dbus-1/services/x.service','vim':'.vim/plugin/x.vim','homemd':'CLAUDE.md',
-            'envd':'.config/environment.d/x.conf','nautilus':'.local/share/nautilus/scripts/x'}
-        self.permis=('.claude.json','.claude/x')   # la config du CLI reste inscriptible (limite connue)
-        for rel in self.ecrits.values():
-            f=self.home/rel;f.parent.mkdir(parents=True,exist_ok=True)
-            if not f.exists():f.write_text('# original\n')
-        # La mémoire de l'utilisateur : illisible dans l'unité (tmpfs jetable sur ~/.claude/projects)
-        (self.home/'.claude/projects/p1/memory').mkdir(parents=True);(self.home/'.claude/projects/p1/memory/MEMORY.md').write_text('MEMOIRE-UTILISATEUR')
+        # Les identifiants du moteur : jeton d'accès valable 10 h, jeton de rafraîchissement (qui ne doit pas être copié)
+        self.cred=dict(claudeAiOauth=dict(accessToken='AT-ACCES-0123',refreshToken='RT-REFRAICHIR-0123',expiresAt=int((time.time()+36000)*1000),
+            scopes=['user:inference'],subscriptionType='max',autreChamp='PAS-COPIE'),mcpOAuth=dict(serveur='PAS-COPIE'))
+        (self.home/'.claude/.credentials.json').write_text(json.dumps(self.cred))
+        (self.home/'.claude.json').write_text(json.dumps(dict(hasCompletedOnboarding=True,oauthAccount=dict(emailAddress='faux'),
+            mcpServers=dict(evil=dict(command='/bin/evil')),projects=dict(p='PAS-COPIE'))))
+        (self.home/'.claude/settings.json').write_text(json.dumps(dict(language='fr',hooks=dict(Stop='PAS-COPIE'),apiKeyHelper='/bin/evil')))
+        (self.home/'.claude/CLAUDE.md').write_text('consignes de l\'utilisateur\n')
+        (self.home/'.codex/auth.json').write_text(json.dumps(dict(OPENAI_API_KEY='sk-PAS-COPIE')))
         self.m=types.ModuleType('engines_iso');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
         self.opt=patch.object(self.m,'agy_accepte_permission_mode',return_value=True);self.opt.start();self.addCleanup(self.opt.stop)
         self.up=types.SimpleNamespace(__file__=str(self.backend/'home-runner/main.py'),KNOWN_MODELS=[],run_agy=AsyncMock(),
@@ -519,39 +516,46 @@ class IsolationMoteur(unittest.TestCase):
             _reset_memory_injection=lambda:None,_should_inject_memory=lambda version:True,render_memory_prompt=lambda:'')
         self.bin=self.root/'bin';self.bin.mkdir()
         env=dict(HOME=str(self.home),TELEGRAM_TOKEN='faux-tg',SECRET_KEY='faux-secret',ANTHROPIC_API_KEY='cle-claude-0123456789',
-            DEPLOY_MODE='local',PATH=str(self.bin)+':/usr/bin:/bin',XDG_CACHE_HOME=str(self.home/'.cache'))
+            DEPLOY_MODE='local',PATH=str(self.bin)+':/usr/bin:/bin')
         self.env=patch.dict(os.environ,env);self.env.start();self.addCleanup(self.env.stop)
-        for k in ('XDG_RUNTIME_DIR','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','CLAUDE_CONFIG_DIR','CODEX_HOME'):os.environ.pop(k,None)
-        (self.root/'run').mkdir(mode=0o700);os.environ['XDG_RUNTIME_DIR']=str(self.root/'run')   # (les conteneurs n'ont pas /run/user/UID)
+        for k in ('XDG_RUNTIME_DIR','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','CLAUDE_CONFIG_DIR','CODEX_HOME'):os.environ.pop(k,None)
+        # Un dossier à lui (les conteneurs n'ont pas /run/user/UID), pas sous /tmp : nc-bac refuse un XDG_RUNTIME_DIR que PrivateTmp masquerait
+        self.rundir=Path(tempfile.mkdtemp(prefix='nc-iso-run-',dir='/dev/shm')) if os.access('/dev/shm',os.W_OK) else None
+        if self.rundir is None:self.skipTest('un /dev/shm inscriptible est requis pour le faux XDG_RUNTIME_DIR')
+        self.addCleanup(shutil.rmtree,self.rundir,True);os.environ['XDG_RUNTIME_DIR']=str(self.rundir)
         self.journal=self.root/'journal'
-        # Le moteur factice (sh : le python du test peut être hors de ce que voit l'unité) note ce qu'il lit
         self.cli=self.root/'fake-cli'
-        self.cli.write_text("""#!/bin/sh
-cat >/dev/null
-echo lance >> "%(j)s.lance"
-r=ok
-cat "%(b)s/.env" >/dev/null 2>&1 && r="$r LIT-ENV"
-cat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"
-[ "$(cat "%(h)s/.claude/session" 2>/dev/null)" = SESSION-DU-MOTEUR ] && r="$r SESSION"
-[ -n "$TELEGRAM_TOKEN" ] && r="$r JETON"
-%(lectures)s%(ecritures)sprintf '{"result":"%%s"}\\n' "$r"
-""" % dict(j=self.journal,b=self.backend,h=self.home,lectures=''.join(
-            'cat "%s/%s" >/dev/null 2>&1 && r="$r LIT-%s"\n'%(self.home,rel,k.upper()) for k,rel in self.secrets.items()),
-            ecritures=''.join('echo x >> "%s/%s" 2>/dev/null && r="$r ECRIT-%s"\n'%(self.home,rel,k.upper()) for k,rel in self.ecrits.items())
-            +''.join('echo x >> "%s/%s" 2>/dev/null && r="$r OK-%s"\n'%(self.home,rel,rel.replace('/','_')) for rel in self.permis)
-            +'echo x > ./travail.txt 2>/dev/null && r="$r TRAVAIL"\n'
-            +'cat "%s/.claude/projects/p1/memory/MEMORY.md" >/dev/null 2>&1 && r="$r LIT-MEMOIRE"\n'%self.home
-            +'mkdir -p "%s/.claude/projects/x/memory" && echo x > "%s/.claude/projects/x/memory/MEMORY.md" && r="$r JETABLE-ECRIT"\n'%(self.home,self.home)));self.cli.chmod(0o755)
+        self.ecrire_cli('cat >/dev/null\necho lance >> "%s.lance"\nprintf \'{"result":"ok"}\\n\'\n'%self.journal)
         self.find=patch.object(self.m,'executable',return_value=str(self.cli));self.find.start();self.addCleanup(self.find.stop)
         self.e=self.m.install(self.up);self.e.choose(engine='claude')
         self.faux_systemd_run('exit 1\n')   # par défaut : pas de systemd-run utilisable (jamais le vrai dans ces tests)
 
     base_tmp=staticmethod(lambda:None)   # faux programmes : un dossier temporaire ordinaire (/dev/shm peut être noexec)
 
+    def ecrire_cli(self,corps):
+        self.cli.write_text('#!/bin/sh\n'+corps);self.cli.chmod(0o755)
     def lance(self):return self.journal.with_suffix('.lance').exists()
     def faux_systemd_run(self,corps):
         sr=self.bin/'systemd-run';sr.write_text('#!/bin/sh\n'+corps);sr.chmod(0o755)
-    def run_moteur(self):return asyncio.run(self.e.run('q',continue_session=False))
+    def run_moteur(self,**kw):return asyncio.run(self.e.run('q',continue_session=False,**kw))
+    def args_notes(self):
+        f=self.journal.with_suffix('.args');return f.read_text() if f.exists() else ''
+    def restes_du_bac(self):
+        base=self.rundir/'nc-ia/bac'
+        return sorted(os.listdir(base)) if base.is_dir() else []
+
+
+class IsolationMoteur(_BaseIsolation):
+    """Local : le moteur tourne dans une unité systemd --user, avec un faux HOME (celui de nc-ia), où le vrai HOME est en
+    lecture seule et le backend (son .env) inaccessible ; sans cela, il n'est pas lancé. Le faux systemd-run n'isole rien
+    (il note ses arguments, ou lance la commande telle quelle) ; le vrai est dans IsolationMoteurReelle."""
+    def direct(self):
+        """Le faux systemd-run note ses arguments puis exécute la commande après « -- » (le lanceur et le moteur), sans rien isoler :
+        les propriétés de l'unité sont contrôlées par l'étage réel ; ici le lanceur ne vérifie plus rien, pour voir ce que le moteur reçoit."""
+        self.faux_systemd_run('echo "$@" >> "%s.args"\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n'%self.journal)
+        orig=self.m.lanceur
+        p=patch.object(self.m,'lanceur',lambda py,garde,cwd,caches,temoins,reste:orig(py,garde,cwd,[],[],reste));p.start();self.addCleanup(p.stop)
+        ia=self.m.module_ia();q=patch.object(ia,'attendre_unite_inactive',return_value=True);q.start();self.addCleanup(q.stop)
 
     def test_sans_systemd_run_en_local_le_moteur_n_est_pas_lance(self):
         (self.bin/'systemd-run').unlink()
@@ -559,10 +563,21 @@ cat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"
             r=self.run_moteur()
         self.assertFalse(r['success']);self.assertIn('n’est pas isolée',r['error']);self.assertFalse(self.lance())
 
-    def test_systemd_run_en_echec_la_sonde_refuse_sans_lancer(self):
+    def test_systemd_run_en_echec_la_sonde_refuse_sans_lancer_et_ne_laisse_rien(self):
         self.faux_systemd_run('exit 1\n')
         r=self.run_moteur()
         self.assertFalse(r['success']);self.assertIn('n’est pas isolée',r['error']);self.assertFalse(self.lance())
+        self.assertEqual(self.restes_du_bac(),[],'ni dossier de sonde ni faux HOME')
+
+    def test_sans_nc_ia_ou_nc_bac_en_local_refus(self):
+        self.direct()
+        for nom in ('nc-ia','nc-bac'):
+            with self.subTest(manque=nom):
+                (self.home/'.local/bin'/nom).rename(self.home/'.local/bin'/(nom+'.absent'))
+                self.m._NC_IA.clear()
+                r=self.run_moteur()
+                self.assertFalse(r['success']);self.assertIn('n’est pas isolée',r['error']);self.assertFalse(self.lance())
+                (self.home/'.local/bin'/(nom+'.absent')).rename(self.home/'.local/bin'/nom)
 
     def test_serveur_distant_sans_systemd_run_refuse_sauf_variable_du_env_du_serveur(self):
         with patch.dict(os.environ,DEPLOY_MODE='server'):   # systemd-run en échec : pas d'isolation possible
@@ -571,13 +586,23 @@ cat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"
             self.assertIn('NC_MOTEURS_SANS_ISOLATION=oui',r['error']);self.assertIn('jetons du bot',r['error']);self.assertIn('257',r['error'])
             with patch.dict(os.environ,NC_MOTEURS_SANS_ISOLATION='oui'):   # l'ancien comportement : liste blanche, cwd vide, sans_secrets
                 r=self.run_moteur()
-        self.assertTrue(r['success'],r);self.assertIn('LIT-ENV',r['output']);self.assertTrue(self.lance())
-        self.assertNotIn('JETON',r['output'])
+        self.assertTrue(r['success'],r);self.assertTrue(self.lance())
+
+    def test_serveur_distant_sans_nc_ia_meme_unite_sans_faux_home(self):
+        (self.home/'.local/bin/nc-ia').unlink();(self.home/'.local/bin/nc-bac').unlink()
+        self.faux_systemd_run('echo "$@" >> "%s.args"\nexit 1\n'%self.journal)
+        with patch.dict(os.environ,DEPLOY_MODE='server'):
+            r=self.run_moteur()
+        self.assertFalse(r['success']);self.assertIn('NC_MOTEURS_SANS_ISOLATION=oui',r['error']);self.assertFalse(self.lance())
+        args=self.args_notes()
+        for attendu in ('PrivatePIDs=yes','KeyringMode=private','TemporaryFileSystem=','InaccessiblePaths="-%s"'%self.backend.resolve(),
+                        'InaccessiblePaths="-%s"'%(self.backend/'.env').resolve(),'--setenv=ANTHROPIC_API_KEY'):self.assertIn(attendu,args)
+        for absent in ('ProtectHome','BindPaths','nc-ia-'):self.assertNotIn(absent,args)
+        self.assertFalse((self.home/'.cache/nc-jarvis-travail').exists() and list((self.home/'.cache/nc-jarvis-travail').iterdir()),'dossier de travail supprimé')
 
     def test_la_variable_n_est_ni_ecrite_par_le_deployeur_ni_permise_a_distance(self):
         dossier=REPO/'home/.local/share/nc-jarvis'
         self.assertNotIn('NC_MOTEURS_SANS_ISOLATION',(dossier/'deployer.py').read_text())
-        gestion=types.ModuleType('gestion_iso')
         src=(dossier/'server/nc_management.py').read_text()
         ligne=next(l for l in src.splitlines() if l.startswith('CONFIG_PERMIS'))
         self.assertNotIn('NC_MOTEURS',ligne);self.assertNotIn('ISOLATION',ligne)
@@ -587,89 +612,114 @@ cat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"
             r=self.run_moteur()
         self.assertFalse(r['success']);self.assertFalse(self.lance())
 
-    def test_les_secrets_de_nc_bac_sont_caches_sauf_la_session_du_moteur(self):
-        caches=self.m.chemins_caches(self.backend/'home-runner','claude')
-        def couvert(chemin,caches):   # le chemin, ou un dossier qui le contient
-            return any(c==str(chemin) or c+'/' in str(chemin)+'/' and str(chemin).startswith(c+'/') for c in caches)
-        for k,rel in self.secrets.items():self.assertTrue(couvert((self.home/rel).resolve(),caches),k)
-        self.assertTrue(couvert((self.home/'.codex/auth.json').resolve(),caches),'la session d\'un autre moteur est cachée')
-        self.assertNotIn(str((self.home/'.claude').resolve()),caches);self.assertNotIn(str(self.home),caches)
-        self.assertFalse(couvert((self.home/'.codex/auth.json').resolve(),self.m.chemins_caches(self.backend/'home-runner','codex')))
-        self.assertFalse(couvert((self.home/'.claude/session').resolve(),caches))
-
-    def test_backend_dans_le_home_cache_les_env_du_home(self):
-        self.up.__file__=str(self.home/'home-runner/main.py');(self.home/'home-runner').mkdir()
-        caches=self.m.chemins_caches(self.home/'home-runner','claude')
-        self.assertIn(str((self.home/'.env.backup-1').resolve()),caches);self.assertNotIn(str(self.home),caches)
-
-    def test_sans_nc_bac_en_local_refus(self):
-        (self.home/'.local/bin/nc-bac').unlink()
-        with self.assertRaises(self.m.IsolationImpossible):self.m.chemins_caches(self.backend/'home-runner','claude')
+    def test_l_unite_cache_les_secrets_et_les_vrais_dossiers_des_moteurs_le_home_est_en_lecture_seule(self):
+        """Le faux systemd-run note la commande de la sonde (les propriétés sont celles de l'unité du moteur) puis échoue."""
+        self.faux_systemd_run('echo "$@" >> "%s.args"\nexit 1\n'%self.journal)
+        self.run_moteur()
+        args=self.args_notes()
+        for k,rel in self.secrets.items():
+            chemin=(self.home/rel).resolve()
+            self.assertTrue(any('InaccessiblePaths="-%s"'%c in args or 'InaccessiblePaths="%s"'%c in args for c in [str(chemin)]+[str(p) for p in chemin.parents if p!=self.home.resolve() and self.home.resolve() in p.parents]),k)
+        # les VRAIS dossiers des moteurs sont cachés en entier : le moteur n'a que sa copie (plus de « sauf la session du moteur »)
+        for rel in ('.claude','.claude.json','.codex'):self.assertIn('InaccessiblePaths="%s"'%(self.home/rel).resolve(),args,rel)
+        for attendu in ('--user','--pipe','--wait','--collect','--expand-environment=no','PrivateUsers=yes','NoNewPrivileges=yes','PrivatePIDs=yes',
+                        'PrivateDevices=yes','PrivateIPC=yes','ProtectControlGroups=yes','PrivateTmp=yes','RestrictAddressFamilies=AF_INET AF_INET6','KillSignal=SIGKILL',
+                        'KeyringMode=private','SystemCallFilter=~@debug @keyring','ReadOnlyPaths=-/dev/shm','ProtectHome=read-only','ProtectSystem=strict',
+                        'ReadOnlyPaths=%s'%self.home,'TemporaryFileSystem=%s:ro'%self.rundir.resolve(),'BindPaths=%s/nc-ia/bac/nc-ia-sonde-'%self.rundir.resolve(),
+                        'InaccessiblePaths="-%s"'%(self.home/'.config/Mullvad VPN').resolve(),'InaccessiblePaths="-%s"'%(self.home/'.pki').resolve(),
+                        'InaccessiblePaths="-%s"'%self.backend.resolve(),'InaccessiblePaths="-%s"'%(self.backend/'home-runner').resolve(),
+                        'InaccessiblePaths="-%s"'%(self.backend/'.env').resolve(),'--unit=nc-ia-'):
+            self.assertIn(attendu,args)
+        for interdit in ('cle-claude-0123456789','faux-tg','faux-secret','--setenv=TELEGRAM_TOKEN','--setenv=SECRET_KEY','--setenv=XDG_'):
+            self.assertNotIn(interdit,args)
+        self.assertNotIn('ReadWritePaths',args)
 
     def test_une_protection_qui_ne_tient_pas_est_refusee_par_le_lanceur(self):
-        """Le faux systemd-run exécute le moteur SANS rien cacher : le lanceur, qui contrôle chaque chemin caché dans l'unité,
-        sort en 97 avant d'exécuter le moteur. Le journal montre la commande et ses propriétés (aucune valeur secrète)."""
+        """Le faux systemd-run exécute le moteur SANS rien cacher : le lanceur, qui contrôle dans l'unité chaque chemin caché et
+        l'écriture du vrai HOME, sort en 97 avant d'exécuter quoi que ce soit (sonde comprise)."""
         self.faux_systemd_run('echo "$@" >> "%s.args"\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n'%self.journal)
         r=self.run_moteur()
         self.assertFalse(r['success']);self.assertIn('n’est pas isolée',r['error']);self.assertFalse(self.lance())
-        args=self.journal.with_suffix('.args').read_text()
-        for attendu in ('--user','--pipe','--wait','--collect','--expand-environment=no','PrivateUsers=yes','NoNewPrivileges=yes',
-                        'PrivatePIDs=yes','PrivateTmp=yes','RestrictAddressFamilies=AF_INET AF_INET6','TemporaryFileSystem=',
-                        'TemporaryFileSystem=%s:mode=1777'%(self.home/'.claude/projects').resolve(),
-                        'ReadOnlyPaths="-%s"'%(self.home/'.local/bin').resolve(),'ReadOnlyPaths="-%s"'%(self.home/'.claude/settings.json').resolve(),
-                        'KillSignal=SIGKILL','RuntimeMaxSec=125','KeyringMode=private','SystemCallFilter=~@debug @keyring','ReadOnlyPaths=-/dev/shm',
-                        'ReadOnlyPaths="-%s"'%(self.home/'.local/lib').resolve(),
-                        'InaccessiblePaths="-%s"'%(self.home/'.config/Mullvad VPN').resolve(),'InaccessiblePaths="-%s"'%(self.home/'.pki').resolve(),
-                        'InaccessiblePaths="-%s"'%self.backend.resolve(),'InaccessiblePaths="-%s"'%(self.backend/'home-runner').resolve(),
-                        'InaccessiblePaths="-%s"'%(self.backend/'.env').resolve(),'--setenv=ANTHROPIC_API_KEY','--setenv=HOME'):
-            self.assertIn(attendu,args)
-        self.assertNotIn('ReadWritePaths',args,'seul un HOME sous /dev/shm (essais réels) est rouvert en écriture')
-        for interdit in ('ProtectHome','ProtectSystem=','ReadOnlyPaths=-/dev/shm"','ReadOnlyPaths=%s'%self.home.resolve(),'cle-claude-0123456789','faux-tg',
-                         'faux-secret','--setenv=TELEGRAM_TOKEN','--setenv=SECRET_KEY'):
-            self.assertNotIn(interdit,args)
+        self.assertEqual(self.restes_du_bac(),[])
+
+    def test_le_lanceur_refuse_un_chemin_lisible_et_un_dossier_inscriptible(self):
+        py=shutil.which('python3',path=os.environ['PATH']);ok=self.root/'ro';ok.mkdir();ok.chmod(0o555);self.addCleanup(ok.chmod,0o755)
+        ecrit=self.root/'rw';ecrit.mkdir();lisible=self.root/'lisible';lisible.mkdir();secret=self.root/'secret';secret.mkdir(mode=0o000);self.addCleanup(secret.chmod,0o700)
+        def lance(caches,temoins):
+            return subprocess.run(self.m.lanceur(py,'',self.root,caches,temoins,['/bin/echo','lance']),capture_output=True,text=True).returncode
+        if os.geteuid():
+            self.assertEqual(lance([str(secret)],[str(ok)]),0,'caché et en lecture seule : le moteur peut démarrer')
+            self.assertEqual(lance([str(lisible)],[]),self.m.CODE_REFUS_ISOLATION)
+        self.assertEqual(lance([],[str(ecrit)]),self.m.CODE_REFUS_ISOLATION)
+        self.assertEqual(list(ecrit.iterdir()),[],'le témoin est supprimé')
+
+    def test_le_moteur_recoit_un_faux_home_avec_les_seuls_champs_copies_et_rien_ne_revient(self):
+        """Le faux systemd-run lance le moteur tel quel (lanceur sans contrôle) : on voit ce qu'il reçoit dans son faux HOME."""
+        self.direct()
+        os.environ['CLAUDE_CONFIG_DIR']=str(self.home/'.claude')   # un dossier déplacé : le moteur ne doit pas le recevoir
+        self.ecrire_cli('cat >/dev/null\nj="%(j)s"\nenv | sort > "$j.env"\nfind "$HOME" | sort > "$j.fichiers"\npwd > "$j.pwd"\n'
+                        'cat "$HOME/.claude/.credentials.json" > "$j.cred" 2>/dev/null\ncat "$HOME/.claude.json" > "$j.cj" 2>/dev/null\n'
+                        'cat "$HOME/.claude/settings.json" > "$j.set" 2>/dev/null\necho x > "$HOME/.zshenv"; echo x >> "$HOME/.claude/.credentials.json"\n'
+                        'echo "$HOME" > "$j.home"\nprintf \'{"result":"ok"}\\n\'\n'%dict(j=self.journal))
+        avant={p:p.read_bytes() for p in self.home.rglob('*') if p.is_file()}
+        r=self.run_moteur()
+        self.assertTrue(r['success'],r)
+        lu=lambda s:self.journal.with_suffix(s).read_text()
+        faux=lu('.home').strip()
+        self.assertTrue(faux.startswith(str(self.rundir/'nc-ia/bac/nc-ia-home-')),faux)
+        self.assertEqual(lu('.pwd').strip().rsplit('-',1)[0],str(self.rundir/'nc-ia/bac/nc-ia-travail'))
+        env=dict(l.split('=',1) for l in lu('.env').splitlines() if '=' in l)
+        self.assertEqual(env['HOME'],faux);self.assertEqual(env['ANTHROPIC_API_KEY'],'cle-claude-0123456789');self.assertEqual(env['DISABLE_AUTOUPDATER'],'1')
+        for absent in ('TELEGRAM_TOKEN','SECRET_KEY','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','CLAUDE_CONFIG_DIR','CODEX_HOME','XDG_RUNTIME_DIR'):
+            self.assertNotIn(absent,env)
+        # champ par champ, comme COPIES de nc-ia : le jeton d'accès et ce qu'il faut pour s'en servir, jamais le jeton de rafraîchissement
+        cred=json.loads(lu('.cred'))
+        self.assertEqual(sorted(cred['claudeAiOauth']),['accessToken','expiresAt','scopes','subscriptionType'])
+        self.assertNotIn('mcpOAuth',cred);self.assertNotIn('RT-REFRAICHIR',lu('.cred').replace('x\n',''))
+        self.assertEqual(sorted(json.loads(lu('.cj'))),['hasCompletedOnboarding','oauthAccount'])
+        self.assertEqual(json.loads(lu('.set')),dict(language='fr'))
+        fichiers=lu('.fichiers')
+        self.assertNotIn('.codex',fichiers);self.assertNotIn('hooks',fichiers)
+        # rien n'a changé dans le vrai HOME, le faux HOME est supprimé, ni le jeton écrit dedans ni .zshenv ne reviennent
+        self.assertEqual(avant,{p:p.read_bytes() for p in self.home.rglob('*') if p.is_file()})
+        self.assertEqual(self.restes_du_bac(),[])
+        # la commande du moteur (2e appel, après la sonde) : ses variables passent par --setenv, seuls le faux HOME et le travail sont remontés
+        moteur=self.args_notes().split('--user --wait')[2]
+        for attendu in ('--setenv=ANTHROPIC_API_KEY','--setenv=HOME','BindPaths='+faux,'BindPaths='+lu('.pwd').strip(),'--unit=nc-ia-','KeyringMode=private'):self.assertIn(attendu,moteur)
+        for interdit in ('--setenv=XDG_','--setenv=CLAUDE_CONFIG_DIR','--setenv=TELEGRAM_TOKEN','cle-claude-0123456789','BindPaths='+str(self.home)):self.assertNotIn(interdit,moteur)
+
+    def test_la_source_des_copies_est_celle_de_nc_ia(self):
+        """Aucune liste de copies dans nc_engines : le faux HOME vient de la classe Demande de nc-ia, chargée par son chemin."""
+        ia=self.m.module_ia()
+        self.assertIsNotNone(ia);self.assertTrue(hasattr(ia,'COPIES') and hasattr(ia,'Demande'))
+        src=SOURCE.read_text()
+        for nom in ('refreshToken','refresh_token','access_token','accessToken'):self.assertNotIn(nom,src)
+        self.assertEqual(self.m.env_unite('codex','/fh')['HOME'],'/fh')
+        with patch.dict(os.environ,XDG_DATA_HOME='/x',CLAUDE_CONFIG_DIR='/x',CODEX_HOME='/x',XDG_CONFIG_HOME='/x'):
+            self.assertFalse(set(self.m.env_unite('claude','/fh'))&self.m.ENV_DEPLACE)
+            self.assertIn('XDG_CONFIG_HOME',self.m.env_moteur('claude'),'sans isolation (serveur), l\'ancien environnement reste')
+
+    def test_un_jeton_expire_n_est_pas_lance_et_le_message_dit_quoi_faire(self):
+        self.direct()
+        self.cred['claudeAiOauth']['expiresAt']=int((time.time()-60)*1000)
+        (self.home/'.claude/.credentials.json').write_text(json.dumps(self.cred))
+        with patch.dict(os.environ,ANTHROPIC_API_KEY=''):
+            os.environ.pop('ANTHROPIC_API_KEY')
+            r=self.run_moteur()
+        self.assertFalse(r['success']);self.assertIn('renouveler',r['error']);self.assertNotIn('isolée',r['error']);self.assertFalse(self.lance())
+        self.assertEqual(self.restes_du_bac(),[])
 
     def test_chemins_caches_et_refus_du_dossier_qui_contient_le_home(self):
         caches=self.m.chemins_caches(self.backend/'home-runner')
-        for c in (self.backend,self.backend/'home-runner',self.backend/'.env',self.backend/'gateway'):self.assertIn(str(c.resolve()),caches)
+        for c in (self.backend,self.backend/'home-runner',self.backend/'.env',self.backend/'gateway',self.home/'.pki',self.home/'.env.backup-1'):
+            self.assertIn(str(c.resolve()),caches)
         self.assertNotIn(str(self.home),caches)
         with self.assertRaises(self.m.IsolationImpossible):self.m.chemins_caches(self.home)   # contient le HOME
         # le backend entier est facultatif : s'il contient le HOME, seuls ses .env et dossiers voisins sont cachés
         (self.backend/'perso').mkdir()
-        (self.backend/'perso/.local/bin').mkdir(parents=True);shutil.copy2(REPO/'home/.local/bin/nc-bac',self.backend/'perso/.local/bin/nc-bac')
         with patch.dict(os.environ,HOME=str(self.backend/'perso')):
-            os.environ.pop('XDG_CACHE_HOME')
             caches=self.m.chemins_caches(self.backend/'home-runner')
         self.assertNotIn(str(self.backend.resolve()),caches);self.assertIn(str(self.backend/'.env'),caches)
-
-    def test_chemins_en_lecture_seule_une_seule_source_celle_de_nc_bac_et_nc_noeud(self):
-        h=self.home.resolve()
-        for rel in ('.config/hypr/x.lua','.local/share/applications/x.desktop','.local/share/nc-jarvis/server/nc_runner.py','.zshrc.perso'):
-            (self.home/rel).parent.mkdir(parents=True,exist_ok=True);(self.home/rel).touch()
-        for rel in ('.config/hypr','.config/autostart','.config/systemd','.config/fish','.config/pipewire','.config/wireplumber'):(self.home/rel).mkdir(parents=True,exist_ok=True)
-        (self.home/'.bashrc').touch();(self.home/'.profile').touch();(self.home/'.zprofile').touch()
-        depot=self.root/'depot';depot.mkdir();(self.home/'.config/nc').mkdir(parents=True,exist_ok=True);(self.home/'.config/nc/depot').write_text(str(depot)+'\n')
-        caches=self.m.chemins_caches(self.backend/'home-runner','claude')
-        ro=self.m.chemins_lecture_seule('claude',caches)
-        self.assertIn(str(h/'.local/lib'),ro);self.assertIn(str(h/'CLAUDE.md'),ro)
-        for rel in ('.local/bin','.local/share/nc-jarvis','.config/hypr','.local/share/applications','.zshrc.perso',
-                    '.config/pipewire','.config/wireplumber','.claude/settings.json','.claude/CLAUDE.md'):
-            self.assertIn(str(h/rel),ro,rel)
-        for rel in ('.config/systemd','.config/autostart','.bashrc','.profile','.zprofile','.config/fish'):   # PROTEGES de nc-bac : cachés tout à fait
-            self.assertIn(str(h/rel),caches,rel);self.assertNotIn(str(h/rel),ro,rel)
-        self.assertIn(str(depot.resolve()),ro,'la copie du dépôt')
-        for rel in ('.claude','.claude.json','.claude/projects','.codex','.config/nc','.ssh'):self.assertNotIn(str(h/rel),ro,rel)   # inscriptibles, ou déjà cachés
-        # Les CLI de claude et d'opencode : ~/.config/opencode reste inscriptible, ses réglages non
-        ro=self.m.chemins_lecture_seule('opencode',self.m.chemins_caches(self.backend/'home-runner','opencode'))
-        self.assertIn(str(h/'.config/opencode/opencode.json'),ro);self.assertNotIn(str(h/'.config/opencode'),ro)
-        self.assertEqual(self.m.chemins_jetables('claude'),[str(h/'.claude/projects'),str(h/'.claude/shell-snapshots')])
-        self.assertTrue((h/'.claude/shell-snapshots').is_dir(),'créé vide par le runner : le moteur ne le crée pas dans le vrai HOME')
-        (self.home/'.local/bin/nc-noeud').unlink()
-        with self.assertRaises(self.m.IsolationImpossible):self.m.chemins_lecture_seule('claude',caches)
-
-    def test_les_listes_lues_dans_nc_noeud_sont_celles_de_nc_noeud(self):
-        spec=importlib_util.spec_from_loader('nc_noeud_liste',importlib_machinery.SourceFileLoader('nc_noeud_liste',str(REPO/'home/.local/bin/nc-noeud')))
-        mod=importlib_util.module_from_spec(spec);spec.loader.exec_module(mod)
-        self.assertEqual(self.m.liste_noeud('ECRITURE_SEULEMENT'),mod.ECRITURE_SEULEMENT)
 
     def test_message_clair_quand_l_isolation_refuse_une_ecriture(self):
         for brut in ("touch: cannot touch '/home/user/.local/bin/y': Read-only file system","Error: EROFS: read-only file system, open '/home/user/.zshrc'",
@@ -677,17 +727,6 @@ cat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"
             m=self.m.ecriture_refusee(brut)
             self.assertIn('isolation de JARVIS : écriture refusée dans /home/user/',m);self.assertIn('signale-le',m);self.assertIn('write denied',m)
         self.assertIsNone(self.m.ecriture_refusee('Invalid API key'))
-
-    def test_le_lanceur_refuse_un_dossier_temoin_inscriptible_et_un_fichier_inscriptible(self):
-        py=shutil.which('python3',path=os.environ['PATH']);ok=self.root/'ro';ok.mkdir();ok.chmod(0o555);self.addCleanup(ok.chmod,0o755)
-        ecrit=self.root/'rw';ecrit.mkdir();f=self.root/'fichier';f.write_text('x')
-        def lance(temoins,lectures):
-            return subprocess.run([py,'-I','-c',self.m.LANCEUR_ISOLE,'',str(self.root),'0',str(len(temoins)),*temoins,str(len(lectures)),*lectures,
-                '/bin/echo','lance'],capture_output=True,text=True).returncode
-        if os.geteuid():self.assertEqual(lance([str(ok)],[]),0,'dossier en lecture seule : le moteur peut démarrer')
-        self.assertEqual(lance([str(ecrit)],[]),self.m.CODE_REFUS_ISOLATION)
-        self.assertEqual(list(ecrit.iterdir()),[],'le témoin est supprimé')
-        self.assertEqual(lance([],[str(f)]),self.m.CODE_REFUS_ISOLATION)
 
     def test_un_chemin_a_guillemet_est_refuse_sans_lancer(self):
         faux=self.root/'ba"ckend';shutil.copytree(self.backend,faux)
@@ -703,74 +742,174 @@ def _shm_utilisable():
 
 
 @unittest.skipUnless(_bus_utilisateur() and _shm_utilisable(),'systemd-run, un bus utilisateur joignable et un /dev/shm exécutable requis')
-class IsolationMoteurReelle(IsolationMoteur):
-    """Le VRAI systemd-run --user (faux HOME, faux backend, faux moteur sous /dev/shm, que l'unité voit ; rien de personnel n'est lu)."""
+class IsolationMoteurReelle(_BaseIsolation):
+    """Le VRAI systemd-run --user (faux HOME, faux backend, faux XDG_RUNTIME_DIR et faux moteur sous /dev/shm, que l'unité voit ;
+    rien de personnel n'est lu ni écrit : HOME, XDG_* et TMPDIR pointent tous vers le dossier du test)."""
     base_tmp=staticmethod(lambda:'/dev/shm')
     def setUp(self):
         super().setUp()
         (self.bin/'systemd-run').unlink()
+        vrai=os.environ.get('NC_TEST_VRAI_RUNTIME') or ''
         os.environ['PATH']=os.environ.get('NC_TEST_VRAI_PATH',os.environ['PATH'])
-        os.environ['XDG_RUNTIME_DIR']=os.environ['NC_TEST_VRAI_RUNTIME']
-        os.environ.pop('XDG_CACHE_HOME',None)
-    # Les cas à faux systemd-run ne valent que pour la classe parente
-    test_sans_systemd_run_en_local_le_moteur_n_est_pas_lance=None
-    test_systemd_run_en_echec_la_sonde_refuse_sans_lancer=None
-    test_une_protection_qui_ne_tient_pas_est_refusee_par_le_lanceur=None
-    test_un_chemin_a_guillemet_est_refuse_sans_lancer=None
-    test_serveur_distant_sans_systemd_run_refuse_sauf_variable_du_env_du_serveur=None
-    test_la_variable_n_ouvre_rien_en_local=None
-    test_sans_nc_bac_en_local_refus=None
-    test_les_secrets_de_nc_bac_sont_caches_sauf_la_session_du_moteur=None
-    test_chemins_en_lecture_seule_une_seule_source_celle_de_nc_bac_et_nc_noeud=None
-    test_les_listes_lues_dans_nc_noeud_sont_celles_de_nc_noeud=None
-    test_message_clair_quand_l_isolation_refuse_une_ecriture=None
-    test_le_lanceur_refuse_un_dossier_temoin_inscriptible_et_un_fichier_inscriptible=None
-    test_backend_dans_le_home_cache_les_env_du_home=None
-    test_chemins_caches_et_refus_du_dossier_qui_contient_le_home=None
+        if not os.environ.get('DBUS_SESSION_BUS_ADDRESS'): os.environ['DBUS_SESSION_BUS_ADDRESS']='unix:path='+os.path.join(vrai,'bus')
+        os.environ['TMPDIR']=str(self.root)
+        # ce qui est vu de l'extérieur avant le moteur : tout l'arbre du test (le dossier run, vidé par le moteur, est suivi à part)
+        self.unites=[]
+        orig=self.m.isoler
+        async def note(*a,**kw):
+            r=await orig(*a,**kw)
+            if r: self.unites.append(r.unite)
+            return r
+        self.m.isoler=note
+        self.e=self.m.install(self.up);self.e.choose(engine='claude')
 
-    def test_le_moteur_ne_lit_pas_le_env_mais_garde_sa_session(self):
+    def instantane(self):
+        out={}
+        for p in sorted(self.root.rglob('*')):
+            if p==self.journal.with_suffix('.sortie'): continue
+            try:
+                st=p.lstat();out[str(p)]=(stat.S_IFMT(st.st_mode),st.st_size,p.read_text() if p.is_file() and st.st_size<10000 else '')
+            except (OSError,UnicodeDecodeError):pass
+        return out
+
+    def test_la_sonde_et_une_vraie_demande_passent(self):
         r=self.run_moteur()
         self.assertTrue(r['success'],r)
-        self.assertEqual(r['output'].split(),['ok','SESSION','OK-.claude.json','OK-.claude_x','TRAVAIL','JETABLE-ECRIT'],
-                         'ni .env du backend, ni TOTP, ni connection.conf, ni assistant.conf, ni .ssh, ni .env.backup, ni la mémoire de l\'utilisateur ; '
-                         'la config du CLI (.claude.json, .claude/x) et le travail restent inscriptibles')
-        for k,rel in self.ecrits.items():self.assertEqual((self.home/rel).read_text(),'# original\n' if k not in('bac',) else (REPO/'home/.local/bin/nc-bac').read_text(),k)
-        self.assertEqual((self.home/'.claude/projects/p1/memory/MEMORY.md').read_text(),'MEMOIRE-UTILISATEUR')
-        self.assertFalse((self.home/'.claude/projects/x').exists(),'ce que le moteur y écrit est jeté avec l\'unité')
-        self.assertTrue((self.home/'.claude/x').exists());self.assertTrue((self.home/'.claude.json').read_text().endswith('x\n'))
-        self.assertFalse(list((self.home/'.cache/nc-jarvis-travail').glob('moteur-*')),'le dossier de travail est supprimé')
+        self.assertEqual(self.restes_du_bac(),[],'faux HOME, dossier de travail et sonde supprimés')
 
-    def test_codex_ne_change_pas_sa_config_mais_ecrit_sa_session(self):
-        (self.home/'.codex/sessions').mkdir(parents=True,exist_ok=True);(self.home/'.codex/config.toml').write_text('# original\n')
-        (self.home/'.codex/memories').mkdir();(self.home/'.codex/memories/m.md').write_text('MEMOIRE')
-        self.cli.write_text('''#!/bin/sh
-cat >/dev/null
-r=ok
-echo x >> "%(h)s/.codex/config.toml" 2>/dev/null && r="$r CONFIG-ECRITE"
-echo x > "%(h)s/.codex/sessions/s1" 2>/dev/null && r="$r SESSION-ECRITE"
-cat "%(h)s/.codex/memories/m.md" >/dev/null 2>&1 && r="$r LIT-MEMOIRE"
-printf '{"type":"item.completed","item":{"type":"agent_message","text":"%%s"}}\\n' "$r"
-''' % dict(h=self.home))
-        self.e.choose(engine='codex')
+    def test_le_moteur_ne_lit_pas_le_env_ni_les_secrets_mais_a_sa_copie(self):
+        lectures=''.join('cat "%s/%s" >/dev/null 2>&1 && r="$r LIT-%s"\n'%(self.home,rel,k.upper()) for k,rel in self.secrets.items())
+        self.ecrire_cli('cat >/dev/null\nr=ok\ncat "%(b)s/.env" >/dev/null 2>&1 && r="$r LIT-ENV"\ncat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"\n'
+            '%(l)s[ -n "$TELEGRAM_TOKEN" ] && r="$r JETON"\n[ -f "$HOME/.claude/.credentials.json" ] && r="$r COPIE"\n'
+            'grep -q REFRAICHIR "$HOME/.claude/.credentials.json" && r="$r REFRESH"\ngrep -q PAS-COPIE "$HOME/.claude.json" "$HOME/.claude/settings.json" && r="$r TROP"\n'
+            '[ -e "$HOME/.codex" ] && r="$r CODEX"\ncat "%(h)s/.claude/.credentials.json" >/dev/null 2>&1 && r="$r LIT-VRAI-JETON"\n'
+            'printf \'{"result":"%%s"}\\n\' "$r"\n'%dict(b=self.backend,l=lectures,h=self.home))
         r=self.run_moteur()
-        self.assertTrue(r['success'],r);self.assertEqual(r['output'].split(),['ok','SESSION-ECRITE'])
-        self.assertEqual((self.home/'.codex/config.toml').read_text(),'# original\n')
+        self.assertTrue(r['success'],r)
+        self.assertEqual(r['output'].split(),['ok','COPIE'],'ni .env du backend, ni TOTP, ni connection.conf, ni assistant.conf, ni .ssh, ni .env.backup, '
+                         'ni la session de l\'utilisateur, ni le vrai jeton ; seulement sa copie, sans jeton de rafraîchissement')
+
+    def test_moteur_echo_n_ecrit_nulle_part_hors_de_son_faux_home_et_de_son_dossier_de_travail(self):
+        """Le moteur « echo » essaie d'écrire PARTOUT où il peut dans le vrai HOME (rc de shell, git, .local, hypr, CLAUDE.md, un .git/hooks,
+        la config des CLI…) et hors du HOME ; la liste de ce qui a réussi est vide, et le disque est identique avant et après."""
+        for rel in ('.zshrc','.bashrc','.profile','.zshenv','.config/git/config','.config/hypr/hyprland.lua','.config/fastfetch/config.jsonc',
+                    '.local/lib/x','.local/share/nc-jarvis/x','CLAUDE.md','repo/.git/hooks/pre-commit.sample','.codex/config.toml','.config/opencode/opencode.json'):
+            f=self.home/rel;f.parent.mkdir(parents=True,exist_ok=True);f.write_text('# original\n')
+        (self.root/'autre').mkdir()
+        existants=['.zshrc','.bashrc','.profile','.zshenv','.config/git/config','.local/bin/nc-ia','.local/bin/nc-bac','.local/share/nc-jarvis/x','.config/hypr/hyprland.lua',
+                   'CLAUDE.md','repo/.git/hooks/pre-commit.sample','.claude.json','.claude/settings.json','.codex/config.toml','.config/opencode/opencode.json',
+                   '.config/fastfetch/config.jsonc','.ssh/id_ed25519','.config/nc/ia.conf','.local/lib/x']
+        nouveaux=['.local/bin/nouveau','.local/lib/nouveau','.config/hypr/nouveau.lua','repo/.git/hooks/pre-commit','.claude/CLAUDE.md.nouveau','.claude/hooks/x',
+                  '.config/systemd/user/x.service','.config/autostart/x.desktop','.config/fish/config.fish','.pam_environment','.cache/x','.local/share/x',
+                  '.local/state/x','nouveau-fichier','.config/environment.d/x.conf','.local/share/applications/x.desktop']
+        exterieur=[self.backend/'.env',self.backend/'home-runner/nouveau',self.root/'autre/x',self.rundir/'x',self.rundir/'nc-ia/x',self.rundir/'nc-ia/bac/x',
+                   Path('/etc/nc-iso-x'),Path('/usr/nc-iso-x'),Path('/opt/nc-iso-x'),Path('/boot/nc-iso-x'),Path('/dev/shm/nc-iso-hors-%d'%os.getpid())]
+        lignes=[]
+        for rel in existants:lignes.append('echo x >> "%s/%s" 2>/dev/null && r="$r ECRIT:%s"'%(self.home,rel,rel))
+        for rel in nouveaux:lignes.append('mkdir -p "$(dirname "%s/%s")" 2>/dev/null; echo x > "%s/%s" 2>/dev/null && r="$r ECRIT:%s"'%(self.home,rel,self.home,rel,rel))
+        for p in exterieur:lignes.append('echo x > "%s" 2>/dev/null && r="$r ECRIT:%s"'%(p,p))
+        # ce qui DOIT réussir : le faux HOME, le dossier de travail ; /tmp et /var/tmp sont ceux de l'unité (PrivateTmp), pas ceux du système
+        privee=Path('/var/tmp/nc-iso-prive-%d'%os.getpid())
+        lignes+=['echo x > "$HOME/.zshenv" 2>/dev/null && r="$r OK-FAUXHOME"','echo x > ./t.txt 2>/dev/null && r="$r OK-TRAVAIL"',
+                 'echo x > /tmp/prive 2>/dev/null && r="$r OK-TMP-PRIVE"','echo x > "%s" 2>/dev/null && r="$r OK-VARTMP-PRIVE"'%privee]
+        self.ecrire_cli('cat >/dev/null\nr=ok\n'+'\n'.join(lignes)+'\nprintf \'{"result":"%s"}\\n\' "$r"\n')
+        avant=self.instantane()
+        r=self.run_moteur()
+        self.assertTrue(r['success'],r)
+        reussies=[x for x in r['output'].split() if x.startswith('ECRIT:')]
+        self.assertEqual(reussies,[],'écritures qui ont réussi hors du faux HOME et du dossier de travail')
+        self.assertEqual([x for x in r['output'].split() if x.startswith('OK-')],['OK-FAUXHOME','OK-TRAVAIL','OK-TMP-PRIVE','OK-VARTMP-PRIVE'])
+        apres=self.instantane()
+        self.assertEqual([k for k in sorted(set(avant)|set(apres)) if avant.get(k)!=apres.get(k)],[],'rien n\'a changé sur le disque')
+        for p in (privee,Path('/tmp/prive'),Path('/dev/shm/nc-iso-hors-%d'%os.getpid()),Path('/etc/nc-iso-x')):self.assertFalse(p.exists(),str(p))
+        self.assertEqual(self.restes_du_bac(),[])
+
+    def test_la_config_deplacee_est_copiee_d_ou_elle_est_et_le_moteur_n_en_recoit_pas_le_chemin(self):
+        alt=self.home/'ailleurs';shutil.copytree(self.home/'.claude',alt);(alt/'.claude.json').write_text(json.dumps(dict(hasCompletedOnboarding=True)))
+        shutil.rmtree(self.home/'.claude');(self.home/'.claude.json').unlink()
+        os.environ['CLAUDE_CONFIG_DIR']=str(alt)
+        self.ecrire_cli('cat >/dev/null\nr=ok\n[ -n "$CLAUDE_CONFIG_DIR" ] && r="$r CONFIGDIR"\n[ -f "$HOME/.claude/.credentials.json" ] && r="$r COPIE"\n'
+                        'cat "%s/.credentials.json" >/dev/null 2>&1 && r="$r LIT-ORIGINAL"\nprintf \'{"result":"%%s"}\\n\' "$r"\n'%alt)
+        r=self.run_moteur();self.assertTrue(r['success'],r);self.assertEqual(r['output'].split(),['ok','COPIE'])
 
     def test_ecriture_refusee_message_clair_au_lieu_de_l_erreur_brute(self):
-        self.cli.write_text('#!/bin/sh\ncat >/dev/null\necho x > "%s/.local/bin/nc-bac" || exit 1\necho x > "%s/.local/bin/nouveau-script" || { echo "Error: EROFS: read-only file system, open \'%s/.local/bin/nouveau-script\'" >&2; exit 1; }\n'%(self.home,self.home,self.home))
+        self.ecrire_cli('cat >/dev/null\necho x > "%s/.local/bin/nc-bac" || exit 1\necho x > "%s/.local/bin/nouveau-script" || { echo "Error: EROFS: read-only file system, open \'%s/.local/bin/nouveau-script\'" >&2; exit 1; }\n'%(self.home,self.home,self.home))
         r=self.run_moteur()
         self.assertFalse(r['success']);self.assertIn('isolation de JARVIS : écriture refusée dans',r['error']);self.assertIn('please report it',r['error'])
         self.assertNotIn('a échoué',r['error']);self.assertFalse((self.home/'.local/bin/nouveau-script').exists())
 
+    def test_ecriture_refusee_ne_laisse_pas_passer_un_secret(self):
+        """Le chemin recopié dans le message vient du moteur : il passe par le même filtre que la réponse."""
+        self.ecrire_cli('cat >/dev/null\necho "Error: EROFS: read-only file system, open \'/$ANTHROPIC_API_KEY\'" >&2\nexit 1\n')
+        r=self.run_moteur()
+        self.assertFalse(r['success']);self.assertNotIn('cle-claude-0123456789',r['error'])
+
     def test_delai_arrete_l_unite_du_moteur(self):
-        self.cli.write_text('#!/bin/sh\ncat >/dev/null\nsleep 60\n')
+        self.ecrire_cli('cat >/dev/null\nsleep 60\n')
         t=time.monotonic()
         r=asyncio.run(self.e.run('q',timeout=3,continue_session=False))
         self.assertFalse(r['success']);self.assertLess(time.monotonic()-t,15)
         time.sleep(1.5)
-        out=subprocess.run([shutil.which('systemctl',path=os.environ['PATH']),'--user','list-units','--all','--plain','--no-legend','nc-jarvis-moteur-*'],
-            capture_output=True,text=True,timeout=10).stdout
-        self.assertEqual(out.strip(),'','aucune unité de moteur ne reste')
+        self.assertEqual(len(self.unites),1)
+        env={k:v for k,v in os.environ.items() if k!='XDG_RUNTIME_DIR'}   # systemctl passe alors par DBUS_SESSION_BUS_ADDRESS (comme nc-ia)
+        etat=subprocess.run([shutil.which('systemctl',path=os.environ['PATH']),'--user','is-active',self.unites[0]+'.service'],capture_output=True,text=True,timeout=10,env=env).stdout.strip()
+        self.assertIn(etat,('inactive','failed','unknown'),'l\'unité du moteur ne reste pas')
+        self.assertEqual(self.restes_du_bac(),[])
+
+    def test_serveur_de_l_hebergeur_sans_nc_ia_meme_unite_le_backend_est_cache(self):
+        """Ni nc-ia ni nc-bac (serveur de l'hébergeur) : la même unité sans faux HOME ; le .env du backend reste illisible."""
+        (self.home/'.local/bin/nc-ia').unlink();(self.home/'.local/bin/nc-bac').unlink()
+        os.environ['XDG_CACHE_HOME']=str(self.home/'.cache');os.environ['DEPLOY_MODE']='server'
+        self.ecrire_cli('cat >/dev/null\nr=ok\ncat "%(b)s/.env" >/dev/null 2>&1 && r="$r LIT-ENV"\ncat "%(b)s/home-runner/.env" >/dev/null 2>&1 && r="$r LIT-ENV-RUNNER"\n'
+            '[ -n "$TELEGRAM_TOKEN" ] && r="$r JETON"\n[ "$HOME" = "%(h)s" ] && r="$r HOME-REEL"\nprintf \'{"result":"%%s"}\\n\' "$r"\n'%dict(b=self.backend,h=self.home))
+        r=self.run_moteur()
+        self.assertTrue(r['success'],r);self.assertEqual(r['output'].split(),['ok','HOME-REEL'])
+        self.assertEqual(list((self.home/'.cache/nc-jarvis-travail').glob('moteur-*')),[],'dossier de travail supprimé')
+
+    def test_opencode_2_recoit_standalone_et_les_variables_de_nc_ia_dans_l_unite(self):
+        """La commande finale d'OpenCode : version lue dans l'unité (opencode --version), --standalone à partir de la 2, comme nc-ia."""
+        prog=shutil.which('opencode',path=os.environ.get('NC_TEST_VRAI_PATH',os.environ['PATH']))
+        if not prog:self.skipTest('opencode absent')
+        self.m.executable=lambda e:prog
+        self.m._VERSION_OPENCODE.clear()
+        v=asyncio.run(self.m.version_opencode(prog,self.backend/'home-runner'))
+        self.assertIsInstance(v,int);self.assertGreater(v,0)
+        self.assertEqual(('--standalone' in self.m.commande('opencode',prog,'','',v)),v>=2)
+        self.assertNotIn('--standalone',self.m.commande('opencode',prog,'','',1))
+        self.assertEqual(self.restes_du_bac(),[])
+        async def un(args):
+            iso=await self.m.isoler('opencode',args,60,self.backend/'home-runner')
+            try:
+                p=await asyncio.create_subprocess_exec(*iso.cmd,env=iso.env,cwd=iso.travail,stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,start_new_session=True)
+                o,e=await asyncio.wait_for(p.communicate(),60);return p.returncode,(o+e).decode(errors='replace')
+            finally:await iso.finir()
+        base=self.m.commande('opencode',prog,'','',v)[:2+(v>=2)]   # [prog, 'run', '--standalone'] : le début de la commande finale
+        for option in ('--version','--help'):
+            code,texte=asyncio.run(un([prog,option]))
+            self.assertEqual(code,0,texte[:300])
+        code,texte=asyncio.run(un(base+['--help']))   # la commande finale avec --help (sans prompt : aucun modèle appelé)
+        self.assertEqual(code,0,texte[:300])
+
+    def test_version_et_aide_des_cli_installes_passent_dans_l_unite(self):
+        """--version et --help de chaque CLI installé sur la machine, lancés dans l'unité (aucun modèle appelé)."""
+        trouves=[(n,shutil.which(n,path=os.environ.get('NC_TEST_VRAI_PATH',os.environ['PATH']))) for n in ('claude','codex','opencode')]
+        trouves=[(n,p) for n,p in trouves if p]
+        if not trouves:self.skipTest('aucun CLI de moteur installé')
+        async def un(engine,args):
+            iso=await self.m.isoler(engine,args,60,self.backend/'home-runner')
+            try:
+                p=await asyncio.create_subprocess_exec(*iso.cmd,env=iso.env,cwd=iso.travail,stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,start_new_session=True)
+                sortie,erreur=await asyncio.wait_for(p.communicate(),60)
+                return p.returncode,(sortie+erreur).decode(errors='replace')
+            finally:await iso.finir()
+        for n,chemin in trouves:
+            for option in ('--version','--help'):
+                with self.subTest(cli=n,option=option):
+                    code,texte=asyncio.run(un(n,[chemin,option]))
+                    self.assertEqual(code,0,texte[:300]);self.assertTrue(texte.strip())
+        self.assertEqual(self.restes_du_bac(),[])
 
 
 if __name__=='__main__':unittest.main()

@@ -333,7 +333,7 @@ class AvecFauxSystemdRun(Base):
 
     def test_chaque_moteur_dans_le_meme_bac(self):
         communes = {"PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "PrivateDevices=yes", "PrivateIPC=yes",
-                    "SystemCallFilter=~@debug @keyring", "ProtectHome=read-only", "PrivateTmp=yes", "RestrictAddressFamilies=AF_INET AF_INET6",
+                    "ProtectControlGroups=yes", "SystemCallFilter=~@debug @keyring", "ProtectHome=read-only", "PrivateTmp=yes", "RestrictAddressFamilies=AF_INET AF_INET6",
                     "ReadOnlyPaths=" + str(self.home)}
         for ident in IDENTS:
             with self.subTest(ident):

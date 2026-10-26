@@ -295,8 +295,10 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     #   /dev/input, /dev/hidraw… PrivateUsers garde ton uid, donc l'ACL « uaccess » (user:<uid>:rw) du système resterait
     #   valable : sans cela une commande de session filmait ou enregistrait, puis envoyait par le réseau.
     # PrivateIPC : ses propres files de messages et mémoires partagées SysV (pas celles du reste de ta session).
+    # ProtectControlGroups : /sys/fs/cgroup en lecture seule ; sinon (strict laisse /sys inscriptible) le bac écrivait dans
+    #   les cgroups de ta session (cgroup.procs, cgroup.freeze) : sortir de son unité ou geler tes applications.
     props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "PrivateDevices=yes", "PrivateIPC=yes",
-             "SystemCallFilter=~@debug @keyring",
+             "ProtectControlGroups=yes", "SystemCallFilter=~@debug @keyring",
              "ProtectHome=read-only", "PrivateTmp=yes", "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm",
              "KillSignal=SIGKILL", "TimeoutStopSec=1s",
              # OnFailure= vide : un greffon global (OnFailure=nc-panne@%n sur chaque service) ferait sinon une notification
