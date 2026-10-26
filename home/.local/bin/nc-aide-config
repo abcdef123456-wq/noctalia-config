@@ -268,10 +268,24 @@ def chercher(index, question, maximum=5):
     return [dict(e, score=round(s, 2)) for s, e in res[:maximum]]
 
 
+def T(fr, en):
+    """Message dans la langue choisie (nc-reglages → Langue : auto, fr, en), comme les autres scripts nc-*."""
+    langue = os.environ.get("NC_LANGUE") or ""
+    if langue not in ("fr", "en"):
+        try:
+            langue = re.search(r"^LANGUE=\"?(\w+)", (CONFIG / "nc/reglages.conf").read_text(encoding="utf-8", errors="replace"), re.M)[1]
+        except (OSError, TypeError):
+            langue = ""
+    if langue not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        langue = "fr" if loc.startswith("fr") else "en"
+    return en if langue == "en" else fr
+
+
 def main(a):
     if a[:1] == ["index"]:
         i = construire("--force" in a)
-        print(f"{len(i['entrees'])} entrées · {CACHE}")
+        print(T(f"{len(i['entrees'])} entrées · {CACHE}", f"{len(i['entrees'])} entries · {CACHE}"))
         return 0
     if a[:1] in (["chercher"], ["search"]) and len(a) >= 2:
         q = " ".join(x for x in a[1:] if x != "--json")
@@ -282,7 +296,8 @@ def main(a):
             for e in r:
                 print(f"[{e['type']}] {e['titre']}\n    {e['texte'][:300]}")
             if not r:
-                print("Rien trouvé : essaie d'autres mots, ou « ? ta question » dans le Spotlight pour une IA.")
+                print(T("Rien trouvé : essaie d'autres mots, ou « ? ta question » dans le Spotlight pour une IA.",
+                        "Nothing found: try other words, or “? your question” in Spotlight to ask an AI."))
         return 0
     print(__doc__.strip(), file=sys.stderr)
     return 2

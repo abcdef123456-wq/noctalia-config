@@ -18,6 +18,23 @@ from pathlib import Path
 
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
 MAGICK = shutil.which("magick") or shutil.which("convert") or "magick"
+MAGICK_ABSENT = not (shutil.which("magick") or shutil.which("convert"))
+DELAI = int(os.environ.get("NC_WALLPAPER_DELAI") or 60)      # secondes laissées à ImageMagick par image (une image géante ne bloque pas le hook Noctalia)
+
+
+def paquet_magick():
+    """Nom du paquet ImageMagick de la famille de la distribution (/etc/os-release) : imagemagick sur Arch et Debian,
+    ImageMagick sur Fedora et openSUSE."""
+    ids = ""
+    try:
+        for l in open("/etc/os-release", encoding="utf-8", errors="replace"):
+            if l.startswith(("ID=", "ID_LIKE=")):
+                ids += " " + l.split("=", 1)[1].strip().strip('"').lower()
+    except OSError:
+        pass
+    if any(m in ids for m in ("fedora", "rhel", "suse")):
+        return "ImageMagick"
+    return "imagemagick"
 
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
 def _langue():
@@ -77,7 +94,7 @@ def oklch(r, g, b):
 
 def colorfulness(path):
     raw = subprocess.run([MAGICK, str(path) + "[0]", "-resize", "64x64!", "-colorspace", "sRGB", "-depth", "8", "rgb:-"],
-                         capture_output=True, check=True).stdout
+                         capture_output=True, check=True, timeout=DELAI).stdout
     chromas = sorted(c for L, c in (oklch(*raw[i:i + 3]) for i in range(0, len(raw) - 2, 3)) if 0.08 < L < 0.95)
     if not chromas:
         return 0.0
@@ -105,6 +122,10 @@ def main():
     img = Path(src).expanduser()
     if not img.is_file():
         sys.exit(T(f"nc-wallpaper-colors : image introuvable : {img}", f"nc-wallpaper-colors: image not found: {img}"))
+    if MAGICK_ABSENT:
+        pq = paquet_magick()
+        sys.exit(T(f"nc-wallpaper-colors : ImageMagick manquant (paquet {pq}) : installe-le, nc-maj le fait aussi",
+                   f"nc-wallpaper-colors: ImageMagick missing (package {pq}): install it, nc-update does it too"))
     # Copie réduite du fond, affichée dès l'ouverture de session avant Noctalia (nc-boot-wallpaper). Écrite dans un
     # temporaire du même dossier puis posée d'un coup : une image illisible ou une coupure ne laisse jamais un JPEG cassé.
     boot = tmp = None
@@ -120,11 +141,21 @@ def main():
             copie = None
     try:
         c = colorfulness(img)
+    except subprocess.TimeoutExpired:
+        sys.exit(T(f"nc-wallpaper-colors : image trop lourde, lecture abandonnée au bout de {DELAI} s : {img}",
+                   f"nc-wallpaper-colors: image too heavy, reading given up after {DELAI} s: {img}"))
     except (subprocess.CalledProcessError, OSError):
         sys.exit(T(f"nc-wallpaper-colors : image illisible : {img}", f"nc-wallpaper-colors: unreadable image: {img}"))
     finally:
         if tmp is not None:
-            if copie is not None and copie.wait() == 0:
+            ok = False
+            if copie is not None:
+                try:
+                    ok = copie.wait(timeout=DELAI) == 0
+                except subprocess.TimeoutExpired:
+                    copie.kill()                  # le fils lancé ici, et lui seul
+                    copie.wait()
+            if ok:
                 try:
                     os.replace(tmp, boot)
                 except OSError:

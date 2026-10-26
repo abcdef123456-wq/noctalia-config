@@ -390,7 +390,10 @@ def remettre_autres_themes():
     """Anciennes versions : icônes posées dans d'autres thèmes (WhiteSur, Papirus…) ; leurs fichiers sont remis."""
     if not INVENTAIRE.exists():
         return
-    for chemin in INVENTAIRE.read_text().split():
+    # Une ligne par chemin (les anciennes versions l'écrivaient ainsi) : un chemin avec des espaces reste entier
+    for chemin in INVENTAIRE.read_text().splitlines():
+        if not chemin.strip():
+            continue
         p = Path(chemin)
         p.unlink(missing_ok=True)
         orig = p.with_name(p.name + ".nc-orig")
