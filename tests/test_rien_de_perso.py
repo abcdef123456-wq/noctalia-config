@@ -76,3 +76,29 @@ class RienDePerso(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Licence(unittest.TestCase):
+    """LICENSE (MIT) : sans nom, pseudo ni adresse ; le README dit ce qui garde une autre licence, et ces fichiers existent."""
+    def test_licence_mit_sans_nom_ni_adresse(self):
+        t = (REPO / "LICENSE").read_text(encoding="utf-8")
+        self.assertTrue(t.startswith("MIT License\n"))
+        self.assertIn("\nCopyright (c) 2026 noctalia-config contributors\n", t)
+        self.assertNotIn("@", t)
+        for cle in ("user.name", "user.email"):
+            v = git_config(cle)
+            if v:
+                self.assertNotIn(v.lower(), t.lower(), cle)
+        compte = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+        if len(compte) > 2:
+            self.assertNotIn(compte.lower(), t.lower())
+
+    def test_le_readme_liste_le_code_tiers(self):
+        r = (REPO / "README.md").read_text(encoding="utf-8")
+        self.assertIn("## Licence", r)
+        section = r[r.index("## Licence"):]
+        self.assertIn("GPLv3", section)
+        self.assertIn("unimatrix", (REPO / "home/.local/bin/unimatrix").read_text(encoding="utf-8"))
+        self.assertIn("GNU General Public License", (REPO / "home/.local/bin/unimatrix").read_text(encoding="utf-8"))
+        for chemin in re.findall(r"^\| `([^`*]+)`", section, re.M):
+            self.assertTrue((REPO / chemin.rstrip("/")).exists(), chemin)

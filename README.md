@@ -444,3 +444,20 @@ Fedora/Nobara et les configurations à plusieurs écrans.
 Les plugins `nc/launcher`, `nc/carousel` et `nc/keys` (recherche, fonds d'écran, raccourcis) sont écrits pour ce dépôt.
 L'écran de connexion s'appuie sur le thème libre [sddm-astronaut-theme](https://github.com/Keyitdev/sddm-astronaut-theme).
 Les fonds d'écran appartiennent à leurs auteurs.
+
+## Licence
+
+noctalia-config est sous licence **MIT** (fichier [`LICENSE`](LICENSE)) : tu peux l'utiliser, le modifier et le
+partager, en gardant la mention de licence.
+
+Ces éléments ne sont pas couverts par la licence MIT, ils gardent la leur :
+
+| Élément | Origine | Licence |
+|---|---|---|
+| `home/.local/bin/unimatrix` | [unimatrix](https://github.com/will8211/unimatrix) | GPLv3 ou plus récente (en-tête d'origine gardé) |
+| `home/.config/nvim/` (base) | modèle de démarrage de [LazyVim](https://github.com/LazyVim/starter) | Apache 2.0 (`home/.config/nvim/LICENSE`) |
+| `home/.p10k.zsh` | assistant de [powerlevel10k](https://github.com/romkatv/powerlevel10k) | MIT (powerlevel10k) |
+| `home/.local/share/nc/logos/*.svg` | [Simple Icons](https://simpleicons.org) | CC0 ; les logos restent des marques de leurs propriétaires |
+| `home/.config/noctalia/arch-logo.png` | logo d'Arch Linux | marque de son propriétaire |
+| `home/.config/quickshell/nc-ile/assets/*-animation.png` | emblèmes fournis pour l'assistant JARVIS | hors licence MIT, droits de leurs auteurs |
+| `home/Pictures/Wallpapers/` | fonds d'écran | droits de leurs auteurs |
