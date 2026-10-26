@@ -1,6 +1,7 @@
 // Page « Météo » de l'île : température, ciel, ressenti, min / max, les 6 prochaines heures et les 5 prochains jours
 // (nc-meteo, Open-Meteo). Ville : un clic sur son nom (ou nc-reglages → Île → « Ville de la météo »).
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 Item {
@@ -55,9 +56,9 @@ Item {
                     id: saisie
                     visible: false; anchors.fill: parent; anchors.leftMargin: 6
                     color: Couleurs.texte; selectionColor: Couleurs.jaune; font.pixelSize: 14; clip: true
-                    onAccepted: { villeEcrire.command = ["sh", "-c", "f=\"$HOME/.config/nc/reglages.conf\"; mkdir -p \"${f%/*}\"; "
-                                     + "{ grep -v '^METEO_VILLE=' \"$f\" 2>/dev/null; printf 'METEO_VILLE=%s\\n' \"${1:-auto}\"; } > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"",
-                                     "sh", text.trim().replace(/[\n=]/g, " ")]
+                    // Écrit par nc-reglages (verrou et écriture atomique : un autre changement en même temps n'est pas perdu)
+                    onAccepted: { villeEcrire.command = [Quickshell.env("HOME") + "/.local/bin/nc-reglages", "set", "METEO_VILLE",
+                                                         text.trim().replace(/[\r\n=]/g, " ") || "auto"]
                                   villeEcrire.running = true; visible = false }
                     Keys.onEscapePressed: visible = false
                     onActiveFocusChanged: if (!activeFocus) visible = false

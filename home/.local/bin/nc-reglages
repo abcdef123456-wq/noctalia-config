@@ -32,6 +32,8 @@ try:
     import curses
 except ImportError:             # openSUSE : le module est dans un paquet à part ; seul l'écran texte en a besoin
     curses = None
+import contextlib
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
@@ -45,6 +47,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 import unicodedata
@@ -277,6 +280,8 @@ class R:
     def valider(self, v):
         """Valeur normalisée, ou ValueError avec un message."""
         v = v.strip()
+        if any(c in v for c in "\r\n\0"):
+            raise ValueError(T("pas de retour à la ligne ni de caractère nul", "no line break or null character"))
         if self.genre == "ouinon":
             l = v.lower()
             if l in ("oui", "o", "yes", "y", "true", "1"):
@@ -304,7 +309,9 @@ class R:
             if not v.startswith("/"):
                 raise ValueError(T("un chemin complet (ex. ~/Images/Captures), ou auto",
                                    "a full path (e.g. ~/Pictures/Screenshots), or auto"))
-            return v.replace(HOME, "~", 1)
+            if v == HOME or v.startswith(HOME + "/"):
+                v = "~" + v[len(HOME):]
+            return v
         if self.genre == "texte":
             # Mots anglais acceptés pour les valeurs gardées en français
             if self.cle in ("CLAVIER_DISPOSITION", "CLAVIER_VARIANTE") and v.lower() == "system":
@@ -1651,13 +1658,13 @@ def maj_disponible():
 def lire():
     vals = {}
     try:
-        with open(FICHIER, encoding="utf-8") as f:
+        with open(FICHIER, encoding="utf-8", errors="replace") as f:
             for l in f:
                 m = re.match(r"\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$", l)
                 if m:
                     vals[m[1]] = re.sub(r'^"(.*)"$', r"\1", m[2])
-    except FileNotFoundError:
-        pass
+    except (OSError, UnicodeError):
+        pass                                     # absent ou illisible : comme s'il était vide
     # Ancien réglage GPU_PERFORMANCE (nvidia | integree) : remplacé par GPU_REGLE, « integree » devient « jamais »
     # (même reprise que nc-gpu-regle) ; disparaît du fichier à la prochaine écriture
     ancien = vals.pop("GPU_PERFORMANCE", None)
@@ -1689,11 +1696,46 @@ def relancer_rappels(avant, apres):
         pass                                     # pas de fichier d'état : rien à effacer
 
 
+_verrou_prof = 0
+
+
+@contextlib.contextmanager
+def verrou():
+    """Un seul « lire, modifier, écrire » à la fois sur reglages.conf (verrou reglages.conf.lock, même dossier).
+    Peut s'emboîter : le verrou est pris une seule fois par processus."""
+    global _verrou_prof
+    if _verrou_prof:
+        _verrou_prof += 1
+        try:
+            yield
+        finally:
+            _verrou_prof -= 1
+        return
+    os.makedirs(os.path.dirname(FICHIER), exist_ok=True)
+    fd = os.open(FICHIER + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        _verrou_prof = 1
+        try:
+            yield
+        finally:
+            _verrou_prof = 0
+    finally:
+        os.close(fd)                             # ferme et libère le verrou
+
+
 def ecrire(vals):
     # Seul chemin d'écriture (regler : écran, fenêtre graphique, set ; reset) : l'ancien fichier sert à voir quels
     # rappels repassent à « oui »
+    for k, v in vals.items():
+        if any(c in str(v) for c in "\r\n\0") or any(c in k for c in "\r\n\0="):
+            raise ValueError(T("pas de retour à la ligne ni de caractère nul", "no line break or null character"))
+    with verrou():
+        _ecrire(vals)
+
+
+def _ecrire(vals):
     avant = lire()
-    os.makedirs(os.path.dirname(FICHIER), exist_ok=True)
     lignes = ["# Tes réglages de noctalia-config : seulement ce que tu as changé, le reste suit la config.",
               "# Gardé tel quel par les mises à jour. Le plus simple pour le changer : la commande nc-reglages."]
     sec = None
@@ -1706,10 +1748,34 @@ def ecrire(vals):
     autres = [k for k in vals if k not in PAR_CLE]
     if autres:
         lignes += ["", "# Autres"] + [f"{k}={vals[k]}" for k in autres]
-    tmp = FICHIER + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(lignes) + "\n")
-    os.replace(tmp, FICHIER)
+    # Mode de l'ancien fichier gardé ; fichier neuf en 644, comme celui que crée install.sh
+    try:
+        mode = stat.S_IMODE(os.stat(FICHIER).st_mode)
+    except OSError:
+        mode = 0o644
+    dossier = os.path.dirname(FICHIER)
+    fd, tmp = tempfile.mkstemp(prefix=".reglages-", suffix=".tmp", dir=dossier)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lignes) + "\n")
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+            os.fsync(f.fileno())
+        os.replace(tmp, FICHIER)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(dossier, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
     relancer_rappels(avant, vals)
 
 
@@ -1777,21 +1843,46 @@ def valeur(vals, cle):
     return st[cle] if cle in st and cle != "STYLE" else PAR_CLE[cle].defaut
 
 
+def valeur_sure(vals, cle):
+    """(valeur, invalide) : une valeur écrite à la main qui n'a pas de sens (HZ_ECO=abc) est ignorée, le défaut reste."""
+    v = valeur(vals, cle)
+    r = PAR_CLE[cle]
+    if cle in vals and r.genre in ("ouinon", "hz", "entier"):
+        if r.genre == "entier":
+            ok = re.fullmatch(r"-?\d+(\.\d+)?", v) is not None
+        else:
+            try:
+                r.valider(v)
+                ok = True
+            except ValueError:
+                ok = False
+        if not ok:
+            base = style_vals().get(cle, r.defaut) if cle != "STYLE" else r.defaut
+            return base, True
+    return v, False
+
+
+def montrer_sure(vals, cle):
+    v, invalide = valeur_sure(vals, cle)
+    return PAR_CLE[cle].montrer(v) + (T(" (valeur invalide ignorée)", " (invalid value ignored)") if invalide else "")
+
+
 def regler(vals, cle, v):
     """Change (ou remet, si v est la valeur de la config) un réglage ; renvoie son groupe d'application."""
     r = PAR_CLE[cle]
     v = r.valider(v)
     # Fichier relu juste avant d'écrire : un réglage changé ailleurs entre-temps (autre fenêtre de nc-reglages,
     # ligne de commande) n'est pas écrasé ; vals est mis à jour sur place avec l'état du fichier
-    frais = lire()
-    vals.clear()
-    vals.update(frais)
-    base = style_vals().get(cle, r.defaut) if cle != "STYLE" else r.defaut
-    if v == base:
-        vals.pop(cle, None)
-    else:
-        vals[cle] = v
-    ecrire(vals)
+    with verrou():
+        frais = lire()
+        vals.clear()
+        vals.update(frais)
+        base = style_vals().get(cle, r.defaut) if cle != "STYLE" else r.defaut
+        if v == base:
+            vals.pop(cle, None)
+        else:
+            vals[cle] = v
+        ecrire(vals)
     if cle == "LANGUE":
         # Langue changée : le texte suit tout de suite (écran des réglages ouvert)
         global EN
@@ -2629,7 +2720,7 @@ class Ecran:
             i, y = self.haut + k, 2 + k
             sel = (i == ci and self.focus == "items")
             if isinstance(it, R):
-                v = it.montrer(valeur(self.vals, it.cle))
+                v = montrer_sure(self.vals, it.cle)
                 if sel and it.genre in ("ouinon", "choix", "hz", "entier"):
                     v = f"‹ {v} ›"
                 elif sel:
@@ -3402,10 +3493,10 @@ def catalogue(vals):
     """Les réglages visibles, leur valeur et tout ce qui permet de les présenter : pour la fenêtre graphique."""
     res = []
     for r in VISIBLES:
-        v = valeur(vals, r.cle)
+        v = valeur_sure(vals, r.cle)[0]
         res.append(dict(cle=r.cle, section=r.section, sectionNom=nom_section(r.section), nom=r.nom, genre=r.genre,
                         defaut=r.defaut, aide=r.aide, choix=[[a, b] for a, b in r.choix()] if r.genre in ("ouinon", "choix", "hz") else [],
-                        mini=r.mini, maxi=r.maxi, pas=r.pas, unite=r.unite, zero=r.zero, valeur=v, affiche=r.montrer(v),
+                        mini=r.mini, maxi=r.maxi, pas=r.pas, unite=r.unite, zero=r.zero, valeur=v, affiche=montrer_sure(vals, r.cle),
                         modifie=r.cle in vals, groupe=r.groupe))
     # Actions qui ouvrent une fenêtre (pas des valeurs) : en tête de leur section
     actions = [dict(cle="action:jarvis-connexion", section="Agents IA (coucou)", sectionNom=nom_section("Agents IA (coucou)"),
@@ -3725,10 +3816,10 @@ def cli(a):
                 print(f"\n  {nom_section(r.section)}")
                 sec = r.section
             m = "●" if r.cle in vals else " "
-            print(f"   {m} {r.nom:<44} {r.montrer(valeur(vals, r.cle)):<30} {r.cle}")
+            print(f"   {m} {r.nom:<44} {montrer_sure(vals, r.cle):<30} {r.cle}")
         print()
     elif a[0] == "get" and len(a) == 2 and a[1] in PAR_CLE:
-        print(valeur(vals, a[1]))
+        print(valeur_sure(vals, a[1])[0])
     elif a[0] == "set" and len(a) == 4 and a[1] == "--distant":
         # Ordre venu de loin : liste blanche d'abord, puis exactement comme « set » (même validation de la valeur)
         if distant_refuse(a[2]):
@@ -3744,15 +3835,17 @@ def cli(a):
         r = PAR_CLE[a[1]]
         print(f"{r.nom}{T(' : ', ': ')}{r.montrer(valeur(vals, a[1]))}")
     elif a[0] == "reset":
-        if len(a) == 2:
-            if a[1] not in PAR_CLE:
-                sys.exit(T(f"nc-reglages : réglage inconnu : {a[1]}", f"nc-settings: unknown setting: {a[1]}"))
-            vals.pop(a[1], None)
-            groupes = {PAR_CLE[a[1]].groupe}
-        else:
-            groupes = {PAR_CLE[k].groupe for k in vals if k in PAR_CLE}
-            vals = {}
-        ecrire(vals)
+        if len(a) == 2 and a[1] not in PAR_CLE:
+            sys.exit(T(f"nc-reglages : réglage inconnu : {a[1]}", f"nc-settings: unknown setting: {a[1]}"))
+        with verrou():
+            vals = lire()                        # relu sous le verrou : rien d'écrasé entre-temps
+            if len(a) == 2:
+                vals.pop(a[1], None)
+                groupes = {PAR_CLE[a[1]].groupe}
+            else:
+                groupes = {PAR_CLE[k].groupe for k in vals if k in PAR_CLE}
+                vals = {}
+            ecrire(vals)
         appliquer([g for g in groupes if g], vals)
         print(T("Valeur de la config remise.", "Config value restored."))
     elif a[0] in ("appliquer", "apply"):
