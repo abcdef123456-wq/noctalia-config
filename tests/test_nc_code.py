@@ -133,7 +133,13 @@ class NcCode(unittest.TestCase):
         self.assertLess(s.index("nvim"), s.index("--location=vsplit"))
         tabs = [l for l in lignes if l.startswith("new_tab")]
         self.assertEqual(tabs, ["new_tab Code", "new_tab Git", "new_tab Terminal"])
-        self.assertIn("launch --title lazygit lazygit", s)
+        self.assertIn("launch --title lazygit lazygit", s)                  # sans ~/.config/nc/lazygit.yml : lazygit nu
+        (self.home / ".config/nc/lazygit.yml").write_text("gui: {}\n")
+        (self.home / ".config/lazygit").mkdir()
+        (self.home / ".config/lazygit/config.yml").write_text("gui: {}\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        attendu = f"{self.home}/.config/nc/lazygit.yml,{self.home}/.config/lazygit/config.yml"
+        self.assertIn(f"launch --title lazygit --env LG_CONFIG_FILE={attendu} lazygit", s)   # comme lg : la nôtre, puis la tienne
 
     def test_sans_lazygit_pas_d_onglet_lazygit(self):
         p = self.depot("dev/projet")
@@ -155,12 +161,39 @@ class NcCode(unittest.TestCase):
     def test_agent_force_neovim_seul_et_sans_agent(self):
         p = self.depot("dev/projet")
         self.programme("nvim")
-        self.reglages("IA_MODE=non\n")
+        self.reglages("IA_MODE=manuel\n")
         self.assertIn("--lancer-agent codex", self.lancer("--session-seule", str(p), "--agent", "codex").stdout)
+        self.reglages("IA_MODE=non\n")
+        self.assertNotIn("--lancer-agent", self.lancer("--session-seule", str(p), "--agent", "codex").stdout)   # IA coupée
         seul = self.lancer("--session-seule", str(p), "--nvim").stdout
         self.assertNotIn("vsplit", seul)
         self.assertEqual([l for l in seul.splitlines() if l.startswith("new_tab")], ["new_tab Code"])
         self.assertNotIn("--lancer-agent", self.lancer("--session-seule", str(p), "--sans-agent").stdout)
+
+    def test_un_dossier_piege_n_injecte_rien_dans_la_session(self):
+        """kitty découpe la session avec splitlines (\\r, \\x0b, U+2028…) et développe $VAR dans cd : un dossier trouvé
+        par le balayage ne doit ajouter aucune ligne. Refusé (et absent de la liste) ; « $ » doublé."""
+        self.reglages("IA_MODE=non\n")
+        for nom in ("x\rlaunch sh -c 'touch /tmp/pirate'", "x\x0blaunch sh", "x\u2028launch sh", "x\x1claunch sh", "x "):
+            with self.subTest(nom=repr(nom)):
+                d = self.depot("dev/" + nom)
+                r = self.lancer("--session-seule", str(d))
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertNotIn("launch sh", r.stdout)
+                self.assertNotIn(str(d), self.liste())
+        d = self.depot("dev/prix$HOME")
+        s = self.lancer("--session-seule", str(d)).stdout
+        self.assertIn("cd " + str(d).replace("$", "$$") + "\n", s)
+
+    def test_lancer_agent_ia_coupee_seulement_le_shell(self):
+        self.programme("claude", f'touch "{self.home}/agent-lance"')
+        (self.faux / "sh").symlink_to("/bin/true")                       # le shell qui suit : sort tout de suite
+        self.reglages("IA_MODE=non\n")
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), PATH=f"{self.faux}:/usr/bin:/bin",
+                   SHELL=str(self.faux / "sh"), NC_LANGUE="fr")
+        subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code"), "--lancer-agent", "claude"], env=env,
+                       capture_output=True, timeout=30)
+        self.assertFalse((self.home / "agent-lance").exists())
 
     def test_dossier_invalide_et_chemin_a_espaces(self):
         r = self.lancer("--session-seule", str(self.home / "rien"))

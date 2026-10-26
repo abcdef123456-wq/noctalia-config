@@ -177,12 +177,29 @@ def projets(delai=1.0):
         for d in sources:
             r = os.path.realpath(d)
             # les copies de travail temporaires des agents (Claude Code : .claude/worktrees/…) ne sont pas des projets
-            if "/.claude/worktrees/" in r + "/":
+            if "/.claude/worktrees/" in r + "/" or not dossier_sur(r):
                 continue
             if r not in vus:
                 vus.add(r)
                 res.append(d.rstrip("/") or "/")
     return res
+
+
+def config_lazygit():
+    """Comme lg (outils.zsh) : notre thème et la touche G (~/.config/nc/lazygit.yml), puis ta config de lazygit (la
+    dernière gagne). '' si LG_CONFIG_FILE est déjà choisi, ou sans notre fichier."""
+    if os.environ.get("LG_CONFIG_FILE"):
+        return ""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
+    nc, perso = os.path.join(HOME, ".config/nc/lazygit.yml"), os.path.join(base, "lazygit/config.yml")
+    if not os.access(nc, os.R_OK) or "," in nc:
+        return ""
+    return nc + ("," + perso if os.access(perso, os.R_OK) and "," not in perso else "")
+
+
+def dossier_sur(d):
+    """Un chemin qui reste une seule ligne, tel quel, dans une session kitty (voir session)."""
+    return bool(d) and d.isprintable() and d.splitlines() == [d] and d == d.strip()
 
 
 def ligne_projet(d):
@@ -274,9 +291,13 @@ def agent_par_defaut(e):
 def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
     """Le texte de la session kitty : Neovim à gauche (62 %), l'agent à droite ; sans agent, un shell. Dispositions
     « splits ». Onglets « Code », « Git » (lazygit, s'il existe) et « Terminal ». seul_nvim : Neovim seul."""
-    if "\n" in dossier:
+    # kitty coupe la session avec str.splitlines() (\r, \x0b, \x1c, U+2028… aussi), retire les espaces au bord de chaque
+    # ligne et développe $VAR dans cd : un dossier trouvé par le balayage ne doit ni ajouter une ligne (une commande), ni
+    # changer de sens. Refusé s'il n'est pas imprimable ou change au découpage ; « $ » doublé (« $$ » : un « $ » pour kitty)
+    if not dossier_sur(dossier):
         raise ValueError("dossier")
-    l = ["new_tab Code", "layout splits", "cd " + dossier]
+    cd = "cd " + dossier.replace("$", "$$")
+    l = ["new_tab Code", "layout splits", cd]
     if nvim:
         l.append("launch --title nvim nvim")
     else:
@@ -289,14 +310,16 @@ def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
             droite += "shell"
         l.append(droite)
         if lazygit:
-            l += ["new_tab Git", "cd " + dossier, "launch --title lazygit lazygit"]
-        l += ["new_tab Terminal", "cd " + dossier, "launch --title shell"]
+            cfg = config_lazygit()
+            l += ["new_tab Git", cd, "launch --title lazygit " + (f"--env LG_CONFIG_FILE={shlex.quote(cfg)} " if cfg else "") + "lazygit"]
+        l += ["new_tab Terminal", cd, "launch --title shell"]
     return "\n".join(l) + "\n"
 
 
 def lancer_agent(prog, args):
-    """Le programme de l'agent, puis un shell quand il s'arrête (la fenêtre reste ouverte pour la suite)."""
-    if shutil.which(prog):
+    """Le programme de l'agent, puis un shell quand il s'arrête (la fenêtre reste ouverte pour la suite). IA coupée
+    (IA_MODE=non) : seulement le shell."""
+    if shutil.which(prog) and not ia_coupee({}):
         try:
             subprocess.call([prog, *args])
         except OSError:
@@ -764,10 +787,14 @@ def main(a):
             return dans_fenetre()
         return selecteur()
     dossier = os.path.realpath(os.path.expanduser(reste[0]))
+    if os.path.isdir(dossier) and not dossier_sur(dossier):
+        print(T("nc-code : ce nom de dossier contient des caractères qu'une session kitty ne peut pas garder tels quels.",
+                "nc-code: this folder name has characters a kitty session cannot keep as they are."), file=sys.stderr)
+        return 1
     if not os.path.isdir(dossier):
         print(T(f"nc-code : « {reste[0]} » n'est pas un dossier.", f"nc-code: “{reste[0]}” is not a folder."), file=sys.stderr)
         return 1
-    if sans_agent or seul_nvim:
+    if sans_agent or seul_nvim or ia_coupee({}):           # IA coupée : pas d'agent, même demandé par --agent
         agent = ""
     else:
         agent = agent_force or agent_par_defaut(etat_ia())
