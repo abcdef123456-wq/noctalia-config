@@ -326,7 +326,8 @@ def ouvrir(dossier, agent="", seul_nvim=False):
 # Noir Apple si la palette de l'île n'est pas encore écrite (nc-theme-sync la crée au premier thème).
 PALETTE_DEFAUT = dict(fond="#1c1c1e", texte="#f5f5f7", texteSec="#98989d", carte="#2c2c2e", carteSurvol="#3a3a3c",
                       gris3="#48484a", gris4="#545458", accent="#0a84ff", surAccent="#ffffff", vert="#30d158",
-                      jaune="#ffd60a", orange="#ff9f0a", bleu="#5e5ce6", rose="#ff375f", cyan="#64d2ff")
+                      jaune="#ffd60a", orange="#ff9f0a", bleu="#5e5ce6", rose="#ff375f", cyan="#64d2ff", rouge="#ff453a",
+                      violet="#bf5af2")
 
 
 def palette():
@@ -401,6 +402,30 @@ def infos_projet(d):
     except OSError:
         pass
     return r
+
+
+# Le langage d'un projet, d'après un fichier à sa racine (quelques stat, rien n'est lu) : son nom et sa couleur
+LANGAGES = (("Cargo.toml", "Rust", "orange"), ("go.mod", "Go", "cyan"), ("package.json", "JavaScript", "jaune"),
+            ("pyproject.toml", "Python", "bleu"), ("setup.py", "Python", "bleu"), ("requirements.txt", "Python", "bleu"),
+            ("CMakeLists.txt", "C/C++", "vert"), ("meson.build", "C/C++", "vert"), ("pom.xml", "Java", "rouge"),
+            ("build.gradle", "Java", "rouge"), ("build.gradle.kts", "Kotlin", "violet"), ("Gemfile", "Ruby", "rouge"),
+            ("composer.json", "PHP", "violet"), ("mix.exs", "Elixir", "violet"), ("pubspec.yaml", "Dart", "cyan"),
+            ("init.lua", "Lua", "bleu"), ("stylua.toml", "Lua", "bleu"), ("install.sh", "Shell", "vert"))
+
+
+def langage(d):
+    for f, nom, couleur in LANGAGES:
+        if os.path.exists(os.path.join(d, f)):
+            if nom == "JavaScript" and os.path.exists(os.path.join(d, "tsconfig.json")):
+                return "TypeScript", "bleu"
+            return nom, couleur
+    return "", "gris4"
+
+
+def melange(a, b, part):
+    """La couleur a mêlée à b (part de a, entre 0 et 1), en #rrggbb."""
+    ca, cb = (tuple(int(x.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) for x in (a, b))
+    return "#" + "".join(f"{round(x * part + y * (1 - part)):02x}" for x, y in zip(ca, cb))
 
 
 def il_y_a(t, maintenant=None):
@@ -504,8 +529,8 @@ class Ecran:
         txt, sec, acc = self.c("texte"), self.c("texteSec"), self.c("accent")
         lignes = []
 
-        def ligne(contenu="", fd=fond):
-            lignes.append(fd + " " * m + contenu + fd + "\033[K" + R)
+        def ligne(contenu="", fd=fond):                         # fd : le fond du contenu ; les marges gardent celui de l'île
+            lignes.append(fond + " " * m + fd + contenu + fond + "\033[K" + R)
 
         ligne()
         droite = tronque(self.sous_titre, max(0, larg - len(self.titre) - 2))
@@ -530,7 +555,7 @@ class Ecran:
             ligne(sec + tronque(self.vide, larg))
         for i, (_, l1, dr, l2, pastille) in enumerate(vis[self.haut:self.haut + place], self.haut):
             sel = i == self.choix
-            fd = self.c("carteSurvol", True) if sel else fond
+            fd = self.c(melange(self.p["accent"], self.p["fond"], 0.16), True) if sel else fond
             dr = tronque(dr, max(0, larg // 2 - 4))
             t1 = tronque(l1, larg - 6 - len(dr))
             t2 = tronque(l2, larg - 6)
@@ -629,9 +654,6 @@ def boucle(fd, out, e):
             e.filtre, e.choix = e.filtre + k, 0
 
 
-PASTILLES = ("accent", "vert", "bleu", "orange", "cyan", "rose", "jaune")
-
-
 def ecran_projets(p, dossiers):
     e = Ecran(p)
     e.titre = T("Espace de code", "Code workspace")
@@ -645,9 +667,10 @@ def ecran_projets(p, dossiers):
     for d in sorted(dossiers, key=lambda d: -infos[d]["quand"]):         # le plus récent en haut
         i = infos[d]
         nom = os.path.basename(d.rstrip("/")) or d
-        droite = "  ·  ".join(x for x in (i["branche"], il_y_a(i["quand"], maintenant)) if x)
+        lang, couleur = langage(d)
+        droite = "  ·  ".join(x for x in (lang, i["branche"], il_y_a(i["quand"], maintenant)) if x)
         bas = court(d) + ("  ·  " + i["message"] if i["message"] else "")
-        e.elements.append((d, nom, droite, bas, PASTILLES[sum(map(ord, nom)) % len(PASTILLES)]))
+        e.elements.append((d, nom, droite, bas, couleur))
     return e
 
 

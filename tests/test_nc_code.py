@@ -237,6 +237,7 @@ class NcCode(unittest.TestCase):
     def test_interface_recherche_puis_entree(self):
         a = self.depot("dev/alpha")
         b = self.depot("dev/neovim-conf")
+        (b / "pyproject.toml").write_text("")
         (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
         (b / ".git/logs").mkdir()
         (b / ".git/logs/HEAD").write_text("0 1 X <x@y> 1700000000 +0100\tcommit: Un message de commit\n")
@@ -246,7 +247,7 @@ class NcCode(unittest.TestCase):
         self.programme("kitty", f'echo "$@" > "{self.home}/kitty-args"; cat > "{self.home}/kitty-session"')
         vu = self.pty_selecteur([b"neo", b"\r"])
         self.assertIn("Rechercher un projet", vu)
-        self.assertIn("essai  ·  ", vu)                                      # branche lue dans .git, sans lancer git
+        self.assertIn("Python  ·  essai  ·  ", vu)                                      # branche lue dans .git, sans lancer git
         self.assertIn("Un message de commit", vu)
         self.assertIn("38;2;", vu)                                         # couleurs de la palette (24 bits)
         for _ in range(50):
@@ -308,6 +309,14 @@ class NcCode(unittest.TestCase):
             (self.home / "dev/gd").mkdir()
             (self.home / "dev/gd/HEAD").write_text("ref: refs/heads/branche-w\n")
             self.assertEqual(m.infos_projet(str(w))["branche"], "branche-w")
+            r = self.depot("dev/rouille")
+            (r / "Cargo.toml").write_text("")
+            self.assertEqual(m.langage(str(r)), ("Rust", "orange"))
+            (w / "package.json").write_text("{}")
+            (w / "tsconfig.json").write_text("{}")
+            self.assertEqual(m.langage(str(w))[0], "TypeScript")
+            self.assertEqual(m.langage(str(self.home)), ("", "gris4"))           # rien de reconnu : pastille neutre
+            self.assertEqual(m.melange("#ff0000", "#000000", 0.5), "#800000")
 
     # ── Hyprland ──
     def test_raccourci_et_regle_de_fenetre(self):
