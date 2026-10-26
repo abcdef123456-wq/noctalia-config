@@ -203,14 +203,6 @@ class NcCode(unittest.TestCase):
         self.reglages("IA_MODE=non\n")
         self.assertIn(f"cd {p}\n", self.lancer("--session-seule", str(p)).stdout)
 
-    def test_apercu(self):
-        p = self.depot("dev/projet")
-        (p / "README.md").write_text("# Titre du projet\nUne ligne\n")
-        r = self.lancer("--apercu", str(p))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("projet", r.stdout)
-        self.assertIn("Titre du projet", r.stdout)
-
     def test_selecteur_numerote_ouvre_kitty_avec_la_session(self):
         p = self.depot("dev/projet")
         self.programme("nvim")

@@ -206,38 +206,6 @@ def ligne_projet(d):
     return f"{os.path.basename(d) or d}  {court(d)}\t{d}"
 
 
-# ── L'aperçu (à droite dans fzf) ────────────────────────────────────────────────────────────────────────────────
-def git(d, *args):
-    try:
-        return subprocess.run(["git", "-C", d, "-c", "core.quotepath=off", *args], capture_output=True, text=True, timeout=3,
-                              stdin=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
-def apercu(d):
-    b = "\033[1m"
-    g = "\033[2m"
-    r = "\033[0m"
-    c = "\033[36m"
-    branche = git(d, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    print(f"{b}{os.path.basename(d)}{r}  {g}{court(d)}{r}")
-    print(f"{c} {branche or '?'}{r}\n")
-    journal = git(d, "log", "--oneline", "-5", "--no-color")
-    if journal:
-        print(journal.rstrip())
-    etat = git(d, "status", "--short").splitlines()
-    print(f"\n{g}{T('état', 'status')}{r}")
-    print("\n".join(etat[:8]) + (f"\n… (+{len(etat) - 8})" if len(etat) > 8 else "") if etat else T("propre", "clean"))
-    try:
-        readme = next(f for f in sorted(os.listdir(d)) if f.lower().startswith("readme"))
-        with open(os.path.join(d, readme), encoding="utf-8", errors="replace") as f:
-            lignes = [l.rstrip() for l in f.read(3000).splitlines()][:14]
-        print(f"\n{g}{readme}{r}\n" + "\n".join(lignes))
-    except (OSError, StopIteration):
-        pass
-
-
 # ── L'agent ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def nc_ia():
     for p in (os.path.join(ICI, "nc-ia"), os.path.join(HOME, ".local/bin/nc-ia")):
@@ -766,9 +734,6 @@ def dans_fenetre():
 def main(a):
     if a and a[0] in ("-h", "--help", "aide"):
         print(__doc__.strip())
-        return 0
-    if a and a[0] == "--apercu" and len(a) > 1:
-        apercu(a[1])
         return 0
     if a and a[0] == "--lancer-agent" and len(a) > 1:
         lancer_agent(a[1], a[2:])
