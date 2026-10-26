@@ -172,6 +172,12 @@ class MajLot(unittest.TestCase):
         self.assertNotIn(str(self.home), t[2], "le chemin n'est pas recollé dans la commande")
         self.assertIn(f"T<{self.home}/.local/bin/nc-maj>", t)
 
+    def test_install_previent_avant_de_relancer_la_barre(self):
+        src = (REPO / "install.sh").read_text()
+        i = src.index("La barre et l'île vont se relancer quelques secondes.")
+        self.assertIn("The bar and the island will restart for a few seconds.", src[i:i + 300])
+        self.assertLess(i, src.index("systemctl --user restart noctalia.service nc-profile-sync.service"))
+
 
 if __name__ == "__main__":
     unittest.main()
