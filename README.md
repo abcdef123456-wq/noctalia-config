@@ -47,6 +47,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/abcdef123456-wq/noctalia-con
 
 Sans `curl` (Debian minimal) : `bash <(wget -qO- https://raw.githubusercontent.com/abcdef123456-wq/noctalia-config/main/get.sh)`
 
+Le script refuse de tourner en root. Si `~/noctalia-config` existe déjà, il doit venir du bon dépôt ; si sa mise à jour échoue, le script s'arrête (`NC_GARDER=1` pour continuer quand même avec la version présente). `NC_VERSION=<branche ou étiquette>` installe cette version au lieu de la dernière.
+
 Ou à la main :
 
 ```bash
