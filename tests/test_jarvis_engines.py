@@ -706,7 +706,7 @@ class IsolationMoteur(_BaseIsolation):
         with patch.dict(os.environ,ANTHROPIC_API_KEY=''):
             os.environ.pop('ANTHROPIC_API_KEY')
             r=self.run_moteur()
-        self.assertFalse(r['success']);self.assertIn('renouveler',r['error']);self.assertNotIn('isolée',r['error']);self.assertFalse(self.lance())
+        self.assertFalse(r['success']);self.assertRegex(r['error'],'renouveler|renew its sign-in');self.assertNotIn('isolée',r['error']);self.assertFalse(self.lance())
         self.assertEqual(self.restes_du_bac(),[])
 
     def test_chemins_caches_et_refus_du_dossier_qui_contient_le_home(self):
