@@ -3,7 +3,7 @@
 # (les 16 couleurs ANSI que nc-theme-sync règle sur le fond d'écran), donc le fond d'écran, sans rien régénérer.
 #   fzf     Ctrl+R historique · Ctrl+T fichiers · Alt+C dossiers · Tab (avec fzf-tab) en liste filtrable
 #   zoxide  z DOSSIER (saute vers un dossier déjà visité) · zi (choix) ; cd reste cd
-#   eza     ls ll la lt (icônes, dossiers d'abord, git) sauf si tu as déjà tes propres alias
+#   eza     ll la lt (icônes, dossiers d'abord, git) sauf si tu as déjà tes propres alias ; ls reste ls
 #   bat     coloré, thème ansi (man aussi) · delta : git diff / log lisibles, sauf si tu as déjà un pager git
 #   lazygit lg · yazi y (change de dossier en sortant) · nc-outils : ce qui est actif
 # Tes propres alias (~/.zshrc.perso, chargé après) l'emportent toujours.
@@ -85,13 +85,10 @@ if [[ "$(_nc_reglage TERMINAL_OUTILS)" != non ]]; then
     typeset _ic=auto _e
     [[ "$(_nc_reglage TERMINAL_LS_ICONES)" == non ]] && _ic=never
     _e="eza --group-directories-first --icons=$_ic"
-    if _nc_alias_libre ls; then
-      alias ls="$_e"
-      _nc_alias_libre ll && alias ll="$_e -l --git --header"
-      _nc_alias_libre la && alias la="$_e -la --git --header"
-      _nc_alias_libre l && alias l="$_e -la --git --header"
-      (( $+aliases[lt] || $+functions[lt] )) || alias lt="$_e --tree --level=2"
-    fi
+    # ls reste ls : eza n'en a pas toutes les options (« ls -ltr » : son -t attend un champ). Seulement ll, la et lt.
+    _nc_alias_libre ll && alias ll="$_e -l --git --header"
+    _nc_alias_libre la && alias la="$_e -la --git --header"
+    (( $+aliases[lt] || $+functions[lt] )) || alias lt="$_e --tree --level=2"
     unfunction _nc_alias_libre
     unset _ic _e
   fi
@@ -159,7 +156,7 @@ if [[ "$(_nc_reglage TERMINAL_OUTILS)" != non ]]; then
     [[ "${NC_LANGUE:-$LANG}" == fr* ]] && fr=1
     (( fr )) && print "Outils modernes du terminal (nc-reglages → Terminal pour les couper) :" \
              || print "Modern terminal tools (nc-settings → Terminal to turn off):"
-    for o in "fzf:Ctrl+R Ctrl+T Alt+C" "zoxide:z zi" "eza:ls ll la lt" "bat:bat, man" "delta:git diff" "lazygit:lg" "yazi:y"; do
+    for o in "fzf:Ctrl+R Ctrl+T Alt+C" "zoxide:z zi" "eza:ll la lt" "bat:bat, man" "delta:git diff" "lazygit:lg" "yazi:y"; do
       c=${o%%:*}; m="·"
       (( $+commands[$c] )) && m="✓"
       [[ $c == bat ]] && (( $+commands[batcat] )) && m="✓"

@@ -52,13 +52,14 @@ zle -N _nc_ia_commande
 bindkey '^[i' _nc_ia_commande
 
 # gcia : « git commit avec message de l'IA ». Le message vient du diff indexé et du style des derniers commits ;
-# l'éditeur s'ouvre toujours dessus (tu le changes, ou tu quittes sans enregistrer pour annuler). Un secret dans le
-# diff : rien n'est envoyé à l'IA.
+# l'éditeur s'ouvre toujours dessus : enregistrer valide le commit, même sans rien changer. Pour annuler : vider le
+# message (git abandonne un message vide), ou :cq dans vim. Un secret dans le diff : rien n'est envoyé à l'IA.
 gcia() {
   _nc_ia_permise || { _nc_ia_msg "IA désactivée (nc-reglages → Intelligence artificielle)." "AI is turned off (nc-settings → Artificial intelligence)." >&2; return 1 }
   local f c; f="$(mktemp "${TMPDIR:-/tmp}/gcia.XXXXXX")" || return 1
   _nc_ia_msg "IA : un message de commit…" "AI: a commit message…" >&2
   if ~/.local/bin/nc-ia commit >"$f" </dev/null; then
+    _nc_ia_msg "Relis le message. Pour annuler : vide-le (ou :cq dans vim)." "Check the message. To cancel: empty it (or :cq in vim)." >&2
     command git commit --edit --file "$f" "$@"; c=$?
   else
     c=$?

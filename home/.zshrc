@@ -7,9 +7,15 @@ typeset -g POWERLEVEL9K_INSTANT_PROMPT=off
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(git)
-# fzf-tab (Tab en liste filtrable) seulement s'il est téléchargé, sinon oh-my-zsh affiche « plugin not found » ;
-# avant les deux autres, qui enveloppent les touches
-[[ -d ${ZSH_CUSTOM:-$ZSH/custom}/plugins/fzf-tab ]] && plugins+=(fzf-tab)
+# fzf-tab (Tab en liste filtrable) seulement s'il est téléchargé (sinon oh-my-zsh affiche « plugin not found »), si fzf
+# est installé (sans lui, Tab ne complèterait plus rien) et si les outils modernes ne sont pas coupés (nc-reglages →
+# Terminal, TERMINAL_OUTILS=non) ; avant les deux autres, qui enveloppent les touches
+() {
+  local r=~/.config/nc/reglages.conf
+  local -a o; [[ -r $r ]] && o=(${(M)${(f)"$(<$r)"}:#TERMINAL_OUTILS=*})
+  [[ ${o[-1]:-} == *non* ]] && return
+  [[ -d ${ZSH_CUSTOM:-$ZSH/custom}/plugins/fzf-tab ]] && (( $+commands[fzf] )) && plugins+=(fzf-tab)
+}
 plugins+=(zsh-autosuggestions zsh-syntax-highlighting)
 # Mises à jour d'oh-my-zsh : nc-maj ne s'en occupe pas, donc un simple rappel (pas de question « Would you like to
 # update? » dans un terminal neuf). La mise à jour se fait à la main : omz update.

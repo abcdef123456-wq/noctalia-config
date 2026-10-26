@@ -104,8 +104,8 @@ class OutilsZsh(unittest.TestCase):
                         "print N=$GIT_CONFIG_COUNT K0=$GIT_CONFIG_KEY_0 V0=$GIT_CONFIG_VALUE_0; print DC=$FZF_DEFAULT_COMMAND; "
                         "whence -w lg y")
         self.assertEqual(r.stderr, "")
-        self.assertRegex(r.stdout, r"ls=eza --group-directories-first --icons=auto")
-        self.assertIn("ll=eza", r.stdout)
+        self.assertNotIn("ls=eza", r.stdout)                                 # ls reste ls (ls -ltr marche)
+        self.assertRegex(r.stdout, r"ll=eza --group-directories-first --icons=auto")
         self.assertIn("lt=eza", r.stdout)
         self.assertIn("BAT=ansi", r.stdout)
         self.assertIn("N=5 K0=core.pager V0=delta", r.stdout)
@@ -138,7 +138,7 @@ class OutilsZsh(unittest.TestCase):
     def test_icones_coupees(self):
         self.outils("eza")
         self.reglage("TERMINAL_LS_ICONES=non")
-        r = self.lancer("print ls=$aliases[ls]")
+        r = self.lancer("print ll=$aliases[ll]")
         self.assertIn("--icons=never", r.stdout)
 
     def test_alias_ls_de_l_utilisateur_respecte(self):
@@ -148,8 +148,8 @@ class OutilsZsh(unittest.TestCase):
 
     def test_alias_par_defaut_d_oh_my_zsh_remplace(self):
         self.outils("eza")
-        r = self.lancer("print ls=$aliases[ls]", avant="alias ls='ls --color=tty'\nalias ll='ls -lh'")
-        self.assertIn("ls=eza", r.stdout)
+        r = self.lancer("print ls=$aliases[ls] ll=$aliases[ll]", avant="alias ls='ls --color=tty'\nalias ll='ls -lh'")
+        self.assertIn("ls=ls --color=tty ll=eza", r.stdout)
 
     def test_fonction_ls_de_l_utilisateur_respectee(self):
         self.outils("eza")
@@ -200,7 +200,8 @@ class OutilsZsh(unittest.TestCase):
         t = LAZYGIT_YML.read_text(encoding="utf-8")
         self.assertIn('nerdFontsVersion: "3"', t)
         self.assertIn("nc-ia commit", t)
-        self.assertIn("key: 'A'", t)
+        self.assertIn("key: 'G'", t)
+        self.assertNotIn("key: 'A'", t)                                  # A : « amender » de lazygit, jamais pris
         self.assertIn("output: terminal", t)
         self.assertIn("git commit --edit --file", t)
         try:
@@ -219,6 +220,24 @@ class OutilsZsh(unittest.TestCase):
         self.assertLess(z.index("ia.zsh"), z.index("outils.zsh"))
         self.assertLess(z.index("fzf-tab"), z.index("zsh-autosuggestions"))
         self.assertIn("-d ${ZSH_CUSTOM:-$ZSH/custom}/plugins/fzf-tab", z, "fzf-tab seulement si son dossier existe")
+
+    def test_fzf_tab_seulement_avec_fzf_et_le_reglage(self):
+        """Sans fzf, Tab ne complèterait plus rien ; TERMINAL_OUTILS=non coupe aussi fzf-tab."""
+        z = (RACINE / "home/.zshrc").read_text(encoding="utf-8")
+        bloc = re.search(r"(?ms)^\(\) \{\n.*?\n\}$", z[:z.index("zsh-autosuggestions")])[0]
+        for reglage, fzf, attendu in (("auto", True, "git fzf-tab"), ('"non"', True, "git"), ("auto", False, "git")):
+            with self.subTest(reglage=reglage, fzf=fzf):
+                h = Path(tempfile.mkdtemp(dir=self.home))
+                (h / ".config/nc").mkdir(parents=True)
+                (h / "omz/custom/plugins/fzf-tab").mkdir(parents=True)
+                (h / "bin").mkdir()
+                if fzf:
+                    (h / "bin/fzf").write_text("#!/bin/sh\n")
+                    (h / "bin/fzf").chmod(0o755)
+                (h / ".config/nc/reglages.conf").write_text(f"TERMINAL_OUTILS={reglage}\n")
+                r = subprocess.run([shutil.which("zsh"), "-f", "-c", "ZSH=$HOME/omz; plugins=(git); " + bloc + "; print -r -- $plugins"],
+                                   env=dict(HOME=str(h), PATH=f"{h}/bin:/usr/bin:/bin"), capture_output=True, text=True, timeout=30)
+                self.assertEqual(r.stdout.strip(), attendu, r.stderr)
 
     def test_ligne_ajoutee_par_install_sh(self):
         # même commande sed que la migration d'install.sh : une seule ligne, juste après celle d'ia.zsh

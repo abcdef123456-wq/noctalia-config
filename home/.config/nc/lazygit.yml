@@ -24,7 +24,8 @@ git:
     colorArg: always
     pager: 'if command -v delta >/dev/null 2>&1; then exec delta --paging=never --syntax-theme=ansi; else exec cat; fi'
 customCommands:
-  - key: 'A'
+  # G (« générer ») : A est déjà « amender le dernier commit » dans le panneau des fichiers de lazygit
+  - key: 'G'
     context: 'files'
     description: 'Message de commit par l''IA (nc-ia commit)'
     output: terminal
@@ -35,7 +36,8 @@ customCommands:
       ~/.local/bin/nc-ia commit > "$t"
       rc=$?
       case $rc in
-        0) git commit --edit --file "$t" ;;
+        0) m "Relis le message. Pour annuler : vide-le (ou :cq dans vim)." "Check the message. To cancel: empty it (or :cq in vim)."
+           git commit --edit --file "$t" ;;
         2) m "Rien n'est indexé : indexe d'abord des fichiers (espace)." "Nothing is staged: stage some files first (space)." ;;
         3) m "IA désactivée (nc-reglages → Intelligence artificielle)." "AI is turned off (nc-settings → Artificial intelligence)." ;;
         4) m "Un secret a été repéré dans les changements : rien n'a été envoyé." "A secret was found in the changes: nothing was sent." ;;
