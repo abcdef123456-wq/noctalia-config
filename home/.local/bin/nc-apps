@@ -74,8 +74,8 @@ DOSSIERS_EXCLUS = {
     "site-packages", "bower_components", "pods", "__macosx", "virtualenvs",
 }
 # Terminaux connus : option qui précède la commande à lancer (xdg-terminal-exec n'en veut aucune)
-OPTION_TERMINAL = {"xdg-terminal-exec": [], "gnome-terminal": ["--"], "wezterm": ["start", "--"]}
-TERMINAUX = ("kitty", "foot", "alacritty", "gnome-terminal", "konsole", "wezterm", "xterm")
+OPTION_TERMINAL = {"xdg-terminal-exec": [], "gnome-terminal": ["--"], "wezterm": ["start", "--"], "ptyxis": ["--"]}
+TERMINAUX = ("kitty", "foot", "alacritty", "ptyxis", "ghostty", "gnome-terminal", "konsole", "wezterm", "xterm")
 # Outils système installés comme dépendances : masqués de la recherche (pas désinstallés)
 HIDDEN = {
     "avahi-discover", "bssh", "bvnc", "jconsole-java-openjdk", "jshell-java-openjdk", "lstopo",
@@ -266,6 +266,24 @@ def cmd_launch(app_id):
     os.execvp((pre + argv)[0], pre + argv)
 
 
+def points_de_montage(home, table="/proc/self/mountinfo"):
+    """Les points de montage sous home, en chemins relatifs à home (lus dans la table du noyau : aucun accès disque, donc
+    rien qui bloque sur un montage FUSE ou réseau figé). Ils ne sont pas explorés."""
+    racine = os.path.realpath(home).rstrip("/") + "/"
+    res = set()
+    try:
+        with open(table, encoding="utf-8", errors="replace") as f:
+            for l in f:
+                champs = l.split()
+                if len(champs) > 4:
+                    m = re.sub(r"\\([0-7]{3})", lambda x: chr(int(x[1], 8)), champs[4])
+                    if m.startswith(racine) and len(m) > len(racine):
+                        res.add(m[len(racine):])
+    except OSError:
+        pass
+    return res
+
+
 def cmd_files(text):
     q = text.strip().lower()
     home = os.path.expanduser("~")
@@ -273,6 +291,7 @@ def cmd_files(text):
         print("[]")
         return
     found = []
+    montages = points_de_montage(home)
     fin = time.monotonic() + DELAI_RECHERCHE
     # Niveau par niveau (les dossiers proches d'abord) ; arrêt dès assez de résultats ou le délai passé
     file = collections.deque([(home, 0)])
@@ -291,7 +310,8 @@ def cmd_files(text):
                 continue
             if name.startswith("."):
                 continue
-            if is_dir and depth < PROFONDEUR_MAX and not en.is_symlink() and name.lower() not in DOSSIERS_EXCLUS:
+            if is_dir and depth < PROFONDEUR_MAX and not en.is_symlink() and name.lower() not in DOSSIERS_EXCLUS \
+                    and os.path.relpath(en.path, home) not in montages:
                 file.append((en.path, depth + 1))
             low = name.lower()
             pos = low.find(q)

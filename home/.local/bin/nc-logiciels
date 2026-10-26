@@ -6,7 +6,8 @@
         apt ou zypper), AUR (avec paru ou yay, sur Arch) et Flatpak. --rapide : seulement les dépôts de la
         distribution (suggestions du Spotlight pendant la frappe). Réglages SPOTLIGHT_AUR et SPOTLIGHT_FLATPAK.
   nc-logiciels installer SOURCE NOM
-        ouvre un terminal qui l'installe (ton mot de passe y est demandé ; paru ou yay te montrent le PKGBUILD)
+        ouvre un terminal qui l'installe (un mot de passe y est demandé : le tien avec sudo, celui de root sur openSUSE ou
+        sans sudo (su) ; paru ou yay te montrent le PKGBUILD)
   nc-logiciels terminal SOURCE NOM
         l'installation elle-même, dans ce terminal
 
@@ -17,11 +18,14 @@ de Flatpak ; sinon des noms à chercher dans le thème d'icônes (champ « noms_
 Les noms sont vérifiés (lettres, chiffres, @ . _ + -) et passés en arguments, jamais à un shell.
 """
 import gzip
+import importlib.machinery
+import importlib.util
 import json
 import math
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -66,6 +70,11 @@ def reglage(cle, defaut):
     except OSError:
         pass
     return defaut
+
+
+def avertir(texte):
+    """Un souci qui ne doit pas rester muet (stderr : le JSON de la recherche reste intact)."""
+    print("nc-logiciels : " + texte, file=sys.stderr)
 
 
 def lancer(cmd, delai=8):
@@ -233,6 +242,9 @@ def ajouter_icones(res):
 def depot_arch(m):
     # pacman -Ss : expressions régulières POSIX, mots combinés en ET ; . et + échappés
     sortie = lancer(["pacman", "-Ss", "--"] + [re.sub(r"([.+])", r"\\\1", x) for x in m])
+    if not sortie.strip() and not list(Path(os.environ.get("NC_PACMAN_SYNC") or "/var/lib/pacman/sync").glob("*.db")):
+        avertir(T("la base de pacman est vide : lance « sudo pacman -Sy » dans un terminal, puis cherche à nouveau.",
+                  "the pacman database is empty: run \"sudo pacman -Sy\" in a terminal, then search again."))
     res, cur = [], None
     for l in sortie.splitlines():
         if not l.startswith(" "):
@@ -247,7 +259,15 @@ def depot_arch(m):
 
 def depot_fedora(m):
     # Cache seulement (-C) : pas de téléchargement des métadonnées à chaque touche
-    sortie = lancer(["dnf", "-q", "-C", "search", "--"] + m, delai=10)
+    try:
+        p = subprocess.run(["dnf", "-q", "-C", "search", "--"] + m, capture_output=True, text=True, timeout=10, env=ENV_C,
+                           stdin=subprocess.DEVNULL)
+        sortie = p.stdout
+        if p.returncode != 0 and not sortie.strip():
+            avertir(T("dnf n'a rien pu lire (cache absent ou périmé ?) : lance « dnf makecache » dans un terminal, puis cherche à nouveau.",
+                      "dnf could not read anything (missing or stale cache?): run \"dnf makecache\" in a terminal, then search again."))
+    except (OSError, subprocess.TimeoutExpired):
+        sortie = ""
     res = []
     for l in sortie.splitlines():
         r = re.match(r"\s*([A-Za-z0-9@._+-]+)\.(?:x86_64|aarch64|noarch|i686)\s*:?\s*(.*)", l)
@@ -371,6 +391,28 @@ def chercher(terme, rapide=False, maximum=30):
 
 
 # ── Installation ───────────────────────────────────────────────────────────────────────────────────────────────
+def avec_droits(cmd):
+    """cmd précédée de ce qu'il faut pour agir en administrateur : sudo s'il est là ; sinon su -c (Debian installé avec un
+    mot de passe root, sans sudo), sinon pkexec. Aucun des trois : message clair."""
+    if shutil.which("sudo"):
+        return ["sudo"] + cmd
+    if shutil.which("su"):
+        return ["su", "-c", shlex.join(cmd)]
+    if shutil.which("pkexec"):
+        return ["pkexec"] + cmd
+    raise ValueError(T("ni sudo, ni su, ni pkexec : impossible d'installer un paquet de la distribution depuis ici",
+                       "no sudo, su or pkexec: cannot install a distribution package from here"))
+
+
+def phrase_mot_de_passe(cmd):
+    """Quel mot de passe sera demandé (openSUSE : sudo veut celui de root ; su : celui de root)."""
+    if cmd and cmd[0] == "su" or (cmd and cmd[0] == "sudo" and famille() == "suse"):
+        return T("Le mot de passe demandé est celui de root (administrateur).", "The password asked is root's (administrator).")
+    if cmd and cmd[0] == "sudo":
+        return T("Le mot de passe demandé est le tien.", "The password asked is your own.")
+    return ""
+
+
 def commande(source, nom, depot=""):
     if not NOM.fullmatch(nom):
         raise ValueError(T("nom de paquet invalide", "invalid package name"))
@@ -385,30 +427,56 @@ def commande(source, nom, depot=""):
         return ["flatpak", "install", depot if NOM.fullmatch(depot or "") else "flathub", nom]
     if source == "depot":
         f = famille()
-        return {"arch": ["sudo", "pacman", "-S", "--needed", "--", nom], "fedora": ["sudo", "dnf", "install", "--", nom],
-                "debian": ["sudo", "apt", "install", "--", nom], "suse": ["sudo", "zypper", "install", "--", nom]}.get(f) or \
-            (_ for _ in ()).throw(ValueError(T("gestionnaire de paquets non reconnu", "unrecognized package manager")))
+        base = {"arch": ["pacman", "-S", "--needed", "--", nom], "fedora": ["dnf", "install", "--", nom],
+                "debian": ["apt", "install", "--", nom], "suse": ["zypper", "install", "--", nom]}.get(f)
+        if not base:
+            raise ValueError(T("gestionnaire de paquets non reconnu", "unrecognized package manager"))
+        return avec_droits(base)
     raise ValueError(T("source inconnue (depot, aur ou flatpak)", "unknown source (depot, aur or flatpak)"))
+
+
+def commande_terminal(cmd):
+    """Celle de nc-apps (xdg-terminal-exec, $TERMINAL, puis kitty, foot, alacritty, ptyxis, ghostty, wezterm…) : une seule liste
+    de terminaux et d'options, chargée depuis nc-apps plutôt que recopiée."""
+    ici = Path(__file__).resolve().parent / "nc-apps"
+    chemin = str(ici if ici.exists() else BIN / "nc-apps")
+    l = importlib.machinery.SourceFileLoader("nc_apps", chemin)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_apps", l))
+    l.exec_module(mod)
+    return mod.commande_terminal(cmd)
 
 
 def installer(source, nom, depot=""):
     commande(source, nom, depot)                                # vérifié avant d'ouvrir un terminal
     moi = str(BIN / "nc-logiciels")
     args = [moi, "terminal", source, nom] + ([depot] if depot else [])
-    terminal = shutil.which("kitty")
-    if terminal:
-        cmd = [terminal, "--class", "nc-logiciels", "--title", T("Installer ", "Install ") + nom, "-e"] + args
-    else:
-        autre = next((t for t in ("foot", "alacritty", "wezterm", "ghostty", "konsole", "gnome-terminal", "xterm") if shutil.which(t)), "")
-        if not autre:
-            raise ValueError(T("aucun terminal trouvé", "no terminal found"))
-        cmd = [autre, "-e"] + args if autre not in ("gnome-terminal",) else [autre, "--"] + args
-    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    cmd = commande_terminal(args)
+    if not cmd:
+        raise ValueError(T("aucun terminal trouvé", "no terminal found"))
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            code = p.wait(timeout=1.5)          # un terminal qui démarre reste ouvert ; s'il échoue, c'est tout de suite
+        except subprocess.TimeoutExpired:
+            return
+    except OSError as e:
+        raise ValueError(T(f"le terminal ne se lance pas ({e})", f"the terminal did not start ({e})"))
+    if code != 0:
+        texte = T(f"Le terminal ne s'est pas ouvert (code {code}) : l'installation de {nom} n'a pas commencé.",
+                  f"The terminal did not open (code {code}): the installation of {nom} did not start.")
+        try:
+            subprocess.run(["notify-send", "-a", "Spotlight", "-u", "critical", T("Installation impossible", "Installation failed"), texte],
+                           capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise ValueError(texte)
 
 
 def terminal(source, nom, depot=""):
     cmd = commande(source, nom, depot)
-    print(T(f"Installation de {nom} : ", f"Installing {nom}: ") + " ".join(cmd) + "\n", flush=True)
+    print(T(f"Installation de {nom} : ", f"Installing {nom}: ") + " ".join(cmd), flush=True)
+    mdp = phrase_mot_de_passe(cmd)
+    print((mdp + "\n" if mdp else ""), flush=True)
     code = subprocess.run(cmd).returncode
     if code == 0:
         texte = T(f"{nom} est installé : tu le trouves dans le Spotlight (Super + R).", f"{nom} is installed: find it in the Spotlight (Super + R).")
