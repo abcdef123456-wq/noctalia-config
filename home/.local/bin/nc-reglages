@@ -1130,6 +1130,14 @@ REGLAGES = [
         "Hold Super + D and speak, release: the text is written in the active window (Discord, browser, Neovim, terminal…). "
         "A short press starts a long dictation, the next one writes it. Transcription: JARVIS, a Groq, OpenAI or Gemini key, "
         "or whisper.cpp on this PC (offline). wtype types directly; without it, the text is pasted.")),
+    R("DICTEE_SECOURS", "Intelligence artificielle", L("Dictée : secours par Groq, OpenAI ou Gemini",
+                                                       "Dictation: fall back to Groq, OpenAI or Gemini"), "ouinon", "oui",
+      L("En mode automatique, si JARVIS ne répond pas, l'audio de la dictée est envoyé à Groq, OpenAI ou Gemini (selon tes "
+        "clés). La notification dit quel service a transcrit. Mets « non » pour que l'audio ne parte jamais ailleurs que "
+        "chez JARVIS.",
+        "In automatic mode, if JARVIS does not answer, the dictation audio is sent to Groq, OpenAI or Gemini (depending on "
+        "your keys). The notification says which service transcribed it. Set to “no” so the audio never goes anywhere but "
+        "JARVIS.")),
     R("IA_TERMINAL", "Intelligence artificielle", L("IA dans le terminal", "AI in the terminal"), "ouinon", "oui",
       L("Alt + I : la description tapée devient une commande (relue avant Entrée) ; « ia question » répond, « … | ia "
         "résume » travaille sur la sortie d'une commande.",
