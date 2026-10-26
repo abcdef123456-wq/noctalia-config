@@ -22,7 +22,7 @@ SEP = "\x1f"
 
 # Outils de base dont nc-video a besoin (liens vers les vrais), et rien d'autre
 OUTILS = ("bash", "sh", "sed", "tail", "tr", "mkdir", "date", "setsid", "sleep", "cat", "readlink", "timeout", "grep",
-          "head", "seq", "rm", "env", "flock", "cut")
+          "head", "seq", "rm", "env", "flock", "cut", "id")
 
 PROFILS_OK = """vainfo: VA-API version: 1.22 (libva 2.22.0)
 vainfo: Driver version: Mesa Gallium driver for AMD Radeon 610M
@@ -285,6 +285,52 @@ class VideoEncodeur(unittest.TestCase):
         appels = self.lancer(AQ_DRM_DEVICES="/dev/dri/card1")
         self.assertIn("--audio", appels[0])
         self.assertEqual(self.encodeur(appels[0]), ["-c", "h264_vaapi", "-d", "/dev/dri/renderD128"])
+
+    # ── Divers-3 : zone libre, son, droits, dossier d'état ──
+    def test_slurp_sans_option_o_zone_a_la_souris(self):
+        self.ecrire_faux("slurp", 'echo "slurp $*" >> "$JOURNAL"\necho "0,0 2560x1600"')
+        self.lancer()
+        appel = [l for l in self.journal.read_text().splitlines() if l.startswith("slurp ")]
+        self.assertTrue(appel)
+        self.assertNotIn(" -o", appel[0])
+
+    def test_son_systeme_sans_pactl_le_dit(self):
+        self.reglages("VIDEO_SON=systeme\n")
+        appels = self.lancer()                          # le faux pactl ne renvoie aucune sortie
+        self.assertFalse([a for a in appels[0] if a.startswith("--audio")])
+        self.assertIn("Vidéo sans son", self.journal.read_text())
+
+    def test_micro_actif_dit_dans_la_notification_de_depart(self):
+        self.reglages("VIDEO_SON=micro\n")
+        self.lancer()
+        self.assertIn("Micro actif", self.journal.read_text())
+        self.reglages("VIDEO_SON=non\n")
+        self.journal.write_text("")
+        self.arreter_enregistrement()
+        (self.run_dir / "nc-video").unlink()
+        self.lancer()
+        self.assertNotIn("Micro actif", self.journal.read_text())
+
+    def test_fichiers_prives(self):
+        corps = ('printf \'%s' + SEP + '\' "$@" >> "$NC_TEST_WF"; echo >> "$NC_TEST_WF"\n'
+                 'while [ $# -gt 0 ]; do [ "$1" = -f ] && : > "$2"; shift; done\nexec sleep 30')
+        self.ecrire_faux("wf-recorder", corps)
+        self.lancer()
+        videos = list((self.home / "Videos/Enregistrements").iterdir())
+        self.assertEqual(len(videos), 1)
+        self.assertEqual(videos[0].stat().st_mode & 0o077, 0, oct(videos[0].stat().st_mode))
+
+    def test_sans_runtime_dir_dossier_prive_et_pas_de_tmp_fixe(self):
+        tmp = self.home / "tmp"
+        tmp.mkdir()
+        env = dict(HOME=str(self.home), PATH=str(self.faux), NC_LANGUE="fr", TMPDIR=str(tmp), XDG_CONFIG_HOME=str(self.home / ".config"))
+        r = subprocess.run([shutil.which("bash"), str(SCRIPT), "arreter"], env=env, capture_output=True, text=True, timeout=30,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        dossiers = list(tmp.iterdir())
+        self.assertEqual(len(dossiers), 1, dossiers)
+        self.assertEqual(dossiers[0].stat().st_mode & 0o777, 0o700)
+        self.assertNotIn('/tmp}/nc-video"', SCRIPT.read_text())
 
     # ── Audit E4 : deux appuis pendant slurp, encodeur qui meurt un peu après le départ ──
     def commande(self, **env_plus):

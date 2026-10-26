@@ -9,7 +9,11 @@
 # Encodage : nc-reglages → Captures → « Encodage des vidéos » (VIDEO_ENCODEUR : auto, carte, processeur).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
-etat="${XDG_RUNTIME_DIR:-/tmp}/nc-video"
+# Dossier d'état privé : XDG_RUNTIME_DIR ; sans lui, un dossier à nous (0700) dans TMPDIR, jamais un nom fixe dans /tmp
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then base="$XDG_RUNTIME_DIR"
+else base="${TMPDIR:-/tmp}/nc-$(id -u)"; (umask 077; mkdir -p "$base") 2>/dev/null; [ -O "$base" ] || { echo "nc-video : dossier d'état non sûr ($base)" >&2; exit 1; }
+fi
+etat="$base/nc-video"
 reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 # nc_pid_notre : pas de processus, un zombie (fini, mais non recueilli par son parent : conteneur sans init), ou un autre
 # processus qui a repris le même pid (après un redémarrage de session) = ce n'est plus notre enregistreur
@@ -52,7 +56,28 @@ if en_cours; then arreter; exit 0; fi
 rm -f "$etat"
 command -v wf-recorder >/dev/null || { dire "$(t "wf-recorder n'est pas installé" "wf-recorder is not installed")" "$(t "nc-maj l'installe (ou ton gestionnaire de paquets : wf-recorder)." "nc-update installs it (or your package manager: wf-recorder).")"; exit 1; }
 
-zone="$(slurp -o -d 2>/dev/null)" || exit 0          # Échap : rien n'est fait
+# Fichiers privés (0600) : la vidéo, le journal de wf-recorder, le dossier créé
+umask 077
+# Une zone à la souris (glisser), ou un clic sur un écran pour l'écran entier : les écrans sont passés à slurp comme
+# régions toutes faites (« slurp -o » seul ne laisserait choisir que des écrans). Sans hyprctl : glisser seulement.
+ecrans() {
+  command -v hyprctl >/dev/null && command -v python3 >/dev/null || return 0
+  hyprctl monitors -j 2>/dev/null | python3 -c '
+import json, sys
+try:
+    for m in json.load(sys.stdin):
+        w, h, e = m["width"], m["height"], m.get("scale") or 1
+        if m.get("transform", 0) % 2:
+            w, h = h, w
+        print("%d,%d %dx%d" % (m["x"], m["y"], round(w / e), round(h / e)))
+except Exception:
+    pass
+' 2>/dev/null
+}
+regions="$(ecrans)"
+if [ -n "$regions" ]; then zone="$(slurp -d <<<"$regions" 2>/dev/null)" || exit 0
+else zone="$(slurp -d 2>/dev/null)" || exit 0
+fi                                                    # Échap : rien n'est fait
 [ -n "$zone" ] || exit 0
 videos="$(xdg-user-dir VIDEOS 2>/dev/null)"
 [ -n "$videos" ] && [ "$videos" != "$HOME" ] && [ "$videos" != "$HOME/" ] || videos="$HOME/Videos"
@@ -63,7 +88,11 @@ fichier="$dossier/$(t "Enregistrement du $(date '+%Y-%m-%d à %H.%M.%S')" "Scree
 
 son=()
 case "$(reglage VIDEO_SON)" in
-  systeme) s="$(pactl get-default-sink 2>/dev/null)"; [ -n "$s" ] && son=(--audio="$s.monitor") ;;
+  systeme)
+    s="$(pactl get-default-sink 2>/dev/null)"
+    if [ -n "$s" ]; then son=(--audio="$s.monitor")
+    else dire "$(t "Vidéo sans son" "Recording without sound")" "$(t "Le son du système n'a pas pu être trouvé (pactl absent ou sans sortie)." "System sound could not be found (pactl missing or no output).")"
+    fi ;;
   micro) son=(--audio) ;;
 esac
 
@@ -115,7 +144,7 @@ choisir_encodeur() {
   enc=("${PROCESSEUR[@]}")
   [ "$mode" = processeur ] && return 0
   command -v ffmpeg >/dev/null && encodeurs="$(timeout 5 ffmpeg -hide_banner -encoders 2>/dev/null)"
-  if [ "$(cat "${XDG_RUNTIME_DIR:-/tmp}/nc-gpu-default" 2>/dev/null)" = nvidia ] && grep -qw h264_nvenc <<<"$encodeurs"; then
+  if [ "$(cat "$base/nc-gpu-default" 2>/dev/null)" = nvidia ] && grep -qw h264_nvenc <<<"$encodeurs"; then
     enc=(-c h264_nvenc -p preset=p4 -p cq=23); return 0
   fi
   # ffmpeg présent mais sans VAAPI : wf-recorder (même bibliothèque) ne l'aura pas non plus
@@ -148,6 +177,8 @@ if ! nc_pid_notre "$pid"; then
   exit 1
 fi
 printf '%s\n%s\n%s\n%s\n' "$pid" "$(date +%s)" "$fichier" "$(nc_pid_debut "$pid" 2>/dev/null)" > "$etat"
+# Le micro enregistre ce qui se dit autour de toi : la notification de départ le dit
+[ "$(reglage VIDEO_SON)" = micro ] && dire "$(t "Enregistrement démarré" "Recording started")" "$(t "Micro actif" "Microphone on")"
 # Un encodeur qui meurt un peu plus tard (carte qui refuse après l'ouverture, pilote) : revérifié vers 2 s, en arrière-plan
 # pour ne pas retenir le raccourci. S'il est mort : l'état (pid mort) est effacé et une notification le dit.
 demarre="$(nc_pid_debut "$pid" 2>/dev/null)"
