@@ -1649,7 +1649,9 @@ if [ "$MODE" = full ]; then
   # sans mot de passe grâce à une règle sudo limitée à lui seul (vérifiée par visudo avant d'être mise en place)
   if [ "$LAPTOP" = 1 ] && [ "$("$REPO/system/nc-limite-charge" etat 2>/dev/null)" != absent ]; then
     regle=/etc/sudoers.d/nc-limite-charge
-    ligne="$(id -un) ALL=(root) NOPASSWD: /usr/local/bin/nc-limite-charge"
+    # Trois commandes exactes, jamais un argument libre (défense en profondeur, même si l'utilitaire refuse le reste)
+    lim=/usr/local/bin/nc-limite-charge
+    ligne="$(id -un) ALL=(root) NOPASSWD: $lim on, $lim off, $lim etat"
     if cmp -s "$REPO/system/nc-limite-charge" /usr/local/bin/nc-limite-charge && sudo grep -qxF "$ligne" "$regle" 2>/dev/null; then
       ok "$(t "Interrupteur de protection de la batterie (île) : déjà en place." "Battery protection switch (island): already set up.")"
     else
