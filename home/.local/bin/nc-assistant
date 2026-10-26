@@ -6,6 +6,7 @@
   nc-assistant ouvrir [question]    ouvre le chat dans kitty
   nc-assistant chat [question]      chat dans le terminal courant
   nc-assistant demander "question"  une réponse ; --flux : lignes JSON pour Spotlight
+                                   -f FICHIER : joint un fichier (5 au plus, 20 Mo chacun ; au serveur JARVIS seulement)
   nc-assistant briefing            briefing et notification
   nc-assistant verifier            test réseau + diagnostic ; --json
   nc-assistant etat                état JSON ; --local : configuration seule, sans réseau
@@ -16,9 +17,11 @@ Une URL 192.168.x.x / 10.x / *.local ne fonctionne que sur le réseau local ;
 pour un autre réseau, configure l'URL HTTPS d'un tunnel côté serveur.
 """
 import argparse
+import base64
 import contextlib
 from datetime import datetime, timedelta, timezone
 import fcntl
+import fnmatch
 import getpass
 import hashlib
 import html
@@ -33,6 +36,7 @@ import signal
 import shutil
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,6 +53,7 @@ DOC_EN = """Remote assistant client (Python standard library only).
   nc-assistant ouvrir [question]    open a kitty chat window
   nc-assistant chat [question]      chat in the current terminal
   nc-assistant demander "question"  print an answer; --flux: JSON lines for Spotlight
+                                   -f FILE: attach a file (5 at most, 20 MB each; to the JARVIS server only)
   nc-assistant briefing            daily briefing and notification
   nc-assistant verifier            network test + diagnostic; --json
   nc-assistant etat                JSON status; --local: configuration only, no network
@@ -1058,12 +1063,16 @@ def chronometrer(mesures, cle):
         mesures[cle] = round(mesures.get(cle, 0) + (time.perf_counter() - debut) * 1000, 3)
 
 
-def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=None, choix=None):
-    """choix : une liste, remplie avec les choix que propose la réponse (issue #7)."""
+def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=None, choix=None, fichiers=None):
+    """choix : une liste, remplie avec les choix que propose la réponse (issue #7). fichiers : déjà validés par
+    preparer_fichiers, envoyés au seul serveur JARVIS configuré (issue #31)."""
     if not briefing and not question.strip():
         raise Erreur(T("La question est vide.", "The question is empty."))
     q_propre = question.strip()
     commande = not briefing and q_propre.startswith("/")
+    if fichiers and (commande or briefing):
+        raise Erreur(T("Les fichiers ne se joignent qu'à une question, pas à une commande.",
+                       "Files can only be attached to a question, not to a command."))
 
     def signaler(evenement, message=""):
         if suivi:
@@ -1088,6 +1097,8 @@ def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=N
                     pc = client_id(c)
                     if pc:
                         corps["client_id"] = pc
+                    if fichiers:
+                        corps["files"] = fichiers
                     r = api(c, "/api/ask", corps)
                     texte, proposes = choix_reponse(r, texte_sortie(r))
                     if choix is not None:
@@ -1258,6 +1269,211 @@ def repondre_par_ia(ia, historique, question, echec_jarvis=None):
     print(json.dumps(dict(ok=True, text=texte, truncated=False, engine=ia.nom(qui)), ensure_ascii=False), flush=True)
 
 
+# ── Pièces jointes (issue #31) ────────────────────────────────────────────────────────────────────────────────────
+# Les fichiers partent en base64 vers le serveur JARVIS configuré, et nulle part ailleurs (jamais vers l'IA du bureau
+# ni vers un autre service en secours). Ils ne sont lus qu'au moment de l'envoi ; leurs chemins passent par l'entrée
+# standard, jamais par un journal ni par la ligne de commande de l'île.
+MAX_FICHIERS = 5
+MAX_FICHIER = 20 * 1024 * 1024
+MAX_TOTAL = 40 * 1024 * 1024
+# Hors du dossier personnel : jamais joints (pseudo-fichiers du noyau, secrets du système)
+SYSTEME_REFUSE = ("/proc", "/sys", "/dev", "/etc/shadow", "/etc/gshadow", "/etc/sudoers", "/etc/sudoers.d", "/etc/ssh",
+                  "/etc/ssl/private", "/run/user", "/run/secrets")
+# En plus des listes de nc-bac (qui manquent peut-être) : l'essentiel, et les fichiers cités dans l'issue #31
+PROTEGES_PLUS = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".mozilla", ".config/nc/ia.conf",
+                 ".claude/.credentials.json", ".codex/auth.json", ".netrc", ".git-credentials", ".config/gh/hosts.yml",
+                 ".aws", ".kube", ".docker/config.json"]
+NOM_SENSIBLE = re.compile(r"\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa).*", re.IGNORECASE | re.DOTALL)
+# Le contenu : une clé privée, ou une clé d'API (mêmes familles que le contrôle de export.sh, plus AWS et Slack)
+CLE_PRIVEE = re.compile(rb"PRIVATE KEY-----")
+CLE_API = re.compile(rb"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+                     rb"|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{20,}")
+
+
+def charger_bac():
+    """nc-bac (même dossier) comme module, ou None s'il manque."""
+    try:
+        import importlib.machinery
+        import importlib.util
+        l = importlib.machinery.SourceFileLoader("nc_bac", str(Path(__file__).resolve().parent / "nc-bac"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_bac", l))
+        l.exec_module(m)
+        return m
+    except (OSError, SyntaxError, ImportError):
+        return None
+
+
+def chemin_protege(reel):
+    """Le chemin protégé (texte lisible) qui contient `reel` (déjà résolu par realpath), ou None. Les listes sont celles
+    de nc-bac (PROTEGES et BAC_INTERDITS, utilisées par read_file de nc-noeud), aux emplacements par défaut ET
+    déplacés (XDG_*, CLAUDE_CONFIG_DIR…); les « * » valent pour un seul niveau."""
+    reel = str(reel)
+    for base in SYSTEME_REFUSE:
+        if reel == base or reel.startswith(base + "/"):
+            return base
+    home = os.path.realpath(str(Path.home()))
+    bac = charger_bac()
+    liste, depl = list(PROTEGES_PLUS), {}
+    if bac:
+        liste += list(bac.PROTEGES) + list(bac.BAC_INTERDITS)
+        try:
+            depl = bac.deplacements(home)
+        except ValueError:
+            depl = {}
+    for rel in dict.fromkeys(liste):
+        if "*" in rel:
+            n = len(Path(rel).parts)
+            try:
+                parts = Path(reel).relative_to(home).parts
+            except ValueError:
+                continue
+            if len(parts) >= n and fnmatch.fnmatchcase("/".join(parts[:n]), rel):
+                return "~/" + rel
+            continue
+        lieux = {os.path.realpath(os.path.join(home, rel))}
+        if bac:
+            lieux.add(os.path.realpath(str(bac.emplacement(home, rel, depl))))
+        for lieu in lieux:
+            if reel == lieu or reel.startswith(lieu + "/"):
+                return "~/" + rel
+    return None
+
+
+def contenu_sensible(donnees):
+    """Vrai si le contenu a l'air d'un secret : clé privée (tout fichier), clé d'API (fichier texte seulement : un
+    binaire peut contenir ces suites d'octets par hasard)."""
+    if CLE_PRIVEE.search(donnees):
+        return True
+    return b"\0" not in donnees[:8192] and CLE_API.search(donnees) is not None
+
+
+def fichier_refuse(chemin, reel, donnees=None):
+    """Pourquoi ce fichier ne doit pas partir (texte pour l'utilisateur, qui nomme le fichier), ou None. Les règles :
+    chemin résolu protégé, nom de fichier sensible, puis contenu (si `donnees` est donné)."""
+    nom = os.path.basename(str(reel)) or str(chemin)
+    sensible = chemin_protege(reel)
+    if sensible:
+        return T(f"« {nom} » n'est pas joint : il est dans {sensible}, un endroit protégé.",
+                 f"“{nom}” was not attached: it is in {sensible}, a protected place.")
+    for n in dict.fromkeys([nom, os.path.basename(str(chemin))]):
+        if NOM_SENSIBLE.fullmatch(n):
+            return T(f"« {n} » n'est pas joint : son nom ressemble à un fichier de secrets (clé, certificat, .env).",
+                     f"“{n}” was not attached: its name looks like a secrets file (key, certificate, .env).")
+    if donnees is not None and contenu_sensible(donnees):
+        return T(f"« {nom} » n'est pas joint : il contient une clé privée ou une clé d'API.",
+                 f"“{nom}” was not attached: it contains a private key or an API key.")
+    return None
+
+
+def chemin_local(brut):
+    """Le chemin d'un texte ou d'une URL file:// locale (sans hôte, ou localhost) ; Erreur sinon."""
+    if not isinstance(brut, str) or not brut.strip() or "\0" in brut:
+        raise Erreur(T("Chemin de fichier invalide.", "Invalid file path."))
+    ch = brut.strip()
+    if ch.lower().startswith("file:"):
+        u = urllib.parse.urlsplit(ch)
+        if u.netloc not in ("", "localhost"):
+            raise Erreur(T("Seuls les fichiers de cet ordinateur peuvent être joints (pas d'adresse réseau).",
+                           "Only files on this computer can be attached (no network address)."))
+        ch = urllib.parse.unquote(u.path)
+        if "\0" in ch:
+            raise Erreur(T("Chemin de fichier invalide.", "Invalid file path."))
+    ch = os.path.expanduser(ch)
+    if not os.path.isabs(ch):
+        raise Erreur(T("Le chemin du fichier doit être complet.", "The file path must be absolute."))
+    return ch
+
+
+def preparer_fichiers(bruts):
+    """Valide et lit les fichiers à joindre : [{"filename", "content_base64"}] pour /api/ask. Erreur claire (qui nomme le
+    fichier) au premier refus. 5 fichiers, 20 Mo chacun, 40 Mo en tout ; doublons ignorés. Rien n'est lu si l'IA est
+    coupée. La taille est vue (fstat) AVANT chaque lecture, qui reste bornée."""
+    if ia_coupee():
+        raise Erreur(message_ia_coupee())
+    chemins = []
+    for brut in bruts:
+        ch = chemin_local(brut)
+        if ch not in chemins:
+            chemins.append(ch)
+    if len(chemins) > MAX_FICHIERS:
+        raise Erreur(T(f"{MAX_FICHIERS} fichiers au plus par envoi.", f"{MAX_FICHIERS} files at most per request."))
+    sortie, vus, total = [], set(), 0
+    for ch in chemins:
+        reel = os.path.realpath(ch)
+        nom = os.path.basename(reel) or ch
+        motif = fichier_refuse(ch, reel)
+        if motif:
+            raise Erreur(motif)
+        try:
+            # O_NONBLOCK : un FIFO ou un périphérique ne bloque jamais l'ouverture ; seul un fichier ordinaire passe
+            fd = os.open(reel, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except OSError:
+            raise Erreur(T(f"Impossible d'ouvrir « {nom} ».", f"Cannot open “{nom}”.")) from None
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise Erreur(T(f"« {nom} » n'est pas un fichier ordinaire.", f"“{nom}” is not a regular file."))
+            f = os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with f:
+            if (st.st_dev, st.st_ino) in vus:
+                continue
+            vus.add((st.st_dev, st.st_ino))
+            # Un lien physique vers un fichier protégé passerait par un autre chemin (comme nc-noeud : sauf paquets)
+            if st.st_nlink > 1 and not reel.startswith(("/usr/", "/opt/", "/nix/store/")):
+                raise Erreur(T(f"« {nom} » a plusieurs liens physiques : copie-le d'abord.",
+                               f"“{nom}” has several hard links: copy it first."))
+            if st.st_size > MAX_FICHIER:
+                raise Erreur(T(f"« {nom} » est trop gros : {MAX_FICHIER // 1048576} Mo au plus par fichier.",
+                               f"“{nom}” is too large: {MAX_FICHIER // 1048576} MB at most per file."))
+            if total + st.st_size > MAX_TOTAL:
+                raise Erreur(T(f"Trop de données : {MAX_TOTAL // 1048576} Mo au plus en tout (« {nom} » dépasse).",
+                               f"Too much data: {MAX_TOTAL // 1048576} MB at most in total (“{nom}” goes over)."))
+            donnees = f.read(MAX_FICHIER + 1)
+        if len(donnees) > MAX_FICHIER:                       # le fichier a grossi pendant la lecture
+            raise Erreur(T(f"« {nom} » est trop gros : {MAX_FICHIER // 1048576} Mo au plus par fichier.",
+                           f"“{nom}” is too large: {MAX_FICHIER // 1048576} MB at most per file."))
+        motif = fichier_refuse(ch, reel, donnees)
+        if motif:
+            raise Erreur(motif)
+        total += len(donnees)
+        sortie.append({"filename": nom, "content_base64": base64.b64encode(donnees).decode("ascii")})
+    return sortie
+
+
+def selectionner_fichiers():
+    """Le sélecteur de fichiers du système (zenity, sinon kdialog, sinon yad), lancé sans shell : JSON sur stdout,
+    {"ok": true, "files": [...]}. Les chemins sont séparés par un caractère de contrôle (zenity, yad : un saut de ligne
+    dans un nom ne coupe rien ; kdialog ne sait que le saut de ligne : un morceau qui n'est pas un fichier est refusé
+    à l'envoi). Aucun sélecteur : une erreur lisible. Délai borné."""
+    sep = "\x1f"
+    titre = T("Choisir des fichiers à joindre", "Select files to attach")
+    if ia_coupee():
+        raise Erreur(message_ia_coupee())
+    if shutil.which("zenity"):
+        cmd, coupe = ["zenity", "--file-selection", "--multiple", f"--separator={sep}", f"--title={titre}"], sep
+    elif shutil.which("kdialog"):
+        cmd, coupe = ["kdialog", "--getopenfilename", "--multiple", "--separate-output", "--title", titre], "\n"
+    elif shutil.which("yad"):
+        cmd, coupe = ["yad", "--file", "--multiple", f"--separator={sep}", f"--title={titre}"], sep
+    else:
+        raise Erreur(T("Aucun sélecteur de fichiers : installe zenity.", "No file picker: install zenity."))
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", timeout=300)
+    except subprocess.TimeoutExpired:
+        raise Erreur(T("Le sélecteur de fichiers est resté ouvert trop longtemps.", "The file picker stayed open too long.")) from None
+    except OSError:
+        raise Erreur(T("Le sélecteur de fichiers ne s'est pas lancé.", "The file picker did not start.")) from None
+    if r.returncode not in (0, 1):                           # 1 : l'utilisateur a annulé
+        raise Erreur(T("Le sélecteur de fichiers a échoué.", "The file picker failed."))
+    sortie = r.stdout[:-1] if r.stdout.endswith("\n") else r.stdout     # le saut de ligne final
+    fichiers = [p for p in sortie.split(coupe) if p] if r.returncode == 0 else []
+    print(json.dumps(dict(ok=True, files=fichiers[:MAX_FICHIERS * 4]), ensure_ascii=False), flush=True)
+    return 0
+
+
 def requete_ile():
     # Une ligne JSON sur stdin : la question ne figure ni dans argv ni dans un fichier.
     try:
@@ -1275,6 +1491,7 @@ def requete_ile():
         raise Erreur(T("Question invalide ou trop longue (8 000 caractères maximum).",
                        "Invalid question or too long (8,000 characters maximum).")) from None
     historique = r.get("historique") if isinstance(r.get("historique"), list) else []
+    bruts = r.get("fichiers") if isinstance(r.get("fichiers"), list) else []
     # JARVIS répond s'il est relié, sauf si une autre IA est choisie à la main (nc-reglages → Intelligence artificielle) ;
     # sinon, ou s'il est injoignable en mode automatique, l'IA du bureau (nc-ia) répond à sa place
     ia = ia_du_bureau()
@@ -1283,14 +1500,21 @@ def requete_ile():
     par_jarvis = CONF.exists() and not (ia and ia.mode() == "manuel" and choix in ia.FOURNISSEURS and choix != "jarvis")
     # La suite d'une réponse donnée par l'IA du bureau (capture, fichier, texte… versés dans le chat) : la même IA, avec
     # le contexte, plutôt que JARVIS qui ne l'a pas vue
+    fichiers = []
+    if bruts:
+        # Les fichiers ne partent qu'à JARVIS : ni vers l'IA du bureau (choisie à la main ou en secours), ni ailleurs
+        if commande or not par_jarvis or r.get("ia_du_bureau") is True:
+            raise Erreur(T("Les fichiers joints ne partent qu'au serveur JARVIS : retire-les, ou choisis JARVIS comme IA.",
+                           "Attached files only go to the JARVIS server: remove them, or choose JARVIS as the AI."))
+        fichiers = preparer_fichiers(bruts)
     if ia and not commande and (not par_jarvis or r.get("ia_du_bureau") is True):
         return repondre_par_ia(ia, historique, question)
     proposes = []
     try:
         # AssistantEtat suit déjà cette demande : aucun hook Coucou à attendre avant/après HTTP.
-        texte = demander(configuration_question(question), sid, question, suivi=False, choix=proposes)
+        texte = demander(configuration_question(question), sid, question, suivi=False, choix=proposes, fichiers=fichiers)
     except Erreur as e:
-        if ia and par_jarvis and not commande and ia.mode() == "auto" and [i for i in ia.candidats("question") if i != "jarvis"]:
+        if ia and not fichiers and par_jarvis and not commande and ia.mode() == "auto" and [i for i in ia.candidats("question") if i != "jarvis"]:
             return repondre_par_ia(ia, historique, question, echec_jarvis=e)
         raise
     # Bornes adaptées au rendu QML ; le client terminal conserve la réponse complète. choices : boutons de l'île (issue #7)
@@ -1313,9 +1537,11 @@ def main():
         if nom == "demander":
             p.add_argument("--flux", action="store_true")
             p.add_argument("--stdin", action="store_true", help=T("La question vient de l'entrée standard (invisible dans la liste des processus)", "The question comes from standard input (not visible in the process list)"))
+            p.add_argument("-f", "--fichier", "--file", dest="fichiers", action="append", default=[], help=T("Joindre un fichier (au serveur JARVIS seulement)", "Attach a file (to the JARVIS server only)"))
             p.add_argument("--mesurer", "--timings", action="store_true", help=T("Mesures de durée sur stderr (JSON, sans requête supplémentaire)", "Timings on stderr (JSON, no extra request)"))
     sous.add_parser("briefing")
     sous.add_parser("requete-ile", help=argparse.SUPPRESS)
+    sous.add_parser("selectionner-fichiers", help=argparse.SUPPRESS)
     p = sous.add_parser("rappel-notifier", help=argparse.SUPPRESS)
     p.add_argument("ident")
     p = sous.add_parser("verifier", aliases=["check", "diagnostic"])
@@ -1338,6 +1564,8 @@ def main():
             ouvrir(a.question)
         elif commande == "requete-ile":
             requete_ile()
+        elif commande == "selectionner-fichiers":
+            return selectionner_fichiers()
         elif commande == "rappel-notifier":
             notifier_rappel(a.ident)
         else:
@@ -1358,10 +1586,14 @@ def main():
                 chat(c, " ".join(getattr(a, "question", [])))
             else:
                 mesures = {} if getattr(a, "mesurer", False) else None
+                fichiers = preparer_fichiers(a.fichiers) if getattr(a, "fichiers", None) else None
+                question = " ".join(getattr(a, "question", []))
+                if fichiers and not question.strip():
+                    question = T("Analyse ces fichiers", "Analyze these files")
                 proposes = []                          # choix proposés par JARVIS (issue #7) : en flux, pour le Spotlight
                 try:
-                    t = demander(c, uuid.uuid4().hex, " ".join(getattr(a, "question", [])), briefing=commande == "briefing",
-                                 mesures=mesures, choix=proposes)
+                    t = demander(c, uuid.uuid4().hex, question, briefing=commande == "briefing",
+                                 mesures=mesures, choix=proposes, fichiers=fichiers)
                 finally:
                     if mesures:
                         print(json.dumps({"timings_ms": mesures}), file=sys.stderr, flush=True)
@@ -1375,7 +1607,7 @@ def main():
             return 1
         message = str(e) if isinstance(e, Erreur) else T("Erreur locale : vérifie les droits et l'espace disque.",
                                                                       "Local error: check permissions and disk space.")
-        if commande == "requete-ile":
+        if commande in ("requete-ile", "selectionner-fichiers"):
             print(json.dumps({"ok": False, "error": message}, ensure_ascii=False), flush=True)
         elif commande in ("etat", "status"):
             resultat = {"online": False, "error": message}

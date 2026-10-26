@@ -90,8 +90,9 @@ def _avec_choix(corps):
     return json.dumps(donnees, ensure_ascii=False).encode()
 
 
-# AskRequest n'a aucun champ volumineux (ni image ni fichier) ; nos questions font 8000 caractères au plus
-LIMITE_ASK = 1024 * 1024
+# Les questions font 8000 caractères au plus, mais l'île peut joindre jusqu'à 40 Mo de fichiers (champ « files », en
+# base64 : environ 54 Mo). Le corps n'est lu qu'après l'authentification
+LIMITE_ASK = 64 * 1024 * 1024
 CLE_BUREAU = re.compile(r'default|desktop:[\w.@-]{1,180}', re.ASCII)
 
 

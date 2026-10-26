@@ -201,7 +201,7 @@ class Passerelle(unittest.TestCase):
         self.assertEqual(self.appeler("/api/ask", None, brut=b"[" * 200000 + b"]" * 200000)[0], 400)
 
     def test_api_ask_corps_trop_gros_donne_413_sans_tout_lire(self):
-        statut, _ = self.appeler("/api/ask", None, brut=b'{"prompt":"' + b"a" * (1024 * 1024) + b'"}')
+        statut, _ = self.appeler("/api/ask", None, brut=b'{"prompt":"' + b"a" * (64 * 1024 * 1024) + b'"}')
         self.assertEqual(statut, 413)
         self.reponses = ["ok"]
         self.assertEqual(self.appeler("/api/ask", dict(prompt="a" * 8000))[0], 200)
