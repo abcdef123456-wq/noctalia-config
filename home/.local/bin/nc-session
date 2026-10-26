@@ -95,7 +95,21 @@ INTERACTIFS = {"nvim", "vim", "vi", "nano", "helix", "hx", "htop", "btop", "top"
 # de la session sans qu'on l'ait décidé (revue SESS-01)
 CONSOLES = {"python", "python3", "ipython", "node"}
 ARGS_SCRIPT = {"-m", "-c", "-e", "-p", "--eval", "--print", "-r", "--require"}
-SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|^--?auth\b")   # pas « auth.lua », « author@ »
+# Un argument qui peut porter un secret (pas « auth.lua », « author@ ») : mot de passe, jeton, clé d'API, cookie, en-tête
+# Authorization / Bearer, key=..., URL avec user:pass@ ou ?token= / &access_token= / &key=
+SECRET = re.compile(r"(?i)password|passwd|secret|token|api[_-]?key|credential|cookie|bearer|authorization|^--?auth\b|"
+                    r"^--pass\b|(?:^|[?&;\s-])key=|://[^/\s@:]+:[^/\s@]+@")
+# Options dont la valeur suit (séparée ou après =) : -p hunter2, --pass=hunter2. « -p » seul est écarté pour un terminal :
+# nvim -p ouvre des onglets
+OPTIONS_MOT_DE_PASSE = {"-p", "--pass", "--password", "--passwd", "--pw"}
+# Fenêtres jamais capturées (aperçu) et dont le titre n'est pas gardé : gestionnaires de mots de passe (classes, en
+# minuscules, comme sous-chaînes) et navigation privée (titres, en minuscules). Il n'y a pas d'autre liste de ce genre dans
+# le dépôt (PARTAGE_DISCRET, dans l'île — nc-ile/Partage.qml —, se déclenche sur l'événement de partage d'Hyprland, sans
+# liste de fenêtres) : si une autre liste apparaît, garder les deux alignées (QML et Python ne partagent pas de code).
+CLASSES_SENSIBLES = ("keepassxc", "keepass", "bitwarden", "1password", "enpass", "seahorse", "proton-pass", "protonpass",
+                     "org.gnome.world.secrets")
+TITRES_SENSIBLES = ("private browsing", "navigation privée", "navigation privee", "incognito", "inprivate", "private window",
+                    "fenêtre privée")
 
 
 class Erreur(Exception):
@@ -192,9 +206,10 @@ def ecrans():
 def boite(e):
     try:
         (x, y), (w, h) = e["position"], e["taille"]
-        return float(x), float(y), float(w), float(h)
-    except (KeyError, TypeError, ValueError):
+        v = (float(x), float(y), float(w), float(h))
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
+    return v if all(math.isfinite(x) for x in v) else None            # NaN ou infini : zone ignorée
 
 
 def schema(s):
@@ -213,7 +228,9 @@ def schema(s):
         boites = [b for b in map(boite, fen) if b]
         try:
             ex, ey, ew, eh = float(g["x"]), float(g["y"]), float(g["largeur"]), float(g["hauteur"])
-        except (TypeError, KeyError, ValueError):
+            if not all(math.isfinite(v) for v in (ex, ey, ew, eh)):
+                raise ValueError
+        except (TypeError, KeyError, ValueError, OverflowError):
             ex, ey = min((b[0] for b in boites), default=0), min((b[1] for b in boites), default=0)
             ew = max((b[0] + b[2] for b in boites), default=0) - ex
             eh = max((b[1] + b[3] for b in boites), default=0) - ey
@@ -329,6 +346,30 @@ def bannieres_pause(oui):
     return r.returncode == 0 and r.stdout.strip() == "oui"
 
 
+def sensible_visible(m):
+    """Vrai si une fenêtre sensible (voir sensible) est visible sur l'écran m : sur son bureau affiché (ou le bureau
+    spécial affiché), dans la zone. Sans l'information du bureau affiché, toute fenêtre de l'écran compte."""
+    z = zone_utile(m)
+    visibles = set()
+    for cle in ("activeWorkspace", "specialWorkspace"):
+        w = m.get(cle)
+        if isinstance(w, dict) and entier(w.get("id")):
+            visibles.add(entier(w["id"]))
+    for c in clients():
+        if not sensible(c) or c.get("hidden") or c.get("monitor") != m.get("id"):
+            continue
+        ws = entier((c.get("workspace") or {}).get("id"))
+        if visibles and ws not in visibles:
+            continue
+        b = boite(dict(position=c.get("at"), taille=c.get("size")))
+        if z and b:
+            zx, zy, uw, uh = z[2]
+            if b[0] >= zx + uw or b[1] >= zy + uh or b[0] + b[2] <= zx or b[1] + b[3] <= zy:
+                continue
+        return True
+    return False
+
+
 def capturer(nom):
     """L'aperçu : l'écran actif sous la barre, à la taille de la carte du carrousel (grim -g, -s), privé (0600). Pas de
     capture (SESSIONS_CAPTURE=non, pour la vie privée ; grim absent ; échec) : le schéma seul, et l'ancien aperçu est
@@ -336,7 +377,7 @@ def capturer(nom):
     png = apercu_fichier(nom)
     effacer_anciennes(nom)
     zone = zone_capture(ecran_actif() or {}) if shutil.which("grim") else None
-    if reglage("SESSIONS_CAPTURE", "oui") == "non" or not zone:
+    if reglage("SESSIONS_CAPTURE", "oui") == "non" or not zone or sensible_visible(ecran_actif() or {}):
         png.unlink(missing_ok=True)
         return None
     APERCUS.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -389,8 +430,28 @@ def clients():
         return []
 
 
+ERREUR_LUA = re.compile(r"(?i)\berror\b|expected|unexpected|attempt to|invalid|failed|not found|malformed")
+
+
 def dispatch(lua):
-    subprocess.run(["hyprctl", "dispatch", lua], capture_output=True, timeout=5)
+    """Évalue du Lua dans Hyprland (0.56 : hyprctl dispatch). Faux si hyprctl échoue ou renvoie une erreur en texte
+    (« ok » sinon) ; les appelants qui s'en moquent l'ignorent."""
+    try:
+        r = subprocess.run(["hyprctl", "dispatch", lua], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and not ERREUR_LUA.search(r.stdout + "\n" + r.stderr)
+
+
+def lua_texte(texte):
+    """Le texte en chaîne Lua à crochets longs, du plus petit niveau [=*[ dont la fermeture ]=*] n'apparaît pas dans le
+    texte (même collée à sa fin : « a] » donnerait [[a]]] et une erreur de Lua)."""
+    n = 0
+    while True:
+        fin = "]" + "=" * n + "]"
+        if (texte + fin).find(fin) == len(texte):
+            return "[" + "=" * n + "[" + texte + fin
+        n += 1
 
 
 def applis():
@@ -424,6 +485,41 @@ def ligne_commande(pid):
         return []
 
 
+def secret_dans(cmd, avec_p=True):
+    """Vrai si un argument (après cmd[0]) peut porter un secret, ou si l'option -p / --pass / --password est suivie d'une
+    valeur. avec_p=False : « -p » seul ne compte pas (nvim -p)."""
+    precedent = ""
+    for a in cmd[1:]:
+        nu = a.split("=", 1)[0].lower()
+        if SECRET.search(a) or (nu in OPTIONS_MOT_DE_PASSE and (avec_p or nu != "-p") and "=" in a):
+            return True
+        if precedent in OPTIONS_MOT_DE_PASSE and (avec_p or precedent != "-p") and not a.startswith("-"):
+            return True
+        precedent = a.lower()
+    return False
+
+
+def commande_sure(cmd, cwd=None):
+    """La ligne de commande d'une appli inconnue, sans secret. Aucun argument à risque : telle quelle. Sinon (-p hunter2,
+    --header "Authorization: Bearer …", URL avec ?token=…) : cmd[0] et seulement les arguments qui sont des fichiers ou
+    dossiers existants (les options, dont on ne sait pas lesquelles portent le secret, sont perdues ; mieux vaut
+    rouvrir l'appli nue que garder un mot de passe dans un fichier de session)."""
+    if not secret_dans(cmd):
+        return cmd
+    base = cwd or str(HOME)
+    sains = [a for a in cmd[1:] if a and not a.startswith("-") and not SECRET.search(a)
+             and os.path.exists(os.path.join(base, os.path.expanduser(a)))]
+    return cmd[:1] + sains
+
+
+def sensible(c):
+    """Une fenêtre qu'on ne montre pas dans un aperçu et dont on ne garde pas le titre : gestionnaire de mots de passe,
+    navigation privée."""
+    classe = (c.get("class") or c.get("initialClass") or "").lower()
+    titre = (c.get("title") or "").lower()
+    return any(k in classe for k in CLASSES_SENSIBLES) or any(k in titre for k in TITRES_SENSIBLES)
+
+
 def terminal(pid):
     """Le dossier du shell d'un terminal et le programme interactif qui y tourne (Neovim, htop…), s'il y en a un."""
     for shell in enfants(pid):
@@ -441,7 +537,7 @@ def terminal(pid):
                     pass
                 nom = re.sub(r"\d+(\.\d+)*$", "", Path(cmd[0]).name) or Path(cmd[0]).name   # python3.14 → python
                 script = nom in CONSOLES and any(not a.startswith("-") or a in ARGS_SCRIPT for a in cmd[1:])
-                if not script and not any(SECRET.search(a) for a in cmd[1:]):
+                if not script and not secret_dans(cmd, avec_p=False):
                     commande = [Path(cmd[0]).name] + cmd[1:]
                 break
         return dossier, commande
@@ -459,7 +555,7 @@ def enregistrer(nom):
         ws = c.get("workspace") or {}
         if not classe or ws.get("id", 0) <= 0 or classe in EXCLUS_CLASSES or (c.get("title") or "") in EXCLUS_TITRES:
             continue
-        e = dict(classe=classe, titre=(c.get("title") or "")[:80], bureau=ws.get("id"),
+        e = dict(classe=classe, titre="" if sensible(c) else (c.get("title") or "")[:80], bureau=ws.get("id"),
                  ecran=par_id.get(c.get("monitor"), c.get("monitor")),          # son nom (eDP-1…)
                  flottant=bool(c.get("floating")), position=c.get("at"), taille=c.get("size"),
                  plein_ecran=int(c.get("fullscreen") or 0), inclure=True)     # 0 : non, 1 : agrandie, 2 : plein écran
@@ -472,7 +568,13 @@ def enregistrer(nom):
             cmd = ligne_commande(c.get("pid", 0))
             if not cmd:
                 continue
-            e["commande"] = cmd[:1] if any(SECRET.search(a) for a in cmd[1:]) else cmd     # pas de jeton dans le fichier
+            try:
+                cwd = os.readlink(f"/proc/{c.get('pid', 0)}/cwd")
+            except OSError:
+                cwd = None
+            e["commande"] = commande_sure(cmd, cwd)                                        # pas de jeton dans le fichier
+            if cwd and cwd.startswith("/"):
+                e["cwd"] = cwd                                  # rouverte là où elle était (sinon : le dossier personnel)
         fenetres.append(e)
     if not fenetres:
         raise Erreur(T("Aucune fenêtre à enregistrer.", "No window to save."))
@@ -489,26 +591,53 @@ def enregistrer(nom):
     return len(fenetres), png
 
 
+# Comme nc-ia (commande_terminal) et nc-apps : même ordre, mêmes options avant la commande à lancer
+ORDRE_TERMINAUX = ("kitty", "foot", "alacritty", "wezterm", "gnome-terminal", "konsole", "xterm")
+OPTION_TERMINAL = {"gnome-terminal": ["--"], "wezterm": ["start", "--"]}          # les autres : -e
+
+
 def lancer(e):
+    """Lance une fenêtre de la session. Renvoie un texte si elle n'est pas rouverte pour une raison à dire, sinon None."""
     if "terminal" in e:
         t = e["terminal"]
         prog = t.get("programme") or "kitty"
-        if not shutil.which(prog):
-            return
+        if not shutil.which(prog):                      # son terminal n'est plus là : le premier installé, comme nc-ia
+            prog = next((x for x in ORDRE_TERMINAUX if shutil.which(x)), None)
+            if not prog:
+                return None
         dossier = t.get("dossier") if t.get("dossier") and Path(t["dossier"]).is_dir() else str(HOME)
         cmd = [prog, "--directory", dossier] if prog == "kitty" else [prog]
         if t.get("commande"):
             # Le programme, puis le shell quand il se termine (le terminal reste ouvert)
             suite = " ".join(shlex.quote(x) for x in t["commande"]) + '; exec "${SHELL:-sh}"'
-            cmd += (["--", "sh", "-c", suite] if prog == "kitty" else ["-e", "sh", "-c", f"cd {shlex.quote(dossier)}; {suite}"])
+            corps = ["sh", "-c", suite if prog == "kitty" else f"cd {shlex.quote(dossier)}; {suite}"]
+            cmd += (["--"] if prog == "kitty" else OPTION_TERMINAL.get(prog, ["-e"])) + corps
         subprocess.Popen(cmd, cwd=dossier, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
     elif "appli" in e:
         subprocess.Popen([str(BIN / "nc-apps"), "launch", e["appli"]], start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    elif e.get("commande") and shutil.which(e["commande"][0]):
-        subprocess.Popen(e["commande"], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, cwd=str(HOME))
+    elif e.get("commande") and isinstance(e["commande"], list) and isinstance(e["commande"][0], str):
+        # Là où elle était (si le dossier existe encore), sinon le dossier personnel
+        cwd = e.get("cwd") if isinstance(e.get("cwd"), str) and Path(e["cwd"]).is_dir() else str(HOME)
+        cmd0 = e["commande"][0]
+        if cmd0.startswith("/"):
+            exe = cmd0 if shutil.which(cmd0) else None
+        elif "/" in cmd0:                               # ./x, bin/x : depuis son dossier
+            exe = os.path.join(cwd, cmd0) if shutil.which(os.path.join(cwd, cmd0)) else None
+        else:
+            exe = cmd0 if shutil.which(cmd0) else None
+        if not exe:
+            if "/" in cmd0 and not cmd0.startswith("/"):
+                return T(f"{e.get('classe') or cmd0} non rouverte : commande relative",
+                         f"{e.get('classe') or cmd0} not reopened: relative command")
+            if "/" not in cmd0:                          # simplement pas installé (ou plus dans le PATH)
+                return T(f"{e.get('classe') or cmd0} non rouverte : {cmd0} introuvable",
+                         f"{e.get('classe') or cmd0} not reopened: {cmd0} not found")
+            return None
+        subprocess.Popen([exe] + e["commande"][1:], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, cwd=cwd)
+    return None
 
 
 def entier(x):
@@ -574,8 +703,11 @@ def regle(n, classe, bureau, active=True):
         return False
 
 
-RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
-POSEES = RUNTIME / "nc-session-regles.json"           # règles actives de l'ouverture en cours (n, classe, bureau)
+# Sans XDG_RUNTIME_DIR, jamais /tmp sous un nom fixe (un autre utilisateur pourrait y poser le verrou ou le journal)
+RUNTIME = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get("XDG_RUNTIME_DIR", "").startswith("/") else None
+POSEES = RUNTIME / "nc-session-regles.json" if RUNTIME else None     # règles actives de l'ouverture en cours (n, classe, bureau)
+MARQUE = RUNTIME / "nc-session-derniere" if RUNTIME else None        # jeton de la dernière ouverture commencée
+JETON = f"{os.getpid()}-{time.time_ns()}"
 
 
 def avertir(texte):
@@ -664,6 +796,9 @@ def ouvrir(nom, delai=None):
     """Une ouverture à la fois : deux à la fois se disputeraient les mêmes fenêtres (revue SESSION-01)."""
     import fcntl
     import signal
+    if RUNTIME is None or not RUNTIME.is_dir():
+        raise Erreur(T("XDG_RUNTIME_DIR absent : impossible d'ouvrir une session en sûreté (verrou et règles temporaires).",
+                       "XDG_RUNTIME_DIR is not set: cannot open a session safely (lock and temporary rules)."))
     verrou = open(RUNTIME / "nc-session.lock", "a")
     try:
         fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -674,6 +809,10 @@ def ouvrir(nom, delai=None):
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: sys.exit(128 + s))
     try:
+        try:
+            MARQUE.write_text(JETON)                    # une demande « Fermer les autres ? » plus ancienne s'annule
+        except OSError:
+            pass
         anciennes = retirer_orphelines()
         if anciennes:
             # Pas de blocage : les noms resservent (une règle reposée remplace l'ancienne) et la fin réessaie le reste
@@ -740,10 +879,21 @@ def fermer(adresses):
             dispatch(f"hl.dsp.window.close({{ window = 'address:{a}' }})")
 
 
+def derniere_marque():
+    try:
+        return MARQUE.read_text().strip() if MARQUE else None
+    except OSError:
+        return None
+
+
 def demander_fermer(nom):
     """« demander » : une notification avec un bouton ; rien n'est fermé sans ce bouton (ni sans notify-send)."""
     s = completer(lire(nom)[1])
-    n = len(a_fermer(s))
+    # La liste est figée maintenant : adresse et classe. Au clic (jusqu'à 10 min plus tard), seules celles qui existent
+    # encore avec la même classe sont fermées, jamais une fenêtre ouverte depuis (revue SESS-AUDIT)
+    liste = set(a_fermer(s))
+    figees = {c["address"]: c.get("class") or c.get("initialClass") or "" for c in clients() if c["address"] in liste}
+    n = len(figees)
     if not n or not shutil.which("notify-send"):
         return 0
     try:
@@ -754,8 +904,11 @@ def demander_fermer(nom):
                            capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return 0
-    if r.stdout.strip() == "fermer":
-        fermer(a_fermer(s))
+    jeton = os.environ.get("NC_SESSION_JETON")
+    if r.stdout.strip() != "fermer" or (jeton and jeton != derniere_marque()):
+        return 0                                        # pas de clic, ou une autre session s'est ouverte depuis
+    actuelles = {c["address"]: c.get("class") or c.get("initialClass") or "" for c in clients()}
+    fermer([a for a in a_fermer(s) if a in figees and actuelles.get(a) == figees[a]])
     return 0
 
 
@@ -781,8 +934,9 @@ def etapes_apres(s, adresses):
     """Après les fenêtres (leurs bureaux existent, leurs adresses sont connues) : noms des bureaux, puis zones."""
     # d. Les noms des bureaux (comme « Nommer ce bureau » de l'IA)
     for b, n in s["bureaux_noms"].items():
-        if str(b).isdigit() and isinstance(n, str) and n and "]]" not in n and "\n" not in n:
-            dispatch(f"hl.dsp.workspace.rename({{ workspace = {int(b)}, name = [[{n}]] }})")
+        if str(b).isdigit() and isinstance(n, str) and n and n.isprintable():
+            if not dispatch(f"hl.dsp.workspace.rename({{ workspace = {int(b)}, name = {lua_texte(n)} }})"):
+                avertir(T(f"Bureau {int(b)} : Hyprland a refusé son nom.", f"Desktop {int(b)}: Hyprland refused its name."))
     # e. Les zones (nc.zones_poser), si la disposition nc-zones est chargée dans Hyprland
     zones = {b: z for b, z in s["zones"].items() if str(b).isdigit()}
     if zones and executer(["hyprctl", "eval", "if not (nc and nc.zones_dispo) then error('absent') end"], 5):
@@ -821,7 +975,7 @@ def _ouvrir(nom, delai, anciennes=()):
         fermer(a_fermer(s, pris))
     elif s["fermer_autres"] == "demander" and shutil.which("notify-send"):
         subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "fermer-autres", nom], start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         env=dict(os.environ, NC_SESSION_JETON=JETON), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # Puis les fenêtres : celles déjà ouvertes vont à leur place, les autres sont lancées (attendre)
     for e in fenetres:
         if id(e) in adresses:
@@ -860,7 +1014,9 @@ def _ouvrir(nom, delai, anciennes=()):
 def attendre(fenetres, lances, avant, delai, adresses=None):
     adresses = {} if adresses is None else adresses
     for e in lances:
-        lancer(e)
+        raison = lancer(e)
+        if raison:
+            avertir(raison)
     # Jusqu'à la fin du délai, chaque nouvelle fenêtre d'une appli lancée est placée (pas seulement la première :
     # Discord, Steam ou JetBrains ouvrent d'abord une fenêtre de mise à jour, puis la vraie)
     connues = {c["address"] for c in avant}
