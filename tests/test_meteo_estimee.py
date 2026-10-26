@@ -18,7 +18,13 @@ class R(io.BytesIO):
     def __exit__(self, *a): pass
 def urlopen(req, timeout=0):
     u = req.full_url
-    if "geocoding" in u:
+    if os.environ.get("NC_TEST_JOURNAL"):
+        open(os.environ["NC_TEST_JOURNAL"], "a").write(u + "\n")
+    if os.environ.get("NC_TEST_HORS") == "1":
+        raise OSError("hors ligne")
+    if "geocoding" in u and os.environ.get("NC_TEST_INCONNU") == "1":
+        d = {}
+    elif "geocoding" in u:
         d = {"results": [{"latitude": 1.0, "longitude": 2.0, "name": "Choisieville"}]}
     elif "ipwho.is" in u:
         d = {"success": True, "latitude": 3.0, "longitude": 4.0, "city": "Exempleville"}
@@ -109,6 +115,47 @@ class MeteoEstimee(unittest.TestCase):
         # 12,5 donne 13 (round() de Python aurait donné 12)
         self.assertEqual(json.loads(self.lancer("Choisieville", extra={"NC_TEST_DEMI": "1"}))["temp"], 13)
         self.assertEqual(json.loads(self.lancer("Choisieville"))["temp"], 12)
+
+    def test_ville_introuvable_pas_d_appel_ipwho(self):
+        with tempfile.TemporaryDirectory() as t:
+            j = os.path.join(t, "journal")
+            m = json.loads(self.lancer("Nullepart", extra={"NC_TEST_INCONNU": "1", "NC_TEST_JOURNAL": j}))
+            self.assertEqual(m, {"erreur": "ville introuvable"})
+            urls = Path(j).read_text()
+            self.assertIn("geocoding", urls)
+            self.assertNotIn("ipwho", urls)
+            self.assertIn("introuvable", self.lancer("Nullepart", "fr", "texte", extra={"NC_TEST_INCONNU": "1"}))
+
+    def test_hors_ligne_cache_perime_ou_autre_ville(self):
+        def cache(ville, age):
+            def f(d):
+                import time
+                d.mkdir(parents=True)
+                (d / "meteo.json").write_text(json.dumps({"t": time.time() - age, "demande": ville, "ville": "Ancienne", "temp": 3}))
+            return f
+        hors = {"NC_TEST_HORS": "1"}
+        m = json.loads(self.lancer("Choisieville", extra=hors, avant=cache("Choisieville", 4 * 3600)))
+        self.assertTrue(m.get("perime"))
+        m = json.loads(self.lancer("Choisieville", extra=hors, avant=cache("Choisieville", 3600)))
+        self.assertEqual(m["ville"], "Ancienne")
+        self.assertNotIn("perime", m)
+        m = json.loads(self.lancer("Choisieville", extra=hors, avant=cache("Autreville", 3600)))      # autre ville : cache refusé
+        self.assertEqual(m, {"erreur": "hors ligne"})
+
+    def test_vie_privee_dite_dans_l_aide_et_les_reglages(self):
+        self.assertIn("ipwho.is", self.lancer("auto", "fr", "--help"))
+        self.assertIn("Open-Meteo", self.lancer("auto", "en", "--help"))
+        reglages = (REPO / "home/.local/bin/nc-reglages").read_text()
+        self.assertIn("position estimée par ipwho.is d'après ton IP, météo par Open-Meteo", reglages)
+        self.assertIn("ipwho.is", (REPO / "README.md").read_text())
+
+    def test_ile_minuterie_meteo_suit_l_ecran_et_affiche_les_erreurs(self):
+        etat = (REPO / "home/.config/quickshell/nc-ile/Etat.qml").read_text()
+        self.assertRegex(etat, r'running: etat\.ecranVu && Reglages\.val\("ILE_METEO"')
+        self.assertIn("ville introuvable", etat)
+        page = (REPO / "home/.config/quickshell/nc-ile/Meteo.qml").read_text()
+        self.assertIn("Etat.meteoErreur", page)
+        self.assertIn("p.m.perime", page)
 
 
 if __name__ == "__main__":

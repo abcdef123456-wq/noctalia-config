@@ -453,8 +453,10 @@ REGLAGES = [
     R("ILE_METEO", "Île", L("Météo à côté de l'heure", "Weather next to the time"), "ouinon", "oui",
       L("Et une page Météo dans l'île (Open-Meteo, sans compte).", "And a Weather page in the island (Open-Meteo, no account).")),
     R("METEO_VILLE", "Île", L("Ville de la météo", "Weather city"), "texte", "auto",
-      L("Automatique : d'après ta connexion internet. Sinon, le nom d'une ville.",
-        "Automatic: based on your internet connection. Otherwise, a city name.")),
+      L("Automatique : position estimée par ipwho.is d'après ton IP, météo par Open-Meteo. Sinon, le nom d'une ville "
+        "(seul le nom part vers Open-Meteo ; ville introuvable : message dans l'île).",
+        "Automatic: position estimated by ipwho.is from your IP, weather by Open-Meteo. Otherwise, a city name "
+        "(only the name goes to Open-Meteo; unknown city: a message in the island).")),
     R("ILE_PRESSE", "Île", L("Presse-papiers dans l'île", "Clipboard in the island"), "ouinon", "oui",
       L("Les 12 derniers textes ou images copiés (Super + Maj + V), en mémoire seulement ; jamais les mots de passe d'un gestionnaire.",
         "The last 12 copied texts or images (Super + Shift + V), in memory only; never passwords from a password manager.")),

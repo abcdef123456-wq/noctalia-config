@@ -40,7 +40,7 @@ Singleton {
                                                  batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
                                                  ["assistant", "notifications"],
                                                  ["son", "reseau", "bluetooth", "systeme", "calendrier"],
-                                                 meteo.temp !== undefined ? ["meteo"] : [], ["presse", "fenetres"],
+                                                 (meteo.temp !== undefined || meteoErreur !== "") ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))
     property string vueNom: "centre"
     readonly property int vue: Math.max(0, vues.indexOf(vueNom))
@@ -221,14 +221,19 @@ Singleton {
 
     // ── Météo (nc-meteo : Open-Meteo, gardée 20 min en cache) : pilule au repos et page Météo ──
     property var meteo: ({})
+    property string meteoErreur: ""
     readonly property bool meteoPilule: Reglages.val("ILE_METEO", "oui") !== "non" && meteo.temp !== undefined
     Process {
         id: lireMeteo
         command: [etat.bin + "nc-meteo"]
-        stdout: StdioCollector { onStreamFinished: { try { let m = JSON.parse(text); if (m.temp !== undefined) etat.meteo = m } catch (e) {} } }
+        stdout: StdioCollector { onStreamFinished: { try {
+            let m = JSON.parse(text)
+            if (m.temp !== undefined) { etat.meteo = m; etat.meteoErreur = "" }
+            else if (m.erreur === "ville introuvable") { etat.meteo = ({}); etat.meteoErreur = m.erreur }   // la météo d'une autre ville serait fausse
+        } catch (e) {} } }
     }
     // Toutes les 10 min ; toutes les 30 min sur batterie (moins de réveils et de réseau, la météo change peu)
-    Timer { interval: (UPower.onBattery ? 30 : 10) * 60000; repeat: true; running: Reglages.val("ILE_METEO", "oui") !== "non"
+    Timer { interval: (UPower.onBattery ? 30 : 10) * 60000; repeat: true; running: etat.ecranVu && Reglages.val("ILE_METEO", "oui") !== "non"     // écran éteint : suspendu, un rafraîchissement dès le réveil
             triggeredOnStart: true; onTriggered: if (!lireMeteo.running) lireMeteo.running = true }
     Connections { target: Reglages; function onValeursChanged() { if (!lireMeteo.running) lireMeteo.running = true } }
 

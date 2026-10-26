@@ -67,6 +67,16 @@ Item {
                 }
                 Process { id: villeEcrire }
             }
+            // Ville saisie mais introuvable (nc-meteo ne se rabat pas sur l'IP)
+            Texte {
+                visible: Etat.meteoErreur !== "" && !saisie.visible
+                text: Reglages.t("Ville introuvable : un clic sur le nom pour en taper une autre", "City not found: click the name to type another"); font.pixelSize: 12; color: Couleurs.orange
+            }
+            // Météo gardée depuis plus de 3 h (hors ligne) : dit discrètement
+            Texte {
+                visible: !!p.m.perime && !saisie.visible
+                text: Reglages.t("Hors ligne : météo ancienne", "Offline: old data"); font.pixelSize: 11; secondaire: true
+            }
             // Ville estimée d'après l'IP (METEO_VILLE vide ou « auto ») : peut être fausse, un clic ouvre la saisie de la ville
             Texte {
                 visible: !!p.m.estimee && !saisie.visible
@@ -80,7 +90,7 @@ Item {
                 Column {
                     anchors.verticalCenter: parent.verticalCenter; spacing: 2
                     Texte { text: p.texteCiel(); font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Texte { text: Reglages.t("Ressenti ", "Feels like ") + p.m.ressenti + "° · min " + p.m.min + "° · max " + p.m.max + "°"; secondaire: true; font.pixelSize: 12 }
+                    Texte { visible: p.m.temp !== undefined; text: Reglages.t("Ressenti ", "Feels like ") + p.m.ressenti + "° · min " + p.m.min + "° · max " + p.m.max + "°"; secondaire: true; font.pixelSize: 12 }
                 }
             }
         }
