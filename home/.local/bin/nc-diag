@@ -613,6 +613,20 @@ def verifier(b):
     if os.path.exists(rac):
         k = sum(1 for l in open(rac) if l.strip() and not l.startswith("#"))
         b.ok(T(f"{k} raccourci(s) personnalisé(s)", f"{k} custom shortcut(s)"))
+    # Le bac des sessions de confiance de JARVIS (nc-bac) demande PrivatePIDs, donc systemd 257 ou plus : avant (Leap…),
+    # pas de session, chaque action reste confirmée une à une. On le dit seulement si JARVIS est activé
+    jarvis = ""
+    try:
+        jarvis = [l.split("=", 1)[1].strip().strip('"') for l in open(conf, encoding="utf-8") if re.match(r"\s*NOEUD_JARVIS\s*=", l)][-1:]
+        jarvis = jarvis[0] if jarvis else ""
+    except OSError:
+        pass
+    v = re.match(r"systemd (\d+)", sortie(["systemctl", "--version"])[0])
+    if jarvis == "oui" and v and int(v[1]) < 257:
+        b.avert(T(f"Session de confiance indisponible : systemd 257 ou plus requis (ici {v[1]})",
+                  f"Trusted session unavailable: systemd 257 or newer required (here {v[1]})"),
+                T("chaque action de JARVIS reste confirmée une à une", "each JARVIS action is still confirmed one by one"),
+                cle="noeud_systemd")
 
 
 def bt_cartes():

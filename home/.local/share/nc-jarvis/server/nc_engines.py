@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -93,11 +94,84 @@ def atomique(path, data):
             if os.path.exists(name): os.unlink(name)
 
 
-async def process(args, prompt, timeout, cwd):
+# Ce qu'un moteur reçoit de l'environnement du serveur JARVIS : une liste blanche, comme ENV_COMMUN et ENV_MOTEUR de nc-ia.
+# Le serveur porte TELEGRAM_TOKEN, DISCORD_TOKEN, SECRET_KEY… (EnvironmentFile du .env) : un moteur n'en a pas besoin.
+# Chaque moteur ne reçoit que SA clé (ou celle des fournisseurs dont il parle) et les dossiers où il cherche sa session
+# (~/.claude, ~/.codex, ~/.config/opencode : par HOME, ou CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*).
+ENV_COMMUN = frozenset({'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LANGUAGE', 'TZ', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+    'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy',
+    'all_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS'})
+ENV_MOTEUR = {
+    'claude': frozenset({'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR'}),
+    'codex': frozenset({'OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_HOME'}),
+    'opencode': frozenset({'OPENCODE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY',
+        'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'MISTRAL_API_KEY', 'DEEPSEEK_API_KEY', 'XAI_API_KEY'}),
+}
+
+
+def env_moteur(engine):
+    gardes = ENV_COMMUN | ENV_MOTEUR.get(engine, frozenset())
+    env = {k: v for k, v in os.environ.items() if k in gardes or k.startswith('LC_')}
+    env.update(TERM='dumb', NO_COLOR='1', FORCE_COLOR='0')
+    return env
+
+
+# Garde-fou de sortie : un moteur (ou une injection de prompt) peut recopier un secret du serveur dans sa réponse, qui
+# part ensuite vers Telegram, Discord ou le cockpit. Toute ligne qui contient la valeur EXACTE d'un secret (jeton,
+# SECRET_KEY, clé d'API, mot de passe ; 8 caractères au moins) du .env ou de l'environnement est remplacée.
+SECRET_CLE = re.compile(r'TOKEN|SECRET|PASSW|API_?KEY|_KEY$|^KEY$|CREDENTIAL|PRIVATE', re.I)
+SECRET_RETIRE = '[secret retiré]'
+
+
+def valeurs_secretes(dossier):
+    """Valeurs (8 caractères au moins) des clés secrètes de l'environnement et des .env autour du runner (dossier)."""
+    trouvees = {v for k, v in os.environ.items() if SECRET_CLE.search(k) and len(v) >= 8}
+    for chemin in (dossier/'.env', dossier.parent/'.env', dossier.parent/'gateway/.env', dossier.parent/'render-gateway/.env'):
+        try: lignes = chemin.read_text(encoding='utf-8', errors='replace').splitlines()
+        except OSError: continue
+        for ligne in lignes:
+            cle, sep, v = ligne.partition('=')
+            cle = cle.strip().removeprefix('export ').strip()
+            if not sep or not SECRET_CLE.search(cle): continue
+            v = v.strip()
+            if v[:1] in '"\'' and v[-1:] == v[:1] and len(v) >= 2:
+                try: v = json.loads(v) if v[0] == '"' else v[1:-1]
+                except ValueError: v = v[1:-1]
+            if len(v) >= 8: trouvees.add(v)
+    return trouvees
+
+
+def dossier_runner(up):
+    return Path(up.__file__).resolve().parent
+
+
+def sans_secrets(texte, dossier):
+    """Le texte sans les lignes qui contiennent un secret exact ; remplacées par « [secret retiré] »."""
+    if not isinstance(texte, str): return texte
+    secrets = valeurs_secretes(dossier)
+    if not any(v in texte for v in secrets): return texte
+    return '\n'.join(SECRET_RETIRE if any(v in l for v in secrets) else l for l in texte.split('\n'))
+
+
+def ia_coupee():
+    """Vrai si IA_MODE=non dans ~/.config/nc/reglages.conf (dernière valeur, espaces et guillemets tolérés), comme nc-ia.
+    Seulement en déploiement local (DEPLOY_MODE différent de server) : le serveur de l'hébergeur n'a pas les réglages
+    du PC de l'utilisateur, et ses moteurs sont ceux de l'hébergeur."""
+    if os.environ.get('DEPLOY_MODE', 'local').strip().lower() == 'server': return False
+    valeur = None
+    try:
+        for ligne in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8').splitlines():
+            cle, sep, v = ligne.partition('=')
+            if sep and cle.strip() == 'IA_MODE': valeur = v.strip().strip('"')
+    except (OSError, ValueError): pass
+    return valeur == 'non'
+
+
+async def process(args, prompt, timeout, cwd, env=None):
     """Sorties bornées, groupe entier tué sur timeout/annulation/débordement."""
     p = await asyncio.create_subprocess_exec(*args, cwd=cwd, start_new_session=True,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, 'TERM':'dumb', 'NO_COLOR':'1', 'FORCE_COLOR':'0'})
+        env=env if env is not None else env_moteur(None))
     async def read(stream):
         data = bytearray()
         while True:
@@ -350,6 +424,7 @@ class Engines:
     async def run(self, prompt, timeout=120, model=None, effort=None, mode=None,
                   continue_session=True, reset_session_flag=False, permission_mode=None, session_key=None, **futurs):
         def failure(message): return dict(success=False,output='',error=message,session=self.session(session_key))
+        if ia_coupee(): return failure('L’IA est coupée sur ce PC (réglage IA_MODE=non) : aucun moteur n’est lancé.')
         if self.lock.locked(): return failure('Une autre requête JARVIS est déjà en cours.')
         # /run n'est jamais contrôlé par l'upstream (P2-2 de 94a3a93) : un agent qui a SECRET_KEY y demandait
         # bypassPermissions. Hors de notre liste : le mode de la session (aucun de nos clients n'envoie ce champ).
@@ -361,9 +436,13 @@ class Engines:
             if not agy_accepte_permission_mode(): permission_mode = 'default'
             self.agy_en_cours+=1
             try:
-                return await fn(prompt=prompt,timeout=timeout,model=model,effort=effort,mode=mode,
+                resultat=await fn(prompt=prompt,timeout=timeout,model=model,effort=effort,mode=mode,
                     continue_session=continue_session,reset_session_flag=reset_session_flag,permission_mode=permission_mode,
                     **compatibles(fn,session_key=session_key,**futurs))
+                if isinstance(resultat,dict):
+                    for champ in ('output','error'):
+                        if isinstance(resultat.get(champ),str): resultat[champ]=sans_secrets(resultat[champ],dossier_runner(self.up))
+                return resultat
             finally: self.agy_en_cours-=1
         if self.agy_en_cours: return failure('Une autre requête JARVIS est déjà en cours.')
         # Nos CLI : session partagée par tous les PC, un seul verrou ; session_key et mots-clés futurs ignorés.
@@ -388,9 +467,12 @@ class Engines:
             if memory: full=memory+'\n\n'+full
             try:
                 args=commande(engine,path,model if model is not None else settings.get('model',''),effort if effort is not None else settings.get('effort',''))
-                code,out=await process(args,full,timeout,self.path.parent)
+                # Dossier de travail : un dossier vide jeté après la demande, jamais celui du serveur (où se trouve .env)
+                travail=tempfile.mkdtemp(prefix='nc-jarvis-')
+                try: code,out=await process(args,full,timeout,travail,env_moteur(engine))
+                finally: shutil.rmtree(travail,ignore_errors=True)
                 if code: return failure(ENGINES[engine]+' a échoué (code '+str(code)+'). Vérifie son authentification et le modèle sur le runner.')
-                answer=reponse(engine,out)
+                answer=sans_secrets(reponse(engine,out),dossier_runner(self.up))
                 if continue_session:
                     if not conv:
                         conv=dict(id='nc-'+uuid.uuid4().hex,engine=engine,title=prompt[:100],history=[])

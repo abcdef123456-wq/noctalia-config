@@ -27,6 +27,7 @@ case "$*" in
   *" is-active "*) etat "$u"; [ "$(etat "$u")" = active ]; exit $? ;;
   *"show -p LoadState"*) [ -e "$FAKE/absente/$u" ] && echo not-found || echo loaded ;;
   *" is-enabled "*) exit 0 ;;
+  "--version") cat "$FAKE/systemd-version" 2>/dev/null || echo "systemd 262 (262.1)" ;;
   *" restart "*|*" start "*) sleep "$(cat "$FAKE/lenteur" 2>/dev/null || echo 0)"; mkdir -p "$FAKE/etat"; echo active > "$FAKE/etat/$u" ;;
 esac
 exit 0
@@ -134,6 +135,19 @@ class Bilan(Base):
         self.assertNotIn("demarrer:nc-pouls.service", d["reparations"])
         self.assertIn("pour cette session", d["reparations"]["demarrer:nc-ecran-externe.service"]["libelle"])
         self.assertIn("peut-être coupé exprès", d["reparations"]["demarrer:nc-ecran-externe.service"]["detail"])
+
+    def test_session_de_confiance_et_systemd_trop_ancien(self):
+        # nc-bac demande PrivatePIDs (systemd 257) : avant, pas de session de confiance ; dit seulement si JARVIS est activé
+        (self.home / ".config/nc/reglages.conf").write_text("NOEUD_JARVIS=oui\n")
+        (self.fake / "systemd-version").write_text("systemd 254 (254.27)\n")
+        cles = {c["cle"]: c for c in self.json("--rapide")["constats"]}
+        self.assertIn("noeud_systemd", cles)
+        self.assertIn("systemd 257", cles["noeud_systemd"]["texte"])
+        (self.fake / "systemd-version").write_text("systemd 257 (257.9)\n")
+        self.assertNotIn("noeud_systemd", {c["cle"] for c in self.json("--rapide")["constats"]})
+        (self.fake / "systemd-version").write_text("systemd 254 (254.27)\n")
+        (self.home / ".config/nc/reglages.conf").write_text("NOEUD_JARVIS=non\n")
+        self.assertNotIn("noeud_systemd", {c["cle"] for c in self.json("--rapide")["constats"]})
 
     def faux_bin(self, nom, corps):
         f = self.bin / nom

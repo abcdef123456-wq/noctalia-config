@@ -3512,6 +3512,26 @@ def panne(unites, flux=False, livraison=False):
 # s'exécuter, et n'est faite qu'après ta confirmation (jamais toute seule). Coupé par défaut (IA_ACTIONS=non).
 # Ses propres réglages (IA_*, SPOTLIGHT_IA) lui sont interdits.
 PROFILS = ("performance", "balanced", "power-saver")
+
+# Réglages que l'IA peut changer (plan « agir ») : LISTE BLANCHE, copie de DISTANT_PERMIS de nc-reglages, qui la revérifie
+# lui-même (« set --distant »). tests/test_reglage_distant.py vérifie que les copies sont identiques. Le plan vient d'un
+# texte écrit par l'IA, donc d'ailleurs : jamais NOEUD_*, IA_*, ALERTES_*, MAJ_*, VEILLE_*, *VERROU*, SPOTLIGHT_IA…
+DISTANT_PERMIS = frozenset((
+    "THEME_MODE", "ILE_STYLE", "ILE_CONTOUR", "ILE_HEURE", "ILE_SURVOL", "ILE_DATE", "ILE_ANIM_BATTERIE", "ILE_BANNIERES",
+    "ILE_BANNIERE_DUREE", "ILE_METEO", "COINS_ECRAN", "EFFETS", "FENETRES_ESPACE", "FENETRES_MARGE", "FENETRES_BORDURE",
+    "FENETRES_ARRONDI", "FENETRES_HALO", "BARRE_OPACITE", "DOCK", "DOCK_AUTO", "DOCK_TAILLE", "DOCK_LOUPE", "DOCK_POSITION",
+    "NUIT", "NUIT_TEMPERATURE", "TERMINAL_OPACITE", "TERMINAL_TAILLE", "VOLUME_PAS", "LUMINOSITE_PAS"))
+# Texte de l'IA affiché avant ta confirmation : ni ESC ni \r (ils effacent ou réécrivent des lignes du terminal), ni
+# caractères de contrôle C0/C1, ni bidi (U+202A-202E, U+2066-2069, U+200E/200F, U+061C) qui cachent ou inversent du texte.
+# Écrits en \u : pas de vrai caractère bidi dans le fichier.
+_CONTROLE_PLAN = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]")
+_CONTROLE_PLAN_LIGNES = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]")
+
+
+def texte_sur(t, lignes=False):
+    """Texte venu de l'IA, sans caractère de contrôle ni bidi (remplacés par une espace). lignes : garde \n et \t."""
+    return (_CONTROLE_PLAN_LIGNES if lignes else _CONTROLE_PLAN).sub(" ", str(t))
+
 OUTILS = {
     "service_journal": dict(domaine="services", lecture=True, args=("nom",), fr="Lire le journal de {nom}", en="Read the log of {nom}"),
     "service_redemarrer": dict(domaine="services", args=("nom",), fr="Redémarrer {nom}", en="Restart {nom}"),
@@ -3760,10 +3780,11 @@ def valider_action(a, domaines, services=None, fenetres=None, bureau=None):
                 raise ErreurIA(T("pourcentage attendu", "percentage expected")) from None
             v = str(max(0, min(150 if nom_o == "volume" else 100, n)))
         elif k == "cle":
-            if not re.fullmatch(r"[A-Z0-9_]{2,60}", v) or v.startswith("IA_") or v in ("SPOTLIGHT_IA", "ALERTES_TELEGRAM"):
+            # Liste blanche seulement (la valeur actuelle d'une clé se lit sans passer ici : aperçu avant confirmation)
+            if not re.fullmatch(r"[A-Z0-9_]{2,60}", v) or v not in DISTANT_PERMIS:
                 raise ErreurIA(T(f"réglage interdit à l'IA : {v[:40]}", f"setting forbidden to the AI: {v[:40]}"))
         elif k == "valeur":
-            if not re.fullmatch(r"[^\n\x00]{0,200}", v):
+            if not re.fullmatch(r"[^\n\x00]{0,200}", v) or _CONTROLE_PLAN.search(v):
                 raise ErreurIA(T("valeur invalide", "invalid value"))
         elif k in ("x", "y", "largeur", "hauteur"):
             try:
@@ -3782,7 +3803,7 @@ def valider_action(a, domaines, services=None, fenetres=None, bureau=None):
                       direction_fr=DIRECTIONS_FR.get(args.get("direction", ""), ""))
     else:
         args_l = args
-    libelle = (o["en"] if EN else o["fr"]).format(**args_l)
+    libelle = texte_sur((o["en"] if EN else o["fr"]).format(**args_l))
     return dict(outil=nom_o, args=args, libelle=libelle, danger=bool(o.get("danger")), lecture=bool(o.get("lecture")))
 
 
@@ -3939,7 +3960,7 @@ def executer_action(a):
         code, t = sortie_cmd(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if g["etat"] == "on" else "0"])
         return code == 0, t
     if o == "reglage":
-        code, t = sortie_cmd([nb + "nc-reglages", "set", g["cle"], g["valeur"]], 60)
+        code, t = sortie_cmd([nb + "nc-reglages", "set", "--distant", g["cle"], g["valeur"]], 60)
         return code == 0, t
     if o.startswith("fenetre_") or o == "bureau_nommer":
         lua = lua_fenetre(a)
@@ -4011,14 +4032,14 @@ def agir(demande, bureau=None):
         texte += T("\n\nRésultats de tes lectures :\n", "\n\nResults of your reads:\n") + "\n".join(resultats) + \
             T("\n\nPropose maintenant le plan final (sans nouvelle lecture).", "\n\nNow propose the final plan (no more reads).")
     domaines = droit_d_agir()                   # pareil pour le plan : coupé entre-temps, aucun plan gardé
-    plan = dict(id=os.urandom(8).hex(), t=time.time(), reponse=str(d.get("reponse") or "")[:2000], ia=nom(ident),
+    plan = dict(id=os.urandom(8).hex(), t=time.time(), reponse=texte_sur(d.get("reponse") or "", True)[:2000], ia=nom(ident),
                 agent=FOURNISSEURS.get(ident, {}).get("agent", "claude"), actions=[], refus=[],
                 portee={"bureau": bureau} if bureau is not None else {})
     for a in (d.get("actions") or [])[:8]:
         try:
             v = apercu_action(valider_action(a, domaines, services, fenetres, bureau), fenetres)
         except ErreurIA as e:
-            plan["refus"].append(str(e))
+            plan["refus"].append(texte_sur(e))
             continue
         if v["lecture"]:
             continue
@@ -4500,14 +4521,15 @@ def annuler_rangement():
 
 
 def afficher_plan(plan):
+    # Tout ce qui s'affiche est nettoyé une seconde fois (plan relu d'un fichier, résultat d'une commande)
     if plan["reponse"]:
-        print(plan["reponse"])
+        print(texte_sur(plan["reponse"], True))
     for a in plan["actions"]:
         etat = ("✓" if a["ok"] else "✗") if a["fait"] else ("⚠" if a["danger"] else "•")
-        print(f"  {etat} {a['libelle']}" + (f" — {a['resultat'][:200]}" if a["fait"] and a["resultat"] and not a["ok"] else "")
-              + (f" — {a['note']}" if a.get("note") else ""))
+        print(f"  {etat} {texte_sur(a['libelle'])}" + (f" — {texte_sur(a['resultat'][:200])}" if a["fait"] and a["resultat"] and not a["ok"] else "")
+              + (f" — {texte_sur(a['note'])}" if a.get("note") else ""))
     for r in plan["refus"]:
-        print("  ⨯ " + r)
+        print("  ⨯ " + texte_sur(r))
 
 
 # ── Rapports de mise à jour (config : nc-maj ; système : nc-paquets) ─────────────────────────────────────────────

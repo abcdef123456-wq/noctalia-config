@@ -332,8 +332,8 @@ class AvecFauxSystemdRun(Base):
         return [avant[i + 1] for i, a in enumerate(avant) if a == "-p" and i + 1 < len(avant)]
 
     def test_chaque_moteur_dans_le_meme_bac(self):
-        communes = {"PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
-                    "ProtectHome=read-only", "PrivateTmp=yes", "RestrictAddressFamilies=AF_INET AF_INET6",
+        communes = {"PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "PrivateDevices=yes", "PrivateIPC=yes",
+                    "SystemCallFilter=~@debug @keyring", "ProtectHome=read-only", "PrivateTmp=yes", "RestrictAddressFamilies=AF_INET AF_INET6",
                     "ReadOnlyPaths=" + str(self.home)}
         for ident in IDENTS:
             with self.subTest(ident):
@@ -347,7 +347,7 @@ class AvecFauxSystemdRun(Base):
                 props = set(self.props(reel))
                 self.assertTrue(communes <= props, communes - props)
                 for sonde_prop in self.props(blocs[0]):
-                    if sonde_prop.startswith(("PrivateUsers", "NoNewPrivileges", "PrivatePIDs", "SystemCallFilter", "ProtectHome")):
+                    if sonde_prop.startswith(("PrivateUsers", "NoNewPrivileges", "PrivatePIDs", "PrivateDevices", "PrivateIPC", "SystemCallFilter", "ProtectHome")):
                         self.assertIn(sonde_prop, props)
                 self.assertTrue(any(p.startswith("RuntimeMaxSec=") and int(p.split("=")[1]) >= 180 for p in props), props)
                 self.assertTrue(any(a.startswith("--unit=nc-ia-") for a in reel))

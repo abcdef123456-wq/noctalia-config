@@ -208,7 +208,10 @@ def schema():
 
 def rewrite_env(original, values):
     lines, written = [], set()
-    for line in original.splitlines():
+    # split('\n') et non splitlines() : splitlines coupe aussi sur U+2028, U+2029, U+0085, \x1c… ; une valeur qui en
+    # contenait serait relue comme une nouvelle ligne (injection d'une clé, par ex. TELEGRAM_ALLOWED_USER_IDS)
+    texte = original[:-1] if original.endswith('\n') else original     # comme splitlines : pas de ligne vide en trop
+    for line in (texte.split('\n') if texte else []):
         key = line.split('=', 1)[0].strip()
         if key in values:
             if key not in written:
@@ -229,16 +232,32 @@ def atomic(path, content):
         if name and os.path.exists(name): os.unlink(name)
 
 
+# Champs du .env qu'une requête de gestion peut écrire : LISTE BLANCHE (briefing). Jamais les jetons, SECRET_KEY, les
+# listes d'utilisateurs permis (*_ALLOWED_*), l'URL du webhook, le serveur Discord, ni les réglages des outils : le jeton
+# du gateway seul (ou « confirmed » du corps) ne doit pas permettre de s'ajouter aux utilisateurs permis ni de remplacer
+# un bot. Ces champs-là se changent sur le PC, dans les fichiers .env. Vider un jeton (config.clear) reste permis : ça
+# coupe un bot, ça n'en met pas un autre.
+CONFIG_PERMIS = frozenset(('BRIEFING_ENABLED', 'BRIEFING_TIME', 'BRIEFING_DAYS', 'BRIEFING_TIMEZONE', 'BRIEFING_CITY', 'BRIEFING_SECTIONS'))
+CLEAR_PERMIS = frozenset(('TELEGRAM_TOKEN', 'DISCORD_TOKEN'))
+
+
 def update_config(values, clear=None):
     clear = clear or []
     if not isinstance(values, dict) or not isinstance(clear,list) or (not values and not clear): raise ValueError
     fields = {f['key']:f for f in schema()['fields']}
     selected = {}
     for key in clear:
-        if key not in fields or not fields[key]['secret'] or values.get(key): raise ValueError
+        if key not in fields or key not in CLEAR_PERMIS or not fields[key]['secret'] or values.get(key): raise ValueError
         selected[key]=''
     for key, value in values.items():
-        if key not in fields or not isinstance(value, str) or len(value)>4000 or any(ord(c)<32 for c in value): raise ValueError
+        if key in fields and fields[key]['secret'] and value == '': continue   # champ masqué vide : rien à écrire
+        # Hors liste blanche : seulement une valeur inchangée (le formulaire de l'île renvoie tous les champs du groupe), jamais écrite
+        if key not in CONFIG_PERMIS:
+            if key in fields and not fields[key]['secret'] and value == os.getenv(key, fields[key].get('default', '')): continue
+            raise ValueError
+        # Aucun caractère de contrôle (C0, DEL, C1) ni séparateur de ligne Unicode : rien qui puisse couper la ligne du .env
+        if key not in fields or not isinstance(value, str) or len(value)>4000 or value.splitlines() not in ([value], []) \
+                or any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f or c in '\u2028\u2029' for c in value): raise ValueError
         if fields[key]['secret'] and not value: continue  # un champ masqué vide conserve le token
         if fields[key].get('kind')=='bool' and value not in ('0','1'): raise ValueError
         if fields[key].get('kind')=='number' and (not math.isfinite(float(value)) or float(value)<0): raise ValueError
@@ -371,7 +390,9 @@ async def dispatch(op, p, confirmed=False, session_key=None):
         if action not in nc_noctalia.ACTIONS or not isinstance(params,dict): raise ValueError
         if not nc_noctalia.ACTIONS[action]['readonly'] and not confirmed: return dict(error='Confirmation explicite requise')
         arguments=[str(params[f['key']])[:200] for f in nc_noctalia.ACTIONS[action]['fields'] if params.get(f['key'])]
-        return await nc_noctalia.agir(action, arguments, confirme=confirmed)
+        # « confirmed » vient du corps de la requête (le jeton du gateway suffit à le poser) : il ne sert qu'aux actions
+        # d'écran. Un réglage n'est jamais « confirmé » par lui : la liste blanche de nc_noctalia et de nc-reglages décide.
+        return await nc_noctalia.agir(action, arguments, confirme=confirmed and action != 'reglage')
     if op in write and not confirmed: return dict(error='Confirmation explicite requise')
     if op=='notify':
         # Un message Telegram aux chats connus du bot (alertes de la machine : nc-alertes)

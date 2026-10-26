@@ -35,6 +35,14 @@ PROFILS = {"performance": "performance", "perf": "performance", "equilibre": "ba
 THEMES = {"sombre": "dark", "dark": "dark", "clair": "light", "light": "light"}
 ECRANS = ("pc", "miroir", "etendre", "externe")
 CLE = re.compile(r"[A-Z][A-Z0-9_]{0,60}")
+# Réglages changeables à distance (Telegram, cockpit) : LISTE BLANCHE, copie de DISTANT_PERMIS de nc-reglages (qui la
+# vérifie aussi, côté PC, avec « set --distant » : ce contrôle-ci ne suffit pas, un gateway compromis le contournerait).
+# tests/test_reglage_distant.py vérifie que les deux listes sont identiques. Jamais NOEUD_*, IA_*, ALERTES_*, MAJ_*…
+DISTANT_PERMIS = frozenset((
+    "THEME_MODE", "ILE_STYLE", "ILE_CONTOUR", "ILE_HEURE", "ILE_SURVOL", "ILE_DATE", "ILE_ANIM_BATTERIE", "ILE_BANNIERES",
+    "ILE_BANNIERE_DUREE", "ILE_METEO", "COINS_ECRAN", "EFFETS", "FENETRES_ESPACE", "FENETRES_MARGE", "FENETRES_BORDURE",
+    "FENETRES_ARRONDI", "FENETRES_HALO", "BARRE_OPACITE", "DOCK", "DOCK_AUTO", "DOCK_TAILLE", "DOCK_LOUPE", "DOCK_POSITION",
+    "NUIT", "NUIT_TEMPERATURE", "TERMINAL_OPACITE", "TERMINAL_TAILLE", "VOLUME_PAS", "LUMINOSITE_PAS"))
 
 # Le catalogue, repris par actions.json (cockpit) : id, libellé, champs, lecture seule, sensible
 ACTIONS = {
@@ -87,7 +95,7 @@ def preparer(action, arguments):
         theme = THEMES.get(arguments[0].lower())
         if not theme:
             raise ValueError("Thème : sombre ou clair.")
-        return ["nc-reglages", "set", "THEME_MODE", theme], False
+        return ["nc-reglages", "set", "--distant", "THEME_MODE", theme], False
     if action == "fond":
         return ["noctalia", "msg", "wallpaper", "random"], False
     if action == "ecran":
@@ -104,10 +112,13 @@ def preparer(action, arguments):
             raise ValueError("Réglage : /nc reglage CLE [VALEUR] (nc-reglages liste pour les clés).")
         if len(arguments) == 1:
             return ["nc-reglages", "get", arguments[0]], False
+        if arguments[0] not in DISTANT_PERMIS:
+            # Écrire un réglage est réservé à une liste blanche (apparence, confort) ; la lecture reste libre
+            raise ValueError(arguments[0][:60] + " ne se change pas à distance (depuis ce PC seulement).")
         valeur = " ".join(arguments[1:])
         if len(valeur) > 200 or any(ord(c) < 32 for c in valeur):
             raise ValueError("Valeur : 200 caractères au plus, sans retour à la ligne.")
-        return ["nc-reglages", "set", arguments[0], valeur], False
+        return ["nc-reglages", "set", "--distant", arguments[0], valeur], False   # nc-reglages revérifie la liste
     raise ValueError("Action inconnue : " + ", ".join(ACTIONS))
 
 

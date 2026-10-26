@@ -391,5 +391,75 @@ print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=
             with self.assertRaises(ValueError):e.choose(session_key='x',inconnu='1')
         self.assertFalse(any(x[0]=='run' for x in appels))
 
+class EnvironnementMoteur(unittest.TestCase):
+    """Le moteur ne reçoit ni les jetons du serveur ni son dossier ; IA_MODE=non l'empêche de démarrer."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
+        self.m=types.ModuleType('engines_env');exec(compile(SOURCE.read_text(),str(SOURCE),'exec'),self.m.__dict__)
+        self.opt=patch.object(self.m,'agy_accepte_permission_mode',return_value=True);self.opt.start();self.addCleanup(self.opt.stop)
+        self.agy=AsyncMock();self.up=types.SimpleNamespace(__file__=str(self.root/'main.py'),KNOWN_MODELS=[],run_agy=self.agy,
+            get_session_info=lambda:{},update_session=lambda **kw:kw,reset_session_async=AsyncMock(),
+            list_recent_conversations=lambda **kw:[],get_conversation_history=lambda *a,**kw:[],resume_conversation=lambda *a:{},
+            delete_conversation=lambda *a:{},delete_all_conversations=lambda:{},get_token_usage=lambda:{},
+            _reset_memory_injection=lambda:None,_should_inject_memory=lambda version:True,render_memory_prompt=lambda:'')
+        env=dict(HOME=str(self.root),TELEGRAM_TOKEN='faux-tg',DISCORD_TOKEN='faux-dc',SECRET_KEY='faux-secret',
+            ANTHROPIC_API_KEY='cle-claude',OPENAI_API_KEY='cle-openai',LC_ALL='C',DEPLOY_MODE='local')
+        self.env=patch.dict(os.environ,env);self.env.start();self.addCleanup(self.env.stop)
+        self.e=self.m.install(self.up)
+        self.cli=self.root/'fake-cli'
+        self.cli.write_text('#!'+sys.executable+'''
+import json,os,sys
+from pathlib import Path
+sys.stdin.read()
+Path(__file__).with_suffix('.etat').write_text(json.dumps(dict(env=dict(os.environ),cwd=os.getcwd(),vide=os.listdir('.'))))
+print(json.dumps(dict(result='ok') if '--print' in sys.argv else dict(type='item.completed',item=dict(type='agent_message',text='ok'))))
+''');self.cli.chmod(0o755)
+        self.find=patch.object(self.m,'executable',return_value=str(self.cli));self.find.start();self.addCleanup(self.find.stop)
+
+    def etat(self): return json.loads(self.cli.with_suffix('.etat').read_text())
+
+    def test_pas_de_jeton_du_serveur_cle_du_moteur_transmise_cwd_temporaire_supprime(self):
+        for engine,presente,absente in (('claude','ANTHROPIC_API_KEY','OPENAI_API_KEY'),('codex','OPENAI_API_KEY','ANTHROPIC_API_KEY')):
+            with self.subTest(engine=engine):
+                self.e.choose(engine=engine)
+                r=asyncio.run(self.up.run_agy(prompt='q',continue_session=False));self.assertTrue(r['success'],r)
+                st=self.etat();env=st['env']
+                for k in ('TELEGRAM_TOKEN','DISCORD_TOKEN','SECRET_KEY'):self.assertNotIn(k,env)
+                self.assertEqual(env[presente],'cle-'+('claude' if presente.startswith('ANTHROPIC') else 'openai'))
+                self.assertNotIn(absente,env);self.assertEqual(env['LC_ALL'],'C');self.assertEqual(env['TERM'],'dumb')
+                self.assertEqual(st['vide'],[])
+                self.assertNotEqual(Path(st['cwd']).resolve(),self.root.resolve())
+                self.assertFalse(Path(st['cwd']).exists())
+
+    def test_une_reponse_de_moteur_ne_sort_pas_avec_un_secret_du_env(self):
+        """Un faux moteur qui recopie TELEGRAM_TOKEN, SECRET_KEY ou une clé d'API : la ligne est retirée avant de sortir."""
+        (self.root/'.env').write_text('TELEGRAM_TOKEN="123456:ABCdef-jeton-secret"\nSECRET_KEY=cle-serveur-0123456789\nBRIEFING_TIME="08:00"\n')
+        (self.root/'home-runner').mkdir(); 
+        with patch.dict(os.environ,OPENAI_API_KEY='sk-test-abcdef123456'):
+            self.cli.write_text('''#!'''+sys.executable+'''
+import json,sys
+sys.stdin.read()
+t="début\\nle jeton est 123456:ABCdef-jeton-secret ok\\nclé cle-serveur-0123456789\\nmoteur sk-test-abcdef123456\\nfin 08:00"
+print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=t))))
+''')
+            self.e.choose(engine='codex')
+            r=asyncio.run(self.up.run_agy(prompt='q',continue_session=True))
+        self.assertTrue(r['success'],r)
+        self.assertEqual(r['output'].split('\n'),['début','[secret retiré]','[secret retiré]','[secret retiré]','fin 08:00'])
+        for v in ('ABCdef-jeton-secret','cle-serveur-0123456789','sk-test-abcdef123456'):
+            self.assertNotIn(v,r['output'])
+            self.assertNotIn(v,self.e.path.read_text(),'ni dans l\'historique gardé')
+
+    def test_ia_mode_non_refuse_sans_lancer_le_moteur_en_local(self):
+        conf=self.root/'.config/nc';conf.mkdir(parents=True)
+        (conf/'reglages.conf').write_text('IA_MODE=auto\n  IA_MODE = "non"\n')
+        r=asyncio.run(self.e.run('q'));self.assertFalse(r['success']);self.assertIn('IA_MODE',r['error'])
+        self.assertFalse(self.cli.with_suffix('.etat').exists());self.agy.assert_not_called()
+        (conf/'reglages.conf').write_text('IA_MODE=non\nIA_MODE=auto\n')   # dernière valeur
+        self.e.choose(engine='claude');self.assertTrue(asyncio.run(self.e.run('q',continue_session=False))['success'])
+        (conf/'reglages.conf').write_text('IA_MODE=non\n')
+        with patch.dict(os.environ,DEPLOY_MODE='server'):                    # serveur de l'hébergeur : réglages du PC absents
+            self.assertTrue(asyncio.run(self.e.run('q',continue_session=False))['success'])
+
 
 if __name__=='__main__':unittest.main()

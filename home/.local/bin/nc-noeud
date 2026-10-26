@@ -761,6 +761,10 @@ def protege(cible, ecriture):
         for b in {Path(os.path.abspath(base)), base.resolve()}:
             if cible == b or b in cible.parents:
                 return "~/" + rel
+    # Le backend JARVIS déployé ailleurs que par défaut (--path) : son dossier se lit dans ses unités assistant-*.service
+    for b in BAC.jarvis_dossiers(HOME) or []:
+        if cible == b or b in cible.parents:
+            return montrer_chemin(b)
     return None
 
 

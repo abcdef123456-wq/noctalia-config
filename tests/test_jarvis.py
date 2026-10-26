@@ -306,6 +306,24 @@ class Management(unittest.TestCase):
         self.assertEqual(self.call('config.update',{'values':{'SECRET_KEY':'replace'}},True).status_code,400)
         self.assertEqual(self.call('config.update',{'values':{'BRIEFING_TIME':'value\nINJECT=1'}},True).status_code,400)
 
+    def test_config_update_refuse_acces_et_secrets_meme_confirme(self):
+        """Le jeton du gateway + confirmed=true ne suffit pas : ni jetons, ni listes d'utilisateurs permis, ni SECRET_KEY."""
+        paths=[self.root/'.env',self.root/'render-gateway/.env',self.root/'home-runner/.env']
+        for p in paths:p.write_text('TELEGRAM_ALLOWED_USER_IDS="1"\nDISCORD_ALLOWED_USER_IDS="2"\nTELEGRAM_TOKEN="t"\nDISCORD_TOKEN="d"\nSECRET_KEY="s"\n')
+        avant=[p.read_text() for p in paths]
+        for cle in ('TELEGRAM_ALLOWED_USER_IDS','DISCORD_ALLOWED_USER_IDS','TELEGRAM_TOKEN','DISCORD_TOKEN','SECRET_KEY','TELEGRAM_WEBHOOK_URL','DISCORD_GUILD_ID'):
+            r=self.call('config.update',{'values':{cle:'999'}},True)
+            self.assertEqual(r.status_code,400,cle)
+        self.assertEqual(self.call('config.update',{'values':{'BRIEFING_TIME':'09:00','TELEGRAM_ALLOWED_USER_IDS':'999'}},True).status_code,400)
+        self.assertEqual(self.call('config.clear',{'keys':['SECRET_KEY']},True).status_code,400)
+        self.assertEqual([p.read_text() for p in paths],avant,'.env inchangé')
+        self.assertEqual(self.call('config.update',{'values':{'BRIEFING_TIME':'09:00'}},True).status_code,200)
+        # Le formulaire renvoie aussi les champs inchangés : acceptés mais jamais écrits
+        with patch.dict(os.environ,{'TELEGRAM_ALLOWED_USER_IDS':'1'}):
+            r=self.call('config.update',{'values':{'TELEGRAM_ALLOWED_USER_IDS':'1','BRIEFING_TIME':'10:00'}},True)
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertTrue(all('TELEGRAM_ALLOWED_USER_IDS="1"' in p.read_text() and '10:00' in p.read_text() for p in paths))
+
     def test_config_failure_rolls_back_all_components(self):
         paths=[self.root/'.env',self.root/'render-gateway/.env',self.root/'home-runner/.env']
         for p in paths:p.write_text('PERSONAL=preserved\n')

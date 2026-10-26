@@ -24,7 +24,11 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
             ".local/share/opencode", ".aws", ".azure", ".config/gcloud", ".kube", ".docker", ".pgpass", ".npmrc",
             ".pypirc", ".cargo/credentials", ".cargo/credentials.toml", ".config/rclone",
             ".local/share/TelegramDesktop", ".config/discord", ".config/Signal", ".local/share/jarvis-bis",
-            ".local/state/nc-jarvis/connection.conf", ".config/nc/assistant.conf.backup-*", ".config/nc/noeud-totp.json"]
+            ".local/state/nc-jarvis/connection.conf", ".config/nc/assistant.conf.backup-*", ".config/nc/noeud-totp.json",
+            # Noctalia : l'historique du presse-papier chiffré et sa clé (storage.key, à côté), l'historique des notifications
+            # (codes SMS, messages) ; le dossier entier, car d'autres fichiers d'état y sont aussi privés. Le dossier de
+            # JARVIS déployé ailleurs que par défaut est ajouté d'après ses unités (jarvis_dossiers)
+            ".local/state/noctalia", ".cache/noctalia"]
 
 # ── Bac à sable (exec en session de confiance) ────────────────────────────────────────────────────────────────────
 # Une session de confiance fait sauter la confirmation de chaque commande ; un contrôle sur le texte de la commande se
@@ -42,6 +46,7 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
 #   - RestrictAddressFamilies=AF_INET AF_INET6 : plus aucun socket unix, donc plus de socket abstrait (X11, bus) → un
 #     exec de session ne peut lancer aucune appli graphique (lancer une appli reste confirmé une par une) ;
 #   - RuntimeMaxSec : tué à l'échéance, --collect nettoie l'unité.
+#   - PrivateDevices + PrivateIPC : ni caméra, ni micro, ni GPU, ni périphériques d'entrée ; IPC SysV à part ;
 # Vérifié dans le manager UTILISATEUR, sans root, sur systemd 262 (Arch) ; les propriétés existent depuis bien avant
 # systemd 254 (openSUSE Leap 15.6, la plus ancienne visée). Toute erreur de mise en place (systemd-run absent, pas de
 # bus utilisateur, namespaces refusés comme sur Ubuntu avec apparmor restrict_unprivileged_userns) → pas de session,
@@ -52,6 +57,8 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
 # (historiques, jetons d'outils, navigateurs, messageries, gestionnaires de mots de passe) ; ce qui n'y est pas reste
 # lisible, tes dossiers à toi s'ajoutent par NOEUD_BAC_INTERDITS.
 BAC_INTERDITS = [".config/nc", ".local/state/nc-jarvis", ".local/state/noctalia-config",
+                 # Noctalia : presse-papier chiffré + sa clé storage.key, historique des notifications (+ ses images, le cache)
+                 ".local/state/noctalia", ".cache/noctalia", ".local/share/jarvis-bis",
                  ".ssh", ".gnupg", ".local/share/keyrings", ".password-store",
                  ".mozilla", ".config/chromium", ".config/google-chrome", ".config/BraveSoftware",
                  ".config/discord", ".config/gh", ".config/git", ".git-credentials", ".netrc", ".docker", ".kube",
@@ -141,6 +148,50 @@ def emplacement(home, rel, depl):
     return Path(home) / rel
 
 
+def jarvis_dossiers(home, environ=None):
+    """Les chemins du backend JARVIS déployé (nc-jarvis deployer --path, n'importe où), lus dans ses unités
+    assistant-*.service : WorkingDirectory= et EnvironmentFile= (« - » et guillemets enlevés, %h = ton dossier personnel),
+    et le dossier du backend lui-même (le parent de gateway/ ou home-runner/ que le déployeur met en WorkingDirectory=,
+    quand il est dans ~ sans être ~) : son .env, son dépôt et ses données y sont. Liste de Path absolus (tels quels et
+    réels), sans doublon. None si une unité existe mais ne se lit pas : pas de bac plutôt qu'un backend lisible. Un
+    spécificateur inconnu (%t…) ou un chemin relatif est ignoré : le chemin ne peut pas être calculé."""
+    environ = os.environ if environ is None else environ
+    home = Path(home)
+    homes = {home, Path(os.path.realpath(str(home)))}
+    conf = environ.get("XDG_CONFIG_HOME") or ""
+    dossiers = [home / ".config/systemd/user"] + ([Path(conf) / "systemd/user"] if conf and os.path.isabs(conf) else [])
+    bruts = []                                                    # (chemin, est un dossier de travail)
+    for d in dict.fromkeys(dossiers):
+        try:
+            unites = sorted(d.glob("assistant-*.service"))
+        except OSError:
+            return None
+        for u in unites:
+            try:
+                lignes = u.read_text(errors="replace").splitlines()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return None
+            for l in lignes:
+                cle, egal, v = l.strip().partition("=")
+                if not egal or cle not in ("WorkingDirectory", "EnvironmentFile"):
+                    continue
+                v = v.strip().lstrip("-").strip().strip('"').replace("%%", "\0").replace("%h", str(home))
+                if v.startswith("~/"):
+                    v = str(home) + v[1:]
+                if "%" in v or not os.path.isabs(v) or "\n" in v:
+                    continue
+                bruts.append((Path(v.replace("\0", "%")), cle == "WorkingDirectory"))
+    out = []
+    for b, travail in bruts:
+        for x in (b, Path(os.path.realpath(str(b)))):
+            out.append(x)
+            if travail and x.name in ("gateway", "home-runner") and x.parent not in homes and any(h in x.parents for h in homes):
+                out.append(x.parent)
+    return list(dict.fromkeys(out))
+
+
 def perso(reglage):
     """NOEUD_BAC_INTERDITS : tes dossiers en plus (relatifs à ~, séparés par « : », « ~/ » permis). None si une entrée
     ne convient pas (chemin absolu, « .. », guillemet, barre oblique inverse) : alors pas de bac, donc pas de session,
@@ -186,6 +237,11 @@ def inaccessibles(home, reglage, libres=(), environ=None, interdits_plus=()):
                 vus += [str(q) for q in p.parent.glob(p.name) if q.exists()]
             elif p.exists():
                 vus.append(str(p))
+    # Le backend JARVIS déployé ailleurs que par défaut (--path) : son dossier, d'après ses unités (aucun chemin /tmp)
+    backend = jarvis_dossiers(home, environ)
+    if backend is None:
+        return None
+    vus += [str(p) for p in backend if not str(p).startswith(TEMPORAIRES) and p.exists()]
     run = environ.get("XDG_RUNTIME_DIR")
     if run and os.path.isdir(run) and not run.startswith(TEMPORAIRES):                  # PrivateTmp le masque déjà
         vus.append(run)
@@ -234,7 +290,12 @@ def argv(cmd, cwd, budget, *, home, reglage, programme, ecriture=(), lecture_seu
     #   ReadOnlyPaths=/dev/shm : /dev reste accessible malgré strict, et /dev/shm est partagé entre tous les comptes.
     # KillSignal=SIGKILL + TimeoutStopSec=1s : un moteur qui ignore SIGTERM et garde sa sortie ouverte est tué tout de
     #   suite et l'unité ne traîne pas (sinon « systemctl stop » attendait jusqu'à 90 s pendant que nc-ia veut nettoyer).
-    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring",
+    # PrivateDevices : un /dev à lui (null, zero, random, urandom, tty, pts, full, shm…), sans /dev/video*, /dev/snd, /dev/dri,
+    #   /dev/input, /dev/hidraw… PrivateUsers garde ton uid, donc l'ACL « uaccess » (user:<uid>:rw) du système resterait
+    #   valable : sans cela une commande de session filmait ou enregistrait, puis envoyait par le réseau.
+    # PrivateIPC : ses propres files de messages et mémoires partagées SysV (pas celles du reste de ta session).
+    props = ["PrivateUsers=yes", "NoNewPrivileges=yes", "PrivatePIDs=yes", "PrivateDevices=yes", "PrivateIPC=yes",
+             "SystemCallFilter=~@debug @keyring",
              "ProtectHome=read-only", "PrivateTmp=yes", "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm",
              "KillSignal=SIGKILL", "TimeoutStopSec=1s",
              # OnFailure= vide : un greffon global (OnFailure=nc-panne@%n sur chaque service) ferait sinon une notification

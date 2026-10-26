@@ -2537,8 +2537,62 @@ class BacReel(ModuleCharge):
         m, _ = self.charger_bac()
         argv = m.bac_argv(":", "/", 10)
         for prop in ("PrivatePIDs=yes", "SystemCallFilter=~@debug @keyring", "PrivateUsers=yes", "NoNewPrivileges=yes",
-                     "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm"):
-            self.assertIn(prop, argv)
+                     "ProtectSystem=strict", "ReadOnlyPaths=-/dev/shm", "PrivateDevices=yes", "PrivateIPC=yes"):
+            self.assertIn(prop, argv)             # la sonde bac_tient() utilise ce même argv : si une propriété ne tient pas, pas de bac
+
+    def test_ni_camera_ni_micro_dans_le_bac(self):
+        # PrivateUsers garde ton uid : sans PrivateDevices, l'ACL « uaccess » de /dev/video0 et /dev/snd resterait valable
+        m, _ = self.charger_bac()
+        r = self.lancer_bac(m, "for p in /dev/video0 /dev/video1 /dev/snd /dev/dri /dev/input; do test -e $p && echo VISIBLE-$p; done; "
+                               "head -c 4 /dev/urandom | wc -c; echo ok > /dev/null && echo NULL-OK")
+        sortie = r.get("stdout", "")
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("VISIBLE", sortie)
+        self.assertIn("NULL-OK", sortie)                              # /dev/null et /dev/urandom restent fournis
+        self.assertIn("4", sortie.split())
+
+    def test_noctalia_et_jarvis_deplace_interdits(self):
+        m, home = self.charger_bac()
+        for rel in (".local/state/noctalia", ".cache/noctalia"):
+            self.assertIn(rel, m.BAC.BAC_INTERDITS)
+            self.assertIn(rel, m.PROTEGES)
+        etat = home / ".local/state/noctalia"
+        (etat / "clipboard").mkdir(parents=True)
+        (etat / "storage.key").write_text("FAUSSE-CLE-DE-TEST")
+        (etat / "notification_history.json").write_text("FAUX-CODE-SMS-DE-TEST")
+        # un backend JARVIS déployé ailleurs que par défaut, d'après de fausses unités (faux HOME)
+        backend = home / "projets/mon-jarvis"
+        for dossier in ("gateway", "home-runner"):
+            (backend / dossier).mkdir(parents=True)
+            (backend / dossier / ".env").write_text("SECRET_KEY=FAUX-SECRET-DE-TEST")
+        unites = home / ".config/systemd/user"
+        unites.mkdir(parents=True)
+        (unites / "assistant-gateway.service").write_text(
+            f"[Service]\nWorkingDirectory={backend}/gateway\nEnvironmentFile=-%h/projets/mon-jarvis/gateway/.env\n")
+        (unites / "assistant-runner.service").write_text(
+            f'[Service]\nWorkingDirectory="{backend}/home-runner"\nEnvironmentFile={backend}/home-runner/.env\n')
+        argv = m.bac_argv(":", "/", 10)
+        (home / ".cache/noctalia").mkdir(parents=True)
+        argv = m.bac_argv(":", "/", 10)
+        for chemin in (etat, home / ".cache/noctalia", backend):
+            self.assertIn(f'InaccessiblePaths="{chemin}"', argv)
+        with self.assertRaises(m.Refus):                              # nc-noeud lui-même refuse aussi (PROTEGES + unités)
+            m.verifier_chemin(str(backend / "gateway/.env"), False)
+        with self.assertRaises(m.Refus):
+            m.verifier_chemin(str(etat / "storage.key"), False)
+        r = self.lancer_bac(m, f"cat {etat}/storage.key {etat}/notification_history.json {backend}/gateway/.env 2>&1; echo FIN")
+        self.assertIn("FIN", r.get("stdout", ""), r)
+        for faux in ("FAUSSE-CLE", "FAUX-CODE-SMS", "FAUX-SECRET"):
+            self.assertNotIn(faux, r.get("stdout", ""))
+
+    def test_chemin_absent_ne_fait_pas_echouer_le_bac(self):
+        m, home = self.charger_bac()
+        unites = home / ".config/systemd/user"
+        unites.mkdir(parents=True)
+        (unites / "assistant-gateway.service").write_text(f"[Service]\nWorkingDirectory={home}/disparu/gateway\n")
+        argv = m.bac_argv(":", "/", 10)
+        self.assertNotIn(f'InaccessiblePaths="{home}/disparu"', argv)
+        self.assertTrue(asyncio.run(m.bac_tient()))
 
     def test_environnement_du_gestionnaire_invisible(self):
         # L'unité hérite de l'environnement du gestionnaire systemd (environment.d, import-environment) : simulé ici par

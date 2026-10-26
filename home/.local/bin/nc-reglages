@@ -3638,6 +3638,25 @@ def fenetre_graphique(section=None):
     return 0
 
 
+# Réglages qu'un ordre venu de loin (JARVIS : Telegram, cockpit ; plan « agir » de l'IA) a le droit de changer :
+# `nc-reglages set --distant CLE VALEUR`. LISTE BLANCHE de réglages d'apparence ou de confort, tous à valeurs bornées
+# (oui/non, choix fixe, nombre) : jamais de texte libre, de chemin ni de commande, jamais ce qui touche la sécurité
+# (NOEUD_*, IA_*, ALERTES_*, MAJ_*, VEILLE_*, *VERROU*, SPOTLIGHT_IA, CLES_LOCALES de nc-sauvegarde…).
+# Vérifiée ICI, côté PC : une copie existe dans nc_noctalia.py et nc-ia (défense en profondeur), tests/test_reglage_distant.py
+# vérifie que les trois restent identiques et que rien de sensible n'y entre.
+DISTANT_PERMIS = frozenset((
+    "THEME_MODE", "ILE_STYLE", "ILE_CONTOUR", "ILE_HEURE", "ILE_SURVOL", "ILE_DATE", "ILE_ANIM_BATTERIE", "ILE_BANNIERES",
+    "ILE_BANNIERE_DUREE", "ILE_METEO", "COINS_ECRAN", "EFFETS", "FENETRES_ESPACE", "FENETRES_MARGE", "FENETRES_BORDURE",
+    "FENETRES_ARRONDI", "FENETRES_HALO", "BARRE_OPACITE", "DOCK", "DOCK_AUTO", "DOCK_TAILLE", "DOCK_LOUPE", "DOCK_POSITION",
+    "NUIT", "NUIT_TEMPERATURE", "TERMINAL_OPACITE", "TERMINAL_TAILLE", "VOLUME_PAS", "LUMINOSITE_PAS"))
+
+
+def distant_refuse(cle):
+    """Vrai si la clé ne peut pas être changée à distance (hors liste blanche, ou genre libre : texte, dossier)."""
+    r = PAR_CLE.get(cle)
+    return cle not in DISTANT_PERMIS or r is None or r.genre in ("texte", "dossier")
+
+
 def cli(a):
     vals = lire()
     if a[0] == "assistant" and len(a) == 2 and a[1] in ("verifier", "verify", "test"):
@@ -3700,6 +3719,12 @@ def cli(a):
         print()
     elif a[0] == "get" and len(a) == 2 and a[1] in PAR_CLE:
         print(valeur(vals, a[1]))
+    elif a[0] == "set" and len(a) == 4 and a[1] == "--distant":
+        # Ordre venu de loin : liste blanche d'abord, puis exactement comme « set » (même validation de la valeur)
+        if distant_refuse(a[2]):
+            sys.exit(T(f"nc-reglages : {a[2][:60]} ne se change pas à distance (depuis ce PC seulement)",
+                       f"nc-settings: {a[2][:60]} cannot be changed remotely (from this PC only)"))
+        cli(["set", a[2], a[3]])
     elif a[0] == "set" and len(a) == 3 and a[1] in PAR_CLE:
         try:
             g = regler(vals, a[1], a[2])
