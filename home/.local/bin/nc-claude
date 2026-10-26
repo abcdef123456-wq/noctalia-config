@@ -286,7 +286,11 @@ def terminal_actif(pid):
 
 
 def ile_active():
-    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "nc-ile.service"]).returncode == 0
+    # sans systemctl (conteneur, système sans systemd) : pas d'île, et surtout pas d'erreur dans un hook ou dans diag
+    try:
+        return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "nc-ile.service"]).returncode == 0
+    except OSError:
+        return False
 
 
 # ── Les événements ───────────────────────────────────────────────────────────────────────────────────────────────

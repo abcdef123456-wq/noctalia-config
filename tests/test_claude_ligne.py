@@ -38,9 +38,9 @@ class LigneEtat(unittest.TestCase):
         elif f.exists():
             f.unlink()
 
-    def lancer(self, *args, entree="", colonnes=None):
+    def lancer(self, *args, entree="", colonnes=None, path="/usr/bin:/bin"):
         env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), XDG_CONFIG_HOME=str(self.home / ".config"),
-                   XDG_CACHE_HOME=str(self.home / "cache"), TMPDIR=str(self.home), PATH="/usr/bin:/bin", NC_LANGUE="fr")
+                   XDG_CACHE_HOME=str(self.home / "cache"), TMPDIR=str(self.home), PATH=path, NC_LANGUE="fr")
         if colonnes:
             env["COLUMNS"] = str(colonnes)
         return subprocess.run([sys.executable, str(NC_CLAUDE), *args], env=env, input=entree, capture_output=True, text=True,
@@ -177,6 +177,15 @@ class LigneEtat(unittest.TestCase):
         self.assertIn("aux couleurs du bureau", r.stdout)
         self.settings.write_text(json.dumps({"statusLine": {"type": "command", "command": "x"}}))
         self.assertIn("la tienne", self.lancer("diag").stdout)
+
+    def test_diag_sans_systemctl(self):
+        # conteneurs de CI (Debian, Fedora, openSUSE) : pas de systemctl, diag répond quand même
+        vide = self.home / "bin-vide"
+        vide.mkdir()
+        r = self.lancer("diag", path=str(vide))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("île (nc-ile.service) arrêtée", r.stdout)
+        self.assertIn("Ligne d'état", r.stdout)
 
 
 if __name__ == "__main__":
