@@ -68,9 +68,9 @@ class Alertes(unittest.TestCase):
         (self.home / "sys/BAT0/capacity").write_text("%d\n" % pct)
         (self.home / "sys/BAT0/status").write_text(statut + "\n")
 
-    def lancer(self, *args, echecs="", eco=False):
+    def lancer(self, *args, echecs="", eco=False, langue="fr"):
         env = dict(HOME=str(self.home), XDG_STATE_HOME=str(self.home / "state"), NC_ALERTES_SYSFS=str(self.home / "sys"),
-                   NC_TEST_ECHECS=echecs, NC_LANGUE="fr", PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin",
+                   NC_TEST_ECHECS=echecs, NC_LANGUE=langue, PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin",
                    NC_POWER_SUPPLY="batterie" if eco else "secteur", NC_PROFIL="power-saver" if eco else "balanced")
         r = subprocess.run([str(self.home / "bin/nc-alertes"), *args], env=env, capture_output=True, text=True, timeout=20)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -113,7 +113,7 @@ class Alertes(unittest.TestCase):
     def test_services_en_echec_une_fois(self):
         self.batterie(80, "Charging")
         self.lancer("verifier", echecs="nc-pouls.service loaded failed failed Halo\nfoo.service loaded failed failed x\n")
-        self.assertEqual(self.textes(), ["⚠️ Service en échec sur le PC : nc-pouls.service (journalctl --user -u …)."])
+        self.assertEqual(self.textes(), ["⚠️ Service en échec sur le PC : nc-pouls.service (détails : journalctl --user -u NOM)."])
         self.lancer("verifier", echecs="nc-pouls.service loaded failed failed Halo\n")
         self.assertEqual(len(self.textes()), 1, "même échec : pas de répétition")
         self.lancer("verifier", echecs="")
@@ -162,6 +162,36 @@ class Alertes(unittest.TestCase):
         (self.home / ".config/nc/reglages.conf").write_text("LANGUE=fr\nALERTES_TELEGRAM=oui\nIA_MODE=non\n")
         self.lancer("verifier", eco=True)
         self.assertEqual(self.textes(), [])
+
+    def test_assistant_charge_seulement_quand_une_alerte_part(self):
+        # Divers-3 : activé mais rien à envoyer (batterie pleine, aucun service en échec) : nc-assistant n'est pas chargé
+        client = self.home / "bin/nc-assistant"
+        vrai = client.read_text()
+        client.write_text("open(__file__ + '.charge', 'w').close()\n" + vrai)
+        self.batterie(80, "Discharging")
+        self.lancer("verifier")
+        self.assertFalse(Path(str(client) + ".charge").exists(), "rien à envoyer : pas chargé")
+        self.batterie(10, "Discharging")
+        self.lancer("verifier")
+        self.assertTrue(Path(str(client) + ".charge").exists(), "une alerte part : chargé")
+        self.assertEqual(len(self.textes()), 1)
+
+    def test_envoyer_coupe_le_dit_sur_stderr(self):
+        self.regler("non", "20")
+        r = self.lancer("envoyer", "coucou")
+        self.assertIn("rien envoyé", r.stderr)
+        self.assertEqual(self.textes(), [])
+        self.assertEqual(self.lancer("verifier").stderr, "")        # la minuterie reste muette
+        self.assertIn("nothing sent", self.lancer("envoyer", "hi", langue="en").stderr)
+
+    def test_aide_en_francais_et_en_anglais_meme_coupe(self):
+        self.regler("non", "20")
+        self.assertIn("alertes de la machine vers Telegram", self.lancer("--help").stdout)
+        self.assertIn("machine alerts to Telegram", self.lancer("--help", langue="en").stdout)
+
+    def test_texte_service_different_en_anglais(self):
+        self.lancer("verifier", echecs="nc-pouls.service\n", langue="en")
+        self.assertEqual(self.textes(), ["⚠️ Failed service on the PC: nc-pouls.service (details: journalctl --user -u NAME)."])
 
     def test_rien_sans_reglage_ni_connexion(self):
         self.batterie(5, "Discharging")
