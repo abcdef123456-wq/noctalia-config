@@ -688,6 +688,14 @@ REGLAGES = [
         "Non : seulement le dessin des fenêtres, rien de ce qui était à l'écran n'est gardé.",
         "When saving a session, a small screen capture is its preview in the session carousel. "
         "No: only the outline of the windows, nothing that was on screen is kept.")),
+    R("SESSION_BLOQUER", "Fenêtres", L("Anciennes barres : les bloquer pour tous mes bureaux", "Old bars: block them for all my desktops"),
+      "ouinon", "non",
+      L("Au démarrage, une ancienne barre (Waybar, HyprPanel…) qui tourne encore est arrêtée. Non : seulement arrêtée, pour cette session. "
+        "Oui : elle est aussi bloquée (service désactivé avec systemctl --user mask, démarrage automatique caché) pour TOUS les bureaux "
+        "de ton compte ; la notification dit comment l'annuler (systemctl --user unmask …, fichier de ~/.config/autostart).",
+        "At startup, an old bar (Waybar, HyprPanel…) that is still running is stopped. No: only stopped, for this session. "
+        "Yes: it is also blocked (service masked with systemctl --user mask, autostart hidden) for ALL the desktops of your "
+        "account; the notification says how to undo it (systemctl --user unmask …, file in ~/.config/autostart).")),
     R("FENETRES_MARGE", "Fenêtres", L("Marge au bord de l'écran", "Margin at the screen edge"), "entier", "10",
       mini=0, maxi=60, unite="px", groupe="hypr"),
     R("FENETRES_BORDURE", "Fenêtres", L("Épaisseur de la bordure", "Border thickness"), "entier", "2",
@@ -1387,6 +1395,12 @@ REGLAGES = [
       L("Ctrl + V la colle directement.", "Ctrl + V pastes it directly.")),
     R("CAPTURES_NOTIF", "Captures", L("Notification après une capture", "Notification after a screenshot"), "ouinon", "oui",
       L("Avec les boutons Annoter, Supprimer et Ouvrir le dossier.", "With Annotate, Delete and Open Folder buttons.")),
+    R("CAPTURES_APERCU", "Captures", L("Montrer le texte lu dans la notification (Super + Maj + T)", "Show the text read in the notification (Super + Shift + T)"),
+      "ouinon", "non",
+      L("Non : la notification dit seulement « N caractères copiés ». Oui : elle montre aussi le début du texte lu, que l'historique "
+        "des notifications garde ; à éviter si tu lis parfois un mot de passe.",
+        "No: the notification only says “N characters copied”. Yes: it also shows the beginning of the text read, which the "
+        "notification history keeps; avoid it if you sometimes read a password.")),
 ]
 PAR_CLE = {r.cle: r for r in REGLAGES}
 

@@ -106,10 +106,12 @@ case "$choix" in
   photo) if [ -n "${KITTY_WINDOW_ID:-}" ] && [ -r "$HOME/.face" ]; then
            PHOTO="$HOME/.cache/nc/term-photo-rond.png"
            if [ ! -s "$PHOTO" ] || [ "$HOME/.face" -nt "$PHOTO" ]; then
-             mkdir -p "$(dirname "$PHOTO")"
-             "$IM" "$HOME/.face[0]" -resize 440x440^ -gravity center -extent 440x440 \
-               \( -size 440x440 xc:black -fill white -draw "circle 220,220 220,2" \) -alpha off -compose CopyOpacity -composite \
-               -compose Over -background none -extent 520x624 "PNG32:$PHOTO.tmp" 2>/dev/null &&
+             # Copie de ta photo : lisible par toi seul (umask 077 dans un sous-shell, le reste du script ne change pas)
+             ( umask 077
+               mkdir -p "$(dirname "$PHOTO")"
+               "$IM" "$HOME/.face[0]" -resize 440x440^ -gravity center -extent 440x440 \
+                 \( -size 440x440 xc:black -fill white -draw "circle 220,220 220,2" \) -alpha off -compose CopyOpacity -composite \
+                 -compose Over -background none -extent 520x624 "PNG32:$PHOTO.tmp" 2>/dev/null ) &&
                mv "$PHOTO.tmp" "$PHOTO" || PHOTO="$HOME/.face"
            fi
            if [ "$PHOTO" = "$HOME/.face" ]; then
