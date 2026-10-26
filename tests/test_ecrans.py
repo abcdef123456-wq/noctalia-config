@@ -37,9 +37,13 @@ PORTABLE = dict(name="eDP-1", description="", width=2560, height=1600, physical_
 
 @unittest.skipUnless(shutil.which("lua"), "Lua requis")
 class Ecrans(unittest.TestCase):
-    def regles(self, moniteurs, hz="max"):
+    def regles(self, moniteurs, hz="max", lid=None):
         """Charge ecrans.lua avec ces écrans ; renvoie les règles posées, par nom d'écran."""
         with tempfile.TemporaryDirectory() as home:
+            env = dict(HOME=home, PATH="/usr/bin:/bin", XDG_RUNTIME_DIR=home, NC_LID_DIR=home + "/lid")
+            if lid:                              # « closed » ou « open » : état du couvercle (sinon : pas de fichier)
+                (Path(home) / "lid/LID0").mkdir(parents=True)
+                (Path(home) / "lid/LID0/state").write_text(f"state:      {lid}\n")
             harness = r'''
 local regles = {}
 local moniteurs = MONITEURS
@@ -53,13 +57,12 @@ nc = { profil = { hz = HZ } }
 dofile(FICHIER)
 for _, r in ipairs(regles) do print(r.output, r.mode, r.scale, r.disabled and "off" or "on") end
 '''.replace("MONITEURS", self.lua(moniteurs)).replace("HZ", json.dumps(hz)).replace("FICHIER", json.dumps(str(LUA)))
-            r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5,
-                               env=dict(HOME=home, PATH="/usr/bin:/bin", XDG_RUNTIME_DIR=home))
+            r = subprocess.run(["lua", "-"], input=harness, text=True, capture_output=True, timeout=5, env=env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         regles = {}
         for ligne in r.stdout.splitlines():
             nom, mode, echelle, etat = ligne.split("\t")
-            regles[nom] = dict(mode=mode, echelle=float(echelle), actif=etat == "on")
+            regles[nom] = dict(mode=mode, echelle=float(echelle) if echelle != "nil" else None, actif=etat == "on")
         return regles
 
     @staticmethod
@@ -184,6 +187,19 @@ end
         self.assertEqual(r["eDP-1"]["mode"], "2560x1600@60.00", "écran interne : la fréquence du profil énergétique")
         self.assertEqual(r["HDMI-A-1"]["mode"], "2560x1440@143.97", "écran externe : sa fréquence la plus haute")
         self.assertTrue(r["HDMI-A-1"]["actif"])
+
+    def test_couvercle_ferme_avec_externe_l_ecran_du_pc_reste_coupe(self):
+        """Après un rechargement de la config, l'écran du PC couvercle fermé ne se rallume pas si un externe est là."""
+        r = self.regles([PORTABLE, ASUS], lid="closed")
+        self.assertFalse(r["eDP-1"]["actif"])
+        self.assertTrue(r["HDMI-A-1"]["actif"])
+
+    def test_couvercle_ouvert_ferme_sans_externe_ou_absent_rien_ne_change(self):
+        self.assertTrue(self.regles([PORTABLE, ASUS], lid="open")["eDP-1"]["actif"])
+        self.assertTrue(self.regles([PORTABLE, ASUS])["eDP-1"]["actif"], "pas de fichier de couvercle : rien ne change")
+        self.assertTrue(self.regles([PORTABLE], lid="closed")["eDP-1"]["actif"], "pas d'externe : l'écran reste")
+        virtuel = dict(SANS, name="HEADLESS-2")
+        self.assertTrue(self.regles([PORTABLE, virtuel], lid="closed")["eDP-1"]["actif"], "un écran virtuel ne compte pas")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,9 @@ mode="$(reglage COUVERCLE)"; [ "$mode" = ecran ] || mode=veille
 
 tous="$(hyprctl monitors all -j 2>/dev/null | jq -r '.[].name' 2>/dev/null)"
 internes="$(grep -E '^(eDP|LVDS|DSI)' <<< "$tous")"
-externe=0; [ -n "$internes" ] && [ "$internes" != "$tous" ] && externe=1
+# Écran externe : ni interne, ni virtuel (HEADLESS : partage de bureau, FALLBACK : écran de secours de Hyprland)
+autres="$(grep -vE '^(eDP|LVDS|DSI|HEADLESS|FALLBACK)' <<< "$tous")"
+externe=0; [ -n "$internes" ] && [ -n "$autres" ] && externe=1
 couvercle_ferme() { grep -qs closed /proc/acpi/button/lid/*/state; }
 
 arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep »)
@@ -41,13 +43,14 @@ case "$action" in
     exec systemd-inhibit --what=handle-lid-switch --who=noctalia-config --mode=block \
       --why="$(t "Couvercle fermé : l'écran s'éteint, le PC continue de tourner (nc-reglages)" "Lid closed: the screen turns off, the PC keeps running (nc-settings)")" sleep infinity ;;
   ferme)
-    [ "$mode" = ecran ] || exit 0
     if [ "$externe" = 1 ]; then
-      # Écran externe : on continue de travailler dessus ; l'écran du portable est retiré (ni pointeur ni fenêtres
-      # dessous, ne se rallume pas à la première touche), sans verrouiller
+      # Écran externe (quel que soit le mode : en veille aussi, le système ne dort pas quand un écran est branché) :
+      # on continue de travailler dessus ; l'écran du portable est retiré (ni pointeur ni fenêtres dessous, ne se
+      # rallume pas à la première touche), sans verrouiller
       while IFS= read -r m; do hyprctl eval "hl.monitor({ output = '$m', disabled = true })" >/dev/null; done <<< "$internes"
       exit 0
     fi
+    [ "$mode" = ecran ] || exit 0              # veille : le système s'en charge
     [ "$(reglage COUVERCLE_VERROU)" = non ] || loginctl lock-session
     # Pas de veille pour inactivité tant que le couvercle est fermé (hypridle respecte ce verrou)
     arreter

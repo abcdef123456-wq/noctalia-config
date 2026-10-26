@@ -195,6 +195,30 @@ local function echelle_retenue(m)
     return e
 end
 
+-- Couvercle du portable fermé (interrupteur ACPI). Sans ce fichier (PC fixe, VM, autre noyau) : faux, rien ne change.
+-- NC_LID_DIR : autre dossier que /proc/acpi/button/lid (tests).
+local function couvercle_ferme()
+    local base = os.getenv("NC_LID_DIR") or "/proc/acpi/button/lid"
+    for _, nom in ipairs({ "LID", "LID0", "LID1", "LID2" }) do
+        local f = io.open(base .. "/" .. nom .. "/state", "r")
+        if f then
+            local etat = f:read("*l") or ""
+            f:close()
+            if etat:find("closed", 1, true) then return true end
+        end
+    end
+    return false
+end
+
+-- Un écran externe est allumé (ni interne, ni virtuel, ni éteint par la projection) : l'écran du PC, couvercle fermé,
+-- reste alors retiré après un rechargement de la config (nc-couvercle l'avait retiré à la fermeture)
+local function externe_allume(p)
+    for _, m in ipairs(hl.get_monitors()) do
+        if m.name ~= p and not virtuel(m) and not est_interne(m) and retenu(m).mode ~= "pc" then return true end
+    end
+    return false
+end
+
 local function regle(m)
     -- Écran réglé à la main dans perso.lua (hl.monitor avec son nom, ou « desc:… ») : on n'y touche plus
     -- Comme Hyprland, « desc:… » désigne un écran dont la description COMMENCE par ce texte
@@ -222,6 +246,7 @@ local function regle(m)
         elseif r.mode == "miroir" then spec.mirror = p
         else spec.position = COTES[r.cote] or "auto-right" end
     end
+    if interne and couvercle_ferme() and externe_allume(m.name) then spec = { output = m.name, disabled = true } end
     hl.monitor(spec)
 end
 
