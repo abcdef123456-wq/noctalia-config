@@ -141,6 +141,47 @@ class IACommit(unittest.TestCase):
                 self.assertNotIn("motdepasse", r.stderr)
         self.assertEqual(self.requetes_ia(), [])
 
+    def test_secret_retire_ou_en_contexte_code_4(self):
+        """Relecture de la refonte (P1) : seules les lignes « + » étaient lues, et un fichier supprimé échappait au contrôle
+        par nom. git rm --cached .env envoyait tout le .env en lignes « - »."""
+        cle = "sk-proj-AbCdEf0123456789AbCdEf0123"
+        (self.depot / ".env").write_text(f"OPENAI_API_KEY={cle}\n")
+        (self.depot / "conf.py").write_text(f'A = 1\nCLE = "{cle}"\nB = 2\nC = 3\n')
+        self.git("add", "-f", ".env", "conf.py")
+        self.git("commit", "-q", "-m", "avant")
+        cas = (("un .env retiré de l'index", lambda: self.git("rm", "-q", "--cached", ".env"), ".env"),
+               ("une clé retirée du code", lambda: ((self.depot / "conf.py").write_text("A = 1\nB = 2\nC = 3\n"),
+                                                    self.git("add", "conf.py")), "conf.py"),
+               ("une clé dans le contexte", lambda: ((self.depot / "conf.py").write_text(f'A = 10\nCLE = "{cle}"\nB = 2\nC = 3\n'),
+                                                     self.git("add", "conf.py")), "conf.py"))
+        for nom, preparer, fichier in cas:
+            with self.subTest(nom):
+                self.git("reset", "-q", "--hard")
+                preparer()
+                r = self.commit()
+                self.assertEqual(r.returncode, 4, r.stderr)
+                self.assertIn(fichier, r.stderr)
+                self.assertNotIn(cle, r.stderr + r.stdout)
+        self.assertEqual(self.requetes_ia(), [])
+
+    def test_jamais_dechiffre_par_un_textconv_et_prefixes_imposes(self):
+        """git-crypt, transcrypt, sops ou gpg déchiffrent par un textconv : le diff envoyé est celui du fichier stocké.
+        Avec diff.noprefix, le chemin restait lisible pour reconnaître un lockfile."""
+        (self.depot / ".gitattributes").write_text("*.chiffre diff=dechiffre\n")
+        (self.depot / "secret.chiffre").write_text("CONTENU-CHIFFRE\n")
+        (self.depot / "package-lock.json").write_text('{"lockfileVersion": 3, "x": "CONTENU_DU_LOCK"}\n')
+        self.git("config", "diff.dechiffre.textconv", "sed s/CHIFFRE/DECHIFFRE-EN-CLAIR/")
+        self.git("config", "diff.noprefix", "true")
+        self.git("config", "diff.mnemonicPrefix", "true")
+        self.git("add", ".")
+        r = self.commit()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        e = self.envoye()
+        self.assertIn("CONTENU-CHIFFRE", e)
+        self.assertNotIn("DECHIFFRE-EN-CLAIR", e)
+        self.assertNotIn("CONTENU_DU_LOCK", e)                               # lockfile reconnu malgré noprefix
+        self.assertIn("package-lock.json", e)
+
     def test_exemple_d_env_et_code_ordinaire_passent(self):
         (self.depot / ".env.example").write_text("CLE=\n")
         (self.depot / "m.py").write_text("token = lire_le_jeton()\npassword = None\n")

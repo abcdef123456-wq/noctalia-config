@@ -4977,7 +4977,7 @@ def commit_git(dossier, *args, maxi=8 * 1024 * 1024):
 
 def commit_fichiers(dossier):
     """[(état, chemin)] des fichiers indexés (un renommage : le nouveau chemin)."""
-    morceaux = commit_git(dossier, "diff", "--cached", "--name-status", "-M", "-z", "--no-ext-diff").split("\0")
+    morceaux = commit_git(dossier, "diff", "--cached", "--name-status", "-M", "-z", "--no-ext-diff", "--no-textconv").split("\0")
     res, i = [], 0
     while i < len(morceaux) and morceaux[i]:
         etat = morceaux[i][0]
@@ -4988,21 +4988,29 @@ def commit_fichiers(dossier):
     return res
 
 
-def commit_cherche_secrets(fichiers, sections):
-    """Les secrets du diff indexé : [« fichier (ce que c'est) »], jamais la valeur."""
+def commit_cherche_secrets(fichiers, sections, envoi=""):
+    """Les secrets de ce qui partirait à l'IA : [« fichier (ce que c'est) »], jamais la valeur. Tout est lu : les lignes
+    ajoutées, mais aussi les retirées et le contexte (un .env retiré de l'index, git rm --cached, part en lignes « - »),
+    et un fichier de secrets compte aussi quand il est supprimé. envoi : le texte entier, relu à la fin (noms, sujets…)."""
     trouves = []
     for etat, chemin in fichiers:
-        if etat != "D" and COMMIT_FICHIERS_SECRETS.search(chemin):
+        if COMMIT_FICHIERS_SECRETS.search(chemin):
             trouves.append(T(f"{chemin} (fichier de secrets)", f"{chemin} (secrets file)"))
     for chemin, texte in sections:
-        for l in texte.splitlines():
-            if not l.startswith("+") or l.startswith("+++"):
-                continue
-            quoi = next((q for q, motif in COMMIT_MOTIFS_SECRETS if motif.search(l)), "")
-            if quoi:
-                trouves.append(f"{chemin} ({quoi})")
-                break                                 # un seul constat par fichier suffit
+        quoi = next((q for q, motif in COMMIT_MOTIFS_SECRETS for l in texte.splitlines() if motif.search(l)), "")
+        if quoi:
+            trouves.append(f"{chemin} ({quoi})")      # un seul constat par fichier suffit
+    if not trouves and envoi:
+        quoi = next((q for q, motif in COMMIT_MOTIFS_SECRETS for l in envoi.splitlines() if motif.search(l)), "")
+        if quoi:
+            trouves.append(T(f"le texte envoyé ({quoi})", f"the text to send ({quoi})"))
     return list(dict.fromkeys(trouves))
+
+
+# Le diff tel qu'il est stocké : jamais déchiffré par un textconv (git-crypt, transcrypt, sops, gpg) ni passé à un outil
+# externe ; préfixes a/ et b/ imposés (diff.noprefix ou diff.mnemonicPrefix de l'utilisateur rendraient le chemin
+# illisible : lockfiles et binaires ne seraient plus reconnus)
+COMMIT_DIFF_OPTIONS = ("--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M")
 
 
 def commit_sections(diff):
@@ -5019,7 +5027,7 @@ def commit_sections(diff):
 def commit_diff_borne(dossier):
     """(sections lisibles, texte à envoyer). Binaires et lockfiles : leur nom seulement ; au-delà de COMMIT_MAX
     caractères : la liste des fichiers (--stat) puis le début de chaque fichier."""
-    sections = commit_sections(commit_git(dossier, "diff", "--cached", "--no-color", "--no-ext-diff", "-M"))
+    sections = commit_sections(commit_git(dossier, "diff", "--cached", *COMMIT_DIFF_OPTIONS))
     lisibles, resume = [], []
     for chemin, texte in sections:
         base = chemin.rsplit("/", 1)[-1]
@@ -5032,7 +5040,7 @@ def commit_diff_borne(dossier):
     if sum(len(t) for _, t in lisibles) <= COMMIT_MAX:
         envoi = "".join(t if t.endswith("\n") else t + "\n" for _, t in lisibles)
     else:
-        stat = commit_git(dossier, "diff", "--cached", "--no-color", "--no-ext-diff", "-M", "--stat=100",
+        stat = commit_git(dossier, "diff", "--cached", *COMMIT_DIFF_OPTIONS, "--stat=100",
                           maxi=400000)[:COMMIT_ETAT_MAX]
         part = max(500, (COMMIT_MAX - len(stat)) // max(1, len(lisibles)))
         debuts = []
@@ -5086,10 +5094,6 @@ def commit_message(dossier):
     if not fichiers:
         return 2, T("Rien n'est indexé (git add d'abord).", "Nothing is staged (git add first).")
     lisibles, envoi = commit_diff_borne(dossier)
-    secrets = commit_cherche_secrets(fichiers, lisibles)
-    if secrets:
-        return 4, T("Un secret semble être dans le diff, rien n'a été envoyé à l'IA : ",
-                    "A secret seems to be in the diff, nothing was sent to the AI: ") + ", ".join(secrets[:8])
     try:
         sujets = commit_git(dossier, "log", "-15", "--no-merges", "--format=%s").splitlines()
     except ErreurIA:                                     # dépôt sans commit
@@ -5099,6 +5103,10 @@ def commit_message(dossier):
              + ("\n".join(sujets) if sujets else T("(aucun : premier commit)", "(none: first commit)"))
              + T("\n\nFichiers indexés :\n", "\n\nStaged files:\n") + noms
              + T("\n\nDiff indexé :\n", "\n\nStaged diff:\n") + envoi)
+    secrets = commit_cherche_secrets(fichiers, lisibles, texte)
+    if secrets:
+        return 4, T("Un secret semble être dans le diff, rien n'a été envoyé à l'IA : ",
+                    "A secret seems to be in the diff, nothing was sent to the AI: ") + ", ".join(secrets[:8])
     rep, _ = demander(texte, "commit", sortie=lambda m: None)
     msg = commit_nettoyer(rep)
     if not msg:
