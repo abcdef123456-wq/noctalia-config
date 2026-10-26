@@ -165,6 +165,24 @@ class CouvercleFerme(unittest.TestCase):
             self.assertNotIn("disabled = true", a)
             self.assertIn("loginctl lock-session", a)
 
+    @unittest.skipUnless(shutil.which("flock"), "flock requis")
+    def test_retrait_de_l_ecran_attend_le_verrou_de_nc_ecran(self):
+        import fcntl
+        import time
+        b = Banc(); self.addCleanup(b.fermer)
+        h = b.d / "faux/hyprctl"
+        h.write_text(f'#!/bin/sh\nprintf "%s\\n" "hyprctl $*" >> {b.journal}\n'
+                     'case "$*" in *"monitors all"*) echo \'[{"name": "eDP-1"}, {"name": "DP-1"}]\' ;; esac\nexit 0\n')
+        with open(b.run / "nc-ecran.verrou", "w") as f:       # un allumage DPMS en cours de nc-ecran
+            fcntl.flock(f, fcntl.LOCK_EX)
+            p = subprocess.Popen(["bash", str(b.home / ".local/bin/nc-couvercle"), "ferme"], env=b.env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            time.sleep(1.5)
+            self.assertNotIn("disabled = true", b.appels())
+            fcntl.flock(f, fcntl.LOCK_UN)
+        p.wait(timeout=20)
+        self.assertIn("disabled = true", b.appels())
+
     def test_veille_sans_externe_ne_fait_rien(self):
         self.assertNotIn("disabled", self.ferme(["eDP-1"], "veille"))
 

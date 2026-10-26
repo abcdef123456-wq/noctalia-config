@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 from tests.test_veille_batterie import SRC, charger, listeners
@@ -191,6 +192,37 @@ class NcEcran(unittest.TestCase):
         self.b.journal()
         self.ecran(*["on"] * 6)
         self.assertEqual(len(allumages(self.b.journal())), 1)
+
+    def test_echec_de_hyprctl_heure_non_notee_l_appel_suivant_reessaie(self):
+        h = self.b.faux / "hyprctl"
+        ok = h.read_text()
+        h.write_text(f'#!/bin/sh\ncase "$1" in dispatch) echo "$2" >> "{self.b.faux}/journal"; exit 1 ;; esac\nexit 0\n')
+        self.ecran("off")
+        self.assertFalse((self.b.run / "nc-ecran.etat").exists())
+        self.assertEqual(len(self.b.journal()), 1)
+        h.write_text(ok)
+        self.ecran("off")                              # sans garde de 5 s : le deuxième appel refait vraiment l'action
+        self.assertEqual(self.b.journal(), ['hl.dsp.dpms({ action = "off" })'])
+        self.assertTrue((self.b.run / "nc-ecran.etat").read_text().startswith("off "))
+
+    def test_sans_variable_le_socket_le_plus_recent(self):
+        import socket
+        sigs = {}
+        for nom, age in (("zzz-ancien", 100), ("aaa-recent", 0)):
+            d = self.b.run / "hypr" / nom
+            d.mkdir(parents=True)
+            s = socket.socket(socket.AF_UNIX)
+            self.addCleanup(s.close)
+            s.bind(str(d / ".socket.sock"))
+            t = time.time() - age
+            os.utime(d / ".socket.sock", (t, t))
+            sigs[nom] = d
+        h = self.b.faux / "hyprctl"
+        h.write_text(f'#!/bin/sh\necho "$HYPRLAND_INSTANCE_SIGNATURE" >> "{self.b.faux}/signatures"\nexit 0\n')
+        env = {k: v for k, v in self.b.env.items() if k != "HYPRLAND_INSTANCE_SIGNATURE"}
+        subprocess.run([str(NC_ECRAN), "off"], env=env, timeout=20, capture_output=True)
+        vues = set((self.b.faux / "signatures").read_text().split())
+        self.assertEqual(vues, {"aaa-recent"})
 
     def test_on_apres_on_ne_fait_rien(self):
         self.ecran("on")

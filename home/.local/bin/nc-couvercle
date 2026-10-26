@@ -25,6 +25,18 @@ autres="$(grep -vE '^(eDP|LVDS|DSI|HEADLESS|FALLBACK)' <<< "$tous")"
 externe=0; [ -n "$internes" ] && [ -n "$autres" ] && externe=1
 couvercle_ferme() { grep -qs closed /proc/acpi/button/lid/*/state; }
 
+# Verrou de nc-ecran (le même fichier) : un retrait d'écran ou un rechargement de la config ne se fait pas en même
+# temps qu'un allumage ou une extinction DPMS (hypridle, coin de l'île). Dépassé au bout de 10 s : on agit quand même.
+# Jamais autour de nc-ecran lui-même (il prend ce verrou : blocage).
+sous_verrou() {
+  if command -v flock >/dev/null 2>&1; then
+    ( flock -w 10 9 2>/dev/null; "$@" ) 9>"$RUN/nc-ecran.verrou"
+  else
+    "$@"
+  fi
+}
+retirer_interne() { hyprctl eval "hl.monitor({ output = '$1', disabled = true })" >/dev/null; }
+
 arreter() {   # retire le verrou d'inactivité (systemd-inhibit et son « sleep »)
   # Fichier : « pid heure-de-démarrage » ; ancien fichier (pid seul) : le nom systemd-inhibit doit être dans sa ligne de commande
   local p d
@@ -47,7 +59,7 @@ case "$action" in
       # Écran externe (quel que soit le mode : en veille aussi, le système ne dort pas quand un écran est branché) :
       # on continue de travailler dessus ; l'écran du portable est retiré (ni pointeur ni fenêtres dessous, ne se
       # rallume pas à la première touche), sans verrouiller
-      while IFS= read -r m; do hyprctl eval "hl.monitor({ output = '$m', disabled = true })" >/dev/null; done <<< "$internes"
+      while IFS= read -r m; do sous_verrou retirer_interne "$m"; done <<< "$internes"
       exit 0
     fi
     [ "$mode" = ecran ] || exit 0              # veille : le système s'en charge
@@ -64,7 +76,7 @@ case "$action" in
     arreter
     # Écran du portable retiré (écran externe) : la config des écrans (nc/ecrans.lua) le remet ; sinon il est rallumé
     if hyprctl monitors all -j 2>/dev/null | jq -e '.[] | select((.name | test("^(eDP|LVDS|DSI)")) and .disabled)' >/dev/null 2>&1; then
-      hyprctl reload >/dev/null
+      sous_verrou hyprctl reload >/dev/null
     else
       "$HOME/.local/bin/nc-ecran" on
     fi ;;
