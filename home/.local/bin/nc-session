@@ -887,7 +887,7 @@ def derniere_marque():
 
 
 def demander_fermer(nom):
-    """« demander » : une notification avec un bouton ; rien n'est fermé sans ce bouton (ni sans notify-send)."""
+    """« demander » : une notification avec un bouton ; rien n'est fermé sans ce bouton (ni sans outil de notification)."""
     s = completer(lire(nom)[1])
     # La liste est figée maintenant : adresse et classe. Au clic (jusqu'à 10 min plus tard), seules celles qui existent
     # encore avec la même classe sont fermées, jamais une fenêtre ouverte depuis (revue SESS-AUDIT)
