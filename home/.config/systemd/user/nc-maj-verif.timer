@@ -5,6 +5,8 @@ Description=Cherche une nouvelle version de noctalia-config toutes les heures (u
 OnStartupSec=3min
 OnUnitActiveSec=1h
 RandomizedDelaySec=10min
+# Une requête réseau par heure : regroupée avec les autres réveils (moins de sorties de veille du processeur)
+AccuracySec=10min
 
 [Install]
 WantedBy=timers.target

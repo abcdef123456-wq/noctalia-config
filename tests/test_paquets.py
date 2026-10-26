@@ -1098,9 +1098,9 @@ class LigneMisesAJour(unittest.TestCase):
                         else if (etape === 7) { if (ligne.titre !== "Repositories not synced") return
                             verifier(ligne.actif && ligne.sous.indexOf("For 4 d") === 0, "sous-titre (non synchronisé) : " + ligne.sous)
                             ligne.clic(); Etat.aBatterie = true; synchro.running = true; etape++ }
-                        // I1 : nc-paquets.service ne compte que sur secteur (ConditionACPower), le texte le dit sur un portable
+                        // I1 : nc-paquets décide lui-même de la cadence sur batterie, le texte ne promet plus « sur secteur »
                         else if (etape === 8) { if (ligne.titre !== "System up to date") return
-                            verifier(ligne.sous === "Checked every hour, when plugged in", "sous-titre (portable) : " + ligne.sous); Qt.quit() } } }
+                            verifier(ligne.sous === "Checked every hour", "sous-titre (portable) : " + ligne.sous); Qt.quit() } } }
                     Timer { interval: 8000; running: true; onTriggered: Qt.exit(9) }
                 }'''))
             env = dict(os.environ, HOME=d, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",

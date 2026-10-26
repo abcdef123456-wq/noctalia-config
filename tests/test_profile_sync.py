@@ -15,6 +15,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "home/.local/bin/nc-profile-sync"
 UNITES = REPO / "home/.config/systemd/user"
+BIN = REPO / "home/.local/bin"
 
 FAUX = {
     # call … Get : le profil de NC_TEST_PROFIL ; monitor : rien (le flux se ferme, le script sort après un passage)
@@ -188,10 +189,17 @@ class ProfileSync(unittest.TestCase):
 
 
 class Paquets(unittest.TestCase):
-    def test_paquets_attend_le_secteur(self):
+    def test_paquets_decide_lui_meme_du_secteur(self):
+        # Une condition dans l'unité empêcherait la cadence batterie (3 h) que nc-paquets calcule lui-même ;
+        # network-online.target n'existe pas dans le gestionnaire utilisateur
         unite = (UNITES / "nc-paquets.service").read_text()
-        avant_service = unite.split("[Service]")[0]
-        self.assertIn("ConditionACPower=true", avant_service)
+        for ligne in unite.splitlines():
+            if not ligne.lstrip().startswith("#"):
+                self.assertNotIn("ConditionACPower", ligne)
+                self.assertNotIn("network-online", ligne)
+        self.assertIn("-p ConditionACPower=true", (BIN / "nc-paquets").read_text())
+        self.assertIn("AccuracySec=10min", (UNITES / "nc-maj-verif.timer").read_text())
+        self.assertIn("AccuracySec=1min", (UNITES / "nc-alertes.timer").read_text())
         # La vérification des nouvelles versions de la config, elle, passe aussi sur batterie
         self.assertNotIn("ConditionACPower", (UNITES / "nc-maj-verif.service").read_text())
 

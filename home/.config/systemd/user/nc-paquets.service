@@ -1,8 +1,8 @@
 [Unit]
 Description=Compte les mises à jour du système (île : page Système et page Notifications ; notification)
-After=network-online.target
-# Sur batterie, le passage du minuteur ne fait rien : la vérification attend le secteur
-ConditionACPower=true
+# Pas de ConditionACPower : nc-paquets décide lui-même (cadence() : 3 h sur batterie, 6 h en Économie, 12 h sur connexion
+# limitée). Pas de After=network-online.target non plus : il n'existe pas dans le gestionnaire utilisateur ; sans réseau,
+# le compte garde le dernier état et réessaie plus tard (paquets-erreur)
 
 [Service]
 Type=oneshot

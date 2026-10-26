@@ -5,6 +5,8 @@ Description=Vérifie la batterie et les services toutes les 5 minutes (alertes T
 OnStartupSec=3min
 OnUnitActiveSec=5min
 RandomizedDelaySec=30s
+# Explicite : une alerte de batterie ou de service ne doit pas attendre plus d'une minute (c'est aussi le défaut de systemd)
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target

@@ -197,8 +197,8 @@ Item {
                 sous: allumee ? Reglages.t("Le bord de l'écran suit la musique", "The screen edge follows the music") : Reglages.t("Désactivé", "Off")
                 onClic: Etat.inverser("halo", ["systemctl", "--user", allumee ? "stop" : "start", "nc-pouls"])
             }
-            // Mises à jour du système (nc-paquets, comptées chaque heure au plus, sur secteur seulement : nc-paquets.service a
-            // ConditionACPower) : un clic, tout mettre à jour dans un terminal. Le nombre est la première ligne de
+            // Mises à jour du système (nc-paquets, comptées chaque heure au plus ; sur batterie, nc-paquets lui-même espace
+            // les passages à 3 h) : un clic, tout mettre à jour dans un terminal. Le nombre est la première ligne de
             // $XDG_CACHE_HOME/nc/paquets, relu à chaque réécriture (le recompte après la mise à jour) et quand la page revient à l'écran
             Ligne {
                 id: maj
@@ -216,7 +216,6 @@ Item {
                                                       "6h": Reglages.t("Vérifié toutes les 6 heures", "Checked every 6 hours"),
                                                       "jour": Reglages.t("Vérifié une fois par jour", "Checked once a day") })[Reglages.val("MAJ_FREQUENCE", "1h")]
                                                    || Reglages.t("Vérifié chaque heure", "Checked every hour"))
-                                                  + (Etat.aBatterie ? Reglages.t(", sur secteur", ", when plugged in") : "")
                 titre: verif.running ? Reglages.t("Recherche des mises à jour…", "Checking for updates…")
                      : n > 0 ? n + (n > 1 ? Reglages.t(" mises à jour du système", " system updates") : Reglages.t(" mise à jour du système", " system update"))
                      : echec ? Reglages.t("Vérification impossible", "Could not check for updates")
