@@ -223,6 +223,29 @@ esac''')
     def test_variante_bepo_pas_de_traduction(self):
         self.assertEqual(self.cles("fr", 38, "bepo"), "A")
 
+    def test_disposition_active_du_clavier_principal(self):
+        """Réglée par appareil, ou changée en cours de session (us,fr, 2e active) : celle du clavier principal compte,
+        pas la valeur globale de getoption (us)."""
+        appareils = {"keyboards": [{"name": "autre", "main": False, "layout": "de", "active_layout_index": 0},
+                                   {"name": "interne", "main": True, "layout": "us,fr", "variant": ",", "active_layout_index": 1}]}
+        self.faux_prog("hyprctl", f'''case "$*" in
+  binds) cat "{self.home}/binds" ;;
+  "devices -j") cat "{self.home}/devices.json" ;;
+  "getoption input:kb_layout") printf 'str: us\\nset: true\\n' ;;
+  *) printf 'str: \\nset: false\\n' ;;
+esac''')
+        (self.home / "devices.json").write_text(json.dumps(appareils))
+        (self.home / "binds").write_text(BINDS.format(touche="code:38"))
+        lire = lambda: json.loads(subprocess.run([sys.executable, str(BIN / "nc-keys"), "json"], env=self.env(IA_MODE="non"),
+                                                 capture_output=True, text=True, timeout=30).stdout)[0]["rows"][0]["keys"][-1]
+        self.assertEqual(lire(), "Q")
+        appareils["keyboards"][1]["active_layout_index"] = 0
+        (self.home / "devices.json").write_text(json.dumps(appareils))
+        self.assertEqual(lire(), "A")
+        appareils["keyboards"][1].update(layout="fr", variant="bepo")
+        (self.home / "devices.json").write_text(json.dumps(appareils))
+        self.assertEqual(lire(), "A")                                            # bépo : noms US
+
     def test_hyprctl_muet_noms_us(self):
         self.faux_prog("hyprctl", 'case "$*" in binds) cat "%s/binds" ;; esac' % self.home)
         (self.home / "binds").write_text(BINDS.format(touche="code:38"))
@@ -281,6 +304,13 @@ class Touches(Base):
         self.assertEqual(r.returncode, 1)
         self.assertEqual(Path("/tmp/nc-pave-coupe").exists(), avant)
         self.assertIn("session incomplète", self.journal_texte())
+
+    def test_hyprland_relit_le_meme_fichier_jamais_tmp(self):
+        """clavier.lua relit l'état du pavé au rechargement : le fichier de nc-touches, rien sans XDG_RUNTIME_DIR."""
+        lua = (BIN.parent.parent / ".config/hypr/nc/clavier.lua").read_text()
+        bloc = lua[lua.index("nc-pave-coupe") - 400:lua.index("nc-pave-coupe") + 200]
+        self.assertNotIn('"/tmp"', bloc)
+        self.assertIn('os.getenv("XDG_RUNTIME_DIR")', bloc)
 
     def test_langue_absente_ne_plante_pas(self):
         self.faux_prog("hyprctl", '''echo '{"keyboards":[{"main":true,"layout":"fr,us","active_keymap":"French"}]}' ''')

@@ -55,9 +55,11 @@ hl.config({
     },
 })
 
--- Pavé tactile coupé avec sa touche (nc-touches pave) : le reste après un rechargement de Hyprland
+-- Pavé tactile coupé avec sa touche (nc-touches pave) : le reste après un rechargement de Hyprland. Même fichier que
+-- nc-touches, qui refuse sans XDG_RUNTIME_DIR : jamais de repli sur un /tmp prévisible
 do
-    local f = io.open((os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-pave-coupe", "r")
+    local run = os.getenv("XDG_RUNTIME_DIR")
+    local f = run and run ~= "" and io.open(run .. "/nc-pave-coupe", "r")
     if f then
         for nom in f:lines() do
             if nom ~= "" then pcall(hl.device, { name = nom, enabled = false }) end

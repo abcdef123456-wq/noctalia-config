@@ -6,7 +6,7 @@
 Seuls les raccourcis qui ont une description apparaissent. Dans ~/.config/hypr/, une description s'écrit
 « Section|Texte » ; sans section, le raccourci va dans « Mes raccourcis » (voir aussi nc-raccourci). Exemple : hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Applis et barre|Navigateur" })
 Les raccourcis par code de touche (code:38…) suivent la POSITION des touches : les lettres sont nommées comme sur ta
-disposition (fr, be, ch, de ; lue avec hyprctl getoption input:kb_layout), sinon comme sur la disposition US.
+disposition (fr, be, ch, de ; celle du clavier principal, hyprctl devices), sinon comme sur la disposition US.
 """
 import json
 import os
@@ -50,7 +50,7 @@ USAGE_EN = """nc-keys: your Hyprland shortcuts, read live (hyprctl binds), with 
 Only shortcuts that have a description are shown. In ~/.config/hypr/, a description is written
 "Section|Text"; without a section, the shortcut goes to "My Shortcuts" (see also nc-shortcut). Example: hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Apps & Bar|Browser" })
 Shortcuts by key code (code:38…) follow the POSITION of the keys: letters are named as on your layout (fr, be, ch, de;
-read with hyprctl getoption input:kb_layout), otherwise as on the US layout."""
+the main keyboard's, from hyprctl devices), otherwise as on the US layout."""
 
 KEYCODES = {
     9: T("Échap", "Esc"), 22: T("Retour arrière", "Backspace"), 23: "Tab", 36: T("Entrée", "Enter"), 49: "`",
@@ -77,9 +77,26 @@ DISPOSITIONS = {"fr": {**_AZERTY, "/": "!"}, "be": {**_AZERTY, "/": "="}, "ch": 
 _VARIANTES_AUTRES = ("bepo", "dvorak", "colemak", "workman", "neo", "optimot", "ergol")
 
 
+def _clavier_principal():
+    """(disposition, variante) actives du clavier principal (hyprctl devices : main, active_layout_index), réglage par
+    appareil compris ; (None, None) si Hyprland ne le dit pas."""
+    try:
+        sortie = subprocess.run(["hyprctl", "devices", "-j"], capture_output=True, text=True, timeout=3).stdout
+        claviers = json.loads(sortie).get("keyboards") or []
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        return None, None
+    k = next((c for c in claviers if isinstance(c, dict) and c.get("main")), None)
+    if not k or not isinstance(k.get("layout"), str) or not k["layout"].strip():
+        return None, None
+    i = k.get("active_layout_index") if isinstance(k.get("active_layout_index"), int) else 0
+    dispositions, variantes = k["layout"].split(","), str(k.get("variant") or "").split(",")
+    i = i if 0 <= i < len(dispositions) else 0
+    return dispositions[i].strip().lower(), (variantes[i] if i < len(variantes) else "").strip().lower()
+
+
 def disposition_active():
-    """Table de traduction (touche US -> touche portée) de la disposition active : la première de input:kb_layout.
-    Vide pour US et pour toute disposition sans table (les noms US restent)."""
+    """Table de traduction (touche US -> touche portée) de la disposition active : celle du clavier principal, sinon la
+    première de input:kb_layout. Vide pour US et pour toute disposition sans table (les noms US restent)."""
     def opt(nom):
         try:
             sortie = subprocess.run(["hyprctl", "getoption", nom], capture_output=True, text=True, timeout=3).stdout
@@ -87,8 +104,10 @@ def disposition_active():
             return ""
         m = re.search(r"^\s*(?:str|string):\s*(.*)$", sortie, re.M)
         return m[1].strip() if m else ""
-    layout = opt("input:kb_layout").split(",")[0].strip().lower()
-    variante = opt("input:kb_variant").split(",")[0].strip().lower()
+    layout, variante = _clavier_principal()
+    if layout is None:
+        layout = opt("input:kb_layout").split(",")[0].strip().lower()
+        variante = opt("input:kb_variant").split(",")[0].strip().lower()
     if any(v in variante for v in _VARIANTES_AUTRES):
         return {}
     return DISPOSITIONS.get(layout, {})
