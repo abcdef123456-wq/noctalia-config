@@ -288,14 +288,14 @@ Item {
             Texte { text: Reglages.t("Session", "Session"); font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 24; verticalAlignment: Text.AlignBottom; leftPadding: 8 }
             Repeater {
                 model: [
-                                        { icone: "keyboard", titre: Reglages.t("Changer la disposition du clavier", "Switch Keyboard Layout"), cmd: ["noctalia", "msg", "keyboard-layout-cycle"], ferme: false },
+                    { icone: "keyboard", titre: Reglages.t("Changer la disposition du clavier", "Switch Keyboard Layout"), sous: Etat.sys.clavier_disposition || "", cmd: [Etat.bin + "nc-touches", "disposition"], ferme: false },
                     { icone: "settings", titre: Reglages.t("Réglages de la barre", "Bar Settings"), cmd: ["noctalia", "msg", "settings-open"], ferme: true },
                     { icone: "lock", titre: Reglages.t("Verrouiller", "Lock"), cmd: ["noctalia", "msg", "session", "lock"], ferme: true },
                     { icone: "power_settings_new", titre: Reglages.t("Éteindre, redémarrer…", "Shut Down, Restart…"), cmd: ["noctalia", "msg", "panel-toggle", "session"], ferme: true }
                 ]
                 Ligne {
                     required property var modelData
-                    width: sy.width; icone: modelData.icone; titre: modelData.titre
+                    width: sy.width; icone: modelData.icone; titre: modelData.titre; sous: modelData.sous || ""
                     droite: modelData.ferme ? "chevron_right" : ""
                     onClic: { if (modelData.ferme) Etat.fermer(); Etat.faire(modelData.cmd) }
                 }

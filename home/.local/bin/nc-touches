@@ -3,6 +3,9 @@
 #   nc-touches clavier up|down|bascule   rétroéclairage du clavier (détecté : …kbd_backlight)
 #   nc-touches pave [bascule|on|off]     pavé tactile activé / coupé (tous les pavés tactiles)
 #   nc-touches calculatrice              calculatrice installée (Qalculate, GNOME…), sinon qalc dans le terminal
+#   nc-touches disposition               change la disposition du clavier (tous les claviers) et dit la nouvelle ;
+#                                        avec une seule disposition, dit comment en ajouter
+#   nc-touches disposition-active        affiche « Français<tabulation>2 » : disposition active du clavier principal, nombre
 # Un petit message dans l'île (notification passagère) dit le nouvel état.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
@@ -12,9 +15,20 @@ dire() {   # dire TITRE [TEXTE] : notification passagère, remplacée par la sui
   notify-send -a "$(t "Clavier" "Keyboard")" -t 1500 -h string:x-canonical-private-synchronous:nc-touches -h int:transient:1 "$@" 2>/dev/null || true
 }
 
+# Disposition du clavier principal (main, sinon le premier qui en a une) : « dispositions<tab>nom donné par Hyprland »
+kb_lire() {
+  hyprctl devices -j 2>/dev/null | jq -r '[.keyboards[]? | select((.layout // "") != "")] | (map(select(.main == true)) + .) | .[0] // empty | "\(.layout)\t\(.active_keymap // "")"' 2>/dev/null
+}
+# Nom lisible : en français, les plus courants traduits (« French » → « Français »), le reste tel que Hyprland le donne
+kb_nom() {
+  if [ "$NC_LANGUE" = en ]; then printf '%s' "$1"; else
+    printf '%s' "$1" | sed -E 's/^English/Anglais/; s/^French/Français/; s/^German/Allemand/; s/^Spanish/Espagnol/; s/^Italian/Italien/; s/^Belgian/Belge/; s/^Swiss/Suisse/; s/^Canadian/Canadien/'
+  fi
+}
+
 # Noms anglais (nc-kbd-light keyboard up|down|toggle, touchpad [toggle|on|off], calculator)
 action="${1:-}"; arg="${2:-bascule}"
-case "$action" in keyboard|kbd) action=clavier ;; touchpad) action=pave ;; calculator) action=calculatrice ;; esac
+case "$action" in keyboard|kbd) action=clavier ;; touchpad) action=pave ;; calculator) action=calculatrice ;; layout) action=disposition ;; esac
 [ "$arg" = toggle ] && arg=bascule
 
 case "$action" in
@@ -66,6 +80,19 @@ case "$action" in
     done <<< "$paves"
     [ "$n" -gt 0 ] || { dire "$(t "Pas de pavé tactile" "No touchpad")"; exit 0; }
     if [ "$coupe" = 1 ]; then dire "$(t "Pavé tactile coupé" "Touchpad off")" "$(t "La souris reste active" "The mouse still works")"; else dire "$(t "Pavé tactile activé" "Touchpad on")"; fi ;;
+  disposition|layout|disposition-active)
+    info="$(kb_lire)"; liste="${info%%$'\t'*}"; nom="${info#*$'\t'}"
+    [ -n "$info" ] || { liste=""; nom=""; }
+    nb=0; [ -n "$liste" ] && nb=$(( $(printf '%s' "$liste" | tr -cd ',' | wc -c) + 1 ))
+    if [ "$action" = disposition-active ]; then printf '%s\t%s\n' "$(kb_nom "$nom")" "$nb"; exit 0; fi
+    if [ "$nb" -ge 2 ]; then
+      # « all » : tous les claviers changent ensemble, comme Super + Espace (sinon un clavier USB et celui du portable divergent)
+      hyprctl switchxkblayout all next >/dev/null 2>&1 || true
+      nouv="$(kb_lire)"; nouv="${nouv#*$'\t'}"
+      dire "$(t "Disposition : " "Layout: ")$(kb_nom "${nouv:-$nom}")"
+    else
+      dire "$(t "Une seule disposition" "Only one layout")" "$(t "Ajoute-en une dans les réglages (Clavier → Disposition, ex. us,fr)" "Add another in the settings (Keyboard → Layout, e.g. us,fr)")"
+    fi ;;
   calculatrice)
     for c in qalculate-gtk qalculate-qt gnome-calculator kcalc galculator; do
       command -v "$c" >/dev/null && exec "$c"
@@ -78,10 +105,12 @@ case "$action" in
 #   nc-kbd-light keyboard up|down|toggle   keyboard backlight (detected: …kbd_backlight)
 #   nc-kbd-light touchpad [toggle|on|off]  touchpad on / off (all touchpads)
 #   nc-kbd-light calculator                installed calculator (Qalculate, GNOME…), otherwise qalc in the terminal
+#   nc-kbd-light layout                    switch the keyboard layout (all keyboards) and say the new one;
+#                                          with a single layout, says how to add one
 # A short message in the island (transient notification) shows the new state.
 FIN
     else
-      sed -n '2,6p' "$0"
+      sed -n '2,9p' "$0"
     fi
     exit 1 ;;
 esac

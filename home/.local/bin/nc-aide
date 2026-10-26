@@ -98,7 +98,7 @@ RACCOURCIS = [
                                       "écran du PC seulement, dupliquer, étendre (à droite, à gauche…), second écran seulement."),
     ("nc-brightness", "nc-brightness set 50", "Luminosité de l'écran (touches de luminosité, F5 / F6)."),
     ("nc-media", "nc-media play-pause", "Touches de musique : visent le lecteur qu'on entend."),
-    ("nc-touches", "nc-touches pave bascule", "Touches spéciales des portables : clavier lumineux, pavé tactile, calculatrice."),
+    ("nc-touches", "nc-touches pave bascule", "Touches spéciales des portables : clavier lumineux, pavé tactile, calculatrice, disposition du clavier."),
     ("nc-fenetre", "nc-fenetre reduire", "Réduire une fenêtre (Super + M) et la ramener (Super + Ctrl + M) ; aussi masquer, "
                                          "fermer, aller sur une fenêtre, tout masquer ou tout afficher."),
     ("nc-keys", "nc-keys", "La fiche des raccourcis (Super + /), dans le terminal."),
@@ -195,7 +195,7 @@ ANGLAIS = {
     "nc-video": ("nc-video", "Screen recording (Super + Shift + R): an area or the whole screen; same shortcut to stop."),
     "nc-brightness": ("nc-brightness set 50", "Screen brightness (brightness keys, F5 / F6)."),
     "nc-media": ("nc-media play-pause", "Media keys: they control the player you can hear."),
-    "nc-touches": ("nc-kbd-light touchpad toggle", "Laptop special keys: keyboard backlight, touchpad, calculator."),
+    "nc-touches": ("nc-kbd-light touchpad toggle", "Laptop special keys: keyboard backlight, touchpad, calculator, keyboard layout."),
     "nc-fenetre": ("nc-window minimize", "Minimize a window (Super + M) and bring it back (Super + Ctrl + M); also hide, "
                                           "close, go to a window, hide everything or show everything."),
     "nc-keys": ("nc-keys", "The shortcut sheet (Super + /), in the terminal."),

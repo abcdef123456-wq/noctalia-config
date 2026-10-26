@@ -97,6 +97,8 @@ systeme() {
   "$HOME/.local/bin/nc-sysinfo" sante | awk -F'\t' 'NF { print "sante=" $1; if ($2 != "") print "cycles=" $2 }'
   # Protection de la batterie (interrupteur de l'île) : 1, 0 ou absent ; rien si l'utilitaire n'est pas installé
   [ -x /usr/local/bin/nc-limite-charge ] && echo "protection=$(/usr/local/bin/nc-limite-charge etat 2>/dev/null)"
+  # Disposition active du clavier principal (nom lisible) et nombre de dispositions : nc-touches disposition-active
+  "$HOME/.local/bin/nc-touches" disposition-active 2>/dev/null | awk -F'\t' 'NF { print "clavier_disposition=" $1; print "clavier_nb=" $2 }'
   hyprctl monitors -j 2>/dev/null | jq -r '.[] | "ecran=\(.name)\t\(.width)x\(.height)\t\(.refreshRate | round) Hz\t\(.scale)"' 2>/dev/null
 }
 
