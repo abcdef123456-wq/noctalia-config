@@ -6,11 +6,11 @@ typeset -g POWERLEVEL9K_INSTANT_PROMPT=off
 
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
-plugins=(
-  git
-  zsh-autosuggestions
-  zsh-syntax-highlighting
-)
+plugins=(git)
+# fzf-tab (Tab en liste filtrable) seulement s'il est téléchargé, sinon oh-my-zsh affiche « plugin not found » ;
+# avant les deux autres, qui enveloppent les touches
+[[ -d ${ZSH_CUSTOM:-$ZSH/custom}/plugins/fzf-tab ]] && plugins+=(fzf-tab)
+plugins+=(zsh-autosuggestions zsh-syntax-highlighting)
 # Mises à jour d'oh-my-zsh : nc-maj ne s'en occupe pas, donc un simple rappel (pas de question « Would you like to
 # update? » dans un terminal neuf). La mise à jour se fait à la main : omz update.
 zstyle ':omz:update' mode reminder
@@ -28,5 +28,8 @@ export PATH
 
 # IA dans le terminal : Alt + I (description → commande), « ia question » (nc-ia)
 [[ -r ~/.config/nc/ia.zsh ]] && source ~/.config/nc/ia.zsh
+
+# Outils modernes : fzf, zoxide, eza, bat, delta, lazygit, yazi (ceux qui sont installés ; nc-outils les liste)
+[[ -r ~/.config/nc/outils.zsh ]] && source ~/.config/nc/outils.zsh
 
 [[ -r ~/.zshrc.perso ]] && source ~/.zshrc.perso

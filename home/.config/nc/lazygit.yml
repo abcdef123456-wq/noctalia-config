@@ -1,0 +1,45 @@
+# lazygit aux couleurs du terminal (noctalia-config). Chargé par la commande « lg » (outils.zsh) AVANT ta propre
+# config (~/.config/lazygit/config.yml) : la tienne gagne toujours. Les noms de couleurs (blue, magenta…) sont les
+# 16 couleurs du terminal, que nc-theme-sync règle sur le fond d'écran : lazygit suit donc le fond tout seul.
+# La langue reste « auto » (celle du système) : lazygit n'a pas de traduction française.
+gui:
+  nerdFontsVersion: "3"
+  border: rounded
+  showRandomTip: false
+  theme:
+    activeBorderColor: [blue, bold]
+    inactiveBorderColor: [default]
+    searchingActiveBorderColor: [magenta, bold]
+    optionsTextColor: [blue]
+    selectedLineBgColor: [reverse]
+    inactiveViewSelectedLineBgColor: [bold]
+    cherryPickedCommitFgColor: [blue]
+    cherryPickedCommitBgColor: [magenta]
+    markedBaseCommitFgColor: [blue]
+    unstagedChangesColor: [red]
+    defaultFgColor: [default]
+git:
+  # delta s'il est là (sinon cat : les couleurs de git passent telles quelles)
+  paging:
+    colorArg: always
+    pager: 'if command -v delta >/dev/null 2>&1; then exec delta --paging=never --syntax-theme=ansi; else exec cat; fi'
+customCommands:
+  - key: 'A'
+    context: 'files'
+    description: 'Message de commit par l''IA (nc-ia commit)'
+    output: terminal
+    command: |
+      t=$(mktemp) || exit 1
+      case "${NC_LANGUE:-$LANG}" in fr*) fr=1 ;; *) fr=0 ;; esac
+      m() { if [ "$fr" = 1 ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi; }
+      ~/.local/bin/nc-ia commit > "$t"
+      rc=$?
+      case $rc in
+        0) git commit --edit --file "$t" ;;
+        2) m "Rien n'est indexé : indexe d'abord des fichiers (espace)." "Nothing is staged: stage some files first (space)." ;;
+        3) m "IA désactivée (nc-reglages → Intelligence artificielle)." "AI is turned off (nc-settings → Artificial intelligence)." ;;
+        4) m "Un secret a été repéré dans les changements : rien n'a été envoyé." "A secret was found in the changes: nothing was sent." ;;
+        *) m "L'IA n'a pas pu écrire le message (voir ci-dessus)." "The AI couldn't write the message (see above)." ;;
+      esac
+      rm -f "$t"
+      if [ $rc != 0 ]; then printf 'Entrée / Enter '; read -r _; fi
