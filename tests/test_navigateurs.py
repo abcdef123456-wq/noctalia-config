@@ -3,6 +3,7 @@ lancement avec les bons drapeaux. HOME, XDG_* et PATH isolés."""
 import importlib.machinery
 import importlib.util
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -82,12 +83,23 @@ class Navigateurs(Base):
         self.assertIn(f"Exec={self.nc} /usr/bin/google-chrome-stable %U\n", chrome)
         self.assertIn(f"Exec={self.nc} /usr/bin/google-chrome-stable\n", chrome)
         self.assertIn(f"Exec={self.nc} /usr/bin/google-chrome-stable --incognito\n", chrome)
-        self.assertEqual(chrome.count("Exec="), 3)
+        self.assertEqual(len(re.findall(r"(?m)^Exec=", chrome)), 3)
+        self.assertIn("X-NC-Chromium=true\nTryExec=/usr/bin/google-chrome-stable\n", chrome)
         self.assertIn(f"Exec={self.nc} brave %u\n", (self.apps / "brave-browser.desktop").read_text())
         fp = (self.apps / "org.chromium.Chromium.desktop").read_text()
         self.assertIn(f"Exec={self.nc} /usr/bin/flatpak run --branch=stable", fp)
         self.assertIn("org.chromium.Chromium @@u %U @@\n", fp)
         self.assertFalse((self.apps / "firefox.desktop").exists())
+
+    def test_tryexec_navigateur_disparu_lanceur_cache(self):
+        # TryExec= (le programme du Exec d'origine) : le bureau cache le lanceur si le navigateur est désinstallé
+        self.reglage("oui")
+        self.run_nc("nc-navigateurs", "installer")
+        self.assertIn("TryExec=/usr/bin/google-chrome-stable\n", (self.apps / "google-chrome.desktop").read_text())
+        self.assertIn("TryExec=brave\n", (self.apps / "brave-browser.desktop").read_text())
+        fp = (self.apps / "org.chromium.Chromium.desktop").read_text()
+        self.assertNotIn("TryExec=", fp)                 # flatpak : le lanceur générique reste, rien de fiable à tester
+        self.assertEqual(len(re.findall(r"(?m)^TryExec=", (self.apps / "google-chrome.desktop").read_text())), 1)
 
     def test_installer_deux_fois_pareil(self):
         self.reglage("oui")

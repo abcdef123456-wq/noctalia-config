@@ -114,6 +114,23 @@ class RechercheFichiers(unittest.TestCase):
             self.assertTrue(all(re.fullmatch(r"cible\d\.txt", n) for n in noms))
             self.assertEqual(self.chercher(t, "trop"), [])          # au-delà de 5 niveaux
 
+    def test_points_de_montage_non_explores(self):
+        # Un montage FUSE ou réseau figé bloquerait scandir : son nom reste trouvable, son contenu n'est jamais ouvert
+        with tempfile.TemporaryDirectory() as t:
+            self.fichiers(t, ["Reseau/cible_dedans.txt", "Documents/cible_ici.txt"])
+            noms = sorted(r["name"] for r in self.chercher(t, "cible", points_de_montage=lambda h: {"Reseau"}))
+            self.assertEqual(noms, ["cible_ici.txt"])
+            noms = sorted(r["name"] for r in self.chercher(t, "cible"))
+            self.assertEqual(noms, ["cible_dedans.txt", "cible_ici.txt"])
+
+    def test_lecture_de_la_table_des_montages(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = os.path.realpath(t)
+            table = Path(t) / "mountinfo"
+            table.write_text(f"1 0 0:1 / {home}/Nas rw - cifs x rw\n2 0 0:2 / {home}/Mon\\040disque rw - fuse x rw\n3 0 0:3 / /mnt/autre rw - ext4 x rw\n"
+                             f"4 0 0:4 / {home} rw - ext4 x rw\n")
+            self.assertEqual(charger().points_de_montage(home, str(table)), {"Nas", "Mon disque"})
+
     def test_texte_court_et_option(self):
         with tempfile.TemporaryDirectory() as t:
             self.fichiers(t, ["-x-fichier.txt"])
@@ -145,6 +162,11 @@ class TerminalDetecte(unittest.TestCase):
         self.assertEqual(self.commande(["kitty", "xdg-terminal-exec"]), ["xdg-terminal-exec", "htop", "-d", "5"])
         self.assertEqual(self.commande(["kitty", "monterm"], terminal="monterm"), ["monterm", "-e", "htop", "-d", "5"])
         self.assertEqual(self.commande(["kitty"], terminal="absent"), ["kitty", "-e", "htop", "-d", "5"])
+
+    def test_ptyxis_ghostty_wezterm(self):
+        self.assertEqual(self.commande(["ptyxis"]), ["ptyxis", "--", "htop", "-d", "5"])
+        self.assertEqual(self.commande(["ghostty"]), ["ghostty", "-e", "htop", "-d", "5"])
+        self.assertEqual(self.commande(["wezterm"]), ["wezterm", "start", "--", "htop", "-d", "5"])
 
     def test_aucun_terminal(self):
         self.assertEqual(self.commande([]), [])

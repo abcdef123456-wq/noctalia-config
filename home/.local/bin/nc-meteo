@@ -3,6 +3,8 @@
   nc-meteo           la météo actuelle, les prochaines heures et les prochains jours (gardée 20 min en cache)
   nc-meteo texte     la même chose en clair
 Ville : nc-reglages → Île → « Ville de la météo » (METEO_VILLE) ; vide : estimée d'après ta connexion internet.
+Vie privée : ville vide ou « auto » = position estimée par ipwho.is d'après ton IP, puis météo par Open-Meteo
+(une ville saisie n'envoie que son nom à Open-Meteo, jamais à ipwho.is). Ville introuvable : {"erreur": "ville introuvable"}.
 """
 import json
 import math
@@ -46,11 +48,18 @@ def T(fr, en):
 USAGE_EN = """nc-weather: the weather for the island (Open-Meteo: free, no key or account), as JSON.
   nc-weather         current weather, the next hours and the next days (cached for 20 min)
   nc-weather text    the same thing in plain text
-City: nc-settings → Island → "Weather city" (METEO_VILLE); empty: guessed from your internet connection."""
+City: nc-settings → Island → "Weather city" (METEO_VILLE); empty: guessed from your internet connection.
+Privacy: empty or "auto" = position estimated by ipwho.is from your IP, then weather by Open-Meteo
+(a typed city only sends its name to Open-Meteo, never to ipwho.is). Unknown city: {"erreur": "ville introuvable"}."""
 
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "nc", "meteo.json")
 DUREE = 20 * 60
+PERIME = 3 * 3600      # hors ligne : au-delà, la météo gardée est marquée « perime »
+
+
+class VilleIntrouvable(Exception):
+    pass
 
 # Codes météo de l'OMM -> (icône Material Symbols le jour, la nuit, texte)
 CODES = {
@@ -106,6 +115,7 @@ def lieu(ville):
         if r.get("results"):
             x = r["results"][0]
             return x["latitude"], x["longitude"], x.get("name", ville), False
+        raise VilleIntrouvable(ville)       # saisie mais inconnue : jamais de repli sur l'IP (ipwho.is)
     r = lire("https://ipwho.is/?fields=latitude,longitude,city,success")
     if r.get("success") is False:
         raise OSError("position introuvable")
@@ -142,8 +152,16 @@ def meteo():
             "hourly": "temperature_2m,weather_code,is_day", "daily": "weather_code,temperature_2m_max,temperature_2m_min",
         })
         r = lire("https://api.open-meteo.com/v1/forecast?" + q)
+    except VilleIntrouvable:
+        return {"erreur": "ville introuvable"}
     except (OSError, ValueError, KeyError):
-        return c or {"erreur": "hors ligne"}                 # pas de réseau : la dernière météo connue
+        # Pas de réseau : la dernière météo connue, mais seulement pour la même ville, et marquée « perime » au-delà de 3 h
+        if isinstance(c, dict) and c.get("demande") == ville and "temp" in c:
+            c = dict(c)
+            if time.time() - c.get("t", 0) > PERIME:
+                c["perime"] = True
+            return c
+        return {"erreur": "hors ligne"}
     try:
         cur = r["current"]
         jour = bool(cur.get("is_day", 1))
@@ -168,7 +186,7 @@ def meteo():
             "heures": heures, "jours": jours,
         }
     except (TypeError, IndexError, KeyError, ValueError, AttributeError, OverflowError):
-        return c or {"erreur": "réponse illisible"}          # un null ou un champ manquant : la dernière météo connue
+        return c if isinstance(c, dict) and c.get("demande") == ville and "temp" in c else {"erreur": "réponse illisible"}          # un null ou un champ manquant : la dernière météo connue
     # L'écriture du cache ne doit jamais empêcher d'afficher la météo (nom unique : deux instances en même temps)
     tmp = None
     try:
@@ -197,6 +215,9 @@ def main():
         return print(T(__doc__.strip(), USAGE_EN))
     m = meteo()
     if len(sys.argv) > 1 and sys.argv[1] in ("texte", "text"):
+        if m.get("erreur") == "ville introuvable":
+            print(T("Ville introuvable : change-la dans nc-reglages → Île.", "City not found: change it in nc-settings → Island."))
+            return
         if "temp" not in m:
             print(T("Météo indisponible (hors ligne ?)", "Weather unavailable (offline?)"))
             return
@@ -205,7 +226,7 @@ def main():
             print("  " + "   ".join(f"{x['h']} {x['t']}°" for x in m["heures"]))
             print("  " + "   ".join(f"{x['jour']} {x['min']}/{x['max']}°" for x in m["jours"]))
             if m.get("estimee"):
-                print("  " + "Choisir ma ville : nc-reglages fenetre Île (Ville de la météo)")
+                print("  " + "Choisir ma ville : nc-reglages → Île (Ville de la météo)")
             return
 
         def heure(h):
@@ -221,7 +242,7 @@ def main():
         print("  " + "   ".join(f"{heure(x['h'])} {x['t']}°" for x in m["heures"]))
         print("  " + "   ".join(f"{jour(x['jour'])} {x['min']}/{x['max']}°" for x in m["jours"]))
         if m.get("estimee"):
-            print("  " + "Choose my city: nc-reglages fenetre Island (Weather city)")
+            print("  " + "Choose my city: nc-settings → Island (Weather city)")
         return
     print(json.dumps(m, ensure_ascii=False))
 

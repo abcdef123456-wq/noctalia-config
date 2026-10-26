@@ -185,6 +185,10 @@ l'île Quickshell.
 - **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
   effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
   l'écriture de la liste, sans minuteur.
+- **Météo et vie privée** (`nc-reglages` → Île, réglage `METEO_VILLE`) : position estimée par ipwho.is d'après ton IP,
+  météo par Open-Meteo. Si tu saisis une ville, seul son nom part vers Open-Meteo (jamais vers ipwho.is) ; une ville
+  introuvable est signalée dans l'île, sans repli sur ton IP. Hors ligne, la dernière météo n'est gardée que pour la même
+  ville, et marquée « ancienne » au-delà de 3 h.
 
 ## Automatismes
 

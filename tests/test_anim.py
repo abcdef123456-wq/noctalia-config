@@ -46,6 +46,16 @@ class TestHorsTerminal(unittest.TestCase):
             self.assertIn("terminal", p.stderr)
             self.assertNotIn("Traceback", p.stderr)
 
+    def test_doigts_sans_nc_finger_message_propre(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, NC_LANGUE="fr")
+            env.pop("WAYLAND_DISPLAY", None)
+            p = subprocess.run([sys.executable, str(BIN), "doigts"], env=env, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn("nc-finger", p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

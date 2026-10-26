@@ -26,6 +26,9 @@ La molette et les flèches permettent toujours d’atteindre les pages hors de c
 La page Agents affiche seulement les sessions non terminées. Les transitions de fin et leur notification sont
 conservées ; une session qui reprend son travail réapparaît. Aucun fichier d’historique n’est supprimé.
 
+La page Météo : position estimée par ipwho.is d'après ton IP (ville vide ou « auto »), météo par Open-Meteo.
+Une ville saisie n'envoie que son nom à Open-Meteo. Ville introuvable : message dans la page, aucun appel à ipwho.is.
+
 Validation isolée : `python3 -B -m unittest tests.test_island_pages tests.test_assistant_page -q`.
 Les essais QML nécessitent Quickshell et QtTest (dépendance de test uniquement).
 
