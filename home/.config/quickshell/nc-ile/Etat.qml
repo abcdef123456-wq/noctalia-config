@@ -593,7 +593,7 @@ Singleton {
     // pendant une autre est mise en file (une seule en attente), pas ignorée
     readonly property bool pageSys: ["centre", "systeme", "reseau", "bluetooth"].indexOf(vueActive) >= 0
     function lire() { if (pageSys) lecteurEtat.demander() }
-    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== "" && etat.pageSys; onTriggered: { etat.lire(); etat.lirePage() } }
+    Timer { interval: 2000; repeat: true; running: etat.ecranOuvert !== "" && etat.pageSys && etat.ecranVu; onTriggered: { etat.lire(); etat.lirePage() } }
     onPageSysChanged: if (pageSys && ecranOuvert !== "") lire()
 
     // Listes des pages Wi-Fi, Bluetooth, et mesures de la page Système

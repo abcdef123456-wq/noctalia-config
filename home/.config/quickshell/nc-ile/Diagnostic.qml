@@ -84,6 +84,16 @@ Item {
         reparer(l[0])
     }
 
+    // Garde : nc-diag --rapide qui ne finit pas en 15 s est arrêté, l'état passe à « erreur »
+    Timer {
+        interval: 15000; running: d.etape === "verif"
+        onTriggered: {
+            d.etape = "erreur"
+            d.resume = d.t("nc-diag n'a pas répondu à temps.", "nc-diag didn't answer in time.")
+            verif.running = false
+            d.change()
+        }
+    }
     Process {
         id: verif
         command: [Etat.bin + "nc-diag", "--json", "--rapide"]

@@ -35,17 +35,19 @@ Item {
         spacing: 1
         Item {
             width: parent.width; height: 16
-            Texte { text: b.vue ? Notifs.nomAppli(b.vue) : ""; secondaire: true; font.pixelSize: 12; width: parent.width - 90 }
+            Texte { text: b.vue ? Notifs.nomAppli(b.vue) : ""; textFormat: Text.PlainText; secondaire: true; font.pixelSize: 12; width: parent.width - 90 }
             Texte {
                 anchors.right: parent.right
                 text: b.vue ? Notifs.quand(b.vue, Etat.minute.getTime()) : ""
                 secondaire: true; font.pixelSize: 12
             }
         }
-        Texte { width: parent.width; text: b.vue ? b.vue.summary : ""; font.pixelSize: 14; font.weight: Font.DemiBold }
+        Texte { width: parent.width; text: b.vue ? b.vue.summary : ""; textFormat: Text.PlainText; font.pixelSize: 14; font.weight: Font.DemiBold }
         Texte {
             width: parent.width
-            text: b.vue ? b.vue.body.replace(/<[^>]*>/g, "") : ""
+            // Balises retirées, puis entités décodées (&amp; en dernier : « &amp;lt; » doit rester « &lt; », pas devenir « < »)
+            text: b.vue ? b.vue.body.replace(/<[^>]*>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&amp;/g, "&") : ""
+            textFormat: Text.PlainText
             visible: text !== ""
             font.pixelSize: 13; color: Couleurs.texteDoux
             wrapMode: Text.Wrap; maximumLineCount: 2

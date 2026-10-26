@@ -66,7 +66,7 @@ Item {
                                 }
                                 Etincelle { anchors.verticalCenter: parent.verticalCenter; taille: 14; agent: Agents.agent(carte.s)
                                             tourne: carte.s.etat === "travail" }
-                                Texte { anchors.verticalCenter: parent.verticalCenter; text: carte.s.projet || Agents.nom(carte.s); font.pixelSize: 15; font.weight: Font.DemiBold
+                                Texte { anchors.verticalCenter: parent.verticalCenter; text: carte.s.projet || Agents.nom(carte.s); textFormat: Text.PlainText; font.pixelSize: 15; font.weight: Font.DemiBold
                                         width: Math.min(implicitWidth, col.width - 232) }
                                 Texte { anchors.verticalCenter: parent.verticalCenter; text: Agents.libelle(carte.s); secondaire: true; font.pixelSize: 12 }
                             }
@@ -135,7 +135,7 @@ Item {
                                 spacing: 8; opacity: derniere ? 1 : 0.55
                                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: parent.modelData.icone || "build"; taille: 15
                                       color: parent.derniere && carte.enCours ? Agents.couleurDe(carte.s) : Couleurs.texteSec }
-                                Texte { anchors.verticalCenter: parent.verticalCenter; text: parent.modelData.texte; font.pixelSize: 13
+                                Texte { anchors.verticalCenter: parent.verticalCenter; text: parent.modelData.texte; textFormat: Text.PlainText; font.pixelSize: 13
                                         width: Math.min(implicitWidth, col.width - 90) }
                                 Texte { anchors.verticalCenter: parent.verticalCenter; visible: (parent.modelData.diff || "") !== ""
                                         text: parent.modelData.diff || ""; font.pixelSize: 12; color: Couleurs.vert }

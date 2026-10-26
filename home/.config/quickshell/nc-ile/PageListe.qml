@@ -6,6 +6,7 @@
 // Listes lues par ~/.local/bin/nc-ile-etat wifi | bt.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 Item {
     id: p
@@ -19,7 +20,7 @@ Item {
     readonly property string cle: wifi ? "wifi" : "bluetooth"
     readonly property bool allume: Etat.valeur(cle, Etat.sys[cle]) === "on"
     readonly property var elements: Etat.liste.filter(e => e.genre === (wifi ? "net" : "bt"))
-    onVisibleChanged: { saisie = ""; attente = ({}) }
+    onVisibleChanged: { saisie = ""; attente = ({}); recherche = false }
 
     function attendre(cle) { var a = Object.assign({}, attente); a[cle] = true; attente = a; finAttente.restart() }
     Timer { id: finAttente; interval: 15000; onTriggered: p.attente = ({}) }
@@ -47,19 +48,29 @@ Item {
     // Connexion avec mot de passe. Refusée (mauvais mot de passe, réseau trop loin) : on le dit, et le profil à moitié
     // créé par nmcli est effacé (sinon le réseau passait pour « Enregistré » et ne redemandait plus le mot de passe)
     function connecterAvec(mdp) {
-        if (saisie === "" || mdp === "") return
+        if (saisie === "" || mdp === "" || connexion.running) return
         attendre(saisie)
-        Etat.faire(["sh", "-c", "nmcli dev wifi connect \"$1\" password \"$2\" >/dev/null 2>&1 || { nmcli con delete id \"$1\" >/dev/null 2>&1; "
+        // Un Process à lui, pas la file des commandes d'Etat : le mot de passe n'entre ni dans la liste des commandes de Voulu ni dans son
+        // journal, et la commande est oubliée à la fin. Il reste quelques secondes dans les arguments de nmcli (visibles
+        // dans /proc/*/cmdline) : la question de nmcli sur son entrée standard n'est pas fiable hors terminal et peut
+        // rester bloquée. « con delete » seulement pour un profil Wi-Fi.
+        connexion.command = ["timeout", "30", "sh", "-c", "nmcli dev wifi connect \"$1\" password \"$2\" >/dev/null 2>&1 || { "
+                    + "[ \"$(nmcli -g connection.type con show id \"$1\" 2>/dev/null)\" = 802-11-wireless ] && nmcli con delete id \"$1\" >/dev/null 2>&1; "
                     + "notify-send -a Wi-Fi -i network-wireless-offline \"$3$1$4\" \"$5\"; }",
                     "sh", saisie, mdp, Reglages.t("Connexion impossible à ", "Couldn't join “"), Reglages.t("", "”"),
-                    Reglages.t("Mot de passe incorrect, ou réseau trop loin.", "Wrong password, or the network is too far away.")])
+                    Reglages.t("Mot de passe incorrect, ou réseau trop loin.", "Wrong password, or the network is too far away.")]
+        connexion.running = true
         saisie = ""
+    }
+    Process {
+        id: connexion
+        onExited: { command = []; Etat.lire(); Etat.lirePage() }
     }
     function basculerBt(f) {
         attendre(f[0])
         if (f[2] === "1") Etat.faire(["bluetoothctl", "disconnect", f[0]])
         else if (f[4] === "1") Etat.faire(["bluetoothctl", "connect", f[0]])
-        else Etat.faire(["sh", "-c", "bluetoothctl pair " + f[0] + " && bluetoothctl trust " + f[0] + " && bluetoothctl connect " + f[0]])
+        else Etat.faire(["timeout", "30", "sh", "-c", "bluetoothctl pair \"$1\" && bluetoothctl trust \"$1\" && bluetoothctl connect \"$1\"", "sh", f[0]])
     }
 
     component Titre: Texte { font.pixelSize: 12; font.weight: Font.DemiBold; secondaire: true; height: 26; verticalAlignment: Text.AlignBottom; leftPadding: 8 }

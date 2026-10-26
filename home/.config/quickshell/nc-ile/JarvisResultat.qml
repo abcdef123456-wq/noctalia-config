@@ -55,8 +55,8 @@ Column {
                         var op=({facts:"memory.delete",profile:"profile.delete",reminders:"reminder.cancel",conversations:"conversation.delete"})[carte.kind]
                         r.choisir(op,carte.kind==="profile"?{key:String(carte.item.id)}:{id:String(carte.item.id||carte.item.conversation_id)},false)
                     } }
-                    JarvisBouton { visible:carte.kind==="services"; texte:Reglages.t("Journaux", "Logs");enabled:!JarvisEtat.enCours;onClic:r.choisir("logs",{unit:carte.item.unit},true) }
-                    JarvisBouton { visible:carte.kind==="services"; texte:Reglages.t("Redémarrer", "Restart");enabled:!JarvisEtat.enCours&&!AssistantEtat.enCours;onClic:r.choisir("service.restart",{unit:carte.item.unit},false) }
+                    JarvisBouton { visible:carte.kind==="services"; texte:Reglages.t("Journaux", "Logs");enabled:!JarvisEtat.enCours;onClic:r.choisir("logs",{unit:String(carte.item.unit||"")},true) }
+                    JarvisBouton { visible:carte.kind==="services"; texte:Reglages.t("Redémarrer", "Restart");enabled:!JarvisEtat.enCours&&!AssistantEtat.enCours;onClic:r.choisir("service.restart",{unit:String(carte.item.unit||"")},false) }
                 }
             }
         }

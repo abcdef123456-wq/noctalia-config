@@ -70,5 +70,10 @@ Singleton {
         stderr: StdioCollector {}
         onExited: (exitCode, exitStatus) => { j.code = exitCode; j.processusFini = true; j.finir() }
     }
+    // Garde : une requête qui ne finit jamais laissait enCours vrai et les boutons grisés ; arrêtée au bout de 90 s
+    Timer {
+        id: garde; interval: 90000; running: j.enCours
+        onTriggered: { requete.running = false; j.code = -1; j.sortieFinie = true; j.processusFini = true; j.finir() }
+    }
     Timer { id: demarrage; interval: 3000; onTriggered: if (j.enCours && !requete.running) { j.code = -1; j.sortieFinie = true; j.processusFini = true; j.finir() } }
 }

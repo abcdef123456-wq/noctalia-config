@@ -273,7 +273,7 @@ Item {
                 nom: "arrow_downward"; taille: 17; color: Couleurs.accent
                 // Immobile en Économie ou sans effets (Reglages.sobre)
                 readonly property bool bouge: telechargement.montre && !Reglages.sobre
-                Pas { running: flecheTelechargement.bouge            // 30 images/s (voir Pas.qml)
+                Pas { running: flecheTelechargement.bouge && Etat.ecranVu            // 30 images/s (voir Pas.qml)
                       onTriggered: flecheTelechargement.y = -3 * Math.cos(2 * Math.PI * t / 1.2)
                       onRunningChanged: if (!running) flecheTelechargement.y = 0 }
             }
@@ -304,7 +304,7 @@ Item {
             // Point rouge fixe en Économie ou sans effets (Reglages.sobre)
             readonly property bool clignote: video.montre && !Reglages.sobre
             // 30 images/s (voir Pas.qml) ; à l'arrêt, le point redevient plein
-            Pas { running: pointVideo.clignote
+            Pas { running: pointVideo.clignote && Etat.ecranVu
                   onTriggered: pointVideo.opacity = 0.675 + 0.325 * Math.cos(2 * Math.PI * t / 1.4)
                   onRunningChanged: if (!running) pointVideo.opacity = 1 }
         }

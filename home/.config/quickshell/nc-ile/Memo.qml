@@ -38,6 +38,19 @@ Singleton {
             lecture.running = true
         }
     }
+    // Garde : si nc-ile-memo ne démarre pas ou ne finit jamais, courant resterait non nul et plus rien ne passerait.
+    // Au bout de 10 s la commande est arrêtée, la lecture rend null et la file repart.
+    Timer {
+        interval: 10000
+        running: memo.courant !== null
+        onTriggered: {
+            var c = memo.courant
+            ecriture.running = false; lecture.running = false
+            memo.courant = null
+            if (c && c.cb) c.cb(null)
+            memo.suivant()
+        }
+    }
     Process {
         id: ecriture
         onStarted: { write(memo.courant.json); stdinEnabled = false }
@@ -46,6 +59,7 @@ Singleton {
     }
     Process {
         id: lecture
+        onExited: memo.suivant()          // gardé : si le flux n'est pas encore fini, il rend la main et c'est le flux qui relance
         stdout: StdioCollector {
             onStreamFinished: {
                 var v = null

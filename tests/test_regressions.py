@@ -586,6 +586,6 @@ class AnimationsFilDeRendu(unittest.TestCase):
                 bloc = texte[max(0, texte.rfind("{", 0, debut) - 40):debut]   # le type de l'animation et sa ligne
                 self.assertNotIn("RotationAnimation ", bloc, f"{nom} : {bloc.strip()}")
         etincelle = (QML / "Etincelle.qml").read_text()
-        self.assertRegex(etincelle, r"Pas \{\s*running: e\.bouge && e\.tournante\s*onTriggered: e\.rotation = \(e\.rotation \+ 360 \* interval / e\.dureeTour\)")
+        self.assertRegex(etincelle, r"Pas \{\s*running: e\.bouge && e\.tournante && Etat\.ecranVu\s*onTriggered: e\.rotation = \(e\.rotation \+ 360 \* interval / e\.dureeTour\)")
         self.assertIn('Reglages.val("ILE_ANIM_BATTERIE", "douces")', etincelle)
         self.assertIn("UPower.onBattery", etincelle)

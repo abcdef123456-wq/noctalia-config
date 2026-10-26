@@ -122,7 +122,7 @@ Item {
     // La durée change aussi en cours de route (le pas suivant tourne à la nouvelle vitesse).
     readonly property int dureeTour: UPower.onBattery && Reglages.val("ILE_ANIM_BATTERIE", "douces") !== "continues" ? 4000 : 2600
     Pas {
-        running: e.bouge && e.tournante
+        running: e.bouge && e.tournante && Etat.ecranVu
         onTriggered: e.rotation = (e.rotation + 360 * interval / e.dureeTour) % 360
         // L'étincelle qui s'arrête de travailler revient droite en douceur, celle qui laisse la place à un logo qui ne
         // tourne pas revient d'un coup
@@ -133,7 +133,7 @@ Item {
     // Les autres : flottent (montent et redescendent, 1,8 s l'aller-retour) pendant le travail
     Pas {
         id: flotte
-        running: e.bouge && !e.tournante && e.agent !== "assistant"
+        running: e.bouge && !e.tournante && e.agent !== "assistant" && Etat.ecranVu
         onTriggered: dessin.y = -e.taille * 0.08 * (1 - Math.cos(2 * Math.PI * t / 1.8))
         onRunningChanged: if (!running) dessin.y = 0
     }

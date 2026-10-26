@@ -16,10 +16,11 @@ class CockpitJarvis(unittest.TestCase):
     def executer(self,scenario,absent=False,evenements=False,avant=None):
         with tempfile.TemporaryDirectory(prefix='nc-jarvis-qml-') as d:
             root=Path(d);shutil.copytree(QML,root/'qml');(root/'runtime').mkdir(mode=0o700)
+            (root/'qml/Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool ecranVu: true}')
             (root/'qml/Reglages.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return en} function val(k,d){return d}}')
             (root/'qml/Agents.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property var ias: ({claude:{couleur:"#d97757"},assistant:{couleur:"#10b981"}})}')
-            singletons={'Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat'}
-            noms=['Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisChat','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','Texte','Ico','Etincelle','Pas','LogoAssistant','Defilement','Ligne','Rond']
+            singletons={'Etat','Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat'}
+            noms=['Etat','Reglages','Agents','Couleurs','AssistantEtat','JarvisEtat','Jarvis','JarvisChat','JarvisBouton','JarvisChamp','JarvisResultat','Assistant','AssistantReglages','AssistantCommande','AssistantOrbe','Texte','Ico','Etincelle','Pas','LogoAssistant','Defilement','Ligne','Rond']
             (root/'qml/qmldir').write_text('\n'.join(('singleton ' if n in singletons else '')+n+' 1.0 '+n+'.qml' for n in noms))
             if not absent:
                 b=root/'.local/bin';b.mkdir(parents=True)
