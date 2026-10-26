@@ -13,7 +13,10 @@ REPO = Path(__file__).resolve().parents[1]
 
 class Export(unittest.TestCase):
     def test_tout_home_est_dans_home_files(self):
-        liste = re.search(r"HOME_FILES=\((.*?)\n\)", (REPO / "export.sh").read_text(), re.S)[1].split()
+        texte = (REPO / "export.sh").read_text()
+        # DEPOT_SEUL : suivis, jamais pris dans ~ (la photo de profil), mais gardés eux aussi
+        liste = [e for nom in ("HOME_FILES", "DEPOT_SEUL")
+                 for e in re.search(nom + r"=\((.*?)\n\)", texte, re.S)[1].split()]
         r = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "home"],
                            capture_output=True, text=True)
         if r.returncode != 0:
@@ -81,6 +84,9 @@ class ExportIsole(unittest.TestCase):
         self.assertIn("version-installee", (home / ".local/bin/nc-dictee").read_text())
 
     def test_nouveau_fichier_d_un_dossier_installe_garde(self):
+        """Un ancien dossier installé (sans Nouveau.qml, suivi) n'efface pas les ajouts du dépôt ; son fichier pas encore
+        suivi par git (Ancien.qml) est seulement signalé (E2)."""
+        self.base_exportee()
         qml = self.home / ".config/quickshell/nc-ile"
         qml.mkdir(parents=True)
         (qml / "Ancien.qml").write_text('import QtQuick\nItem { width: 12 }\n')
@@ -88,7 +94,10 @@ class ExportIsole(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         resultat = self.depot / "home/.config/quickshell/nc-ile"
         self.assertTrue((resultat / "Nouveau.qml").exists(), "un ancien dossier installé n'efface pas les ajouts du dépôt")
-        self.assertTrue((resultat / "Ancien.qml").exists())
+        self.assertFalse((resultat / "Ancien.qml").exists(), "un nouveau fichier n'est pas publié sans le demander")
+        self.assertIn("nouveau, pas publié : ~/.config/quickshell/nc-ile/Ancien.qml", r.stderr)
+        self.assertIn("NC_EXPORT_NOUVEAUX=oui", r.stderr)
+        self.assertEqual(self.etat(), "")
 
     def test_preview_ne_remplace_pas_le_depot(self):
         avant = (self.depot / "home/.local/bin/nc-dictee").read_bytes()
@@ -103,6 +112,10 @@ class ExportIsole(unittest.TestCase):
         contenu est publié, jamais le lien (sa cible contient le chemin du dossier personnel)."""
         (self.depot / "home/.config/nvim").mkdir(parents=True)
         (self.depot / "home/.config/nvim/depot.lua").write_text("-- seulement dans le dépôt\n")
+        # Déjà suivis par git (sinon de nouveaux fichiers : pas publiés)
+        (self.depot / "home/.config/nvim/lua").mkdir()
+        (self.depot / "home/.config/nvim/init.lua").write_text("-- ancienne version\n")
+        (self.depot / "home/.config/nvim/lua/reglages.lua").write_text("-- ancienne version\n")
         subprocess.run(["git", "-C", str(self.depot), "add", "home"], env=self.env, capture_output=True, check=True)
         subprocess.run(["git", "-C", str(self.depot), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                         "commit", "-qm", "nvim"], env=self.env, capture_output=True, check=True)
@@ -133,6 +146,17 @@ class ExportIsole(unittest.TestCase):
         self.assertIn("type incompatible", r.stderr)
         self.assertFalse(list(self.depot.glob(".nc-export.*")))
 
+    def etat(self):
+        return subprocess.run(["git", "-C", str(self.depot), "status", "--porcelain", "--untracked-files=all", "--",
+                               "home"], env=self.env, capture_output=True, text=True, check=True).stdout
+
+    def base_exportee(self):
+        """Le petit dépôt de setUp n'a pas ses repères (clavier, barre…) : un premier export, commité, sert de base,
+        pour que git status ne montre ensuite que ce que le test change."""
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.commit("base exportée")
+
     def commit(self, message):
         for a in (("add", "-A", "home"), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                                           "commit", "-qm", message)):
@@ -141,6 +165,11 @@ class ExportIsole(unittest.TestCase):
     def test_liens_dans_un_dossier_exporte(self):
         """P2-2 : un lien DANS un dossier exporté (fond d'écran -> /home/<nom>/…) était publié tel quel. Il est copié
         comme fichier s'il mène dans le même dossier, refusé sinon."""
+        depot = self.depot / "home/Pictures/Wallpapers"           # déjà suivis par git
+        depot.mkdir(parents=True)
+        for nom in ("a.jpg", "copie.jpg", "perso.jpg"):
+            (depot / nom).write_bytes(b"\xff\xd8ancienne")
+        self.commit("fonds")
         fonds = self.home / "Pictures/Wallpapers"
         fonds.mkdir(parents=True)
         (fonds / "a.jpg").write_bytes(b"\xff\xd8image")
@@ -160,6 +189,12 @@ class ExportIsole(unittest.TestCase):
     def test_lien_interne_vers_un_dossier_refuse(self):
         """Un lien interne vers un dossier (ici son propre dossier : une boucle) : cp échouait sur le lien cyclique,
         l'erreur était ignorée (set -e coupé par « || return 1 ») et le dépôt recevait une copie entière du dossier."""
+        self.base_exportee()
+        depot = self.depot / "home/Pictures/Wallpapers"           # déjà suivis par git, comme fichiers
+        depot.mkdir(parents=True)
+        for nom in ("a.jpg", "boucle", "vers-sous"):
+            (depot / nom).write_bytes(b"\xff\xd8image")
+        self.commit("fonds")
         fonds = self.home / "Pictures/Wallpapers"
         (fonds / "sous").mkdir(parents=True)
         (fonds / "a.jpg").write_bytes(b"\xff\xd8image")
@@ -173,7 +208,8 @@ class ExportIsole(unittest.TestCase):
                     r = self.exporter(*a)
                     self.assertEqual(r.returncode, 1, r.stderr)
                     self.assertIn(f"{nom} est un lien vers un dossier", r.stderr)
-                self.assertFalse((self.depot / "home/Pictures/Wallpapers").exists(), "rien de copié dans le dépôt")
+                self.assertEqual(self.etat(), "", "rien de copié dans le dépôt")
+                self.assertFalse((self.depot / "home/Pictures/Wallpapers/sous").exists())
                 lien.unlink()
 
     def test_dossier_lien_vers_le_dossier_personnel_refuse(self):
@@ -355,6 +391,239 @@ class ExportIsole(unittest.TestCase):
         r = self.exporter("--preview")
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertNotIn("diffère", r.stderr)
+
+    # Revue « export » (E1 à E7). Clés factices évidentes, assemblées ici pour ne jamais figurer telles quelles.
+    CLES = {
+        "openai": "sk-proj-" + "FAUX" * 6,
+        "google": "AIza" + "F" * 35,
+        "groq": "gsk_" + "F" * 40,
+        "aws": "AKIA" + "FAUX" * 4,
+        "telegram": "123456789:AA" + "F" * 32,
+        "slack": "xoxb-" + "1" * 12,
+        "jeton google": "ya29." + "F" * 20,
+        "refresh_token": '"refresh_token": "' + "F" * 12 + '"',
+        "e-mail": "quelquun" + "@" + "courriel.invalid",
+    }
+
+    def test_e1_uwsm_env_garde_noms_seulement(self):
+        """E1 : uwsm/env et env-hyprland (où l'on met ANTHROPIC_API_KEY…) étaient copiés en entier. La version du dépôt
+        est gardée, seuls les noms des variables sont montrés."""
+        self.base_exportee()
+        base = "# session uwsm\nexport QT_QPA_PLATFORMTHEME=qt6ct\n"
+        for nom in ("env", "env-hyprland"):
+            for racine in (self.depot / "home", self.home):
+                p = racine / ".config/uwsm" / nom
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(base)
+        self.commit("uwsm")
+        cle = "sk-ant-" + "FAUX" * 8
+        for nom in ("env", "env-hyprland"):
+            with open(self.home / ".config/uwsm" / nom, "a") as f:
+                f.write(f'export ANTHROPIC_API_KEY="{cle}"\nexport OPENAI_API_KEY={self.CLES["openai"]}\n')
+        for a in (("--preview",), ()):
+            r = self.exporter(*a)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("~/.config/uwsm/env diffère du dépôt", r.stderr)
+            self.assertIn("~/.config/uwsm/env-hyprland diffère du dépôt", r.stderr)
+            self.assertIn("+export ANTHROPIC_API_KEY=…", r.stderr)
+            self.assertNotIn("FAUX", r.stderr + r.stdout, "jamais une valeur à l'écran")
+        self.assertEqual((self.depot / "home/.config/uwsm/env").read_text(), base)
+        self.assertEqual(self.etat(), "")
+
+    def test_e1_cles_et_adresses_nouvelles_refusees(self):
+        """E1 : le contrôle final ne connaissait que gh*_, github_pat_, sk-ant-, MAC et clés privées."""
+        self.base_exportee()
+        avant = (self.depot / "home/.local/bin/nc-dictee").read_text()
+        for genre, cle in self.CLES.items():
+            with self.subTest(genre=genre):
+                (self.home / ".local/bin/nc-dictee").write_text(f"#!/bin/sh\nVALEUR={cle}\n")
+                for a in (("--preview",), ()):
+                    r = self.exporter(*a)
+                    self.assertEqual(r.returncode, 1, r.stderr)
+                    self.assertIn("à vérifier avant de publier", r.stderr)
+                    self.assertIn("home/.local/bin/nc-dictee, ligne 2 :", r.stderr)
+                    self.assertNotIn(cle, r.stderr + r.stdout, "le fichier et la ligne, jamais la valeur")
+                self.assertEqual((self.depot / "home/.local/bin/nc-dictee").read_text(), avant)
+                self.assertEqual(self.etat(), "")
+
+    def test_e1_lignes_deja_dans_le_depot_permises(self):
+        """Faux positifs : nc-ia ou les tests contiennent ces motifs exprès. Une ligne déjà dans git passe ; seule une
+        ligne nouvelle est refusée. Adresses permises : example.*, noreply, unités systemd, adresses déjà suivies."""
+        self.base_exportee()
+        connues = (f"MOTIF={self.CLES['openai']}\n"
+                   "AUTEUR=" + "moi" + "@" + "projet.invalid\n")
+        (self.depot / "home/.local/bin/nc-dictee").write_text("#!/bin/sh\n" + connues)
+        self.commit("motifs connus")
+        permis = ("A=test" + "@" + "example.com\n" + "B=noreply" + "@" + "github.com\n"
+                  + "C=wayland-wm" + "@" + "hyprland.desktop.service\n" + "D=moi" + "@" + "projet.invalid\n")
+        (self.home / ".local/bin/nc-dictee").write_text("#!/bin/sh\n" + connues + "echo modifie\n" + permis)
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("echo modifie", (self.depot / "home/.local/bin/nc-dictee").read_text())
+        self.commit("export")
+        with open(self.home / ".local/bin/nc-dictee", "a") as f:
+            f.write(f"NOUVELLE={self.CLES['groq']}\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("home/.local/bin/nc-dictee, ligne 9 : clé Groq", r.stderr)
+        self.assertNotIn("ligne 2", r.stderr, "la ligne déjà dans git n'est pas signalée")
+        self.assertEqual(self.etat(), "")
+
+    def ile(self):
+        d = self.home / ".config/quickshell/nc-ile"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_e2_nouveaux_fichiers_d_un_dossier(self):
+        """E2 : un dossier de la liste était copié en entier, tout nouveau fichier compris. Seuls les fichiers suivis
+        sont publiés ; NC_EXPORT_NOUVEAUX=oui publie les nouveaux, sauf la liste noire, qui l'emporte toujours."""
+        self.base_exportee()
+        ile = self.ile()
+        (ile / "Perso.qml").write_text("import QtQuick\nItem {}\n")
+        noire = ["auth.json", ".env", "cle.env", ".netrwhist", "spell/fr.utf-8.add", "mon_token.txt", "SECRET.conf",
+                 "cert.pem", "serveur.key", "id_ed25519", "zsh_history", "base.sqlite"]
+        for nom in noire:
+            (ile / nom).parent.mkdir(parents=True, exist_ok=True)
+            (ile / nom).write_text("x = 1\n")
+        prive = ile / "Prive.qml"
+        prive.write_text("import QtQuick\nItem {}\n")
+        prive.chmod(0o600)
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nouveau, pas publié : ~/.config/quickshell/nc-ile/Perso.qml (pas encore dans le dépôt)", r.stderr)
+        self.assertIn("relance avec NC_EXPORT_NOUVEAUX=oui", r.stderr)
+        self.assertEqual(self.etat(), "")
+        self.env["NC_EXPORT_NOUVEAUX"] = "oui"
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        publie = self.depot / "home/.config/quickshell/nc-ile"
+        self.assertTrue((publie / "Perso.qml").exists(), "demandé exprès : publié")
+        self.assertIn("nouveau, publié (NC_EXPORT_NOUVEAUX) : ~/.config/quickshell/nc-ile/Perso.qml", r.stderr)
+        for nom in noire:
+            self.assertFalse((publie / nom).exists(), nom)
+            self.assertIn(f"~/.config/quickshell/nc-ile/{nom} (liste noire)", r.stderr)
+        self.assertFalse((publie / "Prive.qml").exists())
+        self.assertIn("Prive.qml (fichier privé, lisible par toi seul)", r.stderr)
+        self.assertEqual(self.etat(), "?? home/.config/quickshell/nc-ile/Perso.qml\n")
+
+    def test_e2_page_de_l_ile_suivie_modifiee_publiee(self):
+        """Nouvelle page de l'île déjà dans le dépôt (suivie), puis modifiée dans ~ : publiée."""
+        self.base_exportee()
+        (self.ile() / "Nouveau.qml").write_text("import QtQuick\nItem { width: 42 }\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("width: 42", (self.depot / "home/.config/quickshell/nc-ile/Nouveau.qml").read_text())
+        self.assertNotIn("nouveau, pas publié", r.stderr)
+        self.assertEqual(self.etat(), " M home/.config/quickshell/nc-ile/Nouveau.qml\n")
+
+    def test_export_normal_passe(self):
+        """Un export ordinaire : fichiers suivis modifiés, publiés, code 0."""
+        self.base_exportee()
+        (self.home / ".local/bin/nc-dictee").write_text("#!/bin/sh\necho retouche\n")
+        (self.ile() / "Nouveau.qml").write_text("import QtQuick\nItem { width: 7 }\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Dépôt mis à jour depuis ce PC.", r.stdout)
+        self.assertEqual(self.etat(), " M home/.config/quickshell/nc-ile/Nouveau.qml\n M home/.local/bin/nc-dictee\n")
+
+    def test_e3_fonds_lien_vers_un_autre_dossier_de_home_refuse(self):
+        """E3 : ~/Pictures/Wallpapers -> ~/Images faisait partir tout ~/Images. Un lien de dossier qui mène ailleurs
+        dans ~ n'est permis que vers un dossier du même nom."""
+        self.base_exportee()
+        images = self.home / "Images"
+        images.mkdir()
+        (images / "notes.txt").write_text("privé\n")
+        (self.home / "Pictures").mkdir()
+        (self.home / "Pictures/Wallpapers").symlink_to(images)
+        for a in (("--preview",), ()):
+            r = self.exporter(*a)
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn("~/Pictures/Wallpapers mène ailleurs dans ton dossier personnel", r.stderr)
+        self.assertEqual(self.etat(), "")
+        (self.home / "Pictures/Wallpapers").unlink()
+        (images / "Wallpapers").mkdir()
+        (self.home / "Pictures/Wallpapers").symlink_to(images / "Wallpapers")
+        r = self.exporter("--preview")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_e4_photo_de_profil_jamais_publiee(self):
+        """E4 : ~/.face (photo de profil, EXIF compris) était publiée. Le dépôt garde son avatar par défaut."""
+        self.base_exportee()
+        (self.depot / "home/.face").write_bytes(b"\x89PNGavatar-du-depot")
+        self.commit("avatar")
+        (self.home / ".face").write_bytes(b"\x89PNGma-photo")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("jamais publié : ~/.face", r.stdout)
+        self.assertEqual((self.depot / "home/.face").read_bytes(), b"\x89PNGavatar-du-depot")
+        self.assertEqual(self.etat(), "")
+
+    def test_e4_nouvelle_image_et_position_gps(self):
+        """E4 : une nouvelle image acceptée (NC_EXPORT_NOUVEAUX=oui) est refusée si elle a une position GPS
+        (exiftool), et toujours refusée sans exiftool."""
+        self.base_exportee()
+        self.env["NC_EXPORT_NOUVEAUX"] = "oui"
+        fonds = self.home / "Pictures/Wallpapers"
+        fonds.mkdir(parents=True)
+        (fonds / "photo.JPG").write_bytes(b"\xff\xd8photo")
+        cible = self.depot / "home/Pictures/Wallpapers/photo.JPG"
+        exiftool = self.bin / "exiftool"
+        for cas, script, publie in (("sans exiftool", None, False),
+                                    ("avec GPS", "echo 48.8584; echo 2.2945", False),
+                                    ("sans GPS", ":", True)):
+            with self.subTest(cas=cas):
+                if script is None:
+                    exiftool.unlink(missing_ok=True)
+                else:
+                    exiftool.write_text(f"#!/bin/sh\n{script}\n")
+                    exiftool.chmod(0o755)
+                r = self.exporter()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(cible.exists(), publie, r.stderr)
+                if not publie:
+                    self.assertIn("nouveau, pas publié : ~/Pictures/Wallpapers/photo.JPG (image", r.stderr)
+                    self.assertEqual(self.etat(), "")
+
+    def test_e5_clone_partiel_refuse(self):
+        """E5 : la garde « ancienne version » (git log --find-object) ne voit rien dans un clone --depth 1."""
+        (self.depot / "home/.local/bin/nc-dictee").write_text("#!/bin/sh\necho version-2\n")
+        self.commit("version 2")
+        clone = self.racine / "clone"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + str(self.depot), str(clone)], env=self.env,
+                       capture_output=True, check=True)
+        shutil.copy2(self.depot / "export.sh", clone / "export.sh")
+        for a in (("--preview",), ()):
+            r = subprocess.run([str(clone / "export.sh"), *a], env=self.env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertIn("clone partiel", r.stderr)
+            self.assertIn("git fetch --unshallow", r.stderr)
+        self.assertIn("version-2", (clone / "home/.local/bin/nc-dictee").read_text())
+        self.assertFalse(list(clone.glob(".nc-export.*")))
+
+    def test_e6_dossier_personnel_echappe_et_borne(self):
+        """E6 : sed « s|$HOME|@HOME@| » sans échappement ni borne : /home/al changeait /home/alice en @HOME@ice, et un
+        « . » du chemin valait n'importe quel caractère."""
+        maison = self.racine / "mai.son+1"
+        shutil.copytree(self.home, maison, symlinks=True)
+        self.env["HOME"] = str(maison)
+        voisin = self.racine / "maiXson1"                        # le « . » et le « + » ne sont pas des jokers
+        lignes = [f'A="{maison}/bin"', f"B={maison}ice/bin", f"C={voisin}/bin", f"D='{maison}'", f"E={maison}"]
+        (maison / ".local/bin/nc-dictee").write_text("\n".join(lignes) + "\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        publie = (self.depot / "home/.local/bin/nc-dictee").read_text().splitlines()
+        self.assertEqual(publie, ['A="@HOME@/bin"', lignes[1], lignes[2], "D='@HOME@'", "E=@HOME@"])
+
+    def test_e7_kdeglobals_sans_historique(self):
+        """E7 : les dialogues KDE écrivent les derniers dossiers ouverts dans kdeglobals ([KFileDialog Settings])."""
+        kde = self.home / ".config/kdeglobals"
+        kde.write_text("[General]\nColorScheme=noctalia\n\n[KFileDialog Settings]\nRecent URLs[$e]=file:///tmp/x/Photos/\n"
+                       "Show hidden files=false\n\n[Icons]\nTheme=Papirus-Dark\nRecent Files=/tmp/x/a.txt\n")
+        r = self.exporter()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.depot / "home/.config/kdeglobals").read_text(),
+                         "[General]\nColorScheme=noctalia\n\n[Icons]\nTheme=Papirus-Dark\n")
+        self.assertIn("historique des dialogues de fichiers retiré", r.stderr)
 
 
 OUTILS = ("bash", "dirname", "mkdir", "mktemp", "find", "rm", "grep", "sed", "cp", "mv", "id", "git", "jq", "python3",

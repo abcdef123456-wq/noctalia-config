@@ -5,6 +5,8 @@
 #   @BROWSER@  navigateur par défaut      @LCX@ @LCY1@..@LCY4@  position des éléments de l'écran de verrouillage
 #   @DISTRO_LOGO@  logo de la barre       @POLKIT@  agent des demandes de mot de passe
 # Aucun secret n'est copié (liste blanche de fichiers). Contrôle final : rien qui ressemble à un secret.
+# Dans un dossier de la liste, seuls les fichiers déjà suivis par git sont publiés ; un nouveau fichier est seulement
+# signalé (NC_EXPORT_NOUVEAUX=oui le publie, sauf liste noire : jetons, clés, historiques, fichiers privés…).
 # Rien n'est supprimé du dépôt : un fichier absent de ~ y reste. Pour le retirer : git rm home/<chemin>.
 # Usage : ./export.sh [--preview]   puis vérifier le diff avant de publier
 set -euo pipefail
@@ -28,6 +30,13 @@ verifier_propre() {
   fi
 }
 if [ "$preview" = 0 ]; then verifier_propre || exit 1; fi
+# Clone partiel (get.sh clone en --depth 1) : sans l'historique, la garde « ancienne version du dépôt » (plus bas) ne
+# reconnaît rien et une installation en retard effacerait les derniers changements. Aperçu compris.
+if [ "$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null || true)" = true ]; then
+  echo "$(t "Export refusé : ce dépôt est un clone partiel (sans son historique), les anciennes versions ne peuvent pas être reconnues. Lance git fetch --unshallow dans $REPO, puis relance l'export." "Export refused: this repository is a shallow clone (without its history), old versions cannot be recognised. Run git fetch --unshallow in $REPO, then export again.")" >&2
+  exit 1
+fi
+have() { command -v "$1" >/dev/null 2>&1; }
 
 # Toutes les substitutions et vérifications se font à côté du dépôt existant.
 stage="$(mktemp -d "$REPO/.nc-export.XXXXXX")"
@@ -188,13 +197,27 @@ HOME_FILES=(
   .zshrc
   .p10k.zsh
   .config/nvim
-  .face
   Pictures/Wallpapers
 )
+# Suivis par git mais jamais pris dans ~ : le dépôt garde sa version (install.sh ne la pose que si ~ n'en a pas).
+# ~/.face est ta photo de profil : jamais publiée (le dépôt a un avatar par défaut).
+DEPOT_SEUL=(
+  .face
+)
+
+# Le dossier personnel devient @HOME@. Échappé pour sed (un « . » ou un « + » dans le chemin n'est pas un joker), et
+# borné : seulement suivi d'un « / », d'un guillemet, d'une espace ou de la fin de ligne (/home/al ne touche pas
+# /home/alice). Un chemin resté tel quel est arrêté par le contrôle final (/home/<nom>).
+home_re="$(printf '%s' "${HOME%/}" | sed 's/[][\\.*^$+?(){}|#]/\\&/g')"
+normaliser_home() { # normaliser_home [options de sed] FICHIER...
+  if [ -z "$home_re" ]; then sed -e '' "$@"; return; fi  # HOME=/ : rien à remplacer
+  sed -E -e "s#${home_re}([/\"' ]|\$)#@HOME@\\1#g" "$@"
+}
 
 # Fichiers de démarrage du shell : des installateurs tiers y ajoutent leurs lignes (export PATH="/home/<nom>/…").
 # L'export publie toujours la version du dépôt, montre l'écart et ne touche jamais au fichier de ~.
-SHELL_GARDES=" .zshrc .zshenv .zprofile .zlogin .bashrc .bash_profile .profile "
+# Les variables de la session uwsm aussi : on y met ANTHROPIC_API_KEY ou OPENAI_API_KEY (seuls les noms sont montrés).
+SHELL_GARDES=" .zshrc .zshenv .zprofile .zlogin .bashrc .bash_profile .profile .config/uwsm/env .config/uwsm/env-hyprland "
 comparer_shell() { # comparer_shell REL BASE INSTALLE
   local rel="$1" base="$2" installe="$3" norm="$stage/shell-normalise.tmp" ecart lignes n
   if [ ! -f "$base" ]; then
@@ -202,7 +225,7 @@ comparer_shell() { # comparer_shell REL BASE INSTALLE
     return 0
   fi
   [ -f "$installe" ] || return 0
-  sed "s|$HOME|@HOME@|g" "$installe" > "$norm"            # la normalisation habituelle des repères
+  normaliser_home -- "$installe" > "$norm"               # la normalisation habituelle des repères
   ecart="$(git --no-pager diff --no-index --no-color -U0 -- "$base" "$norm" \
            | sed -n '/^@@/,$ { /^@@/d; /^\\/d; p }' || true)"
   rm -f -- "$norm"
@@ -259,7 +282,74 @@ cible_sure() { # cible_sure REL INSTALLE
   c="${cible%/}"                                         # « / » devient « » : tout est dessous
   case "$h/" in "$c"/*) refuser "~/$1 mène à ton dossier personnel ou au-dessus ($cible)." "~/$1 leads to your home folder or above ($cible)."; return 1 ;; esac
   case "$r/" in "$c"/*) refuser "~/$1 mène au dépôt ou au-dessus ($cible)." "~/$1 leads to the repository or above ($cible)."; return 1 ;; esac
+  # Ailleurs dans ~ : seulement un dossier du même nom (~/.config/nvim -> ~/dotfiles/nvim). ~/Pictures/Wallpapers ->
+  # ~/Images ferait passer tout ~/Images pour des fonds d'écran.
+  case "$c/" in
+    "$h"/*) [ "${c##*/}" = "${1##*/}" ] || {
+      refuser "~/$1 mène ailleurs dans ton dossier personnel ($cible), pas à un dossier « ${1##*/} ». Fais-le pointer vers un dossier « ${1##*/} », ou remplace le lien par le dossier lui-même." "~/$1 leads elsewhere in your home folder ($cible), not to a “${1##*/}” folder. Point it to a “${1##*/}” folder, or replace the link with the folder itself."
+      return 1; } ;;
+  esac
   return 0
+}
+
+# Fichiers suivis par git sous home/ (chemins relatifs à home/) : d'un dossier de la liste, seuls ceux-là sont publiés.
+declare -A SUIVIS=()
+while IFS= read -r -d '' f; do SUIVIS["${f#home/}"]=1; done < <(git -C "$REPO" ls-files -z -- home 2>/dev/null || true)
+nouveaux_ecartes=0
+
+# Pourquoi un nouveau fichier (pas encore suivi par git) n'est pas publié ; rien s'il peut l'être. La liste noire
+# l'emporte sur NC_EXPORT_NOUVEAUX : jetons, clés, historiques, bases de données, fichiers lisibles par toi seul.
+raison_nouveau() { # raison_nouveau FICHIER CHEMIN_DANS_~
+  local f="$1" nom gps
+  nom="${2##*/}"; nom="${nom,,}"
+  case "/${2,,}/" in */spell/*) t "liste noire" "blocklist"; return ;; esac
+  case "$nom" in
+    auth.json|*.env|.netrwhist|*token*|*secret*|*.pem|*.key|id_*|*history*|*.sqlite|*.sqlite3)
+      t "liste noire" "blocklist"; return ;;
+  esac
+  [ -e "$f" ] || { t "lien cassé" "broken link"; return; }
+  # 0600 ou plus fermé : ni le groupe ni les autres n'y ont droit (un lien : son fichier)
+  if [ -z "$(find -L "$f" -maxdepth 0 -perm /077 2>/dev/null)" ]; then
+    t "fichier privé, lisible par toi seul" "private file, readable only by you"; return
+  fi
+  case "${NC_EXPORT_NOUVEAUX:-}" in
+    oui|1) ;;
+    *) t "pas encore dans le dépôt" "not in the repository yet"; return ;;
+  esac
+  # Images : la position GPS (EXIF, XMP) ne se voit pas dans le diff. Vérifiée par exiftool ; sans lui, refusée.
+  case "$nom" in
+    *.jpg|*.jpeg|*.png|*.webp|*.gif|*.heic|*.heif|*.avif|*.tif|*.tiff|*.bmp|*.jxl|*.dng)
+      if ! have exiftool; then
+        t "image : exiftool absent, la position GPS ne peut pas être vérifiée" "image: exiftool missing, the GPS position cannot be checked"; return
+      fi
+      gps="$(exiftool -q -q -n -s3 -GPSLatitude -GPSLongitude -GPSPosition -- "$f" 2>/dev/null)" ||
+        { t "image illisible par exiftool" "image exiftool cannot read"; return; }
+      [ -z "$gps" ] || { t "image avec une position GPS" "image with a GPS position"; return; } ;;
+  esac
+}
+
+# Un dossier de la liste, fichier par fichier, superposé à celui du dépôt : les fichiers déjà suivis par git sont
+# publiés ; un nouveau ne l'est qu'avec NC_EXPORT_NOUVEAUX=oui et hors liste noire. Un fichier suivi absent de ~
+# reste tel quel dans le dépôt (rien n'est supprimé, comme pour les fichiers de la liste).
+# shellcheck disable=SC2088  # « ~/ » est du texte affiché
+copier_dossier() { # copier_dossier REL INSTALLE DESTINATION
+  local rel="$1" installe="$2" dest="$3" f p raison
+  mkdir -p -- "$dest" || return 1
+  while IFS= read -r -d '' f; do
+    p="${f#"$installe"/}"
+    case "/$p" in */__pycache__/*|*.bak|*.tmp|*~) continue ;; esac   # jamais publiés (nettoyage, plus bas)
+    if [ -z "${SUIVIS["$rel/$p"]:-}" ]; then
+      raison="$(raison_nouveau "$f" "$rel/$p")"
+      if [ -n "$raison" ]; then
+        echo "$(t "nouveau, pas publié : ~/$rel/$p ($raison)" "new, not published: ~/$rel/$p ($raison)")" >&2
+        nouveaux_ecartes=$((nouveaux_ecartes + 1))
+        continue
+      fi
+      echo "$(t "nouveau, publié (NC_EXPORT_NOUVEAUX) : ~/$rel/$p" "new, published (NC_EXPORT_NOUVEAUX): ~/$rel/$p")" >&2
+    fi
+    { mkdir -p -- "$(dirname -- "$dest/$p")" && cp -a --remove-destination -- "$f" "$dest/$p"; } ||
+      { refuser "copie impossible de ~/$rel/$p." "cannot copy ~/$rel/$p."; return 1; }
+  done < <(find -H "$installe" -mindepth 1 ! -type d -print0)
 }
 
 # Les liens à l'intérieur d'un dossier exporté : copiés comme fichiers s'ils mènent dans ce même dossier, sinon
@@ -308,13 +398,13 @@ copy_list() { # copy_list DEST_PREFIX fichier...
     if [ -d "$installe" ]; then
       # Un dossier, ou un lien vers un dossier (~/.config/nvim → ailleurs) : son contenu, jamais le lien lui-même
       # (sa cible contiendrait /home/<nom>). Superposé au dossier du dépôt : les fichiers ajoutés au dépôt et pas
-      # encore installés (nouvelle page de l'île, par exemple) restent.
+      # encore installés (nouvelle page de l'île, par exemple) restent. Seuls les fichiers suivis par git sont pris.
       if [ -e "$dest/$rel" ] && [ ! -d "$dest/$rel" ]; then
         refuser "type incompatible pour $rel (fichier dans le dépôt, dossier dans ~)." "incompatible type for $rel (file in the repository, directory in ~)."
         return 1
       fi
       cible_sure "$rel" "$installe" || return 1
-      cp -a --remove-destination "$installe/." "$dest/$rel"
+      copier_dossier "$rel" "$installe" "$dest/$rel" || return 1
       liens_internes "$rel" "$installe" "$dest/$rel" || return 1
     else
       if [ -d "$dest/$rel" ]; then
@@ -328,6 +418,45 @@ copy_list() { # copy_list DEST_PREFIX fichier...
 
 cp -a "$REPO/home" home
 copy_list home "${HOME_FILES[@]}"
+if [ "$nouveaux_ecartes" -gt 0 ]; then
+  echo "$(t "$nouveaux_ecartes nouveau(x) fichier(s) pas publié(s). Pour publier ceux qui ne sont pas en liste noire : vérifie-les, puis relance avec NC_EXPORT_NOUVEAUX=oui." "$nouveaux_ecartes new file(s) not published. To publish those not on the blocklist: check them, then run again with NC_EXPORT_NOUVEAUX=oui.")" >&2
+fi
+for rel in "${DEPOT_SEUL[@]}"; do
+  # shellcheck disable=SC2088  # « ~/ » est du texte affiché
+  [ ! -e "$HOME/$rel" ] || echo "$(t "jamais publié : ~/$rel (le dépôt garde sa version)" "never published: ~/$rel (the repository keeps its version)")"
+done
+
+# Réglages KDE : les dialogues de fichiers y écrivent les derniers dossiers ouverts ([KFileDialog Settings], Recent
+# URLs). Ces groupes, et toute clé d'historique, ne sont jamais publiés.
+if [ -f home/.config/kdeglobals ] && [ ! -L home/.config/kdeglobals ]; then
+  python3 -I - home/.config/kdeglobals <<'EOF'
+import os, re, sys
+p = sys.argv[1]
+en = os.environ.get("NC_LANGUE") == "en"
+HISTORIQUE = re.compile(r"recent|histor|kfiledialog", re.I)
+lignes = open(p, encoding="utf-8", errors="surrogateescape").read().splitlines(keepends=True)
+garde, sortie, retire = True, [], 0
+for l in lignes:
+    s = l.strip()
+    if s.startswith("[") and s.endswith("]"):
+        garde = not HISTORIQUE.search(s)
+    elif garde and HISTORIQUE.match(s.split("=", 1)[0].strip()):
+        retire += 1                                     # « Recent URLs[$e]=… » hors d'un groupe d'historique
+        continue
+    if garde:
+        sortie.append(l)
+    else:
+        retire += 1
+if retire:
+    while sortie and not sortie[-1].strip():
+        sortie.pop()                                    # pas de lignes vides laissées par un groupe retiré à la fin
+    if sortie and not sortie[-1].endswith("\n"):
+        sortie[-1] += "\n"
+    open(p, "w", encoding="utf-8", errors="surrogateescape").write("".join(sortie))
+    print("kdeglobals: file dialog history removed (not published)" if en
+          else "kdeglobals : historique des dialogues de fichiers retiré (pas publié)", file=sys.stderr)
+EOF
+fi
 
 # Nettoyage : sauvegardes temporaires, caches Python, réglages personnels (jamais publiés)
 find home \( -name '*.bak' -o -name '*.tmp' -o -name '*~' -o -name '__pycache__' \) -prune -exec rm -rf {} +
@@ -337,7 +466,6 @@ printf '%s\n' "-- Généré par nc-profile-sync à chaque changement de profil �
   'return { profil = "balanced", batterie = false, hz = "max" }' > home/.config/hypr/nc/profil.lua
 
 mon=""
-have() { command -v "$1" >/dev/null 2>&1; }
 # Écrans : seulement dans une session Hyprland. Ailleurs hyprctl répond par un message, pas du JSON : ni lui ni jq
 # ne sont utilisés (les repères des écrans sont reposés par alignement avec le dépôt, plus bas).
 mons=""
@@ -351,7 +479,7 @@ fi
 
 while IFS= read -r -d '' f; do
   grep -Iq . "$f" || continue
-  sed -i "s|$HOME|@HOME@|g" "$f"
+  normaliser_home -i -- "$f"
 done < <(find home -type f -print0)
 
 # Repères par alignement avec le dépôt, sans rien demander à ce PC (écran, échelle, navigateur peuvent avoir changé
@@ -625,6 +753,100 @@ if [ -n "$mon" ]; then
     nouvelles="$(grep -F "\"$mon\"" "$f" | grep -vxFf <(grep -F "\"$mon\"" "$REPO/$f" 2>/dev/null || true) || true)"
     [ -z "$nouvelles" ] || bad="$bad"$'\n'"$f"
   done < <(grep -rIlF "\"$mon\"" home 2>/dev/null || true)
+fi
+# Clés d'API, jetons et adresses e-mail : seulement dans une ligne NOUVELLE, absente de la version du fichier dans git
+# (HEAD). nc-ia, nc-noeud et nc_google.py en contiennent exprès (motifs de masquage, noms de champs). Jamais la valeur
+# à l'écran : le fichier, la ligne et le genre de motif.
+secrets="$(python3 -I - "$REPO" home <<'EOF'
+import os, re, subprocess, sys
+from pathlib import Path
+depot, export = Path(sys.argv[1]), Path(sys.argv[2])
+en = os.environ.get("NC_LANGUE") == "en"
+MOTIFS = [
+    ("clé d'API (sk-…)", "API key (sk-…)", r"sk-[A-Za-z0-9_-]{20,}"),
+    ("clé Google (AIza…)", "Google key (AIza…)", r"AIza[0-9A-Za-z_-]{35}"),
+    ("clé Groq (gsk_…)", "Groq key (gsk_…)", r"gsk_[A-Za-z0-9]{40,}"),
+    ("clé AWS (AKIA…)", "AWS key (AKIA…)", r"AKIA[0-9A-Z]{16}"),
+    ("jeton de bot Telegram", "Telegram bot token", r"(?<![0-9])[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"),
+    ("jeton Slack (xox…-)", "Slack token (xox…-)", r"xox[abprs]-"),
+    ("jeton Google (ya29.)", "Google token (ya29.)", r"ya29\."),
+    ("refresh_token rempli", "filled refresh_token",
+     r"""(?i)refresh_token["']?\s*[:=]\s*(?:["'][^"'\s]+|[A-Za-z0-9._/+=-]{16,})"""),
+]
+MOTIFS = [(fr, an, re.compile(m)) for fr, an, m in MOTIFS]
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.([A-Za-z]{2,}))(?![A-Za-z0-9-])")
+# Pas des adresses : unités systemd (nom@instance.service), images @2x, extensions de fichiers
+PAS_UNE_ADRESSE = {"service", "socket", "target", "timer", "path", "mount", "automount", "slice", "scope", "device",
+                   "swap", "desktop", "png", "jpg", "jpeg", "svg", "webp", "gif", "qml", "lua", "luau", "json", "js"}
+
+
+def git(*a, texte=True):
+    return subprocess.run(["git", "-C", str(depot), *a], capture_output=True, text=texte)
+
+
+tete = {}
+r = git("ls-tree", "-r", "-z", "HEAD", "--", "home", "system")
+for e in filter(None, r.stdout.split("\0") if r.returncode == 0 else []):
+    meta, chemin = e.split("\t", 1)
+    if meta.split()[1] == "blob":
+        tete[chemin] = meta.split()[2]
+# Les adresses déjà dans un fichier suivi par git sont permises partout
+r = git("grep", "-h", "-o", "-I", "-E", r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "HEAD", "--", ".")
+suivies = {m.group(0).lower() for l in (r.stdout.splitlines() if r.returncode == 0 else []) for m in EMAIL.finditer(l)}
+
+
+def adresse_permise(m):
+    adresse, domaine, fin = m.group(0).lower(), m.group(1).lower(), m.group(2).lower()
+    local = adresse.split("@", 1)[0]
+    return (domaine.split(".")[0] == "example" or "noreply" in local or "no-reply" in local or fin in PAS_UNE_ADRESSE
+            or re.fullmatch(r"[0-9]+x", domaine.split(".")[0]) is not None or adresse in suivies)
+
+
+def lignes(f):
+    try:
+        with open(f, "rb") as h:
+            b = h.read(8192)
+            if b"\0" in b:
+                return None                             # binaire (fond d'écran…), comme grep -I
+            b += h.read()
+    except OSError:
+        return None
+    return b.decode("utf-8", "replace").splitlines()
+
+
+def lignes_de_git(rel):
+    blob = tete.get(rel)
+    if not blob:
+        return set()
+    r = git("cat-file", "blob", blob, texte=False)
+    return set(r.stdout.decode("utf-8", "replace").splitlines()) if r.returncode == 0 else set()
+
+
+for racine, prefixe in ((export, "home"), (depot / "system", "system")):
+    if not racine.is_dir():
+        continue
+    for f in sorted(racine.rglob("*")):
+        if f.is_symlink() or not f.is_file():
+            continue
+        contenu = lignes(f)
+        if not contenu:
+            continue
+        rel = prefixe + "/" + f.relative_to(racine).as_posix()
+        connues = None
+        for i, l in enumerate(contenu, 1):
+            genres = [an if en else fr for fr, an, m in MOTIFS if m.search(l)]
+            if any(not adresse_permise(m) for m in EMAIL.finditer(l)):
+                genres.append("e-mail address" if en else "adresse e-mail")
+            if not genres:
+                continue
+            if connues is None:
+                connues = lignes_de_git(rel)
+            if l not in connues:
+                print(f"{rel}, {'line' if en else 'ligne'} {i} : {', '.join(genres)}")
+EOF
+)" || secrets="$(t "contrôle des clés impossible (python3)" "key check failed (python3)")"
+if [ -n "$secrets" ]; then
+  bad="$bad"$'\n'"$secrets"$'\n'"$(t "  (ressemble à une clé, un jeton ou une adresse : retire-le de ~, ou, si ce n'est pas un secret, commite d'abord la ligne dans le dépôt)" "  (looks like a key, a token or an address: remove it from ~, or, if it is not a secret, commit the line to the repository first)")"
 fi
 # Un lien sous home/ ne mène jamais hors du dépôt : ni chemin absolu, ni « .. », ni nom du compte
 while IFS= read -r -d '' l; do
