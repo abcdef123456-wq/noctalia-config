@@ -94,7 +94,7 @@ case "$action" in
   modele)
     dmi=/sys/class/dmi/id
     v=$(cat $dmi/sys_vendor 2>/dev/null); n=$(cat $dmi/product_name 2>/dev/null); ver=$(cat $dmi/product_version 2>/dev/null)
-    # Lenovo range le nom commercial dans product_version (« Legion Pro 5 16ADR10 »), product_name n'est qu'un code
+    # Lenovo range le nom commercial dans product_version (« Legion 5 15ARH05 »), product_name n'est qu'un code
     if [ "${v,,}" = lenovo ] && ! inconnu "$ver"; then n=$ver; fi
     if inconnu "$n"; then
       # PC monté : la carte mère

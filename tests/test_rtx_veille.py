@@ -123,7 +123,7 @@ class Base(unittest.TestCase):
             (pci / BUS / "driver").symlink_to(self.sys / "bus/pci/drivers/nvidia")
         # Un Legion (famille à MUX) : sans indice de MUX, nc-gpu-mode répond « sans objet »
         self.ecrire(self.sys / "class/dmi/id/sys_vendor", "LENOVO")
-        self.ecrire(self.sys / "class/dmi/id/product_family", "Legion Pro 5 16ADR10")
+        self.ecrire(self.sys / "class/dmi/id/product_family", "Legion 5 15ARH05")
         sur = "card0" if ecran_sur_nvidia else "card1"
         self.ecrire(self.sys / "class/drm" / f"{sur}-eDP-1/status", "connected")
         alim = self.sys / "class/power_supply"

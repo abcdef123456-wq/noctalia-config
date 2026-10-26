@@ -60,7 +60,7 @@ class GpuMode(unittest.TestCase):
         if edp:
             self.ecrire(f"class/drm/card{n}-eDP-{n + 1}/status", edp)
 
-    def machine(self, vendeur="LENOVO", nom="83LT", famille="Legion Pro 5 16ADR10", uefi=True):
+    def machine(self, vendeur="LENOVO", nom="82B5", famille="Legion 5 15ARH05", uefi=True):
         if uefi:   # OsIndicationsSupported : 4 octets d'attributs, puis 0x7f (bit 0 : démarrage dans le BIOS possible)
             efi = self.sys / "firmware/efi/efivars/OsIndicationsSupported-8be4df61-93ca-11d2-aa0d-00e098032b8c"
             efi.parent.mkdir(parents=True, exist_ok=True)
