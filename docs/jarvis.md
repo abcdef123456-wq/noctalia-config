@@ -737,6 +737,43 @@ Le visuel de `pfp.mp4` apparaît sur fond noir au-dessus de la saisie : atlas Qt
 Son animation s’arrête quand la page est cachée ou quand les effets sont désactivés. Les réglages sont chargés
 à l’ouverture manuelle du panneau et à l’application, sans scrutation périodique.
 
+### AGY sans auto-approbation
+
+Depuis `17525af`, le runner d’origine lance AGY avec `--dangerously-skip-permissions`, l’approbation automatique de
+tous ses outils (shell, fichiers, MCP). Chez nous, AGY tourne avec le vrai HOME du serveur, le `.env` du serveur dans
+son environnement, et le briefing lui fait lire des e-mails et des pages web. Un e-mail ou une page piégés (injection
+de prompt) suffiraient alors à lancer du shell, lire le `.env` ou envoyer des messages.
+
+`nc_runner` retire donc ce drapeau à chaque lancement d’AGY. Les autres moteurs ne sont pas touchés. Sans le drapeau, AGY
+refuse tout outil qui n’est pas autorisé, car il ne peut rien demander sans terminal. Le journal du runner
+(`journalctl --user -u assistant-runner -n 50`) donne alors la règle exacte à ajouter.
+
+Pour que le briefing marche, autorise seulement les outils de **lecture** dont il a besoin. Ajoute-les dans
+`~/.gemini/antigravity-cli/settings.json` sur le serveur, sous `permissions.allow`. Une règle a la forme
+`mcp(<serveur>/<outil>)` :
+
+```json
+{
+  "permissions": {
+    "allow": ["mcp(<serveur>/<outil de liste>)", "mcp(<serveur>/<outil de recherche>)", "mcp(<serveur>/<outil de lecture>)"]
+  }
+}
+```
+
+- Garde les autres clés du fichier telles quelles. Copie les noms exacts depuis le message de refus du journal.
+  Vérifie le résultat sur un tour réel : le format a été lu dans l’aide intégrée d’AGY, pas essayé.
+- N’autorise jamais `mcp(*)`, `command(*)` ni `read_url(*)`, ni un outil qui envoie, supprime, partage ou modifie
+  (e-mail, Drive, agenda…).
+- Rien n’écrit dans ce fichier à ta place : ni le déployeur, ni l’île.
+
+AGY a aussi son propre réglage `toolPermission`, dans le même fichier. S’il vaut `always-proceed`, AGY pourrait
+approuver les outils même sans le drapeau. Au démarrage, le runner l’écrit dans son journal. Choisis alors une autre
+valeur dans l’interface d’AGY (`request-review`).
+
+Pour remettre l’auto-approbation, en connaissant le risque ci-dessus, écris `NC_AGY_SANS_CONFIRMATION=oui` **à la main**
+dans le `.env` du runner, puis redémarre `assistant-runner`. Cette valeur ne peut pas être changée à distance : elle
+est hors de la liste blanche de la gestion (Telegram, île) et le déployeur ne l’écrit jamais.
+
 ## Gestion et extensions
 
 Le registre du serveur fournit la liste des modules et leurs champs ; les secrets sont fournis en écriture seule,

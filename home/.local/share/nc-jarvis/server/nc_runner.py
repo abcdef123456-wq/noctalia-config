@@ -46,6 +46,72 @@ def _sans_jeton_d_origine():
 
 _sans_jeton_d_origine()
 
+# agy en mode « sans confirmation » : 17525af remet --dangerously-skip-permissions dès que le mode n'est pas
+# request-review, et nc_engines impose « default » à agy (request-review planterait ffb19b9). Le drapeau partirait donc à
+# CHAQUE tour, alors qu'agy tourne avec le vrai HOME, le .env du serveur dans son environnement, et que le briefing lui
+# fait lire des e-mails et des pages web : un message piégé (injection de prompt) suffirait à lancer du shell ou à envoyer
+# des fichiers. Le drapeau est retiré, sauf accord écrit à la main dans le .env du serveur (jamais par le déployeur ni
+# par une requête de gestion : hors de CONFIG_PERMIS).
+DRAPEAU_AGY = '--dangerously-skip-permissions'
+_AVEC_VALEUR = ('-p', '--print', '--prompt', '-i', '--prompt-interactive')   # un prompt égal au drapeau reste un prompt
+
+
+def agy_sans_confirmation_permis():
+    import os
+    return os.environ.get('NC_AGY_SANS_CONFIRMATION', '').strip().lower() == 'oui'
+
+
+def commande_agy_sure(cmd):
+    """La commande telle qu'elle partira : sans le drapeau pour agy (sauf accord) ; toute autre commande intacte."""
+    if not cmd or _P(str(cmd[0])).name != 'agy' or agy_sans_confirmation_permis():
+        return list(cmd)
+    sure = [c for i, c in enumerate(cmd) if not (c == DRAPEAU_AGY and i and cmd[i - 1] not in _AVEC_VALEUR)]
+    if len(sure) != len(cmd):
+        import logging
+        logging.getLogger('nc_runner').info('agy : auto-approbation des outils retirée (NC_AGY_SANS_CONFIRMATION non accordé)')
+    return sure
+
+
+def _sans_auto_approbation():
+    """agy_bridge lance agy par asyncio.create_subprocess_exec (oneshot, worker stream-json et repli ; 4ecc57a à
+    17525af) : son « asyncio » devient un relais qui délègue tout, sauf ce lancement, filtré par commande_agy_sure.
+    Même procédé que runner_gateway.httpx = RunnerHttpx(...) dans nc_gateway. Sans agy_bridge : rien."""
+    import sys
+    bridge = sys.modules.get('agy_bridge')
+    vrai = getattr(bridge, 'asyncio', None)
+    if vrai is None or getattr(vrai, 'nc_relais', False):
+        return
+
+    class _Relais:
+        nc_relais = True
+
+        def __getattr__(self, nom):
+            return getattr(vrai, nom)
+
+        async def create_subprocess_exec(self, program, *args, **kw):
+            cmd = commande_agy_sure([program, *args])
+            return await vrai.create_subprocess_exec(*cmd, **kw)
+    bridge.asyncio = _Relais()
+    if not agy_sans_confirmation_permis() and agy_toujours_permis():
+        import logging
+        logging.getLogger('nc_runner').warning(
+            'agy : toolPermission vaut always-proceed dans ~/.gemini/antigravity-cli/settings.json ; il peut approuver les '
+            'outils même sans --dangerously-skip-permissions (voir docs/jarvis.md, « agy sans auto-approbation »)')
+
+
+def agy_toujours_permis():
+    """Le réglage d'agy lui-même (toolPermission, choisi dans son interface) : always-proceed approuverait tout."""
+    import json
+    import os
+    try:
+        with open(os.path.join(os.path.expanduser('~'), '.gemini/antigravity-cli/settings.json'), encoding='utf-8') as f:
+            return str(json.load(f).get('toolPermission', '')).strip().lower() == 'always-proceed'
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+_sans_auto_approbation()
+
 # Pièces jointes (a25e540) : le runner d'origine les écrit dans /tmp/assistant_uploads et ne les efface qu'au bout de
 # 7 jours, au démarrage. Ici : celles de plus d'une heure, au démarrage puis après chaque /run (l'agent a fini avec
 # elles ; une question suivante de la même conversation a encore l'heure pour y revenir).

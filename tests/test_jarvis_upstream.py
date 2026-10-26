@@ -198,11 +198,13 @@ class JetonDOrigineUpstream(unittest.TestCase):
             etat.write_text(json.dumps(dict(engine='agy',settings=dict(agy=dict(model='gemini-3.8-flash-low',permission_mode='always-proceed',
                             session_token='z'*32)),conversations=[],active={})));etat.chmod(0o600)
             env=dict(HOME=d,XDG_RUNTIME_DIR=str(run),SECRET_KEY='isolated-test-secret',AGY_PERSISTENT='0',MEMORY_FILE=str(root/'memory.json'),
-                     PATH=str(bin)+os.pathsep+os.environ['PATH'])
+                     PATH=str(bin)+os.pathsep+os.environ['PATH'],NC_PIECES_JOINTES=str(root/'pieces'))
             names=('main','agy_bridge','memory','nc_runner','nc_engines','uvicorn')
             previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
             try:
                 with patch.dict(os.environ,env):
+                    os.environ.pop('NC_AGY_SANS_CONFIRMATION',None)
+                    if accord is not None:os.environ['NC_AGY_SANS_CONFIRMATION']=accord
                     for name in names:sys.modules.pop(name,None)
                     sys.modules['uvicorn']=types.ModuleType('uvicorn')
                     sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
@@ -240,7 +242,7 @@ class JetonDOrigineUpstream(unittest.TestCase):
 class ModePermissionAgyUpstream(unittest.TestCase):
     """agy 1.4.7 n'a pas --permission-mode (code 2 « flags provided but not defined »). Le vrai runner de chaque révision,
     avec un faux agy : sans l'option citée par --help, le mode plan demandé à /run n'arrive jamais à agy ; avec, il arrive."""
-    def tour(self,option):
+    def tour(self,option,accord=None):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);runtime=root/'runner';runtime.mkdir();bin=root/'bin';bin.mkdir()
             run=root/'run';run.mkdir(mode=0o700)
@@ -282,6 +284,14 @@ class ModePermissionAgyUpstream(unittest.TestCase):
         # 94a3a93 et ffb19b9 passent --permission-mode à agy ; 4ecc57a ne le fait jamais (il n'a que --dangerously-skip-permissions)
         if '"--permission-mode"' not in (UPSTREAM/'home-runner/agy_bridge.py').read_text(): self.skipTest('Ce runner ne passe pas --permission-mode.')
         self.assertIn('--permission-mode plan',self.tour(option=True))
+
+    # #32 (17525af) : à lancer avec l'accord de l'utilisateur (le code amont est exécuté, avec un faux agy)
+    def test_sans_accord_agy_ne_recoit_jamais_l_auto_approbation(self):
+        self.assertNotIn('--dangerously-skip-permissions',self.tour(option=False))
+
+    def test_avec_l_accord_ecrit_l_auto_approbation_revient(self):
+        if '"--dangerously-skip-permissions"' not in (UPSTREAM/'home-runner/agy_bridge.py').read_text(): self.skipTest('Ce runner ne passe pas le drapeau.')
+        self.assertIn('--dangerously-skip-permissions',self.tour(option=False,accord='oui'))
 
 
 @unittest.skipUnless(fastapi and httpx and (UPSTREAM/'gateway/gateway.py').is_file(),'Checkout upstream et dépendances API requis')
