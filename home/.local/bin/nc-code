@@ -63,7 +63,7 @@ def court(d):
 
 
 def decoder_claude(nom):
-    """Le dossier d'un nom de ~/.claude/projects (« /home/x/mon-projet » → « -home-x-mon-projet » : tout ce qui n'est
+    """Le dossier d'un nom de ~/.claude/projects (« un dossier mon-projet » → « -...-mon-projet » : tout ce qui n'est
     pas lettre ou chiffre devient « - »). Prudent : le chemin n'est jamais construit à partir du texte, seulement à
     partir des vrais dossiers existants dont le nom encodé commence ce qui reste ; '' si rien ne correspond."""
     def encode(x):
