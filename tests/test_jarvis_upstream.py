@@ -203,8 +203,6 @@ class JetonDOrigineUpstream(unittest.TestCase):
             previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
             try:
                 with patch.dict(os.environ,env):
-                    os.environ.pop('NC_AGY_SANS_CONFIRMATION',None)
-                    if accord is not None:os.environ['NC_AGY_SANS_CONFIRMATION']=accord
                     for name in names:sys.modules.pop(name,None)
                     sys.modules['uvicorn']=types.ModuleType('uvicorn')
                     sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
@@ -251,11 +249,13 @@ class ModePermissionAgyUpstream(unittest.TestCase):
             agy.write_text('#!/bin/sh\nif [ "$1" = "--help" ]; then echo "Usage of agy:"; '+('echo "  --permission-mode  mode"; ' if option else '')+'exit 0; fi\n'
                            'echo "$@" >> "'+str(root/'args')+'"\necho OK\n');agy.chmod(0o755)
             env=dict(HOME=d,XDG_RUNTIME_DIR=str(run),SECRET_KEY='isolated-test-secret',AGY_PERSISTENT='0',MEMORY_FILE=str(root/'memory.json'),
-                     PATH=str(bin)+os.pathsep+os.environ['PATH'])
+                     PATH=str(bin)+os.pathsep+os.environ['PATH'],NC_PIECES_JOINTES=str(root/'pieces'))
             names=('main','agy_bridge','memory','nc_runner','nc_engines','uvicorn')
             previous={n:sys.modules.get(n) for n in names};oldpath=list(sys.path)
             try:
                 with patch.dict(os.environ,env):
+                    os.environ.pop('NC_AGY_SANS_CONFIRMATION',None)
+                    if accord is not None:os.environ['NC_AGY_SANS_CONFIRMATION']=accord
                     for name in names:sys.modules.pop(name,None)
                     sys.modules['uvicorn']=types.ModuleType('uvicorn')
                     sys.path[:0]=[str(runtime),str(REPO/'home/.local/share/nc-jarvis/server')]
