@@ -60,6 +60,13 @@ Limites, de bout en bout :
   - Deux gros envois au plus sont traités en même temps ; le suivant attend.
 - **Côté runner**, les fichiers reçus sont écrits dans `/tmp/assistant_uploads`, un `/tmp` privé au service. Ceux de plus d'une
   heure sont effacés au démarrage et après chaque question.
+- **Moteurs du bac** (Claude Code, Codex, OpenCode) : ils tournent dans une unité isolée, qui a son propre `/tmp`.
+  - Pour chaque question, les fichiers joints sont copiés dans `pieces-jointes/` de leur dossier de travail, en
+    lecture seule, puis effacés avec lui à la fin du tour.
+  - Seuls les fichiers ordinaires du dossier des pièces jointes sont copiés : pas de lien symbolique ni physique,
+    5 fichiers et 40 Mo au plus.
+  - Un fichier refusé est signalé au moteur comme « non transmis ».
+  - Avec AGY, rien n'est copié : il tourne dans le runner et lit les fichiers directement.
 - Les pièces jointes demandent un serveur JARVIS-BIS à jour (révision a25e540 ou plus récente).
   Un serveur plus ancien ignore les fichiers.
 

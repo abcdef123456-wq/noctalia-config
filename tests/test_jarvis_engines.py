@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import importlib.machinery as importlib_machinery
 import importlib.util as importlib_util
+import re
 import shutil
 import stat
 import subprocess
@@ -690,6 +691,54 @@ class IsolationMoteur(_BaseIsolation):
         moteur=self.args_notes().split('--user --wait')[2]
         for attendu in ('--setenv=ANTHROPIC_API_KEY','--setenv=HOME','BindPaths='+faux,'BindPaths='+lu('.pwd').strip(),'--unit=nc-ia-','KeyringMode=private'):self.assertIn(attendu,moteur)
         for interdit in ('--setenv=XDG_','--setenv=CLAUDE_CONFIG_DIR','--setenv=TELEGRAM_TOKEN','cle-claude-0123456789','BindPaths='+str(self.home)):self.assertNotIn(interdit,moteur)
+
+    def test_les_pieces_jointes_sont_copiees_pour_le_tour_seulement(self):
+        """#31 : le runner cite /tmp/assistant_uploads/… (son /tmp privé) ; le moteur, dans son unité, n'y a pas accès. La
+        demande en cours pointe vers une copie dans pieces-jointes/ du dossier de travail, effacée avec lui. Refusés : un
+        lien symbolique, un lien physique, un fichier hors du dossier, au-delà de 5 fichiers."""
+        self.direct()
+        pieces=self.root/'uploads';pieces.mkdir()
+        os.environ['NC_PIECES_JOINTES']=str(pieces)
+        (pieces/'ab12_notes.txt').write_text('contenu des notes')
+        (self.root/'secret').write_text('SECRET-HORS-DOSSIER')
+        (pieces/'cd34_lien.txt').symlink_to(self.root/'secret')
+        os.link(self.root/'secret',pieces/'ef56_physique.txt')
+        for i in range(6):(pieces/('n%d_x.txt'%i)).write_text('n%d'%i)
+        lignes=["[Fichier fourni par l'utilisateur: %s]"%(pieces/'ab12_notes.txt'),
+                "[Fichier fourni par l'utilisateur: %s]"%(pieces/'cd34_lien.txt'),
+                "[Fichier fourni par l'utilisateur: %s]"%(pieces/'ef56_physique.txt'),
+                "[Fichier fourni par l'utilisateur: %s]"%(self.root/'secret'),
+                "[Fichier fourni par l'utilisateur: %s/../secret]"%pieces]+[
+                "[Fichier fourni par l'utilisateur: %s]"%(pieces/('n%d_x.txt'%i)) for i in range(6)]
+        self.ecrire_cli('p=$(cat)\nprintf "%%s" "$p" > "%(j)s.prompt"\n'
+                        'printf "%%s\\n" "$p" | sed -n "s/^\\[.* par l.utilisateur: \\(.*\\)\\]$/\\1/p" | while read -r f; do cat "$f" >> "%(j)s.lu"; echo >> "%(j)s.lu"; done\n'
+                        'printf \'{"result":"ok"}\\n\''%dict(j=self.journal))
+        r=asyncio.run(self.e.run('\n'.join(lignes)+'\n\nRésume ce fichier.',continue_session=False))
+        self.assertTrue(r['success'],r)
+        vu=self.journal.with_suffix('.prompt').read_text()
+        copie=re.search(r"\[Fichier fourni par l'utilisateur: (\S+/pieces-jointes/ab12_notes\.txt)\]",vu)
+        self.assertTrue(copie,vu)
+        self.assertTrue(copie.group(1).startswith(str(self.rundir/'nc-ia/bac/nc-ia-travail')),copie.group(1))
+        lu=self.journal.with_suffix('.lu').read_text()
+        self.assertIn('contenu des notes',lu)
+        self.assertNotIn('SECRET-HORS-DOSSIER',lu)
+        self.assertNotIn(str(pieces),vu)                                          # aucun chemin du /tmp du runner ne reste
+        self.assertEqual(vu.count('non transmis à ce moteur'),4+2)                  # lien, physique, hors dossier ×2, 6e et 7e
+        self.assertEqual([l for l in lu.splitlines() if l.startswith('n')],['n0','n1','n2','n3'])   # 5 fichiers au plus
+        self.assertIn('Résume ce fichier.',vu)
+        self.assertFalse(Path(copie.group(1)).exists())                           # effacée à la fin du tour
+        self.assertEqual((pieces/'ab12_notes.txt').read_text(),'contenu des notes')
+        self.assertEqual(self.restes_du_bac(),[])
+
+    def test_pieces_jointes_de_l_historique_ignorees_et_copie_sans_exception(self):
+        pieces=self.root/'uploads';pieces.mkdir();os.environ['NC_PIECES_JOINTES']=str(pieces)
+        travail=self.root/'travail';travail.mkdir()
+        self.assertEqual(self.m.copier_pieces('Bonjour',travail),'Bonjour')
+        texte="[Image fournie par l'utilisateur: %s]\nQuoi ?"%(pieces/'absent.png')
+        self.assertEqual(self.m.copier_pieces(texte,travail),"[Fichier joint non transmis à ce moteur : absent.png]\nQuoi ?")
+        self.assertEqual(self.m.copier_pieces(texte,self.root/'inexistant'),"[Fichier joint non transmis à ce moteur : absent.png]\nQuoi ?")
+        src=(Path(self.m.__file__) if getattr(self.m,'__file__',None) else SOURCE).read_text()
+        self.assertIn('full[:len(full)-len(prompt)]+await asyncio.to_thread(copier_pieces,prompt,',src)   # la demande seule
 
     def test_la_source_des_copies_est_celle_de_nc_ia(self):
         """Aucune liste de copies dans nc_engines : le faux HOME vient de la classe Demande de nc-ia, chargée par son chemin."""

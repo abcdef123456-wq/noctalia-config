@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -606,6 +607,67 @@ async def version_opencode(path, dossier):
     return v
 
 
+# Pièces jointes (a25e540) : le runner d'origine les écrit dans /tmp/assistant_uploads (le /tmp privé du runner) et les
+# cite en tête du prompt. Nos CLI tournent dans une unité qui a son propre /tmp : chaque fichier cité est copié, pour ce
+# tour seulement, dans pieces-jointes/ de son dossier de travail (effacé avec lui à la fin du tour), et le prompt pointe
+# vers la copie. Seulement un fichier ordinaire de ce dossier-là, ni lien symbolique ni lien physique, dans les limites
+# du runner ; sinon la ligne dit que le fichier n'est pas transmis.
+PIECE_LIGNE = re.compile(r"^\[(Image fournie|Fichier fourni) par l'utilisateur: ([^\]\n]+)\]$", re.M)
+PIECE_NOM = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}')
+PIECES_MAX, PIECE_MAX_OCTETS, PIECES_MAX_OCTETS = 5, 20 * 1024 * 1024, 40 * 1024 * 1024
+
+
+def dossier_pieces():
+    return os.path.realpath(os.environ.get('NC_PIECES_JOINTES') or '/tmp/assistant_uploads')
+
+
+def _lire_piece(chemin, source, reste):
+    """Le contenu du fichier, ou None : dans source, ordinaire, un seul lien, pas plus de min(20 Mo, reste) octets."""
+    nom = os.path.basename(chemin)
+    if not PIECE_NOM.fullmatch(nom) or os.path.realpath(os.path.dirname(chemin)) != source: return None
+    try: fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError: return None
+    try:
+        st = os.fstat(fd)
+        limite = min(PIECE_MAX_OCTETS, reste)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > limite: return None
+        # le dossier lui-même n'a pas été remplacé entre-temps : le fichier ouvert est bien source/nom
+        if os.path.realpath('/proc/self/fd/%d' % fd) != os.path.join(source, nom) and os.path.isdir('/proc/self/fd'): return None
+        morceaux, total = [], 0
+        while total <= limite:
+            m = os.read(fd, 1024 * 1024)
+            if not m: break
+            morceaux.append(m); total += len(m)
+        return None if total > limite else b''.join(morceaux)
+    except OSError: return None
+    finally: os.close(fd)
+
+
+def copier_pieces(texte, travail):
+    """texte où chaque pièce jointe citée pointe vers sa copie dans travail/pieces-jointes ; jamais d'exception."""
+    lignes = list(PIECE_LIGNE.finditer(texte))
+    if not lignes: return texte
+    source = dossier_pieces()
+    dest = os.path.join(str(travail), 'pieces-jointes')
+    reste, faites, remplacements = PIECES_MAX_OCTETS, 0, {}
+    for m in lignes:
+        chemin = os.path.normpath(m.group(2))
+        nom = os.path.basename(chemin)
+        contenu = _lire_piece(chemin, source, reste) if faites < PIECES_MAX else None
+        nouveau = None
+        if contenu is not None:
+            try:
+                if not os.path.isdir(dest): os.mkdir(dest, 0o700)
+                cible = os.path.join(dest, nom)
+                fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
+                with os.fdopen(fd, 'wb') as f: f.write(contenu)
+                nouveau = '[%s par l\'utilisateur: %s]' % (m.group(1), cible)
+                reste -= len(contenu); faites += 1
+            except OSError: nouveau = None
+        remplacements[m.group(0)] = nouveau or ('[Fichier joint non transmis à ce moteur : %s]' % (nom if PIECE_NOM.fullmatch(nom) else 'nom refusé'))
+    return PIECE_LIGNE.sub(lambda m: remplacements[m.group(0)], texte)
+
+
 def reponse(engine, output):
     if engine == 'claude':
         data = json.loads(output)
@@ -864,9 +926,12 @@ class Engines:
                 travail=None
                 erreurs=[]
                 try:
-                    if iso: code,out=await process(iso.cmd,full,timeout,iso.travail,iso.env,iso.unite,erreurs)
+                    if iso:
+                        full=full[:len(full)-len(prompt)]+await asyncio.to_thread(copier_pieces,prompt,iso.travail)   # la demande seule, pas l'historique
+                        code,out=await process(iso.cmd,full,timeout,iso.travail,iso.env,iso.unite,erreurs)
                     else:
                         travail=await asyncio.to_thread(dossier_travail)
+                        full=full[:len(full)-len(prompt)]+await asyncio.to_thread(copier_pieces,prompt,travail)
                         code,out=await process(args,full,timeout,travail,env_moteur(engine),None,erreurs)
                 finally:
                     if iso: await asyncio.shield(iso.finir())
