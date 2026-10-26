@@ -1,8 +1,9 @@
 #!/bin/sh
 # nc-presse-capture : lancé par l'île à chaque copie (wl-paste --watch). Une ligne par copie, sur la sortie standard :
-#   T:<texte sur une ligne, retours à la ligne remplacés par \037>      texte (4 000 caractères au plus)
+#   T:<texte sur une ligne, retours à la ligne remplacés par \037>      texte (4 000 caractères au plus, « … » s'il est coupé)
 #   I:<octets>:<identifiant>:<chemin>                                   image PNG, gardée en fichier privé (0600) par
 #                                                                       nc-ile-memo dans ~/.local/state/nc/ile/images
+#                                                                       (l'identifiant vient de l'empreinte du contenu)
 # Rien pour une copie de la dictée (marque nc-dictee-copie de moins de 5 s) ni pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret).
 # Le contenu n'est jamais journalisé.
 # Une copie de nc-dictee (texte dicté, marque datée de moins de 5 s) : jamais gardée dans l'historique
@@ -12,21 +13,38 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$m" ]; then
 fi
 t=$(wl-paste --list-types 2>/dev/null) || exit 0
 case "$t" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0 ;; esac
+tmp=""
+trap '[ -n "$tmp" ] && rm -f "$tmp"' EXIT
 if printf '%s' "$t" | grep -q '^image/png'; then
-  id="$(date +%s%N 2>/dev/null || date +%s)$$"
-  p=$(wl-paste -t image/png 2>/dev/null | "${NC_ILE_MEMO:-$HOME/.local/bin/nc-ile-memo}" image "$id") || exit 0
+  # Même image copiée plusieurs fois (recopier depuis l'île) : même identifiant, donc même entrée et même fichier.
+  # Le contenu passe par un fichier temporaire privé (mktemp : 0600) pour en calculer l'empreinte (sha256sum, coreutils).
+  tmp=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/nc-presse.XXXXXX" 2>/dev/null) || exit 0
+  wl-paste -t image/png 2>/dev/null > "$tmp" || exit 0
+  id=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    h=$(sha256sum < "$tmp" 2>/dev/null | cut -c1-32)
+    [ -n "$h" ] && id="h$h"
+  fi
+  [ -n "$id" ] || id="$(date +%s%N 2>/dev/null || date +%s)$$"
+  p=$("${NC_ILE_MEMO:-$HOME/.local/bin/nc-ile-memo}" image "$id" < "$tmp") || exit 0
   [ -n "$p" ] && [ -f "$p" ] && printf 'I:%s:%s:%s\n' "$(wc -c < "$p")" "$id" "$p"
 elif printf '%s' "$t" | grep -qE '^(text/plain|UTF8_STRING|STRING|TEXT)'; then
   printf 'T:'
   # 4 000 caractères (pas octets) : head -c coupait un caractère accentué en deux. python3 compte en caractères et
   # marche pareil sous dash ; ${x:0:n} n'existe pas en sh. Sans python3 : head -c puis iconv -c, qui retire le
-  # morceau de caractère resté au bout.
+  # morceau de caractère resté au bout. Un texte coupé finit par « … ». Le \r est retiré avant le tr : \r\n ne donne
+  # qu'un séparateur.
   if command -v python3 >/dev/null 2>&1; then
-    wl-paste --no-newline -t text 2>/dev/null | python3 -c 'import sys
-d = sys.stdin.buffer.read(20000).decode("utf-8", "ignore")[:4000]
-sys.stdout.buffer.write(d.encode("utf-8"))' | tr '\n\r' '\037\037'
+    wl-paste --no-newline -t text 2>/dev/null | tr -d '\r' | python3 -c 'import sys
+brut = sys.stdin.buffer.read(20001)
+d = brut[:20000].decode("utf-8", "ignore")
+coupe = len(d) > 4000 or len(brut) > 20000
+sys.stdout.buffer.write((d[:4000] + ("…" if coupe else "")).encode("utf-8"))' | tr '\n' '\037'
   else
-    wl-paste --no-newline -t text 2>/dev/null | head -c 4000 | { iconv -c -f UTF-8 -t UTF-8 2>/dev/null || cat; } | tr '\n\r' '\037\037'
+    tmp=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/nc-presse.XXXXXX" 2>/dev/null) || exit 0
+    wl-paste --no-newline -t text 2>/dev/null | tr -d '\r' > "$tmp"
+    { head -c 4000 "$tmp" | { iconv -c -f UTF-8 -t UTF-8 2>/dev/null || cat; }
+      [ "$(wc -c < "$tmp")" -gt 4000 ] && printf '\342\200\246'; } | tr '\n' '\037'
   fi
   printf '\n'
 fi

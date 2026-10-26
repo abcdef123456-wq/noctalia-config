@@ -66,7 +66,10 @@ Tout / Textes / Images, épinglés en tête (épingle sur la carte), suppression
 complet d’un texte long (flèche), « Coller en texte brut » (recopie en `text/plain`, ferme l’île et envoie Ctrl + V
 à la fenêtre active par le dispatcher `send_shortcut` de Hyprland), « Effacer » (les épinglés restent). Clavier : ↑ ↓ choisir,
 Entrée recopier, Suppr supprimer, `/` ou Ctrl + F chercher, Échap vider la recherche. Réglage `ILE_PRESSE` (non : plus
-de capture).
+de capture). Réglage `PRESSE_DUREE` (1, 7 par défaut, 30 jours ou `jamais`) : les entrées non épinglées plus vieilles
+sont effacées quand la liste est lue (démarrage, ouverture de la page) ou écrite (chaque copie), sans minuteur. Une
+même image copiée plusieurs fois ne fait qu'une entrée (identifiant tiré de l'empreinte du contenu). Pendant un partage
+d'écran (`Partage.silence`), les aperçus (textes et miniatures) sont cachés.
 
 ## Intégration Google
 

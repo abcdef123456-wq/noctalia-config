@@ -25,16 +25,31 @@ Singleton {
                                                                      : e.genre === "image" && typeof e.chemin === "string" && typeof e.id === "string")) : []
         entrees = l.map(e => ({ id: String(e.id || e.t || Date.now()), genre: e.genre, texte: e.texte, chemin: e.chemin, octets: e.octets || 0, t: e.t || 0, epingle: !!e.epingle }))
         prete = true
+        purger()
         nettoyerImages()
     })
     // Remplace la liste ; les fichiers des images qui en sortent sont supprimés (jamais ceux des autres)
     function garder(nouvelle) {
+        nouvelle = expirer(nouvelle)
         var restantes = {}
         nouvelle.forEach(e => { if (e.genre === "image") restantes[e.id] = true })
         var parties = entrees.filter(e => e.genre === "image" && !restantes[e.id]).map(e => e.id)
         entrees = nouvelle
         Memo.ecrire("presse", { entrees: entrees })
         if (parties.length) Quickshell.execDetached([bin + "nc-ile-memo", "images-supprimer"].concat(parties))
+    }
+    // Durée de garde PRESSE_DUREE (jours ; « jamais » : pas d'expiration). Les épinglés ne partent jamais. Pas de minuteur :
+    // l'expiration se fait quand la liste est relue (démarrage, ouverture de la page) ou écrite (chaque copie, changement).
+    function expirer(l) {
+        var v = Reglages.val("PRESSE_DUREE", "7")
+        var jours = v === "jamais" ? 0 : (parseFloat(v) || 7)
+        if (jours <= 0) return l
+        var limite = Date.now() - jours * 86400000
+        return l.filter(e => e.epingle || !(e.t > 0 && e.t < limite))
+    }
+    function purger() {
+        var r = expirer(entrees)
+        if (r.length !== entrees.length) garder(r)
     }
     // Au démarrage seulement : les images orphelines d'une session passée (vieilles d'au moins une minute) sont supprimées
     function nettoyerImages() {
@@ -43,9 +58,11 @@ Singleton {
     function ajouter(e) {
         e.t = Date.now(); e.epingle = false
         if (e.genre === "texte") e.id = "t" + e.t
-        var l = entrees.filter(x => !(x.genre === "texte" && e.genre === "texte" && x.texte === e.texte && !x.epingle))
-        // Un texte déjà épinglé n'est pas ajouté une seconde fois
-        if (!(e.genre === "texte" && l.some(x => x.genre === "texte" && x.texte === e.texte && x.epingle))) l.unshift(e)
+        // Même texte, ou même image (l'identifiant vient de l'empreinte du contenu) : l'ancienne entrée est remplacée
+        var pareil = x => x.genre === e.genre && (e.genre === "texte" ? x.texte === e.texte : x.id === e.id)
+        var l = entrees.filter(x => !(pareil(x) && !x.epingle))
+        // Une entrée déjà épinglée n'est pas ajoutée une seconde fois
+        if (!l.some(x => pareil(x) && x.epingle)) l.unshift(e)
         garder(borner(l))
     }
     // Les limites : textes, images, octets ; les épinglés ne partent pas, les plus anciens d'abord
@@ -95,11 +112,22 @@ Singleton {
     }
 
     // Chaque copie : une ligne de nc-presse-capture
+    // Si wl-paste meurt, la capture repart après 2 s, 5 essais de suite au plus (le compteur repart à chaque copie reçue)
+    property int essais: 0
+    onActiveChanged: essais = 0
+    Timer {
+        id: relance
+        interval: 2000
+        onTriggered: if (pp.prete && pp.active && !veilleur.running) { pp.essais++; veilleur.running = true }
+    }
     Process {
+        id: veilleur
         running: pp.prete && pp.active
         command: ["wl-paste", "--watch", pp.bin + "nc-presse-capture"]
+        onExited: if (pp.prete && pp.active && pp.essais < 5) relance.restart()
         stdout: SplitParser {
             onRead: ligne => {
+                pp.essais = 0
                 if (ligne.indexOf("T:") === 0) {
                     let t = ligne.slice(2).replace(/\x1f/g, "\n")    // retours à la ligne passés en \x1f (une ligne par copie)
                     if (t.trim() !== "") pp.ajouter({ genre: "texte", texte: t })
@@ -109,6 +137,5 @@ Singleton {
                 }
             }
         }
-        stderr: StdioCollector {}
     }
 }

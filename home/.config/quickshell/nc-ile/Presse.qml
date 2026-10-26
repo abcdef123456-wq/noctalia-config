@@ -10,6 +10,8 @@ Item {
     id: p
     // Connexion internet (NetworkManager) : hors ligne, le bouton ✦ de l'IA disparaît, il revient avec la connexion
     readonly property bool enLigne: Connexion.enLigne
+    // Pendant un partage d'écran (Partage.silence : dès le premier début), les aperçus sont cachés : ni texte ni miniature
+    readonly property bool masque: Partage.silence
     property string recherche: ""
     property string filtre: "tout"           // tout, textes, images
     property int choix: -1                   // carte choisie au clavier
@@ -18,19 +20,21 @@ Item {
     readonly property int nbTextes: PressePapiers.liste.filter(e => e.genre === "texte").length
     readonly property int nbImages: PressePapiers.liste.length - nbTextes
     function defiler(dy) { return defil.defiler(dy) }
+    // file:// + chemin casse avec #, %, ? ou une espace : chaque segment est encodé (encodeURI laisse passer #)
+    function urlFichier(c) { return "file://" + String(c).split("/").map(encodeURIComponent).join("/") }
     function apercu(e) { return e.texte.replace(/\s+/g, " ").trim() }
     function longue(e) { return e.genre === "texte" && (e.texte.length > 160 || e.texte.split("\n").length > 2) }
     function deplier(e) { var d = Object.assign({}, deplies); if (d[e.id]) delete d[e.id]; else d[e.id] = true; deplies = d }
-    onVisibleChanged: { if (visible) { choix = -1; forceActiveFocus() } }
+    onVisibleChanged: { if (visible) { choix = -1; forceActiveFocus(); PressePapiers.purger() } }
     onVisiblesChanged: if (choix >= visibles.length) choix = visibles.length - 1
 
     Keys.onPressed: e => {
         if (e.key === Qt.Key_Down && visibles.length) { choix = Math.min(visibles.length - 1, choix + 1); e.accepted = true }
         else if (e.key === Qt.Key_Up && visibles.length) { choix = Math.max(0, choix - 1); e.accepted = true }
         else if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && choix >= 0 && choix < visibles.length) { PressePapiers.recopier(visibles[choix]); e.accepted = true }
-        else if (e.key === Qt.Key_Delete && choix >= 0 && choix < visibles.length) { PressePapiers.supprimer(visibles[choix]); e.accepted = true }
+        else if (e.key === Qt.Key_Delete && !champ.activeFocus && choix >= 0 && choix < visibles.length) { PressePapiers.supprimer(visibles[choix]); e.accepted = true }
         else if (e.key === Qt.Key_Escape && (recherche !== "" || champ.activeFocus)) { recherche = ""; champ.text = ""; p.forceActiveFocus(); e.accepted = true }
-        else if (e.key === Qt.Key_Slash || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { champ.forceActiveFocus(); e.accepted = true }
+        else if ((e.key === Qt.Key_Slash && !champ.activeFocus) || (e.key === Qt.Key_F && (e.modifiers & Qt.ControlModifier))) { champ.forceActiveFocus(); e.accepted = true }
     }
 
     Item {
@@ -133,13 +137,13 @@ Item {
                         id: txt
                         visible: !el.image
                         x: 14; y: 10; width: parent.width - 110
-                        text: el.image ? "" : (el.deplie ? el.modelData.texte : p.apercu(el.modelData))
+                        text: el.image ? "" : (p.masque ? "••••••••" : (el.deplie ? el.modelData.texte : p.apercu(el.modelData)))
                         wrapMode: Text.Wrap; maximumLineCount: el.deplie ? 14 : 2; elide: Text.ElideRight; font.pixelSize: 13
                     }
                     ClippingRectangle {
                         visible: el.image
                         x: 10; y: 8; width: 110; height: 70; radius: 9; color: Couleurs.gris2
-                        Image { anchors.fill: parent; source: el.image ? "file://" + el.modelData.chemin : ""; fillMode: Image.PreserveAspectCrop
+                        Image { anchors.fill: parent; source: el.image && !p.masque ? p.urlFichier(el.modelData.chemin) : ""; fillMode: Image.PreserveAspectCrop
                                 asynchronous: true; sourceSize: Qt.size(220, 140) }
                     }
                     Texte { visible: el.image; x: 132; anchors.verticalCenter: parent.verticalCenter; text: "Image" + (el.modelData.octets ? " · " + Math.round(el.modelData.octets / 1024) + Reglages.t(" Ko", " KB") : ""); secondaire: true }
