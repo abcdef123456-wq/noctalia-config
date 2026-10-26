@@ -5,11 +5,12 @@
   nc-apps launch ID   lance l'application ID (nom du fichier .desktop sans l'extension),
                           dans sa propre unité systemd (uwsm-app) et sur le GPU du profil (nc-launch).
   nc-apps files TEXTE fichiers et dossiers du dossier personnel dont le nom contient TEXTE
-                          (JSON, 4 au plus, dossiers cachés exclus)
+                          (JSON, 4 au plus, dossiers cachés et lourds exclus ; arrêt à 50 trouvés ou 1 s)
   nc-apps open CHEMIN ouvre un fichier ou un dossier avec l'appli par défaut
   nc-apps icon NOM    chemin du fichier d'icône d'une appli (nom du lecteur, de la fenêtre ou du .desktop),
                           cherché dans le thème d'icônes actif puis Papirus et hicolor (vide si rien)
 """
+import collections
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import subprocess
 import shlex
 import shutil
 import sys
+import time
 
 # Réglage mémoire propre à l'île (MALLOC_CONF, nc-ile.service) : pas pour les applis qu'elle lance
 os.environ.pop("MALLOC_CONF", None)
@@ -56,19 +58,47 @@ USAGE_EN = """nc-apps: installed applications, for the Super+R search (Noctalia 
   nc-apps launch ID   launches application ID (name of the .desktop file without the extension),
                           in its own systemd unit (uwsm-app) and on the GPU of the profile (nc-launch).
   nc-apps files TEXT  files and folders of the home folder whose name contains TEXT
-                          (JSON, 4 at most, hidden folders excluded)
+                          (JSON, 4 at most, hidden and heavy folders excluded; stops at 50 found or 1 s)
   nc-apps open PATH   opens a file or a folder with the default app
   nc-apps icon NAME   path of an app's icon file (name of the player, of the window or of the .desktop),
                           looked up in the active icon theme then Papirus and hicolor (empty if nothing)"""
 
 LAUNCH = os.path.expanduser("~/.local/bin/nc-launch")
-TERMINAL = ["kitty", "-e"]
+# Recherche de fichiers : arrêt dès MAX_TROUVES noms trouvés ou après DELAI_RECHERCHE secondes (le panneau en montre 2 au plus)
+MAX_TROUVES = 50
+DELAI_RECHERCHE = 1.0
+PROFONDEUR_MAX = 5
+# Dossiers lourds ou sans intérêt pour une recherche de nom (comparés en minuscules ; les dossiers cachés sont déjà exclus)
+DOSSIERS_EXCLUS = {
+    "node_modules", "__pycache__", "venv", "target", "games", "steam", "steamapps", "snap", "wine", "proton",
+    "site-packages", "bower_components", "pods", "__macosx", "virtualenvs",
+}
+# Terminaux connus : option qui précède la commande à lancer (xdg-terminal-exec n'en veut aucune)
+OPTION_TERMINAL = {"xdg-terminal-exec": [], "gnome-terminal": ["--"], "wezterm": ["start", "--"]}
+TERMINAUX = ("kitty", "foot", "alacritty", "gnome-terminal", "konsole", "wezterm", "xterm")
 # Outils système installés comme dépendances : masqués de la recherche (pas désinstallés)
 HIDDEN = {
     "avahi-discover", "bssh", "bvnc", "jconsole-java-openjdk", "jshell-java-openjdk", "lstopo",
     "qv4l2", "qvidcap", "uuctl", "uxterm", "xterm", "qt6ct", "nvidia-settings", "auto-cpufreq-gtk",
     "nm-connection-editor", "org.torproject.torbrowser-launcher.settings",
 }
+
+
+def commande_terminal(cmd):
+    """La commande qui ouvre cmd dans un terminal : xdg-terminal-exec, $TERMINAL, puis le premier terminal installé
+    (kitty, foot, alacritty, gnome-terminal, konsole…). Liste vide s'il n'y en a aucun."""
+    candidats = ["xdg-terminal-exec"]
+    try:
+        candidats.append(shlex.split(os.environ.get("TERMINAL", "")))
+    except ValueError:
+        pass
+    candidats += [[t] for t in TERMINAUX]
+    for c in candidats:
+        if isinstance(c, str):
+            c = [c]
+        if c and shutil.which(c[0]):
+            return c + OPTION_TERMINAL.get(os.path.basename(c[0]), ["-e"]) + list(cmd)
+    return []
 
 
 def app_dirs():
@@ -220,7 +250,9 @@ def cmd_launch(app_id):
     if not argv:
         sys.exit(T(f"Commande vide : {app_id}", f"Empty command: {app_id}"))
     if e.get("Terminal") == "true":
-        argv = TERMINAL + argv
+        argv = commande_terminal(argv)
+        if not argv:
+            sys.exit(T(f"Aucun terminal trouvé pour lancer {app_id}", f"No terminal found to launch {app_id}"))
     if e.get("Path"):
         try:
             os.chdir(os.path.expanduser(e["Path"]))
@@ -241,20 +273,33 @@ def cmd_files(text):
         print("[]")
         return
     found = []
-    for root, dirs, files in os.walk(home):
-        depth = root[len(home):].count(os.sep)
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__")]
-        if depth >= 5:
-            dirs[:] = []
-        for name, is_dir in [(d, True) for d in dirs] + [(f, False) for f in files if not f.startswith(".")]:
+    fin = time.monotonic() + DELAI_RECHERCHE
+    # Niveau par niveau (les dossiers proches d'abord) ; arrêt dès assez de résultats ou le délai passé
+    file = collections.deque([(home, 0)])
+    while file and len(found) < MAX_TROUVES and time.monotonic() < fin:
+        root, depth = file.popleft()
+        try:
+            with os.scandir(root) as it:
+                entrees = list(it)
+        except OSError:
+            continue
+        for en in entrees:
+            name = en.name
+            try:
+                is_dir = en.is_dir()
+            except OSError:
+                continue
+            if name.startswith("."):
+                continue
+            if is_dir and depth < PROFONDEUR_MAX and not en.is_symlink() and name.lower() not in DOSSIERS_EXCLUS:
+                file.append((en.path, depth + 1))
             low = name.lower()
             pos = low.find(q)
             if pos < 0:
                 continue
-            path = os.path.join(root, name)
             # nom qui commence par le texte > mot qui commence par le texte > ailleurs ; puis moins profond, plus court
             word = pos == 0 or not low[pos - 1].isalnum()
-            found.append(((0 if pos == 0 else 1 if word else 2), depth, len(name), path, name, is_dir))
+            found.append(((0 if pos == 0 else 1 if word else 2), depth, len(name), en.path, name, is_dir))
     found.sort()
     def where(p):
         parts = os.path.relpath(os.path.dirname(p), home).split(os.sep)
@@ -356,8 +401,8 @@ if __name__ == "__main__":
         cmd_list()
     elif len(sys.argv) == 3 and sys.argv[1] == "launch":
         cmd_launch(sys.argv[2])
-    elif len(sys.argv) == 3 and sys.argv[1] == "files":
-        cmd_files(sys.argv[2])
+    elif len(sys.argv) in (3, 4) and sys.argv[1] == "files" and (len(sys.argv) == 3 or sys.argv[2] == "--"):
+        cmd_files(sys.argv[-1])      # « files -- TEXTE » : TEXTE peut commencer par « - »
     elif len(sys.argv) == 3 and sys.argv[1] == "open":
         cmd_open(sys.argv[2])
     elif len(sys.argv) == 3 and sys.argv[1] == "icon":

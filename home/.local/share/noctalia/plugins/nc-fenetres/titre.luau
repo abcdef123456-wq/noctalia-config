@@ -179,5 +179,7 @@ function onScroll(axe, pas)
 end
 
 -- Le flux se relance tout seul s'il s'arrête (Hyprland redémarré…)
-noctalia.runStream("while :; do '" .. c.NC .. "' suivre; sleep 2; done", recevoir)
+-- Le chemin est entre apostrophes (celles qu'il contient sont protégées) : un dossier personnel avec espace ou apostrophe marche
+local cheminSur = "'" .. string.gsub(c.NC, "'", "'\\''") .. "'"
+noctalia.runStream("while :; do " .. cheminSur .. " suivre; sleep 2; done", recevoir)
 noctalia.setUpdateInterval(60000)

@@ -402,6 +402,12 @@ end
 local function connecter(n)
   local nom, actif, secu, connu = n[2], n[1] == "1", n[4] == "1", n[5] == "1"
   if actif then return end
+  -- Un nom de réseau qui commence par « - » serait pris pour une option de nmcli : on ne lance rien
+  if string.sub(nom, 1, 1) == "-" then
+    noctalia.notifyError("Wi-Fi", tr("Le nom de réseau « " .. nom .. " » n’est pas accepté (il commence par « - »).",
+      "The network name “" .. nom .. "” isn’t accepted (it starts with “-”)."))
+    return
+  end
   if secu and not connu then saisie = nom; dessiner(); return end
   enCours[nom] = true
   local argv = connu and { "nmcli", "con", "up", "id", nom } or { "nmcli", "dev", "wifi", "connect", nom }
@@ -434,6 +440,8 @@ local function pageWifi()
         ui.input({ key = "mdp-" .. nom, flexGrow = 1, password = true, placeholder = tr("Mot de passe de « " .. nom .. " »", "Password for “" .. nom .. "”"), focus = true,
           onSubmit = function(mdp)
             saisie = nil; enCours[nom] = true
+            -- Le mot de passe passe en argument de nmcli (visible dans la liste des processus le temps de la commande) :
+            -- méthode gardée pour l'instant, à rediscuter après un essai sur un vrai réseau.
             faire({ "nmcli", "dev", "wifi", "connect", nom, "password", mdp }, function(r)
               enCours[nom] = nil
               if r.exitCode ~= 0 then noctalia.notifyError("Wi-Fi", tr("Mot de passe refusé pour « " .. nom .. " ».", "Wrong password for “" .. nom .. "”.")) end

@@ -64,6 +64,9 @@ local usage = {}
 local usagePath = nil
 local appear = 1
 local ticking = false
+local DEBOUNCE_MS = 200   -- recherche de fichiers : attendre 200 ms sans frappe
+local rechercheA = 0      -- heure (ms) où lancer la recherche de fichiers en attente, 0 = aucune
+local numRequete = 0      -- numéro de la dernière recherche de fichiers : une réponse plus ancienne est ignorée
 
 -- ── Historique d'utilisation (persistant) ───────────────────────────────────
 local function loadUsage()
@@ -193,6 +196,8 @@ end
 local function search()
   local q = noctalia.string.trim(query)
   selected = (q == "") and 0 or 1
+  rechercheA = 0                 -- une recherche de fichiers en attente pour l'ancien texte est annulée
+  numRequete = numRequete + 1    -- et la réponse d'une recherche déjà partie sera ignorée
   calcValue = nil
   files = {}
   appResults = {}
@@ -202,7 +207,8 @@ local function search()
     local question = noctalia.string.trim(q:sub(2))
     results = {{ key = "assistant", name = tr("Demander à l'IA", "Ask the AI"), glyph = "sparkles",
       hint = tr("La réponse dans un terminal", "The answer in a terminal"), run = function()
-        if question ~= "" then noctalia.runAsync({ noctalia.expandPath("~/.local/bin/nc-ia"), "terminal", question }) end
+        -- « -- » : une question qui commence par « - » n'est jamais prise pour une option
+        if question ~= "" then noctalia.runAsync({ noctalia.expandPath("~/.local/bin/nc-ia"), "terminal", "--", question }) end
         panel.close()
       end }}
     return
@@ -212,7 +218,8 @@ local function search()
   buildItems()
   -- Calcul et fichiers arrivent en différé ; une réponse pour un ancien texte est ignorée
   if expr then
-    noctalia.runAsync({ "qalc", "-t", expr }, function(r)
+    -- Entre parenthèses : une expression qui commence par « - » (« =--help ») ne peut pas passer pour une option de qalc
+  noctalia.runAsync({ "qalc", "-t", "(" .. expr .. ")" }, function(r)
       if noctalia.string.trim(query) ~= q then return end
       local v = noctalia.string.trim(r.stdout or "")
       if r.exitCode == 0 and v ~= "" and v ~= expr and not v:find("error", 1, true) then
@@ -222,16 +229,27 @@ local function search()
       end
     end, 3000)
   elseif #q >= 3 then
-    noctalia.runAsync({ APPS_CMD[1], "files", q }, function(r)
-      if noctalia.string.trim(query) ~= q then return end
-      local list = r.exitCode == 0 and noctalia.json.decode(r.stdout)
-      if type(list) == "table" and #list > 0 then
-        files = list
-        buildItems()
-        render()
-      end
-    end, 3000)
+    -- Pas de parcours à chaque frappe : on attend 200 ms sans frappe (voir onFrameTick)
+    rechercheA = noctalia.nowMs() + DEBOUNCE_MS
+    if not ticking then ticking = true; panel.setNeedsFrameTick(true) end
   end
+end
+
+-- Recherche de fichiers (après l'anti-rebond). Seule la réponse de la dernière requête compte.
+local function chercherFichiers()
+  local q = noctalia.string.trim(query)
+  if #q < 3 or q:sub(1, 1) == "?" or mathExpr(q) then return end
+  numRequete = numRequete + 1
+  local mien = numRequete
+  noctalia.runAsync({ APPS_CMD[1], "files", "--", q }, function(r)
+    if mien ~= numRequete or noctalia.string.trim(query) ~= q then return end
+    local list = r.exitCode == 0 and noctalia.json.decode(r.stdout)
+    if type(list) == "table" and #list > 0 then
+      files = list
+      buildItems()
+      render()
+    end
+  end, 3000)
 end
 
 -- ── Lancement ───────────────────────────────────────────────────────────────
@@ -377,9 +395,12 @@ function render()
 end
 
 function onFrameTick(deltaMs)
-  appear = math.min(1, appear + math.min(tonumber(deltaMs) or 16, 64) / FADE_MS)
-  render()
-  if appear >= 1 and ticking then ticking = false; panel.setNeedsFrameTick(false) end
+  if appear < 1 then
+    appear = math.min(1, appear + math.min(tonumber(deltaMs) or 16, 64) / FADE_MS)
+    render()
+  end
+  if rechercheA > 0 and noctalia.nowMs() >= rechercheA then rechercheA = 0; chercherFichiers() end
+  if appear >= 1 and rechercheA == 0 and ticking then ticking = false; panel.setNeedsFrameTick(false) end
 end
 
 -- ── Clavier ─────────────────────────────────────────────────────────────────
@@ -402,7 +423,7 @@ end
 
 -- ── Cycle de vie ────────────────────────────────────────────────────────────
 local function loadApps(after)
-  noctalia.runAsync(APPS_CMD[1] .. " list", function(r)
+  noctalia.runAsync({ APPS_CMD[1], "list" }, function(r)
     local list = r.exitCode == 0 and noctalia.json.decode(r.stdout)
     if type(list) == "table" then
       apps = list
@@ -429,12 +450,15 @@ function onOpen(context)
   appear = 0
   ticking = true
   if noctalia.fileExists(ECO) then appear = 1; ticking = false end
+  if rechercheA > 0 then ticking = true end   -- texte de départ : la recherche de fichiers attend encore son délai
   panel.setNeedsFrameTick(ticking)
   render()
   loadApps(render)   -- rafraîchit la liste (nouvelles applis) sans retarder l'ouverture
 end
 
 function onClose()
+  rechercheA = 0
+  numRequete = numRequete + 1   -- une réponse qui arrive après la fermeture est ignorée
   if ticking then ticking = false; panel.setNeedsFrameTick(false) end
 end
 
