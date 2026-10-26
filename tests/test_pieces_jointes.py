@@ -4,11 +4,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import types
 import unittest
+from unittest import mock
 
-from tests import test_assistant as base
+from tests import test_assistant as base  # les modules seulement : leurs classes de tests ne sont pas rejouées ici
 from tests import test_assistant_page as page
-from tests import test_assistant as base  # le module seulement : sa classe de tests ne doit pas être rejouée ici
 
 BIN = base.BIN
 
@@ -72,7 +73,7 @@ class PiecesJointes(unittest.TestCase):
         secret = self.fichier(".ssh/id", dossier=self.root)
         lien = self.dossier / "innocent.txt"
         lien.symlink_to(secret)
-        self.refus(str(lien), "id", "protected")
+        self.refus(str(lien), "innocent.txt", "symbolic link")
 
     def test_contenu_secret_refuse(self):
         self.preparer()
@@ -167,6 +168,92 @@ class PiecesJointes(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn(".env", r.stderr)
 
+    def test_variable_hors_de_home_aucune_piece_jointe(self):
+        # Point 1 : si les protections déplacées ne se calculent pas, rien ne part (et pas « aucune protection »)
+        self.preparer()
+        p = self.fichier("ok.txt")
+        self.assertEqual(len(self.m.preparer_fichiers([p])), 1)
+        for env in (dict(XDG_CONFIG_HOME="/x/cfg", CODEX_HOME="relatif"), dict(CODEX_HOME="relatif"),
+                    dict(XDG_CONFIG_HOME="/mnt/ailleurs/cfg")):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env):
+                self.refus(p, "cannot be computed")
+
+    def test_course_dossier_remplace_par_un_lien_apres_realpath(self):
+        # Point 2 : le fichier ouvert doit être celui qui a été vérifié
+        self.preparer()
+        d = self.dossier / "lien"
+        d.mkdir()
+        (d / "logins.json").write_bytes(b"innocent")
+        secret = self.root / ".mozilla/p"
+        secret.mkdir(parents=True)
+        (secret / "logins.json").write_bytes(b"SECRET")
+        cible, vrai, fait = str(d / "logins.json"), os.path.realpath, []
+
+        def faux(p, *a, **k):
+            r = vrai(p, *a, **k)
+            if str(p) == cible and not fait:
+                fait.append(1)
+                shutil.rmtree(d)
+                d.symlink_to(secret)
+            return r
+        with mock.patch.object(self.m.os.path, "realpath", faux):
+            self.refus(cible, "changed during the check")
+        self.assertTrue(fait)
+
+    def test_limite_totale_sur_les_octets_lus(self):
+        # Point 4 : st_size peut mentir ; la limite se vérifie sur ce qui est lu
+        self.preparer()
+        fichiers = []
+        for nom, taille in (("g1.bin", 20 * 1024 * 1024), ("g2.bin", 20 * 1024 * 1024), ("un.txt", 1)):
+            with open(self.dossier / nom, "wb") as f:
+                f.truncate(taille)
+            fichiers.append(str(self.dossier / nom))
+        vrai = os.fstat
+
+        def ment(fd):
+            r = vrai(fd)
+            return types.SimpleNamespace(st_mode=r.st_mode, st_dev=r.st_dev, st_ino=r.st_ino, st_nlink=r.st_nlink, st_size=0)
+        with mock.patch.object(self.m.os, "fstat", ment):
+            with self.assertRaises(self.m.Erreur) as e:
+                self.m.preparer_fichiers(fichiers)
+        self.assertIn("40", str(e.exception))
+
+    def test_telegram_jeton_refuse(self):
+        self.preparer()
+        self.refus(self.fichier("t.txt", b"bot 123456789:AA" + b"x" * 33), "t.txt")
+
+    def test_chemin_relatif_seulement_en_ligne_de_commande(self):
+        self.preparer()
+        self.fichier("rel.txt")
+        ancien = os.getcwd()
+        os.chdir(self.dossier)
+        self.addCleanup(os.chdir, ancien)
+        self.assertEqual(self.m.preparer_fichiers(["rel.txt"], relatif_ok=True)[0]["filename"], "rel.txt")
+        self.refus("rel.txt", "absolute")
+
+    def test_transport_http_clair_sur_internet_refuse(self):
+        for url, attendu in (("https://exemple.test", True), ("http://127.0.0.1:8000", True), ("http://[::1]:8000", True),
+                             ("http://10.0.0.5", True), ("http://172.16.4.1", True), ("http://192.168.1.2:8000", True),
+                             ("http://100.101.102.103", True), ("http://pc.tail1234.ts.net", True), ("http://mon-pi.local", True),
+                             ("http://203.0.113.5", False), ("http://exemple.test", False), ("http://172.32.0.1", False),
+                             ("http://100.128.0.1", False)):
+            with self.subTest(url=url):
+                self.assertEqual(self.m.transport_sur(url), attendu)
+        self.preparer()
+        p = self.fichier("a.txt")
+        fichiers = self.m.preparer_fichiers([p])
+        with self.assertRaises(self.m.Erreur) as e:
+            self.m.demander(dict(self.c, URL="http://203.0.113.5:8000", TIMEOUT=2.0), "a" * 32, "q", suivi=False, fichiers=fichiers)
+        self.assertIn("plain HTTP", str(e.exception))
+        self.assertFalse(self.server.recus)
+
+    def test_proxy_ignore_avec_des_fichiers(self):
+        self.preparer()
+        fichiers = self.m.preparer_fichiers([self.fichier("a.txt")])
+        with mock.patch.dict(os.environ, {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9"}):
+            self.m.demander(dict(self.c, TIMEOUT=2.0), "a" * 32, "q", suivi=False, fichiers=fichiers)
+        self.assertEqual(len(self.server.recus), 1)
+
     def faux(self, nom, script):
         f = self.bin / nom
         f.write_text("#!/bin/sh\n" + script)
@@ -186,9 +273,11 @@ class PiecesJointes(unittest.TestCase):
         self.faux("zenity", "exit 1\n")
         self.assertEqual(json.loads(self.cli("selectionner-fichiers").stdout), dict(ok=True, files=[]))
         (self.bin / "zenity").unlink()
-        self.faux("kdialog", 'printf "/x\\n/y\\n"\n')
+        a, b = self.fichier("a.txt"), self.fichier("b.txt")
+        self.faux("kdialog", f'printf "%s\\n" "{a}" "{b}" /etc/hostname /inexistant\n')
         self.env["PATH"] = str(self.bin)
-        self.assertEqual(json.loads(self.cli("selectionner-fichiers").stdout), dict(ok=True, files=["/x", "/y"]))
+        # kdialog : seuls les fichiers existants du dossier du premier morceau restent
+        self.assertEqual(json.loads(self.cli("selectionner-fichiers").stdout), dict(ok=True, files=[a, b]))
         (self.bin / "kdialog").unlink()
         r = self.cli("selectionner-fichiers")
         sortie = json.loads(r.stdout)

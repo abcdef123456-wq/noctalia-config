@@ -294,6 +294,25 @@ def configuration_depuis(d):
                         CLIENT_ID=champ("client_id").strip() if "client_id" in d else avant.get("CLIENT_ID", "")))
 
 
+def transport_sur(url):
+    """Vrai si des fichiers peuvent partir vers cette URL : HTTPS, ou HTTP vers cet ordinateur (127.0.0.0/8, ::1), un
+    réseau privé (RFC 1918, noms .local / .lan) ou Tailscale (100.64.0.0/10, *.ts.net), jamais du HTTP en clair sur
+    Internet."""
+    u = urllib.parse.urlsplit(url)
+    if u.scheme == "https":
+        return True
+    h = (u.hostname or "").lower().rstrip(".")
+    if not h:
+        return False
+    if hote_tailscale(url) or h == "localhost" or h.endswith((".local", ".lan", ".home.arpa")):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return any(ip in ipaddress.ip_network(n) for n in ("127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+
+
 def avertissement(url):
     if hote_prive(url):
         return T("Adresse locale ou privée : elle ne marche que sur le réseau du serveur. Depuis ailleurs, utilise l'adresse "
@@ -383,7 +402,7 @@ def cle_session(c):
     return "desktop:" + repli if repli else None
 
 
-def api(c, endpoint, payload=None):
+def api(c, endpoint, payload=None, sans_proxy=False):
     if endpoint == "/api/nc/manage" and isinstance(payload, dict) and "session_key" not in payload:
         cle = cle_session(c)
         if cle:
@@ -393,7 +412,9 @@ def api(c, endpoint, payload=None):
                                  headers={"Content-Type": "application/json", "X-Secret-Key": c["SECRET_KEY"]},
                                  method="GET" if payload is None else "POST")
     try:
-        with urllib.request.build_opener(SansRedirection()).open(req, timeout=c["TIMEOUT"] if corps else 10) as r:
+        # sans_proxy (fichiers joints) : http_proxy et https_proxy de l'environnement sont ignorés, la requête va droit au serveur
+        gestionnaires = [urllib.request.ProxyHandler({})] if sans_proxy else []
+        with urllib.request.build_opener(SansRedirection(), *gestionnaires).open(req, timeout=c["TIMEOUT"] if corps else 10) as r:
             contenu = r.read(MAX_RESPONSE + 1)
     except urllib.error.HTTPError as e:
         if 300 <= e.code < 400:
@@ -1098,8 +1119,13 @@ def demander(c, sid, question, chat=False, briefing=False, suivi=True, mesures=N
                     if pc:
                         corps["client_id"] = pc
                     if fichiers:
+                        if not transport_sur(c["URL"]):
+                            raise Erreur(T("Les fichiers ne partent pas en HTTP clair sur Internet : utilise une adresse HTTPS, "
+                                           "Tailscale ou locale pour JARVIS.",
+                                           "Files are not sent over plain HTTP on the Internet: use an HTTPS, Tailscale or "
+                                           "local address for JARVIS."))
                         corps["files"] = fichiers
-                    r = api(c, "/api/ask", corps)
+                    r = api(c, "/api/ask", corps, sans_proxy=bool(fichiers))
                     texte, proposes = choix_reponse(r, texte_sortie(r))
                     if choix is not None:
                         choix[:] = proposes
@@ -1287,7 +1313,7 @@ NOM_SENSIBLE = re.compile(r"\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|e
 # Le contenu : une clé privée, ou une clé d'API (mêmes familles que le contrôle de export.sh, plus AWS et Slack)
 CLE_PRIVEE = re.compile(rb"PRIVATE KEY-----")
 CLE_API = re.compile(rb"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-                     rb"|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{20,}")
+                     rb"|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{20,}|\d{8,10}:AA[\w-]{30,}")
 
 
 def charger_bac():
@@ -1303,38 +1329,58 @@ def charger_bac():
         return None
 
 
+def reglage_conf(nom, defaut=""):
+    """Une valeur de ~/.config/nc/reglages.conf (NOM=valeur), sans guillemets."""
+    try:
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
+            if l.startswith(nom + "="):
+                return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
 def chemin_protege(reel):
     """Le chemin protégé (texte lisible) qui contient `reel` (déjà résolu par realpath), ou None. Les listes sont celles
     de nc-bac (PROTEGES et BAC_INTERDITS, utilisées par read_file de nc-noeud), aux emplacements par défaut ET
-    déplacés (XDG_*, CLAUDE_CONFIG_DIR…); les « * » valent pour un seul niveau."""
+    déplacés (XDG_*, CLAUDE_CONFIG_DIR…), plus NOEUD_BAC_INTERDITS et le backend JARVIS déployé; les « * » valent pour un
+    seul niveau. Quand les protections ne peuvent pas être calculées (variable qui pointe hors de ~ ou chemin relatif,
+    réglage ou unité illisibles), Erreur : par prudence, aucun fichier ne part."""
     reel = str(reel)
     for base in SYSTEME_REFUSE:
         if reel == base or reel.startswith(base + "/"):
             return base
     home = os.path.realpath(str(Path.home()))
     bac = charger_bac()
-    liste, depl = list(PROTEGES_PLUS), {}
+    liste, depl, absolus = list(PROTEGES_PLUS), {}, []
     if bac:
-        liste += list(bac.PROTEGES) + list(bac.BAC_INTERDITS)
+        impossible = Erreur(T("Les protections de tes dossiers secrets ne peuvent pas être calculées (variable XDG_* ou "
+                              "CODEX_HOME… hors de ton dossier personnel, réglage ou service illisible) : aucun fichier n'est joint.",
+                              "The protections for your secret folders cannot be computed (an XDG_* or CODEX_HOME… variable "
+                              "outside your home, or an unreadable setting or service): no file is attached."))
         try:
             depl = bac.deplacements(home)
         except ValueError:
-            depl = {}
+            raise impossible from None
+        extra = bac.perso(reglage_conf)
+        backend = bac.jarvis_dossiers(home)
+        if extra is None or backend is None:
+            raise impossible
+        liste += list(bac.PROTEGES) + list(bac.BAC_INTERDITS) + extra
+        absolus = [str(b) for b in backend]
+    for b in absolus:
+        if reel == b or reel.startswith(b + "/"):
+            return b
     for rel in dict.fromkeys(liste):
-        if "*" in rel:
-            n = len(Path(rel).parts)
-            try:
-                parts = Path(reel).relative_to(home).parts
-            except ValueError:
-                continue
-            if len(parts) >= n and fnmatch.fnmatchcase("/".join(parts[:n]), rel):
-                return "~/" + rel
-            continue
         lieux = {os.path.realpath(os.path.join(home, rel))}
         if bac:
             lieux.add(os.path.realpath(str(bac.emplacement(home, rel, depl))))
         for lieu in lieux:
-            if reel == lieu or reel.startswith(lieu + "/"):
+            if "*" in rel:
+                n = len(Path(lieu).parts)
+                if fnmatch.fnmatchcase("/".join(Path(reel).parts[:n]), lieu):
+                    return "~/" + rel
+            elif reel == lieu or reel.startswith(lieu + "/"):
                 return "~/" + rel
     return None
 
@@ -1365,8 +1411,9 @@ def fichier_refuse(chemin, reel, donnees=None):
     return None
 
 
-def chemin_local(brut):
-    """Le chemin d'un texte ou d'une URL file:// locale (sans hôte, ou localhost) ; Erreur sinon."""
+def chemin_local(brut, relatif_ok=False):
+    """Le chemin d'un texte ou d'une URL file:// locale (sans hôte, ou localhost) ; Erreur sinon. relatif_ok (ligne de
+    commande seulement) : un chemin relatif devient absolu ; l'île garde son exigence de chemins complets."""
     if not isinstance(brut, str) or not brut.strip() or "\0" in brut:
         raise Erreur(T("Chemin de fichier invalide.", "Invalid file path."))
     ch = brut.strip()
@@ -1379,12 +1426,14 @@ def chemin_local(brut):
         if "\0" in ch:
             raise Erreur(T("Chemin de fichier invalide.", "Invalid file path."))
     ch = os.path.expanduser(ch)
+    if relatif_ok and not os.path.isabs(ch):
+        ch = os.path.abspath(ch)
     if not os.path.isabs(ch):
         raise Erreur(T("Le chemin du fichier doit être complet.", "The file path must be absolute."))
     return ch
 
 
-def preparer_fichiers(bruts):
+def preparer_fichiers(bruts, relatif_ok=False):
     """Valide et lit les fichiers à joindre : [{"filename", "content_base64"}] pour /api/ask. Erreur claire (qui nomme le
     fichier) au premier refus. 5 fichiers, 20 Mo chacun, 40 Mo en tout ; doublons ignorés. Rien n'est lu si l'IA est
     coupée. La taille est vue (fstat) AVANT chaque lecture, qui reste bornée."""
@@ -1392,13 +1441,21 @@ def preparer_fichiers(bruts):
         raise Erreur(message_ia_coupee())
     chemins = []
     for brut in bruts:
-        ch = chemin_local(brut)
+        ch = chemin_local(brut, relatif_ok)
         if ch not in chemins:
             chemins.append(ch)
     if len(chemins) > MAX_FICHIERS:
         raise Erreur(T(f"{MAX_FICHIERS} fichiers au plus par envoi.", f"{MAX_FICHIERS} files at most per request."))
     sortie, vus, total = [], set(), 0
     for ch in chemins:
+        nom = os.path.basename(ch) or ch
+        try:
+            lien = stat.S_ISLNK(os.lstat(ch).st_mode)
+        except OSError:
+            lien = False
+        if lien:                                             # le nom affiché ne dirait pas quel fichier part
+            raise Erreur(T(f"« {nom} » est un lien symbolique : joins le vrai fichier.",
+                           f"“{nom}” is a symbolic link: attach the real file."))
         reel = os.path.realpath(ch)
         nom = os.path.basename(reel) or ch
         motif = fichier_refuse(ch, reel)
@@ -1411,6 +1468,18 @@ def preparer_fichiers(bruts):
             raise Erreur(T(f"Impossible d'ouvrir « {nom} ».", f"Cannot open “{nom}”.")) from None
         try:
             st = os.fstat(fd)
+            # Un dossier du chemin remplacé par un lien entre la vérification et l'ouverture : le fichier ouvert doit
+            # être celui qu'on a vérifié, puis on refait les contrôles sur son vrai chemin
+            try:
+                vrai = os.path.realpath(f"/proc/self/fd/{fd}")
+            except OSError:
+                vrai = ""
+            if vrai != reel:
+                raise Erreur(T(f"« {nom} » a changé pendant la vérification : réessaie.",
+                               f"“{nom}” changed during the check: try again."))
+            motif = fichier_refuse(ch, vrai)
+            if motif:
+                raise Erreur(motif)
             if not stat.S_ISREG(st.st_mode):
                 raise Erreur(T(f"« {nom} » n'est pas un fichier ordinaire.", f"“{nom}” is not a regular file."))
             f = os.fdopen(fd, "rb")
@@ -1432,15 +1501,28 @@ def preparer_fichiers(bruts):
                 raise Erreur(T(f"Trop de données : {MAX_TOTAL // 1048576} Mo au plus en tout (« {nom} » dépasse).",
                                f"Too much data: {MAX_TOTAL // 1048576} MB at most in total (“{nom}” goes over)."))
             donnees = f.read(MAX_FICHIER + 1)
-        if len(donnees) > MAX_FICHIER:                       # le fichier a grossi pendant la lecture
+        # Les limites se vérifient aussi sur les octets LUS : st_size peut mentir (fichier qui grossit, /proc)
+        if len(donnees) > MAX_FICHIER:
             raise Erreur(T(f"« {nom} » est trop gros : {MAX_FICHIER // 1048576} Mo au plus par fichier.",
                            f"“{nom}” is too large: {MAX_FICHIER // 1048576} MB at most per file."))
+        if total + len(donnees) > MAX_TOTAL:
+            raise Erreur(T(f"Trop de données : {MAX_TOTAL // 1048576} Mo au plus en tout (« {nom} » dépasse).",
+                           f"Too much data: {MAX_TOTAL // 1048576} MB at most in total (“{nom}” goes over)."))
         motif = fichier_refuse(ch, reel, donnees)
         if motif:
             raise Erreur(motif)
         total += len(donnees)
         sortie.append({"filename": nom, "content_base64": base64.b64encode(donnees).decode("ascii")})
     return sortie
+
+
+def filtrer_kdialog(morceaux):
+    """kdialog sépare par un saut de ligne, qu'un nom piégé peut contenir (un dossier « d\\n » donne deux morceaux, dont
+    un vrai fichier ailleurs). Ne restent que les morceaux qui sont des fichiers existants dans le dossier du premier."""
+    if not morceaux:
+        return []
+    dossier = os.path.dirname(morceaux[0])
+    return [m for m in morceaux if os.path.isabs(m) and os.path.dirname(m) == dossier and os.path.isfile(m)]
 
 
 def selectionner_fichiers():
@@ -1470,6 +1552,8 @@ def selectionner_fichiers():
         raise Erreur(T("Le sélecteur de fichiers a échoué.", "The file picker failed."))
     sortie = r.stdout[:-1] if r.stdout.endswith("\n") else r.stdout     # le saut de ligne final
     fichiers = [p for p in sortie.split(coupe) if p] if r.returncode == 0 else []
+    if coupe == "\n":
+        fichiers = filtrer_kdialog(fichiers)
     print(json.dumps(dict(ok=True, files=fichiers[:MAX_FICHIERS * 4]), ensure_ascii=False), flush=True)
     return 0
 
@@ -1586,7 +1670,7 @@ def main():
                 chat(c, " ".join(getattr(a, "question", [])))
             else:
                 mesures = {} if getattr(a, "mesurer", False) else None
-                fichiers = preparer_fichiers(a.fichiers) if getattr(a, "fichiers", None) else None
+                fichiers = preparer_fichiers(a.fichiers, relatif_ok=True) if getattr(a, "fichiers", None) else None
                 question = " ".join(getattr(a, "question", []))
                 if fichiers and not question.strip():
                     question = T("Analyse ces fichiers", "Analyze these files")

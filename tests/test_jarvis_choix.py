@@ -206,6 +206,21 @@ class Passerelle(unittest.TestCase):
         self.reponses = ["ok"]
         self.assertEqual(self.appeler("/api/ask", dict(prompt="a" * 8000))[0], 200)
 
+    def test_api_ask_gros_corps_semaphore_et_authentification_invisible(self):
+        """Fichiers joints : un corps de plus de 1 Mo passe (deux à la fois au plus, jamais de semaphore perdu) ; si
+        l'authentification ne peut pas être vérifiée d'ici (TypeError), seuls les corps de 1 Mo au plus sont lus."""
+        gros = json.dumps(dict(prompt="a" * (2 * 1024 * 1024))).encode()
+        self.reponses = ["ok", "ok", "ok"]
+        self.assertEqual(self.appeler("/api/ask", None, brut=gros)[0], 200)
+        self.assertEqual(self.api._SEM_GROS._value, 2)
+        with patch.object(self.api, "LIMITE_ASK", 3 * 1024 * 1024):                 # refusé en route : semaphore rendu
+            self.assertEqual(self.appeler("/api/ask", None, brut=gros + b" " * (2 * 1024 * 1024))[0], 413)
+        self.assertEqual(self.api._SEM_GROS._value, 2)
+        self.up.require_secret = lambda: None                                       # signature inconnue : TypeError
+        self.assertEqual(self.appeler("/api/ask", None, brut=gros)[0], 413)
+        self.assertEqual(self.appeler("/api/ask", dict(prompt="petit"))[0], 200)
+        self.assertEqual(self.api._SEM_GROS._value, 2)
+
     def test_choix_deja_extraits_par_le_serveur(self):
         # JARVIS-BIS 3d1c6b6 renvoie lui-même « choices » : gardés s'ils respectent nos limites, retirés sinon
         f = self.api._avec_choix

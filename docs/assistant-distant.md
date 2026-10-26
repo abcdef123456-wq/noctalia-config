@@ -44,7 +44,10 @@ Pour accéder au serveur à travers Internet, utiliser son accès HTTPS ; le cer
 Dans l'île, le trombone et le glisser-déposer joignent jusqu'à 5 fichiers à une question (20 Mo chacun, 40 Mo en tout),
 aussi avec `nc-assistant demander -f fichier`. **Les fichiers joints sont envoyés (en base64) au serveur JARVIS configuré**,
 et à lui seul : jamais à l'IA du bureau ni à un autre service. Les clés, certificats, fichiers `.env`, dossiers de secrets
-(`~/.ssh`, `~/.gnupg`, navigateurs…) et fichiers contenant une clé privée ou une clé d'API sont refusés. Le sélecteur
+(`~/.ssh`, `~/.gnupg`, navigateurs…) et fichiers contenant une clé privée ou une clé d'API sont refusés. Ce contrôle n'est qu'une aide, pas une garantie : il reconnaît les motifs de clés les plus courants (clés privées,
+jetons sk-, ghp_, AWS, Slack, Telegram…) mais ne voit pas tous les secrets. Les liens symboliques sont refusés, et les
+fichiers ne partent pas en HTTP clair sur Internet (HTTPS, Tailscale, réseau local ou cet ordinateur seulement) ; pour cet
+envoi, les variables `http_proxy` et `https_proxy` sont ignorées. Le sélecteur
 demande `zenity` (ou `kdialog`, `yad`). Le gateway du dépôt accepte des corps de 64 Mo pour ce champ `files`.
 
 ## Depuis un autre réseau (Wi-Fi différent, Internet)
