@@ -12,6 +12,7 @@
 # (contrairement à lspci ou au module GPU de fastfetch).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+ALIM="${NC_POWER_SUPPLY:-${NC_SYSFS:-/sys}/class/power_supply}"   # alimentations (NC_POWER_SUPPLY, NC_SYSFS : tests)
 
 gpu_name() { # $1 = dossier PCI
   local d=$1 ven dev rev name=""
@@ -63,7 +64,7 @@ inconnu() { [[ -z "$1" || "${1,,}" =~ (to be filled|system product|default strin
 # médiane des 30 derniers. Sortie : « santé<TAB>cycles » (cycles vide si inconnu), rien sans batterie.
 sante() {
   local b pl or cy f jour
-  for b in /sys/class/power_supply/BAT*; do
+  for b in "$ALIM"/BAT*; do
     pl=$(cat "$b/energy_full" 2>/dev/null || cat "$b/charge_full" 2>/dev/null)
     or=$(cat "$b/energy_full_design" 2>/dev/null || cat "$b/charge_full_design" 2>/dev/null)
     cy=$(cat "$b/cycle_count" 2>/dev/null)
@@ -143,18 +144,16 @@ case "$action" in
     pct=$(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower/devices/DisplayDevice \
           org.freedesktop.UPower.Device Percentage 2>/dev/null | awk '{printf "%d", $2 + 0.5}')
     if [ -z "$pct" ] || [ "$pct" = 0 ]; then
-      for b in /sys/class/power_supply/BAT*; do [ -r "$b/capacity" ] && { pct=$(<"$b/capacity"); break; }; done
+      for b in "$ALIM"/BAT*; do [ -r "$b/capacity" ] && { pct=$(<"$b/capacity"); break; }; done
     fi
-    if [ -n "$pct" ] && ls -d /sys/class/power_supply/BAT* >/dev/null 2>&1; then
+    if [ -n "$pct" ] && ls -d "$ALIM"/BAT* >/dev/null 2>&1; then
       sante=$(sante | cut -f1)
       [ -n "$sante" ] && parts+=("$(t "$pct % (santé $sante %)" "$pct% (health $sante%)")") || parts+=("$(t "$pct %" "$pct%")")
     fi
-    ac=""
-    for a in /sys/class/power_supply/*; do
-      [ "$(cat "$a/type" 2>/dev/null)" = Mains ] && ac=$(cat "$a/online" 2>/dev/null) && break
-    done
     if [ ${#parts[@]} -gt 0 ]; then
-      [ "$ac" = 1 ] && parts+=("$(t "sur secteur" "plugged in")") || parts+=("$(t "sur batterie" "on battery")")
+      # Même test que le reste du bureau (nc-gpu-regle) : un chargeur USB-C compte comme le secteur
+      . "$HOME/.local/bin/nc-gpu-regle" 2>/dev/null || nc_sur_batterie() { return 0; }
+      nc_sur_batterie && parts+=("$(t "sur batterie" "on battery")") || parts+=("$(t "sur secteur" "plugged in")")
     fi
     # Profil de la plateforme (instantané, suit TLP / power-profiles-daemon), sinon D-Bus
     prof=$(cat "${NC_SYSFS:-/sys}/firmware/acpi/platform_profile" 2>/dev/null)
@@ -194,7 +193,7 @@ case "$action" in
 #   nc-sysinfo uptime   time since boot
 FIN
     else
-      sed -n '2,6p' "$0"
+      sed -n '2,9p' "$0"
     fi
     exit 1 ;;
 esac

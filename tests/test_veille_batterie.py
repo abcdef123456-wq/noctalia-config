@@ -160,14 +160,16 @@ class CommandesListeners(unittest.TestCase):
             (dossier / nom).chmod(0o755)
         # Le vrai nc-ecran (les listeners l'appellent par ~/.local/bin), devant un faux hyprctl
         shutil.copy2(REPO / "home/.local/bin/nc-ecran", bin_ / "nc-ecran")
+        # La règle « sur batterie » partagée (sourcée par les listeners), lue dans le faux power_supply
+        shutil.copy2(REPO / "home/.local/bin/nc-gpu-regle", bin_ / "nc-gpu-regle")
         self.env = dict(os.environ, HOME=str(self.r), XDG_RUNTIME_DIR=str(self.run), PATH=f"{faux}:/usr/bin:/bin",
-                        HYPRLAND_INSTANCE_SIGNATURE="test")
+                        HYPRLAND_INSTANCE_SIGNATURE="test", NC_POWER_SUPPLY=str(self.ps))
         self.l = listeners(SRC)
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def materiel(self, batterie_=True, secteur=False):
+    def materiel(self, batterie_=True, secteur=False, type_chargeur="Mains"):
         shutil.rmtree(self.ps, ignore_errors=True)
         self.ps.mkdir()
         if batterie_:
@@ -175,7 +177,7 @@ class CommandesListeners(unittest.TestCase):
             (self.ps / "BAT0/type").write_text("Battery\n")
             (self.ps / "BAT0/online").write_text("1\n")
         (self.ps / "AC").mkdir()
-        (self.ps / "AC/type").write_text("Mains\n")
+        (self.ps / "AC/type").write_text(type_chargeur + "\n")
         (self.ps / "AC/online").write_text("1\n" if secteur else "0\n")
 
     def jouer(self, cmd):
@@ -205,6 +207,15 @@ class CommandesListeners(unittest.TestCase):
         self.materiel(secteur=True)
         self.assertEqual(self.jouer(dim["on-timeout"]), [])
         self.assertEqual(self.jouer(normal["on-timeout"]), ["nc-brightness dim"])
+
+    def test_chargeur_usb_c_compte_comme_le_secteur(self):
+        # Un chargeur USB-C (type USB ou USB_C) branché n'est pas « sur batterie » : pas d'assombrissement à 60 s
+        dim = batterie(self.l, "nc-brightness dim")[0]
+        for type_ in ("USB", "USB_C"):
+            self.materiel(secteur=True, type_chargeur=type_)
+            self.assertEqual(self.jouer(dim["on-timeout"]), [], type_)
+            self.materiel(secteur=False, type_chargeur=type_)
+            self.assertEqual(self.jouer(dim["on-timeout"]), ["nc-brightness dim"], type_)
 
     def test_ecran_verrouille(self):
         general = re.search(r"(?ms)^general\s*\{.*?^\}", SRC).group(0)

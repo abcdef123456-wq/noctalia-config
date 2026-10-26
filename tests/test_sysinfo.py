@@ -62,6 +62,37 @@ class Sysinfo(unittest.TestCase):
         self.assertTrue(self.profil("bizarre", dbus="performance").endswith("Performance"))
         self.assertNotIn("Perso", self.profil("bizarre"))
 
+    def alimentation(self, chargeurs):
+        """Une batterie à 80 % et ces chargeurs [(type, online)] dans un faux power_supply ; la vraie règle du bureau
+        (nc-gpu-regle) est copiée dans le HOME du test."""
+        ps = self.sys / "class/power_supply"
+        shutil.rmtree(ps, ignore_errors=True)
+        (ps / "BAT0").mkdir(parents=True)
+        (ps / "BAT0/type").write_text("Battery\n")
+        (ps / "BAT0/capacity").write_text("80\n")
+        for i, (type_, online) in enumerate(chargeurs):
+            (ps / f"AC{i}").mkdir()
+            (ps / f"AC{i}/type").write_text(type_ + "\n")
+            (ps / f"AC{i}/online").write_text(online + "\n")
+        (self.tmp / ".local/bin").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / "home/.local/bin/nc-gpu-regle", self.tmp / ".local/bin/nc-gpu-regle")
+        self.faux("busctl", "exit 1\n")
+
+    def test_secteur_usb_c_compte_comme_le_secteur(self):
+        # Un chargeur USB-C (type USB ou USB_C) branché : « sur secteur », pas « sur batterie »
+        for type_ in ("Mains", "USB", "USB_C"):
+            self.alimentation([(type_, "1")])
+            self.assertIn("sur secteur", self.lancer("power"), type_)
+            self.alimentation([(type_, "0")])
+            self.assertIn("sur batterie", self.lancer("power"), type_)
+
+    def test_aide_francaise_complete(self):
+        env = dict(os.environ, HOME=str(self.tmp), NC_LANGUE="fr")
+        r = subprocess.run(["bash", str(SCRIPT), "inconnu"], env=env, capture_output=True, text=True, timeout=30)
+        for mot in ("modele", "gpu", "ecrans", "disques", "power", "sante", "uptime"):
+            self.assertIn(f"nc-sysinfo {mot}", r.stdout)
+        self.assertNotIn("Une ligne vide", r.stdout)
+
     def carte(self, vendor, device, **env_sup):
         d = self.sys / "bus/pci/devices/0000:01:00.0"
         d.mkdir(parents=True, exist_ok=True)

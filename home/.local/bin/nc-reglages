@@ -1998,8 +1998,8 @@ def texte_veille(vals, src):
     if secteur:
         # PC branché, ou sans batterie (PC de bureau) : veille après ce délai
         texte += ("\n# nc-reglages : veille sur secteur\nlistener {\n    timeout = %d\n    on-timeout = sh -c 'ls -d "
-                  "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; for s in /sys/class/power_supply/*; "
-                  "do [ \"$(cat $s/type)\" = Mains ] && [ \"$(cat $s/online)\" = 1 ] && exec systemctl suspend; done; exit 0'\n}\n"
+                  "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; . ~/.local/bin/nc-gpu-regle; "
+                  "nc_sur_batterie || exec systemctl suspend; exit 0'\n}\n"
                   % (secteur * 60))
     return (f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
             f"veille : {susp} min, sur secteur : {secteur or 'jamais'}, sur batterie : assombri après "
