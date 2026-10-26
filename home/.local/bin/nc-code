@@ -175,6 +175,9 @@ def projets(delai=1.0):
     for sources in (projet_noctalia(), projets_claude(), projets_nvim(), projets_zoxide(), projets_balayage(delai)):
         for d in sources:
             r = os.path.realpath(d)
+            # les copies de travail temporaires des agents (Claude Code : .claude/worktrees/…) ne sont pas des projets
+            if "/.claude/worktrees/" in r + "/":
+                continue
             if r not in vus:
                 vus.add(r)
                 res.append(d.rstrip("/") or "/")

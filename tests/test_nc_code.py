@@ -80,6 +80,14 @@ class NcCode(unittest.TestCase):
         self.assertFalse([x for x in l if "/.cache/" in x])                # dossiers cachés ignorés
         self.assertLess(l.index(str(c)), l.index(str(d)))                  # project.nvim avant le balayage
 
+    def test_copies_de_travail_des_agents_ecartees(self):
+        a = self.depot("dev/vrai")
+        w = self.depot("dev/vrai/.claude/worktrees/agent-1")
+        self.programme("zoxide", f'printf "%s\\n" "{w}" "{a}"')
+        l = self.liste()
+        self.assertIn(str(a), l)
+        self.assertNotIn(str(w), l)
+
     def test_sessions_de_claude_decodees_prudemment(self):
         p = self.depot("dev/mon-projet.v2")
         q = self.depot("dev/mon")                                          # « mon » ne doit pas avaler « mon-projet.v2 »
