@@ -33,7 +33,8 @@ Singleton {
     property int delaiIndicateur: 1500    // ms ; contre le clignotement d'une simple capture d'écran
     property int delaiFin: 1000           // ms de grâce après toute fin : sur un écran fixe, Hyprland envoie fin (0,5 s sans cliché)
                                           // puis début au cliché suivant ; les bulles ne repartent pas entre les deux
-    property int delaiFilet: 14400000     // 4 h : filet si une fin se perdait (ne tourne que pendant un partage)
+    property int delaiFilet: 86400000     // 24 h : filet si une fin se perdait (ne tourne que pendant un partage). Hyprland n'envoie screencast
+                                          // qu'au début et à la fin : un filet court coupait l'indicateur en plein partage long
     signal courteFinie(var notif)
     signal termine(int n)                 // vrai partage fini, n bulles retenues (n > 0)
 
