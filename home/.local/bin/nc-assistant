@@ -1312,6 +1312,7 @@ def main():
         p.add_argument("question", nargs="*")
         if nom == "demander":
             p.add_argument("--flux", action="store_true")
+            p.add_argument("--stdin", action="store_true", help=T("La question vient de l'entrée standard (invisible dans la liste des processus)", "The question comes from standard input (not visible in the process list)"))
             p.add_argument("--mesurer", "--timings", action="store_true", help=T("Mesures de durée sur stderr (JSON, sans requête supplémentaire)", "Timings on stderr (JSON, no extra request)"))
     sous.add_parser("briefing")
     sous.add_parser("requete-ile", help=argparse.SUPPRESS)
@@ -1323,6 +1324,8 @@ def main():
     p.add_argument("--local", action="store_true")
     a = parser.parse_args()
     commande = a.commande or "chat"
+    if getattr(a, "stdin", False):                      # nc-ia : la question ne passe jamais par argv (lisible dans /proc)
+        a.question = [sys.stdin.buffer.read(4 * 1024 * 1024).decode("utf-8", "replace")]
     flux = getattr(a, "flux", False)
     try:
         if commande in ("configurer", "configure"):

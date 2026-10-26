@@ -28,6 +28,7 @@ Réglages : nc-reglages → Intelligence artificielle → « Laisser JARVIS pilo
 """
 import asyncio
 import base64
+import collections
 import contextlib
 from datetime import datetime
 import fnmatch
@@ -116,6 +117,9 @@ MAX_FICHIER = 5 * 1024 * 1024      # lecture et écriture de fichiers, comme le 
 MAX_SORTIE = 1024 * 1024           # sortie d'une commande renvoyée au serveur (chaque flux)
 MAX_TEXTE = 64 * 1024              # ce que la carte peut montrer en entier : au-delà, pas de confirmation possible
 MAX_TRAME = 32 * 1024 * 1024       # message reçu du serveur
+MAX_TACHES = 4                     # demandes du serveur traitées en même temps (les autres attendent leur tour)
+NOTIFY_MAX = 5                     # notifications affichées au plus par NOTIFY_FENETRE secondes (le reste est refusé)
+NOTIFY_FENETRE = 60
 COURT = 400                        # caractères montrés avant « Voir tout »
 SORTIE_DEFINITIVE = 3              # configuration absente ou refusée : systemd ne relance pas (RestartPreventExitStatus)
 
@@ -165,7 +169,18 @@ ECRITURE_SEULEMENT = [".config/nc", ".local/bin", ".config/hypr", ".config/uwsm"
                       ".config/containers/systemd", ".local/share/nc-jarvis", ".local/share/claude", ".config/nvim",
                       ".vimrc", ".config/tmux", ".tmux.conf", ".zshrc.perso", ".p10k.zsh", ".oh-my-zsh",
                       ".local/share/nvim", ".cargo/config*", ".config/starship.toml", ".config/mpv/scripts",
-                      ".zcompdump*", ".zshrc.zwc", ".cache/gitstatus", ".cache/p10k-*"]
+                      ".zcompdump*", ".zshrc.zwc", ".cache/gitstatus", ".cache/p10k-*",
+                      # lancés plus tard par le système : serveur audio (PipeWire, WirePlumber lancent des scripts et des
+                      # modules), direnv (.envrc plus bas, partout)
+                      ".config/pipewire", ".config/wireplumber", ".config/direnv", ".local/share/direnv",
+                      ".local/share/pipewire", ".local/share/wireplumber",
+                      # options de lancement lues par les navigateurs et Electron (--load-extension…), surcharges flatpak,
+                      # mpv en entier (scripts, mpv.conf, input.conf), applis par défaut
+                      ".config/*-flags.conf", ".local/share/flatpak/overrides", ".config/mpv", ".config/mimeapps.list"]
+# Écriture seulement, PARTOUT dans l'arborescence : ce que git ou direnv exécutent tout seul en entrant dans un dossier
+# ou en lançant git (hooks, config d'un dépôt, .envrc), quel que soit le dépôt
+NOMS_ECRITURE_PARTOUT = {".envrc"}
+SOUS_GIT_ECRITURE = {"hooks", "config", "info"}      # après un composant « .git » (dépôts, sous-modules, worktrees)
 # Lecture seulement : historiques des shells (des secrets y restent souvent)
 LECTURE_SEULEMENT = [".bash_history", ".zsh_history", ".local/share/fish/fish_history", ".python_history"]
 
@@ -196,6 +211,9 @@ class Refus(Exception):
 
 class Definitif(Exception):
     """Impossible de se connecter tant que la configuration ne change pas (pas de relance)."""
+
+
+NOTIFY_RECENTES = collections.deque()    # instants (horloge monotone) des dernières notifications affichées
 
 
 def horloge():
@@ -649,6 +667,54 @@ def rendre_visible(texte):
     return re.sub(r"\n{3,}", "\n\n", "".join(out))             # au plus 2 sauts de ligne de suite
 
 
+LIGNES_NOTIFICATION = 12           # lignes qu'une notification montre sans rien couper
+
+
+def marques_visibles(ligne):
+    """Plus de 2 marques combinantes (Mn, Me) de suite débordent sur la ligne voisine (effet « Zalgo ») : dites."""
+    out, i = [], 0
+    while i < len(ligne):
+        j = i
+        while j < len(ligne) and unicodedata.category(ligne[j]) in ("Mn", "Me"):
+            j += 1
+        if j - i > 2:
+            out.append(T(f"⟨{j - i} marques⟩", f"⟨{j - i} marks⟩"))
+        elif j > i:
+            out.append(ligne[i:j])
+        else:
+            out.append(ligne[i])
+            j = i + 1
+        i = j
+    return "".join(out)
+
+
+def pour_carte(texte):
+    """Le texte d'une confirmation, tel qu'on doit le lire : caractères cachés rendus visibles, blancs de fin de ligne
+    enlevés, longues suites d'espaces au milieu d'une ligne dites (⟨40 espaces⟩) et lignes vides regroupées en un
+    marqueur visible (⋯ 38 lignes vides ⋯). Sinon 40 lignes d'espaces pousseraient la vraie commande hors de la carte.
+    Renvoie (texte nettoyé, nombre de lignes du texte d'origine)."""
+    # Compté et coupé AVANT rendre_visible (qui réduit \n{3,} à \n\n) : le nombre dit est celui des vraies lignes
+    lignes = [marques_visibles(rendre_visible(l).replace("⋯", "⟨\\u22ef⟩")) for l in str(texte).split("\n")]
+    out, vides = [], 0
+
+    def fin_de_vides():
+        if vides == 1:
+            out.append("")
+        elif vides > 1:
+            out.append(T(f"⋯ {vides} lignes vides ⋯", f"⋯ {vides} empty lines ⋯"))
+    for ligne in lignes:
+        ligne = ligne.rstrip()
+        if not ligne:
+            vides += 1
+            continue
+        fin_de_vides()
+        vides = 0
+        out.append(re.sub(r"(?<=\S)[^\S\n]{8,}(?=\S)",
+                          lambda m: T(f"⟨{len(m.group())} espaces⟩", f"⟨{len(m.group())} spaces⟩"), ligne))
+    fin_de_vides()
+    return "\n".join(out), len(lignes)
+
+
 def une_ligne(texte):
     """Un texte venu du serveur (origine, chemin lu), sur une seule ligne et sans caractère caché : pour les titres et
     corps de notification, où un saut de ligne ou un U+202E ferait lire autre chose."""
@@ -738,6 +804,21 @@ def resoudre(brut):
 DOSSIERS_SURS = ("/usr", "/opt", "/nix/store")
 
 
+def depot_dotfiles():
+    """Le dossier où le dépôt noctalia-config est cloné (~/.config/nc/depot, une ligne), ou None."""
+    try:
+        with open(HOME / ".config/nc/depot", "rb") as f:
+            brut = f.read(4096).decode("utf-8", "replace").strip()
+    except OSError:
+        return None
+    if not brut or "\0" in brut or "\n" in brut:
+        return None
+    d = Path(brut).expanduser()
+    if not d.is_absolute() or d == Path("/") or d == HOME or d in HOME.parents:
+        return None                              # un chemin absurde ne doit pas tout protéger (ou rien)
+    return d
+
+
 def protege(cible, ecriture):
     """Le chemin protégé qui contient cible (déjà résolue), ou None. Les « * » valent pour un seul niveau."""
     liste = PROTEGES + (ECRITURE_SEULEMENT if ecriture else LECTURE_SEULEMENT)
@@ -748,6 +829,26 @@ def protege(cible, ecriture):
         for b in {Path(os.path.abspath(etat)), etat.resolve()}:
             if cible == b or b in cible.parents:
                 return montrer_chemin(b)
+    if ecriture:
+        parts = cible.parts
+        if parts and (parts[-1] in NOMS_ECRITURE_PARTOUT or parts[-1] == ".git"):
+            return "…/" + parts[-1]
+        if ".git" in parts and SOUS_GIT_ECRITURE & set(parts[parts.index(".git") + 1:]):
+            return "…/.git/" + sorted(SOUS_GIT_ECRITURE & set(parts[parts.index(".git") + 1:]))[0]
+        for anc in cible.parents:                # dépôt bare (HEAD, objects/, refs/) : hooks/, config et info/ y agissent
+            try:
+                bare = (anc / "HEAD").is_file() and (anc / "objects").is_dir() and (anc / "refs").is_dir()
+            except OSError:
+                bare = False
+            if bare:
+                reste = cible.relative_to(anc).parts
+                if reste and (reste[0] in ("hooks", "info") or reste[0] == "config"):
+                    return "…/" + anc.name + "/" + reste[0]
+        depot = depot_dotfiles()
+        if depot is not None:                    # la copie du dépôt : nc-maj et les scripts installés en viennent
+            for b in {Path(os.path.abspath(depot)), depot.resolve()}:
+                if cible == b or b in cible.parents:
+                    return montrer_chemin(b)
     for rel in liste:
         if "*" in rel:
             n = len(Path(rel).parts)
@@ -794,6 +895,93 @@ def verifier_fd(fd, cible, ecriture):
                     "refusé (lien physique)")
 
 
+def ouvrir_dossier_sans_suivre(cible_dossier, creer):
+    """Descend de « / » jusqu'à cible_dossier (déjà résolu) composant par composant, en O_NOFOLLOW|O_DIRECTORY : un lien posé
+    entre-temps fait échouer l'ouverture. Les dossiers manquants ne sont créés (mkdir par descripteur) que si creer, et
+    seulement après avoir vérifié la partie existante. Renvoie le descripteur du dossier final."""
+    drap = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open("/", drap)
+    try:
+        for i, nom in enumerate(cible_dossier.parts[1:]):
+            try:
+                suivant = os.open(nom, drap, dir_fd=fd)
+            except FileNotFoundError:
+                if not creer:
+                    raise
+                os.mkdir(nom, 0o755, dir_fd=fd)
+                suivant = os.open(nom, drap, dir_fd=fd)
+            except OSError as e:
+                raise Refus(T("Un dossier du chemin a changé (lien ?) : refusé.", "A folder in the path changed (link?): denied."),
+                            "refusé (chemin changé)") from e
+            os.close(fd)
+            fd = suivant
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def ecrire_sans_suivre(cible, brut):
+    """Écrit brut dans cible : un temporaire créé en O_EXCL DANS le dossier final (ouvert par descripteur, sans suivre de
+    lien), puis rename par descripteur de dossier. Un lien posé sur cible ou sur un dossier du chemin n'est jamais suivi ;
+    les liens physiques, les non-fichiers et les chemins protégés sont refusés AVANT de créer des dossiers ou le fichier."""
+    nom = cible.name
+    try:
+        dfd = ouvrir_dossier_sans_suivre(cible.parent, False)      # 1) le dossier existe-t-il déjà, sans lien ?
+    except FileNotFoundError:
+        dfd = None
+    try:
+        if dfd is not None:
+            controle_cible_ecriture(dfd, cible)
+            os.close(dfd)
+            dfd = None
+        dfd = ouvrir_dossier_sans_suivre(cible.parent, True)       # 2) création des parents manquants, après vérification
+        controle_cible_ecriture(dfd, cible)
+        tmp = ".nc-noeud-" + uuid.uuid4().hex + ".tmp"
+        try:
+            st = os.stat(nom, dir_fd=dfd, follow_symlinks=False)
+            mode = stat.S_IMODE(st.st_mode)
+        except FileNotFoundError:
+            mode = 0o644
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0), 0o600,
+                     dir_fd=dfd)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                os.fchmod(f.fileno(), mode)
+                f.write(brut)
+            controle_cible_ecriture(dfd, cible)                    # dernier contrôle, juste avant le rename
+            os.rename(tmp, nom, src_dir_fd=dfd, dst_dir_fd=dfd)    # remplace le nom lui-même, jamais ce qu'il désignerait
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp, dir_fd=dfd)
+            raise
+    finally:
+        if dfd is not None:
+            os.close(dfd)
+
+
+def controle_cible_ecriture(dfd, cible):
+    """Le dossier ouvert est bien celui de cible (pas de lien), le chemin n'est pas protégé, et le nom existant est un
+    fichier ordinaire sans lien physique."""
+    vrai = Path(os.path.realpath(f"/proc/self/fd/{dfd}"))
+    if str(vrai).startswith("/") and vrai != cible.parent:
+        raise Refus(T("Le dossier a changé pendant l'ouverture : refusé.", "The folder changed while opening: denied."),
+                    "refusé (chemin changé)")
+    p = protege(vrai / cible.name, True)
+    if p:
+        raise Refus(T(f"Chemin protégé ({p}) : refusé, même avec ta confirmation.",
+                      f"Protected path ({p}): denied, even with your confirmation."), "refusé (chemin protégé)")
+    try:
+        st = os.stat(cible.name, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(st.st_mode):
+        raise Refus(T("Ce n'est pas un fichier ordinaire : refusé.", "Not a regular file: denied."), "refusé (pas un fichier)")
+    if lien_physique_douteux(st, cible):
+        raise Refus(T("Fichier à plusieurs liens physiques : refusé.", "File with several hard links: denied."),
+                    "refusé (lien physique)")
+
+
 def verifier_chemin(brut, ecriture):
     cible = resoudre(brut)
     p = protege(cible, ecriture)
@@ -801,6 +989,16 @@ def verifier_chemin(brut, ecriture):
         raise Refus(T(f"Chemin protégé ({p}) : refusé, même avec ta confirmation.",
                       f"Protected path ({p}): denied, even with your confirmation."), "refusé (chemin protégé)")
     return cible
+
+
+def pseudo_fs(cible):
+    """/proc et /sys ne se lisent pas ici : tailles toujours à 0 (la carte annoncerait « 0 octet »), contenu qui change
+    pendant la lecture, et /proc/<pid>/environ ou mem donnent les secrets d'un autre programme."""
+    reel = os.path.realpath(cible)
+    for racine in ("/proc", "/sys"):
+        if reel == racine or reel.startswith(racine + "/"):
+            raise Refus(T(f"{racine} ne se lit pas par JARVIS : refusé.", f"{racine} cannot be read by JARVIS: denied."),
+                        "refusé (système de fichiers virtuel)")
 
 
 def montrer_chemin(p):
@@ -1069,6 +1267,7 @@ def preparer(action, p):
             return Action(resume, "", executer)
         if action == "list_files":
             raise Refus(T("Ce n'est pas un dossier.", "Not a folder."))
+        pseudo_fs(cible)
         st = cible.stat()
         taille = st.st_size
         if taille > MAX_FICHIER:
@@ -1082,6 +1281,7 @@ def preparer(action, p):
         async def executer(budget=None, bac=False):
             # Relu au moment de lire : un lien posé pendant la confirmation ne mène pas ailleurs
             verifier_chemin(str(cible), False)
+            pseudo_fs(cible)
             fd = os.open(cible, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             try:
                 verifier_fd(fd, cible, False)
@@ -1113,10 +1313,10 @@ def preparer(action, p):
             if lien_physique_douteux(st, cible):
                 raise Refus(T("Fichier à plusieurs liens physiques : refusé.", "File with several hard links: denied."),
                             "refusé (lien physique)")
-        lignes = contenu.split("\n")                    # pas splitlines : \r, \x0c, \x85… restent visibles
-        apercu = "\n".join(lignes[:20])
-        if len(lignes) > 20:
-            apercu += "\n…"
+        if len(contenu) > MAX_TEXTE:                    # la carte montre TOUT le contenu, sinon pas d'écriture
+            raise Refus(T("Contenu trop long pour être montré en entier : écriture refusée.",
+                          "Content too long to be shown in full: write denied."))
+        apercu = contenu
         existe = cible.exists()
         resume = (T(f"remplacer {montrer_chemin(cible)} par {taille_lisible(len(brut))}",
                     f"replace {montrer_chemin(cible)} with {taille_lisible(len(brut))}") if existe else
@@ -1124,19 +1324,10 @@ def preparer(action, p):
                     f"create {montrer_chemin(cible)} ({taille_lisible(len(brut))})"))
 
         async def executer(budget=None):
-            cible.parent.mkdir(parents=True, exist_ok=True)
-            verifier_chemin(str(cible), True)              # relu après la confirmation et la création des dossiers
-            fd = os.open(cible, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644)
-            try:
-                verifier_fd(fd, cible, True)                # vidé seulement après cette vérification
-                os.ftruncate(fd, 0)
-            except BaseException:
-                os.close(fd)
-                raise
-            with os.fdopen(fd, "wb") as f:
-                f.write(brut)
+            verifier_chemin(str(cible), True)              # relu après la confirmation, avant de créer quoi que ce soit
+            ecrire_sans_suivre(cible, brut)
             return {"success": True, "path": str(cible), "bytes_written": len(brut)}
-        return Action(resume, apercu[:MAX_TEXTE], executer, empreinte(brut))
+        return Action(resume, apercu, executer, empreinte(brut))
 
     if action == "screenshot":
         grim = programme("grim")
@@ -1210,14 +1401,23 @@ def preparer(action, p):
         return Action(T(f"contrôler la musique : {sous}", f"control the music: {sous}"), "", executer)
 
     if action == "notify":
-        titre = " ".join(str(p.get("title") or "JARVIS").split())[:100]
-        corps = str(p.get("body") or "")[:1000]
+        titre = une_ligne(" ".join(str(p.get("title") or "JARVIS").split())[:100])
+        corps = rendre_visible(str(p.get("body") or "")[:1000])
         ns = programme("notify-send")
         if not ns:
             raise Refus(T("notify-send introuvable.", "notify-send not found."))
 
         async def executer(budget=None):
-            code, _, _ = await lancer([ns, "-a", "JARVIS", "--", titre, html.escape(corps, quote=False)], delai=10)
+            maintenant = horloge()                    # limite de débit : au plus NOTIFY_MAX par NOTIFY_FENETRE secondes
+            while NOTIFY_RECENTES and maintenant - NOTIFY_RECENTES[0] >= NOTIFY_FENETRE:
+                NOTIFY_RECENTES.popleft()
+            if len(NOTIFY_RECENTES) >= NOTIFY_MAX:
+                return {"success": False, "error": T(f"Trop de notifications ({NOTIFY_MAX} par minute au plus) : refusée.",
+                                                     f"Too many notifications (at most {NOTIFY_MAX} per minute): denied.")}
+            NOTIFY_RECENTES.append(maintenant)
+            # Un nom d'appli à part : une alerte de sécurité de nc-noeud (« -a JARVIS ») ne doit pas pouvoir être imitée
+            code, _, _ = await lancer([ns, "-a", T("Message de JARVIS", "JARVIS message"), "--", titre,
+                                       html.escape(corps, quote=False)], delai=10)
             return {"success": code == 0}
         return Action(T(f"t'envoyer une notification : {titre}", f"send you a notification: {titre}"), corps, executer)
 
@@ -1299,16 +1499,17 @@ class Confirmation:
                     vieux.unlink()
             # « expire » : l'échéance de CETTE action (heure murale), d'où part le compte à rebours de la carte ;
             # au-delà, la carte n'envoie plus « autoriser » (« Trop tard ») et nc-noeud n'exécute plus rien
+            texte_net, nb_lignes = pour_carte(decrite.texte)
             demande = {"id": ident, "serveur": self.serveur, "action": action, "resume": rendre_visible(decrite.resume),
-                       "texte": rendre_visible(decrite.texte), "court": COURT, "expire": time.time() + reste,
-                       "duree": round(reste)}
+                       "texte": texte_net, "lignes": nb_lignes if decrite.texte else 0, "court": COURT,
+                       "expire": time.time() + reste, "duree": round(reste)}
             fichier = d / "demande.json"
             ecrire_atomique(fichier, json.dumps(demande, ensure_ascii=False))
             try:
                 if await ile_prevenue():
                     return await self.attendre(d / "reponses" / ident, limite)
                 ns = await notification_a_boutons()
-                if ns and len(rendre_visible(decrite.texte)) <= COURT:
+                if ns and len(texte_net) <= COURT and texte_net.count("\n") < LIGNES_NOTIFICATION:
                     return await self.par_notification(ns, decrite, limite)
                 return "indisponible"
             finally:
@@ -1337,7 +1538,14 @@ class Confirmation:
     async def par_notification(self, ns, decrite, limite):
         """Sans l'île (openSUSE…) : une notification avec Autoriser et Refuser ; le texte entier doit y tenir."""
         reste = limite - horloge()
-        corps = rendre_visible(decrite.resume + ("\n\n" + decrite.texte if decrite.texte else ""))
+        texte_net, _ = pour_carte(decrite.texte)
+        lignes = texte_net.split("\n")
+        if len(lignes) > LIGNES_NOTIFICATION:         # jamais coupé en silence (l'appelant refuse déjà ce cas)
+            reste_n = len(lignes) - LIGNES_NOTIFICATION
+            texte_net = "\n".join(lignes[:LIGNES_NOTIFICATION] + [T(
+                f"… et {reste_n} lignes de plus : ouvre l'île pour tout voir",
+                f"… and {reste_n} more lines: open the island to see everything")])
+        corps = rendre_visible(decrite.resume) + ("\n\n" + texte_net if texte_net else "")
         args = [ns, "-a", "JARVIS", "-u", "critical", "-t", str(int(reste * 1000)),
                 "-A", "autoriser=" + T("Autoriser", "Allow"), "-A", "refuser=" + T("Refuser", "Deny"), "--",
                 T(f"JARVIS (depuis {self.serveur}) veut :", f"JARVIS (from {self.serveur}) wants to:"),
@@ -1479,15 +1687,18 @@ class ConfirmationDistance:
 def resume_distance(nom, decrite):
     """Ce qui part au serveur pour la confirmation à distance : exactement ce qui sera fait (commande entière, chemin,
     taille, sha256 et premières lignes d'un fichier écrit, texte copié, notification), caractères cachés rendus
-    visibles, seules les valeurs secrètes exactes de la configuration masquées. None si ce résumé ne peut pas être
+    visibles, lignes vides regroupées et nombre de lignes dit, seules les valeurs secrètes exactes de la configuration masquées. None si ce résumé ne peut pas être
     honnête : un motif générique de secret le changerait (on ne montre pas une commande tronquée), ou il est trop
     long pour un message (compté en UTF-16)."""
     s = decrite.resume
     if nom == "write_file" and decrite.sha:
         s += f"\nsha256 {decrite.sha}"
-    if decrite.texte and nom in ("exec", "clipboard_write", "notify", "write_file"):
-        s += " :\n" + decrite.texte
     s = rendre_visible(secrets_exacts(s))
+    if decrite.texte and nom in ("exec", "clipboard_write", "notify", "write_file"):
+        # Même nettoyage que la carte (lignes vides regroupées, blancs de fin enlevés) et le nombre de lignes dit :
+        # 40 lignes vides ne cachent pas la vraie commande. Trop long après nettoyage : None (refus), jamais coupé.
+        net, nb = pour_carte(secrets_exacts(decrite.texte))
+        s += (T(f" ({nb} lignes) :\n", f" ({nb} lines):\n") if nb > 1 else " :\n") + net
     if motifs_trouves(s) or longueur_utf16(s) > MAX_RESUME_DISTANCE:
         return None
     return s
@@ -1673,6 +1884,7 @@ class Noeud:
         self.distance_annoncee = False         # « remote_confirm » envoyé dans le register de cette connexion
         self.ws = None
         self.taches = set()
+        self.places = None                     # asyncio.Semaphore(MAX_TACHES), créé dans la boucle (servir)
         self.session = None                    # session de confiance en cours (Session) ou None
         self.jeton_connexion = None            # tiré à chaque connexion : une reconnexion ferme la session
         retenir_secrets(c)
@@ -1829,7 +2041,9 @@ class Noeud:
             sess = self.session
             sess.reste -= 1
         reutilise = sess is not None
-        ouvre = peut_session and self.session is None                # une seule session à la fois (origine différente → non)
+        # Une session s'ouvre SEULEMENT sur un exec confirmé (liste blanche) : la carte d'une lecture de fichier ou d'une capture
+        # ne dit pas qu'elle couvrirait aussi des commandes. Une lecture ou une capture confirmée reste ce qu'elle est.
+        ouvre = peut_session and self.session is None and nom == "exec"   # une seule session à la fois
         if (reutilise or ouvre) and nom in ("exec", "read_file") and not await bac_tient():
             # Le bac ne tient pas (systemd-run absent, pas de bus utilisateur, namespaces refusés, propriété inconnue) :
             # pas de session, confirmation normale, jamais d'exécution ni de lecture hors du bac
@@ -1965,9 +2179,12 @@ class Noeud:
 
     async def traiter(self, msg):
         req_id = msg.get("req_id")
+        if self.places is None:
+            self.places = asyncio.Semaphore(MAX_TACHES)
         try:
-            res = await self.decider(str(msg.get("action") or ""), msg.get("params") or {}, req_id, msg.get("timeout"),
-                                     msg.get("origin"))
+            async with self.places:                                  # au plus MAX_TACHES demandes traitées à la fois
+                res = await self.decider(str(msg.get("action") or ""), msg.get("params") or {}, req_id,
+                                         msg.get("timeout"), msg.get("origin"))
         except Exception as e:                                       # jamais de réponse manquante
             res = {"success": False, "error": T("Erreur sur le PC : ", "Error on the PC: ") + str(e)[:200]}
         with contextlib.suppress(Exception):

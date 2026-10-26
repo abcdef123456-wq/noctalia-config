@@ -296,6 +296,8 @@ class Spotlight(unittest.TestCase):
             (b / "nc-assistant").write_text(textwrap.dedent("""\
                 import json, sys
                 assert sys.argv[1:3] == ["demander", "--flux"], sys.argv
+                assert not any("question" in a for a in sys.argv), sys.argv      # la question ne passe pas par argv
+                assert "question" in sys.stdin.read()                              # elle passe par stdin
                 print(json.dumps({"t": "Quelle couleur ?", "choices": ["Rouge", "Vert"]}))
             """))
             code = textwrap.dedent(f"""\

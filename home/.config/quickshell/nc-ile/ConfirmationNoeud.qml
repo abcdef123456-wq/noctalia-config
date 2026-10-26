@@ -20,8 +20,19 @@ Item {
     // Le texte montré : en entier (« Voir tout »), ou coupé à « court » caractères avec « … »
     readonly property string texte: vue ? String(vue.texte || "") : ""
     readonly property int court: vue && vue.court > 0 ? vue.court : 400
-    readonly property bool coupe: texte.length > court
-    readonly property string texteMontre: coupe && !Noeud.toutVoir ? texte.slice(0, court) + "…" : texte
+    // Nombre de lignes du texte d'origine (nc-noeud en compte avant de regrouper les lignes vides)
+    readonly property int lignes: vue && vue.lignes > 0 ? vue.lignes : (texte === "" ? 0 : texte.split("\n").length)
+    // « Voir tout » dès que le texte dépasse la zone (hauteur mesurée sur le texte entier), pas seulement au-delà de « court »
+    readonly property bool debordeCourt: mesure.implicitHeight > 150
+    readonly property bool coupe: texte.length > court || debordeCourt
+    readonly property string texteMontre: texte.length > court && !Noeud.toutVoir ? texte.slice(0, court) + "…" : texte
+    // Mesure du texte entier (jamais affichée)
+    Text {
+        id: mesure
+        visible: false; width: c.width - 56
+        text: c.texte; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere
+        font.family: "monospace"; font.pixelSize: 12
+    }
 
     // En-tête : icône, « JARVIS · serveur », compte à rebours
     Row {
@@ -69,6 +80,14 @@ Item {
                     font.family: "monospace"; font.pixelSize: 12; color: Couleurs.texteDoux
                 }
             }
+            // Barre de défilement toujours visible dès que le texte dépasse la zone
+            Rectangle {
+                objectName: "nc-noeud-barre"
+                visible: defile.contentHeight > defile.height + 1
+                x: parent.width - 6; width: 3; radius: 1.5; color: Couleurs.texteSec
+                y: 7 + defile.visibleArea.yPosition * defile.height
+                height: Math.max(12, defile.visibleArea.heightRatio * defile.height)
+            }
         }
         // Autorisé après l'échéance : rien n'est fait, la carte le dit avant de se fermer
         Texte {
@@ -91,12 +110,20 @@ Item {
                 color: zv.containsMouse ? Couleurs.gris4 : "transparent"
                 Texte {
                     id: lv; anchors.centerIn: parent; font.pixelSize: 12; color: Couleurs.texteSec
-                    text: Noeud.toutVoir ? Reglages.t("Voir moins", "Show less") : Reglages.t("Voir tout", "Show all")
+                    text: (c.lignes > 1 ? c.lignes + Reglages.t(" lignes · ", " lines · ") : "")
+                          + (Noeud.toutVoir ? Reglages.t("Voir moins", "Show less") : Reglages.t("Voir tout", "Show all"))
                 }
                 MouseArea { id: zv; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: Noeud.toutVoir = !Noeud.toutVoir }
                 Accessible.role: Accessible.Button
                 Accessible.name: lv.text
+            }
+            Texte {
+                objectName: "nc-noeud-lignes"
+                visible: !c.coupe && c.lignes > 1
+                anchors.left: parent.left; anchors.leftMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                secondaire: true; font.pixelSize: 12
+                text: c.lignes + Reglages.t(" lignes", " lines")
             }
             Row {
                 anchors.right: parent.right; spacing: 8

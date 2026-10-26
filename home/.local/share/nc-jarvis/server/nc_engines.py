@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 import uuid
 
 ENGINES = {'agy': 'Antigravity', 'codex': 'Codex', 'claude': 'Claude Code', 'opencode': 'OpenCode'}
@@ -158,17 +159,344 @@ def ia_coupee():
     Seulement en déploiement local (DEPLOY_MODE différent de server) : le serveur de l'hébergeur n'a pas les réglages
     du PC de l'utilisateur, et ses moteurs sont ceux de l'hébergeur."""
     if os.environ.get('DEPLOY_MODE', 'local').strip().lower() == 'server': return False
+    return reglage_nc('IA_MODE', '') == 'non'
+
+
+def reglage_nc(nom, defaut=''):
+    """Dernière valeur de nom dans ~/.config/nc/reglages.conf (espaces et guillemets tolérés), sinon defaut."""
     valeur = None
     try:
         for ligne in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8').splitlines():
             cle, sep, v = ligne.partition('=')
-            if sep and cle.strip() == 'IA_MODE': valeur = v.strip().strip('"')
+            if sep and cle.strip() == nom: valeur = v.strip().strip('"')
     except (OSError, ValueError): pass
-    return valeur == 'non'
+    return defaut if valeur is None else valeur
 
 
-async def process(args, prompt, timeout, cwd, env=None):
-    """Sorties bornées, groupe entier tué sur timeout/annulation/débordement."""
+# Isolation des moteurs (déploiement local) : un moteur « en lecture seule » lit pourtant tout le disque avec le vrai HOME,
+# donc le .env du serveur (TELEGRAM_TOKEN, SECRET_KEY…) par un chemin absolu, et peut le recopier dans sa réponse. Chaque
+# moteur tourne donc dans une unité systemd --user TRANSITOIRE (comme nc-bac) où le dossier du backend et les .env sont
+# inaccessibles (InaccessiblePaths), ainsi que tout ce que nc-bac protège déjà (liste de nc-bac : ~/.ssh, navigateurs,
+# assistant.conf, noeud-totp.json, ~/.local/state/nc-jarvis…). Le vrai HOME reste visible, SAUF ces chemins : seuls les
+# dossiers de session du moteur lancé restent lisibles (LIBRES_MOTEUR : ~/.claude, ~/.codex, ~/.config/opencode…).
+#   ReadOnlyPaths : ce qui s'exécute ou se relit plus tard HORS de l'unité (~/.local/bin, ~/.local/share/nc-jarvis, hypr, systemd,
+#     autostart, applications, shells, pipewire, ~/.config/nc, copie du dépôt… : listes de nc-bac et de nc-noeud, lues sur place)
+#     et les réglages et consignes des CLI (settings.json, CLAUDE.md, hooks, plugins, config.toml…, CONSIGNES_MOTEUR) ;
+#     le lanceur vérifie qu'on n'y écrit pas. Le reste du HOME reste inscriptible : LIMITE CONNUE, le moteur peut écrire la
+#     config de son CLI (~/.claude.json et ses serveurs MCP, un fichier de consignes ABSENT qu'il créerait, le reste des
+#     dossiers d'état), exécutée plus tard ; un prochain lot donnera aux moteurs un faux HOME ;
+#   TemporaryFileSystem (JETABLES_MOTEUR) : transcriptions, mémoire et scripts de shell de l'utilisateur (~/.claude/projects,
+#     ~/.codex/memories, shell-snapshots…) vides et jetés avec l'unité : le moteur ne les lit pas, n'y écrit rien de durable
+#     (JARVIS lance déjà claude --no-session-persistence et codex --ephemeral) ;
+#   PrivateTmp : /tmp à lui (pas de socket X11, tmux ou ssh-agent de /tmp) ;
+#   RestrictAddressFamilies=AF_INET AF_INET6 : aucun socket Unix, comme dans le bac où nc-ia lance ces mêmes moteurs ;
+#   PrivateUsers + NoNewPrivileges : mise en place sans root, pas d'élévation ;
+#   PrivatePIDs (systemd 257) : un /proc à lui ; sans lui, /proc/<pid>/environ du runner (qui a le .env en EnvironmentFile)
+#     resterait lisible ; sur un systemd plus ancien la sonde échoue et le moteur n'est pas lancé (comme nc-bac) ;
+#   $XDG_RUNTIME_DIR vide (TemporaryFileSystem) : pas de bus, donc pas de « systemd-run --user » qui sortirait de l'unité.
+# Le lanceur Python (-I) efface l'environnement de l'unité (celui du gestionnaire, avec ses clés exportées) et ne remet que
+# la liste blanche ; ses valeurs passent par --setenv=NOM (jamais dans la ligne de commande). Il VÉRIFIE aussi, dans
+# l'unité, que chaque chemin caché refuse l'accès (code 97 sinon) : la protection est contrôlée à chaque lancement.
+# Aucun repli : en local, pas de systemd-run ou protection absente = pas de moteur. Sur le serveur de l'hébergeur
+# (DEPLOY_MODE=server) la même mesure est prise si systemd est là ; sinon pas de moteur non plus, sauf si le .env du
+# serveur (jamais modifiable à distance : hors de CONFIG_PERMIS) contient NC_MOTEURS_SANS_ISOLATION=oui.
+CODE_REFUS_ISOLATION = 97
+LANCEUR_ISOLE = ("import os,sys\n"
+    "a=sys.argv\n"
+    "garde=set(a[1].split(',')) if a[1] else set()\n"
+    "cwd=a[2]; i=4; n=int(a[3]); caches=a[i:i+n]; i+=n\n"
+    "n=int(a[i]); temoins=a[i+1:i+1+n]; i+=1+n\n"
+    "n=int(a[i]); lectures=a[i+1:i+1+n]; i+=1+n; argv=a[i:]\n"
+    "for p in caches:\n"
+    "    try:\n"
+    "        os.listdir(p) if os.path.isdir(p) else open(p,'rb').close()\n"
+    "    except OSError: continue\n"
+    "    sys.exit(%d)\n"
+    "for d in temoins:\n"
+    "    f=os.path.join(d,'.nc-temoin-%%d'%%os.getpid())\n"
+    "    try: os.close(os.open(f,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600))\n"
+    "    except OSError: continue\n"
+    "    try: os.unlink(f)\n"
+    "    except OSError: pass\n"
+    "    sys.exit(%d)\n"
+    "for p in lectures:\n"
+    "    if os.access(p,os.W_OK): sys.exit(%d)\n"
+    "env={k:os.environ[k] for k in garde if k in os.environ}\n"
+    "os.chdir(cwd)\n"
+    "os.execvpe(argv[0],argv,env)\n") % (CODE_REFUS_ISOLATION, CODE_REFUS_ISOLATION, CODE_REFUS_ISOLATION)
+MESSAGE_NON_ISOLE = ('L’IA de JARVIS n’est pas isolée ici (systemd 257 ou plus requis, avec systemd-run --user ; '
+                     'sinon la protection du .env est absente) : aucun moteur n’est lancé.')
+MESSAGE_DISTANT = (MESSAGE_NON_ISOLE[:-1] + ' Pour l’accepter quand même (le moteur pourra lire les jetons du bot), mets '
+                   'NC_MOTEURS_SANS_ISOLATION=oui dans le .env du serveur.')
+# En plus des listes de nc-bac et nc-noeud, en LECTURE SEULE (relatifs à ~, motifs permis, seulement s'ils existent) : ce qui
+# s'exécute ou se charge plus tard (un .pth de site-packages s'exécute dans tout python3 ; le CLI codex est dans
+# ~/.local/lib/node_modules), pour tous les moteurs
+LECTURE_SEULE_EN_PLUS = ('.local/lib', '.local/share/noctalia', '.config/fastfetch', '.local/share/nc', '.config/user-tmpfiles.d',
+                         '.local/share/dbus-1', '.config/environment.d', '.local/share/systemd', '.config/go',
+                         '.local/share/flatpak/exports', '.vim', '.local/share/kio', '.local/share/nautilus', '.local/share/nemo',
+                         'CLAUDE.md')
+# En plus de ceux de nc-bac, ILLISIBLES (noms génériques : profils et identifiants d'autres programmes)
+CACHES_EN_PLUS = ('.pki', '.config/torbrowser', '.local/share/torbrowser', '.config/google-chrome-for-testing', '.config/Proton',
+                  '.config/Mullvad VPN')
+# Jetables : vides dans l'unité, jetés avec elle (relatifs à ~ ; seulement s'ils existent)
+JETABLES_MOTEUR = {
+    'claude': ('.claude/projects', '.claude/shell-snapshots'),
+    'codex': ('.codex/memories', '.codex/shell_snapshots'),
+    'opencode': (),
+}
+# Réglages, consignes, hooks et plugins des CLI (relatifs à ~, motifs permis) : lus mais jamais écrits pendant une question
+CONSIGNES_MOTEUR = {
+    'claude': ('.claude/settings*.json', '.claude/CLAUDE.md', '.claude/hooks', '.claude/commands', '.claude/agents',
+               '.claude/skills', '.claude/plugins', '.claude/output-styles'),
+    'codex': ('.codex/config.toml', '.codex/AGENTS.md', '.codex/AGENTS.override.md', '.codex/prompts', '.codex/rules',
+              '.codex/skills', '.codex/hooks*'),
+    'opencode': ('.config/opencode/opencode.json', '.config/opencode/opencode.jsonc', '.config/opencode/plugin',
+                 '.config/opencode/plugins', '.config/opencode/agent', '.config/opencode/agents', '.config/opencode/command',
+                 '.config/opencode/commands'),
+}
+# Dossiers de session que chaque moteur garde lisibles (relatifs à ~) ; les autres moteurs restent cachés (nc-ia fait de même)
+LIBRES_MOTEUR = {
+    'claude': ('.claude', '.claude.json', '.cache/claude-cli-nodejs', '.local/state/claude'),
+    'codex': ('.codex',),
+    'opencode': ('.config/opencode', '.local/share/opencode', '.local/state/opencode', '.cache/opencode'),
+}
+_sonde_isolation = {'ok': 0.0}
+
+
+class IsolationImpossible(Exception):
+    """Le moteur ne peut pas être lancé à l'abri du .env du serveur."""
+
+
+def deploiement_distant():
+    return os.environ.get('DEPLOY_MODE', 'local').strip().lower() == 'server'
+
+
+def dossier_travail():
+    """Dossier de travail vide du moteur, sous le cache de l'utilisateur : le runner (PrivateTmp) et l'unité du moteur
+    y voient la même chose, pas dans /tmp (qui est différent pour chacun). Seul le serveur de l'hébergeur retombe sur /tmp."""
+    try:
+        base = Path(os.environ.get('XDG_CACHE_HOME') or Path.home()/'.cache')/'nc-jarvis-travail'
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return tempfile.mkdtemp(prefix='moteur-', dir=str(base))
+    except OSError:
+        if not deploiement_distant(): raise
+        return tempfile.mkdtemp(prefix='nc-jarvis-')
+
+
+def _dans(chemin, dossier):
+    return chemin == dossier or dossier in chemin.parents
+
+
+_NC_BAC = {}
+
+
+def module_bac():
+    """Le module nc-bac (~/.local/bin/nc-bac, chargé par son chemin comme le fait nc-ia), ou None s'il manque."""
+    import importlib.machinery
+    import importlib.util
+    chemin = Path.home()/'.local/bin/nc-bac'
+    if chemin not in _NC_BAC:
+        try:
+            ld = importlib.machinery.SourceFileLoader('nc_bac_moteurs', str(chemin))
+            m = importlib.util.module_from_spec(importlib.util.spec_from_loader(ld.name, ld))
+            ld.exec_module(m)
+        except (OSError, SyntaxError, ImportError): m = None
+        _NC_BAC[chemin] = m
+    return _NC_BAC[chemin]
+
+
+def chemins_caches(dossier, engine=None):
+    """Chemins (réels, et tels quels) que le moteur ne doit pas voir, ceux qui existent :
+      - le dossier du runner, le backend (s'il ne contient pas le HOME), leurs .env* (.env.backup-… compris), gateway,
+        render-gateway, ~/.env*, ~/.local/share/jarvis-bis ;
+      - tout ce que nc-bac rend illisible (inaccessibles() : .ssh, .gnupg, navigateurs, assistant.conf, noeud-totp.json,
+        ~/.local/state/nc-jarvis, Noctalia…), sauf les dossiers de session du moteur lancé (LIBRES_MOTEUR).
+    IsolationImpossible si un chemin obligatoire contient le HOME, ou si nc-bac manque / ne sait pas protéger (en local ;
+    sur le serveur de l'hébergeur, sans nc-bac, il ne reste que les .env)."""
+    d = dossier.resolve()
+    maison = Path.home().resolve()
+    candidats = [(d, True), (d.parent/'gateway', True), (d.parent/'render-gateway', True), (d.parent, False),
+                 (Path.home()/'.local/share/jarvis-bis', False)]
+    for dossier_env in dict.fromkeys((d, d.parent, d.parent/'gateway', d.parent/'render-gateway', Path.home(), maison)):
+        try: candidats += [(q, True) for q in sorted(dossier_env.glob('.env*'))]
+        except OSError: pass
+    sortie = []
+    def ajoute(chemin):
+        for x in (str(chemin.resolve()), str(chemin)):
+            if x not in sortie: sortie.append(x)
+    for chemin, obligatoire in candidats:
+        if not os.path.lexists(chemin): continue
+        if _dans(maison, chemin.resolve()):
+            if obligatoire: raise IsolationImpossible(MESSAGE_NON_ISOLE)
+            continue
+        ajoute(chemin)
+    bac = module_bac()
+    if bac is None:
+        if not deploiement_distant(): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        return sortie
+    run = os.path.realpath(os.environ.get('XDG_RUNTIME_DIR') or '/run/user/%d' % os.getuid())
+    try: protege = bac.inaccessibles(Path.home(), reglage_nc, libres=LIBRES_MOTEUR.get(engine, ()), environ=os.environ)
+    except (OSError, ValueError): protege = None
+    if protege is None: raise IsolationImpossible(MESSAGE_NON_ISOLE)
+    for x in protege:
+        if os.path.realpath(x) == run: continue            # déjà un tmpfs vide (TemporaryFileSystem)
+        if _dans(maison, Path(os.path.realpath(x))): continue   # un dossier qui contient le HOME ne peut pas être caché
+        ajoute(Path(x))
+    for rel in CACHES_EN_PLUS:
+        chemin = Path.home()/rel
+        if os.path.lexists(chemin) and not _dans(maison, chemin.resolve()) and not any(_dans(chemin.resolve(), Path(c)) for c in sortie):
+            ajoute(chemin)
+    return sortie
+
+
+def liste_noeud(nom):
+    """La liste NOM (de chaînes) de nc-noeud (~/.local/bin/nc-noeud), lue dans son source sans l'exécuter ; None si absente."""
+    import ast
+    try:
+        arbre = ast.parse((Path.home()/'.local/bin/nc-noeud').read_text(encoding='utf-8'))
+        for n in arbre.body:
+            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == nom for t in n.targets):
+                v = ast.literal_eval(n.value)
+                return [x for x in v if isinstance(x, str)] if isinstance(v, list) else None
+    except (OSError, SyntaxError, ValueError): pass
+    return None
+
+
+def chemins_jetables(engine):
+    """Dossiers existants (réels) à remplacer par un tmpfs vide dans l'unité. Le dossier de config du moteur existe : le
+    sous-dossier manquant est créé (0700, vide) pour que le moteur ne le crée pas, durable, dans le vrai HOME."""
+    home = Path.home()
+    sortie = []
+    for rel in JETABLES_MOTEUR.get(engine, ()):
+        chemin = home/rel
+        if not os.path.lexists(chemin) and chemin.parent.is_dir():
+            with contextlib.suppress(OSError): os.mkdir(chemin, 0o700)
+        if chemin.is_dir():
+            r = str(Path(os.path.realpath(chemin)))
+            if r not in sortie: sortie.append(r)
+    return sortie
+
+
+def chemins_lecture_seule(engine, caches):
+    """Chemins (réels) que le moteur peut lire mais pas modifier : ce qui s'exécute plus tard hors de l'unité (~/.local/bin,
+    ~/.local/share/nc-jarvis, hypr, systemd, autostart, applications, shells, pipewire, wireplumber, ~/.config/nc, la copie du
+    dépôt…). Une seule source, celle de nc-noeud : PROTEGES (= nc-bac) et ECRITURE_SEULEMENT, plus ~/.config/nc/depot. Seuls ceux
+    qui existent ; sans ceux déjà cachés, ni les dossiers de session du moteur (~/.claude, ~/.codex… restent inscriptibles :
+    limite connue). En local sans nc-bac ou nc-noeud lisible : IsolationImpossible ; sur le serveur de l'hébergeur : rien."""
+    home = Path.home()
+    bac = module_bac()
+    ecriture_seulement = liste_noeud('ECRITURE_SEULEMENT')
+    if bac is None or ecriture_seulement is None:
+        if deploiement_distant(): return []
+        raise IsolationImpossible(MESSAGE_NON_ISOLE)
+    try: depl = bac.deplacements(home, os.environ)
+    except ValueError: raise IsolationImpossible(MESSAGE_NON_ISOLE)
+    libres = LIBRES_MOTEUR.get(engine, ())
+    sortie = []
+    for rel in list(bac.PROTEGES) + ecriture_seulement + list(LECTURE_SEULE_EN_PLUS) + list(CONSIGNES_MOTEUR.get(engine, ())):
+        if rel not in CONSIGNES_MOTEUR.get(engine, ()) and (rel in libres or any(rel.startswith(l + '/') for l in libres)): continue
+        for base in dict.fromkeys([home/rel, bac.emplacement(home, rel, depl)]):
+            motif = any(c in base.name for c in '*?[') or any(c in str(base.parent) for c in '*?[')
+            try: trouves = sorted(Path(base.anchor).glob(str(base.relative_to(base.anchor)))) if motif else [base]
+            except (OSError, ValueError): trouves = []
+            for q in trouves:
+                if os.path.lexists(q):
+                    r = str(Path(os.path.realpath(q)))
+                    if r not in sortie: sortie.append(r)
+    # La copie du dépôt (~/.config/nc/depot, une ligne), comme depot_dotfiles() de nc-noeud
+    try:
+        brut = (home/'.config/nc/depot').read_bytes()[:4096].decode('utf-8', 'replace').strip()
+        depot = Path(brut).expanduser() if brut and '\0' not in brut and '\n' not in brut else None
+        if depot and depot.is_absolute() and depot != Path('/') and depot != home and depot not in home.parents and depot.exists():
+            sortie.append(str(depot.resolve()))
+    except OSError: pass
+    ouverts = [Path(os.path.realpath(x)) for x in sortie]
+    return [str(q) for q in ouverts if not any(_dans(q, Path(c)) for c in caches)
+            and not any(_dans(Path(os.path.realpath(l)), q) and Path(os.path.realpath(l)) != q for l in [str(home/x) for x in libres])]
+
+
+async def isoler(engine, args, travail, timeout, dossier):
+    """(commande systemd-run, environnement du client, unité, chemins cachés) pour lancer args dans l'unité isolée.
+    None si l'isolation n'est pas exigée ici (serveur de l'hébergeur sans systemd). IsolationImpossible sinon."""
+    distant = deploiement_distant()
+    try:
+        sr = shutil.which('systemd-run')
+        env = env_moteur(engine)
+        py = shutil.which('python3', path=env.get('PATH'))
+        run = os.environ.get('XDG_RUNTIME_DIR') or '/run/user/%d' % os.getuid()
+        if not sr or not py or not os.path.isabs(run) or not os.path.isdir(run): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        run = os.path.realpath(run)
+        caches = chemins_caches(dossier, engine)
+        lecture = chemins_lecture_seule(engine, caches)
+        jetables = chemins_jetables(engine)
+        if any(c in x for x in jetables for c in '"\\%:\n\0 '): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        # Le lanceur essaie de créer un fichier témoin dans chaque dossier en lecture seule (et d'ouvrir en écriture chaque
+        # fichier) : si ça réussit, la protection ne tient pas, code 97
+        temoins = [x for x in lecture if os.path.isdir(x)]
+        fichiers = [x for x in lecture if not os.path.isdir(x)]
+        if any(c in x for x in lecture for c in '"\\%:\n\0'): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        if any(_dans(Path(os.path.realpath(travail)), Path(x)) for x in lecture): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        # L'exécutable, le python du lanceur et le dossier de travail doivent rester visibles
+        for x in (args[0], py, travail):
+            reel = Path(os.path.realpath(x))
+            if any(_dans(reel, Path(c)) for c in caches): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        # Guillemets, barre oblique inverse, « % » (spécificateur), saut de ligne ou « : » : pas d'unité plutôt qu'une mal lue
+        if any(c in x for x in caches + [run] for c in '"\\%:\n\0'): raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        unite = 'nc-jarvis-moteur-' + uuid.uuid4().hex[:12]
+        cmd = [sr, '--user', '--pipe', '--wait', '--collect', '--quiet', '--expand-environment=no', '--unit=' + unite,
+               '--description=nc-jarvis-moteur-' + re.sub(r'[^a-z]', '', engine.lower())]
+        props = ['PrivateUsers=yes', 'NoNewPrivileges=yes', 'PrivatePIDs=yes', 'PrivateDevices=yes', 'PrivateIPC=yes',
+                 'PrivateTmp=yes', 'RestrictAddressFamilies=AF_INET AF_INET6', 'KillSignal=SIGKILL', 'TimeoutStopSec=1s', 'OnFailure=', 'RuntimeMaxSec=%d' % (int(timeout) + 5),
+                 'TemporaryFileSystem=' + run + ':ro', 'KeyringMode=private',
+                 'SystemCallFilter=~@debug @keyring', 'ReadOnlyPaths=-/dev/shm']
+        for p in props: cmd += ['-p', p]
+        for c in caches: cmd += ['-p', 'InaccessiblePaths="-' + c + '"']
+        # /dev/shm est en lecture seule (partagé entre comptes) ; un HOME ou un dossier de travail qui y vit reste inscriptible
+        for c in (os.path.realpath(Path.home()), os.path.realpath(travail)):
+            if _dans(Path(c), Path('/dev/shm')): cmd += ['-p', 'ReadWritePaths="-' + c + '"']
+        for c in lecture: cmd += ['-p', 'ReadOnlyPaths="-' + c + '"']
+        for c in jetables: cmd += ['-p', 'TemporaryFileSystem=' + c + ':mode=1777']
+        noms = sorted(env)
+        for n in noms: cmd.append('--setenv=' + n)
+        def lanceur(garde, reste):
+            return ['--', py, '-I', '-c', LANCEUR_ISOLE, garde, str(travail), str(len(caches)), *caches,
+                    str(len(temoins)), *temoins, str(len(fichiers)), *fichiers, *reste]
+        cmd += lanceur(','.join(noms), args)
+        # Le client systemd-run a besoin du bus, pas l'unité (--setenv ne reprend que les noms ci-dessus)
+        client = dict(env, XDG_RUNTIME_DIR=run)
+        if os.environ.get('DBUS_SESSION_BUS_ADDRESS'): client['DBUS_SESSION_BUS_ADDRESS'] = os.environ['DBUS_SESSION_BUS_ADDRESS']
+        # Sonde : la même unité avec « true » au lieu du moteur ; positive gardée 60 s
+        if time.monotonic() - _sonde_isolation['ok'] > 60:
+            sonde = cmd[:cmd.index('--')] + lanceur('', ['/bin/true'])
+            sonde = [x if not x.startswith('--unit=') else '--unit=' + unite + '-sonde' for x in sonde]
+            p = await asyncio.create_subprocess_exec(*sonde, env=client, cwd=str(travail), stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+            try: code = await asyncio.wait_for(p.wait(), 15)
+            except asyncio.TimeoutError:
+                with contextlib.suppress(ProcessLookupError): os.killpg(p.pid, signal.SIGKILL)
+                await p.wait(); code = -1
+            if code != 0: raise IsolationImpossible(MESSAGE_NON_ISOLE)
+            _sonde_isolation['ok'] = time.monotonic()
+        return cmd, client, unite
+    except (IsolationImpossible, OSError, ValueError):
+        if not distant: raise IsolationImpossible(MESSAGE_NON_ISOLE)
+        # Serveur de l'hébergeur : seulement si l'administrateur l'a écrit dans le .env du serveur
+        if os.environ.get('NC_MOTEURS_SANS_ISOLATION', '').strip().lower() == 'oui': return None
+        raise IsolationImpossible(MESSAGE_DISTANT)
+
+
+async def arreter_unite(unite, env):
+    """Arrête l'unité du moteur (le client systemd-run tué la laisserait tourner jusqu'à RuntimeMaxSec)."""
+    with contextlib.suppress(Exception):
+        sc = shutil.which('systemctl')
+        if not sc: return
+        p = await asyncio.create_subprocess_exec(sc, '--user', 'stop', '--no-block', unite, env=env, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await asyncio.wait_for(p.wait(), 5)
+
+
+async def process(args, prompt, timeout, cwd, env=None, unite=None, erreurs=None):
+    """Sorties bornées, groupe entier tué sur timeout/annulation/débordement (et l'unité systemd, si le moteur en a une)."""
     p = await asyncio.create_subprocess_exec(*args, cwd=cwd, start_new_session=True,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=env if env is not None else env_moteur(None))
@@ -186,7 +514,8 @@ async def process(args, prompt, timeout, cwd, env=None):
         finally: p.stdin.close()
     tasks = [asyncio.create_task(read(p.stdout)), asyncio.create_task(read(p.stderr)), asyncio.create_task(write())]
     try:
-        out, _, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout)
+        out, err, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout)
+        if erreurs is not None: erreurs.append(err[-8192:].decode(errors='replace'))
         await asyncio.wait_for(p.wait(), 2)
         return p.returncode, out.decode(errors='replace')
     finally:
@@ -195,6 +524,19 @@ async def process(args, prompt, timeout, cwd, env=None):
         for task in tasks: task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await p.wait()
+        if unite: await arreter_unite(unite, env)
+
+
+ECRITURE_REFUSEE = re.compile(r'Read-only file system|\bEROFS\b|\bEACCES\b|Permission denied|Permission non accordée|accessible en lecture seulement')
+
+
+def ecriture_refusee(texte):
+    """Le message clair (FR/EN) si la sortie d'erreur du moteur montre une écriture refusée par l'isolation, sinon None."""
+    m = ECRITURE_REFUSEE.search(texte or '')
+    if not m: return None
+    chemin = next(iter(re.findall(r'(/[^\s\'"`:,;()]+)', texte)), '?')
+    return ('isolation de JARVIS : écriture refusée dans ' + chemin + ', signale-le / '
+            'JARVIS isolation: write denied in ' + chemin + ', please report it.')
 
 
 def commande(engine, path, model, effort):
@@ -468,9 +810,16 @@ class Engines:
             try:
                 args=commande(engine,path,model if model is not None else settings.get('model',''),effort if effort is not None else settings.get('effort',''))
                 # Dossier de travail : un dossier vide jeté après la demande, jamais celui du serveur (où se trouve .env)
-                travail=tempfile.mkdtemp(prefix='nc-jarvis-')
-                try: code,out=await process(args,full,timeout,travail,env_moteur(engine))
+                # En local le moteur tourne dans une unité où le dossier du backend (.env) est inaccessible (voir isoler)
+                travail=await asyncio.to_thread(dossier_travail)
+                try:
+                    iso=await isoler(engine,args,travail,timeout,dossier_runner(self.up))
+                    erreurs=[]
+                    if iso: code,out=await process(iso[0],full,timeout,travail,iso[1],iso[2],erreurs)
+                    else: code,out=await process(args,full,timeout,travail,env_moteur(engine),None,erreurs)
                 finally: shutil.rmtree(travail,ignore_errors=True)
+                if code==CODE_REFUS_ISOLATION and iso: return failure(MESSAGE_NON_ISOLE)
+                if code and iso and (refus:=ecriture_refusee(''.join(erreurs))): return failure(refus)
                 if code: return failure(ENGINES[engine]+' a échoué (code '+str(code)+'). Vérifie son authentification et le modèle sur le runner.')
                 answer=sans_secrets(reponse(engine,out),dossier_runner(self.up))
                 if continue_session:
@@ -482,6 +831,7 @@ class Engines:
                     state=dict(self.state,conversations=conversations[-30:],active=dict(self.state['active'],**{engine:conv['id']}))
                     await asyncio.to_thread(atomique,self.path,state); self.state=state
                 return dict(success=True,output=answer,error=None,session=self.session())
+            except IsolationImpossible as e: return failure(str(e))
             except asyncio.TimeoutError: return failure('Délai dépassé ; le processus moteur a été arrêté.')
             except (ValueError,OSError): return failure('Réponse moteur invalide ou indisponible. Vérifie le modèle, la réflexion et l’authentification du CLI.')
 

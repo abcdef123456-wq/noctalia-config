@@ -627,6 +627,11 @@ def verifier(b):
                   f"Trusted session unavailable: systemd 257 or newer required (here {v[1]})"),
                 T("chaque action de JARVIS reste confirmée une à une", "each JARVIS action is still confirmed one by one"),
                 cle="noeud_systemd")
+        # Les moteurs d'IA du serveur JARVIS local (nc_engines) tournent dans la même sorte d'unité : même condition
+        b.avert(T(f"Moteurs d'IA de JARVIS indisponibles : systemd 257 ou plus requis (ici {v[1]})",
+                  f"JARVIS AI engines unavailable: systemd 257 or newer required (here {v[1]})"),
+                T("aucun moteur n'est lancé (protection du .env du serveur)", "no engine is run (protection of the server .env)"),
+                cle="jarvis_moteurs_systemd")
 
 
 def bt_cartes():

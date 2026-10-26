@@ -47,8 +47,9 @@ PROTEGES = [".ssh", ".gnupg", ".config/systemd", ".local/share/systemd", ".confi
 #     exec de session ne peut lancer aucune appli graphique (lancer une appli reste confirmé une par une) ;
 #   - RuntimeMaxSec : tué à l'échéance, --collect nettoie l'unité.
 #   - PrivateDevices + PrivateIPC : ni caméra, ni micro, ni GPU, ni périphériques d'entrée ; IPC SysV à part ;
-# Vérifié dans le manager UTILISATEUR, sans root, sur systemd 262 (Arch) ; les propriétés existent depuis bien avant
-# systemd 254 (openSUSE Leap 15.6, la plus ancienne visée). Toute erreur de mise en place (systemd-run absent, pas de
+# Vérifié dans le manager UTILISATEUR, sans root, sur systemd 262 (Arch). La plupart des propriétés existent depuis
+# bien avant systemd 254 (openSUSE Leap 15.6, la plus ancienne visée), mais PrivatePIDs demande systemd 257 : sur Leap la
+# sonde échoue, il n'y a donc pas de session de confiance, et c'est voulu. Toute erreur de mise en place (systemd-run absent, pas de
 # bus utilisateur, namespaces refusés comme sur Ubuntu avec apparmor restrict_unprivileged_userns) → pas de session,
 # confirmation normale : jamais une exécution hors du bac. Approche choisie : liste noire (InaccessiblePaths) plutôt que
 # liste blanche (ProtectHome=tmpfs + BindReadOnlyPaths), car une rafale d'outils veut lire des chemins variés du dépôt

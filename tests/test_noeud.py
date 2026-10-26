@@ -334,7 +334,8 @@ class Politique(Base):
         a = self.appels()
         self.assertIn("playerctl play-pause", a)
         self.assertIn("loginctl lock-session", a)
-        self.assertTrue(any(l.startswith("notify-send -a JARVIS -- Coucou &lt;b&gt;x&lt;/b&gt;") for l in a), a)
+        self.assertTrue(any(l.startswith("notify-send -a Message de JARVIS -- Coucou &lt;b&gt;x&lt;/b&gt;") for l in a), a)
+        self.assertFalse([l for l in a if l.startswith("notify-send -a JARVIS -- Coucou")], "pas le nom des alertes de sécurité")
         self.assertFalse([l for l in a if l.startswith("qs ")], "aucune confirmation demandée")
         # Commande de musique hors liste : refusée
         r = self.serveur.demander("media", {"subaction": "--player=x"})
@@ -477,6 +478,61 @@ class Politique(Base):
         self.assertFalse([l for l in self.appels() if l.startswith("qs ")], "refusé avant toute carte")
         self.assertIn("refusé (chemin protégé)", self.journal())
 
+    def test_write_file_montre_tout_ou_refuse(self):
+        self.demarrer()
+        contenu = "".join(f"l{i}\n" for i in range(1, 40)) + "CHARGE-A-LA-40E\n"
+        r = self.serveur.demander("write_file", {"path": "~/Notes/long.txt", "content": contenu})
+        self.assertTrue(r["success"], r)
+        demande = json.loads((self.home / "derniere-demande.json").read_text())
+        self.assertIn("CHARGE-A-LA-40E", demande["texte"])
+        self.assertEqual(demande["texte"], contenu)
+        r = self.serveur.demander("write_file", {"path": "~/Notes/enorme.txt", "content": "x\n" * 40000})
+        self.assertFalse(r["success"], r)
+        self.assertIn("trop long", r["error"])
+        self.assertFalse((self.home / "Notes/enorme.txt").exists())
+
+    def test_write_file_nouveaux_chemins_proteges(self):
+        (self.home / ".config/nc").mkdir(parents=True, exist_ok=True)
+        depot = self.home / "code/copie-depot"
+        (depot / ".git").mkdir(parents=True)
+        (self.home / ".config/nc/depot").write_text(str(depot) + "\n")
+        (self.home / "projet/.git/hooks").mkdir(parents=True)
+        self.demarrer()
+        for chemin in ("~/projet/.git/hooks/pre-commit", "~/projet/.git/config", "~/.config/pipewire/x.conf",
+                       "~/.config/wireplumber/main.lua.d/x.lua", "~/projet/.envrc", "~/projet/sous/.envrc",
+                       str(depot / "home/.local/bin/nc-maj"), "~/projet/.git/modules/m/hooks/post-merge",
+                       "~/.config/autostart/x.desktop", "~/.config/systemd/user/x.service", "~/.profile", "~/.bashrc",
+                       "~/.zshrc", "~/.local/bin/x", "~/.config/hypr/hyprland.lua", "~/.local/share/applications/x.desktop"):
+            r = self.serveur.demander("write_file", {"path": chemin, "content": "x"})
+            self.assertFalse(r["success"], chemin)
+            self.assertIn("protégé", r["error"], chemin)
+        self.assertFalse((self.home / ".config/pipewire").exists(), "aucun dossier créé avant le refus")
+        self.assertFalse((depot / "home").exists())
+        r = self.serveur.demander("write_file", {"path": "~/projet/lisez-moi.txt", "content": "ok"})
+        self.assertTrue(r["success"], r)
+
+    def test_write_file_depots_bare_et_reglages_de_lancement(self):
+        for d in ("projets/x.git", "projets/ordinaire"):
+            for sous in ("objects", "refs", "hooks"):
+                (self.home / d / sous).mkdir(parents=True)
+        (self.home / "projets/x.git/HEAD").write_text("ref: refs/heads/main\n")
+        (self.home / "projets/nu/hooks").mkdir(parents=True)
+        for sous in ("objects", "refs"):
+            (self.home / "projets/nu" / sous).mkdir()
+        (self.home / "projets/nu/HEAD").write_text("ref: refs/heads/main\n")
+        self.demarrer()
+        for chemin in ("~/projets/x.git/hooks/pre-commit", "~/projets/x.git/config", "~/projets/x.git/info/exclude",
+                       "~/projets/nu/hooks/post-update", "~/.config/chromium-flags.conf", "~/.config/electron-flags.conf",
+                       "~/.local/share/flatpak/overrides/global", "~/.config/mpv/mpv.conf",
+                       "~/.config/mpv/scripts/x.lua", "~/.config/mimeapps.list"):
+            r = self.serveur.demander("write_file", {"path": chemin, "content": "x"})
+            self.assertFalse(r["success"], chemin)
+            self.assertIn("protégé", r["error"], chemin)
+        r = self.serveur.demander("write_file", {"path": "~/projets/x.git/description", "content": "ok"})
+        self.assertTrue(r["success"], r)
+        r = self.serveur.demander("write_file", {"path": "~/projets/ordinaire/hooks/a.txt", "content": "ok"})
+        self.assertTrue(r["success"], r)
+
     def test_fichiers_et_capture_autorises(self):
         self.demarrer()
         contenu = "".join(f"ligne {i}\n" for i in range(1, 31))
@@ -486,8 +542,7 @@ class Politique(Base):
         demande = json.loads((self.home / "derniere-demande.json").read_text())
         self.assertIn("~/Notes/notes.txt", demande["resume"])
         self.assertIn("octets", demande["resume"])
-        self.assertEqual(demande["texte"].splitlines()[:20], [f"ligne {i}" for i in range(1, 21)])
-        self.assertNotIn("ligne 21", demande["texte"], "aperçu des 20 premières lignes")
+        self.assertEqual(demande["texte"].splitlines(), [f"ligne {i}" for i in range(1, 31)], "tout le contenu est montré")
         r = self.serveur.demander("read_file", {"path": "~/Notes/notes.txt"})
         self.assertEqual(r["content"], contenu)
         r = self.serveur.demander("screenshot")
@@ -519,6 +574,39 @@ class Politique(Base):
         self.assertFalse(marque.exists())
         self.assertIn("pas de confirmation possible", self.journal())
 
+    def test_notification_lignes_vides_et_ce_qui_est_cache(self):
+        self.ile("absente")
+        (self.home / "notif").write_text("autoriser")
+        self.demarrer()
+        # 40 lignes d'espaces entre « ls » et la vraie commande : la notification montre la vraie commande
+        r = self.serveur.demander("exec", {"command": "ls\n" + "\n".join("   " for _ in range(40)) + "\ntrue # vraie-commande"})
+        self.assertTrue(r["success"], r)
+        a = "\n".join(self.appels())
+        self.assertIn("⋯ 40 lignes vides ⋯\ntrue # vraie-commande", a)
+        # Trop de lignes pour la notification : refusé (jamais coupé en silence)
+        r = self.serveur.demander("exec", {"command": "\n".join(f"echo {i}" for i in range(30)) + "\ntrue # cachee"})
+        self.assertFalse(r["success"])
+        self.assertFalse([l for l in self.appels() if "cachee" in l])
+
+    def test_notify_titre_nettoye(self):
+        self.ile("absente")
+        self.demarrer()
+        r = self.serveur.demander("notify", {"title": "Alerte\n\u202esuite", "body": "x"})
+        self.assertTrue(r["success"], r)
+        a = [l for l in self.appels() if l.startswith("notify-send") and "Alerte" in l]
+        self.assertTrue(a, self.appels())
+        self.assertNotIn("\u202e", a[0])
+        self.assertIn("Alerte ⟨\\u202e⟩suite", a[0])
+
+    def test_read_file_proc_et_sys_refuses(self):
+        self.demarrer()
+        for chemin in ("/proc/self/environ", "/proc/self/status", "/sys/kernel/hostname"):
+            r = self.serveur.demander("read_file", {"path": chemin})
+            self.assertFalse(r["success"], chemin)
+        (self.home / "lien").symlink_to("/proc/self/environ")
+        r = self.serveur.demander("read_file", {"path": "~/lien"})
+        self.assertFalse(r["success"], r)
+
     def test_journal_0600(self):
         self.demarrer()
         self.serveur.demander("media", {"subaction": "play"})
@@ -540,7 +628,8 @@ class Politique(Base):
 # ── La carte de l'île, hors écran ─────────────────────────────────────────────────────────────────────────────────
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Carte(unittest.TestCase):
-    def executer(self, bouton, expire_dans=60, tard=False):
+    def executer(self, bouton, expire_dans=60, tard=False, masque=False):
+        masque_js = "true" if masque else "false"
         tard_js = "true" if tard else "false"
         with tempfile.TemporaryDirectory(prefix="nc-noeud-carte-") as d:
             home = Path(d)
@@ -549,9 +638,12 @@ class Carte(unittest.TestCase):
             (run / "nc-noeud/reponses").mkdir(parents=True, mode=0o700)
             ident = uuid.uuid4().hex
             commande = "rm -rf ~/Téléchargements/vieux && " + "echo x; " * 80
+            lignes = 0
+            if masque:       # ce que nc-noeud envoie pour « ls », 40 lignes d'espaces, puis la vraie commande
+                commande, lignes = "ls\n⋯ 40 lignes vides ⋯\nrm -rf ~/important", 42
             (run / "nc-noeud/demande.json").write_text(json.dumps({
                 "id": ident, "serveur": "jarvis.example.com", "action": "exec", "resume": "exécuter cette commande",
-                "texte": commande, "court": 400, "expire": time.time() + expire_dans, "duree": 25}))
+                "texte": commande, "lignes": lignes, "court": 400, "expire": time.time() + expire_dans, "duree": 25}))
             for nom in ("Noeud", "ConfirmationNoeud", "Texte", "Ico"):
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool sobre: true\n'
@@ -588,14 +680,18 @@ ShellRoot {
     var t = trouver(carte, "nc-noeud-titre").text
     verifier(t === "JARVIS (depuis jarvis.example.com) veut : exécuter cette commande", "titre : " + t)
     var det = trouver(carte, "nc-noeud-detail")
-    verifier(det.text.length === 401 && det.text.slice(-1) === "…", "coupée à 400 : " + det.text.length)
+    if (''' + masque_js + ''') {
+     verifier(det.text.indexOf("rm -rf ~/important") >= 0 && det.text.indexOf("40 lignes vides") >= 0, "la vraie commande est montrée : " + det.text)
+     var nl = trouver(carte, "nc-noeud-lignes")
+     verifier(nl.visible && nl.text === "42 lignes", "nombre de lignes : " + nl.text)
+    } else verifier(det.text.length === 401 && det.text.slice(-1) === "…", "coupée à 400 : " + det.text.length)
     verifier(det.textFormat === Text.PlainText && det.font.family === "monospace", "texte brut en police de terminal")
     var ok = trouver(carte, "nc-noeud-autoriser"), non = trouver(carte, "nc-noeud-refuser")
     verifier(texteDe(ok) === "Autoriser" && texteDe(non) === "Refuser", "libellés")
     verifier(non.x < ok.x, "Refuser à gauche, Autoriser à droite")
     var voir = trouver(carte, "nc-noeud-voir-tout")
-    verifier(voir.visible, "Voir tout")
-    souris.mouseClick(voir)
+    verifier(voir.visible === !''' + masque_js + ''', "Voir tout seulement si le texte dépasse")
+    if (voir.visible) souris.mouseClick(voir)
     etape++; return }
    if (etape === 1) {
     var d2 = trouver(carte, "nc-noeud-detail")
@@ -631,6 +727,9 @@ ShellRoot {
 
     def test_refuser(self):
         self.assertEqual(self.executer("nc-noeud-refuser"), "refuser")
+
+    def test_lignes_vides_regroupees_la_vraie_commande_est_montree(self):
+        self.assertEqual(self.executer("nc-noeud-autoriser", masque=True), "autoriser")
 
     def test_autoriser_trop_tard_rien_n_est_envoye(self):
         self.assertIsNone(self.executer("nc-noeud-autoriser", expire_dans=2.5, tard=True))
@@ -932,6 +1031,19 @@ class ServeurDistant(Base):
 
 
 class Distance(ServeurDistant):
+
+    def test_resume_distant_lignes_vides_regroupees(self):
+        self.demarrer()
+        rid = self.action("exec", {"command": "ls\n" + "\n".join("   " for _ in range(40)) + "\ntrue # vraie-commande"})
+        q = self.attendre("confirm_request", rid)
+        self.assertIn("(42 lignes)", q["summary"])
+        self.assertIn("ls\n⋯ 40 lignes vides ⋯\ntrue # vraie-commande", q["summary"])
+        self.repondre(rid, "deny")
+        # Trop long après nettoyage : jamais envoyé, jamais coupé
+        rid = self.action("exec", {"command": "\n".join(f"echo {i}" * 30 for i in range(200)) + "\ntrue # cachee"})
+        rep = self.attendre("response", rid)
+        self.assertFalse(rep["success"], rep)
+        self.assertNotIn("cachee", json.dumps([m for m in self.recus if m.get("type") == "confirm_request"]))
 
     def test_allow_execute(self):
         r = self.demarrer()
@@ -1632,6 +1744,32 @@ class Revue(ModuleCharge):
         self.assertIn("contient des caractères non ASCII", d.resume)
         self.assertNotIn("non ASCII", m.preparer("exec", {"command": "ls"}).resume)
 
+    def test_pour_carte(self):
+        m = self.charger()
+        t, n = m.pour_carte("ls  \n" + "\n".join(" \u00a0 " for _ in range(40)) + "\nrm -rf x")
+        self.assertEqual((t, n), ("ls\n⋯ 40 lignes vides ⋯\nrm -rf x", 42))
+        self.assertEqual(m.pour_carte("a\n\nb")[0], "a\n\nb")
+        self.assertEqual(m.pour_carte("a" + " " * 50 + "b")[0], "a⟨50 espaces⟩b")
+        self.assertEqual(m.pour_carte("    indenté")[0], "    indenté", "l'indentation reste")
+        self.assertEqual(m.pour_carte("a\rb\u200bc")[0], "a⟨\\x0d⟩b⟨\\u200b⟩c")
+        self.assertEqual(m.pour_carte("")[0], "")
+
+    def test_pour_carte_vraies_lignes_vides_et_marqueur_forge(self):
+        m = self.charger()
+        t, n = m.pour_carte("ls" + "\n" * 50 + "rm x")
+        self.assertEqual((t, n), ("ls\n⋯ 49 lignes vides ⋯\nrm x", 51))
+        # Un marqueur écrit par l'attaquant ne ressemble pas au vrai
+        t, _ = m.pour_carte("ls\n⋯ 3 lignes vides ⋯\nrm x")
+        self.assertNotIn("⋯", t)
+        self.assertIn("⟨\\u22ef⟩ 3 lignes vides", t)
+
+    def test_pour_carte_marques_combinantes(self):
+        m = self.charger()
+        for c in ("\u0336", "\u0489"):
+            t, _ = m.pour_carte("a" + c * 30 + "b")
+            self.assertEqual(t, "a⟨30 marques⟩b")
+        self.assertEqual(m.pour_carte("e\u0301\u0302x")[0], "e\u0301\u0302x", "1 à 2 marques : accents normaux")
+
     def test_chemins_de_la_revue(self):
         m = self.charger()
         h = self.home
@@ -1902,6 +2040,105 @@ class SessionConfiance(ModuleCharge):
         self.assertNotIn("session", r3)
         self.assertEqual(n.session.reste, 19)
         self.assertEqual((self.home / "notes.txt").read_text(), "bonjour")
+
+    def test_read_file_confirme_n_ouvre_pas_de_session(self):
+        m = self.charger()
+        n = self.noeud(m)
+        (self.home / "note.txt").write_text("bonjour")
+        r = self.dec(n, "read_file", {"path": "~/note.txt"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(r["content"], "bonjour")
+        self.assertIsNone(n.session, "pas de session sur une lecture")
+        self.assertNotIn("session", r)
+        self.assertNotIn("ouvre une session", self.confs[0])
+        self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(len(self.confs), 2, "l'exec suivant redemande")
+        self.assertIn("ouvre une session", self.confs[1])
+
+    def test_capture_confirmee_n_ouvre_pas_de_session(self):
+        m = self.charger()
+        n = self.noeud(m)
+        self.regler(NOEUD_JARVIS="oui", NOEUD_SESSION_MINUTES="5", NOEUD_SESSION_CAPTURES="oui")
+        self.assertTrue(m.couverte_session("screenshot"))
+
+        grim = self.bin / "grim"
+        grim.write_text("#!/bin/sh\nprintf x > \"$1\"\n")
+        grim.chmod(0o755)
+        self.dec(n, "screenshot", {})
+        self.assertIsNone(n.session, "une capture ne doit jamais ouvrir de session")
+        self.assertNotIn("ouvre une session", " ".join(self.confs))
+        n_avant = len(self.confs)
+        self.dec(n, "exec", {"command": "true"})
+        self.assertEqual(len(self.confs), n_avant + 1, "l'exec suivant redemande")
+
+    def test_taches_en_parallele_limitees(self):
+        m = self.charger()
+        n = self.noeud(m)
+        en_cours = [0, 0]
+
+        async def lent(action, params, req_id=None, trame=None, origin=None):
+            en_cours[0] += 1
+            en_cours[1] = max(en_cours[1], en_cours[0])
+            await asyncio.sleep(0.05)
+            en_cours[0] -= 1
+            return {"success": True}
+        n.decider = lent
+
+        async def rafale():
+            await asyncio.gather(*(n.traiter({"req_id": str(i), "action": "media"}) for i in range(10)))
+        asyncio.run(rafale())
+        self.assertEqual(en_cours[1], m.MAX_TACHES)
+        self.assertEqual(m.MAX_TACHES, 4)
+        self.assertEqual(len(n.ws.envoyes) if hasattr(n.ws, "envoyes") else 10, 10)
+
+    def test_notify_limite_de_debit(self):
+        m = self.charger()
+        (self.bin / "notify-send").write_text("#!/bin/sh\nexit 0\n")
+        (self.bin / "notify-send").chmod(0o755)
+        n = self.noeud(m)
+        m.NOTIFY_RECENTES.clear()
+        res = [self.dec(n, "notify", {"title": "t", "body": str(i)}) for i in range(7)]
+        self.assertEqual([r["success"] for r in res], [True] * 5 + [False] * 2)
+        self.assertIn("Trop de notifications", res[5]["error"])
+
+    def test_write_file_ne_suit_pas_un_lien_pose_apres_la_verification(self):
+        m = self.charger()
+        n = self.noeud(m)
+        cible = self.home / "d/f.txt"
+        cible.parent.mkdir()
+        cible.write_text("ancien")
+        secret = self.home / "secret-hors-cible.txt"
+        secret.write_text("INTACT")
+        original = m.controle_cible_ecriture
+        faits = []
+
+        def pose_lien(dfd, c):                                   # un lien apparaît entre la vérification et le rename
+            original(dfd, c)
+            faits.append(1)
+            if len(faits) == 3:                                  # après le dernier contrôle, juste avant le rename
+                cible.unlink()
+                cible.symlink_to(secret)
+        m.controle_cible_ecriture = pose_lien
+        r = self.dec(n, "write_file", {"path": "~/d/f.txt", "content": "nouveau"})
+        self.assertTrue(r["success"], r)
+        self.assertEqual(secret.read_text(), "INTACT", "le lien n'a pas été suivi")
+        self.assertFalse(cible.is_symlink())
+        self.assertEqual(cible.read_text(), "nouveau")
+        self.assertEqual(list((self.home / "d").glob(".nc-noeud-*")), [], "pas de temporaire oublié")
+        # un dossier du chemin remplacé par un lien : refusé, rien écrit
+        (self.home / "e").mkdir()
+        (self.home / "ailleurs").mkdir()
+        orig2 = m.ouvrir_dossier_sans_suivre
+
+        def swap(d, creer):
+            if creer and d.name == "e":
+                (self.home / "e").rmdir()
+                (self.home / "e").symlink_to(self.home / "ailleurs")
+            return orig2(d, creer)
+        m.ouvrir_dossier_sans_suivre = swap
+        r = self.dec(n, "write_file", {"path": "~/e/g.txt", "content": "x"})
+        self.assertFalse(r["success"], r)
+        self.assertFalse((self.home / "ailleurs/g.txt").exists())
 
     def test_actions_simultanees_ne_depassent_pas_20(self):
         # Les actions sont traitées en parallèle : la place est prise dès la décision, pas après l'exécution

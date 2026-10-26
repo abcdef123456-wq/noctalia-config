@@ -311,7 +311,7 @@ class Management(unittest.TestCase):
         paths=[self.root/'.env',self.root/'render-gateway/.env',self.root/'home-runner/.env']
         for p in paths:p.write_text('TELEGRAM_ALLOWED_USER_IDS="1"\nDISCORD_ALLOWED_USER_IDS="2"\nTELEGRAM_TOKEN="t"\nDISCORD_TOKEN="d"\nSECRET_KEY="s"\n')
         avant=[p.read_text() for p in paths]
-        for cle in ('TELEGRAM_ALLOWED_USER_IDS','DISCORD_ALLOWED_USER_IDS','TELEGRAM_TOKEN','DISCORD_TOKEN','SECRET_KEY','TELEGRAM_WEBHOOK_URL','DISCORD_GUILD_ID'):
+        for cle in ('TELEGRAM_ALLOWED_USER_IDS','DISCORD_ALLOWED_USER_IDS','TELEGRAM_TOKEN','DISCORD_TOKEN','SECRET_KEY','TELEGRAM_WEBHOOK_URL','DISCORD_GUILD_ID','NC_MOTEURS_SANS_ISOLATION'):
             r=self.call('config.update',{'values':{cle:'999'}},True)
             self.assertEqual(r.status_code,400,cle)
         self.assertEqual(self.call('config.update',{'values':{'BRIEFING_TIME':'09:00','TELEGRAM_ALLOWED_USER_IDS':'999'}},True).status_code,400)

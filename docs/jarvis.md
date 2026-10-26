@@ -693,6 +693,26 @@ l’indique. Il ne s’agit pas de sessions natives CLI à contexte illimité.
 Les sous-processus sont sérialisés sur le runner, avec timeout et sorties bornées ; leur groupe est arrêté sur
 échec ou dépassement. Aucune demande n’est rejouée automatiquement après erreur.
 
+**Isolation des moteurs.** Un moteur « en lecture seule » pourrait lire tout le disque, donc le `.env` du serveur (jeton
+du bot, `SECRET_KEY`) ou les secrets du bureau (`~/.config/nc/noeud-totp.json`, `assistant.conf`, `~/.ssh`…), et les
+recopier dans sa réponse. Chaque moteur tourne donc dans une unité `systemd-run --user` transitoire : le backend, ses
+`.env*` et tout ce que `nc-bac` protège sont inaccessibles (seuls les dossiers de session du moteur restent lisibles :
+`~/.claude`, `~/.codex`, `~/.config/opencode`), avec `/tmp` privé, sans socket Unix ni bus, et un `/proc` à part. Ce qui s'exécute ou se relit plus tard hors de l'unité y est en **lecture seule** (`~/.local/bin`,
+`~/.local/share/nc-jarvis`, hypr, autostart, applications, shells, pipewire, `~/.config/nc`, la copie du dépôt : les listes de
+`nc-bac` et `nc-noeud`, lues sur place) ainsi que les réglages et consignes des CLI (`settings*.json`, `CLAUDE.md`, hooks,
+commands, agents, skills, plugins de Claude ; `config.toml`, `AGENTS.md`, prompts, rules de Codex ; `opencode.json` et plugins
+d'OpenCode). Les transcriptions, la mémoire et les scripts de shell de tes sessions (`~/.claude/projects`, `shell-snapshots`,
+`~/.codex/memories`, `shell_snapshots`) sont remplacés par un dossier vide jeté avec l'unité. **Limite connue** : le reste du
+dossier personnel reste inscriptible, donc le moteur peut écrire la config de son CLI (`~/.claude.json` et ses serveurs MCP, un
+fichier de consignes **absent** qu'il créerait, par exemple `~/.claude/CLAUDE.md`, ou le reste des dossiers d'état), qui
+s'exécutera plus tard hors de l'unité ; systemd ne peut pas verrouiller un fichier absent sans en laisser un vide dans ton
+dossier personnel. Un prochain lot donnera aux moteurs un faux dossier personnel. Si un moteur échoue sur une écriture
+refusée, JARVIS répond « isolation de JARVIS : écriture refusée dans … ». Il faut
+**systemd 257 ou plus** (comme le bac des sessions de confiance) : sans cela, ou si la protection ne tient pas, aucun
+moteur n'est lancé (« l'IA de JARVIS n'est pas isolée ici »). Sur un serveur d'hébergeur sans systemd, le refus est
+aussi la règle ; pour l'accepter, en sachant que **le moteur pourra lire les jetons du bot**, écris
+`NC_MOTEURS_SANS_ISOLATION=oui` dans le `.env` du serveur (jamais modifiable à distance, jamais écrit par le déployeur).
+
 Le visuel de `pfp.mp4` apparaît sur fond noir au-dessus de la saisie : atlas QtQuick, sans dépendance codec.
 Son animation s’arrête quand la page est cachée ou quand les effets sont désactivés. Les réglages sont chargés
 à l’ouverture manuelle du panneau et à l’application, sans scrutation périodique.
@@ -727,6 +747,18 @@ Le suivi d’activité réutilise les verrous de `nc-claude` ; les requêtes mut
 
 ## Limites à connaître
 
+- **Les moteurs locaux et ton dossier personnel.** Tout le HOME hors de ces listes reste inscriptible pour un moteur, y
+  compris des chemins exécutés plus tard (par exemple des fichiers de démarrage du shell ou des modules Python) : seul le
+  prochain lot, qui donnera un faux HOME aux moteurs, le ferme. En attendant, un utilisateur prudent peut ne pas activer les
+  moteurs locaux : mets `IA_MODE=non` (nc-reglages → Intelligence artificielle → IA du bureau : non). Sur le PC, le serveur
+  JARVIS refuse alors toute demande avant de lancer un moteur (claude, codex, opencode et agy), sans toucher au reste de JARVIS
+  (Telegram, rappels, notifications, pilotage). Cela coupe aussi l'IA du bureau (`nc-ia`).
+- **Si le jeton du gateway est volé** : il permet encore de parler aux moteurs, d’écrire la mémoire et le profil (qui
+  entrent dans leurs consignes) et d’envoyer une notification Telegram. Il ne permet plus de changer un réglage sensible
+  du PC (seule une liste blanche de réglages d’apparence et de confort s’écrit à distance, vérifiée sur le PC), ni de
+  s’ajouter aux utilisateurs permis, de remplacer un bot ou de toucher à `SECRET_KEY` (à distance, seuls les champs du
+  briefing s’écrivent dans les `.env`). Les moteurs ne reçoivent aucun jeton du serveur. Garde ce jeton secret, et
+  change-le s’il a pu fuiter.
 - **Session partagée ou par PC** : avec AGY et `64523e5`, chaque PC a sa session, Telegram et Discord aussi (une par
   utilisateur). Avec Claude Code, Codex ou OpenCode, notre gestionnaire garde une seule session pour tous : changer de
   modèle, reprendre ou réinitialiser une conversation touche les autres interfaces, et une seule question à la fois.

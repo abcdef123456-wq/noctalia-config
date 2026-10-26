@@ -266,6 +266,9 @@ class Logique(unittest.TestCase):
         self.executer('''
                 if (etape === 0) {
                     if (!Notifs.pret) return
+                    // Grâce de 3 s (1 s en vrai) : les captures sont à 400 ms l'une de l'autre, une machine chargée
+                    // (suite complète) peut retarder la minuterie du test de plus d'une seconde
+                    Partage.delaiFin = 3000
                     Partage.evenement("1,2"); notifier("Chat", "un", "", "normal"); marquer(); etape++; return }
                 if (etape === 1) {
                     if (Notifs.liste.length < 1) return

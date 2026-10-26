@@ -153,6 +153,12 @@ class Assistant(unittest.TestCase):
             self.assertNotIn("tracking", r.stderr.lower())
         self.assertEqual(len(self.server.recus), 1)  # /help reste une commande locale, sans modèle.
 
+    def test_demander_stdin_prend_la_question_sur_stdin(self):
+        r = self.cli("demander", "--flux", "--stdin", input="question privée\nsuite")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"t": "Bonjour\n$ echo ok"})
+        self.assertEqual(self.server.recus[-1][3]["prompt"], "question privée\nsuite")
+
     def test_request_timings_do_not_repeat_the_question_or_change_stdout(self):
         for option in ("--mesurer", "--timings"):
             r = self.cli("demander", "--flux", option, "question privée")
