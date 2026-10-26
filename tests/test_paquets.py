@@ -257,6 +257,33 @@ class Paquets(unittest.TestCase):
         self.lancer("terminal", NC_TEST_FS="btrfs", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
         self.assertFalse([x for x in self.appels() if x.startswith("btrfs")], "réglage coupé : rien")
 
+    def test_cadence_chargeur_usb_c_et_pile_de_souris(self):
+        """Un chargeur USB-C branché compte comme le secteur (pas de minimum de 3 h) ; la pile d'une souris sans fil
+        (scope Device) n'est pas une batterie du PC (même test que nc-gpu-regle)."""
+        import os, time
+        alim = self.home / "alim"
+        for nom, fichiers in (("ucsi-source-psy-USBC000:001", {"type": "USB", "online": "1"}), ("BAT0", {"type": "Battery"})):
+            (alim / nom).mkdir(parents=True)
+            for f, v in fichiers.items():
+                (alim / nom / f).write_text(v + "\n")
+        lancer = lambda *a, **e: self.lancer(*a, NC_POWER_SUPPLY=str(alim), NC_METERED="u 4", **e)
+        lancer("compter", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        (self.home / "appels").unlink()
+        vieux = time.time() - 2 * 3600
+        os.utime(self.cache, (vieux, vieux))
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertIn("checkupdates", self.appels(), "USB-C branché : comme le secteur, 2 h suffisent")
+        # PC fixe sans batterie, une souris sans fil : jamais « sur batterie »
+        (self.home / "appels").unlink()
+        import shutil
+        shutil.rmtree(alim)
+        (alim / "hidpp_battery_0").mkdir(parents=True)
+        (alim / "hidpp_battery_0/type").write_text("Battery\n")
+        (alim / "hidpp_battery_0/scope").write_text("Device\n")
+        os.utime(self.cache, (vieux, vieux))
+        lancer("compter", "auto", NC_TEST_DEPOTS="zsh 5-1 -> 5-2\n")
+        self.assertIn("checkupdates", self.appels(), "pile de souris : pas une batterie du PC")
+
     def test_cadence_sobre(self):
         import os, time
         # Alimentation et connexion simulées (pas celles de la machine qui lance les tests)

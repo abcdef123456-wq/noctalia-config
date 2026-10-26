@@ -246,13 +246,26 @@ PY
 # La cadence (minutes) : cad_min, le plus court permis (batterie 3 h, Économie 6 h, connexion limitée 12 h, 0 sinon), et
 # cad_base, la période (MAJ_FREQUENCE, jamais sous cad_min)
 cadence() {
-  local base min=0 secteur=0 bat=0 s
+  local base min=0 secteur=0 bat=0 s g
   case "$(reglage MAJ_FREQUENCE)" in 3h) base=180 ;; 6h) base=360 ;; jour) base=1440 ;; *) base=60 ;; esac
-  for s in "${NC_POWER_SUPPLY:-/sys/class/power_supply}"/*; do
-    [ -r "$s/type" ] || continue
-    case "$(cat "$s/type" 2>/dev/null)" in Mains) [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && secteur=1 ;; Battery) bat=1 ;; esac
+  # Même test que le reste du bureau (nc-gpu-regle : un chargeur USB-C compte comme le secteur, la pile d'une souris
+  # n'est pas une batterie du PC) ; sans lui, le même test ici
+  for g in "$(dirname "$0")/nc-gpu-regle" "$HOME/.local/bin/nc-gpu-regle"; do
+    # shellcheck source=/dev/null
+    [ -r "$g" ] && . "$g" && break
   done
-  [ "$bat" = 1 ] && [ "$secteur" = 0 ] && min=180
+  if command -v nc_sur_batterie >/dev/null 2>&1; then
+    nc_sur_batterie && min=180
+  else
+    for s in "${NC_POWER_SUPPLY:-/sys/class/power_supply}"/*; do
+      [ -r "$s/type" ] || continue
+      case "$(cat "$s/type" 2>/dev/null)" in
+        Mains|USB|USB_C) [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && secteur=1 ;;
+        Battery) [ "$(cat "$s/scope" 2>/dev/null)" = Device ] || bat=1 ;;
+      esac
+    done
+    [ "$bat" = 1 ] && [ "$secteur" = 0 ] && min=180
+  fi
   grep -q 'profil *= *"power-saver"' "$HOME/.config/hypr/nc/profil.lua" 2>/dev/null && [ "$min" -lt 360 ] && min=360
   # Connexion limitée selon NetworkManager (1 : oui, 3 : sans doute)
   case "${NC_METERED:-$(busctl get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager org.freedesktop.NetworkManager Metered 2>/dev/null)}" in
