@@ -453,7 +453,12 @@ def lancer(nom):
     if nom == "aleatoire":
         nom = random.choice(list(NOMS) + list(perso()))
     if nom == "doigts":
-        os.execv(os.path.join(HOME, ".local/bin/nc-finger"), ["nc-finger"])
+        finger = os.path.join(HOME, ".local/bin/nc-finger")
+        try:
+            os.execv(finger, ["nc-finger"])
+        except OSError as e:           # nc-finger absent ou illisible : un message, pas une trace Python
+            sys.exit(T(f"nc-anim : impossible de lancer nc-finger ({e.strerror or e}) : {finger}",
+                       f"nc-anim: cannot start nc-finger ({e.strerror or e}): {finger}"))
     if nom in ANIMATIONS:
         if os.environ.get("NC_ANIM_DEDANS") or not os.environ.get("WAYLAND_DISPLAY"):
             jouer(ANIMATIONS[nom])                 # déjà dans le terminal plein écran (ou essai dans ce terminal)
