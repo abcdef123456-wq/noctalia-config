@@ -488,5 +488,5 @@ class CommandeChat(unittest.TestCase):
         r,qs,assistant=self.lancer(False)
         self.assertEqual(r.returncode,0,r.stderr)
         self.assertEqual(assistant,['ouvrir'],'sans Quickshell : le chat terminal')
-        self.assertIn('indisponible',r.stderr)
+        self.assertRegex(r.stderr,'indisponible|unavailable')   # langue de la machine (CI sans locale française : anglais)
 
