@@ -1533,20 +1533,24 @@ def question_gpu(g):
     cible = "dediee" if g.get("mode") == "hybride" else "hybride"
     n = nom_mode_gpu(cible)
     titre = T(f"Passer en mode {n} ?", f"Switch to {n} mode?")
+    # Vers Dédiée sans aucun pilote NVIDIA chargé : l'écran pourrait rester noir
+    avert = ""
+    if cible == "dediee" and g.get("pilote_nvidia") is False:
+        avert = T(" Attention : aucun pilote NVIDIA n'est chargé sur ce PC.", " Warning: no NVIDIA driver is loaded on this PC.")
     if g.get("methode", "") in ("bios", ""):
         if not g.get("bios_direct"):
             return (cible, titre,
                     T(f"Ton PC change de mode dans son BIOS : redémarre, appuie sur F2 dès l'allumage, choisis GPU Working "
-                      f"Mode → {n}, puis F10.",
+                      f"Mode → {n}, puis F10." + avert,
                       f"Your PC switches mode in its BIOS: restart, press F2 right at power-on, choose GPU Working Mode → "
-                      f"{n}, then F10."), "")
+                      f"{n}, then F10." + avert), "")
         return (cible, titre,
-                T(f"Ton PC redémarre dans son BIOS : choisis GPU Working Mode → {n}, puis F10. Les applis ouvertes seront fermées.",
-                  f"Your PC restarts into its BIOS: choose GPU Working Mode → {n}, then F10. Open apps will be closed."),
+                T(f"Ton PC redémarre dans son BIOS : choisis GPU Working Mode → {n}, puis F10. Les applis ouvertes seront fermées." + avert,
+                  f"Your PC restarts into its BIOS: choose GPU Working Mode → {n}, then F10. Open apps will be closed." + avert),
                 T("Redémarrer dans le BIOS", "Restart into BIOS"))
     return (cible, titre,
-            T(f"Ton PC passe en mode {n}, puis redémarre. Les applis ouvertes seront fermées.",
-              f"Your PC switches to {n} mode, then restarts. Open apps will be closed."),
+            T(f"Ton PC passe en mode {n}, puis redémarre. Les applis ouvertes seront fermées." + avert,
+              f"Your PC switches to {n} mode, then restarts. Open apps will be closed." + avert),
             T("Redémarrer", "Restart"))
 
 
@@ -2014,8 +2018,8 @@ def texte_veille(vals, src):
     if secteur:
         # PC branché, ou sans batterie (PC de bureau) : veille après ce délai
         texte += ("\n# nc-reglages : veille sur secteur\nlistener {\n    timeout = %d\n    on-timeout = sh -c 'ls -d "
-                  "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; for s in /sys/class/power_supply/*; "
-                  "do [ \"$(cat $s/type)\" = Mains ] && [ \"$(cat $s/online)\" = 1 ] && exec systemctl suspend; done; exit 0'\n}\n"
+                  "/sys/class/power_supply/BAT* >/dev/null 2>&1 || exec systemctl suspend; . ~/.local/bin/nc-gpu-regle; "
+                  "nc_sur_batterie || exec systemctl suspend; exit 0'\n}\n"
                   % (secteur * 60))
     return (f"# Généré par nc-reglages depuis ~/.config/hypr/hypridle.conf (verrouillage : {verrou} min, "
             f"veille : {susp} min, sur secteur : {secteur or 'jamais'}, sur batterie : assombri après "

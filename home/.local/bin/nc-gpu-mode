@@ -9,7 +9,7 @@
 #                                         BIOS pour la méthode bios) : l'appelant a déjà eu la confirmation (carte de
 #                                         l'île, question de nc-reglages)
 #   nc-gpu-mode json                      l'état, pour l'île et nc-reglages :
-#                                         {"mode": …, "methode": …, "bios_direct": true|false, "carte_ecran": "AMD"…}
+#                                         {"mode": …, "methode": …, "bios_direct": true|false, "carte_ecran": "AMD", "pilote_nvidia": true|false}
 # Mode actuel : l'écran interne (connecteur eDP branché) est-il relié à la carte NVIDIA ? Oui : dédiée (le MUX a
 # branché l'écran sur la NVIDIA) ; non : hybride. Rien n'est lu en boucle, la NVIDIA n'est pas réveillée.
 # Bascule, selon le constructeur :
@@ -69,6 +69,25 @@ carte_ecran_interne() {
   return 1
 }
 
+# La famille de ce portable a-t-elle un MUX (écran relié au choix à l'une ou l'autre carte) ? Lu dans le DMI :
+# Legion, LOQ, ROG, TUF, Alienware, Omen, Predator, Razer, Aorus, MSI gaming
+mux_probable() {
+  local id v
+  v="$(dmi sys_vendor)"
+  id="$v $(dmi product_family) $(dmi product_name) $(dmi product_version) "
+  id="${id,,}"
+  case "$id" in
+    *legion*|*" loq "*|*" rog "*|*" tuf "*|*alienware*|*" omen "*|*predator*|*razer*|*aorus*) return 0 ;;
+  esac
+  case "${v,,}" in
+    *micro-star*|*msi*)
+      case "$id" in
+        *gaming*|*raider*|*stealth*|*vector*|*titan*|*katana*|*pulse*|*cyborg*|*crosshair*|*sword*) return 0 ;;
+      esac ;;
+  esac
+  return 1
+}
+
 actuel() {
   local carte
   # Écran interne sur la NVIDIA : mode Dédiée, même si le BIOS a fait disparaître la carte intégrée du bus
@@ -79,6 +98,9 @@ actuel() {
   # Sans supergfxctl, system76-power ni gsync, le mode se change dans le BIOS (GPU Working Mode) : ce MUX n'existe
   # que pour une NVIDIA. Intel + AMD, ou un eGPU : pas de mode à choisir
   if [ "$(methode)" = bios ] && ! a_nvidia; then echo sans-objet; return; fi
+  # Toujours par le BIOS : seul un vrai indice de MUX donne un mode à choisir. Un portable Optimus ordinaire
+  # (Dell, HP, ThinkPad…) n'a pas ce réglage : « Hybride » avec un clic vers Dédiée enverrait dans un BIOS sans option
+  if [ "$(methode)" = bios ] && ! mux_probable; then echo sans-objet; return; fi
   carte="$(carte_ecran_interne)"
   if [ -n "$carte" ] && [ "$(lire "$SYS/class/drm/$carte/device/vendor")" = "$NVIDIA" ]; then echo dediee; else echo hybride; fi
 }
@@ -101,6 +123,14 @@ fichier_gsync() {
   return 1
 }
 
+# gsync n'est choisi que si l'écriture peut aboutir : fichier déjà inscriptible, ou pkexec présent (un sudo sans
+# terminal échouerait en silence ; sur Debian 13, pkexec est un paquet à part)
+gsync_utilisable() {
+  local f
+  f="$(fichier_gsync)" || return 1
+  [ -w "$f" ] || command -v pkexec >/dev/null 2>&1
+}
+
 methode() {
   local vendeur famille
   vendeur="$(dmi sys_vendor)"
@@ -113,7 +143,7 @@ methode() {
     System76*|system76*)
       command -v system76-power >/dev/null 2>&1 && { echo system76-power; return; } ;;
     LENOVO*|Lenovo*)
-      case "$famille" in *Legion*|*LEGION*) fichier_gsync >/dev/null && { echo gsync; return; } ;; esac ;;
+      case "$famille" in *Legion*|*LEGION*) gsync_utilisable && { echo gsync; return; } ;; esac ;;
   esac
   echo bios
 }
@@ -169,12 +199,25 @@ ecrire_sys() {
 }
 
 SANS_QUESTION=0
+RAISON=""          # raison courte d'un échec de la méthode de bascule (pour la notification)
+AVEC_OPTION=0      # --sans-question donné : personne ne regarde le terminal, l'échec est notifié
 
 basculer() {
+  local rc
+  RAISON=""
+  basculer_corps "$@"; rc=$?
+  if [ "$rc" != 0 ] && [ "$AVEC_OPTION" = 1 ] && [ -n "$RAISON" ] && command -v notify-send >/dev/null 2>&1; then
+    notify-send -a noctalia-config -i dialog-error -- \
+      "$(t "Le changement de mode a échoué : $RAISON" "The mode change failed: $RAISON")" 2>/dev/null || true
+  fi
+  return "$rc"
+}
+
+basculer_corps() {
   local cible="" mode m f a
   for a in "$@"; do
     case "$a" in
-      --sans-question|--no-prompt) SANS_QUESTION=1 ;;
+      --sans-question|--no-prompt) SANS_QUESTION=1; AVEC_OPTION=1 ;;
       *) cible="$a" ;;
     esac
   done
@@ -215,16 +258,22 @@ basculer() {
   esac
   case "$m" in
     supergfxctl)
+      RAISON="supergfxctl"
       if [ "$cible" = dediee ]; then supergfxctl --mode AsusMuxDgpu || return 1
       else supergfxctl --mode Hybrid || return 1; fi
+      RAISON=""
       proposer_redemarrage "$cible" ;;
     system76-power)
+      RAISON="system76-power"
       if [ "$cible" = dediee ]; then system76-power graphics nvidia || return 1
       else system76-power graphics hybrid || return 1; fi
+      RAISON=""
       proposer_redemarrage "$cible" ;;
     gsync)
-      f="$(fichier_gsync)" || return 1
+      f="$(fichier_gsync)" || { RAISON="$(t "attribut gsync introuvable" "gsync attribute not found")"; return 1; }
+      RAISON="$(t "écriture refusée dans gsync" "writing to gsync was refused")"
       if [ "$cible" = dediee ]; then ecrire_sys "$f" 1 || return 1; else ecrire_sys "$f" 0 || return 1; fi
+      RAISON=""
       proposer_redemarrage "$cible" ;;
     *)
       # Sans démarrage direct dans le BIOS (BIOS ancien, variables EFI absentes) : seulement dire comment y entrer
@@ -261,8 +310,11 @@ json() {
       esac
     fi
   fi
-  printf '{"mode": %s, "methode": %s, "bios_direct": %s, "carte_ecran": %s}\n' \
-    "$(chaine_json "$mode")" "$(chaine_json "$m")" "$direct" "$(chaine_json "$carte")"
+  # Un pilote est-il chargé pour la NVIDIA (propriétaire ou nouveau) ? Sans lui, l'écran resterait noir en Dédiée
+  local pilote=false
+  { [ -d "$SYS/module/nvidia" ] || [ -d "$SYS/module/nouveau" ]; } && pilote=true
+  printf '{"mode": %s, "methode": %s, "bios_direct": %s, "carte_ecran": %s, "pilote_nvidia": %s}\n' \
+    "$(chaine_json "$mode")" "$(chaine_json "$m")" "$direct" "$(chaine_json "$carte")" "$pilote"
 }
 
 info() {

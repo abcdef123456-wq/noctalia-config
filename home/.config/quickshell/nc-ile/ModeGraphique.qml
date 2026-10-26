@@ -12,7 +12,7 @@ import Quickshell.Io
 Singleton {
     id: mg
     readonly property string bin: Quickshell.env("HOME") + "/.local/bin/"
-    property var etat: ({})                          // { mode, methode, bios_direct, carte_ecran } (nc-gpu-mode json)
+    property var etat: ({})                          // { mode, methode, bios_direct, carte_ecran, pilote_nvidia } (nc-gpu-mode json)
     readonly property string mode: etat.mode || ""
     readonly property string methode: etat.methode || ""
     readonly property bool biosDirect: etat.bios_direct === true
@@ -47,6 +47,11 @@ Singleton {
                         "Your PC switches mode in its BIOS: restart, press F2 right at power-on, choose GPU Working Mode → " + nom(cible) + ", then F10."))
         : Reglages.t("Ton PC passe en mode " + nom(cible) + ", puis redémarre. Les applis ouvertes seront fermées.",
                      "Your PC switches to " + nom(cible) + " mode, then restarts. Open apps will be closed.")
+    // Vers Dédiée alors qu'aucun pilote NVIDIA (nvidia ou nouveau) n'est chargé : l'écran pourrait rester noir
+    readonly property string avertissement: cible === "dediee" && etat.pilote_nvidia === false
+        ? Reglages.t("Attention : aucun pilote NVIDIA n'est chargé sur ce PC. Installe-le avant de passer en Dédiée.",
+                     "Warning: no NVIDIA driver is loaded on this PC. Install it before switching to Discrete.")
+        : ""
     // Sans démarrage direct dans le BIOS, rien à confirmer : un seul bouton, qui ferme
     readonly property bool aConfirmer: !(parLeBios && !biosDirect)
     readonly property string bouton: parLeBios ? Reglages.t("Redémarrer dans le BIOS", "Restart into BIOS") : Reglages.t("Redémarrer", "Restart")

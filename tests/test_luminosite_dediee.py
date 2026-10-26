@@ -2,6 +2,7 @@
 dernier recours, si l'écran interne branché est sur cette même carte (mode carte dédiée). Faux /sys par NC_SYSFS."""
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -39,6 +40,22 @@ class Choix(unittest.TestCase):
         env = dict(os.environ, NC_SYSFS=str(self.sys))
         return subprocess.run([str(BIN / "nc-brightness"), "appareil"], env=env, capture_output=True, text=True,
                               timeout=10).stdout.strip()
+
+    def test_sans_brightnessctl_rien_et_aucune_erreur(self):
+        # hypridle appelle dim et get sans vérifier : sans brightnessctl, pas de « command not found » ni
+        # d'« integer expression expected »
+        self.carte("card0", "0000:00:02.0", edp="connected")
+        self.retro("intel_backlight", "raw", "0000:00:02.0")
+        outils = Path(self.tmp.name) / "outils"
+        outils.mkdir()
+        for nom in ("bash", "cat", "sed", "cut", "tr", "tail", "readlink"):
+            chemin = shutil.which(nom, path="/usr/bin:/bin")
+            self.assertTrue(chemin, nom)
+            (outils / nom).symlink_to(chemin)
+        env = dict(os.environ, NC_SYSFS=str(self.sys), PATH=str(outils), NC_LANGUE="fr", HOME=self.tmp.name)
+        for action in ("dim", "get", "restore", "up", "down"):
+            r = subprocess.run([str(BIN / "nc-brightness"), action], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), action)
 
     def test_hybride_intel_et_nvidia_ecran_sur_intel(self):
         self.carte("card0", "0000:00:02.0", edp="connected")

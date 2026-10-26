@@ -32,6 +32,12 @@ Item {
             width: parent.width; text: ModeGraphique.texte; font.pixelSize: 13; color: Couleurs.texteDoux
             wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideNone
         }
+        Texte {
+            objectName: "nc-gpu-avertissement"
+            visible: ModeGraphique.avertissement !== ""
+            width: parent.width; text: ModeGraphique.avertissement; font.pixelSize: 12; color: Couleurs.texteDoux
+            wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideNone
+        }
         Item { width: 1; height: 6 }
         // Annuler · Redémarrer (le bouton principal, en clair sur le fond de l'île, à droite comme sur iPhone)
         Row {

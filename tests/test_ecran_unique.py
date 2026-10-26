@@ -56,6 +56,7 @@ class Banc:
         bin_ = r / "home/.local/bin"
         bin_.mkdir(parents=True)
         shutil.copy2(NC_ECRAN, bin_ / "nc-ecran")
+        shutil.copy2(NC_ECRAN.with_name("nc-gpu-regle"), bin_ / "nc-gpu-regle")   # nc_sur_batterie, sourcée par hypridle
         for nom in ("nc-brightness",):
             (bin_ / nom).write_text("#!/bin/sh\nexit 0\n")
             (bin_ / nom).chmod(0o755)
@@ -65,7 +66,8 @@ class Banc:
             (self.faux / "reel").write_text("")      # le faux hyprctl répond l'état DPMS
             (self.faux / "dpms").write_text("true\n")
         self.env = dict(os.environ, HOME=str(r / "home"), XDG_RUNTIME_DIR=str(self.run),
-                        PATH=f"{self.faux}:/usr/bin:/bin", HYPRLAND_INSTANCE_SIGNATURE="test")
+                        PATH=f"{self.faux}:/usr/bin:/bin", HYPRLAND_INSTANCE_SIGNATURE="test",
+                        NC_POWER_SUPPLY=str(r / "power_supply"))
         self.ps = r / "power_supply"
 
     def fermer(self):
