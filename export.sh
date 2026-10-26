@@ -582,8 +582,8 @@ for cible, x, a, sortie in fichiers:
         cible.write_text("".join(resultat), encoding="utf-8")
 EOF
 
-# Clavier
-sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/
+# Clavier (s'il est publié : un clavier.lua nouveau dans ~ ne l'est pas, voir copier_dossier)
+[ ! -f home/.config/hypr/nc/clavier.lua ] || sed -i -E 's/^(\s*kb_layout\s*=\s*)"[^"]*"/\1"@KB_LAYOUT@"/; s/^(\s*kb_options\s*=\s*)"[^"]*"/\1"@KB_OPTIONS@"/
   s/^(\s*local disposition = nc\.reglage\("CLAVIER_DISPOSITION", )"[^"]*"\)/\1"@KB_LAYOUT@")/
   s/^(\s*if disposition == "systeme" then disposition = )"[^"]*"/\1"@KB_LAYOUT@"/
   s/^(\s*local options = )"[^"]*"/\1"@KB_OPTIONS@"/

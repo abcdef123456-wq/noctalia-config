@@ -290,6 +290,16 @@ class Export(unittest.TestCase):
                         '.local/share/applications/nc-assistant.desktop']:
                 dst = source / rel; dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO / 'home' / rel, dst)
+                # Déjà suivis dans le dépôt : l'export ne publie que les fichiers suivis (les nouveaux sont signalés)
+                suivi = root / 'home' / rel; suivi.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO / 'home' / rel, suivi)
+            g = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@example.invalid',
+                     GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@example.invalid')
+            for c in (['init', '-q'], ['add', '-A'], ['commit', '-qm', 'base']):
+                subprocess.run(['git', '-C', str(root), *c], check=True, env=g, capture_output=True)
+            for rel in ('.local/bin/nc-qs-capture', '.local/bin/nc-assistant'):   # modifiés dans ~ : l'aperçu doit les montrer
+                with open(source / rel, 'a') as f:
+                    f.write('\n# modifié dans ~\n')
             secret = source / '.config/nc/assistant.conf'
             secret.parent.mkdir(parents=True, exist_ok=True)
             secret.write_text('SECRET_KEY=must-not-be-exported')
