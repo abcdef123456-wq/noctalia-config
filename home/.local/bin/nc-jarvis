@@ -29,11 +29,11 @@ def catalogue():
     base=json.loads((SHARE/'actions.json').read_text())
     perso=Path.home()/'.config/nc/jarvis-actions.json'
     if perso.exists():
-        if perso.stat().st_size>65536:raise ValueError('Catalogue personnel trop volumineux')
+        if perso.stat().st_size>65536:raise ValueError(T('Catalogue personnel trop volumineux','Personal catalogue too large'))
         extra=json.loads(perso.read_text())
-        if not isinstance(extra,dict):raise ValueError('Catalogue personnel invalide')
+        if not isinstance(extra,dict):raise ValueError(T('Catalogue personnel invalide','Invalid personal catalogue'))
         for tool, actions in extra.items():
-            if not isinstance(actions,list) or any(not isinstance(a,dict) or not isinstance(a.get('id'),str) for a in actions):raise ValueError('Actions personnelles invalides')
+            if not isinstance(actions,list) or any(not isinstance(a,dict) or not isinstance(a.get('id'),str) for a in actions):raise ValueError(T('Actions personnelles invalides','Invalid personal actions'))
             merged={a['id']:a for a in base.get(tool,[])}
             merged.update({a['id']:a for a in actions});base[tool]=list(merged.values())
     return base
@@ -60,7 +60,14 @@ def activity(m):
     else:m.maj_ile(sid,'fini',message='JARVIS a terminé')
 
 
-GESTION_DELAI=float(os.environ.get('NC_JARVIS_GESTION_DELAI') or 20)   # secondes : les opérations de gestion (cockpit, réglages rapides de l'île) n'attendent pas les 180 s du chat
+def delai_gestion():
+    try:
+        d=float(os.environ.get('NC_JARVIS_GESTION_DELAI') or 20)
+    except ValueError:return 20.0           # pas un nombre : le défaut
+    return d if d>0 and d==d and d!=float('inf') else 20.0
+
+
+GESTION_DELAI=delai_gestion()   # secondes : les opérations de gestion (cockpit, réglages rapides de l'île) n'attendent pas les 180 s du chat
 
 def request(body):
     m=client();c=m.configuration()
@@ -68,22 +75,22 @@ def request(body):
     # Un gateway qui ne répond pas ne doit pas figer le cockpit et l'île trois minutes : seules les actions des
     # modules et le briefing (longs par nature) gardent le délai configuré
     if op not in ('action','briefing'):c=dict(c,TIMEOUT=min(float(c.get('TIMEOUT',GESTION_DELAI)),GESTION_DELAI))
-    if not isinstance(p,dict):raise ValueError('Paramètres invalides')
+    if not isinstance(p,dict):raise ValueError(T('Paramètres invalides','Invalid parameters'))
     if op=='overview':
         data=m.api(c,'/api/status')
         try:
             data['management']=m.api(c,'/api/nc/manage',dict(op='capabilities',params={}))
         except m.Erreur:
-            data['management']=dict(unavailable=True,message="Le chat reste disponible. Installe l’adaptateur de gestion avec le déploiement JARVIS pour activer le cockpit complet.")
+            data['management']=dict(unavailable=True,message=T("Le chat reste disponible. Installe l’adaptateur de gestion avec le déploiement JARVIS pour activer le cockpit complet.","The chat is still available. Install the management adapter with the JARVIS deployment to enable the full cockpit."))
         data['catalogue']=catalogue()
         return clean(data,c['SECRET_KEY'])
     reads={'capabilities','models','session','memory','conversations','usage','conversation.history','services','logs','reminders','quick-settings','google.status','google.calendar'}
     writes={'session.update','session.reset','conversation.resume','conversation.delete','memory.add','memory.delete','profile.set','profile.delete','config.update','config.clear','service.restart','action','reminder.create','reminder.cancel','briefing','notify','noctalia'}
-    if op not in reads|writes:raise ValueError('Opération inconnue')
-    if op in writes and not confirmed:raise ValueError('Confirmation requise')
+    if op not in reads|writes:raise ValueError(T('Opération inconnue','Unknown operation'))
+    if op in writes and not confirmed:raise ValueError(T('Confirmation requise','Confirmation required'))
     with (m.requete_unique(c) if op in writes else contextlib.nullcontext()), (activity(m) if op in writes else contextlib.nullcontext()):
         if op=='action':
-            if not isinstance(p.get('tool'),str) or not isinstance(p.get('action'),str) or not isinstance(p.get('params',{}),dict):raise ValueError('Action invalide')
+            if not isinstance(p.get('tool'),str) or not isinstance(p.get('action'),str) or not isinstance(p.get('params',{}),dict):raise ValueError(T('Action invalide','Invalid action'))
             # Les réglages du PC (catalogue noctalia) passent par l'adaptateur de gestion, pas par les outils upstream
             if p['tool']=='noctalia':data=m.api(c,'/api/nc/manage',dict(op='noctalia',params=dict(action=p['action'],params=p.get('params',{})),confirmed=confirmed))
             else:data=m.api(c,'/api/action',dict(tool=p['tool'],action=p['action'],params=p.get('params',{}),platform='desktop'))
@@ -91,12 +98,12 @@ def request(body):
         elif op=='reminders':data=m.api(c,'/api/reminders')
         elif op=='reminder.create':
             allowed={'platform','chat_id','target_id','message','delay','remind_at','recurrence'}
-            if set(p)-allowed:raise ValueError('Paramètre de rappel inconnu')
-            if p.get('platform') not in ('telegram','discord'):raise ValueError('Choisis Telegram ou Discord pour recevoir ce rappel.')
+            if set(p)-allowed:raise ValueError(T('Paramètre de rappel inconnu','Unknown reminder parameter'))
+            if p.get('platform') not in ('telegram','discord'):raise ValueError(T('Choisis Telegram ou Discord pour recevoir ce rappel.','Choose Telegram or Discord to receive this reminder.'))
             data=m.api(c,'/api/reminders',p)
         elif op=='reminder.cancel':
             ident=str(p.get('id',''))
-            if not ident.isascii() or not ident.isdigit():raise ValueError('Identifiant de rappel invalide')
+            if not ident.isascii() or not ident.isdigit():raise ValueError(T('Identifiant de rappel invalide','Invalid reminder identifier'))
             data=m.api(c,'/api/reminders/'+ident+'/cancel',{})
         else:data=m.api(c,'/api/nc/manage',dict(op=op,params=p,confirmed=confirmed))
     return clean(data,c['SECRET_KEY'])
@@ -122,6 +129,11 @@ def langue_en():
     return l=='en'
 
 
+def T(fr,en):
+    """Le texte dans la langue du bureau (nc-reglages → Langue), comme le reste des scripts."""
+    return en if langue_en() else fr
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('commande',nargs='?',default='tableau',choices=['tableau','ile','chat','requete','deployer','serveur','agent','verifier','console'])
@@ -137,17 +149,17 @@ def main():
         return 1
     try:
         if args.commande in ('tableau','ile','chat'):
-            if rest:raise ValueError('Arguments inconnus')
+            if rest:raise ValueError(T('Arguments inconnus','Unknown arguments'))
             cmd=['qs','-c','nc-ile','ipc','call','ile']+{'tableau':['jarvis'],'chat':['jarvisChat']}.get(args.commande,['page','assistant'])
             try:subprocess.run(cmd,check=True,timeout=8,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             except (OSError,subprocess.SubprocessError):
-                print('Cockpit Quickshell indisponible : ouverture du chat terminal.',file=sys.stderr)
+                print(T('Cockpit Quickshell indisponible : ouverture du chat terminal.','Quickshell cockpit unavailable: opening the terminal chat.'),file=sys.stderr)
                 subprocess.run([sys.executable,str(BIN/'nc-assistant'),'ouvrir'],check=True,timeout=8)
                 return 0
         elif args.commande in ('deployer','serveur','agent'):
             sys.path.insert(0,str(SHARE))
             import deployer
-            if args.commande=='serveur' and not rest:rest=['--serveur',input('Adresse SSH (utilisateur@serveur) : ').strip()]
+            if args.commande=='serveur' and not rest:rest=['--serveur',input(T('Adresse SSH (utilisateur@serveur) : ','SSH address (user@server): ')).strip()]
             if args.commande=='agent':rest=['--agent']
             deployer.main(rest)
         elif args.commande=='verifier':
@@ -156,23 +168,23 @@ def main():
             return verifier.main(rest)
         elif args.commande=='requete':
             raw=sys.stdin.buffer.readline(65537)
-            if len(raw)>65536:raise ValueError('Requête trop volumineuse')
+            if len(raw)>65536:raise ValueError(T('Requête trop volumineuse','Request too large'))
             body=json.loads(raw)
-            if not isinstance(body,dict):raise ValueError('Requête invalide')
+            if not isinstance(body,dict):raise ValueError(T('Requête invalide','Invalid request'))
             print(json.dumps(dict(ok=True,data=request(body)),ensure_ascii=False),flush=True)
         else:
-            print('JARVIS — status, modules, models, memory, conversations, reminders ; exit pour quitter.')
+            print(T('JARVIS — status, modules, models, memory, conversations, reminders ; exit pour quitter.','JARVIS — status, modules, models, memory, conversations, reminders; exit to quit.'))
             while True:
                 op=input('Jarvis > ').strip()
                 if op in ('exit','quit'):break
                 if op in ('status','modules'):op='overview'
                 try:print(json.dumps(request(dict(op=op)),ensure_ascii=False,indent=2))
-                except Exception:print('Requête impossible. Vérifie nc-assistant verifier.')
+                except Exception:print(T('Requête impossible. Vérifie nc-assistant verifier.','Request failed. Check nc-assistant verifier.'))
         return 0
     except (KeyboardInterrupt,EOFError):return 130
     except Exception as e:
         # Aucun détail brut d'exception réseau/fichier/serveur susceptible d'exposer un token.
-        message='JARVIS indisponible. Vérifie la connexion avec nc-assistant verifier et la présence de l’adaptateur serveur.'
+        message=T('JARVIS indisponible. Vérifie la connexion avec nc-assistant verifier et la présence de l’adaptateur serveur.','JARVIS unavailable. Check the connection with nc-assistant verifier and that the server adapter is installed.')
         if isinstance(e,ValueError) or type(e).__module__=='nc_assistant_client':message=str(e)[:400]
         if args.commande=='requete':print(json.dumps(dict(ok=False,error=message),ensure_ascii=False),flush=True)
         else:print(message,file=sys.stderr)

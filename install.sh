@@ -1496,7 +1496,9 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   systemctl --user start nc-carousel-thumbs.service >/dev/null 2>&1 || true
   if [ "$NOCT_WAS_ACTIVE" = 1 ] || systemctl --user is-active --quiet graphical-session.target 2>/dev/null; then
     if [ "$copied" -gt 0 ] || [ "$migrated" = 1 ]; then
-      # Session ouverte et fichiers changés : services relancés avec leur nouvelle config
+      # Session ouverte et fichiers changés : services relancés avec leur nouvelle config (la barre et l'île disparaissent
+      # un instant : une ligne avant, pour que personne ne croie à une panne)
+      info "$(t "La barre et l'île vont se relancer quelques secondes." "The bar and the island will restart for a few seconds.")"
       systemctl --user restart noctalia.service nc-profile-sync.service nc-pouls.service nc-ecran-externe.service nc-couvercle.service nc-bt-appel.service hypridle.service 2>/dev/null || true
       [ "$ILE" = quickshell ] && { systemctl --user restart nc-ile.service 2>/dev/null || true; }
     else
