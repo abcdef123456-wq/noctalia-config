@@ -68,7 +68,7 @@ Le script fait tout seul :
 | Hyprland et Noctalia v5 | les installe s'ils manquent (voir le tableau ci-dessous) |
 | Paquets | installe les outils nécessaires (terminal, gestionnaire de fichiers, captures d'écran…) |
 | Fichiers | copie la config, adaptée à ton PC, après avoir **sauvegardé** ce qu'elle remplace |
-| Terminal | propose zsh, oh-my-zsh, powerlevel10k et la police du terminal, et zsh comme shell par défaut |
+| Terminal | propose zsh, oh-my-zsh, powerlevel10k et la police du terminal, et zsh comme shell par défaut ; installe aussi les outils modernes disponibles sur ta distribution (fzf, zoxide, eza, bat, delta, lazygit, yazi) et le plugin fzf-tab |
 | Neovim | propose la config LazyVim, les outils qu'elle utilise (ripgrep, fd, Node.js, gitui…) et ses plugins (Neovim 0.11.2 ou plus) |
 | Services | active la barre, la synchronisation des couleurs, les miniatures du carrousel, les profils d'énergie, la mise en veille |
 | Étapes système | propose, **une par une** : profils d'énergie, Wi-Fi (Arch), écran de démarrage, écran de connexion, pilote NVIDIA |
@@ -130,6 +130,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
+| Terminal moderne : historique, fichiers et dossiers en liste filtrable (fzf) · sauter vers un dossier · git lisible, lazygit, yazi | **Ctrl + R** / **Ctrl + T** / **Alt + C** · `z` `zi` · `lg` `y` ; `nc-outils` liste ce qui est actif (réglage « Outils modernes ») |
 
 ## Île dynamique
 

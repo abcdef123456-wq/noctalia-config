@@ -824,6 +824,15 @@ if [ -f "$HOME/.zshrc" ] && grep -qF '.config/legion/greeting.zsh' "$HOME/.zshrc
   backup .zshrc
   sed -i 's#\.config/legion/greeting\.zsh#.config/nc/greeting.zsh#g' "$HOME/.zshrc"; migrated=1
 fi
+# Ton ~/.zshrc (copié d'une version plus ancienne) charge ia.zsh mais pas outils.zsh : une seule ligne de plus, juste après
+if [ -f "$HOME/.zshrc" ] && grep -qE 'source.*\.config/nc/ia\.zsh' "$HOME/.zshrc" && ! grep -qF '.config/nc/outils.zsh' "$HOME/.zshrc"; then
+  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour les outils modernes du terminal (fzf, zoxide, eza, bat…) ?" "Add one line to your ~/.zshrc for the modern terminal tools (fzf, zoxide, eza, bat…)?")" o; then
+    backup .zshrc
+    sed -i '/source.*\.config\/nc\/ia\.zsh/{a\
+[[ -r ~/.config/nc/outils.zsh ]] \&\& source ~/.config/nc/outils.zsh
+:b;n;bb}' "$HOME/.zshrc"
+  fi
+fi
 [ "$migrated" = 1 ] && ok "$(t "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde." "Old version (“legion”) converted; its files are in the backup.")"
 
 # Icônes : thème « NC » dessiné par nc-icones aux couleurs du fond d'écran (dossiers, corbeille, Terminal,
@@ -1154,9 +1163,10 @@ declare -A REPOS=(
   ["$ZC/themes/powerlevel10k"]=https://github.com/romkatv/powerlevel10k.git
   ["$ZC/plugins/zsh-autosuggestions"]=https://github.com/zsh-users/zsh-autosuggestions.git
   ["$ZC/plugins/zsh-syntax-highlighting"]=https://github.com/zsh-users/zsh-syntax-highlighting.git
+  ["$ZC/plugins/fzf-tab"]=https://github.com/Aloxaf/fzf-tab.git
 )
 need=()
-for d in "$ZSH_DIR" "$ZC/themes/powerlevel10k" "$ZC/plugins/zsh-autosuggestions" "$ZC/plugins/zsh-syntax-highlighting"; do
+for d in "$ZSH_DIR" "$ZC/themes/powerlevel10k" "$ZC/plugins/zsh-autosuggestions" "$ZC/plugins/zsh-syntax-highlighting" "$ZC/plugins/fzf-tab"; do
   [ -e "$d" ] || need+=("$d")
 done
 has_font() { fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font" >/dev/null; }
@@ -1169,6 +1179,14 @@ if [ "$term_done" = 1 ]; then
 elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Install the terminal config (only what's missing)?")" o; then
   have zsh || pkg_try zsh
   have git || pkg_try git
+  # Outils modernes du terminal (outils.zsh les utilise s'ils sont là). Un paquet absent de la distribution est ignoré
+  # sans bruit : Debian 13 n'a pas yazi, Fedora n'a ni lazygit ni yazi. Debian : bat s'appelle batcat, fd fdfind.
+  case "$FAMILY" in
+    arch)   pkg_try fzf zoxide eza bat git-delta lazygit yazi fd ;;
+    debian) pkg_try fzf zoxide eza bat git-delta lazygit fd-find ;;
+    fedora) pkg_try fzf zoxide eza bat git-delta fd-find ;;
+    suse)   pkg_try fzf zoxide eza bat git-delta lazygit yazi fd ;;
+  esac
   if ! have zsh || ! have git; then
     warn "$(t "zsh ou git manquant : étape ignorée (installe-les puis relance)." "zsh or git missing: step skipped (install them, then run this again).")"
   else

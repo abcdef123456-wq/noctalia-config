@@ -143,6 +143,8 @@ batterie et sans connexion). Détails : [docs/ia.md](docs/ia.md).
 | `Super` + `D` (maintenir) | Dicter : parle, relâche, le texte est écrit dans la fenêtre active ; un appui bref lance une dictée longue, le suivant l'écrit |
 | `Super` + `Maj` + `I` | Expliquer une zone de l'écran avec l'IA : la réponse arrive dans la conversation (une notification l'ouvre), pour continuer à poser des questions |
 | `Alt` + `I` (terminal) | La description tapée devient une commande, laissée dans l'invite pour être relue |
+| `Ctrl` + `R` · `Ctrl` + `T` · `Alt` + `C` (terminal) | fzf : chercher dans l'historique · choisir un fichier · aller dans un dossier ; `Tab` ouvre la liste filtrable (fzf-tab). Aux couleurs du fond ; seulement si fzf est installé |
+| `A` (dans lazygit, onglet fichiers) | Message de commit écrit par l'IA, à relire avant de valider (lance lazygit avec `lg`) |
 | `Super` + `R` puis `?` | Question à l'IA (d'abord les réponses de la config) ; la commande proposée se lance avec Entrée |
 | `Super` + `R` puis `!` | L'IA sur le texte sélectionné ou copié : résumer, traduire, corriger… ou une consigne libre |
 | `Super` + `R` puis `@` | L'IA agit : un plan (services de la session, Wi-Fi, Bluetooth, énergie, son, réglages, mises à jour), chaque action confirmée par Entrée |
