@@ -21,7 +21,7 @@ class PageAssistant(unittest.TestCase):
             if configuration is not None:
                 (root / "catalogue.json").write_text(json.dumps(configuration))
             noms = ["Assistant.qml", "AssistantEtat.qml", "Defilement.qml", "Texte.qml", "Ico.qml",
-                    "Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml"]
+                    "Etincelle.qml", "Pas.qml", "LogoAssistant.qml", "Couleurs.qml", "AssistantReglages.qml", "JarvisBouton.qml", "JarvisChamp.qml", "AssistantCommande.qml", "AssistantOrbe.qml", "AssistantPieces.qml"]
             if compact:
                 noms.append("Compact.qml")
             for nom in noms + ["assets/assistant-animation.png", "assets/jarvis-animation.png"]:

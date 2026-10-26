@@ -100,6 +100,7 @@ Item {
             page.bas()
         }
         function onReglagesOuvertsChanged() { if (!AssistantEtat.reglagesOuverts) page.bas() }
+        function onFichiersEnAttenteChanged() { if (AssistantEtat.fichiersEnAttente.length > 0) page.historiqueOuvert = true }
     }
     onHistoriqueOuvertChanged: if (historiqueOuvert) bas()
 
@@ -229,7 +230,7 @@ Item {
         Item {
             id: accueil
             anchors.top: tete.bottom; anchors.topMargin: 10
-            anchors.bottom: page.dansDashboard ? statutDashboard.top : (page.historiqueOuvert ? saisie.top : resume.top); anchors.bottomMargin: 8
+            anchors.bottom: page.dansDashboard ? statutDashboard.top : (page.historiqueOuvert ? (previsualisation.visible ? previsualisation.top : saisie.top) : resume.top); anchors.bottomMargin: 8
             width: parent.width; visible: !AssistantEtat.reglagesOuverts
 
             AssistantOrbe {
@@ -298,6 +299,14 @@ Item {
                                     font.family: "Adwaita Sans"; font.pixelSize: 13
                                     onLinkActivated: lien => page.ouvrirLien(lien)
                                     HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                                }
+                                // Fichiers joints à ce message (issue #31)
+                                AssistantPieces {
+                                    objectName: "nc-jarvis-message-files"
+                                    visible: (modelData.fichiers || []).length > 0
+                                    width: parent.width
+                                    fichiers: modelData.fichiers || []
+                                    teinte: page.cyan
                                 }
                                 // Choix proposés par JARVIS (issue #7), sous sa dernière réponse seulement et pas pendant une
                                 // demande : un clic (ou Tab puis Entrée) l'envoie comme message ; ensuite, le choix fait reste
@@ -417,7 +426,7 @@ Item {
         Rectangle {
             id: modeles
             visible: !page.dansDashboard && !AssistantEtat.reglagesOuverts && !page.historiqueOuvert
-            anchors.bottom: saisie.top; anchors.bottomMargin: 12
+            anchors.bottom: (previsualisation.visible ? previsualisation.top : saisie.top); anchors.bottomMargin: 12
             width: parent.width; height: 140; radius: 18
             color: Couleurs.carte; border.width: 1; border.color: Couleurs.gris3
             Texte {
@@ -487,7 +496,7 @@ Item {
         Texte {
             id: statutDashboard
             visible: page.dansDashboard && !AssistantEtat.reglagesOuverts
-            anchors.bottom: saisie.top; anchors.bottomMargin: 8
+            anchors.bottom: (previsualisation.visible ? previsualisation.top : saisie.top); anchors.bottomMargin: 8
             width: parent.width
             text: AssistantEtat.enCours ? Reglages.t("Réflexion en cours…", "Thinking…") : AssistantEtat.erreur
             color: AssistantEtat.erreur ? Couleurs.rouge : Couleurs.texteSec
@@ -495,6 +504,19 @@ Item {
             height: visible && text ? (AssistantEtat.erreur ? 64 : 20) : 0
         }
 
+        // Fichiers en attente d'envoi (issue #31) : au-dessus de la barre de saisie ; ce qui est au-dessus se cale sur
+        // son haut, ou sur celui de la saisie quand il n'y a rien à joindre
+        AssistantPieces {
+            id: previsualisation
+            objectName: "nc-jarvis-attachments-preview"
+            visible: !AssistantEtat.reglagesOuverts && AssistantEtat.fichiersEnAttente.length > 0
+            anchors.bottom: saisie.top; anchors.bottomMargin: 8
+            width: parent.width
+            retirable: true; teinte: page.cyan
+            fichiers: AssistantEtat.fichiersEnAttente
+            onRetirer: index => AssistantEtat.retirerFichier(index)
+        }
+        
         // Barre de saisie
         Item {
             id: saisie
@@ -503,7 +525,7 @@ Item {
             width: parent.width; height: 46
             Rectangle {
                 anchors.left: parent.left
-                anchors.right: page.dansDashboard ? envoi.left : micro.left
+                anchors.right: trombone.left
                 anchors.rightMargin: 8; height: parent.height
                 radius: page.dansDashboard ? 16 : height / 2
                 color: Couleurs.gris2
@@ -576,6 +598,23 @@ Item {
                     }
                 }
             }
+            // Joindre des fichiers (issue #31) : le sélecteur du système, lancé à part (un second clic pendant qu'il est
+            // ouvert ne fait rien) ; inactif quand l'IA est coupée, avec la raison dans l'info-bulle
+            AssistantCommande {
+                id: trombone
+                objectName: "nc-jarvis-attach"
+                anchors.right: page.dansDashboard ? envoi.left : micro.left
+                anchors.rightMargin: 8
+                rond: true; width: 46; height: 46
+                icone: "attach_file"
+                choisi: AssistantEtat.fichiersEnAttente.length > 0
+                occupe: AssistantEtat.selecteurOuvert
+                animationsActives: page.animationsActives
+                aide: Reglages.iaCoupee ? Reglages.t("IA désactivée : pas de fichiers joints", "AI is off: no attachments")
+                    : Reglages.t("Joindre des fichiers", "Attach files")
+                enabled: !Reglages.iaCoupee && !AssistantEtat.enCours && !AssistantEtat.ecritureReglagesEnCours && !AssistantEtat.selecteurOuvert
+                onClic: AssistantEtat.choisirFichiers()
+            }
             AssistantCommande {
                 id: micro
                 objectName: "nc-jarvis-mic"
@@ -595,11 +634,41 @@ Item {
                 icone: "arrow_upward"
                 occupe: AssistantEtat.enCours
                 animationsActives: page.animationsActives
-                choisi: !AssistantEtat.enCours && AssistantEtat.brouillon.trim().length > 0
+                choisi: !AssistantEtat.enCours && (AssistantEtat.brouillon.trim().length > 0 || AssistantEtat.fichiersEnAttente.length > 0)
                 aide: AssistantEtat.enCours ? Reglages.t("Traitement en cours", "Request in progress") : Reglages.t("Envoyer", "Send")
-                enabled: !AssistantEtat.enCours && !AssistantEtat.ecritureReglagesEnCours && AssistantEtat.brouillon.trim().length > 0
+                enabled: !AssistantEtat.enCours && !AssistantEtat.ecritureReglagesEnCours
+                    && (AssistantEtat.brouillon.trim().length > 0 || AssistantEtat.fichiersEnAttente.length > 0)
                 onClic: { page.historiqueOuvert = true; AssistantEtat.envoyer() }
             }
+        }
+    }
+
+    // Dépose de fichiers (issue #31) : seulement des URL file:// de cet ordinateur (le tri est fait par AssistantEtat) ;
+    // un cadre d'accent montre la zone pendant le survol. Rien ne tourne en dehors d'un glisser.
+    DropArea {
+        id: zoneDepot
+        anchors.fill: parent
+        enabled: !Reglages.iaCoupee && !AssistantEtat.enCours && !AssistantEtat.reglagesOuverts
+        onEntered: drag => { if (!drag.hasUrls) drag.accepted = false }
+        onDropped: drop => {
+            if (!drop.hasUrls) return
+            var urls = []
+            for (let i = 0; i < drop.urls.length; i++) urls.push(String(drop.urls[i]))
+            if (AssistantEtat.ajouterFichiers(urls) > 0) page.historiqueOuvert = true
+            drop.acceptProposedAction()
+        }
+    }
+    Rectangle {
+        objectName: "nc-jarvis-drop-hint"
+        anchors.fill: parent; anchors.margins: 2
+        visible: zoneDepot.containsDrag
+        radius: 18; color: Qt.alpha(page.cyan, 0.12)
+        border.width: 2; border.color: page.cyan
+        Texte {
+            anchors.centerIn: parent; width: parent.width - 32
+            text: Reglages.t("Dépose pour joindre", "Drop to attach")
+            horizontalAlignment: Text.AlignHCenter; textFormat: Text.PlainText
+            font.pixelSize: 15; font.weight: Font.DemiBold; color: page.cyan
         }
     }
 
