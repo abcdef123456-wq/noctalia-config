@@ -27,8 +27,9 @@ function _nc_clear_screen() {
     nc-greeting $COLUMNS $LINES
     _nc_greet_fresh=2
 }
-zle -N clear-screen _nc_clear_screen
+# Seulement si nc-greeting est là : sans lui, Ctrl+L garde le clear-screen de zsh
 if [[ -x ~/.local/bin/nc-greeting ]]; then
+    zle -N clear-screen _nc_clear_screen
     add-zsh-hook precmd _nc_greet
     add-zsh-hook preexec _nc_greet_used
 fi

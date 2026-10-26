@@ -11,6 +11,9 @@ plugins=(
   zsh-autosuggestions
   zsh-syntax-highlighting
 )
+# Mises à jour d'oh-my-zsh : nc-maj ne s'en occupe pas, donc un simple rappel (pas de question « Would you like to
+# update? » dans un terminal neuf). La mise à jour se fait à la main : omz update.
+zstyle ':omz:update' mode reminder
 [[ -r "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
 [[ -r ~/.p10k.zsh ]] && source ~/.p10k.zsh
 

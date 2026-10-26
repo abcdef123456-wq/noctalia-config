@@ -1193,7 +1193,10 @@ elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Ins
     done
     ok "$(t "Config du terminal installée. Tes alias et réglages personnels : ~/.zshrc.perso" "Terminal config installed. Your own aliases and settings: ~/.zshrc.perso")"
     if [ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" != zsh ]; then
-      if sans_tty; then info "$(t "Shell par défaut inchangé : chsh demande ton mot de passe, il faut un terminal (chsh -s $(command -v zsh))." "Default shell unchanged: chsh asks for your password, which needs a terminal (chsh -s $(command -v zsh)).")"
+      # Fedora : l'image de base n'a pas chsh (util-linux-user, devenu un alias de util-linux) ; ailleurs il est déjà là
+      have chsh || case "$FAMILY" in fedora) pkg_try util-linux-user ;; suse) pkg_try shadow ;; debian) pkg_try passwd ;; arch) pkg_try util-linux ;; esac
+      if ! have chsh; then info "$(t "Shell par défaut inchangé : la commande chsh est absente (installe le paquet qui la fournit, puis : chsh -s $(command -v zsh))." "Default shell unchanged: the chsh command is missing (install the package that provides it, then: chsh -s $(command -v zsh)).")"
+      elif sans_tty; then info "$(t "Shell par défaut inchangé : chsh demande ton mot de passe, il faut un terminal (chsh -s $(command -v zsh))." "Default shell unchanged: chsh asks for your password, which needs a terminal (chsh -s $(command -v zsh)).")"
       else
         ask "$(t "Faire de zsh ton shell par défaut (il te demandera ton mot de passe) ?" "Make zsh your default shell (it will ask for your password)?")" o && chsh -s "$(command -v zsh)" && ok "$(t "zsh est ton shell par défaut (à la prochaine connexion)." "zsh is your default shell (from your next login).")"
       fi

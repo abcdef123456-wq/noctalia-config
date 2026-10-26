@@ -78,8 +78,7 @@ return {
         group = vim.api.nvim_create_augroup("nc_bureau", { clear = true }),
         callback = function(ev)
           local chemin = vim.api.nvim_buf_get_name(ev.buf)
-          if chemin:find("/%.config/hypr/", 1) or chemin:find("/%.config/quickshell/", 1) or chemin:find("/%.local/bin/nc%-", 1)
-            or chemin:find("/home/%.config/hypr/", 1) or chemin:find("/home/%.config/quickshell/", 1) or chemin:find("/home/%.local/bin/nc%-", 1) then
+          if chemin:find("/%.config/hypr/", 1) or chemin:find("/%.config/quickshell/", 1) or chemin:find("/%.local/bin/nc%-", 1) then
             vim.b[ev.buf].autoformat = false
           end
         end,

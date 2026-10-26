@@ -3,7 +3,7 @@
 -- l'agent sur le projet (la CLI agentique de l'IA choisie : Claude Code, Codex, Gemini CLI, OpenCode…).
 -- Le texte passe par l'entrée standard de nc-ia ; rien ne bloque l'éditeur pendant la réponse.
 -- Rien ici ne suppose une IA en particulier : tout passe par nc-ia, donc par l'IA choisie.
--- Neovim 0.10 au moins (Debian 13 : 0.10.4) : vim.system, vim.fs.root, titres et pieds des fenêtres flottantes.
+-- Neovim 0.11.2 au moins (le minimum de LazyVim ; Debian 13 a la 0.10.4, install.sh propose la version officielle) : vim.system, vim.fs.root, titres et pieds des fenêtres flottantes.
 local M = {}
 local nc_ia = os.getenv("HOME") .. "/.local/bin/nc-ia"
 local HISTORIQUE = vim.fn.stdpath("state") .. "/nc-ia-demandes.json"
