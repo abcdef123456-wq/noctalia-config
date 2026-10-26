@@ -148,7 +148,10 @@ batterie et sans connexion). Détails : [docs/ia.md](docs/ia.md).
 | `Super` + `R` puis `?` | Question à l'IA (d'abord les réponses de la config) ; la commande proposée se lance avec Entrée |
 | `Super` + `R` puis `!` | L'IA sur le texte sélectionné ou copié : résumer, traduire, corriger… ou une consigne libre |
 | `Super` + `R` puis `@` | L'IA agit : un plan (services de la session, Wi-Fi, Bluetooth, énergie, son, réglages, mises à jour), chaque action confirmée par Entrée |
-| `Espace` + `i` (Neovim) | `i` demander, `e` expliquer, `t` transformer selon une consigne, `c` corriger la sélection |
+| `Espace` + `i` (Neovim) | `i` demander, `e` expliquer, `t` transformer selon une consigne, `c` corriger la sélection, `f` faire une tâche (aperçu avant d'insérer), `d` expliquer et corriger le diagnostic de la ligne (aperçu : `a` applique, `r` refuse), `m` écrire le message dans un commit (sans toucher à un message déjà écrit) |
+| `Espace` + `i` puis `a` / `A` / `s` / `p` / `F` / `w` (Neovim) | Agents en terminal (sidekick) : `a` ouvre ou masque le panneau avec l'agent de l'IA choisie, `A` choisit l'agent, `s` envoie le code ou la sélection, `p` choisit un prompt, `F` envoie le fichier, `w` va au terminal d'un agent suivi par nc-claude ; `Ctrl` + `.` va au panneau |
+| `Espace` + `a` (Neovim) | Claude Code en IDE : `c` ouvre ou ferme, `f` y va, `r` reprend, `C` continue, `b` ajoute le fichier, `s` envoie la sélection, `a` accepte et `d` refuse la modification proposée |
+| `Espace` + `-` (Neovim) | yazi sur le fichier courant (seulement si yazi est installé) |
 
 ## Recherche (Super + R)
 
