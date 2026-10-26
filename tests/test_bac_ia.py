@@ -814,13 +814,14 @@ class AvecFauxSystemdRun(Base):
     # ── Rien ne revient du bac (4e relecture) ───────────────────────────────────────────────────────────────────────
     def _cles_json(self, dossier):
         """Tous les noms de clé de tous les JSON sous dossier, récursivement (objets imbriqués et listes). Une clé dont
-        la valeur est une simple date RFC 3339 (last_refresh de Codex : un horodatage, pas un jeton) n'est pas un jeton."""
+        la valeur est une simple date RFC 3339 (last_refresh de Codex : un horodatage, pas un jeton) ou une chaîne vide
+        (refresh_token de Codex, exigé par son lecteur, laissé vide) n'est pas un jeton."""
         noms = set()
 
         def parcourir(o):
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if not (isinstance(v, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", v)):
+                    if not (isinstance(v, str) and (v == "" or re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", v))):
                         noms.add(k)
                     parcourir(v)
             elif isinstance(o, list):
@@ -844,6 +845,10 @@ class AvecFauxSystemdRun(Base):
                 suspects = {k for k in cles if re.search(r"refresh|^rt$|_rt$|^rt_", k, re.I)}
                 self.assertEqual(suspects, set(), f"{ident} : clé de rafraîchissement dans le HOME jetable")
                 self.assertNotIn("SECRET-REFRESH", "".join(f.read_text() for f in export.rglob("*.json")))
+                if ident == "codex":
+                    # Codex 0.164 ne lit pas un auth.json sans ce champ (« missing field refresh_token ») : présent, vide
+                    copie = json.loads((export / JETONS[ident]).read_text())
+                    self.assertEqual(copie["tokens"]["refresh_token"], "")
 
     def _empreintes(self):
         """Contenu, mtime et inode de chaque vrai fichier d'identifiants et de config."""
@@ -911,6 +916,9 @@ class AvecFauxSystemdRun(Base):
                 with self.subTest(ident=ident, delta=delta):
                     (self.home / "moteur.log").unlink(missing_ok=True)
                     self._avec_echeance(ident, int((time.time() + delta) * 1000))
+                    if ident in self.m.JETON_ACCES and shutil.which(self.m.BINAIRES[ident]):
+                        # nc-diag le signale (nc-ia etat --json) : seulement un jeton déjà expiré
+                        self.assertEqual(self.m.jeton_a_renouveler(ident), delta < 0)
                     if lance:
                         self.assertIn("fin\n", self.lancer_moteur(self.m, ident, NC_TEST_FICHIERS=""))
                         continue

@@ -569,6 +569,13 @@ def verifier(b):
                 b.avert(T("aucune IA disponible ne lit les images (Super + Maj + I)", "no available AI reads images (Super + Shift + I)"),
                         T("une clé Anthropic, OpenAI ou Gemini, Claude Code, Codex ou Ollama", "an Anthropic, OpenAI or Gemini key, Claude Code, Codex or Ollama"),
                         cle="ia_images")
+        # Jeton d'accès expiré (jamais de jeton de rafraîchissement dans le bac) : le moteur est refusé tant qu'il n'est pas rouvert
+        for i in e["ias"]:
+            if i.get("jeton_a_renouveler") and not e["coupee"]:
+                b.avert(T(f"{i['nom']} doit renouveler sa connexion : refusé par l'IA du bureau et JARVIS",
+                          f"{i['nom']} needs to renew its sign-in: refused by the desktop AI and JARVIS"),
+                        T(f"ouvre-le une fois dans un terminal ({i['cli'] or i['id']}), puis réessaie",
+                          f"open it once in a terminal ({i['cli'] or i['id']}), then try again"), cle="ia_jeton_" + i["id"])
         conf = os.path.join(HOME, ".config/nc/ia.conf")
         if os.path.exists(conf) and os.stat(conf).st_mode & 0o077:
             b.faux(T("~/.config/nc/ia.conf lisible par d'autres comptes (clés d'API)", "~/.config/nc/ia.conf readable by other accounts (API keys)"),

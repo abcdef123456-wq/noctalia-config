@@ -1792,6 +1792,10 @@ class Demande:
                 # Sans jeton de rafraîchissement, Codex ne doit pas tenter un rafraîchissement « de routine » (selon l'âge
                 # de last_refresh) : la date d'échéance du jeton d'accès vient d'être vérifiée, on la dit fraîche.
                 donne["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if self.ident == "codex" and isinstance(donne.get("tokens"), dict):
+                # Codex 0.164 refuse un auth.json sans le champ refresh_token (« missing field ») : il se croit alors
+                # déconnecté et part vers l'API sans clé (401). Le champ est là, VIDE : aucun jeton de rafraîchissement.
+                donne["tokens"]["refresh_token"] = ""
             try:
                 ecrire_copie(self.home, rel, vider_json(donne).encode())
             except (OSError, ValueError):
@@ -4924,6 +4928,25 @@ def cli_agent(ident):
     return p, bool(p and shutil.which(p) and en_ligne())
 
 
+def jeton_a_renouveler(ident):
+    """Vrai si le jeton d'accès du moteur (son fichier d'identifiants, comme le lit le bac) a déjà expiré : le bac refuse
+    alors de le lancer, il faut l'ouvrir une fois dans un terminal (nc-diag le signale). Sans fichier, sans jeton d'accès
+    ou sans échéance lisible : faux (rien à dire ici, le refus de la demande le dira)."""
+    if ident not in JETON_ACCES or not shutil.which(BINAIRES.get(ident, ident)):
+        return False
+    try:
+        bac = module_bac()
+        for rel in ETAT_MOTEURS[ident]["jeton"]:
+            octets = lire_source(bac.emplacement(HOME, rel, bac.deplacements(HOME, os.environ)), JETON_MAX)
+            o = charger_json(octets) if octets is not None else None
+            if isinstance(o, dict) and _dedans(o, JETON_ACCES[ident]) is not None:
+                exp = echeance_ms(ident, o)
+                return exp is not None and exp < time.time() * 1000
+    except Exception:
+        pass
+    return False
+
+
 def etat():
     usages = ("question", "texte", "commande", "image")
     choix = {u: (candidats(u) or [""])[0] for u in usages}
@@ -4937,7 +4960,8 @@ def etat():
                        "cli_disponible": cli_agent(i)[1] if i else False} for u, i in choix.items()},
         "ias": [dict(id=i, nom=nom(i), genre=f["genre"], disponible=disponible(i), vision=f["vision"], agent=f["agent"],
                      cle=cle(i)[1] if f["genre"] == "api" else "", modele=modele_choisi(i), inscription=INSCRIPTION.get(i, ""),
-                     cli=cli_agent(i)[0], cli_disponible=cli_agent(i)[1])
+                     cli=cli_agent(i)[0], cli_disponible=cli_agent(i)[1],
+                     jeton_a_renouveler=f["genre"] == "cli" and jeton_a_renouveler(i))
                 for i, f in FOURNISSEURS.items()],
     }
 

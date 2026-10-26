@@ -225,12 +225,22 @@ class Bilan(Base):
         c = {c["cle"]: c for c in self.json("--rapide")["constats"]}
         self.assertEqual(c["ia_conf_lisible"]["reparations"], ["ia_conf_prive"])
 
-    def faux_nc_ia(self):
+    def faux_nc_ia(self, ias='[{"nom":"x","disponible":true}]'):
         f = self.home / ".local/bin/nc-ia"
         f.write_text('#!/bin/sh\necho "nc-ia $*" >> "$FAKE/appels"\n'
-                     'echo \'{"mode":"auto","coupee":false,"ias":[{"nom":"x","disponible":true}],'
+                     'echo \'{"mode":"auto","coupee":false,"ias":' + ias + ','
                      '"usages":{"question":{"nom":"x"},"image":{"nom":"x"}}}\'\n')
         f.chmod(0o755)
+
+    def test_jeton_a_renouveler_dit_quoi_faire(self):
+        self.faux_nc_ia('[{"nom":"x","disponible":true},{"id":"claude","nom":"Claude Code","cli":"claude",'
+                        '"disponible":true,"jeton_a_renouveler":true},{"id":"codex","nom":"Codex","cli":"codex",'
+                        '"disponible":true,"jeton_a_renouveler":false}]')
+        c = {c["cle"]: c for c in self.json("--rapide", NC_LANGUE="fr")["constats"]}
+        self.assertIn("ia_jeton_claude", c)
+        self.assertNotIn("ia_jeton_codex", c)
+        self.assertIn("Claude Code doit renouveler sa connexion", c["ia_jeton_claude"]["texte"])
+        self.assertIn("ouvre-le une fois dans un terminal (claude)", c["ia_jeton_claude"]["quoi"])
 
     def test_resume_fr_en_ordre_et_limite(self):
         for u in ("hypridle.service", "nc-ecran-externe.service", "nc-profile-sync.service", "nc-theme-sync.path"):

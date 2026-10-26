@@ -62,7 +62,8 @@ Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code et Oh My Pi (et les suivants
   ou un serveur MCP créé par le programme disparaît avec la demande et ne sera jamais exécuté hors du bac. **Rien ne
   revient du bac** vers tes vrais fichiers, pas même un jeton rafraîchi : sans réseau, nc-ia ne pourrait vérifier ni la
   signature ni le compte d'un jeton qui en reviendrait. On ne copie donc que le **jeton d'accès** (et ce qu'il faut pour
-  s'en servir : date, scopes, compte), **jamais le jeton de rafraîchissement**. Si le jeton d'accès est expiré, ou
+  s'en servir : date, scopes, compte), **jamais le jeton de rafraîchissement** (Codex exige le champ : il est copié vide).
+  `nc-diag` signale un jeton déjà expiré, avec la commande à lancer. Si le jeton d'accès est expiré, ou
   expire avant la fin de la demande (sa durée maximale, plus six minutes : Claude Code et google-auth le tiennent déjà
   pour expiré cinq minutes avant), ou si le fichier ou sa date est illisible, le moteur n'est pas lancé. Jeton expiré :
   « Codex doit renouveler sa connexion : ouvre-le une fois dans un terminal (codex), puis réessaie. » (au plus une
