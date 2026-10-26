@@ -363,29 +363,106 @@ Singleton {
         return (Array.isArray(c) ? c : []).filter(x => typeof x === "string" && x.trim() !== "")
             .map(x => x.trim().slice(0, 80)).filter((x, i, l) => l.indexOf(x) === i).slice(0, 5)
     }
-    function ajouter(role, texte, choix) {
-        var m = messages.concat([{role: role, texte: texte, num: ++dernierId, choix: nettoyerChoix(choix), choixFait: ""}]).slice(-24)
+    function ajouter(role, texte, choix, fichiers) {
+        var m = messages.concat([{role: role, texte: texte, num: ++dernierId, choix: nettoyerChoix(choix), choixFait: "",
+                                  fichiers: Array.isArray(fichiers) ? fichiers : []}]).slice(-24)
         var total = m.reduce((n, x) => n + x.texte.length, 0)
         while (total > 48000 && m.length > 1) total -= m.shift().texte.length
         messages = m
+    }
+    // ── Pièces jointes (issue #31) ──────────────────────────────────────────────────────────────────────────────────
+    // Les chemins restent en mémoire ici et partent par l'entrée standard de nc-assistant, jamais dans une ligne de
+    // commande ni un journal. nc-assistant valide et lit les fichiers (secrets refusés, tailles bornées) ; les fichiers
+    // ne vont qu'au serveur JARVIS configuré. Aucune minuterie : rien ne tourne tant qu'on n'envoie pas.
+    readonly property int maxFichiers: 5
+    property var fichiersEnAttente: []     // [{chemin, nom}]
+    property var fichiersEnCours: []       // ceux de la demande en cours, rendus à l'attente si elle échoue
+    property bool questionAuto: false      // la question est celle mise à la place d'un texte vide
+    readonly property bool selecteurOuvert: selecteur.running
+    function nomFichier(chemin) {
+        var n = String(chemin || "").split("/").pop()
+        return (n || String(chemin || "")).slice(0, 120)
+    }
+    // Un chemin absolu, ou une URL file:// de cet ordinateur (sans hôte, ou localhost) ; "" pour tout le reste
+    // (http://, file://serveur/, texte quelconque)
+    function cheminLocal(brut) {
+        var c = String(brut || "").trim()
+        if (/^file:/i.test(c)) {
+            var m = /^file:\/\/([^\/]*)(\/[\s\S]*)$/i.exec(c)
+            if (!m || (m[1] !== "" && m[1].toLowerCase() !== "localhost")) return ""
+            try { c = decodeURIComponent(m[2]) } catch (_) { return "" }
+        }
+        return c.charAt(0) === "/" && c.indexOf("\u0000") < 0 && c.length <= 4096 ? c : ""
+    }
+    // Ajoute des chemins ou des URL ; renvoie combien ont été pris
+    function ajouterFichiers(liste) {
+        if (Reglages.iaCoupee) {
+            erreur = Reglages.t("L'IA est désactivée : les fichiers ne peuvent pas être joints.", "AI is turned off: files cannot be attached.")
+            return 0
+        }
+        var pris = 0, refuses = 0, trop = false
+        var suite = fichiersEnAttente.slice()
+        for (let i = 0; i < liste.length; i++) {
+            let c = cheminLocal(liste[i])
+            if (!c) { refuses++; continue }
+            if (suite.some(f => f.chemin === c)) continue
+            if (suite.length >= maxFichiers) { trop = true; break }
+            suite.push({chemin: c, nom: nomFichier(c)})
+            pris++
+        }
+        fichiersEnAttente = suite
+        if (trop) erreur = Reglages.t("5 fichiers au plus par envoi.", "5 files at most per request.")
+        else if (refuses > 0 && pris === 0) erreur = Reglages.t("Seuls les fichiers de cet ordinateur peuvent être joints.", "Only files on this computer can be attached.")
+        return pris
+    }
+    function retirerFichier(index) {
+        if (index < 0 || index >= fichiersEnAttente.length) return
+        var f = fichiersEnAttente.slice()
+        f.splice(index, 1)
+        fichiersEnAttente = f
+    }
+    // Le sélecteur de fichiers du système, dans un Process à part (il peut rester ouvert longtemps) : un second clic
+    // tant qu'il est ouvert ne fait rien
+    function choisirFichiers() {
+        if (selecteur.running || enCours || ecritureReglagesEnCours || Reglages.iaCoupee) return
+        selecteur.running = true
+    }
+    Process {
+        id: selecteur
+        command: [a.bin + "nc-assistant", "selectionner-fichiers"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var r = null
+                try { r = JSON.parse(text) } catch (_) {}
+                if (r && r.ok === true && Array.isArray(r.files)) a.ajouterFichiers(r.files)
+                else a.erreur = r && typeof r.error === "string" ? r.error.slice(0, 300)
+                    : Reglages.t("Le sélecteur de fichiers n'a pas répondu.", "The file picker did not answer.")
+            }
+        }
+        // Ne rien envoyer dans les journaux Quickshell (noms de fichiers)
+        stderr: StdioCollector {}
     }
     // texte : un choix cliqué sous une réponse (envoyé tel quel, le brouillon reste) ; sinon le brouillon
     function envoyer(texte) {
         var duBrouillon = typeof texte !== "string"
         var q = (duBrouillon ? brouillon : texte).trim()
-        if (enCours || ecritureReglagesEnCours || !q) return
+        var pieces = duBrouillon ? fichiersEnAttente : []
+        if (enCours || ecritureReglagesEnCours || (!q && pieces.length === 0)) return
         if (q.length > 8000) {
             erreur = Reglages.t("8 000 caractères maximum.", "8,000 characters maximum.")
             return
         }
-        question = q
+        questionAuto = !q
+        question = q || Reglages.t("Analyse ces fichiers", "Analyze these files")
         erreur = ""
         reponse = ""
         sortieFinie = false
         processusFini = false
         code = -1
         enCours = true
-        ajouter("vous", q)
+        fichiersEnCours = pieces.slice()
+        if (duBrouillon) fichiersEnAttente = []
+        ajouter("vous", question, [], fichiersEnCours.map(f => f.nom))
         if (duBrouillon) brouillon = ""
         requete.stdinEnabled = true
         requete.running = true
@@ -405,12 +482,19 @@ Singleton {
             a.suiteParIA = typeof r.engine === "string" && r.engine !== ""
             a.nomChat = a.suiteParIA ? r.engine : "JARVIS"; if (!a.suiteParIA) a.agentChat = "assistant"
             finReponse.restart()
+            fichiersEnCours = []
         } else {
             erreur = r && typeof r.error === "string" ? r.error.slice(0, 1000)
                     : Reglages.t("Impossible de recevoir la réponse. Vérifie la connexion et la configuration.",
                                  "Unable to receive the answer. Check the connection and configuration.")
             // Permet de corriger ou renvoyer manuellement ; aucune répétition automatique.
-            if (!brouillon) brouillon = question
+            if (!brouillon && !questionAuto) brouillon = question
+            // Les fichiers reviennent en attente : on renvoie sans les rechoisir
+            if (fichiersEnCours.length > 0) {
+                var rendus = fichiersEnCours.filter(f => !fichiersEnAttente.some(g => g.chemin === f.chemin))
+                fichiersEnAttente = rendus.concat(fichiersEnAttente).slice(0, maxFichiers)
+                fichiersEnCours = []
+            }
         }
         question = ""
         reponse = ""
@@ -474,7 +558,8 @@ Singleton {
                 if ((total += t.length) > 16000) break
                 h.unshift({role: a.messages[i].role === "vous" ? "user" : "assistant", texte: t})
             }
-            write(JSON.stringify({session_id: a.session, question: a.question, historique: h, ia_du_bureau: a.suiteParIA}) + "\n")
+            write(JSON.stringify({session_id: a.session, question: a.question, historique: h, ia_du_bureau: a.suiteParIA,
+                               fichiers: a.fichiersEnCours.map(f => f.chemin)}) + "\n")
             stdinEnabled = false
         }
         stdout: StdioCollector {

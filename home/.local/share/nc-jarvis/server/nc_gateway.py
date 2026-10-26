@@ -24,6 +24,7 @@ if "__file__" in globals():
             raise RuntimeError(f"{_m} ne vient pas de l'overlay noctalia-config ({_o}) : relance le déployeur "
                                "(nc-jarvis), qui place l'overlay en tête (--app-dir)")
 import main as upstream
+import asyncio
 import contextlib
 import contextvars
 import inspect
@@ -90,8 +91,13 @@ def _avec_choix(corps):
     return json.dumps(donnees, ensure_ascii=False).encode()
 
 
-# AskRequest n'a aucun champ volumineux (ni image ni fichier) ; nos questions font 8000 caractères au plus
-LIMITE_ASK = 1024 * 1024
+# Les questions font 8000 caractères au plus, mais l'île peut joindre jusqu'à 40 Mo de fichiers (champ « files », en
+# base64 : environ 54 Mo). Le corps n'est lu qu'après l'authentification
+LIMITE_ASK = 64 * 1024 * 1024
+# Sans authentification vérifiable, ou pour les questions seules : 1 Mo. Au-delà (des fichiers), deux corps à la fois au plus
+# (chacun tient en mémoire, plus sa copie JSON)
+LIMITE_PETIT = 1024 * 1024
+_SEM_GROS = asyncio.Semaphore(2)
 CLE_BUREAU = re.compile(r'default|desktop:[\w.@-]{1,180}', re.ASCII)
 
 
@@ -117,7 +123,8 @@ def cle_ask_refusee(corps):
 
 def _secret_refuse(scope):
     """Vrai si l'en-tête X-Secret-Key est refusé par require_secret du serveur (appelé tel quel). Une signature que
-    nous ne savons pas appeler n'authentifie rien ici : la route d'origine le fait de toute façon, après la lecture."""
+    nous ne savons pas appeler n'authentifie rien ici (None) : la route d'origine le fait de toute façon, après la
+    lecture, donc seuls les petits corps (LIMITE_PETIT) sont lus dans ce cas."""
     valeur = None
     for k, v in scope.get('headers', []):
         if bytes(k).lower() == b'x-secret-key':
@@ -128,7 +135,7 @@ def _secret_refuse(scope):
     except HTTPException:
         return True
     except TypeError:
-        return False
+        return None                                           # authentification invisible d'ici : pas de gros corps
     return False
 
 
@@ -138,57 +145,72 @@ def _choix_du_bureau(route_app):
     async def asgi(scope, receive, send):
         if scope.get('type') != 'http':
             return await route_app(scope, receive, send)
-        if _secret_refuse(scope):                            # authentifier AVANT de lire le corps
+        secret = _secret_refuse(scope)
+        if secret:                                           # authentifier AVANT de lire le corps
             return await JSONResponse({'detail': 'Clé API invalide'}, status_code=401)(scope, receive, send)
-        morceaux_requete, plus, total = [], True, 0
-        while plus:
-            message = await receive()
-            if message['type'] == 'http.disconnect':
-                return
-            morceau = message.get('body', b'')
-            total += len(morceau)
-            if total > LIMITE_ASK:
-                return await JSONResponse({'detail': 'Requête trop volumineuse'}, status_code=413)(scope, receive, send)
-            morceaux_requete.append(morceau)
-            plus = message.get('more_body', False)
-        corps_requete = b''.join(morceaux_requete)
-        if cle_ask_refusee(corps_requete):
-            return await JSONResponse({'detail': 'Clé de session refusée'}, status_code=400)(scope, receive, send)
-        rendu = False
-
-        async def receive_rendu():
-            nonlocal rendu
-            if not rendu:
-                rendu = True
-                return {'type': 'http.request', 'body': corps_requete, 'more_body': False}
-            return await receive()
-        debut, morceaux = None, []
-
-        async def envoyer(message):
-            nonlocal debut
-            if debut is None and message['type'] == 'http.response.start':
-                entetes = {bytes(k).lower(): bytes(v) for k, v in message.get('headers', [])}
-                if message.get('status') == 200 and entetes.get(b'content-type', b'').startswith(b'application/json'):
-                    debut = message
-                    return
-            elif debut is not None and message['type'] == 'http.response.body':
-                morceaux.append(message.get('body', b''))
-                if message.get('more_body'):
-                    return
-                corps = _avec_choix(b''.join(morceaux))
-                entetes = [(k, v) for k, v in debut.get('headers', []) if bytes(k).lower() != b'content-length']
-                await send(dict(debut, headers=entetes + [(b'content-length', str(len(corps)).encode())]))
-                await send({'type': 'http.response.body', 'body': corps})
-                return
-            await send(message)
-
-        jeton = _pour_le_bureau.set(True)
+        limite = LIMITE_PETIT if secret is None else LIMITE_ASK
+        gros = False
         try:
-            await route_app(scope, receive_rendu, envoyer)
+            morceaux_requete, plus, total = [], True, 0
+            while plus:
+                message = await receive()
+                if message['type'] == 'http.disconnect':
+                    return
+                morceau = message.get('body', b'')
+                total += len(morceau)
+                if total > limite:
+                    return await JSONResponse({'detail': 'Requête trop volumineuse'}, status_code=413)(scope, receive, send)
+                if total > LIMITE_PETIT and not gros:
+                    await _SEM_GROS.acquire()                # deux gros corps à la fois au plus
+                    gros = True
+                morceaux_requete.append(morceau)
+                plus = message.get('more_body', False)
+            corps_requete = b''.join(morceaux_requete)
+            del morceaux_requete                             # la mémoire ne garde pas deux copies du corps
+            if cle_ask_refusee(corps_requete):
+                return await JSONResponse({'detail': 'Clé de session refusée'}, status_code=400)(scope, receive, send)
+            return await _suite_ask(route_app, scope, receive, send, corps_requete)
         finally:
-            _pour_le_bureau.reset(jeton)
+            if gros:
+                _SEM_GROS.release()
     asgi.nc_choix = True
     return asgi
+
+
+async def _suite_ask(route_app, scope, receive, send, corps_requete):
+    rendu = False
+
+    async def receive_rendu():
+        nonlocal rendu
+        if not rendu:
+            rendu = True
+            return {'type': 'http.request', 'body': corps_requete, 'more_body': False}
+        return await receive()
+    debut, morceaux = None, []
+
+    async def envoyer(message):
+        nonlocal debut
+        if debut is None and message['type'] == 'http.response.start':
+            entetes = {bytes(k).lower(): bytes(v) for k, v in message.get('headers', [])}
+            if message.get('status') == 200 and entetes.get(b'content-type', b'').startswith(b'application/json'):
+                debut = message
+                return
+        elif debut is not None and message['type'] == 'http.response.body':
+            morceaux.append(message.get('body', b''))
+            if message.get('more_body'):
+                return
+            corps = _avec_choix(b''.join(morceaux))
+            entetes = [(k, v) for k, v in debut.get('headers', []) if bytes(k).lower() != b'content-length']
+            await send(dict(debut, headers=entetes + [(b'content-length', str(len(corps)).encode())]))
+            await send({'type': 'http.response.body', 'body': corps})
+            return
+        await send(message)
+
+    jeton = _pour_le_bureau.set(True)
+    try:
+        await route_app(scope, receive_rendu, envoyer)
+    finally:
+        _pour_le_bureau.reset(jeton)
 
 
 for _route in app.routes:

@@ -687,7 +687,7 @@ assert(launched[4] == "a 'quote' and $(false)")
                         ".local/share/nc-jarvis/server/nc_gateway.py", ".local/share/nc-jarvis/server/nc_management.py",
                         ".local/share/nc-jarvis/server/nc_runner.py", ".local/share/nc-jarvis/server/nc_engines.py",
                         ".config/quickshell/nc-ile/AssistantReglages.qml",
-                        ".config/quickshell/nc-ile/AssistantCommande.qml", ".config/quickshell/nc-ile/AssistantOrbe.qml",
+                        ".config/quickshell/nc-ile/AssistantCommande.qml", ".config/quickshell/nc-ile/AssistantOrbe.qml", ".config/quickshell/nc-ile/AssistantPieces.qml",
                         ".config/quickshell/nc-ile/Jarvis.qml", ".config/quickshell/nc-ile/JarvisEtat.qml",
                         ".config/quickshell/nc-ile/JarvisChamp.qml", ".config/quickshell/nc-ile/JarvisBouton.qml",
                         ".config/quickshell/nc-ile/JarvisResultat.qml",
