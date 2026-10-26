@@ -10,11 +10,9 @@ user_pref("browser.compactmode.show", true);                              // « 
 user_pref("browser.tabs.inTitlebar", 1);                                   // onglets dans la barre de titre (Hyprland n'en dessine pas)
 user_pref("ui.key.menuAccessKeyFocuses", false);                           // Alt seul n'ouvre pas la barre de menus (Alt sert aux raccourcis)
 
-// --- Bureau : sélecteur de fichiers du système, vidéo par la carte graphique ---
+// --- Bureau : sélecteur de fichiers du système (la vidéo par la carte graphique est posée en bas, seulement si vainfo répond) ---
 user_pref("widget.use-xdg-desktop-portal.file-picker", 1);                // sélecteur de fichiers du bureau (portail)
 user_pref("widget.use-xdg-desktop-portal.mime-handler", 1);               // ouvre les liens et fichiers avec les applis du bureau
-user_pref("media.ffmpeg.vaapi.enabled", true);                            // décodage vidéo par la carte graphique (VA-API)
-user_pref("gfx.webrender.all", true);                                     // rendu accéléré partout
 user_pref("general.autoScroll", true);                                    // clic molette : défilement automatique
 user_pref("widget.wayland.fractional-scale.enabled", true);               // net sur un écran à l'échelle 1,25 ou 1,6 (Wayland)
 user_pref("full-screen-api.transition-duration.enter", "0 0");            // plein écran instantané (pas de fondu noir)

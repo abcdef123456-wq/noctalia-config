@@ -66,6 +66,64 @@ def style_apple():
         return False
 
 
+def couleur_hex(v):
+    """Couleur en « #rrggbb » minuscule, quel que soit le format de colors.json (#rrggbb, rrggbb, #rrggbbaa, #rgb,
+    rgb(r, g, b), rgba(…)) ; None si illisible (chaîne vide, mot, nombre…). C'est le format que kitty sait lire."""
+    v = str(v if v is not None else "").strip()
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", v)
+    if m:
+        return "#" + m.group(1).lower()
+    m = re.fullmatch(r"#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])", v)
+    if m:
+        return "#" + "".join(x * 2 for x in m.groups()).lower()
+    m = re.fullmatch(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+).*\)", v)
+    if m:
+        return "#" + "".join(f"{min(255, int(x)):02x}" for x in m.groups())
+    return None
+
+
+# Couleurs de secours quand une valeur de colors.json est illisible (thème sombre sobre)
+SECOURS = {"mSurface": "#13171f", "mOnSurface": "#e6e8ee", "mPrimary": "#8fb3ff"}
+
+
+def normaliser(c):
+    """Toutes les couleurs de colors.json au format « #rrggbb », une seule fois. Une valeur illisible ne plante rien :
+    les trois couleurs de base prennent un repli, les autres sont retirées (les .get() du script ont leur propre
+    repli) ; chaque cas est dit sur la sortie d'erreur."""
+    propre = {}
+    for k, v in c.items():
+        if not (isinstance(k, str) and re.fullmatch(r"m[A-Z]\w*", k)):
+            propre[k] = v
+            continue
+        h = couleur_hex(v)
+        if h:
+            propre[k] = h
+        elif k in SECOURS:
+            propre[k] = SECOURS[k]
+            print(T(f"nc-theme-sync : {k} illisible ({v!r}), repli sur {SECOURS[k]}",
+                    f"nc-theme-sync: {k} unreadable ({v!r}), falling back to {SECOURS[k]}"), file=sys.stderr)
+        else:
+            print(T(f"nc-theme-sync : {k} illisible ({v!r}), ignoré", f"nc-theme-sync: {k} unreadable ({v!r}), ignored"),
+                  file=sys.stderr)
+    for k, h in SECOURS.items():
+        propre.setdefault(k, h)
+    return propre
+
+
+def lisible(rgb, bg, dark, cible=4.5):
+    """Texte lisible sur le fond : tel quel s'il atteint le contraste visé ; sinon sa luminosité OKLCH est ajustée
+    (même méthode que les couleurs ANSI), puis, si la teinte ne suffit pas, le blanc ou le noir. Blanc ou noir font
+    toujours au moins 4,58:1 sur n'importe quel fond, donc 4,5:1 est toujours atteint (le plancher de 3,3:1 des
+    couleurs ANSI vient de leur teinte à garder, pas du fond)."""
+    if contrast(rgb, bg) >= cible:
+        return rgb
+    L, C, H = rgb_to_oklch(rgb)
+    ajuste = tone(min(0.97, max(0.06, L)), C, H, bg, cible, dark)
+    if contrast(ajuste, bg) >= cible:
+        return ajuste
+    return max(((1, 1, 1), (0, 0, 0)), key=lambda x: contrast(x, bg))
+
+
 # --- Conversions sRGB <-> OKLab/OKLCH ---------------------------------------------------------
 def hex_to_rgb(h):
     h = h.lstrip("#")
@@ -169,13 +227,23 @@ def accent_lisible(primary, sur, bg_hex, fg_hex, dark):
 def main():
     try:
         c = json.loads(COLORS.read_text())
-        bg_hex, fg_hex = c["mSurface"], c["mOnSurface"]
-        primary = c["mPrimary"]
-    except (OSError, KeyError, ValueError) as e:
+        if not isinstance(c, dict):
+            raise ValueError("pas un objet JSON")
+    except (OSError, ValueError) as e:
         sys.exit(T(f"nc-theme-sync : colors.json illisible ({e})", f"nc-theme-sync: unreadable colors.json ({e})"))
+    c = normaliser(c)
+    bg_hex, primary = c["mSurface"], c["mPrimary"]
 
-    bg, fg = hex_to_rgb(bg_hex), hex_to_rgb(fg_hex)
+    bg = hex_to_rgb(bg_hex)
     dark = luminance(bg) < 0.18
+    # Le texte du terminal reste lisible (4,5:1) même si mOnSurface est trop proche du fond (#fff sur #fff)
+    fg = lisible(hex_to_rgb(c["mOnSurface"]), bg, dark)
+    fg_hex = rgb_to_hex(fg)
+    if fg_hex != c["mOnSurface"]:
+        print(T(f"nc-theme-sync : mOnSurface {c['mOnSurface']} trop proche du fond, texte remplacé par {fg_hex}",
+                f"nc-theme-sync: mOnSurface {c['mOnSurface']} too close to the background, text replaced by {fg_hex}"),
+              file=sys.stderr)
+    c["mOnSurface"] = fg_hex
     _, pc, ph = rgb_to_oklch(hex_to_rgb(primary))
 
     # Teintes OKLCH de référence des couleurs ANSI
@@ -266,16 +334,9 @@ def main():
 
     # --- Hyprland : halo coloré de la fenêtre active, bordure en dégradé, onglets de groupes ---
     def hx(key, fallback):
-        """Couleur en 6 chiffres hexadécimaux, quel que soit le format de colors.json (#rrggbb, #rrggbbaa,
-        rgb(r, g, b)…) ; illisible : couleur de secours (une couleur invalide bloquerait la config Hyprland)."""
-        v = str(c.get(key) or "").strip()
-        m = re.fullmatch(r"#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", v)
-        if m:
-            return m.group(1).lower()
-        m = re.fullmatch(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+).*\)", v)
-        if m:
-            return "".join(f"{min(255, int(x)):02x}" for x in m.groups())
-        return fallback
+        """Couleur en 6 chiffres hexadécimaux (sans #), déjà normalisée ; absente : couleur de secours (une couleur
+        invalide bloquerait la config Hyprland)."""
+        return (couleur_hex(c.get(key)) or "#" + fallback)[1:]
 
     p, s2, t3 = hx("mPrimary", "8fb3ff"), hx("mSecondary", "b9abff"), hx("mTertiary", "7fdbca")
     sv, osv = hx("mSurfaceVariant", "161a23"), hx("mOnSurfaceVariant", "a3a9b8")
@@ -417,7 +478,11 @@ def sync_kdeglobals():
             dst.set(sec, k, v)
     if not dst.has_section("Icons"):
         dst.add_section("Icons")
-    dst.set("Icons", "Theme", "Papirus-Dark")
+    # Le thème d'icônes est celui de l'utilisateur : écrit seulement s'il n'y en a pas (NC, dessiné par nc-icones, qui
+    # reprend Papirus pour le reste ; Papirus-Dark tant que nc-icones n'a rien posé)
+    if not dst.has_option("Icons", "Theme"):
+        nc = Path.home() / ".local/share/icons/NC/index.theme"
+        dst.set("Icons", "Theme", "NC" if nc.is_file() else "Papirus-Dark")
     # Hors Plasma, les applis KDE appliquent le schéma désigné par [UiSettings] ColorScheme (nom du fichier .colors).
     # Indispensable sous Qt 6.12 : qt6ct 0.11 ne parvient plus à appliquer sa propre palette.
     for sec in ("General", "UiSettings"):

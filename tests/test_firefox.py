@@ -49,6 +49,16 @@ class Firefox(unittest.TestCase):
         self.base = self.home / ".config/mozilla/firefox"
         self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), NC_FIREFOX_SOURCE=str(SOURCE))
         self.env.pop("NC_FIREFOX_PROFIL", None)
+        # Faux vainfo en tête du PATH : jamais le vrai ; il échoue tant qu'un test ne le fait pas répondre
+        self.bin = self.home / "faux-bin"
+        self.bin.mkdir()
+        self.faux_vainfo(False)
+        self.env["PATH"] = f"{self.bin}:{os.environ['PATH']}"
+
+    def faux_vainfo(self, repond):
+        f = self.bin / "vainfo"
+        f.write_text(f"#!/bin/sh\nexit {0 if repond else 1}\n")
+        f.chmod(0o755)
 
     def lancer(self, *args):
         return subprocess.run([str(SCRIPT), *args], env=self.env, capture_output=True, text=True, timeout=20)
@@ -383,6 +393,99 @@ class Firefox(unittest.TestCase):
         contenu = (SOURCE / "chrome/userContent.css").read_text()
         self.assertNotIn("--in-content-border-radius:", contenu)
         self.assertIn("--border-radius-medium: 12px !important;", contenu)
+
+    def test_description_honnete_de_l_extension(self):
+        """L'audit : le réglage dit que Firefox accepte aussi les autres extensions non signées (FR et EN)."""
+        texte = (REPO / "home/.local/bin/nc-reglages").read_text()
+        debut = texte.index('R("FIREFOX_COULEURS"')
+        r = texte[debut:texte.index('R("FIREFOX_ONGLETS_VERTICAUX"')]
+        self.assertIn("aussi les autres extensions non signées", r)
+        self.assertIn("also accepts other unsigned extensions", r)
+
+    def test_pas_de_webrender_force_et_vaapi_seulement_si_vainfo_repond(self):
+        self.assertNotIn("gfx.webrender.all", (SOURCE / "user.js").read_text())
+        self.assertNotIn("vaapi", (SOURCE / "user.js").read_text())
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertNotIn("vaapi", (p / "user.js").read_text(), "vainfo échoue : rien posé")
+        self.assertNotIn("gfx.webrender.all", (p / "user.js").read_text())
+        self.faux_vainfo(True)
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertIn('user_pref("media.ffmpeg.vaapi.enabled", true);', (p / "user.js").read_text())
+
+    def test_extension_sans_autodisablescopes(self):
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        self.assertEqual(self.lancer("extension", "installer").returncode, 0)
+        user = (self.base / "x.p/user.js").read_text()
+        self.assertIn("xpinstall.signatures.required", user)
+        self.assertNotRegex(user, r'user_pref\("extensions.autoDisableScopes", 14')
+
+    def test_anciennes_valeurs_remises_par_defaut_une_fois(self):
+        """Un user.js d'avant (webrender forcé, autoDisableScopes 14) : Firefox les a gardées dans prefs.js ; elles sont
+        remises au défaut, puis la remise disparaît quand prefs.js n'a plus rien."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        (p / "prefs.js").write_text('user_pref("gfx.webrender.all", true);\nuser_pref("extensions.autoDisableScopes", 14);\n'
+                                    'user_pref("xpinstall.signatures.required", false);\n')
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        user = (p / "user.js").read_text()
+        self.assertIn('user_pref("gfx.webrender.all", false);', user)
+        self.assertIn('user_pref("extensions.autoDisableScopes", 15);', user)
+        self.assertIn('user_pref("xpinstall.signatures.required", true);', user, "pas d'extension : signatures de nouveau exigées")
+        (p / "prefs.js").write_text("")             # Firefox est passé par là : plus rien à remettre
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertNotIn("anciennes valeurs", (p / "user.js").read_text())
+        # user.js à toi (pas de nc-firefox) : ta valeur n'est jamais « remise »
+        (p / "prefs.js").write_text('user_pref("gfx.webrender.all", true);\n')
+        (p / "user.js").write_text('user_pref("gfx.webrender.all", true);\n')
+        (p / ".nc-firefox.json").unlink()
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertNotIn("gfx.webrender.all", (p / "user.js").read_text())
+
+    def test_ecriture_atomique(self):
+        """user.js et nc-couleurs.css passent par un fichier temporaire du même dossier puis os.replace : aucun reste,
+        et si le renommage échoue l'ancien fichier est intact."""
+        self.profils("[Profile0]\nName=x\nIsRelative=1\nPath=x.p\nDefault=1\n", "x.p")
+        p = self.base / "x.p"
+        (self.home / ".config/nc").mkdir()
+        (self.home / ".config/nc/palette-ile.json").write_text(json.dumps({"sombre": True, "fond": REELLE[0], "accent": REELLE[4]}))
+        self.assertEqual(self.lancer("installer").returncode, 0)
+        self.assertEqual([f.name for f in p.rglob("*") if ".nc-tmp" in f.name], [], "pas de fichier temporaire oublié")
+        texte = SCRIPT.read_text()
+        self.assertEqual(texte.count("os.replace"), 1)
+        self.assertNotRegex(texte, r'\(p / "user\.js"\)\.write_text|f\.write_text\(css')
+        # Échec du renommage simulé : l'ancien contenu reste, le temporaire est nettoyé
+        import importlib.machinery, importlib.util
+        from unittest import mock
+        ch = importlib.machinery.SourceFileLoader("nc_firefox_atomique", str(SCRIPT))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader(ch.name, ch))
+        with mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")}):
+            ch.exec_module(m)
+        cible = p / "user.js"
+        avant = cible.read_text()
+        with mock.patch.object(m.os, "replace", side_effect=OSError("disque plein")):
+            with self.assertRaises(OSError):
+                m.ecrire_atomique(cible, "à moitié")
+        self.assertEqual(cible.read_text(), avant)
+        self.assertEqual([f.name for f in p.iterdir() if ".nc-tmp" in f.name], [])
+
+    def test_profil_flatpak_plus_recent_que_le_vieux_mozilla(self):
+        vieux = self.home / ".mozilla/firefox"
+        flat = self.home / ".var/app/org.mozilla.firefox/.mozilla/firefox"
+        for base, nom, age in ((vieux, "a.default", 1_000_000), (flat, "b.default", 2_000_000)):
+            (base / nom).mkdir(parents=True)
+            (base / nom / "prefs.js").write_text("")
+            os.utime(base / nom / "prefs.js", (age, age))
+            (base / "profiles.ini").write_text(f"[Install1]\nDefault={nom}\n\n[Profile0]\nName=d\nIsRelative=1\nPath={nom}\nDefault=1\n")
+        self.assertEqual(self.lancer("profil").stdout.strip(), str(flat / "b.default"), "le Flatpak, utilisé en dernier")
+        os.utime(vieux / "a.default/prefs.js", (3_000_000, 3_000_000))
+        self.assertEqual(self.lancer("profil").stdout.strip(), str(vieux / "a.default"), "le vieux, s'il redevient le plus récent")
+        # À égalité (rien de daté) : l'ordre habituel, ~/.mozilla avant le Flatpak
+        for d in (vieux / "a.default", flat / "b.default"):
+            (d / "prefs.js").unlink()
+        self.assertEqual(self.lancer("profil").stdout.strip(), str(vieux / "a.default"))
 
     def test_user_js_bien_forme(self):
         cles = []

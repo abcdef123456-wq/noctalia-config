@@ -14,13 +14,14 @@
   nc-firefox extension installer | desinstaller | etat
       L'extension « Couleurs de l'île » : le thème de Firefox suit en direct les couleurs du fond d'écran, sans
       relancer (réglage FIREFOX_COULEURS de nc-reglages → Apparence). Elle est posée dans extensions/ du profil
-      (chargée au prochain démarrage de Firefox, activée d'elle-même) avec son hôte natif (ce script, déclaré dans
+      (chargée au prochain démarrage de Firefox, qui propose de l'activer : à accepter une seule fois) avec son hôte natif (ce script, déclaré dans
       ~/.mozilla/native-messaging-hosts, où Firefox le cherche même quand les profils sont rangés dans
       ~/.config/mozilla ; Flatpak et Snap : le dossier de leur .mozilla). Non signée : Firefox Developer Edition, Nightly et ESR l'acceptent
-      (xpinstall.signatures.required à faux) ; avec la version grand public (Fedora, Snap d'Ubuntu, Flatpak),
+      (xpinstall.signatures.required à faux, pour TOUTES les extensions) ; avec la version grand public (Fedora, Snap d'Ubuntu, Flatpak),
       l'installation est refusée (code 4) au lieu de poser une extension que Firefox rejetterait.
 
-Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit user.js et chrome/ au démarrage : ferme-le et
+Plusieurs dossiers de profils (un vieux ~/.mozilla/firefox derrière un Firefox Flatpak) : celui que Firefox a
+utilisé en dernier. Les fichiers viennent de ~/.local/share/nc/firefox. Firefox relit user.js et chrome/ au démarrage : ferme-le et
 rouvre-le. Sans Firefox ni profil : rien n'est fait, code 1. Noms anglais acceptés : profile, install, uninstall,
 colors, status, extension.
 """
@@ -29,8 +30,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -48,8 +51,10 @@ BLOC_EXTENSION = f"""
 // --- {MARQUE} extension : « Couleurs de l'île » (nc-firefox extension installer) ---
 user_pref("xpinstall.signatures.required", false);                         // extension non signée (Developer Edition, Nightly, ESR)
 user_pref("extensions.sideloadScopes", 1);                                 // extensions/ du profil lu au démarrage
-user_pref("extensions.autoDisableScopes", 14);                             // celles du profil sont activées d'elles-mêmes
 """
+# extensions.autoDisableScopes reste à sa valeur par défaut (15) : Firefox désactive l'extension déposée dans le profil
+# et propose de l'activer (une seule fois, elle le reste ensuite). Avec 14, tout fichier déposé dans extensions/ serait
+# activé sans question.
 
 
 def dossiers_candidats():
@@ -58,44 +63,79 @@ def dossiers_candidats():
             HOME / ".var/app/org.mozilla.firefox/.mozilla/firefox", HOME / "snap/firefox/common/.mozilla/firefox"]
 
 
+def profil_de(base):
+    """Le profil par défaut d'un dossier de profils (son profiles.ini), ou None : le profil « Default » de la section
+    [Install…] (celui que Firefox ouvre), puis Default=1, puis le premier profil existant."""
+    ini = base / "profiles.ini"
+    if not ini.is_file():
+        return None
+    cfg = configparser.RawConfigParser()
+    cfg.optionxform = str
+    try:
+        cfg.read(ini, encoding="utf-8")
+    except configparser.Error:
+        return None
+
+    def chemin(section):
+        p = cfg.get(section, "Path", fallback=None)
+        if not p:
+            return None
+        rel = cfg.get(section, "IsRelative", fallback="1") == "1"
+        d = base / p if rel else Path(p)
+        return d if d.is_dir() else None
+
+    for s in cfg.sections():
+        if s.startswith("Install"):
+            p = cfg.get(s, "Default", fallback="")
+            if p and (base / p).is_dir():
+                return base / p
+    profils = [s for s in cfg.sections() if s.startswith("Profile")]
+    for s in profils:
+        if cfg.get(s, "Default", fallback="0") == "1" and chemin(s):
+            return chemin(s)
+    for s in profils:
+        if chemin(s):
+            return chemin(s)
+    return None
+
+
+def derniere_utilisation(d):
+    """Quand Firefox a servi ce profil pour la dernière fois : le plus récent de prefs.js, compatibility.ini et
+    times.json. Les fichiers que nc-firefox pose (user.js, chrome/) ne comptent pas : sinon le profil qu'il vient de
+    toucher paraîtrait toujours le plus récent."""
+    t = 0.0
+    for nom in ("prefs.js", "compatibility.ini", "times.json"):
+        try:
+            t = max(t, (d / nom).stat().st_mtime)
+        except OSError:
+            pass
+    return t
+
+
 def profil():
-    """Le dossier du profil par défaut, ou None. Priorité : NC_FIREFOX_PROFIL, puis le profil « Default » de la
-    section [Install…] (celui que Firefox ouvre), puis Default=1, puis le premier profil existant."""
+    """Le dossier du profil par défaut, ou None. Priorité : NC_FIREFOX_PROFIL ; sinon le profil par défaut de chaque
+    dossier de profils (voir profil_de), et, s'il y en a plusieurs (un vieux ~/.mozilla/firefox laissé derrière un
+    Firefox Flatpak ou XDG, par exemple), celui que Firefox a utilisé en dernier ; à égalité, l'ordre de
+    dossiers_candidats()."""
     force = os.environ.get("NC_FIREFOX_PROFIL")
     if force:
         return Path(force) if Path(force).is_dir() else None
-    for base in dossiers_candidats():
-        ini = base / "profiles.ini"
-        if not ini.is_file():
-            continue
-        cfg = configparser.RawConfigParser()
-        cfg.optionxform = str
-        try:
-            cfg.read(ini, encoding="utf-8")
-        except configparser.Error:
-            continue
+    trouves = [d for d in (profil_de(b) for b in dossiers_candidats()) if d]
+    if not trouves:
+        return None
+    return max(enumerate(trouves), key=lambda e: (derniere_utilisation(e[1]), -e[0]))[1]
 
-        def chemin(section):
-            p = cfg.get(section, "Path", fallback=None)
-            if not p:
-                return None
-            rel = cfg.get(section, "IsRelative", fallback="1") == "1"
-            d = base / p if rel else Path(p)
-            return d if d.is_dir() else None
 
-        for s in cfg.sections():
-            if s.startswith("Install"):
-                p = cfg.get(s, "Default", fallback="")
-                if p and (base / p).is_dir():
-                    return base / p
-        profils = [s for s in cfg.sections() if s.startswith("Profile")]
-        for s in profils:
-            if cfg.get(s, "Default", fallback="0") == "1" and chemin(s):
-                return chemin(s)
-        for s in profils:
-            if chemin(s):
-                return chemin(s)
-    return None
+def ecrire_atomique(f, texte):
+    """Écrit dans un fichier temporaire du même dossier puis le renomme : Firefox (ou une coupure) ne voit jamais un
+    fichier à moitié écrit."""
+    tmp = f.with_name(f".{f.name}.nc-tmp{os.getpid()}")
+    try:
+        tmp.write_text(texte, encoding="utf-8")
+        os.replace(tmp, f)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def pose_par_nc(f):
@@ -115,6 +155,38 @@ def reglage(cle, defaut):
     return defaut
 
 
+def vaapi_utilisable():
+    """Vrai si `vainfo` répond : un pilote VA-API est là (Intel, AMD, ou NVIDIA avec nvidia-vaapi-driver). Sans lui,
+    ou sans vainfo, la préférence n'est pas posée : Firefox garde son choix par défaut."""
+    if not shutil.which("vainfo"):
+        return False
+    try:
+        return subprocess.run(["vainfo"], stdin=subprocess.DEVNULL, capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def remises_a_zero(p, ancien, extension):
+    """Valeurs que d'anciennes versions de nc-firefox ont posées dans user.js et que Firefox a gardées dans prefs.js
+    (il n'y garde que ce qui diffère du défaut, même après le retrait de la ligne de user.js) : remises à leur valeur
+    par défaut, une fois ; une valeur au défaut n'est plus enregistrée, et la remise disparaît d'elle-même à la
+    réécriture suivante. Seulement si le user.js d'avant était celui de nc-firefox (jamais une valeur que tu as mise)."""
+    if not ancien:
+        return ""
+    try:
+        prefs = (p / "prefs.js").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    cas = [("gfx.webrender.all", "true", "false"), ("extensions.autoDisableScopes", "14", "15")]
+    if not extension:
+        cas.append(("xpinstall.signatures.required", "false", "true"))
+    lignes = [f'user_pref("{cle}", {defaut});\n' for cle, posee, defaut in cas
+              if re.search(r'user_pref\("' + re.escape(cle) + r'",\s*' + posee + r'\s*\)', prefs)]
+    if not lignes:
+        return ""
+    return f"\n// --- {MARQUE} : anciennes valeurs remises par défaut (une fois) ---\n" + "".join(lignes)
+
+
 def bloc_reglages():
     """Préférences qui suivent nc-reglages (Apparence → Firefox : …) ; plus bas dans user.js, elles l'emportent."""
     verticaux = reglage("FIREFOX_ONGLETS_VERTICAUX", "non") == "oui"
@@ -122,21 +194,26 @@ def bloc_reglages():
             f'user_pref("sidebar.revamp", {"true" if verticaux else "false"});\n'
             f'user_pref("sidebar.verticalTabs", {"true" if verticaux else "false"});\n'
             f'user_pref("browser.startup.page", {3 if reglage("FIREFOX_SESSION", "oui") != "non" else 1});\n'
-            f'user_pref("general.smoothScroll", {"false" if reglage("FIREFOX_DEFILEMENT_DOUX", "oui") == "non" else "true"});\n')
+            f'user_pref("general.smoothScroll", {"false" if reglage("FIREFOX_DEFILEMENT_DOUX", "oui") == "non" else "true"});\n'
+            + ('user_pref("media.ffmpeg.vaapi.enabled", true);                            // vidéo par la carte graphique (vainfo répond)\n'
+               if vaapi_utilisable() else ""))
 
 
 def ecrire_user_js(p):
     """user.js = celui du dépôt, tes réglages, plus le bloc de l'extension si elle est installée."""
     garder_avant(p, "user.js", lire_empreintes(p))   # retouché à la main depuis : gardé avant la réécriture (revue FF-01b)
+    ancien = pose_par_nc(p / "user.js")
     texte = (SOURCE / "user.js").read_text(encoding="utf-8") + bloc_reglages()
-    if extension_etat(p) == 0:
+    extension = extension_etat(p) == 0
+    if extension:
         texte += BLOC_EXTENSION
-    (p / "user.js").write_text(texte, encoding="utf-8")
+    texte += remises_a_zero(p, ancien, extension)
+    ecrire_atomique(p / "user.js", texte)
     # Réécrit par nc-firefox lui-même (extension, réglages) : son empreinte suit, ce n'est pas une retouche
     d = lire_empreintes(p)
     if d:
         d["user.js"] = empreinte(p / "user.js")
-        (p / EMPREINTES).write_text(json.dumps(d, indent=1), encoding="utf-8")
+        ecrire_atomique(p / EMPREINTES, json.dumps(d, indent=1))
 
 
 # Tes fichiers à toi ne sont jamais perdus : un fichier qui n'est pas de nc-firefox est gardé en NOM.avant-nc avant la
@@ -186,7 +263,7 @@ def garder_avant(p, rel, empreintes):
 
 def noter_empreintes(p):
     d = {rel: empreinte(p / rel) for rel in FICHIERS if pose_par_nc(p / rel)}
-    (p / EMPREINTES).write_text(json.dumps(d, indent=1), encoding="utf-8")
+    ecrire_atomique(p / EMPREINTES, json.dumps(d, indent=1))
 
 
 def installer(p):
@@ -275,7 +352,7 @@ def couleurs(p):
                "   régénéré à chaque changement de fond. Firefox le relit au démarrage. */\n"
                f"{media} {{\n  :root {{\n" + "\n".join("  " + l for l in lignes) + "\n  }\n}\n")
     if not f.is_file() or f.read_text(encoding="utf-8", errors="replace") != css:
-        f.write_text(css, encoding="utf-8")
+        ecrire_atomique(f, css)
     return 0
 
 
@@ -368,7 +445,7 @@ def extension_installer(p):
                 "path": str(HOME / ".local/bin/nc-firefox"), "type": "stdio", "allowed_extensions": [EXTENSION_ID]}
     for d in dossiers_hotes(p):
         d.mkdir(parents=True, exist_ok=True)
-        (d / (HOTE + ".json")).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        ecrire_atomique(d / (HOTE + ".json"), json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     retirer_anciens_hotes(p)
     if pose_par_nc(p / "user.js") or not (p / "user.js").exists():
         if not pose_par_nc(p / "user.js"):

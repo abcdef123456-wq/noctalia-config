@@ -558,20 +558,22 @@ REGLAGES = [
       L("0 : fond d'écran net.", "0: sharp wallpaper."), mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
     R("FIREFOX_STYLE", "Apparence", L("Firefox au style de l'île", "Firefox in the island style"), "ouinon", "non",
       L("Pose dans ton profil Firefox les préférences du dépôt (barres compactes, sélecteur de fichiers du bureau, vidéo "
-        "par la carte graphique, session rouverte, sans contenu sponsorisé ni télémétrie) et le style de l'île (onglets et "
+        "par la carte graphique si le système la propose, session rouverte, sans contenu sponsorisé ni télémétrie) et le style de l'île (onglets et "
         "barre d'adresse en pastilles). Relance Firefox ensuite. Non : tout est retiré, ton user.js d'avant remis.",
-        "Puts the repo's preferences in your Firefox profile (compact bars, desktop file picker, GPU video, session "
+        "Puts the repo's preferences in your Firefox profile (compact bars, desktop file picker, GPU video when available, session "
         "restored, no sponsored content or telemetry) and the island style (pill tabs and address bar). Restart Firefox "
         "afterwards. No: everything is removed, your previous user.js put back."), groupe="firefox"),
     R("FIREFOX_COULEURS", "Apparence", L("Firefox aux couleurs du fond d'écran", "Firefox in the wallpaper colors"), "ouinon", "non",
       L("Une petite extension (« Couleurs de l'île ») fait suivre au thème de Firefox les couleurs du fond d'écran, en "
         "direct, sans relancer. Un thème choisi dans Firefox reste prioritaire (seuls Système, et Sombre ou Clair du "
-        "même côté que le fond, sont colorés). Non signée : Firefox Developer Edition, Nightly ou ESR seulement. Oui : "
-        "posée dans ton profil, active au prochain démarrage de Firefox ; non : retirée, Firefox revient à son thème.",
+        "même côté que le fond, sont colorés). Non signée : Firefox Developer Edition, Nightly ou ESR seulement. Firefox "
+        "accepte alors aussi les autres extensions non signées. Oui : posée dans ton profil ; au prochain démarrage de "
+        "Firefox, accepte une fois de l'activer. Non : retirée, Firefox revient à son thème.",
         "A small extension (“Island colors”) makes the Firefox theme follow the wallpaper colors live, without a restart. "
         "A theme you pick in Firefox stays in charge (only System, and Dark or Light matching the wallpaper, get colored). "
-        "Unsigned: Firefox Developer Edition, Nightly or ESR only. Yes: installed in your profile, active at Firefox's "
-        "next start; no: removed, Firefox goes back to its theme."), groupe="firefox"),
+        "Unsigned: Firefox Developer Edition, Nightly or ESR only. Firefox then also accepts other unsigned extensions. "
+        "Yes: installed in your profile; at Firefox's next start, accept enabling it once. No: removed, Firefox goes back "
+        "to its theme."), groupe="firefox"),
     R("FIREFOX_ONGLETS_VERTICAUX", "Apparence", L("Firefox : onglets verticaux", "Firefox: vertical tabs"), "ouinon", "non",
       L("Les onglets dans une colonne à gauche (Firefox 136 ou plus). Avec « Firefox au style de l'île ».",
         "Tabs in a column on the left (Firefox 136 or later). With “Firefox in the island style”."), groupe="firefox"),
