@@ -16,6 +16,17 @@ Une [LazyVim](https://lazyvim.github.io) avec ses extras, et des choix maison po
   du bureau ne sont jamais reformatés à l'enregistrement (ils gardent leur style).
 - `lua/plugins/interface.lua` : thème sombre ou clair d'après les couleurs du fond d'écran, tableau de bord Snacks,
   fenêtres flottantes arrondies comme l'île.
+- `lua/plugins/ia.lua`, `lua/config/ia.lua`, `lua/config/agents.lua` : l'IA dans Neovim. **Espace i** passe par `nc-ia`
+  (l'IA choisie dans nc-reglages) : demander, expliquer, transformer, corriger, faire une tâche, `d` expliquer et corriger
+  le diagnostic de la ligne (aperçu : `a` applique, `r` refuse), `m` écrire le message d'un commit (dans `git commit`,
+  lazygit… ; un message déjà écrit n'est jamais touché ; secret repéré = rien n'est envoyé). Les agents en terminal
+  passent par **sidekick.nvim** (panneau seul : ni Copilot ni suggestions d'édition) : `Espace i a` l'ouvre avec l'agent de
+  l'IA choisie, `A` en choisit un autre, `s` envoie le code ou la sélection, `p` un prompt (en français), `F` le fichier,
+  `Ctrl+.` va au panneau, `w` va au terminal d'un agent suivi par nc-claude. **Espace a** reste à Claude Code en IDE
+  (`claudecode.nvim`, modifications à accepter dans Neovim). Quand l'IA est coupée (nc-reglages → Intelligence
+  artificielle), toutes ces touches le disent et n'ouvrent rien. La barre lualine montre « Claude travaille » ou « Claude
+  t'attend » (état de nc-claude, suivi sans minuterie), le tableau de bord propose « Demander à l'IA » et « Agent sur le
+  projet », et `Espace -` ouvre yazi (`yazi.nvim`) s'il est installé.
 - `lua/config/options.lua`, `keymaps.lua`, `autocmds.lua` : ce qui change par rapport à LazyVim, commenté (Ctrl + S,
   Alt + flèches, coller sans écraser le presse-papiers, fichiers rechargés quand ils changent ailleurs…).
 - `lazyvim.json` : les extras activés (`:LazyExtras` pour en changer) : Python, Markdown, TOML, YAML, Docker, Git,

@@ -1,6 +1,11 @@
 -- L'IA du bureau dans Neovim (nc-ia : celle choisie dans nc-reglages → Intelligence artificielle, ou aucune).
--- Menu « Espace i » (lua/config/keymaps.lua) : demander, expliquer, transformer, corriger, faire une tâche, et
--- l'agent sur le projet (la CLI agentique de l'IA choisie : Claude Code, Codex, Gemini CLI, OpenCode…).
+-- Menu « Espace i » (lua/config/keymaps.lua) : demander (ii), expliquer (ie), transformer (it), corriger (ic),
+-- faire une tâche (if), expliquer et corriger le diagnostic de la ligne (id), écrire le message de commit (im),
+-- et les agents sur le projet : le panneau sidekick.nvim avec la CLI agentique de l'IA choisie (ia ouvre ou masque,
+-- iA choisit, is envoie le code ou la sélection, ip un prompt, iF le fichier, Ctrl+. y va), ou, sans sidekick, un
+-- terminal en bas. iw va sur le terminal d'un agent suivi par nc-claude (voir lua/config/agents.lua).
+-- IA coupée (IA_MODE=non dans reglages.conf, relu à chaque appui) : toutes ces touches le disent et n'ouvrent rien.
+-- « Espace a » reste à Claude Code en IDE (claudecode.nvim : diffs à accepter dans Neovim).
 -- Le texte passe par l'entrée standard de nc-ia ; rien ne bloque l'éditeur pendant la réponse.
 -- Rien ici ne suppose une IA en particulier : tout passe par nc-ia, donc par l'IA choisie.
 -- Neovim 0.11.2 au moins (le minimum de LazyVim ; Debian 13 a la 0.10.4, install.sh propose la version officielle) : vim.system, vim.fs.root, titres et pieds des fenêtres flottantes.
@@ -9,6 +14,32 @@ local nc_ia = os.getenv("HOME") .. "/.local/bin/nc-ia"
 local HISTORIQUE = vim.fn.stdpath("state") .. "/nc-ia-demandes.json"
 local MAX_HISTORIQUE = 20
 local compteur = 0
+
+-- IA coupée ? IA_MODE=non dans reglages.conf, relu à chaque appel (un petit fichier : bon marché, pas de sondage)
+function M.coupee()
+  local f = io.open((os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/nc/reglages.conf")
+  if not f then
+    return false
+  end
+  local mode
+  for ligne in f:lines() do
+    local v = ligne:match("^%s*IA_MODE%s*=%s*(.-)%s*$")
+    if v then
+      mode = v:gsub('^"(.*)"$', "%1")
+    end
+  end
+  f:close()
+  return mode == "non"
+end
+
+-- À mettre en tête d'une action d'IA : vrai (et le dit) si l'IA est coupée, l'action s'arrête là
+function M.refuse()
+  if M.coupee() then
+    vim.notify("IA désactivée (nc-reglages → Intelligence artificielle)", vim.log.levels.WARN, { title = "IA" })
+    return true
+  end
+  return false
+end
 
 -- Les lignes de la dernière sélection (après Échap, les marques '< et '> sont posées)
 local function lignes_choisies()
@@ -277,6 +308,9 @@ M.montrer = montrer
 
 -- Une question ; en visuel, les lignes choisies l'accompagnent
 function M.demander(visuel)
+  if M.refuse() then
+    return
+  end
   local contexte = ""
   if visuel then
     local _, _, l = lignes_choisies()
@@ -295,6 +329,9 @@ function M.demander(visuel)
 end
 
 function M.expliquer()
+  if M.refuse() then
+    return
+  end
   local _, _, l = lignes_choisies()
   if l then
     lancer({ "texte", "expliquer", "--stdin" }, table.concat(l, "\n"), montrer)
@@ -331,6 +368,9 @@ local function remplacer(action, debut, fin, l)
 end
 
 function M.transformer()
+  if M.refuse() then
+    return
+  end
   local debut, fin, l = lignes_choisies()
   if not l then
     return
@@ -341,6 +381,9 @@ function M.transformer()
 end
 
 function M.corriger()
+  if M.refuse() then
+    return
+  end
   remplacer("corriger")
 end
 
@@ -395,6 +438,9 @@ local function faire(enonce, debut, fin)
 end
 
 function M.faire(visuel)
+  if M.refuse() then
+    return
+  end
   if visuel then
     local debut, fin, l = lignes_choisies()
     if l then
@@ -519,6 +565,9 @@ local function demande_et_dossier(visuel)
 end
 
 function M.agent(visuel)
+  if M.refuse() then
+    return
+  end
   local demande, dossier = demande_et_dossier(visuel)
   etat(function(e)
     local id = e.mode == "manuel" and e.choix or (e.usages and e.usages.question or {}).id
@@ -545,6 +594,9 @@ end
 
 -- Espace i A : choisir l'agent parmi les IA disponibles
 function M.choisir_agent(visuel)
+  if M.refuse() then
+    return
+  end
   local demande, dossier = demande_et_dossier(visuel)
   etat(function(e)
     local liste, vus = {}, {}
@@ -565,6 +617,249 @@ function M.choisir_agent(visuel)
         terminal(c, demande, dossier)
       end
     end)
+  end)
+end
+
+-- ── Le panneau d'agents (sidekick.nvim) ────────────────────────────────────────────────────────────────────────
+-- L'IA de nc-ia traduite en outil sidekick (les noms de sidekick.cli.tools ; omp, kiro-cli… sont déclarés dans
+-- lua/plugins/ia.lua). Sans sidekick (pas encore installé), Espace i a retombe sur le terminal en bas.
+local OUTIL_SIDEKICK = { ["cursor-agent"] = "cursor" }
+
+local function sidekick()
+  local ok, cli = pcall(require, "sidekick.cli")
+  return ok and cli or nil
+end
+
+local function sans_sidekick()
+  vim.notify("Le panneau d'agents (sidekick.nvim) n'est pas installé : :Lazy sync.", vim.log.levels.WARN, { title = "IA" })
+end
+
+-- Espace i a : ouvre ou masque le panneau avec l'agent de l'IA choisie
+function M.agent_panneau(visuel)
+  if M.refuse() then
+    return
+  end
+  local sk = sidekick()
+  if not sk then
+    return M.agent(visuel)
+  end
+  etat(function(e)
+    local id = e.mode == "manuel" and e.choix or (e.usages and e.usages.question or {}).id
+    local ia
+    for _, x in ipairs(e.ias or {}) do
+      ia = ia or (x.id == id and x or nil)
+    end
+    local cli = ia and cli_de(ia)
+    if not ia then
+      return vim.notify("Aucune IA disponible (nc-reglages → Intelligence artificielle).", vim.log.levels.WARN,
+        { title = "IA" })
+    elseif not cli then
+      return vim.notify("« " .. (ia.nom or id) .. " » n'a pas d'agent en terminal. Espace i A pour en choisir un autre.",
+        vim.log.levels.WARN, { title = "IA" })
+    elseif not cli_utilisable(ia, cli) then
+      return vim.notify("« " .. (ia.nom or id) .. " » : le programme « " .. cli.argv[1] .. " » est introuvable."
+        .. " Espace i A pour en choisir un autre.", vim.log.levels.WARN, { title = "IA" })
+    end
+    sk.toggle({ name = OUTIL_SIDEKICK[cli.prog] or cli.prog, focus = true })
+  end)
+end
+
+-- Espace i A : choisir l'agent (parmi ceux qui sont installés)
+function M.choisir_panneau()
+  if M.refuse() then
+    return
+  end
+  local sk = sidekick()
+  if not sk then
+    return M.choisir_agent(false)
+  end
+  sk.select({ filter = { installed = true } })
+end
+
+-- Espace i s (code sous le curseur, ou sélection en visuel), Espace i F (le fichier) : envoyés à l'agent du panneau
+function M.envoyer(msg)
+  if M.refuse() then
+    return
+  end
+  local sk = sidekick()
+  if not sk then
+    return sans_sidekick()
+  end
+  sk.send({ msg = msg })
+end
+
+function M.prompt()
+  if M.refuse() then
+    return
+  end
+  local sk = sidekick()
+  if not sk then
+    return sans_sidekick()
+  end
+  sk.prompt()
+end
+
+-- Ctrl + . : aller au panneau
+function M.focus_panneau()
+  if M.refuse() then
+    return
+  end
+  local sk = sidekick()
+  if sk then
+    sk.focus()
+  end
+end
+
+-- ── Le message de commit (nc-ia commit) ────────────────────────────────────────────────────────────────────────
+-- Racine du dépôt d'un message de commit : COMMIT_EDITMSG est dans .git/ (ou .git/worktrees/NOM/ pour un arbre de
+-- travail lié, dont le fichier gitdir renvoie vers le .git de cet arbre)
+local function racine_depot(buf)
+  local nom = vim.api.nvim_buf_get_name(buf)
+  local lie = nom:match("^(.*/%.git/worktrees/[^/]+)/")
+  if lie then
+    local f = io.open(lie .. "/gitdir")
+    if f then
+      local g = (f:read("*l") or ""):gsub("%s+$", "")
+      f:close()
+      if g ~= "" then
+        return vim.fs.dirname(g)
+      end
+    end
+  end
+  return vim.fs.root(nom ~= "" and nom or vim.fn.getcwd(), ".git") or vim.fn.getcwd()
+end
+
+-- Une ligne de vrai texte (ni vide, ni commentaire « # ») : un message est déjà écrit
+local function message_ecrit(buf)
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+    if l:match("%S") and not l:match("^#") then
+      return true
+    end
+  end
+  return false
+end
+
+function M.commit()
+  if M.refuse() then
+    return
+  end
+  local buf = vim.api.nvim_get_current_buf()
+  if vim.bo[buf].filetype ~= "gitcommit" then
+    return vim.notify("Espace i m écrit le message d'un commit : à lancer dans le message (git commit).",
+      vim.log.levels.INFO, { title = "IA" })
+  end
+  if message_ecrit(buf) then
+    return vim.notify("Un message est déjà écrit : rien n'est changé.", vim.log.levels.INFO, { title = "IA" })
+  end
+  if vim.fn.executable(nc_ia) ~= 1 then
+    return vim.notify("nc-ia est introuvable (~/.local/bin/nc-ia).", vim.log.levels.ERROR)
+  end
+  vim.notify("L'IA écrit le message…", vim.log.levels.INFO, { title = "IA" })
+  vim.system({ nc_ia, "commit" }, { cwd = racine_depot(buf), text = true }, function(r)
+    vim.schedule(function()
+      local sortie = (r.stdout or ""):gsub("%s+$", "")
+      local erreur = (r.stderr or ""):gsub("%s+$", "")
+      if r.code == 2 then
+        return vim.notify("Rien n'est indexé : git add d'abord.", vim.log.levels.WARN, { title = "IA" })
+      elseif r.code == 3 then
+        return vim.notify("IA désactivée (nc-reglages → Intelligence artificielle)", vim.log.levels.WARN, { title = "IA" })
+      elseif r.code == 4 then
+        return vim.notify("Un secret a été repéré dans les changements : rien n'est envoyé à l'IA."
+          .. (erreur ~= "" and "\n" .. erreur or ""), vim.log.levels.WARN, { title = "IA" })
+      elseif r.code ~= 0 or sortie == "" then
+        return vim.notify(erreur ~= "" and erreur or "L'IA n'a rien répondu.", vim.log.levels.WARN, { title = "IA" })
+      end
+      if not vim.api.nvim_buf_is_valid(buf) then
+        return
+      end
+      if message_ecrit(buf) then -- écrit pendant l'attente : on n'écrase rien
+        return vim.notify("Un message a été écrit entre-temps : celui de l'IA n'est pas inséré.", vim.log.levels.INFO,
+          { title = "IA" })
+      end
+      sortie = sans_clotures(sortie, false)
+      local lignes = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local n = 0 -- les lignes vides du début sont remplacées par le message ; les commentaires restent dessous
+      while n < #lignes and not lignes[n + 1]:match("%S") do
+        n = n + 1
+      end
+      local neuf = vim.split(sortie, "\n")
+      if n < #lignes then
+        table.insert(neuf, "")
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, n, false, neuf)
+      vim.notify("Message écrit : relis-le, puis enregistre.", vim.log.levels.INFO, { title = "IA" })
+    end)
+  end)
+end
+
+-- ── Un diagnostic expliqué et corrigé (Espace i d) ─────────────────────────────────────────────────────────────
+local SEVERITE = { "erreur", "avertissement", "information", "astuce" }
+
+-- Le dernier bloc de code d'une réponse (la correction), sans ses clôtures
+local function dernier_bloc(t)
+  local dernier, courant, dans = nil, nil, false
+  for _, l in ipairs(vim.split(t, "\n")) do
+    if l:match("^%s*```") then
+      if dans then
+        dernier = courant
+      end
+      dans, courant = not dans, {}
+    elseif dans then
+      table.insert(courant, l)
+    end
+  end
+  return dernier and table.concat(dernier, "\n") or nil
+end
+
+function M.diagnostic()
+  if M.refuse() then
+    return
+  end
+  local buf, origine = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win()
+  local c = vim.api.nvim_win_get_cursor(origine)
+  local diags = vim.diagnostic.get(buf, { lnum = c[1] - 1 })
+  if #diags == 0 then
+    return vim.notify("Aucun diagnostic sur cette ligne.", vim.log.levels.INFO, { title = "IA" })
+  end
+  table.sort(diags, function(a, b) return a.severity < b.severity end)
+  local d = diags[1]
+  local ft = type_fichier(buf)
+  local n = vim.api.nvim_buf_line_count(buf)
+  local a, b = math.max(1, c[1] - 15), math.min(n, c[1] + 15)
+  local tick = vim.b[buf].changedtick
+  local contexte = table.concat(vim.api.nvim_buf_get_lines(buf, a - 1, b, false), "\n")
+  local nom = vim.fn.expand("%:t")
+  local qui = (d.source and d.source .. " : " or "") .. (d.code and "[" .. tostring(d.code) .. "] " or "")
+  local entree = "Diagnostic (" .. (SEVERITE[d.severity] or "erreur") .. ") à la ligne " .. (d.lnum + 1) .. " : " .. qui
+    .. d.message .. "\n\nFichier « " .. (nom ~= "" and nom or "sans nom") .. " » (" .. ft .. "), lignes " .. a .. " à " .. b
+    .. " :\n" .. contexte
+  local consigne = "Explique cette erreur en quelques phrases simples, puis donne la correction : les lignes " .. a
+    .. " à " .. b .. " corrigées, recopiées en entier dans un seul bloc de code " .. ft .. "."
+  lancer({ "texte", consigne, "--stdin" }, entree, function(sortie)
+    if balisage_outil(sortie) then
+      return vim.notify("L'IA a répondu par un appel d'outil : rien n'est proposé.", vim.log.levels.WARN, { title = "IA" })
+    end
+    montrer(sortie, {
+      origine = origine, titre = "Diagnostic expliqué",
+      aide = "a appliquer la correction (lignes " .. a .. " à " .. b .. ") · y copier · r refuser",
+      touches = {
+        a = function(_, ferme)
+          local code = dernier_bloc(sortie)
+          if not code then
+            return vim.notify("Pas de code corrigé dans la réponse : rien à appliquer.", vim.log.levels.INFO,
+              { title = "IA" })
+          end
+          if not vim.api.nvim_buf_is_valid(buf) or vim.b[buf].changedtick ~= tick then
+            return vim.notify("Le fichier a changé depuis la demande : rien n'est appliqué.", vim.log.levels.WARN,
+              { title = "IA" })
+          end
+          ferme()
+          vim.api.nvim_buf_set_lines(buf, a - 1, b, false, vim.split(code, "\n"))
+        end,
+        r = function(_, ferme) ferme() end,
+        y = function(t) copier(dernier_bloc(t) or t) end,
+      },
+    })
   end)
 end
 
