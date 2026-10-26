@@ -181,7 +181,10 @@ l'île Quickshell.
   et propose au plus 3 actions, chacune confirmée avant d'être faite.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
-  montre « Partage ».
+  montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
+  effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
+  l'écriture de la liste, sans minuteur.
 
 ## Automatismes
 

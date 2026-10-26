@@ -18,7 +18,7 @@ Item {
             }
         }
     }
-    Timer { interval: 2000; repeat: true; running: j.visible; triggeredOnStart: true; onTriggered: if (!mesure.running) mesure.running = true }
+    Timer { interval: 2000; repeat: true; running: j.visible && Etat.ecranVu; triggeredOnStart: true; onTriggered: if (!mesure.running) mesure.running = true }
 
     Row {
         id: tete

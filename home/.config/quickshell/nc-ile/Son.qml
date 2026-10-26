@@ -156,12 +156,14 @@ Item {
                 Item {
                     id: mic
                     width: parent.width; height: 92
-                    readonly property bool coupe: son.micro && son.micro.audio ? son.micro.audio.muted : true
-                    Ico { x: 14; y: 13; nom: mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.coupe ? Couleurs.rouge : Couleurs.texteDoux }
+                    // Nœud audio pas encore lié : état neutre (ni « Coupé » en rouge, ni « Actif »)
+                    readonly property bool lie: !!(son.micro && son.micro.audio)
+                    readonly property bool coupe: lie ? son.micro.audio.muted : true
+                    Ico { x: 14; y: 13; nom: mic.lie && mic.coupe ? "mic_off" : "mic"; taille: 20; color: mic.lie && mic.coupe ? Couleurs.rouge : Couleurs.texteDoux }
                     Column {
                         x: 46; y: 9; width: parent.width - 46 - 70
                         Texte { text: son.micro ? son.nomAppareil(son.micro, true) : ""; font.pixelSize: 14; width: parent.width }
-                        Texte { text: mic.coupe ? Reglages.t("Coupé", "Muted") : Reglages.t("Actif", "On"); secondaire: true; font.pixelSize: 12 }
+                        Texte { text: !mic.lie ? "…" : (mic.coupe ? Reglages.t("Coupé", "Muted") : Reglages.t("Actif", "On")); secondaire: true; font.pixelSize: 12 }
                     }
                     Inter {
                         anchors.right: parent.right; anchors.rightMargin: 14; y: 11

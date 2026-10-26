@@ -54,14 +54,27 @@ class Capture(unittest.TestCase):
         self.assertEqual(Path(chemin).stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.capturer("application/x-autre"), "", "type inconnu ignoré")
 
+    def test_retour_chariot_un_seul_separateur(self):
+        self.assertEqual(self.capturer("text/plain", "a\r\nb\r\nc"), "T:a\x1fb\x1fc\n")
+
+    def test_meme_image_meme_identifiant(self):
+        """Recopier une image la fait recapturer : même contenu, même identifiant, même fichier (une seule entrée)."""
+        a, b = self.capturer("image/png"), self.capturer("image/png")
+        self.assertEqual(a, b)
+        self.assertRegex(a, r"^I:\d+:h[0-9a-f]{32}:")
+        (self.home / "image.png").write_bytes(PNG + b"\x01")
+        self.assertNotEqual(self.capturer("image/png").split(":")[2], a.split(":")[2], "autre contenu, autre identifiant")
+        self.assertEqual(len(list((self.home / "state/nc/ile/images").glob("*.png"))), 2)
+
     def test_coupe_en_caracteres_jamais_au_milieu_d_un_accent(self):
         # 3999 « a » puis des « é » (2 octets) : la limite de 4 000 octets tomberait au milieu d'un « é »
         texte = "a" * 3999 + "é" * 50
         sortie = self.capturer("text/plain", texte)
         sortie.encode("utf-8")                                   # UTF-8 valide (le test échoue sinon)
-        self.assertEqual(sortie, "T:" + "a" * 3999 + "é" + "\n")  # 4 000 caractères exactement
+        self.assertEqual(sortie, "T:" + "a" * 3999 + "é…\n")  # 4 000 caractères, puis « … » : coupé, et le dit
         sortie = self.capturer("text/plain", "é" * 5000)
-        self.assertEqual(sortie, "T:" + "é" * 4000 + "\n")
+        self.assertEqual(sortie, "T:" + "é" * 4000 + "…\n")
+        self.assertEqual(self.capturer("text/plain", "é" * 4000), "T:" + "é" * 4000 + "\n", "pile 4 000 : pas coupé, pas de « … »")
 
     def test_coupe_en_caracteres_sous_dash(self):
         dash = shutil.which("dash")
@@ -71,12 +84,12 @@ class Capture(unittest.TestCase):
                    NC_TEST_TYPES="text/plain", NC_TEST_TEXTE="a" * 3999 + "éé", NC_TEST_PNG=str(self.home / "image.png"),
                    PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin")
         r = subprocess.run([dash, str(BIN / "nc-presse-capture")], env=env, capture_output=True, timeout=10)
-        self.assertEqual(r.stdout.decode("utf-8"), "T:" + "a" * 3999 + "é\n")
+        self.assertEqual(r.stdout.decode("utf-8"), "T:" + "a" * 3999 + "é…\n")
 
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Page(unittest.TestCase):
-    def executer(self, scenario, memo=None, lignes=(), fichiers=()):
+    def executer(self, scenario, memo=None, lignes=(), fichiers=(), wl_paste=None):
         with tempfile.TemporaryDirectory(prefix="nc-presse-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -88,6 +101,8 @@ class Page(unittest.TestCase):
             (root / "image.png").write_bytes(PNG)
             (bin / "wl-copy").write_text('#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nwith Path(os.environ["HOME"],"copies").open("a") as f:f.write(json.dumps(dict(argv=sys.argv[1:],stdin=sys.stdin.read() if not sys.stdin.isatty() and "--" not in sys.argv else ""))+"\\n")\n')
             (bin / "hyprctl").write_text("#!/bin/sh\necho \"$*\" >> \"$HOME/hyprctl\"\n")
+            if wl_paste is not None:
+                (bin / "wl-paste").write_text(wl_paste)
             for n in ("wl-paste", "wl-copy", "hyprctl"):
                 (bin / n).chmod(0o755)
             images = root / ".local/state/nc/ile/images"
@@ -100,17 +115,21 @@ class Page(unittest.TestCase):
             (root / "lignes").write_text("".join(l.replace("@IMAGES@", str(images)) + "\n" for l in lignes))
             if memo is not None:
                 for e in memo.get("entrees", []):
+                    # Dates de test petites (1000, 2000…) : ramenées à « il y a quelques secondes » pour ne pas expirer
+                    if isinstance(e, dict) and 0 < e.get("t", 0) < 10 ** 6:
+                        e["t"] += int(__import__("time").time() * 1000) - 10 ** 6
                     if isinstance(e, dict) and e.get("genre") == "image" and e.get("id"):
                         e["chemin"] = str(images / (e["id"] + ".png"))
                         Path(e["chemin"]).write_bytes(PNG)
                 (images.parent / "presse.json").write_text(json.dumps(memo))
             for nom in ("Presse.qml", "PressePapiers.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
                 shutil.copy2(QML / nom, root / nom)
-            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; function t(fr,en){return en} function val(k,d){return d}}')
+            (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k] !== undefined ? valeurs[k] : d}}')
+            (root / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool silence: false}')
             (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var hauteurs: ({}); property int fermetures: 0; function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("PressePapiers", "Memo", "Couleurs", "Reglages", "Etat", "Connexion") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Presse", "PressePapiers", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat")))
+                ("singleton " if n in ("PressePapiers", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("Presse", "PressePapiers", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window
@@ -122,6 +141,7 @@ class Page(unittest.TestCase):
                     property bool dansEtape: false
                     property var page: null
                     property var memo: ({})
+                    property real t0: 0
                     TestCase { id: clavier; name: "PresseClavier"; when: false }
                     function verifier(ok, message) { if (!ok) { console.error(message); Qt.exit(2); throw new Error(message) } }
                     function trouver(item, nom) { if (item.objectName === nom) return item; for (var i = 0; i < item.children.length; i++) { var r = trouver(item.children[i], nom); if (r) return r } return null }
@@ -151,7 +171,8 @@ class Page(unittest.TestCase):
             return dict(memo=json.loads(f.read_text()) if f.exists() else None,
                         copies=[json.loads(l) for l in copies.read_text().splitlines()] if copies.exists() else [],
                         hyprctl=(root / "hyprctl").read_text().splitlines() if (root / "hyprctl").exists() else [],
-                        images=sorted(p.name for p in images.iterdir()))
+                        images=sorted(p.name for p in images.iterdir()),
+                        lancements=len((root / "lancements").read_text().splitlines()) if (root / "lancements").exists() else 0)
 
     def test_capture_bornee_et_gardee(self):
         lignes = ["T:texte " + str(i) for i in range(53)] + ["I:1208:img%02d:@IMAGES@/img%02d.png" % (i, i) for i in range(14)] + ["T:texte 52", "T:  ", "I:mal formée"]
@@ -207,6 +228,110 @@ if (etape === 1) {
         self.assertEqual(r["copies"][0]["argv"], ["-t", "text/plain", "--", "épinglé ancien"], "Entrée recopie le choix en texte brut")
         self.assertEqual(r["copies"][-1]["argv"], ["-t", "text/plain", "--", "bonjour le monde"])
         self.assertEqual(r["images"], [], "image supprimée avec son fichier, orpheline purgée au démarrage")
+
+    def test_meme_image_une_seule_entree(self):
+        lignes = ["I:1208:h%s:@IMAGES@/h%s.png" % ("a" * 32, "a" * 32)] * 3
+        r = self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+if (etape === 1 && PressePapiers.liste.length < 1) return
+if (etape === 1) { test.t0 = Date.now(); etape++; return }
+if (etape === 2 && Date.now() - test.t0 < 1200) return
+verifier(PressePapiers.liste.length === 1, "trois copies de la même image : une entrée, pas " + PressePapiers.liste.length)
+Qt.quit()
+''', lignes=lignes, fichiers=["h" + "a" * 32])
+        self.assertEqual(r["images"], ["h" + "a" * 32 + ".png"], "le fichier de l'image reste")
+
+    def test_clavier_slash_et_suppr_vont_au_champ(self):
+        memo = {"entrees": [{"id": "t1", "genre": "texte", "texte": "un", "t": 1000, "epingle": False},
+                            {"id": "t2", "genre": "texte", "texte": "deux", "t": 2000, "epingle": False}]}
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+var champ = trouver(page, "nc-presse-recherche")
+champ.forceActiveFocus()
+verifier(champ.activeFocus, "champ au premier plan")
+page.choix = 0
+clavier.keyClick("h"); clavier.keyClick("t"); clavier.keyClick("/"); clavier.keyClick("/")
+verifier(champ.text === "t//" || champ.text === "ht//", "« / » tapé dans le champ : " + champ.text)
+champ.cursorPosition = 0
+page.choix = 0
+clavier.keyClick(Qt.Key_Delete)
+verifier(PressePapiers.liste.length === 2, "Suppr dans le champ n'efface pas de carte")
+verifier(champ.text.length === 3, "Suppr dans le champ efface un caractère : " + champ.text)
+Qt.quit()
+''', memo=memo)
+
+    def test_url_de_fichier_encodee(self):
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+verifier(page.urlFichier("/home/user/a b#c%d?.png") === "file:///home/user/a%20b%23c%25d%3F.png", page.urlFichier("/home/user/a b#c%d?.png"))
+Qt.quit()
+''')
+
+    def test_partage_cache_les_apercus(self):
+        memo = {"entrees": [{"id": "t1", "genre": "texte", "texte": "secret-du-presse-papiers", "t": 1000, "epingle": False}]}
+        self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+function tous(item, acc) { acc.push(item); for (var i = 0; i < item.children.length; i++) tous(item.children[i], acc); return acc }
+function textes() { return tous(page, []).filter(i => typeof i.text === "string" && i.text.indexOf("secret-du") >= 0).length }
+if (etape === 1) {
+    verifier(textes() === 1, "texte visible hors partage : " + textes())
+    Partage.silence = true
+    etape++
+    return
+}
+verifier(page.masque && textes() === 0, "texte caché pendant le partage : " + textes())
+Partage.silence = false
+verifier(textes() === 1, "texte revenu après le partage")
+Qt.quit()
+''', memo=memo)
+
+    def test_expiration_des_non_epingles(self):
+        import time
+        maintenant = int(time.time() * 1000)
+        jour = 86400000
+        memo = {"entrees": [
+            {"id": "vieux", "genre": "texte", "texte": "vieux", "t": maintenant - 10 * jour, "epingle": False},
+            {"id": "vieuxepingle", "genre": "texte", "texte": "vieux épinglé", "t": maintenant - 10 * jour, "epingle": True},
+            {"id": "recent", "genre": "texte", "texte": "récent", "t": maintenant - jour // 2, "epingle": False},
+            {"id": "vieilleimage", "genre": "image", "chemin": "", "octets": 1208, "t": maintenant - 40 * jour, "epingle": False},
+        ]}
+        r = self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+verifier(PressePapiers.liste.map(e => e.id).join() === "vieuxepingle,recent", "7 jours : " + PressePapiers.liste.map(e => e.id).join())
+Qt.quit()
+''', memo=memo)
+        self.assertEqual([e["id"] for e in r["memo"]["entrees"]], ["recent", "vieuxepingle"] if r["memo"]["entrees"][0]["id"] == "recent" else ["vieuxepingle", "recent"])
+        self.assertEqual(r["images"], [], "le fichier de l'image expirée est supprimé")
+        # « jamais » : rien n'expire ; 1 jour : le récent (12 h) reste ; 30 jours : l'image de 40 jours part, le texte de 10 jours reste
+        r = self.executer('''
+if (etape === 0) { Reglages.valeurs = { PRESSE_DUREE: "jamais" }; creer(); etape++; return }
+if (!PressePapiers.prete) return
+verifier(PressePapiers.liste.length === 4, "jamais : tout reste : " + PressePapiers.liste.length)
+Qt.quit()
+''', memo=memo)
+        self.assertEqual(len(r["memo"]["entrees"]), 4)
+        self.executer('''
+if (etape === 0) { Reglages.valeurs = { PRESSE_DUREE: "30" }; creer(); etape++; return }
+if (!PressePapiers.prete) return
+verifier(PressePapiers.liste.map(e => e.id).join() === "vieuxepingle,recent,vieux", "30 jours : " + PressePapiers.liste.map(e => e.id).join())
+Qt.quit()
+''', memo=memo)
+
+    def test_capture_relancee_si_wl_paste_meurt(self):
+        faux = "#!/bin/sh\necho x >> \"$HOME/lancements\"\nexit 1\n"
+        r = self.executer('''
+if (etape === 0) { creer(); etape++; return }
+if (!PressePapiers.prete) return
+if (test.t0 === 0) { test.t0 = Date.now(); return }
+if (Date.now() - test.t0 < 6500) return
+Qt.quit()
+''', wl_paste=faux)
+        self.assertGreaterEqual(r["lancements"], 3, "relancée après 2 s")
+        self.assertLessEqual(r["lancements"], 6, "essais bornés")
 
     def test_image_disparue_ignoree(self):
         r = self.executer('''

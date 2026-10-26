@@ -25,7 +25,7 @@ PanelWindow {
                                        || moniteur.activeWorkspace.toplevels.values.length === 0
     readonly property bool economie: PowerProfiles.profile === PowerProfile.PowerSaver
     readonly property bool batterieOk: !UPower.onBattery || Reglages.val("FOND_ANIME_BATTERIE", "non") === "oui"
-    readonly property bool anime: bureauVide && batterieOk && !economie && !Etat.jeu
+    readonly property bool anime: Etat.ecranVu && bureauVide && batterieOk && !economie && !Etat.jeu
 
     property real t: 0
     Timer { interval: 66; repeat: true; running: f.anime; onTriggered: f.t += 0.066 }
