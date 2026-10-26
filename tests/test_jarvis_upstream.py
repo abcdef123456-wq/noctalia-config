@@ -290,7 +290,10 @@ class ModePermissionAgyUpstream(unittest.TestCase):
         self.assertNotIn('--dangerously-skip-permissions',self.tour(option=False))
 
     def test_avec_l_accord_ecrit_l_auto_approbation_revient(self):
-        if '"--dangerously-skip-permissions"' not in (UPSTREAM/'home-runner/agy_bridge.py').read_text(): self.skipTest('Ce runner ne passe pas le drapeau.')
+        pont=(UPSTREAM/'home-runner/agy_bridge.py').read_text()
+        # 17525af : le drapeau dès que le mode n'est pas request-review ; 4ecc57a : seulement en always-proceed, que nc_engines
+        # ne laisse jamais passer (le drapeau ne part donc jamais) ; 94a3a93 et ffb19b9 : jamais
+        if '"--dangerously-skip-permissions"' not in pont or '!= "request-review"' not in pont: self.skipTest('Ce runner ne passe pas le drapeau en mode default.')
         self.assertIn('--dangerously-skip-permissions',self.tour(option=False,accord='oui'))
 
 
