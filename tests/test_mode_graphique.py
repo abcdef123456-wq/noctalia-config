@@ -153,6 +153,25 @@ if(etape===2){ModeGraphique.demande=true;ModeGraphique.confirmer();verifier(!Mod
 ''')
         self.assertEqual(bascules, [], "rien n'est lancé")
 
+    def test_avertissement_sans_pilote_nvidia(self):
+        self.executer(dict(LEGION, pilote_nvidia=False), '''
+if(etape===0){ModeGraphique.demander("");etape++;return}
+if(etape===1){if(!ModeGraphique.demande)return
+ var av=trouver(carte,"nc-gpu-avertissement")
+ verifier(av!==null&&av.visible&&av.text.indexOf("aucun pilote NVIDIA")>=0,"avertissement absent");
+ souris.mouseClick(trouver(carte,"nc-gpu-annuler"));etape++;return}
+if(etape===2){ModeGraphique.demander("hybride");attente=0;etape++;return}
+if(etape===3){attente++;if(attente<6)return;verifier(!ModeGraphique.demande,"déjà en Hybride");Qt.quit()}
+''')
+
+    def test_pas_d_avertissement_avec_pilote(self):
+        self.executer(dict(LEGION, pilote_nvidia=True), '''
+if(etape===0){ModeGraphique.demander("");etape++;return}
+if(etape===1){if(!ModeGraphique.demande)return
+ verifier(!trouver(carte,"nc-gpu-avertissement").visible,"avertissement inutile");
+ verifier(ModeGraphique.avertissement==="","texte vide");Qt.quit()}
+''')
+
     def test_sans_objet_pas_de_carte(self):
         bascules = self.executer(SANS_OBJET, '''
 if(etape===0){ModeGraphique.demander("");etape++;return}
@@ -240,6 +259,13 @@ class Reglages(unittest.TestCase):
         self.assertEqual((cible, bouton), ("hybride", "Redémarrer"))
         self.assertIn("puis redémarre", texte)
         self.assertEqual(mod.question_gpu(dict(LEGION, bios_direct=False))[3], "", "rien à confirmer")
+
+    def test_question_avertit_sans_pilote_nvidia(self):
+        mod = self.charger(LEGION)
+        sans = mod.question_gpu(dict(LEGION, pilote_nvidia=False))[2]
+        self.assertIn("aucun pilote NVIDIA", sans)
+        self.assertNotIn("aucun pilote", mod.question_gpu(dict(LEGION, pilote_nvidia=True))[2])
+        self.assertNotIn("aucun pilote", mod.question_gpu(LEGION)[2], "ancien json sans le champ : pas d'avertissement")
 
     def ecran(self, mod, choix):
         """L'écran du terminal sans curses : la question répond `choix` (0 : Redémarrer, 1 : Annuler)."""
