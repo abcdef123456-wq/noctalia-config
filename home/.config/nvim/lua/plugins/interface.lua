@@ -1,19 +1,9 @@
--- Apparence : le thème suit le bureau. nc-theme-sync note dans ~/.config/nc/palette-ile.json si les couleurs du
--- fond d'écran sont sombres ou claires ; Neovim ouvre alors tokyonight-moon (sombre) ou tokyonight-day (clair).
--- Sans ce fichier (autre bureau, serveur) : sombre. Fenêtres flottantes aux coins arrondis, comme l'île ;
+-- Apparence : le thème suit le bureau. nc-theme-sync écrit les couleurs du fond d'écran dans
+-- ~/.config/nc/palette-ile.json ; Neovim prend tokyonight (moon si sombre, day si clair) repeint avec ces couleurs,
+-- comme kitty, et se met à jour tout seul quand le fond change (lua/config/noctalia.lua).
+-- Sans ce fichier (autre bureau, serveur) : tokyonight-moon normal. Fenêtres flottantes aux coins arrondis, comme l'île ;
 -- tableau de bord Snacks au démarrage (fichiers récents, projets, état Git).
-local function bureau_sombre()
-  local chemin = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/nc/palette-ile.json"
-  local f = io.open(chemin)
-  if not f then
-    return true
-  end
-  local texte = f:read("*a") or ""
-  f:close()
-  return texte:match('"sombre"%s*:%s*false') == nil
-end
-
--- Thème choisi dans nc-reglages → Terminal → Thème de Neovim (NVIM_THEME) ; « auto » : d'après le bureau
+-- Thème choisi dans nc-reglages → Terminal → Thème de Neovim (NVIM_THEME) ; « auto » ou « noctalia » : les couleurs du fond
 local function theme_choisi()
   local chemin = (os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") .. "/.config")) .. "/nc/reglages.conf"
   local f = io.open(chemin)
@@ -31,8 +21,8 @@ return {
     opts = {
       colorscheme = function()
         local choix = theme_choisi()
-        if choix == "auto" or not pcall(vim.cmd.colorscheme, choix) then
-          vim.cmd.colorscheme(bureau_sombre() and "tokyonight-moon" or "tokyonight-day")
+        if choix == "auto" or choix == "noctalia" or not pcall(vim.cmd.colorscheme, choix) then
+          require("config.noctalia").activer()
         end
       end,
     },
@@ -43,6 +33,9 @@ return {
     opts = function(_, opts)
       local transparent = require("config.nc").reglage("NVIM_TRANSPARENT", "non") == "oui"
       opts.transparent = transparent
+      opts.on_colors = function(c)
+        require("config.noctalia").on_colors(c)
+      end
       opts.styles = { floats = transparent and "transparent" or "normal", sidebars = transparent and "transparent" or "normal" }
       return opts
     end,

@@ -14,7 +14,8 @@ Une [LazyVim](https://lazyvim.github.io) avec ses extras, et des choix maison po
   `perso.lua`, le dépôt, la fenêtre des réglages (`nc-reglages fenetre` ; sans bureau graphique, `nc-reglages` dans
   un terminal flottant), le journal de l'île dans un terminal flottant, `nc-theme-sync`. Les fichiers
   du bureau ne sont jamais reformatés à l'enregistrement (ils gardent leur style).
-- `lua/plugins/interface.lua` : thème sombre ou clair d'après les couleurs du fond d'écran, tableau de bord Snacks,
+- `lua/plugins/interface.lua` : thème « noctalia » (tokyonight repeint aux couleurs du fond d'écran, comme kitty, mis à jour à chaud
+  quand le fond change ; `lua/config/noctalia.lua`), tableau de bord Snacks,
   fenêtres flottantes arrondies comme l'île.
 - `lua/config/options.lua`, `keymaps.lua`, `autocmds.lua` : ce qui change par rapport à LazyVim, commenté (Ctrl + S,
   Alt + flèches, coller sans écraser le presse-papiers, fichiers rechargés quand ils changent ailleurs…).

@@ -1033,9 +1033,12 @@ REGLAGES = [
     R("TERMINAL_ACCUEIL", "Terminal", L("Accueil à l'ouverture", "Welcome screen on opening"), "ouinon", "oui",
       L("Logo et infos du PC à chaque nouveau terminal.", "Logo and PC info in every new terminal.")),
     R("NVIM_THEME", "Terminal", L("Thème de Neovim", "Neovim theme"), "choix", "auto",
-      L("Automatique : sombre ou clair selon les couleurs du fond d'écran. Pris en compte à la prochaine ouverture de nvim.",
-        "Automatic: dark or light following the wallpaper colors. Applied the next time nvim opens."),
-      [("auto", L("Automatique (suit le bureau)", "Automatic (follows the desktop)")), ("tokyonight-moon", "Tokyo Night Moon"),
+      L("Automatique ou Noctalia : les couleurs du fond d'écran, comme le terminal, mises à jour à chaud dans les nvim ouverts. "
+        "Les autres thèmes sont pris en compte à la prochaine ouverture de nvim.",
+        "Automatic or Noctalia: the wallpaper colors, like the terminal, updated live in open nvim instances. "
+        "Other themes apply the next time nvim opens."),
+      [("auto", L("Automatique (couleurs du fond)", "Automatic (wallpaper colors)")),
+       ("noctalia", L("Noctalia (couleurs du fond)", "Noctalia (wallpaper colors)")), ("tokyonight-moon", "Tokyo Night Moon"),
        ("tokyonight-night", "Tokyo Night"), ("tokyonight-day", "Tokyo Night Day"), ("catppuccin-mocha", "Catppuccin Mocha"),
        ("catppuccin-latte", "Catppuccin Latte"), ("habamax", "Habamax")]),
     R("NVIM_NUMEROS", "Terminal", L("Numéros de ligne de Neovim", "Neovim line numbers"), "choix", "relatifs",
