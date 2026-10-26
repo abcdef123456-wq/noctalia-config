@@ -569,17 +569,124 @@ class Dictee(unittest.TestCase):
             self.assertIn("nc-dictee cancel >/dev/null 2>&1 &)", ligne, cle + " : en fond, le verrou n'attend pas")
         self.assertIn('touch "$XDG_RUNTIME_DIR/nc-verrouille"', conf)
 
-    def test_limite_de_duree_arret_propre_puis_transcription(self):
-        self.faux_notify()
-        self.assertEqual(self.lancer("start", NC_DICTEE_LIMITE="1")[0], 0)
-        fin = time.monotonic() + 10
-        while "Dictée arrêtée au bout de 1 s" not in self.appels() and time.monotonic() < fin:
+    def attendre(self, motif, delai=15):
+        fin = time.monotonic() + delai
+        while motif not in self.appels() and time.monotonic() < fin:
             time.sleep(0.1)
-        self.assertIn("Dictée arrêtée au bout de 1 s", self.appels())
-        self.assertFalse(self.lancer("status")[1]["recording"], "l'enregistreur est arrêté")
-        self.assertTrue(json.loads((self.home / "run/nc-dictee.json").read_text()).get("limite"))
-        self.assertEqual(self.lancer("stop"), (0, {"ok": True, "text": "bonjour jarvis", "engine": "test-whisper"}),
-                         "ce qui a été enregistré est transcrit comme après un arrêt normal")
+        self.assertIn(motif, self.appels())
+
+    def limite_avec_faux_outils(self):
+        """Faux notify-send, wl-copy, wl-paste, wtype et hyprctl (jamais les vrais) pour la dictée arrêtée par la limite."""
+        self.faux_notify()
+        self.collage("text/plain\\n", "avant")
+        w = self.home / "bin/wtype"
+        w.write_text('#!/bin/sh\necho "wtype $* [$(cat)]" >> "$HOME/appels"\n'); w.chmod(0o755)
+
+    def test_limite_de_duree_arret_propre_puis_transcription_automatique(self):
+        self.limite_avec_faux_outils()
+        self.assertEqual(self.lancer("start", NC_DICTEE_LIMITE="1")[0], 0)
+        self.attendre("Dictée arrêtée au bout de 1 s : texte copié")
+        a = self.appels()
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a, "le texte est copié")
+        self.assertNotIn("wtype", a, "jamais tapé : la fenêtre a pu changer")
+        self.assertNotIn("send_shortcut", a)
+        self.assertTrue((self.home / "run/nc-dictee-copie").exists(), "marque : pas dans l'historique du presse-papiers")
+        self.assertEqual(len(Serveur.recus), 1)
+        self.assertFalse(self.lancer("status")[1]["recording"], "l'enregistreur est arrêté, l'île n'est plus en écoute")
+        self.assertFalse((self.home / "run/nc-dictee.json").exists())
+        self.assertFalse((self.home / "run/nc-dictee.wav").exists(), "l'audio est supprimé après la transcription")
+        # l'île, restée en « écoute », clique : message clair, pas une erreur obscure, et une seule fois
+        code, r = self.lancer("stop")
+        self.assertEqual((code, r["ok"]), (1, False))
+        self.assertIn("texte copié", r["error"])
+        self.assertIn("Aucun enregistrement", self.lancer("stop")[1]["error"])
+        self.assertEqual(len(Serveur.recus), 1)
+
+    def test_limite_secours_dit_via(self):
+        (self.home / ".config/nc/ia.conf").write_text(
+            f"GROQ_API_KEY=gsk_test0123456789\nURL_GROQ=http://127.0.0.1:{self.serveur.server_port}/groq\n")
+        (self.home / ".config/nc/ia.conf").chmod(0o600)
+        Serveur.code = 503
+        self.limite_avec_faux_outils()
+        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.attendre("texte copié — via Groq")
+        self.assertIn("[salut depuis groq]", self.appels())
+        self.assertNotIn("wtype", self.appels())
+
+    def test_limite_et_stop_en_meme_temps_une_seule_transcription(self):
+        self.limite_avec_faux_outils()
+        Serveur.entree, Serveur.reprendre = threading.Event(), threading.Event()
+        self.addCleanup(Serveur.reprendre.set)
+        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.assertTrue(Serveur.entree.wait(15), "le gardien a lancé la transcription")
+        code, r = self.lancer("stop")                      # pendant la transcription du gardien : rien à reprendre
+        self.assertEqual((code, r["ok"]), (1, False))
+        Serveur.reprendre.set()
+        self.attendre("texte copié")
+        self.assertEqual(len(Serveur.recus), 1, "une seule transcription")
+
+    def test_stop_avant_le_gardien_une_seule_transcription(self):
+        """Le « stop » prend l'enregistrement marqué « limite » : le gardien (ou lui) ne fait rien de plus."""
+        self.limite_avec_faux_outils()
+        self.lancer("start")                                   # sans limite courte : pas de gardien pressé
+        run = self.home / "run"
+        etat = json.loads((run / "nc-dictee.json").read_text())
+        self.assertEqual(self.lancer("stop")[0], 0)
+        self.assertEqual(len(Serveur.recus), 1)
+        # le gardien arrive après le stop : l'enregistreur n'existe plus, il s'en va sans rien dire ni copier
+        env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(run), NC_LANGUE="fr", PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin")
+        subprocess.run([str(SCRIPT), "garde", str(etat["pid"]), str(etat["demarre"])], env=dict(env, NC_DICTEE_LIMITE="0.2"), timeout=20)
+        self.assertEqual(len(Serveur.recus), 1)
+        self.assertNotIn("wl-copy", self.appels())
+
+    def test_limite_transcription_ratee_message_et_audio_garde(self):
+        self.limite_avec_faux_outils()
+        Serveur.code = 500
+        run = self.home / "run"
+        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.attendre("transcription impossible")
+        a = self.appels()
+        self.assertIn("Erreur HTTP 500", a)
+        self.assertIn("L'audio est gardé", a)
+        self.assertNotIn("wl-copy", a)
+        self.assertNotIn("wtype", a)
+        self.assertEqual((run / "nc-dictee.wav").stat().st_mode & 0o777, 0o600, "audio gardé, privé")
+        self.assertTrue(json.loads((run / "nc-dictee.json").read_text()).get("attente"))
+        self.assertFalse(self.lancer("status")[1]["recording"])
+        # nouvel essai : « stop » transcrit l'audio gardé
+        Serveur.code = 200
+        self.assertEqual(self.lancer("stop"), (0, {"ok": True, "text": "bonjour jarvis", "engine": "test-whisper"}))
+        self.assertFalse((run / "nc-dictee.wav").exists())
+
+    def test_start_avec_audio_en_attente_le_transcrit_d_abord(self):
+        self.limite_avec_faux_outils()
+        Serveur.code = 500
+        run = self.home / "run"
+        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.attendre("transcription impossible")
+        Serveur.code = 200
+        code, r = self.lancer("start")
+        self.assertEqual((code, r["ok"], r["recording"]), (0, True, True))
+        a = self.appels()
+        self.assertIn("Dictée précédente : texte copié", a)
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a)
+        self.assertNotIn("wtype", a)
+        self.assertTrue(self.lancer("status")[1]["recording"])
+
+    def test_start_avec_audio_en_attente_jamais_ecrase(self):
+        self.limite_avec_faux_outils()
+        Serveur.code = 500
+        run = self.home / "run"
+        self.lancer("start", NC_DICTEE_LIMITE="1")
+        self.attendre("transcription impossible")
+        avant = (run / "nc-dictee.wav").read_bytes()
+        code, r = self.lancer("start")                       # le serveur répond encore 500
+        self.assertEqual((code, r["ok"]), (1, False))
+        self.assertIn("gardé", r["error"])
+        self.assertEqual((run / "nc-dictee.wav").read_bytes(), avant, "l'audio en attente n'est pas écrasé")
+        self.assertFalse(self.lancer("status")[1]["recording"])
+        self.assertEqual(self.lancer("cancel"), (0, {"ok": True, "recording": False}))   # annuler le supprime
+        self.assertFalse((run / "nc-dictee.wav").exists())
 
     def test_limite_pas_de_message_si_arrete_avant(self):
         self.faux_notify()

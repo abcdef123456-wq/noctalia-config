@@ -16,7 +16,7 @@ Sans JARVIS (ou s'il ne répond pas, en mode automatique) : la transcription d'u
 IA du bureau coupée (IA_MODE=non) : pas de dictée.
 Enregistreur : parec (PulseAudio ou PipeWire), sinon pw-record, sinon arecord. Pas de synthèse vocale.
 Sécurités : pas de dictée sur un écran verrouillé (marque nc-verrouille de hypridle, qui lance aussi « cancel » au
-verrouillage et avant la veille) ; arrêt de l'enregistrement au bout de 10 min (gardien « garde ») ; refus sans
+verrouillage et avant la veille) ; arrêt de l'enregistrement au bout de 10 min (gardien « garde » : il transcrit lui-même et COPIE le texte, sans le taper) ; refus sans
 XDG_RUNTIME_DIR ; dictée partout : le texte n'est écrit que dans la fenêtre où elle a commencé, sinon il est copié.
 """
 import importlib.machinery
@@ -46,6 +46,7 @@ MAX_REPONSE = 1024 * 1024
 MAX_AUDIO = 24 * 1024 * 1024            # comme nc-ia : 10 min de 16 kHz mono 16 bits font 19 Mo
 LIMITE = 600                            # secondes d'enregistrement au plus (NC_DICTEE_LIMITE : durée plus courte, pour les tests)
 VERROUILLE = RUNTIME / "nc-verrouille"  # posée par hypridle quand la session est verrouillée
+AUTO = RUNTIME / "nc-dictee-auto.txt"   # ce que la limite de durée a fait (texte copié, ou échec) : dit par le « stop » suivant
 COPIE = RUNTIME / "nc-dictee-copie"     # posée à chaque copie du texte dicté : nc-presse-capture ne le garde pas (moins de 5 s)
 
 
@@ -219,8 +220,9 @@ def attendre_fin(pid, duree):
 
 def garde(pid, debut):
     """Gardien lancé par « start » (processus détaché, presque rien en mémoire) : si l'enregistreur tourne encore au
-    bout de la limite, il l'arrête proprement (SIGTERM : le WAV est terminé) mais garde le fichier d'état, marqué
-    « limite » : « stop » (ou Super + D) transcrit ensuite ce qui a été enregistré, comme après un arrêt normal."""
+    bout de la limite, il l'arrête proprement (SIGTERM : le WAV est terminé), marque l'état « limite », puis transcrit
+    lui-même et copie le texte (jamais tapé : la fenêtre a pu changer). Un « stop » au même moment : le premier qui
+    prend l'enregistrement le transcrit. Échec : l'audio reste en attente (état « attente »)."""
     try:
         pid = int(pid)
     except ValueError:
@@ -255,10 +257,59 @@ def garde(pid, debut):
     m = client()
     T = m.T
     minutes = f"{int(duree // 60)} min" if duree >= 60 else f"{int(duree)} s"
-    notifier(T, T(f"Dictée arrêtée au bout de {minutes}", f"Dictation stopped after {minutes}"),
-             T("Ce qui a été dit est gardé : arrête la dictée pour l'écrire.",
-               "What was said is kept: stop the dictation to write it."))
+    if m.ia_coupee():                           # IA coupée entre-temps : rien ne part, l'audio est supprimé
+        annuler()
+        return 0
+    # Le « stop » d'un utilisateur au même moment : le premier qui prend l'enregistrement le transcrit, l'autre ne fait rien
+    transcrire_et_copier(m, T(f"Dictée arrêtée au bout de {minutes}", f"Dictation stopped after {minutes}"), fin_ptt=True)
     return 0
+
+
+def transcrire_et_copier(m, titre, fin_ptt=False):
+    """Transcrit l'enregistrement en attente (même chemin que « stop ») et COPIE le texte, sans jamais le taper : la
+    fenêtre active a pu changer. Vrai si le texte est copié ou gardé, faux sur un échec (l'audio reste alors en attente
+    pour un nouvel essai), None s'il n'y avait rien à transcrire (un « stop » est passé avant)."""
+    global CAPTURE
+    T = m.T
+    if fin_ptt:                             # la dictée longue de Super + D est finie : plus rien à écrire au prochain appui
+        with Verrou():
+            PTT.unlink(missing_ok=True)
+    AUTO.unlink(missing_ok=True)
+    CAPTURE = []
+    transcrire(m, auto=True)
+    CAPTURE, res = None, CAPTURE
+    r = res[-1] if res else {"ok": False}
+    if r.get("rien"):
+        return None
+    if not r.get("ok"):
+        erreur = str(r.get("error") or "")
+        gardee = AUDIO.exists()
+        suite = T(f"L'audio est gardé : {raccourci_dictee()} pour réessayer.", f"The audio is kept: {raccourci_dictee()} to try again.") if gardee else ""
+        message = T(f"{titre} : transcription impossible", f"{titre}: transcription failed")
+        notifier(T, message, f"{erreur}\n{suite}".strip())
+        ecrire_auto(f"{message}. {erreur} {suite}".strip())
+        return False
+    garder(r["text"])
+    via = f" — via {r['engine']}" if r.get("externe") and r.get("engine") else ""
+    if copier_repli(T, r["text"]):
+        message = T(f"{titre} : texte copié", f"{titre}: text copied")
+        corps = r["text"][:300]
+        ecrire_auto(message + via + T(" (Ctrl + V pour le coller).", " (Ctrl + V to paste)."))
+    else:
+        message = T(f"{titre} : texte gardé", f"{titre}: text kept")
+        corps = T(f"Gardé dans {SECOURS}", f"Kept in {SECOURS}") + "\n" + r["text"][:300]
+        ecrire_auto(message + via + ".")
+    notifier(T, message + via, corps)
+    return True
+
+
+def ecrire_auto(texte):
+    try:
+        fd = os.open(AUTO, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(texte)
+    except OSError:
+        pass
 
 
 def lancer_gardien(pid, debut):
@@ -287,6 +338,7 @@ def _demarrer(T):
         return 1
     nettoyer_captures()
     etat = lire_etat()
+    AUTO.unlink(missing_ok=True)
     if enregistre(etat):
         sortie(ok=True, recording=True, message=T("Enregistrement déjà en cours.", "Already recording."))
         return 0
@@ -403,13 +455,80 @@ def par_ia(T, fichier=AUDIO):
     return 0
 
 
-def transcrire(m):
+def _transmettre(m, T, fichier):
+    """Envoie la capture (JARVIS, secours, nc-ia) : (code, None) si la réponse est déjà donnée à sortie(), sinon (0, réponse JARVIS)."""
+    # Sans JARVIS (ou une autre IA choisie à la main) : la transcription des API de nc-ia (Groq, OpenAI, Gemini)
+    if not par_jarvis(m):
+        return par_ia(T, fichier), None
+    try:
+        c = m.configuration()
+        adresse = c["URL"].rstrip("/") + "/api/transcribe?" + urllib.parse.urlencode({"language": langue_dictee(m)})
+        req = urllib.request.Request(adresse, data=fichier.read_bytes(),
+                                     headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
+        with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
+            resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))
+        if not isinstance(resultat, dict):
+            raise ValueError
+    except m.Erreur as e:
+        sortie(ok=False, error=str(e))
+        return 1, None
+    except urllib.error.HTTPError as e:
+        if e.code >= 500 and secours():
+            return par_ia(T, fichier), None
+        if e.code in (401, 403):
+            sortie(ok=False, error=T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
+                                     f"Server rejected the key (HTTP {e.code}): check SECRET_KEY."))
+        elif e.code == 404:
+            sortie(ok=False, error=T("Le serveur n'a pas de transcription (HTTP 404) : mets à jour le gateway.",
+                                     "The server has no transcription (HTTP 404): update the gateway."))
+        else:
+            sortie(ok=False, error=T(f"Erreur HTTP {e.code} du serveur.", f"HTTP error {e.code} from the server."))
+        return 1, None
+    except Exception as e:   # réseau, délai, JSON : le détail sans la clé
+        if secours():                                     # serveur injoignable : une API de transcription
+            return par_ia(T, fichier), None
+        journaliser(f"transcription JARVIS : {type(e).__name__}: {e}")
+        sortie(ok=False, error=T("Transcription impossible : JARVIS ne répond pas ou sa réponse est illisible "
+                                 "(détail dans nc-dictee.log).",
+                                 "Transcription failed: JARVIS did not answer or its reply is unreadable "
+                                 "(details in nc-dictee.log)."))
+        return 1, None
+    return 0, resultat
+
+
+def garder_en_attente(fichier, garder):
+    """Transcription ratée d'un enregistrement fini : l'audio (0600) revient à sa place, marqué « attente », pour un nouvel
+    essai (« stop », Super + D, ou le prochain « start » qui le transcrit d'abord). Jamais par-dessus un nouvel audio."""
+    if not garder:
+        return
+    with Verrou(RUNTIME / "nc-dictee-micro.lock"):
+        if lire_etat() is None and not AUDIO.exists():
+            try:
+                fichier.replace(AUDIO)
+                AUDIO.chmod(0o600)
+                ETAT.write_text(json.dumps({"attente": True}), encoding="utf-8")
+            except OSError:
+                pass
+
+
+def transcrire(m, auto=False):
+    """auto : appelée par le gardien de durée ou par un « start » (pas par « stop ») : un enregistrement déjà pris
+    par un autre n'est pas une erreur (« rien »), et l'audio reste en attente si le serveur a échoué."""
     T = m.T
     # La capture terminée appartient à cette requête. Le micro peut être rouvert pendant l'attente réseau, sans que
     # le nettoyage de cette transcription efface le nouvel audio ou que deux clients envoient la même capture.
     with Verrou(RUNTIME / "nc-dictee-micro.lock"):
-        if not _arreter():
-            sortie(ok=False, error=T("Aucun enregistrement en cours.", "No recording in progress."))
+        pris = _arreter()
+        if not pris:
+            if auto:
+                sortie(ok=False, rien=True, error=T("Aucun enregistrement en cours.", "No recording in progress."))
+                return 1
+            try:                         # la limite de durée a déjà transcrit et copié : « stop » le dit
+                dit = AUTO.read_text(encoding="utf-8").strip()
+                AUTO.unlink(missing_ok=True)
+            except (OSError, UnicodeDecodeError):
+                dit = ""
+            sortie(ok=False, error=dit or T("Aucun enregistrement en cours.", "No recording in progress."))
             return 1
         fd, nom = tempfile.mkstemp(prefix=f"nc-dictee-transcription-{os.getpid()}-", suffix=".wav", dir=RUNTIME)
         os.close(fd)
@@ -434,42 +553,10 @@ def transcrire(m):
             sortie(ok=False, error=T("Enregistrement trop long (24 Mo au plus, environ 12 min).",
                                      "Recording too long (24 MB at most, about 12 min)."))
             return 1
-        # Sans JARVIS (ou une autre IA choisie à la main) : la transcription des API de nc-ia (Groq, OpenAI, Gemini)
-        if not par_jarvis(m):
-            return par_ia(T, fichier)
-        try:
-            c = m.configuration()
-            adresse = c["URL"].rstrip("/") + "/api/transcribe?" + urllib.parse.urlencode({"language": langue_dictee(m)})
-            req = urllib.request.Request(adresse, data=fichier.read_bytes(),
-                                         headers={"Content-Type": "audio/wav", "X-Secret-Key": c["SECRET_KEY"]}, method="POST")
-            with urllib.request.build_opener(m.SansRedirection()).open(req, timeout=min(max(float(c["TIMEOUT"]), 30), 300)) as r:
-                resultat = json.loads(r.read(MAX_REPONSE + 1).decode("utf-8"))
-            if not isinstance(resultat, dict):
-                raise ValueError
-        except m.Erreur as e:
-            sortie(ok=False, error=str(e))
-            return 1
-        except urllib.error.HTTPError as e:
-            if e.code >= 500 and secours():
-                return par_ia(T, fichier)
-            if e.code in (401, 403):
-                sortie(ok=False, error=T(f"Clé refusée par le serveur (HTTP {e.code}) : vérifie SECRET_KEY.",
-                                         f"Server rejected the key (HTTP {e.code}): check SECRET_KEY."))
-            elif e.code == 404:
-                sortie(ok=False, error=T("Le serveur n'a pas de transcription (HTTP 404) : mets à jour le gateway.",
-                                         "The server has no transcription (HTTP 404): update the gateway."))
-            else:
-                sortie(ok=False, error=T(f"Erreur HTTP {e.code} du serveur.", f"HTTP error {e.code} from the server."))
-            return 1
-        except Exception as e:   # réseau, délai, JSON : le détail sans la clé
-            if secours():                                     # serveur injoignable : une API de transcription
-                return par_ia(T, fichier)
-            journaliser(f"transcription JARVIS : {type(e).__name__}: {e}")
-            sortie(ok=False, error=T("Transcription impossible : JARVIS ne répond pas ou sa réponse est illisible "
-                                     "(détail dans nc-dictee.log).",
-                                     "Transcription failed: JARVIS did not answer or its reply is unreadable "
-                                     "(details in nc-dictee.log)."))
-            return 1
+        code, resultat = _transmettre(m, T, fichier)
+        if resultat is None:
+            garder_en_attente(fichier, (auto or pris.get("attente")) and code != 0)
+            return code
     finally:
         try:
             fichier.unlink()
@@ -739,7 +826,7 @@ def ptt_debut(m):
             fenetre = etat.get("fenetre", "")
         elif etat and not etat.get("pret"):
             return 0                                       # un démarrage déjà en cours (répétition de la touche)
-        elif enregistre(lire_etat()) or (lire_etat() or {}).get("limite"):
+        elif enregistre(lire_etat()) or (lire_etat() or {}).get("limite") or (lire_etat() or {}).get("attente"):
             # (un enregistrement arrêté par la limite de durée est aussi à écrire)
             fenetre = (etat or {}).get("fenetre", "")
             # Micro ouvert sans relâchement reçu (relâchement perdu) : ce nouvel appui écrit la dictée au lieu d'être
@@ -899,6 +986,15 @@ def main():
         return 1
     try:
         if action == "start":
+            etat = lire_etat()
+            if etat and not enregistre(etat) and (etat.get("limite") or etat.get("attente")):
+                # Un audio fini attend encore sa transcription : jamais écrasé en silence, il est d'abord transcrit (copié)
+                if transcrire_et_copier(m, m.T("Dictée précédente", "Previous dictation")) is False:
+                    sortie(ok=False, error=m.T("La dictée précédente n'a pas pu être transcrite (son audio est gardé) : "
+                                               "réessaie avec « stop », ou annule-la.",
+                                               "The previous dictation could not be transcribed (its audio is kept): "
+                                               "try again with “stop”, or cancel it."))
+                    return 1
             return demarrer(m.T)
         if action == "stop":
             return transcrire(m)
