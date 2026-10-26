@@ -56,4 +56,9 @@ flux | while read -r _ _ action chemin _; do
     prevenir &
   fi
 done
-wait
+# Fin du flux udevadm (udevadm arrêté, absent, tué) : échec, tout de suite (sans attendre une notification restée sans
+# réponse), pour que systemd (Restart=on-failure) relance le service.
+# Avec un fichier d'événements (tests), la fin du fichier est normale : on attend les notifications puis on sort avec 0.
+[ -n "${NC_ECRAN_FLUX:-}" ] && { wait; exit 0; }
+echo "nc-ecran-externe: $(t "flux udev interrompu" "udev stream interrupted")" >&2
+exit 1

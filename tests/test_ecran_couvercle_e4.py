@@ -84,6 +84,19 @@ class EcranExterne(unittest.TestCase):
         self.assertIn("--action=toujours=Toujours garder la NVIDIA", a)
         self.assertIn("--action=session=", a)
 
+    def test_fin_du_flux_udev_sort_en_echec_et_systemd_relance(self):
+        b = Banc(); self.addCleanup(b.fermer)
+        u = b.d / "faux/udevadm"
+        u.write_text("#!/bin/sh\nexit 0\n")                  # le flux se termine aussitôt (udevadm arrêté)
+        u.chmod(0o755)
+        env = dict(b.env, AQ_DRM_DEVICES="/dev/dri/card0")
+        env.pop("NC_ECRAN_FLUX", None)
+        r = subprocess.run(["bash", str(b.home / ".local/bin/nc-ecran-externe")], env=env, timeout=30,
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        unite = (REPO / "home/.config/systemd/user/nc-ecran-externe.service").read_text()
+        self.assertIn("Restart=on-failure", unite)
+
     def test_carte_utilisee_ignoree(self):
         b = Banc(); self.addCleanup(b.fermer)
         b.carte("card1", "0x10de", [("eDP-1", "connected"), ("HDMI-A-1", "connected")])
