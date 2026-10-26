@@ -17,6 +17,7 @@ class IleEtat(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
         (self.tmp / "home/.cache").mkdir(parents=True)
+        self.faux("busctl", "exit 1\n")                 # pas de playerctld (et jamais le vrai bus de la session)
 
     def faux(self, nom, corps):
         f = self.bin / nom

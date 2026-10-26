@@ -217,8 +217,8 @@ nc-raccourci liste                                 # tous les raccourcis, et tes
 Tout est gardé dans `~/.config/nc/raccourcis.conf`, jamais touché par les mises à jour ; une combinaison déjà prise est refusée.
 
 Ils apparaissent tout de suite dans la fiche **Super + /** (section « Mes raccourcis »). Une combinaison déjà prise est
-refusée, en tenant compte de la disposition du clavier (AZERTY, QWERTZ…). Ils sont rangés dans `~/.config/hypr/perso.lua`,
-que tu peux aussi éditer (exemples dedans) et qu'aucune mise à jour ne remplace.
+refusée, en tenant compte de la disposition du clavier (AZERTY, QWERTZ…). Ils sont rangés dans `~/.config/nc/raccourcis.conf`,
+qu'aucune mise à jour ne remplace (tes propres règles Hyprland vont dans `~/.config/hypr/perso.lua`, exemples dedans).
 
 ## Écrans
 

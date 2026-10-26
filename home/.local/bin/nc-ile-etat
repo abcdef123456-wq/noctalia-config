@@ -2,6 +2,8 @@
 # nc-ile-etat : état du système en lignes « clé=valeur », lu par l'île dynamique (plugin Noctalia nc/ile).
 #   nc-ile-etat          tout (centre de contrôle)
 #   nc-ile-etat media    seulement la musique (pilule)
+#   nc-ile-etat sans-media  tout sauf la musique (l'île Quickshell ne lit aucune clé media_* : pas de playerctl ni de
+#                        téléchargement de pochette toutes les 2 s)
 #   nc-ile-etat wifi     réseaux Wi-Fi :      net=actif<TAB>nom<TAB>signal<TAB>sécurité<TAB>connu
 #   nc-ile-etat bt       appareils Bluetooth : bt=adresse<TAB>nom<TAB>connecté<TAB>icône<TAB>associé
 #   nc-ile-etat son      sorties / entrées :  sortie=id<TAB>nom<TAB>défaut   entree=id<TAB>nom<TAB>défaut
@@ -10,16 +12,37 @@
 #                        watts) ; une carte NVIDIA en veille n'est pas réveillée pour ça (gpu=veille)
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
 media() {
-  local m art cache
-  m="$(timeout 3 playerctl metadata --format $'{{status}}\x1f{{title}}\x1f{{artist}}\x1f{{mpris:artUrl}}\x1f{{mpris:length}}\x1f{{playerName}}' 2>/dev/null | head -1)"
+  local m art cache n f
+  # Le lecteur : le dernier actif selon playerctld (comme nc-verrou-media et les touches de musique) ; sans lui, playerctl choisit
+  n="$(busctl --user get-property org.mpris.MediaPlayer2.playerctld /org/mpris/MediaPlayer2 \
+        com.github.altdesktop.playerctld PlayerNames 2>/dev/null |
+       sed -n 's/^[^"]*"\(org\.mpris\.MediaPlayer2\.\)\{0,1\}\([^"]*\)".*/\2/p;T;q')"
+  local pc=(playerctl); [ -z "$n" ] || pc+=(-p "$n")
+  # La position (µs) vient avec le reste, en dernier champ : un seul playerctl
+  m="$(timeout 3 "${pc[@]}" metadata --format $'{{status}}\x1f{{title}}\x1f{{artist}}\x1f{{mpris:artUrl}}\x1f{{mpris:length}}\x1f{{playerName}}\x1f{{position}}' 2>/dev/null | head -1)"
   [ -n "$m" ] || { echo "media=0"; return; }
   # \x1f et non une tabulation : read fusionne les tabulations vides (titre sans artiste = tout décalé)
-  IFS=$'\x1f' read -r st titre artiste art duree joueur <<<"$m"
+  IFS=$'\x1f' read -r st titre artiste art duree joueur position <<<"$m"
   case "$art" in
     file://*) art="$(printf '%b' "${art#file://}" | sed 's/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g' | xargs -0 printf '%b' 2>/dev/null)" ;;
     http*://*)
       cache="$HOME/.cache/nc/pochettes/$(printf '%s' "$art" | md5sum | cut -c1-16).img"
-      if [ ! -s "$cache" ]; then mkdir -p "${cache%/*}"; curl -fsSL -m 3 -o "$cache" "$art" 2>/dev/null || rm -f "$cache"; fi
+      if [ ! -s "$cache" ]; then
+        mkdir -p "${cache%/*}"
+        # Un échec est retenu 5 minutes (hors ligne, 404, lien expiré) : pas de curl bloquant à chaque appel. L'adresse
+        # vient d'un lecteur (une page web) : seulement http(s), et pas plus de 5 Mo
+        if [ -z "$(find "$cache.echec" -mmin -5 2>/dev/null)" ]; then
+          if curl -fsSL -m 3 --proto =http,https --max-filesize 5M -o "$cache.tmp" "$art" 2>/dev/null && [ -s "$cache.tmp" ]; then
+            mv -f "$cache.tmp" "$cache"; rm -f "$cache.echec"
+          else
+            rm -f "$cache.tmp"; : > "$cache.echec"
+          fi
+          # Garde les 50 dernières pochettes (même ménage que nc-verrou-media)
+          f="${cache%/*}"
+          find "$f" -name '*.echec' -mmin +5 -delete 2>/dev/null
+          ls -1t "$f" 2>/dev/null | grep -v '\.lock$' | tail -n +51 | sed "s|^|$f/|" | xargs -r rm -f
+        fi
+      fi
       art="$cache" ;;
     *) art="" ;;
   esac
@@ -30,7 +53,8 @@ media() {
   echo "media_artiste=$artiste"
   echo "media_pochette=$art"
   echo "media_duree=${duree:-0}"
-  echo "media_position=$(timeout 3 playerctl position 2>/dev/null | cut -d. -f1)"
+  case "${position:-0}" in *[!0-9]*) position=0 ;; esac
+  echo "media_position=$(( ${position:-0} / 1000000 ))"
   echo "media_joueur=$joueur"
 }
 
@@ -133,6 +157,7 @@ jeu() {
 # Noms anglais (nc-island-state media | game | system | wifi | bt | sound) ; les clés écrites restent les mêmes
 case "${1:-}" in
   media) media; exit 0 ;;
+  sans-media) sans_media=1 ;;
   jeu|game) jeu; exit 0 ;;
   systeme|system) systeme; exit 0 ;;
   wifi) wifi; exit 0 ;;
@@ -161,4 +186,4 @@ for b in /sys/class/power_supply/BAT*; do
   [ -r "$b/capacity" ] || continue
   echo "batterie=$(cat "$b/capacity")"; echo "batterie_etat=$(cat "$b/status")"; break
 done
-media
+[ -n "${sans_media:-}" ] || media

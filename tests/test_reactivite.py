@@ -212,7 +212,7 @@ class EtatReel(unittest.TestCase):
             b = root / ".local/bin"
             b.mkdir(parents=True)
             # nc-ile-etat : lit le fichier « wifi » ; noctalia msg wifi-toggle : le bascule après 0,2 s, ou échoue si « casse » existe
-            (b / "nc-ile-etat").write_text('#!/bin/sh\n[ -n "$1" ] && exit 0\necho "wifi=$(cat "$HOME/wifi")"\n')
+            (b / "nc-ile-etat").write_text('#!/bin/sh\n[ -n "$1" ] && [ "$1" != sans-media ] && exit 0\necho "wifi=$(cat "$HOME/wifi")"\n')
             (b / "noctalia").write_text('#!/bin/sh\nsleep 0.2\n[ -e "$HOME/casse" ] && exit 1\n'
                                         '[ "$(cat "$HOME/wifi")" = on ] && echo off > "$HOME/wifi" || echo on > "$HOME/wifi"\n')
             (b / "notify-send").write_text('#!/bin/sh\necho "$@" >> "$HOME/notifs"\n')

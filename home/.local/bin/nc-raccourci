@@ -264,13 +264,22 @@ def write_conf(entries):
     os.replace(tmp, CONF)
 
 
-def reload_or_rollback(old_entries):
-    subprocess.run(["hyprctl", "reload"], capture_output=True)
+def config_errors():
     err = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True).stdout.strip()
-    if err and err != "ok":
+    return "" if err == "ok" else err
+
+
+def reload_or_rollback(old_entries, avant=""):
+    """Recharge ; refuse seulement si les erreurs ont changé depuis `avant` (celles d'avant le changement, d'un
+    perso.lua ou d'un vieux raccourci : elles ne sont pas la faute du changement)."""
+    subprocess.run(["hyprctl", "reload"], capture_output=True)
+    err = config_errors()
+    if err and err != avant:
         write_conf(old_entries)
         subprocess.run(["hyprctl", "reload"], capture_output=True)
-        raise Refus(T("Hyprland a refusé ce changement, rien n'a été modifié :\n", "Hyprland refused this change, nothing was modified:\n") + err)
+        nouvelles = [l for l in err.splitlines() if l not in avant.splitlines()]
+        raise Refus(T("Hyprland a refusé ce changement, rien n'a été modifié :\n", "Hyprland refused this change, nothing was modified:\n")
+                    + "\n".join(nouvelles or err.splitlines()))
 
 
 def original_id(live_id, entries):
@@ -408,8 +417,9 @@ def ajouter(keys, typ, val, nom):
 
 
 def reload_or_rollback_after(old, new):
+    avant = config_errors()                  # les erreurs déjà là, avant ce changement
     write_conf(new)
-    reload_or_rollback(old)
+    reload_or_rollback(old, avant)
 
 
 def find_config_bind(keys):

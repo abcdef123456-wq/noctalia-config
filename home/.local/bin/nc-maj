@@ -30,12 +30,45 @@ base_installee() {
 if [ "${1:-}" = annoncer ]; then
   choix="$(timeout 6h notify-send -a "noctalia-config" -i system-software-update -t 0 -A maj="$(t "Mettre à jour" "Update")" \
     -A tout="$(t "Tout voir" "See all")" -A tard="$(t "Plus tard" "Later")" \
-    "$(t "Nouvelle version de la config" "New version of the config")" "${2:-}" 2>/dev/null || true)"
-  [ "$choix" = maj ] && exec kitty --class nc-maj -e sh -c "$HOME/.local/bin/nc-maj; echo; printf '$(t "Entrée pour fermer" "Press Enter to close")'; read r"
+    -- "$(t "Nouvelle version de la config" "New version of the config")" "${2:-}" 2>/dev/null || true)"
+  if [ "$choix" = maj ]; then
+    # Le terminal de nc-apps (xdg-terminal-exec, $TERMINAL, puis le premier installé) ; le chemin et le texte passent en
+    # arguments du sh (jamais collés dans la commande : un HOME avec une espace ou une apostrophe resterait entier)
+    cmd=()
+    while IFS= read -r -d '' x; do cmd+=("$x"); done < <(python3 -c '
+import importlib.machinery, importlib.util, os, sys
+chemin = os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "nc-apps")
+l = importlib.machinery.SourceFileLoader("nc_apps", chemin)
+mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_apps", l))
+l.exec_module(mod)
+sys.stdout.write("".join(a + "\0" for a in mod.commande_terminal([])))
+' "$0" 2>/dev/null || true)
+    [ "${#cmd[@]}" -gt 0 ] || cmd=(kitty -e)
+    exec "${cmd[@]}" sh -c '"$1"; echo; printf "%s" "$2"; read r' sh "$HOME/.local/bin/nc-maj" "$(t "Entrée pour fermer" "Press Enter to close")"
+  fi
   # « Tout voir » : la section Nouveautés de la fenêtre des réglages ; sans l'île, nc-reglages les montre dans un terminal
   [ "$choix" = tout ] && exec "$HOME/.local/bin/nc-reglages" fenetre Nouveautés
   exit 0
 fi
+
+# La branche suivie : $branche = la branche locale (vide si HEAD est détaché), $amontbr = celle de GitHub qu'elle suit
+# (@{u}, sinon son homonyme, sinon main si c'est main). Échec : pas sur une branche suivie (HEAD détaché, ou une
+# branche locale sans homonyme sur GitHub) ; rien à comparer, ni à mettre à jour
+suivre_branche() {
+  local u
+  amontbr=""
+  branche="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  [ -n "$branche" ] || return 1
+  u="$(git rev-parse -q --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  case "$u" in refs/remotes/origin/?*) amontbr="${u#refs/remotes/origin/}"; return 0 ;; esac
+  if [ "$branche" = main ] || git rev-parse -q --verify "refs/remotes/origin/$branche" >/dev/null 2>&1; then
+    amontbr="$branche"; return 0
+  fi
+  return 1
+}
+pas_suivie() {
+  echo "$(t "Tu n'es pas sur une branche suivie ($depot) : git switch main" "You are not on a tracked branch ($depot): git switch main")" >&2
+}
 
 if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   grep -qx 'MAJ_VERIFIER=non' "$HOME/.config/nc/reglages.conf" 2>/dev/null && exit 0
@@ -45,8 +78,8 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   # (« || … » : avec pipefail, un échec dans le tube quitterait le script en erreur, et le service avec : hors ligne,
   # ce n'est pas une panne — revue MAJ-01)
   url="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github\.com:#https://github.com/#')" || exit 0
-  branche="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$branche" 2>/dev/null | cut -f1)" || distant=""
+  suivre_branche || { pas_suivie; exit 0; }                    # dit pourquoi rien n'est annoncé (journal du service)
+  distant="$(GIT_TERMINAL_PROMPT=0 timeout 30 git ls-remote "$url" "refs/heads/$amontbr" 2>/dev/null | cut -f1)" || distant=""
   [ -n "$distant" ] || exit 0                                  # hors ligne
   base="$(base_installee)"
   # À jour : la version publiée est déjà installée ici (ou plus ancienne que la tienne)
@@ -61,7 +94,7 @@ if [ "${1:-}" = verifier ] || [ "${1:-}" = check ]; then
   # Les grosses nouveautés : la nouvelle version est téléchargée (pas installée) pour lire ses messages de mise à jour ;
   # chacun ramené à son idée principale (avant « ; », sans les parenthèses), les 4 plus récents
   nouveau=""
-  if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$branche" 2>/dev/null; then
+  if GIT_TERMINAL_PROMPT=0 timeout 60 git fetch -q "$url" "$amontbr" 2>/dev/null; then
     # Les sujets absents de l'historique d'ici (après une réécriture en amont, les identifiants ont changé)
     sujets="$(awk 'NR == FNR { vus[$0]; next } !($0 in vus)' <(git log --format=%s "$base") <(git log --format=%s FETCH_HEAD) 2>/dev/null || true)"
     # Rien de nouveau à voir (seulement l'historique réécrit en amont : mêmes fichiers, mêmes sujets) : pas d'annonce
@@ -98,11 +131,12 @@ print(texte + (f" (+ {len(l) - 4} {autres})" if len(l) > 4 else ""))
   # suffit pas, systemd tue tout ce qui reste dans le groupe du service quand ExecStart finit. « OnFailure= » vide :
   # sans lui, le drop-in global service.d/nc-panne.conf signalerait une fausse panne. Si systemd-run échoue : au premier
   # plan, mais avec un délai (et TimeoutStartSec= du service en dernier recours). --expand-environment=no : le texte vient
-  # des titres de commits, systemd n'y remplace aucun « ${…} » par son environnement.
+  # des titres de commits, systemd n'y remplace aucun « ${…} » par son environnement. Les « % » sont doublés pour systemd-run
+  # seul (il lit « %x » comme un spécificateur : un titre « 58 % » faisait échouer l'unité) ; le repli reçoit le texte tel quel.
   soi="$(readlink -f "$0" 2>/dev/null || echo "$0")"
   if ! { command -v systemd-run >/dev/null 2>&1 &&
          systemd-run --user --collect --quiet --expand-environment=no --unit="nc-maj-annonce-$(printf '%08x%x' "$(date +%s)" "$$")" \
-           -p OnFailure= -p RuntimeMaxSec=12h -- "$soi" annoncer "$nouveau" >/dev/null 2>&1; }; then
+           -p OnFailure= -p RuntimeMaxSec=12h -- "$soi" annoncer "${nouveau//%/%%}" >/dev/null 2>&1; }; then
     timeout 6h "$soi" annoncer "$nouveau" || true
   fi
   wait || true                                                 # l'envoi Telegram finit avant le service
@@ -130,8 +164,8 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 base="$(base_installee)"                                       # = HEAD, sauf après un install.sh resté à moitié
-branche="$(git rev-parse --abbrev-ref HEAD)"
-ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null || true)"   # l'amont avant ce fetch
+if ! suivre_branche; then pas_suivie; exit 1; fi
+ancien="$(git rev-parse -q --verify "refs/remotes/origin/$amontbr" 2>/dev/null || true)"   # l'amont avant ce fetch
 # Pas de délai fixe : timeout couperait un fetch lent qui avance, et le sortirait du premier plan du terminal (ssh ou
 # HTTPS ne pourraient plus demander une phrase de passe, un mot de passe ou l'empreinte de l'hôte). Seul un réseau
 # bloqué est coupé : ssh abandonne une connexion qui ne s'établit pas en 20 s ou un serveur muet depuis une minute
@@ -140,14 +174,14 @@ ancien="$(git rev-parse -q --verify "refs/remotes/origin/$branche" 2>/dev/null |
 if [ -z "${GIT_SSH_COMMAND:-}${GIT_SSH:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/null || true)" ]; then
   export GIT_SSH_COMMAND="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 fi
-if ! erreur="$(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch -q origin "$branche" 2>&1 >/dev/null)"; then
+if ! erreur="$(git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch -q origin "$amontbr" 2>&1 >/dev/null)"; then
   echo "$(t "GitHub injoignable (réseau coupé ou trop lent ?) : mise à jour annulée, rien n'a changé. Réessaie plus tard." "GitHub unreachable (network down or too slow?): update cancelled, nothing changed. Try again later.")" >&2
   erreur="$(printf '%s\n' "$erreur" | sed '/^[[:space:]]*$/d' | tail -n 1)"
   [ -z "$erreur" ] || echo "  (git : $erreur)" >&2
   echo "$(t "(git fetch origin dans $depot pour le détail)" "(git fetch origin in $depot for details)")" >&2
   exit 2
 fi
-amont="$(git rev-parse "refs/remotes/origin/$branche")"
+amont="$(git rev-parse "refs/remotes/origin/$amontbr")"
 # Un fichier non suivi à toi au même chemin qu'un fichier que la mise à jour apporte ou change : refus en le nommant
 # (git reset --hard l'écraserait sans un mot, git merge s'arrêterait sur une erreur brute). Identique à celui de
 # l'amont (git hash-object = l'objet de l'amont à ce chemin), rien ne serait perdu : il ne bloque pas, et il est retiré
@@ -208,7 +242,7 @@ if git merge-base --is-ancestor HEAD "$amont"; then
     echo "$(t "La mise à jour n'a pas pu s'appliquer dans $depot : rien n'a changé (tes fichiers sont à leur place)." "The update could not be applied in $depot: nothing changed (your files are where they were).")" >&2
     erreur="$(printf '%s\n' "$erreur" | sed '/^[[:space:]]*$/d' | head -n 2)"
     [ -z "$erreur" ] || printf '%s\n' "$erreur" | sed 's/^/  (git : /; s/$/)/' >&2
-    echo "$(t "(un autre git en cours ? Sinon, git merge --ff-only origin/$branche dans $depot pour le détail)" "(another git running? Otherwise, git merge --ff-only origin/$branche in $depot for details)")" >&2
+    echo "$(t "(un autre git en cours ? Sinon, git merge --ff-only origin/$amontbr dans $depot pour le détail)" "(another git running? Otherwise, git merge --ff-only origin/$amontbr in $depot for details)")" >&2
     exit 1
   fi
   remettre; trap - INT TERM HUP
@@ -218,13 +252,28 @@ elif { [ -n "$ancien" ] && git merge-base --is-ancestor HEAD "$ancien"; } || san
   # « Aucun commit à toi » : HEAD était dans l'amont d'avant ce fetch, ou chacun de ses commits a son équivalent dans
   # le nouvel amont (git cherry, aucun « + ») : l'amont d'avant ne suffit pas, un git pull ou un éditeur a pu
   # récupérer la réécriture plus tôt
+  # Mais si l'amont est plus ancien que ce qu'on a (poussée forcée vers un commit antérieur), ou si ce n'est pas qu'un
+  # changement d'identifiants (des fichiers changent sans aucun sujet nouveau), ce n'est pas une mise à jour : on le dit
+  # et on demande avant le reset (sans terminal pour répondre : rien n'est fait)
+  nouveaux="$(awk 'NR == FNR { vus[$0]; next } !($0 in vus)' <(git log --format=%s "$base") <(git log --format=%s "$amont") 2>/dev/null || true)"
+  if git merge-base --is-ancestor "$amont" HEAD || git merge-base --is-ancestor "$amont" "$base" ||
+     { [ -z "$nouveaux" ] && ! git diff --quiet "$base" "$amont" 2>/dev/null; }; then
+    echo "$(t "La version sur GitHub est plus ancienne ou réécrite : ce n'est pas une mise à jour (origin/$amontbr)." "The version on GitHub is older or rewritten: this is not an update (origin/$amontbr).")" >&2
+    if [ -t 0 ] && [ -t 1 ]; then
+      read -r -p "$(t "La reprendre quand même ? Ta version actuelle reste dans une branche de sauvegarde. [o/N] " "Take it anyway? Your current version stays in a backup branch. [y/N] ")" rep_oui || rep_oui=""
+      case "$rep_oui" in [oOyY]*) ;; *) echo "$(t "Rien n'a changé." "Nothing changed.")" >&2; exit 1 ;; esac
+    else
+      echo "$(t "Rien n'a changé (relance nc-maj dans un terminal pour la reprendre)." "Nothing changed (run nc-update in a terminal to take it).")" >&2
+      exit 1
+    fi
+  fi
   reecrit="nc-sauvegarde-$(date +%Y%m%d)"
   git rev-parse -q --verify "refs/heads/$reecrit" >/dev/null && reecrit="$reecrit-$(date +%H%M%S)"
   git branch "$reecrit" HEAD
   git reset -q --hard "$amont"
 else
   echo "$(t "Le dépôt $depot a des commits à toi qui ne sont pas sur GitHub : mise à jour annulée pour ne pas les perdre." "The repository $depot has commits of yours that are not on GitHub: update cancelled so they are not lost.")" >&2
-  echo "$(t "(git log origin/$branche..HEAD pour les voir)" "(git log origin/$branche..HEAD to see them)")" >&2
+  echo "$(t "(git log origin/$amontbr..HEAD pour les voir)" "(git log origin/$amontbr..HEAD to see them)")" >&2
   exit 1
 fi
 apres="$(git rev-parse HEAD)"

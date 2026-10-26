@@ -8,9 +8,10 @@
 # Icône de l'appli : nc-apps icon, gardée en cache pour ne pas la chercher à chaque seconde.
 set -u
 
+# Le premier nom entre guillemets, sans le préfixe MPRIS (un seul sed : ce script tourne chaque seconde pendant le verrou)
 n=$(busctl --user get-property org.mpris.MediaPlayer2.playerctld /org/mpris/MediaPlayer2 \
-      com.github.altdesktop.playerctld PlayerNames 2>/dev/null | grep -o '"[^"]*"' | head -1 | tr -d '"' |
-    sed 's/^org\.mpris\.MediaPlayer2\.//')
+      com.github.altdesktop.playerctld PlayerNames 2>/dev/null |
+    sed -n 's/^[^"]*"\(org\.mpris\.MediaPlayer2\.\)\{0,1\}\([^"]*\)".*/\2/p;T;q')
 [ -n "$n" ] || exit 0
 
 # Séparateur \x1f (pas une tabulation : read fusionnerait les champs vides)
@@ -24,14 +25,14 @@ case "${art:-}" in
   file://*) pochette="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "${art#file://}")" ;;
   http://*|https://*)
     mkdir -p "$cache/pochettes"
-    f="$cache/pochettes/$(printf '%s' "$art" | md5sum | cut -c1-16)"
+    f="$(printf '%s' "$art" | md5sum)"; f="$cache/pochettes/${f:0:16}"
     if [ ! -s "$f" ]; then
       # Appelé chaque seconde : le téléchargement se fait en arrière-plan (cet appel-ci sans pochette, le suivant la
       # trouve), un seul à la fois par pochette (flock), et un échec est retenu 5 minutes (hors ligne, 404, lien expiré)
       if [ -z "$(find "$f.echec" -mmin -5 2>/dev/null)" ]; then
         (
           flock -n 9 || exit 0
-          if curl -fsSL -m 4 -o "$f.tmp" "$art" >/dev/null 2>&1 && [ -s "$f.tmp" ]; then mv "$f.tmp" "$f"; rm -f "$f.echec"
+          if curl -fsSL -m 4 --proto =http,https --max-filesize 5M -o "$f.tmp" "$art" >/dev/null 2>&1 && [ -s "$f.tmp" ]; then mv "$f.tmp" "$f"; rm -f "$f.echec"
           else rm -f "$f.tmp"; : > "$f.echec"; fi
           # Garde les 50 dernières pochettes (et les marqueurs d'échec de plus de 5 minutes s'en vont avec)
           find "$cache/pochettes" -name '*.echec' -mmin +5 -delete 2>/dev/null
@@ -47,12 +48,13 @@ esac
 # Icône de l'appli (cache : nom du lecteur → fichier)
 nom="${joueur%%.*}"; nom="${nom:-${n%%.*}}"
 icones="$cache/icones-lecteurs"
-icone="$(grep -m1 "^$nom	" "$icones" 2>/dev/null | cut -f2)"
+# Le nom est comparé tel quel (awk, ENVIRON : ni regex ni « \ » interprété), en un seul processus
+icone="$(NOM="$nom" awk -F'\t' '$1 == ENVIRON["NOM"] { print $2; exit }' "$icones" 2>/dev/null)"
 if [ -z "$icone" ] || [ ! -f "$icone" ]; then
   icone="$("$HOME/.local/bin/nc-apps" icon "$nom" 2>/dev/null)"
   if [ -n "$icone" ]; then
     mkdir -p "$cache"
-    { grep -v "^$nom	" "$icones" 2>/dev/null; printf '%s\t%s\n' "$nom" "$icone"; } > "$icones.tmp" && mv "$icones.tmp" "$icones"
+    { NOM="$nom" awk -F'\t' '$1 != ENVIRON["NOM"]' "$icones" 2>/dev/null; printf '%s\t%s\n' "$nom" "$icone"; } > "$icones.tmp" && mv "$icones.tmp" "$icones"
   fi
 fi
 
@@ -60,5 +62,9 @@ fi
 titre="${titre//$'\t'/ }"; artiste="${artiste//$'\t'/ }"
 
 age=""
-if [ -s "$cache/derniere-lecture" ]; then age=$(( $(date +%s) - $(cat "$cache/derniere-lecture") )); fi
+# (read et printf %()T sont internes à bash : ni cat ni date)
+if [ -s "$cache/derniere-lecture" ]; then
+  read -r dernier < "$cache/derniere-lecture" || dernier=""
+  case "$dernier" in ""|*[!0-9]*) ;; *) printf -v maintenant '%(%s)T' -1; age=$(( maintenant - dernier )) ;; esac
+fi
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$etat" "$titre" "${artiste:-}" "$pochette" "${duree:-0}" "${position:-0}" "$nom" "$icone" "$age"
