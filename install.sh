@@ -714,7 +714,7 @@ fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard wtype brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip xdg-utils nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
-         enregistreur)
+         sound-theme-freedesktop enregistreur)   # sound-theme-freedesktop : sons du minuteur et du Pomodoro (même nom sur les 4 distributions)
 [ "$FAMILY" = suse ] && GENERIC+=(python-curses)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"

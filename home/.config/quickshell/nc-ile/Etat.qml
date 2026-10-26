@@ -192,8 +192,15 @@ Singleton {
                                                                       "Session " + pomoSeance + ": 25 minutes of focus.")]
             lancerMinuteur(25)
         }
-        Quickshell.execDetached(["sh", "-c", "notify-send -a Pomodoro \"$1\" \"$2\"; command -v canberra-gtk-play >/dev/null && "
-                                 + "canberra-gtk-play -i complete || true", "sh", msg[0], msg[1]])
+        Quickshell.execDetached(["sh", "-c", "notify-send -a Pomodoro \"$1\" \"$2\"", "sh", msg[0], msg[1]])
+        jouerSon("complete")
+    }
+    // Son du thème freedesktop : canberra-gtk-play s'il est là, sinon pw-play sur le fichier du thème (paquet
+    // sound-theme-freedesktop). Rien si ni l'un ni l'autre, sans message.
+    function jouerSon(nom) {
+        Quickshell.execDetached(["sh", "-c", "f=/usr/share/sounds/freedesktop/stereo/\"$1\".oga; "
+            + "{ command -v canberra-gtk-play >/dev/null 2>&1 && canberra-gtk-play -i \"$1\"; } 2>/dev/null "
+            + "|| { command -v pw-play >/dev/null 2>&1 && [ -r \"$f\" ] && pw-play \"$f\"; } 2>/dev/null; true", "sh", nom])
     }
     onMinuteurResteChanged: {
         if (minuteurFin > 0 && minuteurReste === 0 && pomodoro) {
@@ -201,8 +208,8 @@ Singleton {
             etapePomodoro()
         } else if (minuteurFin > 0 && minuteurReste === 0) {
             minuteurFin = 0
-            Quickshell.execDetached(["sh", "-c", "notify-send -a \"$1\" -u critical \"$2\" \"$3\"; "
-                + "command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i alarm-clock-elapsed || true", "sh",
+            jouerSon("alarm-clock-elapsed")
+            Quickshell.execDetached(["sh", "-c", "notify-send -a \"$1\" -u critical \"$2\" \"$3\"", "sh",
                 Reglages.t("Minuteur", "Timer"), Reglages.t("Minuteur terminé", "Timer Done"), Reglages.t("Le temps est écoulé.", "Time's up.")])
             activite("minuteur-fini", 5000)
         }
