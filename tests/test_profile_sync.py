@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -186,6 +187,42 @@ class ProfileSync(unittest.TestCase):
         self.assertEqual(self.clavier(), 0)
         self.lancer("balanced")
         self.assertEqual(self.clavier(), 3)
+
+    def service_ouvert(self, secours):
+        """Lance le service avec un flux D-Bus qui reste ouvert sans événement ; le profil se lit dans un fichier."""
+        profil = self.home / "profil-voulu"
+        profil.write_text("balanced\n")
+        (self.faux / "gdbus").write_text("#!/bin/sh\ncase \"$*\" in *Properties.Get*) echo \"(<'$(cat \"$NC_TEST_FICHIER\")'>,)\" ;;\n"
+                                         "*monitor*) exec sleep 20 ;; esac\nexit 0\n")
+        self.journal.write_text("")
+        env = dict(HOME=str(self.home), PATH=f"{self.faux}:/usr/bin:/bin", NC_LANGUE="fr", JOURNAL=str(self.journal),
+                   XDG_RUNTIME_DIR=str(self.run_dir), XDG_CONFIG_HOME=str(self.home / ".config"),
+                   NC_POWER_SUPPLY=str(self.alim), NC_LEDS=str(self.leds), NC_TEST_FICHIER=str(profil),
+                   NC_SYNC_SECOURS=str(secours))
+        p = subprocess.Popen(["bash", str(SCRIPT)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(lambda: (p.poll() is None) and (p.kill(), p.wait()))
+        return p, profil
+
+    def passages(self):
+        return self.journal.read_text().count("hyprctl monitors")
+
+    def test_reveil_de_secours_rien_ne_change_rien_n_est_applique(self):
+        p, _ = self.service_ouvert(1)
+        time.sleep(4.5)                                   # plusieurs réveils de secours (1 s), rien de changé
+        self.assertEqual(self.passages(), 1, self.journal.read_text())
+        p.kill()
+
+    def test_reveil_de_secours_profil_change_applique(self):
+        p, profil = self.service_ouvert(1)
+        time.sleep(1.5)
+        profil.write_text("power-saver\n")
+        fin = time.time() + 6
+        while time.time() < fin and self.passages() < 2:
+            time.sleep(0.2)
+        self.assertGreaterEqual(self.passages(), 2, self.journal.read_text())
+        self.assertIn('profil = "power-saver"', (self.home / ".config/hypr/nc/profil.lua").read_text())
+        p.kill()
 
 
 class Paquets(unittest.TestCase):
