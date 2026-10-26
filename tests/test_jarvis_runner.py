@@ -261,7 +261,8 @@ class AgySansAutoApprobation(unittest.TestCase):
     def test_hors_de_la_liste_blanche_et_jamais_ecrit_par_le_deployeur(self):
         gestion = (SERVEUR / "nc_management.py").read_text()
         self.assertNotIn("NC_AGY_SANS_CONFIRMATION", gestion)
-        self.assertNotIn("NC_AGY_SANS_CONFIRMATION", (SERVEUR.parent / "deployer.py").read_text())
+        code = [l for l in (SERVEUR.parent / "deployer.py").read_text().splitlines() if not l.lstrip().startswith("#")]
+        self.assertNotIn("NC_AGY_SANS_CONFIRMATION", "\n".join(code))         # cité en commentaire seulement
 
 
 if __name__ == "__main__":
