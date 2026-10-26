@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+"""nc-code : un espace de code en un geste (Super + X). Un sélecteur de projets, puis une fenêtre kitty prête :
+Neovim à gauche, l'agent de l'IA choisie à droite (Claude Code, Codex, Gemini, OpenCode… ; un shell si l'IA est coupée
+ou si aucun agent n'est installé), un 2e onglet lazygit (s'il existe) et un 3e onglet shell.
+  nc-code                  le sélecteur (fzf s'il existe, sinon une liste numérotée) ; Entrée ouvre l'espace complet,
+                           Alt + Entrée seulement Neovim, Ctrl + A choisit l'agent (liste numérotée : « 3 a » et « 3 n »)
+  nc-code DOSSIER | .      directement, sans sélecteur (--nvim : seulement Neovim ; --agent PROG : cet agent ;
+                           --sans-agent : un shell à la place)
+  nc-code --liste          les projets proposés, un par ligne (nom, tabulation, chemin)
+  nc-code --session-seule DOSSIER   écrit sur la sortie standard la session kitty qui serait ouverte, sans la lancer
+Les projets : dépôts git récents, sans parcours lourd : celui de noctalia-config, l'historique de zoxide et de
+project.nvim, les sessions récentes de Claude Code, puis ~/*/.git et ~/*/*/.git (1 s au plus). Rien ne tourne en fond.
+"""
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+ICI = os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv and sys.argv[0] else os.path.join(HOME, ".local/bin")
+MOI = os.path.join(ICI, "nc-code")
+
+
+def _langue():
+    if os.environ.get("NC_LANGUE") in ("fr", "en"):
+        return os.environ["NC_LANGUE"]
+    v = reglage("LANGUE")
+    if v in ("fr", "en"):
+        return v
+    loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+    return "fr" if loc.startswith("fr") else "en"
+
+
+def reglage(cle, defaut=""):
+    try:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+            for l in f:
+                if l.startswith(cle + "="):
+                    return l.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return defaut
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+# ── Les projets ─────────────────────────────────────────────────────────────────────────────────────────────────
+def est_depot(d):
+    return os.path.isdir(d) and os.path.exists(os.path.join(d, ".git"))
+
+
+def court(d):
+    return "~" + d[len(HOME):] if d == HOME or d.startswith(HOME + "/") else d
+
+
+def decoder_claude(nom):
+    """Le dossier d'un nom de ~/.claude/projects (« un dossier mon-projet » → « -...-mon-projet » : tout ce qui n'est
+    pas lettre ou chiffre devient « - »). Prudent : le chemin n'est jamais construit à partir du texte, seulement à
+    partir des vrais dossiers existants dont le nom encodé commence ce qui reste ; '' si rien ne correspond."""
+    def encode(x):
+        return re.sub(r"[^A-Za-z0-9]", "-", x)
+
+    def descend(base, reste):
+        if not reste:
+            return base
+        try:
+            noms = sorted(os.listdir(base), key=len, reverse=True)       # le plus long d'abord (mon-projet avant mon)
+        except OSError:
+            return ""
+        for n in noms:
+            e = encode(n)
+            if reste == e or reste.startswith(e + "-"):
+                p = os.path.join(base, n)
+                if os.path.isdir(p):
+                    r = descend(p, reste[len(e) + 1:])
+                    if r:
+                        return r
+        return ""
+    if not nom.startswith("-"):
+        return ""
+    return descend("/", nom[1:])
+
+
+def projets_claude(limite=30):
+    base = os.path.join(HOME, ".claude/projects")
+    try:
+        entrees = [(e.stat().st_mtime, e.name) for e in os.scandir(base) if e.is_dir()]
+    except OSError:
+        return []
+    res = []
+    for _, n in sorted(entrees, reverse=True)[:limite * 2]:
+        d = decoder_claude(n)
+        if d and est_depot(d):
+            res.append(d)
+        if len(res) >= limite:
+            break
+    return res
+
+
+def projets_zoxide(limite=40):
+    if not shutil.which("zoxide"):
+        return []
+    try:
+        r = subprocess.run(["zoxide", "query", "-l"], capture_output=True, text=True, timeout=1, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    res = []
+    for l in r.stdout.splitlines()[:400]:
+        if l.startswith("/") and est_depot(l):
+            res.append(l)
+            if len(res) >= limite:
+                break
+    return res
+
+
+def projets_nvim(limite=30):
+    try:
+        with open(os.path.join(HOME, ".local/share/nvim/project_nvim/project_history"), encoding="utf-8",
+                  errors="replace") as f:
+            lignes = f.read().splitlines()
+    except OSError:
+        return []
+    res = [l.strip() for l in reversed(lignes) if l.strip().startswith("/") and est_depot(l.strip())]
+    return res[:limite]
+
+
+def projet_noctalia():
+    try:
+        with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
+            d = f.read().strip()
+    except OSError:
+        return []
+    return [d] if d.startswith("/") and est_depot(d) else []
+
+
+IGNORES = {"node_modules", "snap", "venv", "target", "build", "dist", "__pycache__", "Library"}
+
+
+def projets_balayage(delai=1.0):
+    """~/*/.git et ~/*/*/.git (profondeur 2 au plus), sans les dossiers cachés ; arrêté après delai secondes."""
+    fin = time.monotonic() + delai
+    res = []
+
+    def liste(d):
+        try:
+            return [e for e in os.scandir(d) if not e.name.startswith(".") and e.name not in IGNORES and e.is_dir(follow_symlinks=False)]
+        except OSError:
+            return []
+    for e1 in liste(HOME):
+        if time.monotonic() > fin:
+            break
+        if est_depot(e1.path):
+            res.append(e1.path)
+            continue
+        for e2 in liste(e1.path):
+            if est_depot(e2.path):
+                res.append(e2.path)
+            if time.monotonic() > fin:
+                break
+    return sorted(res, key=lambda p: -os.stat(p).st_mtime if os.path.exists(p) else 0)
+
+
+def projets(delai=1.0):
+    """[chemin] sans doublon, dans l'ordre : noctalia-config, project.nvim, zoxide, Claude Code, puis le balayage."""
+    vus, res = set(), []
+    for sources in (projet_noctalia(), projets_claude(), projets_nvim(), projets_zoxide(), projets_balayage(delai)):
+        for d in sources:
+            r = os.path.realpath(d)
+            if r not in vus:
+                vus.add(r)
+                res.append(d.rstrip("/") or "/")
+    return res
+
+
+def ligne_projet(d):
+    return f"{os.path.basename(d) or d}  {court(d)}\t{d}"
+
+
+# ── L'aperçu (à droite dans fzf) ────────────────────────────────────────────────────────────────────────────────
+def git(d, *args):
+    try:
+        return subprocess.run(["git", "-C", d, "-c", "core.quotepath=off", *args], capture_output=True, text=True, timeout=3,
+                              stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def apercu(d):
+    b = "\033[1m"
+    g = "\033[2m"
+    r = "\033[0m"
+    c = "\033[36m"
+    branche = git(d, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    print(f"{b}{os.path.basename(d)}{r}  {g}{court(d)}{r}")
+    print(f"{c} {branche or '?'}{r}\n")
+    journal = git(d, "log", "--oneline", "-5", "--no-color")
+    if journal:
+        print(journal.rstrip())
+    etat = git(d, "status", "--short").splitlines()
+    print(f"\n{g}{T('état', 'status')}{r}")
+    print("\n".join(etat[:8]) + (f"\n… (+{len(etat) - 8})" if len(etat) > 8 else "") if etat else T("propre", "clean"))
+    try:
+        readme = next(f for f in sorted(os.listdir(d)) if f.lower().startswith("readme"))
+        with open(os.path.join(d, readme), encoding="utf-8", errors="replace") as f:
+            lignes = [l.rstrip() for l in f.read(3000).splitlines()][:14]
+        print(f"\n{g}{readme}{r}\n" + "\n".join(lignes))
+    except (OSError, StopIteration):
+        pass
+
+
+# ── L'agent ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def nc_ia():
+    for p in (os.path.join(ICI, "nc-ia"), os.path.join(HOME, ".local/bin/nc-ia")):
+        if os.access(p, os.X_OK):
+            return p
+    return shutil.which("nc-ia") or ""
+
+
+def etat_ia():
+    """Le JSON de « nc-ia etat --json » ({} s'il ne répond pas)."""
+    p = nc_ia()
+    if not p:
+        return {}
+    try:
+        r = subprocess.run([p, "etat", "--json"], capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL)
+        d = json.loads(r.stdout)
+        return d if isinstance(d, dict) else {}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+
+
+def ia_coupee(e):
+    return reglage("IA_MODE", "auto") == "non" or e.get("mode") == "non" or bool(e.get("coupee"))
+
+
+def agents_disponibles(e):
+    """[(programme, nom)] des IA permises dont l'agent en terminal est installé (sans doublon)."""
+    if ia_coupee(e):
+        return []
+    res, vus = [], set()
+    for ia in e.get("ias") or []:
+        prog = ia.get("cli") or ""
+        if prog and ia.get("cli_disponible") and ia.get("disponible") is not False and prog not in vus and shutil.which(prog):
+            vus.add(prog)
+            res.append((prog, ia.get("nom") or prog))
+    return res
+
+
+def agent_par_defaut(e):
+    """Le programme de l'agent de l'IA choisie (usage « question »), ou '' : IA coupée, aucun agent installé…"""
+    if ia_coupee(e):
+        return ""
+    u = (e.get("usages") or {}).get("question") or {}
+    prog = u.get("cli") or ""
+    if prog and u.get("cli_disponible") and shutil.which(prog):
+        return prog
+    return ""
+
+
+# ── La session kitty ────────────────────────────────────────────────────────────────────────────────────────────
+def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
+    """Le texte de la session kitty : Neovim à gauche (62 %), l'agent à droite ; sans agent, un shell. Dispositions
+    « splits ». Un 2e onglet lazygit (s'il existe), un 3e onglet shell. seul_nvim : Neovim seul."""
+    if "\n" in dossier:
+        raise ValueError("dossier")
+    nom = os.path.basename(dossier.rstrip("/")) or dossier
+    l = ["new_tab " + (nom if nom else "Code"), "layout splits", "cd " + dossier]
+    if nvim:
+        l.append("launch --title nvim nvim")
+    else:
+        l.append("launch --title shell")
+    if not seul_nvim:
+        droite = "launch --location=vsplit --bias=38 --keep-focus --title "
+        if agent:
+            droite += shlex.quote(agent) + " " + shlex.quote(MOI) + " --lancer-agent " + shlex.quote(agent)
+        else:
+            droite += "shell"
+        l.append(droite)
+        if lazygit:
+            l += ["new_tab lazygit", "cd " + dossier, "launch --title lazygit lazygit"]
+        l += ["new_tab shell", "cd " + dossier, "launch --title shell"]
+    return "\n".join(l) + "\n"
+
+
+def lancer_agent(prog, args):
+    """Le programme de l'agent, puis un shell quand il s'arrête (la fenêtre reste ouverte pour la suite)."""
+    if shutil.which(prog):
+        try:
+            subprocess.call([prog, *args])
+        except OSError:
+            pass
+    sh = os.environ.get("SHELL") or shutil.which("zsh") or shutil.which("bash") or "/bin/sh"
+    os.execvp(sh, [sh])
+
+
+def ouvrir(dossier, agent="", seul_nvim=False):
+    kitty = shutil.which("kitty")
+    if not kitty:
+        print(T("nc-code : kitty est introuvable.", "nc-code: kitty not found."), file=sys.stderr)
+        return 1
+    texte = session(dossier, agent, seul_nvim, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit")))
+    p = subprocess.Popen([kitty, "--directory", dossier, "--session", "-"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        p.stdin.write(texte.encode())
+        p.stdin.close()
+    except OSError:
+        pass
+    return 0
+
+
+# ── Le sélecteur ────────────────────────────────────────────────────────────────────────────────────────────────
+def choisir_fzf(lignes, invite, entete, avec_touches=False):
+    """(touche, ligne choisie) ; ('', '') si annulé."""
+    cmd = ["fzf", "--ansi", "--color=16", "--delimiter", "\t", "--with-nth", "1", "--prompt", invite, "--header", entete,
+           "--layout=reverse", "--info=inline-right"]
+    if avec_touches:
+        cmd += ["--expect", "ctrl-a,alt-enter", "--preview", f"{shlex.quote(sys.executable)} {shlex.quote(MOI)} --apercu {{2}}",
+                "--preview-window", "right:55%:wrap"]
+    try:
+        r = subprocess.run(cmd, input="\n".join(lignes), capture_output=False, stdout=subprocess.PIPE, text=True)
+    except OSError:
+        return "", ""
+    sortie = r.stdout.split("\n")
+    if r.returncode != 0 or len(sortie) < 2:
+        return "", ""
+    return (sortie[0], sortie[1]) if avec_touches else ("", sortie[0])
+
+
+def choisir_liste(lignes, invite):
+    """Sans fzf : une liste numérotée. « 3 », « 3 a » (choisir l'agent) ou « 3 n » (seulement Neovim)."""
+    for i, l in enumerate(lignes, 1):
+        print(f"{i:>3}  {l.split(chr(9))[0]}")
+    try:
+        rep = input(invite).strip().split()
+    except (EOFError, KeyboardInterrupt):
+        return "", ""
+    if not rep or not rep[0].isdigit() or not 1 <= int(rep[0]) <= len(lignes):
+        return "", ""
+    touche = {"a": "ctrl-a", "n": "alt-enter"}.get(rep[1].lower() if len(rep) > 1 else "", "")
+    return touche, lignes[int(rep[0]) - 1]
+
+
+def selecteur():
+    liste = [ligne_projet(d) for d in projets()]
+    if not liste:
+        print(T("Aucun dépôt git trouvé (cd dans un projet, puis nc-code .).", "No git repository found (cd into a project, then nc-code .)."))
+        return 1
+    entete = T("Entrée : tout · Alt+Entrée : Neovim seul · Ctrl+A : choisir l'agent", "Enter: everything · Alt+Enter: Neovim only · Ctrl+A: pick the agent")
+    if shutil.which("fzf") and sys.stdin.isatty():
+        touche, ligne = choisir_fzf(liste, T("projet > ", "project > "), entete, True)
+    else:
+        touche, ligne = choisir_liste(liste, T("Numéro (3, 3 a = choisir l'agent, 3 n = Neovim seul) : ", "Number (3, 3 a = pick the agent, 3 n = Neovim only): "))
+    if not ligne or "\t" not in ligne:
+        return 0
+    dossier = ligne.split("\t", 1)[1]
+    e = etat_ia()
+    agent = agent_par_defaut(e)
+    if touche == "ctrl-a":
+        agents = agents_disponibles(e)
+        options = [f"{n} ({p})\t{p}" for p, n in agents] + [T("Un shell, sans agent", "A shell, no agent") + "\t"]
+        if len(options) > 1:
+            if shutil.which("fzf") and sys.stdin.isatty():
+                _, rep = choisir_fzf(options, T("agent > ", "agent > "), dossier)
+            else:
+                _, rep = choisir_liste(options, T("Numéro de l'agent : ", "Agent number: "))
+            if not rep:
+                return 0
+            agent = rep.split("\t", 1)[1] if "\t" in rep else ""
+    return ouvrir(dossier, agent, seul_nvim=(touche == "alt-enter"))
+
+
+def dans_fenetre():
+    """Lancé sans terminal (Super + X) : le sélecteur dans une petite fenêtre kitty flottante (classe nc-code)."""
+    kitty = shutil.which("kitty")
+    if not kitty:
+        return 1
+    subprocess.Popen([kitty, "--class", "nc-code", "--title", T("Espace de code", "Code workspace"), sys.executable, MOI, "--selecteur"],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
+def main(a):
+    if a and a[0] in ("-h", "--help", "aide"):
+        print(__doc__.strip())
+        return 0
+    if a and a[0] == "--apercu" and len(a) > 1:
+        apercu(a[1])
+        return 0
+    if a and a[0] == "--lancer-agent" and len(a) > 1:
+        lancer_agent(a[1], a[2:])
+        return 0
+    if a and a[0] == "--liste":
+        for d in projets():
+            print(ligne_projet(d))
+        return 0
+    seule = "--session-seule" in a
+    seul_nvim = "--nvim" in a
+    sans_agent = "--sans-agent" in a
+    agent_force = a[a.index("--agent") + 1] if "--agent" in a and a.index("--agent") + 1 < len(a) else ""
+    reste = [x for i, x in enumerate(a) if not x.startswith("--") and not (i and a[i - 1] == "--agent")]
+    if "--selecteur" in a or (not reste and not seule):
+        if "--selecteur" not in a and not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return dans_fenetre()
+        return selecteur()
+    dossier = os.path.realpath(os.path.expanduser(reste[0]))
+    if not os.path.isdir(dossier):
+        print(T(f"nc-code : « {reste[0]} » n'est pas un dossier.", f"nc-code: “{reste[0]}” is not a folder."), file=sys.stderr)
+        return 1
+    if sans_agent or seul_nvim:
+        agent = ""
+    else:
+        agent = agent_force or agent_par_defaut(etat_ia())
+    if seule:
+        sys.stdout.write(session(dossier, agent, seul_nvim, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit"))))
+        return 0
+    return ouvrir(dossier, agent, seul_nvim)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

@@ -174,7 +174,7 @@ local PLEINE_PLACE = { ["JARVIS"] = true, ["Réglages du bureau"] = true, ["Desk
 
 -- ── Mémoire des fenêtres flottantes ─────────────────────────────────────────
 -- À la fermeture d'une fenêtre flottante, sa taille et sa place (en proportion de l'écran) sont notées par appli ;
--- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, incrustation vidéo, jeux,
+-- à sa prochaine ouverture flottante, elle les retrouve. Exclues : terminal déroulant, sélecteur de l'espace de code, incrustation vidéo, jeux,
 -- cockpit JARVIS (sa place est fixe, voir plus bas).
 local MEMOIRE = STATE .. "fenetres-flottantes"
 os.execute("mkdir -p '" .. STATE .. "'")
@@ -185,7 +185,7 @@ end
 
 local function exclue(w)
     local c, t = w.class or "", w.initial_title or ""
-    return c == "" or c == "dropterm" or c == "fingerpop" or est_jeu(w) or w.pinned
+    return c == "" or c == "dropterm" or c == "nc-code" or c == "fingerpop" or est_jeu(w) or w.pinned
         or t:match("[Pp]icture") ~= nil or t:match("Incrustation") ~= nil
         or PLEINE_PLACE[t] or PLEINE_PLACE[w.title or ""]
 end

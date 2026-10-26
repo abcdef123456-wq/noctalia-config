@@ -84,6 +84,8 @@ end
 
 -- ── Applis et barre ──────────────────────────────────────────────────────────
 touche(SUPER .. " + code:36", cmd(terminal),                       trad("Applis et barre|Terminal", "Terminal"))
+-- Espace de code (nc-code) : un sélecteur de projets, puis Neovim + l'agent de l'IA + lazygit dans une fenêtre kitty
+touche(SUPER .. " + code:53", cmd("~/.local/bin/nc-code"),         trad("Applis et barre|Espace de code (projet, Neovim et agent IA)", "Code workspace (project, Neovim and AI agent)"))
 touche(SUPER .. " + SHIFT + code:38", cmd("~/.local/bin/nc-jarvis chat"),    trad("IA|Chat JARVIS", "JARVIS chat"))
 touche(SUPER .. " + CTRL + code:38", cmd("~/.local/bin/nc-jarvis tableau"), trad("IA|Cockpit JARVIS", "JARVIS dashboard"))
 -- IA du bureau (nc-ia : celle choisie dans nc-reglages → Intelligence artificielle ; coupée, ces touches le disent)

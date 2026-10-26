@@ -4,7 +4,7 @@
   nc-ia etat [--json]                  le mode, l'IA choisie pour chaque usage, celles qui sont disponibles
   nc-ia demander [options] QUESTION    la réponse (QUESTION « - » : lue sur l'entrée standard)
         --flux                         morceau par morceau : une ligne JSON {"t": …} chacun ({"ia": …} avant)
-        --usage question|texte|commande|image   (question par défaut)
+        --usage question|texte|commande|image|commit   (question par défaut)
         --ia ID                        cette IA-là (sinon : le réglage) ; --image FICHIER : une image jointe
   nc-ia texte ACTION [--presse|--selection|--stdin] [--copier] [--flux]
                                        sur le texte sélectionné (sinon copié) : resumer, traduire, corriger,
@@ -27,6 +27,9 @@
                                        réglages, mises à jour) : un plan d'actions permises, confirmé avant d'agir
                                        (« @ » dans le Spotlight) ; nc-ia executer PLAN [N…] le réalise
   nc-ia commande DESCRIPTION           une commande shell seule (Alt + I dans le terminal)
+  nc-ia commit [--dossier D]           le message de commit du diff INDEXÉ (style des derniers commits), sur la sortie
+                                       standard ; code 2 rien d'indexé, 3 IA coupée, 4 secret dans le diff (rien n'est
+                                       envoyé ; le fichier est nommé, jamais la valeur) ; gcia dans le terminal
   nc-ia raccourci DESCRIPTION [--json]  un raccourci clavier décrit en français (« Super + F ouvre Firefox ») :
                                        proposé, vérifié (touches, appli, bureau, page de l'île), jamais ajouté
   nc-ia capture [QUESTION]             une zone de l'écran, expliquée (Super + Maj + I)
@@ -130,7 +133,7 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
   nc-ai status [--json]                the mode, the AI chosen for each use, the available ones
   nc-ai ask [options] QUESTION         the answer (QUESTION “-”: read from standard input)
         --flux                         piece by piece: one JSON line {"t": …} each ({"ia": …} first)
-        --usage question|texte|commande|image   (question by default)
+        --usage question|texte|commande|image|commit   (question by default)
         --ia ID                        that AI (otherwise: the setting); --image FILE: an attached image
   nc-ai text ACTION [--presse|--selection] [--copier] [--flux]
                                        on the selected (else copied) text: resumer (summarize), traduire (translate),
@@ -154,6 +157,9 @@ DOC_EN = """nc-ai: the desktop's AI, a single door for everything (Spotlight, co
                                        settings, updates): a plan of allowed actions, confirmed before acting (“@” in
                                        Spotlight); nc-ai execute PLAN [N…] carries it out
   nc-ai command DESCRIPTION            a single shell command (Alt + I in the terminal)
+  nc-ai commit [--dossier D]           the commit message for the STAGED diff (in the style of the latest commits), on
+                                       standard output; exit 2 nothing staged, 3 AI off, 4 secret in the diff (nothing
+                                       is sent; the file is named, never the value); gcia in the terminal
   nc-ai shortcut DESCRIPTION [--json]  a keyboard shortcut described in words (“Super + F opens Firefox”):
                                        proposed, checked (keys, app, desktop, island page), never added
   nc-ai screenshot [QUESTION]          an area of the screen, explained (Super + Shift + I)
@@ -2632,6 +2638,8 @@ def consigne(usage):
                  "centre, notifications, son, reseau, bluetooth, systeme, calendrier, minuteur), or a one-line shell "
                  "command. A single target: if the description asks for several, keep the main one. nom: a short name in "
                  "English. If the request is not a shortcut, answer {}.")
+    if usage == "commit":
+        return consigne_commit()
     if usage == "texte":
         return T("Tu transformes le texte que l'on te donne selon la consigne. Réponds seulement par le résultat, sans "
                  "introduction ni commentaire, en texte simple. " + SANS_OUTILS[0],
@@ -4914,6 +4922,190 @@ def raccourci_ia(description):
     return valider_raccourci(rep, rc, applis)
 
 
+# ── Message de commit (nc-ia commit ; gcia dans le terminal) ────────────────────────────────────────────────────
+# Codes de sortie : 0 le message sur la sortie standard, 2 rien d'indexé, 3 IA coupée, 4 secret dans le diff (rien
+# n'est envoyé), 1 autre erreur. L'IA ne voit que le diff indexé, borné, et les sujets des derniers commits.
+COMMIT_MAX = 60000                 # caractères de diff envoyés au plus
+COMMIT_ETAT_MAX = 6000             # la liste des fichiers (--stat) quand le diff est coupé
+COMMIT_LOCKS = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json", "Cargo.lock", "poetry.lock",
+                "Pipfile.lock", "composer.lock", "Gemfile.lock", "go.sum", "flake.lock", "uv.lock", "bun.lockb",
+                "pdm.lock", "mix.lock", "pubspec.lock", "Package.resolved", "gradle.lockfile"}
+COMMIT_FICHIERS_SECRETS = re.compile(
+    r"(^|/)(\.env(\.(?!example$|sample$|template$|dist$)[^/]*)?|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.npmrc|\.pypirc"
+    r"|credentials(\.json)?|\.git-credentials|[^/]*\.(pem|key|p12|pfx|keystore|jks|kdbx|ovpn)|secrets?\.(json|ya?ml|toml))$",
+    re.IGNORECASE)
+COMMIT_MOTIFS_SECRETS = (
+    ("clé privée", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("clé d'API (sk-…)", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
+    ("jeton GitHub", re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
+    ("jeton Slack", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    ("clé Google", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}")),
+    ("clé Groq", re.compile(r"\bgsk_[A-Za-z0-9]{20,}")),
+    ("clé AWS", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("jeton JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
+    ("identifiants dans une adresse", re.compile(r"://[^/\s:@\"']+:[^/\s@\"'$<{(]{4,}@")),
+    ("jeton de bot Telegram", re.compile(r"/bot\d{5,}:[\w-]{30,}")),
+    ("valeur d'un mot de passe ou d'un jeton", re.compile(
+        r"(?i)(password|passwd|secret|token|api[_-]?key|apikey|private[_-]?key)[\w.-]*[\"']?\s*[=:]\s*"
+        r"([\"'][^\"'\s$<{(]{12,}[\"']|[A-Za-z0-9+/_-]{24,}\s*$)")),
+)
+
+
+def commit_git(dossier, *args, maxi=8 * 1024 * 1024):
+    """La sortie de git dans ce dossier (au plus maxi octets) ; ErreurIA si git échoue ou n'est pas là."""
+    try:
+        p = subprocess.Popen(["git", "-C", dossier, "-c", "core.quotepath=off", *args], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                             env=dict(os.environ, GIT_PAGER="cat", LC_ALL="C.UTF-8"))
+    except OSError:
+        raise ErreurIA(T("git n'est pas installé.", "git is not installed.")) from None
+    try:
+        sortie = p.stdout.read(maxi)
+        if p.stdout.read(1):                       # plus gros que maxi : on s'arrête là
+            p.kill()
+            p.wait(10)
+            return sortie.decode("utf-8", "replace")
+        err = p.stderr.read(2000)
+        p.wait(10)
+    finally:
+        p.stdout.close()
+        p.stderr.close()
+    if p.returncode != 0:
+        raise ErreurIA((err.decode("utf-8", "replace").strip().splitlines() or [T("git a échoué.", "git failed.")])[-1])
+    return sortie.decode("utf-8", "replace")
+
+
+def commit_fichiers(dossier):
+    """[(état, chemin)] des fichiers indexés (un renommage : le nouveau chemin)."""
+    morceaux = commit_git(dossier, "diff", "--cached", "--name-status", "-M", "-z", "--no-ext-diff").split("\0")
+    res, i = [], 0
+    while i < len(morceaux) and morceaux[i]:
+        etat = morceaux[i][0]
+        n = 2 if etat in "RC" else 1
+        chemin = morceaux[i + n] if i + n < len(morceaux) else ""
+        res.append((etat, chemin))
+        i += n + 1
+    return res
+
+
+def commit_cherche_secrets(fichiers, sections):
+    """Les secrets du diff indexé : [« fichier (ce que c'est) »], jamais la valeur."""
+    trouves = []
+    for etat, chemin in fichiers:
+        if etat != "D" and COMMIT_FICHIERS_SECRETS.search(chemin):
+            trouves.append(T(f"{chemin} (fichier de secrets)", f"{chemin} (secrets file)"))
+    for chemin, texte in sections:
+        for l in texte.splitlines():
+            if not l.startswith("+") or l.startswith("+++"):
+                continue
+            quoi = next((q for q, motif in COMMIT_MOTIFS_SECRETS if motif.search(l)), "")
+            if quoi:
+                trouves.append(f"{chemin} ({quoi})")
+                break                                 # un seul constat par fichier suffit
+    return list(dict.fromkeys(trouves))
+
+
+def commit_sections(diff):
+    """[(chemin, texte)] : le diff coupé fichier par fichier."""
+    res = []
+    for bloc in re.split(r"(?m)^(?=diff --git )", diff):
+        if not bloc.strip():
+            continue
+        m = re.match(r"diff --git a/(.*?) b/(.*)\n", bloc)
+        res.append((m[2] if m else "?", bloc))
+    return res
+
+
+def commit_diff_borne(dossier):
+    """(sections lisibles, texte à envoyer). Binaires et lockfiles : leur nom seulement ; au-delà de COMMIT_MAX
+    caractères : la liste des fichiers (--stat) puis le début de chaque fichier."""
+    sections = commit_sections(commit_git(dossier, "diff", "--cached", "--no-color", "--no-ext-diff", "-M"))
+    lisibles, resume = [], []
+    for chemin, texte in sections:
+        base = chemin.rsplit("/", 1)[-1]
+        if base in COMMIT_LOCKS or base.endswith((".lock", ".min.js", ".min.css")):
+            resume.append(T(f"(fichier généré, modifié : {chemin})", f"(generated file, changed: {chemin})"))
+        elif "\nBinary files " in texte or "\nGIT binary patch" in texte:
+            resume.append(T(f"(fichier binaire, modifié : {chemin})", f"(binary file, changed: {chemin})"))
+        else:
+            lisibles.append((chemin, texte))
+    if sum(len(t) for _, t in lisibles) <= COMMIT_MAX:
+        envoi = "".join(t if t.endswith("\n") else t + "\n" for _, t in lisibles)
+    else:
+        stat = commit_git(dossier, "diff", "--cached", "--no-color", "--no-ext-diff", "-M", "--stat=100",
+                          maxi=400000)[:COMMIT_ETAT_MAX]
+        part = max(500, (COMMIT_MAX - len(stat)) // max(1, len(lisibles)))
+        debuts = []
+        for chemin, texte in lisibles:
+            if len(texte) > part:
+                texte = texte[:part].rsplit("\n", 1)[0] + "\n" + T("[… suite du fichier coupée]", "[… rest of the file cut]") + "\n"
+            debuts.append(texte)
+        envoi = T("Le diff est trop gros : la liste des fichiers, puis le début de chacun.\n\n",
+                  "The diff is too big: the list of files, then the start of each.\n\n") + stat + "\n" + "".join(debuts)
+    if resume:
+        envoi += "\n" + "\n".join(resume) + "\n"
+    return lisibles, envoi
+
+
+def consigne_commit():
+    return T("Tu écris le message d'un commit git à partir du diff indexé. Réponds UNIQUEMENT par le message, sans "
+             "introduction, sans balises de code (pas de ```), sans guillemets autour. Suis exactement le style des "
+             "sujets des derniers commits du dépôt donnés en exemple : même langue, même longueur, même forme (par "
+             "exemple « Zone : ce qui change pour l'utilisateur »). Le sujet tient sur une ligne de 72 caractères au "
+             "plus, sans point final. Ajoute un corps court (quelques lignes après une ligne vide) seulement si le "
+             "diff est gros ; sinon le sujet seul. Décris ce que le diff change vraiment, rien d'inventé. N'écris "
+             "jamais de ligne Co-Authored-By ni de signature. " + SANS_OUTILS[0],
+             "You write a git commit message from the staged diff. Answer ONLY with the message, no introduction, no "
+             "code fences (no ```), no quotes around it. Follow exactly the style of the subjects of the repository's "
+             "latest commits given as examples: same language, same length, same form (for example “Area: what changes "
+             "for the user”). The subject is one line of at most 72 characters, no trailing period. Add a short body "
+             "(a few lines after a blank line) only if the diff is big; otherwise the subject alone. Describe what the "
+             "diff really changes, nothing invented. Never write a Co-Authored-By line or a signature. " + SANS_OUTILS[1])
+
+
+def commit_nettoyer(rep):
+    """Le message tel que git le veut : sans clôture de code, sans guillemets autour, sans Co-Authored-By."""
+    rep = rep.strip()
+    rep = "\n".join(l.rstrip() for l in rep.splitlines() if not re.match(r"(?i)\s*co-authored-by\s*:", l)
+                    and not l.strip().startswith("```")).strip()
+    for g, d in (('"', '"'), ("'", "'"), ("«", "»"), ("“", "”")):
+        if len(rep) > 1 and rep.startswith(g) and rep.endswith(d) and rep.count(g) == (1 if g != d else 2):
+            rep = rep[1:-1].strip()
+    rep = re.sub(r"^(message de commit|commit message)\s*:\s*", "", rep, flags=re.I).strip()
+    lignes = rep.split("\n")
+    if len(lignes) > 1 and lignes[1].strip():           # une ligne vide entre le sujet et le corps
+        lignes.insert(1, "")
+    return "\n".join(lignes).strip()
+
+
+def commit_message(dossier):
+    """(code, texte) : voir plus haut. texte : le message, ou ce qu'il faut dire sur la sortie d'erreur."""
+    if coupee():
+        return 3, message_coupee()
+    fichiers = commit_fichiers(dossier)
+    if not fichiers:
+        return 2, T("Rien n'est indexé (git add d'abord).", "Nothing is staged (git add first).")
+    lisibles, envoi = commit_diff_borne(dossier)
+    secrets = commit_cherche_secrets(fichiers, lisibles)
+    if secrets:
+        return 4, T("Un secret semble être dans le diff, rien n'a été envoyé à l'IA : ",
+                    "A secret seems to be in the diff, nothing was sent to the AI: ") + ", ".join(secrets[:8])
+    try:
+        sujets = commit_git(dossier, "log", "-15", "--no-merges", "--format=%s").splitlines()
+    except ErreurIA:                                     # dépôt sans commit
+        sujets = []
+    noms = "\n".join(f"{e} {c}" for e, c in fichiers[:200])
+    texte = (T("Sujets des derniers commits du dépôt (le style à suivre) :\n", "Subjects of the repository's latest commits (the style to follow):\n")
+             + ("\n".join(sujets) if sujets else T("(aucun : premier commit)", "(none: first commit)"))
+             + T("\n\nFichiers indexés :\n", "\n\nStaged files:\n") + noms
+             + T("\n\nDiff indexé :\n", "\n\nStaged diff:\n") + envoi)
+    rep, _ = demander(texte, "commit", sortie=lambda m: None)
+    msg = commit_nettoyer(rep)
+    if not msg:
+        raise ErreurIA(T("L'IA n'a rien proposé.", "The AI proposed nothing."))
+    return 0, msg
+
+
 # ── Commandes ───────────────────────────────────────────────────────────────────────────────────────────────────
 # Le programme agentique (qui sait lire et modifier un projet) de chaque IA, pour Neovim (Espace i a) : le sien pour
 # un programme installé, celui du même éditeur pour une API ; aucun pour les autres (JARVIS, Mistral, Ollama…)
@@ -5059,6 +5251,11 @@ def main(a):
                 return 0
             demander(q, usage, force, image, flux=flux)
             return 0
+        if c == "commit":
+            dossier = a[a.index("--dossier") + 1] if "--dossier" in a and a.index("--dossier") + 1 < len(a) else "."
+            code, texte = commit_message(dossier)
+            print(texte, file=sys.stdout if code == 0 else sys.stderr)
+            return code
         if c == "raccourci":
             q = " ".join(x for x in a if not x.startswith("--")).strip()
             if not q:

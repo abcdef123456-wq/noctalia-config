@@ -85,6 +85,7 @@ HOME_FILES=(
   .local/bin/nc-diag
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
+  .local/bin/nc-code
   .local/bin/nc-assistant
   .local/bin/nc-noeud
   .local/bin/nc-bac
