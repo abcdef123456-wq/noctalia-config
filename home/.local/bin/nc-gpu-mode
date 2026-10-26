@@ -70,7 +70,10 @@ carte_ecran_interne() {
 }
 
 # La famille de ce portable a-t-elle un MUX (écran relié au choix à l'une ou l'autre carte) ? Lu dans le DMI :
-# Legion, LOQ, ROG, TUF, Alienware, Omen, Predator, Razer, Aorus, MSI gaming
+# Legion, LOQ, ROG, TUF, Alienware, Omen, Predator, Razer, Aorus, MSI gaming.
+# Pour compléter la liste : ajouter au premier « case » un motif tiré de sys_vendor, product_family, product_name ou
+# product_version (en minuscules, entouré d'espaces s'il est court), avec un test dans tests/test_gpu_mode.py
+# (test_familles_a_mux_gardent_le_mode). Le README (« Mode graphique ») dit comment le demander par une issue.
 mux_probable() {
   local id v
   v="$(dmi sys_vendor)"

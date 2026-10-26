@@ -309,6 +309,12 @@ system76-power ou le module legion_laptop, la bascule est faite pour toi, puis l
 PC à une seule carte graphique, ni sur un PC fixe. En ligne de commande : `nc-gpu-mode info` (mode, manière de basculer
 sur ce PC) et `nc-gpu-mode basculer` (avec une question avant le redémarrage).
 
+Sans supergfxctl, system76-power ni legion_laptop, le changement passe par le BIOS : il n'est alors proposé que si le
+mode Dédiée est déjà actif, ou si la famille du portable est connue pour avoir un MUX (Legion, LOQ, ROG, TUF, Alienware,
+Omen, Predator, Razer, Aorus, MSI gaming). Ainsi, un portable sans ce réglage dans son BIOS ne redémarre pas pour rien.
+Ton PC a un MUX mais l'option n'apparaît pas ? Ouvre une issue avec le résultat de
+`cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_family`.
+
 Les services Google (agenda dans le calendrier de l’île, par la connexion Google de JARVIS) ne s’affichent que si
 **nc-settings → Intégration Google** est activé : sans compte Google relié, rien ne change (voir [docs/pages-ile.md](docs/pages-ile.md)).
 
