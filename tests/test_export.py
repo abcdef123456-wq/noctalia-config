@@ -601,7 +601,7 @@ class ExportIsole(unittest.TestCase):
         self.assertFalse(list(clone.glob(".nc-export.*")))
 
     def test_e6_dossier_personnel_echappe_et_borne(self):
-        """E6 : sed « s|$HOME|@HOME@| » sans échappement ni borne : /home/al changeait /home/alice en @HOME@ice, et un
+        """E6 : sed « s|$HOME|@HOME@| » sans échappement ni borne : un HOME « …/al » changeait « …/alice » en « @HOME@ice », et un
         « . » du chemin valait n'importe quel caractère."""
         maison = self.racine / "mai.son+1"
         shutil.copytree(self.home, maison, symlinks=True)

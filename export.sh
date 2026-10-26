@@ -206,8 +206,8 @@ DEPOT_SEUL=(
 )
 
 # Le dossier personnel devient @HOME@. Échappé pour sed (un « . » ou un « + » dans le chemin n'est pas un joker), et
-# borné : seulement suivi d'un « / », d'un guillemet, d'une espace ou de la fin de ligne (/home/al ne touche pas
-# /home/alice). Un chemin resté tel quel est arrêté par le contrôle final (/home/<nom>).
+# borné : seulement suivi d'un « / », d'un guillemet, d'une espace ou de la fin de ligne (un HOME « …/al » ne touche pas
+# « …/alice »). Un chemin resté tel quel est arrêté par le contrôle final (/home/<nom>).
 home_re="$(printf '%s' "${HOME%/}" | sed 's/[][\\.*^$+?(){}|#]/\\&/g')"
 normaliser_home() { # normaliser_home [options de sed] FICHIER...
   if [ -z "$home_re" ]; then sed -e '' "$@"; return; fi  # HOME=/ : rien à remplacer
