@@ -296,6 +296,7 @@ class Ile(unittest.TestCase):
                  property bool batteriePc: false
                  property bool jeu: false
                  property var meteo: ({})
+                 property string meteoErreur: ""
                  property bool recherche: false
                  property string activiteType: ""
                  function activite(n,d) {}
