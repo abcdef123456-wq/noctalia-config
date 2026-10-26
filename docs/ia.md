@@ -183,8 +183,17 @@ pour une passerelle ou un serveur compatible (LiteLLM, LM Studio…), en HTTPS (
   `~/.local/share/nc/whisper/`, sans internet). `wtype` écrit directement ; sans lui, le texte est collé et ton
   presse-papiers remis (texte, image ou fichiers, avec un seul type : une copie web revient sans sa mise en forme, et
   des fichiers coupés dans Fichiers redeviennent copiés). S'il ne peut pas être lu, rien n'est collé : le texte est
-  copié pour Ctrl + V, et la dernière dictée reste dans `$XDG_RUNTIME_DIR/nc-dictee-derniere.txt` jusqu'à la fin de
-  la session. Réglage « Dictée partout ».
+  copié pour Ctrl + V. Réglage « Dictée partout ».
+  - **Vie privée** : la dernière dictée reste en clair dans `$XDG_RUNTIME_DIR/nc-dictee-derniere.txt` (droits 0600,
+    en mémoire vive) jusqu'à la fin de la session, et le texte apparaît dans la notification (les 120 premiers
+    caractères, 300 en cas de copie). Un texte copié par la dictée n'est pas gardé dans l'historique du presse-papiers
+    de l'île (marque `nc-dictee-copie`, 5 s). Le détail d'une erreur va dans `$XDG_RUNTIME_DIR/nc-dictee.log`.
+  - **Sécurités** : pas de dictée sur un écran verrouillé, et le micro est fermé au verrouillage et avant la veille ;
+    l'enregistrement s'arrête au bout de **10 min** (notification ; ce qui a été dit est gardé et s'écrit au prochain
+    appui) ; refus sans `XDG_RUNTIME_DIR` ; le texte n'est tapé que dans la fenêtre où la dictée a commencé, sinon il est
+    copié (« La fenêtre a changé : texte copié, colle-le avec Ctrl+V »).
+  - **Secours** : en mode automatique, si JARVIS ne répond pas, l'audio part chez Groq, OpenAI ou Gemini, et la
+    notification le dit (« Écrit — via Groq »). Réglage `DICTEE_SECOURS=non` pour l'interdire.
 - **Dictée** (micro du chat) : par JARVIS ; sans JARVIS, ou s'il ne répond pas, par Groq, OpenAI ou Gemini (Whisper).
 - **Agents** (Claude Code, Codex, OpenCode… dans l'île) : section « Agents IA » des réglages ; coupés avec le reste.
 - `nc-diag` dit quelle IA répond et vérifie que le fichier des clés est privé.

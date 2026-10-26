@@ -112,7 +112,9 @@ paramètre. Ce serveur souffle aussi « Transcription en français. » à Whispe
 la transcription reste bonne, mais un mot peut parfois sortir en français. Une erreur (serveur arrêté, micro coupé,
 clé refusée, gateway sans `/api/transcribe` → HTTP 404) s’affiche sous l’orbe, l’écoute s’arrête. Un clic pendant
 une demande ou pendant que `nc-dictee` tourne (double clic) est ignoré ; fermer l’île en pleine écoute annule
-l’enregistrement. Pas de dictée dans le cockpit plein écran, pas de synthèse vocale.
+l’enregistrement. L’enregistrement s’arrête seul au bout de 10 min et le fichier audio est limité à 24 Mo ; pas de
+dictée écran verrouillé. Une erreur réseau s’affiche en clair, son détail est dans `$XDG_RUNTIME_DIR/nc-dictee.log`.
+Pas de dictée dans le cockpit plein écran, pas de synthèse vocale.
 
 ## Architecture et contrat vérifié
 

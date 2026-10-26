@@ -3,8 +3,13 @@
 #   T:<texte sur une ligne, retours à la ligne remplacés par \037>      texte (4 000 caractères au plus)
 #   I:<octets>:<identifiant>:<chemin>                                   image PNG, gardée en fichier privé (0600) par
 #                                                                       nc-ile-memo dans ~/.local/state/nc/ile/images
-# Rien pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret).
+# Rien pour une copie de la dictée (marque nc-dictee-copie de moins de 5 s) ni pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret).
 # Le contenu n'est jamais journalisé.
+# Une copie de nc-dictee (texte dicté, marque datée de moins de 5 s) : jamais gardée dans l'historique
+m="${XDG_RUNTIME_DIR:-}/nc-dictee-copie"
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$m" ]; then
+  d=$(stat -c %Y "$m" 2>/dev/null) && [ $(( $(date +%s) - d )) -lt 5 ] && exit 0
+fi
 t=$(wl-paste --list-types 2>/dev/null) || exit 0
 case "$t" in *x-kde-passwordManagerHint*|*x-nc-secret*) exit 0 ;; esac
 if printf '%s' "$t" | grep -q '^image/png'; then

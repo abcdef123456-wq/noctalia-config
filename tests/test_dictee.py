@@ -36,9 +36,18 @@ class Serveur(BaseHTTPRequestHandler):
     reponse = {"success": True, "text": "  bonjour jarvis ", "engine": "test-whisper"}
     entree = None
     reprendre = None
+    code = 200                              # 503 : JARVIS en panne (secours vers l'API de transcription)
 
     def do_POST(self):
         corps = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path == "/groq/audio/transcriptions":       # le faux Groq de nc-ia (URL_GROQ)
+            Serveur.recus.append(dict(chemin=self.path))
+            data = json.dumps({"text": "salut depuis groq"}).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers()
+            self.wfile.write(data)
+            return
+        if Serveur.code != 200:
+            self.send_response(Serveur.code); self.end_headers(); return
         Serveur.recus.append(dict(chemin=self.path, cle=self.headers.get("X-Secret-Key"), type=self.headers.get("Content-Type"), taille=len(corps)))
         if self.headers.get("X-Secret-Key") != CLE:
             self.send_response(401); self.end_headers(); return
@@ -79,6 +88,7 @@ class Dictee(unittest.TestCase):
         Serveur.recus = []
         Serveur.reponse = {"success": True, "text": "  bonjour jarvis ", "engine": "test-whisper"}
         Serveur.entree = Serveur.reprendre = None
+        Serveur.code = 200
         self.addCleanup(lambda: self.lancer("cancel"))
 
     def configurer(self, cle, url=None):
@@ -168,6 +178,9 @@ class Dictee(unittest.TestCase):
         code, r = self.lancer("stop")
         self.assertEqual(code, 1)
         self.assertTrue(r["error"].startswith("Transcription impossible : "), r["error"])
+        self.assertNotIn("127.0.0.1", r["error"], "le détail réseau va au journal, pas à l'écran")
+        self.assertNotIn("Errno", r["error"])
+        self.assertIn("Connection refused", (self.home / "run/nc-dictee.log").read_text())
         self.assertFalse((self.home / "run/nc-dictee.wav").exists())
 
     def test_non_configure_et_annulation(self):
@@ -296,6 +309,8 @@ class Dictee(unittest.TestCase):
         (b / "notify-send").write_text('#!/bin/sh\necho "notify-send $*" >> "$HOME/appels"\n')
         for nom in ("wtype", "notify-send"):
             (b / nom).chmod(0o755)
+        if not (b / "hyprctl").exists():                 # jamais le vrai hyprctl
+            (b / "hyprctl").write_text("#!/bin/sh\nexit 0\n"); (b / "hyprctl").chmod(0o755)
         (self.home / ".config/nc/reglages.conf").write_text(reglages)
         env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), NC_LANGUE="fr", NC_TEST_OCTETS="4000",
                    PATH=str(b) + os.pathsep + "/usr/bin:/bin", NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", NC_IA_EN_LIGNE="1")
@@ -518,6 +533,173 @@ class Dictee(unittest.TestCase):
         f = self.home / "run/nc-dictee-derniere.txt"
         self.assertEqual(f.read_text(), "bonjour jarvis")
         self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+
+    # ── Lot « dictée 2 » : verrou, limite, copie, secours, fenêtre, runtime ──
+    def faux_notify(self):
+        n = self.home / "bin/notify-send"
+        n.write_text('#!/bin/sh\necho "notify-send $*" >> "$HOME/appels"\n'); n.chmod(0o755)
+
+    def test_session_verrouillee_refuse_le_micro(self):
+        run = self.home / "run"
+        (run / "nc-verrouille").write_text("")
+        code, r = self.lancer("start")
+        self.assertEqual((code, r["ok"]), (1, False))
+        self.assertIn("verrouillé", r["error"])
+        self.assertEqual(self.lancer("status"), (0, {"ok": True, "recording": False}))
+        self.assertFalse((run / "nc-dictee.json").exists())
+        self.assertEqual(self.ptt("ptt-debut"), 1)
+        self.assertIn("verrouillé", self.appels())
+        self.assertFalse((run / "nc-dictee.json").exists())
+        self.assertFalse((run / "nc-dictee-ptt.json").exists())
+        (run / "nc-verrouille").unlink()
+        self.assertEqual(self.lancer("start")[0], 0, "déverrouillé : la dictée repart")
+
+    def test_cancel_sans_dictee_silencieux_et_rapide(self):
+        debut = time.monotonic()
+        self.assertEqual(self.lancer("cancel"), (0, {"ok": True, "recording": False}))   # lancer() exige stderr vide
+        self.assertLess(time.monotonic() - debut, 1.5)
+        self.assertEqual(self.lancer("start")[0], 0)
+        self.assertEqual(self.lancer("cancel"), (0, {"ok": True, "recording": False}))
+        self.assertFalse(self.lancer("status")[1]["recording"], "cancel (verrouillage, veille) ferme le micro")
+
+    def test_hypridle_ferme_le_micro_au_verrouillage_et_avant_la_veille(self):
+        conf = (REPO / "home/.config/hypr/hypridle.conf").read_text()
+        for cle in ("on_lock_cmd", "before_sleep_cmd"):
+            ligne = next(l for l in conf.splitlines() if l.strip().startswith(cle))
+            self.assertIn("nc-dictee cancel >/dev/null 2>&1 &)", ligne, cle + " : en fond, le verrou n'attend pas")
+        self.assertIn('touch "$XDG_RUNTIME_DIR/nc-verrouille"', conf)
+
+    def test_limite_de_duree_arret_propre_puis_transcription(self):
+        self.faux_notify()
+        self.assertEqual(self.lancer("start", NC_DICTEE_LIMITE="1")[0], 0)
+        fin = time.monotonic() + 10
+        while "Dictée arrêtée au bout de 1 s" not in self.appels() and time.monotonic() < fin:
+            time.sleep(0.1)
+        self.assertIn("Dictée arrêtée au bout de 1 s", self.appels())
+        self.assertFalse(self.lancer("status")[1]["recording"], "l'enregistreur est arrêté")
+        self.assertTrue(json.loads((self.home / "run/nc-dictee.json").read_text()).get("limite"))
+        self.assertEqual(self.lancer("stop"), (0, {"ok": True, "text": "bonjour jarvis", "engine": "test-whisper"}),
+                         "ce qui a été enregistré est transcrit comme après un arrêt normal")
+
+    def test_limite_pas_de_message_si_arrete_avant(self):
+        self.faux_notify()
+        self.assertEqual(self.lancer("start", NC_DICTEE_LIMITE="1.5")[0], 0)
+        self.assertEqual(self.lancer("stop")[0], 0)
+        time.sleep(2.5)
+        self.assertNotIn("arrêtée", self.appels())
+
+    def test_limite_par_defaut_dix_minutes(self):
+        l = importlib.machinery.SourceFileLoader("nc_dictee_limite", str(SCRIPT))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_dictee_limite", l))
+        l.exec_module(m)
+        for valeur, attendu in ((None, 600), ("", 600), ("abc", 600), ("5000", 600), ("-3", 600), ("2.5", 2.5)):
+            with self.subTest(valeur=valeur), mock.patch.dict(os.environ, {"NC_DICTEE_LIMITE": valeur} if valeur is not None else {}):
+                if valeur is None:
+                    os.environ.pop("NC_DICTEE_LIMITE", None)
+                self.assertEqual(m.limite_secondes(), attendu)
+
+    def test_enregistrement_trop_gros_pas_envoye_a_jarvis(self):
+        self.assertEqual(self.lancer("start", octets=24 * 1024 * 1024 + 100)[0], 0)
+        code, r = self.lancer("stop")
+        self.assertEqual((code, r["ok"]), (1, False))
+        self.assertIn("24 Mo", r["error"])
+        self.assertEqual(Serveur.recus, [])
+
+    def test_copie_de_repli_pose_la_marque_et_la_presse_la_respecte(self):
+        run = self.home / "run"
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        h = self.home / "bin/hyprctl"
+        h.write_text(h.read_text().replace("exit 0", "[ \"$1\" = dispatch ] && exit 1; exit 0"))
+        self.ptt("ptt-debut", wtype=False)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", wtype=False), 1)
+        marque = run / "nc-dictee-copie"
+        self.assertTrue(marque.exists(), "marque posée pendant la copie du texte dicté")
+        # nc-presse-capture, avec un faux wl-paste (le texte « copié » est le texte dicté)
+        b = self.home / "bin"
+        (b / "wl-paste").write_text("#!/bin/sh\ncase \"$*\" in *list-types*) echo text/plain;; *) printf 'bonjour jarvis';; esac\n")
+        (b / "wl-paste").chmod(0o755)
+        capture = str(REPO / "home/.local/bin/nc-presse-capture")
+        def lancer_capture():
+            env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(run), PATH=str(b) + os.pathsep + "/usr/bin:/bin")
+            return subprocess.run(["sh", capture], env=env, capture_output=True, text=True, timeout=10).stdout
+        self.assertEqual(lancer_capture(), "", "marque de moins de 5 s : rien n'est gardé")
+        vieux = time.time() - 30
+        os.utime(marque, (vieux, vieux))
+        self.assertEqual(lancer_capture(), "T:bonjour jarvis\n", "marque périmée : copie ordinaire gardée")
+        marque.unlink()
+        self.assertEqual(lancer_capture(), "T:bonjour jarvis\n")
+
+    def test_secours_vers_groq_est_dit_dans_la_notification(self):
+        (self.home / ".config/nc/ia.conf").write_text(
+            f"GROQ_API_KEY=gsk_test0123456789\nURL_GROQ=http://127.0.0.1:{self.serveur.server_port}/groq\n")
+        (self.home / ".config/nc/ia.conf").chmod(0o600)
+        Serveur.code = 503
+        self.ptt("ptt-fin")
+        self.ptt("ptt-debut")
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin"), 0)
+        a = self.appels()
+        self.assertIn("wtype - [salut depuis groq]", a)
+        self.assertIn("✓ Écrit — via Groq", a)
+
+    def test_secours_refuse_par_le_reglage(self):
+        (self.home / ".config/nc/ia.conf").write_text(
+            f"GROQ_API_KEY=gsk_test0123456789\nURL_GROQ=http://127.0.0.1:{self.serveur.server_port}/groq\n")
+        (self.home / ".config/nc/ia.conf").chmod(0o600)
+        Serveur.code = 503
+        r = "DICTEE_SECOURS=non\n"
+        self.ptt("ptt-fin", r)
+        self.ptt("ptt-debut", r)
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin", r), 1)
+        self.assertNotIn("/groq/", json.dumps(Serveur.recus), "l'audio n'est pas parti chez Groq")
+        self.assertNotIn("wtype -", self.appels())
+        self.assertIn("rien d'écrit", self.appels())
+
+    def test_fenetre_changee_copie_seulement(self):
+        run = self.home / "run"
+        self.ptt("ptt-fin")
+        self.collage("text/plain\\n", "avant")
+        h = self.home / "bin/hyprctl"
+        h.write_text('#!/bin/sh\necho "hyprctl $*" >> "$HOME/appels"\n'
+                     '[ "$1" = activewindow ] && echo "{\\"address\\": \\"0x$(cat "$HOME/adresse")\\", \\"class\\": \\"firefox\\"}"\nexit 0\n')
+        (self.home / "adresse").write_text("aaa")
+        self.assertEqual(self.ptt("ptt-debut"), 0)
+        time.sleep(0.6)
+        (self.home / "adresse").write_text("bbb")                  # le focus a changé pendant la dictée
+        self.assertEqual(self.ptt("ptt-fin"), 1)
+        a = self.appels()
+        self.assertNotIn("wtype -", a, "rien n'est tapé dans l'autre fenêtre")
+        self.assertNotIn("send_shortcut", a)
+        self.assertIn("wl-copy --type text/plain;charset=utf-8 [bonjour jarvis]", a)
+        self.assertIn("La fenêtre a changé : texte copié, colle-le avec Ctrl+V.", a)
+        self.assertTrue((run / "nc-dictee-copie").exists(), "la copie est protégée de l'historique")
+        # même fenêtre : écrit normalement
+        (self.home / "appels").unlink()
+        self.ptt("ptt-debut")
+        time.sleep(0.6)
+        self.assertEqual(self.ptt("ptt-fin"), 0)
+        self.assertIn("wtype - [bonjour jarvis]", self.appels())
+
+    def test_sans_runtime_refus_et_rien_dans_tmp(self):
+        tmp = self.home / "tmp"
+        tmp.mkdir()
+        env = dict(HOME=str(self.home), NC_LANGUE="fr", PATH=str(self.home / "bin") + os.pathsep + "/usr/bin:/bin", TMPDIR=str(tmp))
+        for action in ("start", "stop", "status"):
+            r = subprocess.run([str(SCRIPT), action], env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(r.returncode, 1, action)
+            self.assertIn("XDG_RUNTIME_DIR", json.loads(r.stdout)["error"])
+        self.faux_notify()
+        r = subprocess.run([str(SCRIPT), "ptt-debut"], env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("XDG_RUNTIME_DIR", self.appels())
+        self.assertEqual(list(tmp.iterdir()), [], "aucun fichier à nom prévisible dans /tmp")
+
+    def test_usage_traduit(self):
+        self.assertEqual(self.lancer("bidule"), (1, {"ok": False, "error": "Usage : nc-dictee start | stop | cancel | status"}))
+        self.assertEqual(self.lancer("bidule", NC_LANGUE="en"), (1, {"ok": False, "error": "Usage: nc-dictee start | stop | cancel | status"}))
 
     def ptt_fond(self, action):
         b = self.home / "bin"

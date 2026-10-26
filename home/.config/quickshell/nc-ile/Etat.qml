@@ -481,7 +481,8 @@ Singleton {
     readonly property bool cameraActive: appliCamera !== ""
     onMicroActifChanged: if (microActif) activite("micro", 3200)
     onCameraActiveChanged: if (cameraActive) activite("micro", 3200)
-    function nomJoli(n) { return n === "WEBRTC VoiceEngine" ? "Discord" : (n.charAt(0).toUpperCase() + n.slice(1)) }
+    // (l'enregistreur de nc-dictee est montré comme « Dictée » : le point orange l'affiche déjà pendant l'écoute)
+    function nomJoli(n) { return n === "WEBRTC VoiceEngine" ? "Discord" : (/^(parec|pw-record|arecord)$/i.test(n) ? Reglages.t("Dictée", "Dictation") : (n.charAt(0).toUpperCase() + n.slice(1))) }
 
     // ── Casque / écouteurs Bluetooth qui se connectent (AirPods…) : la pilule montre leur nom et leur batterie ──
     // Repérés par leur adresse (pas par le nœud PipeWire : passer en mode appel recrée le nœud sans reconnexion)
