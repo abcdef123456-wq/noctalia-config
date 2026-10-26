@@ -130,6 +130,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
+| Espace de code : choisir un projet, puis Neovim + l'agent de l'IA (Claude Code, Codex…) + lazygit dans une fenêtre kitty | **Super + X** (`nc-code`) |
 
 ## Île dynamique
 
@@ -159,7 +160,7 @@ suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur tout
 Aussi : pastille IA du centre de contrôle, presse-papiers et notifications de l'île, bouton des captures, clic droit
 dans les fichiers, Neovim (`Espace i`), `nc-diag ia`, et, si tu l'actives, `@ ` dans le Spotlight : l'IA propose de
 gérer les services de ta session, le Wi-Fi, le Bluetooth, l'énergie, le son, les réglages ou les mises à jour, et
-chaque action attend ta confirmation. Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
+chaque action attend ta confirmation. Dans un dépôt, `gcia` valide ce qui est indexé avec un message écrit par l'IA dans le style de tes derniers commits (tu le relis dans ton éditeur ; un secret dans le diff : rien n'est envoyé). `nc-claude installer` donne aussi à Claude Code une ligne d'état aux couleurs du bureau (modèle, dossier, branche, contexte, coût), seulement si tu n'en as pas déjà une. Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
 
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
