@@ -2,8 +2,9 @@
 Description=Surveille le dossier des fonds d'écran (miniatures du carrousel)
 
 [Path]
+# Le dossier par défaut ; un autre dossier (réglage FONDS_DOSSIER) est mis par nc-carousel-thumbs --surveillance
+# dans le drop-in nc-carousel-thumbs.path.d/dossier.conf
 PathChanged=%h/Pictures/Wallpapers
-PathChanged=%h/.config/noctalia/plugins/wallpaperCarousel/settings.json
 Unit=nc-carousel-thumbs.service
 
 [Install]

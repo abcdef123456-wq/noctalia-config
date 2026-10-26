@@ -12,6 +12,52 @@ set -uo pipefail
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
 IM=$(command -v magick >/dev/null && echo magick || echo convert)
 
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+# Le dossier de Noctalia, comme lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
+NDIR="${NOCTALIA_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}/noctalia"
+FONDS_DEFAUT="$HOME/Pictures/Wallpapers"
+
+# Dossier des fonds : clé « directory » de la section [wallpaper], lue comme Noctalia (v5) : tous les .toml de son
+# dossier par ordre alphabétique (config.toml, puis zy-reglages.toml de nc-reglages…), puis ses réglages d'interface ;
+# le dernier gagne. UNE SEULE source : le service, nc-reglages et install.sh passent tous par ici.
+fichiers=()
+while IFS= read -r f; do [ -f "$f" ] && fichiers+=("$f"); done < <(printf '%s\n' "$NDIR"/*.toml | LC_ALL=C sort)
+[ -f "${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml" ] && fichiers+=("${XDG_STATE_HOME:-$HOME/.local/state}/noctalia/settings.toml")
+src=""
+[ ${#fichiers[@]} -gt 0 ] && src=$(awk 'FNR==1{sec=""} /^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{v=$0; sub(/^[^=]*= *"/,"",v); sub(/".*$/,"",v); r=v} END{if (r != "") print r}' \
+  "${fichiers[@]}" 2>/dev/null)
+[ -n "$src" ] || src="$FONDS_DEFAUT"
+src="${src/#\~/$HOME}"
+
+# --surveillance : fait surveiller par nc-carousel-thumbs.path le vrai dossier (drop-in dossier.conf ; aucun pour le
+# dossier par défaut, déjà dans l'unité). Appelé par nc-reglages (FONDS_DOSSIER) et install.sh. Silencieux sans systemd.
+if [ "${1:-}" = "--surveillance" ]; then
+  dropin="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/nc-carousel-thumbs.path.d/dossier.conf"
+  want=""
+  if [ "$src" != "$FONDS_DEFAUT" ]; then
+    real=$(realpath -m -- "$src" 2>/dev/null) || real="$src"
+    case "$real" in /*) ;; *) real="" ;; esac
+    case "$real" in *$'\n'*|*'\') real="" ;; esac     # saut de ligne ou \ final : illisible pour systemd, on laisse le défaut
+    # % est le début d'un spécificateur pour systemd : %%
+    [ -n "$real" ] && want="[Path]
+PathChanged=
+PathChanged=${real//%/%%}"
+  fi
+  if [ -n "$want" ]; then
+    [ "$(cat "$dropin" 2>/dev/null)" = "$want" ] && exit 0
+    mkdir -p "$(dirname "$dropin")" && printf '%s\n' "$want" > "$dropin.tmp.$$" && mv "$dropin.tmp.$$" "$dropin" || exit 0
+  else
+    [ -e "$dropin" ] || exit 0
+    rm -f "$dropin" && rmdir "$(dirname "$dropin")" 2>/dev/null
+  fi
+  systemctl --user daemon-reload >/dev/null 2>&1 || exit 0
+  if systemctl --user is-active --quiet nc-carousel-thumbs.path 2>/dev/null; then
+    systemctl --user restart nc-carousel-thumbs.path >/dev/null 2>&1
+    systemctl --user start --no-block nc-carousel-thumbs.service >/dev/null 2>&1    # miniatures du nouveau dossier
+  fi
+  exit 0
+fi
+
 # Tailles logiques : MÊMES valeurs que dans le plugin (panel.luau) ; inclinaison SK (0,30 = 17°)
 CW=600; CH=450      # grande tranche du milieu
 NW=192; NH=420      # tranche étroite des voisines
@@ -19,12 +65,23 @@ SK=0.30
 # Facteur de pixels : échelle de l'écran x réduction du plugin sur les écrans de moins de 1600 x 1000 points
 # (Z = min(1, largeur/1600, hauteur/1000), au moins 0,6) ; écran plus grand que 1600 x 1000 : agrandi jusqu'à x2.
 # Le plus grand de tous les écrans branchés.
+OUT="$HOME/.cache/nc/carousel"
 dpr=$(hyprctl monitors -j 2>/dev/null | jq -r '
   [.[] | (.width / .scale) as $w | (.height / .scale) as $h |
    (if $w > 1600 or $h > 1000 then ([2, $w / 1600, $h / 1000] | min | if . < 1 then 1 else . end)
     else ([1, $w / 1600, $h / 1000] | min | if . < 0.6 then 0.6 else . end) end) * .scale] | max // empty' 2>/dev/null)
-[ -n "$dpr" ] || dpr=1
-dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
+# hyprctl en échec (service lancé sans la session Hyprland) : on garde le dernier facteur valide (sinon tout serait
+# régénéré) ; sans facteur connu (première installation hors session), 1, sans le garder : le premier passage dans
+# Hyprland enregistre le vrai facteur.
+if [ -n "$dpr" ]; then
+  dpr=$(awk -v d="$dpr" 'BEGIN{printf "%.3f", d}')
+  if [ "$(cat "$OUT/.dpr" 2>/dev/null)" != "$dpr" ] && mkdir -p "$OUT"; then
+    echo "$dpr" > "$OUT/.dpr.tmp" && mv "$OUT/.dpr.tmp" "$OUT/.dpr"
+  fi
+else
+  dpr=$(cat "$OUT/.dpr" 2>/dev/null)
+  case "$dpr" in ''|*[!0-9.]*) dpr=1.000 ;; esac
+fi
 
 # bake IMAGE SORTIE LARGEUR HAUTEUR LISERE(0|1) : parallélogramme de largeur LARGEUR (sur la ligne centrale), hauteur HAUTEUR
 bake() {
@@ -42,15 +99,8 @@ bake() {
     "${stroke[@]}" -define webp:alpha-quality=100 -quality 95 "$out.tmp.${out##*.}" && mv "$out.tmp.${out##*.}" "$out"
 }
 
-. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 # Le dossier de Noctalia, comme lui : NOCTALIA_CONFIG_HOME, puis XDG_CONFIG_HOME, puis ~/.config
-CONF="${NOCTALIA_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}/noctalia/config.toml"
-OUT="$HOME/.cache/nc/carousel"
 
-# Dossier des fonds : clé « directory » de la section [wallpaper] de la config Noctalia v5
-src=$(awk '/^\[/{sec=$0} sec=="[wallpaper]" && /^directory *=/{sub(/^[^=]*= *"/,""); sub(/".*$/,""); print; exit}' "$CONF" 2>/dev/null)
-[ -n "$src" ] || src="$HOME/Pictures/Wallpapers"
-src="${src/#\~/$HOME}"
 [ -d "$src" ] || exit 0
 
 mkdir -p "$OUT"
@@ -62,18 +112,33 @@ if [ "$(cat "$OUT/.size" 2>/dev/null)" != "$sig" ]; then
 fi
 
 shopt -s nullglob nocaseglob
+# Restes d'une découpe interrompue ou en échec
+rm -f "$OUT"/*.tmp.webp
 made=0
 for f in "$src"/*.{jpg,jpeg,png,webp,bmp,avif,jxl}; do
   n="$(basename "$f")"
   tw="$OUT/$n.W.webp"; tn="$OUT/$n.N.webp"; tb="$OUT/$n.B.webp"
   [ "$tw" -nt "$f" ] && [ "$tn" -nt "$f" ] && [ "$tb" -nt "$f" ] && continue
+  # Image illisible déjà essayée : pas de nouvel essai tant qu'elle n'a pas changé (date de modification)
+  mt=$(stat -c %Y -- "$f" 2>/dev/null)
+  [ -n "$mt" ] && [ "$(cat "$OUT/$n.echec" 2>/dev/null)" = "$mt" ] && continue
   # fond flouté (petit, agrandi à l'affichage : le flou masque l'agrandissement) : remplace le flou en direct, trop coûteux
-  "$IM" "${f}[0]" -resize 800x500^ -gravity center -extent 800x500 -blur 0x12 -modulate 75,110 -quality 88 "$tb.tmp.webp" && mv "$tb.tmp.webp" "$tb"
-  bake "$f" "$tw" "$CW" "$CH" 1 && bake "$f" "$tn" "$NW" "$NH" 0 && made=$((made + 1))
+  if "$IM" "${f}[0]" -resize 800x500^ -gravity center -extent 800x500 -blur 0x12 -modulate 75,110 -quality 88 "$tb.tmp.webp" && mv "$tb.tmp.webp" "$tb" &&
+     bake "$f" "$tw" "$CW" "$CH" 1 && bake "$f" "$tn" "$NW" "$NH" 0; then
+    made=$((made + 1))
+    rm -f "$OUT/$n.echec"
+  else
+    rm -f "$tb.tmp.webp" "$tw.tmp.webp" "$tn.tmp.webp" "$tw" "$tn" "$tb"
+    [ -n "$mt" ] && echo "$mt" > "$OUT/$n.echec"
+  fi
 done
 for t in "$OUT"/*.W.webp; do
   base="$(basename "$t" .W.webp)"
   [ -e "$src/$base" ] || rm -f "$t" "$OUT/$base.N.webp" "$OUT/$base.B.webp"
+done
+for t in "$OUT"/*.echec; do
+  base="$(basename "$t" .echec)"
+  [ -e "$src/$base" ] || rm -f "$t"
 done
 [ "$made" -gt 0 ] && t "nc-carousel-thumbs : $made fond(s) découpé(s) en tranches (${CW}x${CH} et ${NW}x${NH}, échelle $dpr)" \
   "nc-carousel-thumbs: $made wallpaper(s) cut into slices (${CW}x${CH} and ${NW}x${NH}, scale $dpr)" && echo

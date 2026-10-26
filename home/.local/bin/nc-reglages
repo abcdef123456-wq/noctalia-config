@@ -2193,15 +2193,21 @@ def appliquer_noctalia(vals):
         for t, kv in tables.items():
             texte += f"\n[{t}]\n" + "".join(f"{k} = {toml_val(v)}\n" for k, v in kv.items())
     ancien = open(NOCTALIA_OUT, encoding="utf-8").read() if os.path.exists(NOCTALIA_OUT) else ""
-    if texte == ancien:
-        return
-    if texte:
-        os.makedirs(NOCTALIA_DIR, exist_ok=True)
-        with open(NOCTALIA_OUT, "w", encoding="utf-8") as f:
-            f.write(texte)
-    elif os.path.exists(NOCTALIA_OUT):
-        os.remove(NOCTALIA_OUT)
-    subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+    if texte != ancien:
+        if texte:
+            os.makedirs(NOCTALIA_DIR, exist_ok=True)
+            with open(NOCTALIA_OUT, "w", encoding="utf-8") as f:
+                f.write(texte)
+        elif os.path.exists(NOCTALIA_OUT):
+            os.remove(NOCTALIA_OUT)
+        subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
+    if "FONDS_DOSSIER" in vals:
+        # Le carrousel refait ses miniatures quand ce dossier change : nc-carousel-thumbs (qui lit le même dossier
+        # que Noctalia) met à jour la surveillance de son .path ; sans systemd ou sans le script, rien
+        try:
+            subprocess.run([os.path.join(HOME, ".local/bin/nc-carousel-thumbs"), "--surveillance"], capture_output=True)
+        except OSError:
+            pass
 
 
 def appliquer_curseur(vals):
