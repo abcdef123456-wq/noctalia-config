@@ -4,6 +4,10 @@ Les touches sont nommées comme sur une disposition **US** ; les raccourcis sont
 marchent donc de la même façon avec un clavier AZERTY (par exemple `` ` `` est la touche `²`, sous Échap). **Super** est la
 touche Windows.
 
+Ce document nomme les lettres comme sur une disposition US. Sur un clavier AZERTY, la touche US `A` porte un `Q` (et
+`Q` → `A`, `W` → `Z`, `Z` → `W`, `M` → `,`) ; en QWERTZ, `Y` et `Z` sont échangées. La fiche **Super + /** et la page
+Raccourcis de l'île, elles, affichent les lettres de ta disposition (fr, be, ch, de) : lis-les là-bas pour les noms exacts.
+
 La fiche s'affiche aussi à l'écran avec **Super + /**. Elle est lue en direct dans ta config : un raccourci que tu ajoutes
 avec une description (`{ description = "Section|Texte" }`, voir `~/.config/hypr/nc/raccourcis.lua`) y apparaît tout seul.
 La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccourcis : `nc-raccourci ajoute "Super+B" "firefox" "Navigateur"` (rangés dans `~/.config/hypr/perso.lua`,

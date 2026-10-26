@@ -5,7 +5,8 @@
   nc-keys json     JSON pour la fiche Super + / (plugin Noctalia v5 nc/keys)
 Seuls les raccourcis qui ont une description apparaissent. Dans ~/.config/hypr/, une description s'écrit
 « Section|Texte » ; sans section, le raccourci va dans « Mes raccourcis » (voir aussi nc-raccourci). Exemple : hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Applis et barre|Navigateur" })
-Les touches sont nommées comme sur la disposition US (les raccourcis suivent la position des touches).
+Les raccourcis par code de touche (code:38…) suivent la POSITION des touches : les lettres sont nommées comme sur ta
+disposition (fr, be, ch, de ; lue avec hyprctl getoption input:kb_layout), sinon comme sur la disposition US.
 """
 import json
 import os
@@ -48,7 +49,8 @@ USAGE_EN = """nc-keys: your Hyprland shortcuts, read live (hyprctl binds), with 
   nc-keys json     JSON for the Super + / cheat sheet (Noctalia v5 plugin nc/keys)
 Only shortcuts that have a description are shown. In ~/.config/hypr/, a description is written
 "Section|Text"; without a section, the shortcut goes to "My Shortcuts" (see also nc-shortcut). Example: hl.bind("SUPER + code:28", hl.dsp.exec_cmd("firefox"), { description = "Apps & Bar|Browser" })
-Keys are named as on the US layout (shortcuts follow the position of the keys)."""
+Shortcuts by key code (code:38…) follow the POSITION of the keys: letters are named as on your layout (fr, be, ch, de;
+read with hyprctl getoption input:kb_layout), otherwise as on the US layout."""
 
 KEYCODES = {
     9: T("Échap", "Esc"), 22: T("Retour arrière", "Backspace"), 23: "Tab", 36: T("Entrée", "Enter"), 49: "`",
@@ -66,6 +68,42 @@ for row, start in (("QWERTYUIOP", 24), ("ASDFGHJKL", 38), ("ZXCVBNM", 52)):
 for i in range(10):
     KEYCODES[67 + i] = f"F{i + 1}"
 KEYCODES[95], KEYCODES[96] = "F11", "F12"
+
+# Lettres (et ponctuation de lettres) qui changent de place par rapport au US : touche US -> ce qu'elle porte
+_AZERTY = {"A": "Q", "Q": "A", "W": "Z", "Z": "W", "M": ",", ";": "M", ",": ";", ".": ":"}
+_QWERTZ = {"Y": "Z", "Z": "Y"}
+DISPOSITIONS = {"fr": {**_AZERTY, "/": "!"}, "be": {**_AZERTY, "/": "="}, "ch": _QWERTZ, "de": _QWERTZ}
+# Variantes qui changent tout (pas de table : noms US, comme avant)
+_VARIANTES_AUTRES = ("bepo", "dvorak", "colemak", "workman", "neo", "optimot", "ergol")
+
+
+def disposition_active():
+    """Table de traduction (touche US -> touche portée) de la disposition active : la première de input:kb_layout.
+    Vide pour US et pour toute disposition sans table (les noms US restent)."""
+    def opt(nom):
+        try:
+            sortie = subprocess.run(["hyprctl", "getoption", nom], capture_output=True, text=True, timeout=3).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        m = re.search(r"^\s*(?:str|string):\s*(.*)$", sortie, re.M)
+        return m[1].strip() if m else ""
+    layout = opt("input:kb_layout").split(",")[0].strip().lower()
+    variante = opt("input:kb_variant").split(",")[0].strip().lower()
+    if any(v in variante for v in _VARIANTES_AUTRES):
+        return {}
+    return DISPOSITIONS.get(layout, {})
+
+
+_TABLE = None
+
+
+def traduire(lettre):
+    """Nom d'une touche (position US) sur la disposition active."""
+    global _TABLE
+    if _TABLE is None:
+        _TABLE = disposition_active()
+    return _TABLE.get(lettre, lettre)
+
 
 MODS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, T("Maj", "Shift")))
 MOUSE = {"mouse:272": T("glisser", "drag"), "mouse:273": T("clic droit", "right-click"), "mouse_down": T("molette", "scroll"),
@@ -123,7 +161,8 @@ def key_label(raw):
     last = raw.split("+")[-1].strip()
     m = re.fullmatch(r"code:(\d+)", last)
     if m:
-        return KEYCODES.get(int(m.group(1)), T(f"touche {m.group(1)}", f"key {m.group(1)}"))
+        nom = KEYCODES.get(int(m.group(1)))
+        return traduire(nom) if nom else T(f"touche {m.group(1)}", f"key {m.group(1)}")
     if last.startswith("XF86"):
         return T("Touches média", "Media keys")
     if last in MOUSE:

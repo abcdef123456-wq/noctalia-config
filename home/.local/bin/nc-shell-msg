@@ -27,10 +27,15 @@ nmsg() { noctalia_prete || exit 1; exec noctalia msg "$@"; }
 # Le flou plein écran coûte cher sur un processeur graphique intégré : coupé tant qu'un carrousel (fonds, sessions) est
 # ouvert, remis à la fermeture (sauf en profil Économie, où il reste coupé : voir nc.flou dans ~/.config/hypr/nc/energie.lua).
 sans_flou() {
-  local lock="${XDG_RUNTIME_DIR:-/tmp}/nc-carousel-blur"
+  # Le verrou vit dans le dossier privé de la session, jamais dans /tmp (nom prévisible) : sans lui, on ne touche pas au flou
+  [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] || return 0
+  local lock="$XDG_RUNTIME_DIR/nc-carousel-blur"
   [ -e "$lock" ] && return 0
   : > "$lock"; hyprctl eval 'nc.flou(false)' >/dev/null
-  ( sleep 1; while hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 0.3; done
+  # Sonde toutes les secondes (pas 0,3 s), et s'arrête au bout de 5 minutes au plus (écran éteint, carrousel oublié) :
+  # le flou revient alors de toute façon
+  ( sleep 1; n=0
+    while [ "$n" -lt 300 ] && hyprctl layers 2>/dev/null | grep -q 'namespace: noctalia-panel'; do sleep 1; n=$((n + 1)); done
     hyprctl eval 'nc.flou(true)' >/dev/null; rm -f "$lock" ) >/dev/null 2>&1 &
   disown
 }

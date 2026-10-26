@@ -12,8 +12,10 @@ chez certains, l'heure restait en bas à droite pour toujours).
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 try:
     import tomllib
@@ -29,6 +31,28 @@ ETAT = os.path.join(os.environ.get("NOCTALIA_STATE_HOME") or os.environ.get("XDG
                     or os.path.expanduser("~/.local/state"), "noctalia", "settings.toml")
 # Hauteur de chaque élément, en proportion de l'écran (mêmes valeurs que install.sh)
 HAUTEUR = {"nc/verrou:heure": 0.30, "nc/verrou:musique": 0.64, "login_box": 0.86, "nc/verrou:batterie": 0.93}
+
+
+def ecrire(chemin, contenu):
+    """Écrit le fichier d'un coup : temporaire au nom unique dans le même dossier (deux exécutions qui se croisent ne
+    partagent jamais le même fichier), mêmes droits que l'ancien fichier (os.replace les perdait), puis os.replace."""
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(chemin) + ".", suffix=".nc-tmp", dir=os.path.dirname(chemin))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(contenu)
+        try:
+            shutil.copymode(chemin, tmp)             # le fichier existe : ses droits sont gardés
+        except OSError:
+            masque = os.umask(0)
+            os.umask(masque)
+            os.chmod(tmp, 0o666 & ~masque)           # nouveau fichier : droits habituels (mkstemp donne 0600)
+        os.replace(tmp, chemin)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def nettoyer_etat(lignes, widgets, ordre):
@@ -82,9 +106,7 @@ def recentrer_etat(nom_ecran, l, h, widgets, ordre):
                 lignes[i] = f"{m.group(1)}{m.group(2)} = {valeurs[m.group(2)]}"
     if lignes == avant:
         return False
-    with open(ETAT + ".nc-tmp", "w", encoding="utf-8") as f:
-        f.write("\n".join(lignes))
-    os.replace(ETAT + ".nc-tmp", ETAT)
+    ecrire(ETAT, "\n".join(lignes))
     return True
 
 
@@ -117,9 +139,7 @@ def main():
             return
     except OSError:
         pass
-    with open(OUT + ".tmp", "w", encoding="utf-8") as f:
-        f.write(texte)
-    os.replace(OUT + ".tmp", OUT)
+    ecrire(OUT, texte)
     subprocess.run(["noctalia", "msg", "config-reload"], capture_output=True)
 
 

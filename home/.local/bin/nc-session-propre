@@ -2,14 +2,23 @@
 # nc-session-propre : au démarrage de la session (nc/session.lua), arrête les barres et shells d'une ancienne config qui
 # démarreraient encore à côté de Noctalia et de l'île : Waybar, HyprPanel, AGS, eww, Polybar, nwg-panel, Ironbar,
 # Yambar, et les autres configs Quickshell (ancienne Noctalia v4, autres shells). Peu importe comment ils sont lancés :
-#   service systemd       -> bloqué pour de bon (systemctl --user mask : même activé pour tous les utilisateurs,
-#                            comme waybar.service sur Debian, où disable ne suffit pas)
-#   démarrage automatique -> désactivé (copie dans ~/.config/autostart avec Hidden=true, l'original n'est pas touché)
-#   autre (ancienne config de session…) -> arrêté
-# Rien n'est désinstallé. Une notification dit ce qui a été arrêté.   Usage : nc-session-propre [attente en secondes]
+# Par défaut, le processus est seulement ARRÊTÉ (cette session) : rien n'est bloqué pour tes autres bureaux. Avec le
+# réglage SESSION_BLOQUER=oui (nc-reglages), en plus :
+#   service systemd       -> bloqué (systemctl --user mask : vaut pour TOUS tes bureaux, comme waybar.service sur
+#                            Debian, où disable ne suffit pas)
+#   démarrage automatique -> désactivé (copie dans ~/.config/autostart avec Hidden=true, l'original n'est pas touché ;
+#                            vaut aussi pour tous tes bureaux)
+# Rien n'est désinstallé. Une notification dit ce qui a été arrêté, ce qui est bloqué et comment l'annuler.
+# Usage : nc-session-propre [attente en secondes]
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 sleep "${1:-6}"
+
+# Bloquer (mask / Hidden=true) seulement si tu l'as demandé : SESSION_BLOQUER=oui. Ces blocages valent pour TOUS les
+# bureaux de ton compte, pas seulement celui-ci.
+bloquer=0
+[ "$(sed -n 's/^SESSION_BLOQUER=//p' "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"')" = oui ] && bloquer=1
+bloques=()     # une ligne par blocage : comment l'annuler
 
 barres=" waybar hyprpanel ags eww polybar nwg-panel ironbar yambar sfwbar "
 arretes=()
@@ -91,6 +100,7 @@ for pid in $(pgrep -u "$(id -u)" .); do
       # Le fichier de l'utilisateur, lu en premier, l'emporte : on s'arrête au premier trouvé (sinon la copie du paquet
       # écraserait sa version)
       for f in "$HOME/.config/autostart/$d.desktop" "${autostart_sys[@]/%//$d.desktop}"; do
+        [ "$bloquer" = 1 ] || break
         [ -f "$f" ] || continue
         mkdir -p "$HOME/.config/autostart"
         n="$HOME/.config/autostart/$d.desktop"
@@ -102,7 +112,8 @@ for pid in $(pgrep -u "$(id -u)" .); do
                 dans && /^Hidden[ \t]*=/ { next }
                 { print }' "$n" > "$n.nc-tmp"; then
           chmod --reference="$n" "$n.nc-tmp" 2>/dev/null      # garde les droits (600 reste 600)
-          mv "$n.nc-tmp" "$n" || rm -f "$n.nc-tmp"
+          # shellcheck disable=SC2088   # le ~ est écrit pour être lu dans la notification
+          mv "$n.nc-tmp" "$n" && bloques+=("~/.config/autostart/$d.desktop : $(t "supprime ce fichier (ou sa ligne Hidden=true)" "delete this file (or its Hidden=true line)")") || rm -f "$n.nc-tmp"
         else
           rm -f "$n.nc-tmp"
         fi
@@ -115,10 +126,12 @@ for pid in $(pgrep -u "$(id -u)" .); do
       if unite_dediee "$unite" "$pid" "$prog"; then
         reel=0; fichier_unite_reel "$unite" && reel=1
         systemctl --user stop "$unite" >/dev/null 2>&1 && fait=1
-        if [ "$reel" = 1 ]; then
+        if [ "$reel" = 1 ] && [ "$bloquer" = 1 ]; then
           # mask refuse un fichier du même nom dans ~/.config/systemd/user : disable, puis à défaut on tue le processus
-          systemctl --user mask "$unite" >/dev/null 2>&1 || systemctl --user disable "$unite" >/dev/null 2>&1 \
-            || { kill "$pid" 2>/dev/null && fait=1; }
+          if systemctl --user mask "$unite" >/dev/null 2>&1; then bloques+=("systemctl --user unmask $unite")
+          elif systemctl --user disable "$unite" >/dev/null 2>&1; then bloques+=("systemctl --user enable $unite")
+          else kill "$pid" 2>/dev/null && fait=1
+          fi
         fi
       else
         kill "$pid" 2>/dev/null && fait=1
@@ -130,7 +143,12 @@ done
 
 if [ ${#arretes[@]} -gt 0 ]; then
   liste="$(printf '%s\n' "${arretes[@]}" | sort -u | paste -sd ', ')"
-  notify-send -a "noctalia-config" "$(t "Ancienne barre arrêtée" "Old bar stopped")" \
-    "$(t "$liste : elle démarrait encore avec ta session (rien n'est désinstallé)." "$liste: it still started with your session (nothing was uninstalled).")" 2>/dev/null || true
+  corps="$(t "$liste : elle démarrait encore avec ta session (rien n'est désinstallé)." "$liste: it still started with your session (nothing was uninstalled).")"
+  if [ ${#bloques[@]} -gt 0 ]; then
+    corps="$corps
+$(t "Bloqué pour tous tes bureaux. Pour annuler :" "Blocked for all your desktops. To undo:")
+$(printf '%s\n' "${bloques[@]}")"
+  fi
+  notify-send -a "noctalia-config" "$(t "Ancienne barre arrêtée" "Old bar stopped")" "$corps" 2>/dev/null || true
 fi
 exit 0

@@ -9,7 +9,8 @@
 # Un petit message dans l'île (notification passagère) dit le nouvel état.
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
-RUN="${XDG_RUNTIME_DIR:-/tmp}"
+RUN="${XDG_RUNTIME_DIR:-}"      # dossier privé de la session ; jamais /tmp (nom prévisible, que tout le monde peut écrire)
+NC_LANGUE="${NC_LANGUE:-fr}"    # nc-langue absent : français
 
 dire() {   # dire TITRE [TEXTE] : notification passagère, remplacée par la suivante
   notify-send -a "$(t "Clavier" "Keyboard")" -t 1500 -h string:x-canonical-private-synchronous:nc-touches -h int:transient:1 "$@" 2>/dev/null || true
@@ -59,6 +60,10 @@ case "$action" in
     elif [ "$max" -le 4 ]; then dire "$(t "Clavier allumé" "Keyboard backlight on")" "$(t "Niveau $new sur $max" "Level $new of $max")"
     else dire "$(t "Clavier allumé" "Keyboard backlight on")" "$(( new * 100 / max ))$(t " %" "%")"; fi ;;
   pave)
+    if [ -z "$RUN" ] || [ ! -d "$RUN" ]; then
+      dire "$(t "Pavé tactile : session incomplète" "Touchpad: incomplete session")" "$(t "XDG_RUNTIME_DIR n'est pas défini : ouvre une vraie session." "XDG_RUNTIME_DIR is not set: log in to a real session.")"
+      exit 1
+    fi
     etat="$RUN/nc-pave-coupe"
     case "$arg" in
       on) coupe=0 ;; off) coupe=1 ;;

@@ -9,6 +9,8 @@
 # pour l'annoter (Ctrl + S y enregistre la version annotée à côté, Ctrl + C la copie) ; bouton « Supprimer » : à la
 # corbeille. Dans Swappy, l'icône de corbeille efface seulement les annotations ; Échap ferme Swappy.
 set -uo pipefail
+# Captures et dossier privés : lisibles par toi seul (0600 / 0700), pas par les autres comptes du PC
+umask 077
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
 
 mode="${1:-zone}"
@@ -27,6 +29,23 @@ case "$mode" in
   screen) mode=ecran ;; area|region) mode=zone ;; edit|annotate) mode=retouche ;; text) mode=texte ;;
 esac
 
+# Un outil absent ne passe plus en silence : une notification nomme le paquet à installer (même nom sur Arch, Debian,
+# Fedora et openSUSE pour grim, slurp, swappy et wl-clipboard)
+avertir() { notify-send -a "$(t "Capture d'écran" "Screenshot")" -i dialog-warning "$@" 2>/dev/null || true; }
+manque() {   # manque OUTIL PAQUET
+  avertir "$(t "$1 n'est pas installé" "$1 is not installed")" "$(t "Installe le paquet « $2 » (nc-maj l'installe)." "Install the package “$2” (nc-update installs it).")"
+}
+outil_ok() { command -v "$1" >/dev/null 2>&1; }
+case "$mode" in ecran|zone|retouche|texte)
+  outil_ok grim || { manque grim grim; exit 1; }
+  case "$mode" in zone|retouche|texte) outil_ok slurp || { manque slurp slurp; exit 1; } ;; esac
+  [ "$mode" = retouche ] && { outil_ok swappy || { manque swappy swappy; exit 1; }; }
+  [ "$mode" = texte ] && { outil_ok wl-copy || { manque wl-copy wl-clipboard; exit 1; }; }
+  ;;
+esac
+# Réglage de nc-reglages (~/.config/nc/reglages.conf)
+reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
+
 # Texte d'une zone : lu par tesseract (français et anglais), copié ; rien n'est enregistré
 if [ "$mode" = texte ]; then
   dire() { notify-send -a "$(t "Texte de l'écran" "Screen Text")" -i edit-copy "$@" 2>/dev/null || true; }
@@ -39,14 +58,19 @@ if [ "$mode" = texte ]; then
   texte="$(printf '%s' "$texte" | sed -e '/./,$!d')"          # sans lignes vides au début
   if [ -z "${texte//[[:space:]]/}" ]; then dire "$(t "Aucun texte trouvé" "No text found")" "$(t "Essaie une zone plus grande ou plus nette." "Try a larger or sharper area.")"; exit 0; fi
   printf '%s' "$texte" | wl-copy
-  dire "$(t "Texte copié" "Text copied")" "$(printf '%s' "$texte" | head -c 180)"
+  # Le texte lu peut être un mot de passe : la notification (et son historique) ne montre que le nombre de caractères,
+  # sauf si CAPTURES_APERCU=oui
+  if [ "$(reglage CAPTURES_APERCU)" = oui ]; then
+    dire "$(t "Texte copié" "Text copied")" "$(printf '%s' "$texte" | head -c 180)"
+  else
+    dire "$(t "Texte copié" "Text copied")" "$(t "${#texte} caractères copiés" "${#texte} characters copied")"
+  fi
   exit 0
 fi
 images="$(xdg-user-dir PICTURES 2>/dev/null)"
 [ -n "$images" ] && [ "$images" != "$HOME" ] && [ "$images" != "$HOME/" ] || images="$HOME/Pictures"
 dossier="$images/Captures"
 # Dossier choisi avec nc-reglages (CAPTURES_DOSSIER)
-reglage() { sed -n "s/^$1=//p" "$HOME/.config/nc/reglages.conf" 2>/dev/null | tail -1 | tr -d '"'; }
 perso="$(reglage CAPTURES_DOSSIER)"
 [ -n "$perso" ] && dossier="${perso/#\~/$HOME}"
 mkdir -p "$dossier"
@@ -83,7 +107,13 @@ esac
 
 # Copiée aussi, sauf si coupé dans nc-reglages (CAPTURES_COPIER)
 copiee=1
-if [ "$(reglage CAPTURES_COPIER)" = non ]; then copiee=0; else wl-copy --type image/png < "$fichier" 2>/dev/null; fi
+if [ "$(reglage CAPTURES_COPIER)" = non ]; then
+  copiee=0
+elif ! outil_ok wl-copy; then
+  copiee=0; manque wl-copy wl-clipboard
+elif ! wl-copy --type image/png < "$fichier" 2>/dev/null; then
+  copiee=0        # la copie a échoué : la notification ne dit pas « Copiée aussi » à tort
+fi
 
 # Swappy : enregistre la version annotée dans le même dossier
 mkdir -p "$HOME/.config/swappy"
@@ -120,18 +150,26 @@ fi
 # Notification avec la capture (sauf si coupée : CAPTURES_NOTIF) ; clic : l'annoter dans Swappy (attente en arrière-plan,
 # le raccourci rend la main)
 [ "$(reglage CAPTURES_NOTIF)" = non ] && exit 0
-if [ "$copiee" = 1 ]; then texte="$(t "Copiée aussi : Ctrl + V pour la coller. Clic pour l'annoter." "Also copied: Ctrl + V to paste it. Click to annotate.")"; else texte="$(t "Clic pour l'annoter." "Click to annotate.")"; fi
+# Sans swappy : pas de bouton Annoter
+annoter=()
+if outil_ok swappy; then annoter=(-A "default=$(t "Annoter" "Annotate")"); fi
+if [ "$copiee" = 1 ]; then texte="$(t "Copiée aussi : Ctrl + V pour la coller." "Also copied: Ctrl + V to paste it.")"; else texte=""; fi
+if [ "${#annoter[@]}" -gt 0 ]; then
+  texte="${texte:+$texte }$(t "Clic pour l'annoter." "Click to annotate.")"
+else
+  texte="${texte:+$texte }$(t "Pour annoter : installe le paquet « swappy »." "To annotate: install the package “swappy”.")"
+fi
 # « Demander à l'IA » : seulement si l'IA est permise (nc-ia actif) et l'explication des captures pas coupée
 ia=()
 if [ "$(reglage IA_CAPTURE)" != non ] && "$HOME/.local/bin/nc-ia" disponible 2>/dev/null; then ia=(-A "ia=$(t "Demander à l'IA" "Ask the AI")"); fi
 (
-  action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" -A "default=$(t "Annoter" "Annotate")" -A "supprimer=$(t "Supprimer" "Delete")" \
+  action="$(timeout 600 notify-send -a "$(t "Capture d'écran" "Screenshot")" -i "$fichier" "${annoter[@]}" -A "supprimer=$(t "Supprimer" "Delete")" \
     -A "dossier=$(t "Ouvrir le dossier" "Show in Folder")" "${ia[@]}" "$(t "Capture enregistrée" "Screenshot saved")" "$texte" 2>/dev/null)"
   case "$action" in
     default) swappy -f "$fichier" ;;
     ia) "$HOME/.local/bin/nc-ia" fichier "$fichier" --notifier ;;     # l'IA du bureau l'explique (notification)
     supprimer) gio trash "$fichier" 2>/dev/null || rm -f "$fichier" ;;      # à la corbeille (récupérable)
-    dossier) xdg-open "$dossier" ;;
+    dossier) ( umask 022; xdg-open "$dossier" ) ;;
   esac
 ) >/dev/null 2>&1 &
 disown 2>/dev/null || true

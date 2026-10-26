@@ -58,6 +58,13 @@ class SessionPropre(unittest.TestCase):
                         NC_TEST_UNITES=str(self.unites), NC_TEST_SYSTEMCTL=str(self.appels), NC_TEST_NOTIFS=str(self.notifs),
                         NC_AUTOSTART_SYS=str(self.sys), NC_UNITES_SYS=str(self.unites_sys),
                         PATH=f"{t / 'bin'}:{os.environ['PATH']}")
+        # Les tests de blocage (mask, Hidden=true) demandent le réglage ; sans lui (défaut), rien n'est bloqué
+        self.regler_bloquer("oui")
+
+    def regler_bloquer(self, valeur):
+        conf = self.home / ".config/nc/reglages.conf"
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text("" if valeur is None else f"SESSION_BLOQUER={valeur}\n")
 
     def lance(self, unite, prog="waybar", mainpid=None, frag=None, argv=None, mort=False):
         """Lance un sleep, le déclare comme « prog » vivant dans « unite » ; renvoie (stop/mask notés, sleep tué ?)."""
@@ -205,6 +212,40 @@ class SessionPropre(unittest.TestCase):
         _, tue = self.lance("app-foo-autostart@1234.service")
         self.assertTrue(tue)
         self.assertIn("Hidden=true", (a / "foo.desktop").read_text())
+
+    # --- par défaut : rien n'est bloqué pour les autres bureaux (point 4 du lot Outils-1)
+    def test_defaut_pas_de_mask_seulement_stop(self):
+        self.regler_bloquer(None)
+        (self.unites_sys / "waybar.service").write_text("[Service]\nExecStart=/bin/true\n")
+        appels, _ = self.lance("waybar.service", mainpid="pid", frag=str(self.unites_sys / "waybar.service"))
+        self.assertEqual(appels, ["--user stop waybar.service"])
+        self.assertNotIn("bloqué", self.notifs.read_text())
+
+    def test_defaut_autostart_intact(self):
+        self.regler_bloquer("non")
+        a = self.home / ".config/autostart"
+        a.mkdir(parents=True)
+        (a / "foo.desktop").write_text("[Desktop Entry]\nExec=waybar\n")
+        _, tue = self.lance("app-foo@autostart.service")
+        self.assertTrue(tue, "le processus est quand même arrêté")
+        self.assertEqual((a / "foo.desktop").read_text(), "[Desktop Entry]\nExec=waybar\n")
+        self.assertFalse((self.sys / "foo.desktop").exists())
+
+    def test_bloquer_la_notification_dit_comment_annuler(self):
+        (self.unites_sys / "waybar.service").write_text("[Service]\nExecStart=/bin/true\n")
+        self.lance("waybar.service", mainpid="pid", frag=str(self.unites_sys / "waybar.service"))
+        texte = self.notifs.read_text()
+        self.assertIn("tous tes bureaux", texte)
+        self.assertIn("systemctl --user unmask waybar.service", texte)
+
+    def test_bloquer_autostart_la_notification_nomme_le_fichier(self):
+        a = self.home / ".config/autostart"
+        a.mkdir(parents=True)
+        (a / "foo.desktop").write_text("[Desktop Entry]\nExec=waybar\n")
+        self.lance("app-foo@autostart.service")
+        texte = self.notifs.read_text()
+        self.assertIn("tous tes bureaux", texte)
+        self.assertIn("~/.config/autostart/foo.desktop", texte)
 
     # --- reconnaissance des barres
     def test_barre_lancee_par_un_interprete(self):
