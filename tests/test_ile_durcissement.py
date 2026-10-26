@@ -82,3 +82,16 @@ class Gardes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DicteeLimite(unittest.TestCase):
+    def test_fin_de_dictee_par_marque_surveillee_sans_minuterie(self):
+        """La limite de 10 min de nc-dictee écrit nc-dictee-auto.txt : l'île le suit par inotify, jamais par sondage."""
+        src = lire("Assistant.qml")
+        bloc = src[src.index("id: dicteeAuto"):src.index("id: dictee\n")]
+        self.assertIn('"/nc-dictee-auto.txt"', bloc)
+        self.assertIn("watchChanges: true", bloc)
+        self.assertIn("page.ecouteVocale = false", bloc)
+        self.assertIn("!page.ecouteVocale", bloc, "un vieux fichier au démarrage ne dit rien")
+        self.assertNotIn("Timer", bloc)
+        self.assertNotRegex(src, r'"nc-dictee",\s*"status"', "l'île n'interroge pas nc-dictee status")

@@ -604,6 +604,22 @@ Item {
     }
 
     // Dictée : nc-dictee start | stop, une ligne de JSON en réponse ({ ok, recording } ou { ok, text } ou { ok: false, error })
+    // Dictée arrêtée par la limite de 10 min : nc-dictee l'a transcrite et copiée, et l'écrit dans nc-dictee-auto.txt.
+    // Suivi par inotify (watchChanges), sans minuterie : l'écoute s'arrête ici aussi, avec son message court. Seulement
+    // pendant une écoute (un vieux fichier au démarrage de l'île ne dit rien).
+    FileView {
+        id: dicteeAuto
+        path: Quickshell.env("XDG_RUNTIME_DIR") ? Quickshell.env("XDG_RUNTIME_DIR") + "/nc-dictee-auto.txt" : ""
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: {
+            var t = text().trim()
+            if (t === "" || !page.ecouteVocale || dictee.running) return
+            page.ecouteVocale = false
+            page.information = t.split("\n")[0].slice(0, 200)
+        }
+    }
     Process {
         id: dictee
         property string commande: "start"
