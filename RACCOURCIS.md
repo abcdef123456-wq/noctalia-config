@@ -115,7 +115,18 @@ En mode **Souris**, les fenêtres s'ouvrent libres et centrées, comme sur Windo
 | `Super` + `F4` | Éteindre |
 | `Super` + `F5` | Redémarrer |
 | `Touches média` | Son, luminosité, musique |
+| `F1…F12` | Par défaut, la rangée F est celle d'un portable, même sur un clavier de bureau : F1 coupe le son, F2 et F3 baissent et montent le volume, F4 coupe le micro, F5 et F6 baissent et montent la luminosité, F7 / F8 / F9 : morceau précédent, lecture / pause, suivant, F10 éclairage du clavier, F11 pavé tactile, F12 calculatrice. **F5 et F11 ne sont donc pas actualiser et plein écran.** Pour retrouver les F1…F12 classiques : `nc-reglages` → Clavier et souris → « Touches F1 à F12 » → « F1…F12 classiques ». En mode jeu, ils redeviennent classiques d'eux-mêmes |
+| `Super` + `Maj` + `R` | Enregistrer l'écran en vidéo (zone ou écran entier) ; le même raccourci arrête |
 | `Super` + `Espace` | Changer la disposition du clavier |
+| `XF86KbdBrightnessUp` / `XF86KbdBrightnessDown` / `XF86KbdLightOnOff` | Touches du portable : éclairage du clavier (plus, moins, allumer / éteindre) |
+| `XF86TouchpadToggle` / `XF86TouchpadOn` / `XF86TouchpadOff` | Touches du portable : pavé tactile (basculer, activer, couper) |
+| `XF86Calculator` | Touche du portable : calculatrice |
+| `XF86Search` ou `Super` + `Maj` + `F23` | Touche du portable ou touche Copilot des PC récents : la recherche (comme Super + R) |
+| `XF86Explorer` / `XF86MyComputer` | Touches du portable : les fichiers |
+| `XF86HomePage` / `XF86WWW` / `XF86Mail` | Touches du portable : navigateur, courrier |
+| `XF86Tools` / `XF86ScreenSaver` / `XF86Sleep` | Touches du portable : réglages du bureau, verrouiller l'écran, mettre en veille |
+
+Les touches `XF86…` sont celles que ton portable envoie avec `Fn` (selon le modèle) : une touche que ton clavier n'a pas ne gêne pas.
 
 ## IA
 

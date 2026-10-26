@@ -1,6 +1,7 @@
 # Pages de l’île
 
-Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** permet d’activer ou désactiver chacune des 16 pages :
+Dans `nc-settings` (ou `nc-reglages`), **Pages de l’île** (île Quickshell seulement : le plugin Noctalia n'a pas ces pages)
+permet d’activer ou désactiver chacune des 16 pages :
 Musique, Agents IA, Minuteur, Recharge, Jeu, Centre de contrôle, JARVIS, Notifications, Son, Réseau, Bluetooth,
 Système, Calendrier, Météo, Presse-papiers et Fenêtres.
 

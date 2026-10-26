@@ -89,6 +89,14 @@ A_TAPER = [
                                        "le veut (nc-reglages → Énergie → Carte NVIDIA pour les applis)."),
     ("nc-rtx-veille", "nc-rtx-veille", "La carte NVIDIA d'un PC hybride dort-elle (0 W) ? Sinon, ce qui la garde "
                                        "allumée (nvidia-persistenced, une appli ouverte dessus)."),
+    ("nc-conso", "nc-conso pourquoi", "Qu'est-ce qui vide la batterie ? Lecture seule : « pourquoi » donne les faits (sans IA) comme le "
+                                      "bouton « Pourquoi ça se vide ? » de la page Charge de l'île ; sans argument, une mesure en JSON."),
+    ("nc-gpu-mode", "nc-gpu-mode info", "Mode graphique d'un portable à MUX : hybride ou carte dédiée. « actuel » le dit, « info » "
+                                        "explique comment basculer sur ce PC ; basculer redémarre le PC, après une question."),
+    ("nc-dictee", "nc-dictee status", "Dictée vocale (Super + D : maintenir, parler, relâcher, le texte est écrit dans la fenêtre "
+                                      "active) ; start, stop, cancel et status à la main. Coupée avec l'IA du bureau coupée."),
+    ("nc-jarvis", "nc-jarvis tableau", "JARVIS : cockpit (tableau, Super + Ctrl + A), petite fenêtre de chat (chat, Super + Maj + A) "
+                                       "et page de l'île (ile) ; aussi serveur, agent, deployer et verifier."),
     ("cmatrix", "cmatrix", "Pluie façon Matrix dans le terminal, aux couleurs du thème."),
 ]
 RACCOURCIS = [
@@ -188,6 +196,14 @@ ANGLAIS = {
                                     "allows it (nc-settings → Power → NVIDIA graphics for apps)."),
     "nc-rtx-veille": ("nc-rtx-veille", "Is the NVIDIA card of a hybrid laptop asleep (0 W)? If not, what keeps it on "
                                        "(nvidia-persistenced, an app opened on it)."),
+    "nc-conso": ("nc-conso pourquoi", "What is draining the battery? Read-only: “pourquoi” gives the facts (no AI), like the "
+                                      "“Why is it draining?” button on the island's Battery page; with no argument, one measurement as JSON."),
+    "nc-gpu-mode": ("nc-gpu-mode info", "Graphics mode of a laptop with a MUX: hybrid or dedicated card. “actuel” tells which, "
+                                        "“info” explains how to switch on this PC; “basculer” restarts the PC, after a question."),
+    "nc-dictee": ("nc-dictee status", "Voice dictation (Super + D: hold, speak, release, and the text is written in the active "
+                                      "window); start, stop, cancel and status by hand. Off when the desktop AI is off."),
+    "nc-jarvis": ("nc-jarvis tableau", "JARVIS: dashboard (tableau, Super + Ctrl + A), small chat window (chat, Super + Shift + A) "
+                                       "and the island page (ile); also serveur, agent, deployer and verifier."),
     "cmatrix": ("cmatrix", "Matrix-style rain in the terminal, in the theme colors."),
     "nc-capture": ("nc-screenshot area", "Screenshots (Print Screen, Super + P…), saved and copied."),
     "nc-ecrans": ("nc-displays mirror", "Project to a second display or a projector (Super + O), like Windows + P: "

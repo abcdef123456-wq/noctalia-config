@@ -121,6 +121,18 @@ class ReglageSeulementAvecLIle(unittest.TestCase):
         self.assertNotIn("PARTAGE_DISCRET", self.liste(False))
         self.assertIn("PARTAGE_DISCRET", self.liste(True))
 
+    def test_reglages_de_l_ile_aussi(self):
+        """Ceux que le plugin Noctalia ne lit pas (pages, style, heure, bannières…) : cachés sans l'île Quickshell."""
+        cles = ["ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE",
+                "ILE_ANIM_BATTERIE"] + ["ILE_PAGE_" + x.upper() for x in (
+                    "musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son", "reseau",
+                    "bluetooth", "systeme", "calendrier", "meteo", "presse", "fenetres")]
+        sans, avec = self.liste(False), self.liste(True)
+        for c in cles:
+            with self.subTest(cle=c):
+                self.assertNotRegex(sans, r"\b%s\b" % c)
+                self.assertRegex(avec, r"\b%s\b" % c)
+
 
 @HORS_ECRAN
 class Logique(unittest.TestCase):

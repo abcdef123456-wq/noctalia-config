@@ -1372,7 +1372,13 @@ MATERIEL = {
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
-    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
+    "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
+    # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
+    **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE",
+                          "ILE_ANIM_BATTERIE")},
+    **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
+                                               "reseau", "bluetooth", "systeme", "calendrier", "meteo", "presse", "fenetres")},
+    "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 
 
@@ -1409,7 +1415,8 @@ def materiel():
             "clavier-batterie": existe(sys_ + "/class/leds/*kbd_backlight*") and existe(sys_ + "/class/power_supply/BAT*"),
             "hybride": cartes == {True, False},
             # L'île en Quickshell (nc-ile) : sans elle, ce sont les bulles de Noctalia, que le partage discret ne cache pas ;
-            # le réglage n'apparaît pas, pour ne jamais faire croire que c'est protégé
+            # le réglage n'apparaît pas, pour ne jamais faire croire que c'est protégé. Même chose pour les réglages
+            # que seule l'île Quickshell lit (pages, style, heure, bannières…) : le plugin Noctalia n'en lit aucun
             "ile": os.path.isfile(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "quickshell/nc-ile/shell.qml")),
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode

@@ -4,6 +4,8 @@
 
 À chaque push et à chaque PR sur main, la CI lance toute la suite de tests sur Arch, Debian 13, Fedora et openSUSE :
 elle garantit que les tests passent sur ces 4 distributions, sans session graphique, ni systemd, ni Hyprland.
+Chaque semaine, une autre CI, « Installation réelle », lance `install.sh` de bout en bout sur ces 4 distributions
+(conteneur neuf) et vérifie le résultat.
 
 Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n'importe quel PC compatible avec Noctalia
 (portable ou fixe, Intel, AMD ou NVIDIA). La config Hyprland est au **format Lua** (Hyprland 0.55 ou plus).
@@ -36,7 +38,7 @@ Un bureau **Hyprland + Noctalia v5** complet, installable en une commande, sur n
 
 ## Installation
 
-Une seule ligne (Arch, Fedora, Debian 13, Ubuntu) : installe git s'il manque, télécharge le dépôt dans
+Une seule ligne (Arch, Fedora, Debian 13, Ubuntu, openSUSE) : installe git s'il manque, télécharge le dépôt dans
 `~/noctalia-config` (ou le met à jour), puis lance `./install.sh` :
 
 ```bash
@@ -160,9 +162,22 @@ chaque action attend ta confirmation. Clés : `nc-ia configurer`, la fenêtre «
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
 
-Sur Arch, l'île est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
-service `nc-ile`), avec les icônes Material Symbols Rounded. Ailleurs, la même île est fournie par le plugin Noctalia
-`nc/ile` (un peu moins libre : elle s'ouvre juste sous la barre).
+L'île complète est dessinée par **Quickshell** par-dessus la barre de Noctalia (`~/.config/quickshell/nc-ile`,
+service `nc-ile`), avec les icônes Material Symbols Rounded. Quickshell vient du paquet sur Arch, du dépôt COPR sur
+Fedora, et il est compilé par l'installation sur Debian et Ubuntu. Sur openSUSE (pas de paquet), ou si la compilation
+échoue, l'installation met à la place le plugin Noctalia `nc/ile`. Ce n'est **pas la même île** : seulement la pilule
+au centre de la barre et le centre de contrôle qui s'ouvre juste dessous (Wi-Fi, Bluetooth et Son avec leurs pages de
+détails). Il n'a ni le Spotlight de l'île, ni ses notifications, ni les autres pages, ni « Pourquoi ça se vide ? », ni
+partage d'écran discret. Les réglages « Île » et « Pages de l'île » de `nc-reglages` n'apparaissent donc qu'avec
+l'île Quickshell.
+
+**Île Quickshell seulement :**
+
+- **Pourquoi ça se vide ?** Sur la page Charge, quand le PC est sur batterie et qu'elle baisse, un bouton explique pourquoi
+  et propose au plus 3 actions, chacune confirmée avant d'être faite.
+- **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
+  notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
+  montre « Partage ».
 
 ## Automatismes
 
