@@ -5,6 +5,8 @@ sinon le BIOS (notification à bouton, redémarrage dans le BIOS seulement sur u
 tout de suite). Toutes les commandes
 extérieures sont fausses (en tête du PATH) : rien ne bascule ni ne redémarre pour de vrai."""
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -189,14 +191,64 @@ class GpuMode(unittest.TestCase):
         self.assertNotIn("--firmware-setup", self.appels())
 
     def test_asus_sans_mux_passe_par_le_bios(self):
-        self.machine("ASUSTeK COMPUTER INC.", "Vivobook", "Vivobook")
+        # Un ROG dont supergfxctl ne propose pas AsusMuxDgpu : la méthode reste « bios » (MUX probable : famille ROG)
+        self.machine("ASUSTeK COMPUTER INC.", "ROG Zephyrus G14", "ROG Zephyrus")
         self.carte(0, NVIDIA, "disconnected")
         self.carte(1, "0x8086", "connected")
         self.programme("supergfxctl", 'echo "supergfxctl $*" >> "$JOURNAL"\n'
                        '[ "$1" = --supported ] && echo "[Integrated, Hybrid]"; exit 0')
         self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
         self.lancer("basculer", "dediee")
         self.assertNotIn("--mode", self.appels())
+
+    def test_vivobook_sans_mux_sans_objet(self):
+        # Avant : tout portable Optimus passait par le BIOS (« Hybride, clic : Dédiée ») alors qu'un Vivobook n'a
+        # aucun MUX. Désormais « sans objet » : rien à proposer, aucun redémarrage
+        self.machine("ASUSTeK COMPUTER INC.", "Vivobook", "Vivobook")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "sans-objet")
+        self.assertEqual(self.json()["mode"], "sans-objet")
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.appels(), "")
+
+    def test_portables_optimus_ordinaires_sans_objet(self):
+        for vendeur, nom, famille in (("Dell Inc.", "XPS 15 9520", "XPS"), ("HP", "HP ZBook Fury 16", "ZBook"),
+                                      ("LENOVO", "21HH", "ThinkPad P1 Gen 6"), ("Acer", "Swift X", "Swift")):
+            with self.subTest(nom=nom):
+                self.machine(vendeur, nom, famille)
+                self.carte(0, NVIDIA, "disconnected")
+                self.carte(1, "0x8086", "connected")
+                self.assertEqual(self.lancer("actuel").stdout.strip(), "sans-objet")
+
+    def test_familles_a_mux_gardent_le_mode(self):
+        for vendeur, nom, famille in (("LENOVO", "82XV", "LOQ 15IRH8"), ("Alienware", "Alienware m16 R1", "Alienware"),
+                                      ("HP", "OMEN by HP Laptop 16", "OMEN"), ("Acer", "Predator PH16", "Predator"),
+                                      ("Micro-Star International Co., Ltd.", "GE76 Raider", "GE"),
+                                      ("ASUSTeK COMPUTER INC.", "TUF Gaming A15", "TUF Gaming")):
+            with self.subTest(nom=nom):
+                self.machine(vendeur, nom, famille)
+                self.carte(0, NVIDIA, "disconnected")
+                self.carte(1, "0x8086", "connected")
+                self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
+
+    def test_dediee_deja_active_meme_sans_famille_connue(self):
+        # Écran interne déjà sur la NVIDIA : c'est le vrai indice d'un MUX, quel que soit le constructeur
+        self.machine("Dell Inc.", "XPS 15 9520", "XPS")
+        self.carte(0, NVIDIA, "connected")
+        self.carte(1, "0x8086", "disconnected")
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "dediee")
+
+    def test_legion_ne_change_pas(self):
+        # Le Legion de l'utilisateur : mêmes réponses qu'avant, pour l'île et nc-reglages
+        self.legion()
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "hybride")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
+        self.assertEqual(self.json()["mode"], "hybride")
+        self.legion(ecran_sur_nvidia=True)
+        self.assertEqual(self.lancer("actuel").stdout.strip(), "dediee")
 
     def test_system76(self):
         self.machine("System76", "Oryx Pro", "Oryx Pro")
@@ -270,11 +322,22 @@ class GpuMode(unittest.TestCase):
 
     def test_json_legion(self):
         self.legion()
-        self.assertEqual(self.json(), {"mode": "hybride", "methode": "bios", "bios_direct": True, "carte_ecran": "AMD"})
+        self.assertEqual(self.json(), {"mode": "hybride", "methode": "bios", "bios_direct": True, "carte_ecran": "AMD",
+                                       "pilote_nvidia": False})
         (self.sys / "class/drm/card0-eDP-1/status").write_text("connected\n")
         (self.sys / "class/drm/card1-eDP-2/status").write_text("disconnected\n")
-        self.assertEqual(self.json(), {"mode": "dediee", "methode": "bios", "bios_direct": True, "carte_ecran": "NVIDIA"})
+        self.assertEqual(self.json(), {"mode": "dediee", "methode": "bios", "bios_direct": True, "carte_ecran": "NVIDIA",
+                                       "pilote_nvidia": False})
         self.assertEqual(self.appels(), "", "lire l'état n'appelle rien")
+
+    def test_json_pilote_nvidia(self):
+        self.legion()
+        self.assertFalse(self.json()["pilote_nvidia"])
+        (self.sys / "module/nouveau").mkdir(parents=True)
+        self.assertTrue(self.json()["pilote_nvidia"])
+        (self.sys / "module/nouveau").rmdir()
+        (self.sys / "module/nvidia").mkdir()
+        self.assertTrue(self.json()["pilote_nvidia"])
 
     def test_json_sans_demarrage_direct(self):
         self.machine(uefi=False)
@@ -286,7 +349,8 @@ class GpuMode(unittest.TestCase):
     def test_json_sans_objet(self):
         self.machine()
         self.carte(0, AMD, "connected")
-        self.assertEqual(self.json(), {"mode": "sans-objet", "methode": "", "bios_direct": False, "carte_ecran": ""})
+        self.assertEqual(self.json(), {"mode": "sans-objet", "methode": "", "bios_direct": False, "carte_ecran": "",
+                                       "pilote_nvidia": False})
 
     def test_sans_question_bios_redemarre_dans_le_bios(self):
         self.legion()
@@ -367,6 +431,43 @@ class GpuMode(unittest.TestCase):
         r = self.lancer("basculer", "--sans-question", "dediee")
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn("systemctl", self.appels())
+
+    # --- échec visible (--sans-question) ---
+    def test_sans_question_echec_notifie(self):
+        self.machine("System76", "Oryx Pro", "Oryx Pro")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("system76-power", 'echo "system76-power $*" >> "$JOURNAL"; exit 1')
+        r = self.lancer("basculer", "--sans-question", "dediee")
+        self.assertNotEqual(r.returncode, 0)
+        n = self.notifs()
+        self.assertEqual(len(n), 1)
+        self.assertEqual(n[0][-1], "Le changement de mode a échoué : system76-power")
+        self.lancer("basculer", "--sans-question", "dediee", langue="en")
+        self.assertEqual(self.notifs()[-1][-1], "The mode change failed: system76-power")
+
+    def test_sans_option_pas_de_notification_d_echec(self):
+        self.machine("System76", "Oryx Pro", "Oryx Pro")
+        self.carte(0, NVIDIA, "disconnected")
+        self.carte(1, "0x8086", "connected")
+        self.programme("system76-power", 'exit 1')
+        self.clic("oui")
+        self.lancer("basculer", "dediee")
+        self.assertTrue(all("échoué" not in n[-1] for n in self.notifs()))
+
+    def test_gsync_seulement_si_l_ecriture_peut_aboutir(self):
+        # Fichier non inscriptible : gsync seulement avec pkexec (un sudo sans terminal échouerait en silence)
+        self.legion()
+        (self.sys / "module/legion_laptop").mkdir(parents=True)
+        gsync = self.ecrire("bus/platform/drivers/legion/PNP0C09:00/gsync", "0")
+        gsync.chmod(0o444)
+        if os.access(gsync, os.W_OK):
+            self.skipTest("lancé en root : tout fichier est inscriptible")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "gsync", "faux pkexec présent")
+        (self.faux / "pkexec").unlink()
+        if shutil.which("pkexec", path="/usr/bin:/bin"):
+            self.skipTest("un vrai pkexec est installé : le cas sans pkexec ne peut pas être simulé")
+        self.assertEqual(self.lancer("methode").stdout.strip(), "bios")
 
     # --- langue ---
     def test_en_anglais(self):
