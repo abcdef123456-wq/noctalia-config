@@ -589,7 +589,7 @@ Singleton {
     property bool nuit: false
     LectureFile {
         id: lecteurEtat
-        commande: [etat.bin + "nc-ile-etat"]
+        commande: [etat.bin + "nc-ile-etat", "sans-media"]
         actif: etat.pageSys
         onLu: texte => {
             var t = {}
