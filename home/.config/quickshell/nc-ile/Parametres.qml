@@ -31,6 +31,7 @@ FloatingWindow {
     property string recherche: ""
     property string message: ""
     property bool erreur: false
+    property bool lectureIllisible: false          // le dernier message est « catalogue illisible »
     property var file: []                           // écritures en attente : des commandes nc-reglages, une par une
     readonly property var capture: Raccourcis.capture   // le raccourci dont on attend les nouvelles touches (Raccourcis.qml)
     property string captureMessage: ""
@@ -74,6 +75,33 @@ FloatingWindow {
         })
         return exacts.concat(plus, docs)
     }
+    // La liste n'est reconstruite que si les lignes changent (nombre, ordre, section, recherche) : une valeur changée
+    // met seulement à jour l'objet de sa ligne (parCle), donc ni clignotement ni retour en haut. Les clés déjà vues
+    // restent dans parCle, pour que les anciens délégués trouvent toujours leur ligne pendant la reconstruction.
+    property var parCle: ({})
+    property string contexteListe: ""
+    ListModel { id: modeleCles }
+    onVisiblesChanged: synchroniser()
+    function synchroniser() {
+        var v = visibles, m = modeleCles, pareil = v.length === m.count
+        var carte = Object.assign({}, parCle)
+        v.forEach(r => carte[r.cle] = r)
+        parCle = carte
+        for (let i = 0; pareil && i < v.length; i++) if (m.get(i).cle !== v[i].cle) pareil = false
+        if (pareil) return
+        var ctx = section + "\n" + recherche
+        var meme = ctx === contexteListe && m.count > 0
+        contexteListe = ctx
+        var y = liste.contentY, cle = liste.currentIndex >= 0 && liste.currentIndex < m.count ? m.get(liste.currentIndex).cle : ""
+        m.clear()
+        v.forEach(r => m.append({ cle: r.cle }))
+        var i = meme ? v.findIndex(r => r.cle === cle) : -1
+        liste.currentIndex = i >= 0 ? i : (v.length ? 0 : -1)
+        if (!meme) { liste.contentY = 0; return }
+        // Même section et même recherche : on garde la position (aussitôt, puis quand la hauteur est connue)
+        var garder = () => { liste.contentY = Math.max(0, Math.min(y, liste.contentHeight - liste.height)) }
+        garder(); Qt.callLater(garder)
+    }
     // Ouvert depuis le Spotlight (réponse « réglage ») : la recherche est déjà tapée
     function chercherTexte(t) { champRecherche.text = t; liste.forceActiveFocus() }
     // Ouvert sur une section (nc-reglages fenetre SECTION) : gardée à la lecture du catalogue si elle y est
@@ -91,8 +119,22 @@ FloatingWindow {
     function charger() { if (lecture.running) relire = true; else lecture.running = true }
     // Une valeur : nc-reglages set (ou reset pour revenir à la config) ; les demandes se suivent une par une
     function commande(args) { file.push([bin + "nc-reglages"].concat(args)); file = file; suivant() }
-    function regler(cle, valeur) { commande(["set", cle, String(valeur)]) }
-    function remettre(cle) { commande(["reset", cle]) }
+    function regler(cle, valeur) { localement(cle, String(valeur)); commande(["set", cle, String(valeur)]) }
+    function remettre(cle) { var r = reglage(cle); if (r) localement(cle, r.defaut); commande(["reset", cle]) }
+    // Retour immédiat au clic : la nouvelle valeur est affichée avant la fin de nc-reglages ; le catalogue relu ensuite
+    // la confirme, ou rétablit la vraie valeur (et le message en rouge) si la valeur est refusée
+    function localement(cle, v) {
+        var r = reglage(cle)
+        if (!r || r.valeur === v) return
+        var n = Object.assign({}, r)
+        n.valeur = v; n.modifie = v !== String(r.defaut)
+        if (r.genre === "ouinon" || r.genre === "choix" || r.genre === "hz") {
+            var c = r.choix.find(x => x[0] === v)
+            n.affiche = c ? c[1] : (r.genre === "hz" && /^[0-9]+$/.test(v) ? v + " Hz" : v)
+        } else if (r.genre === "entier") n.affiche = v === "0" && r.zero ? r.zero : v + (r.unite ? " " + r.unite : "")
+        else return
+        catalogue = catalogue.map(x => x.cle === cle ? n : x)
+    }
     function suivant() {
         if (ecriture.running || !file.length) return
         ecriture.command = file.shift(); file = file
@@ -196,12 +238,19 @@ FloatingWindow {
                 try {
                     let d = JSON.parse(text)
                     if (!Array.isArray(d)) throw new Error("catalogue")
+                    // Une écriture est en cours ou en attente : cette lecture est déjà périmée, la suivante la remplace
+                    if (ecriture.running || fen.file.length > 0) return
+                    // Les lignes inchangées gardent leur objet : seules les lignes modifiées sont mises à jour
+                    var avant = {}
+                    fen.catalogue.forEach(r => avant[r.cle] = r)
+                    d = d.map(r => { var o = avant[r.cle]; return o && JSON.stringify(o) === JSON.stringify(r) ? o : r })
                     fen.catalogue = d
                     if (!fen.section || fen.sections.indexOf(fen.section) < 0) fen.section = fen.sections.length ? fen.sections[0] : ""
-                    fen.erreur = false
+                    // Seule une erreur de lecture se lève ici : le refus d'une valeur reste affiché en rouge
+                    if (fen.lectureIllisible) { fen.lectureIllisible = false; fen.message = ""; fen.erreur = false }
                 } catch (e) {
                     fen.message = Reglages.t("Réglages illisibles : lance nc-reglages dans un terminal.", "Settings unreadable: run nc-settings in a terminal.")
-                    fen.erreur = true
+                    fen.erreur = true; fen.lectureIllisible = true
                 }
             }
         }
@@ -318,7 +367,7 @@ FloatingWindow {
             id: liste
             objectName: "nc-reglages-liste"
             x: 22; y: rangee.y + rangee.height + 14; width: tout.width - 44; height: pied.y - y - 10
-            clip: true; spacing: 8; model: fen.visibles
+            clip: true; spacing: 8; model: modeleCles
             boundsBehavior: Flickable.StopAtBounds
             focus: true
             currentIndex: 0
@@ -352,10 +401,10 @@ FloatingWindow {
                     text: fen.recherche.trim() ? Reglages.t("Aucun réglage ne correspond.", "No setting matches.") : Reglages.t("Chargement…", "Loading…") }
             delegate: Rectangle {
                 id: ligne
-                required property var modelData
+                required property string cle
                 required property int index
-                objectName: "nc-reglage-" + modelData.cle
-                readonly property var r: modelData
+                objectName: "nc-reglage-" + cle
+                readonly property var r: fen.parCle[cle]
                 property bool deplie: false            // rapport de mise à jour : le détail affiché
                 property bool aConfirmer: false        // action dangereuse : sa question est posée sur la ligne
                 readonly property bool estCourante: ListView.isCurrentItem
@@ -404,7 +453,7 @@ FloatingWindow {
                         Behavior on color { ColorAnimation { duration: 140 } }
                         Rectangle { width: 22; height: 22; radius: 11; y: 3; x: ligne.r.valeur === "oui" ? parent.width - 25 : 3; color: "#ffffff"
                                     Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: fen.regler(ligne.r.cle, ligne.r.valeur === "oui" ? "non" : "oui") }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, ligne.r.valeur === "oui" ? "non" : "oui") } }
                         Accessible.role: Accessible.CheckBox; Accessible.name: ligne.r.nom
                     }
                     // Choix : pastilles quand ils sont peu nombreux, sinon ‹ valeur ›
@@ -412,7 +461,7 @@ FloatingWindow {
                         visible: (ligne.r.genre === "choix" || ligne.r.genre === "hz") && ligne.r.choix.length <= 4; anchors.verticalCenter: parent.verticalCenter; spacing: 6
                         Repeater {
                             model: ligne.r.choix.length <= 4 ? ligne.r.choix : []
-                            Pastille { required property var modelData; petit: true; texte: modelData[1]; actif: ligne.r.valeur === modelData[0]; onClic: fen.regler(ligne.r.cle, modelData[0]) }
+                            Pastille { required property var modelData; petit: true; texte: modelData[1]; actif: ligne.r.valeur === modelData[0]; onClic: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, modelData[0]) } }
                         }
                     }
                     Row {
@@ -420,6 +469,7 @@ FloatingWindow {
                         function decaler(d) {
                             var c = ligne.r.choix, i = 0
                             for (let k = 0; k < c.length; k++) if (c[k][0] === ligne.r.valeur) i = k
+                            liste.currentIndex = ligne.index
                             fen.regler(ligne.r.cle, c[(i + d + c.length) % c.length][0])
                         }
                         AssistantCommande { rond: true; width: 30; height: 30; icone: "chevron_left"; onClic: parent.decaler(-1) }
@@ -430,7 +480,7 @@ FloatingWindow {
                     // Nombre : − valeur + et une barre à glisser
                     Row {
                         visible: ligne.r.genre === "entier"; anchors.verticalCenter: parent.verticalCenter; spacing: 6
-                        AssistantCommande { rond: true; width: 30; height: 30; icone: "remove"; onClic: fen.regler(ligne.r.cle, fen.borner(ligne.r, Number(ligne.r.valeur) - ligne.r.pas)) }
+                        AssistantCommande { rond: true; width: 30; height: 30; icone: "remove"; onClic: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, fen.borner(ligne.r, Number(ligne.r.valeur) - ligne.r.pas)) } }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter; spacing: 4
                             Texte { anchors.horizontalCenter: parent.horizontalCenter; text: ligne.r.affiche; font.pixelSize: 12; font.weight: Font.DemiBold }
@@ -444,11 +494,11 @@ FloatingWindow {
                                     id: zb
                                     anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                     function valeurA(x) { return fen.borner(ligne.r, ligne.r.mini + (x - 8) / barre.width * (ligne.r.maxi - ligne.r.mini)) }
-                                    onReleased: e => fen.regler(ligne.r.cle, valeurA(e.x))
+                                    onReleased: e => { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, valeurA(e.x)) }
                                 }
                             }
                         }
-                        AssistantCommande { rond: true; width: 30; height: 30; icone: "add"; onClic: fen.regler(ligne.r.cle, fen.borner(ligne.r, Number(ligne.r.valeur) + ligne.r.pas)) }
+                        AssistantCommande { rond: true; width: 30; height: 30; icone: "add"; onClic: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, fen.borner(ligne.r, Number(ligne.r.valeur) + ligne.r.pas)) } }
                     }
                     // Texte et dossier : un champ, Entrée pour valider
                     Rectangle {
@@ -459,7 +509,7 @@ FloatingWindow {
                             anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; verticalAlignment: TextInput.AlignVCenter; clip: true; selectByMouse: true
                             color: Couleurs.texte; selectionColor: Couleurs.accent; font.pixelSize: 12
                             text: ligne.r.valeur
-                            onAccepted: { fen.regler(ligne.r.cle, text); liste.forceActiveFocus() }
+                            onAccepted: { liste.currentIndex = ligne.index; fen.regler(ligne.r.cle, text); liste.forceActiveFocus() }
                             Keys.onEscapePressed: { text = ligne.r.valeur; liste.forceActiveFocus() }
                             Connections { target: ligne; function onRChanged() { if (!saisie.activeFocus) saisie.text = ligne.r.valeur } }
                         }
@@ -475,7 +525,7 @@ FloatingWindow {
                     // Confirmation d'une action dangereuse, sur sa ligne : le bouton qui confirme (rouge), puis Annuler
                     Pastille { visible: ligne.aConfirmer; anchors.verticalCenter: parent.verticalCenter; petit: true
                                objectName: "nc-reglage-confirmer-" + ligne.r.cle; texte: ligne.r.bouton || Reglages.t("Confirmer", "Confirm")
-                               actif: true; color: Couleurs.rouge; onClic: { ligne.aConfirmer = false; fen.lancerAction(ligne.r, true) } }
+                               actif: true; color: Couleurs.rouge; onClic: { liste.currentIndex = ligne.index; ligne.aConfirmer = false; fen.lancerAction(ligne.r, true) } }
                     Pastille { visible: ligne.aConfirmer; anchors.verticalCenter: parent.verticalCenter; petit: true
                                objectName: "nc-reglage-annuler-" + ligne.r.cle; texte: Reglages.t("Annuler", "Cancel")
                                onClic: { ligne.aConfirmer = false; liste.forceActiveFocus() } }
@@ -496,14 +546,14 @@ FloatingWindow {
                                texte: Reglages.t("Changer", "Change"); onClic: { liste.currentIndex = ligne.index; fen.capturer(ligne.r) } }
                     Pastille { visible: ligne.r.genre === "raccourci" && ligne.r.mien === ""; anchors.verticalCenter: parent.verticalCenter; petit: true
                                texte: ligne.r.desactive ? Reglages.t("Réactiver", "Turn on") : Reglages.t("Désactiver", "Disable")
-                               onClic: { if (ligne.r.desactive) fen.raccourci(ligne.r, "reactiver"); else fen.raccourci(ligne.r, "desactiver") } }
+                               onClic: { liste.currentIndex = ligne.index; if (ligne.r.desactive) fen.raccourci(ligne.r, "reactiver"); else fen.raccourci(ligne.r, "desactiver") } }
                     Pastille { visible: ligne.r.genre === "raccourci" && ligne.r.mien !== ""; anchors.verticalCenter: parent.verticalCenter; petit: true
-                               texte: Reglages.t("Retirer", "Remove"); onClic: fen.raccourci(ligne.r, "retirer") }
+                               texte: Reglages.t("Retirer", "Remove"); onClic: { liste.currentIndex = ligne.index; fen.raccourci(ligne.r, "retirer") } }
                     // Revenir à la valeur de la config (ou aux touches d'origine d'un raccourci)
                     AssistantCommande { rond: true; width: 30; height: 30; icone: "restart_alt"
                                         visible: ligne.r.modifie && !(ligne.r.genre === "raccourci" && (ligne.r.desactive || ligne.r.mien !== ""))
                                         aide: ligne.r.genre === "raccourci" ? Reglages.t("Touches d'origine", "Original keys") : Reglages.t("Valeur de la config", "Config value")
-                                        onClic: fen.remettreLigne(ligne.r) }
+                                        onClic: { liste.currentIndex = ligne.index; fen.remettreLigne(ligne.r) } }
                 }
             }
         }

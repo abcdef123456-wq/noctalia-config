@@ -24,10 +24,13 @@ if a[0]=='catalogue':
       dict(cle="FENETRES_FLOU_FORCE",section="Fenêtres",sectionNom="Fenêtres",nom="Force du flou",genre="choix",defaut="normal",aide="Derrière les fenêtres transparentes.",choix=[["leger","Léger"],["normal","Normal"],["fort","Fort"]],mini=0,maxi=100,pas=1,unite="",zero="",valeur=d["FENETRES_FLOU_FORCE"],affiche=d["FENETRES_FLOU_FORCE"].capitalize(),modifie=d["FENETRES_FLOU_FORCE"]!="normal",groupe="hypr"),
     ]+([dict(cle="info:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Mode graphique",genre="info",defaut="",aide="Conseil : Hybride sur batterie.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Hybride · se change dans le BIOS",affiche="Hybride · se change dans le BIOS",modifie=False,groupe=""),
         dict(cle="action:mode-graphique",section="Énergie",sectionNom="Énergie",nom="Changer de mode graphique…",genre="action",defaut="",aide="Une confirmation s'ouvre dans l'île.",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Passer en Dédiée…",modifie=False,groupe="",commande=["nc-reglages","mode-graphique"])] if (H/'gpu').exists() else [])
+     +([dict(cle="LONG_%d"%i,section="Clavier et souris",sectionNom="Clavier et souris",nom="Réglage long %d"%i,genre="entier",defaut="0",aide="Ligne de remplissage.",choix=[],mini=0,maxi=100,pas=1,unite=" s".strip(),zero="",valeur=d.get("LONG_%d"%i,"0"),affiche=d.get("LONG_%d"%i,"0"),modifie=d.get("LONG_%d"%i,"0")!="0",groupe="hypr") for i in range(40)] if (H/'long').exists() else [])
      +([dict(cle="raccourci:64:t",section="Raccourcis",sectionNom="Raccourcis",nom="Terminal",genre="raccourci",defaut="",aide="Applis et barre",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="Super + T",affiche="Super + T",modifie=False,groupe="",ids=["64:t"],origs=["64:t"],mien="",desactive=False,change=False,modifiable=True)] if (H/'raccourcis').exists() else [])
      +([dict(cle="session:Dev",section="Fenêtres",sectionNom="Fenêtres",nom="Session « Dev »",genre="action",defaut="",aide="3 fenêtres : firefox, kitty",choix=[],mini=0,maxi=0,pas=1,unite="",zero="",valeur="",affiche="Supprimer…",modifie=False,groupe="",commande=["nc-session","supprimer","Dev"],confirmer="Supprimer la session « Dev » ?",bouton="Supprimer",relire=True)] if (H/'sessions').exists() else []),ensure_ascii=False))
 elif a[0] in ('raccourci','capture'): print("ok")
-elif a[0]=='set': d[a[1]]=a[2]; etat.write_text(json.dumps(d)); print(a[1]+" : "+a[2])
+elif a[0]=='set':
+    if a[2]=='refuse': print("Valeur refusée par le test.",file=sys.stderr); sys.exit(1)
+    import time; time.sleep(0.3); d[a[1]]=a[2]; etat.write_text(json.dumps(d)); print(a[1]+" : "+a[2])
 elif a[0]=='reset': d[a[1]]={"SOURIS_VITESSE":"0","GESTES":"oui","FENETRES_FLOU_FORCE":"normal"}[a[1]]; etat.write_text(json.dumps(d)); print("Valeur de la config remise.")
 '''
 # Faux nc-session : son dossier vient de son propre chemin (<home>/.local/bin), jamais de $HOME ; « supprimer » note
@@ -43,7 +46,7 @@ if sys.argv[1:2]==['supprimer']: (H/'sessions').unlink(missing_ok=True); print("
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class FenetreReglages(unittest.TestCase):
-    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False, sessions=False):
+    def executer(self, scenario, evenements=False, raccourcis=False, gpu=False, sessions=False, longue=False):
         with tempfile.TemporaryDirectory(prefix="nc-reglages-qml-") as d:
             root = Path(d); shutil.copytree(QML, root / "qml"); (root / "runtime").mkdir(mode=0o700)
             (root / "qml/Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
@@ -53,6 +56,8 @@ class FenetreReglages(unittest.TestCase):
             (b / "nc-reglages").write_text(FAUX); (b / "nc-reglages").chmod(0o755)
             if raccourcis:
                 (root / "raccourcis").write_text("")
+            if longue:
+                (root / "long").write_text("")
             if gpu:
                 (root / "gpu").write_text("")
             if sessions:
@@ -65,6 +70,8 @@ ShellRoot {
  property int etape:0
  property bool dansEtape:false
  property var fen:null
+ property real y0:0
+ property var ligne0:null
  // TEST_INPUT
  function trouver(item,nom){if(item.objectName===nom)return item;for(var i=0;i<item.children.length;i++){var r=trouver(item.children[i],nom);if(r)return r}return null}
  function verifier(ok,message){if(!ok){console.error(message);Qt.exit(2);throw new Error(message)}}
@@ -167,6 +174,59 @@ if(etape===3){
         self.assertEqual([(d["action"], d["ids"], d["touches"]) for d in actions], [("changer", ["64:t"], "Ctrl+T"), ("desactiver", ["64:t"], "")])
         captures = [a for a in appels if a[0] == "capture"]
         self.assertEqual(captures, [["capture"], ["capture", "fin"]], "Hyprland sans raccourcis le temps de la capture, puis rendu")
+
+    def test_option_changee_garde_position_index_et_valeur_tout_de_suite(self):
+        """Liste longue défilée vers le bas : changer une option affiche la valeur aussitôt (faux nc-reglages lent),
+        garde la position et la ligne courante, sans reconstruire la liste ; un changement de section remet en haut."""
+        appels = self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+var liste=trouver(fen.contentItem,"nc-reglages-liste")
+if(etape===1){
+ verifier(liste.count===42,"liste longue : "+liste.count)
+ liste.contentY=Math.max(0,liste.contentHeight-liste.height);liste.currentIndex=liste.count-1
+ racine.y0=liste.contentY;verifier(racine.y0>200,"liste non défilée : "+racine.y0)
+ racine.ligne0=trouver(liste.contentItem,"nc-reglage-LONG_39");verifier(racine.ligne0!==null,"ligne du bas absente")
+ fen.regler("LONG_39",7)
+ verifier(fen.reglage("LONG_39").valeur==="7"&&fen.reglage("LONG_39").affiche==="7 s","valeur non affichée tout de suite")
+ etape++;return}
+if(etape===2){
+ verifier(Math.abs(liste.contentY-racine.y0)<2,"position perdue : "+liste.contentY+" au lieu de "+racine.y0)
+ verifier(liste.currentIndex===41,"index perdu : "+liste.currentIndex)
+ verifier(trouver(liste.contentItem,"nc-reglage-LONG_39")===racine.ligne0,"le délégué a été recréé")
+  verifier(fen.reglage("LONG_39").valeur==="7","valeur relue")
+ fen.section="Fenêtres";verifier(liste.contentY===0&&liste.currentIndex===0,"changement de section : retour en haut");Qt.quit()}
+''', longue=True)
+        self.assertEqual([a for a in appels if a[0] == "set"], [["set", "LONG_39", "7"]])
+
+    def test_option_changee_pendant_une_recherche(self):
+        """Une recherche active : changer un réglage garde le filtre, la liste filtrée, la position et la ligne."""
+        self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+var liste=trouver(fen.contentItem,"nc-reglages-liste");var champ=trouver(fen.contentItem,"nc-reglages-recherche")
+if(etape===1){
+ champ.text="long";verifier(liste.count===40&&fen.visibles.length===40,"filtre : "+liste.count)
+ liste.contentY=Math.max(0,liste.contentHeight-liste.height);liste.currentIndex=35
+ racine.y0=liste.contentY;verifier(racine.y0>100,"non défilée")
+ fen.regler("LONG_35",3);etape++;return}
+if(etape===2){
+ verifier(fen.recherche==="long"&&champ.text==="long"&&liste.count===40,"filtre perdu : "+liste.count)
+ verifier(fen.visibles.every(function(r){return r.cle.indexOf("LONG_")===0}),"liste filtrée fausse")
+ verifier(Math.abs(liste.contentY-racine.y0)<2,"position perdue : "+liste.contentY)
+ verifier(liste.currentIndex===35,"index : "+liste.currentIndex)
+ verifier(fen.reglage("LONG_35").valeur==="3","valeur")
+ champ.text="gestes";verifier(liste.count===1&&liste.contentY===0&&liste.currentIndex===0,"nouvelle recherche : en haut");Qt.quit()}
+''', longue=True)
+
+    def test_valeur_refusee_revient_et_se_montre(self):
+        """nc-reglages set échoue : la valeur affichée tout de suite revient à la vraie, et l'erreur est montrée."""
+        self.executer('''
+if(etape===0){creer();etape++;return}
+if(fen.enCours)return
+if(etape===1){fen.regler("SOURIS_VITESSE","refuse");verifier(fen.reglage("SOURIS_VITESSE").valeur==="refuse","retour immédiat");etape++;return}
+if(etape===2){verifier(fen.reglage("SOURIS_VITESSE").valeur==="0","valeur non rétablie : "+fen.reglage("SOURIS_VITESSE").valeur);verifier(fen.erreur&&fen.message!=="","erreur non montrée");Qt.quit()}
+''')
 
     def test_mode_graphique_information_et_bouton(self):
         """Énergie : le mode graphique en lecture seule (sa valeur, rien à changer), et l'action en bouton, qui lance
