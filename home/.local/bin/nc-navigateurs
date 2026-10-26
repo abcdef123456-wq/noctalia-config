@@ -29,7 +29,7 @@ NOM = re.compile(r"^(chromium(-browser)?|ungoogled-chromium|google-chrome(-stabl
 def reglage(cle, defaut):
     base = os.environ.get("XDG_CONFIG_HOME") or str(HOME / ".config")
     try:
-        for l in (Path(base) / "nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (Path(base) / "nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"') or defaut
     except OSError:

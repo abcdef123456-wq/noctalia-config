@@ -43,7 +43,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(HOME / ".config/nc/reglages.conf", encoding="utf-8") as f:
+            with open(HOME / ".config/nc/reglages.conf", encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -61,7 +61,7 @@ T = lambda fr, en: en if EN else fr
 
 def reglage(cle, defaut):
     try:
-        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"') or defaut
     except OSError:

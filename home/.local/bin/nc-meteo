@@ -19,7 +19,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -84,7 +84,7 @@ CIEL_EN = {
 
 def reglage(cle, defaut=""):
     try:
-        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
             for l in f:
                 if l.startswith(cle + "="):
                     defaut = l.split("=", 1)[1].strip().strip('"')

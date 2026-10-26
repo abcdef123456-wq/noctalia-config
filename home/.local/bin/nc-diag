@@ -27,7 +27,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -584,7 +584,7 @@ def verifier(b):
         b.avert(T("nc-ia ne répond pas", "nc-ai does not respond"), T("nc-maj", "nc-update"), cle="ia_muette")
     # Dictée (Super + D) : un enregistreur, et de quoi écrire dans la fenêtre (revue DIST-01)
     try:
-        dictee = "IA_DICTEE=non" not in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8").read().replace('"', "")
+        dictee = "IA_DICTEE=non" not in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace").read().replace('"', "")
     except OSError:
         dictee = True
     if dictee:
@@ -608,7 +608,7 @@ def verifier(b):
     conf = os.path.join(HOME, ".config/nc/reglages.conf")
     n = 0
     if os.path.exists(conf):
-        n = sum(1 for l in open(conf) if re.match(r"\s*[A-Z0-9_]+=", l))
+        n = sum(1 for l in open(conf, encoding="utf-8", errors="replace") if re.match(r"\s*[A-Z0-9_]+=", l))
     style = ""
     try:
         style = next((l.split("=", 1)[1].strip() for l in open(os.path.join(HOME, ".config/nc/style.conf")) if l.startswith("STYLE=")), "")

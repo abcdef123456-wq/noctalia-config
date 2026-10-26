@@ -28,7 +28,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -116,7 +116,7 @@ def halo(n):
 def halo_sur_batterie():
     """Réglage HALO_BATTERIE (nc-reglages) : halo aussi sur batterie, en Équilibré."""
     try:
-        return re.search(r"^HALO_BATTERIE=\"?oui", open(REGLAGES).read(), re.M) is not None
+        return re.search(r"^HALO_BATTERIE=\"?oui", open(REGLAGES, encoding="utf-8", errors="replace").read(), re.M) is not None
     except OSError:
         return False
 

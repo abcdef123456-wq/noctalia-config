@@ -118,7 +118,7 @@ def sources():
 def signature():
     langue = os.environ.get("NC_LANGUE") or ""
     try:
-        langue = langue or re.search(r"^LANGUE=\"?(\w+)", (CONFIG / "nc/reglages.conf").read_text(), re.M)[1]
+        langue = langue or re.search(r"^LANGUE=\"?(\w+)", (CONFIG / "nc/reglages.conf").read_text(encoding="utf-8", errors="replace"), re.M)[1]
     except (OSError, TypeError):
         pass
     return [VERSION, langue] + [[str(f), f.stat().st_mtime_ns] for f in sources()]

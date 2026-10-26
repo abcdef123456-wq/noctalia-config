@@ -36,7 +36,7 @@ import time
 # Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
 def reglage(cle, defaut=""):
     try:
-        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"')
     except OSError:

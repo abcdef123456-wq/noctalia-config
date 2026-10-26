@@ -107,7 +107,7 @@ def pose_par_nc(f):
 
 def reglage(cle, defaut):
     try:
-        for l in (Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"') or defaut
     except OSError:

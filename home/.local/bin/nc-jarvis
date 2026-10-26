@@ -104,7 +104,7 @@ def request(body):
 
 def reglage(cle):
     try:
-        for l in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8').splitlines():
+        for l in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8', errors='replace').splitlines():
             if l.startswith(cle+'='):return l.split('=',1)[1].strip().strip('"')
     except OSError:pass
     return ''

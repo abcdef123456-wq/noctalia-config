@@ -49,7 +49,7 @@ def client():
 def reglages():
     valeurs = {}
     try:
-        for ligne in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for ligne in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if "=" in ligne and not ligne.lstrip().startswith("#"):
                 k, v = ligne.split("=", 1)
                 valeurs[k.strip()] = v.strip().strip('"')

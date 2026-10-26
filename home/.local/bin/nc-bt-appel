@@ -81,7 +81,7 @@ def config_dir():
 
 def reglage(cle, defaut=""):
     try:
-        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8") as f:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
             v = defaut
             for l in f:
                 m = re.match(r"\s*" + re.escape(cle) + r"\s*=\s*(.*?)\s*$", l)

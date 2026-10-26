@@ -295,7 +295,7 @@ def delai_confirmation(nom, p, trame=None):
 def reglage(cle, defaut):
     """Valeur de nc-reglages (~/.config/nc/reglages.conf), relue à chaque demande ; absente : la valeur par défaut."""
     try:
-        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (HOME / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"').strip("'")
     except (OSError, UnicodeError):

@@ -10,8 +10,10 @@
   nc-sauvegarde voir FICHIER        ce que contient une sauvegarde (« contient du code » : remis seulement avec --avec-code)
 Les fichiers générés (couleurs, thème du terminal…) ne sont pas sauvegardés : ils se refont tout seuls.
 """
+import contextlib
 import datetime
 import errno
+import fcntl
 import os
 import re
 import shutil
@@ -27,7 +29,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -91,7 +93,7 @@ def reel(p):
 def dossier_fonds():
     """Dossier des fonds d'écran : celui choisi dans nc-reglages, sinon celui de la config."""
     try:
-        for l in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8"):
+        for l in open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace"):
             if l.startswith("FONDS_DOSSIER="):
                 return os.path.expanduser(l.split("=", 1)[1].strip().strip('"'))
     except OSError:
@@ -361,6 +363,17 @@ def image_valide(tete):
             or (tete[4:8] == b"ftyp" and tete[8:12] in (b"avif", b"avis")))
 
 
+@contextlib.contextmanager
+def verrou_reglages(complet):
+    """Verrou de nc-reglages sur reglages.conf : flock exclusif sur reglages.conf.lock (même dossier, mode 0600)."""
+    fd = os.open(complet + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)                             # ferme et libère le verrou
+
+
 def ecrire_membre(t, m, nom, dest, fonds_rel, avec_code, retirees, gardees):
     """Écrit un membre accepté, nous-mêmes (pas tar.extract : pareil sur toutes les versions de Python). Le fichier est
     écrit dans un temporaire du même dossier (créé en O_EXCL, donc jamais sur un lien existant) puis posé avec
@@ -376,32 +389,35 @@ def ecrire_membre(t, m, nom, dest, fonds_rel, avec_code, retirees, gardees):
     # pour les autres, toujours lisible et modifiable par toi
     mode = 0o644 if est_fonds(nom, fonds_rel) else (m.mode & 0o755) | 0o600
     src = t.extractfile(m)
-    fd, tmp = tempfile.mkstemp(prefix=".nc-restauration-", dir=os.path.dirname(complet))
-    try:
-        with os.fdopen(fd, "wb") as out:
-            os.fchmod(out.fileno(), mode)
-            if nom == RACCOURCIS and not avec_code:
-                donnees, n = sans_raccourcis_risques(b"".join(morceaux(src)))
-                retirees.append(n)
-                out.write(donnees)
-            elif nom == REGLAGES and not avec_code:
-                donnees, cles = fusion_reglages(b"".join(morceaux(src)))
-                gardees.extend(cles)
-                out.write(donnees)
-            else:
-                premier = True
-                for b in morceaux(src):
-                    if premier and est_fonds(nom, fonds_rel) and not image_valide(b[:16]):
-                        raise Refus(T("ce n'est pas une image", "not an image"))
-                    premier = False
-                    out.write(b)
-        os.replace(tmp, complet)
-    except BaseException:
+    # reglages.conf : même verrou que nc-reglages (reglages.conf.lock), pris autour de la lecture (fusion) et du os.replace,
+    # pour ne pas perdre un réglage écrit au même moment
+    with (verrou_reglages(complet) if nom == REGLAGES else contextlib.nullcontext()):
+        fd, tmp = tempfile.mkstemp(prefix=".nc-restauration-", dir=os.path.dirname(complet))
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "wb") as out:
+                os.fchmod(out.fileno(), mode)
+                if nom == RACCOURCIS and not avec_code:
+                    donnees, n = sans_raccourcis_risques(b"".join(morceaux(src)))
+                    retirees.append(n)
+                    out.write(donnees)
+                elif nom == REGLAGES and not avec_code:
+                    donnees, cles = fusion_reglages(b"".join(morceaux(src)))
+                    gardees.extend(cles)
+                    out.write(donnees)
+                else:
+                    premier = True
+                    for b in morceaux(src):
+                        if premier and est_fonds(nom, fonds_rel) and not image_valide(b[:16]):
+                            raise Refus(T("ce n'est pas une image", "not an image"))
+                        premier = False
+                        out.write(b)
+            os.replace(tmp, complet)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
 
 def montrer_ignores(ignores):

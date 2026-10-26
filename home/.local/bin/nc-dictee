@@ -368,7 +368,7 @@ def langue_dictee(m):
     choix = os.environ.get("NC_LANGUE", "")
     if choix not in ("fr", "en"):
         try:
-            for ligne in (m.CONF.parent / "reglages.conf").read_text(encoding="utf-8").splitlines():
+            for ligne in (m.CONF.parent / "reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
                 if ligne.startswith("LANGUE="):
                     choix = ligne.split("=", 1)[1].strip().strip('"')
         except (OSError, AttributeError, UnicodeDecodeError):
@@ -572,7 +572,7 @@ TERMINAUX = ("kitty", "foot", "alacritty", "org.wezfurlong.wezterm", "com.mitche
 
 def reglage(cle, defaut):
     try:
-        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"')
     except OSError:

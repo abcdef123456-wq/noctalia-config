@@ -109,7 +109,7 @@ def reglage(cle, defaut):
     if _reglages is None:
         _reglages = {}
         try:
-            for l in REGLAGES.read_text(encoding="utf-8").splitlines():
+            for l in REGLAGES.read_text(encoding="utf-8", errors="replace").splitlines():
                 k, s, v = l.partition("=")
                 if s and re.fullmatch(r"[A-Z0-9_]+", k.strip()):
                     _reglages[k.strip()] = v.strip().strip('"')

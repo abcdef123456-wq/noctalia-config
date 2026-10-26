@@ -18,7 +18,7 @@ def _langue():
     l = os.environ.get("NC_LANGUE", "")
     if l not in ("fr", "en"):
         try:
-            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8") as f:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
                 for x in f:
                     if x.startswith("LANGUE="):
                         l = x.split("=", 1)[1].strip().strip('"')
@@ -80,7 +80,7 @@ _ALIAS = {"apps and bar": "Applis et barre", "apps": "Applis et barre", "workspa
 
 def reglage(cle):
     try:
-        for l in open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8"):
+        for l in open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace"):
             if l.startswith(cle + "="):
                 return l.split("=", 1)[1].strip().strip('"')
     except OSError:

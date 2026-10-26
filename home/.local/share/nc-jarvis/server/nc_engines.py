@@ -167,7 +167,7 @@ def reglage_nc(nom, defaut=''):
     """Dernière valeur de nom dans ~/.config/nc/reglages.conf (espaces et guillemets tolérés), sinon defaut."""
     valeur = None
     try:
-        for ligne in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8').splitlines():
+        for ligne in (Path.home()/'.config/nc/reglages.conf').read_text(encoding='utf-8', errors='replace').splitlines():
             cle, sep, v = ligne.partition('=')
             if sep and cle.strip() == nom: valeur = v.strip().strip('"')
     except (OSError, ValueError): pass

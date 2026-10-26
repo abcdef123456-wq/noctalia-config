@@ -63,7 +63,7 @@ def langue():
     choix = os.environ.get("NC_LANGUE", "")
     if choix not in ("fr", "en"):
         try:
-            for ligne in (CONF.parent / "reglages.conf").read_text().splitlines():
+            for ligne in (CONF.parent / "reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
                 if ligne.startswith("LANGUE="):
                     choix = ligne.split("=", 1)[1].strip().strip('"')
         except OSError:
@@ -92,7 +92,7 @@ def ia_coupee():
         except Exception:
             pass
     try:
-        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8").splitlines():
+        for l in (Path.home() / ".config/nc/reglages.conf").read_text(encoding="utf-8", errors="replace").splitlines():
             if l.startswith("IA_MODE="):
                 return l.split("=", 1)[1].strip().strip('"') == "non"
     except OSError:
