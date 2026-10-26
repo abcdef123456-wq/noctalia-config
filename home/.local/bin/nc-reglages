@@ -541,6 +541,12 @@ REGLAGES = [
     R("VERROU_MESSAGE", "Apparence", L("Message sur le verrouillage", "Lock screen message"), "texte", "aucun",
       L("Sous l'heure, par exemple « Si trouvé : 06 12 34 56 78 ». « aucun » : pas de message.",
         "Under the time, for example “If found: +1 555 123 4567”. “none”: no message.")),
+    R("VERROU_MUSIQUE", "Apparence", L("Musique sur le verrouillage", "Music on the lock screen"), "choix", "sans-navigateur",
+      L("Un navigateur montre le titre de l'onglet : ta page serait lisible par tous sur l'écran verrouillé.",
+        "A browser shows the tab title: your page would be readable by anyone on the locked screen."),
+      [("tout", L("Tout, avec les boutons", "Everything, with buttons")),
+       ("sans-navigateur", L("Tout, sauf les navigateurs", "Everything except browsers")),
+       ("icone", L("Seulement l'icône", "Icon only"))]),
     R("VERROU_FLOU", "Apparence", L("Flou de l'écran de verrouillage", "Lock screen blur"), "entier", "15",
       L("0 : fond d'écran net.", "0: sharp wallpaper."), mini=0, maxi=100, pas=5, unite="%", groupe="noctalia"),
     R("FIREFOX_STYLE", "Apparence", L("Firefox au style de l'île", "Firefox in the island style"), "ouinon", "non",
@@ -1372,6 +1378,7 @@ MATERIEL = {
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
+    "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE",
@@ -1418,6 +1425,9 @@ def materiel():
             # le réglage n'apparaît pas, pour ne jamais faire croire que c'est protégé. Même chose pour les réglages
             # que seule l'île Quickshell lit (pages, style, heure, bannières…) : le plugin Noctalia n'en lit aucun
             "ile": os.path.isfile(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "quickshell/nc-ile/shell.qml")),
+            # Le verrou nc (plugin nc/verrou de Noctalia) installé : sans lui, le réglage ne servirait à rien
+            "verrou": os.path.isfile(os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
+                                                  "noctalia/plugins/nc-verrou/musique.luau")),
             # Un mode graphique à choisir (nc-gpu-mode : une NVIDIA et un écran interne ; en mode Dédiée, le BIOS peut
             # cacher la carte intégrée), sans lancer nc-gpu-mode
             "mux": True in cartes and existe(sys_ + "/class/drm/card*-eDP-*"),

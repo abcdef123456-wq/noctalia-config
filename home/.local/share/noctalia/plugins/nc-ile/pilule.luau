@@ -35,6 +35,7 @@ local ETAT = noctalia.expandPath("~/.local/bin/nc-ile-etat")
 local LUM = noctalia.expandPath("~/.local/bin/nc-brightness")
 local PROFIL = noctalia.expandPath("~/.config/hypr/nc/profil.lua")
 local JEU = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-mode-jeu"
+local ETEINT = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-ecran-eteint"   -- posé par nc-ecran écran éteint
 local JOURS = { "dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam." }
 local MOIS = { "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc." }
 local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
@@ -51,6 +52,7 @@ local spectre = {}         -- hauteurs 0..1 de l'égaliseur
 local activite = nil       -- réaction en cours : { genre, …, fin = ms }
 local batterie, etatBatterie, profil, jeu = nil, nil, nil, nil
 local dernierMedia, derniereSeconde = 0, 0
+local ecranEteint = false  -- vrai tant que nc-ecran-eteint existe (rien n'est lancé ni redessiné)
 
 -- Animation : largeur en ressort (avec rebond), contenu qui s'efface puis réapparaît à chaque changement
 local largeur, vitesse, opacite = nil, 0, 1
@@ -291,12 +293,23 @@ function onAudioSpectrum(valeursCsv)
   end
 end
 
+-- DEBUT cadence (testé par tests/test_cadence_verrou.py : sous-ensemble commun à Lua et Luau)
+-- Écran éteint : plus rien (ni lancement, ni lecture, ni rendu). Au rallumage : tout est relu tout de suite.
+-- Rien ne joue : la musique n'est relue que toutes les 5 s (le signal « media » de l'IPC relit tout de suite).
 function update()
   local t = maintenant()
-  if t - derniereSeconde >= 1000 then derniereSeconde = t; surveiller() end
-  if t - dernierMedia >= 2000 then lireMedia() end
+  if noctalia.fileExists(ETEINT) then
+    if not ecranEteint then ecranEteint = true; noctalia.setUpdateInterval(1000) end
+    return
+  end
+  local rallume = ecranEteint
+  ecranEteint = false
+  if rallume or t - derniereSeconde >= 1000 then derniereSeconde = t; surveiller() end
+  local pause = (media ~= nil and media.etat == "Playing") and 2000 or 5000
+  if rallume or t - dernierMedia >= pause then lireMedia() end
   rendre()
 end
+-- FIN cadence
 
 function onClick()
   if ileOuverte then
