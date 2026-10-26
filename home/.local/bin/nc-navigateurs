@@ -13,6 +13,7 @@ Les copies sont refaites à chaque nc-maj. Relance le navigateur (ferme toutes s
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -72,9 +73,35 @@ def marque(f):
         return False
 
 
+def binaire(texte):
+    """Le programme du Exec= principal ([Desktop Entry]) : il devient TryExec=, pour que le bureau cache le lanceur quand
+    le navigateur est désinstallé (sans lui, la copie resterait en lanceur fantôme). Vide si on ne sait pas (ou déjà
+    TryExec dans l'original, ou lanceur générique comme flatpak, qui reste là sans l'application)."""
+    groupe, exe = "", ""
+    for l in texte.splitlines():
+        if l.startswith("["):
+            groupe = l.strip()
+        elif groupe == "[Desktop Entry]":
+            if re.match(r"^TryExec\s*=", l):
+                return ""
+            m = re.match(r"^Exec=(.*)$", l)
+            if m and not exe:
+                exe = m.group(1)
+    try:
+        mots = shlex.split(exe)
+    except ValueError:
+        return ""
+    while mots and (mots[0] == "env" or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", mots[0])):
+        mots = mots[1:]
+    if not mots or "%" in mots[0] or os.path.basename(mots[0]) in ("flatpak", "snap", "sh", "bash", "uwsm-app", "nc-chromium"):
+        return ""
+    return mots[0]
+
+
 def enveloppe(texte, nc):
-    """Le .desktop avec chaque Exec= (principal et [Desktop Action …]) passé par nc-chromium, et la marque."""
+    """Le .desktop avec chaque Exec= (principal et [Desktop Action …]) passé par nc-chromium, la marque, et TryExec=."""
     sortie, posee = [], False
+    essai = binaire(texte)
     for l in texte.splitlines(keepends=True):
         m = re.match(r"^Exec=(.*?)(\r?\n?)$", l)
         if m and "nc-chromium" not in m.group(1):
@@ -84,6 +111,8 @@ def enveloppe(texte, nc):
         sortie.append(l)
         if not posee and l.strip() == "[Desktop Entry]":
             sortie.append(MARQUE + "\n")
+            if essai:
+                sortie.append("TryExec=%s\n" % essai)
             posee = True
     return "".join(sortie) if posee else None
 
