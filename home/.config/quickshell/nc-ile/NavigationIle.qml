@@ -6,6 +6,17 @@ Item {
     property var pages: []
     property int courant: 0
     signal choisir(string nom)
+    // Nom lu par un lecteur d'écran : le libellé traduit de la page, pas son identifiant (« fenetres »)
+    function libelle(nom) {
+        var l = ({
+            musique: ["Musique", "Music"], claude: ["Claude", "Claude"], minuteur: ["Minuteur", "Timer"], charge: ["Batterie", "Battery"],
+            jeu: ["Jeu", "Game"], centre: ["Centre de contrôle", "Control Center"], assistant: ["Assistant", "Assistant"],
+            notifications: ["Notifications", "Notifications"], son: ["Son", "Sound"], reseau: ["Réseau", "Network"],
+            bluetooth: ["Bluetooth", "Bluetooth"], systeme: ["Système", "System"], calendrier: ["Calendrier", "Calendar"],
+            meteo: ["Météo", "Weather"], presse: ["Presse-papiers", "Clipboard"], fenetres: ["Fenêtres", "Windows"]
+        })[nom]
+        return l ? Reglages.t(l[0], l[1]) : nom
+    }
     clip: true
     implicitWidth: 18
     Repeater {
@@ -30,7 +41,7 @@ Item {
             Keys.onReturnPressed: navigation.choisir(modelData)
             Keys.onSpacePressed: navigation.choisir(modelData)
             Accessible.role: Accessible.Button
-            Accessible.name: modelData
+            Accessible.name: navigation.libelle(modelData)
             Accessible.checkable: true
             Accessible.checked: distance === 0
             Accessible.onPressAction: navigation.choisir(modelData)

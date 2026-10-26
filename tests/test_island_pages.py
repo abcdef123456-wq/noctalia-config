@@ -119,6 +119,16 @@ else if(etape===3){controler();nav.height=0;etape++}
 else if(etape===4){verifier(points().every(p=>!p.visible),"points pendant la fermeture");Qt.quit()}
 ''', scale=scale)
 
+    def test_nom_accessible_est_le_libelle_pas_l_identifiant(self):
+        self.executer('''
+if(etape===0){etape++;return}
+var noms=nav.pages.map(n=>nav.libelle(n))
+verifier(noms.every((l,i)=>l!==nav.pages[i]||l==="Claude"||l==="Bluetooth"||l==="Notifications"||l==="Assistant"),"identifiant brut lu : "+noms.join())
+verifier(nav.libelle("fenetres")===Reglages.t("Fenêtres","Windows")&&nav.libelle("presse")===Reglages.t("Presse-papiers","Clipboard"),"libellé traduit")
+verifier(nav.libelle("inconnue")==="inconnue","page inconnue : repli sur l'identifiant")
+Qt.quit()
+''')
+
     def test_preferences_filter_dynamic_and_static_pages_and_allow_all_off(self):
         self.executer('''
 if(etape===0){Etat.enCharge=true;Etat.jeu=true;Etat.minuteurFin=Date.now()+10000;Etat.meteo={temp:20};etape++}
