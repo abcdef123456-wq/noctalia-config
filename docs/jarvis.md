@@ -241,7 +241,7 @@ dépôt, et change-la si elle a pu fuiter (dans les `.env` du backend, puis `nc-
 
 ## Passer un serveur déjà installé à la révision validée
 
-La révision validée est `ffb19b9`. Elle ne garde plus aucun jeton d'origine dans le runner (seul l'en-tête de la requête en cours compte), valide `permission_mode` dans `run_agy` et ne bloque plus le démarrage sur un ancien `always-proceed`. `94a3a93` et `4ecc57a` restent acceptées. Par rapport à `4ecc57a`, la série `94a3a93` puis `ffb19b9` limite `/api/ask` à
+La révision validée est `17525af`. Elle ajoute les pièces jointes de `/api/ask` et `/run` (voir « Fichiers joints » dans docs/assistant-distant.md) et remet `--dangerously-skip-permissions` pour AGY, que l'overlay retire (voir « AGY sans auto-approbation »). `ffb19b9`, juste avant, ne garde plus aucun jeton d'origine dans le runner (seul l'en-tête de la requête en cours compte), valide `permission_mode` dans `run_agy` et ne bloque plus le démarrage sur un ancien `always-proceed`. `ffb19b9`, `94a3a93` et `4ecc57a` restent acceptées. Par rapport à `4ecc57a`, la série `94a3a93` puis `ffb19b9` limite `/api/ask` à
 `desktop:<pc>` ou `default`, garde un jeton d'origine par session, resserre les modes de permission (plus de
 `always-proceed`, `yolo` ni `bypass`) et ferme, au reset, la seule session de la conversation visée. L'overlay
 n'en garde que le bon : aucun jeton d'origine n'est gardé ni écrit pour l'agent (le runner le donnait à tout appel
@@ -273,12 +273,12 @@ commandes relayées, et le MCP `jarvis-nodes` (voir « Laisser JARVIS piloter ce
 - **des nœuds plus sûrs** pour `nc-noeud` : la clé seulement dans l’en-tête, `ws://` refusé vers un hôte public,
   les commandes coupées par défaut (voir « Laisser JARVIS piloter ce PC »).
 
-Le déployeur installe la révision validée (`ffb19b9`) sur un nouveau serveur, et accepte un serveur resté sur une
-révision validée plus ancienne (`94a3a93`, `4ecc57a`, `f522291`, `aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà
+Le déployeur installe la révision validée (`17525af`) sur un nouveau serveur, et accepte un serveur resté sur une
+révision validée plus ancienne (`ffb19b9`, `94a3a93`, `4ecc57a`, `f522291`, `aae5b9b`, `64523e5` et `3d1c6b6` compris), mais ne change jamais celle d'un serveur déjà
 installé. Pour le faire, sur la machine du backend (dossier par défaut `~/.local/share/jarvis-bis`) :
 
 ```bash
-git -C ~/.local/share/jarvis-bis fetch --depth=1 origin ffb19b94f9c98ed98723500efbaa5c2c7f832821
+git -C ~/.local/share/jarvis-bis fetch --depth=1 origin 17525afe78e11d4c509daac8bcf4cbb00673cd4a
 git -C ~/.local/share/jarvis-bis checkout --detach FETCH_HEAD
 ```
 
@@ -290,7 +290,7 @@ interfaces (0.0.0.0), sans l'overlay de noctalia-config, et remplacent ses `.env
 
 N’installe pas à la main les révisions intermédiaires `1ae55f3`, `8ff25c3` ou `4d279b6` : elles passent une clé de
 session à des fonctions que l’overlay d’avant `64523e5` ne connaissait pas, et chaque question finit en erreur 500.
-Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `ffb19b9`. Il refuse aussi
+Le déployeur les refuse. Mets d’abord noctalia-config à jour, puis passe directement à `17525af`. Il refuse aussi
 les révisions entre `aae5b9b` et `f522291` (`d1b0280` à `9f4cdeb`) : la première version du relais à distance y
 remplaçait la demande en attente.
 
