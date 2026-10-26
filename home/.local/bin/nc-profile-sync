@@ -503,16 +503,46 @@ return { profil = \"${profile:-balanced}\", batterie = $batterie, hz = \"$hz\" }
 rm -f "$GPU_STATE" "$RTX_GUET"
 apply
 
-# Événements : changement de profil (tlp-pd) et de source d'alimentation (UPower). Vérification de secours toutes les 60 s.
+# Événements : changement de profil (tlp-pd) et de source d'alimentation (UPower). Plus de réveil toutes les 60 s
+# (une dizaine de processus par minute pour rien) :
+#   - par défaut, une vérification de secours toutes les 15 min (événement manqué, reprise de veille), qui ne lance
+#     apply que si le profil ou l'alimentation ont changé ;
+#   - 60 s seulement quand l'Économie automatique guette la batterie (ECO_AUTO) : UPower n'annonce pas chaque
+#     pourcent, et apply ne sert alors que si le niveau a atteint le seuil.
+# NC_SYNC_SECOURS / NC_SYNC_VEILLE : ces délais, en secondes (tests).
+SECOURS="${NC_SYNC_SECOURS:-900}"
+VEILLE="${NC_SYNC_VEILLE:-60}"
+
+# L'Économie automatique guette-t-elle la batterie ? (sur batterie, pas encore déclenchée, hors Économie)
+guet_batterie() {
+  [ "$ECO_AUTO" -gt 0 ] && [ "$last_bat" = 1 ] && [ ! -e "$ECO_AUTO_FLAG" ] && [ "$last_profile" != power-saver ]
+}
+
+# Réveil de secours : y a-t-il quelque chose à appliquer ?
+changement_utile() {
+  local p b=0
+  p=$(get_profile); on_battery && b=1
+  [ "$p" != "$last_profile" ] && return 0
+  [ "$b" != "$last_bat" ] && return 0
+  guet_batterie && [ "$(batterie_pct)" -le "$ECO_AUTO" ] && return 0
+  return 1
+}
+
 {
   gdbus monitor --system --dest net.hadess.PowerProfiles &
   gdbus monitor --system --dest org.freedesktop.UPower --object-path /org/freedesktop/UPower &
   wait
 } 2>/dev/null | while true; do
-  read -r -t 60 _line
+  delai=$SECOURS; guet_batterie && delai=$VEILLE
+  read -r -t "$delai" _line
   rc=$?
-  [ $rc -ne 0 ] && [ $rc -le 128 ] && { log "$(t "flux D-Bus interrompu" "D-Bus stream interrupted")"; exit 1; }
-  sleep 0.3
-  while read -r -t 0.2 _line; do :; done
+  if [ $rc -gt 128 ]; then                   # délai écoulé, aucun événement : apply seulement si quelque chose a changé
+    changement_utile || continue
+  elif [ $rc -ne 0 ]; then
+    log "$(t "flux D-Bus interrompu" "D-Bus stream interrupted")"; exit 1
+  else
+    sleep 0.3
+    while read -r -t 0.2 _line; do :; done
+  fi
   apply
 done

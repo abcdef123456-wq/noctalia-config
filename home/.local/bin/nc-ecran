@@ -21,12 +21,17 @@ esac
 force=""; [ "$action" = on ] && [ "${2:-}" = reveil ] && force=1
 RUN="${XDG_RUNTIME_DIR:-/tmp}"
 command -v hyprctl >/dev/null 2>&1 || exit 0
-# Session Hyprland : la variable de la session, sinon la seule instance ouverte (service lancé sans elle)
+# Session Hyprland : la variable de la session, sinon l'instance la plus récente (service lancé sans elle)
 if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  # le socket le plus récent (et non le dernier par ordre alphabétique)
+  recent=""
   for s in "$RUN"/hypr/*/.socket.sock; do
     [ -S "$s" ] || continue
-    s=${s%/.socket.sock}; HYPRLAND_INSTANCE_SIGNATURE=${s##*/}
+    if [ -z "$recent" ] || [ "$s" -nt "$recent" ]; then recent=$s; fi
   done
+  if [ -n "$recent" ]; then
+    recent=${recent%/.socket.sock}; HYPRLAND_INSTANCE_SIGNATURE=${recent##*/}
+  fi
   [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || exit 0
   export HYPRLAND_INSTANCE_SIGNATURE
 fi
@@ -64,7 +69,10 @@ if [ -z "$force" ]; then
   if [ -n "$etats" ] && [ -z "$(printf '%s\n' "$etats" | grep -vx "$voulu")" ]; then bordure; exit 0; fi
 fi
 
-h dispatch "hl.dsp.dpms({ action = \"$action\" })" >/dev/null 2>&1
+sortie=$(h dispatch "hl.dsp.dpms({ action = \"$action\" })" 2>&1); code=$?
 bordure
-printf '%s %s\n' "$action" "$(date +%s)" > "$ETAT"
+# L'heure n'est notée qu'en cas de succès : après un échec (hyprctl bloqué, erreur de Hyprland), l'appel suivant
+# ne doit pas être pris pour un doublon des 5 s de garde
+case "$sortie" in *[Ee]rror*|*[Ee]rreur*|*nvalid*) code=1 ;; esac
+[ "$code" = 0 ] && printf '%s %s\n' "$action" "$(date +%s)" > "$ETAT"
 exit 0

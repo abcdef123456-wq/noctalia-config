@@ -122,8 +122,10 @@ def halo_sur_batterie():
 
 
 def autorise():
-    """Pas en Économie, pas en mode jeu, pas sur batterie hors Performance (sauf réglage HALO_BATTERIE)."""
+    """Pas en Économie, pas en mode jeu, pas écran éteint, pas sur batterie hors Performance (sauf réglage HALO_BATTERIE)."""
     if os.path.exists(f"{RUN}/nc-mode-jeu"):
+        return False
+    if os.path.exists(f"{RUN}/nc-ecran-eteint"):      # écran éteint (nc-ecran) : personne ne voit le halo
         return False
     try:
         t = open(PROFIL).read()
@@ -167,57 +169,132 @@ def log(msg):
     print(T(f"nc-pouls : {msg}", f"nc-pouls: {msg}"), file=sys.stderr, flush=True)
 
 
+def arreter_processus(p):
+    """Arrête un de nos processus fils et le récupère (pas de zombie) ; kill s'il ne s'arrête pas en 2 s."""
+    if p is None:
+        return
+    try:
+        p.terminate()
+    except OSError:
+        pass
+    try:
+        p.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        try:
+            p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    for f in (p.stdout, p.stderr):
+        try:
+            if f:
+                f.close()
+        except OSError:
+            pass
+
+
+def lancer_suivi():
+    """playerctl --follow : une ligne à chaque changement d'état d'un lecteur (pas d'interrogation toutes les 2 s)."""
+    return subprocess.Popen(["playerctl", "-a", "--follow", "status"], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, bufsize=0)
+
+
+DELAI_SUIVI_MAX = 30     # secondes : attente maximale avant de relancer playerctl --follow s'il meurt
+
+
 def service():
     if not shutil.which("cava"):
         log(T("cava introuvable : le halo ne peut pas écouter la musique (installe le paquet cava)",
               "cava not found: the glow cannot listen to the music (install the cava package)"))
+        return                                     # rien à faire sans cava : on sort proprement (code 0), pas de relance
     # Entrée son de cava : PipeWire, sinon PulseAudio (cava sans PipeWire, comme sur certaines distributions)
     methodes, m = ["pipewire", "pulse"], 0
     cava, niveau, envoye, prochain_test, depart = None, 0.0, -1.0, 0.0, 0.0
     echecs, pause_jusqua = 0, 0.0        # cava qui ne démarre avec aucune entrée : on attend avant de réessayer
-    while True:
-        now = time.time()
-        if now >= prochain_test:
-            prochain_test = now + 2
-            actif = musique() and autorise()
-            if not actif:
-                echecs, pause_jusqua = 0, 0.0      # la musique s'arrête : on réessaiera à la prochaine lecture
-            if actif and cava is None and shutil.which("cava") and now >= pause_jusqua:
-                cava, depart = lancer_cava(methodes[m]), now
-            elif not actif and cava is not None:
-                cava.terminate()
+    suivi, relance_suivi, delai_suivi = None, 0.0, 1.0
+    en_musique = musique()               # ensuite : mis à jour par les événements de playerctl --follow
+    verif_musique = time.time() + 30     # pendant la lecture seulement : un lecteur fermé sans événement
+    try:
+        while True:
+            now = time.time()
+            if suivi is None and now >= relance_suivi:
+                try:
+                    suivi = lancer_suivi()
+                except OSError:                    # playerctl absent : on réessaie, avec un délai qui double
+                    relance_suivi, delai_suivi = now + delai_suivi, min(delai_suivi * 2, DELAI_SUIVI_MAX)
+                else:
+                    en_musique = musique()
+            if en_musique and cava is not None and now >= verif_musique:
+                verif_musique = now + 30
+                en_musique = musique()
+                prochain_test = 0.0
+            if now >= prochain_test:
+                prochain_test = now + 2
+                actif = en_musique and autorise()
+                if not actif:
+                    echecs, pause_jusqua = 0, 0.0      # la musique s'arrête : on réessaiera à la prochaine lecture
+                if actif and cava is None and shutil.which("cava") and now >= pause_jusqua:
+                    cava, depart = lancer_cava(methodes[m]), now
+                    verif_musique = now + 30
+                elif not actif and cava is not None:
+                    arreter_processus(cava)
+                    cava = None
+                    niveau, envoye = 0.0, -1.0
+                    halo(0)
+            fds = ([suivi.stdout] if suivi else []) + ([cava.stdout] if cava else [])
+            # Sans musique, rien ne réveille le service que les événements de playerctl
+            attente = 0.25 if cava else (2.0 if en_musique else 60.0)
+            if suivi is None:
+                attente = min(attente, max(0.1, relance_suivi - now))
+            if not fds:
+                time.sleep(attente)
+                continue
+            r, _, _ = select.select(fds, [], [], attente)
+            if suivi and suivi.stdout in r:
+                try:
+                    donnees = os.read(suivi.stdout.fileno(), 4096)
+                except OSError:
+                    donnees = b""
+                if donnees:
+                    delai_suivi = 1.0
+                    en_musique = musique()
+                    verif_musique = time.time() + 30
+                    prochain_test = 0.0
+                else:                                  # playerctl arrêté : on le récupère et on le relance, plus tard
+                    arreter_processus(suivi)
+                    suivi = None
+                    relance_suivi, delai_suivi = time.time() + delai_suivi, min(delai_suivi * 2, DELAI_SUIVI_MAX)
+                    en_musique = musique()
+                    prochain_test = 0.0
+            if not cava or cava.stdout not in r:
+                continue
+            ligne = cava.stdout.readline()
+            if not ligne:                              # cava arrêté (son coupé, PipeWire relancé…)
+                err = cava.stderr.read().strip() if cava.stderr else ""
+                if time.time() - depart < 3:           # arrêté tout de suite : essaie l'autre entrée son
+                    log(T(f"cava ne démarre pas avec {methodes[m]} ({err[:160] or 'sans message'})",
+                          f"cava does not start with {methodes[m]} ({err[:160] or 'no message'})"))
+                    m = (m + 1) % len(methodes)
+                    echecs += 1
+                    if echecs >= len(methodes):        # les deux entrées ont échoué : pas de relance toutes les 2 s
+                        echecs, pause_jusqua = 0, time.time() + PAUSE_CAVA
+                arreter_processus(cava)
                 cava = None
-                niveau, envoye = 0.0, -1.0
                 halo(0)
-        if cava is None:
-            time.sleep(1)
-            continue
-        r, _, _ = select.select([cava.stdout], [], [], 0.25)
-        if not r:
-            continue
-        ligne = cava.stdout.readline()
-        if not ligne:                              # cava arrêté (son coupé, PipeWire relancé…)
-            err = cava.stderr.read().strip() if cava.stderr else ""
-            if time.time() - depart < 3:           # arrêté tout de suite : essaie l'autre entrée son
-                log(T(f"cava ne démarre pas avec {methodes[m]} ({err[:160] or 'sans message'})",
-                      f"cava does not start with {methodes[m]} ({err[:160] or 'no message'})"))
-                m = (m + 1) % len(methodes)
-                echecs += 1
-                if echecs >= len(methodes):        # les deux entrées ont échoué : pas de relance toutes les 2 s
-                    echecs, pause_jusqua = 0, time.time() + PAUSE_CAVA
-            cava = None
-            halo(0)
-            continue
-        echecs = 0
-        barres = [int(x) for x in ligne.strip().strip(";").split(";") if x.isdigit()]
-        if len(barres) < 2:
-            continue
-        basse = max(barres[0], barres[1]) / 100
-        # Montée immédiate, retombée douce : la pulsation suit le rythme sans clignoter
-        niveau = basse if basse > niveau else niveau * 0.86 + basse * 0.14
-        if abs(niveau - envoye) >= 0.04:
-            halo(niveau)
-            envoye = niveau
+                continue
+            echecs = 0
+            barres = [int(x) for x in ligne.strip().strip(";").split(";") if x.isdigit()]
+            if len(barres) < 2:
+                continue
+            basse = max(barres[0], barres[1]) / 100
+            # Montée immédiate, retombée douce : la pulsation suit le rythme sans clignoter
+            niveau = basse if basse > niveau else niveau * 0.86 + basse * 0.14
+            if abs(niveau - envoye) >= 0.04:
+                halo(niveau)
+                envoye = niveau
+    finally:
+        arreter_processus(cava)
+        arreter_processus(suivi)
 
 
 def diag():
