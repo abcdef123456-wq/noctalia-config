@@ -665,9 +665,9 @@ render = function() end
 onOpen("? a 'quote' and $(false)")
 for _, f in ipairs(callbacks) do f({exitCode=0,stdout="[]"}) end
 onKey("Return", true)
-assert(closed and launched and #launched == 3)
-assert(launched[1] == "~/.local/bin/nc-ia" and launched[2] == "terminal")
-assert(launched[3] == "a 'quote' and $(false)")
+assert(closed and launched and #launched == 4)
+assert(launched[1] == "~/.local/bin/nc-ia" and launched[2] == "terminal" and launched[3] == "--")
+assert(launched[4] == "a 'quote' and $(false)")
 '''
         with tempfile.TemporaryDirectory() as d:
             harness = Path(d) / "launcher.lua"
