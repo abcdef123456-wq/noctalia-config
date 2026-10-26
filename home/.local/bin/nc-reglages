@@ -1375,7 +1375,7 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE",
-                          "ILE_ANIM_BATTERIE")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
                                                "reseau", "bluetooth", "systeme", "calendrier", "meteo", "presse", "fenetres")},
     "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
@@ -2265,6 +2265,21 @@ def appliquer_groupe(g, vals):
 rc = None
 
 
+def sections_config():
+    """{nom d'un raccourci de la config, en français et en anglais : [sections]}, lu dans nc/raccourcis.lua (trad("Section|Nom", "Name"))."""
+    try:
+        src = Path(HOME, ".config/hypr/nc/raccourcis.lua").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    res = {}
+    for sec, fr, en in re.findall(r'trad\("([^"|\\]+)\|((?:[^"\\]|\\.)+)",\s*"((?:[^"\\]|\\.)*)"\s*\)', src):
+        for nom in (fr, en):
+            nom, sec = nom.replace('\\"', '"').strip(), sec.strip()
+            if sec not in res.setdefault(nom, []):
+                res[nom].append(sec)
+    return res
+
+
 def raccourcis():
     """Lignes de la section Raccourcis : titres, raccourcis actifs (de la config et les tiens), désactivés."""
     global rc
@@ -2290,14 +2305,22 @@ def raccourcis():
         origs = [rc.original_id(i, conf) for i in ids]
         lignes[sec].append({"genre": "raccourci", "nom": rc.desc_text(d), "ids": ids, "origs": origs, "mien": mien,
                             "change": any(o != i for o, i in zip(origs, ids)), "desactive": False})
+    # Désactivés : restent, grisés, dans leur section d'origine (retrouvée par leur nom dans la config) ; « Mes raccourcis »
+    # seulement si le nom est inconnu. Le nom de raccourcis.conf ne sert qu'à l'affichage (le Lua ne lit que le masque:touche).
+    connus = sections_config()
     off = {}
     for e in conf:
         if e[0] == "aucun":
             nom = e[2] if len(e) > 2 and e[2] else T("Raccourci de la config", "Config shortcut")
-            off.setdefault(nom, []).append(e[1])
-    for nom, ids in off.items():
-        lignes[mes].append({"genre": "raccourci", "nom": nom, "ids": ids, "origs": ids, "mien": None,
-                                         "change": True, "desactive": True})
+            souris = e[1].partition(":")[2].startswith("mouse:")      # « Déplacer la fenêtre » existe au clavier et à la souris
+            cands = connus.get(nom, [])
+            sec = next((c for c in cands if (c == "Souris") == souris), cands[0] if cands else mes)
+            if sec not in lignes:
+                sec = mes
+            off.setdefault((sec, nom), []).append(e[1])
+    for (sec, nom), ids in off.items():
+        lignes[sec].append({"genre": "raccourci", "nom": nom, "ids": ids, "origs": ids, "mien": None,
+                            "change": True, "desactive": True})
     res = [{"genre": "ajouter", "nom": T("Ajouter un raccourci…", "Add a shortcut…")}]
     for s in rc.nckeys.SECTIONS:
         if lignes[s]:
