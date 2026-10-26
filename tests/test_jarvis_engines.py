@@ -515,6 +515,9 @@ class _BaseIsolation(unittest.TestCase):
             delete_conversation=lambda *a:{},delete_all_conversations=lambda:{},get_token_usage=lambda:{},
             _reset_memory_injection=lambda:None,_should_inject_memory=lambda version:True,render_memory_prompt=lambda:'')
         self.bin=self.root/'bin';self.bin.mkdir()
+        # Ce PATH à lui passe devant les faux du garde-fou : sans ce faux notify-send, le jeton expiré afficherait une VRAIE
+        # notification sur le bureau, avec un bouton « Ouvrir » qui lancerait claude dans un vrai kitty
+        nf=self.bin/'notify-send';nf.write_text('#!/bin/sh\nexit 0\n');nf.chmod(0o755)
         env=dict(HOME=str(self.home),TELEGRAM_TOKEN='faux-tg',SECRET_KEY='faux-secret',ANTHROPIC_API_KEY='cle-claude-0123456789',
             DEPLOY_MODE='local',PATH=str(self.bin)+':/usr/bin:/bin')
         self.env=patch.dict(os.environ,env);self.env.start();self.addCleanup(self.env.stop)
@@ -750,7 +753,7 @@ class IsolationMoteurReelle(_BaseIsolation):
         super().setUp()
         (self.bin/'systemd-run').unlink()
         vrai=os.environ.get('NC_TEST_VRAI_RUNTIME') or ''
-        os.environ['PATH']=os.environ.get('NC_TEST_VRAI_PATH',os.environ['PATH'])
+        os.environ['PATH']=str(self.bin)+os.pathsep+os.environ.get('NC_TEST_VRAI_PATH',os.environ['PATH'])   # le faux notify-send devant
         if not os.environ.get('DBUS_SESSION_BUS_ADDRESS'): os.environ['DBUS_SESSION_BUS_ADDRESS']='unix:path='+os.path.join(vrai,'bus')
         os.environ['TMPDIR']=str(self.root)
         # ce qui est vu de l'extérieur avant le moteur : tout l'arbre du test (le dossier run, vidé par le moteur, est suivi à part)
