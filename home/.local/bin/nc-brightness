@@ -65,12 +65,14 @@ ecrire() {
   [ -n "$err" ] && printf '%s\n' "$err" >&2
   return "$code"
 }
+# Sans brightnessctl (hypridle appelle dim et get sans vérifier) : rien à régler, et pas d'erreur de plus
+case "${1:-}" in up|down|dim|restore|get|set) command -v brightnessctl >/dev/null 2>&1 || exit 0 ;; esac
 case "${1:-}" in
   up)      ecrire -d "$dev" -e2 -n2 set "$pas%+"; exit ;;
   down)    ecrire -d "$dev" -e2 -n2 set "$pas%-"; exit ;;
   dim)     brightnessctl -s -q -d "$dev"
            b=$(brightnessctl -d "$dev" -m | cut -d, -f4 | tr -d %)
-           [ "$b" -gt 20 ] && ecrire -q -d "$dev" set 20% ; exit 0 ;;
+           [ "${b:-0}" -gt 20 ] 2>/dev/null && ecrire -q -d "$dev" set 20% ; exit 0 ;;
   restore) ecrire -r -q -d "$dev"; exit ;;
   get)     brightnessctl -d "$dev" -e2 -m | cut -d, -f4 | tr -d % ; exit 0 ;;
   set)     ecrire -q -d "$dev" -e2 -n2 set "${2:-50}%"; exit ;;
