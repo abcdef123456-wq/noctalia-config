@@ -42,7 +42,8 @@ principal() {
 # Mode et côté retenus pour un écran (par sa description) : « mode côté »
 retenu() {
   [ -r "$CONF" ] || { echo "etendre droite"; return; }
-  awk -F'\t' -v d="$1" '$1 == "ECRAN" && $4 == d { m = $2; c = $3 } END { print (m ? m : "etendre") " " (c ? c : "droite") }' "$CONF"
+  # ENVIRON et non -v : awk -v lirait les « \ » d'une description d'écran comme des échappements
+  D="$1" awk -F'\t' '$1 == "ECRAN" && $4 == ENVIRON["D"] { m = $2; c = $3 } END { print (m ? m : "etendre") " " (c ? c : "droite") }' "$CONF"
 }
 
 etat() {
@@ -66,14 +67,20 @@ etat() {
 }
 
 appliquer() {
-  local mode="$1" c="$2" json p descs
+  local mode="$1" c="$2" json p descs ancien="" avant_erreurs="" apres_erreurs=""
   json="$(ecrans)"
   p="$(principal "$json")"
   descs="$(jq -r --arg p "$p" "$CLE"'.[] | select(.name != $p and (.name | test("^(HEADLESS|FALLBACK)") | not)) | cle' <<< "$json")"
   if [ -z "$descs" ]; then
-    notify-send -a "$(t "Écrans" "Displays")" -i video-display "$(t "Aucun autre écran branché" "No other display connected")" \
+    notify-send -a "$(t "Écrans" "Displays")" -i video-display -- "$(t "Aucun autre écran branché" "No other display connected")" \
       "$(t "Branche un écran ou un projecteur, puis recommence." "Connect a display or a projector, then try again.")" 2>/dev/null
     exit 1
+  fi
+  if [ "$mode" = externe ]; then
+    # Le mode d'avant (pas de question si l'écran du PC était déjà éteint) et les erreurs de configuration d'avant
+    read -r ancien _ <<< "$(retenu "$(head -n 1 <<< "$descs")")"
+    avant_erreurs="$(hyprctl configerrors 2>/dev/null || true)"
+    [ -r "$CONF" ] && cp -f -- "$CONF" "$CONF.avant" 2>/dev/null
   fi
   mkdir -p "$(dirname "$CONF")"
   local tmp="$CONF.tmp"
@@ -81,7 +88,7 @@ appliquer() {
     echo "# Projection (nc-ecrans, Super + O) : mode de chaque écran, retenu par son modèle. Lu par ~/.config/hypr/nc/ecrans.lua."
     echo "PRINCIPAL=$p"
     # Les autres écrans retenus, puis ceux branchés maintenant avec le nouveau mode
-    awk -F'\t' -v liste="$descs" 'BEGIN { n = split(liste, l, "\n"); for (i = 1; i <= n; i++) ici[l[i]] = 1 }
+    LISTE="$descs" awk -F'\t' 'BEGIN { n = split(ENVIRON["LISTE"], l, "\n"); for (i = 1; i <= n; i++) ici[l[i]] = 1 }
          $1 == "ECRAN" && !($4 in ici) { print }' "$CONF" 2>/dev/null
     while IFS= read -r d; do printf 'ECRAN\t%s\t%s\t%s\n' "$mode" "$c" "$d"; done <<< "$descs"
   } > "$tmp" && mv "$tmp" "$CONF"
@@ -89,6 +96,25 @@ appliquer() {
   # En sortant du miroir, Hyprland place d'abord l'écran tout seul (à droite) : une seconde fois pour le bon côté
   if [ "$mode" != miroir ] && jq -e 'any(.[]; .mirrorOf != "none")' <<< "$json" >/dev/null; then
     sleep 0.5; hyprctl reload >/dev/null
+  fi
+  if [ "$mode" = externe ]; then
+    # Une erreur nouvelle après le rechargement : l'ancien réglage revient, l'écran du PC reste allumé
+    apres_erreurs="$(hyprctl configerrors 2>/dev/null || true)"
+    case "$apres_erreurs" in ""|ok) ;; *)
+      if [ "$apres_erreurs" != "$avant_erreurs" ]; then
+        if [ -r "$CONF.avant" ]; then mv -f -- "$CONF.avant" "$CONF"; else rm -f -- "$CONF"; fi
+        hyprctl reload >/dev/null
+        notify-send -a "$(t "Écrans" "Displays")" -i video-display -- "$(t "Hyprland a refusé ce mode" "Hyprland refused this mode")" \
+          "$(printf '%s' "$apres_erreurs" | head -n 3)" 2>/dev/null
+        exit 1
+      fi ;;
+    esac
+    rm -f -- "$CONF.avant"
+    # Écran du PC éteint : sur la mauvaise entrée d'un projecteur, plus rien ne s'affiche. La question est posée à part
+    # (cet appel rend la main) ; sans « Garder » en 15 secondes, retour à « étendre »
+    if [ "$ancien" != externe ]; then
+      setsid -f "$(readlink -f "$0" 2>/dev/null || echo "$0")" confirmer-externe "$c" >/dev/null 2>&1 < /dev/null
+    fi
   fi
 }
 
@@ -107,11 +133,18 @@ case "$action" in
     read -r m c <<< "$(etat | jq -r '"\(.mode) \(.position)"')"
     for i in "${!MODES[@]}"; do [ "${MODES[$i]}" = "$m" ] && break; done
     appliquer "${MODES[$(( (i + 1) % ${#MODES[@]} ))]}" "$c" ;;
+  confirmer-externe)
+    # Interne (lancé à part par « externe ») : « Garder ? » avec un bouton ; fermée, expirée ou sans réponse, l'écran
+    # du PC se rallume (retour à « étendre » du côté retenu). timeout : un serveur de notifications muet ne retient rien
+    choix="$(timeout 20 notify-send -a "$(t "Écrans" "Displays")" -i video-display -t 15000 -A garder="$(t "Garder" "Keep")" \
+      -- "$(t "Garder cet affichage ?" "Keep this display?")" \
+      "$(t "L'écran du PC est éteint. Sans réponse en 15 secondes, il se rallume." "The PC screen is off. With no answer in 15 seconds, it turns back on.")" 2>/dev/null)" || choix=""
+    [ "$choix" = garder ] || appliquer etendre "${cote:-droite}" ;;
   sans-fil)
     if command -v gnome-network-displays >/dev/null; then
       setsid -f gnome-network-displays >/dev/null 2>&1
     else
-      notify-send -a "$(t "Écrans" "Displays")" -i video-display "$(t "Projection sans fil" "Wireless projection")" \
+      notify-send -a "$(t "Écrans" "Displays")" -i video-display -- "$(t "Projection sans fil" "Wireless projection")" \
         "$(t "Installe gnome-network-displays pour projeter sans fil (Miracast) sur une télé ou un projecteur." "Install gnome-network-displays to project wirelessly (Miracast) to a TV or a projector.")" 2>/dev/null
     fi ;;
   verifier)
