@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """nc-code : un espace de code en un geste (Super + X). Un sélecteur de projets, puis une fenêtre kitty prête :
 Neovim à gauche, l'agent de l'IA choisie à droite (Claude Code, Codex, Gemini, OpenCode… ; un shell si l'IA est coupée
-ou si aucun agent n'est installé), un 2e onglet lazygit (s'il existe) et un 3e onglet shell.
-  nc-code                  le sélecteur (fzf s'il existe, sinon une liste numérotée) ; Entrée ouvre l'espace complet,
-                           Alt + Entrée seulement Neovim, Ctrl + A choisit l'agent (liste numérotée : « 3 a » et « 3 n »)
+ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) et un onglet « Terminal ».
+  nc-code                  le sélecteur aux couleurs de l'île (on tape pour chercher) ; Entrée ouvre l'espace complet,
+                           Alt + Entrée seulement Neovim, Tab choisit l'agent (entrée redirigée : liste numérotée,
+                           « 3 a » et « 3 n »)
   nc-code DOSSIER | .      directement, sans sélecteur (--nvim : seulement Neovim ; --agent PROG : cet agent ;
                            --sans-agent : un shell à la place)
   nc-code --liste          les projets proposés, un par ligne (nom, tabulation, chemin)
@@ -272,11 +273,10 @@ def agent_par_defaut(e):
 # ── La session kitty ────────────────────────────────────────────────────────────────────────────────────────────
 def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
     """Le texte de la session kitty : Neovim à gauche (62 %), l'agent à droite ; sans agent, un shell. Dispositions
-    « splits ». Un 2e onglet lazygit (s'il existe), un 3e onglet shell. seul_nvim : Neovim seul."""
+    « splits ». Onglets « Code », « Git » (lazygit, s'il existe) et « Terminal ». seul_nvim : Neovim seul."""
     if "\n" in dossier:
         raise ValueError("dossier")
-    nom = os.path.basename(dossier.rstrip("/")) or dossier
-    l = ["new_tab " + (nom if nom else "Code"), "layout splits", "cd " + dossier]
+    l = ["new_tab Code", "layout splits", "cd " + dossier]
     if nvim:
         l.append("launch --title nvim nvim")
     else:
@@ -289,8 +289,8 @@ def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
             droite += "shell"
         l.append(droite)
         if lazygit:
-            l += ["new_tab lazygit", "cd " + dossier, "launch --title lazygit lazygit"]
-        l += ["new_tab shell", "cd " + dossier, "launch --title shell"]
+            l += ["new_tab Git", "cd " + dossier, "launch --title lazygit lazygit"]
+        l += ["new_tab Terminal", "cd " + dossier, "launch --title shell"]
     return "\n".join(l) + "\n"
 
 
@@ -311,7 +311,8 @@ def ouvrir(dossier, agent="", seul_nvim=False):
         print(T("nc-code : kitty est introuvable.", "nc-code: kitty not found."), file=sys.stderr)
         return 1
     texte = session(dossier, agent, seul_nvim, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit")))
-    p = subprocess.Popen([kitty, "--directory", dossier, "--session", "-"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+    nom = os.path.basename(dossier.rstrip("/")) or dossier
+    p = subprocess.Popen([kitty, "--title", nom, *options_kitty(palette()), "--directory", dossier, "--session", "-"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
     try:
         p.stdin.write(texte.encode())
@@ -321,26 +322,130 @@ def ouvrir(dossier, agent="", seul_nvim=False):
     return 0
 
 
-# ── Le sélecteur ────────────────────────────────────────────────────────────────────────────────────────────────
-def choisir_fzf(lignes, invite, entete, avec_touches=False):
-    """(touche, ligne choisie) ; ('', '') si annulé."""
-    cmd = ["fzf", "--ansi", "--color=16", "--delimiter", "\t", "--with-nth", "1", "--prompt", invite, "--header", entete,
-           "--layout=reverse", "--info=inline-right"]
-    if avec_touches:
-        cmd += ["--expect", "ctrl-a,alt-enter", "--preview", f"{shlex.quote(sys.executable)} {shlex.quote(MOI)} --apercu {{2}}",
-                "--preview-window", "right:55%:wrap"]
+# ── Les couleurs (celles de l'île) ──────────────────────────────────────────────────────────────────────────────
+# Noir Apple si la palette de l'île n'est pas encore écrite (nc-theme-sync la crée au premier thème).
+PALETTE_DEFAUT = dict(fond="#1c1c1e", texte="#f5f5f7", texteSec="#98989d", carte="#2c2c2e", carteSurvol="#3a3a3c",
+                      gris3="#48484a", gris4="#545458", accent="#0a84ff", surAccent="#ffffff", vert="#30d158",
+                      jaune="#ffd60a", orange="#ff9f0a", bleu="#5e5ce6", rose="#ff375f", cyan="#64d2ff")
+
+
+def palette():
+    p = dict(PALETTE_DEFAUT)
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
     try:
-        r = subprocess.run(cmd, input="\n".join(lignes), capture_output=False, stdout=subprocess.PIPE, text=True)
+        with open(os.path.join(base, "nc/palette-ile.json"), encoding="utf-8") as f:
+            lue = json.load(f)
+        p.update({k: v for k, v in lue.items() if k in p and isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v)})
+    except (OSError, ValueError, AttributeError):
+        pass
+    return p
+
+
+def options_kitty(p, selecteur=False):
+    """Les -o de kitty : onglets arrondis et bordures aux couleurs de l'île ; le sélecteur prend le fond de l'île, en verre."""
+    o = dict(tab_bar_edge="top", tab_bar_style="powerline", tab_powerline_style="round", tab_bar_min_tabs="2",
+             tab_bar_margin_height="6 2", active_tab_background=p["accent"], active_tab_foreground=p["surAccent"],
+             active_tab_font_style="bold", inactive_tab_background=p["carte"], inactive_tab_foreground=p["texteSec"],
+             inactive_tab_font_style="normal", active_border_color=p["accent"], inactive_border_color=p["gris3"],
+             bell_border_color=p["orange"], window_border_width="1px", draw_minimal_borders="yes", window_padding_width="6",
+             inactive_text_alpha="0.8")
+    if selecteur:
+        o = dict(background=p["fond"], foreground=p["texte"], background_opacity="0.9", window_padding_width="0",
+                 cursor_shape="beam", confirm_os_window_close="0", remember_window_size="no")
+    r = []
+    for k, v in o.items():
+        r += ["-o", f"{k}={v}"]
+    return r
+
+
+# ── Ce que montre chaque projet, sans lancer git (fichiers de .git lus directement) ───────────────────────────
+def dossier_git(d):
+    g = os.path.join(d, ".git")
+    if os.path.isfile(g):                                        # copie de travail : « gitdir: … »
+        try:
+            with open(g, encoding="utf-8", errors="replace") as f:
+                l = f.read(4096).strip()
+            if l.startswith("gitdir:"):
+                return os.path.normpath(os.path.join(d, l[7:].strip()))
+        except OSError:
+            pass
+        return ""
+    return g
+
+
+def infos_projet(d):
+    """{branche, quand (horodatage), message (du dernier commit, d'après le reflog)}."""
+    g = dossier_git(d)
+    r = dict(branche="", quand=0.0, message="")
+    if not g:
+        return r
+    try:
+        with open(os.path.join(g, "HEAD"), encoding="utf-8", errors="replace") as f:
+            h = f.read(512).strip()
+        r["branche"] = h[16:] if h.startswith("ref: refs/heads/") else h[:7]
     except OSError:
-        return "", ""
-    sortie = r.stdout.split("\n")
-    if r.returncode != 0 or len(sortie) < 2:
-        return "", ""
-    return (sortie[0], sortie[1]) if avec_touches else ("", sortie[0])
+        pass
+    for f in ("index", "logs/HEAD", "HEAD"):
+        try:
+            r["quand"] = max(r["quand"], os.stat(os.path.join(g, f)).st_mtime)
+        except OSError:
+            pass
+    try:
+        with open(os.path.join(g, "logs/HEAD"), "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4096))
+            derniere = f.read().decode("utf-8", "replace").rstrip("\n").rsplit("\n", 1)[-1]
+        msg = derniere.split("\t", 1)[1] if "\t" in derniere else ""
+        if msg.startswith("commit") and ": " in msg:
+            r["message"] = msg.split(": ", 1)[1]
+    except OSError:
+        pass
+    return r
 
 
+def il_y_a(t, maintenant=None):
+    if not t:
+        return ""
+    s = max(0, (maintenant or time.time()) - t)
+    if s < 60:
+        return T("à l'instant", "just now")
+    for duree, fr, en in ((3600, "min", "min"), (86400, "h", "h")):
+        if s < duree:
+            n = int(s // (duree // (60 if duree == 3600 else 24)))
+            return T(f"il y a {n} {fr}", f"{n} {en} ago")
+    j = int(s // 86400)
+    if j == 1:
+        return T("hier", "yesterday")
+    if j < 14:
+        return T(f"il y a {j} j", f"{j} d ago")
+    if j < 60:
+        return T(f"il y a {j // 7} sem", f"{j // 7} wk ago")
+    if j < 365:
+        return T(f"il y a {j // 30} mois", f"{j // 30} mo ago")
+    return T(f"il y a {j // 365} an" + ("s" if j >= 730 else ""), f"{j // 365} y ago")
+
+
+def correspond(filtre, texte):
+    """Score de la recherche (plus petit = mieux), None si les lettres n'y sont pas dans l'ordre."""
+    if not filtre:
+        return 0
+    f, t = filtre.lower(), texte.lower()
+    if t.startswith(f):
+        return 0
+    i = t.find(f)
+    if i >= 0:
+        return 1 + i
+    pos = -1
+    for c in f:
+        pos = t.find(c, pos + 1)
+        if pos < 0:
+            return None
+    return 100 + pos
+
+
+# ── Le sélecteur ────────────────────────────────────────────────────────────────────────────────────────────────
 def choisir_liste(lignes, invite):
-    """Sans fzf : une liste numérotée. « 3 », « 3 a » (choisir l'agent) ou « 3 n » (seulement Neovim)."""
+    """Sans terminal (entrée redirigée) : une liste numérotée. « 3 », « 3 a » (choisir l'agent) ou « 3 n » (Neovim seul)."""
     for i, l in enumerate(lignes, 1):
         print(f"{i:>3}  {l.split(chr(9))[0]}")
     try:
@@ -349,48 +454,268 @@ def choisir_liste(lignes, invite):
         return "", ""
     if not rep or not rep[0].isdigit() or not 1 <= int(rep[0]) <= len(lignes):
         return "", ""
-    touche = {"a": "ctrl-a", "n": "alt-enter"}.get(rep[1].lower() if len(rep) > 1 else "", "")
+    touche = {"a": "agent", "n": "nvim"}.get(rep[1].lower() if len(rep) > 1 else "", "")
     return touche, lignes[int(rep[0]) - 1]
 
 
+def tronque(s, n):
+    s = s.replace("\t", " ").replace("\n", " ")
+    s = "".join(c for c in s if c.isprintable())
+    return s if len(s) <= n else (s[:max(0, n - 1)] + "…" if n > 0 else "")
+
+
+class Ecran:
+    """Une interface plein terminal, façon Spotlight : titre, champ de recherche arrondi, cartes à deux lignes, aide en bas.
+    Aucune dépendance (termios) ; rien ne tourne entre deux touches."""
+
+    def __init__(self, p):
+        self.p = p
+        self.titre = ""
+        self.sous_titre = ""
+        self.elements = []          # [(clé, ligne 1, à droite, ligne 2, couleur de la pastille)]
+        self.filtre = ""
+        self.choix = 0
+        self.haut = 0
+        self.indice = ""
+        self.aide = []
+        self.vide = ""
+
+    def c(self, nom, fond=False):
+        h = self.p.get(nom, nom).lstrip("#")
+        return f"\033[{48 if fond else 38};2;{int(h[0:2], 16)};{int(h[2:4], 16)};{int(h[4:6], 16)}m"
+
+    def visibles(self):
+        res = []
+        for e in self.elements:
+            s = correspond(self.filtre, e[1] + " " + e[3])
+            if s is not None:
+                res.append((s, len(res), e))
+        return [e for _, _, e in sorted(res, key=lambda x: (x[0], x[1]))]
+
+    def dessiner(self, out):
+        try:
+            w, h = os.get_terminal_size(out.fileno())
+        except OSError:
+            w, h = 100, 30
+        m = 3 if w >= 50 else 1
+        larg = max(10, w - 2 * m)
+        R = "\033[0m"
+        fond = self.c("fond", True)
+        txt, sec, acc = self.c("texte"), self.c("texteSec"), self.c("accent")
+        lignes = []
+
+        def ligne(contenu="", fd=fond):
+            lignes.append(fd + " " * m + contenu + fd + "\033[K" + R)
+
+        ligne()
+        droite = tronque(self.sous_titre, max(0, larg - len(self.titre) - 2))
+        ligne("\033[1m" + txt + self.titre + "\033[22m" + " " * max(1, larg - len(self.titre) - len(droite)) + sec + droite)
+        ligne()
+        bord = self.c("accent" if self.filtre else "gris4")
+        champ = self.filtre if self.filtre else self.indice
+        champ = tronque(champ, larg - 7)
+        ligne(bord + "╭" + "─" * (larg - 2) + "╮")
+        ligne(bord + "│" + " " + acc + "› " + (txt if self.filtre else sec) + champ + txt + ("▏" if self.filtre else "")
+              + " " * max(0, larg - 6 - len(champ) - (1 if self.filtre else 0)) + " " + bord + "│")
+        ligne(bord + "╰" + "─" * (larg - 2) + "╯")
+        ligne()
+        vis = self.visibles()
+        self.choix = min(self.choix, max(0, len(vis) - 1))
+        place = max(1, (h - len(lignes) - 3) // 2)
+        if self.choix < self.haut:
+            self.haut = self.choix
+        if self.choix >= self.haut + place:
+            self.haut = self.choix - place + 1
+        if not vis:
+            ligne(sec + tronque(self.vide, larg))
+        for i, (_, l1, dr, l2, pastille) in enumerate(vis[self.haut:self.haut + place], self.haut):
+            sel = i == self.choix
+            fd = self.c("carteSurvol", True) if sel else fond
+            dr = tronque(dr, max(0, larg // 2 - 4))
+            t1 = tronque(l1, larg - 6 - len(dr))
+            t2 = tronque(l2, larg - 6)
+            barre = (acc + "▎") if sel else " "
+            ligne(fd + barre + " " + self.c(pastille) + "● " + "\033[1m" + txt + t1 + "\033[22m"
+                  + " " * max(1, larg - 5 - len(t1) - len(dr)) + sec + dr + " ", fd)
+            ligne(fd + barre + "   " + sec + t2 + " " * max(0, larg - 4 - len(t2)), fd)
+        while len(lignes) < h - 1:
+            ligne()
+        aide = self.aide
+        while aide and sum(len(k) + len(v) + 6 for k, v in aide) > larg:
+            aide = aide[:-1]
+        touche = self.c("carteSurvol", True)
+        bas = "   ".join(touche + txt + " " + k + " " + fond + " " + sec + v for k, v in aide)
+        lignes = lignes[:h - 1]
+        lignes.append(fond + " " * m + bas + fond + "\033[K" + R)
+        out.write("\033[H" + "\r\n".join(lignes) + R)
+        out.flush()
+        return vis
+
+
+def lire_touche(fd):
+    """Une touche : 'haut', 'bas', 'entree', 'alt-entree', 'agent', 'echap', 'efface', 'debut', 'fin', ou le texte tapé."""
+    import select
+    b = os.read(fd, 64)
+    if not b:
+        return "echap"
+    if b == b"\x1b":
+        r, _, _ = select.select([fd], [], [], 0.04)
+        if r:
+            b += os.read(fd, 64)
+    seq = {b"\x1b[A": "haut", b"\x1bOA": "haut", b"\x10": "haut", b"\x1b[B": "bas", b"\x1bOB": "bas", b"\x0e": "bas",
+           b"\r": "entree", b"\n": "entree", b"\x1b\r": "alt-entree", b"\x1b\n": "alt-entree", b"\x01": "agent",
+           b"\t": "agent", b"\x1b": "echap", b"\x03": "echap", b"\x04": "echap", b"\x7f": "efface", b"\x08": "efface",
+           b"\x15": "vide", b"\x1b[5~": "page-haut", b"\x1b[6~": "page-bas", b"\x1b[H": "debut", b"\x1b[F": "fin"}
+    if b in seq:
+        return seq[b]
+    if b.startswith(b"\x1b"):
+        return ""
+    t = b.decode("utf-8", "ignore")
+    return "".join(c for c in t if c.isprintable())
+
+
+def interface(fn):
+    """fn(entree, sortie) dans l'écran alterné, touches brutes ; le terminal est toujours rendu tel quel."""
+    import signal
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    avant = termios.tcgetattr(fd)
+    out = sys.stdout
+    out.write("\033[?1049h\033[?25l\033[?7l")
+    try:
+        tty.setraw(fd)
+        signal.signal(signal.SIGWINCH, lambda *_: None)          # réveille os.read : on redessine
+        return fn(fd, out)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, avant)
+        out.write("\033[?7h\033[?25h\033[?1049l")
+        out.flush()
+
+
+def boucle(fd, out, e):
+    """Fait tourner l'écran e ; (touche, clé), ou None si on le ferme (Échap)."""
+    while True:
+        vis = e.dessiner(out)
+        try:
+            k = lire_touche(fd)
+        except InterruptedError:
+            continue
+        if k == "echap":
+            if e.filtre:
+                e.filtre, e.choix = "", 0
+                continue
+            return None
+        if k in ("entree", "alt-entree", "agent"):
+            if vis:
+                return {"entree": "", "alt-entree": "nvim", "agent": "agent"}[k], vis[e.choix][0]
+        elif k == "haut":
+            e.choix = max(0, e.choix - 1)
+        elif k == "bas":
+            e.choix = min(len(vis) - 1, e.choix + 1)
+        elif k == "page-haut":
+            e.choix = max(0, e.choix - 5)
+        elif k == "page-bas":
+            e.choix = min(len(vis) - 1, e.choix + 5)
+        elif k == "debut":
+            e.choix = 0
+        elif k == "fin":
+            e.choix = len(vis) - 1
+        elif k == "efface":
+            e.filtre, e.choix = e.filtre[:-1], 0
+        elif k == "vide":
+            e.filtre, e.choix = "", 0
+        elif k:
+            e.filtre, e.choix = e.filtre + k, 0
+
+
+PASTILLES = ("accent", "vert", "bleu", "orange", "cyan", "rose", "jaune")
+
+
+def ecran_projets(p, dossiers):
+    e = Ecran(p)
+    e.titre = T("Espace de code", "Code workspace")
+    e.sous_titre = T(f"{len(dossiers)} projet" + ("s" if len(dossiers) > 1 else ""), f"{len(dossiers)} project" + ("s" if len(dossiers) > 1 else ""))
+    e.indice = T("Rechercher un projet…", "Search a project…")
+    e.vide = T("Aucun projet ne correspond.", "No matching project.")
+    e.aide = [(T("Entrée", "Enter"), T("ouvrir", "open")), ("Tab", T("choisir l'agent", "pick the agent")),
+              (T("Alt+Entrée", "Alt+Enter"), T("Neovim seul", "Neovim only")), (T("Échap", "Esc"), T("fermer", "close"))]
+    maintenant = time.time()
+    infos = {d: infos_projet(d) for d in dossiers}
+    for d in sorted(dossiers, key=lambda d: -infos[d]["quand"]):         # le plus récent en haut
+        i = infos[d]
+        nom = os.path.basename(d.rstrip("/")) or d
+        droite = "  ·  ".join(x for x in (i["branche"], il_y_a(i["quand"], maintenant)) if x)
+        bas = court(d) + ("  ·  " + i["message"] if i["message"] else "")
+        e.elements.append((d, nom, droite, bas, PASTILLES[sum(map(ord, nom)) % len(PASTILLES)]))
+    return e
+
+
+def ecran_agents(p, dossier, agents):
+    e = Ecran(p)
+    e.titre = T("Quel agent ?", "Which agent?")
+    e.sous_titre = os.path.basename(dossier.rstrip("/"))
+    e.indice = T("Rechercher…", "Search…")
+    e.vide = T("Rien ne correspond.", "Nothing matches.")
+    e.aide = [(T("Entrée", "Enter"), T("ouvrir", "open")), (T("Échap", "Esc"), T("retour", "back"))]
+    for prog, nom in agents:
+        e.elements.append((prog, nom, "", prog, "accent"))
+    e.elements.append(("", T("Un terminal, sans agent", "A terminal, no agent"), "", T("Neovim et un shell", "Neovim and a shell"), "gris4"))
+    return e
+
+
 def selecteur():
-    liste = [ligne_projet(d) for d in projets()]
-    if not liste:
+    dossiers = projets()
+    if not dossiers:
         print(T("Aucun dépôt git trouvé (cd dans un projet, puis nc-code .).", "No git repository found (cd into a project, then nc-code .)."))
         return 1
-    entete = T("Entrée : tout · Alt+Entrée : Neovim seul · Ctrl+A : choisir l'agent", "Enter: everything · Alt+Enter: Neovim only · Ctrl+A: pick the agent")
-    if shutil.which("fzf") and sys.stdin.isatty():
-        touche, ligne = choisir_fzf(liste, T("projet > ", "project > "), entete, True)
-    else:
-        touche, ligne = choisir_liste(liste, T("Numéro (3, 3 a = choisir l'agent, 3 n = Neovim seul) : ", "Number (3, 3 a = pick the agent, 3 n = Neovim only): "))
-    if not ligne or "\t" not in ligne:
-        return 0
-    dossier = ligne.split("\t", 1)[1]
     e = etat_ia()
     agent = agent_par_defaut(e)
-    if touche == "ctrl-a":
-        agents = agents_disponibles(e)
-        options = [f"{n} ({p})\t{p}" for p, n in agents] + [T("Un shell, sans agent", "A shell, no agent") + "\t"]
-        if len(options) > 1:
-            if shutil.which("fzf") and sys.stdin.isatty():
-                _, rep = choisir_fzf(options, T("agent > ", "agent > "), dossier)
-            else:
-                _, rep = choisir_liste(options, T("Numéro de l'agent : ", "Agent number: "))
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        liste = [ligne_projet(d) for d in dossiers]
+        touche, ligne = choisir_liste(liste, T("Numéro (3, 3 a = choisir l'agent, 3 n = Neovim seul) : ",
+                                                "Number (3, 3 a = pick the agent, 3 n = Neovim only): "))
+        if not ligne or "\t" not in ligne:
+            return 0
+        dossier = ligne.split("\t", 1)[1]
+        if touche == "agent":
+            options = [f"{n} ({p})\t{p}" for p, n in agents_disponibles(e)] + [T("Un shell, sans agent", "A shell, no agent") + "\t"]
+            _, rep = choisir_liste(options, T("Numéro de l'agent : ", "Agent number: "))
             if not rep:
                 return 0
-            agent = rep.split("\t", 1)[1] if "\t" in rep else ""
-    return ouvrir(dossier, agent, seul_nvim=(touche == "alt-enter"))
+            agent = rep.split("\t", 1)[1]
+        return ouvrir(dossier, agent, seul_nvim=(touche == "nvim"))
+    p = palette()
+    projets_e = ecran_projets(p, dossiers)
+
+    def deroule(fd, out):
+        while True:
+            r = boucle(fd, out, projets_e)
+            if r is None:
+                return None
+            touche, dossier = r
+            if touche != "agent":
+                return touche, dossier, agent
+            choisi = boucle(fd, out, ecran_agents(p, dossier, agents_disponibles(e)))
+            if choisi is not None:                               # Échap : retour aux projets
+                return "", dossier, choisi[1]
+
+    r = interface(deroule)
+    if not r:
+        return 0
+    touche, dossier, ag = r
+    return ouvrir(dossier, ag, seul_nvim=(touche == "nvim"))
 
 
 def dans_fenetre():
-    """Lancé sans terminal (Super + X) : le sélecteur dans une petite fenêtre kitty flottante (classe nc-code)."""
+    """Lancé sans terminal (Super + X) : le sélecteur dans une fenêtre kitty flottante (classe nc-code), au fond de l'île."""
     kitty = shutil.which("kitty")
     if not kitty:
         return 1
-    subprocess.Popen([kitty, "--class", "nc-code", "--title", T("Espace de code", "Code workspace"), sys.executable, MOI, "--selecteur"],
+    subprocess.Popen([kitty, "--class", "nc-code", "--title", T("Espace de code", "Code workspace"), *options_kitty(palette(), True),
+                      sys.executable, MOI, "--selecteur"],
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return 0
-
 
 def main(a):
     if a and a[0] in ("-h", "--help", "aide"):

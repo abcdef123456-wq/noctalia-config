@@ -14,7 +14,7 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
-| `Super` + `X` | Espace de code : un sélecteur de projets (dépôts récents), puis une fenêtre kitty avec Neovim à gauche, l'agent de l'IA choisie à droite (un shell si l'IA est coupée), un onglet lazygit et un onglet shell ; `Alt` + `Entrée` : Neovim seul, `Ctrl` + `A` : choisir l'agent (`nc-code DOSSIER` : sans sélecteur) |
+| `Super` + `X` | Espace de code : un sélecteur de projets aux couleurs de l'île (le plus récent en haut, on tape pour chercher), puis une fenêtre kitty avec Neovim à gauche, l'agent de l'IA choisie à droite (un shell si l'IA est coupée), un onglet « Git » (lazygit) et un onglet « Terminal » ; `Alt` + `Entrée` : Neovim seul, `Tab` : choisir l'agent (`nc-code DOSSIER` : sans sélecteur) |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) ; « + nom » : un logiciel à installer (dépôts, AUR, Flatpak), Entrée l'installe |
 | `Super` + `W` | Choisir le fond d'écran |

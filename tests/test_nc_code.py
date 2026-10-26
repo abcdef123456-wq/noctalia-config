@@ -132,7 +132,7 @@ class NcCode(unittest.TestCase):
         self.assertIn("--lancer-agent claude", droite)
         self.assertLess(s.index("nvim"), s.index("--location=vsplit"))
         tabs = [l for l in lignes if l.startswith("new_tab")]
-        self.assertEqual(tabs, ["new_tab projet", "new_tab lazygit", "new_tab shell"])
+        self.assertEqual(tabs, ["new_tab Code", "new_tab Git", "new_tab Terminal"])
         self.assertIn("launch --title lazygit lazygit", s)
 
     def test_sans_lazygit_pas_d_onglet_lazygit(self):
@@ -159,7 +159,7 @@ class NcCode(unittest.TestCase):
         self.assertIn("--lancer-agent codex", self.lancer("--session-seule", str(p), "--agent", "codex").stdout)
         seul = self.lancer("--session-seule", str(p), "--nvim").stdout
         self.assertNotIn("vsplit", seul)
-        self.assertEqual([l for l in seul.splitlines() if l.startswith("new_tab")], ["new_tab projet"])
+        self.assertEqual([l for l in seul.splitlines() if l.startswith("new_tab")], ["new_tab Code"])
         self.assertNotIn("--lancer-agent", self.lancer("--session-seule", str(p), "--sans-agent").stdout)
 
     def test_dossier_invalide_et_chemin_a_espaces(self):
@@ -198,6 +198,116 @@ class NcCode(unittest.TestCase):
         s = (self.home / "kitty-session").read_text()
         self.assertIn("launch --title nvim nvim", s)
         self.assertNotIn("vsplit", s)                                      # « 1 n » : Neovim seul
+
+    # ── l'interface plein terminal (dans un vrai pseudo-terminal) ──
+    def pty_selecteur(self, touches):
+        import fcntl
+        import pty
+        import struct
+        import termios
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), TMPDIR=str(self.home), NC_LANGUE="fr",
+                   PATH=f"{self.faux}:/usr/bin:/bin", TERM="xterm-256color")
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, str(self.home / ".local/bin/nc-code"), "--selecteur"], env)
+        self.addCleanup(lambda: os.close(fd))
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        vu = b""
+
+        def lire(jusque, delai=10):
+            nonlocal vu
+            fin = time.time() + delai
+            while jusque not in vu and time.time() < fin:
+                import select
+                if select.select([fd], [], [], 0.1)[0]:
+                    try:
+                        vu += os.read(fd, 65536)
+                    except OSError:
+                        break
+            return jusque in vu
+        self.assertTrue(lire("Espace de code".encode()), vu[-500:])
+        for t in touches:
+            os.write(fd, t)
+            time.sleep(0.15)
+        lire(b"\x1b[?1049l", 5)
+        _, statut = os.waitpid(pid, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(statut), 0, vu[-800:])
+        return vu.decode("utf-8", "replace")
+
+    def test_interface_recherche_puis_entree(self):
+        a = self.depot("dev/alpha")
+        b = self.depot("dev/neovim-conf")
+        (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
+        (b / ".git/logs").mkdir()
+        (b / ".git/logs/HEAD").write_text("0 1 X <x@y> 1700000000 +0100\tcommit: Un message de commit\n")
+        (self.home / ".config/nc/depot").write_text(f"{a}\n")
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        self.programme("kitty", f'echo "$@" > "{self.home}/kitty-args"; cat > "{self.home}/kitty-session"')
+        vu = self.pty_selecteur([b"neo", b"\r"])
+        self.assertIn("Rechercher un projet", vu)
+        self.assertIn("essai  ·  ", vu)                                      # branche lue dans .git, sans lancer git
+        self.assertIn("Un message de commit", vu)
+        self.assertIn("38;2;", vu)                                         # couleurs de la palette (24 bits)
+        for _ in range(50):
+            if (self.home / "kitty-session").exists() and (self.home / "kitty-session").stat().st_size:
+                break
+            time.sleep(0.1)
+        self.assertIn(f"cd {b}", (self.home / "kitty-session").read_text())
+        args = (self.home / "kitty-args").read_text()
+        self.assertIn("tab_powerline_style=round", args)                  # onglets arrondis
+        self.assertIn("--title neovim-conf", args)
+
+    def test_interface_echap_ferme_sans_rien_ouvrir(self):
+        a = self.depot("dev/alpha")
+        (self.home / ".config/nc/depot").write_text(f"{a}\n")
+        self.programme("kitty", f'touch "{self.home}/kitty-lance"')
+        self.pty_selecteur([b"zz", b"\x1b", b"\x1b"])                   # 1er Échap : vide la recherche ; 2e : ferme
+        time.sleep(0.3)
+        self.assertFalse((self.home / "kitty-lance").exists())
+
+    def test_interface_tab_choisit_l_agent(self):
+        a = self.depot("dev/alpha")
+        (self.home / ".config/nc/depot").write_text(f"{a}\n")
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        self.programme("kitty", f'cat > "{self.home}/kitty-session"')
+        vu = self.pty_selecteur([b"\t", b"\r"])                         # Tab, puis « Un terminal, sans agent »
+        self.assertIn("Quel agent", vu)
+        for _ in range(50):
+            if (self.home / "kitty-session").exists() and (self.home / "kitty-session").stat().st_size:
+                break
+            time.sleep(0.1)
+        self.assertNotIn("--lancer-agent", (self.home / "kitty-session").read_text())
+
+    def test_heure_relative_et_recherche(self):
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_u", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_u", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                                                   "NC_LANGUE": "fr"}):
+            ld.exec_module(m)
+            t = 1_800_000_000
+            self.assertEqual(m.il_y_a(t - 10, t), "à l'instant")
+            self.assertEqual(m.il_y_a(t - 300, t), "il y a 5 min")
+            self.assertEqual(m.il_y_a(t - 3 * 3600, t), "il y a 3 h")
+            self.assertEqual(m.il_y_a(t - 86400 - 5, t), "hier")
+            self.assertEqual(m.il_y_a(t - 20 * 86400, t), "il y a 2 sem")
+            self.assertEqual(m.il_y_a(0, t), "")
+            self.assertLess(m.correspond("neo", "neovim"), m.correspond("neo", "mon-neo"))
+            self.assertIsNotNone(m.correspond("nc", "noctalia-config"))
+            self.assertIsNone(m.correspond("zz", "noctalia"))
+            self.assertEqual(m.palette()["fond"], "#1c1c1e")                # sans palette de l'île : noir Apple
+            (self.home / ".config/nc/palette-ile.json").write_text('{"fond": "#291417", "accent": "pas une couleur"}')
+            self.assertEqual(m.palette()["fond"], "#291417")
+            self.assertEqual(m.palette()["accent"], "#0a84ff")
+            w = self.depot("dev/vrai")
+            (w / ".git").rmdir()
+            (w / ".git").write_text("gitdir: ../gd\n")
+            (self.home / "dev/gd").mkdir()
+            (self.home / "dev/gd/HEAD").write_text("ref: refs/heads/branche-w\n")
+            self.assertEqual(m.infos_projet(str(w))["branche"], "branche-w")
 
     # ── Hyprland ──
     def test_raccourci_et_regle_de_fenetre(self):

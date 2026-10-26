@@ -72,13 +72,13 @@ hl.window_rule({
     center = true,
 })
 
--- Sélecteur de projets de l'espace de code (Super + X ; nc-code) : petite fenêtre kitty flottante, centrée, ~60 % de l'écran.
+-- Sélecteur de projets de l'espace de code (Super + X ; nc-code) : fenêtre kitty flottante et centrée, façon Spotlight.
 -- Exclue de la mémoire des fenêtres flottantes (nc/automatismes.lua) : sa taille est toujours celle-ci.
 hl.window_rule({
     name   = "espace-de-code",
     match  = { class = "^(nc-code)$" },
     float  = true,
-    size   = { "monitor_w*0.6", "monitor_h*0.6" },
+    size   = { "monitor_w*0.5", "monitor_h*0.6" },
     center = true,
 })
 
