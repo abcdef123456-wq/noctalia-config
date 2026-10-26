@@ -1312,8 +1312,12 @@ PROTEGES_PLUS = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", "
 NOM_SENSIBLE = re.compile(r"\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa).*", re.IGNORECASE | re.DOTALL)
 # Le contenu : une clé privée, ou une clé d'API (mêmes familles que le contrôle de export.sh, plus AWS et Slack)
 CLE_PRIVEE = re.compile(rb"PRIVATE KEY-----")
+# Les mêmes sortes de clés que nc-ia commit (COMMIT_MOTIFS_SECRETS ; un test vérifie que chaque exemple de l'un est vu
+# par l'autre), plus le jeton de bot Telegram
 CLE_API = re.compile(rb"sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-                     rb"|AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{20,}|\d{8,10}:AA[\w-]{30,}")
+                     rb"|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|\d{8,10}:AA[\w-]{30,}"
+                     rb"|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}"
+                     rb"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 
 
 def charger_bac():

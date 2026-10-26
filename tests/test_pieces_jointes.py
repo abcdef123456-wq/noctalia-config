@@ -329,3 +329,24 @@ else if(etape===2&&!AssistantEtat.enCours){
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MotifsPartages(unittest.TestCase):
+    """Relecture de la refonte : nc-assistant (pièces jointes) et nc-ia commit doivent voir les mêmes sortes de clés.
+    Chaque exemple est vu par les deux listes (lues dans les scripts, sans les charger)."""
+    EXEMPLES = ("sk-proj-AbCdEf0123456789AbCdEf0123", "ghp_" + "a1B2" * 9, "github_pat_" + "a1B2_" * 6,
+                "AKIAABCDEFGHIJKLMNOP", "xoxb-0123456789-abcdefghij", "AIzaSyA" + "b1C2d3E4f5" * 3 + "xyz",
+                "gsk_" + "Ab12" * 8, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+
+    def test_chaque_cle_vue_des_deux_cotes(self):
+        import re
+        a = (BIN / "nc-assistant").read_text()
+        i = a.index("CLE_API = re.compile(")
+        cle_api = eval(a[i + len("CLE_API = "):a.index(")\n", i) + 1], {"re": re})
+        n = (BIN / "nc-ia").read_text()
+        j = n.index("COMMIT_MOTIFS_SECRETS = (")
+        motifs = eval(n[j + len("COMMIT_MOTIFS_SECRETS = "):n.index("\n)\n", j) + 2], {"re": re})
+        for e in self.EXEMPLES:
+            with self.subTest(e=e[:12]):
+                self.assertTrue(cle_api.search(e.encode()), "nc-assistant ne voit pas cette clé")
+                self.assertTrue(any(m.search(e) for _, m in motifs), "nc-ia commit ne voit pas cette clé")
