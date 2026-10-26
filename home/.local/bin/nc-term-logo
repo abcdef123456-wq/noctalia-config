@@ -64,7 +64,9 @@ dessin() {
   key="$p $s $nom $svg d6"
   [ -r "$DESSIN" ] && [ "$(cat "$DESSIN.key" 2>/dev/null)" = "$key" ] && return 0
   mkdir -p "$(dirname "$DESSIN")"
-  tmp=$(mktemp -d)
+  tmp=$(mktemp -d) || return 1
+  # Le dossier temporaire s'en va même si le script est interrompu (arrêt, fermeture de session) en plein calcul
+  TMP_DESSIN="$tmp"; trap 'rm -rf "$TMP_DESSIN"' EXIT; trap 'exit 143' INT TERM HUP
   haut=$(mix "#ffffff" "$p" 30)      # couleur principale éclaircie en haut, secondaire en bas
   bas=$(mix "#ffffff" "$s" 8)
   if [ "${ID:-}" = arch ] && [ "$svg" != "${svg#/usr/}" ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
@@ -77,6 +79,7 @@ dessin() {
     mv "$tmp/out.png" "$DESSIN" && echo "$key" > "$DESSIN.key"
   local r=$?
   rm -rf "$tmp"
+  trap - EXIT INT TERM HUP
   return $r
 }
 
@@ -93,8 +96,9 @@ key="$p $s $svg v2"
 [ -r "$OUT" ] && [ "$(cat "$OUT.key" 2>/dev/null)" = "$key" ] && exit 0
 
 mkdir -p "$(dirname "$OUT")"
-tmp=$(mktemp -d)
+tmp=$(mktemp -d) || exit 0
 trap 'rm -rf "$tmp"' EXIT
+trap 'exit 143' INT TERM HUP
 # Logo Arch : on retire le petit « ™ » (les deux tracés en bas à droite du SVG officiel) ; autres logos tels quels
 if [ "${ID:-}" = arch ]; then sed -E '/<path d="m23[59]\./d' "$svg" > "$tmp/logo.svg"; else cp "$svg" "$tmp/logo.svg"; fi
 # Silhouette (canal alpha) du logo, 440 px de haut, centrée dans un carré de 560 px (marge pour le halo)

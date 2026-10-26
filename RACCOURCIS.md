@@ -10,7 +10,7 @@ Raccourcis de l'île, elles, affichent les lettres de ta disposition (fr, be, ch
 
 La fiche s'affiche aussi à l'écran avec **Super + /**. Elle est lue en direct dans ta config : un raccourci que tu ajoutes
 avec une description (`{ description = "Section|Texte" }`, voir `~/.config/hypr/nc/raccourcis.lua`) y apparaît tout seul.
-La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccourcis : `nc-raccourci ajoute "Super+B" "firefox" "Navigateur"` (rangés dans `~/.config/hypr/perso.lua`,
+La commande `nc-keys` donne la même liste dans le terminal. Tes propres raccourcis : `nc-raccourci ajoute "Super+B" "firefox" "Navigateur"` (rangés dans `~/.config/nc/raccourcis.conf`,
 section « Mes raccourcis » de la fiche).
 
 ## Applis et barre

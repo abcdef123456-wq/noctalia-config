@@ -18,7 +18,9 @@
 # Une fenêtre réduite qu'on active autrement (dock, Alt + Tab) revient aussi d'elle-même (nc/automatismes.lua).
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
-pile="${XDG_RUNTIME_DIR:-/tmp}/nc-reduites"
+# Dans le dossier de la session (privé, 0700), jamais dans /tmp : un autre utilisateur y poserait un lien ou un fichier
+# à ce nom. Sans XDG_RUNTIME_DIR, les actions qui en ont besoin s'arrêtent (voir plus bas) ; l'aide reste possible
+pile="${XDG_RUNTIME_DIR:-}/nc-reduites"
 CACHE="special:reduites"
 
 clients() { hyprctl clients -j 2>/dev/null; }
@@ -34,8 +36,13 @@ case "$action" in minimize|hide) action=reduire ;; restore|show) action=restaure
 # Même verrou à la restauration, qui retire une entrée des mêmes fichiers.
 case "$action" in
   reduire|reduire-lot|tout-masquer|restaurer|aller)
+    if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+      echo "nc-fenetre: $(t "XDG_RUNTIME_DIR n'est pas défini (pas de session ouverte ?)" "XDG_RUNTIME_DIR is not set (no login session?)")" >&2
+      exit 1
+    fi
     exec 9>"$pile.lock"
-    flock -x 9 || exit 1
+    # Attente bornée : un autre nc-fenetre bloqué ne fige pas celui-ci (et la vue, la barre) pour toujours
+    flock -w 5 -x 9 || exit 1
     ;;
 esac
 # Fondu au lieu du glissement de Hyprland (une fenêtre floutée qui glisse hors de l'écran saccade sur un petit GPU) :
@@ -77,7 +84,7 @@ reduire_lot() {
         mv -f "$pile-tailles.tmp" "$pile-tailles" || statut=1
       { grep -vx "$a" "$pile" 2>/dev/null; echo "$a"; } > "$pile.tmp" && mv -f "$pile.tmp" "$pile" || statut=1
     else
-      echo "nc-fenetre: masquage impossible : $a" >&2
+      echo "nc-fenetre: $(t "masquage impossible" "cannot hide") : $a" >&2
       statut=1
     fi
     prop "$a" no_anim 0; prop "$a" opacity 1
