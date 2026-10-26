@@ -139,7 +139,7 @@ class LigneEtat(unittest.TestCase):
         r = self.lancer("installer")
         self.assertEqual(r.returncode, 0, r.stderr)
         s = self.lire()
-        self.assertEqual(s["statusLine"], {"type": "command", "command": "$HOME/.local/bin/nc-claude statusline", "padding": 0})
+        self.assertEqual(s["statusLine"], {"type": "command", "command": "$HOME/.local/bin/nc-claude-ligne", "padding": 0})
         self.assertEqual(s["model"], "opus")
         self.assertIn("nc-claude hook", json.dumps(s["hooks"]))
         copie = self.home / ".claude/settings.json.avant-nc-claude"
@@ -148,6 +148,39 @@ class LigneEtat(unittest.TestCase):
         avant = self.settings.read_text()
         self.lancer("installer")
         self.assertEqual(self.settings.read_text(), avant)
+
+    def test_ancienne_commande_mise_a_jour_et_toujours_comprise(self):
+        ancienne = {"type": "command", "command": "$HOME/.local/bin/nc-claude statusline", "padding": 0}
+        self.settings.write_text(json.dumps({"statusLine": ancienne}))
+        self.lancer("installer")
+        self.assertEqual(self.lire()["statusLine"]["command"], "$HOME/.local/bin/nc-claude-ligne")
+        self.settings.write_text(json.dumps({"statusLine": ancienne}))
+        self.lancer("retirer")
+        self.assertNotIn("statusLine", self.lire())                  # l'ancienne est aussi « la nôtre »
+
+    def test_petit_script_meme_rendu_et_plus_rapide(self):
+        self.palette()
+        entree = json.dumps(COMPLET)
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), PATH="/usr/bin:/bin", NC_LANGUE="fr")
+        petit = subprocess.run([sys.executable, str(NC_CLAUDE.parent / "nc-claude-ligne")], env=env, input=entree,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(petit.stderr, "")
+        self.assertEqual(petit.stdout, self.ligne(COMPLET))
+        self.assertNotIn("import subprocess", (NC_CLAUDE.parent / "nc-claude-ligne").read_text())
+
+    def test_aucune_sequence_d_echappement_ne_passe(self):
+        """Le nom du modèle, la branche, le dossier et le mode viennent du JSON ou de .git : jamais de caractère de
+        contrôle à l'écran (une séquence d'échappement piloterait le terminal)."""
+        (self.home / "p\x1b]0;titre\x07/.git").mkdir(parents=True)
+        (self.home / "p\x1b]0;titre\x07/.git/HEAD").write_text("ref: refs/heads/br\x1b[2Janche\n")
+        d = {"model": {"display_name": "Opus\x1b]52;c;cGlyYXRl\x07"}, "vim": {"mode": "N\x1b[1m"},
+             "workspace": {"current_dir": str(self.home / "p\x1b]0;titre\x07"), "git_worktree": "w\x9bt"}}
+        sortie = ANSI.sub("", self.ligne(d))
+        self.assertNotIn("\x1b", sortie)
+        self.assertNotIn("\x07", sortie)
+        self.assertNotIn("\x9b", sortie)
+        self.assertIn("Opus]52;c;cGlyYXRl", sortie)
+        self.assertIn("br[2Janche", sortie)
 
     def test_installer_ne_remplace_jamais_la_ligne_de_l_utilisateur(self):
         perso = {"type": "command", "command": "~/ma-ligne.sh", "padding": 2}

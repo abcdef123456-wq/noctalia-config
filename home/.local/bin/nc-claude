@@ -1274,156 +1274,27 @@ def hook_ia(ia, nom):
 
 
 # ── Ligne d'état de Claude Code (statusLine) aux couleurs du bureau ──────────────────────────────────────────────
-# Claude Code lance « nc-claude statusline » à chaque changement avec un JSON sur l'entrée standard et affiche ce qui
+# Claude Code lance « nc-claude-ligne » (avant : « nc-claude statusline », toujours compris) à chaque changement avec un JSON sur l'entrée standard et affiche ce qui
 # sort. Rapide et sans sous-processus ; un JSON absent, vide ou invalide donne une ligne minimale, jamais une trace.
-COMMANDE_LIGNE = "$HOME/.local/bin/nc-claude statusline"
-PALETTE_ILE = os.path.join(HOME, ".config/nc/palette-ile.json")
-ANSI_BASE = {"accent": "36", "texteSec": "2", "vert": "32", "orange": "33", "rouge": "31", "bleu": "34", "violet": "35"}
-
-
-def couleurs_ligne():
-    """{nom: séquence ANSI} : les vraies couleurs du fond (palette de l'île) en 24 bits, sinon les 8 couleurs de base."""
-    try:
-        with open(PALETTE_ILE, encoding="utf-8") as f:
-            p = json.load(f)
-        res = {}
-        for k in ANSI_BASE:
-            m = re.fullmatch(r"#([0-9a-fA-F]{6})", str(p.get(k, "")))
-            if not m:
-                raise ValueError(k)
-            v = int(m[1], 16)
-            res[k] = f"38;2;{v >> 16};{(v >> 8) & 255};{v & 255}"
-        return res
-    except (OSError, ValueError, AttributeError, TypeError):
-        return dict(ANSI_BASE)
-
-
-def branche_git(dossier):
-    """(branche, ) lue dans .git/HEAD sans lancer git ; remonte les dossiers ; .git peut être un fichier (worktree)."""
-    d = os.path.abspath(dossier)
-    for _ in range(40):
-        g = os.path.join(d, ".git")
-        try:
-            if os.path.isfile(g):
-                with open(g, encoding="utf-8", errors="replace") as f:
-                    m = re.match(r"gitdir:\s*(.+)", f.read().strip())
-                if not m:
-                    return ""
-                g = m[1].strip()
-                g = g if os.path.isabs(g) else os.path.join(d, g)
-            if os.path.isdir(g):
-                with open(os.path.join(g, "HEAD"), encoding="utf-8", errors="replace") as f:
-                    tete = f.read().strip()
-                if tete.startswith("ref:"):
-                    return re.sub(r"^ref:\s*refs/heads/", "", tete).strip()
-                return tete[:7]                            # tête détachée : le début du commit
-        except OSError:
-            return ""
-        parent = os.path.dirname(d)
-        if parent == d:
-            return ""
-        d = parent
-    return ""
-
-
-def nombre(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-
-
-def texte_court(v):
-    return v.strip() if isinstance(v, str) else ""
-
-
-def virgule(x, n=2):
-    return f"{x:.{n}f}".replace(".", ",") if not EN else f"{x:.{n}f}"
-
-
-def heure_reprise(t):
-    """L'heure locale d'une échéance donnée en secondes (ou millisecondes) depuis 1970 ; « » sinon."""
-    t = nombre(t)
-    if t is None or t <= 0:
-        return ""
-    if t > 1e12:
-        t /= 1000
-    try:
-        return time.strftime("%Hh%M" if not EN else "%H:%M", time.localtime(t))
-    except (OverflowError, OSError, ValueError):
-        return ""
-
-
-def ligne_etat(d, colonnes=0, c=None):
-    """Le texte de la ligne (une ou deux lignes) pour ce JSON de Claude Code ; d : le dict (peut être vide)."""
-    c = c or couleurs_ligne()
-    pose = lambda nom, t: f"\033[{c[nom]}m{t}\033[0m"
-    sep = pose("texteSec", " │ ")
-    d = d if isinstance(d, dict) else {}
-    sous = lambda k: d.get(k) if isinstance(d.get(k), dict) else {}
-    modele, ws, cout = sous("model"), sous("workspace"), sous("cost")
-    ctx, lim, effort = sous("context_window"), sous("rate_limits"), sous("effort")
-    debut, fin = [], []
-    nom = texte_court(modele.get("display_name")) or "Claude"
-    m = pose("accent", f"\U000f06a9 {nom}")
-    if texte_court(effort.get("level")):
-        m += pose("texteSec", f" · {texte_court(effort.get('level'))}")
-    if d.get("fast_mode") is True:
-        m += pose("orange", " ⚡")
-    debut.append(m)
-    cwd = texte_court(ws.get("current_dir")) or texte_court(d.get("cwd"))
-    projet = texte_court(ws.get("project_dir")) or cwd
-    if projet:
-        debut.append(pose("bleu", " " + (os.path.basename(projet.rstrip("/")) or "/")))
-    b = branche_git(cwd or projet) if (cwd or projet) else ""
-    if b:
-        wt = ws.get("git_worktree")
-        wt = wt if isinstance(wt, str) and wt.strip() else ""
-        debut.append(pose("violet", " " + b) + (pose("texteSec", f" ({wt})") if wt else ""))
-    # Contexte : cinq cases ; orange au-delà de 70 %, rouge au-delà de 90 % (ou au-delà de 200 000 jetons)
-    p = nombre(ctx.get("used_percentage"))
-    if p is not None:
-        p = max(0.0, min(100.0, float(p)))
-        coul = "rouge" if p > 90 else "orange" if p > 70 else "vert"
-        pleines = min(5, int(p / 20 + 0.5)) if p < 100 else 5
-        jauge = "▰" * pleines + "▱" * (5 - pleines)
-        t = pose(coul, f"{jauge} {int(round(p))} %")
-        if d.get("exceeds_200k_tokens") is True:
-            t += pose("rouge", " +200k")
-        fin.append(t)
-    cv = nombre(cout.get("total_cost_usd"))
-    if cv is not None and cv >= 0:
-        fin.append(pose("texteSec", virgule(cv) + " $"))
-    ajouts, retraits = nombre(cout.get("total_lines_added")), nombre(cout.get("total_lines_removed"))
-    if (ajouts or 0) or (retraits or 0):
-        fin.append(pose("vert", f"+{int(ajouts or 0)}") + " " + pose("rouge", f"−{int(retraits or 0)}"))
-    cinq = lim.get("five_hour") if isinstance(lim.get("five_hour"), dict) else None
-    if cinq:
-        u = nombre(cinq.get("used_percentage"))
-        if u is not None:
-            coul = "rouge" if u > 90 else "orange" if u > 70 else "texteSec"
-            h = heure_reprise(cinq.get("resets_at"))
-            fin.append(pose(coul, f"5 h {int(round(u))} %") + (pose("texteSec", f" → {h}") if h else ""))
-    mode = texte_court(sous("vim").get("mode"))
-    if mode:
-        fin.append(pose("texteSec", mode))
-    uneligne = sep.join(debut + fin)
-    visible = len(re.sub(r"\033\[[0-9;]*m", "", uneligne))
-    if colonnes and visible > colonnes and fin:
-        return sep.join(debut) + "\n" + sep.join(fin)
-    return uneligne
+COMMANDE_LIGNE = "$HOME/.local/bin/nc-claude-ligne"
+ANCIENNE_LIGNE = "$HOME/.local/bin/nc-claude statusline"
+# La ligne d'état elle-même : nc-claude-ligne (petit script relancé à chaque changement), chargé ici pour
+# « nc-claude statusline » (ancienne commande) et pour les tests
+def _module_ligne():
+    import importlib.machinery
+    import importlib.util
+    chemin = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0] or ".")), "nc-claude-ligne")
+    if not os.path.exists(chemin):
+        chemin = os.path.join(HOME, ".local/bin/nc-claude-ligne")
+    ld = importlib.machinery.SourceFileLoader("nc_claude_ligne", chemin)
+    m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_claude_ligne", ld))
+    ld.exec_module(m)
+    return m
 
 
 def ligne():
-    """Point d'entrée de « nc-claude statusline » : ne jamais lever d'exception ni écrire sur la sortie d'erreur."""
     try:
-        brut = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read(1 << 20)
-        try:
-            d = json.loads(brut) if brut.strip() else {}
-        except ValueError:
-            d = {}
-        try:
-            colonnes = int(os.environ.get("COLUMNS", "0"))
-        except ValueError:
-            colonnes = 0
-        sys.stdout.write(ligne_etat(d, colonnes) + "\n")
+        _module_ligne().ligne()
     except Exception:
         sys.stdout.write("Claude\n")
 
@@ -1454,7 +1325,8 @@ def retirer_de(cfg):
 
 
 def ligne_a_nous(sl):
-    return isinstance(sl, dict) and "nc-claude statusline" in str(sl.get("command", ""))
+    c = str(sl.get("command", "")) if isinstance(sl, dict) else ""
+    return "nc-claude statusline" in c or "nc-claude-ligne" in c
 
 
 def lire_settings():
@@ -1501,6 +1373,8 @@ def installer(bavard=True):
     if bavard and "statusLine" not in cfg and reglage("CLAUDE_LIGNE", "oui") != "non":
         cfg["statusLine"] = {"type": "command", "command": COMMANDE_LIGNE, "padding": 0}
         ligne_ajoutee = True
+    elif isinstance(cfg.get("statusLine"), dict) and cfg["statusLine"].get("command") == ANCIENNE_LIGNE:
+        cfg["statusLine"]["command"] = COMMANDE_LIGNE      # la nôtre, à l'ancienne commande : le petit script, plus rapide
     if cfg != avant:
         ecrire_settings(cfg)
     if not bavard:
