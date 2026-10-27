@@ -188,6 +188,14 @@ l'île Quickshell.
 
 - **Pourquoi ça se vide ?** Sur la page Charge, quand le PC est sur batterie et qu'elle baisse, un bouton explique pourquoi
   et propose au plus 3 actions, chacune confirmée avant d'être faite.
+- **Santé du PC** (page Santé, après Système, seulement si la machine a des capteurs) : températures du processeur, de la
+  carte graphique (si elle est réveillée, jamais réveillée pour ça), du SSD, de la mémoire et du Wi-Fi, vitesse des
+  ventilateurs, charge et programme le plus gourmand, profil d'énergie avec bascule (par le service de profils, jamais
+  `/sys`). Jauges qui virent à l'orange puis au rouge. **Alerte de surchauffe** (`nc-reglages` → Île, `CHALEUR_ALERTE`,
+  95 °C par défaut, 0 = jamais) : au-delà du seuil pendant plus d'une minute, la pilule le dit et une notification
+  explique les causes probables et les gestes utiles (profil Performance, Fn + Q sur un Lenovo, grilles d'aération),
+  avec un bouton « Mode Performance » ; une seule fois, puis silence jusqu'au retour à la normale. La veille ne coûte
+  presque rien : deux fichiers du noyau relus par l'île toutes les 20 s, écran allumé seulement, aucun processus.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.

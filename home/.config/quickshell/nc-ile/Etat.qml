@@ -36,10 +36,13 @@ Singleton {
     }
     // Page Batterie (Charge.qml) juste après le centre, seulement sur un PC qui a une batterie ; pendant une recharge,
     // elle est déjà en tête parmi les activités : jamais deux fois
+    // Page Santé (Sante.qml) après Système, seulement si la machine a des capteurs (températures, ventilateurs : vu une
+    // fois au démarrage par Chaleur.qml, nc-ile-etat capteurs) ; machine virtuelle ou tour sans capteur : pas de page
+    property bool capteursSante: false
     readonly property var vues: Reglages.filtrerPages(activites.concat(["centre"],
                                                  batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
                                                  ["assistant", "notifications"],
-                                                 ["son", "reseau", "bluetooth", "systeme", "calendrier"],
+                                                 ["son", "reseau", "bluetooth", "systeme"], capteursSante ? ["sante"] : [], ["calendrier"],
                                                  (meteo.temp !== undefined || meteoErreur !== "") ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))
     property string vueNom: "centre"
@@ -544,6 +547,8 @@ Singleton {
     readonly property int profil: PowerProfiles.profile
     onProfilChanged: if (!jeuEnCours) activite("profil")
     function choisirProfil(p) { PowerProfiles.profile = p }
+    // Le service de profils propose Performance (sans lui, ou sans ce profil : pas de bouton Performance dans Santé)
+    readonly property bool performanceDisponible: PowerProfiles.hasPerformanceProfile
 
     // ── Luminosité (nc-brightness, même échelle que les touches) ──
     property real luminosite: 0.5

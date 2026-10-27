@@ -23,6 +23,9 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
+    // Veille de surchauffe du processeur (Chaleur.qml) : un seul « nc-ile-etat capteurs » au démarrage, puis deux
+    // fichiers du noyau relus toutes les 20 s écran allumé ; rien sur une machine sans capteur
+    Component.onCompleted: Chaleur.demarrer()
     // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : chargée seulement à l'ouverture.
     // Elle utilise la capture d'écran de Quickshell, absente de certains paquets : sans elle, seule la vue manque
     // (un message le dit) ; déclarée ici directement, c'est toute l'île qui ne se chargeait plus.

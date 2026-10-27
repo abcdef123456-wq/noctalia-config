@@ -415,7 +415,7 @@ REGLAGES = [
           ("centre", "Centre de contrôle", "Control center"), ("assistant", "JARVIS", "JARVIS"),
           ("notifications", "Notifications", "Notifications"), ("son", "Son", "Sound"),
           ("reseau", "Réseau", "Network"), ("bluetooth", "Bluetooth", "Bluetooth"),
-          ("systeme", "Système", "System"), ("calendrier", "Calendrier", "Calendar"),
+          ("systeme", "Système", "System"), ("sante", "Santé", "Health"), ("calendrier", "Calendrier", "Calendar"),
           ("meteo", "Météo", "Weather"), ("presse", "Presse-papiers", "Clipboard"), ("fenetres", "Fenêtres", "Windows"))],
     # Île
     R("ILE_STYLE", "Île", L("Couleurs", "Colors"), "choix", "terminal",
@@ -507,6 +507,16 @@ REGLAGES = [
     R("BATTERIE_ALERTE", "Île", L("Alerte de batterie faible", "Low battery alert"), "entier", "20",
       L("Une notification à ce niveau, puis à la moitié.", "A notification at this level, then at half of it."),
       mini=0, maxi=50, pas=5, unite="%", zero=_JAMAIS),
+    R("CHALEUR_ALERTE", "Île", L("Alerte de surchauffe du processeur", "CPU overheating alert"), "entier", "95",
+      L("Au-delà de cette température pendant plus d'une minute (le capteur du processeur est relu toutes les 20 s par l'île, "
+        "écran allumé seulement), la pilule le dit et une notification explique les causes probables et les gestes utiles, "
+        "avec un bouton « Mode Performance » ; une seule fois, puis silence jusqu'au retour à la normale. Un pic court ne "
+        "compte pas. Page Santé de l'île : températures, ventilateurs, profil d'énergie. Sans capteur : rien.",
+        "Above this temperature for over a minute (the island re-reads the CPU sensor every 20 s, screen on only), the pill "
+        "says so and a notification explains the likely causes and what to do, with a “Performance Mode” button; once, then "
+        "silence until things are back to normal. A short spike doesn't count. Island Health page: temperatures, fans, power "
+        "profile. No sensor: nothing."),
+      mini=0, maxi=110, pas=5, unite="°C", zero=_JAMAIS),
     # Notifications
     R("PANNES", "Notifications", L("Signaler les services en panne", "Report failed services"), "choix", "nc",
       L("Un service qui s'arrête en échec (l'île, Noctalia, le son…) : une notification avec Redémarrer et, si l'IA est "
@@ -1433,9 +1443,9 @@ MATERIEL = {
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
-                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS")},
+                          "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE")},
     **{"ILE_PAGE_" + x.upper(): "ile" for x in ("musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son",
-                                               "reseau", "bluetooth", "systeme", "calendrier", "meteo", "presse", "fenetres")},
+                                               "reseau", "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres")},
     "SPOTLIGHT_AUR": "aur", "SPOTLIGHT_FLATPAK": "flatpak", "MAJ_AUR": "aur", "MAJ_INSTANTANE": "btrfs",
 }
 

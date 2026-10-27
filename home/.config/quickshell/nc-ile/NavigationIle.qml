@@ -12,7 +12,7 @@ Item {
             musique: ["Musique", "Music"], claude: ["Claude", "Claude"], minuteur: ["Minuteur", "Timer"], charge: ["Batterie", "Battery"],
             jeu: ["Jeu", "Game"], centre: ["Centre de contrôle", "Control Center"], assistant: ["Assistant", "Assistant"],
             notifications: ["Notifications", "Notifications"], son: ["Son", "Sound"], reseau: ["Réseau", "Network"],
-            bluetooth: ["Bluetooth", "Bluetooth"], systeme: ["Système", "System"], calendrier: ["Calendrier", "Calendar"],
+            bluetooth: ["Bluetooth", "Bluetooth"], systeme: ["Système", "System"], sante: ["Santé", "Health"], calendrier: ["Calendrier", "Calendar"],
             meteo: ["Météo", "Weather"], presse: ["Presse-papiers", "Clipboard"], fenetres: ["Fenêtres", "Windows"]
         })[nom]
         return l ? Reglages.t(l[0], l[1]) : nom

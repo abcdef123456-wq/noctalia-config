@@ -23,7 +23,7 @@ Item {
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
                                       claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video, partage: partage,
-                                      telechargement: telechargement, "telechargement-fini": telechargementFini })[mode] || repos
+                                      telechargement: telechargement, "telechargement-fini": telechargementFini, chaleur: chaleur })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -326,6 +326,16 @@ Item {
         Accessible.name: Reglages.t("Partage", "Sharing") + " · " + Etat.heure
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
+    }
+
+    // ── Surchauffe du processeur (Chaleur.qml, une fois par épisode) : « Processeur à 98 °C » ──
+    Fondu {
+        id: chaleur
+        objectName: "nc-chaleur-pill"
+        montre: c.mode === "chaleur"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "device_thermostat"; taille: 18; color: Couleurs.rouge }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Chaleur.titre(); font.weight: Font.DemiBold; color: Couleurs.rouge }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("voir Santé", "see Health"); secondaire: true }
     }
 
     // ── Mode jeu ──

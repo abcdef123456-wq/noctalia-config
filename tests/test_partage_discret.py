@@ -129,7 +129,7 @@ class ReglageSeulementAvecLIle(unittest.TestCase):
         cles = ["ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                 "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS"] + ["ILE_PAGE_" + x.upper() for x in (
                     "musique", "claude", "minuteur", "charge", "jeu", "centre", "assistant", "notifications", "son", "reseau",
-                    "bluetooth", "systeme", "calendrier", "meteo", "presse", "fenetres")]
+                    "bluetooth", "systeme", "sante", "calendrier", "meteo", "presse", "fenetres")]
         sans, avec = self.liste(False), self.liste(True)
         for c in cles:
             with self.subTest(cle=c):
