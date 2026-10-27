@@ -248,8 +248,15 @@ def ia_coupee(e):
     return reglage("IA_MODE", "auto") == "non" or e.get("mode") == "non" or bool(e.get("coupee"))
 
 
+# Agents de terminal qui ne sont pas (encore) des IA de nc-ia : (programme, nom affiché)
+AGENTS_EN_PLUS = (("agy", "Antigravity"),)
+# Ordre quand l'IA choisie n'a pas d'agent : Claude Code, puis Antigravity, puis les autres installés
+ORDRE_AGENTS = ("claude", "agy")
+
+
 def agents_disponibles(e):
-    """[(programme, nom)] des IA permises dont l'agent en terminal est installé (sans doublon)."""
+    """[(programme, nom)] des IA permises dont l'agent en terminal est installé (sans doublon) : Claude Code, Antigravity,
+    puis les autres. Vide si l'IA est coupée."""
     if ia_coupee(e):
         return []
     res, vus = [], set()
@@ -258,18 +265,27 @@ def agents_disponibles(e):
         if prog and ia.get("cli_disponible") and ia.get("disponible") is not False and prog not in vus and shutil.which(prog):
             vus.add(prog)
             res.append((prog, ia.get("nom") or prog))
-    return res
+    for prog, nom in AGENTS_EN_PLUS:
+        if prog not in vus and shutil.which(prog):
+            vus.add(prog)
+            res.append((prog, nom))
+    rang = {p: n for n, p in enumerate(ORDRE_AGENTS)}
+    return sorted(res, key=lambda x: rang.get(x[0], len(rang)))        # tri stable : les autres gardent leur ordre
 
 
 def agent_par_defaut(e):
-    """Le programme de l'agent de l'IA choisie (usage « question »), ou '' : IA coupée, aucun agent installé…"""
+    """Le programme de l'agent à droite : celui de l'usage « question » s'il est installé, sinon celui de l'IA choisie,
+    sinon le premier agent installé. '' seulement si l'IA est coupée ou si aucun agent n'est installé (alors un shell)."""
     if ia_coupee(e):
         return ""
     u = (e.get("usages") or {}).get("question") or {}
-    prog = u.get("cli") or ""
-    if prog and u.get("cli_disponible") and shutil.which(prog):
-        return prog
-    return ""
+    c = e.get("choisie") or {}
+    for x in (u, c):
+        prog = x.get("cli") or ""
+        if prog and x.get("cli_disponible") and shutil.which(prog):
+            return prog
+    dispo = agents_disponibles(e)
+    return dispo[0][0] if dispo else ""
 
 
 # ── La session kitty ────────────────────────────────────────────────────────────────────────────────────────────
@@ -284,21 +300,25 @@ def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
     cd = "cd " + dossier.replace("$", "$$")
     l = ["new_tab Code", "layout splits", cd]
     if nvim:
-        l.append("launch --title nvim nvim")
+        l.append("launch --title nvim --env NC_CODE=1 nvim")
     else:
-        l.append("launch --title shell")
+        l.append(f"launch --title shell {SANS_ACCUEIL}")
     if not seul_nvim:
         droite = "launch --location=vsplit --bias=38 --keep-focus --title "
         if agent:
             droite += shlex.quote(agent) + " " + shlex.quote(MOI) + " --lancer-agent " + shlex.quote(agent)
         else:
-            droite += "shell"
+            droite += "shell " + SANS_ACCUEIL
         l.append(droite)
         if lazygit:
             cfg = config_lazygit()
             l += ["new_tab Git", cd, "launch --title lazygit " + (f"--env LG_CONFIG_FILE={shlex.quote(cfg)} " if cfg else "") + "lazygit"]
         l += ["new_tab Terminal", cd, "launch --title shell"]
     return "\n".join(l) + "\n"
+
+
+# L'accueil (fastfetch) est trop large pour le panneau étroit de droite : les shells de l'espace de code démarrent sans
+SANS_ACCUEIL = "--env FASTFETCH_SHOWN=1"
 
 
 def lancer_agent(prog, args):
@@ -309,6 +329,7 @@ def lancer_agent(prog, args):
             subprocess.call([prog, *args])
         except OSError:
             pass
+    os.environ["FASTFETCH_SHOWN"] = "1"                    # le shell d'après démarre sans l'accueil (panneau étroit)
     sh = os.environ.get("SHELL") or shutil.which("zsh") or shutil.which("bash") or "/bin/sh"
     os.execvp(sh, [sh])
 

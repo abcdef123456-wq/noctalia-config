@@ -222,7 +222,7 @@ class NcCode(unittest.TestCase):
         self.assertIn("--session -", (self.home / "kitty-args").read_text())
         self.assertIn(f"--directory {p}", (self.home / "kitty-args").read_text())
         s = (self.home / "kitty-session").read_text()
-        self.assertIn("launch --title nvim nvim", s)
+        self.assertIn("launch --title nvim --env NC_CODE=1 nvim", s)
         self.assertNotIn("vsplit", s)                                      # « 1 n » : Neovim seul
 
     # ── l'interface plein terminal (dans un vrai pseudo-terminal) ──
@@ -381,6 +381,65 @@ class NcCode(unittest.TestCase):
         self.assertTrue(all(set(x) == {"prog", "nom"} for x in d["agents"]))
         self.reglages("IA_MODE=non\n")
         self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[]))
+
+    def module_nc_code(self):
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_ag", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_ag", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "PATH": f"{self.faux}:/usr/bin:/bin"}):
+            ld.exec_module(m)
+        return m
+
+    def env_faux(self):
+        return unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "PATH": f"{self.faux}:/usr/bin:/bin"})
+
+    def test_agent_par_defaut_question_sans_cli_prend_l_ia_choisie(self):
+        for p in ("claude", "codex", "opencode"):
+            self.programme(p)
+        m = self.module_nc_code()
+        ias = [dict(id=p, nom=p, cli=p, cli_disponible=True, disponible=True) for p in ("claude", "codex", "opencode")]
+        e = dict(mode="manuel", coupee=False,
+                 usages=dict(question=dict(id="jarvis", nom="JARVIS", cli="", cli_disponible=False)),
+                 choisie=dict(id="codex", nom="Codex", cli="codex", cli_disponible=True), ias=ias)
+        with self.env_faux():
+            self.assertEqual(m.agent_par_defaut(e), "codex")               # l'IA choisie (question = jarvis sans cli)
+            e["choisie"] = dict(id="claude", nom="Claude", cli="claude", cli_disponible=True)
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["choisie"] = {}                                              # pas d'IA choisie : le premier installé
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["usages"]["question"] = dict(cli="codex", cli_disponible=True)      # l'usage question gagne s'il a un agent
+            self.assertEqual(m.agent_par_defaut(e), "codex")
+            e["ias"] = []                                                  # aucun agent installé : un shell
+            e["usages"]["question"] = {}
+            self.assertEqual(m.agent_par_defaut(e), "")
+            e["ias"] = ias
+            e["coupee"] = True                                             # IA coupée : aucun agent
+            self.assertEqual(m.agent_par_defaut(e), "")
+
+    def test_ordre_des_agents_claude_agy_puis_les_autres(self):
+        for p in ("claude", "codex", "opencode", "agy"):
+            self.programme(p)
+        m = self.module_nc_code()
+        ias = [dict(id=p, nom=n, cli=p, cli_disponible=True, disponible=True) for p, n in (("codex", "Codex"), ("opencode", "OpenCode"), ("claude", "Claude Code"))]
+        e = dict(mode="manuel", coupee=False, usages={}, choisie=dict(id="jarvis", cli="", cli_disponible=False), ias=ias)
+        with self.env_faux():
+            self.assertEqual([p for p, _ in m.agents_disponibles(e)], ["claude", "agy", "codex", "opencode"])
+            self.assertIn(("agy", "Antigravity"), m.agents_disponibles(e))
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["ias"] = ias[:2]                                             # sans Claude : Antigravity d'abord
+            self.assertEqual(m.agent_par_defaut(e), "agy")
+            e["coupee"] = True
+            self.assertEqual(m.agents_disponibles(e), [])
+
+    def test_shells_de_l_espace_de_code_sans_accueil(self):
+        p = self.depot("dev/projet")
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        self.assertIn("--location=vsplit --bias=38 --keep-focus --title shell --env FASTFETCH_SHOWN=1", s)
+        self.assertIn("--env NC_CODE=1 nvim", s)
+        self.assertIn("launch --title shell\n", s)                         # l'onglet Terminal, large : garde l'accueil
 
     def test_apercu_json_reflog_readme_sans_jamais_lancer_git(self):
         b = self.depot("dev/neo")
