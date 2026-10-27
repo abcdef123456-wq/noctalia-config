@@ -4,7 +4,8 @@
 Tourne en service (nc-pouls.service) : dès qu'un lecteur joue (Spotify, navigateur, mpv… vus par playerctl), il
 écoute la sortie son avec cava et transmet le niveau des basses à Hyprland (nc.halo, dans nc/automatismes.lua).
 Rien ne se passe en profil Économie ni en mode jeu, ni sur batterie hors profil Performance (sauf avec le réglage
-HALO_BATTERIE=oui de nc-reglages) ; sans musique, cava est arrêté (aucun coût).
+HALO_BATTERIE=oui de nc-reglages) ; sans musique, cava est arrêté (aucun coût). Avec le fond vivant de l'île
+(FOND_ANIME=vivant), le même niveau est aussi écrit dans XDG_RUNTIME_DIR/nc-pouls-niveau : pas de second cava.
 
   nc-pouls          service (lancé par systemd)
   nc-pouls demo     8 secondes de pulsation de démonstration, sans musique
@@ -68,6 +69,8 @@ Turn off / on: Super + Alt + M, or systemctl --user disable --now nc-pouls"""
 RUN = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
 PROFIL = os.path.expanduser("~/.config/hypr/nc/profil.lua")
 REGLAGES = os.path.expanduser("~/.config/nc/reglages.conf")
+NIVEAU = f"{RUN}/nc-pouls-niveau"      # niveau des basses pour le fond vivant de l'île (FOND_ANIME=vivant, Fond.qml)
+CADENCE_NIVEAU = 1 / 15                # au plus 15 écritures par seconde : la cadence du fond
 CAVA_CONF = """[general]
 bars = 8
 framerate = 40
@@ -119,6 +122,49 @@ def halo_sur_batterie():
         return re.search(r"^HALO_BATTERIE=\"?oui", open(REGLAGES, encoding="utf-8", errors="replace").read(), re.M) is not None
     except OSError:
         return False
+
+
+def fond_vivant():
+    """Réglage FOND_ANIME=vivant (nc-reglages) : le fond vivant de l'île lit le niveau des basses dans NIVEAU."""
+    try:
+        return re.search(r"^FOND_ANIME=\"?vivant", open(REGLAGES, encoding="utf-8", errors="replace").read(), re.M) is not None
+    except OSError:
+        return False
+
+
+class Niveau:
+    """Niveau des basses pour le fond vivant de l'île (Fond.qml, qui surveille le fichier sans le sonder).
+
+    Écrit en place dans NIVEAU (XDG_RUNTIME_DIR, en mémoire), toujours « 0.42 » sur quatre caractères en une seule
+    écriture, sans jamais vider le fichier ni le remplacer : l'île ne lit jamais un fichier vide et ne perd pas sa
+    surveillance. Au plus CADENCE_NIVEAU écritures par seconde (un zéro passe toujours). Retiré à l'arrêt."""
+
+    def __init__(self):
+        self.fd, self.dernier = None, 0.0
+
+    def ecrire(self, n):
+        now = time.time()
+        if n > 0 and now - self.dernier < CADENCE_NIVEAU:
+            return
+        try:
+            if self.fd is None:
+                self.fd = os.open(NIVEAU, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.pwrite(self.fd, f"{max(0.0, min(1.0, n)):.2f}\n".encode(), 0)
+            self.dernier = now
+        except OSError:
+            pass
+
+    def fermer(self):
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+        try:
+            os.unlink(NIVEAU)
+        except OSError:
+            pass
 
 
 def autorise():
@@ -212,6 +258,7 @@ def service():
     cava, niveau, envoye, prochain_test, depart = None, 0.0, -1.0, 0.0, 0.0
     echecs, pause_jusqua = 0, 0.0        # cava qui ne démarre avec aucune entrée : on attend avant de réessayer
     suivi, relance_suivi, delai_suivi = None, 0.0, 1.0
+    fichier, vivant = Niveau(), False    # fond vivant de l'île : le niveau est aussi écrit dans un fichier
     en_musique = musique()               # ensuite : mis à jour par les événements de playerctl --follow
     verif_musique = time.time() + 30     # pendant la lecture seulement : un lecteur fermé sans événement
     try:
@@ -231,6 +278,9 @@ def service():
             if now >= prochain_test:
                 prochain_test = now + 2
                 actif = en_musique and autorise()
+                vivant = fond_vivant()
+                if not vivant:
+                    fichier.fermer()                   # réglage coupé : plus de fichier (rien de périmé à relire)
                 if not actif:
                     echecs, pause_jusqua = 0, 0.0      # la musique s'arrête : on réessaiera à la prochaine lecture
                 if actif and cava is None and shutil.which("cava") and now >= pause_jusqua:
@@ -241,6 +291,8 @@ def service():
                     cava = None
                     niveau, envoye = 0.0, -1.0
                     halo(0)
+                    if vivant:
+                        fichier.ecrire(0)
             fds = ([suivi.stdout] if suivi else []) + ([cava.stdout] if cava else [])
             # Sans musique, rien ne réveille le service que les événements de playerctl
             attente = 0.25 if cava else (2.0 if en_musique else 60.0)
@@ -281,6 +333,8 @@ def service():
                 arreter_processus(cava)
                 cava = None
                 halo(0)
+                if vivant:
+                    fichier.ecrire(0)
                 continue
             echecs = 0
             barres = [int(x) for x in ligne.strip().strip(";").split(";") if x.isdigit()]
@@ -292,9 +346,12 @@ def service():
             if abs(niveau - envoye) >= 0.04:
                 halo(niveau)
                 envoye = niveau
+                if vivant:
+                    fichier.ecrire(niveau)
     finally:
         arreter_processus(cava)
         arreter_processus(suivi)
+        fichier.fermer()
 
 
 def diag():
