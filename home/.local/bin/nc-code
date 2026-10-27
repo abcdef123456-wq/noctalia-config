@@ -2,12 +2,19 @@
 """nc-code : un espace de code en un geste (Super + X). Un sélecteur de projets, puis une fenêtre kitty prête :
 Neovim à gauche, l'agent de l'IA choisie à droite (Claude Code, Codex, Gemini, OpenCode… ; un shell si l'IA est coupée
 ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) et un onglet « Terminal ».
-  nc-code                  le sélecteur aux couleurs de l'île (on tape pour chercher) ; Entrée ouvre l'espace complet,
-                           Alt + Entrée seulement Neovim, Tab choisit l'agent (entrée redirigée : liste numérotée,
-                           « 3 a » et « 3 n »)
+  nc-code                  dans un terminal : le sélecteur aux couleurs de l'île (on tape pour chercher) ; Entrée ouvre
+                           l'espace complet, Alt + Entrée seulement Neovim, Tab choisit l'agent (entrée redirigée :
+                           liste numérotée, « 3 a » et « 3 n »). Sans terminal (Super + X) : le panneau de l'île
+                           (Code.qml, façon Raycast) si elle tourne, sinon le même sélecteur dans une fenêtre kitty
   nc-code DOSSIER | .      directement, sans sélecteur (--nvim : seulement Neovim ; --agent PROG : cet agent ;
                            --sans-agent : un shell à la place)
   nc-code --liste          les projets proposés, un par ligne (nom, tabulation, chemin)
+  nc-code --liste-json     les mêmes en JSON, le plus récent en tête (nom, chemin, court, branche, quand, date, message,
+                           langage, couleur, github), sans lancer git (fichiers de .git lus directement)
+  nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}]}
+  nc-code --apercu-json DOSSIER   l'aperçu d'un projet en JSON : branche, derniers commits (reflog, sinon un git log -5
+                           borné), état propre ou modifié (git status borné à 1 s, sans écrire), début du README en
+                           texte brut, URL GitHub (https seulement) — pour le panneau de l'île
   nc-code --session-seule DOSSIER   écrit sur la sortie standard la session kitty qui serait ouverte, sans la lancer
 Les projets : dépôts git récents, sans parcours lourd : celui de noctalia-config, l'historique de zoxide et de
 project.nvim, les sessions récentes de Claude Code, puis ~/*/.git et ~/*/*/.git (1 s au plus). Rien ne tourne en fond.
@@ -413,6 +420,159 @@ def langage(d):
     return "", "gris4"
 
 
+def url_github(url):
+    """L'URL https du dépôt sur GitHub, ou '' : l'origine doit être sur github.com (https, http, git@, ssh://), avec un
+    propriétaire et un nom de dépôt simples (lettres, chiffres, « -_. »). Jamais un autre hôte, jamais un chemin bizarre."""
+    m = re.fullmatch(r"(?:https?://(?:[\w.-]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                     r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?", url or "")
+    if not m or m.group(1).strip(".") == "" or m.group(2).strip(".") == "":
+        return ""
+    return f"https://github.com/{m.group(1)}/{m.group(2)}"
+
+
+def origine_github(d):
+    """L'URL https du dépôt sur GitHub d'après l'origine (.git/config, lu sans git) ; '' sans origine, ou ailleurs."""
+    g = dossier_git(d)
+    if not g:
+        return ""
+    try:
+        with open(os.path.join(g, "config"), encoding="utf-8", errors="replace") as f:
+            texte = f.read(65536)
+    except OSError:
+        return ""
+    section = ""
+    for l in texte.splitlines():
+        s = l.strip()
+        if s.startswith("["):
+            section = s
+        elif section == '[remote "origin"]' and s.startswith("url") and "=" in s:
+            return url_github(s.split("=", 1)[1].strip())
+    return ""
+
+
+def commits_reflog(g, n=5):
+    """Les n derniers commits d'après .git/logs/HEAD (sans git), du plus récent au plus ancien : [{message, quand}] ;
+    None sans reflog, [] s'il n'y a pas de commit dedans (dépôt tout juste cloné : seul « clone » y est)."""
+    try:
+        with open(os.path.join(g, "logs/HEAD"), "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 65536))
+            lignes = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    res = []
+    for l in reversed(lignes):
+        if "\t" not in l:
+            continue
+        entete, msg = l.split("\t", 1)
+        if not re.match(r"commit( \((initial|amend|merge)\))?: ", msg):
+            continue
+        champs = entete.split()
+        quand = int(champs[-2]) if len(champs) >= 2 and champs[-2].isdigit() else 0
+        res.append(dict(message=msg.split(": ", 1)[1], quand=quand))
+        if len(res) >= n:
+            break
+    return res
+
+
+def texte_brut(t):
+    """Un début de README lisible en texte brut : sans balises, images, liens, dièses de titres ni étoiles ; lignes vides,
+    tableaux et séparateurs retirés ; seulement de l'imprimable."""
+    t = re.sub(r"<[^>\n]{0,200}>", "", t)
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", t)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"^\s{0,3}#{1,6}\s*", "", t, flags=re.M)
+    t = t.replace("`", "").replace("*", "")
+    lignes = [l.rstrip() for l in t.splitlines()]
+    lignes = [l for l in lignes if l.strip() and not l.strip().startswith(("|", "---", "===", "<!--", "[!["))]
+    return "\n".join("".join(c for c in l if c.isprintable()) for l in lignes)
+
+
+def lire_readme(d, n=1200):
+    try:
+        noms = sorted(os.listdir(d))
+    except OSError:
+        return ""
+    for nom in noms:
+        p = os.path.join(d, nom)
+        if nom.lower().split(".")[0] == "readme" and os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    return texte_brut(f.read(8192))[:n]
+            except OSError:
+                return ""
+    return ""
+
+
+def projet_json(d, maintenant=None):
+    i = infos_projet(d)
+    lang, couleur = langage(d)
+    return dict(nom=os.path.basename(d.rstrip("/")) or d, chemin=d, court=court(d), branche=i["branche"], quand=i["quand"],
+                date=il_y_a(i["quand"], maintenant), message=i["message"], langage=lang, couleur=couleur, github=origine_github(d))
+
+
+def liste_json():
+    """Tous les projets en JSON, le plus récent en tête (comme le sélecteur), sans lancer git."""
+    maintenant = time.time()
+    res = [projet_json(d, maintenant) for d in projets()]
+    res.sort(key=lambda p: -p["quand"])
+    return res
+
+
+def agents_json():
+    e = etat_ia()
+    return dict(coupee=ia_coupee(e), defaut=agent_par_defaut(e), agents=[dict(prog=p, nom=n) for p, n in agents_disponibles(e)])
+
+
+def apercu_json(d):
+    """L'aperçu d'un projet pour le panneau de l'île : {chemin, nom, branche, commits, etat, readme, github}. Les commits
+    viennent du reflog (sans git) ; sans reflog, un seul git log -5 borné à 2 s. L'état (propre, modifie) vient d'un
+    git status borné à 1 s, sans verrou ni écriture de l'index (--no-optional-locks : la date du projet ne bouge pas) ;
+    '' s'il n'a pas répondu à temps."""
+    d = os.path.realpath(os.path.expanduser(d))
+    if not est_depot(d) or not dossier_sur(d):
+        return {}
+    g = dossier_git(d)
+    i = infos_projet(d)
+    maintenant = time.time()
+    commits = commits_reflog(g) if g else None
+    git = shutil.which("git")
+    etat = ""
+    if git:
+        if not commits:
+            try:
+                r = subprocess.run([git, "--no-optional-locks", "-C", d, "log", "-5", "--format=%s%x09%ct"], capture_output=True,
+                                   text=True, timeout=2, stdin=subprocess.DEVNULL)
+                commits = [dict(message=l.split("\t")[0], quand=int(l.split("\t")[1]) if l.split("\t")[-1].isdigit() else 0)
+                           for l in r.stdout.splitlines() if l.strip()]
+            except (OSError, subprocess.SubprocessError, ValueError):
+                commits = []
+        try:
+            r = subprocess.run([git, "--no-optional-locks", "-C", d, "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, timeout=1, stdin=subprocess.DEVNULL)
+            if r.returncode == 0:
+                etat = "modifie" if r.stdout.strip() else "propre"
+        except (OSError, subprocess.SubprocessError):
+            pass
+    for c in commits or []:
+        c["date"] = il_y_a(c["quand"], maintenant)
+    return dict(chemin=d, nom=os.path.basename(d) or d, branche=i["branche"], commits=commits or [], etat=etat,
+                readme=lire_readme(d), github=origine_github(d))
+
+
+def ile_ouvre_panneau():
+    """Le panneau de l'île (Super + X, Code.qml) : vrai si « qs -c nc-ile ipc call ile code » a répondu. Faux sans
+    Quickshell, île arrêtée (ou trop ancienne), ou NC_CODE_ILE=non : le sélecteur kitty prend le relais."""
+    qs = shutil.which("qs")
+    if not qs or os.environ.get("NC_CODE_ILE") == "non":
+        return False
+    try:
+        r = subprocess.run([qs, "-c", "nc-ile", "ipc", "call", "ile", "code"], capture_output=True, timeout=4, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
 def melange(a, b, part):
     """La couleur a mêlée à b (part de a, entre 0 et 1), en #rrggbb."""
     ca, cb = (tuple(int(x.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) for x in (a, b))
@@ -722,7 +882,10 @@ def selecteur():
 
 
 def dans_fenetre():
-    """Lancé sans terminal (Super + X) : le sélecteur dans une fenêtre kitty flottante (classe nc-code), au fond de l'île."""
+    """Lancé sans terminal (Super + X) : le panneau de l'île s'il tourne ; sinon le sélecteur dans une fenêtre kitty
+    flottante (classe nc-code), au fond de l'île."""
+    if ile_ouvre_panneau():
+        return 0
     kitty = shutil.which("kitty")
     if not kitty:
         return 1
@@ -742,6 +905,16 @@ def main(a):
         for d in projets():
             print(ligne_projet(d))
         return 0
+    if a and a[0] == "--liste-json":
+        print(json.dumps(liste_json(), ensure_ascii=False))
+        return 0
+    if a and a[0] == "--agents-json":
+        print(json.dumps(agents_json(), ensure_ascii=False))
+        return 0
+    if a and a[0] == "--apercu-json":
+        r = apercu_json(a[1]) if len(a) > 1 else {}
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r else 1
     seule = "--session-seule" in a
     seul_nvim = "--nvim" in a
     sans_agent = "--sans-agent" in a

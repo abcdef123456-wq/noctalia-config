@@ -2,6 +2,7 @@
 sessions de Claude Code décodées sans rien deviner, balayage de ~/*/.git), la session kitty produite sans la lancer
 (Neovim à gauche, l'agent à droite, lazygit, shell), l'IA coupée (pas d'agent : un shell), le raccourci et la règle de
 fenêtre."""
+import json
 import os
 from pathlib import Path
 import re
@@ -342,6 +343,130 @@ class NcCode(unittest.TestCase):
             self.assertEqual(m.langage(str(w))[0], "TypeScript")
             self.assertEqual(m.langage(str(self.home)), ("", "gris4"))           # rien de reconnu : pastille neutre
             self.assertEqual(m.melange("#ff0000", "#000000", 0.5), "#800000")
+
+    # ── Le panneau de l'île : les sorties JSON (sans git pour la liste), l'aperçu, GitHub, le repli ──
+    def faux_git(self):
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; exit 1')
+
+    def test_liste_json_sans_lancer_git(self):
+        a = self.depot("dev/alpha")
+        b = self.depot("dev/neovim-conf")
+        (b / "pyproject.toml").write_text("")
+        (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
+        (b / ".git/logs").mkdir()
+        (b / ".git/logs/HEAD").write_text("0 1 X <x@y> 1700000000 +0100\tcommit: Un message de commit\n")
+        (b / ".git/config").write_text('[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:moi/neovim-conf.git\n')
+        (self.home / ".config/nc/depot").write_text(f"{a}\n")
+        self.faux_git()
+        r = self.lancer("--liste-json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        l = json.loads(r.stdout)
+        self.assertEqual([p["nom"] for p in l], ["neovim-conf", "alpha"], "le plus récent en tête")
+        neo = l[0]
+        for cle in ("nom", "chemin", "court", "branche", "quand", "date", "message", "langage", "couleur", "github"):
+            self.assertIn(cle, neo)
+        self.assertEqual((neo["chemin"], neo["court"]), (str(b), "~/dev/neovim-conf"))
+        self.assertEqual((neo["branche"], neo["message"], neo["langage"], neo["couleur"]), ("essai", "Un message de commit", "Python", "bleu"))
+        self.assertEqual(neo["github"], "https://github.com/moi/neovim-conf")
+        self.assertEqual(l[1]["github"], "")
+        self.assertFalse((self.home / "git-appels").exists(), "la liste ne lance jamais git")
+
+    def test_agents_json(self):
+        self.programme("claude")
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
+        d = json.loads(self.lancer("--agents-json").stdout)
+        self.assertFalse(d["coupee"])
+        self.assertEqual(d["defaut"], "claude")
+        self.assertIn("claude", [x["prog"] for x in d["agents"]])
+        self.assertTrue(all(set(x) == {"prog", "nom"} for x in d["agents"]))
+        self.reglages("IA_MODE=non\n")
+        self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[]))
+
+    def test_apercu_json_reflog_readme_et_etat(self):
+        b = self.depot("dev/neo")
+        (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
+        (b / ".git/logs").mkdir()
+        (b / ".git/logs/HEAD").write_text("0 1 X <x@y> 1700000000 +0100\tclone: from x\n0 2 X <x@y> 1700000100 +0100\tcommit (initial): Premier\n"
+                                          "2 3 X <x@y> 1700000200 +0100\tcommit: Deuxième <b>gras</b>\n3 4 X <x@y> 1700000300 +0100\tcheckout: moving\n")
+        (b / "README.md").write_text("# Neo\n\n![logo](x.png)\nUn **outil** pour [coder](https://x).\n\n| a | b |\n<p>html</p>\n")
+        (b / ".git/config").write_text('[remote "origin"]\n\turl = https://github.com/moi/neo\n')
+        # Un faux git qui répond à status seulement (log ne doit pas être lancé : le reflog suffit)
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; case "$*" in *status*) echo " M x" ;; *) exit 1 ;; esac')
+        r = self.lancer("--apercu-json", str(b))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["branche"], "essai")
+        self.assertEqual([c["message"] for c in d["commits"]], ["Deuxième <b>gras</b>", "Premier"], "commits du reflog, du plus récent au plus ancien, tels quels")
+        self.assertEqual(d["commits"][0]["quand"], 1700000200)
+        self.assertTrue(d["commits"][0]["date"])
+        self.assertEqual(d["etat"], "modifie")
+        self.assertEqual(d["readme"], "Neo\nUn outil pour coder.\nhtml")
+        self.assertEqual(d["github"], "https://github.com/moi/neo")
+        appels = (self.home / "git-appels").read_text()
+        self.assertNotIn(" log ", appels, "avec un reflog, pas de git log")
+        self.assertIn("--no-optional-locks", appels, "git status ne réécrit pas l'index (la date du projet ne bouge pas)")
+        # Sans reflog : un seul git log -5 ; git absent : rien, et l'état reste inconnu
+        (b / ".git/logs/HEAD").unlink()
+        (self.home / "git-appels").unlink()
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; case "$*" in *log*) printf "Trois\\t1700000400\\n" ;; *status*) ;; esac')
+        d = json.loads(self.lancer("--apercu-json", str(b)).stdout)
+        self.assertEqual([c["message"] for c in d["commits"]], ["Trois"])
+        self.assertEqual(d["etat"], "propre")
+        self.assertEqual((self.home / "git-appels").read_text().count(" log "), 1)
+        (self.faux / "git").unlink()
+        env_sans_git = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), NC_LANGUE="fr", PATH=str(self.faux))
+        r = subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code"), "--apercu-json", str(b)], env=env_sans_git,
+                           capture_output=True, text=True, timeout=30)
+        d = json.loads(r.stdout)
+        self.assertEqual((d["commits"], d["etat"]), ([], ""))
+        # Pas un dépôt, ou un dossier refusé par la session kitty : {} et code 1
+        r = self.lancer("--apercu-json", str(self.home))
+        self.assertEqual((r.returncode, r.stdout.strip()), (1, "{}"))
+        piege = self.depot("dev/x\rlaunch sh")
+        self.assertEqual(self.lancer("--apercu-json", str(piege)).stdout.strip(), "{}")
+
+    def test_url_github_https_seulement(self):
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_g", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_g", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"), "NC_LANGUE": "fr"}):
+            ld.exec_module(m)
+        attendu = "https://github.com/moi/neo"
+        for u in ("https://github.com/moi/neo", "https://github.com/moi/neo.git", "http://github.com/moi/neo/", "git@github.com:moi/neo.git",
+                  "ssh://git@github.com/moi/neo", "https://x@github.com/moi/neo"):
+            self.assertEqual(m.url_github(u), attendu, u)
+        for u in ("https://gitlab.com/moi/neo", "https://github.com.evil.io/moi/neo", "https://evil.io/github.com/moi/neo", "git@github.com.evil:moi/neo",
+                  "https://github.com/moi", "https://github.com/moi/neo/x", "https://github.com/../neo", "https://github.com/moi/neo?x=1",
+                  "https://github.com/moi/neo#f", "https://github.com/moi/a b", "", "javascript:alert(1)", "ftp://github.com/moi/neo"):
+            self.assertEqual(m.url_github(u), "", u)
+        d = self.depot("dev/neo")
+        (d / ".git/config").write_text('[remote "origin"]\n\turl = https://gitlab.com/moi/neo\n[remote "github"]\n\turl = https://github.com/moi/neo\n')
+        self.assertEqual(m.origine_github(str(d)), "", "seule l'origine compte")
+        self.assertEqual(m.texte_brut("# T\n`a` **b** [c](u) ![i](p)\n\n---\n| t |\n<b>x</b>\n"), "T\na b c\nx")
+
+    def test_super_x_ile_sinon_kitty(self):
+        """Sans terminal (Super + X) : le panneau de l'île si « qs -c nc-ile ipc call ile code » répond ; sinon le
+        sélecteur kitty d'avant. Le faux qs note ses arguments et ne lance jamais la vraie île."""
+        self.programme("qs", f'echo "qs $*" >> "{self.home}/qs-appels"; exit "${{QS_CODE:-0}}"')
+        self.programme("kitty", f'echo "kitty $*" >> "{self.home}/kitty-appels"')
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), TMPDIR=str(self.home), NC_LANGUE="fr",
+                   PATH=f"{self.faux}:/usr/bin:/bin")
+        r = subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code")], env=env, capture_output=True, text=True, timeout=30,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.home / "qs-appels").read_text(), "qs -c nc-ile ipc call ile code\n")
+        self.assertFalse((self.home / "kitty-appels").exists(), "l'île a répondu : pas de fenêtre kitty")
+        r = subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code")], env=dict(env, QS_CODE="1"), capture_output=True, text=True,
+                           timeout=30, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("kitty --class nc-code ", (self.home / "kitty-appels").read_text(), "île absente : repli sur le sélecteur kitty")
+        self.assertIn("--selecteur", (self.home / "kitty-appels").read_text())
+        (self.home / "kitty-appels").unlink()
+        subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code")], env=dict(env, NC_CODE_ILE="non"), capture_output=True, timeout=30,
+                       stdin=subprocess.DEVNULL)
+        self.assertTrue((self.home / "kitty-appels").exists(), "NC_CODE_ILE=non : toujours kitty")
+        self.assertEqual((self.home / "qs-appels").read_text().count("\n"), 2, "NC_CODE_ILE=non : qs n'est pas appelé")
 
     # ── Hyprland ──
     def test_raccourci_et_regle_de_fenetre(self):

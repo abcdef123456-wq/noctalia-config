@@ -10,6 +10,7 @@
 //   qs -c nc-ile ipc call ile effacerNotifications | concentration | recherche (Spotlight, Super + R)
 //   qs -c nc-ile ipc call ile projection   projection sur un second écran, comme Windows + P (Super + O)
 //   qs -c nc-ile ipc call ile fiche        fiche des raccourcis, éditable (Super + /)
+//   qs -c nc-ile ipc call ile code         espace de code : le sélecteur de projets façon Raycast (Super + X, nc-code)
 //   qs -c nc-ile ipc call ile gpuMode      confirmer un changement de mode graphique (Hybride ↔ Dédiée), qui redémarre
 import QtQuick
 import Quickshell
@@ -101,6 +102,17 @@ ShellRoot {
             onFermer: racine.ficheOuverte = false
         }
     }
+    // Espace de code (Super + X, nc-code) : le sélecteur de projets façon Raycast, créé à l'ouverture seulement ; sans
+    // l'île, nc-code ouvre le même sélecteur dans une fenêtre kitty
+    property bool codeOuvert: false
+    LazyLoader {
+        id: chargeurCode
+        active: racine.codeOuvert
+        Code {
+            screen: Quickshell.screens.find(s => Hyprland.focusedMonitor && s.name === Hyprland.focusedMonitor.name) || Quickshell.screens[0]
+            onFermer: racine.codeOuvert = false
+        }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens
@@ -123,6 +135,12 @@ ShellRoot {
             Etat.fermer()
             if (racine.ficheOuverte && chargeurFiche.item) chargeurFiche.item.quitter()          // comme Échap
             else { Hyprland.refreshMonitors(); Raccourcis.relire(); racine.ficheOuverte = !racine.ficheOuverte }
+        }
+        // Espace de code (Super + X, par nc-code) : ouvre le sélecteur de projets ; déjà ouvert, le referme
+        function code(): void {
+            Etat.fermer()
+            if (!racine.codeOuvert) Hyprland.refreshMonitors()
+            racine.codeOuvert = !racine.codeOuvert
         }
         function pomodoro(): void { if (Etat.pomodoro) Etat.arreterMinuteur(); else Etat.lancerPomodoro() }
         function vue(): void { if (Etat.vueFenetres) vueFermer(); else vueOuvrir() }

@@ -18,7 +18,7 @@ section « Mes raccourcis » de la fiche).
 | Touches | Action |
 |---|---|
 | `Super` + `Entrée` | Terminal |
-| `Super` + `X` | Espace de code : un sélecteur de projets aux couleurs de l'île (le plus récent en haut, on tape pour chercher), puis une fenêtre kitty avec Neovim à gauche, l'agent de l'IA choisie à droite (un shell si l'IA est coupée), un onglet « Git » (lazygit) et un onglet « Terminal » ; `Alt` + `Entrée` : Neovim seul, `Tab` : choisir l'agent (`nc-code DOSSIER` : sans sélecteur) |
+| `Super` + `X` | Espace de code : le sélecteur de projets de l'île, façon Raycast (carte de verre centrée : recherche floue, le plus récent en haut, aperçu à droite avec la branche, l'état, les derniers commits et le début du README), puis une fenêtre kitty avec Neovim à gauche, l'agent de l'IA choisie à droite (un shell si l'IA est coupée), un onglet « Git » (lazygit) et un onglet « Terminal » ; `Entrée` : ouvrir, `Tab` : choisir l'agent, `Alt` + `Entrée` : Neovim seul, `Échap` : fermer ; `Ctrl` + `E` : le dossier dans le gestionnaire de fichiers, `Ctrl` + `Maj` + `C` : copier le chemin, `Ctrl` + `G` : la page GitHub (si l'origine est sur github.com). Sans l'île Quickshell : le même sélecteur dans une fenêtre kitty (`nc-code DOSSIER` : sans sélecteur) |
 | `Super` + `E` | Fichiers |
 | `Super` + `R` | Rechercher (applis, fichiers, calculs) ; « + nom » : un logiciel à installer (dépôts, AUR, Flatpak), Entrée l'installe |
 | `Super` + `W` | Choisir le fond d'écran |
