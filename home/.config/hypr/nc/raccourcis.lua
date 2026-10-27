@@ -182,7 +182,29 @@ touche(SUPER .. " + code:58", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fen�
 touche(SUPER .. " + code:43", cmd("~/.local/bin/nc-fenetre reduire"), trad("Fenêtres|Masquer la fenêtre (comme macOS)", "Hide the window (like macOS)"))
 touche(SUPER .. " + CTRL + code:58", cmd("~/.local/bin/nc-fenetre restaurer"), trad("Fenêtres|Ramener la dernière fenêtre masquée", "Restore the last hidden window"))
 touche(SUPER .. " + code:38", cmd("qs -c nc-ile ipc call ile vue"),  trad("Fenêtres|Vue de toutes les fenêtres (glisser sur un bureau : l'y envoyer)", "All windows overview (drag onto a desktop to send it there)"))
-touche(SUPER .. " + code:41", hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }), trad("Fenêtres|Plein écran", "Full screen"))
+-- Plein écran : une fenêtre flottante (épinglée ou non) retrouve ensuite sa place et sa taille exactes ; Hyprland ne
+-- garde que la taille. Épinglée : binds.allow_pin_fullscreen (apparence.lua) la désépingle puis la ré-épingle.
+nc.places_plein_ecran = nc.places_plein_ecran or {}
+touche(SUPER .. " + code:41", function()
+    local w = hl.get_active_window()
+    if not w then return end
+    local etait = (tonumber(w.fullscreen) or 0) ~= 0
+    if not etait and w.floating then
+        local x, y = xy(w.at)
+        local l, h = xy(w.size)
+        if x and y and l and h then nc.places_plein_ecran[w.address] = { x = x, y = y, l = l, h = h } end
+    end
+    hl.dispatch(hl.dsp.window.fullscreen_state({ internal = 3, client = 0, action = "toggle" }))
+    local p = etait and nc.places_plein_ecran[w.address]
+    if p then
+        nc.places_plein_ecran[w.address] = nil
+        hl.dispatch(hl.dsp.window.resize({ x = p.l, y = p.h, window = w }))
+        hl.dispatch(hl.dsp.window.move({ x = p.x, y = p.y, window = w }))
+    end
+end, trad("Fenêtres|Plein écran", "Full screen"))
+hl.on("window.close", function(w)
+    if w and w.address then nc.places_plein_ecran[w.address] = nil end
+end)
 touche(SUPER .. " + SHIFT + code:33", hl.dsp.window.pseudo(),      trad("Fenêtres|Garder sa taille (pseudo)", "Keep its size (pseudo)"))
 touche(SUPER .. " + code:44", hl.dsp.layout("togglesplit"),        trad("Fenêtres|Changer le sens de la division", "Change the split direction"))
 

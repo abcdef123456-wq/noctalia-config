@@ -158,3 +158,46 @@ print("a", last["HDMI-A-1"] ~= nil)
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("lua"), "Lua requis")
+class PleinEcranEpinglee(unittest.TestCase):
+    """Super + F sur une fenêtre flottante (épinglée ou non) : elle passe en plein écran, puis retrouve sa place et sa
+    taille exactes (Hyprland ne garde que la taille) ; une épinglée est permise (binds.allow_pin_fullscreen)."""
+    def test_super_f_garde_puis_rend_la_place(self):
+        entete = ENTETE.replace(
+            "  bind = function(k)\n",
+            "  bind = function(k, f) touches = touches or {}; touches[k] = f\n").replace(
+            "dsp = proxy, dispatch = function() end,",
+            "dsp = setmetatable({ window = setmetatable({"
+            " fullscreen_state = function(t) return { 'plein', t.action } end,"
+            " resize = function(t) return { 'taille', t.x, t.y } end,"
+            " move = function(t) return { 'place', t.x, t.y } end }, { __index = function() return proxy end }) },"
+            " { __index = function() return proxy end }),"
+            " dispatch = function(a) if type(a) == 'table' and a[1] then faits[#faits + 1] = table.concat(a, ' ', 1, #a) end end,")
+        entete = entete.replace("last, handlers, notifs, execs, nbinds = {}, {}, {}, {}, 0", "last, handlers, notifs, execs, nbinds, faits = {}, {}, {}, {}, 0, {}")
+        apres = r'''
+local f = touches["SUPER + code:41"]
+assert(type(f) == "function", "Super + F est une fonction")
+local fen = { address = "0xabc", floating = true, pinned = true, fullscreen = 0, at = { x = 300, y = 200 }, size = { x = 800, y = 500 } }
+hl.get_active_window = function() return fen end
+f()
+fen.fullscreen = 2; fen.at = { x = 0, y = 0 }; fen.size = { x = 3840, y = 2160 }
+f()
+for _, l in ipairs(faits) do print(l) end
+for _, h in ipairs(handlers["window.close"] or {}) do h({ address = "0xabc" }) end
+print("reste", nc.places_plein_ecran["0xabc"] == nil)
+'''
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            cfg = home / ".config/hypr"
+            cfg.mkdir(parents=True)
+            (cfg / "hyprland.lua").symlink_to(HYPR / "hyprland.lua")
+            (cfg / "nc").symlink_to(HYPR / "nc")
+            e = dict(os.environ, HOME=str(home), CFG=str(cfg), XDG_CONFIG_HOME=str(home / ".config"), NC_LANGUE="fr")
+            r = subprocess.run(["lua", "-"], input=entete + f'dofile("{cfg}/hyprland.lua")\n' + apres, text=True,
+                               capture_output=True, timeout=30, env=e)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        lignes = r.stdout.strip().splitlines()
+        self.assertEqual(lignes[-5:], ["plein toggle", "plein toggle", "taille 800 500", "place 300 200", "reste\ttrue"])
+        self.assertIn("allow_pin_fullscreen = true", (HYPR / "nc/apparence.lua").read_text())

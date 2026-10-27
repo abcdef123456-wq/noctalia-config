@@ -115,6 +115,9 @@ hl.config({
     -- Super + chiffre du bureau où l'on est déjà : retour au bureau précédent
     binds = {
         workspace_back_and_forth = nc.reglage("BUREAU_ALLER_RETOUR", true),   -- nc-reglages
+        -- Plein écran d'une fenêtre épinglée (Super + Ctrl + P puis Super + F) : sans cela Hyprland le refuse ; avec,
+        -- il la désépingle le temps du plein écran et la ré-épingle en sortant (FullscreenController, 0.56)
+        allow_pin_fullscreen = true,
     },
 
     ecosystem = {
