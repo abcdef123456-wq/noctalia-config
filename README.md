@@ -131,7 +131,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
 | Terminal moderne : historique, fichiers et dossiers en liste filtrable (fzf) · sauter vers un dossier · git lisible, lazygit, yazi | **Ctrl + R** / **Ctrl + T** / **Alt + C** · `z` `zi` · `lg` `y` ; `nc-outils` liste ce qui est actif (réglage « Outils modernes ») |
-| Espace de code : choisir un projet, puis Neovim + l'agent de l'IA (Claude Code, Codex…) + lazygit dans une fenêtre kitty | **Super + X** (`nc-code`) |
+| Espace de code : le sélecteur de projets de l'île façon Raycast (recherche floue, aperçu : branche, derniers commits, README ; Tab choisit l'agent, Ctrl + G ouvre la page GitHub), puis Neovim + l'agent de l'IA (Claude Code, Codex…) + lazygit dans une fenêtre kitty ; sans l'île, le même sélecteur dans kitty | **Super + X** (`nc-code`) |
 
 ## Île dynamique
 
@@ -151,6 +151,12 @@ proposée en dernier ; la recherche de la fenêtre des réglages comprend aussi 
 Entrée ouvre un terminal qui l’installe, après ton mot de passe (et la recette PKGBUILD pour l’AUR). En tapant sans
 préfixe, deux logiciels à installer dont le nom commence par ta saisie s’ajoutent en bas (réglage « Logiciels à
 installer dans le Spotlight »).
+
+**Super + X** ouvre l'espace de code, façon Raycast : une carte de verre centrée avec tes dépôts git récents (recherche
+floue, le plus récent en haut), et à droite l'aperçu du projet choisi (branche, propre ou modifié, derniers commits,
+début du README) ; Entrée ouvre Neovim et l'agent de l'IA dans kitty (`nc-code`), Tab choisit l'agent, Alt + Entrée
+Neovim seul, Ctrl + E / Ctrl + Maj + C / Ctrl + G : le dossier, le chemin copié, la page GitHub. Rien ne tourne tant que
+le panneau est fermé ; sans l'île, le même sélecteur s'ouvre dans une fenêtre kitty.
 
 **L'IA du bureau** ([détails](docs/ia.md)) : une clé d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek,
 OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi (`omp`), Ollama ou JARVIS — **automatique** (la meilleure disponible, la

@@ -72,8 +72,8 @@ hl.window_rule({
     center = true,
 })
 
--- Sélecteur de projets de l'espace de code (Super + X ; nc-code) : fenêtre kitty flottante et centrée, façon Spotlight.
--- Exclue de la mémoire des fenêtres flottantes (nc/automatismes.lua) : sa taille est toujours celle-ci.
+-- Sélecteur de projets de l'espace de code (Super + X ; nc-code) sans l'île Quickshell : fenêtre kitty flottante et
+-- centrée, façon Spotlight. Exclue de la mémoire des fenêtres flottantes (nc/automatismes.lua) : sa taille est toujours celle-ci.
 hl.window_rule({
     name   = "espace-de-code",
     match  = { class = "^(nc-code)$" },
@@ -131,3 +131,5 @@ hl.layer_rule({
 hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-dock$" }, ignore_alpha = 0.2 })
 -- Fiche des raccourcis de l'île (Super + /) : verre, le bureau flouté derrière la carte seulement (le reste est transparent)
 hl.layer_rule({ name = "nc-fiche-verre", match = { namespace = "^nc-fiche$" }, blur = true, ignore_alpha = 0.2 })
+-- Espace de code de l'île (Super + X) : la même carte de verre, floutée seulement sous la carte
+hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blur = true, ignore_alpha = 0.2 })
