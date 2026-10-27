@@ -759,11 +759,14 @@ REGLAGES = [
       "ouinon", "oui", groupe="noctalia"),
     R("FONDS_INTERVALLE", "Fonds d'écran", L("Toutes les", "Every"), "entier", "10", mini=1, maxi=240, unite="min", groupe="noctalia"),
     R("FOND_ANIME", "Fonds d'écran", L("Fond animé", "Animated wallpaper"), "choix", "non",
-      L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. En pause dès qu'une "
-        "fenêtre est ouverte, en mode Économie et en mode jeu.",
-        "Aurora: large glows in the theme's colors drift slowly over your wallpaper. Paused as soon as a "
-        "window is open, in Power Saver and in game mode."),
-      [("non", L("Non", "No")), ("aurore", L("Aurore", "Aurora"))]),
+      L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. Vivant : l'aurore "
+        "prend la teinte de l'heure (aube, jour, crépuscule, nuit), pulse sur les basses avec le halo musical et suit la "
+        "météo de l'île (gouttes, flocons, brouillard). En pause dès qu'une fenêtre est ouverte, écran éteint, en mode "
+        "Économie et en mode jeu.",
+        "Aurora: large glows in the theme's colors drift slowly over your wallpaper. Living: the aurora takes the hue "
+        "of the hour (dawn, day, dusk, night), pulses with the bass along with the music glow and follows the island's "
+        "weather (raindrops, snowflakes, fog). Paused as soon as a window is open, screen off, in Power Saver and in game mode."),
+      [("non", L("Non", "No")), ("aurore", L("Aurore", "Aurora")), ("vivant", L("Vivant", "Living"))]),
     R("FOND_ANIME_BATTERIE", "Fonds d'écran", L("Fond animé aussi sur batterie", "Animated wallpaper on battery too"),
       "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
     R("FONDS_DOSSIER", "Fonds d'écran", L("Dossier des fonds d'écran", "Wallpaper folder"), "dossier", "~/Pictures/Wallpapers",

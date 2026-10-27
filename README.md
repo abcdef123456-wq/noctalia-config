@@ -198,6 +198,7 @@ l'île Quickshell.
 | | |
 |---|---|
 | **Halo musical** | Quand de la musique joue, le halo coloré de la fenêtre active pulse sur les basses (cava écoute la sortie son). Coupé en Économie, en mode jeu et sur batterie (sauf en Performance). **Super + Alt + M** pour le couper ou le remettre ; `nc-pouls demo` pour le voir sans musique. |
+| **Fond vivant** | nc-reglages → Fonds d'écran → Fond animé : *Aurore* (de grandes lueurs du thème dérivent par-dessus ton fond, jamais à sa place) ou *Vivant* (l'aurore prend la teinte de l'heure, pulse sur les basses avec le halo musical et suit la météo de l'île : gouttes, flocons, brouillard). Coupé par défaut ; 15 images/s au plus, rien de calculé fenêtre ouverte, écran éteint, en Économie, en jeu ni sur batterie (réglage « aussi sur batterie »). |
 | **Mode jeu automatique** | Un jeu s'ouvre (Steam, Proton, gamescope, `.exe`) : profil Performance et mode jeu. Le dernier jeu fermé : retour au profil d'avant, effets et notifications rétablis. |
 | **Marque-pages de fenêtres** | **Super + Ctrl + 1…4** : le premier appui attache la fenêtre active à la touche ; ensuite, la touche t'amène à elle depuis n'importe quel bureau, et depuis elle te ramène à la fenêtre d'avant. **Super + Ctrl + Maj + 1…4** pour en attacher une autre. |
 | **Fenêtres flottantes** | Chaque appli flottante (calculatrice, réglages, lecteur…) se rouvre à la taille et à la place où tu l'as fermée, en proportion de l'écran. |

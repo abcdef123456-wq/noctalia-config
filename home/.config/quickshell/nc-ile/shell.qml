@@ -108,10 +108,10 @@ ShellRoot {
     }
     // Terminal déroulant sorti : un clic sur le bureau vide à côté le range
     RangeTerminal {}
-    // Fond d'écran animé (nc-reglages → Fonds d'écran) : créé seulement s'il est choisi
+    // Fond d'écran animé (nc-reglages → Fonds d'écran : aurore ou vivant) : créé seulement s'il est choisi
     Variants {
-        model: Reglages.val("FOND_ANIME", "non") === "aurore" && !Reglages.sobre ? Quickshell.screens : []
-        Fond {}
+        model: ["aurore", "vivant"].indexOf(Reglages.val("FOND_ANIME", "non")) >= 0 && !Reglages.sobre ? Quickshell.screens : []
+        Fond { vivant: Reglages.val("FOND_ANIME", "non") === "vivant" }
     }
 
     IpcHandler {
