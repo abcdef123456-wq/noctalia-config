@@ -46,7 +46,7 @@ class NcCode(unittest.TestCase):
     def lancer(self, *args):
         env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / "cache"),
                    XDG_RUNTIME_DIR=str(self.home / "run"), TMPDIR=str(self.home), NC_LANGUE="fr", NC_IA_EN_LIGNE="1",
-                   NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", PATH=f"{self.faux}:/usr/bin:/bin")
+                   NC_POWER_SUPPLY="secteur", NC_PROFIL="balanced", PATH=getattr(self, "chemin", f"{self.faux}:/usr/bin:/bin"))
         (self.home / "run").mkdir(mode=0o700, exist_ok=True)
         return subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code"), *args], env=env, capture_output=True,
                               text=True, timeout=30)
@@ -145,6 +145,14 @@ class NcCode(unittest.TestCase):
     def test_sans_lazygit_pas_d_onglet_lazygit(self):
         p = self.depot("dev/projet")
         self.programme("nvim")
+        # jamais le vrai lazygit de la machine : un PATH avec seulement les faux et python3, sh, env
+        mini = self.home / "bin-min"
+        mini.mkdir()
+        for prog in ("python3", "sh", "env"):
+            vrai = shutil.which(prog)
+            if vrai:
+                (mini / prog).symlink_to(vrai)
+        self.chemin = f"{self.faux}:{mini}"
         self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
         s = self.lancer("--session-seule", str(p)).stdout
         self.assertNotIn("lazygit", s)
