@@ -14,6 +14,8 @@ ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) e
   nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}]}
   nc-code --apercu-json DOSSIER   l'aperçu d'un projet en JSON : branche, derniers commits (reflog), début du README
                            en texte brut, URL GitHub (https seulement) — pour le panneau de l'île ; jamais git
+  nc-code --nouveau NOM [--modele vide|python|c|web]   crée ~/Projets/NOM (CODE_DOSSIER dans nc-reglages) : git init,
+                           README.md, fichiers de départ du modèle ; refuse un nom déjà pris ; puis ouvre l'espace de code
   nc-code --session-seule DOSSIER   écrit sur la sortie standard la session kitty qui serait ouverte, sans la lancer
 Les projets : dépôts git récents, sans parcours lourd : celui de noctalia-config, l'historique de zoxide et de
 project.nvim, les sessions récentes de Claude Code, puis ~/*/.git et ~/*/*/.git (1 s au plus). Rien ne tourne en fond.
@@ -141,6 +143,41 @@ def projets_nvim(limite=30):
     return res[:limite]
 
 
+def fichier_voulus():
+    """Le fichier d'état des projets voulus (créés ou clonés par nc-code) : un chemin absolu par ligne."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state")
+    return os.path.join(base, "nc", "code-projets")
+
+
+def projets_voulus(limite=50):
+    """Les projets créés ou clonés à la demande : jamais marqués « trouvés sur le disque »."""
+    try:
+        with open(fichier_voulus(), encoding="utf-8", errors="replace") as f:
+            lignes = f.read(65536).splitlines()
+    except OSError:
+        return []
+    res = [l for l in reversed(lignes) if l.startswith("/") and dossier_sur(l) and est_depot(l)]
+    return res[:limite]
+
+
+def retenir_projet(d):
+    """Note un projet voulu (sans doublon, 200 au plus)."""
+    f = fichier_voulus()
+    try:
+        os.makedirs(os.path.dirname(f), mode=0o700, exist_ok=True)
+        try:
+            with open(f, encoding="utf-8", errors="replace") as h:
+                anciens = [l for l in h.read(65536).splitlines() if l and l != d]
+        except OSError:
+            anciens = []
+        tmp = f + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as h:
+            h.write("\n".join((anciens + [d])[-200:]) + "\n")
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
 def projet_noctalia():
     try:
         with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
@@ -187,7 +224,7 @@ def projets(delai=1.0):
     """[chemin] sans doublon, dans l'ordre : noctalia-config, project.nvim, zoxide, Claude Code, puis le balayage."""
     vus, res = set(), []
     PAR_BALAYAGE.clear()
-    sources_connues = (projet_noctalia(), projets_claude(), projets_nvim(), projets_zoxide())
+    sources_connues = (projet_noctalia(), projets_voulus(), projets_claude(), projets_nvim(), projets_zoxide())
     for n, sources in enumerate(sources_connues + (projets_balayage(delai),)):
         for d in sources:
             r = os.path.realpath(d)
@@ -349,6 +386,94 @@ def ouvrir(dossier, agent="", seul_nvim=False):
     except OSError:
         pass
     return 0
+
+
+# ── Un nouveau projet ───────────────────────────────────────────────────────────────────────────────────────────
+MODELES = {
+    "vide": {},
+    "python": {"main.py": 'def main():\n    print("Bonjour !")\n\n\nif __name__ == "__main__":\n    main()\n',
+               ".gitignore": "__pycache__/\n*.pyc\n.venv/\n"},
+    "c": {"main.c": '#include <stdio.h>\n\nint main(void)\n{\n    printf("Bonjour !\\n");\n    return 0;\n}\n',
+          "Makefile": "CFLAGS ?= -Wall -Wextra -g\n\nmain: main.c\n\t$(CC) $(CFLAGS) -o main main.c\n\nclean:\n\trm -f main\n",
+          ".gitignore": "main\n*.o\n"},
+    "web": {"index.html": '<!doctype html>\n<html lang="fr">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n'
+                          '  <title>Ma page</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Bonjour !</h1>\n  <script src="script.js"></script>\n</body>\n</html>\n',
+            "style.css": "body {\n  font-family: sans-serif;\n  margin: 2rem;\n}\n",
+            "script.js": 'console.log("Bonjour !");\n'},
+}
+
+
+def nom_projet(nom):
+    """Le nom filtré : lettres, chiffres, « - » et « _ » (accents retirés, espaces en « - »), sans « - » au début, 64 au plus."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(nom or "")).encode("ascii", "ignore").decode()
+    t = re.sub(r"\s+", "-", t.strip())
+    t = re.sub(r"[^A-Za-z0-9_-]", "", t).lstrip("-")
+    return t[:64]
+
+
+def dossier_projets():
+    """Où vont les nouveaux projets : CODE_DOSSIER (nc-reglages), ~/Projets par défaut."""
+    v = os.path.expanduser(reglage("CODE_DOSSIER", "") or "")
+    if not v.startswith("/") or not dossier_sur(v):
+        v = os.path.join(HOME, "Projets")
+    return v.rstrip("/") or "/"
+
+
+def initialiser_depot(dest):
+    """git init en argv, sans modèle de git (aucun hook copié) et sans hooks. Vrai si le dépôt existe ensuite."""
+    if shutil.which("git"):
+        try:
+            subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "init", "-q", "--template=", dest],
+                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return est_depot(dest)
+
+
+def creer_projet(nom, modele="vide"):
+    """(dossier, '') ou (dossier ou '', message). Refuse un nom vide, un modèle inconnu, un nom déjà pris : rien n'est
+    jamais écrasé (mkdir et open « x » échouent si ça existe)."""
+    n = nom_projet(nom)
+    if not n:
+        return "", T("Donne un nom (lettres, chiffres, - et _).", "Give a name (letters, digits, - and _).")
+    if modele not in MODELES:
+        return "", T(f"Modèle inconnu « {modele} » (vide, python, c, web).", f"Unknown template “{modele}” (vide, python, c, web).")
+    base = dossier_projets()
+    dest = os.path.join(base, n)
+    if os.path.lexists(dest):
+        return "", T(f"Le nom « {n} » est déjà pris dans {court(base)}.", f"The name “{n}” is already taken in {court(base)}.")
+    try:
+        os.makedirs(base, exist_ok=True)
+        os.mkdir(dest)
+        fichiers = dict(MODELES[modele])
+        fichiers["README.md"] = f"# {n}\n\nNouveau projet.\n"
+        for f, texte in fichiers.items():
+            with open(os.path.join(dest, f), "x", encoding="utf-8") as h:
+                h.write(texte)
+    except OSError as err:
+        return "", T(f"Création impossible : {err.strerror or err}", f"Cannot create: {err.strerror or err}")
+    if not initialiser_depot(dest):
+        return dest, T("git init n'a pas marché (le projet est créé sans dépôt).", "git init failed (project created without a repository).")
+    retenir_projet(dest)
+    return dest, ""
+
+
+def cmd_nouveau(a):
+    """nc-code --nouveau NOM [--modele vide|python|c|web] [--sans-agent] [--session-seule] : crée le projet, puis l'ouvre."""
+    modele = a[a.index("--modele") + 1] if "--modele" in a and a.index("--modele") + 1 < len(a) else "vide"
+    reste = [x for i, x in enumerate(a) if not x.startswith("--") and not (i and a[i - 1] == "--modele")]
+    d, msg = creer_projet(reste[0] if reste else "", modele)
+    if msg:
+        print("nc-code : " + msg, file=sys.stderr)
+        if not d:
+            return 1
+    print(d)
+    agent = "" if ("--sans-agent" in a or ia_coupee({})) else agent_par_defaut(etat_ia())
+    if "--session-seule" in a:
+        sys.stdout.write(session(d, agent, "--nvim" in a, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit"))))
+        return 0
+    return ouvrir(d, agent, "--nvim" in a)
 
 
 # ── Les couleurs (celles de l'île) ──────────────────────────────────────────────────────────────────────────────
@@ -940,6 +1065,8 @@ def main(a):
         r = apercu_json(a[1]) if len(a) > 1 else {}
         print(json.dumps(r, ensure_ascii=False))
         return 0 if r else 1
+    if a and a[0] == "--nouveau":
+        return cmd_nouveau(a[1:])
     seule = "--session-seule" in a
     seul_nvim = "--nvim" in a
     sans_agent = "--sans-agent" in a

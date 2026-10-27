@@ -441,6 +441,55 @@ class NcCode(unittest.TestCase):
         self.assertIn("--env NC_CODE=1 nvim", s)
         self.assertIn("launch --title shell\n", s)                         # l'onglet Terminal, large : garde l'accueil
 
+    # ── un nouveau projet ──
+    def faux_git_init(self):
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; for d; do :; done; mkdir -p "$d/.git"')
+
+    def test_nouveau_projet_cree_dossier_readme_git_init(self):
+        self.faux_git_init()
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        r = self.lancer("--nouveau", "Mon Projet é!/..", "--modele", "python", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = self.home / "Projets/Mon-Projet-e"                             # filtré : lettres, chiffres, - et _
+        self.assertTrue(d.is_dir(), r.stdout)
+        self.assertEqual(r.stdout.splitlines()[0], str(d))
+        self.assertTrue((d / "README.md").read_text().startswith("# Mon-Projet-e"))
+        self.assertTrue((d / "main.py").exists())
+        appels = (self.home / "git-appels").read_text().splitlines()
+        self.assertEqual(appels, [f"git -c core.hooksPath=/dev/null init -q --template= {d}"])
+        self.assertIn(f"cd {d}", r.stdout)
+        self.assertIn(str(d), (self.home / ".local/state/nc/code-projets").read_text())
+        l = json.loads(self.lancer("--liste-json").stdout)
+        self.assertFalse([p for p in l if p["chemin"] == str(d)][0]["disque"], "un projet voulu n'est pas « trouvé sur le disque »")
+
+    def test_nouveau_projet_modeles_et_refus(self):
+        self.faux_git_init()
+        for modele, fichier in (("vide", "README.md"), ("c", "main.c"), ("web", "index.html")):
+            r = self.lancer("--nouveau", "p-" + modele, "--modele", modele, "--session-seule")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((self.home / "Projets" / ("p-" + modele) / fichier).exists())
+        self.assertEqual(self.lancer("--nouveau", "x", "--modele", "rust", "--session-seule").returncode, 1)
+        self.assertEqual(self.lancer("--nouveau", "../..", "--session-seule").returncode, 1)        # rien de gardé
+        self.assertEqual(self.lancer("--nouveau", "***", "--session-seule").returncode, 1)
+        self.assertEqual(self.lancer("--nouveau", "--session-seule").returncode, 1)                 # pas de nom
+        self.assertFalse((self.home / "Projets/x").exists())
+        # déjà pris : refusé, rien d'écrasé
+        (self.home / "Projets/p-c/main.c").write_text("MON CODE")
+        r = self.lancer("--nouveau", "p-c", "--modele", "c", "--session-seule")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("déjà pris", r.stderr)
+        self.assertEqual((self.home / "Projets/p-c/main.c").read_text(), "MON CODE")
+        (self.home / "Projets/fichier").write_text("x")                    # un fichier de ce nom : refusé aussi
+        self.assertEqual(self.lancer("--nouveau", "fichier", "--session-seule").returncode, 1)
+
+    def test_nouveau_projet_dossier_reglable(self):
+        self.faux_git_init()
+        self.reglages(f"CODE_DOSSIER={self.home}/mes-codes\n")
+        r = self.lancer("--nouveau", "essai", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.home / "mes-codes/essai/README.md").exists())
+
     def test_apercu_json_reflog_readme_sans_jamais_lancer_git(self):
         b = self.depot("dev/neo")
         (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
