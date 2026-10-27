@@ -72,3 +72,33 @@ esac
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TemperatureCpu(unittest.TestCase):
+    """Issue #33 : sur une tour, hwmon0 est souvent acpitz (16 °C, ambiante ou fictive) et le capteur du processeur vient
+    plus loin : le processeur d'abord, acpitz seulement en repli. Faux /sys/class/hwmon (NC_HWMON_DIR)."""
+    setUp, faux, lancer, cles = IleEtat.setUp, IleEtat.faux, IleEtat.lancer, staticmethod(IleEtat.cles)   # le décor seul
+
+    def capteurs(self, *liste):
+        d = self.tmp / "hwmon"
+        for i, (nom, milli) in enumerate(liste):
+            (d / f"hwmon{i}").mkdir(parents=True)
+            (d / f"hwmon{i}/name").write_text(nom + "\n")
+            (d / f"hwmon{i}/temp1_input").write_text(f"{milli}\n")
+        os.environ["NC_HWMON_DIR"] = str(d)
+        self.addCleanup(os.environ.pop, "NC_HWMON_DIR", None)
+
+    def test_le_processeur_avant_acpitz(self):
+        self.capteurs(("acpitz", 16800), ("nvme", 35000), ("coretemp", 41000))
+        self.assertEqual(self.cles(self.lancer("systeme")).get("temperature"), "41")
+
+    def test_acpitz_en_repli_seulement(self):
+        self.capteurs(("nvme", 35000), ("acpitz", 52000))
+        self.assertEqual(self.cles(self.lancer("systeme")).get("temperature"), "52")
+
+    def test_k10temp_et_jeu_par_la_meme_fonction(self):
+        self.capteurs(("acpitz", 16800), ("k10temp", 60500))
+        self.assertEqual(self.cles(self.lancer("systeme")).get("temperature"), "60")
+        corps_jeu = SCRIPT.read_text()
+        corps_jeu = corps_jeu[corps_jeu.index("\njeu() {"):]
+        self.assertIn('temp="$(temperature_cpu)"', corps_jeu[:corps_jeu.index("\n}\n")])

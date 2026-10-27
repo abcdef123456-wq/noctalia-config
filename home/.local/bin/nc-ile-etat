@@ -97,6 +97,21 @@ son() {
       printf "%s=%s\t%s\t%s\n", s, id, nom, def }'
 }
 
+# Température du processeur (millièmes de degré) : un capteur du processeur d'abord (coretemp, k10temp, zenpower,
+# cpu_thermal), où qu'il soit dans la liste ; acpitz seulement s'il n'y en a aucun. Sur bien des cartes mères de PC
+# fixe, acpitz arrive en premier (hwmon0) avec une valeur ambiante ou fictive (16 °C) : issue #33.
+# NC_HWMON_DIR : autre dossier que /sys/class/hwmon (tests).
+temperature_cpu() {
+  local h t repli=""
+  for h in "${NC_HWMON_DIR:-/sys/class/hwmon}"/hwmon*; do
+    case "$(cat "$h/name" 2>/dev/null)" in
+      k10temp|coretemp|zenpower|cpu_thermal) t="$(cat "$h/temp1_input" 2>/dev/null)"; [ -n "$t" ] && { echo "$t"; return; } ;;
+      acpitz) [ -z "$repli" ] && repli="$(cat "$h/temp1_input" 2>/dev/null)" ;;
+    esac
+  done
+  [ -n "$repli" ] && echo "$repli"
+}
+
 systeme() {
   local u n s i w x y z t1 i1 t2 i2 temp=""
   read -r _ u n s i w x y z _ < /proc/stat; t1=$((u + n + s + i + w + x + y + z)); i1=$((i + w))
@@ -105,9 +120,7 @@ systeme() {
   [ "$t2" -gt "$t1" ] && echo "cpu=$(( (100 * ((t2 - t1) - (i2 - i1))) / (t2 - t1) ))"
   echo "cpu_nom=$(sed -n 's/^model name\s*:\s*//p' /proc/cpuinfo | head -1 | sed -E 's/ with .*//; s/\(R\)|\(TM\)//g; s/ +/ /g')"
   awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} END{ if (t) printf "ram=%d\nram_utilisee=%.1f\nram_totale=%.1f\n", (t-a)*100/t, (t-a)/1048576, t/1048576 }' /proc/meminfo
-  for h in /sys/class/hwmon/hwmon*; do
-    case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|zenpower|cpu_thermal|acpitz) temp="$(cat "$h/temp1_input" 2>/dev/null)"; break ;; esac
-  done
+  temp="$(temperature_cpu)"
   [ -n "$temp" ] && echo "temperature=$((temp / 1000))"
   df -P / 2>/dev/null | awk 'NR==2 { gsub("%","",$5); printf "disque=%s\ndisque_libre=%.0f\n", $5, $4/1048576 }'
   # Durée affichée telle quelle par l'île (« Allumé depuis … ») : dans la langue choisie
@@ -132,9 +145,7 @@ jeu() {
   sleep 0.4
   read -r _ u n s i w x y z _ < /proc/stat; t2=$((u + n + s + i + w + x + y + z)); i2=$((i + w))
   [ "$t2" -gt "$t1" ] && echo "cpu=$(( (100 * ((t2 - t1) - (i2 - i1))) / (t2 - t1) ))"
-  for h in /sys/class/hwmon/hwmon*; do
-    case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|zenpower|cpu_thermal) temp="$(cat "$h/temp1_input" 2>/dev/null)"; break ;; esac
-  done
+  temp="$(temperature_cpu)"
   [ -n "$temp" ] && echo "cpu_temp=$((temp / 1000))"
   # NVIDIA : seulement si la carte est déjà réveillée (nvidia-smi la sortirait de veille) ; 3 s au plus pour chaque appel
   for d in /sys/bus/pci/drivers/nvidia/0000:*; do
