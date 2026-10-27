@@ -1,10 +1,15 @@
-// Fond d'écran animé « aurore » (nc-reglages → Fonds d'écran → FOND_ANIME) : trois grandes lueurs aux couleurs du
-// thème dérivent lentement par-dessus le fond d'écran, sous les fenêtres. Rien à installer.
-// Économe : 15 images par seconde, en pause dès qu'une fenêtre est ouverte sur le bureau affiché (le fond est caché),
-// sur batterie (sauf FOND_ANIME_BATTERIE=oui), en mode Économie et en mode jeu.
+// Fond d'écran animé (nc-reglages → Fonds d'écran → FOND_ANIME) : une couche par-dessus le fond d'écran choisi (jamais
+// à sa place), sous les fenêtres, sur chaque écran, sans jamais prendre la souris. Rien à installer.
+//   aurore : trois grandes lueurs aux couleurs du thème dérivent lentement (Lueurs.qml).
+//   vivant : l'aurore prend la teinte de l'heure (nuit, aube, jour, crépuscule), pulse sur les basses de la musique
+//            (le niveau que nc-pouls écrit dans XDG_RUNTIME_DIR/nc-pouls-niveau : pas de second cava) et suit la météo
+//            de l'île (pluie, neige, brouillard).
+// Économe : 15 images par seconde au plus, et rien de calculé (compteur arrêté, fichier du pouls plus surveillé) dès
+// qu'une fenêtre est ouverte sur le bureau affiché (plein écran compris : le fond est caché), écran éteint ou session
+// verrouillée, sur batterie (sauf FOND_ANIME_BATTERIE=oui), en mode Économie et en mode jeu.
 import QtQuick
-import QtQuick.Shapes
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Services.UPower
@@ -12,6 +17,7 @@ import Quickshell.Services.UPower
 PanelWindow {
     id: f
     required property var modelData
+    property bool vivant: false
     screen: modelData
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
@@ -27,37 +33,49 @@ PanelWindow {
     readonly property bool batterieOk: !UPower.onBattery || Reglages.val("FOND_ANIME_BATTERIE", "non") === "oui"
     readonly property bool anime: Etat.ecranVu && bureauVide && batterieOk && !economie && !Etat.jeu
 
+    // Le seul compteur du fond : tout ce qui bouge (lueurs, pouls, gouttes) ne dépend que de lui
     property real t: 0
-    Timer { interval: 66; repeat: true; running: f.anime; onTriggered: f.t += 0.066 }
-
-    // Lueurs : couleur du thème, centre qui décrit une lente boucle, rayon qui respire
-    component Lueur: ShapePath {
-        id: l
-        property color teinte: "white"
-        property real cx: 0.5
-        property real cy: 0.5
-        property real r: 0.5
-        strokeWidth: -1
-        fillGradient: RadialGradient {
-            centerX: l.cx * f.width; centerY: l.cy * f.height; centerRadius: l.r * Math.max(f.width, f.height)
-            focalX: centerX; focalY: centerY
-            GradientStop { position: 0; color: Qt.alpha(l.teinte, 0.42) }
-            GradientStop { position: 0.55; color: Qt.alpha(l.teinte, 0.14) }
-            GradientStop { position: 1; color: "transparent" }
+    property real pouls: 0           // niveau des basses lissé, mis à jour au tic seulement (jamais à la cadence du fichier)
+    property real niveau: 0          // dernier niveau lu de nc-pouls
+    Timer {
+        interval: 66; repeat: true; running: f.anime
+        onTriggered: {
+            f.t += 0.066
+            if (f.vivant) {
+                var n = f.surveille ? f.niveau : 0
+                f.pouls = n > f.pouls ? n : f.pouls * 0.8 + n * 0.2        // montée immédiate, retombée douce
+            }
         }
-        startX: 0; startY: 0
-        PathLine { x: f.width; y: 0 }
-        PathLine { x: f.width; y: f.height }
-        PathLine { x: 0; y: f.height }
-        PathLine { x: 0; y: 0 }
     }
-    Shape {
+
+    // Heure : relue à la reprise du fond, puis chaque minute tant qu'il tourne (rien en pause)
+    property real heure: 12
+    function majHeure() { var d = new Date(); heure = d.getHours() + d.getMinutes() / 60 }
+    onAnimeChanged: { if (anime) majHeure(); else pouls = 0 }        // en pause : pas de pouls figé à la reprise
+    Component.onCompleted: majHeure()
+    Timer { interval: 60000; repeat: true; running: f.anime && f.vivant; onTriggered: f.majHeure() }
+
+    // Météo déjà lue par l'île (nc-meteo, Etat.meteo) : rien de plus à demander
+    readonly property int meteoCode: vivant && Etat.meteo.code !== undefined ? Etat.meteo.code : -1
+
+    // Niveau des basses de nc-pouls (écrit en place, surveillé sans sondage) : seulement en mode vivant, fond actif et
+    // musique en cours ; sinon le fichier n'est pas surveillé et le pouls retombe à zéro. Sans nc-pouls ni cava : pas de
+    // fichier, le fond respire sans pulser. watchChanges est une propriété C++ évaluée à la demande : la surveillance
+    // est pilotée par une propriété QML ordinaire, et relue ici pour que l'arrêt soit effectif tout de suite.
+    readonly property bool surveille: vivant && anime && Etat.joue
+    onSurveilleChanged: { void fichierPouls.watchChanges; if (surveille) fichierPouls.reload(); else niveau = 0 }
+    FileView {
+        id: fichierPouls
+        path: Etat.dossierSession + "/nc-pouls-niveau"
+        watchChanges: f.surveille
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: f.niveau = f.surveille ? Math.max(0, Math.min(1, parseFloat(text()) || 0)) : 0    // (re)lu aussi quand la surveillance change
+        onLoadFailed: f.niveau = 0
+    }
+
+    Lueurs {
         anchors.fill: parent
-        opacity: f.anime ? 1 : 0.6                           // en pause : figée, un peu plus discrète
-        Behavior on opacity { NumberAnimation { duration: 800 } }
-        preferredRendererType: Shape.CurveRenderer
-        Lueur { teinte: Couleurs.accent; cx: 0.28 + 0.16 * Math.sin(f.t * 0.11); cy: 0.32 + 0.14 * Math.cos(f.t * 0.09); r: 0.55 + 0.06 * Math.sin(f.t * 0.2) }
-        Lueur { teinte: Couleurs.violet; cx: 0.74 + 0.14 * Math.cos(f.t * 0.08); cy: 0.62 + 0.16 * Math.sin(f.t * 0.12); r: 0.5 + 0.07 * Math.cos(f.t * 0.17) }
-        Lueur { teinte: Couleurs.bleu; cx: 0.5 + 0.22 * Math.sin(f.t * 0.06 + 2); cy: 0.9 + 0.08 * Math.cos(f.t * 0.1); r: 0.45 }
+        t: f.t; anime: f.anime; vivant: f.vivant; heure: f.heure; pouls: f.pouls; meteoCode: f.meteoCode
     }
 }
