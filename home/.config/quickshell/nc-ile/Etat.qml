@@ -547,6 +547,8 @@ Singleton {
     readonly property int profil: PowerProfiles.profile
     onProfilChanged: if (!jeuEnCours) activite("profil")
     function choisirProfil(p) { PowerProfiles.profile = p }
+    // Le service de profils propose Performance (sans lui, ou sans ce profil : pas de bouton Performance dans Santé)
+    readonly property bool performanceDisponible: PowerProfiles.hasPerformanceProfile
 
     // ── Luminosité (nc-brightness, même échelle que les touches) ──
     property real luminosite: 0.5

@@ -19,7 +19,8 @@ Singleton {
     property string fichierCpu: ""         // …/hwmon*/temp1_input du processeur ("" : pas de capteur)
     property string fabricant: ""          // constructeur (DMI), pour un conseil adapté (Fn + Q sur un Lenovo Legion…)
     readonly property bool lenovo: /lenovo/i.test(fabricant)
-    readonly property int seuil: Math.max(0, Math.min(110, parseInt(Reglages.val("CHALEUR_ALERTE", "95")) || 0))
+    // Seuil : 0 coupe la veille ; une valeur qui n'est pas un nombre rend le défaut (jamais coupée en silence) ; de 50 à 110 °C
+    readonly property int seuil: { var v = parseInt(Reglages.val("CHALEUR_ALERTE", "95")); return isNaN(v) ? 95 : (v <= 0 ? 0 : Math.max(50, Math.min(110, v))) }
     property int intervalle: 20000         // entre deux lectures (ms)
     property int duree: 60000              // au-dessus du seuil pendant au moins ce temps avant d'alerter (ms)
     readonly property bool veille: fichierCpu !== "" && seuil > 0 && Etat.ecranVu
@@ -45,7 +46,8 @@ Singleton {
                 var t = {}
                 text.split("\n").forEach(l => { var p = l.indexOf("="); if (p > 0) t[l.slice(0, p)] = l.slice(p + 1) })
                 ch.fabricant = t.fabricant || ""
-                ch.fichierCpu = t.cpu || ""
+                // Repli acpitz (cpu_fiable=0) : valeur parfois ambiante ou fictive (issue #33), jamais une alerte dessus
+                ch.fichierCpu = t.cpu_fiable === "0" ? "" : (t.cpu || "")
                 Etat.capteursSante = t.capteurs === "1"
             }
         }
@@ -62,8 +64,9 @@ Singleton {
         if (maintenant - derniereLecture > 3 * intervalle) { chaudDepuis = 0; charge = -1; totAvant = 0 }
         derniereLecture = maintenant
         temp.reload()
+        // Seulement une mesure plausible (1 à 125 °C) : 0, -1, 128000 ou 255000 sont un capteur muet ou cassé
         var t = parseInt(temp.text())
-        if (isNaN(t)) return
+        if (isNaN(t) || t < 1000 || t > 125000) return
         temperature = Math.round(t / 1000)
         stat.reload()
         var l = (stat.text().split("\n")[0] || "").trim().split(/\s+/)
@@ -82,6 +85,10 @@ Singleton {
         }
         if (alerte && temperature <= seuil - 10) alerte = false
     }
+    // Fin de l'épisode : la notification à bouton (notify-send attend un clic) est fermée, sinon la suivante ne
+    // partirait jamais
+    onAlerteChanged: if (!alerte && notifier.running) notifier.running = false
+    readonly property bool notificationOuverte: notifier.running
 
     // Une seule fois par épisode : la pilule, puis le programme le plus gourmand (un nc-ile-etat sante, 0,4 s) et la
     // notification avec les causes et les gestes
@@ -104,11 +111,13 @@ Singleton {
             }
         }
     }
-    readonly property bool performancePossible: Etat.profil !== PowerProfile.Performance
-    // Texte de la notification et de la carte de la page Santé
+    // Bouton Performance : seulement si le service de profils en propose un (sinon le clic ne ferait rien)
+    readonly property bool performancePossible: Etat.performanceDisponible && Etat.profil !== PowerProfile.Performance
+    // Texte de la notification et de la carte de la page Santé ; pendant un partage d'écran (Partage.silence), le nom
+    // du programme gourmand n'est pas montré
     function titre() { return Reglages.t("Processeur à " + temperature + " °C", "CPU at " + temperature + "°C") }
     function situation() {
-        var p = programme !== "" ? Reglages.t(", surtout « " + programme + " » (" + programmePct + " %)", ", mostly “" + programme + "” (" + programmePct + "%)") : ""
+        var p = programme !== "" && !Partage.silence ? Reglages.t(", surtout « " + programme + " » (" + programmePct + " %)", ", mostly “" + programme + "” (" + programmePct + "%)") : ""
         return chargeAlerte >= 60
             ? Reglages.t("Depuis plus d'une minute, sous forte charge (" + chargeAlerte + " %" + p + ").",
                          "For over a minute, under heavy load (" + chargeAlerte + "%" + p + ").")
@@ -128,7 +137,7 @@ Singleton {
         id: notifier
         command: ["notify-send", "-a", Reglages.t("Santé", "Health"), "-u", "critical", "-i", "dialog-warning"]
                  .concat(ch.performancePossible ? ["-A", "perf=" + Reglages.t("Mode Performance", "Performance Mode")] : [])
-                 .concat([ch.titre(), ch.situation() + "\n" + ch.causes() + "\n" + ch.gestes()])
+                 .concat(["--", ch.titre(), ch.situation() + "\n" + ch.causes() + "\n" + ch.gestes()])
         stdout: StdioCollector { onStreamFinished: if (text.trim() === "perf") Etat.choisirProfil(PowerProfile.Performance) }
     }
 }

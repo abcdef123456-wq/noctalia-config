@@ -82,8 +82,10 @@ Item {
                 spacing: 10; height: 34
                 Ico { nom: "monitor_heart"; taille: 24; color: Chaleur.alerte ? Couleurs.rouge : Couleurs.vert; anchors.verticalCenter: parent.verticalCenter }
                 Texte { text: Reglages.t("Santé", "Health"); font.pixelSize: 20; font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+                // Programme le plus gourmand : caché pendant un partage d'écran (Partage.silence), comme le presse-papiers
                 Texte {
-                    visible: sa.m.top !== undefined
+                    objectName: "programmeGourmand"
+                    visible: sa.m.top !== undefined && !Partage.silence
                     text: Reglages.t("le plus gourmand : ", "busiest: ") + String(sa.m.top || "").split("\t")[0]
                     secondaire: true; anchors.verticalCenter: parent.verticalCenter; width: sa.width - 120
                 }
@@ -182,9 +184,11 @@ Item {
                     }
                 }
             }
-            // Profil d'énergie : trois pastilles, la bascule passe par le service de profils (comme le centre)
+            // Profil d'énergie : trois pastilles, la bascule passe par le service de profils (comme le centre) ; sans
+            // service qui propose Performance, rien (un clic ne ferait rien)
             Module {
                 objectName: "blocProfil"
+                visible: Etat.performanceDisponible
                 width: sa.width; radius: 18
                 height: colProfil.implicitHeight + 24
                 Column {
