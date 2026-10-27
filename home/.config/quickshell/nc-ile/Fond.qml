@@ -51,7 +51,7 @@ PanelWindow {
     // Heure : relue à la reprise du fond, puis chaque minute tant qu'il tourne (rien en pause)
     property real heure: 12
     function majHeure() { var d = new Date(); heure = d.getHours() + d.getMinutes() / 60 }
-    onAnimeChanged: if (anime) majHeure()
+    onAnimeChanged: { if (anime) majHeure(); else pouls = 0 }        // en pause : pas de pouls figé à la reprise
     Component.onCompleted: majHeure()
     Timer { interval: 60000; repeat: true; running: f.anime && f.vivant; onTriggered: f.majHeure() }
 

@@ -135,24 +135,27 @@ def fond_vivant():
 class Niveau:
     """Niveau des basses pour le fond vivant de l'île (Fond.qml, qui surveille le fichier sans le sonder).
 
-    Écrit en place dans NIVEAU (XDG_RUNTIME_DIR, en mémoire), toujours « 0.42 » sur quatre caractères en une seule
+    Écrit en place dans NIVEAU (XDG_RUNTIME_DIR, en mémoire), toujours « 0.42\n » sur 5 octets en une seule
     écriture, sans jamais vider le fichier ni le remplacer : l'île ne lit jamais un fichier vide et ne perd pas sa
     surveillance. Au plus CADENCE_NIVEAU écritures par seconde (un zéro passe toujours). Retiré à l'arrêt."""
 
     def __init__(self):
-        self.fd, self.dernier = None, 0.0
+        self.fd, self.dernier, self.valeur = None, 0.0, -1.0
 
     def ecrire(self, n):
+        """Vrai si la valeur est écrite ; faux si elle est sautée (cadence) ou en échec : self.valeur reste celle du
+        fichier, la suivante l'écrira (cava envoie une ligne à chaque image)."""
         now = time.time()
         if n > 0 and now - self.dernier < CADENCE_NIVEAU:
-            return
+            return False
         try:
             if self.fd is None:
                 self.fd = os.open(NIVEAU, os.O_WRONLY | os.O_CREAT, 0o600)
             os.pwrite(self.fd, f"{max(0.0, min(1.0, n)):.2f}\n".encode(), 0)
-            self.dernier = now
+            self.dernier, self.valeur = now, n
+            return True
         except OSError:
-            pass
+            return False
 
     def fermer(self):
         if self.fd is not None:
@@ -161,6 +164,7 @@ class Niveau:
             except OSError:
                 pass
             self.fd = None
+        self.valeur = -1.0
         try:
             os.unlink(NIVEAU)
         except OSError:
@@ -259,6 +263,7 @@ def service():
     echecs, pause_jusqua = 0, 0.0        # cava qui ne démarre avec aucune entrée : on attend avant de réessayer
     suivi, relance_suivi, delai_suivi = None, 0.0, 1.0
     fichier, vivant = Niveau(), False    # fond vivant de l'île : le niveau est aussi écrit dans un fichier
+    fichier.fermer()                     # un fichier resté d'un arrêt brutal (SIGKILL) : jamais une vieille valeur
     en_musique = musique()               # ensuite : mis à jour par les événements de playerctl --follow
     verif_musique = time.time() + 30     # pendant la lecture seulement : un lecteur fermé sans événement
     try:
@@ -281,6 +286,8 @@ def service():
                 vivant = fond_vivant()
                 if not vivant:
                     fichier.fermer()                   # réglage coupé : plus de fichier (rien de périmé à relire)
+                elif fichier.fd is None:
+                    fichier.ecrire(0)                  # le fichier existe dès le début : le fond le surveille au 1er morceau
                 if not actif:
                     echecs, pause_jusqua = 0, 0.0      # la musique s'arrête : on réessaiera à la prochaine lecture
                 if actif and cava is None and shutil.which("cava") and now >= pause_jusqua:
@@ -346,8 +353,9 @@ def service():
             if abs(niveau - envoye) >= 0.04:
                 halo(niveau)
                 envoye = niveau
-                if vivant:
-                    fichier.ecrire(niveau)
+            # Le fichier a son propre écart : une écriture sautée (cadence) n'y laisse pas une vieille valeur
+            if vivant and abs(niveau - fichier.valeur) >= 0.04:
+                fichier.ecrire(niveau)
     finally:
         arreter_processus(cava)
         arreter_processus(suivi)
@@ -434,5 +442,7 @@ if __name__ == "__main__":
         signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
         try:
             service()
+        except KeyboardInterrupt:              # Ctrl + C en essai : pas de trace
+            pass
         finally:
             halo(0)

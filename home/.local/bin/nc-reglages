@@ -762,10 +762,12 @@ REGLAGES = [
       L("Aurore : de grandes lueurs aux couleurs du thème dérivent lentement sur ton fond d'écran. Vivant : l'aurore "
         "prend la teinte de l'heure (aube, jour, crépuscule, nuit), pulse sur les basses avec le halo musical et suit la "
         "météo de l'île (gouttes, flocons, brouillard). En pause dès qu'une fenêtre est ouverte, écran éteint, en mode "
-        "Économie et en mode jeu.",
+        "Économie et en mode jeu. Sur batterie, le pouls demande aussi « Halo aussi sur batterie » ; les gouttes et "
+        "les flocons, la météo de l'île.",
         "Aurora: large glows in the theme's colors drift slowly over your wallpaper. Living: the aurora takes the hue "
         "of the hour (dawn, day, dusk, night), pulses with the bass along with the music glow and follows the island's "
-        "weather (raindrops, snowflakes, fog). Paused as soon as a window is open, screen off, in Power Saver and in game mode."),
+        "weather (raindrops, snowflakes, fog). Paused as soon as a window is open, screen off, in Power Saver and in game mode. "
+        "On battery, the pulse also needs \"Glow on battery too\"; raindrops and snowflakes, the island's weather."),
       [("non", L("Non", "No")), ("aurore", L("Aurore", "Aurora")), ("vivant", L("Vivant", "Living"))]),
     R("FOND_ANIME_BATTERIE", "Fonds d'écran", L("Fond animé aussi sur batterie", "Animated wallpaper on battery too"),
       "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
