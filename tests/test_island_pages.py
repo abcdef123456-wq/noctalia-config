@@ -10,7 +10,7 @@ import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
-PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme calendrier meteo presse fenetres".split()
+PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme sante calendrier meteo presse fenetres".split()
 
 
 class ReglagesPages(unittest.TestCase):
@@ -79,7 +79,7 @@ ShellRoot {
   visible: true; width: 500; height: 700
   NavigationIle {
    id: nav; x: 450; y: 32; width: 18; height: 76
-   pages: ["musique","claude","minuteur","charge","jeu","centre","assistant","notifications","son","reseau","bluetooth","systeme","calendrier","meteo","presse","fenetres"]
+   pages: ["musique","claude","minuteur","charge","jeu","centre","assistant","notifications","son","reseau","bluetooth","systeme","sante","calendrier","meteo","presse","fenetres"]
    courant: 7
    onChoisir: nom => courant = pages.indexOf(nom)
   }
@@ -106,8 +106,8 @@ ShellRoot {
 if(etape===0){etape++;return}
 function controler(){
  var ps=points(), visibles=ps.filter(p=>p.visible)
- verifier(ps.length===16,"pages perdues")
- verifier(visibles.length>1&&visibles.length<16,"fenêtre de points non bornée")
+ verifier(ps.length===17,"pages perdues")
+ verifier(visibles.length>1&&visibles.length<17,"fenêtre de points non bornée")
  var actif=ps.find(p=>p.index===nav.courant)
  verifier(actif.visible&&actif.opacity===1,"page active masquée")
  visibles.forEach(p=>verifier(p.y>=0&&p.y+p.height<=nav.height,"point hors du padding"))

@@ -79,7 +79,7 @@ PanelWindow {
     readonly property var tailles: ({
         musique: Qt.size(430, 214), minuteur: Qt.size(430, Etat.minuteurFin > 0 ? 150 : 334), charge: adaptee("charge", 140),
         jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
-        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), calendrier: adaptee("calendrier", 410),
+        bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
         fenetres: adaptee("fenetres", 160)
     })
@@ -404,7 +404,7 @@ PanelWindow {
                     active: pageIle.visible || pageIle.active || (fen.ouverte && (pageIle.dejaVue || pageIle.voisine))
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
-                                        calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
+                                        sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres })[pageIle.modelData] || pCentre
                 }
             }
         }
@@ -418,6 +418,7 @@ PanelWindow {
         Component { id: pReseau; PageListe { mode: "wifi" } }
         Component { id: pBluetooth; PageListe { mode: "bluetooth" } }
         Component { id: pSysteme; Systeme {} }
+        Component { id: pSante; Sante {} }
         Component { id: pCalendrier; Calendrier {} }
         Component { id: pClaude; Claude {} }
         Component { id: pAssistant; Assistant {} }

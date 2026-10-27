@@ -36,10 +36,13 @@ Singleton {
     }
     // Page Batterie (Charge.qml) juste après le centre, seulement sur un PC qui a une batterie ; pendant une recharge,
     // elle est déjà en tête parmi les activités : jamais deux fois
+    // Page Santé (Sante.qml) après Système, seulement si la machine a des capteurs (températures, ventilateurs : vu une
+    // fois au démarrage par Chaleur.qml, nc-ile-etat capteurs) ; machine virtuelle ou tour sans capteur : pas de page
+    property bool capteursSante: false
     readonly property var vues: Reglages.filtrerPages(activites.concat(["centre"],
                                                  batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
                                                  ["assistant", "notifications"],
-                                                 ["son", "reseau", "bluetooth", "systeme", "calendrier"],
+                                                 ["son", "reseau", "bluetooth", "systeme"], capteursSante ? ["sante"] : [], ["calendrier"],
                                                  (meteo.temp !== undefined || meteoErreur !== "") ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))
     property string vueNom: "centre"

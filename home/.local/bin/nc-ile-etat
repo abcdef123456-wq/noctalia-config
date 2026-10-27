@@ -10,6 +10,10 @@
 #   nc-ile-etat systeme  processeur, mémoire, température, disque, allumage, santé de la batterie, écrans
 #   nc-ile-etat jeu      page Mode jeu : processeur (charge, température), carte graphique (nom, charge, température,
 #                        watts) ; une carte NVIDIA en veille n'est pas réveillée pour ça (gpu=veille)
+#   nc-ile-etat sante    page Santé : charge et programme le plus gourmand, températures (processeur, carte graphique,
+#                        SSD, mémoire, Wi-Fi), ventilateurs, profil du firmware (voir sante() plus bas)
+#   nc-ile-etat capteurs une fois au démarrage de l'île : fichier de la température du processeur, constructeur, et
+#                        s'il y a des capteurs à montrer (sinon, ni page Santé ni veille de surchauffe)
 # Pochettes distantes (http) mises en cache dans ~/.cache/nc/pochettes.
 media() {
   local m art cache n f
@@ -102,14 +106,112 @@ son() {
 # fixe, acpitz arrive en premier (hwmon0) avec une valeur ambiante ou fictive (16 °C) : issue #33.
 # NC_HWMON_DIR : autre dossier que /sys/class/hwmon (tests).
 temperature_cpu() {
-  local h t repli=""
+  local f
+  f="$(fichier_temperature_cpu)"
+  [ -n "$f" ] && cat "$f" 2>/dev/null
+}
+# Le fichier de cette température (la veille de surchauffe de l'île le relit elle-même, sans processus : Chaleur.qml)
+fichier_temperature_cpu() {
+  local h repli=""
   for h in "${NC_HWMON_DIR:-/sys/class/hwmon}"/hwmon*; do
     case "$(cat "$h/name" 2>/dev/null)" in
-      k10temp|coretemp|zenpower|cpu_thermal) t="$(cat "$h/temp1_input" 2>/dev/null)"; [ -n "$t" ] && { echo "$t"; return; } ;;
-      acpitz) [ -z "$repli" ] && repli="$(cat "$h/temp1_input" 2>/dev/null)" ;;
+      k10temp|coretemp|zenpower|cpu_thermal) [ -r "$h/temp1_input" ] && { echo "$h/temp1_input"; return; } ;;
+      acpitz) [ -z "$repli" ] && [ -r "$h/temp1_input" ] && repli="$h/temp1_input" ;;
     esac
   done
   [ -n "$repli" ] && echo "$repli"
+}
+
+# Page Santé de l'île (Sante.qml) et veille de surchauffe (Chaleur.qml). NC_HWMON_DIR, NC_SYSFS : faux dossiers (tests).
+#   nc-ile-etat capteurs  une fois au démarrage de l'île : cpu=<fichier de la température du processeur>,
+#                         fabricant=<constructeur, DMI>, capteurs=1 s'il y a au moins une température ou un ventilateur
+#                         à montrer (sans cette ligne, la page Santé n'existe pas et rien ne tourne)
+capteurs() {
+  local h f n
+  f="$(fichier_temperature_cpu)"
+  [ -n "$f" ] && echo "cpu=$f"
+  for h in "${NC_HWMON_DIR:-/sys/class/hwmon}"/hwmon*; do
+    for f in "$h"/temp[0-9]*_input "$h"/fan[0-9]*_input; do [ -r "$f" ] && { echo "capteurs=1"; break 2; }; done
+  done
+  n="$(cat "${NC_SYSFS:-/sys}/class/dmi/id/sys_vendor" 2>/dev/null)"
+  [ -n "$n" ] && echo "fabricant=$n"
+}
+
+#   nc-ile-etat sante     toutes les 2 s tant que la page Santé est affichée :
+#     cpu=<charge %>              top=<programme>\t<% du processeur>   (le plus gourmand sur 0,4 s, s'il pèse)
+#     temp=<id>\t<°C>\t<°C max>   id : cpu, gpu (carte NVIDIA réveillée seulement : jamais sortie de veille pour ça,
+#                                 gpu=veille sinon ; AMD : amdgpu), ssd (nvme), ram (spd5118, jc42), wifi, carte (acpitz)
+#     fan=<n°>\t<tr/min>\t<max>   chaque ventilateur de hwmon (yogafan, lenovo_wmi_other, asus, dell, thinkpad, nct…)
+#     profil_firmware=<platform_profile du noyau : balanced, performance, max-power, custom…>
+# Un PC sans capteur n'écrit que cpu= : la page n'a alors rien à montrer (elle n'existe pas, voir capteurs).
+sante() {
+  local u n s i w x y z t1 i1 t2 i2 avant h nom f t max id d v num=0 wmi=0 fichier_cpu="" ram="" ram_max=""
+  read -r _ u n s i w x y z _ < /proc/stat; t1=$((u + n + s + i + w + x + y + z)); i1=$((i + w))
+  # Ticks de chaque programme (utime + stime), pour trouver le plus gourmand ; un programme disparu entre les deux
+  # lectures est ignoré (awk se plaint sur stderr, rien d'autre)
+  avant="$(awk '{ p = FILENAME; sub(/^.*\/proc\//, "", p); sub(/\/stat$/, "", p); r = $0; sub(/^.*\) /, "", r); split(r, a, " "); print p, a[12] + a[13] }' /proc/[0-9]*/stat 2>/dev/null)"
+  sleep 0.4
+  read -r _ u n s i w x y z _ < /proc/stat; t2=$((u + n + s + i + w + x + y + z)); i2=$((i + w))
+  [ "$t2" -gt "$t1" ] && echo "cpu=$(( (100 * ((t2 - t1) - (i2 - i1))) / (t2 - t1) ))"
+  awk -v total="$((t2 - t1))" 'NR == FNR { a[$1] = $2; next }
+    { p = FILENAME; sub(/^.*\/proc\//, "", p); sub(/\/stat$/, "", p); if (!(p in a)) next
+      c = $0; sub(/^[^(]*\(/, "", c); sub(/\)[^)]*$/, "", c)
+      r = $0; sub(/^.*\) /, "", r); split(r, b, " "); d = b[12] + b[13] - a[p]
+      if (d > m) { m = d; nom = c } }
+    END { if (total > 0 && m * 100 / total >= 3) printf "top=%s\t%d\n", nom, m * 100 / total }' <(printf '%s\n' "$avant") /proc/[0-9]*/stat 2>/dev/null
+  # Températures : le processeur par la même règle que partout (capteur du processeur avant acpitz)
+  f="$(fichier_temperature_cpu)"
+  if [ -n "$f" ]; then
+    t="$(cat "$f" 2>/dev/null)"; max="$(cat "${f%_input}_crit" 2>/dev/null || cat "${f%_input}_max" 2>/dev/null)"
+    [ -n "$t" ] && { printf 'temp=cpu\t%s\t%s\n' "$((t / 1000))" "${max:+$((max / 1000))}"; fichier_cpu=$f; }
+  fi
+  for h in "${NC_HWMON_DIR:-/sys/class/hwmon}"/hwmon*; do
+    [ "$(cat "$h/name" 2>/dev/null)" = lenovo_wmi_other ] && wmi=1
+  done
+  for h in "${NC_HWMON_DIR:-/sys/class/hwmon}"/hwmon*; do
+    nom="$(cat "$h/name" 2>/dev/null)"
+    case "$nom" in
+      nvme) id=ssd ;;
+      spd5118|jc42) id=ram ;;
+      amdgpu) id=gpu ;;
+      acpitz) [ "$h/temp1_input" != "$fichier_cpu" ] && id=carte || id="" ;;   # déjà pris comme processeur (repli) : pas deux fois
+      mt7[0-9]*_phy*|iwlwifi*|ath1[0-9]k*|rtw*|brcmfmac*|phy[0-9]*) id=wifi ;;
+      *) id="" ;;
+    esac
+    if [ -n "$id" ] && [ -r "$h/temp1_input" ]; then
+      t="$(cat "$h/temp1_input" 2>/dev/null)"; max="$(cat "$h/temp1_crit" 2>/dev/null || cat "$h/temp1_max" 2>/dev/null)"
+      if [ -n "$t" ]; then
+        if [ "$id" = ram ]; then
+          # Plusieurs barrettes : la plus chaude, une seule ligne
+          if [ -z "$ram" ] || [ "$t" -gt "$ram" ]; then ram=$t; fi
+          [ -n "$max" ] && ram_max=$max
+        elif ! [[ " $d " == *" $id "* ]]; then
+          d="$d $id"; printf 'temp=%s\t%s\t%s\n' "$id" "$((t / 1000))" "${max:+$((max / 1000))}"
+        fi
+      fi
+    fi
+    # Ventilateurs ; sur un Lenovo Legion, yogafan et lenovo_wmi_other donnent les mêmes (seul le second a le maximum)
+    [ "$nom" = yogafan ] && [ "$wmi" = 1 ] && continue
+    for f in "$h"/fan[0-9]*_input; do
+      [ -r "$f" ] || continue
+      v="$(cat "$f" 2>/dev/null)"; case "$v" in ''|*[!0-9]*) continue ;; esac
+      max="$(cat "${f%_input}_max" 2>/dev/null)"; case "$max" in *[!0-9]*) max="" ;; esac
+      num=$((num + 1)); printf 'fan=%s\t%s\t%s\n' "$num" "$v" "$max"
+    done
+  done
+  [ -n "$ram" ] && printf 'temp=ram\t%s\t%s\n' "$((ram / 1000))" "${ram_max:+$((ram_max / 1000))}"
+  # Carte NVIDIA : seulement si elle est déjà réveillée (nvidia-smi la sortirait de veille), 3 s au plus
+  if [[ " $d " != *" gpu "* ]]; then
+    for v in "${NC_SYSFS:-/sys}"/bus/pci/drivers/nvidia/0000:*; do
+      [ -e "$v" ] || continue
+      if [ "$(cat "$v/power/runtime_status" 2>/dev/null)" = suspended ]; then echo "gpu=veille"; break; fi
+      t="$(timeout 3 nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -1)"
+      case "$t" in ''|*[!0-9]*) ;; *) printf 'temp=gpu\t%s\t\n' "$t" ;; esac
+      break
+    done
+  fi
+  t="$(cat "${NC_SYSFS:-/sys}/firmware/acpi/platform_profile" 2>/dev/null)"
+  [ -n "$t" ] && echo "profil_firmware=$t"
 }
 
 systeme() {
@@ -171,6 +273,8 @@ case "${1:-}" in
   sans-media) sans_media=1 ;;
   jeu|game) jeu; exit 0 ;;
   systeme|system) systeme; exit 0 ;;
+  sante|health) sante; exit 0 ;;
+  capteurs|sensors) capteurs; exit 0 ;;
   wifi) wifi; exit 0 ;;
   bt|bluetooth) bt; exit 0 ;;
   son|sound|audio) son; exit 0 ;;
