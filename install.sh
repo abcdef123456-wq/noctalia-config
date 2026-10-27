@@ -833,6 +833,15 @@ if [ -f "$HOME/.zshrc" ] && grep -qE 'source.*\.config/nc/ia\.zsh' "$HOME/.zshrc
 :b;n;bb}' "$HOME/.zshrc"
   fi
 fi
+# De même pour terminal.zsh (commandes longues montrées dans l'île), juste après outils.zsh
+if [ -f "$HOME/.zshrc" ] && grep -qF '.config/nc/outils.zsh' "$HOME/.zshrc" && ! grep -qF '.config/nc/terminal.zsh' "$HOME/.zshrc"; then
+  if ask "$(t "Ajouter une ligne à ton ~/.zshrc pour montrer les commandes longues du terminal dans l'île ?" "Add one line to your ~/.zshrc to show long terminal commands in the island?")" o; then
+    backup .zshrc
+    sed -i '/source.*\.config\/nc\/outils\.zsh/{a\
+[[ -r ~/.config/nc/terminal.zsh ]] \&\& source ~/.config/nc/terminal.zsh
+:b;n;bb}' "$HOME/.zshrc"
+  fi
+fi
 [ "$migrated" = 1 ] && ok "$(t "Ancienne version (« legion ») convertie ; ses fichiers sont dans la sauvegarde." "Old version (“legion”) converted; its files are in the backup.")"
 
 # Icônes : thème « NC » dessiné par nc-icones aux couleurs du fond d'écran (dossiers, corbeille, Terminal,

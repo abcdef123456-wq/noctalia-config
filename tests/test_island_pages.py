@@ -10,7 +10,7 @@ import warnings
 
 REPO = Path(__file__).resolve().parents[1]
 QML = REPO / "home/.config/quickshell/nc-ile"
-PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme calendrier meteo presse fenetres".split()
+PAGES = "musique claude minuteur charge jeu centre assistant notifications son reseau bluetooth systeme calendrier meteo presse fenetres appel terminal".split()
 
 
 class ReglagesPages(unittest.TestCase):
@@ -37,6 +37,9 @@ class NavigationPages(unittest.TestCase):
             for name in ("NavigationIle", "Reglages", "Agents"):
                 shutil.copy2(QML / (name + ".qml"), root)
             (root / "Couleurs.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property color texte:"white"}')
+            # Activités Appel et Terminal (Appel.qml, Terminal.qml) : lues par Etat.activites, ici sans appel ni commande
+            for name in ("Appel", "Terminal"):
+                (root / (name + ".qml")).write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false}')
             # Le bloc de navigation de production, avec les entrées matérielles simulées.
             source = (QML / "Etat.qml").read_text()
             bloc = source[source.index('    property string ecranOuvert:'):source.index('    // Spotlight (Super + R)')]
@@ -64,7 +67,7 @@ QtObject {
  function lirePage() {}
 '''
             (root / "Etat.qml").write_text(stub + (bloc if etat_reel else "") + "\n}")
-            (root / "qmldir").write_text("\n".join(("" if n == "NavigationIle" else "singleton ") + n + " 1.0 " + n + ".qml" for n in ("NavigationIle", "Reglages", "Agents", "Couleurs", "Etat")))
+            (root / "qmldir").write_text("\n".join(("" if n == "NavigationIle" else "singleton ") + n + " 1.0 " + n + ".qml" for n in ("NavigationIle", "Reglages", "Agents", "Couleurs", "Etat", "Appel", "Terminal")))
             shell = '''import QtQuick
 import QtQuick.Window
 import QtTest

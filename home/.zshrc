@@ -38,4 +38,7 @@ export PATH
 # Outils modernes : fzf, zoxide, eza, bat, delta, lazygit, yazi (ceux qui sont installés ; nc-outils les liste)
 [[ -r ~/.config/nc/outils.zsh ]] && source ~/.config/nc/outils.zsh
 
+# Commandes longues (10 s ou plus) montrées dans l'île, puis « Terminée » ou « Échec » (nc-reglages → Île)
+[[ -r ~/.config/nc/terminal.zsh ]] && source ~/.config/nc/terminal.zsh
+
 [[ -r ~/.zshrc.perso ]] && source ~/.zshrc.perso

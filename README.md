@@ -185,6 +185,16 @@ l'île Quickshell.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
+  Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
+  la page Appel coupe ou réactive le micro (sur la source qu'utilise l'appli, sinon la source par défaut) et rappelle
+  qu'un casque Bluetooth en mode appel joue en mono. Appel commencé micro coupé : « Micro coupé » dans la pilule, et un
+  micro barré orange tant qu'il l'est. Détection par les événements de PipeWire, aucun sondage ; seul le niveau du micro
+  est mesuré (un chiffre par image, jamais le son), et seulement pendant qu'il s'affiche, écran allumé, hors Économie.
+- **Commande longue dans le terminal** (`nc-reglages` → Île, réglage `ILE_TERMINAL`) : une commande zsh qui dure 10 s
+  ou plus (compilation, copie, mise à jour…) s'affiche dans la pilule avec sa durée, puis « Terminée » ou « Échec (code) »
+  avec un clic pour revenir au terminal. `~/.config/nc/terminal.zsh` (chargé par `~/.zshrc`) écrit un petit fichier dans
+  le dossier privé de la session avec les commandes internes de zsh, que l'île surveille : aucun processus, aucun sondage.
 - **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
   effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
   l'écriture de la liste, sans minuteur.

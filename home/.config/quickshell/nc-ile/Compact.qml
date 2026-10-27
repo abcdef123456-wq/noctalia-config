@@ -13,9 +13,11 @@ Item {
                                    : Etat.enregistre ? "video"
                                    : Partage.indicateur ? "partage"
                                    : AssistantEtat.activitePilule !== "" ? AssistantEtat.activitePilule
+                                   : Appel.enCours ? "appel"
                                    : Etat.telecharge && !Etat.aMusique && !Agents.travaille ? "telechargement"
                                    : (Agents.attendTerminal ? "claude"
-                                   : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur" : "repos"))))
+                                   : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur"
+                                   : (Terminal.enCours ? "terminal" : "repos")))))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
     implicitHeight: 30
 
@@ -23,7 +25,9 @@ Item {
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
                                       minuteur: minuteur, "minuteur-fini": fini, micro: micro, casque: casque,
                                       claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video, partage: partage,
-                                      telechargement: telechargement, "telechargement-fini": telechargementFini })[mode] || repos
+                                      telechargement: telechargement, "telechargement-fini": telechargementFini,
+                                      appel: appel, "appel-muet": appelMuet, "appel-fini": appelFini,
+                                      terminal: terminal, "terminal-fini": terminalFini })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -323,6 +327,77 @@ Item {
         montre: c.mode === "partage"
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
         Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Partage", "Sharing"); font.weight: Font.DemiBold }
+    }
+
+    // ── Appel en cours (Appel.qml) : icône de l'appli, durée, niveau du micro ; micro coupé : micro barré orange ──
+    Fondu {
+        id: appel
+        objectName: "nc-appel-pill"
+        montre: c.mode === "appel"
+        Item {
+            anchors.verticalCenter: parent.verticalCenter; width: 20; height: 20
+            Image { anchors.fill: parent; source: Appel.icone; sourceSize: Qt.size(40, 40); visible: Appel.icone !== "" }
+            Ico { anchors.centerIn: parent; nom: "call"; taille: 17; color: Couleurs.vert; visible: Appel.icone === "" }
+        }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Appel.dureeTexte; font.weight: Font.DemiBold; color: Couleurs.vert; font.features: { "tnum": 1 } }
+        // Niveau du micro : quatre barres (NiveauMicro.qml, 30 images/s pendant l'appel seulement)
+        Row {
+            visible: !Appel.muet; spacing: 2
+            anchors.verticalCenter: parent.verticalCenter
+            Repeater {
+                model: 4
+                Rectangle {
+                    required property int index
+                    width: 3; radius: 1.5
+                    height: 5 + Appel.niveau * [8, 12, 10, 6][index]
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Couleurs.vert
+                }
+            }
+        }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "mic_off"; taille: 17; color: Couleurs.orange; visible: Appel.muet }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Micro coupé", "Muted"); font.weight: Font.DemiBold; color: Couleurs.orange; visible: Appel.muet }
+    }
+    // Appel qui commence micro coupé : on parle, personne n'entend
+    Fondu {
+        id: appelMuet
+        montre: c.mode === "appel-muet"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "mic_off"; taille: 18; color: Couleurs.orange }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Micro coupé", "Microphone muted"); font.weight: Font.DemiBold; color: Couleurs.orange }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Appel.appli + Reglages.t(" ne t'entend pas", " can't hear you"); secondaire: true; width: Math.min(implicitWidth, 200) }
+    }
+    Fondu {
+        id: appelFini
+        montre: c.mode === "appel-fini"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "call_end"; taille: 18; color: Couleurs.rouge }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Appel terminé", "Call ended"); font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Appel.derniereAppli + " · " + Etat.duree(Appel.derniereDuree); secondaire: true; width: Math.min(implicitWidth, 200); font.features: { "tnum": 1 } }
+    }
+
+    // ── Commande longue dans le terminal (Terminal.qml) : la commande et sa durée ; finie : coche verte ou croix rouge ──
+    Fondu {
+        id: terminal
+        objectName: "nc-terminal-pill"
+        montre: c.mode === "terminal"
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold }
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: "terminal"; taille: 17; color: Couleurs.accentClair }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Terminal.commande; font.family: "monospace"; width: Math.min(implicitWidth, 170) }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Terminal.dureeTexte; font.weight: Font.DemiBold; color: Couleurs.accentClair; font.features: { "tnum": 1 } }
+    }
+    Fondu {
+        id: terminalFini
+        montre: c.mode === "terminal-fini"
+        readonly property bool ok: Terminal.fini !== null && Terminal.fini.code === 0
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: terminalFini.ok ? "check_circle" : "error"; taille: 17; color: terminalFini.ok ? Couleurs.vert : Couleurs.rouge }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; font.weight: Font.DemiBold
+            text: terminalFini.ok ? Reglages.t("Terminée", "Done") : Reglages.t("Échec (code " + (Terminal.fini ? Terminal.fini.code : 0) + ")", "Failed (exit " + (Terminal.fini ? Terminal.fini.code : 0) + ")")
+        }
+        Texte {
+            anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.family: "monospace"; width: Math.min(implicitWidth, 170)
+            text: Terminal.fini ? Terminal.fini.commande : ""
+        }
+        Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.features: { "tnum": 1 }; text: Terminal.fini ? Etat.duree(Terminal.fini.duree) : "" }
     }
 
     // ── Mode jeu ──

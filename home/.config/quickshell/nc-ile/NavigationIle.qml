@@ -13,7 +13,8 @@ Item {
             jeu: ["Jeu", "Game"], centre: ["Centre de contrôle", "Control Center"], assistant: ["Assistant", "Assistant"],
             notifications: ["Notifications", "Notifications"], son: ["Son", "Sound"], reseau: ["Réseau", "Network"],
             bluetooth: ["Bluetooth", "Bluetooth"], systeme: ["Système", "System"], calendrier: ["Calendrier", "Calendar"],
-            meteo: ["Météo", "Weather"], presse: ["Presse-papiers", "Clipboard"], fenetres: ["Fenêtres", "Windows"]
+            meteo: ["Météo", "Weather"], presse: ["Presse-papiers", "Clipboard"], fenetres: ["Fenêtres", "Windows"],
+            appel: ["Appel", "Call"], terminal: ["Terminal", "Terminal"]
         })[nom]
         return l ? Reglages.t(l[0], l[1]) : nom
     }
