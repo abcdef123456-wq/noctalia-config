@@ -382,7 +382,7 @@ class NcCode(unittest.TestCase):
         self.reglages("IA_MODE=non\n")
         self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[]))
 
-    def test_apercu_json_reflog_readme_et_etat(self):
+    def test_apercu_json_reflog_readme_sans_jamais_lancer_git(self):
         b = self.depot("dev/neo")
         (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
         (b / ".git/logs").mkdir()
@@ -390,8 +390,11 @@ class NcCode(unittest.TestCase):
                                           "2 3 X <x@y> 1700000200 +0100\tcommit: Deuxième <b>gras</b>\n3 4 X <x@y> 1700000300 +0100\tcheckout: moving\n")
         (b / "README.md").write_text("# Neo\n\n![logo](x.png)\nUn **outil** pour [coder](https://x).\n\n| a | b |\n<p>html</p>\n")
         (b / ".git/config").write_text('[remote "origin"]\n\turl = https://github.com/moi/neo\n')
-        # Un faux git qui répond à status seulement (log ne doit pas être lancé : le reflog suffit)
-        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; case "$*" in *status*) echo " M x" ;; *) exit 1 ;; esac')
+        # Un dépôt cloné d'ailleurs peut imposer des commandes à git (core.fsmonitor et filtres clean pour status,
+        # log.showSignature et gpg.program pour log) : l'aperçu ne lance JAMAIS git, même avec une config piégée
+        (b / ".git/config").write_text('[core]\n\tfsmonitor = touch PIEGE\n[log]\n\tshowSignature = true\n[gpg]\n\tprogram = touch PIEGE\n'
+                                      '[remote "origin"]\n\turl = https://github.com/moi/neo\n')
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; exit 0')
         r = self.lancer("--apercu-json", str(b))
         self.assertEqual(r.returncode, 0, r.stderr)
         d = json.loads(r.stdout)
@@ -399,26 +402,15 @@ class NcCode(unittest.TestCase):
         self.assertEqual([c["message"] for c in d["commits"]], ["Deuxième <b>gras</b>", "Premier"], "commits du reflog, du plus récent au plus ancien, tels quels")
         self.assertEqual(d["commits"][0]["quand"], 1700000200)
         self.assertTrue(d["commits"][0]["date"])
-        self.assertEqual(d["etat"], "modifie")
+        self.assertEqual(d["etat"], "")
         self.assertEqual(d["readme"], "Neo\nUn outil pour coder.\nhtml")
         self.assertEqual(d["github"], "https://github.com/moi/neo")
-        appels = (self.home / "git-appels").read_text()
-        self.assertNotIn(" log ", appels, "avec un reflog, pas de git log")
-        self.assertIn("--no-optional-locks", appels, "git status ne réécrit pas l'index (la date du projet ne bouge pas)")
-        # Sans reflog : un seul git log -5 ; git absent : rien, et l'état reste inconnu
+        # Sans reflog : pas de commits, toujours sans git
         (b / ".git/logs/HEAD").unlink()
-        (self.home / "git-appels").unlink()
-        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; case "$*" in *log*) printf "Trois\\t1700000400\\n" ;; *status*) ;; esac')
         d = json.loads(self.lancer("--apercu-json", str(b)).stdout)
-        self.assertEqual([c["message"] for c in d["commits"]], ["Trois"])
-        self.assertEqual(d["etat"], "propre")
-        self.assertEqual((self.home / "git-appels").read_text().count(" log "), 1)
-        (self.faux / "git").unlink()
-        env_sans_git = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), NC_LANGUE="fr", PATH=str(self.faux))
-        r = subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code"), "--apercu-json", str(b)], env=env_sans_git,
-                           capture_output=True, text=True, timeout=30)
-        d = json.loads(r.stdout)
         self.assertEqual((d["commits"], d["etat"]), ([], ""))
+        self.assertFalse((self.home / "git-appels").exists(), "git n'a jamais été lancé")
+        self.assertFalse((b / "PIEGE").exists())
         # Pas un dépôt, ou un dossier refusé par la session kitty : {} et code 1
         r = self.lancer("--apercu-json", str(self.home))
         self.assertEqual((r.returncode, r.stdout.strip()), (1, "{}"))

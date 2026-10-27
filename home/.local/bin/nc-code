@@ -525,38 +525,20 @@ def agents_json():
 
 
 def apercu_json(d):
-    """L'aperçu d'un projet pour le panneau de l'île : {chemin, nom, branche, commits, etat, readme, github}. Les commits
-    viennent du reflog (sans git) ; sans reflog, un seul git log -5 borné à 2 s. L'état (propre, modifie) vient d'un
-    git status borné à 1 s, sans verrou ni écriture de l'index (--no-optional-locks : la date du projet ne bouge pas) ;
-    '' s'il n'a pas répondu à temps."""
+    """L'aperçu d'un projet pour le panneau de l'île : {chemin, nom, branche, commits, etat, readme, github}, lu dans les
+    fichiers de .git, SANS JAMAIS LANCER GIT : la liste contient aussi des dépôts trouvés par le balayage (clonés
+    d'ailleurs), et git y exécuterait ce que leur config impose (core.fsmonitor et filtres clean pour status,
+    log.showSignature et gpg.program pour log). Les commits viennent du reflog ; etat reste vide (il demanderait git)."""
     d = os.path.realpath(os.path.expanduser(d))
     if not est_depot(d) or not dossier_sur(d):
         return {}
     g = dossier_git(d)
     i = infos_projet(d)
     maintenant = time.time()
-    commits = commits_reflog(g) if g else None
-    git = shutil.which("git")
-    etat = ""
-    if git:
-        if not commits:
-            try:
-                r = subprocess.run([git, "--no-optional-locks", "-C", d, "log", "-5", "--format=%s%x09%ct"], capture_output=True,
-                                   text=True, timeout=2, stdin=subprocess.DEVNULL)
-                commits = [dict(message=l.split("\t")[0], quand=int(l.split("\t")[1]) if l.split("\t")[-1].isdigit() else 0)
-                           for l in r.stdout.splitlines() if l.strip()]
-            except (OSError, subprocess.SubprocessError, ValueError):
-                commits = []
-        try:
-            r = subprocess.run([git, "--no-optional-locks", "-C", d, "status", "--porcelain", "--untracked-files=no"],
-                               capture_output=True, text=True, timeout=1, stdin=subprocess.DEVNULL)
-            if r.returncode == 0:
-                etat = "modifie" if r.stdout.strip() else "propre"
-        except (OSError, subprocess.SubprocessError):
-            pass
-    for c in commits or []:
+    commits = (commits_reflog(g) if g else None) or []
+    for c in commits:
         c["date"] = il_y_a(c["quand"], maintenant)
-    return dict(chemin=d, nom=os.path.basename(d) or d, branche=i["branche"], commits=commits or [], etat=etat,
+    return dict(chemin=d, nom=os.path.basename(d) or d, branche=i["branche"], commits=commits, etat="",
                 readme=lire_readme(d), github=origine_github(d))
 
 

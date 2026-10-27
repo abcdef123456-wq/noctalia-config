@@ -1,5 +1,5 @@
 // L'aperçu du projet choisi dans l'espace de code (Code.qml, à droite) : nom, pastilles de la branche, de l'état
-// (propre ou modifié, s'il a été lu à temps) et du langage, chemin ; les derniers commits avec leur date relative ;
+// et du langage (l'état propre ou modifié demanderait git : jamais lancé ici), chemin ; les derniers commits avec leur date relative ;
 // le début du README dans un voile arrondi. L'en-tête vient de la liste (tout de suite), le reste de
 // nc-code --apercu-json (quelques dizaines de ms après) : rien n'est interprété, tout est en texte brut (Texte.qml).
 import QtQuick
