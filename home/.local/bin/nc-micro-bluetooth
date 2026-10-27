@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# nc-micro-bluetooth : le micro d'un casque Bluetooth (AirPods…) qui ne capte plus rien, réparé en une commande.
+#   1. le casque est en mode musique (A2DP, sans micro) : il passe en mode appel (HFP), le seul qui a un micro ;
+#   2. ses sources de micro sont réactivées (souvent restées coupées, « MUTED ») ;
+#   3. son micro devient le micro par défaut (Discord, navigateur… le prennent).
+# Rien n'est écrit dans la configuration : seulement l'état en cours de PipeWire. Pour revenir au son de qualité
+# (sans micro) : nc-micro-bluetooth musique.
+#   nc-micro-bluetooth            répare le micro (ci-dessus)
+#   nc-micro-bluetooth musique    remet le mode musique (A2DP, meilleur son, pas de micro)
+set -u
+. "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+
+for p in pw-dump jq wpctl; do
+  command -v "$p" >/dev/null 2>&1 || { echo "nc-micro-bluetooth : $(t "il manque $p (PipeWire, jq)." "$p is missing (PipeWire, jq).")" >&2; exit 1; }
+done
+
+etat() { pw-dump 2>/dev/null; }
+
+# Les casques Bluetooth : « id<TAB>nom pactl<TAB>description »
+casques() {
+  etat | jq -r '.[] | select(.type == "PipeWire:Interface:Device") | {id: .id, p: .info.props}
+    | select(.p["device.api"] == "bluez5") | [.id, (.p["device.name"] // ""), (.p["device.description"] // "")] | @tsv' 2>/dev/null
+}
+
+# Les sources de micro Bluetooth : « id<TAB>classe »
+micros() {
+  etat | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | {id: .id, p: .info.props}
+    | select((.p["node.name"] // "") | startswith("bluez_input"))
+    | select((.p["media.class"] // "") | startswith("Audio/Source")) | [.id, .p["media.class"]] | @tsv' 2>/dev/null
+}
+
+liste="$(casques)"
+if [ -z "$liste" ]; then
+  echo "$(t "Aucun casque Bluetooth connecté." "No Bluetooth headset connected.")"
+  exit 1
+fi
+
+if [ "${1:-}" = musique ]; then
+  command -v pactl >/dev/null 2>&1 || { echo "nc-micro-bluetooth : $(t "pactl manque (pipewire-pulse)." "pactl is missing (pipewire-pulse).")" >&2; exit 1; }
+  while IFS=$'\t' read -r _ nom desc; do
+    [ -n "$nom" ] && pactl set-card-profile "$nom" a2dp-sink 2>/dev/null && echo "$desc : $(t "mode musique (pas de micro)." "music mode (no microphone).")"
+  done <<< "$liste"
+  exit 0
+fi
+
+# 1. Pas de micro : le casque est en mode musique ; le mode appel (mSBC, sinon CVSD) donne le micro
+if [ -z "$(micros)" ] && command -v pactl >/dev/null 2>&1; then
+  while IFS=$'\t' read -r _ nom desc; do
+    [ -n "$nom" ] || continue
+    pactl set-card-profile "$nom" headset-head-unit 2>/dev/null || pactl set-card-profile "$nom" headset-head-unit-cvsd 2>/dev/null
+    echo "$desc : $(t "mode appel (micro)." "call mode (microphone).")"
+  done <<< "$liste"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -n "$(micros)" ] && break; sleep 0.3; done
+fi
+
+sources="$(micros)"
+if [ -z "$sources" ]; then
+  echo "$(t "Le casque ne donne aucun micro (mode appel refusé ?) : déconnecte-le puis reconnecte-le." "The headset gives no microphone (call mode refused?): disconnect and reconnect it.")"
+  exit 1
+fi
+
+# 2. Réactiver ses micros ; 3. le premier « Audio/Source » (celui que voient les applis) devient le micro par défaut
+defaut=""
+while IFS=$'\t' read -r id classe; do
+  wpctl set-mute "$id" 0
+  [ -z "$defaut" ] && [ "$classe" = Audio/Source ] && defaut="$id"
+done <<< "$sources"
+[ -n "$defaut" ] && wpctl set-default "$defaut"
+echo "$(t "Micro du casque réactivé et choisi par défaut." "Headset microphone unmuted and set as default.")"

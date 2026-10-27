@@ -163,6 +163,9 @@ dans les fichiers, Neovim (`Espace i`), `nc-diag ia`, et, si tu l'actives, `@ ` 
 gérer les services de ta session, le Wi-Fi, le Bluetooth, l'énergie, le son, les réglages ou les mises à jour, et
 chaque action attend ta confirmation. Dans un dépôt, `gcia` valide ce qui est indexé avec un message écrit par l'IA dans le style de tes derniers commits (tu le relis dans ton éditeur ; un secret dans le diff : rien n'est envoyé). `nc-claude installer` donne aussi à Claude Code une ligne d'état aux couleurs du bureau (modèle, dossier, branche, contexte, coût), seulement si tu n'en as pas déjà une. Clés : `nc-ia configurer`, la fenêtre « Clés des IA » (privées, jamais affichées, essayées tout de suite).
 
+Casque Bluetooth (AirPods…) sans micro : `nc-micro-bluetooth` le passe en mode appel si besoin, réactive son micro
+(souvent resté coupé) et le choisit par défaut ; `nc-micro-bluetooth musique` remet le mode musique, sans micro.
+
 Pour l’île Quickshell, **nc-settings → Pages de l’île** permet d’activer ou désactiver chaque page.
 Les [réglages de pages](docs/pages-ile.md) prennent effet sans redémarrage.
 

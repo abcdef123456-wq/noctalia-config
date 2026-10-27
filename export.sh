@@ -86,6 +86,7 @@ HOME_FILES=(
   .local/bin/nc-sauvegarde
   .local/bin/nc-claude
   .local/bin/nc-claude-ligne
+  .local/bin/nc-micro-bluetooth
   .local/bin/nc-code
   .local/bin/nc-assistant
   .local/bin/nc-noeud
