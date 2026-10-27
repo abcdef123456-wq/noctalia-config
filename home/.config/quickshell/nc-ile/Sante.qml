@@ -39,9 +39,57 @@ Item {
                     else t[k] = c.join("\t")
                 })
                 if (t.gpu === "veille" && !t.temps.some(x => x.id === "gpu")) t.temps.push({ id: "gpu", deg: 0, max: 0, veille: true })
-                sa.m = t
+                sa.noter(t)
             }
         }
+    }
+    // ── Historique de 10 minutes (en mémoire seulement) ──
+    // Alimenté par le relevé que la page fait déjà (toutes les 2 s, page affichée et écran allumé) : aucun relevé de plus.
+    // Borné à 300 points (10 min). Vidé quand la page se ferme : rien ne se mesure pendant ce temps, et recoller des
+    // points séparés par des heures dessinerait une fausse courbe continue.
+    readonly property int maxPoints: 300
+    property var histoTemp: []
+    property var histoCharge: []
+    onAfficheeChanged: if (!affichee) { histoTemp = []; histoCharge = []; chaudLectures = 0; chaudNom = "" }
+    function empiler(tab, v) { var r = tab.length >= maxPoints ? tab.slice(tab.length - maxPoints + 1) : tab.slice(); r.push(v); return r }
+
+    // ── Conseil en cas de chauffe au repos ──
+    // Processeur au-dessus de seuilConseil alors que la charge totale reste modérée et qu'UN programme en prend une
+    // grosse part, sur plusieurs relevés de suite avec le même programme (un pic court ne dit rien).
+    readonly property int seuilConseil: 85
+    readonly property int chargeModeree: 70     // % de charge totale au plus
+    readonly property int partGrosse: 20        // % du processeur au moins pour le programme
+    property int lecturesConseil: 5             // relevés de suite (2 s chacun) avant d'afficher
+    property int chaudLectures: 0
+    property string chaudNom: ""
+    readonly property var cpuTemp: m.temps.filter(x => x.id === "cpu")[0]
+    readonly property int topPct: parseInt(String(m.top || "").split("\t")[1]) || 0
+    readonly property bool conseilVisible: chaudLectures >= lecturesConseil && !Partage.silence && chaudNom !== ""
+    function noter(t) {
+        var cpu = t.temps.filter(x => x.id === "cpu")[0]
+        var charge = parseInt(t.cpu)
+        if (cpu && cpu.deg > 0) histoTemp = empiler(histoTemp, cpu.deg)
+        if (!isNaN(charge)) histoCharge = empiler(histoCharge, charge)
+        var nom = String(t.top || "").split("\t")[0], pct = parseInt(String(t.top || "").split("\t")[1]) || 0
+        var cas = cpu && cpu.deg >= seuilConseil && !isNaN(charge) && charge <= chargeModeree && nom !== "" && pct >= partGrosse
+                  && pct * 100 >= charge * 50
+        if (cas && (nom === chaudNom || chaudLectures === 0)) { chaudNom = nom; chaudLectures++ }
+        else { chaudLectures = cas ? 1 : 0; chaudNom = cas ? nom : "" }
+        m = t
+    }
+    // Le nom est le comm déjà lu (15 caractères), jamais la ligne de commande ; affiché en texte brut (Texte)
+    function conseil() {
+        var n = chaudNom, p = topPct
+        if (/discord/i.test(n))
+            return Reglages.t(n + " prend " + p + " % du processeur : redémarre-le, ou coupe son accélération matérielle.",
+                              n + " takes " + p + "% of the CPU: restart it, or turn off its hardware acceleration.")
+        if (/firefox|chrom|brave|vivaldi|opera|librewolf|zen|epiphany|web/i.test(n))
+            return Reglages.t(n + " prend " + p + " % du processeur : ferme les onglets qui ne servent pas, ou redémarre le navigateur.",
+                              n + " takes " + p + "% of the CPU: close the tabs you don't need, or restart the browser.")
+        if (/electron|slack|teams|spotify|obsidian|signal|code|element|notion|zoom/i.test(n))
+            return Reglages.t(n + " prend " + p + " % du processeur : redémarre-le, ou coupe son accélération matérielle dans ses réglages.",
+                              n + " takes " + p + "% of the CPU: restart it, or turn off hardware acceleration in its settings.")
+        return Reglages.t(n + " prend " + p + " % : ferme-le s'il ne sert pas.", n + " takes " + p + "%: close it if you don't need it.")
     }
     Timer { interval: 2000; repeat: true; running: sa.affichee && Etat.ecranVu; triggeredOnStart: true; onTriggered: if (!mesure.running) mesure.running = true }
 
@@ -144,6 +192,45 @@ Item {
                         valeur: sans ? Reglages.t("en veille", "asleep") : modelData.deg + Reglages.t(" °C", "°C")
                         taux: modelData.deg / Math.max(1, sa.rouge(modelData) + 10)
                         teinte: sa.teinte(modelData)
+                    }
+                }
+            }
+            // Conseil : un programme fait chauffer le processeur au repos (nom caché pendant un partage d'écran)
+            Module {
+                objectName: "conseilChauffe"
+                visible: sa.conseilVisible
+                width: sa.width; radius: 18
+                height: texteConseil.implicitHeight + 24
+                color: Qt.rgba(Couleurs.orange.r, Couleurs.orange.g, Couleurs.orange.b, 0.16)
+                Row {
+                    x: 14; y: 12; width: parent.width - 28; spacing: 8
+                    Ico { nom: "lightbulb"; taille: 18; color: Couleurs.orange; y: 1 }
+                    Texte { id: texteConseil; width: parent.width - 28; wrapMode: Text.WordWrap; elide: Text.ElideNone; font.pixelSize: 12; text: sa.conseilVisible ? sa.conseil() : "" }
+                }
+            }
+            // Dix dernières minutes : température et charge du processeur (courbes lisses, couleur selon le seuil)
+            Module {
+                objectName: "blocCourbes"
+                visible: sa.histoTemp.length >= 2 || sa.histoCharge.length >= 2
+                width: sa.width; radius: 18
+                height: colCourbes.implicitHeight + 24
+                Column {
+                    id: colCourbes
+                    x: 14; y: 12; width: parent.width - 28; spacing: 6
+                    Texte { text: Reglages.t("Les 10 dernières minutes", "Last 10 minutes"); font.weight: Font.DemiBold; font.pixelSize: 14 }
+                    Texte { visible: sa.histoTemp.length >= 2; text: sa.nom("cpu") + Reglages.t(" : température", ": temperature"); secondaire: true; font.pixelSize: 11 }
+                    Courbe {
+                        objectName: "courbeTemp"
+                        visible: sa.histoTemp.length >= 2
+                        width: parent.width; valeurs: sa.histoTemp; echelleAuto: true
+                        teinte: sa.cpuTemp ? sa.teinte(sa.cpuTemp) : Couleurs.vert
+                    }
+                    Texte { visible: sa.histoCharge.length >= 2; text: Reglages.t("Charge", "Load"); secondaire: true; font.pixelSize: 11 }
+                    Courbe {
+                        objectName: "courbeCharge"
+                        visible: sa.histoCharge.length >= 2
+                        width: parent.width; valeurs: sa.histoCharge; mini: 0; maxi: 100
+                        teinte: sa.teinteCharge(parseInt(sa.m.cpu) || 0)
                     }
                 }
             }
