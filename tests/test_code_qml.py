@@ -125,7 +125,7 @@ ShellRoot {
                      verifier(!trouver(fen.contentItem, "nc-code-github").visible, "pas de GitHub sans origine")
                      if (!fen.apercuChoisi) return                                         // nc-code --apercu-json répond
                      verifier(fen.apercuChoisi.branche === "essai", "aperçu du projet choisi")
-                     verifier(trouver(fen.contentItem, "nc-code-etat").visible, "état modifié affiché")
+                     verifier(trouver(fen.contentItem, "nc-code-etat") === null, "plus de pastille d'état (elle demanderait git)")
                      champ().text = ""; etape++; return }
   if (etape === 3) { verifier(fen.visibles.length === 3 && fen.sel === 0, "recherche vidée")
                      touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Up)
@@ -137,7 +137,6 @@ ShellRoot {
                      var commits = []; (function tout(e) { if (e.objectName === "nc-code-commit") commits.push(e); (e.children || []).forEach(tout) })(a)
                      verifier(commits.length === 2, "deux commits : " + commits.length)
                      verifier(trouver(a, "nc-code-readme").visible, "README affiché")
-                     verifier(trouver(fen.contentItem, "nc-code-etat").visible, "état propre affiché")
                      touche(Qt.Key_Return); verifier(racine.fermee, "Entrée ferme"); Qt.quit() }''',
                                    attendus=lambda a: any(x and x[0].endswith("/alpha") for x in a))
         self.assertIn([ps[0]["chemin"]], appels, "Entrée : nc-code DOSSIER")

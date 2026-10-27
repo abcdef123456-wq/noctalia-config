@@ -417,6 +417,49 @@ class NcCode(unittest.TestCase):
         piege = self.depot("dev/x\rlaunch sh")
         self.assertEqual(self.lancer("--apercu-json", str(piege)).stdout.strip(), "{}")
 
+    def test_depot_piege_lu_borne_sans_bloquer(self):
+        """Relecture : une archive extraite peut avoir .git/logs/HEAD en lien vers /dev/zero (lu sans fin : la mémoire
+        y passe), un FIFO à la place de HEAD ou de config (open() bloqué), un README en lien vers ~/.ssh. Tout est lu
+        borné, sans suivre de lien ni bloquer ; rien d'autre n'est montré."""
+        b = self.depot("dev/piege")
+        (b / ".git/logs").mkdir()
+        os.symlink("/dev/zero", b / ".git/logs/HEAD")
+        os.mkfifo(b / ".git/HEAD")
+        os.mkfifo(b / ".git/config")
+        secret = self.home / ".ssh/id_test"
+        secret.parent.mkdir()
+        secret.write_text("CLE-PRIVEE-FACTICE\n")
+        os.symlink(secret, b / "README.md")
+        (self.home / ".config/nc/depot").write_text(f"{b}\n")
+        debut = time.time()
+        r = self.lancer("--apercu-json", str(b))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual((d["branche"], d["commits"], d["readme"], d["github"]), ("", [], "", ""))
+        r = self.lancer("--liste-json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("CLE-PRIVEE", r.stdout)
+        self.assertLess(time.time() - debut, 20)
+
+    def test_date_future_ignoree_et_depot_du_disque_marque(self):
+        """Une archive datée dans le futur ne passe pas en tête ; un dépôt seulement trouvé par le balayage est marqué
+        « disque » (le panneau ne le choisit jamais d'avance)."""
+        connu = self.depot("dev/connu")
+        trouve = self.depot("dev/archive")
+        (trouve / ".git/HEAD").write_text("ref: refs/heads/main\u202egnp.exe\n")
+        futur = time.time() + 10 * 365 * 86400
+        for f in ("HEAD",):
+            os.utime(trouve / ".git" / f, (futur, futur))
+        (connu / ".git/HEAD").write_text("ref: refs/heads/main\n")
+        (self.home / ".config/nc/depot").write_text(f"{connu}\n")
+        l = json.loads(self.lancer("--liste-json").stdout)
+        par_nom = {p["nom"]: p for p in l}
+        self.assertLess(par_nom["archive"]["quand"], time.time() + 61)
+        self.assertTrue(par_nom["archive"]["disque"])
+        self.assertFalse(par_nom["connu"]["disque"])
+        self.assertNotIn("\u202e", par_nom["archive"]["branche"])                # pas d'inversion du sens d'écriture
+        self.assertIn("premierSur()", (BIN.parent.parent / ".config/quickshell/nc-ile/Code.qml").read_text())
+
     def test_url_github_https_seulement(self):
         import importlib.machinery
         import importlib.util

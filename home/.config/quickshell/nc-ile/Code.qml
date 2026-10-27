@@ -5,8 +5,8 @@
 // Clavier : flèches, Entrée ouvre (nc-code DOSSIER : Neovim, l'agent de l'IA, lazygit, terminal), Tab choisit l'agent,
 // Alt + Entrée Neovim seul, Échap ferme (ou revient des agents) ; Ctrl + E le dossier dans le gestionnaire de fichiers,
 // Ctrl + Maj + C copie le chemin, Ctrl + G la page GitHub (https://github.com/… seulement, URL vérifiée ici aussi).
-// Tout vient de nc-code (--liste-json, --agents-json, --apercu-json : les fichiers de .git lus directement, jamais git
-// pour la liste ; pour l'aperçu, un git status borné, sans écriture). Rien ne tourne fermé : la fenêtre n'existe
+// Tout vient de nc-code (--liste-json, --agents-json, --apercu-json : les fichiers de .git lus directement, bornés,
+// jamais git : un dépôt trouvé sur le disque pourrait lui faire exécuter des commandes). Rien ne tourne fermé : la fenêtre n'existe
 // qu'ouverte (shell.qml, LazyLoader) ; l'aperçu part 120 ms après le dernier déplacement, jamais un processus par pas.
 // Les textes venus des dépôts (branche, message de commit, README) sont affichés en texte brut (Texte.qml).
 // Verre : flou de Hyprland derrière (règle de calque nc-code, regles.lua), fond de la palette à 62 % (92 % sans flou).
@@ -67,8 +67,17 @@ PanelWindow {
         res.sort((a, b) => a.s - b.s || a.i - b.i)
         return res.map(x => x.p)
     }
-    onFiltreChanged: sel = 0
-    onProjetsChanged: sel = 0
+    // Sans recherche, jamais un projet seulement « trouvé sur le disque » (jamais ouvert : une archive extraite) n'est
+    // choisi d'avance : un Entrée par réflexe y lancerait lazygit, donc git, avec la config du dépôt
+    function premierSur() {
+        var v = visibles || []
+        if (filtre !== "") return 0
+        for (var k = 0; k < v.length; k++) if (!v[k].disque) return k
+        return -1
+    }
+    function choisirPremier() { sel = premierSur() }
+    onFiltreChanged: Qt.callLater(choisirPremier)          // après la mise à jour de visibles (pas de boucle de liaison)
+    onProjetsChanged: Qt.callLater(choisirPremier)
     readonly property var projet: sel >= 0 && sel < visibles.length ? visibles[sel] : null
     readonly property var choixAgents: agents.concat([{ prog: "", nom: Reglages.t("Un terminal, sans agent", "A terminal, no agent") }])
 

@@ -1,5 +1,5 @@
-// L'aperçu du projet choisi dans l'espace de code (Code.qml, à droite) : nom, pastilles de la branche, de l'état
-// et du langage (l'état propre ou modifié demanderait git : jamais lancé ici), chemin ; les derniers commits avec leur date relative ;
+// L'aperçu du projet choisi dans l'espace de code (Code.qml, à droite) : nom, pastilles de la branche et du langage
+// (l'état propre ou modifié demanderait git : jamais lancé ici), chemin ; les derniers commits avec leur date relative ;
 // le début du README dans un voile arrondi. L'en-tête vient de la liste (tout de suite), le reste de
 // nc-code --apercu-json (quelques dizaines de ms après) : rien n'est interprété, tout est en texte brut (Texte.qml).
 import QtQuick
@@ -10,7 +10,6 @@ Item {
     property var apercu: null                       // null tant que nc-code n'a pas répondu pour ce projet
     readonly property color texteSecondaire: Qt.tint(Couleurs.texteSec, Qt.alpha(Couleurs.texte, 0.35))
     readonly property var commits: apercu && Array.isArray(apercu.commits) ? apercu.commits.slice(0, 5) : []
-    readonly property string etat: apercu && typeof apercu.etat === "string" ? apercu.etat : ""
     readonly property string readme: apercu && typeof apercu.readme === "string" ? apercu.readme : ""
 
     Column {
@@ -25,17 +24,6 @@ Item {
                 color: Qt.alpha(Couleurs.accent, 0.18)
                 Ico { x: 8; anchors.verticalCenter: parent.verticalCenter; nom: "fork_right"; taille: 14; color: Couleurs.accent }
                 Texte { id: libBranche; x: 24; height: parent.height; text: a.projet && a.projet.branche ? a.projet.branche : ""; font.pixelSize: 11; font.weight: Font.DemiBold }
-            }
-            Rectangle {
-                objectName: "nc-code-etat"
-                visible: a.etat !== ""
-                height: 22; width: libEtat.implicitWidth + 20; radius: 11
-                color: Qt.alpha(a.etat === "propre" ? Couleurs.vert : Couleurs.orange, 0.18)
-                Texte {
-                    id: libEtat; anchors.centerIn: parent; font.pixelSize: 11; font.weight: Font.DemiBold
-                    color: a.etat === "propre" ? Couleurs.vert : Couleurs.orange
-                    text: a.etat === "propre" ? Reglages.t("Propre", "Clean") : Reglages.t("Modifié", "Modified")
-                }
             }
             Rectangle {
                 visible: !!(a.projet && a.projet.langage)

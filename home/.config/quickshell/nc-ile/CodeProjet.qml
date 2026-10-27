@@ -30,7 +30,8 @@ Item {
         anchors.left: nom.left; anchors.right: parent.right; anchors.rightMargin: 14
         y: 29; height: 16
         secondaire: true; font.pixelSize: 12
-        text: ligne.projet ? [ligne.projet.court, ligne.projet.langage, ligne.projet.branche].filter(x => x).join("  ·  ") : ""
+        text: ligne.projet ? [ligne.projet.court, ligne.projet.langage, ligne.projet.branche,
+                              ligne.projet.disque ? Reglages.t("trouvé sur le disque", "found on disk") : ""].filter(x => x).join("  ·  ") : ""
     }
     MouseArea {
         anchors.fill: parent; hoverEnabled: true
