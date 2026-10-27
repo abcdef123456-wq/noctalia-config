@@ -5,6 +5,8 @@
 // Clavier : flèches, Entrée ouvre (nc-code DOSSIER : Neovim, l'agent de l'IA, lazygit, terminal), Tab choisit l'agent,
 // Alt + Entrée Neovim seul, Échap ferme (ou revient des agents) ; Ctrl + E le dossier dans le gestionnaire de fichiers,
 // Ctrl + Maj + C copie le chemin, Ctrl + G la page GitHub (https://github.com/… seulement, URL vérifiée ici aussi).
+// Première ligne « + Nouveau projet » (Ctrl + N : taper le nom, nc-code --nouveau) ; Ctrl + L : cloner depuis GitHub
+// (adresse ou propriétaire/dépôt, vide = tes dépôts ; nc-code --cloner ouvre une fenêtre kitty avec la progression).
 // Tout vient de nc-code (--liste-json, --agents-json, --apercu-json : les fichiers de .git lus directement, bornés,
 // jamais git : un dépôt trouvé sur le disque pourrait lui faire exécuter des commandes). Rien ne tourne fermé : la fenêtre n'existe
 // qu'ouverte (shell.qml, LazyLoader) ; l'aperçu part 120 ms après le dernier déplacement, jamais un processus par pas.
@@ -43,6 +45,7 @@ PanelWindow {
     property string agentDefaut: ""
     property string filtre: ""
     property int sel: 0
+    property string mode: ""                        // "" = chercher un projet ; "nouveau" : taper le nom ; "cloner" : coller l'adresse
     property bool choixAgent: false                 // Tab : la liste des agents à droite, à la place de l'aperçu
     property int selAgent: 0
     property var apercu: null                       // nc-code --apercu-json du dernier projet lu
@@ -128,6 +131,21 @@ PanelWindow {
 
     // ── Les actions ──
     function quitter() { code.fermer() }
+    // Ctrl + N (nouveau projet) et Ctrl + L (cloner depuis GitHub) : le champ sert à taper le nom ou l'adresse
+    function demarrerMode(m) { mode = m; choixAgent = false; champ.text = ""; filtre = "" }
+    function finirMode() { mode = ""; champ.text = "" }
+    function lancerSaisie() {
+        var t = champ.text.trim()
+        if (t.indexOf("-") === 0) return                                   // jamais une option pour nc-code
+        if (mode === "nouveau") {
+            if (t === "") return
+            Quickshell.execDetached([bin + "nc-code", "--nouveau", t])      // en argv ; nc-code filtre le nom et refuse un nom pris
+        } else if (mode === "cloner") {
+            // Sans adresse : nc-code montre tes dépôts GitHub (si gh est connecté) dans une fenêtre kitty ; il revérifie tout
+            Quickshell.execDetached([bin + "nc-code", "--cloner"].concat(t === "" ? [] : [t]))
+        } else return
+        quitter()
+    }
     function ouvrir(options) {
         if (!projet) return
         Quickshell.execDetached([bin + "nc-code"].concat(options || []).concat([projet.chemin]))
@@ -152,12 +170,15 @@ PanelWindow {
         var ctrl = (e.modifiers & Qt.ControlModifier) !== 0, maj = (e.modifiers & Qt.ShiftModifier) !== 0, alt = (e.modifiers & Qt.AltModifier) !== 0
         var n = choixAgent ? choixAgents.length : visibles.length
         function bouger(d) { if (choixAgent) selAgent = Math.max(0, Math.min(n - 1, selAgent + d)); else sel = Math.max(0, Math.min(n - 1, sel + d)) }
-        if (e.key === Qt.Key_Escape) { if (choixAgent) choixAgent = false; else quitter(); return true }
+        if (e.key === Qt.Key_Escape) { if (mode !== "") finirMode(); else if (choixAgent) choixAgent = false; else quitter(); return true }
+        if (ctrl && e.key === Qt.Key_N) { demarrerMode("nouveau"); return true }
+        if (ctrl && e.key === Qt.Key_L) { demarrerMode("cloner"); return true }
+        if (mode !== "" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) { lancerSaisie(); return true }
         if (e.key === Qt.Key_Down) { bouger(1); return true }
         if (e.key === Qt.Key_Up) { bouger(-1); return true }
         if (e.key === Qt.Key_PageDown) { bouger(5); return true }
         if (e.key === Qt.Key_PageUp) { bouger(-5); return true }
-        if (e.key === Qt.Key_Tab || e.key === Qt.Key_Backtab) { if (projet) { choixAgent = !choixAgent; selAgent = 0 } return true }
+        if (e.key === Qt.Key_Tab || e.key === Qt.Key_Backtab) { if (projet && mode === "") { choixAgent = !choixAgent; selAgent = 0 } return true }
         if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
             if (choixAgent) { var a = choixAgents[selAgent]; ouvrir(a && a.prog ? ["--agent", a.prog] : ["--sans-agent"]) }
             else ouvrir(alt ? ["--nvim"] : [])
@@ -223,12 +244,15 @@ PanelWindow {
                 focus: true
                 cursorVisible: activeFocus
                 Component.onCompleted: forceActiveFocus()
-                onTextChanged: code.filtre = text
+                onTextChanged: code.filtre = code.mode === "" ? text : ""
                 Keys.onPressed: e => { e.accepted = code.touche(e) }
                 Texte {
                     visible: champ.text === ""
                     anchors.verticalCenter: parent.verticalCenter
-                    text: Reglages.t("Rechercher un projet…", "Search a project…"); secondaire: true; font.pixelSize: 18
+                    text: code.mode === "nouveau" ? Reglages.t("Nom du nouveau projet…", "New project name…")
+                      : code.mode === "cloner" ? Reglages.t("Adresse GitHub (ou propriétaire/dépôt), vide = mes dépôts…", "GitHub address (or owner/repo), empty = my repos…")
+                      : Reglages.t("Rechercher un projet…", "Search a project…")
+                secondaire: true; font.pixelSize: 18
                 }
             }
             Texte {
@@ -245,10 +269,20 @@ PanelWindow {
         Item {
             id: corps
             y: barre.height + 1; width: parent.width; height: parent.height - y - pied.height
+            // Première ligne : un nouveau projet (Ctrl + N), à cliquer ou au clavier
+            Rectangle {
+                id: nouveauLigne
+                objectName: "nc-code-nouveau"
+                x: 8; y: 8; width: Math.round(parent.width * 0.46); height: 34; radius: 12
+                color: zoneNouveau.containsMouse || code.mode === "nouveau" ? Qt.alpha(Couleurs.accent, 0.22) : Qt.alpha(Couleurs.carte, 0.45)
+                Texte { x: 14; anchors.verticalCenter: parent.verticalCenter; text: "+  " + Reglages.t("Nouveau projet", "New project"); font.pixelSize: 13 }
+                Texte { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: "Ctrl N"; secondaire: true; font.pixelSize: 10 }
+                MouseArea { id: zoneNouveau; anchors.fill: parent; hoverEnabled: true; onClicked: { code.demarrerMode("nouveau"); champ.forceActiveFocus() } }
+            }
             ListView {
                 id: liste
                 objectName: "nc-code-liste"
-                x: 8; y: 8; width: Math.round(parent.width * 0.46); height: parent.height - 16
+                x: 8; y: 8 + nouveauLigne.height + 2; width: Math.round(parent.width * 0.46); height: parent.height - 16 - nouveauLigne.height - 2
                 clip: true; spacing: 2
                 boundsBehavior: Flickable.StopAtBounds
                 model: code.visibles
@@ -286,9 +320,24 @@ PanelWindow {
             CodeApercu {
                 objectName: "nc-code-apercu"
                 x: separation.x + 17; y: 14; width: parent.width - x - 22; height: parent.height - 28
-                visible: !code.choixAgent && code.projet !== null
+                visible: !code.choixAgent && code.mode === "" && code.projet !== null
                 projet: code.projet
                 apercu: code.apercuChoisi
+            }
+            // Ctrl + N / Ctrl + L : ce que fait la saisie
+            Column {
+                objectName: "nc-code-saisie"
+                x: separation.x + 17; y: 14; width: parent.width - x - 22
+                visible: code.mode !== ""
+                spacing: 6
+                Texte { width: parent.width; font.pixelSize: 17; font.weight: Font.Bold; height: 30
+                        text: code.mode === "nouveau" ? Reglages.t("Nouveau projet", "New project") : Reglages.t("Cloner depuis GitHub", "Clone from GitHub") }
+                Texte { width: parent.width; secondaire: true; font.pixelSize: 12; wrapMode: Text.Wrap
+                        text: code.mode === "nouveau"
+                              ? Reglages.t("Tape un nom (lettres, chiffres, - et _) puis Entrée : le dossier est créé avec un dépôt git et un README, puis ouvert. Un nom déjà pris est refusé. Modèles (vide, python, c, web) : nc-code --nouveau NOM --modele python.",
+                                           "Type a name (letters, digits, - and _) then Enter: the folder is created with a repository and a README, then opened. A name already taken is refused. Templates: nc-code --nouveau NAME --modele python.")
+                              : Reglages.t("Colle https://github.com/propriétaire/dépôt ou propriétaire/dépôt puis Entrée. Vide : la liste de tes dépôts (si gh est connecté). Rien n'est lancé si le dossier existe déjà. Échap revient.",
+                                           "Paste https://github.com/owner/repo or owner/repo then Enter. Empty: your repositories (if gh is signed in). Nothing runs if the folder already exists. Esc goes back.") }
             }
             // Tab : quel agent ? (ceux de nc-ia qui sont installés, puis « un terminal, sans agent »)
             Column {
@@ -323,7 +372,7 @@ PanelWindow {
             Row {
                 x: 20; anchors.verticalCenter: parent.verticalCenter; spacing: 14
                 Repeater {
-                    model: [["↵", Reglages.t("ouvrir", "open")], ["Tab", Reglages.t("agent", "agent")], ["Alt ↵", "Neovim"], [Reglages.t("Échap", "Esc"), Reglages.t("fermer", "close")]]
+                    model: [["↵", Reglages.t("ouvrir", "open")], ["Tab", Reglages.t("agent", "agent")], ["Alt ↵", "Neovim"], ["Ctrl N", Reglages.t("nouveau", "new")], ["Ctrl L", "GitHub"], [Reglages.t("Échap", "Esc"), Reglages.t("fermer", "close")]]
                     Row {
                         spacing: 6
                         Rectangle {
@@ -339,6 +388,7 @@ PanelWindow {
                 anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 6
                 CodeAction { objectName: "nc-code-fichiers"; glyphe: "folder_open"; libelle: Reglages.t("Fichiers", "Files"); touche: "Ctrl E"; onClic: code.ouvrirDossier() }
                 CodeAction { objectName: "nc-code-copier"; glyphe: "content_copy"; libelle: Reglages.t("Copier le chemin", "Copy path"); touche: "Ctrl ⇧ C"; onClic: code.copierChemin() }
+                CodeAction { objectName: "nc-code-cloner"; glyphe: "download"; libelle: Reglages.t("Cloner", "Clone"); touche: "Ctrl L"; onClic: { code.demarrerMode("cloner"); champ.forceActiveFocus() } }
                 CodeAction { objectName: "nc-code-github"; visible: code.github !== ""; glyphe: "open_in_new"; libelle: "GitHub"; touche: "Ctrl G"; onClic: code.ouvrirGitHub() }
             }
         }
