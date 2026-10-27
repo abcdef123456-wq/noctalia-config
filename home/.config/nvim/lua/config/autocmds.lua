@@ -15,6 +15,9 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- Ouvert par nc-code : le projet (session de ce dossier, README ou dernier fichier) à la place du tableau de bord
+require("config.projet").au_demarrage()
+
 -- Fichier modifié ailleurs : vérifié au retour dans Neovim (autoread fait le reste)
 vim.api.nvim_create_autocmd({ "FocusGained", "TermClose", "TermLeave" }, {
   group = groupe,
