@@ -315,14 +315,17 @@ Item {
         Ico { anchors.verticalCenter: parent.verticalCenter; nom: "stop_circle"; taille: 17; color: Couleurs.texteSec }
     }
 
-    // ── Écran partagé (Partage.qml, après 1,5 s de partage continu) : pastille et « Partage », comme les points du micro et de la caméra ──
+    // ── Écran partagé (Partage.qml, après 1,5 s de partage continu) : le point du partage devant l'heure, comme l'iPhone
+    // qui partage son écran (l'heure reste lisible tout le partage) ; « Partage » pour les lecteurs d'écran.
     // Après l'enregistrement d'écran (nc-video, qui montre déjà qu'on capture et s'arrête d'un clic), avant tout le reste
     Fondu {
         id: partage
         objectName: "nc-partage-pill"
         montre: c.mode === "partage"
+        Accessible.role: Accessible.StaticText
+        Accessible.name: Reglages.t("Partage", "Sharing") + " · " + Etat.heure
         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10; height: 10; radius: 5; color: Couleurs.accentClair }
-        Texte { anchors.verticalCenter: parent.verticalCenter; text: Reglages.t("Partage", "Sharing"); font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Etat.heure; font.weight: Font.DemiBold; font.features: { "tnum": 1 } }
     }
 
     // ── Mode jeu ──

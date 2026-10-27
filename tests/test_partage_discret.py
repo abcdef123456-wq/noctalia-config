@@ -100,6 +100,9 @@ class Source(unittest.TestCase):
             self.assertIn(fr, self.partage)
             self.assertIn(en, self.partage)
         self.assertIn('Reglages.t("Partage", "Sharing")', self.compact)
+        # l'heure reste visible pendant le partage (le point du partage devant, comme l'iPhone)
+        bloc = self.compact[self.compact.index('objectName: "nc-partage-pill"'):]
+        self.assertIn("text: Etat.heure", bloc[:bloc.index("\n    }")])
         self.assertIn('Reglages.t("Ton écran est partagé", "Your screen is being shared")', (QML / "PageNotifs.qml").read_text())
 
 
