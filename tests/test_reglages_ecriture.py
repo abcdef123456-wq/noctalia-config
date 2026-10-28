@@ -120,6 +120,9 @@ class Ecriture(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), defaut)
         self.assertEqual(self.nc("get", "ILE_DATE").stdout.strip(), "oui")
         self.conf.write_text("SPOTLIGHT_RESULTATS=abc\n")
+        # « liste » ne montre que les réglages utiles ici : ceux de l'île demandent l'île Quickshell (garde « ile »)
+        (self.home / ".config/quickshell/nc-ile").mkdir(parents=True)
+        (self.home / ".config/quickshell/nc-ile/shell.qml").write_text("")
         ligne = [l for l in self.nc("liste").stdout.splitlines() if l.endswith("SPOTLIGHT_RESULTATS")]
         self.assertTrue(ligne and "valeur invalide ignorée" in ligne[0])
         self.assertEqual(self.nc("get", "SPOTLIGHT_RESULTATS").stdout.strip(), "6")

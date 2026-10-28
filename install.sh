@@ -152,6 +152,13 @@ esac
 # fin (« Tried to start delayed item … but failed »). Nouveaux essais immédiats à la place.
 APT_OPT="-o Acquire::Retries=3 -o Acquire::Retries::Delay=false"
 BPO=""
+# apt update : une seule fois avant les installs (et de nouveau seulement si une source vient d'être ajoutée)
+APT_A_JOUR=0
+apt_maj() {
+  [ "$APT_A_JOUR" = 1 ] && return 0
+  sudo apt-get $APT_OPT update -q || return 1
+  APT_A_JOUR=1
+}
 bpo_on() {
   [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] || return 1
   if ! apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; then
@@ -160,7 +167,7 @@ bpo_on() {
     ask "$(t "Activer trixie-backports ?" "Enable trixie-backports?")" o || return 1
     printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie-backports\nComponents: main\nEnabled: yes\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' |
       sudo tee /etc/apt/sources.list.d/debian-backports.sources >/dev/null
-    sudo apt-get $APT_OPT update -q || return 1
+    APT_A_JOUR=0; apt_maj || return 1
   fi
 }
 bpo_actif() { [ "$OSID" = debian ] && [ "$OSCODE" = trixie ] && apt-cache policy 2>/dev/null | grep -qE 'o=Debian Backports.*n=trixie-backports'; }
@@ -172,7 +179,7 @@ pacman_s() { if sans_tty; then sudo pacman -S --needed --noconfirm "$@"; else su
 
 pkg_installed() {
   case "$FAMILY" in
-    arch) pacman -Q "$1" ;; fedora) rpm -q "$1" ;; suse) rpm -q --whatprovides "$1" ;; debian) dpkg -s "$1" ;; *) false ;;
+    arch) pacman -Q "$1" ;; fedora) rpm -q "$1" ;; suse) rpm -q --whatprovides "$1" ;; debian) [ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" = installed ] ;; *) false ;;
   esac >/dev/null 2>&1
 }
 pkg_install() {
@@ -181,7 +188,8 @@ pkg_install() {
     fedora) sudo dnf install -y "$@" ;;
     # Debian 13 avec backports (Hyprland) : leurs bibliothèques (libxkbcommon…) sont plus récentes que celles de
     # trixie ; si un paquet ne s'installe pas pour cette raison, nouvel essai en acceptant les backports
-    debian) sudo apt-get $APT_OPT install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get $APT_OPT install -y -t trixie-backports "$@"; } ;;
+    debian) apt_maj || true
+            sudo apt-get $APT_OPT install -y $BPO "$@" || { [ -z "$BPO" ] && bpo_actif && sudo apt-get $APT_OPT install -y -t trixie-backports "$@"; } ;;
     suse) sudo zypper --non-interactive install "$@" ;;
     *) return 1 ;;
   esac
@@ -267,7 +275,7 @@ if [ "$MODE" = restore ]; then
   if [ -f "$last/.created" ]; then
     while IFS= read -r rel; do [ -n "$rel" ] && rm -rf "${HOME:?}/$rel"; done < "$last/.created"
   fi
-  (cd "$last" && find . -path ./system -prune -o \( -type f -o -type l \) ! -name .created -print0 |
+  (cd "$last" && find . -path ./system -prune -o -path ./silencieux -prune -o \( -type f -o -type l \) ! -name .created -print0 |
     while IFS= read -r -d '' f; do mkdir -p "$HOME/$(dirname "$f")"; cp -a "$last/$f" "$HOME/$f"; done)
   [ -d "$last/system" ] && warn "$(t "Fichiers système sauvegardés dans $last/system : à remettre à la main avec sudo si besoin." "System files backed up in $last/system: put them back by hand with sudo if needed.")"
   if have systemctl; then
@@ -286,7 +294,7 @@ if [ ${#manque[@]} -gt 0 ] && [ "$FAMILY" != other ] && [ "$MODE" != files ]; th
   info "$(t "Outils nécessaires au script : ${manque[*]}" "Tools the script needs: ${manque[*]}")"
   paquets=(); for t in "${manque[@]}"; do case "$t" in cmp) paquets+=(diffutils) ;; find) paquets+=(findutils) ;; awk) paquets+=(gawk) ;; timeout) paquets+=(coreutils) ;; *) paquets+=("$t") ;; esac; done
   sudo -v || die "$(t "authentification sudo impossible." "sudo authentication failed.")"
-  if [ "$FAMILY" = debian ]; then sudo apt-get $APT_OPT update -q; fi
+  if [ "$FAMILY" = debian ]; then apt_maj; fi
   pkg_install "${paquets[@]}" || die "$(t "installation des outils de vérification impossible." "could not install the checking tools.")"
 fi
 for t in jq sed find cmp awk timeout; do have "$t" || die "$(t "commande manquante : $t (installe-la avec le gestionnaire de paquets de ta distribution)" "missing command: $t (install it with your distribution's package manager)")"; done
@@ -424,7 +432,7 @@ if [ "$MODE" != files ]; then
   }
   du_paquet() {
     case "$FAMILY" in
-      debian) dpkg -S "$(readlink -f "$1")" >/dev/null 2>&1 || dpkg -S "$1" >/dev/null 2>&1 ;;
+      debian) dpkg-query -S "$(readlink -f "$1")" >/dev/null 2>&1 || dpkg-query -S "$1" >/dev/null 2>&1 ;;
       arch) pacman -Qo "$1" >/dev/null 2>&1 ;; fedora|suse) rpm -qf "$1" >/dev/null 2>&1 ;; *) false ;;
     esac
   }
@@ -510,7 +518,7 @@ if [ "$MODE" != files ]; then
         have wget || sudo apt-get $APT_OPT install -y wget
         kd="$(mktemp -d)"; wget -q --tries=3 --timeout=30 -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
         sudo wget -q --tries=3 --timeout=30 -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
-        sudo apt-get $APT_OPT update -q || true
+        APT_A_JOUR=0; apt_maj || true
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
     esac
@@ -686,7 +694,25 @@ ask "$(t "On y va ?" "Ready to go?")" o || exit "$ANNULE"
 
 mkdir -p "$BK"
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"; rmdir "$BK" 2>/dev/null || true' EXIT   # pas de sauvegarde vide
+# Noctalia n'est arrêtée que le temps de copier les fichiers (étape 2) ; quoi qu'il arrive (erreur, Ctrl-C, kill), la
+# sortie du script la relance. Le dossier de sauvegarde vide est retiré (pas de sauvegarde vide).
+NOCT_ARRETEE=0
+relancer_noctalia() {
+  [ "$NOCT_ARRETEE" = 1 ] || return 0
+  NOCT_ARRETEE=0
+  systemctl --user start noctalia.service 2>/dev/null || true
+}
+sortie_install() {
+  local code="${1:-$?}"
+  trap - INT TERM EXIT
+  relancer_noctalia
+  rm -f "$tmp"
+  rmdir "$BK" 2>/dev/null || true
+  exit "$code"
+}
+trap 'sortie_install 130' INT
+trap 'sortie_install 143' TERM
+trap sortie_install EXIT
 
 # Sauvegarde d'un fichier ou dossier de ta session avant de le remplacer ou de le supprimer
 backup() { # backup CHEMIN_RELATIF_À_HOME
@@ -694,6 +720,27 @@ backup() { # backup CHEMIN_RELATIF_À_HOME
   [ -e "$HOME/$rel" ] || [ -L "$HOME/$rel" ] || return 0
   mkdir -p "$BK/$(dirname "$rel")"
   cp -a "$HOME/$rel" "$BK/$rel" 2>/dev/null || cp -aL "$HOME/$rel" "$BK/$rel"
+}
+
+# Écriture d'un seul coup : le contenu arrive sur l'entrée standard, va dans un fichier temporaire du MÊME dossier, puis
+# mv. Le fichier n'est jamais vide ni à moitié écrit, même si le script s'arrête. Suit un lien symbolique (stow).
+ecrire_atomique() { # ecrire_atomique FICHIER < contenu
+  local cible="$1" reel tmpf
+  reel="$(readlink -f -- "$cible" 2>/dev/null || true)"; [ -n "$reel" ] || reel="$cible"
+  tmpf="$(mktemp "$reel.nc-XXXXXX")" || return 1
+  if ! cat > "$tmpf"; then rm -f "$tmpf"; return 1; fi
+  if [ -e "$reel" ]; then chmod --reference="$reel" "$tmpf" 2>/dev/null || true; else chmod 0644 "$tmpf"; fi
+  mv -f -- "$tmpf" "$reel"
+}
+# Valeur sûre dans le texte de remplacement d'un « s|…|…| » de sed (la barre oblique inverse, & et | y ont un sens)
+esc_sed() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+
+# Modifications faites sans question (gsettings, dossiers utilisateur, signets GTK, .bashrc, notifications masquées,
+# minuteries systemd, NetworkManager) : chacune est notée ici avec sa sauvegarde ou la commande pour revenir, et le
+# résumé s'affiche à la fin (et reste dans $BK/silencieux/resume.txt)
+SILENCIEUX=()
+noter_silencieux() { # noter_silencieux "ce qui a changé" "où est la sauvegarde / comment revenir"
+  SILENCIEUX+=("$1"$'\t'"$2")
 }
 
 # ── 1. Paquets ───────────────────────────────────────────────────────────────
@@ -718,7 +765,11 @@ GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty 
 [ "$FAMILY" = suse ] && GENERIC+=(python-curses)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
-  missing=(); manual=()
+  missing=(); missing_opt=(); manual=()
+  # Arch : ces paquets améliorent le bureau mais ne sont pas nécessaires pour qu'il démarre ; ils sont proposés (une
+  # question), jamais imposés, et un refus ou un échec ne casse rien
+  FACULTATIFS=(cava swappy wtype zenity qalc sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng
+               checkupdates sound-theme-freedesktop enregistreur breeze nerdfont adwaita-fonts noto-fonts)
   for g in "${GENERIC[@]}"; do
     p="$(pname "$g")"
     if [ -z "$p" ]; then manual+=("$g"); continue; fi
@@ -727,9 +778,9 @@ if [ "$MODE" != files ]; then
     # Arch : libva-mesa-driver n'est plus un paquet à part (dans mesa) ; ne pas le croire « introuvable »
     [ "$g" = pilotes-va ] && [ "$FAMILY" = arch ] && ! pacman -Si "$p" >/dev/null 2>&1 && continue
     [ "$g" = nerdfont ] && [ -n "$(fc-list : family 2>/dev/null | grep -i "CaskaydiaCove Nerd Font")" ] && continue
-    missing+=("$p")
+    if [ "$FAMILY" = arch ] && [[ " ${FACULTATIFS[*]} " == *" $g "* ]]; then missing_opt+=("$p"); else missing+=("$p"); fi
   done
-  if [ ${#missing[@]} -eq 0 ]; then
+  if [ ${#missing[@]} -eq 0 ] && [ ${#missing_opt[@]} -eq 0 ]; then
     ok "$(t "Tout est déjà installé." "Everything is already installed.")"
   elif [ "$FAMILY" = arch ]; then
     unknown=()
@@ -738,8 +789,20 @@ if [ "$MODE" != files ]; then
       warn "$(t "Introuvables dans ta base de paquets : ${unknown[*]}" "Not found in your package database: ${unknown[*]}")"
       die "$(t "ta base de paquets est sans doute ancienne. Lance « sudo pacman -Syu », redémarre si besoin, puis relance ce script." "your package database is probably out of date. Run “sudo pacman -Syu”, reboot if needed, then run this script again.")"
     fi
-    info "$(t "À installer : ${missing[*]}" "To install: ${missing[*]}")"
-    if pkg_install "${missing[@]}"; then ok "$(t "Paquets installés." "Packages installed.")"; else warn "$(t "Paquets non installés : ${missing[*]} (à installer toi-même)." "Packages not installed: ${missing[*]} (install them yourself).")"; fi
+    if [ ${#missing[@]} -gt 0 ]; then
+      info "$(t "À installer : ${missing[*]}" "To install: ${missing[*]}")"
+      if pkg_install "${missing[@]}"; then ok "$(t "Paquets installés." "Packages installed.")"; else warn "$(t "Paquets non installés : ${missing[*]} (à installer toi-même)." "Packages not installed: ${missing[*]} (install them yourself).")"; fi
+    fi
+    # Facultatifs : seulement ceux que ta base de paquets connaît ; une question pour tous
+    opt_ok=(); for p in "${missing_opt[@]}"; do pacman -Si "$p" >/dev/null 2>&1 && opt_ok+=("$p"); done
+    if [ ${#opt_ok[@]} -gt 0 ]; then
+      info "$(t "Paquets facultatifs (captures, texte des images, sons, polices…) : ${opt_ok[*]}" "Optional packages (screenshots, text in images, sounds, fonts…): ${opt_ok[*]}")"
+      if ask "$(t "Les installer ?" "Install them?")" o; then
+        if pkg_install "${opt_ok[@]}"; then ok "$(t "Paquets facultatifs installés." "Optional packages installed.")"; else warn "$(t "Paquets facultatifs non installés : ${opt_ok[*]} (le bureau marche sans, ou installe-les toi-même)." "Optional packages not installed: ${opt_ok[*]} (the desktop works without them, or install them yourself).")"; fi
+      else
+        info "$(t "Paquets facultatifs ignorés : le bureau marche sans (certaines fonctions seront absentes)." "Optional packages skipped: the desktop works without them (some features will be missing).")"
+      fi
+    fi
   else
     failed=()
     for p in "${missing[@]}"; do pkg_install "$p" >/dev/null 2>&1 && info "$(t "installé : $p" "installed: $p")" || failed+=("$p"); done
@@ -771,8 +834,28 @@ say "$(t "2. Fichiers de configuration" "2. Configuration files")"
 NOCT_WAS_ACTIVE=0
 if [ "$MODE" != files ] && systemctl --user is-active --quiet noctalia.service 2>/dev/null; then
   NOCT_WAS_ACTIVE=1
-  systemctl --user stop noctalia.service   # Noctalia réécrit ses réglages : on l'arrête pendant la copie
+  NOCT_ARRETEE=1   # le trap de sortie la relance, quoi qu'il arrive
+  systemctl --user stop noctalia.service   # Noctalia réécrit ses réglages : on l'arrête pendant la copie seulement
 fi
+
+# Variables d'environnement perso de uwsm : ~/.config/uwsm/env.d/perso (lu par uwsm/env, jamais écrasé). Ce que tu avais
+# ajouté à la main dans ~/.config/uwsm/env y est repris avant que ce fichier soit remplacé (l'ancien reste dans la sauvegarde).
+UENV="$HOME/.config/uwsm/env"; UPERSO="$HOME/.config/uwsm/env.d/perso"
+if [ ! -e "$UPERSO" ]; then
+  mkdir -p "$(dirname "$UPERSO")"
+  uextra=""
+  if [ -f "$UENV" ] && [ "$MODE" != files ]; then
+    uextra="$( { grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$UENV" || true; } |
+               { grep -vE '^[[:space:]]*(export[[:space:]]+)?(PATH|_nc_p|QT_QPA_PLATFORMTHEME)=' || true; } |
+               { grep -vxFf "$REPO/home/.config/uwsm/env" || true; } )"
+  fi
+  { printf '# Tes variables d'"'"'environnement pour toute la session (uwsm), une par ligne : export NOM=valeur\n'
+    printf '# Ce fichier est à toi : noctalia-config ne le remplace jamais (uwsm/env le lit).\n'
+    [ -z "$uextra" ] || printf '%s\n' "$uextra"; } | ( umask 077; ecrire_atomique "$UPERSO" )
+  chmod 600 "$UPERSO" 2>/dev/null || true
+  [ -z "$uextra" ] || noter_silencieux "variables perso de ~/.config/uwsm/env reprises dans ~/.config/uwsm/env.d/perso" "ancien ~/.config/uwsm/env : $BK/.config/uwsm/env"
+fi
+unset UENV UPERSO uextra
 
 # Ancien cockpit QML orphelin : remplacé par Jarvis.qml, sauvegardé avant retrait.
 rel=.config/quickshell/nc-ile/JarvisDashboard.qml
@@ -809,14 +892,17 @@ fi
 if [ -f "$NSET" ] && grep -qF 'lockscreen_widgets.widget.nc-media]' "$NSET"; then
   backup .local/state/noctalia/settings.toml
   python3 -I - "$NSET" <<'PYEOF'
-import re, sys
+import os, re, sys
 p = sys.argv[1]; out, saute = [], False
 for l in open(p).read().splitlines():
     if re.match(r'^\s*\[', l):
         saute = bool(re.match(r'^\s*\[lockscreen_widgets', l))
     if not saute:
         out.append(l)
-open(p, "w").write("\n".join(out) + "\n")
+tmp = p + ".nc-tmp"
+with open(tmp, "w") as f:
+    f.write("\n".join(out) + "\n")
+os.replace(tmp, p)                      # d'un seul coup
 PYEOF
   migrated=1
 fi
@@ -946,15 +1032,22 @@ QT_STYLE=Fusion
 
 copied=0; same=0; hypr_changed=0
 root="$REPO/home"
+# Les marqueurs @…@ des modèles, remplacés par leurs valeurs ; chaque valeur est échappée pour sed (une valeur avec « | »,
+# « & » ou une barre oblique inverse ne casse plus le fichier)
+SED_ARGS=()
+for paire in HOME:"$HOME" MONITOR:"$MON" KB_LAYOUT:"$KBL" KB_VARIANT:"$KBV" KB_OPTIONS:"$KBO" BROWSER:"$BROWSER" LCX:"$LCX" \
+             LCY1:"$LCY1" LCY2:"$LCY2" LCY3:"$LCY3" LCY4:"$LCY4" LCY5:"$LCY5" DISTRO_LOGO:"$DISTRO_LOGO" POLKIT:"$POLKIT" \
+             QT_STYLE:"$QT_STYLE" ICON_THEME:"$ICON_THEME" ILE_CENTRE:"$ILE_CENTRE" NOTIF_NOCTALIA:"$NOTIF_NOCTALIA" \
+             NOTIF_WIDGET:"$NOTIF_WIDGET" PLUGIN_ILE:"$PLUGIN_ILE"; do
+  SED_ARGS+=(-e "s|@${paire%%:*}@|$(esc_sed "${paire#*:}")|g")
+done
 while IFS= read -r -d '' src; do
   rel="${src#"$root/"}"
   dst="$HOME/$rel"
   # assistant.conf contient la clé privée : aucun modèle du dépôt ne doit remplacer ce fichier personnel.
   case "$rel" in .zshrc|.p10k.zsh|.config/nvim/*|.config/nc/assistant.conf) continue ;; esac   # étapes 3 et 3b
   if grep -Iq . "$src" 2>/dev/null; then
-    sed -e "s|@HOME@|$HOME|g" -e "s|@MONITOR@|$MON|g" -e "s|@KB_LAYOUT@|$KBL|g" -e "s|@KB_VARIANT@|$KBV|g" -e "s|@KB_OPTIONS@|$KBO|g" \
-        -e "s|@BROWSER@|$BROWSER|g" -e "s|@LCX@|$LCX|g" -e "s|@LCY1@|$LCY1|g" -e "s|@LCY2@|$LCY2|g" \
-        -e "s|@LCY3@|$LCY3|g" -e "s|@LCY4@|$LCY4|g" -e "s|@LCY5@|$LCY5|g" -e "s|@DISTRO_LOGO@|$DISTRO_LOGO|g" -e "s|@POLKIT@|$POLKIT|g" -e "s|@QT_STYLE@|$QT_STYLE|g" -e "s|@ICON_THEME@|$ICON_THEME|g" -e "s|@ILE_CENTRE@|$ILE_CENTRE|g" -e "s|@NOTIF_NOCTALIA@|$NOTIF_NOCTALIA|g" -e "s|@NOTIF_WIDGET@|$NOTIF_WIDGET|g" -e "s|@PLUGIN_ILE@|$PLUGIN_ILE|g" "$src" > "$tmp"
+    sed "${SED_ARGS[@]}" "$src" > "$tmp"
   else
     cp "$src" "$tmp"
   fi
@@ -979,6 +1072,7 @@ while IFS= read -r -d '' src; do
   copied=$((copied + 1))
   case "$rel" in .config/hypr/*) hypr_changed=1 ;; esac
 done < <(find "$root" -type f -print0)
+relancer_noctalia   # la copie est finie : Noctalia repart tout de suite (le reste de l'install ne la gêne plus)
 ok "$(t "$copied fichier(s) installé(s), $same déjà à jour." "$copied file(s) installed, $same already up to date.")$([ "$copied" -gt 0 ] && echo " $(t "Sauvegarde : $BK" "Backup: $BK")")"
 # Noms anglais des commandes (nc-settings = nc-reglages…) : liens, quelle que soit la langue choisie
 # (NOMS_ANGLAIS : défini par nc-langue, lu en haut du script)
@@ -1010,11 +1104,22 @@ fi
 # Fichiers (Nautilus, style Apple) : appli par défaut pour les dossiers ; applis GTK en sombre avec les mêmes icônes
 # que le reste ; couleurs GTK générées par Noctalia (fond d'écran) ; vignettes moyennes, dossiers en premier
 if have gsettings; then
-  gsettings set org.gnome.desktop.interface color-scheme prefer-dark 2>/dev/null || true
-  gsettings set org.gnome.desktop.interface icon-theme "$ICON_THEME" 2>/dev/null || true
-  gsettings set org.gnome.nautilus.preferences default-folder-viewer icon-view 2>/dev/null || true
-  gsettings set org.gnome.nautilus.icon-view default-zoom-level medium 2>/dev/null || true
-  gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true 2>/dev/null || true
+  # La valeur d'avant est gardée dans $BK/silencieux/gsettings-avant.sh (« sh » ce fichier remet tout comme avant)
+  gs_set() { # gs_set SCHÉMA CLÉ VALEUR
+    local ancien
+    ancien="$(gsettings get "$1" "$2" 2>/dev/null)" || return 0
+    if [ "$ancien" = "$3" ] || [ "$ancien" = "'$3'" ]; then return 0; fi
+    mkdir -p "$BK/silencieux"
+    printf 'gsettings set %s %s %s\n' "$1" "$2" "$ancien" >> "$BK/silencieux/gsettings-avant.sh"
+    gsettings set "$1" "$2" "$3" 2>/dev/null || true
+  }
+  gs_set org.gnome.desktop.interface color-scheme prefer-dark
+  gs_set org.gnome.desktop.interface icon-theme "$ICON_THEME"
+  gs_set org.gnome.nautilus.preferences default-folder-viewer icon-view
+  gs_set org.gnome.nautilus.icon-view default-zoom-level medium
+  gs_set org.gtk.gtk4.Settings.FileChooser sort-directories-first true
+  [ -f "$BK/silencieux/gsettings-avant.sh" ] &&
+    noter_silencieux "gsettings : thème sombre, icônes $ICON_THEME, vue des fichiers de Nautilus" "valeurs d'avant : sh $BK/silencieux/gsettings-avant.sh"
 fi
 have xdg-mime && [ -n "$(find /usr/share/applications -name org.gnome.Nautilus.desktop -print -quit 2>/dev/null || true)" ] &&
   xdg-mime default org.gnome.Nautilus.desktop inode/directory 2>/dev/null
@@ -1024,6 +1129,7 @@ have xdg-mime && [ -n "$(find /usr/share/applications -name org.gnome.Nautilus.d
 # Dossiers utilisateur : si xdg-user-dirs a créé des dossiers vides en français alors que les tiens existent en
 # anglais (Downloads, Pictures…), on garde les tiens ; Bureau, Modèles et Public vides (inutiles sous Hyprland) sont
 # désactivés. Seuls des dossiers vides sont supprimés.
+backup .config/user-dirs.dirs
 python3 -I - <<'PYEOF' 2>/dev/null || true
 import os, re
 maison = os.path.expanduser("~")
@@ -1052,8 +1158,15 @@ if os.path.exists(fichier):
                     pass
         lignes.append(ligne)
     if change:
-        open(fichier, "w").write("\n".join(lignes) + "\n")
+        tmp = fichier + ".nc-tmp"
+        with open(tmp, "w") as f:
+            f.write("\n".join(lignes) + "\n")
+        os.replace(tmp, fichier)       # d'un seul coup : jamais à moitié écrit
 PYEOF
+if [ -f "$BK/.config/user-dirs.dirs" ] && ! cmp -s "$BK/.config/user-dirs.dirs" "$HOME/.config/user-dirs.dirs"; then
+  noter_silencieux "dossiers utilisateur (~/.config/user-dirs.dirs : dossiers vides inutiles retirés)" "ancienne version : $BK/.config/user-dirs.dirs"
+fi
+[ -e "$HOME/.config/gtk-3.0/bookmarks" ] && backup .config/gtk-3.0/bookmarks || echo ".config/gtk-3.0/bookmarks" >> "$BK/.created"
 python3 -I - "$HOME/.config/gtk-3.0/bookmarks" <<'PYEOF' 2>/dev/null || true
 import os, subprocess, sys, urllib.parse
 fichier = sys.argv[1]
@@ -1073,8 +1186,17 @@ for nom, secours in noms.items():
     uri = "file://" + urllib.parse.quote(d)
     if d and os.path.isdir(d) and d != os.path.expanduser("~") and uri not in deja:
         lignes.append(uri)
-open(fichier, "w").write("\n".join(lignes) + ("\n" if lignes else ""))
+tmp = fichier + ".nc-tmp"
+with open(tmp, "w") as f:
+    f.write("\n".join(lignes) + ("\n" if lignes else ""))
+os.replace(tmp, fichier)               # d'un seul coup : jamais à moitié écrit
 PYEOF
+if [ -f "$BK/.config/gtk-3.0/bookmarks" ]; then
+  cmp -s "$BK/.config/gtk-3.0/bookmarks" "$HOME/.config/gtk-3.0/bookmarks" ||
+    noter_silencieux "signets de Nautilus (~/.config/gtk-3.0/bookmarks : Téléchargements, Documents, Images…)" "ancienne version : $BK/.config/gtk-3.0/bookmarks"
+else
+  noter_silencieux "signets de Nautilus (~/.config/gtk-3.0/bookmarks, fichier créé)" "pour revenir : supprimer ce fichier (il n'existait pas avant)"
+fi
 
 # Icônes sobres du terminal et des fichiers, aux couleurs du thème (remplacent le chat de kitty et le dauphin de Dolphin)
 "$HOME/.local/bin/nc-icones" >/dev/null 2>&1 || true
@@ -1127,15 +1249,16 @@ if [ -f "$HOME/.bashrc" ] || [ "$(basename "${SHELL:-}")" = bash ]; then
   if ! grep -qF 'noctalia-config : ~/.local/bin en tête du PATH' "$HOME/.bashrc" 2>/dev/null; then
     [ -f "$HOME/.bashrc" ] && backup .bashrc
     if grep -qxF "$nc_bash_ancien" "$HOME/.bashrc" 2>/dev/null; then
-      grep -vxF -e "$nc_bash_ancien" -e "$nc_bash_ancien_titre" "$HOME/.bashrc" > "$HOME/.bashrc.nc-tmp" &&
-        cat "$HOME/.bashrc.nc-tmp" > "$HOME/.bashrc"
-      rm -f "$HOME/.bashrc.nc-tmp"
+      { grep -vxF -e "$nc_bash_ancien" -e "$nc_bash_ancien_titre" "$HOME/.bashrc" || true; } | ecrire_atomique "$HOME/.bashrc"
     fi
-    cat >> "$HOME/.bashrc" <<'BASHRC_EOF'
+    { if [ -f "$HOME/.bashrc" ]; then cat "$HOME/.bashrc"; fi; cat <<'BASHRC_EOF'
 
 # noctalia-config : ~/.local/bin en tête du PATH (commandes nc-*, Neovim récent), une seule fois
 _nc_p=":$PATH:"; while case "$_nc_p" in *":$HOME/.local/bin:"*) true ;; *) false ;; esac; do _nc_p="${_nc_p%%":$HOME/.local/bin:"*}:${_nc_p#*":$HOME/.local/bin:"}"; done; _nc_p="${_nc_p#:}"; _nc_p="${_nc_p%:}"; export PATH="$HOME/.local/bin${_nc_p:+:$_nc_p}"; unset _nc_p
 BASHRC_EOF
+    } | ecrire_atomique "$HOME/.bashrc"
+    if [ -f "$BK/.bashrc" ]; then noter_silencieux "~/.bashrc : une ligne ajoutée (~/.local/bin en tête du PATH)" "ancienne version : $BK/.bashrc"
+    else echo ".bashrc" >> "$BK/.created"; noter_silencieux "~/.bashrc créé (~/.local/bin en tête du PATH)" "pour revenir : supprimer ce fichier (il n'existait pas avant)"; fi
   fi
   unset nc_bash_ancien nc_bash_ancien_titre
 fi
@@ -1211,12 +1334,12 @@ elif ask "$(t "Installer la config du terminal (seulement ce qui manque) ?" "Ins
     for f in .zshrc .p10k.zsh; do
       [ -f "$HOME/$f" ] && cmp -s "$REPO/home/$f" "$HOME/$f" && continue
       if [ -f "$HOME/$f" ]; then
-        ask "$(t "Remplacer ton ~/$f (il sera sauvegardé) ?" "Replace your ~/$f (it will be backed up)?")" o || continue
+        ask "$(t "Remplacer ton ~/$f (il sera sauvegardé) ?" "Replace your ~/$f (it will be backed up)?")" n || continue
         backup "$f"
       else
         echo "$f" >> "$BK/.created"
       fi
-      cp "$REPO/home/$f" "$HOME/$f"
+      ecrire_atomique "$HOME/$f" < "$REPO/home/$f"
     done
     ok "$(t "Config du terminal installée. Tes alias et réglages personnels : ~/.zshrc.perso" "Terminal config installed. Your own aliases and settings: ~/.zshrc.perso")"
     if [ "$(basename "$(getent passwd "$(id -un)" | cut -d: -f7)")" != zsh ]; then
@@ -1308,7 +1431,7 @@ elif ask "$nv_q" o; then
   fi
   if [ "$nv_same" = 1 ]; then
     ok "$(t "Config Neovim déjà à jour." "Neovim config already up to date.")"
-  elif [ ! -e "$NV" ] || ask "$(t "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" "Replace your ~/.config/nvim config (it will be backed up)?")" o; then
+  elif [ ! -e "$NV" ] || ask "$(t "Remplacer ta config ~/.config/nvim (elle sera sauvegardée) ?" "Replace your ~/.config/nvim config (it will be backed up)?")" n; then
     if [ -e "$NV" ]; then backup .config/nvim; rm -rf "$NV"; else echo ".config/nvim" >> "$BK/.created"; fi
     mkdir -p "$HOME/.config" && cp -a "$REPO/home/.config/nvim" "$NV"
     mkdir -p "$STATE"; echo "$NV_SUM" > "$NV_STAMP"
@@ -1431,7 +1554,10 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
     info "$(t "Ton ancienne config démarre encore : ${barres[*]} ${demarrages[*]##*/}" "Your old config still starts: ${barres[*]} ${demarrages[*]##*/}")"
     if ask "$(t "Les désactiver (la barre de Noctalia et l'île les remplacent ; rien n'est désinstallé) ?" "Disable them (Noctalia's bar and the island replace them; nothing is uninstalled)?")" o; then
       # mask, pas disable : sur Debian, waybar.service est activé pour tous les utilisateurs et reviendrait
-      for b in "${barres[@]}"; do systemctl --user stop "$b.service" >/dev/null 2>&1; systemctl --user mask "$b.service" >/dev/null 2>&1 || true; done
+      for b in "${barres[@]}"; do
+        systemctl --user stop "$b.service" >/dev/null 2>&1
+        systemctl --user mask "$b.service" >/dev/null 2>&1 && noter_silencieux "$b.service masqué (ancienne barre)" "pour revenir : systemctl --user unmask $b.service"
+      done
       mkdir -p "$HOME/.config/autostart"
       for f in "${demarrages[@]}"; do
         n="$HOME/.config/autostart/$(basename "$f")"
@@ -1445,19 +1571,20 @@ if systemctl --user daemon-reload >/dev/null 2>&1; then
   # Démons de notifications lancés à la demande (dunst, mako, swaync) : ils prendraient la place de l'île ou de Noctalia
   for d in dunst mako swaync; do
     if [ -n "$(systemctl --user list-unit-files "$d.service" --no-legend 2>/dev/null)" ] && ! systemctl --user is-enabled "$d.service" 2>/dev/null | grep -x masked >/dev/null; then
-      systemctl --user mask --now "$d.service" >/dev/null 2>&1 && info "$(t "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")." "$d (notifications) disabled: notifications go through $([ "$ILE" = quickshell ] && echo "the island" || echo "Noctalia").")"
+      systemctl --user mask --now "$d.service" >/dev/null 2>&1 && noter_silencieux "$d.service masqué (notifications : l'île ou Noctalia les remplace)" "pour revenir : systemctl --user unmask $d.service" && info "$(t "$d (notifications) désactivé : les notifications passent par $([ "$ILE" = quickshell ] && echo "l'île" || echo "Noctalia")." "$d (notifications) disabled: notifications go through $([ "$ILE" = quickshell ] && echo "the island" || echo "Noctalia").")"
     fi
   done
   # Dossier des fonds différent du défaut : le .path le surveille (drop-in), avant son démarrage
   "$HOME/.local/bin/nc-carousel-thumbs" --surveillance >/dev/null 2>&1 || true
-  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer nc-alertes.timer hypridle.service >/dev/null 2>&1 ||
+  systemctl --user enable --now nc-theme-sync.path nc-carousel-thumbs.path nc-maj-verif.timer nc-paquets.timer nc-alertes.timer hypridle.service >/dev/null 2>&1 &&
+    noter_silencieux "services et minuteries systemd de ta session (nc-theme-sync.path, nc-carousel-thumbs.path, nc-maj-verif.timer, nc-paquets.timer, nc-alertes.timer, hypridle)" "pour les arrêter : systemctl --user disable --now NOM (leurs unités sont dans ~/.config/systemd/user)" ||
     warn "$(t "Certains services n'ont pas pu démarrer maintenant : ils démarreront à la prochaine session." "Some services couldn't start now: they'll start in your next session.")"
   "$HOME/.local/bin/nc-theme-sync" >/dev/null 2>&1 || true
   # Première installation : quelques choix, tout de suite (tout se change ensuite avec nc-reglages)
   if [ "$PREMIERE" = 1 ]; then
     R="$HOME/.local/bin/nc-reglages"
     say "$(t "Quelques choix pour commencer (modifiables ensuite : nc-reglages)" "A few choices to start with (you can change them later: nc-settings)")"
-    choisir "$(t "Style du bureau :" "Desktop style:")" "$(t "noctalia-config : les couleurs de ton fond d'écran" "noctalia-config: your wallpaper's colors")" "$(t "Apple : façon macOS et iPhone" "Apple: macOS and iPhone style")" \
+    choisir "$(t "Style du bureau :" "Desktop style:")" "noctalia-config $(t "(les couleurs de ton fond d'écran)" "(your wallpaper's colors)")" "Apple (macOS, iPhone)" \
       "$(t "Noir pur (écran OLED)" "Pure black (OLED display)")" "Nord" "Catppuccin"
     case "$CHOIX" in 2) "$R" set STYLE apple ;; 3) "$R" set STYLE oled ;; 4) "$R" set STYLE nord ;; 5) "$R" set STYLE catppuccin ;; esac >/dev/null 2>&1
     ask "$(t "Thème sombre ?" "Dark theme?")" o || "$R" set THEME_MODE light >/dev/null 2>&1
@@ -1589,7 +1716,7 @@ if [ "$MODE" = full ]; then
     fi
     if [ -n "$BATLIM" ] && [ ! -f /etc/tlp.d/20-battery-limit.conf ]; then
       info "$(t "Ta batterie accepte une limite de charge (environ 80 %), qui la préserve si le PC reste souvent branché." "Your battery supports a charge limit (about 80%), which preserves it if the PC is often plugged in.")"
-      if ask "$(t "Activer cette limite de charge ?" "Enable this charge limit?")" o; then
+      if ask "$(t "Activer cette limite de charge ?" "Enable this charge limit?")" o sensible; then
         printf '%s\n' "$BATLIM" | sudo install -Dm0644 /dev/stdin /etc/tlp.d/20-battery-limit.conf; ch=0
       fi
     fi
@@ -1613,7 +1740,7 @@ if [ "$MODE" = full ]; then
   elif [ "$LAPTOP" = 1 ] && tlp_dispo; then
     info "$(t "Portable : TLP et tlp-pd, avec des réglages valables pour tout portable (processeur, turbo, carte PCIe, plateforme)." "Laptop: TLP and tlp-pd, with settings that suit any laptop (processor, turbo, PCIe card, platform).")"
     [ -n "$ppd" ] && info "$(t "Ils remplacent $ppd (même fonctionnement depuis la barre)." "They replace $ppd (works the same from the bar).")"
-    if ask "$(t "Installer ces profils énergétiques ?" "Install these power profiles?")" o; then
+    if ask "$(t "Installer ces profils énergétiques ?" "Install these power profiles?")" o sensible; then
       sbackup /etc/tlp.conf /etc/tlp.d
       for u in auto-cpufreq tuned tuned-ppd power-profiles-daemon; do
         if systemctl is-enabled --quiet "$u.service" 2>/dev/null; then
@@ -1646,7 +1773,7 @@ if [ "$MODE" = full ]; then
     svc=power-profiles-daemon
     [ "$FAMILY" = fedora ] && svc=tuned-ppd   # service de profils par défaut de Fedora
     info "$(t "Installe $svc (profils fournis par ta distribution)." "Will install $svc (profiles provided by your distribution).")"
-    if ask "$(t "Installer les profils énergétiques ?" "Install the power profiles?")" o; then
+    if ask "$(t "Installer les profils énergétiques ?" "Install the power profiles?")" o sensible; then
       if pkg_install "$svc" && { [ "$svc" != tuned-ppd ] || sudo systemctl enable --now tuned.service; } && sudo systemctl enable --now "$svc.service"; then
         ok "$(t "Profils actifs." "Profiles active.")"
       else
@@ -1717,7 +1844,7 @@ if [ "$MODE" = full ]; then
   contenu=$'# noctalia-config : un appui sur le bouton d\'arrêt fait apparaître les doigts (nc-finger) au lieu d\'éteindre.\n# Le garder appuyé éteint ; Super + F4 aussi. Pour revenir à l\'arrêt normal : sudo rm '"$bouton"$'\n[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=poweroff'
   if [ "$(cat "$bouton" 2>/dev/null)" = "$contenu" ] && [ ! -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf ]; then
     ok "$(t "Bouton d'arrêt (les doigts) : déjà en place." "Power button (the fingers): already set up.")"
-  elif ask "$(t "Bouton d'arrêt : un appui fait apparaître des doigts au lieu d'éteindre (le garder appuyé éteint) ?" "Power button: a press shows fingers instead of shutting down (holding it still shuts down)?")" o; then
+  elif ask "$(t "Bouton d'arrêt : un appui fait apparaître des doigts au lieu d'éteindre (le garder appuyé éteint) ?" "Power button: a press shows fingers instead of shutting down (holding it still shuts down)?")" o sensible; then
     if printf '%s\n' "$contenu" | sudo install -Dm0644 /dev/stdin "$bouton"; then
       sudo rm -f /etc/systemd/logind.conf.d/50-legion-powerkey.conf
       # Relecture de la config par logind sans le redémarrer (un redémarrage fermerait la session)
@@ -1736,7 +1863,7 @@ if [ "$MODE" = full ]; then
     ok "$(t "Déjà réglé (pays : $cc)." "Already set (country: $cc).")"
   elif [ "$FAMILY" = arch ] && [ -f /etc/conf.d/wireless-regdom ]; then
     info "$(t "Sans pays, le Wi-Fi reste bridé (canaux et puissance au minimum mondial)." "Without a country, Wi-Fi stays restricted (channels and power at the worldwide minimum).")"
-    if ask "$(t "Régler le pays du Wi-Fi ?" "Set the Wi-Fi country?")" o; then
+    if ask "$(t "Régler le pays du Wi-Fi ?" "Set the Wi-Fi country?")" o sensible; then
       dflt="$(echo "${LANG:-fr_FR}" | sed -nE 's/^[a-z]+_([A-Z]{2}).*/\1/p')"; dflt="${dflt:-FR}"
       cc=""
       { true </dev/tty; } 2>/dev/null && { read -r -p "$(t "   Code du pays (2 lettres) [$dflt] " "   Country code (2 letters) [$dflt] ")" cc </dev/tty || cc=""; }
@@ -1917,6 +2044,12 @@ if [ "$MODE" = full ]; then
   if have nmcli && [ -d /etc/NetworkManager ] && ! cmp -s "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" \
        /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf; then
     say "$(t "5d bis. Wi-Fi réactif" "5d bis. Responsive Wi-Fi")"
+    if [ -f /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf ]; then
+      mkdir -p "$BK/system"; cp -a /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf "$BK/system/nc-wifi-sans-veille.conf" 2>/dev/null || true
+      noter_silencieux "NetworkManager : Wi-Fi sans mise en veille (/etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf mis à jour)" "ancienne version : $BK/system/nc-wifi-sans-veille.conf"
+    else
+      noter_silencieux "NetworkManager : Wi-Fi sans mise en veille (/etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf créé)" "pour revenir : sudo rm /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf && sudo nmcli general reload conf"
+    fi
     sudo install -Dm0644 "$REPO/system/networkmanager/nc-wifi-sans-veille.conf" /etc/NetworkManager/conf.d/nc-wifi-sans-veille.conf &&
       sudo nmcli general reload conf >/dev/null 2>&1 || true
     if have iw; then
@@ -1986,6 +2119,16 @@ fi
 
 noter_version
 say "$(t "Terminé" "Done")"
+# Ce qui a été changé sans question, avec où est la sauvegarde ou comment revenir
+if [ ${#SILENCIEUX[@]} -gt 0 ]; then
+  info "$(t "Modifications faites sans te demander (chacune avec sa sauvegarde ou son retour) :" "Changes made without asking (each with its backup or way back):")"
+  mkdir -p "$BK/silencieux"
+  for ligne in "${SILENCIEUX[@]}"; do
+    info "  - ${ligne%%$'\t'*}"
+    info "      ${ligne#*$'\t'}"
+    printf '%s\n    %s\n' "${ligne%%$'\t'*}" "${ligne#*$'\t'}" >> "$BK/silencieux/resume.txt"
+  done
+fi
 info "$(t "Ferme puis rouvre ta session pour que tout s'applique (choisis « Hyprland (uwsm-managed) » sur l'écran de connexion)." "Log out and back in for everything to apply (pick “Hyprland (uwsm-managed)” on the login screen).")"
 info "$(t "Raccourcis : Super+/ affiche la fiche · Super+R recherche · Super+W fonds d'écran · Super+Entrée terminal (liste complète : RACCOURCIS.md)." "Shortcuts: Super+/ shows the cheat sheet · Super+R search · Super+W wallpapers · Super+Enter terminal (full list: RACCOURCIS.md).")"
 [ "$HYBRID" = 1 ] && info "$(t "PC hybride : lancer une appli sur la carte NVIDIA avec « nvidia-run <commande> » (Steam : nvidia-run %command%)." "Hybrid PC: run an app on the NVIDIA card with “nvidia-run <command>” (Steam: nvidia-run %command%).")"

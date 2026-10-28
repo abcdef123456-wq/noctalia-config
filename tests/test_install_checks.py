@@ -278,7 +278,7 @@ class ClavierVariante(unittest.TestCase):
         self.assertEqual(self.relever('X11 Layout: us,fr\nX11 Variant: bepo,\nX11 Options: n/a'), ['us,fr', '', 'grp:win_space_toggle'])
 
     def test_marqueur_rempli_dans_le_sed_de_copie(self):
-        self.assertIn('-e "s|@KB_VARIANT@|$KBV|g"', SOURCE)
+        self.assertIn('KB_VARIANT:"$KBV"', SOURCE)
 
 
 @unittest.skipUnless(shutil.which('lua'), 'lua requis')
