@@ -10,6 +10,11 @@ tant que `"contrat": 1`. Un champ n'est retiré, ou son sens changé, que dans u
   ne le comparez pas. Forme de commande inconnue : code 2, aide sur l'erreur standard.
 - Aucun secret, aucun mot de passe, aucune adresse IP : les connexions sont désignées par leur UUID et leur nom
   (un libellé choisi par l'utilisateur dans NetworkManager). Tout passe par nmcli en arguments, jamais par un shell.
+  Attention : pour un `.ovpn` ou un `.conf` importé, NetworkManager reprend le NOM DU FICHIER, qui est souvent le nom d'hôte
+  du serveur (par exemple `xx-yyy.prod.fournisseur.example_udp`). Ce `nom` peut donc révéler le serveur, et il part tel quel
+  vers un client automatique (JARVIS le relaie à Telegram, au propriétaire du compte). Pour l'éviter : renomme la connexion
+  dans NetworkManager. Idée notée, pas faite : un réglage `VPN_JARVIS_NOMS=non` qui remplacerait le nom par « tunnel 1, 2… »
+  et les 8 premiers caractères de l'UUID dans les réponses de JARVIS.
 
 ## Commandes
 
