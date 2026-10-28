@@ -28,12 +28,24 @@ if os.environ.get("NM_ARRETE") == "1":
 etat = json.loads((R / "etat.json").read_text())
 def sauver(): (R / "etat.json").write_text(json.dumps(etat))
 def esc(s): return s.replace("\\", "\\\\").replace(":", "\\:")
-if a[-2:] == ["connection", "show"]:
+if a[:4] == ["-t", "-g", "vpn.data", "connection"]:
+    vd = R / "vpn_data.json"
+    print((json.loads(vd.read_text()) if vd.exists() else {}).get(a[-1], ""))
+elif a[-2:] == ["connection", "show"]:
     for c in etat:
         print(":".join([c["uuid"], c["type"], "yes" if c["active"] else "no", c["dev"] if c["active"] else "--", esc(c["nom"])]))
 elif a[-1:] == ["general"]:
     print("running")
 elif a[:3] == ["connection", "up", "uuid"]:
+    if "passwd-file" in a:
+        p = Path(a[a.index("passwd-file") + 1])
+        with (R / "passwd.jsonl").open("a") as f:
+            f.write(json.dumps({"chemin": str(p), "mode": stat.S_IMODE(p.stat().st_mode), "mode_dossier": stat.S_IMODE(p.parent.stat().st_mode),
+                                "contenu": p.read_text()}) + "\n")
+    if os.environ.get("NM_ECHEC_UP") == "2":
+        print("Error: Connection activation failed: Secrets were required, but not provided.", file=sys.stderr); sys.exit(4)
+    if os.environ.get("NM_ECHEC_UP") == "3":
+        print("Error: Connection activation failed: bad " + (R / "passwd.jsonl").read_text(), file=sys.stderr); sys.exit(4)
     if os.environ.get("NM_ECHEC_UP") == "1": print("Error: Connection activation failed.", file=sys.stderr); sys.exit(4)
     for c in etat:
         if c["uuid"] == a[3]: c["active"] = True
@@ -67,12 +79,33 @@ import json, os, sys
 from pathlib import Path
 R = Path(os.environ["FAUX_DIR"])
 entree = sys.stdin.buffer.read()
+if sys.argv[1:2] == ["lookup"]:
+    with (R / "secret.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
+    v = R / "secret-valeur"
+    if os.environ.get("SECRET_LOOKUP_ECHEC") == "1":
+        sys.stderr.write("erreur " + v.read_text() + "\n"); sys.stdout.write(v.read_text()); sys.exit(1)
+    if not v.exists(): sys.exit(1)
+    sys.stdout.buffer.write(v.read_bytes()); sys.exit(0)
+if sys.argv[1:2] == ["store"] and os.environ.get("SECRET_ECHEC") not in ("1", "2"): (R / "secret-valeur").write_bytes(entree)
 with (R / "secret.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
 with (R / "secret-stdin").open("ab") as f: f.write(entree)
 if os.environ.get("SECRET_ECHEC") == "1":
     sys.stderr.write("secret-tool: erreur avec " + entree.decode() + "\n"); sys.exit(1)
 if os.environ.get("SECRET_ECHEC") == "2":
     sys.stderr.write("Cannot autolaunch D-Bus without X11 $DISPLAY\n"); sys.exit(1)
+'''
+
+
+# Faux gdbus : répond comme le bus de session. GDBUS_SECRETS=oui (service lancé), activable (installé), non (absent).
+FAUX_GDBUS = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ["FAUX_DIR"]) / "gdbus.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
+m = os.environ.get("GDBUS_SECRETS", "oui")
+if sys.argv[-2:-1] == ["org.freedesktop.DBus.NameHasOwner"] or "org.freedesktop.DBus.NameHasOwner" in sys.argv:
+    print("(%s,)" % ("true" if m == "oui" else "false"))
+else:
+    print("(['org.freedesktop.DBus'%s],)" % (", 'org.freedesktop.secrets'" if m == "activable" else ""))
 '''
 
 
@@ -93,6 +126,9 @@ class BaseVpn(unittest.TestCase):
         n = self.r / "faux-bin" / "nmcli"
         n.write_text(FAUX_NMCLI)
         n.chmod(0o755)
+        gd = self.r / "faux-bin" / "gdbus"
+        gd.write_text(FAUX_GDBUS)
+        gd.chmod(0o755)
         st = self.r / "faux-bin" / "secret-tool"
         st.write_text(FAUX_SECRET_TOOL)
         st.chmod(0o755)

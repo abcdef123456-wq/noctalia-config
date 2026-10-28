@@ -175,9 +175,32 @@ def connecter(u):
     c = connue(u)
     if c["active"]:
         return print(T(f"Déjà connecté : {c['nom']}", f"Already connected: {c['nom']}"))
-    code, _, err = nmcli(["connection", "up", "uuid", u], delai=120)
+    # Mot de passe gardé par le trousseau (password-flags=1) : aucun agent de secrets ne tourne forcément (Hyprland sans nm-applet),
+    # donc on le relit et on le donne à nmcli par un fichier temporaire (format « vpn.secrets.password:… »), jamais en argument
+    agent = c["type"] == "vpn" and mot_de_passe_agent_owned(u)
+    mdp = lire_secret(u) if agent else None
+    d = None
+    try:
+        args = ["connection", "up", "uuid", u]
+        if mdp is not None:
+            d = dossier_prive()
+            fichier = os.path.join(d, "mdp")
+            fd = os.open(fichier, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(("vpn.secrets.password:" + mdp + "\n").encode("utf-8"))
+            args += ["passwd-file", fichier]
+        code, _, err = nmcli(args, delai=120)
+    except OSError:
+        raise Echec(T("Impossible d'écrire le fichier temporaire du mot de passe.", "Could not write the temporary password file."))
+    finally:
+        if d:
+            shutil.rmtree(d, ignore_errors=True)
     if code != 0:
-        raise Echec(T(f"Connexion impossible : {c['nom']}", f"Could not connect: {c['nom']}") + (" (" + court(err) + ")" if court(err) else ""))
+        if agent and mdp is None and re.search(r"secrets? (were|was) required|no secrets", err or "", re.I):
+            raise Echec(T(f"Connexion impossible : {c['nom']} (secret introuvable dans le trousseau : réimporte le profil ou ouvre ton trousseau)",
+                          f"Could not connect: {c['nom']} (secret not found in the keyring: import the profile again or unlock your keyring)"))
+        msg = court(masquer(err, mdp)).replace(d or "\0", "")
+        raise Echec(T(f"Connexion impossible : {c['nom']}", f"Could not connect: {c['nom']}") + (" (" + msg + ")" if msg else ""))
     print(T(f"Connecté : {c['nom']}", f"Connected: {c['nom']}"))
 
 
@@ -325,7 +348,9 @@ def dossier_prive():
 
 BLOC_AUTH_DEBUT = re.compile(r"<\s*auth-user-pass\s*>", re.I)
 BLOC_AUTH_FIN = re.compile(r"<\s*/\s*auth-user-pass\s*>", re.I)
-SCHEMA_NM = "org.freedesktop.NetworkManager.Connection"   # le schéma du trousseau que lisent nm-applet et les agents de NetworkManager
+# Le schéma et les attributs du trousseau de nm-applet et de GNOME Shell (KEYRING_UUID_TAG « connection-uuid »,
+# KEYRING_SN_TAG « setting-name », KEYRING_SK_TAG « setting-key » dans leurs sources)
+SCHEMA_NM = "org.freedesktop.NetworkManager.Connection"
 
 
 def masquer(texte, secret):
@@ -357,15 +382,15 @@ def extraire_auth(texte):
         elif BLOC_AUTH_FIN.fullmatch(ligne):
             lignes = [x.rstrip("\r") for x in bloc]
             if len(lignes) != 2 or not lignes[0].strip() or not lignes[1]:
-                raise Echec(T("Le bloc <auth-user-pass> doit avoir deux lignes : l'identifiant, puis le mot de passe.",
-                              "The <auth-user-pass> block must have two lines: the username, then the password."))
+                raise Echec(T("Le bloc <auth-user-pass> doit avoir deux lignes : l'identifiant, puis le mot de passe (qui ne peut pas contenir de saut de ligne, de retour chariot ni de caractère nul).",
+                              "The <auth-user-pass> block must have two lines: the username, then the password (which cannot contain a line break, a carriage return or a NUL character)."))
             ident, mdp = lignes[0].strip(), lignes[1]
             if re.search(r"[,\\\x00-\x1f\x7f]", ident):
                 raise Echec(T("L'identifiant du bloc <auth-user-pass> contient un caractère non accepté (virgule, antislash ou caractère de contrôle).",
                               "The username in the <auth-user-pass> block contains an unsupported character (comma, backslash or control character)."))
             if re.search(r"[\x00-\x1f\x7f]", mdp):
-                raise Echec(T("Le mot de passe du bloc <auth-user-pass> contient un caractère de contrôle : import refusé.",
-                              "The password in the <auth-user-pass> block contains a control character: import refused."))
+                raise Echec(T("Le mot de passe du bloc <auth-user-pass> contient un saut de ligne, un retour chariot, un caractère nul ou un autre caractère de contrôle : import refusé.",
+                              "The password in the <auth-user-pass> block contains a line break, a carriage return, a NUL or another control character: import refused."))
             bloc, fin = None, (ident, mdp)
         else:
             bloc.append(brute)
@@ -504,11 +529,70 @@ def trousseau_dispo():
     return shutil.which("secret-tool") is not None
 
 
+def attributs_nm(uuid):
+    return ["xdg:schema", SCHEMA_NM, "connection-uuid", uuid, "setting-name", "vpn", "setting-key", "password"]
+
+
+def lire_secret(uuid):
+    """Le mot de passe du trousseau pour cette connexion, ou None (trousseau absent, fermé, entrée absente). Les arguments de
+    secret-tool n'ont pas de secret ; il arrive sur sa sortie, jamais journalisée."""
+    if not trousseau_dispo():
+        return None
+    try:
+        r = subprocess.run(["secret-tool", "lookup"] + attributs_nm(uuid), capture_output=True, timeout=30,
+                           stdin=subprocess.DEVNULL, env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C"))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout:
+        return None
+    try:
+        mdp = r.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if re.search(r"[\x00-\x1f\x7f]", mdp):       # le passwd-file est d'une ligne par secret : \n, \r ou NUL en injecteraient une autre
+        raise Echec(T("Le mot de passe du trousseau contient un saut de ligne ou un caractère de contrôle : connexion refusée. Réimporte le profil.",
+                      "The keyring password contains a line break or a control character: connection refused. Import the profile again."))
+    return mdp
+
+
+def service_secret():
+    """True / False : un service Secret (org.freedesktop.secrets) tourne ou peut être lancé par le bus de session ; None : on ne
+    peut pas le savoir (ni gdbus ni busctl). Ne démarre rien : on interroge seulement le bus, avec un délai court."""
+    env = dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C")
+    nom = "org.freedesktop.secrets"
+    if shutil.which("gdbus"):
+        base = ["gdbus", "call", "--session", "--timeout", "3", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus", "--method"]
+        essais = [(base + ["org.freedesktop.DBus.NameHasOwner", nom], lambda o: "true" in o),
+                  (base + ["org.freedesktop.DBus.ListActivatableNames"], lambda o: "'" + nom + "'" in o)]
+    elif shutil.which("busctl"):
+        base = ["busctl", "--user", "--timeout=3", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus"]
+        essais = [(base + ["NameHasOwner", "s", nom], lambda o: o.split()[-1:] == ["true"]),
+                  (base + ["ListActivatableNames"], lambda o: '"' + nom + '"' in o)]
+    else:
+        return None
+    reponse = False
+    for args, ok in essais:
+        try:
+            r = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=5, env=env, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            reponse = True
+            if ok(r.stdout):
+                return True
+    return False if reponse else None
+
+
+def mot_de_passe_agent_owned(uuid):
+    """Vrai si la connexion VPN garde son mot de passe chez un agent (password-flags=1)."""
+    code, out, _ = nmcli(["-t", "-g", "vpn.data", "connection", "show", "uuid", uuid])
+    return code == 0 and re.search(r"(^|[\s,])password-flags\s*=\s*1\s*(,|$)", out.strip().replace("\\", "")) is not None
+
+
 def garder_secret(uuid, mdp):
     """Range le mot de passe dans le trousseau (service Secret du bus de session), avec les attributs que NetworkManager
     lit pour ce VPN. Le secret passe par l'entrée standard de secret-tool, jamais par ses arguments."""
-    args = ["secret-tool", "store", "--label=" + "NetworkManager VPN " + uuid, "xdg:schema", SCHEMA_NM,
-            "connection-uuid", uuid, "setting-name", "vpn", "setting-key", "password"]
+    args = ["secret-tool", "store", "--label=" + "NetworkManager VPN " + uuid] + attributs_nm(uuid)
     try:
         r = subprocess.run(args, input=mdp.encode("utf-8"), capture_output=True, timeout=60,
                            env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C"))
@@ -554,8 +638,15 @@ def importer(chemin):
     if not nmcli(["-t", "-f", "RUNNING", "general"])[1].strip() == "running":
         raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
     if mdp is not None and not trousseau_dispo():
-        raise Echec(T("Ce fichier contient un mot de passe, à ranger dans le trousseau, mais secret-tool est absent (paquet libsecret ; libsecret-tools sur Debian et openSUSE). Import refusé.",
-                      "This file holds a password, to be stored in the keyring, but secret-tool is missing (libsecret package; libsecret-tools on Debian and openSUSE). Import refused."))
+        raise Echec(T("Ce fichier contient un mot de passe, à ranger dans le trousseau, mais secret-tool est absent (paquet libsecret sur Arch et Fedora, libsecret-tools sur Debian, secret-tool sur openSUSE). Import refusé.",
+                      "This file holds a password, to be stored in the keyring, but secret-tool is missing (libsecret package on Arch and Fedora, libsecret-tools on Debian, secret-tool on openSUSE). Import refused."))
+    if mdp is not None and service_secret() is False:
+        raise Echec(T("Ce fichier contient un mot de passe, à ranger dans le trousseau, mais aucun service Secret ne répond sur le bus de la session. "
+                      "Installe et lance un trousseau : gnome-keyring (Arch, Debian, Fedora, openSUSE : paquet gnome-keyring), ou KeePassXC (paquet keepassxc) "
+                      "avec l'intégration Secret Service activée. Import refusé.",
+                      "This file holds a password, to be stored in the keyring, but no Secret service answers on the session bus. "
+                      "Install and start a keyring: gnome-keyring (Arch, Debian, Fedora, openSUSE: package gnome-keyring), or KeePassXC (package keepassxc) "
+                      "with the Secret Service integration enabled. Import refused."))
     user = utilisateur()
     avant = {c["uuid"] for c in etat().get("connexions", [])}
     sur = re.sub(r"[^A-Za-z0-9._-]", "_", nom)[:60] or "vpn" + ext

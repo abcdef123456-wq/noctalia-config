@@ -258,7 +258,7 @@ l'île Quickshell.
   un fichier de plus de 64 Kio ; les certificats donnés par un chemin relatif (`ca`, `cert`, `key`, `tls-auth`…) sont lus depuis le
   dossier du `.ovpn` et mis dans une copie (PEM texte seulement) ; un bloc
   `<auth-user-pass>` (identifiant puis mot de passe) est accepté : le mot de passe va dans le trousseau de la session
-  (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian et openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
+  (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian, `secret-tool` sur openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
   jamais dans un fichier, et l'import est refusé s'il manque ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier
   vert est devant l'heure de la pilule tant qu'un tunnel est monté (`VPN_INDICATEUR`, oui par défaut). Mise à jour sur les
   événements de NetworkManager (`nmcli monitor`), jamais en boucle, rien écran éteint ; pendant un partage d'écran, noms,

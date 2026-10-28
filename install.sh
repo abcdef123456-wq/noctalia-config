@@ -302,7 +302,8 @@ pname() {
     nm-openvpn:*) echo NetworkManager-openvpn ;;
     # Mot de passe d'un .ovpn (nc-vpn) : rangé dans le trousseau avec secret-tool. Il faut aussi un service Secret ouvert
     # (gnome-keyring, KeePassXC, KWallet) : on ne l'impose pas, nc-vpn refuse l'import s'il manque
-    secret-tool:debian|secret-tool:suse) echo libsecret-tools ;;
+    secret-tool:debian) echo libsecret-tools ;;        # openSUSE : le paquet s'appelle secret-tool (vérifié dans le dépôt Tumbleweed)
+    secret-tool:suse) echo secret-tool ;;
     secret-tool:*) echo libsecret ;;
     *) echo "$1" ;;
   esac

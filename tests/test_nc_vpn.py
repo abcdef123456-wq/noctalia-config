@@ -130,7 +130,7 @@ class Installation(unittest.TestCase):
         texte = (REPO / "install.sh").read_text()
         debut = texte.index("pname() {")
         fonction = texte[debut:texte.index("\n}\n", debut) + 3]
-        for famille, attendu in (("arch", "libsecret"), ("debian", "libsecret-tools"), ("fedora", "libsecret"), ("suse", "libsecret-tools")):
+        for famille, attendu in (("arch", "libsecret"), ("debian", "libsecret-tools"), ("fedora", "libsecret"), ("suse", "secret-tool")):
             r = subprocess.run(["bash", "-c", fonction + f"FAMILY={famille}; pname secret-tool"], capture_output=True, text=True)
             self.assertEqual(r.stdout.strip(), attendu, famille)
         i = texte.index("FACULTATIFS=(")

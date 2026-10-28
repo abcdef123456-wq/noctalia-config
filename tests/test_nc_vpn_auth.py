@@ -34,7 +34,7 @@ class Auth(BaseVpn):
             if racine == str(self.r):
                 dossiers[:] = [d for d in dossiers if d != "home"]       # « home » tient l'original du test, qui a le mot de passe
             for f in fichiers:
-                if f in ("secret-stdin", "nmcli", "secret-tool"):
+                if f in ("secret-stdin", "secret-valeur", "nmcli", "secret-tool", "gdbus"):
                     continue
                 try:
                     brut += (self.r / racine / f).read_text(errors="replace")
@@ -131,6 +131,42 @@ class Auth(BaseVpn):
             self.assertNotIn(MDP, r.stdout + r.stderr, nom)
         self.assertEqual(self.imports(), [])
         self.assertEqual(self.secret_appels(), [])
+
+    def test_mot_de_passe_avec_saut_de_ligne_retour_chariot_ou_nul_refuse(self):
+        for nom, c in (("lf", "\n"), ("cr", "\r"), ("nul", "\0"), ("ff", "\x0c"), ("ls", "\u2028")):
+            txt = BASE + "<auth-user-pass>\nmoi\nAAAA" + c + "vpn.secrets.autre:BBBB\n</auth-user-pass>\n"
+            r = self.vpn("importer", str(self.ecrire(nom + ".ovpn", txt)))
+            self.assertEqual(r.returncode, 1, nom)
+            self.assertTrue("auth-user-pass" in r.stderr or nom == "nul", r.stderr)
+            self.assertNotIn("AAAA", r.stdout + r.stderr)
+        self.assertEqual(self.imports(), [])
+        self.assertEqual(self.secret_appels(), [])
+
+    def test_aucun_service_secret_dit_quoi_installer(self):
+        r = self.vpn("importer", str(self.ecrire("a.ovpn", AVEC)), GDBUS_SECRETS="non")
+        self.assertEqual(r.returncode, 1)
+        for mot in ("gnome-keyring", "keepassxc", "Secret Service"):
+            self.assertIn(mot, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(self.imports(), [])
+        self.assertEqual(self.secret_appels(), [])
+        r = self.vpn("importer", str(self.ecrire("a.ovpn", AVEC)), GDBUS_SECRETS="non", NC_LANGUE="en")
+        self.assertIn("gnome-keyring", r.stderr)
+        self.assertIn("no Secret service", r.stderr)
+        # sans mot de passe dans le fichier, le bus n'est même pas interrogé
+        self.assertEqual(self.vpn("importer", str(self.ecrire("b.ovpn", BASE)), GDBUS_SECRETS="non").returncode, 0)
+
+    def test_service_secret_lance_ou_activable_accepte_et_rien_n_est_demarre(self):
+        for mode in ("oui", "activable"):
+            r = self.vpn("importer", str(self.ecrire(mode + ".ovpn", AVEC)), GDBUS_SECRETS=mode)
+            self.assertEqual(r.returncode, 0, (mode, r.stderr))
+        appels = [json.loads(l) for l in (self.r / "gdbus.jsonl").read_text().splitlines()]
+        for a in appels:                                        # seulement des questions au bus, avec un délai court
+            self.assertEqual(a[0], "call")
+            self.assertIn("--session", a)
+            self.assertEqual(a[a.index("--timeout") + 1], "3")
+            self.assertTrue(any(x.endswith(("NameHasOwner", "ListActivatableNames")) for x in a), a)
+            self.assertNotIn("StartServiceByName", " ".join(a))
 
     def test_bloc_dans_un_conf_wireguard_toujours_refuse(self):
         r = self.vpn("importer", str(self.ecrire("a.conf", "[Interface]\nPrivateKey = x\n<auth-user-pass>\nmoi\n" + MDP + "\n</auth-user-pass>\n")))
