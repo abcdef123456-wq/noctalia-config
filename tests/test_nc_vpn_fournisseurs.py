@@ -6,7 +6,7 @@ import unittest
 from tests._vpn_faux import BaseVpn
 from tests.test_nc_vpn_nord import ANSI_COMPTE, PAYS
 
-CLES = {"id", "nom", "etat", "message", "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}
+CLES = {"id", "nom", "etat", "message", "pays_actif", "connecte", "peut_login", "probleme", "pilotage", "pays_probleme"}
 
 
 class Fournisseurs(BaseVpn):

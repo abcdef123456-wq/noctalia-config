@@ -103,7 +103,7 @@ Singleton {
         var x = externe[id]
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
         return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
-                 connecte: x.connecte, probleme: x.probleme }
+                 connecte: x.connecte, probleme: x.probleme, paysProbleme: x.paysProbleme }
     }
     // « 🇫🇷 » pour « FR » ; vide si le code n'est pas deux lettres majuscules
     function drapeauDe(cc) {
@@ -168,7 +168,8 @@ Singleton {
                               etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
                               paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
                               connecte: x.connecte === true, peutLogin: x.peut_login === true,
-                              probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "" }
+                              probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "",
+                              paysProbleme: x.pays_probleme === "delai" ? "delai" : "" }
             })
         }
         v.externe = res

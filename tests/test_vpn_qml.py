@@ -705,6 +705,27 @@ class HorsEcran(unittest.TestCase):
         self.assertNotIn(["fournisseurs-json"], appels[i + 1:], "relire() pendant une action ne lance pas de lecture externe")
         self.assertEqual([a for a in appels if a[:1] == ["fournisseurs-json"] and a not in (["fournisseurs-json"], ["fournisseurs-json", "--verifier-proton"])], [])
 
+    def test_proton_liste_des_pays_en_delai_message_et_reessayer(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="", pays=[], pays_actif="", connecte=False, peut_login=False, probleme="",
+                   pilotage="direct", pays_probleme="delai")]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 5) return
+                    var tx = textes(trouver(fen.contentItem, "nc-vpn-liste-zone")).join("|")
+                    verifier(tx.indexOf("Liste des pays indisponible (délai dépassé)") >= 0, "message : " + tx)
+                    var b = trouver(fen.contentItem, "nc-vpn-reessayer")
+                    verifier(b !== null && b.visible && textes(b).join("").indexOf("Réessayer") >= 0, "bouton Réessayer")
+                    t.mouseClick(b); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(appels.count(["fournisseurs-json", "--verifier-proton"]), 2, "ouverture de l'onglet puis Réessayer")
+
     def test_proton_application_ouverte_message_de_nc_vpn_et_tout_deconnecter_sans_ouvrir_l_appli(self):
         fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", pays_actif="fr", connecte=True, peut_login=True,
                    message="Ferme l'application Proton VPN pour piloter depuis l'île : la CLI et l'application ne tournent pas ensemble.",

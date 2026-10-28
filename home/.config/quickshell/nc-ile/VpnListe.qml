@@ -13,12 +13,16 @@ Item {
     property string filtre: "tous"
     property string recherche: ""
     property real maxHauteur: 300
-    height: carteEtat ? carte.height : Math.min(maxHauteur, Math.max(vide.visible ? vide.implicitHeight : 0, colonne.implicitHeight))
+    height: carteEtat ? carte.height : (paysIndispo ? vide.implicitHeight + 8 + reessayer.height
+                                                     : Math.min(maxHauteur, Math.max(vide.visible ? vide.implicitHeight : 0, colonne.implicitHeight)))
 
     // L'onglet Proton ouvert : seul moment (avec la fin d'une connexion au compte) où `protonvpn info` est lancé (une fois par ouverture)
     onFiltreChanged: if (filtre === "proton") VpnEtat.verifierProton(false)
     Component.onCompleted: if (filtre === "proton") VpnEtat.verifierProton(false)
     readonly property var fiche: VpnEtat.fournisseurs.find(p => p.id === filtre) || null
+    // Compte valide mais `countries list` a dépassé son délai : un message et « Réessayer », jamais une liste vide muette
+    readonly property bool paysIndispo: fiche !== null && !fiche.bientot && fiche.etat === "pret" && fiche.paysProbleme === "delai" && filtre === fiche.id
+                                        && liste.length === 0
     readonly property bool carteEtat: fiche !== null && (fiche.bientot || fiche.etat !== "pret")
 
     function lignes() {
@@ -68,9 +72,23 @@ Item {
         visible: !l.carteEtat && l.liste.length === 0
         anchors.left: parent.left; anchors.right: parent.right
         wrapMode: Text.Wrap; secondaire: true; font.pixelSize: 12
-        text: l.recherche.trim() !== "" ? Reglages.t("Aucun résultat pour cette recherche.", "No result for this search.")
+        text: l.paysIndispo ? Reglages.t("Liste des pays indisponible (délai dépassé).", "Country list unavailable (timed out).")
+              : l.recherche.trim() !== "" ? Reglages.t("Aucun résultat pour cette recherche.", "No result for this search.")
               : (l.filtre === "perso" || VpnEtat.connexions.length === 0 ? Reglages.t("Aucun profil. Importe un fichier .ovpn ou .conf (« Importer un profil »).", "No profile. Import an .ovpn or .conf file (\"Import a profile\").")
                                                                          : Reglages.t("Rien à afficher.", "Nothing to show."))
+    }
+    Rectangle {
+        id: reessayer
+        objectName: "nc-vpn-reessayer"
+        visible: l.paysIndispo
+        anchors.top: vide.bottom; anchors.topMargin: 8
+        width: libelleReessayer.implicitWidth + 32; height: 32; radius: 16
+        color: zoneReessayer.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
+        opacity: VpnEtat.cible === "" ? 1 : 0.6
+        Accessible.role: Accessible.Button
+        Accessible.name: libelleReessayer.text
+        Texte { id: libelleReessayer; anchors.centerIn: parent; text: Reglages.t("Réessayer", "Retry"); font.pixelSize: 12; font.weight: Font.DemiBold }
+        MouseArea { id: zoneReessayer; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: VpnEtat.verifierProton(true) }
     }
     Flickable {
         objectName: "nc-vpn-liste"

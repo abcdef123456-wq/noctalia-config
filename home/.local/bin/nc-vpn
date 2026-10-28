@@ -1329,14 +1329,17 @@ def message_probleme(fid, probleme):
     return T(f"{nom} n'a pas pu être lancé.", f"{nom} could not be run.")
 
 
-def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct"):
-    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret »."""
+def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct",
+          pays_probleme=""):
+    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret » ; « pays_probleme » (« delai » ou vide) dit pourquoi la
+    liste des pays manque alors que le compte est valide."""
     f = {"id": fid, "nom": nom, "etat": etat_, "message": message}
     if etat_ == "pret":
         f["pays"] = pays or []
     f.update({"pays_actif": pays_actif if etat_ in ("pret", "pilote_appli") else "",
               "connecte": bool(connecte) and etat_ in ("pret", "pilote_appli"),
-              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage})
+              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage,
+              "pays_probleme": pays_probleme if etat_ == "pret" else ""})
     return f
 
 
@@ -1608,9 +1611,11 @@ def proton_cache_lire():
     except (OSError, ValueError):
         return None
     if not isinstance(d, dict) or d.get("compte") not in (True, False, None) or not isinstance(d.get("appli_ouverte"), bool) \
-            or d.get("probleme", "") not in ("", "delai", "lancement", "illisible") or not isinstance(d.get("pays"), list):
+            or d.get("probleme", "") not in ("", "delai", "lancement", "illisible") or not isinstance(d.get("pays"), list) \
+            or d.get("pays_probleme", "") not in ("", "delai"):
         return None
     return {"appli_ouverte": d["appli_ouverte"], "compte": d["compte"], "probleme": d.get("probleme", ""),
+            "pays_probleme": d.get("pays_probleme", ""),
             "pays": [c for c in d["pays"][:300] if isinstance(c, str) and c in ISO_PAYS]}
 
 
@@ -1622,7 +1627,8 @@ def proton_cache_ecrire(r):
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"appli_ouverte": r["appli_ouverte"], "compte": r["compte"], "probleme": r["probleme"], "pays": r["pays"]}, f)
+            json.dump({"appli_ouverte": r["appli_ouverte"], "compte": r["compte"], "probleme": r["probleme"], "pays": r["pays"],
+                       "pays_probleme": r["pays_probleme"]}, f)
         os.replace(tmp, chemin)
     except OSError:
         try:
@@ -1655,11 +1661,19 @@ def proton_pays_serveur(nom):
     return iso(mots[0])
 
 
+def delai_pays_proton():
+    """20 s pour `countries list` ; NC_VPN_PROTON_DELAI_PAYS (1 à 60) ne sert qu'aux tests."""
+    try:
+        return min(60.0, max(1.0, float(os.environ.get("NC_VPN_PROTON_DELAI_PAYS", "20"))))
+    except ValueError:
+        return 20.0
+
+
 def proton_lire_cli():
     """Relevé EXPLICITE de la CLI, réduit à des booléens et des codes : {"appli_ouverte", "compte" (True/False/None inconnu), "pays"
     (codes ISO), "probleme"}. `info` d'abord ; la liste des pays seulement avec un compte, et si elle dépasse son délai on s'arrête là.
     Jamais `status` (voir plus haut). L'appelant tient le verrou et a vérifié qu'aucun tunnel Proton ne monte."""
-    r = {"appli_ouverte": False, "compte": None, "pays": [], "probleme": ""}
+    r = {"appli_ouverte": False, "compte": None, "pays": [], "probleme": "", "pays_probleme": ""}
     code, t = cli_fournisseur("protonvpn", ["info"], 10)
     if code in (124, 126):
         r["probleme"] = "delai" if code == 124 else "lancement"
@@ -1675,7 +1689,10 @@ def proton_lire_cli():
     del m, t                                    # le nom de compte n'est gardé nulle part
     if not r["compte"]:
         return r
-    code, t = cli_fournisseur("protonvpn", ["countries", "list"], 20)
+    code, t = cli_fournisseur("protonvpn", ["countries", "list"], delai_pays_proton())
+    if code == 124:                             # délai dépassé : le compte reste valide, la liste manque (dit à l'utilisateur)
+        r["pays_probleme"] = "delai"
+        return r
     if PROTON_APPLI_OUVERTE.search(t):
         r["appli_ouverte"] = True
         return r
@@ -1757,7 +1774,7 @@ def proton_fournisseur():
     monte, pays_nm, _ = proton_tunnel_nm()
     pays = sorted(({"code": x, "nom": nom_pays(x)} for x in c["pays"]), key=lambda x: cle_nom(x["nom"]))
     return fiche("proton", "Proton VPN", "pret", T("Compte Proton VPN connecté.", "Proton VPN account signed in."), pays=pays,
-                 pays_actif=pays_nm, connecte=monte)
+                 pays_actif=pays_nm, connecte=monte, pays_probleme=c["pays_probleme"])
 
 
 def proton_ouvrir(message):

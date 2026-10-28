@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 from tests._vpn_faux import BaseVpn, BIN, connexions
 from tests.test_nc_vpn_securite_v6 import FAUX_SUDO, charger
@@ -151,6 +152,38 @@ class ProtonCli(BaseVpn):
         fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.fiche()                                                             # verrou tenu : le relevé précédent sert, rien de plus
         self.assertEqual(len(self.appels_de("protonvpn")), 2)
+
+    def test_delai_de_la_liste_des_pays_compte_valide_et_reessayer(self):
+        self.cli(countries={"dormir": 4, "out": PAYS})
+        f = self.fiche(NC_VPN_PROTON_DELAI_PAYS="1")
+        self.assertEqual((f["etat"], f["pays"], f["pays_probleme"], f["probleme"]), ("pret", [], "delai", ""))   # le compte reste valide
+        self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"]])
+        auto = self.fiche(verifier=False)                                        # lecture automatique : même constat, aucun appel de plus
+        self.assertEqual((auto["etat"], auto["pays_probleme"]), ("pret", "delai"))
+        self.assertEqual(len(self.appels_de("protonvpn")), 2)
+        self.cli()                                                               # « Réessayer » : la vérification explicite, la liste revient
+        f = self.fiche()
+        self.assertEqual((f["pays_probleme"], [p["code"] for p in f["pays"]]), ("", ["DE", "FR", "SE"]))
+        self.assertEqual(self.fiche(verifier=False)["pays_probleme"], "")
+
+    def test_menage_des_dossiers_abandonnes_ne_touche_jamais_au_cache_proton(self):
+        """nettoyer_abandonnes ne vise que des DOSSIERS nc-vpn-* : le cache Proton (un fichier) et le verrou restent, même très vieux."""
+        self.cli()
+        self.fiche()
+        run = self.r / "run"
+        cache, verrou = run / "nc-vpn-proton.json", run / "nc-vpn.lock"
+        vieux = run / "nc-vpn-abandonne"
+        vieux.mkdir(mode=0o700)
+        verrou.touch()
+        avant = cache.read_text()
+        for chemin in (cache, verrou, vieux):
+            os.utime(chemin, (time.time() - 7200, time.time() - 7200))
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(run)}):
+            charger().nettoyer_abandonnes(600)
+        self.assertTrue(cache.is_file())
+        self.assertEqual(cache.read_text(), avant)
+        self.assertTrue(verrou.exists())
+        self.assertFalse(vieux.exists(), "le ménage reste actif pour les vrais dossiers abandonnés")
 
     def test_verification_refusee_pendant_la_montee_du_tunnel(self):
         self.cli()
