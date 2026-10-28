@@ -95,6 +95,8 @@ PanelWindow {
                 spacing: 10; height: 28
                 Ico { anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 22; color: VpnEtat.actif ? Couleurs.vert : Couleurs.accent }
                 Texte { anchors.verticalCenter: parent.verticalCenter; text: "VPN"; font.pixelSize: 18; font.weight: Font.Bold }
+                Texte { objectName: "nc-vpn-resume"; anchors.verticalCenter: parent.verticalCenter; visible: VpnEtat.indicateur
+                        text: VpnEtat.libelle; secondaire: true; font.pixelSize: 12 }
             }
 
             // ── NetworkManager absent ──
@@ -171,6 +173,22 @@ PanelWindow {
                 width: parent.width; wrapMode: Text.Wrap; secondaire: true
                 text: Reglages.t("Aucune connexion VPN ou WireGuard. Importe un fichier .ovpn ou .conf.",
                                  "No VPN or WireGuard connection. Import an .ovpn or .conf file.")
+            }
+
+            // ── Application Mullvad (hors NetworkManager) : seulement si la commande `mullvad` existe ──
+            VpnMullvad {
+                objectName: "nc-vpn-mullvad"
+                width: parent.width
+            }
+
+            // ── Protections : rien de réel pour l'instant, donc pas de bouton ──
+            Column {
+                objectName: "nc-vpn-protections"
+                visible: VpnEtat.disponible
+                width: parent.width; spacing: 4
+                Texte { width: parent.width; secondaire: true; font.pixelSize: 12; text: Reglages.t("Protections", "Protections") }
+                Texte { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12
+                        text: Reglages.t("Bientôt.", "Coming soon.") }
             }
 
             // ── Le dernier message de nc-vpn (texte brut) ──

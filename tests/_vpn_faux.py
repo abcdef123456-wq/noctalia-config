@@ -61,6 +61,25 @@ elif a[:2] == ["connection", "delete"]:
 '''
 
 
+# Faux `mullvad` : note seulement ses arguments (appels-mullvad.jsonl) ; sa sortie vient de mullvad.json s'il existe :
+# {"json": "…", "texte": "…", "code": 0}. Par défaut : déconnecté. Jamais la vraie commande.
+FAUX_MULLVAD = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+R = Path(os.environ["FAUX_DIR"])
+a = sys.argv[1:]
+with (R / "appels-mullvad.jsonl").open("a") as f: f.write(json.dumps(a) + "\n")
+conf = json.loads((R / "mullvad.json").read_text()) if (R / "mullvad.json").exists() else {}
+if a[:2] == ["status", "--json"]:
+    if "json" not in conf: sys.exit(2)
+    print(conf["json"]); sys.exit(conf.get("code", 0))
+elif a[:1] == ["status"]:
+    print(conf.get("texte", "Disconnected")); sys.exit(conf.get("code", 0))
+elif conf.get("echec"):
+    print(conf["echec"], file=sys.stderr); sys.exit(1)
+'''
+
+
 def connexions():
     return [dict(uuid=U1, type="vpn", active=False, dev="tun0", nom="Labo"),
             dict(uuid=U2, type="wireguard", active=True, dev="wg-maison", nom="Maison: 192.0.2.1"),
@@ -78,6 +97,9 @@ class BaseVpn(unittest.TestCase):
         n = self.r / "faux-bin" / "nmcli"
         n.write_text(FAUX_NMCLI)
         n.chmod(0o755)
+        mv = self.r / "faux-bin" / "mullvad"
+        mv.write_text(FAUX_MULLVAD)
+        mv.chmod(0o755)
         (self.r / "etat.json").write_text(json.dumps(connexions()))
 
     def env(self, **plus):
@@ -93,6 +115,10 @@ class BaseVpn(unittest.TestCase):
     def vpn(self, *args, **plus):
         return subprocess.run([sys.executable, str(BIN)] + list(args), env=self.env(**plus), capture_output=True, text=True, timeout=30,
                               stdin=subprocess.DEVNULL)
+
+    def appels_mullvad(self):
+        p = self.r / "appels-mullvad.jsonl"
+        return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
 
     def appels(self):
         p = self.r / "appels.jsonl"

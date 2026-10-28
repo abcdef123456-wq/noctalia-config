@@ -129,6 +129,10 @@ ShellRoot {
             onFermer: racine.vpnOuvert = false
         }
     }
+    Connections {
+        target: VpnEtat
+        function onOuvrirPanneau() { if (!racine.vpnOuvert) { Etat.fermer(); Hyprland.refreshMonitors(); racine.vpnOuvert = true } }
+    }
     // Coins actifs (nc-reglages → Clavier et souris)
     Variants {
         model: Quickshell.screens

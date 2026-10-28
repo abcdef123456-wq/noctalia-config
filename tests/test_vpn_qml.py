@@ -28,6 +28,21 @@ if a[:1] == ["etat-json"]:
     n = sum(1 for l in open(H + "/appels") if json.loads(l) == ["etat-json"]) - 1
     f = H + "/etat-%d.json" % n
     print(open(f if os.path.exists(f) else H + "/etat.json").read())
+elif a[:2] == ["indicateur", "--json"]:
+    n = sum(1 for l in open(H + "/appels") if json.loads(l) == ["indicateur", "--json"]) - 1
+    f = H + "/etat-%d.json" % n
+    e = json.loads(open(f if os.path.exists(f) else H + "/etat.json").read())
+    act = e.get("actives", [])
+    if not e.get("disponible"):
+        print(json.dumps(dict(disponible=False, actif=False, fournisseur="", pays="", nom="", nombre=0)))
+    elif not act:
+        print(json.dumps(dict(disponible=True, actif=False, fournisseur="", pays="", nom="", nombre=0, mullvad=e.get("mullvad", False))))
+    else:
+        print(json.dumps(dict(disponible=True, actif=True, fournisseur=act[0].get("fournisseur", ""), pays=act[0].get("pays", ""),
+                              nom=act[0]["nom"], nombre=len(act), mullvad=e.get("mullvad", False))))
+elif a[:2] == ["mullvad", "etat-json"]:
+    e = json.loads(open(H + "/etat.json").read())
+    print(json.dumps(e.get("mullvad_etat", dict(installe=False))))
 elif a[:1] == ["ip-publique"]:
     print('{"ip": "203.0.113.7"}')
 '''
@@ -38,6 +53,13 @@ open(H + "/appels-nmcli", "a").write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1:] == ["monitor"]:
     time.sleep(1.0)
     print("tun0: connected", flush=True)
+    time.sleep(20)
+'''
+FAUX_MULLVAD = r'''#!/usr/bin/env python3
+import os, sys, time
+H = os.environ["HOME"]
+open(H + "/appels-mullvad", "a").write(" ".join(sys.argv[1:]) + "\n")
+if sys.argv[1:] == ["status", "listen"]:
     time.sleep(20)
 '''
 LIGNE_J = lambda uuid, nom, typ, active, iface: dict(uuid=uuid, nom=nom, type=typ, active=active, interface=iface if active else "")
@@ -102,6 +124,9 @@ class Sources(unittest.TestCase):
         self.assertIn('namespace = "^nc-vpn$"', (REPO / "home/.config/hypr/nc/regles.lua").read_text())
         compact = (QML / "Compact.qml").read_text()
         self.assertIn("visible: VpnEtat.indicateur", compact)
+        self.assertIn("VpnEtat.libelle", compact)
+        self.assertIn("VpnEtat.demanderPanneau()", (QML / "Ile.qml").read_text())       # un clic sur l'indicateur ouvre le panneau complet
+        self.assertIn("onOuvrirPanneau", self.shell)
         self.assertEqual(lua.count('SUPER .. " + ALT + code:55"'), 1)
 
     def test_aucune_ligne_de_shell_construite_avec_un_nom(self):
@@ -114,11 +139,12 @@ class HorsEcran(unittest.TestCase):
     def lancer(self, corps, etats=None, reglages=None, delai=30):
         """etats : {0: état de départ, 1: état à la 2e lecture…} ; renvoie (journal de qs, appels de nc-vpn, appels de nmcli)."""
         with tempfile.TemporaryDirectory(prefix="nc-vpnqml-") as d:
-            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "VpnEtat", "VpnLigne"),
+            root = H.preparer(d, ("Couleurs", "Texte", "Ico", "VpnEtat", "VpnLigne", "VpnMullvad"),
                               extra={"Vpn.qml": panneau_hors_fenetre(), "Partage.qml": FAUX_PARTAGE}, singletons=("VpnEtat", "Partage"))
             home = root / "home"
             (home / ".local/bin").mkdir(parents=True)
-            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nmcli", FAUX_NMCLI, root / "bin")):
+            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nmcli", FAUX_NMCLI, root / "bin"),
+                                   ("mullvad", FAUX_MULLVAD, root / "bin")):
                 (ou / nom).write_text(texte)
                 (ou / nom).chmod(0o755)
             H.faux(root, "notify-send")
@@ -139,6 +165,7 @@ class HorsEcran(unittest.TestCase):
                 self.assertNotIn(e, sortie, sortie)
             self.assertIn("FINI", sortie, sortie)
             lire = lambda n: [x for x in (home / n).read_text().splitlines()] if (home / n).exists() else []
+            self.appels_mullvad = lire("appels-mullvad")
             return sortie, [json.loads(x) for x in lire("appels")], lire("appels-nmcli")
 
     def test_tunnels_affiches_clics_masquage_et_echap(self):
@@ -226,14 +253,132 @@ class HorsEcran(unittest.TestCase):
                 ticks++
                 if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
                 if (etape === 1) {
-                    if (ticks === 8) verifier(VpnEtat.lu && VpnEtat.actives.length === 0 && !VpnEtat.indicateur, "départ : aucun tunnel, pas de bouclier")
+                    if (ticks === 8) verifier(VpnEtat.lu && VpnEtat.indNombre === 0 && !VpnEtat.indicateur, "départ : aucun tunnel, pas de bouclier")
                     if (ticks < 38) return
-                    verifier(VpnEtat.actives.length === 2 && VpnEtat.indicateur, "l'événement de nmcli a relancé la lecture : " + VpnEtat.actives.length)
+                    verifier(VpnEtat.indNombre === 2 && VpnEtat.indicateur, "l'événement de nmcli a relancé la lecture : " + VpnEtat.indNombre)
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', etats={0: zero, 1: un})
         self.assertEqual(nmcli, ["monitor"], "nmcli monitor lancé une seule fois")
-        self.assertEqual([a for a in appels if a == ["etat-json"]], [["etat-json"]] * 2, "un relevé au départ, un seul après l'événement, aucun entre les deux")
+        self.assertEqual([a for a in appels if a == ["indicateur", "--json"]], [["indicateur", "--json"]] * 2, "un relevé au départ, un seul après l'événement, aucun entre les deux")
+
+    def test_libelle_fournisseur_pays_drapeau_plusieurs_tunnels_et_partage(self):
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0"), LIGNE_J(U3, "Bureau", "vpn", True, "tun1"),
+             LIGNE_J(U1, "Labo", "vpn", False, "")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c[:2])
+        _, appels, nmcli = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 8) return
+                    verifier(VpnEtat.indicateur, "indicateur")
+                    var attendu = "Proton VPN · " + String.fromCodePoint(0x1F1EB, 0x1F1F7) + " FR +1"
+                    verifier(VpnEtat.libelle === attendu, "libellé : " + VpnEtat.libelle)
+                    Partage.silence = true; etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    verifier(VpnEtat.libelle === "VPN", "partage : VPN seul : " + VpnEtat.libelle)
+                    Partage.silence = false; VpnEtat.indPays = "fr"
+                    etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    verifier(VpnEtat.drapeau === "", "un code pays mal formé n'a pas de drapeau")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(appels[0], ["indicateur", "--json"])
+        self.assertFalse([a for a in appels if a[0] == "etat-json"], "panneau fermé : lecture légère seulement")
+
+    def test_client_non_connecte_ne_donne_rien(self):
+        c = [LIGNE_J(U1, "ProtonVPN FR#12", "vpn", False, ""), LIGNE_J(U2, "mullvad-de1", "wireguard", False, "")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 8) return
+                    verifier(VpnEtat.lu && !VpnEtat.indicateur && VpnEtat.indFournisseur === "", "rien d'affiché")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: dict(disponible=True, connexions=c, actives=[])})
+
+    def test_vpn_indicateur_non_pas_d_indicateur_ni_de_moniteur(self):
+        _, appels, nmcli = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 8) return
+                    verifier(!VpnEtat.indicateur && !VpnEtat.veille, "VPN_INDICATEUR=non")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', reglages={"VPN_INDICATEUR": "non"})
+        self.assertEqual(nmcli, [], "pas de moniteur")
+        self.assertEqual(appels, [], "pas de lecture")
+
+    def test_panneau_complet_protections_bientot_et_resume_masque_en_partage(self):
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
+                    var corps = fen.contentItem
+                    verifier(trouver(corps, "nc-vpn-protections").visible, "section Protections")
+                    verifier(textes(corps).indexOf("Bientôt.") >= 0 || textes(corps).indexOf("Coming soon.") >= 0, "bientôt : " + textes(corps))
+                    verifier(trouver(corps, "nc-vpn-importer").visible && trouver(corps, "nc-vpn-actifs").visible, "panneau complet")
+                    verifier(textes(corps).join("|").indexOf("Proton VPN") >= 0, "résumé : " + textes(corps))
+                    Partage.silence = true; etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var t2 = textes(fen.contentItem).join("|")
+                    verifier(t2.indexOf("Proton VPN") < 0 && t2.indexOf("FR") < 0, "fournisseur et pays masqués : " + t2)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: dict(disponible=True, connexions=c, actives=c)})
+
+    def test_mullvad_application_section_actions_ecoute_et_masquage(self):
+        etat = dict(disponible=True, connexions=[], actives=[], mullvad=True,
+                    mullvad_etat=dict(installe=True, connecte=True, pays="SE", hote="se-got-wg-004", compte=True))
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 8) return
+                    verifier(VpnEtat.mullvadInstalle && !VpnEtat.indicateur, "installé mais pas de tunnel NM ni lecture : pas d'indicateur")
+                    var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 8) return
+                    var corps = fen.contentItem
+                    var tx = textes(corps).join("|")
+                    verifier(trouver(corps, "nc-vpn-mullvad").visible, "section Mullvad")
+                    verifier(tx.indexOf("se-got-wg-004") >= 0 && tx.indexOf("SE") >= 0 && tx.indexOf("Connecté au compte") >= 0, "état : " + tx)
+                    t.mouseClick(trouver(corps, "nc-mullvad-bascule")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 8) return
+                    var champ = trouver(fen.contentItem, "nc-mullvad-pays")
+                    champ.forceActiveFocus(); t.keyClick(Qt.Key_F); t.keyClick(Qt.Key_R); t.keyClick(Qt.Key_1); t.keyClick(Qt.Key_X); verifier(champ.text === "fr", "saisie bornée à deux lettres minuscules : " + champ.text)
+                    t.mouseClick(trouver(fen.contentItem, "nc-mullvad-choisir")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 8) return
+                    Partage.silence = true; etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 2) return
+                    var t2 = textes(fen.contentItem).join("|")
+                    verifier(t2.indexOf("se-got-wg-004") < 0 && t2.indexOf("SE") < 0, "relais et pays masqués en partage : " + t2)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertIn(["mullvad", "deconnecter"], appels)       # l'application est connectée : le bouton déconnecte
+        self.assertIn(["mullvad", "pays", "fr"], appels)
+        self.assertEqual(self.appels_mullvad.count("status listen"), 1, "écoute lancée une fois, panneau ouvert : " + str(self.appels_mullvad))
+
+    def test_mullvad_sans_panneau_ni_tunnel_aucune_ecoute(self):
+        etat = dict(disponible=True, connexions=[], actives=[], mullvad=True)
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var d = VpnEtat.disponible; etape++; ticks = 0; return }
+                if (etape === 1) { if (ticks < 10) return
+                    verifier(VpnEtat.mullvadInstalle, "installé")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(self.appels_mullvad, [], "ni panneau ouvert ni tunnel : pas de mullvad status listen")
 
     def test_networkmanager_absent_rien_ne_tourne(self):
         _, appels, nmcli = self.lancer('''
@@ -250,7 +395,7 @@ class HorsEcran(unittest.TestCase):
             } }
         ''', etats={0: {"disponible": False}})
         self.assertEqual(nmcli, [], "nmcli monitor n'est jamais lancé sans NetworkManager")
-        self.assertFalse([a for a in appels if a[0] != "etat-json"])
+        self.assertFalse([a for a in appels if a[0] not in ("etat-json", "indicateur")])
 
     def test_ecran_eteint_rien_ne_tourne_puis_reprise_au_reveil(self):
         _, appels, nmcli = self.lancer('''
@@ -268,7 +413,7 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''')
-        self.assertEqual(appels, [["etat-json"]], "un seul relevé, au réveil")
+        self.assertEqual(appels, [["indicateur", "--json"]], "un seul relevé léger, au réveil, sans panneau")
 
     def test_importer_ferme_le_panneau_et_lance_le_selecteur_puis_nc_vpn(self):
         _, appels, _ = self.lancer('''

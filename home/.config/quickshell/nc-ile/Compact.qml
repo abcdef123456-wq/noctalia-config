@@ -21,6 +21,12 @@ Item {
                                    : (Terminal.enCours ? "terminal" : "repos")))))
     readonly property real largeur: Math.max(110, actif.implicitWidth + 32)
     implicitHeight: 30
+    // Le point (x, y) de l'île tombe-t-il sur l'indicateur VPN de la pilule au repos ? (le clic ouvre alors le panneau VPN)
+    function surVpn(x, y) {
+        if (!VpnEtat.indicateur || mode !== "repos") return false
+        var p = c.mapToItem(pastilleVpn, x, y)
+        return p.x >= -4 && p.x <= pastilleVpn.width + 4 && p.y >= -6 && p.y <= pastilleVpn.height + 6
+    }
 
     readonly property Item actif: ({ repos: repos, musique: musique, volume: jauge, luminosite: jauge,
                                       piste: piste, charge: charge, profil: profil, jeu: jeu,
@@ -66,9 +72,18 @@ Item {
     Fondu {
         id: repos
         montre: c.mode === "repos"
-        // Un tunnel VPN monté (VpnEtat.qml, nc-vpn) : un bouclier devant l'heure, jamais de nom
-        Ico { objectName: "nc-vpn-pill"; anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 15; color: Couleurs.vert
-              visible: VpnEtat.indicateur; Accessible.role: Accessible.StaticText; Accessible.name: "VPN" }
+        // Un tunnel VPN RÉELLEMENT monté (VpnEtat.qml, nc-vpn indicateur) : bouclier et « Fournisseur · 🇫🇷 FR » (+1 si plusieurs) ;
+        // pendant un partage d'écran : « VPN » seul. Un clic ouvre le panneau VPN complet.
+        Row {
+            id: pastilleVpn
+            objectName: "nc-vpn-pill"
+            anchors.verticalCenter: parent.verticalCenter; spacing: 4
+            visible: VpnEtat.indicateur
+            Ico { anchors.verticalCenter: parent.verticalCenter; nom: "shield"; taille: 15; color: Couleurs.vert }
+            Texte { objectName: "nc-vpn-pill-texte"; anchors.verticalCenter: parent.verticalCenter; text: VpnEtat.libelle; secondaire: true
+                    font.pixelSize: 12; elide: Text.ElideRight; width: Math.min(implicitWidth, 150) }
+            Accessible.role: Accessible.StaticText; Accessible.name: VpnEtat.libelle
+        }
         // Un mode Concentration actif (Modes.qml) : son icône et son nom court ; le nom est caché pendant un partage d'écran
         Row {
             objectName: "nc-mode-pill"

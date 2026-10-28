@@ -8,6 +8,10 @@
   nc-vpn tout-deconnecter     coupe tous les tunnels montés
   nc-vpn importer FICHIER     importe un .ovpn (OpenVPN) ou un .conf (WireGuard) dans NetworkManager, en connexion privée
                               à toi et sans connexion automatique
+  nc-vpn indicateur --json    le tunnel RÉELLEMENT monté, pour la pilule : {"disponible", "actif", "fournisseur", "pays", "nom", "nombre"}
+                              (un seul nmcli ; fournisseur et pays déduits du nom de la connexion et de l'interface, sans réseau)
+  nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
+  nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
 Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
 Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
@@ -65,6 +69,10 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn tout-deconnecter     bring every active tunnel down
   nc-vpn importer FILE        import an .ovpn (OpenVPN) or .conf (WireGuard) file into NetworkManager, private to you
                               and without autoconnect
+  nc-vpn indicateur --json    the tunnel that is REALLY up, for the pill: {"disponible", "actif", "fournisseur", "pays", "nom", "nombre"}
+                              (one nmcli; provider and country guessed from the connection and interface names, no network)
+  nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
+  nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
 Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
 Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
@@ -371,6 +379,206 @@ def importer(chemin):
             f"Imported: {c['nom'] if c else nom} ({u}), private to {user}, no autoconnect."))
 
 
+# ── Indicateur de la pilule : le tunnel réellement monté, fournisseur et pays déduits des noms, sans réseau ────────
+# Table des fournisseurs (motif cherché, sans tenir compte des majuscules, dans le NOM de la connexion puis dans l'INTERFACE).
+# Un client installé mais pas monté n'apparaît jamais ici : seules les connexions ACTIVES de NetworkManager sont regardées.
+# Aucun motif => fournisseur vide, et la pilule ne montre que le nom de la connexion (texte brut, borné).
+# Exemples de noms : « ProtonVPN FR#12 », « mullvad-fr1 », « fr123.nordvpn.com.udp ».
+_D, _F = r"(?<![a-z0-9])", r"(?![a-z0-9])"
+FOURNISSEURS = (
+    ("Proton VPN", r"proton"),                              # interface proton0, nom « ProtonVPN FR#12 »
+    # Mullvad : interface wg-mullvad, nom « mullvad-fr1 », ou nom d'un fichier du générateur WireGuard de Mullvad (« se-got-wg-001 »,
+    # pays-ville-wg-numéro) importé tel quel
+    ("Mullvad", r"mullvad|" + _D + r"[a-z]{2}-[a-z]{3}-(wg|ovpn|br)-[0-9]{2,3}" + _F),
+    ("NordVPN", r"nordvpn|nordlynx|" + _D + r"nord" + _F),  # interface nordlynx, nom « fr123.nordvpn.com.udp »
+    ("Surfshark", r"surfshark"),
+    ("ExpressVPN", r"express\s*vpn|lightway"),
+    ("Private Internet Access", r"private\s*internet\s*access|" + _D + r"pia" + _F),
+    ("Windscribe", r"windscribe"),
+    ("CyberGhost", r"cyberghost"),
+    ("IVPN", _D + r"ivpn" + _F),
+    ("AirVPN", r"air\s*vpn"),
+)
+# Codes pays ISO 3166-1 à deux lettres (une valeur doit y figurer pour devenir un pays) ; « UK » est lu comme « GB ».
+ISO_PAYS = frozenset(("AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ "
+                      "CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR "
+                      "GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP "
+                      "KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT "
+                      "MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW "
+                      "SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG "
+                      "UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW").split())
+MOTS_PAYS = re.compile(r"[^A-Za-z0-9]+")
+
+
+def fournisseur_de(nom, interface):
+    for libelle, motif in FOURNISSEURS:
+        if re.search(motif, nom or "", re.I) or re.search(motif, interface or "", re.I):
+            return libelle
+    return ""
+
+
+def pays_de(nom):
+    """Le code pays (deux lettres, validé) d'un nom de connexion, sinon vide. Un mot compte s'il est tout en majuscules (« FR »,
+    « FR#12 »), ou en minuscules suivi de chiffres (« fr1 », « fr123 »), ou s'il est le premier mot (« fr-par-wg-001 »). Les mots
+    courts ordinaires (« it », « in », « no », « my »…) ne comptent donc pas au milieu d'un nom."""
+    mots = [m for m in MOTS_PAYS.split(nom or "") if m]
+    for i, m in enumerate(mots):
+        g = re.fullmatch(r"([A-Za-z]{2})([0-9]*)", m)
+        if not g:
+            continue
+        lettres, chiffres = g.group(1), g.group(2)
+        if not (lettres.isupper() or (lettres.islower() and (chiffres or i == 0))):
+            continue
+        code = "GB" if lettres.upper() == "UK" else lettres.upper()
+        if re.fullmatch(r"[A-Z]{2}", code) and code in ISO_PAYS:
+            return code
+    return ""
+
+
+def nom_borne(nom, n=40):
+    """Texte brut sans caractère de contrôle, de 40 signes au plus."""
+    propre = "".join(" " if (ord(c) < 32 or 0x7f <= ord(c) < 0xa0) else c for c in (nom or "")).strip()
+    return propre[:n]
+
+
+def indicateur():
+    """Le premier tunnel ACTIF de NetworkManager (un seul appel nmcli). Aucune géolocalisation, aucun secret, aucun débit.
+    Sans tunnel NetworkManager monté, et seulement si la commande `mullvad` existe : l'état de l'application officielle Mullvad
+    (un `mullvad status --json`, 2 s au plus). Un tunnel NetworkManager réellement monté passe toujours avant. « mullvad » dit
+    seulement si l'application est installée (la pilule en tire sa veille `mullvad status listen`)."""
+    e = etat()
+    mv = shutil.which("mullvad") is not None
+    rien = {"disponible": e["disponible"], "actif": False, "fournisseur": "", "pays": "", "nom": "", "nombre": 0, "mullvad": mv}
+    actives = e.get("actives") or []
+    if not actives:
+        if mv:
+            m = mullvad_etat()
+            if m["connecte"]:
+                return {"disponible": True, "actif": True, "fournisseur": "Mullvad", "pays": m["pays"], "nom": "Mullvad",
+                        "nombre": 1, "mullvad": True}
+        return rien
+    c = actives[0]
+    return {"disponible": True, "actif": True, "fournisseur": fournisseur_de(c["nom"], c["interface"]),
+            "pays": pays_de(c["nom"]), "nom": nom_borne(c["nom"]), "nombre": len(actives), "mullvad": mv}
+
+
+# ── Application officielle Mullvad (commande `mullvad`, démon mullvad-daemon ; son tunnel est hors de NetworkManager) ──────
+# Option retenue : `mullvad status --json` (-j, présente dans mullvad-cli 2025.14 et dans mullvad-cli/src/cmds/status.rs du dépôt
+# officiel github.com/mullvad/mullvadvpn-app). Le numéro de compte n'est JAMAIS lu : ni `mullvad account get`, ni aucun champ
+# de sortie gardé (seuls l'état, le pays et le nom du relais sont extraits) ; toute longue suite de chiffres vue dans un message
+# est remplacée avant d'être montrée. Tout en argv, 2 s au plus pour une lecture.
+def mullvad(args, delai=2):
+    """(code, sortie, erreur) de `mullvad` lancé en arguments. 127 : commande absente."""
+    exe = shutil.which("mullvad")
+    if not exe:
+        return 127, "", ""
+    try:
+        r = subprocess.run([exe] + args, capture_output=True, text=True, errors="replace", timeout=delai,
+                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C"), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return 126, "", ""
+    return r.returncode, r.stdout, r.stderr
+
+
+def epure(texte):
+    """Retire d'un message toute suite de 12 chiffres ou plus (même séparés par des espaces ou tirets) : un numéro de compte."""
+    return re.sub(r"(?:[0-9][ -]?){12,}", "[…]", texte or "")
+
+
+RELAIS = re.compile(r"(?<![a-z0-9])([a-z]{2})-[a-z]{3}-(?:wg|ovpn|br|bridge)-[0-9]{2,3}(?![a-z0-9])", re.I)
+
+
+def mullvad_etat():
+    """{"installe", "connecte", "pays", "hote"} d'après `mullvad status --json`. Le JSON est celui du démon (état « connected »
+    sous la clé « state » ; le relais est cherché dans les textes de « details »). Sans JSON lisible, la sortie texte
+    (« Connected … Relay: se-got-wg-004 ») sert de secours. Rien d'autre n'est gardé."""
+    res = {"installe": shutil.which("mullvad") is not None, "connecte": False, "pays": "", "hote": ""}
+    if not res["installe"]:
+        return res
+    code, out, _ = mullvad(["status", "--json"])
+    if code != 0:
+        code, out, _ = mullvad(["status"])
+        if code != 0:
+            return res
+        res["connecte"] = bool(re.match(r"\s*connected", out, re.I))
+        out_texte = out
+    else:
+        out_texte = ""
+        try:
+            d = json.loads(out)
+        except ValueError:
+            d = None
+        if isinstance(d, dict):
+            res["connecte"] = str(d.get("state", "")).lower() == "connected"
+            out_texte = " ".join(chaines(d.get("details")))
+        else:
+            res["connecte"] = bool(re.match(r"\s*connected", out, re.I))
+            out_texte = out
+    if res["connecte"]:
+        m = RELAIS.search(out_texte)
+        if m:
+            res["hote"] = m.group(0).lower()
+            res["pays"] = m.group(1).upper() if m.group(1).upper() in ISO_PAYS else ""
+        if not res["pays"]:
+            res["pays"] = code_pays_json(out)
+    return res
+
+
+def chaines(v, profondeur=0):
+    """Tous les textes d'une valeur JSON (au plus 4 niveaux), pour y chercher un nom de relais."""
+    if profondeur > 4:
+        return []
+    if isinstance(v, str):
+        return [v[:200]]
+    if isinstance(v, dict):
+        return [t for x in v.values() for t in chaines(x, profondeur + 1)]
+    if isinstance(v, list):
+        return [t for x in v[:20] for t in chaines(x, profondeur + 1)]
+    return []
+
+
+def code_pays_json(brut):
+    """Un code pays à deux lettres porté par une clé « country_code » du JSON du démon, validé ; sinon vide."""
+    m = re.search(r'"country_code"\s*:\s*"([A-Za-z]{2})"', brut or "")
+    return m.group(1).upper() if m and m.group(1).upper() in ISO_PAYS else ""
+
+
+def mullvad_agir(a):
+    """connecter | deconnecter | pays CC : en arguments seulement ; CC doit être ^[a-z]{2}$ (et un code ISO)."""
+    if not shutil.which("mullvad"):
+        raise Echec(T("L'application Mullvad n'est pas installée.", "The Mullvad app is not installed."))
+    if a == ["connecter"]:
+        args, ok = ["connect"], T("Mullvad : connexion demandée.", "Mullvad: connection requested.")
+    elif a == ["deconnecter"]:
+        args, ok = ["disconnect"], T("Mullvad : déconnecté.", "Mullvad: disconnected.")
+    elif len(a) == 2 and a[0] == "pays":
+        if not re.fullmatch(r"[a-z]{2}", a[1]) or a[1].upper() not in ISO_PAYS:
+            raise Echec(T("Code pays invalide (deux lettres minuscules, par exemple « fr »).", "Invalid country code (two lowercase letters, e.g. \"fr\")."))
+        args, ok = ["relay", "set", "location", a[1]], T(f"Mullvad : pays choisi, {a[1]}.", f"Mullvad: country set to {a[1]}.")
+    else:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
+    code, _, err = mullvad(args, delai=30)
+    if code != 0:
+        msg = court(epure(err))
+        raise Echec(T("Mullvad a refusé", "Mullvad refused") + (" (" + msg + ")" if msg else "") + ".")
+    print(ok)
+
+
+def mullvad_json():
+    """L'état pour le panneau : celui de mullvad_etat() et « compte » (connecté au compte : oui, non, ou null si inconnu).
+    Le texte de `mullvad status` n'est lu que pour y trouver l'avertissement « not logged in » ; il n'est pas gardé."""
+    e = mullvad_etat()
+    e["compte"] = None
+    if e["installe"] and not e["connecte"]:
+        code, out, err = mullvad(["status"])
+        if code == 0 or out or err:
+            e["compte"] = not re.search(r"not logged in", out + err, re.I)
+    elif e["connecte"]:
+        e["compte"] = True
+    return e
+
+
 # ── IP publique (à la demande de l'île, jamais en boucle) ──────────────────────────────────────────────────────
 def reglage(cle, defaut=""):
     try:
@@ -434,6 +642,12 @@ def main():
             tout_deconnecter()
         elif cmd == "importer" and len(a) == 2:
             importer(a[1])
+        elif cmd == "indicateur" and a[1:] == ["--json"]:
+            print(json.dumps(indicateur(), ensure_ascii=False))
+        elif cmd == "mullvad" and a[1:] == ["etat-json"]:
+            print(json.dumps(mullvad_json(), ensure_ascii=False))
+        elif cmd == "mullvad" and len(a) >= 2:
+            mullvad_agir(a[1:])
         elif cmd == "ip-publique" and len(a) == 1:
             ip_publique()
         else:

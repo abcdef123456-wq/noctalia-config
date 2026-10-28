@@ -127,7 +127,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Lumière de nuit · ne pas déranger | **Super + N** · **Super + Maj + N** |
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
-| VPN : les tunnels VPN et WireGuard de NetworkManager dans un panneau de l'île (plusieurs tunnels à la fois, « Déconnecter » par tunnel, « Tout déconnecter », import d'un `.ovpn` ou `.conf` refusé s'il fait exécuter un script) ; un bouclier dans la pilule quand un tunnel est monté ; en terminal : `nc-vpn` | **Super + Alt + V** |
+| VPN : les tunnels VPN et WireGuard de NetworkManager dans un panneau de l'île (plusieurs tunnels à la fois, « Déconnecter » par tunnel, « Tout déconnecter », import d'un `.ovpn` ou `.conf` refusé s'il fait exécuter un script) ; un bouclier et « Fournisseur · pays » dans la pilule quand un tunnel est monté ; en terminal : `nc-vpn` | **Super + Alt + V** |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
@@ -256,8 +256,22 @@ l'île Quickshell.
   une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
   qui ferait exécuter quelque chose (`up`, `down`, `route-up`, `script-security` au-dessus de 1, `plugin`, `PostUp`…), un lien,
   un fichier de plus de 64 Kio, un bloc `<auth-user-pass>` et des certificats donnés par un chemin relatif (mets-les dans le
-  fichier) ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier
-  vert est devant l'heure de la pilule tant qu'un tunnel est monté (`VPN_INDICATEUR`, oui par défaut). Mise à jour sur les
+  fichier) ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. **Super + Alt + V**
+  et un clic sur l'indicateur ouvrent directement ce panneau complet (une section « Protections » dira « Bientôt » tant qu'elle
+  est vide). Un bouclier vert et « Fournisseur · 🇫🇷 FR » (« +1 » s'il y a plusieurs tunnels) sont devant l'heure de la pilule
+  tant qu'un tunnel est RÉELLEMENT monté dans NetworkManager (`VPN_INDICATEUR`, oui par défaut) ; un client installé mais pas
+  connecté ne compte jamais. Fournisseur et pays sont déduits sans réseau du nom de la connexion et de l'interface
+  (`nc-vpn indicateur --json`, un seul `nmcli`) : Proton VPN, Mullvad, NordVPN, Surfshark, ExpressVPN, Private Internet Access,
+  Windscribe, CyberGhost, IVPN, AirVPN ; un pays est un code ISO à deux lettres du nom (`FR#12`, `fr1`, `fr-par…`), le drapeau
+  vient des indicateurs régionaux Unicode (jamais une image). Nom inconnu : seulement le nom de la connexion. Pendant un partage
+  d'écran, la pilule et le panneau disent « VPN » seul. Si le client commercial met aussi une icône dans ta barre d'état, tu peux
+  la masquer dans ses propres réglages ou dans ceux de ta barre : nous n'y touchons pas.
+  **Mullvad** : les fichiers WireGuard du générateur de Mullvad (`nc-vpn importer se-got-wg-001.conf`) sont reconnus par le nom du
+  profil (`se-got-wg-001` : pays `SE`). Avec l'application officielle (commande `mullvad`, tunnel hors de NetworkManager), si
+  aucun tunnel NetworkManager n'est monté, la pilule lit `mullvad status --json` (2 s au plus, seulement si la commande existe),
+  rafraîchie par `mullvad status listen` (écran allumé, et panneau ouvert ou tunnel actif seulement, jamais en boucle). Le
+  panneau a une section Mullvad : Connecter / Déconnecter et « Choisir le pays » (`mullvad relay set location fr`, deux lettres
+  minuscules). Le numéro de compte n'est jamais lu ni montré : seulement « connecté au compte » ou non. Mise à jour sur les
   événements de NetworkManager (`nmcli monitor`), jamais en boucle, rien écran éteint ; pendant un partage d'écran, noms,
   interfaces et IP sont masqués. Ton IP publique n'est montrée que si tu le demandes (`VPN_IP_PUBLIQUE` à oui et
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
