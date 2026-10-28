@@ -30,7 +30,7 @@ Module {
     Component.onCompleted: if (affichee && permis) prete.verifier()
     onMontreChanged: if (!montre) { dem.vider(); erreurLocale = "" }
     IaPrete { id: prete }
-    DemandeIA { id: dem; delai: 90000; maxDonnees: 4096; maxReponse: 2000 }
+    DemandeIA { id: dem; local: true; delai: 90000; maxDonnees: 4096; maxReponse: 2000 }
     FileView { id: liste; path: p.cache + "paquets.json"; blockLoading: true; printErrors: false }
 
     // Une ligne par paquet : source, nom, versions (le fichier trie les importants en premier) ; rien d'autre

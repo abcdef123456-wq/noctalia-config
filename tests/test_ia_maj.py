@@ -170,7 +170,7 @@ class HorsEcran(unittest.TestCase):
     def test_clic_noms_et_versions_sur_l_entree_standard(self):
         root = self.lancer(clic=True)
         appels = H.journal(root).splitlines()
-        self.assertEqual(appels, ["nc-ia disponible", "nc-ia demander --usage texte --flux -"])
+        self.assertEqual(appels, ["nc-ia disponible", "nc-ia demander --usage texte --flux --sans-outils --local -"])
         envoye = (root / "stdin.txt").read_text()
         self.assertIn("depot linux 6.15.1-1 -> 6.15.2-1", envoye)
         self.assertIn("flatpak org.exemple.App ? -> 2.0", envoye)
