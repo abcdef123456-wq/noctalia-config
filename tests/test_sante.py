@@ -480,13 +480,13 @@ class Page(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nc-sante-page-") as d:
             root = Path(d)
             bouchons(root, d)
-            for nom in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs"):
+            for nom in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs", "EnergieProfils", "BoutonEnergie"):
                 shutil.copy2(QML / (nom + ".qml"), root)
             (root / "Chaleur.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool alerte: false; property bool lenovo: true; '
                                               'property int seuil: 95; property string fichierCpu: "x"; readonly property bool performancePossible: Etat.performanceDisponible\n'
                                               '  function titre() { return "Processeur à 98 °C" } function situation() { return "s" } function causes() { return "c" } function gestes() { return "g" } }')
             (root / "qmldir").write_text("\n".join(("singleton " if n in ("Couleurs", "Reglages", "Etat", "Chaleur", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                   for n in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs", "Reglages", "Etat", "Chaleur", "Partage")))
+                                                   for n in ("Sante", "JaugeSante", "Courbe", "Texte", "Ico", "Module", "Defilement", "Couleurs", "Reglages", "Etat", "Chaleur", "Partage", "EnergieProfils", "BoutonEnergie")))
             faux(root / "bin", "nc-ile-etat", f'echo "nc-ile-etat $*" >> "{root}/appels"\nprintf \'{sante}\'\n')
             (root / "shell.qml").write_text(ENTETE_QML + "import Quickshell.Services.UPower\n" + textwrap.dedent('''\
                 ShellRoot {

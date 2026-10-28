@@ -159,6 +159,8 @@ HOME_FILES=(
   .local/bin/nvidia-run
   .local/bin/nc-gpu-mode
   .local/bin/nc-rtx-veille
+  .local/bin/nc-energie
+  .local/bin/nc-energie-liste
   .local/bin/cmatrix
   .local/bin/unimatrix
   .local/share/applications/nc-assistant.desktop

@@ -1,0 +1,263 @@
+#!/bin/bash
+# nc-energie-root : l'assistant root des profils d'énergie poussés (nc-energie). Il ne fait QUE les réglages de la liste
+# ci-dessous, avec des valeurs de la liste. Installé par install.sh dans /usr/local/bin (root:root 0755), avec une règle
+# sudo à commandes exactes (une ligne par sous-commande et valeur : « nc-energie-root sudoers UTILISATEUR » l'écrit).
+#
+#   nc-energie-root etat                      l'état lu (clé=valeur), sans rien écrire ni exiger root
+#   nc-energie-root epp performance|balance_performance|balance_power|power
+#   nc-energie-root boost on|off
+#   nc-energie-root freqmax 100|80|60         fréquence maximale du processeur, en % de cpuinfo_max_freq
+#   nc-energie-root platform low-power|quiet|cool|balanced|balanced-performance|performance
+#                                             (seulement si le noyau le propose : platform_profile_choices)
+#   nc-energie-root nvidia-pm auto|on         gestion d'énergie de la carte NVIDIA (power/control)
+#   nc-energie-root nvidia-pl 0|1|2|3         limite de puissance NVIDIA : 0 = minimum, 3 = maximum, entre les deux en
+#                                             paliers égaux ; seulement si la carte est ACTIVE (jamais réveillée pour ça)
+#   nc-energie-root wifi-ps on|off            économie d'énergie du Wi-Fi (iw)
+#   nc-energie-root usb-autosuspend on|off    mise en veille des périphériques USB, sauf ceux de saisie (clavier, souris)
+#   nc-energie-root audio-ps on|off           économie d'énergie de la puce audio (snd_hda_intel)
+#   nc-energie-root kbd 0|1|2|3               niveau du clavier lumineux (borné au maximum du clavier)
+#   nc-energie-root sudoers UTILISATEUR       la ligne sudo exacte pour ce compte (sans rien écrire)
+#
+# Garanties : les chemins de /sys sont construits ICI, jamais reçus ; chaque écriture vérifie que le fichier existe ;
+# aucune chaîne libre n'est acceptée (sous-commande et valeur sont comparées à une liste) ; ni ventilateurs, ni
+# undervolt, ni TDP brut, ni écriture libre. Rien n'est réappliqué tout seul au démarrage.
+# Codes de sortie : 0 fait, 1 échec ou pas root, 2 sous-commande ou valeur refusée, 3 rien de tel sur ce PC.
+# Essais : NC_ENERGIE_RACINE (faux /sys) et NC_ENERGIE_BIN (faux outils) ne sont lus QUE hors root (sudo les efface de
+# toute façon) : lancé en root, cet assistant ne regarde que le vrai /sys et le PATH système.
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH LC_ALL=C   # jamais le PATH ni la langue de l'appelant (appel en root sans secure_path)
+S=/sys
+ESSAI=0
+if [ "$(id -u)" != 0 ] && [ -n "${NC_ENERGIE_RACINE:-}" ]; then
+  S="$NC_ENERGIE_RACINE"; ESSAI=1
+  [ -n "${NC_ENERGIE_BIN:-}" ] && PATH="$NC_ENERGIE_BIN:$PATH"
+fi
+
+# Les listes (la seule source de vérité : le test de sudoers les relit par « sudoers »)
+EPP="performance balance_performance balance_power power"
+ONOFF="on off"
+FREQ="100 80 60"
+PLATEFORME="low-power quiet cool balanced balanced-performance performance"
+NVPM="auto on"
+NVPL="0 1 2 3"
+KBD="0 1 2 3"
+
+refus() { echo "nc-energie-root: $*" >&2; exit 2; }
+absent() { echo "nc-energie-root: $*" >&2; exit 3; }
+echec() { echo "nc-energie-root: $*" >&2; exit 1; }
+dans() { local x="$1"; shift; local y; for y in "$@"; do [ "$x" = "$y" ] && return 0; done; return 1; }
+# Un mot dans une liste lue (séparée par des espaces)
+dans_mots() { case " $2 " in *" $1 "*) return 0 ;; esac; return 1; }
+# Valeur : un mot de la liste, rien d'autre (« -- » et tout motif sont donc refusés avant d'aller plus loin)
+valeur() {   # valeur V liste…
+  local v="$1"; shift
+  [ -n "$v" ] || refus "valeur manquante"
+  dans "$v" "$@" || refus "valeur refusée"
+}
+racine() {
+  [ "$ESSAI" = 1 ] && return 0
+  [ "$(id -u)" = 0 ] || echec "à lancer avec sudo."
+}
+lire() { local f="$1"; [ -r "$f" ] && { read -r l < "$f"; printf '%s' "$l"; }; }
+# Écrit dans un fichier qui existe déjà, jamais dans un fichier créé
+ecrire() {   # ecrire VALEUR FICHIER
+  [ -f "$2" ] || return 1
+  printf '%s\n' "$1" > "$2" 2>/dev/null
+}
+
+# Cartes NVIDIA : périphériques PCI de classe 0x03xxxx et de fabricant 0x10de
+nvidia() {
+  local d
+  for d in "$S"/bus/pci/devices/*; do
+    [ -f "$d/vendor" ] && [ "$(lire "$d/vendor")" = 0x10de ] || continue
+    case "$(lire "$d/class")" in 0x03*) printf '%s\n' "$d" ;; esac
+  done
+}
+# Interfaces Wi-Fi : celles qui ont un dossier « wireless » ; le nom vient de /sys et reste un mot simple
+wifis() {
+  local d n
+  for d in "$S"/class/net/*; do
+    [ -d "$d/wireless" ] || continue
+    n="${d##*/}"
+    case "$n" in *[!a-zA-Z0-9_.-]*|''|-*) continue ;; esac
+    printf '%s\n' "$n"
+  done
+}
+# Périphériques USB (pas les interfaces « 1-1:1.0 ») jamais mis en veille s'ils sont, ou ont une interface, de saisie
+# (03 : clavier, souris), audio (01 : un casque coupé au milieu d'un son), d'impression (07) ou Bluetooth (e0 : la souris
+# et le casque sans fil passent par lui)
+usbs() {
+  local d i garde
+  for d in "$S"/bus/usb/devices/*; do
+    case "${d##*/}" in *:*) continue ;; esac
+    [ -f "$d/power/control" ] || continue
+    garde=0
+    case "$(lire "$d/bDeviceClass")" in 03|01|07|e0|E0) garde=1 ;; esac
+    for i in "$d"/*:*/bInterfaceClass; do
+      [ -f "$i" ] || continue
+      case "$(lire "$i")" in 03|01|07|e0|E0) garde=1 ;; esac
+    done
+    [ "$garde" = 0 ] && printf '%s\n' "$d"
+  done
+}
+politiques() { local p; for p in "$S"/devices/system/cpu/cpufreq/policy[0-9]*; do [ -d "$p" ] && printf '%s\n' "$p"; done; }
+
+do_epp() {
+  local p n=0
+  for p in $(politiques); do
+    [ -f "$p/energy_performance_preference" ] || continue
+    dans_mots "$1" "$(lire "$p/energy_performance_available_preferences")" || continue
+    ecrire "$1" "$p/energy_performance_preference" || echec "écriture impossible (epp)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "pas de préférence énergie/performance sur ce PC"
+}
+do_boost() {
+  local f="$S/devices/system/cpu/cpufreq/boost" g="$S/devices/system/cpu/intel_pstate/no_turbo"
+  if [ -f "$f" ]; then
+    if [ "$1" = on ]; then ecrire 1 "$f"; else ecrire 0 "$f"; fi || echec "écriture impossible (boost)"
+  elif [ -f "$g" ]; then
+    if [ "$1" = on ]; then ecrire 0 "$g"; else ecrire 1 "$g"; fi || echec "écriture impossible (boost)"
+  else
+    absent "pas de réglage du boost sur ce PC"
+  fi
+}
+do_freqmax() {
+  local p n=0 max v
+  for p in $(politiques); do
+    [ -f "$p/scaling_max_freq" ] && [ -r "$p/cpuinfo_max_freq" ] || continue
+    max="$(lire "$p/cpuinfo_max_freq")"
+    case "$max" in ''|*[!0-9]*) continue ;; esac
+    v=$((max * $1 / 100))
+    ecrire "$v" "$p/scaling_max_freq" || echec "écriture impossible (freqmax)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "pas de fréquence maximale réglable sur ce PC"
+}
+do_platform() {
+  local f="$S/firmware/acpi/platform_profile" c="$S/firmware/acpi/platform_profile_choices"
+  [ -f "$f" ] && [ -r "$c" ] || absent "pas de profil de plateforme sur ce PC"
+  dans_mots "$1" "$(lire "$c")" || absent "ce PC ne propose pas ce profil de plateforme"
+  ecrire "$1" "$f" || echec "écriture impossible (platform)"
+}
+do_nvidia_pm() {
+  local d n=0
+  for d in $(nvidia); do
+    [ -f "$d/power/control" ] || continue
+    ecrire "$1" "$d/power/control" || echec "écriture impossible (nvidia-pm)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "pas de carte NVIDIA réglable"
+}
+do_nvidia_pl() {
+  local d actif=0 mn mx w
+  for d in $(nvidia); do
+    [ "$(lire "$d/power/runtime_status")" = active ] && actif=1
+  done
+  [ "$actif" = 1 ] || absent "la carte NVIDIA n'est pas active (elle n'est pas réveillée pour ça)"
+  command -v nvidia-smi >/dev/null 2>&1 || absent "nvidia-smi absent"
+  read -r mn mx <<EOF
+$(nvidia-smi --query-gpu=power.min_limit,power.max_limit --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ',')
+EOF
+  mn="${mn%%.*}"; mx="${mx%%.*}"
+  case "$mn$mx" in ''|*[!0-9]*) absent "limites de puissance illisibles" ;; esac
+  [ "$mx" -gt "$mn" ] || absent "limites de puissance illisibles"
+  w=$((mn + (mx - mn) * $1 / 3))
+  # beaucoup de cartes de portable refusent -pl : « rien de tel » (code 3), le profil continue sans ce réglage
+  nvidia-smi -pl "$w" >/dev/null 2>&1 || absent "la carte refuse de changer sa limite de puissance"
+}
+do_wifi() {
+  command -v iw >/dev/null 2>&1 || absent "iw absent"
+  local i n=0
+  for i in $(wifis); do
+    iw dev "$i" set power_save "$1" >/dev/null 2>&1 || echec "économie d'énergie du Wi-Fi refusée"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "pas de Wi-Fi"
+}
+do_usb() {
+  local d n=0 v=on
+  [ "$1" = on ] && v=auto
+  for d in $(usbs); do
+    ecrire "$v" "$d/power/control" || continue
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "aucun périphérique USB réglable"
+}
+do_audio() {
+  local f="$S/module/snd_hda_intel/parameters/power_save"
+  [ -f "$f" ] || absent "pas de puce audio réglable"
+  if [ "$1" = on ]; then ecrire 1 "$f"; else ecrire 0 "$f"; fi || echec "écriture impossible (audio)"
+}
+do_kbd() {
+  local d n=0 max v
+  for d in "$S"/class/leds/*kbd_backlight*; do
+    [ -f "$d/brightness" ] && [ -r "$d/max_brightness" ] || continue
+    max="$(lire "$d/max_brightness")"
+    case "$max" in ''|*[!0-9]*) continue ;; esac
+    v="$1"; [ "$v" -gt "$max" ] && v="$max"
+    ecrire "$v" "$d/brightness" || echec "écriture impossible (clavier)"
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || absent "pas de clavier lumineux"
+}
+
+etat() {
+  local p d x
+  p="$(politiques | head -n1)"
+  if [ -n "$p" ]; then
+    [ -f "$p/energy_performance_preference" ] && echo "epp=$(lire "$p/energy_performance_preference")"
+    [ -f "$p/scaling_max_freq" ] && echo "freqmax_khz=$(lire "$p/scaling_max_freq")/$(lire "$p/cpuinfo_max_freq")"
+  fi
+  [ -f "$S/devices/system/cpu/cpufreq/boost" ] && echo "boost=$(lire "$S/devices/system/cpu/cpufreq/boost")"
+  [ -f "$S/devices/system/cpu/intel_pstate/no_turbo" ] && echo "no_turbo=$(lire "$S/devices/system/cpu/intel_pstate/no_turbo")"
+  [ -f "$S/firmware/acpi/platform_profile" ] && echo "platform=$(lire "$S/firmware/acpi/platform_profile")"
+  for d in $(nvidia); do
+    [ -f "$d/power/control" ] && echo "nvidia_pm=$(lire "$d/power/control") $(lire "$d/power/runtime_status")"
+  done
+  [ -f "$S/module/snd_hda_intel/parameters/power_save" ] && echo "audio=$(lire "$S/module/snd_hda_intel/parameters/power_save")"
+  for x in $(wifis); do echo "wifi=$x"; done
+  for x in $(usbs); do echo "usb=$(lire "$x/power/control")"; done
+  for d in "$S"/class/leds/*kbd_backlight*; do
+    [ -f "$d/brightness" ] && echo "kbd=$(lire "$d/brightness")/$(lire "$d/max_brightness")"
+  done
+  return 0
+}
+
+sudoers() {   # la ligne exacte pour ce compte : une commande par sous-commande et valeur
+  local u="$1" v
+  local bin=/usr/local/bin/nc-energie-root
+  local liste="$bin etat"
+  # un vrai nom de compte : minuscules, chiffres, « _ » et « - », pas en tête (ni ALL, ni %groupe, ni majuscules)
+  case "$u" in ''|*[!a-z0-9_-]*|[!a-z_]*) refus "nom de compte refusé" ;; esac
+  for v in $EPP; do liste="$liste, $bin epp $v"; done
+  for v in $ONOFF; do liste="$liste, $bin boost $v"; done
+  for v in $FREQ; do liste="$liste, $bin freqmax $v"; done
+  for v in $PLATEFORME; do liste="$liste, $bin platform $v"; done
+  for v in $NVPM; do liste="$liste, $bin nvidia-pm $v"; done
+  for v in $NVPL; do liste="$liste, $bin nvidia-pl $v"; done
+  for v in $ONOFF; do liste="$liste, $bin wifi-ps $v"; done
+  for v in $ONOFF; do liste="$liste, $bin usb-autosuspend $v"; done
+  for v in $ONOFF; do liste="$liste, $bin audio-ps $v"; done
+  for v in $KBD; do liste="$liste, $bin kbd $v"; done
+  printf '%s ALL=(root) NOPASSWD: %s\n' "$u" "$liste"
+}
+
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || refus "usage : etat | epp V | boost V | freqmax V | platform V | nvidia-pm V | nvidia-pl V | wifi-ps V | usb-autosuspend V | audio-ps V | kbd V"
+cmd="$1"; val="${2:-}"
+case "$cmd" in
+  etat)             [ "$#" = 1 ] || refus "etat n'a pas d'argument"; etat ;;
+  sudoers)          [ "$#" = 2 ] || refus "sudoers demande un compte"; sudoers "$val" ;;
+  epp)              valeur "$val" $EPP; racine; do_epp "$val" ;;
+  boost)            valeur "$val" $ONOFF; racine; do_boost "$val" ;;
+  freqmax)          valeur "$val" $FREQ; racine; do_freqmax "$val" ;;
+  platform)         valeur "$val" $PLATEFORME; racine; do_platform "$val" ;;
+  nvidia-pm)        valeur "$val" $NVPM; racine; do_nvidia_pm "$val" ;;
+  nvidia-pl)        valeur "$val" $NVPL; racine; do_nvidia_pl "$val" ;;
+  wifi-ps)          valeur "$val" $ONOFF; racine; do_wifi "$val" ;;
+  usb-autosuspend)  valeur "$val" $ONOFF; racine; do_usb "$val" ;;
+  audio-ps)         valeur "$val" $ONOFF; racine; do_audio "$val" ;;
+  kbd)              valeur "$val" $KBD; racine; do_kbd "$val" ;;
+  *)                refus "sous-commande refusée" ;;
+esac

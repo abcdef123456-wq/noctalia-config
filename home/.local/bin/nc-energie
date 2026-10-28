@@ -1,0 +1,919 @@
+#!/usr/bin/env python3
+"""nc-energie : des profils d'énergie vraiment poussés, proposés par l'IA (ou par des règles, sans IA).
+
+  nc-energie fiche                    la fiche matériel de CE PC, anonyme (JSON) : processeur (marque, cœurs, pilote, EPP,
+                                      boost), cartes graphiques (mode MUX), batterie (santé), écran (définition, Hz max),
+                                      service de profils, et la liste des CAPACITÉS détectées. Jamais de numéro de série,
+                                      de nom, d'adresse MAC ni de nom de machine.
+  nc-energie proposer [--ia|--regles] 2 ou 3 profils (« Cours / bureautique », « Jeu », « Film sur batterie »…), vérifiés par
+                                      la liste blanche (nc-energie-liste) et gardés dans ~/.config/nc/profils-energie.json.
+                                      Sans option : l'IA si elle est permise et répond, sinon les règles. --ia : l'IA seule
+                                      (coupée par IA_MODE=non). --regles : 3 profils de base calculés d'après la fiche.
+  nc-energie liste                    les profils gardés (et le profil actif)
+  nc-energie apercu NOM               ce qui changerait : avant → après, en français simple
+  nc-energie appliquer NOM [--oui] [--oui-hz]
+                                      applique après confirmation (--oui : sans question, pour l'île) ; tout ou rien : si
+                                      une étape échoue, on revient à l'état d'avant. --oui-hz : confirme aussi la baisse de
+                                      la fréquence de l'écran (60 Hz), seulement possible dans un profil « film sur batterie »
+  nc-energie revenir                  remet l'état d'avant (gardé dans ~/.local/state/nc/energie-avant.json)
+  nc-energie autorise                 la liste blanche pour CE PC (clé → valeurs permises)
+Options : --json (sortie lisible par l'île). Codes : 0 fait, 1 échec, 2 refusé ou mal demandé, 3 IA coupée.
+
+Ce qu'un profil peut régler : voir nc-energie-liste (la liste blanche, seul endroit qui en décide). Niveau 1 (sans root) :
+profil du service d'énergie, luminosité, réglages de nc-reglages. Niveau 2 (matériel) : l'assistant root
+/usr/local/bin/nc-energie-root, installé par install.sh seulement si tu l'as accepté (commandes sudo exactes), et
+nc-limite-charge. Jamais : ventilateurs, undervolt, ryzenadj, TDP brut, écriture libre dans /sys, options de rendu de
+Hyprland. La fréquence de l'écran ne descend jamais sous le maximum, sauf un profil « film sur batterie » appliqué après une
+confirmation qui le dit en clair. L'IA ne produit qu'un JSON {nom, description, reglages} : jamais une commande.
+Rien n'est réappliqué tout seul au démarrage. IA_MODE=non coupe toute IA (alors seulement les profils par règles).
+Pour les tests : NC_SYSFS (/sys), NC_PROC (/proc), NC_ENERGIE_OUTILS (dossier d'outils cherché d'abord), NC_IA (commande à la place de nc-ia), NC_ENERGIE_ROOT (assistant lancé
+directement, sans sudo), NC_LIMITE_CHARGE (idem), XDG_CONFIG_HOME, XDG_STATE_HOME."""
+import fcntl
+import glob
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+ICI = os.path.dirname(os.path.realpath(__file__))
+SYS = os.environ.get("NC_SYSFS") or "/sys"
+PROC = os.environ.get("NC_PROC") or "/proc"
+HOME = os.path.expanduser("~")
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "nc")
+ETAT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "nc")
+FICHIER_PROFILS = os.path.join(CONFIG, "profils-energie.json")
+FICHIER_AVANT = os.path.join(ETAT, "energie-avant.json")
+ASSISTANT = "/usr/local/bin/nc-energie-root"
+LIMITE_CHARGE = "/usr/local/bin/nc-limite-charge"
+DELAI = 20                       # secondes, un outil
+DELAI_IA = 60
+
+
+def charger(fichier):
+    c = importlib.machinery.SourceFileLoader("nc_energie_" + fichier.replace("-", "_"), os.path.join(ICI, fichier))
+    m = importlib.util.module_from_spec(importlib.util.spec_from_loader(c.name, c))
+    c.exec_module(m)
+    return m
+
+
+L = charger("nc-energie-liste")
+
+
+class Erreur(Exception):
+    def __init__(self, message, code=1):
+        Exception.__init__(self, message)
+        self.message, self.code = message, code
+
+
+# ── Outils ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def lancer(cmd, entree=None, delai=DELAI):
+    """(code, sortie) d'un outil ; (127, '') s'il manque, (124, '') s'il traîne. Jamais d'exception."""
+    try:
+        p = subprocess.run(cmd, input=entree, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                           errors="replace", timeout=delai)
+        return p.returncode, p.stdout
+    except FileNotFoundError:
+        return 127, ""
+    except (subprocess.TimeoutExpired, OSError):
+        return 124, ""
+
+
+def outil(nom):
+    """Un outil du dépôt (à côté de nc-energie), sinon dans le PATH. NC_ENERGIE_OUTILS : un dossier cherché d'abord (tests)."""
+    essai = os.environ.get("NC_ENERGIE_OUTILS")
+    if essai and os.access(os.path.join(essai, nom), os.X_OK):
+        return os.path.join(essai, nom)
+    c = os.path.join(ICI, nom)
+    return c if os.access(c, os.X_OK) else shutil.which(nom)
+
+
+def lire(chemin):
+    try:
+        with open(chemin, encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def entier(texte):
+    try:
+        return int(str(texte).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def glob_(motif):
+    return sorted(glob.glob(motif))
+
+
+def reglage_ia_mode():
+    """IA_MODE comme nc-ia : ~/.config/nc/reglages.conf, la dernière valeur gagne."""
+    mode = "auto"
+    try:
+        with open(os.path.join(HOME, ".config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+            for ligne in f:
+                k, sep, v = ligne.partition("=")
+                if sep and k.strip() == "IA_MODE":
+                    mode = v.strip().strip('"')
+    except OSError:
+        pass
+    return mode
+
+
+def ia_permise():
+    return reglage_ia_mode() != "non"
+
+
+# ── La fiche matériel (anonyme) ────────────────────────────────────────────────────────────────────────────────
+def pci_cartes():
+    """[(dossier, fabricant)] des cartes graphiques (classe 0x03xxxx)."""
+    res = []
+    for d in glob_(os.path.join(SYS, "bus/pci/devices/*")):
+        if (lire(os.path.join(d, "class")) or "").startswith("0x03"):
+            res.append((d, lire(os.path.join(d, "vendor")) or ""))
+    return res
+
+
+def nvidia_cartes():
+    return [d for d, v in pci_cartes() if v == "0x10de"]
+
+
+def nvidia_limites():
+    """(min, max, courant) en watts, ou None : seulement si une carte NVIDIA est ACTIVE (jamais réveillée pour ça)."""
+    if not any(lire(os.path.join(d, "power/runtime_status")) == "active" for d in nvidia_cartes()):
+        return None
+    if not shutil.which("nvidia-smi"):
+        return None
+    code, sortie = lancer(["nvidia-smi", "--query-gpu=power.min_limit,power.max_limit,power.limit",
+                           "--format=csv,noheader,nounits"], delai=10)
+    if code != 0:
+        return None
+    try:
+        mn, mx, cur = [float(x) for x in sortie.splitlines()[0].replace(" ", "").split(",")[:3]]
+    except (ValueError, IndexError):
+        return None
+    return (mn, mx, cur) if mx > mn else None
+
+
+# Classes USB jamais mises en veille (comme nc-energie-root) : saisie 03, audio 01, impression 07, Bluetooth e0
+USB_GARDES = {"03", "01", "07", "e0"}
+
+
+def usb_reglables():
+    """Périphériques USB dont la veille est réglable : ni saisie, ni audio, ni impression, ni Bluetooth, au niveau du
+    périphérique ou d'une de ses interfaces."""
+    res = []
+    for d in glob_(os.path.join(SYS, "bus/usb/devices/*")):
+        if ":" in os.path.basename(d) or not os.path.isfile(os.path.join(d, "power/control")):
+            continue
+        if (lire(os.path.join(d, "bDeviceClass")) or "").lower() in USB_GARDES:
+            continue
+        if any((lire(i) or "").lower() in USB_GARDES for i in glob_(os.path.join(d, "*:*/bInterfaceClass"))):
+            continue
+        res.append(d)
+    return res
+
+
+def wifis():
+    return [os.path.basename(d) for d in glob_(os.path.join(SYS, "class/net/*")) if os.path.isdir(os.path.join(d, "wireless"))
+            and re.fullmatch(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*", os.path.basename(d))]
+
+
+def claviers():
+    return [d for d in glob_(os.path.join(SYS, "class/leds/*kbd_backlight*")) if os.path.isfile(os.path.join(d, "brightness"))]
+
+
+def batteries():
+    res = []
+    for d in glob_(os.path.join(SYS, "class/power_supply/*")):
+        if lire(os.path.join(d, "type")) == "Battery" and lire(os.path.join(d, "scope")) != "Device":
+            res.append(d)
+    return res
+
+
+def ecran():
+    """{resolution, hz_max} de l'écran interne (comme nc-reglages : hyprctl monitors all -j, connecteur eDP), ou aucun."""
+    if not shutil.which("hyprctl"):
+        return {"resolution": None, "hz_max": None}
+    code, sortie = lancer(["hyprctl", "monitors", "all", "-j"], delai=10)
+    try:
+        mons = json.loads(sortie or "[]") if code == 0 else []
+    except ValueError:
+        mons = []
+    m = next((x for x in mons if isinstance(x, dict) and str(x.get("name", "")).startswith("eDP")), None)
+    modes = []
+    for s in (m or {}).get("availableModes", []):
+        r = re.match(r"(\d+)x(\d+)@([\d.]+)", str(s))
+        if r:
+            modes.append((int(r[1]) * int(r[2]), int(r[1]), int(r[2]), round(float(r[3]))))
+    if not modes:
+        return {"resolution": None, "hz_max": None}
+    px = max(modes)[0]
+    meme = [x for x in modes if x[0] == px]
+    return {"resolution": f"{meme[0][1]}x{meme[0][2]}", "hz_max": max(x[3] for x in meme)}
+
+
+def service_profils():
+    """(nom du service, [profils disponibles parmi power-saver, balanced, performance])."""
+    if outil("powerprofilesctl"):
+        code, sortie = lancer(["powerprofilesctl", "list"], delai=10)
+        noms = re.findall(r"^\s*\*?\s*([a-z][a-z-]*):\s*$", sortie, re.M) if code == 0 else []
+        noms = [n for n in L.PROFILS_SERVICE if n in noms]
+        if noms:
+            return "power-profiles-daemon", noms
+    if outil("tuned-adm"):
+        code, sortie = lancer(["tuned-adm", "list"], delai=10)
+        if code == 0:
+            noms = [p for p, t in TUNED.items() if re.search(r"^- " + re.escape(t) + r"\b", sortie, re.M)]
+            if noms:
+                return "tuned", [n for n in L.PROFILS_SERVICE if n in noms]
+    return "aucun", []
+
+
+TUNED = {"power-saver": "powersave", "balanced": "balanced", "performance": "throughput-performance"}
+
+
+def fiche():
+    """La fiche matériel de CE PC. Anonyme : marque, nombres et listes de valeurs, rien qui identifie."""
+    cpu_dir = os.path.join(SYS, "devices/system/cpu")
+    p0 = os.path.join(cpu_dir, "cpufreq/policy0")
+    vendeur = ""
+    for l in (lire(os.path.join(PROC, "cpuinfo")) or "").splitlines():
+        if l.startswith("vendor_id"):
+            vendeur = l.partition(":")[2].strip()
+            break
+    marque = {"AuthenticAMD": "AMD", "GenuineIntel": "Intel"}.get(vendeur, "autre")
+    coeurs = len([d for d in glob_(os.path.join(cpu_dir, "cpu[0-9]*")) if os.path.isdir(d)]) or os.cpu_count() or 1
+    epp_dispo = (lire(os.path.join(p0, "energy_performance_available_preferences")) or "").split()
+    epp_dispo = [x for x in epp_dispo if x in L.EPP] if os.path.isfile(os.path.join(p0, "energy_performance_preference")) else []
+    boost = os.path.isfile(os.path.join(cpu_dir, "cpufreq/boost")) or os.path.isfile(os.path.join(cpu_dir, "intel_pstate/no_turbo"))
+    cartes = pci_cartes()
+    nvidia = any(v == "0x10de" for _d, v in cartes)
+    integree = next(({"0x1002": "AMD", "0x8086": "Intel"}.get(v, "autre") for _d, v in cartes if v != "0x10de"), "aucune")
+    mux = "sans-objet"
+    if nvidia:
+        mux = "inconnu"
+        if outil("nc-gpu-mode"):
+            code, sortie = lancer([outil("nc-gpu-mode"), "actuel"], delai=15)
+            if code == 0 and sortie.strip() in ("hybride", "dediee", "sans-objet"):
+                mux = sortie.strip()
+    bats = batteries()
+    sante = None
+    for b in bats:
+        plein = entier(lire(os.path.join(b, "energy_full"))) or entier(lire(os.path.join(b, "charge_full")))
+        origine = entier(lire(os.path.join(b, "energy_full_design"))) or entier(lire(os.path.join(b, "charge_full_design")))
+        if plein and origine:
+            sante = max(0, min(100, round(100 * plein / origine)))
+            break
+    service, disponibles = service_profils()
+    choix = [x for x in (lire(os.path.join(SYS, "firmware/acpi/platform_profile_choices")) or "").split() if x in L.PLATEFORME]
+    kbd_max = 0
+    for k in claviers():
+        kbd_max = max(kbd_max, min(3, entier(lire(os.path.join(k, "max_brightness"))) or 0))
+    ec = ecran()
+    caps = []
+    if disponibles:
+        caps.append("profil")
+    if glob_(os.path.join(SYS, "class/backlight/*")) and outil("nc-brightness"):
+        caps.append("luminosite")
+    if ec["hz_max"]:
+        caps.append("ecran")
+    if bats:
+        caps.append("batterie")
+    if glob_(os.path.join(SYS, "class/bluetooth/*")):
+        caps.append("bluetooth")
+    if epp_dispo:
+        caps.append("epp")
+    if boost:
+        caps.append("boost")
+    if os.path.isfile(os.path.join(p0, "scaling_max_freq")) and entier(lire(os.path.join(p0, "cpuinfo_max_freq"))):
+        caps.append("freqmax")
+    if choix and os.path.isfile(os.path.join(SYS, "firmware/acpi/platform_profile")):
+        caps.append("platform")
+    if any(os.path.isfile(os.path.join(d, "power/control")) for d in nvidia_cartes()):
+        caps.append("nvidia_pm")
+    if nvidia_limites():
+        caps.append("nvidia_pl")
+    if wifis() and shutil.which("iw"):
+        caps.append("wifi")
+    if usb_reglables():
+        caps.append("usb")
+    if os.path.isfile(os.path.join(SYS, "module/snd_hda_intel/parameters/power_save")):
+        caps.append("audio")
+    if kbd_max > 0:
+        caps.append("clavier")
+    if limite_charge_possible(bats) and os.access(os.environ.get("NC_LIMITE_CHARGE") or LIMITE_CHARGE, os.X_OK):
+        caps.append("limite_charge")
+    # Sans l'assistant root (PC fixe : install.sh ne le propose que sur un portable ; ou refusé), les réglages matériels
+    # ne sont pas proposés : un profil qui en contiendrait serait refusé en entier
+    if not assistant_present():
+        materiel = {cap for (n, _v, cap, _f, _e) in L.CLES.values() if n == 2 and cap} - {"limite_charge"}
+        caps = [c for c in caps if c not in materiel]
+    return {"version": 1,
+            "cpu": {"marque": marque, "coeurs": coeurs, "pilote": lire(os.path.join(p0, "scaling_driver")) or "inconnu",
+                    "epp_disponibles": epp_dispo, "boost": boost},
+            "gpu": {"integree": integree, "nvidia": nvidia, "mux": mux},
+            "batterie": {"presente": bool(bats), "sante_pct": sante},
+            "ecran": ec,
+            "profils": {"service": service, "disponibles": disponibles},
+            "plateforme": {"choix": choix},
+            "clavier": {"max": kbd_max},
+            "capacites": [c for c in L.CAPACITES if c in caps],
+            "assistant_root": assistant_present()}
+
+
+def limite_charge_possible(bats):
+    for b in bats:
+        if os.path.exists(os.path.join(b, "charge_control_end_threshold")) or "Long_Life" in (lire(os.path.join(b, "charge_types")) or ""):
+            return True
+    return bool(glob_(os.path.join(SYS, "bus/platform/drivers/ideapad_acpi/*/conservation_mode")))
+
+
+def assistant_present():
+    return os.access(os.environ.get("NC_ENERGIE_ROOT") or ASSISTANT, os.X_OK)
+
+
+# ── État actuel (pour l'aperçu, le « avant » et le retour) ─────────────────────────────────────────────────────
+def lire_profil_service():
+    if outil("powerprofilesctl"):
+        code, sortie = lancer(["powerprofilesctl", "get"], delai=10)
+        if code == 0 and sortie.strip() in L.PROFILS_SERVICE:
+            return sortie.strip()
+    if outil("tuned-adm"):
+        code, sortie = lancer(["tuned-adm", "active"], delai=10)
+        m = re.search(r"Current active profile:\s*(\S+)", sortie)
+        if code == 0 and m:
+            return next((k for k, v in TUNED.items() if v == m[1]), None)
+    return None
+
+
+def lire_actuel(cle):
+    """La valeur de maintenant, dans le vocabulaire de la liste blanche, ou None si elle n'y est pas (ou inconnue)."""
+    p0 = os.path.join(SYS, "devices/system/cpu/cpufreq/policy0")
+    if cle == "profil":
+        return lire_profil_service()
+    if cle == "luminosite":
+        code, sortie = lancer([outil("nc-brightness") or "nc-brightness", "get"], delai=10)
+        n = entier(sortie) if code == 0 else None
+        return str(n) if n is not None and 0 <= n <= 100 else None
+    if cle in L.CLES_REGLAGES:
+        code, sortie = lancer([outil("nc-reglages") or "nc-reglages", "get", cle], delai=15)
+        v = sortie.strip()
+        return v if code == 0 and v and "\n" not in v and len(v) <= 40 else None
+    if cle == "cpu_epp":
+        return lire(os.path.join(p0, "energy_performance_preference"))
+    if cle == "cpu_boost":
+        b = lire(os.path.join(SYS, "devices/system/cpu/cpufreq/boost"))
+        if b in ("0", "1"):
+            return "on" if b == "1" else "off"
+        t = lire(os.path.join(SYS, "devices/system/cpu/intel_pstate/no_turbo"))
+        return {"0": "on", "1": "off"}.get(t)
+    if cle == "cpu_freq_max":
+        a, b = entier(lire(os.path.join(p0, "scaling_max_freq"))), entier(lire(os.path.join(p0, "cpuinfo_max_freq")))
+        if not a or not b:
+            return None
+        pct = 100 * a / b
+        return next((str(x) for x in (100, 80, 60) if abs(pct - x) <= 1.5), None)
+    if cle == "platform_profile":
+        return lire(os.path.join(SYS, "firmware/acpi/platform_profile"))
+    if cle == "nvidia_pm":
+        for d in nvidia_cartes():
+            v = lire(os.path.join(d, "power/control"))
+            if v in ("auto", "on"):
+                return v
+        return None
+    if cle == "nvidia_pl":
+        lim = nvidia_limites()
+        if not lim:
+            return None
+        mn, mx, cur = lim
+        k = round(3 * (cur - mn) / (mx - mn))
+        return str(k) if 0 <= k <= 3 and abs(mn + (mx - mn) * k / 3 - cur) <= 0.05 * (mx - mn) else None
+    if cle == "wifi_power_save":
+        for i in wifis()[:1]:
+            code, sortie = lancer(["iw", "dev", i, "get", "power_save"], delai=10)
+            m = re.search(r"Power save:\s*(on|off)", sortie)
+            return m[1] if code == 0 and m else None
+        return None
+    if cle == "usb_autosuspend":
+        etats = {lire(os.path.join(d, "power/control")) for d in usb_reglables()}
+        return "on" if etats == {"auto"} else ("off" if etats == {"on"} else None)
+    if cle == "audio_power_save":
+        v = entier(lire(os.path.join(SYS, "module/snd_hda_intel/parameters/power_save")))
+        return None if v is None else ("on" if v > 0 else "off")
+    if cle == "clavier_retro":
+        k = claviers()[:1]
+        n = entier(lire(os.path.join(k[0], "brightness"))) if k else None
+        return str(n) if n is not None and 0 <= n <= 3 else None
+    if cle == "limite_charge":
+        code, sortie = lancer([os.environ.get("NC_LIMITE_CHARGE") or LIMITE_CHARGE, "etat"], delai=10)
+        return {"1": "on", "0": "off"}.get(sortie.strip()) if code == 0 else None
+    return None
+
+
+# ── Appliquer une clé ──────────────────────────────────────────────────────────────────────────────────────────
+SOUS_COMMANDES = {"cpu_epp": "epp", "cpu_boost": "boost", "cpu_freq_max": "freqmax", "platform_profile": "platform",
+                  "nvidia_pm": "nvidia-pm", "nvidia_pl": "nvidia-pl", "wifi_power_save": "wifi-ps",
+                  "usb_autosuspend": "usb-autosuspend", "audio_power_save": "audio-ps", "clavier_retro": "kbd"}
+
+
+def appliquer_cle(cle, valeur):
+    """(vrai, '') ou (faux, raison). N'envoie à l'assistant que (sous-commande de la liste, valeur de la liste)."""
+    if cle not in L.CLES:
+        return False, "clé inconnue"
+    # Une valeur de la liste ; l'« avant » d'un retour arrière peut en sortir pour la luminosité et les réglages de nc-reglages
+    if valeur in L.CLES[cle][1]:
+        pass
+    elif cle == "luminosite" and entier(valeur) is not None and 0 <= entier(valeur) <= 100:
+        pass
+    elif cle in L.CLES_REGLAGES and re.fullmatch(r"[A-Za-z0-9._-]{1,40}", valeur):
+        pass
+    else:
+        return False, "valeur hors liste"
+    if cle == "profil":
+        return poser_profil(valeur)
+    if cle == "luminosite":
+        code, _ = lancer([outil("nc-brightness") or "nc-brightness", "set", valeur], delai=10)
+        return code == 0, "luminosité refusée"
+    if cle in L.CLES_REGLAGES:
+        code, _ = lancer([outil("nc-reglages") or "nc-reglages", "set", cle, valeur], delai=30)
+        return code == 0, f"réglage {cle} refusé"
+    if cle == "limite_charge":
+        direct = os.environ.get("NC_LIMITE_CHARGE")
+        cmd = [direct, valeur] if direct else ["sudo", "-n", LIMITE_CHARGE, valeur]
+        if not direct and not os.access(LIMITE_CHARGE, os.X_OK):
+            return False, "nc-limite-charge n'est pas installé"
+        code, _ = lancer(cmd, delai=20)
+        return code == 0, "limite de charge refusée"
+    sous = SOUS_COMMANDES[cle]
+    direct = os.environ.get("NC_ENERGIE_ROOT")
+    if not direct and not os.access(ASSISTANT, os.X_OK):
+        return False, "l'assistant nc-energie-root n'est pas installé (relance install.sh et accepte-le)"
+    cmd = [direct, sous, valeur] if direct else ["sudo", "-n", ASSISTANT, sous, valeur]
+    code, _ = lancer(cmd, delai=30)
+    if code == 3 and cle == "nvidia_pl":
+        return None, "la carte refuse sa limite de puissance (souvent le cas sur un portable) : sautée"
+    if code == 3:
+        return False, f"{cle} : rien de tel sur ce PC en ce moment"
+    return code == 0, f"{cle} refusé par l'assistant (code {code})"
+
+
+def poser_profil(valeur):
+    if outil("powerprofilesctl"):
+        code, _ = lancer(["powerprofilesctl", "set", valeur], delai=15)
+        return code == 0, "profil refusé par le service d'énergie"
+    if outil("tuned-adm") and valeur in TUNED:
+        code, _ = lancer(["tuned-adm", "profile", TUNED[valeur]], delai=30)
+        return code == 0, "profil refusé par tuned"
+    return False, "aucun service de profils"
+
+
+# ── Profils gardés ─────────────────────────────────────────────────────────────────────────────────────────────
+def sans_doublon(paires):
+    """Objet JSON de l'IA : une clé en double (la dernière gagnerait en silence) rend la réponse invalide."""
+    d = {}
+    for k, v in paires:
+        if k in d:
+            raise ValueError("clé en double : " + str(k)[:40])
+        d[k] = v
+    return d
+
+
+def ecrire_json(chemin, donnees):
+    """Écriture atomique, en 0600, dans un dossier 0700."""
+    dossier = os.path.dirname(chemin)
+    os.makedirs(dossier, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dossier, prefix=".energie-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(donnees, f, ensure_ascii=False, indent=1)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, chemin)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def lire_json(chemin):
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def profils_gardes():
+    d = lire_json(FICHIER_PROFILS) or {}
+    liste = d.get("profils")
+    return [p for p in liste if isinstance(p, dict)] if isinstance(liste, list) else []
+
+
+def trouver(nom, f):
+    """(profil validé, source) pour un nom ou un identifiant ; Erreur sinon. Toujours revalidé contre CE PC maintenant."""
+    cherche = L.identifiant(str(nom)) if nom else ""
+    for brut in profils_gardes():
+        if brut.get("id") == cherche or str(brut.get("nom", "")).strip().lower() == str(nom).strip().lower():
+            p, raison = L.valider_profil({k: brut.get(k) for k in ("nom", "description", "reglages", "film_batterie") if k in brut}, f)
+            if p is None:
+                raise Erreur(f"le profil « {str(brut.get('nom'))[:40]} » n'est plus valable sur ce PC : {raison}", 2)
+            p["source"] = brut.get("source", "?")
+            return p
+    raise Erreur(f"pas de profil nommé « {str(nom)[:40]} » (nc-energie liste)", 2)
+
+
+# ── Profils par règles (sans IA) ───────────────────────────────────────────────────────────────────────────────
+def regles(f):
+    """3 profils de base calculés d'après la fiche : chaque valeur est prise dans ce que CE PC permet."""
+    def pref(film, cle, *voulues):
+        permises = L.valeurs_permises(cle, f, film)
+        return next((v for v in voulues if v in permises), None)
+
+    def profil(nom, description, film, voeux):
+        reglages = {}
+        for cle, voulues in voeux.items():
+            v = pref(film, cle, *([voulues] if isinstance(voulues, str) else voulues))
+            if v is not None:
+                reglages[cle] = v
+        return {"nom": nom, "description": description, "reglages": reglages, "film_batterie": film}
+
+    cours = profil("Cours / bureautique",
+                   "Sobre et silencieux pour taper, lire et suivre un cours : le processeur reste économe, l'écran garde sa fréquence.",
+                   False, {"profil": "balanced", "cpu_epp": ("balance_power", "power"), "cpu_boost": "on", "wifi_power_save": "on",
+                           "audio_power_save": "on", "usb_autosuspend": "on", "nvidia_pm": "auto", "clavier_retro": "1",
+                           "luminosite": "60", "HALO_BATTERIE": "non", "FOND_ANIME": "non", "FOND_ANIME_BATTERIE": "non",
+                           "BAT_RELEVES": "oui", "HZ_BALANCED_BAT": "max"})
+    jeu = profil("Jeu", "Toute la puissance : processeur et carte graphique à fond, effets gardés.",
+                 False, {"profil": "performance", "cpu_epp": "performance", "cpu_boost": "on", "cpu_freq_max": "100",
+                         "platform_profile": ("performance", "balanced-performance"), "nvidia_pm": "on", "nvidia_pl": "3",
+                         "wifi_power_save": "off", "audio_power_save": "off", "EFFETS": "tous", "HZ_PERFORMANCE": "max"})
+    film = profil("Film sur batterie",
+                  "Le plus d'autonomie pour regarder un film : processeur freiné, écran à 60 Hz (confirmé avant), luminosité modérée.",
+                  True, {"profil": "power-saver", "cpu_epp": "power", "cpu_boost": "off", "cpu_freq_max": "80",
+                         "platform_profile": ("low-power", "quiet", "cool"), "nvidia_pm": "auto", "wifi_power_save": "on",
+                         "audio_power_save": "on", "usb_autosuspend": "on", "clavier_retro": "0", "luminosite": "40",
+                         "HALO_BATTERIE": "non", "FOND_ANIME": "non", "FOND_ANIME_BATTERIE": "non", "HZ_ECO": "60"})
+    # Le « film » n'est marqué que s'il baisse vraiment la fréquence de l'écran
+    if film["reglages"].get("HZ_ECO") != "60":
+        film["film_batterie"] = False
+    return [p for p in (cours, jeu, film) if p["reglages"]]
+
+
+# ── L'IA ───────────────────────────────────────────────────────────────────────────────────────────────────────
+def question_ia(f):
+    blanche = L.liste_blanche(f, film=True)
+    return ("Tu aides à régler la consommation d'un portable Linux. Voici la fiche matériel anonyme de ce PC (JSON), puis la "
+            "LISTE BLANCHE de tout ce que tu as le droit de régler sur ce PC (clé : valeurs permises).\n\n"
+            "Propose 2 ou 3 profils d'énergie : par exemple « Cours / bureautique », « Jeu » et « Film sur batterie ». Réponds "
+            "UNIQUEMENT par un objet JSON {\"profils\": [{\"nom\": \"…\", \"description\": \"une phrase simple en français\", "
+            "\"reglages\": {\"clé\": \"valeur\"}}]}. Règles : seulement les clés et les valeurs de la liste blanche, des "
+            "chaînes ; jamais de commande, de chemin, de code ni de texte hors du JSON ; un nom de 40 caractères au plus. La "
+            "fréquence de l'écran reste à \"max\" partout, SAUF dans le profil « Film sur batterie », qui ajoute "
+            "\"film_batterie\": true à côté de \"reglages\" et peut mettre HZ_ECO à \"60\".\n\n"
+            "Fiche : " + json.dumps(f, ensure_ascii=False) + "\n\nListe blanche : " + json.dumps(blanche, ensure_ascii=False))
+
+
+def demander_ia(f):
+    """(profils bruts, None) ou (None, raison). nc-ia ne reçoit que la fiche anonyme et la liste blanche ; il ne lance rien."""
+    cmd = os.environ.get("NC_IA")
+    if cmd is None:
+        cmd = outil("nc-ia") or ""
+    if not cmd:
+        return None, "nc-ia n'est pas installé"
+    try:
+        p = subprocess.Popen([cmd, "demander", "--usage", "question", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, errors="replace", start_new_session=True)
+    except OSError:
+        return None, "nc-ia n'a pas pu démarrer"
+    try:
+        sortie, _ = p.communicate(question_ia(f), timeout=DELAI_IA)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)          # le groupe de CE nc-ia, lancé ici (pid mémorisé)
+        except OSError:
+            pass
+        try:
+            p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.communicate()
+        return None, "l'IA n'a pas répondu à temps"
+    if p.returncode != 0 or not isinstance(sortie, str):
+        return None, "l'IA n'a pas pu répondre"
+    debut = min([i for i in (sortie.find("{"), sortie.find("[")) if i >= 0], default=-1)
+    try:
+        rep = json.JSONDecoder(object_pairs_hook=sans_doublon).raw_decode(sortie[debut:])[0] if debut >= 0 else None
+    except ValueError:
+        rep = None
+    if rep is None:
+        return None, "réponse de l'IA illisible"
+    return rep, None
+
+
+def proposer(mode):
+    f = fiche()
+    if not f["capacites"]:
+        raise Erreur("rien à régler de plus sur ce PC (aucune capacité détectée)", 1)
+    note = ""
+    source, bons, rejets = "regles", [], []
+    if mode == "ia" and not ia_permise():
+        raise Erreur("l'IA est coupée (IA_MODE=non) : utilise --regles", 3)
+    if mode in ("auto", "ia") and ia_permise():
+        brut, err = demander_ia(f)
+        if brut is not None:
+            bons, rejets = L.valider_liste(brut, f)
+            if bons:
+                source = "ia"
+            else:
+                note = "l'IA n'a donné aucun profil valable"
+        else:
+            note = err
+        if mode == "ia" and not bons:
+            raise Erreur((note or "aucun profil valable") + (" : " + "; ".join(f"{r['nom']} : {r['raison']}" for r in rejets[:3]) if rejets else ""), 1)
+    elif mode == "auto":
+        note = "IA coupée (IA_MODE=non) : profils par règles"
+    if not bons:
+        bons, rejets_r = L.valider_liste(regles(f), f)
+        rejets = rejets + rejets_r
+        if not bons:
+            raise Erreur("aucun profil possible sur ce PC", 1)
+    date = time.strftime("%Y-%m-%dT%H:%M:%S")
+    ecrire_json(FICHIER_PROFILS, {"version": 1, "profils": [dict(p, source=source, date=date) for p in bons]})
+    return {"source": source, "raison": note, "profils": [resume(p, source) for p in bons], "rejets": rejets}
+
+
+def resume(p, source=None):
+    return {"id": p["id"], "nom": p["nom"], "description": p["description"], "film_batterie": p.get("film_batterie", False),
+            "source": source or p.get("source", "?"), "reglages": len(p["reglages"]),
+            "materiel": any(L.CLES[c][0] == 2 for c in p["reglages"])}
+
+
+# ── Aperçu, application, retour ────────────────────────────────────────────────────────────────────────────────
+VALEURS = {"oui": "oui", "non": "non", "on": "activé", "off": "coupé", "tous": "tous", "aucun": "aucun", "max": "la plus haute",
+           "power-saver": "Économie", "balanced": "Équilibré", "performance": "Performance", "auto": "automatique"}
+
+
+def montrer(cle, v):
+    if v is None:
+        return "inconnu"
+    if cle in ("luminosite", "cpu_freq_max") or cle in ("ECO_BRIGHTNESS_MAX",):
+        return "sans limite" if v == "0" and cle == "ECO_BRIGHTNESS_MAX" else v + " %"
+    if cle == "ECO_AUTO":
+        return "jamais" if v == "0" else f"sous {v} %"
+    if cle in ("HZ_ECO", "HZ_BALANCED_BAT") and v == "60":
+        return "60 Hz"
+    if cle == "nvidia_pl":
+        return {"0": "minimum", "3": "maximum"}.get(v, f"palier {v} sur 3")
+    if cle == "nvidia_pm":
+        return {"auto": "automatique (dort quand inutile)", "on": "toujours allumée"}.get(v, v)
+    if cle == "FENETRES_OMBRE":
+        return "aucune" if v == "0" else "oui"
+    if cle == "clavier_retro":
+        return "éteint" if v == "0" else f"niveau {v}"
+    return VALEURS.get(v, v)
+
+
+ORDRE_NIVEAU = {2: 0, 1: 1}                         # le matériel d'abord : s'il échoue, rien d'autre n'a bougé
+
+
+def apercu(p, f):
+    changements, inchanges, avert = [], 0, []
+    for cle, apres in p["reglages"].items():
+        avant = lire_actuel(cle)
+        if avant == apres:
+            inchanges += 1
+            continue
+        niveau = L.CLES[cle][0]
+        changements.append({"cle": cle, "libelle": L.CLES[cle][3], "avant": montrer(cle, avant), "apres": montrer(cle, apres),
+                            "_avant": avant, "_apres": apres, "niveau": niveau})
+        if avant is None:
+            avert.append(f"{L.CLES[cle][3]} : l'état d'avant est inconnu, il ne pourra pas être remis par « revenir »")
+        elif cle in SOUS_COMMANDES and avant not in L.CLES[cle][1]:
+            # ex. platform_profile « custom » ou « max-power » d'une Legion, EPP numérique : l'assistant ne sait pas le remettre
+            avert.append(f"{L.CLES[cle][3]} : l'état d'avant (« {avant} ») n'est pas une valeur que l'assistant sait remettre ; "
+                         "« revenir » ne pourra pas le rétablir")
+    changements.sort(key=lambda c: (ORDRE_NIVEAU[c["niveau"]], c["cle"]))
+    root = [c for c in changements if c["cle"] in SOUS_COMMANDES]
+    applicable, raison = True, ""
+    if root and not f.get("assistant_root"):
+        applicable, raison = False, "l'assistant nc-energie-root n'est pas installé (install.sh le propose sur un portable, avec ton accord)"
+    hz = [c for c in changements if c["cle"] in L.HZ_FILM and c["_apres"] == "60"]
+    return {"id": p["id"], "nom": p["nom"], "description": p["description"], "film_batterie": p["film_batterie"],
+            "changements": changements, "inchanges": inchanges, "avertissements": avert, "applicable": applicable,
+            "raison": raison, "demande_hz": bool(hz), "hz_max": (f.get("ecran") or {}).get("hz_max"),
+            "texte_hz": (f"L'écran passera à 60 Hz au lieu de {(f.get('ecran') or {}).get('hz_max')} Hz tant que ce profil est actif "
+                         "(« revenir » rend la fréquence d'avant).") if hz else ""}
+
+
+def public(ap):
+    return dict(ap, changements=[{k: v for k, v in c.items() if not k.startswith("_")} for c in ap["changements"]])
+
+
+class Verrou:
+    def __enter__(self):
+        os.makedirs(ETAT, mode=0o700, exist_ok=True)
+        self.f = open(os.path.join(ETAT, "energie.lock"), "w")
+        try:
+            fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise Erreur("un autre changement d'énergie est en cours", 1)
+        return self
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+def defaire(etapes):
+    """Remet, dans l'ordre inverse, les valeurs d'avant de ces étapes [(clé, avant)] ; renvoie les clés non remises."""
+    rates = []
+    for cle, avant in reversed(etapes):
+        if avant is None:
+            rates.append(cle)
+            continue
+        ok, _ = appliquer_cle(cle, avant)
+        if not ok:
+            rates.append(cle)
+    return rates
+
+
+def appliquer(nom, oui=False, oui_hz=False, interactif=False):
+    f = fiche()
+    p = trouver(nom, f)
+    ap = apercu(p, f)
+    if not ap["applicable"]:
+        raise Erreur(ap["raison"], 2)
+    if not ap["changements"]:
+        return {"ok": True, "applique": False, "message": "Rien à changer : ce PC est déjà dans cet état.", "nom": p["nom"]}
+    if ap["demande_hz"] and not oui_hz:
+        if interactif and not oui and demander(ap["texte_hz"] + " Confirmer la baisse de la fréquence de l'écran ?"):
+            oui_hz = True
+        else:
+            raise Erreur(ap["texte_hz"] + " Confirme avec --oui-hz.", 2)
+    if not oui:
+        if not (interactif and demander(f"Appliquer le profil « {p['nom']} » ({len(ap['changements'])} changements) ?")):
+            raise Erreur("pas confirmé : rien n'a changé", 2)
+    with Verrou():
+        precedent = lire_json(FICHIER_AVANT)
+        etapes = [(c["cle"], c["_avant"]) for c in ap["changements"]]
+        fusion = {cle: av for cle, av in etapes}
+        if precedent and isinstance(precedent.get("avant"), dict):
+            fusion.update({k: v for k, v in precedent["avant"].items() if k in L.CLES})     # l'état d'origine d'abord
+        ecrire_json(FICHIER_AVANT, {"version": 1, "profil": p["id"], "nom": p["nom"], "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                    "avant": fusion})
+        faites, sautees = [], []
+        for c in ap["changements"]:
+            ok, raison = appliquer_cle(c["cle"], c["_apres"])
+            if ok is None:                                  # réglage refusé par le matériel lui-même : sauté, pas d'échec
+                sautees.append(f"{c['libelle']} ({raison})")
+                continue
+            faites.append((c["cle"], c["_avant"]))
+            if not ok:
+                rates = defaire(faites)
+                if precedent:
+                    ecrire_json(FICHIER_AVANT, precedent)
+                else:
+                    try:
+                        os.unlink(FICHIER_AVANT)
+                    except OSError:
+                        pass
+                msg = f"échec à « {c['libelle']} » : {raison}. Tout a été remis comme avant."
+                if rates:
+                    msg += " Mais n'ont pas pu être remis : " + ", ".join(rates) + "."
+                raise Erreur(msg, 1)
+    msg = f"Profil « {p['nom']} » appliqué ({len(faites)} changements). « nc-energie revenir » remet l'état d'avant."
+    if sautees:
+        msg += " Sautés : " + ", ".join(sautees) + "."
+    return {"ok": True, "applique": True, "nom": p["nom"], "changements": len(faites), "sautes": sautees, "message": msg}
+
+
+def revenir():
+    d = lire_json(FICHIER_AVANT)
+    if not d or not isinstance(d.get("avant"), dict) or not d["avant"]:
+        return {"ok": True, "revenu": False, "message": "Rien à remettre : aucun profil n'a été appliqué."}
+    with Verrou():
+        avant = [(k, v) for k, v in d["avant"].items() if k in L.CLES and (v is None or isinstance(v, str))]
+        # jamais un écran noir au retour : une luminosité d'avant sous 5 % est remise à 5 %
+        avant = [(k, "5" if k == "luminosite" and entier(v) is not None and entier(v) < 5 else v) for k, v in avant]
+        # Le matériel en dernier à remettre = en premier appliqué : l'ordre inverse de l'application
+        avant.sort(key=lambda kv: (ORDRE_NIVEAU[L.CLES[kv[0]][0]], kv[0]))
+        rates = defaire(avant)
+        if rates:
+            ecrire_json(FICHIER_AVANT, dict(d, avant={k: v for k, v in d["avant"].items() if k in rates}))
+            return {"ok": False, "revenu": True, "message": "Remis, sauf : " + ", ".join(rates) + " (état d'avant inconnu ou refusé)."}
+        try:
+            os.unlink(FICHIER_AVANT)
+        except OSError:
+            pass
+    return {"ok": True, "revenu": True, "message": f"État d'avant remis ({len(avant)} réglages)."}
+
+
+def demander(question):
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return input(question + " [o/N] ").strip().lower() in ("o", "oui", "y", "yes")
+    except EOFError:
+        return False
+
+
+def liste():
+    f = fiche()
+    actif = (lire_json(FICHIER_AVANT) or {}).get("profil")
+    sortie = []
+    for brut in profils_gardes():
+        base = {"id": str(brut.get("id", ""))[:40], "nom": str(brut.get("nom", ""))[:40], "source": brut.get("source", "?")}
+        p, raison = L.valider_profil({k: brut.get(k) for k in ("nom", "description", "reglages", "film_batterie") if k in brut}, f)
+        if p is None:
+            sortie.append(dict(base, valide=False, raison=raison, description="", film_batterie=False, reglages=0, materiel=False))
+        else:
+            sortie.append(dict(resume(p, brut.get("source", "?")), valide=True, raison=""))
+    return {"ia": ia_permise(), "disponible": bool(f["capacites"]), "assistant_root": f["assistant_root"],
+            "actif": actif, "profils": sortie}
+
+
+# ── Ligne de commande ──────────────────────────────────────────────────────────────────────────────────────────
+def texte_apercu(ap):
+    lignes = [f"Profil « {ap['nom']} » : {ap['description']}"]
+    for c in ap["changements"]:
+        lignes.append(f"  {c['libelle']} : {c['avant']} → {c['apres']}" + ("  (matériel, assistant root)" if c["niveau"] == 2 else ""))
+    if not ap["changements"]:
+        lignes.append("  Rien à changer : ce PC est déjà dans cet état.")
+    if ap["inchanges"]:
+        lignes.append(f"  ({ap['inchanges']} réglages déjà comme voulu)")
+    for a in ap["avertissements"]:
+        lignes.append("  Attention : " + a)
+    if ap["texte_hz"]:
+        lignes.append("  " + ap["texte_hz"])
+    if not ap["applicable"]:
+        lignes.append("  Impossible : " + ap["raison"])
+    return "\n".join(lignes)
+
+
+def principal(argv):
+    json_ = "--json" in argv
+    args = [a for a in argv if a != "--json"]
+    if not args or args[0] in ("-h", "--help", "aide"):
+        print(__doc__.split('"""')[0].strip())
+        return 0
+    cmd, reste = args[0], args[1:]
+    options = {a for a in reste if a.startswith("--")}
+    mots = [a for a in reste if not a.startswith("--")]
+
+    def sortir(donnees, texte=None, code=0):
+        if json_:
+            print(json.dumps(donnees, ensure_ascii=False))
+        else:
+            print(texte if texte is not None else json.dumps(donnees, ensure_ascii=False, indent=1))
+        return code
+
+    try:
+        if cmd == "fiche" and not mots:
+            return sortir(fiche())
+        if cmd == "autorise" and not mots:
+            return sortir(L.liste_blanche(fiche(), film=True))
+        if cmd == "proposer" and not mots and options <= {"--ia", "--regles"} and len(options) <= 1:
+            r = proposer("ia" if "--ia" in options else "regles" if "--regles" in options else "auto")
+            txt = "\n".join([f"Profils proposés ({'IA' if r['source'] == 'ia' else 'règles'}) :"] +
+                            [f"  {p['nom']} : {p['description']}" for p in r["profils"]] +
+                            ([f"  Remarque : {r['raison']}"] if r["raison"] else []) +
+                            [f"  Refusé : {x['nom']} ({x['raison']})" for x in r["rejets"]])
+            return sortir(r, txt)
+        if cmd == "liste" and not mots and not options:
+            r = liste()
+            txt = "\n".join([f"{'* ' if p['id'] == r['actif'] else '  '}{p['nom']} : {p['description'] or p.get('raison', '')}" for p in r["profils"]]
+                            or ["Aucun profil : nc-energie proposer"])
+            return sortir(r, txt)
+        if cmd == "apercu" and len(mots) == 1 and not options:
+            f = fiche()
+            ap = apercu(trouver(mots[0], f), f)
+            return sortir(public(ap), texte_apercu(ap))
+        if cmd == "appliquer" and len(mots) == 1 and options <= {"--oui", "--oui-hz"}:
+            r = appliquer(mots[0], "--oui" in options, "--oui-hz" in options, interactif=not json_)
+            return sortir(r, r["message"])
+        if cmd == "revenir" and not mots and not options:
+            r = revenir()
+            return sortir(r, r["message"], 0 if r["ok"] else 1)
+        raise Erreur("usage : nc-energie fiche | proposer [--ia|--regles] | liste | apercu NOM | appliquer NOM [--oui] [--oui-hz] | revenir | autorise", 2)
+    except Erreur as e:
+        if json_:
+            print(json.dumps({"ok": False, "erreur": e.message}, ensure_ascii=False))
+        else:
+            print("nc-energie : " + e.message, file=sys.stderr)
+        return e.code
+
+
+if __name__ == "__main__":
+    sys.exit(principal(sys.argv[1:]))
