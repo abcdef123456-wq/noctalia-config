@@ -189,7 +189,28 @@ class Import(BaseVpn):
         r = self.importer(self.ecrire("rel.ovpn", "client\nca ca.crt\nremote 192.0.2.10 1194\n"))
         self.assertEqual(r.returncode, 1)
         self.assertIn("chemin relatif", r.stderr)
-        self.assertEqual(self.importer(self.ecrire("abs.ovpn", "client\nca /etc/ssl/certs/x.crt\nremote 192.0.2.10 1194\n")).returncode, 0)
+        # chemin complet d'un fichier que l'utilisateur peut lire : accepté
+        ca = self.ecrire("ca.crt", "certificat")
+        r = self.importer(self.ecrire("abs.ovpn", f"client\nca {ca}\nremote 192.0.2.10 1194\n"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_certificat_que_root_seul_peut_lire_refuse(self):
+        # openvpn lit ces fichiers en root : un fichier illisible pour l'utilisateur, un lien, /proc, /sys, /dev ou un
+        # fichier absent sont refusés, et rien ne part à nmcli
+        illisible = self.ecrire("prive.key", "secret", mode=0o000)
+        lien = self.r / "home/lien.crt"
+        lien.symlink_to(self.ecrire("vrai.crt", "certificat"))
+        cas = [f"ca {lien}", "key /proc/self/environ", "extra-certs /sys/kernel/notes", "ca /dev/zero",
+               "ca /home/user/absent.crt"]
+        if os.geteuid() != 0:                                # root lit tout (conteneurs de la CI)
+            cas.append(f"cert {illisible}")
+        if os.geteuid() != 0 and os.path.exists("/etc/shadow") and not os.access("/etc/shadow", os.R_OK):
+            cas.append("cert /etc/shadow")
+        for i, c in enumerate(cas):
+            r = self.importer(self.ecrire(f"c{i}.ovpn", f"client\n{c}\nremote 192.0.2.10 1194\n"))
+            self.assertEqual(r.returncode, 1, c)
+            self.assertIn("refusé", r.stderr, c)
+        self.assertEqual(self.appels_import(), [])
 
     # ── le ménage ──
     def test_copie_et_dossier_effaces_meme_si_nmcli_echoue(self):

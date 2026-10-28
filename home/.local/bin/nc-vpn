@@ -280,7 +280,25 @@ def verifier(texte):
             if arg and arg != "[inline]" and not arg.startswith("/"):
                 raise Echec(T(f"Le certificat « {mot} {arg} » est donné par un chemin relatif : il ne serait pas retrouvé après l'import. Mets-le dans le fichier (bloc <{mot}>…</{mot}>) ou donne un chemin complet.",
                               f"The certificate \"{mot} {arg}\" is given by a relative path: it would not be found after the import. Put it in the file (<{mot}>…</{mot}> block) or give a full path."))
+            if arg.startswith("/"):
+                fichier_lisible(mot, arg)
     return "wireguard" if wireguard else "openvpn"
+
+
+def fichier_lisible(mot, chemin):
+    """Un certificat donné par un chemin complet : openvpn le lira en root (lancé par NetworkManager). Il doit donc être un
+    fichier ordinaire que l'utilisateur peut lire LUI-MÊME (sinon un .ovpn douteux ferait lire par root un fichier interdit,
+    voire l'enverrait au serveur), sans lien ni détour, hors de /proc, /sys et /dev."""
+    reel = os.path.realpath(chemin)
+    ok = reel == os.path.normpath(chemin) and not re.match(r"/(proc|sys|dev)(/|$)", reel)
+    if ok:
+        try:
+            ok = stat.S_ISREG(os.lstat(chemin).st_mode) and os.access(chemin, os.R_OK)
+        except OSError:
+            ok = False
+    if not ok:
+        raise Echec(T(f"Le certificat « {mot} {chemin} » est refusé : ce doit être un fichier ordinaire (pas un lien, ni dans /proc, /sys ou /dev) que tu peux lire toi-même. Sinon, mets-le dans le fichier (bloc <{mot}>…</{mot}>).",
+                      f"The certificate \"{mot} {chemin}\" is refused: it must be a regular file (not a link, nor in /proc, /sys or /dev) that you can read yourself. Otherwise, put it in the file (<{mot}>…</{mot}> block)."))
 
 
 def dossier_prive():
