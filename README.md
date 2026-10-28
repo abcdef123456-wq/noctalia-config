@@ -278,6 +278,14 @@ l'île Quickshell.
   mises à jour lues dans le cache de `nc-paquets`, agenda seulement si Google Agenda par JARVIS est déjà configuré
   (une ligne absente sans donnée). Rien pendant un partage d'écran (repris à la fin s'il est encore le matin) ni en
   mode jeu. Aucun minuteur en continu : l'île note l'heure quand l'écran s'éteint (`$XDG_STATE_HOME/nc/ile-resume`).
+- **Modes Concentration** (`nc-reglages` → Île, réglage `ILE_CONCENTRATION`) : des modes que tu crées toi-même (Travail, Nuit,
+  Jeu en un clic, ou ton propre nom) par un appui long sur Ne pas déranger dans le centre de contrôle. Un mode règle d'un
+  coup Ne pas déranger, un profil d'énergie de `nc-energie` (rien de plus que ce qui existe, pas de nouvelle commande
+  root), le fond du jour ou de la nuit (si `FONDS_JOUR_NUIT` est allumé) et l'IA des notifications (jamais touchée avec
+  `IA_MODE=non`). Le désactiver remet ce qu'il avait changé, sauf ce que tu as modifié à la main entre-temps. Le mode actif
+  survit au redémarrage de l'île (`~/.local/state/nc/modes-etat.json`) ; les modes sont dans `~/.config/nc/modes.json`.
+  Aucun mode au départ, rien ne s'applique sans ton clic, aucun minuteur. Pastille dans la pilule (icône et nom court ;
+  l'icône seule pendant un partage d'écran).
 - **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
   effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
   l'écriture de la liste, sans minuteur.

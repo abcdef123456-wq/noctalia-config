@@ -44,7 +44,7 @@ Singleton {
     property bool capteursSante: false
     readonly property var vues: Reglages.filtrerPages(activites.concat(["centre"],
                                                  batteriePc && activites.indexOf("charge") < 0 ? ["charge"] : [],
-                                                 ["assistant", "notifications"],
+                                                 ["assistant", "notifications"], Modes.pagePossible ? ["concentration"] : [],
                                                  ["son", "reseau", "bluetooth", "systeme"], capteursSante ? ["sante"] : [], ["calendrier"],
                                                  (meteo.temp !== undefined || meteoErreur !== "") ? ["meteo"] : [], ["presse", "fenetres"],
                                                  minuteurFin > 0 ? [] : ["minuteur"]))

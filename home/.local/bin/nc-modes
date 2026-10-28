@@ -1,0 +1,511 @@
+#!/usr/bin/env python3
+"""nc-modes : les Modes Concentration de l'île (Travail, Nuit, Jeu… ceux que TU crées), façon iOS.
+
+Un mode est un petit profil nommé qui combine seulement ce qui existe déjà :
+  dnd         Ne pas déranger de l'île : garder | oui | non   (posé par l'île, qui reçoit la valeur à mettre)
+  energie     un profil de nc-energie (identifiant) ou vide = inchangé  (seulement via nc-energie, jamais de root ici)
+  fond        garder | jour | nuit   (nc-fond-jour-nuit imposer ; sans effet si FONDS_JOUR_NUIT n'est pas « oui »)
+  notifs_ia   garder | oui | non     (réglage NOTIFS_IA ; sans effet si IA_MODE=non)
+
+  nc-modes liste                      les modes valides, le mode actif
+  nc-modes etat                       le mode actif seulement (lecture, rien n'est appliqué)
+  nc-modes creer NOM [--exemple travail|nuit|jeu]
+  nc-modes renommer ID NOM
+  nc-modes regler ID CLE VALEUR       CLE : dnd, energie, fond, notifs_ia, icone
+  nc-modes supprimer ID               refusé si le mode est actif
+  nc-modes activer ID --dnd oui|non   applique ; --dnd : Ne pas déranger tel qu'il est maintenant
+  nc-modes sortir --dnd oui|non       remet ce que le mode a changé
+
+Sortie : toujours un objet JSON. « dnd » vaut oui ou non quand l'île doit changer Ne pas déranger, null sinon.
+Rien n'est lancé tout seul, aucun minuteur : tout vient d'un clic. Activer note l'état d'avant ET la valeur posée ; sortir ne
+remet une valeur que si elle est encore celle que le mode a posée (un changement à la main entre-temps est gardé).
+Fichiers : ~/.config/nc/modes.json (les modes ; lu borné à 64 Kio, JSON validé, champs inconnus ignorés, valeur hors liste =
+mode ignoré), ~/.local/state/nc/modes-etat.json (mode actif, valeurs d'avant et posées : survit au redémarrage de l'île).
+Tout est écrit atomiquement (fichier temporaire du même dossier puis rename). Les programmes (nc-energie, nc-fond-jour-nuit,
+nc-reglages) sont lancés en argv, jamais par un shell. Pour les tests : NC_MODES_OUTILS (dossier d'outils cherché d'abord),
+XDG_CONFIG_HOME, XDG_STATE_HOME."""
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import unicodedata
+
+ICI = os.path.dirname(os.path.realpath(__file__))
+HOME = os.path.expanduser("~")
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "nc")
+ETAT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "nc")
+FICHIER_MODES = os.path.join(CONFIG, "modes.json")
+FICHIER_ETAT = os.path.join(ETAT, "modes-etat.json")
+FICHIER_IMPOSE = os.path.join(ETAT, "fond-impose")
+TAILLE_MAX = 65536
+MODES_MAX = 12
+NOM_MAX = 24
+DELAI = 40
+ICONES = ("work", "bedtime", "sports_esports", "school", "home", "menu_book", "fitness_center", "restaurant")
+ID_MODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")            # jamais un tiret en tête : ce serait une option
+ID_ENERGIE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")         # idem (passé à nc-energie en argv)
+CHOIX = {"dnd": ("garder", "oui", "non"), "fond": ("garder", "jour", "nuit"), "notifs_ia": ("garder", "oui", "non")}
+EXEMPLES = {
+    "travail": {"icone": "work", "dnd": "oui"},
+    "nuit": {"icone": "bedtime", "dnd": "oui", "fond": "nuit"},
+    "jeu": {"icone": "sports_esports", "dnd": "oui", "notifs_ia": "non"},
+}
+
+
+class Erreur(Exception):
+    pass
+
+
+# ── Fichiers ───────────────────────────────────────────────────────────────────────────────────────────────────
+def lire_json(chemin):
+    """Le JSON du fichier, ou None (absent, trop gros, abîmé, pas un objet)."""
+    try:
+        with open(chemin, "rb") as f:
+            brut = f.read(TAILLE_MAX + 1)
+    except OSError:
+        return None
+    if len(brut) > TAILLE_MAX:
+        return None
+    try:
+        d = json.loads(brut.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def ecrire_json(chemin, donnees):
+    dossier = os.path.dirname(chemin)
+    os.makedirs(dossier, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".modes-", suffix=".tmp", dir=dossier)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(donnees, f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, chemin)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def reglages():
+    v = {}
+    try:
+        with open(os.path.join(CONFIG, "reglages.conf"), encoding="utf-8", errors="replace") as f:
+            for l in f.read(1 << 20).splitlines():
+                m = re.match(r'\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$', l)
+                if m:
+                    v[m[1]] = m[2].strip('"')
+    except OSError:
+        pass
+    return v
+
+
+def ia_coupee():
+    return reglages().get("IA_MODE", "auto") == "non"
+
+
+# ── Validation ─────────────────────────────────────────────────────────────────────────────────────────────────
+def nom_propre(nom):
+    """Le nom nettoyé (espaces compactés), ou None : vide, trop long, caractère de contrôle."""
+    if not isinstance(nom, str):
+        return None
+    n = " ".join(nom.split())
+    if not n or len(n) > NOM_MAX or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Co", "Cn") for c in n):
+        return None
+    return n
+
+
+def valider_mode(d):
+    """Le mode normalisé (champs inconnus ignorés) ou None si une valeur est hors liste."""
+    if not isinstance(d, dict):
+        return None
+    ident = d.get("id")
+    nom = nom_propre(d.get("nom"))
+    if not isinstance(ident, str) or not ID_MODE.match(ident) or nom is None:
+        return None
+    m = {"id": ident, "nom": nom, "icone": d.get("icone", "work"), "dnd": d.get("dnd", "garder"), "energie": d.get("energie", ""),
+         "fond": d.get("fond", "garder"), "notifs_ia": d.get("notifs_ia", "garder")}
+    if m["icone"] not in ICONES:
+        return None
+    for cle, permis in CHOIX.items():
+        if m[cle] not in permis:
+            return None
+    if not isinstance(m["energie"], str) or (m["energie"] != "" and not ID_ENERGIE.match(m["energie"])):
+        return None
+    return m
+
+
+def lire_modes():
+    d = lire_json(FICHIER_MODES) or {}
+    brut = d.get("modes")
+    sortie, vus = [], set()
+    for x in (brut if isinstance(brut, list) else [])[:MODES_MAX * 2]:
+        m = valider_mode(x)
+        if m and m["id"] not in vus:
+            vus.add(m["id"])
+            sortie.append(m)
+    return sortie[:MODES_MAX]
+
+
+def ecrire_modes(modes):
+    ecrire_json(FICHIER_MODES, {"version": 1, "modes": modes})
+
+
+def booleen(v):
+    return v if isinstance(v, bool) else None
+
+
+def lire_etat():
+    """Le mode actif et ce qu'il a posé, validé ; None s'il n'y a rien de valable."""
+    d = lire_json(FICHIER_ETAT)
+    if not d or not isinstance(d.get("actif"), str) or not ID_MODE.match(d["actif"]):
+        return None
+    nom = nom_propre(d.get("nom"))
+    if nom is None:
+        return None
+    e = {"version": 1, "actif": d["actif"], "nom": nom, "icone": d.get("icone") if d.get("icone") in ICONES else "work",
+         "dnd": None, "energie": None, "fond": None, "notifs_ia": None}
+    x = d.get("dnd")
+    if isinstance(x, dict) and booleen(x.get("avant")) is not None and booleen(x.get("pose")) is not None:
+        e["dnd"] = {"avant": x["avant"], "pose": x["pose"]}
+    x = d.get("energie")
+    if isinstance(x, dict) and isinstance(x.get("pose"), str) and ID_ENERGIE.match(x["pose"]):
+        av = x.get("avant_actif")
+        e["energie"] = {"pose": x["pose"], "avant_actif": av if isinstance(av, str) and ID_ENERGIE.match(av) else None}
+    x = d.get("fond")
+    if isinstance(x, dict) and x.get("pose") in ("jour", "nuit") and x.get("avant") in ("", "jour", "nuit"):
+        e["fond"] = {"avant": x["avant"], "pose": x["pose"]}
+    x = d.get("notifs_ia")
+    if isinstance(x, dict) and x.get("pose") in ("oui", "non") and x.get("avant") in (None, "oui", "non"):
+        e["notifs_ia"] = {"avant": x["avant"], "pose": x["pose"]}
+    return e
+
+
+def ecrire_etat(e):
+    ecrire_json(FICHIER_ETAT, e)
+
+
+def effacer_etat():
+    try:
+        os.unlink(FICHIER_ETAT)
+    except OSError:
+        pass
+
+
+# ── Outils (argv seulement) ────────────────────────────────────────────────────────────────────────────────────
+def outil(nom):
+    dossier = os.environ.get("NC_MODES_OUTILS")
+    if dossier and os.path.exists(os.path.join(dossier, nom)):
+        return os.path.join(dossier, nom)
+    return os.path.join(ICI, nom)
+
+
+def lancer(nom, *args):
+    """(code, sortie) ; 127 si l'outil manque, 124 s'il traîne. Jamais d'exception, jamais de shell."""
+    try:
+        p = subprocess.run([outil(nom), *args], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+                           timeout=DELAI)
+        return p.returncode, p.stdout
+    except FileNotFoundError:
+        return 127, ""
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except OSError:
+        return 127, ""
+
+
+def json_de(texte):
+    try:
+        d = json.loads(texte)
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def energie_actif():
+    code, sortie = lancer("nc-energie", "liste", "--json")
+    d = json_de(sortie)
+    if code != 0 or "actif" not in d:
+        return False, None
+    a = d["actif"]
+    return True, (a if isinstance(a, str) and ID_ENERGIE.match(a) else None)
+
+
+def energie_intacte(ident):
+    """Le profil est toujours en vigueur : actif ET plus rien à changer (sinon quelqu'un a touché un réglage à la main)."""
+    ok, actif = energie_actif()
+    if not ok or actif != ident:
+        return False
+    code, sortie = lancer("nc-energie", "apercu", ident, "--json")
+    d = json_de(sortie)
+    return code == 0 and d.get("changements") == []
+
+
+def impose_actuel():
+    try:
+        with open(FICHIER_IMPOSE, encoding="utf-8") as f:
+            v = f.read(16).strip()
+    except OSError:
+        return ""
+    return v if v in ("jour", "nuit") else ""
+
+
+# ── Sortir d'un mode ───────────────────────────────────────────────────────────────────────────────────────────
+def sortir_interne(e, dnd, messages):
+    """Remet ce que le mode a posé ET qui n'a pas bougé depuis ; renvoie le Ne pas déranger voulu."""
+    if e["dnd"]:
+        if dnd == e["dnd"]["pose"]:
+            dnd = e["dnd"]["avant"]
+        else:
+            messages.append("Ne pas déranger changé à la main : laissé tel quel.")
+    if e["energie"]:
+        pose = e["energie"]["pose"]
+        if energie_intacte(pose):
+            code, _ = lancer("nc-energie", "revenir", "--json")
+            if code != 0:
+                messages.append("Profil d'énergie : retour impossible.")
+            elif e["energie"]["avant_actif"]:
+                code, _ = lancer("nc-energie", "appliquer", e["energie"]["avant_actif"], "--oui", "--json")
+                if code != 0:
+                    messages.append("Profil d'énergie d'avant : non réappliqué.")
+        else:
+            messages.append("Profil d'énergie changé à la main : laissé tel quel.")
+    if e["fond"]:
+        if impose_actuel() == e["fond"]["pose"]:
+            lancer("nc-fond-jour-nuit", "imposer", e["fond"]["avant"] or "aucun")
+        else:
+            messages.append("Fond changé entre-temps : laissé tel quel.")
+    if e["notifs_ia"] and not ia_coupee():
+        courant = reglages().get("NOTIFS_IA")
+        if courant == e["notifs_ia"]["pose"]:
+            if e["notifs_ia"]["avant"] is None:
+                lancer("nc-reglages", "reset", "NOTIFS_IA")
+            else:
+                lancer("nc-reglages", "set", "NOTIFS_IA", e["notifs_ia"]["avant"])
+        else:
+            messages.append("IA sur les notifications changée à la main : laissée telle quelle.")
+    return dnd
+
+
+def cmd_sortir(dnd_actuel):
+    e = lire_etat()
+    if e is None:
+        effacer_etat()
+        return {"ok": True, "actif": None, "dnd": None, "messages": []}
+    messages = []
+    dnd = sortir_interne(e, dnd_actuel, messages)
+    effacer_etat()
+    return {"ok": True, "actif": None, "dnd": ("oui" if dnd else "non") if dnd != dnd_actuel else None, "messages": messages}
+
+
+# ── Activer un mode ────────────────────────────────────────────────────────────────────────────────────────────
+def cmd_activer(ident, dnd_actuel):
+    modes = {m["id"]: m for m in lire_modes()}
+    mode = modes.get(ident)
+    if mode is None:
+        raise Erreur("mode inconnu")
+    messages = []
+    dnd = dnd_actuel
+    ancien = lire_etat()
+    if ancien is not None:
+        dnd = sortir_interne(ancien, dnd, messages)         # un seul mode à la fois : l'ancien est d'abord remis
+        effacer_etat()
+    e = {"version": 1, "actif": mode["id"], "nom": mode["nom"], "icone": mode["icone"], "dnd": None, "energie": None,
+         "fond": None, "notifs_ia": None}
+    ecrire_etat(e)                                            # écrit d'abord : un plantage en cours reste rattrapable
+    if mode["dnd"] != "garder":
+        voulu = mode["dnd"] == "oui"
+        if voulu != dnd:
+            e["dnd"] = {"avant": dnd, "pose": voulu}
+            dnd = voulu
+            ecrire_etat(e)
+    if mode["energie"]:
+        ok, avant_actif = energie_actif()
+        if not ok:
+            messages.append("Profil d'énergie : nc-energie ne répond pas.")
+        else:
+            code, sortie = lancer("nc-energie", "appliquer", mode["energie"], "--oui", "--json")
+            d = json_de(sortie)
+            if code == 0 and d.get("applique") is True:
+                e["energie"] = {"pose": mode["energie"], "avant_actif": avant_actif}
+                ecrire_etat(e)
+            elif code != 0:
+                messages.append("Profil d'énergie non appliqué : " + str(d.get("erreur", ""))[:200])
+    if mode["fond"] != "garder":
+        if reglages().get("FONDS_JOUR_NUIT", "non") == "oui":
+            avant = impose_actuel()
+            if avant != mode["fond"]:
+                code, _ = lancer("nc-fond-jour-nuit", "imposer", mode["fond"])
+                if code == 0:
+                    e["fond"] = {"avant": avant, "pose": mode["fond"]}
+                    ecrire_etat(e)
+    if mode["notifs_ia"] != "garder" and not ia_coupee():
+        courant = reglages().get("NOTIFS_IA")
+        if (courant or "non") != mode["notifs_ia"]:
+            code, _ = lancer("nc-reglages", "set", "NOTIFS_IA", mode["notifs_ia"])
+            if code == 0:
+                e["notifs_ia"] = {"avant": courant if courant in ("oui", "non") else None, "pose": mode["notifs_ia"]}
+                ecrire_etat(e)
+    return {"ok": True, "actif": mode["id"], "dnd": ("oui" if dnd else "non") if dnd != dnd_actuel else None, "messages": messages}
+
+
+# ── Gestion des modes ──────────────────────────────────────────────────────────────────────────────────────────
+def identifiant(nom, modes):
+    base = unicodedata.normalize("NFKD", nom).encode("ascii", "ignore").decode().lower()
+    base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:18] or "mode"
+    pris = {m["id"] for m in modes}
+    ident, n = base, 2
+    while ident in pris:
+        ident = base + "-" + str(n)
+        n += 1
+    return ident
+
+
+def cmd_creer(nom, exemple):
+    n = nom_propre(nom)
+    if n is None:
+        raise Erreur("nom refusé (1 à %d caractères, sans caractère de contrôle)" % NOM_MAX)
+    if exemple is not None and exemple not in EXEMPLES:
+        raise Erreur("exemple inconnu")
+    modes = lire_modes()
+    if len(modes) >= MODES_MAX:
+        raise Erreur("trop de modes (%d au plus)" % MODES_MAX)
+    m = valider_mode(dict({"id": identifiant(n, modes), "nom": n}, **EXEMPLES.get(exemple, {})))
+    modes.append(m)
+    ecrire_modes(modes)
+    return {"ok": True, "id": m["id"]}
+
+
+def cmd_modifier(ident, fonction):
+    modes = lire_modes()
+    for i, m in enumerate(modes):
+        if m["id"] == ident:
+            neuf = fonction(dict(m))
+            if neuf is None:
+                raise Erreur("valeur refusée")
+            modes[i] = neuf
+            ecrire_modes(modes)
+            e = lire_etat()
+            if e and e["actif"] == ident and (e["nom"] != neuf["nom"] or e["icone"] != neuf["icone"]):
+                e["nom"], e["icone"] = neuf["nom"], neuf["icone"]
+                ecrire_etat(e)
+            return {"ok": True}
+    raise Erreur("mode inconnu")
+
+
+def cmd_supprimer(ident):
+    e = lire_etat()
+    if e and e["actif"] == ident:
+        raise Erreur("ce mode est actif : désactive-le d'abord")
+    modes = lire_modes()
+    reste = [m for m in modes if m["id"] != ident]
+    if len(reste) == len(modes):
+        raise Erreur("mode inconnu")
+    ecrire_modes(reste)
+    return {"ok": True}
+
+
+def cmd_liste():
+    e = lire_etat()
+    return {"ok": True, "actif": e["actif"] if e else None, "actif_nom": e["nom"] if e else "", "actif_icone": e["icone"] if e else "",
+            "dnd_pose": (e["dnd"]["pose"] if e and e["dnd"] else None), "modes": lire_modes(), "ia_coupee": ia_coupee(),
+            "fond_actif": reglages().get("FONDS_JOUR_NUIT", "non") == "oui", "icones": list(ICONES)}
+
+
+def cmd_etat():
+    e = lire_etat()
+    return {"ok": True, "actif": e["actif"] if e else None, "nom": e["nom"] if e else "", "icone": e["icone"] if e else "",
+            "dnd_pose": (e["dnd"]["pose"] if e and e["dnd"] else None)}
+
+
+class Verrou:
+    """Un seul changement à la fois (deux nc-modes lancés ensemble ne mélangent pas modes.json ni modes-etat.json) :
+    verrou exclusif sur ~/.local/state/nc/modes.lock, sans attendre, comme celui de nc-energie."""
+    def __enter__(self):
+        os.makedirs(ETAT, mode=0o700, exist_ok=True)
+        self.f = open(os.path.join(ETAT, "modes.lock"), "w")
+        try:
+            fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.f.close()
+            raise Erreur("un autre changement de mode est en cours")
+        return self
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+ECRIT = ("creer", "renommer", "regler", "supprimer", "activer", "sortir")
+
+
+def principal(argv):
+    if not argv or argv[0] in ("-h", "--help", "aide"):
+        print(__doc__.split('"""')[0].strip())
+        return 0
+    cmd, reste = argv[0], argv[1:]
+    options, mots, i = {}, [], 0
+    while i < len(reste):
+        if reste[i] in ("--dnd", "--exemple") and i + 1 < len(reste):
+            options[reste[i]] = reste[i + 1]
+            i += 2
+        else:
+            mots.append(reste[i])
+            i += 1
+    dnd = options.get("--dnd")
+    try:
+        with (Verrou() if cmd in ECRIT else _SansVerrou()):
+            return _executer(cmd, reste, mots, options, dnd)
+    except Erreur as e:
+        print(json.dumps({"ok": False, "erreur": str(e)}, ensure_ascii=False))
+        return 1
+
+
+class _SansVerrou:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _executer(cmd, reste, mots, options, dnd):
+    try:
+        if cmd == "liste" and not reste:
+            r = cmd_liste()
+        elif cmd == "etat" and not reste:
+            r = cmd_etat()
+        elif cmd == "creer" and len(mots) == 1 and set(options) <= {"--exemple"}:
+            r = cmd_creer(mots[0], options.get("--exemple"))
+        elif cmd == "renommer" and len(mots) == 2 and not options:
+            n = nom_propre(mots[1])
+            r = cmd_modifier(mots[0], lambda m: valider_mode(dict(m, nom=n)) if n else None)
+        elif cmd == "regler" and len(mots) == 3 and not options and mots[1] in ("dnd", "energie", "fond", "notifs_ia", "icone"):
+            r = cmd_modifier(mots[0], lambda m: valider_mode(dict(m, **{mots[1]: mots[2]})))
+        elif cmd == "supprimer" and len(mots) == 1 and not options:
+            r = cmd_supprimer(mots[0])
+        elif cmd == "activer" and len(mots) == 1 and dnd in ("oui", "non") and set(options) == {"--dnd"}:
+            r = cmd_activer(mots[0], dnd == "oui")
+        elif cmd == "sortir" and not mots and dnd in ("oui", "non") and set(options) == {"--dnd"}:
+            r = cmd_sortir(dnd == "oui")
+        else:
+            print(json.dumps({"ok": False, "erreur": "usage : nc-modes aide"}, ensure_ascii=False))
+            return 2
+    except Erreur as e:
+        print(json.dumps({"ok": False, "erreur": str(e)}, ensure_ascii=False))
+        return 1
+    except OSError as e:
+        print(json.dumps({"ok": False, "erreur": "fichier illisible ou impossible à écrire"}, ensure_ascii=False))
+        return 1
+    print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(principal(sys.argv[1:]))
