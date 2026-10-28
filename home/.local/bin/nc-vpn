@@ -12,6 +12,7 @@
                               (un seul nmcli ; fournisseur et pays déduits du nom de la connexion et de l'interface, sans réseau)
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn mullvad pays-json    les pays de Mullvad (`mullvad relay list`) en JSON : {"pays": [{"cc", "nom"}]}
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
                               assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
@@ -86,6 +87,7 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
                               (one nmcli; provider and country guessed from the connection and interface names, no network)
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
+  nc-vpn mullvad pays-json    Mullvad's countries (`mullvad relay list`) as JSON: {"pays": [{"cc", "nom"}]}
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
                               (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
@@ -906,6 +908,36 @@ def nom_borne(nom, n=40):
     return propre[:n]
 
 
+def horodatages(uuids):
+    """{uuid: secondes depuis l'époque} de l'activation des connexions « uuids » (champ TIMESTAMP de nmcli : la dernière
+    activation réussie). Une valeur absente ou illisible n'y figure pas."""
+    if not uuids:
+        return {}
+    code, out, _ = nmcli(["-t", "-c", "no", "-g", "UUID,TIMESTAMP", "connection", "show"])
+    res = {}
+    if code == 0:
+        for ligne in out.splitlines():
+            f = champs_nmcli(ligne)
+            if len(f) == 2 and f[0].lower() in uuids and re.fullmatch(r"[0-9]{1,12}", f[1]) and 0 < int(f[1]) <= time.time() + 60:
+                res[f[0].lower()] = int(f[1])
+    return res
+
+
+def etat_enrichi():
+    """etat() + pour chaque connexion « fournisseur » et « pays » (déduits du nom, sans réseau) et, si elle est montée, « depuis »
+    (secondes depuis l'époque de son activation, absent si inconnu)."""
+    e = etat()
+    if not e["disponible"]:
+        return e
+    depuis = horodatages({c["uuid"] for c in e["actives"]})
+    for c in e["connexions"]:
+        c["fournisseur"] = fournisseur_de(c["nom"], c["interface"])
+        c["pays"] = pays_de(c["nom"])
+        if c["uuid"] in depuis:
+            c["depuis"] = depuis[c["uuid"]]
+    return e
+
+
 def indicateur():
     """Le premier tunnel ACTIF de NetworkManager (un seul appel nmcli). Aucune géolocalisation, aucun secret, aucun débit.
     Sans tunnel NetworkManager monté, et seulement si la commande `mullvad` existe : l'état de l'application officielle Mullvad
@@ -1028,6 +1060,28 @@ def mullvad_agir(a):
         msg = court(epure(err))
         raise Echec(T("Mullvad a refusé", "Mullvad refused") + (" (" + msg + ")" if msg else "") + ".")
     print(ok)
+
+
+PAYS_RELAIS = re.compile(r"^([^\s].*?)\s+\(([a-z]{2})\)\s*$")
+
+
+def mullvad_pays_json():
+    """Les pays que connaît l'application (`mullvad relay list`, lignes de pays sans retrait : « Sweden (se) »), triés par nom,
+    code validé. Aucun numéro de compte n'y figure. Application absente ou muette : liste vide."""
+    res = []
+    if shutil.which("mullvad"):
+        code, out, _ = mullvad(["relay", "list"], delai=10)
+        if code == 0:
+            for ligne in out.splitlines():
+                m = PAYS_RELAIS.match(ligne)
+                if m and m.group(2).upper() in ISO_PAYS:
+                    res.append({"cc": m.group(2).upper(), "nom": nom_borne(m.group(1), 40)})
+    vus, uniques = set(), []
+    for x in sorted(res, key=lambda x: x["nom"].lower()):
+        if x["cc"] not in vus:
+            vus.add(x["cc"])
+            uniques.append(x)
+    return {"pays": uniques[:150]}
 
 
 def mullvad_json():
@@ -1392,7 +1446,7 @@ def main():
         a = a[:-1]
     try:
         if cmd == "etat-json" and len(a) == 1:
-            print(json.dumps(dict({"contrat": CONTRAT, "connexions": [], "actives": []}, **etat()), ensure_ascii=False))
+            print(json.dumps(dict({"contrat": CONTRAT, "connexions": [], "actives": []}, **etat_enrichi()), ensure_ascii=False))
         elif cmd == "liste" and len(a) == 1:
             e = etat()
             if not e["disponible"]:
@@ -1407,6 +1461,8 @@ def main():
             importer(a[1])
         elif cmd == "indicateur" and a[1:] == ["--json"]:
             print(json.dumps(indicateur(), ensure_ascii=False))
+        elif cmd == "mullvad" and a[1:] == ["pays-json"]:
+            print(json.dumps(mullvad_pays_json(), ensure_ascii=False))
         elif cmd == "mullvad" and a[1:] == ["etat-json"]:
             print(json.dumps(mullvad_json(), ensure_ascii=False))
         elif cmd == "mullvad" and len(a) >= 2:

@@ -34,6 +34,10 @@ if a[:4] == ["-t", "-g", "vpn.data", "connection"]:
 elif a[:3] == ["-t", "-g", "IP4.ADDRESS,IP6.ADDRESS"]:
     ic = R / "ipconf.json"
     print((json.loads(ic.read_text()) if ic.exists() else {}).get(a[-1], ""))
+elif a[-2:] == ["connection", "show"] and "UUID,TIMESTAMP" in a:
+    ts = R / "horodatages.json"
+    for u, t in (json.loads(ts.read_text()) if ts.exists() else {}).items():
+        print(u + ":" + str(t))
 elif a[-2:] == ["connection", "show"]:
     for c in etat:
         print(":".join([c["uuid"], c["type"], "yes" if c["active"] else "no", c["dev"] if c["active"] else "--", esc(c["nom"])]))
@@ -131,6 +135,8 @@ if a[:2] == ["status", "--json"]:
     print(conf["json"]); sys.exit(conf.get("code", 0))
 elif a[:1] == ["status"]:
     print(conf.get("texte", "Disconnected")); sys.exit(conf.get("code", 0))
+elif a[:2] == ["relay", "list"] and "relais" in conf:
+    print(conf["relais"]); sys.exit(0)
 elif conf.get("echec"):
     print(conf["echec"], file=sys.stderr); sys.exit(1)
 '''

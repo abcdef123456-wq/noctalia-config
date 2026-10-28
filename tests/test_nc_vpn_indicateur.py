@@ -201,6 +201,14 @@ class MullvadApplication(BaseVpn):
         self.assertEqual((d["connecte"], d["compte"]), (False, False))
         self.assertTrue(all(a[0] in ("status",) for a in self.appels_mullvad()))     # jamais « account »
 
+    def test_pays_json_liste_les_pays_du_relais(self):
+        self.mv(relais="Sweden (se)\n\tGothenburg (got) @ 57.7N, 11.9E\n\t\tse-got-wg-004 (192.0.2.4) - WireGuard\n"
+                       "France (fr)\n\tParis (par)\nNowhere (zz)\nSweden (se)\n")
+        r = self.vpn("mullvad", "pays-json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"pays": [{"cc": "FR", "nom": "France"}, {"cc": "SE", "nom": "Sweden"}]})
+        self.assertEqual(self.appels_mullvad(), [["relay", "list"]])
+
     def test_numero_de_compte_jamais_remonte_dans_une_erreur(self):
         self.mv(echec="Error: account 1234 5678 9012 3456 refused " + NUMERO)
         r = self.vpn("mullvad", "connecter")
