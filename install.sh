@@ -1672,6 +1672,31 @@ if [ "$MODE" = full ]; then
     fi
   fi
 
+  # Profils d'énergie poussés (nc-energie, proposés par l'IA ou par des règles) : un petit assistant root qui ne règle que
+  # des valeurs d'une liste fixe (processeur, boost, Wi-Fi, USB, audio, clavier, NVIDIA…), avec une règle sudo à commandes
+  # exactes (une ligne par sous-commande et valeur, écrite par l'assistant lui-même, vérifiée par visudo). Étape
+  # sensible : refusée par défaut sans terminal (--oui pour l'accepter). Rien n'est réappliqué tout seul au démarrage.
+  if [ "$LAPTOP" = 1 ]; then
+    regle_e=/etc/sudoers.d/nc-energie
+    ligne_e="$("$REPO/system/nc-energie-root" sudoers "$(id -un)")"
+    if cmp -s "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root && [ -n "$ligne_e" ] && sudo grep -qxF "$ligne_e" "$regle_e" 2>/dev/null; then
+      ok "$(t "Assistant des profils d'énergie poussés : déjà en place." "Advanced power profiles helper: already set up.")"
+    else
+      info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
+      info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
+      if [ -n "$ligne_e" ] && ask "$(t "L'installer ?" "Install it?")" n sensible; then
+        t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
+        if sudo install -Dm0755 -o root -g root "$REPO/system/nc-energie-root" /usr/local/bin/nc-energie-root &&
+           sudo visudo -cf "$t_e" >/dev/null && sudo install -m0440 -o root -g root "$t_e" "$regle_e"; then
+          ok "$(t "Assistant des profils d'énergie poussés installé." "Advanced power profiles helper installed.")"
+        else
+          warn "$(t "Installation de l'assistant d'énergie impossible (règle sudo refusée par visudo)." "Couldn't install the power helper (sudo rule rejected by visudo).")"
+        fi
+        rm -f "$t_e"
+      fi
+    fi
+  fi
+
   # Bouton d'arrêt : un appui fait une petite animation (nc-anim bouton, raccourci XF86PowerOff ; laquelle : nc-reglages) au lieu
   # d'éteindre ; logind doit donc laisser la touche à Hyprland. Le garder appuyé éteint toujours proprement, et
   # Super + F4 éteint aussi. 50-legion-powerkey.conf : ancien nom de ce réglage, remplacé.
