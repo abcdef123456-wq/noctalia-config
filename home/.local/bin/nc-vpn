@@ -1,0 +1,448 @@
+#!/usr/bin/env python3
+"""nc-vpn : les connexions VPN et WireGuard de NetworkManager, pilotées depuis le bureau (panneau VPN de l'île, Super + Alt + V).
+  nc-vpn etat-json            les connexions de type vpn et wireguard en JSON : {"disponible", "connexions", "actives"}
+                              (uuid, nom, type, active, interface) ; nmcli absent ou NetworkManager arrêté : {"disponible": false}
+  nc-vpn liste                les mêmes en clair
+  nc-vpn connecter UUID       monte ce tunnel (déjà monté : rien à faire) ; plusieurs tunnels peuvent être montés à la fois
+  nc-vpn deconnecter UUID     coupe ce tunnel
+  nc-vpn tout-deconnecter     coupe tous les tunnels montés
+  nc-vpn importer FICHIER     importe un .ovpn (OpenVPN) ou un .conf (WireGuard) dans NetworkManager, en connexion privée
+                              à toi et sans connexion automatique
+  nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
+Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
+Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
+un fichier trop gros (64 Kio), un bloc <auth-user-pass> (pas de mot de passe dans ce lot) et des certificats donnés par un
+chemin relatif (mets-les dans le fichier : blocs <ca>, <cert>, <key>). Les secrets restent chez NetworkManager ou dans le
+trousseau : jamais dans nos fichiers, jamais dans les journaux ni dans la sortie.
+"""
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+
+
+# Langue (nc-reglages → Apparence → Langue : auto, fr, en) : T("texte français", "English text")
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        if not loc:
+            try:
+                loc = re.search(r'LANG="?([^"\s]+)', open("/etc/locale.conf").read())[1]
+            except (OSError, TypeError):
+                loc = ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven from the desktop (island VPN panel, Super + Alt + V).
+  nc-vpn etat-json            the vpn and wireguard connections as JSON: {"disponible", "connexions", "actives"}
+                              (uuid, nom, type, active, interface); no nmcli or NetworkManager stopped: {"disponible": false}
+  nc-vpn liste                the same in plain text
+  nc-vpn connecter UUID       bring this tunnel up (already up: nothing to do); several tunnels can be up at once
+  nc-vpn deconnecter UUID     bring this tunnel down
+  nc-vpn tout-deconnecter     bring every active tunnel down
+  nc-vpn importer FILE        import an .ovpn (OpenVPN) or .conf (WireGuard) file into NetworkManager, private to you
+                              and without autoconnect
+  nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
+Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
+Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
+is too big (64 KiB), an <auth-user-pass> block (no password handling yet) and certificates given by a relative path (put them
+in the file: <ca>, <cert>, <key> blocks). Secrets stay with NetworkManager or in the keyring: never in our files, logs or output."""
+
+TYPES = ("vpn", "wireguard")
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+MAX_OCTETS = 64 * 1024
+
+# OpenVPN : directives qui exécutent un programme ou chargent du code (et « iproute », « pkcs11-providers »)
+OVPN_EXEC = ("up", "down", "route-up", "route-pre-down", "ipchange", "client-connect", "client-disconnect", "learn-address",
+             "tls-verify", "auth-user-pass-verify", "plugin", "iproute", "pkcs11-providers", "dns-updown", "tls-crypt-v2-verify")
+# OpenVPN : directives qui feraient lire un autre fichier de configuration (non vérifié ici) ou écrire un fichier n'importe où
+OVPN_AUTRES = ("config", "log", "log-append", "writepid", "status", "management")
+WG_EXEC = ("preup", "postup", "predown", "postdown")
+# Fichiers de certificats donnés par un chemin : la copie temporaire est effacée, un chemin relatif ne mènerait plus à rien
+OVPN_FICHIERS = ("ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "tls-crypt-v2", "secret", "crl-verify", "extra-certs", "dh")
+
+
+class Echec(Exception):
+    pass
+
+
+def nmcli(args, delai=15):
+    """(code, sortie, erreur) d'un nmcli lancé en arguments, en anglais (messages stables). 127 : nmcli absent."""
+    if not shutil.which("nmcli"):
+        return 127, "", ""
+    env = dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C")
+    try:
+        r = subprocess.run(["nmcli"] + args, capture_output=True, text=True, errors="replace", timeout=delai, env=env,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return 126, "", ""
+    return r.returncode, r.stdout, r.stderr
+
+
+def champs_nmcli(ligne):
+    """Découpe une ligne de « nmcli -t » : séparateur « : », échappé par « \\: » (et « \\\\ » pour l'antislash)."""
+    res, cur, i = [], [], 0
+    while i < len(ligne):
+        c = ligne[i]
+        if c == "\\" and i + 1 < len(ligne):
+            cur.append(ligne[i + 1]); i += 2
+            continue
+        if c == ":":
+            res.append("".join(cur)); cur = []
+        else:
+            cur.append(c)
+        i += 1
+    res.append("".join(cur))
+    return res
+
+
+def etat():
+    """{"disponible": False} ou {"disponible": True, "connexions": [...], "actives": [...]}."""
+    code, out, _ = nmcli(["-t", "-c", "no", "-f", "UUID,TYPE,ACTIVE,DEVICE,NAME", "connection", "show"])
+    if code != 0:
+        return {"disponible": False}
+    connexions = []
+    for ligne in out.splitlines():
+        f = champs_nmcli(ligne)
+        if len(f) < 5:
+            continue
+        uuid, typ, active, dev = f[0], f[1], f[2], f[3]
+        nom = ":".join(f[4:])        # le nom est le dernier champ : un « : » non échappé n'y casserait rien
+        if typ not in TYPES or not UUID.fullmatch(uuid):
+            continue
+        on = active == "yes"
+        connexions.append({"uuid": uuid.lower(), "nom": nom, "type": "wireguard" if typ == "wireguard" else "vpn", "active": on,
+                           "interface": dev if on and dev not in ("", "--") else ""})
+    return {"disponible": True, "connexions": connexions, "actives": [c for c in connexions if c["active"]]}
+
+
+def uuid_valide(u):
+    if not isinstance(u, str) or not UUID.fullmatch(u):
+        raise Echec(T("UUID invalide (forme attendue : 8-4-4-4-12 chiffres hexadécimaux).",
+                      "Invalid UUID (expected form: 8-4-4-4-12 hexadecimal digits)."))
+    return u.lower()
+
+
+def connue(u):
+    e = etat()
+    if not e["disponible"]:
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+    for c in e["connexions"]:
+        if c["uuid"] == u:
+            return c
+    raise Echec(T("Cette connexion n'est pas un VPN ou un WireGuard connu de NetworkManager.",
+                  "This connection is not a VPN or WireGuard known to NetworkManager."))
+
+
+def court(texte, n=200):
+    ligne = (texte or "").strip().splitlines()
+    return ligne[0][:n] if ligne else ""
+
+
+def connecter(u):
+    u = uuid_valide(u)
+    c = connue(u)
+    if c["active"]:
+        return print(T(f"Déjà connecté : {c['nom']}", f"Already connected: {c['nom']}"))
+    code, _, err = nmcli(["connection", "up", "uuid", u], delai=120)
+    if code != 0:
+        raise Echec(T(f"Connexion impossible : {c['nom']}", f"Could not connect: {c['nom']}") + (" (" + court(err) + ")" if court(err) else ""))
+    print(T(f"Connecté : {c['nom']}", f"Connected: {c['nom']}"))
+
+
+def deconnecter(u):
+    u = uuid_valide(u)
+    c = connue(u)
+    if not c["active"]:
+        return print(T(f"Déjà déconnecté : {c['nom']}", f"Already disconnected: {c['nom']}"))
+    code, _, err = nmcli(["connection", "down", "uuid", u], delai=60)
+    if code != 0:
+        raise Echec(T(f"Déconnexion impossible : {c['nom']}", f"Could not disconnect: {c['nom']}") + (" (" + court(err) + ")" if court(err) else ""))
+    print(T(f"Déconnecté : {c['nom']}", f"Disconnected: {c['nom']}"))
+
+
+def tout_deconnecter():
+    e = etat()
+    if not e["disponible"]:
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+    if not e["actives"]:
+        return print(T("Aucun tunnel connecté.", "No tunnel connected."))
+    rates = 0
+    for c in e["actives"]:
+        code, _, _ = nmcli(["connection", "down", "uuid", c["uuid"]], delai=60)
+        if code != 0:
+            rates += 1
+            print(T(f"Déconnexion impossible : {c['nom']}", f"Could not disconnect: {c['nom']}"), file=sys.stderr)
+        else:
+            print(T(f"Déconnecté : {c['nom']}", f"Disconnected: {c['nom']}"))
+    if rates:
+        sys.exit(1)
+
+
+# ── Import ──────────────────────────────────────────────────────────────────────────────────────────────────────
+def lire_fichier(chemin):
+    """Les octets d'un fichier ordinaire (jamais un lien), de 64 Kio au plus, en .ovpn ou .conf."""
+    if not isinstance(chemin, str) or chemin == "" or "\0" in chemin:
+        raise Echec(T("Chemin de fichier invalide.", "Invalid file path."))
+    nom = os.path.basename(chemin)
+    if os.path.splitext(nom)[1].lower() not in (".ovpn", ".conf"):
+        raise Echec(T("Seuls les fichiers .ovpn (OpenVPN) et .conf (WireGuard) sont acceptés.",
+                      "Only .ovpn (OpenVPN) and .conf (WireGuard) files are accepted."))
+    try:
+        if stat.S_ISLNK(os.lstat(chemin).st_mode):
+            raise Echec(T("Un lien symbolique est refusé : donne le fichier lui-même.", "A symbolic link is refused: give the file itself."))
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except Echec:
+        raise
+    except OSError:
+        raise Echec(T("Fichier introuvable ou illisible.", "File not found or unreadable."))
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Echec(T("Ce n'est pas un fichier ordinaire.", "This is not a regular file."))
+        if st.st_size > MAX_OCTETS:
+            raise Echec(T("Fichier trop gros (64 Kio au plus).", "File too big (64 KiB at most)."))
+        donnees = b""
+        while len(donnees) <= MAX_OCTETS:
+            bloc = os.read(fd, MAX_OCTETS + 1 - len(donnees))
+            if not bloc:
+                break
+            donnees += bloc
+    except OSError:
+        raise Echec(T("Fichier illisible.", "File unreadable."))
+    finally:
+        os.close(fd)
+    if len(donnees) > MAX_OCTETS:
+        raise Echec(T("Fichier trop gros (64 Kio au plus).", "File too big (64 KiB at most)."))
+    if b"\0" in donnees:
+        raise Echec(T("Ce n'est pas un fichier texte.", "This is not a text file."))
+    return nom, donnees
+
+
+def verifier(texte):
+    """Refuse (Echec) ce qui exécute quelque chose ou demande un traitement de mot de passe. Retourne 'openvpn' ou 'wireguard'.
+    Chaque ligne est examinée, y compris dans les blocs <…> ; les lignes de commentaire (# ou ;) sont ignorées."""
+    texte = texte.lstrip("﻿")
+    wireguard = False
+    for brute in texte.splitlines():
+        ligne = brute.strip()
+        if ligne == "" or ligne[0] in "#;":
+            continue
+        if re.match(r"\[\s*interface\s*\]", ligne, re.I):
+            wireguard = True
+        if re.match(r"<\s*/?\s*auth-user-pass\s*>", ligne, re.I):
+            raise Echec(T("Un bloc <auth-user-pass> (identifiant et mot de passe dans le fichier) est refusé : les mots de passe ne sont pas encore pris en charge ici.",
+                          "An <auth-user-pass> block (username and password in the file) is refused: passwords are not handled here yet."))
+        # OpenVPN lit les guillemets n'importe où dans un mot (u"p" est « up ») : ils sont retirés avant de lire la directive
+        m = re.match(r"-{0,2}([A-Za-z][A-Za-z0-9_-]*)(?=$|[\s=])\s*(.*)$", ligne.replace('"', "").replace("'", ""))
+        if not m:
+            continue
+        mot, reste = m.group(1).lower(), m.group(2)
+        if mot in OVPN_EXEC:
+            raise Echec(T(f"Directive refusée « {mot} » : elle ferait exécuter un programme. Retire-la du fichier.",
+                          f"Directive refused \"{mot}\": it would run a program. Remove it from the file."))
+        if mot in OVPN_AUTRES and not wireguard:
+            raise Echec(T(f"Directive refusée « {mot} » : elle ferait lire ou écrire un autre fichier. Retire-la du fichier.",
+                          f"Directive refused \"{mot}\": it would read or write another file. Remove it from the file."))
+        if mot in WG_EXEC:
+            raise Echec(T(f"Directive refusée « {m.group(1)} » : elle ferait exécuter une commande. Retire-la du fichier.",
+                          f"Directive refused \"{m.group(1)}\": it would run a command. Remove it from the file."))
+        if mot == "script-security":
+            niveau = (reste.split() or [""])[0].lower()
+            if niveau not in ("0", "1", "none", "builtin"):
+                raise Echec(T("Directive refusée « script-security » au-dessus de 1 : elle autorise l'exécution de scripts.",
+                              "Directive refused \"script-security\" above 1: it allows scripts to run."))
+        if mot in OVPN_FICHIERS and not wireguard:
+            arg = (reste.split() or [""])[0]
+            if arg and arg != "[inline]" and not arg.startswith("/"):
+                raise Echec(T(f"Le certificat « {mot} {arg} » est donné par un chemin relatif : il ne serait pas retrouvé après l'import. Mets-le dans le fichier (bloc <{mot}>…</{mot}>) ou donne un chemin complet.",
+                              f"The certificate \"{mot} {arg}\" is given by a relative path: it would not be found after the import. Put it in the file (<{mot}>…</{mot}> block) or give a full path."))
+            if arg.startswith("/"):
+                fichier_lisible(mot, arg)
+    return "wireguard" if wireguard else "openvpn"
+
+
+def fichier_lisible(mot, chemin):
+    """Un certificat donné par un chemin complet : openvpn le lira en root (lancé par NetworkManager). Il doit donc être un
+    fichier ordinaire que l'utilisateur peut lire LUI-MÊME (sinon un .ovpn douteux ferait lire par root un fichier interdit,
+    voire l'enverrait au serveur), sans lien ni détour, hors de /proc, /sys et /dev."""
+    reel = os.path.realpath(chemin)
+    ok = reel == os.path.normpath(chemin) and not re.match(r"/(proc|sys|dev)(/|$)", reel)
+    if ok:
+        try:
+            ok = stat.S_ISREG(os.lstat(chemin).st_mode) and os.access(chemin, os.R_OK)
+        except OSError:
+            ok = False
+    if not ok:
+        raise Echec(T(f"Le certificat « {mot} {chemin} » est refusé : ce doit être un fichier ordinaire (pas un lien, ni dans /proc, /sys ou /dev) que tu peux lire toi-même. Sinon, mets-le dans le fichier (bloc <{mot}>…</{mot}>).",
+                      f"The certificate \"{mot} {chemin}\" is refused: it must be a regular file (not a link, nor in /proc, /sys or /dev) that you can read yourself. Otherwise, put it in the file (<{mot}>…</{mot}> block)."))
+
+
+def dossier_prive():
+    """Un dossier 0700 neuf, sous XDG_RUNTIME_DIR (le dossier privé de la session) si possible."""
+    base = os.environ.get("XDG_RUNTIME_DIR", "")
+    try:
+        if base and os.path.isdir(base) and os.stat(base).st_uid == os.getuid():
+            d = tempfile.mkdtemp(prefix="nc-vpn-", dir=base)
+        else:
+            d = tempfile.mkdtemp(prefix="nc-vpn-")
+    except OSError:
+        raise Echec(T("Impossible de créer un dossier temporaire privé.", "Could not create a private temporary folder."))
+    os.chmod(d, 0o700)
+    return d
+
+
+def utilisateur():
+    import getpass
+    try:
+        u = getpass.getuser()
+    except Exception:
+        u = ""
+    if not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._-]*\$?", u or ""):
+        raise Echec(T("Nom d'utilisateur introuvable.", "User name not found."))
+    return u
+
+
+def importer(chemin):
+    nom, donnees = lire_fichier(chemin)
+    texte = donnees.decode("utf-8", errors="replace")
+    typ = verifier(texte)
+    ext = os.path.splitext(nom)[1].lower()
+    if ext == ".ovpn" and typ == "wireguard":
+        raise Echec(T("Un fichier .ovpn ne peut pas contenir une section WireGuard.", "An .ovpn file cannot contain a WireGuard section."))
+    if not nmcli(["-t", "-f", "RUNNING", "general"])[1].strip() == "running":
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+    user = utilisateur()
+    avant = {c["uuid"] for c in etat().get("connexions", [])}
+    sur = re.sub(r"[^A-Za-z0-9._-]", "_", nom)[:60] or "vpn" + ext
+    d = dossier_prive()
+    copie = os.path.join(d, sur)
+    try:
+        fd = os.open(copie, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(donnees)
+        except OSError:
+            raise Echec(T("Impossible d'écrire la copie temporaire.", "Could not write the temporary copy."))
+        os.chmod(copie, 0o600)
+        code, out, err = nmcli(["connection", "import", "type", typ, "file", copie], delai=60)
+        if code != 0:
+            msg = court(err or out).replace(copie, nom).replace(d, "")
+            raise Echec(T("NetworkManager a refusé l'import", "NetworkManager refused the import") + (" (" + msg + ")" if msg else "") + ".")
+        m = re.search(r"\(([0-9a-fA-F-]{36})\)", out)
+        u = m.group(1).lower() if m and UUID.fullmatch(m.group(1)) else ""
+        if not u:                                    # message inattendu : la nouvelle connexion se trouve par différence
+            nouvelles = [c["uuid"] for c in etat().get("connexions", []) if c["uuid"] not in avant]
+            u = nouvelles[0] if len(nouvelles) == 1 else ""
+        if not u:
+            raise Echec(T("Import fait, mais la connexion n'a pas été retrouvée : règle-la dans NetworkManager.",
+                          "Imported, but the connection was not found: set it up in NetworkManager."))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    code, _, _ = nmcli(["connection", "modify", "uuid", u, "connection.autoconnect", "no", "connection.permissions", "user:" + user])
+    if code != 0:
+        nmcli(["connection", "delete", "uuid", u])   # jamais une connexion importée qui se lancerait seule ou serait ouverte à tous
+        raise Echec(T("Impossible de rendre la connexion privée : import annulé.", "Could not make the connection private: import cancelled."))
+    c = next((x for x in etat().get("connexions", []) if x["uuid"] == u), None)
+    print(T(f"Importé : {c['nom'] if c else nom} ({u}), privé à {user}, sans connexion automatique.",
+            f"Imported: {c['nom'] if c else nom} ({u}), private to {user}, no autoconnect."))
+
+
+# ── IP publique (à la demande de l'île, jamais en boucle) ──────────────────────────────────────────────────────
+def reglage(cle, defaut=""):
+    try:
+        with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+            val = defaut
+            for x in f:
+                if x.startswith(cle + "="):
+                    val = x.split("=", 1)[1].strip().strip('"')
+            return val
+    except OSError:
+        return defaut
+
+
+def ip_publique():
+    if reglage("VPN_IP_PUBLIQUE", "non") != "oui":
+        print(json.dumps({"ip": ""}))
+        return
+    url = reglage("VPN_IP_SERVICE", "")
+    p = urllib.parse.urlsplit(url)
+    if p.scheme != "https" or not p.hostname or p.username or p.password:
+        print(json.dumps({"ip": "", "erreur": T("adresse du service absente ou pas en https", "service address missing or not https")}))
+        return
+    try:
+        class PasDeRedirection(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        ouvre = urllib.request.build_opener(PasDeRedirection)
+        with ouvre.open(urllib.request.Request(url, headers={"User-Agent": "nc-vpn"}), timeout=8) as r:
+            brut = r.read(256).decode("ascii", errors="ignore").strip()
+    except Exception:
+        print(json.dumps({"ip": "", "erreur": T("service injoignable", "service unreachable")}))
+        return
+    import ipaddress
+    try:
+        ip = str(ipaddress.ip_address(brut))
+    except ValueError:
+        print(json.dumps({"ip": "", "erreur": T("réponse inattendue", "unexpected answer")}))
+        return
+    print(json.dumps({"ip": ip}))
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "aide", "help"):
+        return print(T(__doc__.strip(), USAGE_EN))
+    cmd = a[0]
+    try:
+        if cmd == "etat-json" and len(a) == 1:
+            print(json.dumps(etat(), ensure_ascii=False))
+        elif cmd == "liste" and len(a) == 1:
+            e = etat()
+            if not e["disponible"]:
+                return print(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+            for c in e["connexions"]:
+                print(("* " if c["active"] else "  ") + c["nom"] + "  [" + c["type"] + "]" + ("  " + c["interface"] if c["interface"] else "") + "  " + c["uuid"])
+        elif cmd == "connecter" and len(a) == 2:
+            connecter(a[1])
+        elif cmd == "deconnecter" and len(a) == 2:
+            deconnecter(a[1])
+        elif cmd == "tout-deconnecter" and len(a) == 1:
+            tout_deconnecter()
+        elif cmd == "importer" and len(a) == 2:
+            importer(a[1])
+        elif cmd == "ip-publique" and len(a) == 1:
+            ip_publique()
+        else:
+            print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+            sys.exit(2)
+    except Echec as e:
+        print("nc-vpn : " + str(e), file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

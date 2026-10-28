@@ -127,6 +127,7 @@ Les principaux : **Super + R** recherche · **Super + W** fonds d'écran · **Su
 | Lumière de nuit · ne pas déranger | **Super + N** · **Super + Maj + N** |
 | Loupe (zoom autour du curseur) | **Super + Ctrl + molette**, ou **Super + =** / **Super + -** |
 | Mode jeu : effets coupés, image envoyée sans attendre l'écran, notifications en pause | **Super + Alt + G** (même touche pour sortir) |
+| VPN : les tunnels VPN et WireGuard de NetworkManager dans un panneau de l'île (plusieurs tunnels à la fois, « Déconnecter » par tunnel, « Tout déconnecter », import d'un `.ovpn` ou `.conf` refusé s'il fait exécuter un script) ; un bouclier dans la pilule quand un tunnel est monté ; en terminal : `nc-vpn` | **Super + Alt + V** |
 | Revenir au bureau précédent | **Super + chiffre** du bureau où tu es déjà |
 | IA sur le texte sélectionné (résumer, traduire, corriger…) · expliquer une zone de l'écran | **Super + I** · **Super + Maj + I** |
 | Le terminal écrit la commande décrite (relue avant Entrée) | **Alt + I** |
@@ -235,6 +236,19 @@ l'île Quickshell.
 - **Batterie des casques Bluetooth** (`nc-reglages` → Île, réglage `ILE_CASQUE_BATTERIE`) : à la connexion d'écouteurs ou
   d'un casque qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau pendant 3 s, puis la page Son
   l'affiche à côté du casque. Le niveau vient d'UPower (aucun processus, aucun sondage) ; rien si le casque ne le donne pas.
+- **VPN** (**Super + Alt + V**, `nc-vpn`) : les connexions VPN et WireGuard que NetworkManager connaît déjà, dans un panneau de
+  l'île : tous les tunnels montés (plusieurs à la fois) avec un bouton « Déconnecter » chacun, « Tout déconnecter », un clic sur
+  une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
+  qui ferait exécuter quelque chose (`up`, `down`, `route-up`, `script-security` au-dessus de 1, `plugin`, `PostUp`…), un lien,
+  un fichier de plus de 64 Kio, un bloc `<auth-user-pass>` et des certificats donnés par un chemin relatif (mets-les dans le
+  fichier) ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier
+  vert est devant l'heure de la pilule tant qu'un tunnel est monté (`VPN_INDICATEUR`, oui par défaut). Mise à jour sur les
+  événements de NetworkManager (`nmcli monitor`), jamais en boucle, rien écran éteint ; pendant un partage d'écran, noms,
+  interfaces et IP sont masqués. Ton IP publique n'est montrée que si tu le demandes (`VPN_IP_PUBLIQUE` à oui et
+  `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
+  Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
+  client commercial, pas de kill switch, pas de mot de passe dans cette étape. En terminal : `nc-vpn etat-json | liste |
+  connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER`.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
   la page Appel coupe ou réactive le micro (sur la source qu'utilise l'appli, sinon la source par défaut) et rappelle

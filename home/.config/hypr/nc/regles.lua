@@ -133,3 +133,4 @@ hl.layer_rule({ name = "noctalia-dock-verre", match = { namespace = "^noctalia-d
 hl.layer_rule({ name = "nc-fiche-verre", match = { namespace = "^nc-fiche$" }, blur = true, ignore_alpha = 0.2 })
 -- Espace de code de l'île (Super + X) : la même carte de verre, floutée seulement sous la carte
 hl.layer_rule({ name = "nc-code-verre", match = { namespace = "^nc-code$" }, blur = true, ignore_alpha = 0.2 })
+hl.layer_rule({ name = "nc-vpn-verre", match = { namespace = "^nc-vpn$" }, blur = true, ignore_alpha = 0.2 })
