@@ -1,5 +1,5 @@
 """nc-vpn importer : fichier ordinaire seulement (jamais un lien), 64 Kio au plus, .ovpn ou .conf ; chaque directive qui
-exécute quelque chose est refusée (variantes de casse, d'espaces, de guillemets, dans des blocs) ; <auth-user-pass> refusé ;
+exécute quelque chose est refusée (variantes de casse, d'espaces, de guillemets, dans des blocs) ;
 copie 0600 dans un dossier 0700 effacés quoi qu'il arrive ; connexion privée sans connexion automatique ; aucun secret
 dans la sortie ni dans les arguments de nmcli. Faux nmcli seulement."""
 import json
@@ -176,13 +176,8 @@ class Import(BaseVpn):
         r = self.importer(self.ecrire("ok.ovpn", txt))
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_auth_user_pass_inline_refuse_mais_pas_la_directive_seule(self):
-        r = self.importer(self.ecrire("mdp.ovpn", "client\n<auth-user-pass>\nmoi\nMOTDEPASSEDETEST\n</auth-user-pass>\n"))
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("auth-user-pass", r.stderr)
-        self.assertNotIn("MOTDEPASSEDETEST", r.stdout + r.stderr)
-        r = self.importer(self.ecrire("mdp2.ovpn", "client\n<AUTH-USER-PASS >\nmoi\nx\n</auth-user-pass>\n"))
-        self.assertEqual(r.returncode, 1)
+    def test_auth_user_pass_directive_seule_acceptee(self):
+        # le bloc en ligne est pris en charge (tests/test_nc_vpn_auth.py) ; la directive seule passe comme avant
         self.assertEqual(self.importer(self.ecrire("seule.ovpn", "client\nauth-user-pass\nremote 192.0.2.10 1194\n")).returncode, 0)
 
     def test_certificat_en_chemin_relatif_refuse_chemin_complet_accepte(self):

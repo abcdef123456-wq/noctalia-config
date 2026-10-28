@@ -60,6 +60,21 @@ elif a[:2] == ["connection", "delete"]:
     etat[:] = [c for c in etat if c["uuid"] != a[3]]; sauver()
 '''
 
+# Faux secret-tool : note ses arguments (secret.jsonl) et son entrée standard (secret-stdin, à part). Ne touche jamais au vrai
+# trousseau. SECRET_ECHEC=1 : échoue en recrachant son entrée sur la sortie d'erreur ; SECRET_ECHEC=2 : échoue proprement.
+FAUX_SECRET_TOOL = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+R = Path(os.environ["FAUX_DIR"])
+entree = sys.stdin.buffer.read()
+with (R / "secret.jsonl").open("a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
+with (R / "secret-stdin").open("ab") as f: f.write(entree)
+if os.environ.get("SECRET_ECHEC") == "1":
+    sys.stderr.write("secret-tool: erreur avec " + entree.decode() + "\n"); sys.exit(1)
+if os.environ.get("SECRET_ECHEC") == "2":
+    sys.stderr.write("Cannot autolaunch D-Bus without X11 $DISPLAY\n"); sys.exit(1)
+'''
+
 
 def connexions():
     return [dict(uuid=U1, type="vpn", active=False, dev="tun0", nom="Labo"),
@@ -78,6 +93,9 @@ class BaseVpn(unittest.TestCase):
         n = self.r / "faux-bin" / "nmcli"
         n.write_text(FAUX_NMCLI)
         n.chmod(0o755)
+        st = self.r / "faux-bin" / "secret-tool"
+        st.write_text(FAUX_SECRET_TOOL)
+        st.chmod(0o755)
         (self.r / "etat.json").write_text(json.dumps(connexions()))
 
     def env(self, **plus):

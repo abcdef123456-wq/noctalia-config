@@ -11,8 +11,10 @@
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
 Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
 Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
-un fichier trop gros (64 Kio), un bloc <auth-user-pass> (pas de mot de passe dans ce lot) et des certificats donnés par un
-chemin relatif (mets-les dans le fichier : blocs <ca>, <cert>, <key>). Les secrets restent chez NetworkManager ou dans le
+un fichier trop gros (64 Kio) et des certificats donnés par un chemin relatif (mets-les dans le fichier : blocs <ca>, <cert>,
+<key>). Un bloc <auth-user-pass> (identifiant puis mot de passe) est accepté : l'identifiant va dans la connexion, le mot de
+passe dans le trousseau de la session (secret-tool, paquet libsecret ; il faut un trousseau ouvert : gnome-keyring, KeePassXC,
+KWallet…), jamais dans un fichier ; sans trousseau l'import est refusé. Les secrets restent chez NetworkManager ou dans le
 trousseau : jamais dans nos fichiers, jamais dans les journaux ni dans la sortie.
 """
 import json
@@ -68,8 +70,11 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
 Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
 Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
-is too big (64 KiB), an <auth-user-pass> block (no password handling yet) and certificates given by a relative path (put them
-in the file: <ca>, <cert>, <key> blocks). Secrets stay with NetworkManager or in the keyring: never in our files, logs or output."""
+is too big (64 KiB) and certificates given by a relative path (put them in the file: <ca>, <cert>, <key> blocks). An
+<auth-user-pass> block (username then password) is accepted: the username goes into the connection, the password into the
+session keyring (secret-tool, libsecret package; an unlocked keyring is needed: gnome-keyring, KeePassXC, KWallet…), never
+into a file; without a keyring the import is refused. Secrets stay with NetworkManager or in the keyring: never in our files,
+logs or output."""
 
 TYPES = ("vpn", "wireguard")
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -254,8 +259,8 @@ def verifier(texte):
         if re.match(r"\[\s*interface\s*\]", ligne, re.I):
             wireguard = True
         if re.match(r"<\s*/?\s*auth-user-pass\s*>", ligne, re.I):
-            raise Echec(T("Un bloc <auth-user-pass> (identifiant et mot de passe dans le fichier) est refusé : les mots de passe ne sont pas encore pris en charge ici.",
-                          "An <auth-user-pass> block (username and password in the file) is refused: passwords are not handled here yet."))
+            raise Echec(T("Un bloc <auth-user-pass> inattendu est refusé (un seul bloc, de deux lignes : identifiant puis mot de passe).",
+                          "An unexpected <auth-user-pass> block is refused (a single block of two lines: username then password)."))
         # OpenVPN lit les guillemets n'importe où dans un mot (u"p" est « up ») : ils sont retirés avant de lire la directive
         m = re.match(r"-{0,2}([A-Za-z][A-Za-z0-9_-]*)(?=$|[\s=])\s*(.*)$", ligne.replace('"', "").replace("'", ""))
         if not m:
@@ -315,6 +320,83 @@ def dossier_prive():
     return d
 
 
+BLOC_AUTH_DEBUT = re.compile(r"<\s*auth-user-pass\s*>", re.I)
+BLOC_AUTH_FIN = re.compile(r"<\s*/\s*auth-user-pass\s*>", re.I)
+SCHEMA_NM = "org.freedesktop.NetworkManager.Connection"   # le schéma du trousseau que lisent nm-applet et les agents de NetworkManager
+
+
+def masquer(texte, secret):
+    """Un message d'outil : le mot de passe (et sa forme échappée) n'y apparaît jamais."""
+    if not secret:
+        return texte or ""
+    texte = (texte or "").replace(secret, "***")
+    for forme in (json.dumps(secret)[1:-1], repr(secret)[1:-1]):
+        if forme:
+            texte = texte.replace(forme, "***")
+    return texte
+
+
+def extraire_auth(texte):
+    """(texte sans le bloc <auth-user-pass>, identifiant, mot de passe). Le bloc (deux lignes : identifiant puis mot de passe)
+    est remplacé par la directive « auth-user-pass » seule, pour que NetworkManager crée une connexion à mot de passe.
+    Sans bloc : (texte, None, None)."""
+    sortie, bloc, trouve, fin = [], None, False, None
+    for brute in texte.splitlines():
+        ligne = brute.strip()
+        if bloc is None:
+            if BLOC_AUTH_DEBUT.fullmatch(ligne):
+                if trouve:
+                    raise Echec(T("Un seul bloc <auth-user-pass> est accepté.", "Only one <auth-user-pass> block is accepted."))
+                bloc, trouve = [], True
+                sortie.append("auth-user-pass")
+            else:
+                sortie.append(brute)
+        elif BLOC_AUTH_FIN.fullmatch(ligne):
+            lignes = [x.rstrip("\r") for x in bloc]
+            if len(lignes) != 2 or not lignes[0].strip() or not lignes[1]:
+                raise Echec(T("Le bloc <auth-user-pass> doit avoir deux lignes : l'identifiant, puis le mot de passe.",
+                              "The <auth-user-pass> block must have two lines: the username, then the password."))
+            ident, mdp = lignes[0].strip(), lignes[1]
+            if re.search(r"[,\\\x00-\x1f\x7f]", ident):
+                raise Echec(T("L'identifiant du bloc <auth-user-pass> contient un caractère non accepté (virgule, antislash ou caractère de contrôle).",
+                              "The username in the <auth-user-pass> block contains an unsupported character (comma, backslash or control character)."))
+            if re.search(r"[\x00-\x1f\x7f]", mdp):
+                raise Echec(T("Le mot de passe du bloc <auth-user-pass> contient un caractère de contrôle : import refusé.",
+                              "The password in the <auth-user-pass> block contains a control character: import refused."))
+            bloc, fin = None, (ident, mdp)
+        else:
+            bloc.append(brute)
+    if bloc is not None:
+        raise Echec(T("Le bloc <auth-user-pass> n'est pas fermé.", "The <auth-user-pass> block is not closed."))
+    if not trouve:
+        return texte, None, None
+    return "\n".join(sortie) + "\n", fin[0], fin[1]
+
+
+def trousseau_dispo():
+    return shutil.which("secret-tool") is not None
+
+
+def garder_secret(uuid, mdp):
+    """Range le mot de passe dans le trousseau (service Secret du bus de session), avec les attributs que NetworkManager
+    lit pour ce VPN. Le secret passe par l'entrée standard de secret-tool, jamais par ses arguments."""
+    args = ["secret-tool", "store", "--label=" + "NetworkManager VPN " + uuid, "xdg:schema", SCHEMA_NM,
+            "connection-uuid", uuid, "setting-name", "vpn", "setting-key", "password"]
+    try:
+        r = subprocess.run(args, input=mdp.encode("utf-8"), capture_output=True, timeout=60,
+                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C"))
+    except subprocess.TimeoutExpired:
+        raise Echec(T("Le trousseau n'a pas répondu à temps (est-il verrouillé ?) : import annulé.",
+                      "The keyring did not answer in time (is it locked?): import cancelled."))
+    except (OSError, subprocess.SubprocessError):
+        raise Echec(T("secret-tool n'a pas pu être lancé : import annulé.", "secret-tool could not be run: import cancelled."))
+    if r.returncode != 0:
+        detail = court(masquer((r.stderr or b"").decode("utf-8", "replace"), mdp))
+        raise Echec(T("Le trousseau a refusé le mot de passe (service Secret absent, fermé ou refus) : import annulé.",
+                      "The keyring refused the password (no Secret service, locked, or refused): import cancelled.")
+                    + (" (" + detail + ")" if detail else ""))
+
+
 def utilisateur():
     import getpass
     try:
@@ -329,12 +411,19 @@ def utilisateur():
 def importer(chemin):
     nom, donnees = lire_fichier(chemin)
     texte = donnees.decode("utf-8", errors="replace")
-    typ = verifier(texte)
     ext = os.path.splitext(nom)[1].lower()
+    ident = mdp = None
+    if ext == ".ovpn":
+        texte, ident, mdp = extraire_auth(texte)          # le mot de passe quitte le texte ici : la copie n'en a plus
+        donnees = texte.encode("utf-8")
+    typ = verifier(texte)
     if ext == ".ovpn" and typ == "wireguard":
         raise Echec(T("Un fichier .ovpn ne peut pas contenir une section WireGuard.", "An .ovpn file cannot contain a WireGuard section."))
     if not nmcli(["-t", "-f", "RUNNING", "general"])[1].strip() == "running":
         raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+    if mdp is not None and not trousseau_dispo():
+        raise Echec(T("Ce fichier contient un mot de passe, à ranger dans le trousseau, mais secret-tool est absent (paquet libsecret ; libsecret-tools sur Debian et openSUSE). Import refusé.",
+                      "This file holds a password, to be stored in the keyring, but secret-tool is missing (libsecret package; libsecret-tools on Debian and openSUSE). Import refused."))
     user = utilisateur()
     avant = {c["uuid"] for c in etat().get("connexions", [])}
     sur = re.sub(r"[^A-Za-z0-9._-]", "_", nom)[:60] or "vpn" + ext
@@ -350,7 +439,7 @@ def importer(chemin):
         os.chmod(copie, 0o600)
         code, out, err = nmcli(["connection", "import", "type", typ, "file", copie], delai=60)
         if code != 0:
-            msg = court(err or out).replace(copie, nom).replace(d, "")
+            msg = masquer(court(err or out), mdp).replace(copie, nom).replace(d, "")
             raise Echec(T("NetworkManager a refusé l'import", "NetworkManager refused the import") + (" (" + msg + ")" if msg else "") + ".")
         m = re.search(r"\(([0-9a-fA-F-]{36})\)", out)
         u = m.group(1).lower() if m and UUID.fullmatch(m.group(1)) else ""
@@ -362,10 +451,19 @@ def importer(chemin):
                           "Imported, but the connection was not found: set it up in NetworkManager."))
     finally:
         shutil.rmtree(d, ignore_errors=True)
-    code, _, _ = nmcli(["connection", "modify", "uuid", u, "connection.autoconnect", "no", "connection.permissions", "user:" + user])
+    modif = ["connection", "modify", "uuid", u, "connection.autoconnect", "no", "connection.permissions", "user:" + user]
+    if ident is not None:    # le mot de passe sera gardé par le trousseau de l'utilisateur (« agent-owned »), pas par NetworkManager
+        modif += ["+vpn.data", "username=" + ident + ",password-flags=1"]
+    code, _, _ = nmcli(modif)
     if code != 0:
         nmcli(["connection", "delete", "uuid", u])   # jamais une connexion importée qui se lancerait seule ou serait ouverte à tous
         raise Echec(T("Impossible de rendre la connexion privée : import annulé.", "Could not make the connection private: import cancelled."))
+    if mdp is not None:
+        try:
+            garder_secret(u, mdp)
+        except Echec:
+            nmcli(["connection", "delete", "uuid", u])   # pas de connexion sans son mot de passe
+            raise
     c = next((x for x in etat().get("connexions", []) if x["uuid"] == u), None)
     print(T(f"Importé : {c['nom'] if c else nom} ({u}), privé à {user}, sans connexion automatique.",
             f"Imported: {c['nom'] if c else nom} ({u}), private to {user}, no autoconnect."))

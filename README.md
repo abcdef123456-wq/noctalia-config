@@ -255,14 +255,16 @@ l'île Quickshell.
   l'île : tous les tunnels montés (plusieurs à la fois) avec un bouton « Déconnecter » chacun, « Tout déconnecter », un clic sur
   une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
   qui ferait exécuter quelque chose (`up`, `down`, `route-up`, `script-security` au-dessus de 1, `plugin`, `PostUp`…), un lien,
-  un fichier de plus de 64 Kio, un bloc `<auth-user-pass>` et des certificats donnés par un chemin relatif (mets-les dans le
-  fichier) ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier
+  un fichier de plus de 64 Kio et des certificats donnés par un chemin relatif (mets-les dans le fichier) ; un bloc
+  `<auth-user-pass>` (identifiant puis mot de passe) est accepté : le mot de passe va dans le trousseau de la session
+  (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian et openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
+  jamais dans un fichier, et l'import est refusé s'il manque ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. Un bouclier
   vert est devant l'heure de la pilule tant qu'un tunnel est monté (`VPN_INDICATEUR`, oui par défaut). Mise à jour sur les
   événements de NetworkManager (`nmcli monitor`), jamais en boucle, rien écran éteint ; pendant un partage d'écran, noms,
   interfaces et IP sont masqués. Ton IP publique n'est montrée que si tu le demandes (`VPN_IP_PUBLIQUE` à oui et
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
-  client commercial, pas de kill switch, pas de mot de passe dans cette étape. En terminal : `nc-vpn etat-json | liste |
+  client commercial, pas de kill switch. En terminal : `nc-vpn etat-json | liste |
   connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER`.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
