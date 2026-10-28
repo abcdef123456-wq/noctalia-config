@@ -44,8 +44,8 @@ MODES_MAX = 12
 NOM_MAX = 24
 DELAI = 40
 ICONES = ("work", "bedtime", "sports_esports", "school", "home", "menu_book", "fitness_center", "restaurant")
-ID_MODE = re.compile(r"^[a-z0-9-]{1,24}$")
-ID_ENERGIE = re.compile(r"^[a-z0-9-]{1,40}$")
+ID_MODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")            # jamais un tiret en tête : ce serait une option
+ID_ENERGIE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")         # idem (passé à nc-energie en argv)
 CHOIX = {"dnd": ("garder", "oui", "non"), "fond": ("garder", "jour", "nuit"), "notifs_ia": ("garder", "oui", "non")}
 EXEMPLES = {
     "travail": {"icone": "work", "dnd": "oui"},

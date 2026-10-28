@@ -182,7 +182,9 @@ class Validation(Base):
         self.modes.write_text(json.dumps({"version": 9, "extra": 1, "modes": [
             bon, {"id": "A B", "nom": "id"}, {"id": "dnd", "nom": "d", "dnd": "peut-etre"}, {"id": "fond", "nom": "f", "fond": "soir"},
             {"id": "ia", "nom": "i", "notifs_ia": 1}, {"id": "en", "nom": "e", "energie": "x;y"}, {"id": "ic", "nom": "i", "icone": "../x"},
-            {"id": "long", "nom": "n" * 25}, {"id": "bon", "nom": "doublon"}, "texte", None, {"id": "ctl", "nom": "a\x07b"}]}))
+            {"id": "long", "nom": "n" * 25}, {"id": "bon", "nom": "doublon"}, "texte", None, {"id": "ctl", "nom": "a\x07b"},
+            # un tiret en tête serait lu comme une option par nc-energie (argv) : refusé, pour le mode comme pour le profil
+            {"id": "-x", "nom": "t"}, {"id": "opt", "nom": "o", "energie": "--oui"}, {"id": "opt2", "nom": "o", "energie": "-h"}]}))
         modes = self.nc("liste")[0]["modes"]
         self.assertEqual([m["id"] for m in modes], ["bon"])
         self.assertNotIn("champ_inconnu", modes[0])
