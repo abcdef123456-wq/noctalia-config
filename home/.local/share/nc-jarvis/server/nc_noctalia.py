@@ -30,7 +30,7 @@ logger = logging.getLogger("nc_noctalia")
 BIN = Path.home() / ".local/bin"
 DELAI = 20
 CONFIRMATION = 120          # secondes pour répondre /nc oui
-_en_attente = {}            # chat_id → (action, arguments, échéance)
+_en_attente = {}            # (chat_id, user_id) → (action, arguments, échéance, résumé) : celui qui demande est celui qui confirme
 
 PROFILS = {"performance": "performance", "perf": "performance", "equilibre": "balanced", "équilibré": "balanced",
            "equilibré": "balanced", "balanced": "balanced", "eco": "power-saver", "éco": "power-saver", "economie": "power-saver",
@@ -311,6 +311,15 @@ def vpn_valider(action, code, sortie, uuid=None):
     return True, ("Déjà coupé : " if d["deja"] else "Tunnel coupé : ") + c["nom"]
 
 
+async def killswitch_actif():
+    """True / False / None (inconnu) : l'état du kill switch, lu par nc-vpn (lecture seule, mêmes validations que /nc vpn killswitch)."""
+    code, sortie = await executer(["nc-vpn", "killswitch", "etat-json"], VPN_DELAIS["vpn_killswitch"], VPN_MAX_SORTIE, False)
+    succes, _ = vpn_valider("vpn_killswitch", code, sortie)
+    if not succes:
+        return None
+    return json.loads(sortie)["actif"]
+
+
 async def etat():
     lignes = []
     for titre, argv in (("🔋", ["nc-sysinfo", "power"]), ("🖥", ["nc-sysinfo", "ecrans"]), ("⚡", ["powerprofilesctl", "get"]),
@@ -334,8 +343,21 @@ async def agir(action, arguments, confirme=False):
     if argv is None:
         return dict(success=True, output=await etat())
     if sensible and not confirme:
-        quoi = "un tunnel VPN va changer d'état" if action.startswith("vpn_") else "un écran va s'éteindre"
-        return dict(success=False, confirm=True, output="Action sensible (" + quoi + ") : confirme avec /nc oui dans les deux minutes.")
+        if action.startswith("vpn_"):
+            if action == "vpn_tout":
+                resume = "couper TOUS les tunnels VPN"
+            else:
+                resume = ("connecter" if action == "vpn_connecter" else "couper") + " le tunnel " + argv[2][:8] + "…"
+            note = ""
+            if action != "vpn_connecter":
+                actif = await killswitch_actif()
+                note = (" Le kill switch est actif : JARVIS perdra le réseau et ne pourra pas remonter le tunnel." if actif is True else
+                        " Le kill switch est inactif : ta connexion réelle sera visible." if actif is False else
+                        " État du kill switch inconnu : la connexion réelle peut devenir visible.")
+            return dict(success=False, confirm=True, resume=resume,
+                        output="Action sensible : " + resume + "." + note + " Confirme avec /nc oui dans les deux minutes.")
+        return dict(success=False, confirm=True, resume="projection " + " ".join(arguments),
+                    output="Action sensible (un écran va s'éteindre) : confirme avec /nc oui dans les deux minutes.")
     if action.startswith("vpn_"):
         code, sortie = await executer(argv, VPN_DELAIS[action], VPN_MAX_SORTIE, False)
         succes, texte = vpn_valider(action, code, sortie, argv[2] if action in ("vpn_connecter", "vpn_deconnecter") else None)
@@ -359,14 +381,18 @@ def aide():
             "/nc oui — confirmer l'action sensible en attente")
 
 
-async def commande(texte, chat_id, maintenant=None):
-    """Le texte après /nc → la réponse (pour Telegram)."""
+async def commande(texte, chat_id, maintenant=None, user_id=None, prive=True):
+    """Le texte après /nc → la réponse (pour Telegram). La confirmation appartient à (chat, utilisateur) : un autre membre du
+    même chat ne confirme pas. Une action sensible n'est acceptée que dans la discussion privée avec le bot (prive)."""
+    cle = (chat_id, user_id)
     maintenant = time.time() if maintenant is None else maintenant
     mots = (texte or "").split()
     if mots and mots[0].lower() in ("aide", "help", "?"):
         return aide()
     if mots and mots[0].lower() in ("oui", "yes", "confirmer"):
-        attente = _en_attente.pop(chat_id, None)
+        if not prive:
+            return "Les actions sensibles ne se confirment que dans la discussion privée avec le bot."
+        attente = _en_attente.pop(cle, None)
         if not attente or attente[2] < maintenant:
             return "Rien à confirmer (ou plus de deux minutes ont passé)."
         r = await agir(attente[0], attente[1], confirme=True)
@@ -386,14 +412,22 @@ async def commande(texte, chat_id, maintenant=None):
         return "Commande inconnue.\n\n" + aide()
     r = await agir(action, arguments)
     if r.get("confirm"):
-        _en_attente[chat_id] = (action, arguments, maintenant + CONFIRMATION)
-        return "⚠️ " + r["output"]
+        if not prive:
+            return "⛔ Action sensible refusée ici : demande-la dans la discussion privée avec le bot."
+        avant = _en_attente.get(cle)
+        remplace = ""
+        if avant and avant[2] >= maintenant:
+            remplace = "L'action en attente (%s) est remplacée.\n" % avant[3]
+        _en_attente[cle] = (action, arguments, maintenant + CONFIRMATION, r.get("resume", action))
+        return "⚠️ " + remplace + r["output"]
     return ("✅ " if r["success"] else "❌ ") + r["output"]
 
 
 def handler(tb):
     """Le handler Telegram de /nc : liste blanche du bot, puis commande()."""
     async def nc(update, context):
+        if getattr(update, "edited_message", None) is not None:
+            return            # un message modifié ne lance ni ne confirme rien
         user = update.effective_user
         if not tb._is_allowed(user.id):
             logger.warning("/nc refusé à l'utilisateur Telegram %s.", user.id)
@@ -402,7 +436,8 @@ def handler(tb):
         # L'heure du message, pas celle du traitement : une confirmation « /nc oui » ne vaut que dans les deux minutes
         # qui suivent l'envoi de sa commande (revue SRV-03)
         date = getattr(update.message, "date", None)
+        prive = getattr(update.effective_chat, "type", None) == "private"
         reponse = await commande(" ".join(context.args or []), update.effective_chat.id,
-                                 date.timestamp() if date is not None else None)
+                                 date.timestamp() if date is not None else None, user.id, prive)
         await update.message.reply_text(reponse[:4000])
     return nc

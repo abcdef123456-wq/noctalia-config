@@ -370,9 +370,13 @@ class Extensions(unittest.TestCase):
         faux_telegram.BotCommand = BotCommand
         faux_ext = types.ModuleType("telegram.ext")
         class CommandHandler:
-            def __init__(self, commands, callback):
-                self.commands, self.callback = commands, callback
+            def __init__(self, commands, callback, filters=None):
+                self.commands, self.callback, self.filters = commands, callback, filters
         faux_ext.CommandHandler = CommandHandler
+        class Filtre:
+            def __invert__(self):
+                return "pas-modifie"
+        faux_ext.filters = types.SimpleNamespace(UpdateType=types.SimpleNamespace(EDITED_MESSAGE=Filtre()))
         faux_noctalia = types.ModuleType("nc_noctalia")
         faux_noctalia.handler = lambda tb: "handler-nc"
         anciens = {k: sys.modules.get(k) for k in ("telegram", "telegram.ext", "nc_noctalia")}
@@ -384,6 +388,7 @@ class Extensions(unittest.TestCase):
             tb = types.SimpleNamespace(cmd_annuler_rappel=annuler, BOT_COMMANDS=[BotCommand("rappel", "x")])
             self.m.commandes_nc(app, tb)
             self.assertEqual([(h.commands, h.callback) for h, _ in app.handlers], [(["supprimer"], annuler), (["nc", "pc"], "handler-nc")])
+            self.assertEqual([h.filters for h, _ in app.handlers], [None, "pas-modifie"], "/nc ignore les messages modifiés")
             self.assertEqual([c.command for c in tb.BOT_COMMANDS], ["rappel", "nc", "supprimer"])
             self.m.commandes_nc(app, tb)
             self.assertEqual([c.command for c in tb.BOT_COMMANDS], ["rappel", "nc", "supprimer"], "pas de doublon")

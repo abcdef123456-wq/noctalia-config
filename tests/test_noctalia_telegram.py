@@ -100,7 +100,7 @@ class Noctalia(unittest.TestCase):
         class Message:
             async def reply_text(self, texte):
                 reponses.append(texte)
-        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=42), message=Message())
+        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=42, type="private"), message=Message())
         tb = types.SimpleNamespace(_is_allowed=lambda uid: uid == 42)
         handler = self.m.handler(tb)
         asyncio.run(handler(update, types.SimpleNamespace(args=["energie", "eco"])))

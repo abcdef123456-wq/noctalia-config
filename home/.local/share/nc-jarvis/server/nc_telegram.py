@@ -251,7 +251,12 @@ def commandes_nc(app, tb, chemin_offset=None):
         app.add_handler(CommandHandler(["supprimer"], tb.cmd_annuler_rappel))
     try:
         import nc_noctalia
-        app.add_handler(CommandHandler(["nc", "pc"], nc_noctalia.handler(tb)))
+        try:    # python-telegram-bot 20+ : les messages MODIFIÉS ne déclenchent rien (le handler les ignore aussi lui-même)
+            from telegram.ext import filters
+            sans_modifies = ~filters.UpdateType.EDITED_MESSAGE
+        except (ImportError, AttributeError):
+            sans_modifies = None
+        app.add_handler(CommandHandler(["nc", "pc"], nc_noctalia.handler(tb), filters=sans_modifies))
         descriptions = [("nc", "Réglages du PC Noctalia (/nc aide)"), ("supprimer", "Supprimer un rappel : /supprimer <id>")]
     except ImportError as exc:
         logger.warning("Commandes /nc indisponibles : %s", exc)

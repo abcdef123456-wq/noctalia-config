@@ -456,6 +456,34 @@ class TransportJarvis(unittest.TestCase):
         r=self.req('briefing',confirmed=True)
         self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertTrue(json.loads(r.stdout)['ok'],'le briefing garde ses 2 s')
 
+    def test_vpn_actions_are_exempt_from_the_short_management_timeout(self):
+        # Les actions vpn_* (nmcli up : jusqu'à ~2 minutes) ne sont pas coupées à GESTION_DELAI ; le reste de la gestion l'est
+        import threading,time
+        self.env['NC_JARVIS_GESTION_DELAI']='1'
+        for op,params in (('noctalia',dict(action='vpn_etat',params={})),('action',dict(tool='noctalia',action='vpn_etat',params={}))):
+            self.server.reponse=(200,json.dumps(dict(success=True,output='VPN')).encode())
+            self.server.bloquer=True
+            self.server.entree,self.server.sortie=threading.Event(),threading.Event()
+            threading.Timer(1.5,self.server.sortie.set).start()
+            r=self.req(op,params,True)
+            self.assertEqual(r.returncode,0,(op,r.stdout+r.stderr));self.assertTrue(json.loads(r.stdout)['ok'],op)
+            self.server.sortie.wait(3)
+        # une autre action noctalia reste bornée à 1 s
+        self.server.entree,self.server.sortie=threading.Event(),threading.Event()
+        threading.Timer(1.5,self.server.sortie.set).start()
+        debut=time.monotonic();r=self.req('noctalia',dict(action='etat',params={}),True);duree=time.monotonic()-debut
+        self.assertEqual(r.returncode,1);self.assertLess(duree,1.4)
+        self.server.sortie.wait(3)
+
+    def test_vpn_delais_identiques_a_ceux_du_serveur(self):
+        m=module(BIN/'nc-jarvis','nc_jarvis_vpn_delais')
+        n=module(SHARE/'server/nc_noctalia.py','nc_noctalia_vpn_delais')
+        self.assertEqual(m.VPN_DELAIS,n.VPN_DELAIS)
+        self.assertEqual(m.delai_vpn('noctalia',dict(action='vpn_connecter')),n.VPN_DELAIS['vpn_connecter']+m.VPN_MARGE)
+        self.assertIsNone(m.delai_vpn('noctalia',dict(action='etat')))
+        self.assertIsNone(m.delai_vpn('models',dict(action='vpn_etat')))
+        self.assertIsNone(m.delai_vpn('action',dict(tool='shopping',action='vpn_etat')))
+
     def test_overview_loads_status_and_capabilities_and_keeps_secret_hidden(self):
 
         self.server.reponse=(200,b'{"online":true,"protocol":1,"modules":[],"fields":[]}')

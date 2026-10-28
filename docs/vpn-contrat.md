@@ -35,6 +35,7 @@ gardent leur sortie en texte pour le bureau (inchangée).
 | `nm_indisponible` | NetworkManager ou nmcli n'est pas disponible |
 | `echec` | nmcli a refusé (mot de passe manquant, délai, tunnel en panne…) |
 | `echec_partiel` | `tout-deconnecter` : certains tunnels sont restés montés ; la réponse porte aussi `coupes` et `rates` |
+| `occupe` | un autre `connecter`, `deconnecter` ou `tout-deconnecter` est en cours (verrou `flock` non bloquant) : réessayer plus tard |
 | `killswitch_coupe` | `killswitch activer` : `VPN_KILLSWITCH` n'est pas à `oui` dans les réglages |
 | `killswitch_refuse` | l'assistant root a refusé ou n'est pas installé |
 
@@ -46,9 +47,13 @@ gardent leur sortie en texte pour le bureau (inchangée).
 ## JARVIS
 
 JARVIS (Telegram et cockpit) pilote le VPN de la machine qui l'héberge, par `nc-vpn` en arguments (jamais un shell), avec une
-liste blanche : état, connecter, déconnecter, tout déconnecter, état du kill switch. Connecter et déconnecter demandent une
-confirmation (`/nc oui` sur Telegram). Le kill switch ne s'active ni ne se coupe depuis JARVIS : couper une protection à
+liste blanche : état, connecter, déconnecter, tout déconnecter, état du kill switch. Connecter, déconnecter et tout couper demandent une
+confirmation (`/nc oui` sur Telegram, dans la discussion privée, par la même personne). Le kill switch ne s'active ni ne se coupe depuis JARVIS : couper une protection à
 distance, avec un compte de messagerie volé, démasquerait la connexion. Voir `docs/jarvis.md`.
+
+`/nc oui` ne protège pas d'un compte volé. Couper un tunnel (ou tout couper) quand le kill switch est inactif démasque la
+connexion. Les réponses de JARVIS sont des textes résumés, construits à partir de `refus_code` : ni `refus` ni `limites`
+(qui peuvent nommer un serveur) ne sont relayés. Voir « Limites de la protection » dans `docs/jarvis.md`.
 
 Attention : si le kill switch est actif, déconnecter le tunnel coupe aussi l'accès réseau de JARVIS ; on ne pourra pas le
 reconnecter à distance.

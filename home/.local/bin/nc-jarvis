@@ -67,6 +67,20 @@ def delai_gestion():
     return d if d>0 and d==d and d!=float('inf') else 20.0
 
 
+# Actions VPN du PC (catalogue noctalia) : plus longues que les 20 s de la gestion (nmcli up peut prendre 2 minutes). Délais de
+# VPN_DELAIS de nc_noctalia.py (un test vérifie qu'ils sont identiques) ; on ajoute 15 s de marge pour la réponse du gateway.
+VPN_DELAIS={'vpn_etat':30,'vpn_connecter':210,'vpn_deconnecter':90,'vpn_tout':210,'vpn_killswitch':60}
+VPN_MARGE=15
+
+
+def delai_vpn(op,p):
+    """Le délai nécessaire à une action vpn_* (op noctalia, ou action du catalogue noctalia), sinon None."""
+    if op=='action' and p.get('tool')=='noctalia':nom=p.get('action')
+    elif op=='noctalia':nom=p.get('action')
+    else:return None
+    return VPN_DELAIS[nom]+VPN_MARGE if isinstance(nom,str) and nom in VPN_DELAIS else None
+
+
 GESTION_DELAI=delai_gestion()   # secondes : les opérations de gestion (cockpit, réglages rapides de l'île) n'attendent pas les 180 s du chat
 
 def request(body):
@@ -76,6 +90,8 @@ def request(body):
     # modules et le briefing (longs par nature) gardent le délai configuré
     if op not in ('action','briefing'):c=dict(c,TIMEOUT=min(float(c.get('TIMEOUT',GESTION_DELAI)),GESTION_DELAI))
     if not isinstance(p,dict):raise ValueError(T('Paramètres invalides','Invalid parameters'))
+    vpn=delai_vpn(op,p)
+    if vpn:c=dict(c,TIMEOUT=max(float(c.get('TIMEOUT',180)),vpn))   # actions VPN : exemptées des 20 s de la gestion
     if op=='overview':
         data=m.api(c,'/api/status')
         try:

@@ -934,7 +934,15 @@ arguments vérifiés, jamais de shell (`nc-reglages set` valide lui-même les va
   en arguments avec `--json` ([contrat 1](vpn-contrat.md)), UUID vérifié avant l’appel, délai borné, réponse analysée puis
   reconstruite champ par champ. Le kill switch ne s’active ni ne se coupe depuis JARVIS : couper une protection à distance,
   avec un compte de messagerie ou une clé volés, démasquerait la connexion. Si le kill switch est actif, couper le tunnel
-  coupe aussi le réseau de JARVIS : impossible de remonter le tunnel à distance. **Après la mise à jour, relance
+  coupe aussi le réseau de JARVIS : impossible de remonter le tunnel à distance. **Limites de la protection :**
+  `/nc oui` ne protège PAS d'un compte Telegram volé (celui qui tient le compte autorisé tape aussi `oui`) ; il protège d'une
+  faute de frappe. Couper un tunnel (`deconnecter`) ou tout couper (`tout`) quand le kill switch est inactif DÉMASQUE ta
+  connexion (ton adresse réelle sort) : l'invite de confirmation le dit. `tout` demande la même confirmation que `connecter` et
+  `deconnecter`, une seule à la fois, par (discussion, utilisateur), dans la discussion privée avec le bot seulement (un groupe
+  est refusé, comme les messages modifiés ; même règle pour `/nc ecran pc|externe`). Ces confirmations ne couvrent que `/nc` et le
+  cockpit : un moteur d'IA de JARVIS (agy) suit sa propre confirmation, et avec `NC_AGY_SANS_CONFIRMATION=oui` (écrit à la main,
+  voir « AGY sans auto-approbation ») il en est dispensé ; garde ce réglage à non si tu veux cette protection. Idée notée, pas
+  faite : un réglage `VPN_JARVIS=lecture|complet` pour n'autoriser que la lecture. **Après la mise à jour, relance
   `nc-jarvis deployer`** (c’est toi qui le lances) pour que le serveur reçoive ces actions.
 
 Les mêmes actions forment la section `noctalia` du catalogue `actions.json` (op `noctalia` de `/api/nc/manage` ;

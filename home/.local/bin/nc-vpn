@@ -28,6 +28,7 @@ passe dans le trousseau de la session (secret-tool, paquet libsecret ; il faut u
 KWallet…), jamais dans un fichier ; sans trousseau l'import est refusé. Les secrets restent chez NetworkManager ou dans le
 trousseau : jamais dans nos fichiers, jamais dans les journaux ni dans la sortie.
 """
+import fcntl
 import json
 import os
 import re
@@ -259,6 +260,30 @@ def tout_deconnecter():
     return {"coupes": coupes, "rates": rates}
 
 
+# ── Un seul changement de VPN à la fois ──────────────────────────────────────────────────────────────────────────
+_verrou = None
+
+
+def verrou_changement():
+    """connecter, deconnecter et tout-deconnecter ne tournent pas en même temps (flock non bloquant sur
+    $XDG_RUNTIME_DIR/nc-vpn.lock, gardé jusqu'à la fin du processus, relâché par le noyau même si nc-vpn est tué). Occupé :
+    Echec de code « occupe ». Un verrou impossible à créer ne bloque rien."""
+    global _verrou
+    base = os.environ.get("XDG_RUNTIME_DIR", "")
+    try:
+        if not base or not os.path.isdir(base) or os.stat(base).st_uid != os.getuid():
+            return
+        fd = os.open(os.path.join(base, "nc-vpn.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise Echec(T("Un autre changement de VPN est en cours.", "Another VPN change is in progress."), "occupe")
+    _verrou = fd
+
+
 # ── Sorties : texte pour le bureau, JSON (--json) pour JARVIS et les scripts (docs/vpn-contrat.md) ──────────────
 def sortie_json(d):
     print(json.dumps(dict({"contrat": CONTRAT, "ok": True}, **d), ensure_ascii=False))
@@ -266,6 +291,7 @@ def sortie_json(d):
 
 def agir_connexion(cmd, u, en_json):
     """connecter / deconnecter UUID : le même code pour le texte et le JSON."""
+    verrou_changement()
     r = (connecter if cmd == "connecter" else deconnecter)(u)
     actif = cmd == "connecter"
     if en_json:
@@ -279,6 +305,7 @@ def agir_connexion(cmd, u, en_json):
 
 
 def agir_tout(en_json):
+    verrou_changement()
     r = tout_deconnecter()
     if en_json:
         brut = lambda l: [{"uuid": c["uuid"], "nom": c["nom"]} for c in l]

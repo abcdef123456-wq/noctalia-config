@@ -61,7 +61,7 @@ class Connecter(BaseVpn):
         self.assertEqual(p["mode_dossier"], 0o700)
         self.assertTrue(p["chemin"].startswith(str(self.r / "run")), "sous XDG_RUNTIME_DIR")
         self.assertFalse(os.path.exists(p["chemin"]))
-        self.assertEqual(os.listdir(self.r / "run"), [])
+        self.assertEqual([x for x in os.listdir(self.r / "run") if x != "nc-vpn.lock"], [])   # seul le verrou (fichier vide) reste
         self.assertEqual(os.listdir(self.r / "tmp"), [])
         self.assertNotIn(MDP, r.stdout + r.stderr)
         (lk,) = self.secret_appels()
@@ -85,7 +85,7 @@ class Connecter(BaseVpn):
         self.assertNotIn(MDP, r.stdout + r.stderr)
         self.assertIn("***", r.stderr)
         self.assertFalse(os.path.exists(self.passwd()[0]["chemin"]))
-        self.assertEqual(os.listdir(self.r / "run"), [])
+        self.assertEqual([x for x in os.listdir(self.r / "run") if x != "nc-vpn.lock"], [])   # seul le verrou (fichier vide) reste
 
     def test_fichier_efface_apres_un_delai_depasse(self):
         # nmcli() rend 126 quand le délai est dépassé ; ici le délai lui-même est simulé : le « finally » doit nettoyer
@@ -110,7 +110,7 @@ class Connecter(BaseVpn):
                     m.connecter(U1)
         self.assertEqual(len(vus), 1)
         self.assertFalse(os.path.exists(vus[0]))
-        self.assertEqual(os.listdir(self.r / "run"), [])
+        self.assertEqual([x for x in os.listdir(self.r / "run") if x != "nc-vpn.lock"], [])   # seul le verrou (fichier vide) reste
 
     def test_sans_password_flags_comme_avant_sans_secret_tool(self):
         (self.r / "vpn_data.json").write_text("{}")
@@ -164,7 +164,7 @@ class Connecter(BaseVpn):
             self.assertEqual(self.ups(), [], brut)
             self.assertEqual(self.passwd(), [])
             self.assertNotIn("AAAA", r.stdout + r.stderr)
-        self.assertEqual(os.listdir(self.r / "run"), [])
+        self.assertEqual([x for x in os.listdir(self.r / "run") if x != "nc-vpn.lock"], [])   # seul le verrou (fichier vide) reste
 
 
 if __name__ == "__main__":

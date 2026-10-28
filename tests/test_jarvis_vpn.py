@@ -135,7 +135,7 @@ class Confirmation(Base):
     def test_deconnecter_et_tout_demandent_oui(self):
         for texte in ("vpn deconnecter " + U1, "vpn tout"):
             self.assertTrue(self.nc(texte).startswith("⚠️"), texte)
-        self.assertEqual(self.appels, [])
+        self.assertEqual([a for a in self.appels if a[0][1] != "killswitch"], [], "seule la lecture du kill switch est lancée")
 
     def test_lecture_sans_confirmation(self):
         self.reponse = (0, json.dumps({"contrat": 1, "disponible": True, "connexions": [conn()], "actives": []}))
@@ -147,7 +147,7 @@ class Confirmation(Base):
     def test_agir_sans_confirmation_refuse(self):
         r = self.agir("vpn_deconnecter", [U1], confirme=False)
         self.assertTrue(r.get("confirm"))
-        self.assertEqual(self.appels, [])
+        self.assertEqual([a for a in self.appels if a[0][1] != "killswitch"], [])
 
 
 class Identite(Base):
@@ -159,7 +159,7 @@ class Identite(Base):
         class Message:
             async def reply_text(self, texte):
                 reponses.append(texte)
-        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=42), message=Message())
+        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=42, type="private"), message=Message())
         tb = types.SimpleNamespace(_is_allowed=lambda uid: uid == 42)
         handler = self.m.handler(tb)
         self.reponse = (0, json.dumps({"contrat": 1, "disponible": True, "connexions": [], "actives": []}))

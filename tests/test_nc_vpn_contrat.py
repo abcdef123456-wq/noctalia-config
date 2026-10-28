@@ -2,6 +2,7 @@
 compatibilité (status --json, connect, disconnect) qui doivent donner EXACTEMENT les mêmes sorties et les mêmes appels.
 Faux nmcli seulement (tests/_vpn_faux.py), adresses de documentation."""
 import json
+import os
 import unittest
 
 from tests._vpn_faux import BaseVpn, U1, U2, U3, U4, NOUVEAU
@@ -85,6 +86,30 @@ class ContratVpn(BaseVpn):
         self.assertIsInstance(d["limites"], list)
         r, d = self.json("killswitch", "activer", "--json")          # coupé dans les réglages : erreur JSON
         self.assertEqual((r.returncode, d["ok"], d["code"]), (1, False, "killswitch_coupe"))
+
+    def test_un_seul_changement_a_la_fois(self):
+        """flock non bloquant : un autre changement en cours donne le code `occupe` (sans lancer nmcli) ; relâché, tout repasse."""
+        import fcntl
+        verrou = os.open(str(self.r / "run" / "nc-vpn.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, verrou)
+        fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for args in (("connecter", U1), ("deconnecter", U2), ("tout-deconnecter",)):
+            r, d = self.json(*args, "--json")
+            self.assertEqual((r.returncode, d["ok"], d["code"]), (1, False, "occupe"), args)
+            self.assertEqual(r.stderr, "")
+        r = self.vpn("connecter", U1)                                # le texte aussi
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Un autre changement de VPN est en cours", r.stderr)
+        self.assertEqual([a for a in self.appels() if "up" in a or "down" in a], [], "rien n'est lancé")
+        r, d = self.json("etat-json")                                # la lecture n'est pas bloquée
+        self.assertTrue(d["disponible"])
+        fcntl.flock(verrou, fcntl.LOCK_UN)
+        r, d = self.json("connecter", U1, "--json")
+        self.assertEqual((r.returncode, d["ok"]), (0, True))
+
+    def test_nm_absent_listes_vides(self):
+        r, d = self.json("etat-json", NM_ARRETE="1")
+        self.assertEqual(d, {"contrat": 1, "disponible": False, "connexions": [], "actives": []})
 
     def test_aucun_secret_ni_ip_dans_les_champs_du_contrat(self):
         r, d = self.json("etat-json")
