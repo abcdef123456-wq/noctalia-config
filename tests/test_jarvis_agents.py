@@ -208,11 +208,11 @@ class Liste(Base):
 
     def test_dossier_borne_a_40_et_texte_brut(self):
         self.sessions[0]["dossier"] = "/home/user/" + "d" * 10 + "é" * 60
-        self.sessions[1]["dossier"] = "*gras* _it_ `code`‮"
+        self.sessions[1]["dossier"] = "*gras* _it_ `code`\u202e"
         r = self.un("/agents")
         self.assertIn("1. Claude Code · " + "d" * 10 + "é" * 29 + "… ·", r)
         self.assertIn("*gras* _it_ `code`", r)
-        self.assertNotIn("‮", r)
+        self.assertNotIn("\u202e", r)
 
     def test_aucune_session(self):
         self.sessions = []
@@ -408,8 +408,8 @@ class TexteRefuse(Base):
         self.assertIn("Rien à confirmer", self.un("/code " + CODE_BON, t=1002))
 
     def test_controle_echappement_bidi_invisibles(self):
-        for texte in ("a\tb", "a\x00b", "a\x07b", "a\x1bb", "a\x1b[31mb", "a\x7fb", "a\x85b", "a\x9bb", "a\x9f", "a‮b", "a⁦b",
-                      "a​b", "a﻿b", "a­b", "a b", "a b", "aㅤb", "a͏b", "a b", "a　b",
+        for texte in ("a\tb", "a\x00b", "a\x07b", "a\x1bb", "a\x1b[31mb", "a\x7fb", "a\x85b", "a\x9bb", "a\x9f", "a\u202eb", "a\u2066b",
+                      "a\u200bb", "a\ufeffb", "a\u00adb", "a\u2028b", "a\u2029b", "a\u3164b", "a\u034fb", "a\u00a0b", "a\u3000b",
                       "a\U000e0041b"):
             self.refuse(texte)
 
@@ -474,7 +474,7 @@ class Secrets(Base):
             self.assertTrue(out.endswith(reste), (texte, out))
 
     def test_chemins_et_emails(self):
-        out = self.f("voir /home/alice/projets/x.py et /Users/bob/y et /home/alice")
+        out = self.f("voir /home/user/projets/x.py et /Users/bob/y et /home/user")
         self.assertEqual(out, "voir /home/…/projets/x.py et /Users/…/y et /home/…")
         out = self.f("écris à jean.dupont+tag@exemple.fr ou a@b.co")
         self.assertEqual(out, "écris à …@… ou …@…")
@@ -611,7 +611,7 @@ class NcClaudeEtatJson(unittest.TestCase):
         h = str(self.home)
         self.etat({
             "a": {"id": "a", "cwd": "~/projets/mon-projet", "cwd_reel": h + "/projets/mon-projet", "etat": "attente", "ecrire": True,
-                  "reponse": "Réponse longue avec secret", "etape": "Edit /home/x/y", "question": {"texte": "rm -rf /"}, "projet": "titre"},
+                  "reponse": "Réponse longue avec secret", "etape": "Edit /home/user/y", "question": {"texte": "rm -rf /"}, "projet": "titre"},
             "codex-b": {"id": "codex-b", "agent": "codex", "cwd_reel": h, "etat": "travail", "ecrire": False, "message": "m"},
             "c": {"id": "c", "cwd_reel": "/", "etat": "fini", "ecrire": "oui"},
         })
