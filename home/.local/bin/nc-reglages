@@ -909,6 +909,17 @@ REGLAGES = [
         "tu branches le chargeur.",
         "On battery (except in Performance), lowered to level 1 if it was higher; its previous level comes back when "
         "you plug in the charger."), groupe="energie"),
+    R("BAT_RAPPEL_80", "Énergie", L("Rappel de débrancher à 80 % pendant la charge", "Reminder to unplug at 80% while charging"),
+      "ouinon", "non",
+      L("Pour garder la batterie en bonne santé : pendant la charge, une seule notification douce quand elle atteint le "
+        "seuil, puis plus rien avant le prochain branchement. Inutile (donc sans rappel) si une limite de charge matérielle "
+        "est active (Protéger la batterie). Reporté pendant un partage d'écran ou un jeu. Lu par l'île sur les changements "
+        "d'état de la batterie, sans aucun sondage.",
+        "To keep the battery healthy: while charging, one gentle notification when it reaches the threshold, then nothing "
+        "until the next plug-in. Pointless (so no reminder) when a hardware charge limit is on (Protect the battery). "
+        "Postponed during screen sharing or gaming. Read by the island from battery state changes, with no polling.")),
+    R("BAT_RAPPEL_SEUIL", "Énergie", L("Seuil du rappel de charge", "Charge reminder threshold"), "entier", "80",
+      mini=50, maxi=100, pas=5, unite="%"),
     R("BORDURE_PERFORMANCE", "Énergie", L("Bordure animée en Performance", "Animated border in Performance"), "ouinon", "oui",
       L("En Performance sur secteur, quand l'écran est rendu par une carte graphique dédiée (mode Dédiée du BIOS, PC fixe) : "
         "la bordure de la fenêtre active tourne. Sur une carte intégrée, elle reste figée (elle forcerait un rendu permanent "
@@ -1509,7 +1520,7 @@ MATERIEL = {
     "PROFIL_SECTEUR": "batterie", "PROFIL_BATTERIE": "batterie", "ECO_AUTO": "batterie",
     "ECO_CLAVIER": "clavier", "ECO_BLUETOOTH": "bluetooth", "BT_APPEL_REPARE": "bluetooth", "BT_QUALITE_MUSIQUE": "bluetooth", "GPU_REGLE": "hybride", "GPU_JAMAIS_RTX": "hybride",
     "GPU_MUX_PROPOSER": "mux", "GPU_MUX_AVERTIR": "mux",
-    "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
+    "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie", "BAT_RAPPEL_80": "batterie", "BAT_RAPPEL_SEUIL": "batterie",
     "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
     "ILE_RESUME_REVEIL": "ile",
