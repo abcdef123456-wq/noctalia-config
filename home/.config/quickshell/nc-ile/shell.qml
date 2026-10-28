@@ -23,9 +23,6 @@ ShellRoot {
         model: Quickshell.screens
         Ile {}
     }
-    // Veille de surchauffe du processeur (Chaleur.qml) : un seul « nc-ile-etat capteurs » au démarrage, puis deux
-    // fichiers du noyau relus toutes les 20 s écran allumé ; rien sur une machine sans capteur
-    Component.onCompleted: Chaleur.demarrer()
     // Vue de toutes les fenêtres (Super + A, trois doigts vers le haut, coin actif) : chargée seulement à l'ouverture.
     // Elle utilise la capture d'écran de Quickshell, absente de certains paquets : sans elle, seule la vue manque
     // (un message le dit) ; déclarée ici directement, c'est toute l'île qui ne se chargeait plus.
@@ -92,7 +89,12 @@ ShellRoot {
     // Fiche des raccourcis (Super + /), éditable : créée à l'ouverture, sur l'écran actif ; sans l'île Quickshell,
     // Super + / ouvre la fiche de Noctalia
     property bool ficheOuverte: false
-    Component.onCompleted: Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
+    // Un seul Component.onCompleted par objet (deux : « Property value set multiple times », l'île ne démarre plus)
+    Component.onCompleted: {
+        Raccourcis.relire()          // le catalogue est prêt avant la première ouverture de la fiche
+        Chaleur.demarrer()           // veille de surchauffe (Chaleur.qml) : un « nc-ile-etat capteurs », puis deux fichiers
+                                     // du noyau relus toutes les 20 s écran allumé ; rien sur une machine sans capteur
+    }
     // Créée seulement une fois ses raccourcis connus : jamais une carte vide
     LazyLoader {
         id: chargeurFiche
