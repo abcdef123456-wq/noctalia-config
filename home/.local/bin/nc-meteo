@@ -213,6 +213,9 @@ def nom_ville(m):
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help", "aide", "help"):
         return print(T(__doc__.strip(), USAGE_EN))
+    if len(sys.argv) > 1 and (sys.argv[1] not in ("texte", "text") or len(sys.argv) > 2):     # argument inconnu : pas d'appel réseau
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
     m = meteo()
     if len(sys.argv) > 1 and sys.argv[1] in ("texte", "text"):
         if m.get("erreur") == "ville introuvable":

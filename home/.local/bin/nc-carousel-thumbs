@@ -8,6 +8,12 @@
 # le carrousel l'affiche pixel pour pixel, l'image d'origine reste celle appliquée comme fond.
 # Seules les images nouvelles ou modifiées sont traitées ; les miniatures des images supprimées sont effacées.
 # Lancé automatiquement (nc-carousel-thumbs.path) à chaque changement du dossier de fonds.
+# Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+case "${1:-}" in
+  ""|--surveillance) ;;
+  -h|--help|aide) echo "usage : nc-carousel-thumbs [--surveillance]"; exit 0 ;;
+  *) echo "usage : nc-carousel-thumbs [--surveillance]" >&2; exit 2 ;;
+esac
 set -uo pipefail
 # ImageMagick 7 (magick) ou 6 (convert, Debian et Ubuntu) : même syntaxe ici
 IM=$(command -v magick >/dev/null && echo magick || echo convert)

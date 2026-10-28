@@ -12,6 +12,12 @@
 # Usage : nc-session-propre [attente en secondes]
 set -uo pipefail
 . "$HOME/.local/bin/nc-langue" 2>/dev/null || t() { printf '%s' "$1"; }
+# Un argument inconnu n'arrête rien : seul un nombre de secondes est permis (-h, --help, aide : usage et code 0)
+case "${1:-}" in
+  -h|--help|aide) echo "usage : nc-session-propre [attente en secondes]"; exit 0 ;;
+  *[!0-9]*) echo "usage : nc-session-propre [attente en secondes]" >&2; exit 2 ;;
+esac
+[ $# -le 1 ] || { echo "usage : nc-session-propre [attente en secondes]" >&2; exit 2; }
 sleep "${1:-6}"
 
 # Bloquer (mask / Hidden=true) seulement si tu l'as demandé : SESSION_BLOQUER=oui. Ces blocages valent pour TOUS les

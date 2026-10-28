@@ -2,6 +2,11 @@
 # nc-boot-wallpaper : affiche le fond d'écran dès l'ouverture de session, sans écran noir pendant que
 # Noctalia démarre. swaybg montre la copie réduite (~/.cache/nc/wallpaper-boot.jpg), puis s'arrête
 # dès que le fond de Noctalia est en place. Lancé par Hyprland (exec-once).
+# Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+if [ $# -gt 0 ]; then
+  case "$1" in -h|--help|aide) echo "usage : nc-boot-wallpaper (sans argument)"; exit 0 ;; esac
+  echo "usage : nc-boot-wallpaper (sans argument)" >&2; exit 2
+fi
 command -v swaybg >/dev/null || exit 0
 img="$HOME/.cache/nc/wallpaper-boot.jpg"
 [ -r "$img" ] || img=$(jq -r '.wallpapers | to_entries | map(.value) | first // empty' "$HOME/.cache/noctalia/wallpapers.json" 2>/dev/null)

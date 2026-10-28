@@ -1371,6 +1371,11 @@ def main(a):
         return cmd_nouveau(a[1:])
     if a and a[0] == "--cloner":
         return cmd_cloner(a[1:])
+    connus = {"--session-seule", "--nvim", "--sans-agent", "--agent", "--selecteur"}
+    inconnu = [x for i, x in enumerate(a) if x.startswith("--") and x not in connus]
+    if inconnu:                       # option inconnue : aucune fenêtre n'est ouverte
+        print(T("nc-code : option inconnue %s (nc-code --help)" % inconnu[0], "nc-code: unknown option %s (nc-code --help)" % inconnu[0]), file=sys.stderr)
+        return 2
     seule = "--session-seule" in a
     seul_nvim = "--nvim" in a
     sans_agent = "--sans-agent" in a

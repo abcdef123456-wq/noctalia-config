@@ -144,4 +144,9 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys as _sys
+    if len(_sys.argv) > 1:          # un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+        _aide = _sys.argv[1] in ("-h", "--help", "aide")
+        print("usage : %s (sans argument)" % __import__("os").path.basename(_sys.argv[0]), file=_sys.stdout if _aide else _sys.stderr)
+        _sys.exit(0 if _aide else 2)
     main()

@@ -8,6 +8,12 @@ la config. Le reste de settings.toml (thème, fond d'écran…) n'est pas touch�
 """
 import os
 import re
+import sys
+
+if len(sys.argv) > 1:          # un argument inconnu ne touche à rien : usage et code 2 (-h, --help, aide : usage et code 0)
+    _aide = sys.argv[1] in ("-h", "--help", "aide")
+    print("usage : nc-noctalia-avant (sans argument)", file=sys.stdout if _aide else sys.stderr)
+    sys.exit(0 if _aide else 2)
 
 # L'état de Noctalia, comme lui (stateDir de src/util/file_utils.h) : NOCTALIA_STATE_HOME, puis XDG_STATE_HOME, puis
 # ~/.local/state (une valeur vide compte comme absente)

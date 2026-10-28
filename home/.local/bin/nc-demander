@@ -54,6 +54,12 @@ def main(ia=None):
     flux = a[:1] == ["--flux"]
     if flux:
         a = a[1:]
+    if a[:1] in (["-h"], ["--help"], ["aide"]):
+        print(ia.T(__doc__, DOC_EN).strip())
+        return 0
+    if a[:1] and a[0].startswith("--") and a[0] != "--":      # option inconnue : jamais envoyée à l'IA comme question
+        print(ia.T(__doc__, DOC_EN).strip(), file=sys.stderr)
+        return 2
     question = " ".join(a).strip()
     if not question:
         sys.exit(ia.T(__doc__, DOC_EN).strip())

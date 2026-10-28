@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # nc-finger : le bouton d'arrêt fait apparaître de gros doigts (image vectorielle nette) sur le fond flouté, sans éteindre. Une touche quitte.
+# Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+if [ $# -gt 0 ]; then
+  case "$1" in -h|--help|aide) echo "usage : nc-finger (sans argument)"; exit 0 ;; esac
+  echo "usage : nc-finger (sans argument)" >&2; exit 2
+fi
 hyprctl clients -j | grep -q '"class": "fingerpop"' && exit 0
 exec flock -n "${XDG_RUNTIME_DIR:-/tmp}/nc-finger.lock" kitty --class fingerpop -o background_opacity=0.35 -o font_size=14 -o confirm_os_window_close=0 -o hide_window_decorations=yes \
   -o window_padding_width=0 python3 -c '

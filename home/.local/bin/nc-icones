@@ -423,6 +423,9 @@ def main():
         return print(T(__doc__.strip(), USAGE_EN))
     if len(sys.argv) > 1 and sys.argv[1] in ("retirer", "--retirer", "remove", "--remove"):
         return retirer()
+    if len(sys.argv) > 1:                # argument inconnu : rien n'est dessiné
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
     remettre_autres_themes()
     tout = dessins(couleurs())
     ecrire(THEME / "index.theme", INDEX.format(parents=parents(), commentaire=T(

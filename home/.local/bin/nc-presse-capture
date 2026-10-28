@@ -7,6 +7,11 @@
 # Rien pour une copie de la dictée (marque nc-dictee-copie de moins de 5 s) ni pour ce qu'un gestionnaire de mots de passe marque comme secret (x-kde-passwordManagerHint, x-nc-secret).
 # Le contenu n'est jamais journalisé.
 # Une copie de nc-dictee (texte dicté, marque datée de moins de 5 s) : jamais gardée dans l'historique
+# Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+if [ $# -gt 0 ]; then
+  case "$1" in -h|--help|aide) echo "usage : nc-presse-capture (sans argument)"; exit 0 ;; esac
+  echo "usage : nc-presse-capture (sans argument)" >&2; exit 2
+fi
 m="${XDG_RUNTIME_DIR:-}/nc-dictee-copie"
 if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$m" ]; then
   d=$(stat -c %Y "$m" 2>/dev/null) && [ $(( $(date +%s) - d )) -lt 5 ] && exit 0

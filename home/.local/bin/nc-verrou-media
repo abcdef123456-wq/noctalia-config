@@ -6,6 +6,11 @@
 # Lecteur : le dernier actif selon playerctld (comme les touches de musique du clavier).
 # Pochette venue d'internet (YouTube, Spotify…) : téléchargée une fois dans ~/.cache/nc/pochettes.
 # Icône de l'appli : nc-apps icon, gardée en cache pour ne pas la chercher à chaque seconde.
+# Un argument inconnu ne lance rien : usage et code 2 (-h, --help, aide : usage et code 0)
+if [ $# -gt 0 ]; then
+  case "$1" in -h|--help|aide) echo "usage : nc-verrou-media (sans argument)"; exit 0 ;; esac
+  echo "usage : nc-verrou-media (sans argument)" >&2; exit 2
+fi
 set -u
 
 # Le premier nom entre guillemets, sans le préfixe MPRIS (un seul sed : ce script tourne chaque seconde pendant le verrou)
