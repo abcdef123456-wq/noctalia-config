@@ -57,7 +57,9 @@ def main(ia=None):
     if a[:1] in (["-h"], ["--help"], ["aide"]):
         print(ia.T(__doc__, DOC_EN).strip())
         return 0
-    if a[:1] and a[0].startswith("--") and a[0] != "--":      # option inconnue : jamais envoyée à l'IA comme question
+    # option inconnue en ligne de commande : jamais envoyée à l'IA comme question (avec --flux, tout le reste est la question
+    # tapée dans le Spotlight, même si elle commence par « -- »)
+    if not flux and a[:1] and a[0].startswith("--") and a[0] != "--":
         print(ia.T(__doc__, DOC_EN).strip(), file=sys.stderr)
         return 2
     question = " ".join(a).strip()

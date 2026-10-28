@@ -89,5 +89,34 @@ class ArgumentInconnu(Base):
         self.assertNotIn("usage", r.stderr)
 
 
+class DemanderFlux(unittest.TestCase):
+    def test_question_du_spotlight_qui_commence_par_deux_tirets(self):
+        # avec --flux (Spotlight), tout le reste est la question tapée : même « --version … » part à l'IA
+        import importlib.machinery
+        import importlib.util
+        l = importlib.machinery.SourceFileLoader("nc_demander_flux", str(BIN / "nc-demander"))
+        spec = importlib.util.spec_from_loader("nc_demander_flux", l)
+        m = importlib.util.module_from_spec(spec)
+        l.exec_module(m)
+        recu = []
+
+        class FausseIA:
+            FOURNISSEURS, ANCIENS = {}, {}
+            def reglage(self, c, d): return d
+            def coupee(self): return False
+            def T(self, fr, en): return fr
+            def main(self, args): recu.append(args); return 0
+
+        ancien = sys.argv
+        try:
+            sys.argv = ["nc-demander", "--flux", "--version de python ?"]
+            self.assertEqual(m.main(FausseIA()), 0)
+            sys.argv = ["nc-demander", "--zzz-inconnu"]
+            self.assertEqual(m.main(FausseIA()), 2)
+        finally:
+            sys.argv = ancien
+        self.assertEqual(recu, [["demander", "--flux", "--", "--version de python ?"]])
+
+
 if __name__ == "__main__":
     unittest.main()
