@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # nc-limite-charge : protège la batterie en limitant sa charge (vers 80 %), pour un PC souvent branché.
 # Installé par install.sh dans /usr/local/bin (appartient à root), avec une règle sudo qui permet à l'utilisateur de le
 # lancer sans mot de passe (interrupteur « Protéger la batterie » de l'île). Il ne fait que ça.
@@ -9,6 +9,7 @@
 # noctalia-config) suit le même réglage, sinon TLP remettrait l'ancien au démarrage.
 set -u
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH LC_ALL=C   # jamais le PATH ni la langue de l'appelant (appel en root sans secure_path)
 # Langue des messages : NC_LANGUE, sinon la langue du système (français si elle commence par « fr »). Lancé en root :
 # ne lit aucun fichier de l'utilisateur (ni nc-langue ni ses réglages), seulement l'environnement et /etc/locale.conf.
 case "${NC_LANGUE:-}" in

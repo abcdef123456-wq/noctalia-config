@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # nc-energie-root : l'assistant root des profils d'énergie poussés (nc-energie). Il ne fait QUE les réglages de la liste
 # ci-dessous, avec des valeurs de la liste. Installé par install.sh dans /usr/local/bin (root:root 0755), avec une règle
 # sudo à commandes exactes (une ligne par sous-commande et valeur : « nc-energie-root sudoers UTILISATEUR » l'écrit).
@@ -26,6 +26,7 @@
 # toute façon) : lancé en root, cet assistant ne regarde que le vrai /sys et le PATH système.
 set -u
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH LC_ALL=C   # jamais le PATH ni la langue de l'appelant (appel en root sans secure_path)
 S=/sys
 ESSAI=0
 if [ "$(id -u)" != 0 ] && [ -n "${NC_ENERGIE_RACINE:-}" ]; then

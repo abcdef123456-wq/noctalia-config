@@ -290,3 +290,21 @@ class Sudoers(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShebangRoot(unittest.TestCase):
+    """Les scripts de system/ tournent en root par sudo : un « #!/usr/bin/env bash » prendrait bash dans le PATH de
+    l'appelant (sudo sans secure_path) AVANT que le script fixe le sien. Shebang absolu, PATH et langue fixés."""
+    def test_shebang_absolu_et_path_fixe(self):
+        racine = Path(__file__).resolve().parents[1] / "system"
+        scripts = [f for f in racine.rglob("*") if f.is_file() and f.read_bytes()[:2] == b"#!"]
+        self.assertTrue(scripts)
+        for f in scripts:
+            with self.subTest(f=f.name):
+                premiere = f.read_text(errors="replace").splitlines()[0]
+                self.assertRegex(premiere, r"^#!/(usr/)?bin/(ba)?sh\b")
+                self.assertNotIn("env", premiere)
+        for nom in ("nc-energie-root", "nc-limite-charge"):
+            t = (racine / nom).read_text()
+            self.assertIn("PATH=/usr/sbin:/usr/bin:/sbin:/bin", t)
+            self.assertIn("LC_ALL=C", t)
