@@ -48,8 +48,9 @@ PanelWindow {
     property string agentDefaut: ""
     property bool debutant: false                   // nc-code --agents-json : aucun projet jamais ouvert
     property string filtre: ""
-    property int sel: 0
-    property string mode: ""                        // "" = chercher un projet ; "nouveau" : taper le nom ; "cloner" : coller l'adresse
+    property int sel: 0                             // -1 = la ligne « + Nouveau projet » (Haut depuis le premier projet)
+    property string mode: ""                        // "" = chercher un projet ; "choix" : Nouveau (projet vide ou GitHub) ; "nouveau" : taper le nom ; "cloner" : coller l'adresse
+    property int selChoix: 0                        // la ligne du petit choix de « Nouveau »
     property bool choixAgent: false                 // Tab : la liste des agents à droite, à la place de l'aperçu
     property int selAgent: 0
     property var apercu: null                       // nc-code --apercu-json du dernier projet lu
@@ -182,8 +183,10 @@ PanelWindow {
     // ── Les actions ──
     function quitter() { if (!fondu.fermer()) code.fermer() }
     // Ctrl + N (nouveau projet) et Ctrl + L (cloner depuis GitHub) : le champ sert à taper le nom ou l'adresse
-    function demarrerMode(m) { mode = m; choixAgent = false; champ.text = ""; filtre = "" }
+    function demarrerMode(m) { mode = m; choixAgent = false; selChoix = 0; champ.text = ""; filtre = "" }
     function finirMode() { mode = ""; champ.text = "" }
+    // Un choix du petit menu « Nouveau » (clavier ou clic) : 0 = projet vide (taper le nom), 1 = depuis GitHub
+    function choisirNouveau(i) { demarrerMode(i === 1 ? "cloner" : "nouveau"); champ.forceActiveFocus() }
     function lancerSaisie() {
         var t = champ.text.trim()
         if (t.indexOf("-") === 0) return                                   // jamais une option pour nc-code
@@ -219,18 +222,26 @@ PanelWindow {
     function touche(e) {
         var ctrl = (e.modifiers & Qt.ControlModifier) !== 0, maj = (e.modifiers & Qt.ShiftModifier) !== 0, alt = (e.modifiers & Qt.AltModifier) !== 0
         var n = choixAgent ? choixAgents.length : visibles.length
-        function bouger(d) { if (choixAgent) selAgent = Math.max(0, Math.min(n - 1, selAgent + d)); else sel = Math.max(0, Math.min(n - 1, sel + d)) }
+        // Les projets : de -1 (la ligne Nouveau) à la fin ; une page ne remonte pas jusqu'à Nouveau
+        function bouger(d, page) {
+            if (mode === "choix") selChoix = Math.max(0, Math.min(1, selChoix + d))
+            else if (mode !== "") return
+            else if (choixAgent) selAgent = Math.max(0, Math.min(n - 1, selAgent + d))
+            else sel = Math.max(page && sel > 0 ? 0 : -1, Math.min(n - 1, sel + d))
+        }
         if (e.key === Qt.Key_Escape) { if (mode !== "") finirMode(); else if (choixAgent) choixAgent = false; else quitter(); return true }
-        if (ctrl && e.key === Qt.Key_N) { demarrerMode("nouveau"); return true }
+        if (ctrl && e.key === Qt.Key_N) { demarrerMode("choix"); return true }
         if (ctrl && e.key === Qt.Key_L) { demarrerMode("cloner"); return true }
+        if (mode === "choix" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) { choisirNouveau(selChoix); return true }
         if (mode !== "" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) { lancerSaisie(); return true }
         if (e.key === Qt.Key_Down) { bouger(1); return true }
         if (e.key === Qt.Key_Up) { bouger(-1); return true }
-        if (e.key === Qt.Key_PageDown) { bouger(5); return true }
-        if (e.key === Qt.Key_PageUp) { bouger(-5); return true }
+        if (e.key === Qt.Key_PageDown) { bouger(5, true); return true }
+        if (e.key === Qt.Key_PageUp) { bouger(-5, true); return true }
         if (e.key === Qt.Key_Tab || e.key === Qt.Key_Backtab) { if (projet && mode === "") { choixAgent = !choixAgent; selAgent = 0 } return true }
         if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-            if (choixAgent) { var a = choixAgents[selAgent]; ouvrir(a && a.prog ? ["--agent", a.prog] : ["--sans-agent"]) }
+            if (sel < 0 && !choixAgent) demarrerMode("choix")                   // la ligne « + Nouveau projet » est choisie
+            else if (choixAgent) { var a = choixAgents[selAgent]; ouvrir(a && a.prog ? ["--agent", a.prog] : ["--sans-agent"]) }
             else if (alt) ouvrir(["--nvim"])
             else if (ctrl) ouvrir([])
             else entrer()
@@ -314,7 +325,8 @@ PanelWindow {
                 Texte {
                     visible: champ.text === ""
                     anchors.verticalCenter: parent.verticalCenter
-                    text: code.mode === "nouveau" ? Reglages.t("Nom du nouveau projet…", "New project name…")
+                    text: code.mode === "choix" ? Reglages.t("Nouveau : choisis avec les flèches…", "New: pick with the arrows…")
+                      : code.mode === "nouveau" ? Reglages.t("Nom du nouveau projet…", "New project name…")
                       : code.mode === "cloner" ? Reglages.t("Adresse GitHub (ou propriétaire/dépôt), vide = mes dépôts…", "GitHub address (or owner/repo), empty = my repos…")
                       : Reglages.t("Rechercher un projet…", "Search a project…")
                 secondaire: true; font.pixelSize: 18
@@ -338,11 +350,20 @@ PanelWindow {
             Rectangle {
                 id: nouveauLigne
                 objectName: "nc-code-nouveau"
+                z: 2                                                              // au-dessus de la liste : rien ne lui passe devant
                 x: 8; y: 8; width: Math.round(parent.width * 0.46); height: 34; radius: 12
-                color: zoneNouveau.containsMouse || code.mode === "nouveau" ? Qt.alpha(Couleurs.accent, 0.22) : Qt.alpha(Couleurs.carte, 0.45)
+                // Choisie comme une ligne de la liste : Haut depuis le premier projet (sel = -1), le survol, ou son petit choix ouvert
+                readonly property bool choisie: code.sel < 0 || code.mode === "choix" || code.mode === "nouveau" || code.mode === "cloner"
+                color: zoneNouveau.containsMouse || choisie ? Qt.alpha(Couleurs.accent, 0.22) : Qt.alpha(Couleurs.carte, 0.45)
                 Texte { x: 14; anchors.verticalCenter: parent.verticalCenter; text: "+  " + Reglages.t("Nouveau projet", "New project"); font.pixelSize: 13 }
                 Texte { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: "Ctrl N"; secondaire: true; font.pixelSize: 10 }
-                MouseArea { id: zoneNouveau; anchors.fill: parent; hoverEnabled: true; onClicked: { code.demarrerMode("nouveau"); champ.forceActiveFocus() } }
+                MouseArea {
+                    id: zoneNouveau
+                    objectName: "nc-code-nouveau-zone"
+                    anchors.fill: parent; hoverEnabled: true
+                    onEntered: if (code.mode === "") code.sel = -1
+                    onClicked: { code.demarrerMode("choix"); champ.forceActiveFocus() }
+                }
             }
             ListView {
                 id: liste
@@ -401,11 +422,28 @@ PanelWindow {
                 projet: code.projet
                 apercu: code.apercuChoisi
             }
+            // Nouveau (clic, Entrée sur la ligne, Ctrl + N) : « Projet vide » ou « Depuis GitHub »
+            CodeChoixNouveau {
+                objectName: "nc-code-choix"
+                x: separation.x + 17; y: 14; width: parent.width - x - 22
+                visible: code.mode === "choix"
+                selection: code.selChoix
+                onSurvol: i => code.selChoix = i
+                onChoisir: i => code.choisirNouveau(i)
+            }
+            // Ligne « + Nouveau projet » choisie (Haut depuis le premier projet) : ce qu'Entrée va faire
+            Texte {
+                objectName: "nc-code-nouveau-aide"
+                x: separation.x + 17; y: 14; width: parent.width - x - 22
+                visible: code.mode === "" && !code.choixAgent && code.sel < 0
+                secondaire: true; wrapMode: Text.Wrap
+                text: Reglages.t("Entrée : un nouveau projet (vide, ou depuis GitHub). Bas revient à la liste.", "Enter: a new project (empty, or from GitHub). Down goes back to the list.")
+            }
             // Ctrl + N / Ctrl + L : ce que fait la saisie
             Column {
                 objectName: "nc-code-saisie"
                 x: separation.x + 17; y: 14; width: parent.width - x - 22
-                visible: code.mode !== ""
+                visible: code.mode === "nouveau" || code.mode === "cloner"
                 spacing: 6
                 Texte { width: parent.width; font.pixelSize: 17; font.weight: Font.Bold; height: 30
                         text: code.mode === "nouveau" ? Reglages.t("Nouveau projet", "New project") : Reglages.t("Cloner depuis GitHub", "Clone from GitHub") }

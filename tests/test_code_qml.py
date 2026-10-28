@@ -68,7 +68,7 @@ class EspaceDeCode(unittest.TestCase):
     def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "CodeChoixNouveau.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -90,7 +90,7 @@ class EspaceDeCode(unittest.TestCase):
                                             % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
             (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "Texte", "Ico")))
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
@@ -167,7 +167,9 @@ ShellRoot {
   if (etape === 3) { verifier(fen.visibles.length === 3 && fen.sel === 0, "recherche vidée")
                      touche(Qt.Key_Down); touche(Qt.Key_Down); touche(Qt.Key_Up)
                      verifier(fen.sel === 1, "flèches : " + fen.sel)
-                     touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.sel === 0, "pas sous zéro")
+                     touche(Qt.Key_Up); touche(Qt.Key_Up); verifier(fen.sel === -1, "Haut depuis le premier projet : la ligne Nouveau")
+                     touche(Qt.Key_Up); verifier(fen.sel === -1, "pas au-dessus de Nouveau")
+                     touche(Qt.Key_Down); verifier(fen.sel === 0, "Bas revient au premier projet")
                      etape++; return }
   if (etape === 4) { if (!fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
                      var a = trouver(fen.contentItem, "nc-code-apercu")
@@ -235,14 +237,61 @@ ShellRoot {
     def test_nouveau_projet_ctrl_n(self):
         appels, ps = self.executer('''
   if (etape === 1) { verifier(trouver(fen.contentItem, "nc-code-nouveau") !== null, "première ligne : nouveau projet")
-                     touche(Qt.Key_N, Qt.ControlModifier); verifier(fen.mode === "nouveau" && trouver(fen.contentItem, "nc-code-saisie").visible, "mode nouveau")
+                     touche(Qt.Key_N, Qt.ControlModifier); verifier(fen.mode === "choix" && trouver(fen.contentItem, "nc-code-choix").visible, "Ctrl N : le petit choix")
+                     touche(Qt.Key_Return); verifier(fen.mode === "nouveau" && trouver(fen.contentItem, "nc-code-saisie").visible, "« Projet vide » : mode nouveau")
                      taper("-piege"); touche(Qt.Key_Return); verifier(!racine.fermee, "un nom qui commence par - est refusé ici")
                      touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
-                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
                      taper("essai"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
                                    attendus=lambda a: ["--nouveau", "essai"] in a)
         self.assertIn(["--nouveau", "essai"], appels)
         self.assertNotIn(["--nouveau", "-piege"], appels)
+
+    def test_ligne_nouveau_au_clavier_haut_entree_choix_a_deux_lignes(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { verifier(fen.sel === 0, "départ : le premier projet")
+                     var ligne = trouver(fen.contentItem, "nc-code-nouveau")
+                     verifier(!ligne.choisie, "Nouveau n'est pas choisie au départ")
+                     touche(Qt.Key_Up); verifier(fen.sel === -1 && fen.projet === null, "Haut : la ligne Nouveau")
+                     verifier(ligne.choisie, "mise en évidence comme une ligne choisie")
+                     verifier(!trouver(fen.contentItem, "nc-code-apercu").visible && trouver(fen.contentItem, "nc-code-nouveau-aide").visible, "à droite : ce qu'Entrée va faire")
+                     touche(Qt.Key_PageUp); verifier(fen.sel === -1, "page haut ne bouge pas")
+                     touche(Qt.Key_Down); verifier(fen.sel === 0, "Bas revient au premier projet")
+                     touche(Qt.Key_Up); touche(Qt.Key_Return)
+                     verifier(!racine.fermee && fen.mode === "choix", "Entrée sur Nouveau : le choix à deux lignes")
+                     var vide = trouver(fen.contentItem, "nc-code-choix-vide"), gh = trouver(fen.contentItem, "nc-code-choix-github")
+                     verifier(vide.visible && gh.visible && fen.selChoix === 0 && vide.actif && !gh.actif, "« Projet vide » d'abord")
+                     touche(Qt.Key_Down); verifier(fen.selChoix === 1 && gh.actif, "Bas : Depuis GitHub")
+                     touche(Qt.Key_Down); verifier(fen.selChoix === 1, "pas plus bas")
+                     touche(Qt.Key_Up); touche(Qt.Key_Escape); verifier(fen.mode === "" && fen.sel === -1 && !racine.fermee, "Échap ferme le choix, pas le panneau")
+                     touche(Qt.Key_Return); touche(Qt.Key_Down); touche(Qt.Key_Return); verifier(fen.mode === "cloner", "Depuis GitHub")
+                     touche(Qt.Key_Escape); touche(Qt.Key_Return); touche(Qt.Key_Return); taper("demo"); touche(Qt.Key_Return)
+                     verifier(racine.fermee, "fermée"); Qt.quit() }''', attendus=lambda a: ["--nouveau", "demo"] in a)
+        self.assertIn(["--nouveau", "demo"], appels)
+        self.assertFalse([a for a in appels if a and a[0] == ps[0]["chemin"]], "Entrée sur Nouveau n'ouvre aucun projet")
+
+    def test_clic_sur_nouveau_et_sur_les_lignes_du_choix(self):
+        appels, ps = self.executer('''
+  function cliquer(item) { clavier.mouseClick(item, item.width / 2, item.height / 2) }
+  if (etape === 1) { var zone = trouver(fen.contentItem, "nc-code-nouveau-zone")
+                     verifier(zone !== null && zone.visible, "zone de clic de la ligne Nouveau")
+                     // la zone est bien celle qui reçoit un clic en son centre (ni la liste, ni le surligneur, ni le champ devant elle)
+                     var p = zone.mapToItem(fen.contentItem, zone.width / 2, zone.height / 2)
+                     var devant = fen.contentItem.childAt(p.x, p.y)
+                     verifier(devant !== null, "un élément à cet endroit")
+                     cliquer(zone); verifier(fen.mode === "choix", "clic : le choix à deux lignes (mode " + fen.mode + ")")
+                     verifier(!racine.fermee, "un clic sur Nouveau ne ferme pas")
+                     cliquer(trouver(fen.contentItem, "nc-code-choix-github")); verifier(fen.mode === "cloner", "clic sur Depuis GitHub")
+                     touche(Qt.Key_Escape); fen.sel = 2
+                     cliquer(zone); verifier(fen.mode === "choix", "clic aussi quand un autre projet était choisi")
+                     cliquer(trouver(fen.contentItem, "nc-code-choix-vide")); verifier(fen.mode === "nouveau", "clic sur Projet vide")
+                     touche(Qt.Key_Escape); etape++; return }
+  if (etape === 2) { // un clic sur un projet de la liste l'ouvre toujours
+                     var l = trouver(fen.contentItem, "nc-code-liste")
+                     var it = l.itemAtIndex(1); verifier(it !== null, "deuxième ligne")
+                     clavier.mouseClick(it, it.width / 2, it.height / 2)
+                     verifier(racine.fermee, "clic sur un projet : ouvert"); Qt.quit() }''', attendus=lambda a: any(x and x[0].endswith("/neovim-conf") for x in a))
+        self.assertIn([ps[1]["chemin"]], appels, "le clic sur la deuxième ligne ouvre ce projet")
 
     def test_cloner_ctrl_l(self):
         appels, ps = self.executer('''
@@ -255,7 +304,7 @@ ShellRoot {
         shell = (QML / "shell.qml").read_text()
         self.assertIn("function code(): void", shell, "qs -c nc-ile ipc call ile code")
         self.assertRegex(shell, r"LazyLoader \{\s*id: chargeurCode\s*active: racine\.codeOuvert", "le panneau n'existe que lorsqu'il est ouvert")
-        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction"):
+        for nom in ("Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "CodeChoixNouveau"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom + " : jamais de component inline")
         code = (QML / "Code.qml").read_text()
@@ -302,7 +351,8 @@ ShellRoot {
 
     def test_aide_de_premiere_ouverture(self):
         self.executer('''
-  if (etape === 1) { var a = trouver(fen.contentItem, "nc-code-aide"); verifier(a !== null && a.visible === true, "aide visible pour un débutant")
+  if (etape === 1) { if (!fen.debutant) return                                  // agents-json peut répondre après la liste
+                     var a = trouver(fen.contentItem, "nc-code-aide"); verifier(a !== null && a.visible === true, "aide visible pour un débutant")
                      taper("x"); etape++; return }
   if (etape === 2) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible || fen.mode === "", "aide discrète"); Qt.quit() }''',
                       agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
@@ -355,7 +405,7 @@ ShellRoot {
                      verifier(nom.truncated, "le long nom est coupé (elide)")
                      verifier(nom.x + nom.width + 12 <= date.x, "la date garde sa place : " + (nom.x + nom.width) + " vs " + date.x)
                      etape++; return }
-  if (etape === 3) { if (!fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
+  if (etape === 3) { if (!fen.debutant || !fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
                      var a = trouver(fen.contentItem, "nc-code-apercu"), r = trouver(a, "nc-code-readme")
                      verifier(r.visible && r.y + r.height <= a.height - 8, "le README finit avant le bas de l'aperçu avec une marge : " + (r.y + r.height) + " / " + a.height)
                      var t = r.children[0]
