@@ -456,6 +456,21 @@ def code_trouve(secret, code, etat):
 
 
 def verifier_code_distant(code):
+    """Sous verrou (flock) : deux vérifications en même temps (la confirmation à distance de JARVIS et /code de Telegram) ne lisent
+    pas le même « dernier code servi » : un code ne sert qu'une fois. Voir _verifier_code_distant."""
+    import fcntl
+    chemin = fichier_totp_etat().with_name("noeud-totp.lock")
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        verrou = open(chemin, "a")
+    except OSError:
+        return False, "illisible"
+    with verrou:
+        fcntl.flock(verrou, fcntl.LOCK_EX)
+        return _verifier_code_distant(code)
+
+
+def _verifier_code_distant(code):
     """(vrai, "") si le code autorise ; sinon (faux, raison). Un code faux ou absent est compté et annoncé sur ce PC :
     5 en une heure, ou 10 depuis le dernier « totp verifier », bloquent la distance. Un code déjà servi ne compte pas
     (raison « déjà servi » : le serveur demande le code suivant)."""
@@ -486,9 +501,10 @@ def verifier_code_distant(code):
     else:
         prevenir(T("Code faux reçu de JARVIS", "Wrong code received from JARVIS"),
                  T(f"Une confirmation à distance est arrivée avec un code {raison} ({etat['total']} depuis la dernière "
-                   "vérification). Si ce n'est pas toi, coupe « Laisser JARVIS piloter ce PC ».",
+                   "vérification). Si ce n'est pas toi, coupe « Laisser JARVIS piloter ce PC » et « Agents de code depuis "
+                   "Telegram » (TELEGRAM_AGENTS).",
                    f"A remote confirmation arrived with a {raison} code ({etat['total']} since the last check). If it "
-                   "was not you, turn off “Let JARVIS control this PC”."))
+                   "was not you, turn off “Let JARVIS control this PC” and “Coding agents from Telegram” (TELEGRAM_AGENTS)."))
     ecrire_json_prive(fichier_totp_etat(), etat)
     return False, raison
 

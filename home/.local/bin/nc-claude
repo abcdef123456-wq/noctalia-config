@@ -17,6 +17,8 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
   nc-claude ia IA EVENEMENT   appelé par leurs hooks ou leur extension ; nc-claude agy EVENEMENT : par Antigravity
   nc-claude detecter | actualiser   IA présentes pas encore branchées / remettre celles branchées au format du jour
   nc-claude ecrire SESSION TEXTE   écrit à l'agent de cette session (tapé dans son terminal kitty, puis Entrée)
+  nc-claude ecrire --distant SESSION TEXTE   pour JARVIS (Telegram) : refuse (sortie 3 ou 4, rien n'est envoyé) si l'agent n'est plus
+                        au premier plan de son terminal ou si une autorisation attend
   nc-claude aller PID [SHELL]      va sur ce terminal (et, dans kitty, sur l'onglet de ce shell)
 Notifications de Claude (terminé, t'attend) : envoyées par nc-claude à la place des siennes ; un clic sur « t'attend »
 (Voir) ouvre l'île sur sa question en entier, sur « terminé » ramène sur son terminal ; elles s'en vont seules quand
@@ -1482,22 +1484,73 @@ def montrer():
         print(T("  demande : ", "  request: ") + f"{x.get('titre')} {x.get('detail', '')}")
 
 
-def ecrire(sid, texte):
-    """Écrit un message à l'agent d'une session depuis l'île : tapé dans son terminal (kitty), puis Entrée."""
+# Ce que kitty montre au premier plan du terminal quand l'agent y tourne encore (noms de processus réels : un binaire, ou un
+# interpréteur suivi du script). Comparaison EXACTE d'un nom ou d'un composant du chemin du script, jamais une sous-chaîne.
+PROCESSUS_AGENT = {"claude": ("claude", "claude-code"), "codex": ("codex",), "gemini": ("gemini", "gemini-cli"),
+                   "opencode": ("opencode",), "antigravity": ("agy", "antigravity"), "cursor": ("cursor-agent",),
+                   "copilot": ("copilot",), "qwen": ("qwen", "qwen-code"), "kiro": ("kiro", "kiro-cli"), "amp": ("amp",)}
+INTERPRETES = ("node", "nodejs", "bun", "deno", "python", "python3")
+SORTIE_AGENT_ABSENT = 3                    # nc-claude ecrire --distant : l'agent ne tourne plus dans ce terminal
+SORTIE_AUTORISATION = 4                    # … ou une autorisation attend (n'importe quel texte + Entrée la validerait)
+
+
+def cmdline_est_agent(cmdline, agent):
+    noms = PROCESSUS_AGENT.get(agent)
+    if not noms or not isinstance(cmdline, list) or not cmdline or not all(isinstance(x, str) for x in cmdline):
+        return False
+    exe = os.path.basename(cmdline[0])
+    if exe in noms:
+        return True
+    if exe in INTERPRETES and len(cmdline) > 1:
+        script = [c for c in cmdline[1].split("/") if c]
+        if script:
+            script[-1] = re.sub(r"\.(?:c|m)?js$|\.py$", "", script[-1])
+        return any(c in noms for c in script)
+    return False
+
+
+def agent_au_premier_plan(sock, shell, agent):
+    """Vrai si le premier plan du terminal de ce shell (kitty @ ls, argv exact) est bien cet agent."""
+    try:
+        r = subprocess.run(["kitty", "@", "--to", "unix:" + sock, "ls", "--match", f"pid:{shell}"], capture_output=True, text=True, timeout=5)
+        os_fenetres = json.loads(r.stdout) if r.returncode == 0 else []
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+    for ow in os_fenetres if isinstance(os_fenetres, list) else ():
+        for tab in ow.get("tabs") or () if isinstance(ow, dict) else ():
+            for w in tab.get("windows") or () if isinstance(tab, dict) else ():
+                if isinstance(w, dict) and w.get("pid") == shell and any(
+                        cmdline_est_agent(p.get("cmdline"), agent) for p in w.get("foreground_processes") or () if isinstance(p, dict)):
+                    return True
+    return False
+
+
+def ecrire(sid, texte, distant=False):
+    """Écrit un message à l'agent d'une session depuis l'île : tapé dans son terminal (kitty), puis Entrée. distant (JARVIS,
+    Telegram) : refuse, sans rien envoyer, si une autorisation attend (état demande ou terminal : un texte + Entrée la validerait)
+    ou si l'agent n'est plus au premier plan de son terminal (la session est gardée 6 h : le texte partirait dans un shell, ssh, vim…)."""
     texte = re.sub(r"\s+", " ", texte).strip()
     try:
         s = json.load(open(ETAT, encoding="utf-8"))["sessions"][sid]
     except (OSError, ValueError, KeyError):
         sys.exit(T("nc-claude : session inconnue.", "nc-agents: unknown session."))
+    if distant and s.get("etat") in ("demande", "terminal"):
+        print(T("nc-claude : une autorisation attend, réponds sur le PC.", "nc-agents: a permission is waiting, answer on the PC."), file=sys.stderr)
+        sys.exit(SORTIE_AUTORISATION)
     sock = socket_kitty(s.get("terminal"))
     if texte and s.get("agent") == "opencode" and not (sock and s.get("shell")) and shutil.which("opencode"):
-        # OpenCode 2 tourne en service de fond : le message part dans la session par sa propre commande
-        subprocess.Popen(["opencode", "run", "--session", sid.split("-", 1)[1], texte], cwd=os.path.expanduser(s.get("cwd") or "~"),
+        # OpenCode 2 tourne en service de fond : le message part dans la session par sa propre commande. « -- » avant le texte :
+        # un texte qui commence par « - » ne devient pas une option
+        subprocess.Popen(["opencode", "run", "--session", sid.split("-", 1)[1], "--", texte], cwd=os.path.expanduser(s.get("cwd") or "~"),
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     elif not texte or not sock or not s.get("shell"):
         sys.exit(T("nc-claude : on ne peut écrire qu'à un agent lancé dans kitty.",
                    "nc-agents: you can only write to an agent started in kitty."))
     else:
+        if distant and not agent_au_premier_plan(sock, s["shell"], s.get("agent") or "claude"):
+            print(T("nc-claude : l'agent ne tourne plus dans ce terminal.", "nc-agents: the agent is no longer running in this terminal."),
+                  file=sys.stderr)
+            sys.exit(SORTIE_AGENT_ABSENT)
         envoyer_kitty(sock, s["shell"], texte)
     with Etat() as d:
         x = d["sessions"].get(sid)
@@ -1632,11 +1685,17 @@ def main():
     elif a[0] == "statusline":
         ligne()
     elif a[0] == "etat" and a[1:2] == ["--json"] and set(a[2:]) <= {"--texte", "--text"}:
+        if not os.environ.get("XDG_RUNTIME_DIR"):
+            sys.exit(2)
         montrer_json(len(a) > 2)
     elif a[0] == "etat":
         montrer()
     elif a[0] == "diag":
         diag()
+    elif a[0] == "ecrire" and a[1:2] == ["--distant"] and len(a) >= 4:
+        if not os.environ.get("XDG_RUNTIME_DIR"):          # pas de repli sur /tmp : l'état d'un autre compte pourrait s'y trouver
+            sys.exit(T("nc-claude : XDG_RUNTIME_DIR manque, rien n'est envoyé.", "nc-agents: XDG_RUNTIME_DIR is missing, nothing sent."))
+        ecrire(a[2], " ".join(a[3:]), distant=True)
     elif a[0] == "ecrire" and len(a) >= 3:
         ecrire(a[1], " ".join(a[2:]))
     elif a[0] == "notification" and len(a) >= 4:

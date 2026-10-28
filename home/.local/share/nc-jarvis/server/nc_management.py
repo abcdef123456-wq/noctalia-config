@@ -397,7 +397,7 @@ async def dispatch(op, p, confirmed=False, session_key=None):
     if op=='notify':
         # Un message Telegram aux chats connus du bot (alertes de la machine : nc-alertes)
         import nc_telegram
-        return await nc_telegram.diffuser(p.get('text'))
+        return await nc_telegram.diffuser(p.get('text'), prive=p.get('prive') is True)
     if op=='capabilities': return schema()
     paths={'models':'/models','session':'/session'+cle,'memory':'/memory','conversations':'/conversations?limit=25','usage':'/usage/stats'}
     if op in paths: return await runner('GET',paths[op])

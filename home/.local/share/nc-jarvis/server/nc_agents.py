@@ -43,7 +43,11 @@ JOURNAL_LIGNES = 200
 NOMS = {"claude": "Claude Code", "antigravity": "Antigravity", "opencode": "OpenCode", "codex": "Codex", "gemini": "Gemini CLI",
         "cursor": "Cursor", "copilot": "Copilot", "qwen": "Qwen Code", "kiro": "Kiro", "amp": "Amp", "assistant": "JARVIS"}
 # États internes de nc-claude → ce qui s'affiche
-ETATS = {"attente": "t'attend", "demande": "t'attend", "terminal": "t'attend", "travail": "travaille", "fini": "fini", "pret": "prêt"}
+ETATS = {"attente": "t'attend", "demande": "demande ton accord", "terminal": "demande ton accord", "travail": "travaille",
+         "fini": "fini", "pret": "prêt"}
+# Pendant une demande d'autorisation, N'IMPORTE QUEL texte suivi d'Entrée valide le choix surligné (souvent « Oui ») : jamais d'écriture
+AUTORISATION_EN_ATTENTE = ("demande", "terminal")
+AUTORISATION_REFUSEE = "une autorisation attend : réponds sur le PC (un texte suivi d'Entrée la validerait)"
 IDENTIFIANT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}")
 NUMERO = re.compile(r"[0-9]{1,3}")
 CODE = re.compile(r"[0-9]{6}")
@@ -80,6 +84,9 @@ def indisponible():
         return "Cette fonction pilote les terminaux de CE PC : elle est absente en mode serveur (DEPLOY_MODE=server)."
     if reglage("IA_MODE", "auto") == "non":
         return "L'IA du bureau est coupée (IA_MODE=non) : rien n'est suivi."
+    if not any(x.strip().isdigit() for x in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",")):
+        return ("TELEGRAM_ALLOWED_USER_IDS est vide : ces commandes exigent une liste d'utilisateurs autorisés (ALLOW_ALL_USERS ne "
+                "suffit pas).")
     if reglage("TELEGRAM_AGENTS") != "oui":
         return ("Désactivé. Sur le PC : nc-reglages → Agents IA → « Agents de code depuis Telegram » (ou l'île, page Agents IA, "
                 "bouton ⚙). Pour répondre, il faut aussi le code d'authentification : nc-noeud totp creer.")
@@ -114,13 +121,19 @@ def propre(texte, n):
 MASQUE = "[masqué]"
 SECRETS = (
     (re.compile(r"-----BEGIN [A-Z0-9 ]+-----.*?(?:-----END [A-Z0-9 ]+-----|\Z)", re.S), "[clé masquée]"),
-    (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), MASQUE),
+    (re.compile(r"(?i)\bsk-[A-Za-z0-9_\-]{8,}"), MASQUE),
+    (re.compile(r"(?i)\b[sr]k_(?:live|test)_[A-Za-z0-9]{8,}"), MASQUE),
+    (re.compile(r"\bglpat-[A-Za-z0-9_\-]{8,}"), MASQUE),
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}"), MASQUE),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{8,}"), MASQUE),
     (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{8,}"), MASQUE),
     (re.compile(r"\bxox[a-z]-[A-Za-z0-9-]{6,}"), MASQUE),
     (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{12,}"), MASQUE),
-    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"), "Bearer " + MASQUE),
-    (re.compile(r"(?i)\b([a-z0-9_.-]*(?:password|passwd|pwd|token|secret|api[_-]?key))\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|\S+)"),
+    (re.compile(r"(?i)\b(authorization)[\"']?\s*[=:]\s*[\"']?(?:(?:basic|bearer|token)\s+)?[^\s\"',;]+"), r"\1=" + MASQUE),
+    (re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), MASQUE),
+    (re.compile(r"(?i)\b(password|passwd|passphrase|mot de passe|mdp)\s+(?:is|est)\s+\S+"), r"\1 " + MASQUE),
+    (re.compile(r"(?i)\b(mot de passe|mdp)\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|\S+)"), r"\1=" + MASQUE),
+    (re.compile(r"(?i)\b([a-z0-9_.-]*(?:password|passwd|passphrase|pwd|token|secret|api[_-]?key))[\"']?\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|\S+)"),
      r"\1=" + MASQUE),
     (re.compile(r"/(home|Users)/[^/\s\"']+"), r"/\1/…"),
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"), "…@…"),
@@ -141,14 +154,14 @@ def extrait(message):
     """Le dernier message d'un agent, prêt pour Telegram : filtré, nettoyé, 600 signes au plus."""
     if not isinstance(message, str):
         return ""
-    return propre(filtrer(message[:8000]), EXTRAIT_MAX)
+    return propre(filtrer(propre(message[:8000], 8000)), EXTRAIT_MAX)
 
 
 def nom_dossier(valeur):
     """Le NOM d'un dossier (jamais un chemin), 40 signes au plus, en texte brut."""
     if not isinstance(valeur, str):
         return "?"
-    nom = propre(filtrer(valeur.rstrip("/").rsplit("/", 1)[-1]), DOSSIER_MAX)
+    nom = propre(filtrer(propre(valeur.rstrip("/").rsplit("/", 1)[-1], 400)), DOSSIER_MAX)
     return nom or "?"
 
 
@@ -166,8 +179,10 @@ def verifier_texte(texte):
             return "Caractère de contrôle ou séquence d'échappement refusé."
         if _invisible(c) or (c.isspace() and c != " "):
             return "Caractère invisible ou d'inversion d'écriture refusé."
-    if texte.lstrip().startswith("!"):
-        return "Un texte qui commence par ! est refusé (certains agents le lancent comme une commande du shell)."
+    debut = texte.lstrip()[:1]
+    if debut in ("!", "/", "#", "&", "-"):
+        return ("Un texte qui commence par %s est refusé (selon l'agent : commande du shell, commande de l'agent comme /share ou "
+                "/logout, note, tâche de fond ou option)." % debut)
     return None
 
 
@@ -198,8 +213,9 @@ def valider(brut, avec_texte):
         agent = _nom_agent(x.get("agent"))
         if agent is None:
             continue
-        s = {"id": x["id"], "agent": agent, "dossier": nom_dossier(x.get("dossier")),
-             "etat": ETATS.get(x.get("etat") if isinstance(x.get("etat"), str) else "", "état inconnu"),
+        brut = x.get("etat") if isinstance(x.get("etat"), str) and x.get("etat") in ETATS else "?"
+        s = {"id": x["id"], "agent": agent, "dossier": nom_dossier(x.get("dossier")), "etat_brut": brut,
+             "etat": ETATS.get(brut, "état inconnu"),
              "ecrire": x.get("ecrire") is True}
         if avec_texte and x.get("message"):
             s["message"] = extrait(x["message"])
@@ -215,18 +231,21 @@ async def lire_sessions(avec_texte=False):
 
 
 def numeroter(cle, sessions, maintenant):
-    """Un numéro court par session : gardé tant que la liste précédente a moins de 10 minutes, sinon repartir de 1. Le numéro
-    désigne l'identifiant réel (gardé ici), jamais l'inverse. Renvoie {identifiant: numéro}."""
+    """Un numéro court par session : gardé tant qu'elle est vue dans les 10 minutes, sinon repartir de 1. Le numéro désigne
+    l'identifiant réel (gardé ici), jamais l'inverse. Un numéro libéré (session disparue) n'est PAS donné à une autre session
+    pendant ses 10 minutes : « /repondre 2 » ne peut pas viser une autre session que celle vue. Renvoie {identifiant: numéro}."""
     avant = _listes.get(cle)
-    anciens = {i: n for n, i in avant["ids"].items()} if avant and 0 <= maintenant - avant["t"] <= VALIDITE else {}
+    vus = {n: v for n, v in avant["vus"].items() if 0 <= maintenant - v[1] <= VALIDITE} if avant else {}
+    anciens = {i: n for n, (i, _) in vus.items()}
     numeros = {s["id"]: anciens[s["id"]] for s in sessions if s["id"] in anciens}
-    pris = set(numeros.values())
+    pris = set(vus) | set(numeros.values())
     for s in sessions:
         if s["id"] not in numeros:
             n = next(i for i in range(1, 1000) if i not in pris)
             numeros[s["id"]] = n
             pris.add(n)
-    _listes[cle] = {"t": maintenant, "ids": {n: i for i, n in numeros.items()},
+    vus.update({n: (i, maintenant) for i, n in numeros.items()})
+    _listes[cle] = {"t": maintenant, "ids": {n: i for i, n in numeros.items()}, "vus": vus,
                     "ecrire": {numeros[s["id"]]: s["ecrire"] for s in sessions}}
     return numeros
 
@@ -305,11 +324,11 @@ def _arguments(brut):
 
 
 async def cmd_agents(brut, chat_id, user_id, prive, maintenant):
+    if not prive:
+        return "⛔ Les agents ne se suivent que dans la discussion privée avec le bot."
     refus = indisponible()
     if refus:
         return refus
-    if not prive:
-        return "⛔ Les agents ne se suivent que dans la discussion privée avec le bot."
     avec_texte = reglage("TELEGRAM_AGENTS_TEXTE") == "oui"
     sessions = await lire_sessions(avec_texte)
     if sessions is None:
@@ -324,6 +343,8 @@ async def cmd_agents(brut, chat_id, user_id, prive, maintenant):
         lignes.append("%d. %s · %s · %s" % (numeros[s["id"]], s["agent"], s["dossier"], s["etat"]))
         if not s["ecrire"]:
             lignes.append("   ↳ " + IMPOSSIBLE)
+        elif s["etat_brut"] in AUTORISATION_EN_ATTENTE:
+            lignes.append("   ↳ " + AUTORISATION_REFUSEE)
         if s.get("message"):
             lignes.append("   « " + s["message"] + " »")
     lignes.append("Répondre : /repondre N texte (puis /code avec les 6 chiffres de ton appli). Liste valable 10 minutes.")
@@ -331,16 +352,22 @@ async def cmd_agents(brut, chat_id, user_id, prive, maintenant):
 
 
 async def cmd_repondre(brut, chat_id, user_id, prive, maintenant):
+    if not prive:
+        return "⛔ Les réponses aux agents ne se demandent que dans la discussion privée avec le bot."
     refus = indisponible()
     if refus:
         return refus
-    if not prive:
-        return "⛔ Les réponses aux agents ne se demandent que dans la discussion privée avec le bot."
     m = re.match(r"(\S+)\s+(.*)\Z", _arguments(brut), re.S)
     if not m or not NUMERO.fullmatch(m.group(1)):
         return "Usage : /repondre N texte (N : le numéro donné par /agents)."
     numero, texte = int(m.group(1)), m.group(2).strip()
     cle = (chat_id, user_id)
+    # JAMAIS de remplacement : quelqu'un qui tient ton compte Telegram pourrait glisser une demande, effacer les messages, et ton
+    # /code confirmerait la sienne. Deux demandes en même temps : tout est annulé.
+    avant = _attente.pop(cle, None)
+    if avant and avant["echeance"] >= maintenant:
+        logger.warning("Deux demandes de réponse à un agent en même temps : annulées.")
+        return "⛔ Deux demandes en même temps : tout est annulé, refais /repondre (une seule à la fois)."
     liste = _listes.get(cle)
     if not liste or not 0 <= maintenant - liste["t"] <= VALIDITE:
         return "La liste a plus de 10 minutes (ou n'existe pas) : tape /agents d'abord."
@@ -359,54 +386,66 @@ async def cmd_repondre(brut, chat_id, user_id, prive, maintenant):
     if s is None or not s["ecrire"]:
         _listes.pop(cle, None)
         return "❌ Cette session n'est plus là (ou n'accepte plus l'écriture) : tape /agents."
-    avant = _attente.get(cle)
-    remplace = ""
-    if avant and avant["echeance"] >= maintenant:
-        remplace = "La demande en attente (%s) est remplacée.\n" % avant["resume"]
-    resume = "%s · %s" % (s["agent"], s["dossier"])
+    if s["etat_brut"] in AUTORISATION_EN_ATTENTE:
+        return "❌ Agent %d : %s." % (numero, AUTORISATION_REFUSEE)
+    if cle in _attente:                          # une autre demande est arrivée pendant les vérifications ci-dessus
+        _attente.pop(cle, None)
+        return "⛔ Deux demandes en même temps : tout est annulé, refais /repondre (une seule à la fois)."
     _attente[cle] = {"id": s["id"], "agent": s["agent"], "dossier": s["dossier"], "texte": texte, "echeance": maintenant + CONFIRMATION,
-                     "resume": resume}
+                     "etat_brut": s["etat_brut"]}
     avertissement = ""
     if ressemble_a_une_autorisation(texte):
         avertissement = "\n⚠️ attention : tu autorises peut-être une commande de l'agent."
-    elif texte.lstrip().startswith("/"):
-        avertissement = "\n⚠️ Ce texte commence par / : l'agent peut le prendre pour une commande."
-    etat = "" if s["etat"] == "t'attend" else "\n(l'agent est dans l'état « %s », pas « t'attend »)" % s["etat"]
-    return ("⚠️ " + remplace + "Envoyer à %s (%s), %d signes :\n« %s »%s%s\nConfirme avec /code 123456 (les 6 chiffres de ton appli "
-            "d'authentification) dans les deux minutes." % (s["agent"], s["dossier"], len(texte), texte, etat, avertissement))
+    etat = "" if s["etat_brut"] == "attente" else "\n(l'agent est dans l'état « %s », pas « t'attend »)" % s["etat"]
+    return ("⚠️ Envoyer à %s (%s), %d signes :\n« %s »%s%s\nSi un brouillon est déjà tapé dans l'agent, ce texte s'y ajoute.\n"
+            "Confirme avec /code 123456 (les 6 chiffres de ton appli d'authentification) dans les deux minutes."
+            % (s["agent"], s["dossier"], len(texte), texte, etat, avertissement))
 
 
 async def cmd_code(brut, chat_id, user_id, prive, maintenant):
+    if not prive:
+        return "⛔ Le code ne se tape que dans la discussion privée avec le bot."
     refus = indisponible()
     if refus:
         return refus
-    if not prive:
-        return "⛔ Le code ne se tape que dans la discussion privée avec le bot."
     code = _arguments(brut)
     if not CODE.fullmatch(code):
         return "Le code fait 6 chiffres collés : /code 123456."
     cle = (chat_id, user_id)
     demande = _attente.pop(cle, None)            # avant tout await : un seul /code emporte la demande
+    # Le code est contrôlé (donc consommé, usage unique) même sans demande en attente : un code tapé pour rien ne sert plus à personne
+    bon, message = await totp_controler(code)
     if not demande or demande["echeance"] < maintenant:
         return "Rien à confirmer (ou plus de deux minutes ont passé) : refais /repondre."
-    bon, message = await totp_controler(code)
     if not bon:
         return "❌ " + message
     sessions = await lire_sessions(False)
     s = next((x for x in sessions or () if x["id"] == demande["id"]), None)
     if s is None or not s["ecrire"]:
         return "❌ Cette session n'est plus là (ou n'accepte plus l'écriture) : rien n'est envoyé."
-    # L'argv exact : l'identifiant vient de nc-claude (validé), le texte est UN argument (vérifié : une ligne, sans contrôle)
-    sortie, _ = await _executer(["nc-claude", "ecrire", s["id"], demande["texte"]], DELAI_ECRIRE, 500)
+    if s["etat_brut"] != demande["etat_brut"] or s["etat_brut"] in AUTORISATION_EN_ATTENTE:
+        return "❌ L'état de l'agent a changé (%s) ou une autorisation attend : rien n'est envoyé, réponds sur le PC ou refais /repondre." % s["etat"]
+    # L'argv exact : l'identifiant vient de nc-claude (validé), le texte est UN argument (vérifié : une ligne, sans contrôle) ;
+    # --distant : nc-claude refuse si l'agent n'est plus au premier plan de son terminal ou si une autorisation attend
+    sortie, _ = await _executer(["nc-claude", "ecrire", "--distant", s["id"], demande["texte"]], DELAI_ECRIRE, 500)
     ok = sortie == 0
     journaliser(s["agent"], s["dossier"], len(demande["texte"]), ok, maintenant)
     logger.info("Réponse à un agent (%s, %s, %d signes) : %s", s["agent"], s["dossier"], len(demande["texte"]), "ok" if ok else "échec")
-    return ("✅ Envoyé à %s (%s)." if ok else "❌ Échec de l'envoi à %s (%s) : son terminal n'accepte plus l'écriture ?") % (s["agent"], s["dossier"])
+    if ok:
+        # Une notification sur le PC à chaque envoi réussi : un usage depuis un compte volé se voit
+        await _executer(["notify-send", "-a", "JARVIS", "--", "Réponse envoyée à un agent depuis Telegram",
+                         "%s (%s) : %s" % (s["agent"], s["dossier"], propre(filtrer(demande["texte"]), 60))], 5, 200)
+        return "✅ Parti vers %s (%s) : l'envoi est fait, pas la lecture par l'agent." % (s["agent"], s["dossier"])
+    if sortie == 3:
+        return "❌ Rien n'est envoyé : l'agent ne tourne plus dans ce terminal."
+    if sortie == 4:
+        return "❌ Rien n'est envoyé : une autorisation attend, réponds sur le PC."
+    return "❌ Échec de l'envoi à %s (%s) : son terminal n'accepte plus l'écriture ?" % (s["agent"], s["dossier"])
 
 
-def handler(tb, commande):
+def handler(tb, commande, effacer=False):
     """Le handler Telegram d'une commande : liste blanche du bot, messages modifiés ignorés, heure du message (pas celle du
-    traitement), conversation privée ou non, puis la commande."""
+    traitement), conversation privée ou non, puis la commande. effacer : le message (le code) est supprimé après lecture."""
     async def h(update, context):
         if getattr(update, "edited_message", None) is not None:
             return
@@ -421,7 +460,14 @@ def handler(tb, commande):
         date = getattr(message, "date", None)
         prive = getattr(update.effective_chat, "type", None) == "private"
         brut = message.text if isinstance(getattr(message, "text", None), str) else "/x " + " ".join(context.args or [])
-        reponse = await commande(brut, update.effective_chat.id, user.id, prive, date.timestamp() if date is not None else time.time())
+        try:
+            reponse = await commande(brut, update.effective_chat.id, user.id, prive, date.timestamp() if date is not None else time.time())
+        finally:
+            if effacer:
+                try:
+                    await message.delete()           # le code ne reste pas dans la discussion (il ne vaut plus rien, mais autant)
+                except Exception as exc:
+                    logger.info("Message du code non effacé : %s", exc)
         await message.reply_text(reponse[:4000])
     return h
 
@@ -429,7 +475,7 @@ def handler(tb, commande):
 def commandes(tb):
     """[(noms, handler)] pour nc_telegram.commandes_nc."""
     return [(["agents", "claude"], handler(tb, cmd_agents)), (["repondre"], handler(tb, cmd_repondre)),
-            (["code"], handler(tb, cmd_code))]
+            (["code"], handler(tb, cmd_code, effacer=True))]
 
 
 MENU = (("agents", "Suivre tes agents de code (réglage requis)"), ("repondre", "Répondre à un agent : /repondre N texte"),

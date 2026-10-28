@@ -226,8 +226,33 @@ def etendre_rappels(reminders, tb=None):
     reminders._nc_heures = True
 
 
-async def diffuser(texte, tb=None):
-    """Un message Telegram à tous les chats que le bot connaît (ceux qui lui ont écrit) ; {sent, error?}."""
+def _envoyer_prive(token, utilisateur, texte):
+    """Un message dans la conversation PRIVÉE d'un utilisateur (son identifiant est celui de sa conversation privée avec le bot)."""
+    import urllib.parse
+    import urllib.request
+    corps = urllib.parse.urlencode({"chat_id": utilisateur, "text": texte}).encode()
+    with urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot" + token + "/sendMessage", data=corps), timeout=15) as r:
+        return 200 <= r.status < 300
+
+
+async def diffuser_prive(texte, tb):
+    """Un message aux seules conversations privées des utilisateurs autorisés (TELEGRAM_ALLOWED_USER_IDS), jamais à un groupe."""
+    ids = [x.strip() for x in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if x.strip().isdigit()]
+    if not ids:
+        return dict(sent=False, error="TELEGRAM_ALLOWED_USER_IDS vide : aucune conversation privée connue")
+    envoyes = 0
+    for uid in ids:
+        try:
+            if await asyncio.to_thread(_envoyer_prive, tb.TELEGRAM_TOKEN, uid, texte):
+                envoyes += 1
+        except Exception as exc:        # le jeton ne doit jamais se retrouver dans le journal (il est dans l'adresse)
+            logger.warning("Message privé Telegram impossible (%s)", type(exc).__name__)
+    return dict(sent=True) if envoyes else dict(sent=False, error="Envoi Telegram impossible")
+
+
+async def diffuser(texte, tb=None, prive=False):
+    """Un message Telegram à tous les chats que le bot connaît (ceux qui lui ont écrit) ; {sent, error?}. prive : seulement aux
+    conversations privées des utilisateurs autorisés (l'alerte « un agent t'attend »)."""
     if not isinstance(texte, str) or not 1 <= len(texte.strip()) <= 4000:
         return dict(sent=False, error="Texte vide ou trop long (4 000 caractères)")
     if tb is None:
@@ -237,6 +262,8 @@ async def diffuser(texte, tb=None):
             return dict(sent=False, error="Bot Telegram absent de ce gateway")
     if not getattr(tb, "TELEGRAM_TOKEN", ""):
         return dict(sent=False, error="Telegram non configuré (TELEGRAM_TOKEN)")
+    if prive:
+        return await diffuser_prive(texte.strip(), tb)
     try:
         envoye = await tb.send_broadcast_message(texte.strip())
     except Exception as exc:

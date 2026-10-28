@@ -939,38 +939,50 @@ Le code est dans la surcouche (`server/nc_agents.py`, branché par `nc_telegram.
 
 ### Les commandes
 
-Réservées à l'utilisateur autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`) et à la **conversation privée** ; un message
+Réservées à l'utilisateur autorisé du bot et à la **conversation privée** (vérifiée en premier) ; la liste
+`TELEGRAM_ALLOWED_USER_IDS` doit être non vide (`ALLOW_ALL_USERS` ne suffit pas) ; un message
 modifié ne lance rien ; un ordre reçu pendant que le PC était éteint n'est pas rejoué (comme `/nc`).
 
 - `/agents` (ou `/claude`) : une ligne par session suivie, quel que soit l'agent : un **numéro court** (1, 2, 3… gardé 10
   minutes ; il est lié à l'identifiant réel de la session côté gateway, jamais l'inverse), le **nom du dossier** (le nom seul,
-  jamais le chemin, 40 signes au plus, en texte brut), l'agent et l'état (« t'attend », « travaille », « fini », « prêt »).
+  jamais le chemin, 40 signes au plus, en texte brut), l'agent et l'état (« t'attend », « demande ton accord », « travaille », « fini », « prêt »). Une session qui
+  « demande ton accord » (autorisation d'une commande ou question dans le terminal) ne reçoit AUCUNE réponse à distance : pendant
+  cette demande, n'importe quel texte suivi d'Entrée valide le choix surligné (souvent « Oui »). Elle dit « une autorisation attend :
+  réponds sur le PC ».
   Une session dont le terminal n'est pas pris en charge dit « réponse impossible à distance (terminal non pris en charge) ».
   **Par défaut aucun contenu de conversation.** Avec `TELEGRAM_AGENTS_TEXTE=oui` : le dernier message de l'agent, si
   `nc-claude` l'a, passé par un filtre de secrets (jetons `sk-…`, `ghp_…`/`gho_…`, `xox…`, `AKIA…`, clés PEM, `password=`,
-  `token=`, `secret=`, chemins `/home/<nom>` → `/home/…`, e-mails → `…@…`, suites hexadécimales ou base64 de 32 signes ou
+  `token=`, `secret=`, `api_key`, « mot de passe : », `Authorization: Bearer/Basic`, `sk_live_…`, `glpat-…`, `AIza…`, chemins `/home/<nom>` → `/home/…`, e-mails → `…@…`, suites hexadécimales ou base64 de 32 signes ou
   plus), puis coupé à 600 signes. Le filtre est un garde-fou, pas une garantie : un secret d'une autre forme passerait.
 - `/repondre N texte` : N est un numéro de la dernière liste (valable 10 minutes) pour une session où l'écriture est possible.
   Le texte fait 2 000 signes au plus, **sur une seule ligne** : tout caractère de contrôle (retour à la ligne, tabulation,
   `ESC`, DEL, C1), toute séquence d'échappement de terminal et les caractères Unicode d'inversion d'écriture ou invisibles
-  sont refusés. Un texte qui commence par `!` est refusé (Claude Code et d'autres le lancent comme une commande du shell) ;
-  un texte qui commence par `/` est accepté mais l'invite le signale.
-  **Rien ne part tout de suite** : la demande attend (une seule par discussion et utilisateur, 120 s) et le bot répond
+  sont refusés. Un texte qui commence par `!`, `/`, `#`, `&` ou `-` est refusé : selon l'agent, c'est une commande du shell, une
+  commande de l'agent (`/share`, `/permissions`, `/logout`…), une note, une tâche de fond ou une option. Si un **brouillon** est déjà
+  tapé dans l'agent, le texte envoyé s'y ajoute (l'invite le rappelle).
+  **Rien ne part tout de suite** : la demande attend (une seule par discussion et utilisateur, 120 s ; **jamais remplacée** : une seconde
+  demande pendant la première annule les deux, pour qu'on ne puisse pas glisser une demande à la place de la tienne) et le bot répond
   « confirme avec /code 123456 » en rappelant l'agent, le dossier et le texte.
 - `/code XXXXXX` : les 6 chiffres de ton appli. Le code est vérifié par `nc-noeud` (`nc-noeud totp controler`, le code passe
   par l'entrée standard, jamais par la ligne de commande), donc avec le **même mécanisme que la confirmation à distance** :
   usage unique (un code déjà servi est refusé, y compris par la confirmation à distance de JARVIS), codes faux comptés et
   annoncés par une notification sur le PC, blocage après 5 codes faux en une heure. La demande est consommée dès qu'un code
-  est tapé, bon ou faux. Avant d'envoyer, la session est relue : si elle a disparu ou n'accepte plus l'écriture, rien ne part.
-- L'envoi est `nc-claude ecrire SESSION TEXTE` (arguments exacts, la session est l'identifiant réel validé, jamais une chaîne
-  venue de Telegram, délai borné). Le résultat rendu est « envoyé » ou « échec » : aucune sortie libre n'est relayée.
+  est tapé, bon ou faux, et le code est contrôlé (donc consommé) même sans demande en attente. Le message `/code …` est effacé
+  de la discussion après lecture. Avant d'envoyer, la session est relue : si elle a disparu, n'accepte plus l'écriture, a changé
+  d'état ou demande une autorisation, rien ne part.
+- L'envoi est `nc-claude ecrire --distant SESSION TEXTE` (arguments exacts, la session est l'identifiant réel validé, jamais une chaîne
+  venue de Telegram, délai borné). Avec `--distant`, `nc-claude` vérifie avant d'écrire (`kitty @ ls`) que l'agent est
+  bien au premier plan de son terminal (la session est gardée jusqu'à 6 h : l'onglet peut être passé à `ssh` ou `vim`) et qu'aucune
+  autorisation n'attend ; sinon il n'envoie rien. Le résultat rendu est « parti » ou « échec » : aucune sortie libre n'est
+  relayée. **« Parti » ne veut pas dire « reçu » ni « lu » par l'agent.** Chaque envoi réussi lance aussi une notification sur le
+  PC (agent, dossier, 60 premiers signes du texte).
   `nc-claude ecrire` ramène déjà tout espace à une seule ligne ; refuser les retours à la ligne évite un message qui serait
   silencieusement recollé.
 - Si le texte ressemble à une réponse d'autorisation (`1`, `2`, `3`, `y`, `yes`, `oui`, `o`, `n`, `no`, `non`, `a`, `always`,
   `toujours`, seuls), la demande de code ajoute : « attention : tu autorises peut-être une commande de l'agent ».
 
 Journal local de chaque envoi : `~/.local/state/nc-jarvis/agents-envois.log` (0600, borné à 64 Ko) : date, agent, nom du
-dossier, longueur, ok ou échec. **Jamais le texte.**
+dossier, longueur, ok (= parti, pas reçu) ou échec. **Jamais le texte.**
 
 ### L'alerte « t'attend » (facultative)
 
@@ -980,7 +992,7 @@ ou question), le hook de `nc-claude` lance `nc-alertes agent AGENT DOSSIER SESSI
 c'est l'événement du hook qui la pousse. Elle part par le canal des autres alertes (op `notify` de `/api/nc/manage`, avec la clé
 locale de `nc-assistant`, aucun nouveau port). **Le message ne contient que l'agent, le nom du dossier et « t'attend »**, jamais
 de texte de conversation, même avec `TELEGRAM_AGENTS_TEXTE=oui` : un message poussé sans que tu l'aies demandé reste le plus pauvre
-possible. Elle part à tous les chats que le bot connaît, comme les autres alertes.
+possible. Elle ne part qu'aux **conversations privées** des utilisateurs autorisés (`TELEGRAM_ALLOWED_USER_IDS`), jamais aux groupes.
 
 ### Risques
 
@@ -992,6 +1004,11 @@ possible. Elle part à tous les chats que le bot connaît, comme les autres aler
   que le téléphone qui porte Telegram, et ne l'utilise pas pour autre chose que ces confirmations.
 - **Une réponse « 1 », « y » ou « oui » peut autoriser une commande** que l'agent attend de toi. L'invite le dit, mais vérifie ce
   que l'agent demande (sur le PC) avant de répondre à distance. Le journal et l'invite ne montrent pas ce qu'il demandait.
+- **Une autorisation peut changer entre la liste et l'envoi** : le gateway relit l'état avant d'envoyer, et `nc-claude` refuse si
+  une autorisation attend, mais l'agent peut en demander une dans l'instant qui suit. Une seconde de décalage reste possible ; le
+  code ne remplace pas un coup d'œil au PC.
+- **Le terminal peut avoir changé** : `nc-claude` vérifie que l'agent est au premier plan, pas que c'est la bonne conversation ni
+  que le terminal n'a pas un brouillon déjà tapé.
 - Un message d'un agent peut contenir n'importe quoi ; ce qui est relayé est filtré mais pas relu.
 
 ### Autre solution : Remote Control (officiel)

@@ -154,7 +154,7 @@ def en_pause():
         return False
 
 
-def envoyer(texte, urgent=False):
+def envoyer(texte, urgent=False, prive=False):
     """Par le gateway ; vrai si parti. Rien sans le réglage ni la connexion. La pause Économie sur batterie ne retient
     que les envois d'arrière-plan sans urgence (mise à jour, version, message libre) : la batterie faible et les
     services en échec sont un petit message sans IA, et nc-profile-sync passe seul en Économie sous ECO_AUTO,
@@ -165,7 +165,7 @@ def envoyer(texte, urgent=False):
     m = client()
     try:
         c = m.configuration()
-        r = m.api(c, "/api/nc/manage", {"op": "notify", "params": {"text": texte[:4000]}, "confirmed": True})
+        r = m.api(c, "/api/nc/manage", {"op": "notify", "params": dict({"text": texte[:4000]}, **({"prive": True} if prive else {})), "confirmed": True})
     except m.Erreur as exc:
         print("nc-alertes : " + str(exc), file=sys.stderr)
         return False
@@ -222,7 +222,7 @@ def alerte_agent(agent, dossier, session):
         return False
     agent = propre(agent, 30) or "agent"
     dossier = propre(str(dossier).rstrip("/").rsplit("/", 1)[-1], 40) or "?"
-    return envoyer(T(f"💬 {agent} t'attend dans « {dossier} ».", f"💬 {agent} is waiting for you in “{dossier}”."), urgent=True)
+    return envoyer(T(f"💬 {agent} t'attend dans « {dossier} ».", f"💬 {agent} is waiting for you in “{dossier}”."), urgent=True, prive=True)
 
 
 def verifier():

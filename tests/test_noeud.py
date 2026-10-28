@@ -1647,6 +1647,23 @@ class CommandeTotp(Base):
         self.assertEqual(self.totp("pret").returncode, 4)
         self.assertEqual(self.controler(code_totp(secret, 1)).returncode, 4)
 
+    def test_deux_controles_en_meme_temps_un_seul_passe(self):
+        """Verrou : la confirmation à distance et /code de Telegram ne servent pas le même code deux fois."""
+        self.enroler()
+        code = code_totp(json.loads((self.home / ".config/nc/noeud-totp.json").read_text())["secret"])
+        procs = [subprocess.Popen([sys.executable, str(self.bin / "nc-noeud"), "totp", "controler"], env=self.env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True) for _ in range(6)]
+        for p in procs:
+            p.stdin.write(code + "\n")
+            p.stdin.close()
+        codes = sorted(p.wait(timeout=30) for p in procs)
+        self.assertEqual(codes, [0, 1, 1, 1, 1, 1])
+
+    def test_code_faux_dit_aussi_de_couper_les_agents_telegram(self):
+        self.enroler()
+        self.controler("000000")
+        self.assertTrue(self.notifie("TELEGRAM_AGENTS"), "la notification d'un code faux nomme le réglage des agents Telegram")
+
     def test_qr_code_si_qrencode(self):
         (self.bin / "qrencode").write_text(ENTETE + 'cat > "$H/qr-entree"; echo "[QR]"\n')
         (self.bin / "qrencode").chmod(0o755)

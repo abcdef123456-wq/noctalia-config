@@ -196,7 +196,10 @@ class Alertes(unittest.TestCase):
         self.assertEqual(self.textes(), ["💬 Claude Code t'attend dans « mon-projet »."])
         chemin, cle, corps = Gateway.recus[0]
         self.assertEqual((chemin, cle, corps["op"], corps["confirmed"]), ("/api/nc/manage", CLE, "notify", True))
-        self.assertEqual(list(corps["params"]), ["text"])
+        self.assertEqual(corps["params"], {"text": "💬 Claude Code t'attend dans « mon-projet »."[:4000], "prive": True},
+                         "seulement les conversations privées des utilisateurs autorisés, jamais un groupe")
+        self.lancer("envoyer", "autre message")
+        self.assertEqual(list(Gateway.recus[-1][2]["params"]), ["text"], "les autres alertes gardent leur envoi")
         self.lancer("agent", "Codex", "mon-projet", "s2", langue="en")
         self.assertEqual(self.textes()[-1], "💬 Codex is waiting for you in “mon-projet”.")
 

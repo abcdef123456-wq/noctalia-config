@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -42,7 +43,7 @@ def session(sid, agent, dossier, etat, ecrire=True, message=None):
 
 
 SESSIONS = [
-    session(S_CLAUDE, "claude", "mon-projet", "terminal", message="Fini : tests verts."),
+    session(S_CLAUDE, "claude", "mon-projet", "attente", message="Fini : tests verts."),
     session(S_CODEX, "codex", "/home/user/projets/outil", "travail", message="ancien message"),
     session(S_OMP, "omp", "site", "fini", message="Voilà."),
     session(S_OPENCODE, "opencode", "docs", "attente"),
@@ -56,7 +57,7 @@ class Base(unittest.TestCase):
         self.addCleanup(d.cleanup)
         self.home = Path(d.name)
         (self.home / ".config/nc").mkdir(parents=True)
-        env = mock.patch.dict(os.environ, HOME=str(self.home), DEPLOY_MODE="local", NC_LANGUE="fr")
+        env = mock.patch.dict(os.environ, HOME=str(self.home), DEPLOY_MODE="local", NC_LANGUE="fr", TELEGRAM_ALLOWED_USER_IDS="42,43")
         env.start()
         self.addCleanup(env.stop)
         self.regler(TELEGRAM_AGENTS="oui")
@@ -64,7 +65,7 @@ class Base(unittest.TestCase):
         self.appels = []                       # (argv, délai, limite, fusion, entree)
         self.sessions = [dict(s) for s in SESSIONS]
         self.pret = 0                          # sortie de « nc-noeud totp pret »
-        self.valides = {CODE_BON, CODE_BON2}
+        self.valides = {CODE_BON, CODE_BON2, "111111", "222222", "333333"}
         self.servis = set()
         self.ecrire_code = 0
         self.etat_code = 0
@@ -128,6 +129,7 @@ class Base(unittest.TestCase):
 
     def demander(self, texte="vas-y", numero="1", t=1000.0, **kw):
         """/agents puis /repondre : la demande attend son code."""
+        self.m._attente.clear()
         self.un("/agents", t=t, **kw)
         return self.un("/repondre %s %s" % (numero, texte), t=t + 1, **kw)
 
@@ -246,7 +248,8 @@ class Liste(Base):
         r = self.un("/agents", t=1000 + 599)
         self.assertIn("1. Claude Code · mon-projet", r)
         self.assertIn("3. omp · site", r)
-        self.assertIn("2. Claude Code · nouveau", r, "le numéro 2 (une session disparue) est repris par la nouvelle")
+        self.assertIn("6. Claude Code · nouveau", r, "les numéros 2, 4 et 5 (sessions disparues) ne sont pas réattribués pendant 10 min")
+        self.assertNotIn("2. Claude Code", r)
         r = self.un("/agents", t=1000 + 599 + 601)
         self.assertLess(r.index("1. omp · site"), r.index("2. Claude Code · mon-projet"), "plus de 10 min : repart de 1")
 
@@ -267,8 +270,11 @@ class Reponse(Base):
         self.assertEqual(self.commandes_ecrire(), [], "rien ne part avant le code")
         self.assertIn(["nc-noeud", "totp", "pret"], [a[0] for a in self.appels])
         r = self.un("/code " + CODE_BON, t=1030)
-        self.assertEqual(r, "✅ Envoyé à Claude Code (mon-projet).")
-        self.assertEqual(self.commandes_ecrire(), [["nc-claude", "ecrire", S_CLAUDE, "Fais les tests, merci"]])
+        self.assertEqual(r, "✅ Parti vers Claude Code (mon-projet) : l'envoi est fait, pas la lecture par l'agent.")
+        notif = [a[0] for a in self.appels if a[0][0] == "notify-send"]
+        self.assertEqual(notif, [["notify-send", "-a", "JARVIS", "--", "Réponse envoyée à un agent depuis Telegram",
+                                  "Claude Code (mon-projet) : Fais les tests, merci"]], "une notification sur le PC, en argv")
+        self.assertEqual(self.commandes_ecrire(), [["nc-claude", "ecrire", "--distant", S_CLAUDE, "Fais les tests, merci"]])
         ecr = next(a for a in self.appels if a[0][:2] == ["nc-claude", "ecrire"])
         self.assertEqual((ecr[1], ecr[3]), (self.m.DELAI_ECRIRE, False), "délai borné")
         self.assertNotIn("sortie libre", r, "aucune sortie libre relayée")
@@ -360,18 +366,31 @@ class Reponse(Base):
         self.assertTrue(r.startswith("❌ Échec de l'envoi"), r)
         self.assertNotIn("sortie libre", r)
 
-    def test_une_demande_par_utilisateur_et_la_derniere_remplace(self):
+    def test_deux_demandes_tout_est_annule_jamais_de_remplacement(self):
+        """Quelqu'un qui tient le compte glisse /repondre Y puis efface les messages : le /code de l'utilisateur ne confirme pas Y."""
         self.demander("premier")
         r = self.un("/repondre 4 second", t=1010)
-        self.assertIn("est remplacée", r)
-        self.un("/code " + CODE_BON, t=1020)
-        self.assertEqual(self.commandes_ecrire(), [["nc-claude", "ecrire", S_OPENCODE, "second"]])
+        self.assertIn("Deux demandes en même temps : tout est annulé", r)
+        r = self.un("/code " + CODE_BON, t=1020)
+        self.assertIn("Rien à confirmer", r)
+        self.assertEqual(self.commandes_ecrire(), [], "ni la première ni la seconde")
+        # une demande expirée n'empêche pas la suivante ; une demande seule passe
+        self.demander("troisième", t=2000)
+        self.assertIn("Confirme avec /code", self.un("/repondre 4 quatrième", t=2000 + 121 + 1))
+        self.assertTrue(self.un("/code " + CODE_BON2, t=2125).startswith("✅"))
+        self.assertEqual(self.commandes_ecrire(), [["nc-claude", "ecrire", "--distant", S_OPENCODE, "quatrième"]])
+
+    def test_notification_seulement_apres_un_envoi_reussi(self):
+        self.ecrire_code = 1
+        self.demander()
+        self.un("/code " + CODE_BON, t=1030)
+        self.assertEqual([a for a in self.appels if a[0][0] == "notify-send"], [])
 
     def test_un_autre_utilisateur_ne_confirme_pas(self):
         autorises = (42, 43)
         self.demander(autorises=autorises)
-        self.assertIn("Rien à confirmer", self.un("/code " + CODE_BON, t=1030, user=43, autorises=autorises))
-        self.assertIn("Rien à confirmer", self.un("/code " + CODE_BON, t=1031, user=42, chat=8, autorises=autorises))
+        self.assertIn("Rien à confirmer", self.un("/code 111111", t=1030, user=43, autorises=autorises))
+        self.assertIn("Rien à confirmer", self.un("/code 222222", t=1031, user=42, chat=8, autorises=autorises))
         self.assertEqual(self.commandes_ecrire(), [])
         self.assertTrue(self.un("/code " + CODE_BON, t=1032, autorises=autorises).startswith("✅"))
 
@@ -499,6 +518,159 @@ class Secrets(Base):
         self.assertEqual(self.m.extrait(None), "")
 
 
+class AutorisationEtTerminal(Base):
+    """B1 : pendant une demande d'autorisation, n'importe quel texte + Entrée valide le choix surligné : jamais d'écriture."""
+    def test_demande_ou_terminal_refuses_et_affiches(self):
+        self.sessions[0]["etat"] = "demande"
+        self.sessions[3]["etat"] = "terminal"
+        r = self.un("/agents")
+        self.assertIn("1. Claude Code · mon-projet · demande ton accord", r)
+        self.assertIn("4. OpenCode · docs · demande ton accord", r)
+        self.assertEqual(r.count("une autorisation attend : réponds sur le PC"), 2)
+        for n in ("1", "4"):
+            r = self.un("/repondre %s oui" % n, t=1001)
+            self.assertIn("une autorisation attend : réponds sur le PC", r)
+            self.assertNotIn("/code", r)
+        self.assertEqual(self.m._attente, {})
+        self.assertEqual(self.commandes_ecrire(), [])
+
+    def test_etat_qui_change_avant_le_code(self):
+        for nouveau in ("demande", "terminal", "travail", "fini"):
+            self.m._attente.clear()
+            self.sessions[0]["etat"] = "attente"
+            self.demander(t=1000)
+            self.sessions[0]["etat"] = nouveau
+            r = self.un("/code " + {"demande": "111111", "terminal": "222222", "travail": "333333", "fini": CODE_BON2}[nouveau], t=1030)
+            self.assertIn("L'état de l'agent a changé", r, nouveau)
+        self.assertEqual(self.commandes_ecrire(), [])
+
+    def test_etat_brut_garde_dans_la_demande(self):
+        self.demander()
+        self.assertEqual(self.m._attente[(7, 42)]["etat_brut"], "attente")
+
+    def test_code_de_sortie_de_nc_claude_expliques(self):
+        for sortie, mot in ((3, "ne tourne plus dans ce terminal"), (4, "une autorisation attend")):
+            self.ecrire_code = sortie
+            self.demander()
+            r = self.un("/code " + {3: "111111", 4: "222222"}[sortie], t=1030)
+            self.assertTrue(r.startswith("❌ Rien n'est envoyé"), r)
+            self.assertIn(mot, r)
+        self.assertEqual([a for a in self.appels if a[0][0] == "notify-send"], [])
+
+
+class Garde(Base):
+    def test_prive_avant_indisponible(self):
+        self.regler()                                    # réglage à non : un groupe ne l'apprend pas
+        for c in ("/agents", "/repondre 1 x", "/code 123456"):
+            r = self.un(c, type="supergroup")
+            self.assertTrue(r.startswith("⛔") and "privée" in r, (c, r))
+
+    def test_liste_d_utilisateurs_obligatoire(self):
+        for vide in ("", " , ", "abc"):
+            with mock.patch.dict(os.environ, TELEGRAM_ALLOWED_USER_IDS=vide, ALLOW_ALL_USERS="1"):
+                for c in ("/agents", "/repondre 1 x", "/code 123456"):
+                    self.assertIn("TELEGRAM_ALLOWED_USER_IDS est vide", self.un(c), (vide, c))
+        self.assertEqual(self.appels, [])
+
+    def test_code_consomme_meme_sans_demande_et_message_efface(self):
+        supprimes = []
+
+        class Message:
+            text = "/code " + CODE_BON
+            date = types.SimpleNamespace(timestamp=lambda: 1000.0)
+
+            async def reply_text(self, r):
+                supprimes.append(("reponse", r))
+
+            async def delete(self):
+                supprimes.append(("efface",))
+        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=7, type="private"),
+                                       message=Message(), edited_message=None)
+        tb = types.SimpleNamespace(_is_allowed=lambda uid: True)
+        asyncio.run(self.m.handler(tb, self.m.cmd_code, effacer=True)(update, types.SimpleNamespace(args=[])))
+        self.assertEqual([x[0] for x in supprimes], ["efface", "reponse"])
+        self.assertIn("Rien à confirmer", supprimes[1][1])
+        self.assertIn(CODE_BON, self.servis, "le code a été contrôlé, donc consommé")
+        self.assertIn(["nc-noeud", "totp", "controler"], [a[0] for a in self.appels])
+
+    def test_message_non_efface_pour_les_autres_commandes_et_suppression_impossible(self):
+        class Message:
+            text = "/agents"
+            date = types.SimpleNamespace(timestamp=lambda: 1000.0)
+            repondu = []
+
+            async def reply_text(self, r):
+                self.repondu.append(r)
+
+            async def delete(self):
+                raise RuntimeError("trop ancien")
+        m = Message()
+        update = types.SimpleNamespace(effective_user=types.SimpleNamespace(id=42), effective_chat=types.SimpleNamespace(id=7, type="private"),
+                                       message=m, edited_message=None)
+        tb = types.SimpleNamespace(_is_allowed=lambda uid: True)
+        asyncio.run(self.m.handler(tb, self.m.cmd_agents)(update, types.SimpleNamespace(args=[])))
+        self.assertEqual(len(m.repondu), 1)
+        self.m._attente[(7, 42)] = dict(id=S_CLAUDE, agent="Claude Code", dossier="x", texte="t", echeance=2000, etat_brut="attente")
+        m.text = "/code " + CODE_BON
+        asyncio.run(self.m.handler(tb, self.m.cmd_code, effacer=True)(update, types.SimpleNamespace(args=[])))
+        self.assertEqual(len(m.repondu), 2, "une suppression impossible ne gêne pas la réponse")
+
+    def test_commandes_du_module_effacent_seulement_le_code(self):
+        class H:
+            pass
+        noms = {tuple(n): h for n, h in self.m.commandes(types.SimpleNamespace(_is_allowed=lambda u: True))}
+        self.assertEqual(set(noms), {("agents", "claude"), ("repondre",), ("code",)})
+
+
+class SecretsRenforces(Base):
+    def test_invisible_ne_cache_pas_le_secret(self):
+        fakes = "sk-" + "A1b2" * 6
+        self.assertNotIn("A1b2", self.m.extrait("clé s\u200bk-" + "A1b2" * 6))
+        self.assertNotIn("A1b2", self.m.extrait("ke\u202ey " + fakes))
+        self.assertNotIn("hunter2", self.m.extrait("pass\u200bword=hunter2"))
+        self.assertNotIn("A1b2", self.m.nom_dossier("s\u200bk-" + "A1b2" * 6))
+
+    def test_nouvelles_formes(self):
+        cas = [('{"api_key": "abc123xyz"}', "abc123xyz"), ('"access_token":"abc123xyz"', "abc123xyz"),
+               ("mot de passe : hunter2", "hunter2"), ("Mot de passe: hunter2", "hunter2"), ("Password is hunter2", "hunter2"),
+               ("Le mot de passe est hunter2", "hunter2"), ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+               ("Authorization: Bearer abc.def.ghi", "abc.def"), ("authorization: tokenvaleur", "tokenvaleur"),
+               ("clé " + "sk_" + "live_" + "Ab12Cd34Ef56", "Ab12Cd34"), ("clé " + "rk_" + "live_" + "Ab12Cd34Ef56", "Ab12Cd34"),
+               ("jeton " + "glpat" + "-Ab12Cd34Ef56Gh78", "Ab12Cd34"), ("clé " + "AIza" + "SyAb12Cd34Ef", "Ab12Cd34"),
+               ("clé SK-" + "AB12CD34EF56", "AB12CD34"), ("PASSPHRASE=lapetitephrase", "lapetitephrase")]
+        for texte, secret in cas:
+            out = self.m.filtrer(texte)
+            self.assertNotIn(secret, out, (texte, out))
+            self.assertIn("[masqué]", out, texte)
+
+
+class OuvertureDeTexte(Base):
+    def test_debuts_refuses(self):
+        for debut in ("/share", "/logout x", "# note", "&tache", "-rf", "--help", "!ls", " /permissions"):
+            self.un("/agents", t=1000)
+            r = self.un("/repondre 1 " + debut, t=1001)
+            self.assertTrue(r.startswith("❌ Un texte qui commence par"), (debut, r))
+        self.assertIn("Confirme avec /code", self.demander("fais /share ensuite, un - ou # au milieu & ça va"))
+
+    def test_brouillon_dit_dans_la_demande(self):
+        self.assertIn("brouillon", self.demander())
+
+
+class NumerosLiberes(Base):
+    def test_numero_libere_pas_reattribue(self):
+        self.un("/agents", t=1000)
+        self.sessions = self.sessions[:1]
+        self.un("/agents", t=1100)
+        self.sessions = self.sessions + [session("nouvelle", "claude", "neuve", "fini")]
+        r = self.un("/agents", t=1200)
+        self.assertIn("6. Claude Code · neuve", r)
+        r = self.un("/repondre 2 x", t=1201)
+        self.assertIn("Numéro inconnu", r, "le 2 d'avant ne désigne rien")
+        self.sessions = [session("neuve2", "claude", "autre", "fini")]
+        self.un("/agents", t=1850)         # le 1 et le 6 ne sont plus vus depuis plus de 10 min : reparti de 1
+        self.assertEqual(self.m._listes[(7, 42)]["ids"], {1: "neuve2"})
+
+
 class Journal(Base):
     def test_journal_sans_le_texte_en_0600(self):
         self.demander("mot de passe très secret du test")
@@ -548,6 +720,179 @@ class ExecuterAvecEntree(unittest.TestCase):
         self.assertEqual((code, sortie), (0, ""), "sans entrée : fermée, comme avant")
         code, _ = asyncio.run(n.executer(["/usr/bin/true"], 5, 100, False, entree=b"x" * 500000))
         self.assertEqual(code, 0, "un programme qui ne lit pas son entrée ne bloque pas")
+
+
+class EcrireDistant(unittest.TestCase):
+    """B2 : le vrai nc-claude ecrire --distant, avec un faux kitty (HOME, XDG_RUNTIME_DIR et PATH isolés) : le texte ne part que si
+    l'agent est au premier plan du terminal, jamais dans un shell, ssh ou vim ; jamais pendant une autorisation."""
+    def setUp(self):
+        d = tempfile.TemporaryDirectory(prefix="nc-ed-")
+        self.addCleanup(d.cleanup)
+        self.home = Path(d.name)
+        self.bin = self.home / "bin"
+        self.bin.mkdir()
+        (self.home / "run/nc-claude").mkdir(parents=True, mode=0o700)
+        (self.home / ".config/nc").mkdir(parents=True)
+        self.shell, self.terminal = 4242, 4141
+        (self.home / "run" / ("kitty-%d" % self.terminal)).write_text("")
+        (self.bin / "kitty").write_text(
+            '#!/bin/sh\nH="' + str(self.home) + '"\necho "kitty $*" >> "$H/kitty.log"\n'
+            'case "$*" in *" ls "*) cat "$H/ls.json";; *send-text*) cat >> "$H/kitty.log"; echo >> "$H/kitty.log";; esac\n')
+        (self.bin / "opencode").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(self.home) + '/opencode.log"\n')
+        for f in ("kitty", "opencode"):
+            (self.bin / f).chmod(0o755)
+        self.env = dict(HOME=str(self.home), XDG_RUNTIME_DIR=str(self.home / "run"), PATH=str(self.bin) + ":/usr/bin:/bin", NC_LANGUE="fr", TMPDIR=str(self.home))
+
+    def session(self, agent="claude", etat="attente", sid="s1", **plus):
+        x = {"id": sid, "etat": etat, "terminal": self.terminal, "shell": self.shell, "cwd": str(self.home), "maj": time.time(), **plus}
+        if agent != "claude":
+            x["agent"] = agent
+        (self.home / "run/nc-claude/etat.json").write_text(json.dumps({"sessions": {sid: x}, "demandes": {}}))
+
+    def premier_plan(self, *cmdlines):
+        (self.home / "ls.json").write_text(json.dumps([{"tabs": [{"windows": [
+            {"pid": self.shell, "foreground_processes": [{"pid": 1, "cmdline": c} for c in cmdlines]}]}]}]))
+
+    def lancer(self, *args):
+        return subprocess.run([sys.executable, str(NC_CLAUDE), "ecrire", *args], env=self.env, capture_output=True, text=True, timeout=30)
+
+    def journal(self):
+        f = self.home / "kitty.log"
+        return f.read_text() if f.exists() else ""
+
+    def test_agent_au_premier_plan_le_texte_part(self):
+        self.session()
+        for cmdline in (["claude"], ["/usr/local/bin/claude", "--continue"], ["node", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"],
+                        ["bash"] and ["node", "/home/user/.npm/claude/cli.mjs"]):
+            (self.home / "kitty.log").unlink(missing_ok=True)
+            self.premier_plan(["fish"], cmdline)
+            r = self.lancer("--distant", "s1", "bonjour", "toi")
+            self.assertEqual(r.returncode, 0, (cmdline, r.stderr))
+            j = self.journal()
+            self.assertIn("kitty @ --to unix:%s ls --match pid:%d" % (self.home / "run" / ("kitty-%d" % self.terminal), self.shell), j)
+            self.assertIn("send-text --match pid:%d --bracketed-paste auto --stdin" % self.shell, j)
+            self.assertIn("bonjour toi", j)
+            self.assertLess(j.index(" ls "), j.index("send-text"), "la vérification AVANT l'envoi")
+
+    def test_agent_absent_rien_n_est_envoye(self):
+        self.session()
+        for cmdline in (["bash"], ["fish", "-l"], ["vim", "x"], ["ssh", "serveur"], ["/usr/bin/ssh", "claude"], ["claude-evil"],
+                        ["notclaude"], ["node", "/x/autre/foo.js"], ["node", "/x/claudette/cli.js"], ["python3", "claude_helper.py"], ["cat"],
+                        [], "claude"):
+            (self.home / "kitty.log").unlink(missing_ok=True)
+            self.premier_plan(cmdline)
+            r = self.lancer("--distant", "s1", "bonjour")
+            self.assertEqual(r.returncode, 3, (cmdline, r.stderr))
+            self.assertNotIn("send-text", self.journal(), cmdline)
+            self.assertIn("ne tourne plus", r.stderr)
+
+    def test_kitty_ne_repond_pas_ou_json_faux_rien_n_est_envoye(self):
+        self.session()
+        (self.home / "ls.json").write_text("pas du json")
+        self.assertEqual(self.lancer("--distant", "s1", "x").returncode, 3)
+        (self.home / "ls.json").write_text("{}")
+        self.assertEqual(self.lancer("--distant", "s1", "x").returncode, 3)
+        self.premier_plan(["claude"])
+        (self.home / "ls.json").write_text(json.dumps([{"tabs": [{"windows": [{"pid": 999, "foreground_processes": [{"cmdline": ["claude"]}]}]}]}]))
+        self.assertEqual(self.lancer("--distant", "s1", "x").returncode, 3, "une autre fenêtre que ce shell ne compte pas")
+        self.assertNotIn("send-text", self.journal())
+
+    def test_chaque_agent_son_processus(self):
+        for agent, cmdline in (("codex", ["codex"]), ("gemini", ["node", "/x/bin/gemini"]), ("antigravity", ["agy", "chat"]),
+                               ("opencode", ["opencode"]), ("qwen", ["qwen"]), ("kiro", ["kiro-cli"]), ("amp", ["amp"]),
+                               ("cursor", ["cursor-agent"]), ("copilot", ["copilot"])):
+            self.session(agent=agent, sid=agent + "-1")
+            self.premier_plan(cmdline)
+            self.assertEqual(self.lancer("--distant", agent + "-1", "x").returncode, 0, agent)
+            self.premier_plan(["claude"])            # l'agent d'un autre : non
+            self.assertEqual(self.lancer("--distant", agent + "-1", "x").returncode, 3, agent)
+
+    def test_autorisation_en_attente_refusee(self):
+        for etat in ("demande", "terminal"):
+            self.session(etat=etat)
+            self.premier_plan(["claude"])
+            (self.home / "kitty.log").unlink(missing_ok=True)
+            r = self.lancer("--distant", "s1", "oui")
+            self.assertEqual(r.returncode, 4, etat)
+            self.assertEqual(self.journal(), "", "même pas interrogé")
+
+    def test_sans_distant_comme_avant_l_ile_ne_change_pas(self):
+        self.session(etat="terminal")
+        self.premier_plan(["vim"])
+        r = self.lancer("s1", "depuis", "l'île")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        j = self.journal()
+        self.assertNotIn(" ls ", j)
+        self.assertIn("depuis l'île", j)
+
+    def test_opencode_double_tiret_avant_le_texte(self):
+        (self.home / "run/nc-claude/etat.json").write_text(json.dumps({"sessions": {"opencode-ses_9": {
+            "id": "opencode-ses_9", "agent": "opencode", "etat": "fini", "cwd": str(self.home), "maj": time.time(), "terminal": 0, "shell": 0}}, "demandes": {}}))
+        for args in (("--distant", "opencode-ses_9", "-rf", "x"), ("opencode-ses_9", "-rf", "x")):
+            (self.home / "opencode.log").unlink(missing_ok=True)
+            self.assertEqual(self.lancer(*args).returncode, 0)
+            fin = time.monotonic() + 3
+            while time.monotonic() < fin and not (self.home / "opencode.log").exists():
+                time.sleep(0.05)
+            self.assertEqual((self.home / "opencode.log").read_text().strip(), "run --session ses_9 -- -rf x")
+
+    def test_sans_xdg_runtime_dir_refus(self):
+        src = NC_CLAUDE.read_text()
+        m = types.ModuleType("nc_claude_xdg")
+        m.__file__ = str(NC_CLAUDE)
+        env = {k: v for k, v in self.env.items() if k != "XDG_RUNTIME_DIR"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("os.path.isdir", lambda x: False):
+            exec(compile(src, str(NC_CLAUDE), "exec"), m.__dict__)
+            for argv in (["nc-claude", "ecrire", "--distant", "s1", "x"], ["nc-claude", "etat", "--json"]):
+                with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit) as e:
+                    m.main()
+                self.assertNotEqual(e.exception.code, 0, argv)
+        self.assertEqual(self.journal(), "")
+
+
+class AlerteSeulementEnPrive(unittest.TestCase):
+    def charger(self):
+        m = types.ModuleType("nc_telegram_prive")
+        src = REPO / "home/.local/share/nc-jarvis/server/nc_telegram.py"
+        m.__file__ = str(src)
+        exec(compile(src.read_text(), str(src), "exec"), m.__dict__)
+        return m
+
+    def test_prive_aux_utilisateurs_autorises_jamais_la_diffusion(self):
+        m = self.charger()
+        envoyes = []
+        m._envoyer_prive = lambda token, uid, texte: envoyes.append((token, uid, texte)) or True
+        diffusions = []
+
+        async def diffusion(texte):
+            diffusions.append(texte)
+            return True
+        tb = types.SimpleNamespace(TELEGRAM_TOKEN="jeton-faux", send_broadcast_message=diffusion)
+        with mock.patch.dict(os.environ, TELEGRAM_ALLOWED_USER_IDS="42, x ,43"):
+            self.assertEqual(asyncio.run(m.diffuser("💬 Codex t'attend", tb, prive=True)), {"sent": True})
+            self.assertEqual(envoyes, [("jeton-faux", "42", "💬 Codex t'attend"), ("jeton-faux", "43", "💬 Codex t'attend")])
+            self.assertEqual(diffusions, [], "pas de diffusion aux groupes")
+            asyncio.run(m.diffuser("alerte normale", tb))
+            self.assertEqual(diffusions, ["alerte normale"])
+        with mock.patch.dict(os.environ, TELEGRAM_ALLOWED_USER_IDS=""):
+            r = asyncio.run(m.diffuser("x", tb, prive=True))
+            self.assertFalse(r["sent"])
+        self.assertEqual(len(envoyes), 2)
+
+    def test_echec_d_envoi_sans_jeton_dans_le_journal(self):
+        m = self.charger()
+
+        def boom(token, uid, texte):
+            raise OSError("https://api.telegram.org/botjeton-faux/sendMessage")
+        m._envoyer_prive = boom
+        tb = types.SimpleNamespace(TELEGRAM_TOKEN="jeton-faux")
+        with mock.patch.dict(os.environ, TELEGRAM_ALLOWED_USER_IDS="42"), self.assertLogs("nc_telegram", "WARNING") as j:
+            self.assertFalse(asyncio.run(m.diffuser("x", tb, prive=True))["sent"])
+        self.assertNotIn("jeton-faux", "\n".join(j.output))
+
+    def test_management_passe_prive(self):
+        src = (REPO / "home/.local/share/nc-jarvis/server/nc_management.py").read_text()
+        self.assertIn("nc_telegram.diffuser(p.get('text'), prive=p.get('prive') is True)", src)
 
 
 class Branchement(unittest.TestCase):
