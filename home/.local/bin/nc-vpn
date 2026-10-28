@@ -959,7 +959,7 @@ def mullvad_json():
     e["compte"] = None
     if e["installe"] and not e["connecte"]:
         code, out, err = mullvad(["status"])
-        if code == 0 or out or err:
+        if code == 0:         # service arrêté (code non nul, « Failed to connect… ») : on ne sait pas, pas de « connecté » inventé
             e["compte"] = not re.search(r"not logged in", out + err, re.I)
     elif e["connecte"]:
         e["compte"] = True
@@ -1294,6 +1294,69 @@ def proton_login():
 
 API_FOURNISSEURS["proton"] = {"fiche": proton_fournisseur, "connecter": proton_connecter, "deconnecter": proton_deconnecter,
                               "login": proton_login}
+
+
+# ── Mullvad dans les fournisseurs (même application que `nc-vpn mullvad …`) ───────────────────────────────────────────────
+# Sources (dépôt mullvad/mullvadvpn-app, mullvad-cli/src/cmds/) : `status` ajoute « Warning: You are not logged in to an
+# account. » quand aucun compte n'est connecté (tunnel_state.rs, status.rs) : c'est notre seul signal, `account get` n'est
+# JAMAIS lancé (il affiche le numéro de compte). `relay list` écrit une ligne par pays sans retrait, « Nom (code) » en
+# minuscules, puis les villes et les relais en retrait (relay.rs). `relay set location CC`, `connect`, `disconnect`.
+def mullvad_pays_liste():
+    """([{"code","nom"}…], source) : les pays de `mullvad relay list` ; à défaut (commande en échec, rien de lisible), la liste
+    ISO intégrée (« defaut »). Les noms sont bornés, en texte brut."""
+    code, out, _ = mullvad(["relay", "list"], delai=10)
+    res = []
+    if code == 0:
+        for ligne in nettoyer_sortie(out.encode("utf-8", "replace")).splitlines():
+            m = re.fullmatch(r"([^\s(][^()\t]{0,58}?)\s+\(([a-z]{2})\)\s*", ligne)
+            if m and m.group(2).upper() in ISO_PAYS and m.group(2).upper() not in {x["code"] for x in res}:
+                res.append({"code": m.group(2).upper(), "nom": nom_borne(m.group(1))})
+    if res:
+        return sorted(res, key=lambda x: x["nom"]), "relay"
+    return sorted(({"code": c, "nom": n} for c, n in CODE_NOM.items()), key=lambda x: x["nom"]), "defaut"
+
+
+def mullvad_fournisseur():
+    if not shutil.which("mullvad"):
+        return fiche("mullvad", "Mullvad", "absent", T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    e = mullvad_json()
+    if e["compte"] is None:
+        return fiche("mullvad", "Mullvad", "sans_compte",
+                     T("L'état de Mullvad est illisible : le service mullvad-daemon tourne-t-il ?",
+                       "Mullvad's state cannot be read: is the mullvad-daemon service running?"), probleme="demon")
+    if e["compte"] is False:
+        return fiche("mullvad", "Mullvad", "sans_compte",
+                     T("Mullvad est installé, mais aucun compte n'est connecté.", "Mullvad is installed, but no account is signed in."),
+                     peut_login=True)
+    pays, _ = mullvad_pays_liste()
+    return fiche("mullvad", "Mullvad", "pret", T("Compte Mullvad connecté.", "Mullvad account signed in."), pays=pays,
+                 pays_actif=e["pays"] if e["connecte"] else "", connecte=e["connecte"])
+
+
+def mullvad_connecter(cc):
+    code_pays_ok(cc)
+    if not shutil.which("mullvad"):
+        raise Echec(T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    mullvad_agir(["pays", cc.lower()])
+    mullvad_agir(["connecter"])
+
+
+def mullvad_deconnecter():
+    mullvad_agir(["deconnecter"])
+
+
+def mullvad_login():
+    """Jamais de numéro de compte chez nous : on ouvre l'application graphique (`mullvad-vpn`), sinon on dit quoi lancer."""
+    if not shutil.which("mullvad"):
+        raise Echec(T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    if shutil.which("mullvad-vpn") and ouvrir(["mullvad-vpn"]):
+        return print(T("Mullvad : l'application s'ouvre, connecte ton compte dedans.", "Mullvad: the app is opening, sign in there."))
+    raise Echec(T("Dans un terminal, lance : mullvad account login (le numéro de compte se tape là, jamais ici).",
+                  "In a terminal, run: mullvad account login (the account number is typed there, never here)."))
+
+
+API_FOURNISSEURS["mullvad"] = {"fiche": mullvad_fournisseur, "connecter": mullvad_connecter, "deconnecter": mullvad_deconnecter,
+                               "login": mullvad_login}
 
 
 def fournisseurs_json():

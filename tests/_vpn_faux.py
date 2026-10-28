@@ -131,6 +131,9 @@ if a[:2] == ["status", "--json"]:
     print(conf["json"]); sys.exit(conf.get("code", 0))
 elif a[:1] == ["status"]:
     print(conf.get("texte", "Disconnected")); sys.exit(conf.get("code", 0))
+elif a[:2] == ["relay", "list"]:
+    if "relais" not in conf: sys.exit(1)
+    print(conf["relais"])
 elif conf.get("echec"):
     print(conf["echec"], file=sys.stderr); sys.exit(1)
 '''
