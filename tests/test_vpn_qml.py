@@ -636,6 +636,57 @@ class HorsEcran(unittest.TestCase):
         act = [a for a in appels if a[:1] == ["fournisseur"]]
         self.assertEqual(act, [["fournisseur", "proton", "login"]])
 
+    def test_proton_cli_pret_liste_changer_et_tout_deconnecter_sans_doublon(self):
+        # Proton prêt (CLI officielle) comme Mullvad : Connecté / Changer par pays ; son tunnel NetworkManager n'est pas doublé ;
+        # « Tout déconnecter » ajoute `protonvpn disconnect` (fournisseur proton deconnecter)
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="Compte Proton VPN connecté.",
+                   pays=[dict(code="fr", nom="France"), dict(code="de", nom="Allemagne")], pays_actif="fr", connecte=True, peut_login=False,
+                   probleme="", pilotage="direct")]
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c, fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    verifier(VpnEtat.tunnels.length === 1, "un seul tunnel Proton (pas de doublon) : " + VpnEtat.tunnels.length)
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var p = tous(fen.contentItem, "nc-vpn-pays")
+                    verifier(p.length === 2 && textes(p[0]).indexOf("Connecté") >= 0 && textes(p[1]).indexOf("Changer") >= 0, "pays Proton : " + p.length)
+                    t.mouseClick(p[1]); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        act = [a for a in appels if a[:1] == ["fournisseur"]]
+        self.assertEqual(act, [["fournisseur", "proton", "connecter", "DE"], ["fournisseur", "proton", "deconnecter"]])
+
+    def test_proton_application_ouverte_message_de_nc_vpn_et_tout_deconnecter_sans_ouvrir_l_appli(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", pays_actif="fr", connecte=True, peut_login=True,
+                   message="Ferme l'application Proton VPN pour piloter depuis l'île : la CLI et l'application ne tournent pas ensemble.",
+                   probleme="appli_ouverte", pilotage="appli")]
+        c = [LIGNE_J(U2, "ProtonVPN FR#12", "vpn", True, "proton0")]
+        c[0].update(fournisseur="Proton VPN", pays="FR")
+        etat = dict(disponible=True, connexions=c, actives=c, fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var tp = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
+                    verifier(tp.indexOf("Proton VPN · application ouverte") >= 0 && tp.indexOf("Ferme l'application Proton VPN pour piloter") >= 0, "carte : " + tp)
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        self.assertEqual([a for a in appels if a[:1] == ["fournisseur"]], [], "l'application n'est pas ouverte par Tout déconnecter")
+        self.assertIn(["tout-deconnecter"], appels)
+
     def test_carte_principale_tout_deconnecter_dans_le_titre_et_lignes_pleine_largeur(self):
         self.lancer('''
             Timer { interval: 100; running: true; repeat: true; onTriggered: {

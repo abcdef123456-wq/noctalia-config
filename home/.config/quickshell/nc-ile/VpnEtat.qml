@@ -86,8 +86,8 @@ Singleton {
         return l
     }
     // Le modèle des fournisseurs du panneau : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays: [{cc, nom}]}.
-    // « pilote_appli » : Proton, qui se pilote dans son application (pas de pays chez nous ; le bouton l'ouvre).
-    // Proton et Nord : « bientôt » (leurs adaptateurs sont un autre lot) ; CyberGhost seulement si un profil de ce nom existe.
+    // « pilote_appli » : Proton sans sa CLI (ou avec l'application ouverte), qui se pilote dans son application (pas de pays chez nous ; le bouton l'ouvre).
+    // Proton et Nord : « bientôt » tant que nc-vpn ne répond pas ; CyberGhost seulement si un profil de ce nom existe.
     readonly property var fournisseurs: {
         var l = [fiche("proton", "Proton VPN"), fiche("nord", "NordVPN"),
                  { id: "mullvad", fournisseur: "Mullvad", bientot: false, peutLogin: false, message: "",
@@ -101,7 +101,7 @@ Singleton {
         var x = externe[id]
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
         return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
-                 connecte: x.connecte }
+                 connecte: x.connecte, probleme: x.probleme }
     }
     // « 🇫🇷 » pour « FR » ; vide si le code n'est pas deux lettres majuscules
     function drapeauDe(cc) {
@@ -149,7 +149,8 @@ Singleton {
                         res[x.id] = { id: x.id, nom: typeof x.nom === "string" && x.nom !== "" ? x.nom.slice(0, 40) : (x.id === "nord" ? "NordVPN" : "Proton VPN"),
                                       etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
                                       paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
-                                      connecte: x.connecte === true, peutLogin: x.peut_login === true }
+                                      connecte: x.connecte === true, peutLogin: x.peut_login === true,
+                                      probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "" }
                     })
                 }
                 v.externe = res
@@ -345,14 +346,15 @@ Singleton {
     }
     function connecter(uuid) { lancer(["connecter", uuid], uuid) }
     function deconnecter(uuid) { lancer(["deconnecter", uuid], uuid) }
-    // Tout couper : les tunnels de NetworkManager, puis l'application Mullvad si elle est montée
+    // Tout couper : les tunnels de NetworkManager, puis l'application Mullvad si elle est montée, puis Nord et Proton prêts (par leur CLI ;
+    // Proton qui se pilote dans son appli n'est jamais ouvert pour ça : son tunnel NetworkManager est déjà coupé plus haut)
     function toutDeconnecter() {
         if (agir.running) return
         if (actives.length === 0) {
             var file0 = []
             if (mullvad.connecte) file0.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
             for (var i0 of ["nord", "proton"])
-                if (externe[i0] && externe[i0].connecte) file0.push({ args: ["fournisseur", i0, "deconnecter"], cible: "ext:" + i0, toujours: true })
+                if (externe[i0] && externe[i0].connecte && externe[i0].etat === "pret") file0.push({ args: ["fournisseur", i0, "deconnecter"], cible: "ext:" + i0, toujours: true })
             if (file0.length === 0) return
             suites = file0.slice(1)
             lancer(file0[0].args, file0[0].cible)
@@ -361,7 +363,7 @@ Singleton {
         var file = []
         if (mullvad.connecte) file.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
         for (var id of ["nord", "proton"])
-            if (externe[id] && externe[id].connecte) file.push({ args: ["fournisseur", id, "deconnecter"], cible: "ext:" + id, toujours: true })
+            if (externe[id] && externe[id].connecte && externe[id].etat === "pret") file.push({ args: ["fournisseur", id, "deconnecter"], cible: "ext:" + id, toujours: true })
         suites = file
         lancer(["tout-deconnecter"], "tout")
     }

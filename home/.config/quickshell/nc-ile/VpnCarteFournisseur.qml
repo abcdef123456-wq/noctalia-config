@@ -1,6 +1,7 @@
-// La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (Proton, Nord : leurs
-// adaptateurs arrivent plus tard), « client absent », « installé, pas de compte », « se pilote dans son application » (Proton :
-// bouton « Ouvrir Proton VPN », qui lance l'application officielle, rien de caché). Un message clair, jamais de faux bouton.
+// La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (tant que nc-vpn ne
+// répond pas), « client absent », « installé, pas de compte » (Proton : bouton « Se connecter au compte »), « se pilote dans son
+// application » (Proton sans sa CLI : bouton « Ouvrir Proton VPN », qui lance l'application officielle, rien de caché) et
+// « application ouverte » (Proton : la CLI ne tourne pas avec l'application, le message de nc-vpn dit de la fermer). Un message clair, jamais de faux bouton.
 // Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays}.
 import QtQuick
 
@@ -11,11 +12,14 @@ Rectangle {
     readonly property string titre: {
         if (modele.bientot) return modele.fournisseur + " · " + Reglages.t("bientôt", "coming soon")
         if (modele.etat === "pilote_appli")
-            return modele.fournisseur + " · " + (modele.connecte === true ? Reglages.t("connecté", "connected") : Reglages.t("se pilote dans son application", "driven from its app"))
+            return modele.fournisseur + " · " + (modele.probleme === "appli_ouverte" ? Reglages.t("application ouverte", "app is open")
+                   : (modele.connecte === true ? Reglages.t("connecté", "connected") : Reglages.t("se pilote dans son application", "driven from its app")))
         if (modele.etat === "sans_compte") return modele.fournisseur + " · " + Reglages.t("installé, sans compte", "installed, no account")
         return modele.fournisseur + " · " + Reglages.t("client absent", "client not installed")
     }
     readonly property string message: {
+        if (modele.etat === "pilote_appli" && modele.probleme === "appli_ouverte" && typeof modele.message === "string" && modele.message !== "")
+            return modele.message                  // l'application est ouverte : la CLI ne peut pas piloter, nc-vpn dit de la fermer
         if (modele.etat === "pilote_appli" && modele.connecte === true)
             return Reglages.t("La connexion est active (voir en haut). Pour changer de pays ou te déconnecter, ouvre l'application " + modele.fournisseur + ".",
                               "The connection is active (see above). To switch country or disconnect, open the " + modele.fournisseur + " app.")
