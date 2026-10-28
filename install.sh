@@ -145,6 +145,38 @@ case " $OSID $OSLIKE " in
   *suse*) FAMILY=suse ;;
 esac
 
+# Dépôt Noctalia pour Debian / Ubuntu : la clé vient d'un paquet (nickh-archive-keyring.deb) téléchargé en HTTPS. Avant de
+# l'installer, l'empreinte de la clé principale qu'il contient est comparée à celle-ci, en dur : si elle diffère (ou si le
+# paquet contient une autre clé en plus), l'installation s'arrête net, rien n'est installé ni ajouté à apt.
+NOCT_DEB_EMPREINTE=C2A7E07FB3D746BDF2A245CD683B67D7BC99A9B7
+empreintes_deb() { # empreintes_deb FICHIER.deb : l'empreinte de chaque clé principale du paquet, une par ligne
+  local d r=0
+  have dpkg-deb && have gpg || return 1
+  d="$(mktemp -d)" || return 1
+  mkdir -p "$d/g" && chmod 700 "$d" "$d/g"
+  if dpkg-deb -x "$1" "$d/x" 2>/dev/null; then
+    find "$d/x" -type f \( -name '*.gpg' -o -name '*.asc' \) -print0 |
+      xargs -0 -r env GNUPGHOME="$d/g" gpg --batch --no-tty --show-keys --with-colons 2>/dev/null |
+      awk -F: '/^pub:/ { p = 1; next } /^sub:/ { p = 0 } /^fpr:/ && p { print $10; p = 0 }' || r=1
+  else
+    r=1
+  fi
+  rm -rf "$d"
+  return "$r"
+}
+verifier_empreinte_cle() { # verifier_empreinte_cle FICHIER.deb EMPREINTE : vrai seulement si la clé est exactement celle-là
+  local vues
+  vues="$(empreintes_deb "$1")" || vues=""
+  if [ "$vues" = "$2" ]; then return 0; fi
+  warn "$(t "Empreinte de la clé du dépôt différente de celle attendue. Attendue : $2 ; reçue : ${vues:-aucune}. Dépôt refusé, rien n'est installé." "Repository key fingerprint differs from the expected one. Expected: $2; received: ${vues:-none}. Repository refused, nothing installed.")"
+  return 1
+}
+# Fedora (COPR) et openSUSE (dépôt tiers) : dépôts communautaires, non vérifiés par la distribution. Leur clé GPG est
+# importée sans autre question (« dnf -y », « zypper --gpg-auto-import-keys ») : c'est dit clairement avant chaque question.
+avertir_depot_tiers() { # avertir_depot_tiers DÉPÔT COMMANDE
+  warn "$(t "$1 est un dépôt communautaire : ta distribution ne le vérifie pas. Sa clé GPG sera importée automatiquement ($2) et ses paquets pourront remplacer ceux de même nom." "$1 is a community repository: your distribution doesn't vet it. Its GPG key will be imported automatically ($2) and its packages may replace ones with the same name.")"
+  info "$(t "Pour le retirer plus tard : « dnf copr remove » (Fedora) ou « zypper removerepo » (openSUSE)." "To remove it later: “dnf copr remove” (Fedora) or “zypper removerepo” (openSUSE).")"
+}
 # Debian 13 (trixie) : Hyprland 0.55+ n'existe que dans les « backports » officiels de Debian (paquets plus récents
 # publiés par Debian elle-même, https://backports.debian.org). bpo_on : vrai si la source est (ou vient d'être) activée ;
 # bpo_install : installe des paquets précis depuis les backports (les autres paquets viennent toujours de trixie).
@@ -270,12 +302,23 @@ if [ "$MODE" = restore ]; then
   last="$(ls -1d "$STATE"/backup-* "$OLD_STATE"/backup-* 2>/dev/null | awk -F/ '{ print $NF "\t" $0 }' | sort | tail -1 | cut -f2- || true)"
   [ -n "$last" ] || die "$(t "aucune sauvegarde trouvée dans $STATE" "no backup found in $STATE")"
   say "$(t "Restauration de $last" "Restoring $last")"
-  ask "$(t "Remettre tes anciens fichiers et supprimer ceux ajoutés par l'installation ?" "Put your old files back and delete the ones added by the install?")" n || exit "$ANNULE"
+  ask "$(t "Remettre tes anciens fichiers et mettre de côté ceux ajoutés par l'installation (rien n'est supprimé) ?" "Put your old files back and move aside the ones added by the install (nothing is deleted)?")" n || exit "$ANNULE"
   have systemctl && systemctl --user stop noctalia.service 2>/dev/null || true
+  # Un fichier ajouté par l'installation peut avoir été modifié depuis (tes réglages, ton travail) : il est déplacé, avec
+  # son chemin, dans un dossier horodaté de la sauvegarde ; rien n'est supprimé. Pour le récupérer : le remettre à sa place.
+  ECARTE="$last/ecarte-$(date +%Y%m%d-%H%M%S)"
   if [ -f "$last/.created" ]; then
-    while IFS= read -r rel; do [ -n "$rel" ] && rm -rf "${HOME:?}/$rel"; done < "$last/.created"
+    ecartes=0
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      case "$rel" in /*|..|../*|*/..|*/../*) warn "$(t "chemin ignoré : $rel" "path ignored: $rel")"; continue ;; esac
+      [ -e "${HOME:?}/$rel" ] || [ -L "${HOME:?}/$rel" ] || continue
+      mkdir -p "$ECARTE/$(dirname "$rel")"
+      if mv -- "${HOME:?}/$rel" "$ECARTE/$rel"; then ecartes=$((ecartes + 1)); else warn "$(t "impossible de mettre de côté : ~/$rel" "couldn't move aside: ~/$rel")"; fi
+    done < "$last/.created"
+    [ "$ecartes" -eq 0 ] || info "$(t "$ecartes élément(s) mis de côté (pas supprimés) : $ECARTE" "$ecartes item(s) moved aside (not deleted): $ECARTE")"
   fi
-  (cd "$last" && find . -path ./system -prune -o -path ./silencieux -prune -o \( -type f -o -type l \) ! -name .created -print0 |
+  (cd "$last" && find . -path ./system -prune -o -path ./silencieux -prune -o -path './ecarte-*' -prune -o \( -type f -o -type l \) ! -name .created -print0 |
     while IFS= read -r -d '' f; do mkdir -p "$HOME/$(dirname "$f")"; cp -a "$last/$f" "$HOME/$f"; done)
   [ -d "$last/system" ] && warn "$(t "Fichiers système sauvegardés dans $last/system : à remettre à la main avec sudo si besoin." "System files backed up in $last/system: put them back by hand with sudo if needed.")"
   if have systemctl; then
@@ -409,6 +452,7 @@ if [ "$MODE" != files ]; then
       # dépôt communautaire (COPR) le plus suivi, à jour
       info "$(t "Pas de Hyprland 0.55 ou plus dans les dépôts de Fedora : dépôt communautaire COPR sdegler/hyprland" "No Hyprland 0.55 or later in Fedora's repositories: community COPR repository sdegler/hyprland")"
       info "  https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/"
+      avertir_depot_tiers "COPR sdegler/hyprland" "dnf -y copr enable"
       ask "$(t "Activer ce dépôt et installer Hyprland ?" "Enable this repository and install Hyprland?")" o || die "$(t "Hyprland 0.55 ou plus est nécessaire." "Hyprland 0.55 or later is required.")"
       if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi   # commande « dnf copr »
       sudo dnf -y copr disable solopasha/hyprland >/dev/null 2>&1 || true
@@ -501,6 +545,7 @@ if [ "$MODE" != files ]; then
         url="https://download.opensuse.org/repositories/home:neifua:Noctalia/$rp/home:neifua:Noctalia.repo"
         info "$(t "Noctalia n'est pas dans les dépôts d'openSUSE : dépôt tiers indiqué par la documentation officielle :" "Noctalia isn't in openSUSE's repositories: third-party repository given by the official documentation:")"
         info "$url"
+        avertir_depot_tiers "$url" "zypper --gpg-auto-import-keys"
         ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         sudo zypper --non-interactive addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --non-interactive --gpg-auto-import-keys refresh && sudo zypper --non-interactive install noctalia ;;
       debian)
@@ -516,8 +561,20 @@ if [ "$MODE" != files ]; then
         info "$(t "  dépôt : https://pkg.noctalia.dev/deb/$src" "  repository: https://pkg.noctalia.dev/deb/$src")"
         ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         have wget || sudo apt-get $APT_OPT install -y wget
-        kd="$(mktemp -d)"; wget -q --tries=3 --timeout=30 -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb && sudo dpkg -i "$kd/keyring.deb"; rm -rf "$kd"
-        sudo wget -q --tries=3 --timeout=30 -O "/etc/apt/sources.list.d/$src" "https://pkg.noctalia.dev/deb/$src"
+        have gpg || pkg_install gnupg
+        info "$(t "  empreinte attendue de la clé : $NOCT_DEB_EMPREINTE" "  expected key fingerprint: $NOCT_DEB_EMPREINTE")"
+        kd="$(mktemp -d)"
+        if ! { wget -q --tries=3 --timeout=30 -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb &&
+               wget -q --tries=3 --timeout=30 -O "$kd/$src" "https://pkg.noctalia.dev/deb/$src"; }; then
+          rm -rf "$kd"; die "$(t "téléchargement du dépôt Noctalia impossible : $NOCT_DOCS" "couldn't download the Noctalia repository: $NOCT_DOCS")"
+        fi
+        # Clé vérifiée AVANT d'être installée ; le fichier de source doit s'appuyer sur cette clé et sur ce site seulement
+        if ! verifier_empreinte_cle "$kd/keyring.deb" "$NOCT_DEB_EMPREINTE" ||
+           ! grep -qx 'Signed-By: /usr/share/keyrings/nickh-archive-keyring.gpg' "$kd/$src" ||
+           [ -n "$(grep -E '^URIs:' "$kd/$src" | grep -v 'https://pkg.noctalia.dev/' || true)" ]; then
+          rm -rf "$kd"; die "$(t "la clé ou la source du dépôt Noctalia ne correspond pas à ce qui est attendu : installation arrêtée, rien n'a été ajouté à apt." "the Noctalia repository key or source isn't what is expected: installation stopped, nothing was added to apt.")"
+        fi
+        sudo dpkg -i "$kd/keyring.deb" && sudo install -Dm0644 "$kd/$src" "/etc/apt/sources.list.d/$src"; rm -rf "$kd"
         APT_A_JOUR=0; apt_maj || true
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
@@ -749,6 +806,7 @@ noter_silencieux() { # noter_silencieux "ce qui a changé" "où est la sauvegard
 qs_ver() { qs --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1; }
 if [ "$MODE" != files ] && [ "$FAMILY" = fedora ] && ! ver_ge "$(qs_ver || true)" 0.3; then
   info "$(t "L'île dynamique utilise Quickshell 0.3, absent des dépôts de Fedora : dépôt communautaire COPR errornointernet/quickshell" "The dynamic island uses Quickshell 0.3, which isn't in Fedora's repositories: community COPR repository errornointernet/quickshell")"
+  avertir_depot_tiers "COPR errornointernet/quickshell" "dnf -y copr enable"
   if ask "$(t "Activer ce dépôt pour l'île dynamique ?" "Enable this repository for the dynamic island?")" o; then
     if have dnf5; then pkg_try dnf5-plugins; else pkg_try dnf-plugins-core; fi
     sudo dnf -y copr enable errornointernet/quickshell >/dev/null 2>&1 &&
@@ -943,6 +1001,18 @@ ILE=noctalia
 # déjà là (un module ajouté à l'île plus tard). tests/test_connexion_ile.py vérifie qu'elle couvre tous les imports.
 QS_QML_DEBIAN="qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtquick-effects
   qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models"
+# Sources téléchargées puis compilées ou installées en root : épinglées par l'empreinte exacte du commit (une étiquette de
+# version peut être déplacée sur le dépôt). Après le clone, le commit obtenu est comparé à celui-ci ; s'il diffère, rien
+# n'est compilé ni installé. Quickshell v0.3.2 (étiquette annotée : commit pointé) ; sddm-astronaut-theme.
+QS_COMMIT=4f508be500dea6e5732cc3d50382a0048b17e7b1
+SDDM_ASTRO_COMMIT=abb3163c724935af888ba5ea9ac0c4f22afd8048
+verifier_commit() { # verifier_commit DOSSIER COMMIT [sudo] : vrai si HEAD du clone est exactement ce commit
+  local vu
+  vu="$(${3:+sudo} git -C "$1" rev-parse HEAD 2>/dev/null)" || vu=""
+  [ "$vu" = "$2" ] && return 0
+  warn "$(t "Commit inattendu dans $1 : ${vu:-aucun} au lieu de $2. Source refusée, rien n'est compilé ni installé." "Unexpected commit in $1: ${vu:-none} instead of $2. Source refused, nothing is built or installed.")"
+  return 1
+}
 # Debian / Ubuntu : Quickshell n'est pas dans les dépôts : compilé depuis ses sources officielles (version 0.3.2),
 # seulement les modules utiles à l'île, installé dans /usr/local. Testé sur Debian 13 (protocoles Wayland des backports).
 compiler_quickshell() {
@@ -958,8 +1028,10 @@ compiler_quickshell() {
   if [ "$OSCODE" = trixie ]; then bpo_on && bpo_install wayland-protocols >/dev/null 2>&1; fi
   wd="$(mktemp -d)"
   info "$(t "Compilation de Quickshell (5 à 15 minutes selon le processeur) :" "Building Quickshell (5 to 15 minutes depending on the processor):")"
-  if { avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" ||
-       avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs"; } &&
+  if { { avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://git.outfoxxed.me/quickshell/quickshell.git "$wd/qs" &&
+         verifier_commit "$wd/qs" "$QS_COMMIT"; } ||
+       { rm -rf "$wd/qs"; avec_progres "$(t "Téléchargement des sources" "Downloading the sources")" "$wd/clone.log" git clone -q --depth 1 --branch v0.3.2 https://github.com/quickshell-mirror/quickshell.git "$wd/qs" &&
+         verifier_commit "$wd/qs" "$QS_COMMIT"; }; } &&
      avec_progres "$(t "Préparation" "Configuring")" "$wd/cmake.log" cmake -S "$wd/qs" -B "$wd/build" -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$prefixe" \
        -DDISTRIBUTOR="noctalia-config" -DCRASH_HANDLER=OFF -DUSE_JEMALLOC=OFF -DX11=OFF -DI3=OFF \
        -DSCREENCOPY=ON -DSCREENCOPY_HYPRLAND_TOPLEVEL=ON \
@@ -2021,7 +2093,15 @@ if [ "$MODE" = full ]; then
           # Tumbleweed : le module SVG (imageformats/libqsvg.so) est dans libQt6Svg6 ; qt6-svg-imports n'existe pas
           suse) pkg_try libQt6Svg6 qt6-virtualkeyboard-imports qt6-multimedia-imports ;;
         esac
-        sudo git clone -q --depth 1 https://github.com/Keyitdev/sddm-astronaut-theme.git "$T" || warn "$(t "Téléchargement impossible." "Download failed.")"
+        # Commit épinglé : récupéré par son empreinte, puis vérifié ; sinon le dossier est retiré et rien n'est installé
+        if sudo git init -q "$T" && sudo git -C "$T" remote add origin https://github.com/Keyitdev/sddm-astronaut-theme.git &&
+           sudo git -C "$T" fetch -q --depth 1 origin "$SDDM_ASTRO_COMMIT" &&
+           sudo git -C "$T" -c advice.detachedHead=false checkout -q FETCH_HEAD && verifier_commit "$T" "$SDDM_ASTRO_COMMIT" sudo; then
+          ok "$(t "Thème téléchargé (commit ${SDDM_ASTRO_COMMIT:0:12})." "Theme downloaded (commit ${SDDM_ASTRO_COMMIT:0:12}).")"
+        else
+          warn "$(t "Téléchargement impossible ou source refusée." "Download failed or source refused.")"
+          sudo rm -rf "${T:?}"
+        fi
       fi
     fi
     if [ -d "$T" ] && ! sddm_done && ask "$(t "Installer l'écran de connexion ?" "Install the login screen?")" o sensible; then
