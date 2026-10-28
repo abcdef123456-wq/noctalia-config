@@ -818,13 +818,28 @@ class Dictee(unittest.TestCase):
         """Revue Codex DICT-01 : un relâchement arrivé pendant que le micro démarre était perdu (le micro restait ouvert)."""
         self.ptt("ptt-fin")                                   # prépare les faux programmes ; rien en cours
         etat = self.home / "run/nc-dictee-ptt.json"
+        appui, relache = self.home / "run/nc-dictee-appui", self.home / "run/nc-dictee-relache"
+        # Comme le raccourci : l'appui et le relâchement sont datés AVANT de lancer nc-dictee (appui bref de 50 ms).
+        # Sans ces heures, la durée de l'appui compte le démarrage de Python et, sous charge, dépasse 0,45 s : le test
+        # croyait faire un appui long (le fichier d'état disparaissait). Les heures fixes rendent le test déterministe.
+        maintenant = time.time()
+        appui.write_text(""); os.utime(appui, (maintenant - 0.2, maintenant - 0.2))
         p = self.ptt_fond("ptt-debut")
-        fin = time.time() + 5
-        while time.time() < fin and not etat.exists():
+        fin = time.time() + 60                                # condition (état écrit, micro pas prêt), limite très large
+        e = None
+        while time.time() < fin:
+            try:
+                e = json.loads(etat.read_text())
+            except (OSError, ValueError):
+                e = None
+            if e is not None:
+                break
             time.sleep(0.005)
-        self.assertFalse(json.loads(etat.read_text()).get("pret"), "relâché pendant le démarrage")
+        self.assertIsNotNone(e, "état « appuyer pour parler » jamais écrit")
+        self.assertFalse(e.get("pret"), "relâché pendant le démarrage")
+        relache.write_text(""); os.utime(relache, (maintenant - 0.15, maintenant - 0.15))
         self.assertEqual(self.ptt("ptt-fin"), 0)
-        p.wait(20)
+        p.wait(60)
         e = json.loads(etat.read_text())
         self.assertTrue(e.get("bascule"), "appui bref (relâché pendant le démarrage) : dictée longue")
         self.assertEqual(self.ptt("ptt-debut"), 0)            # second appui : écrit
