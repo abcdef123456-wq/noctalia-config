@@ -7,6 +7,7 @@
 - IA_MODE=non : l'IA des notifications n'est jamais touchée. Fichier abîmé, trop gros ou aux valeurs hors liste : ignoré.
 - Écriture atomique, noms en texte brut, jamais de shell, aucune commande root ni sudo.
 Tout se passe dans un dossier temporaire court (HOME, XDG_*, TMPDIR) avec de faux outils qui notent leurs arguments."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -167,6 +168,26 @@ class Defauts(Base):
         self.assertIn("os.replace(tmp, chemin)", src)
         self.assertIn("os.fsync", src)
         self.assertEqual(oct(self.modes.stat().st_mode & 0o777), "0o600")
+
+
+class VerrouModes(Base):
+    def test_un_seul_changement_a_la_fois(self):
+        # un autre nc-modes tient le verrou : écrire est refusé (rien n'est touché), lire marche toujours
+        self.creer("Travail")
+        avant = self.modes.read_bytes()
+        verrou = self.r / "state/nc/modes.lock"
+        with open(verrou, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for args in (("creer", "Nuit"), ("activer", "travail", "--dnd", "non"), ("sortir", "--dnd", "non"),
+                         ("supprimer", "travail"), ("renommer", "travail", "Boulot")):
+                r, code = self.nc(*args)
+                self.assertEqual((code, r["ok"]), (1, False), args)
+                self.assertIn("un autre changement de mode est en cours", r["erreur"])
+            self.assertEqual(self.nc("liste")[1], 0)
+        self.assertEqual(self.modes.read_bytes(), avant)
+        self.assertFalse(self.etat.exists())
+        self.assertEqual(self.journal(), [], "aucun outil lancé")
+        self.assertEqual(self.nc("creer", "Nuit")[1], 0, "verrou rendu : ça repasse")
 
 
 class Validation(Base):

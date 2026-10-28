@@ -24,6 +24,7 @@ mode ignoré), ~/.local/state/nc/modes-etat.json (mode actif, valeurs d'avant et
 Tout est écrit atomiquement (fichier temporaire du même dossier puis rename). Les programmes (nc-energie, nc-fond-jour-nuit,
 nc-reglages) sont lancés en argv, jamais par un shell. Pour les tests : NC_MODES_OUTILS (dossier d'outils cherché d'abord),
 XDG_CONFIG_HOME, XDG_STATE_HOME."""
+import fcntl
 import json
 import os
 import re
@@ -424,6 +425,26 @@ def cmd_etat():
             "dnd_pose": (e["dnd"]["pose"] if e and e["dnd"] else None)}
 
 
+class Verrou:
+    """Un seul changement à la fois (deux nc-modes lancés ensemble ne mélangent pas modes.json ni modes-etat.json) :
+    verrou exclusif sur ~/.local/state/nc/modes.lock, sans attendre, comme celui de nc-energie."""
+    def __enter__(self):
+        os.makedirs(ETAT, mode=0o700, exist_ok=True)
+        self.f = open(os.path.join(ETAT, "modes.lock"), "w")
+        try:
+            fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.f.close()
+            raise Erreur("un autre changement de mode est en cours")
+        return self
+
+    def __exit__(self, *a):
+        self.f.close()
+
+
+ECRIT = ("creer", "renommer", "regler", "supprimer", "activer", "sortir")
+
+
 def principal(argv):
     if not argv or argv[0] in ("-h", "--help", "aide"):
         print(__doc__.split('"""')[0].strip())
@@ -438,6 +459,23 @@ def principal(argv):
             mots.append(reste[i])
             i += 1
     dnd = options.get("--dnd")
+    try:
+        with (Verrou() if cmd in ECRIT else _SansVerrou()):
+            return _executer(cmd, reste, mots, options, dnd)
+    except Erreur as e:
+        print(json.dumps({"ok": False, "erreur": str(e)}, ensure_ascii=False))
+        return 1
+
+
+class _SansVerrou:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _executer(cmd, reste, mots, options, dnd):
     try:
         if cmd == "liste" and not reste:
             r = cmd_liste()

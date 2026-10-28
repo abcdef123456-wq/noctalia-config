@@ -6,7 +6,8 @@ pragma Singleton
 // qu'elle renvoie. Aucun minuteur, aucun sondage : une lecture au démarrage de l'île et une après chaque action.
 // Rien n'existe tant que tu n'as créé aucun mode : pas de pastille, pas de page dans la liste. Le mode actif est gardé par
 // nc-modes (~/.local/state/nc/modes-etat.json) : il survit au redémarrage de l'île. Au démarrage, rien n'est réappliqué dehors ;
-// seul Ne pas déranger, qui n'est gardé qu'en mémoire, est remis comme le mode l'avait posé.
+// seul Ne pas déranger, qui n'est gardé qu'en mémoire, est remis comme le mode l'avait posé (limite connue : s'il avait été
+// coupé à la main pendant le mode juste avant un redémarrage de l'île, il revient tel que le mode l'avait posé).
 // Ne pas déranger, énergie, fond, IA : à la sortie, une valeur changée à la main depuis l'activation est laissée telle quelle.
 import QtQuick
 import Quickshell
