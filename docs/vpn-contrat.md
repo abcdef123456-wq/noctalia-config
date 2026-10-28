@@ -93,12 +93,12 @@ Ce contrat est la version 1.
 | `message` | une phrase, dans la langue de la session (français ou anglais) ; texte brut |
 | `pays` | **seulement si `etat` vaut `pret`** : `[{"code": "FR", "nom": "France"}]`, code en deux lettres majuscules ; le nom vient TOUJOURS du code ISO (table interne français ou anglais selon la langue du bureau), jamais d'une CLI ; liste triée par ce nom. Absente à l'état `pilote_appli` de Proton (le pays se choisit dans l'appli) |
 | `pays_actif` | code du pays du tunnel de ce fournisseur, ou `""` |
-| `connecte` | ce fournisseur a un tunnel monté (toujours `false` hors des états `pret` et `pilote_appli`) ; pour Proton, `protonvpn status` dit « Connected » ou une connexion NetworkManager « ProtonVPN … » est ACTIVE |
+| `connecte` | ce fournisseur a un tunnel monté (toujours `false` hors des états `pret` et `pilote_appli`) ; pour Proton, une connexion NetworkManager « ProtonVPN … » (interface `proton0`) est ACTIVE (jamais `protonvpn status`) |
 | `peut_login` | `nc-vpn fournisseur ID login` est utile (installé, pas de compte connecté, et possible ; pour Proton : « Se connecter au compte » à l'état `sans_compte`, « Ouvrir Proton VPN » à l'état `pilote_appli`) |
-| `probleme` | `""`, ou `permission` (groupe `nordvpn` manquant), `consentement` (première exécution de `nordvpn` : question interactive), `demon` (service arrêté), `delai`, `lancement`, `revoque` (Mullvad : l'appareil a été révoqué), `illisible` (Proton : `protonvpn info` n'a rien donné de lisible), `appli_ouverte` (Proton : l'application graphique tourne, la CLI refuse de travailler en même temps) ; le `message` dit quoi faire |
+| `probleme` | `""`, ou `permission` (groupe `nordvpn` manquant), `consentement` (première exécution de `nordvpn` : question interactive), `demon` (service arrêté), `delai`, `lancement`, `revoque` (Mullvad : l'appareil a été révoqué), `illisible` (Proton : `protonvpn info` n'a rien donné de lisible), `non_verifie` (Proton : le compte n'a pas encore été vérifié, voir plus bas), `appli_ouverte` (Proton : l'application graphique tourne, la CLI refuse de travailler en même temps) ; le `message` dit quoi faire |
 | `pilotage` | `direct` : on pilote la CLI ; `appli` : on ouvre seulement l'application officielle (Proton sans sa CLI, ou application ouverte) |
 
-Jamais dans la sortie : adresse e-mail, nom ou numéro de compte, jeton, adresse IP, URL de connexion. Identifiants lus par la CLI mais jamais gardés : Proton (`protonvpn info` écrit le nom du compte, `status` et `connect` écrivent une IP) et Mullvad ; seuls des booléens et un code pays en sont tirés. Le numéro de compte Mullvad est lu par la CLI mais jamais gardé :
+Jamais dans la sortie : adresse e-mail, nom ou numéro de compte, jeton, adresse IP, URL de connexion. Identifiants lus par la CLI mais jamais gardés : Proton (`protonvpn info` écrit le nom du compte, `connect` écrit une IP) et Mullvad ; seuls des booléens et un code pays en sont tirés. Le numéro de compte Mullvad est lu par la CLI mais jamais gardé :
 `mullvad account get` n'est lancé que pour un oui/non, sa sortie est lue en mémoire (4 Kio au plus), analysée puis jetée, et n'apparaît dans aucun
 message, journal, erreur ni JSON. Toutes les lectures de CLI sont réellement bornées (64 Kio, 1 Mio pour `mullvad relay list`) : passé la borne, ou le délai,
 le groupe de processus est arrêté (SIGTERM puis SIGKILL).
@@ -135,9 +135,25 @@ Les messages d'erreur passent par un filtre (URL, e-mail, longues suites de chif
   - `info` écrit `Account: 'NOM'` (`'None'` sans compte, `commands/account.py` et `core/api.py`) : seul « un compte existe » est gardé, NOM est jeté.
     La liste des pays est `countries list` (`countries` seul est un groupe sans action) : un tableau « Country  Code », code en majuscules
     (`commands/location_discovery.py`) ; seul le code est gardé, le nom vient de la table ISO. Sans compte elle écrit « Authentication required… » (session
-    perdue : état `sans_compte`). `status` écrit `Status: Connected` puis `Server: IT#23 in Ville, Pays`, sinon `Status: Disconnected`
-    (`commands/server.py`) ; le pays actif est lu dans le nom du serveur (`IT#23` : `IT` ; avec des tirets, le dernier mot de deux lettres ISO, forme
-    `CH-IT#1` ou `US-FREE#5` supposée, non vue dans les sources : sans lecture possible, le pays vient du nom de la connexion NetworkManager).
+    perdue : état `sans_compte`).
+  - **`protonvpn status` n'est jamais lancé** : ce n'est pas une lecture pure. Il passe par `get_vpn_connector` (`commands/server.py` ; `core/api.py`
+    l.121-139), donc par `initialize_state` puis `_apply_kill_switch_setting` (`core/vpnconnector.py` l.284-306) : il RÉAPPLIQUE le réglage du kill
+    switch de Proton (et sa protection IPv6), ce qui, pendant un `connect` lancé ailleurs, peut les désactiver. Le tunnel, son serveur et son pays se lisent
+    dans NetworkManager : la connexion s'appelle « ProtonVPN NOM_DU_SERVEUR » (`backend/networkmanager/core/networkmanager.py` l.221, `_get_servername` ;
+    `protocol/wireguard/wireguard.py` l.153, `openvpn/openvpn.py` l.249, `protun/protun.py` l.175) et son interface est `proton0`
+    (`VIRTUAL_DEVICE_NAME`, `wireguard.py` l.97, `openvpn.py` l.201, `protun.py` l.129). Le nom du serveur donne le pays : `IT#23` donne IT, `UK#3` donne
+    GB ; Secure Core : si le 1er segment est CH, IS ou SE et le 2e un pays ISO, c'est le 2e (`CH-US#1` donne US), sinon le 1er (`US-CA#12` donne US).
+    Les formes `CH-US#1` et `US-CA#12` ne sont pas dans les sources lues (seul `IT#23` y figure) : c'est la règle retenue.
+  - **`info` et `countries list` ne sont pas sûrs en arrière-plan** : ils n'appellent pas `get_vpn_connector` eux-mêmes (`Controller.create` fait
+    `get_settings`, donc `ProtonVPNAPI.load_settings`, `core/api.py` l.218), mais `load_settings` passe par `_force_protun_for_free_users` puis
+    `_should_force_protun_for_free_users` (l.150-180) qui appelle `get_vpn_connector` pour un compte gratuit quand le drapeau PROTUN_ONLY est présent : le même
+    effet de bord est possible. Règle : lire l'état de Proton par sa CLI peut réappliquer ses protections ; noctalia-config ne le fait jamais en arrière-plan.
+    `info` et `countries list` ne sont lancés que par `nc-vpn fournisseurs-json --verifier-proton`, demandé par l'île à l'ouverture de l'onglet Proton (une
+    fois par ouverture de la fenêtre) ou à la fin d'une connexion au compte ; jamais par un événement NetworkManager, au démarrage, par `relire()`, par
+    l'indicateur ni par `fournisseurs-json` seul. Même alors, rien n'est lancé si un tunnel Proton monte (NetworkManager « activating ») ou si le verrou des
+    changements est tenu (ils prennent ce verrou le temps de la lecture). Sans l'option, l'état du compte et la liste des pays viennent du dernier relevé,
+    gardé dans `$XDG_RUNTIME_DIR/nc-vpn-proton.json` (mémoire vive, mode 0600) : seulement `compte` (oui/non), `appli_ouverte`, `probleme` et des codes
+    pays ISO, jamais un nom de compte. Sans relevé : `sans_compte` avec `probleme` = `non_verifie`.
   - `connect --country X` : `X` est un code à deux lettres (insensible à la casse) ou un nom anglais (`core/controller.py`, `validate_country_input` :
     deux caractères = code) ; nous donnons toujours le code ISO MAJUSCULE, validé avant tout appel. Sur le palier gratuit, choisir un pays est refusé par
     la CLI (« not available on the free plan ») : message prévu, jamais la sortie brute. Un compte payant dont la requête n'aboutit pas peut recevoir un

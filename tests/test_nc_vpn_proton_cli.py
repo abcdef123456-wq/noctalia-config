@@ -4,7 +4,9 @@ de compte, un faux jeton et une fausse IP qui ne doivent ressortir NULLE PART. T
 depuis le code ISO et triés ; connect en argv exact ; code pays refusé sans appel ; verrou ; kill switch ; appli graphique ouverte
 (la CLI refuse de tourner avec elle) ; login par l'appli ou par kitty `protonvpn signin` ; repli sur l'état « pilote_appli ».
 PATH = faux-bin seul : jamais le vrai protonvpn, ni protonvpn-app, ni kitty."""
+import fcntl
 import json
+import os
 import subprocess
 import sys
 import time
@@ -28,8 +30,7 @@ PAYS = ("Server list is outdated, updating... This may take a moment.\n"
         "France         FR\n"
         "Germany        DE\n"
         "Atlantis       ZZ\n")
-STATUS_NON = "Status: Disconnected\n"
-STATUS_OUI = f"Status: Connected\nServer: SE#12 in Stockholm, Sweden\nLoad: 40%\nProtocol: wireguard\nIP: {IP}\n"
+AUTORISEES = {"info", "countries", "connect", "disconnect", "signin"}     # jamais « status » : il réapplique le kill switch de Proton
 APPLI = ("Error: Proton VPN desktop app is currently running\n"
          "The CLI and GUI cannot run simultaneously. Please close the GUI application and try again.\n")
 CONNECTE_OK = f"Connected to FR#7 in Paris, France. \nYour new IP address is {IP}.\n"
@@ -41,14 +42,20 @@ def lire(r):
 
 
 class ProtonCli(BaseVpn):
-    def cli(self, info=INFO_OK, pays=PAYS, status=STATUS_NON, **autres):
-        conf = {"info": {"out": info}, "countries": {"out": pays}, "status": {"out": status},
+    def cli(self, info=INFO_OK, pays=PAYS, **autres):
+        conf = {"info": {"out": info}, "countries": {"out": pays}, "status": {"out": "Status: Disconnected\n", "err": "BOOM-status", "code": 99},
                 "connect": {"out": CONNECTE_OK}, "disconnect": {"out": "Disconnected.\n"}}
         conf.update(autres)
         self.poser("protonvpn", conf)
+        self.addCleanup(self.aucune_commande_interdite)
 
-    def fiche(self, **env):
-        r = self.seul("fournisseurs-json", **env)
+    def aucune_commande_interdite(self):
+        """Quoi qu'ait fait le test, aucune sous-commande en dehors de la liste (surtout pas `status`) n'a été lancée."""
+        vus = {a[0] for a in self.appels_de("protonvpn") if a}
+        self.assertLessEqual(vus, AUTORISEES)
+
+    def fiche(self, verifier=True, **env):
+        r = self.seul(*(("fournisseurs-json", "--verifier-proton") if verifier else ("fournisseurs-json",)), **env)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.vu = lire(r)
         for s in SECRETS:
@@ -79,26 +86,79 @@ class ProtonCli(BaseVpn):
         f = self.fiche()
         self.assertEqual((f["etat"], f["peut_login"], f["connecte"], f["pilotage"]), ("sans_compte", True, False, "direct"))
         self.assertNotIn("pays", f)
-        self.assertEqual(self.appels_de("protonvpn"), [["info"]])              # ni la liste des pays ni le statut sans compte
+        self.assertEqual(self.appels_de("protonvpn"), [["info"]])              # ni la liste des pays sans compte
 
     def test_pret_pays_seulement_a_pret_traduits_et_tries(self):
         self.cli()
         f = self.fiche(NC_LANGUE="fr")
         self.assertEqual((f["etat"], f["connecte"], f["pays_actif"], f["pilotage"]), ("pret", False, "", "direct"))
         self.assertEqual(f["pays"], [{"code": "DE", "nom": "Allemagne"}, {"code": "FR", "nom": "France"}, {"code": "SE", "nom": "Suède"}])
-        self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"], ["status"]])
-        en = self.fiche(NC_LANGUE="en")
+        self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"]])
+        en = self.fiche(verifier=False, NC_LANGUE="en")                         # lecture automatique : le dernier relevé, aucun appel de plus
         self.assertEqual([p["nom"] for p in en["pays"]], ["France", "Germany", "Sweden"])
+        self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"]])
 
-    def test_tunnel_actif_donne_le_pays(self):
-        self.cli(status=STATUS_OUI)
-        f = self.fiche()
-        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"]), ("pret", True, "SE"))
+    def test_tunnel_actif_et_pays_lus_dans_networkmanager(self):
+        self.cli()
+        for nom, cc in (("ProtonVPN SE#12", "SE"), ("ProtonVPN CH-US#1", "US"), ("ProtonVPN US-CA#12", "US"), ("ProtonVPN UK#3", "GB")):
+            (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=True, dev="proton0", nom=nom)]))
+            f = self.fiche()
+            self.assertEqual((f["etat"], f["connecte"], f["pays_actif"]), ("pret", True, cc), nom)
+            actives = json.loads(self.seul("etat-json").stdout)["actives"]
+            self.assertEqual([c["pays"] for c in actives if "Proton" in c["nom"]], [cc], nom)        # même règle pour la carte principale
+            self.assertEqual(charger().pays_proton_nom(nom), cc, nom)
 
     def test_pays_du_serveur_secure_core_et_gratuit(self):
         mod = charger()
-        for nom, cc in (("IT#23", "IT"), ("CH-IT#1", "IT"), ("US-FREE#5", "US"), ("XX#1", ""), ("", "")):
+        for nom, cc in (("IT#23", "IT"), ("CH-IT#1", "IT"), ("US-FREE#5", "US"), ("XX#1", ""), ("", ""), ("US-CA#12", "US"),
+                        ("CH-US#1", "US"), ("IS-FR#2", "FR"), ("SE-DE#3", "DE"), ("UK#3", "GB"), ("CH#1", "CH"), ("SE-FREE#1", "SE")):
             self.assertEqual(mod.proton_pays_serveur(nom), cc, nom)
+
+    def test_lectures_automatiques_ne_lancent_jamais_protonvpn(self):
+        """Événement NetworkManager simulé, relire(), indicateur, fournisseurs-json sans l'action explicite : aucun appel."""
+        self.cli()
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=True, dev="proton0", nom="ProtonVPN FR#12")]))
+        for args in (("fournisseurs-json",), ("indicateur", "--json"), ("etat-json",), ("fournisseurs-json",)):
+            r = self.seul(*args)
+            self.assertEqual(r.returncode, 0, args)
+        self.assertEqual(self.appels_de("protonvpn"), [])
+        f = self.fiche(verifier=False)                                           # pas encore vérifié : dit d'ouvrir l'onglet, sans appel
+        self.assertEqual((f["etat"], f["probleme"], f["connecte"]), ("sans_compte", "non_verifie", False))
+        self.assertEqual(self.appels_de("protonvpn"), [])
+
+    def test_verification_explicite_ecrit_un_cache_sans_identifiant(self):
+        self.cli()
+        self.fiche()
+        cache = (self.r / "run" / "nc-vpn-proton.json").read_text()
+        for s in SECRETS:
+            self.assertNotIn(s, cache)
+        self.assertEqual(json.loads(cache)["pays"], ["SE", "FR", "DE"])
+        self.assertEqual(oct((self.r / "run" / "nc-vpn-proton.json").stat().st_mode & 0o777), "0o600")
+        f = self.fiche(verifier=False, NC_LANGUE="fr")
+        self.assertEqual(f["etat"], "pret")
+
+    def test_verification_refusee_si_le_verrou_est_tenu(self):
+        self.cli()
+        verrou = os.open(str(self.r / "run" / "nc-vpn.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, verrou)
+        fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        f = self.fiche()
+        self.assertEqual(f["probleme"], "non_verifie")
+        self.assertEqual(self.appels_de("protonvpn"), [])
+        fcntl.flock(verrou, fcntl.LOCK_UN)
+        self.assertEqual(self.fiche()["etat"], "pret")
+        self.assertEqual(self.appels_de("protonvpn"), [["info"], ["countries", "list"]])
+        fcntl.flock(verrou, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.fiche()                                                             # verrou tenu : le relevé précédent sert, rien de plus
+        self.assertEqual(len(self.appels_de("protonvpn")), 2)
+
+    def test_verification_refusee_pendant_la_montee_du_tunnel(self):
+        self.cli()
+        (self.r / "etat.json").write_text(json.dumps(connexions() + [dict(uuid=UP, type="wireguard", active=True, dev="proton0",
+                                                                           nom="ProtonVPN FR#12", etat="activating")]))
+        f = self.fiche()
+        self.assertEqual(f["probleme"], "non_verifie")
+        self.assertEqual(self.appels_de("protonvpn"), [])
 
     def test_tunnel_nm_proton_compte_aussi_sans_doublon_dans_la_fiche(self):
         self.cli()
@@ -140,7 +200,7 @@ class ProtonCli(BaseVpn):
         self.assertEqual(self.fiche()["etat"], "sans_compte")
 
     def test_identifiants_jamais_ressortis_nulle_part(self):
-        for kw in ({}, {"info": INFO_SANS}, {"status": STATUS_OUI}, {"info": APPLI}):
+        for kw in ({}, {"info": INFO_SANS}, {"info": APPLI}):
             self.cli(**kw)
             self.fiche()
         self.cli(connect={"out": "Error: " + EMAIL + " " + COMPTE + " " + JETON + " " + IP + "\n", "code": 1})

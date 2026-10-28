@@ -14,6 +14,9 @@ Item {
     property real maxHauteur: 300
     height: carteEtat ? carte.height : Math.min(maxHauteur, Math.max(vide.visible ? vide.implicitHeight : 0, colonne.implicitHeight))
 
+    // L'onglet Proton ouvert : seul moment (avec la fin d'une connexion au compte) où `protonvpn info` est lancé (une fois par ouverture)
+    onFiltreChanged: if (filtre === "proton") VpnEtat.verifierProton(false)
+    Component.onCompleted: if (filtre === "proton") VpnEtat.verifierProton(false)
     readonly property var fiche: VpnEtat.fournisseurs.find(p => p.id === filtre) || null
     readonly property bool carteEtat: fiche !== null && (fiche.bientot || fiche.etat !== "pret")
 

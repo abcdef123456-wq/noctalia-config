@@ -48,6 +48,9 @@ elif a[:2] == ["killswitch", "etat-json"]:
     print(open(f).read() if os.path.exists(f) else json.dumps(dict(installe=True, voulu=True, actif=False, refus="", limites=["Limite un", "Limite deux"])))
 elif a[:2] == ["killswitch", "activer"] or a[:2] == ["killswitch", "desactiver"]:
     open(H + "/ks.json", "w").write(json.dumps(dict(installe=True, voulu=True, actif=a[1] == "activer", refus="", limites=["Limite un", "Limite deux"])))
+elif a[:1] == ["fournisseur"]:
+    if json.loads(open(H + "/etat.json").read()).get("lent"):
+        import time; time.sleep(2)            # une action qui dure : pour vérifier ce que relire() fait pendant ce temps
 elif a[:1] == ["fournisseurs-json"]:
     e = json.loads(open(H + "/etat.json").read())
     if "fournisseurs" in e: print(json.dumps(dict(contrat=1, fournisseurs=e["fournisseurs"])))
@@ -663,6 +666,34 @@ class HorsEcran(unittest.TestCase):
         ''', etats={0: etat})
         act = [a for a in appels if a[:1] == ["fournisseur"]]
         self.assertEqual(act, [["fournisseur", "proton", "connecter", "DE"], ["fournisseur", "proton", "deconnecter"]])
+
+    def test_proton_verification_explicite_une_fois_et_relire_pendant_une_action_ne_lance_rien(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="", pays=[dict(code="fr", nom="France")], pays_actif="", connecte=False,
+                   peut_login=False, probleme="", pilotage="direct"),
+              dict(id="nord", nom="NordVPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False)]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl, lent=True)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 4) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 2) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 4 || VpnEtat.externeEnLecture) return
+                    VpnEtat.lancer(["fournisseur", "proton", "deconnecter"], "ext:proton")
+                    VpnEtat.relire()
+                    etape++; ticks = 0; return }
+                if (etape === 5) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }      // fini AVANT la fin de l'action (2 s)
+            } }
+        ''', etats={0: etat})
+        self.assertEqual(appels.count(["fournisseurs-json", "--verifier-proton"]), 1, "une seule vérification par ouverture")
+        self.assertGreaterEqual(appels.count(["fournisseurs-json"]), 1)
+        i = appels.index(["fournisseur", "proton", "deconnecter"])
+        self.assertNotIn(["fournisseurs-json"], appels[i + 1:], "relire() pendant une action ne lance pas de lecture externe")
+        self.assertEqual([a for a in appels if a[:1] == ["fournisseurs-json"] and a not in (["fournisseurs-json"], ["fournisseurs-json", "--verifier-proton"])], [])
 
     def test_proton_application_ouverte_message_de_nc_vpn_et_tout_deconnecter_sans_ouvrir_l_appli(self):
         fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", pays_actif="fr", connecte=True, peut_login=True,

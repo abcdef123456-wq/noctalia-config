@@ -293,7 +293,8 @@ l'île Quickshell.
   lancement de `nordvpn` pose une question (statistiques anonymes) : ouvre un terminal et lance `nordvpn` une fois ; sans le groupe
   `nordvpn` dans ta session, ajoute ton compte au groupe puis rouvre la session (aucune élévation de notre part). Proton : l'état vient de `protonvpn info`
   (seul « un compte existe » est gardé, jamais son nom), les pays de `protonvpn countries list` (le nom vient du code ISO, pas de la
-  CLI), le tunnel de `protonvpn status` ; `connecter FR` lance `protonvpn connect --country FR` et `deconnecter` lance `protonvpn
+  CLI), le tunnel de NetworkManager (connexion « ProtonVPN SERVEUR ») ; la CLI n'est lue que quand tu ouvres l'onglet Proton, jamais en
+  arrière-plan, et jamais `protonvpn status` (il réappliquerait le kill switch de Proton) ; `connecter FR` lance `protonvpn connect --country FR` et `deconnecter` lance `protonvpn
   disconnect` (refusé si le kill switch est actif). La CLI refuse de tourner avec l'application Proton ouverte : l'île te dit alors de
   fermer l'application (nous ne la fermons jamais). `login` ouvre l'application Proton si elle est installée, sinon une fenêtre kitty
   où tu tapes ton nom de compte, puis Proton te demande lui-même le mot de passe (jamais chez nous). Sans la CLI mais avec l'application,

@@ -132,34 +132,48 @@ Singleton {
     }
 
     function lireExterne() { if (panneauOuvert && !lectureExterne.running) lectureExterne.running = true }
+    // Lecture AUTOMATIQUE (événements NetworkManager, relire()) : nc-vpn ne lance alors aucune commande Proton (voir docs/vpn-contrat.md).
     Process {
         id: lectureExterne
         command: [v.bin + "nc-vpn", "fournisseurs-json"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var d = null
-                try { d = JSON.parse(text) } catch (e) { d = null }
-                var res = {}
-                if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
-                    d.fournisseurs.forEach(x => {
-                        if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
-                        var pays = x.etat === "pret" && Array.isArray(x.pays)
-                            ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
-                                    .map(q => ({ cc: q.code.toUpperCase(), nom: q.nom.slice(0, 40) })).slice(0, 150) : []
-                        res[x.id] = { id: x.id, nom: typeof x.nom === "string" && x.nom !== "" ? x.nom.slice(0, 40) : (x.id === "nord" ? "NordVPN" : "Proton VPN"),
-                                      etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
-                                      paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
-                                      connecte: x.connecte === true, peutLogin: x.peut_login === true,
-                                      probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "" }
-                    })
-                }
-                v.externe = res
-            }
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+    }
+    // Vérification EXPLICITE du compte Proton (`protonvpn info` et `countries list`) : une seule fois par ouverture de la fenêtre, à
+    // l'ouverture de l'onglet Proton, ou après une connexion au compte (force). Jamais pendant une action, jamais depuis relire().
+    property bool protonVerifie: false
+    readonly property bool externeEnLecture: lectureExterne.running      // lecture automatique en cours (pour les tests)
+    function verifierProton(force) {
+        if (!panneauOuvert || agir.running || verificationProton.running || (protonVerifie && force !== true)) return
+        protonVerifie = true
+        verificationProton.running = true
+    }
+    Process {
+        id: verificationProton
+        command: [v.bin + "nc-vpn", "fournisseurs-json", "--verifier-proton"]
+        stdout: StdioCollector { onStreamFinished: v.ingererExterne(text) }
+    }
+    function ingererExterne(text) {
+        var d = null
+        try { d = JSON.parse(text) } catch (e) { d = null }
+        var res = {}
+        if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
+            d.fournisseurs.forEach(x => {
+                if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
+                var pays = x.etat === "pret" && Array.isArray(x.pays)
+                    ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
+                            .map(q => ({ cc: q.code.toUpperCase(), nom: q.nom.slice(0, 40) })).slice(0, 150) : []
+                res[x.id] = { id: x.id, nom: typeof x.nom === "string" && x.nom !== "" ? x.nom.slice(0, 40) : (x.id === "nord" ? "NordVPN" : "Proton VPN"),
+                              etat: x.etat, message: typeof x.message === "string" ? x.message.slice(0, 300) : "", pays: pays,
+                              paysActif: typeof x.pays_actif === "string" && /^[A-Za-z]{2}$/.test(x.pays_actif) ? x.pays_actif.toUpperCase() : "",
+                              connecte: x.connecte === true, peutLogin: x.peut_login === true,
+                              probleme: typeof x.probleme === "string" ? x.probleme.slice(0, 20) : "" }
+            })
         }
+        v.externe = res
     }
 
     function relire() {
-        lireExterne()
+        if (!agir.running) lireExterne()           // une action en cours relira l'état à sa fin (onExited)
         if (panneauOuvert && !lecture.running) lecture.running = true      // tous les tunnels : panneau ouvert seulement
         if (panneauOuvert && mullvadInstalle && !lectureMullvad.running) lectureMullvad.running = true
         if (!resume.running) resume.running = true
@@ -190,7 +204,7 @@ Singleton {
         }
     }
     onVouluChanged: if (voulu) relire()           // premier relevé, et relevé au réveil de l'écran
-    onPanneauOuvertChanged: { if (panneauOuvert) { relire(); lireKs(); lirePays() } else tunnelsLus = false }
+    onPanneauOuvertChanged: { if (panneauOuvert) { relire(); lireKs(); lirePays() } else { tunnelsLus = false; protonVerifie = false } }
     onMullvadInstalleChanged: { lirePays(); if (panneauOuvert && mullvadInstalle && !lectureMullvad.running) lectureMullvad.running = true }
     function lirePays() { if (panneauOuvert && mullvadInstalle && !mullvadPaysLus && !lecturePays.running) lecturePays.running = true }
     Process {
