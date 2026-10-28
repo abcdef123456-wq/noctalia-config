@@ -50,6 +50,10 @@ class Carte(unittest.TestCase):
                   proposer) echo '{{"source": "regles", "raison": "", "profils": [], "rejets": []}}' ;;
                 esac
                 '''))
+            faux(root / "bin", "nc-assistant-install", textwrap.dedent(f'''\
+                echo "nc-assistant-install $*" >> "{root}/appels"
+                sed -i 's/"assistant_root": false/"assistant_root": true/' "{root}/liste.json"
+                '''))
             (root / "shell.qml").write_text(ENTETE_QML + textwrap.dedent('''\
                 ShellRoot {
                     id: racine
@@ -120,6 +124,30 @@ if (etape === 0) { if (attendre(900)) return
 else if (etape === 1) { if (attendre(500)) return; Qt.quit() }
 ''')
         self.assertEqual([l for l in appels if "apercu" in l], [])
+
+    def test_assistant_absent_pas_installe_et_bouton_installer(self):
+        appels = self.executer({"profils": PROFILS, "ia": False, "disponible": True, "actif": None, "assistant_root": False}, '''
+if (etape === 0) { if (attendre(900)) return
+  var b = trouver(page, "boutonInstallerEnergie")
+  verifier(b.visible, "bouton Installer l'assistant absent")
+  verifier(b.texte.indexOf("Installer l'assistant") >= 0, "texte du bouton : " + b.texte)
+  verifier(tous(page, "boutonInstallerEnergie").length === 1, "un seul bouton")
+  verifier(cliquer(page, "boutonInstallerEnergie"), "clic sur Installer")
+  marque = Date.now(); etape++ }
+else if (etape === 1) { if (attendre(1200)) return
+  verifier(!trouver(page, "boutonInstallerEnergie").visible, "bouton encore là après l'installation : état non relu")
+  Qt.quit() }
+''')
+        self.assertIn("nc-assistant-install energie", appels)
+        self.assertGreaterEqual(len([l for l in appels if l == "nc-energie liste --json"]), 2, "relecture après la fenêtre")
+
+    def test_assistant_present_pas_de_bouton_installer(self):
+        appels = self.executer({"profils": PROFILS, "ia": False, "disponible": True, "actif": None, "assistant_root": True}, '''
+if (etape === 0) { if (attendre(900)) return
+  verifier(!trouver(page, "boutonInstallerEnergie").visible, "bouton Installer alors que l'assistant est là")
+  Qt.quit() }
+''')
+        self.assertNotIn("nc-assistant-install energie", appels)
 
     def test_carte_cachee_sans_capacite(self):
         self.executer({"profils": [], "ia": False, "disponible": False, "actif": None, "assistant_root": False}, '''

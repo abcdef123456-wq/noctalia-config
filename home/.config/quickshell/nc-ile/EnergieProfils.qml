@@ -98,6 +98,17 @@ Module {
         id: applicateur
         stdout: StdioCollector { onStreamFinished: ep.fin(text) }
     }
+    // Poser l'assistant root : nc-assistant-install ouvre une fenêtre kitty qui lance seulement l'étape énergie d'install.sh (la
+    // question, le mot de passe et la sortie y sont, jamais d'installation en silence). Fin de la fenêtre : on relit les profils.
+    Process {
+        id: installeur
+        command: [Etat.bin + "nc-assistant-install", "energie"]
+        stderr: StdioCollector { id: erreurInstalleur }
+        onExited: code => {
+            if (code !== 0) ep.message = erreurInstalleur.text.trim().split("\n")[0] || Reglages.t("Installation de l'assistant impossible.", "Couldn't install the helper.")
+            ep.lire()
+        }
+    }
     Process {
         id: retour
         command: [Etat.bin + "nc-energie", "revenir", "--json"]
@@ -230,8 +241,15 @@ Module {
             text: ep.etat.assistant_root === true
                   ? Reglages.t("Rien n'est réappliqué tout seul au démarrage. L'écran garde sa fréquence maximale sauf profil « film » confirmé.",
                                "Nothing is reapplied on its own at startup. The screen keeps its top refresh rate unless a confirmed \"movie\" profile says otherwise.")
-                  : Reglages.t("Les réglages du matériel demandent l'assistant (install.sh te le propose, avec ton accord).",
-                               "Hardware settings need the helper (install.sh offers it, with your consent).")
+                  : Reglages.t("Pas installé : l'assistant se pose avec ton accord (les réglages du matériel en ont besoin).",
+                               "Not installed: the helper is set up with your consent (hardware settings need it).")
+        }
+        BoutonEnergie {
+            objectName: "boutonInstallerEnergie"
+            visible: ep.etat.assistant_root !== true
+            texte: Reglages.t("Installer l'assistant…", "Install the helper…"); icone: "download"
+            actif: !installeur.running
+            onClic: if (!installeur.running) installeur.running = true
         }
     }
 }

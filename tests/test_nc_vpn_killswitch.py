@@ -254,6 +254,31 @@ class KillSwitch(BaseVpn):
         self.cfg_reglage("non")
         self.assertFalse(json.loads(self.ks("etat-json").stdout)["voulu"])
 
+    def test_pas_installe_assistant_absent_ou_regle_sudo_absente(self):
+        """« Pas installé » (champ installe: false), jamais « inconnu » : l'assistant manque, ou sudo ne le permet pas sans mot de passe.
+        La règle est cherchée par « sudo -n -l ASSISTANT etat » en argv, sans rien lancer d'autre."""
+        # assistant absent : sudo n'est même pas appelé
+        r = self.ks("etat", NC_VPN_ROOT=str(self.r / "absent"))
+        self.assertIn("pas installé", r.stdout)
+        self.assertNotIn("inconnu", r.stdout)
+        j = json.loads(self.ks("etat-json", NC_VPN_ROOT=str(self.r / "absent")).stdout)
+        self.assertEqual((j["installe"], j["actif"]), (False, None))
+        self.assertIn("Pas installé", j["refus"])
+        self.assertEqual(self.sudo(), [])
+        # assistant posé mais règle sudo absente (sudo demande un mot de passe) : pas installé non plus
+        r = self.ks("etat", SUDO_MOT_DE_PASSE="1")
+        self.assertIn("pas installé", r.stdout)
+        self.assertNotIn("inconnu", r.stdout)
+        j = json.loads(self.ks("etat-json", SUDO_MOT_DE_PASSE="1").stdout)
+        self.assertEqual((j["installe"], j["actif"]), (False, None))
+        self.assertEqual(set(map(tuple, self.sudo())), {("-n", "-l", str(self.helper), "etat")})
+        # règle présente : la question à sudo est la seule demandée, puis l'état vient de l'assistant
+        (self.r / "appels-sudo.jsonl").unlink()
+        (self.r / "ks-etat").write_text("inactif\n")
+        j = json.loads(self.ks("etat-json").stdout)
+        self.assertEqual((j["installe"], j["actif"]), (True, False))
+        self.assertEqual(self.sudo()[0], ["-n", "-l", str(self.helper), "etat"])
+
     def test_aucun_appel_a_nft_ni_a_ip_link_ni_a_systemctl(self):
         self.openvpn_sous_wifi()
         self.ks("activer")

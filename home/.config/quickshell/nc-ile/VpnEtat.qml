@@ -47,6 +47,7 @@ Singleton {
 
     // Kill switch (nc-vpn killswitch etat-json) : lu panneau ouvert et hors partage d'écran seulement, puis après chaque action
     property bool ksInstalle: false
+    property bool ksLu: false                     // l'état a été lu au moins une fois (avant, on ne dit pas « pas installé »)
     property bool ksVoulu: false
     property var ksActif: null                    // true, false ou null (inconnu)
     property string ksRefus: ""                   // pourquoi on ne peut pas l'activer maintenant (texte brut de nc-vpn)
@@ -142,6 +143,7 @@ Singleton {
                 if (!d || typeof d !== "object") { v.ksActif = null }          // illisible : état inconnu, jamais l'ancien
                 else {
                     v.ksInstalle = d.installe === true
+                    v.ksLu = true
                     v.ksVoulu = d.voulu === true
                     v.ksActif = d.actif === true ? true : (d.actif === false ? false : null)
                     v.ksRefus = typeof d.refus === "string" ? d.refus.slice(0, 240) : ""
@@ -150,6 +152,21 @@ Singleton {
             }
         }
     }
+
+    // Poser l'assistant root : nc-assistant-install ouvre une fenêtre kitty qui lance seulement l'étape kill switch d'install.sh
+    // (la question, le mot de passe et la sortie y sont) ; le processus finit quand la fenêtre est fermée, alors on relit l'état.
+    // Dépôt ou kitty introuvable : la commande à taper à la main arrive en notification.
+    property bool installationEnCours: installeur.running
+    Process {
+        id: installeur
+        command: [v.bin + "nc-assistant-install", "killswitch"]
+        stderr: StdioCollector { id: erreurInstalleur }
+        onExited: code => {
+            if (code !== 0) v.notifier(erreurInstalleur.text.trim().split("\n")[0] || Reglages.t("Installation de l'assistant impossible.", "Couldn't install the helper."))
+            v.lireKs()
+        }
+    }
+    function installerAssistant() { if (!installeur.running && !masque) installeur.running = true }
 
     // Relecture de l'état du kill switch toutes les 10 s : SEULEMENT panneau ouvert, écran allumé, hors partage d'écran
     Timer { interval: 10000; repeat: true; running: v.panneauOuvert && v.disponible && !v.masque && Etat.ecranVu; onTriggered: v.lireKs() }

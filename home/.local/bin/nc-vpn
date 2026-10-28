@@ -1169,8 +1169,24 @@ def message_root(err):
     return re.sub(r"^nc-vpn-root:\s*", "", court(err, 240))
 
 
+def assistant_installe():
+    """L'assistant est posé ET la règle sudo existe : « sudo -n -l ASSISTANT etat » (en argv, sans mot de passe) ne lance rien,
+    il demande seulement à sudo si cette commande exacte est permise. Faux sinon : « pas installé », pas « inconnu »."""
+    if not os.path.exists(ROOT_VPN):
+        return False
+    sudo = shutil.which("sudo")
+    if not sudo:
+        return False
+    try:
+        r = subprocess.run([sudo, "-n", "-l", ROOT_VPN, "etat"], capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
+                           env=dict(os.environ, LC_ALL="C"))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
 def killswitch_etat():
-    """True / False d'après l'assistant (« etat »), None si inconnu (assistant absent, règle sudo manquante)."""
+    """True / False d'après l'assistant (« etat »), None si inconnu (l'assistant ne répond pas)."""
     try:
         code, out, _ = appeler_root(["etat"])
     except Echec:
@@ -1204,14 +1220,19 @@ def killswitch(a):
                         + T(" (en terminal : sudo nft delete table inet nc_vpn)", " (in a terminal: sudo nft delete table inet nc_vpn)"))
         print(T("Kill switch coupé.", "Kill switch off."))
     elif a == ["etat"]:
+        if not assistant_installe():
+            print(T("Kill switch : pas installé (l'assistant se pose avec ton accord : install.sh --seulement killswitch)",
+                    "Kill switch: not installed (the helper is set up with your consent: install.sh --seulement killswitch)"))
+            return
         s = killswitch_etat()
         print(T("Kill switch : ", "Kill switch: ") + (T("actif", "on") if s else T("inactif", "off") if s is False else T("inconnu", "unknown")))
     elif a == ["etat-json"]:
-        installe = os.path.exists(ROOT_VPN)
+        installe = assistant_installe()
         actif = killswitch_etat() if installe else None
         refus = ""
         if not installe:
-            refus = T("Assistant non installé : lance install.sh (avec ton accord).", "Helper not installed: run install.sh (with your consent).")
+            refus = T("Pas installé : l'assistant se pose avec ton accord (install.sh --seulement killswitch).",
+                      "Not installed: the helper is set up with your consent (install.sh --seulement killswitch).")
         elif actif is not True:
             try:
                 resoudre_tunnel()

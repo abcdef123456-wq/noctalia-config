@@ -98,6 +98,7 @@ en charge** par l'installateur : il copie tout dans `~/.config` et `~/.local/sta
 | `./install.sh --no-system` | seulement ta session (aucune modification système, à part l'installation de paquets) |
 | `./install.sh --files-only` | seulement la copie des fichiers |
 | `./install.sh --restore` | remet tes fichiers comme avant la dernière installation |
+| `./install.sh --seulement killswitch` ou `energie` | seulement l'assistant root du kill switch VPN, ou celui des profils d'énergie : une question (non par défaut, `--oui` ne l'accepte pas), rien d'autre ; c'est ce que lance le bouton « Installer l'assistant… » de l'île |
 | `./install.sh --oui` | sans terminal (CI, ssh), répond aussi oui aux étapes de démarrage, de connexion et de pilotes, que le script saute sinon |
 
 Le script :
@@ -287,7 +288,9 @@ l'île Quickshell.
   tout hors du VPN » est dans la section « Protections » du panneau (confirmation avant d'activer, rien pendant un partage
   d'écran, couper en un clic) ; en terminal : `nc-vpn killswitch activer | desactiver | etat | limites`. Il demande un petit
   assistant root, `system/nc-vpn-root`, que `install.sh` pose seulement si tu réponds oui à une question à part (non par défaut ;
-  il propose alors le paquet `nftables`) : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
+  il propose alors le paquet `nftables`). Pas posé, le panneau dit « Pas installé » (sans bouton Couper) et son bouton « Installer
+  l'assistant… » ouvre une fenêtre kitty qui lance seulement `install.sh --seulement killswitch` (le clone noté par `install.sh`
+  dans `~/.config/nc/depot` ; la même question, `--oui` ne l'accepte pas), puis relit l'état. L'assistant : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
   être un vrai TUN/TAP ou WireGuard, jamais le Wi-Fi ni l'Ethernet ; les serveurs sont des adresses IP, 8 au plus) et n'écrit que
   sa propre table nft `inet nc_vpn` (les autres règles ne sont ni lues ni touchées). Sortent seulement : la boucle locale, le
   tunnel, DHCP, le voisinage IPv6, les adresses et ports du serveur VPN (port obligatoire), puis le DNS (ports 53 et 853) est jeté, puis les sous-réseaux
@@ -450,7 +453,8 @@ raison.
   veille USB hors clavier et souris ; audio ; rétroéclairage du clavier) et `nc-limite-charge`. L'assistant n'accepte que des
   sous-commandes et des valeurs d'une liste fixe, construit lui-même les chemins de `/sys`, et sa règle sudo est faite de
   commandes exactes. `install.sh` ne le pose qu'avec ton accord (étape sensible : « non » par défaut sans terminal). Rien n'est
-  réappliqué tout seul au démarrage.
+  réappliqué tout seul au démarrage. Pas posé, la carte dit « Pas installé » et son bouton « Installer l'assistant… » ouvre une
+  fenêtre kitty qui lance seulement `install.sh --seulement energie` (même question, non par défaut, `--oui` ne l'accepte pas).
 - Dans l'île : une carte « Profils d'énergie poussés » dans la page Santé (aperçu, Appliquer, Revenir ; le bouton de l'IA est
   caché si `IA_MODE=non`). Détails : `docs/profils-energie.md`.
 

@@ -52,6 +52,12 @@ elif a[:2] == ["mullvad", "etat-json"]:
 elif a[:1] == ["ip-publique"]:
     print('{"ip": "203.0.113.7"}')
 '''
+FAUX_INSTALLEUR = r'''#!/usr/bin/env python3
+import json, os, sys
+H = os.environ["HOME"]
+open(H + "/appels", "a").write(json.dumps(["nc-assistant-install"] + sys.argv[1:]) + "\n")
+open(H + "/ks.json", "w").write(json.dumps(dict(installe=True, voulu=True, actif=False, refus="", limites=["Limite un"])))
+'''
 FAUX_NMCLI = r'''#!/usr/bin/env python3
 import os, sys, time
 H = os.environ["HOME"]
@@ -157,7 +163,7 @@ class HorsEcran(unittest.TestCase):
                               extra={"Vpn.qml": panneau_hors_fenetre(), "Partage.qml": FAUX_PARTAGE}, singletons=("VpnEtat", "Partage"))
             home = root / "home"
             (home / ".local/bin").mkdir(parents=True)
-            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nmcli", FAUX_NMCLI, root / "bin"),
+            for nom, texte, ou in (("nc-vpn", FAUX_NC_VPN, home / ".local/bin"), ("nc-assistant-install", FAUX_INSTALLEUR, home / ".local/bin"), ("nmcli", FAUX_NMCLI, root / "bin"),
                                    ("mullvad", FAUX_MULLVAD, root / "bin")):
                 (ou / nom).write_text(texte)
                 (ou / nom).chmod(0o755)
@@ -409,6 +415,33 @@ class HorsEcran(unittest.TestCase):
                     console.log("FINI"); Qt.exit(0) }
             } }
         ''', ks=dict(installe=True, voulu=True, actif=False, refus="Aucun tunnel monté", limites=["L"]))
+        self.assertFalse([a for a in appels if a[:2] in (["killswitch", "activer"], ["killswitch", "desactiver"])])
+
+    def test_kill_switch_pas_installe_pas_de_couper_et_bouton_installer(self):
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
+                    var corps = fen.contentItem
+                    var tx = textes(corps).join("|")
+                    verifier(tx.indexOf("Pas installé : l'assistant se pose avec ton accord") >= 0, "pas installé affiché : " + tx)
+                    verifier(tx.indexOf("Inconnu") < 0 && tx.indexOf("Couper") < 0, "ni inconnu ni Couper : " + tx)
+                    verifier(!trouver(corps, "nc-vpn-ks-bascule").visible, "pas de bouton Couper ni Activer")
+                    var b = trouver(corps, "nc-vpn-ks-installer")
+                    verifier(b.visible && tx.indexOf("Installer l'assistant") >= 0, "bouton Installer l'assistant : " + tx)
+                    t.mouseClick(b); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 10) return
+                    var corps2 = fen.contentItem
+                    verifier(VpnEtat.ksInstalle === true, "état relu après la fenêtre")
+                    verifier(!trouver(corps2, "nc-vpn-ks-installer").visible, "plus de bouton Installer")
+                    verifier(trouver(corps2, "nc-vpn-ks-bascule").visible, "l'interrupteur revient")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', ks=dict(installe=False, voulu=True, actif=None, refus="Pas installé", limites=["L"]))
+        self.assertEqual([a for a in appels if a[:1] == ["nc-assistant-install"]], [["nc-assistant-install", "killswitch"]])
+        i = appels.index(["nc-assistant-install", "killswitch"])
+        self.assertIn(["killswitch", "etat-json"], appels[i + 1:], "relecture après la fin de la fenêtre")
         self.assertFalse([a for a in appels if a[:2] in (["killswitch", "activer"], ["killswitch", "desactiver"])])
 
     def test_kill_switch_etat_inconnu_propose_de_couper(self):

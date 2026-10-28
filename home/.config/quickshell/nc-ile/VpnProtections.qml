@@ -9,6 +9,7 @@ Column {
     visible: VpnEtat.disponible && !VpnEtat.masque
     spacing: 6
     property bool confirmation: false
+    readonly property bool pasInstalle: VpnEtat.ksLu && !VpnEtat.ksInstalle           // assistant ou règle sudo absents : ni Couper ni Activer
     readonly property bool actif: VpnEtat.ksActif === true
     readonly property bool inconnu: VpnEtat.ksInstalle && VpnEtat.ksActif === null     // l'assistant ne répond pas : on propose de couper
     readonly property bool coupable: actif || inconnu
@@ -21,6 +22,7 @@ Column {
     Texte { width: parent.width; secondaire: true; font.pixelSize: 12; text: Reglages.t("Protections", "Protections") }
     Rectangle {
         objectName: "nc-vpn-ks-bascule"
+        visible: !p.pasInstalle
         width: parent.width; height: 34; radius: 17
         color: zoneKs.containsMouse ? Qt.alpha(p.actif ? Couleurs.rouge : Couleurs.accent, 0.3) : Qt.alpha(Couleurs.gris3, 0.55)
         opacity: p.libre && (p.coupable || p.activable) ? 1 : 0.5
@@ -39,6 +41,7 @@ Column {
         width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12
         color: p.actif ? Couleurs.accent : (VpnEtat.ksRefus !== "" && VpnEtat.ksVoulu ? Couleurs.orange : Couleurs.texte)
         text: {
+            if (p.pasInstalle) return Reglages.t("Pas installé : l'assistant se pose avec ton accord", "Not installed: the helper is set up with your consent")
             if (p.actif) return Reglages.t("Actif : rien ne sort hors du tunnel. Un clic sur l'interrupteur le coupe.",
                                            "On: nothing leaves outside the tunnel. One click on the switch turns it off.")
             if (p.inconnu) return Reglages.t("Inconnu : l'assistant ne répond pas. Un clic sur l'interrupteur tente de le couper.",
@@ -48,6 +51,18 @@ Column {
             if (VpnEtat.ksRefus !== "") return Reglages.t("Refusé : ", "Refused: ") + VpnEtat.ksRefus
             return Reglages.t("Inactif.", "Off.")
         }
+    }
+    // Pas installé : un seul bouton, qui ouvre une fenêtre de terminal pour l'étape kill switch d'install.sh (jamais en silence)
+    Rectangle {
+        objectName: "nc-vpn-ks-installer"
+        visible: p.pasInstalle
+        width: libelleInstaller.implicitWidth + 28; height: 30; radius: 15
+        opacity: VpnEtat.installationEnCours ? 0.5 : 1
+        color: zoneInstaller.containsMouse ? Qt.alpha(Couleurs.accent, 0.3) : Qt.alpha(Couleurs.gris3, 0.7)
+        Texte { id: libelleInstaller; anchors.centerIn: parent; font.pixelSize: 12; font.weight: Font.DemiBold
+                text: Reglages.t("Installer l'assistant…", "Install the helper…") }
+        MouseArea { id: zoneInstaller; anchors.fill: parent; hoverEnabled: true; enabled: !VpnEtat.installationEnCours
+                    onClicked: VpnEtat.installerAssistant() }
     }
     // Les limites, toujours visibles
     Column {

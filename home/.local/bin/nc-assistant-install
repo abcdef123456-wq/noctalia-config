@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""nc-assistant-install : pose un assistant root facultatif (kill switch VPN, profils d'énergie) depuis un bouton de l'île.
+  nc-assistant-install killswitch | energie    ouvre une fenêtre kitty qui lance UNIQUEMENT cette étape d'install.sh du dépôt cloné
+                                               (install.sh --seulement ÉTAPE) ; la fenêtre te pose la question (non par défaut) et
+                                               demande ton mot de passe elle-même : jamais d'installation silencieuse.
+Rend la main quand la fenêtre est fermée (l'appelant relit alors l'état). Le clone est celui que install.sh a noté dans
+~/.config/nc/depot ; introuvable, la commande à taper à la main est affichée (sortie 1)."""
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+ETAPES = ("killswitch", "energie")
+
+
+def _langue():
+    l = os.environ.get("NC_LANGUE", "")
+    if l not in ("fr", "en"):
+        try:
+            with open(os.path.expanduser("~/.config/nc/reglages.conf"), encoding="utf-8", errors="replace") as f:
+                for x in f:
+                    if x.startswith("LANGUE="):
+                        l = x.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    if l not in ("fr", "en"):
+        loc = os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+        l = "fr" if loc.startswith("fr") else "en"
+    return l
+
+
+EN = _langue() == "en"
+
+
+def T(fr, en):
+    return en if EN else fr
+
+
+def depot():
+    """Le dossier du clone (celui qui contient install.sh), ou ''."""
+    try:
+        with open(os.path.expanduser("~/.config/nc/depot"), encoding="utf-8", errors="replace") as f:
+            d = f.readline().strip()
+    except OSError:
+        return ""
+    if d and os.path.isabs(d) and os.path.isfile(os.path.join(d, "install.sh")):
+        return d
+    return ""
+
+
+def main(a):
+    if len(a) != 1 or a[0] not in ETAPES:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    etape = a[0]
+    d = depot()
+    kitty = shutil.which("kitty")
+    manuel = T("À la main, dans un terminal : cd <ton clone de noctalia-config> && ./install.sh --seulement %s",
+               "By hand, in a terminal: cd <your noctalia-config clone> && ./install.sh --seulement %s") % etape
+    if not d:
+        print(T("Le dépôt noctalia-config est introuvable (lance ./install.sh une fois depuis ton clone pour qu'il le note). ",
+                "The noctalia-config repository wasn't found (run ./install.sh once from your clone so it notes it). ") + manuel, file=sys.stderr)
+        return 1
+    if not kitty:
+        print(T("kitty est introuvable. ", "kitty not found. ") + manuel, file=sys.stderr)
+        return 1
+    titre = T("Installer l'assistant", "Install the helper") + " : " + etape
+    try:
+        r = subprocess.run([kitty, "--hold", "--title", titre, "bash", os.path.join(d, "install.sh"), "--seulement", etape],
+                           stdin=subprocess.DEVNULL, cwd=d)
+    except OSError as e:
+        print(re.sub(r"\s+", " ", str(e))[:200] + " " + manuel, file=sys.stderr)
+        return 1
+    return 0 if r.returncode == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
