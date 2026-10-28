@@ -4,6 +4,8 @@
 // - La consigne ET les données vont sur l'entrée standard, jamais dans les arguments (un « ps » les montrerait) ;
 //   les données sont bornées (maxDonnees) et la réponse aussi (maxReponse). La consigne dit que les données sont des
 //   données et non des ordres.
+// - TOUJOURS --sans-outils : ce texte vient de n'importe qui (une notification peut être un message piégé) ; il ne va jamais
+//   à JARVIS ni à un moteur qui a des outils (nc-ia choisit Ollama, une API, ou une CLI lancée sans outils).
 // - Un seul appel à la fois par objet ; délai borné (delai) ; arreter() coupe l'attente.
 // - IA coupée (IA_MODE=non) : lancer() ne fait rien.
 // La réponse est du texte brut : la montrer dans Texte.qml (PlainText), jamais en rich text.
@@ -43,7 +45,7 @@ Item {
     }
     Process {
         id: proc
-        command: [Etat.bin + "nc-ia", "demander", "--usage", "texte", "--flux"].concat(d.local ? ["--local"] : []).concat(["-"])
+        command: [Etat.bin + "nc-ia", "demander", "--usage", "texte", "--flux", "--sans-outils"].concat(d.local ? ["--local"] : []).concat(["-"])
         onStarted: { write(d.envoi); stdinEnabled = false }
         stdout: SplitParser {
             onRead: l => {
