@@ -81,8 +81,19 @@ class Capture(Base):
         self.dossier = self.home / "Pictures/Captures"
 
     def lancer(self, mode):
-        return subprocess.run(["bash", str(BIN / "nc-capture"), mode], env=self.env(), capture_output=True, text=True,
-                              timeout=30, stdin=subprocess.DEVNULL)
+        # nc-capture rend la main avant la fin de sa notification (sous-shell détaché, qui écrit encore le journal) :
+        # attendre que tout son groupe de processus ait fini, sinon le dossier temporaire peut être supprimé sous lui
+        p = subprocess.Popen(["bash", str(BIN / "nc-capture"), mode], env=self.env(), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL, start_new_session=True)
+        out, err = p.communicate(timeout=30)
+        fin = time.monotonic() + 15
+        while time.monotonic() < fin:
+            try:
+                os.killpg(p.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+            time.sleep(0.05)
+        return subprocess.CompletedProcess(p.args, p.returncode, out, err)
 
     def test_slurp_absent_dit_le_paquet(self):
         (self.faux / "slurp").unlink()
