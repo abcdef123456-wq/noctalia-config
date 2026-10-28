@@ -215,6 +215,11 @@ Window { visible: true; width: 640; height: 400; Lueurs { id: l; anchors.fill: p
 ''', etat="")
 
 
+# Garde-fou contre un blocage seulement : nc-pouls s'arrête en 0,02 s après SIGTERM (mesuré 5 fois) ; 5 s avaient été dépassées
+# une fois sous la charge de plusieurs suites lancées ensemble. Ce que le test vérifie (code 0, fichier retiré) ne change pas.
+DELAI_ARRET = 30
+
+
 class PoulsEtFondVivant(unittest.TestCase):
     def cadre(self, vivant):
         c = Cadre(CAVA_OK)
@@ -233,7 +238,7 @@ class PoulsEtFondVivant(unittest.TestCase):
         self.assertRegex(f.read_text(), r"^[01]\.\d\d\n$")
         self.assertTrue(any(x != "eval nc.halo(0.00)" for x in c.cmds), "le halo d'Hyprland reste alimenté")
         p.send_signal(signal.SIGTERM)
-        self.assertEqual(p.wait(timeout=5), 0)
+        self.assertEqual(p.wait(timeout=DELAI_ARRET), 0)
         self.assertFalse(f.exists(), "fichier retiré à l'arrêt")
 
     def test_sans_le_reglage_aucun_fichier(self):
@@ -242,7 +247,7 @@ class PoulsEtFondVivant(unittest.TestCase):
         time.sleep(1)
         self.assertFalse((c.run / "nc-pouls-niveau").exists())
         p.send_signal(signal.SIGTERM)
-        p.wait(timeout=5)
+        p.wait(timeout=DELAI_ARRET)
 
 
 if __name__ == "__main__":
