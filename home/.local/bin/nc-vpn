@@ -1227,6 +1227,75 @@ API_FOURNISSEURS = {
 }
 
 
+# ── Proton : l'application officielle `protonvpn-app` (dépôt ProtonVPN/proton-vpn-gtk-app, paquet proton-vpn-gtk-app) ─────
+# Il n'existe PAS de CLI officielle actuelle (l'ancienne protonvpn-cli est abandonnée) : le point d'entrée du paquet est
+# `protonvpn-app`, une application graphique à instance unique dont les seules options sont --start-minimized et --version.
+# Le compte de l'application vit dans son propre stockage (session chiffrée, trousseau) : le lire, c'est toucher des jetons, ce
+# que nous ne faisons pas. Le seul signe public est la connexion NetworkManager que l'appli crée en se connectant : nommée
+# « ProtonVPN <serveur> » (proton-vpn-api-core, backend/networkmanager/core/networkmanager.py) mais créée sans être enregistrée
+# (save_to_disk=False) : elle n'existe que pendant la connexion. Donc : « pret » seulement si une telle connexion existe ;
+# sinon « sans_compte » (compte non détecté : l'appli décide). Choisir un pays, se connecter, se déconnecter, se connecter au
+# compte : on ouvre l'appli officielle (« pilotage »: « appli »), sans simuler son interface ni la fermer.
+def proton_exe():
+    return shutil.which("protonvpn-app") is not None
+
+
+def proton_connexions():
+    """Les connexions NetworkManager de l'appli Proton (nom « ProtonVPN … »), ou None si NetworkManager est indisponible."""
+    e = etat()
+    if not e["disponible"]:
+        return None
+    return [c for c in e["connexions"] if re.match(r"\s*proton\s*vpn(\s|$)", c["nom"], re.I)]
+
+
+def proton_fournisseur():
+    if not proton_exe():
+        return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."),
+                     pilotage="appli")
+    cx = proton_connexions()
+    if not cx:
+        return fiche("proton", "Proton VPN", "sans_compte",
+                     T("Proton VPN est installé, mais aucune connexion Proton n'est détectée (le compte de l'application n'est jamais lu) : "
+                       "ouvre l'application, connecte-toi et choisis un serveur.",
+                       "Proton VPN is installed, but no Proton connection is detected (the app's account is never read): "
+                       "open the app, sign in and pick a server."),
+                     peut_login=True, pilotage="appli")
+    actives = [c for c in cx if c["active"]]
+    actif = pays_de(re.sub(r"^\s*proton\s*vpn\s*", "", actives[0]["nom"], flags=re.I)) if actives else ""
+    return fiche("proton", "Proton VPN", "pret",
+                 T("Connexion Proton détectée. Le choix du pays se fait dans l'application officielle.",
+                   "Proton connection detected. Pick the country in the official app."),
+                 pays=[], pays_actif=actif, connecte=bool(actives), pilotage="appli")
+
+
+def proton_ouvrir(message):
+    if not proton_exe():
+        raise Echec(T("Proton VPN n'est pas installé.", "Proton VPN is not installed."))
+    if not ouvrir(["protonvpn-app"]):
+        raise Echec(T("Impossible de lancer l'application Proton VPN.", "Could not start the Proton VPN app."))
+    print(message)
+
+
+def proton_connecter(cc):
+    code_pays_ok(cc)
+    proton_ouvrir(T(f"Proton VPN : l'application officielle s'ouvre, choisis le pays ({cc}) et connecte-toi dedans.",
+                    f"Proton VPN: the official app is opening, pick the country ({cc}) and connect there."))
+
+
+def proton_deconnecter():
+    proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, déconnecte-toi dedans (nous ne la fermons ni ne la pilotons jamais).",
+                    "Proton VPN: the official app is opening, disconnect there (we never close or drive it)."))
+
+
+def proton_login():
+    proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, connecte ton compte dedans.",
+                    "Proton VPN: the official app is opening, sign in to your account there."))
+
+
+API_FOURNISSEURS["proton"] = {"fiche": proton_fournisseur, "connecter": proton_connecter, "deconnecter": proton_deconnecter,
+                              "login": proton_login}
+
+
 def fournisseurs_json():
     return {"contrat": CONTRAT_FOURNISSEURS, "fournisseurs": [a["fiche"]() for a in API_FOURNISSEURS.values()]}
 
