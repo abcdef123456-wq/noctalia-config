@@ -982,13 +982,17 @@ def limites():
               "Turn it off to change server: the server addresses are fixed when you enable it."),
             T("Un seul serveur (pas de multi-remote) ; un tunnel doit être monté avant d'activer.",
               "One server only (no multi-remote); a tunnel must be up before enabling."),
-            T("Le réseau local (sous-réseaux de tes cartes) reste joignable ; en cas de souci, depuis un terminal : sudo nft delete table inet nc_vpn",
-              "Your local network (your cards' subnets) stays reachable; if anything goes wrong, from a terminal: sudo nft delete table inet nc_vpn")]
+            T("Le réseau local (sous-réseaux de tes cartes, /16 au plus large) reste joignable (sauf le DNS).",
+              "Your local network (your cards' subnets, /16 at most) stays reachable (except DNS)."),
+            T("Un rechargement de nftables (systemctl reload nftables, nft flush ruleset) efface la protection.",
+              "Reloading nftables (systemctl reload nftables, nft flush ruleset) wipes the protection."),
+            T("En cas de souci, depuis un terminal : sudo nft delete table inet nc_vpn",
+              "If anything goes wrong, from a terminal: sudo nft delete table inet nc_vpn")]
 
 
 def iface_tunnel(nom):
     """Vrai si /sys/class/net/NOM est un TUN/TAP (tun_flags) ou un WireGuard (DEVTYPE=wireguard)."""
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", nom or ""):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", nom or "") or not nom.strip("."):
         return False
     d = os.path.join(SYSFS, "class/net", nom)
     try:
@@ -1015,7 +1019,7 @@ def sortie_ip_json():
 
 def tunnel_de(c):
     """Le vrai tunnel d'une connexion montée. NetworkManager donne parfois le Wi-Fi comme « device » d'un OpenVPN : on retrouve
-    alors le tun par les adresses que NetworkManager a données à la connexion, sinon par l'unique tunnel du système."""
+    alors le tun par les adresses que NetworkManager a données à la connexion, jamais « l'unique tunnel du système » (ce pourrait être tailscale0 ou le TAP d'une machine virtuelle)."""
     import ipaddress
     if iface_tunnel(c["interface"]):
         return c["interface"]
@@ -1040,14 +1044,6 @@ def tunnel_de(c):
     trouves = sorted(set(trouves))
     if len(trouves) == 1:
         return trouves[0]
-    if not trouves:
-        seuls = []
-        try:
-            seuls = [n for n in sorted(os.listdir(os.path.join(SYSFS, "class/net"))) if iface_tunnel(n)]
-        except OSError:
-            pass
-        if len(seuls) == 1:
-            return seuls[0]
     raise Echec(T("Impossible de retrouver l'interface du tunnel (TUN/TAP ou WireGuard) de cette connexion.",
                   "Could not find the tunnel interface (TUN/TAP or WireGuard) of this connection."))
 

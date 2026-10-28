@@ -172,6 +172,33 @@ class KillSwitch(BaseVpn):
         self.assertIn("Impossible de retrouver l'interface du tunnel", r.stderr)
         self.assertEqual(self.sudo(), [])
 
+    def test_pas_de_repli_sur_l_unique_tunnel_du_systeme(self):
+        # le Wi-Fi porte l'OpenVPN, les adresses ne correspondent à aucun tun ; un seul tun existe (tailscale0 ou le TAP d'une VM) :
+        # il ne doit JAMAIS être pris
+        self.openvpn_sous_wifi()
+        (self.r / "ipconf.json").write_text(json.dumps({U1: "10.99.0.2/24\n"}))
+        (self.sysfs / "class/net/tun0").rename(self.sysfs / "class/net/tailscale0")
+        self.iface("tailscale0", tun=True)
+        r = self.ks("activer")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Impossible de retrouver l'interface du tunnel", r.stderr)
+        self.assertEqual(self.sudo(), [])
+
+    def test_nom_d_interface_point_refuse(self):
+        import importlib.machinery, importlib.util
+        l = importlib.machinery.SourceFileLoader("ncvpn", str(Path(__file__).resolve().parents[1] / "home/.local/bin/nc-vpn"))
+        sp = importlib.util.spec_from_loader("ncvpn", l)
+        m = importlib.util.module_from_spec(sp)
+        l.exec_module(m)
+        for nom in (".", "..", "..."):
+            self.assertFalse(m.iface_tunnel(nom), nom)
+
+    def test_limites_dns_et_rechargement_de_nftables(self):
+        out = self.ks("limites").stdout
+        self.assertIn("sauf le DNS", out)
+        self.assertIn("systemctl reload nftables", out)
+        self.assertIn("nft flush ruleset", out)
+
     def test_plusieurs_tunnels_refuses(self):
         self.connexions(dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="A"), dict(uuid=U2, type="wireguard", active=True, dev="wg0", nom="B"))
         r = self.ks("activer")

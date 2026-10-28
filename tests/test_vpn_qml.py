@@ -4,6 +4,7 @@ isolés, un faux nc-vpn, un faux nmcli (« monitor » envoie une ligne puis se t
 tunnels affichés (plusieurs montés), clics (connecter, déconnecter, tout déconnecter), noms masqués pendant un partage d'écran,
 IP publique jamais demandée par défaut ni en partage, mises à jour sur événements seulement, NetworkManager absent, écran éteint."""
 import json
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -99,7 +100,15 @@ class Sources(unittest.TestCase):
         for nom in ("Vpn", "VpnEtat", "VpnLigne", "VpnProtections"):
             src = (QML / (nom + ".qml")).read_text()
             self.assertNotRegex(src, r"(?m)^\s*component ", nom)
-            self.assertNotRegex(src, r"repeat:\s*true", nom + " : jamais de relevé toutes les N secondes")
+            if nom == "VpnEtat":      # un seul Timer répétitif : l'état du kill switch, toutes les 10 s, panneau ouvert et écran allumé seulement
+                rep = [l for l in src.splitlines() if re.search(r"repeat:\s*true", l)]
+                self.assertEqual(len(rep), 1, rep)
+                self.assertIn("interval: 10000", rep[0])
+                self.assertIn("v.panneauOuvert", rep[0])
+                self.assertIn("Etat.ecranVu", rep[0])
+                self.assertIn("!v.masque", rep[0])
+            else:
+                self.assertNotRegex(src, r"repeat:\s*true", nom + " : jamais de relevé toutes les N secondes")
         self.assertIn('command: ["nmcli", "monitor"]', self.etat)
         self.assertIn("running: v.veille", self.etat)
         self.assertIn("Etat.ecranVu", self.etat)
@@ -402,6 +411,26 @@ class HorsEcran(unittest.TestCase):
         ''', ks=dict(installe=True, voulu=True, actif=False, refus="Aucun tunnel monté", limites=["L"]))
         self.assertFalse([a for a in appels if a[:2] in (["killswitch", "activer"], ["killswitch", "desactiver"])])
 
+    def test_kill_switch_etat_inconnu_propose_de_couper(self):
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 6) return
+                    var corps = fen.contentItem
+                    var tx = textes(corps).join("|")
+                    verifier(VpnEtat.ksActif === null, "état inconnu")
+                    verifier(tx.indexOf("Inconnu") >= 0, "affiché inconnu : " + tx)
+                    verifier(tx.indexOf("Couper le kill switch") >= 0, "Couper proposé : " + tx)
+                    t.mouseClick(trouver(corps, "nc-vpn-ks-bascule")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 6) return
+                    verifier(!trouver(fen.contentItem, "nc-vpn-ks-confirmation").visible, "couper : pas de confirmation")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', ks=dict(installe=True, voulu=True, actif=None, refus="", limites=["L"]))
+        self.assertIn(["killswitch", "desactiver"], appels)
+        self.assertNotIn(["killswitch", "activer"], appels)
+
     def test_kill_switch_sources(self):
         src = (QML / "VpnProtections.qml").read_text()
         self.assertIn("!VpnEtat.masque", src)
@@ -410,6 +439,7 @@ class HorsEcran(unittest.TestCase):
         etat = (QML / "VpnEtat.qml").read_text()
         self.assertIn('"nc-vpn", "killswitch", "etat-json"]', etat)
         self.assertIn("panneauOuvert && disponible && !masque", etat)
+        self.assertIn("v.ksActif = null", etat)                       # JSON illisible : état inconnu
 
     def test_mullvad_application_section_actions_ecoute_et_masquage(self):
         etat = dict(disponible=True, connexions=[], actives=[], mullvad=True,

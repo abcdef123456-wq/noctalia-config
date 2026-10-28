@@ -10,6 +10,8 @@ Column {
     spacing: 6
     property bool confirmation: false
     readonly property bool actif: VpnEtat.ksActif === true
+    readonly property bool inconnu: VpnEtat.ksInstalle && VpnEtat.ksActif === null     // l'assistant ne répond pas : on propose de couper
+    readonly property bool coupable: actif || inconnu
     readonly property bool libre: VpnEtat.cible === ""
     // On ne propose d'activer que si le réglage est à oui, l'assistant est là et rien ne s'y oppose ; couper est toujours permis
     readonly property bool activable: VpnEtat.ksVoulu && VpnEtat.ksInstalle && VpnEtat.ksRefus === ""
@@ -21,14 +23,15 @@ Column {
         objectName: "nc-vpn-ks-bascule"
         width: parent.width; height: 34; radius: 17
         color: zoneKs.containsMouse ? Qt.alpha(p.actif ? Couleurs.rouge : Couleurs.accent, 0.3) : Qt.alpha(Couleurs.gris3, 0.55)
-        opacity: p.libre && (p.actif || p.activable) ? 1 : 0.5
+        opacity: p.libre && (p.coupable || p.activable) ? 1 : 0.5
         Texte { anchors.centerIn: parent; font.pixelSize: 13; font.weight: Font.DemiBold
-                text: (p.actif ? Reglages.t("Actif : ", "On: ") : "") + Reglages.t("Bloquer tout hors du VPN", "Block everything outside the VPN") }
+                text: p.inconnu ? Reglages.t("Couper le kill switch (état inconnu)", "Turn the kill switch off (unknown state)")
+                                : (p.actif ? Reglages.t("Actif : ", "On: ") : "") + Reglages.t("Bloquer tout hors du VPN", "Block everything outside the VPN") }
         MouseArea {
             id: zoneKs
             anchors.fill: parent; hoverEnabled: true
-            enabled: p.libre && (p.actif || p.activable)
-            onClicked: { if (p.actif) VpnEtat.killswitchDesactiver(); else p.confirmation = !p.confirmation }
+            enabled: p.libre && (p.coupable || p.activable)
+            onClicked: { if (p.coupable) VpnEtat.killswitchDesactiver(); else p.confirmation = !p.confirmation }
         }
     }
     Texte {
@@ -38,6 +41,8 @@ Column {
         text: {
             if (p.actif) return Reglages.t("Actif : rien ne sort hors du tunnel. Un clic sur l'interrupteur le coupe.",
                                            "On: nothing leaves outside the tunnel. One click on the switch turns it off.")
+            if (p.inconnu) return Reglages.t("Inconnu : l'assistant ne répond pas. Un clic sur l'interrupteur tente de le couper.",
+                                             "Unknown: the helper isn't answering. One click on the switch tries to turn it off.")
             if (!VpnEtat.ksVoulu) return Reglages.t("Inactif. Coupé dans les réglages (nc-reglages → Île → VPN : kill switch).",
                                                     "Off. Disabled in the settings (nc-settings → Island → VPN: kill switch).")
             if (VpnEtat.ksRefus !== "") return Reglages.t("Refusé : ", "Refused: ") + VpnEtat.ksRefus
@@ -56,7 +61,7 @@ Column {
     // Confirmation explicite avant d'activer
     Column {
         objectName: "nc-vpn-ks-confirmation"
-        visible: p.confirmation && !p.actif
+        visible: p.confirmation && !p.coupable
         width: parent.width; spacing: 6
         Texte { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12
                 text: Reglages.t("Bloquer toute sortie de l'ordinateur hors du VPN ? Si le tunnel tombe, plus rien ne sort. Les limites ci-dessus s'appliquent.",

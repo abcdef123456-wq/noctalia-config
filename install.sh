@@ -56,6 +56,21 @@ ask() { # ask "question" [o|n] [sensible] -> vrai si oui (o, oui, y, yes ; en an
 # distinct de 0, pour que nc-maj ne le prenne pas pour une installation réussie (ni rapport ni bilan)
 ANNULE=10
 have() { command -v "$1" >/dev/null 2>&1; }
+# Un assistant root ne se pose que si /usr, /usr/local et /usr/local/bin (ceux qui existent) sont à root, sans écriture pour le
+# groupe ni pour les autres : sinon quelqu'un d'autre pourrait remplacer l'assistant que sudo lance sans mot de passe.
+dossiers_root_surs() {
+  local d u m
+  for d in /usr /usr/local /usr/local/bin; do
+    [ -d "$d" ] || continue
+    u="$(stat -L -c %u "$d" 2>/dev/null)"; m="$(stat -L -c %a "$d" 2>/dev/null)"
+    case "$m" in ''|*[!0-7]*) u="" ;; esac
+    if [ "$u" != 0 ] || [ $((8#${m:-777} & 8#022)) != 0 ]; then
+      warn "$(t "Assistant root non posé : $d n'appartient pas à root ou est modifiable par d'autres (droits $m). Corrige-le puis relance install.sh." "Root helper not installed: $d isn't owned by root or is writable by others (mode $m). Fix it and run install.sh again.")"
+      return 1
+    fi
+  done
+  return 0
+}
 # Une sonde en lecture seule ne doit pas bloquer toute l'installation. Les installations
 # de paquets gardent leurs propres délais et une sortie visible.
 sonder() { # sonder DURÉE LIBELLÉ COMMANDE…
@@ -1894,7 +1909,7 @@ if [ "$MODE" = full ]; then
   # Profils d'énergie poussés (nc-energie, proposés par l'IA ou par des règles) : un petit assistant root qui ne règle que
   # des valeurs d'une liste fixe (processeur, boost, Wi-Fi, USB, audio, clavier, NVIDIA…), avec une règle sudo à commandes
   # exactes (une ligne par sous-commande et valeur, écrite par l'assistant lui-même, vérifiée par visudo). Étape
-  # sensible : refusée par défaut sans terminal (--oui pour l'accepter). Rien n'est réappliqué tout seul au démarrage.
+  # sensible, réponse par défaut non : sans terminal elle est refusée (--oui n'accepte pas une question dont la réponse par défaut est non). Rien n'est réappliqué tout seul au démarrage.
   if [ "$LAPTOP" = 1 ]; then
     regle_e=/etc/sudoers.d/nc-energie
     ligne_e="$("$REPO/system/nc-energie-root" sudoers "$(id -un)")"
@@ -1903,7 +1918,7 @@ if [ "$MODE" = full ]; then
     else
       info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
       info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
-      if [ -n "$ligne_e" ] && ask "$(t "L'installer ?" "Install it?")" n sensible; then
+      if [ -n "$ligne_e" ] && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then
         t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
         # La règle est d'abord copiée en root (« .tmp » : sudo ignore les noms avec un point), vérifiée par visudo À
         # CETTE PLACE, puis mise en service : ce qui est vérifié est exactement ce qui sert
@@ -1922,7 +1937,7 @@ if [ "$MODE" = full ]; then
 
   # Kill switch VPN (nc-vpn killswitch, panneau VPN de l'île) : un petit assistant root qui ne fait que bloquer la sortie hors du
   # tunnel (table nft « nc_vpn » à lui seul), avec une règle sudo (activer reçoit les adresses du serveur : l'assistant les
-  # valide une à une). FACULTATIF, question à part, NON par défaut, refusée sans terminal (--oui pour l'accepter) ; le paquet
+  # valide une à une). FACULTATIF, question à part, NON par défaut (sans terminal : refusée, --oui n'y change rien) ; le paquet
   # nftables (même nom sur Arch, Debian, Fedora et openSUSE) n'est proposé que si tu réponds oui. Le réglage VPN_KILLSWITCH
   # reste coupé : rien n'est bloqué tant que tu ne l'actives pas.
   regle_v=/etc/sudoers.d/nc-vpn
@@ -1932,7 +1947,8 @@ if [ "$MODE" = full ]; then
   else
     info "$(t "Kill switch VPN (facultatif) : un petit assistant root (/usr/local/bin/nc-vpn-root) qui ne sait que bloquer la sortie hors du" "VPN kill switch (optional): a small root helper (/usr/local/bin/nc-vpn-root) that can only block traffic outside the")"
     info "$(t "tunnel (table nft « nc_vpn »), lancé sans mot de passe. Coupé par défaut (réglage VPN_KILLSWITCH) ; nftables sera installé si besoin." "tunnel (nft table “nc_vpn”), run without a password. Off by default (VPN_KILLSWITCH setting); nftables will be installed if needed.")"
-    if [ -n "$ligne_v" ] && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible; then
+    info "$(t "Attention : firewalld est actif par défaut sur Fedora et openSUSE ; tant qu'il l'est (ou ufw), le kill switch refusera de s'activer." "Note: firewalld is on by default on Fedora and openSUSE; while it is (or ufw is), the kill switch will refuse to turn on.")"
+    if [ -n "$ligne_v" ] && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible && dossiers_root_surs; then
       t_v="$(mktemp)"; printf '# noctalia-config : assistant du kill switch VPN (nc-vpn killswitch)\n%s\n' "$ligne_v" > "$t_v"
       nft_ok=1
       have nft || pkg_install nftables || nft_ok=0

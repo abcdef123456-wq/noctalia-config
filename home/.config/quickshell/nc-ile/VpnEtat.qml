@@ -139,7 +139,8 @@ Singleton {
             onStreamFinished: {
                 var d = null
                 try { d = JSON.parse(text) } catch (e) { d = null }
-                if (d && typeof d === "object") {
+                if (!d || typeof d !== "object") { v.ksActif = null }          // illisible : état inconnu, jamais l'ancien
+                else {
                     v.ksInstalle = d.installe === true
                     v.ksVoulu = d.voulu === true
                     v.ksActif = d.actif === true ? true : (d.actif === false ? false : null)
@@ -149,6 +150,9 @@ Singleton {
             }
         }
     }
+
+    // Relecture de l'état du kill switch toutes les 10 s : SEULEMENT panneau ouvert, écran allumé, hors partage d'écran
+    Timer { interval: 10000; repeat: true; running: v.panneauOuvert && v.disponible && !v.masque && Etat.ecranVu; onTriggered: v.lireKs() }
 
     // L'application Mullvad pour le panneau : installée, connectée, pays (deux lettres), relais, « connecté au compte » (oui, non, inconnu)
     Process {

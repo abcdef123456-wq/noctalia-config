@@ -290,12 +290,13 @@ l'île Quickshell.
   il propose alors le paquet `nftables`) : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
   être un vrai TUN/TAP ou WireGuard, jamais le Wi-Fi ni l'Ethernet ; les serveurs sont des adresses IP, 8 au plus) et n'écrit que
   sa propre table nft `inet nc_vpn` (les autres règles ne sont ni lues ni touchées). Sortent seulement : la boucle locale, le
-  tunnel, DHCP, le voisinage IPv6, les adresses du serveur VPN et les sous-réseaux directement attachés à tes cartes réseau
-  (pas tout le réseau privé) ; le reste est jeté. Refusé avec un message clair si `nft` manque, si `firewalld` ou `ufw` est actif
-  (ils gardent la main) ou si l'application Mullvad tourne (utilise plutôt sa protection : `mullvad lockdown-mode set on`).
+  tunnel, DHCP, le voisinage IPv6, les adresses et ports du serveur VPN (port obligatoire), puis le DNS (ports 53 et 853) est jeté, puis les sous-réseaux
+  directement attachés à tes cartes réseau (jusqu'à /16 en IPv4 et /48 en IPv6, pas tout le réseau privé) ; le reste est jeté. Refusé avec un message clair si `nft` manque, si `firewalld` ou `ufw` est actif
+  (ils gardent la main ; pour ufw, c'est `ENABLED=yes` dans `/etc/ufw/ufw.conf` qui compte) ou si l'application Mullvad tourne (utilise plutôt sa protection : `mullvad lockdown-mode set on`).
   **Limites** (affichées avant l'activation) : ne dure pas après un redémarrage ; ne couvre pas le forwarding des conteneurs ni des
   machines virtuelles ; à couper pour changer de serveur (les adresses sont figées) ; un seul serveur (pas de multi-remote, pas
-  de nom d'hôte : mets l'adresse IP) ; un tunnel doit être monté avant d'activer. **Pour tout couper depuis un TTY** :
+  de nom d'hôte : mets l'adresse IP) ; un tunnel doit être monté avant d'activer ; le réseau local reste joignable sauf le DNS ; un rechargement de nftables
+  (`systemctl reload nftables`, `nft flush ruleset`) efface la protection. **Pour tout couper depuis un TTY** :
   `sudo nft delete table inet nc_vpn`.
   En terminal : `nc-vpn etat-json | liste |
   connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER | killswitch …`.

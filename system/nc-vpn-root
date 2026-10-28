@@ -8,12 +8,14 @@
 
 IFACE : un nom ^[A-Za-z0-9_.-]{1,15}$ qui est RÉELLEMENT un tunnel (TUN/TAP : /sys/class/net/IFACE/tun_flags, ou WireGuard :
 DEVTYPE=wireguard dans uevent), jamais une interface Wi-Fi ni une carte physique.
-ENDPOINT : une adresse IP v4 ou v6 (jamais un nom d'hôte), seule ou suivie de @PORT ou @PORT/udp ou @PORT/tcp ; 8 au plus.
+ENDPOINT : une adresse IP v4 ou v6 (jamais un nom d'hôte, ni zone « %x ») suivie du port obligatoire : IP@PORT (udp et tcp),
+IP@PORT/udp ou IP@PORT/tcp ; 8 au plus.
 
 La table est la nôtre seule : activer la recrée d'un bloc par « nft -f - » (texte généré ici, à partir de données validées),
 désactiver fait « nft delete table inet nc_vpn ». Les autres tables ne sont jamais lues pour être modifiées ni touchées.
 Règles (chaîne output, priorité filter, policy drop) : on laisse passer la boucle locale, le tunnel, DHCP, le voisinage IPv6
-(nd-*), les ENDPOINTS du VPN, et les sous-réseaux directement attachés aux cartes physiques ; tout le reste est jeté.
+(nd-*, mld), les ENDPOINTS du VPN, puis le DNS (53 et 853) est jeté, puis les sous-réseaux directement attachés aux cartes
+physiques (/16 au plus large en IPv4, /48 en IPv6) ; tout le reste est jeté.
 Refus clairs : nft absent, firewalld ou ufw actif, application Mullvad (utilise son « lockdown mode »).
 Codes de sortie : 0 fait, 1 échec ou pas root, 2 argument refusé, 3 refus de l'environnement (outil absent, pare-feu, Mullvad).
 Essais : NC_VPN_RACINE (faux /sys) et NC_VPN_BIN (faux outils) ne sont lus QUE hors root (sudo les efface de toute façon).
@@ -23,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -47,13 +50,13 @@ class Refus(Exception):
 
 # ── Validation (fonctions pures) ────────────────────────────────────────────────────────────────────────────────
 def valider_nom(nom):
-    if not isinstance(nom, str) or not NOM_IFACE.fullmatch(nom) or nom.startswith("-"):
+    if not isinstance(nom, str) or not NOM_IFACE.fullmatch(nom) or nom.startswith("-") or not nom.strip("."):
         raise Refus("nom d'interface refusé (1 à 15 signes : lettres, chiffres, « _ », « . », « - »)")
     return nom
 
 
 def valider_endpoint(texte):
-    """IP[@PORT[/PROTO]] -> (ip_address, port|None, proto|None). Jamais de nom d'hôte."""
+    """IP@PORT[/PROTO] -> (ip_address, port, proto|None). Le port est obligatoire. Jamais de nom d'hôte."""
     if not isinstance(texte, str) or not texte or len(texte) > 64:
         raise Refus("endpoint refusé")
     adr, _, reste = texte.partition("@")
@@ -68,17 +71,17 @@ def valider_endpoint(texte):
         raise Refus("endpoint refusé : pas d'identifiant de zone")
     if ip.is_unspecified or ip.is_loopback or ip.is_multicast or ip.is_link_local:
         raise Refus("endpoint refusé : adresse inutilisable")
-    port = proto = None
-    if "@" in texte:
-        p, _, proto = reste.partition("/")
-        if not re.fullmatch(r"[0-9]{1,5}", p) or not 1 <= int(p) <= 65535:
-            raise Refus("endpoint refusé : port invalide")
-        port = int(p)
-        if "/" in reste:
-            if proto not in ("udp", "tcp"):
-                raise Refus("endpoint refusé : protocole udp ou tcp seulement")
-        else:
-            proto = None
+    if "@" not in texte:
+        raise Refus("endpoint refusé : le port est obligatoire (IP@PORT ou IP@PORT/udp ou IP@PORT/tcp)")
+    p, _, proto = reste.partition("/")
+    if not re.fullmatch(r"[0-9]{1,5}", p) or not 1 <= int(p) <= 65535:
+        raise Refus("endpoint refusé : port invalide")
+    port = int(p)
+    if "/" in reste:
+        if proto not in ("udp", "tcp"):
+            raise Refus("endpoint refusé : protocole udp ou tcp seulement")
+    else:
+        proto = None
     return ip, port, proto
 
 
@@ -99,8 +102,6 @@ def valider_endpoints(liste):
 def regle_endpoint(ip, port, proto):
     famille = "ip" if ip.version == 4 else "ip6"
     base = "%s daddr %s" % (famille, ip)
-    if port is None:
-        return [base + " accept"]
     protos = [proto] if proto else ["udp", "tcp"]
     return ["%s %s dport %d accept" % (base, p, port) for p in protos]
 
@@ -116,10 +117,12 @@ def generer_regles(iface, endpoints, sous_reseaux):
          '\t\toifname "%s" accept' % iface,
          "\t\tudp sport 68 udp dport 67 accept",
          "\t\tudp sport 546 udp dport 547 accept",
-         "\t\ticmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept"]
+         "\t\ticmpv6 type { nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert, mld2-listener-report } accept"]
     for ip, port, proto in endpoints:
         for r in regle_endpoint(ip, port, proto):
             L.append("\t\t" + r)
+    # Fuite DNS : après les endpoints (un VPN qui écoute sur le port 53 reste joignable), avant les sous-réseaux attachés
+    L.append("\t\tmeta l4proto { udp, tcp } th dport { 53, 853 } drop")
     for net in sous_reseaux:
         L.append("\t\t%s daddr %s accept" % ("ip" if net.version == 4 else "ip6", net))
     L += ["\t}", "}"]
@@ -140,7 +143,8 @@ def verifier_texte(lignes, elements):
 
 def sous_reseaux_attaches(addr_json, tunnel, physique):
     """Les préfixes des adresses globales des interfaces physiques (physique(nom) -> bool), triés, sans doublon.
-    Ni le tunnel, ni lo, ni les adresses d'hôte seul (/32, /128), ni /0."""
+    Ni le tunnel, ni lo, ni les adresses d'hôte seul (/32, /128). Les préfixes plus larges que /16 (IPv4) ou /48 (IPv6) sont
+    IGNORÉS (jamais ouverts) : un /8 ouvrirait des millions d'adresses qui ne sont pas ton réseau local."""
     res = set()
     for itf in addr_json if isinstance(addr_json, list) else []:
         nom = itf.get("ifname") if isinstance(itf, dict) else None
@@ -153,7 +157,7 @@ def sous_reseaux_attaches(addr_json, tunnel, physique):
                 net = ipaddress.ip_interface("%s/%d" % (a.get("local"), int(a.get("prefixlen")))).network
             except (ValueError, TypeError):
                 continue
-            if net.prefixlen == 0 or net.prefixlen >= net.max_prefixlen or net.is_link_local:
+            if net.prefixlen < (16 if net.version == 4 else 48) or net.prefixlen >= net.max_prefixlen or net.is_link_local:
                 continue
             res.add(net)
     return sorted(res, key=lambda n: (n.version, int(n.network_address), n.prefixlen))
@@ -203,13 +207,30 @@ def verifier_tunnel(nom):
         raise Refus("%s n'est pas un tunnel (TUN/TAP ou WireGuard) : refusé" % nom)
 
 
+def ufw_active():
+    """Vrai si /etc/ufw/ufw.conf (fichier ordinaire, jamais un lien, 64 Kio au plus) dit ENABLED=yes."""
+    chemin = os.path.join(S, "etc/ufw/ufw.conf") if ESSAI else "/etc/ufw/ufw.conf"
+    try:
+        st = os.lstat(chemin)
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        fd = os.open(chemin, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as f:
+            texte = f.read(65536).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return re.search(r'(?mi)^\s*ENABLED\s*=\s*"?yes"?\s*$', texte) is not None
+
+
 def verifier_environnement():
     """Refus clairs, sans aucun appel à nft."""
     if not outil("nft"):
         raise Refus("nft est absent : installe le paquet nftables pour utiliser le kill switch.", 3)
-    for svc in ("firewalld", "ufw"):
-        if outil("systemctl") and lancer([outil("systemctl"), "is-active", svc])[1].strip() == "active":
-            raise Refus("%s est actif : le kill switch risque d'entrer en conflit avec lui, utilise plutôt ses propres règles." % svc, 3)
+    if outil("systemctl") and lancer([outil("systemctl"), "is-active", "firewalld"])[1].strip() == "active":
+        raise Refus("firewalld est actif : le kill switch risque d'entrer en conflit avec lui, utilise plutôt ses propres règles.", 3)
+    # ufw : son service reste « active » après « ufw disable » (Debian) ; seule la ligne ENABLED=yes de sa configuration compte
+    if ufw_active():
+        raise Refus("ufw est actif (ENABLED=yes dans /etc/ufw/ufw.conf) : le kill switch risque d'entrer en conflit avec lui, utilise plutôt ses propres règles.", 3)
     mullvad_actif = bool(outil("systemctl")) and lancer([outil("systemctl"), "is-active", "mullvad-daemon"])[1].strip() == "active"
     if not mullvad_actif and outil("mullvad"):
         code, sortie, _ = lancer([outil("mullvad"), "status"])
@@ -224,8 +245,8 @@ def activer(args):
         raise Refus("usage : activer IFACE ENDPOINT…")
     iface = valider_nom(args[0])
     endpoints = valider_endpoints(args[1:])
+    racine()                       # avant tout outil : sans root (hors essai), on s'arrête sans lancer systemctl ni mullvad
     verifier_environnement()
-    racine()
     verifier_tunnel(iface)
     if not outil("ip"):
         raise Refus("la commande ip est absente (paquet iproute2)", 3)
