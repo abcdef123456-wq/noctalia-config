@@ -14,6 +14,7 @@ Item {
                                    : Partage.indicateur ? "partage"
                                    : AssistantEtat.activitePilule !== "" ? AssistantEtat.activitePilule
                                    : Appel.enCours ? "appel"
+                                   : Resume.actif ? "resume"
                                    : Etat.telecharge && !Etat.aMusique && !Agents.travaille ? "telechargement"
                                    : (Agents.attendTerminal ? "claude"
                                    : (Etat.aMusique ? "musique" : (Agents.travaille ? "claude" : (Etat.minuteurFin > 0 ? "minuteur"
@@ -27,7 +28,7 @@ Item {
                                       claude: claude, "claude-fini": claudeFini, jarvis: jarvis, "jarvis-fini": jarvis, video: video, partage: partage,
                                       telechargement: telechargement, "telechargement-fini": telechargementFini, chaleur: chaleur,
                                       appel: appel, "appel-muet": appelMuet, "appel-fini": appelFini,
-                                      terminal: terminal, "terminal-fini": terminalFini })[mode] || repos
+                                      terminal: terminal, "terminal-fini": terminalFini, resume: resume })[mode] || repos
 
     component Fondu: Row {
         property bool montre: false
@@ -411,6 +412,16 @@ Item {
             text: Terminal.finiAffichee
         }
         Texte { anchors.verticalCenter: parent.verticalCenter; secondaire: true; font.features: { "tnum": 1 }; text: Terminal.fini ? Etat.duree(Terminal.fini.duree) : "" }
+    }
+
+    // ── Résumé au réveil (Resume.qml) : soleil ou lune, puis météo, rendez-vous et mises à jour en court ──
+    Fondu {
+        id: resume
+        objectName: "nc-resume-pill"
+        montre: c.mode === "resume"
+        Ico { anchors.verticalCenter: parent.verticalCenter; nom: Resume.soir ? "bedtime" : "wb_sunny"; taille: 18; color: Resume.soir ? Couleurs.accentClair : Couleurs.jaune }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Resume.salut; font.weight: Font.DemiBold }
+        Texte { anchors.verticalCenter: parent.verticalCenter; text: Resume.court; secondaire: true; width: Math.min(implicitWidth, 260); font.features: { "tnum": 1 } }
     }
 
     // ── Mode jeu ──

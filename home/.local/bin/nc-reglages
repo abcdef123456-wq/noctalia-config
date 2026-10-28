@@ -519,6 +519,11 @@ REGLAGES = [
         "Pris en compte dans les nouveaux terminaux.",
         "A zsh command running for 10 s or more: its name and duration in the pill, then “Done” or “Failed” (a click goes back to the terminal). "
         "Applies to newly opened terminals.")),
+    R("ILE_RESUME_REVEIL", "Île", L("Résumé au réveil dans l'île", "Wake-up summary in the island"), "ouinon", "oui",
+      L("Au retour après une longue absence (4 h ou plus) ou la première fois du jour : « Bonjour » avec la météo, les rendez-vous, "
+        "les mises à jour du système et la batterie. Rien pendant un partage d'écran ni en mode jeu.",
+        "When you come back after a long absence (4 h or more) or the first time of the day: “Good morning” with the weather, events, "
+        "system updates and battery. Nothing during screen sharing or Game Mode.")),
     R("POMODORO_CONCENTRATION", "Île", L("Pomodoro : Ne pas déranger pendant le travail", "Pomodoro: Do Not Disturb while working"),
       "ouinon", "oui",
       L("Pomodoro (page Minuteur de l'île, ou « Pomodoro » dans le Spotlight) : 25 min de travail, 5 de pause, 15 toutes les 4.",
@@ -1495,6 +1500,7 @@ MATERIEL = {
     "BAT_RELEVES": "batterie", "BAT_CLAVIER": "clavier-batterie",
     "VERROU_MUSIQUE": "verrou",
     "PAVE_PENDANT_FRAPPE": "pave", "PAVE_CLIC_MILIEU": "pave", "PARTAGE_DISCRET": "ile", "NPD_AUTO": "ile",
+    "ILE_RESUME_REVEIL": "ile",
     # Réglages que seule l'île Quickshell lit (le plugin Noctalia nc/ile n'en lit aucun) : cachés sans elle
     **{c: "ile" for c in ("ILE_HEURE", "ILE_DATE", "ILE_STYLE", "ILE_CONTOUR", "ILE_SURVOL", "ILE_BANNIERES", "ILE_METEO", "ILE_PRESSE", "PRESSE_DUREE",
                           "ILE_ANIM_BATTERIE", "ILE_BANNIERE_DUREE", "ILE_TELECHARGEMENTS", "CHALEUR_ALERTE", "ILE_APPEL", "ILE_TERMINAL", "ILE_CASQUE_BATTERIE", "ILE_PRESSE_ACTIONS")},

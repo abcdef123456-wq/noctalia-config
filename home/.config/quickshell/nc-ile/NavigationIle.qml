@@ -14,7 +14,7 @@ Item {
             notifications: ["Notifications", "Notifications"], son: ["Son", "Sound"], reseau: ["Réseau", "Network"],
             bluetooth: ["Bluetooth", "Bluetooth"], systeme: ["Système", "System"], sante: ["Santé", "Health"], calendrier: ["Calendrier", "Calendar"],
             meteo: ["Météo", "Weather"], presse: ["Presse-papiers", "Clipboard"], fenetres: ["Fenêtres", "Windows"],
-            appel: ["Appel", "Call"], terminal: ["Terminal", "Terminal"]
+            appel: ["Appel", "Call"], terminal: ["Terminal", "Terminal"], resume: ["Résumé", "Summary"]
         })[nom]
         return l ? Reglages.t(l[0], l[1]) : nom
     }

@@ -34,6 +34,7 @@ Singleton {
         if (enCharge) a.push("charge")
         if (jeu) a.push("jeu")
         if (Terminal.enCours) a.push("terminal")                           // commande longue dans le terminal (Terminal.qml)
+        if (Resume.actif) a.push("resume")                                 // « Bonjour » au réveil (Resume.qml)
         return a
     }
     // Page Batterie (Charge.qml) juste après le centre, seulement sur un PC qui a une batterie ; pendant une recharge,

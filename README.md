@@ -249,6 +249,13 @@ l'île Quickshell.
   une espace, et les programmes interactifs (éditeurs, ssh, pagers, consoles…) ne sont pas notés ; pendant un partage
   d'écran, la pilule dit « Commande » sans le nom. Le retour au terminal passe par le pid du terminal qui a lancé zsh :
   sous tmux ou dans une instance unique de kitty, ce peut être une autre fenêtre, ou aucune.
+- **Résumé au réveil** (`nc-reglages` → Île, réglage `ILE_RESUME_REVEIL`) : au retour après 4 h ou plus d'écran éteint ou
+  verrouillé, ou la première fois du jour après 5 h, la pilule dit « Bonjour » (« Bonsoir » le soir) avec la météo, les
+  rendez-vous du jour, le nombre de mises à jour du système et la batterie (sur batterie seulement), puis s'efface au
+  bout de 8 s ; un clic ouvre la page Résumé. Rien de nouveau n'est demandé au réseau : météo déjà chargée par l'île,
+  mises à jour lues dans le cache de `nc-paquets`, agenda seulement si Google Agenda par JARVIS est déjà configuré
+  (une ligne absente sans donnée). Rien pendant un partage d'écran (repris à la fin s'il est encore le matin) ni en
+  mode jeu. Aucun minuteur en continu : l'île note l'heure quand l'écran s'éteint (`$XDG_STATE_HOME/nc/ile-resume`).
 - **Presse-papiers de l'île** (`nc-reglages` → Île, réglage `PRESSE_DUREE`) : les textes et images non épinglés sont
   effacés après 1, 7 (par défaut) ou 30 jours, ou jamais. Les épinglés restent. L'effacement se fait à la lecture ou à
   l'écriture de la liste, sans minuteur.
