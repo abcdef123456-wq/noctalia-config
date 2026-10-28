@@ -900,8 +900,10 @@ def fournisseur_de(nom, interface):
 def pays_de(nom):
     """Le code pays (deux lettres, validé) d'un nom de connexion, sinon vide. Un mot compte s'il est tout en majuscules (« FR »,
     « FR#12 »), ou en minuscules suivi de chiffres (« fr1 », « fr123 »), ou s'il est le premier mot (« fr-par-wg-001 »). Les mots
-    courts ordinaires (« it », « in », « no », « my »…) ne comptent donc pas au milieu d'un nom."""
-    mots = [m for m in MOTS_PAYS.split(nom or "") if m]
+    courts ordinaires (« it », « in », « no », « my »…) ne comptent donc pas au milieu d'un nom. Le préfixe « nc-vpn- » (nos propres
+    profils, sans tenir compte des majuscules) est retiré d'abord : « nc-vpn-labo » ne donne plus NC, « nc-vpn-FR#12 » donne FR."""
+    nom = re.sub(r"^\s*nc-vpn-", "", nom or "", flags=re.I)
+    mots = [m for m in MOTS_PAYS.split(nom) if m]
     for i, m in enumerate(mots):
         g = re.fullmatch(r"([A-Za-z]{2})([0-9]*)", m)
         if not g:
@@ -951,8 +953,17 @@ def etat_enrichi():
     return e
 
 
+def nordlynx_monte():
+    """Vrai si l'interface « nordlynx » existe (tunnel du client NordVPN natif, hors NetworkManager) : une simple présence dans
+    /sys/class/net, aucun appel de la CLI `nordvpn`, aucun réseau. Le client la crée à la connexion et l'enlève à la déconnexion."""
+    return os.path.isdir(os.path.join(SYSFS, "class", "net", "nordlynx"))
+
+
 def indicateur():
-    """Le premier tunnel ACTIF de NetworkManager (un seul appel nmcli). Aucune géolocalisation, aucun secret, aucun débit.
+    """Le tunnel ACTIF à montrer (un seul appel nmcli). Aucune géolocalisation, aucun secret, aucun débit.
+    Plusieurs tunnels : un FOURNISSEUR RECONNU passe avant un profil perso (« nc-vpn-labo »), même s'il n'est pas le premier de
+    NetworkManager ; à défaut, le tunnel `nordlynx` du client Nord natif (présence de l'interface seulement, pays inconnu : « NordVPN »
+    seul), puis le premier tunnel de NetworkManager. « nombre » compte tous les tunnels vus.
     Sans tunnel NetworkManager monté, et seulement si la commande `mullvad` existe : l'état de l'application officielle Mullvad
     (un `mullvad status --json`, 2 s au plus). Un tunnel NetworkManager réellement monté passe toujours avant. « mullvad » dit
     seulement si l'application est installée (la pilule en tire sa veille `mullvad status listen`)."""
@@ -960,17 +971,24 @@ def indicateur():
     mv = shutil.which("mullvad") is not None
     rien = {"disponible": e["disponible"], "actif": False, "fournisseur": "", "pays": "", "nom": "", "nombre": 0, "mullvad": mv}
     actives = e.get("actives") or []
-    if not actives:
+    nord = nordlynx_monte()
+    if not actives and not nord:
         if mv:
             m = mullvad_etat()
             if m["connecte"]:
                 return {"disponible": True, "actif": True, "fournisseur": "Mullvad", "pays": m["pays"], "nom": "Mullvad",
                         "nombre": 1, "mullvad": True}
         return rien
-    c = actives[0]
-    return {"disponible": True, "actif": True, "fournisseur": fournisseur_de(c["nom"], c["interface"]),
-            "pays": (pays_proton_nom(c["nom"]) if fournisseur_de(c["nom"], c["interface"]) == "Proton VPN" else "") or pays_de(c["nom"]),
-            "nom": nom_borne(c["nom"]), "nombre": len(actives), "mullvad": mv}
+    nord_hors_nm = nord and not any(c["interface"] == "nordlynx" for c in actives)
+    nombre = len(actives) + (1 if nord_hors_nm else 0)
+    reconnue = next((c for c in actives if fournisseur_de(c["nom"], c["interface"])), None)
+    if reconnue is None and nord_hors_nm:
+        return {"disponible": True, "actif": True, "fournisseur": "NordVPN", "pays": "", "nom": "NordVPN", "nombre": nombre, "mullvad": mv}
+    c = reconnue or actives[0]
+    f = fournisseur_de(c["nom"], c["interface"])
+    return {"disponible": True, "actif": True, "fournisseur": f,
+            "pays": (pays_proton_nom(c["nom"]) if f == "Proton VPN" else "") or pays_de(c["nom"]),
+            "nom": nom_borne(c["nom"]), "nombre": nombre, "mullvad": mv}
 
 
 # ── Application officielle Mullvad (commande `mullvad`, démon mullvad-daemon ; son tunnel est hors de NetworkManager) ──────

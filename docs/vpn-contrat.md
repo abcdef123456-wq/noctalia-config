@@ -67,6 +67,16 @@ reconnecter à distance.
 Après la mise à jour du dépôt, relance `nc-jarvis deployer` pour que le serveur de JARVIS reçoive cette nouvelle action
 (c'est toi qui le fais, la mise à jour ne le lance jamais).
 
+
+## Indicateur de la pilule (`nc-vpn indicateur --json`) : plusieurs tunnels
+
+`{"disponible", "actif", "fournisseur", "pays", "nom", "nombre", "mullvad"}`, un seul appel `nmcli`, aucun réseau. Quand plusieurs tunnels sont montés,
+un **fournisseur reconnu** passe avant un profil perso (« nc-vpn-labo ») même s'il n'est pas le premier de NetworkManager ; `nombre` compte tous les
+tunnels. Le client NordVPN natif (hors NetworkManager) se lit par la seule présence de `/sys/class/net/nordlynx` (`NC_VPN_SYSFS` pour les tests) :
+`fournisseur` = `NordVPN`, `nom` = `NordVPN`, `pays` vide (aucune commande `nordvpn`, aucun appel réseau) ; il passe avant un profil perso mais après un
+fournisseur reconnu de NetworkManager, et n'est pas compté deux fois si NetworkManager porte déjà l'interface `nordlynx`. Le pays se déduit du nom de la
+connexion après retrait du préfixe `nc-vpn-` (sans tenir compte des majuscules) : « nc-vpn-labo » ne donne aucun pays (et non NC), « nc-vpn-FR#12 » donne FR.
+
 ## Contrat des fournisseurs VPN (`nc-vpn`)
 
 Ce que la fenêtre VPN lit et lance pour NordVPN, Proton VPN et Mullvad. Tout est en arguments (jamais une ligne de shell).

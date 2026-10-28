@@ -49,6 +49,16 @@ class Motifs(unittest.TestCase):
         self.assertEqual(p("wg0 vpn"), "")
         self.assertEqual(p(""), "")
 
+    def test_prefixe_nc_vpn_retire_avant_le_pays(self):
+        p = self.m.pays_de
+        self.assertEqual(p("nc-vpn-labo"), "")                               # « nc » n'est pas la Nouvelle-Calédonie
+        self.assertEqual(p("nc-vpn-FR#12"), "FR")
+        self.assertEqual(p("NC-VPN-fr1"), "FR")                              # sans tenir compte des majuscules
+        self.assertEqual(p("  nc-vpn-fr-par-wg-001"), "FR")
+        self.assertEqual(p("nc-vpn-"), "")
+        self.assertEqual(p("nc-vpn-nc1"), "NC")                              # un vrai « nc1 » après le préfixe reste lu
+        self.assertEqual(p("mullvad-nc-vpn-fr1"), "FR")                      # le préfixe n'est retiré qu'au début ; « fr1 » compte
+
     def test_nom_borne_et_sans_controle(self):
         n = self.m.nom_borne("A\x1b[31mB\nC" + "x" * 100)
         self.assertNotIn("\x1b", n)
@@ -107,6 +117,60 @@ class Indicateur(BaseVpn):
     def test_arguments_inattendus_refuses(self):
         self.assertEqual(self.vpn("indicateur").returncode, 2)
         self.assertEqual(self.vpn("indicateur", "--json", "x").returncode, 2)
+
+
+class PlusieursTunnels(BaseVpn):
+    def ecrire(self, lignes):
+        (self.r / "etat.json").write_text(json.dumps(lignes))
+
+    def sys_nord(self):
+        (self.r / "sys" / "class" / "net" / "nordlynx").mkdir(parents=True)
+
+    def ind(self):
+        r = self.vpn("indicateur", "--json", NC_VPN_SYSFS=str(self.r / "sys"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_fournisseur_reconnu_prefere_au_profil_perso(self):
+        self.ecrire([dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="nc-vpn-labo"),
+                     dict(uuid=U2, type="wireguard", active=True, dev="proton0", nom="ProtonVPN FR#12")])
+        d = self.ind()
+        self.assertEqual((d["fournisseur"], d["pays"], d["nom"], d["nombre"]), ("Proton VPN", "FR", "ProtonVPN FR#12", 2))
+
+    def test_sans_fournisseur_reconnu_le_premier_tunnel(self):
+        self.ecrire([dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="nc-vpn-labo"),
+                     dict(uuid=U2, type="wireguard", active=True, dev="wg0", nom="Maison")])
+        d = self.ind()
+        self.assertEqual((d["fournisseur"], d["pays"], d["nom"], d["nombre"]), ("", "", "nc-vpn-labo", 2))
+
+    def test_nordlynx_seul_hors_networkmanager(self):
+        self.ecrire([])
+        self.sys_nord()
+        self.poser("nordvpn", {})
+        d = self.ind()
+        self.assertEqual(d, dict(disponible=True, actif=True, fournisseur="NordVPN", pays="", nom="NordVPN", nombre=1, mullvad=True))
+        self.assertEqual(self.appels_de("nordvpn"), [])                      # aucune CLI Nord, aucun réseau
+
+    def test_nordlynx_absent_rien_ne_change(self):
+        self.ecrire([])
+        (self.r / "sys").mkdir()
+        self.assertFalse(self.ind()["actif"])
+
+    def test_nordlynx_avec_profil_perso_et_avec_proton(self):
+        self.sys_nord()
+        self.ecrire([dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="nc-vpn-labo")])
+        d = self.ind()
+        self.assertEqual((d["fournisseur"], d["nombre"]), ("NordVPN", 2))        # un fournisseur reconnu passe avant le profil perso
+        self.ecrire([dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="nc-vpn-labo"),
+                     dict(uuid=U2, type="wireguard", active=True, dev="proton0", nom="ProtonVPN DE#3")])
+        d = self.ind()
+        self.assertEqual((d["fournisseur"], d["pays"], d["nombre"]), ("Proton VPN", "DE", 3))   # le premier reconnu de NetworkManager garde la main
+
+    def test_nordlynx_deja_dans_networkmanager_pas_compte_deux_fois(self):
+        self.sys_nord()
+        self.ecrire([dict(uuid=U1, type="wireguard", active=True, dev="nordlynx", nom="Nord perso")])
+        d = self.ind()
+        self.assertEqual((d["fournisseur"], d["nombre"]), ("NordVPN", 1))
 
 
 NUMERO = "1234567890123456"          # faux numéro de compte : ne doit jamais ressortir
