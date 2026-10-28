@@ -966,6 +966,288 @@ def mullvad_json():
     return e
 
 
+# ── Fournisseurs (Nord, Proton, Mullvad) : trois états, des pays seulement quand le compte est connecté ─────────────────
+# États : « absent » (commande introuvable), « sans_compte » (client installé, pas de compte connecté, ou client inutilisable
+# pour une raison dite dans « probleme »), « pret » (compte connecté). Jamais d'adresse e-mail, de numéro de compte ni de jeton :
+# seul un oui/non en est tiré. Toutes les commandes en argv, stdin fermé, délai borné, sortie bornée et nettoyée (couleurs ANSI,
+# retours chariot, animations d'attente). Le nom d'un client installé ne fait jamais office de fournisseur connecté.
+CONTRAT_FOURNISSEURS = 1
+MAX_SORTIE = 64 * 1024
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+# Pays : « CODE Nom anglais » (la liste de secours de Mullvad, et la table qui donne un code aux noms que la CLI de Nord liste sans code)
+NOMS_PAYS = ("AD Andorra|AE United Arab Emirates|AF Afghanistan|AL Albania|AM Armenia|AO Angola|AR Argentina|AT Austria|AU Australia|"
+             "AZ Azerbaijan|BA Bosnia and Herzegovina|BB Barbados|BD Bangladesh|BE Belgium|BG Bulgaria|BH Bahrain|BM Bermuda|"
+             "BN Brunei Darussalam|BO Bolivia|BR Brazil|BS Bahamas|BT Bhutan|BZ Belize|CA Canada|CH Switzerland|CI Cote d'Ivoire|"
+             "CL Chile|CN China|CO Colombia|CR Costa Rica|CY Cyprus|CZ Czech Republic|DE Germany|DK Denmark|DO Dominican Republic|"
+             "DZ Algeria|EC Ecuador|EE Estonia|EG Egypt|ES Spain|ET Ethiopia|FI Finland|FR France|GB United Kingdom|GE Georgia|"
+             "GH Ghana|GI Gibraltar|GL Greenland|GR Greece|GT Guatemala|GU Guam|HK Hong Kong|HN Honduras|HR Croatia|HU Hungary|"
+             "ID Indonesia|IE Ireland|IL Israel|IM Isle of Man|IN India|IQ Iraq|IS Iceland|IT Italy|JE Jersey|JM Jamaica|JO Jordan|"
+             "JP Japan|KE Kenya|KG Kyrgyzstan|KH Cambodia|KR South Korea|KW Kuwait|KZ Kazakhstan|LA Laos|LB Lebanon|LI Liechtenstein|"
+             "LK Sri Lanka|LT Lithuania|LU Luxembourg|LV Latvia|MA Morocco|MC Monaco|MD Moldova|ME Montenegro|MK North Macedonia|"
+             "MM Myanmar|MN Mongolia|MO Macao|MT Malta|MU Mauritius|MX Mexico|MY Malaysia|NG Nigeria|NL Netherlands|NO Norway|"
+             "NP Nepal|NZ New Zealand|PA Panama|PE Peru|PH Philippines|PK Pakistan|PL Poland|PR Puerto Rico|PT Portugal|PY Paraguay|"
+             "QA Qatar|RO Romania|RS Serbia|RU Russia|SA Saudi Arabia|SE Sweden|SG Singapore|SI Slovenia|SK Slovakia|SN Senegal|"
+             "TH Thailand|TN Tunisia|TR Turkey|TT Trinidad and Tobago|TW Taiwan|UA Ukraine|UG Uganda|US United States|UY Uruguay|"
+             "UZ Uzbekistan|VE Venezuela|VN Vietnam|ZA South Africa")
+NOMS_PAYS_ALIAS = {"czechia": "CZ", "turkiye": "TR", "macau": "MO", "korea south": "KR", "brunei": "BN", "cote divoire": "CI",
+                   "united states of america": "US", "usa": "US", "uk": "GB", "great britain": "GB", "russian federation": "RU"}
+CODE_NOM = {x[:2]: x[3:] for x in NOMS_PAYS.split("|")}
+
+
+def cle_nom(nom):
+    """Clé de comparaison d'un nom de pays : sans accents, sans apostrophes, en minuscules, « _ » et « - » lus comme des espaces."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", nom or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower().replace("'", "").replace("’", "")
+    return " ".join(re.split(r"[\s_-]+", s.strip()))
+
+
+NOM_CODE = {cle_nom(n): c for c, n in CODE_NOM.items()}
+NOM_CODE.update(NOMS_PAYS_ALIAS)
+HOTES_NORD = ("nordaccount.com", "nordvpn.com")
+SECRET_LONG = re.compile(r"[A-Za-z0-9_+/=.-]{24,}")
+
+
+def filtre_secret(texte, n=200):
+    """Une ligne de message d'un outil, sans URL (de rappel ou autre), sans adresse e-mail, sans longue suite de chiffres ni jeton."""
+    t = (texte or "").strip().splitlines()
+    t = t[0] if t else ""
+    t = re.sub(r"[A-Za-z][A-Za-z0-9+.-]*://\S*", "[URL]", t)
+    t = re.sub(r"[^\s@]+@[^\s@]+", "[…]", t)
+    t = SECRET_LONG.sub("[…]", epure(t))
+    return nom_borne(t, n)
+
+
+def nettoyer_sortie(octets):
+    """Texte brut d'une sortie de CLI : 64 Kio au plus, couleurs ANSI retirées, retours chariot lus comme des sauts de ligne
+    (les animations d'attente en réécrivent la ligne), caractères de contrôle retirés."""
+    t = ANSI.sub("", (octets or b"")[:MAX_SORTIE].decode("utf-8", errors="replace"))
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", t)
+
+
+def cli_fournisseur(nom, args, delai=10):
+    """(code, texte propre) de la commande `nom` lancée en argv, stdin fermé. 127 : absente ; 126 : lancement impossible ;
+    124 : délai dépassé (la commande est tuée : une question interactive posée à un stdin fermé ne bloque donc jamais)."""
+    exe = shutil.which(nom)
+    if not exe:
+        return 127, ""
+    try:
+        r = subprocess.run([exe] + args, capture_output=True, timeout=delai, stdin=subprocess.DEVNULL, start_new_session=True,
+                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C", NO_COLOR="1", TERM="dumb"))
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except (OSError, subprocess.SubprocessError):
+        return 126, ""
+    return r.returncode, nettoyer_sortie(r.stdout + b"\n" + r.stderr)
+
+
+def probleme_cli(code, texte):
+    """Le défaut qui rend une CLI inutilisable : delai, lancement, permission, consentement, demon ; sinon vide."""
+    if code == 124:
+        return "delai"
+    if code == 126:
+        return "lancement"
+    if re.search(r"permission denied", texte, re.I):
+        return "permission"
+    if re.search(r"\(y/n\)|we value your privacy|collect and use limited", texte, re.I):
+        return "consentement"
+    if re.search(r"isn'?t running|not running|connection refused|socket not found|nordvpnd", texte, re.I):
+        return "demon"
+    return ""
+
+
+def message_probleme(fid, probleme):
+    nom = {"nord": "nordvpn", "mullvad": "mullvad", "proton": "protonvpn-app"}.get(fid, fid)
+    if probleme == "permission":
+        return T("Ajoute ton compte au groupe nordvpn (sudo usermod -aG nordvpn $USER), puis rouvre la session.",
+                 "Add your account to the nordvpn group (sudo usermod -aG nordvpn $USER), then log in again.")
+    if probleme == "consentement":
+        return T("Ouvre un terminal et lance nordvpn une fois : il pose une question (statistiques anonymes) à laquelle répondre.",
+                 "Open a terminal and run nordvpn once: it asks a question (anonymous statistics) to answer.")
+    if probleme == "demon":
+        return T("Le service nordvpnd ne tourne pas (sudo systemctl enable --now nordvpnd).",
+                 "The nordvpnd service is not running (sudo systemctl enable --now nordvpnd).")
+    if probleme == "delai":
+        return T(f"{nom} ne répond pas à temps. Si c'est la première fois, ouvre un terminal et lance {nom} une fois.",
+                 f"{nom} did not answer in time. If this is the first time, open a terminal and run {nom} once.")
+    return T(f"{nom} n'a pas pu être lancé.", f"{nom} could not be run.")
+
+
+def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct"):
+    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret »."""
+    f = {"id": fid, "nom": nom, "etat": etat_, "message": message}
+    if etat_ == "pret":
+        f["pays"] = pays or []
+    f.update({"pays_actif": pays_actif if etat_ == "pret" else "", "connecte": bool(connecte) and etat_ == "pret",
+              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage})
+    return f
+
+
+# ── Nord : la CLI officielle `nordvpn` (dépôt NordSecurity/nordvpn-linux, dossier cli/) ──────────────────────────────────
+# Sous-commandes lues dans les sources : `account` (affiche « Account information » si connecté ; sinon « You're not logged in »
+# ou une demande de reconnexion), `countries` (noms avec « _ », un par ligne quand la sortie n'est pas un terminal),
+# `connect NOM`, `disconnect`, `status` (« Status: Connected », « Country: Nom »), `login` (affiche « Continue in the browser: URL »
+# et ne lance pas lui-même le navigateur ; pose la question du consentement si besoin) ; socket refusé : « Permission denied… ».
+# `account` affiche l'adresse e-mail : sa sortie n'est JAMAIS gardée, seule la présence de « Account information » compte.
+def nord_exe():
+    return shutil.which("nordvpn") is not None
+
+
+def nord_pays_liste():
+    """([{"code","nom","cli"}…], probleme) d'après `nordvpn countries`. Seuls les noms de la CLI (lettres, « _ », « ' » ou « . »)
+    qui ont un code ISO connu sont gardés ; « cli » est le nom exact à redonner à `connect`."""
+    code, t = cli_fournisseur("nordvpn", ["countries"], 10)
+    p = probleme_cli(code, t)
+    if p:
+        return [], p
+    res = []
+    for mot in t.split():
+        if not re.fullmatch(r"[A-Za-z][A-Za-z_'.-]{1,39}", mot):
+            continue
+        c = NOM_CODE.get(cle_nom(mot))
+        if c and c not in {x["code"] for x in res}:
+            res.append({"code": c, "nom": mot.replace("_", " "), "cli": mot})
+    res.sort(key=lambda x: x["nom"])
+    return res, ""
+
+
+def nord_fournisseur():
+    if not nord_exe():
+        return fiche("nord", "NordVPN", "absent", T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["account"], 10)
+    p = probleme_cli(code, t)
+    if p:
+        return fiche("nord", "NordVPN", "sans_compte", message_probleme("nord", p), peut_login=p == "consentement", probleme=p)
+    if code != 0 or "Account information" not in t:
+        return fiche("nord", "NordVPN", "sans_compte",
+                     T("NordVPN est installé, mais aucun compte n'est connecté.", "NordVPN is installed, but no account is signed in."),
+                     peut_login=True)
+    pays, _ = nord_pays_liste()
+    code, t = cli_fournisseur("nordvpn", ["status"], 8)
+    connecte = code == 0 and re.search(r"^\s*Status:\s*Connected\s*$", t, re.I | re.M) is not None
+    actif = ""
+    m = re.search(r"^\s*Country:\s*(.{1,60})$", t, re.M)
+    if connecte and m:
+        actif = NOM_CODE.get(cle_nom(m.group(1)), "")
+    return fiche("nord", "NordVPN", "pret", T("Compte NordVPN connecté.", "NordVPN account signed in."),
+                 pays=[{"code": x["code"], "nom": x["nom"]} for x in pays], pays_actif=actif, connecte=connecte)
+
+
+def code_pays_ok(cc):
+    if not isinstance(cc, str) or not re.fullmatch(r"[A-Z]{2}", cc) or cc not in ISO_PAYS:
+        raise Echec(T("Code pays invalide (deux lettres majuscules, par exemple « FR »).", "Invalid country code (two uppercase letters, e.g. \"FR\")."))
+    return cc
+
+
+def nord_connecter(cc):
+    code_pays_ok(cc)
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    pays, p = nord_pays_liste()
+    if p:
+        raise Echec(message_probleme("nord", p))
+    nom = next((x["cli"] for x in pays if x["code"] == cc), "")
+    if not nom:
+        raise Echec(T("NordVPN ne propose pas ce pays (ou aucun compte n'est connecté).", "NordVPN does not offer this country (or no account is signed in)."))
+    code, t = cli_fournisseur("nordvpn", ["connect", nom], 90)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if code != 0 or re.search(r"not logged in|log in again|please log in", t, re.I):
+        detail = filtre_secret(t)
+        raise Echec(T("NordVPN a refusé la connexion", "NordVPN refused the connection") + (" (" + detail + ")" if detail else "") + ".")
+    print(T(f"NordVPN : connexion demandée ({cc}).", f"NordVPN: connection requested ({cc})."))
+
+
+def nord_deconnecter():
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["disconnect"], 30)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if code != 0:
+        detail = filtre_secret(t)
+        raise Echec(T("NordVPN a refusé", "NordVPN refused") + (" (" + detail + ")" if detail else "") + ".")
+    print(T("NordVPN : déconnecté.", "NordVPN: disconnected."))
+
+
+def url_nord_sure(url):
+    """Vrai pour une URL https d'un domaine Nord attendu (nordaccount.com, nordvpn.com et leurs sous-domaines), sans identifiant,
+    sur le port 443, sans espace ni caractère de contrôle."""
+    if not isinstance(url, str) or len(url) > 2048 or not re.fullmatch(r"[\x21-\x7e]+", url):
+        return False
+    try:
+        p = urllib.parse.urlsplit(url)
+        h = (p.hostname or "").lower().rstrip(".")
+        port = p.port
+    except ValueError:
+        return False
+    return (p.scheme == "https" and not p.username and not p.password and port in (None, 443)
+            and any(h == d or h.endswith("." + d) for d in HOTES_NORD))
+
+
+def ouvrir(args):
+    """Lance un programme à part (navigateur, application officielle), sans l'attendre ni lire sa sortie. Faux si impossible."""
+    exe = shutil.which(args[0])
+    if not exe:
+        return False
+    try:
+        subprocess.Popen([exe] + args[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def nord_login():
+    """`nordvpn login` (parcours officiel, aucun mot de passe ni jeton chez nous) : il donne une URL, ouverte avec xdg-open si
+    elle est en https sur un domaine Nord. L'URL n'est jamais affichée ni journalisée."""
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["login"], 20)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if re.search(r"already logged in", t, re.I):
+        return print(T("NordVPN : un compte est déjà connecté.", "NordVPN: an account is already signed in."))
+    m = re.search(r"Continue in the browser:\s*(https://\S+)", t)
+    if not m or not url_nord_sure(m.group(1)):
+        raise Echec(T("NordVPN n'a pas donné d'adresse de connexion sûre : lance « nordvpn login » dans un terminal.",
+                      "NordVPN did not give a safe login address: run \"nordvpn login\" in a terminal."))
+    if not ouvrir(["xdg-open", m.group(1)]):
+        raise Echec(T("Impossible d'ouvrir le navigateur (xdg-open) : lance « nordvpn login » dans un terminal.",
+                      "Could not open the browser (xdg-open): run \"nordvpn login\" in a terminal."))
+    print(T("NordVPN : la page de connexion s'ouvre dans le navigateur.", "NordVPN: the login page is opening in the browser."))
+
+
+API_FOURNISSEURS = {
+    "nord": {"fiche": nord_fournisseur, "connecter": nord_connecter, "deconnecter": nord_deconnecter, "login": nord_login},
+}
+
+
+def fournisseurs_json():
+    return {"contrat": CONTRAT_FOURNISSEURS, "fournisseurs": [a["fiche"]() for a in API_FOURNISSEURS.values()]}
+
+
+def fournisseur_agir(a):
+    """nc-vpn fournisseur ID connecter CC | deconnecter | login"""
+    api = API_FOURNISSEURS.get(a[0]) if a else None
+    if not api:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
+    if len(a) == 3 and a[1] == "connecter":
+        api["connecter"](a[2])
+    elif a[1:] == ["deconnecter"]:
+        api["deconnecter"]()
+    elif a[1:] == ["login"]:
+        api["login"]()
+    else:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
+
+
 # ── IP publique (à la demande de l'île, jamais en boucle) ──────────────────────────────────────────────────────
 def reglage(cle, defaut=""):
     try:
@@ -1316,6 +1598,10 @@ def main():
             print(json.dumps(mullvad_json(), ensure_ascii=False))
         elif cmd == "mullvad" and len(a) >= 2:
             mullvad_agir(a[1:])
+        elif cmd == "fournisseurs-json" and len(a) == 1:
+            print(json.dumps(fournisseurs_json(), ensure_ascii=False))
+        elif cmd == "fournisseur" and len(a) >= 3:
+            fournisseur_agir(a[1:])
         elif cmd == "killswitch":
             killswitch(a[1:])
         elif cmd == "ip-publique" and len(a) == 1:

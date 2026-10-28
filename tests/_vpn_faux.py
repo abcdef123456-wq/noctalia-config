@@ -136,6 +136,23 @@ elif conf.get("echec"):
 '''
 
 
+# Faux client générique (nordvpn, protonvpn-app, xdg-open, mullvad-vpn) : note ses arguments (appels-NOM.jsonl) ; sa réponse vient de
+# NOM.json : {"premier argument ou *": {"out": "…", "err": "…", "code": 0, "dormir": secondes}}. Jamais le vrai programme.
+FAUX_CLIENT = r'''#!@PYTHON@
+import json, os, sys, time
+from pathlib import Path
+R = Path(os.environ["FAUX_DIR"])
+nom = Path(sys.argv[0]).name
+a = sys.argv[1:]
+with (R / ("appels-" + nom + ".jsonl")).open("a") as f: f.write(json.dumps(a) + "\n")
+conf = json.loads((R / (nom + ".json")).read_text()) if (R / (nom + ".json")).exists() else {}
+c = conf.get(a[0] if a else "", conf.get("*", {}))
+if c.get("dormir"): time.sleep(c["dormir"])
+sys.stdout.write(c.get("out", "")); sys.stderr.write(c.get("err", ""))
+sys.exit(c.get("code", 0))
+'''
+
+
 def connexions():
     return [dict(uuid=U1, type="vpn", active=False, dev="tun0", nom="Labo"),
             dict(uuid=U2, type="wireguard", active=True, dev="wg-maison", nom="Maison: 192.0.2.1"),
@@ -163,6 +180,7 @@ class BaseVpn(unittest.TestCase):
         st.write_text(FAUX_SECRET_TOOL)
         st.chmod(0o755)
         (self.r / "etat.json").write_text(json.dumps(connexions()))
+        (self.r / "faux-bin" / "python3").symlink_to(sys.executable)     # pour les « #!/usr/bin/env python3 » avec PATH = faux-bin seul
 
     def env(self, **plus):
         env = dict(os.environ, HOME=str(self.r / "home"), XDG_CONFIG_HOME=str(self.r / "cfg"), XDG_RUNTIME_DIR=str(self.r / "run"),
@@ -177,6 +195,25 @@ class BaseVpn(unittest.TestCase):
     def vpn(self, *args, **plus):
         return subprocess.run([sys.executable, str(BIN)] + list(args), env=self.env(**plus), capture_output=True, text=True, timeout=30,
                               stdin=subprocess.DEVNULL)
+
+    def poser(self, nom, conf=None):
+        """Pose un faux client NOM dans faux-bin ; conf : sa réponse (voir FAUX_CLIENT)."""
+        f = self.r / "faux-bin" / nom
+        f.write_text(FAUX_CLIENT.replace("@PYTHON@", sys.executable))
+        f.chmod(0o755)
+        if conf is not None:
+            self.regler(nom, conf)
+
+    def regler(self, nom, conf):
+        (self.r / (nom + ".json")).write_text(json.dumps(conf))
+
+    def appels_de(self, nom):
+        p = self.r / ("appels-" + nom + ".jsonl")
+        return [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+
+    def seul(self, *args, **plus):
+        """nc-vpn avec PATH = faux-bin seul : aucun vrai client (nordvpn, mullvad, protonvpn…) ne peut être lancé."""
+        return self.vpn(*args, PATH=str(self.r / "faux-bin"), **plus)
 
     def appels_mullvad(self):
         p = self.r / "appels-mullvad.jsonl"
