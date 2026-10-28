@@ -16,6 +16,10 @@ map("n", "<A-Up>", "<Cmd>m .-2<CR>==", { desc = "Monter la ligne" })
 map("v", "<A-Down>", ":m '>+1<CR>gv=gv", { desc = "Descendre la sélection" })
 map("v", "<A-Up>", ":m '<-2<CR>gv=gv", { desc = "Monter la sélection" })
 
+-- Ctrl + C en visuel copie la sélection dans le presse-papiers du système (registre +, donc aussi sous SSH où LazyVim ne
+-- met pas unnamedplus). En mode normal, Ctrl + C reste une interruption ; Échap quitte toujours le mode visuel.
+map("x", "<C-c>", '"+y', { desc = "Copier (presse-papiers)" })
+
 -- Collé par-dessus une sélection sans perdre ce qu'on vient de copier
 map("x", "p", '"_dP', { desc = "Coller sans écraser le presse-papiers" })
 
