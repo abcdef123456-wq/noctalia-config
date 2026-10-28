@@ -174,7 +174,7 @@ class Rejets(unittest.TestCase):
 
     def test_texte_non_imprimable_ou_hors_bornes(self):
         r = {"profil": "balanced"}
-        for nom in ("Cours\nJeu", "Cours\x00", "Cours\x1b[31m", "Cours‮", "", "   ", "x" * 41, "-rf", "<b>Cours</b>", 5, None):
+        for nom in ("Cours\nJeu", "Cours\x00", "Cours\x1b[31m", "Cours\u202e", "", "   ", "x" * 41, "-rf", "<b>Cours</b>", 5, None):
             self.rejet(profil(r, nom=nom), contient="nom")
         for d in ("a\nb", "a\tb", "x" * 241, "", "<script>", None, 3):
             self.rejet(profil(r, description=d), contient="description")
