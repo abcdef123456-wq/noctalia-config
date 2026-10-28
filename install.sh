@@ -300,6 +300,11 @@ pname() {
     nm-openvpn:arch) echo networkmanager-openvpn ;;
     nm-openvpn:debian) echo network-manager-openvpn ;;
     nm-openvpn:*) echo NetworkManager-openvpn ;;
+    # Mot de passe d'un .ovpn (nc-vpn) : rangé dans le trousseau avec secret-tool. Il faut aussi un service Secret ouvert
+    # (gnome-keyring, KeePassXC, KWallet) : on ne l'impose pas, nc-vpn refuse l'import s'il manque
+    secret-tool:debian) echo libsecret-tools ;;        # openSUSE : le paquet s'appelle secret-tool (vérifié dans le dépôt Tumbleweed)
+    secret-tool:suse) echo secret-tool ;;
+    secret-tool:*) echo libsecret ;;
     *) echo "$1" ;;
   esac
 }
@@ -824,7 +829,7 @@ fi
 GENERIC=(uwsm hypridle xdg-desktop-portal-hyprland xdg-desktop-portal-gtk kitty nautilus qt6ct papirus-icon-theme cava swaybg imagemagick
          jq grim slurp swappy wl-clipboard wtype zenity brightnessctl libnotify python qalc playerctl fastfetch bluez-utils gdbus
          zsh git curl unzip xdg-utils nerdfont adwaita-fonts noto-fonts breeze quickshell sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng checkupdates
-         sound-theme-freedesktop enregistreur inotify-tools nm-openvpn)   # sound-theme-freedesktop : sons du minuteur et du Pomodoro ; inotify-tools : fin des téléchargements vue sans relevé (île) ; même nom sur les 4 distributions
+         sound-theme-freedesktop enregistreur inotify-tools nm-openvpn secret-tool)   # sound-theme-freedesktop : sons du minuteur et du Pomodoro ; inotify-tools : fin des téléchargements vue sans relevé (île) ; même nom sur les 4 distributions
 [ "$FAMILY" = suse ] && GENERIC+=(python-curses)
 if [ "$MODE" != files ]; then
   say "$(t "1. Paquets" "1. Packages")"
@@ -832,7 +837,7 @@ if [ "$MODE" != files ]; then
   # Arch : ces paquets améliorent le bureau mais ne sont pas nécessaires pour qu'il démarre ; ils sont proposés (une
   # question), jamais imposés, et un refus ou un échec ne casse rien
   FACULTATIFS=(cava swappy wtype zenity qalc sushi wf-recorder pilotes-va vainfo tesseract tesseract-fra tesseract-eng
-               checkupdates sound-theme-freedesktop enregistreur breeze nerdfont adwaita-fonts noto-fonts nm-openvpn)
+               checkupdates sound-theme-freedesktop enregistreur breeze nerdfont adwaita-fonts noto-fonts nm-openvpn secret-tool)
   for g in "${GENERIC[@]}"; do
     p="$(pname "$g")"
     if [ -z "$p" ]; then manual+=("$g"); continue; fi

@@ -255,8 +255,11 @@ l'île Quickshell.
   l'île : tous les tunnels montés (plusieurs à la fois) avec un bouton « Déconnecter » chacun, « Tout déconnecter », un clic sur
   une autre connexion la monte, « Importer… » prend un `.ovpn` (OpenVPN) ou un `.conf` (WireGuard). L'import refuse un fichier
   qui ferait exécuter quelque chose (`up`, `down`, `route-up`, `script-security` au-dessus de 1, `plugin`, `PostUp`…), un lien,
-  un fichier de plus de 64 Kio, un bloc `<auth-user-pass>` et des certificats donnés par un chemin relatif (mets-les dans le
-  fichier) ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. **Super + Alt + V**
+  un fichier de plus de 64 Kio ; les certificats donnés par un chemin relatif (`ca`, `cert`, `key`, `tls-auth`…) sont lus depuis le
+  dossier du `.ovpn` et mis dans une copie (PEM texte seulement) ; un bloc
+  `<auth-user-pass>` (identifiant puis mot de passe) est accepté : le mot de passe va dans le trousseau de la session
+  (`secret-tool`, paquet `libsecret` ; `libsecret-tools` sur Debian, `secret-tool` sur openSUSE ; il faut un trousseau ouvert comme gnome-keyring),
+  jamais dans un fichier, et l'import est refusé s'il manque ; la connexion est privée à toi, sans connexion automatique, et ses secrets restent chez NetworkManager. **Super + Alt + V**
   et un clic sur l'indicateur ouvrent directement ce panneau complet (une section « Protections » dira « Bientôt » tant qu'elle
   est vide). Un bouclier vert et « Fournisseur · 🇫🇷 FR » (« +1 » s'il y a plusieurs tunnels) sont devant l'heure de la pilule
   tant qu'un tunnel est RÉELLEMENT monté dans NetworkManager (`VPN_INDICATEUR`, oui par défaut) ; un client installé mais pas
@@ -276,7 +279,7 @@ l'île Quickshell.
   interfaces et IP sont masqués. Ton IP publique n'est montrée que si tu le demandes (`VPN_IP_PUBLIQUE` à oui et
   `VPN_IP_SERVICE` : une adresse `https://…` ; demandée à l'ouverture du panneau et quand un tunnel change, jamais en boucle).
   Module OpenVPN de NetworkManager proposé à l'installation (facultatif) ; WireGuard est déjà dans NetworkManager. Pas de
-  client commercial, pas de kill switch, pas de mot de passe dans cette étape. En terminal : `nc-vpn etat-json | liste |
+  client commercial, pas de kill switch. En terminal : `nc-vpn etat-json | liste |
   connecter UUID | deconnecter UUID | tout-deconnecter | importer FICHIER`.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;

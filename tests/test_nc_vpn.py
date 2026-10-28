@@ -124,6 +124,19 @@ class Installation(unittest.TestCase):
             r = subprocess.run(["bash", "-c", fonction + f"FAMILY={famille}; pname nm-openvpn"], capture_output=True, text=True)
             self.assertEqual(r.stdout.strip(), attendu, famille)
 
+    def test_paquet_secret_tool_par_distribution(self):
+        import subprocess
+        from tests._vpn_faux import REPO
+        texte = (REPO / "install.sh").read_text()
+        debut = texte.index("pname() {")
+        fonction = texte[debut:texte.index("\n}\n", debut) + 3]
+        for famille, attendu in (("arch", "libsecret"), ("debian", "libsecret-tools"), ("fedora", "libsecret"), ("suse", "secret-tool")):
+            r = subprocess.run(["bash", "-c", fonction + f"FAMILY={famille}; pname secret-tool"], capture_output=True, text=True)
+            self.assertEqual(r.stdout.strip(), attendu, famille)
+        i = texte.index("FACULTATIFS=(")
+        self.assertIn("secret-tool", texte[i:texte.index(")", i)].split())
+        self.assertIn("secret-tool", texte[texte.index("GENERIC=("):texte.index(")", texte.index("GENERIC=("))].split())
+
     def test_facultatif_sur_arch_et_sans_wireguard_tools(self):
         from tests._vpn_faux import REPO
         texte = (REPO / "install.sh").read_text()
