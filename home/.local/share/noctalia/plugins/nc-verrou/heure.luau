@@ -77,8 +77,12 @@ function rendre()
   desktopWidget.render(ui.column({ width = L, height = H, align = "center", justify = "center", gap = 2 }, enfants))
 end
 
+-- Énergie : écran éteint (fichier nc-ecran-eteint de nc-ecran), rien n'est relu ni redessiné ; l'heure juste dès le rallumage
+local ETEINT = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-ecran-eteint"
+
 function update()
   -- Chaque minute (et dès qu'un réglage change, à la minute suivante)
+  if noctalia.fileExists(ETEINT) then return end
   if os.date("%H:%M") ~= derniere then rendre() end
 end
 

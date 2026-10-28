@@ -113,6 +113,17 @@ class CadenceVerrou(unittest.TestCase):
             self.assertNotRegex(b, r"runAsync|os\.execute|io\.popen|test -e")
             self.assertRegex(f.read_text(), r'nc-ecran-eteint"')
 
+    def test_heure_et_batterie_rien_ecran_eteint(self):
+        # l'heure et la batterie du verrou ne relisent ni ne redessinent rien écran éteint (test d'un fichier, sans processus)
+        for nom in ("heure.luau", "batterie.luau"):
+            src = (MUSIQUE.parent / nom).read_text()
+            self.assertRegex(src, r'local ETEINT = \(noctalia\.getenv\("XDG_RUNTIME_DIR"\) or "/tmp"\) \.\. "/nc-ecran-eteint"', nom)
+            corps = re.search(r"\nfunction update\(\)\n(.*?)\nend\n", src, re.S)
+            self.assertTrue(corps, nom)
+            garde, rendu = corps.group(1).find("if noctalia.fileExists(ETEINT) then return end"), corps.group(1).find("rendre()")
+            self.assertTrue(0 <= garde < rendu, nom)        # la garde passe avant tout rendu
+            self.assertNotRegex(src, r"runAsync|os\.execute|io\.popen", nom)
+
     def test_musique_vie_privee(self):
         s = MUSIQUE.read_text()
         self.assertIn("VERROU_MUSIQUE", s)
