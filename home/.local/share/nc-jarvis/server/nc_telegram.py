@@ -18,7 +18,8 @@ Aussi, dans le même overlay (installer) :
   - rappels « toutes les N heures » (every:hours:N) en plus des récurrences upstream (jour, semaine, mois), pour
     /rappel de Telegram comme pour l'API ; alias /supprimer de /annuler_rappel ;
   - diffuser(texte) : un message Telegram aux chats connus du bot (alertes machine, op notify de /api/nc/manage) ;
-  - les commandes /nc de réglage du PC (nc_noctalia), seulement en déploiement local.
+  - les commandes /nc de réglage du PC (nc_noctalia), seulement en déploiement local ;
+  - /agents, /repondre et /code : suivre et répondre aux agents de code du PC (nc_agents), réglage TELEGRAM_AGENTS.
 """
 import asyncio
 import datetime
@@ -100,7 +101,8 @@ def autorise(message, verifier=None):
 
 
 # Pilotage du PC (/nc, /pc) : un ordre envoyé PC éteint n'est pas exécuté des heures plus tard (revue SRV-03)
-PILOTAGE = re.compile(r"^/(nc|pc)(@\w+)?(\s|$)", re.IGNORECASE)
+# (et les agents de code : /repondre et /code ne se rejouent jamais, /agents et /claude non plus)
+PILOTAGE = re.compile(r"^/(nc|pc|agents|claude|repondre|code)(@\w+)?(\s|$)", re.IGNORECASE)
 
 
 def _repond(url):
@@ -224,8 +226,33 @@ def etendre_rappels(reminders, tb=None):
     reminders._nc_heures = True
 
 
-async def diffuser(texte, tb=None):
-    """Un message Telegram à tous les chats que le bot connaît (ceux qui lui ont écrit) ; {sent, error?}."""
+def _envoyer_prive(token, utilisateur, texte):
+    """Un message dans la conversation PRIVÉE d'un utilisateur (son identifiant est celui de sa conversation privée avec le bot)."""
+    import urllib.parse
+    import urllib.request
+    corps = urllib.parse.urlencode({"chat_id": utilisateur, "text": texte}).encode()
+    with urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot" + token + "/sendMessage", data=corps), timeout=15) as r:
+        return 200 <= r.status < 300
+
+
+async def diffuser_prive(texte, tb):
+    """Un message aux seules conversations privées des utilisateurs autorisés (TELEGRAM_ALLOWED_USER_IDS), jamais à un groupe."""
+    ids = [x.strip() for x in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",") if x.strip().isdigit()]
+    if not ids:
+        return dict(sent=False, error="TELEGRAM_ALLOWED_USER_IDS vide : aucune conversation privée connue")
+    envoyes = 0
+    for uid in ids:
+        try:
+            if await asyncio.to_thread(_envoyer_prive, tb.TELEGRAM_TOKEN, uid, texte):
+                envoyes += 1
+        except Exception as exc:        # le jeton ne doit jamais se retrouver dans le journal (il est dans l'adresse)
+            logger.warning("Message privé Telegram impossible (%s)", type(exc).__name__)
+    return dict(sent=True) if envoyes else dict(sent=False, error="Envoi Telegram impossible")
+
+
+async def diffuser(texte, tb=None, prive=False):
+    """Un message Telegram à tous les chats que le bot connaît (ceux qui lui ont écrit) ; {sent, error?}. prive : seulement aux
+    conversations privées des utilisateurs autorisés (l'alerte « un agent t'attend »)."""
     if not isinstance(texte, str) or not 1 <= len(texte.strip()) <= 4000:
         return dict(sent=False, error="Texte vide ou trop long (4 000 caractères)")
     if tb is None:
@@ -235,6 +262,8 @@ async def diffuser(texte, tb=None):
             return dict(sent=False, error="Bot Telegram absent de ce gateway")
     if not getattr(tb, "TELEGRAM_TOKEN", ""):
         return dict(sent=False, error="Telegram non configuré (TELEGRAM_TOKEN)")
+    if prive:
+        return await diffuser_prive(texte.strip(), tb)
     try:
         envoye = await tb.send_broadcast_message(texte.strip())
     except Exception as exc:
@@ -249,18 +278,26 @@ def commandes_nc(app, tb, chemin_offset=None):
     from telegram.ext import CommandHandler
     if hasattr(tb, "cmd_annuler_rappel"):
         app.add_handler(CommandHandler(["supprimer"], tb.cmd_annuler_rappel))
+    try:    # python-telegram-bot 20+ : les messages MODIFIÉS ne déclenchent rien (les handlers les ignorent aussi eux-mêmes)
+        from telegram.ext import filters
+        sans_modifies = ~filters.UpdateType.EDITED_MESSAGE
+    except (ImportError, AttributeError):
+        sans_modifies = None
     try:
         import nc_noctalia
-        try:    # python-telegram-bot 20+ : les messages MODIFIÉS ne déclenchent rien (le handler les ignore aussi lui-même)
-            from telegram.ext import filters
-            sans_modifies = ~filters.UpdateType.EDITED_MESSAGE
-        except (ImportError, AttributeError):
-            sans_modifies = None
         app.add_handler(CommandHandler(["nc", "pc"], nc_noctalia.handler(tb), filters=sans_modifies))
         descriptions = [("nc", "Réglages du PC Noctalia (/nc aide)"), ("supprimer", "Supprimer un rappel : /supprimer <id>")]
     except ImportError as exc:
         logger.warning("Commandes /nc indisponibles : %s", exc)
         descriptions = [("supprimer", "Supprimer un rappel : /supprimer <id>")]
+    try:
+        import nc_agents
+        for noms, h in nc_agents.commandes(tb):
+            app.add_handler(CommandHandler(noms, h, filters=sans_modifies))
+        if nc_agents.local():           # en mode serveur : les commandes répondent « absent », sans figurer dans le menu
+            descriptions += list(nc_agents.MENU)
+    except ImportError as exc:
+        logger.warning("Commandes /agents indisponibles : %s", exc)
     existantes = {getattr(c, "command", None) for c in tb.BOT_COMMANDS}
     for nom, description in descriptions:
         if nom not in existantes:

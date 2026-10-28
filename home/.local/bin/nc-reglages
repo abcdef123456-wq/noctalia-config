@@ -1504,6 +1504,26 @@ REGLAGES = [
         "Activé après coup, il prévient à partir de la version suivante.",
         "As soon as a new noctalia-config version is published (checked every hour), with what's new. Turned on later, "
         "it notifies from the next version on.")),
+    R("ALERTES_AGENTS", "Agents IA (coucou)", L("Alerte Telegram : un agent de code t'attend", "Telegram alert: a coding agent is waiting for you"),
+      "ouinon", "non",
+      L("Quand un agent de code (Claude Code, Codex…) passe à « t'attend » : un message avec l'agent et le nom du dossier, jamais "
+        "de texte de la conversation, au plus un par session toutes les 5 minutes. Demande aussi « Alertes Telegram ».",
+        "When a coding agent (Claude Code, Codex…) starts waiting for you: a message with the agent and the folder name, never "
+        "any conversation text, at most one per session every 5 minutes. Also needs “Telegram alerts”.")),
+    R("TELEGRAM_AGENTS", "Agents IA (coucou)", L("Agents de code depuis Telegram (/agents, /repondre)", "Coding agents from Telegram (/agents, /reply)"),
+      "ouinon", "non",
+      L("Suivre tes agents de code depuis le bot JARVIS (liste, état) et leur répondre : chaque réponse demande le code de ton appli "
+        "d'authentification (nc-noeud totp creer). Sur ce PC seulement (pas en mode serveur). Telegram n'est pas chiffré de bout en bout : "
+        "voir docs/jarvis.md.",
+        "Follow your coding agents from the JARVIS bot (list, state) and answer them: every answer needs the code from your "
+        "authenticator app (nc-noeud totp creer). On this PC only (not in server mode). Telegram is not end-to-end encrypted: "
+        "see docs/jarvis.md.")),
+    R("TELEGRAM_AGENTS_TEXTE", "Agents IA (coucou)", L("Agents depuis Telegram : montrer le dernier message", "Agents from Telegram: show the last message"),
+      "ouinon", "non",
+      L("Non (recommandé) : /agents ne montre que l'agent, le dossier et l'état. Oui : aussi le dernier message de l'agent (600 signes, "
+        "secrets masqués par un filtre qui peut en laisser passer), lisible par Telegram.",
+        "No (recommended): /agents shows only the agent, the folder and the state. Yes: also the agent's last message (600 characters, "
+        "secrets masked by a filter that can miss some), readable by Telegram.")),
     # Claude Code et Antigravity dans l'île (nc-claude)
     R("CLAUDE_ILE", "Agents IA (coucou)", L("Claude Code dans l'île (coucou)", "Claude Code in the island (coucou)"),
       "ouinon", "oui",

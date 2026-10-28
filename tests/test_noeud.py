@@ -1616,6 +1616,54 @@ class CommandeTotp(Base):
         self.assertEqual(r.returncode, 0)
         self.assertFalse(f.exists())
 
+    def controler(self, code, *args):
+        return subprocess.run([sys.executable, str(self.bin / "nc-noeud"), "totp", "controler", *args], env=self.env, input=code + "\n",
+                              capture_output=True, text=True, timeout=20)
+
+    def test_pret_et_controler_pour_telegram(self):
+        """nc_agents (/repondre, /code) : « totp pret » et « totp controler » (code sur l'entrée standard), sans rien afficher."""
+        r = self.totp("pret")
+        self.assertEqual((r.returncode, r.stdout), (3, ""), "aucun code")
+        self.assertEqual(self.controler("123456").returncode, 3)
+        self.enroler(verifie=False)
+        self.assertEqual(self.totp("pret").returncode, 3, "créé mais pas vérifié")
+        self.enroler()
+        r = self.totp("pret")
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        secret = json.loads((self.home / ".config/nc/noeud-totp.json").read_text())["secret"]
+        bon = {code_totp(secret, d) for d in (-1, 0, 1)}
+        faux = next(c for c in ("000000", "999999", "123456", "654321") if c not in bon)
+        r = self.controler(faux)
+        self.assertEqual((r.returncode, r.stdout), (1, ""), "code faux")
+        self.assertTrue(self.notifie("Wrong code") or self.notifie("Code faux"), "un code faux est annoncé sur le PC")
+        code = code_totp(secret)
+        r = self.controler(code)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        self.assertEqual(self.controler(code).returncode, 1, "le même code ne sert qu'une fois")
+        self.assertEqual(self.controler(code_totp(secret, -1)).returncode, 1, "un code plus ancien non plus")
+        self.assertFalse([l for l in self.appels() if code in l], "le code ne passe jamais par une ligne de commande")
+        for _ in range(5):                                     # 5 codes faux en une heure : bloqué
+            self.controler(faux)
+        self.assertEqual(self.totp("pret").returncode, 4)
+        self.assertEqual(self.controler(code_totp(secret, 1)).returncode, 4)
+
+    def test_deux_controles_en_meme_temps_un_seul_passe(self):
+        """Verrou : la confirmation à distance et /code de Telegram ne servent pas le même code deux fois."""
+        self.enroler()
+        code = code_totp(json.loads((self.home / ".config/nc/noeud-totp.json").read_text())["secret"])
+        procs = [subprocess.Popen([sys.executable, str(self.bin / "nc-noeud"), "totp", "controler"], env=self.env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True) for _ in range(6)]
+        for p in procs:
+            p.stdin.write(code + "\n")
+            p.stdin.close()
+        codes = sorted(p.wait(timeout=30) for p in procs)
+        self.assertEqual(codes, [0, 1, 1, 1, 1, 1])
+
+    def test_code_faux_dit_aussi_de_couper_les_agents_telegram(self):
+        self.enroler()
+        self.controler("000000")
+        self.assertTrue(self.notifie("TELEGRAM_AGENTS"), "la notification d'un code faux nomme le réglage des agents Telegram")
+
     def test_qr_code_si_qrencode(self):
         (self.bin / "qrencode").write_text(ENTETE + 'cat > "$H/qr-entree"; echo "[QR]"\n')
         (self.bin / "qrencode").chmod(0o755)
