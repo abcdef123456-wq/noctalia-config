@@ -481,12 +481,17 @@ def candidats(usage="question", force=""):
     return sorted(liste, key=lambda i: i in e)
 
 
+# Les CLI vérifiées une à une : appeler() les lance sans outils pour une question (voir sans_outils_ok). Une CLI ajoutée plus
+# tard n'y est PAS d'office : il faut vérifier comment elle est lancée, puis l'ajouter ici (tests/test_ia.py le rappelle).
+SANS_OUTILS_CLI = ("claude", "codex", "gemini-cli", "opencode", "qwen", "omp")
+
+
 def sans_outils_ok(ident):
     """Une IA sans outils par nature ou lancée sans outils : Ollama, les API, et les CLI telles que appeler() les lance pour
     une question (claude --tools "", codex -s read-only sans web, omp --no-tools, opencode nc-question, gemini et qwen en
     mode default avec outils exclus, tous dans le bac, sans tête). JARVIS (agy avec MCP, web, shell) : jamais."""
     f = FOURNISSEURS.get(ident)
-    return bool(f) and f["genre"] in ("api", "local", "cli")
+    return bool(f) and (f["genre"] in ("api", "local") or (f["genre"] == "cli" and ident in SANS_OUTILS_CLI))
 
 
 def candidats_sans_outils(usage="question", force=""):

@@ -356,6 +356,15 @@ class IA(unittest.TestCase):
         for ok in ("ollama", "anthropic", "claude", "codex", "omp", "opencode", "gemini-cli", "qwen"):
             self.assertTrue(m.sans_outils_ok(ok), ok)
         self.assertFalse(m.sans_outils_ok("jarvis"))
+        # liste explicite : une CLI ajoutée plus tard n'est pas « sans outils » d'office ; toute CLI de FOURNISSEURS doit
+        # avoir été vérifiée (lancée sans outils par appeler()) et ajoutée à SANS_OUTILS_CLI à la main
+        clis = {i for i, f in m.FOURNISSEURS.items() if f["genre"] == "cli"}
+        self.assertEqual(clis, set(m.SANS_OUTILS_CLI), "nouvelle CLI : vérifier qu'elle est lancée sans outils, puis l'ajouter")
+        m.FOURNISSEURS["nouvelle-cli"] = dict(nom="Nouvelle", genre="cli", prog="nouvelle", vision=False, agent="nouvelle")
+        try:
+            self.assertFalse(m.sans_outils_ok("nouvelle-cli"))
+        finally:
+            del m.FOURNISSEURS["nouvelle-cli"]
         with self.assertRaises(m.ErreurIA) as e:
             m.demander("t", "texte", sans_outils=True)
         self.assertIn("Choisis une IA sans outils dans les réglages (Ollama, une API, ou Claude/Codex…)", str(e.exception))
