@@ -40,6 +40,8 @@ DANGEREUX_OVPN = [
     "client-connect /bin/vrai", "client-disconnect /bin/vrai", "learn-address /bin/vrai", "tls-verify /bin/vrai",
     "auth-user-pass-verify /bin/vrai via-env", "plugin /usr/lib/x.so", "script-security 2", "script-security 3",
     "script-security system", "script-security execve", "iproute /bin/vrai", "pkcs11-providers /usr/lib/x.so",
+    "dns-updown /bin/vrai", "tls-crypt-v2-verify /bin/vrai", "config /home/user/autre.ovpn", "log /home/user/.bashrc",
+    "log-append /home/user/.bashrc", "writepid /home/user/.profile", "status /home/user/.zshrc 10", "management 127.0.0.1 7505",
     # variantes
     "UP /bin/vrai", "Route-Up /bin/vrai", "\tup\t/bin/vrai", "   down    /bin/vrai", "--up /bin/vrai", "SCRIPT-SECURITY   2",
     "script-security\t2", "script-security 2 # commentaire", '"up" /bin/vrai', 'u"p" /bin/vrai', "'script-security' '2'",

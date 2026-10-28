@@ -77,7 +77,9 @@ MAX_OCTETS = 64 * 1024
 
 # OpenVPN : directives qui exécutent un programme ou chargent du code (et « iproute », « pkcs11-providers »)
 OVPN_EXEC = ("up", "down", "route-up", "route-pre-down", "ipchange", "client-connect", "client-disconnect", "learn-address",
-             "tls-verify", "auth-user-pass-verify", "plugin", "iproute", "pkcs11-providers")
+             "tls-verify", "auth-user-pass-verify", "plugin", "iproute", "pkcs11-providers", "dns-updown", "tls-crypt-v2-verify")
+# OpenVPN : directives qui feraient lire un autre fichier de configuration (non vérifié ici) ou écrire un fichier n'importe où
+OVPN_AUTRES = ("config", "log", "log-append", "writepid", "status", "management")
 WG_EXEC = ("preup", "postup", "predown", "postdown")
 # Fichiers de certificats donnés par un chemin : la copie temporaire est effacée, un chemin relatif ne mènerait plus à rien
 OVPN_FICHIERS = ("ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "tls-crypt-v2", "secret", "crl-verify", "extra-certs", "dh")
@@ -262,6 +264,9 @@ def verifier(texte):
         if mot in OVPN_EXEC:
             raise Echec(T(f"Directive refusée « {mot} » : elle ferait exécuter un programme. Retire-la du fichier.",
                           f"Directive refused \"{mot}\": it would run a program. Remove it from the file."))
+        if mot in OVPN_AUTRES and not wireguard:
+            raise Echec(T(f"Directive refusée « {mot} » : elle ferait lire ou écrire un autre fichier. Retire-la du fichier.",
+                          f"Directive refused \"{mot}\": it would read or write another file. Remove it from the file."))
         if mot in WG_EXEC:
             raise Echec(T(f"Directive refusée « {m.group(1)} » : elle ferait exécuter une commande. Retire-la du fichier.",
                           f"Directive refused \"{m.group(1)}\": it would run a command. Remove it from the file."))
