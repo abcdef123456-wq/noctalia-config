@@ -6,6 +6,9 @@
   nc-noeud totp verifier CODE  vérifie le code de l'appli et active la confirmation à distance
   nc-noeud totp retirer      oublie ce code (la confirmation à distance redevient impossible)
   nc-noeud totp              dit où en est le code
+  nc-noeud totp pret         sans rien afficher : sortie 0 si le code est prêt, 3 s'il n'y en a pas, 4 s'il est bloqué
+  nc-noeud totp controler    lit un code sur l'entrée standard, mêmes règles que la distance (usage unique, essais comptés) :
+                             sortie 0 bon, 1 faux ou déjà servi, 3 aucun code, 4 bloqué (JARVIS : /repondre de Telegram)
   nc-noeud aide       cette aide
 
 Le serveur JARVIS-BIS (/api/node/ws) peut demander des actions à ce PC. Leur client (clients/node_agent.py) exécute
@@ -61,6 +64,7 @@ DOC_EN = """This PC as a JARVIS “node” (issue #12), with your confirmation, 
 
   nc-noeud            connects to the JARVIS server (nc-noeud.service, off by default) and waits for its requests
   nc-noeud totp creer|verifier CODE|retirer   remote confirmation code (TOTP, for your authenticator app)
+  nc-noeud totp pret|controler   silent: ready? / check a code read on standard input (exit 0 good, 1 wrong or used, 3 none, 4 blocked)
   nc-noeud aide       this help
 
 No confirmation: music, notification, clipboard read, lock, folder listing. Confirmation in the island (or a
@@ -577,6 +581,16 @@ def commande_totp(args):
                 "JARVIS actions” → Remotely (or Both)."))
         relancer_service()
         return 0
+    if quoi in ("pret", "ready"):
+        # Sans rien afficher : 0 prêt, 3 aucun code vérifié, 4 bloqué (JARVIS, nc_agents : /repondre sait s'il peut demander un code)
+        return 0 if totp_actif() else (4 if totp_secret() is not None else 3)
+    if quoi in ("controler", "contrôler", "check"):
+        # Le code vient de l'ENTRÉE STANDARD (jamais de la ligne de commande, visible dans ps), mêmes règles que la confirmation
+        # à distance : usage unique, codes faux comptés et annoncés, blocage. Rien n'est affiché ; sortie 0 bon, 1 faux ou déjà
+        # servi, 3 aucun code vérifié, 4 bloqué. Pour nc_agents.py (/repondre et /code de Telegram).
+        code = sys.stdin.readline(64).strip()
+        ok, raison = verifier_code_distant(code)
+        return 0 if ok else 3 if raison == "aucun code enrôlé" else 4 if raison == "bloqué" else 1
     if quoi in ("retirer", "remove"):
         for x in (f, fichier_totp_etat()):
             with contextlib.suppress(FileNotFoundError):

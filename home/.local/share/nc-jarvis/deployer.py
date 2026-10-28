@@ -245,7 +245,7 @@ def deploy(mode, target):
     connection=Path.home()/'.local/state/nc-jarvis/connection.conf'
     merge_env(connection,dict(URL='http://127.0.0.1:8000',SECRET_KEY=secret,USER_ID=getpass.getuser(),TIMEOUT='180'))
     overlay=Path.home()/'.local/share/nc-jarvis/server';overlay.mkdir(parents=True,exist_ok=True)
-    for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_google.py','nc_choix.py'):
+    for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_agents.py','nc_google.py','nc_choix.py'):
         data=resource('server/'+name)
         (overlay/name).write_bytes(data)
     print('\nÉtape 3 sur 4 : faire tourner JARVIS en arrière-plan.\n'
@@ -294,7 +294,7 @@ def bundle(path):
         z.writestr('deployer.py',resource('deployer.py'))
         try:z.writestr('verifier.py',resource('verifier.py'))  # la vérification tourne sur le serveur ; absent : ancien dépôt
         except (OSError,KeyError):pass
-        for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_google.py','nc_choix.py'):z.writestr('server/'+name,resource('server/'+name))
+        for name in ('nc_gateway.py','nc_management.py','nc_runner.py','nc_engines.py','nc_telegram.py','nc_noctalia.py','nc_agents.py','nc_google.py','nc_choix.py'):z.writestr('server/'+name,resource('server/'+name))
 
 
 def agent():

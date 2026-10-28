@@ -18,7 +18,7 @@ def _origine(nom):
 
 
 if "__file__" in globals():
-    for _m in ("nc_management", "nc_telegram", "nc_noctalia", "nc_google", "nc_choix"):
+    for _m in ("nc_management", "nc_telegram", "nc_noctalia", "nc_agents", "nc_google", "nc_choix"):
         _o = _origine(_m)
         if _o and _P(_o).resolve().parent != _P(__file__).resolve().parent:
             raise RuntimeError(f"{_m} ne vient pas de l'overlay noctalia-config ({_o}) : relance le déployeur "

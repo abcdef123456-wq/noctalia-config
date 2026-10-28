@@ -90,12 +90,14 @@ def local():
     return os.environ.get("DEPLOY_MODE", "local").strip().lower() != "server"
 
 
-async def executer(argv, delai=DELAI, limite=3000, fusion=True):
-    """Une commande de l'hôte (liste d'arguments, jamais de shell) ; (code, sortie tronquée)."""
+async def executer(argv, delai=DELAI, limite=3000, fusion=True, entree=None):
+    """Une commande de l'hôte (liste d'arguments, jamais de shell) ; (code, sortie tronquée). entree : des octets donnés à son
+    entrée standard (un code à usage unique ne passe pas par la ligne de commande) ; sinon l'entrée est fermée."""
     programme = str(BIN / argv[0]) if not argv[0].startswith("/") and (BIN / argv[0]).exists() else argv[0]
     try:
         # Un groupe de processus à part : au délai, on arrête TOUT le groupe (nc-vpn et ses nmcli), pas seulement le père
-        p = await asyncio.create_subprocess_exec(programme, *argv[1:], stdin=asyncio.subprocess.DEVNULL,
+        p = await asyncio.create_subprocess_exec(programme, *argv[1:],
+                                                 stdin=asyncio.subprocess.DEVNULL if entree is None else asyncio.subprocess.PIPE,
                                                  stdout=asyncio.subprocess.PIPE,
                                                  stderr=asyncio.subprocess.STDOUT if fusion else asyncio.subprocess.PIPE,
                                                  start_new_session=True)
@@ -111,7 +113,17 @@ async def executer(argv, delai=DELAI, limite=3000, fusion=True):
                 return bytes(gardes)
             gardes += bloc[:max(0, borne - len(gardes))]
 
+    async def donner():
+        try:
+            p.stdin.write(entree)
+            await p.stdin.drain()
+            p.stdin.close()
+        except (BrokenPipeError, ConnectionResetError):
+            pass            # il n'a pas lu son entrée : son code de sortie le dira
+
     taches = [asyncio.ensure_future(lire(p.stdout, limite))]
+    if entree is not None:
+        taches.append(asyncio.ensure_future(donner()))
     if not fusion:
         taches.append(asyncio.ensure_future(lire(p.stderr, 4096)))     # lue pour ne pas bloquer, jamais relayée
     try:

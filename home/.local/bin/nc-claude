@@ -7,6 +7,8 @@ fini, et ses demandes (autoriser une commande, répondre à une question) depuis
                         « installer » l'ajoute à settings.json seulement si tu n'en as pas déjà une, « retirer » l'enlève
                         seulement si c'est la nôtre
   nc-claude etat        les sessions suivies, en clair
+  nc-claude etat --json [--texte]   les mêmes, pour JARVIS (/agents de Telegram) : contrat 1, seulement id, agent, nom du dossier,
+                        état, « ecrire » ; --texte ajoute le dernier message de l'agent (sinon aucun contenu)
   nc-claude hook        appelé par Claude Code à chaque événement (lit le JSON de l'événement sur l'entrée standard)
   nc-claude installer IA | retirer IA
                         la même chose pour les autres IA : antigravity, opencode, codex, gemini, cursor, copilot, qwen,
@@ -75,6 +77,8 @@ done, and its requests (allow a command, answer a question) from the island.
   nc-agents statusline  Claude Code's status line in the desktop colors (model, folder, branch, context, cost): “install”
                         adds it to settings.json only if you have none, “remove” removes it only if it is ours
   nc-agents state       the tracked sessions, in plain text
+  nc-agents state --json [--text]   the same, for JARVIS (Telegram /agents): contract 1, only id, agent, folder name, state,
+                        “ecrire”; --text adds the agent's last message (otherwise no content)
   nc-agents hook        called by Claude Code on every event (reads the event JSON on standard input)
   nc-agents install AI | remove AI
                         the same for the other AIs: antigravity, opencode, codex, gemini, cursor, copilot, qwen,
@@ -1404,6 +1408,38 @@ def retirer():
     print(T("Hooks de l'île retirés de ", "Island hooks removed from ") + SETTINGS.replace(HOME, "~") + ".")
 
 
+def dossier_court(s):
+    """Le NOM du dossier de la session (jamais le chemin) : « ~ » pour le dossier personnel, 40 signes imprimables au plus."""
+    cwd = s.get("cwd_reel") or s.get("cwd") or ""
+    if not isinstance(cwd, str):
+        return "?"
+    if cwd in ("~", HOME) or os.path.realpath(os.path.expanduser(cwd)) == os.path.realpath(HOME):
+        return "~"
+    nom = "".join(c for c in os.path.basename(cwd.rstrip("/")) if c.isprintable()).strip()
+    return nom[:40] or "?"
+
+
+def montrer_json(avec_texte=False):
+    """L'état pour JARVIS (contrat 1) : une liste de champs choisis un à un, rien d'autre ne sort (ni chemin, ni étapes, ni
+    question). Le dernier message de l'agent seulement avec --texte, et pas pendant qu'il travaille (il serait périmé)."""
+    try:
+        d = json.load(open(ETAT, encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    sessions = []
+    for sid, s in (d.get("sessions") or {}).items() if isinstance(d.get("sessions"), dict) else ():
+        if not isinstance(s, dict) or not isinstance(sid, str):
+            continue
+        x = {"id": sid, "agent": s.get("agent") or "claude", "dossier": dossier_court(s), "etat": str(s.get("etat") or "pret"),
+             "ecrire": s.get("ecrire") is True}
+        if avec_texte and x["etat"] != "travail":
+            m = s.get("reponse") or s.get("message")
+            if isinstance(m, str) and m.strip():
+                x["message"] = m.strip()[:QUESTION_MAX]
+        sessions.append(x)
+    print(json.dumps({"contrat": 1, "sessions": sessions}, ensure_ascii=False))
+
+
 def montrer():
     try:
         d = json.load(open(ETAT, encoding="utf-8"))
@@ -1569,6 +1605,8 @@ def main():
                 installer_ia(ia, bavard=False)
     elif a[0] == "statusline":
         ligne()
+    elif a[0] == "etat" and a[1:2] == ["--json"] and set(a[2:]) <= {"--texte", "--text"}:
+        montrer_json(len(a) > 2)
     elif a[0] == "etat":
         montrer()
     elif a[0] == "diag":
