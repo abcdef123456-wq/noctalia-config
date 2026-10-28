@@ -81,7 +81,7 @@ PanelWindow {
         jeu: Qt.size(432, 250), centre: adaptee("centre", 494), son: adaptee("son", 300), reseau: adaptee("reseau", 260),
         bluetooth: adaptee("bluetooth", 220), notifications: adaptee("notifications", 200), systeme: Qt.size(432, 600), sante: adaptee("sante", 300), calendrier: adaptee("calendrier", 410),
         claude: adaptee("claude", 180), assistant: Qt.size(Math.min(480, modelData.width - 32), Math.min(620, modelData.height - 80)), meteo: Qt.size(432, 330), presse: adaptee("presse", 200),
-        fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150)
+        fenetres: adaptee("fenetres", 160), appel: adaptee("appel", 150), terminal: adaptee("terminal", 150), resume: adaptee("resume", 170)
     })
     readonly property size taille: recherche ? Qt.size(680, spot.hauteurVoulue) : (tailles[Etat.vueActive] || tailles.centre)
     readonly property bool points: Etat.vues.length > 1 && !recherche
@@ -338,11 +338,13 @@ PanelWindow {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
+                               // « Bonjour » au réveil : un clic ouvre le résumé
+                               : (Resume.actif && !Resume.ouvert && Etat.activiteType === "" ? Resume.ouvrir(fen.modelData.name)
                                // « Terminée » / « Échec » d'une commande longue : retour à son terminal
                                : (Etat.activiteType === "telechargement-fini" && Etat.dossierTel !== "" ? Etat.ouvrirTelechargements()
                                : (Etat.activiteType === "terminal-fini" && Terminal.fini ? Terminal.aller(Terminal.fini.pid)
                                // Un agent t'attend dans son terminal : sa question, directement
-                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false)))))
+                               : (Agents.ouvrirAttente(fen.modelData.name) || Etat.basculer(fen.modelData.name, false))))))
             onWheel: w => Etat.reglerVolume(Etat.volume + (w.angleDelta.y > 0 ? 0.05 : -0.05))
         }
 
@@ -411,12 +413,13 @@ PanelWindow {
                     sourceComponent: ({ musique: pMusique, minuteur: pMinuteur, charge: pCharge, jeu: pJeu, centre: pCentre,
                                         son: pSon, notifications: pNotifs, reseau: pReseau, bluetooth: pBluetooth, systeme: pSysteme,
                                         sante: pSante, calendrier: pCalendrier, claude: pClaude, assistant: pAssistant, meteo: pMeteo, presse: pPresse, fenetres: pFenetres,
-                                        appel: pAppel, terminal: pTerminal })[pageIle.modelData] || pCentre
+                                        appel: pAppel, terminal: pTerminal, resume: pResume })[pageIle.modelData] || pCentre
                 }
             }
         }
         Component { id: pAppel; PageAppel {} }
         Component { id: pTerminal; PageTerminal {} }
+        Component { id: pResume; PageResume {} }
         Component { id: pMusique; Musique {} }
         Component { id: pMinuteur; Minuteur {} }
         Component { id: pCharge; Charge {} }

@@ -36,11 +36,12 @@ class PageAssistant(unittest.TestCase):
                 (root/'Partage.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool indicateur: false}')
                 (root/'Chaleur.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool alerte: false; function titre(){return "CPU"}}')
                 (root/'Appel.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false; property bool muet: false; property real niveau: 0; property string icone: ""; property string appli: ""; property string dureeTexte: "0:00"; property string derniereAppli: ""; property int derniereDuree: 0}')
+                (root/'Resume.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool ouvert: false; property bool soir: false; property string salut: ""; property string court: ""; property var contenu: ({}) }')
                 (root/'Terminal.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool enCours: false; property string commande: ""; property string dureeTexte: "0:00"; property var fini: null}')
                 (root/'Etat.qml').write_text('pragma Singleton\nimport QtQuick\nQtObject {\n'+ '\n'.join('property var '+k+':'+v for k,v in champs.items())+'\nfunction duree(n){return "0:00"} function nomJoli(s){return s} function octets(n){return "0"}\n}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml") else "")
-                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml"] if compact else [])))
+                ("singleton " if nom in ("AssistantEtat.qml", "Couleurs.qml", "Reglages.qml", "Agents.qml", "Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml") else "")
+                + nom[:-4] + " 1.0 " + nom for nom in noms + ["Reglages.qml", "Agents.qml"] + (["Etat.qml", "Partage.qml", "Chaleur.qml", "Appel.qml", "Terminal.qml", "Resume.qml"] if compact else [])))
             if not absent:
                 bin = root / ".local/bin"
                 bin.mkdir(parents=True)

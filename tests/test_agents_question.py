@@ -318,7 +318,8 @@ class Ile(unittest.TestCase):
             # Activités Appel et Terminal (Appel.qml, Terminal.qml) : lues par Etat.activites, ici sans appel ni commande
             for nom in ("Appel", "Terminal"):
                 (root / (nom + ".qml")).write_text("pragma Singleton\nimport QtQuick\nQtObject { property bool enCours: false }")
-            singletons = ("Agents", "Reglages", "Couleurs", "Etat", "Appel", "Terminal")
+            (root / "Resume.qml").write_text("pragma Singleton\nimport QtQuick\nQtObject { property bool actif: false; property bool ouvert: false; property bool soir: false; property string salut: ""; property string court: ""; property var contenu: ({}) }")
+            singletons = ("Agents", "Reglages", "Couleurs", "Etat", "Appel", "Terminal", "Resume")
             (root / "qmldir").write_text("\n".join(("singleton " if n in singletons else "") + n + " 1.0 " + n + ".qml"
                                                    for n in singletons + ("Claude", "DemandeClaude", "Texte", "Ico", "Defilement", "Etincelle")))
             (root / "shell.qml").write_text('''import QtQuick
