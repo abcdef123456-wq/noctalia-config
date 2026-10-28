@@ -145,31 +145,33 @@ case " $OSID $OSLIKE " in
   *suse*) FAMILY=suse ;;
 esac
 
-# Dépôt Noctalia pour Debian / Ubuntu : la clé vient d'un paquet (nickh-archive-keyring.deb) téléchargé en HTTPS. Avant de
-# l'installer, l'empreinte de la clé principale qu'il contient est comparée à celle-ci, en dur : si elle diffère (ou si le
-# paquet contient une autre clé en plus), l'installation s'arrête net, rien n'est installé ni ajouté à apt.
+# Dépôt Noctalia pour Debian / Ubuntu. La clé (nickh-archive-keyring.gpg, la même que dans le paquet
+# nickh-archive-keyring.deb) est téléchargée seule en HTTPS ; son empreinte est comparée à celle-ci, en dur, AVANT d'être
+# copiée dans /usr/share/keyrings : si elle diffère (ou s'il y a une autre clé en plus), l'installation s'arrête net. Le
+# paquet .deb n'est jamais installé (dpkg -i lancerait ses scripts en root, même avec la bonne clé dedans), et le fichier
+# de source d'apt est écrit ici, jamais téléchargé (un .sources reçu pourrait dire « Trusted: yes » ou viser un autre site).
 NOCT_DEB_EMPREINTE=C2A7E07FB3D746BDF2A245CD683B67D7BC99A9B7
-empreintes_deb() { # empreintes_deb FICHIER.deb : l'empreinte de chaque clé principale du paquet, une par ligne
+NOCT_DEB_CLE=/usr/share/keyrings/nickh-archive-keyring.gpg
+empreintes_cle() { # empreintes_cle FICHIER.gpg : l'empreinte de chaque clé principale du fichier, une par ligne
   local d r=0
-  have dpkg-deb && have gpg || return 1
+  have gpg || return 1
   d="$(mktemp -d)" || return 1
-  mkdir -p "$d/g" && chmod 700 "$d" "$d/g"
-  if dpkg-deb -x "$1" "$d/x" 2>/dev/null; then
-    find "$d/x" -type f \( -name '*.gpg' -o -name '*.asc' \) -print0 |
-      xargs -0 -r env GNUPGHOME="$d/g" gpg --batch --no-tty --show-keys --with-colons 2>/dev/null |
-      awk -F: '/^pub:/ { p = 1; next } /^sub:/ { p = 0 } /^fpr:/ && p { print $10; p = 0 }' || r=1
-  else
-    r=1
-  fi
+  chmod 700 "$d"
+  GNUPGHOME="$d" gpg --batch --no-tty --show-keys --with-colons "$1" 2>/dev/null |
+    awk -F: '/^pub:/ { p = 1; next } /^sub:/ { p = 0 } /^fpr:/ && p { print $10; p = 0 }' || r=1
   rm -rf "$d"
   return "$r"
 }
-verifier_empreinte_cle() { # verifier_empreinte_cle FICHIER.deb EMPREINTE : vrai seulement si la clé est exactement celle-là
+verifier_empreinte_cle() { # verifier_empreinte_cle FICHIER.gpg EMPREINTE : vrai seulement si la clé est exactement celle-là
   local vues
-  vues="$(empreintes_deb "$1")" || vues=""
+  # apt ne lit un fichier .gpg qu'en binaire : une clé en texte (« -----BEGIN ») est refusée elle aussi
+  if [ "$(head -c 5 "$1" 2>/dev/null)" = "-----" ]; then vues=""; else vues="$(empreintes_cle "$1")" || vues=""; fi
   if [ "$vues" = "$2" ]; then return 0; fi
   warn "$(t "Empreinte de la clé du dépôt différente de celle attendue. Attendue : $2 ; reçue : ${vues:-aucune}. Dépôt refusé, rien n'est installé." "Repository key fingerprint differs from the expected one. Expected: $2; received: ${vues:-none}. Repository refused, nothing installed.")"
   return 1
+}
+source_noctalia() { # source_noctalia SUITES : le fichier de source d'apt (format deb822), sur le modèle de celui du dépôt
+  printf 'Types: deb\nURIs: https://pkg.noctalia.dev/deb/\nSuites: %s\nArchitectures: amd64\nSigned-By: %s\n' "$1" "$NOCT_DEB_CLE"
 }
 # Fedora (COPR) et openSUSE (dépôt tiers) : dépôts communautaires, non vérifiés par la distribution. Leur clé GPG est
 # importée sans autre question (« dnf -y », « zypper --gpg-auto-import-keys ») : c'est dit clairement avant chaque question.
@@ -550,31 +552,29 @@ if [ "$MODE" != files ]; then
         sudo zypper --non-interactive addrepo --refresh --name noctalia-v5 "$url" && sudo zypper --non-interactive --gpg-auto-import-keys refresh && sudo zypper --non-interactive install noctalia ;;
       debian)
         case "$OSCODE" in
-          trixie) src=noctalia-trixie.sources ;;
-          resolute) src=noctalia-resolute.sources ;;
-          sid|"") [ "$OSID" = debian ] && src=noctalia-unstable.sources || src="" ;;
+          trixie) src=noctalia-trixie.sources; suites="trixie/ trixie-backports/" ;;
+          resolute) src=noctalia-resolute.sources; suites="resolute/ resolute-backports/" ;;
+          sid|"") [ "$OSID" = debian ] && { src=noctalia-unstable.sources; suites="unstable/"; } || src="" ;;
           *) src="" ;;
         esac
         [ -n "$src" ] || die "$(t "version de ${OSID:-Debian} non gérée par l'installateur (Debian 13, Debian Sid, Ubuntu 26.04) : suis $NOCT_DOCS puis relance." "${OSID:-Debian} version not supported by the installer (Debian 13, Debian Sid, Ubuntu 26.04): follow $NOCT_DOCS, then run this again.")"
         info "$(t "Noctalia n'est pas dans les dépôts de ta distribution : dépôt officiel indiqué par la documentation :" "Noctalia isn't in your distribution's repositories: official repository given by the documentation:")"
-        info "$(t "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb" "  key: https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb")"
-        info "$(t "  dépôt : https://pkg.noctalia.dev/deb/$src" "  repository: https://pkg.noctalia.dev/deb/$src")"
+        info "$(t "  clé : https://pkg.noctalia.dev/deb/nickh-archive-keyring.gpg" "  key: https://pkg.noctalia.dev/deb/nickh-archive-keyring.gpg")"
+        info "$(t "  dépôt : https://pkg.noctalia.dev/deb/ ($suites)" "  repository: https://pkg.noctalia.dev/deb/ ($suites)")"
         ask "$(t "Ajouter ce dépôt et installer Noctalia ?" "Add this repository and install Noctalia?")" o || die "$(t "Noctalia v5 est nécessaire : $NOCT_DOCS" "Noctalia v5 is required: $NOCT_DOCS")"
         have wget || sudo apt-get $APT_OPT install -y wget
         have gpg || pkg_install gnupg
         info "$(t "  empreinte attendue de la clé : $NOCT_DEB_EMPREINTE" "  expected key fingerprint: $NOCT_DEB_EMPREINTE")"
         kd="$(mktemp -d)"
-        if ! { wget -q --tries=3 --timeout=30 -O "$kd/keyring.deb" https://pkg.noctalia.dev/deb/nickh-archive-keyring.deb &&
-               wget -q --tries=3 --timeout=30 -O "$kd/$src" "https://pkg.noctalia.dev/deb/$src"; }; then
-          rm -rf "$kd"; die "$(t "téléchargement du dépôt Noctalia impossible : $NOCT_DOCS" "couldn't download the Noctalia repository: $NOCT_DOCS")"
+        if ! wget -q --tries=3 --timeout=30 -O "$kd/cle.gpg" https://pkg.noctalia.dev/deb/nickh-archive-keyring.gpg; then
+          rm -rf "$kd"; die "$(t "téléchargement de la clé du dépôt Noctalia impossible : $NOCT_DOCS" "couldn't download the Noctalia repository key: $NOCT_DOCS")"
         fi
-        # Clé vérifiée AVANT d'être installée ; le fichier de source doit s'appuyer sur cette clé et sur ce site seulement
-        if ! verifier_empreinte_cle "$kd/keyring.deb" "$NOCT_DEB_EMPREINTE" ||
-           ! grep -qx 'Signed-By: /usr/share/keyrings/nickh-archive-keyring.gpg' "$kd/$src" ||
-           [ -n "$(grep -E '^URIs:' "$kd/$src" | grep -v 'https://pkg.noctalia.dev/' || true)" ]; then
-          rm -rf "$kd"; die "$(t "la clé ou la source du dépôt Noctalia ne correspond pas à ce qui est attendu : installation arrêtée, rien n'a été ajouté à apt." "the Noctalia repository key or source isn't what is expected: installation stopped, nothing was added to apt.")"
+        # Clé vérifiée AVANT d'être installée ; c'est ce fichier-là, vérifié, qui est copié (jamais retéléchargé)
+        if ! verifier_empreinte_cle "$kd/cle.gpg" "$NOCT_DEB_EMPREINTE"; then
+          rm -rf "$kd"; die "$(t "la clé du dépôt Noctalia ne correspond pas à celle attendue : installation arrêtée, rien n'a été ajouté à apt." "the Noctalia repository key isn't the expected one: installation stopped, nothing was added to apt.")"
         fi
-        sudo dpkg -i "$kd/keyring.deb" && sudo install -Dm0644 "$kd/$src" "/etc/apt/sources.list.d/$src"; rm -rf "$kd"
+        source_noctalia "$suites" > "$kd/$src"
+        sudo install -Dm0644 "$kd/cle.gpg" "$NOCT_DEB_CLE" && sudo install -Dm0644 "$kd/$src" "/etc/apt/sources.list.d/$src"; rm -rf "$kd"
         APT_A_JOUR=0; apt_maj || true
         # Debian 13 : ce dépôt est construit pour trixie-backports (comme Hyprland 0.55) : mêmes versions des bibliothèques
         if [ "$OSCODE" = trixie ]; then { bpo_on && bpo_install noctalia; } || true; else pkg_install noctalia || true; fi ;;
@@ -1329,6 +1329,7 @@ if [ -f "$HOME/.bashrc" ] || [ "$(basename "${SHELL:-}")" = bash ]; then
 _nc_p=":$PATH:"; while case "$_nc_p" in *":$HOME/.local/bin:"*) true ;; *) false ;; esac; do _nc_p="${_nc_p%%":$HOME/.local/bin:"*}:${_nc_p#*":$HOME/.local/bin:"}"; done; _nc_p="${_nc_p#:}"; _nc_p="${_nc_p%:}"; export PATH="$HOME/.local/bin${_nc_p:+:$_nc_p}"; unset _nc_p
 BASHRC_EOF
     } | ecrire_atomique "$HOME/.bashrc"
+    # shellcheck disable=SC2088  # « ~/.bashrc » : texte affiché, le ~ n'a pas à être développé
     if [ -f "$BK/.bashrc" ]; then noter_silencieux "~/.bashrc : une ligne ajoutée (~/.local/bin en tête du PATH)" "ancienne version : $BK/.bashrc"
     else echo ".bashrc" >> "$BK/.created"; noter_silencieux "~/.bashrc créé (~/.local/bin en tête du PATH)" "pour revenir : supprimer ce fichier (il n'existait pas avant)"; fi
   fi
