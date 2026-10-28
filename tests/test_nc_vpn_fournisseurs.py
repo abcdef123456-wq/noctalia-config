@@ -37,10 +37,10 @@ class Fournisseurs(BaseVpn):
     def test_etats_differents_en_meme_temps(self):
         self.poser("nordvpn", {"account": {"out": ANSI_COMPTE}, "countries": {"out": PAYS}, "status": {"out": "Status: Disconnected\n"}})
         self.poser("protonvpn-app", {})
-        (self.r / "mullvad.json").write_text(json.dumps({"texte": "Disconnected\nWarning: You are not logged in to an account.",
+        (self.r / "mullvad.json").write_text(json.dumps({"texte": "Disconnected", "compte": "Not logged in on any account",
                                                          "json": json.dumps({"state": "disconnected"})}))
         etats = {f["id"]: f["etat"] for f in self.lire()["fournisseurs"]}
-        self.assertEqual(etats, {"nord": "pret", "proton": "sans_compte", "mullvad": "sans_compte"})
+        self.assertEqual(etats, {"nord": "pret", "proton": "pilote_appli", "mullvad": "sans_compte"})
 
     def test_commandes_inconnues(self):
         for args in (("fournisseur",), ("fournisseur", "inconnu", "login"), ("fournisseur", "nord"), ("fournisseur", "nord", "connecter"),

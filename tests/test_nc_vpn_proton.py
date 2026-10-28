@@ -35,9 +35,10 @@ class Proton(BaseVpn):
     def test_installe_sans_connexion_proton(self):
         self.poser("protonvpn-app", {})
         f = self.fiche()                                                      # les connexions de test (Labo, Maison…) ne sont pas Proton
-        self.assertEqual(f["etat"], "sans_compte")
+        self.assertEqual(f["etat"], "pilote_appli")                           # jamais « sans_compte » : le compte, c'est l'appli
+        self.assertIn("application", f["message"])
         self.assertNotIn("pays", f)
-        self.assertTrue(f["peut_login"])
+        self.assertTrue(f["peut_login"])                                      # le bouton « Ouvrir Proton VPN »
         self.assertFalse(f["connecte"])
         self.assertEqual(self.appels_de("protonvpn-app"), [])                  # lire l'état ne lance pas l'appli
 
@@ -45,8 +46,8 @@ class Proton(BaseVpn):
         self.poser("protonvpn-app", {})
         self.proton_nm()
         f = self.fiche()
-        self.assertEqual(f["etat"], "pret")
-        self.assertEqual(f["pays"], [])                                       # le pays se choisit dans l'appli
+        self.assertEqual(f["etat"], "pilote_appli")
+        self.assertNotIn("pays", f)                                           # le pays se choisit dans l'appli
         self.assertTrue(f["connecte"])
         self.assertEqual(f["pays_actif"], "FR")
         self.assertEqual(f["pilotage"], "appli")
@@ -55,7 +56,7 @@ class Proton(BaseVpn):
         self.poser("protonvpn-app", {})
         self.proton_nm(active=False)
         f = self.fiche()
-        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"]), ("pret", False, ""))
+        self.assertEqual((f["etat"], f["connecte"], f["pays_actif"]), ("pilote_appli", False, ""))
 
     def test_connexion_proton_sans_l_appli_reste_absent(self):
         self.proton_nm()
@@ -64,7 +65,8 @@ class Proton(BaseVpn):
     def test_nom_proche_pas_proton(self):
         self.poser("protonvpn-app", {})
         self.proton_nm(nom="Protonic Labo")
-        self.assertEqual(self.fiche()["etat"], "sans_compte")
+        self.assertEqual(self.fiche()["etat"], "pilote_appli")
+        self.assertFalse(self.fiche()["connecte"])
 
     def test_actions_ouvrent_seulement_l_appli(self):
         self.poser("protonvpn-app", {})

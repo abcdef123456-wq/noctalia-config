@@ -66,9 +66,9 @@ class Nord(BaseVpn):
         self.connecte()
         f = self.fiche()
         self.assertEqual(f["etat"], "pret")
-        self.assertEqual(f["pays"], [{"code": "BA", "nom": "Bosnia and Herzegovina"}, {"code": "FR", "nom": "France"},
-                                     {"code": "DE", "nom": "Germany"}, {"code": "HK", "nom": "Hong Kong"},
-                                     {"code": "US", "nom": "United States"}])    # Atlantis : sans code connu, écarté
+        self.assertEqual(f["pays"], [{"code": "DE", "nom": "Allemagne"}, {"code": "BA", "nom": "Bosnie-Herzégovine"},
+                                     {"code": "US", "nom": "États-Unis"}, {"code": "FR", "nom": "France"},
+                                     {"code": "HK", "nom": "Hong Kong"}])    # Atlantis : sans code connu, écarté
         self.assertEqual(f["pays_actif"], "FR")
         self.assertTrue(f["connecte"])
         for interdit in ("exemple.invalid", "ABCDEFGHIJKLMNOP", "\x1b", "\r"):
@@ -181,8 +181,16 @@ class Nord(BaseVpn):
 
     def test_domaines_nord(self):
         m = charger()
-        for ok in ("https://nordaccount.com/a", "https://my.nordaccount.com/a?b=c", "https://nordvpn.com/", "https://NordAccount.com./x"):
+        for ok in ("https://nordaccount.com/a", "https://my.nordaccount.com/a?b=c", "https://nordvpn.com/", "https://nordaccount.com",
+                   "https://nordaccount.com/oauth?x=%2Fy", "https://a-b.nordvpn.com/p%20q"):
             self.assertTrue(m.url_nord_sure(ok), ok)
+        for mauvais in ("https://evil.example\\.nordvpn.com/", "https://evil.example%2f.nordvpn.com/", "https://evil.example%5c.nordvpn.com/",
+                        "https://evil.example;.nordvpn.com/", 'https://evil.example".nordvpn.com/', "https://evil.example'.nordvpn.com/",
+                        "https://evil.example`.nordvpn.com/", "https://evil.example{.nordvpn.com/", "https://evil.example|.nordvpn.com/",
+                        "https://evil.example^.nordvpn.com/", "https://nordvpn.com@evil.example/", "https://evil.example#.nordvpn.com",
+                        "https://nordaccount.com\\@evil.example/", "https://nordaccount.com/a\\b", "https://nord%61ccount.com/",
+                        "https://nordaccount.com/a'b", "https://nordaccount.com/a{b", "https://NordAccount.com/x", "https://nordaccount.com./x"):
+            self.assertFalse(m.url_nord_sure(mauvais), mauvais)
         for mauvais in ("", None, "https://nordaccount.com/a b", "https://nordaccount.com/\n", "ftp://nordvpn.com/", "https://127.0.0.1/"):
             self.assertFalse(m.url_nord_sure(mauvais), repr(mauvais))
 

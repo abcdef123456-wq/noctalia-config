@@ -1,5 +1,5 @@
 """nc-vpn : Mullvad dans les fournisseurs (faux `mullvad` qui note ses arguments). Trois états ; le numéro de compte n'est jamais
-lu (`account` n'est jamais lancé) ni montré ; pays de `relay list`, sinon la liste ISO intégrée ; connecter CC en argv exact,
+gardé ni montré (`account get` n'est lancé que pour un oui/non, sa sortie est jetée) ; pays de `relay list`, sinon la liste ISO intégrée ; connecter CC en argv exact,
 code invalide refusé sans appel ; login sans saisie. PATH = faux-bin seul."""
 import json
 import time
@@ -36,11 +36,64 @@ class MullvadEtats(BaseVpn):
         self.assertEqual(self.appels_mullvad(), [])
 
     def test_installe_sans_compte(self):
-        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected\nWarning: You are not logged in to an account.", relais=RELAIS)
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais=RELAIS)     # compte : « Not logged in… » par défaut
         f = self.fiche()
         self.assertEqual((f["etat"], f["peut_login"]), ("sans_compte", True))
         self.assertNotIn("pays", f)
-        self.assertTrue(all(a[0] == "status" for a in self.appels_mullvad()))
+        self.assertIn(["account", "get"], self.appels_mullvad())
+        self.assertNotIn(["relay", "list"], self.appels_mullvad())
+
+    def test_deconnecte_avec_compte_est_pret(self):
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais=RELAIS, compte="Mullvad account: " + NUMERO)
+        f = self.fiche()
+        self.assertEqual((f["etat"], f["connecte"]), ("pret", False))
+        self.assertEqual(self.appels_mullvad().count(["account", "get"]), 1)
+
+    def test_appareil_revoque_sans_compte(self):
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", compte="The current device has been revoked")
+        f = self.fiche()
+        self.assertEqual((f["etat"], f["probleme"], f["peut_login"]), ("sans_compte", "revoque", True))
+        self.assertIn("révoqué", f["message"])
+        self.assertNotIn("pays", f)
+
+    def test_numero_jamais_ressorti(self):
+        for compte in ("Mullvad account: " + NUMERO, "Not logged in on any account", "The current device has been revoked"):
+            self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", compte=compte, bruit="Mullvad account: " + NUMERO,
+                    relais=RELAIS)
+            for args in (("fournisseurs-json",), ("mullvad", "etat-json")):
+                r = self.seul(*args)
+                self.assertNotIn(NUMERO, r.stdout + r.stderr, (compte, args))
+                self.assertNotIn("1234 5678", r.stdout + r.stderr)
+
+    def test_service_arrete_compte_inconnu(self):
+        self.mv(texte="Failed to connect to daemon", code=1)
+        d = json.loads(self.seul("mullvad", "etat-json").stdout)
+        self.assertIsNone(d["compte"])
+        self.assertFalse(d["revoque"])
+
+    def test_account_get_argv_exact(self):
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected")
+        self.seul("mullvad", "etat-json")
+        self.assertEqual([a for a in self.appels_mullvad() if a[0] == "account"], [["account", "get"]])
+
+    def test_pays_traduits_depuis_le_code_et_tries(self):
+        # les noms de la commande (ici faux exprès) ne servent jamais : seul le code compte
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais="Zweden (se)\nAllemagne-faux (de)\n\nEtats (us)\n",
+                compte="Mullvad account: " + NUMERO)
+        self.assertEqual([(p["code"], p["nom"]) for p in self.fiche()["pays"]],
+                         [("DE", "Allemagne"), ("US", "États-Unis"), ("SE", "Suède")])
+        r = self.seul("fournisseurs-json", NC_LANGUE="en")
+        f = next(f for f in json.loads(r.stdout)["fournisseurs"] if f["id"] == "mullvad")
+        self.assertEqual([(p["code"], p["nom"]) for p in f["pays"]], [("DE", "Germany"), ("SE", "Sweden"), ("US", "United States")])
+        d = json.loads(self.seul("mullvad", "pays-json").stdout)["pays"]
+        self.assertEqual([(p["cc"], p["nom"]) for p in d], [("DE", "Allemagne"), ("US", "États-Unis"), ("SE", "Suède")])
+
+    def test_relay_list_tres_long_lu_jusqu_a_sa_borne(self):
+        gros = "Sweden (se)\n" + "\t\tse-got-wg-004 (192.0.2.10) - hosted by Hote (rented)\n" * 40000      # plus de 1 Mio
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais=gros, compte="Mullvad account: " + NUMERO)
+        f = self.fiche()
+        self.assertEqual(f["etat"], "pret")
+        self.assertTrue({"FR", "SE", "DE", "US"} <= {p["code"] for p in f["pays"]})      # liste coupée : secours ISO
 
     def test_service_arrete_ni_pret_ni_connecte(self):
         self.mv(texte="Failed to connect to daemon", code=1)
@@ -49,10 +102,10 @@ class MullvadEtats(BaseVpn):
         self.assertFalse(f["connecte"])
 
     def test_pret_pays_de_relay_list(self):
-        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais=RELAIS)
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", relais=RELAIS, compte="Mullvad account: " + NUMERO)
         f = self.fiche()
         self.assertEqual(f["etat"], "pret")
-        self.assertEqual(f["pays"], [{"code": "FR", "nom": "France"}, {"code": "DE", "nom": "Germany"}, {"code": "SE", "nom": "Sweden"}])
+        self.assertEqual(f["pays"], [{"code": "DE", "nom": "Allemagne"}, {"code": "FR", "nom": "France"}, {"code": "SE", "nom": "Suède"}])
         self.assertEqual((f["connecte"], f["pays_actif"]), (False, ""))
         self.assertIn(["relay", "list"], self.appels_mullvad())
 
@@ -61,10 +114,10 @@ class MullvadEtats(BaseVpn):
         f = self.fiche()
         self.assertEqual((f["etat"], f["connecte"], f["pays_actif"]), ("pret", True, "SE"))
         self.assertNotIn(NUMERO, self.sortie_vue)
-        self.assertTrue(all(a[0] in ("status", "relay") for a in self.appels_mullvad()))     # jamais « account »
+        self.assertTrue(all(a[0] in ("status", "relay") for a in self.appels_mullvad()))     # connecté : le compte va de soi, pas d'« account »
 
     def test_liste_iso_de_secours(self):
-        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected")          # relay list en échec
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", compte="Mullvad account: " + NUMERO)          # relay list en échec
         f = self.fiche()
         codes = {p["code"] for p in f["pays"]}
         self.assertTrue({"FR", "SE", "DE", "US"} <= codes)

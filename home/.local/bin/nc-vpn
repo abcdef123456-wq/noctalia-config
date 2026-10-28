@@ -13,7 +13,7 @@
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    les pays de Mullvad (`mullvad relay list`) en JSON : {"pays": [{"cc", "nom"}]}
-  nc-vpn fournisseurs-json    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+  nc-vpn fournisseurs-json    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (seulement à l'état pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC : deux lettres MAJUSCULES (FR). Nord : la CLI nordvpn ;
                               Mullvad : mullvad ; Proton (pas de CLI officielle) : ouvre l'appli officielle, sans la piloter ni la fermer.
@@ -38,6 +38,7 @@ import fcntl
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
 import signal
@@ -93,7 +94,7 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    Mullvad's countries (`mullvad relay list`) as JSON: {"pays": [{"cc", "nom"}]}
-  nc-vpn fournisseurs-json    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+  nc-vpn fournisseurs-json    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pilote_appli | pret,
                               "message", "pays" (only when pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
   nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC: two UPPERCASE letters (FR). Nord: the nordvpn CLI;
                               Mullvad: mullvad; Proton (no official CLI): opens the official app, never driving or closing it.
@@ -134,7 +135,7 @@ CONTRAT = 1      # version du contrat JSON (docs/vpn-contrat.md) : change seulem
 
 class Echec(Exception):
     """Une erreur annoncée. `code` est stable (contrat JSON) : echec, uuid_invalide, nm_indisponible, inconnue,
-    echec_partiel, occupe, killswitch_coupe, killswitch_refuse. `refus` (killswitch etat-json) vient d'un Echec dont le
+    echec_partiel, occupe, killswitch_coupe, killswitch_refuse, killswitch_actif. `refus` (killswitch etat-json) vient d'un Echec dont le
     code donne `refus_code` : pas_installe, aucun_tunnel, plusieurs_tunnels, serveur_nom, mullvad, nm_indisponible, autre."""
     def __init__(self, message="", code="echec"):
         super().__init__(message)
@@ -281,6 +282,8 @@ def verrou_changement():
     $XDG_RUNTIME_DIR/nc-vpn.lock, gardé jusqu'à la fin du processus, relâché par le noyau même si nc-vpn est tué). Occupé :
     Echec de code « occupe ». Un verrou impossible à créer ne bloque rien."""
     global _verrou
+    if _verrou is not None:      # déjà tenu par ce processus (mullvad_connecter appelle mullvad_agir deux fois)
+        return
     base = os.environ.get("XDG_RUNTIME_DIR", "")
     try:
         if not base or not os.path.isdir(base) or os.stat(base).st_uid != os.getuid():
@@ -971,20 +974,90 @@ def indicateur():
 
 # ── Application officielle Mullvad (commande `mullvad`, démon mullvad-daemon ; son tunnel est hors de NetworkManager) ──────
 # Option retenue : `mullvad status --json` (-j, présente dans mullvad-cli 2025.14 et dans mullvad-cli/src/cmds/status.rs du dépôt
-# officiel github.com/mullvad/mullvadvpn-app). Le numéro de compte n'est JAMAIS lu : ni `mullvad account get`, ni aucun champ
-# de sortie gardé (seuls l'état, le pays et le nom du relais sont extraits) ; toute longue suite de chiffres vue dans un message
+# officiel github.com/mullvad/mullvadvpn-app). Le numéro de compte n'est JAMAIS gardé : `mullvad account get` (qui l'écrit) n'est
+# lancé que pour un oui/non, sa sortie est jetée ; aucun champ de sortie gardé (seuls l'état, le pays et le nom du relais sont extraits) ; toute longue suite de chiffres vue dans un message
 # est remplacée avant d'être montrée. Tout en argv, 2 s au plus pour une lecture.
-def mullvad(args, delai=2):
-    """(code, sortie, erreur) de `mullvad` lancé en arguments. 127 : commande absente."""
+def env_cli():
+    """Environnement des outils lancés : anglais fixe (les phrases sont lues), ni couleur ni terminal."""
+    return dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C", NO_COLOR="1", TERM="dumb")
+
+
+def arreter_groupe(p):
+    """SIGTERM puis, si besoin, SIGKILL à tout le groupe de processus lancé par lancer_borne."""
+    for sig, attente in ((signal.SIGTERM, 0.5), (signal.SIGKILL, 2)):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            break
+        try:
+            p.wait(timeout=attente)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    try:
+        p.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def lancer_borne(argv, delai, borne=64 * 1024):
+    """(code, sortie, erreur) en octets : la commande tourne dans son propre groupe, stdin fermé, et sa sortie est lue par
+    morceaux ; passé `borne` octets (par flux) ou `delai` secondes, le groupe est arrêté (SIGTERM puis SIGKILL). Codes :
+    124 délai dépassé, 125 sortie trop longue (le début lu est rendu), 126 lancement impossible."""
+    try:
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             start_new_session=True, env=env_cli())
+    except (OSError, subprocess.SubprocessError):
+        return 126, b"", b""
+    sel = selectors.DefaultSelector()
+    tampons = {p.stdout: bytearray(), p.stderr: bytearray()}
+    for f in tampons:
+        os.set_blocking(f.fileno(), False)
+        sel.register(f, selectors.EVENT_READ)
+    fin, arret = time.monotonic() + delai, 0
+    try:
+        while sel.get_map() and not arret:
+            reste = fin - time.monotonic()
+            if reste <= 0:
+                arret = 124
+                break
+            for cle, _ in sel.select(min(reste, 0.2)):
+                f = cle.fileobj
+                try:
+                    d = os.read(f.fileno(), 16384)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    d = b""
+                if not d:
+                    sel.unregister(f)
+                    continue
+                tampons[f] += d
+                if len(tampons[f]) > borne:
+                    del tampons[f][borne:]
+                    arret = 125
+        if arret:
+            arreter_groupe(p)
+        else:
+            try:
+                p.wait(timeout=max(0.5, fin - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                arret = 124
+                arreter_groupe(p)
+    finally:
+        sel.close()
+        for f in tampons:
+            f.close()
+    return (arret or p.returncode), bytes(tampons[p.stdout]), bytes(tampons[p.stderr])
+
+
+def mullvad(args, delai=2, borne=64 * 1024):
+    """(code, sortie, erreur) de `mullvad` lancé en arguments, lecture bornée. 127 : commande absente."""
     exe = shutil.which("mullvad")
     if not exe:
         return 127, "", ""
-    try:
-        r = subprocess.run([exe] + args, capture_output=True, text=True, errors="replace", timeout=delai,
-                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C"), stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return 126, "", ""
-    return r.returncode, r.stdout, r.stderr
+    code, out, err = lancer_borne([exe] + args, delai, borne)
+    return code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def epure(texte):
@@ -1065,44 +1138,65 @@ def mullvad_agir(a):
     else:
         print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
         sys.exit(2)
+    verrou_changement()
     code, _, err = mullvad(args, delai=30)
     if code != 0:
-        msg = court(epure(err))
+        msg = filtre_secret(nettoyer_sortie(err.encode("utf-8", "replace")))
         raise Echec(T("Mullvad a refusé", "Mullvad refused") + (" (" + msg + ")" if msg else "") + ".")
     print(ok)
 
 
+BORNE_RELAIS = 1024 * 1024      # `mullvad relay list` est long (tous les relais) : sa borne à elle, les autres lectures gardent 64 Kio
 PAYS_RELAIS = re.compile(r"^([^\s].*?)\s+\(([a-z]{2})\)\s*$")
 
 
 def mullvad_pays_json():
-    """Les pays que connaît l'application (`mullvad relay list`, lignes de pays sans retrait : « Sweden (se) »), triés par nom,
-    code validé. Aucun numéro de compte n'y figure. Application absente ou muette : liste vide."""
+    """Les pays que connaît l'application (`mullvad relay list`, lignes de pays sans retrait : « Sweden (se) »), triés par nom
+    traduit (le nom vient du code, jamais de la sortie de la commande), code validé. Aucun numéro de compte n'y figure. Application absente ou muette : liste vide."""
     res = []
     if shutil.which("mullvad"):
-        code, out, _ = mullvad(["relay", "list"], delai=10)
+        code, out, _ = mullvad(["relay", "list"], delai=10, borne=BORNE_RELAIS)
         if code == 0:
-            for ligne in out.splitlines():
+            for ligne in nettoyer_sortie(out.encode("utf-8", "replace")).splitlines():
                 m = PAYS_RELAIS.match(ligne)
                 if m and m.group(2).upper() in ISO_PAYS:
-                    res.append({"cc": m.group(2).upper(), "nom": nom_borne(m.group(1), 40)})
+                    res.append({"cc": m.group(2).upper(), "nom": nom_pays(m.group(2).upper())})
     vus, uniques = set(), []
-    for x in sorted(res, key=lambda x: x["nom"].lower()):
+    for x in sorted(res, key=lambda x: cle_nom(x["nom"])):
         if x["cc"] not in vus:
             vus.add(x["cc"])
             uniques.append(x)
     return {"pays": uniques[:150]}
 
 
+def mullvad_compte():
+    """« oui », « non », « revoque » ou None (inconnu : service arrêté, sortie illisible) d'après `mullvad account get`.
+    Phrases des sources officielles (mullvad-cli/src/cmds/account.rs, fonction get) : « Not logged in on any account »,
+    « The current device has been revoked », et une ligne « Mullvad account: … » quand un compte est connecté. La sortie
+    contient le numéro de compte : elle est lue en mémoire (4 Kio au plus), analysée ici, puis jetée. Elle n'est ni gardée,
+    ni affichée, ni journalisée, pas même tronquée."""
+    code, out, err = mullvad(["account", "get"], delai=10, borne=4096)
+    texte = out + "\n" + err
+    if re.search(r"not logged in", texte, re.I):
+        return "non"
+    if re.search(r"has been revoked", texte, re.I):
+        return "revoque"
+    if code == 0 and re.search(r"^\s*Mullvad account:", texte, re.I | re.M):
+        return "oui"
+    return None
+
+
 def mullvad_json():
-    """L'état pour le panneau : celui de mullvad_etat() et « compte » (connecté au compte : oui, non, ou null si inconnu).
-    Le texte de `mullvad status` n'est lu que pour y trouver l'avertissement « not logged in » ; il n'est pas gardé."""
+    """L'état pour le panneau : celui de mullvad_etat(), « compte » (connecté au compte : oui, non, ou null si inconnu) et
+    « revoque » (l'appareil a été révoqué : plus de compte sur cet appareil). Connecté, le compte va de soi ; déconnecté, il est
+    demandé à `mullvad account get` (oui/non seulement, voir mullvad_compte)."""
     e = mullvad_etat()
     e["compte"] = None
+    e["revoque"] = False
     if e["installe"] and not e["connecte"]:
-        code, out, err = mullvad(["status"])
-        if code == 0:         # service arrêté (code non nul, « Failed to connect… ») : on ne sait pas, pas de « connecté » inventé
-            e["compte"] = not re.search(r"not logged in", out + err, re.I)
+        c = mullvad_compte()
+        e["compte"] = None if c is None else c == "oui"
+        e["revoque"] = c == "revoque"
     elif e["connecte"]:
         e["compte"] = True
     return e
@@ -1110,7 +1204,8 @@ def mullvad_json():
 
 # ── Fournisseurs (Nord, Proton, Mullvad) : trois états, des pays seulement quand le compte est connecté ─────────────────
 # États : « absent » (commande introuvable), « sans_compte » (client installé, pas de compte connecté, ou client inutilisable
-# pour une raison dite dans « probleme »), « pret » (compte connecté). Jamais d'adresse e-mail, de numéro de compte ni de jeton :
+# pour une raison dite dans « probleme »), « pilote_appli » (Proton : tout se fait dans l'application officielle), « pret » (compte
+# connecté). Jamais d'adresse e-mail, de numéro de compte ni de jeton :
 # seul un oui/non en est tiré. Toutes les commandes en argv, stdin fermé, délai borné, sortie bornée et nettoyée (couleurs ANSI,
 # retours chariot, animations d'attente). Le nom d'un client installé ne fait jamais office de fournisseur connecté.
 CONTRAT_FOURNISSEURS = 1
@@ -1134,6 +1229,27 @@ NOMS_PAYS = ("AD Andorra|AE United Arab Emirates|AF Afghanistan|AL Albania|AM Ar
 NOMS_PAYS_ALIAS = {"czechia": "CZ", "turkiye": "TR", "macau": "MO", "korea south": "KR", "brunei": "BN", "cote divoire": "CI",
                    "united states of america": "US", "usa": "US", "uk": "GB", "great britain": "GB", "russian federation": "RU"}
 CODE_NOM = {x[:2]: x[3:] for x in NOMS_PAYS.split("|")}
+# Mêmes codes, noms français (le nom affiché vient TOUJOURS du code ISO et de ces tables, jamais d'un nom donné par une CLI)
+NOMS_PAYS_FR = ("AD Andorre|AE Émirats arabes unis|AF Afghanistan|AL Albanie|AM Arménie|AO Angola|AR Argentine|AT Autriche|AU Australie|"
+                "AZ Azerbaïdjan|BA Bosnie-Herzégovine|BB Barbade|BD Bangladesh|BE Belgique|BG Bulgarie|BH Bahreïn|BM Bermudes|"
+                "BN Brunei|BO Bolivie|BR Brésil|BS Bahamas|BT Bhoutan|BZ Belize|CA Canada|CH Suisse|CI Côte d'Ivoire|"
+                "CL Chili|CN Chine|CO Colombie|CR Costa Rica|CY Chypre|CZ Tchéquie|DE Allemagne|DK Danemark|DO République dominicaine|"
+                "DZ Algérie|EC Équateur|EE Estonie|EG Égypte|ES Espagne|ET Éthiopie|FI Finlande|FR France|GB Royaume-Uni|GE Géorgie|"
+                "GH Ghana|GI Gibraltar|GL Groenland|GR Grèce|GT Guatemala|GU Guam|HK Hong Kong|HN Honduras|HR Croatie|HU Hongrie|"
+                "ID Indonésie|IE Irlande|IL Israël|IM Île de Man|IN Inde|IQ Irak|IS Islande|IT Italie|JE Jersey|JM Jamaïque|JO Jordanie|"
+                "JP Japon|KE Kenya|KG Kirghizistan|KH Cambodge|KR Corée du Sud|KW Koweït|KZ Kazakhstan|LA Laos|LB Liban|LI Liechtenstein|"
+                "LK Sri Lanka|LT Lituanie|LU Luxembourg|LV Lettonie|MA Maroc|MC Monaco|MD Moldavie|ME Monténégro|MK Macédoine du Nord|"
+                "MM Birmanie|MN Mongolie|MO Macao|MT Malte|MU Maurice|MX Mexique|MY Malaisie|NG Nigéria|NL Pays-Bas|NO Norvège|"
+                "NP Népal|NZ Nouvelle-Zélande|PA Panama|PE Pérou|PH Philippines|PK Pakistan|PL Pologne|PR Porto Rico|PT Portugal|PY Paraguay|"
+                "QA Qatar|RO Roumanie|RS Serbie|RU Russie|SA Arabie saoudite|SE Suède|SG Singapour|SI Slovénie|SK Slovaquie|SN Sénégal|"
+                "TH Thaïlande|TN Tunisie|TR Turquie|TT Trinité-et-Tobago|TW Taïwan|UA Ukraine|UG Ouganda|US États-Unis|UY Uruguay|"
+                "UZ Ouzbékistan|VE Venezuela|VN Vietnam|ZA Afrique du Sud")
+CODE_NOM_FR = {x[:2]: x[3:] for x in NOMS_PAYS_FR.split("|")}
+
+
+def nom_pays(cc):
+    """Le nom d'un pays dans la langue du bureau, d'après son code ISO (table interne). Code hors table : le code lui-même."""
+    return (CODE_NOM if EN else CODE_NOM_FR).get(cc) or CODE_NOM.get(cc) or cc
 
 
 def cle_nom(nom):
@@ -1174,14 +1290,10 @@ def cli_fournisseur(nom, args, delai=10):
     exe = shutil.which(nom)
     if not exe:
         return 127, ""
-    try:
-        r = subprocess.run([exe] + args, capture_output=True, timeout=delai, stdin=subprocess.DEVNULL, start_new_session=True,
-                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C", NO_COLOR="1", TERM="dumb"))
-    except subprocess.TimeoutExpired:
-        return 124, ""
-    except (OSError, subprocess.SubprocessError):
-        return 126, ""
-    return r.returncode, nettoyer_sortie(r.stdout + b"\n" + r.stderr)
+    code, out, err = lancer_borne([exe] + args, delai, MAX_SORTIE)
+    if code in (124, 126):
+        return code, ""
+    return code, nettoyer_sortie(out + b"\n" + err)
 
 
 def probleme_cli(code, texte):
@@ -1221,7 +1333,8 @@ def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, pe
     f = {"id": fid, "nom": nom, "etat": etat_, "message": message}
     if etat_ == "pret":
         f["pays"] = pays or []
-    f.update({"pays_actif": pays_actif if etat_ == "pret" else "", "connecte": bool(connecte) and etat_ == "pret",
+    f.update({"pays_actif": pays_actif if etat_ in ("pret", "pilote_appli") else "",
+              "connecte": bool(connecte) and etat_ in ("pret", "pilote_appli"),
               "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage})
     return f
 
@@ -1238,7 +1351,8 @@ def nord_exe():
 
 def nord_pays_liste():
     """([{"code","nom","cli"}…], probleme) d'après `nordvpn countries`. Seuls les noms de la CLI (lettres, « _ », « ' » ou « . »)
-    qui ont un code ISO connu sont gardés ; « cli » est le nom exact à redonner à `connect`."""
+    qui ont un code ISO connu sont gardés ; « cli » est le nom exact à redonner à `connect` (jamais montré), « nom » vient du code,
+    dans la langue du bureau, et la liste est triée par ce nom."""
     code, t = cli_fournisseur("nordvpn", ["countries"], 10)
     p = probleme_cli(code, t)
     if p:
@@ -1249,8 +1363,8 @@ def nord_pays_liste():
             continue
         c = NOM_CODE.get(cle_nom(mot))
         if c and c not in {x["code"] for x in res}:
-            res.append({"code": c, "nom": mot.replace("_", " "), "cli": mot})
-    res.sort(key=lambda x: x["nom"])
+            res.append({"code": c, "nom": nom_pays(c), "cli": mot})
+    res.sort(key=lambda x: cle_nom(x["nom"]))
     return res, ""
 
 
@@ -1286,6 +1400,9 @@ def nord_connecter(cc):
     code_pays_ok(cc)
     if not nord_exe():
         raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    if killswitch_etat() is True:
+        raise Echec(T("Coupe d'abord le kill switch : il bloquerait NordVPN.", "Turn the kill switch off first: it would block NordVPN."),
+                    "killswitch_actif")
     pays, p = nord_pays_liste()
     if p:
         raise Echec(message_probleme("nord", p))
@@ -1315,19 +1432,29 @@ def nord_deconnecter():
     print(T("NordVPN : déconnecté.", "NordVPN: disconnected."))
 
 
+# Forme exacte acceptée, lue sur la chaîne BRUTE avant tout découpage : l'hôte est fait de lettres, chiffres et « - » séparés par
+# des points et finit par nordaccount.com ou nordvpn.com ; le « % » n'est permis que dans le chemin et la requête (les paramètres
+# OAuth y sont encodés) ; aucune barre oblique inverse, guillemet, apostrophe, accent grave, accolade, « | », « ^ », « < », « > »
+# ni espace.
+URL_NORD = re.compile(r"https://((?:[a-z0-9-]+\.)*(?:nordaccount|nordvpn)\.com)(?:[/?][^\s\\\"'`<>{}|^]*)?")
+
+
 def url_nord_sure(url):
     """Vrai pour une URL https d'un domaine Nord attendu (nordaccount.com, nordvpn.com et leurs sous-domaines), sans identifiant,
-    sur le port 443, sans espace ni caractère de contrôle."""
+    sur le port 443, sans caractère douteux. La chaîne brute est comparée d'abord à URL_NORD ; urlsplit doit ensuite lire
+    EXACTEMENT le même hôte : les deux lectures ne peuvent pas diverger."""
     if not isinstance(url, str) or len(url) > 2048 or not re.fullmatch(r"[\x21-\x7e]+", url):
+        return False
+    m = URL_NORD.fullmatch(url)
+    if not m:
         return False
     try:
         p = urllib.parse.urlsplit(url)
-        h = (p.hostname or "").lower().rstrip(".")
+        h = p.hostname
         port = p.port
     except ValueError:
         return False
-    return (p.scheme == "https" and not p.username and not p.password and port in (None, 443)
-            and any(h == d or h.endswith("." + d) for d in HOTES_NORD))
+    return p.scheme == "https" and not p.username and not p.password and port is None and h == m.group(1)
 
 
 def ouvrir(args):
@@ -1391,23 +1518,17 @@ def proton_connexions():
 
 
 def proton_fournisseur():
+    """« absent » sans l'application ; sinon « pilote_appli » : Proton se pilote dans son application (compte, pays, connexion).
+    Une connexion NetworkManager « ProtonVPN … » ACTIVE rend connecte vrai et donne le pays actif ; son absence ne dit rien du compte."""
     if not proton_exe():
         return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."),
                      pilotage="appli")
-    cx = proton_connexions()
-    if not cx:
-        return fiche("proton", "Proton VPN", "sans_compte",
-                     T("Proton VPN est installé, mais aucune connexion Proton n'est détectée (le compte de l'application n'est jamais lu) : "
-                       "ouvre l'application, connecte-toi et choisis un serveur.",
-                       "Proton VPN is installed, but no Proton connection is detected (the app's account is never read): "
-                       "open the app, sign in and pick a server."),
-                     peut_login=True, pilotage="appli")
-    actives = [c for c in cx if c["active"]]
+    actives = [c for c in (proton_connexions() or []) if c["active"]]
     actif = pays_de(re.sub(r"^\s*proton\s*vpn\s*", "", actives[0]["nom"], flags=re.I)) if actives else ""
-    return fiche("proton", "Proton VPN", "pret",
-                 T("Connexion Proton détectée. Le choix du pays se fait dans l'application officielle.",
-                   "Proton connection detected. Pick the country in the official app."),
-                 pays=[], pays_actif=actif, connecte=bool(actives), pilotage="appli")
+    return fiche("proton", "Proton VPN", "pilote_appli",
+                 T("Proton VPN se pilote dans son application : ouvre-la pour te connecter et choisir un pays.",
+                   "Proton VPN is driven from its own app: open it to sign in and pick a country."),
+                 pays_actif=actif, connecte=bool(actives), peut_login=True, pilotage="appli")
 
 
 def proton_ouvrir(message):
@@ -1439,23 +1560,24 @@ API_FOURNISSEURS["proton"] = {"fiche": proton_fournisseur, "connecter": proton_c
 
 
 # ── Mullvad dans les fournisseurs (même application que `nc-vpn mullvad …`) ───────────────────────────────────────────────
-# Sources (dépôt mullvad/mullvadvpn-app, mullvad-cli/src/cmds/) : `status` ajoute « Warning: You are not logged in to an
-# account. » quand aucun compte n'est connecté (tunnel_state.rs, status.rs) : c'est notre seul signal, `account get` n'est
-# JAMAIS lancé (il affiche le numéro de compte). `relay list` écrit une ligne par pays sans retrait, « Nom (code) » en
-# minuscules, puis les villes et les relais en retrait (relay.rs). `relay set location CC`, `connect`, `disconnect`.
+# Sources (dépôt mullvad/mullvadvpn-app, mullvad-cli/src/cmds/account.rs) : `account get` écrit « Not logged in on any account »,
+# « The current device has been revoked » ou, connecté, une ligne « Mullvad account: <numéro> » (code de sortie 0 dans les trois
+# cas). Le numéro y figure : la sortie est analysée en mémoire puis jetée (mullvad_compte). `status` n'affiche PAS d'avertissement
+# de compte quand il est déconnecté. `relay list` écrit une ligne par pays sans retrait, « Nom (code) » en minuscules, puis les
+# villes et les relais en retrait (relay.rs). `relay set location CC`, `connect`, `disconnect`.
 def mullvad_pays_liste():
     """([{"code","nom"}…], source) : les pays de `mullvad relay list` ; à défaut (commande en échec, rien de lisible), la liste
     ISO intégrée (« defaut »). Les noms sont bornés, en texte brut."""
-    code, out, _ = mullvad(["relay", "list"], delai=10)
+    code, out, _ = mullvad(["relay", "list"], delai=10, borne=BORNE_RELAIS)
     res = []
     if code == 0:
         for ligne in nettoyer_sortie(out.encode("utf-8", "replace")).splitlines():
             m = re.fullmatch(r"([^\s(][^()\t]{0,58}?)\s+\(([a-z]{2})\)\s*", ligne)
             if m and m.group(2).upper() in ISO_PAYS and m.group(2).upper() not in {x["code"] for x in res}:
-                res.append({"code": m.group(2).upper(), "nom": nom_borne(m.group(1))})
+                res.append({"code": m.group(2).upper(), "nom": nom_pays(m.group(2).upper())})
     if res:
-        return sorted(res, key=lambda x: x["nom"]), "relay"
-    return sorted(({"code": c, "nom": n} for c, n in CODE_NOM.items()), key=lambda x: x["nom"]), "defaut"
+        return sorted(res, key=lambda x: cle_nom(x["nom"])), "relay"
+    return sorted(({"code": c, "nom": nom_pays(c)} for c in CODE_NOM), key=lambda x: cle_nom(x["nom"])), "defaut"
 
 
 def mullvad_fournisseur():
@@ -1466,6 +1588,11 @@ def mullvad_fournisseur():
         return fiche("mullvad", "Mullvad", "sans_compte",
                      T("L'état de Mullvad est illisible : le service mullvad-daemon tourne-t-il ?",
                        "Mullvad's state cannot be read: is the mullvad-daemon service running?"), probleme="demon")
+    if e["revoque"]:
+        return fiche("mullvad", "Mullvad", "sans_compte",
+                     T("Cet appareil a été révoqué : reconnecte-toi à ton compte dans l'application Mullvad.",
+                       "This device has been revoked: sign in to your account again in the Mullvad app."),
+                     peut_login=True, probleme="revoque")
     if e["compte"] is False:
         return fiche("mullvad", "Mullvad", "sans_compte",
                      T("Mullvad est installé, mais aucun compte n'est connecté.", "Mullvad is installed, but no account is signed in."),
@@ -1512,8 +1639,10 @@ def fournisseur_agir(a):
         print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
         sys.exit(2)
     if len(a) == 3 and a[1] == "connecter":
+        verrou_changement()
         api["connecter"](a[2])
     elif a[1:] == ["deconnecter"]:
+        verrou_changement()
         api["deconnecter"]()
     elif a[1:] == ["login"]:
         api["login"]()

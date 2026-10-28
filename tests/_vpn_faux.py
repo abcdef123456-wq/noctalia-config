@@ -122,7 +122,7 @@ else:
 
 
 # Faux `mullvad` : note seulement ses arguments (appels-mullvad.jsonl) ; sa sortie vient de mullvad.json s'il existe :
-# {"json": "…", "texte": "…", "code": 0}. Par défaut : déconnecté. Jamais la vraie commande.
+# {"json": "…", "texte": "…", "compte": "…", "code": 0}. Par défaut : déconnecté, sans compte. Jamais la vraie commande.
 FAUX_MULLVAD = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -135,6 +135,14 @@ if a[:2] == ["status", "--json"]:
     print(conf["json"]); sys.exit(conf.get("code", 0))
 elif a[:1] == ["status"]:
     print(conf.get("texte", "Disconnected")); sys.exit(conf.get("code", 0))
+elif a[:2] == ["account", "get"]:
+    # comme mullvad-cli/src/cmds/account.rs : « Not logged in on any account », « The current device has been revoked » ou
+    # « Mullvad account: <numéro> » ; conf["compte"] le décide, conf["bruit"] ajoute une ligne sur les deux flux (un faux numéro)
+    if conf.get("code", 0) != 0:
+        print("Failed to connect to daemon", file=sys.stderr); sys.exit(1)
+    print(conf.get("compte", "Not logged in on any account"))
+    if conf.get("bruit"):
+        print(conf["bruit"]); print(conf["bruit"], file=sys.stderr)
 elif a[:2] == ["relay", "list"]:
     if "relais" not in conf: sys.exit(1)
     print(conf["relais"])

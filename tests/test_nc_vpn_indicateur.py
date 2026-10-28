@@ -196,17 +196,21 @@ class MullvadApplication(BaseVpn):
         d = json.loads(r.stdout)
         self.assertEqual((d["installe"], d["connecte"], d["pays"], d["hote"], d["compte"]), (True, True, "SE", "se-got-wg-004", True))
         self.assertNotIn(NUMERO, r.stdout + r.stderr)
-        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected\nWarning: You are not logged in to an account.")
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected")
         d = json.loads(self.vpn("mullvad", "etat-json").stdout)
         self.assertEqual((d["connecte"], d["compte"]), (False, False))
-        self.assertTrue(all(a[0] in ("status",) for a in self.appels_mullvad()))     # jamais « account »
+        self.assertEqual([a for a in self.appels_mullvad() if a[0] != "status"], [["account", "get"]])     # un oui/non, sortie jetée
+        self.mv(json=json.dumps({"state": "disconnected"}), texte="Disconnected", compte="Mullvad account: " + NUMERO, bruit=NUMERO)
+        r = self.vpn("mullvad", "etat-json")
+        self.assertEqual(json.loads(r.stdout)["compte"], True)
+        self.assertNotIn(NUMERO, r.stdout + r.stderr)
 
     def test_pays_json_liste_les_pays_du_relais(self):
         self.mv(relais="Sweden (se)\n\tGothenburg (got) @ 57.7N, 11.9E\n\t\tse-got-wg-004 (192.0.2.4) - WireGuard\n"
                        "France (fr)\n\tParis (par)\nNowhere (zz)\nSweden (se)\n")
         r = self.vpn("mullvad", "pays-json")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads(r.stdout), {"pays": [{"cc": "FR", "nom": "France"}, {"cc": "SE", "nom": "Sweden"}]})
+        self.assertEqual(json.loads(r.stdout), {"pays": [{"cc": "FR", "nom": "France"}, {"cc": "SE", "nom": "Suède"}]})
         self.assertEqual(self.appels_mullvad(), [["relay", "list"]])
 
     def test_numero_de_compte_jamais_remonte_dans_une_erreur(self):
