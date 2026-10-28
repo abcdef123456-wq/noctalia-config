@@ -15,6 +15,10 @@
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
                               assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
+Contrat JSON pour les scripts et JARVIS (docs/vpn-contrat.md, "contrat": 1) : etat-json et killswitch etat-json en JSON ;
+connecter UUID, deconnecter UUID, tout-deconnecter et killswitch activer|desactiver acceptent --json en dernier argument
+(succès : {"contrat", "ok": true, …} ; erreur : {"contrat", "ok": false, "code", "erreur"} sur la sortie standard, code de sortie 1).
+Alias : status --json = etat-json, connect = connecter, disconnect = deconnecter. Rappel : après une mise à jour, relance `nc-jarvis deployer`.
 Tout passe par nmcli, en arguments (jamais par une ligne de shell), et par l'UUID de la connexion. Ni root, ni pkexec.
 Importer refuse un fichier qui ferait exécuter quelque chose (up, down, route-up, script-security 2, plugin, PostUp…), un lien,
 un fichier trop gros (64 Kio). Les certificats donnés par un chemin relatif (ca, cert, key, tls-auth, tls-crypt…) sont lus depuis
@@ -84,6 +88,10 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
                               (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
+JSON contract for scripts and JARVIS (docs/vpn-contrat.md, "contrat": 1): etat-json and killswitch etat-json print JSON;
+connecter UUID, deconnecter UUID, tout-deconnecter and killswitch activer|desactiver accept --json as the last argument
+(success: {"contrat", "ok": true, …}; error: {"contrat", "ok": false, "code", "erreur"} on standard output, exit code 1).
+Aliases: status --json = etat-json, connect = connecter, disconnect = deconnecter. Reminder: after an update, run `nc-jarvis deployer` again.
 Everything goes through nmcli, as arguments (never a shell line), by connection UUID. No root, no pkexec.
 Import refuses a file that would run something (up, down, route-up, script-security 2, plugin, PostUp…), a link, a file that
 is too big (64 KiB). Certificates given by a relative path (ca, cert, key, tls-auth, tls-crypt…) are read from the .ovpn's
@@ -107,8 +115,15 @@ WG_EXEC = ("preup", "postup", "predown", "postdown")
 OVPN_FICHIERS = ("ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "tls-crypt-v2", "secret", "crl-verify", "extra-certs", "dh")
 
 
+CONTRAT = 1      # version du contrat JSON (docs/vpn-contrat.md) : change seulement si un champ disparaît ou change de sens
+
+
 class Echec(Exception):
-    pass
+    """Une erreur annoncée. `code` est stable (contrat JSON) : echec, uuid_invalide, nm_indisponible, inconnue,
+    echec_partiel, killswitch_coupe, killswitch_refuse."""
+    def __init__(self, message="", code="echec"):
+        super().__init__(message)
+        self.code = code
 
 
 def nmcli(args, delai=15):
@@ -164,19 +179,19 @@ def etat():
 def uuid_valide(u):
     if not isinstance(u, str) or not UUID.fullmatch(u):
         raise Echec(T("UUID invalide (forme attendue : 8-4-4-4-12 chiffres hexadécimaux).",
-                      "Invalid UUID (expected form: 8-4-4-4-12 hexadecimal digits)."))
+                      "Invalid UUID (expected form: 8-4-4-4-12 hexadecimal digits)."), "uuid_invalide")
     return u.lower()
 
 
 def connue(u):
     e = etat()
     if not e["disponible"]:
-        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."), "nm_indisponible")
     for c in e["connexions"]:
         if c["uuid"] == u:
             return c
     raise Echec(T("Cette connexion n'est pas un VPN ou un WireGuard connu de NetworkManager.",
-                  "This connection is not a VPN or WireGuard known to NetworkManager."))
+                  "This connection is not a VPN or WireGuard known to NetworkManager."), "inconnue")
 
 
 def court(texte, n=200):
@@ -189,7 +204,7 @@ def connecter(u):
     nettoyer_abandonnes()
     c = connue(u)
     if c["active"]:
-        return print(T(f"Déjà connecté : {c['nom']}", f"Already connected: {c['nom']}"))
+        return {"nom": c["nom"], "deja": True}
     # Mot de passe gardé par le trousseau (password-flags=1) : aucun agent de secrets ne tourne forcément (Hyprland sans nm-applet),
     # donc on le relit et on le donne à nmcli par un fichier temporaire (format « vpn.secrets.password:… »), jamais en argument
     agent = c["type"] == "vpn" and mot_de_passe_agent_owned(u)
@@ -216,35 +231,69 @@ def connecter(u):
                           f"Could not connect: {c['nom']} (secret not found in the keyring: import the profile again or unlock your keyring)"))
         msg = court(masquer(err, mdp)).replace(d or "\0", "")
         raise Echec(T(f"Connexion impossible : {c['nom']}", f"Could not connect: {c['nom']}") + (" (" + msg + ")" if msg else ""))
-    print(T(f"Connecté : {c['nom']}", f"Connected: {c['nom']}"))
+    return {"nom": c["nom"], "deja": False}
 
 
 def deconnecter(u):
     u = uuid_valide(u)
     c = connue(u)
     if not c["active"]:
-        return print(T(f"Déjà déconnecté : {c['nom']}", f"Already disconnected: {c['nom']}"))
+        return {"nom": c["nom"], "deja": True}
     code, _, err = nmcli(["connection", "down", "uuid", u], delai=60)
     if code != 0:
         raise Echec(T(f"Déconnexion impossible : {c['nom']}", f"Could not disconnect: {c['nom']}") + (" (" + court(err) + ")" if court(err) else ""))
-    print(T(f"Déconnecté : {c['nom']}", f"Disconnected: {c['nom']}"))
+    return {"nom": c["nom"], "deja": False}
 
 
 def tout_deconnecter():
+    """{"coupes": [connexions], "rates": [connexions]} ; Echec si NetworkManager manque."""
     e = etat()
     if not e["disponible"]:
-        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
-    if not e["actives"]:
-        return print(T("Aucun tunnel connecté.", "No tunnel connected."))
-    rates = 0
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."), "nm_indisponible")
+    coupes, rates = [], []
     for c in e["actives"]:
         code, _, _ = nmcli(["connection", "down", "uuid", c["uuid"]], delai=60)
-        if code != 0:
-            rates += 1
-            print(T(f"Déconnexion impossible : {c['nom']}", f"Could not disconnect: {c['nom']}"), file=sys.stderr)
-        else:
-            print(T(f"Déconnecté : {c['nom']}", f"Disconnected: {c['nom']}"))
-    if rates:
+        (rates if code != 0 else coupes).append(c)
+    return {"coupes": coupes, "rates": rates}
+
+
+# ── Sorties : texte pour le bureau, JSON (--json) pour JARVIS et les scripts (docs/vpn-contrat.md) ──────────────
+def sortie_json(d):
+    print(json.dumps(dict({"contrat": CONTRAT, "ok": True}, **d), ensure_ascii=False))
+
+
+def agir_connexion(cmd, u, en_json):
+    """connecter / deconnecter UUID : le même code pour le texte et le JSON."""
+    r = (connecter if cmd == "connecter" else deconnecter)(u)
+    actif = cmd == "connecter"
+    if en_json:
+        return sortie_json({"action": cmd, "uuid": uuid_valide(u), "nom": r["nom"], "actif": actif, "deja": r["deja"]})
+    if actif:
+        print(T(f"Déjà connecté : {r['nom']}", f"Already connected: {r['nom']}") if r["deja"]
+              else T(f"Connecté : {r['nom']}", f"Connected: {r['nom']}"))
+    else:
+        print(T(f"Déjà déconnecté : {r['nom']}", f"Already disconnected: {r['nom']}") if r["deja"]
+              else T(f"Déconnecté : {r['nom']}", f"Disconnected: {r['nom']}"))
+
+
+def agir_tout(en_json):
+    r = tout_deconnecter()
+    if en_json:
+        brut = lambda l: [{"uuid": c["uuid"], "nom": c["nom"]} for c in l]
+        d = {"action": "tout-deconnecter", "coupes": brut(r["coupes"]), "rates": brut(r["rates"])}
+        if r["rates"]:
+            print(json.dumps(dict({"contrat": CONTRAT, "ok": False, "code": "echec_partiel",
+                                   "erreur": T("Certains tunnels n'ont pas pu être coupés.", "Some tunnels could not be disconnected.")}, **d),
+                             ensure_ascii=False))
+            sys.exit(1)
+        return sortie_json(d)
+    if not r["coupes"] and not r["rates"]:
+        return print(T("Aucun tunnel connecté.", "No tunnel connected."))
+    for c in r["coupes"]:
+        print(T(f"Déconnecté : {c['nom']}", f"Disconnected: {c['nom']}"))
+    for c in r["rates"]:
+        print(T(f"Déconnexion impossible : {c['nom']}", f"Could not disconnect: {c['nom']}"), file=sys.stderr)
+    if r["rates"]:
         sys.exit(1)
 
 
@@ -1237,28 +1286,34 @@ def killswitch_etat():
     return out.strip() == "actif"
 
 
-def killswitch(a):
+def killswitch(a, en_json=False):
     if a == ["limites"]:
         for l in limites():
             print("- " + l)
     elif a == ["activer"]:
         if reglage("VPN_KILLSWITCH", "non") != "oui":
             raise Echec(T("Le kill switch est coupé dans les réglages (nc-reglages → Île → VPN : kill switch, VPN_KILLSWITCH).",
-                          "The kill switch is off in the settings (nc-settings → Island → VPN: kill switch, VPN_KILLSWITCH)."))
-        print(T("Limites du kill switch :", "Kill switch limits:"))
-        for l in limites():
-            print("- " + l)
+                          "The kill switch is off in the settings (nc-settings → Island → VPN: kill switch, VPN_KILLSWITCH)."), "killswitch_coupe")
+        if not en_json:
+            print(T("Limites du kill switch :", "Kill switch limits:"))
+            for l in limites():
+                print("- " + l)
         t = resoudre_tunnel()
         code, out, err = appeler_root(["activer", t["tunnel"]] + t["endpoints"])
         if code != 0:
-            raise Echec(T("Kill switch refusé : ", "Kill switch refused: ") + message_root(err))
+            raise Echec(T("Kill switch refusé : ", "Kill switch refused: ") + message_root(err), "killswitch_refuse")
+        if en_json:
+            return sortie_json({"action": "killswitch-activer", "actif": True})
         print(T("Kill switch actif : tout ce qui sort hors du tunnel %s est bloqué." % t["tunnel"],
                 "Kill switch on: everything leaving outside tunnel %s is blocked." % t["tunnel"]))
     elif a == ["desactiver"]:
         code, out, err = appeler_root(["desactiver"])
         if code != 0:
             raise Echec(T("Impossible de couper le kill switch : ", "Could not turn the kill switch off: ") + message_root(err)
-                        + T(" (en terminal : sudo nft delete table inet nc_vpn)", " (in a terminal: sudo nft delete table inet nc_vpn)"))
+                        + T(" (en terminal : sudo nft delete table inet nc_vpn)", " (in a terminal: sudo nft delete table inet nc_vpn)"),
+                        "killswitch_refuse")
+        if en_json:
+            return sortie_json({"action": "killswitch-desactiver", "actif": False})
         print(T("Kill switch coupé.", "Kill switch off."))
     elif a == ["etat"]:
         if not assistant_installe():
@@ -1279,35 +1334,44 @@ def killswitch(a):
                 resoudre_tunnel()
             except Echec as e:
                 refus = str(e)
-        print(json.dumps({"installe": installe, "voulu": reglage("VPN_KILLSWITCH", "non") == "oui", "actif": actif,
+        print(json.dumps({"contrat": CONTRAT, "installe": installe, "voulu": reglage("VPN_KILLSWITCH", "non") == "oui", "actif": actif,
                           "refus": refus, "limites": limites()}, ensure_ascii=False))
     else:
         print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
         sys.exit(2)
 
 
+ALIAS = {"status": "etat-json", "connect": "connecter", "disconnect": "deconnecter"}
+
+
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "aide", "help"):
         return print(T(__doc__.strip(), USAGE_EN))
+    # Alias de compatibilité : ils se réécrivent en commande d'origine, puis passent par le MÊME code (aucune logique en double)
+    if a[:2] == ["status", "--json"] and len(a) == 2:
+        a = ["etat-json"]
+    elif a[0] in ALIAS and a[0] != "status":
+        a = [ALIAS[a[0]]] + a[1:]
     cmd = a[0]
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, arret_propre)
+    en_json = a[-1:] == ["--json"] and cmd in ("connecter", "deconnecter", "tout-deconnecter", "killswitch")
+    if en_json:
+        a = a[:-1]
     try:
         if cmd == "etat-json" and len(a) == 1:
-            print(json.dumps(etat(), ensure_ascii=False))
+            print(json.dumps(dict({"contrat": CONTRAT}, **etat()), ensure_ascii=False))
         elif cmd == "liste" and len(a) == 1:
             e = etat()
             if not e["disponible"]:
                 return print(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
             for c in e["connexions"]:
                 print(("* " if c["active"] else "  ") + c["nom"] + "  [" + c["type"] + "]" + ("  " + c["interface"] if c["interface"] else "") + "  " + c["uuid"])
-        elif cmd == "connecter" and len(a) == 2:
-            connecter(a[1])
-        elif cmd == "deconnecter" and len(a) == 2:
-            deconnecter(a[1])
+        elif cmd in ("connecter", "deconnecter") and len(a) == 2:
+            agir_connexion(cmd, a[1], en_json)
         elif cmd == "tout-deconnecter" and len(a) == 1:
-            tout_deconnecter()
+            agir_tout(en_json)
         elif cmd == "importer" and len(a) == 2:
             importer(a[1])
         elif cmd == "indicateur" and a[1:] == ["--json"]:
@@ -1317,14 +1381,17 @@ def main():
         elif cmd == "mullvad" and len(a) >= 2:
             mullvad_agir(a[1:])
         elif cmd == "killswitch":
-            killswitch(a[1:])
+            killswitch(a[1:], en_json)
         elif cmd == "ip-publique" and len(a) == 1:
             ip_publique()
         else:
             print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
             sys.exit(2)
     except Echec as e:
-        print("nc-vpn : " + str(e), file=sys.stderr)
+        if en_json:      # le contrat : l'erreur est un objet JSON sur la sortie standard, code de sortie 1
+            print(json.dumps({"contrat": CONTRAT, "ok": False, "code": e.code, "erreur": str(e)}, ensure_ascii=False))
+        else:
+            print("nc-vpn : " + str(e), file=sys.stderr)
         sys.exit(1)
 
 
