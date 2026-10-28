@@ -58,7 +58,13 @@ function rendre()
   }))
 end
 
-function update() rendre() end
+-- Énergie : écran éteint (fichier nc-ecran-eteint de nc-ecran), plus aucune lecture ; à jour dès le rallumage
+local ETEINT = (noctalia.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/nc-ecran-eteint"
+
+function update()
+  if noctalia.fileExists(ETEINT) then return end
+  rendre()
+end
 
 noctalia.setUpdateInterval(5000)
 rendre()
