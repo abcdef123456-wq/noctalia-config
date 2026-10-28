@@ -264,13 +264,14 @@ Singleton {
     // ── Téléchargements du navigateur (fichiers .part de Firefox, .crdownload des Chrome) : taille, vitesse, fin ──
     property var telechargements: []          // { nom, taille, vitesse } (octets, octets/s)
     property string telechargeFini: ""
+    property string dossierTel: ""            // le dossier Téléchargements (vu par le relevé) : un clic sur « téléchargé » l'ouvre
     property var tailles: ({})
     readonly property string sansNom: Reglages.t("Téléchargement", "Download")    // fichier Chrome pas encore nommé
     readonly property bool telecharge: telechargements.length > 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"
     Process {
         id: lecteurTel
         command: ["sh", "-c", "d=$(xdg-user-dir DOWNLOAD 2>/dev/null); [ -d \"$d\" ] || d=$HOME/Downloads; "
-                  + "find \"$d\" -maxdepth 1 -type f \\( -name '*.part' -o -name '*.crdownload' \\) -printf '%s\\t%f\\n' 2>/dev/null; echo \"#$d\""]
+                  + "find \"$d\" -maxdepth 1 -type f \\( -name '*.part' -o -name '*.crdownload' -o -name '*.tmp' \\) -printf '%s\\t%f\\n' 2>/dev/null; echo \"#$d\""]
         stdout: StdioCollector {
             onStreamFinished: {
                 var l = [], vu = {}, dossier = ""
@@ -278,13 +279,14 @@ Singleton {
                     if (x.startsWith("#")) { dossier = x.slice(1); return }
                     var p = x.split("\t")
                     if (p.length < 2) return
-                    var nom = p[1].replace(/\.(part|crdownload)$/, "").replace(/^Unconfirmed \d+$/, etat.sansNom)
+                    var nom = p[1].replace(/\.(part|crdownload|tmp)$/, "").replace(/^Unconfirmed \d+$/, etat.sansNom)
                     var taille = parseInt(p[0]) || 0, avant = etat.tailles[p[1]]
                     vu[p[1]] = { taille: taille, nom: nom }
                     l.push({ nom: nom, taille: taille, vitesse: avant !== undefined ? Math.max(0, (taille - avant.taille) / 2) : 0 })
                 })
                 // Un fichier temporaire disparu : téléchargement fini (si le vrai fichier est là, pas annulé)
                 for (let k in etat.tailles) if (!vu[k] && etat.tailles[k].nom !== etat.sansNom) verifFin.verifier(dossier, etat.tailles[k].nom)
+                if (dossier.charAt(0) === "/") etat.dossierTel = dossier
                 etat.tailles = vu
                 etat.telechargements = l
             }
@@ -294,12 +296,32 @@ Singleton {
         id: verifFin
         property string nom: ""
         function verifier(dossier, n) { nom = n; command = ["test", "-s", dossier + "/" + n]; running = true }
-        onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non") { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
+        onExited: code => { if (code === 0 && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non" && !Partage.silence) { etat.telechargeFini = nom; etat.activite("telechargement-fini", 4500) } }
     }
-    // Toutes les 2 s pendant un téléchargement (vitesse) ; sinon un find du dossier Téléchargements toutes les 6 s, toutes
-    // les 30 s sur batterie (moins de réveils) ; suspendu écran éteint ou session verrouillée, relevé dès le réveil. Pas de FolderListModel : un paquet de plus sous Debian, absent des
-    // installations déjà faites, et l'île entière ne se chargerait plus
-    Timer { interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000); repeat: true; running: etat.ecranVu && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non"; triggeredOnStart: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    // Fin d'un téléchargement vue par inotify (inotifywait, du paquet inotify-tools, s'il est installé) : le dossier Téléchargements
+    // est surveillé, et le relevé ci-dessus ne se fait qu'à l'apparition ou à la disparition d'un .part, .crdownload ou .tmp. Au
+    // repos, plus aucun réveil. Sans inotifywait (ou s'il s'arrête), on revient au relevé régulier plus bas. Suspendu écran éteint
+    // ou session verrouillée (relevé dès le réveil), rien du tout si ILE_TELECHARGEMENTS=non.
+    property bool surveillance: false
+    property bool sansInotify: false
+    readonly property bool veilleTelVoulue: ecranVu && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non" && !sansInotify
+    Process {
+        id: veilleTel
+        command: ["sh", "-c", "d=$(xdg-user-dir DOWNLOAD 2>/dev/null); [ -d \"$d\" ] || d=$HOME/Downloads; [ -d \"$d\" ] || exit 3; "
+                  + "command -v inotifywait >/dev/null 2>&1 || exit 4; "
+                  + "exec inotifywait -m -q -e create -e moved_to -e moved_from -e delete -e close_write --format '%f' \"$d\""]
+        running: etat.veilleTelVoulue
+        onStarted: etat.surveillance = true
+        onExited: code => { etat.surveillance = false; if (etat.veilleTelVoulue && code !== 0) etat.sansInotify = true }
+        stdout: SplitParser { onRead: nom => { if (/\.(part|crdownload|tmp)$/.test(nom)) relectureTel.restart() } }
+    }
+    Timer { id: relectureTel; interval: 400; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
+    // Un clic sur « téléchargé » (pilule) : le dossier s'ouvre
+    function ouvrirTelechargements() { if (dossierTel.charAt(0) === "/") Quickshell.execDetached(["xdg-open", dossierTel]) }
+    // Toutes les 2 s pendant un téléchargement (vitesse) ; sans inotifywait, aussi un find du dossier Téléchargements toutes les 6 s,
+    // toutes les 30 s sur batterie (moins de réveils) ; suspendu écran éteint ou session verrouillée, relevé dès le réveil. Pas de
+    // FolderListModel : un paquet de plus sous Debian, absent des installations déjà faites, et l'île entière ne se chargerait plus
+    Timer { interval: etat.telechargements.length ? 2000 : (UPower.onBattery ? 30000 : 6000); repeat: true; running: etat.ecranVu && Reglages.val("ILE_TELECHARGEMENTS", "oui") !== "non" && (etat.telechargements.length > 0 || !etat.surveillance); triggeredOnStart: true; onTriggered: if (!lecteurTel.running) lecteurTel.running = true }
     function octets(n) {
         if (Reglages.en) return n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n >= 1e6 ? Math.round(n / 1e6) + " MB" : Math.round(n / 1e3) + " kB")
         return n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " Go" : (n >= 1e6 ? Math.round(n / 1e6) + " Mo" : Math.round(n / 1e3) + " ko")
@@ -508,24 +530,19 @@ Singleton {
         .map(n => ({ mac: n.name.split(".")[1].replace(/_/g, ":"), nom: n.description || n.nickname || Reglages.t("Casque", "Headphones") }))
     property var btConnus: []
     property string casqueNom: ""
-    property string casqueBatterie: ""
+    // Niveau donné par UPower (CasqueBatterie.qml) : vide tant que le casque ne le donne pas (ou si le réglage est coupé)
+    readonly property string casqueBatterie: { var n = casqueNom === "" ? 0 : CasqueBatterie.niveauPour(casqueNom); return n > 0 ? String(n) : "" }
     onAdressesBtChanged: {
         var avant = btConnus, macs = []
         for (let i = 0; i < adressesBt.length; i++) {
             let a = adressesBt[i]
             macs.push(a.mac)
             if (avant.indexOf(a.mac) < 0 && macs.indexOf(a.mac) === macs.length - 1 && pret) {
-                casqueNom = a.nom; casqueBatterie = ""
-                lireBatterieBt.command = ["sh", "-c", "sleep 1.5; bluetoothctl info " + a.mac + " | sed -n 's/.*Battery Percentage:.*(\\([0-9]*\\)).*/\\1/p' | head -1"]
-                lireBatterieBt.running = true
-                activite("casque", 4500)
+                casqueNom = a.nom
+                activite("casque", 3000)
             }
         }
         btConnus = macs
-    }
-    Process {
-        id: lireBatterieBt
-        stdout: StdioCollector { onStreamFinished: etat.casqueBatterie = text.trim() }
     }
 
     // ── Batterie faible : alerte à 20 % puis à 10 % (sur batterie), avec un bouton « Mode Économie » ──

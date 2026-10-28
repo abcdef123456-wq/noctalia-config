@@ -187,6 +187,21 @@ Item {
                 }
             }
 
+            // ── Mode jeu ou projection (Ne pas déranger automatique, Partage.qml) : même chose, sans le point du partage ──
+            Rectangle {
+                objectName: "nc-notifs-npd-auto"
+                visible: Partage.auto && !Partage.silence
+                width: parent.width; height: visible ? 56 : 0; radius: 16; color: Couleurs.carte
+                Ico { id: iconeNpd; x: 14; anchors.verticalCenter: parent.verticalCenter; nom: Partage.jeuAuto ? "sports_esports" : "cast"; taille: 20; color: Couleurs.accentClair }
+                Column {
+                    anchors.left: iconeNpd.right; anchors.leftMargin: 12; anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                    Texte { width: parent.width; text: Partage.jeuAuto ? Reglages.t("Mode jeu : pas de bannières", "Game Mode: no banners") : Reglages.t("Projection : pas de bannières", "Projection: no banners")
+                            font.weight: Font.DemiBold; font.pixelSize: 13; elide: Text.ElideRight }
+                    Texte { width: parent.width; secondaire: true; font.pixelSize: 11; elide: Text.ElideRight
+                            text: Reglages.t("Les notifications restent ici ; un groupe te dira combien sont arrivées.", "Notifications stay here; one summary will tell you how many arrived.") }
+                }
+            }
+
             // ── Résumé par l'IA ──
             Rectangle {
                 objectName: "nc-notifs-resume"

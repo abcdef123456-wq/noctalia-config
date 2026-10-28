@@ -122,14 +122,14 @@ class Page(unittest.TestCase):
                         e["chemin"] = str(images / (e["id"] + ".png"))
                         Path(e["chemin"]).write_bytes(PNG)
                 (images.parent / "presse.json").write_text(json.dumps(memo))
-            for nom in ("Presse.qml", "PressePapiers.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml"):
+            for nom in ("Presse.qml", "PressePapiers.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "PresseAction.qml", "PresseAnalyse.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k] !== undefined ? valeurs[k] : d}}')
             (root / "Partage.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool silence: false}')
-            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var hauteurs: ({}); property int fermetures: 0; function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
+            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool ecranVu: true; property var hauteurs: ({}); property int fermetures: 0; function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("PressePapiers", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("Presse", "PressePapiers", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage")))
+                ("singleton " if n in ("PressePapiers", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage", "PresseAnalyse") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("Presse", "PresseAction", "PresseAnalyse", "PressePapiers", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window

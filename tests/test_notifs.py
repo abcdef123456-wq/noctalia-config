@@ -31,13 +31,13 @@ class Notifications(unittest.TestCase):
             if memo is not None:
                 (root / ".local/state/nc/ile").mkdir(parents=True, mode=0o700)
                 (root / ".local/state/nc/ile/notifs.json").write_text(json.dumps(memo))
-            for nom in ("Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml"):
+            for nom in ("Notifs.qml", "PageNotifs.qml", "Connexion.qml", "Memo.qml", "Defilement.qml", "Texte.qml", "Ico.qml", "Couleurs.qml", "Partage.qml", "Projecteur.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {readonly property bool en: true; property var valeurs: ({}); function t(fr,en){return en} function val(k,d){return valeurs[k]!==undefined?valeurs[k]:d}}')
-            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property var maintenant: new Date(); property var minute: new Date(); property var hauteurs: ({}); property int fermetures: 0; property string ouvert: ""; property string ecranOuvert: ""; function basculer(e,c){ouvert="b"+c; ecranOuvert=e} function aller(n){ouvert+=n} function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
+            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool jeu: false; property bool ecranVu: true; property var maintenant: new Date(); property var minute: new Date(); property var hauteurs: ({}); property int fermetures: 0; property string ouvert: ""; property string ecranOuvert: ""; function basculer(e,c){ouvert="b"+c; ecranOuvert=e} function aller(n){ouvert+=n} function annoncerHauteur(n,h){var t=Object.assign({},hauteurs);t[n]=Math.round(h);hauteurs=t} function fermer(){fermetures++}}')
             (root / "qmldir").write_text("\n".join(
-                ("singleton " if n in ("Notifs", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                for n in ("PageNotifs", "Notifs", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage")))
+                ("singleton " if n in ("Notifs", "Memo", "Couleurs", "Reglages", "Etat", "Connexion", "Partage", "Projecteur") else "") + n + " 1.0 " + n + ".qml"
+                for n in ("PageNotifs", "Notifs", "Connexion", "Memo", "Defilement", "Texte", "Ico", "Couleurs", "Reglages", "Etat", "Partage", "Projecteur")))
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import QtQuick.Window

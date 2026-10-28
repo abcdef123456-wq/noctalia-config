@@ -214,6 +214,27 @@ l'île Quickshell.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Téléchargement terminé** (`nc-reglages` → Île, réglage `ILE_TELECHARGEMENTS`) : pendant un téléchargement du
+  navigateur (fichiers `.part`, `.crdownload` ou `.tmp` du dossier Téléchargements), la pilule montre le fichier, la taille
+  et la vitesse ; à la fin, « Fichier.pdf téléchargé », et un clic sur la pilule ouvre le dossier. Avec `inotifywait`
+  (paquet `inotify-tools`, facultatif), la fin est vue à l'instant et rien ne tourne au repos ; sans lui, l'île relève
+  le dossier toutes les 6 s (30 s sur batterie). Rien écran éteint, et rien pendant un partage d'écran.
+- **Actions rapides du presse-papiers** (`nc-reglages` → Île, réglage `ILE_PRESSE_ACTIONS`) : sous un texte copié, la page
+  Presse-papiers propose selon ce qu'il est : une couleur (`#rgb`, `#rrggbb`, `rgb(…)`) avec sa pastille et ses
+  conversions hex, rgb et hsl ; un lien http(s) avec « Ouvrir » ; un chemin qui existe avec « Ouvrir le dossier » ; un calcul
+  (`2+3*4`) avec son résultat par `qalc` s'il est installé ; un nombre avec ses écritures hexadécimale et binaire. Les
+  commandes sont lancées en argv, et seulement sur ton clic. Le calcul d'aperçu n'accepte que des chiffres et des opérateurs
+  (aucun taux de change n'est cherché en ligne), est borné à 2 s et ne se lance qu'à l'affichage de la carte. Tout est caché
+  pendant un partage d'écran.
+- **Ne pas déranger automatique** (`nc-reglages` → Notifications, réglage `NPD_AUTO`, activé par défaut) : la même retenue
+  que pour le partage d'écran pendant le mode jeu et pendant une projection (écran du PC dupliqué, ou éteint au profit d'un
+  projecteur ou d'un second écran avec `nc-ecrans`, Super + O ; étendre le bureau n'en fait pas partie). Les bannières
+  restent dans la page Notifications, et une seule notification dit à la fin combien sont arrivées. La projection est
+  lue par `hyprctl monitors all -j`, seulement quand Hyprland signale un écran qui change et jamais écran éteint. Ton
+  réglage Concentration n'est pas touché.
+- **Batterie des casques Bluetooth** (`nc-reglages` → Île, réglage `ILE_CASQUE_BATTERIE`) : à la connexion d'écouteurs ou
+  d'un casque qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau pendant 3 s, puis la page Son
+  l'affiche à côté du casque. Le niveau vient d'UPower (aucun processus, aucun sondage) ; rien si le casque ne le donne pas.
 - **Appel en cours** (`nc-reglages` → Île, réglage `ILE_APPEL`) : une appli enregistre le micro (Discord, navigateur,
   Zoom, Teams…) depuis plus de 2,5 s : la pilule montre l'icône de l'appli, la durée de l'appel et le niveau du micro ;
   la page Appel coupe ou réactive le micro (sur la source qu'utilise l'appli, sinon la source par défaut) et rappelle
