@@ -55,9 +55,9 @@ PanelWindow {
     // Recherche : le clavier va tout de suite à l'île ; sinon seulement quand on clique dedans
     WlrLayershell.keyboardFocus: recherche ? WlrKeyboardFocus.Exclusive : (ouverte ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
     readonly property bool recherche: ouverte && Etat.recherche
-    // Pilule cachée le temps que le lanceur (Code.qml) sort d'elle : plus rien à cliquer à sa place
+    // Pilule cachée le temps que le lanceur (Code.qml) sort d'elle : ni survol ni clic ne l'activent (le clic est avalé)
     readonly property bool pilCachee: Etat.lanceurFondu === modelData.name
-    mask: Region { item: fen.pilCachee ? bulle : (fen.recherche ? fondClic : ile); Region { item: bulle } }
+    mask: Region { item: fen.recherche ? fondClic : ile; Region { item: bulle } }
 
     // Clic hors de l'île : elle se referme. Activé un instant après l'ouverture : en recherche, l'île prend le clavier
     // en même temps, et Hyprland annulait la prise aussitôt (l'île se refermait seule)
@@ -342,7 +342,7 @@ PanelWindow {
 
         MouseArea {
             anchors.fill: parent
-            enabled: !fen.ouverte && !fen.banniere && !fen.enCarte
+            enabled: !fen.ouverte && !fen.banniere && !fen.enCarte && !fen.pilCachee
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: e => e.button === Qt.RightButton ? Etat.lecturePause()
                             : (Etat.enregistre ? Etat.arreterVideo()
