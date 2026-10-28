@@ -208,6 +208,12 @@ l'île Quickshell.
 - **Partage d'écran discret** (`nc-reglages` → Notifications) : pendant un partage d'écran (Discord, Meet, Teams…), les
   notifications n'apparaissent pas en bannière, même les urgentes. Elles restent dans la page Notifications, et la pilule
   montre « Partage ». Les aperçus du presse-papiers de l'île sont cachés pendant ce temps.
+- **Ne pas déranger automatique** (`nc-reglages` → Notifications, réglage `NPD_AUTO`, activé par défaut) : la même retenue
+  que pour le partage d'écran pendant le mode jeu et pendant une projection (écran du PC dupliqué, ou éteint au profit d'un
+  projecteur ou d'un second écran avec `nc-ecrans`, Super + O ; étendre le bureau n'en fait pas partie). Les bannières
+  restent dans la page Notifications, et une seule notification dit à la fin combien sont arrivées. La projection est
+  lue par `hyprctl monitors all -j`, seulement quand Hyprland signale un écran qui change et jamais écran éteint. Ton
+  réglage Concentration n'est pas touché.
 - **Batterie des casques Bluetooth** (`nc-reglages` → Île, réglage `ILE_CASQUE_BATTERIE`) : à la connexion d'écouteurs ou
   d'un casque qui donnent leur batterie (AirPods…), la pilule montre son nom et son niveau pendant 3 s, puis la page Son
   l'affiche à côté du casque. Le niveau vient d'UPower (aucun processus, aucun sondage) ; rien si le casque ne le donne pas.

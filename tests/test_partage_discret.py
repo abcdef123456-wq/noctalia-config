@@ -68,7 +68,7 @@ class Source(unittest.TestCase):
 
     def test_notifs_consulte_partage_avant_la_bulle(self):
         m = re.search(r"function montrer\(notif\) \{\n(.*?)\n", self.notifs)
-        self.assertIn("Partage.silence", m.group(1))
+        self.assertIn("Partage.retient", m.group(1))
 
     def test_ordre_des_modes(self):
         m = re.search(r"readonly property string mode: (.*?)\n    readonly property real largeur", self.compact, re.S)
@@ -453,10 +453,11 @@ class CanalHyprland(unittest.TestCase):
             socks = _faux_hyprland(hypr, [(1.0, "screencast>>1,0\nscreencastv2>>1,0,DP-1\n"), (3.0, "screencast>>0,0\n")], pret, fini)
             self.addCleanup(lambda: [s.close() for s in socks])
             self.addCleanup(fini.set)
-            for nom in ("Partage.qml",):
+            for nom in ("Partage.qml", "Projecteur.qml"):
                 shutil.copy2(QML / nom, root / nom)
             (root / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {function t(fr,en){return fr} function val(k,d){return d}}')
-            (root / "qmldir").write_text("singleton Partage 1.0 Partage.qml\nsingleton Reglages 1.0 Reglages.qml\n")
+            (root / "Etat.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool jeu: false; property bool ecranVu: true}')
+            (root / "qmldir").write_text("singleton Partage 1.0 Partage.qml\nsingleton Projecteur 1.0 Projecteur.qml\nsingleton Reglages 1.0 Reglages.qml\nsingleton Etat 1.0 Etat.qml\n")
             (root / "shell.qml").write_text(textwrap.dedent('''\
                 import QtQuick
                 import Quickshell

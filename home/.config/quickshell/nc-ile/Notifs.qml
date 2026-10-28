@@ -2,7 +2,7 @@ pragma Singleton
 // Notifications reçues par l'île (à la place de dunst et de celles de Noctalia) : chaque nouvelle notification sort de
 // la pilule en bannière quelques secondes (comme sur iPhone), puis reste dans l'historique (page « Notifications »).
 // Concentration : plus de bannières (sauf urgentes), l'historique se remplit quand même.
-// Écran partagé (Partage.qml) : plus de bannières du tout, urgentes comprises, sans toucher à la Concentration.
+// Écran partagé, mode jeu ou projection (Partage.qml) : plus de bannières du tout, urgentes comprises, sans toucher à la Concentration.
 // Lu / non lu (ouverte, répondue ou marquée), report (15 min, 1 h, demain : la notification revient en bannière à
 // l'heure dite, même après un redémarrage de l'île), applis masquées (1 h ou toujours : ni bannière ni carte), réponse
 // rapide quand l'appli le permet (sendInlineReply). Tout ça est gardé par Memo « notifs ».
@@ -121,14 +121,18 @@ Singleton {
     // Le réglage Concentration n'est jamais touché.
     Connections {
         target: Partage
-        function onSilenceChanged() {
-            if (!Partage.silence) return
+        function onRetientChanged() {
+            if (!Partage.retient) return
             if (n.enAttente) { Partage.retenir(n.enAttente); n.enAttente = null }
             n.banniere = null
         }
         // Vrai partage fini : une bulle courte avec le nombre seulement ; un clic ouvre la page Notifications
         function onTermine(nombre) {
             if (!n.concentration) n.annonce(Partage.texteFin(nombre))
+        }
+        // Fin du mode jeu ou de la projection (Ne pas déranger automatique) : le même groupe, avec le nombre seulement
+        function onTermineAuto(nombre, raison) {
+            if (!n.concentration) n.annonce(Partage.texteFinAuto(nombre, raison))
         }
         function onCourteFinie(notif) {
             if (n.encoreLa(notif) && (!n.concentration || notif.urgency === NotificationUrgency.Critical)) n.montrer(notif)
@@ -149,7 +153,7 @@ Singleton {
     Timer { id: reprise; interval: 3000; onTriggered: n.pauseBannieres(false) }
 
     function montrer(notif) {
-        if (Partage.silence) { Partage.retenir(notif); return }     // écran partagé : gardée dans l'historique, pas de bulle
+        if (Partage.retient) { Partage.retenir(notif); return }     // écran partagé, jeu ou projection : gardée dans l'historique, pas de bulle
         if (enPause) { enAttente = notif; return }
         banniere = notif
         fin.prolonge = false

@@ -38,6 +38,33 @@ Singleton {
     signal courteFinie(var notif)
     signal termine(int n)                 // vrai partage fini, n bulles retenues (n > 0)
 
+    // ── Ne pas déranger automatique (réglage NPD_AUTO) : même silence en mode jeu (Etat.jeu) et en projection (Projecteur.qml :
+    //    écran dupliqué, ou écran du PC éteint au profit d'un projecteur). Les bannières sont retenues de la même façon ; à la fin,
+    //    une seule notification dit combien sont arrivées. « silence » ne change pas (il cache aussi les aperçus : partage seulement).
+    readonly property bool reglageAuto: Reglages.val("NPD_AUTO", "oui") !== "non"
+    readonly property bool jeuAuto: reglageAuto && Etat.jeu
+    readonly property bool projAuto: reglageAuto && Projecteur.actif
+    readonly property bool auto: jeuAuto || projAuto
+    readonly property bool retient: silence || auto       // ce que Notifs.montrer consulte
+    property string raison: ""                            // jeu | projection : pour le texte de fin
+    signal termineAuto(int n, string raison)
+    onJeuAutoChanged: if (jeuAuto) raison = "jeu"
+    onProjAutoChanged: if (projAuto && !jeuAuto) raison = "projection"
+    onAutoChanged: {
+        if (auto) {
+            if (!silence) { compte = 0; retenue = null; vues = ({}) }
+        } else if (!silence) {
+            var n = compte
+            compte = 0; retenue = null; vues = ({})
+            if (n > 0 && reglageAuto) termineAuto(n, raison)
+        }
+    }
+    function texteFinAuto(n, pourquoi) {
+        var quand = pourquoi === "jeu" ? Reglages.t("le jeu", "gaming") : Reglages.t("la projection", "projection")
+        return n === 1 ? Reglages.t("1 notification reçue pendant " + quand, "1 notification received during " + quand)
+                       : Reglages.t(n + " notifications reçues pendant " + quand, n + " notifications received during " + quand)
+    }
+
     Connections {
         target: Hyprland
         function onRawEvent(event) { if (event.name === "screencast") p.evenement(event.data) }
@@ -79,10 +106,12 @@ Singleton {
         sessions = 0
         silence = false
         indicateur = false
+        seuilEchu = false
+        // Jeu ou projection toujours en cours : les bulles restent retenues, le groupe viendra à la fin de ce mode (onAutoChanged)
+        if (auto) return
         compte = 0
         retenue = null
         vues = ({})
-        seuilEchu = false
         if (vrai) { if (n > 0) termine(n) }
         else if (derniere) courteFinie(derniere)
     }
