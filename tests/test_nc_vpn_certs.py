@@ -54,12 +54,37 @@ class Certs(BaseVpn):
         self.assertEqual(os.listdir(self.r / "run"), [])
 
     def test_sous_dossier_et_point_point_dans_un_dossier_lisible(self):
-        self.ecrire("certs/ca.crt", PEM_CA)
-        self.ecrire("autre/cert.crt", PEM_CERT)
-        p = self.ecrire("vpn/labo.ovpn", BASE + "ca ../certs/ca.crt\ncert ../autre/../autre/cert.crt\n")
+        # sous-dossiers du profil permis (paquets des fournisseurs), « .. » qui reste dans le dossier du profil aussi
+        self.ecrire("vpn/certs/ca.crt", PEM_CA)
+        self.ecrire("vpn/autre/cert.crt", PEM_CERT)
+        p = self.ecrire("vpn/labo.ovpn", BASE + "ca certs/ca.crt\ncert certs/../autre/cert.crt\n")
         r = self.importer(p)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("<ca>\n" + PEM_CA, self.copie())
+        self.assertIn("<cert>\n" + PEM_CERT, self.copie())
+
+    def test_point_point_qui_sort_du_dossier_du_profil_refuse(self):
+        # un fichier téléchargé ne doit pas faire copier une clé de l'utilisateur prise ailleurs (« ../../.ssh/… »)
+        self.ecrire(".ssh/id_test", PEM_KEY)
+        self.ecrire("certs/ca.crt", PEM_CA)
+        (self.r / "home/telechargements/vpn/sous").mkdir(parents=True)          # existe : seul le confinement refuse
+        for i, ligne in enumerate(("key ../../.ssh/id_test", "ca ../certs/ca.crt", "ca sous/../../certs/ca.crt")):
+            p = self.ecrire(f"telechargements/vpn/p{i}.ovpn", BASE + ligne + "\n")
+            r = self.importer(p)
+            self.assertEqual(r.returncode, 1, ligne)
+            self.assertIn("sort du dossier du profil", r.stderr, ligne)
+        self.assertEqual(self.imports(), [])
+
+    def test_seules_les_etiquettes_pem_d_un_vpn_sont_permises(self):
+        for i, etiquette in enumerate(("OPENSSH PRIVATE KEY", "PGP PRIVATE KEY BLOCK", "SSH2 ENCRYPTED PRIVATE KEY", "FOO")):
+            self.ecrire(f"k{i}.key", f"-----BEGIN {etiquette}-----\nQUJD\n-----END {etiquette}-----\n")
+            r = self.importer(self.ecrire(f"e{i}.ovpn", BASE + f"key k{i}.key\n"))
+            self.assertEqual(r.returncode, 1, etiquette)
+            self.assertIn("n'est pas un certificat ni une clé de VPN", r.stderr, etiquette)
+        # fin qui ne correspond pas au début : refusé
+        self.ecrire("mel.key", "-----BEGIN PRIVATE KEY-----\nQUJD\n-----END CERTIFICATE-----\n")
+        self.assertEqual(self.importer(self.ecrire("mel.ovpn", BASE + "key mel.key\n")).returncode, 1)
+        self.assertEqual(self.imports(), [])
 
     def test_resultat_repasse_par_verifier(self):
         self.ecrire("ca.crt", PEM_CA)

@@ -406,20 +406,35 @@ DIRECTION = ("tls-auth", "secret")     # ces deux directives peuvent porter un s
 
 
 def chemin_relatif_sur(dossier, arg):
-    """Le chemin absolu de `arg` (relatif) depuis `dossier`, ou Echec. Chaque dossier traversé doit être lisible et
-    traversable par l'utilisateur, « .. » compris : pas de détour par un dossier qu'il ne pourrait pas ouvrir."""
-    cur = dossier
+    """Le chemin absolu de `arg` (relatif) depuis `dossier`, ou Echec. Confiné au dossier du .ovpn (sous-dossiers permis,
+    comme les paquets des fournisseurs) : un « ../../.ssh/… » d'un fichier téléchargé ferait copier une clé de l'utilisateur
+    dans la connexion ; vérifié à chaque « .. », avant toute lecture. Chaque dossier traversé doit être lisible et traversable,
+    et aucun lien n'est suivi."""
+    base = os.path.normpath(os.path.abspath(dossier))
+    sort = Echec(T(f"Le chemin « {arg} » sort du dossier du profil : refusé. Donne un chemin complet, ou mets le fichier à côté du profil.",
+                   f"The path \"{arg}\" leaves the profile's folder: refused. Give a full path, or put the file next to the profile."))
+    cur = base
     parties = [x for x in arg.split("/") if x not in ("", ".")]
     for i, part in enumerate(parties):
-        if not os.access(cur, os.R_OK | os.X_OK):
+        if part == ".." and cur == base:
+            raise sort
+        if not os.access(cur, os.R_OK | os.X_OK):        # « .. » compris : pas de détour par un dossier qu'il ne peut pas ouvrir
             raise Echec(T(f"Le chemin « {arg} » passe par un dossier que tu ne peux pas ouvrir.", f"The path \"{arg}\" goes through a folder you cannot open."))
         if part == "..":
             cur = os.path.dirname(cur)
-        else:
-            cur = os.path.join(cur, part)
-            if i < len(parties) - 1 and stat.S_ISLNK(os.lstat(cur).st_mode if os.path.lexists(cur) else 0):
-                raise Echec(T(f"Le chemin « {arg} » passe par un lien symbolique : refusé.", f"The path \"{arg}\" goes through a symbolic link: refused."))
+            continue
+        cur = os.path.join(cur, part)
+        if i < len(parties) - 1 and stat.S_ISLNK(os.lstat(cur).st_mode if os.path.lexists(cur) else 0):
+            raise Echec(T(f"Le chemin « {arg} » passe par un lien symbolique : refusé.", f"The path \"{arg}\" goes through a symbolic link: refused."))
+    if os.path.commonpath([base, cur]) != base:
+        raise sort
     return cur
+
+
+# Étiquettes PEM permises pour un VPN (certificats, clés, CRL, clé statique OpenVPN, paramètres DH) : une clé SSH ou PGP n'a
+# rien à faire dans un profil VPN et n'est jamais recopiée
+PEM_PERMIS = ("CERTIFICATE", "TRUSTED CERTIFICATE", "X509 CRL", "PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY",
+              "ENCRYPTED PRIVATE KEY", "OpenVPN Static key V1", "DH PARAMETERS")
 
 
 def lire_pem(mot, chemin):
@@ -451,19 +466,25 @@ def lire_pem(mot, chemin):
         raise pas_pem
     if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", texte):
         raise pas_pem
-    sortie, dedans = [], False
+    sortie, dedans, etiquette = [], False, ""
     for brute in texte.splitlines():
         ligne = brute.strip()
-        if re.fullmatch(r"-----BEGIN [A-Za-z0-9 ]+-----", ligne):
+        m = re.fullmatch(r"-----BEGIN ([A-Za-z0-9 ]+)-----", ligne)
+        if m:
             if dedans:
                 raise pas_pem
+            if m.group(1) not in PEM_PERMIS:
+                raise Echec(T(f"Le fichier « {mot} » contient « {m.group(1)[:40]} », qui n'est pas un certificat ni une clé de VPN : refusé.",
+                              f"The \"{mot}\" file contains \"{m.group(1)[:40]}\", which is not a VPN certificate or key: refused."))
+            etiquette = m.group(1)
             dedans = True
         if dedans:
             if ligne.startswith("<"):                 # ne jamais laisser le fichier fermer notre bloc et ajouter des directives
                 raise pas_pem
             sortie.append(ligne)
-        if re.fullmatch(r"-----END [A-Za-z0-9 ]+-----", ligne):
-            if not dedans:
+        m = re.fullmatch(r"-----END ([A-Za-z0-9 ]+)-----", ligne)
+        if m:
+            if not dedans or m.group(1) != etiquette:
                 raise pas_pem
             dedans = False
     if dedans or not sortie:
@@ -549,7 +570,7 @@ def lire_secret(uuid):
         mdp = r.stdout.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    if re.search(r"[\x00-\x1f\x7f]", mdp):       # le passwd-file est d'une ligne par secret : \n, \r ou NUL en injecteraient une autre
+    if re.search("[\x00-\x1f\x7f\x85\u2028\u2029]", mdp):       # le passwd-file est d'une ligne par secret : \n, \r ou NUL en injecteraient une autre
         raise Echec(T("Le mot de passe du trousseau contient un saut de ligne ou un caractère de contrôle : connexion refusée. Réimporte le profil.",
                       "The keyring password contains a line break or a control character: connection refused. Import the profile again."))
     return mdp
