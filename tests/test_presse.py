@@ -89,7 +89,7 @@ class Capture(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class Page(unittest.TestCase):
-    def executer(self, scenario, memo=None, lignes=(), fichiers=(), wl_paste=None):
+    def executer(self, scenario, memo=None, lignes=(), fichiers=(), wl_paste=None, attendre_images_vides=False):
         with tempfile.TemporaryDirectory(prefix="nc-presse-") as d:
             root = Path(d)
             (root / "run").mkdir(mode=0o700)
@@ -166,6 +166,13 @@ class Page(unittest.TestCase):
             self.assertEqual(r.returncode, 0, sortie)
             for e in ("ReferenceError", "TypeError", "Cannot assign", "Binding loop", "is not a type"):
                 self.assertNotIn(e, sortie)
+            if attendre_images_vides:
+                # Les fichiers d'images sont supprimés par un nc-ile-memo lancé en arrière-plan (execDetached) : il peut finir
+                # après la sortie de qs. On attend la condition (dossier vide, 10 s au plus), pas un délai fixe.
+                import time
+                fin = time.monotonic() + 10
+                while any(images.iterdir()) and time.monotonic() < fin:
+                    time.sleep(0.05)
             f = root / ".local/state/nc/ile/presse.json"
             copies = root / "copies"
             return dict(memo=json.loads(f.read_text()) if f.exists() else None,
@@ -180,6 +187,8 @@ class Page(unittest.TestCase):
 if (etape === 0) { creer(); etape++; return }
 if (!PressePapiers.prete) return
 if (etape === 1 && PressePapiers.liste.length < 62) return
+// La hauteur de la page n'est annoncée qu'après sa mise en page : sous charge, elle arrive plus tard (on attend, la limite de 12 s reste)
+if (etape === 1 && !(Etat.hauteurs.presse > 200)) return
 if (etape === 1) {
     verifier(PressePapiers.liste.length === 62, "bornes : " + PressePapiers.liste.length)
     var textes = PressePapiers.liste.filter(e => e.genre === "texte"), images = PressePapiers.liste.filter(e => e.genre === "image")
@@ -302,8 +311,9 @@ Qt.quit()
 if (etape === 0) { creer(); etape++; return }
 if (!PressePapiers.prete) return
 verifier(PressePapiers.liste.map(e => e.id).join() === "vieuxepingle,recent", "7 jours : " + PressePapiers.liste.map(e => e.id).join())
-Qt.quit()
-''', memo=memo)
+// Quitter seulement quand l'écriture de l'historique est finie (sinon qs sort avant que presse.json soit réécrit)
+if (Memo.enAttente === 0 && Memo.courant === null) Qt.quit()
+''', memo=memo, attendre_images_vides=True)
         self.assertEqual([e["id"] for e in r["memo"]["entrees"]], ["recent", "vieuxepingle"] if r["memo"]["entrees"][0]["id"] == "recent" else ["vieuxepingle", "recent"])
         self.assertEqual(r["images"], [], "le fichier de l'image expirée est supprimé")
         # « jamais » : rien n'expire ; 1 jour : le récent (12 h) reste ; 30 jours : l'image de 40 jours part, le texte de 10 jours reste
