@@ -56,6 +56,12 @@ class Serveur(BaseHTTPRequestHandler):
             pass
 
 
+# Garde-fou contre un blocage, pas une mesure : un appel dure ~0,5 s (deux démarrages de Python et la compilation
+# de nc-ia, 5 500 lignes, à chaque appel puisque le dossier de test est neuf). Aucune attente fixe dans nc-assistant ;
+# sur un exécuteur CI partagé (openSUSE a dépassé 10 s une fois), un à-coup suffit : délai large en CI seulement.
+DELAI_CLI = 60 if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS") else 10
+
+
 class Assistant(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -102,7 +108,7 @@ class Assistant(unittest.TestCase):
 
     def cli(self, *args, nom="nc-assistant", input=None):
         return subprocess.run([sys.executable, str(self.bin / nom), *args], input=input, env=self.env,
-                              text=True, capture_output=True, timeout=10)
+                              text=True, capture_output=True, timeout=DELAI_CLI)
 
     def etat(self):
         return json.loads((self.run / "nc-claude/etat.json").read_text())
