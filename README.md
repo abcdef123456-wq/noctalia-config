@@ -296,8 +296,9 @@ l'île Quickshell.
   CLI), le tunnel de NetworkManager (connexion « ProtonVPN SERVEUR ») ; la CLI n'est lue que quand tu ouvres l'onglet Proton, jamais en
   arrière-plan, et jamais `protonvpn status` (il réappliquerait le kill switch de Proton) ; `connecter FR` lance `protonvpn connect --country FR` et `deconnecter` lance `protonvpn
   disconnect` (refusé si le kill switch est actif). La CLI refuse de tourner avec l'application Proton ouverte : l'île te dit alors de
-  fermer l'application (nous ne la fermons jamais). `login` ouvre l'application Proton si elle est installée, sinon une fenêtre kitty
-  où tu tapes ton nom de compte, puis Proton te demande lui-même le mot de passe (jamais chez nous). Sans la CLI mais avec l'application,
+  fermer l'application (nous ne la fermons jamais). `login` (le bouton « Se connecter au compte » ferme d'abord la fenêtre VPN, qui sinon avalerait ta saisie) ouvre l'application Proton si
+  elle est installée, sinon une fenêtre kitty où tu tapes ton nom de compte, puis Proton te demande lui-même le mot de passe (jamais chez nous ; une clé de
+  sécurité doit être sous la main, ou connecte-toi par l'application) ; le trousseau de clés peut demander son déverrouillage. Sans la CLI mais avec l'application,
   Proton reste « piloté dans son application » (bouton « Ouvrir Proton VPN »). Mullvad : « compte connecté » vient d'un
   `mullvad account get` dont la sortie (qui porte le numéro) est lue en mémoire puis jetée, les pays de `mullvad relay list` (sinon la
   liste ISO intégrée), `login` ouvre l'appli ou dit de lancer `mullvad account login` dans un terminal. Le nom d'un client installé ne fait jamais office de fournisseur connecté : la pilule ne

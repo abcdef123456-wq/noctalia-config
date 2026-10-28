@@ -591,8 +591,10 @@ class HorsEcran(unittest.TestCase):
                 if (etape === 2) { if (ticks < 2) return
                     var tp = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
                     verifier(tp.indexOf("Pas de compte Proton connecté.") >= 0 && tp.indexOf("bientôt") < 0, "message de nc-vpn : " + tp)
+                    fen.fermer.connect(function () { fermee = true })
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-fournisseur-login")); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 6) return
+                    verifier(fermee, "le clic sur « Se connecter au compte » ferme la fenêtre (elle garde sinon tout le clavier)")
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
                 if (etape === 4) { if (ticks < 2) return
                     var p = tous(fen.contentItem, "nc-vpn-pays")
@@ -625,8 +627,10 @@ class HorsEcran(unittest.TestCase):
                     verifier(lg === null || !lg.visible, "pas de faux bouton de compte")
                     var b = trouver(fen.contentItem, "nc-vpn-fournisseur-ouvrir")
                     verifier(b !== null && b.visible && textes(b).join("").indexOf("Ouvrir Proton VPN") >= 0, "bouton Ouvrir Proton VPN")
+                    fen.fermer.connect(function () { fermee = true })
                     t.mouseClick(b); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 6) return
+                    verifier(fermee, "« Ouvrir Proton VPN » ferme aussi la fenêtre")
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
                 if (etape === 4) { if (ticks < 2) return
                     var tn = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
@@ -660,12 +664,18 @@ class HorsEcran(unittest.TestCase):
                     verifier(p.length === 2 && textes(p[0]).indexOf("Connecté") >= 0 && textes(p[1]).indexOf("Changer") >= 0, "pays Proton : " + p.length)
                     t.mouseClick(p[1]); etape++; ticks = 0; return }
                 if (etape === 3) { if (ticks < 6) return
+                    var ligne = trouver(fen.contentItem, "nc-vpn-actif")
+                    verifier(ligne !== null, "la ligne du tunnel ProtonVPN")
+                    t.mouseClick(trouver(ligne, "nc-vpn-bouton")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 6) return
                     t.mouseClick(trouver(fen.contentItem, "nc-vpn-tout")); etape++; ticks = 0; return }
-                if (etape === 4) { if (ticks < 8) return; console.log("FINI"); Qt.exit(0) }
+                if (etape === 5) { if (ticks < 12) return; console.log("FINI"); Qt.exit(0) }
             } }
         ''', etats={0: etat})
-        act = [a for a in appels if a[:1] == ["fournisseur"]]
-        self.assertEqual(act, [["fournisseur", "proton", "connecter", "DE"], ["fournisseur", "proton", "deconnecter"]])
+        act = [a for a in appels if a[:1] in (["fournisseur"], ["tout-deconnecter"], ["deconnecter"])]
+        self.assertEqual(act, [["fournisseur", "proton", "connecter", "DE"], ["fournisseur", "proton", "deconnecter"],
+                               ["fournisseur", "proton", "deconnecter"], ["tout-deconnecter"]],
+                         "Déconnecter (ligne ProtonVPN) puis Tout déconnecter : la CLI Proton d'abord, nmcli ensuite, jamais nmcli seul")
 
     def test_proton_verification_explicite_une_fois_et_relire_pendant_une_action_ne_lance_rien(self):
         fl = [dict(id="proton", nom="Proton VPN", etat="pret", message="", pays=[dict(code="fr", nom="France")], pays_actif="", connecte=False,

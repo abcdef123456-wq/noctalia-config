@@ -124,7 +124,7 @@ Rectangle {
                     nom: c.nomDe(modelData, index)
                     detail: c.detailDe(modelData)
                     monte: true
-                    occupe: VpnEtat.cible === modelData.id || VpnEtat.cible === "tout" || (modelData.mullvad && VpnEtat.cible === "mullvad")
+                    occupe: VpnEtat.cible === modelData.id || VpnEtat.cible === "tout" || (modelData.externe && VpnEtat.cible === "ext:" + modelData.externe) || (modelData.mullvad && VpnEtat.cible === "mullvad")
                     onClic: c.deconnecter(modelData)
                 }
             }

@@ -72,7 +72,9 @@ Singleton {
                                     pays: typeof c.pays === "string" && /^[A-Z]{2}$/.test(c.pays) ? c.pays : "",
                                     serveur: String(c.nom || ""),
                                     interface: typeof c.interface === "string" && /^[A-Za-z0-9_.-]{1,15}$/.test(c.interface) && c.interface !== ".." ? c.interface : "",
-                                    depuis: typeof c.depuis === "number" ? c.depuis : 0, mullvad: false }))
+                                    depuis: typeof c.depuis === "number" ? c.depuis : 0, mullvad: false,
+                                    // Proton prêt par sa CLI : « Déconnecter » passe par `protonvpn disconnect`, pas par nmcli derrière son dos
+                                    externe: c.fournisseur === "Proton VPN" && externe.proton && externe.proton.etat === "pret" ? "proton" : "" }))
         for (var id of ["nord", "proton"]) {
             var x = externe[id]
             // Proton : sa connexion « ProtonVPN … » est déjà dans les tunnels de NetworkManager ci-dessus (pas de doublon)
@@ -360,26 +362,20 @@ Singleton {
     }
     function connecter(uuid) { lancer(["connecter", uuid], uuid) }
     function deconnecter(uuid) { lancer(["deconnecter", uuid], uuid) }
-    // Tout couper : les tunnels de NetworkManager, puis l'application Mullvad si elle est montée, puis Nord et Proton prêts (par leur CLI ;
-    // Proton qui se pilote dans son appli n'est jamais ouvert pour ça : son tunnel NetworkManager est déjà coupé plus haut)
+    // Tout couper, dans l'ordre : Proton prêt (sa CLI), les tunnels de NetworkManager, Mullvad, Nord prêt
     function toutDeconnecter() {
         if (agir.running) return
-        if (actives.length === 0) {
-            var file0 = []
-            if (mullvad.connecte) file0.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
-            for (var i0 of ["nord", "proton"])
-                if (externe[i0] && externe[i0].connecte && externe[i0].etat === "pret") file0.push({ args: ["fournisseur", i0, "deconnecter"], cible: "ext:" + i0, toujours: true })
-            if (file0.length === 0) return
-            suites = file0.slice(1)
-            lancer(file0[0].args, file0[0].cible)
-            return
-        }
         var file = []
+        // Proton prêt : d'abord sa CLI (`protonvpn disconnect`), puis les tunnels de NetworkManager, puis Mullvad et Nord prêts
+        if (externe.proton && externe.proton.connecte && externe.proton.etat === "pret")
+            file.push({ args: ["fournisseur", "proton", "deconnecter"], cible: "ext:proton", toujours: true })
+        if (actives.length > 0) file.push({ args: ["tout-deconnecter"], cible: "tout", toujours: true })
         if (mullvad.connecte) file.push({ args: ["mullvad", "deconnecter"], cible: "mullvad", toujours: true })
-        for (var id of ["nord", "proton"])
-            if (externe[id] && externe[id].connecte && externe[id].etat === "pret") file.push({ args: ["fournisseur", id, "deconnecter"], cible: "ext:" + id, toujours: true })
-        suites = file
-        lancer(["tout-deconnecter"], "tout")
+        if (externe.nord && externe.nord.connecte && externe.nord.etat === "pret")
+            file.push({ args: ["fournisseur", "nord", "deconnecter"], cible: "ext:nord", toujours: true })
+        if (file.length === 0) return
+        suites = file.slice(1)
+        lancer(file[0].args, file[0].cible)
     }
     function killswitchActiver() { if (!masque) lancer(["killswitch", "activer"], "killswitch") }
     function killswitchDesactiver() { if (!masque) lancer(["killswitch", "desactiver"], "killswitch") }
@@ -390,7 +386,25 @@ Singleton {
         if ((id === "nord" || id === "proton") && /^[A-Z]{2}$/.test(cc)) lancer(["fournisseur", id, "connecter", cc], "ext:" + id)
     }
     function fournisseurDeconnecter(id) { if (id === "nord" || id === "proton") lancer(["fournisseur", id, "deconnecter"], "ext:" + id) }
-    function fournisseurLogin(id) { if (id === "nord" || id === "proton") lancer(["fournisseur", id, "login"], "ext:" + id) }
+    // Connexion au compte (Nord, Proton, Mullvad) : un Process à part, pas `agir` (une fenêtre kitty ouverte pendant des minutes ne grise pas les
+    // autres actions VPN). La fenêtre de l'île se ferme avant (Vpn.qml connecterCompte) : le processus vit ici, dans le singleton.
+    property string compteId: ""
+    function fournisseurLogin(id) {
+        if ((id !== "nord" && id !== "proton" && id !== "mullvad") || connexionCompte.running) return
+        compteId = id
+        connexionCompte.command = [bin + "nc-vpn", "fournisseur", id, "login"]
+        connexionCompte.running = true
+    }
+    Process {
+        id: connexionCompte
+        stderr: StdioCollector { id: erreurCompte }
+        onExited: code => {
+            var qui = v.compteId; v.compteId = ""
+            if (code !== 0) v.notifier(erreurCompte.text.trim().split("\n")[0] || Reglages.t("Connexion au compte impossible.", "Couldn't open the account sign-in."))
+            v.relire()
+            if (qui === "proton") v.verifierProton(true)      // le compte vient peut-être de changer : nouvelle vérification explicite
+        }
+    }
     // Un pays de la liste : choisir le pays puis connecter (Connecter, ou Changer si Mullvad est déjà monté)
     function mullvadVers(cc) {
         if (!/^[A-Z]{2}$/.test(cc) || agir.running) return

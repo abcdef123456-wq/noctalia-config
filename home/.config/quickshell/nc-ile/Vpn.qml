@@ -38,6 +38,9 @@ PanelWindow {
 
     function quitter() { vpn.fermer() }
     function importer() { VpnEtat.choisirFichier(); quitter() }
+    // Connexion au compte d'un fournisseur : un terminal ou une application s'ouvre PAR-DESSUS ; cette fenêtre garde tout le clavier
+    // (focus exclusif) et avalerait ce qu'on y tape (nom de compte, mot de passe) : elle se ferme d'abord, comme pour l'import
+    function connecterCompte(id) { VpnEtat.fournisseurLogin(id); quitter() }
     Component.onCompleted: { entree = true; VpnEtat.panneauOuvert = true }
     Component.onDestruction: VpnEtat.panneauOuvert = false
 
@@ -145,6 +148,7 @@ PanelWindow {
                 visible: VpnEtat.lu
                 filtre: filtres.filtre
                 recherche: filtres.recherche
+                onConnecterCompte: id => vpn.connecterCompte(id)
                 maxHauteur: Math.max(170, Math.min(340, Math.round(vpn.hauteurEcran * 0.3)))
             }
 

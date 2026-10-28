@@ -9,6 +9,7 @@ import QtQuick
 
 Item {
     id: l
+    signal connecterCompte(string id)
     property string filtre: "tous"
     property string recherche: ""
     property real maxHauteur: 300
@@ -58,6 +59,7 @@ Item {
         objectName: "nc-vpn-carte-fournisseur"
         visible: l.carteEtat
         width: parent.width
+        onConnecterCompte: id => l.connecterCompte(id)
         modele: l.fiche || ({ fournisseur: "", etat: "absent", bientot: false })
     }
     Texte {

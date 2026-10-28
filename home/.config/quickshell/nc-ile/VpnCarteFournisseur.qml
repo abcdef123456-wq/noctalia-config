@@ -7,6 +7,7 @@ import QtQuick
 
 Rectangle {
     id: k
+    signal connecterCompte(string id)             // « Se connecter au compte » / « Ouvrir » : la fenêtre se ferme et lance le login (Vpn.qml)
     property var modele: ({ fournisseur: "", etat: "absent", bientot: false, peutLogin: false, message: "" })
     readonly property string etatTexte: modele.bientot ? "bientot" : modele.etat
     readonly property string titre: {
@@ -55,7 +56,7 @@ Rectangle {
                 color: zoneLogin.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
                 opacity: VpnEtat.cible === "" ? 1 : 0.6
                 Texte { id: libelleLogin; anchors.centerIn: parent; text: Reglages.t("Se connecter au compte", "Log in to the account"); font.pixelSize: 12; font.weight: Font.DemiBold }
-                MouseArea { id: zoneLogin; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: VpnEtat.fournisseurLogin(k.modele.id) }
+                MouseArea { id: zoneLogin; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: k.connecterCompte(k.modele.id) }
             }
             Texte { objectName: "nc-vpn-fournisseur-message"; width: parent.width; text: k.message; wrapMode: Text.Wrap; elide: Text.ElideNone
                     secondaire: true; font.pixelSize: 12 }
@@ -69,7 +70,7 @@ Rectangle {
                 Accessible.name: libelleOuvrir.text
                 Texte { id: libelleOuvrir; anchors.centerIn: parent; text: Reglages.t("Ouvrir " + k.modele.fournisseur, "Open " + k.modele.fournisseur)
                         font.pixelSize: 12; font.weight: Font.DemiBold }
-                MouseArea { id: zoneOuvrir; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: VpnEtat.fournisseurLogin(k.modele.id) }
+                MouseArea { id: zoneOuvrir; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: k.connecterCompte(k.modele.id) }
             }
         }
     }
