@@ -180,7 +180,7 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(appels[0], "nc-ia disponible")
         self.assertEqual(appels[1], "top -b -n 2 -d 1 -w 200 -o %CPU")
         self.assertEqual(appels[2], "nc-energie liste --json")
-        self.assertEqual(appels[3], "nc-ia demander --usage texte --flux -")
+        self.assertEqual(appels[3], "nc-ia demander --usage texte --flux --sans-outils --local -")
         self.assertEqual(len(appels), 4)
         envoye = (root / "stdin.txt").read_text()
         self.assertIn("93 °C", envoye)

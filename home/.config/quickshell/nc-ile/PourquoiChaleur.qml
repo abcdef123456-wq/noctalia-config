@@ -118,7 +118,7 @@ Module {
         }
         onExited: { if (p.etape === "energie") p.lancerIA() }
     }
-    DemandeIA { id: dem; delai: 60000 }
+    DemandeIA { id: dem; delai: 60000; local: true }      // l'IA de ce PC si elle existe, sans l'imposer
 
     Column {
         id: col
