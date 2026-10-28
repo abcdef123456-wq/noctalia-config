@@ -29,6 +29,11 @@
    n'a ni batterie ni rétroéclairage, et « Écran en Économie » n'y apparaît pas). Un test qui veut un autre /sys
    met le sien dans son environnement.
 
+6. La langue est celle de la CI : anglais (LANG=C.UTF-8, sans NC_LANGUE, LC_ALL, LC_MESSAGES ni LANGUAGE). Sur un PC en
+   français, un test qui cherchait une phrase française sans fixer la langue passait ici et cassait en CI (deux fois le
+   2026-10-28). Un test qui vérifie un texte français pose lui-même NC_LANGUE=fr (ou LANGUE=fr dans son reglages.conf,
+   ou module.EN = False) : les versions françaises restent testées (île, nc-reglages, nc-ia…).
+
 Le dossier temporaire est effacé à la fin des tests."""
 import atexit
 import os
@@ -116,4 +121,7 @@ if not os.environ.get("NC_TEST_ISOLE"):
         for _f, _v in _fichiers.items():
             (_sys / _d / _f).write_text(_v + "\n")
     os.environ.setdefault("NC_SYSFS", str(_sys))
+    for _cle in ("NC_LANGUE", "LC_ALL", "LC_MESSAGES", "LANGUAGE"):
+        os.environ.pop(_cle, None)
+    os.environ["LANG"] = "C.UTF-8"
     os.environ["NC_TEST_ISOLE"] = str(_racine)
