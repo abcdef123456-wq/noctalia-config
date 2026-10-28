@@ -380,7 +380,7 @@ PanelWindow {
                 id: aide
                 objectName: "nc-code-aide"
                 visible: code.debutant && code.mode === ""
-                x: 20; y: parent.height - height; width: liste.width + 40; height: 26
+                x: liste.x + 12; y: parent.height - height; width: liste.width - 24; height: 26     // bornée à la colonne de gauche (elide)
                 secondaire: true; font.pixelSize: 11; elide: Text.ElideRight
                 text: Reglages.t("Premier projet ? Choisis-en un, puis Entrée : Neovim, ton agent IA, lazygit et un terminal s'ouvrent.",
                                  "First project? Pick one, then Enter: Neovim, your AI agent, lazygit and a terminal open.")
@@ -446,27 +446,39 @@ PanelWindow {
             id: pied
             anchors.bottom: parent.bottom; width: parent.width; height: 48
             Rectangle { x: 16; y: 0; width: parent.width - 32; height: 1; color: Qt.alpha(Couleurs.texte, 0.08) }
+            // Aides des touches à gauche : la largeur est bornée (pied moins les actions) ; quand elle manque, les aides les moins
+            // utiles disparaissent une à une (« ouvrir quand même », puis « Alt ↵ », puis « Tab »), jamais coupées au milieu.
+            // « ↵ ouvrir » et « Échap fermer » restent toujours. Si même ça ne tient pas, les actions de droite passent en icône seule.
+            readonly property real largeurActionsPleine: {
+                var l = [actFichiers, actCopier, actCloner, actGitHub], t = 0, n = 0
+                for (var i = 0; i < l.length; i++) if (l[i].visible) { t += l[i].largeurPleine; n++ }
+                return t + Math.max(0, n - 1) * 6
+            }
+            readonly property real aidesMini: aOuvrir.implicitWidth + aEchap.implicitWidth + 14
+            readonly property bool actionsCompactes: width - 34 - largeurActionsPleine - 20 < aidesMini
+            readonly property real placeAides: Math.max(0, width - 20 - actions.width - 14 - 20)
+            function tient(l) { var t = 0; for (var i = 0; i < l.length; i++) t += l[i].implicitWidth; return t + (l.length - 1) * 14 <= placeAides }
+            readonly property bool aideForce: tient([aOuvrir, aTab, aNvim, aForce, aEchap])
+            readonly property bool aideNvim: aideForce || tient([aOuvrir, aTab, aNvim, aEchap])
+            readonly property bool aideTab: aideNvim || tient([aOuvrir, aTab, aEchap])
             Row {
-                x: 20; anchors.verticalCenter: parent.verticalCenter; spacing: 14
-                Repeater {
-                    model: [["↵", Reglages.t("ouvrir", "open")], ["Tab", Reglages.t("agent", "agent")], ["Alt ↵", "Neovim"], ["Ctrl ↵", Reglages.t("ouvrir quand même", "open anyway")], [Reglages.t("Échap", "Esc"), Reglages.t("fermer", "close")]]
-                    Row {
-                        spacing: 6
-                        Rectangle {
-                            width: libTouche.implicitWidth + 12; height: 20; radius: 6
-                            color: Qt.alpha(Couleurs.carte, 0.7); border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.1)
-                            Texte { id: libTouche; anchors.centerIn: parent; text: modelData[0]; font.pixelSize: 10; color: code.texteSecondaire }
-                        }
-                        Texte { height: 20; text: modelData[1]; font.pixelSize: 11; color: code.texteSecondaire }
-                    }
-                }
+                id: aides
+                objectName: "nc-code-aides"
+                x: 20; width: pied.placeAides; height: parent.height; spacing: 14; clip: true
+                CodeAide { id: aOuvrir; objectName: "nc-code-aide-ouvrir"; anchors.verticalCenter: parent.verticalCenter; touche: "↵"; libelle: Reglages.t("ouvrir", "open") }
+                CodeAide { id: aTab; objectName: "nc-code-aide-tab"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideTab; touche: "Tab"; libelle: Reglages.t("agent", "agent") }
+                CodeAide { id: aNvim; objectName: "nc-code-aide-nvim"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideNvim; touche: "Alt ↵"; libelle: "Neovim" }
+                CodeAide { id: aForce; objectName: "nc-code-aide-force"; anchors.verticalCenter: parent.verticalCenter; visible: pied.aideForce; touche: "Ctrl ↵"; libelle: Reglages.t("ouvrir quand même", "open anyway") }
+                CodeAide { id: aEchap; objectName: "nc-code-aide-echap"; anchors.verticalCenter: parent.verticalCenter; touche: Reglages.t("Échap", "Esc"); libelle: Reglages.t("fermer", "close") }
             }
             Row {
+                id: actions
+                objectName: "nc-code-actions"
                 anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 6
-                CodeAction { objectName: "nc-code-fichiers"; glyphe: "folder_open"; libelle: Reglages.t("Fichiers", "Files"); touche: "Ctrl E"; onClic: code.ouvrirDossier() }
-                CodeAction { objectName: "nc-code-copier"; glyphe: "content_copy"; libelle: Reglages.t("Copier le chemin", "Copy path"); touche: "Ctrl ⇧ C"; onClic: code.copierChemin() }
-                CodeAction { objectName: "nc-code-cloner"; glyphe: "download"; libelle: Reglages.t("Cloner", "Clone"); touche: "Ctrl L"; onClic: { code.demarrerMode("cloner"); champ.forceActiveFocus() } }
-                CodeAction { objectName: "nc-code-github"; visible: code.github !== ""; glyphe: "open_in_new"; libelle: "GitHub"; touche: "Ctrl G"; onClic: code.ouvrirGitHub() }
+                CodeAction { id: actFichiers; objectName: "nc-code-fichiers"; compact: pied.actionsCompactes; glyphe: "folder_open"; libelle: Reglages.t("Fichiers", "Files"); touche: "Ctrl E"; onClic: code.ouvrirDossier() }
+                CodeAction { id: actCopier; objectName: "nc-code-copier"; compact: pied.actionsCompactes; glyphe: "content_copy"; libelle: Reglages.t("Copier le chemin", "Copy path"); touche: "Ctrl ⇧ C"; onClic: code.copierChemin() }
+                CodeAction { id: actCloner; objectName: "nc-code-cloner"; compact: pied.actionsCompactes; glyphe: "download"; libelle: Reglages.t("Cloner", "Clone"); touche: "Ctrl L"; onClic: { code.demarrerMode("cloner"); champ.forceActiveFocus() } }
+                CodeAction { id: actGitHub; objectName: "nc-code-github"; compact: pied.actionsCompactes; visible: code.github !== ""; glyphe: "open_in_new"; libelle: "GitHub"; touche: "Ctrl G"; onClic: code.ouvrirGitHub() }
             }
         }
         }

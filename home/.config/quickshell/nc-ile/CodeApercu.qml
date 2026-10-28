@@ -62,20 +62,24 @@ Item {
             }
         }
     }
+    FontMetrics { id: metriques; font.family: "Adwaita Sans"; font.pixelSize: 12 }
     // Le début du README, en texte brut, dans un voile du fond (autant de lignes que la place le permet)
     Rectangle {
         objectName: "nc-code-readme"
         visible: a.readme !== ""
         anchors.top: haut.bottom; anchors.topMargin: 12
         width: parent.width
-        height: Math.max(0, Math.min(texteReadme.implicitHeight + 24, a.height - haut.height - 12))
+        // jamais plus bas que l'aperçu, avec une marge avant le pied ; le texte est coupé à la dernière ligne entière (…)
+        height: Math.max(0, Math.min(texteReadme.implicitHeight + 24, a.height - haut.height - 12 - 10))
         radius: 12; color: Qt.alpha(Couleurs.carte, 0.55)
         clip: true
         Texte {
             id: texteReadme
             x: 12; y: 12; width: parent.width - 24
             text: a.readme
-            wrapMode: Text.Wrap; maximumLineCount: 14
+            // autant de lignes ENTIÈRES que la place en laisse (14 au plus), la dernière finit par « … » : jamais une ligne coupée en deux
+            wrapMode: Text.Wrap; elide: Text.ElideRight
+            maximumLineCount: Math.max(1, Math.min(14, Math.floor((a.height - haut.height - 12 - 10 - 24) / Math.max(1, metriques.lineSpacing * 1.25))))
             verticalAlignment: Text.AlignTop
             font.pixelSize: 12; lineHeight: 1.25
             color: a.texteSecondaire

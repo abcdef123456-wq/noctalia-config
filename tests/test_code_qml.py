@@ -65,10 +65,10 @@ def projets(home):
 
 @unittest.skipUnless(shutil.which("qs"), "Quickshell requis")
 class EspaceDeCode(unittest.TestCase):
-    def executer(self, scenario, agents=None, attendus=None, fondu=False):
+    def executer(self, scenario, agents=None, attendus=None, fondu=False, carte=None, projets_plus=None, readme=None):
         with tempfile.TemporaryDirectory(prefix="nc-code-qml-") as d:
             root = Path(d); q = root / "qml"; q.mkdir(); (root / "runtime").mkdir(mode=0o700)
-            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
+            for nom in ("CodeProjet.qml", "CodeApercu.qml", "CodeAgent.qml", "CodeAction.qml", "CodeAide.qml", "Couleurs.qml", "Texte.qml", "Ico.qml", "LanceurFondu.qml"):
                 shutil.copy2(QML / nom, q / nom)
             source = (QML / "Code.qml").read_text()
             # Hors Hyprland : une fenêtre ordinaire de 1600 x 1000 à la place du calque Wayland
@@ -81,22 +81,27 @@ class EspaceDeCode(unittest.TestCase):
                 self.assertIn(l, source); source = source.replace(l, "")
             source = source.replace('code.screen ? code.screen.name : ""', '"DP-1"')   # hors écran, la fenêtre n'a pas de nom d'écran
             source = source.replace("code.screen ? code.screen.width : 1600", "1600").replace("code.screen ? code.screen.height : 1000", "1000")
+            if carte:
+                self.assertIn("Math.min(980, Math.round(largeurEcran * 0.64))", source)
+                source = source.replace("Math.min(980, Math.round(largeurEcran * 0.64))", str(carte))
             (q / "Code.qml").write_text(source.replace('    color: "transparent"\n', '    color: "transparent"; width: 1600; height: 1000; visible: true\n'))
             (q / "Reglages.qml").write_text('pragma Singleton\nimport QtQuick\nQtObject {property bool en: false; property bool sobre: %s;'
                                             ' property bool iaCoupee: false; function t(fr,en){return fr} function val(k,d){return %s}}'
                                             % (("false", 'k === "ILE_LANCEUR_FONDU" ? "oui" : d') if fondu else ("true", "d")))
             (q / "Agents.qml").write_text(FAUX_AGENTS); (q / "Etat.qml").write_text(FAUX_ETAT); (q / "Partage.qml").write_text(FAUX_PARTAGE)
             (q / "qmldir").write_text("\n".join(("singleton " if n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage") else "") + n + " 1.0 " + n + ".qml"
-                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "Texte", "Ico")))
+                                                for n in ("Reglages", "Couleurs", "Agents", "Etat", "Partage", "LanceurFondu", "Code", "CodeProjet", "CodeApercu", "CodeAgent", "CodeAction", "CodeAide", "Texte", "Ico")))
             b = root / ".local/bin"; b.mkdir(parents=True)
             (b / "nc-code").write_text(FAUX_NC_CODE); (b / "nc-code").chmod(0o755)
             (b / "nc-claude").write_text(FAUX_NC_CLAUDE); (b / "nc-claude").chmod(0o755)
             ps = projets(root)
+            if projets_plus:
+                ps = ps + projets_plus(root)
             (root / "projets.json").write_text(json.dumps(ps))
             (root / "agents.json").write_text(json.dumps(agents if agents is not None else
                                                          dict(coupee=False, defaut="claude", agents=[dict(prog="claude", nom="Claude Code"), dict(prog="codex", nom="Codex")])))
             (root / "apercus.json").write_text(json.dumps({
-                ps[0]["chemin"]: dict(chemin=ps[0]["chemin"], nom="alpha", branche="main", etat="propre", readme="Alpha\nUn outil.", github=ps[0]["github"],
+                ps[0]["chemin"]: dict(chemin=ps[0]["chemin"], nom="alpha", branche="main", etat="propre", readme=readme or "Alpha\nUn outil.", github=ps[0]["github"],
                                       commits=[dict(message="Dernier <b>brut</b>", quand=1700000300, date="hier"), dict(message="Premier", quand=1700000100, date="il y a 3 j")]),
                 ps[1]["chemin"]: dict(chemin=ps[1]["chemin"], nom="neovim-conf", branche="essai", etat="modifie", readme="", github="", commits=[])}))
             (q / "shell.qml").write_text('''import QtQuick
@@ -303,6 +308,63 @@ ShellRoot {
                       agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
         self.executer('''
   if (etape === 1) { verifier(!trouver(fen.contentItem, "nc-code-aide").visible, "pas d'aide quand un projet a déjà été ouvert"); Qt.quit() }''')
+
+    # ── mise en page : rien ne se chevauche, quelle que soit la largeur du panneau ──
+    SCENARIO_PIED = '''
+  if (etape === 1) { if (!fen.projet) return; etape++; return }                  // le temps que la sélection et GitHub se posent
+  if (etape === 2) {
+    var pied = trouver(fen.contentItem, "nc-code-aides"), act = trouver(fen.contentItem, "nc-code-actions")
+    var px = pied.mapToItem(fen.contentItem, 0, 0).x, ax = act.mapToItem(fen.contentItem, 0, 0).x
+    console.log("PIED carte=" + fen.largeurCarte + " aides=" + px + "+" + pied.width + " actions=" + ax + "+" + act.width)
+    verifier(px + pied.width <= ax, "la rangée d'aides s'arrête avant les actions")
+    var noms = ["ouvrir", "tab", "nvim", "force", "echap"], vus = []
+    noms.forEach(n => { var a = trouver(fen.contentItem, "nc-code-aide-" + n); vus.push(a.visible)
+        if (a.visible) verifier(a.x + a.width <= pied.width, "l'aide " + n + " tient entière dans sa rangée : " + (a.x + a.width) + " > " + pied.width) })
+    verifier(vus[0] && vus[4], "« ouvrir » et « fermer » restent toujours")
+    verifier(!vus[3] || vus[2], "« ouvrir quand même » ne reste pas seul sans « Alt ↵ »")
+    verifier(!vus[2] || vus[1], "« Alt ↵ » ne reste pas sans « Tab »")
+    var pieds = trouver(fen.contentItem, "nc-code-fichiers")
+    var cx = (1600 - fen.largeurCarte) / 2; verifier(ax >= cx && ax + act.width <= cx + fen.largeurCarte, "les actions restent dans la carte")
+    console.log("PIED visibles=" + vus + " compactes=" + pieds.compact)
+    ATTENDU
+    Qt.quit() }'''
+
+    def test_pied_large_toutes_les_aides(self):
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(vus.every(v => v), "assez large : toutes les aides"); verifier(!pieds.compact, "actions complètes")'), carte=1300)
+
+    def test_pied_etroit_aides_masquees_dans_l_ordre_puis_actions_en_icone(self):
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(!vus[3], "étroit : « ouvrir quand même » partie d\'abord")'), carte=900)
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(pieds.compact, "les actions passent en icône quand les aides ne tiennent plus avec elles")'), carte=760)
+        self.executer(self.SCENARIO_PIED.replace("ATTENDU", 'verifier(pieds.compact && pieds.width < 40, "très étroit : les actions passent en icône seule")'), carte=560)
+
+    def test_noms_longs_date_reservee_aide_bornee_et_readme_clippe(self):
+        long = "un-nom-de-projet-vraiment-tres-long-pour-voir-la-coupure-" * 2
+        plus = lambda root: [dict(nom=long, chemin=str(root / "dev" / "long"), court="~/dev/long", branche="main", quand=1700000100,
+                                  date="il y a 10 j", message="", langage="Go", couleur="cyan", github="")]
+        lignes = "\n".join("Ligne %d du fichier de présentation, assez longue pour passer à la ligne dans la carte de l'aperçu" % i for i in range(60))
+        self.executer('''
+  if (etape === 1) { var l = trouver(fen.contentItem, "nc-code-liste"); l.positionViewAtEnd(); etape++; return }
+  if (etape === 2) { var l = trouver(fen.contentItem, "nc-code-liste"); var it = null
+                     for (var i = 0; i < l.contentItem.children.length; i++) { var c = l.contentItem.children[i]; if (c.projet && c.projet.nom && c.projet.nom.indexOf("un-nom-de-projet") === 0) it = c }
+                     if (!it) return
+                     var nom = null, date = null
+                     ;(function tout(e) { var t = e.text !== undefined ? e.text : null
+                       if (t && t.indexOf("un-nom-de-projet") === 0) nom = e
+                       if (t === "il y a 10 j") date = e; (e.children || []).forEach(tout) })(it)
+                     verifier(nom !== null && date !== null, "nom et date trouvés")
+                     verifier(nom.truncated, "le long nom est coupé (elide)")
+                     verifier(nom.x + nom.width + 12 <= date.x, "la date garde sa place : " + (nom.x + nom.width) + " vs " + date.x)
+                     etape++; return }
+  if (etape === 3) { if (!fen.apercuChoisi || fen.apercuChoisi.nom !== "alpha") return
+                     var a = trouver(fen.contentItem, "nc-code-apercu"), r = trouver(a, "nc-code-readme")
+                     verifier(r.visible && r.y + r.height <= a.height - 8, "le README finit avant le bas de l'aperçu avec une marge : " + (r.y + r.height) + " / " + a.height)
+                     var t = r.children[0]
+                     verifier(t.truncated, "texte long : fini par « … »")
+                     verifier(t.y + t.contentHeight <= r.height, "aucune ligne coupée en bas : " + (t.y + t.contentHeight) + " > " + r.height)
+                     var aide = trouver(fen.contentItem, "nc-code-aide"), li = trouver(fen.contentItem, "nc-code-liste")
+                     verifier(aide.x + aide.width <= li.x + li.width, "l'aide « Premier projet » reste dans la colonne de gauche : " + (aide.x + aide.width) + " > " + (li.x + li.width))
+                     verifier(aide.truncated, "…et elle est coupée (elide) plutôt que de déborder")
+                     Qt.quit() }''', projets_plus=plus, readme=lignes, carte=700, agents=dict(coupee=False, defaut="claude", debutant=True, agents=[]))
 
 
 def ps_chemin(appels):
