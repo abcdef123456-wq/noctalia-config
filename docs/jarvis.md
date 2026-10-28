@@ -914,6 +914,92 @@ fin d’une mise à jour du système lancée depuis l’île (`nc-paquets` appel
 TEXTE` envoie un message libre. Rien n’est envoyé sans le réglage ni sans connexion configurée ; état dans
 `~/.local/state/nc/alertes.json`.
 
+## Suivre et répondre aux agents de code depuis Telegram
+
+Les agents de code que `nc-claude` suit (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity, Cursor, Copilot, Qwen
+Code, Kiro, Amp) se suivent et se répondent depuis le bot JARVIS : `/agents` les liste, `/repondre N texte` leur écrit.
+**Seulement en déploiement local** (`DEPLOY_MODE=local`) : `nc-claude ecrire` tape dans le terminal (kitty) de CE PC. En
+mode serveur la fonction est absente et le dit. Oh My Pi (`omp`) n'est pas suivi par `nc-claude` : il n'apparaît pas.
+Le code est dans la surcouche (`server/nc_agents.py`, branché par `nc_telegram.py` ; JARVIS-BIS n'est pas modifié) et dans
+`nc-claude`, `nc-noeud`, `nc-alertes` et `nc-reglages` côté PC.
+
+### Activer
+
+1. `nc-reglages → Agents IA` (la page Agents IA de l'île, bouton ⚙) : **Agents depuis Telegram** (`TELEGRAM_AGENTS`, non par
+   défaut). **Dernier message de l'agent dans `/agents`** (`TELEGRAM_AGENTS_TEXTE`, non par défaut) en plus, si tu le veux.
+   **Alerte « t'attend »** (`ALERTES_AGENTS`, non par défaut) à côté des autres alertes Telegram : elle demande aussi
+   `ALERTES_TELEGRAM=oui`. Ces trois réglages ne se changent PAS à distance (`/nc reglage` les refuse).
+2. Le code de confirmation : `nc-noeud totp creer`, ajoute la clé dans ton appli d'authentification, puis
+   `nc-noeud totp verifier 123456`. C'est le même code que la confirmation à distance de JARVIS (voir plus haut). Sans lui,
+   `/repondre` est refusé.
+3. Relance `nc-jarvis deployer` (c'est toi qui le lances) pour que le gateway reçoive `nc_agents.py`.
+4. `nc-claude installer IA` (ou `tout`) pour chaque agent à suivre : sans ses hooks, l'agent n'apparaît pas.
+   `IA_MODE=non` coupe tout, partout.
+
+### Les commandes
+
+Réservées à l'utilisateur autorisé du bot (`TELEGRAM_ALLOWED_USER_IDS`) et à la **conversation privée** ; un message
+modifié ne lance rien ; un ordre reçu pendant que le PC était éteint n'est pas rejoué (comme `/nc`).
+
+- `/agents` (ou `/claude`) : une ligne par session suivie, quel que soit l'agent : un **numéro court** (1, 2, 3… gardé 10
+  minutes ; il est lié à l'identifiant réel de la session côté gateway, jamais l'inverse), le **nom du dossier** (le nom seul,
+  jamais le chemin, 40 signes au plus, en texte brut), l'agent et l'état (« t'attend », « travaille », « fini », « prêt »).
+  Une session dont le terminal n'est pas pris en charge dit « réponse impossible à distance (terminal non pris en charge) ».
+  **Par défaut aucun contenu de conversation.** Avec `TELEGRAM_AGENTS_TEXTE=oui` : le dernier message de l'agent, si
+  `nc-claude` l'a, passé par un filtre de secrets (jetons `sk-…`, `ghp_…`/`gho_…`, `xox…`, `AKIA…`, clés PEM, `password=`,
+  `token=`, `secret=`, chemins `/home/<nom>` → `/home/…`, e-mails → `…@…`, suites hexadécimales ou base64 de 32 signes ou
+  plus), puis coupé à 600 signes. Le filtre est un garde-fou, pas une garantie : un secret d'une autre forme passerait.
+- `/repondre N texte` : N est un numéro de la dernière liste (valable 10 minutes) pour une session où l'écriture est possible.
+  Le texte fait 2 000 signes au plus, **sur une seule ligne** : tout caractère de contrôle (retour à la ligne, tabulation,
+  `ESC`, DEL, C1), toute séquence d'échappement de terminal et les caractères Unicode d'inversion d'écriture ou invisibles
+  sont refusés. Un texte qui commence par `!` est refusé (Claude Code et d'autres le lancent comme une commande du shell) ;
+  un texte qui commence par `/` est accepté mais l'invite le signale.
+  **Rien ne part tout de suite** : la demande attend (une seule par discussion et utilisateur, 120 s) et le bot répond
+  « confirme avec /code 123456 » en rappelant l'agent, le dossier et le texte.
+- `/code XXXXXX` : les 6 chiffres de ton appli. Le code est vérifié par `nc-noeud` (`nc-noeud totp controler`, le code passe
+  par l'entrée standard, jamais par la ligne de commande), donc avec le **même mécanisme que la confirmation à distance** :
+  usage unique (un code déjà servi est refusé, y compris par la confirmation à distance de JARVIS), codes faux comptés et
+  annoncés par une notification sur le PC, blocage après 5 codes faux en une heure. La demande est consommée dès qu'un code
+  est tapé, bon ou faux. Avant d'envoyer, la session est relue : si elle a disparu ou n'accepte plus l'écriture, rien ne part.
+- L'envoi est `nc-claude ecrire SESSION TEXTE` (arguments exacts, la session est l'identifiant réel validé, jamais une chaîne
+  venue de Telegram, délai borné). Le résultat rendu est « envoyé » ou « échec » : aucune sortie libre n'est relayée.
+  `nc-claude ecrire` ramène déjà tout espace à une seule ligne ; refuser les retours à la ligne évite un message qui serait
+  silencieusement recollé.
+- Si le texte ressemble à une réponse d'autorisation (`1`, `2`, `3`, `y`, `yes`, `oui`, `o`, `n`, `no`, `non`, `a`, `always`,
+  `toujours`, seuls), la demande de code ajoute : « attention : tu autorises peut-être une commande de l'agent ».
+
+Journal local de chaque envoi : `~/.local/state/nc-jarvis/agents-envois.log` (0600, borné à 64 Ko) : date, agent, nom du
+dossier, longueur, ok ou échec. **Jamais le texte.**
+
+### L'alerte « t'attend » (facultative)
+
+Avec `ALERTES_AGENTS=oui` et `ALERTES_TELEGRAM=oui`, quand un agent passe à l'état « t'attend » (réponse à donner, autorisation
+ou question), le hook de `nc-claude` lance `nc-alertes agent AGENT DOSSIER SESSION` : au plus **une alerte par session toutes les
+5 minutes** (horodatage dans `~/.local/state/nc/alertes-agents.json`). Rien ne tourne en boucle et aucun minuteur n'est ajouté :
+c'est l'événement du hook qui la pousse. Elle part par le canal des autres alertes (op `notify` de `/api/nc/manage`, avec la clé
+locale de `nc-assistant`, aucun nouveau port). **Le message ne contient que l'agent, le nom du dossier et « t'attend »**, jamais
+de texte de conversation, même avec `TELEGRAM_AGENTS_TEXTE=oui` : un message poussé sans que tu l'aies demandé reste le plus pauvre
+possible. Elle part à tous les chats que le bot connaît, comme les autres alertes.
+
+### Risques
+
+- **Telegram n'est pas chiffré de bout en bout** (les discussions normales des bots passent en clair chez Telegram) : ce que tu
+  y écris ou lis (noms de dossiers, derniers messages d'agents) est lisible par Telegram. Laisse `TELEGRAM_AGENTS_TEXTE` à non si
+  tes agents travaillent sur du confidentiel.
+- **Un compte Telegram volé ET le code d'authentification volé donnent la main sur des agents qui ont des outils** (lire,
+  modifier, lancer des commandes sur ce PC). Le code est la seule vraie barrière : garde-le dans une appli sur un autre appareil
+  que le téléphone qui porte Telegram, et ne l'utilise pas pour autre chose que ces confirmations.
+- **Une réponse « 1 », « y » ou « oui » peut autoriser une commande** que l'agent attend de toi. L'invite le dit, mais vérifie ce
+  que l'agent demande (sur le PC) avant de répondre à distance. Le journal et l'invite ne montrent pas ce qu'il demandait.
+- Un message d'un agent peut contenir n'importe quoi ; ce qui est relayé est filtré mais pas relu.
+
+### Autre solution : Remote Control (officiel)
+
+Claude Code a sa propre fonction **Remote Control** : la session reste sur le PC et se continue depuis l'appli Claude ou
+claude.ai, avec le compte Anthropic, sans passer par Telegram ni par JARVIS (voir la documentation de Claude Code pour l'activer).
+Elle ne couvre que Claude Code ; la fonction de cette page couvre tous les agents que `nc-claude` suit. Si seul Claude Code te
+suffit, c'est la voie la plus simple et la mieux intégrée.
+
 ## Réglages du PC depuis Telegram
 
 Commande `/nc` (ou `/pc`) du bot, ajoutée par l’overlay, **seulement en déploiement local** (`DEPLOY_MODE=local` : le
