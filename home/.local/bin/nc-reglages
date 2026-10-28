@@ -416,6 +416,16 @@ def choix_ia():
     return list(_CHOIX_IA)
 
 
+def code_agents_choix():
+    """Pour CODE_AGENT : Automatique, Aucun, puis les agents de terminal installés (les mêmes que nc-code)."""
+    res = [("auto", L("Automatique", "Automatic")), ("aucun", L("Aucun (un terminal)", "None (a terminal)"))]
+    for prog, nom in (("claude", "Claude Code"), ("agy", "Antigravity"), ("codex", "Codex"), ("gemini", "Gemini CLI"),
+                      ("opencode", "OpenCode"), ("qwen", "Qwen Code"), ("omp", "Oh My Pi")):
+        if shutil.which(prog):
+            res.append((prog, nom))
+    return res
+
+
 def nom_section(s):
     return T(s, SECTIONS_EN.get(s, s))
 
@@ -1198,6 +1208,21 @@ REGLAGES = [
       L("Le fond du terminal (et sa transparence) se voit derrière le texte.", "The terminal background (and its transparency) shows behind the text.")),
     R("CODE_DOSSIER", "Terminal", L("Dossier des nouveaux projets (Super + X)", "Folder for new projects (Super + X)"), "dossier", "~/Projets",
       L("Nouveau projet et clonage depuis GitHub y créent leur dossier.", "New projects and GitHub clones are created there.")),
+    R("CODE_AGENT", "Terminal", L("Agent de l'espace de code (Super + X)", "Agent of the code space (Super + X)"), "choix", "auto",
+      L("L'agent qui s'ouvre à droite de Neovim. Automatique : celui de l'IA choisie, sinon le premier installé. Aucun : un terminal. "
+        "Sans effet si l'IA du bureau est coupée.",
+        "The agent that opens to the right of Neovim. Automatic: the chosen AI's one, otherwise the first installed. None: a terminal. "
+        "No effect if the desktop AI is off."),
+      lambda: code_agents_choix()),
+    R("CODE_MODELE", "Terminal", L("Modèle d'un projet vide (Super + X)", "Template of an empty project (Super + X)"), "choix", "vide",
+      L("Les fichiers de départ d'un nouveau projet : rien, Python, C ou une page web.",
+        "A new project's starting files: nothing, Python, C or a web page."),
+      [("vide", L("Vide", "Empty")), ("python", "Python"), ("c", "C"), ("web", L("Page web", "Web page"))]),
+    R("CODE_NVIM_PART", "Terminal", L("Place de Neovim dans l'espace de code", "Neovim's share of the code space"), "entier", "62",
+      L("La part de la largeur pour Neovim ; l'agent prend le reste.", "The share of the width for Neovim; the agent takes the rest."),
+      mini=30, maxi=80, pas=2, unite="%"),
+    R("CODE_LAZYGIT", "Terminal", L("lazygit dans l'espace de code", "lazygit in the code space"), "ouinon", "oui",
+      L("Un onglet Git avec lazygit (s'il est installé).", "A Git tab with lazygit (if installed).")),
     R("APPLI_TERMINAL", "Applications", L("Terminal (Super + Entrée)", "Terminal (Super + Enter)"), "choix", "kitty",
       L("Les terminaux installés. L'île, le terminal déroulant et les outils gardent kitty (ils s'appuient sur ses fonctions).",
         "Installed terminals. The island, the drop-down terminal and the tools keep kitty (they rely on its features)."),

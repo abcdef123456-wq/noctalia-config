@@ -338,6 +338,11 @@ def agent_par_defaut(e):
     sinon le premier agent installé. '' seulement si l'IA est coupée ou si aucun agent n'est installé (alors un shell)."""
     if ia_coupee(e):
         return ""
+    choix = reglage("CODE_AGENT", "auto")                  # nc-reglages → Terminal : un agent précis, ou aucun (un terminal)
+    if choix == "aucun":
+        return ""
+    if choix != "auto" and any(p == choix for p, _ in agents_disponibles(e)):
+        return choix
     u = (e.get("usages") or {}).get("question") or {}
     c = e.get("choisie") or {}
     for x in (u, c):
@@ -358,13 +363,16 @@ def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
     if not dossier_sur(dossier):
         raise ValueError("dossier")
     cd = "cd " + dossier.replace("$", "$$")
+    lazygit = lazygit and reglage("CODE_LAZYGIT", "oui") != "non"      # nc-reglages → Terminal
+    part = reglage("CODE_NVIM_PART", "62")                              # la part de Neovim, en % (30 à 80)
+    part = int(part) if part.isdigit() and 30 <= int(part) <= 80 else 62
     l = ["new_tab Code", "layout splits", cd]
     if nvim:
         l.append("launch --title nvim --env NC_CODE=1 nvim")
     else:
         l.append(f"launch --title shell {SANS_ACCUEIL}")
     if not seul_nvim:
-        droite = "launch --location=vsplit --bias=38 --keep-focus --title "
+        droite = f"launch --location=vsplit --bias={100 - part} --keep-focus --title "
         if agent:
             droite += shlex.quote(agent) + " " + shlex.quote(MOI) + " --lancer-agent " + shlex.quote(agent)
         else:
@@ -485,7 +493,7 @@ def creer_projet(nom, modele="vide"):
 
 def cmd_nouveau(a):
     """nc-code --nouveau NOM [--modele vide|python|c|web] [--sans-agent] [--session-seule] : crée le projet, puis l'ouvre."""
-    modele = a[a.index("--modele") + 1] if "--modele" in a and a.index("--modele") + 1 < len(a) else "vide"
+    modele = a[a.index("--modele") + 1] if "--modele" in a and a.index("--modele") + 1 < len(a) else (reglage("CODE_MODELE", "vide") if reglage("CODE_MODELE", "vide") in MODELES else "vide")
     reste = [x for i, x in enumerate(a) if not x.startswith("--") and not (i and a[i - 1] == "--modele")]
     d, msg = creer_projet(reste[0] if reste else "", modele)
     if msg:
