@@ -12,6 +12,8 @@
 // (dépôts de la distribution, AUR avec paru ou yay, Flatpak : nc-logiciels ; Entrée ouvre un terminal qui l'installe).
 // Sans préfixe, deux logiciels à installer dont le nom commence par la saisie s'ajoutent en bas (SPOTLIGHT_PAQUETS).
 // Une saisie qui commence par un programme (htop, ping…) propose aussi de la lancer dans le terminal.
+// Emoji : « : » puis un mot (« :coeur », « :rire », « :heart ») ; Entrée copie l'emoji (wl-copy) et referme. Les récents d'abord.
+// Liste lue à la première frappe de « : » seulement (Emoji.qml). Réglage SPOTLIGHT_EMOJI.
 // Action secondaire d'un résultat (champ facultatif suppr: { libelle, f }, une session par exemple) : Suppr (curseur en fin
 // de saisie) ou Maj + Suppr, ou le rond « − » de la ligne, demande confirmation sur la ligne même ; Entrée la fait, Échap
 // ou une autre ligne l'annule, le Spotlight reste ouvert.
@@ -248,6 +250,10 @@ Item {
     // Logiciels à installer (nc-logiciels) : la liste et le terme qu'elle concerne
     property var paquets: []
     property string paquetsPour: ""
+    // Emoji (« : coeur ») : la liste est lue à la première frappe de « : » (Emoji.qml)
+    readonly property bool emojiActif: Reglages.val("SPOTLIGHT_EMOJI", "oui") !== "non"
+    Emoji { id: emojis; onDonnees: if (r.emojiActif && r.q.startsWith(":")) r.chercher() }
+    function copierEmoji(em) { Quickshell.execDetached(["wl-copy", "--", em]); emojis.noter(em) }
     readonly property string modePaquets: Reglages.val("SPOTLIGHT_PAQUETS", "auto")
     // Nombre de lignes de résultats (nc-reglages : SPOTLIGHT_RESULTATS, 3 à 10)
     readonly property int nbResultats: Math.max(3, Math.min(10, parseInt(Reglages.val("SPOTLIGHT_RESULTATS", "6")) || 6))
@@ -987,6 +993,20 @@ Item {
         out.sort((x, y) => y.s - x.s)
         out = out.slice(0, nbResultats)
         // Logiciels à installer dont le nom commence par la saisie : deux au plus, en bas (pas ceux déjà là)
+        if (q.startsWith(":") && emojiActif) {
+            emojis.demander()
+            let motE = q.slice(1).trim()
+            let trouves = emojis.pret ? emojis.chercher(motE).slice(0, Math.max(8, nbResultats)) : []     // 24 au plus trouvés, 8 à 10 montrés
+            resultats = trouves.length ? trouves.map(x => ({ titre: Reglages.t(x.fr, x.en), sous: (x.recent ? Reglages.t("Récent · ", "Recent · ") : "") + Reglages.t("Copier ", "Copy ") + x.e,
+                                                             emoji: x.e, f: () => r.copierEmoji(x.e) }))
+                      : [{ titre: emojis.echec ? Reglages.t("Liste d'emoji introuvable", "Emoji list not found")
+                                  : !emojis.pret ? Reglages.t("Chargement des emoji…", "Loading emoji…")
+                                  : motE === "" ? Reglages.t("Tape un mot : :coeur, :rire, :heart", "Type a word: :heart, :laugh, :coeur")
+                                  : Reglages.t("Aucun emoji pour « ", "No emoji for “") + motE + Reglages.t(" »", "”"),
+                          sous: "", glyphe: "mood", garder: true, f: () => {} }]
+            if (sel >= resultats.length) sel = Math.max(0, resultats.length - 1)
+            return
+        }
         if (modePaquets === "auto" && paquetsPour === q && q.length >= 3) {
             let noms = applis.map(a => (a.id || "").toLowerCase().replace(/\.desktop$/, ""))
             let aInstaller = paquets.filter(p => !p.installe && p.score >= 85 && noms.indexOf(p.nom.toLowerCase()) < 0).slice(0, 2)
@@ -1064,7 +1084,7 @@ Item {
         if (i === confirmer && resultats[i]) { confirmerSuppr(); return }     // ↵ oui : la suppression demandée sur cette ligne
         // Applis pas encore chargées (on tape vite juste après Super + R) : on attend la liste avant de choisir
         // (pas pour « ? », « ! », « > », « + » ni une question : leurs réponses ne dépendent pas des applis)
-        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
+        if ((lireApplis.running || applis.length === 0) && !/^([?>+!@:]|sessions? )/i.test(q) && !Aide.estQuestion(q) && !estDiag(q)
             && !(modeDiag && q === diagPour)) { entreeEnAttente = true; return }
         var x = resultats[i]
         if (!x) return
@@ -1208,7 +1228,8 @@ Item {
                         sourceSize: Qt.size(56, 56)
                         visible: status === Image.Ready
                     }
-                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: Couleurs.texteDoux; visible: img.status !== Image.Ready }
+                    Ico { anchors.centerIn: parent; nom: ligne.modelData.glyphe || "search"; taille: 22; color: Couleurs.texteDoux; visible: img.status !== Image.Ready && !ligne.modelData.emoji }
+                    Texte { objectName: "nc-spotlight-emoji"; anchors.centerIn: parent; visible: !!ligne.modelData.emoji; text: ligne.modelData.emoji || ""; font.pixelSize: 24 }
                 }
                 Texte {
                     visible: !ligne.confirme
