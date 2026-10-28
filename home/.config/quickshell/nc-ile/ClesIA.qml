@@ -208,5 +208,10 @@ FloatingWindow {
                 }
             }
         }
+        BoutonReglages {
+            objectName: "nc-cles-reglages"
+            anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: 16; anchors.rightMargin: 18
+            section: "Intelligence artificielle"
+        }
     }
 }

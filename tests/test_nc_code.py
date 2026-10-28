@@ -157,6 +157,38 @@ class NcCode(unittest.TestCase):
         s = self.lancer("--session-seule", str(p)).stdout
         self.assertNotIn("lazygit", s)
 
+    def test_reglages_du_code_agent_part_de_neovim_lazygit_et_modele(self):
+        """CODE_AGENT, CODE_NVIM_PART, CODE_LAZYGIT et CODE_MODELE (nc-reglages → Terminal, page ⚙ du panneau) sont lus par nc-code."""
+        p = self.depot("dev/projet")
+        for prog in ("claude", "agy", "nvim", "lazygit"):
+            self.programme(prog)
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        self.assertIn("--bias=38", s)                                      # 62 % pour Neovim par défaut
+        self.assertIn("--lancer-agent claude", s)
+        self.assertIn("launch --title lazygit", s)
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\nCODE_AGENT=agy\nCODE_NVIM_PART=70\nCODE_LAZYGIT=non\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        self.assertIn("--lancer-agent agy", s)                             # l'agent choisi dans les réglages
+        self.assertIn("--bias=30", s)
+        self.assertNotIn("lazygit", s)
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\nCODE_AGENT=aucun\nCODE_NVIM_PART=5\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        self.assertNotIn("--lancer-agent", s)                              # « Aucun » : un terminal
+        self.assertIn("--bias=38", s)                                      # une part absurde : la valeur par défaut
+        self.reglages("IA_MODE=manuel\nIA_CHOIX=claude\nCODE_AGENT=inconnu\n")
+        self.assertIn("--lancer-agent claude", self.lancer("--session-seule", str(p)).stdout)   # inconnu ou absent : automatique
+        # le modèle d'un projet vide : le réglage, sauf --modele donné
+        self.faux_git_init()
+        self.reglages("CODE_MODELE=python\n")
+        self.assertEqual(self.lancer("--nouveau", "p-py", "--session-seule").returncode, 0)
+        self.assertTrue((self.home / "Projets/p-py/main.py").exists())
+        self.assertEqual(self.lancer("--nouveau", "p-c2", "--modele", "c", "--session-seule").returncode, 0)
+        self.assertTrue((self.home / "Projets/p-c2/main.c").exists())
+        self.reglages("CODE_MODELE=nimporte\n")
+        self.assertEqual(self.lancer("--nouveau", "p-v", "--session-seule").returncode, 0)
+        self.assertFalse((self.home / "Projets/p-v/main.py").exists())     # réglage inconnu : projet vide
+
     def test_ia_coupee_un_shell_a_la_place_de_l_agent(self):
         p = self.depot("dev/projet")
         self.programme("claude")

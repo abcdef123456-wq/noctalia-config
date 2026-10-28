@@ -416,6 +416,16 @@ def choix_ia():
     return list(_CHOIX_IA)
 
 
+def code_agents_choix():
+    """Pour CODE_AGENT : Automatique, Aucun, puis les agents de terminal installés (les mêmes que nc-code)."""
+    res = [("auto", L("Automatique", "Automatic")), ("aucun", L("Aucun (un terminal)", "None (a terminal)"))]
+    for prog, nom in (("claude", "Claude Code"), ("agy", "Antigravity"), ("codex", "Codex"), ("gemini", "Gemini CLI"),
+                      ("opencode", "OpenCode"), ("qwen", "Qwen Code"), ("omp", "Oh My Pi")):
+        if shutil.which(prog):
+            res.append((prog, nom))
+    return res
+
+
 def nom_section(s):
     return T(s, SECTIONS_EN.get(s, s))
 
@@ -880,15 +890,23 @@ REGLAGES = [
       "ouinon", "non", L("Consomme un peu plus.", "Uses a bit more power.")),
     R("FONDS_DOSSIER", "Fonds d'écran", L("Dossier des fonds d'écran", "Wallpaper folder"), "dossier", "~/Pictures/Wallpapers",
       groupe="noctalia"),
+    R("FONDS_JOUR_DE", "Fonds d'écran", L("Le fond du jour commence à", "The day wallpaper starts at"), "entier", "7",
+      L("L'heure (0 à 22) où le fond du dossier « jour » remplace celui de la nuit. Utile avec « Un fond pour le jour, un pour la nuit ».",
+        "The hour (0 to 22) when the \"jour\" folder's wallpaper replaces the night one. Used with \"One wallpaper for day, one for night\"."),
+      mini=0, maxi=22, unite=" h"),
+    R("FONDS_NUIT_DE", "Fonds d'écran", L("Le fond de la nuit commence à", "The night wallpaper starts at"), "entier", "19",
+      L("L'heure (1 à 23) où le fond du dossier « nuit » prend la place. Doit être après le début du jour, sinon 7 h et 19 h.",
+        "The hour (1 to 23) when the \"nuit\" folder's wallpaper takes over. Must be after the day start, otherwise 7:00 and 19:00."),
+      mini=1, maxi=23, unite=" h"),
     R("FONDS_JOUR_NUIT", "Fonds d'écran", L("Un fond pour le jour, un pour la nuit", "One wallpaper for day, one for night"),
       "ouinon", "non",
       L("Crée deux sous-dossiers « jour » et « nuit » dans le dossier des fonds d'écran et mets-y tes images : le fond change "
-        "à 7 h et à 19 h (un fond par jour, à tour de rôle s'il y en a plusieurs). Il passe devant « Changer de fond "
+        "à 7 h et à 19 h par défaut, heures réglables ci-dessous (un fond par jour, à tour de rôle s'il y en a plusieurs). Il passe devant « Changer de fond "
         "automatiquement », qui est alors coupé. Rien ne tourne entre deux changements : un seul minuteur est posé jusqu'au "
         "suivant, rien n'est fait écran éteint ou verrouillé (le fond se met à jour dès le réveil). Sous-dossier vide ou "
         "absent : le fond ne change pas.",
         "Create two subfolders \"jour\" (day) and \"nuit\" (night) in the wallpaper folder and put your images there: the "
-        "wallpaper changes at 7:00 and 19:00 (one per day, in turn if there are several). It overrides \"Change wallpaper "
+        "wallpaper changes at 7:00 and 19:00 by default, hours adjustable below (one per day, in turn if there are several). It overrides \"Change wallpaper "
         "automatically\", which is then turned off. Nothing runs between two changes: a single timer is set until the next "
         "one, nothing is done while the screen is off or locked (the wallpaper updates as soon as you wake it). Empty or "
         "missing subfolder: the wallpaper doesn't change."), groupe="noctalia"),
@@ -1205,6 +1223,21 @@ REGLAGES = [
       L("Le fond du terminal (et sa transparence) se voit derrière le texte.", "The terminal background (and its transparency) shows behind the text.")),
     R("CODE_DOSSIER", "Terminal", L("Dossier des nouveaux projets (Super + X)", "Folder for new projects (Super + X)"), "dossier", "~/Projets",
       L("Nouveau projet et clonage depuis GitHub y créent leur dossier.", "New projects and GitHub clones are created there.")),
+    R("CODE_AGENT", "Terminal", L("Agent de l'espace de code (Super + X)", "Agent of the code space (Super + X)"), "choix", "auto",
+      L("L'agent qui s'ouvre à droite de Neovim. Automatique : celui de l'IA choisie, sinon le premier installé. Aucun : un terminal. "
+        "Sans effet si l'IA du bureau est coupée.",
+        "The agent that opens to the right of Neovim. Automatic: the chosen AI's one, otherwise the first installed. None: a terminal. "
+        "No effect if the desktop AI is off."),
+      lambda: code_agents_choix()),
+    R("CODE_MODELE", "Terminal", L("Modèle d'un projet vide (Super + X)", "Template of an empty project (Super + X)"), "choix", "vide",
+      L("Les fichiers de départ d'un nouveau projet : rien, Python, C ou une page web.",
+        "A new project's starting files: nothing, Python, C or a web page."),
+      [("vide", L("Vide", "Empty")), ("python", "Python"), ("c", "C"), ("web", L("Page web", "Web page"))]),
+    R("CODE_NVIM_PART", "Terminal", L("Place de Neovim dans l'espace de code", "Neovim's share of the code space"), "entier", "62",
+      L("La part de la largeur pour Neovim ; l'agent prend le reste.", "The share of the width for Neovim; the agent takes the rest."),
+      mini=30, maxi=80, pas=2, unite="%"),
+    R("CODE_LAZYGIT", "Terminal", L("lazygit dans l'espace de code", "lazygit in the code space"), "ouinon", "oui",
+      L("Un onglet Git avec lazygit (s'il est installé).", "A Git tab with lazygit (if installed).")),
     R("APPLI_TERMINAL", "Applications", L("Terminal (Super + Entrée)", "Terminal (Super + Enter)"), "choix", "kitty",
       L("Les terminaux installés. L'île, le terminal déroulant et les outils gardent kitty (ils s'appuient sur ses fonctions).",
         "Installed terminals. The island, the drop-down terminal and the tools keep kitty (they rely on its features)."),
