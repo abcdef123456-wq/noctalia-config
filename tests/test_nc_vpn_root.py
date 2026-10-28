@@ -3,6 +3,7 @@ aucun appel à nft (nft absent, firewalld, ufw, Mullvad), desactiver = seulement
 (NC_VPN_RACINE) et faux outils (NC_VPN_BIN) qui notent leurs arguments : jamais le vrai nft, ip, sudo ni systemctl.
 Un essai réel existe dans un espace de noms réseau isolé (unshare sans root réel), seulement s'il est possible ici."""
 import importlib.machinery
+import ipaddress
 import importlib.util
 import json
 import os
@@ -101,6 +102,40 @@ class Pur(unittest.TestCase):
         with self.assertRaises(self.m.Refus):
             self.m.valider_endpoints(["192.0.2.%d" % i for i in range(1, 10)])
         self.assertEqual(len(self.m.valider_endpoints(["192.0.2.%d" % i for i in range(1, 9)])), 8)
+
+
+    PIEGES = ["2001:db8::1%x\nflush ruleset\ninclude \"shadow\"\n#", "2001:db8::1%eth0", "2001:db8::1%", "fe80::1%wlan0", "fe80::1",
+              '2001:db8::1%"', "2001:db8::1%}", "2001:db8::1%;", "2001:db8::1%#", "2001:db8::1%x\n", "192.0.2.1\n", "192.0.2.1\nflush ruleset",
+              "192.0.2.1%x"]
+
+    def test_identifiant_de_zone_et_signes_piegeux_refuses(self):
+        for p in self.PIEGES:
+            for suite in ("", "@1194", "@1194/udp"):
+                with self.assertRaises(self.m.Refus, msg=repr(p + suite)):
+                    self.m.valider_endpoint(p + suite)
+        with self.assertRaises(self.m.Refus):
+            self.m.valider_endpoints(["192.0.2.1", self.PIEGES[0]])
+
+    def test_garde_finale_refuse_un_element_piege_sans_passer_par_la_validation(self):
+        m = self.m
+        piege = ipaddress.ip_address("2001:db8::1%x")                   # accepté par ipaddress lui-même
+        for ip in (piege, ipaddress.ip_address("2001:db8::1%a;b"), ipaddress.ip_address("2001:db8::1%a#b")):
+            with self.assertRaises(m.Refus, msg=str(ip)):
+                m.generer_regles("tun0", [(ip, 51820, "udp")], [])
+        for iface in ('tun0"\nflush ruleset', "tun0\n", "tun0;", "tun#", 'tun"', "tun%"):
+            with self.assertRaises(m.Refus, msg=repr(iface)):
+                m.generer_regles(iface, [], [])
+
+        class Reseau:                                                     # un faux réseau dont le texte est piégé
+            version = 4
+            def __str__(self):
+                return "192.0.2.0/24\nflush ruleset"
+        with self.assertRaises(m.Refus):
+            m.generer_regles("tun0", [], [Reseau()])
+        # la garde directe sur les lignes
+        with self.assertRaises(m.Refus):
+            m.verifier_texte(["\t\tflush ruleset!"], [])
+        m.verifier_texte(["\t\ttype filter hook output priority filter; policy drop;", '\t\toifname "tun0" accept'], ["tun0"])
 
 
 class Base(unittest.TestCase):

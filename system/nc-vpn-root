@@ -57,11 +57,16 @@ def valider_endpoint(texte):
     if not isinstance(texte, str) or not texte or len(texte) > 64:
         raise Refus("endpoint refusé")
     adr, _, reste = texte.partition("@")
+    # AVANT ipaddress : il accepte « %zone » avec n'importe quel signe (retour à la ligne, guillemets…) et str() le recopie
+    if not re.fullmatch(r"[0-9A-Fa-f:.]{2,45}", adr):
+        raise Refus("endpoint refusé : une adresse IP est demandée (chiffres, « : » et « . » seulement), jamais un nom d'hôte")
     try:
         ip = ipaddress.ip_address(adr)
     except ValueError:
         raise Refus("endpoint refusé : une adresse IP est demandée, jamais un nom d'hôte")
-    if ip.is_unspecified or ip.is_loopback or ip.is_multicast:
+    if getattr(ip, "scope_id", None):
+        raise Refus("endpoint refusé : pas d'identifiant de zone")
+    if ip.is_unspecified or ip.is_loopback or ip.is_multicast or ip.is_link_local:
         raise Refus("endpoint refusé : adresse inutilisable")
     port = proto = None
     if "@" in texte:
@@ -118,7 +123,19 @@ def generer_regles(iface, endpoints, sous_reseaux):
     for net in sous_reseaux:
         L.append("\t\t%s daddr %s accept" % ("ip" if net.version == 4 else "ip6", net))
     L += ["\t}", "}"]
+    verifier_texte(L, [iface] + [str(e[0]) for e in endpoints] + [str(n) for n in sous_reseaux])
     return "\n".join(L) + "\n"
+
+
+def verifier_texte(lignes, elements):
+    """Dernière garde : aucun élément inséré ne porte de retour à la ligne, de guillemet, de « % », de « # » ni de « ; », et
+    chaque ligne n'a que des signes attendus. Sinon Refus : RIEN n'est envoyé à nft."""
+    for e in elements:
+        if re.search(r'[\n\r"%#;]', e):
+            raise Refus("texte nft refusé : un élément porte un signe interdit")
+    for l in lignes:
+        if not re.fullmatch(r'[\tA-Za-z0-9 _.:/{},;"-]*', l):
+            raise Refus("texte nft refusé : ligne inattendue")
 
 
 def sous_reseaux_attaches(addr_json, tunnel, physique):

@@ -124,6 +124,20 @@ class KillSwitch(BaseVpn):
         self.assertIn("multi-remote", r.stderr)
         self.assertEqual(self.sudo(), [])
 
+    def test_identifiant_de_zone_et_signes_piegeux_refuses_cote_utilisateur(self):
+        for remote in ("remote = [2001:db8::1%eth0]:1194:udp", "remote = fe80::1", "remote = [fe80::1]:1194:udp", "remote = 192.0.2.1%x:1194",
+                       "remote = 2001:db8::1%\"", "remote = 2001:db8::1%;"):
+            self.openvpn_sous_wifi(remote)
+            (self.r / "appels-sudo.jsonl").unlink(missing_ok=True)
+            r = self.ks("activer")
+            self.assertEqual(r.returncode, 1, remote)
+            self.assertEqual(self.sudo(), [], remote)
+        self.connexions(dict(uuid=U2, type="wireguard", active=True, dev="wg-maison", nom="Maison"))
+        self.iface("wg-maison", wireguard=True)
+        (self.r / "gdbus-settings.txt").write_text("({'wireguard': {'peers': <[{'endpoint': <'[2001:db8::1%x#]:51820'>}]>}},)")
+        self.assertEqual(self.ks("activer").returncode, 1)
+        self.assertEqual(self.sudo(), [])
+
     def test_formes_de_remote_openvpn(self):
         for remote, attendu in (("remote = 192.0.2.10, port = 443, proto-tcp = yes", "192.0.2.10@443/tcp"),
                                 ("remote = [2001:db8::1]:1195:tcp", "2001:db8::1@1195/tcp"),

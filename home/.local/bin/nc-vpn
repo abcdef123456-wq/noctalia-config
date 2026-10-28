@@ -1054,8 +1054,14 @@ def tunnel_de(c):
 
 def ip_ou_refus(texte, port, proto):
     import ipaddress
+    brut = texte.strip("[]")
     try:
-        ip = ipaddress.ip_address(texte.strip("[]"))
+        # Même validation que l'assistant root : avant ipaddress (qui accepte « %zone » avec n'importe quel signe)
+        if not re.fullmatch(r"[0-9A-Fa-f:.]{2,45}", brut):
+            raise ValueError(brut)
+        ip = ipaddress.ip_address(brut)
+        if getattr(ip, "scope_id", None) or ip.is_link_local or ip.is_unspecified or ip.is_loopback or ip.is_multicast:
+            raise ValueError(brut)
     except ValueError:
         raise Echec(T("L'adresse du serveur est un nom (« %s ») : le kill switch demande une adresse IP. Mets l'adresse IP du serveur dans la connexion."
                       % court(texte, 60), "The server address is a name (\"%s\"): the kill switch needs an IP address. Put the server's IP address in the connection."
