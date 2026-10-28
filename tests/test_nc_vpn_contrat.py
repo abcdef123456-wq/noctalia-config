@@ -79,7 +79,7 @@ class ContratVpn(BaseVpn):
     def test_killswitch_json(self):
         r, d = self.json("killswitch", "etat-json")
         self.assertEqual(d["contrat"], 1)
-        self.assertEqual(set(d), {"contrat", "installe", "voulu", "actif", "refus", "limites"})
+        self.assertEqual(set(d), {"contrat", "installe", "voulu", "actif", "refus", "refus_code", "limites"})
         self.assertIsInstance(d["installe"], bool)
         self.assertIsInstance(d["voulu"], bool)
         self.assertIsInstance(d["limites"], list)

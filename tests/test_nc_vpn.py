@@ -28,10 +28,10 @@ class EtatVpn(BaseVpn):
 
     def test_networkmanager_arrete_ou_nmcli_absent(self):
         r = self.vpn("etat-json", NM_ARRETE="1")
-        self.assertEqual(json.loads(r.stdout), {"contrat": 1, "disponible": False})
+        self.assertEqual(json.loads(r.stdout), {"contrat": 1, "disponible": False, "connexions": [], "actives": []})
         (self.r / "faux-bin" / "nmcli").unlink()
         r = self.vpn("etat-json", PATH=str(self.r / "etat"))        # aucun nmcli nulle part
-        self.assertEqual((r.returncode, json.loads(r.stdout)), (0, {"contrat": 1, "disponible": False}))
+        self.assertEqual((r.returncode, json.loads(r.stdout)), (0, {"contrat": 1, "disponible": False, "connexions": [], "actives": []}))
         self.assertEqual(r.stderr, "")
 
     def test_liste_en_clair(self):

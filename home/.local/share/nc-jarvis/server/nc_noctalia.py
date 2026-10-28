@@ -40,12 +40,25 @@ ECRANS = ("pc", "miroir", "etendre", "externe")
 # VPN : liste blanche d'actions → argv de nc-vpn (jamais un shell). Le kill switch ne s'active ni ne se coupe d'ici : couper
 # une protection à distance, avec un compte de messagerie ou une clé volés, démasquerait la connexion (lecture seule).
 VPN_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-VPN_DELAIS = {"vpn_etat": 15, "vpn_connecter": 130, "vpn_deconnecter": 70, "vpn_tout": 130, "vpn_killswitch": 20}
+# Délais de JARVIS : AU-DESSUS du pire cas de nc-vpn (connecter ~190 s : état 15, trousseau ~50, nmcli up 120 ; couper ~75 s), pour
+# que nc-vpn finisse seul et efface son dossier de mot de passe. Au délai : SIGTERM au groupe (nc-vpn efface), SIGKILL 5 s après.
+VPN_DELAIS = {"vpn_etat": 30, "vpn_connecter": 210, "vpn_deconnecter": 90, "vpn_tout": 210, "vpn_killswitch": 60}
+GRACE_ARRET = 5             # secondes entre SIGTERM et SIGKILL
+# Pourquoi le kill switch ne peut pas s'activer : table maison par `refus_code` (le texte `refus` de nc-vpn, qui peut nommer un
+# serveur, n'est JAMAIS relayé) ; les limites sont un texte fixe d'ici.
+VPN_REFUS = {"": "", "pas_installe": "l'assistant root n'est pas installé", "aucun_tunnel": "aucun tunnel n'est monté",
+             "plusieurs_tunnels": "plusieurs tunnels sont montés (le kill switch n'en protège qu'un)",
+             "serveur_nom": "l'adresse du serveur est un nom, pas une adresse IP", "mullvad": "Mullvad est connecté (sa propre protection)",
+             "firewall": "un pare-feu en conflit", "nm_indisponible": "NetworkManager n'est pas disponible", "autre": "raison non précisée"}
+VPN_LIMITES = ("Ne dure pas après un redémarrage.", "Ne couvre pas les conteneurs ni les machines virtuelles.",
+               "Les adresses du serveur sont figées à l'activation.", "Un seul tunnel et un seul serveur.",
+               "Le réseau local reste joignable.", "Un rechargement de nftables efface la protection.")
 VPN_MAX_SORTIE = 60000      # octets lus sur nc-vpn avant de valider (le résultat rendu est borné plus bas)
+VPN_AFFICHEES = 20          # connexions montrées dans la réponse (la liste complète reste dans nc-vpn)
 VPN_MAX_LIGNES = 64         # connexions rendues au plus
 VPN_ERREURS = {"uuid_invalide": "UUID invalide.", "inconnue": "Ce n'est pas un VPN connu de NetworkManager.",
                "nm_indisponible": "NetworkManager n'est pas disponible.", "echec": "nc-vpn a échoué (connexion refusée ou délai).",
-               "echec_partiel": "Certains tunnels n'ont pas pu être coupés."}
+               "echec_partiel": "Certains tunnels n'ont pas pu être coupés.", "occupe": "Un autre changement de VPN est en cours : réessaie dans un instant."}
 CLE = re.compile(r"[A-Z][A-Z0-9_]{0,60}")
 # Réglages changeables à distance (Telegram, cockpit) : LISTE BLANCHE, copie de DISTANT_PERMIS de nc-reglages (qui la
 # vérifie aussi, côté PC, avec « set --distant » : ce contrôle-ci ne suffit pas, un gateway compromis le contournerait).
@@ -77,21 +90,58 @@ def local():
     return os.environ.get("DEPLOY_MODE", "local").strip().lower() != "server"
 
 
-async def executer(argv, delai=DELAI, limite=3000):
+async def executer(argv, delai=DELAI, limite=3000, fusion=True):
     """Une commande de l'hôte (liste d'arguments, jamais de shell) ; (code, sortie tronquée)."""
     programme = str(BIN / argv[0]) if not argv[0].startswith("/") and (BIN / argv[0]).exists() else argv[0]
     try:
+        # Un groupe de processus à part : au délai, on arrête TOUT le groupe (nc-vpn et ses nmcli), pas seulement le père
         p = await asyncio.create_subprocess_exec(programme, *argv[1:], stdin=asyncio.subprocess.DEVNULL,
-                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                                                 stdout=asyncio.subprocess.PIPE,
+                                                 stderr=asyncio.subprocess.STDOUT if fusion else asyncio.subprocess.PIPE,
+                                                 start_new_session=True)
     except OSError as exc:
         return 127, str(exc)[:200]
+
+    async def lire(flux, borne):
+        """Lit tout (pour ne pas bloquer le programme) mais ne garde que `borne` octets."""
+        gardes = bytearray()
+        while True:
+            bloc = await flux.read(4096)
+            if not bloc:
+                return bytes(gardes)
+            gardes += bloc[:max(0, borne - len(gardes))]
+
+    taches = [asyncio.ensure_future(lire(p.stdout, limite))]
+    if not fusion:
+        taches.append(asyncio.ensure_future(lire(p.stderr, 4096)))     # lue pour ne pas bloquer, jamais relayée
     try:
-        sortie, _ = await asyncio.wait_for(p.communicate(), delai)
+        await asyncio.wait_for(asyncio.gather(*taches, p.wait()), delai)
     except asyncio.TimeoutError:
-        p.kill()
-        await p.wait()
+        await arreter_groupe(p)
+        for t in taches:
+            t.cancel()
         return 124, "Délai dépassé"
+    sortie = taches[0].result()
     return p.returncode, re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", sortie.decode("utf-8", errors="replace"))[:limite].strip()
+
+
+async def arreter_groupe(p):
+    """SIGTERM au groupe du processus (il peut effacer ses fichiers temporaires), puis SIGKILL au groupe s'il traîne."""
+    import signal
+    for sig, attente in ((signal.SIGTERM, GRACE_ARRET), (signal.SIGKILL, None)):
+        try:
+            os.killpg(p.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            break
+        try:
+            await asyncio.wait_for(p.wait(), attente)
+            break
+        except asyncio.TimeoutError:
+            continue
+    try:
+        await asyncio.wait_for(p.wait(), 2)
+    except asyncio.TimeoutError:
+        pass
 
 
 def preparer(action, arguments):
@@ -204,45 +254,61 @@ def vpn_valider(action, code, sortie, uuid=None):
     if action == "vpn_etat":
         if code != 0 or not isinstance(d.get("disponible"), bool):
             return invalide
+        if not d["disponible"]:                  # NetworkManager absent : pas de liste à vérifier (nc-vpn la rend vide)
+            return False, VPN_ERREURS["nm_indisponible"]
         lignes = _liste(d.get("connexions"), True)
         if lignes is None:
             return invalide
-        return True, json.dumps({"contrat": 1, "disponible": d["disponible"], "connexions": lignes}, ensure_ascii=False)
+        if not lignes:
+            return True, "Aucune connexion VPN ou WireGuard dans NetworkManager."
+        texte = ["VPN : %d connexion(s)" % len(lignes)]
+        for c in lignes[:VPN_AFFICHEES]:
+            texte.append("%s %s [%s]%s\n  %s" % ("●" if c["active"] else "○", c["nom"], c["type"],
+                                                " " + c["interface"] if c["interface"] else "", c["uuid"]))
+        if len(lignes) > VPN_AFFICHEES:
+            texte.append("… et %d autre(s)." % (len(lignes) - VPN_AFFICHEES))
+        return True, "\n".join(texte)
     if action == "vpn_killswitch":
-        limites = d.get("limites")
-        refus = _texte(d.get("refus"), 300)
+        # `refus` et `limites` (textes de nc-vpn, dans la langue du bureau, pouvant nommer un serveur) ne sont pas relayés
+        rc = d.get("refus_code", "")
         if code != 0 or not all(isinstance(d.get(k), bool) for k in ("installe", "voulu")) or d.get("actif") not in (True, False, None) \
-                or refus is None or not isinstance(limites, list) or len(limites) > 12:
+                or not isinstance(rc, str):
             return invalide
-        textes = [_texte(x, 300) for x in limites]
-        if any(t is None for t in textes):
-            return invalide
-        return True, json.dumps({"contrat": 1, "installe": d["installe"], "voulu": d["voulu"], "actif": d["actif"],
-                                 "refus": refus, "limites": textes}, ensure_ascii=False)
+        rc = rc if rc in VPN_REFUS else "autre"
+        etat = "actif" if d["actif"] is True else "inactif" if d["actif"] is False else "inconnu"
+        texte = "Kill switch : " + etat + (" (voulu dans les réglages)" if d["voulu"] else " (coupé dans les réglages)")
+        if not d["installe"]:
+            texte += " ; assistant root non installé"
+        if d["actif"] is not True and rc:
+            texte += "\nImpossible à activer : " + VPN_REFUS[rc] + "."
+        texte += "\nLimites : " + " ".join(VPN_LIMITES)
+        return True, texte
     ok = d.get("ok")
     if not isinstance(ok, bool) or ok != (code == 0):
         return invalide
     if not ok:
         c = d.get("code")
-        extra = {}
+        texte = VPN_ERREURS.get(c if isinstance(c, str) else "", VPN_ERREURS["echec"])
         if action == "vpn_tout":
-            for k in ("coupes", "rates"):
-                extra[k] = _liste(d.get(k), False) if k in d else []
-                if extra[k] is None:
-                    extra[k] = []
-        return False, VPN_ERREURS.get(c if isinstance(c, str) else "", VPN_ERREURS["echec"]) + (" " + json.dumps(extra, ensure_ascii=False) if extra else "")
+            rates = _liste(d.get("rates"), False) or []
+            if rates:
+                texte += " Restent montés : " + ", ".join(r["nom"] for r in rates[:8]) + "."
+        return False, texte
     if action == "vpn_tout":
         coupes, rates = _liste(d.get("coupes"), False), _liste(d.get("rates"), False)
         if d.get("action") != "tout-deconnecter" or coupes is None or rates is None:
             return invalide
-        return True, json.dumps({"contrat": 1, "ok": True, "action": "tout-deconnecter", "coupes": coupes, "rates": rates}, ensure_ascii=False)
+        if rates:
+            return False, VPN_ERREURS["echec_partiel"] + " Restent montés : " + ", ".join(r["nom"] for r in rates[:8]) + "."
+        return True, ("Tunnels coupés : " + ", ".join(c["nom"] for c in coupes[:8]) + ".") if coupes else "Aucun tunnel n'était monté."
     voulu = "connecter" if action == "vpn_connecter" else "deconnecter"
     c = _connexion(d, False)
     if d.get("action") != voulu or c is None or c["uuid"] != (uuid or "").lower() or not isinstance(d.get("actif"), bool) \
             or d["actif"] != (voulu == "connecter") or not isinstance(d.get("deja"), bool):
         return invalide
-    return True, json.dumps({"contrat": 1, "ok": True, "action": voulu, "uuid": c["uuid"], "nom": c["nom"],
-                             "actif": d["actif"], "deja": d["deja"]}, ensure_ascii=False)
+    if voulu == "connecter":
+        return True, ("Déjà connecté : " if d["deja"] else "Connecté : ") + c["nom"]
+    return True, ("Déjà coupé : " if d["deja"] else "Tunnel coupé : ") + c["nom"]
 
 
 async def etat():
@@ -271,7 +337,7 @@ async def agir(action, arguments, confirme=False):
         quoi = "un tunnel VPN va changer d'état" if action.startswith("vpn_") else "un écran va s'éteindre"
         return dict(success=False, confirm=True, output="Action sensible (" + quoi + ") : confirme avec /nc oui dans les deux minutes.")
     if action.startswith("vpn_"):
-        code, sortie = await executer(argv, VPN_DELAIS[action], VPN_MAX_SORTIE)
+        code, sortie = await executer(argv, VPN_DELAIS[action], VPN_MAX_SORTIE, False)
         succes, texte = vpn_valider(action, code, sortie, argv[2] if action in ("vpn_connecter", "vpn_deconnecter") else None)
         logger.info("Action /nc %s %s → code %s", action, " ".join(arguments), code)
         return dict(success=succes, output=texte)

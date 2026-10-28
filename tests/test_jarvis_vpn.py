@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -37,7 +38,7 @@ class Base(unittest.TestCase):
         self.appels = []
         self.reponse = (0, "{}")
 
-        async def executer(argv, delai=20, limite=3000):
+        async def executer(argv, delai=20, limite=3000, fusion=True):
             self.appels.append((list(argv), delai, limite))
             return self.reponse
         self.m.executer = executer
@@ -74,9 +75,13 @@ class ListeBlanche(Base):
     def test_delais_bornes(self):
         self.reponse = (0, json.dumps({"contrat": 1, "disponible": False, "connexions": []}))
         self.agir("vpn_etat")
-        self.assertEqual(self.appels[0][1:], (15, self.m.VPN_MAX_SORTIE))
+        self.assertEqual(self.appels[0][1:], (30, self.m.VPN_MAX_SORTIE))
         for a, d in self.m.VPN_DELAIS.items():
-            self.assertTrue(0 < d <= 130, a)
+            self.assertTrue(0 < d <= 300, a)
+        # au-dessus du pire cas de nc-vpn (connecter ~190 s, couper ~75 s) : il finit seul et efface son dossier de mot de passe
+        self.assertGreaterEqual(self.m.VPN_DELAIS["vpn_connecter"], 200)
+        self.assertGreaterEqual(self.m.VPN_DELAIS["vpn_deconnecter"], 90)
+        self.assertEqual((self.m.VPN_DELAIS["vpn_etat"], self.m.VPN_DELAIS["vpn_killswitch"]), (30, 60))
 
     def test_pas_de_killswitch_activer_ni_desactiver(self):
         for action in ("vpn_killswitch_activer", "vpn_killswitch_desactiver", "vpn_activer", "vpn_importer", "vpn", "vpn_"):
@@ -177,7 +182,7 @@ class Identite(Base):
         import nc_management
         appels = []
 
-        async def executer(argv, delai=20, limite=3000):
+        async def executer(argv, delai=20, limite=3000, fusion=True):
             appels.append(list(argv))
             return 0, json.dumps({"contrat": 1, "ok": True, "action": "deconnecter", "uuid": U1, "nom": "Labo", "actif": False, "deja": False})
         nc_noctalia.executer = executer
@@ -205,36 +210,36 @@ class Sortie(Base):
             self.assertIn("invalide", texte)
         self.assertFalse(self.lire("vpn_etat", 1, '{"contrat": 1, "disponible": true, "connexions": []}')[0], "code de sortie non nul")
         bonne = {"contrat": 1, "ok": True, "action": "connecter", "uuid": U1, "nom": "Labo", "actif": True, "deja": False}
-        self.assertTrue(self.lire("vpn_connecter", 0, json.dumps(bonne), U1)[0])
+        self.assertEqual(self.lire("vpn_connecter", 0, json.dumps(bonne), U1), (True, "Connecté : Labo"))
         for tordu in (dict(bonne, uuid=U2), dict(bonne, action="deconnecter"), dict(bonne, actif=False), dict(bonne, deja="non"),
                       dict(bonne, ok=False), dict(bonne, uuid="x"), dict(bonne, nom=5)):
             self.assertFalse(self.lire("vpn_connecter", 0, json.dumps(tordu), U1)[0], tordu)
         self.assertFalse(self.lire("vpn_connecter", 1, json.dumps(bonne), U1)[0], "ok vrai mais code non nul")
 
-    def test_sortie_reconstruite_champs_inconnus_jetes(self):
+    def test_texte_seulement_champs_inconnus_jetes(self):
         brut = {"contrat": 1, "disponible": True, "secret": "S3CRET", "ip": "203.0.113.9",
                 "connexions": [dict(conn(), mot_de_passe="hunter2", ip="203.0.113.9")], "actives": []}
         ok, texte = self.lire("vpn_etat", 0, json.dumps(brut))
         self.assertTrue(ok)
-        self.assertNotIn("S3CRET", texte)
-        self.assertNotIn("hunter2", texte)
-        self.assertNotIn("203.0.113.9", texte)
-        d = json.loads(texte)
-        self.assertEqual(set(d), {"contrat", "disponible", "connexions"})
-        self.assertEqual(set(d["connexions"][0]), {"uuid", "nom", "type", "active", "interface"})
+        for interdit in ("S3CRET", "hunter2", "203.0.113.9", "{", "}"):
+            self.assertNotIn(interdit, texte)
+        self.assertIn(U1, texte)
+        self.assertIn("Labo", texte)
 
     def test_sortie_bornee(self):
         grosse = {"contrat": 1, "disponible": True, "connexions": [conn(nom="N" * 5000 + "\x1b[31m\n")] * 64, "actives": []}
         ok, texte = self.lire("vpn_etat", 0, json.dumps(grosse))
         self.assertTrue(ok)
-        d = json.loads(texte)
-        self.assertEqual(len(d["connexions"][0]["nom"]), 80)
+        self.assertNotIn("N" * 81, texte)
         self.assertNotIn("\x1b", texte)
-        self.assertNotIn("\\n", texte)
+        self.assertLessEqual(len(texte), 20 * 200 + 200)
+        self.assertIn("et 44 autre(s)", texte)
         trop = dict(grosse, connexions=[conn()] * 300)
         self.assertFalse(self.lire("vpn_etat", 0, json.dumps(trop))[0], "plus de 256 connexions : refusé")
-        beaucoup = dict(grosse, connexions=[conn()] * 100)
-        self.assertEqual(len(json.loads(self.lire("vpn_etat", 0, json.dumps(beaucoup))[1])["connexions"]), self.m.VPN_MAX_LIGNES)
+
+    def test_nm_indisponible(self):
+        for corps in ({"contrat": 1, "disponible": False, "connexions": [], "actives": []}, {"contrat": 1, "disponible": False}):
+            self.assertEqual(self.lire("vpn_etat", 0, json.dumps(corps)), (False, "NetworkManager n'est pas disponible."))
 
     def test_erreur_de_nc_vpn_texte_maison(self):
         err = {"contrat": 1, "ok": False, "code": "inconnue", "erreur": "texte libre avec 203.0.113.9 et mot de passe"}
@@ -245,22 +250,32 @@ class Sortie(Base):
         ok, texte = self.lire("vpn_connecter", 1, json.dumps(dict(err, code="n'importe quoi")), U1)
         self.assertFalse(ok)
         self.assertIn("a échoué", texte)
+        self.assertIn("réessaie", self.lire("vpn_connecter", 1, json.dumps(dict(err, code="occupe")), U1)[1])
 
-    def test_killswitch_borne(self):
-        ok, texte = self.lire("vpn_killswitch", 0, json.dumps({"contrat": 1, "installe": True, "voulu": True, "actif": None,
-                                                                "refus": "r" * 999, "limites": ["l" * 999] * 12}))
+    def test_killswitch_ni_refus_ni_limites_relayes(self):
+        """Le refus de nc-vpn peut nommer le serveur : jamais relayé (ni `refus`, ni `limites`)."""
+        brut = {"contrat": 1, "installe": True, "voulu": True, "actif": False, "refus_code": "serveur_nom",
+                "refus": "L'adresse du serveur est un nom (vpn.example.org)", "limites": ["vpn.example.org et 203.0.113.9"]}
+        ok, texte = self.lire("vpn_killswitch", 0, json.dumps(brut))
         self.assertTrue(ok)
-        d = json.loads(texte)
-        self.assertEqual(len(d["refus"]), 300)
-        self.assertEqual(len(d["limites"][0]), 300)
-        self.assertFalse(self.lire("vpn_killswitch", 0, json.dumps({"contrat": 1, "installe": True, "voulu": True, "actif": "oui",
-                                                                     "refus": "", "limites": []}))[0])
+        self.assertNotIn("vpn.example.org", texte)
+        self.assertNotIn("203.0.113.9", texte)
+        self.assertIn("un nom, pas une adresse IP", texte)
+        self.assertIn("redémarrage", texte)                        # limites : texte fixe de JARVIS
+        # un code inconnu devient « autre » ; sans refus_code (ancien nc-vpn) : pas de raison affichée
+        self.assertIn("raison non précisée", self.lire("vpn_killswitch", 0, json.dumps(dict(brut, refus_code="x<script>")))[1])
+        sans = {k: v for k, v in brut.items() if k != "refus_code"}
+        self.assertNotIn("Impossible", self.lire("vpn_killswitch", 0, json.dumps(sans))[1])
+        for mauvais in (dict(brut, actif="oui"), dict(brut, refus_code=5), dict(brut, installe=1)):
+            self.assertFalse(self.lire("vpn_killswitch", 0, json.dumps(mauvais))[0], mauvais)
+        for code in self.m.VPN_REFUS:
+            self.assertTrue(self.lire("vpn_killswitch", 0, json.dumps(dict(brut, refus_code=code)))[0])
 
     def test_tout_partiel(self):
         err = {"contrat": 1, "ok": False, "code": "echec_partiel", "coupes": [{"uuid": U1, "nom": "A"}], "rates": [{"uuid": U2, "nom": "B"}]}
         ok, texte = self.lire("vpn_tout", 1, json.dumps(err))
         self.assertFalse(ok)
-        self.assertIn(U2, texte)
+        self.assertIn("Restent montés : B", texte)
 
 
 class ExecutionReelle(unittest.TestCase):
@@ -272,6 +287,13 @@ class ExecutionReelle(unittest.TestCase):
         faux = self.bin / "nc-vpn"
         faux.write_text('#!/usr/bin/env python3\nimport json, os, sys, time\n'
                         'open(os.environ["FAUX_JOURNAL"], "a").write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                        'import signal\n'
+                        'def fin(n, c):\n'
+                        '    open(os.environ["FAUX_JOURNAL"] + ".term", "w").write("propre")\n'
+                        '    sys.exit(1)\n'
+                        'if os.environ.get("FAUX_TERM") == "ignore": signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+                        'elif os.environ.get("FAUX_TERM"): signal.signal(signal.SIGTERM, fin)\n'
+                        'if os.environ.get("FAUX_ERR"): sys.stderr.write(os.environ["FAUX_ERR"] + "\\n")\n'
                         'if os.environ.get("FAUX_LENT"): time.sleep(30)\n'
                         'print(os.environ.get("FAUX_SORTIE", "{}"))\n')
         faux.chmod(0o755)
@@ -287,7 +309,7 @@ class ExecutionReelle(unittest.TestCase):
         with mock.patch.dict(os.environ, FAUX_SORTIE=sortie):
             r = asyncio.run(self.m.agir("vpn_connecter", [U1], confirme=True))
         self.assertTrue(r["success"], r)
-        self.assertEqual(json.loads(r["output"])["uuid"], U1)
+        self.assertEqual(r["output"], "Connecté : Labo")
         self.assertEqual(json.loads(self.journal.read_text()), ["connecter", U1, "--json"])
         r = asyncio.run(self.m.agir("vpn_connecter", [U1 + "; id"], confirme=True))
         self.assertFalse(r["success"])
@@ -298,6 +320,38 @@ class ExecutionReelle(unittest.TestCase):
         with mock.patch.dict(os.environ, FAUX_LENT="1"):
             r = asyncio.run(self.m.agir("vpn_etat", [], confirme=True))
         self.assertEqual((r["success"], r["output"]), (False, "Délai dépassé"))
+
+    def test_delai_sigterm_d_abord_au_groupe(self):
+        """Au délai : SIGTERM (nc-vpn peut effacer son dossier de mot de passe), jamais SIGKILL en premier."""
+        self.m.VPN_DELAIS["vpn_etat"] = 0.5
+        with mock.patch.dict(os.environ, FAUX_LENT="1", FAUX_TERM="propre"):
+            r = asyncio.run(self.m.agir("vpn_etat", [], confirme=True))
+        self.assertEqual(r["output"], "Délai dépassé")
+        self.assertEqual(Path(str(self.journal) + ".term").read_text(), "propre")
+
+    def test_delai_sigkill_si_sigterm_ignore(self):
+        self.m.VPN_DELAIS["vpn_etat"] = 0.3
+        self.m.GRACE_ARRET = 0.3
+        with mock.patch.dict(os.environ, FAUX_LENT="1", FAUX_TERM="ignore"):
+            debut = time.monotonic()
+            r = asyncio.run(self.m.agir("vpn_etat", [], confirme=True))
+        self.assertEqual(r["output"], "Délai dépassé")
+        self.assertLess(time.monotonic() - debut, 5)
+
+    def test_stderr_separe_et_jamais_relaye(self):
+        sortie = json.dumps({"contrat": 1, "disponible": True, "connexions": [conn()], "actives": []})
+        with mock.patch.dict(os.environ, FAUX_SORTIE=sortie, FAUX_ERR="ERREUR-SECRETE 203.0.113.9"):
+            r = asyncio.run(self.m.agir("vpn_etat", [], confirme=True))
+        self.assertTrue(r["success"], r)
+        self.assertNotIn("SECRETE", r["output"])
+
+    def test_sortie_geante_bornee_en_octets(self):
+        m = self.m
+        m.VPN_MAX_SORTIE = 1000
+        with mock.patch.dict(os.environ, FAUX_SORTIE="x" * 100000):
+            r = asyncio.run(m.agir("vpn_etat", [], confirme=True))
+        self.assertFalse(r["success"])
+        self.assertIn("invalide", r["output"])
 
     def test_sortie_non_json_refusee(self):
         with mock.patch.dict(os.environ, FAUX_SORTIE="usage: nc-vpn ..."):

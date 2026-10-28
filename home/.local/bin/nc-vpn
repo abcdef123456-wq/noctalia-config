@@ -115,12 +115,14 @@ WG_EXEC = ("preup", "postup", "predown", "postdown")
 OVPN_FICHIERS = ("ca", "cert", "key", "pkcs12", "tls-auth", "tls-crypt", "tls-crypt-v2", "secret", "crl-verify", "extra-certs", "dh")
 
 
+CODES_REFUS = ("pas_installe", "aucun_tunnel", "plusieurs_tunnels", "serveur_nom", "mullvad", "firewall", "nm_indisponible", "autre")
 CONTRAT = 1      # version du contrat JSON (docs/vpn-contrat.md) : change seulement si un champ disparaît ou change de sens
 
 
 class Echec(Exception):
     """Une erreur annoncée. `code` est stable (contrat JSON) : echec, uuid_invalide, nm_indisponible, inconnue,
-    echec_partiel, killswitch_coupe, killswitch_refuse."""
+    echec_partiel, occupe, killswitch_coupe, killswitch_refuse. `refus` (killswitch etat-json) vient d'un Echec dont le
+    code donne `refus_code` : pas_installe, aucun_tunnel, plusieurs_tunnels, serveur_nom, mullvad, nm_indisponible, autre."""
     def __init__(self, message="", code="echec"):
         super().__init__(message)
         self.code = code
@@ -1151,7 +1153,7 @@ def ip_ou_refus(texte, port, proto):
     except ValueError:
         raise Echec(T("L'adresse du serveur est un nom (« %s ») : le kill switch demande une adresse IP. Mets l'adresse IP du serveur dans la connexion."
                       % court(texte, 60), "The server address is a name (\"%s\"): the kill switch needs an IP address. Put the server's IP address in the connection."
-                      % court(texte, 60)))
+                      % court(texte, 60)), "serveur_nom")
     return "%s@%d/%s" % (ip, port, proto)
 
 
@@ -1220,16 +1222,16 @@ def resoudre_tunnel():
     """{"tunnel", "nom", "endpoints"} du tunnel monté, ou un refus (Echec) qui dit pourquoi."""
     e = etat()
     if not e["disponible"]:
-        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."))
+        raise Echec(T("NetworkManager n'est pas disponible.", "NetworkManager is not available."), "nm_indisponible")
     actives = e["actives"]
     if not actives:
         if mullvad_etat()["connecte"]:
             raise Echec(T("Mullvad est connecté : utilise sa protection, `mullvad lockdown-mode set on`.",
-                          "Mullvad is connected: use its own protection, `mullvad lockdown-mode set on`."))
-        raise Echec(T("Aucun tunnel monté : monte d'abord un tunnel, puis active le kill switch.", "No tunnel is up: bring one up first, then enable the kill switch."))
+                          "Mullvad is connected: use its own protection, `mullvad lockdown-mode set on`."), "mullvad")
+        raise Echec(T("Aucun tunnel monté : monte d'abord un tunnel, puis active le kill switch.", "No tunnel is up: bring one up first, then enable the kill switch."), "aucun_tunnel")
     if len(actives) > 1:
         raise Echec(T("Plusieurs tunnels montés : le kill switch n'en protège qu'un seul, coupe les autres.",
-                      "Several tunnels are up: the kill switch protects only one, bring the others down."))
+                      "Several tunnels are up: the kill switch protects only one, bring the others down."), "plusieurs_tunnels")
     c = actives[0]
     iface = tunnel_de(c)
     eps = endpoints_wireguard(c["uuid"]) if c["type"] == "wireguard" else endpoints_openvpn(c["uuid"])
@@ -1325,8 +1327,9 @@ def killswitch(a, en_json=False):
     elif a == ["etat-json"]:
         installe = assistant_installe()
         actif = killswitch_etat() if installe else None
-        refus = ""
+        refus, refus_code = "", ""
         if not installe:
+            refus_code = "pas_installe"
             refus = T("Pas installé : l'assistant se pose avec ton accord (install.sh --seulement killswitch).",
                       "Not installed: the helper is set up with your consent (install.sh --seulement killswitch).")
         elif actif is not True:
@@ -1334,8 +1337,9 @@ def killswitch(a, en_json=False):
                 resoudre_tunnel()
             except Echec as e:
                 refus = str(e)
+                refus_code = e.code if e.code in CODES_REFUS else "autre"
         print(json.dumps({"contrat": CONTRAT, "installe": installe, "voulu": reglage("VPN_KILLSWITCH", "non") == "oui", "actif": actif,
-                          "refus": refus, "limites": limites()}, ensure_ascii=False))
+                          "refus": refus, "refus_code": refus_code, "limites": limites()}, ensure_ascii=False))
     else:
         print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
         sys.exit(2)
@@ -1361,7 +1365,7 @@ def main():
         a = a[:-1]
     try:
         if cmd == "etat-json" and len(a) == 1:
-            print(json.dumps(dict({"contrat": CONTRAT}, **etat()), ensure_ascii=False))
+            print(json.dumps(dict({"contrat": CONTRAT, "connexions": [], "actives": []}, **etat()), ensure_ascii=False))
         elif cmd == "liste" and len(a) == 1:
             e = etat()
             if not e["disponible"]:

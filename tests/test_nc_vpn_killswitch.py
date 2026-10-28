@@ -279,6 +279,26 @@ class KillSwitch(BaseVpn):
         self.assertEqual((j["installe"], j["actif"]), (True, False))
         self.assertEqual(self.sudo()[0], ["-n", "-l", str(self.helper), "etat"])
 
+    def test_refus_code_stable_et_nom_d_hote_dans_refus_seulement(self):
+        """Le contrat : `refus_code` est une valeur fixe ; le nom d'hôte du serveur n'est que dans le texte `refus`."""
+        j = json.loads(self.ks("etat-json", NC_VPN_ROOT=str(self.r / "absent")).stdout)
+        self.assertEqual(j["refus_code"], "pas_installe")
+        (self.r / "ks-etat").write_text("inactif\n")
+        self.connexions(dict(uuid=U1, type="vpn", active=False, dev="tun0", nom="A"))
+        j = json.loads(self.ks("etat-json").stdout)               # installé, aucun tunnel monté (le faux Wi-Fi seul)
+        self.assertEqual(j["refus_code"], "aucun_tunnel")
+        self.openvpn_sous_wifi("remote = vpn.example.org:1194:udp")
+        j = json.loads(self.ks("etat-json").stdout)
+        self.assertEqual(j["refus_code"], "serveur_nom")
+        self.assertIn("vpn.example.org", j["refus"])
+        self.assertNotIn("vpn.example.org", j["refus_code"])
+        (self.r / "ks-etat").write_text("actif\n")
+        self.assertEqual(json.loads(self.ks("etat-json").stdout)["refus_code"], "")
+        self.connexions(dict(uuid=U1, type="vpn", active=True, dev="tun0", nom="A"), dict(uuid=U2, type="vpn", active=True, dev="tun1", nom="B"))
+        (self.r / "ks-etat").write_text("inactif\n")
+        self.assertEqual(json.loads(self.ks("etat-json").stdout)["refus_code"], "plusieurs_tunnels")
+        self.assertEqual(json.loads(self.ks("etat-json", NM_ARRETE="1").stdout)["refus_code"], "nm_indisponible")
+
     def test_aucun_appel_a_nft_ni_a_ip_link_ni_a_systemctl(self):
         self.openvpn_sous_wifi()
         self.ks("activer")
