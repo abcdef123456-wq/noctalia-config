@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import shutil
 import stat
 import subprocess
 import sys
@@ -117,13 +118,32 @@ class Seulement(Base):
         # sudo : note ses arguments, ne lance rien ; « grep » (règle déjà posée ?) répond non
         faux(self.bin, "sudo", 'echo "sudo $*" >> "$FAUX_JOURNAL"\n[ "$1" = grep ] && exit 1\nexit 0')
         # stat : note l'appel, dit que le dossier est à root (uid 0, droits 755) sauf FAUX_UID
-        faux(self.bin, "stat", 'echo "stat $*" >> "$FAUX_JOURNAL"\ncase "$*" in *%u*) echo "${FAUX_UID:-0}" ;; *) echo 755 ;; esac')
+        # (le clone de l'essai, lui, est regardé pour de vrai : /usr/bin/stat)
+        faux(self.bin, "stat", 'echo "stat $*" >> "$FAUX_JOURNAL"\ncase "${@: -1}" in "$CLONE_ESSAI"*) exec /usr/bin/stat "$@" ;; esac\ncase "$*" in *%u*) echo "${FAUX_UID:-0}" ;; *) echo 755 ;; esac')
+        self.clone = self.r / "clone-essai"
+        self.faire_clone(self.clone)
+        self.install = self.clone / "install.sh"
+        self.env["CLONE_ESSAI"] = str(self.clone)
         faux(self.bin, "nft", "exit 0")                      # nftables « présent » : aucun paquet à proposer dans ces essais
         for nom in ("pacman", "apt-get", "dnf", "zypper", "systemctl"):
             faux(self.bin, nom, f'echo "{nom} $*" >> "$FAUX_JOURNAL"')
 
+    def git(self, d, *args):
+        subprocess.run(["git", "-c", "user.name=essai", "-c", "user.email=essai@example.invalid", "-C", str(d), *args], check=True,
+                       capture_output=True, env={"PATH": "/usr/bin:/bin", "HOME": str(self.home), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"})
+
+    def faire_clone(self, d):
+        """Un VRAI petit dépôt git : install.sh et system/ du dépôt, un commit."""
+        d.mkdir()
+        shutil.copy(INSTALL, d / "install.sh")
+        shutil.copytree(REPO / "system", d / "system")
+        d.chmod(0o755)
+        self.git(d, "init", "-q")
+        self.git(d, "add", "install.sh", "system")
+        self.git(d, "commit", "-q", "-m", "Commit d'essai")
+
     def sans_terminal(self, *args, **plus):
-        r = subprocess.run(["bash", str(INSTALL), *args], env=dict(self.env, **plus), capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        r = subprocess.run(["bash", str(self.install), *args], env=dict(self.env, **plus), capture_output=True, text=True, stdin=subprocess.DEVNULL,
                            start_new_session=True, timeout=60)
         return r
 
@@ -131,7 +151,7 @@ class Seulement(Base):
         env = dict(self.env, **plus)
         pid, fd = pty.fork()
         if pid == 0:
-            os.execvpe("bash", ["bash", str(INSTALL), *args], env)
+            os.execvpe("bash", ["bash", str(self.install), *args], env)
         os.write(fd, reponse.encode())
         sortie = b""
         while True:
@@ -203,7 +223,7 @@ class Seulement(Base):
         self.assertEqual(code, 0, sortie)
         self.assertEqual(sortie.count("[o/N]") + sortie.count("[O/n]"), 1, "une seule question : " + sortie)
         j = self.log()
-        self.assertIn("sudo install -Dm0755 -o root -g root " + str(REPO / "system/nc-energie-root") + " /usr/local/bin/nc-energie-root", j)
+        self.assertIn("sudo install -Dm0755 -o root -g root " + str(self.clone / "system/nc-energie-root") + " /usr/local/bin/nc-energie-root", j)
         self.assertIn("sudo visudo -cf /etc/sudoers.d/nc-energie.tmp", j)
         self.assertIn("stat ", j)
         self.assertNotIn("nc-vpn", j)
@@ -220,6 +240,111 @@ class Seulement(Base):
         self.assertIn("Assistant root non posé", sortie)
         self.assertNotIn("visudo", self.log())
         self.assertNotIn("install -Dm0755", self.log())
+
+    # ── garde du clone avant de poser un assistant root ──
+    def pose(self):
+        return "install -Dm0755" in self.log()
+
+    def modifier(self, etape):
+        with open(self.clone / "system" / ("nc-vpn-root" if etape == "killswitch" else "nc-energie-root"), "a") as f:
+            f.write("\n# modif\n")
+
+    def test_clone_propre_affiche_chemin_et_commit(self):
+        code, sortie = self.avec_terminal(["--seulement", "killswitch"], "o\n")
+        self.assertEqual(code, 0, sortie)
+        self.assertIn(str(self.clone), sortie)
+        self.assertIn("Commit d'essai", sortie)
+        self.assertNotIn("modifications locales", sortie)
+        self.assertEqual(sortie.count("[o/N]"), 1, sortie)
+        self.assertTrue(self.pose(), self.log())
+
+    def test_system_modifie_question_a_part_entree_vide_non(self):
+        for etape in ("killswitch", "energie"):
+            self.journal.write_text("")
+            self.modifier(etape)
+            code, sortie = self.avec_terminal(["--seulement", etape], "\n")
+            self.assertEqual(code, 0, sortie)
+            self.assertIn("modifications locales non validées", sortie)
+            self.assertIn("nc-" + ("vpn" if etape == "killswitch" else "energie") + "-root", sortie)
+            self.assertFalse(self.pose(), sortie)
+            self.git(self.clone, "checkout", "--", "system")
+
+    def test_system_modifie_deux_oui_puis_pose(self):
+        self.modifier("killswitch")
+        code, sortie = self.avec_terminal(["--seulement", "killswitch"], "o\no\n")
+        self.assertEqual(code, 0, sortie)
+        self.assertEqual(sortie.count("[o/N]"), 2, "deux questions : " + sortie)
+        self.assertTrue(self.pose(), sortie)
+
+    def test_system_modifie_puis_non_a_la_seconde(self):
+        self.modifier("energie")
+        code, sortie = self.avec_terminal(["--seulement", "energie"], "o\nn\n")
+        self.assertEqual(sortie.count("[o/N]"), 2, sortie)
+        self.assertFalse(self.pose(), sortie)
+
+    def test_fichier_non_suivi_meme_garde(self):
+        (self.clone / "system/intrus.sh").write_text("x\n")
+        code, sortie = self.avec_terminal(["--seulement", "energie"], "\n")
+        self.assertIn("modifications locales non validées", sortie)
+        self.assertIn("intrus.sh", sortie)
+        self.assertFalse(self.pose(), sortie)
+
+    def test_oui_n_accepte_pas_les_modifications(self):
+        self.modifier("killswitch")
+        r = self.sans_terminal("--seulement", "killswitch", "--oui")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("modifications locales non validées", r.stdout)
+        self.assertIn("réponse par défaut (n)", r.stdout)
+        self.assertFalse(self.pose(), r.stdout)
+
+    def refus(self, attendu, etape="killswitch"):
+        code, sortie = self.avec_terminal(["--seulement", etape], "o\n")
+        self.assertEqual(code, 0, sortie)           # refus clair, mais le reste d'une installation complète continuerait
+        self.assertIn("Assistant root non posé", sortie)
+        self.assertIn(attendu, sortie)
+        self.assertNotIn("[o/N]", sortie)
+        self.assertFalse(self.pose(), sortie)
+        self.assertNotIn("visudo", self.log())
+
+    def test_dossier_ecrivable_par_le_groupe_refuse(self):
+        self.clone.chmod(0o775)
+        self.refus("groupe")
+        self.clone.chmod(0o757)
+        self.refus("groupe", "energie")
+
+    def test_sans_git_dans_le_clone_refuse(self):
+        shutil.rmtree(self.clone / ".git")
+        self.refus("clone git")
+
+    def test_clone_lien_refuse(self):
+        lien = self.r / "lien"
+        lien.symlink_to(self.clone)
+        self.install = lien / "install.sh"
+        self.refus("pas un vrai dossier")
+
+    def test_proprietaire_autre_refuse(self):
+        faux(self.bin, "id", 'if [ "$1" = -u ]; then echo 4242; else exec /usr/bin/id "$@"; fi')
+        self.refus("n'appartient pas")
+
+    def test_git_absent_refuse(self):
+        sain = self.r / "sain"
+        sain.mkdir()
+        for c in ("bash", "dirname", "cat", "cmp", "mktemp", "rm", "id", "head", "paste", "sort", "grep", "sed", "awk", "tr", "cut", "date", "env", "uname", "mkdir", "timeout"):
+            f = shutil.which(c)
+            if f:
+                (sain / c).symlink_to(f)
+        for c in ("sudo", "stat", "nft"):
+            (sain / c).symlink_to(self.bin / c)
+        code, sortie = self.avec_terminal(["--seulement", "killswitch"], "o\n", PATH=str(sain))
+        self.assertIn("git est absent", sortie)
+        self.assertFalse(self.pose(), sortie)
+
+    def test_garde_dans_les_deux_etapes_et_installation_complete_continue(self):
+        src = INSTALL.read_text()
+        self.assertIn('[ -n "$ligne_e" ] && garde_clone_assistant && ask', src)
+        self.assertIn('[ -n "$ligne_v" ] && garde_clone_assistant && ask', src)
+        # appelée dans une condition : un refus (retour 1) n'arrête pas l'installation complète, l'étape suivante part
+        self.assertIn("  if [ \"$LAPTOP\" = 1 ]; then etape_energie_root; fi\n  etape_killswitch_root\n", src)
 
     def test_aucune_autre_etape(self):
         code, sortie = self.avec_terminal(["--seulement", "killswitch"], "\n")

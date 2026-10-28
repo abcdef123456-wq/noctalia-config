@@ -7,6 +7,8 @@
 #   ./install.sh --restore     remet les fichiers tels qu'avant la dernière installation
 #   ./install.sh --seulement killswitch | energie   seulement l'assistant root du kill switch VPN, ou celui des profils d'énergie
 #                              (une question, non par défaut, rien d'autre ; --oui ne l'accepte pas) : le bouton « Installer l'assistant »
+#                              (avant de le poser : le clone doit être sûr, à toi, sans écriture pour d'autres, et system/ non modifié ;
+#                              sinon refus, ou question à part non par défaut)
 #   ./install.sh --oui         sans terminal, répond aussi oui au démarrage, à la connexion et aux pilotes (sinon : non)
 #   ./install.sh --en | --fr   force la langue : anglais ou français (sinon le réglage LANGUE, puis celle du système)
 #
@@ -74,6 +76,44 @@ dossiers_root_surs() {
   done
   return 0
 }
+# Garde du clone avant de poser un assistant root (appelée par etape_energie_root ET etape_killswitch_root, donc par
+# l'installation complète comme par --seulement). On ne veut pas poser en root, sans le savoir, un assistant modifié localement.
+# 1) $REPO : chemin absolu, vrai dossier (pas un lien) à l'utilisateur qui lance install.sh, sans écriture pour le groupe ni pour
+#    les autres, avec install.sh et .git ; 2) system/ identique au dernier commit, sans fichier non suivi, sinon avertissement et
+#    question à part (non par défaut, --oui ne l'accepte pas) ; 3) le chemin et le commit sont affichés avant la question.
+# Retour 0 : on peut poser ; 1 : refusé (le reste de l'installation continue).
+garde_clone_assistant() {
+  local u m liste
+  case "$REPO" in /*) ;; *) warn "$(t "Assistant root non posé : le chemin du clone n'est pas absolu ($REPO)." "Root helper not installed: the clone path isn't absolute ($REPO).")"; return 1 ;; esac
+  if [ -L "$REPO" ] || [ ! -d "$REPO" ]; then
+    warn "$(t "Assistant root non posé : $REPO n'est pas un vrai dossier (lien ou absent)." "Root helper not installed: $REPO isn't a real directory (a link, or missing).")"; return 1
+  fi
+  u="$(stat -c %u "$REPO" 2>/dev/null)"; m="$(stat -c %a "$REPO" 2>/dev/null)"
+  case "$m" in ''|*[!0-7]*) m="" ;; esac
+  if [ -z "$u" ] || [ "$u" != "$(id -u)" ]; then
+    warn "$(t "Assistant root non posé : le clone $REPO n'appartient pas à l'utilisateur qui lance install.sh." "Root helper not installed: the clone $REPO isn't owned by the user running install.sh.")"; return 1
+  fi
+  if [ -z "$m" ] || [ $((8#$m & 8#022)) != 0 ]; then
+    warn "$(t "Assistant root non posé : le clone $REPO est modifiable par le groupe ou par les autres (droits ${m:-?}). Retire-leur l'écriture (chmod go-w)." "Root helper not installed: the clone $REPO is writable by the group or others (mode ${m:-?}). Remove their write access (chmod go-w).")"; return 1
+  fi
+  if [ ! -f "$REPO/install.sh" ] || [ ! -e "$REPO/.git" ]; then
+    warn "$(t "Assistant root non posé : $REPO n'est pas un clone git de noctalia-config (install.sh ou .git absent)." "Root helper not installed: $REPO isn't a noctalia-config git clone (install.sh or .git missing).")"; return 1
+  fi
+  if ! have git; then
+    warn "$(t "Assistant root non posé : git est absent, impossible de vérifier que system/ n'a pas été modifié." "Root helper not installed: git is missing, can't check that system/ is unmodified.")"; return 1
+  fi
+  if ! git -C "$REPO" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    warn "$(t "Assistant root non posé : $REPO n'a aucun commit, impossible de vérifier system/." "Root helper not installed: $REPO has no commit, can't check system/.")"; return 1
+  fi
+  info "$(t "Clone : $REPO" "Clone: $REPO")"
+  info "$(t "Commit : " "Commit: ")$(git -C "$REPO" log -1 --format='%h %s' 2>/dev/null)"
+  liste="$({ git -C "$REPO" diff --name-only HEAD -- system/; git -C "$REPO" ls-files --others --exclude-standard -- system/; } 2>/dev/null | sort -u)"
+  if ! git -C "$REPO" diff --quiet HEAD -- system/ 2>/dev/null || [ -n "$liste" ]; then
+    warn "$(t "l'assistant root a des modifications locales non validées : $(printf '%s' "$liste" | head -n 5 | paste -sd' ' -)" "the root helper has uncommitted local changes: $(printf '%s' "$liste" | head -n 5 | paste -sd' ' -)")"
+    ask "$(t "Poser quand même cet assistant modifié, avec ces changements locaux ?" "Install it anyway, with these local changes?")" n sensible || { warn "$(t "Assistant root non posé (modifications locales)." "Root helper not installed (local changes).")"; return 1; }
+  fi
+  return 0
+}
 # Une sonde en lecture seule ne doit pas bloquer toute l'installation. Les installations
 # de paquets gardent leurs propres délais et une sortie visible.
 sonder() { # sonder DURÉE LIBELLÉ COMMANDE…
@@ -134,6 +174,8 @@ install.sh: installs the noctalia-config desktop (Hyprland + Noctalia v5) on you
   ./install.sh --restore     put the files back as they were before the last install
   ./install.sh --seulement killswitch | energie   only the root helper of the VPN kill switch, or of the power profiles
                              (one question, "no" by default, nothing else; --oui does not accept it): the "Install the helper" button
+                             (before installing it: the clone must be yours, not writable by others, with system/ unmodified;
+                             otherwise refusal, or a separate question, "no" by default)
   ./install.sh --oui | --yes without a terminal, also answer yes to boot, login and driver steps (otherwise: no)
   ./install.sh --en | --fr   force the language: English or French (otherwise the LANGUE setting, then the system's)
 
@@ -350,7 +392,7 @@ etape_energie_root() {
   else
     info "$(t "Profils d'énergie poussés (nc-energie) : un petit assistant root (/usr/local/bin/nc-energie-root) qui ne règle que des" "Advanced power profiles (nc-energie): a small root helper (/usr/local/bin/nc-energie-root) that only sets")"
     info "$(t "valeurs d'une liste fixe (processeur, Wi-Fi, USB, audio, clavier, NVIDIA), lancé sans mot de passe, commande par commande." "values from a fixed list (CPU, Wi-Fi, USB, audio, keyboard, NVIDIA), run without a password, one exact command at a time.")"
-    if [ -n "$ligne_e" ] && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then
+    if [ -n "$ligne_e" ] && garde_clone_assistant && ask "$(t "L'installer ?" "Install it?")" n sensible && dossiers_root_surs; then
       t_e="$(mktemp)"; printf '# noctalia-config : assistant des profils d'"'"'énergie poussés (nc-energie)\n%s\n' "$ligne_e" > "$t_e"
       # La règle est d'abord copiée en root (« .tmp » : sudo ignore les noms avec un point), vérifiée par visudo À
       # CETTE PLACE, puis mise en service : ce qui est vérifié est exactement ce qui sert
@@ -383,7 +425,7 @@ etape_killswitch_root() {
     info "$(t "Kill switch VPN (facultatif) : un petit assistant root (/usr/local/bin/nc-vpn-root) qui ne sait que bloquer la sortie hors du" "VPN kill switch (optional): a small root helper (/usr/local/bin/nc-vpn-root) that can only block traffic outside the")"
     info "$(t "tunnel (table nft « nc_vpn »), lancé sans mot de passe. Coupé par défaut (réglage VPN_KILLSWITCH) ; nftables sera installé si besoin." "tunnel (nft table “nc_vpn”), run without a password. Off by default (VPN_KILLSWITCH setting); nftables will be installed if needed.")"
     info "$(t "Attention : firewalld est actif par défaut sur Fedora et openSUSE ; tant qu'il l'est (ou ufw), le kill switch refusera de s'activer." "Note: firewalld is on by default on Fedora and openSUSE; while it is (or ufw is), the kill switch will refuse to turn on.")"
-    if [ -n "$ligne_v" ] && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible && dossiers_root_surs; then
+    if [ -n "$ligne_v" ] && garde_clone_assistant && ask "$(t "Installer l'assistant du kill switch VPN ?" "Install the VPN kill switch helper?")" n sensible && dossiers_root_surs; then
       t_v="$(mktemp)"; printf '# noctalia-config : assistant du kill switch VPN (nc-vpn killswitch)\n%s\n' "$ligne_v" > "$t_v"
       nft_ok=1
       have nft || pkg_install nftables || nft_ok=0

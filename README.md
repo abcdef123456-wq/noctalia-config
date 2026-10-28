@@ -290,7 +290,7 @@ l'île Quickshell.
   assistant root, `system/nc-vpn-root`, que `install.sh` pose seulement si tu réponds oui à une question à part (non par défaut ;
   il propose alors le paquet `nftables`). Pas posé, le panneau dit « Pas installé » (sans bouton Couper) et son bouton « Installer
   l'assistant… » ouvre une fenêtre kitty qui lance seulement `install.sh --seulement killswitch` (le clone noté par `install.sh`
-  dans `~/.config/nc/depot` ; la même question, `--oui` ne l'accepte pas), puis relit l'état. L'assistant : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
+  dans `~/.config/nc/depot` ; la même question, `--oui` ne l'accepte pas), puis relit l'état. Avant de poser un assistant root, `install.sh` vérifie le clone : un vrai dossier à toi, sans écriture pour le groupe ni les autres, avec `.git`, et `system/` identique au dernier commit ; il affiche le chemin et le commit, refuse sinon, et pour des modifications locales pose une question à part (non par défaut, `--oui` ne l'accepte pas). L'assistant : il ne sait qu'`activer`, `desactiver` et `etat`, valide chaque argument (le tunnel doit
   être un vrai TUN/TAP ou WireGuard, jamais le Wi-Fi ni l'Ethernet ; les serveurs sont des adresses IP, 8 au plus) et n'écrit que
   sa propre table nft `inet nc_vpn` (les autres règles ne sont ni lues ni touchées). Sortent seulement : la boucle locale, le
   tunnel, DHCP, le voisinage IPv6, les adresses et ports du serveur VPN (port obligatoire), puis le DNS (ports 53 et 853) est jeté, puis les sous-réseaux
