@@ -543,7 +543,7 @@ class NcCode(unittest.TestCase):
         r = self.lancer("--cloner", "https://github.com/moi/depot", "--session-seule")
         self.assertEqual(r.returncode, 0, r.stderr)
         d = self.home / "Projets/depot"
-        self.assertEqual(self.appels(), ["gh auth status", f"gh repo clone moi/depot {d} -- -c core.hooksPath=/dev/null --template= --progress"])
+        self.assertEqual(self.appels(), ["gh auth status", f"gh repo clone moi/depot {d} -- --template= --progress"])
 
     def test_cloner_liste_de_ses_depots_gh(self):
         self.faux_clone(gh=True)
@@ -674,6 +674,19 @@ class NcCode(unittest.TestCase):
         self.assertFalse(par_nom["connu"]["disque"])
         self.assertNotIn("\u202e", par_nom["archive"]["branche"])                # pas d'inversion du sens d'écriture
         self.assertIn("premierSur()", (BIN.parent.parent / ".config/quickshell/nc-ile/Code.qml").read_text())
+
+    def test_clone_muet_arrete_au_bout_du_delai(self):
+        """Un clone bloqué sans rien écrire (réseau suspendu) est arrêté au bout du délai, pas attendu sans fin."""
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_clone", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_clone", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")}):
+            ld.exec_module(m)
+        debut = time.monotonic()
+        code, _ = m.lancer_clone([sys.executable, "-c", "import time; time.sleep(60)"], dict(os.environ), delai=1)
+        self.assertLess(time.monotonic() - debut, 20)
+        self.assertNotEqual(code, 0)
 
     def test_url_github_https_seulement(self):
         import importlib.machinery
