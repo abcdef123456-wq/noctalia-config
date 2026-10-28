@@ -461,7 +461,7 @@ REGLAGES = [
         "partage d'écran, ou si l'île n'est pas sur le même écran. Le Spotlight (Super + R) est déjà la pilule qui grandit.",
         "Super + X (code workspace): the panel starts exactly from the island pill, grows with a spring, then shrinks back into it "
         "on close; the pill hides during the animation. Opens directly with reduced animations, during screen sharing, or when the "
-        "island is on another screen. Spotlight (Super + R) already is the pill growing.")),
+        "island is on another screen. Spotlight (Super + R) already is the pill growing."), groupe="hypr"),
     R("ILE_DATE", "Île", L("Date à côté de l'heure", "Date next to the time"), "ouinon", "oui"),
     R("ILE_ANIM_BATTERIE", "Île", L("Animations de l'île sur batterie", "Island animations on battery"), "choix", "douces",
       L("Douces : sur batterie, l'étincelle d'une IA qui travaille tourne plus lentement (un tour en 4 s au lieu de 2,6).",
