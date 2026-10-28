@@ -1,6 +1,7 @@
 // La carte d'état d'un fournisseur qui n'est pas prêt, à la place de sa liste (VpnListe.qml) : « bientôt » (Proton, Nord : leurs
-// adaptateurs arrivent plus tard), « client absent », « installé, pas de compte ». Un message clair, jamais de faux bouton.
-// Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pret, bientot, pays}.
+// adaptateurs arrivent plus tard), « client absent », « installé, pas de compte », « se pilote dans son application » (Proton :
+// bouton « Ouvrir Proton VPN », qui lance l'application officielle, rien de caché). Un message clair, jamais de faux bouton.
+// Le modèle est un élément de VpnEtat.fournisseurs : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays}.
 import QtQuick
 
 Rectangle {
@@ -9,10 +10,15 @@ Rectangle {
     readonly property string etatTexte: modele.bientot ? "bientot" : modele.etat
     readonly property string titre: {
         if (modele.bientot) return modele.fournisseur + " · " + Reglages.t("bientôt", "coming soon")
+        if (modele.etat === "pilote_appli")
+            return modele.fournisseur + " · " + (modele.connecte === true ? Reglages.t("connecté", "connected") : Reglages.t("se pilote dans son application", "driven from its app"))
         if (modele.etat === "sans_compte") return modele.fournisseur + " · " + Reglages.t("installé, sans compte", "installed, no account")
         return modele.fournisseur + " · " + Reglages.t("client absent", "client not installed")
     }
     readonly property string message: {
+        if (modele.etat === "pilote_appli" && modele.connecte === true)
+            return Reglages.t("La connexion est active (voir en haut). Pour changer de pays ou te déconnecter, ouvre l'application " + modele.fournisseur + ".",
+                              "The connection is active (see above). To switch country or disconnect, open the " + modele.fournisseur + " app.")
         if (!modele.bientot && typeof modele.message === "string" && modele.message !== "") return modele.message      // le message de nc-vpn, en texte brut
         if (modele.bientot)
             return Reglages.t("La gestion de " + modele.fournisseur + " depuis cette fenêtre arrive bientôt. En attendant, importe un profil WireGuard ou OpenVPN fourni par le service (« Importer un profil ») : il apparaît dans « Profils perso ».",
@@ -24,15 +30,15 @@ Rectangle {
                           "The " + modele.fournisseur + " app is not installed. Install it with your distribution's package manager, then reopen this window.")
     }
     height: contenu.implicitHeight + 36; radius: 18
-    color: Qt.alpha(Couleurs.carte, 0.5)
-    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.08)
+    color: Qt.alpha(Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.texte, 0.08)), 0.85)       // un peu plus clair que la page, même sans flou
+    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)
 
     Row {
         id: contenu
         x: 20; y: 18; width: parent.width - 40; spacing: 14
         Ico {
             anchors.top: parent.top
-            nom: k.etatTexte === "bientot" ? "schedule" : (k.etatTexte === "sans_compte" ? "person_off" : "download")
+            nom: k.etatTexte === "bientot" ? "schedule" : (k.etatTexte === "sans_compte" ? "person_off" : (k.etatTexte === "pilote_appli" ? "open_in_new" : "download"))
             taille: 26; color: Couleurs.texteSec
         }
         Column {
@@ -49,6 +55,18 @@ Rectangle {
             }
             Texte { objectName: "nc-vpn-fournisseur-message"; width: parent.width; text: k.message; wrapMode: Text.Wrap; elide: Text.ElideNone
                     secondaire: true; font.pixelSize: 12 }
+            Rectangle {
+                objectName: "nc-vpn-fournisseur-ouvrir"
+                visible: k.modele.peutLogin === true && k.modele.etat === "pilote_appli" && !k.modele.bientot
+                width: libelleOuvrir.implicitWidth + 32; height: 32; radius: 16
+                color: zoneOuvrir.containsMouse ? Qt.alpha(Couleurs.accent, 0.4) : Qt.alpha(Couleurs.accent, 0.25)
+                opacity: VpnEtat.cible === "" ? 1 : 0.6
+                Accessible.role: Accessible.Button
+                Accessible.name: libelleOuvrir.text
+                Texte { id: libelleOuvrir; anchors.centerIn: parent; text: Reglages.t("Ouvrir " + k.modele.fournisseur, "Open " + k.modele.fournisseur)
+                        font.pixelSize: 12; font.weight: Font.DemiBold }
+                MouseArea { id: zoneOuvrir; anchors.fill: parent; hoverEnabled: true; enabled: VpnEtat.cible === ""; onClicked: VpnEtat.fournisseurLogin(k.modele.id) }
+            }
         }
     }
 }

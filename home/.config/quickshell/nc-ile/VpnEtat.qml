@@ -75,7 +75,8 @@ Singleton {
                                     depuis: typeof c.depuis === "number" ? c.depuis : 0, mullvad: false }))
         for (var id of ["nord", "proton"]) {
             var x = externe[id]
-            if (x && x.connecte)
+            // Proton : sa connexion « ProtonVPN … » est déjà dans les tunnels de NetworkManager ci-dessus (pas de doublon)
+            if (x && x.connecte && !(id === "proton" && actives.some(c => c.fournisseur === "Proton VPN")))
                 l.push({ id: "ext:" + id, uuid: "", nom: x.nom, fournisseur: x.nom, pays: x.paysActif, serveur: "", interface: "",
                          depuis: 0, mullvad: false, externe: id })
         }
@@ -84,7 +85,8 @@ Singleton {
                      interface: "wg0-mullvad", depuis: 0, mullvad: true })
         return l
     }
-    // Le modèle des fournisseurs du panneau : {id, fournisseur, etat: absent | sans_compte | pret, bientot, pays: [{cc, nom}]}.
+    // Le modèle des fournisseurs du panneau : {id, fournisseur, etat: absent | sans_compte | pilote_appli | pret, bientot, pays: [{cc, nom}]}.
+    // « pilote_appli » : Proton, qui se pilote dans son application (pas de pays chez nous ; le bouton l'ouvre).
     // Proton et Nord : « bientôt » (leurs adaptateurs sont un autre lot) ; CyberGhost seulement si un profil de ce nom existe.
     readonly property var fournisseurs: {
         var l = [fiche("proton", "Proton VPN"), fiche("nord", "NordVPN"),
@@ -98,7 +100,8 @@ Singleton {
     function fiche(id, nom) {
         var x = externe[id]
         if (!x) return { id: id, fournisseur: nom, etat: "absent", bientot: true, peutLogin: false, message: "", pays: [] }
-        return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays }
+        return { id: id, fournisseur: x.nom, etat: x.etat, bientot: false, peutLogin: x.peutLogin, message: x.message, pays: x.pays,
+                 connecte: x.connecte }
     }
     // « 🇫🇷 » pour « FR » ; vide si le code n'est pas deux lettres majuscules
     function drapeauDe(cc) {
@@ -139,7 +142,7 @@ Singleton {
                 var res = {}
                 if (d && d.contrat === 1 && Array.isArray(d.fournisseurs)) {
                     d.fournisseurs.forEach(x => {
-                        if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pret"].indexOf(x.etat) < 0) return
+                        if (!x || (x.id !== "nord" && x.id !== "proton") || ["absent", "sans_compte", "pilote_appli", "pret"].indexOf(x.etat) < 0) return
                         var pays = x.etat === "pret" && Array.isArray(x.pays)
                             ? x.pays.filter(q => q && typeof q.code === "string" && /^[A-Za-z]{2}$/.test(q.code) && typeof q.nom === "string")
                                     .map(q => ({ cc: q.code.toUpperCase(), nom: q.nom.slice(0, 40) })).slice(0, 150) : []

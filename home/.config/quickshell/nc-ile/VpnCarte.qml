@@ -1,7 +1,8 @@
 // La carte principale de la fenêtre VPN : un point d'état (vert connecté, gris déconnecté), le titre « Connecté · 🇫🇷 FR · 2 tunnels »
 // ou « Déconnecté », une ligne par tunnel RÉELLEMENT monté (NetworkManager et application Mullvad, plusieurs à la fois) avec son
 // bouton « Déconnecter », puis les mesures : IP publique (la ligne n'existe que si VPN_IP_PUBLIQUE=oui), durée de connexion, débits
-// ↓ ↑. Une valeur absente s'écrit « indisponible ». À droite, « Tout déconnecter » (couleur d'alerte). Pendant un partage d'écran
+// ↓ ↑. Une valeur absente s'écrit « indisponible ». « Tout déconnecter » (couleur d'alerte) est dans la ligne du titre, à droite ;
+// les lignes de tunnel prennent toute la largeur. Pendant un partage d'écran
 // (VpnEtat.masque) : noms « Tunnel N », ni pays, ni serveur, ni interface, ni IP.
 import QtQuick
 
@@ -18,9 +19,9 @@ Rectangle {
     readonly property string indispo: Reglages.t("indisponible", "unavailable")
 
     radius: 22
-    height: Math.max(contenu.implicitHeight, boutonTout.visible ? boutonTout.height : 0) + 36
-    color: Qt.alpha(Couleurs.carte, 0.55)
-    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.08)
+    height: contenu.implicitHeight + 36
+    color: Qt.alpha(Qt.tint(Couleurs.fond, Qt.alpha(Couleurs.texte, 0.08)), 0.85)       // un peu plus clair que la page, même sans flou
+    border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)
 
     function titre() {
         if (!monte) return Reglages.t("Déconnecté", "Disconnected")
@@ -69,19 +70,41 @@ Rectangle {
     Column {
         id: contenu
         x: 20; y: 18
-        width: parent.width - 40 - (boutonTout.visible ? boutonTout.width + 16 : 0)
+        width: parent.width - 40
         spacing: 10
 
-        Row {
-            spacing: 10; height: 26
-            Rectangle {
-                objectName: "nc-vpn-point"
-                anchors.verticalCenter: parent.verticalCenter
-                width: 12; height: 12; radius: 6
-                color: c.monte ? Couleurs.vert : Couleurs.gris4
+        Item {
+            id: ligneTitre
+            width: parent.width; height: 38
+            Row {
+                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - (boutonTout.visible ? boutonTout.width + 16 : 0)
+                spacing: 10
+                Rectangle {
+                    objectName: "nc-vpn-point"
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 12; height: 12; radius: 6
+                    color: c.monte ? Couleurs.vert : Couleurs.gris4
+                }
+                Texte { objectName: "nc-vpn-titre-etat"; anchors.verticalCenter: parent.verticalCenter; text: c.titre(); font.pixelSize: 18; font.weight: Font.Bold
+                        width: Math.min(implicitWidth, parent.width - 22) }
             }
-            Texte { objectName: "nc-vpn-titre-etat"; anchors.verticalCenter: parent.verticalCenter; text: c.titre(); font.pixelSize: 18; font.weight: Font.Bold
-                    width: Math.min(implicitWidth, contenu.width - 24) }
+            Rectangle {
+                id: boutonTout
+                objectName: "nc-vpn-tout"
+                visible: c.monte
+                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                width: libelleTout.implicitWidth + 36; height: 38; radius: 19
+                color: zoneTout.containsMouse ? Qt.alpha(Couleurs.rouge, 0.34) : Qt.alpha(Couleurs.rouge, 0.18)
+                border.width: 1; border.color: Qt.alpha(Couleurs.rouge, 0.45)
+                opacity: c.libre ? 1 : 0.6
+                Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
+                Accessible.role: Accessible.Button
+                Accessible.name: libelleTout.text
+                Texte { id: libelleTout; anchors.centerIn: parent; text: Reglages.t("Tout déconnecter", "Disconnect all"); color: Couleurs.rouge
+                        font.pixelSize: 13; font.weight: Font.DemiBold }
+                MouseArea { id: zoneTout; anchors.fill: parent; hoverEnabled: true; enabled: c.libre; onClicked: VpnEtat.toutDeconnecter() }
+            }
         }
         Texte {
             objectName: "nc-vpn-aucun"
@@ -116,22 +139,5 @@ Rectangle {
             VpnStat { objectName: "nc-vpn-debit-bas"; titre: Reglages.t("Débit ↓", "Download ↓"); valeur: c.formaterDebit(c.debitBas) }
             VpnStat { objectName: "nc-vpn-debit-haut"; titre: Reglages.t("Débit ↑", "Upload ↑"); valeur: c.formaterDebit(c.debitHaut) }
         }
-    }
-
-    Rectangle {
-        id: boutonTout
-        objectName: "nc-vpn-tout"
-        visible: c.monte
-        anchors.right: parent.right; anchors.rightMargin: 18; anchors.top: parent.top; anchors.topMargin: 18
-        width: libelleTout.implicitWidth + 36; height: 38; radius: 19
-        color: zoneTout.containsMouse ? Qt.alpha(Couleurs.rouge, 0.34) : Qt.alpha(Couleurs.rouge, 0.18)
-        border.width: 1; border.color: Qt.alpha(Couleurs.rouge, 0.45)
-        opacity: c.libre ? 1 : 0.6
-        Behavior on color { enabled: !Reglages.sobre; ColorAnimation { duration: 120 } }
-        Accessible.role: Accessible.Button
-        Accessible.name: libelleTout.text
-        Texte { id: libelleTout; anchors.centerIn: parent; text: Reglages.t("Tout déconnecter", "Disconnect all"); color: Couleurs.rouge
-                font.pixelSize: 13; font.weight: Font.DemiBold }
-        MouseArea { id: zoneTout; anchors.fill: parent; hoverEnabled: true; enabled: c.libre; onClicked: VpnEtat.toutDeconnecter() }
     }
 }

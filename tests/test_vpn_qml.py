@@ -604,6 +604,54 @@ class HorsEcran(unittest.TestCase):
         self.assertEqual(act, [["fournisseur", "proton", "login"], ["fournisseur", "nord", "connecter", "DE"],
                                ["fournisseur", "nord", "deconnecter"]])
 
+    def test_proton_pilote_appli_bouton_ouvrir_et_absent(self):
+        fl = [dict(id="proton", nom="Proton VPN", etat="pilote_appli", message="Proton VPN se pilote dans son application.", pays_actif="",
+                   connecte=False, peut_login=True),
+              dict(id="nord", nom="NordVPN", etat="absent", message="", pays_actif="", connecte=False, peut_login=False)]
+        etat = dict(disponible=True, connexions=[], actives=[], fournisseurs=fl)
+        _, appels, _ = self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-proton")); etape++; ticks = 0; return }
+                if (etape === 2) { if (ticks < 2) return
+                    var tp = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
+                    verifier(tp.indexOf("se pilote dans son application") >= 0 && tp.indexOf("sans compte") < 0, "carte pilote_appli : " + tp)
+                    var lg = trouver(fen.contentItem, "nc-vpn-fournisseur-login")
+                    verifier(lg === null || !lg.visible, "pas de faux bouton de compte")
+                    var b = trouver(fen.contentItem, "nc-vpn-fournisseur-ouvrir")
+                    verifier(b !== null && b.visible && textes(b).join("").indexOf("Ouvrir Proton VPN") >= 0, "bouton Ouvrir Proton VPN")
+                    t.mouseClick(b); etape++; ticks = 0; return }
+                if (etape === 3) { if (ticks < 6) return
+                    t.mouseClick(trouver(fen.contentItem, "nc-vpn-filtre-nord")); etape++; ticks = 0; return }
+                if (etape === 4) { if (ticks < 2) return
+                    var tn = textes(trouver(fen.contentItem, "nc-vpn-carte-fournisseur")).join("|")
+                    verifier(tn.indexOf("client absent") >= 0, "Nord absent : " + tn)
+                    var o = trouver(fen.contentItem, "nc-vpn-fournisseur-ouvrir")
+                    verifier(o === null || !o.visible, "pas de bouton Ouvrir pour un client absent")
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat})
+        act = [a for a in appels if a[:1] == ["fournisseur"]]
+        self.assertEqual(act, [["fournisseur", "proton", "login"]])
+
+    def test_carte_principale_tout_deconnecter_dans_le_titre_et_lignes_pleine_largeur(self):
+        self.lancer('''
+            Timer { interval: 100; running: true; repeat: true; onTriggered: {
+                ticks++
+                if (etape === 0) { var k = Qt.createComponent("Vpn.qml"); fen = k.createObject(racine); etape++; return }
+                if (etape === 1) { if (!VpnEtat.lu || ticks < 8) return
+                    var tout = trouver(fen.contentItem, "nc-vpn-tout"), titre = trouver(fen.contentItem, "nc-vpn-titre-etat")
+                    var actifs = trouver(fen.contentItem, "nc-vpn-actifs"), ligne = tous(fen.contentItem, "nc-vpn-actif")[0]
+                    var p = tout.mapToItem(actifs, 0, 0), q = titre.mapToItem(actifs, 0, 0)
+                    verifier(p.y < 0 && Math.abs((p.y + tout.height / 2) - (q.y + titre.height / 2)) < 12, "Tout déconnecter dans la ligne du titre : " + p.y + " / " + q.y)
+                    verifier(p.x > q.x + titre.width, "Tout déconnecter à droite du titre")
+                    verifier(Math.abs(ligne.width - actifs.width) < 1 && Math.abs(p.x + tout.width - actifs.width) < 2, "lignes de tunnel sur toute la largeur : " + ligne.width + " / " + actifs.width)
+                    console.log("FINI"); Qt.exit(0) }
+            } }
+        ''', etats={0: etat_deux_tunnels()})
+
     def test_deux_tunnels_nm_et_mullvad_tout_deconnecter_arguments_exacts(self):
         c = [LIGNE_J(U2, "Labo", "wireguard", True, "wg-labo")]
         etat = dict(disponible=True, connexions=c, actives=c, mullvad=True, mullvad_pays=[],

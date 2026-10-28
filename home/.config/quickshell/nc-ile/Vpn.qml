@@ -65,6 +65,7 @@ PanelWindow {
             id: fondVerre
             anchors.fill: parent; radius: vpn.rayon
             color: Qt.alpha(Couleurs.fond, vpn.verre ? 0.62 : 0.92)
+            border.width: 1; border.color: Qt.alpha(Couleurs.texte, 0.09)          // contour fin tout autour : la carte tient sans flou
             Rectangle {
                 x: 32; width: parent.width - 64; height: 1; y: 1
                 gradient: Gradient {
