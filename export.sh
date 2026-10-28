@@ -121,6 +121,7 @@ HOME_FILES=(
   .local/bin/nc-langue
   .local/bin/nc-pid
   .local/bin/nc-meteo
+  .local/bin/nc-fond-jour-nuit
   .local/bin/nc-video
   .local/bin/nc-fermer
   .local/bin/nc-greeting
