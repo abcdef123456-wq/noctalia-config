@@ -14,6 +14,11 @@ ou si aucun agent n'est installé), un onglet « Git » (lazygit, s'il existe) e
   nc-code --agents-json    les agents disponibles en JSON : {coupee, defaut, agents: [{prog, nom}]}
   nc-code --apercu-json DOSSIER   l'aperçu d'un projet en JSON : branche, derniers commits (reflog), début du README
                            en texte brut, URL GitHub (https seulement) — pour le panneau de l'île ; jamais git
+  nc-code --nouveau NOM [--modele vide|python|c|web]   crée ~/Projets/NOM (CODE_DOSSIER dans nc-reglages) : git init,
+                           README.md, fichiers de départ du modèle ; refuse un nom déjà pris ; puis ouvre l'espace de code
+  nc-code --cloner [SOURCE]   clone un dépôt GitHub dans ~/Projets/DEPOT puis l'ouvre. SOURCE : https://github.com/PROP/DEPOT(.git),
+                           git@github.com:PROP/DEPOT.git ou PROP/DEPOT (rien d'autre). Sans SOURCE : tes dépôts (gh connecté) ou
+                           l'adresse tapée. gh repo clone si gh est connecté, sinon git clone par https ; jamais sur un dossier existant
   nc-code --session-seule DOSSIER   écrit sur la sortie standard la session kitty qui serait ouverte, sans la lancer
 Les projets : dépôts git récents, sans parcours lourd : celui de noctalia-config, l'historique de zoxide et de
 project.nvim, les sessions récentes de Claude Code, puis ~/*/.git et ~/*/*/.git (1 s au plus). Rien ne tourne en fond.
@@ -141,6 +146,41 @@ def projets_nvim(limite=30):
     return res[:limite]
 
 
+def fichier_voulus():
+    """Le fichier d'état des projets voulus (créés ou clonés par nc-code) : un chemin absolu par ligne."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state")
+    return os.path.join(base, "nc", "code-projets")
+
+
+def projets_voulus(limite=50):
+    """Les projets créés ou clonés à la demande : jamais marqués « trouvés sur le disque »."""
+    try:
+        with open(fichier_voulus(), encoding="utf-8", errors="replace") as f:
+            lignes = f.read(65536).splitlines()
+    except OSError:
+        return []
+    res = [l for l in reversed(lignes) if l.startswith("/") and dossier_sur(l) and est_depot(l)]
+    return res[:limite]
+
+
+def retenir_projet(d):
+    """Note un projet voulu (sans doublon, 200 au plus)."""
+    f = fichier_voulus()
+    try:
+        os.makedirs(os.path.dirname(f), mode=0o700, exist_ok=True)
+        try:
+            with open(f, encoding="utf-8", errors="replace") as h:
+                anciens = [l for l in h.read(65536).splitlines() if l and l != d]
+        except OSError:
+            anciens = []
+        tmp = f + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as h:
+            h.write("\n".join((anciens + [d])[-200:]) + "\n")
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
 def projet_noctalia():
     try:
         with open(os.path.join(HOME, ".config/nc/depot"), encoding="utf-8") as f:
@@ -187,7 +227,7 @@ def projets(delai=1.0):
     """[chemin] sans doublon, dans l'ordre : noctalia-config, project.nvim, zoxide, Claude Code, puis le balayage."""
     vus, res = set(), []
     PAR_BALAYAGE.clear()
-    sources_connues = (projet_noctalia(), projets_claude(), projets_nvim(), projets_zoxide())
+    sources_connues = (projet_noctalia(), projets_voulus(), projets_claude(), projets_nvim(), projets_zoxide())
     for n, sources in enumerate(sources_connues + (projets_balayage(delai),)):
         for d in sources:
             r = os.path.realpath(d)
@@ -248,8 +288,15 @@ def ia_coupee(e):
     return reglage("IA_MODE", "auto") == "non" or e.get("mode") == "non" or bool(e.get("coupee"))
 
 
+# Agents de terminal qui ne sont pas (encore) des IA de nc-ia : (programme, nom affiché)
+AGENTS_EN_PLUS = (("agy", "Antigravity"),)
+# Ordre quand l'IA choisie n'a pas d'agent : Claude Code, puis Antigravity, puis les autres installés
+ORDRE_AGENTS = ("claude", "agy")
+
+
 def agents_disponibles(e):
-    """[(programme, nom)] des IA permises dont l'agent en terminal est installé (sans doublon)."""
+    """[(programme, nom)] des IA permises dont l'agent en terminal est installé (sans doublon) : Claude Code, Antigravity,
+    puis les autres. Vide si l'IA est coupée."""
     if ia_coupee(e):
         return []
     res, vus = [], set()
@@ -258,18 +305,27 @@ def agents_disponibles(e):
         if prog and ia.get("cli_disponible") and ia.get("disponible") is not False and prog not in vus and shutil.which(prog):
             vus.add(prog)
             res.append((prog, ia.get("nom") or prog))
-    return res
+    for prog, nom in AGENTS_EN_PLUS:
+        if prog not in vus and shutil.which(prog):
+            vus.add(prog)
+            res.append((prog, nom))
+    rang = {p: n for n, p in enumerate(ORDRE_AGENTS)}
+    return sorted(res, key=lambda x: rang.get(x[0], len(rang)))        # tri stable : les autres gardent leur ordre
 
 
 def agent_par_defaut(e):
-    """Le programme de l'agent de l'IA choisie (usage « question »), ou '' : IA coupée, aucun agent installé…"""
+    """Le programme de l'agent à droite : celui de l'usage « question » s'il est installé, sinon celui de l'IA choisie,
+    sinon le premier agent installé. '' seulement si l'IA est coupée ou si aucun agent n'est installé (alors un shell)."""
     if ia_coupee(e):
         return ""
     u = (e.get("usages") or {}).get("question") or {}
-    prog = u.get("cli") or ""
-    if prog and u.get("cli_disponible") and shutil.which(prog):
-        return prog
-    return ""
+    c = e.get("choisie") or {}
+    for x in (u, c):
+        prog = x.get("cli") or ""
+        if prog and x.get("cli_disponible") and shutil.which(prog):
+            return prog
+    dispo = agents_disponibles(e)
+    return dispo[0][0] if dispo else ""
 
 
 # ── La session kitty ────────────────────────────────────────────────────────────────────────────────────────────
@@ -284,21 +340,25 @@ def session(dossier, agent="", seul_nvim=False, nvim=True, lazygit=True):
     cd = "cd " + dossier.replace("$", "$$")
     l = ["new_tab Code", "layout splits", cd]
     if nvim:
-        l.append("launch --title nvim nvim")
+        l.append("launch --title nvim --env NC_CODE=1 nvim")
     else:
-        l.append("launch --title shell")
+        l.append(f"launch --title shell {SANS_ACCUEIL}")
     if not seul_nvim:
         droite = "launch --location=vsplit --bias=38 --keep-focus --title "
         if agent:
             droite += shlex.quote(agent) + " " + shlex.quote(MOI) + " --lancer-agent " + shlex.quote(agent)
         else:
-            droite += "shell"
+            droite += "shell " + SANS_ACCUEIL
         l.append(droite)
         if lazygit:
             cfg = config_lazygit()
             l += ["new_tab Git", cd, "launch --title lazygit " + (f"--env LG_CONFIG_FILE={shlex.quote(cfg)} " if cfg else "") + "lazygit"]
         l += ["new_tab Terminal", cd, "launch --title shell"]
     return "\n".join(l) + "\n"
+
+
+# L'accueil (fastfetch) est trop large pour le panneau étroit de droite : les shells de l'espace de code démarrent sans
+SANS_ACCUEIL = "--env FASTFETCH_SHOWN=1"
 
 
 def lancer_agent(prog, args):
@@ -309,6 +369,7 @@ def lancer_agent(prog, args):
             subprocess.call([prog, *args])
         except OSError:
             pass
+    os.environ["FASTFETCH_SHOWN"] = "1"                    # le shell d'après démarre sans l'accueil (panneau étroit)
     sh = os.environ.get("SHELL") or shutil.which("zsh") or shutil.which("bash") or "/bin/sh"
     os.execvp(sh, [sh])
 
@@ -328,6 +389,290 @@ def ouvrir(dossier, agent="", seul_nvim=False):
     except OSError:
         pass
     return 0
+
+
+# ── Un nouveau projet ───────────────────────────────────────────────────────────────────────────────────────────
+MODELES = {
+    "vide": {},
+    "python": {"main.py": 'def main():\n    print("Bonjour !")\n\n\nif __name__ == "__main__":\n    main()\n',
+               ".gitignore": "__pycache__/\n*.pyc\n.venv/\n"},
+    "c": {"main.c": '#include <stdio.h>\n\nint main(void)\n{\n    printf("Bonjour !\\n");\n    return 0;\n}\n',
+          "Makefile": "CFLAGS ?= -Wall -Wextra -g\n\nmain: main.c\n\t$(CC) $(CFLAGS) -o main main.c\n\nclean:\n\trm -f main\n",
+          ".gitignore": "main\n*.o\n"},
+    "web": {"index.html": '<!doctype html>\n<html lang="fr">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n'
+                          '  <title>Ma page</title>\n  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n  <h1>Bonjour !</h1>\n  <script src="script.js"></script>\n</body>\n</html>\n',
+            "style.css": "body {\n  font-family: sans-serif;\n  margin: 2rem;\n}\n",
+            "script.js": 'console.log("Bonjour !");\n'},
+}
+
+
+def nom_projet(nom):
+    """Le nom filtré : lettres, chiffres, « - » et « _ » (accents retirés, espaces en « - »), sans « - » au début, 64 au plus."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(nom or "")).encode("ascii", "ignore").decode()
+    t = re.sub(r"\s+", "-", t.strip())
+    t = re.sub(r"[^A-Za-z0-9_-]", "", t).lstrip("-")
+    return t[:64]
+
+
+def dossier_projets():
+    """Où vont les nouveaux projets : CODE_DOSSIER (nc-reglages), ~/Projets par défaut."""
+    v = os.path.expanduser(reglage("CODE_DOSSIER", "") or "")
+    if not v.startswith("/") or not dossier_sur(v):
+        v = os.path.join(HOME, "Projets")
+    return v.rstrip("/") or "/"
+
+
+def initialiser_depot(dest):
+    """git init en argv, sans modèle de git (aucun hook copié) et sans hooks. Vrai si le dépôt existe ensuite."""
+    if shutil.which("git"):
+        try:
+            subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "init", "-q", "--template=", dest],
+                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return est_depot(dest)
+
+
+def creer_projet(nom, modele="vide"):
+    """(dossier, '') ou (dossier ou '', message). Refuse un nom vide, un modèle inconnu, un nom déjà pris : rien n'est
+    jamais écrasé (mkdir et open « x » échouent si ça existe)."""
+    n = nom_projet(nom)
+    if not n:
+        return "", T("Donne un nom (lettres, chiffres, - et _).", "Give a name (letters, digits, - and _).")
+    if modele not in MODELES:
+        return "", T(f"Modèle inconnu « {modele} » (vide, python, c, web).", f"Unknown template “{modele}” (vide, python, c, web).")
+    base = dossier_projets()
+    dest = os.path.join(base, n)
+    if os.path.lexists(dest):
+        return "", T(f"Le nom « {n} » est déjà pris dans {court(base)}.", f"The name “{n}” is already taken in {court(base)}.")
+    try:
+        os.makedirs(base, exist_ok=True)
+        os.mkdir(dest)
+        fichiers = dict(MODELES[modele])
+        fichiers["README.md"] = f"# {n}\n\nNouveau projet.\n"
+        for f, texte in fichiers.items():
+            with open(os.path.join(dest, f), "x", encoding="utf-8") as h:
+                h.write(texte)
+    except OSError as err:
+        return "", T(f"Création impossible : {err.strerror or err}", f"Cannot create: {err.strerror or err}")
+    if not initialiser_depot(dest):
+        return dest, T("git init n'a pas marché (le projet est créé sans dépôt).", "git init failed (project created without a repository).")
+    retenir_projet(dest)
+    return dest, ""
+
+
+def cmd_nouveau(a):
+    """nc-code --nouveau NOM [--modele vide|python|c|web] [--sans-agent] [--session-seule] : crée le projet, puis l'ouvre."""
+    modele = a[a.index("--modele") + 1] if "--modele" in a and a.index("--modele") + 1 < len(a) else "vide"
+    reste = [x for i, x in enumerate(a) if not x.startswith("--") and not (i and a[i - 1] == "--modele")]
+    d, msg = creer_projet(reste[0] if reste else "", modele)
+    if msg:
+        print("nc-code : " + msg, file=sys.stderr)
+        if not d:
+            return 1
+    print(d)
+    agent = "" if ("--sans-agent" in a or ia_coupee({})) else agent_par_defaut(etat_ia())
+    if "--session-seule" in a:
+        sys.stdout.write(session(d, agent, "--nvim" in a, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit"))))
+        return 0
+    return ouvrir(d, agent, "--nvim" in a)
+
+
+# ── Cloner depuis GitHub ────────────────────────────────────────────────────────────────────────────────────────
+# Règle de sécurité : on ne clone QUE github.com, par une source validée de façon stricte, vers un dossier qui n'existe
+# pas encore ; aucune commande n'est lancée sur un dépôt déjà là ; tout en argv (jamais une ligne de shell).
+_NOM_GH = r"[A-Za-z0-9._-]+"
+
+
+def source_github(src):
+    """(propriétaire, dépôt) ou None. Formes acceptées, et seulement elles :
+         https://github.com/OWNER/REPO[.git][/]      (schéma https exact, hôte exactement github.com, sans identifiant)
+         git@github.com:OWNER/REPO[.git]
+         OWNER/REPO
+       OWNER et REPO en [A-Za-z0-9._-], jamais « . » ou « .. » (ni que des points), jamais un « - » au début (ce serait une
+       option pour git ou gh), 39 et 100 caractères au plus. Refusés : http, ssh://, un autre hôte, github.com@ailleurs,
+       un port, une requête ou un fragment (?, #), un chemin en plus (/tree/main), des espaces ou retours à la ligne."""
+    if not isinstance(src, str) or src != src.strip() or not src.isascii() or not src.isprintable():
+        return None
+    m = (re.fullmatch(rf"https://github\.com/({_NOM_GH})/({_NOM_GH})/?", src)
+         or re.fullmatch(rf"git@github\.com:({_NOM_GH})/({_NOM_GH})", src)
+         or re.fullmatch(rf"({_NOM_GH})/({_NOM_GH})", src))
+    if not m:
+        return None
+    owner, repo = m.group(1), m.group(2)
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    for x in (owner, repo):
+        if not x or x.strip(".") == "" or x.startswith("-"):
+            return None
+    if len(owner) > 39 or len(repo) > 100:
+        return None
+    return owner, repo
+
+
+def gh_connecte():
+    """Vrai si gh est installé et connecté (gh auth status : code 0)."""
+    if not shutil.which("gh"):
+        return False
+    try:
+        r = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=15, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def depots_gh():
+    """[(propriétaire, dépôt)] de tes dépôts (gh repo list), chaque URL revalidée comme n'importe quelle source."""
+    try:
+        r = subprocess.run(["gh", "repo", "list", "--json", "name,url", "--limit", "50"], capture_output=True, text=True,
+                           timeout=30, stdin=subprocess.DEVNULL, env=dict(os.environ, GH_PROMPT_DISABLED="1"))
+        d = json.loads(r.stdout) if r.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    res = []
+    for x in d if isinstance(d, list) else []:
+        s = source_github(x.get("url") if isinstance(x, dict) else None)
+        if s and x.get("name") == s[1]:
+            res.append(s)
+    return res
+
+
+def erreur_clone(sortie):
+    t = (sortie or "").lower()
+    if "not found" in t or "could not read from remote" in t or "repository does not exist" in t or "does not exist" in t:
+        return T("dépôt introuvable (ou privé : connecte-toi avec « gh auth login »).", "repository not found (or private: sign in with “gh auth login”).")
+    if "resolve host" in t or "unable to access" in t or "failed to connect" in t or "network is unreachable" in t or "timed out" in t:
+        return T("impossible de joindre GitHub (hors ligne ?).", "cannot reach GitHub (offline?).")
+    if "already exists" in t:
+        return T("le dossier existe déjà.", "the folder already exists.")
+    derniere = next((l.strip() for l in reversed((sortie or "").splitlines()) if l.strip()), "")
+    derniere = "".join(c for c in derniere if c.isprintable())[:200]
+    return derniere or T("le clonage a échoué.", "the clone failed.")
+
+
+def lancer_clone(cmd, env, delai=1800):
+    """Lance le clonage en laissant voir la progression (stderr recopié tel quel) ; (code, fin du texte d'erreur). Arrêté
+    au bout de delai secondes, qu'il parle ou non."""
+    fin = time.monotonic() + delai
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
+    except OSError as err:
+        return 127, str(err)
+    queue = b""
+    import select
+    try:
+        while True:
+            # le délai compte aussi quand rien n'arrive (réseau suspendu : un clone muet n'attend pas sans fin)
+            reste = fin - time.monotonic()
+            if reste <= 0:
+                p.terminate()
+                break
+            if not select.select([p.stderr], [], [], min(reste, 5))[0]:
+                continue
+            b = os.read(p.stderr.fileno(), 4096)
+            if not b:
+                break
+            queue = (queue + b)[-4096:]
+            try:
+                sys.stderr.buffer.write(b)
+                sys.stderr.buffer.flush()
+            except (OSError, ValueError):
+                pass
+    except OSError:
+        pass
+    try:
+        code = p.wait(10)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        code = p.wait()
+    return code, queue.decode("utf-8", "replace").replace("\r", "\n")
+
+
+def cloner(src, via_gh=None):
+    """(dossier, '') ou ('', message). src : une source acceptée par source_github. Le dossier est base/REPO, qui ne doit
+    pas exister (rien n'est lancé sinon, jamais git sur un dépôt déjà là). Sans gh connecté : git clone par https."""
+    s = source_github(src)
+    if not s:
+        return "", T("Source refusée : seulement https://github.com/PROPRIETAIRE/DEPOT, git@github.com:PROPRIETAIRE/DEPOT.git ou PROPRIETAIRE/DEPOT.",
+                     "Source refused: only https://github.com/OWNER/REPO, git@github.com:OWNER/REPO.git or OWNER/REPO.")
+    owner, repo = s
+    base = dossier_projets()
+    dest = os.path.join(base, repo)
+    if os.path.lexists(dest):
+        return "", T(f"{court(dest)} existe déjà : rien n'a été fait.", f"{court(dest)} already exists: nothing was done.")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except OSError as err:
+        return "", T(f"Dossier impossible : {err.strerror or err}", f"Cannot create the folder: {err.strerror or err}")
+    if via_gh is None:
+        via_gh = gh_connecte()
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
+    # --template= : aucun hook du modèle de git n'est copié ; un clone ne récupère jamais les hooks du dépôt distant.
+    # git : -c core.hooksPath=/dev/null vaut pour cette commande seulement. gh : rien après « -- » qui s'écrirait dans
+    # .git/config du dépôt cloné (tes futurs hooks, pre-commit ou husky, y seraient ignorés sans prévenir)
+    if via_gh:
+        cmd = ["gh", "repo", "clone", f"{owner}/{repo}", dest, "--", "--template=", "--progress"]
+    else:
+        cmd = ["git", "-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+               "clone", "--progress", "--template=", "--", f"https://github.com/{owner}/{repo}.git", dest]
+    if not shutil.which(cmd[0]):
+        return "", T(f"{cmd[0]} n'est pas installé.", f"{cmd[0]} is not installed.")
+    code, sortie = lancer_clone(cmd, env)
+    if code != 0 or not est_depot(dest):
+        return "", T("Clonage impossible : ", "Clone failed: ") + erreur_clone(sortie)
+    retenir_projet(dest)
+    return dest, ""
+
+
+def choisir_source_clone():
+    """Sans source donnée : tes dépôts GitHub (si gh est connecté), ou l'adresse tapée. '' si on renonce."""
+    lignes = []
+    if gh_connecte():
+        lignes = [f"{o}/{r}\t{o}/{r}" for o, r in depots_gh()]
+    lignes.append(T("Un autre dépôt (j'écris l'adresse)", "Another repository (I type the address)") + "\t")
+    _, ligne = choisir_liste(lignes, T("Numéro : ", "Number: "))
+    if not ligne:
+        return ""
+    if "\t" in ligne and ligne.split("\t", 1)[1]:
+        return ligne.split("\t", 1)[1]
+    try:
+        return input(T("Adresse (https://github.com/…, git@github.com:… ou proprietaire/depot) : ", "Address (https://github.com/…, git@github.com:… or owner/repo): ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def cmd_cloner(a):
+    """nc-code --cloner [SOURCE] [--sans-agent] [--nvim] [--session-seule] : clone puis ouvre l'espace de code. Sans terminal
+    (lancé par le panneau de l'île) : relancé dans une fenêtre kitty, pour voir la progression."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()) and "--session-seule" not in a and "--ici" not in a:
+        kitty = shutil.which("kitty")
+        if not kitty:
+            print(T("nc-code : kitty est introuvable.", "nc-code: kitty not found."), file=sys.stderr)
+            return 1
+        subprocess.Popen([kitty, "--class", "nc-code", "--title", T("Cloner depuis GitHub", "Clone from GitHub"), *options_kitty(palette(), True),
+                          sys.executable, MOI, "--cloner", "--ici", *[x for x in a if x != "--ici"]],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return 0
+    reste = [x for x in a if not x.startswith("--")]
+    src = reste[0] if reste else choisir_source_clone()
+    if not src:
+        return 0
+    d, msg = cloner(src)
+    if msg:
+        print("nc-code : " + msg, file=sys.stderr)
+        if sys.stdin.isatty():
+            try:
+                input(T("Entrée pour fermer…", "Press Enter to close…"))
+            except (EOFError, KeyboardInterrupt):
+                pass
+        return 1
+    print(d)
+    agent = "" if ("--sans-agent" in a or ia_coupee({})) else agent_par_defaut(etat_ia())
+    if "--session-seule" in a:
+        sys.stdout.write(session(d, agent, "--nvim" in a, nvim=bool(shutil.which("nvim")), lazygit=bool(shutil.which("lazygit"))))
+        return 0
+    return ouvrir(d, agent, "--nvim" in a)
 
 
 # ── Les couleurs (celles de l'île) ──────────────────────────────────────────────────────────────────────────────
@@ -919,6 +1264,10 @@ def main(a):
         r = apercu_json(a[1]) if len(a) > 1 else {}
         print(json.dumps(r, ensure_ascii=False))
         return 0 if r else 1
+    if a and a[0] == "--nouveau":
+        return cmd_nouveau(a[1:])
+    if a and a[0] == "--cloner":
+        return cmd_cloner(a[1:])
     seule = "--session-seule" in a
     seul_nvim = "--nvim" in a
     sans_agent = "--sans-agent" in a

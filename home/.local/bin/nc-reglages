@@ -1083,6 +1083,8 @@ REGLAGES = [
       L("Les longues lignes passent à la ligne au lieu de déborder.", "Long lines wrap instead of overflowing."))  ,
     R("NVIM_TRANSPARENT", "Terminal", L("Fond transparent dans Neovim", "Transparent background in Neovim"), "ouinon", "non",
       L("Le fond du terminal (et sa transparence) se voit derrière le texte.", "The terminal background (and its transparency) shows behind the text.")),
+    R("CODE_DOSSIER", "Terminal", L("Dossier des nouveaux projets (Super + X)", "Folder for new projects (Super + X)"), "dossier", "~/Projets",
+      L("Nouveau projet et clonage depuis GitHub y créent leur dossier.", "New projects and GitHub clones are created there.")),
     R("APPLI_TERMINAL", "Applications", L("Terminal (Super + Entrée)", "Terminal (Super + Enter)"), "choix", "kitty",
       L("Les terminaux installés. L'île, le terminal déroulant et les outils gardent kitty (ils s'appuient sur ses fonctions).",
         "Installed terminals. The island, the drop-down terminal and the tools keep kitty (they rely on its features)."),

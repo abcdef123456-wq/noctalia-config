@@ -230,7 +230,7 @@ class NcCode(unittest.TestCase):
         self.assertIn("--session -", (self.home / "kitty-args").read_text())
         self.assertIn(f"--directory {p}", (self.home / "kitty-args").read_text())
         s = (self.home / "kitty-session").read_text()
-        self.assertIn("launch --title nvim nvim", s)
+        self.assertIn("launch --title nvim --env NC_CODE=1 nvim", s)
         self.assertNotIn("vsplit", s)                                      # « 1 n » : Neovim seul
 
     # ── l'interface plein terminal (dans un vrai pseudo-terminal) ──
@@ -390,6 +390,221 @@ class NcCode(unittest.TestCase):
         self.reglages("IA_MODE=non\n")
         self.assertEqual(json.loads(self.lancer("--agents-json").stdout), dict(coupee=True, defaut="", agents=[]))
 
+    def module_nc_code(self):
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_ag", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_ag", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "PATH": f"{self.faux}:/usr/bin:/bin"}):
+            ld.exec_module(m)
+        return m
+
+    def env_faux(self):
+        return unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "PATH": f"{self.faux}:/usr/bin:/bin"})
+
+    def test_agent_par_defaut_question_sans_cli_prend_l_ia_choisie(self):
+        for p in ("claude", "codex", "opencode"):
+            self.programme(p)
+        m = self.module_nc_code()
+        ias = [dict(id=p, nom=p, cli=p, cli_disponible=True, disponible=True) for p in ("claude", "codex", "opencode")]
+        e = dict(mode="manuel", coupee=False,
+                 usages=dict(question=dict(id="jarvis", nom="JARVIS", cli="", cli_disponible=False)),
+                 choisie=dict(id="codex", nom="Codex", cli="codex", cli_disponible=True), ias=ias)
+        with self.env_faux():
+            self.assertEqual(m.agent_par_defaut(e), "codex")               # l'IA choisie (question = jarvis sans cli)
+            e["choisie"] = dict(id="claude", nom="Claude", cli="claude", cli_disponible=True)
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["choisie"] = {}                                              # pas d'IA choisie : le premier installé
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["usages"]["question"] = dict(cli="codex", cli_disponible=True)      # l'usage question gagne s'il a un agent
+            self.assertEqual(m.agent_par_defaut(e), "codex")
+            e["ias"] = []                                                  # aucun agent installé : un shell
+            e["usages"]["question"] = {}
+            self.assertEqual(m.agent_par_defaut(e), "")
+            e["ias"] = ias
+            e["coupee"] = True                                             # IA coupée : aucun agent
+            self.assertEqual(m.agent_par_defaut(e), "")
+
+    def test_ordre_des_agents_claude_agy_puis_les_autres(self):
+        for p in ("claude", "codex", "opencode", "agy"):
+            self.programme(p)
+        m = self.module_nc_code()
+        ias = [dict(id=p, nom=n, cli=p, cli_disponible=True, disponible=True) for p, n in (("codex", "Codex"), ("opencode", "OpenCode"), ("claude", "Claude Code"))]
+        e = dict(mode="manuel", coupee=False, usages={}, choisie=dict(id="jarvis", cli="", cli_disponible=False), ias=ias)
+        with self.env_faux():
+            self.assertEqual([p for p, _ in m.agents_disponibles(e)], ["claude", "agy", "codex", "opencode"])
+            self.assertIn(("agy", "Antigravity"), m.agents_disponibles(e))
+            self.assertEqual(m.agent_par_defaut(e), "claude")
+            e["ias"] = ias[:2]                                             # sans Claude : Antigravity d'abord
+            self.assertEqual(m.agent_par_defaut(e), "agy")
+            e["coupee"] = True
+            self.assertEqual(m.agents_disponibles(e), [])
+
+    def test_shells_de_l_espace_de_code_sans_accueil(self):
+        p = self.depot("dev/projet")
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        s = self.lancer("--session-seule", str(p)).stdout
+        self.assertIn("--location=vsplit --bias=38 --keep-focus --title shell --env FASTFETCH_SHOWN=1", s)
+        self.assertIn("--env NC_CODE=1 nvim", s)
+        self.assertIn("launch --title shell\n", s)                         # l'onglet Terminal, large : garde l'accueil
+
+    # ── un nouveau projet ──
+    def faux_git_init(self):
+        self.programme("git", f'echo "git $*" >> "{self.home}/git-appels"; for d; do :; done; mkdir -p "$d/.git"')
+
+    def test_nouveau_projet_cree_dossier_readme_git_init(self):
+        self.faux_git_init()
+        self.programme("nvim")
+        self.reglages("IA_MODE=non\n")
+        r = self.lancer("--nouveau", "Mon Projet é!/..", "--modele", "python", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = self.home / "Projets/Mon-Projet-e"                             # filtré : lettres, chiffres, - et _
+        self.assertTrue(d.is_dir(), r.stdout)
+        self.assertEqual(r.stdout.splitlines()[0], str(d))
+        self.assertTrue((d / "README.md").read_text().startswith("# Mon-Projet-e"))
+        self.assertTrue((d / "main.py").exists())
+        appels = (self.home / "git-appels").read_text().splitlines()
+        self.assertEqual(appels, [f"git -c core.hooksPath=/dev/null init -q --template= {d}"])
+        self.assertIn(f"cd {d}", r.stdout)
+        self.assertIn(str(d), (self.home / ".local/state/nc/code-projets").read_text())
+        l = json.loads(self.lancer("--liste-json").stdout)
+        self.assertFalse([p for p in l if p["chemin"] == str(d)][0]["disque"], "un projet voulu n'est pas « trouvé sur le disque »")
+
+    def test_nouveau_projet_modeles_et_refus(self):
+        self.faux_git_init()
+        for modele, fichier in (("vide", "README.md"), ("c", "main.c"), ("web", "index.html")):
+            r = self.lancer("--nouveau", "p-" + modele, "--modele", modele, "--session-seule")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((self.home / "Projets" / ("p-" + modele) / fichier).exists())
+        self.assertEqual(self.lancer("--nouveau", "x", "--modele", "rust", "--session-seule").returncode, 1)
+        self.assertEqual(self.lancer("--nouveau", "../..", "--session-seule").returncode, 1)        # rien de gardé
+        self.assertEqual(self.lancer("--nouveau", "***", "--session-seule").returncode, 1)
+        self.assertEqual(self.lancer("--nouveau", "--session-seule").returncode, 1)                 # pas de nom
+        self.assertFalse((self.home / "Projets/x").exists())
+        # déjà pris : refusé, rien d'écrasé
+        (self.home / "Projets/p-c/main.c").write_text("MON CODE")
+        r = self.lancer("--nouveau", "p-c", "--modele", "c", "--session-seule")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("déjà pris", r.stderr)
+        self.assertEqual((self.home / "Projets/p-c/main.c").read_text(), "MON CODE")
+        (self.home / "Projets/fichier").write_text("x")                    # un fichier de ce nom : refusé aussi
+        self.assertEqual(self.lancer("--nouveau", "fichier", "--session-seule").returncode, 1)
+
+    def test_nouveau_projet_dossier_reglable(self):
+        self.faux_git_init()
+        self.reglages(f"CODE_DOSSIER={self.home}/mes-codes\n")
+        r = self.lancer("--nouveau", "essai", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.home / "mes-codes/essai/README.md").exists())
+
+    # ── cloner depuis GitHub (faux git et faux gh : ils notent leurs arguments, aucun réseau) ──
+    def faux_clone(self, gh=False, code_git=0, erreur=""):
+        """git : note ses arguments, crée le dernier argument/.git (le clone). gh : connecté ou non, liste, clone."""
+        self.programme("git", f'echo "git $*" >> "{self.home}/appels"; [ {code_git} -ne 0 ] && {{ echo "{erreur}" >&2; exit {code_git}; }}\n'
+                              f'for d; do :; done; mkdir -p "$d/.git"')
+        if gh:
+            self.programme("gh", f'echo "gh $*" >> "{self.home}/appels"\n'
+                                 'case "$1 $2" in\n'
+                                 '  "auth status") exit 0;;\n'
+                                 '  "repo list") echo \'[{"name":"mien","url":"https://github.com/moi/mien"},{"name":"x","url":"https://evil.example/moi/x"},'
+                                 '{"name":"y","url":"https://github.com/..//y"}]\';;\n'
+                                 '  "repo clone") mkdir -p "$4/.git";;\n'
+                                 'esac')
+
+    def appels(self):
+        f = self.home / "appels"
+        return f.read_text().splitlines() if f.exists() else []
+
+    def test_source_github_entrees_acceptees_et_refusees(self):
+        m = self.module_nc_code()
+        for src, attendu in (("https://github.com/moi/depot", ("moi", "depot")), ("https://github.com/moi/depot.git", ("moi", "depot")),
+                             ("https://github.com/moi/depot/", ("moi", "depot")), ("git@github.com:moi/depot.git", ("moi", "depot")),
+                             ("git@github.com:moi/depot", ("moi", "depot")), ("moi/depot", ("moi", "depot")),
+                             ("a.b-c_d/e.f-g_h", ("a.b-c_d", "e.f-g_h")), ("moi/.github", ("moi", ".github"))):
+            self.assertEqual(m.source_github(src), attendu, src)
+        for src in ("", " moi/depot", "moi/depot ", "moi/depot\n", "http://github.com/moi/depot", "HTTPS://github.com/moi/depot",
+                    "https://github.com@evil.example/moi/depot", "https://moi@github.com/moi/depot", "https://user:pw@github.com/moi/depot",
+                    "https://github.com.evil.example/moi/depot", "https://evil.example/github.com/moi/depot", "https://github.com:443/moi/depot",
+                    "https://github.com/moi/depot?x=1", "https://github.com/moi/depot#f", "https://github.com/moi/depot/tree/main",
+                    "https://github.com/moi", "https://github.com//depot", "ssh://git@github.com/moi/depot", "git@evil.example:moi/depot.git",
+                    "git@github.com:moi/depot/extra", "file:///etc/passwd", "/etc/passwd", "../depot", "./moi/depot", "moi/../depot",
+                    "./depot", "../..", "moi/..", "../depot", "./.", "moi/.", "./moi", "-x/depot", "moi/-depot", "--upload-pack=x/y",
+                    "moi/dépôt", "moi/de pot", "moi/de;pot", "moi/$(x)", "moi/`x`", "moi/dep\x00ot", "moi/a\\b", "a/b/c", "moi/.git", "moi/" + "a" * 101,
+                    "a" * 40 + "/depot", "https://github.com/moi/depot\n--upload-pack=x", "https://github.com/%2e%2e/depot"):
+            self.assertIsNone(m.source_github(src), repr(src))
+
+    def test_cloner_sans_gh_git_clone_https_en_argv(self):
+        self.faux_clone()
+        r = self.lancer("--cloner", "git@github.com:moi/depot.git", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = self.home / "Projets/depot"
+        self.assertEqual(self.appels(), [f"git -c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always "
+                                          f"clone --progress --template= -- https://github.com/moi/depot.git {d}"])
+        self.assertEqual(r.stdout.splitlines()[0], str(d))
+        self.assertIn(f"cd {d}", r.stdout)
+        l = json.loads(self.lancer("--liste-json").stdout)
+        self.assertFalse([p for p in l if p["chemin"] == str(d)][0]["disque"], "un dépôt cloné à la demande n'est pas « trouvé sur le disque »")
+
+    def test_cloner_avec_gh_connecte(self):
+        self.faux_clone(gh=True)
+        r = self.lancer("--cloner", "https://github.com/moi/depot", "--session-seule")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = self.home / "Projets/depot"
+        self.assertEqual(self.appels(), ["gh auth status", f"gh repo clone moi/depot {d} -- --template= --progress"])
+
+    def test_cloner_liste_de_ses_depots_gh(self):
+        self.faux_clone(gh=True)
+        m = self.module_nc_code()
+        with self.env_faux():
+            self.assertEqual(m.depots_gh(), [("moi", "mien")])             # les URL d'ailleurs ou piégées sont écartées
+        self.assertIn("gh repo list --json name,url --limit 50", self.appels())
+
+    def test_cloner_dossier_existant_rien_n_est_lance(self):
+        self.faux_clone(gh=True)
+        d = self.home / "Projets/depot"
+        (d / ".git").mkdir(parents=True)
+        (d / "mon-fichier").write_text("à moi")
+        r = self.lancer("--cloner", "moi/depot", "--session-seule")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("existe déjà", r.stderr)
+        self.assertEqual(self.appels(), [], "ni git ni gh, même pas gh auth status")
+        self.assertEqual((d / "mon-fichier").read_text(), "à moi")
+
+    def test_cloner_source_refusee_rien_n_est_lance(self):
+        self.faux_clone(gh=True)
+        for src in ("https://evil.example/moi/depot", "http://github.com/moi/depot", "https://github.com@evil.example/a/b", "../x", "-x/y",
+                    "https://github.com/moi/depot?x=1"):
+            r = self.lancer("--cloner", src, "--session-seule")
+            self.assertEqual(r.returncode, 1, src)
+            self.assertIn("Source refusée", r.stderr)
+        self.assertEqual(self.appels(), [])
+        self.assertFalse((self.home / "Projets").exists())
+
+    def test_cloner_erreurs_claires(self):
+        for erreur, mot in (("fatal: repository 'https://github.com/moi/depot.git/' not found", "introuvable"),
+                            ("fatal: unable to access 'x': Could not resolve host: github.com", "hors ligne")):
+            self.faux_clone(code_git=128, erreur=erreur)
+            r = self.lancer("--cloner", "moi/depot", "--session-seule")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn(mot, r.stderr)
+            self.assertFalse((self.home / "Projets/depot").exists())
+
+    def test_cloner_depuis_le_panneau_s_ouvre_dans_kitty(self):
+        self.faux_clone()
+        self.programme("kitty", f'echo "$*" > "{self.home}/kitty-args"')
+        env = dict(HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), TMPDIR=str(self.home), NC_LANGUE="fr",
+                   PATH=f"{self.faux}:/usr/bin:/bin")
+        r = subprocess.run([sys.executable, str(self.home / ".local/bin/nc-code"), "--cloner", "moi/depot"], env=env, capture_output=True,
+                           text=True, timeout=30, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for _ in range(50):
+            if (self.home / "kitty-args").exists() and (self.home / "kitty-args").stat().st_size:
+                break
+            time.sleep(0.1)
+        self.assertIn("--cloner --ici moi/depot", (self.home / "kitty-args").read_text())
+        self.assertEqual(self.appels(), [], "le clone se fait dans la fenêtre kitty, pas ici")
+
     def test_apercu_json_reflog_readme_sans_jamais_lancer_git(self):
         b = self.depot("dev/neo")
         (b / ".git/HEAD").write_text("ref: refs/heads/essai\n")
@@ -467,6 +682,19 @@ class NcCode(unittest.TestCase):
         self.assertFalse(par_nom["connu"]["disque"])
         self.assertNotIn("\u202e", par_nom["archive"]["branche"])                # pas d'inversion du sens d'écriture
         self.assertIn("premierSur()", (BIN.parent.parent / ".config/quickshell/nc-ile/Code.qml").read_text())
+
+    def test_clone_muet_arrete_au_bout_du_delai(self):
+        """Un clone bloqué sans rien écrire (réseau suspendu) est arrêté au bout du délai, pas attendu sans fin."""
+        import importlib.machinery
+        import importlib.util
+        ld = importlib.machinery.SourceFileLoader("nc_code_clone", str(BIN / "nc-code"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("nc_code_clone", ld))
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")}):
+            ld.exec_module(m)
+        debut = time.monotonic()
+        code, _ = m.lancer_clone([sys.executable, "-c", "import time; time.sleep(60)"], dict(os.environ), delai=1)
+        self.assertLess(time.monotonic() - debut, 20)
+        self.assertNotEqual(code, 0)
 
     def test_url_github_https_seulement(self):
         import importlib.machinery

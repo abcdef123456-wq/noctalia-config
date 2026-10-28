@@ -158,6 +158,15 @@ début du README) ; Entrée ouvre Neovim et l'agent de l'IA dans kitty (`nc-code
 Neovim seul, Ctrl + E / Ctrl + Maj + C / Ctrl + G : le dossier, le chemin copié, la page GitHub. Rien ne tourne tant que
 le panneau est fermé ; sans l'île, le même sélecteur s'ouvre dans une fenêtre kitty.
 
+La première ligne de la liste, « + Nouveau projet » (Ctrl + N, ou `nc-code --nouveau NOM [--modele vide|python|c|web]`),
+crée `~/Projets/NOM` (dossier réglable : `CODE_DOSSIER` dans nc-reglages) avec `git init`, un README et des fichiers de
+départ, puis l'ouvre ; un nom déjà pris est refusé, rien n'est jamais écrasé. Ctrl + L (ou `nc-code --cloner SOURCE`)
+clone un dépôt GitHub (`https://github.com/proprio/depot`, `git@github.com:proprio/depot.git` ou `proprio/depot`, rien
+d'autre) : avec `gh` connecté, la liste de tes dépôts est proposée, sinon `git clone` en https ; jamais sur un dossier
+déjà là, sans aucun hook. Les agents proposés (Tab) : Claude Code, Antigravity (`agy`), puis les autres installés.
+Neovim s'ouvre sur le projet (la session de la dernière fois, sinon l'explorateur et le README) ; son tableau de bord
+est en français.
+
 **L'IA du bureau** ([détails](docs/ia.md)) : une clé d'API (Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek,
 OpenRouter), Claude Code, Codex, Gemini CLI, OpenCode, Oh My Pi (`omp`), Ollama ou JARVIS — **automatique** (la meilleure disponible, la
 suivante si elle échoue), **choisie**, ou **aucune** (tout est coupé, sur toutes les distributions) dans

@@ -183,6 +183,25 @@ ShellRoot {
                      touche(Qt.Key_Escape); verifier(racine.fermee, "Échap ferme"); Qt.quit() }''')
         self.assertFalse([a for a in appels if a and not a[0].startswith("--")], "Échap n'ouvre rien")
 
+    def test_nouveau_projet_ctrl_n(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { verifier(trouver(fen.contentItem, "nc-code-nouveau") !== null, "première ligne : nouveau projet")
+                     touche(Qt.Key_N, Qt.ControlModifier); verifier(fen.mode === "nouveau" && trouver(fen.contentItem, "nc-code-saisie").visible, "mode nouveau")
+                     taper("-piege"); touche(Qt.Key_Return); verifier(!racine.fermee, "un nom qui commence par - est refusé ici")
+                     touche(Qt.Key_Escape); verifier(fen.mode === "" && !racine.fermee, "Échap revient")
+                     touche(Qt.Key_N, Qt.ControlModifier); touche(Qt.Key_Return); verifier(!racine.fermee, "nom vide : rien")
+                     taper("essai"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--nouveau", "essai"] in a)
+        self.assertIn(["--nouveau", "essai"], appels)
+        self.assertNotIn(["--nouveau", "-piege"], appels)
+
+    def test_cloner_ctrl_l(self):
+        appels, ps = self.executer('''
+  if (etape === 1) { touche(Qt.Key_L, Qt.ControlModifier); verifier(fen.mode === "cloner", "mode cloner")
+                     taper("moi/depot"); touche(Qt.Key_Return); verifier(racine.fermee, "fermée"); Qt.quit() }''',
+                                   attendus=lambda a: ["--cloner", "moi/depot"] in a)
+        self.assertIn(["--cloner", "moi/depot"], appels)
+
     def test_fichiers_libelles_et_chargeur(self):
         shell = (QML / "shell.qml").read_text()
         self.assertIn("function code(): void", shell, "qs -c nc-ile ipc call ile code")

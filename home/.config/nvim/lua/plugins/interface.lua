@@ -62,16 +62,16 @@ return {
             "",
           }, "\n"),
         },
-        sections = {
-          { section = "header" },
-          { section = "keys", gap = 1, padding = 1 },
-          { icon = " ", title = "Fichiers récents", section = "recent_files", indent = 2, padding = 1 },
-          { icon = " ", title = "Projets", section = "projects", indent = 2, padding = 1 },
-          { section = "startup" },
-        },
       },
       -- Coins arrondis pour les fenêtres flottantes de Snacks (pickers, terminal, notifications)
       styles = { float = { border = "rounded" }, notification = { border = "rounded" } },
     },
+  },
+  -- Tableau de bord en français (config/accueil.lua) : entrées traduites, doublons retirés, aide dans nc-code
+  {
+    "folke/snacks.nvim",
+    opts = function(_, opts)
+      return require("config.accueil").adapter(opts)
+    end,
   },
 }

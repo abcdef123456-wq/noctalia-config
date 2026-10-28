@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nc-greeting : accueil du terminal (fastfetch), adapté à la taille de la fenêtre.
 #   large   (≥ 66 colonnes, ≥ 16 lignes) : logo + infos (logo image dans kitty, logo texte ailleurs)
-#   moyenne (≥ 34 colonnes, ≥ 12 lignes) : infos seules, lignes coupées à la largeur de la fenêtre
+#   moyenne (≥ 34 colonnes, ≥ 12 lignes) : infos seules, lignes coupées à la largeur de la fenêtre, jamais au milieu d'un mot
 #   petite                               : rien
 # Usage : nc-greeting [colonnes] [lignes]   (zsh passe $COLUMNS et $LINES ; sinon tput)
 # Le .zshrc le relance quand la fenêtre change de taille, tant qu'aucune commande n'a été tapée.
@@ -59,14 +59,26 @@ lignes = sys.stdin.buffer.read().decode("utf-8", "replace").split("\n")
 if lignes and lignes[-1] == "":
     lignes.pop()
 for ligne in lignes:
-    out, n, i = "", 0, 0
+    out, n, i, coupe, blanc, prec = "", 0, 0, False, None, " "
     while i < len(ligne):
         m = seq.match(ligne, i)
         if m:
-            out += m.group(); i = m.end(); continue
+            if not coupe:
+                out += m.group()
+            i = m.end(); continue
         c = ligne[i]; i += 1
-        if n + larg(c) <= w:
-            out += c; n += larg(c)
+        if coupe:
+            continue
+        if n + larg(c) > w:
+            # jamais de mot coupé en deux : on revient au dernier espace (« Performance » entier ou rien)
+            coupe = True
+            if not c.isspace() and not prec.isspace() and blanc is not None:
+                out = out[:blanc]
+            out = out.rstrip()
+            continue
+        if c.isspace():
+            blanc = len(out)
+        out += c; n += larg(c); prec = c
     sys.stdout.write(out + "\033[0m\n")
 ' "$1"
     return
