@@ -96,7 +96,7 @@ class Indicateur(BaseVpn):
         self.assertNotIn("-s", appels[0])
         self.assertEqual(set(json.loads(r.stdout)), {"disponible", "actif", "fournisseur", "pays", "nom", "nombre", "mullvad"})
         source = BIN.read_text()
-        corps = source[source.index("def indicateur():"):source.index("# ── IP publique")]
+        corps = source[source.index("def indicateur():"):source.index("# ── Application officielle Mullvad")]
         self.assertNotIn("urllib", corps)
         self.assertNotIn("socket", corps)
 

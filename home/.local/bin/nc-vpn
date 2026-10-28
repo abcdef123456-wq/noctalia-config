@@ -13,6 +13,11 @@
   nc-vpn mullvad etat-json    l'application officielle Mullvad (commande `mullvad`, hors NetworkManager) : {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    les pilote (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    les pays de Mullvad (`mullvad relay list`) en JSON : {"pays": [{"cc", "nom"}]}
+  nc-vpn fournisseurs-json    Nord, Proton et Mullvad pour la fenêtre : {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+                              "message", "pays" (seulement à l'état pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+  nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC : deux lettres MAJUSCULES (FR). Nord : la CLI nordvpn ;
+                              Mullvad : mullvad ; Proton (pas de CLI officielle) : ouvre l'appli officielle, sans la piloter ni la fermer.
+                              Le login lance le parcours officiel (navigateur, appli) : jamais de mot de passe, de numéro de compte ni de jeton chez nous
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    bloque toute sortie hors du tunnel monté (VPN_KILLSWITCH à oui ;
                               assistant root facultatif posé par install.sh ; les limites sont affichées avant d'activer)
   nc-vpn ip-publique          ton adresse IP publique, si tu l'as demandé (nc-reglages → Île : VPN_IP_PUBLIQUE et VPN_IP_SERVICE)
@@ -88,6 +93,11 @@ USAGE_EN = """nc-vpn: NetworkManager's VPN and WireGuard connections, driven fro
   nc-vpn mullvad etat-json    the official Mullvad app (`mullvad` command, outside NetworkManager): {"installe", "connecte", "pays", "hote"}
   nc-vpn mullvad connecter | deconnecter | pays CC    drive it (`mullvad connect`, `mullvad disconnect`, `mullvad relay set location cc`)
   nc-vpn mullvad pays-json    Mullvad's countries (`mullvad relay list`) as JSON: {"pays": [{"cc", "nom"}]}
+  nc-vpn fournisseurs-json    Nord, Proton and Mullvad for the window: {"contrat": 1, "fournisseurs": [{"id", "nom", "etat": absent | sans_compte | pret,
+                              "message", "pays" (only when pret), "pays_actif", "connecte", "peut_login", "probleme", "pilotage"}]}
+  nc-vpn fournisseur nord|proton|mullvad connecter CC | deconnecter | login    CC: two UPPERCASE letters (FR). Nord: the nordvpn CLI;
+                              Mullvad: mullvad; Proton (no official CLI): opens the official app, never driving or closing it.
+                              Login starts the official flow (browser, app): never a password, account number or token on our side
   nc-vpn killswitch activer | desactiver | etat | etat-json | limites    block everything leaving outside the tunnel that is up
                               (VPN_KILLSWITCH set to oui; optional root helper installed by install.sh; the limits are shown before enabling)
   nc-vpn ip-publique          your public IP address, if you asked for it (nc-settings → Island: VPN_IP_PUBLIQUE and VPN_IP_SERVICE)
@@ -1091,11 +1101,425 @@ def mullvad_json():
     e["compte"] = None
     if e["installe"] and not e["connecte"]:
         code, out, err = mullvad(["status"])
-        if code == 0 or out or err:
+        if code == 0:         # service arrêté (code non nul, « Failed to connect… ») : on ne sait pas, pas de « connecté » inventé
             e["compte"] = not re.search(r"not logged in", out + err, re.I)
     elif e["connecte"]:
         e["compte"] = True
     return e
+
+
+# ── Fournisseurs (Nord, Proton, Mullvad) : trois états, des pays seulement quand le compte est connecté ─────────────────
+# États : « absent » (commande introuvable), « sans_compte » (client installé, pas de compte connecté, ou client inutilisable
+# pour une raison dite dans « probleme »), « pret » (compte connecté). Jamais d'adresse e-mail, de numéro de compte ni de jeton :
+# seul un oui/non en est tiré. Toutes les commandes en argv, stdin fermé, délai borné, sortie bornée et nettoyée (couleurs ANSI,
+# retours chariot, animations d'attente). Le nom d'un client installé ne fait jamais office de fournisseur connecté.
+CONTRAT_FOURNISSEURS = 1
+MAX_SORTIE = 64 * 1024
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+# Pays : « CODE Nom anglais » (la liste de secours de Mullvad, et la table qui donne un code aux noms que la CLI de Nord liste sans code)
+NOMS_PAYS = ("AD Andorra|AE United Arab Emirates|AF Afghanistan|AL Albania|AM Armenia|AO Angola|AR Argentina|AT Austria|AU Australia|"
+             "AZ Azerbaijan|BA Bosnia and Herzegovina|BB Barbados|BD Bangladesh|BE Belgium|BG Bulgaria|BH Bahrain|BM Bermuda|"
+             "BN Brunei Darussalam|BO Bolivia|BR Brazil|BS Bahamas|BT Bhutan|BZ Belize|CA Canada|CH Switzerland|CI Cote d'Ivoire|"
+             "CL Chile|CN China|CO Colombia|CR Costa Rica|CY Cyprus|CZ Czech Republic|DE Germany|DK Denmark|DO Dominican Republic|"
+             "DZ Algeria|EC Ecuador|EE Estonia|EG Egypt|ES Spain|ET Ethiopia|FI Finland|FR France|GB United Kingdom|GE Georgia|"
+             "GH Ghana|GI Gibraltar|GL Greenland|GR Greece|GT Guatemala|GU Guam|HK Hong Kong|HN Honduras|HR Croatia|HU Hungary|"
+             "ID Indonesia|IE Ireland|IL Israel|IM Isle of Man|IN India|IQ Iraq|IS Iceland|IT Italy|JE Jersey|JM Jamaica|JO Jordan|"
+             "JP Japan|KE Kenya|KG Kyrgyzstan|KH Cambodia|KR South Korea|KW Kuwait|KZ Kazakhstan|LA Laos|LB Lebanon|LI Liechtenstein|"
+             "LK Sri Lanka|LT Lithuania|LU Luxembourg|LV Latvia|MA Morocco|MC Monaco|MD Moldova|ME Montenegro|MK North Macedonia|"
+             "MM Myanmar|MN Mongolia|MO Macao|MT Malta|MU Mauritius|MX Mexico|MY Malaysia|NG Nigeria|NL Netherlands|NO Norway|"
+             "NP Nepal|NZ New Zealand|PA Panama|PE Peru|PH Philippines|PK Pakistan|PL Poland|PR Puerto Rico|PT Portugal|PY Paraguay|"
+             "QA Qatar|RO Romania|RS Serbia|RU Russia|SA Saudi Arabia|SE Sweden|SG Singapore|SI Slovenia|SK Slovakia|SN Senegal|"
+             "TH Thailand|TN Tunisia|TR Turkey|TT Trinidad and Tobago|TW Taiwan|UA Ukraine|UG Uganda|US United States|UY Uruguay|"
+             "UZ Uzbekistan|VE Venezuela|VN Vietnam|ZA South Africa")
+NOMS_PAYS_ALIAS = {"czechia": "CZ", "turkiye": "TR", "macau": "MO", "korea south": "KR", "brunei": "BN", "cote divoire": "CI",
+                   "united states of america": "US", "usa": "US", "uk": "GB", "great britain": "GB", "russian federation": "RU"}
+CODE_NOM = {x[:2]: x[3:] for x in NOMS_PAYS.split("|")}
+
+
+def cle_nom(nom):
+    """Clé de comparaison d'un nom de pays : sans accents, sans apostrophes, en minuscules, « _ » et « - » lus comme des espaces."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", nom or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower().replace("'", "").replace("’", "")
+    return " ".join(re.split(r"[\s_-]+", s.strip()))
+
+
+NOM_CODE = {cle_nom(n): c for c, n in CODE_NOM.items()}
+NOM_CODE.update(NOMS_PAYS_ALIAS)
+HOTES_NORD = ("nordaccount.com", "nordvpn.com")
+SECRET_LONG = re.compile(r"[A-Za-z0-9_+/=.-]{24,}")
+
+
+def filtre_secret(texte, n=200):
+    """Une ligne de message d'un outil, sans URL (de rappel ou autre), sans adresse e-mail, sans longue suite de chiffres ni jeton."""
+    t = (texte or "").strip().splitlines()
+    t = t[0] if t else ""
+    t = re.sub(r"[A-Za-z][A-Za-z0-9+.-]*://\S*", "[URL]", t)
+    t = re.sub(r"[^\s@]+@[^\s@]+", "[…]", t)
+    t = SECRET_LONG.sub("[…]", epure(t))
+    return nom_borne(t, n)
+
+
+def nettoyer_sortie(octets):
+    """Texte brut d'une sortie de CLI : 64 Kio au plus, couleurs ANSI retirées, retours chariot lus comme des sauts de ligne
+    (les animations d'attente en réécrivent la ligne), caractères de contrôle retirés."""
+    t = ANSI.sub("", (octets or b"")[:MAX_SORTIE].decode("utf-8", errors="replace"))
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", t)
+
+
+def cli_fournisseur(nom, args, delai=10):
+    """(code, texte propre) de la commande `nom` lancée en argv, stdin fermé. 127 : absente ; 126 : lancement impossible ;
+    124 : délai dépassé (la commande est tuée : une question interactive posée à un stdin fermé ne bloque donc jamais)."""
+    exe = shutil.which(nom)
+    if not exe:
+        return 127, ""
+    try:
+        r = subprocess.run([exe] + args, capture_output=True, timeout=delai, stdin=subprocess.DEVNULL, start_new_session=True,
+                           env=dict(os.environ, LC_ALL="C", LANG="C", LANGUAGE="C", NO_COLOR="1", TERM="dumb"))
+    except subprocess.TimeoutExpired:
+        return 124, ""
+    except (OSError, subprocess.SubprocessError):
+        return 126, ""
+    return r.returncode, nettoyer_sortie(r.stdout + b"\n" + r.stderr)
+
+
+def probleme_cli(code, texte):
+    """Le défaut qui rend une CLI inutilisable : delai, lancement, permission, consentement, demon ; sinon vide."""
+    if code == 124:
+        return "delai"
+    if code == 126:
+        return "lancement"
+    if re.search(r"permission denied", texte, re.I):
+        return "permission"
+    if re.search(r"\(y/n\)|we value your privacy|collect and use limited", texte, re.I):
+        return "consentement"
+    if re.search(r"isn'?t running|not running|connection refused|socket not found|nordvpnd", texte, re.I):
+        return "demon"
+    return ""
+
+
+def message_probleme(fid, probleme):
+    nom = {"nord": "nordvpn", "mullvad": "mullvad", "proton": "protonvpn-app"}.get(fid, fid)
+    if probleme == "permission":
+        return T("Ajoute ton compte au groupe nordvpn (sudo usermod -aG nordvpn $USER), puis rouvre la session.",
+                 "Add your account to the nordvpn group (sudo usermod -aG nordvpn $USER), then log in again.")
+    if probleme == "consentement":
+        return T("Ouvre un terminal et lance nordvpn une fois : il pose une question (statistiques anonymes) à laquelle répondre.",
+                 "Open a terminal and run nordvpn once: it asks a question (anonymous statistics) to answer.")
+    if probleme == "demon":
+        return T("Le service nordvpnd ne tourne pas (sudo systemctl enable --now nordvpnd).",
+                 "The nordvpnd service is not running (sudo systemctl enable --now nordvpnd).")
+    if probleme == "delai":
+        return T(f"{nom} ne répond pas à temps. Si c'est la première fois, ouvre un terminal et lance {nom} une fois.",
+                 f"{nom} did not answer in time. If this is the first time, open a terminal and run {nom} once.")
+    return T(f"{nom} n'a pas pu être lancé.", f"{nom} could not be run.")
+
+
+def fiche(fid, nom, etat_, message, pays=None, pays_actif="", connecte=False, peut_login=False, probleme="", pilotage="direct"):
+    """Une entrée de fournisseurs-json. « pays » n'existe qu'à l'état « pret »."""
+    f = {"id": fid, "nom": nom, "etat": etat_, "message": message}
+    if etat_ == "pret":
+        f["pays"] = pays or []
+    f.update({"pays_actif": pays_actif if etat_ == "pret" else "", "connecte": bool(connecte) and etat_ == "pret",
+              "peut_login": bool(peut_login), "probleme": probleme, "pilotage": pilotage})
+    return f
+
+
+# ── Nord : la CLI officielle `nordvpn` (dépôt NordSecurity/nordvpn-linux, dossier cli/) ──────────────────────────────────
+# Sous-commandes lues dans les sources : `account` (affiche « Account information » si connecté ; sinon « You're not logged in »
+# ou une demande de reconnexion), `countries` (noms avec « _ », un par ligne quand la sortie n'est pas un terminal),
+# `connect NOM`, `disconnect`, `status` (« Status: Connected », « Country: Nom »), `login` (affiche « Continue in the browser: URL »
+# et ne lance pas lui-même le navigateur ; pose la question du consentement si besoin) ; socket refusé : « Permission denied… ».
+# `account` affiche l'adresse e-mail : sa sortie n'est JAMAIS gardée, seule la présence de « Account information » compte.
+def nord_exe():
+    return shutil.which("nordvpn") is not None
+
+
+def nord_pays_liste():
+    """([{"code","nom","cli"}…], probleme) d'après `nordvpn countries`. Seuls les noms de la CLI (lettres, « _ », « ' » ou « . »)
+    qui ont un code ISO connu sont gardés ; « cli » est le nom exact à redonner à `connect`."""
+    code, t = cli_fournisseur("nordvpn", ["countries"], 10)
+    p = probleme_cli(code, t)
+    if p:
+        return [], p
+    res = []
+    for mot in t.split():
+        if not re.fullmatch(r"[A-Za-z][A-Za-z_'.-]{1,39}", mot):
+            continue
+        c = NOM_CODE.get(cle_nom(mot))
+        if c and c not in {x["code"] for x in res}:
+            res.append({"code": c, "nom": mot.replace("_", " "), "cli": mot})
+    res.sort(key=lambda x: x["nom"])
+    return res, ""
+
+
+def nord_fournisseur():
+    if not nord_exe():
+        return fiche("nord", "NordVPN", "absent", T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["account"], 10)
+    p = probleme_cli(code, t)
+    if p:
+        return fiche("nord", "NordVPN", "sans_compte", message_probleme("nord", p), peut_login=p == "consentement", probleme=p)
+    if code != 0 or "Account information" not in t:
+        return fiche("nord", "NordVPN", "sans_compte",
+                     T("NordVPN est installé, mais aucun compte n'est connecté.", "NordVPN is installed, but no account is signed in."),
+                     peut_login=True)
+    pays, _ = nord_pays_liste()
+    code, t = cli_fournisseur("nordvpn", ["status"], 8)
+    connecte = code == 0 and re.search(r"^\s*Status:\s*Connected\s*$", t, re.I | re.M) is not None
+    actif = ""
+    m = re.search(r"^\s*Country:\s*(.{1,60})$", t, re.M)
+    if connecte and m:
+        actif = NOM_CODE.get(cle_nom(m.group(1)), "")
+    return fiche("nord", "NordVPN", "pret", T("Compte NordVPN connecté.", "NordVPN account signed in."),
+                 pays=[{"code": x["code"], "nom": x["nom"]} for x in pays], pays_actif=actif, connecte=connecte)
+
+
+def code_pays_ok(cc):
+    if not isinstance(cc, str) or not re.fullmatch(r"[A-Z]{2}", cc) or cc not in ISO_PAYS:
+        raise Echec(T("Code pays invalide (deux lettres majuscules, par exemple « FR »).", "Invalid country code (two uppercase letters, e.g. \"FR\")."))
+    return cc
+
+
+def nord_connecter(cc):
+    code_pays_ok(cc)
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    pays, p = nord_pays_liste()
+    if p:
+        raise Echec(message_probleme("nord", p))
+    nom = next((x["cli"] for x in pays if x["code"] == cc), "")
+    if not nom:
+        raise Echec(T("NordVPN ne propose pas ce pays (ou aucun compte n'est connecté).", "NordVPN does not offer this country (or no account is signed in)."))
+    code, t = cli_fournisseur("nordvpn", ["connect", nom], 90)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if code != 0 or re.search(r"not logged in|log in again|please log in", t, re.I):
+        detail = filtre_secret(t)
+        raise Echec(T("NordVPN a refusé la connexion", "NordVPN refused the connection") + (" (" + detail + ")" if detail else "") + ".")
+    print(T(f"NordVPN : connexion demandée ({cc}).", f"NordVPN: connection requested ({cc})."))
+
+
+def nord_deconnecter():
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["disconnect"], 30)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if code != 0:
+        detail = filtre_secret(t)
+        raise Echec(T("NordVPN a refusé", "NordVPN refused") + (" (" + detail + ")" if detail else "") + ".")
+    print(T("NordVPN : déconnecté.", "NordVPN: disconnected."))
+
+
+def url_nord_sure(url):
+    """Vrai pour une URL https d'un domaine Nord attendu (nordaccount.com, nordvpn.com et leurs sous-domaines), sans identifiant,
+    sur le port 443, sans espace ni caractère de contrôle."""
+    if not isinstance(url, str) or len(url) > 2048 or not re.fullmatch(r"[\x21-\x7e]+", url):
+        return False
+    try:
+        p = urllib.parse.urlsplit(url)
+        h = (p.hostname or "").lower().rstrip(".")
+        port = p.port
+    except ValueError:
+        return False
+    return (p.scheme == "https" and not p.username and not p.password and port in (None, 443)
+            and any(h == d or h.endswith("." + d) for d in HOTES_NORD))
+
+
+def ouvrir(args):
+    """Lance un programme à part (navigateur, application officielle), sans l'attendre ni lire sa sortie. Faux si impossible."""
+    exe = shutil.which(args[0])
+    if not exe:
+        return False
+    try:
+        subprocess.Popen([exe] + args[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def nord_login():
+    """`nordvpn login` (parcours officiel, aucun mot de passe ni jeton chez nous) : il donne une URL, ouverte avec xdg-open si
+    elle est en https sur un domaine Nord. L'URL n'est jamais affichée ni journalisée."""
+    if not nord_exe():
+        raise Echec(T("NordVPN n'est pas installé.", "NordVPN is not installed."))
+    code, t = cli_fournisseur("nordvpn", ["login"], 20)
+    p = probleme_cli(code, t)
+    if p:
+        raise Echec(message_probleme("nord", p))
+    if re.search(r"already logged in", t, re.I):
+        return print(T("NordVPN : un compte est déjà connecté.", "NordVPN: an account is already signed in."))
+    m = re.search(r"Continue in the browser:\s*(https://\S+)", t)
+    if not m or not url_nord_sure(m.group(1)):
+        raise Echec(T("NordVPN n'a pas donné d'adresse de connexion sûre : lance « nordvpn login » dans un terminal.",
+                      "NordVPN did not give a safe login address: run \"nordvpn login\" in a terminal."))
+    if not ouvrir(["xdg-open", m.group(1)]):
+        raise Echec(T("Impossible d'ouvrir le navigateur (xdg-open) : lance « nordvpn login » dans un terminal.",
+                      "Could not open the browser (xdg-open): run \"nordvpn login\" in a terminal."))
+    print(T("NordVPN : la page de connexion s'ouvre dans le navigateur.", "NordVPN: the login page is opening in the browser."))
+
+
+API_FOURNISSEURS = {
+    "nord": {"fiche": nord_fournisseur, "connecter": nord_connecter, "deconnecter": nord_deconnecter, "login": nord_login},
+}
+
+
+# ── Proton : l'application officielle `protonvpn-app` (dépôt ProtonVPN/proton-vpn-gtk-app, paquet proton-vpn-gtk-app) ─────
+# Il n'existe PAS de CLI officielle actuelle (l'ancienne protonvpn-cli est abandonnée) : le point d'entrée du paquet est
+# `protonvpn-app`, une application graphique à instance unique dont les seules options sont --start-minimized et --version.
+# Le compte de l'application vit dans son propre stockage (session chiffrée, trousseau) : le lire, c'est toucher des jetons, ce
+# que nous ne faisons pas. Le seul signe public est la connexion NetworkManager que l'appli crée en se connectant : nommée
+# « ProtonVPN <serveur> » (proton-vpn-api-core, backend/networkmanager/core/networkmanager.py) mais créée sans être enregistrée
+# (save_to_disk=False) : elle n'existe que pendant la connexion. Donc : « pret » seulement si une telle connexion existe ;
+# sinon « sans_compte » (compte non détecté : l'appli décide). Choisir un pays, se connecter, se déconnecter, se connecter au
+# compte : on ouvre l'appli officielle (« pilotage »: « appli »), sans simuler son interface ni la fermer.
+def proton_exe():
+    return shutil.which("protonvpn-app") is not None
+
+
+def proton_connexions():
+    """Les connexions NetworkManager de l'appli Proton (nom « ProtonVPN … »), ou None si NetworkManager est indisponible."""
+    e = etat()
+    if not e["disponible"]:
+        return None
+    return [c for c in e["connexions"] if re.match(r"\s*proton\s*vpn(\s|$)", c["nom"], re.I)]
+
+
+def proton_fournisseur():
+    if not proton_exe():
+        return fiche("proton", "Proton VPN", "absent", T("Proton VPN n'est pas installé.", "Proton VPN is not installed."),
+                     pilotage="appli")
+    cx = proton_connexions()
+    if not cx:
+        return fiche("proton", "Proton VPN", "sans_compte",
+                     T("Proton VPN est installé, mais aucune connexion Proton n'est détectée (le compte de l'application n'est jamais lu) : "
+                       "ouvre l'application, connecte-toi et choisis un serveur.",
+                       "Proton VPN is installed, but no Proton connection is detected (the app's account is never read): "
+                       "open the app, sign in and pick a server."),
+                     peut_login=True, pilotage="appli")
+    actives = [c for c in cx if c["active"]]
+    actif = pays_de(re.sub(r"^\s*proton\s*vpn\s*", "", actives[0]["nom"], flags=re.I)) if actives else ""
+    return fiche("proton", "Proton VPN", "pret",
+                 T("Connexion Proton détectée. Le choix du pays se fait dans l'application officielle.",
+                   "Proton connection detected. Pick the country in the official app."),
+                 pays=[], pays_actif=actif, connecte=bool(actives), pilotage="appli")
+
+
+def proton_ouvrir(message):
+    if not proton_exe():
+        raise Echec(T("Proton VPN n'est pas installé.", "Proton VPN is not installed."))
+    if not ouvrir(["protonvpn-app"]):
+        raise Echec(T("Impossible de lancer l'application Proton VPN.", "Could not start the Proton VPN app."))
+    print(message)
+
+
+def proton_connecter(cc):
+    code_pays_ok(cc)
+    proton_ouvrir(T(f"Proton VPN : l'application officielle s'ouvre, choisis le pays ({cc}) et connecte-toi dedans.",
+                    f"Proton VPN: the official app is opening, pick the country ({cc}) and connect there."))
+
+
+def proton_deconnecter():
+    proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, déconnecte-toi dedans (nous ne la fermons ni ne la pilotons jamais).",
+                    "Proton VPN: the official app is opening, disconnect there (we never close or drive it)."))
+
+
+def proton_login():
+    proton_ouvrir(T("Proton VPN : l'application officielle s'ouvre, connecte ton compte dedans.",
+                    "Proton VPN: the official app is opening, sign in to your account there."))
+
+
+API_FOURNISSEURS["proton"] = {"fiche": proton_fournisseur, "connecter": proton_connecter, "deconnecter": proton_deconnecter,
+                              "login": proton_login}
+
+
+# ── Mullvad dans les fournisseurs (même application que `nc-vpn mullvad …`) ───────────────────────────────────────────────
+# Sources (dépôt mullvad/mullvadvpn-app, mullvad-cli/src/cmds/) : `status` ajoute « Warning: You are not logged in to an
+# account. » quand aucun compte n'est connecté (tunnel_state.rs, status.rs) : c'est notre seul signal, `account get` n'est
+# JAMAIS lancé (il affiche le numéro de compte). `relay list` écrit une ligne par pays sans retrait, « Nom (code) » en
+# minuscules, puis les villes et les relais en retrait (relay.rs). `relay set location CC`, `connect`, `disconnect`.
+def mullvad_pays_liste():
+    """([{"code","nom"}…], source) : les pays de `mullvad relay list` ; à défaut (commande en échec, rien de lisible), la liste
+    ISO intégrée (« defaut »). Les noms sont bornés, en texte brut."""
+    code, out, _ = mullvad(["relay", "list"], delai=10)
+    res = []
+    if code == 0:
+        for ligne in nettoyer_sortie(out.encode("utf-8", "replace")).splitlines():
+            m = re.fullmatch(r"([^\s(][^()\t]{0,58}?)\s+\(([a-z]{2})\)\s*", ligne)
+            if m and m.group(2).upper() in ISO_PAYS and m.group(2).upper() not in {x["code"] for x in res}:
+                res.append({"code": m.group(2).upper(), "nom": nom_borne(m.group(1))})
+    if res:
+        return sorted(res, key=lambda x: x["nom"]), "relay"
+    return sorted(({"code": c, "nom": n} for c, n in CODE_NOM.items()), key=lambda x: x["nom"]), "defaut"
+
+
+def mullvad_fournisseur():
+    if not shutil.which("mullvad"):
+        return fiche("mullvad", "Mullvad", "absent", T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    e = mullvad_json()
+    if e["compte"] is None:
+        return fiche("mullvad", "Mullvad", "sans_compte",
+                     T("L'état de Mullvad est illisible : le service mullvad-daemon tourne-t-il ?",
+                       "Mullvad's state cannot be read: is the mullvad-daemon service running?"), probleme="demon")
+    if e["compte"] is False:
+        return fiche("mullvad", "Mullvad", "sans_compte",
+                     T("Mullvad est installé, mais aucun compte n'est connecté.", "Mullvad is installed, but no account is signed in."),
+                     peut_login=True)
+    pays, _ = mullvad_pays_liste()
+    return fiche("mullvad", "Mullvad", "pret", T("Compte Mullvad connecté.", "Mullvad account signed in."), pays=pays,
+                 pays_actif=e["pays"] if e["connecte"] else "", connecte=e["connecte"])
+
+
+def mullvad_connecter(cc):
+    code_pays_ok(cc)
+    if not shutil.which("mullvad"):
+        raise Echec(T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    mullvad_agir(["pays", cc.lower()])
+    mullvad_agir(["connecter"])
+
+
+def mullvad_deconnecter():
+    mullvad_agir(["deconnecter"])
+
+
+def mullvad_login():
+    """Jamais de numéro de compte chez nous : on ouvre l'application graphique (`mullvad-vpn`), sinon on dit quoi lancer."""
+    if not shutil.which("mullvad"):
+        raise Echec(T("Mullvad n'est pas installé.", "Mullvad is not installed."))
+    if shutil.which("mullvad-vpn") and ouvrir(["mullvad-vpn"]):
+        return print(T("Mullvad : l'application s'ouvre, connecte ton compte dedans.", "Mullvad: the app is opening, sign in there."))
+    raise Echec(T("Dans un terminal, lance : mullvad account login (le numéro de compte se tape là, jamais ici).",
+                  "In a terminal, run: mullvad account login (the account number is typed there, never here)."))
+
+
+API_FOURNISSEURS["mullvad"] = {"fiche": mullvad_fournisseur, "connecter": mullvad_connecter, "deconnecter": mullvad_deconnecter,
+                               "login": mullvad_login}
+
+
+def fournisseurs_json():
+    return {"contrat": CONTRAT_FOURNISSEURS, "fournisseurs": [a["fiche"]() for a in API_FOURNISSEURS.values()]}
+
+
+def fournisseur_agir(a):
+    """nc-vpn fournisseur ID connecter CC | deconnecter | login"""
+    api = API_FOURNISSEURS.get(a[0]) if a else None
+    if not api:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
+    if len(a) == 3 and a[1] == "connecter":
+        api["connecter"](a[2])
+    elif a[1:] == ["deconnecter"]:
+        api["deconnecter"]()
+    elif a[1:] == ["login"]:
+        api["login"]()
+    else:
+        print(T(__doc__.strip(), USAGE_EN), file=sys.stderr)
+        sys.exit(2)
 
 
 # ── IP publique (à la demande de l'île, jamais en boucle) ──────────────────────────────────────────────────────
@@ -1467,6 +1891,10 @@ def main():
             print(json.dumps(mullvad_json(), ensure_ascii=False))
         elif cmd == "mullvad" and len(a) >= 2:
             mullvad_agir(a[1:])
+        elif cmd == "fournisseurs-json" and len(a) == 1:
+            print(json.dumps(fournisseurs_json(), ensure_ascii=False))
+        elif cmd == "fournisseur" and len(a) >= 3:
+            fournisseur_agir(a[1:])
         elif cmd == "killswitch":
             killswitch(a[1:], en_json)
         elif cmd == "ip-publique" and len(a) == 1:
