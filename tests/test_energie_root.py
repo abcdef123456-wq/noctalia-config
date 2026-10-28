@@ -322,7 +322,7 @@ class ShebangRoot(unittest.TestCase):
         for f in scripts:
             with self.subTest(f=f.name):
                 premiere = f.read_text(errors="replace").splitlines()[0]
-                self.assertRegex(premiere, r"^#!/(usr/)?bin/(ba)?sh\b")
+                self.assertRegex(premiere, r"^#!/(usr/)?bin/(ba)?sh\b|^#!/usr/bin/python3 -I$")   # nc-vpn-root : Python isolé, chemin absolu
                 self.assertNotIn("env", premiere)
         for nom in ("nc-energie-root", "nc-limite-charge"):
             t = (racine / nom).read_text()
