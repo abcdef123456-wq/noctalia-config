@@ -20,7 +20,7 @@ tant que `"contrat": 1`. Un champ n'est retiré, ou son sens changé, que dans u
 
 | Commande | Succès |
 |---|---|
-| `nc-vpn etat-json` | `{"contrat", "disponible": bool, "connexions": [C], "actives": [C]}` ; `C` = `{"uuid": str, "nom": str, "type": "vpn"\|"wireguard", "active": bool, "interface": str}` (`interface` vide si le tunnel n'est pas monté). NetworkManager ou nmcli absent : `{"contrat": 1, "disponible": false, "connexions": [], "actives": []}`, code 0. |
+| `nc-vpn etat-json` | `{"contrat", "disponible": bool, "connexions": [C], "actives": [C]}` ; `C` = `{"uuid": str, "nom": str, "type": "vpn"\|"wireguard", "active": bool, "interface": str, "fournisseur": str, "pays": str, "depuis"?: int}` (`interface` vide si le tunnel n'est pas monté ; `fournisseur` et `pays` (code ISO à 2 lettres ou vide) sont déduits du nom de la connexion, sans réseau ; `depuis` : secondes depuis l'époque de l'activation, seulement pour un tunnel monté et si NetworkManager le donne). Champs ajoutés sans changer de version : un client ignore les champs qu'il ne connaît pas. NetworkManager ou nmcli absent : `{"contrat": 1, "disponible": false, "connexions": [], "actives": []}`, code 0. |
 | `nc-vpn connecter UUID --json` | `{"contrat", "ok": true, "action": "connecter", "uuid", "nom", "actif": true, "deja": bool}` (`deja` : il était déjà monté) |
 | `nc-vpn deconnecter UUID --json` | idem avec `"action": "deconnecter"`, `"actif": false` |
 | `nc-vpn tout-deconnecter --json` | `{"contrat", "ok": true, "action": "tout-deconnecter", "coupes": [{"uuid","nom"}], "rates": []}` ; aucun tunnel monté : listes vides, succès |

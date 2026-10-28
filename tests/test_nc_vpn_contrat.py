@@ -18,7 +18,11 @@ class ContratVpn(BaseVpn):
         self.assertEqual((r.returncode, d["contrat"], d["disponible"]), (0, 1, True))
         self.assertEqual(set(d), {"contrat", "disponible", "connexions", "actives"})
         for c in d["connexions"]:
-            self.assertEqual(set(c), {"uuid", "nom", "type", "active", "interface"})
+            # champs de base, plus fournisseur et pays (déduits du nom, sans réseau) ; depuis seulement pour un tunnel monté
+            self.assertTrue({"uuid", "nom", "type", "active", "interface", "fournisseur", "pays"} <= set(c) <=
+                            {"uuid", "nom", "type", "active", "interface", "fournisseur", "pays", "depuis"}, set(c))
+            self.assertIsInstance(c["fournisseur"], str)
+            self.assertIsInstance(c["pays"], str)
             self.assertIsInstance(c["uuid"], str)
             self.assertIsInstance(c["nom"], str)
             self.assertIn(c["type"], ("vpn", "wireguard"))
